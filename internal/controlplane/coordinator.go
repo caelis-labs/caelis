@@ -187,7 +187,7 @@ func (c *Coordinator) handoffController(ctx context.Context, req agent.HandoffCo
 		if c.controllers == nil {
 			return session.Session{}, fmt.Errorf("controlplane: ACP controller backend is not configured")
 		}
-		sinceSeq := 0
+		var sinceSeq uint64
 		if from.Kind == session.ControllerKindACP && sameControllerAgent(from, req.Agent) {
 			sinceSeq = from.ContextSyncSeq
 		}

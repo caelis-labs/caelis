@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
@@ -24,6 +25,38 @@ func TestClassifyControlBackendErrorTreatsLeaseConflictAsConflict(t *testing.T) 
 	var outcomeErr *controlport.OutcomeError
 	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlport.OutcomeConflicted {
 		t.Fatalf("classifyControlBackendError() = %v, want conflicted outcome", err)
+	}
+}
+
+func TestClassifyControlBackendErrorAddsTypedHTTPCategories(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		err     error
+		outcome controlport.Outcome
+		code    errorcode.Code
+	}{
+		{
+			name: "validation",
+			err: &gateway.Error{
+				Kind: gateway.KindValidation, Code: gateway.CodeInvalidRequest, Message: "invalid prompt",
+			},
+			outcome: controlport.OutcomeRejected,
+			code:    errorcode.InvalidArgument,
+		},
+		{
+			name:    "internal",
+			err:     &gateway.Error{Kind: gateway.KindInternal, Code: gateway.CodeInternal, Message: "private failure"},
+			outcome: controlport.OutcomeRejected,
+			code:    errorcode.Unknown,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := classifyControlBackendError(tt.err)
+			var outcomeErr *controlport.OutcomeError
+			if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != tt.outcome || errorcode.CodeOf(err) != tt.code {
+				t.Fatalf("classifyControlBackendError() = %v (outcome %#v, code %q)", err, outcomeErr, errorcode.CodeOf(err))
+			}
+		})
 	}
 }
 

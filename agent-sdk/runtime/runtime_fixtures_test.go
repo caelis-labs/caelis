@@ -465,24 +465,24 @@ func (r testContextRouter) ParticipantContext(ctx context.Context, req controlle
 	return controller.ContextRoute{Prelude: b.String(), SyncSeq: checkpoint}, nil
 }
 
-func (r testContextRouter) Checkpoint(ctx context.Context, ref session.SessionRef, excludeTurnID string) (int, error) {
+func (r testContextRouter) Checkpoint(ctx context.Context, ref session.SessionRef, excludeTurnID string) (uint64, error) {
 	_, checkpoint, err := r.entries(ctx, ref, 0, excludeTurnID)
 	return checkpoint, err
 }
 
 type testContextEntry struct {
-	seq  int
+	seq  uint64
 	role string
 	text string
 }
 
-func (r testContextRouter) entries(ctx context.Context, ref session.SessionRef, sinceSeq int, excludeTurnID string) ([]testContextEntry, int, error) {
+func (r testContextRouter) entries(ctx context.Context, ref session.SessionRef, sinceSeq uint64, excludeTurnID string) ([]testContextEntry, uint64, error) {
 	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: session.NormalizeSessionRef(ref)})
 	if err != nil {
 		return nil, 0, err
 	}
 	var entries []testContextEntry
-	checkpoint := 0
+	var checkpoint uint64
 	for i, event := range events {
 		if event == nil || !session.IsCanonicalHistoryEvent(event) {
 			continue
@@ -494,9 +494,9 @@ func (r testContextRouter) entries(ctx context.Context, ref session.SessionRef, 
 		if typeOf != session.EventTypeUser && typeOf != session.EventTypeAssistant && typeOf != session.EventTypeCompact {
 			continue
 		}
-		seq := i + 1
+		seq := uint64(i + 1)
 		if event.Seq > 0 {
-			seq = int(event.Seq)
+			seq = event.Seq
 		}
 		if seq > checkpoint {
 			checkpoint = seq

@@ -6,14 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 const apiPrefix = "/api/control/v1"
@@ -42,28 +42,33 @@ func (f AuthenticatorFunc) Authenticate(request *http.Request) (controlclient.Pr
 }
 
 type Config struct {
-	Service        controlclient.Service
-	Authenticator  Authenticator
-	LocalPrincipal controlclient.Principal
-	Heartbeat      time.Duration
+	Service       controlclient.Service
+	Authenticator Authenticator
+	AllowedHosts  []string
+	Heartbeat     time.Duration
 }
 
 type Server struct {
 	config Config
 	mux    *http.ServeMux
+	policy *requestPolicy
 }
 
 func New(config Config) (*Server, error) {
 	if config.Service == nil {
 		return nil, errors.New("appserver: control client service is required")
 	}
-	if config.Authenticator == nil && strings.TrimSpace(config.LocalPrincipal.ID) == "" {
-		config.LocalPrincipal.ID = "local-user"
+	if config.Authenticator == nil {
+		return nil, errors.New("appserver: authenticator is required for an HTTP handler")
 	}
 	if config.Heartbeat <= 0 {
 		config.Heartbeat = 15 * time.Second
 	}
-	server := &Server{config: config, mux: http.NewServeMux()}
+	policy, err := newRequestPolicy(config.AllowedHosts)
+	if err != nil {
+		return nil, err
+	}
+	server := &Server{config: config, mux: http.NewServeMux(), policy: policy}
 	server.routes()
 	return server, nil
 }
@@ -71,6 +76,10 @@ func New(config Config) (*Server, error) {
 func (s *Server) Handler() http.Handler { return s }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	if err := s.policy.authorize(request); err != nil {
+		writeError(writer, http.StatusForbidden, "request origin is not allowed")
+		return
+	}
 	if hasCredentialQuery(request) {
 		writeError(writer, http.StatusBadRequest, "credentials are not accepted in query parameters")
 		return
@@ -97,12 +106,12 @@ func (s *Server) routes() {
 }
 
 func (s *Server) principal(request *http.Request) (controlclient.Principal, error) {
-	if s.config.Authenticator == nil {
-		return s.config.LocalPrincipal, nil
-	}
 	principal, err := s.config.Authenticator.Authenticate(request)
-	if err != nil || strings.TrimSpace(principal.ID) == "" {
-		return controlclient.Principal{}, errors.New("appserver: authentication failed")
+	if err != nil {
+		return controlclient.Principal{}, errorcode.Wrap(errorcode.Unauthenticated, "appserver: authentication failed", err)
+	}
+	if strings.TrimSpace(principal.ID) == "" {
+		return controlclient.Principal{}, errorcode.New(errorcode.Unauthenticated, "appserver: authentication failed")
 	}
 	return principal, nil
 }
@@ -112,7 +121,15 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	limit := 0
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		var err error
+		limit, err = strconv.Atoi(rawLimit)
+		if err != nil || limit < 1 {
+			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+	}
 	result, err := s.config.Service.ListSessions(r.Context(), principal, controlclient.ListSessionsRequest{WorkspaceKey: r.URL.Query().Get("workspace_key"), Cursor: r.URL.Query().Get("cursor"), Limit: limit})
 	writeJSONResult(w, result, err)
 }
@@ -215,7 +232,7 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request) {
 			if !open {
 				return
 			}
-			data, err := json.Marshal(envelope)
+			data, err := marshalEnvelope(envelope)
 			if err != nil {
 				return
 			}
@@ -342,16 +359,29 @@ func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
 func (s *Server) requirePrincipal(w http.ResponseWriter, r *http.Request) (controlclient.Principal, bool) {
 	principal, err := s.principal(r)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, err.Error())
+		writeMappedError(w, err)
 		return controlclient.Principal{}, false
 	}
 	return principal, true
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, target any) bool {
+	contentType := strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0])
+	if !strings.EqualFold(contentType, "application/json") {
+		writeError(w, http.StatusBadRequest, "Content-Type must be application/json")
+		return false
+	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
+	var raw json.RawMessage
+	if err := decoder.Decode(&raw); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON request: "+err.Error())
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "request body must contain exactly one JSON value")
+		return false
+	}
+	if err := decodeWireRequest(raw, target); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON request: "+err.Error())
 		return false
 	}
@@ -359,7 +389,12 @@ func decodeBody(w http.ResponseWriter, r *http.Request, target any) bool {
 }
 
 func applyWriteHeaders(w http.ResponseWriter, r *http.Request, base *controlclient.WriteBase, sessionID string) bool {
-	operationID := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	operationValues := r.Header.Values("Idempotency-Key")
+	if len(operationValues) != 1 || strings.Contains(operationValues[0], ",") {
+		writeError(w, http.StatusBadRequest, "Idempotency-Key must be provided exactly once")
+		return false
+	}
+	operationID := strings.TrimSpace(operationValues[0])
 	if operationID == "" {
 		writeError(w, http.StatusBadRequest, "Idempotency-Key is required")
 		return false
@@ -376,13 +411,26 @@ func applyWriteHeaders(w http.ResponseWriter, r *http.Request, base *controlclie
 		}
 		base.SessionID = sessionID
 	}
+	ifMatchValues := r.Header.Values("If-Match")
+	if len(ifMatchValues) > 1 {
+		writeError(w, http.StatusBadRequest, "If-Match must be provided at most once")
+		return false
+	}
 	ifMatch := strings.TrimSpace(r.Header.Get("If-Match"))
 	if ifMatch == "" {
 		return true
 	}
+	if strings.Contains(ifMatch, ",") {
+		writeError(w, http.StatusBadRequest, "If-Match must contain one revision")
+		return false
+	}
 	ifMatch = strings.TrimPrefix(ifMatch, "W/")
-	ifMatch = strings.Trim(ifMatch, `"`)
-	revision, err := strconv.ParseUint(ifMatch, 10, 64)
+	if len(ifMatch) < 2 || ifMatch[0] != '"' || ifMatch[len(ifMatch)-1] != '"' {
+		writeError(w, http.StatusBadRequest, "If-Match revision must be a quoted decimal string")
+		return false
+	}
+	ifMatch = ifMatch[1 : len(ifMatch)-1]
+	revision, err := parseUint64Decimal(ifMatch)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid If-Match revision")
 		return false
@@ -405,8 +453,24 @@ func applyParticipantPath(w http.ResponseWriter, value *string, path string) boo
 }
 
 func resumeCursor(w http.ResponseWriter, r *http.Request) (string, bool) {
-	after := strings.TrimSpace(r.URL.Query().Get("after"))
-	last := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
+	afterValues := r.URL.Query()["after"]
+	if len(afterValues) > 1 {
+		writeError(w, http.StatusBadRequest, "after must be provided at most once")
+		return "", false
+	}
+	after := ""
+	if len(afterValues) == 1 {
+		after = strings.TrimSpace(afterValues[0])
+	}
+	lastValues := r.Header.Values("Last-Event-ID")
+	if len(lastValues) > 1 || len(lastValues) == 1 && strings.Contains(lastValues[0], ",") {
+		writeError(w, http.StatusBadRequest, "Last-Event-ID must be provided at most once")
+		return "", false
+	}
+	last := ""
+	if len(lastValues) == 1 {
+		last = strings.TrimSpace(lastValues[0])
+	}
 	if after != "" && last != "" && after != last {
 		writeError(w, http.StatusBadRequest, "after and Last-Event-ID must match")
 		return "", false
@@ -418,24 +482,74 @@ func resumeCursor(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 func hasCredentialQuery(r *http.Request) bool {
-	query := r.URL.Query()
-	return query.Has("token") || query.Has("access_token") || query.Has("authorization") || query.Has("auth")
+	for key := range r.URL.Query() {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "token", "access_token", "authorization", "auth":
+			return true
+		}
+	}
+	return false
 }
 
 func writeCommandResult(w http.ResponseWriter, result controlclient.CommandResult, err error) {
-	status := http.StatusOK
+	status, knownOutcome := commandOutcomeStatus(result.Outcome)
+	if !knownOutcome {
+		status = http.StatusInternalServerError
+	}
 	switch result.Outcome {
+	case controlclient.OutcomeUnknown:
+		result.Detail = "effect outcome cannot be proven"
+	case controlclient.OutcomeConflicted:
+		result.Detail = "conflict"
+	}
+	if err != nil {
+		mapped := statusForError(err)
+		switch mapped {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			writeMappedError(w, err)
+			return
+		case http.StatusBadRequest, http.StatusConflict:
+			if !knownOutcome {
+				writeMappedError(w, err)
+				return
+			}
+			status = mapped
+			if mapped == http.StatusConflict && strings.TrimSpace(result.Detail) != "" {
+				result.Detail = "conflict"
+			}
+		default:
+			// CommandResult.Outcome is the transport-neutral recovery contract.
+			// In particular, an uncoded backend error accompanying unknown or
+			// conflicted must not erase the client's 202/409 recovery path.
+			switch result.Outcome {
+			case controlclient.OutcomeUnknown:
+				result.Detail = "effect outcome cannot be proven"
+			case controlclient.OutcomeConflicted:
+				result.Detail = "conflict"
+			default:
+				writeMappedError(w, err)
+				return
+			}
+		}
+	}
+	writeJSON(w, status, result)
+}
+
+func commandOutcomeStatus(outcome controlclient.Outcome) (int, bool) {
+	var status int
+	switch outcome {
+	case controlclient.OutcomeCommitted:
+		status = http.StatusOK
 	case controlclient.OutcomeAccepted, controlclient.OutcomeUnknown:
 		status = http.StatusAccepted
 	case controlclient.OutcomeConflicted:
 		status = http.StatusConflict
 	case controlclient.OutcomeRejected:
 		status = http.StatusBadRequest
+	default:
+		return 0, false
 	}
-	if errors.Is(err, eventstream.ErrInvalidCursor) {
-		status = http.StatusBadRequest
-	}
-	writeJSON(w, status, result)
+	return status, true
 }
 
 func writeJSONResult(w http.ResponseWriter, value any, err error) {
@@ -445,35 +559,16 @@ func writeJSONResult(w http.ResponseWriter, value any, err error) {
 	}
 	writeJSON(w, http.StatusOK, value)
 }
-func writeMappedError(w http.ResponseWriter, err error) {
-	status := http.StatusBadRequest
-	if strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
-		status = http.StatusForbidden
-	}
-	writeError(w, status, err.Error())
-}
 func writeError(w http.ResponseWriter, status int, detail string) {
 	writeJSON(w, status, map[string]any{"error": strings.TrimSpace(detail)})
 }
 func writeJSON(w http.ResponseWriter, status int, value any) {
+	data, err := marshalWireValue(value)
+	if err != nil {
+		status = http.StatusInternalServerError
+		data = []byte(`{"error":"internal server error"}`)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
-}
-
-// ValidateListener rejects unsafe unauthenticated non-loopback binding.
-func ValidateListener(address string, authenticator Authenticator) error {
-	host, _, err := net.SplitHostPort(strings.TrimSpace(address))
-	if err != nil {
-		return fmt.Errorf("appserver: invalid listen address: %w", err)
-	}
-	host = strings.Trim(host, "[]")
-	loopback := strings.EqualFold(host, "localhost")
-	if ip := net.ParseIP(host); ip != nil {
-		loopback = ip.IsLoopback()
-	}
-	if !loopback && authenticator == nil {
-		return errors.New("appserver: non-loopback listener requires authentication")
-	}
-	return nil
+	_, _ = w.Write(append(data, '\n'))
 }

@@ -2,9 +2,9 @@ package controlclient
 
 import (
 	"context"
-	"errors"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -14,7 +14,7 @@ const (
 	HTTPAPIVersion  = "v1"
 )
 
-var ErrStateRevisionConflict = errors.New("controlclient: session state changed during bootstrap")
+var ErrStateRevisionConflict = errorcode.New(errorcode.Conflict, "controlclient: session state changed during bootstrap")
 
 // ClientCapabilities declares presentation ownership and reserved bootstrap
 // capability slots without implying Runtime support.

@@ -808,6 +808,28 @@ func TestCompleteSystemManagedAgentEventsKeepsNonGuardianOrphanUserEvent(t *test
 	}
 }
 
+func TestSystemManagedAgentCursorSurvivesDurableEventJSONRoundTrip(t *testing.T) {
+	before := session.Event{
+		Type: session.EventTypeUser,
+		Meta: map[string]any{
+			systemManagedAgentStateCursorEventCount:  12,
+			systemManagedAgentStateCursorLastEventID: "evt-12",
+		},
+	}
+	raw, err := json.Marshal(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var after session.Event
+	if err := json.Unmarshal(raw, &after); err != nil {
+		t.Fatal(err)
+	}
+	got := systemManagedAgentCursorFromEvents([]*session.Event{&after})
+	if got.EventCount != 12 || got.LastEventID != "evt-12" {
+		t.Fatalf("cursor after durable round trip = %#v", got)
+	}
+}
+
 func TestApprovalReviewerRetriesInvalidJSONAssessment(t *testing.T) {
 	ctx := context.Background()
 	service, activeSession := newApprovalReviewerTestSession(t, ctx)

@@ -14,7 +14,7 @@ import (
 	"unicode"
 )
 
-const generatorVersion = "caelis-client-protocol-gen/v2.2.0"
+const generatorVersion = "caelis-client-protocol-gen/v2.4.0"
 
 var check = flag.Bool("check", false, "verify generated output without writing")
 
@@ -58,6 +58,7 @@ type schema struct {
 	Enum                 []any              `json:"enum"`
 	Const                any                `json:"const"`
 	OneOf                []*schema          `json:"oneOf"`
+	AnyOf                []*schema          `json:"anyOf"`
 	AllOf                []*schema          `json:"allOf"`
 	AdditionalProperties json.RawMessage    `json:"additionalProperties"`
 }
@@ -143,16 +144,18 @@ func validateSpec(spec openAPISpec) error {
 	if !oneOfReferences(spec.Components.Schemas["ACPUpdate"], "ACPRawUpdate") {
 		return fmt.Errorf("ACPUpdate must include ACPRawUpdate")
 	}
+	for name, value := range spec.Components.Schemas {
+		if schemaContainsNumericUint64(value, spec.Components.Schemas, map[string]bool{}) {
+			return fmt.Errorf("schema %q contains integer/uint64; use Uint64Decimal string wire fields", name)
+		}
+	}
 	return nil
 }
 
 func validateOperationResponses(spec openAPISpec, method string, operation operation) error {
-	required := []string{"200", "400", "401", "403"}
+	required := []string{"200", "400", "401", "403", "409", "500"}
 	if method != "get" {
-		required = []string{"200", "202", "400", "401", "409"}
-	}
-	if operation.OperationID == "streamSessionEvents" {
-		required = append(required, "500")
+		required = []string{"200", "202", "400", "401", "403", "409", "500"}
 	}
 	for _, status := range required {
 		declared, ok := operation.Responses[status]
@@ -166,6 +169,57 @@ func validateOperationResponses(spec openAPISpec, method string, operation opera
 		}
 	}
 	return nil
+}
+
+func schemaContainsNumericUint64(value *schema, schemas map[string]*schema, seen map[string]bool) bool {
+	if value == nil {
+		return false
+	}
+	if value.Ref != "" {
+		name := refName(value.Ref)
+		if seen[name] {
+			return false
+		}
+		nextSeen := cloneSeen(seen)
+		nextSeen[name] = true
+		return schemaContainsNumericUint64(schemas[name], schemas, nextSeen)
+	}
+	if value.Type == "integer" && value.Format == "uint64" {
+		return true
+	}
+	for _, property := range value.Properties {
+		if schemaContainsNumericUint64(property, schemas, seen) {
+			return true
+		}
+	}
+	if schemaContainsNumericUint64(value.Items, schemas, seen) {
+		return true
+	}
+	for _, option := range append(append([]*schema(nil), value.OneOf...), value.AllOf...) {
+		if schemaContainsNumericUint64(option, schemas, seen) {
+			return true
+		}
+	}
+	for _, option := range value.AnyOf {
+		if schemaContainsNumericUint64(option, schemas, seen) {
+			return true
+		}
+	}
+	if additional := additionalPropertiesSchema(value.AdditionalProperties); schemaContainsNumericUint64(additional, schemas, seen) {
+		return true
+	}
+	return false
+}
+
+func additionalPropertiesSchema(raw json.RawMessage) *schema {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("true")) || bytes.Equal(bytes.TrimSpace(raw), []byte("false")) {
+		return nil
+	}
+	var out schema
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return &out
 }
 
 func oneOfReferences(value *schema, name string) bool {
@@ -234,6 +288,12 @@ func writeGoSchema(out *strings.Builder, name string, value *schema, schemas map
 	}
 	if name == "JSONValue" {
 		out.WriteString("type JSONValue = any\n\n")
+		return
+	}
+	if name == "ACPRawUpdate" {
+		// Raw vendor extensions must preserve numeric tokens as well as unknown
+		// fields. map[string]any would round large integers through float64.
+		out.WriteString("type ACPRawUpdate = json.RawMessage\n\n")
 		return
 	}
 	if oneOfHasExplicitAdditionalProperties(value, schemas, map[string]bool{}) {

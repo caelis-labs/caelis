@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -48,7 +49,11 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	_ = inProcess.Subscription.Close()
 
 	server, err := appserver.New(appserver.Config{
-		Service: parityService{feed: feed}, LocalPrincipal: controlport.Principal{ID: "owner"}, Heartbeat: time.Hour,
+		Service: parityService{feed: feed},
+		Authenticator: appserver.AuthenticatorFunc(func(*http.Request) (controlport.Principal, error) {
+			return controlport.Principal{ID: "owner"}, nil
+		}),
+		AllowedHosts: []string{"127.0.0.1"}, Heartbeat: time.Hour,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +64,7 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	request.Header.Set("Authorization", "Bearer parity-test")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -81,12 +87,39 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	if strings.TrimSpace(strings.TrimPrefix(idLine, "id: ")) != want.Cursor {
 		t.Fatalf("SSE id = %q, want %q", idLine, want.Cursor)
 	}
-	var got eventstream.Envelope
+	var got any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(dataLine, "data: "))), &got); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("HTTP/SSE Envelope = %#v, want in-process %#v", got, want)
+	wantJSON, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wantWire any
+	if err := json.Unmarshal(wantJSON, &wantWire); err != nil {
+		t.Fatal(err)
+	}
+	decimalizeParityPosition(wantWire, want.Position)
+	if !reflect.DeepEqual(got, wantWire) {
+		t.Fatalf("HTTP/SSE Envelope = %#v, want in-process projection %#v", got, wantWire)
+	}
+}
+
+func decimalizeParityPosition(value any, position *eventstream.FeedPosition) {
+	if position == nil {
+		return
+	}
+	root := value.(map[string]any)
+	wirePosition := root["position"].(map[string]any)
+	if position.Durable != nil {
+		durable := wirePosition["durable"].(map[string]any)
+		durable["seq"] = strconv.FormatUint(position.Durable.Seq, 10)
+	}
+	if position.Transient != nil {
+		transient := wirePosition["transient"].(map[string]any)
+		anchor := transient["anchor"].(map[string]any)
+		anchor["seq"] = strconv.FormatUint(position.Transient.Anchor.Seq, 10)
+		transient["sequence"] = strconv.FormatUint(position.Transient.Sequence, 10)
 	}
 }
 

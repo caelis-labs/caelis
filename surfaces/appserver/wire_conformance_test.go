@@ -3,10 +3,13 @@ package appserver
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,6 +41,50 @@ func TestCommandOutcomeHTTPStatusesMatchOpenAPI(t *testing.T) {
 			}
 			validateWireValue(t, "CommandResult", result)
 		})
+	}
+}
+
+func TestCommandOutcomeRecoverySurvivesUncodedBackendError(t *testing.T) {
+	for _, tt := range []struct {
+		outcome controlclient.Outcome
+		status  int
+	}{
+		{outcome: controlclient.OutcomeUnknown, status: http.StatusAccepted},
+		{outcome: controlclient.OutcomeConflicted, status: http.StatusConflict},
+	} {
+		t.Run(string(tt.outcome), func(t *testing.T) {
+			result := controlclient.CommandResult{OperationID: "operation-1", Outcome: tt.outcome, Detail: "recovery detail"}
+			err := controlclient.NewOutcomeError(tt.outcome, errors.New("uncoded backend failure"))
+			recorder := httptest.NewRecorder()
+			writeCommandResult(recorder, result, err)
+			if recorder.Code != tt.status {
+				t.Fatalf("status = %d, want %d; body = %s", recorder.Code, tt.status, recorder.Body.String())
+			}
+			var got controlclient.CommandResult
+			if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Outcome != tt.outcome || got.OperationID != result.OperationID {
+				t.Fatalf("CommandResult = %#v, want %#v", got, result)
+			}
+		})
+	}
+
+	recorder := httptest.NewRecorder()
+	writeCommandResult(recorder, controlclient.CommandResult{
+		OperationID: "operation-1", Outcome: controlclient.OutcomeRejected, Detail: "private backend detail",
+	}, controlclient.NewOutcomeError(controlclient.OutcomeRejected, errors.New("uncoded backend failure")))
+	if recorder.Code != http.StatusInternalServerError ||
+		!bytes.Contains(recorder.Body.Bytes(), []byte("internal server error")) ||
+		bytes.Contains(recorder.Body.Bytes(), []byte("private backend detail")) ||
+		bytes.Contains(recorder.Body.Bytes(), []byte("uncoded backend failure")) {
+		t.Fatalf("uncoded rejected fallback = %d %s", recorder.Code, recorder.Body.String())
+	}
+
+	recorder = httptest.NewRecorder()
+	writeCommandResult(recorder, controlclient.CommandResult{}, errors.New("uncoded backend failure"))
+	if recorder.Code != http.StatusInternalServerError || !bytes.Contains(recorder.Body.Bytes(), []byte("internal server error")) {
+		t.Fatalf("invalid outcome fallback = %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -157,7 +204,7 @@ func TestGeneratedGoEnvelopePreservesRawACPVendorFields(t *testing.T) {
 	rawEnvelope := []byte(`{
 		"kind":"session/update",
 		"cursor":"cursor-1",
-		"position":{"durable":{"seq":1,"projection_index":0}},
+		"position":{"durable":{"seq":"1","projection_index":0}},
 		"delivery":{"mode":"canonical"},
 		"session_id":"session-1",
 		"update":{
@@ -182,8 +229,14 @@ func TestGeneratedGoEnvelopePreservesRawACPVendorFields(t *testing.T) {
 	if err := json.Unmarshal(rawUpdateJSON, &rawUpdate); err != nil {
 		t.Fatalf("decode generated ACPRawUpdate: %v", err)
 	}
-	if got := rawUpdate["sessionUpdate"]; got != "vendor/custom" {
-		t.Fatalf("generated ACPRawUpdate sessionUpdate = %v, want vendor/custom", got)
+	var discriminator struct {
+		SessionUpdate string `json:"sessionUpdate"`
+	}
+	if err := json.Unmarshal(rawUpdate, &discriminator); err != nil {
+		t.Fatalf("inspect generated ACPRawUpdate: %v", err)
+	}
+	if discriminator.SessionUpdate != "vendor/custom" {
+		t.Fatalf("generated ACPRawUpdate sessionUpdate = %v, want vendor/custom", discriminator.SessionUpdate)
 	}
 	encodedUpdate, err := json.Marshal(rawUpdate)
 	if err != nil {
@@ -194,16 +247,62 @@ func TestGeneratedGoEnvelopePreservesRawACPVendorFields(t *testing.T) {
 
 func assertJSONEquivalent(t *testing.T, got, want []byte) {
 	t.Helper()
-	var gotValue any
-	if err := json.Unmarshal(got, &gotValue); err != nil {
-		t.Fatalf("decode got JSON: %v\nJSON: %s", err, got)
-	}
-	var wantValue any
-	if err := json.Unmarshal(want, &wantValue); err != nil {
-		t.Fatalf("decode want JSON: %v\nJSON: %s", err, want)
-	}
+	gotValue := decodeJSONWithNumbers(t, got)
+	wantValue := decodeJSONWithNumbers(t, want)
 	if !reflect.DeepEqual(gotValue, wantValue) {
 		t.Fatalf("JSON mismatch\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func decodeJSONWithNumbers(t *testing.T, raw []byte) any {
+	t.Helper()
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		t.Fatalf("decode JSON: %v\nJSON: %s", err, raw)
+	}
+	return normalizeJSONNumbers(t, value)
+}
+
+func normalizeJSONNumbers(t *testing.T, value any) any {
+	t.Helper()
+	switch typed := value.(type) {
+	case json.Number:
+		text := typed.String()
+		if !strings.ContainsAny(text, ".eE") {
+			if strings.HasPrefix(text, "-") {
+				parsed, err := strconv.ParseInt(text, 10, 64)
+				if err != nil {
+					t.Fatalf("decode JSON integer %q: %v", text, err)
+				}
+				return parsed
+			}
+			parsed, err := strconv.ParseUint(text, 10, 64)
+			if err != nil {
+				t.Fatalf("decode JSON integer %q: %v", text, err)
+			}
+			return parsed
+		}
+		parsed, err := strconv.ParseFloat(text, 64)
+		if err != nil {
+			t.Fatalf("decode JSON number %q: %v", text, err)
+		}
+		return parsed
+	case []any:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			out[index] = normalizeJSONNumbers(t, item)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = normalizeJSONNumbers(t, item)
+		}
+		return out
+	default:
+		return value
 	}
 }
 
@@ -225,14 +324,11 @@ func stringPointer(value string) *string { return &value }
 
 func validateWireValue(t *testing.T, schemaName string, value any) {
 	t.Helper()
-	raw, err := json.Marshal(value)
+	raw, err := marshalWireValue(value)
 	if err != nil {
 		t.Fatalf("marshal %s: %v", schemaName, err)
 	}
-	var instance any
-	if err := json.Unmarshal(raw, &instance); err != nil {
-		t.Fatalf("decode %s instance: %v", schemaName, err)
-	}
+	instance := decodeJSONWithNumbers(t, raw)
 	if err := openAPIValidator(t, schemaName).Validate(instance); err != nil {
 		t.Fatalf("%s wire does not conform: %v\nJSON: %s", schemaName, err, raw)
 	}

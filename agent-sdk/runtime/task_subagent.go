@@ -37,8 +37,8 @@ func (r *Runtime) buildSideSubagentPromptContext(
 	activeSession session.Session,
 	ref session.SessionRef,
 	target string,
-	sinceSeq int,
-) (string, int, error) {
+	sinceSeq uint64,
+) (string, uint64, error) {
 	if r == nil || r.controllerContextRouter == nil {
 		return "", 0, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
 	}

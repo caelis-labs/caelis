@@ -24,6 +24,7 @@ import (
 )
 
 func TestRunServeStartsProductControlServer(t *testing.T) {
+	t.Setenv("CAELIS_CONTROL_TOKEN", "0123456789abcdef0123456789abcdef0123456789abcdef")
 	previous := runControlServerCommand
 	t.Cleanup(func() { runControlServerCommand = previous })
 	var captured controlserver.Config
@@ -35,13 +36,45 @@ func TestRunServeStartsProductControlServer(t *testing.T) {
 		return nil
 	}
 	err := run(context.Background(), []string{
-		"serve", "--store-dir", t.TempDir(), "--listen", "0.0.0.0:7777", "--control-token", "secret",
+		"serve", "--store-dir", t.TempDir(), "--listen", "127.0.0.1:7777",
 	}, nil, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if captured.Address != "0.0.0.0:7777" || captured.Authenticator == nil || captured.LocalPrincipal.ID != "local-user" {
+	if captured.Address != "127.0.0.1:7777" || captured.Authenticator == nil || captured.Principal.ID != "local-user" || captured.TokenFile != "" {
 		t.Fatalf("control server config = %#v", captured)
+	}
+}
+
+func TestRunServeRejectsBearerSecretInArgv(t *testing.T) {
+	err := run(context.Background(), []string{
+		"serve", "--control-token", "do-not-put-secrets-in-argv",
+	}, nil, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("run() error = %v, want removed --control-token flag", err)
+	}
+}
+
+func TestRunServeDefaultsToPersistentTokenFile(t *testing.T) {
+	t.Setenv("CAELIS_CONTROL_TOKEN", "")
+	t.Setenv("CAELIS_CONTROL_TOKEN_FILE", "")
+	previous := runControlServerCommand
+	t.Cleanup(func() { runControlServerCommand = previous })
+	var captured controlserver.Config
+	runControlServerCommand = func(_ context.Context, _ *gatewayapp.Stack, config controlserver.Config) error {
+		captured = config
+		return nil
+	}
+	storeDir := t.TempDir()
+	err := run(context.Background(), []string{"serve", "--store-dir", storeDir}, nil, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if captured.Authenticator != nil || captured.Principal.ID != "local-user" {
+		t.Fatalf("control server config = %#v", captured)
+	}
+	if want := controlserver.DefaultTokenFile(storeDir); captured.TokenFile != want {
+		t.Fatalf("TokenFile = %q, want %q", captured.TokenFile, want)
 	}
 }
 

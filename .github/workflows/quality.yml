@@ -87,5 +87,5 @@ jobs:
 
       # Cross-compilation cannot catch Windows file-lock and durable-rename
       # behavior. Keep the supported release target on a real Windows runner.
-      - name: Windows persistence runtime
-        run: go test -count=1 ./agent-sdk/session/file ./internal/controlclient
+      - name: Windows persistence and credential runtime
+        run: go test -count=1 ./agent-sdk/session/file ./internal/controlclient ./app/controlserver

@@ -1,0 +1,8 @@
+{
+  "read/400": {"error": "validation failed"},
+  "read/401": {"error": "authentication required"},
+  "read/403": {"error": "forbidden"},
+  "read/409": {"error": "conflict"},
+  "command/400": {"operation_id": "operation-1", "outcome": "rejected", "target": {}},
+  "command/409": {"operation_id": "operation-1", "outcome": "conflicted", "target": {}, "detail": "conflict"}
+}

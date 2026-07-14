@@ -448,7 +448,7 @@ func (liveOutputContextRouter) ParticipantContext(context.Context, controller.Pa
 	return controller.ContextRoute{}, nil
 }
 
-func (liveOutputContextRouter) Checkpoint(context.Context, session.SessionRef, string) (int, error) {
+func (liveOutputContextRouter) Checkpoint(context.Context, session.SessionRef, string) (uint64, error) {
 	return 0, nil
 }
 

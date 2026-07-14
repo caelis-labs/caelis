@@ -1,6 +1,8 @@
 package session
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -82,6 +84,33 @@ type Event struct {
 	Protocol          *EventProtocol         `json:"protocol,omitempty"`
 	Text              string                 `json:"-"`
 	Meta              map[string]any         `json:"_meta,omitempty"`
+}
+
+// UnmarshalJSON preserves numeric tokens in the open durable metadata map.
+// Typed event fields and other open payloads retain their established decoder
+// behavior; metadata consumers can distinguish an exact json.Number from a
+// legacy float64 value that may already have lost integer precision.
+func (e *Event) UnmarshalJSON(data []byte) error {
+	type eventAlias Event
+	var decoded eventAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields struct {
+		Meta json.RawMessage `json:"_meta"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if len(fields.Meta) > 0 && string(fields.Meta) != "null" {
+		decoder := json.NewDecoder(bytes.NewReader(fields.Meta))
+		decoder.UseNumber()
+		if err := decoder.Decode(&decoded.Meta); err != nil {
+			return err
+		}
+	}
+	*e = Event(decoded)
+	return nil
 }
 
 // NoticeOf returns the structured notice carried by one event, if any.

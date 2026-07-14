@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
@@ -65,17 +66,20 @@ func (s *CommandService) execute(ctx context.Context, principal controlport.Prin
 	operationID := strings.TrimSpace(base.OperationID)
 	sessionID := strings.TrimSpace(base.SessionID)
 	if operationID == "" {
-		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, "operation_id is required"), errors.New("controlclient: operation_id is required")
+		err := errorcode.New(errorcode.InvalidArgument, "controlclient: operation_id is required")
+		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, publicCommandDetail(err, controlport.OutcomeRejected)), err
 	}
 	if err := validateCommandRequest(action, request); err != nil {
-		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, err.Error()), err
+		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
+		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, publicCommandDetail(coded, controlport.OutcomeRejected)), coded
 	}
 	if err := s.config.Authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
-		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, err.Error()), err
+		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, publicCommandDetail(err, controlport.OutcomeRejected)), err
 	}
 	digest, err := requestDigest(request)
 	if err != nil {
-		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, err.Error()), err
+		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
+		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, publicCommandDetail(coded, controlport.OutcomeRejected)), coded
 	}
 	intent := OperationIntent{
 		PrincipalID: strings.TrimSpace(principal.ID), OperationID: operationID, Action: action,
@@ -83,10 +87,11 @@ func (s *CommandService) execute(ctx context.Context, principal controlport.Prin
 	}
 	record, created, err := s.config.Operations.Begin(ctx, intent)
 	if errors.Is(err, ErrOperationConflict) {
-		return commandFailure(operationID, sessionID, controlport.OutcomeConflicted, err.Error()), err
+		return commandFailure(operationID, sessionID, controlport.OutcomeConflicted, publicCommandDetail(err, controlport.OutcomeConflicted)), err
 	}
 	if err != nil {
-		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, err.Error()), err
+		coded := internalCommandError("controlclient: begin operation", err)
+		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, publicCommandDetail(coded, controlport.OutcomeRejected)), coded
 	}
 	if !created {
 		if record.Result != nil {
@@ -112,7 +117,8 @@ func (s *CommandService) execute(ctx context.Context, principal controlport.Prin
 	completionCtx, cancelCompletion := operationCompletionContext(ctx)
 	defer cancelCompletion()
 	if _, completeErr := s.config.Operations.Complete(completionCtx, intent, result); completeErr != nil {
-		return commandFailure(operationID, result.SessionID, controlport.OutcomeUnknown, completeErr.Error()), completeErr
+		coded := internalCommandError("controlclient: complete operation", completeErr)
+		return commandFailure(operationID, result.SessionID, controlport.OutcomeUnknown, publicCommandDetail(coded, controlport.OutcomeUnknown)), coded
 	}
 	return result, dispatchErr
 }
@@ -135,8 +141,40 @@ func resultForBackendError(result controlport.CommandResult, err error) controlp
 	} else {
 		result.Outcome = controlport.OutcomeRejected
 	}
-	result.Detail = err.Error()
+	result.Detail = publicCommandDetail(err, result.Outcome)
 	return result
+}
+
+func internalCommandError(message string, err error) error {
+	if err == nil || errorcode.CodeOf(err) != errorcode.Unknown {
+		return err
+	}
+	return errorcode.Wrap(errorcode.Internal, message, err)
+}
+
+func publicCommandDetail(err error, outcome controlport.Outcome) string {
+	switch errorcode.CodeOf(err) {
+	case errorcode.InvalidArgument:
+		return strings.TrimSpace(err.Error())
+	case errorcode.Unauthenticated:
+		return "authentication required"
+	case errorcode.PermissionDenied:
+		return "permission denied"
+	case errorcode.AlreadyExists, errorcode.Conflict, errorcode.FailedPrecondition:
+		return "conflict"
+	case errorcode.UnknownOutcome:
+		return "effect outcome cannot be proven"
+	}
+	switch outcome {
+	case controlport.OutcomeUnknown:
+		return "effect outcome cannot be proven"
+	case controlport.OutcomeConflicted:
+		return "conflict"
+	case controlport.OutcomeRejected:
+		return "command rejected"
+	default:
+		return ""
+	}
 }
 
 func commandFailure(operationID, sessionID string, outcome controlport.Outcome, detail string) controlport.CommandResult {

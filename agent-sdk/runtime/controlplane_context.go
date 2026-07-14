@@ -14,7 +14,7 @@ func (r *Runtime) buildControllerTurnContext(
 	activeSession session.Session,
 	ref session.SessionRef,
 	excludeTurnID string,
-) (string, int, error) {
+) (string, uint64, error) {
 	binding := session.CloneControllerBinding(activeSession.Controller)
 	if binding.Kind != session.ControllerKindACP {
 		return "", binding.ContextSyncSeq, nil
@@ -27,9 +27,9 @@ func (r *Runtime) buildControllerHandoffContext(
 	activeSession session.Session,
 	ref session.SessionRef,
 	from session.ControllerBinding,
-	sinceSeq int,
+	sinceSeq uint64,
 	excludeTurnID string,
-) (string, int, error) {
+) (string, uint64, error) {
 	if r == nil || r.controllerContextRouter == nil {
 		return "", 0, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
 	}
@@ -51,7 +51,7 @@ func (r *Runtime) buildParticipantPromptContext(
 	activeSession session.Session,
 	ref session.SessionRef,
 	binding session.ParticipantBinding,
-) (string, int, error) {
+) (string, uint64, error) {
 	if r == nil || r.controllerContextRouter == nil {
 		return "", 0, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
 	}
