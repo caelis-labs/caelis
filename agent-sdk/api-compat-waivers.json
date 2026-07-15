@@ -3,94 +3,10 @@
   "current_snapshot": "agent-sdk/api.txt",
   "removals": [
     {
-      "package": "github.com/caelis-labs/caelis/agent-sdk/task/stream",
-      "sha256": "9b7220e14d879fb3665c19010b7ff4f77797ee94face4b660191b952a1b8d49d",
-      "symbol": "type Frame",
-      "reason": "pre-v1 Frame adds terminal ExitCode and a typed truncated-before boundary so Control preserves exit state and makes bounded live-output gaps visible"
-    },
-    {
-      "package": "github.com/caelis-labs/caelis/agent-sdk/task/stream",
-      "sha256": "aba0db3a8f76259042fef5e92a9e1b37a58c2608412a4c5bee86e10fa3693d17",
-      "symbol": "type Snapshot",
-      "reason": "pre-v1 Snapshot adds a typed truncated-before boundary so late task-stream readers cannot mistake a bounded retained suffix for complete terminal output"
-    },
-    {
-      "package": "github.com/caelis-labs/caelis/agent-sdk",
-      "sha256": "b18f3fc0a10461a773a459032b07fba67a8b618277a9da28f2b959e96c53edf6",
-      "symbol": "type ApprovalRequest",
-      "reason": "pre-v1 approval request adds the SDK durable pause identity for Control-owned approval correlation"
-    },
-    {
-      "package": "github.com/caelis-labs/caelis/agent-sdk/approval",
-      "sha256": "d93d06f85e184b7d515d358d0d5a4141631e997c3961daf0e7ed957e6a0d84af",
-      "symbol": "type Payload",
-      "reason": "pre-v1 approval payload retains normalized ACP ToolCall kind, title, status, raw output, and content so child permissions round-trip without loss"
-    },
-    {
       "package": "github.com/caelis-labs/caelis/agent-sdk/session",
-      "sha256": "9c648f36f9e47206a08223e9201be2ee22583074f5a93f136af4b478155d761e",
-      "symbol": "type Event",
-      "reason": "pre-v1 Event adds typed child origin and approval request identity required for durable M2 replay without reconstructing semantic relations from display metadata"
-    },
-    {
-      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
-      "sha256": "53dcd3ce4d3c07c9cbcb4115b7641bb78e4461dc3917dda88e0f9d3df075f2ae",
-      "symbol": "ControlMutationPurpose constants",
-      "reason": "pre-v1 Control mutation purposes add explicit session lifecycle authority so semantic close can overlap a cancelling Runtime lease without using an anonymous bypass"
-    },
-    {
-      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
-      "sha256": "5e18d30fcc7d6bf60483dae7e5b30e243ba9c42996849ad200e7fbb20a2aec79",
-      "symbol": "type StateWriter",
-      "reason": "pre-v1 StateWriter replaces legacy unfenced signatures with request-scoped revision CAS and explicit mutation authority so durable semantic state cannot bypass an active Session lease"
-    },
-    {
-      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
-      "sha256": "b609ad48f5647bfa53e8274a74a2b7b0ca3f98d861913ecb8a543df9107a2ea2",
+      "sha256": "fd47c2dd35738db12e3505c881b0cdaee5410d62d4334fd286c18856242b40cd",
       "symbol": "type Store",
-      "reason": "pre-v1 low-level Store adopts the request-scoped State mutation contract and returns the exact committed Session for revision-aware recovery"
-    },
-    {
-      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
-      "sha256": "48965729b21ca3904d707395c3dcf93ccc12bca3ec84ad075a1a8809a9889222",
-      "symbol": "type ContextRoute",
-      "reason": "pre-v1 context checkpoints use uint64 end to end so durable sequence values cannot truncate before the decimal-string HTTP projection"
-    },
-    {
-      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
-      "sha256": "ecfdfb0c14b1d79cfb0dc8230a503cb4db448dc7aa43176adc226332af877689",
-      "symbol": "type ContextRouter",
-      "reason": "pre-v1 context checkpoint contracts use uint64 end to end so durable sequence values cannot truncate before the decimal-string HTTP projection"
-    },
-    {
-      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
-      "sha256": "70fc418df6c5be669c5223d41ec7b2012d3e7adc02379ae2b5b1edee6d28affb",
-      "symbol": "type ControllerContextRequest",
-      "reason": "pre-v1 controller context requests use uint64 checkpoints so resume values preserve the full durable sequence domain"
-    },
-    {
-      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
-      "sha256": "9d29025cc62ca289dd5275764b13f1fd7eb1a6585bd26dc0ed89aa621c29643f",
-      "symbol": "type HandoffRequest",
-      "reason": "pre-v1 handoff context checkpoints use uint64 so Control can preserve the full durable sequence domain"
-    },
-    {
-      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
-      "sha256": "7b5ba8e3ec2b8afd5855770e11054bde06ecdf3e43e05e9b6f6485602cb90539",
-      "symbol": "type TurnRequest",
-      "reason": "pre-v1 turn context checkpoints use uint64 so Runtime receives the exact durable sequence selected by Control"
-    },
-    {
-      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
-      "sha256": "703386ecab8fedd7505f3f64103ea9fcd7f028f7833b1cf1eb1ff066cb6d578e",
-      "symbol": "type ControllerBinding",
-      "reason": "pre-v1 durable controller bindings use uint64 checkpoints so Session state can represent the complete sequence domain"
-    },
-    {
-      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
-      "sha256": "b62e3654da3c897abbbd8f5698b07305ddd26f815bab4f791d1c58e521903734",
-      "symbol": "type ParticipantBinding",
-      "reason": "pre-v1 durable participant bindings use uint64 checkpoints so Session state can represent the complete sequence domain"
+      "reason": "pre-v1 removes the obsolete low-level Store interface whose unfenced mutation signatures conflict with the request-scoped Service and narrow session contracts"
     }
   ]
 }

@@ -8,8 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -195,49 +194,14 @@ func (l *modelLookup) ResolveModelConfig(ctx context.Context, cfg ModelConfig, c
 
 func resolveModelFromConfig(ctx context.Context, cfg ModelConfig, fallbackContextWindow int, contextWindow int) (kernelimpl.ModelResolution, error) {
 	_ = ctx
-	cfg = normalizeModelConfig(cfg)
-	effectiveContextWindow := fallbackContextWindow
-	if cfg.ContextWindowTokens > 0 {
-		effectiveContextWindow = cfg.ContextWindowTokens
-	}
-	if contextWindow > 0 {
-		effectiveContextWindow = contextWindow
-	}
-	factory := providers.NewFactory()
-	record := providers.Config{
-		Alias:                     cfg.ID,
-		Provider:                  cfg.Provider,
-		API:                       cfg.API,
-		Model:                     cfg.Model,
-		BaseURL:                   cfg.BaseURL,
-		HTTPClient:                cfg.HTTPClient,
-		Timeout:                   cfg.Timeout,
-		StreamFirstEventTimeout:   cfg.StreamFirstEventTimeout,
-		MaxOutputTok:              cfg.MaxOutputTok,
-		ContextWindowTokens:       effectiveContextWindow,
-		ReasoningLevels:           append([]string(nil), cfg.ReasoningLevels...),
-		ReasoningMode:             cfg.ReasoningMode,
-		DefaultReasoningEffort:    cfg.DefaultReasoningEffort,
-		ReasoningEffort:           cfg.ReasoningEffort,
-		SupportedReasoningEfforts: append([]string(nil), cfg.ReasoningLevels...),
-		Auth: providers.AuthConfig{
-			Type:      cfg.AuthType,
-			Token:     cfg.Token,
-			TokenEnv:  cfg.TokenEnv,
-			HeaderKey: cfg.HeaderKey,
-		},
-	}
-	if err := factory.Register(record); err != nil {
-		return kernelimpl.ModelResolution{}, err
-	}
-	llm, err := factory.NewByAlias(cfg.ID)
+	resolved, err := modelconfig.BuildModel(cfg, fallbackContextWindow, contextWindow)
 	if err != nil {
 		return kernelimpl.ModelResolution{}, err
 	}
 	return kernelimpl.ModelResolution{
-		Model:                  llm,
-		ReasoningEffort:        cfg.ReasoningEffort,
-		DefaultReasoningEffort: cfg.DefaultReasoningEffort,
+		Model:                  resolved.Model,
+		ReasoningEffort:        resolved.ReasoningEffort,
+		DefaultReasoningEffort: resolved.DefaultReasoningEffort,
 	}, nil
 }
 
@@ -358,6 +322,9 @@ func (l *modelLookup) SetDefault(alias string) {
 	defer l.mu.Unlock()
 	if cfg, ok, err := l.resolveConfigLocked(alias); err == nil && ok {
 		l.defaultID = cfg.ID
+		if cfg.ContextWindowTokens > 0 {
+			l.contextWindow = cfg.ContextWindowTokens
+		}
 	}
 }
 
@@ -510,37 +477,37 @@ func (l *modelLookup) hydrateModelConfigLocked(cfg ModelConfig) ModelConfig {
 }
 
 func modelChoiceDetail(cfg ModelConfig) string {
-	return modelregistry.ChoiceDetail(cfg)
+	return modelconfig.ChoiceDetail(cfg)
 }
 
 func modelChoiceFromConfig(cfg ModelConfig) ModelChoice {
-	return modelregistry.ChoiceFromConfig(cfg)
+	return modelconfig.ChoiceFromConfig(cfg)
 }
 
 func dedupeModelChoices(choices []ModelChoice) []ModelChoice {
-	return modelregistry.DedupeChoices(choices)
+	return modelconfig.DedupeChoices(choices)
 }
 
 func normalizeModelConfig(cfg ModelConfig) ModelConfig {
-	return modelregistry.NormalizeConfig(cfg)
+	return modelconfig.NormalizeConfig(cfg)
 }
 
 func normalizeModelProfileConfig(profile ModelProfileConfig) ModelProfileConfig {
-	return modelregistry.NormalizeProfileConfig(profile)
+	return modelconfig.NormalizeProfileConfig(profile)
 }
 
 func modelProfileFromModelConfig(cfg ModelConfig) ModelProfileConfig {
-	return modelregistry.ProfileFromConfig(cfg)
+	return modelconfig.ProfileFromConfig(cfg)
 }
 
 func modelConfigCarriesProfileAuth(cfg ModelConfig) bool {
-	return modelregistry.ConfigCarriesProfileAuth(cfg)
+	return modelconfig.ConfigCarriesProfileAuth(cfg)
 }
 
 func mergeModelConfigProfile(cfg ModelConfig, profile ModelProfileConfig) ModelConfig {
-	return modelregistry.MergeConfigProfile(cfg, profile)
+	return modelconfig.MergeConfigProfile(cfg, profile)
 }
 
 func modelConfigSupportsReasoningEffort(cfg ModelConfig, effort string) bool {
-	return modelregistry.SupportsReasoningEffort(cfg, effort)
+	return modelconfig.SupportsReasoningEffort(cfg, effort)
 }

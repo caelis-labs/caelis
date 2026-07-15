@@ -5,12 +5,10 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 )
 
 type RuntimeStackGatewayAppAdapters struct {
-	ModelConfig          func(gatewayapp.ModelConfig) ModelConfig
-	GatewayModelConfig   func(ModelConfig) gatewayapp.ModelConfig
-	ModelCapabilities    func(gatewayapp.ModelCapabilityInfo) ModelCapabilityInfo
 	SandboxStatus        func(gatewayapp.SandboxStatus) SandboxStatus
 	SessionRuntimeState  func(gatewayapp.SessionRuntimeState, error) (SessionRuntimeState, error)
 	ModelChoices         func([]gatewayapp.ModelChoice, error) ([]ModelChoice, error)
@@ -91,38 +89,17 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 		Model: ModelRuntimeDeps{
 			DefaultAliasFn: models.DefaultAlias,
 			ConfigFn: func(alias string) (ModelConfig, bool) {
-				cfg, ok := models.Config(alias)
-				if !ok {
-					return ModelConfig{}, false
-				}
-				return adapters.ModelConfig(cfg), true
+				return models.Config(alias)
 			},
 			SessionUsageSnapshotFn: models.UsageSnapshot,
-			ConnectFn:              func(cfg ModelConfig) (string, error) { return models.Connect(adapters.GatewayModelConfig(cfg)) },
+			ConnectModelsFn:        models.ConnectModels,
 			UseFn:                  models.Use,
 			DeleteFn:               models.Delete,
 			ListAliasesFn:          models.ListAliases,
 			ListChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
 				return adapters.ModelChoices(models.ListChoices(ctx, ref))
 			},
-			Catalog: gatewayAppRuntimeModelCatalog{
-				models:            models,
-				modelCapabilities: adapters.ModelCapabilities,
-			},
-			EnsureCodeFreeAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
-				return models.EnsureCodeFreeAuth(ctx, gatewayapp.CodeFreeAuthRequest{
-					BaseURL:         req.BaseURL,
-					OpenBrowser:     req.OpenBrowser,
-					CallbackTimeout: req.CallbackTimeout,
-				})
-			},
-			EnsureCodeFreeModelSelectionAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
-				return models.EnsureCodeFreeModelSelectionAuth(ctx, gatewayapp.CodeFreeAuthRequest{
-					BaseURL:         req.BaseURL,
-					OpenBrowser:     req.OpenBrowser,
-					CallbackTimeout: req.CallbackTimeout,
-				})
-			},
+			AuthenticateFn: modelconfig.AuthenticateProvider,
 		},
 		Skill: SkillRuntimeDeps{
 			SnapshotFn: skills.Snapshot,
@@ -203,34 +180,4 @@ func gatewayDepsFromStack(stack *gatewayapp.Stack) GatewayRuntimeDeps {
 		ControlPlaneServiceFn: func() GatewayControlPlaneService { return stack.KernelControlPlane() },
 		StreamProviderFn:      func() GatewayStreamProvider { return stack.KernelStreams() },
 	}
-}
-
-type gatewayAppRuntimeModelCatalog struct {
-	models            gatewayapp.ModelService
-	modelCapabilities func(gatewayapp.ModelCapabilityInfo) ModelCapabilityInfo
-}
-
-func (c gatewayAppRuntimeModelCatalog) ListProviderModels(provider string) []string {
-	return c.models.ListProviderModels(provider)
-}
-
-func (c gatewayAppRuntimeModelCatalog) ListCatalogModels(provider string) []string {
-	return c.models.ListCatalogModels(provider)
-}
-
-func (c gatewayAppRuntimeModelCatalog) ListModelDirectoryModels(provider string) []string {
-	return c.models.ListModelDirectoryModels(provider)
-}
-
-func (c gatewayAppRuntimeModelCatalog) DefaultCapabilities() ModelCapabilityInfo {
-	return c.modelCapabilities(c.models.DefaultCapabilities())
-}
-
-func (c gatewayAppRuntimeModelCatalog) LookupCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
-	caps, ok := c.models.LookupCapabilities(provider, modelName)
-	return c.modelCapabilities(caps), ok
-}
-
-func (c gatewayAppRuntimeModelCatalog) ReasoningLevels(provider string, modelName string) []string {
-	return c.models.ReasoningLevels(provider, modelName)
 }

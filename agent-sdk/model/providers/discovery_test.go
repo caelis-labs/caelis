@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
-
-	"github.com/caelis-labs/caelis/agent-sdk/model/codefreecaps"
 )
 
 func TestDiscoverGeminiModels_UsesAPIKeyHeader(t *testing.T) {
@@ -90,43 +88,6 @@ func TestDiscoverOpenRouterModels_ParsesOpenRouterShapeAndConfiguredHeaders(t *t
 	}
 }
 
-func TestCodeFreeModelLimitsMatchCodeFreeODirectory(t *testing.T) {
-	tests := []struct {
-		model     string
-		context   int
-		maxOutput int
-		image     bool
-		known     bool
-	}{
-		{model: "DeepSeek-V4-Flash-ctyun-oc", context: 112000, maxOutput: 16000, image: false, known: true},
-		{model: "deepseek-v4-flash-ctyun-oc", context: 112000, maxOutput: 16000, image: false, known: true},
-		{model: "GLM-4.7", context: 80000, maxOutput: 8000, image: false, known: true},
-		{model: "GLM-5.1", context: 112000, maxOutput: 16000, image: false, known: true},
-		{model: "GLM-5.1-ctyun-oc", context: 112000, maxOutput: 16000, image: false, known: true},
-		{model: "Qwen3.5-122B-A10B", context: 112000, maxOutput: 16000, image: true, known: true},
-		{model: "GLM-5-ctyun-oc", context: 128000, maxOutput: 8000, image: false, known: false},
-		{model: "custom-codefree-model", context: 128000, maxOutput: 8000, image: false, known: false},
-	}
-	for _, tt := range tests {
-		got, ok := codefreecaps.Lookup(tt.model)
-		if ok != tt.known {
-			t.Fatalf("codefreecaps.Lookup(%q) ok = %v, want %v", tt.model, ok, tt.known)
-		}
-		contextWindow := codefreecaps.UnknownContextWindowTokens
-		maxOutput := codefreecaps.UnknownMaxOutputTokens
-		image := false
-		if ok {
-			contextWindow = got.ContextWindowTokens
-			maxOutput = got.MaxOutputTokens
-			image = got.SupportsImages
-		}
-		if contextWindow != tt.context || maxOutput != tt.maxOutput || image != tt.image {
-			t.Fatalf("codefreecaps.Lookup(%q) = limits %d/%d image %v, want %d/%d image %v",
-				tt.model, contextWindow, maxOutput, image, tt.context, tt.maxOutput, tt.image)
-		}
-	}
-}
-
 func TestDiscoverCodeFreeModelsParsesLimits(t *testing.T) {
 	credsPath := writeCodeFreeCredsForTest(t, "272182", "api-key")
 	t.Setenv(codeFreeCredsPathEnv, credsPath)
@@ -143,7 +104,7 @@ func TestDiscoverCodeFreeModelsParsesLimits(t *testing.T) {
 			t.Fatalf("sessionId = %q, want stored login session", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"optResult":0,"data":[{"modelName":"DeepSeek-V4-Flash-ctyun-oc","modelType":"chat","maxTokens":112000,"maxOutputTokens":16000},{"modelName":"GLM-5.1-ctyun-oc","modelType":"chat","maxTokens":112000,"maxOutputTokens":16000},{"modelName":"GLM-4.7","modelType":"chat","maxTokens":80000,"maxOutputTokens":8000},{"modelName":"GLM-5.1","modelType":"chat","maxTokens":112000,"maxOutputTokens":16000},{"modelName":"Qwen3.5-122B-A10B","modelType":"multimodal","maxTokens":112000,"maxOutputTokens":16000}]}`)
+		_, _ = fmt.Fprint(w, `{"optResult":0,"data":[{"modelName":"DeepSeek-V4-Flash-ctyun-oc","modelType":"chat","maxTokens":112000,"maxOutputTokens":16000},{"modelName":"GLM-5.1-ctyun-oc","modelType":"chat","maxTokens":112000,"maxOutputTokens":16000},{"modelName":"GLM-4.7","modelType":"chat","maxTokens":80000,"maxOutputTokens":8000},{"modelName":"GLM-5.1","modelType":"chat","maxTokens":112000,"maxOutputTokens":16000},{"modelName":"Qwen3.5-122B-A10B","modelType":"multimodal","maxTokens":112000,"maxOutputTokens":16000},{"modelName":"future-codefree-model","modelType":"chat"}]}`)
 	}))
 	defer server.Close()
 
@@ -184,6 +145,13 @@ func TestDiscoverCodeFreeModelsParsesLimits(t *testing.T) {
 		if hasImage := containsRemoteCapability(item.Capabilities, "image"); hasImage != tt.image {
 			t.Fatalf("discoverCodeFreeModels(%q) image capability = %v in %#v, want %v", tt.model, hasImage, item.Capabilities, tt.image)
 		}
+	}
+	unknown, ok := byName["future-codefree-model"]
+	if !ok {
+		t.Fatalf("discoverCodeFreeModels() missing future-codefree-model in %+v", got)
+	}
+	if unknown.ContextWindowTokens != 0 || unknown.MaxOutputTokens != 0 {
+		t.Fatalf("discoverCodeFreeModels(future-codefree-model) limits = %d/%d, want provider response left unspecified", unknown.ContextWindowTokens, unknown.MaxOutputTokens)
 	}
 }
 

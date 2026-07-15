@@ -205,10 +205,11 @@ type ResumeCandidate struct {
 }
 
 type SlashArgCandidate struct {
-	Value   string
-	Display string
-	Detail  string
-	NoAuth  bool
+	Value                 string
+	Display               string
+	Detail                string
+	NoAuth                bool
+	ModelMetadataComplete bool
 }
 
 type commandItem struct {

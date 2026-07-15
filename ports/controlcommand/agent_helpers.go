@@ -318,8 +318,11 @@ func dashAsEmpty(value string) string {
 
 func parseReasoningLevels(raw string) []string {
 	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "-" {
+	if raw == "" || strings.EqualFold(raw, "auto") {
 		return nil
+	}
+	if raw == "-" {
+		return []string{}
 	}
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))

@@ -3,14 +3,13 @@ package controladapter
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
@@ -45,42 +44,7 @@ type GatewayStreamProvider interface {
 	gateway.StreamProvider
 }
 
-type ModelConfig struct {
-	ID                      string
-	Alias                   string
-	Provider                string
-	ProfileID               string
-	EndpointID              string
-	API                     model.APIType
-	Model                   string
-	BaseURL                 string
-	HTTPClient              *http.Client
-	Token                   string
-	TokenEnv                string
-	PersistToken            bool
-	AuthType                model.AuthType
-	HeaderKey               string
-	ContextWindowTokens     int
-	ReasoningEffort         string
-	DefaultReasoningEffort  string
-	ReasoningLevels         []string
-	ReasoningMode           string
-	MaxOutputTok            int
-	Timeout                 time.Duration
-	StreamFirstEventTimeout time.Duration
-}
-
-type ModelCapabilityInfo struct {
-	ContextWindowTokens    int
-	DefaultMaxOutputTokens int
-	MaxOutputTokens        int
-	ReasoningEfforts       []string
-	DefaultReasoningEffort string
-	SupportsReasoning      bool
-	SupportsToolCalls      bool
-	SupportsImages         bool
-	SupportsJSON           bool
-}
+type ModelConfig = modelconfig.Config
 
 type ModelChoice struct {
 	ID         string
@@ -239,17 +203,15 @@ type AgentRuntimeDeps struct {
 // reads can return zero values when absent; connect/use/delete operations fail
 // when invoked without their backing hooks.
 type ModelRuntimeDeps struct {
-	DefaultAliasFn                     func() string
-	ConfigFn                           func(string) (ModelConfig, bool)
-	SessionUsageSnapshotFn             func(context.Context, session.SessionRef, string) (compact.UsageSnapshot, error)
-	ConnectFn                          func(ModelConfig) (string, error)
-	UseFn                              func(context.Context, session.SessionRef, string, ...string) error
-	DeleteFn                           func(context.Context, session.SessionRef, string) error
-	ListAliasesFn                      func(context.Context, session.SessionRef) ([]string, error)
-	ListChoicesFn                      func(context.Context, session.SessionRef) ([]ModelChoice, error)
-	Catalog                            RuntimeModelCatalog
-	EnsureCodeFreeAuthFn               func(context.Context, CodeFreeAuthRequest) error
-	EnsureCodeFreeModelSelectionAuthFn func(context.Context, CodeFreeAuthRequest) error
+	DefaultAliasFn         func() string
+	ConfigFn               func(string) (ModelConfig, bool)
+	SessionUsageSnapshotFn func(context.Context, session.SessionRef, string) (compact.UsageSnapshot, error)
+	ConnectModelsFn        func([]ModelConfig) ([]string, error)
+	UseFn                  func(context.Context, session.SessionRef, string, ...string) error
+	DeleteFn               func(context.Context, session.SessionRef, string) error
+	ListAliasesFn          func(context.Context, session.SessionRef) ([]string, error)
+	ListChoicesFn          func(context.Context, session.SessionRef) ([]ModelChoice, error)
+	AuthenticateFn         modelconfig.AuthenticateFunc
 }
 
 // SkillRuntimeDeps carries access to the current runtime skill catalog used for
@@ -289,12 +251,6 @@ type ACPAgentAddOption struct {
 	Detail  string
 }
 
-type CodeFreeAuthRequest struct {
-	BaseURL         string
-	OpenBrowser     bool
-	CallbackTimeout time.Duration
-}
-
 type RuntimeStack struct {
 	Gateway          GatewayRuntimeDeps
 	ControlFeeds     controlclientport.FeedRegistry
@@ -307,15 +263,6 @@ type RuntimeStack struct {
 	Skill            SkillRuntimeDeps
 	AgentProfile     AgentProfileRuntimeDeps
 	Plugin           PluginRuntimeDeps
-}
-
-type RuntimeModelCatalog interface {
-	ListProviderModels(provider string) []string
-	ListCatalogModels(provider string) []string
-	ListModelDirectoryModels(provider string) []string
-	DefaultCapabilities() ModelCapabilityInfo
-	LookupCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool)
-	ReasoningLevels(provider string, modelName string) []string
 }
 
 func missingRuntimeDependency(name string) error {
@@ -338,29 +285,4 @@ func listModelChoices(ctx context.Context, deps ModelRuntimeDeps, ref session.Se
 		choices = append(choices, ModelChoice{ID: alias, Alias: alias})
 	}
 	return choices, nil
-}
-
-func defaultModelCapabilities(deps ModelRuntimeDeps) ModelCapabilityInfo {
-	if deps.Catalog == nil {
-		return ModelCapabilityInfo{
-			ContextWindowTokens:    128000,
-			DefaultMaxOutputTokens: 4096,
-			MaxOutputTokens:        4096,
-		}
-	}
-	return deps.Catalog.DefaultCapabilities()
-}
-
-func lookupModelCapabilities(deps ModelRuntimeDeps, provider string, modelName string) (ModelCapabilityInfo, bool) {
-	if deps.Catalog == nil {
-		return ModelCapabilityInfo{}, false
-	}
-	return deps.Catalog.LookupCapabilities(provider, modelName)
-}
-
-func reasoningLevelsForModelDeps(deps ModelRuntimeDeps, provider string, modelName string) []string {
-	if deps.Catalog == nil {
-		return nil
-	}
-	return deps.Catalog.ReasoningLevels(provider, modelName)
 }

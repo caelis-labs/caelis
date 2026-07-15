@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	commands "github.com/caelis-labs/caelis/ports/controlcommand"
@@ -24,7 +24,7 @@ type RuntimeConfig struct {
 	ControlOperationRetention time.Duration
 	ContextWindow             int
 	SystemPrompt              string
-	Model                     modelregistry.Config
+	Model                     modelconfig.Config
 }
 
 type DefaultSelfConfig struct {

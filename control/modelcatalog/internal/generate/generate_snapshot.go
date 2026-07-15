@@ -58,7 +58,7 @@ var providerAlias = map[string]string{
 
 func main() {
 	input := flag.String("input", "", "path to a full models.dev api.json snapshot; if empty, fetch -url")
-	output := flag.String("output", "agent-sdk/model/catalog/models_dev_snapshot.compact.json.gz", "path for the compact gzip snapshot")
+	output := flag.String("output", "control/modelcatalog/models_dev_snapshot.compact.json.gz", "path for the compact gzip snapshot")
 	sourceURL := flag.String("url", defaultModelsDevURL, "models.dev API URL used when -input is empty")
 	flag.Parse()
 

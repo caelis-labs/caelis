@@ -4,108 +4,43 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 )
 
 func (d *Adapter) Connect(ctx context.Context, cfg ConnectConfig) (StatusSnapshot, error) {
-	tpl, ok := findProviderTemplate(cfg.Provider)
-	if !ok {
-		return StatusSnapshot{}, fmt.Errorf("provider %q is not supported", strings.TrimSpace(cfg.Provider))
+	if d == nil || d.stack == nil {
+		return StatusSnapshot{}, missingRuntimeDependency("stack")
 	}
-	cfg.Provider = tpl.provider
-	cfg.Model = strings.TrimSpace(cfg.Model)
-	cfg.BaseURL = strings.TrimSpace(cfg.BaseURL)
-	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
-	cfg.TokenEnv = strings.TrimSpace(cfg.TokenEnv)
-	if env, ok := parseTokenEnvSpec(cfg.APIKey); ok {
-		cfg.TokenEnv = env
-		cfg.APIKey = ""
-	}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = tpl.defaultBaseURL
-	}
-	endpoint, hasEndpoint := connectEndpointForBaseURL(tpl, cfg.BaseURL)
-	if strings.TrimSpace(cfg.EndpointID) == "" && hasEndpoint {
-		cfg.EndpointID = endpoint.id
-	}
-	if err := validateConnectConfig(tpl, cfg); err != nil {
-		if !d.hasReusableConnectAuth(ctx, tpl.provider, cfg.BaseURL) {
-			return StatusSnapshot{}, err
-		}
-	}
-	if defaults, err := connectDefaultsForConfigWithStack(ctx, d.stack, cfg); err == nil {
-		if cfg.ContextWindowTokens <= 0 {
-			cfg.ContextWindowTokens = defaults.ContextWindow
-		}
-		if cfg.MaxOutputTokens <= 0 {
-			cfg.MaxOutputTokens = defaults.MaxOutput
-		}
-		if len(cfg.ReasoningLevels) == 0 {
-			cfg.ReasoningLevels = defaults.ReasoningLevels
-		}
-		if cfg.ReasoningEffort == "" {
-			cfg.ReasoningEffort = defaults.DefaultReasoningEffort
-		}
-	}
-	baseURL := strings.TrimSpace(cfg.BaseURL)
-	api := tpl.api
-	if hasEndpoint && strings.TrimSpace(string(endpoint.api)) != "" {
-		api = endpoint.api
-	}
-	if tpl.provider == "codefree" {
-		if d.stack.Model.EnsureCodeFreeAuthFn == nil {
-			return StatusSnapshot{}, missingRuntimeDependency("codefree auth")
-		}
-		if err := d.stack.Model.EnsureCodeFreeAuthFn(ctx, CodeFreeAuthRequest{
-			BaseURL:         baseURL,
-			OpenBrowser:     true,
-			CallbackTimeout: 5 * time.Minute,
-		}); err != nil {
-			return StatusSnapshot{}, err
-		}
-	}
-	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
-	if cfg.TimeoutSeconds <= 0 {
-		timeout = 60 * time.Second
-	}
-	firstEventTimeout := time.Duration(cfg.StreamFirstEventTimeoutSeconds) * time.Second
-	authType := defaultConnectAuthType(tpl.provider)
-	if strings.TrimSpace(cfg.AuthType) != "" {
-		authType = authTypeFromString(strings.TrimSpace(cfg.AuthType))
-	}
-	if tpl.noAuthRequired {
-		authType = model.AuthNone
-	}
-	persistToken := strings.TrimSpace(cfg.APIKey) != "" && strings.TrimSpace(cfg.TokenEnv) == ""
-	reasoningLevels := normalizeReasoningLevels(cfg.ReasoningLevels)
-	defaultReasoningEffort := strings.TrimSpace(cfg.ReasoningEffort)
-	if d.stack.Model.ConnectFn == nil {
-		return StatusSnapshot{}, missingRuntimeDependency("connect")
-	}
-	alias, err := d.stack.Model.ConnectFn(ModelConfig{
-		Provider:                strings.TrimSpace(cfg.Provider),
-		EndpointID:              strings.TrimSpace(cfg.EndpointID),
-		API:                     api,
-		Model:                   cfg.Model,
-		BaseURL:                 baseURL,
-		Token:                   cfg.APIKey,
-		TokenEnv:                cfg.TokenEnv,
-		PersistToken:            persistToken,
-		AuthType:                authType,
-		ContextWindowTokens:     cfg.ContextWindowTokens,
-		DefaultReasoningEffort:  defaultReasoningEffort,
-		ReasoningEffort:         defaultReasoningEffort,
-		ReasoningLevels:         reasoningLevels,
-		MaxOutputTok:            cfg.MaxOutputTokens,
-		Timeout:                 timeout,
-		StreamFirstEventTimeout: firstEventTimeout,
+	assembled, err := modelconfig.AssembleConnect(ctx, modelconfig.ConnectRequest{
+		Provider:                       cfg.Provider,
+		EndpointID:                     cfg.EndpointID,
+		Models:                         connectModelSelections(cfg),
+		BaseURL:                        cfg.BaseURL,
+		TimeoutSeconds:                 cfg.TimeoutSeconds,
+		StreamFirstEventTimeoutSeconds: cfg.StreamFirstEventTimeoutSeconds,
+		APIKey:                         cfg.APIKey,
+		TokenEnv:                       cfg.TokenEnv,
+		AuthType:                       cfg.AuthType,
+	}, modelconfig.ConnectOptions{
+		HasReusableAuth: d.hasReusableConnectAuth,
+		Authenticate:    d.stack.Model.AuthenticateFn,
 	})
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
+	if d.stack.Model.ConnectModelsFn == nil {
+		return StatusSnapshot{}, missingRuntimeDependency("connect")
+	}
+	aliases, err := d.stack.Model.ConnectModelsFn(assembled)
+	if err != nil {
+		return StatusSnapshot{}, err
+	}
+	if len(aliases) == 0 {
+		return StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: connect returned no model aliases")
+	}
+	alias := aliases[0]
 	if activeSession, ok := d.currentSession(); ok && alias != "" {
 		if d.stack.Model.UseFn == nil {
 			return StatusSnapshot{}, missingRuntimeDependency("use model")
@@ -123,11 +58,40 @@ func (d *Adapter) Connect(ctx context.Context, cfg ConnectConfig) (StatusSnapsho
 	return d.Status(ctx)
 }
 
+func connectModelSelections(cfg ConnectConfig) []modelconfig.ModelSelection {
+	names := strings.Split(cfg.Model, ",")
+	selections := make([]modelconfig.ModelSelection, 0, len(names))
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		levels := append([]string(nil), cfg.ReasoningLevels...)
+		if cfg.ReasoningLevels != nil && levels == nil {
+			levels = []string{}
+		}
+		selections = append(selections, modelconfig.ModelSelection{
+			Name:                name,
+			ContextWindowTokens: cfg.ContextWindowTokens,
+			MaxOutputTokens:     cfg.MaxOutputTokens,
+			ReasoningEffort:     cfg.ReasoningEffort,
+			ReasoningLevels:     levels,
+		})
+	}
+	return selections
+}
+
 func (d *Adapter) hasReusableConnectAuth(ctx context.Context, provider string, baseURL string) bool {
 	if d == nil || d.stack == nil {
 		return false
 	}
-	normalizedBaseURL := normalizedConnectBaseURL(baseURL)
+	normalizedBaseURL := modelconfig.NormalizeBaseURL(baseURL)
 	if normalizedBaseURL == "" {
 		return false
 	}
@@ -143,7 +107,7 @@ func (d *Adapter) hasReusableConnectAuth(ctx context.Context, provider string, b
 		if !strings.EqualFold(strings.TrimSpace(choice.Provider), strings.TrimSpace(provider)) {
 			continue
 		}
-		if normalizedConnectBaseURL(choice.BaseURL) == normalizedBaseURL {
+		if modelconfig.NormalizeBaseURL(choice.BaseURL) == normalizedBaseURL {
 			return true
 		}
 	}

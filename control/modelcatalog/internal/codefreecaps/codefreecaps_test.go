@@ -16,25 +16,20 @@ func TestLookupKnownModels(t *testing.T) {
 		{model: "GLM-5.1", context: 112000, maxOutput: 16000, image: false, known: true},
 		{model: "GLM-5.1-ctyun-oc", context: 112000, maxOutput: 16000, image: false, known: true},
 		{model: "Qwen3.5-122B-A10B", context: 112000, maxOutput: 16000, image: true, known: true},
-		{model: "GLM-5-ctyun-oc", context: 128000, maxOutput: 8000, image: false, known: false},
-		{model: "custom-codefree-model", context: 128000, maxOutput: 8000, image: false, known: false},
+		{model: "GLM-5-ctyun-oc", known: false},
+		{model: "custom-codefree-model", known: false},
 	}
 	for _, tt := range tests {
 		got, ok := Lookup(tt.model)
 		if ok != tt.known {
 			t.Fatalf("Lookup(%q) ok = %v, want %v", tt.model, ok, tt.known)
 		}
-		contextWindow := UnknownContextWindowTokens
-		maxOutput := UnknownMaxOutputTokens
-		image := false
-		if ok {
-			contextWindow = got.ContextWindowTokens
-			maxOutput = got.MaxOutputTokens
-			image = got.SupportsImages
+		if !ok {
+			continue
 		}
-		if contextWindow != tt.context || maxOutput != tt.maxOutput || image != tt.image {
+		if got.ContextWindowTokens != tt.context || got.MaxOutputTokens != tt.maxOutput || got.SupportsImages != tt.image {
 			t.Fatalf("Lookup(%q) = limits %d/%d image %v, want %d/%d image %v",
-				tt.model, contextWindow, maxOutput, image, tt.context, tt.maxOutput, tt.image)
+				tt.model, got.ContextWindowTokens, got.MaxOutputTokens, got.SupportsImages, tt.context, tt.maxOutput, tt.image)
 		}
 	}
 }
@@ -57,13 +52,7 @@ func TestLookupPrefixMatchingUsesLongestID(t *testing.T) {
 	}
 }
 
-func TestLookupUnknownFallbackConstants(t *testing.T) {
-	if UnknownContextWindowTokens != 128000 {
-		t.Fatalf("UnknownContextWindowTokens = %d, want 128000", UnknownContextWindowTokens)
-	}
-	if UnknownMaxOutputTokens != 8000 {
-		t.Fatalf("UnknownMaxOutputTokens = %d, want 8000", UnknownMaxOutputTokens)
-	}
+func TestLookupUnknownReturnsFalse(t *testing.T) {
 	_, ok := Lookup("totally-unknown-codefree-model")
 	if ok {
 		t.Fatal("Lookup(unknown) ok = true, want false")

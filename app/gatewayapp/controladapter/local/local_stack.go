@@ -14,7 +14,6 @@ import (
 type Adapter = controladapter.Adapter
 type RuntimeStack = controladapter.RuntimeStack
 type ModelConfig = controladapter.ModelConfig
-type ModelCapabilityInfo = controladapter.ModelCapabilityInfo
 type ModelChoice = controladapter.ModelChoice
 type SessionRuntimeState = controladapter.SessionRuntimeState
 type SandboxStatus = controladapter.SandboxStatus
@@ -25,7 +24,6 @@ type ACPAgentInfo = controladapter.ACPAgentInfo
 type ACPAgentAddOption = controladapter.ACPAgentAddOption
 type AgentProfileStatusSnapshot = controladapter.AgentProfileStatusSnapshot
 type AgentProfileBindingConfig = controladapter.AgentProfileBindingConfig
-type CodeFreeAuthRequest = controladapter.CodeFreeAuthRequest
 type CustomAgentConfig = controladapter.CustomAgentConfig
 
 func NewLocalAdapter(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*Adapter, error) {
@@ -38,9 +36,6 @@ func NewLocalAdapterForSession(ctx context.Context, stack *gatewayapp.Stack, act
 
 func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
 	return controladapter.NewRuntimeStackFromGatewayApp(stack, controladapter.RuntimeStackGatewayAppAdapters{
-		ModelConfig:          toRuntimeModelConfig,
-		GatewayModelConfig:   toGatewayModelConfig,
-		ModelCapabilities:    toRuntimeModelCapabilities,
 		SandboxStatus:        toRuntimeSandboxStatus,
 		SessionRuntimeState:  toRuntimeSessionRuntimeState,
 		ModelChoices:         toRuntimeModelChoices,
@@ -55,78 +50,6 @@ func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
 		MarketplaceSnapshots: toRuntimeMarketplaceSnapshots,
 		MarketplaceSnapshot:  toRuntimeMarketplaceSnapshotWithError,
 	})
-}
-
-func toRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {
-	return ModelConfig{
-		ID:                      cfg.ID,
-		Alias:                   cfg.Alias,
-		Provider:                cfg.Provider,
-		ProfileID:               cfg.ProfileID,
-		EndpointID:              cfg.EndpointID,
-		API:                     cfg.API,
-		Model:                   cfg.Model,
-		BaseURL:                 cfg.BaseURL,
-		HTTPClient:              cfg.HTTPClient,
-		Token:                   cfg.Token,
-		TokenEnv:                cfg.TokenEnv,
-		PersistToken:            cfg.PersistToken,
-		AuthType:                cfg.AuthType,
-		HeaderKey:               cfg.HeaderKey,
-		ContextWindowTokens:     cfg.ContextWindowTokens,
-		ReasoningEffort:         cfg.ReasoningEffort,
-		DefaultReasoningEffort:  cfg.DefaultReasoningEffort,
-		ReasoningLevels:         append([]string(nil), cfg.ReasoningLevels...),
-		ReasoningMode:           cfg.ReasoningMode,
-		MaxOutputTok:            cfg.MaxOutputTok,
-		Timeout:                 cfg.Timeout,
-		StreamFirstEventTimeout: cfg.StreamFirstEventTimeout,
-	}
-}
-
-func toGatewayModelConfig(cfg ModelConfig) gatewayapp.ModelConfig {
-	return gatewayapp.ModelConfig{
-		ID:                      cfg.ID,
-		Alias:                   cfg.Alias,
-		Provider:                cfg.Provider,
-		ProfileID:               cfg.ProfileID,
-		EndpointID:              cfg.EndpointID,
-		API:                     cfg.API,
-		Model:                   cfg.Model,
-		BaseURL:                 cfg.BaseURL,
-		HTTPClient:              cfg.HTTPClient,
-		Token:                   cfg.Token,
-		TokenEnv:                cfg.TokenEnv,
-		PersistToken:            cfg.PersistToken,
-		AuthType:                cfg.AuthType,
-		HeaderKey:               cfg.HeaderKey,
-		ContextWindowTokens:     cfg.ContextWindowTokens,
-		ReasoningEffort:         cfg.ReasoningEffort,
-		DefaultReasoningEffort:  cfg.DefaultReasoningEffort,
-		ReasoningLevels:         append([]string(nil), cfg.ReasoningLevels...),
-		ReasoningMode:           cfg.ReasoningMode,
-		MaxOutputTok:            cfg.MaxOutputTok,
-		Timeout:                 cfg.Timeout,
-		StreamFirstEventTimeout: cfg.StreamFirstEventTimeout,
-	}
-}
-
-func toRuntimeModelCapabilitiesWithOK(caps gatewayapp.ModelCapabilityInfo, ok bool) (ModelCapabilityInfo, bool) {
-	return toRuntimeModelCapabilities(caps), ok
-}
-
-func toRuntimeModelCapabilities(caps gatewayapp.ModelCapabilityInfo) ModelCapabilityInfo {
-	return ModelCapabilityInfo{
-		ContextWindowTokens:    caps.ContextWindowTokens,
-		DefaultMaxOutputTokens: caps.DefaultMaxOutputTokens,
-		MaxOutputTokens:        caps.MaxOutputTokens,
-		ReasoningEfforts:       append([]string(nil), caps.ReasoningEfforts...),
-		DefaultReasoningEffort: caps.DefaultReasoningEffort,
-		SupportsReasoning:      caps.SupportsReasoning,
-		SupportsToolCalls:      caps.SupportsToolCalls,
-		SupportsImages:         caps.SupportsImages,
-		SupportsJSON:           caps.SupportsJSON,
-	}
 }
 
 func toRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {

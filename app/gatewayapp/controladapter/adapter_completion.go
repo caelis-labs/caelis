@@ -7,6 +7,8 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/control/modelcatalog"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	"github.com/caelis-labs/caelis/ports/gateway"
@@ -424,8 +426,8 @@ func (d *Adapter) modelAliasSupportsReasoningLevel(alias string, level string) b
 }
 
 func (d *Adapter) configuredModelReasoningLevels(cfg ModelConfig) []string {
-	levels := normalizeReasoningLevels(cfg.ReasoningLevels)
-	for _, level := range normalizeReasoningLevels(reasoningLevelsForModel(stackForAdapter(d), cfg.Provider, cfg.Model)) {
+	levels := modelconfig.NormalizeReasoningLevels(cfg.ReasoningLevels)
+	for _, level := range modelconfig.NormalizeReasoningLevels(modelcatalog.ReasoningLevelsForModel(cfg.Provider, cfg.Model)) {
 		seen := false
 		for _, existing := range levels {
 			if strings.EqualFold(existing, level) {

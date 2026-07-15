@@ -8,9 +8,10 @@ Presentation surfaces -> Control layer -> Agent Runtime / SDK
 
 `agent-sdk/*` is the long-lived reusable package and dependency boundary inside
 the root `github.com/caelis-labs/caelis` Go module. It has no separate module,
-version, release, or test lifecycle. Remaining `ports/*` packages are
-product-host/control contracts, and remaining `internal/*` packages are Caelis
-application glue.
+version, release, or test lifecycle. The durable home for product-control
+contracts and implementations is `control/*`. Remaining `ports/*` packages are
+frozen transitional contracts, and remaining root `internal/*` packages are
+Caelis application glue awaiting bounded migration where appropriate.
 
 ## Layers
 
@@ -65,17 +66,30 @@ Document responsibilities are intentionally separate:
 - `agent-sdk/*`: reusable SDK package tree. It owns runtime, model, tool, session,
   sandbox, task, policy, skill, and display contracts and reusable
   implementations.
-- `ports/controlclient`: transport-neutral product-client commands, outcomes,
-  bootstrap state, and Session-feed subscription contracts.
-- `internal/controlclient`: Control-owned authorization, operation ledger,
-  command dispatch, Session feed/replay, child recorder, approval recovery, and
-  state assembly. `internal/controlclient/turningress` is the one shared
+- `control/modelcatalog`: Control-owned provider/model directory, concrete model
+  capability metadata, provider overlays, and the embedded models.dev snapshot.
+  Known providers use maintained metadata; generic compatible endpoints do not
+  inherit another vendor's model list. Models without explicit Control metadata
+  require custom advanced configuration.
+- `control/modelconfig`: Control-owned provider and endpoint onboarding
+  templates, provider authentication orchestration, authenticated model
+  selection, persisted model/profile configuration semantics, and complete SDK
+  model construction. Presentation adapters map requests into this package;
+  `app/gatewayapp` only persists the resulting configuration and installs the
+  selected model into its runtime transaction.
+- `ports/controlclient`: frozen transitional transport-neutral product-client
+  commands, outcomes, bootstrap state, and Session-feed subscription contracts.
+- `internal/controlclient`: transitional implementation of Control-owned
+  authorization, operation ledger, command dispatch, Session feed/replay,
+  child recorder, approval recovery, and state assembly pending coherent
+  migration under `control/*`.
+  `internal/controlclient/turningress` is the one shared
   Turn/task ingress and does not own task execution.
 - `surfaces/appserver`: thin HTTP JSON/SSE and authentication mapping over
   `ports/controlclient`; `app/controlserver` owns production listener assembly
   and fail-closed network configuration.
-- `ports/controlcommand`, `ports/controlprompt`: transitional command catalog
-  plus prompt request/result parsing contracts.
+- `ports/controlcommand`, `ports/controlprompt`: frozen transitional command
+  catalog plus prompt request/result parsing contracts.
 - `internal/controlpromptrouter`: shared app-control slash orchestration over
   `protocol/acp/control.Service`.
 - `internal/controlassembly`: product Agent assembly and profile resolution.
@@ -84,11 +98,13 @@ Document responsibilities are intentionally separate:
 - `app/gatewayapp`, `internal/kernel`: remaining Control host integration and
   runtime coordination hotspots.
 - `protocol/acp/control.Service` and `app/gatewayapp/controladapter`:
-  transitional in-process ACP/TUI command adapters. New product-client
-  operations belong in `ports/controlclient`, not these aggregate interfaces.
+  transitional in-process ACP/TUI command adapters. Do not add product-client
+  operations to these aggregate interfaces or to `ports/*`; new capabilities
+  belong in coherent `control/*` packages.
 - `ports/gateway`, `ports/plugin`, `ports/controlcommand`,
-  `ports/controlprompt`, and `ports/agentprofile`: product-host contracts that
-  stay outside the SDK.
+  `ports/controlprompt`, and `ports/agentprofile`: frozen transitional
+  product-host contracts that stay outside the SDK and migrate toward
+  `control/*` by bounded slices.
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
   product integration adapters that make external endpoints implement the same
   SDK controller/participant contracts used by built-in Agents.
@@ -102,6 +118,7 @@ the Caelis root module. The package tree remains reusable below the application;
 module extraction, physical repository extraction, and additional adapter
 modules are not current goals. SDK packages must not depend on:
 
+- `control/*`
 - `app/*`
 - `surfaces/*`
 - `protocol/acp/*`
@@ -124,8 +141,9 @@ Current SDK package ownership:
   app-owned.
 - `agent-sdk/approval`: approval review contracts.
 - `agent-sdk/display`: display helpers for runtime and tools.
-- `agent-sdk/model`: model contracts, provider implementations, and catalog
-  data.
+- `agent-sdk/model`: model contracts and reusable provider protocol
+  implementations. It does not own concrete model directories, recommended
+  model lists, provider overlays, or models.dev snapshots.
 - `agent-sdk/policy`: policy presets and permission helpers.
 - `agent-sdk/runtime`: local agent runtime, reusable ACP-compatible endpoint and
   controller contracts, turn mechanics, and low-level control-plane mechanisms.
@@ -140,8 +158,11 @@ Current SDK package ownership:
 The current migration has moved reusable runtime, model, tool, session,
 sandbox, task, policy, skill, and display contracts and implementations into
 `agent-sdk/*`. SDK-owned `ports/*` and global `impl/*` compatibility paths have
-been removed; the remaining `ports/*` packages are product-host contracts, and
-Caelis ACP agent bridge code now lives under `internal/acpagentbridge`.
+been removed; the remaining `ports/*` packages are frozen transitional
+product-host contracts, concrete model catalog data lives under
+`control/modelcatalog`, provider/model configuration and construction live under
+`control/modelconfig`, and Caelis ACP agent bridge code now lives under
+`internal/acpagentbridge`.
 
 Repeatable SDK boundary gates:
 

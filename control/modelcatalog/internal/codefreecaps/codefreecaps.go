@@ -4,11 +4,6 @@ import "strings"
 
 const Provider = "codefree"
 
-const (
-	UnknownContextWindowTokens = 128000
-	UnknownMaxOutputTokens     = 8000
-)
-
 type Model struct {
 	ID                     string
 	ContextWindowTokens    int

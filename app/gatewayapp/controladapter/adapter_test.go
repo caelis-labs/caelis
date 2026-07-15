@@ -24,6 +24,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/testenv"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
@@ -1050,12 +1051,12 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-baseurl:xiaomi) error = %v", err)
 	}
-	if !slashCandidatesHaveValue(xiaomiEndpoints, connectXiaomiAPIBaseURL) {
+	if !slashCandidatesHaveValue(xiaomiEndpoints, modelconfig.XiaomiAPIBaseURL) {
 		t.Fatalf("xiaomi endpoint candidates = %#v, missing api cn", xiaomiEndpoints)
 	}
 	var foundTokenPlan bool
 	for _, item := range xiaomiEndpoints {
-		if strings.EqualFold(strings.TrimSpace(item.Value), connectXiaomiTokenPlanCNBaseURL) &&
+		if strings.EqualFold(strings.TrimSpace(item.Value), modelconfig.XiaomiTokenPlanCNBaseURL) &&
 			strings.Contains(item.Detail, "MIMO_TOKEN_PLAN_API_KEY") {
 			foundTokenPlan = true
 		}
@@ -1101,6 +1102,9 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 		if !strings.Contains(item.Detail, "catalog preset") {
 			t.Fatalf("deepseek connect model candidate = %#v, want catalog preset detail", item)
 		}
+		if strings.Contains(item.Detail, "ctx") {
+			t.Fatalf("deepseek connect model candidate = %#v, should not expose context-window tuning", item)
+		}
 	}
 	openAICompatModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(connectwizard.ConnectWizardState{
 		Provider:       "openai-compatible",
@@ -1110,15 +1114,8 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-model openai-compatible) error = %v", err)
 	}
-	foundOpenAICompatDirectoryModel := false
-	for _, item := range openAICompatModels {
-		if item.Value == "gpt-5.5" && strings.Contains(item.Detail, "model directory") {
-			foundOpenAICompatDirectoryModel = true
-			break
-		}
-	}
-	if !foundOpenAICompatDirectoryModel {
-		t.Fatalf("openai-compatible connect model candidates = %#v, want gpt-5.5 from model directory", openAICompatModels)
+	if len(openAICompatModels) != 0 {
+		t.Fatalf("openai-compatible connect model candidates = %#v, want custom endpoint model input", openAICompatModels)
 	}
 	openAIModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(connectwizard.ConnectWizardState{
 		Provider:       "openai",
@@ -3436,14 +3433,14 @@ func TestAdapterConnectPersistsMultipleProviders(t *testing.T) {
 func TestFindProviderTemplateSupportsOpenAICompatible(t *testing.T) {
 	t.Parallel()
 
-	tpl, ok := findProviderTemplate("openai-compatible")
+	tpl, ok := modelconfig.LookupProvider("openai-compatible")
 	if !ok {
-		t.Fatal("findProviderTemplate(openai-compatible) = false, want true")
+		t.Fatal("LookupProvider(openai-compatible) = false, want true")
 	}
-	if tpl.provider != "openai-compatible" {
-		t.Fatalf("provider = %q, want openai-compatible", tpl.provider)
+	if tpl.Provider != "openai-compatible" {
+		t.Fatalf("provider = %q, want openai-compatible", tpl.Provider)
 	}
-	if tpl.defaultBaseURL == "" {
+	if tpl.DefaultBaseURL == "" {
 		t.Fatal("defaultBaseURL = empty, want non-empty")
 	}
 }
@@ -3451,18 +3448,18 @@ func TestFindProviderTemplateSupportsOpenAICompatible(t *testing.T) {
 func TestFindProviderTemplateSupportsXiaomiTokenPlanCN(t *testing.T) {
 	t.Parallel()
 
-	tpl, ok := findProviderTemplate(connectXiaomiTokenPlanCNAlias)
+	tpl, ok := modelconfig.LookupProvider(modelconfig.XiaomiTokenPlanCNAlias)
 	if !ok {
-		t.Fatalf("findProviderTemplate(%q) = false, want true", connectXiaomiTokenPlanCNAlias)
+		t.Fatalf("LookupProvider(%q) = false, want true", modelconfig.XiaomiTokenPlanCNAlias)
 	}
-	if tpl.provider != "xiaomi" {
-		t.Fatalf("provider = %q, want xiaomi", tpl.provider)
+	if tpl.Provider != "xiaomi" {
+		t.Fatalf("provider = %q, want xiaomi", tpl.Provider)
 	}
-	if tpl.api != providers.APIMimo {
-		t.Fatalf("api = %q, want %q", tpl.api, providers.APIMimo)
+	if tpl.API != providers.APIMimo {
+		t.Fatalf("api = %q, want %q", tpl.API, providers.APIMimo)
 	}
-	if tpl.defaultBaseURL != connectXiaomiTokenPlanCNBaseURL {
-		t.Fatalf("defaultBaseURL = %q, want %q", tpl.defaultBaseURL, connectXiaomiTokenPlanCNBaseURL)
+	if tpl.DefaultBaseURL != modelconfig.XiaomiTokenPlanCNBaseURL {
+		t.Fatalf("defaultBaseURL = %q, want %q", tpl.DefaultBaseURL, modelconfig.XiaomiTokenPlanCNBaseURL)
 	}
 }
 
@@ -3470,8 +3467,8 @@ func TestFindProviderTemplateRejectsMimoProviderAliases(t *testing.T) {
 	t.Parallel()
 
 	for _, provider := range []string{"mimo", "mimo-token-plan-cn"} {
-		if tpl, ok := findProviderTemplate(provider); ok {
-			t.Fatalf("findProviderTemplate(%q) = %#v, want unsupported", provider, tpl)
+		if tpl, ok := modelconfig.LookupProvider(provider); ok {
+			t.Fatalf("LookupProvider(%q) = %#v, want unsupported", provider, tpl)
 		}
 	}
 }
@@ -3479,17 +3476,13 @@ func TestFindProviderTemplateRejectsMimoProviderAliases(t *testing.T) {
 func TestValidateConnectConfigXiaomiTokenPlanCNUsesTokenPlanEnvHint(t *testing.T) {
 	t.Parallel()
 
-	tpl, ok := findProviderTemplate("xiaomi")
-	if !ok {
-		t.Fatal("findProviderTemplate(xiaomi) = false, want true")
-	}
-	err := validateConnectConfig(tpl, ConnectConfig{
+	_, err := modelconfig.AssembleConnect(context.Background(), modelconfig.ConnectRequest{
 		Provider: "xiaomi",
-		Model:    "mimo-v2.5-pro",
-		BaseURL:  connectXiaomiTokenPlanCNBaseURL,
-	})
+		Models:   []modelconfig.ModelSelection{{Name: "mimo-v2.5-pro"}},
+		BaseURL:  modelconfig.XiaomiTokenPlanCNBaseURL,
+	}, modelconfig.ConnectOptions{})
 	if err == nil || !strings.Contains(err.Error(), "env:MIMO_TOKEN_PLAN_API_KEY") {
-		t.Fatalf("validateConnectConfig() error = %v, want MIMO_TOKEN_PLAN_API_KEY hint", err)
+		t.Fatalf("AssembleConnect() error = %v, want MIMO_TOKEN_PLAN_API_KEY hint", err)
 	}
 }
 
@@ -3517,7 +3510,7 @@ func TestAdapterConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "xiaomi",
 		Model:    "mimo-v2.5-pro",
-		BaseURL:  connectXiaomiTokenPlanCNBaseURL,
+		BaseURL:  modelconfig.XiaomiTokenPlanCNBaseURL,
 		APIKey:   "env:MIMO_TOKEN_PLAN_API_KEY",
 	}); err != nil {
 		t.Fatalf("Connect() error = %v", err)
@@ -3559,8 +3552,8 @@ func TestAdapterConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
 	if profile.Provider != "xiaomi" {
 		t.Fatalf("profile provider = %q, want xiaomi", profile.Provider)
 	}
-	if profile.BaseURL != connectXiaomiTokenPlanCNBaseURL {
-		t.Fatalf("profile base_url = %q, want %q", profile.BaseURL, connectXiaomiTokenPlanCNBaseURL)
+	if profile.BaseURL != modelconfig.XiaomiTokenPlanCNBaseURL {
+		t.Fatalf("profile base_url = %q, want %q", profile.BaseURL, modelconfig.XiaomiTokenPlanCNBaseURL)
 	}
 	if profile.TokenEnv != "MIMO_TOKEN_PLAN_API_KEY" {
 		t.Fatalf("profile token_env = %q, want MIMO_TOKEN_PLAN_API_KEY", profile.TokenEnv)
@@ -3589,8 +3582,8 @@ func TestAdapterConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.T) {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
 	for _, cfg := range []ConnectConfig{
-		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: connectXiaomiAPIBaseURL, APIKey: "env:XIAOMI_API_KEY"},
-		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: connectXiaomiTokenPlanCNBaseURL, APIKey: "env:MIMO_TOKEN_PLAN_API_KEY"},
+		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: modelconfig.XiaomiAPIBaseURL, APIKey: "env:XIAOMI_API_KEY"},
+		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: modelconfig.XiaomiTokenPlanCNBaseURL, APIKey: "env:MIMO_TOKEN_PLAN_API_KEY"},
 	} {
 		if _, err := driver.Connect(ctx, cfg); err != nil {
 			t.Fatalf("Connect(%s) error = %v", cfg.BaseURL, err)
@@ -3671,7 +3664,7 @@ func TestAdapterConnectReusesExistingEndpointAuth(t *testing.T) {
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "xiaomi",
 		Model:    "mimo-v2.5-pro",
-		BaseURL:  connectXiaomiAPIBaseURL,
+		BaseURL:  modelconfig.XiaomiAPIBaseURL,
 		APIKey:   "env:XIAOMI_API_KEY",
 	}); err != nil {
 		t.Fatalf("Connect(first model) error = %v", err)
@@ -3682,7 +3675,7 @@ func TestAdapterConnectReusesExistingEndpointAuth(t *testing.T) {
 	}
 	var foundReusable bool
 	for _, endpoint := range endpoints {
-		if endpoint.Value == connectXiaomiAPIBaseURL && endpoint.NoAuth && strings.Contains(endpoint.Detail, "configured auth") {
+		if endpoint.Value == modelconfig.XiaomiAPIBaseURL && endpoint.NoAuth && strings.Contains(endpoint.Detail, "configured auth") {
 			foundReusable = true
 			break
 		}
@@ -3693,7 +3686,7 @@ func TestAdapterConnectReusesExistingEndpointAuth(t *testing.T) {
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "xiaomi",
 		Model:    "mimo-v2-pro",
-		BaseURL:  connectXiaomiAPIBaseURL,
+		BaseURL:  modelconfig.XiaomiAPIBaseURL,
 	}); err != nil {
 		t.Fatalf("Connect(second model without key) error = %v", err)
 	}
@@ -3712,19 +3705,15 @@ func TestAdapterConnectReusesExistingEndpointAuth(t *testing.T) {
 func TestConnectDefaultsForConfigOpenAICompatibleCustomBaseURL(t *testing.T) {
 	t.Parallel()
 
-	defaults, err := connectDefaultsForConfig(context.Background(), ConnectConfig{
-		Provider: "openai-compatible",
-		Model:    "gpt-4o-mini",
-		BaseURL:  "https://proxy.example.test/v1",
-	})
+	defaults, err := modelconfig.ResolveModelDefaults("openai-compatible", "gpt-4o-mini")
 	if err != nil {
-		t.Fatalf("connectDefaultsForConfig() error = %v", err)
+		t.Fatalf("ResolveModelDefaults() error = %v", err)
 	}
-	if defaults.ContextWindow <= 0 {
-		t.Fatalf("ContextWindow = %d, want > 0", defaults.ContextWindow)
+	if defaults.ContextWindowTokens <= 0 {
+		t.Fatalf("ContextWindowTokens = %d, want > 0", defaults.ContextWindowTokens)
 	}
-	if defaults.MaxOutput <= 0 {
-		t.Fatalf("MaxOutput = %d, want > 0", defaults.MaxOutput)
+	if defaults.MaxOutputTokens <= 0 {
+		t.Fatalf("MaxOutputTokens = %d, want > 0", defaults.MaxOutputTokens)
 	}
 }
 
@@ -4274,7 +4263,64 @@ func TestAdapterConnectModelCandidatesIncludeConfiguredProviderModels(t *testing
 		}
 	}
 	if !found {
-		t.Fatalf("connect model candidates = %#v, want configured minimax model", models)
+		t.Fatalf("connect model candidates = %#v, want maintained minimax model", models)
+	}
+	const privateCatalogPrefixModel = "MiniMax-M2.7-highspeed-private"
+	if _, err := driver.Connect(ctx, ConnectConfig{
+		Provider: "minimax",
+		Model:    privateCatalogPrefixModel,
+		APIKey:   "secret",
+	}); err != nil {
+		t.Fatalf("Connect(private catalog-prefix model) error = %v", err)
+	}
+	models, err = driver.CompleteSlashArg(ctx, connectModelCompletionCommand(connectwizard.ConnectWizardState{
+		Provider:       "minimax",
+		BaseURL:        "https://api.minimaxi.com/anthropic",
+		TimeoutSeconds: connectwizard.DefaultConnectTimeoutSeconds,
+		TokenRef:       "secret",
+	}), privateCatalogPrefixModel, 20)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(connect-model private catalog-prefix model) error = %v", err)
+	}
+	if slashCandidatesHaveValue(models, privateCatalogPrefixModel) {
+		t.Fatalf("connect model candidates = %#v, configured private model must not inherit catalog metadata by prefix", models)
+	}
+
+	const customCompatibleModel = "acme-reasoning-model"
+	if _, err := driver.Connect(ctx, ConnectConfig{
+		Provider:            "openai-compatible",
+		Model:               customCompatibleModel,
+		BaseURL:             "https://models.acme.example/v1",
+		APIKey:              "secret",
+		ContextWindowTokens: 262144,
+		MaxOutputTokens:     32768,
+		ReasoningEffort:     "medium",
+		ReasoningLevels:     []string{"low", "medium", "high"},
+	}); err != nil {
+		t.Fatalf("Connect(openai-compatible) error = %v", err)
+	}
+	configured := stack.ListProviderModels("openai-compatible")
+	configuredFound := false
+	for _, modelName := range configured {
+		if modelName == customCompatibleModel {
+			configuredFound = true
+			break
+		}
+	}
+	if !configuredFound {
+		t.Fatalf("ListProviderModels(openai-compatible) = %#v, want configured custom model", configured)
+	}
+	models, err = driver.CompleteSlashArg(ctx, connectModelCompletionCommand(connectwizard.ConnectWizardState{
+		Provider:       "openai-compatible",
+		BaseURL:        "https://models.acme.example/v1",
+		TimeoutSeconds: connectwizard.DefaultConnectTimeoutSeconds,
+		TokenRef:       "secret",
+	}), customCompatibleModel, 20)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(connect-model openai-compatible) error = %v", err)
+	}
+	if slashCandidatesHaveValue(models, customCompatibleModel) {
+		t.Fatalf("connect model candidates = %#v, configured generic-compatible model must remain custom", models)
 	}
 }
 

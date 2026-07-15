@@ -225,10 +225,11 @@ type CompletionCandidate struct {
 }
 
 type SlashArgCandidate struct {
-	Value   string
-	Display string
-	Detail  string
-	NoAuth  bool
+	Value                 string
+	Display               string
+	Detail                string
+	NoAuth                bool
+	ModelMetadataComplete bool
 }
 
 // SlashCommandResultKind identifies the domain payload produced by a slash

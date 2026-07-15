@@ -3,10 +3,7 @@ package gatewayapp
 import (
 	"context"
 	"strings"
-	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/catalog"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
@@ -32,24 +29,6 @@ type StatusService struct {
 
 type ACPSurfaceService = gatewayACPSurface
 
-type ModelCapabilityInfo struct {
-	ContextWindowTokens    int
-	DefaultMaxOutputTokens int
-	MaxOutputTokens        int
-	ReasoningEfforts       []string
-	DefaultReasoningEffort string
-	SupportsReasoning      bool
-	SupportsToolCalls      bool
-	SupportsImages         bool
-	SupportsJSON           bool
-}
-
-type CodeFreeAuthRequest struct {
-	BaseURL         string
-	OpenBrowser     bool
-	CallbackTimeout time.Duration
-}
-
 func (s *Stack) Models() ModelService {
 	return ModelService{stack: s}
 }
@@ -72,6 +51,11 @@ func (s *Stack) ACPSurface(modes acp.ModeProvider, useFallbackModes bool, config
 
 func (s ModelService) Connect(cfg ModelConfig) (string, error) {
 	return s.stack.Connect(cfg)
+}
+
+// ConnectModels atomically adds one or more models sharing a provider profile.
+func (s ModelService) ConnectModels(configs []ModelConfig) ([]string, error) {
+	return s.stack.ConnectModels(configs)
 }
 
 func (s ModelService) Use(ctx context.Context, ref session.SessionRef, alias string, reasoningEffort ...string) error {
@@ -108,45 +92,6 @@ func (s ModelService) HasAlias(alias string) bool {
 
 func (s ModelService) ListProviderModels(provider string) []string {
 	return s.stack.ListProviderModels(provider)
-}
-
-func (s ModelService) ListCatalogModels(provider string) []string {
-	return modelcatalog.ListCatalogModels(provider)
-}
-
-func (s ModelService) ListModelDirectoryModels(provider string) []string {
-	return modelcatalog.ListModelDirectoryModels(provider)
-}
-
-func (s ModelService) LookupCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
-	caps, ok := modelcatalog.LookupModelCapabilities(provider, modelName)
-	return toModelCapabilityInfo(caps), ok
-}
-
-func (s ModelService) DefaultCapabilities() ModelCapabilityInfo {
-	return toModelCapabilityInfo(modelcatalog.DefaultModelCapabilities())
-}
-
-func (s ModelService) ReasoningLevels(provider string, modelName string) []string {
-	return modelcatalog.ReasoningLevelsForModel(provider, modelName)
-}
-
-func (s ModelService) EnsureCodeFreeAuth(ctx context.Context, req CodeFreeAuthRequest) error {
-	_, err := providers.CodeFreeEnsureAuth(ctx, providers.CodeFreeEnsureAuthOptions{
-		BaseURL:         req.BaseURL,
-		OpenBrowser:     req.OpenBrowser,
-		CallbackTimeout: req.CallbackTimeout,
-	})
-	return err
-}
-
-func (s ModelService) EnsureCodeFreeModelSelectionAuth(ctx context.Context, req CodeFreeAuthRequest) error {
-	_, err := providers.CodeFreeEnsureModelSelectionAuth(ctx, providers.CodeFreeEnsureAuthOptions{
-		BaseURL:         req.BaseURL,
-		OpenBrowser:     req.OpenBrowser,
-		CallbackTimeout: req.CallbackTimeout,
-	})
-	return err
 }
 
 func (s ModelService) UsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string) (compact.UsageSnapshot, error) {
@@ -268,18 +213,4 @@ func (s StatusService) SetSessionMode(ctx context.Context, ref session.SessionRe
 
 func (s StatusService) CycleSessionMode(ctx context.Context, ref session.SessionRef) (string, error) {
 	return s.stack.CycleSessionMode(ctx, ref)
-}
-
-func toModelCapabilityInfo(caps modelcatalog.ModelCapabilities) ModelCapabilityInfo {
-	return ModelCapabilityInfo{
-		ContextWindowTokens:    caps.ContextWindowTokens,
-		DefaultMaxOutputTokens: caps.DefaultMaxOutputTokens,
-		MaxOutputTokens:        caps.MaxOutputTokens,
-		ReasoningEfforts:       append([]string(nil), caps.ReasoningEfforts...),
-		DefaultReasoningEffort: caps.DefaultReasoningEffort,
-		SupportsReasoning:      caps.SupportsReasoning,
-		SupportsToolCalls:      caps.SupportsToolCalls,
-		SupportsImages:         caps.SupportsImages,
-		SupportsJSON:           caps.SupportsJSONOutput,
-	}
 }

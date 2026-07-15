@@ -1,46 +1,16 @@
 package tuiapp
 
 import (
-	"net/url"
 	"runtime"
 	"strconv"
 	"strings"
 
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
 )
 
 // defaults.go provides DefaultCommands and DefaultWizards for the TUI shell.
-
-var connectWizardEndpointProviders = map[string]struct{}{
-	"volcengine": {},
-	"xiaomi":     {},
-}
-
-var connectWizardBaseURLProviders = map[string]struct{}{
-	"openai-compatible":    {},
-	"anthropic-compatible": {},
-}
-
-var connectWizardTokenEnvByProvider = map[string]string{
-	"minimax":              "MINIMAX_API_KEY",
-	"openai":               "OPENAI_API_KEY",
-	"openai-compatible":    "OPENAI_COMPATIBLE_API_KEY",
-	"openrouter":           "OPENROUTER_API_KEY",
-	"gemini":               "GEMINI_API_KEY",
-	"anthropic":            "ANTHROPIC_API_KEY",
-	"anthropic-compatible": "ANTHROPIC_COMPATIBLE_API_KEY",
-	"deepseek":             "DEEPSEEK_API_KEY",
-	"xiaomi":               "XIAOMI_API_KEY",
-	"volcengine":           "VOLCENGINE_API_KEY",
-}
-
-var connectWizardTokenEnvByEndpoint = map[string]string{
-	"xiaomi|https://api.xiaomimimo.com/v1":                       "XIAOMI_API_KEY",
-	"xiaomi|https://token-plan-cn.xiaomimimo.com/v1":             "MIMO_TOKEN_PLAN_API_KEY",
-	"volcengine|https://ark.cn-beijing.volces.com/api/v3":        "VOLCENGINE_API_KEY",
-	"volcengine|https://ark.cn-beijing.volces.com/api/coding/v3": "VOLCENGINE_API_KEY",
-}
 
 func lookupSlashCommandSpec(name string) (controlcommands.CommandSpec, bool) {
 	return controlcommands.Lookup(name)
@@ -256,9 +226,15 @@ func connectWizard() WizardDef {
 				},
 			},
 			{
-				Key:          "model",
-				HintLabel:    "/connect model",
-				FreeformHint: "/connect model: choose a suggested model or type a custom model name and press enter",
+				Key:       "model",
+				HintLabel: "/connect model · tab adds · enter confirms",
+				FreeformHintFunc: func(state map[string]string) string {
+					if selected := connectWizardSelectedModelCount(state); selected > 0 {
+						return "/connect model: press enter to confirm the selected models"
+					}
+					return "/connect model: choose a suggested model or type one custom model name and press enter"
+				},
+				MultiSelect: true,
 				CompletionCommand: func(state map[string]string) string {
 					return "connect-model:" + buildConnectWizardPayload(state)
 				},
@@ -324,7 +300,7 @@ func connectWizard() WizardDef {
 				}
 			}
 			if stepKey == "model" {
-				if candidate != nil && strings.TrimSpace(candidate.Value) != "" && !strings.EqualFold(strings.TrimSpace(candidate.Value), "__custom_model__") {
+				if candidate != nil && candidate.ModelMetadataComplete {
 					state["_known_model"] = "true"
 				} else {
 					delete(state, "_known_model")
@@ -339,6 +315,9 @@ func connectWizard() WizardDef {
 			reasoningLevels := strings.TrimSpace(state["reasoning_levels"])
 			if reasoningLevels == "" {
 				reasoningLevels = "-"
+				if state["_known_model"] == "true" {
+					reasoningLevels = "auto"
+				}
 			}
 			parts := []string{
 				"/connect",
@@ -356,54 +335,41 @@ func connectWizard() WizardDef {
 	}
 }
 
+func connectWizardSelectedModelCount(state map[string]string) int {
+	if state == nil {
+		return 0
+	}
+	count := 0
+	seen := map[string]struct{}{}
+	for _, value := range strings.Split(state["model"], ",") {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		count++
+	}
+	return count
+}
+
 func connectWizardTokenEnvHint(state map[string]string) string {
-	provider := strings.ToLower(strings.TrimSpace(state["provider"]))
-	baseURL := strings.ToLower(strings.TrimRight(strings.TrimSpace(state["baseurl"]), "/"))
-	if env := connectWizardTokenEnvByEndpoint[provider+"|"+baseURL]; env != "" {
-		return env
-	}
-	if env := connectWizardTokenEnvForKnownEndpoint(provider, baseURL); env != "" {
-		return env
-	}
-	if env := connectWizardTokenEnvByProvider[provider]; env != "" {
+	if env := modelconfig.DefaultTokenEnv(state["provider"], state["baseurl"]); env != "" {
 		return env
 	}
 	return "YOUR_API_KEY"
 }
 
-func connectWizardTokenEnvForKnownEndpoint(provider string, baseURL string) string {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	host := ""
-	if parsed, err := url.Parse(strings.TrimSpace(baseURL)); err == nil {
-		host = strings.ToLower(strings.TrimSpace(parsed.Host))
-	}
-	if host == "" {
-		host = strings.ToLower(strings.TrimSpace(strings.Split(strings.TrimPrefix(baseURL, "//"), "/")[0]))
-	}
-	switch provider {
-	case "xiaomi":
-		switch host {
-		case "api.xiaomimimo.com":
-			return "XIAOMI_API_KEY"
-		case "token-plan-cn.xiaomimimo.com":
-			return "MIMO_TOKEN_PLAN_API_KEY"
-		}
-	case "volcengine":
-		if host == "ark.cn-beijing.volces.com" {
-			return "VOLCENGINE_API_KEY"
-		}
-	}
-	return ""
-}
-
 func connectWizardProviderHasEndpointStep(provider string) bool {
-	_, ok := connectWizardEndpointProviders[strings.ToLower(strings.TrimSpace(provider))]
-	return ok
+	template, ok := modelconfig.LookupProvider(provider)
+	return ok && len(template.Endpoints) > 0
 }
 
 func connectWizardProviderHasBaseURLStep(provider string) bool {
-	_, ok := connectWizardBaseURLProviders[strings.ToLower(strings.TrimSpace(provider))]
-	return ok
+	template, ok := modelconfig.LookupProvider(provider)
+	return ok && template.PromptForBaseURL
 }
 
 func buildConnectWizardPayload(state map[string]string) string {

@@ -144,6 +144,7 @@ func (m *Model) updateSlashArgCandidates() {
 		return
 	}
 	filtered := filterSlashArgCandidates(query, candidates)
+	filtered = m.filterWizardMultiSelectCandidates(filtered)
 	if len(filtered) == 0 {
 		m.slashArgCandidates = nil
 		m.slashArgQuery = query
@@ -209,6 +210,9 @@ func (m *Model) applySlashArgCompletion() tea.Cmd {
 		return nil
 	}
 	if m.isWizardActive() {
+		if m.addWizardMultiSelectCandidate(selected) {
+			return nil
+		}
 		// During a wizard, fill only the step-local query.
 		m.setInputText(choice)
 		m.syncTextareaFromInput()

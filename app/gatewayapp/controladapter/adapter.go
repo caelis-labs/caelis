@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/ports/gateway"
@@ -617,106 +615,6 @@ func (d *Adapter) HandoffAgent(ctx context.Context, target string) (AgentStatusS
 	return d.AgentStatus(ctx)
 }
 
-func validateConnectConfig(tpl providerTemplate, cfg ConnectConfig) error {
-	if strings.TrimSpace(cfg.Model) == "" {
-		return fmt.Errorf("model is required; use /connect and choose or type a model name")
-	}
-	if baseURL := strings.TrimSpace(cfg.BaseURL); baseURL != "" {
-		parsed, err := url.Parse(baseURL)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-			return fmt.Errorf("base URL is invalid; use a full URL such as %s", tpl.defaultBaseURL)
-		}
-	}
-	if tpl.noAuthRequired {
-		return nil
-	}
-	if strings.TrimSpace(cfg.APIKey) != "" || strings.TrimSpace(cfg.TokenEnv) != "" {
-		return nil
-	}
-	envHint := defaultTokenEnvNameForConnect(tpl.provider, cfg.BaseURL)
-	if envHint == "" {
-		envHint = "YOUR_API_KEY"
-	}
-	return fmt.Errorf("API key is missing; paste a key or enter env:%s in /connect", envHint)
-}
-
-func parseTokenEnvSpec(value string) (string, bool) {
-	trimmed := strings.TrimSpace(value)
-	switch {
-	case strings.HasPrefix(strings.ToLower(trimmed), "env:"):
-		env := strings.TrimSpace(trimmed[len("env:"):])
-		return env, env != ""
-	case strings.HasPrefix(trimmed, "$"):
-		env := strings.TrimSpace(strings.TrimPrefix(trimmed, "$"))
-		return env, env != ""
-	default:
-		return "", false
-	}
-}
-
-func defaultTokenEnvName(provider string) string {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "minimax":
-		return "MINIMAX_API_KEY"
-	case "openai":
-		return "OPENAI_API_KEY"
-	case "openai-compatible":
-		return "OPENAI_COMPATIBLE_API_KEY"
-	case "openrouter":
-		return "OPENROUTER_API_KEY"
-	case "gemini":
-		return "GEMINI_API_KEY"
-	case "anthropic":
-		return "ANTHROPIC_API_KEY"
-	case "anthropic-compatible":
-		return "ANTHROPIC_COMPATIBLE_API_KEY"
-	case "deepseek":
-		return "DEEPSEEK_API_KEY"
-	case connectXiaomiTokenPlanCNAlias:
-		return "MIMO_TOKEN_PLAN_API_KEY"
-	case "xiaomi":
-		return "XIAOMI_API_KEY"
-	case "volcengine":
-		return "VOLCENGINE_API_KEY"
-	default:
-		return ""
-	}
-}
-
-func defaultTokenEnvNameForConnect(provider string, baseURL string) string {
-	if isXiaomiTokenPlanProvider(provider) || isXiaomiTokenPlanBaseURL(baseURL) {
-		return "MIMO_TOKEN_PLAN_API_KEY"
-	}
-	return defaultTokenEnvName(provider)
-}
-
-func defaultConnectAuthType(provider string) model.AuthType {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "minimax":
-		return model.AuthBearerToken
-	default:
-		return model.AuthAPIKey
-	}
-}
-
-func isXiaomiTokenPlanProvider(provider string) bool {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case connectXiaomiTokenPlanCNAlias:
-		return true
-	default:
-		return false
-	}
-}
-
-func isXiaomiTokenPlanBaseURL(baseURL string) bool {
-	switch normalizedConnectBaseURL(baseURL) {
-	case normalizedConnectBaseURL(connectXiaomiTokenPlanCNBaseURL):
-		return true
-	default:
-		return false
-	}
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
@@ -808,19 +706,4 @@ func (d *Adapter) refreshSessionDisplay(ctx context.Context, activeSession sessi
 	d.sessionMode = sessionMode
 	d.sandboxType = sandboxType
 	d.mu.Unlock()
-}
-
-func authTypeFromString(s string) model.AuthType {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "api_key", "apikey":
-		return model.AuthAPIKey
-	case "bearer_token", "bearer":
-		return model.AuthBearerToken
-	case "oauth_token", "oauth":
-		return model.AuthOAuthToken
-	case "none":
-		return model.AuthNone
-	default:
-		return model.AuthAPIKey
-	}
 }

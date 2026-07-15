@@ -158,14 +158,6 @@ func LookupOverlayModelCapabilities(provider, modelName string) (ModelCapabiliti
 	return lookupOverlayModelCapabilities(provider, modelName)
 }
 
-// ProviderUsesModelDirectory reports whether connect-style model discovery for
-// a provider should use models.dev directory data instead of curated catalog
-// recommendations.
-func ProviderUsesModelDirectory(provider string) bool {
-	_, ok := modelDirectoryProviders[strings.ToLower(strings.TrimSpace(provider))]
-	return ok
-}
-
 // ListRecommendedModels returns the curated model recommendations for a
 // provider. It includes local overrides, built-in catalog entries, and provider
 // overlays, but intentionally does not enumerate the models.dev directory.
@@ -198,8 +190,8 @@ func ListCatalogModels(provider string) []string {
 }
 
 // ListModelDirectoryModels returns models.dev directory entries for a provider.
-// Directory provider aliases are explicit so compatible providers can opt into
-// their upstream model namespace without broad substring matching.
+// Directory provider aliases are explicit so known routed providers can opt
+// into an upstream namespace without broad substring matching.
 func ListModelDirectoryModels(provider string) []string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
@@ -291,14 +283,6 @@ func modelDirectoryProviderMatches(queryProvider, keyProvider string) bool {
 }
 
 var modelDirectoryProviderAliases = map[string][]string{
-	"openai-compatible":    {"openai"},
-	"anthropic-compatible": {"anthropic"},
-	"openrouter":           {"openrouter"},
-	"gemini":               {"google"},
-}
-
-var modelDirectoryProviders = map[string]struct{}{
-	"openai-compatible":    {},
-	"anthropic-compatible": {},
-	"openrouter":           {},
+	"openrouter": {"openrouter"},
+	"gemini":     {"google"},
 }

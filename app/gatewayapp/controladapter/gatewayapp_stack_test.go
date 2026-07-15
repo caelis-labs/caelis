@@ -15,9 +15,6 @@ func newAdapterFromGatewayAppStack(ctx context.Context, stack *gatewayapp.Stack,
 
 func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
 	return NewRuntimeStackFromGatewayApp(stack, RuntimeStackGatewayAppAdapters{
-		ModelConfig:          testRuntimeModelConfig,
-		GatewayModelConfig:   testGatewayModelConfig,
-		ModelCapabilities:    testRuntimeModelCapabilities,
 		SandboxStatus:        testRuntimeSandboxStatus,
 		SessionRuntimeState:  testRuntimeSessionRuntimeState,
 		ModelChoices:         testRuntimeModelChoices,
@@ -155,33 +152,6 @@ func testRuntimeAgentProfileMetadataBool(metadata map[string]any, key string) bo
 	}
 }
 
-func testRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {
-	return ModelConfig{
-		ID:                      cfg.ID,
-		Alias:                   cfg.Alias,
-		Provider:                cfg.Provider,
-		ProfileID:               cfg.ProfileID,
-		EndpointID:              cfg.EndpointID,
-		API:                     cfg.API,
-		Model:                   cfg.Model,
-		BaseURL:                 cfg.BaseURL,
-		HTTPClient:              cfg.HTTPClient,
-		Token:                   cfg.Token,
-		TokenEnv:                cfg.TokenEnv,
-		PersistToken:            cfg.PersistToken,
-		AuthType:                cfg.AuthType,
-		HeaderKey:               cfg.HeaderKey,
-		ContextWindowTokens:     cfg.ContextWindowTokens,
-		ReasoningEffort:         cfg.ReasoningEffort,
-		DefaultReasoningEffort:  cfg.DefaultReasoningEffort,
-		ReasoningLevels:         append([]string(nil), cfg.ReasoningLevels...),
-		ReasoningMode:           cfg.ReasoningMode,
-		MaxOutputTok:            cfg.MaxOutputTok,
-		Timeout:                 cfg.Timeout,
-		StreamFirstEventTimeout: cfg.StreamFirstEventTimeout,
-	}
-}
-
 func testGatewayAgentProfileBinding(cfg AgentProfileBindingConfig) gatewayapp.AgentProfileBindingConfig {
 	return gatewayapp.AgentProfileBindingConfig{
 		ProfileID:       cfg.ProfileID,
@@ -267,47 +237,6 @@ func testRuntimeMarketplaceSnapshotWithError(info gatewayapp.MarketplaceInfo, er
 		return MarketplaceSnapshot{}, err
 	}
 	return testRuntimeMarketplaceSnapshot(info), nil
-}
-
-func testGatewayModelConfig(cfg ModelConfig) gatewayapp.ModelConfig {
-	return gatewayapp.ModelConfig{
-		ID:                      cfg.ID,
-		Alias:                   cfg.Alias,
-		Provider:                cfg.Provider,
-		ProfileID:               cfg.ProfileID,
-		EndpointID:              cfg.EndpointID,
-		API:                     cfg.API,
-		Model:                   cfg.Model,
-		BaseURL:                 cfg.BaseURL,
-		HTTPClient:              cfg.HTTPClient,
-		Token:                   cfg.Token,
-		TokenEnv:                cfg.TokenEnv,
-		PersistToken:            cfg.PersistToken,
-		AuthType:                cfg.AuthType,
-		HeaderKey:               cfg.HeaderKey,
-		ContextWindowTokens:     cfg.ContextWindowTokens,
-		ReasoningEffort:         cfg.ReasoningEffort,
-		DefaultReasoningEffort:  cfg.DefaultReasoningEffort,
-		ReasoningLevels:         append([]string(nil), cfg.ReasoningLevels...),
-		ReasoningMode:           cfg.ReasoningMode,
-		MaxOutputTok:            cfg.MaxOutputTok,
-		Timeout:                 cfg.Timeout,
-		StreamFirstEventTimeout: cfg.StreamFirstEventTimeout,
-	}
-}
-
-func testRuntimeModelCapabilities(caps gatewayapp.ModelCapabilityInfo) ModelCapabilityInfo {
-	return ModelCapabilityInfo{
-		ContextWindowTokens:    caps.ContextWindowTokens,
-		DefaultMaxOutputTokens: caps.DefaultMaxOutputTokens,
-		MaxOutputTokens:        caps.MaxOutputTokens,
-		ReasoningEfforts:       append([]string(nil), caps.ReasoningEfforts...),
-		DefaultReasoningEffort: caps.DefaultReasoningEffort,
-		SupportsReasoning:      caps.SupportsReasoning,
-		SupportsToolCalls:      caps.SupportsToolCalls,
-		SupportsImages:         caps.SupportsImages,
-		SupportsJSON:           caps.SupportsJSON,
-	}
 }
 
 func testRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {

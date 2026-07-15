@@ -1,4 +1,6 @@
-package modelregistry
+// Package modelconfig owns Caelis provider profiles, configured model records,
+// onboarding templates, and construction of SDK model implementations.
+package modelconfig
 
 import (
 	"crypto/sha256"
@@ -9,8 +11,10 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/control/modelcatalog"
 )
 
+// Config is the complete Control-owned configuration for one selectable model.
 type Config struct {
 	ID         string            `json:"id,omitempty"`
 	Alias      string            `json:"alias,omitempty"`
@@ -37,6 +41,7 @@ type Config struct {
 	StreamFirstEventTimeout time.Duration      `json:"stream_first_event_timeout,omitempty"`
 }
 
+// ProfileConfig stores endpoint and credential data shared by configured models.
 type ProfileConfig struct {
 	ID                      string             `json:"id,omitempty"`
 	Provider                string             `json:"provider,omitempty"`
@@ -53,6 +58,7 @@ type ProfileConfig struct {
 	StreamFirstEventTimeout time.Duration      `json:"stream_first_event_timeout,omitempty"`
 }
 
+// Choice is the presentation-neutral identity of one configured model.
 type Choice struct {
 	ID         string
 	Alias      string
@@ -64,13 +70,12 @@ type Choice struct {
 	Detail     string
 }
 
+// NormalizeConfig canonicalizes identifiers, endpoint defaults, credentials,
+// and model limits.
 func NormalizeConfig(cfg Config) Config {
 	cfg.ID = strings.ToLower(strings.TrimSpace(cfg.ID))
 	cfg.Provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
 	cfg.Model = strings.TrimSpace(cfg.Model)
-	if cfg.Provider == "minimax" && cfg.API == providers.APIAnthropicCompatible {
-		cfg.API = providers.APIMiniMax
-	}
 	cfg.EndpointID = NormalizeEndpointID(cfg.Provider, cfg.EndpointID, cfg.BaseURL, cfg.API)
 	cfg.ProfileID = strings.ToLower(strings.TrimSpace(cfg.ProfileID))
 	if cfg.ProfileID == "" {
@@ -92,6 +97,9 @@ func NormalizeConfig(cfg Config) Config {
 	if cfg.DefaultReasoningEffort == "" && cfg.ReasoningEffort != "" {
 		cfg.DefaultReasoningEffort = cfg.ReasoningEffort
 	}
+	if cfg.ReasoningMode == "" && cfg.Provider != "" && cfg.Model != "" {
+		cfg.ReasoningMode = modelcatalog.ReasoningModeForModel(cfg.Provider, cfg.Model)
+	}
 	if cfg.MaxOutputTok <= 0 {
 		cfg.MaxOutputTok = 4096
 	}
@@ -105,12 +113,10 @@ func NormalizeConfig(cfg Config) Config {
 	return cfg
 }
 
+// NormalizeProfileConfig canonicalizes one shared provider profile.
 func NormalizeProfileConfig(profile ProfileConfig) ProfileConfig {
 	profile.ID = strings.ToLower(strings.TrimSpace(profile.ID))
 	profile.Provider = strings.ToLower(strings.TrimSpace(profile.Provider))
-	if profile.Provider == "minimax" && profile.API == providers.APIAnthropicCompatible {
-		profile.API = providers.APIMiniMax
-	}
 	profile.EndpointID = NormalizeEndpointID(profile.Provider, profile.EndpointID, profile.BaseURL, profile.API)
 	if profile.ID == "" {
 		profile.ID = BuildProfileID(profile.Provider, profile.EndpointID, profile.BaseURL)
@@ -127,6 +133,7 @@ func NormalizeProfileConfig(profile ProfileConfig) ProfileConfig {
 	return profile
 }
 
+// ProfileFromConfig extracts shared endpoint and authentication fields.
 func ProfileFromConfig(cfg Config) ProfileConfig {
 	cfg = NormalizeConfig(cfg)
 	return NormalizeProfileConfig(ProfileConfig{
@@ -146,6 +153,7 @@ func ProfileFromConfig(cfg Config) ProfileConfig {
 	})
 }
 
+// ConfigCarriesProfileFields reports whether cfg contains any profile-owned data.
 func ConfigCarriesProfileFields(cfg Config) bool {
 	return strings.TrimSpace(cfg.Provider) != "" ||
 		strings.TrimSpace(cfg.EndpointID) != "" ||
@@ -160,6 +168,7 @@ func ConfigCarriesProfileFields(cfg Config) bool {
 		cfg.StreamFirstEventTimeout > 0
 }
 
+// ConfigCarriesProfileAuth reports whether cfg can update stored credentials.
 func ConfigCarriesProfileAuth(cfg Config) bool {
 	return strings.TrimSpace(cfg.Token) != "" ||
 		strings.TrimSpace(cfg.TokenEnv) != "" ||
@@ -168,6 +177,7 @@ func ConfigCarriesProfileAuth(cfg Config) bool {
 		cfg.HTTPClient != nil
 }
 
+// MergeConfigProfile hydrates a model record from its provider profile.
 func MergeConfigProfile(cfg Config, profile ProfileConfig) Config {
 	cfg = NormalizeConfig(cfg)
 	profile = NormalizeProfileConfig(profile)
@@ -191,6 +201,7 @@ func MergeConfigProfile(cfg Config, profile ProfileConfig) Config {
 	return NormalizeConfig(cfg)
 }
 
+// SupportsReasoningEffort reports whether cfg accepts an effort value.
 func SupportsReasoningEffort(cfg Config, effort string) bool {
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	if effort == "" {
@@ -214,41 +225,20 @@ func SupportsReasoningEffort(cfg Config, effort string) bool {
 	}
 }
 
+// DefaultAPIForProvider returns the maintained protocol dialect for a provider.
 func DefaultAPIForProvider(provider string) providers.APIType {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "openai":
-		return providers.APIOpenAI
-	case "openai-compatible":
-		return providers.APIOpenAICompatible
-	case "openrouter":
-		return providers.APIOpenRouter
-	case "codefree":
-		return providers.APICodeFree
-	case "gemini":
-		return providers.APIGemini
-	case "anthropic":
-		return providers.APIAnthropic
-	case "anthropic-compatible":
-		return providers.APIAnthropicCompatible
-	case "minimax":
-		return providers.APIMiniMax
-	case "deepseek":
-		return providers.APIDeepSeek
-	case "xiaomi":
-		return providers.APIMimo
-	case "volcengine":
-		return providers.APIVolcengine
-	case "volcengine-coding-plan", "volcengine_coding_plan":
-		return providers.APIVolcengineCoding
-	case "ollama":
-		return providers.APIOllama
-	default:
-		return ""
+	if template, ok := LookupProvider(provider); ok {
+		return template.API
 	}
+	return ""
 }
 
+// SanitizePersistedConfig removes profile-owned and derivable runtime fields.
 func SanitizePersistedConfig(cfg Config) Config {
 	cfg = NormalizeConfig(cfg)
+	if cfg.ReasoningMode == modelcatalog.ReasoningModeForModel(cfg.Provider, cfg.Model) {
+		cfg.ReasoningMode = ""
+	}
 	if cfg.ProfileID != "" {
 		cfg.Provider = ""
 		cfg.EndpointID = ""
@@ -284,6 +274,7 @@ func SanitizePersistedConfig(cfg Config) Config {
 	return cfg
 }
 
+// SanitizePersistedProfile removes transient fields and non-persisted secrets.
 func SanitizePersistedProfile(profile ProfileConfig) ProfileConfig {
 	profile = NormalizeProfileConfig(profile)
 	if !profile.PersistToken {
@@ -301,17 +292,19 @@ func SanitizePersistedProfile(profile ProfileConfig) ProfileConfig {
 	return profile
 }
 
+// DefaultAuthTypeForProvider returns the maintained authentication scheme.
 func DefaultAuthTypeForProvider(provider string) providers.AuthType {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "minimax":
-		return providers.AuthBearerToken
-	case "ollama", "codefree":
-		return providers.AuthNone
-	default:
+	template, ok := LookupProvider(provider)
+	if !ok {
 		return providers.AuthAPIKey
 	}
+	if template.AuthType == "" {
+		return providers.AuthAPIKey
+	}
+	return template.AuthType
 }
 
+// BuildAlias returns the visible provider/model alias.
 func BuildAlias(provider string, modelName string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	modelName = strings.TrimSpace(modelName)
@@ -324,6 +317,7 @@ func BuildAlias(provider string, modelName string) string {
 	return strings.ToLower(provider + "/" + modelName)
 }
 
+// BuildProfileID returns a stable provider-endpoint identity.
 func BuildProfileID(provider string, endpointID string, baseURL string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	endpointID = sanitizeConfigIDPart(firstNonEmpty(strings.TrimSpace(endpointID), "default"))
@@ -336,6 +330,7 @@ func BuildProfileID(provider string, endpointID string, baseURL string) string {
 	return provider + "@" + endpointID
 }
 
+// BuildModelID qualifies a visible alias by its provider profile.
 func BuildModelID(profileID string, alias string) string {
 	profileID = strings.ToLower(strings.TrimSpace(profileID))
 	alias = strings.ToLower(strings.TrimSpace(alias))
@@ -348,6 +343,7 @@ func BuildModelID(profileID string, alias string) string {
 	return profileID + "/" + alias
 }
 
+// NormalizeEndpointID resolves maintained endpoints and hashes custom URLs.
 func NormalizeEndpointID(provider string, endpointID string, baseURL string, api providers.APIType) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	endpointID = sanitizeConfigIDPart(endpointID)
@@ -355,83 +351,21 @@ func NormalizeEndpointID(provider string, endpointID string, baseURL string, api
 		return endpointID
 	}
 	normalizedBaseURL := normalizedConfigBaseURL(baseURL)
-	switch provider {
-	case "openai":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.openai.com/v1" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "openai-compatible":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.openai.com/v1" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "openrouter":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://openrouter.ai/api/v1" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "gemini":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://generativelanguage.googleapis.com/v1beta" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "anthropic":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.anthropic.com" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "anthropic-compatible":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.anthropic.com" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "deepseek":
-		switch normalizedBaseURL {
-		case "", "https://api.deepseek.com/v1", "https://api.deepseek.com/anthropic":
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "minimax":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.minimaxi.com/anthropic" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "codefree":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://www.srdcloud.cn" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "ollama":
-		if normalizedBaseURL == "" || normalizedBaseURL == "http://localhost:11434" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "xiaomi":
-		switch normalizedBaseURL {
-		case "https://api.xiaomimimo.com/v1", "":
-			return "api-cn"
-		case "https://token-plan-cn.xiaomimimo.com/v1":
-			return "token-plan-cn"
-		default:
-			return "custom-" + shortConfigHash(normalizedBaseURL)
-		}
-	case "volcengine":
-		if api == providers.APIVolcengineCoding || normalizedBaseURL == "https://ark.cn-beijing.volces.com/api/coding/v3" {
-			return "coding-plan"
-		}
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://ark.cn-beijing.volces.com/api/v3" {
-			return "standard"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	default:
-		if normalizedBaseURL == "" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
+	if provider == "volcengine" && api == providers.APIVolcengineCoding {
+		return "coding-plan"
 	}
+	if template, ok := LookupProvider(provider); ok {
+		if endpoint, found := EndpointForBaseURL(template, baseURL); found {
+			return sanitizeConfigIDPart(endpoint.ID)
+		}
+	}
+	if normalizedBaseURL == "" {
+		return "default"
+	}
+	return "custom-" + shortConfigHash(normalizedBaseURL)
 }
 
+// ChoiceDetail returns a concise endpoint description for a configured model.
 func ChoiceDetail(cfg Config) string {
 	parts := []string{}
 	if profileID := strings.TrimSpace(cfg.ProfileID); profileID != "" {
@@ -452,6 +386,7 @@ func ChoiceDetail(cfg Config) string {
 	return strings.Join(parts, " · ")
 }
 
+// ChoiceFromConfig projects a configured model into selection metadata.
 func ChoiceFromConfig(cfg Config) Choice {
 	cfg = NormalizeConfig(cfg)
 	return Choice{
@@ -466,6 +401,7 @@ func ChoiceFromConfig(cfg Config) Choice {
 	}
 }
 
+// DedupeChoices removes duplicate or empty model identities.
 func DedupeChoices(choices []Choice) []Choice {
 	if len(choices) == 0 {
 		return nil
@@ -486,6 +422,7 @@ func DedupeChoices(choices []Choice) []Choice {
 	return out
 }
 
+// DedupeNonEmptyStrings removes case-insensitive duplicates and empty values.
 func DedupeNonEmptyStrings(values []string) []string {
 	if len(values) == 0 {
 		return nil
@@ -507,6 +444,7 @@ func DedupeNonEmptyStrings(values []string) []string {
 	return out
 }
 
+// FirstNonEmptyAPI returns the first specified API dialect.
 func FirstNonEmptyAPI(values ...providers.APIType) providers.APIType {
 	for _, value := range values {
 		if strings.TrimSpace(string(value)) != "" {
@@ -516,6 +454,7 @@ func FirstNonEmptyAPI(values ...providers.APIType) providers.APIType {
 	return ""
 }
 
+// FirstNonEmptyAuthType returns the first specified authentication scheme.
 func FirstNonEmptyAuthType(values ...providers.AuthType) providers.AuthType {
 	for _, value := range values {
 		if strings.TrimSpace(string(value)) != "" {
@@ -525,6 +464,7 @@ func FirstNonEmptyAuthType(values ...providers.AuthType) providers.AuthType {
 	return ""
 }
 
+// FirstNonNilHTTPClient returns the first configured HTTP client.
 func FirstNonNilHTTPClient(values ...*http.Client) *http.Client {
 	for _, value := range values {
 		if value != nil {

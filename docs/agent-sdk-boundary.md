@@ -33,24 +33,36 @@ evidence rather than a parallel documentation board.
    bridge as four required top-level Core abstractions. Existing task and
    delegation primitives remain available; remote is an ACP transport choice,
    not a separate Agent category.
+9. Concrete provider/model directories are Caelis Control data. The SDK may
+   provide reusable provider protocol adapters and model contracts, but it does
+   not own recommended model lists, provider-specific capability tables,
+   models.dev snapshots, or onboarding configuration.
 
 ## Ownership
 
 | Layer | Owns | Must not own |
 | --- | --- | --- |
 | Agent SDK stable kernel | Agent/run values, model and tool contracts, canonical session events, policy and approval primitives, durable run/replay mechanics, task/delegation primitives, normalized ACP-compatible controller and participant contracts | Caelis profiles, UI state, agent-selection policy, Manage Loop decisions, product wire transport |
-| Agent SDK bundled capabilities | Reusable providers, stores, sandbox backends, builtin tools, MCP, skills, and helpers useful to more than one host | Product imports or product-specific assembly and presentation policy |
-| Caelis Control | Agent registry and assembly, endpoint factories, credentials/process lifecycle, permission and review routing, Guardian/Reviewer/system Agents, dynamic orchestration, active-controller selection, handoff authorization and commit | Presentation rendering; autonomous model-driven ownership transfer |
+| Agent SDK bundled capabilities | Reusable provider protocol adapters, stores, sandbox backends, builtin tools, MCP, skills, and helpers useful to more than one host | Product imports, concrete model directories and snapshots, or product-specific assembly and presentation policy |
+| Caelis Control | Agent registry and assembly, endpoint factories, provider/model directory and concrete capability metadata, credentials/process lifecycle, permission and review routing, Guardian/Reviewer/system Agents, dynamic orchestration, active-controller selection, handoff authorization and commit | Presentation rendering; autonomous model-driven ownership transfer |
 | ACP product implementation | JSON-RPC/wire schema, transport, compatibility, ingress normalization, envelope projection, documented `_meta` | Agent-selection policy or a second copy of canonical model truth |
 | Surfaces | Rendering ACP-shaped envelopes and collecting user input | Runtime, policy, persistence, tool, sandbox, or handoff decisions |
 
 Package placement is still transitional. Ownership is determined by semantics,
 not solely by the current directory name.
 
+`control/modelconfig` resolves endpoint templates, authentication, catalog
+metadata, persisted profiles, and runtime overrides before constructing an SDK
+model from a complete provider configuration.
+Provider list APIs may contribute discovered IDs and metadata when available,
+but incomplete discovery responses do not make the SDK the owner of product
+documentation or fallback capability policy.
+
 ## Dependency Rule
 
 SDK packages must not depend on:
 
+- `control/*`;
 - `app/*`;
 - `surfaces/*`;
 - the product `protocol/acp/*` implementation;

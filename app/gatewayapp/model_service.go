@@ -14,36 +14,58 @@ import (
 // Connect reconfigures the model provider on the live stack. The new config
 // takes effect for subsequent turns.
 func (s *Stack) Connect(cfg ModelConfig) (string, error) {
+	modelIDs, err := s.ConnectModels([]ModelConfig{cfg})
+	if err != nil {
+		return "", err
+	}
+	if len(modelIDs) == 0 {
+		return "", fmt.Errorf("gatewayapp: connect produced no model")
+	}
+	return modelIDs[0], nil
+}
+
+// ConnectModels atomically persists one or more provider-backed models. The
+// first model remains the default and active model after the transaction.
+func (s *Stack) ConnectModels(configs []ModelConfig) ([]string, error) {
 	if s == nil {
-		return "", fmt.Errorf("gatewayapp: stack is unavailable")
+		return nil, fmt.Errorf("gatewayapp: stack is unavailable")
+	}
+	if len(configs) == 0 {
+		return nil, fmt.Errorf("gatewayapp: at least one model config is required")
 	}
 	s.reconfigureMu.Lock()
 	defer s.reconfigureMu.Unlock()
 	if err := s.rejectReconfigureWhileActive("connect model"); err != nil {
-		return "", err
+		return nil, err
 	}
 	if s.lookup == nil {
-		return "", fmt.Errorf("gatewayapp: model lookup unavailable")
+		return nil, fmt.Errorf("gatewayapp: model lookup unavailable")
 	}
 	txn, err := s.beginModelConfigTransaction()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	modelID, err := s.lookup.Upsert(cfg)
-	if err != nil {
-		return "", fmt.Errorf("gatewayapp: invalid model config: %w", err)
+	modelIDs := make([]string, 0, len(configs))
+	for _, cfg := range configs {
+		modelID, err := s.lookup.upsert(cfg, false)
+		if err != nil {
+			return nil, txn.rollback(fmt.Errorf("gatewayapp: invalid model config: %w", err))
+		}
+		modelIDs = append(modelIDs, modelID)
 	}
-	cfg, _ = s.lookup.Config(modelID)
-	s.setRuntimeModel(cfg)
+	activeID := modelIDs[0]
+	s.lookup.SetDefault(activeID)
+	activeConfig, _ := s.lookup.Config(activeID)
+	s.setRuntimeModel(activeConfig)
 	txn.applyResolver()
 	if err := s.saveModelConfigs(); err != nil {
-		return "", txn.rollback(err)
+		return nil, txn.rollback(err)
 	}
 	txn.markStoreSaved()
 	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
-		return "", txn.rollback(err)
+		return nil, txn.rollback(err)
 	}
-	return modelID, nil
+	return modelIDs, nil
 }
 
 // UseModel persists one per-session model alias override for subsequent turns.

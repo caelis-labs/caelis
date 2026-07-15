@@ -60,6 +60,24 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "agent-sdk must not depend on non-SDK Caelis packages",
 		},
 		{
+			name:       "sdk rejects control model catalog",
+			rel:        "agent-sdk/model/providers/provider.go",
+			importPath: modulePath + "/control/modelcatalog",
+			want:       "agent-sdk must not depend on non-SDK Caelis packages",
+		},
+		{
+			name:       "control accepts reusable sdk model packages",
+			rel:        "control/modelconfig/build.go",
+			importPath: modulePath + "/agent-sdk/model/providers",
+			want:       "",
+		},
+		{
+			name:       "control rejects app implementation packages",
+			rel:        "control/modelconfig/connect.go",
+			importPath: modulePath + "/app/gatewayapp",
+			want:       "control must depend only on Control peers and reusable SDK packages",
+		},
+		{
 			name:       "sandbox leaf may use approved sdk backend",
 			rel:        "agent-sdk/sandbox/bwrap/runtime.go",
 			importPath: modulePath + "/agent-sdk/sandbox/backend/policy",
@@ -255,7 +273,7 @@ func semanticRuleForSource(t *testing.T, rel string, source string, modulePath s
 	return semanticBoundaryRule(rel, file, fset, modulePath)
 }
 
-func TestDeletedSDKCompatFileRuleRejectsDeletedCompatPaths(t *testing.T) {
+func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -297,8 +315,32 @@ func TestDeletedSDKCompatFileRuleRejectsDeletedCompatPaths(t *testing.T) {
 		{
 			name:    "deleted impl model catalog path fails",
 			rel:     "impl/model/catalog/model_catalog.go",
-			want:    "must not recreate impl/model/catalog; use agent-sdk/model/catalog",
+			want:    "must not recreate impl/model/catalog; concrete model catalogs belong to Control",
 			wantSub: "impl/model/catalog",
+		},
+		{
+			name:    "deleted impl codefree metadata path fails",
+			rel:     "impl/model/internal/codefreecaps/codefreecaps.go",
+			want:    "must not recreate impl/model/internal/codefreecaps; concrete model metadata belongs to Control",
+			wantSub: "impl/model/internal/codefreecaps",
+		},
+		{
+			name:    "deleted sdk model catalog path fails",
+			rel:     "agent-sdk/model/catalog/model_catalog.go",
+			want:    "must not recreate agent-sdk/model/catalog; concrete model catalogs belong to control/modelcatalog",
+			wantSub: "agent-sdk/model/catalog",
+		},
+		{
+			name:    "deleted sdk codefree metadata path fails",
+			rel:     "agent-sdk/model/codefreecaps/codefreecaps.go",
+			want:    "must not recreate agent-sdk/model/codefreecaps; concrete model metadata belongs to control/modelcatalog",
+			wantSub: "agent-sdk/model/codefreecaps",
+		},
+		{
+			name:    "deleted gateway model registry path fails",
+			rel:     "app/gatewayapp/internal/modelregistry/config.go",
+			want:    "must not recreate app/gatewayapp/internal/modelregistry; model configuration belongs to Control",
+			wantSub: "app/gatewayapp/internal/modelregistry",
 		},
 		{
 			name:    "deleted impl sandbox host path fails",
@@ -382,21 +424,21 @@ func TestDeletedSDKCompatFileRuleRejectsDeletedCompatPaths(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			rule, subject, line := deletedSDKCompatFileRule(tt.rel)
+			rule, subject, line := removedPackageFileRule(tt.rel)
 			if tt.want == "" {
 				if rule != "" || subject != "" || line != 0 {
-					t.Fatalf("deletedSDKCompatFileRule(%q) = (%q, %q, %d), want no violation", tt.rel, rule, subject, line)
+					t.Fatalf("removedPackageFileRule(%q) = (%q, %q, %d), want no violation", tt.rel, rule, subject, line)
 				}
 				return
 			}
 			if rule != tt.want {
-				t.Fatalf("deletedSDKCompatFileRule(%q) rule = %q, want %q", tt.rel, rule, tt.want)
+				t.Fatalf("removedPackageFileRule(%q) rule = %q, want %q", tt.rel, rule, tt.want)
 			}
 			if tt.wantSub != "" && subject != tt.wantSub {
-				t.Fatalf("deletedSDKCompatFileRule(%q) subject = %q, want %q", tt.rel, subject, tt.wantSub)
+				t.Fatalf("removedPackageFileRule(%q) subject = %q, want %q", tt.rel, subject, tt.wantSub)
 			}
 			if line != 1 {
-				t.Fatalf("deletedSDKCompatFileRule(%q) line = %d, want 1", tt.rel, line)
+				t.Fatalf("removedPackageFileRule(%q) line = %d, want 1", tt.rel, line)
 			}
 		})
 	}

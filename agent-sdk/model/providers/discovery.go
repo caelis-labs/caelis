@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/caelis-labs/caelis/agent-sdk/model/codefreecaps"
 )
 
 // RemoteModel describes one model discovered from provider list APIs.
@@ -302,20 +300,13 @@ func discoverCodeFreeModels(ctx context.Context, client *http.Client, cfg Config
 		caps := []string{}
 		if kind := strings.TrimSpace(item.ModelType); kind != "" {
 			caps = append(caps, kind)
-		}
-		defaults, ok := codefreecaps.Lookup(name)
-		contextWindow := firstPositiveInt(item.MaxTokens)
-		maxOutput := firstPositiveInt(item.MaxOutputTokens)
-		if ok {
-			contextWindow = firstPositiveInt(contextWindow, defaults.ContextWindowTokens)
-			maxOutput = firstPositiveInt(maxOutput, defaults.MaxOutputTokens)
-			if defaults.SupportsImages {
+			lowerKind := strings.ToLower(kind)
+			if strings.Contains(lowerKind, "multimodal") || strings.Contains(lowerKind, "vision") || strings.Contains(lowerKind, "image") {
 				caps = appendUniqueStrings(caps, "image")
 			}
-		} else {
-			contextWindow = firstPositiveInt(contextWindow, codefreecaps.UnknownContextWindowTokens)
-			maxOutput = firstPositiveInt(maxOutput, codefreecaps.UnknownMaxOutputTokens)
 		}
+		contextWindow := firstPositiveInt(item.MaxTokens)
+		maxOutput := firstPositiveInt(item.MaxOutputTokens)
 		models = append(models, RemoteModel{
 			Name:                name,
 			ContextWindowTokens: contextWindow,

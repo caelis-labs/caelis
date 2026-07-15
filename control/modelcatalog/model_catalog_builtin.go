@@ -1,6 +1,6 @@
 package modelcatalog
 
-import "github.com/caelis-labs/caelis/agent-sdk/model/codefreecaps"
+import "github.com/caelis-labs/caelis/control/modelcatalog/internal/codefreecaps"
 
 // catalogEntry maps a provider+model pattern to capabilities.
 type catalogEntry struct {

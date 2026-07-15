@@ -68,7 +68,7 @@ func main() {
 			return fmt.Errorf("%s: %w", rel, err)
 		}
 		filesChecked++
-		if rule, subject, line := deletedSDKCompatFileRule(rel); rule != "" {
+		if rule, subject, line := removedPackageFileRule(rel); rule != "" {
 			violations = append(violations, violation{
 				file:    rel,
 				line:    line,
@@ -480,6 +480,10 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		return rule
 	}
 	switch {
+	case strings.HasPrefix(rel, "control/"):
+		if startsWithAny(target, "app/", "surfaces/", "protocol/", "ports/", "internal/") {
+			return "control must depend only on Control peers and reusable SDK packages"
+		}
 	case strings.HasPrefix(rel, "kernel/"):
 		if target == "internal/kernel" || strings.HasPrefix(target, "internal/kernel/") {
 			return "kernel must not depend on internal/kernel"
@@ -608,9 +612,7 @@ func deletedSDKImplPaths() []deletedSDKImplPath {
 	)
 	paths = append(paths,
 		deletedSDKImplPath{prefix: "impl/agent/local", sdk: "agent-sdk/runtime"},
-		deletedSDKImplPath{prefix: "impl/model/internal/codefreecaps", sdk: "agent-sdk/model/codefreecaps"},
 		deletedSDKImplPath{prefix: "impl/model/providers", sdk: "agent-sdk/model/providers"},
-		deletedSDKImplPath{prefix: "impl/model/catalog", sdk: "agent-sdk/model/catalog"},
 		deletedSDKImplPath{prefix: "impl/approval/agentreview", sdk: "agent-sdk/approval"},
 		deletedSDKImplPath{prefix: "impl/policy/presets", sdk: "agent-sdk/policy/presets"},
 		deletedSDKImplPath{prefix: "impl/policy/devcache", sdk: "agent-sdk/policy/devcache"},
@@ -651,10 +653,22 @@ func deletedSDKImplImportRule(target string) string {
 	return ""
 }
 
-func deletedSDKCompatFileRule(rel string) (string, string, int) {
+func removedPackageFileRule(rel string) (string, string, int) {
 	pkg := filepath.ToSlash(filepath.Dir(rel))
 	if pkg == "." {
 		return "", "", 0
+	}
+	switch {
+	case pkg == "impl/model/catalog" || strings.HasPrefix(pkg, "impl/model/catalog/"):
+		return "must not recreate impl/model/catalog; concrete model catalogs belong to Control", pkg, 1
+	case pkg == "impl/model/internal/codefreecaps" || strings.HasPrefix(pkg, "impl/model/internal/codefreecaps/"):
+		return "must not recreate impl/model/internal/codefreecaps; concrete model metadata belongs to Control", pkg, 1
+	case pkg == "agent-sdk/model/catalog" || strings.HasPrefix(pkg, "agent-sdk/model/catalog/"):
+		return "must not recreate agent-sdk/model/catalog; concrete model catalogs belong to control/modelcatalog", pkg, 1
+	case pkg == "agent-sdk/model/codefreecaps" || strings.HasPrefix(pkg, "agent-sdk/model/codefreecaps/"):
+		return "must not recreate agent-sdk/model/codefreecaps; concrete model metadata belongs to control/modelcatalog", pkg, 1
+	case pkg == "app/gatewayapp/internal/modelregistry" || strings.HasPrefix(pkg, "app/gatewayapp/internal/modelregistry/"):
+		return "must not recreate app/gatewayapp/internal/modelregistry; model configuration belongs to Control", pkg, 1
 	}
 	if isMigratedRuntimePortsPackage(pkg) {
 		return sdkOwnedPortsCompatFileMessage(pkg), pkg, 1

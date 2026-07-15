@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/ports/agentprofile"
 )
 
@@ -85,10 +85,10 @@ type AgentProviderConfig struct {
 }
 
 type PersistedModelConfig struct {
-	DefaultAlias string                        `json:"default_alias,omitempty"`
-	DefaultID    string                        `json:"default_model_id,omitempty"`
-	Profiles     []modelregistry.ProfileConfig `json:"profiles,omitempty"`
-	Configs      []modelregistry.Config        `json:"configs,omitempty"`
+	DefaultAlias string                      `json:"default_alias,omitempty"`
+	DefaultID    string                      `json:"default_model_id,omitempty"`
+	Profiles     []modelconfig.ProfileConfig `json:"profiles,omitempty"`
+	Configs      []modelconfig.Config        `json:"configs,omitempty"`
 }
 
 type Store struct {
@@ -436,15 +436,15 @@ func NormalizeAgentConfig(in AgentConfig) AgentConfig {
 	return out
 }
 
-func dedupeModelConfigs(configs []modelregistry.Config) []modelregistry.Config {
+func dedupeModelConfigs(configs []modelconfig.Config) []modelconfig.Config {
 	if len(configs) == 0 {
 		return nil
 	}
-	out := make([]modelregistry.Config, 0, len(configs))
+	out := make([]modelconfig.Config, 0, len(configs))
 	seen := make(map[string]struct{}, len(configs))
 	for _, cfg := range configs {
 		hadPersistedToken := strings.TrimSpace(cfg.Token) != ""
-		cfg = modelregistry.NormalizeConfig(cfg)
+		cfg = modelconfig.NormalizeConfig(cfg)
 		if hadPersistedToken {
 			cfg.PersistToken = true
 		}
@@ -463,21 +463,21 @@ func dedupeModelConfigs(configs []modelregistry.Config) []modelregistry.Config {
 
 func normalizePersistedModelsForSave(models PersistedModelConfig) PersistedModelConfig {
 	for _, cfg := range models.Configs {
-		if modelregistry.ConfigCarriesProfileFields(cfg) {
-			models.Profiles = append(models.Profiles, modelregistry.ProfileFromConfig(cfg))
+		if modelconfig.ConfigCarriesProfileFields(cfg) {
+			models.Profiles = append(models.Profiles, modelconfig.ProfileFromConfig(cfg))
 		}
 	}
 	return models
 }
 
-func dedupeModelConfigsForSave(configs []modelregistry.Config) []modelregistry.Config {
+func dedupeModelConfigsForSave(configs []modelconfig.Config) []modelconfig.Config {
 	if len(configs) == 0 {
 		return nil
 	}
-	out := make([]modelregistry.Config, 0, len(configs))
+	out := make([]modelconfig.Config, 0, len(configs))
 	seen := make(map[string]struct{}, len(configs))
 	for _, cfg := range configs {
-		cfg = modelregistry.SanitizePersistedConfig(cfg)
+		cfg = modelconfig.SanitizePersistedConfig(cfg)
 		if cfg.ID == "" {
 			continue
 		}
@@ -491,15 +491,15 @@ func dedupeModelConfigsForSave(configs []modelregistry.Config) []modelregistry.C
 	return out
 }
 
-func dedupeModelProfiles(profiles []modelregistry.ProfileConfig) []modelregistry.ProfileConfig {
+func dedupeModelProfiles(profiles []modelconfig.ProfileConfig) []modelconfig.ProfileConfig {
 	if len(profiles) == 0 {
 		return nil
 	}
-	out := make([]modelregistry.ProfileConfig, 0, len(profiles))
+	out := make([]modelconfig.ProfileConfig, 0, len(profiles))
 	seen := make(map[string]struct{}, len(profiles))
 	for _, profile := range profiles {
 		hadPersistedToken := strings.TrimSpace(profile.Token) != ""
-		profile = modelregistry.NormalizeProfileConfig(profile)
+		profile = modelconfig.NormalizeProfileConfig(profile)
 		if hadPersistedToken {
 			profile.PersistToken = true
 		}
@@ -516,14 +516,14 @@ func dedupeModelProfiles(profiles []modelregistry.ProfileConfig) []modelregistry
 	return out
 }
 
-func dedupeModelProfilesForSave(profiles []modelregistry.ProfileConfig) []modelregistry.ProfileConfig {
+func dedupeModelProfilesForSave(profiles []modelconfig.ProfileConfig) []modelconfig.ProfileConfig {
 	if len(profiles) == 0 {
 		return nil
 	}
-	out := make([]modelregistry.ProfileConfig, 0, len(profiles))
+	out := make([]modelconfig.ProfileConfig, 0, len(profiles))
 	seen := make(map[string]struct{}, len(profiles))
 	for _, profile := range profiles {
-		profile = modelregistry.SanitizePersistedProfile(profile)
+		profile = modelconfig.SanitizePersistedProfile(profile)
 		if profile.ID == "" {
 			continue
 		}

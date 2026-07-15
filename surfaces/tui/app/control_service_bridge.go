@@ -380,10 +380,11 @@ func ConfigFromControlService(service control.Service, sender *ProgramSender, ba
 			out := make([]SlashArgCandidate, len(candidates))
 			for i, c := range candidates {
 				out[i] = SlashArgCandidate{
-					Value:   c.Value,
-					Display: c.Display,
-					Detail:  c.Detail,
-					NoAuth:  c.NoAuth,
+					Value:                 c.Value,
+					Display:               c.Display,
+					Detail:                c.Detail,
+					NoAuth:                c.NoAuth,
+					ModelMetadataComplete: c.ModelMetadataComplete,
 				}
 			}
 			return out, nil

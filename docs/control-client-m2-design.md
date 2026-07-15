@@ -19,7 +19,7 @@ and request-scoped command contract:
 
 ```text
 TUI / headless / ACP bridge ----+
-                                +-> ports/controlclient -> Control
+                                +-> ports/controlclient (transitional) -> Control
 HTTP JSON + SSE app-server -----+          |
                                            +-> Session Feed Broker
                                                 |- durable session.Event lane
@@ -356,6 +356,11 @@ followed by parent-directory sync; Windows document/WAL replacement uses
 SessionState, subscriptions, and capabilities; it does not own persistence,
 ACP wire DTOs, HTTP, or runtime assembly.
 
+This describes the accepted M2 API and current import path, not the long-term
+package destination. The path is frozen: new Control operations and domains
+belong under `control/*`, while later bounded migrations preserve the accepted
+wire and replay semantics.
+
 Every write contains:
 
 - `operation_id` (HTTP: `Idempotency-Key`);
@@ -665,8 +670,8 @@ participant/handoff policy, or persistence logic.
 | canonical events, child typed origin, paged Session Reader | `agent-sdk/session` |
 | Envelope, delivery mode, feed position, cursor codec contract | `protocol/acp/eventstream` |
 | ACP semantic projection | `protocol/acp/projector` |
-| transport-neutral commands and SessionState | `ports/controlclient` |
-| feed broker, durable child recorder, operation store, authorizer, command service | `internal/controlclient` |
+| transport-neutral commands and SessionState | `ports/controlclient` (transitional, frozen) |
+| feed broker, durable child recorder, operation store, authorizer, command service | `internal/controlclient` (transitional toward `control/*`) |
 | shared Turn/task ingress and final-read barrier | `internal/controlclient/turningress`; every in-process and network adapter consumes the same merged feed |
 | HTTP/SSE DTO mapping and authentication extraction | `surfaces/appserver` |
 | dependency assembly, listener configuration, persistent secret path | `app/*` and `cmd/caelis` |

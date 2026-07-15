@@ -296,7 +296,7 @@ func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *tes
 			default:
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "xiaomi" && state.BaseURL == tokenPlanBaseURL && state.TokenRef == "sk-test" {
-					return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro"}}, nil
+					return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro", ModelMetadataComplete: true}}, nil
 				}
 				return nil, nil
 			}
@@ -412,7 +412,7 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 			default:
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "xiaomi" && state.BaseURL == tokenPlanBaseURL && state.TokenRef == "env:MIMO_TOKEN_PLAN_API_KEY" {
-					return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro"}}, nil
+					return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro", ModelMetadataComplete: true}}, nil
 				}
 				return nil, nil
 			}
@@ -469,7 +469,7 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 	if !findAndRunTaskResult(msg, m) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
-	want := "/connect xiaomi mimo-v2.5-pro " + tokenPlanBaseURL + " 60 env:MIMO_TOKEN_PLAN_API_KEY - - -"
+	want := "/connect xiaomi mimo-v2.5-pro " + tokenPlanBaseURL + " 60 env:MIMO_TOKEN_PLAN_API_KEY - - auto"
 	if called != want {
 		t.Fatalf("called = %q, want %q", called, want)
 	}
@@ -592,7 +592,7 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 			default:
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "minimax" && state.TokenRef == "sk-test" {
-					return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed"}}, nil
+					return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed", ModelMetadataComplete: true}}, nil
 				}
 				return nil, nil
 			}
@@ -629,8 +629,121 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 	if !findAndRunTaskResult(msg, m) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
-	if called != "/connect minimax MiniMax-M2.7-highspeed - 60 sk-test - - -" {
+	if called != "/connect minimax MiniMax-M2.7-highspeed - 60 sk-test - - auto" {
 		t.Fatalf("called = %q", called)
+	}
+}
+
+func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
+	called := ""
+	m := NewModel(Config{
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			called = submission.Text
+			return TaskResultMsg{}
+		},
+		Wizards: DefaultWizards(),
+		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "connect":
+				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
+			default:
+				state, ok := connectModelCommandState(command)
+				if ok && state.Provider == "minimax" && state.TokenRef == "sk-test" {
+					return []SlashArgCandidate{
+						{Value: "MiniMax-M2.7", Display: "minimax/MiniMax-M2.7", ModelMetadataComplete: true},
+						{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed", ModelMetadataComplete: true},
+					}, nil
+				}
+				return nil, nil
+			}
+		},
+	})
+	m.openSlashArgPicker("connect")
+	if handled, cmd := m.handleWizardEnter(); !handled {
+		t.Fatal("provider selection was not handled")
+	} else if cmd != nil {
+		cmd()
+	}
+	m.slashArgQuery = "sk-test"
+	if handled, cmd := m.handleWizardEnter(); !handled {
+		t.Fatal("api key was not handled")
+	} else if cmd != nil {
+		cmd()
+	}
+	if len(m.slashArgCandidates) != 2 {
+		t.Fatalf("model candidates = %#v", m.slashArgCandidates)
+	}
+	m.applySlashArgCompletion()
+	if got := m.wizard.state["model"]; got != "MiniMax-M2.7" {
+		t.Fatalf("first selected model = %q", got)
+	}
+	m.applySlashArgCompletion()
+	if got := m.wizard.state["model"]; got != "MiniMax-M2.7,MiniMax-M2.7-highspeed" {
+		t.Fatalf("selected models = %q", got)
+	}
+	handled, cmd := m.handleWizardEnter()
+	if !handled || cmd == nil {
+		t.Fatalf("multi-model confirmation = handled:%v cmd:%v", handled, cmd)
+	}
+	if !findAndRunTaskResult(cmd(), m) {
+		t.Fatal("expected TaskResultMsg in batch")
+	}
+	if called != "/connect minimax MiniMax-M2.7,MiniMax-M2.7-highspeed - 60 sk-test - - auto" {
+		t.Fatalf("called = %q", called)
+	}
+}
+
+func TestConnectWizardKeepsAdvancedStepsForCustomCompatibleModel(t *testing.T) {
+	const baseURL = "https://models.acme.example/v1"
+	m := NewModel(Config{
+		Wizards: DefaultWizards(),
+		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "connect":
+				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
+			case "connect-baseurl:openai-compatible":
+				return []SlashArgCandidate{{Value: baseURL, Display: baseURL, NoAuth: true}}, nil
+			default:
+				return nil, nil
+			}
+		},
+	})
+	m.openSlashArgPicker("connect")
+
+	handled, cmd := m.handleWizardEnter() // provider -> baseurl
+	if !handled {
+		t.Fatal("provider selection was not handled")
+	}
+	if cmd != nil {
+		cmd()
+	}
+	handled, cmd = m.handleWizardEnter() // reusable base URL -> model
+	if !handled {
+		t.Fatal("baseurl selection was not handled")
+	}
+	if cmd != nil {
+		cmd()
+	}
+	if len(m.slashArgCandidates) != 0 {
+		t.Fatalf("custom compatible model candidates = %#v, want free-form input", m.slashArgCandidates)
+	}
+
+	m.slashArgQuery = "acme-reasoning-model"
+	handled, cmd = m.handleWizardEnter() // custom model -> context window
+	if !handled {
+		t.Fatal("custom model step was not handled")
+	}
+	if cmd != nil {
+		t.Fatal("custom model should continue to advanced configuration instead of submitting")
+	}
+	if step := m.wizard.currentStep(); step == nil || step.Key != "context_window_tokens" {
+		t.Fatalf("current wizard step = %#v, want context_window_tokens", step)
+	}
+	if got := m.wizard.state["_known_model"]; got != "" {
+		t.Fatalf("_known_model = %q, want unset for custom compatible model", got)
+	}
+	if got := strings.TrimSpace(m.slashArgCommand); !strings.HasPrefix(got, "connect-context:") {
+		t.Fatalf("slashArgCommand after custom model = %q, want connect-context command", got)
 	}
 }
 
@@ -649,7 +762,7 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 			default:
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "minimax" && state.TokenRef == "sk-test" {
-					return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed"}}, nil
+					return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed", ModelMetadataComplete: true}}, nil
 				}
 				return nil, nil
 			}
@@ -683,7 +796,7 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 	if !findAndRunTaskResult(msg, m) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
-	if called != "/connect minimax MiniMax-M2.7-highspeed - 60 sk-test - - -" {
+	if called != "/connect minimax MiniMax-M2.7-highspeed - 60 sk-test - - auto" {
 		t.Fatalf("called = %q", called)
 	}
 }

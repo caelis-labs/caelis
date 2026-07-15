@@ -51,6 +51,11 @@ type WizardStepDef struct {
 	// steps can still allow custom base URLs or model names.
 	RequireCandidate bool
 
+	// MultiSelect lets completion-backed values be accumulated with the complete
+	// key before enter confirms the comma-separated selection. Enter still keeps
+	// the one-candidate fast path, and free-form input remains a single value.
+	MultiSelect bool
+
 	// CompletionCommand returns the command string passed to
 	// Config.SlashArgComplete for this step. It receives the accumulated
 	// state from previous steps. If it returns "", no completion is requested.
@@ -315,8 +320,18 @@ func (m *Model) handleWizardEnter() (bool, tea.Cmd) {
 		return false, nil
 	}
 
-	// Determine the entered value.
+	// A multi-select step with accumulated candidates confirms them when enter is
+	// pressed on an empty query. This must run before ordinary candidate matching,
+	// where an empty query otherwise selects the highlighted next candidate.
 	value := strings.TrimSpace(m.slashArgQuery)
+	selectedValues := wizardMultiSelectValues(w, step)
+	if step.MultiSelect && len(selectedValues) > 0 && value == "" {
+		joined := strings.Join(selectedValues, ",")
+		complete := SlashArgCandidate{Value: joined, ModelMetadataComplete: true}
+		return true, m.advanceWizardStep(joined, &complete)
+	}
+
+	// Determine the entered value.
 	var candidate *SlashArgCandidate
 	if len(m.slashArgCandidates) > 0 && m.slashArgIndex >= 0 && m.slashArgIndex < len(m.slashArgCandidates) {
 		c := m.slashArgCandidates[m.slashArgIndex]
@@ -343,9 +358,86 @@ func (m *Model) handleWizardEnter() (bool, tea.Cmd) {
 			return true, nil // validation failed — stay
 		}
 	}
+	if step.MultiSelect && len(selectedValues) > 0 {
+		if candidate == nil || !candidate.ModelMetadataComplete {
+			return true, nil
+		}
+		selectedValues = appendUniqueWizardValue(selectedValues, value)
+		joined := strings.Join(selectedValues, ",")
+		complete := SlashArgCandidate{Value: joined, ModelMetadataComplete: true}
+		return true, m.advanceWizardStep(joined, &complete)
+	}
 
 	cmd := m.advanceWizardStep(value, candidate)
 	return true, cmd
+}
+
+func wizardMultiSelectValues(w *wizardRuntime, step *WizardStepDef) []string {
+	if w == nil || step == nil || !step.MultiSelect {
+		return nil
+	}
+	parts := strings.Split(w.state[step.Key], ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		out = appendUniqueWizardValue(out, strings.TrimSpace(part))
+	}
+	return out
+}
+
+func appendUniqueWizardValue(values []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return values
+	}
+	for _, existing := range values {
+		if strings.EqualFold(strings.TrimSpace(existing), value) {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func (m *Model) addWizardMultiSelectCandidate(candidate SlashArgCandidate) bool {
+	if m == nil || m.wizard == nil || !candidate.ModelMetadataComplete {
+		return false
+	}
+	step := m.wizard.currentStep()
+	if step == nil || !step.MultiSelect {
+		return false
+	}
+	values := appendUniqueWizardValue(wizardMultiSelectValues(m.wizard, step), candidate.Value)
+	m.wizard.state[step.Key] = strings.Join(values, ",")
+	m.slashArgQuery = ""
+	m.slashArgIndex = 0
+	m.setInputText("")
+	m.syncTextareaFromInput()
+	m.updateSlashArgCandidates()
+	return true
+}
+
+func (m *Model) filterWizardMultiSelectCandidates(candidates []SlashArgCandidate) []SlashArgCandidate {
+	if m == nil || m.wizard == nil {
+		return candidates
+	}
+	step := m.wizard.currentStep()
+	selected := wizardMultiSelectValues(m.wizard, step)
+	if len(selected) == 0 {
+		return candidates
+	}
+	out := make([]SlashArgCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		found := false
+		for _, value := range selected {
+			if strings.EqualFold(strings.TrimSpace(candidate.Value), value) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, candidate)
+		}
+	}
+	return out
 }
 
 // wizardQueryAtCursor extracts the query text after the wizard command prefix.

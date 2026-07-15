@@ -457,14 +457,8 @@ func TestListModelDirectoryModelsUsesDynamicCatalog(t *testing.T) {
 		dynamicMu.Unlock()
 	}()
 
-	openAICompatModels := ListModelDirectoryModels("openai-compatible")
-	for _, want := range []string{"gpt-from-local", "gpt-from-remote", "gpt-from-embedded"} {
-		if !containsString(openAICompatModels, want) {
-			t.Fatalf("ListModelDirectoryModels(openai-compatible) = %#v, missing %q", openAICompatModels, want)
-		}
-	}
-	if containsString(openAICompatModels, "accidental-substring-match") {
-		t.Fatalf("ListModelDirectoryModels(openai-compatible) = %#v, included substring provider match", openAICompatModels)
+	if models := ListModelDirectoryModels("openai-compatible"); len(models) != 0 {
+		t.Fatalf("ListModelDirectoryModels(openai-compatible) = %#v, want no assumed upstream directory", models)
 	}
 	for _, stale := range []string{"gpt-from-remote", "gpt-from-embedded"} {
 		if containsString(ListCatalogModels("openai-compatible"), stale) {
@@ -472,9 +466,8 @@ func TestListModelDirectoryModelsUsesDynamicCatalog(t *testing.T) {
 		}
 	}
 
-	anthropicCompatModels := ListModelDirectoryModels("anthropic-compatible")
-	if !containsString(anthropicCompatModels, "claude-from-remote") {
-		t.Fatalf("ListModelDirectoryModels(anthropic-compatible) = %#v, missing claude-from-remote", anthropicCompatModels)
+	if models := ListModelDirectoryModels("anthropic-compatible"); len(models) != 0 {
+		t.Fatalf("ListModelDirectoryModels(anthropic-compatible) = %#v, want no assumed upstream directory", models)
 	}
 	openRouterModels := ListModelDirectoryModels("openrouter")
 	if !containsString(openRouterModels, "openai/gpt-from-openrouter") {
@@ -483,14 +476,6 @@ func TestListModelDirectoryModelsUsesDynamicCatalog(t *testing.T) {
 	geminiModels := ListModelDirectoryModels("gemini")
 	if !containsString(geminiModels, "gemini-from-google") {
 		t.Fatalf("ListModelDirectoryModels(gemini) = %#v, missing aliased google model", geminiModels)
-	}
-	if ProviderUsesModelDirectory("gemini") {
-		t.Fatal("ProviderUsesModelDirectory(gemini) = true, want false for explicit provider catalog recommendations")
-	}
-	for _, provider := range []string{"openai-compatible", "anthropic-compatible", "openrouter"} {
-		if !ProviderUsesModelDirectory(provider) {
-			t.Fatalf("ProviderUsesModelDirectory(%q) = false, want true", provider)
-		}
 	}
 }
 

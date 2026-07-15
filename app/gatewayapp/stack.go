@@ -18,7 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
@@ -47,9 +47,9 @@ type Config struct {
 	Sandbox                     SandboxConfig
 }
 
-type ModelConfig = modelregistry.Config
-type ModelProfileConfig = modelregistry.ProfileConfig
-type ModelChoice = modelregistry.Choice
+type ModelConfig = modelconfig.Config
+type ModelProfileConfig = modelconfig.ProfileConfig
+type ModelChoice = modelconfig.Choice
 
 // DefaultControlOperationRetention is the production replay guarantee for
 // proven terminal Control operations.
