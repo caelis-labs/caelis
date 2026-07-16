@@ -250,6 +250,26 @@ func TestOpenAICodexFactoryRequiresInjectedOAuthClient(t *testing.T) {
 	}
 }
 
+func TestOpenAICodexPromptCacheKeyBoundsLongSessionAffinity(t *testing.T) {
+	t.Parallel()
+
+	if got := openAICodexPromptCacheKey("caelis-session-1"); got != "caelis-session-1" {
+		t.Fatalf("short key = %q, want unchanged session affinity", got)
+	}
+
+	longAffinity := strings.Repeat("guardian-approval-review-", 5)
+	got := openAICodexPromptCacheKey(longAffinity)
+	if len(got) != openAICodexPromptCacheKeyMaxLength {
+		t.Fatalf("long key length = %d, want %d", len(got), openAICodexPromptCacheKeyMaxLength)
+	}
+	if got != openAICodexPromptCacheKey(longAffinity) {
+		t.Fatal("long key is not stable")
+	}
+	if got == openAICodexPromptCacheKey(longAffinity+"other-session") {
+		t.Fatal("distinct long affinities share a prompt cache key")
+	}
+}
+
 type openAICodexTestAuthTransport struct {
 	base http.RoundTripper
 }

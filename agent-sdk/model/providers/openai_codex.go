@@ -3,6 +3,7 @@ package providers
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"iter"
@@ -14,7 +15,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
-const defaultOpenAICodexBaseURL = "https://chatgpt.com/backend-api/codex"
+const (
+	defaultOpenAICodexBaseURL          = "https://chatgpt.com/backend-api/codex"
+	openAICodexPromptCacheKeyMaxLength = 64
+)
 
 type openAICodexLLM struct {
 	name                string
@@ -75,7 +79,7 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 			return
 		}
 		if metadata, ok := model.ProviderRequestMetadataFromContext(ctx); ok {
-			payload.PromptCache = metadata.SessionAffinity
+			payload.PromptCache = openAICodexPromptCacheKey(metadata.SessionAffinity)
 		}
 		raw, err := json.Marshal(payload)
 		if err != nil {
@@ -215,6 +219,14 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 			yield(nil, fmt.Errorf("openai codex: stream ended before a terminal response"))
 		}
 	}
+}
+
+func openAICodexPromptCacheKey(sessionAffinity string) string {
+	key := strings.TrimSpace(sessionAffinity)
+	if len(key) <= openAICodexPromptCacheKeyMaxLength {
+		return key
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
 }
 
 type openAICodexTerminalError struct {
