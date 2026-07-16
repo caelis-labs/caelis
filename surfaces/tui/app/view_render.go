@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
@@ -366,18 +365,6 @@ func (m *Model) renderInputBar() string {
 				prompt,
 				m.promptAwareSelectionStyles(),
 			)
-		case m.isWizardActive() && m.wizard != nil:
-			query, _, ok := wizardVisibleInputAtCursor(m.wizard.def.Command, m.input, m.cursor)
-			if ok {
-				inputVal := query
-				if m.wizard.hideInput() {
-					inputVal = strings.Repeat("*", utf8.RuneCountInString(strings.TrimSpace(query)))
-				}
-				prompt := m.theme.PromptStyle().Render("> ")
-				rendered = renderMultilineInput(prompt, inputVal)
-			} else {
-				rendered = m.composeInputRenderFrom(snapshot).styledText()
-			}
 		default:
 			rendered = m.composeInputRenderFrom(snapshot).styledText()
 		}

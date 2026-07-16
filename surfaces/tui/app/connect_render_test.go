@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
@@ -182,5 +183,34 @@ func TestRenderInputBarHidesConnectPrefixForProviderStep(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "deepseek") {
 		t.Fatalf("rendered provider step missing visible query: %q", rendered)
+	}
+}
+
+func TestRenderInputBarKeepsComposerBackgroundForConnectWizardInput(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		Wizards:  DefaultWizards(),
+	})
+	model.width = 80
+	model.theme.UserBg = lipgloss.Color("#141414")
+	model.theme.NoColor = false
+	def := connectModelWizard()
+	model.wizard = &wizardRuntime{
+		def:       &def,
+		stepIndex: 0,
+		state:     map[string]string{},
+	}
+	model.slashArgActive = true
+	model.setInputText("acp")
+	model.syncTextareaFromInput()
+
+	rendered := model.renderInputBar()
+	wantPrompt := model.theme.PromptStyle().Background(model.theme.UserBg).Render("> ")
+	wantInput := model.theme.TextStyle().Background(model.theme.UserBg).Render("acp")
+	if !strings.Contains(rendered, wantPrompt) {
+		t.Fatalf("rendered connect input missing composer background on prompt %q: %q", wantPrompt, rendered)
+	}
+	if !strings.Contains(rendered, wantInput) {
+		t.Fatalf("rendered connect input missing composer background on text %q: %q", wantInput, rendered)
 	}
 }
