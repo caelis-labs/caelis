@@ -14,6 +14,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
 )
 
 type AppConfig struct {
@@ -22,12 +23,15 @@ type AppConfig struct {
 	// dispatch, Spawn target resolution, and Control-authorized handoff.
 	AgentRoster controlagents.Configuration `json:"agent_roster,omitempty"`
 	// Delegation maps the fixed Caelis capability profiles to identities in the
-	// authoritative AgentRoster. Missing bindings inherit the Session default.
-	Delegation         controldelegation.Configuration `json:"delegation,omitempty"`
-	Sandbox            SandboxConfig                   `json:"sandbox,omitempty"`
-	Runtime            RuntimeConfig                   `json:"runtime,omitempty"`
-	Plugins            []PluginConfig                  `json:"plugins,omitempty"`
-	PluginMarketplaces []MarketplaceConfig             `json:"plugin_marketplaces,omitempty"`
+	// authoritative AgentRoster. Missing configurable bindings remain unbound.
+	Delegation controldelegation.Configuration `json:"delegation,omitempty"`
+	// SystemAgents binds fixed Control-managed scenes to model-backed roster
+	// Agents without making those scenes delegation profiles.
+	SystemAgents       controlsystemagent.Configuration `json:"system_agents,omitempty"`
+	Sandbox            SandboxConfig                    `json:"sandbox,omitempty"`
+	Runtime            RuntimeConfig                    `json:"runtime,omitempty"`
+	Plugins            []PluginConfig                   `json:"plugins,omitempty"`
+	PluginMarketplaces []MarketplaceConfig              `json:"plugin_marketplaces,omitempty"`
 }
 
 type MarketplaceConfig struct {
@@ -150,8 +154,12 @@ func (s *Store) loadUnlocked() (AppConfig, error) {
 		if err := controldelegation.ValidateConfiguration(doc.Delegation, doc.AgentRoster, doc.Models.Configs); err != nil {
 			return AppConfig{}, fmt.Errorf("gatewayapp: invalid delegation configuration: %w", err)
 		}
+		if err := controlsystemagent.ValidateConfiguration(doc.SystemAgents, doc.AgentRoster, doc.Models.Configs); err != nil {
+			return AppConfig{}, fmt.Errorf("gatewayapp: invalid system Agent configuration: %w", err)
+		}
 		doc.AgentRoster = controlagents.NormalizeConfiguration(doc.AgentRoster)
 		doc.Delegation = controldelegation.NormalizeConfiguration(doc.Delegation)
+		doc.SystemAgents = controlsystemagent.NormalizeConfiguration(doc.SystemAgents)
 		doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 		doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 		doc.Plugins = DedupePluginConfigs(doc.Plugins)
@@ -279,8 +287,12 @@ func (s *Store) Save(doc AppConfig) error {
 	if err := controldelegation.ValidateConfiguration(doc.Delegation, doc.AgentRoster, doc.Models.Configs); err != nil {
 		return fmt.Errorf("gatewayapp: invalid delegation configuration: %w", err)
 	}
+	if err := controlsystemagent.ValidateConfiguration(doc.SystemAgents, doc.AgentRoster, doc.Models.Configs); err != nil {
+		return fmt.Errorf("gatewayapp: invalid system Agent configuration: %w", err)
+	}
 	doc.AgentRoster = controlagents.NormalizeConfiguration(doc.AgentRoster)
 	doc.Delegation = controldelegation.NormalizeConfiguration(doc.Delegation)
+	doc.SystemAgents = controlsystemagent.NormalizeConfiguration(doc.SystemAgents)
 	doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 	doc.Plugins = DedupePluginConfigs(doc.Plugins)

@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controldelegation "github.com/caelis-labs/caelis/control/delegation"
+	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/ports/gateway"
 )
@@ -223,8 +224,10 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 	txn.applyResolver()
 	txn.captureAgentRoster(doc.AgentRoster)
 	txn.captureDelegation(doc.Delegation)
+	txn.captureSystemAgents(doc.SystemAgents)
 	doc.Models = s.lookup.Snapshot()
 	doc.Delegation = resetRemovedDelegationBindings(doc.Delegation, doc.AgentRoster, nextRoster)
+	doc.SystemAgents = resetRemovedSystemAgentBindings(doc.SystemAgents, doc.AgentRoster, nextRoster)
 	doc.AgentRoster = nextRoster
 	if err := s.store.Save(doc); err != nil {
 		return txn.rollback(err)
@@ -261,6 +264,8 @@ type modelConfigTransaction struct {
 	restoreAgentRoster    bool
 	previousDelegation    controldelegation.Configuration
 	restoreDelegation     bool
+	previousSystemAgents  controlsystemagent.Configuration
+	restoreSystemAgents   bool
 	storeSaved            bool
 }
 
@@ -317,6 +322,14 @@ func (t *modelConfigTransaction) captureDelegation(configuration controldelegati
 	t.restoreDelegation = true
 }
 
+func (t *modelConfigTransaction) captureSystemAgents(configuration controlsystemagent.Configuration) {
+	if t == nil {
+		return
+	}
+	t.previousSystemAgents = controlsystemagent.NormalizeConfiguration(configuration)
+	t.restoreSystemAgents = true
+}
+
 func (t *modelConfigTransaction) rollback(cause error) error {
 	if t == nil || t.stack == nil {
 		return cause
@@ -330,7 +343,13 @@ func (t *modelConfigTransaction) rollback(cause error) error {
 		return cause
 	}
 	var saveErr error
-	if t.restoreAgentRoster && t.restoreDelegation {
+	if t.restoreAgentRoster && t.restoreDelegation && t.restoreSystemAgents {
+		saveErr = t.stack.saveModelConfigsAgentRosterDelegationAndSystemAgents(
+			t.previousAgentRoster,
+			t.previousDelegation,
+			t.previousSystemAgents,
+		)
+	} else if t.restoreAgentRoster && t.restoreDelegation {
 		saveErr = t.stack.saveModelConfigsAgentRosterAndDelegation(t.previousAgentRoster, t.previousDelegation)
 	} else if t.restoreAgentRoster {
 		saveErr = t.stack.saveModelConfigsAndAgentRoster(t.previousAgentRoster)

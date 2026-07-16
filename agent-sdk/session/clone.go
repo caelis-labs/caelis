@@ -150,6 +150,7 @@ func CloneParticipantBinding(in ParticipantBinding) ParticipantBinding {
 		Role:                 in.Role,
 		AgentName:            strings.TrimSpace(in.AgentName),
 		Label:                strings.TrimSpace(in.Label),
+		ReasoningEffort:      strings.TrimSpace(in.ReasoningEffort),
 		SessionID:            strings.TrimSpace(in.SessionID),
 		Source:               strings.TrimSpace(in.Source),
 		ParentTurnID:         strings.TrimSpace(in.ParentTurnID),

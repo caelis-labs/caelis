@@ -7,17 +7,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
-func TestLocalStackInjectsOnlyFixedDelegationProfiles(t *testing.T) {
+func TestLocalStackInjectsOnlySelfUntilProfileIsBound(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{
 		Agents: []assembly.AgentConfig{{
@@ -32,22 +35,34 @@ func TestLocalStackInjectsOnlyFixedDelegationProfiles(t *testing.T) {
 	if !toolSetHas(resolved.RunRequest.AgentSpec.Tools, spawn.ToolName) || !toolSetHas(resolved.RunRequest.AgentSpec.Tools, task.ToolName) {
 		t.Fatalf("tools = %#v, want SPAWN and task tools", resolved.RunRequest.AgentSpec.Tools)
 	}
-	for _, want := range []string{"self", "breeze", "orbit", "zenith"} {
-		if !spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, want) {
-			t.Fatalf("SPAWN Agent enum missing %q", want)
-		}
+	if !spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "self") {
+		t.Fatal("SPAWN Agent enum missing self")
 	}
-	for _, hidden := range []string{"helper", ReviewerAgentID, guardianSceneID} {
+	for _, hidden := range []string{"breeze", "orbit", "zenith", "helper", ReviewerAgentID, guardianSceneID} {
 		if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, hidden) {
-			t.Fatalf("SPAWN Agent enum exposes system scene %q", hidden)
+			t.Fatalf("SPAWN Agent enum exposes unbound or system Agent %q", hidden)
 		}
 	}
 	if spawnToolRequiresAgent(resolved.RunRequest.AgentSpec.Tools) {
 		t.Fatal("SPAWN Agent is required despite self default")
 	}
+
+	bindProfileToModelForToolTest(t, stack, controldelegation.ProfileOrbit)
+	resolved, err = stack.currentGateway().Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("ResolveTurn(bound Orbit) error = %v", err)
+	}
+	if !spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "orbit") {
+		t.Fatal("SPAWN Agent enum missing explicitly bound Orbit")
+	}
+	for _, hidden := range []string{"breeze", "zenith"} {
+		if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, hidden) {
+			t.Fatalf("SPAWN Agent enum exposes unbound profile %q", hidden)
+		}
+	}
 }
 
-func TestACPSurfaceAvailableCommandsExposeAgentSlashAndHideSystemScenes(t *testing.T) {
+func TestACPSurfaceAvailableCommandsExposeOnlyBoundProfilesAndHideRosterAgents(t *testing.T) {
 	stack, activeSession := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{
 		Agents: []assembly.AgentConfig{{
 			Name: "helper", Description: "bounded ACP helper", Command: "go",
@@ -58,15 +73,61 @@ func TestACPSurfaceAvailableCommandsExposeAgentSlashAndHideSystemScenes(t *testi
 	if err != nil {
 		t.Fatalf("AvailableCommands() error = %v", err)
 	}
-	if helper := acpCommandForToolTest(commands, "helper"); helper == nil || helper.Description != "bounded ACP helper" {
-		t.Fatalf("AvailableCommands() = %#v, want /helper", commands)
+	for _, profile := range []string{"breeze", "orbit", "zenith"} {
+		if acpCommandForToolTest(commands, profile) != nil {
+			t.Fatalf("AvailableCommands() = %#v, should hide unbound /%s", commands, profile)
+		}
 	}
-	if acpCommandForToolTest(commands, "lead") == nil {
-		t.Fatalf("AvailableCommands() = %#v, want /lead", commands)
+	bindProfileToModelForToolTest(t, stack, controldelegation.ProfileOrbit)
+	commands, err = stack.ACPSurface(nil, false, nil).AvailableCommands(context.Background(), activeSession.SessionID)
+	if err != nil {
+		t.Fatalf("AvailableCommands(bound Orbit) error = %v", err)
 	}
-	for _, hidden := range []string{ReviewerAgentID, guardianSceneID, "agent", "subagent"} {
+	if acpCommandForToolTest(commands, "orbit") == nil {
+		t.Fatalf("AvailableCommands() = %#v, want bound /orbit", commands)
+	}
+	for _, profile := range []string{"breeze", "zenith"} {
+		if acpCommandForToolTest(commands, profile) != nil {
+			t.Fatalf("AvailableCommands() = %#v, should hide unbound /%s", commands, profile)
+		}
+	}
+	for _, hidden := range []string{"helper", "lead", ReviewerAgentID, guardianSceneID, "agent", "subagent"} {
 		if acpCommandForToolTest(commands, hidden) != nil {
 			t.Fatalf("AvailableCommands() exposes removed or system command %q: %#v", hidden, commands)
+		}
+	}
+}
+
+func bindProfileToModelForToolTest(t *testing.T, stack *Stack, profile controldelegation.Profile) {
+	t.Helper()
+	modelID, err := stack.Connect(ModelConfig{
+		Provider: "ollama",
+		API:      providers.APIOllama,
+		Model:    "bound-" + string(profile),
+	})
+	if err != nil {
+		t.Fatalf("Connect(bound %s model) error = %v", profile, err)
+	}
+	agentID := modelBackedAgentIDForTest(t, stack, modelID)
+	if _, err = stack.Delegation().BindDelegation(context.Background(), controldelegation.BindRequest{
+		Profile: profile,
+		AgentID: agentID,
+	}); err != nil {
+		t.Fatalf("BindDelegation(%s) error = %v", profile, err)
+	}
+}
+
+func TestACPProfileCommandDescriptionIncludesBoundModel(t *testing.T) {
+	detail := availableProfileDescription(controldelegation.ProfileStatus{
+		Definition: controldelegation.Definition{Profile: controldelegation.ProfileOrbit, Description: "General implementation."},
+		Binding: controldelegation.Binding{
+			Profile: controldelegation.ProfileOrbit, Target: controldelegation.TargetAgent, AgentID: "sol", ReasoningEffort: "high",
+		},
+		Agent: controlagents.Agent{ID: "sol", Backing: controlagents.AgentBacking{ModelAlias: "openai-codex/gpt-5.6-sol"}},
+	})
+	for _, want := range []string{"General implementation", "openai-codex/gpt-5.6-sol", "[high]"} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("availableProfileDescription() = %q, want %q", detail, want)
 		}
 	}
 }

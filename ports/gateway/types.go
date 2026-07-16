@@ -103,12 +103,13 @@ type HandoffControllerRequest struct {
 // AttachParticipantRequest attaches one ACP-backed participant to the current
 // session control plane without replacing the main controller.
 type AttachParticipantRequest struct {
-	SessionRef session.SessionRef
-	BindingKey string
-	Agent      string
-	Role       session.ParticipantRole
-	Source     string
-	Label      string
+	SessionRef      session.SessionRef
+	BindingKey      string
+	Agent           string
+	Role            session.ParticipantRole
+	Source          string
+	Label           string
+	ReasoningEffort string
 }
 
 // DetachParticipantRequest removes one attached participant from the current
@@ -141,18 +142,19 @@ const (
 )
 
 type StartParticipantRequest struct {
-	SessionRef   session.SessionRef
-	BindingKey   string
-	Agent        string
-	Role         session.ParticipantRole
-	Label        string
-	Input        string
-	DisplayInput string
-	DisplayTitle string
-	ContentParts []model.ContentPart
-	Source       string
-	Lifecycle    ParticipantLifecycle
-	DetachSource string
+	SessionRef      session.SessionRef
+	BindingKey      string
+	Agent           string
+	Role            session.ParticipantRole
+	Label           string
+	ReasoningEffort string
+	Input           string
+	DisplayInput    string
+	DisplayTitle    string
+	ContentParts    []model.ContentPart
+	Source          string
+	Lifecycle       ParticipantLifecycle
+	DetachSource    string
 }
 
 type ControlPlaneStateRequest struct {

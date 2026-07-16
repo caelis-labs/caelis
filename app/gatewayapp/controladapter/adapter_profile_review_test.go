@@ -151,12 +151,13 @@ func (g *reviewProfileGatewayService) PromptParticipant(_ context.Context, req g
 
 func (g *reviewProfileGatewayService) StartParticipant(ctx context.Context, req gateway.StartParticipantRequest) (gateway.BeginTurnResult, error) {
 	updated, err := g.AttachParticipant(ctx, gateway.AttachParticipantRequest{
-		SessionRef: req.SessionRef,
-		BindingKey: req.BindingKey,
-		Agent:      req.Agent,
-		Role:       req.Role,
-		Source:     req.Source,
-		Label:      req.Label,
+		SessionRef:      req.SessionRef,
+		BindingKey:      req.BindingKey,
+		Agent:           req.Agent,
+		Role:            req.Role,
+		Source:          req.Source,
+		Label:           req.Label,
+		ReasoningEffort: req.ReasoningEffort,
 	})
 	if err != nil {
 		return gateway.BeginTurnResult{}, err

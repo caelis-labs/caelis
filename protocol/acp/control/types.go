@@ -239,15 +239,31 @@ type SlashCommandResultKind string
 const (
 	SlashCommandResultHelp   SlashCommandResultKind = "help"
 	SlashCommandResultStatus SlashCommandResultKind = "status"
+	SlashCommandResultTable  SlashCommandResultKind = "table"
 )
 
 // SlashCommandResult carries structured slash-command data without prescribing
-// table, list, card, or selection rendering.
+// surface-specific styling or terminal layout.
 type SlashCommandResult struct {
 	Command string                 `json:"command,omitempty"`
 	Kind    SlashCommandResultKind `json:"kind,omitempty"`
 	Status  StatusSnapshot         `json:"status,omitempty"`
 	Help    CommandHelpSnapshot    `json:"help,omitempty"`
+	Table   SlashTableSnapshot     `json:"table,omitempty"`
+}
+
+// SlashTableSnapshot is structured tabular output for a slash command. Rich
+// surfaces choose styling while plain-text surfaces retain aligned columns.
+type SlashTableSnapshot struct {
+	Title    string              `json:"title,omitempty"`
+	Sections []SlashTableSection `json:"sections,omitempty"`
+}
+
+// SlashTableSection groups one set of columns and rows under a heading.
+type SlashTableSection struct {
+	Title   string     `json:"title,omitempty"`
+	Columns []string   `json:"columns,omitempty"`
+	Rows    [][]string `json:"rows,omitempty"`
 }
 
 // CommandHelpSnapshot is the slash command catalog available to the current
@@ -278,6 +294,7 @@ type AgentParticipantSnapshot struct {
 	AgentName string
 	Kind      string
 	Role      string
+	Source    string
 	SessionID string
 }
 

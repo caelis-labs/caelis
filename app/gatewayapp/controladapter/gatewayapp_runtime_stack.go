@@ -27,6 +27,7 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 	models := stack.Models()
 	agents := stack.Agents()
 	delegation := stack.Delegation()
+	systemAgents := stack.SystemAgents()
 	skills := stack.Skills()
 	status := stack.Status()
 	plugins := stack.Plugins()
@@ -66,6 +67,11 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 			StatusFn: delegation.DelegationStatus,
 			BindFn:   delegation.BindDelegation,
 			ResetFn:  delegation.ResetDelegation,
+		},
+		SystemAgent: SystemAgentRuntimeDeps{
+			StatusFn: systemAgents.SystemAgentStatus,
+			BindFn:   systemAgents.BindSystemAgent,
+			ResetFn:  systemAgents.ResetSystemAgent,
 		},
 		Model: ModelRuntimeDeps{
 			DefaultAliasFn: models.DefaultAlias,

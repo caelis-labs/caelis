@@ -20,6 +20,15 @@ func NewStatusSlashResult(status StatusSnapshot) SlashCommandResult {
 	}
 }
 
+// NewTableSlashResult builds structured tabular output for a slash command.
+func NewTableSlashResult(command string, table SlashTableSnapshot) SlashCommandResult {
+	return SlashCommandResult{
+		Command: strings.ToLower(strings.TrimSpace(command)),
+		Kind:    SlashCommandResultTable,
+		Table:   table,
+	}
+}
+
 // FormatSlashResult renders a structured slash result for plain-text surfaces.
 // Rich surfaces should consume the structured payload directly.
 func FormatSlashResult(result SlashCommandResult) string {
@@ -28,6 +37,8 @@ func FormatSlashResult(result SlashCommandResult) string {
 		return FormatCommandHelp(result.Help)
 	case SlashCommandResultStatus:
 		return FormatStatusSnapshot(result.Status)
+	case SlashCommandResultTable:
+		return FormatSlashTable(result.Table)
 	default:
 		command := strings.TrimSpace(result.Command)
 		if command == "" {
@@ -35,6 +46,70 @@ func FormatSlashResult(result SlashCommandResult) string {
 		}
 		return "slash command produced an unsupported result: " + command
 	}
+}
+
+// FormatSlashTable renders a table snapshot for plain-text surfaces.
+func FormatSlashTable(table SlashTableSnapshot) string {
+	lines := make([]string, 0)
+	if title := strings.TrimSpace(table.Title); title != "" {
+		lines = append(lines, title)
+	}
+	writtenSections := 0
+	for _, section := range table.Sections {
+		if len(section.Columns) == 0 && len(section.Rows) == 0 {
+			continue
+		}
+		if writtenSections > 0 {
+			lines = append(lines, "")
+		}
+		if title := strings.TrimSpace(section.Title); title != "" {
+			lines = append(lines, title)
+		}
+		lines = append(lines, formatSlashTableRows(section.Columns, section.Rows)...)
+		writtenSections++
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatSlashTableRows(columns []string, rows [][]string) []string {
+	table := make([][]string, 0, len(rows)+1)
+	if len(columns) > 0 {
+		table = append(table, append([]string(nil), columns...))
+	}
+	for _, row := range rows {
+		table = append(table, append([]string(nil), row...))
+	}
+	if len(table) == 0 {
+		return nil
+	}
+	widths := make([]int, 0)
+	for i := range table {
+		for j := range table[i] {
+			table[i][j] = strings.TrimSpace(table[i][j])
+			for len(widths) <= j {
+				widths = append(widths, 0)
+			}
+			if width := len([]rune(table[i][j])); width > widths[j] {
+				widths[j] = width
+			}
+		}
+	}
+	out := make([]string, 0, len(table)+1)
+	for rowIndex, row := range table {
+		parts := make([]string, len(row))
+		for columnIndex, value := range row {
+			parts[columnIndex] = padRightRunes(value, widths[columnIndex])
+		}
+		out = append(out, "  "+strings.TrimRight(strings.Join(parts, "  "), " "))
+		if len(columns) > 0 && rowIndex == 0 {
+			divider := make([]string, len(row))
+			for columnIndex := range row {
+				divider[columnIndex] = strings.Repeat("─", widths[columnIndex])
+			}
+			out = append(out, "  "+strings.Join(divider, "  "))
+		}
+	}
+	return out
 }
 
 // FormatCommandHelp renders a help snapshot for plain-text surfaces.

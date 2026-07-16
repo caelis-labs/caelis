@@ -191,7 +191,7 @@ func (s *Stack) estimatedPromptPrefixTokens(ctx context.Context, ref session.Ses
 		base = 0
 	}
 
-	agents := delegationAgentsForSpawn()
+	agents := s.delegationAgentsForSpawn()
 	if len(agents) == 0 {
 		return base
 	}

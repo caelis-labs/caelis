@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	"github.com/caelis-labs/caelis/protocol/acp"
@@ -207,15 +208,37 @@ func (p gatewayACPSurface) PromptCapabilities(context.Context) (acp.PromptCapabi
 }
 
 func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID string) ([]acp.AvailableCommand, error) {
+	boundProfiles := map[string]controldelegation.ProfileStatus{}
+	if p.stack != nil {
+		if status, err := p.stack.Delegation().DelegationStatus(ctx); err == nil {
+			for _, profile := range status.Profiles {
+				if !controldelegation.IsProfileBound(profile) {
+					continue
+				}
+				name := profile.Definition.Profile
+				if name == "" {
+					name = profile.Binding.Profile
+				}
+				boundProfiles[string(name)] = profile
+			}
+		}
+	}
 	commands := make([]acp.AvailableCommand, 0, len(controlcommands.DefaultACPSpecs()))
 	seen := map[string]struct{}{}
 	for _, spec := range controlcommands.DefaultACPSpecs() {
 		if spec.Hidden {
 			continue
 		}
+		profile, isProfile := boundProfiles[strings.ToLower(strings.TrimSpace(spec.Name))]
+		if controldelegation.IsDirectRunProfile(spec.Name) && !isProfile {
+			continue
+		}
 		cmd := acp.AvailableCommand{
 			Name:        spec.Name,
 			Description: spec.Description,
+		}
+		if isProfile {
+			cmd.Description = availableProfileDescription(profile)
 		}
 		if hint := availableCommandHint(spec.Usage); hint != "" {
 			cmd.Input = commandInput(hint)
@@ -224,25 +247,6 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 		seen[strings.ToLower(strings.TrimSpace(spec.Name))] = struct{}{}
 	}
 	if p.stack != nil {
-		for _, agent := range p.stack.ListACPAgents() {
-			name := strings.TrimSpace(agent.Name)
-			if name == "" {
-				continue
-			}
-			if reservedSlashCommandName(name) {
-				continue
-			}
-			name = controlagents.NormalizeName(name)
-			if _, exists := seen[name]; exists {
-				continue
-			}
-			commands = append(commands, acp.AvailableCommand{
-				Name:        name,
-				Description: firstNonEmpty(strings.TrimSpace(agent.Description), "Send a prompt to the registered ACP agent"),
-				Input:       commandInput("prompt"),
-			})
-			seen[name] = struct{}{}
-		}
 		if strings.TrimSpace(sessionID) != "" {
 			activeSession, err := p.session(ctx, sessionID)
 			if err != nil {
@@ -250,14 +254,14 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 			}
 			runs := make([]controlagents.Run, 0, len(activeSession.Participants))
 			for _, participant := range activeSession.Participants {
-				runs = append(runs, controlagents.RunFromParticipant(
+				runs = append(runs, controldelegation.DirectRunFromParticipant(
 					participant.Label,
-					participant.AgentName,
 					string(participant.Kind),
 					string(participant.Role),
+					participant.Source,
 				))
 			}
-			for _, name := range controlagents.AppendRunNames(nil, runs, func(agent string) bool { return !reservedSlashCommandName(agent) }) {
+			for _, name := range controlagents.AppendRunNames(nil, runs, controldelegation.IsDirectRunProfile) {
 				if _, exists := seen[name]; exists {
 					continue
 				}
@@ -272,12 +276,25 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 			if remote, active, err := p.stack.ACPControllerStatus(ctx, activeSession.SessionRef); err != nil {
 				return nil, err
 			} else if active {
+				hiddenRosterNames := make(map[string]struct{})
+				for _, agent := range p.stack.ListACPAgents() {
+					if name := controlagents.NormalizeName(agent.Name); name != "" {
+						hiddenRosterNames[name] = struct{}{}
+					}
+				}
 				for _, command := range remote.Commands {
 					name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command.Name, "/")))
 					if fields := strings.Fields(name); len(fields) > 0 {
 						name = fields[0]
 					}
 					if name == "" || reservedSlashCommandName(name) {
+						continue
+					}
+					baseName := name
+					if agent, _, ok := controlagents.ParseRunName(name); ok {
+						baseName = agent
+					}
+					if _, hidden := hiddenRosterNames[baseName]; hidden {
 						continue
 					}
 					if _, exists := seen[name]; exists {
@@ -290,6 +307,27 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 		}
 	}
 	return commands, nil
+}
+
+func availableProfileDescription(profile controldelegation.ProfileStatus) string {
+	description := strings.TrimSpace(profile.Definition.Description)
+	if profile.Binding.Target != controldelegation.TargetAgent {
+		return firstNonEmpty(description+" Unbound; configure it with /subagent bind.", description)
+	}
+	target := strings.TrimSpace(profile.Agent.Backing.ModelAlias)
+	if target == "" {
+		target = strings.TrimSpace(firstNonEmpty(profile.Agent.Name, profile.Agent.ID, profile.Binding.AgentID))
+		if modelID := strings.TrimSpace(profile.Agent.Defaults.ModelID); modelID != "" {
+			target += " · " + modelID
+		}
+	}
+	if effort := strings.TrimSpace(profile.Binding.ReasoningEffort); effort != "" {
+		target += " [" + effort + "]"
+	}
+	if description == "" {
+		return target
+	}
+	return description + " · " + target
 }
 
 func (p gatewayACPSurface) modeConfigOption(ctx context.Context, session session.Session) (acp.SessionConfigOption, error) {

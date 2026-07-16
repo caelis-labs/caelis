@@ -17,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	controlassembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	controlpromptrouter "github.com/caelis-labs/caelis/internal/controlpromptrouter"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
@@ -104,6 +105,12 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stack.Close() })
 
+	if _, err := stack.Delegation().BindDelegation(ctx, controldelegation.BindRequest{
+		Profile: controldelegation.ProfileOrbit,
+		AgentID: agentID,
+	}); err != nil {
+		t.Fatalf("BindDelegation(orbit) error = %v", err)
+	}
 	active, err := stack.StartSession(ctx, "agent-handoff-e2e", "surface-handoff-e2e")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -119,7 +126,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	})
 	routed := routedHandoffStarter{router: controlpromptrouter.New(controlprompt.RouterConfig{Service: driver})}
 
-	directCommand := "/" + agentID
+	directCommand := "/orbit"
 	directOutput, err := runScopedAgentOnce(ctx, routed, control.Submission{Text: directCommand + " inspect side"})
 	if err != nil {
 		t.Fatalf("%s direct run error = %v", directCommand, err)
@@ -127,7 +134,20 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	if got := strings.TrimSpace(directOutput); got != "opus owns this turn" {
 		t.Fatalf("direct Agent output = %q, want %q", got, "opus owns this turn")
 	}
-	continuedCommand := directCommand + "-1"
+	state, err := stack.KernelControlPlane().ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatalf("ControlPlaneState(after profile run) error = %v", err)
+	}
+	continuedCommand := ""
+	for _, participant := range state.Participants {
+		if participant.Source == controldelegation.DirectRunSource(controldelegation.ProfileOrbit) {
+			continuedCommand = "/" + controlagents.FormatRunName("orbit", participant.Label)
+			break
+		}
+	}
+	if continuedCommand == "" {
+		t.Fatalf("participants after profile run = %#v, want Orbit sidecar", state.Participants)
+	}
 	continuedOutput, err := runScopedAgentOnce(ctx, routed, control.Submission{Text: continuedCommand + " continue side"})
 	if err != nil {
 		t.Fatalf("%s continuation error = %v", continuedCommand, err)
@@ -144,15 +164,15 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 		t.Fatalf("direct Agent session %q disappeared after continuation", directSessionID)
 	}
 
-	if _, err := headless.RunOnce(ctx, routed, control.Submission{Text: "/lead " + agentID}, headless.Options{}); err != nil {
-		t.Fatalf("/lead %s error = %v", agentID, err)
+	if _, err := driver.HandoffAgent(ctx, agentID); err != nil {
+		t.Fatalf("HandoffAgent(%s) error = %v", agentID, err)
 	}
-	state, err := stack.KernelControlPlane().ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: active.SessionRef})
+	state, err = stack.KernelControlPlane().ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatalf("ControlPlaneState(after handoff) error = %v", err)
 	}
 	if state.Controller.Kind != session.ControllerKindACP || !strings.EqualFold(state.Controller.AgentName, agentID) || strings.TrimSpace(state.Controller.EpochID) == "" {
-		t.Fatalf("controller after /lead %s = %+v", agentID, state.Controller)
+		t.Fatalf("controller after HandoffAgent(%s) = %+v", agentID, state.Controller)
 	}
 	controllerSessionID := assertOneNewChildSession(t, ctx, childRoot, workdir, afterDirectSessions, map[string]string{
 		"model":  "opus",
@@ -162,7 +182,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 
 	result, err := headless.RunOnce(ctx, routed, control.Submission{Text: "who owns this turn?"}, headless.Options{})
 	if err != nil {
-		t.Fatalf("prompt after /lead %s error = %v", agentID, err)
+		t.Fatalf("prompt after HandoffAgent(%s) error = %v", agentID, err)
 	}
 	if got := strings.TrimSpace(result.Output); got != "opus owns this turn" {
 		t.Fatalf("ACP controller output = %q, want %q", got, "opus owns this turn")
@@ -170,15 +190,15 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	assertChildSessionHasUserPrompt(t, ctx, childRoot, workdir, controllerSessionID, "who owns this turn?")
 	assertChildSessionIDsEqual(t, afterHandoffSessions, childSessionIDs(t, ctx, childRoot, workdir))
 
-	if _, err := headless.RunOnce(ctx, routed, control.Submission{Text: "/lead local"}, headless.Options{}); err != nil {
-		t.Fatalf("/lead local error = %v", err)
+	if _, err := driver.HandoffAgent(ctx, "local"); err != nil {
+		t.Fatalf("HandoffAgent(local) error = %v", err)
 	}
 	state, err = stack.KernelControlPlane().ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatalf("ControlPlaneState(after return) error = %v", err)
 	}
 	if state.Controller.Kind != session.ControllerKindKernel {
-		t.Fatalf("controller after /lead local = %+v", state.Controller)
+		t.Fatalf("controller after HandoffAgent(local) = %+v", state.Controller)
 	}
 
 	loaded, err := stack.Sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})

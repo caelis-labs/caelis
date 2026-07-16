@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	prompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
@@ -20,8 +21,6 @@ func (r Router) dispatchSlash(ctx context.Context, cmd string, args string, args
 		return r.slashResult(control.NewHelpSlashResult(help)), nil
 	case "review":
 		return r.dispatchReview(ctx, args, argsStart, fullText, attachments)
-	case "lead":
-		return r.dispatchLead(ctx, args)
 	case "new":
 		return r.dispatchNew(ctx)
 	case "resume":
@@ -36,31 +35,6 @@ func (r Router) dispatchSlash(ctx context.Context, cmd string, args string, args
 		return r.dispatchCompact(ctx, args)
 	}
 	return r.dispatchAgentRun(ctx, cmd, args, prompt.AttachmentsForPromptRange(attachments, argsStart, len([]rune(strings.TrimSpace(fullText)))))
-}
-
-func (r Router) dispatchLead(ctx context.Context, args string) (prompt.Result, error) {
-	target := strings.TrimSpace(args)
-	if target == "" {
-		return r.noticeResult("usage: /lead <agent|local>"), nil
-	}
-	status, err := r.service.HandoffAgent(ctx, target)
-	if err != nil {
-		return prompt.Result{}, controlcommands.FriendlyCommandError("lead", err)
-	}
-	label := strings.TrimSpace(status.ControllerLabel)
-	if label == "" {
-		label = target
-	}
-	text := label + " is now leading this task"
-	if controlcommands.IsLocalAgentTarget(target) {
-		text = "local Agent is now leading this task"
-	}
-	result := r.noticeResult(text)
-	if current, statusErr := r.service.Status(ctx); statusErr == nil {
-		result.StatusUpdate = &current
-	}
-	result.RefreshCommands = true
-	return result, nil
 }
 
 func (r Router) dispatchReview(ctx context.Context, args string, argsStart int, fullText string, attachments []control.Attachment) (prompt.Result, error) {
@@ -236,7 +210,7 @@ func (r Router) dispatchAgentRun(ctx context.Context, command string, promptText
 	command = strings.ToLower(strings.TrimSpace(command))
 	promptText = strings.TrimSpace(promptText)
 	if promptText == "" && len(attachments) == 0 {
-		if r.isRegisteredAgent(ctx, command) || r.isDirectAgentRun(ctx, command) {
+		if controldelegation.IsDirectRunProfile(command) || r.isDirectAgentRun(ctx, command) {
 			return r.noticeResult(fmt.Sprintf("usage: /%s <prompt>", command)), nil
 		}
 		return r.noticeResult(fmt.Sprintf("unknown command: /%s\nrun /help to list available commands", command)), nil

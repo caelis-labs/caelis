@@ -51,11 +51,12 @@ func (g *Gateway) AttachParticipant(ctx context.Context, req AttachParticipantRe
 		return session.Session{}, err
 	}
 	activeSession, err := g.control.AttachParticipant(ctx, agent.AttachParticipantRequest{
-		SessionRef: ref,
-		Agent:      strings.TrimSpace(req.Agent),
-		Role:       req.Role,
-		Source:     strings.TrimSpace(req.Source),
-		Label:      strings.TrimSpace(req.Label),
+		SessionRef:      ref,
+		Agent:           strings.TrimSpace(req.Agent),
+		Role:            req.Role,
+		Source:          strings.TrimSpace(req.Source),
+		Label:           strings.TrimSpace(req.Label),
+		ReasoningEffort: strings.TrimSpace(req.ReasoningEffort),
 	})
 	if err != nil {
 		return session.Session{}, err

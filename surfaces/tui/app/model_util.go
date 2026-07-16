@@ -455,14 +455,6 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 		hasTrailingDelimiter = last == ' ' || last == '\t'
 	}
 	switch command {
-	case "lead":
-		if len(fields) == 1 {
-			if !hasTrailingDelimiter {
-				return "", "", false
-			}
-			return command, "", true
-		}
-		return command, strings.TrimSpace(strings.Join(fields[1:], " ")), true
 	case "model":
 		if len(fields) == 1 {
 			if !hasTrailingDelimiter {

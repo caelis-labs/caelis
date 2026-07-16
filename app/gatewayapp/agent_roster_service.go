@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controldelegation "github.com/caelis-labs/caelis/control/delegation"
+	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/discovery"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	"github.com/caelis-labs/caelis/internal/version"
@@ -219,6 +220,18 @@ func resetRemovedDelegationBindings(
 	next := current
 	for _, agentID := range removedAgentIDs(before, after) {
 		next, _ = controldelegation.ResetAgentBindings(next, agentID)
+	}
+	return next
+}
+
+func resetRemovedSystemAgentBindings(
+	current controlsystemagent.Configuration,
+	before controlagents.Configuration,
+	after controlagents.Configuration,
+) controlsystemagent.Configuration {
+	next := current
+	for _, agentID := range removedAgentIDs(before, after) {
+		next = controlsystemagent.ResetAgentBindings(next, agentID)
 	}
 	return next
 }

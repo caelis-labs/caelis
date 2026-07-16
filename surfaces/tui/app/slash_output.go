@@ -132,9 +132,40 @@ func renderSlashCommandResultLines(result control.SlashCommandResult) []slashOut
 		return renderSlashStatusLines(result.Status)
 	case control.SlashCommandResultHelp:
 		return renderSlashHelpLines(result.Help)
+	case control.SlashCommandResultTable:
+		return renderSlashTableLines(result.Table)
 	default:
 		return []slashOutputLine{slashField("Slash", control.FormatSlashResult(result))}
 	}
+}
+
+func renderSlashTableLines(table control.SlashTableSnapshot) []slashOutputLine {
+	lines := make([]slashOutputLine, 0)
+	if title := strings.TrimSpace(table.Title); title != "" {
+		lines = append(lines, slashSection(title))
+	}
+	writtenSections := 0
+	for _, section := range table.Sections {
+		if len(section.Columns) == 0 && len(section.Rows) == 0 {
+			continue
+		}
+		if writtenSections > 0 {
+			lines = append(lines, slashBlank())
+		}
+		if title := strings.TrimSpace(section.Title); title != "" {
+			lines = append(lines, slashSection(title))
+		}
+		rows := make([][]string, 0, len(section.Rows)+1)
+		if len(section.Columns) > 0 {
+			rows = append(rows, append([]string(nil), section.Columns...))
+		}
+		for _, row := range section.Rows {
+			rows = append(rows, append([]string(nil), row...))
+		}
+		lines = append(lines, renderSlashPaddedRowsWithOptions(rows, len(section.Columns) > 0)...)
+		writtenSections++
+	}
+	return lines
 }
 
 func renderSlashStatusLines(status control.StatusSnapshot) []slashOutputLine {
@@ -214,7 +245,7 @@ func slashHelpGroupTitle(item control.CommandHelpItem) string {
 		return "Core"
 	case "model", "connect", "new", "resume", "compact":
 		return "Model & Session"
-	case "review", "lead":
+	case "review", "breeze", "orbit", "zenith", "subagent":
 		return "Agents"
 	case "plugin":
 		return "Plugins & Tools"

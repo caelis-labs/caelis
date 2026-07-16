@@ -1,11 +1,13 @@
 package gatewayapp
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/ports/plugin"
 )
@@ -143,4 +145,60 @@ func TestConnectedModelAgentMaterializesGenericSelfRuntimeWithoutProfilePrompt(t
 	if strings.TrimSpace(materialized.Env[systemSceneEnvKey]) != "" {
 		t.Fatalf("model Agent inherited system-scene marker: %#v", materialized.Env)
 	}
+}
+
+func TestSystemAgentBindingsApplySelectedModelAndEffort(t *testing.T) {
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+	modelID, err := stack.Connect(ModelConfig{
+		Provider: "ollama", API: providers.APIOllama, Model: "reviewer-specialist",
+		ReasoningMode: "effort", ReasoningEffort: "high", ReasoningLevels: []string{"high", "xhigh"},
+	})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	doc, err := stack.store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	agentID := ""
+	for _, agent := range controlagents.ListAgents(doc.AgentRoster) {
+		if agent.Backing.ModelAlias == modelID {
+			agentID = agent.ID
+			break
+		}
+	}
+	if agentID == "" {
+		t.Fatalf("AgentRoster = %#v, want model Agent for %q", doc.AgentRoster, modelID)
+	}
+	if _, err := stack.SystemAgents().BindSystemAgent(context.Background(), controlsystemagent.BindRequest{
+		ID: controlsystemagent.Reviewer, AgentID: agentID, ReasoningEffort: "xhigh",
+	}); err != nil {
+		t.Fatalf("BindSystemAgent(Reviewer) error = %v", err)
+	}
+	if _, err := stack.SystemAgents().BindSystemAgent(context.Background(), controlsystemagent.BindRequest{
+		ID: controlsystemagent.Guardian, AgentID: agentID, ReasoningEffort: "xhigh",
+	}); err != nil {
+		t.Fatalf("BindSystemAgent(Guardian) error = %v", err)
+	}
+	guardian, bound, err := stack.resolveSystemAgentModel(context.Background(), controlsystemagent.Guardian, 0)
+	if err != nil || !bound || guardian.Model == nil || guardian.ReasoningEffort != "xhigh" {
+		t.Fatalf("resolveSystemAgentModel(Guardian) = (%#v, %v, %v), want xhigh binding", guardian, bound, err)
+	}
+
+	stack.mu.RLock()
+	agents := append([]assembly.AgentConfig(nil), stack.runtime.Assembly.Agents...)
+	stack.mu.RUnlock()
+	for _, agent := range agents {
+		if agent.Name != ReviewerAgentID {
+			continue
+		}
+		if got, _ := argValue(agent.Args, "-model"); got != "reviewer-specialist" {
+			t.Fatalf("Reviewer -model = %q, want reviewer-specialist; args=%#v", got, agent.Args)
+		}
+		if got, _ := argValue(agent.Args, "-reasoning-effort"); got != "xhigh" {
+			t.Fatalf("Reviewer -reasoning-effort = %q, want xhigh; args=%#v", got, agent.Args)
+		}
+		return
+	}
+	t.Fatalf("runtime assembly = %#v, want fixed Reviewer", agents)
 }

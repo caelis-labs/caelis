@@ -22,7 +22,7 @@ func (d *Adapter) BindDelegation(ctx context.Context, req controldelegation.Bind
 	return d.stack.Delegation.BindFn(delegationContext(ctx), req)
 }
 
-// ResetDelegation restores one configurable profile to Session self.
+// ResetDelegation removes one configurable profile's explicit Agent binding.
 func (d *Adapter) ResetDelegation(ctx context.Context, profile controldelegation.Profile) (controldelegation.Status, error) {
 	if d == nil || d.stack == nil || d.stack.Delegation.ResetFn == nil {
 		return controldelegation.Status{}, missingRuntimeDependency("delegation reset")

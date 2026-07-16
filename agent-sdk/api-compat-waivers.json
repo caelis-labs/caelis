@@ -3,6 +3,18 @@
   "current_snapshot": "agent-sdk/api.txt",
   "removals": [
     {
+      "package": "github.com/caelis-labs/caelis/agent-sdk",
+      "sha256": "f05d5f0550a7c1df1324a07ec50dd2d127cb1f7ed4fea0285b39d4110e726c89",
+      "symbol": "type AttachParticipantRequest",
+      "reason": "pre-v1 adds an explicit per-participant reasoning effort so direct profile runs apply their bound execution choice before the first ACP prompt"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
+      "sha256": "3d6b9096ae1a01b47509a330549a4f91b12b61cddb431cb065b76444a528e5dc",
+      "symbol": "type AttachRequest",
+      "reason": "pre-v1 carries the Control-selected participant reasoning effort through the transport-neutral controller attachment boundary"
+    },
+    {
       "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
       "sha256": "7b3adf809bd5b795c99a4c2f8f89aa5ff3bfbe8eae431e241389b6cdbbc31117",
       "symbol": "type ContextRoute",
@@ -25,6 +37,12 @@
       "sha256": "f026168f58f1441a37af2c251d39f80b43dab5b65eba68261e0942e019869add",
       "symbol": "type TurnRequest",
       "reason": "pre-v1 replaces adapter-rendered context preludes with a neutral typed ContextTransfer so Control owns routing policy and prompt adapters own rendering"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "0cd9f88ef7d7e86e520e798e24f54629f35176dc8df9bb7533f97779e4090d5d",
+      "symbol": "type ParticipantBinding",
+      "reason": "pre-v1 persists the participant reasoning effort required to reattach an ACP profile run without changing its execution choice"
     },
     {
       "package": "github.com/caelis-labs/caelis/agent-sdk/session",

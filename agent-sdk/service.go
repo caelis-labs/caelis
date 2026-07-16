@@ -145,6 +145,9 @@ type AttachParticipantRequest struct {
 	Role       session.ParticipantRole `json:"role,omitempty"`
 	Source     string                  `json:"source,omitempty"`
 	Label      string                  `json:"label,omitempty"`
+	// ReasoningEffort optionally configures the participant's ACP session
+	// before its first prompt and is preserved for durable reattachment.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // DetachParticipantRequest removes one attached participant and releases

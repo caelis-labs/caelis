@@ -70,10 +70,17 @@ func (s *Stack) loadDelegationResolutionSnapshot() (*delegationResolutionSnapsho
 	}
 }
 
-func fixedDelegationAgents() []sdkdelegation.Agent {
+func delegationAgentsForConfiguration(configuration controldelegation.Configuration) []sdkdelegation.Agent {
+	visible := map[controldelegation.Profile]struct{}{controldelegation.ProfileSelf: {}}
+	for _, profile := range controldelegation.BoundProfiles(configuration) {
+		visible[profile] = struct{}{}
+	}
 	definitions := controldelegation.Definitions()
 	out := make([]sdkdelegation.Agent, 0, len(definitions))
 	for _, definition := range definitions {
+		if _, ok := visible[definition.Profile]; !ok {
+			continue
+		}
 		out = append(out, sdkdelegation.Agent{
 			Name:        string(definition.Profile),
 			Description: definition.Description,
@@ -83,38 +90,37 @@ func fixedDelegationAgents() []sdkdelegation.Agent {
 }
 
 func (s *Stack) delegationSpawnTargets(modelRef string, reasoningEffort string) (map[string]spawn.Target, error) {
+	_, targets, err := s.delegationSpawnConfiguration(modelRef, reasoningEffort)
+	return targets, err
+}
+
+func (s *Stack) delegationSpawnConfiguration(modelRef string, reasoningEffort string) ([]sdkdelegation.Agent, map[string]spawn.Target, error) {
 	if s == nil || s.store == nil || s.lookup == nil {
-		return nil, fmt.Errorf("gatewayapp: delegation placement is unavailable")
+		return nil, nil, fmt.Errorf("gatewayapp: delegation placement is unavailable")
 	}
 	snapshot, err := s.loadDelegationResolutionSnapshot()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	self, err := s.selfDelegationTarget(modelRef, reasoningEffort)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	targets := make(map[string]spawn.Target, len(controldelegation.Definitions()))
-	for _, definition := range controldelegation.Definitions() {
-		profile := definition.Profile
+	agents := delegationAgentsForConfiguration(snapshot.configuration)
+	targets := make(map[string]spawn.Target, len(agents))
+	targets[string(controldelegation.ProfileSelf)] = self
+	for _, profile := range controldelegation.BoundProfiles(snapshot.configuration) {
 		resolution, err := controldelegation.Resolve(snapshot.configuration, profile, snapshot.roster, snapshot.models)
 		if err != nil {
-			return nil, err
-		}
-		if resolution.Binding.Target == controldelegation.TargetSelf {
-			target := self
-			target.Selector = string(profile)
-			target.Placement.Fingerprint = delegationPlacementFingerprint(target)
-			targets[string(profile)] = target
-			continue
+			return nil, nil, err
 		}
 		target, err := s.rosterDelegationTarget(profile, resolution, snapshot.roster, snapshot.models)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		targets[string(profile)] = target
 	}
-	return targets, nil
+	return agents, targets, nil
 }
 
 func (s *Stack) selfDelegationTarget(modelRef string, reasoningEffort string) (spawn.Target, error) {

@@ -37,7 +37,7 @@ func (e *AgentInUseError) Error() string {
 		return "control/agents: Agent is still in use"
 	}
 	return fmt.Sprintf(
-		"control/agents: Agent %q controls recoverable task session %q; run /lead local in that task before disconnecting it",
+		"control/agents: Agent %q controls recoverable task session %q; close that task before disconnecting the Agent",
 		strings.TrimSpace(e.AgentID),
 		strings.TrimSpace(e.SessionID),
 	)

@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/ports/gateway"
@@ -30,8 +31,15 @@ type stackRuntimeConfig struct {
 	EstimatedPromptPrefixTokens int
 }
 
-func delegationAgentsForSpawn() []delegation.Agent {
-	return fixedDelegationAgents()
+func (s *Stack) delegationAgentsForSpawn() []delegation.Agent {
+	if s == nil {
+		return delegationAgentsForConfiguration(controldelegation.Configuration{})
+	}
+	snapshot, err := s.loadDelegationResolutionSnapshot()
+	if err != nil {
+		return delegationAgentsForConfiguration(controldelegation.Configuration{})
+	}
+	return delegationAgentsForConfiguration(snapshot.configuration)
 }
 
 func systemPromptWithDelegationGuidance(systemPrompt string) string {

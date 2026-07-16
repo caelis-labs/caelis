@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	pluginapi "github.com/caelis-labs/caelis/ports/plugin"
@@ -171,6 +172,34 @@ func (s *Stack) withReviewerAgent(resolved assembly.ResolvedAssembly, runtimeCfg
 			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: host agent %q conflicts with the fixed Reviewer scene", ReviewerAgentID)
 		}
 	}
+	reviewerModel := runtimeCfg.Model
+	if s.store != nil {
+		doc, loadErr := s.store.Load()
+		if loadErr != nil {
+			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: load Reviewer model binding: %w", loadErr)
+		}
+		configured, bound, resolveErr := controlsystemagent.ResolveModel(
+			doc.SystemAgents,
+			controlsystemagent.Reviewer,
+			doc.AgentRoster,
+			doc.Models.Configs,
+		)
+		if resolveErr != nil {
+			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer model binding: %w", resolveErr)
+		}
+		if bound {
+			if s.lookup == nil {
+				return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer model binding: model lookup unavailable")
+			}
+			reviewerModel, resolveErr = s.lookup.ResolveConfig(configured.ID)
+			if resolveErr != nil {
+				return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer model %q: %w", configured.ID, resolveErr)
+			}
+			if configured.ReasoningEffort != "" {
+				reviewerModel.ReasoningEffort = configured.ReasoningEffort
+			}
+		}
+	}
 	reviewer, err := configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		Config: Config{
 			AppName:                   s.AppName,
@@ -182,7 +211,7 @@ func (s *Stack) withReviewerAgent(resolved assembly.ResolvedAssembly, runtimeCfg
 			PolicyProfile:             runtimeCfg.PolicyProfile,
 			ContextWindow:             runtimeCfg.ContextWindow,
 			SystemPrompt:              fixedReviewerSystemPrompt(runtimeCfg.SystemPrompt),
-			Model:                     runtimeCfg.Model,
+			Model:                     reviewerModel,
 		},
 		AppName:      s.AppName,
 		UserID:       s.UserID,

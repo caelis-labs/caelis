@@ -12,6 +12,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
@@ -57,6 +58,12 @@ type ModelChoice struct {
 	EndpointID string
 	BaseURL    string
 	Detail     string
+}
+
+type SystemAgentRuntimeDeps struct {
+	StatusFn func(context.Context) (controlsystemagent.Status, error)
+	BindFn   func(context.Context, controlsystemagent.BindRequest) (controlsystemagent.Status, error)
+	ResetFn  func(context.Context, controlsystemagent.ID) (controlsystemagent.Status, error)
 }
 
 type SessionRuntimeState struct {
@@ -251,6 +258,7 @@ type RuntimeStack struct {
 	Status           StatusRuntimeDeps
 	Agent            AgentRuntimeDeps
 	Delegation       DelegationRuntimeDeps
+	SystemAgent      SystemAgentRuntimeDeps
 	Model            ModelRuntimeDeps
 	Sandbox          SandboxRuntimeDeps
 	Skill            SkillRuntimeDeps

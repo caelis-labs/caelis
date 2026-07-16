@@ -14,7 +14,9 @@ func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
 	want := []string{
 		"help",
 		"review",
-		"lead",
+		"breeze",
+		"orbit",
+		"zenith",
 		"connect",
 		"subagent",
 		"plugin",
@@ -40,13 +42,16 @@ func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
 }
 
 func TestACPSlashCommandsFilterLocalAndReservedRemoteCommands(t *testing.T) {
-	got := acpSlashCommands([]string{"help"}, control.AgentStatusSnapshot{ControllerCommands: []string{
-		"/remote", "/compact", "/new now", "/status", "/sandbox",
-	}})
+	got := acpSlashCommands([]string{"help"}, control.AgentStatusSnapshot{
+		AvailableAgents: []control.AgentCandidate{{Name: "codex"}},
+		ControllerCommands: []string{
+			"/remote", "/compact", "/new now", "/status", "/sandbox", "/lead", "/codex", "/codex(lina)",
+		},
+	})
 	if !sliceContainsString(got, "remote") {
 		t.Fatalf("acpSlashCommands() = %#v, want routable remote command", got)
 	}
-	for _, filtered := range []string{"compact", "new", "status", "sandbox"} {
+	for _, filtered := range []string{"compact", "new", "status", "sandbox", "lead", "codex", "codex(lina)"} {
 		if sliceContainsString(got, filtered) {
 			t.Fatalf("acpSlashCommands() = %#v, should filter reserved /%s", got, filtered)
 		}

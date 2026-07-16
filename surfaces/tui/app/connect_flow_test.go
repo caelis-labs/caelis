@@ -55,7 +55,7 @@ func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {
 func TestConnectEnterSubmitsWhenCommandUnavailable(t *testing.T) {
 	called := ""
 	m := NewModel(Config{
-		Commands: []string{"help", "lead", "status", "resume", "model"},
+		Commands: []string{"help", "review", "status", "resume", "model"},
 		ExecuteLine: func(submission Submission) TaskResultMsg {
 			called = submission.Text
 			return TaskResultMsg{}

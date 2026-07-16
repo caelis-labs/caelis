@@ -75,8 +75,13 @@ func TestRuntimeParticipantLifecycleMayOverlapActiveTurnLease(t *testing.T) {
 		AttachmentGeneration: "generation-1",
 	}
 	backend := stubACPController{
-		attach: func(context.Context, controller.AttachRequest) (session.ParticipantBinding, error) {
-			return binding, nil
+		attach: func(_ context.Context, req controller.AttachRequest) (session.ParticipantBinding, error) {
+			if req.ReasoningEffort != "xhigh" {
+				t.Fatalf("Attach reasoning effort = %q, want xhigh", req.ReasoningEffort)
+			}
+			attached := binding
+			attached.ReasoningEffort = req.ReasoningEffort
+			return attached, nil
 		},
 		detach: func(_ context.Context, req controller.DetachRequest) error {
 			if req.ParticipantID != binding.ID || req.AttachmentGeneration != binding.AttachmentGeneration {
@@ -92,12 +97,12 @@ func TestRuntimeParticipantLifecycleMayOverlapActiveTurnLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	attached, err := runtime.AttachParticipant(context.Background(), agent.AttachParticipantRequest{
-		SessionRef: active.SessionRef, Agent: "claude", Role: session.ParticipantRoleSidecar,
+		SessionRef: active.SessionRef, Agent: "claude", Role: session.ParticipantRoleSidecar, ReasoningEffort: "xhigh",
 	})
 	if err != nil {
 		t.Fatalf("AttachParticipant() during active Turn error = %v", err)
 	}
-	if durable, ok := participantBinding(attached, binding.ID); !ok || durable.AttachmentGeneration != binding.AttachmentGeneration {
+	if durable, ok := participantBinding(attached, binding.ID); !ok || durable.AttachmentGeneration != binding.AttachmentGeneration || durable.ReasoningEffort != "xhigh" {
 		t.Fatalf("attached participant = %#v, want exact durable generation", durable)
 	}
 	detached, err := runtime.DetachParticipant(context.Background(), agent.DetachParticipantRequest{

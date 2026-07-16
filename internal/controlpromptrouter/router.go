@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	prompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
@@ -99,7 +100,7 @@ func (r Router) shouldDispatchSlash(ctx context.Context, cmd string) bool {
 		}
 		return r.dynamicSlashAllowed(ctx, cmd)
 	}
-	return r.isRegisteredAgent(ctx, cmd) || r.isDirectAgentRun(ctx, cmd)
+	return controldelegation.IsDirectRunProfile(cmd) || r.isDirectAgentRun(ctx, cmd)
 }
 
 func (r Router) dispatchPrivateSlash(ctx context.Context, req prompt.PrivateSlashRequest) (prompt.Result, bool, error) {
@@ -134,7 +135,7 @@ func (r Router) helpCommandNames(ctx context.Context) []string {
 	if r.commandNames != nil {
 		return r.commandNames(ctx, r.service)
 	}
-	return controlcommands.AppendRegisteredAgentNames(ctx, r.service, controlcommands.DefaultSharedNames())
+	return controlcommands.DefaultSharedNames()
 }
 
 func (r Router) noticeResult(text string) prompt.Result {
@@ -153,10 +154,6 @@ func (r Router) slashResult(result control.SlashCommandResult) prompt.Result {
 	}
 }
 
-func (r Router) isRegisteredAgent(ctx context.Context, agent string) bool {
-	return controlcommands.RegisteredAgentNameAllowed(ctx, r.service, agent)
-}
-
 func (r Router) isDirectAgentRun(ctx context.Context, name string) bool {
 	status, err := r.service.AgentStatus(contextOrBackground(ctx))
 	if err != nil {
@@ -167,12 +164,21 @@ func (r Router) isDirectAgentRun(ctx context.Context, name string) bool {
 
 func (r Router) isRemoteControllerCommand(ctx context.Context, name string) bool {
 	name = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(name, "/")))
-	if name == "" || controlcommands.IsKnown(name) {
+	if name == "" || controlcommands.IsKnown(name) || strings.EqualFold(name, "lead") {
 		return false
 	}
 	status, err := r.service.AgentStatus(contextOrBackground(ctx))
 	if err != nil || !strings.EqualFold(strings.TrimSpace(status.ControllerKind), "acp") {
 		return false
+	}
+	baseName := name
+	if agent, _, ok := controlagents.ParseRunName(name); ok {
+		baseName = agent
+	}
+	for _, agent := range status.AvailableAgents {
+		if controlagents.NormalizeName(agent.Name) == baseName {
+			return false
+		}
 	}
 	for _, advertised := range status.ControllerCommands {
 		advertised = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(advertised, "/")))
@@ -186,13 +192,13 @@ func (r Router) isRemoteControllerCommand(ctx context.Context, name string) bool
 func directAgentRuns(status control.AgentStatusSnapshot) []controlagents.Run {
 	runs := make([]controlagents.Run, 0, len(status.Participants))
 	for _, participant := range status.Participants {
-		runs = append(runs, controlagents.RunFromParticipant(participant.Label, participant.AgentName, participant.Kind, participant.Role))
+		runs = append(runs, controldelegation.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))
 	}
 	return runs
 }
 
 func availableAgentCommandName(name string) bool {
-	return !controlcommands.IsKnown(name) && !strings.EqualFold(strings.TrimSpace(name), "sandbox")
+	return controldelegation.IsDirectRunProfile(name)
 }
 
 func notice(text string) eventstream.Envelope {

@@ -1287,6 +1287,9 @@ func TestManagerAttachRehydratesPersistedParticipant(t *testing.T) {
 		if cfg.Name != "tova" {
 			t.Fatalf("startClient cfg = %q, want tova", cfg.Name)
 		}
+		if got := cfg.SessionOptions.ConfigValues["reasoning_effort"]; got != "xhigh" {
+			t.Fatalf("startClient reasoning effort = %q, want xhigh", got)
+		}
 		return nil, resumeRemoteSessionID, controllerClientState{}, nil
 	}
 
@@ -1301,16 +1304,17 @@ func TestManagerAttachRehydratesPersistedParticipant(t *testing.T) {
 		},
 	}
 	persisted := session.ParticipantBinding{
-		ID:             "codex-3",
-		Kind:           session.ParticipantKindACP,
-		Role:           session.ParticipantRoleSidecar,
-		AgentName:      "tova",
-		Label:          "@tova",
-		SessionID:      "remote-tova",
-		Source:         "tui_agent_add",
-		ContextSyncSeq: 7,
-		AttachedAt:     time.Unix(50, 0),
-		ControllerRef:  "epoch-1",
+		ID:              "codex-3",
+		Kind:            session.ParticipantKindACP,
+		Role:            session.ParticipantRoleSidecar,
+		AgentName:       "tova",
+		Label:           "@tova",
+		ReasoningEffort: "xhigh",
+		SessionID:       "remote-tova",
+		Source:          "tui_agent_add",
+		ContextSyncSeq:  7,
+		AttachedAt:      time.Unix(50, 0),
+		ControllerRef:   "epoch-1",
 	}
 	binding, err := manager.Attach(context.Background(), controller.AttachRequest{
 		Session: parentSession,
@@ -1323,7 +1327,7 @@ func TestManagerAttachRehydratesPersistedParticipant(t *testing.T) {
 	if resumed != "remote-tova" {
 		t.Fatalf("resumeRemoteSessionID = %q, want remote-tova", resumed)
 	}
-	if binding.ID != "codex-3" || binding.SessionID != "remote-tova" || binding.ContextSyncSeq != 7 || binding.Label != "@tova" {
+	if binding.ID != "codex-3" || binding.SessionID != "remote-tova" || binding.ContextSyncSeq != 7 || binding.Label != "@tova" || binding.ReasoningEffort != "xhigh" {
 		t.Fatalf("binding = %#v, want persisted participant binding", binding)
 	}
 

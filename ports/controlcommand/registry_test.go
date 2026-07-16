@@ -1,12 +1,9 @@
 package controlcommand
 
 import (
-	"context"
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
@@ -14,7 +11,9 @@ func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
 	want := []string{
 		"help",
 		"review",
-		"lead",
+		"breeze",
+		"orbit",
+		"zenith",
 		"connect",
 		"subagent",
 		"plugin",
@@ -43,7 +42,7 @@ func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
 
 func TestDefaultSharedNamesExcludeTUIPrivateCommands(t *testing.T) {
 	got := DefaultSharedNamesForPlatform("linux")
-	for _, want := range []string{"help", "review", "lead", "model", "status", "new", "resume", "compact"} {
+	for _, want := range []string{"help", "review", "breeze", "orbit", "zenith", "model", "status", "new", "resume", "compact"} {
 		if !sliceContainsString(got, want) {
 			t.Fatalf("DefaultSharedNamesForPlatform(linux) = %#v, want %q", got, want)
 		}
@@ -60,7 +59,7 @@ func TestDefaultSharedNamesExcludeTUIPrivateCommands(t *testing.T) {
 
 func TestDefaultACPNamesExposeACPPromptCommandsOnly(t *testing.T) {
 	got := DefaultACPNamesForPlatform("linux")
-	want := []string{"status", "lead", "compact", "review"}
+	want := []string{"status", "breeze", "orbit", "zenith", "compact", "review"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DefaultACPNamesForPlatform(linux) = %#v, want %#v", got, want)
 	}
@@ -75,38 +74,16 @@ func TestDefaultACPNamesExposeACPPromptCommandsOnly(t *testing.T) {
 }
 
 func TestHelpTextUsesRegistrySpecs(t *testing.T) {
-	got := HelpText([]string{"help", "lead", "review", "custom"})
-	for _, want := range []string{"/help", "Show commands and shortcuts", "/lead <agent|local>", "/review [instructions]", "/custom <prompt>"} {
+	got := HelpText([]string{"help", "breeze", "review", "custom"})
+	for _, want := range []string{"/help", "Show commands and shortcuts", "/breeze <prompt>", "/review [instructions]", "/custom <prompt>"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("HelpText() = %q, want %q", got, want)
 		}
 	}
 }
 
-func TestAppendRegisteredAgentNamesDedupesAndFilters(t *testing.T) {
-	lister := staticAgentLister{
-		{Name: "Helper"},
-		{Name: "status"},
-		{Name: "helper"},
-		{Name: "  "},
-	}
-	got := AppendRegisteredAgentNames(context.Background(), lister, []string{"status"}, func(name string) bool {
-		return name != "status"
-	})
-	want := []string{"status", "helper"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("AppendRegisteredAgentNames() = %#v, want %#v", got, want)
-	}
-	if !RegisteredAgentNameAllowed(context.Background(), lister, "helper") {
-		t.Fatal("RegisteredAgentNameAllowed(helper) = false, want true")
-	}
-	if AgentNameAllowed([]string{"helper"}, "status", func(name string) bool { return name != "status" }) {
-		t.Fatal("AgentNameAllowed(status) = true despite filter")
-	}
-}
-
 func TestLocalDuringACPMatchesAdvertisedLocalCommands(t *testing.T) {
-	local := []string{"help", "review", "lead", "subagent", "plugin", "status", "resume", "model", "exit", "quit"}
+	local := []string{"help", "review", "breeze", "orbit", "zenith", "subagent", "plugin", "status", "resume", "model", "exit", "quit"}
 	for _, name := range local {
 		if !IsLocalDuringACP(name) {
 			t.Fatalf("IsLocalDuringACP(%q) = false, want true", name)
@@ -156,12 +133,6 @@ func TestDoctorRootCandidatesExcludeRemovedFixAction(t *testing.T) {
 	if got := RootArgCandidatesForPlatform("doctor", "windows"); len(got) != 0 {
 		t.Fatalf("RootArgCandidates(doctor) = %#v, want none", got)
 	}
-}
-
-type staticAgentLister []control.AgentCandidate
-
-func (l staticAgentLister) ListAgents(context.Context, int) ([]control.AgentCandidate, error) {
-	return append([]control.AgentCandidate(nil), l...), nil
 }
 
 func sliceContainsString(values []string, want string) bool {

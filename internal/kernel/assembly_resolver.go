@@ -60,6 +60,10 @@ type AssemblyResolverConfig struct {
 	AgentName         string
 	BaseMetadata      map[string]any
 	ToolAugmenter     ToolAugmenter
+	// ApprovalModelResolver optionally returns the fully configured model for
+	// the Control-managed approval reviewer. handled=false preserves the current
+	// Session model behavior.
+	ApprovalModelResolver func(context.Context, session.SessionRef) (resolved model.LLM, handled bool, err error)
 }
 
 type AssemblyResolver struct {
@@ -68,14 +72,15 @@ type AssemblyResolver struct {
 	sessions interface {
 		SnapshotState(context.Context, session.SessionRef) (map[string]any, error)
 	}
-	assembly          assembly.ResolvedAssembly
-	defaultModelAlias string
-	contextWindow     int
-	modelLookup       ModelLookup
-	tools             []tool.Tool
-	agentName         string
-	baseMetadata      map[string]any
-	toolAugmenter     ToolAugmenter
+	assembly              assembly.ResolvedAssembly
+	defaultModelAlias     string
+	contextWindow         int
+	modelLookup           ModelLookup
+	tools                 []tool.Tool
+	agentName             string
+	baseMetadata          map[string]any
+	toolAugmenter         ToolAugmenter
+	approvalModelResolver func(context.Context, session.SessionRef) (model.LLM, bool, error)
 }
 
 type ToolAugmenter func(context.Context, ToolAugmentContext) (ToolAugmentation, error)
@@ -109,15 +114,16 @@ func NewAssemblyResolver(cfg AssemblyResolverConfig) (*AssemblyResolver, error) 
 		agentName = "main"
 	}
 	return &AssemblyResolver{
-		sessions:          cfg.Sessions,
-		assembly:          assembly.CloneResolvedAssembly(cfg.Assembly),
-		defaultModelAlias: strings.TrimSpace(cfg.DefaultModelAlias),
-		contextWindow:     cfg.ContextWindow,
-		modelLookup:       cfg.ModelLookup,
-		tools:             append([]tool.Tool(nil), cfg.Tools...),
-		agentName:         agentName,
-		baseMetadata:      cloneMap(cfg.BaseMetadata),
-		toolAugmenter:     cfg.ToolAugmenter,
+		sessions:              cfg.Sessions,
+		assembly:              assembly.CloneResolvedAssembly(cfg.Assembly),
+		defaultModelAlias:     strings.TrimSpace(cfg.DefaultModelAlias),
+		contextWindow:         cfg.ContextWindow,
+		modelLookup:           cfg.ModelLookup,
+		tools:                 append([]tool.Tool(nil), cfg.Tools...),
+		agentName:             agentName,
+		baseMetadata:          cloneMap(cfg.BaseMetadata),
+		toolAugmenter:         cfg.ToolAugmenter,
+		approvalModelResolver: cfg.ApprovalModelResolver,
 	}, nil
 }
 
@@ -187,19 +193,31 @@ func (r *AssemblyResolver) ResolveControllerTurn(ctx context.Context, intent Tur
 	}, nil
 }
 
-// ResolveApprovalModel resolves the model currently selected for one session so
-// automatic approval review uses the same model surface as the main session.
+// ResolveApprovalModel resolves the configured approval-review model, falling
+// back to the model currently selected for the Session.
 func (r *AssemblyResolver) ResolveApprovalModel(ctx context.Context, ref session.SessionRef) (model.LLM, error) {
 	if r == nil {
 		return nil, fmt.Errorf("gateway: model lookup is required")
 	}
-	state, err := r.snapshotState(ctx, ref)
-	if err != nil {
-		return nil, err
-	}
 	snap := r.snapshot()
 	if snap.modelLookup == nil {
 		return nil, fmt.Errorf("gateway: model lookup is required")
+	}
+	if snap.approvalModelResolver != nil {
+		resolved, handled, err := snap.approvalModelResolver(ctx, ref)
+		if err != nil {
+			return nil, fmt.Errorf("gateway: resolve approval model: %w", err)
+		}
+		if handled {
+			if resolved == nil {
+				return nil, fmt.Errorf("gateway: approval model resolver returned no model")
+			}
+			return resolved, nil
+		}
+	}
+	state, err := r.snapshotState(ctx, ref)
+	if err != nil {
+		return nil, err
 	}
 	model, err := snap.modelLookup.ResolveModel(ctx, resolveModelAliasWith(snap.modelLookup, snap.defaultModelAlias, state, ""), snap.contextWindow)
 	if err != nil {
@@ -255,14 +273,15 @@ func (r *AssemblyResolver) ListModelAliases(ctx context.Context, ref session.Ses
 }
 
 type assemblyResolverSnapshot struct {
-	assembly          assembly.ResolvedAssembly
-	defaultModelAlias string
-	contextWindow     int
-	modelLookup       ModelLookup
-	tools             []tool.Tool
-	agentName         string
-	baseMetadata      map[string]any
-	toolAugmenter     ToolAugmenter
+	assembly              assembly.ResolvedAssembly
+	defaultModelAlias     string
+	contextWindow         int
+	modelLookup           ModelLookup
+	tools                 []tool.Tool
+	agentName             string
+	baseMetadata          map[string]any
+	toolAugmenter         ToolAugmenter
+	approvalModelResolver func(context.Context, session.SessionRef) (model.LLM, bool, error)
 }
 
 func (r *AssemblyResolver) snapshot() assemblyResolverSnapshot {
@@ -272,14 +291,15 @@ func (r *AssemblyResolver) snapshot() assemblyResolverSnapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return assemblyResolverSnapshot{
-		assembly:          assembly.CloneResolvedAssembly(r.assembly),
-		defaultModelAlias: r.defaultModelAlias,
-		contextWindow:     r.contextWindow,
-		modelLookup:       r.modelLookup,
-		tools:             append([]tool.Tool(nil), r.tools...),
-		agentName:         r.agentName,
-		baseMetadata:      cloneMap(r.baseMetadata),
-		toolAugmenter:     r.toolAugmenter,
+		assembly:              assembly.CloneResolvedAssembly(r.assembly),
+		defaultModelAlias:     r.defaultModelAlias,
+		contextWindow:         r.contextWindow,
+		modelLookup:           r.modelLookup,
+		tools:                 append([]tool.Tool(nil), r.tools...),
+		agentName:             r.agentName,
+		baseMetadata:          cloneMap(r.baseMetadata),
+		toolAugmenter:         r.toolAugmenter,
+		approvalModelResolver: r.approvalModelResolver,
 	}
 }
 

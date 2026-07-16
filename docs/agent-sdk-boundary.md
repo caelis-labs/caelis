@@ -164,24 +164,35 @@ never uninstalls the external or Caelis-managed adapter, never deletes prior
 Sessions, and is rejected while a Turn is active or while the selected Agent
 controls the current task.
 
-The same roster supplies direct slash dispatch, delegation binding targets,
-and Control-authorized handoff targets. Model-visible Spawn exposes only the
-fixed capability profiles `self`, `breeze`, `orbit`, and `zenith`; it never
-expands every connected Agent or model ID into the tool schema. `self` and an
-unbound profile inherit the current Session model and effective reasoning
-effort. `/subagent` binds Breeze, Orbit, or Zenith to one roster Agent and may
+The same roster supplies delegation and system-Agent binding targets, plus
+Control-authorized handoff targets. Roster identities are configuration data;
+connecting a model or external ACP Agent never creates a raw slash command for
+that Agent ID. Model-visible Spawn always exposes `self` and exposes the fixed
+capability profiles `breeze`, `orbit`, and `zenith` only when each one has an
+explicit roster Agent binding; it never expands every connected Agent or model
+ID into the tool schema. `self` inherits the current Session model and effective
+reasoning effort. An unbound configurable profile is absent from both Spawn and
+the user-facing slash catalog; a manually entered direct run still fails closed.
+`/subagent` first offers `list` and `bind`; it binds Breeze, Orbit, or Zenith to
+one roster Agent and may
 override effort only for model-backed Agents; external ACP Agents retain their
-own defaults. Removing a roster Agent atomically drops its profile bindings, so
-those profiles inherit `self` without a separate Surface reset step. Control
+own defaults. The same command binds Guardian and Reviewer only to model-backed
+Agents and may override their reasoning effort, with an unbound system Agent
+retaining its product default. Removing a
+roster Agent atomically drops its profile and system-Agent bindings. Control
 resolves the profile to a concrete Agent/model/effort
 placement before writing the durable Spawn intent and persists that placement
 and its fingerprint with the task, so later configuration changes cannot alter
-recovery. This is a projection over the one roster, not a second Agent catalog.
+recovery. A direct profile slash run applies the same effort override before
+the participant's first ACP prompt and records it in the durable participant
+binding so reattachment preserves the execution choice. This is a projection
+over the one roster, not a second Agent catalog.
 
-Presentation command resolution is deterministic:
-core command, registered Agent, addressable direct Agent run, then a slash
-command advertised by the active remote ACP controller. Unknown slash input
-fails closed instead of becoming an ordinary model prompt.
+Presentation command resolution is deterministic: core command, fixed profile,
+addressable profile run such as `/breeze(lina)`, then a non-Agent slash command
+advertised by the active remote ACP controller. Raw roster Agent names and
+their remote run aliases are filtered. Unknown slash input fails closed instead
+of becoming an ordinary model prompt.
 
 ## Controller, Participant, Delegation, and Handoff
 
@@ -207,9 +218,10 @@ transfer, and recovery contracts. Control owns the handoff operation:
 
 There is no LLM-facing handoff tool. A model recommendation is advisory input to
 Control, not authority to mutate the controller binding.
-An explicit user `/lead <agent|local>` command is one presentation of that
-authorization. It resolves the target from the Control Agent roster and then
-enters the fenced handoff operation above.
+The former `/lead` presentation has been removed pending a focused redesign.
+The fenced Control operation remains available to trusted product-control
+callers; roster membership by itself does not expose a user-facing handoff
+command.
 
 The current Caelis implementation places product assembly in
 `internal/controlassembly` and shared-ledger routing, endpoint lifecycle,

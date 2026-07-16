@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -19,6 +20,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controldelegation "github.com/caelis-labs/caelis/control/delegation"
+	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -67,6 +69,25 @@ func (s *Stack) saveModelConfigsAgentRosterAndDelegation(
 	doc.Models = s.lookup.Snapshot()
 	doc.AgentRoster = controlagents.NormalizeConfiguration(roster)
 	doc.Delegation = controldelegation.NormalizeConfiguration(delegation)
+	return s.store.Save(doc)
+}
+
+func (s *Stack) saveModelConfigsAgentRosterDelegationAndSystemAgents(
+	roster controlagents.Configuration,
+	delegation controldelegation.Configuration,
+	systemAgents controlsystemagent.Configuration,
+) error {
+	if s == nil || s.store == nil || s.lookup == nil {
+		return nil
+	}
+	doc, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	doc.Models = s.lookup.Snapshot()
+	doc.AgentRoster = controlagents.NormalizeConfiguration(roster)
+	doc.Delegation = controldelegation.NormalizeConfiguration(delegation)
+	doc.SystemAgents = controlsystemagent.NormalizeConfiguration(systemAgents)
 	return s.store.Save(doc)
 }
 
@@ -367,13 +388,16 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		ModelLookup:       s.lookup,
 		Tools:             tools,
 		BaseMetadata:      cloneMap(effectiveBaseMetadata),
-		ToolAugmenter: func(ctx context.Context, req kernelimpl.ToolAugmentContext) (kernelimpl.ToolAugmentation, error) {
-			agents := delegationAgentsForSpawn()
-			if len(agents) == 0 {
-				return kernelimpl.ToolAugmentation{}, nil
+		ApprovalModelResolver: func(ctx context.Context, _ session.SessionRef) (model.LLM, bool, error) {
+			resolved, bound, err := s.resolveSystemAgentModel(ctx, controlsystemagent.Guardian, runtimeCfg.ContextWindow)
+			if err != nil {
+				return nil, false, err
 			}
+			return resolved.Model, bound, nil
+		},
+		ToolAugmenter: func(ctx context.Context, req kernelimpl.ToolAugmentContext) (kernelimpl.ToolAugmentation, error) {
 			s.agentRosterMu.RLock()
-			targets, err := s.delegationSpawnTargets(req.EffectiveModelRef, req.EffectiveReasoningEffort)
+			agents, targets, err := s.delegationSpawnConfiguration(req.EffectiveModelRef, req.EffectiveReasoningEffort)
 			s.agentRosterMu.RUnlock()
 			if err != nil {
 				return kernelimpl.ToolAugmentation{}, err

@@ -141,6 +141,37 @@ func TestAssemblyResolverSessionReasoningOverridesModeAndModelDefault(t *testing
 	}
 }
 
+func TestAssemblyResolverApprovalModelResolverOverridesSessionModel(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := NewAssemblyResolver(AssemblyResolverConfig{
+		Sessions: snapshotStateFunc(func(context.Context, session.SessionRef) (map[string]any, error) {
+			return map[string]any{StateCurrentModelAlias: "session-model"}, nil
+		}),
+		DefaultModelAlias: "default-model",
+		ApprovalModelResolver: func(_ context.Context, ref session.SessionRef) (model.LLM, bool, error) {
+			if ref.SessionID != "s1" {
+				t.Fatalf("approval model Session = %#v", ref)
+			}
+			return fakeLLM{name: "guardian-model"}, true, nil
+		},
+		ModelLookup: modelLookupFunc(func(_ context.Context, alias string, _ int) (ModelResolution, error) {
+			t.Fatalf("ResolveModel(%q) called despite configured Guardian model", alias)
+			return ModelResolution{}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewAssemblyResolver() error = %v", err)
+	}
+	resolved, err := resolver.ResolveApprovalModel(context.Background(), session.SessionRef{SessionID: "s1"})
+	if err != nil {
+		t.Fatalf("ResolveApprovalModel() error = %v", err)
+	}
+	if resolved == nil || resolved.Name() != "guardian-model" {
+		t.Fatalf("ResolveApprovalModel() = %#v, want guardian-model", resolved)
+	}
+}
+
 func TestAssemblyResolverToolAugmenterReceivesEffectiveModelAndEffort(t *testing.T) {
 	t.Parallel()
 

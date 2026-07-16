@@ -116,7 +116,7 @@ func (d *Adapter) DisconnectACP(ctx context.Context, agentID string) (controlage
 		var inUse *controlagents.AgentInUseError
 		if errors.As(err, &inUse) && d.hasSession && strings.TrimSpace(inUse.SessionID) == strings.TrimSpace(d.session.SessionID) {
 			return controlagents.DisconnectResult{}, fmt.Errorf(
-				"app/gatewayapp/controladapter: Agent %q currently controls this task; run /lead local before disconnecting it: %w",
+				"app/gatewayapp/controladapter: Agent %q currently controls this task; close the controlling task before disconnecting it: %w",
 				strings.TrimSpace(inUse.AgentID),
 				err,
 			)

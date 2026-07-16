@@ -159,7 +159,7 @@ func TestRouterHelpReturnsStructuredPayload(t *testing.T) {
 	router := New(prompt.RouterConfig{
 		Service: svc,
 		CommandNames: func(context.Context, control.Service) []string {
-			return []string{"help", "status", "helper"}
+			return []string{"help", "status", "breeze"}
 		},
 	})
 
@@ -173,32 +173,39 @@ func TestRouterHelpReturnsStructuredPayload(t *testing.T) {
 	if got := len(help.SlashResult.Help.Items); got != 3 {
 		t.Fatalf("help items = %d, want 3", got)
 	}
-	if !help.SlashResult.Help.Items[2].Dynamic || help.SlashResult.Help.Items[2].Usage != "/helper <prompt>" {
-		t.Fatalf("dynamic help item = %#v, want helper prompt command", help.SlashResult.Help.Items[2])
+	if help.SlashResult.Help.Items[2].Dynamic || help.SlashResult.Help.Items[2].Usage != "/breeze <prompt>" {
+		t.Fatalf("profile help item = %#v, want Breeze prompt command", help.SlashResult.Help.Items[2])
 	}
 	if len(help.Events) != 0 {
 		t.Fatalf("Route(/help).Events = %#v, want no eager fallback events", help.Events)
 	}
-	if text := control.FormatSlashResult(*help.SlashResult); !strings.Contains(text, "/helper <prompt>") {
-		t.Fatalf("FormatSlashResult(/help) = %q, want helper command", text)
+	if text := control.FormatSlashResult(*help.SlashResult); !strings.Contains(text, "/breeze <prompt>") {
+		t.Fatalf("FormatSlashResult(/help) = %q, want Breeze command", text)
 	}
 }
 
-func TestRouterDynamicAgentMentionUnknownAndNormalPrompt(t *testing.T) {
+func TestRouterFixedProfileRejectsRawAgentAndRoutesNormalPrompt(t *testing.T) {
 	svc := &fakeService{
 		status: control.StatusSnapshot{Session: control.StatusSession{ID: "session-1"}},
 		agents: []control.AgentCandidate{{Name: "helper", Description: "bounded helper"}},
 		turn:   &fakeTurn{id: "turn-1"},
 	}
 	router := New(prompt.RouterConfig{Service: svc})
-	dynamic, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{
-		Text:        "/helper inspect repo",
-		Attachments: []control.Attachment{{Name: "img.png", Offset: len([]rune("/helper inspect "))}},
-	}})
+	raw, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper inspect repo"}})
 	if err != nil {
 		t.Fatalf("Route(/helper) error = %v", err)
 	}
-	if dynamic.Turn == nil || svc.startedAgent != "helper" || svc.startedPrompt != "inspect repo" {
+	if !raw.Handled || !strings.Contains(firstNotice(raw), "unknown command: /helper") || svc.startedAgent != "" {
+		t.Fatalf("raw Agent route = %#v started=%q, want hidden", raw, svc.startedAgent)
+	}
+	dynamic, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{
+		Text:        "/breeze inspect repo",
+		Attachments: []control.Attachment{{Name: "img.png", Offset: len([]rune("/breeze inspect "))}},
+	}})
+	if err != nil {
+		t.Fatalf("Route(/breeze) error = %v", err)
+	}
+	if dynamic.Turn == nil || svc.startedAgent != "breeze" || svc.startedPrompt != "inspect repo" {
 		t.Fatalf("dynamic route turn=%#v agent=%q prompt=%q", dynamic.Turn, svc.startedAgent, svc.startedPrompt)
 	}
 	if len(svc.startedAttachments) != 1 || svc.startedAttachments[0].Offset != len([]rune("inspect ")) {
@@ -231,30 +238,30 @@ func TestRouterDirectAgentRunSlashContinuesAddressableRun(t *testing.T) {
 	svc := &fakeService{
 		agents: []control.AgentCandidate{{Name: "helper"}},
 		agentStatus: control.AgentStatusSnapshot{Participants: []control.AgentParticipantSnapshot{
-			{Label: "@lina", AgentName: "helper", Kind: "acp", Role: "sidecar"},
-			{Label: "@maya", AgentName: "helper", Kind: "acp", Role: "delegated"},
+			{Label: "@lina", AgentName: "helper", Kind: "acp", Role: "sidecar", Source: "slash_profile_breeze"},
+			{Label: "@maya", AgentName: "helper", Kind: "acp", Role: "delegated", Source: "slash_profile_breeze"},
 		}},
 		turn: &fakeTurn{id: "turn-1"},
 	}
 	router := New(prompt.RouterConfig{
 		Service: svc,
 		DynamicCommandAllowed: func(_ context.Context, command string) bool {
-			return command == "helper"
+			return command == "breeze"
 		},
 	})
-	result, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper(lina) continue"}})
+	result, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/breeze(lina) continue"}})
 	if err != nil {
 		t.Fatalf("Route(/helper(lina)) error = %v", err)
 	}
-	if result.Turn == nil || svc.continuedHandle != "helper(lina)" || svc.continuedPrompt != "continue" || svc.startedAgent != "" {
-		t.Fatalf("Route(/helper(lina)) = %#v continued=%q prompt=%q started=%q", result, svc.continuedHandle, svc.continuedPrompt, svc.startedAgent)
+	if result.Turn == nil || svc.continuedHandle != "breeze(lina)" || svc.continuedPrompt != "continue" || svc.startedAgent != "" {
+		t.Fatalf("Route(/breeze(lina)) = %#v continued=%q prompt=%q started=%q", result, svc.continuedHandle, svc.continuedPrompt, svc.startedAgent)
 	}
-	delegated, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper(maya) continue"}})
+	delegated, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/breeze(maya) continue"}})
 	if err != nil {
 		t.Fatalf("Route(/helper(maya)) error = %v", err)
 	}
-	if !delegated.Handled || !strings.Contains(firstNotice(delegated), "unknown command: /helper(maya)") {
-		t.Fatalf("Route(/helper(maya)) = %#v, want delegated run hidden", delegated)
+	if !delegated.Handled || !strings.Contains(firstNotice(delegated), "unknown command: /breeze(maya)") {
+		t.Fatalf("Route(/breeze(maya)) = %#v, want delegated run hidden", delegated)
 	}
 }
 
@@ -265,8 +272,9 @@ func TestRouterPrioritizesCoreAndAgentRunsBeforeRemoteControllerCommands(t *test
 		agentStatus: control.AgentStatusSnapshot{
 			ControllerKind:     "acp",
 			ControllerCommands: []string{"/foo", "/helper", "/helper(lina)", "/status"},
+			AvailableAgents:    []control.AgentCandidate{{Name: "helper"}},
 			Participants: []control.AgentParticipantSnapshot{
-				{Label: "@lina", AgentName: "helper", Kind: "acp", Role: "sidecar"},
+				{Label: "@lina", AgentName: "helper", Kind: "acp", Role: "sidecar", Source: "slash_profile_orbit"},
 			},
 		},
 		turn: &fakeTurn{id: "turn-1"},
@@ -283,20 +291,20 @@ func TestRouterPrioritizesCoreAndAgentRunsBeforeRemoteControllerCommands(t *test
 		t.Fatalf("Route(/foo) = %#v submitted=%#v, want original remote prompt", remote, svc.submitted)
 	}
 	svc.submitted = control.Submission{}
-	agent, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper inspect"}})
+	agent, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/orbit inspect"}})
 	if err != nil {
 		t.Fatalf("Route(/helper) error = %v", err)
 	}
-	if agent.Turn == nil || svc.startedAgent != "helper" || svc.submitted.Text != "" {
-		t.Fatalf("Route(/helper) = %#v started=%q submitted=%#v, want Agent run", agent, svc.startedAgent, svc.submitted)
+	if agent.Turn == nil || svc.startedAgent != "orbit" || svc.submitted.Text != "" {
+		t.Fatalf("Route(/orbit) = %#v started=%q submitted=%#v, want profile run", agent, svc.startedAgent, svc.submitted)
 	}
 	svc.submitted = control.Submission{}
-	run, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper(lina) continue"}})
+	run, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/orbit(lina) continue"}})
 	if err != nil {
 		t.Fatalf("Route(/helper(lina)) error = %v", err)
 	}
-	if run.Turn == nil || svc.continuedHandle != "helper(lina)" || svc.submitted.Text != "" {
-		t.Fatalf("Route(/helper(lina)) = %#v continued=%q submitted=%#v, want continuation", run, svc.continuedHandle, svc.submitted)
+	if run.Turn == nil || svc.continuedHandle != "orbit(lina)" || svc.submitted.Text != "" {
+		t.Fatalf("Route(/orbit(lina)) = %#v continued=%q submitted=%#v, want continuation", run, svc.continuedHandle, svc.submitted)
 	}
 	svc.submitted = control.Submission{}
 	core, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/status"}})
@@ -308,7 +316,25 @@ func TestRouterPrioritizesCoreAndAgentRunsBeforeRemoteControllerCommands(t *test
 	}
 }
 
-func TestRouterDynamicCommandAllowedFiltersRegisteredAgents(t *testing.T) {
+func TestRouterDoesNotForwardRemovedLeadCommandToRemoteController(t *testing.T) {
+	svc := &fakeService{
+		agentStatus: control.AgentStatusSnapshot{
+			ControllerKind: "acp", ControllerCommands: []string{"/lead"},
+		},
+		turn: &fakeTurn{id: "turn-1"},
+	}
+	result, err := New(prompt.RouterConfig{Service: svc}).Route(context.Background(), prompt.Request{
+		Submission: control.Submission{Text: "/lead helper"},
+	})
+	if err != nil {
+		t.Fatalf("Route(/lead) error = %v", err)
+	}
+	if !result.Handled || !strings.Contains(firstNotice(result), "unknown command: /lead") || svc.submitted.Text != "" {
+		t.Fatalf("Route(/lead) = %#v submitted=%#v, want removed command hidden", result, svc.submitted)
+	}
+}
+
+func TestRouterDynamicCommandAllowedOnlyPermitsFixedProfiles(t *testing.T) {
 	svc := &fakeService{
 		agents: []control.AgentCandidate{{Name: "reviewer"}, {Name: "helper"}},
 		turn:   &fakeTurn{id: "turn-1"},
@@ -316,7 +342,7 @@ func TestRouterDynamicCommandAllowedFiltersRegisteredAgents(t *testing.T) {
 	router := New(prompt.RouterConfig{
 		Service: svc,
 		DynamicCommandAllowed: func(_ context.Context, command string) bool {
-			return command == "helper"
+			return command == "breeze"
 		},
 	})
 	hidden, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/reviewer inspect"}})
@@ -326,12 +352,19 @@ func TestRouterDynamicCommandAllowedFiltersRegisteredAgents(t *testing.T) {
 	if !hidden.Handled || !strings.Contains(firstNotice(hidden), "unknown command: /reviewer") || svc.startedAgent != "" {
 		t.Fatalf("Route(/reviewer) = %#v startedAgent=%q, want fail-closed notice", hidden, svc.startedAgent)
 	}
-	allowed, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper inspect"}})
+	raw, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper inspect"}})
 	if err != nil {
 		t.Fatalf("Route(/helper) error = %v", err)
 	}
-	if allowed.Turn == nil || svc.startedAgent != "helper" || svc.startedPrompt != "inspect" {
-		t.Fatalf("Route(/helper) = %#v agent=%q prompt=%q, want handled helper", allowed, svc.startedAgent, svc.startedPrompt)
+	if !raw.Handled || !strings.Contains(firstNotice(raw), "unknown command: /helper") || svc.startedAgent != "" {
+		t.Fatalf("Route(/helper) = %#v agent=%q, want raw Agent hidden", raw, svc.startedAgent)
+	}
+	allowed, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/breeze inspect"}})
+	if err != nil {
+		t.Fatalf("Route(/breeze) error = %v", err)
+	}
+	if allowed.Turn == nil || svc.startedAgent != "breeze" || svc.startedPrompt != "inspect" {
+		t.Fatalf("Route(/breeze) = %#v agent=%q prompt=%q, want handled profile", allowed, svc.startedAgent, svc.startedPrompt)
 	}
 }
 

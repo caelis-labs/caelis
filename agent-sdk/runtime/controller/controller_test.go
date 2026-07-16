@@ -91,12 +91,13 @@ func TestNormalizeAttachDetachHandoffRequests(t *testing.T) {
 	t.Parallel()
 
 	attach := NormalizeAttachRequest(AttachRequest{
-		SessionRef: session.SessionRef{SessionID: " sid "},
-		Agent:      " agent ",
-		Source:     " source ",
-		Label:      " label ",
+		SessionRef:      session.SessionRef{SessionID: " sid "},
+		Agent:           " agent ",
+		Source:          " source ",
+		Label:           " label ",
+		ReasoningEffort: " xhigh ",
 	})
-	if attach.SessionRef.SessionID != "sid" || attach.Agent != "agent" || attach.Source != "source" || attach.Label != "label" {
+	if attach.SessionRef.SessionID != "sid" || attach.Agent != "agent" || attach.Source != "source" || attach.Label != "label" || attach.ReasoningEffort != "xhigh" {
 		t.Fatalf("normalized attach = %+v", attach)
 	}
 

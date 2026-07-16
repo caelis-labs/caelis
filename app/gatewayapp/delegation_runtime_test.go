@@ -49,8 +49,8 @@ func TestSelfDelegationPlacementTracksEffectiveSessionModelAndEffort(t *testing.
 	assertDelegationPlacementArgs(t, stack, firstSelf, "session-model-a", "high", "111111")
 	assertDelegationPlacementArgs(t, stack, secondSelf, "session-model-b", "low", "222222")
 	for _, profile := range []string{"breeze", "orbit", "zenith"} {
-		if target := first[profile]; target.Selector != profile || target.Placement.Model != firstSelf.Placement.Model {
-			t.Fatalf("unbound %s placement = %#v, want first Session self", profile, target)
+		if _, ok := first[profile]; ok {
+			t.Fatalf("unbound %s unexpectedly has a Spawn target: %#v", profile, first[profile])
 		}
 	}
 }

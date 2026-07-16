@@ -16,6 +16,7 @@ import (
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controldelegation "github.com/caelis-labs/caelis/control/delegation"
+	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
@@ -217,6 +218,7 @@ type ControlServices interface {
 	controlagents.Connector
 	controlagents.Disconnector
 	controldelegation.Service
+	controlsystemagent.Service
 }
 
 // ConfigFromControlService populates Config callbacks from Control services.
@@ -234,7 +236,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 		base.ProgramSender = sender
 	}
 	base.Commands = appendAgentSlashCommandsWithContext(ctx, service, base.Commands)
-	for name, detail := range registeredAgentCommandDetailsWithContext(ctx, service) {
+	for name, detail := range profileCommandDetailsWithContext(ctx, service) {
 		if base.CommandDetails == nil {
 			base.CommandDetails = map[string]string{}
 		}
@@ -599,11 +601,12 @@ func appendAgentSlashCommandsWithContext(ctx context.Context, service control.Se
 	if len(commands) == 0 {
 		commands = DefaultCommands()
 	}
+	boundProfiles := boundDirectProfileNames(ctx, service)
+	commands = projectBoundDirectProfileCommands(commands, boundProfiles)
 	status, err := service.AgentStatus(ctx)
 	if err == nil && strings.EqualFold(strings.TrimSpace(status.ControllerKind), "acp") {
-		commands = localACPCommands()
+		commands = projectBoundDirectProfileCommands(localACPCommands(), boundProfiles)
 	}
-	commands = controlcommands.AppendRegisteredAgentNames(ctx, service, commands)
 	if err == nil {
 		commands = controlagents.AppendRunNames(commands, tuiDirectAgentRuns(status), tuiAgentCommandNameAllowed)
 	}
@@ -629,12 +632,25 @@ func acpSlashCommands(base []string, status control.AgentStatusSnapshot) []strin
 	for _, command := range out {
 		seen[strings.ToLower(strings.TrimSpace(command))] = struct{}{}
 	}
+	hiddenRosterNames := make(map[string]struct{}, len(status.AvailableAgents))
+	for _, agent := range status.AvailableAgents {
+		if name := controlagents.NormalizeName(agent.Name); name != "" {
+			hiddenRosterNames[name] = struct{}{}
+		}
+	}
 	for _, command := range status.ControllerCommands {
 		name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command, "/")))
 		if fields := strings.Fields(name); len(fields) > 0 {
 			name = fields[0]
 		}
-		if name == "" || !tuiAgentCommandNameAllowed(name) {
+		if name == "" || !tuiRemoteControllerCommandNameAllowed(name) {
+			continue
+		}
+		baseName := name
+		if agent, _, ok := controlagents.ParseRunName(name); ok {
+			baseName = agent
+		}
+		if _, hidden := hiddenRosterNames[baseName]; hidden {
 			continue
 		}
 		if _, exists := seen[name]; exists {
@@ -649,13 +665,71 @@ func acpSlashCommands(base []string, status control.AgentStatusSnapshot) []strin
 func tuiDirectAgentRuns(status control.AgentStatusSnapshot) []controlagents.Run {
 	runs := make([]controlagents.Run, 0, len(status.Participants))
 	for _, participant := range status.Participants {
-		runs = append(runs, controlagents.RunFromParticipant(participant.Label, participant.AgentName, participant.Kind, participant.Role))
+		runs = append(runs, controldelegation.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))
 	}
 	return runs
 }
 
 func tuiAgentCommandNameAllowed(name string) bool {
-	return !controlcommands.IsKnown(name) && !strings.EqualFold(strings.TrimSpace(name), "sandbox")
+	return controldelegation.IsDirectRunProfile(name)
+}
+
+func tuiRemoteControllerCommandNameAllowed(name string) bool {
+	name = strings.TrimSpace(name)
+	return !controlcommands.IsKnown(name) && !strings.EqualFold(name, "sandbox") && !strings.EqualFold(name, "lead")
+}
+
+func boundDirectProfileNames(ctx context.Context, service control.Service) map[string]struct{} {
+	out := map[string]struct{}{}
+	delegation, ok := service.(controldelegation.Service)
+	if !ok {
+		return out
+	}
+	status, err := delegation.DelegationStatus(contextOrBackground(ctx))
+	if err != nil {
+		return out
+	}
+	for _, profile := range status.Profiles {
+		if !controldelegation.IsProfileBound(profile) {
+			continue
+		}
+		name := profile.Definition.Profile
+		if name == "" {
+			name = profile.Binding.Profile
+		}
+		out[string(name)] = struct{}{}
+	}
+	return out
+}
+
+func projectBoundDirectProfileCommands(commands []string, bound map[string]struct{}) []string {
+	out := make([]string, 0, len(commands)+len(bound))
+	seen := make(map[string]struct{}, len(commands)+len(bound))
+	for _, command := range commands {
+		name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command, "/")))
+		if controldelegation.IsDirectRunProfile(name) {
+			if _, ok := bound[name]; !ok {
+				continue
+			}
+		}
+		if name == "" {
+			continue
+		}
+		out = append(out, command)
+		seen[name] = struct{}{}
+	}
+	for _, profile := range controldelegation.DirectRunProfiles() {
+		name := string(profile)
+		if _, ok := bound[name]; !ok {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		out = append(out, name)
+		seen[name] = struct{}{}
+	}
+	return out
 }
 
 func refreshAgentSlashCommandsViaSend(service control.Service, send func(tea.Msg)) {
@@ -668,22 +742,23 @@ func refreshAgentSlashCommandsViaSendWithContext(ctx context.Context, service co
 	}
 	send(SetCommandsMsg{
 		Commands: appendAgentSlashCommandsWithContext(ctx, service, DefaultCommands()),
-		Details:  registeredAgentCommandDetailsWithContext(ctx, service),
+		Details:  profileCommandDetailsWithContext(ctx, service),
 	})
 }
 
-func registeredAgentCommandDetailsWithContext(ctx context.Context, service control.Service) map[string]string {
+func profileCommandDetailsWithContext(ctx context.Context, service control.Service) map[string]string {
 	if service == nil {
 		return nil
 	}
 	ctx = contextOrBackground(ctx)
 	details := map[string]string{}
-	if agents, err := service.ListAgents(ctx, 200); err == nil {
-		for _, agent := range agents {
-			name := controlagents.NormalizeName(agent.Name)
-			detail := strings.TrimSpace(agent.Description)
-			if name != "" && detail != "" {
-				details[name] = detail
+	if delegation, ok := service.(controldelegation.Service); ok {
+		if status, err := delegation.DelegationStatus(ctx); err == nil {
+			for _, profile := range status.Profiles {
+				if !controldelegation.IsProfileBound(profile) {
+					continue
+				}
+				details[string(profile.Definition.Profile)] = subagentProfileCommandDetail(profile)
 			}
 		}
 	}

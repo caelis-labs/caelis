@@ -2,6 +2,7 @@ package controladapter
 
 import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
@@ -9,6 +10,7 @@ var (
 	_ control.Service                   = (*Adapter)(nil)
 	_ controlagents.Connector           = (*Adapter)(nil)
 	_ controlagents.Disconnector        = (*Adapter)(nil)
+	_ controlsystemagent.Service        = (*Adapter)(nil)
 	_ control.StatusService             = (*Adapter)(nil)
 	_ control.TurnService               = (*Adapter)(nil)
 	_ control.SessionService            = (*Adapter)(nil)

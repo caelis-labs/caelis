@@ -19,6 +19,7 @@ import (
 	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
@@ -33,6 +34,8 @@ type Config struct {
 	ClientInfo *client.Implementation
 	Clock      func() time.Time
 }
+
+const participantReasoningEffortConfigID = "reasoning_effort"
 
 type Manager struct {
 	registry    *subagent.Registry
@@ -698,6 +701,15 @@ func (m *Manager) startParticipant(
 ) (*participantRun, error) {
 	var run *participantRun
 	existing := session.CloneParticipantBinding(req.Binding)
+	reasoningEffort := firstNonEmpty(strings.TrimSpace(req.ReasoningEffort), strings.TrimSpace(existing.ReasoningEffort))
+	if reasoningEffort != "" {
+		cfg.SessionOptions = controlagents.NormalizeSessionOptions(cfg.SessionOptions)
+		cfg.SessionOptions.ConfigValues = maps.Clone(cfg.SessionOptions.ConfigValues)
+		if cfg.SessionOptions.ConfigValues == nil {
+			cfg.SessionOptions.ConfigValues = make(map[string]string, 1)
+		}
+		cfg.SessionOptions.ConfigValues[participantReasoningEffortConfigID] = reasoningEffort
+	}
 	resumeRemoteSessionID := strings.TrimSpace(existing.SessionID)
 	client, remoteSessionID, state, err := m.startClient(ctx, parentSession.CWD, cfg, resumeRemoteSessionID, func(env client.UpdateEnvelope) {
 		if run != nil {
@@ -761,6 +773,7 @@ func (m *Manager) startParticipant(
 			Role:                 role,
 			AgentName:            agentName,
 			Label:                label,
+			ReasoningEffort:      reasoningEffort,
 			SessionID:            remoteSessionID,
 			Source:               firstNonEmpty(req.Source, existing.Source, "user_attach"),
 			ParentTurnID:         strings.TrimSpace(existing.ParentTurnID),

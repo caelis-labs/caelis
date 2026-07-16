@@ -30,6 +30,8 @@ const (
 	ProfileZenith Profile = "zenith"
 )
 
+const directRunSourcePrefix = "slash_profile_"
+
 // Definition describes one fixed Caelis delegation profile.
 type Definition struct {
 	Profile      Profile
@@ -70,20 +72,95 @@ func Definitions() []Definition {
 	return append([]Definition(nil), definitions...)
 }
 
-// TargetKind identifies whether a profile inherits the current Session or
+// DirectRunProfiles returns the user-addressable fixed profile names. Self is
+// model-facing only and is not exposed as a direct slash command.
+func DirectRunProfiles() []Profile {
+	out := make([]Profile, 0, len(definitions)-1)
+	for _, definition := range definitions {
+		if definition.Configurable {
+			out = append(out, definition.Profile)
+		}
+	}
+	return out
+}
+
+// BoundProfiles returns explicitly Agent-bound configurable profiles in fixed
+// presentation order. The fixed self profile is intentionally excluded.
+func BoundProfiles(in Configuration) []Profile {
+	normalized := NormalizeConfiguration(in)
+	bound := make(map[Profile]struct{}, len(normalized.Bindings))
+	for _, binding := range normalized.Bindings {
+		if binding.Target == TargetAgent && strings.TrimSpace(binding.AgentID) != "" {
+			bound[binding.Profile] = struct{}{}
+		}
+	}
+	out := make([]Profile, 0, len(bound))
+	for _, definition := range definitions {
+		if !definition.Configurable {
+			continue
+		}
+		if _, ok := bound[definition.Profile]; ok {
+			out = append(out, definition.Profile)
+		}
+	}
+	return out
+}
+
+// IsDirectRunProfile reports whether a name is a user-addressable profile.
+func IsDirectRunProfile(name string) bool {
+	profile := NormalizeProfile(Profile(name))
+	for _, candidate := range DirectRunProfiles() {
+		if candidate == profile {
+			return true
+		}
+	}
+	return false
+}
+
+// DirectRunSource returns the durable participant source for one profile run.
+func DirectRunSource(profile Profile) string {
+	profile = NormalizeProfile(profile)
+	if !IsDirectRunProfile(string(profile)) {
+		return ""
+	}
+	return directRunSourcePrefix + string(profile)
+}
+
+// DirectRunProfileFromSource recovers a fixed profile from its typed Control
+// participant source. Raw roster Agent names are intentionally not accepted.
+func DirectRunProfileFromSource(source string) (Profile, bool) {
+	profile := NormalizeProfile(Profile(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(source)), directRunSourcePrefix)))
+	return profile, strings.HasPrefix(strings.ToLower(strings.TrimSpace(source)), directRunSourcePrefix) && IsDirectRunProfile(string(profile))
+}
+
+// DirectRunFromParticipant projects one attached profile participant into its
+// stable <profile>(<handle>) address. Only ACP sidecars started through a fixed
+// profile are addressable.
+func DirectRunFromParticipant(label, kind, role, source string) controlagents.Run {
+	profile, ok := DirectRunProfileFromSource(source)
+	return controlagents.Run{
+		Name:        controlagents.FormatRunName(string(profile), label),
+		Agent:       string(profile),
+		Addressable: ok && strings.EqualFold(strings.TrimSpace(kind), "acp") && strings.EqualFold(strings.TrimSpace(role), "sidecar"),
+	}
+}
+
+// TargetKind identifies whether a profile has no explicit roster binding or
 // resolves through the Control Agent roster.
 type TargetKind string
 
 const (
-	// TargetSelf inherits the current Session controller model and effort.
+	// TargetSelf is the implicit unbound state for configurable profiles. The
+	// fixed self profile still follows the current Session controller.
 	TargetSelf TargetKind = "self"
 	// TargetAgent resolves one stable Agent ID from the Control roster.
 	TargetAgent TargetKind = "agent"
 )
 
 // Binding maps one configurable profile to an execution target. TargetSelf is
-// the default and is omitted from normalized persistence. ReasoningEffort is an
-// optional execution override and is valid only for a model-backed Agent.
+// the implicit unbound state and is omitted from normalized persistence.
+// ReasoningEffort is an optional execution override and is valid only for a
+// model-backed Agent.
 type Binding struct {
 	Profile         Profile    `json:"profile,omitempty"`
 	Target          TargetKind `json:"target,omitempty"`
@@ -110,6 +187,18 @@ type ProfileStatus struct {
 	Definition Definition
 	Binding    Binding
 	Agent      controlagents.Agent
+}
+
+// IsProfileBound reports whether a projected configurable profile has an
+// explicit roster Agent binding and can be advertised for direct execution.
+func IsProfileBound(status ProfileStatus) bool {
+	profile := status.Definition.Profile
+	if profile == "" {
+		profile = status.Binding.Profile
+	}
+	return IsDirectRunProfile(string(profile)) &&
+		status.Binding.Target == TargetAgent &&
+		strings.TrimSpace(status.Binding.AgentID) != ""
 }
 
 // TargetStatus describes one roster Agent that may back a configurable
@@ -158,7 +247,8 @@ func NormalizeBinding(binding Binding) Binding {
 }
 
 // NormalizeConfiguration returns a detached, deterministic configuration.
-// Explicit self bindings are omitted because self is the effective default.
+// Explicit TargetSelf entries are omitted because unbound is the implicit
+// configurable-profile state.
 func NormalizeConfiguration(in Configuration) Configuration {
 	out := Configuration{}
 	seen := make(map[Profile]struct{}, len(in.Bindings))
@@ -185,7 +275,8 @@ func NormalizeConfiguration(in Configuration) Configuration {
 }
 
 // ListBindings returns every effective profile binding in fixed order. Missing
-// configurable bindings are represented explicitly as TargetSelf.
+// configurable bindings are represented explicitly as the unbound TargetSelf
+// sentinel.
 func ListBindings(in Configuration) []Binding {
 	normalized := NormalizeConfiguration(in)
 	configured := make(map[Profile]Binding, len(normalized.Bindings))
@@ -242,7 +333,7 @@ func ValidateConfiguration(in Configuration, roster controlagents.Configuration,
 		switch binding.Target {
 		case TargetSelf:
 			if binding.AgentID != "" || binding.ReasoningEffort != "" {
-				return fmt.Errorf("control/delegation: self binding for profile %q cannot declare an Agent or reasoning effort", binding.Profile)
+				return fmt.Errorf("control/delegation: unbound profile %q cannot declare an Agent or reasoning effort", binding.Profile)
 			}
 		case TargetAgent:
 			if binding.AgentID == "" {
@@ -298,7 +389,7 @@ func BindAgent(
 	return NormalizeConfiguration(next), nil
 }
 
-// Reset restores one configurable profile to its implicit self binding. Reset
+// Reset restores one configurable profile to its implicit unbound state. Reset
 // deliberately does not require the current target to remain available, so it
 // can repair a stale binding.
 func Reset(current Configuration, profile Profile) (Configuration, error) {
@@ -319,7 +410,7 @@ func Reset(current Configuration, profile Profile) (Configuration, error) {
 }
 
 // ResetAgentBindings restores every profile backed by agentID to its implicit
-// self binding. Roster deletion uses this before persisting the smaller roster,
+// unbound state. Roster deletion uses this before persisting the smaller roster,
 // so removing a model or external ACP Agent cannot leave stale delegation
 // references behind.
 func ResetAgentBindings(current Configuration, agentID string) (Configuration, []Profile) {

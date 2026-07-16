@@ -233,7 +233,7 @@ func LookupBuiltInAgent(name string) (assembly.AgentConfig, bool) {
 
 func ReservedSlashCommandName(name string) bool {
 	name = strings.TrimSpace(name)
-	return commands.IsKnown(name) || strings.EqualFold(name, "sandbox")
+	return commands.IsKnown(name) || strings.EqualFold(name, "sandbox") || strings.EqualFold(name, "lead")
 }
 
 func cloneStringMap(in map[string]string) map[string]string {

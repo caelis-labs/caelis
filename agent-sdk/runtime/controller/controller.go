@@ -52,6 +52,8 @@ type AttachRequest struct {
 	Role       session.ParticipantRole    `json:"role,omitempty"`
 	Source     string                     `json:"source,omitempty"`
 	Label      string                     `json:"label,omitempty"`
+	// ReasoningEffort is applied to a new ACP participant before prompting it.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // DetachRequest removes one ACP-backed participant attachment.
@@ -194,6 +196,7 @@ func NormalizeAttachRequest(in AttachRequest) AttachRequest {
 	out.Agent = strings.TrimSpace(in.Agent)
 	out.Source = strings.TrimSpace(in.Source)
 	out.Label = strings.TrimSpace(in.Label)
+	out.ReasoningEffort = strings.TrimSpace(in.ReasoningEffort)
 	return out
 }
 

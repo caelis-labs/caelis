@@ -12,16 +12,17 @@ import (
 )
 
 type startParticipantRequest struct {
-	SessionRef   session.SessionRef
-	BindingKey   string
-	Agent        string
-	Role         session.ParticipantRole
-	Label        string
-	Input        string
-	DisplayInput string
-	DisplayTitle string
-	ContentParts []model.ContentPart
-	Source       string
+	SessionRef      session.SessionRef
+	BindingKey      string
+	Agent           string
+	Role            session.ParticipantRole
+	Label           string
+	ReasoningEffort string
+	Input           string
+	DisplayInput    string
+	DisplayTitle    string
+	ContentParts    []model.ContentPart
+	Source          string
 }
 
 func (g *Gateway) StartParticipant(ctx context.Context, req StartParticipantRequest) (BeginTurnResult, error) {
@@ -33,16 +34,17 @@ func (g *Gateway) StartParticipant(ctx context.Context, req StartParticipantRequ
 		return BeginTurnResult{}, err
 	}
 	result, attached, participantID, err := g.startParticipant(ctx, startParticipantRequest{
-		SessionRef:   req.SessionRef,
-		BindingKey:   req.BindingKey,
-		Agent:        req.Agent,
-		Role:         req.Role,
-		Label:        req.Label,
-		Input:        req.Input,
-		DisplayInput: req.DisplayInput,
-		DisplayTitle: req.DisplayTitle,
-		ContentParts: req.ContentParts,
-		Source:       req.Source,
+		SessionRef:      req.SessionRef,
+		BindingKey:      req.BindingKey,
+		Agent:           req.Agent,
+		Role:            req.Role,
+		Label:           req.Label,
+		ReasoningEffort: req.ReasoningEffort,
+		Input:           req.Input,
+		DisplayInput:    req.DisplayInput,
+		DisplayTitle:    req.DisplayTitle,
+		ContentParts:    req.ContentParts,
+		Source:          req.Source,
 	})
 	if err != nil {
 		return BeginTurnResult{}, err
@@ -57,12 +59,13 @@ func (g *Gateway) startParticipant(ctx context.Context, req startParticipantRequ
 	req.Role = defaultParticipantRole(req.Role)
 	beforeParticipantIDs := g.participantIDsBeforeAttach(ctx, req.SessionRef, req.BindingKey)
 	attached, err := g.AttachParticipant(ctx, AttachParticipantRequest{
-		SessionRef: req.SessionRef,
-		BindingKey: req.BindingKey,
-		Agent:      req.Agent,
-		Role:       req.Role,
-		Source:     strings.TrimSpace(req.Source),
-		Label:      strings.TrimSpace(req.Label),
+		SessionRef:      req.SessionRef,
+		BindingKey:      req.BindingKey,
+		Agent:           req.Agent,
+		Role:            req.Role,
+		Source:          strings.TrimSpace(req.Source),
+		Label:           strings.TrimSpace(req.Label),
+		ReasoningEffort: strings.TrimSpace(req.ReasoningEffort),
 	})
 	if err != nil {
 		return BeginTurnResult{}, session.Session{}, "", err

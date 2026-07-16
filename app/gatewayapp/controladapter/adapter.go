@@ -522,6 +522,7 @@ func agentParticipantSnapshot(participant gateway.ParticipantState) AgentPartici
 		AgentName: strings.TrimSpace(firstNonEmpty(participant.AgentName, participant.Label, participant.ID)),
 		Kind:      string(participant.Kind),
 		Role:      string(participant.Role),
+		Source:    strings.TrimSpace(participant.Source),
 		SessionID: strings.TrimSpace(participant.SessionID),
 	}
 }

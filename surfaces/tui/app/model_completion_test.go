@@ -524,48 +524,16 @@ func TestSlashCommandCompletionRefreshesBeforeAcceptingStaleCandidates(t *testin
 	}
 }
 
-func TestSlashCommandCompletionOpensAndAppliesLeadPicker(t *testing.T) {
+func TestSlashCommandCompletionDoesNotExposeRemovedLeadCommand(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
-			if command != "lead" {
-				return nil, nil
-			}
-			return []SlashArgCandidate{
-				{Value: "local", Display: "local"},
-				{Value: "helper", Display: "helper"},
-			}, nil
-		},
 	})
 
 	model.setInputText("/lea")
 	model.syncTextareaFromInput()
 	model.refreshSlashCommands()
-	if len(model.slashCandidates) != 1 || model.slashCandidates[0] != "/lead" {
-		t.Fatalf("slashCandidates = %#v, want only /lead", model.slashCandidates)
-	}
-	model.applySlashCommandCompletion()
-	model.syncTextareaFromInput()
-
-	if got := string(model.input); got != "/lead " {
-		t.Fatalf("input after /lea<Tab> = %q, want /lead ", got)
-	}
-	if got := model.slashArgCommand; got != "lead" {
-		t.Fatalf("slashArgCommand = %q, want lead", got)
-	}
-	if len(model.slashArgCandidates) != 2 || model.slashArgCandidates[0].Value != "local" {
-		t.Fatalf("slashArgCandidates = %#v, want local/helper", model.slashArgCandidates)
-	}
-	model.slashArgIndex = 1
-	handled, cmd := model.handleSlashArgKey(keyPress("enter"))
-	if !handled {
-		t.Fatal("handleSlashArgKey(enter) = false, want true")
-	}
-	if cmd != nil {
-		cmd()
-	}
-	if got := string(model.input); got != "/lead helper " {
-		t.Fatalf("input after choosing helper = %q, want /lead helper ", got)
+	if len(model.slashCandidates) != 0 {
+		t.Fatalf("slashCandidates = %#v, want removed /lead hidden", model.slashCandidates)
 	}
 }
 
@@ -1219,21 +1187,22 @@ func TestSlashCompletionRendersDescriptionsWithoutHeaderOrBorder(t *testing.T) {
 	}
 }
 
-func TestAgentSlashCompletionShowsProviderModelButExecutesStableProviderCommand(t *testing.T) {
+func TestProfileSlashCompletionShowsBoundProviderModelButExecutesStableProfile(t *testing.T) {
 	model := NewModel(Config{
-		Commands:       []string{"codex"},
-		CommandDetails: map[string]string{"codex": "codex(gpt-5.6-sol)"},
+		Commands:       []string{"breeze"},
+		CommandDetails: map[string]string{"breeze": "openai-codex/gpt-5.6-sol [high]"},
 	})
+	model.width = 120
 	model.setInputText("/")
 	model.syncTextareaFromInput()
 	model.refreshSlashCommands()
-	if got := ansi.Strip(model.renderSlashCommandList()); !strings.Contains(got, "/codex") || !strings.Contains(got, "codex(gpt-5.6-sol)") {
-		t.Fatalf("renderSlashCommandList() = %q, want provider command and model display", got)
+	if got := ansi.Strip(model.renderSlashCommandList()); !strings.Contains(got, "/breeze") || !strings.Contains(got, "openai-codex/gpt-5.6-sol") {
+		t.Fatalf("renderSlashCommandList() = %q, want profile and bound model display", got)
 	}
 	model.applySlashCommandCompletion()
 	model.syncTextareaFromInput()
-	if got := model.textarea.Value(); got != "/codex " {
-		t.Fatalf("completed command = %q, want stable executable /codex", got)
+	if got := model.textarea.Value(); got != "/breeze " {
+		t.Fatalf("completed command = %q, want stable executable /breeze", got)
 	}
 }
 

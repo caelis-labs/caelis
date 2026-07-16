@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
@@ -116,8 +117,6 @@ func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query st
 		}
 	}
 	switch normalizedCommand {
-	case "lead":
-		return d.completeAgentHandoffTargets(ctx, query, limit)
 	case "model use", "model del":
 		return d.completeModelAliases(ctx, query, limit)
 	case "plugin rm":
@@ -501,31 +500,6 @@ func (d *Adapter) completeAgentParticipants(ctx context.Context, query string, l
 	return out, nil
 }
 
-func (d *Adapter) completeAgentHandoffTargets(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
-	out := []SlashArgCandidate{{
-		Value:   "local",
-		Display: "local",
-		Detail:  "return to local kernel",
-	}}
-	if query != "" && !hasSlashArgPrefix(query, "local", "kernel") {
-		out = nil
-	}
-	for _, agent := range d.completeAgentCatalog(query, limit) {
-		out = append(out, SlashArgCandidate{
-			Value:   agent.Value,
-			Display: agent.Display,
-			Detail:  agent.Detail,
-		})
-		if len(out) >= limit {
-			break
-		}
-	}
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
-}
-
 func (d *Adapter) agentCatalog(limit int) []AgentCandidate {
 	if d.stack.Agent.ListFn == nil {
 		return nil
@@ -612,7 +586,8 @@ func (d *Adapter) resolveParticipantID(ctx context.Context, ref session.SessionR
 			continue
 		}
 		if directRun {
-			if strings.EqualFold(controlagents.NormalizeName(participant.AgentName), runAgent) &&
+			profile, profileRun := controldelegation.DirectRunProfileFromSource(participant.Source)
+			if profileRun && strings.EqualFold(string(profile), runAgent) &&
 				strings.EqualFold(taskapi.NormalizeHandle(label), runHandle) {
 				return id, nil
 			}

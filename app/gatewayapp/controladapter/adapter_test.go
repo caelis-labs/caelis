@@ -25,6 +25,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/testenv"
@@ -2292,8 +2293,8 @@ func TestAdapterAgentRegistryAndControllerUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(lead) error = %v", err)
 	}
-	if !slashCandidatesHaveValue(leadCandidates, "local") || !slashCandidatesHaveValue(leadCandidates, "copilot") {
-		t.Fatalf("lead candidates = %#v, want local and copilot", leadCandidates)
+	if len(leadCandidates) != 0 {
+		t.Fatalf("lead candidates = %#v, want removed command hidden", leadCandidates)
 	}
 
 	status, err := driver.HandoffAgent(ctx, "copilot")
@@ -2367,6 +2368,7 @@ func TestAdapterStartAgentRunRollsBackAttachmentOnPromptConflict(t *testing.T) {
 				return []ACPAgentInfo{{Name: "copilot", Description: "ACP sidecar agent."}}
 			},
 		},
+		Delegation: boundDelegationRuntimeForTest(controldelegation.ProfileOrbit, "copilot", "high"),
 	}, activeSession.SessionID, "surface", "ollama/llama3")
 	if err != nil {
 		t.Fatalf("NewAdapter() error = %v", err)
@@ -2379,7 +2381,7 @@ func TestAdapterStartAgentRunRollsBackAttachmentOnPromptConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = driver.StartAgentRun(ctx, "copilot", "  second prompt  ", []Attachment{{Name: "side.png", Offset: len([]rune("second "))}})
+	_, err = driver.StartAgentRun(ctx, "orbit", "  second prompt  ", []Attachment{{Name: "side.png", Offset: len([]rune("second "))}})
 	if err == nil {
 		t.Fatal("StartAgentRun() error = nil, want active run conflict")
 	}
@@ -2417,6 +2419,25 @@ func TestAdapterStartAgentRunRollsBackAttachmentOnPromptConflict(t *testing.T) {
 	}
 }
 
+func TestAdapterStartAgentRunFailsClosedWhenProfileIsUnbound(t *testing.T) {
+	t.Parallel()
+
+	driver, err := NewAdapter(context.Background(), &RuntimeStack{
+		Delegation: DelegationRuntimeDeps{StatusFn: func(context.Context) (controldelegation.Status, error) {
+			return controldelegation.Status{Profiles: []controldelegation.ProfileStatus{{
+				Definition: controldelegation.Definition{Profile: controldelegation.ProfileBreeze, Configurable: true},
+				Binding:    controldelegation.Binding{Profile: controldelegation.ProfileBreeze, Target: controldelegation.TargetSelf},
+			}}}, nil
+		}},
+	}, "", "surface", "ollama/llama3")
+	if err != nil {
+		t.Fatalf("NewAdapter() error = %v", err)
+	}
+	if _, err := driver.StartAgentRun(context.Background(), "breeze", "inspect", nil); err == nil || !strings.Contains(err.Error(), "/breeze is not bound") {
+		t.Fatalf("StartAgentRun(unbound Breeze) error = %v, want bind guidance", err)
+	}
+}
+
 func TestAdapterStartAgentRunKeepsRunAttachedForFollowUp(t *testing.T) {
 	t.Parallel()
 
@@ -2450,12 +2471,13 @@ func TestAdapterStartAgentRunKeepsRunAttachedForFollowUp(t *testing.T) {
 				return []ACPAgentInfo{{Name: "copilot", Description: "ACP sidecar agent."}}
 			},
 		},
+		Delegation: boundDelegationRuntimeForTest(controldelegation.ProfileOrbit, "copilot", "high"),
 	}, activeSession.SessionID, "surface", "ollama/llama3")
 	if err != nil {
 		t.Fatalf("NewAdapter() error = %v", err)
 	}
 
-	turn, err := driver.StartAgentRun(ctx, "copilot", "first prompt", nil)
+	turn, err := driver.StartAgentRun(ctx, "orbit", "first prompt", nil)
 	if err != nil {
 		t.Fatalf("StartAgentRun() error = %v", err)
 	}
@@ -2468,13 +2490,19 @@ func TestAdapterStartAgentRunKeepsRunAttachedForFollowUp(t *testing.T) {
 	if len(gw.session.Participants) != 1 || gw.session.Participants[0].ID != "side-new" {
 		t.Fatalf("Participants after first prompt = %#v, want one attached copilot sidecar", gw.session.Participants)
 	}
+	if participant := gw.session.Participants[0]; participant.AgentName != "copilot" || participant.Source != controldelegation.DirectRunSource(controldelegation.ProfileOrbit) {
+		t.Fatalf("profile participant = %#v, want copilot placement with Orbit source", participant)
+	}
+	if participant := gw.session.Participants[0]; participant.ReasoningEffort != "high" {
+		t.Fatalf("profile participant reasoning effort = %q, want high", participant.ReasoningEffort)
+	}
 	handle := strings.TrimPrefix(gw.session.Participants[0].Label, "@")
 	if !agenthandle.ContainsPoolName(handle) {
 		t.Fatalf("side Agent handle = %q, want human-name pool entry", handle)
 	}
-	runName := controlagents.FormatRunName("copilot", handle)
+	runName := controlagents.FormatRunName("orbit", handle)
 	if runName == "" {
-		t.Fatalf("FormatRunName(copilot, %q) returned empty", handle)
+		t.Fatalf("FormatRunName(orbit, %q) returned empty", handle)
 	}
 
 	turn, err = driver.ContinueAgentRun(ctx, runName, "follow up", nil)
@@ -4374,13 +4402,14 @@ func (g *sideAgentRollbackGatewayService) ControlPlaneState(context.Context, gat
 func (g *sideAgentRollbackGatewayService) AttachParticipant(_ context.Context, req gateway.AttachParticipantRequest) (session.Session, error) {
 	g.attachReqs = append(g.attachReqs, req)
 	g.session.Participants = append(g.session.Participants, session.ParticipantBinding{
-		ID:        "side-new",
-		Kind:      session.ParticipantKindACP,
-		Role:      req.Role,
-		AgentName: req.Agent,
-		Label:     req.Label,
-		SessionID: "remote-new",
-		Source:    req.Source,
+		ID:              "side-new",
+		Kind:            session.ParticipantKindACP,
+		Role:            req.Role,
+		AgentName:       req.Agent,
+		Label:           req.Label,
+		ReasoningEffort: req.ReasoningEffort,
+		SessionID:       "remote-new",
+		Source:          req.Source,
 	})
 	return session.CloneSession(g.session), nil
 }
@@ -4392,12 +4421,13 @@ func (g *sideAgentRollbackGatewayService) PromptParticipant(_ context.Context, r
 
 func (g *sideAgentRollbackGatewayService) StartParticipant(ctx context.Context, req gateway.StartParticipantRequest) (gateway.BeginTurnResult, error) {
 	updated, err := g.AttachParticipant(ctx, gateway.AttachParticipantRequest{
-		SessionRef: req.SessionRef,
-		BindingKey: req.BindingKey,
-		Agent:      req.Agent,
-		Role:       req.Role,
-		Source:     req.Source,
-		Label:      req.Label,
+		SessionRef:      req.SessionRef,
+		BindingKey:      req.BindingKey,
+		Agent:           req.Agent,
+		Role:            req.Role,
+		Source:          req.Source,
+		Label:           req.Label,
+		ReasoningEffort: req.ReasoningEffort,
 	})
 	if err != nil {
 		return gateway.BeginTurnResult{}, err
@@ -4448,6 +4478,21 @@ func (g *sideAgentRollbackGatewayService) DetachParticipant(_ context.Context, r
 	}
 	g.session.Participants = kept
 	return session.CloneSession(g.session), nil
+}
+
+func boundDelegationRuntimeForTest(profile controldelegation.Profile, agentID, reasoningEffort string) DelegationRuntimeDeps {
+	return DelegationRuntimeDeps{StatusFn: func(context.Context) (controldelegation.Status, error) {
+		return controldelegation.Status{Profiles: []controldelegation.ProfileStatus{{
+			Definition: controldelegation.Definition{Profile: profile, Configurable: true},
+			Binding: controldelegation.Binding{
+				Profile:         profile,
+				Target:          controldelegation.TargetAgent,
+				AgentID:         agentID,
+				ReasoningEffort: reasoningEffort,
+			},
+			Agent: controlagents.Agent{ID: agentID},
+		}}}, nil
+	}}
 }
 
 type activeSubmitGatewayService struct {

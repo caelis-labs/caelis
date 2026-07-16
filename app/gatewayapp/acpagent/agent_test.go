@@ -6,9 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
@@ -203,7 +205,7 @@ func configOptionString(options []acp.SessionConfigOption, id string) (string, b
 	return "", false
 }
 
-func TestACPPromptCommandNamesUseACPAgentCatalog(t *testing.T) {
+func TestACPPromptCommandNamesExposeOnlyBoundProfilesAndHideAgentCatalog(t *testing.T) {
 	workdir := t.TempDir()
 	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
 		AppName:      "caelis",
@@ -227,11 +229,46 @@ func TestACPPromptCommandNamesUseACPAgentCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	commands := acpPromptCommandNames(stack)
-	if !containsCommand(commands, "helper") {
-		t.Fatalf("acpPromptCommandNames() = %#v, want helper", commands)
+	if len(stack.ListACPAgents()) == 0 {
+		t.Fatal("test setup did not materialize the registered helper Agent")
 	}
-	for _, hidden := range []string{"reviewer", "self"} {
+	if _, err := stack.Connect(gatewayapp.ModelConfig{
+		Provider: "ollama",
+		API:      providers.APIOllama,
+		Model:    "bound-orbit",
+	}); err != nil {
+		t.Fatalf("Connect(bound Orbit model) error = %v", err)
+	}
+	delegationStatus, err := stack.Delegation().DelegationStatus(context.Background())
+	if err != nil {
+		t.Fatalf("DelegationStatus() error = %v", err)
+	}
+	commands := acpPromptCommandNames(delegationStatus)
+	for _, profile := range []string{"breeze", "orbit", "zenith"} {
+		if containsCommand(commands, profile) {
+			t.Fatalf("acpPromptCommandNames() = %#v, should hide unbound %q", commands, profile)
+		}
+	}
+	if len(delegationStatus.Targets) == 0 {
+		t.Fatal("test setup has no delegation targets")
+	}
+	delegationStatus, err = stack.Delegation().BindDelegation(context.Background(), controldelegation.BindRequest{
+		Profile: controldelegation.ProfileOrbit,
+		AgentID: delegationStatus.Targets[0].Agent.ID,
+	})
+	if err != nil {
+		t.Fatalf("BindDelegation(Orbit) error = %v", err)
+	}
+	commands = acpPromptCommandNames(delegationStatus)
+	if !containsCommand(commands, "orbit") {
+		t.Fatalf("acpPromptCommandNames() = %#v, want bound Orbit", commands)
+	}
+	for _, profile := range []string{"breeze", "zenith"} {
+		if containsCommand(commands, profile) {
+			t.Fatalf("acpPromptCommandNames() = %#v, should hide unbound %q", commands, profile)
+		}
+	}
+	for _, hidden := range []string{"helper", "reviewer", "self", "lead"} {
 		if containsCommand(commands, hidden) {
 			t.Fatalf("acpPromptCommandNames() = %#v, should not contain %q", commands, hidden)
 		}
@@ -239,11 +276,11 @@ func TestACPPromptCommandNamesUseACPAgentCatalog(t *testing.T) {
 	if countCommand(commands, "status") != 1 {
 		t.Fatalf("acpPromptCommandNames() = %#v, want one core status command", commands)
 	}
-	if !acpAgentCommandAllowed(stack, "helper") {
-		t.Fatal("acpAgentCommandAllowed(helper) = false, want true")
+	if !acpAgentCommandAllowed("breeze") {
+		t.Fatal("acpAgentCommandAllowed(breeze) = false, want true")
 	}
-	for _, hidden := range []string{"reviewer", "self", "status"} {
-		if acpAgentCommandAllowed(stack, hidden) {
+	for _, hidden := range []string{"helper", "reviewer", "self", "status", "lead"} {
+		if acpAgentCommandAllowed(hidden) {
 			t.Fatalf("acpAgentCommandAllowed(%q) = true, want false", hidden)
 		}
 	}

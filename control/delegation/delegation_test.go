@@ -30,6 +30,25 @@ func TestDefinitionsUseFixedCaelisProfiles(t *testing.T) {
 	}
 }
 
+func TestBoundProfilesExposeOnlyExplicitRosterBindings(t *testing.T) {
+	t.Parallel()
+
+	configuration := Configuration{Bindings: []Binding{
+		{Profile: ProfileZenith, Target: TargetAgent, AgentID: "zenith-agent"},
+		{Profile: ProfileBreeze, Target: TargetSelf},
+		{Profile: ProfileOrbit, Target: TargetAgent, AgentID: "orbit-agent"},
+	}}
+	if got, want := BoundProfiles(configuration), []Profile{ProfileOrbit, ProfileZenith}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("BoundProfiles() = %#v, want %#v", got, want)
+	}
+	if IsProfileBound(ProfileStatus{Definition: definitions[1], Binding: Binding{Profile: ProfileBreeze, Target: TargetSelf}}) {
+		t.Fatal("IsProfileBound(unbound Breeze) = true")
+	}
+	if !IsProfileBound(ProfileStatus{Definition: definitions[2], Binding: Binding{Profile: ProfileOrbit, Target: TargetAgent, AgentID: "orbit-agent"}}) {
+		t.Fatal("IsProfileBound(bound Orbit) = false")
+	}
+}
+
 func TestListBindingsDefaultsEveryProfileToSelf(t *testing.T) {
 	t.Parallel()
 

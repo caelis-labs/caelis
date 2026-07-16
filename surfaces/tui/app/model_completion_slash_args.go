@@ -601,8 +601,6 @@ func (m *Model) shouldExecuteSlashArgSelection(command string, choice string) bo
 		return false
 	}
 	switch command {
-	case "lead":
-		return false
 	case "plugin":
 		return false
 	case "plugin marketplace":
@@ -645,8 +643,6 @@ func isExecutableSlashArgInput(line string) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(fields[0])) {
-	case "/lead":
-		return len(fields) == 2
 	case "/model":
 		action := strings.ToLower(strings.TrimSpace(fields[1]))
 		switch action {

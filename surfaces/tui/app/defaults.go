@@ -164,13 +164,13 @@ func (m *Model) commandCompletionDetail(command string) string {
 	if name == "" {
 		return ""
 	}
-	if spec, ok := controlcommands.Lookup(name); ok {
-		return strings.TrimSpace(spec.Description)
-	}
 	if m != nil {
 		if detail := strings.TrimSpace(m.cfg.CommandDetails[strings.ToLower(name)]); detail != "" {
 			return detail
 		}
+	}
+	if spec, ok := controlcommands.Lookup(name); ok {
+		return strings.TrimSpace(spec.Description)
 	}
 	return "Send a prompt to the registered ACP agent"
 }

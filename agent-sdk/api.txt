@@ -111,6 +111,8 @@ package github.com/caelis-labs/caelis/agent-sdk
       Role       session.ParticipantRole `json:"role,omitempty"`
       Source     string                  `json:"source,omitempty"`
       Label      string                  `json:"label,omitempty"`
+
+      ReasoningEffort string `json:"reasoning_effort,omitempty"`
   }
   type CancelResult struct {
       Status CancelStatus `json:"status,omitempty"`
@@ -1264,6 +1266,8 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime/controller
       Role       session.ParticipantRole    `json:"role,omitempty"`
       Source     string                     `json:"source,omitempty"`
       Label      string                     `json:"label,omitempty"`
+
+      ReasoningEffort string `json:"reasoning_effort,omitempty"`
   }
   type Backend interface {
       Activate(context.Context, HandoffRequest) (session.ControllerBinding, error)
@@ -2287,15 +2291,17 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       EventsPage(context.Context, EventPageRequest) (EventPage, error)
   }
   type ParticipantBinding struct {
-      ID           string          `json:"id,omitempty"`
-      Kind         ParticipantKind `json:"kind,omitempty"`
-      Role         ParticipantRole `json:"role,omitempty"`
-      AgentName    string          `json:"agent_name,omitempty"`
-      Label        string          `json:"label,omitempty"`
-      SessionID    string          `json:"session_id,omitempty"`
-      Source       string          `json:"source,omitempty"`
-      ParentTurnID string          `json:"parent_turn_id,omitempty"`
-      DelegationID string          `json:"delegation_id,omitempty"`
+      ID        string          `json:"id,omitempty"`
+      Kind      ParticipantKind `json:"kind,omitempty"`
+      Role      ParticipantRole `json:"role,omitempty"`
+      AgentName string          `json:"agent_name,omitempty"`
+      Label     string          `json:"label,omitempty"`
+
+      ReasoningEffort string `json:"reasoning_effort,omitempty"`
+      SessionID       string `json:"session_id,omitempty"`
+      Source          string `json:"source,omitempty"`
+      ParentTurnID    string `json:"parent_turn_id,omitempty"`
+      DelegationID    string `json:"delegation_id,omitempty"`
 
       AttachmentGeneration string    `json:"attachment_generation,omitempty"`
       ContextSyncSeq       uint64    `json:"context_sync_seq,omitempty"`

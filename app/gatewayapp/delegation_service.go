@@ -74,7 +74,7 @@ func (s DelegationService) BindDelegation(ctx context.Context, req controldelega
 	return s.persist(next, doc)
 }
 
-// ResetDelegation restores one configurable profile to Session self.
+// ResetDelegation removes one configurable profile's explicit Agent binding.
 func (s DelegationService) ResetDelegation(ctx context.Context, profile controldelegation.Profile) (controldelegation.Status, error) {
 	if s.stack == nil || s.stack.store == nil {
 		return controldelegation.Status{}, fmt.Errorf("gatewayapp: delegation configuration is unavailable")

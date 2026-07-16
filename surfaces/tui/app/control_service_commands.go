@@ -163,13 +163,13 @@ func slashConnectWithContext(ctx context.Context, service control.Service, agent
 		}
 		names := make([]string, 0, len(result.Agents))
 		for _, agent := range result.Agents {
-			name := "/" + strings.TrimSpace(agent.ID)
+			name := strings.TrimSpace(agent.ID)
 			if model := strings.TrimSpace(agent.Defaults.ModelID); model != "" {
 				name += " (" + model + ")"
 			}
 			names = append(names, name)
 		}
-		sendNotice(send, "connected Agents: "+strings.Join(names, ", "))
+		sendNotice(send, "connected ACP Agents: "+strings.Join(names, ", ")+"\nnext: /subagent bind assigns Breeze, Orbit, or Zenith")
 		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}

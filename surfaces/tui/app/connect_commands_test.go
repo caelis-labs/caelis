@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
@@ -20,8 +21,9 @@ type acpConnectControlStub struct {
 
 type modelConnectControlStub struct {
 	control.Service
-	agents []control.AgentCandidate
-	status control.AgentStatusSnapshot
+	agents           []control.AgentCandidate
+	status           control.AgentStatusSnapshot
+	delegationStatus controldelegation.Status
 }
 
 func (*modelConnectControlStub) Connect(context.Context, control.ConnectConfig) (control.StatusSnapshot, error) {
@@ -37,6 +39,18 @@ func (s *modelConnectControlStub) ListAgents(context.Context, int) ([]control.Ag
 		return slices.Clone(s.agents), nil
 	}
 	return []control.AgentCandidate{{Name: "sol", Description: "GPT 5.6 Sol"}}, nil
+}
+
+func (s *modelConnectControlStub) DelegationStatus(context.Context) (controldelegation.Status, error) {
+	return s.delegationStatus, nil
+}
+
+func (s *modelConnectControlStub) BindDelegation(_ context.Context, _ controldelegation.BindRequest) (controldelegation.Status, error) {
+	return s.delegationStatus, nil
+}
+
+func (s *modelConnectControlStub) ResetDelegation(_ context.Context, _ controldelegation.Profile) (controldelegation.Status, error) {
+	return s.delegationStatus, nil
 }
 
 func (s *acpConnectControlStub) DiscoverACPConnection(_ context.Context, _ controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
@@ -106,7 +120,7 @@ func TestSlashConnectDisconnectsOnlyAfterWizardConfirmation(t *testing.T) {
 	}
 }
 
-func TestSlashConnectModelRefreshesAgentSlashCommands(t *testing.T) {
+func TestSlashConnectModelKeepsUnboundProfilesHiddenWithoutExposingAgentSlash(t *testing.T) {
 	service := &modelConnectControlStub{}
 	var commands SetCommandsMsg
 	var notice SlashNoticeMsg
@@ -121,11 +135,13 @@ func TestSlashConnectModelRefreshesAgentSlashCommands(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("slashConnectWithContext() error = %v", result.Err)
 	}
-	if !slices.Contains(commands.Commands, "sol") {
-		t.Fatalf("refreshed commands = %#v, want sol", commands.Commands)
+	for _, profile := range []string{"breeze", "orbit", "zenith"} {
+		if slices.Contains(commands.Commands, profile) {
+			t.Fatalf("refreshed commands = %#v, should hide unbound %s", commands.Commands, profile)
+		}
 	}
-	if commands.Details["sol"] != "GPT 5.6 Sol" {
-		t.Fatalf("refreshed command details = %#v", commands.Details)
+	if slices.Contains(commands.Commands, "sol") {
+		t.Fatalf("refreshed commands = %#v, should hide model Agent ID sol", commands.Commands)
 	}
 	if !strings.Contains(notice.Text, "connected: openai-codex/gpt-5.6-sol") {
 		t.Fatalf("connect notice = %#v, want canonical connected model", notice)
@@ -135,7 +151,7 @@ func TestSlashConnectModelRefreshesAgentSlashCommands(t *testing.T) {
 	}
 }
 
-func TestAgentSlashCommandsKeepRosterGlobalAndRunsSessionScoped(t *testing.T) {
+func TestAgentSlashCommandsHideRosterAndKeepProfileRunsSessionScoped(t *testing.T) {
 	t.Parallel()
 
 	service := &modelConnectControlStub{
@@ -144,29 +160,43 @@ func TestAgentSlashCommandsKeepRosterGlobalAndRunsSessionScoped(t *testing.T) {
 			{Name: "claude", Description: "Claude ACP Agent"},
 		},
 		status: control.AgentStatusSnapshot{Participants: []control.AgentParticipantSnapshot{{
-			ID: "participant-1", Label: "@lina", AgentName: "codex", Kind: "acp", Role: "sidecar",
+			ID: "participant-1", Label: "@lina", AgentName: "codex", Kind: "acp", Role: "sidecar", Source: "slash_profile_breeze",
 		}}},
+		delegationStatus: subagentTestStatus(),
 	}
 
 	before := appendAgentSlashCommandsWithContext(context.Background(), service, DefaultCommands())
-	for _, command := range []string{"codex", "claude", "codex(lina)"} {
+	for _, command := range []string{"orbit", "breeze(lina)"} {
 		if !slices.Contains(before, command) {
 			t.Fatalf("commands before /new = %#v, want %q", before, command)
 		}
 	}
-	details := registeredAgentCommandDetailsWithContext(context.Background(), service)
-	if details["codex(lina)"] != "Continue /codex as lina" {
+	for _, hidden := range []string{"breeze", "zenith"} {
+		if slices.Contains(before, hidden) {
+			t.Fatalf("commands before /new = %#v, should hide unbound profile %q", before, hidden)
+		}
+	}
+	for _, hidden := range []string{"codex", "claude", "codex(lina)"} {
+		if slices.Contains(before, hidden) {
+			t.Fatalf("commands before /new = %#v, should hide raw Agent %q", before, hidden)
+		}
+	}
+	details := profileCommandDetailsWithContext(context.Background(), service)
+	if details["breeze(lina)"] != "Continue /breeze as lina" {
 		t.Fatalf("run command details = %#v", details)
 	}
 
 	service.status.Participants = nil
 	after := appendAgentSlashCommandsWithContext(context.Background(), service, DefaultCommands())
-	for _, command := range []string{"codex", "claude"} {
-		if !slices.Contains(after, command) {
-			t.Fatalf("commands after /new = %#v, want global %q", after, command)
+	if !slices.Contains(after, "orbit") {
+		t.Fatalf("commands after /new = %#v, want bound Orbit", after)
+	}
+	for _, hidden := range []string{"breeze", "zenith"} {
+		if slices.Contains(after, hidden) {
+			t.Fatalf("commands after /new = %#v, should hide unbound profile %q", after, hidden)
 		}
 	}
-	if slices.Contains(after, "codex(lina)") {
+	if slices.Contains(after, "breeze(lina)") {
 		t.Fatalf("commands after /new = %#v, want prior Session run removed", after)
 	}
 }

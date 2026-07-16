@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controldelegation "github.com/caelis-labs/caelis/control/delegation"
+	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
 	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
@@ -136,6 +137,11 @@ func TestDeleteModelAtomicallyRemovesModelBackedAgent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("BindDelegation() error = %v", err)
 	}
+	if _, err := stack.SystemAgents().BindSystemAgent(ctx, controlsystemagent.BindRequest{
+		ID: controlsystemagent.Reviewer, AgentID: agentID,
+	}); err != nil {
+		t.Fatalf("BindSystemAgent() error = %v", err)
+	}
 	if err := stack.DeleteModel(ctx, activeSession.SessionRef, modelID); err != nil {
 		t.Fatalf("DeleteModel() error = %v", err)
 	}
@@ -153,6 +159,9 @@ func TestDeleteModelAtomicallyRemovesModelBackedAgent(t *testing.T) {
 	}
 	if binding, ok := controldelegation.LookupBinding(doc.Delegation, controldelegation.ProfileZenith); !ok || binding.Target != controldelegation.TargetSelf {
 		t.Fatalf("Zenith binding after model deletion = %#v, ok=%v, want self", binding, ok)
+	}
+	if binding, ok := controlsystemagent.LookupBinding(doc.SystemAgents, controlsystemagent.Reviewer); !ok || binding.AgentID != "" {
+		t.Fatalf("Reviewer binding after model deletion = %#v, ok=%v, want default", binding, ok)
 	}
 }
 
@@ -209,6 +218,11 @@ func TestDeleteModelRestoresModelBackedAgentWhenRefreshFails(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("BindDelegation() error = %v", err)
 	}
+	if _, err := stack.SystemAgents().BindSystemAgent(ctx, controlsystemagent.BindRequest{
+		ID: controlsystemagent.Guardian, AgentID: agentID,
+	}); err != nil {
+		t.Fatalf("BindSystemAgent() error = %v", err)
+	}
 	wantErr := errors.New("refresh failed")
 	stack.refreshConfiguredAgentsHook = func() error { return wantErr }
 	if err := stack.DeleteModel(ctx, activeSession.SessionRef, modelID); !errors.Is(err, wantErr) {
@@ -230,6 +244,9 @@ func TestDeleteModelRestoresModelBackedAgentWhenRefreshFails(t *testing.T) {
 	}
 	if binding, ok := controldelegation.LookupBinding(doc.Delegation, controldelegation.ProfileZenith); !ok || binding.Target != controldelegation.TargetAgent || binding.AgentID != agentID {
 		t.Fatalf("rollback did not restore Zenith binding = %#v, ok=%v", binding, ok)
+	}
+	if binding, ok := controlsystemagent.LookupBinding(doc.SystemAgents, controlsystemagent.Guardian); !ok || binding.AgentID != agentID {
+		t.Fatalf("rollback did not restore Guardian binding = %#v, ok=%v", binding, ok)
 	}
 }
 

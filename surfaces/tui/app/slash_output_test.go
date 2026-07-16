@@ -11,6 +11,7 @@ import (
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 func TestSlashStatusOutputRendersStructuredSnapshot(t *testing.T) {
@@ -112,6 +113,33 @@ func TestSlashHelpOutputUsesTUIGrouping(t *testing.T) {
 	}, "\n")
 	if plain != want {
 		t.Fatalf("help output mismatch:\n--- got ---\n%s\n--- want ---\n%s", plain, want)
+	}
+}
+
+func TestSlashTableOutputUsesSectionAndTableStyles(t *testing.T) {
+	t.Parallel()
+
+	lines := renderSlashCommandResultLines(control.NewTableSlashResult("subagent", control.SlashTableSnapshot{
+		Title: "Subagents",
+		Sections: []control.SlashTableSection{{
+			Title:   "Delegation Profiles",
+			Columns: []string{"Profile", "Binding"},
+			Rows:    [][]string{{"breeze", "Unbound"}, {"orbit", "openai-codex/gpt-5.6-sol [high]"}},
+		}},
+	}))
+	want := strings.Join([]string{
+		"Subagents",
+		"Delegation Profiles",
+		"  Profile  Binding",
+		"  ───────  ───────────────────────────────",
+		"  breeze   Unbound",
+		"  orbit    openai-codex/gpt-5.6-sol [high]",
+	}, "\n")
+	if got := slashOutputPlainForTest(lines); got != want {
+		t.Fatalf("table output mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if lines[0].Style != tuikit.LineStyleSection || lines[2].Style != tuikit.LineStyleTableHeader || lines[3].Style != tuikit.LineStyleTableDivider {
+		t.Fatalf("table styles = %#v", lines)
 	}
 }
 
@@ -278,8 +306,8 @@ func TestExecuteControlPromptResultDefersNewSessionStatusAfterClearAndNotice(t *
 		t.Fatalf("third message = %#v, want deferred status refresh", got[2])
 	}
 	commands, ok := got[3].(SetCommandsMsg)
-	if !ok || !slices.Contains(commands.Commands, "sol") {
-		t.Fatalf("last message = %#v, want refreshed global Agent commands", got[3])
+	if !ok || slices.Contains(commands.Commands, "breeze") || slices.Contains(commands.Commands, "orbit") || slices.Contains(commands.Commands, "zenith") || slices.Contains(commands.Commands, "sol") {
+		t.Fatalf("last message = %#v, want unbound profiles and raw Agent IDs hidden", got[3])
 	}
 }
 

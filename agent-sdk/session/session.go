@@ -290,15 +290,18 @@ type ControllerBinding struct {
 
 // ParticipantBinding is the durable participant attachment for one session.
 type ParticipantBinding struct {
-	ID           string          `json:"id,omitempty"`
-	Kind         ParticipantKind `json:"kind,omitempty"`
-	Role         ParticipantRole `json:"role,omitempty"`
-	AgentName    string          `json:"agent_name,omitempty"`
-	Label        string          `json:"label,omitempty"`
-	SessionID    string          `json:"session_id,omitempty"`
-	Source       string          `json:"source,omitempty"`
-	ParentTurnID string          `json:"parent_turn_id,omitempty"`
-	DelegationID string          `json:"delegation_id,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Kind      ParticipantKind `json:"kind,omitempty"`
+	Role      ParticipantRole `json:"role,omitempty"`
+	AgentName string          `json:"agent_name,omitempty"`
+	Label     string          `json:"label,omitempty"`
+	// ReasoningEffort is the optional ACP session effort selected when this
+	// participant was attached.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	SessionID       string `json:"session_id,omitempty"`
+	Source          string `json:"source,omitempty"`
+	ParentTurnID    string `json:"parent_turn_id,omitempty"`
+	DelegationID    string `json:"delegation_id,omitempty"`
 	// AttachmentGeneration identifies the exact live endpoint instance behind
 	// this durable binding. Conditional detach must match it.
 	AttachmentGeneration string    `json:"attachment_generation,omitempty"`
