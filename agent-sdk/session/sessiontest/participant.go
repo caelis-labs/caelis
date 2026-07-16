@@ -374,12 +374,6 @@ func assertParticipantSessionTransition(
 	expected.UpdatedAt = actual.UpdatedAt
 	if lifecycleEvent != nil {
 		expected.UpdatedAt = lifecycleEvent.Time
-		if expected.Title == "" {
-			expected.Title = strings.TrimSpace(session.EventDisplayText(lifecycleEvent))
-			if len(expected.Title) > 80 {
-				expected.Title = expected.Title[:80]
-			}
-		}
 	}
 	if !participantJSONEqual(session.CloneSession(actual), expected) {
 		t.Fatalf("participant mutation returned a non-exact session: expected=%#v actual=%#v", expected, actual)

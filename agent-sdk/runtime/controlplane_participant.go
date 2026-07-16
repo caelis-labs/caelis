@@ -319,12 +319,6 @@ func participantLifecycleResultMatches(
 	}
 	expectedSession.Revision = before.Revision + 1
 	expectedSession.UpdatedAt = requestedEvent.Time
-	if expectedSession.Title == "" {
-		expectedSession.Title = strings.TrimSpace(requestedEvent.Text)
-		if len(expectedSession.Title) > 80 {
-			expectedSession.Title = expectedSession.Title[:80]
-		}
-	}
 	if !participantLifecycleJSONEqual(session.CloneSession(actual), expectedSession) {
 		return false
 	}

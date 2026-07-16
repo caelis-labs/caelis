@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 // EventIDAllocator assigns a durable event id that is unique within existingIDs.
@@ -375,7 +377,11 @@ func cloneEventIDSet(in map[string]struct{}) map[string]struct{} {
 }
 
 func generatedSessionTitle(event *Event) string {
-	if event == nil || titleHiddenEvent(event) {
+	if event == nil || EventTypeOf(event) != EventTypeUser || titleHiddenEvent(event) {
+		return ""
+	}
+	message, ok := ModelMessageOf(event)
+	if !ok || message.Role != model.RoleUser {
 		return ""
 	}
 	return truncateGeneratedSessionTitle(EventDisplayText(event))

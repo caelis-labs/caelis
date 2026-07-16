@@ -586,6 +586,82 @@ func TestStoreAppendUsesDisplayTextForGeneratedTitle(t *testing.T) {
 	}
 }
 
+func TestStoreParticipantLifecycleBeforeFirstPromptDoesNotClaimGeneratedTitle(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-side-first" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+
+	binding := session.ParticipantBinding{
+		ID:                   "claude-1",
+		Kind:                 session.ParticipantKindACP,
+		Role:                 session.ParticipantRoleSidecar,
+		AgentName:            "claude",
+		Label:                "@aria",
+		DelegationID:         "delegation-1",
+		AttachmentGeneration: "generation-1",
+	}
+	participantProtocol := session.NewParticipantProtocol(session.ProtocolParticipant{Action: "attached"})
+	attached, _, err := store.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
+		SessionRef:       createdSession.SessionRef,
+		ExpectedRevision: &createdSession.Revision,
+		Binding:          binding,
+		Event: &session.Event{
+			Type:       session.EventTypeParticipant,
+			Visibility: session.VisibilityCanonical,
+			Text:       "attached participant @aria",
+			Protocol:   &participantProtocol,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PutParticipantWithEvent() error = %v", err)
+	}
+	if attached.Title != "" {
+		t.Fatalf("title after participant attach = %q, want empty", attached.Title)
+	}
+
+	modelPrompt := "Inspect the current changes and explain the root cause."
+	displayPrompt := "检查当前修改并解释根因"
+	message := model.NewTextMessage(model.RoleUser, modelPrompt)
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef: attached.SessionRef,
+		Event: &session.Event{
+			Type:       session.EventTypeUser,
+			Visibility: session.VisibilityCanonical,
+			Message:    &message,
+			Text:       displayPrompt,
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent(user prompt) error = %v", err)
+	}
+
+	list, err := store.ListSessions(ctx, session.ListSessionsRequest{
+		AppName:      "caelis",
+		UserID:       "user-1",
+		WorkspaceKey: "ws-1",
+	})
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(list.Sessions) != 1 || list.Sessions[0].Title != displayPrompt {
+		t.Fatalf("resume summary = %#v, want user display prompt %q", list.Sessions, displayPrompt)
+	}
+}
+
 func TestStoreLoadRejectsToolResultNameMismatch(t *testing.T) {
 	t.Parallel()
 
