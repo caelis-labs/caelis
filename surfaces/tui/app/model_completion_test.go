@@ -17,7 +17,7 @@ import (
 func TestModelDeleteSelectionOpensAliasPicker(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
@@ -58,7 +58,7 @@ func TestPluginCommandShowsRootCompletion(t *testing.T) {
 		t.Run(fmt.Sprintf("%q", input), func(t *testing.T) {
 			model := NewModel(Config{
 				Commands: DefaultCommands(),
-				SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+				SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 					if command != "plugin" {
 						t.Fatalf("SlashArgComplete command = %q, want plugin", command)
 					}
@@ -94,7 +94,7 @@ func TestPluginCommandShowsRootCompletion(t *testing.T) {
 func TestPluginMarketplaceSelectionOpensNestedPicker(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "plugin":
 				return []SlashArgCandidate{{Value: "marketplace", Display: "marketplace"}}, nil
@@ -152,7 +152,7 @@ func TestPluginMarketplaceInputShowsNestedCompletion(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			model := NewModel(Config{
 				Commands: DefaultCommands(),
-				SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+				SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 					switch command {
 					case "plugin marketplace":
 						return []SlashArgCandidate{{Value: "update", Display: "update"}}, nil
@@ -186,7 +186,7 @@ func TestPluginMarketplaceListCompletionSubmitsPickerCommand(t *testing.T) {
 			submitted = submission.Text
 			return TaskResultMsg{SuppressTurnDivider: true}
 		},
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			if command != "plugin marketplace" {
 				return nil, nil
 			}
@@ -299,7 +299,7 @@ func candidateValuesForTUITest(candidates []SlashArgCandidate) []string {
 func TestTryOpenSlashArgPickerUsesCommandRegistry(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			if command != "plugin" {
 				return nil, nil
 			}
@@ -323,7 +323,7 @@ func TestPluginManageCompletionSubmitsPickerCommand(t *testing.T) {
 			submitted = submission.Text
 			return TaskResultMsg{SuppressTurnDivider: true}
 		},
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			if command != "plugin" {
 				return nil, nil
 			}
@@ -349,7 +349,7 @@ func TestPluginManageCompletionSubmitsPickerCommand(t *testing.T) {
 func TestModelUseSelectionOpensReasoningPicker(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{{Value: "use", Display: "use"}}, nil
@@ -388,7 +388,7 @@ func TestModelUseSelectionOpensReasoningPicker(t *testing.T) {
 func TestModelUseExactAliasInputOpensReasoningPicker(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model use":
 				return []SlashArgCandidate{{Value: "gpt-5.5", Display: "GPT-5.5"}}, nil
@@ -412,166 +412,6 @@ func TestModelUseExactAliasInputOpensReasoningPicker(t *testing.T) {
 	}
 }
 
-func TestSubagentBindSelectionOpensNestedPickers(t *testing.T) {
-	model := NewModel(Config{
-		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
-			switch command {
-			case "subagent":
-				return []SlashArgCandidate{
-					{Value: "list", Display: "list"},
-					{Value: "bind", Display: "bind"},
-				}, nil
-			case "subagent bind":
-				return []SlashArgCandidate{{Value: "guardian", Display: "guardian"}}, nil
-			case "subagent bind guardian":
-				return []SlashArgCandidate{
-					{Value: "default", Display: "default"},
-					{Value: "model", Display: "model"},
-				}, nil
-			case "subagent bind guardian model":
-				return []SlashArgCandidate{{Value: "guardian-model", Display: "guardian-model"}}, nil
-			case "subagent bind guardian model guardian-model":
-				return []SlashArgCandidate{
-					{Value: "none", Display: "none"},
-					{Value: "high", Display: "high"},
-				}, nil
-			default:
-				return nil, nil
-			}
-		},
-	})
-
-	model.openSlashArgPicker("subagent")
-	model.slashArgIndex = 2
-	model.applySlashArgCompletion()
-	if got := string(model.input); got != "/subagent bind " {
-		t.Fatalf("input after bind action = %q, want /subagent bind ", got)
-	}
-	if got := model.slashArgCommand; got != "subagent bind" {
-		t.Fatalf("slashArgCommand = %q, want subagent bind", got)
-	}
-
-	model.applySlashArgCompletion()
-	if got := string(model.input); got != "/subagent bind guardian " {
-		t.Fatalf("input after guardian profile = %q, want /subagent bind guardian ", got)
-	}
-	if got := model.slashArgCommand; got != "subagent bind guardian" {
-		t.Fatalf("slashArgCommand = %q, want subagent bind guardian", got)
-	}
-
-	model.slashArgIndex = 1
-	model.applySlashArgCompletion()
-	if got := string(model.input); got != "/subagent bind guardian model " {
-		t.Fatalf("input after model target = %q, want /subagent bind guardian model ", got)
-	}
-	if got := model.slashArgCommand; got != "subagent bind guardian model" {
-		t.Fatalf("slashArgCommand = %q, want model alias picker", got)
-	}
-
-	model.applySlashArgCompletion()
-	if got := string(model.input); got != "/subagent bind guardian model guardian-model " {
-		t.Fatalf("input after model alias = %q, want alias plus trailing space", got)
-	}
-	if got := model.slashArgCommand; got != "subagent bind guardian model guardian-model" {
-		t.Fatalf("slashArgCommand = %q, want reasoning picker command", got)
-	}
-
-	model.slashArgIndex = 1
-	model.applySlashArgCompletion()
-	if got := string(model.input); got != "/subagent bind guardian model guardian-model high" {
-		t.Fatalf("input after reasoning = %q, want high reasoning", got)
-	}
-	if model.slashArgActive {
-		t.Fatal("slash arg picker should close after final reasoning selection")
-	}
-}
-
-func TestSubagentSlashTypingActivatesNestedCompletion(t *testing.T) {
-	model := NewModel(Config{
-		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
-			switch command {
-			case "subagent":
-				return []SlashArgCandidate{{Value: "bind", Display: "bind"}}, nil
-			case "subagent bind":
-				return []SlashArgCandidate{{Value: "guardian", Display: "guardian"}}, nil
-			case "subagent bind guardian":
-				return []SlashArgCandidate{{Value: "model", Display: "model"}}, nil
-			case "subagent bind guardian model":
-				return []SlashArgCandidate{{Value: "guardian-model", Display: "guardian-model"}}, nil
-			case "subagent bind guardian model guardian-model":
-				return []SlashArgCandidate{{Value: "high", Display: "high"}}, nil
-			default:
-				return nil, nil
-			}
-		},
-	})
-
-	tests := []struct {
-		input   string
-		command string
-		value   string
-	}{
-		{input: "/subagent bi", command: "subagent", value: "bind"},
-		{input: "/subagent bind gu", command: "subagent bind", value: "guardian"},
-		{input: "/subagent bind guardian mo", command: "subagent bind guardian", value: "model"},
-		{input: "/subagent bind guardian model guardian", command: "subagent bind guardian model", value: "guardian-model"},
-		{input: "/subagent bind guardian model guardian-model h", command: "subagent bind guardian model guardian-model", value: "high"},
-	}
-	for _, tt := range tests {
-		model.setInputText(tt.input)
-		model.syncTextareaFromInput()
-		model.syncSlashInputOverlays()
-		if got := model.slashArgCommand; got != tt.command {
-			t.Fatalf("slashArgCommand for %q = %q, want %q", tt.input, got, tt.command)
-		}
-		if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != tt.value {
-			t.Fatalf("slashArgCandidates for %q = %#v, want %q", tt.input, model.slashArgCandidates, tt.value)
-		}
-	}
-}
-
-func TestSubagentBindFinalCandidateEnterSubmitsCompletedInput(t *testing.T) {
-	var submitted string
-	model := NewModel(Config{
-		Commands: DefaultCommands(),
-		ExecuteLine: func(submission Submission) TaskResultMsg {
-			submitted = submission.Text
-			return TaskResultMsg{SuppressTurnDivider: true}
-		},
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
-			switch command {
-			case "subagent bind guardian":
-				return []SlashArgCandidate{{Value: "default", Display: "default"}}, nil
-			default:
-				return nil, nil
-			}
-		},
-	})
-	model.setInputText("/subagent bind guardian ")
-	model.syncTextareaFromInput()
-	model.syncSlashInputOverlays()
-	if got := model.slashArgCommand; got != "subagent bind guardian" {
-		t.Fatalf("slashArgCommand = %q, want subagent bind guardian", got)
-	}
-	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "default" {
-		t.Fatalf("slashArgCandidates = %#v, want default", model.slashArgCandidates)
-	}
-
-	handled, cmd := model.handleSlashArgKey(keyPress("enter"))
-	if !handled {
-		t.Fatal("handleSlashArgKey(enter) = false, want true")
-	}
-	if cmd == nil {
-		t.Fatalf("handleSlashArgKey(enter) command = nil, want submit command; input=%q active=%v command=%q candidates=%#v running=%v executeLineNil=%v", model.textarea.Value(), model.slashArgActive, model.slashArgCommand, model.slashArgCandidates, model.turnRunning(), model.cfg.ExecuteLine == nil)
-	}
-	findAndRunTaskResult(cmd(), model)
-	if submitted != "/subagent bind guardian default" {
-		t.Fatalf("submitted input = %q, want /subagent bind guardian default", submitted)
-	}
-}
-
 func TestDestructiveSlashArgEnterCompletesBeforeSubmit(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -587,13 +427,6 @@ func TestDestructiveSlashArgEnterCompletesBeforeSubmit(t *testing.T) {
 			candidate: "stale-model",
 			wantInput: "/model del stale-model ",
 		},
-		{
-			name:      "agent remove",
-			command:   "agent remove",
-			input:     "/agent remove ",
-			candidate: "copilot",
-			wantInput: "/agent remove copilot",
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -604,7 +437,7 @@ func TestDestructiveSlashArgEnterCompletesBeforeSubmit(t *testing.T) {
 					submitted = append(submitted, submission.Text)
 					return TaskResultMsg{SuppressTurnDivider: true}
 				},
-				SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+				SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 					if command != tt.command {
 						return nil, nil
 					}
@@ -671,13 +504,13 @@ func TestSlashCommandSelectionMovesWithArrowKeys(t *testing.T) {
 
 func TestSlashCommandCompletionRefreshesBeforeAcceptingStaleCandidates(t *testing.T) {
 	model := NewModel(Config{
-		Commands: []string{"agent", "doctor"},
+		Commands: []string{"alpha", "doctor"},
 	})
 
 	_, cmd := model.handleKey(keyPress("/"))
 	runCompletionCmd(t, model, cmd)
-	if got := model.slashCandidates; len(got) != 2 || got[0] != "/agent" {
-		t.Fatalf("slashCandidates after / = %#v, want stale list starting with /agent", got)
+	if got := model.slashCandidates; len(got) != 2 || got[0] != "/alpha" {
+		t.Fatalf("slashCandidates after / = %#v, want stale list starting with /alpha", got)
 	}
 	_, cmd = model.handleKey(keyPress("do"))
 	if cmd == nil {
@@ -691,49 +524,60 @@ func TestSlashCommandCompletionRefreshesBeforeAcceptingStaleCandidates(t *testin
 	}
 }
 
-func TestSlashCommandCompletionOpensSubagentArgPicker(t *testing.T) {
+func TestSlashCommandCompletionOpensAndAppliesLeadPicker(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
-			if command != "subagent" {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
+			if command != "lead" {
 				return nil, nil
 			}
 			return []SlashArgCandidate{
-				{Value: "list", Display: "list"},
-				{Value: "bind", Display: "bind"},
+				{Value: "local", Display: "local"},
+				{Value: "helper", Display: "helper"},
 			}, nil
 		},
 	})
 
-	model.setInputText("/sub")
+	model.setInputText("/lea")
 	model.syncTextareaFromInput()
 	model.refreshSlashCommands()
-	if len(model.slashCandidates) != 1 || model.slashCandidates[0] != "/subagent" {
-		t.Fatalf("slashCandidates = %#v, want only /subagent", model.slashCandidates)
+	if len(model.slashCandidates) != 1 || model.slashCandidates[0] != "/lead" {
+		t.Fatalf("slashCandidates = %#v, want only /lead", model.slashCandidates)
 	}
 	model.applySlashCommandCompletion()
 	model.syncTextareaFromInput()
 
-	if got := string(model.input); got != "/subagent " {
-		t.Fatalf("input after /sub<Tab> = %q, want /subagent ", got)
+	if got := string(model.input); got != "/lead " {
+		t.Fatalf("input after /lea<Tab> = %q, want /lead ", got)
 	}
-	if got := model.slashArgCommand; got != "subagent" {
-		t.Fatalf("slashArgCommand = %q, want subagent", got)
+	if got := model.slashArgCommand; got != "lead" {
+		t.Fatalf("slashArgCommand = %q, want lead", got)
 	}
-	if len(model.slashArgCandidates) != 2 || model.slashArgCandidates[0].Value != "list" {
-		t.Fatalf("slashArgCandidates = %#v, want list/bind", model.slashArgCandidates)
+	if len(model.slashArgCandidates) != 2 || model.slashArgCandidates[0].Value != "local" {
+		t.Fatalf("slashArgCandidates = %#v, want local/helper", model.slashArgCandidates)
+	}
+	model.slashArgIndex = 1
+	handled, cmd := model.handleSlashArgKey(keyPress("enter"))
+	if !handled {
+		t.Fatal("handleSlashArgKey(enter) = false, want true")
+	}
+	if cmd != nil {
+		cmd()
+	}
+	if got := string(model.input); got != "/lead helper " {
+		t.Fatalf("input after choosing helper = %q, want /lead helper ", got)
 	}
 }
 
 func TestSlashCommandTabKeepsArrowSelectedCandidateAcrossRefresh(t *testing.T) {
 	model := NewModel(Config{
-		Commands: []string{"agent", "doctor"},
+		Commands: []string{"alpha", "doctor"},
 	})
 	model.setInputText("/")
 	model.syncTextareaFromInput()
 	model.refreshSlashCommands()
-	if got := model.slashCandidates; len(got) != 2 || got[0] != "/agent" || got[1] != "/doctor" {
-		t.Fatalf("slashCandidates = %#v, want /agent then /doctor", got)
+	if got := model.slashCandidates; len(got) != 2 || got[0] != "/alpha" || got[1] != "/doctor" {
+		t.Fatalf("slashCandidates = %#v, want /alpha then /doctor", got)
 	}
 
 	handled, _ := model.handleSlashCommandKey(keyPress("down"))
@@ -754,7 +598,7 @@ func TestSlashCommandTabKeepsArrowSelectedCandidateAcrossRefresh(t *testing.T) {
 func TestModelActionPrefixTypingOpensMatchingAliasPicker(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
@@ -800,7 +644,7 @@ func TestModelActionPrefixTypingOpensMatchingAliasPicker(t *testing.T) {
 func TestModelActionPrefixTypingFiltersCandidatesWhenCursorLags(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
@@ -826,7 +670,7 @@ func TestModelActionPrefixTypingFiltersCandidatesWhenCursorLags(t *testing.T) {
 func TestModelActionPrefixTypingResetsSelectionToFirstFilteredCandidate(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
@@ -1058,71 +902,10 @@ func TestClosingResumePickerRejectsLateCompletionAndAcceptRetriesAsync(t *testin
 	}
 }
 
-func TestAgentActionPrefixTypingFiltersCandidates(t *testing.T) {
-	model := NewModel(Config{
-		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
-			switch command {
-			case "agent":
-				return []SlashArgCandidate{
-					{Value: "add", Display: "add"},
-					{Value: "remove", Display: "remove"},
-					{Value: "use", Display: "use"},
-					{Value: "list", Display: "list"},
-				}, nil
-			default:
-				return nil, nil
-			}
-		},
-	})
-
-	model.setInputText("/agent us")
-	model.syncTextareaFromInput()
-	model.syncSlashInputOverlays()
-
-	if got := model.slashArgCommand; got != "agent" {
-		t.Fatalf("slashArgCommand = %q, want agent", got)
-	}
-	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "use" {
-		t.Fatalf("slashArgCandidates = %#v, want only use candidate", model.slashArgCandidates)
-	}
-}
-
-func TestAgentActionPrefixTypingFiltersCandidatesWhenCursorLags(t *testing.T) {
-	model := NewModel(Config{
-		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
-			switch command {
-			case "agent":
-				return []SlashArgCandidate{
-					{Value: "add", Display: "add"},
-					{Value: "remove", Display: "remove"},
-					{Value: "use", Display: "use"},
-					{Value: "list", Display: "list"},
-				}, nil
-			default:
-				return nil, nil
-			}
-		},
-	})
-
-	model.setInputText("/agent us")
-	model.syncTextareaFromInput()
-	model.cursor = len([]rune("/agent "))
-	model.syncSlashInputOverlays()
-
-	if got := model.slashArgCommand; got != "agent" {
-		t.Fatalf("slashArgCommand = %q, want agent", got)
-	}
-	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "use" {
-		t.Fatalf("slashArgCandidates with lagging cursor = %#v, want only use candidate", model.slashArgCandidates)
-	}
-}
-
 func TestModelActionPrefixTypingFiltersCandidatesDuringLiveInput(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
@@ -1155,7 +938,7 @@ func TestModelActionPrefixTypingFiltersCandidatesDuringLiveInput(t *testing.T) {
 func TestCompletionRefreshDoesNotBlockTypingPath(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			time.Sleep(200 * time.Millisecond)
 			return []SlashArgCandidate{{Value: "del", Display: "del"}}, nil
 		},
@@ -1175,7 +958,7 @@ func TestCompletionRefreshDoesNotBlockTypingPath(t *testing.T) {
 func TestModelActionPrefixTypingUsesTextareaValueAsSourceOfTruth(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
@@ -1436,6 +1219,24 @@ func TestSlashCompletionRendersDescriptionsWithoutHeaderOrBorder(t *testing.T) {
 	}
 }
 
+func TestAgentSlashCompletionShowsProviderModelButExecutesStableProviderCommand(t *testing.T) {
+	model := NewModel(Config{
+		Commands:       []string{"codex"},
+		CommandDetails: map[string]string{"codex": "codex(gpt-5.6-sol)"},
+	})
+	model.setInputText("/")
+	model.syncTextareaFromInput()
+	model.refreshSlashCommands()
+	if got := ansi.Strip(model.renderSlashCommandList()); !strings.Contains(got, "/codex") || !strings.Contains(got, "codex(gpt-5.6-sol)") {
+		t.Fatalf("renderSlashCommandList() = %q, want provider command and model display", got)
+	}
+	model.applySlashCommandCompletion()
+	model.syncTextareaFromInput()
+	if got := model.textarea.Value(); got != "/codex " {
+		t.Fatalf("completed command = %q, want stable executable /codex", got)
+	}
+}
+
 func TestWizardSuppressesRootSlashCompletion(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
@@ -1490,13 +1291,6 @@ func TestInputCompletionSelectionsAvoidFocusAccent(t *testing.T) {
 	model.slashCandidates = []string{"/help", "/model"}
 	model.slashIndex = 1
 	cases["slash"] = model.renderSlashCommandList()
-
-	model.mentionPrefix = "@"
-	model.mentionCandidates = []CompletionCandidate{
-		{Value: "agent-a", Display: "agent-a", Detail: "Agent A"},
-	}
-	model.mentionIndex = 0
-	cases["mention"] = model.renderMentionList()
 
 	model.mentionPrefix = "#"
 	model.mentionCandidates = []CompletionCandidate{
@@ -1602,9 +1396,6 @@ func TestFileCompletionAcceptPreservesSelectedCandidateAcrossRefresh(t *testing.
 	for _, keyName := range []string{"tab", "enter"} {
 		t.Run(keyName, func(t *testing.T) {
 			model := NewModel(Config{
-				MentionComplete: func(query string, limit int) ([]CompletionCandidate, error) {
-					return nil, nil
-				},
 				FileComplete: func(query string, limit int) ([]CompletionCandidate, error) {
 					return []CompletionCandidate{
 						{Value: "docs/", Display: "docs/", Detail: "directory"},
@@ -1658,9 +1449,6 @@ func TestFileCompletionListHidesPrefixAndTypeDetail(t *testing.T) {
 func TestFileCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
 	var gotLimit int
 	model := NewModel(Config{
-		MentionComplete: func(query string, limit int) ([]CompletionCandidate, error) {
-			return nil, nil
-		},
 		FileComplete: func(query string, limit int) ([]CompletionCandidate, error) {
 			gotLimit = limit
 			return numberedCompletionCandidates("file", 12), nil
@@ -1701,9 +1489,6 @@ func TestFileCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
 func TestFileCompletionLoadsNextPageAtBottomThenWrapsWhenExhausted(t *testing.T) {
 	var limits []int
 	model := NewModel(Config{
-		MentionComplete: func(query string, limit int) ([]CompletionCandidate, error) {
-			return nil, nil
-		},
 		FileComplete: func(query string, limit int) ([]CompletionCandidate, error) {
 			limits = append(limits, limit)
 			return numberedCompletionCandidates("file", minInt(limit, 65)), nil
@@ -1740,91 +1525,6 @@ func TestFileCompletionLoadsNextPageAtBottomThenWrapsWhenExhausted(t *testing.T)
 	}
 	if len(limits) != callCount {
 		t.Fatalf("FileComplete called after exhausted page: %v", limits)
-	}
-	if model.mentionIndex != 0 {
-		t.Fatalf("mentionIndex after exhausted down = %d, want wrap to 0", model.mentionIndex)
-	}
-}
-
-func TestMentionCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
-	var gotLimit int
-	model := NewModel(Config{
-		MentionComplete: func(query string, limit int) ([]CompletionCandidate, error) {
-			gotLimit = limit
-			return numberedCompletionCandidates("agent", 12), nil
-		},
-	})
-
-	model.setInputText("@")
-	model.syncTextareaFromInput()
-	model.refreshMention()
-	if gotLimit != completionCandidateFetchLimit {
-		t.Fatalf("MentionComplete limit = %d, want %d", gotLimit, completionCandidateFetchLimit)
-	}
-	if len(model.mentionCandidates) != 12 {
-		t.Fatalf("mentionCandidates = %d, want 12", len(model.mentionCandidates))
-	}
-	for i := 0; i < 9; i++ {
-		handled, _ := model.handleMentionKey(keyPress("down"))
-		if !handled {
-			t.Fatal("handleMentionKey(down) = false, want true")
-		}
-	}
-
-	rendered := ansi.Strip(model.renderMentionList())
-	if !strings.Contains(rendered, "@agent-09") {
-		t.Fatalf("renderMentionList() = %q, want selected @agent-09 visible", rendered)
-	}
-	if strings.Contains(rendered, "@agent-00") {
-		t.Fatalf("renderMentionList() = %q, should have scrolled past @agent-00", rendered)
-	}
-	if strings.Contains(rendered, "earlier") || strings.Contains(rendered, "more") {
-		t.Fatalf("renderMentionList() = %q, should not contain scroll text rows", rendered)
-	}
-	if !strings.Contains(ansi.Strip(model.renderMentionList()), "select") {
-		t.Fatalf("renderMentionList() should include unified overlay footer")
-	}
-}
-
-func TestMentionCompletionLoadsNextPageAtBottomThenWrapsWhenExhausted(t *testing.T) {
-	var limits []int
-	model := NewModel(Config{
-		MentionComplete: func(query string, limit int) ([]CompletionCandidate, error) {
-			limits = append(limits, limit)
-			return numberedCompletionCandidates("agent", minInt(limit, 65)), nil
-		},
-	})
-
-	model.setInputText("@")
-	model.syncTextareaFromInput()
-	model.refreshMention()
-	if len(model.mentionCandidates) != completionCandidateFetchLimit {
-		t.Fatalf("mentionCandidates = %d, want initial page of %d", len(model.mentionCandidates), completionCandidateFetchLimit)
-	}
-
-	model.mentionIndex = len(model.mentionCandidates) - 1
-	handled, _ := model.handleMentionKey(keyPress("down"))
-	if !handled {
-		t.Fatal("handleMentionKey(down) = false, want true")
-	}
-	if want := completionCandidateFetchLimit * 2; limits[len(limits)-1] != want {
-		t.Fatalf("MentionComplete second limit = %d, want %d", limits[len(limits)-1], want)
-	}
-	if len(model.mentionCandidates) != 65 {
-		t.Fatalf("mentionCandidates after paging = %d, want 65", len(model.mentionCandidates))
-	}
-	if model.mentionIndex != completionCandidateFetchLimit {
-		t.Fatalf("mentionIndex after paging = %d, want %d", model.mentionIndex, completionCandidateFetchLimit)
-	}
-
-	callCount := len(limits)
-	model.mentionIndex = len(model.mentionCandidates) - 1
-	handled, _ = model.handleMentionKey(keyPress("down"))
-	if !handled {
-		t.Fatal("handleMentionKey(down exhausted) = false, want true")
-	}
-	if len(limits) != callCount {
-		t.Fatalf("MentionComplete called after exhausted page: %v", limits)
 	}
 	if model.mentionIndex != 0 {
 		t.Fatalf("mentionIndex after exhausted down = %d, want wrap to 0", model.mentionIndex)
@@ -1926,7 +1626,7 @@ func lineContaining(lines []string, needle string) string {
 func TestModelActionPrefixTypingFiltersCandidatesDuringPaste(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
@@ -1956,7 +1656,7 @@ func TestModelActionPrefixTypingFiltersCandidatesDuringPaste(t *testing.T) {
 func TestModelActionPrefixTypingFiltersCandidatesWhenTerminalBatchesInput(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{
@@ -1986,7 +1686,7 @@ func TestModelActionPrefixTypingFiltersCandidatesWhenTerminalBatchesInput(t *tes
 func TestModelActionPrefixTypingFiltersCandidatesAfterSlashThenBatchedTail(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "model":
 				return []SlashArgCandidate{

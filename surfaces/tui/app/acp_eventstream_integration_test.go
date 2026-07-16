@@ -473,7 +473,8 @@ func TestHandleACPEventEnvelopeAppliesParticipantSequence(t *testing.T) {
 		Scope:         eventstream.ScopeParticipant,
 		ScopeID:       "participant-turn-1",
 		ParticipantID: "agent-1",
-		Actor:         "@agent",
+		Actor:         "@lina",
+		Meta:          map[string]any{"agent": "codex", "handle": "lina"},
 		Participant:   &eventstream.Participant{State: "attached"},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -482,7 +483,8 @@ func TestHandleACPEventEnvelopeAppliesParticipantSequence(t *testing.T) {
 		Scope:         eventstream.ScopeParticipant,
 		ScopeID:       "participant-turn-1",
 		ParticipantID: "agent-1",
-		Actor:         "@agent",
+		Actor:         "@lina",
+		Meta:          map[string]any{"agent": "codex", "handle": "lina"},
 		Final:         true,
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentMessage,
@@ -494,11 +496,25 @@ func TestHandleACPEventEnvelopeAppliesParticipantSequence(t *testing.T) {
 	if block == nil {
 		t.Fatal("participant block missing")
 	}
-	if block.Actor != "@agent" || block.Status != "completed" {
-		t.Fatalf("participant block = %#v, want @agent completed", block)
+	if block.Actor != "/codex(lina)" || block.Status != "completed" {
+		t.Fatalf("participant block = %#v, want /codex(lina) completed", block)
 	}
 	if len(block.Events) != 1 || block.Events[0].Kind != SEAssistant || block.Events[0].Text != "participant answer" {
 		t.Fatalf("participant events = %#v, want assistant answer", block.Events)
+	}
+}
+
+func TestDirectedParticipantUserDisplayUsesAgentAndHumanHandle(t *testing.T) {
+	t.Parallel()
+
+	event := TranscriptEvent{
+		Scope: ACPProjectionParticipant,
+		Actor: "@lina",
+		Meta:  map[string]any{"agent": "codex", "handle": "lina"},
+		Text:  "inspect the workspace",
+	}
+	if got, want := directedParticipantUserDisplay(event), "/codex(lina) inspect the workspace"; got != want {
+		t.Fatalf("directedParticipantUserDisplay() = %q, want %q", got, want)
 	}
 }
 
@@ -1531,7 +1547,7 @@ func TestHandleACPEventEnvelopeSuppressesDuplicateParticipantUserMessage(t *test
 	t.Parallel()
 
 	const prompt = "搜一下上海明天的天气如何"
-	const display = "@bela " + prompt
+	const display = "/bela " + prompt
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.commitUserDisplayLine(display)
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -1564,7 +1580,7 @@ func TestHandleACPEventEnvelopeSuppressesLateParticipantUserEchoAfterTurnStarts(
 	t.Parallel()
 
 	const prompt = "搜一下上海明天的天气如何"
-	const display = "@bela " + prompt
+	const display = "/bela " + prompt
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.commitUserDisplayLine(display)
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -1613,7 +1629,7 @@ func TestHandleACPEventEnvelopeSuppressesLateParticipantUserEchoAfterTurnComplet
 	t.Parallel()
 
 	const prompt = "搜一下上海明天的天气如何"
-	const display = "@bela " + prompt
+	const display = "/bela " + prompt
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.commitUserDisplayLine(display)
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -1663,7 +1679,7 @@ func TestHandleACPEventEnvelopeRendersQueuedRepeatedParticipantUserMessage(t *te
 	t.Parallel()
 
 	const prompt = "搜一下上海明天的天气如何"
-	const display = "@bela " + prompt
+	const display = "/bela " + prompt
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.commitUserDisplayLine(display)
 	model.pendingQueue = append(model.pendingQueue, pendingPrompt{
@@ -1704,7 +1720,7 @@ func TestHandleACPEventEnvelopeRendersRepeatedParticipantUserMessageAcrossEmptyT
 	t.Parallel()
 
 	const prompt = "搜一下上海明天的天气如何"
-	const display = "@bela " + prompt
+	const display = "/bela " + prompt
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.commitUserDisplayLine(display)
 	for _, turnID := range []string{"participant-turn-1", "participant-turn-2"} {

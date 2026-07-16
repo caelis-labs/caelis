@@ -39,12 +39,11 @@ func TestPluginServiceSkillsFollowEnabledStateAndSuppressLegacyCopies(t *testing
 	}
 
 	stack, err := NewLocalStack(Config{
-		AppName:                     "CAELIS",
-		StoreDir:                    storeDir,
-		WorkspaceCWD:                workspaceDir,
-		SkillDirs:                   []string{regularSkills},
-		DisableBuiltInAgentProfiles: true,
-		Sandbox:                     SandboxConfig{RequestedType: "host"},
+		AppName:      "CAELIS",
+		StoreDir:     storeDir,
+		WorkspaceCWD: workspaceDir,
+		SkillDirs:    []string{regularSkills},
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)

@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -52,9 +53,21 @@ type WizardStepDef struct {
 	RequireCandidate bool
 
 	// MultiSelect lets completion-backed values be accumulated with the complete
-	// key before enter confirms the comma-separated selection. Enter still keeps
+	// key before enter confirms the selection. Enter still keeps
 	// the one-candidate fast path, and free-form input remains a single value.
 	MultiSelect bool
+
+	// MultiSelectCandidate optionally decides whether a completion candidate may
+	// be accumulated. Nil accepts every candidate.
+	MultiSelectCandidate func(candidate SlashArgCandidate) bool
+
+	// MergeMultiSelect optionally applies product-specific replacement rules.
+	// Nil appends a case-insensitively unique value.
+	MergeMultiSelect func(values []string, value string) []string
+
+	// FormatMultiSelect optionally serializes accumulated values into the state
+	// map. Nil joins values with commas for simple list-oriented commands.
+	FormatMultiSelect func(values []string) string
 
 	// CompletionCommand returns the command string passed to
 	// Config.SlashArgComplete for this step. It receives the accumulated
@@ -94,6 +107,11 @@ type WizardDef struct {
 	// from the completion list (as opposed to typing free-form).
 	// stepKey is the Key of the just-confirmed step.
 	OnStepConfirm func(stepKey string, value string, candidate *SlashArgCandidate, state map[string]string)
+
+	// Branch optionally selects a new explicit wizard flow after a step is
+	// confirmed. The new flow inherits the accumulated state and starts at its
+	// first eligible step.
+	Branch func(stepKey string, value string, candidate *SlashArgCandidate, state map[string]string) *WizardDef
 }
 
 // ---------------------------------------------------------------------------
@@ -102,9 +120,10 @@ type WizardDef struct {
 
 // wizardRuntime holds the mutable state of an active wizard session.
 type wizardRuntime struct {
-	def       *WizardDef
-	stepIndex int
-	state     map[string]string
+	def             *WizardDef
+	stepIndex       int
+	state           map[string]string
+	multiSelections map[string][]string
 }
 
 // currentStep returns the current step definition, or nil if out of range.
@@ -170,9 +189,10 @@ func (m *Model) startWizardWithQuery(def *WizardDef, initialQuery string) {
 	m.clearSlashCompletion()
 
 	m.wizard = &wizardRuntime{
-		def:       def,
-		stepIndex: -1, // will be advanced below
-		state:     make(map[string]string),
+		def:             def,
+		stepIndex:       -1, // will be advanced below
+		state:           make(map[string]string),
+		multiSelections: make(map[string][]string),
 	}
 
 	// Open the first non-skipped step.
@@ -222,6 +242,12 @@ func (m *Model) advanceWizardStepWithQuery(value string, initialQuery string, ca
 		if w.def.OnStepConfirm != nil {
 			w.def.OnStepConfirm(step.Key, value, cand, w.state)
 		}
+		if w.def.Branch != nil {
+			if next := w.def.Branch(step.Key, value, cand, w.state); next != nil {
+				w.def = next
+				w.stepIndex = -1
+			}
+		}
 	}
 
 	// Advance to next non-skipped step.
@@ -237,8 +263,7 @@ func (m *Model) advanceWizardStepWithQuery(value string, initialQuery string, ca
 	m.slashArgCandidates = nil
 	m.setInputText(strings.TrimSpace(initialQuery))
 	m.syncTextareaFromInput()
-	m.updateSlashArgCandidates()
-	return nil
+	return m.beginSlashArgLoad()
 }
 
 // wizardSubmit builds the exec line and submits it.
@@ -260,6 +285,18 @@ func (m *Model) wizardSubmit() tea.Cmd {
 
 // clearWizard resets all wizard and slash-arg state.
 func (m *Model) clearWizard() {
+	m.slashArgLoadSeq++
+	m.cancelSlashArgLoad()
+	m.slashArgLoadPending = false
+	m.slashArgLoadLabel = ""
+	m.slashArgLoadStartedAt = time.Time{}
+	m.slashArgLoadBytes = 0
+	m.slashArgLoaded = false
+	m.slashArgLoadedCommand = ""
+	m.slashArgLoadedCandidates = nil
+	if !m.turnRunning() {
+		m.stopRunningAnimation()
+	}
 	m.wizard = nil
 	m.slashArgActive = false
 	m.slashArgCommand = ""
@@ -326,9 +363,9 @@ func (m *Model) handleWizardEnter() (bool, tea.Cmd) {
 	value := strings.TrimSpace(m.slashArgQuery)
 	selectedValues := wizardMultiSelectValues(w, step)
 	if step.MultiSelect && len(selectedValues) > 0 && value == "" {
-		joined := strings.Join(selectedValues, ",")
-		complete := SlashArgCandidate{Value: joined, ModelMetadataComplete: true}
-		return true, m.advanceWizardStep(joined, &complete)
+		formatted := formatWizardMultiSelect(step, selectedValues)
+		complete := SlashArgCandidate{Value: formatted, ModelMetadataComplete: true}
+		return true, m.advanceWizardStep(formatted, &complete)
 	}
 
 	// Determine the entered value.
@@ -358,14 +395,14 @@ func (m *Model) handleWizardEnter() (bool, tea.Cmd) {
 			return true, nil // validation failed — stay
 		}
 	}
-	if step.MultiSelect && len(selectedValues) > 0 {
-		if candidate == nil || !candidate.ModelMetadataComplete {
+	if step.MultiSelect && candidate != nil {
+		if !wizardCandidateSupportsMultiSelect(step, *candidate) {
 			return true, nil
 		}
-		selectedValues = appendUniqueWizardValue(selectedValues, value)
-		joined := strings.Join(selectedValues, ",")
-		complete := SlashArgCandidate{Value: joined, ModelMetadataComplete: true}
-		return true, m.advanceWizardStep(joined, &complete)
+		selectedValues = mergeWizardMultiSelectValue(step, selectedValues, value)
+		formatted := formatWizardMultiSelect(step, selectedValues)
+		complete := SlashArgCandidate{Value: formatted, ModelMetadataComplete: true}
+		return true, m.advanceWizardStep(formatted, &complete)
 	}
 
 	cmd := m.advanceWizardStep(value, candidate)
@@ -376,12 +413,7 @@ func wizardMultiSelectValues(w *wizardRuntime, step *WizardStepDef) []string {
 	if w == nil || step == nil || !step.MultiSelect {
 		return nil
 	}
-	parts := strings.Split(w.state[step.Key], ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		out = appendUniqueWizardValue(out, strings.TrimSpace(part))
-	}
-	return out
+	return append([]string(nil), w.multiSelections[step.Key]...)
 }
 
 func appendUniqueWizardValue(values []string, value string) []string {
@@ -398,21 +430,58 @@ func appendUniqueWizardValue(values []string, value string) []string {
 }
 
 func (m *Model) addWizardMultiSelectCandidate(candidate SlashArgCandidate) bool {
-	if m == nil || m.wizard == nil || !candidate.ModelMetadataComplete {
+	if m == nil || m.wizard == nil {
 		return false
 	}
 	step := m.wizard.currentStep()
-	if step == nil || !step.MultiSelect {
+	if step == nil || !step.MultiSelect || !wizardCandidateSupportsMultiSelect(step, candidate) {
 		return false
 	}
-	values := appendUniqueWizardValue(wizardMultiSelectValues(m.wizard, step), candidate.Value)
-	m.wizard.state[step.Key] = strings.Join(values, ",")
+	values := mergeWizardMultiSelectValue(step, wizardMultiSelectValues(m.wizard, step), candidate.Value)
+	if m.wizard.multiSelections == nil {
+		m.wizard.multiSelections = make(map[string][]string)
+	}
+	m.wizard.multiSelections[step.Key] = append([]string(nil), values...)
+	m.wizard.state[step.Key] = formatWizardMultiSelect(step, values)
 	m.slashArgQuery = ""
 	m.slashArgIndex = 0
 	m.setInputText("")
 	m.syncTextareaFromInput()
-	m.updateSlashArgCandidates()
+	command := m.wizard.completionCommand()
+	if isAsyncSlashArgCommand(command) && m.slashArgLoaded && sameAsyncSlashArgCatalog(m.slashArgLoadedCommand, command) {
+		m.applySlashArgCandidates(command, "", m.slashArgLoadedCandidates, nil)
+	} else {
+		m.updateSlashArgCandidates()
+	}
 	return true
+}
+
+func wizardCandidateSupportsMultiSelect(step *WizardStepDef, candidate SlashArgCandidate) bool {
+	if step == nil || !step.MultiSelect {
+		return false
+	}
+	if step.MultiSelectCandidate != nil {
+		return step.MultiSelectCandidate(candidate)
+	}
+	return true
+}
+
+func mergeWizardMultiSelectValue(step *WizardStepDef, values []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return values
+	}
+	if step != nil && step.MergeMultiSelect != nil {
+		return step.MergeMultiSelect(append([]string(nil), values...), value)
+	}
+	return appendUniqueWizardValue(values, value)
+}
+
+func formatWizardMultiSelect(step *WizardStepDef, values []string) string {
+	if step != nil && step.FormatMultiSelect != nil {
+		return step.FormatMultiSelect(append([]string(nil), values...))
+	}
+	return strings.Join(values, ",")
 }
 
 func (m *Model) filterWizardMultiSelectCandidates(candidates []SlashArgCandidate) []SlashArgCandidate {

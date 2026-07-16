@@ -2,11 +2,9 @@ package controladapter
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/ports/agentprofile"
 )
 
 func newAdapterFromGatewayAppStack(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*Adapter, error) {
@@ -20,10 +18,7 @@ func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
 		ModelChoices:         testRuntimeModelChoices,
 		DoctorRequest:        testGatewayDoctorRequest,
 		DoctorReport:         testRuntimeDoctorReport,
-		ACPAgentAddOptions:   testRuntimeACPAgentAddOptions,
 		ACPAgents:            testRuntimeACPAgents,
-		AgentProfileStatus:   testRuntimeAgentProfileStatus,
-		AgentProfileBinding:  testGatewayAgentProfileBinding,
 		PluginSnapshots:      testRuntimePluginSnapshots,
 		PluginSnapshot:       testRuntimePluginSnapshotWithError,
 		MarketplaceSnapshots: testRuntimeMarketplaceSnapshots,
@@ -82,84 +77,6 @@ func TestGatewayAppStackForRuntimeTestWiresFullRuntimeSurface(t *testing.T) {
 		if !ok {
 			t.Fatalf("plugin hook %s is not wired", name)
 		}
-	}
-}
-
-func testRuntimeAgentProfileStatus(status gatewayapp.AgentProfileStatus, err error) (AgentProfileStatusSnapshot, error) {
-	if err != nil {
-		return AgentProfileStatusSnapshot{}, err
-	}
-	out := AgentProfileStatusSnapshot{}
-	for _, warning := range status.Warnings {
-		message := strings.TrimSpace(warning.Message)
-		if message == "" {
-			continue
-		}
-		if path := strings.TrimSpace(warning.Path); path != "" {
-			message = path + ": " + message
-		}
-		out.Warnings = append(out.Warnings, message)
-	}
-	for _, snapshot := range status.Profiles {
-		profile := agentprofile.NormalizeProfile(snapshot.Profile)
-		binding := agentprofile.NormalizeBinding(snapshot.Binding)
-		out.Profiles = append(out.Profiles, AgentProfileSnapshot{
-			ID:              profile.ID,
-			Name:            profile.Name,
-			Description:     profile.Description,
-			Capabilities:    append([]string(nil), profile.Capabilities...),
-			Path:            profile.Path,
-			Enabled:         binding.Enabled == nil || *binding.Enabled,
-			Target:          string(binding.Target),
-			Model:           binding.Model,
-			ACPAgent:        binding.ACPAgent,
-			ACPModel:        binding.ACPModel,
-			ReasoningEffort: binding.ReasoningEffort,
-			Status:          string(binding.Status),
-			Warning:         binding.Warning,
-			Source:          testRuntimeAgentProfileMetadataString(profile.Metadata, "source"),
-			BuiltIn:         testRuntimeAgentProfileMetadataBool(profile.Metadata, "built_in"),
-			SystemManaged:   testRuntimeAgentProfileMetadataBool(profile.Metadata, "system_managed"),
-		})
-	}
-	return out, nil
-}
-
-func testRuntimeAgentProfileMetadataString(metadata map[string]any, key string) string {
-	if len(metadata) == 0 {
-		return ""
-	}
-	value, _ := metadata[key].(string)
-	return strings.TrimSpace(value)
-}
-
-func testRuntimeAgentProfileMetadataBool(metadata map[string]any, key string) bool {
-	if len(metadata) == 0 {
-		return false
-	}
-	switch value := metadata[key].(type) {
-	case bool:
-		return value
-	case string:
-		switch strings.ToLower(strings.TrimSpace(value)) {
-		case "true", "yes", "1", "on":
-			return true
-		default:
-			return false
-		}
-	default:
-		return false
-	}
-}
-
-func testGatewayAgentProfileBinding(cfg AgentProfileBindingConfig) gatewayapp.AgentProfileBindingConfig {
-	return gatewayapp.AgentProfileBindingConfig{
-		ProfileID:       cfg.ProfileID,
-		Target:          agentprofile.BindingTargetKind(strings.TrimSpace(cfg.Target)),
-		Model:           cfg.Model,
-		ACPAgent:        cfg.ACPAgent,
-		ACPModel:        cfg.ACPModel,
-		ReasoningEffort: cfg.ReasoningEffort,
 	}
 }
 
@@ -316,18 +233,6 @@ func testRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorR
 		ConfigPermissionsSecure:   report.ConfigPermissionsSecure,
 		Warnings:                  append([]string(nil), report.Warnings...),
 	}, err
-}
-
-func testRuntimeACPAgentAddOptions(options []gatewayapp.ACPAgentAddOption) []ACPAgentAddOption {
-	out := make([]ACPAgentAddOption, 0, len(options))
-	for _, option := range options {
-		out = append(out, ACPAgentAddOption{
-			Value:   option.Value,
-			Display: option.Display,
-			Detail:  option.Detail,
-		})
-	}
-	return out
 }
 
 func testRuntimeACPAgents(agents []gatewayapp.ACPAgentInfo) []ACPAgentInfo {

@@ -12,6 +12,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/ports/plugin"
@@ -53,6 +54,37 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 	if got := len(stack.currentGateway().ActiveTurns()); got != 1 {
 		t.Fatalf("ActiveTurns() len = %d, want 1", got)
 	}
+	acpCommand := writeAgentRosterExecutable(t, t.TempDir(), "active-turn-acp")
+	acpRequest := controlagents.ConnectRequest{
+		AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand, CommandLine: acpCommand,
+		ModelID: "opus", CWD: stack.Workspace.CWD,
+	}
+	acpConnection, err := stack.resolveACPConnectionLauncher(ctx, acpRequest)
+	if err != nil {
+		t.Fatalf("resolveACPConnectionLauncher() error = %v", err)
+	}
+	acpRequest.Discovery = &controlagents.DiscoverySnapshot{
+		ConnectionID: acpConnection.ID, LaunchFingerprint: controlagents.LaunchFingerprint(acpConnection.Launcher),
+		CWD: stack.Workspace.CWD, SelectedModelID: "opus", Models: []controlagents.RemoteModel{{ID: "opus", Name: "Opus"}},
+	}
+	disconnectConnection := controlagents.Connection{
+		ID: "disconnect-acp", Launcher: controlagents.Launcher{Command: writeAgentRosterExecutable(t, t.TempDir(), "disconnect-acp")},
+	}
+	doc, err := stack.store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	doc.AgentRoster = controlagents.Configuration{
+		Connections: []controlagents.Connection{disconnectConnection},
+		Agents: []controlagents.Agent{{
+			ID: "disconnect-agent", Backing: controlagents.AgentBacking{ConnectionID: disconnectConnection.ID},
+			Defaults: controlagents.SessionOptions{ModelID: "opus"},
+		}},
+		Discoveries: []controlagents.DiscoverySnapshot{{ConnectionID: disconnectConnection.ID, SelectedModelID: "opus"}},
+	}
+	if err := stack.store.Save(doc); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
 
 	tests := []struct {
 		name string
@@ -73,6 +105,43 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 				t.Helper()
 				if stack.lookup.HasAlias("ollama/blocked-model") {
 					t.Fatal("Connect() mutated lookup while active turn was running")
+				}
+			},
+		},
+		{
+			name: "connect ACP Agent",
+			run: func() error {
+				_, err := stack.ConnectACP(ctx, acpRequest)
+				return err
+			},
+			want: func(t *testing.T) {
+				t.Helper()
+				doc, err := stack.store.Load()
+				if err != nil {
+					t.Fatalf("Load() error = %v", err)
+				}
+				if _, ok := controlagents.LookupConnection(doc.AgentRoster, acpConnection.ID); ok {
+					t.Fatal("ConnectACP() persisted a connection while an active turn was running")
+				}
+			},
+		},
+		{
+			name: "disconnect ACP Agent",
+			run: func() error {
+				_, err := stack.DisconnectACP(ctx, "disconnect-agent")
+				return err
+			},
+			want: func(t *testing.T) {
+				t.Helper()
+				doc, err := stack.store.Load()
+				if err != nil {
+					t.Fatalf("Load() error = %v", err)
+				}
+				if _, ok := controlagents.LookupAgent(doc.AgentRoster, "disconnect-agent"); !ok {
+					t.Fatal("DisconnectACP() removed an Agent while an active turn was running")
+				}
+				if _, ok := controlagents.LookupConnection(doc.AgentRoster, disconnectConnection.ID); !ok {
+					t.Fatal("DisconnectACP() removed a Connection while an active turn was running")
 				}
 			},
 		},

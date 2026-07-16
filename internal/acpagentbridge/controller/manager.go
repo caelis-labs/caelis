@@ -17,7 +17,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -75,7 +77,9 @@ type controllerRun struct {
 	configOptions     []ControllerConfigOption
 	models            *client.SessionModelState
 	mode              string
+	legacyMode        string
 	modeOptions       []ControllerMode
+	legacyModeOptions []ControllerMode
 	remoteTitle       string
 	turnID            string
 	turnSession       session.Session
@@ -201,12 +205,12 @@ func (r *controllerRun) applyStartupStateLocked(client *client.Client, remoteSes
 	r.commands = mergeControllerCommands(r.commands, state.commands)
 	r.configOptions = fillControllerConfigOptions(r.configOptions, state.configOptions)
 	r.models = cloneACPSessionModelState(state.models)
-	if mode := currentModeFromConfigOptions(r.configOptions); mode != "" {
-		r.mode = mode
-	} else if strings.TrimSpace(r.mode) == "" {
-		r.mode = strings.TrimSpace(state.mode)
+	if strings.TrimSpace(r.legacyMode) == "" {
+		r.legacyMode = strings.TrimSpace(state.mode)
 	}
-	r.modeOptions = mergeControllerModes(controllerModesFromConfigOptions(r.configOptions), mergeControllerModes(r.modeOptions, state.modeOptions))
+	r.mode = firstNonEmpty(currentModeFromConfigOptions(r.configOptions), r.legacyMode)
+	r.legacyModeOptions = mergeControllerModes(r.legacyModeOptions, state.modeOptions)
+	r.modeOptions = mergeControllerModes(controllerModesFromConfigOptions(r.configOptions), r.legacyModeOptions)
 	r.binding.RemoteSessionID = strings.TrimSpace(remoteSessionID)
 	r.binding.ContextSyncSeq = contextSyncSeq
 	r.promptCapabilities = state.promptCapabilities
@@ -819,9 +823,17 @@ func (m *Manager) startACPClient(
 	if remoteSessionID != "" && acpSessionCapability(initResp, "resume") {
 		resp, err := client.ResumeSession(ctx, remoteSessionID, strings.TrimSpace(cwd), nil)
 		if err == nil {
+			configured, configureErr := sessionconfig.Apply(ctx, client, remoteSessionID, sessionconfig.State{
+				ConfigOptions: resp.ConfigOptions,
+				Models:        resp.Models,
+			}, cfg.SessionOptions)
+			if configureErr != nil {
+				_ = client.Close(context.WithoutCancel(ctx))
+				return nil, "", controllerClientState{}, configureErr
+			}
 			state := controllerClientState{
-				configOptions:      controllerConfigOptionsFromACP(resp.ConfigOptions),
-				models:             cloneACPSessionModelState(resp.Models),
+				configOptions:      controllerConfigOptionsFromACP(configured.ConfigOptions),
+				models:             cloneACPSessionModelState(configured.Models),
 				mode:               currentModeID(resp.Modes),
 				modeOptions:        controllerModesFromACP(resp.Modes),
 				supportsClose:      acpSessionCapability(initResp, "close"),
@@ -842,9 +854,20 @@ func (m *Manager) startACPClient(
 		_ = client.Close(ctx)
 		return nil, "", controllerClientState{}, err
 	}
+	configured, err := sessionconfig.Apply(ctx, client, strings.TrimSpace(resp.SessionID), sessionconfig.State{
+		ConfigOptions: resp.ConfigOptions,
+		Models:        resp.Models,
+	}, cfg.SessionOptions)
+	if err != nil {
+		if acpSessionCapability(initResp, "close") {
+			_ = acpcleanup.CloseSession(ctx, client, strings.TrimSpace(resp.SessionID))
+		}
+		_ = acpcleanup.CloseClient(ctx, client)
+		return nil, "", controllerClientState{}, err
+	}
 	state := controllerClientState{
-		configOptions:      controllerConfigOptionsFromACP(resp.ConfigOptions),
-		models:             cloneACPSessionModelState(resp.Models),
+		configOptions:      controllerConfigOptionsFromACP(configured.ConfigOptions),
+		models:             cloneACPSessionModelState(configured.Models),
 		mode:               currentModeID(resp.Modes),
 		modeOptions:        controllerModesFromACP(resp.Modes),
 		supportsClose:      acpSessionCapability(initResp, "close"),
@@ -1092,13 +1115,12 @@ func (r *controllerRun) applySessionUpdateLocked(clock func() time.Time, update 
 	case client.AvailableCommandsUpdate:
 		r.commands = controllerCommandsFromACP(typed.AvailableCommands)
 	case client.ConfigOptionUpdate:
-		r.configOptions = mergeControllerConfigOptions(r.configOptions, controllerConfigOptionsFromACP(typed.ConfigOptions))
-		if mode := currentModeFromConfigOptions(r.configOptions); mode != "" {
-			r.mode = mode
-		}
-		r.modeOptions = mergeControllerModes(controllerModesFromConfigOptions(r.configOptions), r.modeOptions)
+		r.configOptions = controllerConfigOptionsFromACP(typed.ConfigOptions)
+		r.mode = firstNonEmpty(currentModeFromConfigOptions(r.configOptions), r.legacyMode)
+		r.modeOptions = mergeControllerModes(controllerModesFromConfigOptions(r.configOptions), r.legacyModeOptions)
 	case client.CurrentModeUpdate:
-		r.mode = strings.TrimSpace(typed.CurrentModeID)
+		r.legacyMode = strings.TrimSpace(typed.CurrentModeID)
+		r.mode = firstNonEmpty(currentModeFromConfigOptions(r.configOptions), r.legacyMode)
 	case client.SessionInfoUpdate:
 		if typed.Title != nil {
 			r.remoteTitle = strings.TrimSpace(*typed.Title)
@@ -1191,7 +1213,10 @@ func (r *controllerRun) setControllerModel(ctx context.Context, req SetControlle
 		if err != nil {
 			return ControllerStatus{}, err
 		}
-		configOptions = mergeControllerConfigOptions(configOptions, controllerConfigOptionsFromACP(resp.ConfigOptions))
+		configOptions, err = validatedControllerConfigResponse(resp, modelOption.ID, choice.Value)
+		if err != nil {
+			return ControllerStatus{}, err
+		}
 	}
 	if effort != "" {
 		effortOption, hasEffortOption := pickEffortConfigOption(configOptions)
@@ -1204,7 +1229,10 @@ func (r *controllerRun) setControllerModel(ctx context.Context, req SetControlle
 			if err != nil {
 				return ControllerStatus{}, err
 			}
-			configOptions = mergeControllerConfigOptions(configOptions, controllerConfigOptionsFromACP(resp.ConfigOptions))
+			configOptions, err = validatedControllerConfigResponse(resp, effortOption.ID, choice.Value)
+			if err != nil {
+				return ControllerStatus{}, err
+			}
 		} else {
 			modelForEffort := firstNonEmpty(testModel, currentModelFromConfigOptions(configOptions))
 			modelID, ok := matchACPModelIDForEffort(models, modelForEffort, effort)
@@ -1248,6 +1276,7 @@ func (r *controllerRun) setControllerMode(ctx context.Context, req SetController
 	remoteSessionID := strings.TrimSpace(r.remoteSessionID)
 	configOptions := cloneControllerConfigOptions(r.configOptions)
 	modeOptions := cloneControllerModes(r.modeOptions)
+	legacyModeOptions := cloneControllerModes(r.legacyModeOptions)
 	r.mu.Unlock()
 	if client == nil || remoteSessionID == "" {
 		return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: active controller client is unavailable")
@@ -1261,13 +1290,16 @@ func (r *controllerRun) setControllerMode(ctx context.Context, req SetController
 		if err != nil {
 			return ControllerStatus{}, err
 		}
-		configOptions = mergeControllerConfigOptions(configOptions, controllerConfigOptionsFromACP(resp.ConfigOptions))
-		modeOptions = mergeControllerModes(controllerModesFromConfigOptions(configOptions), modeOptions)
+		configOptions, err = validatedControllerConfigResponse(resp, modeOption.ID, choice.Value)
+		if err != nil {
+			return ControllerStatus{}, err
+		}
+		modeOptions = mergeControllerModes(controllerModesFromConfigOptions(configOptions), legacyModeOptions)
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		r.configOptions = cloneControllerConfigOptions(configOptions)
 		r.modeOptions = cloneControllerModes(modeOptions)
-		r.mode = firstNonEmpty(currentModeFromConfigOptions(configOptions), strings.TrimSpace(choice.Value), strings.TrimSpace(choice.Name))
+		r.mode = firstNonEmpty(currentModeFromConfigOptions(configOptions), r.legacyMode)
 		if clock != nil {
 			r.updatedAt = clock()
 		} else {
@@ -1288,13 +1320,31 @@ func (r *controllerRun) setControllerMode(ctx context.Context, req SetController
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.mode = strings.TrimSpace(choice.ID)
+	r.legacyMode = strings.TrimSpace(choice.ID)
+	r.mode = r.legacyMode
 	if clock != nil {
 		r.updatedAt = clock()
 	} else {
 		r.updatedAt = time.Now()
 	}
 	return r.controllerStatusLocked(req.SessionRef), nil
+}
+
+func validatedControllerConfigResponse(resp client.SetSessionConfigOptionResponse, configID string, value string) ([]ControllerConfigOption, error) {
+	options := controllerConfigOptionsFromACP(resp.ConfigOptions)
+	for _, option := range options {
+		if !strings.EqualFold(strings.TrimSpace(option.ID), strings.TrimSpace(configID)) {
+			continue
+		}
+		if strings.TrimSpace(option.CurrentValue) != strings.TrimSpace(value) {
+			return nil, fmt.Errorf("internal/acpagentbridge/controller: ACP response reported current value %q for config option %q, want %q", option.CurrentValue, configID, value)
+		}
+		if _, ok := matchControllerConfigChoice(option.Options, value); !ok {
+			return nil, fmt.Errorf("internal/acpagentbridge/controller: ACP response no longer advertises current value %q for config option %q", value, configID)
+		}
+		return options, nil
+	}
+	return nil, fmt.Errorf("internal/acpagentbridge/controller: ACP response omitted updated config option %q", configID)
 }
 
 func (r *participantRun) beginPrompt(req controller.ParticipantPromptRequest, handle *turnHandle) error {

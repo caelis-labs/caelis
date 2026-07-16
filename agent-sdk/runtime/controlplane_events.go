@@ -58,6 +58,8 @@ func participantLifecycleEvent(activeSession session.Session, binding session.Pa
 		},
 		Meta: map[string]any{
 			"participant_id":        binding.ID,
+			"agent":                 binding.AgentName,
+			"handle":                strings.TrimPrefix(strings.TrimSpace(binding.Label), "@"),
 			"label":                 binding.Label,
 			"session_id":            binding.SessionID,
 			"controller_ref":        binding.ControllerRef,

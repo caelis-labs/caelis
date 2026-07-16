@@ -375,9 +375,10 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "retained ports agentprofile path passes",
-			rel:  "ports/agentprofile/profile.go",
-			want: "",
+			name:    "deleted ports agentprofile path fails",
+			rel:     "ports/agentprofile/profile.go",
+			want:    "must not recreate ports/agentprofile; user Agents belong to control/agents and fixed scenes belong to Control",
+			wantSub: "ports/agentprofile",
 		},
 		{
 			name: "retained acpagentbridge path passes",

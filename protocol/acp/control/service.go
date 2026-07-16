@@ -70,22 +70,16 @@ type SandboxService interface {
 type AgentService interface {
 	ListAgents(context.Context, int) ([]AgentCandidate, error)
 	AgentStatus(context.Context) (AgentStatusSnapshot, error)
-	AddAgent(context.Context, string) (AgentStatusSnapshot, error)
-	AddAgentWithOptions(context.Context, string, AgentAddOptions) (AgentStatusSnapshot, error)
-	RemoveAgent(context.Context, string) (AgentStatusSnapshot, error)
 	HandoffAgent(context.Context, string) (AgentStatusSnapshot, error)
-	StartAgentSubagent(context.Context, string, string, []Attachment) (Turn, error)
-	ContinueSubagent(context.Context, string, string, []Attachment) (Turn, error)
+	StartAgentRun(context.Context, string, string, []Attachment) (Turn, error)
+	ContinueAgentRun(context.Context, string, string, []Attachment) (Turn, error)
 }
 
-type AgentProfileService interface {
-	AgentProfileStatus(context.Context) (AgentProfileStatusSnapshot, error)
-	BindAgentProfile(context.Context, AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error)
-	StartReviewSubagent(context.Context, string, []Attachment) (Turn, error)
+type ReviewService interface {
+	StartReview(context.Context, string, []Attachment) (Turn, error)
 }
 
 type CompletionService interface {
-	CompleteMention(context.Context, string, int) ([]CompletionCandidate, error)
 	CompleteFile(context.Context, string, int) ([]CompletionCandidate, error)
 	CompleteSkill(context.Context, string, int) ([]CompletionCandidate, error)
 	CompleteResume(context.Context, string, int) ([]ResumeCandidate, error)
@@ -114,7 +108,7 @@ type Service interface {
 	ModelService
 	SandboxService
 	AgentService
-	AgentProfileService
+	ReviewService
 	CompletionService
 	PluginService
 }

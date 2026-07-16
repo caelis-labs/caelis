@@ -526,56 +526,6 @@ func matchControllerMode(options []ControllerMode, requested string) (Controller
 	return ControllerMode{}, false
 }
 
-func mergeControllerConfigOptions(existing []ControllerConfigOption, updates []ControllerConfigOption) []ControllerConfigOption {
-	if len(updates) == 0 {
-		return cloneControllerConfigOptions(existing)
-	}
-	if len(existing) == 0 {
-		return cloneControllerConfigOptions(updates)
-	}
-	out := cloneControllerConfigOptions(existing)
-	indexByID := map[string]int{}
-	for i, item := range out {
-		if id := strings.ToLower(strings.TrimSpace(item.ID)); id != "" {
-			indexByID[id] = i
-		}
-	}
-	for _, item := range updates {
-		id := strings.ToLower(strings.TrimSpace(item.ID))
-		if id != "" {
-			if idx, exists := indexByID[id]; exists {
-				out[idx] = mergeControllerConfigOption(out[idx], item)
-				continue
-			}
-			indexByID[id] = len(out)
-		}
-		out = append(out, cloneControllerConfigOption(item))
-	}
-	return out
-}
-
-func mergeControllerConfigOption(existing ControllerConfigOption, update ControllerConfigOption) ControllerConfigOption {
-	out := cloneControllerConfigOption(existing)
-	if value := strings.TrimSpace(update.ID); value != "" {
-		out.ID = value
-	}
-	if value := strings.TrimSpace(update.Name); value != "" {
-		out.Name = value
-	}
-	if value := strings.TrimSpace(update.Type); value != "" {
-		out.Type = value
-	}
-	if value := strings.TrimSpace(update.Category); value != "" {
-		out.Category = value
-	}
-	if value := strings.TrimSpace(update.Description); value != "" {
-		out.Description = value
-	}
-	out.CurrentValue = strings.TrimSpace(update.CurrentValue)
-	out.Options = mergeControllerConfigChoices(existing.Options, update.Options)
-	return out
-}
-
 func fillControllerConfigOptions(existing []ControllerConfigOption, fallback []ControllerConfigOption) []ControllerConfigOption {
 	if len(existing) == 0 {
 		return cloneControllerConfigOptions(fallback)

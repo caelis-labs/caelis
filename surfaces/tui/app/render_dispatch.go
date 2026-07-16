@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"maps"
 	"strings"
 	"time"
 
@@ -418,6 +419,9 @@ func (m *Model) handleStatusRefreshResultMsg(msg StatusRefreshResultMsg) tea.Mod
 }
 
 func (m *Model) handleSetCommandsMsg(msg SetCommandsMsg) tea.Model {
+	if msg.Details != nil {
+		m.cfg.CommandDetails = maps.Clone(msg.Details)
+	}
 	m.setCommands(msg.Commands)
 	return m
 }

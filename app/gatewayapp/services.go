@@ -7,6 +7,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
@@ -110,28 +111,24 @@ func (s AgentService) SetControllerMode(ctx context.Context, ref session.Session
 	return s.stack.SetACPControllerMode(ctx, ref, mode)
 }
 
-func (s AgentService) RegisterBuiltinWithOptions(ctx context.Context, name string, opts RegisterBuiltinACPAgentOptions) error {
-	return s.stack.RegisterBuiltinACPAgentWithOptions(ctx, name, opts)
+func (s AgentService) DiscoverConnection(ctx context.Context, req controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
+	return s.stack.DiscoverACPConnection(ctx, req)
 }
 
-func (s AgentService) RegisterCustom(ctx context.Context, cfg AgentConfig) error {
-	return s.stack.RegisterACPAgent(ctx, cfg)
+func (s AgentService) Connect(ctx context.Context, req controlagents.ConnectRequest) (controlagents.ConnectResult, error) {
+	return s.stack.ConnectACP(ctx, req)
 }
 
-func (s AgentService) Unregister(name string) error {
-	return s.stack.UnregisterACPAgent(name)
+func (s AgentService) DisconnectCandidates(ctx context.Context) ([]controlagents.DisconnectCandidate, error) {
+	return s.stack.DisconnectCandidates(ctx)
+}
+
+func (s AgentService) Disconnect(ctx context.Context, agentID string) (controlagents.DisconnectResult, error) {
+	return s.stack.DisconnectACP(ctx, agentID)
 }
 
 func (s AgentService) List() []ACPAgentInfo {
 	return s.stack.ListACPAgents()
-}
-
-func (s AgentService) BuiltinAddOptions() []ACPAgentAddOption {
-	return s.stack.ListBuiltinACPAgentAddOptions()
-}
-
-func (s AgentService) InstallableOptions() []ACPAgentAddOption {
-	return s.stack.ListInstallableACPAgentOptions()
 }
 
 func (s SkillService) Discover(ctx context.Context, workspaceDir string) ([]SkillMeta, error) {

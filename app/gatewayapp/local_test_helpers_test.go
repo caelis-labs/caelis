@@ -13,6 +13,5 @@ func newGatewayAppTestStack(t *testing.T, cfg Config) (*Stack, error) {
 	if cfg.SkillDirs == nil {
 		cfg.SkillDirs = []string{t.TempDir()}
 	}
-	cfg.DisableBuiltInAgentProfiles = true
 	return NewLocalStack(cfg)
 }

@@ -14,8 +14,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
@@ -132,7 +134,8 @@ func (r *Runner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req del
 		childCancel()
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
-	if _, err := client.Initialize(ctx); err != nil {
+	initialize, err := client.Initialize(ctx)
+	if err != nil {
 		childCancel()
 		_ = client.Close(ctx)
 		return delegation.Anchor{}, delegation.Result{}, err
@@ -141,6 +144,17 @@ func (r *Runner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req del
 	if err != nil {
 		childCancel()
 		_ = client.Close(ctx)
+		return delegation.Anchor{}, delegation.Result{}, err
+	}
+	if _, err := sessionconfig.Apply(ctx, client, strings.TrimSpace(sessionResp.SessionID), sessionconfig.State{
+		ConfigOptions: sessionResp.ConfigOptions,
+		Models:        sessionResp.Models,
+	}, cfg.SessionOptions); err != nil {
+		childCancel()
+		if hasACPSessionCapability(initialize, "close") {
+			_ = acpcleanup.CloseSession(ctx, client, strings.TrimSpace(sessionResp.SessionID))
+		}
+		_ = acpcleanup.CloseClient(ctx, client)
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
 	// Do not call session/set_mode for spawned ACP children here. External ACP
@@ -173,6 +187,14 @@ func (r *Runner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req del
 	r.mu.Unlock()
 	go r.drivePrompt(childCtx, run, strings.TrimSpace(req.Prompt))
 	return anchor, r.waitRun(ctx, run, 0), nil
+}
+
+func hasACPSessionCapability(resp client.InitializeResponse, name string) bool {
+	if resp.AgentCapabilities.SessionCapabilities == nil {
+		return false
+	}
+	_, ok := resp.AgentCapabilities.SessionCapabilities[strings.TrimSpace(name)]
+	return ok
 }
 
 func (r *Runner) Wait(ctx context.Context, anchor delegation.Anchor, yieldTimeMS int) (delegation.Result, error) {

@@ -37,7 +37,7 @@ func NewModel(cfg Config) *Model {
 	palette.Styles.HelpStyle = theme.HelpHintTextStyle()
 
 	ta := textarea.New()
-	ta.Placeholder = "Type your message, @agent, #path/to/file, or $skill"
+	ta.Placeholder = "Type a message, /agent-name prompt, #path/to/file, or $skill"
 	ta.Prompt = "> "
 	ta.SetPromptFunc(2, func(info textarea.PromptInfo) string {
 		if info.LineNumber == 0 {
@@ -161,7 +161,7 @@ func (m *Model) setCommands(commands []string) {
 		if name == "" {
 			continue
 		}
-		items = append(items, commandItem{name: name})
+		items = append(items, commandItem{name: name, description: m.commandCompletionDetail(name)})
 	}
 	if m.palette.Title == "" {
 		m.palette.Title = "Commands"
@@ -321,9 +321,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.paletteAnimationCmd()
 
+	case slashArgLoadResultMsg:
+		return m, m.handleSlashArgLoadResult(typed)
+
+	case acpSetupProgressMsg:
+		m.handleACPSetupProgress(typed)
+		return m, nil
+
 	case spinner.TickMsg:
 		m.spinnerTickScheduled = false
-		if m.turnRunning() {
+		if m.runningIndicatorActive() {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			if cmd != nil {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/ports/gateway"
 )
@@ -35,6 +36,8 @@ func (s *Stack) ConnectModels(configs []ModelConfig) ([]string, error) {
 	}
 	s.reconfigureMu.Lock()
 	defer s.reconfigureMu.Unlock()
+	s.agentRosterMu.Lock()
+	defer s.agentRosterMu.Unlock()
 	if err := s.rejectReconfigureWhileActive("connect model"); err != nil {
 		return nil, err
 	}
@@ -58,7 +61,31 @@ func (s *Stack) ConnectModels(configs []ModelConfig) ([]string, error) {
 	activeConfig, _ := s.lookup.Config(activeID)
 	s.setRuntimeModel(activeConfig)
 	txn.applyResolver()
-	if err := s.saveModelConfigs(); err != nil {
+	if s.store == nil {
+		return nil, txn.rollback(fmt.Errorf("gatewayapp: app config store unavailable"))
+	}
+	doc, err := s.store.Load()
+	if err != nil {
+		return nil, txn.rollback(err)
+	}
+	rosterSelections := make([]controlagents.ModelBackingSelection, 0, len(modelIDs))
+	for _, modelID := range modelIDs {
+		model, ok := s.lookup.Config(modelID)
+		if !ok {
+			return nil, txn.rollback(fmt.Errorf("gatewayapp: connected model %q is unavailable", modelID))
+		}
+		rosterSelections = append(rosterSelections, controlagents.ModelBackingSelection{
+			Alias: model.ID, Name: firstNonEmpty(model.Alias, model.Model, model.ID), Namespace: model.Provider,
+		})
+	}
+	nextRoster, _, err := controlagents.UpsertModelBackedAgents(doc.AgentRoster, rosterSelections, rosterAgentNameAllowed)
+	if err != nil {
+		return nil, txn.rollback(err)
+	}
+	txn.captureAgentRoster(doc.AgentRoster)
+	doc.Models = s.lookup.Snapshot()
+	doc.AgentRoster = nextRoster
+	if err := s.store.Save(doc); err != nil {
 		return nil, txn.rollback(err)
 	}
 	txn.markStoreSaved()
@@ -75,6 +102,8 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 	}
 	s.reconfigureMu.Lock()
 	defer s.reconfigureMu.Unlock()
+	s.agentRosterMu.Lock()
+	defer s.agentRosterMu.Unlock()
 	if err := s.rejectReconfigureWhileActive("switch model"); err != nil {
 		return err
 	}
@@ -148,6 +177,8 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 	}
 	s.reconfigureMu.Lock()
 	defer s.reconfigureMu.Unlock()
+	s.agentRosterMu.Lock()
+	defer s.agentRosterMu.Unlock()
 	if err := s.rejectReconfigureWhileActive("delete model"); err != nil {
 		return err
 	}
@@ -170,12 +201,26 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 	if err != nil {
 		return err
 	}
+	if s.store == nil {
+		return fmt.Errorf("gatewayapp: app config store unavailable")
+	}
+	doc, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	nextRoster := controlagents.RemoveModelBackedAgent(doc.AgentRoster, cfg.ID)
+	if err := s.rejectRemovedBoundACPAgents(ctx, doc.AgentRoster, nextRoster); err != nil {
+		return err
+	}
 	if err := s.lookup.Delete(alias); err != nil {
 		return err
 	}
 	hasDefault := strings.TrimSpace(s.lookup.DefaultID()) != ""
 	txn.applyResolver()
-	if err := s.saveModelConfigs(); err != nil {
+	txn.captureAgentRoster(doc.AgentRoster)
+	doc.Models = s.lookup.Snapshot()
+	doc.AgentRoster = nextRoster
+	if err := s.store.Save(doc); err != nil {
 		return txn.rollback(err)
 	}
 	txn.markStoreSaved()
@@ -206,6 +251,8 @@ type modelConfigTransaction struct {
 	previousLookup        persistedModelConfig
 	previousContextWindow int
 	previousRuntime       stackRuntimeConfig
+	previousAgentRoster   controlagents.Configuration
+	restoreAgentRoster    bool
 	storeSaved            bool
 }
 
@@ -246,6 +293,14 @@ func (t *modelConfigTransaction) markStoreSaved() {
 	}
 }
 
+func (t *modelConfigTransaction) captureAgentRoster(roster controlagents.Configuration) {
+	if t == nil {
+		return
+	}
+	t.previousAgentRoster = controlagents.NormalizeConfiguration(roster)
+	t.restoreAgentRoster = true
+}
+
 func (t *modelConfigTransaction) rollback(cause error) error {
 	if t == nil || t.stack == nil {
 		return cause
@@ -255,10 +310,20 @@ func (t *modelConfigTransaction) rollback(cause error) error {
 	t.stack.runtime = t.previousRuntime
 	t.stack.mu.Unlock()
 	t.applyResolver()
-	if t.storeSaved {
-		if err := t.stack.saveModelConfigs(); err != nil {
-			return errors.Join(cause, fmt.Errorf("gatewayapp: rollback model config save failed: %w", err))
-		}
+	if !t.storeSaved {
+		return cause
+	}
+	var saveErr error
+	if t.restoreAgentRoster {
+		saveErr = t.stack.saveModelConfigsAndAgentRoster(t.previousAgentRoster)
+	} else {
+		saveErr = t.stack.saveModelConfigs()
+	}
+	if saveErr != nil {
+		return errors.Join(cause, fmt.Errorf("gatewayapp: rollback model config save failed: %w", saveErr))
+	}
+	if refreshErr := t.stack.refreshConfiguredAgentsFromStore(); refreshErr != nil {
+		return errors.Join(cause, fmt.Errorf("gatewayapp: rollback Agent assembly refresh failed: %w", refreshErr))
 	}
 	return cause
 }
@@ -306,11 +371,7 @@ func (s *Stack) refreshConfiguredAgentsFromStore() error {
 	if s.store == nil {
 		return nil
 	}
-	doc, err := s.store.Load()
-	if err != nil {
-		return err
-	}
-	return s.setConfiguredAgents(doc.Agents)
+	return s.refreshAgentAssembly()
 }
 
 // ListModelAliases returns the current session override plus resolver-known

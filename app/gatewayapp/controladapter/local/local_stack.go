@@ -2,13 +2,11 @@ package local
 
 import (
 	"context"
-	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
-	"github.com/caelis-labs/caelis/ports/agentprofile"
 )
 
 type Adapter = controladapter.Adapter
@@ -19,12 +17,7 @@ type SessionRuntimeState = controladapter.SessionRuntimeState
 type SandboxStatus = controladapter.SandboxStatus
 type DoctorRequest = controladapter.DoctorRequest
 type DoctorReport = controladapter.DoctorReport
-type RegisterBuiltinACPAgentOptions = controladapter.RegisterBuiltinACPAgentOptions
 type ACPAgentInfo = controladapter.ACPAgentInfo
-type ACPAgentAddOption = controladapter.ACPAgentAddOption
-type AgentProfileStatusSnapshot = controladapter.AgentProfileStatusSnapshot
-type AgentProfileBindingConfig = controladapter.AgentProfileBindingConfig
-type CustomAgentConfig = controladapter.CustomAgentConfig
 
 func NewLocalAdapter(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*Adapter, error) {
 	return controladapter.NewAdapter(ctx, runtimeStack(stack), preferredSessionID, bindingKey, modelText)
@@ -41,10 +34,7 @@ func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
 		ModelChoices:         toRuntimeModelChoices,
 		DoctorRequest:        toGatewayDoctorRequest,
 		DoctorReport:         toRuntimeDoctorReport,
-		ACPAgentAddOptions:   toRuntimeACPAgentAddOptions,
 		ACPAgents:            toRuntimeACPAgents,
-		AgentProfileStatus:   toRuntimeAgentProfileStatus,
-		AgentProfileBinding:  toGatewayAgentProfileBinding,
 		PluginSnapshots:      toRuntimePluginSnapshots,
 		PluginSnapshot:       toRuntimePluginSnapshotWithError,
 		MarketplaceSnapshots: toRuntimeMarketplaceSnapshots,
@@ -165,18 +155,6 @@ func cloneOptionalSetupStatus(status *sandbox.SetupStatus) *sandbox.SetupStatus 
 	return &out
 }
 
-func toRuntimeACPAgentAddOptions(options []gatewayapp.ACPAgentAddOption) []ACPAgentAddOption {
-	out := make([]ACPAgentAddOption, 0, len(options))
-	for _, option := range options {
-		out = append(out, ACPAgentAddOption{
-			Value:   option.Value,
-			Display: option.Display,
-			Detail:  option.Detail,
-		})
-	}
-	return out
-}
-
 func toRuntimeACPAgents(agents []gatewayapp.ACPAgentInfo) []ACPAgentInfo {
 	out := make([]ACPAgentInfo, 0, len(agents))
 	for _, agent := range agents {
@@ -186,88 +164,6 @@ func toRuntimeACPAgents(agents []gatewayapp.ACPAgentInfo) []ACPAgentInfo {
 		})
 	}
 	return out
-}
-
-func toRuntimeAgentProfileStatus(status gatewayapp.AgentProfileStatus, err error) (AgentProfileStatusSnapshot, error) {
-	if err != nil {
-		return AgentProfileStatusSnapshot{}, err
-	}
-	out := AgentProfileStatusSnapshot{}
-	for _, warning := range status.Warnings {
-		message := strings.TrimSpace(warning.Message)
-		if message == "" {
-			continue
-		}
-		if path := strings.TrimSpace(warning.Path); path != "" {
-			message = path + ": " + message
-		}
-		out.Warnings = append(out.Warnings, message)
-	}
-	for _, snapshot := range status.Profiles {
-		out.Profiles = append(out.Profiles, toRuntimeAgentProfileSnapshot(snapshot))
-	}
-	return out, nil
-}
-
-func toRuntimeAgentProfileSnapshot(snapshot agentprofile.Snapshot) controladapter.AgentProfileSnapshot {
-	profile := agentprofile.NormalizeProfile(snapshot.Profile)
-	binding := agentprofile.NormalizeBinding(snapshot.Binding)
-	return controladapter.AgentProfileSnapshot{
-		ID:              profile.ID,
-		Name:            profile.Name,
-		Description:     profile.Description,
-		Capabilities:    append([]string(nil), profile.Capabilities...),
-		Path:            profile.Path,
-		Enabled:         binding.Enabled == nil || *binding.Enabled,
-		Target:          string(binding.Target),
-		Model:           binding.Model,
-		ACPAgent:        binding.ACPAgent,
-		ACPModel:        binding.ACPModel,
-		ReasoningEffort: binding.ReasoningEffort,
-		Status:          string(binding.Status),
-		Warning:         binding.Warning,
-		Source:          agentProfileMetadataString(profile.Metadata, "source"),
-		BuiltIn:         agentProfileMetadataBool(profile.Metadata, "built_in"),
-		SystemManaged:   agentProfileMetadataBool(profile.Metadata, "system_managed"),
-	}
-}
-
-func toGatewayAgentProfileBinding(cfg AgentProfileBindingConfig) gatewayapp.AgentProfileBindingConfig {
-	return gatewayapp.AgentProfileBindingConfig{
-		ProfileID:       cfg.ProfileID,
-		Target:          agentprofile.BindingTargetKind(strings.TrimSpace(cfg.Target)),
-		Model:           cfg.Model,
-		ACPAgent:        cfg.ACPAgent,
-		ACPModel:        cfg.ACPModel,
-		ReasoningEffort: cfg.ReasoningEffort,
-	}
-}
-
-func agentProfileMetadataString(metadata map[string]any, key string) string {
-	if len(metadata) == 0 {
-		return ""
-	}
-	value, _ := metadata[key].(string)
-	return strings.TrimSpace(value)
-}
-
-func agentProfileMetadataBool(metadata map[string]any, key string) bool {
-	if len(metadata) == 0 {
-		return false
-	}
-	switch value := metadata[key].(type) {
-	case bool:
-		return value
-	case string:
-		switch strings.ToLower(strings.TrimSpace(value)) {
-		case "true", "yes", "1", "on":
-			return true
-		default:
-			return false
-		}
-	default:
-		return false
-	}
 }
 
 func toRuntimePluginSnapshot(info gatewayapp.PluginInfo) controladapter.PluginSnapshot {

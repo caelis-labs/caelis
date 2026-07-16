@@ -1,11 +1,15 @@
 package tuiapp
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
 )
 
@@ -17,14 +21,14 @@ func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {
 			return TaskResultMsg{}
 		},
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			if command == "connect" {
-				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
 			}
 			return nil, nil
 		},
 	})
-	m.setInputText("/connect openai-compatible")
+	m.setInputText("/connect model")
 	m.syncTextareaFromInput()
 	_, cmd := m.Update(keyPress("enter"))
 	if cmd != nil {
@@ -39,24 +43,24 @@ func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {
 	if strings.TrimSpace(m.slashArgCommand) != "connect" {
 		t.Fatalf("slashArgCommand = %q, want connect", m.slashArgCommand)
 	}
-	if got := m.textarea.Value(); got != "openai-compatible" {
-		t.Fatalf("textarea = %q, want openai-compatible", got)
+	if got := m.textarea.Value(); got != "model" {
+		t.Fatalf("textarea = %q, want model", got)
 	}
-	if got := strings.TrimSpace(m.slashArgQuery); got != "openai-compatible" {
-		t.Fatalf("slashArgQuery = %q, want openai-compatible", got)
+	if got := strings.TrimSpace(m.slashArgQuery); got != "model" {
+		t.Fatalf("slashArgQuery = %q, want model", got)
 	}
 }
 
 func TestConnectEnterSubmitsWhenCommandUnavailable(t *testing.T) {
 	called := ""
 	m := NewModel(Config{
-		Commands: []string{"help", "agent", "status", "resume", "model"},
+		Commands: []string{"help", "lead", "status", "resume", "model"},
 		ExecuteLine: func(submission Submission) TaskResultMsg {
 			called = submission.Text
 			return TaskResultMsg{}
 		},
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			if command == "connect" {
 				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
 			}
@@ -81,7 +85,7 @@ func TestConnectTypingTrailingSpaceDoesNotOpenGenericPicker(t *testing.T) {
 	m := NewModel(Config{
 		ExecuteLine:      func(Submission) TaskResultMsg { return TaskResultMsg{} },
 		Wizards:          DefaultWizards(),
-		SlashArgComplete: func(string, string, int) ([]SlashArgCandidate, error) { return nil, nil },
+		SlashArgComplete: func(context.Context, string, string, int) ([]SlashArgCandidate, error) { return nil, nil },
 	})
 	m.setInputText("/connect ")
 	if len(m.slashArgCandidates) != 0 {
@@ -92,12 +96,378 @@ func TestConnectTypingTrailingSpaceDoesNotOpenGenericPicker(t *testing.T) {
 	}
 }
 
+func TestConnectWizardACPFlowPicksLauncherModelAndDefaults(t *testing.T) {
+	called := ""
+	m := NewModel(Config{
+		Wizards: DefaultWizards(),
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			called = submission.Text
+			return TaskResultMsg{}
+		},
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			switch {
+			case command == "connect":
+				return []SlashArgCandidate{{Value: "acp", Display: "Local ACP Agent"}}, nil
+			case command == "connect-acp-agent":
+				return []SlashArgCandidate{{Value: "claude", Display: "Claude Code"}}, nil
+			case command == "connect-acp-launcher:claude":
+				return []SlashArgCandidate{{Value: "npx", Display: "npx"}}, nil
+			case strings.HasPrefix(command, "connect-acp-model:"):
+				return []SlashArgCandidate{{Value: "opus", Display: "Opus"}}, nil
+			case strings.HasPrefix(command, "connect-acp-config:"):
+				return []SlashArgCandidate{{Value: "default", Display: "Agent default"}}, nil
+			default:
+				return nil, nil
+			}
+		},
+	})
+	m.openSlashArgPicker("connect")
+	for i := 0; i < 5; i++ {
+		handled, cmd := m.handleWizardEnter()
+		if !handled {
+			t.Fatalf("wizard step %d was not handled; command=%q", i, m.slashArgCommand)
+		}
+		if cmd != nil {
+			findAndRunTaskResult(cmd(), m)
+		}
+	}
+	if !strings.HasPrefix(called, "/connect acp ") {
+		t.Fatalf("ExecuteLine called with %q, want hidden ACP connect payload", called)
+	}
+	encoded := strings.TrimSpace(strings.TrimPrefix(called, "/connect acp "))
+	payload, err := parseACPConnectWizardPayload(encoded)
+	if err != nil {
+		t.Fatalf("parseACPConnectWizardPayload() error = %v", err)
+	}
+	if payload.Agent != "claude" || payload.Launcher != "npx" || payload.Model != "opus" || len(payload.ConfigValues) != 0 {
+		t.Fatalf("ACP connect payload = %#v", payload)
+	}
+}
+
+func TestConnectWizardDisconnectRequiresAgentAndConfirmation(t *testing.T) {
+	called := ""
+	m := NewModel(Config{
+		Wizards: DefaultWizards(),
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			called = submission.Text
+			return TaskResultMsg{}
+		},
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "connect":
+				return []SlashArgCandidate{{Value: "disconnect", Display: "Disconnect local ACP Agent"}}, nil
+			case "connect-disconnect-agent":
+				return []SlashArgCandidate{{Value: "codex", Display: "/codex", Detail: "codex(gpt-5.6-sol)"}}, nil
+			case "connect-disconnect-confirm:codex":
+				return []SlashArgCandidate{{Value: "confirm", Display: "Disconnect /codex"}}, nil
+			default:
+				return nil, nil
+			}
+		},
+	})
+
+	m.setInputText("/connect disconnect")
+	m.syncTextareaFromInput()
+	if _, cmd := m.Update(keyPress("enter")); cmd != nil {
+		findAndRunTaskResult(cmd(), m)
+	}
+	if !m.isWizardActive() {
+		t.Fatal("/connect disconnect did not open the guided disconnect flow")
+	}
+	if handled, cmd := m.handleWizardEnter(); !handled || cmd != nil {
+		t.Fatalf("source selection = handled:%v cmd:%v", handled, cmd)
+	}
+	if got := m.slashArgCommand; got != "connect-disconnect-agent" {
+		t.Fatalf("command after source = %q, want Agent picker", got)
+	}
+	if handled, cmd := m.handleWizardEnter(); !handled || cmd != nil {
+		t.Fatalf("Agent selection = handled:%v cmd:%v", handled, cmd)
+	}
+	if called != "" {
+		t.Fatalf("Agent selection submitted %q before confirmation", called)
+	}
+	if got := m.slashArgCommand; got != "connect-disconnect-confirm:codex" {
+		t.Fatalf("command after Agent = %q, want confirmation", got)
+	}
+
+	handled, cmd := m.handleWizardEnter()
+	if !handled || cmd == nil {
+		t.Fatalf("confirmation = handled:%v cmd:%v", handled, cmd)
+	}
+	if !findAndRunTaskResult(cmd(), m) {
+		t.Fatal("expected TaskResultMsg after disconnect confirmation")
+	}
+	if called != "/connect disconnect codex confirmed" {
+		t.Fatalf("ExecuteLine called with %q", called)
+	}
+}
+
+func TestConnectWizardLoadsACPModelsInBackgroundWithRunningSpinner(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	m := NewModel(Config{
+		Wizards: DefaultWizards(),
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			if strings.HasPrefix(command, "connect-acp-model:") {
+				close(started)
+				<-release
+				return []SlashArgCandidate{{Value: "opus", Display: "Opus"}}, nil
+			}
+			return nil, nil
+		},
+	})
+	m.slashArgActive = true
+	m.slashArgCommand = "connect-acp-model:" + buildACPConnectWizardPayload(map[string]string{
+		"acp_agent": "claude", "acp_launcher": "managed",
+	})
+
+	cmd := m.beginSlashArgLoad()
+	if cmd == nil || !m.slashArgLoadPending || !m.runningIndicatorActive() {
+		t.Fatalf("beginSlashArgLoad() = cmd:%v pending:%v running:%v", cmd, m.slashArgLoadPending, m.runningIndicatorActive())
+	}
+	if hint := ansi.Strip(m.buildHintText()); !strings.Contains(hint, "Preparing Claude Code ACP Agent") || !strings.Contains(hint, "Esc cancels") {
+		t.Fatalf("buildHintText() = %q, want setup activity", hint)
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("beginSlashArgLoad() message is %T, want tea.BatchMsg", msg)
+	}
+	results := make(chan tea.Msg, len(batch))
+	for _, one := range batch {
+		go func(run tea.Cmd) { results <- run() }(one)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("ACP completion did not start in the background")
+	}
+	close(release)
+	deadline := time.After(2 * time.Second)
+	for m.slashArgLoadPending {
+		select {
+		case msg := <-results:
+			if _, ok := msg.(slashArgLoadResultMsg); ok {
+				m.Update(msg)
+			}
+		case <-deadline:
+			t.Fatal("ACP completion did not finish")
+		}
+	}
+	if len(m.slashArgCandidates) != 1 || m.slashArgCandidates[0].Value != "opus" {
+		t.Fatalf("slashArgCandidates = %#v, want loaded Opus", m.slashArgCandidates)
+	}
+}
+
+func TestConnectWizardStreamsManagedInstallProgress(t *testing.T) {
+	messages := make(chan tea.Msg, 4)
+	release := make(chan struct{})
+	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
+	m := NewModel(Config{
+		Context:       context.Background(),
+		ProgramSender: sender,
+		SlashArgComplete: func(ctx context.Context, _ string, _ string, _ int) ([]SlashArgCandidate, error) {
+			controlagents.ReportSetupProgress(ctx, controlagents.SetupProgress{
+				AdapterID: "claude", Phase: controlagents.SetupPhaseDownloading, Bytes: 128 * 1024 * 1024,
+			})
+			<-release
+			return []SlashArgCandidate{{Value: "opus"}}, nil
+		},
+	})
+	m.slashArgActive = true
+	m.slashArgCommand = "connect-acp-model:" + buildACPConnectWizardPayload(map[string]string{
+		"acp_agent": "claude", "acp_launcher": "managed",
+	})
+
+	msg := m.beginSlashArgLoad()()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok || len(batch) == 0 {
+		t.Fatalf("beginSlashArgLoad() message = %T, want tea.BatchMsg", msg)
+	}
+	result := make(chan tea.Msg, 1)
+	go func() { result <- batch[0]() }()
+	select {
+	case progress := <-messages:
+		m.Update(progress)
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("managed install progress was not forwarded to the TUI")
+	}
+	hint := ansi.Strip(m.buildHintText())
+	for _, want := range []string{"Downloading and unpacking Claude Code ACP Agent", "128.0 MB written", "Esc cancels"} {
+		if !strings.Contains(hint, want) {
+			close(release)
+			t.Fatalf("buildHintText() = %q, want %q", hint, want)
+		}
+	}
+	close(release)
+	select {
+	case loaded := <-result:
+		m.Update(loaded)
+	case <-time.After(time.Second):
+		t.Fatal("ACP model load did not finish")
+	}
+}
+
+func TestConnectWizardIgnoresStaleACPModelLoadAfterCancel(t *testing.T) {
+	m := NewModel(Config{SlashArgComplete: func(context.Context, string, string, int) ([]SlashArgCandidate, error) {
+		return []SlashArgCandidate{{Value: "opus"}}, nil
+	}})
+	m.slashArgActive = true
+	m.slashArgCommand = "connect-acp-model:" + buildACPConnectWizardPayload(map[string]string{
+		"acp_agent": "claude", "acp_launcher": "managed",
+	})
+	if cmd := m.beginSlashArgLoad(); cmd == nil {
+		t.Fatal("beginSlashArgLoad() command = nil")
+	}
+	seq := m.slashArgLoadSeq
+	command := m.slashArgCommand
+	m.clearSlashArg()
+	m.Update(slashArgLoadResultMsg{
+		seq: seq, command: command, candidates: []SlashArgCandidate{{Value: "opus"}},
+	})
+	if m.slashArgLoadPending || len(m.slashArgCandidates) != 0 || m.runningIndicatorActive() {
+		t.Fatalf("stale load restored canceled wizard: pending=%v candidates=%#v", m.slashArgLoadPending, m.slashArgCandidates)
+	}
+}
+
+func TestConnectWizardCancelCancelsACPDiscoveryRequest(t *testing.T) {
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+	m := NewModel(Config{
+		Context: context.Background(),
+		SlashArgComplete: func(ctx context.Context, _ string, _ string, _ int) ([]SlashArgCandidate, error) {
+			close(started)
+			<-ctx.Done()
+			close(canceled)
+			return nil, ctx.Err()
+		},
+	})
+	m.slashArgActive = true
+	m.slashArgCommand = "connect-acp-model:" + buildACPConnectWizardPayload(map[string]string{
+		"acp_agent": "claude", "acp_launcher": "managed",
+	})
+
+	msg := m.beginSlashArgLoad()()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok || len(batch) == 0 {
+		t.Fatalf("beginSlashArgLoad() message = %T, want non-empty tea.BatchMsg", msg)
+	}
+	result := make(chan tea.Msg, 1)
+	go func() { result <- batch[0]() }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("ACP discovery request did not start")
+	}
+
+	m.clearSlashArg()
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("clearing the wizard did not cancel the ACP discovery request")
+	}
+	select {
+	case <-result:
+	case <-time.After(time.Second):
+		t.Fatal("canceled ACP discovery request did not return")
+	}
+}
+
+func TestACPCompletionCacheMissDoesNotCallCompleterOnUpdateLoop(t *testing.T) {
+	calls := 0
+	m := NewModel(Config{SlashArgComplete: func(context.Context, string, string, int) ([]SlashArgCandidate, error) {
+		calls++
+		return nil, nil
+	}})
+	m.slashArgActive = true
+	m.slashArgCommand = "connect-acp-model:" + buildACPConnectWizardPayload(map[string]string{
+		"acp_agent": "claude", "acp_launcher": "managed",
+	})
+	m.setInputText("/" + m.slashArgCommand + " ")
+	m.syncTextareaFromInput()
+
+	m.updateSlashArgCandidates()
+	m.applySlashArgCompletion()
+	if calls != 0 {
+		t.Fatalf("completion calls during synchronous update = %d, want 0", calls)
+	}
+	if cmd := m.beginSlashArgLoad(); cmd == nil {
+		t.Fatal("beginSlashArgLoad() = nil, want background request")
+	}
+	if calls != 0 {
+		t.Fatalf("completion calls before background command runs = %d, want 0", calls)
+	}
+	m.clearSlashArg()
+}
+
+func TestACPConfigSelectionIsExclusiveByConfigID(t *testing.T) {
+	step := &WizardStepDef{MultiSelect: true, MergeMultiSelect: mergeACPConfigSelection, FormatMultiSelect: formatACPConfigSelections}
+	if !wizardCandidateSupportsMultiSelect(step, SlashArgCandidate{Value: "reasoning_effort=max"}) {
+		t.Fatal("ACP config candidate without model metadata should support multi-select")
+	}
+
+	values := mergeWizardMultiSelectValue(step, nil, "default")
+	values = mergeWizardMultiSelectValue(step, values, "reasoning_effort=max")
+	if got := strings.Join(values, ","); got != "reasoning_effort=max" {
+		t.Fatalf("explicit value after default = %q", got)
+	}
+	values = mergeWizardMultiSelectValue(step, values, "mode=manual")
+	values = mergeWizardMultiSelectValue(step, values, "reasoning_effort=high")
+	if got := strings.Join(values, ","); got != "mode=manual,reasoning_effort=high" {
+		t.Fatalf("values after same-ID replacement = %q", got)
+	}
+	values = mergeWizardMultiSelectValue(step, values, "default")
+	if got := strings.Join(values, ","); got != "default" {
+		t.Fatalf("default after explicit values = %q", got)
+	}
+	if got := formatWizardMultiSelect(step, []string{"instructions=short, exact=a=b"}); got != "{\"instructions\":\"short, exact=a=b\"}" {
+		t.Fatalf("formatted ACP config = %q", got)
+	}
+}
+
+func TestConnectWizardGlobalLauncherDoesNotAskForCommand(t *testing.T) {
+	m := NewModel(Config{
+		Wizards: DefaultWizards(),
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "connect":
+				return []SlashArgCandidate{{Value: "acp"}}, nil
+			case "connect-acp-agent":
+				return []SlashArgCandidate{{Value: "claude"}}, nil
+			case "connect-acp-launcher:claude":
+				return []SlashArgCandidate{{Value: "global"}}, nil
+			default:
+				if strings.HasPrefix(command, "connect-acp-model:") {
+					return []SlashArgCandidate{{Value: "opus"}}, nil
+				}
+				return nil, nil
+			}
+		},
+	})
+	m.openSlashArgPicker("connect")
+	for i := 0; i < 3; i++ {
+		handled, cmd := m.handleWizardEnter()
+		if !handled {
+			t.Fatalf("wizard step %d was not handled", i)
+		}
+		if cmd != nil {
+			cmd()
+		}
+	}
+	if !strings.HasPrefix(m.slashArgCommand, "connect-acp-model:") {
+		t.Fatalf("slashArgCommand = %q, global launcher should skip command step", m.slashArgCommand)
+	}
+}
+
 func TestConnectWizardSkipsDirectlyToAPIKeyForMiniMax(t *testing.T) {
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
 				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
 			case "connect-apikey:minimax":
 				return nil, nil
@@ -106,7 +476,7 @@ func TestConnectWizardSkipsDirectlyToAPIKeyForMiniMax(t *testing.T) {
 			}
 		},
 	})
-	m.openSlashArgPicker("connect")
+	openModelConnectWizard(t, m)
 	if !m.isWizardActive() {
 		t.Fatal("expected connect wizard to start")
 	}
@@ -128,9 +498,11 @@ func TestConnectWizardSkipsDirectlyToAPIKeyForMiniMax(t *testing.T) {
 func TestConnectWizardSkipsAPIKeyForNoAuthProvider(t *testing.T) {
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
 				return []SlashArgCandidate{{Value: "ollama", Display: "ollama", NoAuth: true}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
@@ -141,7 +513,7 @@ func TestConnectWizardSkipsAPIKeyForNoAuthProvider(t *testing.T) {
 			}
 		},
 	})
-	m.openSlashArgPicker("connect")
+	openModelConnectWizard(t, m)
 	if !m.isWizardActive() {
 		t.Fatal("expected connect wizard to start")
 	}
@@ -164,9 +536,11 @@ func TestConnectWizardSkipsAPIKeyForNoAuthProvider(t *testing.T) {
 func TestConnectWizardKeepsBaseURLStepForCompatibleProviders(t *testing.T) {
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
 				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
 			case "connect-baseurl:openai-compatible":
 				return []SlashArgCandidate{{Value: "https://api.openai.com/v1", Display: "https://api.openai.com/v1"}}, nil
@@ -175,7 +549,7 @@ func TestConnectWizardKeepsBaseURLStepForCompatibleProviders(t *testing.T) {
 			}
 		},
 	})
-	m.openSlashArgPicker("connect")
+	openModelConnectWizard(t, m)
 	if !m.isWizardActive() {
 		t.Fatal("expected connect wizard to start")
 	}
@@ -198,9 +572,11 @@ func TestConnectWizardSkipsAPIKeyForReusableBaseURLAuth(t *testing.T) {
 	const baseURL = "https://api.openai.com/v1"
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
 				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
 			case "connect-baseurl:openai-compatible":
 				return []SlashArgCandidate{{Value: baseURL, Display: baseURL, Detail: "configured auth", NoAuth: true}}, nil
@@ -213,7 +589,7 @@ func TestConnectWizardSkipsAPIKeyForReusableBaseURLAuth(t *testing.T) {
 			}
 		},
 	})
-	m.openSlashArgPicker("connect")
+	openModelConnectWizard(t, m)
 	if !m.isWizardActive() {
 		t.Fatal("expected connect wizard to start")
 	}
@@ -240,9 +616,11 @@ func TestConnectWizardSkipsAPIKeyForReusableBaseURLAuth(t *testing.T) {
 func TestConnectWizardTypedXiaomiAdvancesToEndpointStep(t *testing.T) {
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
 			case "connect-baseurl:xiaomi":
 				return []SlashArgCandidate{
@@ -254,7 +632,7 @@ func TestConnectWizardTypedXiaomiAdvancesToEndpointStep(t *testing.T) {
 			}
 		},
 	})
-	m.setInputText("/connect xiaomi")
+	m.setInputText("/connect model")
 	m.syncTextareaFromInput()
 	_, cmd := m.Update(keyPress("enter"))
 	if cmd != nil {
@@ -263,6 +641,10 @@ func TestConnectWizardTypedXiaomiAdvancesToEndpointStep(t *testing.T) {
 	if !m.isWizardActive() {
 		t.Fatal("expected connect wizard to start")
 	}
+	advanceConnectWizardSourceToProvider(t, m)
+	m.setInputText("xiaomi")
+	m.syncTextareaFromInput()
+	m.updateSlashArgCandidates()
 	handled, cmd := m.handleWizardEnter()
 	if !handled {
 		t.Fatal("provider selection was not handled")
@@ -282,9 +664,11 @@ func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *tes
 	const tokenPlanBaseURL = "https://token-plan-cn.xiaomimimo.com/v1"
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
 			case "connect-baseurl:xiaomi":
 				return []SlashArgCandidate{
@@ -302,7 +686,7 @@ func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *tes
 			}
 		},
 	})
-	m.setInputText("/connect x")
+	m.setInputText("/connect model")
 	m.syncTextareaFromInput()
 	_, cmd := m.Update(keyPress("enter"))
 	if cmd != nil {
@@ -311,6 +695,10 @@ func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *tes
 	if !m.isWizardActive() {
 		t.Fatal("expected connect wizard to start")
 	}
+	advanceConnectWizardSourceToProvider(t, m)
+	m.setInputText("x")
+	m.syncTextareaFromInput()
+	m.updateSlashArgCandidates()
 	handled, cmd := m.handleWizardEnter()
 	if !handled {
 		t.Fatal("provider prefix selection was not handled")
@@ -358,14 +746,17 @@ func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *tes
 func TestConnectWizardDoesNotAcceptUnknownProviderFreeform(t *testing.T) {
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			if command == "connect" {
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			}
+			if command == "connect-provider" {
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
 			}
 			return nil, nil
 		},
 	})
-	m.setInputText("/connect xiaomi token")
+	m.setInputText("/connect model")
 	m.syncTextareaFromInput()
 	_, cmd := m.Update(keyPress("enter"))
 	if cmd != nil {
@@ -374,6 +765,10 @@ func TestConnectWizardDoesNotAcceptUnknownProviderFreeform(t *testing.T) {
 	if !m.isWizardActive() {
 		t.Fatal("expected connect wizard to start")
 	}
+	advanceConnectWizardSourceToProvider(t, m)
+	m.setInputText("xiaomi token")
+	m.syncTextareaFromInput()
+	m.updateSlashArgCandidates()
 	handled, cmd := m.handleWizardEnter()
 	if !handled {
 		t.Fatal("provider step enter was not handled")
@@ -381,8 +776,8 @@ func TestConnectWizardDoesNotAcceptUnknownProviderFreeform(t *testing.T) {
 	if cmd != nil {
 		cmd()
 	}
-	if got := strings.TrimSpace(m.slashArgCommand); got != "connect" {
-		t.Fatalf("slashArgCommand after unknown provider input = %q, want to stay on connect provider step", got)
+	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-provider" {
+		t.Fatalf("slashArgCommand after unknown provider input = %q, want to stay on connect-provider step", got)
 	}
 	if got := strings.TrimSpace(m.wizard.state["provider"]); got != "" {
 		t.Fatalf("provider state = %q, want empty after rejected provider input", got)
@@ -398,9 +793,11 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 			return TaskResultMsg{}
 		},
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
 			case "connect-baseurl:xiaomi":
 				return []SlashArgCandidate{
@@ -418,7 +815,7 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 			}
 		},
 	})
-	m.openSlashArgPicker("connect")
+	openModelConnectWizard(t, m)
 	if !m.isWizardActive() {
 		t.Fatal("expected connect wizard to start")
 	}
@@ -479,9 +876,11 @@ func TestConnectWizardSkipsAPIKeyForReusableEndpointAuth(t *testing.T) {
 	const apiBaseURL = "https://api.xiaomimimo.com/v1"
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
 			case "connect-baseurl:xiaomi":
 				return []SlashArgCandidate{{Value: apiBaseURL, Display: "api cn", Detail: "configured auth", NoAuth: true}}, nil
@@ -494,7 +893,7 @@ func TestConnectWizardSkipsAPIKeyForReusableEndpointAuth(t *testing.T) {
 			}
 		},
 	})
-	m.openSlashArgPicker("connect")
+	openModelConnectWizard(t, m)
 	handled, cmd := m.handleWizardEnter() // provider -> endpoint
 	if !handled {
 		t.Fatal("provider selection was not handled")
@@ -529,12 +928,9 @@ func TestConnectWizardAPIKeyHintUsesSelectedXiaomiEndpoint(t *testing.T) {
 			m := NewModel(Config{
 				Wizards: DefaultWizards(),
 			})
-			def := m.findWizard("connect")
-			if def == nil {
-				t.Fatalf("connect wizard not found")
-			}
+			def := connectModelWizard()
 			m.wizard = &wizardRuntime{
-				def:       def,
+				def:       &def,
 				stepIndex: 3,
 				state: map[string]string{
 					"provider": "xiaomi",
@@ -556,12 +952,9 @@ func TestConnectWizardAPIKeyHintRecognizesCustomXiaomiTokenPlanHost(t *testing.T
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
 	})
-	def := m.findWizard("connect")
-	if def == nil {
-		t.Fatalf("connect wizard not found")
-	}
+	def := connectModelWizard()
 	m.wizard = &wizardRuntime{
-		def:       def,
+		def:       &def,
 		stepIndex: 3,
 		state: map[string]string{
 			"provider": "xiaomi",
@@ -585,9 +978,11 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 			return TaskResultMsg{}
 		},
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
 				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
@@ -598,7 +993,7 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 			}
 		},
 	})
-	m.openSlashArgPicker("connect")
+	openModelConnectWizard(t, m)
 	handled, cmd := m.handleWizardEnter() // provider -> apikey
 	if !handled {
 		t.Fatal("provider selection was not handled")
@@ -642,9 +1037,11 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 			return TaskResultMsg{}
 		},
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
 				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
@@ -658,7 +1055,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 			}
 		},
 	})
-	m.openSlashArgPicker("connect")
+	openModelConnectWizard(t, m)
 	if handled, cmd := m.handleWizardEnter(); !handled {
 		t.Fatal("provider selection was not handled")
 	} else if cmd != nil {
@@ -697,9 +1094,11 @@ func TestConnectWizardKeepsAdvancedStepsForCustomCompatibleModel(t *testing.T) {
 	const baseURL = "https://models.acme.example/v1"
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
 				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
 			case "connect-baseurl:openai-compatible":
 				return []SlashArgCandidate{{Value: baseURL, Display: baseURL, NoAuth: true}}, nil
@@ -708,7 +1107,7 @@ func TestConnectWizardKeepsAdvancedStepsForCustomCompatibleModel(t *testing.T) {
 			}
 		},
 	})
-	m.openSlashArgPicker("connect")
+	openModelConnectWizard(t, m)
 
 	handled, cmd := m.handleWizardEnter() // provider -> baseurl
 	if !handled {
@@ -755,9 +1154,11 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 			return TaskResultMsg{}
 		},
 		Wizards: DefaultWizards(),
-		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
 				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
@@ -768,7 +1169,7 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 			}
 		},
 	})
-	m.openSlashArgPicker("connect")
+	openModelConnectWizard(t, m)
 	handled, cmd := m.handleWizardEnter() // provider -> apikey
 	if !handled {
 		t.Fatal("provider selection was not handled")
@@ -801,6 +1202,29 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 	}
 }
 
+func openModelConnectWizard(t *testing.T, m *Model) {
+	t.Helper()
+	m.openSlashArgPicker("connect")
+	if !m.isWizardActive() {
+		t.Fatal("expected connect wizard to start")
+	}
+	advanceConnectWizardSourceToProvider(t, m)
+}
+
+func advanceConnectWizardSourceToProvider(t *testing.T, m *Model) {
+	t.Helper()
+	handled, cmd := m.handleWizardEnter()
+	if !handled {
+		t.Fatal("model source selection was not handled")
+	}
+	if cmd != nil {
+		cmd()
+	}
+	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-provider" {
+		t.Fatalf("slashArgCommand after model source = %q, want connect-provider", got)
+	}
+}
+
 func requireConnectModelCommandState(t *testing.T, command string) connectwizard.ConnectWizardState {
 	t.Helper()
 	state, ok := connectModelCommandState(command)
@@ -823,6 +1247,10 @@ func findAndRunTaskResult(msg tea.Msg, m *Model) bool {
 	if _, ok := msg.(TaskResultMsg); ok {
 		m.Update(msg)
 		return true
+	}
+	if _, ok := msg.(slashArgLoadResultMsg); ok {
+		m.Update(msg)
+		return false
 	}
 	if batch, ok := msg.(tea.BatchMsg); ok {
 		for _, cmd := range batch {

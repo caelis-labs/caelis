@@ -23,7 +23,7 @@ func (m *Model) windowTitle() string {
 	if title == "" {
 		title = "CAELIS"
 	}
-	if m.turnRunning() {
+	if m.runningIndicatorActive() {
 		if frame := m.runningFrame(); frame != "" {
 			return frame + " " + title
 		}
@@ -61,7 +61,7 @@ func (m *Model) buildHintText() string {
 		}
 		return m.promptHintText()
 	}
-	if m.turnRunning() && m.activePrompt == nil {
+	if m.runningIndicatorActive() && m.activePrompt == nil {
 		return m.buildRunningHintText()
 	}
 	if text := m.pendingQueueHintText(); text != "" {
@@ -423,7 +423,7 @@ func (m *Model) inputPromptPrefix() string {
 }
 
 func (m *Model) currentInputGhostHint() string {
-	if m == nil || m.activePrompt != nil || m.turnRunning() {
+	if m == nil || m.activePrompt != nil || m.runningIndicatorActive() {
 		return ""
 	}
 	value := m.textarea.Value()

@@ -9,6 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
@@ -45,6 +46,11 @@ func TestConnectRollsBackLookupRuntimeAndStoreWhenAgentRefreshFails(t *testing.T
 			t.Fatalf("stored configs contain failed model %#v", cfg)
 		}
 	}
+	for _, agent := range controlagents.ListAgents(doc.AgentRoster) {
+		if strings.Contains(agent.Backing.ModelAlias, "new-model") {
+			t.Fatalf("stored roster contains failed model Agent %#v", agent)
+		}
+	}
 }
 
 func TestConnectModelsPersistsBatchAtomicallyAndKeepsFirstDefault(t *testing.T) {
@@ -70,6 +76,13 @@ func TestConnectModelsPersistsBatchAtomicallyAndKeepsFirstDefault(t *testing.T) 
 	if !found["batch-first"] || !found["batch-second"] || doc.Models.DefaultID != modelIDs[0] {
 		t.Fatalf("persisted batch = models:%#v default:%q", found, doc.Models.DefaultID)
 	}
+	rosterModels := map[string]bool{}
+	for _, agent := range controlagents.ListAgents(doc.AgentRoster) {
+		rosterModels[agent.Backing.ModelAlias] = true
+	}
+	if !rosterModels[modelIDs[0]] || !rosterModels[modelIDs[1]] {
+		t.Fatalf("persisted model-backed Agents = %#v, want %#v", rosterModels, modelIDs)
+	}
 
 	before := stack.lookup.Snapshot()
 	_, err = stack.ConnectModels([]ModelConfig{
@@ -82,6 +95,98 @@ func TestConnectModelsPersistsBatchAtomicallyAndKeepsFirstDefault(t *testing.T) 
 	after := stack.lookup.Snapshot()
 	if !reflect.DeepEqual(after, before) || stack.lookup.HasAlias("ollama/should-rollback") {
 		t.Fatalf("invalid batch leaked into lookup: before=%#v after=%#v", before, after)
+	}
+}
+
+func TestDeleteModelAtomicallyRemovesModelBackedAgent(t *testing.T) {
+	ctx := context.Background()
+	stack, activeSession := newLocalStateTestStack(t)
+	modelID, err := stack.Connect(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "delete-agent-model"})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	if err := stack.DeleteModel(ctx, activeSession.SessionRef, modelID); err != nil {
+		t.Fatalf("DeleteModel() error = %v", err)
+	}
+	doc, err := stack.store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	for _, agent := range controlagents.ListAgents(doc.AgentRoster) {
+		if agent.Backing.ModelAlias == modelID {
+			t.Fatalf("deleted model still has roster Agent %#v", agent)
+		}
+	}
+	if stack.lookup.HasAlias(modelID) {
+		t.Fatalf("deleted model %q remains in lookup", modelID)
+	}
+}
+
+func TestDeleteModelRejectsRecoverableControllerBinding(t *testing.T) {
+	ctx := context.Background()
+	stack, activeSession := newLocalStateTestStack(t)
+	modelID, err := stack.Connect(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "bound-model"})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	doc, err := stack.store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	agentID := ""
+	for _, rosterAgent := range controlagents.ListAgents(doc.AgentRoster) {
+		if rosterAgent.Backing.ModelAlias == modelID {
+			agentID = rosterAgent.ID
+			break
+		}
+	}
+	if agentID == "" {
+		t.Fatalf("model-backed Agent missing for %q", modelID)
+	}
+	if _, err := stack.Sessions.BindController(ctx, session.BindControllerRequest{
+		SessionRef: activeSession.SessionRef,
+		Binding: session.ControllerBinding{
+			Kind: session.ControllerKindACP, ControllerID: agentID, AgentName: agentID,
+		},
+	}); err != nil {
+		t.Fatalf("BindController() error = %v", err)
+	}
+
+	err = stack.DeleteModel(ctx, activeSession.SessionRef, modelID)
+	var inUse *controlagents.AgentInUseError
+	if !errors.As(err, &inUse) || inUse.AgentID != agentID || inUse.SessionID != activeSession.SessionID {
+		t.Fatalf("DeleteModel() error = %v, want AgentInUseError for %q/%q", err, agentID, activeSession.SessionID)
+	}
+	if !stack.lookup.HasAlias(modelID) {
+		t.Fatalf("DeleteModel() removed bound model %q", modelID)
+	}
+}
+
+func TestDeleteModelRestoresModelBackedAgentWhenRefreshFails(t *testing.T) {
+	ctx := context.Background()
+	stack, activeSession := newLocalStateTestStack(t)
+	modelID, err := stack.Connect(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "delete-rollback-model"})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	wantErr := errors.New("refresh failed")
+	stack.refreshConfiguredAgentsHook = func() error { return wantErr }
+	if err := stack.DeleteModel(ctx, activeSession.SessionRef, modelID); !errors.Is(err, wantErr) {
+		t.Fatalf("DeleteModel() error = %v, want %v", err, wantErr)
+	}
+	if !stack.lookup.HasAlias(modelID) {
+		t.Fatalf("rollback did not restore model %q", modelID)
+	}
+	doc, err := stack.store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	found := false
+	for _, agent := range controlagents.ListAgents(doc.AgentRoster) {
+		found = found || agent.Backing.ModelAlias == modelID
+	}
+	if !found {
+		t.Fatalf("rollback did not restore roster Agent for %q: %#v", modelID, doc.AgentRoster.Agents)
 	}
 }
 
@@ -119,6 +224,46 @@ func TestUseModelRollsBackConfigWhenSessionStateUpdateFails(t *testing.T) {
 	}
 }
 
+func TestDeleteModelRestoresLiveAgentAssemblyWhenSessionStateUpdateFails(t *testing.T) {
+	ctx := context.Background()
+	stack, activeSession := newLocalStateTestStack(t)
+	modelID, err := stack.Connect(ModelConfig{
+		Provider: "ollama",
+		API:      providers.APIOllama,
+		Model:    "delete-state-rollback-model",
+	})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	var refreshAgentPresence []bool
+	stack.refreshConfiguredAgentsHook = func() error {
+		doc, loadErr := stack.store.Load()
+		if loadErr != nil {
+			return loadErr
+		}
+		found := false
+		for _, agent := range controlagents.ListAgents(doc.AgentRoster) {
+			found = found || agent.Backing.ModelAlias == modelID
+		}
+		refreshAgentPresence = append(refreshAgentPresence, found)
+		return nil
+	}
+	wantErr := errors.New("state update failed")
+	stack.Sessions = &failOnceUpdateSessionService{Service: stack.Sessions, err: wantErr}
+
+	err = stack.DeleteModel(ctx, activeSession.SessionRef, modelID)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("DeleteModel() error = %v, want %v", err, wantErr)
+	}
+	if want := []bool{false, true}; !reflect.DeepEqual(refreshAgentPresence, want) {
+		t.Fatalf("Agent presence during refreshes = %#v, want %#v", refreshAgentPresence, want)
+	}
+	if !stack.lookup.HasAlias(modelID) {
+		t.Fatalf("rollback did not restore model %q", modelID)
+	}
+}
+
 type failingUpdateSessionService struct {
 	session.Service
 	err error
@@ -126,4 +271,18 @@ type failingUpdateSessionService struct {
 
 func (s *failingUpdateSessionService) UpdateState(context.Context, session.UpdateStateRequest) (session.Session, error) {
 	return session.Session{}, s.err
+}
+
+type failOnceUpdateSessionService struct {
+	session.Service
+	err    error
+	failed bool
+}
+
+func (s *failOnceUpdateSessionService) UpdateState(ctx context.Context, req session.UpdateStateRequest) (session.Session, error) {
+	if !s.failed {
+		s.failed = true
+		return session.Session{}, s.err
+	}
+	return s.Service.UpdateState(ctx, req)
 }

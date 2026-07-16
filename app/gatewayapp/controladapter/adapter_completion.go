@@ -7,6 +7,8 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
@@ -15,60 +17,6 @@ import (
 )
 
 const resumeCompletionPageLimit = 200
-
-func (d *Adapter) CompleteMention(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
-	limit = normalizeCompletionLimit(limit)
-	activeSession, ok := d.currentSession()
-	if !ok {
-		return []CompletionCandidate{}, nil
-	}
-	gw, err := d.gatewayControlPlane()
-	if err != nil {
-		return nil, err
-	}
-	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: activeSession.SessionRef})
-	if err != nil {
-		return nil, err
-	}
-	query = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(query), "@"))
-	out := make([]CompletionCandidate, 0, min(limit, len(state.Participants)))
-	for _, participant := range state.Participants {
-		if !isUserSideParticipant(participant) {
-			continue
-		}
-		handle := strings.TrimPrefix(strings.TrimSpace(participant.Label), "@")
-		if handle == "" {
-			continue
-		}
-		agent := strings.TrimSpace(participant.AgentName)
-		if agent == "" {
-			agent = strings.TrimSpace(participant.ID)
-		}
-		if query != "" && !hasSlashArgPrefix(query, handle, agent, participant.SessionID, participant.DelegationID) {
-			continue
-		}
-		display := handle
-		if agent != "" {
-			display = handle + "(" + agent + ")"
-		}
-		out = append(out, CompletionCandidate{
-			Value:   handle,
-			Display: display,
-			Detail:  strings.Join(compactNonEmpty([]string{string(participant.Role), participant.SessionID}), " · "),
-		})
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out, nil
-}
-
-func isUserSideParticipant(participant gateway.ParticipantState) bool {
-	if participant.Role != session.ParticipantRoleSidecar {
-		return false
-	}
-	return participant.Kind == session.ParticipantKindACP
-}
 
 func (d *Adapter) CompleteFile(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
 	return completeWorkspaceFiles(ctx, d.WorkspaceDir(), query, limit)
@@ -158,6 +106,8 @@ func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query st
 		limit = 8
 	}
 	query = strings.TrimSpace(strings.ToLower(query))
+	command = strings.TrimSpace(command)
+	normalizedCommand := strings.ToLower(command)
 	if acpStatus, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
 		return nil, err
 	} else if activeACP {
@@ -165,19 +115,9 @@ func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query st
 			return candidates, nil
 		}
 	}
-	switch strings.TrimSpace(strings.ToLower(command)) {
-	case "agent add":
-		return d.completeBuiltInAgentCatalog(query, limit), nil
-	case "agent install":
-		return d.completeInstallableBuiltInAgentCatalog(query, limit), nil
-	case "agent add --install":
-		return d.completeInstallableBuiltInAgentCatalog(query, limit), nil
-	case "agent use":
+	switch normalizedCommand {
+	case "lead":
 		return d.completeAgentHandoffTargets(ctx, query, limit)
-	case "agent remove":
-		return d.completeRemovableAgentCatalog(ctx, query, limit), nil
-	case "subagent bind":
-		return d.completeAgentProfiles(ctx, query, limit)
 	case "model use", "model del":
 		return d.completeModelAliases(ctx, query, limit)
 	case "plugin rm":
@@ -189,13 +129,10 @@ func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query st
 	case "connect":
 		return completeConnectArgs(ctx, d, "connect", query, limit)
 	}
-	if strings.HasPrefix(strings.TrimSpace(strings.ToLower(command)), "subagent bind ") {
-		return d.completeSubagentBindArgs(ctx, command, query, limit)
+	if strings.HasPrefix(normalizedCommand, "connect-") {
+		return completeConnectArgs(ctx, d, command, query, limit)
 	}
-	if strings.HasPrefix(strings.TrimSpace(strings.ToLower(command)), "connect-") {
-		return completeConnectArgs(ctx, d, strings.TrimSpace(strings.ToLower(command)), query, limit)
-	}
-	if alias, ok := strings.CutPrefix(strings.TrimSpace(strings.ToLower(command)), "model use "); ok {
+	if alias, ok := strings.CutPrefix(normalizedCommand, "model use "); ok {
 		return d.completeModelReasoningLevels(ctx, alias, query, limit)
 	}
 	candidates := controlcommands.RootArgCandidates(command)
@@ -210,134 +147,6 @@ func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query st
 		}
 	}
 	return out, nil
-}
-
-func (d *Adapter) completeAgentProfiles(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
-	if d.stack.AgentProfile.StatusFn == nil {
-		return nil, nil
-	}
-	status, err := d.stack.AgentProfile.StatusFn(ctx)
-	if err != nil {
-		return nil, nil
-	}
-	out := make([]SlashArgCandidate, 0, min(limit, len(status.Profiles)))
-	for _, profile := range status.Profiles {
-		id := strings.TrimSpace(profile.ID)
-		if id == "" {
-			continue
-		}
-		if query != "" && !hasSlashArgPrefix(query, id, profile.Name, profile.Description) {
-			continue
-		}
-		out = append(out, SlashArgCandidate{
-			Value:   id,
-			Display: firstNonEmpty(profile.Name, id),
-			Detail:  agentProfileCompletionDetail(profile),
-		})
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out, nil
-}
-
-func (d *Adapter) completeSubagentBindArgs(ctx context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
-	normalized := strings.TrimSpace(strings.ToLower(command))
-	args := strings.Fields(strings.TrimSpace(strings.TrimPrefix(normalized, "subagent bind")))
-	switch len(args) {
-	case 0:
-		return d.completeAgentProfiles(ctx, query, limit)
-	case 1:
-		candidates := []SlashArgCandidate{
-			{Value: "default", Display: "default", Detail: "Use the default self ACP agent and session model"},
-			{Value: "model", Display: "model", Detail: "Use a specific configured model"},
-		}
-		if !strings.EqualFold(strings.TrimSpace(args[0]), "guardian") {
-			candidates = append(candidates, SlashArgCandidate{Value: "acp", Display: "acp", Detail: "Use a registered ACP agent"})
-		}
-		return filterSlashCandidates(candidates, query, limit), nil
-	case 2:
-		switch args[1] {
-		case "model":
-			return d.completeModelAliases(ctx, query, limit)
-		case "acp":
-			return d.completeSubagentACPBindTargets(ctx, query, limit), nil
-		default:
-			return nil, nil
-		}
-	case 3:
-		if args[1] == "model" {
-			return d.completeModelReasoningLevels(ctx, args[2], query, limit)
-		}
-		return nil, nil
-	default:
-		return nil, nil
-	}
-}
-
-func agentProfileCompletionDetail(profile AgentProfileSnapshot) string {
-	parts := []string{}
-	if binding := subagentProfileBindingDetail(profile); binding != "" {
-		parts = append(parts, binding)
-	}
-	if profile.Description != "" {
-		parts = append(parts, profile.Description)
-	}
-	if status := strings.TrimSpace(profile.Status); status != "" && !strings.EqualFold(status, "ok") {
-		parts = append(parts, status)
-	}
-	return strings.Join(parts, " · ")
-}
-
-func subagentProfileBindingDetail(profile AgentProfileSnapshot) string {
-	if !profile.Enabled {
-		return "disabled"
-	}
-	switch strings.ToLower(strings.TrimSpace(profile.Target)) {
-	case "acp":
-		if profile.ACPAgent != "" {
-			return "acp " + profile.ACPAgent
-		}
-	case "built_in", "builtin", "self":
-		model := strings.TrimSpace(profile.Model)
-		if model == "" {
-			return "session default"
-		}
-		if reasoning := strings.TrimSpace(profile.ReasoningEffort); reasoning != "" {
-			return "model " + model + " (" + reasoning + ")"
-		}
-		return "model " + model
-	}
-	return strings.TrimSpace(profile.Target)
-}
-
-func (d *Adapter) completeSubagentACPBindTargets(ctx context.Context, query string, limit int) []SlashArgCandidate {
-	profileIDs := map[string]struct{}{}
-	if d.stack.AgentProfile.StatusFn != nil {
-		if status, err := d.stack.AgentProfile.StatusFn(ctx); err == nil {
-			for _, profile := range status.Profiles {
-				if id := strings.ToLower(strings.TrimSpace(profile.ID)); id != "" {
-					profileIDs[id] = struct{}{}
-				}
-			}
-		}
-	}
-	agents := d.completeAgentCatalog(query, limit+len(profileIDs)+1)
-	out := make([]SlashArgCandidate, 0, min(limit, len(agents)))
-	for _, agent := range agents {
-		name := strings.ToLower(strings.TrimSpace(agent.Value))
-		if name == "self" {
-			continue
-		}
-		if _, generated := profileIDs[name]; generated {
-			continue
-		}
-		out = append(out, agent)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
 }
 
 func filterSlashCandidates(candidates []SlashArgCandidate, query string, limit int) []SlashArgCandidate {
@@ -655,81 +464,6 @@ func (d *Adapter) completeAgentCatalog(query string, limit int) []SlashArgCandid
 	return out
 }
 
-func (d *Adapter) completeRemovableAgentCatalog(ctx context.Context, query string, limit int) []SlashArgCandidate {
-	profileIDs := map[string]struct{}{}
-	if d.stack.AgentProfile.StatusFn != nil {
-		if status, err := d.stack.AgentProfile.StatusFn(ctx); err == nil {
-			for _, profile := range status.Profiles {
-				if id := strings.ToLower(strings.TrimSpace(profile.ID)); id != "" {
-					profileIDs[id] = struct{}{}
-				}
-			}
-		}
-	}
-	agents := d.completeAgentCatalog(query, limit+len(profileIDs))
-	out := make([]SlashArgCandidate, 0, min(limit, len(agents)))
-	for _, agent := range agents {
-		if _, generated := profileIDs[strings.ToLower(strings.TrimSpace(agent.Value))]; generated {
-			continue
-		}
-		out = append(out, agent)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
-}
-
-func (d *Adapter) completeBuiltInAgentCatalog(query string, limit int) []SlashArgCandidate {
-	if d.stack.Agent.ListBuiltinAddOptionsFn == nil {
-		return nil
-	}
-	options := d.stack.Agent.ListBuiltinAddOptionsFn()
-	if len(options) == 0 {
-		return nil
-	}
-	out := make([]SlashArgCandidate, 0, min(limit, len(options)))
-	for _, option := range options {
-		if query != "" && !hasSlashArgPrefix(query, option.Value, option.Display, option.Detail) {
-			continue
-		}
-		out = append(out, SlashArgCandidate{
-			Value:   option.Value,
-			Display: option.Display,
-			Detail:  firstNonEmpty(option.Detail, "built-in ACP agent"),
-		})
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
-}
-
-func (d *Adapter) completeInstallableBuiltInAgentCatalog(query string, limit int) []SlashArgCandidate {
-	if d.stack.Agent.ListInstallableOptionsFn == nil {
-		return nil
-	}
-	options := d.stack.Agent.ListInstallableOptionsFn()
-	if len(options) == 0 {
-		return nil
-	}
-	out := make([]SlashArgCandidate, 0, min(limit, len(options)))
-	for _, option := range options {
-		if query != "" && !hasSlashArgPrefix(query, option.Value, option.Display, option.Detail) {
-			continue
-		}
-		out = append(out, SlashArgCandidate{
-			Value:   option.Value,
-			Display: option.Display,
-			Detail:  firstNonEmpty(option.Detail, "install ACP agent adapter"),
-		})
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
-}
-
 func (d *Adapter) completeAgentParticipants(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
 	activeSession, ok := d.currentSession()
 	if !ok {
@@ -816,30 +550,6 @@ func (d *Adapter) agentCatalog(limit int) []AgentCandidate {
 	return out
 }
 
-func (d *Adapter) resolveHandoffAgentName(ctx context.Context, ref session.SessionRef, input string) (string, error) {
-	if agent, err := d.resolveAgentName(input); err == nil {
-		return agent, nil
-	}
-	participantID, err := d.resolveParticipantID(ctx, ref, input)
-	if err != nil {
-		return "", err
-	}
-	gw, err := d.gatewayControlPlane()
-	if err != nil {
-		return "", err
-	}
-	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref})
-	if err != nil {
-		return "", err
-	}
-	for _, participant := range state.Participants {
-		if strings.EqualFold(strings.TrimSpace(participant.ID), participantID) {
-			return strings.TrimSpace(firstNonEmpty(participant.Label, participant.ID)), nil
-		}
-	}
-	return "", fmt.Errorf("app/gatewayapp/controladapter: participant %q is not attached", input)
-}
-
 func (d *Adapter) resolveAgentName(input string) (string, error) {
 	input = strings.ToLower(strings.TrimSpace(input))
 	if input == "" {
@@ -887,10 +597,11 @@ func (d *Adapter) resolveParticipantID(ctx context.Context, ref session.SessionR
 	if err != nil {
 		return "", err
 	}
+	runAgent, runHandle, directRun := controlagents.ParseRunName(input)
 	var exact string
 	prefixMatches := make([]string, 0, 2)
 	for _, participant := range state.Participants {
-		if participant.Kind != session.ParticipantKindACP {
+		if participant.Kind != session.ParticipantKindACP || participant.Role != session.ParticipantRoleSidecar {
 			continue
 		}
 		id := strings.TrimSpace(participant.ID)
@@ -898,6 +609,13 @@ func (d *Adapter) resolveParticipantID(ctx context.Context, ref session.SessionR
 		handle := strings.TrimPrefix(label, "@")
 		sessionID := strings.TrimSpace(participant.SessionID)
 		if id == "" {
+			continue
+		}
+		if directRun {
+			if strings.EqualFold(controlagents.NormalizeName(participant.AgentName), runAgent) &&
+				strings.EqualFold(taskapi.NormalizeHandle(label), runHandle) {
+				return id, nil
+			}
 			continue
 		}
 		if strings.EqualFold(id, input) || strings.EqualFold(label, input) || strings.EqualFold(handle, input) || strings.EqualFold(sessionID, input) {

@@ -156,10 +156,6 @@ func TestAppConfigStoreDoesNotPersistEnvHydratedToken(t *testing.T) {
 	if cfg.PersistToken {
 		t.Fatal("loaded env token set PersistToken=true, want false")
 	}
-	doc.Agents = []AgentConfig{{
-		Name:    "helper",
-		Command: "true",
-	}}
 	if err := store.Save(doc); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}

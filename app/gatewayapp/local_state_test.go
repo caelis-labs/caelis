@@ -728,28 +728,20 @@ func TestNewLocalStackProductionBootstrapDoesNotPersistSandboxNetworkDefault(t *
 	}
 
 	stack, err := NewLocalStack(Config{
-		AppName:                     "caelis",
-		UserID:                      "sandbox-bootstrap-test",
-		StoreDir:                    root,
-		WorkspaceKey:                workdir,
-		WorkspaceCWD:                workdir,
-		Assembly:                    assembly.ResolvedAssembly{},
-		Sandbox:                     SandboxConfig{RequestedType: "host"},
-		SkillDirs:                   []string{t.TempDir()},
-		DisableBuiltInAgentProfiles: false,
+		AppName:      "caelis",
+		UserID:       "sandbox-bootstrap-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		Assembly:     assembly.ResolvedAssembly{},
+		Sandbox:      SandboxConfig{RequestedType: "host"},
+		SkillDirs:    []string{t.TempDir()},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 	assertSandboxNetworkEnabledDefault(t, stack)
 	assertConfigSandboxNetworkUnset(t, configPath)
-	doc, err := LoadAppConfig(root)
-	if err != nil {
-		t.Fatalf("LoadAppConfig() error = %v", err)
-	}
-	if len(doc.AgentBindings.Bindings) == 0 {
-		t.Fatal("agent bindings were not bootstrapped; test did not exercise production save path")
-	}
 }
 
 func assertSandboxNetworkEnabledDefault(t *testing.T, stack *Stack) {

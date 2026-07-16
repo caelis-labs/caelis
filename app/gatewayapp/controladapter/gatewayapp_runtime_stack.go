@@ -14,10 +14,7 @@ type RuntimeStackGatewayAppAdapters struct {
 	ModelChoices         func([]gatewayapp.ModelChoice, error) ([]ModelChoice, error)
 	DoctorRequest        func(DoctorRequest) gatewayapp.DoctorRequest
 	DoctorReport         func(gatewayapp.DoctorReport, error) (DoctorReport, error)
-	ACPAgentAddOptions   func([]gatewayapp.ACPAgentAddOption) []ACPAgentAddOption
 	ACPAgents            func([]gatewayapp.ACPAgentInfo) []ACPAgentInfo
-	AgentProfileStatus   func(gatewayapp.AgentProfileStatus, error) (AgentProfileStatusSnapshot, error)
-	AgentProfileBinding  func(AgentProfileBindingConfig) gatewayapp.AgentProfileBindingConfig
 	PluginSnapshots      func([]gatewayapp.PluginInfo, error) ([]PluginSnapshot, error)
 	PluginSnapshot       func(gatewayapp.PluginInfo, error) (PluginSnapshot, error)
 	MarketplaceSnapshots func([]gatewayapp.MarketplaceInfo, error) ([]MarketplaceSnapshot, error)
@@ -30,7 +27,6 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 	}
 	models := stack.Models()
 	agents := stack.Agents()
-	profiles := stack.AgentProfiles()
 	skills := stack.Skills()
 	status := stack.Status()
 	plugins := stack.Plugins()
@@ -57,34 +53,14 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 			SetSessionModeFn: status.SetSessionMode,
 		},
 		Agent: AgentRuntimeDeps{
-			ControllerStatusFn:   agents.ControllerStatus,
-			SetControllerModelFn: agents.SetControllerModel,
-			SetControllerModeFn:  agents.SetControllerMode,
-			RegisterBuiltinWithOptionsFn: func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
-				return agents.RegisterBuiltinWithOptions(ctx, target, gatewayapp.RegisterBuiltinACPAgentOptions{Install: opts.Install})
-			},
-			RegisterCustomFn: func(ctx context.Context, cfg CustomAgentConfig) error {
-				env := make(map[string]string, len(cfg.Env))
-				for key, value := range cfg.Env {
-					env[key] = value
-				}
-				return agents.RegisterCustom(ctx, gatewayapp.AgentConfig{
-					Name:        cfg.Name,
-					Description: cfg.Description,
-					Command:     cfg.Command,
-					Args:        append([]string(nil), cfg.Args...),
-					Env:         env,
-					WorkDir:     cfg.WorkDir,
-				})
-			},
-			UnregisterFn: agents.Unregister,
-			ListBuiltinAddOptionsFn: func() []ACPAgentAddOption {
-				return adapters.ACPAgentAddOptions(agents.BuiltinAddOptions())
-			},
-			ListInstallableOptionsFn: func() []ACPAgentAddOption {
-				return adapters.ACPAgentAddOptions(agents.InstallableOptions())
-			},
-			ListFn: func() []ACPAgentInfo { return adapters.ACPAgents(agents.List()) },
+			ControllerStatusFn:     agents.ControllerStatus,
+			SetControllerModelFn:   agents.SetControllerModel,
+			SetControllerModeFn:    agents.SetControllerMode,
+			DiscoverConnectionFn:   agents.DiscoverConnection,
+			ConnectFn:              agents.Connect,
+			DisconnectCandidatesFn: agents.DisconnectCandidates,
+			DisconnectFn:           agents.Disconnect,
+			ListFn:                 func() []ACPAgentInfo { return adapters.ACPAgents(agents.List()) },
 		},
 		Model: ModelRuntimeDeps{
 			DefaultAliasFn: models.DefaultAlias,
@@ -103,14 +79,6 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 		},
 		Skill: SkillRuntimeDeps{
 			SnapshotFn: skills.Snapshot,
-		},
-		AgentProfile: AgentProfileRuntimeDeps{
-			StatusFn: func(ctx context.Context) (AgentProfileStatusSnapshot, error) {
-				return adapters.AgentProfileStatus(profiles.Status(ctx))
-			},
-			BindFn: func(ctx context.Context, cfg AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error) {
-				return adapters.AgentProfileStatus(profiles.Bind(ctx, adapters.AgentProfileBinding(cfg)))
-			},
 		},
 		Sandbox: SandboxRuntimeDeps{
 			StatusFn: func() SandboxStatus { return adapters.SandboxStatus(status.Sandbox()) },

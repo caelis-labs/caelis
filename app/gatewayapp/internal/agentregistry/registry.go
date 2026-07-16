@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -42,9 +41,14 @@ type BuiltinAdapterPackage struct {
 	Bin     string
 }
 
-const claudeACPAdapterVersion = "^0.31.0"
+const (
+	codexACPAdapterVersion  = "1.1.2"
+	claudeACPAdapterVersion = "0.59.0"
+)
 
-func WithConfiguredAgents(resolved assembly.ResolvedAssembly, configured []configstore.AgentConfig, self assembly.AgentConfig) assembly.ResolvedAssembly {
+// WithSelfAgent adds the private Caelis child endpoint when the host did not
+// already provide one.
+func WithSelfAgent(resolved assembly.ResolvedAssembly, self assembly.AgentConfig) assembly.ResolvedAssembly {
 	out := assembly.CloneResolvedAssembly(resolved)
 	seen := map[string]struct{}{}
 	for _, agent := range out.Agents {
@@ -59,52 +63,7 @@ func WithConfiguredAgents(resolved assembly.ResolvedAssembly, configured []confi
 			seen[name] = struct{}{}
 		}
 	}
-	for _, agent := range configured {
-		if !configuredAgentSupported(agent) {
-			continue
-		}
-		cfg := AgentConfigToPlugin(agent)
-		name := strings.ToLower(strings.TrimSpace(cfg.Name))
-		if name != "" {
-			if _, exists := seen[name]; !exists {
-				out.Agents = append(out.Agents, cfg)
-				seen[name] = struct{}{}
-			}
-		}
-	}
 	return out
-}
-
-func configuredAgentSupported(agent configstore.AgentConfig) bool {
-	if !agent.Builtin {
-		return true
-	}
-	_, ok := LookupBuiltInAgent(agent.Name)
-	return ok
-}
-
-func AgentConfigToPlugin(in configstore.AgentConfig) assembly.AgentConfig {
-	in = configstore.NormalizeAgentConfig(in)
-	return assembly.AgentConfig{
-		Name:        in.Name,
-		Description: in.Description,
-		Command:     in.Command,
-		Args:        append([]string(nil), in.Args...),
-		Env:         cloneStringMap(in.Env),
-		WorkDir:     in.WorkDir,
-	}
-}
-
-func PluginAgentToConfig(in assembly.AgentConfig, builtin bool) configstore.AgentConfig {
-	return configstore.NormalizeAgentConfig(configstore.AgentConfig{
-		Name:        in.Name,
-		Description: in.Description,
-		Command:     in.Command,
-		Args:        append([]string(nil), in.Args...),
-		Env:         cloneStringMap(in.Env),
-		WorkDir:     in.WorkDir,
-		Builtin:     builtin,
-	})
 }
 
 func DefaultSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
@@ -115,6 +74,17 @@ func DefaultSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
 	if agent != nil {
 		return *agent, nil
 	}
+	return configuredSelfAgent(cfg)
+}
+
+// ConfiguredModelSelfAgent builds the generic Caelis ACP runtime for one
+// configured model. Environment self-agent replacement is intentionally not
+// used because it cannot guarantee the selected ModelConfig reaches the child.
+func ConfiguredModelSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
+	return configuredSelfAgent(cfg)
+}
+
+func configuredSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
 	executable, err := os.Executable()
 	if err != nil || strings.TrimSpace(executable) == "" {
 		executable = os.Args[0]
@@ -165,6 +135,12 @@ func SelfRuntimeInvocation(cfg RuntimeConfig) ([]string, map[string]string) {
 	}
 	appendFlag("-auth-type", string(model.AuthType))
 	appendFlag("-header-key", model.HeaderKey)
+	appendFlag("-reasoning-effort", model.ReasoningEffort)
+	appendFlag("-default-reasoning-effort", model.DefaultReasoningEffort)
+	appendFlag("-reasoning-mode", model.ReasoningMode)
+	if len(model.ReasoningLevels) > 0 {
+		appendFlag("-reasoning-levels", strings.Join(model.ReasoningLevels, ","))
+	}
 	appendFlag("-system-prompt", cfg.SystemPrompt)
 	if cfg.ControlOperationRetention > 0 {
 		args = append(args, "-control-operation-retention", cfg.ControlOperationRetention.String())
@@ -183,7 +159,7 @@ func SelfRuntimeInvocation(cfg RuntimeConfig) ([]string, map[string]string) {
 
 func BuiltInAgents() []assembly.AgentConfig {
 	return []assembly.AgentConfig{
-		npxAgentConfig("codex", "OpenAI Codex ACP agent", "@zed-industries/codex-acp"),
+		npxAgentConfig("codex", "OpenAI Codex ACP agent", "@agentclientprotocol/codex-acp@"+codexACPAdapterVersion),
 		npxAgentConfig("claude", "Claude Code ACP agent", "@agentclientprotocol/claude-agent-acp@"+claudeACPAdapterVersion),
 		nativeACPAgentConfig("opencode", "OpenCode ACP agent", "opencode", "acp"),
 		nativeACPAgentConfig("codefree-o", "CodeFree-O ACP agent", "codefree-o", "acp"),
@@ -200,6 +176,20 @@ func BuiltInAgents() []assembly.AgentConfig {
 			Args:        []string{"agent", "stdio"},
 		},
 	}
+}
+
+// ConnectableBuiltInAgents returns the curated ACP endpoints exposed by the
+// guided /connect flow. Copilot remains available to existing assembly users
+// but is not part of this onboarding catalog.
+func ConnectableBuiltInAgents() []assembly.AgentConfig {
+	names := []string{"codex", "claude", "opencode", "codefree-o", "grok"}
+	out := make([]assembly.AgentConfig, 0, len(names))
+	for _, name := range names {
+		if agent, ok := LookupBuiltInAgent(name); ok {
+			out = append(out, agent)
+		}
+	}
+	return out
 }
 
 func nativeACPAgentConfig(name string, description string, command string, args ...string) assembly.AgentConfig {
@@ -223,7 +213,7 @@ func npxAgentConfig(name string, description string, pkg string) assembly.AgentC
 func BuiltinAdapterPackageFor(name string) (BuiltinAdapterPackage, bool) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "codex":
-		return BuiltinAdapterPackage{Package: "@zed-industries/codex-acp", Bin: "codex-acp"}, true
+		return BuiltinAdapterPackage{Package: "@agentclientprotocol/codex-acp", Version: codexACPAdapterVersion, Bin: "codex-acp"}, true
 	case "claude":
 		return BuiltinAdapterPackage{Package: "@agentclientprotocol/claude-agent-acp", Version: claudeACPAdapterVersion, Bin: "claude-agent-acp"}, true
 	default:

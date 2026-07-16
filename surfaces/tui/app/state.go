@@ -143,6 +143,7 @@ type Config struct {
 	ShowWelcomeCard        bool
 	InitialLogs            []string
 	Commands               []string
+	CommandDetails         map[string]string
 	Wizards                []WizardDef
 	ControlService         control.Service
 	ProgramSender          *ProgramSender
@@ -158,11 +159,10 @@ type Config struct {
 	RefreshWorkspace       func() string
 	RefreshStatus          func() (string, string)
 	RefreshStatusView      func() StatusViewModel
-	MentionComplete        func(string, int) ([]CompletionCandidate, error)
 	FileComplete           func(string, int) ([]CompletionCandidate, error)
 	SkillComplete          func(string, int) ([]CompletionCandidate, error)
 	ResumeComplete         func(context.Context, string, int) ([]ResumeCandidate, error)
-	SlashArgComplete       func(command string, query string, limit int) ([]SlashArgCandidate, error)
+	SlashArgComplete       func(context.Context, string, string, int) ([]SlashArgCandidate, error)
 	ReadClipboardText      func() (string, error)
 	WriteClipboardText     func(string) error
 	PasteClipboardImage    func() ([]string, string, error)
@@ -213,11 +213,17 @@ type SlashArgCandidate struct {
 }
 
 type commandItem struct {
-	name string
+	name        string
+	description string
 }
 
-func (i commandItem) Title() string       { return "/" + i.name }
-func (i commandItem) Description() string { return "Run slash command " + i.name }
+func (i commandItem) Title() string { return "/" + i.name }
+func (i commandItem) Description() string {
+	if i.description != "" {
+		return i.description
+	}
+	return "Run slash command " + i.name
+}
 func (i commandItem) FilterValue() string { return i.name }
 
 type streamSmoothingState struct {

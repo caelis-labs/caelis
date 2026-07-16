@@ -256,8 +256,8 @@ typed value back to the owning Turn.
 
 The Session-scoped Control approval coordinator owns the authoritative
 registry, FIFO queue, and single active approval head across main, participant,
-Side ACP, and child origins. A Turn contributes origin and lifecycle ownership,
-but it does not own queue ordering. The coordinator reuses an SDK durable pause
+direct AgentRun, and child origins. A Turn contributes origin and lifecycle
+ownership, but it does not own queue ordering. The coordinator reuses an SDK durable pause
 token when a Runtime approval has one; otherwise it allocates a stable live ID.
 Registration and enqueueing happen before delivery. Only the active head may
 be published or resolved; its completion or individual abandonment advances the
@@ -266,7 +266,7 @@ preserves a detached child's request; Session close releases the complete
 coordinator. Unknown, stale, duplicate, and queued-but-not-active responses are
 rejected explicitly.
 
-Main Runtime, Side ACP, and Spawn-child requests all enter this coordinator as
+Main Runtime, direct AgentRun, and Spawn-child requests all enter this coordinator as
 normalized `ApprovalRequest` values. Control uses their canonical origin and
 parent metadata to publish the active standard ACP permission Envelope with the
 child `scope`, task `scope_id`, real Spawn `parent_tool`, and unmodified
@@ -278,7 +278,7 @@ auto-review never calls its approver before that request is active.
 The ACP child runner no longer emits a permission `Frame.Event`, and
 `ProjectStreamFrame` does not project permission frames as an alternate route.
 The live broker therefore receives the Control-published Envelope through the
-same Turn feed as main and Side ACP delivery. TUI, headless, and the ACP prompt
+same Turn feed as main and direct AgentRun delivery. TUI, headless, and the ACP prompt
 bridge only return that ID plus the user's decision through
 `Turn.SubmitApproval`; they do not select an endpoint or own permission policy.
 

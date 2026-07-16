@@ -3,7 +3,6 @@ package controladapter
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
@@ -12,15 +11,11 @@ import (
 )
 
 func newRegressionDriver(t *testing.T) (*Adapter, *gatewayapp.Stack) {
-	return newRegressionDriverWithOptions(t, adapterTestStackOptions{})
-}
-
-func newRegressionDriverWithOptions(t *testing.T, opts adapterTestStackOptions) (*Adapter, *gatewayapp.Stack) {
 	t.Helper()
 	ctx := context.Background()
 	storeDir := t.TempDir()
 	workspace := t.TempDir()
-	stack, err := newAdapterTestStackWithOptions(t, gatewayapp.Config{
+	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
 		UserID:       "regression-user",
 		StoreDir:     storeDir,
@@ -36,7 +31,7 @@ func newRegressionDriverWithOptions(t *testing.T, opts adapterTestStackOptions) 
 			API:      providers.APIOllama,
 			Model:    "llama3",
 		},
-	}, opts)
+	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
@@ -217,73 +212,6 @@ func TestRegressionSlashCompletionConnect(t *testing.T) {
 	_ = candidates
 }
 
-func TestRegressionSlashCompletionAgentUse(t *testing.T) {
-	t.Parallel()
-	driver, _ := newRegressionDriver(t)
-	ctx := context.Background()
-
-	candidates, err := driver.CompleteSlashArg(ctx, "agent use", "", 10)
-	if err != nil {
-		t.Fatalf("CompleteSlashArg(agent use) error = %v", err)
-	}
-	_ = candidates
-}
-
-func TestRegressionSlashCompletionAgentAdd(t *testing.T) {
-	t.Parallel()
-	driver, _ := newRegressionDriver(t)
-	ctx := context.Background()
-
-	candidates, err := driver.CompleteSlashArg(ctx, "agent add", "", 10)
-	if err != nil {
-		t.Fatalf("CompleteSlashArg(agent add) error = %v", err)
-	}
-	_ = candidates
-}
-
-func TestRegressionSlashCompletionAgentRemove(t *testing.T) {
-	t.Parallel()
-	driver, _ := newRegressionDriver(t)
-	ctx := context.Background()
-
-	candidates, err := driver.CompleteSlashArg(ctx, "agent remove", "", 10)
-	if err != nil {
-		t.Fatalf("CompleteSlashArg(agent remove) error = %v", err)
-	}
-	_ = candidates
-}
-
-func TestRegressionSlashCompletionSubagentRunIsRemoved(t *testing.T) {
-	t.Parallel()
-	driver, _ := newRegressionDriverWithOptions(t, adapterTestStackOptions{BuiltInAgentProfiles: true})
-	ctx := context.Background()
-
-	candidates, err := driver.CompleteSlashArg(ctx, "subagent run", "", 10)
-	if err != nil {
-		t.Fatalf("CompleteSlashArg(subagent run) error = %v", err)
-	}
-	if len(candidates) != 0 {
-		t.Fatalf("CompleteSlashArg(subagent run) = %#v, want no candidates for removed command", candidates)
-	}
-}
-
-func TestRegressionSlashCompletionSubagentBindGuardianOmitsACP(t *testing.T) {
-	t.Parallel()
-	driver, _ := newRegressionDriverWithOptions(t, adapterTestStackOptions{BuiltInAgentProfiles: true})
-	ctx := context.Background()
-
-	candidates, err := driver.CompleteSlashArg(ctx, "subagent bind guardian", "", 10)
-	if err != nil {
-		t.Fatalf("CompleteSlashArg(subagent bind guardian) error = %v", err)
-	}
-	if !slashArgCandidateHasValue(candidates, "default") || !slashArgCandidateHasValue(candidates, "model") {
-		t.Fatalf("CompleteSlashArg(subagent bind guardian) = %#v, want default and model", candidates)
-	}
-	if slashArgCandidateHasValue(candidates, "acp") {
-		t.Fatalf("CompleteSlashArg(subagent bind guardian) = %#v, want no acp target", candidates)
-	}
-}
-
 func TestRegressionSlashCompletionModelUseFiltered(t *testing.T) {
 	t.Parallel()
 	driver, _ := newRegressionDriver(t)
@@ -296,15 +224,6 @@ func TestRegressionSlashCompletionModelUseFiltered(t *testing.T) {
 	for _, c := range candidates {
 		_ = c
 	}
-}
-
-func slashArgCandidateHasValue(candidates []SlashArgCandidate, value string) bool {
-	for _, candidate := range candidates {
-		if strings.EqualFold(strings.TrimSpace(candidate.Value), strings.TrimSpace(value)) {
-			return true
-		}
-	}
-	return false
 }
 
 func TestRegressionCommandWorkspaceStatusDisplay(t *testing.T) {

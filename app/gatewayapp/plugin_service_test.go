@@ -31,12 +31,11 @@ func buildMinimalPluginDir(t *testing.T, root string, manifestJSON string) {
 func buildPluginStack(t *testing.T, storeDir, workspaceDir string) *Stack {
 	t.Helper()
 	cfg := Config{
-		AppName:                     "CAELIS",
-		StoreDir:                    storeDir,
-		WorkspaceCWD:                workspaceDir,
-		SkillDirs:                   []string{t.TempDir()},
-		DisableBuiltInAgentProfiles: true,
-		Sandbox:                     SandboxConfig{RequestedType: "host"},
+		AppName:      "CAELIS",
+		StoreDir:     storeDir,
+		WorkspaceCWD: workspaceDir,
+		SkillDirs:    []string{t.TempDir()},
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 	}
 	stack, err := NewLocalStack(cfg)
 	if err != nil {

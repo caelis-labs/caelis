@@ -1,16 +1,16 @@
 package gatewayapp
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
 type AppConfig = configstore.AppConfig
-type AgentConfig = configstore.AgentConfig
 type SandboxConfig = configstore.SandboxConfig
 type RuntimeConfig = configstore.RuntimeConfig
-type AgentProviderConfig = configstore.AgentProviderConfig
 type persistedModelConfig = configstore.PersistedModelConfig
 type PluginConfig = configstore.PluginConfig
 type MarketplaceConfig = configstore.MarketplaceConfig
@@ -33,7 +33,14 @@ func newAppConfigStore(root string) *appConfigStore {
 }
 
 func LoadAppConfig(root string) (AppConfig, error) {
-	return configstore.LoadAppConfig(root)
+	doc, err := configstore.LoadAppConfig(root)
+	if err != nil {
+		return AppConfig{}, err
+	}
+	if err := validateProductAgentRoster(doc.AgentRoster); err != nil {
+		return AppConfig{}, err
+	}
+	return doc, nil
 }
 
 func (s *appConfigStore) Load() (AppConfig, error) {
@@ -41,12 +48,22 @@ func (s *appConfigStore) Load() (AppConfig, error) {
 		return AppConfig{}, nil
 	}
 	s.inner.SetPath(s.path)
-	return s.inner.Load()
+	doc, err := s.inner.Load()
+	if err != nil {
+		return AppConfig{}, err
+	}
+	if err := validateProductAgentRoster(doc.AgentRoster); err != nil {
+		return AppConfig{}, err
+	}
+	return doc, nil
 }
 
 func (s *appConfigStore) Save(doc AppConfig) error {
 	if s == nil || s.inner == nil {
 		return nil
+	}
+	if err := validateProductAgentRoster(doc.AgentRoster); err != nil {
+		return err
 	}
 	if s.saveHook != nil {
 		if err := s.saveHook(doc); err != nil {
@@ -55,6 +72,18 @@ func (s *appConfigStore) Save(doc AppConfig) error {
 	}
 	s.inner.SetPath(s.path)
 	return s.inner.Save(doc)
+}
+
+func validateProductAgentRoster(roster controlagents.Configuration) error {
+	if err := controlagents.ValidateConfiguration(roster); err != nil {
+		return fmt.Errorf("gatewayapp: invalid Agent roster: %w", err)
+	}
+	for _, agent := range controlagents.ListAgents(roster) {
+		if forbiddenRosterAgentID(agent.ID) {
+			return fmt.Errorf("gatewayapp: roster Agent %q conflicts with a product command or system Agent", agent.ID)
+		}
+	}
+	return nil
 }
 
 type atomicWriteOps struct {
@@ -71,8 +100,4 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode, ops atomicWrite
 		Chmod:      ops.chmod,
 		FsyncDir:   ops.fsyncDir,
 	})
-}
-
-func normalizeAgentConfig(in AgentConfig) AgentConfig {
-	return configstore.NormalizeAgentConfig(in)
 }

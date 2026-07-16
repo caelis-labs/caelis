@@ -131,6 +131,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		tokenEnv         = fs.String("token-env", envOr("CAELIS_TOKEN_ENV", ""), "Environment variable for provider token")
 		authType         = fs.String("auth-type", envOr("CAELIS_AUTH_TYPE", ""), "Auth type")
 		headerKey        = fs.String("header-key", envOr("CAELIS_HEADER_KEY", ""), "Optional auth header key")
+		reasoningEffort  = fs.String("reasoning-effort", envOr("CAELIS_REASONING_EFFORT", ""), "Selected reasoning effort")
+		defaultReasoning = fs.String("default-reasoning-effort", envOr("CAELIS_DEFAULT_REASONING_EFFORT", ""), "Default reasoning effort")
+		reasoningLevels  = fs.String("reasoning-levels", envOr("CAELIS_REASONING_LEVELS", ""), "Comma-separated supported reasoning efforts")
+		reasoningMode    = fs.String("reasoning-mode", envOr("CAELIS_REASONING_MODE", ""), "Provider reasoning mode")
 		sandboxBackend   = fs.String("sandbox-backend", envOr("CAELIS_SANDBOX_BACKEND", ""), "Sandbox backend: auto|host|bwrap|landlock|seatbelt|windows")
 		sandboxHelper    = fs.String("sandbox-helper-path", envOr("CAELIS_SANDBOX_HELPER_PATH", ""), "Sandbox helper executable path")
 		contextWindow    = fs.Int("context-window", envInt("CAELIS_CONTEXT_WINDOW", 0), "Context window override")
@@ -169,16 +173,20 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		ContextWindow:             *contextWindow,
 		SystemPrompt:              *systemPrompt,
 		Model: gatewayapp.ModelConfig{
-			Alias:        *modelAlias,
-			Provider:     *modelProvider,
-			API:          providers.APIType(strings.TrimSpace(*modelAPI)),
-			Model:        *modelName,
-			BaseURL:      *baseURL,
-			Token:        *token,
-			TokenEnv:     *tokenEnv,
-			AuthType:     providers.AuthType(strings.TrimSpace(*authType)),
-			HeaderKey:    *headerKey,
-			MaxOutputTok: *maxOutputTokens,
+			Alias:                  *modelAlias,
+			Provider:               *modelProvider,
+			API:                    providers.APIType(strings.TrimSpace(*modelAPI)),
+			Model:                  *modelName,
+			BaseURL:                *baseURL,
+			Token:                  *token,
+			TokenEnv:               *tokenEnv,
+			AuthType:               providers.AuthType(strings.TrimSpace(*authType)),
+			HeaderKey:              *headerKey,
+			ReasoningEffort:        *reasoningEffort,
+			DefaultReasoningEffort: *defaultReasoning,
+			ReasoningLevels:        splitNonEmptyCSV(*reasoningLevels),
+			ReasoningMode:          *reasoningMode,
+			MaxOutputTok:           *maxOutputTokens,
 		},
 		Sandbox: gatewayapp.SandboxConfig{
 			RequestedType: strings.TrimSpace(*sandboxBackend),
@@ -612,6 +620,25 @@ func envInt(key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+func splitNonEmptyCSV(value string) []string {
+	values := strings.Split(value, ",")
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func parseControlOperationRetention(value string) (time.Duration, error) {

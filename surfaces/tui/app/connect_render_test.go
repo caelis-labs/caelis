@@ -14,12 +14,9 @@ func TestRenderSlashArgListUsesWizardHintInsteadOfInternalConnectPayload(t *test
 		Commands: DefaultCommands(),
 		Wizards:  DefaultWizards(),
 	})
-	def := model.findWizard("connect")
-	if def == nil {
-		t.Fatalf("connect wizard not found")
-	}
+	def := connectModelWizard()
 	model.wizard = &wizardRuntime{
-		def:       def,
+		def:       &def,
 		stepIndex: 5,
 		state:     map[string]string{},
 	}
@@ -54,12 +51,9 @@ func TestRenderSlashArgListDistinguishesCandidateTextFromDetail(t *testing.T) {
 		Commands: DefaultCommands(),
 		Wizards:  DefaultWizards(),
 	})
-	def := model.findWizard("connect")
-	if def == nil {
-		t.Fatalf("connect wizard not found")
-	}
+	def := connectModelWizard()
 	model.wizard = &wizardRuntime{
-		def:       def,
+		def:       &def,
 		stepIndex: 1,
 		state:     map[string]string{"provider": "xiaomi"},
 	}
@@ -145,12 +139,9 @@ func TestRenderInputBarMasksConnectAPIKeyWithoutDuplicatePrompt(t *testing.T) {
 		Commands: DefaultCommands(),
 		Wizards:  DefaultWizards(),
 	})
-	def := model.findWizard("connect")
-	if def == nil {
-		t.Fatalf("connect wizard not found")
-	}
+	def := connectModelWizard()
 	model.wizard = &wizardRuntime{
-		def:       def,
+		def:       &def,
 		stepIndex: 3,
 		state:     map[string]string{"provider": "minimax"},
 	}
@@ -175,12 +166,9 @@ func TestRenderInputBarHidesConnectPrefixForProviderStep(t *testing.T) {
 		Commands: DefaultCommands(),
 		Wizards:  DefaultWizards(),
 	})
-	def := model.findWizard("connect")
-	if def == nil {
-		t.Fatalf("connect wizard not found")
-	}
+	def := connectModelWizard()
 	model.wizard = &wizardRuntime{
-		def:       def,
+		def:       &def,
 		stepIndex: 0,
 		state:     map[string]string{},
 	}

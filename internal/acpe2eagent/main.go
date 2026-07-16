@@ -201,6 +201,24 @@ func resolveAssembly() (assemblyapi.ResolvedAssembly, error) {
 			},
 		}}
 	}
+	if strings.TrimSpace(os.Getenv("SDK_ACP_ENABLE_MODEL_CONFIG")) == "1" {
+		assembly.Configs = append(assembly.Configs,
+			assemblyapi.ConfigOption{
+				ID: "model", Name: "Model", Description: "E2E model catalog", DefaultValue: "sonnet",
+				Options: []assemblyapi.ConfigSelectOption{
+					{Value: "sonnet", Name: "Sonnet"},
+					{Value: "opus", Name: "Opus"},
+				},
+			},
+			assemblyapi.ConfigOption{
+				ID: "effort", Name: "Reasoning effort", Description: "E2E reasoning default", DefaultValue: "high",
+				Options: []assemblyapi.ConfigSelectOption{
+					{Value: "high", Name: "High", Runtime: assemblyapi.RuntimeOverrides{Reasoning: model.ReasoningConfig{Effort: "high"}}},
+					{Value: "max", Name: "Max", Runtime: assemblyapi.RuntimeOverrides{Reasoning: model.ReasoningConfig{Effort: "max"}}},
+				},
+			},
+		)
+	}
 
 	if strings.TrimSpace(os.Getenv("SDK_ACP_CHILD_NO_SPAWN")) == "1" {
 		return assembly, nil
@@ -239,6 +257,10 @@ type staticLLM struct {
 }
 
 func (m staticLLM) Name() string { return "static" }
+
+func (m staticLLM) Capabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true, Streaming: true}
+}
 
 func (m staticLLM) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {

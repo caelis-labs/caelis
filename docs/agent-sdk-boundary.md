@@ -117,6 +117,51 @@ ACP-native collaboration does not mean that raw ACP payloads are the only
 persisted/model-visible truth, that external Agents are trusted by default, or
 that every transport and presentation type belongs in the SDK.
 
+## User Agent identity and connection
+
+The product exposes one Control-owned Agent identity regardless of execution
+backend. An Agent is backed by exactly one already configured built-in model or
+one local external ACP connection; it has no reusable role prompt. The main
+Agent supplies the concrete task when it delegates, and Control supplies the
+fixed scene prompt for Guardian and Reviewer.
+
+`/connect` first distinguishes a model provider from a local ACP Agent. Model
+selection persists both the model configuration and its stable Agent identity
+in one transaction. Local ACP setup records an explicit launcher (package
+runner, global npm install, Caelis-managed install, an existing native command
+on `PATH`, or a custom command). The user-facing identity remains provider-first
+while the selected model is display metadata and a session default. A
+short-lived empty ACP Session discovers the model catalog; after the user picks
+one model, another short-lived Session selects that model before discovering
+its model-scoped option catalog. Each `/connect` completion creates or updates
+exactly one stable Agent, so its defaults cannot be shared accidentally with a
+sibling model. The selected defaults and model-scoped discovery snapshot are
+persisted, but temporary Session IDs are not. Every real or resumed ACP Session
+revalidates and applies those defaults before its first prompt; stale choices
+fail closed.
+
+Caelis-managed npm adapters use an isolated immutable directory per adapter
+version. Installation writes only to a unique staging directory, validates the
+curated package, adapter entrypoint, and required platform runtime, then
+publishes the directory atomically. Cancellation and failure remove that
+attempt without modifying a previously usable adapter or another adapter's
+installation. Setup progress is transient Control metadata that Surfaces may
+render; it is not persisted in the Agent roster or Session history.
+
+`/connect disconnect` removes one external Agent identity from the same roster.
+Sibling model Agents keep their shared ACP connection; removing the final
+reference also removes the connection and its discovery snapshots. Disconnect
+never uninstalls the external or Caelis-managed adapter, never deletes prior
+Sessions, and is rejected while a Turn is active or while the selected Agent
+controls the current task.
+
+The same roster supplies direct slash dispatch, model-visible Spawn choices,
+and Control-authorized handoff targets. This avoids separate Side, Spawn, and
+profile identity catalogs. Presentation command resolution is deterministic:
+core command, registered Agent, addressable direct Agent run, then a slash
+command advertised by the active remote ACP controller. Unknown slash input
+fails closed instead of becoming an ordinary model prompt.
+
 ## Controller, Participant, Delegation, and Handoff
 
 A **controller** owns the next main-session turn for one controller epoch. A
@@ -141,6 +186,9 @@ transfer, and recovery contracts. Control owns the handoff operation:
 
 There is no LLM-facing handoff tool. A model recommendation is advisory input to
 Control, not authority to mutate the controller binding.
+An explicit user `/lead <agent|local>` command is one presentation of that
+authorization. It resolves the target from the Control Agent roster and then
+enters the fenced handoff operation above.
 
 The current Caelis implementation places product assembly in
 `internal/controlassembly` and shared-ledger routing, endpoint lifecycle,
@@ -155,10 +203,14 @@ A workspace may host multiple Sessions and those Sessions may execute in
 parallel. Within one Session, Caelis separates the durable collaboration ledger
 from the current canonical Turn:
 
-- one local controller, ACP controller, or Side ACP/Reviewer prompt owns the
-  execution lease for its complete asynchronous Turn;
-- `/claude`, `/codex`, `@agent`, and ACP-backed `/review` are valid participant
-  Turn owners. Their normalized ACP event forwarder carries the same
+- one local controller, ACP controller, or direct AgentRun/Reviewer prompt owns
+  the execution lease for its complete asynchronous Turn;
+- `/<agent>`, `/<agent>(<handle>)`, and ACP-backed `/review` are valid participant
+  Turn owners. The first form starts a direct AgentRun from the workspace-global
+  Agent roster and the second continues that exact user-addressable run in the
+  current Session; delegated Spawn children remain parent-owned
+  and do not enter the continuation namespace. Their normalized ACP event
+  forwarder carries the same
   `MutationGuard` as the user event, so transport projection cannot lose the
   fence before persistence;
 - participant attach/detach is Control-owned collaboration metadata, not a

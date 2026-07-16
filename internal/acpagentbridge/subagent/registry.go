@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
@@ -112,5 +113,6 @@ func normalizeAgentConfig(in AgentConfig) AgentConfig {
 		out.Args = append([]string(nil), in.Args...)
 	}
 	out.Env = maps.Clone(in.Env)
+	out.SessionOptions = controlagents.NormalizeSessionOptions(in.SessionOptions)
 	return out
 }

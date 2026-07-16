@@ -24,7 +24,6 @@ type stackRuntimeConfig struct {
 	SkillDirs                   []string
 	PluginSkills                []skill.PluginBundle
 	SkillCatalog                skill.Catalog
-	DisableBuiltInAgentProfiles bool
 	Plugins                     []PluginConfig
 	BaseAssembly                assembly.ResolvedAssembly
 	Assembly                    assembly.ResolvedAssembly
@@ -59,7 +58,10 @@ func delegationAgentsForSpawn(assembly assembly.ResolvedAssembly, _ []session.Pa
 
 func isSpawnVisibleAgent(agent assembly.AgentConfig) bool {
 	name := strings.TrimSpace(agent.Name)
-	return strings.EqualFold(name, "self") || isSubagentProfileAgent(agent)
+	if name == "" || isSystemSceneAgent(agent) {
+		return false
+	}
+	return !strings.EqualFold(name, guardianSceneID) && !strings.EqualFold(name, ReviewerAgentID)
 }
 
 func systemPromptWithDelegationGuidance(systemPrompt string) string {

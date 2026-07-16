@@ -16,9 +16,9 @@ func (r *guardianApprovalReviewer) reviewSessionFor(ctx context.Context, req gat
 	if r == nil || r.systemSessions == nil {
 		return nil, fmt.Errorf("approval reviewer requires session history")
 	}
-	spec, ok := systemManagedAgentSpecFor(guardianProfileID)
+	spec, ok := systemManagedAgentSpecFor(guardianSceneID)
 	if !ok {
-		return nil, fmt.Errorf("gatewayapp: missing %q system-managed agent", guardianProfileID)
+		return nil, fmt.Errorf("gatewayapp: missing %q system-managed agent", guardianSceneID)
 	}
 	reuseKey := guardianReuseKey(req.Model, guardianPolicyPrompt())
 	return r.systemSessions.sessionFor(ctx, systemManagedAgentSessionRequest{

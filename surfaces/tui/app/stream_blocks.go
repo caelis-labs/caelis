@@ -872,7 +872,7 @@ func (m *Model) ensureParticipantTurnBlock(sessionID string, actor string) *Part
 	if blockID := strings.TrimSpace(m.participantTurnIDs[sessionID]); blockID != "" {
 		if block, _ := m.doc.Find(blockID).(*ParticipantTurnBlock); block != nil {
 			if strings.TrimSpace(actor) != "" {
-				block.Actor = strings.TrimSpace(actor)
+				block.Actor = participantActorDisplayName(actor)
 				m.markViewportBlockDirty(block.BlockID())
 			}
 			return block
@@ -934,7 +934,7 @@ func (m *Model) handleParticipantTurnStream(sessionID, kind, actor, text string,
 }
 
 func (m *Model) handleParticipantStatusMsg(msg ParticipantStatusMsg) (tea.Model, tea.Cmd) {
-	block := m.ensureParticipantTurnBlock(msg.SessionID, "")
+	block := m.ensureParticipantTurnBlock(msg.SessionID, msg.Actor)
 	if block == nil {
 		return m, nil
 	}

@@ -108,7 +108,7 @@ func TestComposerSitsOneColumnPastTranscriptGutter(t *testing.T) {
 				case !foundTranscript && (strings.Contains(trimmed, "hello user") || strings.Contains(trimmed, "Ran ls")):
 					transcriptIndent = leadingSpaces(line)
 					foundTranscript = true
-				case !foundInput && strings.Contains(trimmed, "Type your message"):
+				case !foundInput && strings.Contains(trimmed, "Type a message"):
 					inputIndent = leadingSpaces(line)
 					foundInput = true
 				case !foundStatus && strings.Contains(trimmed, "not configured"):

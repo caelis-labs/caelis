@@ -20,15 +20,6 @@ func NewStatusSlashResult(status StatusSnapshot) SlashCommandResult {
 	}
 }
 
-// NewSubagentProfilesSlashResult builds a structured /subagent list result.
-func NewSubagentProfilesSlashResult(status AgentProfileStatusSnapshot) SlashCommandResult {
-	return SlashCommandResult{
-		Command:       "subagent list",
-		Kind:          SlashCommandResultSubagentProfiles,
-		AgentProfiles: status,
-	}
-}
-
 // FormatSlashResult renders a structured slash result for plain-text surfaces.
 // Rich surfaces should consume the structured payload directly.
 func FormatSlashResult(result SlashCommandResult) string {
@@ -37,8 +28,6 @@ func FormatSlashResult(result SlashCommandResult) string {
 		return FormatCommandHelp(result.Help)
 	case SlashCommandResultStatus:
 		return FormatStatusSnapshot(result.Status)
-	case SlashCommandResultSubagentProfiles:
-		return FormatSubagentList(result.AgentProfiles)
 	default:
 		command := strings.TrimSpace(result.Command)
 		if command == "" {

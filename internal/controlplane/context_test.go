@@ -172,6 +172,45 @@ func TestCoordinatorOwnsActivationAndAtomicHandoffCommit(t *testing.T) {
 	}
 }
 
+func TestCoordinatorHandoffUsesControllerBindingGate(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	sessions, activeSession := newControlTestSession(t, "handoff-gate")
+	router, err := NewContextRouter(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &recordingControllerBackend{activation: session.ControllerBinding{
+		Kind: session.ControllerKindACP, ControllerID: "remote-1", AgentName: "codex", EpochID: "remote-epoch",
+	}}
+	gate := &blockingControllerBindingGate{entered: make(chan struct{}), release: make(chan struct{})}
+	coordinator, err := NewCoordinator(CoordinatorConfig{
+		Sessions: sessions, Controllers: backend, Context: router, ControllerBindingGate: gate,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, handoffErr := coordinator.HandoffController(ctx, agent.HandoffControllerRequest{
+			SessionRef: activeSession.SessionRef, Kind: session.ControllerKindACP, Agent: "codex",
+		})
+		done <- handoffErr
+	}()
+	<-gate.entered
+	if backend.activate.Agent != "" {
+		t.Fatalf("Activate() ran before controller binding gate released: %#v", backend.activate)
+	}
+	close(gate.release)
+	if err := <-done; err != nil {
+		t.Fatalf("HandoffController() error = %v", err)
+	}
+	if backend.activate.Agent != "codex" {
+		t.Fatalf("Activate() request = %#v", backend.activate)
+	}
+}
+
 func TestCoordinatorHandoffDoesNotBypassActiveTurnLease(t *testing.T) {
 	t.Parallel()
 
@@ -409,6 +448,18 @@ type recordingControllerBackend struct {
 	activate      controller.HandoffRequest
 	deactivations int
 }
+
+type blockingControllerBindingGate struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (g *blockingControllerBindingGate) Lock() {
+	close(g.entered)
+	<-g.release
+}
+
+func (*blockingControllerBindingGate) Unlock() {}
 
 func (b *recordingControllerBackend) Activate(_ context.Context, req controller.HandoffRequest) (session.ControllerBinding, error) {
 	b.activate = controller.NormalizeHandoffRequest(req)

@@ -11,7 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
-func (d *Adapter) StartAgentSubagent(ctx context.Context, target string, prompt string, attachments []Attachment) (Turn, error) {
+func (d *Adapter) StartAgentRun(ctx context.Context, target string, prompt string, attachments []Attachment) (Turn, error) {
 	agent, err := d.resolveAgentName(target)
 	if err != nil {
 		return nil, err
@@ -115,14 +115,10 @@ func (d *Adapter) allocateSideAgentLabel(ctx context.Context, ref session.Sessio
 			}
 		}
 	}
-	return "@" + allocateSideAgentHandle(used, agent)
+	return "@" + agenthandle.Allocate(used, agent)
 }
 
-func allocateSideAgentHandle(used map[string]struct{}, agent string) string {
-	return agenthandle.Allocate(used, agent)
-}
-
-func (d *Adapter) ContinueSubagent(ctx context.Context, handle string, prompt string, attachments []Attachment) (Turn, error) {
+func (d *Adapter) ContinueAgentRun(ctx context.Context, handle string, prompt string, attachments []Attachment) (Turn, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
 		return nil, err

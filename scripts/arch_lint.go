@@ -669,6 +669,8 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "must not recreate agent-sdk/model/codefreecaps; concrete model metadata belongs to control/modelcatalog", pkg, 1
 	case pkg == "app/gatewayapp/internal/modelregistry" || strings.HasPrefix(pkg, "app/gatewayapp/internal/modelregistry/"):
 		return "must not recreate app/gatewayapp/internal/modelregistry; model configuration belongs to Control", pkg, 1
+	case pkg == "ports/agentprofile" || strings.HasPrefix(pkg, "ports/agentprofile/"):
+		return "must not recreate ports/agentprofile; user Agents belong to control/agents and fixed scenes belong to Control", pkg, 1
 	}
 	if isMigratedRuntimePortsPackage(pkg) {
 		return sdkOwnedPortsCompatFileMessage(pkg), pkg, 1

@@ -157,8 +157,8 @@ func TestApprovalReviewerUsesSystemManagedGuardianRunner(t *testing.T) {
 	if runner.calls != 1 {
 		t.Fatalf("system agent runner calls = %d, want 1", runner.calls)
 	}
-	if runner.req.AgentID != guardianProfileID {
-		t.Fatalf("system agent id = %q, want %q", runner.req.AgentID, guardianProfileID)
+	if runner.req.AgentID != guardianSceneID {
+		t.Fatalf("system agent id = %q, want %q", runner.req.AgentID, guardianSceneID)
 	}
 	if runner.req.Model != testModel {
 		t.Fatalf("system agent model = %#v, want request model", runner.req.Model)
@@ -246,7 +246,7 @@ func TestApprovalReviewerSelectedOptionOverridesOutcome(t *testing.T) {
 
 func TestSystemManagedAgentPlanRejectsGuardianTools(t *testing.T) {
 	_, err := systemManagedAgentRunPlanFor(systemManagedAgentRunRequest{
-		AgentID: guardianProfileID,
+		AgentID: guardianSceneID,
 		Model:   &approvalReviewerFakeModel{},
 		ParentSession: session.Session{
 			SessionRef: session.SessionRef{
@@ -269,7 +269,7 @@ func TestSystemManagedAgentSessionKeepsExistingGuardianSession(t *testing.T) {
 			UserID:    "user",
 			SessionID: "parent-approval-review-abcdef123456",
 		},
-		Metadata: map[string]any{"system_managed_agent": guardianProfileID},
+		Metadata: map[string]any{"system_managed_agent": guardianSceneID},
 		Participants: []session.ParticipantBinding{{
 			ID:   "visible-participant",
 			Kind: session.ParticipantKindSubagent,
@@ -1475,7 +1475,7 @@ func approvalReviewerSystemSession(t *testing.T, reviewer gateway.ApprovalReview
 
 func guardianSpecForTest(t *testing.T) systemManagedAgentSpec {
 	t.Helper()
-	spec, ok := systemManagedAgentSpecFor(guardianProfileID)
+	spec, ok := systemManagedAgentSpecFor(guardianSceneID)
 	if !ok {
 		t.Fatal("guardian system-managed spec missing")
 	}

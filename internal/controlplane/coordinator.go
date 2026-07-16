@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -16,9 +17,13 @@ import (
 // CoordinatorConfig wires product-owned controller handoff coordination to
 // neutral SDK endpoint and participant mechanisms.
 type CoordinatorConfig struct {
-	Sessions              session.Service
-	Controllers           controller.Backend
-	Context               controller.ContextRouter
+	Sessions    session.Service
+	Controllers controller.Backend
+	Context     controller.ContextRouter
+	// ControllerBindingGate coordinates durable controller bindings with
+	// product-owned Agent registry mutations. Callers should provide the read
+	// side of the registry's read/write gate.
+	ControllerBindingGate sync.Locker
 	Clock                 func() time.Time
 	IDGenerator           func() string
 	LifecycleInterceptors []agent.LifecycleInterceptor
@@ -32,6 +37,7 @@ type Coordinator struct {
 	sessions               session.Service
 	controllers            controller.Backend
 	context                controller.ContextRouter
+	controllerBindingGate  sync.Locker
 	clock                  func() time.Time
 	idGenerator            func() string
 	lifecycle              agent.LifecycleOptions
@@ -58,6 +64,7 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 		sessions:               cfg.Sessions,
 		controllers:            cfg.Controllers,
 		context:                cfg.Context,
+		controllerBindingGate:  cfg.ControllerBindingGate,
 		clock:                  cfg.Clock,
 		idGenerator:            cfg.IDGenerator,
 		leases:                 leases,
@@ -78,6 +85,8 @@ func (c *Coordinator) ReattachController(ctx context.Context, req controller.Rec
 	if c == nil || c.controllers == nil {
 		return session.Session{}, fmt.Errorf("controlplane: ACP controller backend is not configured")
 	}
+	c.lockControllerBinding()
+	defer c.unlockControllerBinding()
 	ref := session.NormalizeSessionRef(req.SessionRef)
 	activeSession := session.CloneSession(req.Session)
 	if activeSession.SessionID == "" {
@@ -167,6 +176,8 @@ func (c *Coordinator) handoffController(ctx context.Context, req agent.HandoffCo
 	if c == nil || c.sessions == nil {
 		return session.Session{}, fmt.Errorf("controlplane: coordinator is unavailable")
 	}
+	c.lockControllerBinding()
+	defer c.unlockControllerBinding()
 	ref := session.NormalizeSessionRef(req.SessionRef)
 	activeSession, err := c.sessions.Session(ctx, ref)
 	if err != nil {
@@ -263,6 +274,18 @@ func (c *Coordinator) handoffController(ctx context.Context, req agent.HandoffCo
 		cleanupErr = errors.Join(cleanupErr, rollbackErr)
 	}
 	return session.Session{}, errors.Join(err, cleanupErr)
+}
+
+func (c *Coordinator) lockControllerBinding() {
+	if c != nil && c.controllerBindingGate != nil {
+		c.controllerBindingGate.Lock()
+	}
+}
+
+func (c *Coordinator) unlockControllerBinding() {
+	if c != nil && c.controllerBindingGate != nil {
+		c.controllerBindingGate.Unlock()
+	}
 }
 
 func (c *Coordinator) reactivatePreviousController(ctx context.Context, ref session.SessionRef, activeSession session.Session, from session.ControllerBinding) error {

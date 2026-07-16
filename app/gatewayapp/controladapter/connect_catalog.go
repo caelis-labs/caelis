@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
@@ -24,7 +26,21 @@ type connectWizardPayload = connectwizard.ConnectWizardState
 func completeConnectArgs(ctx context.Context, driver *Adapter, command string, query string, limit int) ([]SlashArgCandidate, error) {
 	switch {
 	case command == "connect":
+		return completeConnectSources(ctx, driver, query, limit), nil
+	case command == "connect-provider":
 		return completeConnectProviders(query, limit), nil
+	case command == "connect-disconnect-agent":
+		return completeConnectDisconnectAgents(ctx, driver, query, limit)
+	case strings.HasPrefix(command, "connect-disconnect-confirm:"):
+		return completeConnectDisconnectConfirmation(ctx, driver, strings.TrimPrefix(command, "connect-disconnect-confirm:"), query, limit)
+	case command == "connect-acp-agent":
+		return completeConnectACPAgents(query, limit), nil
+	case strings.HasPrefix(command, "connect-acp-launcher:"):
+		return completeConnectACPLaunchers(strings.TrimPrefix(command, "connect-acp-launcher:"), query, limit), nil
+	case strings.HasPrefix(command, "connect-acp-model:"):
+		return completeConnectACPModels(ctx, driver, strings.TrimPrefix(command, "connect-acp-model:"), query, limit)
+	case strings.HasPrefix(command, "connect-acp-config:"):
+		return completeConnectACPConfig(ctx, driver, strings.TrimPrefix(command, "connect-acp-config:"), query, limit)
 	case strings.HasPrefix(command, "connect-baseurl:"):
 		return completeConnectBaseURL(ctx, driver, strings.TrimPrefix(command, "connect-baseurl:"), query, limit), nil
 	case strings.HasPrefix(command, "connect-timeout:"):
@@ -42,6 +58,183 @@ func completeConnectArgs(ctx context.Context, driver *Adapter, command string, q
 	default:
 		return nil, nil
 	}
+}
+
+func completeConnectSources(ctx context.Context, driver *Adapter, query string, limit int) []SlashArgCandidate {
+	candidates := []SlashArgCandidate{
+		{Value: "model", Display: "Model provider", Detail: "Connect an API or local model provider"},
+		{Value: "acp", Display: "Local ACP Agent", Detail: "Connect Codex, Claude, or another local ACP command"},
+	}
+	if driver != nil {
+		if connected, err := driver.DisconnectCandidates(ctx); err == nil && len(connected) > 0 {
+			candidates = append(candidates, SlashArgCandidate{
+				Value: "disconnect", Display: "Disconnect local ACP Agent", Detail: "Remove one connected Agent from the Caelis roster",
+			})
+		}
+	}
+	return filterSlashArgCandidates(candidates, query, limit)
+}
+
+func completeConnectDisconnectAgents(ctx context.Context, driver *Adapter, query string, limit int) ([]SlashArgCandidate, error) {
+	if driver == nil {
+		return nil, missingRuntimeDependency("ACP Agent disconnect")
+	}
+	connected, err := driver.DisconnectCandidates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]SlashArgCandidate, 0, len(connected))
+	for _, candidate := range connected {
+		detail := firstNonEmpty(candidate.Name, candidate.ConnectionID, "local ACP Agent")
+		if candidate.LastOnConnection {
+			detail += " · last Agent on this connection; keeps the installed adapter"
+		} else {
+			detail += fmt.Sprintf(" · %d other %s will remain", candidate.SiblingCount, pluralAgent(candidate.SiblingCount))
+		}
+		candidates = append(candidates, SlashArgCandidate{
+			Value: candidate.AgentID, Display: "/" + candidate.AgentID, Detail: detail,
+		})
+	}
+	return filterSlashArgCandidates(candidates, query, limit), nil
+}
+
+func completeConnectDisconnectConfirmation(ctx context.Context, driver *Adapter, agentID string, query string, limit int) ([]SlashArgCandidate, error) {
+	if driver == nil {
+		return nil, missingRuntimeDependency("ACP Agent disconnect")
+	}
+	agentID = controlagents.NormalizeName(agentID)
+	connected, err := driver.DisconnectCandidates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, candidate := range connected {
+		if candidate.AgentID != agentID {
+			continue
+		}
+		detail := fmt.Sprintf("Keep the installed adapter and %d sibling %s", candidate.SiblingCount, pluralAgent(candidate.SiblingCount))
+		if candidate.LastOnConnection {
+			detail = "Remove the Caelis connection settings and keep the installed adapter"
+		}
+		return filterSlashArgCandidates([]SlashArgCandidate{{
+			Value: "confirm", Display: "Disconnect /" + candidate.AgentID, Detail: detail,
+		}}, query, limit), nil
+	}
+	return nil, fmt.Errorf("app/gatewayapp/controladapter: ACP Agent %q is no longer connected", agentID)
+}
+
+func pluralAgent(count int) string {
+	if count == 1 {
+		return "Agent"
+	}
+	return "Agents"
+}
+
+func completeConnectACPAgents(query string, limit int) []SlashArgCandidate {
+	agents := agentregistry.ConnectableBuiltInAgents()
+	candidates := make([]SlashArgCandidate, 0, len(agents)+1)
+	for _, agent := range agents {
+		candidates = append(candidates, SlashArgCandidate{
+			Value: agent.Name, Display: acpAgentDisplayName(agent.Name), Detail: agent.Description,
+		})
+	}
+	candidates = append(candidates, SlashArgCandidate{Value: "custom", Display: "Custom command", Detail: "Run another local ACP stdio command"})
+	return filterSlashArgCandidates(candidates, query, limit)
+}
+
+func completeConnectACPLaunchers(agent string, query string, limit int) []SlashArgCandidate {
+	agent = strings.ToLower(strings.TrimSpace(agent))
+	if agent == "custom" {
+		return filterSlashArgCandidates([]SlashArgCandidate{{
+			Value: "command", Display: "Custom command", Detail: "Use an executable and arguments you provide",
+		}}, query, limit)
+	}
+	if _, ok := agentregistry.LookupBuiltInAgent(agent); !ok {
+		return nil
+	}
+	if _, managed := agentregistry.BuiltinAdapterPackageFor(agent); !managed {
+		return filterSlashArgCandidates([]SlashArgCandidate{{
+			Value: "installed", Display: "Installed command", Detail: "Use the ACP Agent executable already installed on PATH",
+		}}, query, limit)
+	}
+	return filterSlashArgCandidates([]SlashArgCandidate{
+		{Value: "managed", Display: "Managed by Caelis · Recommended", Detail: "Isolated, verified install; safe to cancel or retry. The first runtime download can be several hundred MB"},
+		{Value: "npx", Display: "npx cache", Detail: "Let npx download and cache the curated adapter on first use"},
+		{Value: "global", Display: "Global npm install", Detail: "Use or modify the adapter in your global npm environment"},
+	}, query, limit)
+}
+
+func acpAgentDisplayName(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "codex":
+		return "Codex"
+	case "claude":
+		return "Claude Code"
+	case "opencode":
+		return "OpenCode"
+	case "codefree-o":
+		return "CodeFree-O"
+	case "grok":
+		return "Grok"
+	default:
+		return strings.TrimSpace(name)
+	}
+}
+
+func completeConnectACPModels(ctx context.Context, driver *Adapter, raw string, query string, limit int) ([]SlashArgCandidate, error) {
+	payload, snapshot, err := discoverConnectACPState(ctx, driver, raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(snapshot.Models) == 0 {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: ACP agent %q did not advertise any models", strings.TrimSpace(payload.Agent))
+	}
+	candidates := make([]SlashArgCandidate, 0, len(snapshot.Models))
+	for _, model := range snapshot.Models {
+		candidates = append(candidates, SlashArgCandidate{
+			Value: model.ID, Display: firstNonEmpty(model.Name, model.ID),
+			Detail: firstNonEmpty(model.Description, "remote ACP model"), ModelMetadataComplete: true,
+		})
+	}
+	return filterSlashArgCandidates(candidates, query, limit), nil
+}
+
+func completeConnectACPConfig(ctx context.Context, driver *Adapter, raw string, query string, limit int) ([]SlashArgCandidate, error) {
+	payload, snapshot, err := discoverConnectACPState(ctx, driver, raw)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(payload.Model) == "" {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: ACP model is required before selecting defaults")
+	}
+	candidates := []SlashArgCandidate{{Value: "default", Display: "Agent default", Detail: "Keep the ACP Agent's default session options"}}
+	for _, option := range snapshot.ConfigOptions {
+		if strings.EqualFold(strings.TrimSpace(option.ID), strings.TrimSpace(snapshot.ModelControl.ConfigID)) {
+			continue
+		}
+		for _, choice := range option.Options {
+			if strings.TrimSpace(choice.Value) == "" {
+				continue
+			}
+			candidates = append(candidates, SlashArgCandidate{
+				Value:   option.ID + "=" + choice.Value,
+				Display: firstNonEmpty(option.Name, option.ID) + ": " + firstNonEmpty(choice.Name, choice.Value),
+				Detail:  firstNonEmpty(choice.Description, option.Description, "remote ACP session default"),
+			})
+		}
+	}
+	return filterSlashArgCandidates(candidates, query, limit), nil
+}
+
+func discoverConnectACPState(ctx context.Context, driver *Adapter, raw string) (controlagents.ConnectState, controlagents.DiscoverySnapshot, error) {
+	if driver == nil || driver.stack == nil || driver.stack.Agent.DiscoverConnectionFn == nil {
+		return controlagents.ConnectState{}, controlagents.DiscoverySnapshot{}, missingRuntimeDependency("ACP agent discovery")
+	}
+	payload, err := controlagents.DecodeConnectState(raw)
+	if err != nil {
+		return controlagents.ConnectState{}, controlagents.DiscoverySnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: parse ACP connect state: %w", err)
+	}
+	snapshot, err := driver.DiscoverACPConnection(ctx, payload.ConnectRequest(driver.WorkspaceDir()))
+	return payload, snapshot, err
 }
 
 func completeConnectProviders(query string, limit int) []SlashArgCandidate {

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
@@ -52,12 +53,8 @@ func directedParticipantUserDisplay(event TranscriptEvent) string {
 	if event.Scope != ACPProjectionParticipant {
 		return ""
 	}
-	handle := firstNonEmpty(
-		participantMentionFromHandle(asString(event.Meta["mention"])),
-		participantMentionFromHandle(asString(event.Meta["handle"])),
-		participantMentionFromHandle(event.Actor),
-	)
-	if handle == "" {
+	address := participantRunSlashName(event)
+	if address == "" {
 		return ""
 	}
 	text := firstNonEmpty(
@@ -66,9 +63,9 @@ func directedParticipantUserDisplay(event TranscriptEvent) string {
 		strings.TrimSpace(event.Text),
 	)
 	if text == "" {
-		return handle
+		return address
 	}
-	return handle + " " + text
+	return address + " " + text
 }
 
 func directedParticipantUserDequeueText(event TranscriptEvent) string {
@@ -82,15 +79,37 @@ func directedParticipantUserDequeueText(event TranscriptEvent) string {
 	)
 }
 
-func participantMentionFromHandle(handle string) string {
+func participantSlashNameFromHandle(handle string) string {
 	handle = strings.TrimSpace(handle)
 	if handle == "" {
 		return ""
 	}
-	if strings.HasPrefix(handle, "@") {
+	if strings.HasPrefix(handle, "/") {
 		return handle
 	}
-	return "@" + handle
+	return "/" + strings.TrimPrefix(handle, "@")
+}
+
+func participantRunSlashName(event TranscriptEvent) string {
+	agent := asString(event.Meta["agent"])
+	handle := firstNonEmpty(
+		asString(event.Meta["handle"]),
+		asString(event.Meta["mention"]),
+		event.Actor,
+	)
+	if run := controlagents.FormatRunName(agent, handle); run != "" {
+		return "/" + run
+	}
+	return participantSlashNameFromHandle(handle)
+}
+
+func participantTranscriptActor(event TranscriptEvent) string {
+	return firstNonEmpty(
+		participantRunSlashName(event),
+		strings.TrimSpace(event.Actor),
+		strings.TrimSpace(event.ScopeID),
+		"agent",
+	)
 }
 
 func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any {

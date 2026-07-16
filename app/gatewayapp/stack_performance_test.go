@@ -27,7 +27,6 @@ func BenchmarkNewLocalStackFirstFrameBoundary(b *testing.B) {
 			cfg := Config{
 				AppName: "caelis", UserID: "performance-user", StoreDir: storeDir,
 				WorkspaceKey: "performance-workspace", WorkspaceCWD: "/tmp/performance-workspace",
-				DisableBuiltInAgentProfiles: true,
 			}
 			b.ReportMetric(float64(fixture.sessionCount), "sessions")
 			b.ReportMetric(float64(fixture.sessionCount*fixture.eventsPerSess), "events")
@@ -45,7 +44,6 @@ func BenchmarkNewSessionControlPath(b *testing.B) {
 	stack, err := NewLocalStack(Config{
 		AppName: "caelis", UserID: "performance-user", StoreDir: b.TempDir(),
 		WorkspaceKey: "performance-workspace", WorkspaceCWD: "/tmp/performance-workspace",
-		DisableBuiltInAgentProfiles: true,
 	})
 	if err != nil {
 		b.Fatal(err)

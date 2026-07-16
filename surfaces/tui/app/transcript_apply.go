@@ -118,7 +118,7 @@ func (m *Model) applyTranscriptNarrative(event TranscriptEvent) (tea.Model, tea.
 	m.prepareForTranscriptScope(event.Scope)
 	switch event.Scope {
 	case ACPProjectionParticipant:
-		return m.handleParticipantTurnStream(transcriptParticipantTurnKey(event), transcriptNarrativeStreamKind(event.NarrativeKind), event.Actor, event.Text, event.Final, event.OccurredAt)
+		return m.handleParticipantTurnStream(transcriptParticipantTurnKey(event), transcriptNarrativeStreamKind(event.NarrativeKind), participantTranscriptActor(event), event.Text, event.Final, event.OccurredAt)
 	case ACPProjectionSubagent:
 		return m.applyTranscriptSubagentNarrative(event)
 	default:
@@ -187,7 +187,7 @@ func (m *Model) applyTranscriptPlan(event TranscriptEvent) (tea.Model, tea.Cmd) 
 	}
 	switch event.Scope {
 	case ACPProjectionParticipant:
-		block := m.ensureParticipantTurnBlock(transcriptParticipantTurnKey(event), event.Actor)
+		block := m.ensureParticipantTurnBlock(transcriptParticipantTurnKey(event), participantTranscriptActor(event))
 		if block == nil {
 			return m, nil
 		}
@@ -242,6 +242,7 @@ func (m *Model) applyTranscriptApproval(event TranscriptEvent) (tea.Model, tea.C
 	case ACPProjectionParticipant:
 		return m.handleParticipantStatusMsg(ParticipantStatusMsg{
 			SessionID:       transcriptParticipantTurnKey(event),
+			Actor:           participantTranscriptActor(event),
 			State:           firstNonEmpty(strings.TrimSpace(event.State), "waiting_approval"),
 			ApprovalTool:    event.ApprovalTool,
 			ApprovalCommand: event.ApprovalCommand,
@@ -271,7 +272,7 @@ func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model,
 	}
 	switch event.Scope {
 	case ACPProjectionParticipant:
-		block := m.ensureParticipantTurnBlock(transcriptParticipantTurnKey(event), event.Actor)
+		block := m.ensureParticipantTurnBlock(transcriptParticipantTurnKey(event), participantTranscriptActor(event))
 		if block == nil {
 			return m, nil
 		}
@@ -360,6 +361,7 @@ func (m *Model) applyTranscriptParticipant(event TranscriptEvent) (tea.Model, te
 	default:
 		return m.handleParticipantStatusMsg(ParticipantStatusMsg{
 			SessionID:  transcriptParticipantTurnKey(event),
+			Actor:      participantTranscriptActor(event),
 			State:      event.State,
 			OccurredAt: event.OccurredAt,
 		})
@@ -372,6 +374,7 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 	case ACPProjectionParticipant:
 		return m.handleParticipantStatusMsg(ParticipantStatusMsg{
 			SessionID:  transcriptParticipantTurnKey(event),
+			Actor:      participantTranscriptActor(event),
 			State:      event.State,
 			OccurredAt: event.OccurredAt,
 		})

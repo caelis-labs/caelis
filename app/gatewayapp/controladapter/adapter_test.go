@@ -24,6 +24,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/testenv"
@@ -234,30 +235,16 @@ func TestAdapterUsesCurrentTurnServiceAfterSandboxRebuild(t *testing.T) {
 	}
 }
 
-func TestAllocateSideAgentHandleUsesSharedNamePool(t *testing.T) {
+func TestAllocateSideAgentLabelUsesHumanHandles(t *testing.T) {
 	t.Parallel()
 
-	used := map[string]struct{}{}
-
-	first := allocateSideAgentHandle(used, "claude")
+	first := agenthandle.Allocate(nil, "claude")
 	if !agenthandle.ContainsPoolName(first) {
-		t.Fatalf("allocateSideAgentHandle() = %q, want shared human-name pool handle", first)
+		t.Fatalf("first side Agent handle = %q, want human-name pool entry", first)
 	}
-	used[first] = struct{}{}
-	second := allocateSideAgentHandle(used, "claude")
+	second := agenthandle.Allocate(map[string]struct{}{first: {}}, "claude")
 	if !agenthandle.ContainsPoolName(second) || second == first {
-		t.Fatalf("allocateSideAgentHandle() = %q after %q, want unique shared pool handle", second, first)
-	}
-	used[second] = struct{}{}
-	third := allocateSideAgentHandle(used, "claude")
-	if !agenthandle.ContainsPoolName(third) || third == first || third == second {
-		t.Fatalf("allocateSideAgentHandle() = %q after %q/%q, want unique shared pool handle", third, first, second)
-	}
-	if got := allocateSideAgentHandle(used, "anthropic/Claude Agent"); !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("allocateSideAgentHandle() = %q, want shared human-name pool handle", got)
-	}
-	if got := allocateSideAgentHandle(used, "!!!"); !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("allocateSideAgentHandle() = %q, want shared human-name pool handle", got)
+		t.Fatalf("second side Agent handle = %q after %q, want a distinct human-name pool entry", second, first)
 	}
 }
 
@@ -1002,7 +989,7 @@ func TestAdapterListSessionsSkipsUntitledSessions(t *testing.T) {
 	}
 }
 
-func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
+func TestAdapterCompleteSlashArgConnectSeparatesSourcesAndProviders(t *testing.T) {
 	ctx := context.Background()
 	credsPath := filepath.Join(t.TempDir(), "codefree.json")
 	rawCreds, err := json.Marshal(map[string]any{
@@ -1040,9 +1027,19 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	providers, err := driver.CompleteSlashArg(ctx, "connect", "", 20)
+	sources, err := driver.CompleteSlashArg(ctx, "connect", "", 20)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect) error = %v", err)
+	}
+	if !slashCandidatesHaveValue(sources, "model") || !slashCandidatesHaveValue(sources, "acp") {
+		t.Fatalf("connect source candidates = %#v, want model and acp", sources)
+	}
+	if slashCandidatesHaveValue(sources, "disconnect") {
+		t.Fatalf("connect source candidates = %#v, should hide disconnect without external roster Agents", sources)
+	}
+	providers, err := driver.CompleteSlashArg(ctx, "connect-provider", "", 20)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(connect-provider) error = %v", err)
 	}
 	if len(providers) == 0 || providers[0].Value == "" {
 		t.Fatalf("provider candidates = %#v, want non-empty", providers)
@@ -2264,59 +2261,25 @@ func TestAdapterAgentRegistryAndControllerUse(t *testing.T) {
 	if !agentCandidatesHaveName(agents, "copilot") {
 		t.Fatalf("ListAgents() = %#v, want assembly-registered copilot", agents)
 	}
-	addCandidates, err := driver.CompleteSlashArg(ctx, "agent add", "", 10)
-	if err != nil {
-		t.Fatalf("CompleteSlashArg(agent add) error = %v", err)
-	}
-	for _, want := range []string{"claude", "codex", "opencode", "codefree-o", "copilot", "grok"} {
-		if !slashCandidatesHaveValue(addCandidates, want) {
-			t.Fatalf("agent add candidates = %#v, want %q", addCandidates, want)
+	for _, removed := range []string{"agent add", "agent install"} {
+		candidates, err := driver.CompleteSlashArg(ctx, removed, "", 10)
+		if err != nil {
+			t.Fatalf("CompleteSlashArg(%s) error = %v", removed, err)
 		}
-	}
-	if slashCandidatesHaveValue(addCandidates, "gemini") {
-		t.Fatalf("agent add candidates = %#v, want gemini unsupported", addCandidates)
-	}
-	if slashCandidatesHaveValue(addCandidates, "--install claude") || slashCandidatesHaveValue(addCandidates, "--install codex") {
-		t.Fatalf("agent add candidates = %#v, want no install variants", addCandidates)
-	}
-	installCandidates, err := driver.CompleteSlashArg(ctx, "agent install", "", 10)
-	if err != nil {
-		t.Fatalf("CompleteSlashArg(agent install) error = %v", err)
-	}
-	for _, want := range []string{"claude", "codex"} {
-		if !slashCandidatesHaveValue(installCandidates, want) {
-			t.Fatalf("agent install candidates = %#v, want %q", installCandidates, want)
-		}
-	}
-	for _, notInstallable := range []string{"opencode", "codefree-o", "copilot", "grok", "gemini"} {
-		if slashCandidatesHaveValue(installCandidates, notInstallable) {
-			t.Fatalf("agent install candidates = %#v, want no %q", installCandidates, notInstallable)
+		if len(candidates) != 0 {
+			t.Fatalf("CompleteSlashArg(%s) = %#v, want removed interaction", removed, candidates)
 		}
 	}
 
-	status, err := driver.AddAgent(ctx, "copilot")
+	leadCandidates, err := driver.CompleteSlashArg(ctx, "lead", "", 10)
 	if err != nil {
-		t.Fatalf("AddAgent() error = %v", err)
+		t.Fatalf("CompleteSlashArg(lead) error = %v", err)
 	}
-	if len(status.Participants) != 0 {
-		t.Fatalf("AddAgent() status = %#v, want no session participants", status)
-	}
-	agents, err = driver.ListAgents(ctx, 10)
-	if err != nil {
-		t.Fatalf("ListAgents(after add) error = %v", err)
-	}
-	if !agentCandidatesHaveName(agents, "copilot") {
-		t.Fatalf("ListAgents(after add) = %#v, want attached copilot", agents)
-	}
-	useCandidates, err := driver.CompleteSlashArg(ctx, "agent use", "", 10)
-	if err != nil {
-		t.Fatalf("CompleteSlashArg(agent use) error = %v", err)
-	}
-	if !slashCandidatesHaveValue(useCandidates, "local") || !slashCandidatesHaveValue(useCandidates, "copilot") {
-		t.Fatalf("agent use candidates = %#v, want local and copilot", useCandidates)
+	if !slashCandidatesHaveValue(leadCandidates, "local") || !slashCandidatesHaveValue(leadCandidates, "copilot") {
+		t.Fatalf("lead candidates = %#v, want local and copilot", leadCandidates)
 	}
 
-	status, err = driver.HandoffAgent(ctx, "copilot")
+	status, err := driver.HandoffAgent(ctx, "copilot")
 	if err != nil {
 		t.Fatalf("HandoffAgent(copilot) error = %v", err)
 	}
@@ -2324,9 +2287,6 @@ func TestAdapterAgentRegistryAndControllerUse(t *testing.T) {
 		t.Fatalf("controller kind after ACP handoff = %q, want acp", status.ControllerKind)
 	}
 
-	if _, err := driver.RemoveAgent(ctx, "copilot"); err == nil {
-		t.Fatal("RemoveAgent(active copilot) error = nil, want use local first")
-	}
 	status, err = driver.HandoffAgent(ctx, "local")
 	if err != nil {
 		t.Fatalf("HandoffAgent(local) error = %v", err)
@@ -2335,31 +2295,16 @@ func TestAdapterAgentRegistryAndControllerUse(t *testing.T) {
 		t.Fatalf("controller kind after local handoff = %q, want kernel", status.ControllerKind)
 	}
 
-	removeCandidates, err := driver.CompleteSlashArg(ctx, "agent remove", "", 10)
-	if err != nil {
-		t.Fatalf("CompleteSlashArg(agent remove) error = %v", err)
-	}
-	if len(removeCandidates) != 1 || removeCandidates[0].Value != "copilot" {
-		t.Fatalf("agent remove candidates = %#v, want registered copilot", removeCandidates)
-	}
-
-	status, err = driver.RemoveAgent(ctx, "copilot")
-	if err != nil {
-		t.Fatalf("RemoveAgent(copilot) error = %v", err)
-	}
-	if len(status.Participants) != 0 {
-		t.Fatalf("RemoveAgent() status = %#v, want zero participants", status)
-	}
 	agents, err = driver.ListAgents(ctx, 10)
 	if err != nil {
-		t.Fatalf("ListAgents(after remove) error = %v", err)
+		t.Fatalf("ListAgents(after handoff) error = %v", err)
 	}
-	if agentCandidatesHaveName(agents, "copilot") {
-		t.Fatalf("ListAgents(after remove) = %#v, want copilot removed", agents)
+	if !agentCandidatesHaveName(agents, "copilot") {
+		t.Fatalf("ListAgents(after handoff) = %#v, want connected copilot retained", agents)
 	}
 }
 
-func TestAdapterStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing.T) {
+func TestAdapterStartAgentRunRollsBackAttachmentOnPromptConflict(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -2417,13 +2362,13 @@ func TestAdapterStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing
 		t.Fatal(err)
 	}
 
-	_, err = driver.StartAgentSubagent(ctx, "copilot", "  second prompt  ", []Attachment{{Name: "side.png", Offset: len([]rune("second "))}})
+	_, err = driver.StartAgentRun(ctx, "copilot", "  second prompt  ", []Attachment{{Name: "side.png", Offset: len([]rune("second "))}})
 	if err == nil {
-		t.Fatal("StartAgentSubagent() error = nil, want active run conflict")
+		t.Fatal("StartAgentRun() error = nil, want active run conflict")
 	}
 	var gwErr *gateway.Error
 	if !gateway.As(err, &gwErr) || gwErr.Code != gateway.CodeActiveRunConflict {
-		t.Fatalf("StartAgentSubagent() error = %v, want active run conflict", err)
+		t.Fatalf("StartAgentRun() error = %v, want active run conflict", err)
 	}
 	if len(gw.attachReqs) != 1 {
 		t.Fatalf("AttachParticipant calls = %d, want 1", len(gw.attachReqs))
@@ -2450,12 +2395,12 @@ func TestAdapterStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing
 	if len(status.Participants) != 1 {
 		t.Fatalf("AgentStatus().Participants = %#v, want only first sidecar after rollback", status.Participants)
 	}
-	if status.Participants[0].ID != "side-existing" || status.Participants[0].AgentName != "copilot" || !agenthandle.ContainsPoolName(strings.TrimPrefix(status.Participants[0].Label, "@")) {
-		t.Fatalf("remaining participant = %#v, want original copilot sidecar with shared pool label", status.Participants[0])
+	if status.Participants[0].ID != "side-existing" || status.Participants[0].AgentName != "copilot" || status.Participants[0].Label != "@ari" {
+		t.Fatalf("remaining participant = %#v, want original copilot sidecar", status.Participants[0])
 	}
 }
 
-func TestAdapterStartAgentSubagentKeepsDynamicSidecarAttachedForFollowUp(t *testing.T) {
+func TestAdapterStartAgentRunKeepsRunAttachedForFollowUp(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -2493,27 +2438,34 @@ func TestAdapterStartAgentSubagentKeepsDynamicSidecarAttachedForFollowUp(t *test
 		t.Fatalf("NewAdapter() error = %v", err)
 	}
 
-	turn, err := driver.StartAgentSubagent(ctx, "copilot", "first prompt", nil)
+	turn, err := driver.StartAgentRun(ctx, "copilot", "first prompt", nil)
 	if err != nil {
-		t.Fatalf("StartAgentSubagent() error = %v", err)
+		t.Fatalf("StartAgentRun() error = %v", err)
 	}
 	if turn != nil {
-		t.Fatalf("StartAgentSubagent() turn = %#v, want nil fake turn", turn)
+		t.Fatalf("StartAgentRun() turn = %#v, want nil fake turn", turn)
 	}
 	if len(gw.detachReqs) != 0 {
 		t.Fatalf("DetachParticipant requests after first prompt = %#v, want persistent sidecar", gw.detachReqs)
 	}
-	if len(gw.session.Participants) != 1 || gw.session.Participants[0].ID != "side-new" || !agenthandle.ContainsPoolName(strings.TrimPrefix(gw.session.Participants[0].Label, "@")) {
-		t.Fatalf("Participants after first prompt = %#v, want attached copilot sidecar with pool label", gw.session.Participants)
+	if len(gw.session.Participants) != 1 || gw.session.Participants[0].ID != "side-new" {
+		t.Fatalf("Participants after first prompt = %#v, want one attached copilot sidecar", gw.session.Participants)
 	}
-	handle := gw.session.Participants[0].Label
+	handle := strings.TrimPrefix(gw.session.Participants[0].Label, "@")
+	if !agenthandle.ContainsPoolName(handle) {
+		t.Fatalf("side Agent handle = %q, want human-name pool entry", handle)
+	}
+	runName := controlagents.FormatRunName("copilot", handle)
+	if runName == "" {
+		t.Fatalf("FormatRunName(copilot, %q) returned empty", handle)
+	}
 
-	turn, err = driver.ContinueSubagent(ctx, handle, "follow up", nil)
+	turn, err = driver.ContinueAgentRun(ctx, runName, "follow up", nil)
 	if err != nil {
-		t.Fatalf("ContinueSubagent(%s) error = %v", handle, err)
+		t.Fatalf("ContinueAgentRun(%s) error = %v", runName, err)
 	}
 	if turn != nil {
-		t.Fatalf("ContinueSubagent() turn = %#v, want nil fake turn", turn)
+		t.Fatalf("ContinueAgentRun() turn = %#v, want nil fake turn", turn)
 	}
 	if len(gw.attachReqs) != 1 {
 		t.Fatalf("AttachParticipant requests = %#v, want only initial attach", gw.attachReqs)
@@ -2526,6 +2478,20 @@ func TestAdapterStartAgentSubagentKeepsDynamicSidecarAttachedForFollowUp(t *test
 	}
 	if got := gw.promptReqs[1].Input; got != "follow up" {
 		t.Fatalf("follow-up input = %q, want trimmed prompt", got)
+	}
+
+	for _, participant := range []session.ParticipantBinding{
+		{ID: "delegated", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleDelegated, AgentName: "copilot", Label: "@maya"},
+		{ID: "observer", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleObserver, AgentName: "copilot", Label: "@nora"},
+	} {
+		gw.session.Participants = append(gw.session.Participants, participant)
+		address := controlagents.FormatRunName(participant.AgentName, participant.Label)
+		if _, err := driver.ContinueAgentRun(ctx, address, "must not route", nil); err == nil {
+			t.Fatalf("ContinueAgentRun(%s) error = nil, want non-sidecar rejection", address)
+		}
+	}
+	if got, want := len(gw.promptReqs), 2; got != want {
+		t.Fatalf("PromptParticipant requests after rejected continuations = %d, want %d", got, want)
 	}
 }
 
@@ -3193,46 +3159,6 @@ func TestAdapterCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 	}
 }
 
-func TestAdapterCompleteSlashArgAgentRootOrder(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:      "caelis",
-		UserID:       "agent-root-order-test",
-		StoreDir:     t.TempDir(),
-		WorkspaceKey: t.TempDir(),
-		WorkspaceCWD: t.TempDir(),
-		ApprovalMode: "default",
-		Assembly:     assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
-			Provider: "ollama",
-			API:      providers.APIOllama,
-			Model:    "llama3",
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewLocalStack() error = %v", err)
-	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "agent-root-order-session", "surface", "ollama/llama3")
-	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
-	}
-
-	candidates, err := driver.CompleteSlashArg(ctx, "agent", "", 10)
-	if err != nil {
-		t.Fatalf("CompleteSlashArg(agent) error = %v", err)
-	}
-	got := make([]string, 0, len(candidates))
-	for _, candidate := range candidates {
-		got = append(got, candidate.Value)
-	}
-	want := []string{"use", "add", "install", "list", "remove"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("agent root candidates = %#v, want %#v", got, want)
-	}
-}
-
 func TestAdapterCompleteSlashArgPluginRootOrder(t *testing.T) {
 	t.Parallel()
 
@@ -3324,51 +3250,6 @@ func TestAdapterCompleteSlashArgPluginMarketplace(t *testing.T) {
 	}
 	if got := candidateValues(removeNames); !equalStrings(got, []string{"internal"}) {
 		t.Fatalf("plugin marketplace rm candidates = %#v, want internal", removeNames)
-	}
-}
-
-func TestAdapterInterruptCancelsAgentInstall(t *testing.T) {
-	ctx := context.Background()
-	started := make(chan struct{})
-	driver, err := NewAdapter(ctx, &RuntimeStack{
-		Agent: AgentRuntimeDeps{
-			RegisterBuiltinWithOptionsFn: func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
-				if target != "claude" || !opts.Install {
-					return errors.New("unexpected install request")
-				}
-				close(started)
-				<-ctx.Done()
-				return ctx.Err()
-			},
-		},
-	}, "", "surface", "ollama/llama3")
-	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		_, err := driver.AddAgentWithOptions(ctx, "claude", AgentAddOptions{Install: true})
-		done <- err
-	}()
-
-	select {
-	case <-started:
-	case err := <-done:
-		t.Fatalf("AddAgentWithOptions returned before install started: %v", err)
-	case <-time.After(time.Second):
-		t.Fatal("install did not start")
-	}
-	if err := driver.Interrupt(ctx); err != nil {
-		t.Fatalf("Interrupt() error = %v", err)
-	}
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("AddAgentWithOptions error = %v, want context.Canceled", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("AddAgentWithOptions did not return after Interrupt")
 	}
 }
 
@@ -4013,7 +3894,7 @@ func TestSkillCompletionCandidatePrefersLocalNameForPluginSkill(t *testing.T) {
 	}
 }
 
-func TestAdapterCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
+func TestAdapterAgentStatusClassifiesDirectAndDelegatedParticipants(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -4092,13 +3973,6 @@ func TestAdapterCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 		},
 	}); err != nil {
 		t.Fatalf("PutParticipant(self) error = %v", err)
-	}
-	candidates, err := driver.CompleteMention(ctx, "j", 8)
-	if err != nil {
-		t.Fatalf("CompleteMention() error = %v", err)
-	}
-	if len(candidates) != 1 || candidates[0].Value != "jeff" || candidates[0].Display != "jeff(codex)" {
-		t.Fatalf("CompleteMention() = %#v, want side target", candidates)
 	}
 	status, err := driver.AgentStatus(ctx)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	prompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
@@ -47,12 +48,19 @@ func (r Router) Route(ctx context.Context, req prompt.Request) (prompt.Result, e
 			return result, err
 		}
 		if !r.shouldDispatchSlash(ctx, cmd) {
-			return prompt.Result{}, nil
+			if r.isRemoteControllerCommand(ctx, cmd) {
+				turn, err := r.service.Submit(ctx, req.Submission)
+				if err != nil {
+					return prompt.Result{}, controlcommands.FriendlyCommandError("submit", err)
+				}
+				if turn == nil {
+					return prompt.Result{Handled: true, ContinueRunning: true, SuppressTurnDivider: true}, nil
+				}
+				return prompt.Result{Handled: true, Turn: turn}, nil
+			}
+			return r.noticeResult(fmt.Sprintf("unknown command: /%s\nrun /help to list available commands", cmd)), nil
 		}
 		return r.dispatchSlash(ctx, cmd, args, argsStart, text, req.Submission.Attachments)
-	}
-	if strings.HasPrefix(text, "@") {
-		return r.dispatchMention(ctx, text, req.Submission.Attachments)
 	}
 	turn, err := r.service.Submit(ctx, req.Submission)
 	if err != nil {
@@ -84,9 +92,14 @@ func (r Router) shouldDispatchSlash(ctx context.Context, cmd string) bool {
 		return true
 	}
 	if r.dynamicCommandAllowed != nil {
+		if r.isDirectAgentRun(ctx, cmd) {
+			if agent, _, ok := controlagents.ParseRunName(cmd); ok {
+				return r.dynamicSlashAllowed(ctx, agent)
+			}
+		}
 		return r.dynamicSlashAllowed(ctx, cmd)
 	}
-	return r.isRegisteredAgent(ctx, cmd)
+	return r.isRegisteredAgent(ctx, cmd) || r.isDirectAgentRun(ctx, cmd)
 }
 
 func (r Router) dispatchPrivateSlash(ctx context.Context, req prompt.PrivateSlashRequest) (prompt.Result, bool, error) {
@@ -144,6 +157,44 @@ func (r Router) isRegisteredAgent(ctx context.Context, agent string) bool {
 	return controlcommands.RegisteredAgentNameAllowed(ctx, r.service, agent)
 }
 
+func (r Router) isDirectAgentRun(ctx context.Context, name string) bool {
+	status, err := r.service.AgentStatus(contextOrBackground(ctx))
+	if err != nil {
+		return false
+	}
+	return controlagents.RunNameAllowed(directAgentRuns(status), name, availableAgentCommandName)
+}
+
+func (r Router) isRemoteControllerCommand(ctx context.Context, name string) bool {
+	name = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(name, "/")))
+	if name == "" || controlcommands.IsKnown(name) {
+		return false
+	}
+	status, err := r.service.AgentStatus(contextOrBackground(ctx))
+	if err != nil || !strings.EqualFold(strings.TrimSpace(status.ControllerKind), "acp") {
+		return false
+	}
+	for _, advertised := range status.ControllerCommands {
+		advertised = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(advertised, "/")))
+		if fields := strings.Fields(advertised); len(fields) > 0 && fields[0] == name {
+			return true
+		}
+	}
+	return false
+}
+
+func directAgentRuns(status control.AgentStatusSnapshot) []controlagents.Run {
+	runs := make([]controlagents.Run, 0, len(status.Participants))
+	for _, participant := range status.Participants {
+		runs = append(runs, controlagents.RunFromParticipant(participant.Label, participant.AgentName, participant.Kind, participant.Role))
+	}
+	return runs
+}
+
+func availableAgentCommandName(name string) bool {
+	return !controlcommands.IsKnown(name) && !strings.EqualFold(strings.TrimSpace(name), "sandbox")
+}
+
 func notice(text string) eventstream.Envelope {
 	return eventstream.Envelope{
 		Kind:   eventstream.KindNotice,
@@ -156,58 +207,4 @@ func contextOrBackground(ctx context.Context) context.Context {
 		return context.Background()
 	}
 	return ctx
-}
-
-func parseSubagentBindArgs(args string) (control.AgentProfileBindingConfig, bool) {
-	fields := strings.Fields(strings.TrimSpace(args))
-	if len(fields) < 2 {
-		return control.AgentProfileBindingConfig{}, false
-	}
-	cfg := control.AgentProfileBindingConfig{ProfileID: fields[0]}
-	switch strings.ToLower(strings.TrimSpace(fields[1])) {
-	case "default", "self", "builtin", "built-in":
-		if len(fields) != 2 {
-			return control.AgentProfileBindingConfig{}, false
-		}
-		cfg.Target = "built_in"
-		return cfg, true
-	case "model":
-		if len(fields) < 3 || len(fields) > 4 {
-			return control.AgentProfileBindingConfig{}, false
-		}
-		cfg.Target = "built_in"
-		cfg.Model = fields[2]
-		if len(fields) == 4 {
-			cfg.ReasoningEffort = fields[3]
-		}
-		return cfg, true
-	case "acp":
-		if len(fields) != 3 {
-			return control.AgentProfileBindingConfig{}, false
-		}
-		cfg.Target = "acp"
-		cfg.ACPAgent = fields[2]
-		return cfg, true
-	default:
-		return control.AgentProfileBindingConfig{}, false
-	}
-}
-
-func subagentUsageText() string {
-	return strings.Join([]string{
-		"usage:",
-		"  /subagent list",
-		"  /subagent bind <id> default",
-		"  /subagent bind <id> model <alias> [reasoning]",
-		"  /subagent bind <id> acp <agent>",
-	}, "\n")
-}
-
-func subagentBindUsageText() string {
-	return strings.Join([]string{
-		"usage:",
-		"  /subagent bind <id> default",
-		"  /subagent bind <id> model <alias> [reasoning]",
-		"  /subagent bind <id> acp <agent>",
-	}, "\n")
 }

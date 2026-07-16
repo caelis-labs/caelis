@@ -30,21 +30,20 @@ import (
 )
 
 type Config struct {
-	AppName                     string
-	UserID                      string
-	StoreDir                    string
-	ControlOperationRetention   time.Duration // Zero adopts an existing root policy; a fresh root uses the default.
-	WorkspaceKey                string
-	WorkspaceCWD                string
-	ApprovalMode                string
-	PolicyProfile               string
-	ContextWindow               int
-	SystemPrompt                string
-	Assembly                    assembly.ResolvedAssembly
-	SkillDirs                   []string
-	DisableBuiltInAgentProfiles bool
-	Model                       ModelConfig
-	Sandbox                     SandboxConfig
+	AppName                   string
+	UserID                    string
+	StoreDir                  string
+	ControlOperationRetention time.Duration // Zero adopts an existing root policy; a fresh root uses the default.
+	WorkspaceKey              string
+	WorkspaceCWD              string
+	ApprovalMode              string
+	PolicyProfile             string
+	ContextWindow             int
+	SystemPrompt              string
+	Assembly                  assembly.ResolvedAssembly
+	SkillDirs                 []string
+	Model                     ModelConfig
+	Sandbox                   SandboxConfig
 }
 
 type ModelConfig = modelconfig.Config
@@ -67,21 +66,24 @@ type Stack struct {
 	leaseOwnerID              string
 	mu                        sync.RWMutex
 	reconfigureMu             sync.Mutex
-	runtime                   stackRuntimeConfig
-	sandbox                   SandboxConfig
-	exec                      sandbox.Runtime
-	engine                    *runtime.Runtime
-	placement                 controlplane.PlacementExecutor
-	acpControlPlane           *acpassembly.ControlPlane
-	taskStore                 task.Store
-	controlFeeds              controlclientport.FeedRegistry
-	controlState              controlclientport.StateReader
-	controlCommands           controlclientport.CommandClient
-	controlClient             controlclientport.Service
-	operations                *internalcontrolclient.FileOperationStore
-	approvalRecovery          *internalcontrolclient.ApprovalRecoveryGate
-	gateway                   *kernelimpl.Gateway
-	mcpMgr                    *mcp.Manager
+	// agentRosterMu serializes live Agent assembly mutations with durable
+	// controller binding changes. Coordinators receive its read side.
+	agentRosterMu    sync.RWMutex
+	runtime          stackRuntimeConfig
+	sandbox          SandboxConfig
+	exec             sandbox.Runtime
+	engine           *runtime.Runtime
+	placement        controlplane.PlacementExecutor
+	acpControlPlane  *acpassembly.ControlPlane
+	taskStore        task.Store
+	controlFeeds     controlclientport.FeedRegistry
+	controlState     controlclientport.StateReader
+	controlCommands  controlclientport.CommandClient
+	controlClient    controlclientport.Service
+	operations       *internalcontrolclient.FileOperationStore
+	approvalRecovery *internalcontrolclient.ApprovalRecoveryGate
+	gateway          *kernelimpl.Gateway
+	mcpMgr           *mcp.Manager
 
 	// Optional test seam; nil uses the platform lifecycle runtime factory.
 	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
@@ -276,15 +278,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !cfg.DisableBuiltInAgentProfiles {
-		if err := ensureBuiltInAgentProfiles(context.Background(), storeDir, configStore); err != nil {
-			return nil, err
-		}
-		doc, err = configStore.Load()
-		if err != nil {
-			return nil, err
-		}
-	}
 	sandboxCfg := mergeSandboxConfig(doc.Sandbox, cfg.Sandbox)
 	leaseOwnerID, err := newStackLeaseOwnerID()
 	if err != nil {
@@ -306,16 +299,15 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		controlFeeds:     controlFeeds,
 		approvalRecovery: approvalRecovery,
 		runtime: stackRuntimeConfig{
-			ApprovalMode:                effectiveApprovalMode,
-			PolicyProfile:               effectivePolicyProfile,
-			ContextWindow:               cfg.ContextWindow,
-			SystemPrompt:                cfg.SystemPrompt,
-			Model:                       cfg.Model,
-			SkillDirs:                   cloneStringSlicePreserveNil(cfg.SkillDirs),
-			DisableBuiltInAgentProfiles: cfg.DisableBuiltInAgentProfiles,
-			Plugins:                     clonePluginConfigs(doc.Plugins),
-			BaseAssembly:                baseAssembly,
-			Assembly:                    assembly.CloneResolvedAssembly(baseAssembly),
+			ApprovalMode:  effectiveApprovalMode,
+			PolicyProfile: effectivePolicyProfile,
+			ContextWindow: cfg.ContextWindow,
+			SystemPrompt:  cfg.SystemPrompt,
+			Model:         cfg.Model,
+			SkillDirs:     cloneStringSlicePreserveNil(cfg.SkillDirs),
+			Plugins:       clonePluginConfigs(doc.Plugins),
+			BaseAssembly:  baseAssembly,
+			Assembly:      assembly.CloneResolvedAssembly(baseAssembly),
 		},
 		sandbox: sandboxCfg,
 	}

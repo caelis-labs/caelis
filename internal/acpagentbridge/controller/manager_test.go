@@ -562,7 +562,7 @@ func TestControllerRunStatusDerivesEffortOptionsFromACPModelState(t *testing.T) 
 	}
 }
 
-func TestControllerRunStatusPreservesConfigChoicesAfterPartialUpdate(t *testing.T) {
+func TestControllerRunStatusReplacesConfigChoicesAfterFullUpdate(t *testing.T) {
 	t.Parallel()
 
 	run := &controllerRun{}
@@ -594,8 +594,33 @@ func TestControllerRunStatusPreservesConfigChoicesAfterPartialUpdate(t *testing.
 	if status.Model != "gpt-5.4" {
 		t.Fatalf("model = %q, want updated current model", status.Model)
 	}
-	if got := controllerChoiceValues(status.ModelOptions); !equalStrings(got, []string{"gpt-5.5", "gpt-5.4"}) {
-		t.Fatalf("model options = %#v, want preserved full choices", got)
+	if got := controllerChoiceValues(status.ModelOptions); !equalStrings(got, []string{"gpt-5.4"}) {
+		t.Fatalf("model options = %#v, want full replacement choices", got)
+	}
+}
+
+func TestControllerRunFullConfigUpdateRemovesDerivedModes(t *testing.T) {
+	t.Parallel()
+
+	run := &controllerRun{}
+	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{configOptions: []ControllerConfigOption{{
+		ID: "mode", Name: "Mode", Type: "select", Category: "mode", CurrentValue: "review",
+		Options: []ControllerConfigChoice{{Value: "review", Name: "Review"}, {Value: "code", Name: "Code"}},
+	}}}, 0)
+	run.applySessionUpdateLocked(func() time.Time { return time.Unix(2, 0) }, client.ConfigOptionUpdate{
+		SessionUpdate: client.UpdateConfigOption,
+		ConfigOptions: []client.SessionConfigOption{{
+			ID: "tone", Name: "Tone", Type: "select", CurrentValue: "concise",
+			Options: []client.SessionConfigSelectOption{{Value: "concise"}, {Value: "detailed"}},
+		}},
+	})
+
+	status := run.controllerStatusLocked(session.SessionRef{SessionID: "parent"})
+	if len(status.ModeOptions) != 0 {
+		t.Fatalf("mode options = %#v, want removed config-derived modes cleared", status.ModeOptions)
+	}
+	if len(status.ConfigOptions) != 1 || status.ConfigOptions[0].ID != "tone" {
+		t.Fatalf("config options = %#v, want full replacement tone selector", status.ConfigOptions)
 	}
 }
 

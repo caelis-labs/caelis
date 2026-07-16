@@ -35,11 +35,6 @@ type guardianApprovalReviewer struct {
 	accounting     map[string]approvalReviewAccounting
 }
 
-type guardianBindingApprovalReviewer struct {
-	base    gateway.ApprovalReviewer
-	resolve func(context.Context, session.SessionRef) (model.LLM, error)
-}
-
 type guardianPromptMode struct {
 	Delta  bool
 	Cursor systemManagedAgentTranscriptCursor
@@ -90,36 +85,6 @@ func newGuardianApprovalReviewer(service session.Service) gateway.ApprovalReview
 		timeout:        defaultApprovalReviewTimeout,
 		accounting:     map[string]approvalReviewAccounting{},
 	}
-}
-
-func (r guardianBindingApprovalReviewer) ReviewApproval(ctx context.Context, req gateway.ApprovalReviewRequest) (gateway.ApprovalReviewResult, error) {
-	if r.resolve != nil {
-		llm, err := r.resolve(ctx, req.SessionRef)
-		if err != nil {
-			return gateway.ApprovalReviewResult{}, err
-		}
-		if llm != nil {
-			req.Model = llm
-		}
-	}
-	if r.base == nil {
-		return gateway.ApprovalReviewResult{}, fmt.Errorf("approval reviewer is unavailable")
-	}
-	return r.base.ReviewApproval(ctx, req)
-}
-
-func (r guardianBindingApprovalReviewer) ApprovalReviewAccounting(
-	ctx context.Context,
-	req gateway.ApprovalReviewRequest,
-	result gateway.ApprovalReviewResult,
-) (*gateway.UsageSnapshot, *session.EventInvocation, error) {
-	provider, ok := r.base.(interface {
-		ApprovalReviewAccounting(context.Context, gateway.ApprovalReviewRequest, gateway.ApprovalReviewResult) (*gateway.UsageSnapshot, *session.EventInvocation, error)
-	})
-	if !ok {
-		return nil, nil, nil
-	}
-	return provider.ApprovalReviewAccounting(ctx, req, result)
 }
 
 func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req gateway.ApprovalReviewRequest) (gateway.ApprovalReviewResult, error) {
@@ -285,9 +250,9 @@ func (r *guardianApprovalReviewer) runGuardianAgent(
 	if runner == nil {
 		runner = newSystemManagedAgentRuntime(nil)
 	}
-	spec, ok := systemManagedAgentSpecFor(guardianProfileID)
+	spec, ok := systemManagedAgentSpecFor(guardianSceneID)
 	if !ok {
-		return nil, "", fmt.Errorf("gatewayapp: missing %q system-managed agent", guardianProfileID)
+		return nil, "", fmt.Errorf("gatewayapp: missing %q system-managed agent", guardianSceneID)
 	}
 	result, err := runner.Run(ctx, systemManagedAgentRunRequest{
 		AgentID:           spec.ID,
@@ -1044,7 +1009,7 @@ func annotateGuardianReviewEvent(event *session.Event, reviewID string) {
 	if event.Meta == nil {
 		event.Meta = map[string]any{}
 	}
-	event.Meta["system_managed_agent"] = guardianProfileID
+	event.Meta["system_managed_agent"] = guardianSceneID
 	event.Meta["hidden_from_transcript"] = true
 	if strings.TrimSpace(reviewID) != "" {
 		event.Meta["review_id"] = strings.TrimSpace(reviewID)

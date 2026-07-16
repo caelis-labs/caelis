@@ -127,7 +127,7 @@ func (m *Model) refreshCompletionOverlaysNow() tea.Cmd {
 }
 
 // ---------------------------------------------------------------------------
-// @Mention completion
+// # File completion
 // ---------------------------------------------------------------------------
 
 const (
@@ -159,7 +159,7 @@ func (m *Model) refreshMentionWithLimit(limit int) {
 		previousSelected = m.mentionCandidates[m.mentionIndex]
 	}
 	m.clearMention()
-	if m.cfg.MentionComplete == nil || m.turnRunning() {
+	if m.turnRunning() {
 		return
 	}
 	start, end, query, prefix, ok := mentionQueryAtCursorWithPrefix(m.input, m.cursor)
@@ -179,7 +179,7 @@ func (m *Model) refreshMentionWithLimit(limit int) {
 		}
 		candidates, err = m.cfg.FileComplete(query, limit)
 	default:
-		candidates, err = m.cfg.MentionComplete(query, limit)
+		return
 	}
 	latency := time.Since(begin)
 	m.diag.LastMentionLatency = latency
@@ -204,7 +204,7 @@ func (m *Model) applyMentionCompletion() {
 	}
 	prefix := m.mentionPrefix
 	if prefix == "" {
-		prefix = "@"
+		prefix = "#"
 	}
 	choice := prefix + strings.TrimSpace(m.mentionCandidates[m.mentionIndex].Value)
 	replaced, nextCursor := replaceRuneSpan(m.input, m.mentionStart, m.mentionEnd, choice)
@@ -809,7 +809,7 @@ func (m *Model) renderSlashCommandList() string {
 	lines := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
 		display := m.slashCandidates[i]
-		lines = append(lines, m.renderCompletionTextLine(display, slashCommandCompletionDetail(display), i == m.slashIndex))
+		lines = append(lines, m.renderCompletionTextLine(display, m.commandCompletionDetail(display), i == m.slashIndex))
 	}
 	return m.renderCompletionOverlay("Commands", lines)
 }

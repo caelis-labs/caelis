@@ -307,7 +307,7 @@ Session ID is the only resource identity. Workspace key and CWD are optional
 list filters, display metadata, and authorization inputs; they never select a
 current Session or repair a missing Session ID.
 
-All main, Side ACP, child, Guardian, and auto-review approvals share the
+All main, direct AgentRun, child, Guardian, and auto-review approvals share the
 existing Control FIFO. Before the active head is published, Control appends a
 `VisibilityMirror` permission event with typed approval request ID, scope,
 scope ID, parent tool, and the unmodified normalized ACP permission payload.

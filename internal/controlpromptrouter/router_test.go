@@ -3,6 +3,7 @@ package controlpromptrouter
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -52,6 +53,13 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	if svc.usedModel != "fast" || svc.usedReasoning != "high" || model.StatusUpdate == nil {
 		t.Fatalf("model route used model=%q reasoning=%q status=%#v", svc.usedModel, svc.usedReasoning, model.StatusUpdate)
 	}
+	deleted, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/model del fast"}})
+	if err != nil {
+		t.Fatalf("Route(/model del) error = %v", err)
+	}
+	if !deleted.RefreshCommands {
+		t.Fatalf("Route(/model del).RefreshCommands = false, want refreshed Agent slash commands")
+	}
 	compactResult, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/compact"}})
 	if err != nil {
 		t.Fatalf("Route(/compact) error = %v", err)
@@ -74,7 +82,7 @@ func TestRouterResumeReturnsLiveReconnectWithoutSuccessNotice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/resume) error = %v", err)
 	}
-	if !result.Handled || !result.ClearHistory || !result.RefreshStatus {
+	if !result.Handled || !result.ClearHistory || !result.RefreshStatus || !result.RefreshCommands {
 		t.Fatalf("Route(/resume) = %#v, want replay with deferred status refresh", result)
 	}
 	if result.ActiveSessionID != "resumed-session" {
@@ -135,7 +143,7 @@ func TestRouterNewDefersStatusUntilAfterHistoryClear(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/new) error = %v", err)
 	}
-	if !result.Handled || !result.ClearHistory || !result.RefreshStatus {
+	if !result.Handled || !result.ClearHistory || !result.RefreshStatus || !result.RefreshCommands {
 		t.Fatalf("Route(/new) = %#v, want clear with deferred status refresh", result)
 	}
 	if result.ActiveSessionID != "new-session" {
@@ -146,22 +154,12 @@ func TestRouterNewDefersStatusUntilAfterHistoryClear(t *testing.T) {
 	}
 }
 
-func TestRouterHelpAndSubagentListReturnStructuredPayloads(t *testing.T) {
-	svc := &fakeService{
-		profileStatus: control.AgentProfileStatusSnapshot{
-			Profiles: []control.AgentProfileSnapshot{{
-				ID:          "reviewer",
-				Enabled:     true,
-				Target:      "self",
-				Model:       "deepseek/deepseek-v4-flash",
-				Description: "review current changes",
-			}},
-		},
-	}
+func TestRouterHelpReturnsStructuredPayload(t *testing.T) {
+	svc := &fakeService{}
 	router := New(prompt.RouterConfig{
 		Service: svc,
 		CommandNames: func(context.Context, control.Service) []string {
-			return []string{"help", "status", "subagent", "helper"}
+			return []string{"help", "status", "helper"}
 		},
 	})
 
@@ -172,31 +170,17 @@ func TestRouterHelpAndSubagentListReturnStructuredPayloads(t *testing.T) {
 	if help.SlashResult == nil || help.SlashResult.Kind != control.SlashCommandResultHelp {
 		t.Fatalf("Route(/help).SlashResult = %#v, want help payload", help.SlashResult)
 	}
-	if got := len(help.SlashResult.Help.Items); got != 4 {
-		t.Fatalf("help items = %d, want 4", got)
+	if got := len(help.SlashResult.Help.Items); got != 3 {
+		t.Fatalf("help items = %d, want 3", got)
 	}
-	if !help.SlashResult.Help.Items[3].Dynamic || help.SlashResult.Help.Items[3].Usage != "/helper <prompt>" {
-		t.Fatalf("dynamic help item = %#v, want helper prompt command", help.SlashResult.Help.Items[3])
+	if !help.SlashResult.Help.Items[2].Dynamic || help.SlashResult.Help.Items[2].Usage != "/helper <prompt>" {
+		t.Fatalf("dynamic help item = %#v, want helper prompt command", help.SlashResult.Help.Items[2])
 	}
 	if len(help.Events) != 0 {
 		t.Fatalf("Route(/help).Events = %#v, want no eager fallback events", help.Events)
 	}
 	if text := control.FormatSlashResult(*help.SlashResult); !strings.Contains(text, "/helper <prompt>") {
 		t.Fatalf("FormatSlashResult(/help) = %q, want helper command", text)
-	}
-
-	subagents, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/subagent list"}})
-	if err != nil {
-		t.Fatalf("Route(/subagent list) error = %v", err)
-	}
-	if subagents.SlashResult == nil || subagents.SlashResult.Kind != control.SlashCommandResultSubagentProfiles {
-		t.Fatalf("Route(/subagent list).SlashResult = %#v, want profile payload", subagents.SlashResult)
-	}
-	if got := subagents.SlashResult.AgentProfiles.Profiles[0].ID; got != "reviewer" {
-		t.Fatalf("subagent profile id = %q, want reviewer", got)
-	}
-	if len(subagents.Events) != 0 {
-		t.Fatalf("Route(/subagent list).Events = %#v, want no eager fallback events", subagents.Events)
 	}
 }
 
@@ -220,19 +204,19 @@ func TestRouterDynamicAgentMentionUnknownAndNormalPrompt(t *testing.T) {
 	if len(svc.startedAttachments) != 1 || svc.startedAttachments[0].Offset != len([]rune("inspect ")) {
 		t.Fatalf("dynamic attachments = %#v", svc.startedAttachments)
 	}
-	mention, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "@side continue"}})
+	normalAt, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "@side continue"}})
 	if err != nil {
 		t.Fatalf("Route(@side) error = %v", err)
 	}
-	if mention.Turn == nil || svc.continuedHandle != "side" || svc.continuedPrompt != "continue" {
-		t.Fatalf("mention route turn=%#v handle=%q prompt=%q", mention.Turn, svc.continuedHandle, svc.continuedPrompt)
+	if normalAt.Turn == nil || svc.submitted.Text != "@side continue" || svc.continuedHandle != "" {
+		t.Fatalf("@ text route turn=%#v submitted=%#v continued=%q, want normal prompt", normalAt.Turn, svc.submitted, svc.continuedHandle)
 	}
 	unknown, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/unknown command"}})
 	if err != nil {
 		t.Fatalf("Route(/unknown) error = %v", err)
 	}
-	if unknown.Handled {
-		t.Fatalf("Route(/unknown).Handled = true, want false")
+	if !unknown.Handled || !strings.Contains(firstNotice(unknown), "unknown command: /unknown") {
+		t.Fatalf("Route(/unknown) = %#v, want fail-closed notice", unknown)
 	}
 	normal, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "hello"}})
 	if err != nil {
@@ -240,6 +224,87 @@ func TestRouterDynamicAgentMentionUnknownAndNormalPrompt(t *testing.T) {
 	}
 	if normal.Turn == nil || svc.submitted.Text != "hello" {
 		t.Fatalf("normal route turn=%#v submitted=%#v", normal.Turn, svc.submitted)
+	}
+}
+
+func TestRouterDirectAgentRunSlashContinuesAddressableRun(t *testing.T) {
+	svc := &fakeService{
+		agents: []control.AgentCandidate{{Name: "helper"}},
+		agentStatus: control.AgentStatusSnapshot{Participants: []control.AgentParticipantSnapshot{
+			{Label: "@lina", AgentName: "helper", Kind: "acp", Role: "sidecar"},
+			{Label: "@maya", AgentName: "helper", Kind: "acp", Role: "delegated"},
+		}},
+		turn: &fakeTurn{id: "turn-1"},
+	}
+	router := New(prompt.RouterConfig{
+		Service: svc,
+		DynamicCommandAllowed: func(_ context.Context, command string) bool {
+			return command == "helper"
+		},
+	})
+	result, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper(lina) continue"}})
+	if err != nil {
+		t.Fatalf("Route(/helper(lina)) error = %v", err)
+	}
+	if result.Turn == nil || svc.continuedHandle != "helper(lina)" || svc.continuedPrompt != "continue" || svc.startedAgent != "" {
+		t.Fatalf("Route(/helper(lina)) = %#v continued=%q prompt=%q started=%q", result, svc.continuedHandle, svc.continuedPrompt, svc.startedAgent)
+	}
+	delegated, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper(maya) continue"}})
+	if err != nil {
+		t.Fatalf("Route(/helper(maya)) error = %v", err)
+	}
+	if !delegated.Handled || !strings.Contains(firstNotice(delegated), "unknown command: /helper(maya)") {
+		t.Fatalf("Route(/helper(maya)) = %#v, want delegated run hidden", delegated)
+	}
+}
+
+func TestRouterPrioritizesCoreAndAgentRunsBeforeRemoteControllerCommands(t *testing.T) {
+	svc := &fakeService{
+		status: control.StatusSnapshot{ModelStatus: control.StatusModel{Display: "local/model"}},
+		agents: []control.AgentCandidate{{Name: "helper"}},
+		agentStatus: control.AgentStatusSnapshot{
+			ControllerKind:     "acp",
+			ControllerCommands: []string{"/foo", "/helper", "/helper(lina)", "/status"},
+			Participants: []control.AgentParticipantSnapshot{
+				{Label: "@lina", AgentName: "helper", Kind: "acp", Role: "sidecar"},
+			},
+		},
+		turn: &fakeTurn{id: "turn-1"},
+	}
+	router := New(prompt.RouterConfig{Service: svc})
+	attachment := control.Attachment{Name: "remote.png", Offset: len([]rune("/foo remote"))}
+	remote, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{
+		Text: "/foo remote", Attachments: []control.Attachment{attachment},
+	}})
+	if err != nil {
+		t.Fatalf("Route(/foo) error = %v", err)
+	}
+	if remote.Turn == nil || svc.submitted.Text != "/foo remote" || !reflect.DeepEqual(svc.submitted.Attachments, []control.Attachment{attachment}) {
+		t.Fatalf("Route(/foo) = %#v submitted=%#v, want original remote prompt", remote, svc.submitted)
+	}
+	svc.submitted = control.Submission{}
+	agent, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper inspect"}})
+	if err != nil {
+		t.Fatalf("Route(/helper) error = %v", err)
+	}
+	if agent.Turn == nil || svc.startedAgent != "helper" || svc.submitted.Text != "" {
+		t.Fatalf("Route(/helper) = %#v started=%q submitted=%#v, want Agent run", agent, svc.startedAgent, svc.submitted)
+	}
+	svc.submitted = control.Submission{}
+	run, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper(lina) continue"}})
+	if err != nil {
+		t.Fatalf("Route(/helper(lina)) error = %v", err)
+	}
+	if run.Turn == nil || svc.continuedHandle != "helper(lina)" || svc.submitted.Text != "" {
+		t.Fatalf("Route(/helper(lina)) = %#v continued=%q submitted=%#v, want continuation", run, svc.continuedHandle, svc.submitted)
+	}
+	svc.submitted = control.Submission{}
+	core, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/status"}})
+	if err != nil {
+		t.Fatalf("Route(/status) error = %v", err)
+	}
+	if core.SlashResult == nil || core.SlashResult.Kind != control.SlashCommandResultStatus || svc.submitted.Text != "" {
+		t.Fatalf("Route(/status) = %#v submitted=%#v, want Caelis core", core, svc.submitted)
 	}
 }
 
@@ -258,8 +323,8 @@ func TestRouterDynamicCommandAllowedFiltersRegisteredAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/reviewer) error = %v", err)
 	}
-	if hidden.Handled || svc.startedAgent != "" {
-		t.Fatalf("Route(/reviewer) = %#v startedAgent=%q, want unhandled", hidden, svc.startedAgent)
+	if !hidden.Handled || !strings.Contains(firstNotice(hidden), "unknown command: /reviewer") || svc.startedAgent != "" {
+		t.Fatalf("Route(/reviewer) = %#v startedAgent=%q, want fail-closed notice", hidden, svc.startedAgent)
 	}
 	allowed, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper inspect"}})
 	if err != nil {
@@ -299,47 +364,24 @@ func TestRouterReviewForwardsAttachmentsForPromptRange(t *testing.T) {
 	}
 }
 
-func TestRouterAgentInstallRemainsPrivateToSurfaceHandler(t *testing.T) {
+func TestRouterRemovedAgentCommandsFailClosed(t *testing.T) {
 	svc := &fakeService{}
-	privateCalls := 0
 	router := New(prompt.RouterConfig{Service: svc})
 
 	install, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/agent install claude"}})
 	if err != nil {
 		t.Fatalf("Route(/agent install) error = %v", err)
 	}
-	if !install.Handled || !strings.Contains(firstNotice(install), "usage: /agent") || svc.addedAgent != "" || svc.addedOptions.Install {
-		t.Fatalf("Route(/agent install) = %#v added=%q opts=%#v, want usage without install", install, svc.addedAgent, svc.addedOptions)
+	if !install.Handled || !strings.Contains(firstNotice(install), "unknown command: /agent") {
+		t.Fatalf("Route(/agent install) = %#v, want removed command", install)
 	}
 
 	addInstall, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/agent add --install claude"}})
 	if err != nil {
 		t.Fatalf("Route(/agent add --install) error = %v", err)
 	}
-	if !addInstall.Handled || !strings.Contains(firstNotice(addInstall), "usage: /agent add") || svc.addedAgent != "" || svc.addedOptions.Install {
-		t.Fatalf("Route(/agent add --install) = %#v added=%q opts=%#v, want usage without install", addInstall, svc.addedAgent, svc.addedOptions)
-	}
-
-	privatePayload := struct{ command string }{command: "agent install"}
-	privateRouter := New(prompt.RouterConfig{
-		Service: svc,
-		PrivateSlashHandler: func(_ context.Context, req prompt.PrivateSlashRequest) (prompt.Result, bool, error) {
-			if req.Command != "agent" || !strings.HasPrefix(req.Args, "install ") {
-				return prompt.Result{}, false, nil
-			}
-			privateCalls++
-			return prompt.Result{Handled: true, SuppressTurnDivider: true, PrivateResult: privatePayload}, true, nil
-		},
-	})
-	privateInstall, err := privateRouter.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/agent install claude"}})
-	if err != nil {
-		t.Fatalf("private Route(/agent install) error = %v", err)
-	}
-	if !privateInstall.Handled || !privateInstall.SuppressTurnDivider || privateCalls != 1 {
-		t.Fatalf("private Route(/agent install) = %#v calls=%d, want private handled once", privateInstall, privateCalls)
-	}
-	if privateInstall.PrivateResult != privatePayload {
-		t.Fatalf("private Route(/agent install).PrivateResult = %#v, want %#v", privateInstall.PrivateResult, privatePayload)
+	if !addInstall.Handled || !strings.Contains(firstNotice(addInstall), "unknown command: /agent") {
+		t.Fatalf("Route(/agent add --install) = %#v, want removed command", addInstall)
 	}
 }
 
@@ -364,8 +406,8 @@ func TestRouterCoreCommandAllowedFiltersSharedSlash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/new) error = %v", err)
 	}
-	if newSession.Handled {
-		t.Fatalf("Route(/new).Handled = true, want false when core command is filtered")
+	if !newSession.Handled || !strings.Contains(firstNotice(newSession), "unknown command: /new") {
+		t.Fatalf("Route(/new) = %#v, want fail-closed notice when core command is filtered", newSession)
 	}
 }
 
@@ -412,11 +454,9 @@ type fakeService struct {
 	continuedHandle    string
 	continuedPrompt    string
 	controllerKind     string
+	agentStatus        control.AgentStatusSnapshot
 	resumeSnapshot     control.SessionSnapshot
 	resumeErr          error
-	addedAgent         string
-	addedOptions       control.AgentAddOptions
-	profileStatus      control.AgentProfileStatusSnapshot
 }
 
 func (s *fakeService) Status(context.Context) (control.StatusSnapshot, error) {
@@ -513,46 +553,30 @@ func (s *fakeService) ListAgents(context.Context, int) ([]control.AgentCandidate
 	return s.agents, nil
 }
 func (s *fakeService) AgentStatus(context.Context) (control.AgentStatusSnapshot, error) {
-	return control.AgentStatusSnapshot{ControllerKind: s.controllerKind}, nil
-}
-func (s *fakeService) AddAgent(context.Context, string) (control.AgentStatusSnapshot, error) {
-	return control.AgentStatusSnapshot{}, nil
-}
-func (s *fakeService) AddAgentWithOptions(_ context.Context, agent string, opts control.AgentAddOptions) (control.AgentStatusSnapshot, error) {
-	s.addedAgent = agent
-	s.addedOptions = opts
-	return control.AgentStatusSnapshot{}, nil
-}
-func (s *fakeService) RemoveAgent(context.Context, string) (control.AgentStatusSnapshot, error) {
-	return control.AgentStatusSnapshot{}, nil
+	status := s.agentStatus
+	if status.ControllerKind == "" {
+		status.ControllerKind = s.controllerKind
+	}
+	return status, nil
 }
 func (s *fakeService) HandoffAgent(context.Context, string) (control.AgentStatusSnapshot, error) {
 	return control.AgentStatusSnapshot{}, nil
 }
-func (s *fakeService) StartAgentSubagent(_ context.Context, agent string, prompt string, attachments []control.Attachment) (control.Turn, error) {
+func (s *fakeService) StartAgentRun(_ context.Context, agent string, prompt string, attachments []control.Attachment) (control.Turn, error) {
 	s.startedAgent = agent
 	s.startedPrompt = prompt
 	s.startedAttachments = attachments
 	return s.turn, nil
 }
-func (s *fakeService) ContinueSubagent(_ context.Context, handle string, prompt string, attachments []control.Attachment) (control.Turn, error) {
+func (s *fakeService) ContinueAgentRun(_ context.Context, handle string, prompt string, attachments []control.Attachment) (control.Turn, error) {
 	s.continuedHandle = handle
 	s.continuedPrompt = prompt
 	return s.turn, nil
 }
-func (s *fakeService) AgentProfileStatus(context.Context) (control.AgentProfileStatusSnapshot, error) {
-	return s.profileStatus, nil
-}
-func (s *fakeService) BindAgentProfile(context.Context, control.AgentProfileBindingConfig) (control.AgentProfileStatusSnapshot, error) {
-	return control.AgentProfileStatusSnapshot{}, nil
-}
-func (s *fakeService) StartReviewSubagent(_ context.Context, prompt string, attachments []control.Attachment) (control.Turn, error) {
+func (s *fakeService) StartReview(_ context.Context, prompt string, attachments []control.Attachment) (control.Turn, error) {
 	s.reviewPrompt = prompt
 	s.reviewAttachments = attachments
 	return s.turn, nil
-}
-func (s *fakeService) CompleteMention(context.Context, string, int) ([]control.CompletionCandidate, error) {
-	return nil, nil
 }
 func (s *fakeService) CompleteFile(context.Context, string, int) ([]control.CompletionCandidate, error) {
 	return nil, nil

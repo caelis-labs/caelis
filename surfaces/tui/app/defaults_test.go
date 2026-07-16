@@ -6,15 +6,15 @@ import (
 	"testing"
 
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
 	got := controlcommands.DefaultNamesForPlatform("linux")
 	want := []string{
 		"help",
-		"agent",
-		"subagent",
 		"review",
+		"lead",
 		"connect",
 		"plugin",
 		"model",
@@ -38,6 +38,20 @@ func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
 	}
 }
 
+func TestACPSlashCommandsFilterLocalAndReservedRemoteCommands(t *testing.T) {
+	got := acpSlashCommands([]string{"help"}, control.AgentStatusSnapshot{ControllerCommands: []string{
+		"/remote", "/compact", "/new now", "/status", "/sandbox",
+	}})
+	if !sliceContainsString(got, "remote") {
+		t.Fatalf("acpSlashCommands() = %#v, want routable remote command", got)
+	}
+	for _, filtered := range []string{"compact", "new", "status", "sandbox"} {
+		if sliceContainsString(got, filtered) {
+			t.Fatalf("acpSlashCommands() = %#v, should filter reserved /%s", got, filtered)
+		}
+	}
+}
+
 func TestDefaultWizardsCoverCoreConfigFlows(t *testing.T) {
 	wizards := DefaultWizards()
 	if len(wizards) < 1 {
@@ -45,7 +59,7 @@ func TestDefaultWizardsCoverCoreConfigFlows(t *testing.T) {
 	}
 }
 
-func TestDefaultConnectWizardMatchesLegacyStepShape(t *testing.T) {
+func TestDefaultConnectWizardSeparatesModelAndACPConnectionSteps(t *testing.T) {
 	wizards := DefaultWizards()
 	var connect *WizardDef
 	for i := range wizards {
@@ -61,16 +75,28 @@ func TestDefaultConnectWizardMatchesLegacyStepShape(t *testing.T) {
 	if connect.DisplayLine != "/connect" {
 		t.Fatalf("DisplayLine = %q, want /connect", connect.DisplayLine)
 	}
-	if got := len(connect.Steps); got != 8 {
-		t.Fatalf("connect wizard step count = %d, want 8", got)
+	if got := len(connect.Steps); got != 1 || connect.Steps[0].Key != "source" || connect.Branch == nil {
+		t.Fatalf("connect root wizard = %#v, want one explicit branching step", connect)
 	}
-	keys := make([]string, 0, len(connect.Steps))
-	for _, step := range connect.Steps {
-		keys = append(keys, step.Key)
+	tests := []struct {
+		name string
+		def  WizardDef
+		want []string
+	}{
+		{name: "model", def: connectModelWizard(), want: []string{"provider", "endpoint", "baseurl", "apikey", "model", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
+		{name: "acp", def: connectACPWizard(), want: []string{"acp_agent", "acp_launcher", "acp_command", "acp_model", "acp_config"}},
+		{name: "disconnect", def: disconnectACPWizard(), want: []string{"disconnect_agent", "disconnect_confirm"}},
 	}
-	want := []string{"provider", "endpoint", "baseurl", "apikey", "model", "context_window_tokens", "max_output_tokens", "reasoning_levels"}
-	if !reflect.DeepEqual(keys, want) {
-		t.Fatalf("connect wizard steps = %#v, want %#v", keys, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			keys := make([]string, 0, len(tt.def.Steps))
+			for _, step := range tt.def.Steps {
+				keys = append(keys, step.Key)
+			}
+			if !reflect.DeepEqual(keys, tt.want) {
+				t.Fatalf("steps = %#v, want %#v", keys, tt.want)
+			}
+		})
 	}
 }
 

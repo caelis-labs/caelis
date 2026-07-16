@@ -114,8 +114,8 @@ derives and validates the final assembled model/tool/sandbox requirements.
   only the lease revision, while release, expiry, and takeover never permit an
   older token to become current again.
 - The lease serializes one canonical Turn, not one Agent identity. Local main
-  turns, ACP-controlled main turns, and Side ACP/Reviewer participant prompts
-  all acquire it and keep it through the asynchronous Runner lifetime. ACP
+  turns, ACP-controlled main turns, and direct AgentRun/Reviewer participant
+  prompts all acquire it and keep it through the asynchronous Runner lifetime. ACP
   event forwarders receive and preserve the same `MutationGuard` as Runtime;
   dropping it is a lease conflict rather than an unfenced fallback.
 - Runtime-owned event, batch, compound, controller, task, and participant-prompt

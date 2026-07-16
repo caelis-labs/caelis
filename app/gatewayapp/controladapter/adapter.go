@@ -2,7 +2,6 @@ package controladapter
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -28,6 +27,7 @@ type Adapter struct {
 	sandboxType         string
 	activeCommandID     uint64
 	activeCommandCancel context.CancelFunc
+	acpDiscoveries      map[string]acpDiscoveryCacheEntry
 }
 
 func NewAdapter(ctx context.Context, stack *RuntimeStack, preferredSessionID string, bindingKey string, modelText string) (*Adapter, error) {
@@ -526,55 +526,6 @@ func agentParticipantSnapshot(participant gateway.ParticipantState) AgentPartici
 	}
 }
 
-func (d *Adapter) AddAgent(ctx context.Context, target string) (AgentStatusSnapshot, error) {
-	return d.AddAgentWithOptions(ctx, target, AgentAddOptions{})
-}
-
-func (d *Adapter) AddAgentWithOptions(ctx context.Context, target string, opts AgentAddOptions) (AgentStatusSnapshot, error) {
-	if opts.Custom != nil {
-		if d.stack.Agent.RegisterCustomFn == nil {
-			return AgentStatusSnapshot{}, missingRuntimeDependency("custom ACP agent")
-		}
-		if err := d.stack.Agent.RegisterCustomFn(ctx, *opts.Custom); err != nil {
-			return AgentStatusSnapshot{}, err
-		}
-		return d.AgentStatus(ctx)
-	}
-	if opts.Install {
-		var finish func()
-		ctx, finish = d.beginInterruptibleCommand(ctx)
-		defer finish()
-	}
-	if d.stack.Agent.RegisterBuiltinWithOptionsFn == nil {
-		return AgentStatusSnapshot{}, missingRuntimeDependency("builtin ACP agent")
-	}
-	if err := d.stack.Agent.RegisterBuiltinWithOptionsFn(ctx, target, RegisterBuiltinACPAgentOptions{Install: opts.Install}); err != nil {
-		if opts.Install && errors.Is(ctx.Err(), context.Canceled) {
-			return AgentStatusSnapshot{}, context.Canceled
-		}
-		return AgentStatusSnapshot{}, err
-	}
-	return d.AgentStatus(ctx)
-}
-
-func (d *Adapter) RemoveAgent(ctx context.Context, target string) (AgentStatusSnapshot, error) {
-	target = strings.ToLower(strings.TrimSpace(target))
-	status, err := d.AgentStatus(ctx)
-	if err != nil {
-		return AgentStatusSnapshot{}, err
-	}
-	if strings.EqualFold(strings.TrimSpace(status.ControllerKind), string(session.ControllerKindACP)) {
-		return AgentStatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: an ACP agent is the active controller; run /agent use local before removing registered agents")
-	}
-	if d.stack.Agent.UnregisterFn == nil {
-		return AgentStatusSnapshot{}, missingRuntimeDependency("ACP agent unregister")
-	}
-	if err := d.stack.Agent.UnregisterFn(target); err != nil {
-		return AgentStatusSnapshot{}, err
-	}
-	return d.AgentStatus(ctx)
-}
-
 func (d *Adapter) HandoffAgent(ctx context.Context, target string) (AgentStatusSnapshot, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
@@ -584,7 +535,7 @@ func (d *Adapter) HandoffAgent(ctx context.Context, target string) (AgentStatusS
 	req := gateway.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		BindingKey: d.bindingKey,
-		Source:     "tui_agent_handoff",
+		Source:     "user_agent_handoff",
 	}
 	switch strings.ToLower(target) {
 	case "", "main", "local", "kernel":

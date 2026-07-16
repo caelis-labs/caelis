@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
@@ -47,8 +48,8 @@ func AppendAgentNames(base []string, names []string, filters ...AgentNameFilter)
 		seen[strings.ToLower(strings.TrimSpace(command))] = struct{}{}
 	}
 	for _, name := range names {
-		name = strings.ToLower(strings.TrimSpace(name))
-		if name == "" || !agentNameAllowed(name, filters...) {
+		name = controlagents.NormalizeName(name)
+		if !controlagents.IsName(name) || IsKnown(name) || strings.EqualFold(name, "sandbox") || !agentNameAllowed(name, filters...) {
 			continue
 		}
 		if _, exists := seen[name]; exists {
@@ -83,8 +84,8 @@ func RegisteredAgentNameAllowed(ctx context.Context, service AgentLister, comman
 // AgentNameAllowed reports whether command appears in names and passes all
 // surface filters.
 func AgentNameAllowed(names []string, command string, filters ...AgentNameFilter) bool {
-	command = strings.ToLower(strings.TrimSpace(command))
-	if command == "" || !agentNameAllowed(command, filters...) {
+	command = controlagents.NormalizeName(command)
+	if !controlagents.IsName(command) || IsKnown(command) || strings.EqualFold(command, "sandbox") || !agentNameAllowed(command, filters...) {
 		return false
 	}
 	for _, name := range names {

@@ -513,14 +513,23 @@ type ParticipantTurnBlock struct {
 }
 
 func NewParticipantTurnBlock(sessionID, actor string) *ParticipantTurnBlock {
+	actor = participantActorDisplayName(actor)
 	return &ParticipantTurnBlock{
 		id:             nextBlockID(),
 		SessionID:      strings.TrimSpace(sessionID),
-		Actor:          strings.TrimSpace(actor),
+		Actor:          actor,
 		Status:         "running",
 		StartedAt:      time.Now(),
 		toolEventIndex: map[string]int{},
 	}
+}
+
+func participantActorDisplayName(actor string) string {
+	actor = strings.TrimSpace(actor)
+	if strings.HasPrefix(actor, "@") {
+		return "/" + strings.TrimPrefix(actor, "@")
+	}
+	return actor
 }
 
 func (b *ParticipantTurnBlock) BlockID() string { return b.id }

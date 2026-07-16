@@ -14,6 +14,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
@@ -208,10 +209,18 @@ func (s *ProgramSender) waitForwarders(timeout time.Duration) bool {
 	}
 }
 
-// ConfigFromControlService populates Config callbacks from a control service.
+// ControlServices is the explicit set of Control facets required by the TUI.
+// ACP onboarding remains separate from the transitional aggregate service.
+type ControlServices interface {
+	control.Service
+	controlagents.Connector
+	controlagents.Disconnector
+}
+
+// ConfigFromControlService populates Config callbacks from Control services.
 // When sender is non-nil, its Send field is populated after Program creation
 // but before the user can trigger ExecuteLine.
-func ConfigFromControlService(service control.Service, sender *ProgramSender, base Config) Config {
+func ConfigFromControlService(service ControlServices, sender *ProgramSender, base Config) Config {
 	base.ControlService = service
 	if base.StreamTickInterval <= 0 {
 		base.StreamTickInterval = streamSmoothingTickIntervalDefault
@@ -223,6 +232,12 @@ func ConfigFromControlService(service control.Service, sender *ProgramSender, ba
 		base.ProgramSender = sender
 	}
 	base.Commands = appendAgentSlashCommandsWithContext(ctx, service, base.Commands)
+	for name, detail := range registeredAgentCommandDetailsWithContext(ctx, service) {
+		if base.CommandDetails == nil {
+			base.CommandDetails = map[string]string{}
+		}
+		base.CommandDetails[name] = detail
+	}
 	promptRouterFactory := base.PromptRouterFactory
 	var cachedModeLabel string
 	var cachedStatusView StatusViewModel
@@ -236,7 +251,7 @@ func ConfigFromControlService(service control.Service, sender *ProgramSender, ba
 				runCtx, finish = sender.beginRunContext(ctx)
 			}
 			defer finish()
-			return executeLineViaControlServiceWithContextResult(runCtx, service, sender, sub, promptRouterFactory)
+			return executeLineViaControlServiceWithContextResult(runCtx, service, service, sender, sub, promptRouterFactory)
 		}
 		base.ExecuteLine = func(sub Submission) TaskResultMsg {
 			return runExecuteLine(sub).completion
@@ -286,26 +301,6 @@ func ConfigFromControlService(service control.Service, sender *ProgramSender, ba
 	if base.RefreshWorkspace == nil {
 		base.RefreshWorkspace = func() string {
 			return service.WorkspaceDir()
-		}
-	}
-
-	if base.MentionComplete == nil {
-		base.MentionComplete = func(query string, limit int) ([]CompletionCandidate, error) {
-			candidates, err := service.CompleteMention(ctx, query, limit)
-			if err != nil {
-				return nil, err
-			}
-			out := make([]CompletionCandidate, len(candidates))
-			for i, c := range candidates {
-				out[i] = CompletionCandidate{
-					Value:   c.Value,
-					Display: c.Display,
-					Kind:    c.Kind,
-					Detail:  c.Detail,
-					Path:    c.Path,
-				}
-			}
-			return out, nil
 		}
 	}
 
@@ -372,8 +367,8 @@ func ConfigFromControlService(service control.Service, sender *ProgramSender, ba
 	}
 
 	if base.SlashArgComplete == nil {
-		base.SlashArgComplete = func(command string, query string, limit int) ([]SlashArgCandidate, error) {
-			candidates, err := service.CompleteSlashArg(ctx, command, query, limit)
+		base.SlashArgComplete = func(requestCtx context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
+			candidates, err := service.CompleteSlashArg(contextOrBackground(requestCtx), command, query, limit)
 			if err != nil {
 				return nil, err
 			}
@@ -435,14 +430,6 @@ func refreshStatusSnapshot(ctx context.Context, service control.Service) (contro
 // ExecuteLine: the single submission entry point
 // ---------------------------------------------------------------------------
 
-func executeLineViaControlService(service control.Service, sender *ProgramSender, sub Submission) TaskResultMsg {
-	return executeLineViaControlServiceWithContext(context.Background(), service, sender, sub)
-}
-
-func executeLineViaControlServiceWithContext(ctx context.Context, service control.Service, sender *ProgramSender, sub Submission) TaskResultMsg {
-	return executeLineViaControlServiceWithContextResult(ctx, service, sender, sub, nil).completion
-}
-
 type executeLineResult struct {
 	completion TaskResultMsg
 	queued     bool
@@ -455,7 +442,7 @@ func (r executeLineResult) commandMessage() tea.Msg {
 	return r.completion
 }
 
-func executeLineViaControlServiceWithContextResult(ctx context.Context, service control.Service, sender *ProgramSender, sub Submission, routerFactory controlprompt.RouterFactory) executeLineResult {
+func executeLineViaControlServiceWithContextResult(ctx context.Context, service control.Service, agents agentRosterServices, sender *ProgramSender, sub Submission, routerFactory controlprompt.RouterFactory) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -470,7 +457,7 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 			return appendAgentSlashCommandsWithContext(ctx, service, DefaultCommands())
 		},
 		PrivateSlashHandler: func(ctx context.Context, req controlprompt.PrivateSlashRequest) (controlprompt.Result, bool, error) {
-			result, ok := executeTUIPrivateSlashCommandWithContext(ctx, service, sender, req.Command, req.Args)
+			result, ok := executeTUIPrivateSlashCommandWithContext(ctx, service, agents, sender, req.Command, req.Args)
 			if !ok {
 				return controlprompt.Result{}, false, nil
 			}
@@ -603,14 +590,32 @@ func appendAgentSlashCommandsWithContext(ctx context.Context, service control.Se
 	if len(commands) == 0 {
 		commands = DefaultCommands()
 	}
-	if status, activeACP := control.ActiveACPStatus(ctx, service); activeACP {
-		return acpSlashCommands(status)
+	status, err := service.AgentStatus(ctx)
+	if err == nil && strings.EqualFold(strings.TrimSpace(status.ControllerKind), "acp") {
+		commands = localACPCommands()
 	}
-	return controlcommands.AppendRegisteredAgentNames(ctx, service, commands)
+	commands = controlcommands.AppendRegisteredAgentNames(ctx, service, commands)
+	if err == nil {
+		commands = controlagents.AppendRunNames(commands, tuiDirectAgentRuns(status), tuiAgentCommandNameAllowed)
+	}
+	if err == nil && strings.EqualFold(strings.TrimSpace(status.ControllerKind), "acp") {
+		return acpSlashCommands(commands, status)
+	}
+	return commands
 }
 
-func acpSlashCommands(status control.AgentStatusSnapshot) []string {
-	out := []string{"help", "agent", "status", "resume", "model", "exit", "quit"}
+func localACPCommands() []string {
+	out := make([]string, 0)
+	for _, spec := range controlcommands.DefaultSpecs() {
+		if spec.LocalDuringACP && !spec.Hidden {
+			out = append(out, spec.Name)
+		}
+	}
+	return out
+}
+
+func acpSlashCommands(base []string, status control.AgentStatusSnapshot) []string {
+	out := append([]string(nil), base...)
 	seen := map[string]struct{}{}
 	for _, command := range out {
 		seen[strings.ToLower(strings.TrimSpace(command))] = struct{}{}
@@ -620,7 +625,7 @@ func acpSlashCommands(status control.AgentStatusSnapshot) []string {
 		if fields := strings.Fields(name); len(fields) > 0 {
 			name = fields[0]
 		}
-		if name == "" {
+		if name == "" || !tuiAgentCommandNameAllowed(name) {
 			continue
 		}
 		if _, exists := seen[name]; exists {
@@ -632,6 +637,18 @@ func acpSlashCommands(status control.AgentStatusSnapshot) []string {
 	return out
 }
 
+func tuiDirectAgentRuns(status control.AgentStatusSnapshot) []controlagents.Run {
+	runs := make([]controlagents.Run, 0, len(status.Participants))
+	for _, participant := range status.Participants {
+		runs = append(runs, controlagents.RunFromParticipant(participant.Label, participant.AgentName, participant.Kind, participant.Role))
+	}
+	return runs
+}
+
+func tuiAgentCommandNameAllowed(name string) bool {
+	return !controlcommands.IsKnown(name) && !strings.EqualFold(strings.TrimSpace(name), "sandbox")
+}
+
 func refreshAgentSlashCommandsViaSend(service control.Service, send func(tea.Msg)) {
 	refreshAgentSlashCommandsViaSendWithContext(context.Background(), service, send)
 }
@@ -640,7 +657,43 @@ func refreshAgentSlashCommandsViaSendWithContext(ctx context.Context, service co
 	if send == nil {
 		return
 	}
-	send(SetCommandsMsg{Commands: appendAgentSlashCommandsWithContext(ctx, service, DefaultCommands())})
+	send(SetCommandsMsg{
+		Commands: appendAgentSlashCommandsWithContext(ctx, service, DefaultCommands()),
+		Details:  registeredAgentCommandDetailsWithContext(ctx, service),
+	})
+}
+
+func registeredAgentCommandDetailsWithContext(ctx context.Context, service control.Service) map[string]string {
+	if service == nil {
+		return nil
+	}
+	ctx = contextOrBackground(ctx)
+	details := map[string]string{}
+	if agents, err := service.ListAgents(ctx, 200); err == nil {
+		for _, agent := range agents {
+			name := controlagents.NormalizeName(agent.Name)
+			detail := strings.TrimSpace(agent.Description)
+			if name != "" && detail != "" {
+				details[name] = detail
+			}
+		}
+	}
+	if status, err := service.AgentStatus(ctx); err == nil {
+		for _, run := range tuiDirectAgentRuns(status) {
+			if !run.Addressable {
+				continue
+			}
+			agent, handle, ok := controlagents.ParseRunName(run.Name)
+			if !ok || !tuiAgentCommandNameAllowed(agent) {
+				continue
+			}
+			details[run.Name] = fmt.Sprintf("Continue /%s as %s", agent, handle)
+		}
+	}
+	if len(details) == 0 {
+		return nil
+	}
+	return details
 }
 
 func sendStatusUpdate(send func(tea.Msg), status control.StatusSnapshot) {

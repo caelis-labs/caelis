@@ -15,7 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/ports/agentprofile"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
 type systemManagedAgentPurpose string
@@ -35,27 +35,17 @@ const (
 	systemManagedAgentCapabilityController systemManagedAgentCapabilityProfile = "controller"
 )
 
-type systemManagedAgentBindingPolicy struct {
-	ForceEnabled     bool
-	AllowExternalACP bool
-}
-
-// systemManagedAgentSpec describes one built-in system-owned agent profile and
+// systemManagedAgentSpec describes one built-in system-owned scene and
 // its default runtime cuts. It is intentionally app-private until another layer
 // needs a stable public system-agent contract.
 type systemManagedAgentSpec struct {
 	ID                string
-	Name              string
-	Description       string
-	Capabilities      []string
 	Instructions      string
-	ProfileMetadata   map[string]any
 	SessionID         func(session.Session, map[string]any) string
 	SessionSuffix     string
 	SessionMetadata   map[string]any
 	Purpose           systemManagedAgentPurpose
 	CapabilityProfile systemManagedAgentCapabilityProfile
-	BindingPolicy     systemManagedAgentBindingPolicy
 	ReasoningEffort   string
 	Tools             []tool.Tool
 }
@@ -349,11 +339,10 @@ func buildSystemManagedAgentRegistry(specs []systemManagedAgentSpec) systemManag
 }
 
 func normalizeSystemManagedAgentSpec(spec systemManagedAgentSpec) systemManagedAgentSpec {
-	spec.ID = normalizeAgentProfileID(spec.ID)
-	spec.Name = strings.TrimSpace(spec.Name)
-	spec.Description = strings.TrimSpace(spec.Description)
-	spec.Capabilities = append([]string(nil), spec.Capabilities...)
-	spec.ProfileMetadata = maps.Clone(spec.ProfileMetadata)
+	spec.ID = controlagents.NormalizeName(spec.ID)
+	if !controlagents.IsName(spec.ID) {
+		spec.ID = ""
+	}
 	spec.SessionMetadata = maps.Clone(spec.SessionMetadata)
 	spec.Tools = append([]tool.Tool(nil), spec.Tools...)
 	return spec
@@ -378,27 +367,8 @@ func systemManagedAgentToolsForCapability(
 	}
 }
 
-func systemManagedAgentProfile(agentID string) (agentprofile.Profile, bool) {
-	spec, ok := systemManagedAgentSpecFor(agentID)
-	if !ok {
-		return agentprofile.Profile{}, false
-	}
-	return systemManagedAgentProfileFromSpec(spec), true
-}
-
-func systemManagedAgentProfileFromSpec(spec systemManagedAgentSpec) agentprofile.Profile {
-	return agentprofile.NormalizeProfile(agentprofile.Profile{
-		ID:           spec.ID,
-		Name:         spec.Name,
-		Description:  spec.Description,
-		Capabilities: append([]string(nil), spec.Capabilities...),
-		Instructions: spec.Instructions,
-		Metadata:     maps.Clone(spec.ProfileMetadata),
-	})
-}
-
 func systemManagedAgentSpecFor(agentID string) (systemManagedAgentSpec, bool) {
-	agentID = normalizeAgentProfileID(agentID)
+	agentID = controlagents.NormalizeName(agentID)
 	if agentID == "" {
 		return systemManagedAgentSpec{}, false
 	}
@@ -406,72 +376,15 @@ func systemManagedAgentSpecFor(agentID string) (systemManagedAgentSpec, bool) {
 	return spec, ok
 }
 
-func isSystemManagedAgentProfileID(profileID string) bool {
-	profileID = normalizeAgentProfileID(profileID)
-	if profileID == "" {
-		return false
-	}
-	_, ok := systemManagedAgentRegistrySnapshot().byID[profileID]
-	return ok
-}
-
-func defaultSystemManagedAgentBinding(spec systemManagedAgentSpec) agentprofile.Binding {
-	return normalizeSystemManagedAgentBinding(spec, defaultAgentProfileBinding(spec.ID))
-}
-
-// normalizeSystemManagedAgentBinding reads only the registry-owned immutable
-// spec identity and binding policy; profile/runtime fields stay out of this path.
-func normalizeSystemManagedAgentBinding(spec systemManagedAgentSpec, binding agentprofile.Binding) agentprofile.Binding {
-	agentID := normalizeAgentProfileID(spec.ID)
-	policy := spec.BindingPolicy
-	binding.ProfileID = agentID
-	binding = agentprofile.NormalizeBinding(binding)
-	binding.ProfileID = agentID
-	if policy.ForceEnabled {
-		binding.Enabled = boolPtr(true)
-	}
-	binding.Status = agentprofile.BindingStatusOK
-	binding.Warning = ""
-	if binding.Target == agentprofile.BindingTargetACP && !policy.AllowExternalACP {
-		binding.Target = agentprofile.BindingTargetSelf
-		binding.Model = ""
-		binding.ACPAgent = ""
-		binding.ACPModel = ""
-		binding.ReasoningEffort = ""
-	}
-	return binding
-}
-
-func validateSystemManagedAgentBinding(spec systemManagedAgentSpec, binding agentprofile.Binding) error {
-	agentID := normalizeAgentProfileID(spec.ID)
-	policy := spec.BindingPolicy
-	binding = agentprofile.NormalizeBinding(binding)
-	if binding.Target == agentprofile.BindingTargetACP && !policy.AllowExternalACP {
-		return fmt.Errorf("gatewayapp: %s cannot bind to an external ACP agent", agentID)
-	}
-	return nil
-}
-
 func guardianSystemManagedAgentSpec() systemManagedAgentSpec {
 	return systemManagedAgentSpec{
-		ID:           guardianProfileID,
-		Name:         "Guardian",
-		Description:  "Reviews approval requests for auto-review mode.",
-		Instructions: guardianPolicyPrompt(),
-		ProfileMetadata: map[string]any{
-			"source":         "caelis",
-			"built_in":       true,
-			"system_managed": true,
-		},
+		ID:                guardianSceneID,
+		Instructions:      guardianPolicyPrompt(),
 		SessionSuffix:     "approval-review",
 		SessionID:         guardianReviewSessionIDFromMetadata,
 		Purpose:           systemManagedAgentPurposeApprovalReview,
 		CapabilityProfile: systemManagedAgentCapabilityNone,
-		BindingPolicy: systemManagedAgentBindingPolicy{
-			ForceEnabled:     true,
-			AllowExternalACP: false,
-		},
-		ReasoningEffort: "none",
+		ReasoningEffort:   "none",
 		SessionMetadata: map[string]any{
 			"guardian": true,
 			"source":   "auto-review",

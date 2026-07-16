@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -141,34 +142,6 @@ func TestSlashOutputAddsBlankLineAfterUserCommand(t *testing.T) {
 	}
 }
 
-func TestSlashSubagentOutputRendersProfileData(t *testing.T) {
-	t.Parallel()
-
-	lines := renderSlashCommandResultLines(control.SlashCommandResult{
-		Kind: control.SlashCommandResultSubagentProfiles,
-		AgentProfiles: control.AgentProfileStatusSnapshot{
-			Profiles: []control.AgentProfileSnapshot{
-				{ID: "reviewer", Enabled: true, Target: "self", Model: "deepseek/deepseek-v4-flash", ReasoningEffort: "high", Description: "review changes"},
-				{ID: "explorer", Enabled: false, Target: "self", Warning: "disabled for this workspace"},
-			},
-		},
-	})
-	plain := slashOutputPlainForTest(lines)
-	want := strings.Join([]string{
-		"Subagents",
-		"  Profile   Binding                            Status    Description",
-		"  ────────  ─────────────────────────────────  ────────  ──────────────",
-		"  explorer  disabled                           disabled",
-		"  reviewer  deepseek/deepseek-v4-flash [high]  ready     review changes",
-		"",
-		"Warnings",
-		"  Warning:   explorer: disabled for this workspace",
-	}, "\n")
-	if plain != want {
-		t.Fatalf("subagent output mismatch:\n--- got ---\n%s\n--- want ---\n%s", plain, want)
-	}
-}
-
 func TestExecuteControlPromptResultForwardsSlashResultAndEvents(t *testing.T) {
 	t.Parallel()
 
@@ -241,7 +214,7 @@ func TestExecuteControlPromptResultDefersNewSessionStatusAfterClearAndNotice(t *
 
 	var got []tea.Msg
 	sender := &ProgramSender{Send: func(msg tea.Msg) { got = append(got, msg) }}
-	executeControlPromptResult(context.Background(), nil, sender, controlprompt.Result{
+	executeControlPromptResult(context.Background(), &modelConnectControlStub{}, sender, controlprompt.Result{
 		Handled:      true,
 		ClearHistory: true,
 		Events: []eventstream.Envelope{{
@@ -250,10 +223,11 @@ func TestExecuteControlPromptResultDefersNewSessionStatusAfterClearAndNotice(t *
 		}},
 		ActiveSessionID: "session-2",
 		RefreshStatus:   true,
+		RefreshCommands: true,
 	})
 
-	if len(got) != 3 {
-		t.Fatalf("sent messages = %#v, want clear, notice, deferred status", got)
+	if len(got) != 4 {
+		t.Fatalf("sent messages = %#v, want clear, notice, deferred status, commands", got)
 	}
 	if _, ok := got[0].(ClearHistoryMsg); !ok {
 		t.Fatalf("first message = %#v, want ClearHistoryMsg", got[0])
@@ -262,7 +236,11 @@ func TestExecuteControlPromptResultDefersNewSessionStatusAfterClearAndNotice(t *
 		t.Fatalf("second message = %#v, want new-session notice", got[1])
 	}
 	if _, ok := got[2].(statusRefreshRequestMsg); !ok {
-		t.Fatalf("last message = %#v, want deferred status refresh", got[2])
+		t.Fatalf("third message = %#v, want deferred status refresh", got[2])
+	}
+	commands, ok := got[3].(SetCommandsMsg)
+	if !ok || !slices.Contains(commands.Commands, "sol") {
+		t.Fatalf("last message = %#v, want refreshed global Agent commands", got[3])
 	}
 }
 

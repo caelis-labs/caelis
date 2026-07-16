@@ -1,11 +1,28 @@
 package tuiapp
 
 import (
+	"context"
+	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
+
+type slashArgLoadResultMsg struct {
+	seq        uint64
+	command    string
+	query      string
+	candidates []SlashArgCandidate
+	err        error
+}
+
+type acpSetupProgressMsg struct {
+	seq      uint64
+	progress controlagents.SetupProgress
+}
 
 func (m *Model) clearSlashArg() {
 	m.clearWizard()
@@ -80,7 +97,10 @@ func (m *Model) syncSlashInputOverlays() {
 }
 
 func (m *Model) updateSlashArgCandidates() {
-	if !m.slashArgActive || m.cfg.SlashArgComplete == nil || m.turnRunning() {
+	if m.slashArgLoadPending {
+		return
+	}
+	if !m.slashArgActive || !m.hasSlashArgCompleter() || m.turnRunning() {
 		m.slashArgCandidates = nil
 		m.slashArgQuery = ""
 		m.slashArgIndex = 0
@@ -136,7 +156,35 @@ func (m *Model) updateSlashArgCandidates() {
 		m.slashArgIndex = 0
 		return
 	}
-	candidates, err := m.cfg.SlashArgComplete(command, query, 200)
+	if isAsyncSlashArgCommand(command) {
+		if m.slashArgLoaded && sameAsyncSlashArgCatalog(m.slashArgLoadedCommand, command) {
+			m.applySlashArgCandidates(command, query, m.slashArgLoadedCandidates, nil)
+			return
+		}
+		m.slashArgCandidates = nil
+		m.slashArgQuery = query
+		m.slashArgIndex = 0
+		return
+	}
+	candidates, err := m.completeSlashArg(contextOrBackground(m.cfg.Context), command, query, 200)
+	m.applySlashArgCandidates(command, query, candidates, err)
+}
+
+func (m *Model) hasSlashArgCompleter() bool {
+	return m != nil && m.cfg.SlashArgComplete != nil
+}
+
+func (m *Model) completeSlashArg(ctx context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
+	if m == nil {
+		return nil, nil
+	}
+	if m.cfg.SlashArgComplete != nil {
+		return m.cfg.SlashArgComplete(contextOrBackground(ctx), command, query, limit)
+	}
+	return nil, nil
+}
+
+func (m *Model) applySlashArgCandidates(command string, query string, candidates []SlashArgCandidate, err error) {
 	if err != nil || len(candidates) == 0 {
 		m.slashArgCandidates = nil
 		m.slashArgQuery = query
@@ -163,6 +211,198 @@ func (m *Model) updateSlashArgCandidates() {
 	m.slashArgCandidates = filtered
 }
 
+func (m *Model) beginSlashArgLoad() tea.Cmd {
+	if m == nil || !m.slashArgActive || !m.hasSlashArgCompleter() {
+		return nil
+	}
+	command := m.currentSlashArgCompletionCommand()
+	if !isAsyncSlashArgCommand(command) {
+		m.updateSlashArgCandidates()
+		return nil
+	}
+	if m.slashArgLoaded && sameAsyncSlashArgCatalog(m.slashArgLoadedCommand, command) {
+		m.updateSlashArgCandidates()
+		return nil
+	}
+	query := strings.TrimSpace(m.slashArgQuery)
+	m.cancelSlashArgLoad()
+	m.slashArgLoadSeq++
+	seq := m.slashArgLoadSeq
+	m.slashArgLoadPending = true
+	m.slashArgLoadLabel = slashArgLoadLabel(command)
+	m.slashArgLoadStartedAt = time.Now()
+	m.slashArgLoadBytes = 0
+	m.slashArgCandidates = nil
+	m.slashArgLoaded = false
+	m.slashArgLoadedCommand = ""
+	m.slashArgLoadedCandidates = nil
+	if !m.turnRunning() {
+		m.startRunningAnimation()
+	}
+	requestCtx, cancel := context.WithCancel(contextOrBackground(m.cfg.Context))
+	if sender := m.cfg.ProgramSender; sender != nil {
+		requestCtx = controlagents.WithSetupProgress(requestCtx, func(progress controlagents.SetupProgress) {
+			sender.SendMsg(acpSetupProgressMsg{seq: seq, progress: progress})
+		})
+	}
+	m.slashArgLoadCancel = cancel
+	complete := m.cfg.SlashArgComplete
+	return tea.Batch(func() tea.Msg {
+		candidates, err := complete(requestCtx, command, "", 200)
+		return slashArgLoadResultMsg{
+			seq: seq, command: command, query: query, candidates: candidates, err: err,
+		}
+	}, m.scheduleSpinnerTick())
+}
+
+func (m *Model) handleSlashArgLoadResult(msg slashArgLoadResultMsg) tea.Cmd {
+	if m == nil || msg.seq != m.slashArgLoadSeq || !m.slashArgLoadPending || strings.TrimSpace(m.slashArgCommand) != msg.command {
+		return nil
+	}
+	m.cancelSlashArgLoad()
+	m.slashArgLoadPending = false
+	m.slashArgLoadLabel = ""
+	m.slashArgLoadStartedAt = time.Time{}
+	m.slashArgLoadBytes = 0
+	if !m.turnRunning() {
+		m.stopRunningAnimation()
+	}
+	if msg.err == nil {
+		m.slashArgLoaded = true
+		m.slashArgLoadedCommand = msg.command
+		m.slashArgLoadedCandidates = append([]SlashArgCandidate(nil), msg.candidates...)
+	}
+	m.applySlashArgCandidates(msg.command, msg.query, msg.candidates, msg.err)
+	if msg.err != nil {
+		return m.showHint(fmt.Sprintf("ACP Agent setup failed: %v", msg.err), hintOptions{
+			priority: HintPriorityHigh, clearOnMessage: true, clearAfter: systemHintDuration,
+		})
+	}
+	return nil
+}
+
+func (m *Model) handleACPSetupProgress(msg acpSetupProgressMsg) {
+	if m == nil || msg.seq != m.slashArgLoadSeq || !m.slashArgLoadPending {
+		return
+	}
+	progress := msg.progress
+	name := acpSetupAdapterDisplayName(progress.AdapterID)
+	switch progress.Phase {
+	case controlagents.SetupPhaseChecking:
+		m.slashArgLoadLabel = "Checking the " + name + " ACP Agent installation"
+	case controlagents.SetupPhaseWaiting:
+		m.slashArgLoadLabel = "Another Caelis session is installing " + name + "; waiting safely"
+	case controlagents.SetupPhaseInstalling:
+		m.slashArgLoadLabel = "Installing " + name + " ACP Agent; the runtime download may take several minutes"
+	case controlagents.SetupPhaseDownloading:
+		m.slashArgLoadLabel = "Downloading and unpacking " + name + " ACP Agent"
+	case controlagents.SetupPhaseVerifying:
+		m.slashArgLoadLabel = "Verifying the " + name + " adapter and platform runtime"
+	case controlagents.SetupPhaseReady:
+		m.slashArgLoadLabel = name + " ACP Agent is ready"
+	case controlagents.SetupPhaseDiscovering:
+		m.slashArgLoadLabel = "Starting " + name + " ACP Agent and discovering models"
+	default:
+		if detail := strings.TrimSpace(progress.Detail); detail != "" {
+			m.slashArgLoadLabel = detail
+		}
+	}
+	if progress.Bytes > m.slashArgLoadBytes {
+		m.slashArgLoadBytes = progress.Bytes
+	}
+}
+
+func (m *Model) cancelSlashArgLoad() {
+	if m == nil || m.slashArgLoadCancel == nil {
+		return
+	}
+	m.slashArgLoadCancel()
+	m.slashArgLoadCancel = nil
+}
+
+func (m *Model) currentSlashArgCompletionCommand() string {
+	if m == nil {
+		return ""
+	}
+	if m.isWizardActive() && m.wizard != nil {
+		return strings.TrimSpace(m.wizard.completionCommand())
+	}
+	return strings.TrimSpace(m.slashArgCommand)
+}
+
+func sameAsyncSlashArgCatalog(left string, right string) bool {
+	return asyncSlashArgCatalogKey(left) == asyncSlashArgCatalogKey(right)
+}
+
+func asyncSlashArgCatalogKey(command string) string {
+	command = strings.TrimSpace(command)
+	prefix := ""
+	raw := ""
+	switch {
+	case strings.HasPrefix(command, "connect-acp-model:"):
+		prefix = "model"
+		raw = strings.TrimPrefix(command, "connect-acp-model:")
+	case strings.HasPrefix(command, "connect-acp-config:"):
+		prefix = "config"
+		raw = strings.TrimPrefix(command, "connect-acp-config:")
+	default:
+		return command
+	}
+	payload, err := parseACPConnectWizardPayload(raw)
+	if err != nil {
+		return command
+	}
+	return strings.Join([]string{
+		prefix,
+		payload.Agent,
+		string(payload.Launcher),
+		payload.CommandLine,
+		payload.Model,
+	}, "\x00")
+}
+
+func isAsyncSlashArgCommand(command string) bool {
+	command = strings.TrimSpace(command)
+	return strings.HasPrefix(command, "connect-acp-model:") || strings.HasPrefix(command, "connect-acp-config:")
+}
+
+func slashArgLoadLabel(command string) string {
+	prefix := "Preparing local ACP Agent"
+	raw := ""
+	switch {
+	case strings.HasPrefix(command, "connect-acp-model:"):
+		raw = strings.TrimPrefix(command, "connect-acp-model:")
+	case strings.HasPrefix(command, "connect-acp-config:"):
+		raw = strings.TrimPrefix(command, "connect-acp-config:")
+		prefix = "Loading ACP Agent options"
+	}
+	if payload, err := parseACPConnectWizardPayload(raw); err == nil && payload.Agent != "" {
+		name := acpSetupAdapterDisplayName(payload.Agent)
+		if strings.HasPrefix(command, "connect-acp-model:") {
+			return "Preparing " + name + " ACP Agent"
+		}
+		return "Loading " + name + " model options"
+	}
+	return prefix
+}
+
+func acpSetupAdapterDisplayName(adapterID string) string {
+	switch strings.ToLower(strings.TrimSpace(adapterID)) {
+	case "claude":
+		return "Claude Code"
+	case "codex":
+		return "Codex"
+	default:
+		adapterID = strings.TrimSpace(adapterID)
+		if adapterID == "" {
+			return "local"
+		}
+		runes := []rune(adapterID)
+		runes[0] = []rune(strings.ToUpper(string(runes[0])))[0]
+		return string(runes)
+	}
+}
+
 func isExactModelUseReasoningCommand(command string, parsedCmd string, query string) bool {
 	command = strings.TrimSpace(command)
 	parsedCmd = strings.TrimSpace(parsedCmd)
@@ -175,7 +415,7 @@ func isExactModelUseReasoningCommand(command string, parsedCmd string, query str
 
 func (m *Model) exactModelUseReasoningCandidates(query string, candidates []SlashArgCandidate) (string, []SlashArgCandidate) {
 	query = strings.TrimSpace(query)
-	if query == "" || m == nil || m.cfg.SlashArgComplete == nil {
+	if query == "" || m == nil || !m.hasSlashArgCompleter() {
 		return "", nil
 	}
 	for _, candidate := range candidates {
@@ -185,7 +425,7 @@ func (m *Model) exactModelUseReasoningCandidates(query string, candidates []Slas
 			continue
 		}
 		nextCommand := "model use " + value
-		next, err := m.cfg.SlashArgComplete(nextCommand, "", 200)
+		next, err := m.completeSlashArg(contextOrBackground(m.cfg.Context), nextCommand, "", 200)
 		if err != nil || len(next) == 0 {
 			return "", nil
 		}
@@ -222,20 +462,6 @@ func (m *Model) applySlashArgCompletion() tea.Cmd {
 	// Non-wizard: fill and close.
 	command := strings.TrimSpace(m.slashArgCommand)
 	switch command {
-	case "agent":
-		m.setInputText("/agent " + choice + " ")
-		m.syncTextareaFromInput()
-		switch choice {
-		case "add", "install", "remove", "use":
-			m.activateSlashArgPickerFromInput("agent " + choice)
-		default:
-			m.clearSlashArg()
-		}
-		return nil
-	case "agent add", "agent install", "agent remove", "agent use":
-		m.setInputText("/" + command + " " + choice)
-		m.clearSlashArg()
-		return nil
 	case "plugin":
 		if choice == "manage" {
 			line := "/plugin manage"
@@ -281,21 +507,6 @@ func (m *Model) applySlashArgCompletion() tea.Cmd {
 		m.setInputText("/" + command + " " + choice)
 		m.clearSlashArg()
 		return nil
-	case "subagent":
-		m.setInputText("/subagent " + choice + " ")
-		m.syncTextareaFromInput()
-		switch choice {
-		case "bind":
-			m.activateSlashArgPickerFromInput("subagent " + choice)
-		default:
-			m.clearSlashArg()
-		}
-		return nil
-	case "subagent bind":
-		m.setInputText("/subagent bind " + choice + " ")
-		m.syncTextareaFromInput()
-		m.activateSlashArgPickerFromInput("subagent bind " + choice)
-		return nil
 	case "model":
 		m.setInputText("/model " + choice + " ")
 		m.syncTextareaFromInput()
@@ -332,33 +543,6 @@ func (m *Model) applySlashArgCompletion() tea.Cmd {
 		m.clearSlashArg()
 		return nil
 	}
-	if strings.HasPrefix(command, "subagent bind ") {
-		fields := strings.Fields(command)
-		if len(fields) == 3 {
-			m.setInputText("/" + command + " " + choice + " ")
-			m.syncTextareaFromInput()
-			switch choice {
-			case "model", "acp":
-				m.activateSlashArgPickerFromInput(command + " " + choice)
-			default:
-				m.clearSlashArg()
-			}
-			return nil
-		}
-		if len(fields) == 4 {
-			m.setInputText("/" + command + " " + choice + " ")
-			m.syncTextareaFromInput()
-			if fields[3] == "model" {
-				m.activateSlashArgPickerFromInput(command + " " + choice)
-			} else {
-				m.clearSlashArg()
-			}
-			return nil
-		}
-		m.setInputText("/" + command + " " + choice)
-		m.clearSlashArg()
-		return nil
-	}
 	m.setInputText("/" + command + " " + choice + " ")
 	m.clearSlashArg()
 	return nil
@@ -378,10 +562,8 @@ func (m *Model) shouldExecuteSlashArgSelection(command string, choice string) bo
 		return false
 	}
 	switch command {
-	case "agent":
+	case "lead":
 		return false
-	case "agent add", "agent install", "agent remove", "agent use":
-		return true
 	case "plugin":
 		return false
 	case "plugin marketplace":
@@ -390,10 +572,6 @@ func (m *Model) shouldExecuteSlashArgSelection(command string, choice string) bo
 		return true
 	case "plugin rm":
 		return true
-	case "subagent":
-		return false
-	case "subagent bind":
-		return false
 	case "model":
 		return false
 	case "model use":
@@ -404,22 +582,12 @@ func (m *Model) shouldExecuteSlashArgSelection(command string, choice string) bo
 	if strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
 		return true
 	}
-	if strings.HasPrefix(command, "subagent bind ") {
-		fields := strings.Fields(command)
-		if len(fields) == 3 {
-			return choice == "default" || choice == "self" || choice == "builtin" || choice == "built-in"
-		}
-		if len(fields) == 4 {
-			return fields[3] == "acp"
-		}
-		return true
-	}
 	return true
 }
 
 func requiresExactSlashArgSelection(command string) bool {
 	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "agent remove", "agent rm", "model del", "plugin rm", "plugin marketplace update", "plugin marketplace rm":
+	case "model del", "plugin rm", "plugin marketplace update", "plugin marketplace rm":
 		return true
 	default:
 		return false
@@ -438,19 +606,8 @@ func isExecutableSlashArgInput(line string) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(fields[0])) {
-	case "/agent":
-		action := ""
-		if len(fields) >= 2 {
-			action = strings.ToLower(strings.TrimSpace(fields[1]))
-		}
-		switch action {
-		case "list":
-			return len(fields) == 2
-		case "add", "install", "remove", "use":
-			return len(fields) >= 3
-		default:
-			return false
-		}
+	case "/lead":
+		return len(fields) == 2
 	case "/model":
 		action := strings.ToLower(strings.TrimSpace(fields[1]))
 		switch action {
@@ -484,29 +641,6 @@ func isExecutableSlashArgInput(line string) bool {
 		default:
 			return false
 		}
-	case "/subagent":
-		action := strings.ToLower(strings.TrimSpace(fields[1]))
-		switch action {
-		case "list":
-			return len(fields) == 2
-		case "bind":
-			if len(fields) < 4 {
-				return false
-			}
-			target := strings.ToLower(strings.TrimSpace(fields[3]))
-			switch target {
-			case "default", "self", "builtin", "built-in":
-				return len(fields) == 4
-			case "model":
-				return len(fields) == 5 || len(fields) == 6
-			case "acp":
-				return len(fields) == 5
-			default:
-				return false
-			}
-		default:
-			return false
-		}
 	default:
 		return false
 	}
@@ -516,6 +650,17 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	if m.slashArgActive && strings.TrimSpace(m.slashArgCommand) == "" && !m.isWizardActive() {
 		m.clearSlashArg()
 		return false, nil
+	}
+	if m.slashArgLoadPending {
+		if key.Matches(msg, m.keys.Back) {
+			m.setInputText("")
+			m.syncTextareaFromInput()
+			m.clearSlashArg()
+			return true, m.showHint("ACP Agent setup canceled; no incomplete installation was activated.", hintOptions{
+				priority: HintPriorityNormal, clearAfter: systemHintDuration,
+			})
+		}
+		return true, nil
 	}
 	switch {
 	case key.Matches(msg, m.keys.Back):
@@ -536,6 +681,11 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.Complete):
+		if len(m.slashArgCandidates) == 0 {
+			if cmd := m.beginSlashArgLoad(); cmd != nil {
+				return true, cmd
+			}
+		}
 		cmd := m.applySlashArgCompletion()
 		m.syncTextareaFromInput()
 		return true, cmd
@@ -545,6 +695,11 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		}
 		if !m.isWizardActive() {
 			m.updateSlashArgCandidates()
+		}
+		if len(m.slashArgCandidates) == 0 {
+			if cmd := m.beginSlashArgLoad(); cmd != nil {
+				return true, cmd
+			}
 		}
 		// Delegate to wizard engine if active.
 		if m.isWizardActive() {
@@ -577,7 +732,7 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			_, submitCmd := m.submitLine(line)
 			return true, submitCmd
 		}
-		if command == "agent" || command == "plugin" || command == "plugin marketplace" || command == "plugin marketplace update" || command == "plugin marketplace rm" || command == "subagent" || command == "subagent bind" || strings.HasPrefix(command, "subagent bind ") || command == "model" || command == "model use" || command == "model del" || strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
+		if command == "plugin" || command == "plugin marketplace" || command == "plugin marketplace update" || command == "plugin marketplace rm" || command == "model" || command == "model use" || command == "model del" || strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
 			cmd := m.applySlashArgCompletion()
 			m.syncTextareaFromInput()
 			return true, cmd

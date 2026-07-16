@@ -2,6 +2,7 @@ package controladapter
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -392,6 +393,15 @@ func TestRegressionCommandExecNewSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
+	for _, model := range []string{"codex-sim", "claude-sim"} {
+		if _, err := driver.Connect(ctx, ConnectConfig{Provider: "ollama", Model: model}); err != nil {
+			t.Fatalf("Connect(%s) error = %v", model, err)
+		}
+	}
+	agentsBefore, err := driver.ListAgents(ctx, 100)
+	if err != nil {
+		t.Fatalf("ListAgents() before /new error = %v", err)
+	}
 
 	newSess, err := driver.NewSession(ctx)
 	if err != nil {
@@ -410,6 +420,13 @@ func TestRegressionCommandExecNewSession(t *testing.T) {
 	}
 	if after.Session.ID != newSess.SessionID {
 		t.Fatalf("Status().SessionID = %q, want %q after NewSession", after.Session.ID, newSess.SessionID)
+	}
+	agentsAfter, err := driver.ListAgents(ctx, 100)
+	if err != nil {
+		t.Fatalf("ListAgents() after /new error = %v", err)
+	}
+	if !reflect.DeepEqual(agentsAfter, agentsBefore) {
+		t.Fatalf("global Agent roster changed across /new:\nbefore: %#v\nafter:  %#v", agentsBefore, agentsAfter)
 	}
 }
 

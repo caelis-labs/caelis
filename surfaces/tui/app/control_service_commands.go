@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
@@ -14,24 +15,29 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
-func dispatchSlashCommand(service control.Service, sender *ProgramSender, text string) TaskResultMsg {
-	return dispatchSlashCommandWithContext(context.Background(), service, sender, text, nil)
+type agentRosterServices interface {
+	controlagents.Connector
+	controlagents.Disconnector
 }
 
-func dispatchSlashCommandWithContext(ctx context.Context, service control.Service, sender *ProgramSender, text string, attachments []Attachment) TaskResultMsg {
-	return dispatchSlashCommandWithContextResult(ctx, service, sender, text, attachments).completion
+func dispatchSlashCommand(service control.Service, agents agentRosterServices, sender *ProgramSender, text string) TaskResultMsg {
+	return dispatchSlashCommandWithContext(context.Background(), service, agents, sender, text, nil)
 }
 
-func dispatchSlashCommandWithContextResult(ctx context.Context, service control.Service, sender *ProgramSender, text string, attachments []Attachment) executeLineResult {
+func dispatchSlashCommandWithContext(ctx context.Context, service control.Service, agents agentRosterServices, sender *ProgramSender, text string, attachments []Attachment) TaskResultMsg {
+	return dispatchSlashCommandWithContextResult(ctx, service, agents, sender, text, attachments).completion
+}
+
+func dispatchSlashCommandWithContextResult(ctx context.Context, service control.Service, agents agentRosterServices, sender *ProgramSender, text string, attachments []Attachment) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
 	}
 	cmd, args, _, _ := controlprompt.ParseSlash(text)
-	return dispatchTUIPrivateSlashCommandWithContext(ctx, service, sender, cmd, args)
+	return dispatchTUIPrivateSlashCommandWithContext(ctx, service, agents, sender, cmd, args)
 }
 
-func dispatchTUIPrivateSlashCommandWithContext(ctx context.Context, service control.Service, sender *ProgramSender, cmd string, args string) executeLineResult {
+func dispatchTUIPrivateSlashCommandWithContext(ctx context.Context, service control.Service, agents agentRosterServices, sender *ProgramSender, cmd string, args string) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -39,12 +45,10 @@ func dispatchTUIPrivateSlashCommandWithContext(ctx context.Context, service cont
 	send := sender.sendFunc()
 
 	switch cmd {
-	case "agent":
-		return executeLineResult{completion: slashAgentPrivateWithContext(ctx, service, send, args)}
 	case "plugin":
 		return executeLineResult{completion: slashPluginWithContext(ctx, service, send, args)}
 	case "connect":
-		return executeLineResult{completion: slashConnectWithContext(ctx, service, send, args)}
+		return executeLineResult{completion: slashConnectWithContext(ctx, service, agents, send, args)}
 	case "exit", "quit":
 		return executeLineResult{completion: TaskResultMsg{ExitNow: true}}
 	default:
@@ -53,18 +57,10 @@ func dispatchTUIPrivateSlashCommandWithContext(ctx context.Context, service cont
 	}
 }
 
-func executeTUIPrivateSlashCommandWithContext(ctx context.Context, service control.Service, sender *ProgramSender, cmd string, args string) (executeLineResult, bool) {
+func executeTUIPrivateSlashCommandWithContext(ctx context.Context, service control.Service, agents agentRosterServices, sender *ProgramSender, cmd string, args string) (executeLineResult, bool) {
 	cmd = strings.ToLower(strings.TrimSpace(cmd))
 	if cmd == "" {
 		return executeLineResult{}, false
-	}
-	if strings.EqualFold(cmd, "agent") && isTUIPrivateAgentSlash(args) {
-		if _, activeACP := control.ActiveACPStatus(ctx, service); activeACP {
-			if !controlcommands.IsLocalDuringACP(cmd) {
-				return executeLineResult{}, false
-			}
-		}
-		return dispatchTUIPrivateSlashCommandWithContext(ctx, service, sender, cmd, args), true
 	}
 	if controlcommands.IsSharedKnown(cmd) || !controlcommands.IsKnown(cmd) {
 		return executeLineResult{}, false
@@ -74,7 +70,7 @@ func executeTUIPrivateSlashCommandWithContext(ctx context.Context, service contr
 			return executeLineResult{}, false
 		}
 	}
-	return dispatchTUIPrivateSlashCommandWithContext(ctx, service, sender, cmd, args), true
+	return dispatchTUIPrivateSlashCommandWithContext(ctx, service, agents, sender, cmd, args), true
 }
 
 func isCoreLocalSlashCommand(cmd string) bool {
@@ -115,12 +111,65 @@ func projectResumeReplayEvents(events []eventstream.Envelope) []TranscriptEvent 
 	return transcript.ProjectReplayEvents(events, tuiTranscriptProjector{})
 }
 
-func slashConnect(service control.Service, send func(tea.Msg), args string) TaskResultMsg {
-	return slashConnectWithContext(context.Background(), service, send, args)
+func slashConnect(service control.Service, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {
+	return slashConnectWithContext(context.Background(), service, agents, send, args)
 }
 
-func slashConnectWithContext(ctx context.Context, service control.Service, send func(tea.Msg), args string) TaskResultMsg {
+func slashConnectWithContext(ctx context.Context, service control.Service, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
+	kind, payloadText, _ := controlprompt.ParseFirst(strings.TrimSpace(args))
+	if strings.EqualFold(strings.TrimSpace(kind), "disconnect") {
+		agentID, confirmation, _ := controlprompt.ParseFirst(payloadText)
+		if strings.TrimSpace(agentID) == "" || !strings.EqualFold(strings.TrimSpace(confirmation), "confirmed") {
+			sendNotice(send, "run /connect disconnect to choose and confirm a local ACP Agent")
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
+		if agents == nil {
+			return TaskResultMsg{Err: friendlyCommandError("disconnect ACP Agent", fmt.Errorf("ACP Agent roster service is unavailable"))}
+		}
+		result, err := agents.DisconnectACP(ctx, agentID)
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("disconnect ACP Agent", err)}
+		}
+		message := "disconnected /" + strings.TrimSpace(result.Agent.ID)
+		if result.ConnectionRemoved {
+			message += "; Caelis connection settings were removed"
+		} else {
+			message += "; the shared ACP connection remains"
+		}
+		message += "; the installed adapter was kept"
+		sendNotice(send, message)
+		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
+		return TaskResultMsg{SuppressTurnDivider: true}
+	}
+	if strings.EqualFold(strings.TrimSpace(kind), "acp") {
+		payload, err := parseACPConnectWizardPayload(payloadText)
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("connect ACP agent", err)}
+		}
+		if agents == nil {
+			return TaskResultMsg{Err: friendlyCommandError("connect ACP agent", fmt.Errorf("ACP connection service is unavailable"))}
+		}
+		result, err := agents.ConnectACP(ctx, controlagents.ConnectRequest{
+			AdapterID: payload.Agent, Launcher: payload.Launcher,
+			CommandLine: payload.CommandLine, ModelID: payload.Model,
+			ConfigValues: payload.ConfigValues,
+		})
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("connect ACP agent", err)}
+		}
+		names := make([]string, 0, len(result.Agents))
+		for _, agent := range result.Agents {
+			name := "/" + strings.TrimSpace(agent.ID)
+			if model := strings.TrimSpace(agent.Defaults.ModelID); model != "" {
+				name += " (" + model + ")"
+			}
+			names = append(names, name)
+		}
+		sendNotice(send, "connected Agents: "+strings.Join(names, ", "))
+		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
+		return TaskResultMsg{SuppressTurnDivider: true}
+	}
 	cfg := parseConnectArgs(args)
 	if cfg.Provider == "" || cfg.Model == "" {
 		sendNotice(send, "usage: /connect\nrun /connect to open the guided setup wizard")
@@ -135,5 +184,6 @@ func slashConnectWithContext(ctx context.Context, service control.Service, send 
 	}
 	sendNotice(send, fmt.Sprintf("connected: %s", status.ModelStatus.Display))
 	sendStatusUpdate(send, status)
+	refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
 	return TaskResultMsg{SuppressTurnDivider: true}
 }

@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"time"
 
 	"charm.land/bubbles/v2/list"
 )
@@ -55,11 +56,20 @@ type OverlayState struct {
 	resumeRequestPending bool
 	resumeRequestCancel  context.CancelFunc
 
-	slashArgActive     bool
-	slashArgCommand    string
-	slashArgQuery      string
-	slashArgCandidates []SlashArgCandidate
-	slashArgIndex      int
+	slashArgActive           bool
+	slashArgCommand          string
+	slashArgQuery            string
+	slashArgCandidates       []SlashArgCandidate
+	slashArgIndex            int
+	slashArgLoadSeq          uint64
+	slashArgLoadPending      bool
+	slashArgLoadLabel        string
+	slashArgLoadStartedAt    time.Time
+	slashArgLoadBytes        int64
+	slashArgLoadCancel       context.CancelFunc
+	slashArgLoaded           bool
+	slashArgLoadedCommand    string
+	slashArgLoadedCandidates []SlashArgCandidate
 
 	completionRefreshSeq uint64
 }

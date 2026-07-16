@@ -20,7 +20,7 @@ type CommandSpec struct {
 	DynamicCompleter bool
 }
 
-var defaultACPCommandNames = []string{"status", "compact", "review"}
+var defaultACPCommandNames = []string{"status", "lead", "compact", "review"}
 
 // DefaultSpecs returns the canonical TUI slash command specs in display order.
 // Use DefaultSharedSpecs for commands that are safe for shared prompt routers,
@@ -79,12 +79,7 @@ func defaultSpecs() []CommandSpec {
 	for _, spec := range append(defaultSharedSpecs(), defaultTUISpecs()...) {
 		byName[spec.Name] = spec
 	}
-	if spec, ok := byName["agent"]; ok {
-		spec.Details = []string{"actions: list, add <builtin>, install <adapter>, use <agent|local>, remove <agent>"}
-		spec.ArgCandidates = agentTUIRootCandidates()
-		byName["agent"] = spec
-	}
-	order := []string{"help", "agent", "subagent", "review", "connect", "plugin", "model", "status", "doctor", "new", "resume", "compact", "exit", "quit"}
+	order := []string{"help", "review", "lead", "connect", "plugin", "model", "status", "doctor", "new", "resume", "compact", "exit", "quit"}
 	specs := make([]CommandSpec, 0, len(order))
 	for _, name := range order {
 		if spec, ok := byName[name]; ok {
@@ -97,9 +92,8 @@ func defaultSpecs() []CommandSpec {
 func defaultSharedSpecs() []CommandSpec {
 	specs := []CommandSpec{
 		{Name: "help", Usage: "/help", Description: "Show commands and shortcuts", LocalDuringACP: true},
-		{Name: "agent", Usage: "/agent <action>", Description: "Manage ACP agents and controller switching", LocalDuringACP: true, Details: []string{"actions: list, add <builtin>, use <agent|local>, remove <agent>"}, ArgCandidates: agentSharedRootCandidates(), DynamicCompleter: true},
-		{Name: "subagent", Usage: "/subagent <action>", Description: "Manage subagents and runtime bindings", LocalDuringACP: true, Details: []string{"actions: list, bind <id> default|model|acp ..."}, ArgCandidates: subagentRootCandidates(), DynamicCompleter: true},
 		{Name: "review", Usage: "/review [instructions]", Description: "Review current workspace changes with the built-in reviewer", LocalDuringACP: true},
+		{Name: "lead", Usage: "/lead <agent|local>", Description: "Transfer control of the current task", LocalDuringACP: true, DynamicCompleter: true},
 		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info", LocalDuringACP: true},
 		{Name: "doctor", Usage: "/doctor", Description: "Diagnose and repair Windows sandbox readiness", LocalDuringACP: true, Platforms: []string{"windows"}},
@@ -112,7 +106,7 @@ func defaultSharedSpecs() []CommandSpec {
 
 func defaultTUISpecs() []CommandSpec {
 	specs := []CommandSpec{
-		{Name: "connect", Usage: "/connect", Description: "Open the guided model/provider setup wizard", DynamicCompleter: true},
+		{Name: "connect", Usage: "/connect", Description: "Connect a model provider or local ACP Agent", DynamicCompleter: true},
 		{Name: "plugin", Usage: "/plugin <action>", Description: "Manage Caelis plugins", LocalDuringACP: true, Details: []string{"actions: install <plugin@marketplace|path>, marketplace add|list|update|rm, manage, rm <id>"}, ArgCandidates: pluginRootCandidates(), DynamicCompleter: true},
 		{Name: "exit", Usage: "/exit", Description: "Exit the TUI", LocalDuringACP: true},
 		{Name: "quit", Usage: "/quit", Description: "Exit the TUI", LocalDuringACP: true},
@@ -352,32 +346,6 @@ func RootArgCandidatesForPlatform(command string, goos string) []control.SlashAr
 	out := make([]control.SlashArgCandidate, len(spec.ArgCandidates))
 	copy(out, spec.ArgCandidates)
 	return out
-}
-
-func agentSharedRootCandidates() []control.SlashArgCandidate {
-	return []control.SlashArgCandidate{
-		{Value: "use", Display: "use", Detail: "Switch the main controller"},
-		{Value: "add", Display: "add", Detail: "Register a built-in ACP agent"},
-		{Value: "list", Display: "list", Detail: "List registered ACP agents"},
-		{Value: "remove", Display: "remove", Detail: "Unregister an ACP agent"},
-	}
-}
-
-func agentTUIRootCandidates() []control.SlashArgCandidate {
-	return []control.SlashArgCandidate{
-		{Value: "use", Display: "use", Detail: "Switch the main controller"},
-		{Value: "add", Display: "add", Detail: "Register a built-in ACP agent"},
-		{Value: "install", Display: "install", Detail: "Install and register an external ACP adapter"},
-		{Value: "list", Display: "list", Detail: "List registered ACP agents"},
-		{Value: "remove", Display: "remove", Detail: "Unregister an ACP agent"},
-	}
-}
-
-func subagentRootCandidates() []control.SlashArgCandidate {
-	return []control.SlashArgCandidate{
-		{Value: "list", Display: "list", Detail: "List subagents and bindings"},
-		{Value: "bind", Display: "bind", Detail: "Bind subagents to the session model, a model alias, or an ACP agent"},
-	}
 }
 
 func modelRootCandidates() []control.SlashArgCandidate {

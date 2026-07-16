@@ -77,6 +77,12 @@ Document responsibilities are intentionally separate:
   model construction. Presentation adapters map requests into this package;
   `app/gatewayapp` only persists the resulting configuration and installs the
   selected model into its runtime transaction.
+- `control/agents`: Control-owned user Agent roster. Each Agent has exactly one
+  backing: a configured built-in model alias or an external ACP connection.
+  External connections carry launch declarations, per-Agent model/config
+  defaults, and discovery snapshots; all Agents share stable Agent/run slash
+  naming. Live ACP Session IDs remain execution state and are never persisted
+  as discovery configuration.
 - `ports/controlclient`: frozen transitional transport-neutral product-client
   commands, outcomes, bootstrap state, and Session-feed subscription contracts.
 - `internal/controlclient`: transitional implementation of Control-owned
@@ -92,7 +98,7 @@ Document responsibilities are intentionally separate:
   catalog plus prompt request/result parsing contracts.
 - `internal/controlpromptrouter`: shared app-control slash orchestration over
   `protocol/acp/control.Service`.
-- `internal/controlassembly`: product Agent assembly and profile resolution.
+- `internal/controlassembly`: product Agent assembly resolution.
 - `internal/controlplane`: shared-ledger routing, endpoint lifecycle/recovery,
   and handoff coordination.
 - `app/gatewayapp`, `internal/kernel`: remaining Control host integration and
@@ -101,8 +107,8 @@ Document responsibilities are intentionally separate:
   transitional in-process ACP/TUI command adapters. Do not add product-client
   operations to these aggregate interfaces or to `ports/*`; new capabilities
   belong in coherent `control/*` packages.
-- `ports/gateway`, `ports/plugin`, `ports/controlcommand`,
-  `ports/controlprompt`, and `ports/agentprofile`: frozen transitional
+- `ports/gateway`, `ports/plugin`, `ports/controlcommand`, and
+  `ports/controlprompt`: frozen transitional
   product-host contracts that stay outside the SDK and migrate toward
   `control/*` by bounded slices.
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
@@ -180,8 +186,8 @@ and roles, and routes system Agents through the common Runtime pipeline.
 Durable continuation is explicitly process-local live attach, while the
 production Control host owns fenced cross-Runtime Session execution leases.
 The lease serializes one canonical Turn rather than one Agent identity: local
-and ACP controllers plus Side ACP or Reviewer participant prompts use the same
-fenced envelope. Participant lifecycle is explicit Control metadata with
+and ACP controllers plus direct AgentRun or Reviewer participant prompts use
+the same fenced envelope. Participant lifecycle is explicit Control metadata with
 revision/delegation/generation CAS; handoff acquires the exclusive lease before
 endpoint activation and binding commit. ACP event forwarding preserves the
 owning Turn fence instead of becoming an unscoped writer. The leased Runtime

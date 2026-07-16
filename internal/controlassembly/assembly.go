@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
 const (
@@ -18,12 +19,13 @@ const (
 // AgentConfig is one pure ACP agent declaration resolved by the app layer.
 // Runtime code consumes these values to build concrete registries and managers.
 type AgentConfig struct {
-	Name        string
-	Description string
-	Command     string
-	Args        []string
-	Env         map[string]string
-	WorkDir     string
+	Name           string
+	Description    string
+	Command        string
+	Args           []string
+	Env            map[string]string
+	WorkDir        string
+	SessionOptions controlagents.SessionOptions
 }
 
 // SkillBundle is one pure skill-bundle declaration resolved by the app layer.
@@ -89,6 +91,7 @@ func CloneAgentConfig(in AgentConfig) AgentConfig {
 		out.Args = append([]string(nil), in.Args...)
 	}
 	out.Env = maps.Clone(in.Env)
+	out.SessionOptions = controlagents.NormalizeSessionOptions(in.SessionOptions)
 	return out
 }
 

@@ -83,8 +83,8 @@ func TestDiscoverMetaMaterializesSystemSkillsAndDedupesByPriority(t *testing.T) 
 	if got := byName["review"].Description; !strings.Contains(got, "review code changes") {
 		t.Fatalf("review description = %q, want code review trigger", got)
 	}
-	if got := byName["subagent-creator"].Description; !strings.Contains(got, "create or edit a reusable subagent markdown profile") || strings.Contains(got, "/agents") || strings.Contains(got, ".caelis") {
-		t.Fatalf("subagent-creator description = %q, want clear trigger without storage paths", got)
+	if _, ok := byName["subagent-creator"]; ok {
+		t.Fatal("removed subagent profile creator was materialized")
 	}
 	if got := byName["shared"].Description; got != "private shared" {
 		t.Fatalf("shared description = %q, want private user skill over public .agents skill", got)
@@ -141,7 +141,7 @@ func TestDiscoverMetaConcurrentSystemMaterializationDoesNotExposeEmptySkills(t *
 	testenv.SetHome(t, home)
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	systemRoot := filepath.Join(home, ".caelis", "skills", ".system")
-	emptySkill := filepath.Join(systemRoot, "subagent-creator")
+	emptySkill := filepath.Join(systemRoot, "review")
 	if err := os.MkdirAll(emptySkill, 0o755); err != nil {
 		t.Fatalf("mkdir empty system skill: %v", err)
 	}

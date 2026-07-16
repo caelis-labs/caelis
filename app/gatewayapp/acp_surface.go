@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	"github.com/caelis-labs/caelis/protocol/acp"
@@ -205,8 +206,9 @@ func (p gatewayACPSurface) PromptCapabilities(context.Context) (acp.PromptCapabi
 	}, nil
 }
 
-func (p gatewayACPSurface) AvailableCommands(context.Context, string) ([]acp.AvailableCommand, error) {
+func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID string) ([]acp.AvailableCommand, error) {
 	commands := make([]acp.AvailableCommand, 0, len(controlcommands.DefaultACPSpecs()))
+	seen := map[string]struct{}{}
 	for _, spec := range controlcommands.DefaultACPSpecs() {
 		if spec.Hidden {
 			continue
@@ -219,6 +221,7 @@ func (p gatewayACPSurface) AvailableCommands(context.Context, string) ([]acp.Ava
 			cmd.Input = commandInput(hint)
 		}
 		commands = append(commands, cmd)
+		seen[strings.ToLower(strings.TrimSpace(spec.Name))] = struct{}{}
 	}
 	if p.stack != nil {
 		for _, agent := range p.stack.ListACPAgents() {
@@ -229,11 +232,61 @@ func (p gatewayACPSurface) AvailableCommands(context.Context, string) ([]acp.Ava
 			if reservedSlashCommandName(name) {
 				continue
 			}
+			name = controlagents.NormalizeName(name)
+			if _, exists := seen[name]; exists {
+				continue
+			}
 			commands = append(commands, acp.AvailableCommand{
 				Name:        name,
 				Description: firstNonEmpty(strings.TrimSpace(agent.Description), "Send a prompt to the registered ACP agent"),
 				Input:       commandInput("prompt"),
 			})
+			seen[name] = struct{}{}
+		}
+		if strings.TrimSpace(sessionID) != "" {
+			activeSession, err := p.session(ctx, sessionID)
+			if err != nil {
+				return nil, err
+			}
+			runs := make([]controlagents.Run, 0, len(activeSession.Participants))
+			for _, participant := range activeSession.Participants {
+				runs = append(runs, controlagents.RunFromParticipant(
+					participant.Label,
+					participant.AgentName,
+					string(participant.Kind),
+					string(participant.Role),
+				))
+			}
+			for _, name := range controlagents.AppendRunNames(nil, runs, func(agent string) bool { return !reservedSlashCommandName(agent) }) {
+				if _, exists := seen[name]; exists {
+					continue
+				}
+				agent, _, _ := controlagents.ParseRunName(name)
+				commands = append(commands, acp.AvailableCommand{
+					Name:        name,
+					Description: "Continue the " + agent + " Agent run",
+					Input:       commandInput("prompt"),
+				})
+				seen[name] = struct{}{}
+			}
+			if remote, active, err := p.stack.ACPControllerStatus(ctx, activeSession.SessionRef); err != nil {
+				return nil, err
+			} else if active {
+				for _, command := range remote.Commands {
+					name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command.Name, "/")))
+					if fields := strings.Fields(name); len(fields) > 0 {
+						name = fields[0]
+					}
+					if name == "" || reservedSlashCommandName(name) {
+						continue
+					}
+					if _, exists := seen[name]; exists {
+						continue
+					}
+					commands = append(commands, acp.AvailableCommand{Name: name, Description: strings.TrimSpace(command.Description), Input: commandInput("prompt")})
+					seen[name] = struct{}{}
+				}
+			}
 		}
 	}
 	return commands, nil

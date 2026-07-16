@@ -18,7 +18,7 @@ func TestParticipantLifecycleEventUsesNormalizedACPParticipantSemantics(t *testi
 
 	event := participantLifecycleEvent(
 		session.Session{Controller: session.ControllerBinding{Kind: session.ControllerKindKernel, ControllerID: "kernel-1", EpochID: "epoch-1"}},
-		session.ParticipantBinding{ID: "participant-1", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar, SessionID: "remote-1"},
+		session.ParticipantBinding{ID: "participant-1", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar, SessionID: "remote-1", AgentName: "codex", Label: "@lina"},
 		"attached",
 		time.Unix(1, 0),
 	)
@@ -28,6 +28,9 @@ func TestParticipantLifecycleEventUsesNormalizedACPParticipantSemantics(t *testi
 	}
 	if event.Protocol.Method != session.ProtocolMethodParticipantUpdate {
 		t.Fatalf("participant method = %q, want %q", event.Protocol.Method, session.ProtocolMethodParticipantUpdate)
+	}
+	if event.Meta["agent"] != "codex" || event.Meta["handle"] != "lina" {
+		t.Fatalf("participant display meta = %#v, want typed Agent and human handle", event.Meta)
 	}
 }
 

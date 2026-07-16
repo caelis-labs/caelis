@@ -18,12 +18,10 @@ func (r Router) dispatchSlash(ctx context.Context, cmd string, args string, args
 		names := r.helpCommandNames(ctx)
 		help := controlcommands.HelpSnapshot(names)
 		return r.slashResult(control.NewHelpSlashResult(help)), nil
-	case "agent":
-		return r.dispatchAgent(ctx, args)
-	case "subagent":
-		return r.dispatchSubagent(ctx, args)
 	case "review":
 		return r.dispatchReview(ctx, args, argsStart, fullText, attachments)
+	case "lead":
+		return r.dispatchLead(ctx, args)
 	case "new":
 		return r.dispatchNew(ctx)
 	case "resume":
@@ -37,109 +35,37 @@ func (r Router) dispatchSlash(ctx context.Context, cmd string, args string, args
 	case "compact":
 		return r.dispatchCompact(ctx, args)
 	}
-	return r.dispatchDynamicAgent(ctx, cmd, args, prompt.AttachmentsForPromptRange(attachments, argsStart, len([]rune(strings.TrimSpace(fullText)))))
+	return r.dispatchAgentRun(ctx, cmd, args, prompt.AttachmentsForPromptRange(attachments, argsStart, len([]rune(strings.TrimSpace(fullText)))))
 }
 
-func (r Router) dispatchAgent(ctx context.Context, args string) (prompt.Result, error) {
-	sub, rest, _ := prompt.ParseFirst(strings.TrimSpace(args))
-	switch strings.ToLower(strings.TrimSpace(sub)) {
-	case "", "help":
-		return r.noticeResult(controlcommands.AgentHelpText()), nil
-	case "list":
-		agents, err := r.service.ListAgents(ctx, 20)
-		if err != nil {
-			return prompt.Result{}, controlcommands.FriendlyCommandError("agent list", err)
-		}
-		status, _ := r.service.AgentStatus(ctx)
-		return r.noticeResult(controlcommands.FormatAgentList(agents, status)), nil
-	case "status":
-		return r.noticeResult("usage: /agent list | add <builtin> | use <agent|local> | remove <agent>"), nil
-	case "add":
-		addArgs, ok := controlcommands.ParseAgentAddArgs(rest)
-		if !ok || addArgs.Target == "" {
-			return r.noticeResult("usage: /agent add <name> | /agent add custom <name> -- <command> [args...]"), nil
-		}
-		if addArgs.Install {
-			return r.noticeResult("usage: /agent add <name> | /agent add custom <name> -- <command> [args...]"), nil
-		}
-		_, err := r.service.AddAgentWithOptions(ctx, addArgs.Target, control.AgentAddOptions{
-			Custom: addArgs.Custom,
-		})
-		if err != nil {
-			return prompt.Result{}, controlcommands.FriendlyCommandError("agent add", err)
-		}
-		result := r.noticeResult(controlcommands.FormatAgentReadyNotice(addArgs.Target))
-		result.RefreshCommands = true
-		return result, nil
-	case "remove":
-		target := strings.TrimSpace(rest)
-		if target == "" {
-			return r.noticeResult("usage: /agent remove <agent>\nrun /agent list to inspect registered agents"), nil
-		}
-		_, err := r.service.RemoveAgent(ctx, target)
-		if err != nil {
-			return prompt.Result{}, controlcommands.FriendlyCommandError("agent remove", err)
-		}
-		result := r.noticeResult(controlcommands.FormatAgentRemovedNotice(target))
-		result.RefreshCommands = true
-		return result, nil
-	case "use":
-		target := strings.TrimSpace(rest)
-		if target == "" {
-			return r.noticeResult("usage: /agent use <agent|local>\nrun /agent list for registered agents"), nil
-		}
-		status, err := r.service.HandoffAgent(ctx, target)
-		if err != nil {
-			return prompt.Result{}, controlcommands.FriendlyCommandError("agent use", err)
-		}
-		result := r.noticeResult(controlcommands.FormatAgentUseNotice(target, status))
-		if current, err := r.service.Status(ctx); err == nil {
-			result.StatusUpdate = &current
-		}
-		result.RefreshCommands = true
-		return result, nil
-	default:
-		return r.noticeResult("usage: /agent list | add <builtin> | use <agent|local> | remove <agent>"), nil
+func (r Router) dispatchLead(ctx context.Context, args string) (prompt.Result, error) {
+	target := strings.TrimSpace(args)
+	if target == "" {
+		return r.noticeResult("usage: /lead <agent|local>"), nil
 	}
-}
-
-func (r Router) dispatchSubagent(ctx context.Context, args string) (prompt.Result, error) {
-	sub, rest, _ := prompt.ParseFirst(strings.TrimSpace(args))
-	switch strings.ToLower(strings.TrimSpace(sub)) {
-	case "", "help":
-		return r.noticeResult(subagentUsageText()), nil
-	case "list":
-		status, err := r.service.AgentProfileStatus(ctx)
-		if err != nil {
-			return prompt.Result{}, controlcommands.FriendlyCommandError("subagent list", err)
-		}
-		return r.slashResult(control.NewSubagentProfilesSlashResult(status)), nil
-	case "run":
-		return r.noticeResult(strings.Join([]string{
-			"/subagent run has been removed.",
-			"Use /review [instructions] for code review.",
-			"Use /<agent> <prompt> for a registered ACP side agent.",
-		}, "\n")), nil
-	case "bind":
-		cfg, ok := parseSubagentBindArgs(rest)
-		if !ok {
-			return r.noticeResult(subagentBindUsageText()), nil
-		}
-		status, err := r.service.BindAgentProfile(ctx, cfg)
-		if err != nil {
-			return prompt.Result{}, controlcommands.FriendlyCommandError("subagent bind", err)
-		}
-		result := r.noticeResult(control.FormatSubagentBindNotice(cfg.ProfileID, status))
-		result.RefreshCommands = true
-		return result, nil
-	default:
-		return r.noticeResult(subagentUsageText()), nil
+	status, err := r.service.HandoffAgent(ctx, target)
+	if err != nil {
+		return prompt.Result{}, controlcommands.FriendlyCommandError("lead", err)
 	}
+	label := strings.TrimSpace(status.ControllerLabel)
+	if label == "" {
+		label = target
+	}
+	text := label + " is now leading this task"
+	if controlcommands.IsLocalAgentTarget(target) {
+		text = "local Agent is now leading this task"
+	}
+	result := r.noticeResult(text)
+	if current, statusErr := r.service.Status(ctx); statusErr == nil {
+		result.StatusUpdate = &current
+	}
+	result.RefreshCommands = true
+	return result, nil
 }
 
 func (r Router) dispatchReview(ctx context.Context, args string, argsStart int, fullText string, attachments []control.Attachment) (prompt.Result, error) {
 	promptAttachments := prompt.AttachmentsForPromptRange(attachments, argsStart, len([]rune(strings.TrimSpace(fullText))))
-	turn, err := r.service.StartReviewSubagent(ctx, strings.TrimSpace(args), promptAttachments)
+	turn, err := r.service.StartReview(ctx, strings.TrimSpace(args), promptAttachments)
 	if err != nil {
 		return prompt.Result{}, controlcommands.FriendlyCommandError("review", err)
 	}
@@ -155,6 +81,7 @@ func (r Router) dispatchNew(ctx context.Context) (prompt.Result, error) {
 	result.ClearHistory = true
 	result.ActiveSessionID = strings.TrimSpace(session.SessionID)
 	result.RefreshStatus = true
+	result.RefreshCommands = true
 	return result, nil
 }
 
@@ -191,6 +118,7 @@ func (r Router) dispatchResume(ctx context.Context, args string) (prompt.Result,
 		SuppressTurnDivider: true,
 		ActiveSessionID:     strings.TrimSpace(resumed.SessionID),
 		RefreshStatus:       true,
+		RefreshCommands:     true,
 		Reconnect:           resumed.Reconnect,
 	}
 	if resumed.Reconnect == nil {
@@ -280,6 +208,7 @@ func (r Router) dispatchModel(ctx context.Context, args string) (prompt.Result, 
 		if status, err := r.service.Status(ctx); err == nil {
 			result.StatusUpdate = &status
 		}
+		result.RefreshCommands = true
 		return result, nil
 	default:
 		if activeACP {
@@ -303,34 +232,27 @@ func (r Router) dispatchCompact(ctx context.Context, args string) (prompt.Result
 	return result, nil
 }
 
-func (r Router) dispatchDynamicAgent(ctx context.Context, agent string, promptText string, attachments []control.Attachment) (prompt.Result, error) {
-	agent = strings.ToLower(strings.TrimSpace(agent))
+func (r Router) dispatchAgentRun(ctx context.Context, command string, promptText string, attachments []control.Attachment) (prompt.Result, error) {
+	command = strings.ToLower(strings.TrimSpace(command))
 	promptText = strings.TrimSpace(promptText)
 	if promptText == "" && len(attachments) == 0 {
-		if r.isRegisteredAgent(ctx, agent) {
-			return r.noticeResult(fmt.Sprintf("usage: /%s <prompt>", agent)), nil
+		if r.isRegisteredAgent(ctx, command) || r.isDirectAgentRun(ctx, command) {
+			return r.noticeResult(fmt.Sprintf("usage: /%s <prompt>", command)), nil
 		}
-		return prompt.Result{}, nil
+		return r.noticeResult(fmt.Sprintf("unknown command: /%s\nrun /help to list available commands", command)), nil
 	}
-	turn, err := r.service.StartAgentSubagent(ctx, agent, promptText, attachments)
+	if r.isDirectAgentRun(ctx, command) {
+		turn, err := r.service.ContinueAgentRun(ctx, command, promptText, attachments)
+		if err != nil {
+			return prompt.Result{}, controlcommands.FriendlyCommandError("/"+command, err)
+		}
+		return prompt.Result{Handled: true, Turn: turn}, nil
+	}
+	turn, err := r.service.StartAgentRun(ctx, command, promptText, attachments)
 	if err != nil {
-		return prompt.Result{}, controlcommands.FriendlyCommandError("/"+agent, err)
+		return prompt.Result{}, controlcommands.FriendlyCommandError("/"+command, err)
 	}
-	return prompt.Result{Handled: true, Turn: turn}, nil
-}
-
-func (r Router) dispatchMention(ctx context.Context, text string, attachments []control.Attachment) (prompt.Result, error) {
-	handle, promptText, promptStart := prompt.ParseFirst(strings.TrimSpace(text))
-	handle = strings.TrimPrefix(strings.TrimSpace(handle), "@")
-	attachments = prompt.AttachmentsForPromptRange(attachments, promptStart, len([]rune(strings.TrimSpace(text))))
-	if handle == "" || (strings.TrimSpace(promptText) == "" && len(attachments) == 0) {
-		return r.noticeResult("usage: @handle <prompt>"), nil
-	}
-	turn, err := r.service.ContinueSubagent(ctx, handle, promptText, attachments)
-	if err != nil {
-		return prompt.Result{}, controlcommands.FriendlyCommandError("@"+handle, err)
-	}
-	return prompt.Result{Handled: true, Turn: turn}, nil
+	return prompt.Result{Handled: true, Turn: turn, RefreshCommands: true}, nil
 }
 
 func parseModelUseArgs(args string) (alias string, reasoning string) {

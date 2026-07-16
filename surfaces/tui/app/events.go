@@ -52,6 +52,7 @@ type StatusRefreshResultMsg struct {
 
 type SetCommandsMsg struct {
 	Commands []string
+	Details  map[string]string
 }
 
 type SetHintMsg struct {
@@ -160,6 +161,7 @@ type UserMessageMsg struct {
 
 type ParticipantStatusMsg struct {
 	SessionID       string
+	Actor           string
 	State           string
 	ApprovalTool    string
 	ApprovalCommand string

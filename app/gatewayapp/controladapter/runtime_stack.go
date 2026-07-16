@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
@@ -130,10 +131,6 @@ type DoctorReport struct {
 	Warnings                        []string
 }
 
-type RegisterBuiltinACPAgentOptions struct {
-	Install bool
-}
-
 type ACPAgentInfo struct {
 	Name        string
 	Description string
@@ -188,15 +185,14 @@ type StatusRuntimeDeps struct {
 // ControllerStatusFn is optional and degrades to the session binding; command
 // and mutation hooks fail when invoked but absent.
 type AgentRuntimeDeps struct {
-	ControllerStatusFn           func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
-	SetControllerModelFn         func(context.Context, session.SessionRef, string, string) (controller.ControllerStatus, error)
-	SetControllerModeFn          func(context.Context, session.SessionRef, string) (controller.ControllerStatus, error)
-	RegisterBuiltinWithOptionsFn func(context.Context, string, RegisterBuiltinACPAgentOptions) error
-	RegisterCustomFn             func(context.Context, CustomAgentConfig) error
-	UnregisterFn                 func(string) error
-	ListBuiltinAddOptionsFn      func() []ACPAgentAddOption
-	ListInstallableOptionsFn     func() []ACPAgentAddOption
-	ListFn                       func() []ACPAgentInfo
+	ControllerStatusFn     func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
+	SetControllerModelFn   func(context.Context, session.SessionRef, string, string) (controller.ControllerStatus, error)
+	SetControllerModeFn    func(context.Context, session.SessionRef, string) (controller.ControllerStatus, error)
+	DiscoverConnectionFn   func(context.Context, controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error)
+	ConnectFn              func(context.Context, controlagents.ConnectRequest) (controlagents.ConnectResult, error)
+	DisconnectCandidatesFn func(context.Context) ([]controlagents.DisconnectCandidate, error)
+	DisconnectFn           func(context.Context, string) (controlagents.DisconnectResult, error)
+	ListFn                 func() []ACPAgentInfo
 }
 
 // ModelRuntimeDeps carries model catalog and mutation capabilities. Metadata
@@ -227,12 +223,6 @@ func (deps SkillRuntimeDeps) Snapshot() skill.Catalog {
 	return deps.SnapshotFn()
 }
 
-// AgentProfileRuntimeDeps carries optional agent-profile status and binding.
-type AgentProfileRuntimeDeps struct {
-	StatusFn func(context.Context) (AgentProfileStatusSnapshot, error)
-	BindFn   func(context.Context, AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error)
-}
-
 // SandboxRuntimeDeps carries sandbox status and lifecycle commands. Status and
 // preflight can degrade to zero-value status; mutating lifecycle hooks fail
 // when invoked but absent.
@@ -245,12 +235,6 @@ type SandboxRuntimeDeps struct {
 	ResetFn      func(context.Context) (SandboxStatus, error)
 }
 
-type ACPAgentAddOption struct {
-	Value   string
-	Display string
-	Detail  string
-}
-
 type RuntimeStack struct {
 	Gateway          GatewayRuntimeDeps
 	ControlFeeds     controlclientport.FeedRegistry
@@ -261,7 +245,6 @@ type RuntimeStack struct {
 	Model            ModelRuntimeDeps
 	Sandbox          SandboxRuntimeDeps
 	Skill            SkillRuntimeDeps
-	AgentProfile     AgentProfileRuntimeDeps
 	Plugin           PluginRuntimeDeps
 }
 

@@ -76,6 +76,7 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 				ScopeID:    scopeID,
 				Actor:      strings.TrimSpace(env.Actor),
 				OccurredAt: occurredAt,
+				Meta:       meta,
 				State:      strings.TrimSpace(env.Participant.State),
 			})
 		}
@@ -108,7 +109,7 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 			}
 		}
 	case eventstream.KindApprovalReview:
-		if event, ok := projectACPApprovalReview(env, scope, scopeID, surface); ok {
+		if event, ok := projectACPApprovalReview(env, meta, scope, scopeID, surface); ok {
 			out = append(out, event)
 		}
 	}
@@ -264,6 +265,7 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			ScopeID:     scopeID,
 			Actor:       strings.TrimSpace(env.Actor),
 			OccurredAt:  env.OccurredAt,
+			Meta:        meta,
 			PlanEntries: entries,
 		}}
 	case schema.UsageUpdate:
@@ -312,6 +314,7 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 			ScopeID:       scopeID,
 			Actor:         strings.TrimSpace(env.Actor),
 			OccurredAt:    env.OccurredAt,
+			Meta:          meta,
 			NarrativeKind: NarrativeAssistant,
 			MessageID:     strings.TrimSpace(update.MessageID),
 			Text:          text,
@@ -324,6 +327,7 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 			ScopeID:       scopeID,
 			Actor:         strings.TrimSpace(env.Actor),
 			OccurredAt:    env.OccurredAt,
+			Meta:          meta,
 			NarrativeKind: NarrativeReasoning,
 			MessageID:     strings.TrimSpace(update.MessageID),
 			Text:          text,
@@ -336,6 +340,7 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 			ScopeID:       scopeID,
 			Actor:         strings.TrimSpace(env.Actor),
 			OccurredAt:    env.OccurredAt,
+			Meta:          meta,
 			NarrativeKind: NarrativeNotice,
 			NoticeKind:    NoticeKindCompact,
 			Text:          CompactNoticeLabel,
@@ -346,7 +351,7 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 	}
 }
 
-func projectACPApprovalReview(env eventstream.Envelope, scope Scope, scopeID string, surface SurfaceProjector) (Event, bool) {
+func projectACPApprovalReview(env eventstream.Envelope, meta map[string]any, scope Scope, scopeID string, surface SurfaceProjector) (Event, bool) {
 	if env.ApprovalReview == nil {
 		return Event{}, false
 	}
@@ -365,6 +370,7 @@ func projectACPApprovalReview(env eventstream.Envelope, scope Scope, scopeID str
 		ScopeID:         scopeID,
 		Actor:           strings.TrimSpace(env.Actor),
 		OccurredAt:      env.OccurredAt,
+		Meta:            meta,
 		ToolCallID:      strings.TrimSpace(env.ApprovalReview.ToolCallID),
 		ApprovalTool:    strings.TrimSpace(env.ApprovalReview.ToolName),
 		ApprovalCommand: preview,

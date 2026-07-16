@@ -15,7 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
-func TestAdapterStartReviewSubagentUsesHiddenReviewerProfile(t *testing.T) {
+func TestAdapterStartReviewUsesHiddenReviewerProfile(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -41,32 +41,22 @@ func TestAdapterStartReviewSubagentUsesHiddenReviewerProfile(t *testing.T) {
 				return session.CloneSession(gw.session), nil
 			},
 		},
-		AgentProfile: AgentProfileRuntimeDeps{
-			StatusFn: func(context.Context) (AgentProfileStatusSnapshot, error) {
-				return AgentProfileStatusSnapshot{Profiles: []AgentProfileSnapshot{{
-					ID:      "reviewer",
-					Enabled: true,
-					Target:  "built_in",
-					Status:  "ok",
-				}}}, nil
-			},
-		},
 	}, activeSession.SessionID, "surface", "ollama/llama3")
 	if err != nil {
 		t.Fatalf("NewAdapter() error = %v", err)
 	}
 	imageData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-	turn, err := driver.StartReviewSubagent(ctx, "  inspect the image  ", []Attachment{{
+	turn, err := driver.StartReview(ctx, "  inspect the image  ", []Attachment{{
 		Name:     "review.png",
 		Offset:   len([]rune("inspect the ")),
 		MimeType: "image/png",
 		Data:     imageData,
 	}})
 	if err != nil {
-		t.Fatalf("StartReviewSubagent() error = %v", err)
+		t.Fatalf("StartReview() error = %v", err)
 	}
 	if turn == nil {
-		t.Fatal("StartReviewSubagent() turn = nil, want participant stream")
+		t.Fatal("StartReview() turn = nil, want participant stream")
 	}
 	if len(gw.attachReqs) != 1 || gw.attachReqs[0].Agent != "reviewer" || gw.attachReqs[0].Label == "" || gw.attachReqs[0].Source != "slash_review" {
 		t.Fatalf("AttachParticipant requests = %#v, want hidden reviewer slash_review attach", gw.attachReqs)
@@ -105,237 +95,6 @@ func TestAdapterStartReviewSubagentUsesHiddenReviewerProfile(t *testing.T) {
 	if len(status.Participants) != 0 {
 		t.Fatalf("AgentStatus().Participants = %#v, want completed review sidecar hidden", status.Participants)
 	}
-}
-
-func TestAdapterStartReviewSubagentExternalACPReviewerPrompts(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		input      string
-		wantPrompt string
-	}{
-		{
-			name:  "user prompt",
-			input: "  focus on auth  ",
-			wantPrompt: "Review request:\n" +
-				"Strictly review the current workspace changes (staged, unstaged, and untracked). Use the $review skill. Findings-first: correctness, regressions, bloat, design smells, boundary drift, and test gaps.\n\n" +
-				"User review instructions:\nfocus on auth",
-		},
-		{
-			name:  "empty review request",
-			input: "   ",
-			wantPrompt: "Review request:\n" +
-				"Strictly review the current workspace changes (staged, unstaged, and untracked). Use the $review skill. Findings-first: correctness, regressions, bloat, design smells, boundary drift, and test gaps.",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			ctx := context.Background()
-			driver, gw := newReviewProfileAdapterForTest(t, ctx, "review-profile-acp-"+strings.ReplaceAll(tt.name, " ", "-"), AgentProfileStatusSnapshot{
-				Profiles: []AgentProfileSnapshot{{
-					ID:       "reviewer",
-					Enabled:  true,
-					Target:   "acp",
-					ACPAgent: "codex",
-					Status:   "ok",
-				}},
-			})
-
-			turn, err := driver.StartReviewSubagent(ctx, tt.input, nil)
-			if err != nil {
-				t.Fatalf("StartReviewSubagent() error = %v", err)
-			}
-			if turn == nil {
-				t.Fatal("StartReviewSubagent() turn = nil, want participant stream")
-			}
-			if len(gw.attachReqs) != 1 || gw.attachReqs[0].Agent != "reviewer" || gw.attachReqs[0].Label == "" || strings.EqualFold(strings.TrimPrefix(gw.attachReqs[0].Label, "@"), "reviewer") {
-				t.Fatalf("AttachParticipant requests = %#v, want reviewer profile attached with external ACP label", gw.attachReqs)
-			}
-			if len(gw.promptReqs) != 1 {
-				t.Fatalf("PromptParticipant requests = %#v, want one reviewer prompt", gw.promptReqs)
-			}
-			if prompt := gw.promptReqs[0].Input; prompt != tt.wantPrompt {
-				t.Fatalf("external review prompt = %q, want %q", prompt, tt.wantPrompt)
-			}
-			drainReviewProfileTurnEvents(t, turn)
-			if len(gw.detachReqs) != 1 || gw.detachReqs[0].ParticipantID != "side-reviewer" {
-				t.Fatalf("DetachParticipant requests = %#v, want review sidecar completion detach", gw.detachReqs)
-			}
-		})
-	}
-}
-
-func TestAdapterStartReviewSubagentAllowsWarningReviewer(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	activeSession := session.Session{
-		SessionRef: session.SessionRef{
-			AppName:      "caelis",
-			UserID:       "review-profile-test",
-			SessionID:    "review-profile-warning",
-			WorkspaceKey: "ws",
-		},
-		CWD:        t.TempDir(),
-		Controller: session.ControllerBinding{Kind: session.ControllerKindKernel},
-	}
-	gw := &reviewProfileGatewayService{
-		session: activeSession,
-		handle:  reviewProfileTurnHandle(activeSession.SessionRef),
-	}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
-		Gateway: gatewayRuntimeDepsForTest(gw),
-		Session: SessionRuntimeDeps{
-			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
-			StartFn: func(context.Context, string, string) (session.Session, error) {
-				return session.CloneSession(gw.session), nil
-			},
-		},
-		AgentProfile: AgentProfileRuntimeDeps{
-			StatusFn: func(context.Context) (AgentProfileStatusSnapshot, error) {
-				return AgentProfileStatusSnapshot{Profiles: []AgentProfileSnapshot{{
-					ID:      "reviewer",
-					Enabled: true,
-					Target:  "built_in",
-					Status:  "warning",
-					Warning: "model reasoning level is unavailable",
-				}}}, nil
-			},
-		},
-	}, activeSession.SessionID, "surface", "ollama/llama3")
-	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
-	}
-
-	turn, err := driver.StartReviewSubagent(ctx, "inspect", nil)
-	if err != nil {
-		t.Fatalf("StartReviewSubagent(warning) error = %v, want runnable reviewer", err)
-	}
-	if turn == nil {
-		t.Fatal("StartReviewSubagent(warning) turn = nil, want participant stream")
-	}
-	if len(gw.attachReqs) != 1 || len(gw.promptReqs) != 1 {
-		t.Fatalf("gateway requests = attach %#v prompt %#v, want reviewer start", gw.attachReqs, gw.promptReqs)
-	}
-	drainReviewProfileTurnEvents(t, turn)
-	if len(gw.detachReqs) != 1 || gw.detachReqs[0].ParticipantID != "side-reviewer" {
-		t.Fatalf("DetachParticipant requests = %#v, want review sidecar completion detach", gw.detachReqs)
-	}
-}
-
-func TestAdapterStartReviewSubagentRejectsUnavailableReviewer(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		status   AgentProfileStatusSnapshot
-		wantText string
-	}{
-		{
-			name:     "missing",
-			status:   AgentProfileStatusSnapshot{},
-			wantText: "unavailable",
-		},
-		{
-			name: "disabled",
-			status: AgentProfileStatusSnapshot{Profiles: []AgentProfileSnapshot{{
-				ID:      "reviewer",
-				Enabled: false,
-				Status:  "ok",
-			}}},
-			wantText: "disabled",
-		},
-		{
-			name: "stale",
-			status: AgentProfileStatusSnapshot{Profiles: []AgentProfileSnapshot{{
-				ID:      "reviewer",
-				Enabled: true,
-				Status:  "stale",
-				Warning: "model alias is missing",
-			}}},
-			wantText: "model alias is missing",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			ctx := context.Background()
-			activeSession := session.Session{
-				SessionRef: session.SessionRef{
-					AppName:      "caelis",
-					UserID:       "review-profile-test",
-					SessionID:    "review-profile-" + tt.name,
-					WorkspaceKey: "ws",
-				},
-				CWD: t.TempDir(),
-			}
-			gw := &reviewProfileGatewayService{session: activeSession}
-			driver, err := NewAdapter(ctx, &RuntimeStack{
-				Gateway: gatewayRuntimeDepsForTest(gw),
-				Session: SessionRuntimeDeps{
-					Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
-					StartFn: func(context.Context, string, string) (session.Session, error) {
-						return session.CloneSession(gw.session), nil
-					},
-				},
-				AgentProfile: AgentProfileRuntimeDeps{
-					StatusFn: func(context.Context) (AgentProfileStatusSnapshot, error) {
-						return tt.status, nil
-					},
-				},
-			}, activeSession.SessionID, "surface", "ollama/llama3")
-			if err != nil {
-				t.Fatalf("NewAdapter() error = %v", err)
-			}
-
-			_, err = driver.StartReviewSubagent(ctx, "inspect", nil)
-			if err == nil || !strings.Contains(err.Error(), tt.wantText) {
-				t.Fatalf("StartReviewSubagent() error = %v, want %q", err, tt.wantText)
-			}
-			if len(gw.attachReqs) != 0 || len(gw.promptReqs) != 0 {
-				t.Fatalf("gateway requests = attach %#v prompt %#v, want no participant start", gw.attachReqs, gw.promptReqs)
-			}
-		})
-	}
-}
-
-func newReviewProfileAdapterForTest(t *testing.T, ctx context.Context, sessionID string, status AgentProfileStatusSnapshot) (*Adapter, *reviewProfileGatewayService) {
-	t.Helper()
-	activeSession := session.Session{
-		SessionRef: session.SessionRef{
-			AppName:      "caelis",
-			UserID:       "review-profile-test",
-			SessionID:    sessionID,
-			WorkspaceKey: "ws",
-		},
-		CWD:        t.TempDir(),
-		Controller: session.ControllerBinding{Kind: session.ControllerKindKernel},
-	}
-	gw := &reviewProfileGatewayService{
-		session: activeSession,
-		handle:  reviewProfileTurnHandle(activeSession.SessionRef),
-	}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
-		Gateway: gatewayRuntimeDepsForTest(gw),
-		Session: SessionRuntimeDeps{
-			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
-			StartFn: func(context.Context, string, string) (session.Session, error) {
-				return session.CloneSession(gw.session), nil
-			},
-		},
-		AgentProfile: AgentProfileRuntimeDeps{
-			StatusFn: func(context.Context) (AgentProfileStatusSnapshot, error) {
-				return status, nil
-			},
-		},
-	}, activeSession.SessionID, "surface", "ollama/llama3")
-	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
-	}
-	return driver, gw
 }
 
 type reviewProfileGatewayService struct {

@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/surfaces/headless"
@@ -45,10 +46,10 @@ func TestLocalStackClaudeBuiltInACPE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	registerClaudeACPAgentForE2E(ctx, t, stack)
+	claudeAgent := connectClaudeAgentForE2E(ctx, t, stack)
 
 	const want = "caelis claude acp e2e ok"
-	snapshot, err := stack.StartSubagent(ctx, activeSession.SessionRef, "claude", "Reply with exactly: "+want, "claude_e2e")
+	snapshot, err := stack.StartSubagent(ctx, activeSession.SessionRef, claudeAgent, "Reply with exactly: "+want, "claude_e2e")
 	if err != nil {
 		t.Fatalf("StartSubagent(claude) error = %v", err)
 	}
@@ -92,11 +93,11 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	registerClaudeACPAgentForE2E(ctx, t, stack)
+	claudeAgent := connectClaudeAgentForE2E(ctx, t, stack)
 	updated, err := stack.KernelControlPlane().HandoffController(ctx, gateway.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,
-		Agent:      "claude",
+		Agent:      claudeAgent,
 		Source:     "test",
 		Reason:     "exercise real Claude ACP session/resume",
 	})
@@ -126,7 +127,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	resumed, err := stack.KernelControlPlane().HandoffController(ctx, gateway.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,
-		Agent:      "claude",
+		Agent:      claudeAgent,
 		Source:     "test-resume",
 		Reason:     "resume existing Claude ACP remote session",
 	})
@@ -175,13 +176,28 @@ func requireClaudeACPE2E(t *testing.T) {
 	}
 }
 
-func registerClaudeACPAgentForE2E(ctx context.Context, t *testing.T, stack *gatewayapp.Stack) {
+func connectClaudeAgentForE2E(ctx context.Context, t *testing.T, stack *gatewayapp.Stack) string {
 	t.Helper()
-	opts := gatewayapp.RegisterBuiltinACPAgentOptions{}
+	launcher := controlagents.LauncherChoiceNPX
 	if strings.TrimSpace(os.Getenv("CAELIS_CLAUDE_ACP_E2E_INSTALL")) == "1" {
-		opts.Install = true
+		launcher = controlagents.LauncherChoiceManaged
 	}
-	if err := stack.RegisterBuiltinACPAgentWithOptions(ctx, "claude", opts); err != nil {
-		t.Fatalf("RegisterBuiltinACPAgentWithOptions(claude, %+v) error = %v", opts, err)
+	req := controlagents.ConnectRequest{AdapterID: "claude", Launcher: launcher, CWD: stack.Workspace.CWD}
+	discovered, err := stack.DiscoverACPConnection(ctx, req)
+	if err != nil {
+		t.Fatalf("DiscoverACPConnection(claude, %s) error = %v", launcher, err)
 	}
+	if len(discovered.Models) == 0 {
+		t.Fatal("Claude ACP discovery returned no selectable models")
+	}
+	req.ModelID = discovered.Models[0].ID
+	req.Discovery = &discovered
+	connected, err := stack.ConnectACP(ctx, req)
+	if err != nil {
+		t.Fatalf("ConnectACP(claude, %s) error = %v", launcher, err)
+	}
+	if len(connected.Agents) != 1 {
+		t.Fatalf("ConnectACP(claude) Agents = %#v, want one", connected.Agents)
+	}
+	return connected.Agents[0].ID
 }

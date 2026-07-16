@@ -11,19 +11,19 @@ import (
 	"sync"
 
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
-	"github.com/caelis-labs/caelis/ports/agentprofile"
 )
 
 type AppConfig struct {
-	Models             PersistedModelConfig    `json:"models,omitempty"`
-	Agents             []AgentConfig           `json:"agents,omitempty"`
-	AgentProviders     []AgentProviderConfig   `json:"agent_providers,omitempty"`
-	AgentBindings      agentprofile.BindingSet `json:"agent_bindings,omitempty"`
-	Sandbox            SandboxConfig           `json:"sandbox,omitempty"`
-	Runtime            RuntimeConfig           `json:"runtime,omitempty"`
-	Plugins            []PluginConfig          `json:"plugins,omitempty"`
-	PluginMarketplaces []MarketplaceConfig     `json:"plugin_marketplaces,omitempty"`
+	Models PersistedModelConfig `json:"models,omitempty"`
+	// AgentRoster is authoritative for stable user-selected Agents used by
+	// dispatch, Spawn target resolution, and Control-authorized handoff.
+	AgentRoster        controlagents.Configuration `json:"agent_roster,omitempty"`
+	Sandbox            SandboxConfig               `json:"sandbox,omitempty"`
+	Runtime            RuntimeConfig               `json:"runtime,omitempty"`
+	Plugins            []PluginConfig              `json:"plugins,omitempty"`
+	PluginMarketplaces []MarketplaceConfig         `json:"plugin_marketplaces,omitempty"`
 }
 
 type MarketplaceConfig struct {
@@ -51,16 +51,6 @@ type PluginConfig struct {
 	CacheRoot   string `json:"cache_root,omitempty"`
 }
 
-type AgentConfig struct {
-	Name        string            `json:"name,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Command     string            `json:"command,omitempty"`
-	Args        []string          `json:"args,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	WorkDir     string            `json:"work_dir,omitempty"`
-	Builtin     bool              `json:"builtin,omitempty"`
-}
-
 type SandboxConfig struct {
 	RequestedType    string   `json:"requested_type,omitempty"`
 	HelperPath       string   `json:"helper_path,omitempty"`
@@ -73,15 +63,6 @@ type SandboxConfig struct {
 type RuntimeConfig struct {
 	ApprovalMode  string `json:"approval_mode,omitempty"`
 	PolicyProfile string `json:"policy_profile,omitempty"`
-}
-
-type AgentProviderConfig struct {
-	ID       string         `json:"id,omitempty"`
-	Kind     string         `json:"kind,omitempty"`
-	Label    string         `json:"label,omitempty"`
-	BaseURL  string         `json:"base_url,omitempty"`
-	TokenEnv string         `json:"token_env,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type PersistedModelConfig struct {
@@ -156,8 +137,13 @@ func (s *Store) loadUnlocked() (AppConfig, error) {
 		}
 		doc.Models.Profiles = dedupeModelProfiles(doc.Models.Profiles)
 		doc.Models.Configs = dedupeModelConfigs(doc.Models.Configs)
-		doc.Agents = DedupeAgentConfigs(doc.Agents)
-		doc.AgentBindings = agentprofile.NormalizeBindingSet(doc.AgentBindings)
+		if err := controlagents.ValidateConfiguration(doc.AgentRoster); err != nil {
+			return AppConfig{}, fmt.Errorf("gatewayapp: invalid agent roster: %w", err)
+		}
+		if err := validateAgentRosterModels(doc.AgentRoster, doc.Models.Configs); err != nil {
+			return AppConfig{}, err
+		}
+		doc.AgentRoster = controlagents.NormalizeConfiguration(doc.AgentRoster)
 		doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 		doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 		doc.Plugins = DedupePluginConfigs(doc.Plugins)
@@ -274,8 +260,13 @@ func (s *Store) Save(doc AppConfig) error {
 	doc.Models = normalizePersistedModelsForSave(doc.Models)
 	doc.Models.Configs = dedupeModelConfigsForSave(doc.Models.Configs)
 	doc.Models.Profiles = dedupeModelProfilesForSave(doc.Models.Profiles)
-	doc.Agents = DedupeAgentConfigs(doc.Agents)
-	doc.AgentBindings = agentprofile.NormalizeBindingSet(doc.AgentBindings)
+	if err := controlagents.ValidateConfiguration(doc.AgentRoster); err != nil {
+		return fmt.Errorf("gatewayapp: invalid agent roster: %w", err)
+	}
+	if err := validateAgentRosterModels(doc.AgentRoster, doc.Models.Configs); err != nil {
+		return err
+	}
+	doc.AgentRoster = controlagents.NormalizeConfiguration(doc.AgentRoster)
 	doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 	doc.Plugins = DedupePluginConfigs(doc.Plugins)
@@ -296,6 +287,26 @@ func (s *Store) Save(doc AppConfig) error {
 	}
 	if err := os.Chmod(s.path, 0o600); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateAgentRosterModels(roster controlagents.Configuration, configs []modelconfig.Config) error {
+	configured := make(map[string]struct{}, len(configs))
+	for _, cfg := range configs {
+		cfg = modelconfig.NormalizeConfig(cfg)
+		if cfg.ID != "" {
+			configured[strings.ToLower(strings.TrimSpace(cfg.ID))] = struct{}{}
+		}
+	}
+	for _, agent := range controlagents.ListAgents(roster) {
+		modelAlias := strings.ToLower(strings.TrimSpace(agent.Backing.ModelAlias))
+		if modelAlias == "" {
+			continue
+		}
+		if _, ok := configured[modelAlias]; !ok {
+			return fmt.Errorf("gatewayapp: roster agent %q references unknown configured model %q", agent.ID, agent.Backing.ModelAlias)
+		}
 	}
 	return nil
 }
@@ -393,47 +404,6 @@ func writeFileInPlace(path string, data []byte, perm os.FileMode, chmod func(str
 		return chmod(path, perm)
 	}
 	return nil
-}
-
-func DedupeAgentConfigs(configs []AgentConfig) []AgentConfig {
-	if len(configs) == 0 {
-		return nil
-	}
-	out := make([]AgentConfig, 0, len(configs))
-	seen := make(map[string]struct{}, len(configs))
-	for _, cfg := range configs {
-		cfg = NormalizeAgentConfig(cfg)
-		if cfg.Name == "" {
-			continue
-		}
-		key := strings.ToLower(strings.TrimSpace(cfg.Name))
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, cfg)
-	}
-	return out
-}
-
-func NormalizeAgentConfig(in AgentConfig) AgentConfig {
-	out := in
-	out.Name = strings.ToLower(strings.TrimSpace(in.Name))
-	out.Description = strings.TrimSpace(in.Description)
-	out.Command = strings.TrimSpace(in.Command)
-	out.WorkDir = strings.TrimSpace(in.WorkDir)
-	if len(in.Args) > 0 {
-		out.Args = append([]string(nil), in.Args...)
-	}
-	if len(in.Env) > 0 {
-		out.Env = map[string]string{}
-		for key, value := range in.Env {
-			if trimmed := strings.TrimSpace(key); trimmed != "" {
-				out.Env[trimmed] = value
-			}
-		}
-	}
-	return out
 }
 
 func dedupeModelConfigs(configs []modelconfig.Config) []modelconfig.Config {

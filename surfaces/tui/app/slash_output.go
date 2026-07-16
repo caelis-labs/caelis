@@ -103,8 +103,6 @@ func renderSlashCommandResultLines(result control.SlashCommandResult) []slashOut
 		return renderSlashStatusLines(result.Status)
 	case control.SlashCommandResultHelp:
 		return renderSlashHelpLines(result.Help)
-	case control.SlashCommandResultSubagentProfiles:
-		return renderSlashSubagentProfileLines(result.AgentProfiles)
 	default:
 		return []slashOutputLine{slashField("Slash", control.FormatSlashResult(result))}
 	}
@@ -187,7 +185,7 @@ func slashHelpGroupTitle(item control.CommandHelpItem) string {
 		return "Core"
 	case "model", "connect", "new", "resume", "compact":
 		return "Model & Session"
-	case "agent", "subagent", "review":
+	case "review", "lead":
 		return "Agents"
 	case "plugin":
 		return "Plugins & Tools"
@@ -196,44 +194,6 @@ func slashHelpGroupTitle(item control.CommandHelpItem) string {
 	default:
 		return "Core"
 	}
-}
-
-func renderSlashSubagentProfileLines(status control.AgentProfileStatusSnapshot) []slashOutputLine {
-	lines := []slashOutputLine{slashSection("Subagents")}
-	view := control.AgentProfileDisplayFromSnapshot(status)
-	if len(view.Rows) == 0 && len(view.Warnings) == 0 {
-		return append(lines, slashField("Profiles", "none"))
-	}
-	if len(view.Rows) > 0 {
-		table := [][]string{{"Profile", "Binding", "Status", "Description"}}
-		for _, row := range view.Rows {
-			table = append(table, []string{
-				row.ID,
-				row.Binding,
-				row.Status,
-				row.Description,
-			})
-		}
-		lines = append(lines, renderSlashPaddedRowsWithOptions(table, true)...)
-	}
-	var warnings []string
-	for _, row := range view.Rows {
-		if row.Warning != "" {
-			warnings = append(warnings, row.ID+": "+row.Warning)
-		}
-	}
-	for _, warning := range view.Warnings {
-		if warning = strings.TrimSpace(warning); warning != "" {
-			warnings = append(warnings, warning)
-		}
-	}
-	if len(warnings) > 0 {
-		lines = append(lines, slashBlank(), slashSection("Warnings"))
-		for _, warning := range warnings {
-			lines = append(lines, slashField("Warning", warning))
-		}
-	}
-	return lines
 }
 
 func renderSlashTokenUsage(usage control.TokenUsageView) []slashOutputLine {

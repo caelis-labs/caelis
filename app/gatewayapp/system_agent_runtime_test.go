@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
-	"github.com/caelis-labs/caelis/ports/agentprofile"
 )
 
 func TestSystemManagedAgentUsesCoreRuntimeLifecycleAndJournalPipeline(t *testing.T) {
@@ -33,7 +32,7 @@ func TestSystemManagedAgentUsesCoreRuntimeLifecycleAndJournalPipeline(t *testing
 	}}
 	prompt := model.NewTextMessage(model.RoleUser, "review this")
 	result, err := runner.Run(context.Background(), systemManagedAgentRunRequest{
-		AgentID: guardianProfileID, Model: systemManagedAgentResponseModel{}, ParentSession: parent,
+		AgentID: guardianSceneID, Model: systemManagedAgentResponseModel{}, ParentSession: parent,
 		Events: []*session.Event{{Type: session.EventTypeUser, Message: &prompt, Text: "review this"}},
 	})
 	if err != nil {
@@ -51,7 +50,7 @@ func TestSystemManagedAgentUsesCoreRuntimeLifecycleAndJournalPipeline(t *testing
 		t.Fatalf("guardrail calls = %d, want one Core Runtime input pass", guardrail.calls())
 	}
 	plan, err := systemManagedAgentRunPlanFor(systemManagedAgentRunRequest{
-		AgentID: guardianProfileID, Model: systemManagedAgentResponseModel{}, ParentSession: parent,
+		AgentID: guardianSceneID, Model: systemManagedAgentResponseModel{}, ParentSession: parent,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +94,7 @@ func TestSystemManagedAgentDoesNotInheritParentRuntimeLease(t *testing.T) {
 	ctx := session.ContextWithRuntimeLease(context.Background(), parentLease)
 	prompt := model.NewTextMessage(model.RoleUser, "review this")
 	result, err := runner.Run(ctx, systemManagedAgentRunRequest{
-		AgentID: guardianProfileID, Model: systemManagedAgentResponseModel{}, ParentSession: parent,
+		AgentID: guardianSceneID, Model: systemManagedAgentResponseModel{}, ParentSession: parent,
 		Events: []*session.Event{{Type: session.EventTypeUser, Message: &prompt, Text: "review this"}},
 	})
 	if err != nil {
@@ -167,7 +166,7 @@ func TestSystemManagedAgentRegistryEntries(t *testing.T) {
 	}
 
 	spec := specs[0]
-	if spec.ID != guardianProfileID {
+	if spec.ID != guardianSceneID {
 		t.Fatalf("systemManagedAgentSpecs()[0].ID = %q, want guardian", spec.ID)
 	}
 	if spec.Purpose != systemManagedAgentPurposeApprovalReview {
@@ -176,59 +175,19 @@ func TestSystemManagedAgentRegistryEntries(t *testing.T) {
 	if spec.CapabilityProfile != systemManagedAgentCapabilityNone {
 		t.Fatalf("guardian capability = %q, want none", spec.CapabilityProfile)
 	}
-	if !spec.BindingPolicy.ForceEnabled || spec.BindingPolicy.AllowExternalACP {
-		t.Fatalf("guardian binding policy = %#v, want forced enabled and no external ACP", spec.BindingPolicy)
-	}
 }
 
-func TestSystemManagedAgentRegistryOwnsProfileAndBindingPolicy(t *testing.T) {
+func TestSystemManagedAgentRegistryOwnsFixedScene(t *testing.T) {
 	spec, ok := systemManagedAgentSpecFor("guardian")
 	if !ok {
 		t.Fatal("systemManagedAgentSpecFor(guardian) missing")
 	}
-	if spec.ID != guardianProfileID || spec.Purpose != systemManagedAgentPurposeApprovalReview {
+	if spec.ID != guardianSceneID || spec.Purpose != systemManagedAgentPurposeApprovalReview {
 		t.Fatalf("guardian spec = %#v, want approval-review registry entry", spec)
 	}
 
-	profile, ok := systemManagedAgentProfile("guardian")
-	if !ok {
-		t.Fatal("systemManagedAgentProfile(guardian) missing")
-	}
-	if profile.Name != "Guardian" {
-		t.Fatalf("guardian profile name = %q, want Guardian", profile.Name)
-	}
-	if value, _ := profile.Metadata["system_managed"].(bool); !value {
-		t.Fatalf("guardian profile metadata = %#v, want system_managed", profile.Metadata)
-	}
-
-	disabled := false
-	binding := normalizeSystemManagedAgentBinding(spec, agentprofile.Binding{
-		ProfileID: "guardian",
-		Target:    agentprofile.BindingTargetACP,
-		ACPAgent:  "legacy-reviewer",
-		ACPModel:  "legacy-model",
-		Enabled:   &disabled,
-		Status:    agentprofile.BindingStatusStale,
-		Warning:   "legacy binding",
-	})
-	if binding.Enabled == nil || !*binding.Enabled {
-		t.Fatalf("normalized guardian binding enabled = %#v, want forced enabled", binding.Enabled)
-	}
-	if binding.Target == agentprofile.BindingTargetACP || binding.ACPAgent != "" || binding.ACPModel != "" {
-		t.Fatalf("normalized guardian binding = %#v, want ACP binding cleared", binding)
-	}
-	if binding.Status != agentprofile.BindingStatusOK || binding.Warning != "" {
-		t.Fatalf("normalized guardian binding status = %q warning %q, want clean status", binding.Status, binding.Warning)
-	}
-
-	err := validateSystemManagedAgentBinding(spec, agentprofile.Binding{
-		ProfileID: "guardian",
-		Target:    agentprofile.BindingTargetACP,
-		ACPAgent:  "reviewer",
-		Enabled:   boolPtr(true),
-	})
-	if err == nil || !strings.Contains(err.Error(), "guardian cannot bind to an external ACP agent") {
-		t.Fatalf("validateSystemManagedAgentBinding() error = %v, want guardian ACP rejection", err)
+	if spec.Instructions == "" || spec.CapabilityProfile != systemManagedAgentCapabilityNone {
+		t.Fatalf("guardian scene = %#v, want fixed instructions without tools", spec)
 	}
 }
 
@@ -250,13 +209,13 @@ func TestSystemManagedAgentRunPlanUsesRegistryDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("systemManagedAgentRunPlanFor() error = %v", err)
 	}
-	if plan.Spec.ID != guardianProfileID || plan.AgentID != guardianProfileID {
+	if plan.Spec.ID != guardianSceneID || plan.AgentID != guardianSceneID {
 		t.Fatalf("run plan agent = spec %q id %q, want guardian", plan.Spec.ID, plan.AgentID)
 	}
 	if plan.Purpose != systemManagedAgentPurposeApprovalReview || plan.CapabilityProfile != systemManagedAgentCapabilityNone {
 		t.Fatalf("run plan purpose/capability = %q/%q, want approval_review/none", plan.Purpose, plan.CapabilityProfile)
 	}
-	if got := plan.Metadata["system_managed_agent"]; got != guardianProfileID {
+	if got := plan.Metadata["system_managed_agent"]; got != guardianSceneID {
 		t.Fatalf("run plan metadata system_managed_agent = %#v, want guardian", got)
 	}
 	if got := plan.Metadata["system_managed_capability_profile"]; got != string(systemManagedAgentCapabilityNone) {
@@ -265,7 +224,7 @@ func TestSystemManagedAgentRunPlanUsesRegistryDefaults(t *testing.T) {
 	if plan.Session.SessionID != "parent-session-approval-review" {
 		t.Fatalf("run plan session id = %q, want parent-session-approval-review", plan.Session.SessionID)
 	}
-	if got := plan.Session.Metadata["system_managed_agent"]; got != guardianProfileID {
+	if got := plan.Session.Metadata["system_managed_agent"]; got != guardianSceneID {
 		t.Fatalf("run plan session metadata system_managed_agent = %#v, want guardian", got)
 	}
 }

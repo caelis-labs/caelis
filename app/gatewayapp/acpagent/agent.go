@@ -8,6 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	controlpromptrouter "github.com/caelis-labs/caelis/internal/controlpromptrouter"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
@@ -40,7 +41,12 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 			router := controlpromptrouter.New(controlprompt.RouterConfig{
 				Service: driver,
 				CommandNames: func(ctx context.Context, service control.Service) []string {
-					return acpPromptCommandNames(stack)
+					out := acpPromptCommandNames(stack)
+					status, err := service.AgentStatus(ctx)
+					if err != nil {
+						return out
+					}
+					return controlagents.AppendRunNames(out, acpDirectAgentRuns(status), acpAgentNameAllowed)
 				},
 				CoreCommandAllowed: func(_ context.Context, command string) bool {
 					return controlcommands.IsACPKnown(command)
@@ -84,4 +90,12 @@ func stackACPAgentNames(stack *gatewayapp.Stack) []string {
 
 func acpAgentNameAllowed(name string) bool {
 	return !agentregistry.ReservedSlashCommandName(name)
+}
+
+func acpDirectAgentRuns(status control.AgentStatusSnapshot) []controlagents.Run {
+	runs := make([]controlagents.Run, 0, len(status.Participants))
+	for _, participant := range status.Participants {
+		runs = append(runs, controlagents.RunFromParticipant(participant.Label, participant.AgentName, participant.Kind, participant.Role))
+	}
+	return runs
 }

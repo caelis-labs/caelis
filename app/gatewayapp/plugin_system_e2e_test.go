@@ -69,13 +69,12 @@ func TestRealConfigPluginSystemE2E(t *testing.T) {
 
 	fakeProvider := newPluginSystemE2EProvider(t)
 	stack, err := NewLocalStack(Config{
-		AppName:                     "caelis-e2e",
-		UserID:                      "plugin-e2e",
-		StoreDir:                    storeDir,
-		WorkspaceKey:                "plugin-e2e-workspace",
-		WorkspaceCWD:                workspaceDir,
-		DisableBuiltInAgentProfiles: true,
-		Sandbox:                     SandboxConfig{RequestedType: "host"},
+		AppName:      "caelis-e2e",
+		UserID:       "plugin-e2e",
+		StoreDir:     storeDir,
+		WorkspaceKey: "plugin-e2e-workspace",
+		WorkspaceCWD: workspaceDir,
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
 			Alias:               "plugin-e2e",
 			Provider:            "openai-compatible",

@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -33,6 +34,19 @@ func (s *Stack) saveModelConfigs() error {
 		return err
 	}
 	doc.Models = s.lookup.Snapshot()
+	return s.store.Save(doc)
+}
+
+func (s *Stack) saveModelConfigsAndAgentRoster(roster controlagents.Configuration) error {
+	if s == nil || s.store == nil || s.lookup == nil {
+		return nil
+	}
+	doc, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	doc.Models = s.lookup.Snapshot()
+	doc.AgentRoster = controlagents.NormalizeConfiguration(roster)
 	return s.store.Save(doc)
 }
 
@@ -79,7 +93,27 @@ func (s *Stack) rebuildGateway() error {
 	if err != nil {
 		return err
 	}
+	if err := s.rejectRemovedAssemblyAgents(context.Background(), runtimeCfg.Assembly.Agents, bundle.RuntimeConfig.Assembly.Agents); err != nil {
+		bundle.Close()
+		return err
+	}
 	return s.installGatewayRuntimeBundle(oldGateway, bundle)
+}
+
+func (s *Stack) rejectRemovedAssemblyAgents(ctx context.Context, before []assembly.AgentConfig, after []assembly.AgentConfig) error {
+	afterIDs := make(map[string]struct{}, len(after))
+	for _, agent := range after {
+		afterIDs[strings.ToLower(strings.TrimSpace(agent.Name))] = struct{}{}
+	}
+	for _, agent := range before {
+		if _, retained := afterIDs[strings.ToLower(strings.TrimSpace(agent.Name))]; retained {
+			continue
+		}
+		if err := s.rejectBoundACPAgent(ctx, agent.Name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type gatewayBuildPlan struct {
@@ -143,7 +177,7 @@ func (s *Stack) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runtimeCfg stackR
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
-	configuredAssembly, err := s.configuredAssemblyWithPluginAgents(runtimeCfg.BaseAssembly, doc.Agents, contribs.Agents, runtimeCfg)
+	configuredAssembly, err := s.configuredAssemblyWithPluginAgents(runtimeCfg.BaseAssembly, contribs.Agents, runtimeCfg)
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
@@ -256,9 +290,10 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		return nil, err
 	}
 	controlCoordinator, err := controlplane.NewCoordinator(controlplane.CoordinatorConfig{
-		Sessions:    s.Sessions,
-		Controllers: localCfg.Controllers,
-		Context:     contextRouter,
+		Sessions:              s.Sessions,
+		Controllers:           localCfg.Controllers,
+		Context:               contextRouter,
+		ControllerBindingGate: s.agentRosterMu.RLocker(),
 	})
 	if err != nil {
 		bundle.Close()
@@ -367,6 +402,18 @@ func (s *Stack) installGatewayRuntimeBundle(oldGateway *kernelimpl.Gateway, bund
 	if err := guardNoActiveTurns(oldGateway, "rebuild gateway"); err != nil {
 		bundle.Close()
 		return err
+	}
+	// A caller may already hold the old Gateway pointer and begin a handoff once
+	// the roster mutation gate opens. Revoke removed Agents from that shared
+	// registry before publishing the replacement runtime as well.
+	s.mu.RLock()
+	oldControlPlane := s.acpControlPlane
+	s.mu.RUnlock()
+	if oldControlPlane != nil {
+		if err := oldControlPlane.Updater.UpdateAgents(bundle.RuntimeConfig.Assembly.Agents); err != nil {
+			bundle.Close()
+			return err
+		}
 	}
 	s.swapGatewayRuntime(bundle)
 	return nil
