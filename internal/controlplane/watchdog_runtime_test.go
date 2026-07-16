@@ -43,6 +43,56 @@ func TestWatchdogHighConfidenceToolLoopInterrupts(t *testing.T) {
 	}
 }
 
+func TestWatchdogRepeatedTaskWaitDoesNotInterruptLongTurn(t *testing.T) {
+	t.Parallel()
+
+	service, active := newWatchdogTestSession(t, "watchdog-task-wait")
+	events := make([]*session.Event, 0, 6)
+	for index := 0; index < 6; index++ {
+		events = append(events, watchdogToolCall(fmt.Sprintf("wait-%d", index), "TASK", map[string]any{
+			"action": "wait", "task_id": "8d7a77b2b254",
+		}))
+	}
+	runner := newControlledWatchdogRunner("task-wait-run", events, true)
+	var reviews atomic.Int32
+	watchdog, err := NewWatchdogRuntime(WatchdogRuntimeConfig{
+		Runtime: watchdogTestRuntime{runner: runner}, Sessions: service,
+		Thresholds: WatchdogThresholds{ToolLoopStreak: 3, TextLoopStreak: 50},
+		Reviewer: WatchdogReviewFunc(func(context.Context, WatchdogObservation) (WatchdogDecision, error) {
+			reviews.Add(1)
+			return WatchdogDecision{Action: WatchdogActionInterrupt}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := watchdog.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := consumeWatchdogEvents(run.Handle)
+	select {
+	case <-runner.eventsYielded:
+	case <-time.After(time.Second):
+		t.Fatal("Task wait events were not observed")
+	}
+	if got := reviews.Load(); got != 0 {
+		t.Fatalf("watchdog reviews = %d, want repeated Task wait excluded", got)
+	}
+	if got := runner.cancelCalls.Load(); got != 0 {
+		t.Fatalf("watchdog Cancel calls = %d, want long Turn left running", got)
+	}
+	runner.finish()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Events() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Task wait event stream did not finish")
+	}
+}
+
 func TestWatchdogCapacitySaturationDropsEvidenceWithoutCancelling(t *testing.T) {
 	t.Parallel()
 
@@ -496,6 +546,8 @@ type controlledWatchdogRunner struct {
 	cancelUnblocks bool
 	done           chan struct{}
 	doneOnce       sync.Once
+	eventsYielded  chan struct{}
+	eventsOnce     sync.Once
 	cancelCalls    atomic.Int32
 	closeCalls     atomic.Int32
 }
@@ -503,7 +555,7 @@ type controlledWatchdogRunner struct {
 func newControlledWatchdogRunner(id string, events []*session.Event, waitForFinish bool) *controlledWatchdogRunner {
 	return &controlledWatchdogRunner{
 		id: id, events: session.CloneEvents(events), waitForFinish: waitForFinish,
-		cancelUnblocks: true, done: make(chan struct{}),
+		cancelUnblocks: true, done: make(chan struct{}), eventsYielded: make(chan struct{}),
 	}
 }
 
@@ -513,9 +565,11 @@ func (r *controlledWatchdogRunner) Events() iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
 		for _, event := range r.events {
 			if !yield(session.CloneEvent(event), nil) {
+				r.markEventsYielded()
 				return
 			}
 		}
+		r.markEventsYielded()
 		if r.waitForFinish {
 			<-r.done
 		}
@@ -540,6 +594,10 @@ func (r *controlledWatchdogRunner) Close() error {
 
 func (r *controlledWatchdogRunner) finish() {
 	r.doneOnce.Do(func() { close(r.done) })
+}
+
+func (r *controlledWatchdogRunner) markEventsYielded() {
+	r.eventsOnce.Do(func() { close(r.eventsYielded) })
 }
 
 type watchdogSourceTestRunner struct{ *controlledWatchdogRunner }

@@ -57,6 +57,63 @@ func TestLoopDetectorTripsOnPureIdenticalToolWithEmptyContent(t *testing.T) {
 	}
 }
 
+func TestLoopDetectorIgnoresRepeatedTaskWaitAndResetsToolEvidence(t *testing.T) {
+	t.Parallel()
+
+	d := newGenerationLoopDetector(20, 3, 8)
+	for i := 0; i < 2; i++ {
+		if _, ok := d.observe(watchdogToolCall("read-before-"+strconv.Itoa(i), "READ", map[string]any{"path": "same.txt"})); ok {
+			t.Fatalf("READ triggered before threshold at step %d", i)
+		}
+	}
+	for i := 0; i < 6; i++ {
+		if _, ok := d.observe(watchdogToolCall("wait-"+strconv.Itoa(i), "TASK", map[string]any{
+			"action": "wait", "task_id": "8d7a77b2b254",
+		})); ok {
+			t.Fatalf("repeated Task wait triggered a loop at step %d", i)
+		}
+	}
+	if _, ok := d.observe(watchdogToolCall("read-after", "READ", map[string]any{"path": "same.txt"})); ok {
+		t.Fatal("tool-loop evidence crossed a Task wait boundary")
+	}
+}
+
+func TestLoopDetectorIgnoresProtocolOnlyTaskWait(t *testing.T) {
+	t.Parallel()
+
+	d := newGenerationLoopDetector(20, 2, 8)
+	for i := 0; i < 4; i++ {
+		event := &session.Event{Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodSessionUpdate,
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+				ToolCallID:    "wait-" + strconv.Itoa(i),
+				Title:         "TASK wait 8d7a77b2b254",
+				RawInput:      map[string]any{"action": "wait", "task_id": "8d7a77b2b254"},
+			},
+		}}
+		if _, ok := d.observe(event); ok {
+			t.Fatalf("protocol-only Task wait triggered a loop at step %d", i)
+		}
+	}
+}
+
+func TestLoopDetectorStillCountsRepeatedTaskWrite(t *testing.T) {
+	t.Parallel()
+
+	d := newGenerationLoopDetector(20, 3, 8)
+	var hit loopHit
+	var ok bool
+	for i := 0; i < 3; i++ {
+		hit, ok = d.observe(watchdogToolCall("write-"+strconv.Itoa(i), "TASK", map[string]any{
+			"action": "write", "task_id": "command-task", "input": "continue",
+		}))
+	}
+	if !ok || hit.Reason != WatchdogReasonToolLoop {
+		t.Fatalf("hit = %+v ok=%v, want repeated Task write tool loop", hit, ok)
+	}
+}
+
 func TestLoopDetectorFailsOpenOnEmptyToolArgs(t *testing.T) {
 	t.Parallel()
 	d := newGenerationLoopDetector(20, 3, 8)

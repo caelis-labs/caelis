@@ -362,7 +362,9 @@ probes the live Runner event stream for high-confidence generation loops:
 exact reasoning/assistant tail cycles, or identical tool name+args steps only
 when the content segment since the previous tool call is also identical
 (different thought with the same tool is progress). Stream deltas are
-concatenated without inserted separators; empty tool args fail open.
+concatenated without inserted separators; empty tool args fail open. Repeated
+`Task` wait calls are long-running work observation rather than repeated
+execution: each wait resets tool-loop evidence and is never itself counted.
 High-confidence hits claim one interrupt and cancel the live Turn
 (`WatchdogActionInterrupt`); the durable loop checkpoint is best-effort audit,
 not a precondition and not model context. Review runs asynchronously in at most

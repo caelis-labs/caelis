@@ -89,6 +89,7 @@ func TestEnsureAuthenticatedCompletesPKCECallback(t *testing.T) {
 		Issuer:         issuer.URL,
 		CredentialPath: credentialPath,
 		Clock:          func() time.Time { return now },
+		Headless:       func() bool { return false },
 		Listen: func(string, string) (net.Listener, error) {
 			return listener, nil
 		},
@@ -178,6 +179,7 @@ func TestEnsureAuthenticatedRejectsCallbackStateMismatch(t *testing.T) {
 	manager, err := NewManager(Options{
 		Issuer:         issuer.URL,
 		CredentialPath: DefaultCredentialPath(t.TempDir()),
+		Headless:       func() bool { return false },
 		Listen: func(string, string) (net.Listener, error) {
 			return listener, nil
 		},
@@ -217,6 +219,7 @@ func TestEnsureAuthenticatedDoesNotReplaceTransientRefreshFailureWithLogin(t *te
 	manager, err := NewManager(Options{
 		Issuer:         issuer.URL,
 		CredentialPath: credentialPath,
+		Headless:       func() bool { return false },
 		BrowserOpener: func(string) error {
 			browserCalls.Add(1)
 			return nil
@@ -249,7 +252,12 @@ func TestEnsureAuthenticatedRequiresLoginWhenRefreshChangesAccount(t *testing.T)
 		})
 	}))
 	defer issuer.Close()
-	manager, err := NewManager(Options{Issuer: issuer.URL, CredentialPath: credentialPath, Clock: func() time.Time { return now }})
+	manager, err := NewManager(Options{
+		Issuer:         issuer.URL,
+		CredentialPath: credentialPath,
+		Clock:          func() time.Time { return now },
+		Headless:       func() bool { return false },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +284,10 @@ func TestMalformedCredentialsAreClassifiedForInteractiveRecovery(t *testing.T) {
 	if err := os.WriteFile(credentialPath, []byte("{not-json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := NewManager(Options{CredentialPath: credentialPath})
+	manager, err := NewManager(Options{
+		CredentialPath: credentialPath,
+		Headless:       func() bool { return false },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

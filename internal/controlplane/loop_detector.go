@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 // generationLoopDetector is a near-zero-cost stream-tail probe.
@@ -19,6 +20,8 @@ import (
 //
 // Same tool with different segment content is treated as progress (not a loop).
 // Empty/unusable tool args fail open (never name-only identity).
+// Task wait is long-running work observation, so it resets tool-loop evidence
+// and is never counted as repeated execution.
 //
 // This is not a wall-clock task timeout.
 const (
@@ -95,6 +98,12 @@ func (d *generationLoopDetector) observe(event *session.Event) (loopHit, bool) {
 		if callID != "" && d.toolCallCounted(callID) {
 			// ACP may emit several pending updates for one remote tool call. They
 			// are one generation step, not repeated tool execution evidence.
+			return loopHit{}, false
+		}
+		if watchdogTaskWait(event) {
+			d.rememberToolCall(callID)
+			d.segment = d.segment[:0]
+			d.resetToolEvidence()
 			return loopHit{}, false
 		}
 		sig := watchdogToolSignature(event)
@@ -330,12 +339,7 @@ func watchdogToolSignature(event *session.Event) string {
 	if name == "" {
 		return ""
 	}
-	input := map[string]any(nil)
-	if event.Tool != nil {
-		input = event.Tool.Input
-	} else if update != nil {
-		input = update.RawInput
-	}
+	input := watchdogToolInput(event, update)
 	args, ok := canonicalToolArgs(input)
 	if !ok {
 		return ""
@@ -346,6 +350,32 @@ func watchdogToolSignature(event *session.Event) string {
 	}
 	sum := sha256.Sum256(append([]byte(name+"\x00"), payload...))
 	return hex.EncodeToString(sum[:])
+}
+
+func watchdogTaskWait(event *session.Event) bool {
+	if event == nil {
+		return false
+	}
+	update := session.ProtocolUpdateOf(event)
+	info, ok := identity.Lookup(session.CanonicalToolName(event, update))
+	if !ok || info.Name != identity.Task {
+		return false
+	}
+	action, _ := watchdogToolInput(event, update)["action"].(string)
+	return strings.EqualFold(strings.TrimSpace(action), "wait")
+}
+
+func watchdogToolInput(event *session.Event, update *session.ProtocolUpdate) map[string]any {
+	if event == nil {
+		return nil
+	}
+	if event.Tool != nil {
+		return event.Tool.Input
+	}
+	if update != nil {
+		return update.RawInput
+	}
+	return nil
 }
 
 func watchdogToolCallID(event *session.Event) string {
