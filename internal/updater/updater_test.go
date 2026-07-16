@@ -62,7 +62,7 @@ func TestCheckSkipsDevelopmentBuild(t *testing.T) {
 func TestAutoCheckUsesDailyCache(t *testing.T) {
 	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 	storeDir := t.TempDir()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newUpdaterTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"tag_name":"v1.1.0"}`)
 	}))
 	defer server.Close()
@@ -327,7 +327,7 @@ func TestDeferredUpdateStateKeepsCurrentVersionAvailable(t *testing.T) {
 func TestRawUpdateReportsInstallProgress(t *testing.T) {
 	archive := releaseArchive(t, "caelis", []byte("new-binary"))
 	sum := sha256.Sum256(archive)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newUpdaterTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/latest":
 			fmt.Fprint(w, `{"tag_name":"v1.2.0"}`)
@@ -379,7 +379,7 @@ func TestRawUpdateReportsInstallProgress(t *testing.T) {
 func TestRawUpdateDownloadsVerifiesAndReplacesExecutable(t *testing.T) {
 	archive := releaseArchive(t, "caelis", []byte("new-binary"))
 	sum := sha256.Sum256(archive)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newUpdaterTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/latest":
 			fmt.Fprint(w, `{"tag_name":"v1.2.0"}`)
@@ -437,4 +437,34 @@ func releaseArchive(t *testing.T, name string, data []byte) []byte {
 		t.Fatalf("gzip Close() error = %v", err)
 	}
 	return buf.Bytes()
+}
+
+type updaterTestHTTPServer struct {
+	URL     string
+	handler http.Handler
+}
+
+func newUpdaterTestHTTPServer(handler http.Handler) *updaterTestHTTPServer {
+	return &updaterTestHTTPServer{
+		URL:     "http://updater.test",
+		handler: handler,
+	}
+}
+
+func (s *updaterTestHTTPServer) Client() *http.Client {
+	return &http.Client{Transport: updaterRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		recorder := httptest.NewRecorder()
+		s.handler.ServeHTTP(recorder, req)
+		response := recorder.Result()
+		response.Request = req
+		return response, nil
+	})}
+}
+
+func (*updaterTestHTTPServer) Close() {}
+
+type updaterRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f updaterRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

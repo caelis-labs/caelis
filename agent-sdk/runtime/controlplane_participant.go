@@ -375,7 +375,7 @@ func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptPartici
 	if !claimed {
 		return agent.RunResult{}, fmt.Errorf("agent-sdk/runtime: participant %q already has a prompt in progress", strings.TrimSpace(binding.ID))
 	}
-	contextPrelude, _, err := r.buildParticipantPromptContext(ctx, activeSession, ref, binding)
+	contextTransfer, _, err := r.buildParticipantPromptContext(ctx, activeSession, ref, binding)
 	if err != nil {
 		releasePrompt()
 		return agent.RunResult{}, err
@@ -384,7 +384,7 @@ func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptPartici
 	runID := r.nextID("participant-run", nil)
 	runCtx, cancel := context.WithCancel(ctx)
 	handle := newRunner(runID, cancel)
-	go r.executeACPParticipantTurn(runCtx, activeSession, ref, req, binding, contextPrelude, runID, turnID, handle, releasePrompt)
+	go r.executeACPParticipantTurn(runCtx, activeSession, ref, req, binding, contextTransfer, runID, turnID, handle, releasePrompt)
 	return agent.RunResult{
 		Session: activeSession,
 		Handle:  handle,
@@ -397,7 +397,7 @@ func (r *Runtime) executeACPParticipantTurn(
 	ref session.SessionRef,
 	req agent.PromptParticipantRequest,
 	binding session.ParticipantBinding,
-	contextPrelude string,
+	contextTransfer agent.ContextTransfer,
 	runID string,
 	turnID string,
 	handle *runner,
@@ -419,17 +419,17 @@ func (r *Runtime) executeACPParticipantTurn(
 		handle.publishEvent(persisted)
 	}
 	turnResult, err := r.controllers.PromptParticipant(ctx, controller.ParticipantPromptRequest{
-		SessionRef:     ref,
-		Session:        activeSession,
-		TurnID:         turnID,
-		ParticipantID:  participantID,
-		Input:          strings.TrimSpace(req.Input),
-		DisplayInput:   strings.TrimSpace(req.DisplayInput),
-		DisplayTitle:   strings.TrimSpace(req.DisplayTitle),
-		ContentParts:   req.ContentParts,
-		ContextPrelude: contextPrelude,
-		Stream:         req.Stream,
-		Mode:           r.policyMode(agent.AgentSpec{}),
+		SessionRef:    ref,
+		Session:       activeSession,
+		TurnID:        turnID,
+		ParticipantID: participantID,
+		Input:         strings.TrimSpace(req.Input),
+		DisplayInput:  strings.TrimSpace(req.DisplayInput),
+		DisplayTitle:  strings.TrimSpace(req.DisplayTitle),
+		ContentParts:  req.ContentParts,
+		Context:       contextTransfer,
+		Stream:        req.Stream,
+		Mode:          r.policyMode(agent.AgentSpec{}),
 		ApprovalRequester: controllerApprovalRequester{
 			requester:            req.ApprovalRequester,
 			sessionRef:           ref,
@@ -462,6 +462,9 @@ func (r *Runtime) executeACPParticipantTurn(
 		Publisher:     handle,
 		Normalize: func(active session.Session, turn string, event *session.Event) *session.Event {
 			normalized := normalizeEvent(active, turn, event)
+			if normalized != nil && normalized.Scope != nil {
+				normalized.Scope.Executor = session.ParticipantExecutor(binding)
+			}
 			if scopeRuntimeToolFactIdentity(normalized, runID, turnID, toolFactOrdinal+1) {
 				toolFactOrdinal++
 			}
@@ -652,8 +655,9 @@ func participantPromptUserEvent(
 		Time:       now,
 		Actor:      session.ActorRef{Kind: session.ActorKindUser, Name: "user"},
 		Scope: &session.EventScope{
-			TurnID: strings.TrimSpace(turnID),
-			Source: firstNonEmpty(strings.TrimSpace(source), "acp_participant"),
+			TurnID:   strings.TrimSpace(turnID),
+			Source:   firstNonEmpty(strings.TrimSpace(source), "acp_participant"),
+			Executor: session.ParticipantExecutor(binding),
 			Controller: session.ControllerRef{
 				Kind:    activeSession.Controller.Kind,
 				ID:      activeSession.Controller.ControllerID,

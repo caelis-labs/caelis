@@ -120,7 +120,7 @@ func (c *Coordinator) ReattachController(ctx context.Context, req controller.Rec
 		Agent:          agentName,
 		Source:         "controller_rehydrate",
 		Reason:         "controller process rehydrate",
-		ContextPrelude: strings.TrimSpace(route.Prelude),
+		Context:        route.Context,
 		ContextSyncSeq: route.SyncSeq,
 	})
 	if err != nil {
@@ -217,7 +217,7 @@ func (c *Coordinator) handoffController(ctx context.Context, req agent.HandoffCo
 			Agent:          strings.TrimSpace(req.Agent),
 			Source:         strings.TrimSpace(req.Source),
 			Reason:         strings.TrimSpace(req.Reason),
-			ContextPrelude: strings.TrimSpace(route.Prelude),
+			Context:        route.Context,
 			ContextSyncSeq: route.SyncSeq,
 		})
 		if err != nil {
@@ -308,7 +308,7 @@ func (c *Coordinator) reactivatePreviousController(ctx context.Context, ref sess
 		Agent:          agentName,
 		Source:         "handoff_rollback",
 		Reason:         "durable handoff commit failed",
-		ContextPrelude: strings.TrimSpace(route.Prelude),
+		Context:        route.Context,
 		ContextSyncSeq: route.SyncSeq,
 	})
 	return err

@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -112,7 +111,7 @@ func TestCodeFreeNonStream_UsesLocalOAuthCredsAndEndpoint(t *testing.T) {
 
 	var seenHeaders http.Header
 	var seenPayload map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != codeFreeChatCompletionsPath {
 			http.NotFound(w, r)
 			return

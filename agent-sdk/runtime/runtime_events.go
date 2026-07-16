@@ -90,8 +90,14 @@ func normalizeEvent(activeSession session.Session, turnID string, event *session
 	if event.Scope.Controller.Kind == "" {
 		event.Scope.Controller = defaultControllerRef(activeSession)
 	}
+	if !session.ActorRefHasIdentity(event.Scope.Executor) {
+		event.Scope.Executor = session.ControllerExecutor(activeSession.Controller)
+	}
 	if event.Actor.Kind == "" {
 		event.Actor = defaultActorForEvent(event)
+	}
+	if event.Actor.Kind == session.ActorKindController && strings.TrimSpace(event.Actor.Name) == "" {
+		event.Actor.Name = event.Scope.Executor.Name
 	}
 	return event
 }
@@ -122,6 +128,7 @@ func scopeRuntimeToolFactIdentity(event *session.Event, runID, turnID string, or
 func defaultScope(activeSession session.Session, turnID string) session.EventScope {
 	return session.EventScope{
 		TurnID:     strings.TrimSpace(turnID),
+		Executor:   session.ControllerExecutor(activeSession.Controller),
 		Controller: defaultControllerRef(activeSession),
 	}
 }

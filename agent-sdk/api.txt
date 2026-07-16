@@ -45,10 +45,13 @@ package github.com/caelis-labs/caelis/agent-sdk
   func (o ModelRequestOptions) StreamEnabled(defaultValue bool) bool
   func (o ModelRequestOptions) WithDefaults(defaults ModelRequestOptions) ModelRequestOptions
   func (r CancelResult) Cancelled() bool
+  func CloneContextTransfer(in ContextTransfer) ContextTransfer
   func CloneSourceEvent(in SourceEvent) SourceEvent
   func CloneSubmission(sub Submission) Submission
   func CloneSubmissions(items []Submission) []Submission
+  func ContextTransferEmpty(in ContextTransfer) bool
   func ExecuteLifecycle(ctx context.Context, event LifecycleEvent, options LifecycleOptions, next LifecycleNext) error
+  func MergeContextTransfers(earlier, later ContextTransfer) ContextTransfer
   func NewContext(spec ContextSpec) Context
   func NewEvents(events []*session.Event) Events
   func NewReadonlyState(values map[string]any) ReadonlyState
@@ -129,6 +132,15 @@ package github.com/caelis-labs/caelis/agent-sdk
       State            map[string]any
       DrainSubmissions func() []Submission
       Overlay          bool
+  }
+  type ContextTransfer struct {
+      Summary string        `json:"summary,omitempty"`
+      Turns   []ContextTurn `json:"turns,omitempty"`
+  }
+  type ContextTurn struct {
+      Executor         session.ActorRef `json:"executor,omitempty"`
+      UserMessages     []string         `json:"user_messages,omitempty"`
+      AssistantSummary string           `json:"assistant_summary,omitempty"`
   }
   type ContextUsage struct {
       CurrentTokens int `json:"current_tokens,omitempty"`
@@ -1263,8 +1275,8 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime/controller
   type CancelResult = agent.CancelResult
   type CancelStatus = agent.CancelStatus
   type ContextRoute struct {
-      Prelude string `json:"prelude,omitempty"`
-      SyncSeq uint64 `json:"sync_seq,omitempty"`
+      Context agent.ContextTransfer `json:"context,omitempty"`
+      SyncSeq uint64                `json:"sync_seq,omitempty"`
   }
   type ContextRouter interface {
       ControllerContext(context.Context, ControllerContextRequest) (ContextRoute, error)
@@ -1287,13 +1299,13 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime/controller
       Source               string             `json:"source,omitempty"`
   }
   type HandoffRequest struct {
-      SessionRef     session.SessionRef `json:"session_ref,omitempty"`
-      Session        session.Session    `json:"session,omitempty"`
-      Agent          string             `json:"agent,omitempty"`
-      Source         string             `json:"source,omitempty"`
-      Reason         string             `json:"reason,omitempty"`
-      ContextPrelude string             `json:"context_prelude,omitempty"`
-      ContextSyncSeq uint64             `json:"context_sync_seq,omitempty"`
+      SessionRef     session.SessionRef    `json:"session_ref,omitempty"`
+      Session        session.Session       `json:"session,omitempty"`
+      Agent          string                `json:"agent,omitempty"`
+      Source         string                `json:"source,omitempty"`
+      Reason         string                `json:"reason,omitempty"`
+      Context        agent.ContextTransfer `json:"context,omitempty"`
+      ContextSyncSeq uint64                `json:"context_sync_seq,omitempty"`
   }
   type ParticipantContextRequest struct {
       SessionRef session.SessionRef         `json:"session_ref,omitempty"`
@@ -1301,18 +1313,18 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime/controller
       Binding    session.ParticipantBinding `json:"binding,omitempty"`
   }
   type ParticipantPromptRequest struct {
-      SessionRef        session.SessionRef  `json:"session_ref,omitempty"`
-      Session           session.Session     `json:"session,omitempty"`
-      TurnID            string              `json:"turn_id,omitempty"`
-      ParticipantID     string              `json:"participant_id,omitempty"`
-      Input             string              `json:"input,omitempty"`
-      DisplayInput      string              `json:"display_input,omitempty"`
-      DisplayTitle      string              `json:"display_title,omitempty"`
-      ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
-      ContextPrelude    string              `json:"context_prelude,omitempty"`
-      Stream            bool                `json:"stream,omitempty"`
-      Mode              string              `json:"mode,omitempty"`
-      ApprovalRequester ApprovalRequester   `json:"-"`
+      SessionRef        session.SessionRef    `json:"session_ref,omitempty"`
+      Session           session.Session       `json:"session,omitempty"`
+      TurnID            string                `json:"turn_id,omitempty"`
+      ParticipantID     string                `json:"participant_id,omitempty"`
+      Input             string                `json:"input,omitempty"`
+      DisplayInput      string                `json:"display_input,omitempty"`
+      DisplayTitle      string                `json:"display_title,omitempty"`
+      ContentParts      []model.ContentPart   `json:"content_parts,omitempty"`
+      Context           agent.ContextTransfer `json:"context,omitempty"`
+      Stream            bool                  `json:"stream,omitempty"`
+      Mode              string                `json:"mode,omitempty"`
+      ApprovalRequester ApprovalRequester     `json:"-"`
   }
   type RecoveryCoordinator interface {
       ReattachController(context.Context, RecoveryRequest) (session.Session, error)
@@ -1328,16 +1340,16 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime/controller
       Close() error
   }
   type TurnRequest struct {
-      SessionRef        session.SessionRef  `json:"session_ref,omitempty"`
-      Session           session.Session     `json:"session,omitempty"`
-      TurnID            string              `json:"turn_id,omitempty"`
-      Input             string              `json:"input,omitempty"`
-      ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
-      ContextPrelude    string              `json:"context_prelude,omitempty"`
-      ContextSyncSeq    uint64              `json:"context_sync_seq,omitempty"`
-      Stream            bool                `json:"stream,omitempty"`
-      Mode              string              `json:"mode,omitempty"`
-      ApprovalRequester ApprovalRequester   `json:"-"`
+      SessionRef        session.SessionRef    `json:"session_ref,omitempty"`
+      Session           session.Session       `json:"session,omitempty"`
+      TurnID            string                `json:"turn_id,omitempty"`
+      Input             string                `json:"input,omitempty"`
+      ContentParts      []model.ContentPart   `json:"content_parts,omitempty"`
+      Context           agent.ContextTransfer `json:"context,omitempty"`
+      ContextSyncSeq    uint64                `json:"context_sync_seq,omitempty"`
+      Stream            bool                  `json:"stream,omitempty"`
+      Mode              string                `json:"mode,omitempty"`
+      ApprovalRequester ApprovalRequester     `json:"-"`
   }
   type TurnResult struct {
       Handle    TurnHandle `json:"-"`
@@ -1836,6 +1848,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func (p EventProtocol) MarshalJSON() ([]byte, error)
   func (r *MigrationRegistry) Migrate(kind SchemaKind, source, target int, raw json.RawMessage) (json.RawMessage, error)
   func (r *MigrationRegistry) Register(kind SchemaKind, from, to int, migration SchemaMigration) error
+  func ActorRefHasIdentity(ref ActorRef) bool
   func ApplyPreparedAppendToSession(activeSession *Session, prepared PreparedAppendEvents) bool
   func AuthorizeMutationGuard(active SessionLease, guard MutationGuard, now time.Time) error
   func CanonicalToolName(event *Event, update *ProtocolUpdate) string
@@ -1866,6 +1879,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func ControlMutationGuard(purpose ControlMutationPurpose) MutationGuard
   func ControlMutationGuardWithRuntimeLease(ctx context.Context, purpose ControlMutationPurpose) MutationGuard
   func ControlMutationMayOverlapRuntimeLease(purpose ControlMutationPurpose) bool
+  func ControllerExecutor(binding ControllerBinding) ActorRef
   func DecodeSessionListCursor(encoded string) (SessionListCursor, error)
   func DefaultMigrationRegistry() *MigrationRegistry
   func EncodeSessionListCursor(cursor SessionListCursor) (string, error)
@@ -1915,6 +1929,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func NormalizeUsageForDisplay(usage UsageSnapshot, provider string) UsageSnapshot
   func NoticeOf(event *Event) (EventNotice, bool)
   func PageEvents(events []*Event, req EventPageRequest) EventPage
+  func ParticipantExecutor(binding ParticipantBinding) ActorRef
   func PendingApprovalMatches(current *Event, req SettlePendingApprovalRequest) bool
   func PlanPayloadOf(event *Event) *EventPlanPayload
   func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppendTransaction, error)
@@ -2143,6 +2158,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   type EventScope struct {
       TurnID      string         `json:"turn_id,omitempty"`
       Source      string         `json:"source,omitempty"`
+      Executor    ActorRef       `json:"executor,omitempty"`
       Controller  ControllerRef  `json:"controller,omitempty"`
       Participant ParticipantRef `json:"participant,omitempty"`
       ACP         ACPRef         `json:"acp,omitempty"`
@@ -2802,12 +2818,12 @@ package github.com/caelis-labs/caelis/agent-sdk/task
       Observer    Observer      `json:"-"`
   }
   type ControlRequest struct {
-      TaskID         string            `json:"task_id,omitempty"`
-      Yield          time.Duration     `json:"yield,omitempty"`
-      Input          string            `json:"input,omitempty"`
-      Principal      session.ActorKind `json:"principal,omitempty"`
-      Source         string            `json:"source,omitempty"`
-      ContextPrelude string            `json:"context_prelude,omitempty"`
+      TaskID    string                `json:"task_id,omitempty"`
+      Yield     time.Duration         `json:"yield,omitempty"`
+      Input     string                `json:"input,omitempty"`
+      Principal session.ActorKind     `json:"principal,omitempty"`
+      Source    string                `json:"source,omitempty"`
+      Context   agent.ContextTransfer `json:"context,omitempty"`
   }
   type Entry struct {
       TaskID         string              `json:"task_id,omitempty"`
@@ -2915,16 +2931,16 @@ package github.com/caelis-labs/caelis/agent-sdk/task
       GetSessionTaskByHandle(context.Context, session.SessionRef, Kind, string) (*Entry, error)
   }
   type SubagentStartRequest struct {
-      SpawnID        string                          `json:"spawn_id,omitempty"`
-      Agent          string                          `json:"agent,omitempty"`
-      Prompt         string                          `json:"prompt,omitempty"`
-      ContextPrelude string                          `json:"context_prelude,omitempty"`
-      ParentCall     string                          `json:"parent_call,omitempty"`
-      Role           session.ParticipantRole         `json:"role,omitempty"`
-      Source         string                          `json:"source,omitempty"`
-      Mode           string                          `json:"mode,omitempty"`
-      ApprovalMode   string                          `json:"approval_mode,omitempty"`
-      Approval       agent.SubagentApprovalRequester `json:"-"`
+      SpawnID      string                          `json:"spawn_id,omitempty"`
+      Agent        string                          `json:"agent,omitempty"`
+      Prompt       string                          `json:"prompt,omitempty"`
+      Context      agent.ContextTransfer           `json:"context,omitempty"`
+      ParentCall   string                          `json:"parent_call,omitempty"`
+      Role         session.ParticipantRole         `json:"role,omitempty"`
+      Source       string                          `json:"source,omitempty"`
+      Mode         string                          `json:"mode,omitempty"`
+      ApprovalMode string                          `json:"approval_mode,omitempty"`
+      Approval     agent.SubagentApprovalRequester `json:"-"`
   }
 
 package github.com/caelis-labs/caelis/agent-sdk/task/delegation

@@ -36,13 +36,19 @@ func formatToolName(pluginID, serverName, toolName string) string {
 }
 
 func NewManager(ctx context.Context, specs []ServerSpec) (*Manager, error) {
+	return newManager(ctx, specs, StartClient)
+}
+
+type clientStarter func(context.Context, ServerSpec) (*Client, error)
+
+func newManager(ctx context.Context, specs []ServerSpec, start clientStarter) (*Manager, error) {
 	mgr := &Manager{
 		clients: make(map[string]*Client),
 	}
 	usedToolNames := map[string]string{}
 
 	for _, spec := range specs {
-		client, err := StartClient(ctx, spec)
+		client, err := start(ctx, spec)
 		if err != nil {
 			_ = mgr.Close()
 			return nil, fmt.Errorf("mcp manager: failed to start server %s/%s: %w", spec.PluginID, spec.Name, err)

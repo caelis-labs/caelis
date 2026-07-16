@@ -18,7 +18,7 @@ import (
 func TestFetchToolReturnsCleanMarkdown(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newWebTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = fmt.Fprint(w, `<!doctype html>
 <html><head><title>Ignored Browser Title</title><script>alert("secret")</script></head>
@@ -187,7 +187,7 @@ func TestFetchToolReturnsFullContentForRuntimeTruncation(t *testing.T) {
 	t.Parallel()
 
 	fullContent := strings.Repeat("large fetched line with useful evidence\n", 3000)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newWebTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = fmt.Fprint(w, fullContent)
 	}))
@@ -220,4 +220,34 @@ func TestFetchToolReturnsFullContentForRuntimeTruncation(t *testing.T) {
 	if _, ok := payload["artifact_path"]; ok {
 		t.Fatalf("artifact_path = %#v, WebFetch must defer artifacts to Runtime", payload["artifact_path"])
 	}
+}
+
+type webTestHTTPServer struct {
+	URL     string
+	handler http.Handler
+}
+
+func newWebTestHTTPServer(handler http.Handler) *webTestHTTPServer {
+	return &webTestHTTPServer{
+		URL:     "http://web-fetch.test",
+		handler: handler,
+	}
+}
+
+func (s *webTestHTTPServer) Client() *http.Client {
+	return &http.Client{Transport: webRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		recorder := httptest.NewRecorder()
+		s.handler.ServeHTTP(recorder, req)
+		response := recorder.Result()
+		response.Request = req
+		return response, nil
+	})}
+}
+
+func (*webTestHTTPServer) Close() {}
+
+type webRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f webRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

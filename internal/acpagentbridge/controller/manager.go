@@ -14,7 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
@@ -60,17 +62,17 @@ type clientStarter func(
 ) (*client.Client, string, controllerClientState, error)
 
 type controllerRun struct {
-	parentSessionID       string
-	agent                 string
-	cfg                   subagent.AgentConfig
-	cwd                   string
-	client                *client.Client
-	remoteSessionID       string
-	supportsClose         bool
-	promptCapabilities    schema.PromptCapabilities
-	binding               session.ControllerBinding
-	contextPrelude        string
-	contextPreludePending bool
+	parentSessionID    string
+	agent              string
+	cfg                subagent.AgentConfig
+	cwd                string
+	client             *client.Client
+	remoteSessionID    string
+	supportsClose      bool
+	promptCapabilities schema.PromptCapabilities
+	binding            session.ControllerBinding
+	context            agent.ContextTransfer
+	contextPending     bool
 
 	mu                sync.Mutex
 	commands          []ControllerCommand
@@ -154,14 +156,14 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 	}
 
 	run := &controllerRun{
-		parentSessionID:       parentSessionID,
-		agent:                 strings.TrimSpace(cfg.Name),
-		cfg:                   cfg,
-		cwd:                   strings.TrimSpace(req.Session.CWD),
-		binding:               controllerBinding(cfg.Name, req.Source, m.nextID("controller"), m.clock()),
-		contextPrelude:        strings.TrimSpace(req.ContextPrelude),
-		contextPreludePending: strings.TrimSpace(req.ContextPrelude) != "",
-		updatedAt:             m.clock(),
+		parentSessionID: parentSessionID,
+		agent:           strings.TrimSpace(cfg.Name),
+		cfg:             cfg,
+		cwd:             strings.TrimSpace(req.Session.CWD),
+		binding:         controllerBinding(cfg.Name, req.Source, m.nextID("controller"), m.clock()),
+		context:         agent.CloneContextTransfer(req.Context),
+		contextPending:  !agent.ContextTransferEmpty(req.Context),
+		updatedAt:       m.clock(),
 	}
 	resumeRemoteSessionID := reusableControllerRemoteSessionID(req.Session, cfg.Name)
 	client, remoteSessionID, state, err := m.startClient(ctx, req.Session.CWD, cfg, resumeRemoteSessionID,
@@ -178,8 +180,8 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 	contextSyncSeq := req.ContextSyncSeq
 	if resumeRemoteSessionID != "" && !strings.EqualFold(strings.TrimSpace(remoteSessionID), resumeRemoteSessionID) {
 		contextSyncSeq = 0
-		run.contextPrelude = ""
-		run.contextPreludePending = false
+		run.context = agent.ContextTransfer{}
+		run.contextPending = false
 	}
 	run.applyStartupStateLocked(client, remoteSessionID, state, contextSyncSeq)
 
@@ -251,8 +253,7 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 	}
 
 	prompt := buildPromptParts(req.Input, req.ContentParts)
-	prompt = run.consumeContextPrelude(prompt)
-	prompt = prependACPContextPrelude(prompt, req.ContextPrelude)
+	prompt = composeACPContextPrompt(prompt, agent.MergeContextTransfers(run.consumeContext(), req.Context))
 	turnCtx, cancel := context.WithCancel(ctx)
 	handle := newTurnHandle(cancel)
 	run.beginTurn(req, handle)
@@ -422,8 +423,8 @@ func (m *Manager) reconnectControllerRun(ctx context.Context, run *controllerRun
 	if resumeRemoteSessionID != "" && !strings.EqualFold(strings.TrimSpace(remoteSessionID), resumeRemoteSessionID) {
 		contextSyncSeq = 0
 		run.mu.Lock()
-		run.contextPrelude = ""
-		run.contextPreludePending = false
+		run.context = agent.ContextTransfer{}
+		run.contextPending = false
 		run.mu.Unlock()
 	}
 	run.applyStartupStateLocked(acpClient, remoteSessionID, state, contextSyncSeq)
@@ -630,7 +631,7 @@ func (m *Manager) PromptParticipant(ctx context.Context, req controller.Particip
 		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: participant %q does not support image prompts", req.ParticipantID)
 	}
 	prompt := buildPromptParts(req.Input, req.ContentParts)
-	prompt = prependACPContextPrelude(prompt, req.ContextPrelude)
+	prompt = composeACPContextPrompt(prompt, req.Context)
 	if len(prompt) == 0 {
 		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: participant prompt is required")
 	}
@@ -1024,34 +1025,38 @@ func (r *controllerRun) beginTurn(req controller.TurnRequest, handle *turnHandle
 	r.events = nil
 }
 
-func (r *controllerRun) consumeContextPrelude(prompt []json.RawMessage) []json.RawMessage {
+func (r *controllerRun) consumeContext() agent.ContextTransfer {
 	if r == nil {
-		return prompt
+		return agent.ContextTransfer{}
 	}
 	r.mu.Lock()
-	prelude := strings.TrimSpace(r.contextPrelude)
-	pending := r.contextPreludePending
+	contextTransfer := agent.CloneContextTransfer(r.context)
+	pending := r.contextPending
 	if pending {
-		r.contextPreludePending = false
+		r.contextPending = false
 	}
 	r.mu.Unlock()
-	if !pending || prelude == "" {
-		return prompt
+	if !pending {
+		return agent.ContextTransfer{}
 	}
-	return prependACPContextPrelude(prompt, prelude)
+	return contextTransfer
 }
 
-func prependACPContextPrelude(prompt []json.RawMessage, prelude string) []json.RawMessage {
-	prelude = strings.TrimSpace(prelude)
-	if prelude == "" {
+func composeACPContextPrompt(prompt []json.RawMessage, contextTransfer agent.ContextTransfer) []json.RawMessage {
+	background := contextprompt.RenderBackground(contextTransfer)
+	if background == "" || len(prompt) == 0 {
 		return prompt
 	}
-	raw, _ := json.Marshal(client.TextContent{
+	backgroundRaw, _ := json.Marshal(client.TextContent{
 		Type: "text",
-		Text: prelude,
+		Text: background,
 	})
-	out := make([]json.RawMessage, 0, len(prompt)+1)
-	out = append(out, raw)
+	currentRaw, _ := json.Marshal(client.TextContent{
+		Type: "text",
+		Text: contextprompt.CurrentRequestMarker(),
+	})
+	out := make([]json.RawMessage, 0, len(prompt)+2)
+	out = append(out, backgroundRaw, currentRaw)
 	out = append(out, prompt...)
 	return out
 }
@@ -1525,6 +1530,7 @@ func applyACPParticipantEventScope(event *session.Event, binding session.Partici
 		event.Scope = &session.EventScope{}
 	}
 	event.Scope.Source = "acp_participant"
+	event.Scope.Executor = session.ParticipantExecutor(binding)
 	event.Scope.Controller = session.ControllerRef{}
 	event.Scope.Participant = session.ParticipantRef{
 		ID:           participantID,

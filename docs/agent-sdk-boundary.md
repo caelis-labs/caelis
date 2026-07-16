@@ -236,6 +236,32 @@ parallel Sessions, parent-fenced delegated tasks, and participant lifecycle;
 the orchestration layer decides when the next same-Session Turn runs. Raw child
 stream output never becomes parent model truth without a canonical result.
 
+### Context transfer between Agents
+
+Control routes a recipient-specific offset of public Session context when a
+controller or participant has not seen completed Turns. Each uncompressed Turn
+contains the ordered user messages leading to one final assistant summary and
+the typed `EventScope.Executor` identity of the Agent that executed it. Turn and
+message order are preserved. Tool calls, tool results, reasoning, plans, live
+chunks, Session identifiers, workspace paths, endpoint routing metadata, and
+participant rosters are not model-visible context-transfer data.
+
+The current request is a separate input and is never embedded in the historical
+offset. An empty offset adds no prompt wrapper. String-based Agent adapters
+render a versioned background block followed by an explicit current-request
+boundary; structured adapters may carry the same neutral `ContextTransfer`
+contract without using that rendering.
+
+Compaction remains endpoint-local and opaque to this contract. When a
+recipient checkpoint predates the latest Caelis compact event, Control sends
+the existing compact summary as an opaque baseline plus the ordered complete
+Turn tail. Caelis does not require compaction to preserve a structured Turn
+snapshot or reconstruct identities inside that summary. Recipient checkpoints
+advance only across compact boundaries or complete public exchanges. Each
+exchange preserves all ordered user messages received before its final
+assistant summary, so both post-answer follow-ups and pre-answer steering remain
+distinct instead of being collapsed or paired with the wrong answer.
+
 ## Dynamic Orchestration
 
 The Agent Manage Loop is an event-driven Control loop:

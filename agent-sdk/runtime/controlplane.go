@@ -151,14 +151,14 @@ func (r *Runtime) executeACPControllerTurn(
 		Mode:              r.policyMode(req.AgentSpec),
 		ApprovalRequester: controllerApprovalRequester{requester: req.ApprovalRequester, sessionRef: ref, session: activeSession, runID: runID, turnID: turnID},
 	}
-	contextPrelude, contextSeq, err := r.buildControllerTurnContext(ctx, activeSession, ref, turnID)
+	contextTransfer, contextSeq, err := r.buildControllerTurnContext(ctx, activeSession, ref, turnID)
 	if err != nil {
 		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
 		handle.publishError(err)
 		return
 	}
 	if contextSeq > activeSession.Controller.ContextSyncSeq {
-		turnReq.ContextPrelude = contextPrelude
+		turnReq.Context = contextTransfer
 		turnReq.ContextSyncSeq = contextSeq
 	}
 	var turnResult controller.TurnResult
@@ -177,7 +177,7 @@ func (r *Runtime) executeACPControllerTurn(
 				})
 				if turnErr == nil {
 					turnReq.Session = activeSession
-					turnReq.ContextPrelude, turnReq.ContextSyncSeq, turnErr = r.buildControllerTurnContext(turnCtx, activeSession, ref, turnID)
+					turnReq.Context, turnReq.ContextSyncSeq, turnErr = r.buildControllerTurnContext(turnCtx, activeSession, ref, turnID)
 					if turnErr == nil {
 						turnResult, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
 					}

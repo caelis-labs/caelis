@@ -65,17 +65,11 @@ func TestSSEUsesCursorIDAndWholeEnvelopeData(t *testing.T) {
 	subscription := newTestSubscription(want)
 	service := &fakeService{subscription: subscription}
 	server := newTestServer(t, service, time.Hour)
-	httpServer := httptest.NewServer(server)
-	defer httpServer.Close()
-	request, err := http.NewRequest(http.MethodGet, httpServer.URL+apiPrefix+"/sessions/session-1/stream", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/stream", nil)
 	authorizeTestRequest(request)
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	response := recorder.Result()
 	defer response.Body.Close()
 	if response.Header.Get(resumeModeHeader) != string(controlclient.ResumeModeExact) || response.Header.Get(transientGapHeader) != "false" || response.Header.Get(boundaryCursorHeader) != "signed-cursor-1" {
 		t.Fatalf("SSE resume headers = %#v", response.Header)
@@ -127,17 +121,11 @@ func TestSSEReportsTypedGapWithRetryCursor(t *testing.T) {
 		Mode: controlclient.ResumeModeDurableFallback, TransientGap: true,
 	}
 	server := newTestServer(t, &fakeService{subscription: subscription}, time.Hour)
-	httpServer := httptest.NewServer(server)
-	defer httpServer.Close()
-	request, err := http.NewRequest(http.MethodGet, httpServer.URL+apiPrefix+"/sessions/session-1/stream", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/stream", nil)
 	authorizeTestRequest(request)
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	response := recorder.Result()
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {

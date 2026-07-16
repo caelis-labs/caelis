@@ -541,6 +541,57 @@ type ActorRef struct {
 	Name string    `json:"name,omitempty"`
 }
 
+// ActorRefHasIdentity reports whether one actor reference carries an actor
+// kind, stable ID, or display name. Role alone describes a relationship and
+// does not identify an actor.
+func ActorRefHasIdentity(ref ActorRef) bool {
+	return ref.Kind != "" || strings.TrimSpace(ref.ID) != "" || strings.TrimSpace(ref.Name) != ""
+}
+
+// ControllerExecutor returns the durable Turn executor identity for one
+// controller binding. The executor is distinct from an individual event actor:
+// a user event is authored by the user but executed by this Agent.
+func ControllerExecutor(binding ControllerBinding) ActorRef {
+	binding = CloneControllerBinding(binding)
+	return ActorRef{
+		Kind: ActorKindController,
+		ID:   binding.ControllerID,
+		Role: string(binding.Kind),
+		Name: firstExecutorName(binding.AgentName, binding.ControllerID, string(binding.Kind)),
+	}
+}
+
+// ParticipantExecutor returns the durable Turn executor identity for one
+// participant binding, including its addressable handle when available.
+func ParticipantExecutor(binding ParticipantBinding) ActorRef {
+	binding = CloneParticipantBinding(binding)
+	agentName := strings.TrimSpace(binding.AgentName)
+	handle := strings.Trim(strings.TrimSpace(binding.Label), "@/")
+	name := agentName
+	if handle != "" && !strings.EqualFold(handle, agentName) {
+		if name == "" {
+			name = handle
+		} else {
+			name += "(" + handle + ")"
+		}
+	}
+	return ActorRef{
+		Kind: ActorKindParticipant,
+		ID:   binding.ID,
+		Role: string(binding.Role),
+		Name: firstExecutorName(name, binding.ID, string(binding.Kind)),
+	}
+}
+
+func firstExecutorName(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return "unknown"
+}
+
 // ControllerRef identifies the controller epoch associated with one event.
 type ControllerRef struct {
 	Kind    ControllerKind `json:"kind,omitempty"`
@@ -576,6 +627,7 @@ type EventInvocation struct {
 type EventScope struct {
 	TurnID      string         `json:"turn_id,omitempty"`
 	Source      string         `json:"source,omitempty"`
+	Executor    ActorRef       `json:"executor,omitempty"`
 	Controller  ControllerRef  `json:"controller,omitempty"`
 	Participant ParticipantRef `json:"participant,omitempty"`
 	ACP         ACPRef         `json:"acp,omitempty"`

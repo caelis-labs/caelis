@@ -195,8 +195,9 @@ func CloneEventInvocation(in EventInvocation) EventInvocation {
 // CloneEventScope returns one normalized event scope copy.
 func CloneEventScope(in EventScope) EventScope {
 	return EventScope{
-		TurnID: strings.TrimSpace(in.TurnID),
-		Source: strings.TrimSpace(in.Source),
+		TurnID:   strings.TrimSpace(in.TurnID),
+		Source:   strings.TrimSpace(in.Source),
+		Executor: CloneActorRef(in.Executor),
 		Controller: ControllerRef{
 			Kind:    in.Controller.Kind,
 			ID:      strings.TrimSpace(in.Controller.ID),

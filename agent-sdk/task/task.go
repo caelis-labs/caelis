@@ -101,27 +101,27 @@ type CommandStartRequest struct {
 // participant relationship selected by Control. Source is audit provenance and
 // is never interpreted as authorization or role policy.
 type SubagentStartRequest struct {
-	SpawnID        string                          `json:"spawn_id,omitempty"`
-	Agent          string                          `json:"agent,omitempty"`
-	Prompt         string                          `json:"prompt,omitempty"`
-	ContextPrelude string                          `json:"context_prelude,omitempty"`
-	ParentCall     string                          `json:"parent_call,omitempty"`
-	Role           session.ParticipantRole         `json:"role,omitempty"`
-	Source         string                          `json:"source,omitempty"`
-	Mode           string                          `json:"mode,omitempty"`
-	ApprovalMode   string                          `json:"approval_mode,omitempty"`
-	Approval       agent.SubagentApprovalRequester `json:"-"`
+	SpawnID      string                          `json:"spawn_id,omitempty"`
+	Agent        string                          `json:"agent,omitempty"`
+	Prompt       string                          `json:"prompt,omitempty"`
+	Context      agent.ContextTransfer           `json:"context,omitempty"`
+	ParentCall   string                          `json:"parent_call,omitempty"`
+	Role         session.ParticipantRole         `json:"role,omitempty"`
+	Source       string                          `json:"source,omitempty"`
+	Mode         string                          `json:"mode,omitempty"`
+	ApprovalMode string                          `json:"approval_mode,omitempty"`
+	Approval     agent.SubagentApprovalRequester `json:"-"`
 }
 
 // ControlRequest defines one task control request. Principal is the normalized
 // actor exercising control. Source is audit provenance only.
 type ControlRequest struct {
-	TaskID         string            `json:"task_id,omitempty"`
-	Yield          time.Duration     `json:"yield,omitempty"`
-	Input          string            `json:"input,omitempty"`
-	Principal      session.ActorKind `json:"principal,omitempty"`
-	Source         string            `json:"source,omitempty"`
-	ContextPrelude string            `json:"context_prelude,omitempty"`
+	TaskID    string                `json:"task_id,omitempty"`
+	Yield     time.Duration         `json:"yield,omitempty"`
+	Input     string                `json:"input,omitempty"`
+	Principal session.ActorKind     `json:"principal,omitempty"`
+	Source    string                `json:"source,omitempty"`
+	Context   agent.ContextTransfer `json:"context,omitempty"`
 }
 
 // Entry is one durable task persistence record.

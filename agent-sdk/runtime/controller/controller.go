@@ -66,20 +66,20 @@ type DetachRequest struct {
 
 // HandoffRequest activates one ACP controller for a session.
 type HandoffRequest struct {
-	SessionRef     session.SessionRef `json:"session_ref,omitempty"`
-	Session        session.Session    `json:"session,omitempty"`
-	Agent          string             `json:"agent,omitempty"`
-	Source         string             `json:"source,omitempty"`
-	Reason         string             `json:"reason,omitempty"`
-	ContextPrelude string             `json:"context_prelude,omitempty"`
-	ContextSyncSeq uint64             `json:"context_sync_seq,omitempty"`
+	SessionRef     session.SessionRef    `json:"session_ref,omitempty"`
+	Session        session.Session       `json:"session,omitempty"`
+	Agent          string                `json:"agent,omitempty"`
+	Source         string                `json:"source,omitempty"`
+	Reason         string                `json:"reason,omitempty"`
+	Context        agent.ContextTransfer `json:"context,omitempty"`
+	ContextSyncSeq uint64                `json:"context_sync_seq,omitempty"`
 }
 
 // ContextRoute is one Control-selected context synchronization payload for an
 // endpoint turn or activation.
 type ContextRoute struct {
-	Prelude string `json:"prelude,omitempty"`
-	SyncSeq uint64 `json:"sync_seq,omitempty"`
+	Context agent.ContextTransfer `json:"context,omitempty"`
+	SyncSeq uint64                `json:"sync_seq,omitempty"`
 }
 
 // ControllerContextRequest asks Control to select the canonical context that
@@ -125,33 +125,33 @@ type RecoveryCoordinator interface {
 
 // TurnRequest runs one turn through the active ACP controller.
 type TurnRequest struct {
-	SessionRef        session.SessionRef  `json:"session_ref,omitempty"`
-	Session           session.Session     `json:"session,omitempty"`
-	TurnID            string              `json:"turn_id,omitempty"`
-	Input             string              `json:"input,omitempty"`
-	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
-	ContextPrelude    string              `json:"context_prelude,omitempty"`
-	ContextSyncSeq    uint64              `json:"context_sync_seq,omitempty"`
-	Stream            bool                `json:"stream,omitempty"`
-	Mode              string              `json:"mode,omitempty"`
-	ApprovalRequester ApprovalRequester   `json:"-"`
+	SessionRef        session.SessionRef    `json:"session_ref,omitempty"`
+	Session           session.Session       `json:"session,omitempty"`
+	TurnID            string                `json:"turn_id,omitempty"`
+	Input             string                `json:"input,omitempty"`
+	ContentParts      []model.ContentPart   `json:"content_parts,omitempty"`
+	Context           agent.ContextTransfer `json:"context,omitempty"`
+	ContextSyncSeq    uint64                `json:"context_sync_seq,omitempty"`
+	Stream            bool                  `json:"stream,omitempty"`
+	Mode              string                `json:"mode,omitempty"`
+	ApprovalRequester ApprovalRequester     `json:"-"`
 }
 
 // ParticipantPromptRequest sends one bounded prompt to an attached ACP
 // participant without changing the main controller.
 type ParticipantPromptRequest struct {
-	SessionRef        session.SessionRef  `json:"session_ref,omitempty"`
-	Session           session.Session     `json:"session,omitempty"`
-	TurnID            string              `json:"turn_id,omitempty"`
-	ParticipantID     string              `json:"participant_id,omitempty"`
-	Input             string              `json:"input,omitempty"`
-	DisplayInput      string              `json:"display_input,omitempty"`
-	DisplayTitle      string              `json:"display_title,omitempty"`
-	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
-	ContextPrelude    string              `json:"context_prelude,omitempty"`
-	Stream            bool                `json:"stream,omitempty"`
-	Mode              string              `json:"mode,omitempty"`
-	ApprovalRequester ApprovalRequester   `json:"-"`
+	SessionRef        session.SessionRef    `json:"session_ref,omitempty"`
+	Session           session.Session       `json:"session,omitempty"`
+	TurnID            string                `json:"turn_id,omitempty"`
+	ParticipantID     string                `json:"participant_id,omitempty"`
+	Input             string                `json:"input,omitempty"`
+	DisplayInput      string                `json:"display_input,omitempty"`
+	DisplayTitle      string                `json:"display_title,omitempty"`
+	ContentParts      []model.ContentPart   `json:"content_parts,omitempty"`
+	Context           agent.ContextTransfer `json:"context,omitempty"`
+	Stream            bool                  `json:"stream,omitempty"`
+	Mode              string                `json:"mode,omitempty"`
+	ApprovalRequester ApprovalRequester     `json:"-"`
 }
 
 type CancelStatus = agent.CancelStatus
@@ -215,7 +215,7 @@ func NormalizeHandoffRequest(in HandoffRequest) HandoffRequest {
 	out.Agent = strings.TrimSpace(in.Agent)
 	out.Source = strings.TrimSpace(in.Source)
 	out.Reason = strings.TrimSpace(in.Reason)
-	out.ContextPrelude = strings.TrimSpace(in.ContextPrelude)
+	out.Context = agent.CloneContextTransfer(in.Context)
 	out.ContextSyncSeq = in.ContextSyncSeq
 	return out
 }
@@ -229,7 +229,7 @@ func NormalizeTurnRequest(in TurnRequest) TurnRequest {
 	if len(in.ContentParts) > 0 {
 		out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)
 	}
-	out.ContextPrelude = strings.TrimSpace(in.ContextPrelude)
+	out.Context = agent.CloneContextTransfer(in.Context)
 	out.ContextSyncSeq = in.ContextSyncSeq
 	out.Mode = strings.TrimSpace(in.Mode)
 	return out
@@ -243,7 +243,7 @@ func NormalizeParticipantPromptRequest(in ParticipantPromptRequest) ParticipantP
 	out.ParticipantID = strings.TrimSpace(in.ParticipantID)
 	out.Input = strings.TrimSpace(in.Input)
 	out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)
-	out.ContextPrelude = strings.TrimSpace(in.ContextPrelude)
+	out.Context = agent.CloneContextTransfer(in.Context)
 	out.Stream = in.Stream
 	out.Mode = strings.TrimSpace(in.Mode)
 	return out

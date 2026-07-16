@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -34,10 +35,12 @@ func TestNormalizeTurnRequestTrimsAndClones(t *testing.T) {
 				"mode": "agent",
 			},
 		},
-		TurnID:         " turn-1 ",
-		Input:          "  prompt  ",
-		ContentParts:   []model.ContentPart{part},
-		ContextPrelude: " prelude ",
+		TurnID:       " turn-1 ",
+		Input:        "  prompt  ",
+		ContentParts: []model.ContentPart{part},
+		Context: agent.ContextTransfer{Turns: []agent.ContextTurn{{
+			Executor: session.ActorRef{Name: " helper "}, UserMessages: []string{" prior "}, AssistantSummary: " done ",
+		}}},
 		ContextSyncSeq: 3,
 		Mode:           " plan ",
 	}
@@ -46,7 +49,7 @@ func TestNormalizeTurnRequestTrimsAndClones(t *testing.T) {
 	if got.SessionRef.SessionID != "session-1" {
 		t.Fatalf("session ref = %q, want session-1", got.SessionRef.SessionID)
 	}
-	if got.TurnID != "turn-1" || got.Input != "prompt" || got.ContextPrelude != "prelude" || got.Mode != "plan" {
+	if got.TurnID != "turn-1" || got.Input != "prompt" || got.Mode != "plan" || len(got.Context.Turns) != 1 || got.Context.Turns[0].Executor.Name != "helper" {
 		t.Fatalf("trimmed fields = %+v", got)
 	}
 	if got.ContextSyncSeq != 3 {
@@ -111,10 +114,10 @@ func TestNormalizeAttachDetachHandoffRequests(t *testing.T) {
 		Agent:          " agent ",
 		Source:         " source ",
 		Reason:         " reason ",
-		ContextPrelude: " prelude ",
+		Context:        agent.ContextTransfer{Summary: " summary "},
 		ContextSyncSeq: 9,
 	})
-	if handoff.SessionRef.SessionID != "sid" || handoff.Agent != "agent" || handoff.Reason != "reason" || handoff.ContextSyncSeq != 9 {
+	if handoff.SessionRef.SessionID != "sid" || handoff.Agent != "agent" || handoff.Reason != "reason" || handoff.Context.Summary != "summary" || handoff.ContextSyncSeq != 9 {
 		t.Fatalf("normalized handoff = %+v", handoff)
 	}
 }

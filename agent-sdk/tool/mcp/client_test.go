@@ -3,10 +3,11 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -161,22 +162,21 @@ func TestMCPManagerStreamableHTTP(t *testing.T) {
 			Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "pong"}},
 		}, nil, nil
 	})
-	httpServer := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(req *http.Request) *mcpsdk.Server {
+	handler := mcpsdk.NewStreamableHTTPHandler(func(req *http.Request) *mcpsdk.Server {
 		if req.Header.Get("X-Test-MCP") == "yes" {
 			sawHeader.Store(true)
 		}
 		return server
-	}, nil))
-	defer httpServer.Close()
+	}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	mgr, err := NewManager(ctx, []ServerSpec{{
+	mgr, err := newMCPManagerWithHTTPHandler(ctx, handler, []ServerSpec{{
 		PluginID:  "myplugin",
 		Name:      "httpserver",
 		Transport: TransportStreamableHTTP,
-		URL:       httpServer.URL,
+		URL:       "http://mcp.test",
 		Headers:   map[string]string{"X-Test-MCP": "yes"},
 	}})
 	if err != nil {
@@ -214,22 +214,21 @@ func TestMCPManagerSSE(t *testing.T) {
 			Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "sse-pong"}},
 		}, nil, nil
 	})
-	httpServer := httptest.NewServer(mcpsdk.NewSSEHandler(func(req *http.Request) *mcpsdk.Server {
+	handler := mcpsdk.NewSSEHandler(func(req *http.Request) *mcpsdk.Server {
 		if req.Header.Get("X-Test-MCP") == "yes" {
 			sawHeader.Store(true)
 		}
 		return server
-	}, nil))
-	defer httpServer.Close()
+	}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	mgr, err := NewManager(ctx, []ServerSpec{{
+	mgr, err := newMCPManagerWithHTTPHandler(ctx, handler, []ServerSpec{{
 		PluginID:  "myplugin",
 		Name:      "sseserver",
 		Transport: TransportSSE,
-		URL:       httpServer.URL,
+		URL:       "http://mcp.test",
 		Headers:   map[string]string{"X-Test-MCP": "yes"},
 	}})
 	if err != nil {
@@ -254,6 +253,100 @@ func TestMCPManagerSSE(t *testing.T) {
 	if !sawHeader.Load() {
 		t.Fatal("SSE MCP server did not receive configured header")
 	}
+}
+
+func newMCPManagerWithHTTPHandler(ctx context.Context, handler http.Handler, specs []ServerSpec) (*Manager, error) {
+	httpClient := &http.Client{Transport: mcpHandlerRoundTripper{handler: handler}}
+	return newManager(ctx, specs, func(ctx context.Context, spec ServerSpec) (*Client, error) {
+		return startClientWithHTTPClient(ctx, spec, httpClient)
+	})
+}
+
+type mcpHandlerRoundTripper struct {
+	handler http.Handler
+}
+
+func (rt mcpHandlerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	requestCtx, cancel := context.WithCancel(req.Context())
+	request := req.Clone(requestCtx)
+	reader, writer := io.Pipe()
+	responseWriter := &mcpStreamingResponseWriter{
+		header: make(http.Header),
+		body:   writer,
+		ready:  make(chan struct{}),
+	}
+	go func() {
+		rt.handler.ServeHTTP(responseWriter, request)
+		responseWriter.finish()
+	}()
+
+	select {
+	case <-req.Context().Done():
+		cancel()
+		_ = reader.CloseWithError(req.Context().Err())
+		_ = writer.CloseWithError(req.Context().Err())
+		return nil, req.Context().Err()
+	case <-responseWriter.ready:
+		statusCode := responseWriter.statusCode
+		return &http.Response{
+			Status:     fmt.Sprintf("%d %s", statusCode, http.StatusText(statusCode)),
+			StatusCode: statusCode,
+			Header:     responseWriter.header.Clone(),
+			Body: &mcpResponseBody{
+				ReadCloser: reader,
+				cancel:     cancel,
+			},
+			Request: request,
+		}, nil
+	}
+}
+
+type mcpStreamingResponseWriter struct {
+	header     http.Header
+	body       *io.PipeWriter
+	ready      chan struct{}
+	readyOnce  sync.Once
+	statusCode int
+}
+
+func (w *mcpStreamingResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *mcpStreamingResponseWriter) WriteHeader(statusCode int) {
+	w.readyOnce.Do(func() {
+		w.statusCode = statusCode
+		close(w.ready)
+	})
+}
+
+func (w *mcpStreamingResponseWriter) Write(data []byte) (int, error) {
+	w.WriteHeader(http.StatusOK)
+	return w.body.Write(data)
+}
+
+func (w *mcpStreamingResponseWriter) Flush() {
+	w.WriteHeader(http.StatusOK)
+}
+
+func (w *mcpStreamingResponseWriter) FlushError() error {
+	w.Flush()
+	return nil
+}
+
+func (w *mcpStreamingResponseWriter) finish() {
+	w.WriteHeader(http.StatusOK)
+	_ = w.body.Close()
+}
+
+type mcpResponseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *mcpResponseBody) Close() error {
+	b.cancel()
+	return b.ReadCloser.Close()
 }
 
 func TestMCPToolNamesAreProviderSafeAndStable(t *testing.T) {

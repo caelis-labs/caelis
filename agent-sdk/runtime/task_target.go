@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 )
@@ -111,12 +112,12 @@ func (tm *taskRuntime) lookupControlTargetClaimed(ctx context.Context, ref sessi
 
 func normalizeTaskControlRequest(req taskapi.ControlRequest) taskapi.ControlRequest {
 	return taskapi.ControlRequest{
-		TaskID:         strings.TrimSpace(req.TaskID),
-		Yield:          req.Yield,
-		Input:          req.Input,
-		Principal:      req.Principal,
-		Source:         strings.TrimSpace(req.Source),
-		ContextPrelude: req.ContextPrelude,
+		TaskID:    strings.TrimSpace(req.TaskID),
+		Yield:     req.Yield,
+		Input:     req.Input,
+		Principal: req.Principal,
+		Source:    strings.TrimSpace(req.Source),
+		Context:   agent.CloneContextTransfer(req.Context),
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -185,7 +184,7 @@ func writePluginSystemE2EPlugin(t *testing.T, root string) {
 }
 
 type pluginSystemE2EProvider struct {
-	*httptest.Server
+	*gatewayTestHTTPServer
 	mu                  sync.Mutex
 	calls               int
 	payloadSummaries    []string
@@ -201,7 +200,7 @@ type pluginSystemE2EProvider struct {
 func newPluginSystemE2EProvider(t *testing.T) *pluginSystemE2EProvider {
 	t.Helper()
 	provider := &pluginSystemE2EProvider{}
-	provider.Server = httptest.NewServer(http.HandlerFunc(provider.handle))
+	provider.gatewayTestHTTPServer = newGatewayTestHTTPServer(http.HandlerFunc(provider.handle))
 	t.Cleanup(provider.Close)
 	return provider
 }

@@ -223,7 +223,7 @@ func TestNewLocalStackPersistsTasksInSessionSQLiteIndex(t *testing.T) {
 func TestModelLookupResolvesMiniMaxThroughProviderFactory(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newGatewayTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" {
 			t.Fatalf("request path = %q, want /v1/messages", r.URL.Path)
 		}
@@ -236,10 +236,11 @@ func TestModelLookupResolvesMiniMaxThroughProviderFactory(t *testing.T) {
 	defer server.Close()
 
 	lookup, err := newModelLookup(nil, ModelConfig{
-		Provider: "minimax",
-		Model:    "MiniMax-M2",
-		BaseURL:  server.URL,
-		Token:    "minimax-secret",
+		Provider:   "minimax",
+		Model:      "MiniMax-M2",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Token:      "minimax-secret",
 	}, 204800)
 	if err != nil {
 		t.Fatalf("newModelLookup() error = %v", err)

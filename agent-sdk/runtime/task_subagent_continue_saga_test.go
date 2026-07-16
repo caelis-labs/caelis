@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	memory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -329,11 +330,11 @@ func TestSubagentWaitRecoversPendingContinueBeforeReturningSnapshot(t *testing.T
 		t.Fatal(err)
 	}
 	subagent.beginContinuationTurn()
-	digest, err := continueRequestDigest("follow up", "", subagent.turnSeq)
+	digest, err := continueRequestDigest("follow up", agent.ContextTransfer{}, subagent.turnSeq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.tasks.markSubagentContinuePhase(context.Background(), subagent, continuePhasePending, "follow up", "", digest, subagent.turnSeq, ""); err != nil {
+	if err := runtime.tasks.markSubagentContinuePhase(context.Background(), subagent, continuePhasePending, "follow up", agent.ContextTransfer{}, digest, subagent.turnSeq, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -506,11 +507,11 @@ func TestSubagentContinueSagaRecoversPreparedWithoutRemoteUntilClaim(t *testing.
 		t.Fatal(err)
 	}
 	checkpoint := task.beginContinuationTurn()
-	digest, err := continueRequestDigest("follow up", "", task.turnSeq)
+	digest, err := continueRequestDigest("follow up", agent.ContextTransfer{}, task.turnSeq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.tasks.markSubagentContinuePhase(context.Background(), task, continuePhasePrepared, "follow up", "", digest, task.turnSeq, ""); err != nil {
+	if err := runtime.tasks.markSubagentContinuePhase(context.Background(), task, continuePhasePrepared, "follow up", agent.ContextTransfer{}, digest, task.turnSeq, ""); err != nil {
 		t.Fatal(err)
 	}
 	_ = checkpoint

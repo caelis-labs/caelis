@@ -135,6 +135,10 @@ func (tm *taskRuntime) appendSideSubagentUserEvent(ctx context.Context, task *su
 		Scope: &session.EventScope{
 			TurnID: subagentTurnID(task.ref.TaskID, task.turnSeq),
 			Source: firstNonEmpty(taskStringValue(task.metadata["source"]), "subagent_sidecar"),
+			Executor: session.ParticipantExecutor(session.ParticipantBinding{
+				ID: task.anchor.AgentID, Kind: session.ParticipantKindSubagent, Role: role,
+				AgentName: task.agent, Label: "@" + strings.TrimPrefix(strings.TrimSpace(task.handle), "@"),
+			}),
 			Participant: session.ParticipantRef{
 				ID:           strings.TrimSpace(task.anchor.AgentID),
 				Kind:         session.ParticipantKindSubagent,
@@ -186,6 +190,10 @@ func (tm *taskRuntime) appendSideSubagentFinalEvent(ctx context.Context, task *s
 		Scope: &session.EventScope{
 			TurnID: subagentTurnID(task.ref.TaskID, task.turnSeq),
 			Source: firstNonEmpty(taskStringValue(task.metadata["source"]), "subagent_sidecar"),
+			Executor: session.ParticipantExecutor(session.ParticipantBinding{
+				ID: task.anchor.AgentID, Kind: session.ParticipantKindSubagent, Role: role,
+				AgentName: task.agent, Label: "@" + strings.TrimPrefix(strings.TrimSpace(task.handle), "@"),
+			}),
 			Participant: session.ParticipantRef{
 				ID:           strings.TrimSpace(task.anchor.AgentID),
 				Kind:         session.ParticipantKindSubagent,

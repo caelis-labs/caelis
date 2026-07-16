@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 )
@@ -70,7 +72,7 @@ func (tm *taskRuntime) continueSubagentClaimed(ctx context.Context, task *subage
 	case continuePhaseUnknownOutcome:
 		return task.snapshot(), fmt.Errorf("agent-sdk/runtime: subagent continue %q has %s; refusing blind re-issue of the remote turn", task.ref.TaskID, phase)
 	case continuePhasePrepared, continuePhasePostEffect:
-		digest, err := continueRequestDigest(prompt, req.ContextPrelude, storedTurnSeq)
+		digest, err := continueRequestDigest(prompt, req.Context, storedTurnSeq)
 		if err != nil {
 			return taskapi.Snapshot{}, err
 		}
@@ -93,12 +95,12 @@ func (tm *taskRuntime) continueSubagentClaimed(ctx context.Context, task *subage
 
 	checkpoint := task.beginContinuationTurn()
 	turnSeq := task.turnSeq
-	digest, err := continueRequestDigest(prompt, req.ContextPrelude, turnSeq)
+	digest, err := continueRequestDigest(prompt, req.Context, turnSeq)
 	if err != nil {
 		task.restoreContinuationTurn(checkpoint, true)
 		return taskapi.Snapshot{}, err
 	}
-	if err := tm.markSubagentContinuePhase(ctx, task, continuePhasePrepared, prompt, req.ContextPrelude, digest, turnSeq, ""); err != nil {
+	if err := tm.markSubagentContinuePhase(ctx, task, continuePhasePrepared, prompt, req.Context, digest, turnSeq, ""); err != nil {
 		task.restoreContinuationTurn(checkpoint, true)
 		return taskapi.Snapshot{}, err
 	}
@@ -106,25 +108,25 @@ func (tm *taskRuntime) continueSubagentClaimed(ctx context.Context, task *subage
 }
 
 func (tm *taskRuntime) executeClaimedSubagentContinue(ctx context.Context, task *subagentTask, yieldMS int) (taskapi.Snapshot, error) {
-	_, prompt, prelude, digest, turnSeq := continueStateOfTask(task)
+	_, prompt, contextTransfer, digest, turnSeq := continueStateOfTask(task)
 
 	if err := tm.appendSideSubagentUserEvent(ctx, task, prompt); err != nil {
 		// Intent is durable; leave prepared so retry re-appends via idempotent keys.
 		return task.snapshot(), err
 	}
-	if err := tm.markSubagentContinuePhase(ctx, task, continuePhasePending, prompt, prelude, digest, turnSeq, ""); err != nil {
+	if err := tm.markSubagentContinuePhase(ctx, task, continuePhasePending, prompt, contextTransfer, digest, turnSeq, ""); err != nil {
 		return task.snapshot(), err
 	}
 	result, err := task.runner.Continue(ctx, delegation.CloneAnchor(task.anchor), delegation.ContinueRequest{
 		Agent:       task.agent,
-		Prompt:      subagentPromptWithContext(prelude, prompt),
+		Prompt:      contextprompt.ComposeTextPrompt(contextTransfer, prompt),
 		YieldTimeMS: yieldMS,
 	})
 	if err != nil {
 		persistErr := tm.markSubagentContinueUnknown(context.WithoutCancel(ctx), task, err.Error())
 		return task.snapshot(), errors.Join(err, persistErr)
 	}
-	if err := tm.markSubagentContinuePostEffect(ctx, task, prompt, prelude, digest, turnSeq, result); err != nil {
+	if err := tm.markSubagentContinuePostEffect(ctx, task, prompt, contextTransfer, digest, turnSeq, result); err != nil {
 		return task.snapshot(), err
 	}
 	return tm.advanceSubagentContinue(ctx, task)
@@ -161,14 +163,14 @@ func (tm *taskRuntime) advanceSubagentContinue(ctx context.Context, task *subage
 	return snapshot, nil
 }
 
-func continueRequestDigest(prompt string, prelude string, turnSeq int64) (string, error) {
+func continueRequestDigest(prompt string, contextTransfer agent.ContextTransfer, turnSeq int64) (string, error) {
 	payload := struct {
-		Prompt  string `json:"prompt"`
-		Prelude string `json:"prelude"`
-		TurnSeq int64  `json:"turn_seq"`
+		Prompt  string                `json:"prompt"`
+		Context agent.ContextTransfer `json:"context"`
+		TurnSeq int64                 `json:"turn_seq"`
 	}{
 		Prompt:  strings.TrimSpace(prompt),
-		Prelude: strings.TrimSpace(prelude),
+		Context: agent.CloneContextTransfer(contextTransfer),
 		TurnSeq: turnSeq,
 	}
 	raw, err := json.Marshal(payload)
@@ -184,15 +186,15 @@ func continuePhaseOfTask(task *subagentTask) continuePhase {
 	return phase
 }
 
-func continueStateOfTask(task *subagentTask) (continuePhase, string, string, string, int64) {
+func continueStateOfTask(task *subagentTask) (continuePhase, string, agent.ContextTransfer, string, int64) {
 	if task == nil {
-		return continuePhaseNone, "", "", "", 0
+		return continuePhaseNone, "", agent.ContextTransfer{}, "", 0
 	}
 	task.mu.Lock()
 	defer task.mu.Unlock()
 	return normalizeContinuePhase(taskStringValue(task.metadata["continue_phase"])),
 		taskStringValue(task.metadata["continue_prompt"]),
-		taskStringValue(task.metadata["continue_prelude"]),
+		taskContextTransferValue(task.metadata["continue_context"]),
 		taskStringValue(task.metadata["continue_digest"]),
 		continueTurnSeqOfTaskLocked(task)
 }
@@ -233,24 +235,24 @@ func (tm *taskRuntime) markSubagentContinuePhase(
 	task *subagentTask,
 	phase continuePhase,
 	prompt string,
-	prelude string,
+	contextTransfer agent.ContextTransfer,
 	digest string,
 	turnSeq int64,
 	reason string,
 ) error {
-	return tm.persistSubagentContinuePhase(ctx, task, phase, prompt, prelude, digest, turnSeq, reason, nil)
+	return tm.persistSubagentContinuePhase(ctx, task, phase, prompt, contextTransfer, digest, turnSeq, reason, nil)
 }
 
 func (tm *taskRuntime) markSubagentContinuePostEffect(
 	ctx context.Context,
 	task *subagentTask,
 	prompt string,
-	prelude string,
+	contextTransfer agent.ContextTransfer,
 	digest string,
 	turnSeq int64,
 	result delegation.Result,
 ) error {
-	return tm.persistSubagentContinuePhase(ctx, task, continuePhasePostEffect, prompt, prelude, digest, turnSeq, "", &result)
+	return tm.persistSubagentContinuePhase(ctx, task, continuePhasePostEffect, prompt, contextTransfer, digest, turnSeq, "", &result)
 }
 
 func (tm *taskRuntime) persistSubagentContinuePhase(
@@ -258,7 +260,7 @@ func (tm *taskRuntime) persistSubagentContinuePhase(
 	task *subagentTask,
 	phase continuePhase,
 	prompt string,
-	prelude string,
+	contextTransfer agent.ContextTransfer,
 	digest string,
 	turnSeq int64,
 	reason string,
@@ -277,7 +279,7 @@ func (tm *taskRuntime) persistSubagentContinuePhase(
 		desired.seedStreamFromResult(*result)
 		entry = desired.entrySnapshot(tm.runtime.now())
 	}
-	applyContinuePhaseToEntry(entry, phase, prompt, prelude, digest, turnSeq, reason)
+	applyContinuePhaseToEntry(entry, phase, prompt, contextTransfer, digest, turnSeq, reason)
 	if phase == continuePhaseUnknownOutcome {
 		reason = firstNonEmpty(strings.TrimSpace(reason), "remote continuation outcome is unknown")
 		entry.Running = false
@@ -302,7 +304,7 @@ func (tm *taskRuntime) persistSubagentContinuePhase(
 		task.applyResult(*result)
 		task.seedStreamFromResult(*result)
 	}
-	applyContinuePhaseToMetadata(&task.metadata, phase, prompt, prelude, digest, turnSeq, reason)
+	applyContinuePhaseToMetadata(&task.metadata, phase, prompt, contextTransfer, digest, turnSeq, reason)
 	if phase == continuePhaseUnknownOutcome {
 		task.running = false
 		task.state = taskapi.StateUnknownOutcome
@@ -318,11 +320,11 @@ func (tm *taskRuntime) persistSubagentContinuePhase(
 	return nil
 }
 
-func applyContinuePhaseToEntry(entry *taskapi.Entry, phase continuePhase, prompt, prelude, digest string, turnSeq int64, reason string) {
+func applyContinuePhaseToEntry(entry *taskapi.Entry, phase continuePhase, prompt string, contextTransfer agent.ContextTransfer, digest string, turnSeq int64, reason string) {
 	if entry == nil {
 		return
 	}
-	applyContinuePhaseToMetadata(&entry.Metadata, phase, prompt, prelude, digest, turnSeq, reason)
+	applyContinuePhaseToMetadata(&entry.Metadata, phase, prompt, contextTransfer, digest, turnSeq, reason)
 	if entry.Spec == nil {
 		entry.Spec = map[string]any{}
 	}
@@ -337,7 +339,7 @@ func applyContinuePhaseToEntry(entry *taskapi.Entry, phase continuePhase, prompt
 	}
 }
 
-func applyContinuePhaseToMetadata(metadata *map[string]any, phase continuePhase, prompt, prelude, digest string, turnSeq int64, reason string) {
+func applyContinuePhaseToMetadata(metadata *map[string]any, phase continuePhase, prompt string, contextTransfer agent.ContextTransfer, digest string, turnSeq int64, reason string) {
 	if metadata == nil {
 		return
 	}
@@ -346,14 +348,14 @@ func applyContinuePhaseToMetadata(metadata *map[string]any, phase continuePhase,
 	}
 	values := *metadata
 	if phase == continuePhaseNone {
-		for _, key := range []string{"continue_phase", "continue_prompt", "continue_prelude", "continue_digest", "continue_turn_seq", "continue_reason"} {
+		for _, key := range []string{"continue_phase", "continue_prompt", "continue_context", "continue_digest", "continue_turn_seq", "continue_reason"} {
 			delete(values, key)
 		}
 		return
 	}
 	values["continue_phase"] = string(phase)
 	values["continue_prompt"] = strings.TrimSpace(prompt)
-	values["continue_prelude"] = strings.TrimSpace(prelude)
+	values["continue_context"] = agent.CloneContextTransfer(contextTransfer)
 	values["continue_digest"] = strings.TrimSpace(digest)
 	values["continue_turn_seq"] = turnSeq
 	if strings.TrimSpace(reason) == "" {
@@ -364,7 +366,7 @@ func applyContinuePhaseToMetadata(metadata *map[string]any, phase continuePhase,
 }
 
 func (tm *taskRuntime) clearSubagentContinuePhase(ctx context.Context, task *subagentTask) error {
-	return tm.markSubagentContinuePhase(ctx, task, continuePhaseNone, "", "", "", 0, "")
+	return tm.markSubagentContinuePhase(ctx, task, continuePhaseNone, "", agent.ContextTransfer{}, "", 0, "")
 }
 
 func (tm *taskRuntime) markSubagentContinueUnknown(ctx context.Context, task *subagentTask, reason string) error {
@@ -374,9 +376,24 @@ func (tm *taskRuntime) markSubagentContinueUnknown(ctx context.Context, task *su
 	reason = firstNonEmpty(strings.TrimSpace(reason), "remote continuation outcome is unknown")
 	task.mu.Lock()
 	prompt := taskStringValue(task.metadata["continue_prompt"])
-	prelude := taskStringValue(task.metadata["continue_prelude"])
+	contextTransfer := taskContextTransferValue(task.metadata["continue_context"])
 	digest := taskStringValue(task.metadata["continue_digest"])
 	turnSeq := continueTurnSeqOfTaskLocked(task)
 	task.mu.Unlock()
-	return tm.markSubagentContinuePhase(ctx, task, continuePhaseUnknownOutcome, prompt, prelude, digest, turnSeq, reason)
+	return tm.markSubagentContinuePhase(ctx, task, continuePhaseUnknownOutcome, prompt, contextTransfer, digest, turnSeq, reason)
+}
+
+func taskContextTransferValue(raw any) agent.ContextTransfer {
+	if typed, ok := raw.(agent.ContextTransfer); ok {
+		return agent.CloneContextTransfer(typed)
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return agent.ContextTransfer{}
+	}
+	var decoded agent.ContextTransfer
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		return agent.ContextTransfer{}
+	}
+	return agent.CloneContextTransfer(decoded)
 }

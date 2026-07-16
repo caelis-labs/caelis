@@ -585,7 +585,9 @@ func TestSubagentSpawnIdentityBindsCompleteSemanticRequest(t *testing.T) {
 		name   string
 		change func(*taskapi.SubagentStartRequest)
 	}{
-		{name: "context prelude", change: func(req *taskapi.SubagentStartRequest) { req.ContextPrelude = "different context" }},
+		{name: "context", change: func(req *taskapi.SubagentStartRequest) {
+			req.Context = agent.ContextTransfer{Summary: "different context"}
+		}},
 		{name: "mode", change: func(req *taskapi.SubagentStartRequest) { req.Mode = "different-mode" }},
 		{name: "approval mode", change: func(req *taskapi.SubagentStartRequest) { req.ApprovalMode = "different-approval" }},
 		{name: "parent call", change: func(req *taskapi.SubagentStartRequest) { req.ParentCall = "different-call" }},
@@ -606,7 +608,7 @@ func TestSubagentSpawnIdentityBindsCompleteSemanticRequest(t *testing.T) {
 				t.Fatal(err)
 			}
 			req := taskapi.SubagentStartRequest{
-				SpawnID: "semantic-request", Agent: "helper", Prompt: "review", ContextPrelude: "context",
+				SpawnID: "semantic-request", Agent: "helper", Prompt: "review", Context: agent.ContextTransfer{Summary: "context"},
 				Mode: "allow", ApprovalMode: "ask", ParentCall: "call-1", Role: session.ParticipantRoleSidecar,
 			}
 			if _, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err != nil {

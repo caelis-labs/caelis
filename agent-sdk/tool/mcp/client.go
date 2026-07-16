@@ -40,7 +40,11 @@ func resolveExecutable(command string, workDir string) string {
 }
 
 func StartClient(ctx context.Context, spec ServerSpec) (*Client, error) {
-	transport, transportName, err := transportForSpec(spec)
+	return startClientWithHTTPClient(ctx, spec, nil)
+}
+
+func startClientWithHTTPClient(ctx context.Context, spec ServerSpec, httpClient *http.Client) (*Client, error) {
+	transport, transportName, err := transportForSpecWithHTTPClient(spec, httpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +95,7 @@ func connectWithTimeout(ctx context.Context, client *mcpsdk.Client, lifetimeCtx 
 	}
 }
 
-func transportForSpec(spec ServerSpec) (mcpsdk.Transport, string, error) {
+func transportForSpecWithHTTPClient(spec ServerSpec, httpClient *http.Client) (mcpsdk.Transport, string, error) {
 	transportName := NormalizeTransport(spec.Transport, spec.Command, spec.URL)
 	switch transportName {
 	case TransportStdio:
@@ -117,7 +121,7 @@ func transportForSpec(spec ServerSpec) (mcpsdk.Transport, string, error) {
 		}
 		return &mcpsdk.StreamableClientTransport{
 			Endpoint:             endpoint,
-			HTTPClient:           httpClientWithHeaders(spec.Headers),
+			HTTPClient:           httpClientWithHeaders(httpClient, spec.Headers),
 			DisableStandaloneSSE: true,
 		}, transportName, nil
 	case TransportSSE:
@@ -127,21 +131,26 @@ func transportForSpec(spec ServerSpec) (mcpsdk.Transport, string, error) {
 		}
 		return &mcpsdk.SSEClientTransport{
 			Endpoint:   endpoint,
-			HTTPClient: httpClientWithHeaders(spec.Headers),
+			HTTPClient: httpClientWithHeaders(httpClient, spec.Headers),
 		}, transportName, nil
 	default:
 		return nil, "", fmt.Errorf("mcp: unsupported transport %q for server %s/%s", spec.Transport, spec.PluginID, spec.Name)
 	}
 }
 
-func httpClientWithHeaders(headers map[string]string) *http.Client {
+func httpClientWithHeaders(client *http.Client, headers map[string]string) *http.Client {
 	if len(headers) == 0 {
-		return nil
+		return client
 	}
-	return &http.Client{Transport: headerRoundTripper{
-		base:    http.DefaultTransport,
+	if client == nil {
+		client = &http.Client{}
+	}
+	cloned := *client
+	cloned.Transport = headerRoundTripper{
+		base:    client.Transport,
 		headers: headers,
-	}}
+	}
+	return &cloned
 }
 
 type headerRoundTripper struct {

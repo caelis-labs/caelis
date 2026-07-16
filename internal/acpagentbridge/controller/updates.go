@@ -25,6 +25,7 @@ func normalizeACPUpdateEvent(
 	scope := &session.EventScope{
 		TurnID:     strings.TrimSpace(turnID),
 		Source:     "acp",
+		Executor:   session.ControllerExecutor(binding),
 		Controller: controller,
 		ACP: session.ACPRef{
 			SessionID: strings.TrimSpace(remoteSessionID),

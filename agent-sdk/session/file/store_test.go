@@ -90,6 +90,39 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 	}
 }
 
+func TestStoreRoundTripsTurnExecutorIdentity(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "executor-roundtrip" }})
+	ctx := context.Background()
+	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantScope := session.EventScope{
+		TurnID: "turn-1",
+		Executor: session.ActorRef{
+			Kind: session.ActorKindParticipant, ID: "participant-1", Role: string(session.ParticipantRoleSidecar), Name: "claude(aria)",
+		},
+		Participant: session.ParticipantRef{ID: "participant-1", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar},
+	}
+	message := model.NewTextMessage(model.RoleUser, "hello")
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{
+		Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Scope: &wantScope, Message: &message, Text: "hello",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	reopened := NewStore(Config{RootDir: root})
+	loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Events) != 1 || loaded.Events[0].Scope == nil || !reflect.DeepEqual(*loaded.Events[0].Scope, wantScope) {
+		t.Fatalf("reloaded scope = %#v, want %#v", loaded.Events, wantScope)
+	}
+}
+
 func TestStoreEventsPageStreamsCanonicalAndMirrorBySequence(t *testing.T) {
 	t.Parallel()
 

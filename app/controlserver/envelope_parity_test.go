@@ -4,11 +4,12 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -58,14 +59,13 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	httpServer := httptest.NewServer(server)
-	defer httpServer.Close()
-	request, err := http.NewRequest(http.MethodGet, httpServer.URL+"/api/control/v1/sessions/session-1/stream", nil)
+	request, err := http.NewRequest(http.MethodGet, "http://control.test/api/control/v1/sessions/session-1/stream", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	request.Host = "127.0.0.1"
 	request.Header.Set("Authorization", "Bearer parity-test")
-	response, err := http.DefaultClient.Do(request)
+	response, err := (&http.Client{Transport: controlHandlerRoundTripper{handler: server}}).Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,4 +141,89 @@ func receiveParityEnvelope(t *testing.T, events <-chan eventstream.Envelope) eve
 		t.Fatal("timed out waiting for broker Envelope")
 		return eventstream.Envelope{}
 	}
+}
+
+type controlHandlerRoundTripper struct {
+	handler http.Handler
+}
+
+func (rt controlHandlerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	requestCtx, cancel := context.WithCancel(req.Context())
+	request := req.Clone(requestCtx)
+	reader, writer := io.Pipe()
+	responseWriter := &controlStreamingResponseWriter{
+		header: make(http.Header),
+		body:   writer,
+		ready:  make(chan struct{}),
+	}
+	go func() {
+		rt.handler.ServeHTTP(responseWriter, request)
+		responseWriter.finish()
+	}()
+
+	select {
+	case <-req.Context().Done():
+		cancel()
+		_ = reader.CloseWithError(req.Context().Err())
+		_ = writer.CloseWithError(req.Context().Err())
+		return nil, req.Context().Err()
+	case <-responseWriter.ready:
+		return &http.Response{
+			StatusCode: responseWriter.statusCode,
+			Header:     responseWriter.header.Clone(),
+			Body: &controlResponseBody{
+				ReadCloser: reader,
+				cancel:     cancel,
+			},
+			Request: request,
+		}, nil
+	}
+}
+
+type controlStreamingResponseWriter struct {
+	header     http.Header
+	body       *io.PipeWriter
+	ready      chan struct{}
+	readyOnce  sync.Once
+	statusCode int
+}
+
+func (w *controlStreamingResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *controlStreamingResponseWriter) WriteHeader(statusCode int) {
+	w.readyOnce.Do(func() {
+		w.statusCode = statusCode
+		close(w.ready)
+	})
+}
+
+func (w *controlStreamingResponseWriter) Write(data []byte) (int, error) {
+	w.WriteHeader(http.StatusOK)
+	return w.body.Write(data)
+}
+
+func (w *controlStreamingResponseWriter) Flush() {
+	w.WriteHeader(http.StatusOK)
+}
+
+func (w *controlStreamingResponseWriter) FlushError() error {
+	w.Flush()
+	return nil
+}
+
+func (w *controlStreamingResponseWriter) finish() {
+	w.WriteHeader(http.StatusOK)
+	_ = w.body.Close()
+}
+
+type controlResponseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *controlResponseBody) Close() error {
+	b.cancel()
+	return b.ReadCloser.Close()
 }

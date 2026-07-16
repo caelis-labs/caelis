@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -79,19 +80,25 @@ func TestContextRouterUsesOnlySharedCanonicalDialogue(t *testing.T) {
 	if route.SyncSeq != 3 {
 		t.Fatalf("SyncSeq = %d, want latest shared event sequence 3", route.SyncSeq)
 	}
-	for _, want := range []string{"shared_ledger_checkpoint: 3", "shared_dialogue_delta:", "[1] user:\nuser prompt", "[3] assistant(ella):\nchild answer", "- @ella agent=codex"} {
-		if !strings.Contains(route.Prelude, want) {
-			t.Fatalf("context missing %q:\n%s", want, route.Prelude)
-		}
+	wantContext := agent.ContextTransfer{Turns: []agent.ContextTurn{{
+		Executor:     session.ActorRef{Kind: session.ActorKindParticipant, Name: "ella"},
+		UserMessages: []string{"user prompt"}, AssistantSummary: "child answer",
+	}}}
+	if !reflect.DeepEqual(route.Context, wantContext) {
+		t.Fatalf("context = %#v, want %#v", route.Context, wantContext)
 	}
-	for _, forbidden := range []string{"canonical_tail", "tool output", "live chunk", "task-1"} {
-		if strings.Contains(route.Prelude, forbidden) {
-			t.Fatalf("context contains %q:\n%s", forbidden, route.Prelude)
+	encoded, err := json.Marshal(route.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"canonical_tail", "tool output", "live chunk", "task-1", "@ella"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("context contains %q: %s", forbidden, encoded)
 		}
 	}
 }
 
-func TestSharedDialogueDeltaUsesDurableSequenceAndCompactBoundary(t *testing.T) {
+func TestSharedContextOffsetUsesDurableCompleteTurnsAndOpaqueCompactBoundary(t *testing.T) {
 	t.Parallel()
 
 	compactMessage := model.NewTextMessage(model.RoleUser, "CONTEXT CHECKPOINT\nObjective: compacted baseline")
@@ -99,26 +106,128 @@ func TestSharedDialogueDeltaUsesDurableSequenceAndCompactBoundary(t *testing.T) 
 		controlUserEvent("old user"),
 		controlAssistantEvent("old assistant"),
 		{Seq: 7, Type: session.EventTypeCompact, Visibility: session.VisibilityCanonical, Message: &compactMessage, Text: compactMessage.TextContent()},
-		{Seq: 8, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "fresh user"},
-		{Seq: 9, Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "fresh assistant"},
+		{Seq: 8, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "fresh user", Scope: &session.EventScope{TurnID: "turn-fresh", Executor: session.ActorRef{Kind: session.ActorKindController, Name: "codex"}}},
+		{Seq: 9, Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "fresh assistant", Scope: &session.EventScope{TurnID: "turn-fresh", Executor: session.ActorRef{Kind: session.ActorKindController, Name: "codex"}}},
 	}
 	events[0].Seq = 2
 	events[1].Seq = 4
 
-	first := sharedDialogueDeltaFromEvents(events, 0, "")
-	want := sharedDialogueDelta{
+	first := sharedContextOffsetFromEvents(events, 0, "")
+	want := sharedContextOffset{
 		Checkpoint: 9,
-		Entries: []sharedDialogueEntry{
-			{Seq: 7, Role: "compact", Text: compactMessage.TextContent()},
-			{Seq: 8, Role: "user", Text: "fresh user"},
-			{Seq: 9, Role: "assistant", Text: "fresh assistant"},
+		Transfer: agent.ContextTransfer{
+			Summary: compactMessage.TextContent(),
+			Turns: []agent.ContextTurn{{
+				Executor:     session.ActorRef{Kind: session.ActorKindController, Name: "codex"},
+				UserMessages: []string{"fresh user"}, AssistantSummary: "fresh assistant",
+			}},
 		},
 	}
 	if !reflect.DeepEqual(first, want) {
-		t.Fatalf("delta = %#v, want %#v", first, want)
+		t.Fatalf("offset = %#v, want %#v", first, want)
 	}
-	if got := sharedDialogueDeltaFromEvents(events, 9, ""); !reflect.DeepEqual(got, sharedDialogueDelta{Checkpoint: 9}) {
-		t.Fatalf("incremental delta = %#v, want empty checkpoint", got)
+	if got := sharedContextOffsetFromEvents(events, 9, ""); !reflect.DeepEqual(got, sharedContextOffset{Checkpoint: 9}) {
+		t.Fatalf("incremental offset = %#v, want empty checkpoint", got)
+	}
+}
+
+func TestSharedContextOffsetDefersIncompleteTurnsWithoutLosingTheirUserMessage(t *testing.T) {
+	t.Parallel()
+
+	events := []*session.Event{
+		{Seq: 1, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "first user", Scope: &session.EventScope{
+			TurnID: "turn-first", Executor: session.ActorRef{Kind: session.ActorKindController, Name: "codex"},
+		}},
+		{Seq: 2, Type: session.EventTypeToolResult, Visibility: session.VisibilityCanonical, Text: "private tool trace", Scope: &session.EventScope{TurnID: "turn-first"}},
+		{Seq: 3, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "second user", Scope: &session.EventScope{
+			TurnID: "turn-second", Executor: session.ActorRef{Kind: session.ActorKindParticipant, Name: "claude(aria)"},
+		}},
+		{Seq: 4, Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "second assistant", Scope: &session.EventScope{
+			TurnID: "turn-second", Executor: session.ActorRef{Kind: session.ActorKindParticipant, Name: "claude(aria)"},
+		}},
+	}
+	first := sharedContextOffsetFromEvents(events, 0, "")
+	wantFirst := sharedContextOffset{Checkpoint: 4, Transfer: agent.ContextTransfer{Turns: []agent.ContextTurn{{
+		Executor:     session.ActorRef{Kind: session.ActorKindParticipant, Name: "claude(aria)"},
+		UserMessages: []string{"second user"}, AssistantSummary: "second assistant",
+	}}}}
+	if !reflect.DeepEqual(first, wantFirst) {
+		t.Fatalf("first offset = %#v, want only complete turn %#v", first, wantFirst)
+	}
+
+	events = append(events, &session.Event{
+		Seq: 5, Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "first assistant", Scope: &session.EventScope{
+			TurnID: "turn-first", Executor: session.ActorRef{Kind: session.ActorKindController, Name: "codex"},
+		},
+	})
+	second := sharedContextOffsetFromEvents(events, first.Checkpoint, "")
+	wantSecond := sharedContextOffset{Checkpoint: 5, Transfer: agent.ContextTransfer{Turns: []agent.ContextTurn{{
+		Executor:     session.ActorRef{Kind: session.ActorKindController, Name: "codex"},
+		UserMessages: []string{"first user"}, AssistantSummary: "first assistant",
+	}}}}
+	if !reflect.DeepEqual(second, wantSecond) {
+		t.Fatalf("second offset = %#v, want completed crossing turn %#v", second, wantSecond)
+	}
+	encoded, err := json.Marshal(second.Transfer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "private tool trace") {
+		t.Fatalf("context leaked a tool trace: %s", encoded)
+	}
+}
+
+func TestSharedContextOffsetPreservesMultipleExchangesWithinOneRuntimeTurn(t *testing.T) {
+	t.Parallel()
+
+	executor := session.ActorRef{Kind: session.ActorKindController, ID: "controller-1", Name: "codex"}
+	events := []*session.Event{
+		{Seq: 1, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "initial request", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
+		{Seq: 2, Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "initial answer", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
+		{Seq: 3, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "follow-up guidance", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
+		{Seq: 4, Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "revised answer", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
+	}
+	want := sharedContextOffset{Checkpoint: 4, Transfer: agent.ContextTransfer{Turns: []agent.ContextTurn{
+		{Executor: executor, UserMessages: []string{"initial request"}, AssistantSummary: "initial answer"},
+		{Executor: executor, UserMessages: []string{"follow-up guidance"}, AssistantSummary: "revised answer"},
+	}}}
+	if got := sharedContextOffsetFromEvents(events, 0, ""); !reflect.DeepEqual(got, want) {
+		t.Fatalf("offset = %#v, want two ordered exchanges %#v", got, want)
+	}
+}
+
+func TestSharedContextOffsetPreservesSteeringBeforeAssistantAnswer(t *testing.T) {
+	t.Parallel()
+
+	executor := session.ActorRef{Kind: session.ActorKindController, Name: "codex"}
+	events := []*session.Event{
+		{Seq: 1, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "initial request", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
+		{Seq: 2, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "steer before answering", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
+		{Seq: 3, Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "guided answer", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
+	}
+	want := sharedContextOffset{Checkpoint: 3, Transfer: agent.ContextTransfer{Turns: []agent.ContextTurn{{
+		Executor:         executor,
+		UserMessages:     []string{"initial request", "steer before answering"},
+		AssistantSummary: "guided answer",
+	}}}}
+	if got := sharedContextOffsetFromEvents(events, 0, ""); !reflect.DeepEqual(got, want) {
+		t.Fatalf("offset = %#v, want ordered user steering %#v", got, want)
+	}
+}
+
+func TestSharedContextOffsetPreservesIDOnlyExecutor(t *testing.T) {
+	t.Parallel()
+
+	executor := session.ActorRef{ID: "custom-agent-1"}
+	events := []*session.Event{
+		{Seq: 1, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "question", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
+		{Seq: 2, Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "answer", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
+	}
+	want := sharedContextOffset{Checkpoint: 2, Transfer: agent.ContextTransfer{Turns: []agent.ContextTurn{{
+		Executor: executor, UserMessages: []string{"question"}, AssistantSummary: "answer",
+	}}}}
+	if got := sharedContextOffsetFromEvents(events, 0, ""); !reflect.DeepEqual(got, want) {
+		t.Fatalf("offset = %#v, want ID-only executor %#v", got, want)
 	}
 }
 
@@ -153,7 +262,7 @@ func TestCoordinatorOwnsActivationAndAtomicHandoffCommit(t *testing.T) {
 	if !reflect.DeepEqual(updated.Controller, backend.activation) {
 		t.Fatalf("controller = %#v, want %#v", updated.Controller, backend.activation)
 	}
-	if backend.activate.Agent != "codex" || !strings.Contains(backend.activate.ContextPrelude, "Caelis controller handoff context") {
+	if backend.activate.Agent != "codex" || !agent.ContextTransferEmpty(backend.activate.Context) {
 		t.Fatalf("activation request = %#v", backend.activate)
 	}
 	loaded, err := sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -589,9 +588,9 @@ func TestHookHelperProcess(t *testing.T) {
 	}
 }
 
-func newSessionStartHookProvider(t *testing.T) *httptest.Server {
+func newSessionStartHookProvider(t *testing.T) *gatewayTestHTTPServer {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newGatewayTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
 			http.NotFound(w, r)
 			return

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -38,9 +39,9 @@ func (r *Runtime) buildSideSubagentPromptContext(
 	ref session.SessionRef,
 	target string,
 	sinceSeq uint64,
-) (string, uint64, error) {
+) (agent.ContextTransfer, uint64, error) {
 	if r == nil || r.controllerContextRouter == nil {
-		return "", 0, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
+		return agent.ContextTransfer{}, 0, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
 	}
 	route, err := r.controllerContextRouter.ParticipantContext(ctx, controller.ParticipantContextRequest{
 		SessionRef: session.NormalizeSessionRef(ref),
@@ -52,21 +53,9 @@ func (r *Runtime) buildSideSubagentPromptContext(
 		},
 	})
 	if err != nil {
-		return "", 0, err
+		return agent.ContextTransfer{}, 0, err
 	}
-	return strings.TrimSpace(route.Prelude), route.SyncSeq, nil
-}
-
-func subagentPromptWithContext(prelude string, prompt string) string {
-	prompt = strings.TrimSpace(prompt)
-	prelude = strings.TrimSpace(prelude)
-	if prelude == "" {
-		return prompt
-	}
-	if prompt == "" {
-		return prelude
-	}
-	return prelude + "\n\nCurrent request:\n" + prompt
+	return agent.CloneContextTransfer(route.Context), route.SyncSeq, nil
 }
 
 func isSideSubagentTask(task *subagentTask) bool {
@@ -158,20 +147,20 @@ func (r *Runtime) StartSubagentWithOptions(
 			approvalMode = string(r.currentApprovalMode(state))
 		}
 	}
-	contextPrelude, _, err := r.buildSideSubagentPromptContext(ctx, activeSession, ref, strings.TrimSpace(agent), 0)
+	contextTransfer, _, err := r.buildSideSubagentPromptContext(ctx, activeSession, ref, strings.TrimSpace(agent), 0)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
 	snapshot, err := r.tasks.StartSubagent(ctx, activeSession, ref, r.subagents, taskapi.SubagentStartRequest{
-		SpawnID:        strings.TrimSpace(opts.SpawnID),
-		Agent:          strings.TrimSpace(agent),
-		Prompt:         strings.TrimSpace(prompt),
-		ContextPrelude: contextPrelude,
-		Role:           session.ParticipantRoleSidecar,
-		Source:         firstNonEmpty(strings.TrimSpace(source), "user"),
-		Mode:           strings.TrimSpace(r.defaultPolicyMode),
-		ApprovalMode:   approvalMode,
-		Approval:       newSubagentApprovalRequester(opts.ApprovalRequester, activeSession, ref),
+		SpawnID:      strings.TrimSpace(opts.SpawnID),
+		Agent:        strings.TrimSpace(agent),
+		Prompt:       strings.TrimSpace(prompt),
+		Context:      contextTransfer,
+		Role:         session.ParticipantRoleSidecar,
+		Source:       firstNonEmpty(strings.TrimSpace(source), "user"),
+		Mode:         strings.TrimSpace(r.defaultPolicyMode),
+		ApprovalMode: approvalMode,
+		Approval:     newSubagentApprovalRequester(opts.ApprovalRequester, activeSession, ref),
 	})
 	if err != nil || !snapshot.Running {
 		return snapshot, err
@@ -203,17 +192,17 @@ func (r *Runtime) ContinueSubagentByHandle(
 	if !ok {
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent handle %q not found", strings.TrimSpace(handle))
 	}
-	contextPrelude, _, err := r.buildSideSubagentPromptContext(ctx, activeSession, ref, strings.TrimSpace(handle), binding.ContextSyncSeq)
+	contextTransfer, _, err := r.buildSideSubagentPromptContext(ctx, activeSession, ref, strings.TrimSpace(handle), binding.ContextSyncSeq)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
 	return r.tasks.Write(ctx, ref, taskapi.ControlRequest{
-		TaskID:         taskID,
-		Input:          strings.TrimSpace(prompt),
-		Yield:          yield,
-		Principal:      session.ActorKindUser,
-		Source:         "user",
-		ContextPrelude: contextPrelude,
+		TaskID:    taskID,
+		Input:     strings.TrimSpace(prompt),
+		Yield:     yield,
+		Principal: session.ActorKindUser,
+		Source:    "user",
+		Context:   contextTransfer,
 	})
 }
 

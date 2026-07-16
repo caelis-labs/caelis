@@ -3,10 +3,52 @@
   "current_snapshot": "agent-sdk/api.txt",
   "removals": [
     {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
+      "sha256": "7b3adf809bd5b795c99a4c2f8f89aa5ff3bfbe8eae431e241389b6cdbbc31117",
+      "symbol": "type ContextRoute",
+      "reason": "pre-v1 replaces adapter-rendered context preludes with a neutral typed ContextTransfer so Control owns routing policy and prompt adapters own rendering"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
+      "sha256": "766b5a6537e35290630ebbf22e315e20f7aba680a5bb9c7f793b2c7b09b3c761",
+      "symbol": "type HandoffRequest",
+      "reason": "pre-v1 replaces adapter-rendered context preludes with a neutral typed ContextTransfer so Control owns routing policy and prompt adapters own rendering"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
+      "sha256": "97c7b7adeedb1d19b0a21d90eb4a183183b5936168207c7ea1f7f4071f3a594c",
+      "symbol": "type ParticipantPromptRequest",
+      "reason": "pre-v1 replaces adapter-rendered context preludes with a neutral typed ContextTransfer so Control owns routing policy and prompt adapters own rendering"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
+      "sha256": "f026168f58f1441a37af2c251d39f80b43dab5b65eba68261e0942e019869add",
+      "symbol": "type TurnRequest",
+      "reason": "pre-v1 replaces adapter-rendered context preludes with a neutral typed ContextTransfer so Control owns routing policy and prompt adapters own rendering"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "f6f44615ad72169258f140863fb87d7ab426205ad4b7f26cde0449390b3ab456",
+      "symbol": "type EventScope",
+      "reason": "pre-v1 adds the typed Turn executor identity required to disambiguate multi-Agent public dialogue during Context Transfer"
+    },
+    {
       "package": "github.com/caelis-labs/caelis/agent-sdk/session",
       "sha256": "fd47c2dd35738db12e3505c881b0cdaee5410d62d4334fd286c18856242b40cd",
       "symbol": "type Store",
       "reason": "pre-v1 removes the obsolete low-level Store interface whose unfenced mutation signatures conflict with the request-scoped Service and narrow session contracts"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/task",
+      "sha256": "23f5659dd1d643b2c90edc5e23509c2b7985347f58d8bbd6211d289d52826d90",
+      "symbol": "type ControlRequest",
+      "reason": "pre-v1 replaces string context preludes with typed ContextTransfer offsets and removes duplicated current-request prompt assembly"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/task",
+      "sha256": "49ea07e6bc1406abaa55202ebec399faa6bdfc41ebc2ef3a377562f3d45622db",
+      "symbol": "type SubagentStartRequest",
+      "reason": "pre-v1 replaces string context preludes with typed ContextTransfer offsets and removes duplicated current-request prompt assembly"
     }
   ]
 }

@@ -87,6 +87,32 @@ func TestVisibilityRules(t *testing.T) {
 	}
 }
 
+func TestParticipantExecutorIncludesAgentAndHandle(t *testing.T) {
+	t.Parallel()
+
+	got := ParticipantExecutor(ParticipantBinding{
+		ID: "participant-1", Kind: ParticipantKindACP, Role: ParticipantRoleSidecar,
+		AgentName: "claude", Label: "@aria",
+	})
+	want := ActorRef{
+		Kind: ActorKindParticipant, ID: "participant-1", Role: string(ParticipantRoleSidecar), Name: "claude(aria)",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ParticipantExecutor() = %#v, want %#v", got, want)
+	}
+}
+
+func TestActorRefHasIdentityAcceptsStableID(t *testing.T) {
+	t.Parallel()
+
+	if !ActorRefHasIdentity(ActorRef{ID: "agent-1"}) {
+		t.Fatal("ID-only ActorRef should carry identity")
+	}
+	if ActorRefHasIdentity(ActorRef{Role: "sidecar"}) {
+		t.Fatal("role-only ActorRef should not carry identity")
+	}
+}
+
 func TestMainInvocationVisibleSharesSideDialogueAndExcludesDelegatedWork(t *testing.T) {
 	t.Parallel()
 

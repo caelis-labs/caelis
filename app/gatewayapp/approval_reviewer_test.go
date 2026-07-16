@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"iter"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync"
@@ -892,7 +891,7 @@ func TestApprovalReviewerProviderE2EReportsCachedPromptHit(t *testing.T) {
 		serverMu sync.Mutex
 		calls    int
 	)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newGatewayTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
 			http.NotFound(w, r)
 			return
@@ -932,13 +931,14 @@ func TestApprovalReviewerProviderE2EReportsCachedPromptHit(t *testing.T) {
 
 	factory := providers.NewFactory()
 	if err := factory.Register(providers.Config{
-		Alias:    "cache-provider",
-		Provider: "openai-compatible",
-		API:      providers.APIOpenAICompatible,
-		Model:    "cache-provider",
-		BaseURL:  server.URL,
-		Timeout:  2 * time.Second,
-		Auth:     providers.AuthConfig{Type: providers.AuthNone},
+		Alias:      "cache-provider",
+		Provider:   "openai-compatible",
+		API:        providers.APIOpenAICompatible,
+		Model:      "cache-provider",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    2 * time.Second,
+		Auth:       providers.AuthConfig{Type: providers.AuthNone},
 	}); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -105,7 +107,7 @@ func (tm *taskRuntime) StartSubagent(
 	}
 	var task *subagentTask
 	if outcome.ShouldSpawn {
-		childPrompt := subagentPromptWithContext(req.ContextPrelude, req.Prompt)
+		childPrompt := contextprompt.ComposeTextPrompt(req.Context, strings.TrimSpace(req.Prompt))
 		anchor, result, err := runner.Spawn(ctx, subagent.SpawnContext{
 			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession), CWD: strings.TrimSpace(activeSession.CWD),
 			TaskID: taskID, ParentCallID: strings.TrimSpace(req.ParentCall), Mode: mode, ApprovalMode: strings.TrimSpace(req.ApprovalMode),
@@ -191,7 +193,7 @@ func (tm *taskRuntime) beginSubagentSpawn(
 		Spec: map[string]any{
 			"spawn_identity": strings.TrimSpace(spawnID), "spawn_request_digest": strings.TrimSpace(requestDigest),
 			"agent": strings.TrimSpace(req.Agent), "prompt": strings.TrimSpace(req.Prompt),
-			"context_prelude": strings.TrimSpace(req.ContextPrelude), "mode": strings.TrimSpace(mode),
+			"context": agent.CloneContextTransfer(req.Context), "mode": strings.TrimSpace(mode),
 			"approval_mode": strings.TrimSpace(req.ApprovalMode), "parent_call": strings.TrimSpace(req.ParentCall),
 			"participant_role": string(role),
 			"handle":           strings.TrimSpace(handle), "terminal_id": subagentTerminalID(taskID), "turn_seq": int64(1),
@@ -262,16 +264,16 @@ func (tm *taskRuntime) claimSpawnExternalEffect(ctx context.Context, entry *task
 
 func subagentSpawnRequestDigest(req taskapi.SubagentStartRequest, mode string, role session.ParticipantRole) (string, error) {
 	payload := struct {
-		Agent          string                  `json:"agent"`
-		Prompt         string                  `json:"prompt"`
-		ContextPrelude string                  `json:"context_prelude"`
-		Mode           string                  `json:"mode"`
-		ApprovalMode   string                  `json:"approval_mode"`
-		ParentCall     string                  `json:"parent_call"`
-		Role           session.ParticipantRole `json:"role"`
+		Agent        string                  `json:"agent"`
+		Prompt       string                  `json:"prompt"`
+		Context      agent.ContextTransfer   `json:"context"`
+		Mode         string                  `json:"mode"`
+		ApprovalMode string                  `json:"approval_mode"`
+		ParentCall   string                  `json:"parent_call"`
+		Role         session.ParticipantRole `json:"role"`
 	}{
 		Agent: strings.TrimSpace(req.Agent), Prompt: strings.TrimSpace(req.Prompt),
-		ContextPrelude: strings.TrimSpace(req.ContextPrelude), Mode: strings.TrimSpace(mode),
+		Context: agent.CloneContextTransfer(req.Context), Mode: strings.TrimSpace(mode),
 		ApprovalMode: strings.TrimSpace(req.ApprovalMode), ParentCall: strings.TrimSpace(req.ParentCall), Role: role,
 	}
 	raw, err := json.Marshal(payload)

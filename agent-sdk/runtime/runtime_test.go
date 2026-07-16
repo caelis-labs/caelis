@@ -34,6 +34,27 @@ import (
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
+func TestNormalizeEventPreservesIDOnlyExecutor(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{Controller: session.ControllerBinding{
+		Kind: session.ControllerKindACP, ControllerID: "default-controller", AgentName: "codex",
+	}}
+	event := &session.Event{
+		Type: session.EventTypeAssistant,
+		Scope: &session.EventScope{
+			Executor: session.ActorRef{ID: "custom-controller"},
+		},
+	}
+	got := normalizeEvent(activeSession, "turn-1", event)
+	if got == nil || got.Scope == nil {
+		t.Fatalf("normalizeEvent() = %#v, want one scoped event", got)
+	}
+	if !reflect.DeepEqual(got.Scope.Executor, event.Scope.Executor) {
+		t.Fatalf("executor = %#v, want preserved ID-only executor %#v", got.Scope.Executor, event.Scope.Executor)
+	}
+}
+
 func TestRuntimeRequiresControlContextRouterForExternalEndpoints(t *testing.T) {
 	t.Parallel()
 
@@ -947,9 +968,27 @@ func TestRuntimeACPControllerTurnSendsUnsyncedSharedDialogue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BindController() error = %v", err)
 	}
+	sideUser := userTextEvent("side request")
+	sideUser.Scope = &session.EventScope{
+		TurnID:   "side-turn",
+		Executor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "side-1", Name: "helper(jeff)"},
+		Participant: session.ParticipantRef{
+			ID:   "side-1",
+			Kind: session.ParticipantKindSubagent,
+			Role: session.ParticipantRoleSidecar,
+		},
+	}
+	if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: activeSession.SessionRef,
+		Event:      sideUser,
+	}); err != nil {
+		t.Fatalf("AppendEvent(side user) error = %v", err)
+	}
 	sideEvent := assistantEvent("side result")
 	sideEvent.Actor = session.ActorRef{Kind: session.ActorKindParticipant, Name: "jeff"}
 	sideEvent.Scope = &session.EventScope{
+		TurnID:   "side-turn",
+		Executor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "side-1", Name: "helper(jeff)"},
 		Participant: session.ParticipantRef{
 			ID:   "side-1",
 			Kind: session.ParticipantKindSubagent,
@@ -1004,20 +1043,28 @@ func TestRuntimeACPControllerTurnSendsUnsyncedSharedDialogue(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("controller did not receive RunTurn request")
 	}
-	if turnReq.ContextSyncSeq != 2 {
-		t.Fatalf("ContextSyncSeq = %d, want checkpoint 2", turnReq.ContextSyncSeq)
+	if turnReq.ContextSyncSeq != 3 {
+		t.Fatalf("ContextSyncSeq = %d, want checkpoint 3", turnReq.ContextSyncSeq)
 	}
-	if !strings.Contains(turnReq.ContextPrelude, "side result") || !strings.Contains(turnReq.ContextPrelude, "shared_dialogue_delta:") {
-		t.Fatalf("ContextPrelude = %q, want unsynced side dialogue", turnReq.ContextPrelude)
+	if got, want := turnReq.Context, (agent.ContextTransfer{Turns: []agent.ContextTurn{{
+		Executor:         session.ActorRef{Kind: session.ActorKindParticipant, ID: "side-1", Name: "helper(jeff)"},
+		UserMessages:     []string{"side request"},
+		AssistantSummary: "side result",
+	}}}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Context = %#v, want %#v", got, want)
 	}
-	if strings.Contains(turnReq.ContextPrelude, "next prompt") {
-		t.Fatalf("ContextPrelude = %q, should not duplicate current user prompt", turnReq.ContextPrelude)
+	contextJSON, err := json.Marshal(turnReq.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(contextJSON), "next prompt") {
+		t.Fatalf("Context = %s, should not duplicate current user prompt", contextJSON)
 	}
 	updated, err := sessions.Session(context.Background(), activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("Session() error = %v", err)
 	}
-	if updated.Controller.ContextSyncSeq < 4 {
+	if updated.Controller.ContextSyncSeq < 5 {
 		t.Fatalf("controller ContextSyncSeq = %d, want current shared ledger checkpoint", updated.Controller.ContextSyncSeq)
 	}
 }
@@ -1138,8 +1185,8 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 		if req.TurnID == "" {
 			t.Fatal("participant prompt TurnID is empty")
 		}
-		if strings.Contains(req.ContextPrelude, "current_user_request") || strings.Contains(req.ContextPrelude, req.Input) {
-			t.Fatalf("participant context prelude duplicated current prompt:\n%s", req.ContextPrelude)
+		if !agent.ContextTransferEmpty(req.Context) {
+			t.Fatalf("participant Context = %#v, want no background for an empty offset", req.Context)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("participant prompt request was not sent")
@@ -1169,6 +1216,9 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 			if !session.IsMainInvocationVisibleEvent(event) {
 				t.Fatalf("side user event is not visible to main invocation: %#v", event)
 			}
+			if got := event.Scope.Executor.Name; got != "claude(emma)" {
+				t.Fatalf("side user executor = %q, want claude(emma)", got)
+			}
 		case session.EventTypeAssistant:
 			sideAssistants++
 			if got := strings.TrimSpace(session.EventText(event)); got != "emma summary" {
@@ -1176,6 +1226,9 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 			}
 			if !session.IsMainInvocationVisibleEvent(event) {
 				t.Fatalf("side assistant event is not visible to main invocation: %#v", event)
+			}
+			if got := event.Scope.Executor.Name; got != "claude(emma)" {
+				t.Fatalf("side assistant executor = %q, want claude(emma)", got)
 			}
 		}
 	}

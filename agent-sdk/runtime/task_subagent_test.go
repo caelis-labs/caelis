@@ -59,13 +59,13 @@ func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *tes
 	if snapshot.State != task.StateCompleted {
 		t.Fatalf("snapshot state = %q, want completed", snapshot.State)
 	}
-	if prompt := runner.spawnRequest.Prompt; !strings.Contains(prompt, "shared_dialogue_delta:") ||
-		!strings.Contains(prompt, "[1] user:\nprevious request") ||
-		!strings.Contains(prompt, "[2] assistant:\nprevious answer") ||
-		!strings.Contains(prompt, "Current request:\nreview") {
+	if prompt := runner.spawnRequest.Prompt; !strings.Contains(prompt, `<caelis_background version="1">`) ||
+		!strings.Contains(prompt, `"user_messages":["previous request"]`) ||
+		!strings.Contains(prompt, `"assistant_summary":"previous answer"`) ||
+		!strings.Contains(prompt, "<caelis_current_request>\nreview") {
 		t.Fatalf("spawn prompt missing shared side context:\n%s", prompt)
-	} else if strings.Contains(prompt, "current_user_request") {
-		t.Fatalf("spawn prompt duplicated current request in context prelude:\n%s", prompt)
+	} else if strings.Count(prompt, "review") != 1 {
+		t.Fatalf("spawn prompt duplicated current request:\n%s", prompt)
 	}
 
 	loaded, err := runtime.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
@@ -552,11 +552,8 @@ func TestSideAndDelegatedSubagentsHaveSeparateControlSurfaces(t *testing.T) {
 	if _, err := runtime.ContinueSubagentByHandle(ctx, activeSession.SessionRef, taskStringValue(side.Result["handle"]), "follow up", 0); err != nil {
 		t.Fatalf("ContinueSubagentByHandle(side) error = %v", err)
 	}
-	if !strings.Contains(runner.continuePrompt, "shared_dialogue_delta:\n(none)") || !strings.Contains(runner.continuePrompt, "Current request:\nfollow up") {
-		t.Fatalf("side continuation prompt missing shared context:\n%s", runner.continuePrompt)
-	}
-	if strings.Contains(runner.continuePrompt, "current_user_request") {
-		t.Fatalf("side continuation duplicated current request in context prelude:\n%s", runner.continuePrompt)
+	if runner.continuePrompt != "follow up" {
+		t.Fatalf("side continuation prompt = %q, want raw current request for an empty offset", runner.continuePrompt)
 	}
 	if strings.Contains(runner.continuePrompt, "side done") {
 		t.Fatalf("side continuation repeated prior side final output:\n%s", runner.continuePrompt)

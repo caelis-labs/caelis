@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -14,10 +15,10 @@ func (r *Runtime) buildControllerTurnContext(
 	activeSession session.Session,
 	ref session.SessionRef,
 	excludeTurnID string,
-) (string, uint64, error) {
+) (agent.ContextTransfer, uint64, error) {
 	binding := session.CloneControllerBinding(activeSession.Controller)
 	if binding.Kind != session.ControllerKindACP {
-		return "", binding.ContextSyncSeq, nil
+		return agent.ContextTransfer{}, binding.ContextSyncSeq, nil
 	}
 	return r.buildControllerHandoffContext(ctx, activeSession, ref, binding, binding.ContextSyncSeq, excludeTurnID)
 }
@@ -29,9 +30,9 @@ func (r *Runtime) buildControllerHandoffContext(
 	from session.ControllerBinding,
 	sinceSeq uint64,
 	excludeTurnID string,
-) (string, uint64, error) {
+) (agent.ContextTransfer, uint64, error) {
 	if r == nil || r.controllerContextRouter == nil {
-		return "", 0, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
+		return agent.ContextTransfer{}, 0, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
 	}
 	route, err := r.controllerContextRouter.ControllerContext(ctx, controller.ControllerContextRequest{
 		SessionRef:    session.NormalizeSessionRef(ref),
@@ -41,9 +42,9 @@ func (r *Runtime) buildControllerHandoffContext(
 		ExcludeTurnID: strings.TrimSpace(excludeTurnID),
 	})
 	if err != nil {
-		return "", 0, err
+		return agent.ContextTransfer{}, 0, err
 	}
-	return strings.TrimSpace(route.Prelude), route.SyncSeq, nil
+	return agent.CloneContextTransfer(route.Context), route.SyncSeq, nil
 }
 
 func (r *Runtime) buildParticipantPromptContext(
@@ -51,9 +52,9 @@ func (r *Runtime) buildParticipantPromptContext(
 	activeSession session.Session,
 	ref session.SessionRef,
 	binding session.ParticipantBinding,
-) (string, uint64, error) {
+) (agent.ContextTransfer, uint64, error) {
 	if r == nil || r.controllerContextRouter == nil {
-		return "", 0, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
+		return agent.ContextTransfer{}, 0, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
 	}
 	route, err := r.controllerContextRouter.ParticipantContext(ctx, controller.ParticipantContextRequest{
 		SessionRef: session.NormalizeSessionRef(ref),
@@ -61,9 +62,9 @@ func (r *Runtime) buildParticipantPromptContext(
 		Binding:    session.CloneParticipantBinding(binding),
 	})
 	if err != nil {
-		return "", 0, err
+		return agent.ContextTransfer{}, 0, err
 	}
-	return strings.TrimSpace(route.Prelude), route.SyncSeq, nil
+	return agent.CloneContextTransfer(route.Context), route.SyncSeq, nil
 }
 
 func (r *Runtime) updateControllerContextCheckpoint(ctx context.Context, ref session.SessionRef) error {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -99,6 +100,54 @@ func TestBuildPromptPartsPreservesContentPartWhitespace(t *testing.T) {
 	}
 	if first.Text != "first " || image.Type != "image" || image.Name != "shot.png" || second.Text != " second" {
 		t.Fatalf("prompt parts = %#v %#v %#v, want whitespace-preserving text/image/text", first, image, second)
+	}
+}
+
+func TestComposeACPContextPromptLeavesEmptyOffsetUnchanged(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildPromptParts("hi", nil)
+	got := composeACPContextPrompt(prompt, agent.ContextTransfer{})
+	if len(got) != 1 || string(got[0]) != string(prompt[0]) {
+		t.Fatalf("composeACPContextPrompt() = %s, want unchanged prompt %s", got, prompt)
+	}
+}
+
+func TestComposeACPContextPromptSeparatesBackgroundFromCurrentContentParts(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildPromptParts("ignored", []model.ContentPart{
+		{Type: model.ContentPartText, Text: "hi"},
+		{Type: model.ContentPartImage, MimeType: "image/png", Data: "iVBORw0KGgo="},
+	})
+	got := composeACPContextPrompt(prompt, agent.ContextTransfer{Turns: []agent.ContextTurn{{
+		Executor:     session.ActorRef{Kind: session.ActorKindParticipant, Name: "claude(aria)"},
+		UserMessages: []string{"earlier question"}, AssistantSummary: "earlier answer",
+	}}})
+	if len(got) != 4 {
+		t.Fatalf("len(composeACPContextPrompt()) = %d, want background, marker, and two current parts", len(got))
+	}
+	var background, marker, current client.TextContent
+	if err := json.Unmarshal(got[0], &background); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(got[1], &marker); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(got[2], &current); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(background.Text, `<caelis_background version="1">`) ||
+		!strings.Contains(background.Text, `"executor":"claude(aria)"`) ||
+		strings.Contains(background.Text, "session_id") || strings.Contains(background.Text, "workspace") ||
+		strings.Contains(background.Text, "target_agent") {
+		t.Fatalf("background block = %q", background.Text)
+	}
+	if marker.Text != "<caelis_current_request>" || current.Text != "hi" {
+		t.Fatalf("marker/current = %q/%q, want isolated current request", marker.Text, current.Text)
+	}
+	if string(got[3]) != string(prompt[1]) {
+		t.Fatalf("current image part changed: got %s want %s", got[3], prompt[1])
 	}
 }
 
@@ -1588,7 +1637,7 @@ func TestManagerActivateResetsContextCheckpointForNewRemoteSession(t *testing.T)
 			},
 		},
 		Agent:          "helper",
-		ContextPrelude: "incremental context for old remote",
+		Context:        agent.ContextTransfer{Summary: "incremental context for old remote"},
 		ContextSyncSeq: 42,
 	})
 	if err != nil {
