@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	defaultOpenAICodexBaseURL          = "https://chatgpt.com/backend-api/codex"
-	openAICodexPromptCacheKeyMaxLength = 64
+	defaultOpenAICodexBaseURL           = "https://chatgpt.com/backend-api/codex"
+	openAICodexRequestAffinityMaxLength = 64
 )
 
 type openAICodexLLM struct {
@@ -78,8 +78,10 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 			yield(nil, err)
 			return
 		}
+		requestAffinity := ""
 		if metadata, ok := model.ProviderRequestMetadataFromContext(ctx); ok {
-			payload.PromptCache = openAICodexPromptCacheKey(metadata.SessionAffinity)
+			requestAffinity = openAICodexRequestAffinity(metadata.SessionAffinity)
+			payload.PromptCache = requestAffinity
 		}
 		raw, err := json.Marshal(payload)
 		if err != nil {
@@ -94,8 +96,8 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "text/event-stream")
 		setHeaderDefault(httpReq.Header, "originator", "caelis")
-		if metadata, ok := model.ProviderRequestMetadataFromContext(ctx); ok {
-			setHeaderDefault(httpReq.Header, "session-id", metadata.SessionAffinity)
+		if requestAffinity != "" {
+			setHeaderDefault(httpReq.Header, "session-id", requestAffinity)
 		}
 		applyDefaultAttributionHeaders(httpReq, APIOpenAICodex)
 		applyConfiguredHeaders(httpReq, l.headers)
@@ -221,11 +223,14 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 	}
 }
 
-func openAICodexPromptCacheKey(sessionAffinity string) string {
+func openAICodexRequestAffinity(sessionAffinity string) string {
 	key := strings.TrimSpace(sessionAffinity)
-	if len(key) <= openAICodexPromptCacheKeyMaxLength {
+	if len(key) <= openAICodexRequestAffinityMaxLength {
 		return key
 	}
+	// The Codex backend uses session-id as request affinity and may project it
+	// into the downstream prompt_cache_key. Keep the header and body on the
+	// same stable value within the Responses API's 64-character limit.
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
 }
 

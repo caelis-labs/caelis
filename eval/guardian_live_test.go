@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -291,6 +292,20 @@ func isolatedGuardianE2EStore(t *testing.T) string {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "config.json"), minimal, 0o600); err != nil {
 		t.Fatalf("write isolated model config: %v", err)
+	}
+	sourceCredentialPath := codexauth.DefaultCredentialPath(filepath.Join(home, ".caelis"))
+	credential, err := os.ReadFile(sourceCredentialPath)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read Codex OAuth credential: %v", err)
+	}
+	if err == nil {
+		destinationCredentialPath := codexauth.DefaultCredentialPath(root)
+		if err := os.MkdirAll(filepath.Dir(destinationCredentialPath), 0o700); err != nil {
+			t.Fatalf("create isolated Codex credential directory: %v", err)
+		}
+		if err := os.WriteFile(destinationCredentialPath, credential, 0o600); err != nil {
+			t.Fatalf("write isolated Codex OAuth credential: %v", err)
+		}
 	}
 	return root
 }

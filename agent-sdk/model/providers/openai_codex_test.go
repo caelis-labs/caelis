@@ -250,23 +250,73 @@ func TestOpenAICodexFactoryRequiresInjectedOAuthClient(t *testing.T) {
 	}
 }
 
-func TestOpenAICodexPromptCacheKeyBoundsLongSessionAffinity(t *testing.T) {
+func TestOpenAICodexRequestAffinityBoundsLongSessionID(t *testing.T) {
 	t.Parallel()
 
-	if got := openAICodexPromptCacheKey("caelis-session-1"); got != "caelis-session-1" {
+	if got := openAICodexRequestAffinity("caelis-session-1"); got != "caelis-session-1" {
 		t.Fatalf("short key = %q, want unchanged session affinity", got)
 	}
 
-	longAffinity := strings.Repeat("guardian-approval-review-", 5)
-	got := openAICodexPromptCacheKey(longAffinity)
-	if len(got) != openAICodexPromptCacheKeyMaxLength {
-		t.Fatalf("long key length = %d, want %d", len(got), openAICodexPromptCacheKeyMaxLength)
+	longAffinity := strings.Repeat("s", 28) + "-approval-review-" + strings.Repeat("a", 64)
+	if len(longAffinity) != 109 {
+		t.Fatalf("test Guardian affinity length = %d, want reported failure length 109", len(longAffinity))
 	}
-	if got != openAICodexPromptCacheKey(longAffinity) {
+	got := openAICodexRequestAffinity(longAffinity)
+	if len(got) != openAICodexRequestAffinityMaxLength {
+		t.Fatalf("long key length = %d, want %d", len(got), openAICodexRequestAffinityMaxLength)
+	}
+	if got != openAICodexRequestAffinity(longAffinity) {
 		t.Fatal("long key is not stable")
 	}
-	if got == openAICodexPromptCacheKey(longAffinity+"other-session") {
+	if got == openAICodexRequestAffinity(longAffinity+"other-session") {
 		t.Fatal("distinct long affinities share a prompt cache key")
+	}
+}
+
+func TestOpenAICodexLongSessionAffinityIsBoundedOnWire(t *testing.T) {
+	t.Parallel()
+
+	longAffinity := strings.Repeat("s", 28) + "-approval-review-" + strings.Repeat("a", 64)
+	wantAffinity := openAICodexRequestAffinity(longAffinity)
+	var gotHeader string
+	var gotPromptCache string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("session-id")
+		var body struct {
+			PromptCache string `json:"prompt_cache_key"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		gotPromptCache = body.PromptCache
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeOpenAICodexSSE(t, w, map[string]any{
+			"type": "response.completed",
+			"response": map[string]any{
+				"model": "gpt-test", "status": "completed", "output": []any{},
+			},
+		})
+	}))
+	defer server.Close()
+
+	llm := newOpenAICodex(Config{
+		Provider:   "openai-codex",
+		Model:      "gpt-test",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+	ctx := model.WithProviderRequestMetadata(context.Background(), model.ProviderRequestMetadata{SessionAffinity: longAffinity})
+	for _, err := range llm.Generate(ctx, &model.Request{Messages: []model.Message{model.NewTextMessage(model.RoleUser, "review")}}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+	}
+	if gotPromptCache != wantAffinity {
+		t.Fatalf("prompt_cache_key = %q, want bounded affinity %q", gotPromptCache, wantAffinity)
+	}
+	if gotHeader != wantAffinity {
+		t.Fatalf("session-id = %q, want bounded affinity %q", gotHeader, wantAffinity)
 	}
 }
 
