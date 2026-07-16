@@ -494,6 +494,7 @@ func TestFileOperationStoreSweepHonorsSoftTimeLimit(t *testing.T) {
 		SweepDeleteLimit:  64,
 		SweepTimeLimit:    time.Nanosecond,
 	}, clock)
+	store.elapsed = func(time.Time) time.Duration { return time.Nanosecond }
 	for index := range 64 {
 		intent := operationStoreTestIntent(fmt.Sprintf("time-bound-%03d", index), "digest")
 		writeRawOperationRecord(t, store, intent, expiredTestRecord(clock.Now(), intent))

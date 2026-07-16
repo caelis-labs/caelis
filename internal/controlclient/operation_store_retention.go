@@ -227,7 +227,7 @@ func (s *MemoryOperationStore) sweepLocked(ctx context.Context, now time.Time) (
 			result.More = true
 			return result, err
 		}
-		if result.Scanned > 0 && time.Since(started) >= s.retention.SweepTimeLimit {
+		if result.Scanned > 0 && s.elapsed(started) >= s.retention.SweepTimeLimit {
 			result.More = true
 			return result, nil
 		}
@@ -320,7 +320,7 @@ func (s *FileOperationStore) sweepDirectoryLocked(
 			sweepErr = errors.Join(sweepErr, err)
 			break
 		}
-		if result.Scanned > 0 && time.Since(started) >= s.retention.SweepTimeLimit {
+		if result.Scanned > 0 && s.elapsed(started) >= s.retention.SweepTimeLimit {
 			break
 		}
 		if len(s.scanPending) == 0 {

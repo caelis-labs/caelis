@@ -53,6 +53,7 @@ type MemoryOperationStore struct {
 	nextSweep   time.Time
 	retention   normalizedOperationRetentionConfig
 	now         func() time.Time
+	elapsed     func(time.Time) time.Duration
 }
 
 func NewMemoryOperationStore() *MemoryOperationStore {
@@ -76,6 +77,7 @@ func NewMemoryOperationStoreWithConfig(config OperationRetentionConfig) (*Memory
 		elements:  map[string]*list.Element{},
 		retention: retention,
 		now:       time.Now,
+		elapsed:   time.Since,
 	}, nil
 }
 
@@ -170,6 +172,7 @@ func (s *MemoryOperationStore) removeRecordLocked(key string) {
 type FileOperationStore struct {
 	root                     string
 	now                      func() time.Time
+	elapsed                  func(time.Time) time.Duration
 	retention                normalizedOperationRetentionConfig
 	retentionExplicit        bool
 	initialized              bool
@@ -267,6 +270,7 @@ func NewFileOperationStoreWithConfig(root string, config OperationRetentionConfi
 	return &FileOperationStore{
 		root:              root,
 		now:               time.Now,
+		elapsed:           time.Since,
 		retention:         retention,
 		retentionExplicit: config.TerminalRetention != 0,
 		syncDirectory:     syncOperationStoreDirectory,
