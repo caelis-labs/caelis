@@ -200,7 +200,7 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireAnnotations(t, defs[shell.RunCommandToolName], false, true, false, true)
 
 	requireStringMinLength(t, defs[task.ToolName], "task_id", 1)
-	requireIntegerBounds(t, defs[task.ToolName], "yield_time_ms", -1, nil)
+	requireNoProperty(t, defs[task.ToolName], "yield_time_ms")
 	requireNoProperty(t, defs[task.ToolName], "wait_until_done")
 	requireDescriptionContains(t, defs[task.ToolName], "Control an async task", "terminal stdin", "follow-up prompt", "Always wait")
 	requireAnnotations(t, defs[task.ToolName], false, true, false, true)

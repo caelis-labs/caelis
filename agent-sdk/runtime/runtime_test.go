@@ -3165,10 +3165,20 @@ func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveCommand(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action":        "write",
-		"task_id":       taskID,
-		"input":         "Codex",
-		"yield_time_ms": shellCompletionYieldMillisForTest(250),
+		"action":  "write",
+		"task_id": taskID,
+		"input":   "Codex",
+	})
+	if payload := testToolResultPayload(t, taskResult); payload["state"] != string(taskapi.StateRunning) {
+		t.Fatalf("task write result = %#v, want running before explicit wait", payload)
+	}
+	taskResult = callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action":  "wait",
+		"task_id": taskID,
 	})
 	if len(taskResult.Content) == 0 || taskResult.Content[0].JSON == nil {
 		t.Fatalf("task result content = %#v, want json payload", taskResult.Content)
@@ -3425,7 +3435,7 @@ func TestRuntimeTerminalSubscribePreservesCompletionTailDuringTaskWait(t *testin
 		subscriptionDone <- result
 	}()
 
-	time.Sleep(minDuration(delay/4, 50*time.Millisecond))
+	time.Sleep(min(delay/4, 50*time.Millisecond))
 	waited, err := runtime.tasks.Wait(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
 		TaskID:    snapshot.Ref.TaskID,
 		Yield:     waitBudget,
@@ -3705,7 +3715,7 @@ func TestRuntimeTaskWaitErrorDoesNotTerminateRunningCommand(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskWaitUsesDefaultYieldWhenOmitted(t *testing.T) {
+func TestRuntimeTaskWaitUsesFixedMaximumYield(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -3735,15 +3745,15 @@ func TestRuntimeTaskWaitUsesDefaultYieldWhenOmitted(t *testing.T) {
 		"task_id": taskID,
 	})
 
-	if got := fake.session.lastWait; got != defaultCommandYield {
-		t.Fatalf("omitted TASK wait yield = %v, want %v", got, defaultCommandYield)
+	if got := fake.session.lastWait; got != taskWaitMaxYield {
+		t.Fatalf("TASK wait yield = %v, want %v", got, taskWaitMaxYield)
 	}
 	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
-	if got := toolMeta["effective_yield_time_ms"]; got != float64(7000) && got != 7000 {
-		t.Fatalf("effective_yield_time_ms = %#v, want 7000", got)
+	if got := toolMeta["effective_yield_time_ms"]; got != float64(60000) && got != 60000 {
+		t.Fatalf("effective_yield_time_ms = %#v, want 60000", got)
 	}
-	if got := toolMeta["yield_time_ms_defaulted"]; got != true {
-		t.Fatalf("yield_time_ms_defaulted = %#v, want true", got)
+	if got := toolMeta["yield_time_ms_defaulted"]; got != nil {
+		t.Fatalf("yield_time_ms_defaulted = %#v, want omitted", got)
 	}
 	payload := testToolResultPayload(t, taskResult)
 	if _, ok := payload["actual_wait_time_ms"]; !ok {
@@ -3782,14 +3792,12 @@ func isShortHexTaskID(taskID string) bool {
 	return true
 }
 
-func TestRuntimeTaskWaitNegativeOneWaitsUntilDone(t *testing.T) {
+func TestRuntimeTaskWaitIgnoresLegacyAgentYield(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
 	taskID := startProbeCommandTask(t, activeSession, runtime, fake)
-	completed := false
-	fake.session.statusRunning = &completed
 
 	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
 		base:       tasktool.New(),
@@ -3801,83 +3809,12 @@ func TestRuntimeTaskWaitNegativeOneWaitsUntilDone(t *testing.T) {
 		"yield_time_ms": -1,
 	})
 
+	if got := fake.session.lastWait; got != taskWaitMaxYield {
+		t.Fatalf("TASK wait yield = %v, want legacy yield_time_ms ignored and fixed %v", got, taskWaitMaxYield)
+	}
 	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
-	if got := fake.session.lastWait; got > defaultTaskWaitUntilDoneYield || got < defaultTaskWaitUntilDoneYield-time.Millisecond {
-		t.Fatalf("yield_time_ms=-1 wait = %v, want %v", got, defaultTaskWaitUntilDoneYield)
-	}
-	if got := toolMeta["effective_yield_time_ms"]; got != float64(300000) && got != 300000 {
-		t.Fatalf("effective_yield_time_ms = %#v, want 300000", got)
-	}
-	if got := toolMeta["yield_time_ms_defaulted"]; got == true {
-		t.Fatalf("yield_time_ms_defaulted = %#v, want false when yield_time_ms=-1 is explicit", got)
-	}
-	if got := toolMeta["yield_time_ms"]; got != float64(-1) && got != -1 {
-		t.Fatalf("yield_time_ms meta = %#v, want -1", got)
-	}
-	if got := toolMeta["wait_until_done"]; got != nil {
-		t.Fatalf("wait_until_done meta = %#v, want omitted", got)
-	}
-	payload := testToolResultPayload(t, taskResult)
-	if _, ok := payload["actual_wait_time_ms"]; !ok {
-		t.Fatalf("payload missing actual_wait_time_ms: %#v", payload)
-	}
-}
-
-func TestRuntimeTaskWaitPositiveYieldDoesNotPollUntilDone(t *testing.T) {
-	t.Parallel()
-
-	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
-	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
-	startResult := callRuntimeRunCommandTool(t, runtimeCommandTool{
-		base:       mustRuntimeRunCommandTool(t, fake),
-		session:    session.CloneSession(activeSession),
-		sessionRef: activeSession.SessionRef,
-		tasks:      runtime.tasks,
-	}, map[string]any{
-		"command":       "printf 'still-running'",
-		"workdir":       activeSession.CWD,
-		"yield_time_ms": 0,
-	})
-	taskID, _ := testToolResultRuntimeMeta(t, startResult, "task")["task_id"].(string)
-	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("command result metadata = %#v, want task_id", startResult.Metadata)
-	}
-
-	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
-		base:       tasktool.New(),
-		sessionRef: activeSession.SessionRef,
-		tasks:      runtime.tasks,
-	}, map[string]any{
-		"action":        "wait",
-		"task_id":       taskID,
-		"yield_time_ms": 25,
-	})
-
-	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
-	if got := fake.session.lastWait; got != 25*time.Millisecond {
-		t.Fatalf("positive TASK wait yield = %v, want 25ms", got)
-	}
-	if got := toolMeta["wait_timed_out"]; got != nil {
-		t.Fatalf("wait_timed_out = %#v, want omitted for positive yield", got)
-	}
-	if got := toolMeta["wait_until_done"]; got != nil {
-		t.Fatalf("wait_until_done = %#v, want omitted for positive yield", got)
-	}
-	if len(taskResult.Content) == 0 || taskResult.Content[0].JSON == nil {
-		t.Fatalf("task result content = %#v, want json payload", taskResult.Content)
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(taskResult.Content[0].JSON.Value, &payload); err != nil {
-		t.Fatalf("json.Unmarshal(task payload) error = %v", err)
-	}
-	if _, ok := payload["actual_wait_time_ms"]; !ok {
-		t.Fatalf("payload missing actual_wait_time_ms: %#v", payload)
-	}
-	if got := payload["still_running"]; got != nil {
-		t.Fatalf("payload still_running = %#v, want omitted for positive yield", got)
-	}
-	if got := payload["wait_timed_out"]; got != nil {
-		t.Fatalf("payload wait_timed_out = %#v, want omitted for positive yield", got)
+	if got := toolMeta["effective_yield_time_ms"]; got != float64(60000) && got != 60000 {
+		t.Fatalf("effective_yield_time_ms = %#v, want 60000", got)
 	}
 }
 
@@ -3895,13 +3832,12 @@ func TestRuntimeTaskWaitAcceptsCommaSeparatedTaskIDs(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action":        "wait",
-		"task_id":       taskOne + ", " + taskTwo,
-		"yield_time_ms": 125,
+		"action":  "wait",
+		"task_id": taskOne + ", " + taskTwo,
 	})
 
-	if fakeOne.session.lastWait > 125*time.Millisecond || fakeTwo.session.lastWait > 125*time.Millisecond {
-		t.Fatalf("wait durations = %v/%v, want both <=125ms", fakeOne.session.lastWait, fakeTwo.session.lastWait)
+	if fakeOne.session.lastWait > taskWaitMaxYield || fakeTwo.session.lastWait > taskWaitMaxYield {
+		t.Fatalf("wait durations = %v/%v, want both <=%v", fakeOne.session.lastWait, fakeTwo.session.lastWait, taskWaitMaxYield)
 	}
 	payload := testToolResultPayload(t, taskResult)
 	if got, _ := payload["action"].(string); got != "wait" {
@@ -3940,9 +3876,8 @@ func TestRuntimeTaskBatchWaitUsesSharedYieldBudget(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action":        "wait",
-		"task_id":       taskOne + "," + taskTwo,
-		"yield_time_ms": 50,
+		"action":  "wait",
+		"task_id": taskOne + "," + taskTwo,
 	})
 
 	if len(fakeOne.session.waitCalls) < 2 || len(fakeTwo.session.waitCalls) < 2 {
@@ -3950,11 +3885,11 @@ func TestRuntimeTaskBatchWaitUsesSharedYieldBudget(t *testing.T) {
 	}
 	batchFirst := fakeOne.session.waitCalls[len(fakeOne.session.waitCalls)-1]
 	batchSecond := fakeTwo.session.waitCalls[len(fakeTwo.session.waitCalls)-1]
-	if batchFirst > 50*time.Millisecond || batchFirst < 40*time.Millisecond {
-		t.Fatalf("first batch wait = %v, want near 50ms", batchFirst)
+	if batchFirst > taskWaitMaxYield || batchFirst < taskWaitMaxYield-time.Millisecond {
+		t.Fatalf("first batch wait = %v, want near %v", batchFirst, taskWaitMaxYield)
 	}
-	if batchSecond >= 50*time.Millisecond {
-		t.Fatalf("second batch wait = %v, want remaining budget below 50ms", batchSecond)
+	if batchSecond >= batchFirst || batchSecond < batchFirst-100*time.Millisecond {
+		t.Fatalf("second batch wait = %v, want remaining shared one-minute budget below %v", batchSecond, batchFirst)
 	}
 }
 
@@ -4070,49 +4005,6 @@ func TestRuntimeTaskWriteWithCommaSeparatedTaskIDsUsesFirst(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskWaitZeroUsesDefaultYield(t *testing.T) {
-	t.Parallel()
-
-	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
-	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
-	runCommandTool := runtimeCommandTool{
-		base:       mustRuntimeRunCommandTool(t, fake),
-		session:    session.CloneSession(activeSession),
-		sessionRef: activeSession.SessionRef,
-		tasks:      runtime.tasks,
-	}
-	runCommandResult := callRuntimeRunCommandTool(t, runCommandTool, map[string]any{
-		"command":       "printf 'ok'",
-		"workdir":       activeSession.CWD,
-		"yield_time_ms": 0,
-	})
-	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
-	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
-	}
-
-	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
-		base:       tasktool.New(),
-		sessionRef: activeSession.SessionRef,
-		tasks:      runtime.tasks,
-	}, map[string]any{
-		"action":        "wait",
-		"task_id":       taskID,
-		"yield_time_ms": 0,
-	})
-
-	if got := fake.session.lastWait; got != defaultCommandYield {
-		t.Fatalf("explicit zero TASK wait yield = %v, want default %v", got, defaultCommandYield)
-	}
-	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
-	if got := toolMeta["effective_yield_time_ms"]; got != float64(7000) && got != 7000 {
-		t.Fatalf("effective_yield_time_ms = %#v, want 7000", got)
-	}
-	if got := toolMeta["yield_time_ms_defaulted"]; got != true {
-		t.Fatalf("yield_time_ms_defaulted = %#v, want true", got)
-	}
-}
-
 func TestRuntimeTaskWaitReturnsTailWhileRunningAndFullWhenCompleted(t *testing.T) {
 	t.Parallel()
 
@@ -4146,9 +4038,8 @@ func TestRuntimeTaskWaitReturnsTailWhileRunningAndFullWhenCompleted(t *testing.T
 		tasks:      runtime.tasks,
 	}
 	runningResult := callRuntimeTaskTool(t, taskTool, map[string]any{
-		"action":        "wait",
-		"task_id":       taskID,
-		"yield_time_ms": 100,
+		"action":  "wait",
+		"task_id": taskID,
 	})
 	runningPayload := testToolResultPayload(t, runningResult)
 	wantTail := "...3 lines hidden...\nline 4\nline 5\nline 6\nline 7\nline 8\n"
@@ -4163,9 +4054,8 @@ func TestRuntimeTaskWaitReturnsTailWhileRunningAndFullWhenCompleted(t *testing.T
 	fakeSession.statusRunning = &completed
 	fakeSession.result = sandbox.CommandResult{Stdout: fakeSession.stdout, ExitCode: 0}
 	completedResult := callRuntimeTaskTool(t, taskTool, map[string]any{
-		"action":        "wait",
-		"task_id":       taskID,
-		"yield_time_ms": 12000,
+		"action":  "wait",
+		"task_id": taskID,
 	})
 	completedPayload := testToolResultPayload(t, completedResult)
 	if got, _ := completedPayload["result"].(string); got != fakeSession.stdout {
@@ -4216,9 +4106,8 @@ fatal: Could not read from remote repository.`
 		tasks:      runtime.tasks,
 	}
 	completedResult := callRuntimeTaskTool(t, taskTool, map[string]any{
-		"action":        "wait",
-		"task_id":       taskID,
-		"yield_time_ms": 12000,
+		"action":  "wait",
+		"task_id": taskID,
 	})
 	payload := testToolResultPayload(t, completedResult)
 	if text, _ := payload["result"].(string); !strings.Contains(text, "couldn't create signal pipe") {
@@ -4341,8 +4230,6 @@ func TestTaskControlSnapshotToolResultSimplifiesCancelPayload(t *testing.T) {
 			},
 		},
 		"cancel",
-		false,
-		false,
 		0,
 	)
 

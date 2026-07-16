@@ -34,7 +34,7 @@ func (Tool) Definition() tool.Definition {
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        []string{"wait", "write", "cancel"},
-					"description": "Control action: wait observes, write delivers input, cancel stops.",
+					"description": "Control action: wait observes for at most one minute, write delivers input, cancel stops.",
 				},
 				"task_id": map[string]any{
 					"type":        "string",
@@ -44,11 +44,6 @@ func (Tool) Definition() tool.Definition {
 				"input": map[string]any{
 					"type":        "string",
 					"description": "Text for write. RunCommand receives terminal stdin; completed Spawn receives a follow-up prompt.",
-				},
-				"yield_time_ms": map[string]any{
-					"type":        "integer",
-					"minimum":     -1,
-					"description": "Milliseconds to wait before returning. For wait, omitted or 0 uses the default 7000 ms, -1 waits as long as possible for completion, and positive values use that exact budget.",
 				},
 			},
 			"required":             []string{"action", "task_id"},

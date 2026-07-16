@@ -1680,7 +1680,7 @@ func TestToolResultEventSuppressesSuccessfulTaskWaitACPContent(t *testing.T) {
 	event := toolResultEvent(model.ToolCall{
 		ID:   "task-wait-1",
 		Name: "TASK",
-		Args: `{"action":"wait","task_id":"jack","yield_time_ms":5000}`,
+		Args: `{"action":"wait","task_id":"jack"}`,
 	}, tool.Result{
 		ID:   "task-wait-1",
 		Name: "TASK",

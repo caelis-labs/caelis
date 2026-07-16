@@ -443,70 +443,34 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	default:
 		return tool.Result{}, fmt.Errorf("tool: invalid action %q", action)
 	}
-	yieldMS, yieldDefaulted, waitUntilDone, err := taskControlYield(args, normalizedAction)
-	if err != nil {
-		return tool.Result{}, err
-	}
 	if len(taskIDs) > 1 && normalizedAction != "write" {
-		result := t.callBatchTaskControl(ctx, call, normalizedAction, taskIDs, input, yieldMS, yieldDefaulted, waitUntilDone)
+		result := t.callBatchTaskControl(ctx, call, normalizedAction, taskIDs, input)
 		return result, nil
 	}
-	budget := time.Duration(yieldMS) * time.Millisecond
+	yield := time.Duration(0)
+	if normalizedAction == "wait" {
+		yield = taskWaitMaxYield
+	}
 	req := taskapi.ControlRequest{
 		TaskID:    taskIDs[0],
-		Yield:     budget,
+		Yield:     yield,
 		Input:     input,
 		Principal: session.ActorKindTool,
 		Source:    "agent_tool",
 	}
 	var snapshot taskapi.Snapshot
-	var timedOut bool
 	actualWaitMS := 0
-	if strings.EqualFold(normalizedAction, "wait") && waitUntilDone && budget > 0 {
-		var waitErr error
-		started := time.Now()
-		snapshot, timedOut, waitErr = t.tasks.WaitUntilDone(ctx, t.sessionRef, req, budget)
+	started := time.Now()
+	snapshot, controlErr := t.callTaskControl(ctx, normalizedAction, req)
+	if normalizedAction == "wait" {
 		actualWaitMS = durationMillis(time.Since(started))
-		if waitErr != nil {
-			return tool.Result{}, waitErr
-		}
-	} else {
-		var controlErr error
-		started := time.Now()
-		snapshot, controlErr = t.callTaskControl(ctx, normalizedAction, req)
-		if strings.EqualFold(normalizedAction, "wait") {
-			actualWaitMS = durationMillis(time.Since(started))
-		}
-		if controlErr != nil {
-			return tool.Result{}, controlErr
-		}
 	}
-	result := taskControlSnapshotToolResult(call, t.base.Definition(), snapshot, normalizedAction, waitUntilDone, timedOut, actualWaitMS)
-	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, yieldMS, yieldDefaulted, waitUntilDone, timedOut, actualWaitMS, snapshot)
+	if controlErr != nil {
+		return tool.Result{}, controlErr
+	}
+	result := taskControlSnapshotToolResult(call, t.base.Definition(), snapshot, normalizedAction, actualWaitMS)
+	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, actualWaitMS, snapshot)
 	return result, nil
-}
-
-func taskControlYield(args map[string]any, action string) (yieldMS int, defaulted bool, waitUntilDone bool, err error) {
-	parsedYield := optionalIntArg(args, "yield_time_ms")
-	if strings.EqualFold(strings.TrimSpace(action), "wait") {
-		if parsedYield == nil || *parsedYield == 0 {
-			return int(defaultCommandYield / time.Millisecond), true, false, nil
-		}
-		if *parsedYield == -1 {
-			return int(defaultTaskWaitUntilDoneYield / time.Millisecond), false, true, nil
-		}
-		if *parsedYield < -1 {
-			return 0, false, false, fmt.Errorf("tool: arg %q must be -1 or >= 0", "yield_time_ms")
-		}
-		return *parsedYield, false, false, nil
-	}
-	if parsedYield == nil {
-		return 0, false, false, nil
-	}
-	if *parsedYield < 0 {
-		return 0, false, false, fmt.Errorf("tool: arg %q must be >= 0 for action %q", "yield_time_ms", action)
-	}
-	return *parsedYield, false, false, nil
 }
 
 func durationMillis(value time.Duration) int {
@@ -516,11 +480,14 @@ func durationMillis(value time.Duration) int {
 	return int(value / time.Millisecond)
 }
 
-func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Call, action string, taskIDs []string, input string, yieldMS int, yieldDefaulted bool, waitUntilDone bool) tool.Result {
+func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Call, action string, taskIDs []string, input string) tool.Result {
 	items := make([]taskBatchControlItem, 0, len(taskIDs))
 	started := time.Now()
 	for _, id := range taskIDs {
-		yield := time.Duration(yieldMS) * time.Millisecond
+		yield := time.Duration(0)
+		if strings.EqualFold(action, "wait") {
+			yield = taskWaitMaxYield
+		}
 		if strings.EqualFold(action, "wait") && yield > 0 {
 			elapsed := time.Since(started)
 			if elapsed >= yield {
@@ -537,15 +504,10 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Cal
 			Source:    "agent_tool",
 		}
 		var snapshot taskapi.Snapshot
-		var timedOut bool
 		var err error
 		itemStarted := time.Now()
 		actualWaitMS := 0
-		if strings.EqualFold(action, "wait") && waitUntilDone && yield > 0 {
-			snapshot, timedOut, err = t.tasks.WaitUntilDone(ctx, t.sessionRef, req, yield)
-		} else {
-			snapshot, err = t.callTaskControl(ctx, action, req)
-		}
+		snapshot, err = t.callTaskControl(ctx, action, req)
 		if strings.EqualFold(action, "wait") {
 			actualWaitMS = durationMillis(time.Since(itemStarted))
 		}
@@ -553,14 +515,14 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Cal
 			items = append(items, taskBatchControlItem{TaskID: id, Err: err, ActualWaitMS: actualWaitMS})
 			continue
 		}
-		items = append(items, taskBatchControlItem{TaskID: id, Snapshot: snapshot, OK: true, TimedOut: timedOut, ActualWaitMS: actualWaitMS})
+		items = append(items, taskBatchControlItem{TaskID: id, Snapshot: snapshot, OK: true, ActualWaitMS: actualWaitMS})
 	}
 	actualWaitMS := 0
 	if strings.EqualFold(action, "wait") {
 		actualWaitMS = durationMillis(time.Since(started))
 	}
-	result := taskBatchControlToolResult(call, t.base.Definition(), items, action, waitUntilDone, actualWaitMS)
-	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, action, input, yieldMS, yieldDefaulted, waitUntilDone, actualWaitMS, items)
+	result := taskBatchControlToolResult(call, t.base.Definition(), items, action, actualWaitMS)
+	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, action, input, actualWaitMS, items)
 	return result
 }
 
@@ -593,7 +555,7 @@ func splitTaskControlIDs(taskID string) []string {
 	return out
 }
 
-func taskToolResultEventMeta(existing map[string]any, action string, input string, yieldMS int, yieldDefaulted bool, waitUntilDone bool, timedOut bool, actualWaitMS int, snapshot taskapi.Snapshot) map[string]any {
+func taskToolResultEventMeta(existing map[string]any, action string, input string, actualWaitMS int, snapshot taskapi.Snapshot) map[string]any {
 	out := session.CloneState(existing)
 	if out == nil {
 		out = map[string]any{}
@@ -604,17 +566,7 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 	toolMeta["target_kind"] = strings.TrimSpace(string(snapshot.Kind))
 	toolMeta["target_id"] = taskVisibleID(snapshot)
 	if strings.EqualFold(strings.TrimSpace(action), "wait") {
-		toolMeta["effective_yield_time_ms"] = yieldMS
-		if waitUntilDone {
-			toolMeta["yield_time_ms"] = -1
-		}
-		if yieldDefaulted {
-			toolMeta["yield_time_ms_defaulted"] = true
-		}
-		if timedOut && snapshot.Running {
-			toolMeta["wait_timed_out"] = true
-			toolMeta["still_running"] = true
-		}
+		toolMeta["effective_yield_time_ms"] = int(taskWaitMaxYield / time.Millisecond)
 		toolMeta["actual_wait_time_ms"] = actualWaitMS
 	}
 	if strings.EqualFold(strings.TrimSpace(action), "write") {
@@ -623,7 +575,7 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 	return out
 }
 
-func taskBatchToolResultEventMeta(existing map[string]any, action string, input string, yieldMS int, yieldDefaulted bool, waitUntilDone bool, actualWaitMS int, items []taskBatchControlItem) map[string]any {
+func taskBatchToolResultEventMeta(existing map[string]any, action string, input string, actualWaitMS int, items []taskBatchControlItem) map[string]any {
 	out := session.CloneState(existing)
 	if out == nil {
 		out = map[string]any{}
@@ -640,18 +592,7 @@ func taskBatchToolResultEventMeta(existing map[string]any, action string, input 
 		toolMeta["target_kind"] = strings.TrimSpace(string(kind))
 	}
 	if strings.EqualFold(strings.TrimSpace(action), "wait") {
-		toolMeta["effective_yield_time_ms"] = yieldMS
-		if waitUntilDone {
-			toolMeta["yield_time_ms"] = -1
-		}
-		if yieldDefaulted {
-			toolMeta["yield_time_ms_defaulted"] = true
-		}
-		if timedOut := taskBatchTimedOutCount(items); timedOut > 0 {
-			toolMeta["wait_timed_out"] = true
-			toolMeta["still_running"] = true
-			toolMeta["timed_out_count"] = timedOut
-		}
+		toolMeta["effective_yield_time_ms"] = int(taskWaitMaxYield / time.Millisecond)
 		toolMeta["actual_wait_time_ms"] = actualWaitMS
 	}
 	if strings.EqualFold(strings.TrimSpace(action), "write") {
@@ -663,23 +604,10 @@ func taskBatchToolResultEventMeta(existing map[string]any, action string, input 
 	if failed := taskBatchErrorCount(items); failed > 0 {
 		taskMeta["failed_count"] = failed
 	}
-	if timedOut := taskBatchTimedOutCount(items); timedOut > 0 {
-		taskMeta["timed_out_count"] = timedOut
-	}
 	if kind, ok := commonTaskBatchKind(items); ok {
 		taskMeta["kind"] = strings.TrimSpace(string(kind))
 	}
 	return out
-}
-
-func taskBatchTimedOutCount(items []taskBatchControlItem) int {
-	count := 0
-	for _, item := range items {
-		if item.TimedOut && item.Snapshot.Running {
-			count++
-		}
-	}
-	return count
 }
 
 func taskBatchVisibleIDs(items []taskBatchControlItem) []string {

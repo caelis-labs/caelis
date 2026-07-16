@@ -467,7 +467,7 @@ func (s *handleLookupTaskStore) GetSessionTaskByHandle(_ context.Context, ref se
 func TestTaskToolResultEventMetaMarksSubagentWriteTarget(t *testing.T) {
 	t.Parallel()
 
-	meta := taskToolResultEventMeta(nil, "write", "请追加两行", 0, false, false, false, 0, task.Snapshot{
+	meta := taskToolResultEventMeta(nil, "write", "请追加两行", 0, task.Snapshot{
 		Ref:  task.Ref{TaskID: "task-1"},
 		Kind: task.KindSubagent,
 		Result: map[string]any{

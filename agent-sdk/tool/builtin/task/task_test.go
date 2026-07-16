@@ -27,21 +27,19 @@ func TestTaskDescriptionGuidesContinuingSubagentConversation(t *testing.T) {
 	}
 }
 
-func TestTaskSchemaUsesYieldTimeForWaitBudget(t *testing.T) {
+func TestTaskSchemaUsesFixedWaitBudget(t *testing.T) {
 	def := New().Definition()
 	props, _ := def.InputSchema["properties"].(map[string]any)
 	if _, ok := props["wait_until_done"]; ok {
 		t.Fatalf("wait_until_done property unexpectedly exposed: %#v", props["wait_until_done"])
 	}
-	yield, _ := props["yield_time_ms"].(map[string]any)
-	if got := yield["minimum"]; got != -1 {
-		t.Fatalf("yield_time_ms minimum = %#v, want -1", got)
+	if _, ok := props["yield_time_ms"]; ok {
+		t.Fatalf("yield_time_ms property unexpectedly exposed: %#v", props["yield_time_ms"])
 	}
-	desc, _ := yield["description"].(string)
-	for _, want := range []string{"0 uses the default 7000 ms", "-1 waits as long as possible", "positive values use that exact budget"} {
-		if !strings.Contains(desc, want) {
-			t.Fatalf("yield_time_ms description = %q, want %q", desc, want)
-		}
+	action, _ := props["action"].(map[string]any)
+	actionDesc, _ := action["description"].(string)
+	if !strings.Contains(actionDesc, "wait observes for at most one minute") {
+		t.Fatalf("action description = %q, want fixed one-minute wait guidance", actionDesc)
 	}
 	input, _ := props["input"].(map[string]any)
 	inputDesc, _ := input["description"].(string)
@@ -78,5 +76,22 @@ func TestTaskCallRejectsUnknownArgsBeforeRuntimeWrapperError(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "runtime wrapper") || !strings.Contains(err.Error(), "unexpected") {
 		t.Fatalf("TASK Call() error = %v, want unknown arg rejection before runtime wrapper error", err)
+	}
+}
+
+func TestTaskCallSilentlyAcceptsLegacyYieldTime(t *testing.T) {
+	t.Parallel()
+
+	raw, _ := json.Marshal(map[string]any{
+		"action":        "wait",
+		"task_id":       "task-1",
+		"yield_time_ms": -1,
+	})
+	_, err := New().Call(context.Background(), tool.Call{Name: ToolName, Input: raw})
+	if err == nil {
+		t.Fatal("TASK Call() error = nil, want runtime wrapper error")
+	}
+	if !strings.Contains(err.Error(), "runtime wrapper") || strings.Contains(err.Error(), "yield_time_ms") {
+		t.Fatalf("TASK Call() error = %v, want legacy yield_time_ms accepted before runtime wrapper error", err)
 	}
 }

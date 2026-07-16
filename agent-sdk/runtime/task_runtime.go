@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -46,54 +45,6 @@ func (tm *taskRuntime) Wait(ctx context.Context, ref session.SessionRef, req tas
 	})
 }
 
-func (tm *taskRuntime) WaitUntilDone(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest, budget time.Duration) (taskapi.Snapshot, bool, error) {
-	if budget <= 0 {
-		snapshot, err := tm.Wait(ctx, ref, req)
-		return snapshot, false, err
-	}
-	deadline := time.Now().Add(budget)
-	var last taskapi.Snapshot
-	var err error
-	for {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			break
-		}
-		waitReq := req
-		waitReq.Yield = remaining
-		started := time.Now()
-		last, err = tm.Wait(ctx, ref, waitReq)
-		if err != nil {
-			return last, false, err
-		}
-		if !last.Running {
-			return last, false, nil
-		}
-		elapsed := time.Since(started)
-		if elapsed < 25*time.Millisecond {
-			backoff := minDuration(remaining-elapsed, 100*time.Millisecond)
-			if backoff > 0 {
-				timer := time.NewTimer(backoff)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return last, false, ctx.Err()
-				case <-timer.C:
-				}
-			}
-		}
-	}
-	if last.Running {
-		probe := req
-		probe.Yield = 0
-		if probeSnap, probeErr := tm.Wait(ctx, ref, probe); probeErr == nil {
-			last = probeSnap
-		}
-		return last, last.Running, err
-	}
-	return last, false, err
-}
-
 func (tm *taskRuntime) Write(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
 	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
 		return target.Write(ctx, normalized)
@@ -106,24 +57,16 @@ func (tm *taskRuntime) Cancel(ctx context.Context, ref session.SessionRef, req t
 	})
 }
 
-func minDuration(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func taskSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot) tool.Result {
 	return taskSnapshotToolResultWithPayload(call, def, snapshot, taskToolPayload(snapshot))
 }
 
-func taskControlSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot, action string, waitUntilDone bool, timedOut bool, actualWaitMS int) tool.Result {
+func taskControlSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot, action string, actualWaitMS int) tool.Result {
 	if strings.EqualFold(strings.TrimSpace(action), "cancel") {
 		return taskSnapshotToolResultWithPayload(call, def, snapshot, taskCancelToolPayload(snapshot))
 	}
 	payload := taskToolPayload(snapshot)
 	if strings.EqualFold(strings.TrimSpace(action), "wait") {
-		applyWaitUntilDonePayloadHints(payload, waitUntilDone, timedOut, snapshot)
 		payload["actual_wait_time_ms"] = actualWaitMS
 	}
 	return taskSnapshotToolResultWithPayload(call, def, snapshot, payload)
@@ -134,12 +77,11 @@ type taskBatchControlItem struct {
 	Snapshot     taskapi.Snapshot
 	Err          error
 	OK           bool
-	TimedOut     bool
 	ActualWaitMS int
 }
 
-func taskBatchControlToolResult(call tool.Call, def tool.Definition, items []taskBatchControlItem, action string, waitUntilDone bool, actualWaitMS int) tool.Result {
-	payload := taskBatchControlPayload(items, action, waitUntilDone, actualWaitMS)
+func taskBatchControlToolResult(call tool.Call, def tool.Definition, items []taskBatchControlItem, action string, actualWaitMS int) tool.Result {
+	payload := taskBatchControlPayload(items, action, actualWaitMS)
 	raw, _ := json.Marshal(payload)
 	return tool.Result{
 		ID:      strings.TrimSpace(call.ID),
@@ -163,7 +105,7 @@ func taskSnapshotToolResultWithPayload(call tool.Call, def tool.Definition, snap
 	}
 }
 
-func taskBatchControlPayload(items []taskBatchControlItem, action string, waitUntilDone bool, actualWaitMS int) map[string]any {
+func taskBatchControlPayload(items []taskBatchControlItem, action string, actualWaitMS int) map[string]any {
 	tasks := make([]any, 0, len(items))
 	normalizedAction := strings.ToLower(strings.TrimSpace(action))
 	for _, item := range items {
@@ -184,7 +126,6 @@ func taskBatchControlPayload(items []taskBatchControlItem, action string, waitUn
 		} else {
 			payload = taskToolPayload(item.Snapshot)
 			if strings.EqualFold(strings.TrimSpace(action), "wait") {
-				applyWaitUntilDonePayloadHints(payload, waitUntilDone, item.TimedOut, item.Snapshot)
 				payload["actual_wait_time_ms"] = item.ActualWaitMS
 			}
 		}
@@ -200,16 +141,6 @@ func taskBatchControlPayload(items []taskBatchControlItem, action string, waitUn
 		out["actual_wait_time_ms"] = actualWaitMS
 	}
 	return out
-}
-
-func applyWaitUntilDonePayloadHints(payload map[string]any, waitUntilDone bool, timedOut bool, snapshot taskapi.Snapshot) {
-	if payload == nil || !waitUntilDone {
-		return
-	}
-	if timedOut && snapshot.Running {
-		payload["wait_timed_out"] = true
-		payload["still_running"] = true
-	}
 }
 
 func taskBatchHasError(items []taskBatchControlItem) bool {
