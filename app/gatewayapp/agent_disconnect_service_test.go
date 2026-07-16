@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 )
@@ -42,6 +43,10 @@ func TestDisconnectACPPreservesSharedConnectionAndRetainsInstallation(t *testing
 			{ConnectionID: connection.ID, SelectedModelID: "sonnet"},
 		},
 	}
+	doc.Delegation = controldelegation.Configuration{Bindings: []controldelegation.Binding{
+		{Profile: controldelegation.ProfileBreeze, Target: controldelegation.TargetAgent, AgentID: "opus"},
+		{Profile: controldelegation.ProfileOrbit, Target: controldelegation.TargetAgent, AgentID: "sonnet"},
+	}}
 	if err := stack.store.Save(doc); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -67,6 +72,12 @@ func TestDisconnectACPPreservesSharedConnectionAndRetainsInstallation(t *testing
 	if _, ok := controlagents.LookupConnection(doc.AgentRoster, connection.ID); !ok || len(doc.AgentRoster.Discoveries) != 1 || doc.AgentRoster.Discoveries[0].SelectedModelID != "sonnet" {
 		t.Fatalf("roster after first disconnect = %#v", doc.AgentRoster)
 	}
+	if binding, _ := controldelegation.LookupBinding(doc.Delegation, controldelegation.ProfileBreeze); binding.Target != controldelegation.TargetSelf {
+		t.Fatalf("Breeze binding after first disconnect = %#v, want self", binding)
+	}
+	if binding, _ := controldelegation.LookupBinding(doc.Delegation, controldelegation.ProfileOrbit); binding.Target != controldelegation.TargetAgent || binding.AgentID != "sonnet" {
+		t.Fatalf("Orbit binding after first disconnect = %#v, want sonnet", binding)
+	}
 
 	last, err := stack.DisconnectACP(context.Background(), "sonnet")
 	if err != nil {
@@ -81,6 +92,9 @@ func TestDisconnectACPPreservesSharedConnectionAndRetainsInstallation(t *testing
 	}
 	if len(doc.AgentRoster.Agents) != 0 || len(doc.AgentRoster.Connections) != 0 || len(doc.AgentRoster.Discoveries) != 0 {
 		t.Fatalf("final roster = %#v, want connection-owned state removed", doc.AgentRoster)
+	}
+	if binding, _ := controldelegation.LookupBinding(doc.Delegation, controldelegation.ProfileOrbit); binding.Target != controldelegation.TargetSelf {
+		t.Fatalf("Orbit binding after final disconnect = %#v, want self", binding)
 	}
 	if _, err := os.Stat(installed); err != nil {
 		t.Fatalf("disconnect removed managed adapter installation %q: %v", installed, err)
@@ -101,6 +115,9 @@ func TestDisconnectACPRollsBackPersistedRosterWhenAssemblyRefreshFails(t *testin
 		}},
 		Discoveries: []controlagents.DiscoverySnapshot{{ConnectionID: connection.ID, SelectedModelID: "opus"}},
 	}
+	doc.Delegation = controldelegation.Configuration{Bindings: []controldelegation.Binding{{
+		Profile: controldelegation.ProfileZenith, Target: controldelegation.TargetAgent, AgentID: "opus",
+	}}}
 	if err := stack.store.Save(doc); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -129,6 +146,9 @@ func TestDisconnectACPRollsBackPersistedRosterWhenAssemblyRefreshFails(t *testin
 	}
 	if _, ok := controlagents.LookupConnection(doc.AgentRoster, connection.ID); !ok || len(doc.AgentRoster.Discoveries) != 1 {
 		t.Fatalf("rollback did not restore connection state: %#v", doc.AgentRoster)
+	}
+	if binding, _ := controldelegation.LookupBinding(doc.Delegation, controldelegation.ProfileZenith); binding.Target != controldelegation.TargetAgent || binding.AgentID != "opus" {
+		t.Fatalf("rollback did not restore Zenith binding: %#v", binding)
 	}
 }
 

@@ -179,6 +179,7 @@ func (m *Model) commandCompletionDetail(command string) string {
 func DefaultWizards() []WizardDef {
 	return []WizardDef{
 		connectWizard(),
+		subagentWizard(),
 	}
 }
 

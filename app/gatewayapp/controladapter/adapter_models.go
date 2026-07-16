@@ -13,6 +13,16 @@ func (d *Adapter) Connect(ctx context.Context, cfg ConnectConfig) (StatusSnapsho
 	if d == nil || d.stack == nil {
 		return StatusSnapshot{}, missingRuntimeDependency("stack")
 	}
+	previousDefault := ""
+	if d.stack.Model.DefaultAliasFn != nil {
+		previousDefault = strings.TrimSpace(d.stack.Model.DefaultAliasFn())
+	} else {
+		d.mu.Lock()
+		previousDefault = strings.TrimSpace(d.defaultModelText)
+		d.mu.Unlock()
+	}
+	hadConfiguredModel := previousDefault != ""
+
 	assembled, err := modelconfig.AssembleConnect(ctx, modelconfig.ConnectRequest{
 		Provider:                       cfg.Provider,
 		EndpointID:                     cfg.EndpointID,
@@ -41,7 +51,7 @@ func (d *Adapter) Connect(ctx context.Context, cfg ConnectConfig) (StatusSnapsho
 		return StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: connect returned no model aliases")
 	}
 	alias := aliases[0]
-	if activeSession, ok := d.currentSession(); ok && alias != "" {
+	if activeSession, ok := d.currentSession(); ok && alias != "" && !hadConfiguredModel {
 		if d.stack.Model.UseFn == nil {
 			return StatusSnapshot{}, missingRuntimeDependency("use model")
 		}
@@ -50,9 +60,11 @@ func (d *Adapter) Connect(ctx context.Context, cfg ConnectConfig) (StatusSnapsho
 		}
 	}
 	d.mu.Lock()
-	if alias != "" {
+	if alias != "" && !hadConfiguredModel {
 		d.defaultModelText = alias
 		d.modelText = alias
+	} else if d.stack.Model.DefaultAliasFn != nil {
+		d.defaultModelText = strings.TrimSpace(d.stack.Model.DefaultAliasFn())
 	}
 	d.mu.Unlock()
 	return d.Status(ctx)

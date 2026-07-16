@@ -180,7 +180,7 @@ func (r Router) dispatchModel(ctx context.Context, args string) (prompt.Result, 
 			if activeACP {
 				return r.noticeResult("usage: /model use <model> [effort]"), nil
 			}
-			return r.noticeResult("usage: /model use <alias>"), nil
+			return r.noticeResult("usage: /model use <alias> [effort]"), nil
 		}
 		status, err := r.service.UseModel(ctx, alias, reasoning)
 		if err != nil {
@@ -214,7 +214,7 @@ func (r Router) dispatchModel(ctx context.Context, args string) (prompt.Result, 
 		if activeACP {
 			return r.noticeResult("usage: /model use <model> [effort]"), nil
 		}
-		return r.noticeResult("usage: /model use|del <alias>"), nil
+		return r.noticeResult("usage: /model use <alias> [effort] | del <alias>"), nil
 	}
 }
 

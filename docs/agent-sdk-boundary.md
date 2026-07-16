@@ -140,6 +140,15 @@ persisted, but temporary Session IDs are not. Every real or resumed ACP Session
 revalidates and applies those defaults before its first prompt; stale choices
 fail closed.
 
+Interactive model-provider credentials are Control-owned. Persisted model
+profiles contain only an opaque credential reference; provider SDK adapters
+receive an authenticated HTTP client assembled by the product host. The Codex
+OAuth provider follows this path with one account and a fixed ChatGPT endpoint,
+so it can back the primary/controller Agent like any built-in model provider.
+It is not represented as an ACP child-Agent connection. Encrypted provider
+reasoning needed for stateless Responses continuation remains canonical SDK
+replay metadata and survives Session reconstruction.
+
 Caelis-managed npm adapters use an isolated immutable directory per adapter
 version. Installation writes only to a unique staging directory, validates the
 curated package, adapter entrypoint, and required platform runtime, then
@@ -155,9 +164,21 @@ never uninstalls the external or Caelis-managed adapter, never deletes prior
 Sessions, and is rejected while a Turn is active or while the selected Agent
 controls the current task.
 
-The same roster supplies direct slash dispatch, model-visible Spawn choices,
-and Control-authorized handoff targets. This avoids separate Side, Spawn, and
-profile identity catalogs. Presentation command resolution is deterministic:
+The same roster supplies direct slash dispatch, delegation binding targets,
+and Control-authorized handoff targets. Model-visible Spawn exposes only the
+fixed capability profiles `self`, `breeze`, `orbit`, and `zenith`; it never
+expands every connected Agent or model ID into the tool schema. `self` and an
+unbound profile inherit the current Session model and effective reasoning
+effort. `/subagent` binds Breeze, Orbit, or Zenith to one roster Agent and may
+override effort only for model-backed Agents; external ACP Agents retain their
+own defaults. Removing a roster Agent atomically drops its profile bindings, so
+those profiles inherit `self` without a separate Surface reset step. Control
+resolves the profile to a concrete Agent/model/effort
+placement before writing the durable Spawn intent and persists that placement
+and its fingerprint with the task, so later configuration changes cannot alter
+recovery. This is a projection over the one roster, not a second Agent catalog.
+
+Presentation command resolution is deterministic:
 core command, registered Agent, addressable direct Agent run, then a slash
 command advertised by the active remote ACP controller. Unknown slash input
 fails closed instead of becoming an ordinary model prompt.

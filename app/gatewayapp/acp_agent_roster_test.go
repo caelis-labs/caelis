@@ -75,7 +75,7 @@ func TestPluginAgentCollisionFailsClosed(t *testing.T) {
 func TestAgentRosterRejectsProductAndSystemNames(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"status", "reviewer", "guardian", "self", "local", "main", "kernel", "sandbox", "worker(lina)", "bad name"} {
+	for _, name := range []string{"status", "reviewer", "guardian", "self", "breeze", "orbit", "zenith", "local", "main", "kernel", "sandbox", "worker(lina)", "bad name"} {
 		t.Run(name, func(t *testing.T) {
 			store := newAppConfigStore(t.TempDir())
 			err := store.Save(AppConfig{AgentRoster: controlagents.Configuration{

@@ -66,6 +66,8 @@ type OverlayState struct {
 	slashArgLoadLabel        string
 	slashArgLoadStartedAt    time.Time
 	slashArgLoadBytes        int64
+	slashArgLoadAuthURL      string
+	slashArgLoadAuthCode     string
 	slashArgLoadCancel       context.CancelFunc
 	slashArgLoaded           bool
 	slashArgLoadedCommand    string

@@ -357,6 +357,9 @@ func modelConfigMissingAPIKey(cfg ModelConfig) bool {
 	if strings.TrimSpace(cfg.Token) != "" {
 		return false
 	}
+	if strings.TrimSpace(cfg.CredentialRef) != "" {
+		return false
+	}
 	if env := strings.TrimSpace(cfg.TokenEnv); env != "" {
 		return strings.TrimSpace(os.Getenv(env)) == ""
 	}
@@ -365,6 +368,8 @@ func modelConfigMissingAPIKey(cfg ModelConfig) bool {
 
 func modelConfigTokenSource(cfg ModelConfig) string {
 	switch {
+	case strings.TrimSpace(cfg.CredentialRef) != "":
+		return "credential:" + strings.TrimSpace(cfg.CredentialRef)
 	case strings.TrimSpace(cfg.TokenEnv) != "":
 		return "env:" + strings.TrimSpace(cfg.TokenEnv)
 	case strings.TrimSpace(cfg.Token) != "":

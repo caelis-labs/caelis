@@ -76,6 +76,7 @@ type subagentTask struct {
 	anchor     delegation.Anchor
 	runner     subagent.Runner
 	agent      string
+	target     delegation.Target
 	handle     string
 	title      string
 	prompt     string

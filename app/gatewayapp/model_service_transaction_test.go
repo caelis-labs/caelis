@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
@@ -53,8 +54,9 @@ func TestConnectRollsBackLookupRuntimeAndStoreWhenAgentRefreshFails(t *testing.T
 	}
 }
 
-func TestConnectModelsPersistsBatchAtomicallyAndKeepsFirstDefault(t *testing.T) {
+func TestConnectModelsPersistsBatchAtomicallyAndKeepsExistingDefault(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
+	originalDefaultID := stack.lookup.DefaultID()
 	modelIDs, err := stack.ConnectModels([]ModelConfig{
 		{Provider: "ollama", API: providers.APIOllama, Model: "batch-first"},
 		{Provider: "ollama", API: providers.APIOllama, Model: "batch-second"},
@@ -62,7 +64,7 @@ func TestConnectModelsPersistsBatchAtomicallyAndKeepsFirstDefault(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ConnectModels() error = %v", err)
 	}
-	if len(modelIDs) != 2 || stack.lookup.DefaultID() != modelIDs[0] || stack.runtime.Model.ID != modelIDs[0] {
+	if len(modelIDs) != 2 || stack.lookup.DefaultID() != originalDefaultID || stack.runtime.Model.ID != originalDefaultID {
 		t.Fatalf("batch ids/default/runtime = %#v/%q/%q", modelIDs, stack.lookup.DefaultID(), stack.runtime.Model.ID)
 	}
 	doc, err := stack.store.Load()
@@ -73,7 +75,7 @@ func TestConnectModelsPersistsBatchAtomicallyAndKeepsFirstDefault(t *testing.T) 
 	for _, cfg := range doc.Models.Configs {
 		found[cfg.Model] = true
 	}
-	if !found["batch-first"] || !found["batch-second"] || doc.Models.DefaultID != modelIDs[0] {
+	if !found["batch-first"] || !found["batch-second"] || doc.Models.DefaultID != originalDefaultID {
 		t.Fatalf("persisted batch = models:%#v default:%q", found, doc.Models.DefaultID)
 	}
 	rosterModels := map[string]bool{}
@@ -98,12 +100,41 @@ func TestConnectModelsPersistsBatchAtomicallyAndKeepsFirstDefault(t *testing.T) 
 	}
 }
 
+func TestConnectModelsSelectsFirstModelWhenNoModelExists(t *testing.T) {
+	stack, err := newGatewayAppTestStack(t, Config{
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+
+	modelIDs, err := stack.ConnectModels([]ModelConfig{
+		{Provider: "ollama", API: providers.APIOllama, Model: "first"},
+		{Provider: "ollama", API: providers.APIOllama, Model: "second"},
+	})
+	if err != nil {
+		t.Fatalf("ConnectModels() error = %v", err)
+	}
+	if len(modelIDs) != 2 || stack.lookup.DefaultID() != modelIDs[0] || stack.runtime.Model.ID != modelIDs[0] {
+		t.Fatalf("batch ids/default/runtime = %#v/%q/%q, want first model active", modelIDs, stack.lookup.DefaultID(), stack.runtime.Model.ID)
+	}
+}
+
 func TestDeleteModelAtomicallyRemovesModelBackedAgent(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
 	modelID, err := stack.Connect(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "delete-agent-model"})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
+	}
+	agentID := modelBackedAgentIDForTest(t, stack, modelID)
+	if _, err := stack.Delegation().BindDelegation(ctx, controldelegation.BindRequest{
+		Profile: controldelegation.ProfileZenith, AgentID: agentID, ReasoningEffort: "high",
+	}); err != nil {
+		t.Fatalf("BindDelegation() error = %v", err)
 	}
 	if err := stack.DeleteModel(ctx, activeSession.SessionRef, modelID); err != nil {
 		t.Fatalf("DeleteModel() error = %v", err)
@@ -119,6 +150,9 @@ func TestDeleteModelAtomicallyRemovesModelBackedAgent(t *testing.T) {
 	}
 	if stack.lookup.HasAlias(modelID) {
 		t.Fatalf("deleted model %q remains in lookup", modelID)
+	}
+	if binding, ok := controldelegation.LookupBinding(doc.Delegation, controldelegation.ProfileZenith); !ok || binding.Target != controldelegation.TargetSelf {
+		t.Fatalf("Zenith binding after model deletion = %#v, ok=%v, want self", binding, ok)
 	}
 }
 
@@ -169,6 +203,12 @@ func TestDeleteModelRestoresModelBackedAgentWhenRefreshFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
+	agentID := modelBackedAgentIDForTest(t, stack, modelID)
+	if _, err := stack.Delegation().BindDelegation(ctx, controldelegation.BindRequest{
+		Profile: controldelegation.ProfileZenith, AgentID: agentID,
+	}); err != nil {
+		t.Fatalf("BindDelegation() error = %v", err)
+	}
 	wantErr := errors.New("refresh failed")
 	stack.refreshConfiguredAgentsHook = func() error { return wantErr }
 	if err := stack.DeleteModel(ctx, activeSession.SessionRef, modelID); !errors.Is(err, wantErr) {
@@ -188,6 +228,24 @@ func TestDeleteModelRestoresModelBackedAgentWhenRefreshFails(t *testing.T) {
 	if !found {
 		t.Fatalf("rollback did not restore roster Agent for %q: %#v", modelID, doc.AgentRoster.Agents)
 	}
+	if binding, ok := controldelegation.LookupBinding(doc.Delegation, controldelegation.ProfileZenith); !ok || binding.Target != controldelegation.TargetAgent || binding.AgentID != agentID {
+		t.Fatalf("rollback did not restore Zenith binding = %#v, ok=%v", binding, ok)
+	}
+}
+
+func modelBackedAgentIDForTest(t *testing.T, stack *Stack, modelID string) string {
+	t.Helper()
+	doc, err := stack.store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	for _, agent := range controlagents.ListAgents(doc.AgentRoster) {
+		if agent.Backing.ModelAlias == modelID {
+			return agent.ID
+		}
+	}
+	t.Fatalf("model-backed Agent missing for %q", modelID)
+	return ""
 }
 
 func TestUseModelRollsBackConfigWhenSessionStateUpdateFails(t *testing.T) {

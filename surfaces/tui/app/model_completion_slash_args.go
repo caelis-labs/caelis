@@ -9,6 +9,8 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
 )
 
 type slashArgLoadResultMsg struct {
@@ -232,6 +234,8 @@ func (m *Model) beginSlashArgLoad() tea.Cmd {
 	m.slashArgLoadLabel = slashArgLoadLabel(command)
 	m.slashArgLoadStartedAt = time.Now()
 	m.slashArgLoadBytes = 0
+	m.slashArgLoadAuthURL = ""
+	m.slashArgLoadAuthCode = ""
 	m.slashArgCandidates = nil
 	m.slashArgLoaded = false
 	m.slashArgLoadedCommand = ""
@@ -243,6 +247,9 @@ func (m *Model) beginSlashArgLoad() tea.Cmd {
 	if sender := m.cfg.ProgramSender; sender != nil {
 		requestCtx = controlagents.WithSetupProgress(requestCtx, func(progress controlagents.SetupProgress) {
 			sender.SendMsg(acpSetupProgressMsg{seq: seq, progress: progress})
+		})
+		requestCtx = modelconfig.WithAuthProgress(requestCtx, func(progress modelconfig.AuthProgress) {
+			sender.SendMsg(modelAuthProgressMsg{seq: seq, progress: progress})
 		})
 	}
 	m.slashArgLoadCancel = cancel
@@ -264,6 +271,8 @@ func (m *Model) handleSlashArgLoadResult(msg slashArgLoadResultMsg) tea.Cmd {
 	m.slashArgLoadLabel = ""
 	m.slashArgLoadStartedAt = time.Time{}
 	m.slashArgLoadBytes = 0
+	m.slashArgLoadAuthURL = ""
+	m.slashArgLoadAuthCode = ""
 	if !m.turnRunning() {
 		m.stopRunningAnimation()
 	}
@@ -274,7 +283,7 @@ func (m *Model) handleSlashArgLoadResult(msg slashArgLoadResultMsg) tea.Cmd {
 	}
 	m.applySlashArgCandidates(msg.command, msg.query, msg.candidates, msg.err)
 	if msg.err != nil {
-		return m.showHint(fmt.Sprintf("ACP Agent setup failed: %v", msg.err), hintOptions{
+		return m.showHint(fmt.Sprintf("%s: %v", slashArgLoadFailureLabel(msg.command), msg.err), hintOptions{
 			priority: HintPriorityHigh, clearOnMessage: true, clearAfter: systemHintDuration,
 		})
 	}
@@ -363,10 +372,26 @@ func asyncSlashArgCatalogKey(command string) string {
 
 func isAsyncSlashArgCommand(command string) bool {
 	command = strings.TrimSpace(command)
-	return strings.HasPrefix(command, "connect-acp-model:") || strings.HasPrefix(command, "connect-acp-config:")
+	if strings.HasPrefix(command, "connect-acp-model:") || strings.HasPrefix(command, "connect-acp-config:") {
+		return true
+	}
+	if !strings.HasPrefix(command, "connect-model:") {
+		return false
+	}
+	payload := connectwizard.ParseConnectWizardStatePayload(strings.TrimPrefix(command, "connect-model:"))
+	template, ok := modelconfig.LookupProvider(payload.Provider)
+	return ok && template.AuthFlow != ""
 }
 
 func slashArgLoadLabel(command string) string {
+	if strings.HasPrefix(strings.TrimSpace(command), "connect-model:") {
+		payload := connectwizard.ParseConnectWizardStatePayload(strings.TrimPrefix(strings.TrimSpace(command), "connect-model:"))
+		provider := strings.TrimSpace(payload.Provider)
+		if provider == "" {
+			provider = "model provider"
+		}
+		return "Starting " + provider + " sign-in"
+	}
 	prefix := "Preparing local ACP Agent"
 	raw := ""
 	switch {
@@ -384,6 +409,20 @@ func slashArgLoadLabel(command string) string {
 		return "Loading " + name + " model options"
 	}
 	return prefix
+}
+
+func slashArgLoadFailureLabel(command string) string {
+	if strings.HasPrefix(strings.TrimSpace(command), "connect-model:") {
+		return "Model provider sign-in failed"
+	}
+	return "ACP Agent setup failed"
+}
+
+func slashArgLoadCancelLabel(command string) string {
+	if strings.HasPrefix(strings.TrimSpace(command), "connect-model:") {
+		return "Model provider sign-in canceled."
+	}
+	return "ACP Agent setup canceled; no incomplete installation was activated."
 }
 
 func acpSetupAdapterDisplayName(adapterID string) string {
@@ -653,10 +692,11 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	}
 	if m.slashArgLoadPending {
 		if key.Matches(msg, m.keys.Back) {
+			command := m.slashArgCommand
 			m.setInputText("")
 			m.syncTextareaFromInput()
 			m.clearSlashArg()
-			return true, m.showHint("ACP Agent setup canceled; no incomplete installation was activated.", hintOptions{
+			return true, m.showHint(slashArgLoadCancelLabel(command), hintOptions{
 				priority: HintPriorityNormal, clearAfter: systemHintDuration,
 			})
 		}

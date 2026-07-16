@@ -84,6 +84,9 @@ func (m *Model) primaryDrawerHeight() int {
 }
 
 func (m *Model) renderPrimaryDrawer() string {
+	if drawer := m.renderModelAuthDrawer(); drawer != "" {
+		return drawer
+	}
 	if drawer := m.renderBTWDrawer(); drawer != "" {
 		return drawer
 	}

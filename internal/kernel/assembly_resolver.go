@@ -81,8 +81,10 @@ type AssemblyResolver struct {
 type ToolAugmenter func(context.Context, ToolAugmentContext) (ToolAugmentation, error)
 
 type ToolAugmentContext struct {
-	SessionRef session.SessionRef
-	State      map[string]any
+	SessionRef               session.SessionRef
+	State                    map[string]any
+	EffectiveModelRef        string
+	EffectiveReasoningEffort string
 }
 
 type ToolAugmentation struct {
@@ -148,7 +150,7 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 	if err != nil {
 		return ResolvedTurn{}, err
 	}
-	spec, err := resolveAgentSpecWith(ctx, snap, intent, state, modelResolution)
+	spec, err := resolveAgentSpecWith(ctx, snap, intent, state, alias, modelResolution)
 	if err != nil {
 		return ResolvedTurn{}, err
 	}
@@ -171,7 +173,7 @@ func (r *AssemblyResolver) ResolveControllerTurn(ctx context.Context, intent Tur
 	if key := unsupportedLegacyStateKey(state); key != "" {
 		return ResolvedTurn{}, fmt.Errorf("gateway: %w: session state contains legacy key %q", session.ErrUnsupportedLegacyFormat, key)
 	}
-	spec, err := resolveAgentSpecWith(ctx, r.snapshot(), intent, state, ModelResolution{})
+	spec, err := resolveAgentSpecWith(ctx, r.snapshot(), intent, state, "", ModelResolution{})
 	if err != nil {
 		return ResolvedTurn{}, err
 	}
@@ -297,7 +299,7 @@ func (r *AssemblyResolver) resolveMetadata(intent TurnIntent, state map[string]a
 	return resolveMetadataWith(snap.baseMetadata, snap.assembly, intent, state, model)
 }
 
-func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, intent TurnIntent, state map[string]any, modelResolution ModelResolution) (agent.AgentSpec, error) {
+func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, intent TurnIntent, state map[string]any, modelRef string, modelResolution ModelResolution) (agent.AgentSpec, error) {
 	metadata, err := resolveMetadataWith(snap.baseMetadata, snap.assembly, intent, state, modelResolution)
 	if err != nil {
 		return agent.AgentSpec{}, err
@@ -305,8 +307,10 @@ func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, in
 	tools := append([]tool.Tool(nil), snap.tools...)
 	if snap.toolAugmenter != nil {
 		augmentation, err := snap.toolAugmenter(ctx, ToolAugmentContext{
-			SessionRef: intent.SessionRef,
-			State:      cloneMap(state),
+			SessionRef:               intent.SessionRef,
+			State:                    cloneMap(state),
+			EffectiveModelRef:        strings.TrimSpace(modelRef),
+			EffectiveReasoningEffort: stringMetadata(metadata, "reasoning_effort"),
 		})
 		if err != nil {
 			return agent.AgentSpec{}, err

@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
@@ -20,24 +21,24 @@ type agentRosterServices interface {
 	controlagents.Disconnector
 }
 
-func dispatchSlashCommand(service control.Service, agents agentRosterServices, sender *ProgramSender, text string) TaskResultMsg {
-	return dispatchSlashCommandWithContext(context.Background(), service, agents, sender, text, nil)
+func dispatchSlashCommand(service ControlServices, sender *ProgramSender, text string) TaskResultMsg {
+	return dispatchSlashCommandWithContext(context.Background(), service, sender, text, nil)
 }
 
-func dispatchSlashCommandWithContext(ctx context.Context, service control.Service, agents agentRosterServices, sender *ProgramSender, text string, attachments []Attachment) TaskResultMsg {
-	return dispatchSlashCommandWithContextResult(ctx, service, agents, sender, text, attachments).completion
+func dispatchSlashCommandWithContext(ctx context.Context, service ControlServices, sender *ProgramSender, text string, attachments []Attachment) TaskResultMsg {
+	return dispatchSlashCommandWithContextResult(ctx, service, sender, text, attachments).completion
 }
 
-func dispatchSlashCommandWithContextResult(ctx context.Context, service control.Service, agents agentRosterServices, sender *ProgramSender, text string, attachments []Attachment) executeLineResult {
+func dispatchSlashCommandWithContextResult(ctx context.Context, service ControlServices, sender *ProgramSender, text string, attachments []Attachment) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
 	}
 	cmd, args, _, _ := controlprompt.ParseSlash(text)
-	return dispatchTUIPrivateSlashCommandWithContext(ctx, service, agents, sender, cmd, args)
+	return dispatchTUIPrivateSlashCommandWithContext(ctx, service, sender, cmd, args)
 }
 
-func dispatchTUIPrivateSlashCommandWithContext(ctx context.Context, service control.Service, agents agentRosterServices, sender *ProgramSender, cmd string, args string) executeLineResult {
+func dispatchTUIPrivateSlashCommandWithContext(ctx context.Context, service ControlServices, sender *ProgramSender, cmd string, args string) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -48,7 +49,9 @@ func dispatchTUIPrivateSlashCommandWithContext(ctx context.Context, service cont
 	case "plugin":
 		return executeLineResult{completion: slashPluginWithContext(ctx, service, send, args)}
 	case "connect":
-		return executeLineResult{completion: slashConnectWithContext(ctx, service, agents, send, args)}
+		return executeLineResult{completion: slashConnectWithContext(ctx, service, service, send, args)}
+	case "subagent":
+		return executeLineResult{completion: slashSubagentWithContext(ctx, service, send, args)}
 	case "exit", "quit":
 		return executeLineResult{completion: TaskResultMsg{ExitNow: true}}
 	default:
@@ -57,7 +60,7 @@ func dispatchTUIPrivateSlashCommandWithContext(ctx context.Context, service cont
 	}
 }
 
-func executeTUIPrivateSlashCommandWithContext(ctx context.Context, service control.Service, agents agentRosterServices, sender *ProgramSender, cmd string, args string) (executeLineResult, bool) {
+func executeTUIPrivateSlashCommandWithContext(ctx context.Context, service ControlServices, sender *ProgramSender, cmd string, args string) (executeLineResult, bool) {
 	cmd = strings.ToLower(strings.TrimSpace(cmd))
 	if cmd == "" {
 		return executeLineResult{}, false
@@ -70,7 +73,7 @@ func executeTUIPrivateSlashCommandWithContext(ctx context.Context, service contr
 			return executeLineResult{}, false
 		}
 	}
-	return dispatchTUIPrivateSlashCommandWithContext(ctx, service, agents, sender, cmd, args), true
+	return dispatchTUIPrivateSlashCommandWithContext(ctx, service, sender, cmd, args), true
 }
 
 func isCoreLocalSlashCommand(cmd string) bool {
@@ -182,8 +185,38 @@ func slashConnectWithContext(ctx context.Context, service control.Service, agent
 	if err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("connect", err)}
 	}
-	sendNotice(send, fmt.Sprintf("connected: %s", status.ModelStatus.Display))
+	aliases := connectedModelAliases(cfg)
+	connected := strings.Join(aliases, ", ")
+	if connected == "" {
+		connected = strings.TrimSpace(cfg.Model)
+	}
+	sendNotice(send, fmt.Sprintf(
+		"connected: %s\nnext: /model use <model> [effort] switches the active model or reasoning effort",
+		connected,
+	))
 	sendStatusUpdate(send, status)
 	refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
 	return TaskResultMsg{SuppressTurnDivider: true}
+}
+
+func connectedModelAliases(cfg control.ConnectConfig) []string {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if template, ok := modelconfig.LookupProvider(provider); ok {
+		provider = template.Provider
+	}
+	models := strings.Split(cfg.Model, ",")
+	aliases := make([]string, 0, len(models))
+	seen := map[string]struct{}{}
+	for _, name := range models {
+		alias := modelconfig.BuildAlias(provider, name)
+		if alias == "" {
+			continue
+		}
+		if _, ok := seen[alias]; ok {
+			continue
+		}
+		seen[alias] = struct{}{}
+		aliases = append(aliases, alias)
+	}
+	return aliases
 }

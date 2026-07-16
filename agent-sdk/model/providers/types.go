@@ -26,6 +26,9 @@ const (
 	APIOllama              = model.APIOllama
 )
 
+// APIOpenAICodex selects the ChatGPT Codex Responses wire adapter.
+const APIOpenAICodex = model.APIOpenAICodex
+
 // AuthType defines model provider authentication strategy.
 type AuthType = model.AuthType
 

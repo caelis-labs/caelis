@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
@@ -48,8 +49,10 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 			})
 		case spawn.ToolName:
 			hasSpawn = true
+			resolver, _ := one.(spawn.Resolver)
 			out = append(out, runtimeSpawnTool{
 				base:         one,
+				resolver:     resolver,
 				session:      session.CloneSession(activeSession),
 				sessionRef:   session.NormalizeSessionRef(ref),
 				tasks:        r.tasks,
@@ -209,6 +212,7 @@ func commandStartDiagnosticToolResult(call tool.Call, def tool.Definition, comma
 
 type runtimeSpawnTool struct {
 	base         tool.Tool
+	resolver     spawn.Resolver
 	session      session.Session
 	sessionRef   session.SessionRef
 	tasks        *taskRuntime
@@ -237,14 +241,24 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	if !ok || strings.TrimSpace(prompt) == "" {
 		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "prompt")
 	}
-	agent, _ := stringArg(args, "agent")
-	agent, err = resolveRuntimeSpawnToolAgent(t.base.Definition(), t.session, agent)
+	requested, _ := stringArg(args, "agent")
+	requested, err = resolveRuntimeSpawnToolAgent(t.base.Definition(), t.session, requested)
 	if err != nil {
 		return tool.Result{}, err
 	}
-	snapshot, err := t.tasks.StartSubagent(ctx, t.session, t.sessionRef, t.runner, taskapi.SubagentStartRequest{
+	resolver := t.resolver
+	if resolver == nil {
+		resolver, _ = t.base.(spawn.Resolver)
+	}
+	if resolver == nil {
+		return tool.Result{}, fmt.Errorf("agent-sdk/runtime: Spawn tool does not implement spawn.Resolver")
+	}
+	target, err := resolver.ResolveTarget(requested)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	snapshot, err := t.tasks.StartSubagentTarget(ctx, t.session, t.sessionRef, t.runner, delegation.NormalizeTarget(target), taskapi.SubagentStartRequest{
 		SpawnID:      strings.TrimSpace(call.ID),
-		Agent:        strings.TrimSpace(agent),
 		Prompt:       strings.TrimSpace(prompt),
 		ParentCall:   strings.TrimSpace(call.ID),
 		Role:         session.ParticipantRoleDelegated,

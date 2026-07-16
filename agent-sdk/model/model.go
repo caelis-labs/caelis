@@ -30,6 +30,9 @@ const (
 	APIOllama              APIType = "ollama"
 )
 
+// APIOpenAICodex selects the ChatGPT Codex Responses wire adapter.
+const APIOpenAICodex APIType = "openai_codex"
+
 // AuthType identifies how a model-provider endpoint authenticates.
 type AuthType string
 

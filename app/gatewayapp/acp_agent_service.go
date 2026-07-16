@@ -248,31 +248,7 @@ func (s *Stack) materializeRosterAgent(agent controlagents.Agent, connection con
 		if err != nil {
 			return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: materialize roster agent %q: %w", agent.ID, err)
 		}
-		materialized, err := configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
-			Config: Config{
-				AppName:                   s.AppName,
-				UserID:                    s.UserID,
-				StoreDir:                  s.storeDir,
-				ControlOperationRetention: s.controlOperationRetention,
-				WorkspaceKey:              s.Workspace.Key,
-				WorkspaceCWD:              s.Workspace.CWD,
-				PolicyProfile:             runtimeCfg.PolicyProfile,
-				ContextWindow:             runtimeCfg.ContextWindow,
-				SystemPrompt:              runtimeCfg.SystemPrompt,
-				Model:                     model,
-			},
-			AppName:      s.AppName,
-			UserID:       s.UserID,
-			StoreDir:     s.storeDir,
-			WorkspaceKey: s.Workspace.Key,
-			WorkspaceCWD: s.Workspace.CWD,
-		})
-		if err != nil {
-			return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: materialize roster agent %q: %w", agent.ID, err)
-		}
-		materialized.Name = agent.ID
-		materialized.Description = agent.Name
-		return materialized, nil
+		return s.materializeModelRosterAgent(agent.ID, agent.Name, model, runtimeCfg)
 	}
 	return assembly.AgentConfig{
 		Name:           agent.ID,
@@ -283,6 +259,34 @@ func (s *Stack) materializeRosterAgent(agent controlagents.Agent, connection con
 		WorkDir:        connection.Launcher.WorkDir,
 		SessionOptions: controlagents.NormalizeSessionOptions(agent.Defaults),
 	}, nil
+}
+
+func (s *Stack) materializeModelRosterAgent(name string, description string, model ModelConfig, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
+	materialized, err := configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
+		Config: Config{
+			AppName:                   s.AppName,
+			UserID:                    s.UserID,
+			StoreDir:                  s.storeDir,
+			ControlOperationRetention: s.controlOperationRetention,
+			WorkspaceKey:              s.Workspace.Key,
+			WorkspaceCWD:              s.Workspace.CWD,
+			PolicyProfile:             runtimeCfg.PolicyProfile,
+			ContextWindow:             effectiveDelegationContextWindow(model, runtimeCfg.ContextWindow),
+			SystemPrompt:              runtimeCfg.SystemPrompt,
+			Model:                     model,
+		},
+		AppName:      s.AppName,
+		UserID:       s.UserID,
+		StoreDir:     s.storeDir,
+		WorkspaceKey: s.Workspace.Key,
+		WorkspaceCWD: s.Workspace.CWD,
+	})
+	if err != nil {
+		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: materialize roster agent %q: %w", name, err)
+	}
+	materialized.Name = strings.TrimSpace(name)
+	materialized.Description = strings.TrimSpace(description)
+	return materialized, nil
 }
 
 func (s *Stack) withPluginACPAgents(resolved assembly.ResolvedAssembly, pluginAgents []pluginAgentContribution) (assembly.ResolvedAssembly, error) {

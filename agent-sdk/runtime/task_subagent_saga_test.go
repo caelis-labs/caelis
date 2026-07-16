@@ -119,6 +119,13 @@ type sagaRunner struct {
 	cancelErr   error
 }
 
+type placementSagaRunner struct{ sagaRunner }
+
+func (r *placementSagaRunner) SpawnTarget(_ context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (delegation.Anchor, delegation.Result, error) {
+	r.spawnCalls++
+	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-saga", Agent: req.Target.ExecutionAgent(), AgentID: "child-agent-saga"}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted, Result: "saga result"}, nil
+}
+
 func (r *sagaRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
 	r.spawnCalls++
 	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-saga", Agent: req.Agent, AgentID: "child-agent-saga"}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted, Result: "saga result"}, nil
@@ -830,13 +837,20 @@ func TestSubagentSpawnSagaFileRoundTripWholeObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := &sagaRunner{}
+	runner := &placementSagaRunner{}
 	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: tasks}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
-		SpawnID: "file-roundtrip", Agent: "helper", Prompt: "review", Source: "test", Role: session.ParticipantRoleSidecar,
+	durableTarget := delegation.Target{
+		Selector: "orbit",
+		Placement: delegation.Placement{
+			Kind: delegation.PlacementModel, Model: "provider/model", ReasoningEffort: "high",
+			ConfigFingerprint: "config-v1", Fingerprint: "placement-v1",
+		},
+	}
+	snapshot, err := runtime.tasks.StartSubagentTarget(context.Background(), active, active.SessionRef, runner, durableTarget, taskapi.SubagentStartRequest{
+		SpawnID: "file-roundtrip", Prompt: "review", Source: "test", Role: session.ParticipantRoleSidecar,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -871,6 +885,9 @@ func TestSubagentSpawnSagaFileRoundTripWholeObjects(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotTask, wantTask) {
 		t.Fatalf("reopened task = %#v, want %#v", gotTask, wantTask)
+	}
+	if got := taskSpecTarget(gotTask.Spec, "target"); !reflect.DeepEqual(got, durableTarget) {
+		t.Fatalf("reopened durable target = %#v, want %#v", got, durableTarget)
 	}
 	if !reflect.DeepEqual(gotSession, wantSession) {
 		t.Fatalf("reopened session binding = %#v, want %#v", gotSession, wantSession)

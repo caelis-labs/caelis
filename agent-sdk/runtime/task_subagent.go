@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -520,7 +521,18 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	if entry == nil {
 		return nil
 	}
-	agent := taskSpecString(entry.Spec, "agent")
+	target := taskSpecTarget(entry.Spec, "target")
+	if target.Selector == "" {
+		agent := taskSpecString(entry.Spec, "agent")
+		target = delegation.Target{
+			Selector: agent,
+			Placement: delegation.Placement{
+				Kind:  delegation.PlacementAgent,
+				Agent: firstNonEmpty(taskSpecString(entry.Spec, "target_agent"), agent),
+			},
+		}
+	}
+	target = delegation.NormalizeTarget(target)
 	result := session.CloneState(entry.Result)
 	if len(result) == 0 {
 		if stored, ok := entry.Spec["spawn_result"].(map[string]any); ok {
@@ -537,11 +549,12 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		anchor: delegation.Anchor{
 			TaskID:    strings.TrimSpace(entry.TaskID),
 			SessionID: taskSpecString(entry.Spec, "session_id"),
-			Agent:     agent,
+			Agent:     target.ExecutionAgent(),
 			AgentID:   taskSpecString(entry.Spec, "agent_id"),
 		},
 		runner:    tm.runtime.subagents,
-		agent:     agent,
+		agent:     target.Selector,
+		target:    target,
 		handle:    firstNonEmpty(taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"])),
 		title:     strings.TrimSpace(entry.Title),
 		prompt:    taskSpecString(entry.Spec, "prompt"),
@@ -733,7 +746,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		UpdatedAt:      now,
 		Lease:          taskapi.CloneLease(t.lease),
 		Spec: map[string]any{
-			"agent":                t.agent,
+			"target":               delegation.NormalizeTarget(t.target),
 			"prompt":               t.prompt,
 			"spawn_identity":       taskStringValue(t.metadata["spawn_identity"]),
 			"spawn_request_digest": taskStringValue(t.metadata["spawn_request_digest"]),
@@ -762,6 +775,30 @@ func subagentTaskEntryResult(result map[string]any, running bool) map[string]any
 		mode = taskapi.ResultPersistenceDeferred
 	}
 	return taskapi.SanitizeResultForPersistence(result, mode)
+}
+
+func taskSpecTarget(values map[string]any, key string) delegation.Target {
+	if len(values) == 0 {
+		return delegation.Target{}
+	}
+	switch raw := values[key].(type) {
+	case delegation.Target:
+		return delegation.NormalizeTarget(raw)
+	case *delegation.Target:
+		if raw != nil {
+			return delegation.NormalizeTarget(*raw)
+		}
+		return delegation.Target{}
+	}
+	encoded, err := json.Marshal(values[key])
+	if err != nil {
+		return delegation.Target{}
+	}
+	var target delegation.Target
+	if err := json.Unmarshal(encoded, &target); err != nil {
+		return delegation.Target{}
+	}
+	return delegation.NormalizeTarget(target)
 }
 
 func subagentTurnID(taskID string, seq int64) string {

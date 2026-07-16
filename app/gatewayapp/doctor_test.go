@@ -131,6 +131,17 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 		wantMiss   bool
 	}{
 		{
+			name: "managed credential",
+			cfg: ModelConfig{
+				Provider:      "openai-codex",
+				API:           providers.APIOpenAICodex,
+				Model:         "gpt-5.4",
+				CredentialRef: "codex-oauth",
+			},
+			wantSource: "credential:codex-oauth",
+			wantMiss:   false,
+		},
+		{
 			name: "env token",
 			cfg: ModelConfig{
 				Provider: "deepseek",

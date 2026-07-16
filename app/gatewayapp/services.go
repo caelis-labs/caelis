@@ -2,12 +2,15 @@ package gatewayapp
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
@@ -93,6 +96,45 @@ func (s ModelService) HasAlias(alias string) bool {
 
 func (s ModelService) ListProviderModels(provider string) []string {
 	return s.stack.ListProviderModels(provider)
+}
+
+// Authenticate runs the Control-owned interactive authentication flow for a
+// model provider. Codex credentials stay scoped to this Stack's state root.
+func (s ModelService) Authenticate(ctx context.Context, req modelconfig.AuthenticateRequest) (modelconfig.AuthenticateResult, error) {
+	if s.stack == nil {
+		return modelconfig.AuthenticateResult{}, fmt.Errorf("gatewayapp: stack is unavailable")
+	}
+	template, ok := modelconfig.LookupProvider(req.Provider)
+	if ok && template.AuthFlow == modelconfig.AuthFlowCodexOAuth {
+		if s.stack.codexAuth == nil {
+			return modelconfig.AuthenticateResult{}, fmt.Errorf("gatewayapp: codex authentication is unavailable")
+		}
+		if err := s.stack.codexAuth.EnsureAuthenticated(ctx, codexauth.LoginOptions{
+			HTTPClient:      req.HTTPClient,
+			OpenBrowser:     req.OpenBrowser,
+			CallbackTimeout: req.CallbackTimeout,
+		}); err != nil {
+			return modelconfig.AuthenticateResult{}, err
+		}
+		if req.Purpose != modelconfig.AuthPurposeModelSelection {
+			return modelconfig.AuthenticateResult{}, nil
+		}
+		models, err := s.stack.codexAuth.ListModels(ctx, req.HTTPClient)
+		if err != nil {
+			if ctx != nil && ctx.Err() != nil {
+				return modelconfig.AuthenticateResult{}, ctx.Err()
+			}
+			// Match the official client manager's remote-first/fallback behavior:
+			// authentication remains successful and Control uses its maintained
+			// catalog when the account catalog is temporarily unavailable.
+			return modelconfig.AuthenticateResult{}, nil
+		}
+		return modelconfig.AuthenticateResult{
+			SelectableModels:          models,
+			ModelCatalogAuthoritative: true,
+		}, nil
+	}
+	return modelconfig.AuthenticateProvider(ctx, req)
 }
 
 func (s ModelService) UsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string) (compact.UsageSnapshot, error) {

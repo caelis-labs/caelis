@@ -24,7 +24,8 @@ type ControlPlane struct {
 
 // ControlPlaneConfig configures one shared-registry ACP control plane.
 type ControlPlaneConfig struct {
-	Agents []assembly.AgentConfig
+	Agents            []assembly.AgentConfig
+	PlacementResolver acpsubagent.PlacementResolver
 }
 
 // NewControlPlane constructs controller, subagent runner, and updater instances
@@ -34,7 +35,10 @@ func NewControlPlane(cfg ControlPlaneConfig) (*ControlPlane, error) {
 	if err != nil {
 		return nil, err
 	}
-	runner, err := acpsubagent.NewRunner(acpsubagent.RunnerConfig{Registry: registry})
+	runner, err := acpsubagent.NewRunner(acpsubagent.RunnerConfig{
+		Registry:          registry,
+		PlacementResolver: cfg.PlacementResolver,
+	})
 	if err != nil {
 		return nil, err
 	}

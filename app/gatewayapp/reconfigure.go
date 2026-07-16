@@ -12,10 +12,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -47,6 +50,23 @@ func (s *Stack) saveModelConfigsAndAgentRoster(roster controlagents.Configuratio
 	}
 	doc.Models = s.lookup.Snapshot()
 	doc.AgentRoster = controlagents.NormalizeConfiguration(roster)
+	return s.store.Save(doc)
+}
+
+func (s *Stack) saveModelConfigsAgentRosterAndDelegation(
+	roster controlagents.Configuration,
+	delegation controldelegation.Configuration,
+) error {
+	if s == nil || s.store == nil || s.lookup == nil {
+		return nil
+	}
+	doc, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	doc.Models = s.lookup.Snapshot()
+	doc.AgentRoster = controlagents.NormalizeConfiguration(roster)
+	doc.Delegation = controldelegation.NormalizeConfiguration(delegation)
 	return s.store.Save(doc)
 }
 
@@ -284,7 +304,11 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		TraceSink:                watchdogLifecycle,
 	}
 	var acpControlPlane *acpassembly.ControlPlane
-	localCfg, acpControlPlane, err = injectACPControlPlane(localCfg, runtimeCfg.Assembly)
+	localCfg, acpControlPlane, err = injectACPControlPlane(
+		localCfg,
+		runtimeCfg.Assembly,
+		s.delegationPlacementResolver(runtimeCfg),
+	)
 	if err != nil {
 		bundle.Close()
 		return nil, err
@@ -344,27 +368,22 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		Tools:             tools,
 		BaseMetadata:      cloneMap(effectiveBaseMetadata),
 		ToolAugmenter: func(ctx context.Context, req kernelimpl.ToolAugmentContext) (kernelimpl.ToolAugmentation, error) {
-			s.mu.RLock()
-			runtimeCfg := s.runtime
-			s.mu.RUnlock()
-			var participants []session.ParticipantBinding
-			if strings.TrimSpace(req.SessionRef.SessionID) != "" {
-				session, err := s.Sessions.Session(ctx, req.SessionRef)
-				if err != nil {
-					return kernelimpl.ToolAugmentation{}, err
-				}
-				participants = session.Participants
-			}
-			agents := delegationAgentsForSpawn(runtimeCfg.Assembly, participants)
+			agents := delegationAgentsForSpawn()
 			if len(agents) == 0 {
 				return kernelimpl.ToolAugmentation{}, nil
+			}
+			s.agentRosterMu.RLock()
+			targets, err := s.delegationSpawnTargets(req.EffectiveModelRef, req.EffectiveReasoningEffort)
+			s.agentRosterMu.RUnlock()
+			if err != nil {
+				return kernelimpl.ToolAugmentation{}, err
 			}
 			metadata := map[string]any{}
 			if systemPrompt := stringFromMap(effectiveBaseMetadata, "system_prompt"); systemPrompt != "" {
 				metadata["system_prompt"] = systemPromptWithDelegationGuidance(systemPrompt)
 			}
 			return kernelimpl.ToolAugmentation{
-				Tools:    spawnTools(agents),
+				Tools:    []tool.Tool{spawn.NewWithTargets(agents, targets)},
 				Metadata: metadata,
 			}, nil
 		},

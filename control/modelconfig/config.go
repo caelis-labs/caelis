@@ -27,6 +27,9 @@ type Config struct {
 	HTTPClient *http.Client      `json:"-"`
 	Token      string            `json:"token,omitempty"`
 	TokenEnv   string            `json:"token_env,omitempty"`
+	// CredentialRef identifies a Control-owned credential without persisting
+	// the credential material in the model profile.
+	CredentialRef string `json:"credential_ref,omitempty"`
 
 	PersistToken            bool               `json:"persist_token,omitempty"`
 	AuthType                providers.AuthType `json:"auth_type,omitempty"`
@@ -51,6 +54,7 @@ type ProfileConfig struct {
 	HTTPClient              *http.Client       `json:"-"`
 	Token                   string             `json:"token,omitempty"`
 	TokenEnv                string             `json:"token_env,omitempty"`
+	CredentialRef           string             `json:"credential_ref,omitempty"`
 	PersistToken            bool               `json:"persist_token,omitempty"`
 	AuthType                providers.AuthType `json:"auth_type,omitempty"`
 	HeaderKey               string             `json:"header_key,omitempty"`
@@ -76,6 +80,7 @@ func NormalizeConfig(cfg Config) Config {
 	cfg.ID = strings.ToLower(strings.TrimSpace(cfg.ID))
 	cfg.Provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
 	cfg.Model = strings.TrimSpace(cfg.Model)
+	cfg.CredentialRef = strings.ToLower(strings.TrimSpace(cfg.CredentialRef))
 	cfg.EndpointID = NormalizeEndpointID(cfg.Provider, cfg.EndpointID, cfg.BaseURL, cfg.API)
 	cfg.ProfileID = strings.ToLower(strings.TrimSpace(cfg.ProfileID))
 	if cfg.ProfileID == "" {
@@ -117,6 +122,7 @@ func NormalizeConfig(cfg Config) Config {
 func NormalizeProfileConfig(profile ProfileConfig) ProfileConfig {
 	profile.ID = strings.ToLower(strings.TrimSpace(profile.ID))
 	profile.Provider = strings.ToLower(strings.TrimSpace(profile.Provider))
+	profile.CredentialRef = strings.ToLower(strings.TrimSpace(profile.CredentialRef))
 	profile.EndpointID = NormalizeEndpointID(profile.Provider, profile.EndpointID, profile.BaseURL, profile.API)
 	if profile.ID == "" {
 		profile.ID = BuildProfileID(profile.Provider, profile.EndpointID, profile.BaseURL)
@@ -145,6 +151,7 @@ func ProfileFromConfig(cfg Config) ProfileConfig {
 		HTTPClient:              cfg.HTTPClient,
 		Token:                   cfg.Token,
 		TokenEnv:                cfg.TokenEnv,
+		CredentialRef:           cfg.CredentialRef,
 		PersistToken:            cfg.PersistToken,
 		AuthType:                cfg.AuthType,
 		HeaderKey:               cfg.HeaderKey,
@@ -160,6 +167,7 @@ func ConfigCarriesProfileFields(cfg Config) bool {
 		strings.TrimSpace(cfg.BaseURL) != "" ||
 		strings.TrimSpace(cfg.Token) != "" ||
 		strings.TrimSpace(cfg.TokenEnv) != "" ||
+		strings.TrimSpace(cfg.CredentialRef) != "" ||
 		strings.TrimSpace(cfg.HeaderKey) != "" ||
 		cfg.HTTPClient != nil ||
 		cfg.API != "" ||
@@ -172,6 +180,7 @@ func ConfigCarriesProfileFields(cfg Config) bool {
 func ConfigCarriesProfileAuth(cfg Config) bool {
 	return strings.TrimSpace(cfg.Token) != "" ||
 		strings.TrimSpace(cfg.TokenEnv) != "" ||
+		strings.TrimSpace(cfg.CredentialRef) != "" ||
 		strings.TrimSpace(cfg.HeaderKey) != "" ||
 		cfg.PersistToken ||
 		cfg.HTTPClient != nil
@@ -189,6 +198,7 @@ func MergeConfigProfile(cfg Config, profile ProfileConfig) Config {
 	cfg.HTTPClient = FirstNonNilHTTPClient(profile.HTTPClient, cfg.HTTPClient)
 	cfg.Token = firstNonEmpty(profile.Token, cfg.Token)
 	cfg.TokenEnv = firstNonEmpty(profile.TokenEnv, cfg.TokenEnv)
+	cfg.CredentialRef = firstNonEmpty(profile.CredentialRef, cfg.CredentialRef)
 	cfg.PersistToken = profile.PersistToken || cfg.PersistToken
 	cfg.AuthType = FirstNonEmptyAuthType(profile.AuthType, cfg.AuthType)
 	cfg.HeaderKey = firstNonEmpty(profile.HeaderKey, cfg.HeaderKey)
@@ -247,6 +257,7 @@ func SanitizePersistedConfig(cfg Config) Config {
 		cfg.HTTPClient = nil
 		cfg.Token = ""
 		cfg.TokenEnv = ""
+		cfg.CredentialRef = ""
 		cfg.PersistToken = false
 		cfg.AuthType = ""
 		cfg.HeaderKey = ""
@@ -277,7 +288,11 @@ func SanitizePersistedConfig(cfg Config) Config {
 // SanitizePersistedProfile removes transient fields and non-persisted secrets.
 func SanitizePersistedProfile(profile ProfileConfig) ProfileConfig {
 	profile = NormalizeProfileConfig(profile)
-	if !profile.PersistToken {
+	if profile.CredentialRef != "" {
+		profile.Token = ""
+		profile.TokenEnv = ""
+		profile.PersistToken = false
+	} else if !profile.PersistToken {
 		profile.Token = ""
 	}
 	if profile.API == DefaultAPIForProvider(profile.Provider) {
@@ -379,6 +394,9 @@ func ChoiceDetail(cfg Config) string {
 	}
 	if tokenEnv := strings.TrimSpace(cfg.TokenEnv); tokenEnv != "" {
 		parts = append(parts, "env:"+tokenEnv)
+	}
+	if credentialRef := strings.TrimSpace(cfg.CredentialRef); credentialRef != "" {
+		parts = append(parts, "managed auth")
 	}
 	if len(parts) == 0 {
 		return "configured model"

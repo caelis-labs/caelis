@@ -93,7 +93,7 @@ func TestSlashHelpOutputUsesTUIGrouping(t *testing.T) {
 		Kind: control.SlashCommandResultHelp,
 		Help: control.CommandHelpSnapshot{Items: []control.CommandHelpItem{
 			{Name: "help", Usage: "/help", Description: "Show commands and shortcuts", Known: true},
-			{Name: "model", Usage: "/model <action>", Description: "Switch model", Details: []string{"actions: use <alias>, del <alias>"}, Known: true},
+			{Name: "model", Usage: "/model <action>", Description: "Switch model", Details: []string{"actions: use <alias> [effort], del <alias>"}, Known: true},
 			{Name: "helper", Usage: "/helper <prompt>", Description: "Send a prompt to the registered ACP agent", Dynamic: true},
 		}},
 	})
@@ -105,7 +105,7 @@ func TestSlashHelpOutputUsesTUIGrouping(t *testing.T) {
 		"",
 		"Model & Session",
 		"  /model <action>  Switch model",
-		"                   actions: use <alias>, del <alias>",
+		"                   actions: use <alias> [effort], del <alias>",
 		"",
 		"Agents",
 		"  /helper <prompt>  Send a prompt to the registered ACP agent",
@@ -115,7 +115,7 @@ func TestSlashHelpOutputUsesTUIGrouping(t *testing.T) {
 	}
 }
 
-func TestSlashOutputAddsBlankLineAfterUserCommand(t *testing.T) {
+func TestSlashOutputKeepsBlankLinesBeforeAndAfter(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{})
@@ -130,8 +130,8 @@ func TestSlashOutputAddsBlankLineAfterUserCommand(t *testing.T) {
 	})
 	model = next.(*Model)
 
-	if model.doc.Len() != 3 {
-		t.Fatalf("document blocks = %d, want user, spacer, slash output", model.doc.Len())
+	if model.doc.Len() != 4 {
+		t.Fatalf("document blocks = %d, want user, spacer, slash output, spacer", model.doc.Len())
 	}
 	spacer, ok := model.doc.blocks[1].(*TranscriptBlock)
 	if !ok || strings.TrimSpace(spacer.Raw) != "" {
@@ -139,6 +139,45 @@ func TestSlashOutputAddsBlankLineAfterUserCommand(t *testing.T) {
 	}
 	if _, ok := model.doc.blocks[2].(*slashOutputBlock); !ok {
 		t.Fatalf("third block = %#v, want slash output block", model.doc.blocks[2])
+	}
+	trailing, ok := model.doc.blocks[3].(*TranscriptBlock)
+	if !ok || strings.TrimSpace(trailing.Raw) != "" {
+		t.Fatalf("fourth block = %#v, want trailing spacer", model.doc.blocks[3])
+	}
+
+	model.handleUserMessageMsg(UserMessageMsg{Text: "/subagent"})
+	if model.doc.Len() != 5 {
+		t.Fatalf("document blocks after next command = %d, want existing trailing spacer reused", model.doc.Len())
+	}
+	if _, ok := model.doc.blocks[4].(*UserNarrativeBlock); !ok {
+		t.Fatalf("fifth block = %#v, want next user command", model.doc.blocks[4])
+	}
+}
+
+func TestSlashNoticeOutputUsesAlignedPlainText(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{})
+	model.handleUserMessageMsg(UserMessageMsg{Text: "/connect"})
+	next, _ := model.handleSlashNoticeMsg(SlashNoticeMsg{
+		Text: "connected: openai-codex/gpt-5.6-sol\nnext: /model use <model> [effort]",
+	})
+	model = next.(*Model)
+
+	block, ok := model.doc.blocks[2].(*slashOutputBlock)
+	if !ok {
+		t.Fatalf("third block = %#v, want slash output block", model.doc.blocks[2])
+	}
+	if got := slashOutputPlainForTest(block.lines); got != "connected: openai-codex/gpt-5.6-sol\nnext: /model use <model> [effort]" {
+		t.Fatalf("notice = %q", got)
+	}
+	if !block.lines[0].Plain || !block.lines[1].Plain {
+		t.Fatalf("notice lines = %#v, want aligned explicit plain text", block.lines)
+	}
+
+	single := renderSlashNoticeLines(SlashNoticeMsg{Text: "model switched to: openai-codex/gpt-5.6-sol"})
+	if len(single) != 1 || single[0].Text != "model switched to: openai-codex/gpt-5.6-sol" || !single[0].Plain {
+		t.Fatalf("single-line notice = %#v", single)
 	}
 }
 
@@ -168,8 +207,8 @@ func TestExecuteControlPromptResultForwardsSlashResultAndEvents(t *testing.T) {
 	if msg, ok := got[0].(SlashCommandResultMsg); !ok || msg.Result.Kind != control.SlashCommandResultStatus {
 		t.Fatalf("first message = %#v, want SlashCommandResultMsg", got[0])
 	}
-	if env, ok := got[1].(eventstream.Envelope); !ok || env.Kind != eventstream.KindNotice || env.Notice != "extra notice" {
-		t.Fatalf("second message = %#v, want extra notice event", got[1])
+	if notice, ok := got[1].(SlashNoticeMsg); !ok || notice.Text != "extra notice" {
+		t.Fatalf("second message = %#v, want structured extra notice", got[1])
 	}
 }
 
@@ -197,8 +236,8 @@ func TestExecuteControlPromptResultAppliesPostCompactContextStatus(t *testing.T)
 	if len(got) != 2 {
 		t.Fatalf("sent messages = %#v, want compact notice followed by status update", got)
 	}
-	if env, ok := got[0].(eventstream.Envelope); !ok || env.Notice != "Context compacted" {
-		t.Fatalf("first message = %#v, want compact notice", got[0])
+	if notice, ok := got[0].(SlashNoticeMsg); !ok || notice.Text != "Context compacted" {
+		t.Fatalf("first message = %#v, want structured compact notice", got[0])
 	}
 	update, ok := got[1].(SetStatusMsg)
 	if !ok {
@@ -232,8 +271,8 @@ func TestExecuteControlPromptResultDefersNewSessionStatusAfterClearAndNotice(t *
 	if _, ok := got[0].(ClearHistoryMsg); !ok {
 		t.Fatalf("first message = %#v, want ClearHistoryMsg", got[0])
 	}
-	if notice, ok := got[1].(eventstream.Envelope); !ok || notice.Notice != "new session: session-2" {
-		t.Fatalf("second message = %#v, want new-session notice", got[1])
+	if notice, ok := got[1].(SlashNoticeMsg); !ok || notice.Text != "new session: session-2" {
+		t.Fatalf("second message = %#v, want structured new-session notice", got[1])
 	}
 	if _, ok := got[2].(statusRefreshRequestMsg); !ok {
 		t.Fatalf("third message = %#v, want deferred status refresh", got[2])

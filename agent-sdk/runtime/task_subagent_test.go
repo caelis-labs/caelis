@@ -284,7 +284,7 @@ func TestSubagentRejectsUnknownNeutralRoleBeforeSpawn(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unsupported subagent participant role") {
 		t.Fatalf("StartSubagent(unknown role) error = %v, want fail-closed rejection", err)
 	}
-	if runner.spawnRequest.Agent != "" {
+	if runner.spawnTargetRequest.Target.ExecutionAgent() != "" {
 		t.Fatalf("Spawn() request = %#v, want no external spawn before role validation", runner.spawnRequest)
 	}
 }
@@ -317,7 +317,8 @@ func TestAllocateSubagentHandleUsesAgentDerivedFallback(t *testing.T) {
 func TestStartSubagentAllocatesUniqueHandlesFromRuntimeReservations(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+		spawnResult:    delegation.Result{State: delegation.StateCompleted, Result: "done"},
+		continueResult: delegation.Result{State: delegation.StateCompleted, Result: "continued"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 
@@ -1253,8 +1254,8 @@ func TestRuntimeSpawnToolAllowsSelfDefaultAndRejectsRawACPWhenEnumExists(t *test
 		if _, err := targetTool.Call(ctx, tool.Call{ID: fmt.Sprintf("spawn-%d", index+1), Name: spawn.ToolName, Input: raw}); err != nil {
 			t.Fatalf("SPAWN Call(%v) error = %v", input, err)
 		}
-		if runner.spawnRequest.Agent != "self" {
-			t.Fatalf("spawn agent = %q, want self", runner.spawnRequest.Agent)
+		if runner.spawnTargetRequest.Target.ExecutionAgent() != "self" {
+			t.Fatalf("spawn agent = %q, want self", runner.spawnTargetRequest.Target.ExecutionAgent())
 		}
 	}
 
@@ -1273,8 +1274,61 @@ func TestRuntimeSpawnToolAllowsSelfDefaultAndRejectsRawACPWhenEnumExists(t *test
 	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-reviewer", Name: spawn.ToolName, Input: raw}); err != nil {
 		t.Fatalf("SPAWN Call(reviewer) error = %v", err)
 	}
-	if runner.spawnRequest.Agent != "reviewer" {
-		t.Fatalf("spawn agent = %q, want reviewer", runner.spawnRequest.Agent)
+	if runner.spawnTargetRequest.Target.ExecutionAgent() != "reviewer" {
+		t.Fatalf("spawn agent = %q, want reviewer", runner.spawnTargetRequest.Target.ExecutionAgent())
+	}
+}
+
+func TestRuntimeSpawnToolPersistsResolvedPlacementBeforeSpawn(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	targetTool := runtimeSpawnTool{
+		base: spawn.NewWithTargets(
+			[]delegation.Agent{{Name: "self"}, {Name: "orbit"}},
+			map[string]spawn.Target{
+				"orbit": {
+					Selector: "orbit",
+					Placement: delegation.Placement{
+						Kind: delegation.PlacementModel, Model: "provider/model", ReasoningEffort: "high", Fingerprint: "placement-v1",
+					},
+				},
+			},
+		),
+		session:    activeSession,
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+		runner:     runner,
+	}
+	raw, err := json.Marshal(map[string]any{"agent": "orbit", "prompt": "review this"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	_, err = targetTool.Call(ctx, tool.Call{ID: "spawn-placement", Name: spawn.ToolName, Input: raw})
+	if err != nil {
+		t.Fatalf("SPAWN Call() error = %v", err)
+	}
+	if runner.spawnTargetRequest.Target.ExecutionAgent() != "orbit" {
+		t.Fatalf("runner Agent = %q, want stable selector", runner.spawnTargetRequest.Target.ExecutionAgent())
+	}
+	taskID := runner.spawnContext.TaskID
+	entry, err := runtime.tasks.store.Get(ctx, strings.TrimSpace(taskID))
+	if err != nil {
+		t.Fatalf("Get(task) error = %v", err)
+	}
+	target := taskSpecTarget(entry.Spec, "target")
+	if target.Selector != "orbit" || target.Placement.Model != "provider/model" || target.Placement.ReasoningEffort != "high" || target.Placement.Fingerprint != "placement-v1" {
+		t.Fatalf("durable target = %#v", target)
+	}
+	if _, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: taskID, Input: "follow up", Principal: session.ActorKindTool,
+	}); err != nil {
+		t.Fatalf("Write(placement task) error = %v", err)
+	}
+	if runner.continueAgent != "orbit" {
+		t.Fatalf("continue Agent = %q, want stable selector", runner.continueAgent)
 	}
 }
 
@@ -1298,8 +1352,8 @@ func TestRuntimeSpawnToolKeepsImplicitSelfFallback(t *testing.T) {
 	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-1", Name: spawn.ToolName, Input: raw}); err != nil {
 		t.Fatalf("SPAWN Call(implicit self) error = %v", err)
 	}
-	if runner.spawnRequest.Agent != "self" {
-		t.Fatalf("spawn agent = %q, want self", runner.spawnRequest.Agent)
+	if runner.spawnTargetRequest.Target.ExecutionAgent() != "self" {
+		t.Fatalf("spawn agent = %q, want self", runner.spawnTargetRequest.Target.ExecutionAgent())
 	}
 	raw, err = json.Marshal(map[string]any{"agent": "codex", "prompt": "inspect this"})
 	if err != nil {
@@ -1418,7 +1472,9 @@ type recordingSubagentRunner struct {
 	waitResult         delegation.Result
 	continueResult     delegation.Result
 	spawnRequest       delegation.Request
+	spawnTargetRequest delegation.TargetRequest
 	continueAnchor     delegation.Anchor
+	continueAgent      string
 	continuePrompt     string
 	waitErr            error
 	publishOnSpawn     bool
@@ -1445,12 +1501,18 @@ func (r *recordingSubagentRunner) Spawn(_ context.Context, spawn subagent.SpawnC
 			Running: running,
 		})
 	}
-	agentName := strings.TrimSpace(req.Agent)
+	agentName := req.Agent
 	return delegation.Anchor{SessionID: "child-1", Agent: agentName, AgentID: strings.TrimSpace(spawn.TaskID)}, delegation.CloneResult(r.spawnResult), nil
+}
+
+func (r *recordingSubagentRunner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (delegation.Anchor, delegation.Result, error) {
+	r.spawnTargetRequest = delegation.CloneTargetRequest(req)
+	return r.Spawn(ctx, spawn, delegation.Request{Agent: req.Target.ExecutionAgent(), Prompt: req.Prompt})
 }
 
 func (r *recordingSubagentRunner) Continue(_ context.Context, anchor delegation.Anchor, req delegation.ContinueRequest) (delegation.Result, error) {
 	r.continueAnchor = delegation.CloneAnchor(anchor)
+	r.continueAgent = strings.TrimSpace(anchor.Agent)
 	r.continuePrompt = strings.TrimSpace(req.Prompt)
 	return delegation.CloneResult(r.continueResult), nil
 }

@@ -141,6 +141,41 @@ func TestAssemblyResolverSessionReasoningOverridesModeAndModelDefault(t *testing
 	}
 }
 
+func TestAssemblyResolverToolAugmenterReceivesEffectiveModelAndEffort(t *testing.T) {
+	t.Parallel()
+
+	var got ToolAugmentContext
+	resolver, err := NewAssemblyResolver(AssemblyResolverConfig{
+		Sessions: snapshotStateFunc(func(context.Context, session.SessionRef) (map[string]any, error) {
+			return map[string]any{
+				StateCurrentModelAlias:      "provider/model-id",
+				StateCurrentReasoningEffort: "high",
+			}, nil
+		}),
+		DefaultModelAlias: "fallback",
+		ModelLookup: modelLookupFunc(func(_ context.Context, alias string, _ int) (ModelResolution, error) {
+			if alias != "provider/model-id" {
+				t.Fatalf("ResolveModel alias = %q", alias)
+			}
+			return ModelResolution{Model: fakeLLM{name: "selected"}, DefaultReasoningEffort: "medium"}, nil
+		}),
+		ToolAugmenter: func(_ context.Context, ctx ToolAugmentContext) (ToolAugmentation, error) {
+			got = ctx
+			return ToolAugmentation{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewAssemblyResolver() error = %v", err)
+	}
+	_, err = resolver.ResolveTurn(context.Background(), TurnIntent{SessionRef: session.SessionRef{SessionID: "s1"}})
+	if err != nil {
+		t.Fatalf("ResolveTurn() error = %v", err)
+	}
+	if got.EffectiveModelRef != "provider/model-id" || got.EffectiveReasoningEffort != "high" {
+		t.Fatalf("ToolAugmentContext = %#v", got)
+	}
+}
+
 func TestAssemblyResolverRejectsLegacySessionState(t *testing.T) {
 	t.Parallel()
 

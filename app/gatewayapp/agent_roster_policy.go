@@ -22,7 +22,7 @@ func forbiddenRosterAgentID(id string) bool {
 		return true
 	}
 	switch strings.ToLower(id) {
-	case "guardian", "reviewer", "self", "local", "main", "kernel", "sandbox":
+	case "guardian", "reviewer", "self", "breeze", "orbit", "zenith", "local", "main", "kernel", "sandbox":
 		return true
 	default:
 		return false

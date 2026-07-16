@@ -48,3 +48,9 @@ type Runner interface {
 	Wait(context.Context, delegation.Anchor, int) (delegation.Result, error)
 	Cancel(context.Context, delegation.Anchor) error
 }
+
+// PlacementRunner is the optional typed Spawn extension used when Control has
+// resolved a model-backed placement that is not an assembled Agent identity.
+type PlacementRunner interface {
+	SpawnTarget(context.Context, SpawnContext, delegation.TargetRequest) (delegation.Anchor, delegation.Result, error)
+}

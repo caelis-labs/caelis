@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -108,11 +109,15 @@ func TestSlashConnectDisconnectsOnlyAfterWizardConfirmation(t *testing.T) {
 func TestSlashConnectModelRefreshesAgentSlashCommands(t *testing.T) {
 	service := &modelConnectControlStub{}
 	var commands SetCommandsMsg
+	var notice SlashNoticeMsg
 	result := slashConnectWithContext(context.Background(), service, nil, func(msg tea.Msg) {
-		if update, ok := msg.(SetCommandsMsg); ok {
+		switch update := msg.(type) {
+		case SetCommandsMsg:
 			commands = update
+		case SlashNoticeMsg:
+			notice = update
 		}
-	}, "openai gpt-5.6")
+	}, "codex gpt-5.6-sol")
 	if result.Err != nil {
 		t.Fatalf("slashConnectWithContext() error = %v", result.Err)
 	}
@@ -121,6 +126,12 @@ func TestSlashConnectModelRefreshesAgentSlashCommands(t *testing.T) {
 	}
 	if commands.Details["sol"] != "GPT 5.6 Sol" {
 		t.Fatalf("refreshed command details = %#v", commands.Details)
+	}
+	if !strings.Contains(notice.Text, "connected: openai-codex/gpt-5.6-sol") {
+		t.Fatalf("connect notice = %#v, want canonical connected model", notice)
+	}
+	if !strings.Contains(notice.Text, "/model use <model> [effort]") {
+		t.Fatalf("connect notice = %#v, want model and effort switch guidance", notice)
 	}
 }
 

@@ -36,21 +36,33 @@ type AuthenticateRequest struct {
 	CallbackTimeout time.Duration
 }
 
+// AuthenticateResult contains provider-owned facts discovered while
+// authenticating. A provider may return an authoritative account-scoped model
+// catalog for model selection; callers fall back to the maintained catalog
+// only when ModelCatalogAuthoritative is false.
+type AuthenticateResult struct {
+	SelectableModels          []string
+	ModelCatalogAuthoritative bool
+}
+
 // AuthenticateFunc performs provider-specific authentication for Control.
-type AuthenticateFunc func(context.Context, AuthenticateRequest) error
+type AuthenticateFunc func(context.Context, AuthenticateRequest) (AuthenticateResult, error)
 
 // AuthenticateProvider runs the maintained authentication implementation for
 // a provider. Providers that do not require an interactive flow are no-ops.
-func AuthenticateProvider(ctx context.Context, req AuthenticateRequest) error {
+func AuthenticateProvider(ctx context.Context, req AuthenticateRequest) (AuthenticateResult, error) {
 	template, ok := LookupProvider(req.Provider)
 	if !ok {
-		return fmt.Errorf("modelconfig: provider %q is not supported", strings.TrimSpace(req.Provider))
+		return AuthenticateResult{}, fmt.Errorf("modelconfig: provider %q is not supported", strings.TrimSpace(req.Provider))
 	}
 	if template.AuthFlow == "" {
-		return nil
+		return AuthenticateResult{}, nil
+	}
+	if template.AuthFlow == AuthFlowCodexOAuth {
+		return AuthenticateResult{}, fmt.Errorf("modelconfig: codex authentication must be provided by the Control host")
 	}
 	if template.AuthFlow != AuthFlowCodeFreeOAuth {
-		return fmt.Errorf("modelconfig: provider %q has unsupported authentication flow %q", template.Provider, template.AuthFlow)
+		return AuthenticateResult{}, fmt.Errorf("modelconfig: provider %q has unsupported authentication flow %q", template.Provider, template.AuthFlow)
 	}
 	opts := providers.CodeFreeEnsureAuthOptions{
 		BaseURL:         firstNonEmpty(req.BaseURL, template.DefaultBaseURL),
@@ -60,10 +72,10 @@ func AuthenticateProvider(ctx context.Context, req AuthenticateRequest) error {
 	}
 	if req.Purpose == AuthPurposeModelSelection {
 		_, err := providers.CodeFreeEnsureModelSelectionAuth(ctx, opts)
-		return err
+		return AuthenticateResult{}, err
 	}
 	_, err := providers.CodeFreeEnsureAuth(ctx, opts)
-	return err
+	return AuthenticateResult{}, err
 }
 
 // ModelSelection contains the model-specific part of one provider connection.
@@ -123,6 +135,11 @@ func ResolveModelDefaults(provider string, modelName string) (ModelDefaults, err
 	template, ok := LookupProvider(provider)
 	if !ok {
 		return ModelDefaults{}, fmt.Errorf("modelconfig: provider %q is not supported", strings.TrimSpace(provider))
+	}
+	if template.AuthFlow == AuthFlowCodexOAuth {
+		if defaults, known := codexOAuthModelDefaults(modelName); known {
+			return defaults, nil
+		}
 	}
 	caps, known := modelcatalog.LookupModelCapabilities(template.Provider, modelName)
 	if !known {
@@ -211,7 +228,7 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 		if opts.Authenticate == nil {
 			return nil, fmt.Errorf("modelconfig: %s authentication is unavailable", template.Provider)
 		}
-		if err := opts.Authenticate(ctx, AuthenticateRequest{
+		if _, err := opts.Authenticate(ctx, AuthenticateRequest{
 			Provider:        template.Provider,
 			BaseURL:         req.BaseURL,
 			HTTPClient:      req.HTTPClient,
@@ -279,6 +296,7 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 			HTTPClient:              req.HTTPClient,
 			Token:                   req.APIKey,
 			TokenEnv:                req.TokenEnv,
+			CredentialRef:           credentialRefForTemplate(template),
 			PersistToken:            req.APIKey != "" && req.TokenEnv == "",
 			AuthType:                authType,
 			ContextWindowTokens:     contextWindow,
@@ -303,29 +321,50 @@ func SelectableModels(ctx context.Context, provider string, baseURL string, auth
 	if !ok {
 		return nil, nil
 	}
+	authResult := AuthenticateResult{}
 	if template.AuthFlow != "" {
 		if authenticate == nil {
 			return nil, fmt.Errorf("modelconfig: %s model-selection authentication is unavailable", template.Provider)
 		}
-		if err := authenticate(ctx, AuthenticateRequest{
+		var err error
+		authResult, err = authenticate(ctx, AuthenticateRequest{
 			Provider:        template.Provider,
 			BaseURL:         firstNonEmpty(baseURL, template.DefaultBaseURL),
 			Purpose:         AuthPurposeModelSelection,
 			OpenBrowser:     true,
 			CallbackTimeout: 5 * time.Minute,
-		}); err != nil {
+		})
+		if err != nil {
 			return nil, err
 		}
 	}
 	var maintained []string
-	if template.UseModelDirectory {
+	if template.AuthFlow == AuthFlowCodexOAuth {
+		if authResult.ModelCatalogAuthoritative {
+			maintained = filterCodexOAuthSelectableModels(authResult.SelectableModels)
+		} else {
+			maintained = codexOAuthSelectableModels()
+		}
+	} else if template.UseModelDirectory {
 		maintained = modelcatalog.ListModelDirectoryModels(template.Provider)
 	} else {
 		maintained = modelcatalog.ListRecommendedModels(template.Provider)
 	}
 	models := make([]SelectableModel, 0, len(maintained))
 	for _, name := range maintained {
-		models = append(models, SelectableModel{Name: name, MetadataComplete: hasCompleteModelMetadata(template.Provider, name)})
+		metadataComplete := hasCompleteModelMetadata(template.Provider, name)
+		if template.AuthFlow == AuthFlowCodexOAuth {
+			// The fixed Codex profile supplies conservative context, output, and
+			// reasoning defaults for every explicitly allowed catalog entry.
+			metadataComplete = true
+		}
+		models = append(models, SelectableModel{Name: name, MetadataComplete: metadataComplete})
+	}
+	if template.AuthFlow == AuthFlowCodexOAuth {
+		// The account catalog and bundled Codex snapshot are maintained in
+		// product priority order. Keep that order aligned with the official
+		// client instead of alphabetizing version-like model IDs.
+		return uniqueSelectableModels(models), nil
 	}
 	return sortedUniqueSelectableModels(models), nil
 }
@@ -376,7 +415,10 @@ func validateConnectRequest(template ProviderTemplate, req ConnectRequest, reusa
 			return fmt.Errorf("base URL is invalid; use a full URL such as %s", template.DefaultBaseURL)
 		}
 	}
-	if template.NoAuthRequired || reusableAuth || req.APIKey != "" || req.TokenEnv != "" {
+	if template.AuthFlow == AuthFlowCodexOAuth && NormalizeBaseURL(req.BaseURL) != NormalizeBaseURL(template.DefaultBaseURL) {
+		return fmt.Errorf("modelconfig: codex OAuth requires the maintained endpoint %s", template.DefaultBaseURL)
+	}
+	if template.NoAuthRequired || template.AuthFlow != "" || reusableAuth || req.APIKey != "" || req.TokenEnv != "" {
 		return nil
 	}
 	envHint := DefaultTokenEnv(template.Provider, req.BaseURL)
@@ -384,6 +426,13 @@ func validateConnectRequest(template ProviderTemplate, req ConnectRequest, reusa
 		envHint = "YOUR_API_KEY"
 	}
 	return fmt.Errorf("API key is missing; paste a key or enter env:%s in /connect", envHint)
+}
+
+func credentialRefForTemplate(template ProviderTemplate) string {
+	if template.AuthFlow == AuthFlowCodexOAuth {
+		return CodexOAuthCredentialRef
+	}
+	return ""
 }
 
 func normalizeModelSelections(selections []ModelSelection) []ModelSelection {
@@ -419,7 +468,14 @@ func hasCompleteModelMetadata(provider string, modelName string) bool {
 }
 
 func sortedUniqueSelectableModels(values []SelectableModel) []SelectableModel {
+	out := uniqueSelectableModels(values)
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
+	return out
+}
+
+func uniqueSelectableModels(values []SelectableModel) []SelectableModel {
 	seen := map[string]SelectableModel{}
+	keys := make([]string, 0, len(values))
 	for _, value := range values {
 		value.Name = strings.TrimSpace(value.Name)
 		if value.Name == "" {
@@ -432,12 +488,12 @@ func sortedUniqueSelectableModels(values []SelectableModel) []SelectableModel {
 			continue
 		}
 		seen[key] = value
+		keys = append(keys, key)
 	}
-	out := make([]SelectableModel, 0, len(seen))
-	for _, value := range seen {
-		out = append(out, value)
+	out := make([]SelectableModel, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, seen[key])
 	}
-	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	return out
 }
 

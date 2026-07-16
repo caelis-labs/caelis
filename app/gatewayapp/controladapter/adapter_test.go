@@ -1044,6 +1044,16 @@ func TestAdapterCompleteSlashArgConnectSeparatesSourcesAndProviders(t *testing.T
 	if len(providers) == 0 || providers[0].Value == "" {
 		t.Fatalf("provider candidates = %#v, want non-empty", providers)
 	}
+	var codexCandidate SlashArgCandidate
+	for _, candidate := range providers {
+		if candidate.Value == "codex" {
+			codexCandidate = candidate
+			break
+		}
+	}
+	if !codexCandidate.NoAuth || !strings.Contains(codexCandidate.Detail, "browser/device oauth") || !strings.Contains(codexCandidate.Detail, "community") {
+		t.Fatalf("codex provider candidate = %#v, want OAuth flow without API-key prompt and explicit community status", codexCandidate)
+	}
 	xiaomiEndpoints, err := driver.CompleteSlashArg(ctx, "connect-baseurl:xiaomi", "", 10)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-baseurl:xiaomi) error = %v", err)
@@ -1187,8 +1197,11 @@ func TestAdapterCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 	if len(useCandidates) < 2 {
 		t.Fatalf("model use candidates = %#v, want at least default and session aliases", useCandidates)
 	}
-	if got := useCandidates[0].Display; got != "ollama/alt-model" {
-		t.Fatalf("first model use display = %q, want ollama/alt-model", got)
+	if got := useCandidates[0].Display; got != "ollama/llama3" {
+		t.Fatalf("first model use display = %q, want existing default ollama/llama3", got)
+	}
+	if !modelCandidateHasDisplay(useCandidates, "ollama/alt-model") {
+		t.Fatalf("model use candidates = %#v, want connected alt model", useCandidates)
 	}
 
 	delCandidates, err := driver.CompleteSlashArg(ctx, "model del", "", 10)
@@ -1198,8 +1211,8 @@ func TestAdapterCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 	if len(delCandidates) < 2 {
 		t.Fatalf("model del candidates = %#v, want at least default and session aliases", delCandidates)
 	}
-	if got := delCandidates[0].Display; got != "ollama/alt-model" {
-		t.Fatalf("first model del display = %q, want ollama/alt-model", got)
+	if got := delCandidates[0].Display; got != "ollama/llama3" {
+		t.Fatalf("first model del display = %q, want existing default ollama/llama3", got)
 	}
 }
 
@@ -1628,11 +1641,15 @@ func TestAdapterConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect(codefree) error = %v", err)
 	}
-	if status.ModelStatus.Provider != "codefree" {
-		t.Fatalf("provider = %q, want codefree", status.ModelStatus.Provider)
+	if status.ModelStatus.Provider != "ollama" || status.ModelStatus.Name != "llama3" {
+		t.Fatalf("active model = %q/%q, want existing ollama/llama3", status.ModelStatus.Provider, status.ModelStatus.Name)
 	}
-	if status.ModelStatus.Name != "GLM-4.7" {
-		t.Fatalf("model name = %q, want GLM-4.7", status.ModelStatus.Name)
+	choices, err := driver.CompleteSlashArg(ctx, "model use", "codefree", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(model use) error = %v", err)
+	}
+	if !modelCandidateHasDisplay(choices, "codefree/glm-4.7") {
+		t.Fatalf("model use candidates = %#v, want connected CodeFree model", choices)
 	}
 }
 
@@ -3296,18 +3313,18 @@ func TestAdapterConnectPersistsMultipleProviders(t *testing.T) {
 	if len(candidates) < 2 {
 		t.Fatalf("model use candidates = %#v, want both providers", candidates)
 	}
-	if candidates[0].Display != "deepseek/deepseek-v4-pro" {
-		t.Fatalf("first candidate display = %q, want deepseek/deepseek-v4-pro", candidates[0].Display)
+	if candidates[0].Display != "minimax/minimax-m2.7-highspeed" {
+		t.Fatalf("first candidate display = %q, want first connected default minimax model", candidates[0].Display)
 	}
-	foundMinimax := false
+	foundDeepSeek := false
 	for _, candidate := range candidates {
-		if candidate.Display == "minimax/minimax-m2.7-highspeed" {
-			foundMinimax = true
+		if candidate.Display == "deepseek/deepseek-v4-pro" {
+			foundDeepSeek = true
 			break
 		}
 	}
-	if !foundMinimax {
-		t.Fatalf("model use candidates = %#v, missing minimax alias", candidates)
+	if !foundDeepSeek {
+		t.Fatalf("model use candidates = %#v, missing deepseek alias", candidates)
 	}
 }
 
@@ -4525,6 +4542,15 @@ func agentCandidatesHaveName(candidates []AgentCandidate, name string) bool {
 func slashCandidatesHaveValue(candidates []SlashArgCandidate, value string) bool {
 	for _, candidate := range candidates {
 		if strings.EqualFold(strings.TrimSpace(candidate.Value), strings.TrimSpace(value)) {
+			return true
+		}
+	}
+	return false
+}
+
+func modelCandidateHasDisplay(candidates []SlashArgCandidate, display string) bool {
+	for _, candidate := range candidates {
+		if strings.EqualFold(strings.TrimSpace(candidate.Display), strings.TrimSpace(display)) {
 			return true
 		}
 	}

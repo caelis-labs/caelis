@@ -75,12 +75,22 @@ func TestRegressionCommandExecModelUse(t *testing.T) {
 	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
 	ctx := context.Background()
 
-	_, err := driver.Connect(ctx, ConnectConfig{
+	connected, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "ollama",
 		Model:    "alt-model",
 	})
 	if err != nil {
 		t.Fatalf("Connect(alt-model) error = %v", err)
+	}
+	if connected.ModelStatus.Display != "ollama/llama3" {
+		t.Fatalf("Connect() status.ModelStatus.Display = %q, want existing model to remain active", connected.ModelStatus.Display)
+	}
+	current, err := driver.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status() after Connect error = %v", err)
+	}
+	if current.ModelStatus.Display != "ollama/llama3" {
+		t.Fatalf("Status().Model = %q, want existing model unchanged after Connect", current.ModelStatus.Display)
 	}
 
 	status, err := driver.UseModel(ctx, "ollama/alt-model")
@@ -91,7 +101,7 @@ func TestRegressionCommandExecModelUse(t *testing.T) {
 		t.Fatalf("UseModel() status.ModelStatus.Display = %q, want ollama/alt-model", status.ModelStatus.Display)
 	}
 
-	current, err := driver.Status(ctx)
+	current, err = driver.Status(ctx)
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}

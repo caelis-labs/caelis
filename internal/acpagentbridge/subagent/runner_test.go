@@ -21,6 +21,39 @@ import (
 
 type detachedChildContextMarker struct{}
 
+func TestRunnerResolvesTypedPlacementWithoutRegistryIdentity(t *testing.T) {
+	registry, err := NewRegistry([]AgentConfig{{Name: "helper", Command: "helper-acp"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := 0
+	runner, err := NewRunner(RunnerConfig{
+		Registry: registry,
+		PlacementResolver: func(_ context.Context, _ tasksubagent.SpawnContext, req delegation.TargetRequest) (AgentConfig, error) {
+			called++
+			if req.Target.Selector != "orbit" || req.Target.Placement.Model != "provider/model" {
+				t.Fatalf("placement request = %#v", req.Target)
+			}
+			return AgentConfig{Name: "orbit", Command: "dynamic-acp"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := runner.resolveSpawnConfig(context.Background(), tasksubagent.SpawnContext{}, delegation.TargetRequest{Target: delegation.Target{
+		Selector: "orbit",
+		Placement: delegation.Placement{
+			Kind: delegation.PlacementModel, Model: "provider/model", ConfigFingerprint: "config-v1", Fingerprint: "placement-v1",
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called != 1 || got.Name != "orbit" || got.Command != "dynamic-acp" {
+		t.Fatalf("resolved config = %#v, calls=%d", got, called)
+	}
+}
+
 func TestDetachedChildContextClearsParentRuntimeFence(t *testing.T) {
 	parent := session.ContextWithRuntimeLease(
 		context.WithValue(context.Background(), detachedChildContextMarker{}, "kept"),

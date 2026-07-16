@@ -16,6 +16,7 @@ func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
 		"review",
 		"lead",
 		"connect",
+		"subagent",
 		"plugin",
 		"model",
 		"status",
@@ -54,8 +55,17 @@ func TestACPSlashCommandsFilterLocalAndReservedRemoteCommands(t *testing.T) {
 
 func TestDefaultWizardsCoverCoreConfigFlows(t *testing.T) {
 	wizards := DefaultWizards()
-	if len(wizards) < 1 {
+	if len(wizards) < 2 {
 		t.Fatalf("expected core wizards, got %d", len(wizards))
+	}
+	for _, command := range []string{"connect", "subagent"} {
+		found := false
+		for _, wizard := range wizards {
+			found = found || wizard.Command == command
+		}
+		if !found {
+			t.Fatalf("DefaultWizards() omitted %q", command)
+		}
 	}
 }
 

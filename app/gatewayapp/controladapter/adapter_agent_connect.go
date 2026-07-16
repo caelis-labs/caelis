@@ -45,12 +45,13 @@ func (d *Adapter) DiscoverACPConnection(ctx context.Context, req controlagents.C
 	if err != nil {
 		return controlagents.DiscoverySnapshot{}, err
 	}
+	snapshot = controlagents.NormalizeDiscoverySnapshot(snapshot)
 	d.mu.Lock()
 	if d.acpDiscoveries == nil {
 		d.acpDiscoveries = map[string]acpDiscoveryCacheEntry{}
 	}
 	d.acpDiscoveries[key] = acpDiscoveryCacheEntry{
-		request: controlagents.NormalizeConnectRequest(req), snapshot: controlagents.NormalizeDiscoverySnapshot(snapshot), cachedAt: time.Now(),
+		request: controlagents.NormalizeConnectRequest(req), snapshot: snapshot, cachedAt: time.Now(),
 	}
 	d.mu.Unlock()
 	return snapshot, nil

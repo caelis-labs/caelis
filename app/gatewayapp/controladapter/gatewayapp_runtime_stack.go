@@ -5,7 +5,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/control/modelconfig"
 )
 
 type RuntimeStackGatewayAppAdapters struct {
@@ -27,6 +26,7 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 	}
 	models := stack.Models()
 	agents := stack.Agents()
+	delegation := stack.Delegation()
 	skills := stack.Skills()
 	status := stack.Status()
 	plugins := stack.Plugins()
@@ -62,6 +62,11 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 			DisconnectFn:           agents.Disconnect,
 			ListFn:                 func() []ACPAgentInfo { return adapters.ACPAgents(agents.List()) },
 		},
+		Delegation: DelegationRuntimeDeps{
+			StatusFn: delegation.DelegationStatus,
+			BindFn:   delegation.BindDelegation,
+			ResetFn:  delegation.ResetDelegation,
+		},
 		Model: ModelRuntimeDeps{
 			DefaultAliasFn: models.DefaultAlias,
 			ConfigFn: func(alias string) (ModelConfig, bool) {
@@ -75,7 +80,7 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 			ListChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
 				return adapters.ModelChoices(models.ListChoices(ctx, ref))
 			},
-			AuthenticateFn: modelconfig.AuthenticateProvider,
+			AuthenticateFn: models.Authenticate,
 		},
 		Skill: SkillRuntimeDeps{
 			SnapshotFn: skills.Snapshot,

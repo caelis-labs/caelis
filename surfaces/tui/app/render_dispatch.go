@@ -41,7 +41,7 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 		return renderEventPolicyForACPEnvelope(typed), true
 	case TranscriptEventsMsg:
 		return renderEventPolicyForTranscriptEvents(typed), true
-	case SlashCommandResultMsg:
+	case SlashCommandResultMsg, SlashNoticeMsg:
 		return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}, true
 	case LogChunkMsg:
 		return renderEventPolicy{lane: renderLaneLog, flushSmoothing: true, dismissHints: true}, true
@@ -214,6 +214,9 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return model, tea.Batch(policyCmd, cmd), true
 	case SlashCommandResultMsg:
 		model, cmd := m.handleSlashCommandResultMsg(typed)
+		return model, tea.Batch(policyCmd, cmd), true
+	case SlashNoticeMsg:
+		model, cmd := m.handleSlashNoticeMsg(typed)
 		return model, tea.Batch(policyCmd, cmd), true
 	case LogChunkMsg:
 		if !m.deferredBatchingEnabled() {

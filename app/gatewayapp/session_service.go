@@ -191,13 +191,7 @@ func (s *Stack) estimatedPromptPrefixTokens(ctx context.Context, ref session.Ses
 		base = 0
 	}
 
-	var participants []session.ParticipantBinding
-	if s.Sessions != nil && strings.TrimSpace(ref.SessionID) != "" {
-		if session, err := s.Sessions.Session(ctx, ref); err == nil {
-			participants = session.Participants
-		}
-	}
-	agents := delegationAgentsForSpawn(runtimeCfg.Assembly, participants)
+	agents := delegationAgentsForSpawn()
 	if len(agents) == 0 {
 		return base
 	}

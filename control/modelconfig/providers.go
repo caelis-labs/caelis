@@ -8,6 +8,11 @@ import (
 )
 
 const (
+	// CodexOAuthBaseURL is the fixed ChatGPT Codex Responses API root used by
+	// the maintained subscription-backed provider.
+	CodexOAuthBaseURL = "https://chatgpt.com/backend-api/codex"
+	// CodexOAuthCredentialRef selects the one Control-owned Codex OAuth account.
+	CodexOAuthCredentialRef = "codex:default"
 	// XiaomiAPIBaseURL is the standard Xiaomi MiMo endpoint.
 	XiaomiAPIBaseURL = "https://api.xiaomimimo.com/v1"
 	// XiaomiTokenPlanCNBaseURL is the Xiaomi coding-plan endpoint in China.
@@ -23,6 +28,9 @@ type AuthFlow string
 const (
 	// AuthFlowCodeFreeOAuth uses CodeFree's browser OAuth flow.
 	AuthFlowCodeFreeOAuth AuthFlow = "codefree_oauth"
+	// AuthFlowCodexOAuth uses the public Codex CLI OAuth client with browser and
+	// device-code login modes.
+	AuthFlowCodexOAuth AuthFlow = "codex_oauth"
 )
 
 // EndpointTemplate describes one maintained endpoint variant for a provider.
@@ -45,6 +53,8 @@ type ProviderTemplate struct {
 	API                        model.APIType
 	AuthType                   model.AuthType
 	AuthFlow                   AuthFlow
+	AuthDisplay                string
+	PreserveModelOrder         bool
 	DefaultTokenEnv            string
 	DefaultEndpointID          string
 	DefaultBaseURL             string
@@ -61,9 +71,10 @@ type ProviderTemplate struct {
 }
 
 var providerTemplates = []ProviderTemplate{
+	{Label: "codex", API: model.APIOpenAICodex, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowCodexOAuth, AuthDisplay: "browser/device oauth", PreserveModelOrder: true, Provider: "openai-codex", Description: "ChatGPT subscription through a community Codex OAuth integration", DefaultBaseURL: CodexOAuthBaseURL, DefaultContextWindowTokens: 272000, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"low", "medium", "high", "xhigh"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium"},
 	{Label: "openai", API: model.APIOpenAI, AuthType: model.AuthAPIKey, Provider: "openai", Description: "OpenAI-hosted models", DefaultTokenEnv: "OPENAI_API_KEY", DefaultBaseURL: "https://api.openai.com/v1", DefaultContextWindowTokens: 128000},
 	{Label: "openai-compatible", API: model.APIOpenAICompatible, AuthType: model.AuthAPIKey, Provider: "openai-compatible", Description: "OpenAI-compatible proxy or self-hosted endpoint", DefaultTokenEnv: "OPENAI_COMPATIBLE_API_KEY", DefaultBaseURL: "https://api.openai.com/v1", DefaultContextWindowTokens: 262144, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium", PromptForBaseURL: true},
-	{Label: "codefree", API: model.APICodeFree, AuthType: model.AuthNone, AuthFlow: AuthFlowCodeFreeOAuth, Provider: "codefree", Description: "China Telecom SRD CodeFree models via browser OAuth", DefaultBaseURL: "https://www.srdcloud.cn", DefaultContextWindowTokens: 128000, DefaultMaxOutputTokens: 8000, NoAuthRequired: true},
+	{Label: "codefree", API: model.APICodeFree, AuthType: model.AuthNone, AuthFlow: AuthFlowCodeFreeOAuth, AuthDisplay: "browser oauth", Provider: "codefree", Description: "China Telecom SRD CodeFree models via browser OAuth", DefaultBaseURL: "https://www.srdcloud.cn", DefaultContextWindowTokens: 128000, DefaultMaxOutputTokens: 8000, NoAuthRequired: true},
 	{Label: "openrouter", API: model.APIOpenRouter, AuthType: model.AuthAPIKey, Provider: "openrouter", Description: "OpenRouter multi-provider routing", DefaultTokenEnv: "OPENROUTER_API_KEY", DefaultBaseURL: "https://openrouter.ai/api/v1", DefaultContextWindowTokens: 262144, UseModelDirectory: true},
 	{Label: "gemini", API: model.APIGemini, AuthType: model.AuthAPIKey, Provider: "gemini", Description: "Google Gemini API", DefaultTokenEnv: "GEMINI_API_KEY", DefaultBaseURL: "https://generativelanguage.googleapis.com/v1beta", DefaultContextWindowTokens: 128000},
 	{Label: "anthropic", API: model.APIAnthropic, AuthType: model.AuthAPIKey, Provider: "anthropic", Description: "Anthropic Claude API", DefaultTokenEnv: "ANTHROPIC_API_KEY", DefaultBaseURL: "https://api.anthropic.com", DefaultContextWindowTokens: 200000, DefaultMaxOutputTokens: 1024},

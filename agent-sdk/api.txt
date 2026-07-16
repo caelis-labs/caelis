@@ -632,6 +632,7 @@ package github.com/caelis-labs/caelis/agent-sdk/model
       ToolSpecKindProviderExecuted ToolSpecKind = "provider_executed"
       ToolSpecKindMCP              ToolSpecKind = "mcp"
   )
+  const APIOpenAICodex APIType = "openai_codex"
   func (e *CapabilityError) Error() string
   func (e *CapabilityError) ErrorCode() errorcode.Code
   func (e *ContextOverflowError) Error() string
@@ -2945,6 +2946,11 @@ package github.com/caelis-labs/caelis/agent-sdk/task
 
 package github.com/caelis-labs/caelis/agent-sdk/task/delegation
   const (
+      PlacementAgent PlacementKind = "agent"
+
+      PlacementModel PlacementKind = "model"
+  )
+  const (
       StateRunning         State = "running"
       StateCompleted       State = "completed"
       StateFailed          State = "failed"
@@ -2952,11 +2958,17 @@ package github.com/caelis-labs/caelis/agent-sdk/task/delegation
       StateInterrupted     State = "interrupted"
       StateWaitingApproval State = "waiting_approval"
   )
+  func (t Target) ExecutionAgent() string
+  func AgentTarget(name string) Target
   func CloneAnchor(in Anchor) Anchor
   func CloneContinueRequest(in ContinueRequest) ContinueRequest
   func CloneRequest(in Request) Request
   func CloneResult(in Result) Result
+  func CloneTargetRequest(in TargetRequest) TargetRequest
   func NormalizeAgent(in Agent) Agent
+  func NormalizePlacement(in Placement) Placement
+  func NormalizeTarget(in Target) Target
+  func ValidateTarget(raw Target) error
   type Agent struct {
       Name        string `json:"name,omitempty"`
       Description string `json:"description,omitempty"`
@@ -2972,6 +2984,15 @@ package github.com/caelis-labs/caelis/agent-sdk/task/delegation
       Prompt      string `json:"prompt,omitempty"`
       YieldTimeMS int    `json:"yield_time_ms,omitempty"`
   }
+  type Placement struct {
+      Kind              PlacementKind `json:"kind,omitempty"`
+      Agent             string        `json:"agent,omitempty"`
+      Model             string        `json:"model,omitempty"`
+      ReasoningEffort   string        `json:"reasoning_effort,omitempty"`
+      ConfigFingerprint string        `json:"config_fingerprint,omitempty"`
+      Fingerprint       string        `json:"fingerprint,omitempty"`
+  }
+  type PlacementKind string
   type Request struct {
       Agent  string `json:"agent,omitempty"`
       Prompt string `json:"prompt,omitempty"`
@@ -2986,6 +3007,14 @@ package github.com/caelis-labs/caelis/agent-sdk/task/delegation
       UpdatedAt     time.Time `json:"updated_at,omitempty"`
   }
   type State string
+  type Target struct {
+      Selector  string    `json:"selector,omitempty"`
+      Placement Placement `json:"placement,omitempty"`
+  }
+  type TargetRequest struct {
+      Target Target `json:"target,omitempty"`
+      Prompt string `json:"prompt,omitempty"`
+  }
 
 package github.com/caelis-labs/caelis/agent-sdk/task/stream
   func CloneCursor(in Cursor) Cursor
@@ -3058,6 +3087,9 @@ package github.com/caelis-labs/caelis/agent-sdk/task/subagent
   type ApprovalRequester = agent.SubagentApprovalRequester
   type ApprovalResponse = agent.ApprovalResponse
   type ApprovalToolCall = agent.SubagentApprovalToolCall
+  type PlacementRunner interface {
+      SpawnTarget(context.Context, SpawnContext, delegation.TargetRequest) (delegation.Anchor, delegation.Result, error)
+  }
   type Registry interface {
       Get(context.Context, string) (delegation.Agent, error)
       List(context.Context) ([]delegation.Agent, error)

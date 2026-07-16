@@ -104,8 +104,8 @@ func (s *pluginStubService) InspectPlugin(ctx context.Context, id string) (contr
 func runPluginCmd(svc control.PluginService, args string) (TaskResultMsg, []string) {
 	var notices []string
 	send := func(msg tea.Msg) {
-		if n, ok := msg.(LogChunkMsg); ok {
-			notices = append(notices, n.Chunk)
+		if n, ok := msg.(SlashNoticeMsg); ok {
+			notices = append(notices, n.Text)
 		}
 	}
 	result := slashPluginWithContext(context.Background(), svc, send, args)
@@ -176,8 +176,8 @@ func TestSlashPluginManageOpensMultiSelectManager(t *testing.T) {
 		switch prompt := msg.(type) {
 		case PromptRequestMsg:
 			prompts = append(prompts, prompt)
-		case LogChunkMsg:
-			notices = append(notices, prompt.Chunk)
+		case SlashNoticeMsg:
+			notices = append(notices, prompt.Text)
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())

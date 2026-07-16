@@ -16,6 +16,7 @@ func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
 		"review",
 		"lead",
 		"connect",
+		"subagent",
 		"plugin",
 		"model",
 		"status",
@@ -47,7 +48,7 @@ func TestDefaultSharedNamesExcludeTUIPrivateCommands(t *testing.T) {
 			t.Fatalf("DefaultSharedNamesForPlatform(linux) = %#v, want %q", got, want)
 		}
 	}
-	for _, hidden := range []string{"connect", "plugin", "exit", "quit"} {
+	for _, hidden := range []string{"connect", "subagent", "plugin", "exit", "quit"} {
 		if sliceContainsString(got, hidden) {
 			t.Fatalf("DefaultSharedNamesForPlatform(linux) = %#v, should exclude TUI-private %q", got, hidden)
 		}
@@ -105,7 +106,7 @@ func TestAppendRegisteredAgentNamesDedupesAndFilters(t *testing.T) {
 }
 
 func TestLocalDuringACPMatchesAdvertisedLocalCommands(t *testing.T) {
-	local := []string{"help", "review", "lead", "plugin", "status", "resume", "model", "exit", "quit"}
+	local := []string{"help", "review", "lead", "subagent", "plugin", "status", "resume", "model", "exit", "quit"}
 	for _, name := range local {
 		if !IsLocalDuringACP(name) {
 			t.Fatalf("IsLocalDuringACP(%q) = false, want true", name)
@@ -137,14 +138,17 @@ func TestRootArgCandidatesReturnsCopies(t *testing.T) {
 	}
 }
 
-func TestRemovedAgentManagementCommandsAreUnknown(t *testing.T) {
-	for _, removed := range []string{"agent", "subagent"} {
+func TestRemovedAgentManagementCommandIsUnknown(t *testing.T) {
+	for _, removed := range []string{"agent"} {
 		if IsKnownForPlatform(removed, "linux") || IsSharedKnownForPlatform(removed, "linux") {
 			t.Fatalf("removed command %q is still registered", removed)
 		}
 		if got := RootArgCandidatesForPlatform(removed, "linux"); len(got) != 0 {
 			t.Fatalf("RootArgCandidatesForPlatform(%q) = %#v, want none", removed, got)
 		}
+	}
+	if !IsKnownForPlatform("subagent", "linux") || IsSharedKnownForPlatform("subagent", "linux") || IsACPKnownForPlatform("subagent", "linux") {
+		t.Fatal("subagent must be registered as a TUI-private command only")
 	}
 }
 

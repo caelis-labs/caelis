@@ -2,6 +2,22 @@ package agents
 
 import "testing"
 
+func TestNormalizeDiscoverySnapshotClassifiesReasoningEffortOnce(t *testing.T) {
+	snapshot := NormalizeDiscoverySnapshot(DiscoverySnapshot{ConfigOptions: []ConfigOption{
+		{ID: "thought_level", Name: "Thought depth", Category: "reasoning"},
+		{ID: "theme", Name: "Theme", Category: "display"},
+	}})
+	if len(snapshot.ConfigOptions) != 2 {
+		t.Fatalf("ConfigOptions = %#v", snapshot.ConfigOptions)
+	}
+	if snapshot.ConfigOptions[0].Purpose != ConfigOptionPurposeReasoningEffort {
+		t.Fatalf("reasoning purpose = %q", snapshot.ConfigOptions[0].Purpose)
+	}
+	if snapshot.ConfigOptions[1].Purpose != "" {
+		t.Fatalf("display purpose = %q, want empty", snapshot.ConfigOptions[1].Purpose)
+	}
+}
+
 func TestUpsertExternalAgentPreservesSiblingAgentsAndDefaults(t *testing.T) {
 	connection := Connection{ID: "claude", Launcher: Launcher{Command: "/usr/bin/claude-acp"}}
 	current, opus, err := UpsertExternalAgent(Configuration{}, connection, RemoteModel{ID: "opus", Name: "Opus"}, SessionOptions{

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
@@ -68,22 +70,26 @@ type Stack struct {
 	reconfigureMu             sync.Mutex
 	// agentRosterMu serializes live Agent assembly mutations with durable
 	// controller binding changes. Coordinators receive its read side.
-	agentRosterMu    sync.RWMutex
-	runtime          stackRuntimeConfig
-	sandbox          SandboxConfig
-	exec             sandbox.Runtime
-	engine           *runtime.Runtime
-	placement        controlplane.PlacementExecutor
-	acpControlPlane  *acpassembly.ControlPlane
-	taskStore        task.Store
-	controlFeeds     controlclientport.FeedRegistry
-	controlState     controlclientport.StateReader
-	controlCommands  controlclientport.CommandClient
-	controlClient    controlclientport.Service
-	operations       *internalcontrolclient.FileOperationStore
-	approvalRecovery *internalcontrolclient.ApprovalRecoveryGate
-	gateway          *kernelimpl.Gateway
-	mcpMgr           *mcp.Manager
+	agentRosterMu             sync.RWMutex
+	delegationCacheMu         sync.RWMutex
+	delegationCache           *delegationResolutionSnapshot
+	delegationCacheGeneration uint64
+	runtime                   stackRuntimeConfig
+	sandbox                   SandboxConfig
+	exec                      sandbox.Runtime
+	engine                    *runtime.Runtime
+	placement                 controlplane.PlacementExecutor
+	acpControlPlane           *acpassembly.ControlPlane
+	taskStore                 task.Store
+	controlFeeds              controlclientport.FeedRegistry
+	controlState              controlclientport.StateReader
+	controlCommands           controlclientport.CommandClient
+	controlClient             controlclientport.Service
+	operations                *internalcontrolclient.FileOperationStore
+	approvalRecovery          *internalcontrolclient.ApprovalRecoveryGate
+	gateway                   *kernelimpl.Gateway
+	mcpMgr                    *mcp.Manager
+	codexAuth                 *codexauth.Manager
 
 	// Optional test seam; nil uses the platform lifecycle runtime factory.
 	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
@@ -274,9 +280,27 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
+	codexAuth, err := codexauth.NewManager(codexauth.Options{
+		CredentialPath: codexauth.DefaultCredentialPath(storeDir),
+	})
+	if err != nil {
+		return nil, err
+	}
 	lookup, err := newModelLookup(configStore, cfg.Model, cfg.ContextWindow)
 	if err != nil {
 		return nil, err
+	}
+	lookup.resolveHTTPClient = func(ctx context.Context, modelCfg ModelConfig) (*http.Client, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !strings.EqualFold(modelCfg.Provider, "openai-codex") || modelCfg.CredentialRef != modelconfig.CodexOAuthCredentialRef {
+			return nil, fmt.Errorf("gatewayapp: unsupported managed model credential %q for provider %q", modelCfg.CredentialRef, modelCfg.Provider)
+		}
+		if modelconfig.NormalizeBaseURL(modelCfg.BaseURL) != modelconfig.NormalizeBaseURL(modelconfig.CodexOAuthBaseURL) {
+			return nil, fmt.Errorf("gatewayapp: codex OAuth requires the maintained endpoint %s", modelconfig.CodexOAuthBaseURL)
+		}
+		return codexAuth.AuthenticatedClient(modelCfg.HTTPClient)
 	}
 	sandboxCfg := mergeSandboxConfig(doc.Sandbox, cfg.Sandbox)
 	leaseOwnerID, err := newStackLeaseOwnerID()
@@ -298,6 +322,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		taskStore:        taskStore,
 		controlFeeds:     controlFeeds,
 		approvalRecovery: approvalRecovery,
+		codexAuth:        codexAuth,
 		runtime: stackRuntimeConfig{
 			ApprovalMode:  effectiveApprovalMode,
 			PolicyProfile: effectivePolicyProfile,
@@ -311,6 +336,8 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		},
 		sandbox: sandboxCfg,
 	}
+	stack.delegationCache = newDelegationResolutionSnapshot(doc)
+	configStore.savedHook = stack.invalidateDelegationResolutionSnapshot
 	controlState, err := internalcontrolclient.NewStateService(internalcontrolclient.StateServiceConfig{
 		Sessions: sessions, Runtime: stack, Feeds: controlFeeds,
 	})

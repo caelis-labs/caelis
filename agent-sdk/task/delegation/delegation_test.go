@@ -14,13 +14,9 @@ func TestCloneRequestAndResultPreserveMinimalLLMSurface(t *testing.T) {
 		t.Fatalf("req.Prompt = %q, want %q", got, "inspect repo")
 	}
 	continuation := CloneContinueRequest(ContinueRequest{
-		Agent:       "  codex  ",
 		Prompt:      "  continue  ",
 		YieldTimeMS: 250,
 	})
-	if got := continuation.Agent; got != "codex" {
-		t.Fatalf("continuation.Agent = %q, want codex", got)
-	}
 	if got := continuation.Prompt; got != "continue" {
 		t.Fatalf("continuation.Prompt = %q, want continue", got)
 	}

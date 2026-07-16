@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
@@ -215,6 +216,7 @@ type ControlServices interface {
 	control.Service
 	controlagents.Connector
 	controlagents.Disconnector
+	controldelegation.Service
 }
 
 // ConfigFromControlService populates Config callbacks from Control services.
@@ -251,7 +253,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 				runCtx, finish = sender.beginRunContext(ctx)
 			}
 			defer finish()
-			return executeLineViaControlServiceWithContextResult(runCtx, service, service, sender, sub, promptRouterFactory)
+			return executeLineViaControlServiceWithContextResult(runCtx, service, sender, sub, promptRouterFactory)
 		}
 		base.ExecuteLine = func(sub Submission) TaskResultMsg {
 			return runExecuteLine(sub).completion
@@ -368,6 +370,9 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 
 	if base.SlashArgComplete == nil {
 		base.SlashArgComplete = func(requestCtx context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
+			if candidates, handled, err := completeSubagentSlashArgs(contextOrBackground(requestCtx), service, command, query, limit); handled {
+				return candidates, err
+			}
 			candidates, err := service.CompleteSlashArg(contextOrBackground(requestCtx), command, query, limit)
 			if err != nil {
 				return nil, err
@@ -442,7 +447,7 @@ func (r executeLineResult) commandMessage() tea.Msg {
 	return r.completion
 }
 
-func executeLineViaControlServiceWithContextResult(ctx context.Context, service control.Service, agents agentRosterServices, sender *ProgramSender, sub Submission, routerFactory controlprompt.RouterFactory) executeLineResult {
+func executeLineViaControlServiceWithContextResult(ctx context.Context, service ControlServices, sender *ProgramSender, sub Submission, routerFactory controlprompt.RouterFactory) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -457,7 +462,7 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 			return appendAgentSlashCommandsWithContext(ctx, service, DefaultCommands())
 		},
 		PrivateSlashHandler: func(ctx context.Context, req controlprompt.PrivateSlashRequest) (controlprompt.Result, bool, error) {
-			result, ok := executeTUIPrivateSlashCommandWithContext(ctx, service, agents, sender, req.Command, req.Args)
+			result, ok := executeTUIPrivateSlashCommandWithContext(ctx, service, sender, req.Command, req.Args)
 			if !ok {
 				return controlprompt.Result{}, false, nil
 			}
@@ -535,6 +540,10 @@ func executeControlPromptResult(ctx context.Context, service control.Service, se
 		if send == nil {
 			continue
 		}
+		if event.Kind == eventstream.KindNotice {
+			send(SlashNoticeMsg{Text: event.Notice})
+			continue
+		}
 		send(event)
 	}
 	if result.StatusUpdate != nil {
@@ -577,7 +586,7 @@ func executeControlPromptResult(ctx context.Context, service control.Service, se
 
 func sendNotice(send func(tea.Msg), text string) {
 	if send != nil {
-		send(LogChunkMsg{Chunk: text + "\n"})
+		send(SlashNoticeMsg{Text: text})
 	}
 }
 
@@ -798,7 +807,9 @@ func awaitApprovalPrompt(ctx context.Context, turn control.Turn, req *approvalPa
 	}
 	decision := approvalDecisionFromPrompt(req, response)
 	if err := turn.SubmitApproval(ctx, decision); err != nil {
-		sendNotice(send, fmt.Sprintf("approval submit failed: %v", err))
+		if send != nil {
+			send(LogChunkMsg{Chunk: fmt.Sprintf("approval submit failed: %v\n", err)})
+		}
 	}
 }
 

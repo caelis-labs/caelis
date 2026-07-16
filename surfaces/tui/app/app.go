@@ -327,6 +327,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case acpSetupProgressMsg:
 		m.handleACPSetupProgress(typed)
 		return m, nil
+	case modelAuthProgressMsg:
+		m.handleModelAuthProgress(typed)
+		return m, nil
 
 	case spinner.TickMsg:
 		m.spinnerTickScheduled = false

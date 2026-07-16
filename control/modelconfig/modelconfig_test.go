@@ -3,6 +3,7 @@ package modelconfig
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -153,12 +154,12 @@ func TestAssembleConnectAuthenticatesOnceForMultipleModels(t *testing.T) {
 			{Name: "GLM-4.7"},
 			{Name: "GLM-5.1"},
 		},
-	}, ConnectOptions{Authenticate: func(_ context.Context, req AuthenticateRequest) error {
+	}, ConnectOptions{Authenticate: func(_ context.Context, req AuthenticateRequest) (AuthenticateResult, error) {
 		authCalls++
 		if req.Purpose != AuthPurposeConnect {
 			t.Fatalf("AuthenticateRequest.Purpose = %q", req.Purpose)
 		}
-		return nil
+		return AuthenticateResult{}, nil
 	}})
 	if err != nil {
 		t.Fatalf("AssembleConnect(multiple) error = %v", err)
@@ -172,12 +173,12 @@ func TestSelectableModelsAuthenticatesCodeFreeBeforeListing(t *testing.T) {
 	t.Parallel()
 
 	called := false
-	models, err := SelectableModels(context.Background(), "codefree", "", func(_ context.Context, req AuthenticateRequest) error {
+	models, err := SelectableModels(context.Background(), "codefree", "", func(_ context.Context, req AuthenticateRequest) (AuthenticateResult, error) {
 		called = true
 		if req.Provider != "codefree" || req.Purpose != AuthPurposeModelSelection || req.BaseURL != "https://www.srdcloud.cn" {
 			t.Fatalf("AuthenticateRequest = %#v", req)
 		}
-		return nil
+		return AuthenticateResult{}, nil
 	})
 	if err != nil {
 		t.Fatalf("SelectableModels(codefree) error = %v", err)
@@ -190,6 +191,167 @@ func TestSelectableModelsAuthenticatesCodeFreeBeforeListing(t *testing.T) {
 	}
 }
 
+func TestAssembleConnectBuildsManagedCodexOAuthProfile(t *testing.T) {
+	t.Parallel()
+
+	authCalls := 0
+	configs, err := AssembleConnect(context.Background(), ConnectRequest{
+		Provider: "codex",
+		Models:   []ModelSelection{{Name: "gpt-5.5"}},
+	}, ConnectOptions{Authenticate: func(_ context.Context, req AuthenticateRequest) (AuthenticateResult, error) {
+		authCalls++
+		if req.Provider != "openai-codex" || req.BaseURL != CodexOAuthBaseURL || req.Purpose != AuthPurposeConnect {
+			t.Fatalf("AuthenticateRequest = %#v", req)
+		}
+		return AuthenticateResult{}, nil
+	}})
+	if err != nil {
+		t.Fatalf("AssembleConnect(codex) error = %v", err)
+	}
+	if authCalls != 1 || len(configs) != 1 {
+		t.Fatalf("codex auth/config count = %d/%d", authCalls, len(configs))
+	}
+	cfg := configs[0]
+	if cfg.Provider != "openai-codex" || cfg.API != model.APIOpenAICodex || cfg.AuthType != model.AuthOAuthToken {
+		t.Fatalf("codex provider config = %#v", cfg)
+	}
+	if cfg.CredentialRef != CodexOAuthCredentialRef || cfg.Token != "" || cfg.TokenEnv != "" || cfg.PersistToken {
+		t.Fatalf("codex credentials leaked into model config = %#v", cfg)
+	}
+	if cfg.BaseURL != CodexOAuthBaseURL || cfg.ProfileID != "openai-codex@default" {
+		t.Fatalf("codex endpoint identity = %#v", cfg)
+	}
+}
+
+func TestAssembleConnectRejectsCustomCodexOAuthEndpoint(t *testing.T) {
+	t.Parallel()
+
+	_, err := AssembleConnect(context.Background(), ConnectRequest{
+		Provider: "codex",
+		BaseURL:  "https://proxy.example.test/backend-api/codex",
+		Models:   []ModelSelection{{Name: "gpt-5.5"}},
+	}, ConnectOptions{Authenticate: func(context.Context, AuthenticateRequest) (AuthenticateResult, error) {
+		return AuthenticateResult{}, nil
+	}})
+	if err == nil || !strings.Contains(err.Error(), "requires the maintained endpoint") {
+		t.Fatalf("AssembleConnect(custom codex endpoint) error = %v", err)
+	}
+}
+
+func TestSelectableModelsAuthenticatesAndFiltersCodexCatalog(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	models, err := SelectableModels(context.Background(), "codex", "", func(_ context.Context, req AuthenticateRequest) (AuthenticateResult, error) {
+		called = true
+		if req.Provider != "openai-codex" || req.Purpose != AuthPurposeModelSelection {
+			t.Fatalf("AuthenticateRequest = %#v", req)
+		}
+		return AuthenticateResult{
+			SelectableModels: []string{
+				"gpt-5.6-sol",
+				"gpt-5.6-terra",
+				"gpt-5.6-luna",
+				"gpt-5.5",
+				"gpt-5.4",
+				"gpt-5.4-mini",
+				"gpt-5.3-codex-spark",
+				"gpt-5.7-unknown",
+			},
+			ModelCatalogAuthoritative: true,
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("SelectableModels(codex) error = %v", err)
+	}
+	if !called || !selectableModelNamesContain(models, "gpt-5.5") || !selectableModelNamesContain(models, "gpt-5.6-sol") || !selectableModelNamesContain(models, "gpt-5.4") || !selectableModelNamesContain(models, "gpt-5.4-mini") || !selectableModelNamesContain(models, "gpt-5.3-codex-spark") {
+		t.Fatalf("codex selectable models = %#v", models)
+	}
+	wantOrder := []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"}
+	if got := selectableModelNames(models); !slices.Equal(got, wantOrder) {
+		t.Fatalf("codex selectable model order = %#v, want %#v", got, wantOrder)
+	}
+	if selectableModelNamesContain(models, "gpt-5.2") || selectableModelNamesContain(models, "gpt-5.5-pro") || selectableModelNamesContain(models, "gpt-5.6") || selectableModelNamesContain(models, "gpt-5.7-unknown") || selectableModelNamesContain(models, "gpt-5.5-instant") {
+		t.Fatalf("codex selectable models include disallowed entries = %#v", models)
+	}
+	for _, item := range models {
+		if !item.MetadataComplete {
+			t.Fatalf("codex selectable model requires unnecessary advanced setup = %#v", item)
+		}
+	}
+	if isCodexOAuthModel("gpt-5.7-pro") || isCodexOAuthModel("gpt-5.7-sol") || !isCodexOAuthModel("gpt-5.6-sol") || !isCodexOAuthModel("gpt-5.3-codex-spark") {
+		t.Fatalf("codex model allowlist accepted an unknown model or rejected a maintained one")
+	}
+}
+
+func TestSelectableModelsUsesCurrentBundledCodexFallback(t *testing.T) {
+	t.Parallel()
+
+	models, err := SelectableModels(context.Background(), "codex", "", func(context.Context, AuthenticateRequest) (AuthenticateResult, error) {
+		return AuthenticateResult{}, nil
+	})
+	if err != nil {
+		t.Fatalf("SelectableModels(codex fallback) error = %v", err)
+	}
+	for _, name := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"} {
+		if !selectableModelNamesContain(models, name) {
+			t.Fatalf("codex fallback models = %#v, missing %q", models, name)
+		}
+	}
+	if selectableModelNamesContain(models, "gpt-5.2") {
+		t.Fatalf("codex fallback exposes deprecated gpt-5.2 = %#v", models)
+	}
+}
+
+func TestResolveCodexOAuthModelDefaultsUseCodexCatalogMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		context        int
+		defaultEffort  string
+		reasoningLevel []string
+	}{
+		{name: "gpt-5.6-sol", context: codexOAuthEffectiveContextWindowTokens, defaultEffort: "low", reasoningLevel: []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
+		{name: "gpt-5.6-luna", context: codexOAuthEffectiveContextWindowTokens, defaultEffort: "medium", reasoningLevel: []string{"low", "medium", "high", "xhigh", "max"}},
+		{name: "gpt-5.5", context: 272000, defaultEffort: "medium", reasoningLevel: []string{"low", "medium", "high", "xhigh"}},
+		{name: "gpt-5.4", context: 272000, defaultEffort: "medium", reasoningLevel: []string{"low", "medium", "high", "xhigh"}},
+		{name: "gpt-5.4-mini", context: 272000, defaultEffort: "medium", reasoningLevel: []string{"low", "medium", "high", "xhigh"}},
+		{name: "gpt-5.3-codex-spark", context: 128000, defaultEffort: "high", reasoningLevel: []string{"low", "medium", "high", "xhigh"}},
+		{name: "gpt-5.2", context: 272000, defaultEffort: "medium", reasoningLevel: []string{"low", "medium", "high", "xhigh"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defaults, err := ResolveModelDefaults("codex", tt.name)
+			if err != nil {
+				t.Fatalf("ResolveModelDefaults(codex, %q) error = %v", tt.name, err)
+			}
+			if defaults.ContextWindowTokens != tt.context || defaults.MaxOutputTokens != codexOAuthDefaultMaxOutputTokens || defaults.DefaultReasoningEffort != tt.defaultEffort || defaults.ReasoningMode != modelcatalog.ReasoningModeEffort || !slices.Equal(defaults.ReasoningLevels, tt.reasoningLevel) {
+				t.Fatalf("ResolveModelDefaults(codex, %q) = %#v", tt.name, defaults)
+			}
+			if slices.Contains(defaults.ReasoningLevels, "none") {
+				t.Fatalf("ResolveModelDefaults(codex, %q) advertises unsupported none effort", tt.name)
+			}
+		})
+	}
+}
+
+func TestSanitizePersistedCodexProfileKeepsReferenceOnly(t *testing.T) {
+	t.Parallel()
+
+	profile := SanitizePersistedProfile(ProfileConfig{
+		Provider:      "openai-codex",
+		BaseURL:       CodexOAuthBaseURL,
+		CredentialRef: CodexOAuthCredentialRef,
+		Token:         "access-secret",
+		TokenEnv:      "SHOULD_NOT_SURVIVE",
+		PersistToken:  true,
+	})
+	if profile.CredentialRef != CodexOAuthCredentialRef || profile.Token != "" || profile.TokenEnv != "" || profile.PersistToken {
+		t.Fatalf("SanitizePersistedProfile(codex) = %#v", profile)
+	}
+}
+
 func selectableModelNamesContain(models []SelectableModel, name string) bool {
 	for _, item := range models {
 		if item.Name == name {
@@ -197,6 +359,14 @@ func selectableModelNamesContain(models []SelectableModel, name string) bool {
 		}
 	}
 	return false
+}
+
+func selectableModelNames(models []SelectableModel) []string {
+	names := make([]string, 0, len(models))
+	for _, item := range models {
+		names = append(names, item.Name)
+	}
+	return names
 }
 
 func TestBuildModelConstructsSDKModelFromControlConfig(t *testing.T) {

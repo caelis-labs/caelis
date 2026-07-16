@@ -80,6 +80,29 @@ func (tm *taskRuntime) StartSubagent(
 	runner subagent.Runner,
 	req taskapi.SubagentStartRequest,
 ) (taskapi.Snapshot, error) {
+	return tm.startSubagentTarget(ctx, activeSession, ref, runner, delegation.AgentTarget(req.Agent), req, true)
+}
+
+func (tm *taskRuntime) StartSubagentTarget(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+	runner subagent.Runner,
+	target delegation.Target,
+	req taskapi.SubagentStartRequest,
+) (taskapi.Snapshot, error) {
+	return tm.startSubagentTarget(ctx, activeSession, ref, runner, target, req, false)
+}
+
+func (tm *taskRuntime) startSubagentTarget(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+	runner subagent.Runner,
+	target delegation.Target,
+	req taskapi.SubagentStartRequest,
+	legacyDigest bool,
+) (taskapi.Snapshot, error) {
 	if runner == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent runner is required")
 	}
@@ -96,23 +119,38 @@ func (tm *taskRuntime) StartSubagent(
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	requestDigest, err := subagentSpawnRequestDigest(req, mode, role)
+	target = delegation.NormalizeTarget(target)
+	if err := delegation.ValidateTarget(target); err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	if delegationTargetRequiresPlacementRunner(target) {
+		if _, ok := runner.(subagent.PlacementRunner); !ok {
+			return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent runner does not support typed placements")
+		}
+	}
+	var requestDigest string
+	if legacyDigest {
+		requestDigest, err = subagentSpawnRequestDigest(req, mode, role)
+	} else {
+		requestDigest, err = subagentSpawnTargetRequestDigest(target, req, mode, role)
+	}
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	handle := tm.reserveSubagentHandle(activeSession, ref, req.Agent)
-	outcome, err := tm.beginSubagentSpawn(ctx, ref, taskID, spawnID, requestDigest, req, mode, role, handle, runner)
+	handle := tm.reserveSubagentHandle(activeSession, ref, target.Selector)
+	outcome, err := tm.beginSubagentSpawn(ctx, ref, taskID, spawnID, requestDigest, target, req, mode, role, handle, runner)
 	if err != nil || outcome.Terminal {
 		return outcome.Snapshot, err
 	}
 	var task *subagentTask
 	if outcome.ShouldSpawn {
 		childPrompt := contextprompt.ComposeTextPrompt(req.Context, strings.TrimSpace(req.Prompt))
-		anchor, result, err := runner.Spawn(ctx, subagent.SpawnContext{
+		spawnContext := subagent.SpawnContext{
 			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession), CWD: strings.TrimSpace(activeSession.CWD),
 			TaskID: taskID, ParentCallID: strings.TrimSpace(req.ParentCall), Mode: mode, ApprovalMode: strings.TrimSpace(req.ApprovalMode),
 			ApprovalRequester: req.Approval, Streams: tm,
-		}, delegation.Request{Agent: strings.TrimSpace(req.Agent), Prompt: childPrompt})
+		}
+		anchor, result, err := spawnSubagentTarget(ctx, runner, spawnContext, target, childPrompt)
 		if err != nil {
 			outcome.Entry.State = taskapi.StateUnknownOutcome
 			setSpawnEntryPhase(outcome.Entry, spawnPhaseUnknownOutcome, err.Error())
@@ -129,11 +167,11 @@ func (tm *taskRuntime) StartSubagent(
 		}
 		// Validate before any durable post_spawn commit so a crash cannot
 		// roll-forward an invalid anchor (empty AgentID, mismatched agent, etc.).
-		if validationErr := validateSubagentSpawnResult(taskID, strings.TrimSpace(req.Agent), anchor, result); validationErr != nil {
-			task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, req, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhaseExternalPending)
+		if validationErr := validateSubagentSpawnResult(taskID, target.ExecutionAgent(), anchor, result); validationErr != nil {
+			task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, target, req, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhaseExternalPending)
 			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, validationErr)
 		}
-		task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, req, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhasePostSpawn)
+		task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, target, req, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhasePostSpawn)
 		task.seedStreamFromResult(result)
 		spawnedEntry := task.entrySnapshot(tm.runtime.now())
 		if err := tm.persistSpawnEntry(ctx, spawnedEntry); err != nil {
@@ -165,6 +203,7 @@ func (tm *taskRuntime) beginSubagentSpawn(
 	taskID string,
 	spawnID string,
 	requestDigest string,
+	target delegation.Target,
 	req taskapi.SubagentStartRequest,
 	mode string,
 	role session.ParticipantRole,
@@ -188,11 +227,12 @@ func (tm *taskRuntime) beginSubagentSpawn(
 	now := tm.runtime.now()
 	entry := &taskapi.Entry{
 		TaskID: taskID, Kind: taskapi.KindSubagent, Session: session.NormalizeSessionRef(ref),
-		Title: "Spawn " + strings.TrimSpace(req.Agent), State: taskapi.StatePrepared, CreatedAt: now, UpdatedAt: now,
+		Title: "Spawn " + target.Selector, State: taskapi.StatePrepared, CreatedAt: now, UpdatedAt: now,
 		SupportsCancel: true,
 		Spec: map[string]any{
 			"spawn_identity": strings.TrimSpace(spawnID), "spawn_request_digest": strings.TrimSpace(requestDigest),
-			"agent": strings.TrimSpace(req.Agent), "prompt": strings.TrimSpace(req.Prompt),
+			"target":  target,
+			"prompt":  strings.TrimSpace(req.Prompt),
 			"context": agent.CloneContextTransfer(req.Context), "mode": strings.TrimSpace(mode),
 			"approval_mode": strings.TrimSpace(req.ApprovalMode), "parent_call": strings.TrimSpace(req.ParentCall),
 			"participant_role": string(role),
@@ -276,6 +316,27 @@ func subagentSpawnRequestDigest(req taskapi.SubagentStartRequest, mode string, r
 		Context: agent.CloneContextTransfer(req.Context), Mode: strings.TrimSpace(mode),
 		ApprovalMode: strings.TrimSpace(req.ApprovalMode), ParentCall: strings.TrimSpace(req.ParentCall), Role: role,
 	}
+	return hashSubagentSpawnPayload(payload)
+}
+
+func subagentSpawnTargetRequestDigest(target delegation.Target, req taskapi.SubagentStartRequest, mode string, role session.ParticipantRole) (string, error) {
+	payload := struct {
+		Target       delegation.Target       `json:"target"`
+		Prompt       string                  `json:"prompt"`
+		Context      agent.ContextTransfer   `json:"context"`
+		Mode         string                  `json:"mode"`
+		ApprovalMode string                  `json:"approval_mode"`
+		ParentCall   string                  `json:"parent_call"`
+		Role         session.ParticipantRole `json:"role"`
+	}{
+		Target: delegation.NormalizeTarget(target), Prompt: strings.TrimSpace(req.Prompt),
+		Context: agent.CloneContextTransfer(req.Context), Mode: strings.TrimSpace(mode),
+		ApprovalMode: strings.TrimSpace(req.ApprovalMode), ParentCall: strings.TrimSpace(req.ParentCall), Role: role,
+	}
+	return hashSubagentSpawnPayload(payload)
+}
+
+func hashSubagentSpawnPayload(payload any) (string, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("agent-sdk/runtime: encode subagent spawn identity: %w", err)
@@ -289,6 +350,7 @@ func newSubagentTaskFromSpawn(
 	taskID string,
 	spawnID string,
 	requestDigest string,
+	target delegation.Target,
 	req taskapi.SubagentStartRequest,
 	role session.ParticipantRole,
 	handle string,
@@ -299,11 +361,12 @@ func newSubagentTaskFromSpawn(
 	now time.Time,
 	phase spawnPhase,
 ) *subagentTask {
-	agentName := strings.TrimSpace(firstNonEmpty(anchor.Agent, req.Agent))
+	target = delegation.NormalizeTarget(target)
+	agentName := firstNonEmpty(target.Selector, strings.TrimSpace(anchor.Agent))
 	task := &subagentTask{
 		ref:        taskapi.Ref{TaskID: taskID, SessionID: strings.TrimSpace(anchor.SessionID), TerminalID: subagentTerminalID(taskID)},
 		sessionRef: session.NormalizeSessionRef(ref), anchor: delegation.CloneAnchor(anchor), runner: runner,
-		agent: agentName, handle: handle, title: spawn.ToolName + " " + agentName,
+		agent: agentName, target: target, handle: handle, title: spawn.ToolName + " " + agentName,
 		prompt: strings.TrimSpace(req.Prompt), createdAt: now, revision: revision,
 		state: taskStateFromDelegation(result.State), running: result.State == delegation.StateRunning, turnSeq: 1,
 		metadata: map[string]any{
@@ -314,6 +377,25 @@ func newSubagentTaskFromSpawn(
 	}
 	task.applyResult(result)
 	return task
+}
+
+func delegationTargetRequiresPlacementRunner(target delegation.Target) bool {
+	target = delegation.NormalizeTarget(target)
+	return target.Placement.Kind == delegation.PlacementModel ||
+		target.Placement.ConfigFingerprint != "" || target.Placement.Fingerprint != ""
+}
+
+func spawnSubagentTarget(
+	ctx context.Context,
+	runner subagent.Runner,
+	spawnContext subagent.SpawnContext,
+	target delegation.Target,
+	prompt string,
+) (delegation.Anchor, delegation.Result, error) {
+	if placed, ok := runner.(subagent.PlacementRunner); ok {
+		return placed.SpawnTarget(ctx, spawnContext, delegation.TargetRequest{Target: target, Prompt: prompt})
+	}
+	return runner.Spawn(ctx, spawnContext, delegation.Request{Agent: target.ExecutionAgent(), Prompt: prompt})
 }
 
 func validateSubagentSpawnResult(taskID, requestedAgent string, anchor delegation.Anchor, result delegation.Result) error {

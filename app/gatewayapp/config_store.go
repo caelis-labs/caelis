@@ -16,9 +16,10 @@ type PluginConfig = configstore.PluginConfig
 type MarketplaceConfig = configstore.MarketplaceConfig
 
 type appConfigStore struct {
-	path     string
-	inner    *configstore.Store
-	saveHook func(AppConfig) error
+	path      string
+	inner     *configstore.Store
+	saveHook  func(AppConfig) error
+	savedHook func()
 }
 
 func newAppConfigStore(root string) *appConfigStore {
@@ -71,7 +72,13 @@ func (s *appConfigStore) Save(doc AppConfig) error {
 		}
 	}
 	s.inner.SetPath(s.path)
-	return s.inner.Save(doc)
+	if err := s.inner.Save(doc); err != nil {
+		return err
+	}
+	if s.savedHook != nil {
+		s.savedHook()
+	}
+	return nil
 }
 
 func validateProductAgentRoster(roster controlagents.Configuration) error {

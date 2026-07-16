@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/ports/gateway"
 )
@@ -25,8 +26,9 @@ func (s *Stack) Connect(cfg ModelConfig) (string, error) {
 	return modelIDs[0], nil
 }
 
-// ConnectModels atomically persists one or more provider-backed models. The
-// first model remains the default and active model after the transaction.
+// ConnectModels atomically persists one or more provider-backed models. An
+// existing default remains active; the first connected model becomes the
+// default only when no model has been configured yet.
 func (s *Stack) ConnectModels(configs []ModelConfig) ([]string, error) {
 	if s == nil {
 		return nil, fmt.Errorf("gatewayapp: stack is unavailable")
@@ -48,6 +50,8 @@ func (s *Stack) ConnectModels(configs []ModelConfig) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	previousDefaultID := strings.TrimSpace(s.lookup.DefaultID())
+	_, hadDefault := s.lookup.Config(previousDefaultID)
 	modelIDs := make([]string, 0, len(configs))
 	for _, cfg := range configs {
 		modelID, err := s.lookup.upsert(cfg, false)
@@ -56,10 +60,10 @@ func (s *Stack) ConnectModels(configs []ModelConfig) ([]string, error) {
 		}
 		modelIDs = append(modelIDs, modelID)
 	}
-	activeID := modelIDs[0]
-	s.lookup.SetDefault(activeID)
-	activeConfig, _ := s.lookup.Config(activeID)
-	s.setRuntimeModel(activeConfig)
+	if !hadDefault {
+		s.lookup.SetDefault(modelIDs[0])
+	}
+	s.setRuntimeDefaultModelFromLookup()
 	txn.applyResolver()
 	if s.store == nil {
 		return nil, txn.rollback(fmt.Errorf("gatewayapp: app config store unavailable"))
@@ -209,7 +213,7 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 		return err
 	}
 	nextRoster := controlagents.RemoveModelBackedAgent(doc.AgentRoster, cfg.ID)
-	if err := s.rejectRemovedBoundACPAgents(ctx, doc.AgentRoster, nextRoster); err != nil {
+	if err := s.rejectRemovedLiveACPAgents(ctx, doc.AgentRoster, nextRoster); err != nil {
 		return err
 	}
 	if err := s.lookup.Delete(alias); err != nil {
@@ -218,7 +222,9 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 	hasDefault := strings.TrimSpace(s.lookup.DefaultID()) != ""
 	txn.applyResolver()
 	txn.captureAgentRoster(doc.AgentRoster)
+	txn.captureDelegation(doc.Delegation)
 	doc.Models = s.lookup.Snapshot()
+	doc.Delegation = resetRemovedDelegationBindings(doc.Delegation, doc.AgentRoster, nextRoster)
 	doc.AgentRoster = nextRoster
 	if err := s.store.Save(doc); err != nil {
 		return txn.rollback(err)
@@ -253,6 +259,8 @@ type modelConfigTransaction struct {
 	previousRuntime       stackRuntimeConfig
 	previousAgentRoster   controlagents.Configuration
 	restoreAgentRoster    bool
+	previousDelegation    controldelegation.Configuration
+	restoreDelegation     bool
 	storeSaved            bool
 }
 
@@ -301,6 +309,14 @@ func (t *modelConfigTransaction) captureAgentRoster(roster controlagents.Configu
 	t.restoreAgentRoster = true
 }
 
+func (t *modelConfigTransaction) captureDelegation(configuration controldelegation.Configuration) {
+	if t == nil {
+		return
+	}
+	t.previousDelegation = controldelegation.NormalizeConfiguration(configuration)
+	t.restoreDelegation = true
+}
+
 func (t *modelConfigTransaction) rollback(cause error) error {
 	if t == nil || t.stack == nil {
 		return cause
@@ -314,7 +330,9 @@ func (t *modelConfigTransaction) rollback(cause error) error {
 		return cause
 	}
 	var saveErr error
-	if t.restoreAgentRoster {
+	if t.restoreAgentRoster && t.restoreDelegation {
+		saveErr = t.stack.saveModelConfigsAgentRosterAndDelegation(t.previousAgentRoster, t.previousDelegation)
+	} else if t.restoreAgentRoster {
 		saveErr = t.stack.saveModelConfigsAndAgentRoster(t.previousAgentRoster)
 	} else {
 		saveErr = t.stack.saveModelConfigs()

@@ -79,7 +79,7 @@ func defaultSpecs() []CommandSpec {
 	for _, spec := range append(defaultSharedSpecs(), defaultTUISpecs()...) {
 		byName[spec.Name] = spec
 	}
-	order := []string{"help", "review", "lead", "connect", "plugin", "model", "status", "doctor", "new", "resume", "compact", "exit", "quit"}
+	order := []string{"help", "review", "lead", "connect", "subagent", "plugin", "model", "status", "doctor", "new", "resume", "compact", "exit", "quit"}
 	specs := make([]CommandSpec, 0, len(order))
 	for _, name := range order {
 		if spec, ok := byName[name]; ok {
@@ -94,7 +94,7 @@ func defaultSharedSpecs() []CommandSpec {
 		{Name: "help", Usage: "/help", Description: "Show commands and shortcuts", LocalDuringACP: true},
 		{Name: "review", Usage: "/review [instructions]", Description: "Review current workspace changes with the built-in reviewer", LocalDuringACP: true},
 		{Name: "lead", Usage: "/lead <agent|local>", Description: "Transfer control of the current task", LocalDuringACP: true, DynamicCompleter: true},
-		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
+		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias> [effort], del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info", LocalDuringACP: true},
 		{Name: "doctor", Usage: "/doctor", Description: "Diagnose and repair Windows sandbox readiness", LocalDuringACP: true, Platforms: []string{"windows"}},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
@@ -107,6 +107,7 @@ func defaultSharedSpecs() []CommandSpec {
 func defaultTUISpecs() []CommandSpec {
 	specs := []CommandSpec{
 		{Name: "connect", Usage: "/connect", Description: "Connect a model provider or local ACP Agent", DynamicCompleter: true},
+		{Name: "subagent", Usage: "/subagent", Description: "Configure Caelis Breeze, Orbit, and Zenith delegation profiles", LocalDuringACP: true, DynamicCompleter: true, Details: []string{"actions: list, bind <profile> <self|agent-id> [effort]"}},
 		{Name: "plugin", Usage: "/plugin <action>", Description: "Manage Caelis plugins", LocalDuringACP: true, Details: []string{"actions: install <plugin@marketplace|path>, marketplace add|list|update|rm, manage, rm <id>"}, ArgCandidates: pluginRootCandidates(), DynamicCompleter: true},
 		{Name: "exit", Usage: "/exit", Description: "Exit the TUI", LocalDuringACP: true},
 		{Name: "quit", Usage: "/quit", Description: "Exit the TUI", LocalDuringACP: true},

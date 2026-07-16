@@ -22,9 +22,29 @@ func TestAdapterACPConnectDiscoveryIsReusedForModelsConfigAndPersist(t *testing.
 					ConnectionID: "claude", LaunchFingerprint: "fingerprint", CWD: req.CWD,
 					SelectedModelID: req.ModelID,
 					Models:          []controlagents.RemoteModel{{ID: "opus", Name: "Opus"}},
-					ConfigOptions: []controlagents.ConfigOption{{
-						ID: "reasoning_effort", Name: "Reasoning", Options: []controlagents.ConfigChoice{{Value: "max", Name: "Max"}},
-					}},
+					ConfigOptions: []controlagents.ConfigOption{
+						{
+							ID: "model", Name: "Model", Category: "model",
+							Options: []controlagents.ConfigChoice{{Value: "opus", Name: "Opus"}},
+						},
+						{
+							ID: "mode", Name: "Mode", Category: "mode",
+							Options: []controlagents.ConfigChoice{{Value: "agent", Name: "Agent"}, {Value: "full_access", Name: "Agent (full access)"}},
+						},
+						{
+							ID: "reasoning_effort", Name: "Reasoning effort", Category: "thought_level",
+							Options: []controlagents.ConfigChoice{{Value: "high", Name: "High"}, {Value: "max", Name: "Max"}},
+						},
+						{
+							ID: "fast_mode", Name: "Fast mode", Category: "thought_level",
+							Options: []controlagents.ConfigChoice{{Value: "off", Name: "Off"}, {Value: "on", Name: "On"}},
+						},
+						{
+							ID: "tone", Name: "Tone",
+							Options: []controlagents.ConfigChoice{{Value: "concise", Name: "Concise"}, {Value: "detailed", Name: "Detailed"}},
+						},
+					},
+					ModelControl: controlagents.ModelControl{Kind: controlagents.ModelControlConfigOption, ConfigID: "model"},
 				}, nil
 			},
 			ConnectFn: func(_ context.Context, req controlagents.ConnectRequest) (controlagents.ConnectResult, error) {
@@ -49,8 +69,19 @@ func TestAdapterACPConnectDiscoveryIsReusedForModelsConfigAndPersist(t *testing.
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(config) error = %v", err)
 	}
-	if !slashCandidatesHaveValue(configs, "default") || !slashCandidatesHaveValue(configs, "reasoning_effort=max") {
-		t.Fatalf("config candidates = %#v, want default and reasoning", configs)
+	wantConfigValues := []string{"default", "reasoning_effort=high", "reasoning_effort=max"}
+	if len(configs) != len(wantConfigValues) {
+		t.Fatalf("config candidates = %#v, want only Agent default and reasoning effort", configs)
+	}
+	for _, want := range wantConfigValues {
+		if !slashCandidatesHaveValue(configs, want) {
+			t.Fatalf("config candidates = %#v, want %q", configs, want)
+		}
+	}
+	for _, unwanted := range []string{"mode=agent", "mode=full_access", "fast_mode=off", "fast_mode=on", "tone=concise", "tone=detailed", "model=opus"} {
+		if slashCandidatesHaveValue(configs, unwanted) {
+			t.Fatalf("config candidates = %#v, must keep %q at the ACP Agent default", configs, unwanted)
+		}
 	}
 	if discoveryCalls != 2 {
 		t.Fatalf("discovery calls = %d, want catalog and selected-model temporary Sessions", discoveryCalls)

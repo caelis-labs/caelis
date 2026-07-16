@@ -12,6 +12,7 @@ import (
 type slashOutputLine struct {
 	Text  string
 	Style tuikit.LineStyle
+	Plain bool
 }
 
 type slashOutputBlock struct {
@@ -25,6 +26,7 @@ func newSlashOutputBlock(lines []slashOutputLine) *slashOutputBlock {
 		out = append(out, slashOutputLine{
 			Text:  strings.TrimRight(line.Text, " \t"),
 			Style: line.Style,
+			Plain: line.Plain,
 		})
 	}
 	return &slashOutputBlock{id: nextBlockID(), lines: out}
@@ -40,7 +42,7 @@ func (b *slashOutputBlock) Render(ctx BlockRenderContext) []RenderedRow {
 			continue
 		}
 		style := line.Style
-		if style == 0 {
+		if style == 0 && !line.Plain {
 			style = tuikit.DetectLineStyle(line.Text)
 		}
 		plain := line.Text
@@ -51,17 +53,25 @@ func (b *slashOutputBlock) Render(ctx BlockRenderContext) []RenderedRow {
 }
 
 func (m *Model) handleSlashCommandResultMsg(msg SlashCommandResultMsg) (tea.Model, tea.Cmd) {
-	lines := renderSlashCommandResultLines(msg.Result)
+	return m.appendSlashOutputLines(renderSlashCommandResultLines(msg.Result))
+}
+
+func (m *Model) handleSlashNoticeMsg(msg SlashNoticeMsg) (tea.Model, tea.Cmd) {
+	return m.appendSlashOutputLines(renderSlashNoticeLines(msg))
+}
+
+func (m *Model) appendSlashOutputLines(lines []slashOutputLine) (tea.Model, tea.Cmd) {
 	if len(lines) == 0 {
 		return m, nil
 	}
 	m.finalizeAssistantBlock()
 	m.finalizeReasoningBlock()
 	if m.hasCommittedLine {
-		m.insertSpacing(tuikit.LineStyleSection, firstSlashOutputLine(lines))
+		m.appendSlashOutputSpacer()
 	}
 	block := newSlashOutputBlock(lines)
 	m.doc.Append(block)
+	m.appendSlashOutputSpacer()
 	m.lastCommittedStyle = lastSlashOutputStyle(lines)
 	m.lastCommittedRaw = lastSlashOutputText(lines)
 	m.hasCommittedLine = true
@@ -70,13 +80,32 @@ func (m *Model) handleSlashCommandResultMsg(msg SlashCommandResultMsg) (tea.Mode
 	return m, m.requestStreamViewportSync()
 }
 
-func firstSlashOutputLine(lines []slashOutputLine) string {
-	for _, line := range lines {
-		if strings.TrimSpace(line.Text) != "" {
-			return line.Text
-		}
+func (m *Model) appendSlashOutputSpacer() {
+	if m == nil || m.doc == nil || m.doc.Len() == 0 {
+		return
 	}
-	return ""
+	if last, ok := m.doc.Last().(*TranscriptBlock); ok && strings.TrimSpace(last.Raw) == "" {
+		return
+	}
+	m.doc.Append(NewSpacerBlock())
+}
+
+func renderSlashNoticeLines(msg SlashNoticeMsg) []slashOutputLine {
+	text := strings.TrimSpace(strings.ReplaceAll(msg.Text, "\r\n", "\n"))
+	if text == "" {
+		return nil
+	}
+	rawLines := strings.Split(text, "\n")
+	lines := make([]slashOutputLine, 0, len(rawLines))
+	for _, raw := range rawLines {
+		content := strings.TrimSpace(raw)
+		if content == "" {
+			lines = append(lines, slashBlank())
+			continue
+		}
+		lines = append(lines, slashOutputLine{Text: content, Plain: true})
+	}
+	return lines
 }
 
 func lastSlashOutputText(lines []slashOutputLine) string {

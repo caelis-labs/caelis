@@ -15,6 +15,7 @@ type Factory struct {
 
 var supportedAPITypes = map[APIType]struct{}{
 	APIOpenAI:              {},
+	APIOpenAICodex:         {},
 	APIOpenAICompatible:    {},
 	APIOpenRouter:          {},
 	APICodeFree:            {},
@@ -67,6 +68,8 @@ func defaultAuthType(api APIType) AuthType {
 	switch api {
 	case APIOllama, APICodeFree:
 		return AuthNone
+	case APIOpenAICodex:
+		return AuthOAuthToken
 	case APIDeepSeek, APIMiniMax:
 		return AuthBearerToken
 	default:
@@ -87,6 +90,16 @@ func (f *Factory) NewByAlias(alias string) (model.LLM, error) {
 	if !ok {
 		return nil, fmt.Errorf("providers: unknown model alias %q", alias)
 	}
+	if cfg.API == APIOpenAICodex {
+		if cfg.Auth.Type != AuthOAuthToken {
+			return nil, fmt.Errorf("providers: openai codex requires oauth authentication")
+		}
+		if cfg.HTTPClient == nil {
+			return nil, fmt.Errorf("providers: openai codex requires an authenticated http client")
+		}
+		return model.WithRetry(newOpenAICodex(cfg), cfg.Retry), nil
+	}
+
 	token, err := resolveToken(cfg.Auth)
 	if err != nil {
 		return nil, err

@@ -41,10 +41,11 @@ func BuildModel(cfg Config, fallbackContextWindow int, overrideContextWindow int
 		ReasoningEffort:           cfg.ReasoningEffort,
 		SupportedReasoningEfforts: append([]string(nil), cfg.ReasoningLevels...),
 		Auth: providers.AuthConfig{
-			Type:      cfg.AuthType,
-			Token:     cfg.Token,
-			TokenEnv:  cfg.TokenEnv,
-			HeaderKey: cfg.HeaderKey,
+			Type:          cfg.AuthType,
+			Token:         cfg.Token,
+			TokenEnv:      cfg.TokenEnv,
+			CredentialRef: cfg.CredentialRef,
+			HeaderKey:     cfg.HeaderKey,
 		},
 	}
 	factory := providers.NewFactory()

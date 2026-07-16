@@ -25,6 +25,11 @@ import (
 
 type PermissionHandler func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error)
 
+// PlacementResolver materializes a durable model placement at the external
+// effect boundary. The product host owns model configuration and must reject a
+// placement whose recorded configuration no longer matches current state.
+type PlacementResolver func(context.Context, subagent.SpawnContext, delegation.TargetRequest) (AgentConfig, error)
+
 type PermissionBridge interface {
 	RequestPermission(context.Context, PermissionRequest) (client.RequestPermissionResponse, error)
 }
@@ -42,6 +47,7 @@ type RunnerConfig struct {
 	Clock             func() time.Time
 	PermissionHandler PermissionHandler
 	PermissionBridge  PermissionBridge
+	PlacementResolver PlacementResolver
 }
 
 type Runner struct {
@@ -50,6 +56,7 @@ type Runner struct {
 	clock             func() time.Time
 	permissionHandler PermissionHandler
 	permissionBridge  PermissionBridge
+	placementResolver PlacementResolver
 
 	counter atomic.Uint64
 	mu      sync.RWMutex
@@ -89,12 +96,22 @@ func NewRunner(cfg RunnerConfig) (*Runner, error) {
 		clock:             clock,
 		permissionHandler: cfg.PermissionHandler,
 		permissionBridge:  cfg.PermissionBridge,
+		placementResolver: cfg.PlacementResolver,
 		runs:              map[string]*childRun{},
 	}, nil
 }
 
 func (r *Runner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
-	cfg, err := r.registry.Resolve(req.Agent)
+	req = delegation.CloneRequest(req)
+	return r.SpawnTarget(ctx, spawn, delegation.TargetRequest{Target: delegation.AgentTarget(req.Agent), Prompt: req.Prompt})
+}
+
+func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (delegation.Anchor, delegation.Result, error) {
+	req = delegation.CloneTargetRequest(req)
+	if err := delegation.ValidateTarget(req.Target); err != nil {
+		return delegation.Anchor{}, delegation.Result{}, err
+	}
+	cfg, err := r.resolveSpawnConfig(ctx, spawn, req)
 	if err != nil {
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
@@ -187,6 +204,45 @@ func (r *Runner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req del
 	r.mu.Unlock()
 	go r.drivePrompt(childCtx, run, strings.TrimSpace(req.Prompt))
 	return anchor, r.waitRun(ctx, run, 0), nil
+}
+
+func (r *Runner) resolveSpawnConfig(ctx context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (AgentConfig, error) {
+	placement := delegation.NormalizePlacement(req.Target.Placement)
+	switch placement.Kind {
+	case delegation.PlacementModel:
+		if r.placementResolver == nil {
+			return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: model placement resolver is unavailable")
+		}
+		cfg, err := r.placementResolver(ctx, spawn, req)
+		if err != nil {
+			return AgentConfig{}, err
+		}
+		cfg = normalizeAgentConfig(cfg)
+		if cfg.Name == "" || cfg.Command == "" {
+			return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: model placement resolved an invalid Agent configuration")
+		}
+		return cfg, nil
+	case delegation.PlacementAgent:
+		if placement.ConfigFingerprint != "" {
+			if r.placementResolver == nil {
+				return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: configured placement resolver is unavailable")
+			}
+			cfg, err := r.placementResolver(ctx, spawn, req)
+			if err != nil {
+				return AgentConfig{}, err
+			}
+			cfg = normalizeAgentConfig(cfg)
+			if cfg.Name == "" || cfg.Command == "" {
+				return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: configured placement resolved an invalid Agent configuration")
+			}
+			return cfg, nil
+		}
+		return r.registry.Resolve(req.Target.ExecutionAgent())
+	case "":
+		return r.registry.Resolve(req.Target.ExecutionAgent())
+	default:
+		return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: unsupported placement kind %q", placement.Kind)
+	}
 }
 
 func hasACPSessionCapability(resp client.InitializeResponse, name string) bool {

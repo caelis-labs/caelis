@@ -9,6 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/discovery"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	"github.com/caelis-labs/caelis/internal/version"
@@ -172,9 +173,10 @@ func (s *Stack) DisconnectACP(ctx context.Context, agentID string) (controlagent
 	if err != nil {
 		return controlagents.DisconnectResult{}, fmt.Errorf("gatewayapp: %w", err)
 	}
-	if err := s.rejectRemovedBoundACPAgents(ctx, doc.AgentRoster, next); err != nil {
+	if err := s.rejectRemovedLiveACPAgents(ctx, doc.AgentRoster, next); err != nil {
 		return controlagents.DisconnectResult{}, err
 	}
+	doc.Delegation = resetRemovedDelegationBindings(doc.Delegation, doc.AgentRoster, next)
 	doc.AgentRoster = next
 	if err := s.store.Save(doc); err != nil {
 		return controlagents.DisconnectResult{}, err
@@ -185,20 +187,40 @@ func (s *Stack) DisconnectACP(ctx context.Context, agentID string) (controlagent
 	return result, nil
 }
 
-func (s *Stack) rejectRemovedBoundACPAgents(ctx context.Context, before controlagents.Configuration, after controlagents.Configuration) error {
-	afterIDs := make(map[string]struct{}, len(after.Agents))
-	for _, agent := range controlagents.NormalizeConfiguration(after).Agents {
-		afterIDs[strings.ToLower(strings.TrimSpace(agent.ID))] = struct{}{}
-	}
-	for _, agent := range controlagents.NormalizeConfiguration(before).Agents {
-		if _, retained := afterIDs[strings.ToLower(strings.TrimSpace(agent.ID))]; retained {
-			continue
-		}
-		if err := s.rejectBoundACPAgent(ctx, agent.ID); err != nil {
+func (s *Stack) rejectRemovedLiveACPAgents(ctx context.Context, before controlagents.Configuration, after controlagents.Configuration) error {
+	for _, agentID := range removedAgentIDs(before, after) {
+		if err := s.rejectBoundACPAgent(ctx, agentID); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func removedAgentIDs(before controlagents.Configuration, after controlagents.Configuration) []string {
+	afterIDs := make(map[string]struct{}, len(after.Agents))
+	for _, agent := range controlagents.NormalizeConfiguration(after).Agents {
+		afterIDs[strings.ToLower(strings.TrimSpace(agent.ID))] = struct{}{}
+	}
+	removed := make([]string, 0)
+	for _, agent := range controlagents.NormalizeConfiguration(before).Agents {
+		if _, retained := afterIDs[strings.ToLower(strings.TrimSpace(agent.ID))]; retained {
+			continue
+		}
+		removed = append(removed, agent.ID)
+	}
+	return removed
+}
+
+func resetRemovedDelegationBindings(
+	current controldelegation.Configuration,
+	before controlagents.Configuration,
+	after controlagents.Configuration,
+) controldelegation.Configuration {
+	next := current
+	for _, agentID := range removedAgentIDs(before, after) {
+		next, _ = controldelegation.ResetAgentBindings(next, agentID)
+	}
+	return next
 }
 
 // rejectBoundACPAgent is the Control-owned safety gate for durable controller

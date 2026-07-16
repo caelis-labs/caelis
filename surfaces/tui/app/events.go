@@ -29,6 +29,12 @@ type SlashCommandResultMsg struct {
 	Result control.SlashCommandResult
 }
 
+// SlashNoticeMsg carries non-tabular Slash command output through the same
+// structured renderer used by /help and /status.
+type SlashNoticeMsg struct {
+	Text string
+}
+
 type SetStatusMsg struct {
 	Workspace string
 	Model     string

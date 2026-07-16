@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
@@ -195,6 +196,13 @@ type AgentRuntimeDeps struct {
 	ListFn                 func() []ACPAgentInfo
 }
 
+// DelegationRuntimeDeps carries the Control-owned fixed profile bindings.
+type DelegationRuntimeDeps struct {
+	StatusFn func(context.Context) (controldelegation.Status, error)
+	BindFn   func(context.Context, controldelegation.BindRequest) (controldelegation.Status, error)
+	ResetFn  func(context.Context, controldelegation.Profile) (controldelegation.Status, error)
+}
+
 // ModelRuntimeDeps carries model catalog and mutation capabilities. Metadata
 // reads can return zero values when absent; connect/use/delete operations fail
 // when invoked without their backing hooks.
@@ -242,6 +250,7 @@ type RuntimeStack struct {
 	Session          SessionRuntimeDeps
 	Status           StatusRuntimeDeps
 	Agent            AgentRuntimeDeps
+	Delegation       DelegationRuntimeDeps
 	Model            ModelRuntimeDeps
 	Sandbox          SandboxRuntimeDeps
 	Skill            SkillRuntimeDeps

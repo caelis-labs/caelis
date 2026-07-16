@@ -17,7 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
-func TestLocalStackInjectsSpawnForOrdinaryAgentsAndHidesSystemScenes(t *testing.T) {
+func TestLocalStackInjectsOnlyFixedDelegationProfiles(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{
 		Agents: []assembly.AgentConfig{{
@@ -32,12 +32,12 @@ func TestLocalStackInjectsSpawnForOrdinaryAgentsAndHidesSystemScenes(t *testing.
 	if !toolSetHas(resolved.RunRequest.AgentSpec.Tools, spawn.ToolName) || !toolSetHas(resolved.RunRequest.AgentSpec.Tools, task.ToolName) {
 		t.Fatalf("tools = %#v, want SPAWN and task tools", resolved.RunRequest.AgentSpec.Tools)
 	}
-	for _, want := range []string{"self", "helper"} {
+	for _, want := range []string{"self", "breeze", "orbit", "zenith"} {
 		if !spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, want) {
 			t.Fatalf("SPAWN Agent enum missing %q", want)
 		}
 	}
-	for _, hidden := range []string{ReviewerAgentID, guardianSceneID} {
+	for _, hidden := range []string{"helper", ReviewerAgentID, guardianSceneID} {
 		if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, hidden) {
 			t.Fatalf("SPAWN Agent enum exposes system scene %q", hidden)
 		}

@@ -208,7 +208,7 @@ func completeConnectACPConfig(ctx context.Context, driver *Adapter, raw string, 
 	}
 	candidates := []SlashArgCandidate{{Value: "default", Display: "Agent default", Detail: "Keep the ACP Agent's default session options"}}
 	for _, option := range snapshot.ConfigOptions {
-		if strings.EqualFold(strings.TrimSpace(option.ID), strings.TrimSpace(snapshot.ModelControl.ConfigID)) {
+		if strings.EqualFold(strings.TrimSpace(option.ID), strings.TrimSpace(snapshot.ModelControl.ConfigID)) || option.Purpose != controlagents.ConfigOptionPurposeReasoningEffort {
 			continue
 		}
 		for _, choice := range option.Options {
@@ -245,8 +245,8 @@ func completeConnectProviders(query string, limit int) []SlashArgCandidate {
 			continue
 		}
 		detailParts := []string{strings.TrimSpace(template.Description), strings.TrimSpace(template.DefaultBaseURL)}
-		if template.AuthFlow != "" {
-			detailParts = append(detailParts, "browser oauth")
+		if template.AuthDisplay != "" {
+			detailParts = append(detailParts, template.AuthDisplay)
 		} else if template.NoAuthRequired {
 			detailParts = append(detailParts, "no auth")
 		} else if env := modelconfig.DefaultTokenEnv(template.Provider, template.DefaultBaseURL); env != "" {
@@ -256,7 +256,7 @@ func completeConnectProviders(query string, limit int) []SlashArgCandidate {
 			Value:   template.Label,
 			Display: template.Label,
 			Detail:  strings.Join(compactNonEmpty(detailParts), " · "),
-			NoAuth:  template.NoAuthRequired,
+			NoAuth:  template.NoAuthRequired || template.AuthFlow != "",
 		})
 		if len(out) >= limit {
 			break
@@ -438,9 +438,12 @@ func buildConnectModelChoices(provider string, fallbackModels []modelconfig.Sele
 	for _, item := range fallbackModels {
 		add(item, "")
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		return strings.ToLower(out[i].Display) < strings.ToLower(out[j].Display)
-	})
+	template, maintainedProvider := modelconfig.LookupProvider(provider)
+	if !maintainedProvider || !template.PreserveModelOrder {
+		sort.SliceStable(out, func(i, j int) bool {
+			return strings.ToLower(out[i].Display) < strings.ToLower(out[j].Display)
+		})
+	}
 	return out
 }
 

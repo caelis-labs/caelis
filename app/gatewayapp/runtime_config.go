@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -31,37 +30,8 @@ type stackRuntimeConfig struct {
 	EstimatedPromptPrefixTokens int
 }
 
-func delegationAgentsFromAssembly(assembly assembly.ResolvedAssembly) []delegation.Agent {
-	out := make([]delegation.Agent, 0, len(assembly.Agents))
-	for _, one := range assembly.Agents {
-		if !isSpawnVisibleAgent(one) {
-			continue
-		}
-		agent := delegation.NormalizeAgent(delegation.Agent{
-			Name:        one.Name,
-			Description: one.Description,
-		})
-		if agent.Name == "" {
-			continue
-		}
-		out = append(out, agent)
-	}
-	return out
-}
-
-func delegationAgentsForSpawn(assembly assembly.ResolvedAssembly, _ []session.ParticipantBinding) []delegation.Agent {
-	if len(assembly.Agents) == 0 {
-		return nil
-	}
-	return delegationAgentsFromAssembly(assembly)
-}
-
-func isSpawnVisibleAgent(agent assembly.AgentConfig) bool {
-	name := strings.TrimSpace(agent.Name)
-	if name == "" || isSystemSceneAgent(agent) {
-		return false
-	}
-	return !strings.EqualFold(name, guardianSceneID) && !strings.EqualFold(name, ReviewerAgentID)
+func delegationAgentsForSpawn() []delegation.Agent {
+	return fixedDelegationAgents()
 }
 
 func systemPromptWithDelegationGuidance(systemPrompt string) string {

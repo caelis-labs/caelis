@@ -20,10 +20,28 @@ func ValidateArgs(args map[string]any) error {
 }
 
 type Tool struct {
-	agents []delegation.Agent
+	agents  []delegation.Agent
+	targets map[string]Target
+}
+
+// Target is the typed execution placement behind one model-visible Spawn
+// selector.
+type Target = delegation.Target
+
+// Resolver resolves one validated model-visible selector before the durable
+// Spawn intent is written.
+type Resolver interface {
+	ResolveTarget(string) (Target, error)
 }
 
 func New(agents []delegation.Agent) Tool {
+	return NewWithTargets(agents, nil)
+}
+
+// NewWithTargets builds a Spawn tool with stable model-visible selectors and
+// optional concrete execution placements. Missing placements execute the
+// selector directly, preserving the generic SDK behavior.
+func NewWithTargets(agents []delegation.Agent, targets map[string]Target) Tool {
 	out := make([]delegation.Agent, 0, len(agents))
 	for _, one := range agents {
 		normalized := delegation.NormalizeAgent(one)
@@ -32,7 +50,42 @@ func New(agents []delegation.Agent) Tool {
 		}
 		out = append(out, normalized)
 	}
-	return Tool{agents: out}
+	resolved := make(map[string]Target, len(targets))
+	for selector, raw := range targets {
+		target := normalizeTarget(raw)
+		if target.Selector == "" {
+			target.Selector = strings.TrimSpace(selector)
+		}
+		if delegation.ValidateTarget(target) != nil {
+			continue
+		}
+		resolved[strings.ToLower(target.Selector)] = target
+	}
+	return Tool{agents: out, targets: resolved}
+}
+
+// ResolveTarget resolves one already-validated model-visible selector to its
+// concrete execution placement.
+func (t Tool) ResolveTarget(selector string) (Target, error) {
+	selector = strings.TrimSpace(selector)
+	if target, ok := t.targets[strings.ToLower(selector)]; ok {
+		return cloneTarget(target), nil
+	}
+	for _, agent := range t.agents {
+		if strings.EqualFold(agent.Name, selector) {
+			name := strings.TrimSpace(agent.Name)
+			return Target{Selector: name, Placement: delegation.Placement{Kind: delegation.PlacementAgent, Agent: name}}, nil
+		}
+	}
+	return Target{}, fmt.Errorf("tool: Spawn agent %q is not available", selector)
+}
+
+func normalizeTarget(target Target) Target {
+	return delegation.NormalizeTarget(target)
+}
+
+func cloneTarget(target Target) Target {
+	return delegation.NormalizeTarget(target)
 }
 
 func (t Tool) Definition() tool.Definition {
@@ -107,3 +160,4 @@ func agentDescription(agents []delegation.Agent) string {
 }
 
 var _ tool.Tool = Tool{}
+var _ Resolver = Tool{}

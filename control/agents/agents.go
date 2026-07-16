@@ -76,15 +76,25 @@ type ConfigChoice struct {
 	Description string `json:"description,omitempty"`
 }
 
+// ConfigOptionPurpose is the normalized semantic role of an ACP session
+// option. Discovery classifies protocol vocabulary once so presentation code
+// does not repeat vendor-name heuristics.
+type ConfigOptionPurpose string
+
+const (
+	ConfigOptionPurposeReasoningEffort ConfigOptionPurpose = "reasoning_effort"
+)
+
 // ConfigOption is the persisted discovery view of one ACP session option.
 type ConfigOption struct {
-	ID           string         `json:"id,omitempty"`
-	Name         string         `json:"name,omitempty"`
-	Type         string         `json:"type,omitempty"`
-	Category     string         `json:"category,omitempty"`
-	Description  string         `json:"description,omitempty"`
-	CurrentValue string         `json:"current_value,omitempty"`
-	Options      []ConfigChoice `json:"options,omitempty"`
+	ID           string              `json:"id,omitempty"`
+	Name         string              `json:"name,omitempty"`
+	Type         string              `json:"type,omitempty"`
+	Category     string              `json:"category,omitempty"`
+	Description  string              `json:"description,omitempty"`
+	CurrentValue string              `json:"current_value,omitempty"`
+	Purpose      ConfigOptionPurpose `json:"purpose,omitempty"`
+	Options      []ConfigChoice      `json:"options,omitempty"`
 }
 
 // RemoteModel is one model advertised by an ACP session.
@@ -416,10 +426,35 @@ func NormalizeDiscoverySnapshot(in DiscoverySnapshot) DiscoverySnapshot {
 		option.Category = strings.TrimSpace(option.Category)
 		option.Description = strings.TrimSpace(option.Description)
 		option.CurrentValue = strings.TrimSpace(option.CurrentValue)
+		option.Purpose = ConfigOptionPurpose(strings.ToLower(strings.TrimSpace(string(option.Purpose))))
+		if option.Purpose == "" {
+			option.Purpose = classifyConfigOptionPurpose(option)
+		}
 		option.Options = append([]ConfigChoice(nil), option.Options...)
 		out.ConfigOptions = append(out.ConfigOptions, option)
 	}
 	return out
+}
+
+func classifyConfigOptionPurpose(option ConfigOption) ConfigOptionPurpose {
+	compact := func(value string) string {
+		return strings.NewReplacer("_", "", "-", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(value)))
+	}
+	id := compact(option.ID)
+	switch id {
+	case "effort", "reasoningeffort", "reasoninglevel", "reasoningdepth", "thoughtlevel", "thoughtdepth", "thinkinglevel", "thinkingdepth":
+		return ConfigOptionPurposeReasoningEffort
+	}
+	category := compact(option.Category)
+	if category != "thoughtlevel" && category != "reasoning" && category != "reasoningeffort" {
+		return ""
+	}
+	name := compact(option.Name)
+	if strings.Contains(id, "effort") || strings.Contains(id, "level") || strings.Contains(id, "depth") ||
+		strings.Contains(name, "effort") || strings.Contains(name, "level") || strings.Contains(name, "depth") {
+		return ConfigOptionPurposeReasoningEffort
+	}
+	return ""
 }
 
 func normalizeID(value string) string {

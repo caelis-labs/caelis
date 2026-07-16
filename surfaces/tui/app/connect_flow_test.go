@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
 )
 
@@ -306,6 +307,101 @@ func TestConnectWizardStreamsManagedInstallProgress(t *testing.T) {
 		m.Update(loaded)
 	case <-time.After(time.Second):
 		t.Fatal("ACP model load did not finish")
+	}
+}
+
+func TestConnectWizardRunsCodexAuthenticationInBackgroundAndShowsBrowserGuidance(t *testing.T) {
+	messages := make(chan tea.Msg, 4)
+	release := make(chan struct{})
+	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
+	m := NewModel(Config{
+		Context:       context.Background(),
+		ProgramSender: sender,
+		Wizards:       DefaultWizards(),
+		SlashArgComplete: func(ctx context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
+				return []SlashArgCandidate{{Value: "codex", Display: "codex", NoAuth: true}}, nil
+			default:
+				modelconfig.ReportAuthProgress(ctx, modelconfig.AuthProgress{
+					Provider:        "openai-codex",
+					Phase:           modelconfig.AuthProgressWaitingForBrowser,
+					VerificationURL: "https://auth.openai.com/oauth/authorize?test=1",
+				})
+				<-release
+				return []SlashArgCandidate{{Value: "gpt-5.1-codex", Display: "GPT-5.1 Codex"}}, nil
+			}
+		},
+	})
+	m.width = 120
+	m.openSlashArgPicker("connect")
+	if handled, cmd := m.handleWizardEnter(); !handled || cmd != nil {
+		t.Fatalf("model source selection = handled:%v cmd:%v", handled, cmd)
+	}
+	if got := m.slashArgCommand; got != "connect-provider" {
+		t.Fatalf("command after model source = %q", got)
+	}
+	handled, cmd := m.handleWizardEnter()
+	if !handled {
+		t.Fatal("Codex provider selection was not handled")
+	}
+	if cmd == nil || !m.slashArgLoadPending || len(m.slashArgCandidates) != 0 {
+		t.Fatalf("Codex provider selection = cmd:%v pending:%v candidates:%#v", cmd, m.slashArgLoadPending, m.slashArgCandidates)
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok || len(batch) == 0 {
+		t.Fatalf("beginSlashArgLoad() message = %T, want non-empty tea.BatchMsg", msg)
+	}
+	result := make(chan tea.Msg, 1)
+	go func() { result <- batch[0]() }()
+	select {
+	case progress := <-messages:
+		m.Update(progress)
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("Codex auth progress was not forwarded to the TUI")
+	}
+	if got := ansi.Strip(m.renderModelAuthDrawer()); !strings.Contains(got, "Finish signing in via your browser") || !strings.Contains(got, "https://auth.openai.com/oauth/authorize?test=1") || !strings.Contains(got, "Esc cancels") {
+		close(release)
+		t.Fatalf("renderModelAuthDrawer() = %q", got)
+	}
+	if hint := ansi.Strip(m.buildHintText()); !strings.Contains(hint, "Finish signing in to Codex in your browser") || !strings.Contains(hint, "Esc cancels") {
+		close(release)
+		t.Fatalf("buildHintText() = %q", hint)
+	}
+	close(release)
+	select {
+	case loaded := <-result:
+		m.Update(loaded)
+	case <-time.After(time.Second):
+		t.Fatal("Codex model load did not finish")
+	}
+	if m.slashArgLoadPending || len(m.slashArgCandidates) != 1 || m.slashArgCandidates[0].Value != "gpt-5.1-codex" {
+		t.Fatalf("completed auth state = pending:%v candidates:%#v", m.slashArgLoadPending, m.slashArgCandidates)
+	}
+}
+
+func TestConnectWizardShowsCodexDeviceCodeGuidance(t *testing.T) {
+	m := NewModel(Config{})
+	m.width = 120
+	m.slashArgActive = true
+	m.slashArgLoadPending = true
+	m.slashArgLoadSeq = 7
+	m.handleModelAuthProgress(modelAuthProgressMsg{seq: 7, progress: modelconfig.AuthProgress{
+		Provider:        "openai-codex",
+		Phase:           modelconfig.AuthProgressWaitingForDevice,
+		VerificationURL: "https://auth.openai.com/codex/device",
+		UserCode:        "ABCD-EFGH",
+	}})
+
+	got := ansi.Strip(m.renderModelAuthDrawer())
+	for _, want := range []string{"Finish signing in with a device code", "https://auth.openai.com/codex/device", "ABCD-EFGH", "expires in 15 minutes", "Esc cancels"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderModelAuthDrawer() = %q, want %q", got, want)
+		}
 	}
 }
 

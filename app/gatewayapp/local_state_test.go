@@ -18,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/surfaces/headless"
@@ -276,6 +277,39 @@ func TestModelLookupResolvesMiniMaxThroughProviderFactory(t *testing.T) {
 	}
 }
 
+func TestModelLookupRequiresControlResolverForManagedCodexCredential(t *testing.T) {
+	t.Parallel()
+
+	lookup, err := newModelLookup(nil, ModelConfig{
+		Provider:      "openai-codex",
+		API:           providers.APIOpenAICodex,
+		Model:         "gpt-5.4",
+		BaseURL:       modelconfig.CodexOAuthBaseURL,
+		CredentialRef: modelconfig.CodexOAuthCredentialRef,
+		AuthType:      providers.AuthOAuthToken,
+	}, 400000)
+	if err != nil {
+		t.Fatalf("newModelLookup() error = %v", err)
+	}
+	if _, err := lookup.ResolveModel(context.Background(), "openai-codex/gpt-5.4", 0); err == nil || !strings.Contains(err.Error(), "managed model credential") {
+		t.Fatalf("ResolveModel() error = %v, want unavailable managed credential", err)
+	}
+	resolverCalls := 0
+	lookup.resolveHTTPClient = func(_ context.Context, cfg ModelConfig) (*http.Client, error) {
+		resolverCalls++
+		if cfg.CredentialRef != modelconfig.CodexOAuthCredentialRef || cfg.Provider != "openai-codex" {
+			t.Fatalf("managed config = %#v", cfg)
+		}
+		return &http.Client{}, nil
+	}
+	if _, err := lookup.ResolveModel(context.Background(), "openai-codex/gpt-5.4", 0); err != nil {
+		t.Fatalf("ResolveModel() with Control resolver error = %v", err)
+	}
+	if resolverCalls != 1 {
+		t.Fatalf("resolver calls = %d, want 1", resolverCalls)
+	}
+}
+
 func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	root := t.TempDir()
 	workdir := t.TempDir()
@@ -465,6 +499,9 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Connect(token plan) error = %v", err)
+	}
+	if err := stack.UseModel(ctx, activeSession.SessionRef, tokenPlanID); err != nil {
+		t.Fatalf("UseModel(token plan) error = %v", err)
 	}
 	surface := stack.ACPSurface(nil, false, nil)
 	models, err := surface.SessionModels(ctx, activeSession)

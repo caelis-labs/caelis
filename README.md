@@ -99,6 +99,24 @@ Common flags:
 
 If no model is configured yet, start the TUI and run `/connect`.
 
+Use `/subagent` to configure the fixed Caelis delegation profiles: Breeze for
+fast bounded work, Orbit for general implementation and review, and Zenith for
+deep or high-risk analysis. Unbound profiles use the current Session model and
+reasoning effort (`self`); connected model or ACP Agent IDs remain configuration
+targets instead of being exposed directly in the model-facing Spawn catalog.
+Deleting a bound model or disconnecting a bound ACP Agent automatically returns
+the affected profiles to `self`; no separate reset command is required.
+
+To use a ChatGPT subscription as the primary model path, choose the `codex`
+model provider in `/connect` and complete the guided sign-in. Caelis opens a
+browser when one is available and automatically uses device-code sign-in for
+headless/SSH/CI environments or when the browser cannot be opened. This is a
+community-compatible OAuth integration rather than a documented third-party
+OpenAI integration. It uses one account, the fixed ChatGPT Codex endpoint, and
+does not implement account pools or rotation. The refresh credential is stored
+under `~/.caelis/providers/codex/auth.json` by default with `0600` permissions
+so Caelis processes sharing the same state root can reuse one unexpired login.
+
 ## Data
 
 The default data root is:

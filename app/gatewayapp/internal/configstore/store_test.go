@@ -2,13 +2,49 @@ package configstore
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 )
+
+func TestStorePersistsManagedCredentialReferenceWithoutOAuthTokens(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := New(root)
+	model := modelconfig.NormalizeConfig(modelconfig.Config{
+		Provider:      "openai-codex",
+		API:           modelconfig.DefaultAPIForProvider("openai-codex"),
+		Model:         "gpt-5.5",
+		BaseURL:       modelconfig.CodexOAuthBaseURL,
+		CredentialRef: modelconfig.CodexOAuthCredentialRef,
+		Token:         "must-not-persist",
+		PersistToken:  true,
+	})
+	if err := store.Save(AppConfig{Models: PersistedModelConfig{DefaultID: model.ID, Configs: []modelconfig.Config{model}}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "config.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(config.json) error = %v", err)
+	}
+	if strings.Contains(string(raw), "must-not-persist") || !strings.Contains(string(raw), `"credential_ref": "codex:default"`) {
+		t.Fatalf("persisted config = %s", raw)
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(loaded.Models.Profiles) != 1 || loaded.Models.Profiles[0].CredentialRef != modelconfig.CodexOAuthCredentialRef || loaded.Models.Profiles[0].Token != "" {
+		t.Fatalf("loaded managed profile = %#v", loaded.Models.Profiles)
+	}
+}
 
 func TestStorePersistsUserAgentRoster(t *testing.T) {
 	t.Parallel()
@@ -74,6 +110,56 @@ func TestStorePersistsModelBackedAgentAndRejectsStaleModelReference(t *testing.T
 	doc.Models.Configs = nil
 	if err := store.Save(doc); err == nil {
 		t.Fatal("Save(stale model Agent) error = nil, want unknown configured model rejection")
+	}
+}
+
+func TestStorePersistsDelegationBindingsAndRejectsStaleAgentReference(t *testing.T) {
+	t.Parallel()
+
+	store := New(t.TempDir())
+	model := modelconfig.NormalizeConfig(modelconfig.Config{
+		Provider:        "openai-codex",
+		Model:           "gpt-5.6-luna",
+		ReasoningMode:   "effort",
+		ReasoningLevels: []string{"low", "medium", "high", "xhigh"},
+	})
+	roster := controlagents.Configuration{Agents: []controlagents.Agent{{
+		ID: "codex", Backing: controlagents.AgentBacking{ModelAlias: model.ID},
+	}}}
+	delegation, err := controldelegation.BindAgent(
+		controldelegation.Configuration{},
+		controldelegation.ProfileOrbit,
+		"codex",
+		"high",
+		roster,
+		[]modelconfig.Config{model},
+	)
+	if err != nil {
+		t.Fatalf("BindAgent() error = %v", err)
+	}
+	doc := AppConfig{
+		Models:      PersistedModelConfig{DefaultID: model.ID, Configs: []modelconfig.Config{model}},
+		AgentRoster: roster,
+		Delegation:  delegation,
+	}
+	if err := store.Save(doc); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	resolved, err := controldelegation.Resolve(loaded.Delegation, controldelegation.ProfileOrbit, loaded.AgentRoster, loaded.Models.Configs)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if resolved.Agent.ID != "codex" || resolved.Binding.ReasoningEffort != "high" {
+		t.Fatalf("loaded delegation = %#v", resolved)
+	}
+
+	doc.AgentRoster = controlagents.Configuration{}
+	if err := store.Save(doc); err == nil || !strings.Contains(err.Error(), "unknown Agent") {
+		t.Fatalf("Save(stale binding) error = %v, want unknown Agent", err)
 	}
 }
 

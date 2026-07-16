@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -15,11 +16,12 @@ import (
 var errAmbiguousModelAlias = errors.New("ambiguous model alias")
 
 type modelLookup struct {
-	mu            sync.RWMutex
-	configs       map[string]ModelConfig
-	profiles      map[string]ModelProfileConfig
-	contextWindow int
-	defaultID     string
+	mu                sync.RWMutex
+	configs           map[string]ModelConfig
+	profiles          map[string]ModelProfileConfig
+	contextWindow     int
+	defaultID         string
+	resolveHTTPClient func(context.Context, ModelConfig) (*http.Client, error)
 }
 
 func newModelLookup(store *appConfigStore, cfg ModelConfig, contextWindow int) (*modelLookup, error) {
@@ -179,7 +181,7 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 	if !ok {
 		return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: unknown model alias %q", alias)
 	}
-	return resolveModelFromConfig(ctx, cfg, fallbackContextWindow, contextWindow)
+	return resolveModelFromConfig(ctx, cfg, fallbackContextWindow, contextWindow, l.resolveHTTPClient)
 }
 
 func (l *modelLookup) ResolveModelConfig(ctx context.Context, cfg ModelConfig, contextWindow int) (kernelimpl.ModelResolution, error) {
@@ -189,11 +191,20 @@ func (l *modelLookup) ResolveModelConfig(ctx context.Context, cfg ModelConfig, c
 	l.mu.RLock()
 	fallbackContextWindow := l.contextWindow
 	l.mu.RUnlock()
-	return resolveModelFromConfig(ctx, cfg, fallbackContextWindow, contextWindow)
+	return resolveModelFromConfig(ctx, cfg, fallbackContextWindow, contextWindow, l.resolveHTTPClient)
 }
 
-func resolveModelFromConfig(ctx context.Context, cfg ModelConfig, fallbackContextWindow int, contextWindow int) (kernelimpl.ModelResolution, error) {
-	_ = ctx
+func resolveModelFromConfig(ctx context.Context, cfg ModelConfig, fallbackContextWindow int, contextWindow int, resolveHTTPClient func(context.Context, ModelConfig) (*http.Client, error)) (kernelimpl.ModelResolution, error) {
+	if strings.TrimSpace(cfg.CredentialRef) != "" {
+		if resolveHTTPClient == nil {
+			return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: managed model credential %q is unavailable", cfg.CredentialRef)
+		}
+		client, err := resolveHTTPClient(ctx, cfg)
+		if err != nil {
+			return kernelimpl.ModelResolution{}, err
+		}
+		cfg.HTTPClient = client
+	}
 	resolved, err := modelconfig.BuildModel(cfg, fallbackContextWindow, contextWindow)
 	if err != nil {
 		return kernelimpl.ModelResolution{}, err

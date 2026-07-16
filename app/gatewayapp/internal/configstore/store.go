@@ -12,6 +12,7 @@ import (
 
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 )
 
@@ -19,11 +20,14 @@ type AppConfig struct {
 	Models PersistedModelConfig `json:"models,omitempty"`
 	// AgentRoster is authoritative for stable user-selected Agents used by
 	// dispatch, Spawn target resolution, and Control-authorized handoff.
-	AgentRoster        controlagents.Configuration `json:"agent_roster,omitempty"`
-	Sandbox            SandboxConfig               `json:"sandbox,omitempty"`
-	Runtime            RuntimeConfig               `json:"runtime,omitempty"`
-	Plugins            []PluginConfig              `json:"plugins,omitempty"`
-	PluginMarketplaces []MarketplaceConfig         `json:"plugin_marketplaces,omitempty"`
+	AgentRoster controlagents.Configuration `json:"agent_roster,omitempty"`
+	// Delegation maps the fixed Caelis capability profiles to identities in the
+	// authoritative AgentRoster. Missing bindings inherit the Session default.
+	Delegation         controldelegation.Configuration `json:"delegation,omitempty"`
+	Sandbox            SandboxConfig                   `json:"sandbox,omitempty"`
+	Runtime            RuntimeConfig                   `json:"runtime,omitempty"`
+	Plugins            []PluginConfig                  `json:"plugins,omitempty"`
+	PluginMarketplaces []MarketplaceConfig             `json:"plugin_marketplaces,omitempty"`
 }
 
 type MarketplaceConfig struct {
@@ -143,7 +147,11 @@ func (s *Store) loadUnlocked() (AppConfig, error) {
 		if err := validateAgentRosterModels(doc.AgentRoster, doc.Models.Configs); err != nil {
 			return AppConfig{}, err
 		}
+		if err := controldelegation.ValidateConfiguration(doc.Delegation, doc.AgentRoster, doc.Models.Configs); err != nil {
+			return AppConfig{}, fmt.Errorf("gatewayapp: invalid delegation configuration: %w", err)
+		}
 		doc.AgentRoster = controlagents.NormalizeConfiguration(doc.AgentRoster)
+		doc.Delegation = controldelegation.NormalizeConfiguration(doc.Delegation)
 		doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 		doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 		doc.Plugins = DedupePluginConfigs(doc.Plugins)
@@ -220,6 +228,7 @@ var legacyModelConfigKeys = []string{
 	"BaseURL",
 	"Token",
 	"TokenEnv",
+	"CredentialRef",
 	"PersistToken",
 	"AuthType",
 	"HeaderKey",
@@ -241,6 +250,7 @@ var legacyModelProfileKeys = []string{
 	"BaseURL",
 	"Token",
 	"TokenEnv",
+	"CredentialRef",
 	"PersistToken",
 	"AuthType",
 	"HeaderKey",
@@ -266,7 +276,11 @@ func (s *Store) Save(doc AppConfig) error {
 	if err := validateAgentRosterModels(doc.AgentRoster, doc.Models.Configs); err != nil {
 		return err
 	}
+	if err := controldelegation.ValidateConfiguration(doc.Delegation, doc.AgentRoster, doc.Models.Configs); err != nil {
+		return fmt.Errorf("gatewayapp: invalid delegation configuration: %w", err)
+	}
 	doc.AgentRoster = controlagents.NormalizeConfiguration(doc.AgentRoster)
+	doc.Delegation = controldelegation.NormalizeConfiguration(doc.Delegation)
 	doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 	doc.Plugins = DedupePluginConfigs(doc.Plugins)
