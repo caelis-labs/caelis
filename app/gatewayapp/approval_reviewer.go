@@ -211,7 +211,7 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 	var lastAssistantEvent *session.Event
 	var lastParseErr error
 	for attempt := 0; attempt < guardianAssessmentMaxAttempts; attempt++ {
-		assistantEvent, text, err := r.runGuardianAgent(ctx, req.Model, reviewSession.session, events, guardianOutputSpec(req.Approval))
+		assistantEvent, text, err := r.runGuardianAgent(ctx, req.Model, reviewSession.session, events, guardianOutputSpecForModel(req.Model, req.Approval))
 		if err != nil {
 			return promptItems, promptEvent, assistantEvent, guardianReviewModelOutput{}, nil, err
 		}

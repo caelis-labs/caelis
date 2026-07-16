@@ -219,6 +219,16 @@ type staticApprovalReviewer struct {
 	sessionAccounting *UsageSnapshot
 }
 
+type recordingApprovalReviewer struct {
+	req    ApprovalReviewRequest
+	result ApprovalReviewResult
+}
+
+func (r *recordingApprovalReviewer) ReviewApproval(_ context.Context, req ApprovalReviewRequest) (ApprovalReviewResult, error) {
+	r.req = req
+	return r.result, nil
+}
+
 func (r staticApprovalReviewer) ReviewApproval(context.Context, ApprovalReviewRequest) (ApprovalReviewResult, error) {
 	return r.result, nil
 }
@@ -489,6 +499,16 @@ func (s *recordingSessionService) UpdateState(context.Context, session.UpdateSta
 type staticResolver struct {
 	resolved ResolvedTurn
 	err      error
+}
+
+type approvalModelResolverStub struct {
+	staticResolver
+	model model.LLM
+	err   error
+}
+
+func (r approvalModelResolverStub) ResolveApprovalModel(context.Context, session.SessionRef) (model.LLM, error) {
+	return r.model, r.err
 }
 
 func (r staticResolver) ResolveTurn(context.Context, TurnIntent) (ResolvedTurn, error) {

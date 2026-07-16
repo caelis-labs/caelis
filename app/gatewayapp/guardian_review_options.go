@@ -59,6 +59,21 @@ func guardianOutputSpec(payload *gateway.ApprovalPayload) *model.OutputSpec {
 	}
 }
 
+// guardianOutputSpecForModel preserves Guardian's bounded response contract
+// without requiring native schema output from providers such as Codex OAuth.
+// The fixed Guardian instructions and parser still enforce the JSON shape when
+// the model can only return plain text.
+func guardianOutputSpecForModel(llm model.LLM, payload *gateway.ApprovalPayload) *model.OutputSpec {
+	output := guardianOutputSpec(payload)
+	capabilities, declared := model.CapabilitiesOf(llm)
+	if declared && capabilities.StructuredOutput {
+		return output
+	}
+	output.Mode = model.OutputModeText
+	output.JSONSchema = nil
+	return output
+}
+
 func stringsToAny(values []string) []any {
 	out := make([]any, 0, len(values))
 	for _, value := range values {

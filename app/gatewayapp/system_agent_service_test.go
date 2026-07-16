@@ -2,11 +2,14 @@ package gatewayapp
 
 import (
 	"context"
+	"iter"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
+	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
 
 func TestSystemAgentServicePersistsModelBindingAndRefreshesReviewerAssembly(t *testing.T) {
@@ -64,6 +67,46 @@ func TestSystemAgentServicePersistsModelBindingAndRefreshesReviewerAssembly(t *t
 		t.Fatalf("runtime refreshes = %d, want 2", refreshes)
 	}
 	assertSystemAgentTarget(t, status, controlsystemagent.Reviewer, "")
+}
+
+func TestSystemAgentReasoningModelOverridesSceneFallback(t *testing.T) {
+	t.Parallel()
+
+	inner := &systemAgentReasoningRecorder{}
+	wrapped := withSystemAgentReasoningEffort(kernelimpl.ModelResolution{
+		Model: inner, ReasoningEffort: "xhigh",
+	})
+	for _, err := range wrapped.Generate(context.Background(), &model.Request{
+		Reasoning: model.ReasoningConfig{Effort: "none"},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+	}
+	if inner.effort != "xhigh" {
+		t.Fatalf("reasoning effort = %q, want bound xhigh", inner.effort)
+	}
+	capabilities, declared := model.CapabilitiesOf(wrapped)
+	if !declared || !capabilities.StructuredOutput {
+		t.Fatalf("wrapped capabilities = %#v, declared=%v", capabilities, declared)
+	}
+}
+
+type systemAgentReasoningRecorder struct {
+	effort string
+}
+
+func (*systemAgentReasoningRecorder) Name() string { return "system-agent-reasoning-recorder" }
+
+func (m *systemAgentReasoningRecorder) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	if req != nil {
+		m.effort = req.Reasoning.Effort
+	}
+	return func(func(*model.StreamEvent, error) bool) {}
+}
+
+func (*systemAgentReasoningRecorder) Capabilities() model.Capabilities {
+	return model.Capabilities{StructuredOutput: true}
 }
 
 func assertSystemAgentTarget(t *testing.T, status controlsystemagent.Status, id controlsystemagent.ID, agentID string) {

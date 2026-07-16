@@ -143,8 +143,9 @@ func (g *Gateway) resolveActiveAutoApproval(
 			approver = denyingApprovalApprover{}
 		}
 	}
-	if reviewModel == nil {
-		reviewModel, _ = g.approvalReviewModel(turnCtx, req.SessionRef)
+	configured, handled, modelResolveErr := g.approvalReviewModel(turnCtx, req.SessionRef)
+	if modelResolveErr == nil && handled {
+		reviewModel = configured
 	}
 	reviewReq := ApprovalReviewRequest{
 		SessionRef:     req.SessionRef,
@@ -156,7 +157,15 @@ func (g *Gateway) resolveActiveAutoApproval(
 		Approval:       cloneApprovalPayload(payload),
 		RuntimeRequest: *req,
 	}
-	result, err := approver.Decide(approvalCtx, reviewReq)
+	var (
+		result ApprovalReviewResult
+		err    error
+	)
+	if modelResolveErr != nil {
+		err = fmt.Errorf("resolve automatic approval review model: %w", modelResolveErr)
+	} else {
+		result, err = approver.Decide(approvalCtx, reviewReq)
+	}
 	var reviewErrStatus ApprovalReviewStatus
 	if err != nil {
 		status, rationale, _ := approval.ReviewErrorOutcome(err)
@@ -413,15 +422,19 @@ func approvalOptionIDForDecision(options []ApprovalOption, approved bool) string
 
 type approvalModelResolver = approval.ModelResolver
 
-func (g *Gateway) approvalReviewModel(ctx context.Context, ref session.SessionRef) (model.LLM, error) {
+func (g *Gateway) approvalReviewModel(ctx context.Context, ref session.SessionRef) (model.LLM, bool, error) {
 	if g == nil || g.resolver == nil {
-		return nil, fmt.Errorf("gateway: approval review model resolver is unavailable")
+		return nil, false, nil
 	}
 	resolver, ok := g.resolver.(approvalModelResolver)
 	if !ok || resolver == nil {
-		return nil, fmt.Errorf("gateway: approval review model resolver is unsupported")
+		return nil, false, nil
 	}
-	return resolver.ResolveApprovalModel(ctx, ref)
+	resolved, err := resolver.ResolveApprovalModel(ctx, ref)
+	if err != nil {
+		return nil, true, err
+	}
+	return resolved, true, nil
 }
 
 func (g *Gateway) currentApprovalMode(ctx context.Context, ref session.SessionRef) (ApprovalMode, error) {

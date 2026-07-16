@@ -1892,6 +1892,42 @@ func TestBeginTurnSessionApprovalModeOverridesDefaultManual(t *testing.T) {
 	}
 }
 
+func TestBeginTurnUsesConfiguredGuardianModelForMainTurnApproval(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+	}}
+	mainModel := fakeLLM{name: "main-model"}
+	guardianModel := fakeLLM{name: "guardian-model"}
+	reviewer := &recordingApprovalReviewer{result: ApprovalReviewResult{Approved: true}}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: activeSession},
+		Runtime:  &approvalRuntime{session: activeSession},
+		Resolver: approvalModelResolverStub{
+			staticResolver: staticResolver{resolved: ResolvedTurn{RunRequest: agent.RunRequest{
+				AgentSpec: agent.AgentSpec{Model: mainModel},
+			}}},
+			model: guardianModel,
+		},
+		ApprovalReviewer: reviewer,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	_ = collectHandleEvents(t, result.Handle)
+	if reviewer.req.Model == nil || reviewer.req.Model.Name() != guardianModel.Name() {
+		t.Fatalf("approval review model = %#v, want configured Guardian %q", reviewer.req.Model, guardianModel.Name())
+	}
+}
+
 func TestBeginTurnRequestModeManualIgnoredUnderAutoReview(t *testing.T) {
 	t.Parallel()
 

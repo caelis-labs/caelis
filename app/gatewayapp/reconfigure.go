@@ -393,7 +393,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 			if err != nil {
 				return nil, false, err
 			}
-			return resolved.Model, bound, nil
+			return withSystemAgentReasoningEffort(resolved), bound, nil
 		},
 		ToolAugmenter: func(ctx context.Context, req kernelimpl.ToolAugmentContext) (kernelimpl.ToolAugmentation, error) {
 			s.agentRosterMu.RLock()

@@ -133,6 +133,42 @@ func TestApprovalReviewerWorksInsideParentRuntimeLease(t *testing.T) {
 	}
 }
 
+func TestApprovalReviewerFallsBackToTextForModelWithoutStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please inspect the workspace.")
+	testModel := &approvalReviewerFakeModel{
+		disableStructuredOutput: true,
+		responses:               []string{`{"outcome":"allow","risk_level":"low","user_authorization":"medium","rationale":"read-only inspection"}`},
+	}
+	reviewer := newModelApprovalReviewer(service)
+	result, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(
+		activeSession,
+		testModel,
+		"inspect workspace",
+		map[string]any{"cmd": "rg TODO"},
+	))
+	if err != nil {
+		t.Fatalf("ReviewApproval() error = %v", err)
+	}
+	if !result.Approved {
+		t.Fatalf("Approved = false, want true: %#v", result)
+	}
+	requests := testModel.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("model calls = %d, want 1", len(requests))
+	}
+	output := requests[0].Output
+	if output == nil || output.Mode != model.OutputModeText || output.JSONSchema != nil {
+		t.Fatalf("Output = %#v, want bounded text fallback", output)
+	}
+	if output.MaxOutputTokens != guardianMaxOutputTokens {
+		t.Fatalf("Output.MaxOutputTokens = %d, want %d", output.MaxOutputTokens, guardianMaxOutputTokens)
+	}
+}
+
 func TestApprovalReviewerUsesSystemManagedGuardianRunner(t *testing.T) {
 	ctx := context.Background()
 	service, activeSession := newApprovalReviewerTestSession(t, ctx)
@@ -1124,12 +1160,13 @@ type approvalReviewerError string
 func (e approvalReviewerError) Error() string { return string(e) }
 
 type approvalReviewerFakeModel struct {
-	mu        sync.Mutex
-	name      string
-	responses []string
-	requests  []model.Request
-	release   <-chan struct{}
-	started   chan struct{}
+	mu                      sync.Mutex
+	name                    string
+	responses               []string
+	requests                []model.Request
+	release                 <-chan struct{}
+	started                 chan struct{}
+	disableStructuredOutput bool
 }
 
 type approvalReviewerSystemAgentRunner struct {
@@ -1170,7 +1207,7 @@ func (m *approvalReviewerFakeModel) Name() string {
 }
 
 func (m *approvalReviewerFakeModel) Capabilities() model.Capabilities {
-	return model.Capabilities{StructuredOutput: true}
+	return model.Capabilities{StructuredOutput: !m.disableStructuredOutput}
 }
 
 type approvalReviewerUpdateFailSessionService struct {
