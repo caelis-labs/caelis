@@ -154,8 +154,8 @@ type UsageCost struct {
 
 type UsageUpdate struct {
 	SessionUpdate string         `json:"sessionUpdate"`
-	Size          int            `json:"size"`
-	Used          int            `json:"used"`
+	Size          uint64         `json:"size"`
+	Used          uint64         `json:"used"`
 	Cost          *UsageCost     `json:"cost,omitempty"`
 	Meta          map[string]any `json:"_meta,omitempty"`
 }

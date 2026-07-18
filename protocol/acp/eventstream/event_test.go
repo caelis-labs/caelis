@@ -3,6 +3,7 @@ package eventstream
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -354,6 +355,17 @@ func TestUsageUpdateFromSnapshotDefaultsUnknownSizeToUsed(t *testing.T) {
 	update := UsageUpdateFromSnapshot(UsageSnapshot{TotalTokens: 17}, nil)
 	if update.Used != 17 || update.Size != 17 {
 		t.Fatalf("usage size/used = %d/%d, want required size fallback to used total", update.Size, update.Used)
+	}
+}
+
+func TestUsageSnapshotFromUpdateNeverWrapsFullUint64Counters(t *testing.T) {
+	t.Parallel()
+
+	update := schema.UsageUpdate{
+		SessionUpdate: schema.UpdateUsage, Size: math.MaxUint64, Used: math.MaxUint64,
+	}
+	if usage := UsageSnapshotFromUpdate(update); usage != nil {
+		t.Fatalf("UsageSnapshotFromUpdate() = %#v, want no lossy machine-int projection", usage)
 	}
 }
 

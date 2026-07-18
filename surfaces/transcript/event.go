@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
@@ -18,14 +19,17 @@ const (
 type EventKind string
 
 const (
-	EventNarrative   EventKind = "narrative"
-	EventNotice      EventKind = "notice"
-	EventPlan        EventKind = "plan"
-	EventTool        EventKind = "tool"
-	EventApproval    EventKind = "approval"
-	EventParticipant EventKind = "participant"
-	EventLifecycle   EventKind = "lifecycle"
-	EventUsage       EventKind = "usage"
+	EventNarrative       EventKind = "narrative"
+	EventNotice          EventKind = "notice"
+	EventPlan            EventKind = "plan"
+	EventTool            EventKind = "tool"
+	EventApprovalRequest EventKind = "approval_request"
+	EventApproval        EventKind = "approval"
+	EventParticipant     EventKind = "participant"
+	EventLifecycle       EventKind = "lifecycle"
+	EventUsage           EventKind = "usage"
+	EventError           EventKind = "error"
+	EventRawExtension    EventKind = "raw_extension"
 )
 
 type NarrativeKind string
@@ -49,24 +53,34 @@ const (
 )
 
 type PlanEntry struct {
-	Content string
-	Status  string
+	Content  string
+	Status   string
+	Priority string
+}
+
+type ApprovalOption struct {
+	ID   string
+	Name string
+	Kind string
 }
 
 type Event struct {
-	Kind       EventKind
-	Scope      Scope
-	ScopeID    string
-	TurnID     string
-	Actor      string
-	OccurredAt time.Time
-	Meta       map[string]any
+	Kind          EventKind
+	Scope         Scope
+	ScopeID       string
+	RunID         string
+	TurnID        string
+	Actor         string
+	ParticipantID string
+	OccurredAt    time.Time
+	Meta          map[string]any
 
 	NarrativeKind NarrativeKind
 	NoticeKind    NoticeKind
 	MessageID     string
 	Text          string
 	Final         bool
+	Citations     []Citation
 
 	ToolCallID          string
 	ToolName            string
@@ -91,16 +105,23 @@ type Event struct {
 
 	PlanEntries []PlanEntry
 
-	ApprovalTool    string
-	ApprovalCommand string
-	ApprovalStatus  string
-	ApprovalRisk    string
-	ApprovalAuth    string
-	ApprovalText    string
+	ApprovalTool      string
+	ApprovalRequestID string
+	ApprovalOptions   []ApprovalOption
+	ApprovalCommand   string
+	ApprovalStatus    string
+	ApprovalRisk      string
+	ApprovalAuth      string
+	ApprovalText      string
 
-	State string
+	State      string
+	Reason     string
+	StopReason string
 
 	Usage *eventstream.UsageSnapshot
+
+	RawSessionUpdate string
+	RawUpdate        json.RawMessage
 
 	// Parent-tool fields flatten the Envelope relationship. They do not make
 	// transcript state authoritative.

@@ -291,15 +291,12 @@ func prepareEnvelopeMetadata(envelope *eventstream.Envelope) error {
 }
 
 func marshalUsageUpdate(update schema.UsageUpdate) (json.RawMessage, error) {
-	if update.Size < 0 || update.Used < 0 {
-		return nil, fmt.Errorf("appserver: usage size and used must be non-negative")
-	}
 	fields, err := marshalObject(update)
 	if err != nil {
 		return nil, err
 	}
-	fields["size"] = decimalRaw(uint64(update.Size))
-	fields["used"] = decimalRaw(uint64(update.Used))
+	fields["size"] = decimalRaw(update.Size)
+	fields["used"] = decimalRaw(update.Used)
 	return json.Marshal(fields)
 }
 

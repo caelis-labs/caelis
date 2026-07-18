@@ -105,6 +105,9 @@ func (m *Model) prepareForTranscriptScope(scope ACPProjectionScope) {
 }
 
 func (m *Model) applyTranscriptNarrative(event TranscriptEvent) (tea.Model, tea.Cmd) {
+	if event.Final && event.NarrativeKind == TranscriptNarrativeAssistant && len(event.Citations) > 0 {
+		event.Text = transcript.RenderCitationMarkdown(event.Text, event.Citations)
+	}
 	switch event.NarrativeKind {
 	case TranscriptNarrativeUser:
 		if event.Scope == ACPProjectionParticipant {
@@ -183,7 +186,7 @@ func (m *Model) applyTranscriptPlan(event TranscriptEvent) (tea.Model, tea.Cmd) 
 	m.prepareForTranscriptScope(event.Scope)
 	entries := make([]planEntryState, 0, len(event.PlanEntries))
 	for _, entry := range event.PlanEntries {
-		entries = append(entries, planEntryState(entry))
+		entries = append(entries, planEntryState{Content: entry.Content, Status: entry.Status})
 	}
 	switch event.Scope {
 	case ACPProjectionParticipant:

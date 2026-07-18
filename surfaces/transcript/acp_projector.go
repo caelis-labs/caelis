@@ -34,6 +34,7 @@ type ToolProjectionInput struct {
 	RawInput  map[string]any
 	RawOutput any
 	Content   []schema.ToolCallContent
+	Locations []schema.ToolCallLocation
 	Error     bool
 
 	GatewayProjection bool
@@ -55,10 +56,36 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 	switch env.Kind {
 	case eventstream.KindSessionUpdate:
 		out = append(out, projectACPSessionUpdate(env, meta, scope, scopeID, surface)...)
+	case eventstream.KindRequestPermission:
+		if env.Permission != nil && strings.TrimSpace(string(env.ApprovalRequestID)) != "" {
+			options := make([]ApprovalOption, 0, len(env.Permission.Options))
+			for _, option := range env.Permission.Options {
+				options = append(options, ApprovalOption{
+					ID: strings.TrimSpace(option.OptionID), Name: strings.TrimSpace(option.Name), Kind: strings.TrimSpace(option.Kind),
+				})
+			}
+			out = append(out, Event{
+				Kind:              EventApprovalRequest,
+				Scope:             scope,
+				ScopeID:           scopeID,
+				Actor:             strings.TrimSpace(env.Actor),
+				OccurredAt:        occurredAt,
+				Meta:              meta,
+				ToolCallID:        strings.TrimSpace(env.Permission.ToolCall.ToolCallID),
+				ApprovalTool:      firstNonEmptyString(StringFromPtr(env.Permission.ToolCall.Title), StringFromPtr(env.Permission.ToolCall.Kind)),
+				ApprovalRequestID: strings.TrimSpace(string(env.ApprovalRequestID)),
+				ApprovalOptions:   options,
+			})
+		}
 	case eventstream.KindNotice:
 		if text := strings.TrimSpace(env.Notice); text != "" {
+			noticeKind := NoticeKind("")
+			if text == CompactNoticeLabel {
+				noticeKind = NoticeKindCompact
+			}
 			out = append(out, Event{
 				Kind:          EventNotice,
+				NoticeKind:    noticeKind,
 				Scope:         scope,
 				ScopeID:       scopeID,
 				Actor:         strings.TrimSpace(env.Actor),
@@ -92,6 +119,8 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 				OccurredAt: occurredAt,
 				Meta:       eventMeta,
 				State:      state,
+				Reason:     strings.TrimSpace(env.Lifecycle.Reason),
+				StopReason: strings.TrimSpace(env.Lifecycle.StopReason),
 			})
 			if notice := attemptResetNoticeText(state, eventMeta); notice != "" {
 				out = append(out, Event{
@@ -112,9 +141,17 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 		if event, ok := projectACPApprovalReview(env, meta, scope, scopeID, surface); ok {
 			out = append(out, event)
 		}
+	case eventstream.KindError:
+		if text := strings.TrimSpace(env.Error); text != "" {
+			out = append(out, Event{
+				Kind: EventError, Scope: scope, ScopeID: scopeID, Actor: strings.TrimSpace(env.Actor), OccurredAt: occurredAt, Text: text,
+			})
+		}
 	}
 	for i := range out {
+		out[i].RunID = strings.TrimSpace(env.RunID)
 		out[i].TurnID = strings.TrimSpace(env.TurnID)
+		out[i].ParticipantID = strings.TrimSpace(env.ParticipantID)
 		out[i].AnchorToolCallID = parentToolCallID
 		out[i].AnchorToolName = parentToolName
 	}
@@ -220,6 +257,7 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			Status:     update.Status,
 			RawInput:   RawMap(update.RawInput),
 			Content:    update.Content,
+			Locations:  update.Locations,
 		})}
 	case schema.ToolCallUpdate:
 		if surface == nil {
@@ -244,6 +282,7 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			RawInput:          RawMap(update.RawInput),
 			RawOutput:         update.RawOutput,
 			Content:           update.Content,
+			Locations:         update.Locations,
 			Error:             ToolUpdateError(update),
 			GatewayProjection: GatewayProjection(meta),
 		}, "in_progress")
@@ -254,7 +293,7 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 	case schema.PlanUpdate:
 		entries := make([]PlanEntry, 0, len(update.Entries))
 		for _, entry := range update.Entries {
-			entries = append(entries, PlanEntry{Content: entry.Content, Status: entry.Status})
+			entries = append(entries, PlanEntry{Content: entry.Content, Status: entry.Status, Priority: entry.Priority})
 		}
 		if len(entries) == 0 {
 			return nil
@@ -281,9 +320,32 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			OccurredAt: env.OccurredAt,
 			Usage:      usage,
 		}}
+	case schema.RawUpdate:
+		raw := append(json.RawMessage(nil), update.Raw...)
+		if len(raw) == 0 {
+			raw, _ = json.Marshal(update)
+		}
+		return []Event{{
+			Kind:             EventRawExtension,
+			Scope:            scope,
+			ScopeID:          scopeID,
+			Actor:            strings.TrimSpace(env.Actor),
+			OccurredAt:       env.OccurredAt,
+			RawSessionUpdate: strings.TrimSpace(update.SessionUpdate),
+			RawUpdate:        raw,
+		}}
 	default:
 		return nil
 	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk, meta map[string]any, scope Scope, scopeID string) []Event {
@@ -304,6 +366,7 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 			OccurredAt:    env.OccurredAt,
 			Meta:          meta,
 			NarrativeKind: NarrativeUser,
+			MessageID:     strings.TrimSpace(update.MessageID),
 			Text:          strings.TrimSpace(text),
 			Final:         true,
 		}}
@@ -319,6 +382,7 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 			MessageID:     strings.TrimSpace(update.MessageID),
 			Text:          text,
 			Final:         env.Final,
+			Citations:     CitationsFromMeta(meta, text),
 		}}
 	case schema.UpdateAgentThought:
 		return []Event{{
@@ -414,6 +478,8 @@ func ACPEventScopeID(env eventstream.Envelope) string {
 
 func ACPUpdateMeta(update schema.Update) map[string]any {
 	switch typed := update.(type) {
+	case schema.ContentChunk:
+		return CloneAnyMap(typed.Meta)
 	case schema.ToolCall:
 		return CloneAnyMap(typed.Meta)
 	case schema.ToolCallUpdate:

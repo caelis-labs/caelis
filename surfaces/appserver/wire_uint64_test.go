@@ -128,15 +128,12 @@ func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
 }
 
 func TestUsageUpdateUsesDecimalStringsBeyondJavaScriptSafeInteger(t *testing.T) {
-	if strconv.IntSize < 64 {
-		t.Skip("64-bit domain int is required for large ACP usage counters")
-	}
-	for _, value := range []int64{9007199254740991, 9007199254740992, 9007199254740993, math.MaxInt64} {
+	for _, value := range []uint64{9007199254740991, 9007199254740992, 9007199254740993, math.MaxInt64, math.MaxUint64} {
 		value := value
-		t.Run(strconv.FormatInt(value, 10), func(t *testing.T) {
+		t.Run(strconv.FormatUint(value, 10), func(t *testing.T) {
 			envelope := baseEnvelope(eventstream.KindSessionUpdate)
 			envelope.Update = schema.UsageUpdate{
-				SessionUpdate: schema.UpdateUsage, Size: int(value), Used: int(value),
+				SessionUpdate: schema.UpdateUsage, Size: value, Used: value,
 			}
 			raw := mustMarshalEnvelope(t, envelope)
 			var root struct {
@@ -149,7 +146,7 @@ func TestUsageUpdateUsesDecimalStringsBeyondJavaScriptSafeInteger(t *testing.T) 
 			if err := json.Unmarshal(root.Update, &update); err != nil {
 				t.Fatal(err)
 			}
-			want := strconv.FormatInt(value, 10)
+			want := strconv.FormatUint(value, 10)
 			if string(update.Size) != want || string(update.Used) != want {
 				t.Fatalf("usage size/used = %q/%q, want %q", update.Size, update.Used, want)
 			}

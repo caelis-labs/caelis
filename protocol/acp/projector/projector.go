@@ -345,7 +345,56 @@ func contentChunkForEvent(event *session.Event, kind string, text string) Conten
 		chunk.MessageID = strings.TrimSpace(update.MessageID)
 		chunk.Meta = cloneAnyMap(update.Meta)
 	}
+	if kind == UpdateAgentMessage && event != nil {
+		message := event.Message
+		if message == nil {
+			if projected, ok := session.ModelMessageOf(event); ok {
+				message = &projected
+			}
+		}
+		if message != nil {
+			if citations := message.TextContentCitations(); len(citations) > 0 {
+				chunk.Meta = metautil.WithSection(chunk.Meta, metautil.Message, map[string]any{
+					metautil.MessageCitations: citationMetaPayload(citations),
+				})
+			}
+		}
+	}
 	return chunk
+}
+
+func citationMetaPayload(citations []model.Citation) []any {
+	out := make([]any, 0, len(citations))
+	for _, citation := range citations {
+		sources := make([]any, 0, len(citation.Sources))
+		for _, source := range citation.Sources {
+			item := map[string]any{}
+			putNonEmptyString(item, "ref_id", source.RefID)
+			putNonEmptyString(item, "title", source.Title)
+			putNonEmptyString(item, "url", source.URL)
+			putNonEmptyString(item, "snippet", source.Snippet)
+			putNonEmptyString(item, "source", source.Source)
+			putNonEmptyString(item, "published_at", source.PublishedAt)
+			if len(item) > 0 {
+				sources = append(sources, item)
+			}
+		}
+		if len(sources) == 0 {
+			continue
+		}
+		out = append(out, map[string]any{
+			"start_index": citation.StartIndex,
+			"end_index":   citation.EndIndex,
+			"sources":     sources,
+		})
+	}
+	return out
+}
+
+func putNonEmptyString(out map[string]any, key string, value string) {
+	if value = strings.TrimSpace(value); value != "" {
+		out[key] = value
+	}
 }
 
 func toolCallForEvent(event *session.Event) (ToolCall, bool, error) {

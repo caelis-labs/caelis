@@ -11,9 +11,11 @@ const (
 	// treated as display metadata.
 	Root = "caelis"
 
-	Version   = "version"
-	Transient = "transient"
-	Runtime   = "runtime"
+	Version          = "version"
+	Transient        = "transient"
+	Runtime          = "runtime"
+	Message          = "message"
+	MessageCitations = "citations"
 
 	RuntimeTool             = "tool"
 	RuntimeToolName         = "name"
@@ -35,6 +37,34 @@ const (
 	RuntimeStreamParentTool   = "parent_tool"
 	RuntimeStreamParentTaskID = "parent_task_id"
 )
+
+// WithSection returns a copy of meta with one direct _meta.caelis section
+// merged in. It is used for presentation semantics that are not runtime
+// lifecycle state, such as structured message citations.
+func WithSection(meta map[string]any, section string, values map[string]any) map[string]any {
+	if section == "" || len(values) == 0 {
+		return CloneMap(meta)
+	}
+	out := CloneMap(meta)
+	if out == nil {
+		out = map[string]any{}
+	}
+	caelis := CloneMap(mapAt(out, Root))
+	if caelis == nil {
+		caelis = map[string]any{}
+	}
+	caelis[Version] = 1
+	sectionMap := CloneMap(mapAt(caelis, section))
+	if sectionMap == nil {
+		sectionMap = map[string]any{}
+	}
+	for key, value := range values {
+		sectionMap[key] = CloneAny(value)
+	}
+	caelis[section] = sectionMap
+	out[Root] = caelis
+	return out
+}
 
 // String returns a trimmed string from _meta using a stable path.
 func String(values map[string]any, path ...string) string {

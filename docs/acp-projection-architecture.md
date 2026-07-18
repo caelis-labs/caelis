@@ -46,6 +46,34 @@ before adding product display policy or documented `_meta` extensions. This
 keeps compatibility, terminal rendering, and transport details outside the
 SDK without maintaining a second semantic schema.
 
+## Web Citation Projection
+
+`agent-sdk/model.TextPart.Citations` is the canonical durable owner for web
+attribution. Each citation contains an inclusive `start_index`, an exclusive
+`end_index`, and one or more normalized sources. Indices are UTF-8 byte offsets
+local to the text part. Equal indices represent an insertion-point citation for
+providers that return sources without a precise supported claim. Provider-local
+`ref_id` values are retained only for correlation; they are never a link target
+or presentation format.
+
+ACP `agent_message_chunk` projects the message-level, offset-adjusted form under
+the versioned extension `_meta.caelis.message.citations`. Each source may carry
+`ref_id`, `title`, `url`, `snippet`, `source`, and `published_at`. TUI parses this
+extension into the shared transcript event and materializes safe HTTP(S) sources
+as numbered Markdown links. A future GUI consumes the same structured citation
+list directly and may render source chips, hover details, or a source panel
+without reparsing assistant text.
+
+OpenAI/Codex URL annotations and Gemini grounding supports preserve their exact
+provider ranges. Xiaomi annotations without ranges and DeepSeek's
+Anthropic-compatible web-search results degrade to an answer-end citation. The
+degraded form attributes only the answer as a whole; it does not invent a claim
+range. OpenAI private-use markers such as `citeturn0search2` are removed at
+the SDK boundary and resolved against the nearest preceding matching WebSearch
+tool result. Reference IDs can repeat across calls, so resolution never merges
+sources from different tool results and fails closed when one scoped result
+cannot resolve the full marker.
+
 ## Orchestration Ownership
 
 Built-in and external Agents differ in transport, process lifecycle, trust, and

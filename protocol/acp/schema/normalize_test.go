@@ -2,6 +2,7 @@ package schema
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 )
 
@@ -171,6 +172,24 @@ func TestUsageUpdateMarshalIncludesZeroSize(t *testing.T) {
 	}
 	if _, ok := decoded["size"]; !ok {
 		t.Fatalf("usage_update JSON = %s, want required size field present", raw)
+	}
+}
+
+func TestUsageUpdateRoundTripsFullUint64Range(t *testing.T) {
+	t.Parallel()
+
+	raw, err := json.Marshal(UsageUpdate{
+		SessionUpdate: UpdateUsage, Size: math.MaxUint64, Used: math.MaxUint64,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded UsageUpdate
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Size != math.MaxUint64 || decoded.Used != math.MaxUint64 {
+		t.Fatalf("decoded usage = %#v", decoded)
 	}
 }
 

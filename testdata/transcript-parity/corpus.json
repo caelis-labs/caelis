@@ -1,0 +1,212 @@
+{
+  "version": "caelis.transcript-parity/v1",
+  "cases": [
+    {
+      "name": "narrative_live_replay_splice",
+      "boundary": {"resume_mode": "exact", "transient_gap": false, "boundary_cursor": "cursor-4"},
+      "envelopes": [
+        {
+          "kind": "session/update", "cursor": "cursor-1", "projection_id": "projection-message-1",
+          "event_id": "event-message-1", "delivery": {"mode": "canonical"},
+          "position": {"durable": {"seq": "1", "projection_index": 0}}, "scope": "main", "run_id": "run-main",
+          "update": {"sessionUpdate": "agent_message_chunk", "messageId": "message-1", "content": {"type": "text", "text": "Hello "}}
+        },
+        {
+          "kind": "session/update", "cursor": "cursor-replay-1", "projection_id": "projection-message-1",
+          "event_id": "event-message-1", "delivery": {"mode": "canonical"},
+          "position": {"durable": {"seq": "1", "projection_index": 0}}, "scope": "main", "run_id": "run-main",
+          "update": {"sessionUpdate": "agent_message_chunk", "messageId": "message-1", "content": {"type": "text", "text": "Hello "}}
+        },
+        {
+          "kind": "session/update", "cursor": "cursor-2", "projection_id": "projection-message-2",
+          "event_id": "event-message-2", "delivery": {"mode": "canonical"},
+          "position": {"durable": {"seq": "2", "projection_index": 0}}, "scope": "main", "run_id": "run-main", "final": true,
+          "update": {"sessionUpdate": "agent_message_chunk", "messageId": "message-1", "content": {"type": "text", "text": "world"}}
+        },
+        {
+          "kind": "session/update", "cursor": "cursor-3", "projection_id": "projection-thought-1",
+          "event_id": "event-thought-1", "delivery": {"mode": "canonical"},
+          "position": {"durable": {"seq": "3", "projection_index": 0}}, "scope": "main", "run_id": "run-main", "final": true,
+          "update": {"sessionUpdate": "agent_thought_chunk", "messageId": "thought-1", "content": {"type": "text", "text": "check assumptions"}}
+        },
+        {
+          "kind": "session/update", "cursor": "cursor-4", "projection_id": "projection-user-1",
+          "event_id": "event-user-1", "delivery": {"mode": "canonical"},
+          "position": {"durable": {"seq": "4", "projection_index": 0}}, "scope": "participant", "scope_id": "participant-1", "actor": "reviewer",
+          "update": {"sessionUpdate": "user_message_chunk", "messageId": "user-1", "content": {"type": "text", "text": "review this"}}
+        }
+      ],
+      "expected": {
+        "items": [
+          {"cursor": "cursor-2", "runId": "run-main", "scope": "main", "final": true, "id": "message:main::run-main:message-1", "kind": "narrative", "messageId": "message-1", "role": "assistant", "text": "Hello world"},
+          {"cursor": "cursor-3", "runId": "run-main", "scope": "main", "final": true, "id": "message:main::run-main:thought-1", "kind": "narrative", "messageId": "thought-1", "role": "reasoning", "text": "check assumptions"},
+          {"actor": "reviewer", "cursor": "cursor-4", "scope": "participant", "scopeId": "participant-1", "final": true, "id": "message:participant:participant-1::user-1", "kind": "narrative", "messageId": "user-1", "role": "user", "text": "review this"}
+        ],
+        "boundary": {"resumeMode": "exact", "transientGap": false, "boundaryCursor": "cursor-4"}
+      }
+    },
+    {
+      "name": "tools_parent_observer_sibling_terminal_and_plan",
+      "envelopes": [
+        {
+          "kind": "session/update", "cursor": "tool-cursor-1", "projection_id": "projection-spawn-1",
+          "event_id": "event-spawn-1", "delivery": {"mode": "canonical"},
+          "position": {"durable": {"seq": "10", "projection_index": 0}}, "scope": "main", "run_id": "run-tools",
+          "update": {"sessionUpdate": "tool_call", "toolCallId": "spawn-1", "title": "Spawn", "kind": "execute", "status": "in_progress", "rawInput": {"prompt": "inspect A"}}
+        },
+        {
+          "kind": "session/update", "cursor": "tool-cursor-2", "projection_id": "projection-spawn-2",
+          "event_id": "event-spawn-2", "delivery": {"mode": "canonical"},
+          "position": {"durable": {"seq": "11", "projection_index": 0}}, "scope": "main", "run_id": "run-tools",
+          "update": {"sessionUpdate": "tool_call", "toolCallId": "spawn-2", "title": "Spawn", "kind": "execute", "status": "in_progress", "rawInput": {"prompt": "inspect B"}}
+        },
+        {
+          "kind": "session/update", "cursor": "tool-cursor-3", "projection_id": "projection-child-a-start",
+          "event_id": "event-child-a-start", "delivery": {"mode": "mirror"},
+          "position": {"durable": {"seq": "12", "projection_index": 0}}, "scope": "subagent", "scope_id": "task-a", "run_id": "run-tools",
+          "parent_tool": {"tool_call_id": "spawn-1", "tool_name": "Spawn"},
+          "update": {"sessionUpdate": "tool_call", "toolCallId": "shared-tool", "title": "Run command", "kind": "execute", "status": "in_progress", "rawInput": {"command": "printf A"}, "content": [{"type": "terminal", "terminalId": "shared-terminal"}]}
+        },
+        {
+          "kind": "session/update", "cursor": "tool-cursor-4", "projection_id": "projection-child-a-finish",
+          "event_id": "event-child-a-finish", "delivery": {"mode": "mirror"},
+          "position": {"durable": {"seq": "13", "projection_index": 0}}, "scope": "subagent", "scope_id": "task-a", "run_id": "run-tools",
+          "parent_tool": {"tool_call_id": "spawn-1", "tool_name": "Spawn"},
+          "update": {
+            "sessionUpdate": "tool_call_update", "toolCallId": "shared-tool", "status": "completed",
+            "rawOutput": {"exit_code": 0},
+            "content": [{"type": "diff", "path": "a.txt", "oldText": "before", "newText": "after"}],
+            "locations": [{"path": "a.txt", "line": 7}],
+            "_meta": {
+              "terminal_info": {"terminal_id": "shared-terminal"},
+              "terminal_output": {"terminal_id": "shared-terminal", "data": "\u001b[32mA\u001b[0m\n"},
+              "terminal_exit": {"terminal_id": "shared-terminal", "exit_code": 0},
+              "caelis": {"runtime": {"stream": {"truncated": true, "truncated_before": "9"}}}
+            }
+          }
+        },
+        {
+          "kind": "session/update", "cursor": "tool-cursor-5", "projection_id": "projection-child-b-start",
+          "event_id": "event-child-b-start", "delivery": {"mode": "mirror"},
+          "position": {"durable": {"seq": "14", "projection_index": 0}}, "scope": "subagent", "scope_id": "task-b", "run_id": "run-tools",
+          "parent_tool": {"tool_call_id": "spawn-2", "tool_name": "Spawn"},
+          "update": {"sessionUpdate": "tool_call", "toolCallId": "shared-tool", "title": "Run command", "kind": "execute", "status": "in_progress", "rawInput": {"command": "printf B"}, "content": [{"type": "terminal", "terminalId": "shared-terminal"}]}
+        },
+        {
+          "kind": "session/update", "cursor": "tool-cursor-6", "projection_id": "projection-child-b-output",
+          "event_id": "event-child-b-output", "delivery": {"mode": "transient"},
+          "position": {"transient": {"anchor": {"seq": "14", "projection_index": 0}, "generation": "generation-tools", "sequence": "1"}},
+          "scope": "subagent", "scope_id": "task-b", "run_id": "run-tools",
+          "parent_tool": {"tool_call_id": "spawn-2", "tool_name": "Spawn"},
+          "update": {"sessionUpdate": "tool_call_update", "toolCallId": "shared-tool", "status": "in_progress", "_meta": {"terminal_output": {"terminal_id": "shared-terminal", "data": "B\n"}}}
+        },
+        {
+          "kind": "session/update", "cursor": "tool-cursor-7", "projection_id": "projection-task-observer",
+          "event_id": "event-task-observer", "delivery": {"mode": "canonical"},
+          "position": {"durable": {"seq": "15", "projection_index": 0}}, "scope": "main", "run_id": "run-tools",
+          "parent_tool": {"tool_call_id": "spawn-1", "tool_name": "Spawn"},
+          "update": {"sessionUpdate": "tool_call_update", "toolCallId": "observer-1", "title": "Task", "status": "completed", "rawOutput": {"state": "completed", "final_message": "A done"}}
+        },
+        {
+          "kind": "session/update", "cursor": "tool-cursor-8", "projection_id": "projection-plan-a",
+          "event_id": "event-plan-a", "delivery": {"mode": "mirror"},
+          "position": {"durable": {"seq": "16", "projection_index": 0}}, "scope": "subagent", "scope_id": "task-a", "run_id": "run-tools",
+          "parent_tool": {"tool_call_id": "spawn-1", "tool_name": "Spawn"},
+          "update": {"sessionUpdate": "plan", "entries": [{"content": "inspect package", "status": "completed", "priority": "high"}]}
+        }
+      ],
+      "expected": {
+        "items": [
+          {"cursor": "tool-cursor-7", "runId": "run-tools", "scope": "main", "content": [], "error": false, "id": "tool:main::run-tools:spawn-1", "kind": "tool", "locations": [], "rawInput": {"prompt": "inspect A"}, "rawOutput": {"state": "completed", "final_message": "A done"}, "status": "completed", "terminal": true, "title": "Spawn", "toolCallId": "spawn-1", "toolKind": "execute"},
+          {"cursor": "tool-cursor-2", "runId": "run-tools", "scope": "main", "content": [], "error": false, "id": "tool:main::run-tools:spawn-2", "kind": "tool", "locations": [], "rawInput": {"prompt": "inspect B"}, "status": "in_progress", "terminal": false, "title": "Spawn", "toolCallId": "spawn-2", "toolKind": "execute"},
+          {"cursor": "tool-cursor-4", "parentTool": {"tool_call_id": "spawn-1", "tool_name": "Spawn"}, "runId": "run-tools", "scope": "subagent", "scopeId": "task-a", "content": [{"type": "terminal", "terminalId": "shared-terminal"}, {"type": "diff", "path": "a.txt", "oldText": "before", "newText": "after"}], "error": false, "id": "tool:subagent:task-a:run-tools:shared-tool", "kind": "tool", "locations": [{"path": "a.txt", "line": 7}], "rawInput": {"command": "printf A"}, "rawOutput": {"exit_code": 0}, "status": "completed", "terminal": true, "terminalExitCode": 0, "terminalGapBefore": true, "terminalId": "shared-terminal", "terminalOutput": "\u001b[32mA\u001b[0m\n", "terminalTruncatedBefore": "9", "title": "Run command", "toolCallId": "shared-tool", "toolKind": "execute"},
+          {"cursor": "tool-cursor-6", "parentTool": {"tool_call_id": "spawn-2", "tool_name": "Spawn"}, "runId": "run-tools", "scope": "subagent", "scopeId": "task-b", "content": [{"type": "terminal", "terminalId": "shared-terminal"}], "error": false, "id": "tool:subagent:task-b:run-tools:shared-tool", "kind": "tool", "locations": [], "rawInput": {"command": "printf B"}, "status": "in_progress", "terminal": false, "terminalId": "shared-terminal", "terminalOutput": "B\n", "title": "Run command", "toolCallId": "shared-tool", "toolKind": "execute"},
+          {"cursor": "tool-cursor-8", "parentTool": {"tool_call_id": "spawn-1", "tool_name": "Spawn"}, "runId": "run-tools", "scope": "subagent", "scopeId": "task-a", "entries": [{"content": "inspect package", "status": "completed", "priority": "high"}], "id": "plan:subagent:task-a:run-tools", "kind": "plan"}
+        ]
+      }
+    },
+    {
+      "name": "approval_participant_lifecycle_error_raw_and_fallback",
+      "boundary": {"resume_mode": "durable_fallback", "transient_gap": true, "boundary_cursor": "approval-cursor-7"},
+      "envelopes": [
+        {
+          "kind": "session/update", "cursor": "approval-cursor-1", "projection_id": "projection-approval-tool",
+          "event_id": "event-approval-tool", "delivery": {"mode": "mirror"},
+          "position": {"durable": {"seq": "20", "projection_index": 0}}, "scope": "subagent", "scope_id": "task-approval", "run_id": "run-approval",
+          "parent_tool": {"tool_call_id": "spawn-approval", "tool_name": "Spawn"},
+          "update": {"sessionUpdate": "tool_call", "toolCallId": "approval-tool", "title": "Run command", "kind": "execute", "status": "in_progress", "rawInput": {"command": "git status"}}
+        },
+        {
+          "kind": "session/request_permission", "cursor": "approval-cursor-2", "projection_id": "projection-approval-request",
+          "event_id": "event-approval-request", "delivery": {"mode": "transient"},
+          "position": {"transient": {"anchor": {"seq": "20", "projection_index": 0}, "generation": "generation-approval", "sequence": "1"}},
+          "scope": "subagent", "scope_id": "task-approval", "run_id": "run-approval", "approval_request_id": "approval-1",
+          "parent_tool": {"tool_call_id": "spawn-approval", "tool_name": "Spawn"},
+          "permission": {
+            "sessionId": "session-1",
+            "toolCall": {"sessionUpdate": "tool_call_update", "toolCallId": "approval-tool", "title": "Run command", "status": "in_progress"},
+            "options": [{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"}, {"optionId": "reject", "name": "Reject", "kind": "reject_once"}]
+          }
+        },
+        {
+          "kind": "caelis/approval_review", "cursor": "approval-cursor-3", "projection_id": "projection-approval-review",
+          "event_id": "event-approval-review", "delivery": {"mode": "mirror"},
+          "position": {"durable": {"seq": "21", "projection_index": 0}}, "scope": "subagent", "scope_id": "task-approval", "run_id": "run-approval",
+          "parent_tool": {"tool_call_id": "spawn-approval", "tool_name": "Spawn"},
+          "approval_review": {"tool_call_id": "approval-tool", "tool_name": "Run command", "status": "approved", "risk": "low", "authorization": "allow_once", "text": "Automatic approval review approved (risk: low, authorization: allow_once)"}
+        },
+        {
+          "kind": "caelis/participant", "cursor": "approval-cursor-4", "projection_id": "projection-participant",
+          "event_id": "event-participant", "delivery": {"mode": "canonical"},
+          "position": {"durable": {"seq": "22", "projection_index": 0}}, "scope": "participant", "scope_id": "participant-1", "participant_id": "participant-1", "actor": "reviewer",
+          "participant": {"state": "attached"}
+        },
+        {
+          "kind": "caelis/lifecycle", "cursor": "approval-cursor-5", "projection_id": "projection-lifecycle",
+          "event_id": "event-lifecycle", "delivery": {"mode": "canonical"},
+          "position": {"durable": {"seq": "23", "projection_index": 0}}, "scope": "main", "run_id": "direct-agent-run", "actor": "direct-agent",
+          "lifecycle": {"state": "completed", "stopReason": "end_turn"}
+        },
+        {
+          "kind": "caelis/error", "cursor": "approval-cursor-6", "projection_id": "projection-error",
+          "event_id": "event-error", "delivery": {"mode": "canonical"},
+          "position": {"durable": {"seq": "24", "projection_index": 0}}, "scope": "main", "run_id": "direct-agent-run", "actor": "direct-agent",
+          "error": "network failed"
+        },
+        {
+          "kind": "session/update", "cursor": "approval-cursor-7", "projection_id": "projection-raw",
+          "event_id": "event-raw", "delivery": {"mode": "canonical"},
+          "position": {"durable": {"seq": "25", "projection_index": 0}}, "scope": "main", "run_id": "direct-agent-run",
+          "update": {"sessionUpdate": "vendor/future", "payload": {"future": true, "label": "inspectable"}}
+        }
+      ],
+      "expected": {
+        "items": [
+          {"cursor": "approval-cursor-2", "parentTool": {"tool_call_id": "spawn-approval", "tool_name": "Spawn"}, "runId": "run-approval", "scope": "subagent", "scopeId": "task-approval", "content": [], "error": false, "id": "tool:subagent:task-approval:run-approval:approval-tool", "kind": "tool", "locations": [], "rawInput": {"command": "git status"}, "status": "in_progress", "terminal": false, "title": "Run command", "toolCallId": "approval-tool", "toolKind": "execute"},
+          {"cursor": "approval-cursor-2", "parentTool": {"tool_call_id": "spawn-approval", "tool_name": "Spawn"}, "runId": "run-approval", "scope": "subagent", "scopeId": "task-approval", "id": "projection:projection-approval-request", "kind": "approval", "requestId": "approval-1", "status": "requested", "toolCallId": "approval-tool", "toolName": "Run command"},
+          {"cursor": "approval-cursor-3", "parentTool": {"tool_call_id": "spawn-approval", "tool_name": "Spawn"}, "runId": "run-approval", "scope": "subagent", "scopeId": "task-approval", "authorization": "allow_once", "id": "projection:projection-approval-review", "kind": "approval", "risk": "low", "status": "approved", "text": "Automatic approval review approved (risk: low, authorization: allow_once)", "toolCallId": "approval-tool", "toolName": "Run command"},
+          {"actor": "reviewer", "cursor": "approval-cursor-4", "scope": "participant", "scopeId": "participant-1", "id": "projection:projection-participant", "kind": "participant", "participantId": "participant-1", "state": "attached"},
+          {"actor": "direct-agent", "cursor": "approval-cursor-5", "runId": "direct-agent-run", "scope": "main", "id": "projection:projection-lifecycle", "kind": "lifecycle", "state": "completed", "stopReason": "end_turn"},
+          {"actor": "direct-agent", "cursor": "approval-cursor-6", "runId": "direct-agent-run", "scope": "main", "id": "projection:projection-error", "kind": "error", "text": "network failed"},
+          {"cursor": "approval-cursor-7", "runId": "direct-agent-run", "scope": "main", "id": "projection:projection-raw", "kind": "raw_extension", "sessionUpdate": "vendor/future", "update": {"sessionUpdate": "vendor/future", "payload": {"future": true, "label": "inspectable"}}}
+        ],
+        "boundary": {"resumeMode": "durable_fallback", "transientGap": true, "boundaryCursor": "approval-cursor-7"}
+      }
+    },
+    {
+      "name": "usage_max_uint64",
+      "envelopes": [
+        {
+          "kind": "session/update", "cursor": "usage-cursor-1", "projection_id": "projection-usage",
+          "event_id": "event-usage", "delivery": {"mode": "canonical"},
+          "position": {"durable": {"seq": "18446744073709551615", "projection_index": 0}}, "scope": "main",
+          "update": {"sessionUpdate": "usage_update", "size": "18446744073709551615", "used": "18446744073709551614", "cost": {"total": 0.47, "currency": "USD"}}
+        }
+      ],
+      "expected": {
+        "items": [],
+        "usage": {"cost": {"total": 0.47, "currency": "USD"}, "size": "18446744073709551615", "used": "18446744073709551614"}
+      }
+    }
+  ]
+}

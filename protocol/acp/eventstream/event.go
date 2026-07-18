@@ -70,14 +70,14 @@ type UsageSnapshot struct {
 }
 
 func UsageUpdateFromSnapshot(usage UsageSnapshot, meta map[string]any) schema.UsageUpdate {
-	used := usage.TotalTokens
+	used := nonNegativeUsage(usage.TotalTokens)
 	size := usage.ContextWindowTokens
 	if size <= 0 {
-		size = used
+		size = usage.TotalTokens
 	}
 	return schema.UsageUpdate{
 		SessionUpdate: schema.UpdateUsage,
-		Size:          size,
+		Size:          nonNegativeUsage(size),
 		Used:          used,
 		Meta:          usageUpdateMeta(meta, usage),
 	}
@@ -91,14 +91,23 @@ func UsageSnapshotFromUpdate(update schema.UsageUpdate) *UsageSnapshot {
 	if usage == nil {
 		usage = &UsageSnapshot{}
 	}
-	if usage.TotalTokens == 0 {
-		usage.TotalTokens = update.Used
+	if usage.TotalTokens == 0 && update.Used <= uint64(maxInt()) {
+		usage.TotalTokens = int(update.Used)
 	}
 	if usageSnapshotEmpty(*usage) {
 		return nil
 	}
 	return usage
 }
+
+func nonNegativeUsage(value int) uint64 {
+	if value <= 0 {
+		return 0
+	}
+	return uint64(value)
+}
+
+func maxInt() int { return int(^uint(0) >> 1) }
 
 func UsageSnapshotFromEnvelope(env Envelope) *UsageSnapshot {
 	if env.Kind != KindSessionUpdate {
