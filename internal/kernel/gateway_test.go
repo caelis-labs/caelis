@@ -1548,7 +1548,7 @@ func TestBeginTurnAllowsSurfaceToOverrideStreamingPolicy(t *testing.T) {
 	}
 }
 
-func TestBeginTurnDefaultsHeadlessSurfaceToNonStreaming(t *testing.T) {
+func TestBeginTurnDefaultsHeadlessSurfaceToStreaming(t *testing.T) {
 	t.Parallel()
 
 	activeSession := session.Session{
@@ -1581,8 +1581,8 @@ func TestBeginTurnDefaultsHeadlessSurfaceToNonStreaming(t *testing.T) {
 	result.Handle.Close()
 	<-rt.ran
 
-	if rt.lastReq.Request.StreamEnabled(true) {
-		t.Fatalf("runtime request stream = true, want false for headless default")
+	if !rt.lastReq.Request.StreamEnabled(false) {
+		t.Fatalf("runtime request stream = false, want true for headless default")
 	}
 }
 
