@@ -35,7 +35,7 @@ func glamourRenderNarrative(raw string, width int, theme tuikit.Theme, roleStyle
 		return ""
 	}
 	// Glamour appends trailing newlines; trim them.
-	return strings.TrimRight(rendered, "\n")
+	return strings.TrimRight(tuikit.LinkifyText(rendered, theme.MarkdownLinkStyle()), "\n")
 }
 
 // glamourNarrativeRows renders a finalized narrative block into RenderedRows
