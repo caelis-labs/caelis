@@ -35,8 +35,8 @@ func TestTextRendererSemanticPolicies(t *testing.T) {
 		Theme:          theme,
 		LineStyle:      tuikit.LineStyleReasoning,
 	})
-	if plain := joinRenderedPlain(reasoning.Rows); !strings.Contains(plain, "**think**") || !strings.Contains(plain, "`code`") {
-		t.Fatalf("reasoning plain = %q, want markdown source preserved", plain)
+	if plain := joinRenderedPlain(reasoning.Rows); strings.Contains(plain, "**") || strings.Contains(plain, "`") || !strings.Contains(plain, "think with code") {
+		t.Fatalf("reasoning plain = %q, want lightweight markdown presentation", plain)
 	}
 
 	user := RenderText(TextRenderRequest{

@@ -28,6 +28,7 @@ func (m *Model) beginLiveTurn(mode SubmissionMode, divider bool, startedAt time.
 	m.liveTurn.StartedAt = startedAt
 	m.liveTurn.LastDuration = 0
 	m.liveTurn.HasLastDuration = false
+	m.compactNoticePair = compactNoticePairState{}
 	m.startRunningAnimation()
 }
 
@@ -92,6 +93,7 @@ func (m *Model) finishLiveTurn(endedAt time.Time, interrupted bool, err error) t
 	m.runningInterruptRequested = false
 	m.sandboxProgress = nil
 	m.stopLiveTurn()
+	m.compactNoticePair = compactNoticePairState{}
 	m.planEntries = m.planEntries[:0]
 	m.clearInputAttachments()
 	m.syncTextareaChrome()

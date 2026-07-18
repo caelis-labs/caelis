@@ -2116,6 +2116,86 @@ func TestHandleACPEventEnvelopeAnchorsCompactNoticeInMainTurn(t *testing.T) {
 	}
 }
 
+func TestHandleACPEventEnvelopeCollapsesCanonicalAndTransientCompactSignals(t *testing.T) {
+	t.Parallel()
+
+	canonical := eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		TurnID:    "turn-1",
+		Scope:     eventstream.ScopeMain,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateCompact,
+			Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
+		},
+		Final: true,
+	}
+	transient := eventstream.Envelope{
+		Kind:      eventstream.KindNotice,
+		SessionID: "session-1",
+		TurnID:    "turn-1",
+		Scope:     eventstream.ScopeMain,
+		Notice:    transcript.CompactNoticeLabel,
+	}
+
+	for _, test := range []struct {
+		name   string
+		inputs []eventstream.Envelope
+	}{
+		{name: "durable first", inputs: []eventstream.Envelope{canonical, transient}},
+		{name: "transient first", inputs: []eventstream.Envelope{transient, canonical}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			model := NewModel(Config{NoColor: true, NoAnimation: true})
+			model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+			for _, input := range test.inputs {
+				model = applyACPEnvelopeForTest(t, model, input)
+			}
+			block := requireMainACPTurnBlockForTest(t, model)
+			if len(block.Events) != 1 || block.Events[0].NoticeKind != transcript.NoticeKindCompact {
+				t.Fatalf("compact events = %#v, want one notice for paired projections", block.Events)
+			}
+		})
+	}
+}
+
+func TestHandleACPEventEnvelopeKeepsRepeatedCompactionsVisibleOnceEach(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+	for compactIndex := 0; compactIndex < 2; compactIndex++ {
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "session-1",
+			TurnID:    "turn-1",
+			Scope:     eventstream.ScopeMain,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateCompact,
+				Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT"},
+			},
+			Final: true,
+		})
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind:      eventstream.KindNotice,
+			SessionID: "session-1",
+			TurnID:    "turn-1",
+			Scope:     eventstream.ScopeMain,
+			Notice:    transcript.CompactNoticeLabel,
+		})
+	}
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 2 {
+		t.Fatalf("compact events = %#v, want two real compactions rendered once each", block.Events)
+	}
+	for _, event := range block.Events {
+		if event.NoticeKind != transcript.NoticeKindCompact {
+			t.Fatalf("compact event = %#v, want compact notice", event)
+		}
+	}
+}
+
 func TestRenderEventPolicyForACPEnvelopeRoutesStandardUpdates(t *testing.T) {
 	t.Parallel()
 

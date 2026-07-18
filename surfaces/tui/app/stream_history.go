@@ -29,6 +29,7 @@ func (m *Model) resetConversationView() {
 	m.hintEntries = nil
 	m.hint = ""
 	m.liveTurn = liveTurnState{}
+	m.compactNoticePair = compactNoticePairState{}
 	m.clearSelection()
 	m.clearInputSelection()
 	m.setViewportFollowState(viewportFollowTail)

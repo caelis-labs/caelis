@@ -57,7 +57,7 @@ func userSurfaceRow(blockID, prefix, segment string, width int, theme tuikit.The
 }
 
 func renderPlainReasoningRows(blockID, raw, rolePrefix string, width int, theme tuikit.Theme) []RenderedRow {
-	raw = strings.ReplaceAll(strings.ReplaceAll(raw, "\r\n", "\n"), "\r", "\n")
+	raw = normalizeReasoningDisplayText(raw)
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
@@ -75,16 +75,13 @@ func renderPlainReasoningRows(blockID, raw, rolePrefix string, width int, theme 
 	rows := make([]RenderedRow, 0, strings.Count(raw, "\n")+1)
 	first := true
 	for _, line := range strings.Split(raw, "\n") {
-		segments := strings.Split(hardWrapDisplayLine(line, bodyWidth), "\n")
-		if len(segments) == 0 {
-			segments = []string{line}
-		}
-		for _, segment := range segments {
-			plain := segment
-			styled := bodyStyle.Render(segment)
+		styledSegments, plainSegments := renderInlineMarkdownWrappedSegments(line, bodyStyle, theme, bodyWidth)
+		for i := range plainSegments {
+			plain := strings.Repeat(" ", prefixWidth) + plainSegments[i]
+			styled := strings.Repeat(" ", prefixWidth) + styledSegments[i]
 			if first {
-				plain = rolePrefix + segment
-				styled = prefixStyled + bodyStyle.Render(segment)
+				plain = rolePrefix + plainSegments[i]
+				styled = prefixStyled + styledSegments[i]
 				first = false
 			}
 			rows = append(rows, RenderedRow{
@@ -96,4 +93,60 @@ func renderPlainReasoningRows(blockID, raw, rolePrefix string, width int, theme 
 		}
 	}
 	return rows
+}
+
+// normalizeReasoningDisplayText keeps the canonical reasoning payload intact
+// while presenting adjacent GPT summary spans as separate steps. A sequence
+// such as **first****second** is two complete strong spans with no provider
+// whitespace between them; incomplete streaming markers remain untouched.
+func normalizeReasoningDisplayText(raw string) string {
+	raw = strings.ReplaceAll(strings.ReplaceAll(raw, "\r\n", "\n"), "\r", "\n")
+	lines := strings.Split(raw, "\n")
+	for i, line := range lines {
+		lines[i] = splitAdjacentReasoningStrongSpans(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func splitAdjacentReasoningStrongSpans(line string) string {
+	var out strings.Builder
+	for i := 0; i < len(line); {
+		if line[i] == '\\' && i+1 < len(line) {
+			out.WriteString(line[i : i+2])
+			i += 2
+			continue
+		}
+		if line[i] == '`' {
+			if _, next, ok := parseInlineCodeSpan(line, i); ok {
+				out.WriteString(line[i:next])
+				i = next
+				continue
+			}
+		}
+		if strings.HasPrefix(line[i:], "**") {
+			if _, next, ok := parseInlineDelimited(line, i, "**"); ok && strings.HasPrefix(line[next:], "**") {
+				if _, _, adjacentOK := parseInlineDelimited(line, next, "**"); adjacentOK {
+					out.WriteString(line[i:next])
+					out.WriteByte('\n')
+					i = next
+					continue
+				}
+			}
+		}
+		out.WriteByte(line[i])
+		i++
+	}
+	return out.String()
+}
+
+func reasoningDisplayPlainText(raw string) string {
+	lines := strings.Split(normalizeReasoningDisplayText(raw), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(stripInlineMarkdown(line))
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
 }

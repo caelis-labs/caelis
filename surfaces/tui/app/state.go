@@ -63,6 +63,12 @@ type liveTurnState struct {
 	HasLastDuration bool
 }
 
+type compactNoticePairState struct {
+	key                string
+	canonicalUnmatched int
+	transientUnmatched int
+}
+
 var runningSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 var runningCarouselLines = []string{
@@ -369,6 +375,7 @@ type Model struct {
 	planEntries        []planEntryState
 	welcomeCardPending bool
 	liveTurn           liveTurnState
+	compactNoticePair  compactNoticePairState
 
 	// Transient log replacement tracking — now uses block IDs.
 	transientBlockID string

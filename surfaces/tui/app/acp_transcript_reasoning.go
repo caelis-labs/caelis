@@ -237,7 +237,11 @@ func liveReasoningOmittedRow(blockID string, hidden int, ctx BlockRenderContext)
 }
 
 func reasoningPreviewText(text string, width int) string {
-	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	lines := strings.Split(reasoningDisplayPlainText(text), "\n")
+	for i, line := range lines {
+		lines[i] = strings.Join(strings.Fields(line), " ")
+	}
+	text = strings.Join(lines, " · ")
 	if text == "" {
 		return ""
 	}
@@ -246,7 +250,7 @@ func reasoningPreviewText(text string, width int) string {
 }
 
 func reasoningExpandedBodyVisible(text string, width int) bool {
-	normalized := strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	normalized := reasoningPreviewText(text, 1<<20)
 	if normalized == "" {
 		return false
 	}
