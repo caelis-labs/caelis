@@ -122,6 +122,33 @@ func TestFeedBrokerPrimePublishesCommittedMutationToLiveSubscriber(t *testing.T)
 	}
 }
 
+func TestFeedBrokerMainTerminalReconcilesCommittedAssistantFirst(t *testing.T) {
+	reader := &mutablePageReader{}
+	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{SubscriberQueue: 8})
+	subscription, err := broker.SubscribeFromNow(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+
+	reader.events = append(reader.events, durableProtocolEvent(1, "committed final answer"))
+	terminal := eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(2, 0))
+	terminal.SessionID = "session-1"
+	terminal.Scope = eventstream.ScopeMain
+	if err := broker.Publish(terminal); err != nil {
+		t.Fatal(err)
+	}
+
+	got := receiveEnvelopes(t, subscription.Events(), 2)
+	chunk, ok := got[0].Update.(schema.ContentChunk)
+	if !ok || chunk.SessionUpdate != schema.UpdateAgentMessage || schema.ExtractTextValue(chunk.Content) != "committed final answer" {
+		t.Fatalf("first event = %#v, want committed assistant", got[0])
+	}
+	if !eventstream.IsTerminalLifecycle(got[1]) {
+		t.Fatalf("second event = %#v, want terminal", got[1])
+	}
+}
+
 func TestFeedBrokerDurablePublishGapFillsFromStorage(t *testing.T) {
 	reader := &mutablePageReader{}
 	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{SubscriberQueue: 8})

@@ -361,6 +361,27 @@ func (b *FeedBroker) publish(
 		holdingTarget = false
 		return true, active, nil
 	}
+	if isMainTerminalEnvelope(envelope) && b.reader != nil {
+		// A Runtime terminal is the final delivery barrier for one Turn, while
+		// canonical assistant output is durable Session truth. Reconcile storage
+		// under the same sequencer before accepting the transient terminal so a
+		// fast provider cannot close a Surface before its committed final answer.
+		if err := b.lockPrime(ctx); err != nil {
+			return false, false, err
+		}
+		if err := b.primeLocked(ctx, 0); err != nil {
+			b.unlockPrime()
+			return false, false, err
+		}
+		_, _, err = b.publishSerialized(envelope, target)
+		b.unlockPrime()
+		if err != nil {
+			return false, false, err
+		}
+		active := b.flushTargetHold(ctx, target)
+		holdingTarget = false
+		return true, active, nil
+	}
 	_, _, err = b.publishSerialized(envelope, target)
 	if err != nil {
 		return false, false, err
@@ -368,6 +389,11 @@ func (b *FeedBroker) publish(
 	active := b.flushTargetHold(ctx, target)
 	holdingTarget = false
 	return true, active, nil
+}
+
+func isMainTerminalEnvelope(envelope eventstream.Envelope) bool {
+	return eventstream.IsTerminalLifecycle(envelope) &&
+		(envelope.Scope == "" || envelope.Scope == eventstream.ScopeMain)
 }
 
 func (b *FeedBroker) publishSerialized(
