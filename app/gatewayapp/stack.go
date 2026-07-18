@@ -21,6 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
+	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
@@ -90,6 +91,7 @@ type Stack struct {
 	gateway                   *kernelimpl.Gateway
 	mcpMgr                    *mcp.Manager
 	codexAuth                 *codexauth.Manager
+	providerUsage             *providerusage.Registry
 
 	// Optional test seam; nil uses the platform lifecycle runtime factory.
 	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
@@ -286,6 +288,9 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
+	providerUsage := providerusage.NewRegistry(map[string]providerusage.Reader{
+		"openai-codex": codexAuth,
+	})
 	lookup, err := newModelLookup(configStore, cfg.Model, cfg.ContextWindow)
 	if err != nil {
 		return nil, err
@@ -323,6 +328,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		controlFeeds:     controlFeeds,
 		approvalRecovery: approvalRecovery,
 		codexAuth:        codexAuth,
+		providerUsage:    providerUsage,
 		runtime: stackRuntimeConfig{
 			ApprovalMode:  effectiveApprovalMode,
 			PolicyProfile: effectivePolicyProfile,

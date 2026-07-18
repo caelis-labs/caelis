@@ -11,6 +11,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
+	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
@@ -139,6 +140,20 @@ func (s ModelService) Authenticate(ctx context.Context, req modelconfig.Authenti
 
 func (s ModelService) UsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string) (compact.UsageSnapshot, error) {
 	return s.stack.SessionUsageSnapshot(ctx, ref, modelAlias)
+}
+
+// ProviderUsage returns account-level subscription windows for the selected
+// model's provider. found=false means the provider has no usage adapter or the
+// model is not backed by a subscription credential.
+func (s ModelService) ProviderUsage(ctx context.Context, modelAlias string) (providerusage.Snapshot, bool, error) {
+	if s.stack == nil || s.stack.providerUsage == nil {
+		return providerusage.Snapshot{}, false, nil
+	}
+	config, ok := s.stack.ModelConfig(modelAlias)
+	if !ok || config.CredentialRef != modelconfig.CodexOAuthCredentialRef {
+		return providerusage.Snapshot{}, false, nil
+	}
+	return s.stack.providerUsage.Query(ctx, config.Provider)
 }
 
 func (s AgentService) ControllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {

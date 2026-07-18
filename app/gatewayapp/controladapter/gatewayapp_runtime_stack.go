@@ -79,6 +79,7 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 				return models.Config(alias)
 			},
 			SessionUsageSnapshotFn: models.UsageSnapshot,
+			ProviderUsageFn:        models.ProviderUsage,
 			ConnectModelsFn:        models.ConnectModels,
 			UseFn:                  models.Use,
 			DeleteFn:               models.Delete,
