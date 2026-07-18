@@ -174,6 +174,13 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 				return StatusSnapshot{}, ctx.Err()
 			}
 		}
+		if includeDiagnostics && !activeACP && d.stack.Model.ProviderUsageFn != nil {
+			if usage, found, err := d.stack.Model.ProviderUsageFn(ctx, rawModelText); err == nil && found {
+				status.RateLimits = statusRateLimitsFromProviderUsage(usage)
+			} else if ctx.Err() != nil {
+				return StatusSnapshot{}, ctx.Err()
+			}
+		}
 	}
 	if activeACP {
 		rawModelText = firstNonEmpty(strings.TrimSpace(acpStatus.Model), acpModelText, rawModelText)

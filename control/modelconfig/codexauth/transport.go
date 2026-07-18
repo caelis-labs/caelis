@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
-const codexBackendPath = "/backend-api/codex"
+const (
+	codexBackendPath = "/backend-api/codex"
+	codexUsagePath   = "/backend-api/wham/usage"
+)
 
 type authenticatedTransport struct {
 	manager *Manager
@@ -19,7 +22,7 @@ func (t *authenticatedTransport) RoundTrip(request *http.Request) (*http.Respons
 		return nil, fmt.Errorf("codexauth: request is nil")
 	}
 	if !allowedCodexRequest(request) {
-		return nil, fmt.Errorf("codexauth: refusing to send OAuth credentials outside https://chatgpt.com%s", codexBackendPath)
+		return nil, fmt.Errorf("codexauth: refusing to send OAuth credentials outside maintained ChatGPT endpoints")
 	}
 	credentials, err := t.manager.accessToken(request.Context(), nil)
 	if err != nil {
@@ -52,5 +55,5 @@ func allowedCodexRequest(request *http.Request) bool {
 		return false
 	}
 	path := request.URL.EscapedPath()
-	return path == codexBackendPath || strings.HasPrefix(path, codexBackendPath+"/")
+	return path == codexUsagePath || path == codexBackendPath || strings.HasPrefix(path, codexBackendPath+"/")
 }

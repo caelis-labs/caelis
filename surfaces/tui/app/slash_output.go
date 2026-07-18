@@ -180,6 +180,15 @@ func renderSlashStatusLines(status control.StatusSnapshot) []slashOutputLine {
 			lines = append(lines, slashField("Warning", warning))
 		}
 	}
+	if !view.RateLimits.Empty() {
+		lines = append(lines, slashBlank(), slashSection("Limits"))
+		if view.RateLimits.Plan != "" {
+			lines = append(lines, slashField("Plan", view.RateLimits.Plan))
+		}
+		for _, row := range view.RateLimits.Rows {
+			lines = append(lines, slashField(row.Label, row.Value))
+		}
+	}
 	if !view.Usage.Empty() {
 		lines = append(lines, slashBlank(), slashSection("Usage"))
 		lines = append(lines, renderSlashTokenUsage(view.Usage)...)

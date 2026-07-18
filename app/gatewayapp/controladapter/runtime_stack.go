@@ -12,6 +12,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
@@ -217,6 +218,7 @@ type ModelRuntimeDeps struct {
 	DefaultAliasFn         func() string
 	ConfigFn               func(string) (ModelConfig, bool)
 	SessionUsageSnapshotFn func(context.Context, session.SessionRef, string) (compact.UsageSnapshot, error)
+	ProviderUsageFn        func(context.Context, string) (providerusage.Snapshot, bool, error)
 	ConnectModelsFn        func([]ModelConfig) ([]string, error)
 	UseFn                  func(context.Context, session.SessionRef, string, ...string) error
 	DeleteFn               func(context.Context, session.SessionRef, string) error

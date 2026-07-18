@@ -120,6 +120,29 @@ type StatusRuntime struct {
 	Running        bool
 }
 
+// StatusRateLimits is the provider-neutral account usage projection exposed
+// to TUI, headless, app-server, and future GUI status surfaces.
+type StatusRateLimits struct {
+	Provider   string
+	Plan       string
+	CapturedAt time.Time
+	Limits     []StatusRateLimit
+}
+
+type StatusRateLimit struct {
+	ID      string
+	Name    string
+	Windows []StatusRateLimitWindow
+}
+
+type StatusRateLimitWindow struct {
+	Kind            string
+	Label           string
+	UsedPercent     float64
+	DurationMinutes int64
+	ResetsAt        time.Time
+}
+
 type SessionSnapshot struct {
 	SessionID string
 	Reconnect SessionReconnect
@@ -203,6 +226,7 @@ type StatusSnapshot struct {
 	ModelStatus   StatusModel
 	SandboxStatus StatusSandbox
 	Usage         StatusUsage
+	RateLimits    StatusRateLimits
 	Runtime       StatusRuntime
 }
 

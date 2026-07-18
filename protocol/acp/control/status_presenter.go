@@ -2,15 +2,17 @@ package control
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // FormatStatusSnapshot renders the shared text status view used by prompt
 // surfaces.
 func FormatStatusSnapshot(status StatusSnapshot) string {
 	view := StatusDisplayFromSnapshot(status)
-	lines := make([]string, 0, len(view.Fields)+len(view.Warnings)+len(view.Usage.Rows)+4)
+	lines := make([]string, 0, len(view.Fields)+len(view.Warnings)+len(view.RateLimits.Rows)+len(view.Usage.Rows)+6)
 	for _, field := range view.Fields {
 		appendStatusField(&lines, field.Label, field.Value)
 	}
@@ -20,6 +22,15 @@ func FormatStatusSnapshot(status StatusSnapshot) string {
 		}
 		for _, warning := range view.Warnings {
 			appendStatusField(&lines, "Warning", warning)
+		}
+	}
+	if !view.RateLimits.Empty() {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		appendStatusField(&lines, "Plan", view.RateLimits.Plan)
+		for _, row := range view.RateLimits.Rows {
+			appendStatusField(&lines, row.Label, row.Value)
 		}
 	}
 	if usage := FormatTokenUsageDisplay(view.Usage); usage != "" {
@@ -45,9 +56,26 @@ type DisplayField struct {
 // StatusDisplay is the canonical display model for /status. It contains
 // derived user-facing strings but no surface-specific layout or styling.
 type StatusDisplay struct {
-	Fields   []DisplayField `json:"fields,omitempty"`
-	Warnings []string       `json:"warnings,omitempty"`
-	Usage    TokenUsageView `json:"usage,omitempty"`
+	Fields     []DisplayField     `json:"fields,omitempty"`
+	Warnings   []string           `json:"warnings,omitempty"`
+	RateLimits RateLimitUsageView `json:"rate_limits,omitempty"`
+	Usage      TokenUsageView     `json:"usage,omitempty"`
+}
+
+// RateLimitUsageView is the canonical display model for provider subscription
+// windows. The structured StatusSnapshot remains available to richer GUI
+// clients that need progress bars or localized reset timestamps.
+type RateLimitUsageView struct {
+	Provider string                  `json:"provider,omitempty"`
+	Plan     string                  `json:"plan,omitempty"`
+	Rows     []RateLimitUsageViewRow `json:"rows,omitempty"`
+}
+
+func (v RateLimitUsageView) Empty() bool { return len(v.Rows) == 0 }
+
+type RateLimitUsageViewRow struct {
+	Label string `json:"label,omitempty"`
+	Value string `json:"value,omitempty"`
 }
 
 // TokenUsageView is the canonical display model for session token usage.
@@ -129,7 +157,65 @@ func StatusDisplayFromSnapshot(status StatusSnapshot) StatusDisplay {
 	if strings.TrimSpace(status.SandboxStatus.FallbackReason) != "" {
 		warnings = append(warnings, "Requested sandbox backend is unavailable and a fallback is in effect")
 	}
-	return StatusDisplay{Fields: fields, Warnings: warnings, Usage: sessionTokenUsageView(status)}
+	return StatusDisplay{
+		Fields:     fields,
+		Warnings:   warnings,
+		RateLimits: rateLimitUsageView(status.RateLimits),
+		Usage:      sessionTokenUsageView(status),
+	}
+}
+
+func rateLimitUsageView(status StatusRateLimits) RateLimitUsageView {
+	view := RateLimitUsageView{
+		Provider: strings.TrimSpace(status.Provider),
+		Plan:     strings.TrimSpace(status.Plan),
+	}
+	for _, limit := range status.Limits {
+		bucket := strings.TrimSpace(firstNonEmpty(limit.Name, limit.ID))
+		for _, window := range limit.Windows {
+			label := rateLimitWindowLabel(window)
+			if bucket != "" && !strings.EqualFold(bucket, "codex") {
+				label = bucket + " " + label
+			}
+			remaining := 100 - math.Max(0, math.Min(100, window.UsedPercent))
+			value := fmt.Sprintf("%.0f%% left", remaining)
+			if !window.ResetsAt.IsZero() {
+				value += " · resets " + window.ResetsAt.Local().Format("2006-01-02 15:04 MST")
+			}
+			view.Rows = append(view.Rows, RateLimitUsageViewRow{Label: label, Value: value})
+		}
+	}
+	return view
+}
+
+func rateLimitWindowLabel(window StatusRateLimitWindow) string {
+	if label := strings.TrimSpace(window.Label); label != "" {
+		return label
+	}
+	switch window.DurationMinutes {
+	case int64((5 * time.Hour) / time.Minute):
+		return "5h limit"
+	case int64((24 * time.Hour) / time.Minute):
+		return "Daily limit"
+	case int64((7 * 24 * time.Hour) / time.Minute):
+		return "Weekly limit"
+	case int64((30 * 24 * time.Hour) / time.Minute):
+		return "Monthly limit"
+	}
+	if window.DurationMinutes > 0 && window.DurationMinutes%int64(time.Hour/time.Minute) == 0 {
+		hours := window.DurationMinutes / int64(time.Hour/time.Minute)
+		if hours%24 == 0 {
+			return fmt.Sprintf("%dd limit", hours/24)
+		}
+		return fmt.Sprintf("%dh limit", hours)
+	}
+	if window.DurationMinutes > 0 {
+		return fmt.Sprintf("%dm limit", window.DurationMinutes)
+	}
+	if kind := strings.TrimSpace(window.Kind); kind != "" {
+		return strings.ToUpper(kind[:1]) + kind[1:] + " limit"
+	}
+	return "Limit"
 }
 
 // FormatDoctorSnapshot renders the shared doctor output used by prompt
