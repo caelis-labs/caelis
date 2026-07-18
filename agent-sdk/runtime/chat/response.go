@@ -32,12 +32,29 @@ func collectFinalResponse(
 	yieldChunk func(*session.Event) bool,
 ) (*model.Response, error) {
 	var final *model.Response
+	textFilters := map[int]*citationMarkerStreamFilter{}
+	textFilterOrder := make([]int, 0)
 	for event, err := range llm.Generate(ctx, req) {
 		if err != nil {
 			return nil, err
 		}
 		if req != nil && req.Stream {
-			if chunk := chunkEventFromStreamEvent(event); chunk != nil && yieldChunk != nil {
+			visibleEvent := event
+			if event != nil && event.PartDelta != nil && event.PartDelta.Kind == model.PartKindText {
+				index := event.PartDelta.Index
+				filter := textFilters[index]
+				if filter == nil {
+					filter = &citationMarkerStreamFilter{}
+					textFilters[index] = filter
+					textFilterOrder = append(textFilterOrder, index)
+				}
+				copyEvent := *event
+				copyDelta := *event.PartDelta
+				copyDelta.TextDelta = filter.Push(copyDelta.TextDelta)
+				copyEvent.PartDelta = &copyDelta
+				visibleEvent = &copyEvent
+			}
+			if chunk := chunkEventFromStreamEvent(visibleEvent); chunk != nil && yieldChunk != nil {
 				if !yieldChunk(chunk) {
 					return nil, context.Canceled
 				}
@@ -45,6 +62,19 @@ func collectFinalResponse(
 		}
 		if event != nil && event.Response != nil && event.TurnComplete {
 			final = event.Response
+		}
+	}
+	if req != nil && req.Stream && yieldChunk != nil {
+		for _, index := range textFilterOrder {
+			if pending := textFilters[index].Flush(); pending != "" {
+				chunk := chunkEventFromStreamEvent(&model.StreamEvent{
+					Type:      model.StreamEventPartDelta,
+					PartDelta: &model.PartDelta{Index: index, Kind: model.PartKindText, TextDelta: pending},
+				})
+				if chunk != nil && !yieldChunk(chunk) {
+					return nil, context.Canceled
+				}
+			}
 		}
 	}
 	if final == nil {

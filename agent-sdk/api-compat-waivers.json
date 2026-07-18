@@ -9,6 +9,24 @@
       "reason": "pre-v1 adds an explicit per-participant reasoning effort so direct profile runs apply their bound execution choice before the first ACP prompt"
     },
     {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/model",
+      "sha256": "99c8159c5a42c71fd32b909000fb91d9591c723f38cbfd7e8cf602bc24039596",
+      "symbol": "type TextPart",
+      "reason": "pre-v1 adds durable provider-neutral web citations to canonical text parts so replay and every presentation surface share one attribution truth"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/model",
+      "sha256": "e77df0faf284cdeb6815ab97cc83b3b0958b53e23c5e139386903e6f7dd5ef45",
+      "symbol": "type WebSearchResponse",
+      "reason": "pre-v1 returns normalized answer citation ranges alongside provider-native search results instead of leaking provider presentation markers"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/model",
+      "sha256": "79f3ec067e7a3aeb06823ff927d25792bca6242e6fcfcf7d94e64584225fad97",
+      "symbol": "type WebSearchResult",
+      "reason": "pre-v1 preserves provider-local search result references long enough to resolve scoped citation markers without treating those references as user-visible links"
+    },
+    {
       "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
       "sha256": "3d6b9096ae1a01b47509a330549a4f91b12b61cddb431cb065b76444a528e5dc",
       "symbol": "type AttachRequest",

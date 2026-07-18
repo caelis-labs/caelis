@@ -42,13 +42,25 @@ func (l *geminiLLM) SearchWeb(ctx context.Context, req model.WebSearchRequest) (
 	if err != nil {
 		return model.WebSearchResponse{}, err
 	}
+	rawAnswer := msg.TextContent()
+	results := geminiGroundingResults(out, req.MaxResults)
+	citations := msg.TextContentCitations()
+	if len(citations) == 0 && len(results) > 0 {
+		citations = []model.Citation{{
+			StartIndex: len(rawAnswer),
+			EndIndex:   len(rawAnswer),
+			Sources:    citationSourcesFromSearchResults(results),
+		}}
+	}
+	answer, citations := trimCitedText(rawAnswer, citations)
 	return model.WebSearchResponse{
-		Query:    req.Query,
-		Provider: l.provider,
-		Model:    firstNonEmptyString(out.ModelVersion, l.name),
-		Answer:   strings.TrimSpace(msg.TextContent()),
-		Results:  geminiGroundingResults(out, req.MaxResults),
-		Usage:    usage,
+		Query:     req.Query,
+		Provider:  l.provider,
+		Model:     firstNonEmptyString(out.ModelVersion, l.name),
+		Answer:    answer,
+		Results:   results,
+		Citations: citations,
+		Usage:     usage,
 	}, nil
 }
 
@@ -58,8 +70,7 @@ func geminiGroundingResults(out *genai.GenerateContentResponse, maxResults int) 
 	}
 	chunks := out.Candidates[0].GroundingMetadata.GroundingChunks
 	results := make([]model.WebSearchResult, 0, min(maxResults, len(chunks)))
-	seen := map[string]struct{}{}
-	for _, chunk := range chunks {
+	for index, chunk := range chunks {
 		if chunk == nil || chunk.Web == nil {
 			continue
 		}
@@ -67,11 +78,8 @@ func geminiGroundingResults(out *genai.GenerateContentResponse, maxResults int) 
 		if url == "" {
 			continue
 		}
-		if _, ok := seen[url]; ok {
-			continue
-		}
-		seen[url] = struct{}{}
 		results = append(results, model.WebSearchResult{
+			RefID:  fmt.Sprintf("grounding-%d", index),
 			Title:  strings.TrimSpace(chunk.Web.Title),
 			URL:    url,
 			Source: strings.TrimSpace(chunk.Web.Domain),
@@ -81,4 +89,40 @@ func geminiGroundingResults(out *genai.GenerateContentResponse, maxResults int) 
 		}
 	}
 	return results
+}
+
+func geminiGroundingCitationsForPart(out *genai.GenerateContentResponse, partIndex int, text string) []model.Citation {
+	if out == nil || len(out.Candidates) == 0 || out.Candidates[0] == nil || out.Candidates[0].GroundingMetadata == nil {
+		return nil
+	}
+	metadata := out.Candidates[0].GroundingMetadata
+	citations := make([]model.Citation, 0, len(metadata.GroundingSupports))
+	for _, support := range metadata.GroundingSupports {
+		if support == nil || support.Segment == nil || int(support.Segment.PartIndex) != partIndex {
+			continue
+		}
+		sources := make([]model.CitationSource, 0, len(support.GroundingChunkIndices))
+		for _, rawIndex := range support.GroundingChunkIndices {
+			index := int(rawIndex)
+			if index < 0 || index >= len(metadata.GroundingChunks) {
+				continue
+			}
+			chunk := metadata.GroundingChunks[index]
+			if chunk == nil || chunk.Web == nil || strings.TrimSpace(chunk.Web.URI) == "" {
+				continue
+			}
+			sources = append(sources, model.CitationSource{
+				RefID:  fmt.Sprintf("grounding-%d", index),
+				Title:  strings.TrimSpace(chunk.Web.Title),
+				URL:    strings.TrimSpace(chunk.Web.URI),
+				Source: strings.TrimSpace(chunk.Web.Domain),
+			})
+		}
+		citations = append(citations, model.Citation{
+			StartIndex: int(support.Segment.StartIndex),
+			EndIndex:   int(support.Segment.EndIndex),
+			Sources:    sources,
+		})
+	}
+	return model.NormalizeCitations(text, citations)
 }

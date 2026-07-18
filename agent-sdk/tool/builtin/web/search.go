@@ -22,7 +22,7 @@ func NewSearch() *SearchTool {
 func (t *SearchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        SearchToolName,
-		Description: "Search the web for current, external, or unknown information when you do not already have a URL. Use concise keyword queries with the key entity, location, date/time, version, error text, or product name instead of long prose. Put common search operators directly in query, such as site:, filetype:, quoted phrases, OR, or minus terms. Use WebFetch after search when you need to read a specific result URL. If provider-native web search is unavailable, fall back to WebFetch with a known URL or ask for a search backend.",
+		Description: "Search the web for current, external, or unknown information when you do not already have a URL. Use concise keyword queries with the key entity, location, date/time, version, error text, or product name instead of long prose. Put common search operators directly in query, such as site:, filetype:, quoted phrases, OR, or minus terms. Use WebFetch after search when you need to read a specific result URL. In the final response, cite sources with visible Markdown links; never expose result ref_id values or private citation markers. If provider-native web search is unavailable, fall back to WebFetch with a known URL or ask for a search backend.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -87,13 +87,14 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 		resp.Query = req.Query
 	}
 	return toolutil.JSONResult(SearchToolName, map[string]any{
-		"status":   "completed",
-		"query":    resp.Query,
-		"provider": resp.Provider,
-		"model":    resp.Model,
-		"answer":   resp.Answer,
-		"results":  webSearchResultsPayload(resp.Results),
-		"usage":    usagePayload(resp.Usage),
+		"status":    "completed",
+		"query":     resp.Query,
+		"provider":  resp.Provider,
+		"model":     resp.Model,
+		"answer":    resp.Answer,
+		"results":   webSearchResultsPayload(resp.Results),
+		"citations": resp.Citations,
+		"usage":     usagePayload(resp.Usage),
 	}, map[string]any{
 		"query":    resp.Query,
 		"provider": resp.Provider,
@@ -144,6 +145,7 @@ func webSearchResultsPayload(results []model.WebSearchResult) []map[string]any {
 	out := make([]map[string]any, 0, len(results))
 	for _, result := range results {
 		item := map[string]any{}
+		putNonEmpty(item, "ref_id", result.RefID)
 		putNonEmpty(item, "title", result.Title)
 		putNonEmpty(item, "url", result.URL)
 		putNonEmpty(item, "snippet", result.Snippet)

@@ -77,13 +77,17 @@ func (l *mimoLLM) searchMimoWeb(ctx context.Context, req model.WebSearchRequest)
 		return model.WebSearchResponse{}, fmt.Errorf("model: empty xiaomi web search choices")
 	}
 	choice := out.Choices[0]
+	rawAnswer := contentText(choice.Message.Content)
+	results := mimoAnnotationResults(choice.Message.Annotations, req.MaxResults)
+	answer, citations := trimCitedText(rawAnswer, mimoAnnotationCitations(rawAnswer, choice.Message.Annotations, results))
 	return model.WebSearchResponse{
-		Query:    req.Query,
-		Provider: l.provider,
-		Model:    firstNonEmptyString(out.Model, searchModel),
-		Answer:   strings.TrimSpace(contentText(choice.Message.Content)),
-		Results:  mimoAnnotationResults(choice.Message.Annotations, req.MaxResults),
-		Usage:    choice.Usage.toKernelUsageOr(out.Usage.toKernelUsage()),
+		Query:     req.Query,
+		Provider:  l.provider,
+		Model:     firstNonEmptyString(out.Model, searchModel),
+		Answer:    answer,
+		Results:   results,
+		Citations: citations,
+		Usage:     choice.Usage.toKernelUsageOr(out.Usage.toKernelUsage()),
 	}, nil
 }
 
@@ -114,21 +118,19 @@ type mimoWebAnnotation struct {
 	Summary     string `json:"summary"`
 	SiteName    string `json:"site_name"`
 	PublishTime string `json:"publish_time"`
+	StartIndex  *int   `json:"start_index,omitempty"`
+	EndIndex    *int   `json:"end_index,omitempty"`
 }
 
 func mimoAnnotationResults(annotations []mimoWebAnnotation, maxResults int) []model.WebSearchResult {
 	results := make([]model.WebSearchResult, 0, min(maxResults, len(annotations)))
-	seen := map[string]struct{}{}
-	for _, annotation := range annotations {
+	for index, annotation := range annotations {
 		url := strings.TrimSpace(annotation.URL)
 		if url == "" {
 			continue
 		}
-		if _, ok := seen[url]; ok {
-			continue
-		}
-		seen[url] = struct{}{}
 		results = append(results, model.WebSearchResult{
+			RefID:       fmt.Sprintf("annotation-%d", index),
 			Title:       strings.TrimSpace(annotation.Title),
 			URL:         url,
 			Snippet:     strings.TrimSpace(annotation.Summary),
@@ -140,6 +142,47 @@ func mimoAnnotationResults(annotations []mimoWebAnnotation, maxResults int) []mo
 		}
 	}
 	return results
+}
+
+func mimoAnnotationCitations(answer string, annotations []mimoWebAnnotation, results []model.WebSearchResult) []model.Citation {
+	if len(results) == 0 {
+		return nil
+	}
+	byURL := make(map[string]model.WebSearchResult, len(results))
+	for _, result := range results {
+		byURL[result.URL] = result
+	}
+	citations := make([]model.Citation, 0, len(annotations))
+	unpositioned := make([]model.CitationSource, 0, len(annotations))
+	for _, annotation := range annotations {
+		result, ok := byURL[strings.TrimSpace(annotation.URL)]
+		if !ok {
+			continue
+		}
+		source := citationSourceFromSearchResult(result.RefID, result)
+		if annotation.StartIndex != nil && annotation.EndIndex != nil {
+			start, end, ok := providerCharacterRangeToBytes(answer, *annotation.StartIndex, *annotation.EndIndex)
+			if ok {
+				citations = append(citations, model.Citation{
+					StartIndex: start,
+					EndIndex:   end,
+					Sources:    []model.CitationSource{source},
+				})
+			} else {
+				unpositioned = append(unpositioned, source)
+			}
+		} else {
+			unpositioned = append(unpositioned, source)
+		}
+	}
+	if len(unpositioned) > 0 {
+		citations = append(citations, model.Citation{
+			StartIndex: len(answer),
+			EndIndex:   len(answer),
+			Sources:    unpositioned,
+		})
+	}
+	return model.NormalizeCitations(answer, citations)
 }
 
 func mimoChatCompletionsURL(baseURL string) string {

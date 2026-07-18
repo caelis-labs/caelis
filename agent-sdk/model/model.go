@@ -198,7 +198,8 @@ type MessageOrigin struct {
 }
 
 type TextPart struct {
-	Text string `json:"text"`
+	Text      string     `json:"text"`
+	Citations []Citation `json:"citations,omitempty"`
 }
 
 type ReasoningPart struct {
@@ -903,6 +904,7 @@ func CloneParts(parts []Part) []Part {
 		cp := part
 		if part.Text != nil {
 			text := *part.Text
+			text.Citations = cloneCitations(part.Text.Citations)
 			cp.Text = &text
 		}
 		cp.Reasoning = cloneReasoningPart(part.Reasoning)
@@ -920,6 +922,18 @@ func CloneParts(parts []Part) []Part {
 			cp.FileRef = &fileRef
 		}
 		out = append(out, cp)
+	}
+	return out
+}
+
+func cloneCitations(citations []Citation) []Citation {
+	if len(citations) == 0 {
+		return nil
+	}
+	out := make([]Citation, len(citations))
+	for i, citation := range citations {
+		out[i] = citation
+		out[i].Sources = append([]CitationSource(nil), citation.Sources...)
 	}
 	return out
 }

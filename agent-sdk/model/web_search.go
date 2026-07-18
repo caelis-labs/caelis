@@ -14,6 +14,7 @@ type WebSearchRequest struct {
 // WebSearchResult is one cited search source returned by a provider-native
 // search backend.
 type WebSearchResult struct {
+	RefID       string `json:"ref_id,omitempty"`
 	Title       string `json:"title,omitempty"`
 	URL         string `json:"url,omitempty"`
 	Snippet     string `json:"snippet,omitempty"`
@@ -25,12 +26,13 @@ type WebSearchResult struct {
 // call. Answer is optional provider-generated context; Results are the cited
 // sources the model should inspect or cite.
 type WebSearchResponse struct {
-	Query    string            `json:"query,omitempty"`
-	Provider string            `json:"provider,omitempty"`
-	Model    string            `json:"model,omitempty"`
-	Answer   string            `json:"answer,omitempty"`
-	Results  []WebSearchResult `json:"results,omitempty"`
-	Usage    Usage             `json:"usage,omitempty"`
+	Query     string            `json:"query,omitempty"`
+	Provider  string            `json:"provider,omitempty"`
+	Model     string            `json:"model,omitempty"`
+	Answer    string            `json:"answer,omitempty"`
+	Results   []WebSearchResult `json:"results,omitempty"`
+	Citations []Citation        `json:"citations,omitempty"`
+	Usage     Usage             `json:"usage,omitempty"`
 }
 
 // WebSearcher is an optional model capability for provider-native web search.

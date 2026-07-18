@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	anthropic "github.com/anthropics/anthropic-sdk-go"
+
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -65,14 +67,60 @@ func (l *anthropicSDKLLM) SearchWeb(ctx context.Context, req model.WebSearchRequ
 	if final == nil {
 		return model.WebSearchResponse{}, fmt.Errorf("model: empty web search response")
 	}
+	rawAnswer := final.Message.TextContent()
+	results := anthropicWebSearchResultsFromMessage(final.Message, req.MaxResults)
+	citations := final.Message.TextContentCitations()
+	if len(citations) == 0 && len(results) > 0 {
+		citations = []model.Citation{{
+			StartIndex: len(rawAnswer),
+			EndIndex:   len(rawAnswer),
+			Sources:    citationSourcesFromSearchResults(results),
+		}}
+	}
+	answer, citations := trimCitedText(rawAnswer, citations)
 	return model.WebSearchResponse{
-		Query:    req.Query,
-		Provider: firstNonEmptyString(final.Provider, l.provider),
-		Model:    firstNonEmptyString(final.Model, l.name),
-		Answer:   strings.TrimSpace(final.Message.TextContent()),
-		Results:  anthropicWebSearchResultsFromMessage(final.Message, req.MaxResults),
-		Usage:    final.Usage,
+		Query:     req.Query,
+		Provider:  firstNonEmptyString(final.Provider, l.provider),
+		Model:     firstNonEmptyString(final.Model, l.name),
+		Answer:    answer,
+		Results:   results,
+		Citations: citations,
+		Usage:     final.Usage,
 	}, nil
+}
+
+func anthropicTextCitations(text string, citations []anthropic.TextCitationUnion) []model.Citation {
+	out := make([]model.Citation, 0, len(citations))
+	searchFrom := 0
+	for index, citation := range citations {
+		if citation.Type != "web_search_result_location" || strings.TrimSpace(citation.URL) == "" {
+			continue
+		}
+		start := len(text)
+		end := len(text)
+		citedText := citation.CitedText
+		if citedText != "" {
+			if relative := strings.Index(text[searchFrom:], citedText); relative >= 0 {
+				start = searchFrom + relative
+				end = start + len(citedText)
+				searchFrom = end
+			} else if absolute := strings.Index(text, citedText); absolute >= 0 {
+				start = absolute
+				end = absolute + len(citedText)
+			}
+		}
+		out = append(out, model.Citation{
+			StartIndex: start,
+			EndIndex:   end,
+			Sources: []model.CitationSource{{
+				RefID:  fmt.Sprintf("citation-%d", index),
+				Title:  strings.TrimSpace(citation.Title),
+				URL:    strings.TrimSpace(citation.URL),
+				Source: hostFromURL(citation.URL),
+			}},
+		})
+	}
+	return model.NormalizeCitations(text, out)
 }
 
 func anthropicRuntimeProviderSupportsWebSearch(provider string) bool {

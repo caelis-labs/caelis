@@ -651,6 +651,7 @@ package github.com/caelis-labs/caelis/agent-sdk/model
   func (m Message) ReasoningParts() []ReasoningPart
   func (m Message) ReasoningText() string
   func (m Message) TextContent() string
+  func (m Message) TextContentCitations() []Citation
   func (m Message) ToolCalls() []ToolCall
   func (m Message) ToolResponse() *ToolResponse
   func (m Message) ToolResults() []ToolResultPart
@@ -687,11 +688,14 @@ package github.com/caelis-labs/caelis/agent-sdk/model
   func NewReasoningPart(text string, visibility ReasoningVisibility) Part
   func NewTextMessage(role Role, text string) Message
   func NewTextPart(text string) Part
+  func NewTextPartWithCitations(text string, citations []Citation) Part
   func NewToolResultJSONPart(toolUseID, name string, value map[string]any, isError bool) Part
   func NewToolUsePart(id, name string, input json.RawMessage) Part
+  func NormalizeCitations(text string, citations []Citation) []Citation
   func NormalizeRetryConfig(cfg RetryConfig) RetryConfig
   func NormalizeToolUseInput(input json.RawMessage) json.RawMessage
   func NormalizeWebSearchRequest(req WebSearchRequest) WebSearchRequest
+  func ParseCitationMarkers(text string, resolve func([]string) []CitationSource) (string, []Citation)
   func ParseToolCallArgs(raw string) (map[string]any, error)
   func ParseToolCallArgsRaw(raw string) (json.RawMessage, error)
   func PartFromContentPart(part ContentPart) Part
@@ -733,6 +737,19 @@ package github.com/caelis-labs/caelis/agent-sdk/model
   }
   type CapabilityProvider interface {
       Capabilities() Capabilities
+  }
+  type Citation struct {
+      StartIndex int              `json:"start_index,omitempty"`
+      EndIndex   int              `json:"end_index,omitempty"`
+      Sources    []CitationSource `json:"sources,omitempty"`
+  }
+  type CitationSource struct {
+      RefID       string `json:"ref_id,omitempty"`
+      Title       string `json:"title,omitempty"`
+      URL         string `json:"url,omitempty"`
+      Snippet     string `json:"snippet,omitempty"`
+      Source      string `json:"source,omitempty"`
+      PublishedAt string `json:"published_at,omitempty"`
   }
   type ContentPart struct {
       Type     ContentPartType `json:"type"`
@@ -906,7 +923,8 @@ package github.com/caelis-labs/caelis/agent-sdk/model
   }
   type StreamEventType string
   type TextPart struct {
-      Text string `json:"text"`
+      Text      string     `json:"text"`
+      Citations []Citation `json:"citations,omitempty"`
   }
   type ToolCall struct {
       ID               string `json:"id,omitempty"`
@@ -959,14 +977,16 @@ package github.com/caelis-labs/caelis/agent-sdk/model
       MaxResults int    `json:"max_results,omitempty"`
   }
   type WebSearchResponse struct {
-      Query    string            `json:"query,omitempty"`
-      Provider string            `json:"provider,omitempty"`
-      Model    string            `json:"model,omitempty"`
-      Answer   string            `json:"answer,omitempty"`
-      Results  []WebSearchResult `json:"results,omitempty"`
-      Usage    Usage             `json:"usage,omitempty"`
+      Query     string            `json:"query,omitempty"`
+      Provider  string            `json:"provider,omitempty"`
+      Model     string            `json:"model,omitempty"`
+      Answer    string            `json:"answer,omitempty"`
+      Results   []WebSearchResult `json:"results,omitempty"`
+      Citations []Citation        `json:"citations,omitempty"`
+      Usage     Usage             `json:"usage,omitempty"`
   }
   type WebSearchResult struct {
+      RefID       string `json:"ref_id,omitempty"`
       Title       string `json:"title,omitempty"`
       URL         string `json:"url,omitempty"`
       Snippet     string `json:"snippet,omitempty"`

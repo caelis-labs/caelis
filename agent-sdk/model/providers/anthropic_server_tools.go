@@ -3,6 +3,7 @@ package providers
 import (
 	"encoding/json"
 	"net/url"
+	"strconv"
 	"strings"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -256,6 +257,9 @@ func anthropicWebSearchResultsFromMessage(msg model.Message, maxResults int) []m
 				continue
 			}
 			seen[result.URL] = struct{}{}
+			if strings.TrimSpace(result.RefID) == "" {
+				result.RefID = "search-" + strconv.Itoa(len(results))
+			}
 			results = append(results, result)
 			if len(results) >= maxResults {
 				return results

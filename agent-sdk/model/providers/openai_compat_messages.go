@@ -11,12 +11,32 @@ import (
 )
 
 type openAICompatMsg struct {
-	Role             string                 `json:"role"`
-	Content          any                    `json:"content,omitempty"`
-	Reasoning        string                 `json:"reasoning,omitempty"`
-	ReasoningContent string                 `json:"reasoning_content,omitempty"`
-	ToolCallID       string                 `json:"tool_call_id,omitempty"`
-	ToolCalls        []openAICompatToolCall `json:"tool_calls,omitempty"`
+	Role             string                   `json:"role"`
+	Content          any                      `json:"content,omitempty"`
+	Reasoning        string                   `json:"reasoning,omitempty"`
+	ReasoningContent string                   `json:"reasoning_content,omitempty"`
+	ToolCallID       string                   `json:"tool_call_id,omitempty"`
+	ToolCalls        []openAICompatToolCall   `json:"tool_calls,omitempty"`
+	Annotations      []openAICompatAnnotation `json:"annotations,omitempty"`
+}
+
+type openAICompatAnnotation struct {
+	Type        string                         `json:"type"`
+	URL         string                         `json:"url"`
+	Title       string                         `json:"title"`
+	Summary     string                         `json:"summary"`
+	SiteName    string                         `json:"site_name"`
+	PublishTime string                         `json:"publish_time"`
+	StartIndex  *int                           `json:"start_index,omitempty"`
+	EndIndex    *int                           `json:"end_index,omitempty"`
+	URLCitation *openAICompatURLCitationDetail `json:"url_citation,omitempty"`
+}
+
+type openAICompatURLCitationDetail struct {
+	URL        string `json:"url"`
+	Title      string `json:"title"`
+	StartIndex *int   `json:"start_index,omitempty"`
+	EndIndex   *int   `json:"end_index,omitempty"`
 }
 
 type openAICompatReqMsg struct {
@@ -56,10 +76,11 @@ type openAICompatStreamChunk struct {
 }
 
 type openAIStreamAccumulator struct {
-	role      model.Role
-	text      strings.Builder
-	reasoning strings.Builder
-	toolCalls map[int]*openAICompatToolCall
+	role        model.Role
+	text        strings.Builder
+	reasoning   strings.Builder
+	toolCalls   map[int]*openAICompatToolCall
+	annotations []openAICompatAnnotation
 }
 
 func (a *openAIStreamAccumulator) message() (model.Message, error) {
@@ -82,7 +103,7 @@ func (a *openAIStreamAccumulator) message() (model.Message, error) {
 		parts = append(parts, model.NewReasoningPart(a.reasoning.String(), model.ReasoningVisibilityVisible))
 	}
 	if strings.TrimSpace(a.text.String()) != "" {
-		parts = append(parts, model.NewTextPart(a.text.String()))
+		parts = append(parts, model.NewTextPartWithCitations(a.text.String(), openAICompatAnnotationCitations(a.text.String(), a.annotations)))
 	}
 	for _, call := range calls {
 		part := model.NewToolUsePart(call.ID, call.Name, json.RawMessage(strings.TrimSpace(call.Args)))
@@ -230,13 +251,69 @@ func toKernelMessage(m openAICompatMsg) (model.Message, error) {
 		})
 	}
 	if role == model.RoleAssistant {
-		return model.MessageFromAssistantParts(text, firstNonEmpty(m.Reasoning, m.ReasoningContent), calls), nil
+		message := model.MessageFromAssistantParts(text, firstNonEmpty(m.Reasoning, m.ReasoningContent), calls)
+		for i := range message.Parts {
+			if message.Parts[i].Text != nil {
+				message.Parts[i].Text.Citations = openAICompatAnnotationCitations(text, m.Annotations)
+				break
+			}
+		}
+		return message, nil
 	}
 	parts := make([]model.Part, 0, 1)
 	if strings.TrimSpace(text) != "" {
 		parts = append(parts, model.NewTextPart(text))
 	}
 	return model.NewMessage(role, parts...), nil
+}
+
+func openAICompatAnnotationCitations(text string, annotations []openAICompatAnnotation) []model.Citation {
+	if len(annotations) == 0 {
+		return nil
+	}
+	citations := make([]model.Citation, 0, len(annotations))
+	unpositioned := make([]model.CitationSource, 0, len(annotations))
+	for index, annotation := range annotations {
+		url := strings.TrimSpace(annotation.URL)
+		title := strings.TrimSpace(annotation.Title)
+		start := annotation.StartIndex
+		end := annotation.EndIndex
+		if annotation.URLCitation != nil {
+			url = firstNonEmptyString(annotation.URLCitation.URL, url)
+			title = firstNonEmptyString(annotation.URLCitation.Title, title)
+			if annotation.URLCitation.StartIndex != nil {
+				start = annotation.URLCitation.StartIndex
+			}
+			if annotation.URLCitation.EndIndex != nil {
+				end = annotation.URLCitation.EndIndex
+			}
+		}
+		if url == "" {
+			continue
+		}
+		source := model.CitationSource{
+			RefID:       fmt.Sprintf("annotation-%d", index),
+			Title:       title,
+			URL:         url,
+			Snippet:     strings.TrimSpace(annotation.Summary),
+			Source:      strings.TrimSpace(annotation.SiteName),
+			PublishedAt: strings.TrimSpace(annotation.PublishTime),
+		}
+		if start != nil && end != nil {
+			startByte, endByte, ok := providerCharacterRangeToBytes(text, *start, *end)
+			if ok {
+				citations = append(citations, model.Citation{StartIndex: startByte, EndIndex: endByte, Sources: []model.CitationSource{source}})
+			} else {
+				unpositioned = append(unpositioned, source)
+			}
+		} else {
+			unpositioned = append(unpositioned, source)
+		}
+	}
+	if len(unpositioned) > 0 {
+		citations = append(citations, model.Citation{StartIndex: len(text), EndIndex: len(text), Sources: unpositioned})
+	}
+	return model.NormalizeCitations(text, citations)
 }
 
 func contentText(value any) string {

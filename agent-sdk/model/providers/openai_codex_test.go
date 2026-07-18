@@ -204,6 +204,35 @@ func TestOpenAICodexTokenOnlyReasoningAndPrematureEOF(t *testing.T) {
 	}
 }
 
+func TestOpenAICodexOutputTextPreservesURLCitations(t *testing.T) {
+	t.Parallel()
+
+	accumulator := newOpenAICodexAccumulator()
+	accumulator.applyItem(openAICodexOutputItem{
+		ID:   "msg-cited",
+		Type: "message",
+		Content: []openAICodexOutputContent{{
+			Type: "output_text",
+			Text: "OpenAI docs",
+			Annotations: []openAICodexURLAnnotation{{
+				Type:       "url_citation",
+				URL:        "https://developers.openai.com/api/docs/guides/tools-web-search",
+				Title:      "Web search",
+				StartIndex: 0,
+				EndIndex:   len("OpenAI docs"),
+			}},
+		}},
+	}, 0)
+	message, err := accumulator.message()
+	if err != nil {
+		t.Fatalf("message() error = %v", err)
+	}
+	citations := message.TextContentCitations()
+	if len(citations) != 1 || citations[0].Sources[0].URL != "https://developers.openai.com/api/docs/guides/tools-web-search" {
+		t.Fatalf("citations = %#v", citations)
+	}
+}
+
 func TestOpenAICodexErrorsAreClassified(t *testing.T) {
 	t.Parallel()
 

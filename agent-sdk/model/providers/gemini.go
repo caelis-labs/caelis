@@ -635,7 +635,7 @@ func geminiResponseToMessage(out *genai.GenerateContentResponse) (model.Message,
 
 	parts := make([]model.Part, 0, len(out.Candidates[0].Content.Parts))
 	serverToolCallTokens := map[string]string{}
-	for _, part := range out.Candidates[0].Content.Parts {
+	for partIndex, part := range out.Candidates[0].Content.Parts {
 		if part == nil {
 			continue
 		}
@@ -678,7 +678,7 @@ func geminiResponseToMessage(out *genai.GenerateContentResponse) (model.Message,
 			if part.Thought {
 				parts = append(parts, model.NewReasoningPart(part.Text, model.ReasoningVisibilityVisible))
 			} else {
-				parts = append(parts, model.NewTextPart(part.Text))
+				parts = append(parts, model.NewTextPartWithCitations(part.Text, geminiGroundingCitationsForPart(out, partIndex, part.Text)))
 			}
 		}
 	}

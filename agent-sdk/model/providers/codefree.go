@@ -237,6 +237,9 @@ func (l *codeFreeLLM) generateOnce(
 			finishReason = one
 		}
 		delta := chunk.Choices[0].Delta
+		if len(delta.Annotations) > 0 {
+			acc.annotations = append(acc.annotations, delta.Annotations...)
+		}
 		if strings.TrimSpace(delta.Role) != "" {
 			acc.role = model.Role(delta.Role)
 		}

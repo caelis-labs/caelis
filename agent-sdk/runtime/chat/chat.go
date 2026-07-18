@@ -173,6 +173,7 @@ func (a *Agent) collectCanonicalModelStep(
 		if err != nil {
 			return model.Message{}, nil, nil, true, err
 		}
+		final.Message = normalizeAssistantCitations(final.Message, messages)
 
 		assistantMessage, calls, err := canonicalizeAssistantToolCalls(final.Message, a.tools...)
 		if err == nil {

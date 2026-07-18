@@ -23,6 +23,50 @@ func jsonArgs(v map[string]any) string {
 	return string(raw)
 }
 
+func TestOpenAICompatMessagePreservesFlatAndNestedURLAnnotations(t *testing.T) {
+	t.Parallel()
+
+	start := 0
+	end := len("cited")
+	message, err := toKernelMessage(openAICompatMsg{
+		Role:    "assistant",
+		Content: "cited answer",
+		Annotations: []openAICompatAnnotation{
+			{Type: "url_citation", URL: "https://example.com/flat", Title: "Flat", StartIndex: &start, EndIndex: &end},
+			{Type: "url_citation", URLCitation: &openAICompatURLCitationDetail{URL: "https://example.com/nested", Title: "Nested"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("toKernelMessage() error = %v", err)
+	}
+	citations := message.TextContentCitations()
+	if len(citations) != 2 || citations[0].StartIndex != 0 || citations[0].EndIndex != end {
+		t.Fatalf("citations = %#v", citations)
+	}
+	if got := citations[0].Sources[0].URL; got != "https://example.com/flat" {
+		t.Fatalf("precise source URL = %q", got)
+	}
+	if citations[1].StartIndex != len("cited answer") || citations[1].Sources[0].URL != "https://example.com/nested" {
+		t.Fatalf("unpositioned source = %#v", citations[1])
+	}
+
+	fallback, err := toKernelMessage(openAICompatMsg{
+		Role:    "assistant",
+		Content: "answer",
+		Annotations: []openAICompatAnnotation{{
+			Type:        "url_citation",
+			URLCitation: &openAICompatURLCitationDetail{URL: "https://example.com/nested", Title: "Nested"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("toKernelMessage(fallback) error = %v", err)
+	}
+	citations = fallback.TextContentCitations()
+	if len(citations) != 1 || citations[0].StartIndex != len("answer") || citations[0].Sources[0].URL != "https://example.com/nested" {
+		t.Fatalf("fallback citations = %#v", citations)
+	}
+}
+
 func TestListModelsRequiresRegistration(t *testing.T) {
 	factory := NewFactory()
 	if got := factory.ListModels(); len(got) != 0 {

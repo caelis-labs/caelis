@@ -146,10 +146,10 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 				if event.Delta == "" {
 					return nil
 				}
-				accumulator.appendReasoning(event)
+				delta := accumulator.appendReasoning(event)
 				if req.Stream && !yield(&model.StreamEvent{
 					Type:      model.StreamEventPartDelta,
-					PartDelta: &model.PartDelta{Index: event.OutputIndex, Kind: model.PartKindReasoning, TextDelta: event.Delta},
+					PartDelta: &model.PartDelta{Index: event.OutputIndex, Kind: model.PartKindReasoning, TextDelta: delta},
 				}, nil) {
 					stopped = true
 					return errStopSSE

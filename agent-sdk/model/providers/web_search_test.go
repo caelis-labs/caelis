@@ -23,7 +23,10 @@ func TestGeminiSearchWebUsesGroundingToolAndReturnsSources(t *testing.T) {
 		  "modelVersion":"gemini-2.5-flash",
 		  "candidates":[{
 		    "content":{"role":"model","parts":[{"text":"grounded answer"}]},
-		    "groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://example.com/a","title":"A","domain":"example.com"}}]}
+		    "groundingMetadata":{
+		      "groundingChunks":[{"web":{"uri":"https://example.com/a","title":"A","domain":"example.com"}}],
+		      "groundingSupports":[{"segment":{"partIndex":0,"startIndex":0,"endIndex":8,"text":"grounded"},"groundingChunkIndices":[0]}]
+		    }
 		  }],
 		  "usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":5,"totalTokenCount":9}
 		}`)
@@ -52,6 +55,9 @@ func TestGeminiSearchWebUsesGroundingToolAndReturnsSources(t *testing.T) {
 	}
 	if len(resp.Results) != 1 || resp.Results[0].URL != "https://example.com/a" {
 		t.Fatalf("results = %#v, want grounding source", resp.Results)
+	}
+	if resp.Results[0].RefID != "grounding-0" || len(resp.Citations) != 1 || resp.Citations[0].EndIndex != 8 {
+		t.Fatalf("grounding citation = results %#v citations %#v", resp.Results, resp.Citations)
 	}
 }
 
@@ -115,6 +121,9 @@ func TestMimoSearchWebUsesWebSearchToolAndReturnsAnnotations(t *testing.T) {
 	}
 	if len(resp.Results) != 1 || resp.Results[0].Snippet != "summary" {
 		t.Fatalf("results = %#v, want annotation result", resp.Results)
+	}
+	if resp.Results[0].RefID != "annotation-0" || len(resp.Citations) != 1 || resp.Citations[0].StartIndex != len(resp.Answer) {
+		t.Fatalf("annotation citation = results %#v citations %#v", resp.Results, resp.Citations)
 	}
 }
 
@@ -211,6 +220,9 @@ func TestDeepSeekSearchWebUsesAnthropicServerToolAndReturnsSources(t *testing.T)
 	}
 	if len(resp.Results) != 1 || resp.Results[0].URL != "https://api-docs.deepseek.com/" || resp.Results[0].Source != "api-docs.deepseek.com" {
 		t.Fatalf("results = %#v, want DeepSeek docs source", resp.Results)
+	}
+	if resp.Results[0].RefID != "search-0" || len(resp.Citations) != 1 || resp.Citations[0].StartIndex != len(resp.Answer) {
+		t.Fatalf("DeepSeek answer-level citation = results %#v citations %#v", resp.Results, resp.Citations)
 	}
 }
 

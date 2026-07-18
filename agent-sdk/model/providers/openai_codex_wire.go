@@ -411,8 +411,17 @@ type openAICodexIncompleteDetails struct {
 }
 
 type openAICodexOutputContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type        string                     `json:"type"`
+	Text        string                     `json:"text"`
+	Annotations []openAICodexURLAnnotation `json:"annotations,omitempty"`
+}
+
+type openAICodexURLAnnotation struct {
+	Type       string `json:"type"`
+	URL        string `json:"url"`
+	Title      string `json:"title"`
+	StartIndex int    `json:"start_index"`
+	EndIndex   int    `json:"end_index"`
 }
 
 type openAICodexOutputItem struct {
@@ -441,7 +450,7 @@ type openAICodexStreamWire struct {
 	Delta        string                   `json:"delta"`
 	ItemID       string                   `json:"item_id"`
 	OutputIndex  int                      `json:"output_index"`
-	SummaryIndex int                      `json:"summary_index"`
+	SummaryIndex *int                     `json:"summary_index"`
 	Item         *openAICodexOutputItem   `json:"item"`
 	Response     *openAICodexResponseWire `json:"response"`
 	Code         string                   `json:"code"`
@@ -450,14 +459,17 @@ type openAICodexStreamWire struct {
 }
 
 type openAICodexOutputSlot struct {
-	kind             string
-	id               string
-	callID           string
-	name             string
-	text             strings.Builder
-	reasoning        strings.Builder
-	arguments        strings.Builder
-	encryptedContent string
+	kind                    string
+	id                      string
+	callID                  string
+	name                    string
+	text                    strings.Builder
+	reasoning               strings.Builder
+	citations               []model.Citation
+	arguments               strings.Builder
+	encryptedContent        string
+	reasoningSummaryIndex   int
+	reasoningSummaryIndexed bool
 }
 
 type openAICodexAccumulator struct {
@@ -502,6 +514,7 @@ func (a *openAICodexAccumulator) applyItem(item openAICodexOutputItem, index int
 		if text := openAICodexOutputTextContent(item.Content); text != "" {
 			entry.text.Reset()
 			entry.text.WriteString(text)
+			entry.citations = openAICodexOutputTextCitations(item.Content)
 		}
 	case "function_call":
 		a.hasToolCall = true
@@ -534,12 +547,56 @@ func openAICodexOutputTextContent(parts []openAICodexOutputContent) string {
 	return out.String()
 }
 
+func openAICodexOutputTextCitations(parts []openAICodexOutputContent) []model.Citation {
+	text := openAICodexOutputTextContent(parts)
+	citations := make([]model.Citation, 0)
+	offset := 0
+	annotationIndex := 0
+	for _, part := range parts {
+		if part.Type != "output_text" {
+			continue
+		}
+		for _, annotation := range part.Annotations {
+			if annotation.Type != "url_citation" || strings.TrimSpace(annotation.URL) == "" {
+				continue
+			}
+			start, end, ok := providerCharacterRangeToBytes(part.Text, annotation.StartIndex, annotation.EndIndex)
+			if !ok {
+				continue
+			}
+			citations = append(citations, model.Citation{
+				StartIndex: offset + start,
+				EndIndex:   offset + end,
+				Sources: []model.CitationSource{{
+					RefID: fmt.Sprintf("annotation-%d", annotationIndex),
+					Title: strings.TrimSpace(annotation.Title),
+					URL:   strings.TrimSpace(annotation.URL),
+				}},
+			})
+			annotationIndex++
+		}
+		offset += len(part.Text)
+	}
+	return model.NormalizeCitations(text, citations)
+}
+
 func (a *openAICodexAccumulator) appendText(event openAICodexStreamWire) {
 	a.slot(event.OutputIndex, event.ItemID, "message").text.WriteString(event.Delta)
 }
 
-func (a *openAICodexAccumulator) appendReasoning(event openAICodexStreamWire) {
-	a.slot(event.OutputIndex, event.ItemID, "reasoning").reasoning.WriteString(event.Delta)
+func (a *openAICodexAccumulator) appendReasoning(event openAICodexStreamWire) string {
+	entry := a.slot(event.OutputIndex, event.ItemID, "reasoning")
+	delta := event.Delta
+	if event.SummaryIndex != nil {
+		if entry.reasoningSummaryIndexed && entry.reasoningSummaryIndex != *event.SummaryIndex &&
+			entry.reasoning.Len() > 0 && !strings.HasSuffix(entry.reasoning.String(), "\n") && !strings.HasPrefix(delta, "\n") {
+			delta = "\n" + delta
+		}
+		entry.reasoningSummaryIndex = *event.SummaryIndex
+		entry.reasoningSummaryIndexed = true
+	}
+	entry.reasoning.WriteString(delta)
+	return delta
 }
 
 func (a *openAICodexAccumulator) appendArguments(event openAICodexStreamWire) {
@@ -574,7 +631,7 @@ func (a *openAICodexAccumulator) message() (model.Message, error) {
 			parts = append(parts, part)
 		case "message":
 			if entry.text.Len() > 0 {
-				parts = append(parts, model.NewTextPart(entry.text.String()))
+				parts = append(parts, model.NewTextPartWithCitations(entry.text.String(), entry.citations))
 			}
 		case "function_call":
 			callID := strings.TrimSpace(entry.callID)

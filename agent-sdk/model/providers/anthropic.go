@@ -668,7 +668,7 @@ func anthropicMessageToKernel(provider string, resp *anthropic.Message) (model.M
 	for _, block := range resp.Content {
 		switch variant := block.AsAny().(type) {
 		case anthropic.TextBlock:
-			parts = append(parts, model.NewTextPart(variant.Text))
+			parts = append(parts, model.NewTextPartWithCitations(variant.Text, anthropicTextCitations(variant.Text, variant.Citations)))
 		case anthropic.ThinkingBlock:
 			part := model.NewReasoningPart(variant.Thinking, model.ReasoningVisibilityVisible)
 			if part.Reasoning != nil && strings.TrimSpace(variant.Signature) != "" {
