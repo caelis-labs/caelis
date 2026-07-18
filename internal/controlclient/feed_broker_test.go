@@ -315,7 +315,10 @@ func TestFeedBrokerExactReconnectPreservesTransientBytes(t *testing.T) {
 }
 
 func TestFeedBrokerExactReconnectDeliversBashSpawnAndFinalExactlyOnce(t *testing.T) {
-	broker, _ := newTestFeedBroker(t, nil, FeedBrokerConfig{RingEvents: 16, SubscriberQueue: 2})
+	// This case verifies exact reconnect ordering, not slow-consumer eviction.
+	// Size the queue for the complete synchronous burst so goroutine scheduling
+	// cannot turn the third frame into an unrelated backpressure assertion.
+	broker, _ := newTestFeedBroker(t, nil, FeedBrokerConfig{RingEvents: 16, SubscriberQueue: 3})
 	if err := broker.Publish(eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "boundary"}); err != nil {
 		t.Fatal(err)
 	}

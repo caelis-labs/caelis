@@ -2,10 +2,12 @@ package controlclient
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -145,6 +147,41 @@ func TestStateServiceReconnectSucceedsDuringContinuousPublish(t *testing.T) {
 	}
 	if state.SessionID != "session-1" || state.BoundaryCursor == "" {
 		t.Fatalf("State during continuous Publish = %#v", state)
+	}
+}
+
+func TestStateServiceMapsCheckpointLagToRevisionConflict(t *testing.T) {
+	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := &checkpointPageReader{active: session.Session{
+		SessionRef: session.SessionRef{SessionID: "session-1"}, Revision: 1,
+	}, events: []*session.Event{durableProtocolEvent(1, "accepted before checkpoint")}}
+	feeds, err := NewFeedRegistry(FeedRegistryConfig{Reader: reader, CursorCodec: codec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed, err := feeds.Session(session.SessionRef{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := feed.Publish(projectedEnvelope(1, "accepted before checkpoint")); err != nil {
+		t.Fatal(err)
+	}
+	// Model the observed bootstrap window after Feed acceptance but before the
+	// checkpoint reader makes that durable position visible.
+	reader.events = nil
+	service, err := NewStateService(StateServiceConfig{
+		Sessions: readerSessionLookup{reader}, Runtime: staticRuntimeStateReader{}, Feeds: feeds,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = service.State(context.Background(), controlport.StateRequest{SessionID: "session-1"})
+	if !errors.Is(err, controlport.ErrStateRevisionConflict) || errorcode.CodeOf(err) != errorcode.Conflict {
+		t.Fatalf("State error = %v (code %q), want ErrStateRevisionConflict", err, errorcode.CodeOf(err))
 	}
 }
 

@@ -11,7 +11,10 @@ import (
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
-var errFeedSubscriptionStopped = errors.New("controlclient: feed subscription stopped")
+var (
+	errFeedSubscriptionStopped             = errors.New("controlclient: feed subscription stopped")
+	errDurableCheckpointBehindAcceptedFeed = errors.New("controlclient: durable checkpoint is behind the accepted feed")
+)
 
 type feedBackfillPlan struct {
 	ctx            context.Context
@@ -131,7 +134,7 @@ func (b *FeedBroker) captureCheckpoint(
 	if b.latestDurable.Seq > 0 && (checkpointPosition == nil || checkpointPosition.Durable == nil ||
 		eventstream.CompareDurablePosition(b.latestDurable, *checkpointPosition.Durable) > 0) {
 		b.mu.Unlock()
-		return session.EventCheckpoint{}, nil, 0, false, errors.New("controlclient: durable checkpoint is behind the accepted feed")
+		return session.EventCheckpoint{}, nil, 0, false, errDurableCheckpointBehindAcceptedFeed
 	}
 	cold := b.acceptID == 0 && b.scannedSeq == 0 && len(b.ring) == 0 && len(b.subscribers) == 0
 	if cold {

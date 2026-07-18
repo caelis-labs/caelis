@@ -1,8 +1,13 @@
 package turningress
 
 import (
+	"context"
 	"testing"
+	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -47,4 +52,79 @@ func TestTurnIdentityMatchesKnownIDs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBrokerHoldsSourceTerminalUntilProducerChannelCloses(t *testing.T) {
+	handle := newBarrierTestHandle()
+	broker := New(handle, nil)
+	events := broker.Events()
+	handle.events <- eventstream.TurnCompleted(handle.HandleID(), handle.RunID(), handle.TurnID(), time.Now())
+
+	select {
+	case envelope := <-events:
+		t.Fatalf("broker exposed terminal before producer close: %#v", envelope)
+	case <-broker.Done():
+		t.Fatal("broker crossed producer barrier before ACPEvents closed")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(handle.events)
+	got := collectBrokerBarrierEvents(events)
+	if len(got) != 1 || got[0].Lifecycle == nil ||
+		got[0].Lifecycle.State != eventstream.LifecycleStateCompleted {
+		t.Fatalf("events after producer close = %#v", got)
+	}
+}
+
+func TestBrokerLateAttachDoesNotPreserveSuccessAfterDrainCancellation(t *testing.T) {
+	handle := newBarrierTestHandle()
+	handle.events <- eventstream.TurnCompleted(handle.HandleID(), handle.RunID(), handle.TurnID(), time.Now())
+	handle.events <- eventstream.Error(context.Canceled)
+	close(handle.events)
+
+	// The producer is already complete when the Control delivery broker attaches.
+	// Buffered cancellation truth must replace the earlier success candidate.
+	got := collectBrokerBarrierEvents(New(handle, nil).Events())
+	if len(got) != 2 || got[0].Kind != eventstream.KindError || got[1].Lifecycle == nil ||
+		got[1].Lifecycle.State != eventstream.LifecycleStateCancelled {
+		t.Fatalf("late attach events = %#v, want error then cancelled terminal", got)
+	}
+	for _, envelope := range got {
+		if envelope.Lifecycle != nil && envelope.Lifecycle.State == eventstream.LifecycleStateCompleted {
+			t.Fatalf("late attach preserved synthesized success: %#v", got)
+		}
+	}
+}
+
+type barrierTestHandle struct {
+	events chan eventstream.Envelope
+	ref    session.SessionRef
+}
+
+func newBarrierTestHandle() *barrierTestHandle {
+	return &barrierTestHandle{
+		events: make(chan eventstream.Envelope, 4),
+		ref:    session.SessionRef{SessionID: "session-1"},
+	}
+}
+
+func (*barrierTestHandle) HandleID() string                 { return "handle-1" }
+func (*barrierTestHandle) RunID() string                    { return "run-1" }
+func (*barrierTestHandle) TurnID() string                   { return "turn-1" }
+func (h *barrierTestHandle) SessionRef() session.SessionRef { return h.ref }
+func (*barrierTestHandle) CreatedAt() time.Time             { return time.Unix(100, 0) }
+func (h *barrierTestHandle) ACPEvents() <-chan eventstream.Envelope {
+	return h.events
+}
+func (*barrierTestHandle) Submit(context.Context, gateway.SubmitRequest) error { return nil }
+func (*barrierTestHandle) Cancel() agent.CancelResult {
+	return agent.CancelResult{Status: agent.CancelStatusCancelled}
+}
+func (*barrierTestHandle) Close() error { return nil }
+
+func collectBrokerBarrierEvents(events <-chan eventstream.Envelope) []eventstream.Envelope {
+	var out []eventstream.Envelope
+	for envelope := range events {
+		out = append(out, envelope)
+	}
+	return out
 }

@@ -183,6 +183,7 @@ func (b *Broker) run() {
 
 	failureReason := ""
 	cancelled := false
+	var sourceTerminal *eventstream.Envelope
 	for {
 		select {
 		case <-b.ctx.Done():
@@ -202,7 +203,7 @@ func (b *Broker) run() {
 			// the execution lease cannot outlive the failed terminal.
 		case env, ok := <-mainEvents:
 			if !ok {
-				b.finish(b.terminalForSourceEnd(failureReason, cancelled))
+				b.finish(b.terminalAfterSourceClose(sourceTerminal, failureReason, cancelled))
 				return
 			}
 			mainScope := isMainFeedScope(env)
@@ -214,13 +215,15 @@ func (b *Broker) run() {
 					continue
 				}
 				if eventstream.IsTerminalLifecycle(env) {
-					if b.deliveryFailure() != nil {
-						// Runtime may report cancellation before its producer exits.
-						// Preserve the source failure and wait for channel close.
-						continue
+					// A terminal frame is semantic output, not the Runtime producer
+					// barrier. Hold it until ACPEvents closes so cancellation, lease
+					// completion, late errors, and final child-source reads cannot be
+					// hidden behind an early successful terminal.
+					if sourceTerminal == nil {
+						clone := eventstream.CloneEnvelope(env)
+						sourceTerminal = &clone
 					}
-					b.finish(env)
-					return
+					continue
 				}
 				if env.Err != nil || env.Kind == eventstream.KindError {
 					failureReason = strings.TrimSpace(firstNonEmpty(env.Error, errorText(env.Err)))
@@ -698,6 +701,21 @@ func (b *Broker) terminalForSourceEnd(failureReason string, cancelled bool) even
 	default:
 		return eventstream.TurnCompleted(b.identity.handleID, b.identity.runID, b.identity.turnID, time.Now())
 	}
+}
+
+func (b *Broker) terminalAfterSourceClose(
+	sourceTerminal *eventstream.Envelope,
+	failureReason string,
+	cancelled bool,
+) eventstream.Envelope {
+	state, _ := b.requestedStop()
+	if b.deliveryFailure() != nil || state != "" || cancelled || strings.TrimSpace(failureReason) != "" {
+		return b.terminalForSourceEnd(failureReason, cancelled)
+	}
+	if sourceTerminal != nil {
+		return eventstream.CloneEnvelope(*sourceTerminal)
+	}
+	return b.terminalForSourceEnd("", false)
 }
 
 func (b *Broker) requestedStop() (string, string) {
