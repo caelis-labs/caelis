@@ -90,9 +90,10 @@ type ContextUsage struct {
 
 // Runner is one active runtime run handle. Events and optional SourceEvents are
 // alternate views of one bounded single-consumer stream; consuming both returns
-// runtime.ErrEventStreamConsumed. Close cancels an unfinished run and discards
-// undrained events, while natural completion preserves queued events for the
-// selected consumer.
+// runtime.ErrEventStreamConsumed. Producers never wait for the observer: a slow
+// consumer receives EventStreamGapError before the newest retained suffix.
+// Close cancels an unfinished run and discards undrained events, while natural
+// completion preserves the retained suffix for the selected consumer.
 type Runner interface {
 	RunID() string
 	Events() iter.Seq2[*session.Event, error]

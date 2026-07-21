@@ -74,11 +74,12 @@ reverse. This rule is enforced by `make arch-lint` and
 `make sdk-boundary-check`, including SDK test imports. The root module remains
 the single build and release graph.
 
-Only import paths in `agent-sdk/supported-packages.txt` receive the declared
-pre-v1 source-compatibility review. Other non-`internal` SDK paths are bundled
-implementations or experimental helpers until explicitly promoted. The API
-snapshot is a review gate, not by itself proof of SemVer compatibility or
-behavioral correctness.
+Only import paths in `agent-sdk/supported-packages.txt` are compiled by the
+external-consumer boundary checks. Other non-`internal` SDK paths are bundled
+implementations or experimental helpers until explicitly promoted. Before v1,
+declaration-level source compatibility is intentionally not a routine commit
+gate; durable schema, replay, and protocol contracts remain independently
+binding.
 
 ## ACP-native Collaboration
 

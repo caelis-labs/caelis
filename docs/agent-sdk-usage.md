@@ -104,8 +104,18 @@ derives and validates the final assembled model/tool/sandbox requirements.
   retained UTF-8 suffix, `stream.Snapshot` and `stream.Frame` set
   `TruncatedBefore` to the earliest available absolute byte position; clients
   must display or otherwise account for the missing prefix.
-- Event publication applies backpressure when the bounded queue is full. A
-  slow consumer therefore bounds memory at the cost of slowing the run.
+- Event publication never waits for the observer. When the bounded queue is
+  full, Runtime overwrites the oldest observer event, preserves the newest
+  suffix, and yields `agent.EventStreamGapError` before that suffix. The gap is
+  observer-only: execution, durable Session writes, completion, and explicit
+  cancellation semantics are unchanged. Consumers should classify it with
+  `agent.AsEventStreamGap`, continue draining, and obtain authoritative final
+  state from durable Session facts or the owning lifecycle rather than parsing
+  the diagnostic error text.
+- This bounded-isolation contract applies to one main `Runner` observation
+  stream. Command and subagent task streams already use their separate
+  task-stream/Control-feed cursor and truncation contracts; this slice does not
+  merge those transports or add another Surface-owned fan-out path.
 - Session mutations use revision compare-and-swap. Concurrent writers pass
   `ExpectedRevision`; a stale writer receives `session.ErrRevisionConflict`
   with code `errorcode.Conflict` and must reload before retrying.
@@ -293,7 +303,7 @@ derives and validates the final assembled model/tool/sandbox requirements.
   must be copied on input and output so callers cannot mutate stored state
   without a store operation.
 
-## Errors and compatibility
+## Errors and integration boundary
 
 Use `errorcode.CodeOf(err)` or `errors.As`/`errors.Is` with documented typed
 errors. Human-readable `Error()` text is diagnostic and may change; it is not a
@@ -301,26 +311,18 @@ control-flow or wire contract. External protocol and OS adapters may inspect a
 foreign diagnostic once, but must normalize it into an SDK type or code before
 Core makes a semantic decision.
 
-Supported declarations are recorded in [`agent-sdk/api.txt`](../agent-sdk/api.txt)
-and checked by `make sdk-boundary-check` from an external consumer module. The
-SDK shares the root Caelis release version and dependency graph. Before v1,
-changes to bundled imports outside the allowlist do not carry a source-
-compatibility promise; durable schema compatibility and the contracts above
-still apply to data written by supported reference stores.
+`make sdk-boundary-check` verifies that the SDK package tree depends only on
+itself and compiles `agent-sdk/supported-packages.txt` from an external consumer
+module. The SDK shares the root Caelis release version and dependency graph.
+Before v1, declaration-level source compatibility is intentionally not a
+routine commit gate. Durable schema compatibility and the contracts above still
+apply to data written by supported reference stores.
 
-The declaration snapshot detects an unreviewed worktree change. The
-`sdk-api-compat` gate automatically compares it with the most recent reachable
-prior release tag; when running at a candidate tag, that tag itself is skipped.
-`agent-sdk/api-compat-waivers.json` may use `auto`, while an explicit operator
-override is available for controlled diagnostics. Additions are accepted; a removed or
-changed old declaration must match an exact package/SHA-256 waiver with a
-specific pre-v1 reason. Stale waivers fail, so they cannot silently authorize a
-different future change. This is source-declaration evidence; behavioral
-compatibility is covered separately by the supported-consumer quickstart and
-proxy smoke tests. The current-source gate compiles the worktree fixture with a
-local module replacement. The tagged-artifact gate extracts the target tag's
-own fixture and package list, resolves the exact proxy version, and forbids
-`replace`.
+The current-source gate compiles the worktree fixture with a local module
+replacement. The tagged-artifact gate extracts the target tag's own fixture and
+package list, resolves the exact proxy version, and forbids `replace`. Together
+they validate package ownership and consumability without turning every pre-v1
+API iteration into a waiver workflow.
 
 ## Sandbox platforms
 

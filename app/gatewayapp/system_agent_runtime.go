@@ -66,7 +66,6 @@ type systemManagedAgentRunRequest struct {
 }
 
 type systemManagedAgentRunResult struct {
-	Events         []*session.Event
 	AssistantEvent *session.Event
 	Text           string
 }
@@ -180,6 +179,19 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 			return systemManagedAgentRunResult{}, err
 		}
 	}
+	baselineEvents, err := staging.Events(stagingCtx, session.EventsRequest{
+		SessionRef:       activeSession.SessionRef,
+		IncludeTransient: true,
+	})
+	if err != nil {
+		return systemManagedAgentRunResult{}, err
+	}
+	var baselineSeq uint64
+	for _, event := range baselineEvents {
+		if event != nil && event.Seq > baselineSeq {
+			baselineSeq = event.Seq
+		}
+	}
 	core, err := sdkruntime.New(sdkruntime.Config{
 		Sessions:              staging,
 		AgentFactory:          config.AgentFactory,
@@ -210,18 +222,48 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 		return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: system-managed agent runtime returned no handle")
 	}
 	defer run.Handle.Close()
+	return collectSystemManagedAgentResult(stagingCtx, staging, activeSession.SessionRef, baselineSeq, run.Handle)
+}
+
+// collectSystemManagedAgentResult treats Runner events as a best-effort live
+// observation stream. The isolated staging Session is the authoritative source
+// for the final assistant result after the execution producer is quiescent.
+func collectSystemManagedAgentResult(
+	ctx context.Context,
+	staging session.Service,
+	ref session.SessionRef,
+	baselineSeq uint64,
+	handle agent.Runner,
+) (systemManagedAgentRunResult, error) {
 	result := systemManagedAgentRunResult{}
-	for event, runErr := range run.Handle.Events() {
+	for event, runErr := range handle.Events() {
 		if runErr != nil {
+			if _, ok := agent.AsEventStreamGap(runErr); ok {
+				continue
+			}
 			return result, runErr
 		}
 		if event == nil {
 			continue
 		}
 		cloned := session.CloneEvent(event)
-		result.Events = append(result.Events, cloned)
 		if session.EventTypeOf(cloned) == session.EventTypeAssistant {
 			result.AssistantEvent = cloned
+		}
+	}
+	durableEvents, err := staging.Events(ctx, session.EventsRequest{
+		SessionRef:       ref,
+		IncludeTransient: true,
+	})
+	if err != nil {
+		return result, err
+	}
+	for _, event := range durableEvents {
+		if event == nil || event.Seq <= baselineSeq || !session.IsCanonicalHistoryEvent(event) {
+			continue
+		}
+		if session.EventTypeOf(event) == session.EventTypeAssistant {
+			result.AssistantEvent = session.CloneEvent(event)
 		}
 	}
 	if result.AssistantEvent != nil {

@@ -85,11 +85,12 @@ the host Control layer, never by an LLM-facing tool, and Caelis does not provide
 a deterministic workflow engine.
 
 Only the exact import paths in
-[`supported-packages.txt`](supported-packages.txt) are supported SDK API. Other
-non-`internal` packages are bundled Caelis implementations or experimental
-helpers and carry no pre-v1 source-compatibility promise. The generated
-[`api.txt`](api.txt) records exported declarations for supported packages;
-`make sdk-boundary-check` fails on an unreviewed API change and compiles the
+[`supported-packages.txt`](supported-packages.txt) are compiled as the supported
+external SDK surface. Other non-`internal` packages are bundled Caelis
+implementations or experimental helpers. Before v1, routine commits do not run
+a declaration-level source-compatibility gate; durable data and protocol
+contracts remain governed by their normative documents. `make
+sdk-boundary-check` verifies the SDK dependency closure and compiles the
 allowlist from a separate consumer module.
 
 Supported consumers should depend on the smallest capability they need. The
@@ -114,12 +115,6 @@ make arch-lint
 `sdk-proxy-smoke` separately extracts the target tag's own fixture and supported
 package list, resolves that exact version through a Go proxy, and rejects local
 `replace` directives.
-
-After intentionally reviewing a supported API change, refresh its manifest:
-
-```bash
-go run ./scripts/sdk_api_snapshot -write
-```
 
 `make commit-check` runs the package-boundary checks together with root-module
 formatting, lint, vet, tests, and builds. Root commands cover SDK packages once;

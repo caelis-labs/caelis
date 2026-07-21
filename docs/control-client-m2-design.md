@@ -308,11 +308,18 @@ list filters, display metadata, and authorization inputs; they never select a
 current Session or repair a missing Session ID.
 
 All main, direct AgentRun, child, Guardian, and auto-review approvals share the
-existing Control FIFO. Before the active head is published, Control appends a
-`VisibilityMirror` permission event with typed approval request ID, scope,
-scope ID, parent tool, and the unmodified normalized ACP permission payload.
-Only the active head is exposed by bootstrap and may be resolved; bootstrap
-also reports `queued_count` without queued request details.
+existing Control FIFO. Before a client-facing active head is published, Control
+appends a `VisibilityMirror` permission event with typed approval request ID,
+scope, scope ID, parent tool, and the unmodified normalized ACP permission
+payload. Only the active head is exposed by bootstrap and may be resolved;
+bootstrap also reports `queued_count` without queued request details.
+
+Guardian/auto-review progress, terminal review presentation, and reviewer usage
+remain transient live observations. Child scope and parent relation are typed
+correlation facts, not evidence of persistence; they never promote review
+telemetry to `mirror`. A durable approval Envelope is projected only from the
+stored request or settlement event and therefore always carries its durable
+Session position.
 
 A live waiter remains owned by the Session coordinator after client disconnect.
 Turn ownership supplies origin and cancellation, while a detached child may

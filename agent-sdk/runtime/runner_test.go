@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -153,7 +154,7 @@ func TestRunnerPublishDoesNotBlockBeforeAnyStreamIsDrained(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < 128; i++ {
+		for i := 0; i < runnerEventQueueCapacity+128; i++ {
 			runner.publishEvent(&session.Event{ID: "event", Type: session.EventTypeAssistant})
 		}
 		runner.publishError(context.Canceled)
@@ -164,5 +165,41 @@ func TestRunnerPublishDoesNotBlockBeforeAnyStreamIsDrained(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("publish blocked before a stream was selected")
+	}
+	completionCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := runner.WaitCompletion(completionCtx); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
+	}
+
+	var (
+		canonicalCount int
+		gapCount       int
+		dropped        uint64
+		sawRunError    bool
+	)
+	for event, seqErr := range runner.SourceEvents() {
+		if seqErr != nil {
+			var gap *agent.EventStreamGapError
+			if errors.As(seqErr, &gap) {
+				gapCount++
+				dropped = gap.Dropped
+				continue
+			}
+			if errors.Is(seqErr, context.Canceled) {
+				sawRunError = true
+				continue
+			}
+			t.Fatalf("SourceEvents() error = %v", seqErr)
+		}
+		if event.Canonical != nil {
+			canonicalCount++
+		}
+	}
+	if gapCount != 1 || dropped != 129 {
+		t.Fatalf("stream gaps = %d with %d dropped, want one gap with 129 dropped", gapCount, dropped)
+	}
+	if canonicalCount != runnerEventQueueCapacity-1 || !sawRunError {
+		t.Fatalf("retained stream = %d canonical, run error %v; want %d canonical and error", canonicalCount, sawRunError, runnerEventQueueCapacity-1)
 	}
 }

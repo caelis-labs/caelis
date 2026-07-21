@@ -239,7 +239,7 @@ func EnsureTerminalLifecycle(events <-chan Envelope, handleID string, runID stri
 			if terminalSeen {
 				continue
 			}
-			if IsTerminalLifecycle(env) {
+			if IsTurnTerminalLifecycle(env) {
 				terminalSeen = true
 				out <- env
 				continue
@@ -270,6 +270,20 @@ func IsTerminalLifecycle(env Envelope) bool {
 		return false
 	}
 	return IsTerminalLifecycleState(env.Lifecycle.State)
+}
+
+// IsTurnTerminalLifecycle reports whether an Envelope closes one main Turn.
+// Other domain lifecycles may use the same terminal states; in particular, an
+// approval settlement carries ApprovalRequestID and must not end its owning
+// Turn. An empty Scope is accepted for unstamped Runtime output.
+func IsTurnTerminalLifecycle(env Envelope) bool {
+	if !IsTerminalLifecycle(env) {
+		return false
+	}
+	if env.Scope != "" && env.Scope != ScopeMain {
+		return false
+	}
+	return strings.TrimSpace(string(env.ApprovalRequestID)) == ""
 }
 
 func IsCancelledReason(reason string) bool {

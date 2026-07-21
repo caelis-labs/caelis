@@ -41,10 +41,13 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 			Message:     "gateway: session already has an active run",
 		}
 	}
+	handleID := g.allocateID("handle")
+	runID := g.allocateID("run")
+	turnID := g.allocateID("turn")
 	handle := newTurnHandle(turnHandleConfig{
-		handleID:                g.allocateID("handle"),
-		runID:                   g.allocateID("run"),
-		turnID:                  g.allocateID("turn"),
+		handleID:                handleID,
+		runID:                   runID,
+		turnID:                  turnID,
 		activeKind:              ActiveTurnKindKernel,
 		sessionRef:              activeSession.SessionRef,
 		createdAt:               g.clock(),
@@ -55,10 +58,10 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		cancel: func() bool {
 			return cancelFn()
 		},
-		approvals: approvals,
+		approvals:       approvals,
+		persistApproval: g.approvalPersister(activeSession.SessionRef, turnID),
+		settleApproval:  g.approvalSettler(activeSession.SessionRef, turnID),
 	})
-	handle.persistApproval = g.approvalPersister(activeSession.SessionRef, handle.TurnID())
-	handle.settleApproval = g.approvalSettler(activeSession.SessionRef, handle.TurnID())
 	g.active[activeSession.SessionID] = handle
 	g.mu.Unlock()
 

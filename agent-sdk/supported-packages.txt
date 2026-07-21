@@ -1,5 +1,5 @@
-# Stable Agent SDK import paths. Packages not listed here remain available to
-# the Caelis repository but carry no pre-v1 source-compatibility promise.
+# Agent SDK import paths compiled by the external-consumer boundary checks.
+# Other packages remain bundled or experimental Caelis implementation details.
 github.com/caelis-labs/caelis/agent-sdk
 github.com/caelis-labs/caelis/agent-sdk/approval
 github.com/caelis-labs/caelis/agent-sdk/errorcode

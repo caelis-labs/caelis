@@ -573,6 +573,26 @@ func TestIsTerminalLifecycle(t *testing.T) {
 	}
 }
 
+func TestIsTurnTerminalLifecycleExcludesOtherDomainLifecycles(t *testing.T) {
+	turn := TurnCompleted("h", "r", "t", time.Time{})
+	if !IsTurnTerminalLifecycle(turn) {
+		t.Fatalf("IsTurnTerminalLifecycle(%#v) = false, want true", turn)
+	}
+
+	approvalSettlement := turn
+	approvalSettlement.ApprovalRequestID = "approval-1"
+	approvalSettlement.Lifecycle = &Lifecycle{State: LifecycleStateCompleted, Reason: "resolved"}
+	if IsTurnTerminalLifecycle(approvalSettlement) {
+		t.Fatalf("approval settlement ended its owning Turn: %#v", approvalSettlement)
+	}
+
+	child := turn
+	child.Scope = ScopeSubagent
+	if IsTurnTerminalLifecycle(child) {
+		t.Fatalf("child lifecycle ended the main Turn: %#v", child)
+	}
+}
+
 func TestEnsureTerminalLifecycleSynthesizesCompletedForEmptyStream(t *testing.T) {
 	out := collectLifecycleTestEnvelopes(EnsureTerminalLifecycle(nil, "h", "r", "t"))
 	if len(out) != 1 {
@@ -633,6 +653,26 @@ func TestEnsureTerminalLifecycleForwardsExplicitTerminalOnce(t *testing.T) {
 		t.Fatalf("first event = %#v, want notice", out[0])
 	}
 	assertLifecycleState(t, out[1], LifecycleStateCompleted)
+}
+
+func TestEnsureTerminalLifecycleDoesNotTreatApprovalSettlementAsTurnTerminal(t *testing.T) {
+	src := make(chan Envelope, 2)
+	src <- Envelope{
+		Kind:              KindLifecycle,
+		Scope:             ScopeMain,
+		ApprovalRequestID: "approval-1",
+		Lifecycle:         &Lifecycle{State: LifecycleStateCompleted, Reason: "resolved"},
+	}
+	src <- Envelope{Kind: KindNotice, Notice: "turn continued"}
+	close(src)
+
+	out := collectLifecycleTestEnvelopes(EnsureTerminalLifecycle(src, "h", "r", "t"))
+	if len(out) != 3 || out[0].ApprovalRequestID != "approval-1" || out[1].Notice != "turn continued" {
+		t.Fatalf("events = %#v, want settlement, continued output, and synthesized terminal", out)
+	}
+	if !IsTurnTerminalLifecycle(out[2]) || out[2].Lifecycle.State != LifecycleStateCompleted {
+		t.Fatalf("last event = %#v, want synthesized Turn completion", out[2])
+	}
 }
 
 func TestIsCancelledReason(t *testing.T) {

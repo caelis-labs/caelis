@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -365,7 +366,7 @@ func (s staticSessionService) Session(context.Context, session.SessionRef) (sess
 }
 
 func (s staticSessionService) AppendEvent(_ context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	return req.Event, nil
+	return storedTestEvent(req), nil
 }
 func (s staticSessionService) Events(context.Context, session.EventsRequest) ([]*session.Event, error) {
 	return nil, nil
@@ -445,7 +446,20 @@ func (s *recordingSessionService) Session(_ context.Context, ref session.Session
 }
 
 func (s *recordingSessionService) AppendEvent(_ context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	return req.Event, nil
+	return storedTestEvent(req), nil
+}
+
+func storedTestEvent(req session.AppendEventRequest) *session.Event {
+	event := session.CloneEvent(req.Event)
+	if event == nil {
+		return nil
+	}
+	event.SessionID = firstNonEmpty(strings.TrimSpace(event.SessionID), strings.TrimSpace(req.SessionRef.SessionID))
+	event.ID = firstNonEmpty(strings.TrimSpace(event.ID), strings.TrimSpace(event.IdempotencyKey), "test-event")
+	if event.Seq == 0 {
+		event.Seq = 1
+	}
+	return event
 }
 
 func (s *recordingSessionService) Events(_ context.Context, req session.EventsRequest) ([]*session.Event, error) {

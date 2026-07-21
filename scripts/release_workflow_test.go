@@ -48,6 +48,7 @@ func TestSDKConsumerGatesUseCurrentAndTaggedFixturesSeparately(t *testing.T) {
 	}
 	tagged := readWorkflow(t, "./sdk_proxy_smoke.sh")
 	for _, want := range []string{
+		"git tag --merged HEAD --sort=-v:refname",
 		"git show \"${VERSION}:scripts/testdata/sdk_consumer/quickstart_test.go\"",
 		"git show \"${VERSION}:agent-sdk/supported-packages.txt\"",
 		"go list -m",
@@ -62,6 +63,9 @@ func TestSDKConsumerGatesUseCurrentAndTaggedFixturesSeparately(t *testing.T) {
 		if !strings.Contains(tagged, want) {
 			t.Errorf("tagged consumer gate missing %q", want)
 		}
+	}
+	if strings.Contains(tagged, "sdk_api_compat") {
+		t.Error("tagged consumer gate still depends on the removed declaration-compatibility command")
 	}
 }
 

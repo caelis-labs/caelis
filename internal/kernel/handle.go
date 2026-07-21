@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
 type turnHandleConfig struct {
@@ -324,29 +323,24 @@ func (h *turnHandle) publishSessionEventWithACPProjection(event *session.Event, 
 }
 
 func (h *turnHandle) publishApprovalReviewPayload(req *agent.ApprovalRequest, payload *ApprovalPayload) {
-	h.publishApprovalEvent(req, payload, EventKindApprovalReview, nil, nil, "")
+	h.publishEnvelopes(h.approvalReviewEnvelopes(req, payload, nil, nil), "")
 }
 
 func (h *turnHandle) publishApprovalReviewPayloadWithUsage(req *agent.ApprovalRequest, payload *ApprovalPayload, usage *UsageSnapshot, invocation *session.EventInvocation) {
-	h.publishApprovalEvent(req, payload, EventKindApprovalReview, usage, invocation, "")
+	h.publishEnvelopes(h.approvalReviewEnvelopes(req, payload, usage, invocation), "")
 }
 
-func (h *turnHandle) publishApprovalEvent(req *agent.ApprovalRequest, payload *ApprovalPayload, kind EventKind, usage *UsageSnapshot, invocation *session.EventInvocation, requestID eventstream.ApprovalRequestID) {
-	h.publishEnvelopes(h.approvalEventEnvelopes(req, payload, kind, usage, invocation, requestID), "")
-}
-
-func (h *turnHandle) approvalEventEnvelopes(req *agent.ApprovalRequest, payload *ApprovalPayload, kind EventKind, usage *UsageSnapshot, invocation *session.EventInvocation, requestID eventstream.ApprovalRequestID) []eventstream.Envelope {
+func (h *turnHandle) approvalReviewEnvelopes(req *agent.ApprovalRequest, payload *ApprovalPayload, usage *UsageSnapshot, invocation *session.EventInvocation) []eventstream.Envelope {
 	payload = cloneApprovalPayload(payload)
 	base := eventstream.Envelope{
-		SessionID:         h.sessionRef.SessionID,
-		HandleID:          h.handleID,
-		RunID:             h.runID,
-		TurnID:            h.turnID,
-		OccurredAt:        time.Now(),
-		Scope:             eventstream.ScopeMain,
-		ScopeID:           h.sessionRef.SessionID,
-		Meta:              approvalEventMeta(req, invocation),
-		ApprovalRequestID: requestID,
+		SessionID:  h.sessionRef.SessionID,
+		HandleID:   h.handleID,
+		RunID:      h.runID,
+		TurnID:     h.turnID,
+		OccurredAt: time.Now(),
+		Scope:      eventstream.ScopeMain,
+		ScopeID:    h.sessionRef.SessionID,
+		Meta:       approvalEventMeta(req, invocation),
 	}
 	if origin := canonicalOriginFromApproval(req, h.sessionRef, h.turnID); origin != nil {
 		base.Scope = eventstream.Scope(origin.Scope)
@@ -354,23 +348,22 @@ func (h *turnHandle) approvalEventEnvelopes(req *agent.ApprovalRequest, payload 
 		base.Actor = strings.TrimSpace(origin.Actor)
 		base.ParticipantID = strings.TrimSpace(origin.ParticipantID)
 		if base.Scope == eventstream.ScopeSubagent {
-			base.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryMirror}
 			if parent := approvalParentToolRelation(req); parent != nil {
 				base.ParentTool = parent
 			}
 		}
 	}
+	// Scope describes who produced an event; it does not make that event
+	// durable. Guardian review progress and accounting are live observations,
+	// while reconnectable permission requests are projected from their stored
+	// Session events by the approval coordinator.
+	base.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
 	var out []eventstream.Envelope
-	switch kind {
-	case EventKindApprovalRequested:
-		out = append(out, acpprojector.ProjectApprovalPayloadEnvelope(base, payload)...)
-	case EventKindApprovalReview:
-		if review := approvalReviewFromPayload(payload); review != nil {
-			next := base
-			next.Kind = eventstream.KindApprovalReview
-			next.ApprovalReview = review
-			out = append(out, next)
-		}
+	if review := approvalReviewFromPayload(payload); review != nil {
+		next := base
+		next.Kind = eventstream.KindApprovalReview
+		next.ApprovalReview = review
+		out = append(out, next)
 	}
 	if usage != nil {
 		next := base

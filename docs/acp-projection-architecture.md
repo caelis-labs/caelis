@@ -90,6 +90,21 @@ External controller permission ingress and prompt responses route through
 facts use SDK-owned constructors. Architecture lint rejects new direct
 participant/handoff protocol construction outside the SDK semantic owner.
 
+## Runtime Observation Gaps
+
+A slow consumer of a bounded SDK `Runner` stream may miss transient live
+updates while execution and durable Session writes continue. Control projects
+that condition as a transient Notice Envelope with
+`_meta.caelis.runtime.observation.code="observation_gap"` and
+`dropped=<count>`. The Notice text is presentation copy, not a wire-level error
+code or replay key. Surfaces may display the warning and continue consuming the
+same Control-owned Session feed; they recover authoritative final state through
+normal Session replay. The gap never authorizes a Surface to open a second
+Runtime stream or infer execution failure.
+The ACP stdio bridge renders the Notice as an independently keyed
+`agent_message_chunk` and preserves the structured observation metadata, so it
+cannot suppress or be mistaken for the later final assistant message.
+
 ## Task Stream Projection
 
 `RunCommand`, Bash-compatible command tools, and `Spawn` share the task-stream
@@ -166,6 +181,12 @@ delegated stream closes. These are Caelis Envelope extensions, never custom
 fields in an ACP update payload root. Envelope-native Surfaces, including a
 future GUI, render the same replayable scoped ACP payloads with the components
 used for a main Agent.
+
+A projected event may claim `canonical` or `mirror` delivery only after storage
+has supplied both its Event ID and Session sequence. Live unstored projections
+are demoted to `transient` instead of emitting a durable mode without a durable
+position; ingress validation remains a fail-closed defense for arbitrary
+producers.
 
 The standard ACP stdio `session/update` notification carries only `sessionId`
 and `update`; it cannot carry the surrounding Caelis Envelope `scope` or
@@ -298,8 +319,11 @@ Main Runtime, direct AgentRun, and Spawn-child requests all enter this coordinat
 normalized `ApprovalRequest` values. Control uses their canonical origin and
 parent metadata to publish the active standard ACP permission Envelope with the
 child `scope`, task `scope_id`, real Spawn `parent_tool`, and unmodified
-ToolCall/options/raw input/output/content. The active request and settlement are
-durable mirror events, so reconnect needs no second permission route. A user and
+ToolCall/options/raw input/output/content. A client-facing active request and
+its settlement are durable mirror events, so reconnect needs no second
+permission route. Guardian/auto-review progress, terminal review presentation,
+and reviewer usage are transient live observations; a child `scope` and
+`parent_tool` relation do not promote them to durable mirror events. A user and
 Guardian/auto-review are different resolvers of the same active queue head;
 auto-review never calls its approver before that request is active.
 

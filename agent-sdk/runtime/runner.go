@@ -57,9 +57,15 @@ func (r *runner) Events() iter.Seq2[*session.Event, error] {
 			return
 		}
 		for {
-			item, ok := r.events.Pop()
+			item, gap, ok := r.nextDelivery()
 			if !ok {
 				return
+			}
+			if gap != nil {
+				if !yield(nil, gap) {
+					return
+				}
+				continue
 			}
 			if item.err != nil {
 				if !yield(nil, item.err) {
@@ -87,15 +93,35 @@ func (r *runner) SourceEvents() iter.Seq2[agent.SourceEvent, error] {
 			return
 		}
 		for {
-			item, ok := r.events.Pop()
+			item, gap, ok := r.nextDelivery()
 			if !ok {
 				return
+			}
+			if gap != nil {
+				if !yield(agent.SourceEvent{}, gap) {
+					return
+				}
+				continue
 			}
 			if !yield(agent.CloneSourceEvent(item.event), item.err) {
 				return
 			}
 		}
 	}
+}
+
+func (r *runner) nextDelivery() (runnerEvent, *agent.EventStreamGapError, bool) {
+	if r == nil {
+		return runnerEvent{}, nil, false
+	}
+	delivery, ok := r.events.Pop()
+	if !ok {
+		return runnerEvent{}, nil, false
+	}
+	if delivery.Dropped > 0 {
+		return runnerEvent{}, &agent.EventStreamGapError{Dropped: delivery.Dropped}, true
+	}
+	return delivery.Item, nil, true
 }
 
 func (r *runner) claimEventStream(requested string) error {

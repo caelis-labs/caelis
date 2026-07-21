@@ -243,10 +243,11 @@ func policyDecisionResultWithOutcome(
 func policyModelFeedback(decision policy.Decision, outcome agent.ApprovalResponse) (errorText string, systemHint string) {
 	reason := strings.TrimSpace(decision.Reason)
 	outcomeReason := strings.TrimSpace(firstNonEmpty(outcome.Reason, outcome.ReviewText))
+	approvalResolved := strings.TrimSpace(outcome.Outcome) != "" || strings.TrimSpace(outcome.OptionID) != "" || outcomeReason != ""
 
 	switch {
-	case decision.Action == policy.ActionAskApproval && !outcome.Approved && outcomeReason != "":
-		errorText = outcomeReason
+	case decision.Action == policy.ActionAskApproval && approvalResolved && !outcome.Approved:
+		errorText = firstNonEmpty(outcomeReason, "approval denied")
 	case decision.Action == policy.ActionAskApproval:
 		errorText = firstNonEmpty(reason, "approval required")
 		systemHint = "This operation will run only after approval; keep using the same tool rather than shell workarounds."

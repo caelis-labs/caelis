@@ -456,8 +456,26 @@ func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, 
 	}
 	defer handle.Close()
 	outboundFilter := newACPNarrativeFilter(suppressUserEcho)
+	var observationGapSequence uint64
 	for event, seqErr := range handle.Events() {
 		if seqErr != nil {
+			if gap, ok := agent.AsEventStreamGap(seqErr); ok {
+				observationGapSequence++
+				notice := projector.ProjectRuntimeObservationGap(gap.Dropped)
+				notice.SessionID = strings.TrimSpace(ref.SessionID)
+				if err := emitACPNotice(
+					runCtx,
+					cb,
+					notice.SessionID,
+					notice,
+					fmt.Sprintf("caelis-runtime-observation-%d", observationGapSequence),
+					acpFilterSourceFromEnvelope(notice, ref.SessionID),
+					outboundFilter,
+				); err != nil {
+					return err
+				}
+				continue
+			}
 			if errors.Is(seqErr, context.Canceled) {
 				return context.Canceled
 			}

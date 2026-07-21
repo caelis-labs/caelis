@@ -51,10 +51,7 @@ func (m *Model) finishLiveTurnFromEnvelope(env eventstream.Envelope) (tea.Cmd, b
 }
 
 func isMainTurnTerminalLifecycle(env eventstream.Envelope) bool {
-	if !eventstream.IsTerminalLifecycle(env) {
-		return false
-	}
-	return env.Scope == "" || env.Scope == eventstream.ScopeMain
+	return eventstream.IsTurnTerminalLifecycle(env)
 }
 
 func terminalLifecycleForTaskResult(msg TaskResultMsg, occurredAt time.Time) eventstream.Envelope {

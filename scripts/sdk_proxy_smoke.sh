@@ -5,7 +5,20 @@ ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "${ROOT}"
 
 MODULE="github.com/caelis-labs/caelis"
-VERSION="${SDK_PROXY_VERSION:-$(go run ./scripts/sdk_api_compat -print-baseline)}"
+default_proxy_version() {
+  local exact tag
+  exact="$(git describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null || true)"
+  while IFS= read -r tag; do
+    if [[ -n "${tag}" && "${tag}" != "${exact}" ]]; then
+      printf '%s\n' "${tag}"
+      return 0
+    fi
+  done < <(git tag --merged HEAD --sort=-v:refname --list 'v[0-9]*')
+  echo "sdk-proxy-smoke: no previous semantic release tag is reachable from HEAD" >&2
+  return 1
+}
+
+VERSION="${SDK_PROXY_VERSION:-$(default_proxy_version)}"
 PROXY="${SDK_PROXY_URL:-https://proxy.golang.org}"
 if [[ -z "${VERSION}" || "${VERSION}" != v* ]]; then
   echo "sdk-proxy-smoke: SDK_PROXY_VERSION must be a semantic release tag" >&2
@@ -34,8 +47,10 @@ if git cat-file -e "${VERSION}:scripts/testdata/sdk_consumer/quickstart_test.go"
   git show "${VERSION}:scripts/testdata/sdk_consumer/quickstart_test.go" >"${consumer_dir}/quickstart_test.go"
   git show "${VERSION}:agent-sdk/supported-packages.txt" >"${consumer_dir}/supported-packages.txt"
 else
-  # Historical tags before the dedicated consumer fixture use their own
-  # external SDK example plus the package list frozen in their API snapshot.
+  # This fallback applies only to immutable historical tags that predate
+  # supported-packages.txt. Current and future releases must use the fixture
+  # and supported-package manifest in the branch above; api.txt is not a
+  # current-tree compatibility contract.
   git show "${VERSION}:agent-sdk/example_external_test.go" |
     sed '1s/^package .*/package consumer/' >"${consumer_dir}/quickstart_test.go"
   git show "${VERSION}:agent-sdk/api.txt" |

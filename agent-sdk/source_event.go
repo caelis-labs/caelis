@@ -18,7 +18,8 @@ type SourceEvent struct {
 
 // SourceHandle is an optional alternate view for handles that expose canonical
 // session events plus opaque native passthrough. It and Runner.Events must not
-// be consumed concurrently; one handle has one event consumer.
+// be consumed concurrently; one handle has one event consumer. Consumers may
+// continue after EventStreamGapError to receive the newest retained suffix.
 type SourceHandle interface {
 	SourceEvents() iter.Seq2[SourceEvent, error]
 }

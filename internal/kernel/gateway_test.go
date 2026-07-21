@@ -1706,6 +1706,78 @@ func TestBeginTurnPublishesChildApprovalThroughControlQueue(t *testing.T) {
 	_ = collectHandleEvents(t, result.Handle)
 }
 
+func TestBeginTurnPublishesChildAutoReviewAsTransient(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+	}}
+	runtime := &childApprovalRuntime{
+		session:   activeSession,
+		responses: make(chan agent.ApprovalResponse, 1),
+	}
+	gw, err := New(Config{
+		Sessions: staticSessionService{
+			session: activeSession,
+			state:   map[string]any{StateCurrentApprovalMode: string(ApprovalModeAutoReview)},
+		},
+		Runtime:  runtime,
+		Resolver: staticResolver{resolved: ResolvedTurn{RunRequest: agent.RunRequest{}}},
+		ApprovalReviewer: staticApprovalReviewer{
+			result:            ApprovalReviewResult{Approved: true},
+			sessionAccounting: &UsageSnapshot{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectHandleEvents(t, result.Handle)
+	reviewCount := 0
+	usageCount := 0
+	for _, envelope := range events {
+		isReview := envelope.Kind == eventstream.KindApprovalReview
+		isUsage := eventstream.UsageSnapshotFromEnvelope(envelope) != nil
+		if !isReview && !isUsage {
+			continue
+		}
+		if isReview {
+			reviewCount++
+		} else {
+			usageCount++
+		}
+		if envelope.Scope != eventstream.ScopeSubagent || envelope.ScopeID != "task-1" {
+			t.Fatalf("child auto-review scope = %q/%q, want subagent/task-1", envelope.Scope, envelope.ScopeID)
+		}
+		if envelope.ParentTool == nil || envelope.ParentTool.ToolCallID != "spawn-call-1" {
+			t.Fatalf("child auto-review parent = %#v, want spawn-call-1", envelope.ParentTool)
+		}
+		if envelope.Delivery == nil || envelope.Delivery.Mode != eventstream.DeliveryTransient {
+			t.Fatalf("child auto-review delivery = %#v, want transient", envelope.Delivery)
+		}
+		if envelope.Position != nil {
+			t.Fatalf("child auto-review position = %#v, want broker-assigned transient position later", envelope.Position)
+		}
+	}
+	if reviewCount != 2 || usageCount != 1 {
+		t.Fatalf("child auto-review events = %#v, want two reviews and one usage", events)
+	}
+	select {
+	case response := <-runtime.responses:
+		if !response.Approved {
+			t.Fatalf("child auto-review response = %#v, want approved", response)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("child runtime did not receive auto-review response")
+	}
+}
+
 func TestResolveApprovalRequestQueuesAutoReviewAtActiveHead(t *testing.T) {
 	t.Parallel()
 

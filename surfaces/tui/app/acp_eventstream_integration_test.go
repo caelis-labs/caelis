@@ -1183,6 +1183,37 @@ func TestHandleACPEventEnvelopeScopedChildTerminalKeepsOneSpawnPanelAndMainTurnA
 	}
 }
 
+func TestHandleACPEventEnvelopeApprovalSettlementKeepsMainTurnAlive(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(235, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:              eventstream.KindLifecycle,
+		SessionID:         "session-1",
+		HandleID:          "handle-1",
+		RunID:             "run-1",
+		TurnID:            "turn-1",
+		Scope:             eventstream.ScopeMain,
+		ApprovalRequestID: "approval-1",
+		Lifecycle: &eventstream.Lifecycle{
+			State:  eventstream.LifecycleStateCompleted,
+			Reason: "resolved",
+		},
+	})
+	if !model.turnRunning() {
+		t.Fatal("approval settlement ended the main live turn")
+	}
+
+	terminal := eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(236, 0))
+	terminal.SessionID = "session-1"
+	terminal.ScopeID = "session-1"
+	model = applyACPEnvelopeForTest(t, model, terminal)
+	if model.turnRunning() {
+		t.Fatal("Turn terminal did not end the main live turn")
+	}
+}
+
 func TestHandleACPEventEnvelopeRoutesAnchoredSubagentOutputToParentPanel(t *testing.T) {
 	t.Parallel()
 

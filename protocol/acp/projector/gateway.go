@@ -236,8 +236,11 @@ func ProjectSessionEventEnvelopeWithProjector(base eventstream.Envelope, event *
 }
 
 func stampDurableProjectionPositions(event *session.Event, events []eventstream.Envelope) []eventstream.Envelope {
-	if event == nil || event.Seq == 0 || strings.TrimSpace(event.ID) == "" || len(events) == 0 {
+	if len(events) == 0 {
 		return events
+	}
+	if event == nil || event.Seq == 0 || strings.TrimSpace(event.ID) == "" {
+		return demoteUnpositionedDurableProjections(events)
 	}
 	out := make([]eventstream.Envelope, len(events))
 	for index, env := range events {
@@ -247,6 +250,23 @@ func stampDurableProjectionPositions(event *session.Event, events []eventstream.
 			Seq:             event.Seq,
 			ProjectionIndex: uint32(index),
 		}}
+		out[index] = env
+	}
+	return out
+}
+
+// demoteUnpositionedDurableProjections prevents an unstored live event from
+// claiming canonical or mirror replay guarantees. ProjectSessionEventEnvelope
+// cannot return an error without changing its established projection API, so
+// transient delivery is the only safe representation until a stored Event ID
+// and Session sequence are available.
+func demoteUnpositionedDurableProjections(events []eventstream.Envelope) []eventstream.Envelope {
+	out := make([]eventstream.Envelope, len(events))
+	for index, env := range events {
+		if env.Delivery != nil && (env.Delivery.Mode == eventstream.DeliveryCanonical || env.Delivery.Mode == eventstream.DeliveryMirror) {
+			env.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+			env.Position = nil
+		}
 		out[index] = env
 	}
 	return out

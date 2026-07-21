@@ -93,8 +93,7 @@ func (t *gatewayTurn) turnSubscriptionEvents() <-chan eventstream.Envelope {
 				// A Session feed may contain durable lifecycle history from older
 				// Turns. Never forward a foreign main terminal: downstream Surfaces
 				// correctly treat any main terminal as their current Turn boundary.
-				if eventstream.IsTerminalLifecycle(envelope) &&
-					(envelope.Scope == "" || envelope.Scope == eventstream.ScopeMain) &&
+				if eventstream.IsTurnTerminalLifecycle(envelope) &&
 					!t.isMainTerminal(envelope) {
 					continue
 				}
@@ -189,7 +188,7 @@ func (t *gatewayTurn) emitStopped(out chan<- eventstream.Envelope) {
 		terminalFound := false
 		errorFound := false
 		for _, envelope := range final {
-			if eventstream.IsTerminalLifecycle(envelope) {
+			if eventstream.IsTurnTerminalLifecycle(envelope) {
 				terminalFound = true
 			}
 			if envelope.Kind == eventstream.KindError || envelope.Err != nil {
@@ -356,7 +355,7 @@ func (t *gatewayTurn) stopOwnerContextWatch() {
 }
 
 func (t *gatewayTurn) isMainTerminal(envelope eventstream.Envelope) bool {
-	if envelope.Lifecycle == nil || (envelope.Scope != "" && envelope.Scope != eventstream.ScopeMain) {
+	if !eventstream.IsTurnTerminalLifecycle(envelope) {
 		return false
 	}
 	if strings.TrimSpace(envelope.HandleID) != strings.TrimSpace(t.HandleID()) {

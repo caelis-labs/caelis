@@ -18,6 +18,43 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
+func TestFeedBrokerRejectsDurableEnvelopeWithoutPosition(t *testing.T) {
+	broker, _ := newTestFeedBroker(t, nil, FeedBrokerConfig{})
+	err := broker.Publish(eventstream.Envelope{
+		Kind:      eventstream.KindNotice,
+		SessionID: "session-1",
+		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
+		Notice:    "invalid durable ingress",
+	})
+	if err == nil || !strings.Contains(err.Error(), "durable envelope requires a durable position") {
+		t.Fatalf("Publish() error = %v, want durable-position rejection", err)
+	}
+}
+
+func TestFeedBrokerRejectsZeroDurablePositionBeforePrimingStorage(t *testing.T) {
+	reader := &mutablePageReader{events: []*session.Event{durableProtocolEvent(1, "stored history")}}
+	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{})
+
+	err := broker.Publish(eventstream.Envelope{
+		Kind:      eventstream.KindNotice,
+		SessionID: "session-1",
+		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
+		Position:  &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{}},
+		Notice:    "invalid zero-position ingress",
+	})
+	if err == nil || !strings.Contains(err.Error(), "durable envelope position sequence must be greater than zero") {
+		t.Fatalf("Publish() error = %v, want zero-sequence rejection", err)
+	}
+
+	if err := broker.Prime(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	position, _ := broker.Boundary()
+	if position == nil || position.Durable == nil || position.Durable.Seq != 1 {
+		t.Fatalf("Boundary() after rejected ingress = %#v, want stored durable seq 1", position)
+	}
+}
+
 func TestFeedBrokerDurableSequencerSerializesGapFillAndPublishesOnce(t *testing.T) {
 	reader := &blockingPageReader{
 		started: make(chan struct{}), release: make(chan struct{}),

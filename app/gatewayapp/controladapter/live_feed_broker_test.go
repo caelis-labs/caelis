@@ -461,7 +461,7 @@ func TestGatewayTurnAttachToPermanentFailureEmitsFailedTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	feeds, err := internalcontrolclient.NewFeedRegistry(internalcontrolclient.FeedRegistryConfig{
-		CursorCodec: codec, SubscriberQueue: 1,
+		CursorCodec: codec, SubscriberQueue: 4,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -527,7 +527,7 @@ func TestGatewayTurnAttachToPermanentFailureEmitsFailedTerminal(t *testing.T) {
 	}
 	close(producerRelease)
 	failure := receiveBrokerEnvelope(t, events)
-	if failure.Kind != eventstream.KindError || failure.Err == nil || !strings.Contains(failure.Err.Error(), "durable feed envelope requires a durable position") {
+	if failure.Kind != eventstream.KindError || failure.Err == nil || !strings.Contains(failure.Err.Error(), "durable envelope requires a durable position") {
 		t.Fatalf("attachment failure = %#v, want durable-position error", failure)
 	}
 	terminal := receiveBrokerEnvelope(t, events)
@@ -548,6 +548,90 @@ func TestGatewayTurnAttachToPermanentFailureEmitsFailedTerminal(t *testing.T) {
 	case duplicate := <-observerTerminal:
 		t.Fatalf("sibling Session subscriber received duplicate main terminal: %#v", duplicate)
 	case <-time.After(30 * time.Millisecond):
+	}
+}
+
+func TestGatewayTurnAttachAcceptsTransientChildApprovalReview(t *testing.T) {
+	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{
+		Secret: []byte("0123456789abcdef0123456789abcdef"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feeds, err := internalcontrolclient.NewFeedRegistry(internalcontrolclient.FeedRegistryConfig{
+		CursorCodec: codec, SubscriberQueue: 8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed, err := feeds.Session(session.SessionRef{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closer, ok := feed.(interface{ Close() error }); ok {
+		defer closer.Close()
+	}
+	prepared, err := feed.SubscribeFromNow(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base := eventstream.Envelope{
+		SessionID: "session-1",
+		HandleID:  "handle-1",
+		RunID:     "run-1",
+		TurnID:    "turn-1",
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "task-review",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-call-1",
+			ToolName:   "SPAWN",
+		},
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+	}
+	review := eventstream.CloneEnvelope(base)
+	review.Kind = eventstream.KindApprovalReview
+	review.ApprovalReview = &eventstream.ApprovalReview{
+		ToolCallID: "child-tool-1",
+		ToolName:   "RUN_COMMAND",
+		Status:     "approved",
+		Text:       "approved by reviewer",
+	}
+	usage := eventstream.CloneEnvelope(base)
+	usage.Kind = eventstream.KindSessionUpdate
+	usage.Update = eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
+		PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5,
+	}, nil)
+
+	mainEvents := make(chan eventstream.Envelope, 3)
+	mainEvents <- review
+	mainEvents <- usage
+	mainEvents <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Now())
+	close(mainEvents)
+
+	driver := &Adapter{stack: &RuntimeStack{ControlFeeds: feeds}}
+	turn := driver.newGatewayTurnWithSubscription(newBrokerTestHandle(mainEvents), prepared, true)
+	defer turn.Close()
+	var got []eventstream.Envelope
+	for envelope := range turn.Events() {
+		got = append(got, envelope)
+	}
+	if len(got) != 3 {
+		t.Fatalf("attached child review events = %#v, want review, usage, and completion", got)
+	}
+	for _, envelope := range got[:2] {
+		if envelope.Scope != eventstream.ScopeSubagent || envelope.ScopeID != "task-review" {
+			t.Fatalf("attached child review scope = %q/%q, want subagent/task-review", envelope.Scope, envelope.ScopeID)
+		}
+		if envelope.Delivery == nil || envelope.Delivery.Mode != eventstream.DeliveryTransient {
+			t.Fatalf("attached child review delivery = %#v, want transient", envelope.Delivery)
+		}
+		if envelope.Position == nil || envelope.Position.Transient == nil || envelope.Position.Validate() != nil {
+			t.Fatalf("attached child review position = %#v, want broker-stamped transient position", envelope.Position)
+		}
+	}
+	if got[2].Lifecycle == nil || got[2].Lifecycle.State != eventstream.LifecycleStateCompleted {
+		t.Fatalf("attached child review terminal = %#v, want completed", got[2])
 	}
 }
 
@@ -1225,6 +1309,7 @@ func TestLiveFeedBrokerDropsKnownForeignMainEvents(t *testing.T) {
 		RunID:    "other-run",
 		TurnID:   "other-turn",
 		Scope:    eventstream.ScopeMain,
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
 		Error:    "foreign failure",
 	}
 	source <- brokerMainMessageEnvelope("main event")
@@ -1239,7 +1324,7 @@ func TestLiveFeedBrokerDropsKnownForeignMainEvents(t *testing.T) {
 	}
 	terminal := receiveBrokerEnvelope(t, events)
 	if !eventstream.IsTerminalLifecycle(terminal) || terminal.Lifecycle.State != eventstream.LifecycleStateCompleted {
-		t.Fatalf("terminal = %#v, want completed lifecycle after foreign error was dropped", terminal)
+		t.Fatalf("terminal = %#v, want completed lifecycle after malformed foreign error was dropped", terminal)
 	}
 	requireBrokerChannelClosed(t, events)
 	waitBrokerDone(t, turn.feed)

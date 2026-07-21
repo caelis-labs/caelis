@@ -131,10 +131,13 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 			Message:     "gateway: session already has an active run",
 		}
 	}
+	handleID := g.allocateID("handle")
+	runID := g.allocateID("participant-run")
+	turnID := g.allocateID("participant-turn")
 	handle := newTurnHandle(turnHandleConfig{
-		handleID:                g.allocateID("handle"),
-		runID:                   g.allocateID("participant-run"),
-		turnID:                  g.allocateID("participant-turn"),
+		handleID:                handleID,
+		runID:                   runID,
+		turnID:                  turnID,
 		activeKind:              ActiveTurnKindParticipant,
 		participantID:           req.ParticipantID,
 		sessionRef:              session.SessionRef,
@@ -146,10 +149,10 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 		cancel: func() bool {
 			return cancelFn()
 		},
-		approvals: approvals,
+		approvals:       approvals,
+		persistApproval: g.approvalPersister(session.SessionRef, turnID),
+		settleApproval:  g.approvalSettler(session.SessionRef, turnID),
 	})
-	handle.persistApproval = g.approvalPersister(session.SessionRef, handle.TurnID())
-	handle.settleApproval = g.approvalSettler(session.SessionRef, handle.TurnID())
 	g.active[session.SessionID] = handle
 	g.noteActiveHandleLocked(session.SessionID, handle)
 	g.mu.Unlock()

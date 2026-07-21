@@ -1193,7 +1193,6 @@ func (r *approvalReviewerSystemAgentRunner) Run(_ context.Context, req systemMan
 		Text:    text,
 	}
 	return systemManagedAgentRunResult{
-		Events:         []*session.Event{event},
 		AssistantEvent: event,
 		Text:           text,
 	}, nil

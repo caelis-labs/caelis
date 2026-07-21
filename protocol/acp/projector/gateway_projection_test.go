@@ -56,6 +56,36 @@ func TestProjectSessionEventEnvelopeProjectsToolUpdate(t *testing.T) {
 	}
 }
 
+func TestProjectSessionEventEnvelopeDemotesUnpositionedDurableDelivery(t *testing.T) {
+	t.Parallel()
+
+	for _, visibility := range []session.Visibility{session.VisibilityCanonical, session.VisibilityMirror} {
+		t.Run(string(visibility), func(t *testing.T) {
+			message := model.NewTextMessage(model.RoleAssistant, "not stored yet")
+			event := &session.Event{
+				Type:       session.EventTypeAssistant,
+				Visibility: visibility,
+				Message:    &message,
+			}
+			base := EnvelopeBaseFromSessionEvent(
+				session.SessionRef{SessionID: "session-1"},
+				event,
+				SessionEventTransport{},
+			)
+			events := ProjectSessionEventEnvelope(base, event)
+			if len(events) != 1 {
+				t.Fatalf("ProjectSessionEventEnvelope() = %#v, want one assistant update", events)
+			}
+			if events[0].Delivery == nil || events[0].Delivery.Mode != eventstream.DeliveryTransient {
+				t.Fatalf("delivery = %#v, want transient without stored Event position", events[0].Delivery)
+			}
+			if events[0].Position != nil {
+				t.Fatalf("position = %#v, want no invented durable position", events[0].Position)
+			}
+		})
+	}
+}
+
 func TestSessionEventFinalIgnoresAuditSource(t *testing.T) {
 	t.Parallel()
 

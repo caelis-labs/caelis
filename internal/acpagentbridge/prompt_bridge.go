@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
@@ -346,17 +347,7 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCal
 		}
 		return emitFilteredSessionUpdate(ctx, cb, notification, env.Final, source, outboundFilter)
 	case eventstream.KindNotice:
-		text := strings.TrimSpace(env.Notice)
-		if text == "" {
-			return nil
-		}
-		return emitFilteredSessionUpdate(ctx, cb, acp.SessionNotification{
-			SessionID: sessionID,
-			Update: acp.ContentChunk{
-				SessionUpdate: acp.UpdateAgentMessage,
-				Content:       acp.TextContent{Type: "text", Text: text},
-			},
-		}, true, source, outboundFilter)
+		return emitACPNotice(ctx, cb, sessionID, env, "", source, outboundFilter)
 	case eventstream.KindError:
 		if env.Err != nil {
 			return env.Err
@@ -369,6 +360,47 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCal
 		return emitFilteredSessionUpdate(ctx, cb, acp.SessionNotification{SessionID: sessionID, Update: env.Update}, env.Final, source, outboundFilter)
 	}
 	return nil
+}
+
+func emitACPNotice(
+	ctx context.Context,
+	cb acp.PromptCallbacks,
+	sessionID string,
+	env eventstream.Envelope,
+	fallbackMessageID string,
+	source acpFilterSource,
+	outboundFilter *acpNarrativeFilter,
+) error {
+	if cb == nil {
+		return nil
+	}
+	text := strings.TrimSpace(env.Notice)
+	if text == "" {
+		return nil
+	}
+	return emitFilteredSessionUpdate(ctx, cb, acp.SessionNotification{
+		SessionID: sessionID,
+		Update: acp.ContentChunk{
+			SessionUpdate: acp.UpdateAgentMessage,
+			Content:       acp.TextContent{Type: "text", Text: text},
+			MessageID: firstNonEmptyNoticeMessageID(
+				strings.TrimSpace(env.ProjectionID),
+				strings.TrimSpace(env.EventID),
+				strings.TrimSpace(env.Cursor),
+				strings.TrimSpace(fallbackMessageID),
+			),
+			Meta: metautil.CloneMap(env.Meta),
+		},
+	}, true, source, outboundFilter)
+}
+
+func firstNonEmptyNoticeMessageID(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func emitFilteredSessionUpdate(ctx context.Context, cb acp.PromptCallbacks, notification acp.SessionNotification, final bool, source acpFilterSource, outboundFilter *acpNarrativeFilter) error {

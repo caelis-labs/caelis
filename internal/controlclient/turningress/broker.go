@@ -214,7 +214,16 @@ func (b *Broker) run() {
 					// cannot enter this feed or become its terminal boundary.
 					continue
 				}
-				if eventstream.IsTerminalLifecycle(env) {
+			}
+			if err := validateIngressEnvelope(env); err != nil {
+				b.reportDeliveryFailure(err)
+				failureReason = errorText(err)
+				b.RequestStop(eventstream.LifecycleStateFailed, failureReason)
+				b.cancelOwningProducer()
+				continue
+			}
+			if mainScope {
+				if eventstream.IsTurnTerminalLifecycle(env) {
 					// A terminal frame is semantic output, not the Runtime producer
 					// barrier. Hold it until ACPEvents closes so cancellation, lease
 					// completion, late errors, and final child-source reads cannot be
@@ -357,6 +366,10 @@ func (b *Broker) forwardSource(ctx context.Context, source *source) {
 			if ctx.Err() != nil {
 				return
 			}
+			if isIngressDeliveryError(err) {
+				b.reportDeliveryFailure(err)
+				return
+			}
 			consecutiveFailures++
 			if consecutiveFailures >= sourceMaxConsecutiveFailures {
 				b.reportDeliveryFailure(fmt.Errorf("task stream %q delivery failed after %d attempts: %w", source.request.Key(), consecutiveFailures, err))
@@ -450,6 +463,9 @@ func (b *Broker) acceptSourceSnapshot(ctx context.Context, request acpprojector.
 			if len(stored) != len(indexes) {
 				return fmt.Errorf("turningress: child recorder returned %d events for %d frames", len(stored), len(indexes))
 			}
+			if err := validateStoredChildEvents(stored); err != nil {
+				return err
+			}
 			for index, frameIndex := range indexes {
 				frames[frameIndex].Event = stored[index]
 			}
@@ -465,6 +481,9 @@ func (b *Broker) acceptSourceSnapshot(ctx context.Context, request acpprojector.
 	}
 	if len(batch) == 0 {
 		return nil
+	}
+	if err := validateIngressEnvelopes(batch); err != nil {
+		return err
 	}
 	select {
 	case b.batches <- batch:

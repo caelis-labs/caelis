@@ -248,19 +248,24 @@ func (c *approvalCoordinator) activateNextLocked() {
 		c.active = pending
 		if pending.publishOnActivate {
 			owner := pending.owner
-			if owner != nil && owner.persistApproval != nil {
-				event, err := owner.persistApproval(pending.request, pending.id)
-				if err != nil {
-					pending.activationErr = err
-					c.removeLocked(pending, "persistence_failed")
-					close(pending.done)
-					continue
-				}
-				owner.publishEnvelopes(projectSessionACPEvent(owner.sessionRef, event, owner.handleID, owner.runID, owner.turnID), "")
-				pending.persisted = true
-			} else if owner != nil {
-				owner.publishApprovalPayload(pending.request, canonicalApprovalPayload(pending.request), pending.id)
+			if owner == nil || owner.persistApproval == nil {
+				pending.activationErr = fmt.Errorf("gateway: durable approval persistence is unavailable")
+				c.removeLocked(pending, "persistence_failed")
+				close(pending.done)
+				continue
 			}
+			event, err := owner.persistApproval(pending.request, pending.id)
+			if err == nil {
+				err = validatePersistedApprovalEvent(event)
+			}
+			if err != nil {
+				pending.activationErr = err
+				c.removeLocked(pending, "persistence_failed")
+				close(pending.done)
+				continue
+			}
+			owner.publishEnvelopes(projectSessionACPEvent(owner.sessionRef, event, owner.handleID, owner.runID, owner.turnID), "")
+			pending.persisted = true
 		}
 		close(pending.activated)
 		return
@@ -275,10 +280,23 @@ func (c *approvalCoordinator) settleLocked(pending *pendingApproval, state strin
 	if err != nil {
 		return err
 	}
+	if err := validatePersistedApprovalEvent(event); err != nil {
+		return err
+	}
 	pending.settled = true
 	pending.owner.publishEnvelopes(projectSessionACPEvent(
 		pending.owner.sessionRef, event, pending.owner.handleID, pending.owner.runID, pending.owner.turnID,
 	), "")
+	return nil
+}
+
+func validatePersistedApprovalEvent(event *session.Event) error {
+	if event == nil {
+		return fmt.Errorf("gateway: durable approval persistence returned no event")
+	}
+	if strings.TrimSpace(event.ID) == "" || event.Seq == 0 {
+		return fmt.Errorf("gateway: durable approval persistence returned an event without a durable position")
+	}
 	return nil
 }
 
@@ -381,8 +399,4 @@ func (h *turnHandle) releasePendingApproval(pending *pendingApproval, state stri
 
 func (h *turnHandle) publishApproval(req *agent.ApprovalRequest) (*pendingApproval, error) {
 	return h.enqueueApproval(req, true)
-}
-
-func (h *turnHandle) publishApprovalPayload(req *agent.ApprovalRequest, payload *ApprovalPayload, requestID eventstream.ApprovalRequestID) {
-	h.publishEnvelopes(h.approvalEventEnvelopes(req, payload, EventKindApprovalRequested, nil, nil, requestID), "")
 }

@@ -29,6 +29,11 @@ const (
 	RuntimeTaskID         = "task_id"
 	RuntimeTaskTerminalID = "terminal_id"
 
+	RuntimeObservation        = "observation"
+	RuntimeObservationCode    = "code"
+	RuntimeObservationDropped = "dropped"
+	RuntimeObservationGap     = "observation_gap"
+
 	RuntimeStream             = "stream"
 	RuntimeStreamMode         = "mode"
 	RuntimeStreamTruncated    = "truncated"

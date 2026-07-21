@@ -330,6 +330,12 @@ func (b *FeedBroker) publish(
 		}
 	}()
 	envelope = eventstream.CloneEnvelope(envelope)
+	// Reject malformed durable declarations before they can enter the storage
+	// sequencer. Validation inside publishSerialized remains the final defense,
+	// but it is too late to protect scannedSeq from an invalid gap-fill target.
+	if err := eventstream.ValidateEnvelopeDelivery(envelope); err != nil {
+		return false, false, fmt.Errorf("controlclient: feed envelope delivery: %w", err)
+	}
 	if isDurableFeedEnvelope(envelope) && b.reader != nil {
 		if err := b.lockPrime(ctx); err != nil {
 			return false, false, err
@@ -392,8 +398,7 @@ func (b *FeedBroker) publish(
 }
 
 func isMainTerminalEnvelope(envelope eventstream.Envelope) bool {
-	return eventstream.IsTerminalLifecycle(envelope) &&
-		(envelope.Scope == "" || envelope.Scope == eventstream.ScopeMain)
+	return eventstream.IsTurnTerminalLifecycle(envelope)
 }
 
 func (b *FeedBroker) publishSerialized(
@@ -703,19 +708,17 @@ func (b *FeedBroker) prepareEnvelopeLocked(envelope *eventstream.Envelope) error
 	if envelope.Delivery != nil {
 		mode = envelope.Delivery.Mode
 	}
+	if err := eventstream.ValidateEnvelopeDelivery(*envelope); err != nil {
+		return fmt.Errorf("controlclient: feed envelope delivery: %w", err)
+	}
 	switch mode {
 	case eventstream.DeliveryCanonical, eventstream.DeliveryMirror:
-		if envelope.Position == nil || envelope.Position.Durable == nil || envelope.Position.Validate() != nil {
-			return errors.New("controlclient: durable feed envelope requires a durable position")
-		}
 	case eventstream.DeliveryTransient, "":
 		b.transientSeq++
 		envelope.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
 		envelope.Position = &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
 			Anchor: b.latestDurable, Generation: b.generation, Sequence: b.transientSeq,
 		}}
-	default:
-		return fmt.Errorf("controlclient: unsupported delivery mode %q", mode)
 	}
 	cursor, err := b.codec.Encode(b.ref.SessionID, *envelope.Position)
 	if err != nil {

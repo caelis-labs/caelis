@@ -164,6 +164,4 @@ cp "${ROOT}/scripts/testdata/sdk_consumer/quickstart_test.go" "${consumer_dir}/q
   check_sdk_closure "external consumer" -test ./...
 )
 
-go run ./scripts/sdk_api_snapshot -check
-
 echo "sdk-boundary-check: passed (${package_count} packages, ${#supported_packages[@]} supported imports)"

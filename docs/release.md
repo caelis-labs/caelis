@@ -28,11 +28,9 @@ separate Agent SDK module or release process.
    the tag. This operator check catches branch-only failures early; the release
    workflow independently invokes the same reusable quality workflow for the
    tag SHA before publish.
-8. Run `go run ./scripts/sdk_api_compat -print-baseline` and confirm it is the
-   immediately preceding reachable release. On a candidate tag, the resolver
-   skips the candidate itself. Remove waivers that become stale when the
-   baseline rolls forward; each remaining waiver must bind an exact package and
-   declaration digest with a concrete reason.
+8. If running `make sdk-proxy-smoke` without `SDK_PROXY_VERSION`, confirm its
+   automatically selected target is the immediately preceding reachable
+   release. On a candidate tag, the resolver skips the candidate itself.
 
 The focused race suite for SDK persistence/runtime work is:
 

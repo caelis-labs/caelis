@@ -27,6 +27,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -429,6 +430,49 @@ func TestRuntimeAgentPromptConvertsLocalTerminalTextToTerminalMetaForACPStdio(t 
 	}
 	if got := terminalOutputPayloads(cb.notifications, "call-1"); strings.Join(got, "") != "streamed output\n" {
 		t.Fatalf("terminal output payloads = %#v, want terminal output meta", got)
+	}
+}
+
+func TestRuntimeAgentPromptContinuesAfterObservationGap(t *testing.T) {
+	t.Parallel()
+
+	sessions := inmemory.NewStore(inmemory.Config{})
+	bridge, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:  observationGapRuntime{},
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{Name: "fake"}, nil
+		},
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	active, err := bridge.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	callbacks := &recordingPromptCallbacks{}
+	response, err := bridge.Prompt(context.Background(), acp.PromptRequest{SessionID: active.SessionID}, callbacks)
+	if err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if response.StopReason != acp.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", response.StopReason, acp.StopReasonEndTurn)
+	}
+	chunks := agentMessageChunks(callbacks.notifications)
+	if len(chunks) != 2 || chunks[0] != projector.RuntimeObservationGapNotice || chunks[1] != "durable final" {
+		t.Fatalf("agent messages = %#v, want gap notice then final message", chunks)
+	}
+	gapUpdate, ok := callbacks.notifications[0].Update.(acp.ContentChunk)
+	if !ok || strings.TrimSpace(gapUpdate.MessageID) == "" {
+		t.Fatalf("gap update = %#v, want independently keyed ACP notice", callbacks.notifications[0].Update)
+	}
+	observation := metautil.RuntimeSection(gapUpdate.Meta, metautil.RuntimeObservation)
+	if observation[metautil.RuntimeObservationCode] != metautil.RuntimeObservationGap ||
+		observation[metautil.RuntimeObservationDropped] != uint64(17) {
+		t.Fatalf("gap metadata = %#v", observation)
 	}
 }
 
@@ -965,6 +1009,28 @@ type recordingRunRuntime struct {
 	request agent.RunRequest
 }
 
+type observationGapRuntime struct{}
+
+func (observationGapRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
+	message := model.NewTextMessage(model.RoleAssistant, "durable final")
+	return agent.RunResult{
+		Session: session.Session{SessionRef: req.SessionRef},
+		Handle: terminalBridgeRun{
+			gapDropped: 17,
+			events: []*session.Event{{
+				SessionID: req.SessionRef.SessionID,
+				Type:      session.EventTypeAssistant,
+				Message:   &message,
+				Text:      message.TextContent(),
+			}},
+		},
+	}, nil
+}
+
+func (observationGapRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+	return agent.RunState{}, nil
+}
+
 func (r *recordingRunRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
 	r.request = req
 	return agent.RunResult{
@@ -1496,13 +1562,17 @@ func (narrativeToolBoundaryReplayRuntime) RunState(context.Context, session.Sess
 }
 
 type terminalBridgeRun struct {
-	events []*session.Event
+	events     []*session.Event
+	gapDropped uint64
 }
 
 func (r terminalBridgeRun) RunID() string { return "run-1" }
 
 func (r terminalBridgeRun) Events() iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
+		if r.gapDropped > 0 && !yield(nil, &agent.EventStreamGapError{Dropped: r.gapDropped}) {
+			return
+		}
 		for _, event := range r.events {
 			if !yield(event, nil) {
 				return

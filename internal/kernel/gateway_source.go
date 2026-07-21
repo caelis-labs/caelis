@@ -1,8 +1,10 @@
 package kernel
 
 import (
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
+	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
 func (g *Gateway) forwardHandleSourceEvents(activeSession session.Session, handle *turnHandle, source acpbridge.EventHandle) {
@@ -12,6 +14,10 @@ func (g *Gateway) forwardHandleSourceEvents(activeSession session.Session, handl
 func (g *Gateway) forwardSourceEvents(activeSession session.Session, handle *turnHandle, source acpbridge.SourceStream) {
 	for sourceEvent, seqErr := range source.Events {
 		if seqErr != nil {
+			if gap, ok := agent.AsEventStreamGap(seqErr); ok {
+				handle.publishACP(acpprojector.ProjectRuntimeObservationGap(gap.Dropped), "runtime_observation")
+				continue
+			}
 			handle.publishError(seqErr)
 			return
 		}

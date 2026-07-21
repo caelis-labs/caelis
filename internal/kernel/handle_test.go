@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -138,6 +140,62 @@ func TestTurnHandlePublishesApprovalAsACPPermission(t *testing.T) {
 	}
 	if len(permission.Options) != 1 || permission.Options[0].OptionID != "allow_once" {
 		t.Fatalf("permission options = %#v, want allow_once", permission.Options)
+	}
+}
+
+func TestTurnHandlePublishApprovalRequiresDurablePersister(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID: "h1", runID: "run-1", turnID: "turn-1",
+		sessionRef: session.SessionRef{SessionID: "s1"},
+	})
+	_, err := handle.publishApproval(&agent.ApprovalRequest{
+		Tool: tool.Definition{Name: "RUN_COMMAND"},
+		Call: tool.Call{ID: "call-1", Name: "RUN_COMMAND"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "durable approval persistence is unavailable") {
+		t.Fatalf("publishApproval() error = %v, want durable persistence failure", err)
+	}
+	events, _, replayErr := handle.eventsAfter("")
+	if replayErr != nil {
+		t.Fatal(replayErr)
+	}
+	if len(events) != 0 {
+		t.Fatalf("approval events = %#v, want no transient permission fallback", events)
+	}
+}
+
+func TestTurnHandleChildApprovalReviewIsTransient(t *testing.T) {
+	t.Parallel()
+
+	handle := newTestTurnHandle()
+	request := testChildApprovalRequest("task-review", "review.txt")
+	payload := canonicalApprovalPayload(request)
+	payload.ReviewStatus = ApprovalReviewStatusApproved
+	payload.ReviewText = "approved by reviewer"
+	events := handle.approvalReviewEnvelopes(
+		request,
+		payload,
+		&UsageSnapshot{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5},
+		nil,
+	)
+	if len(events) != 2 {
+		t.Fatalf("approval review events = %#v, want review plus usage", events)
+	}
+	for _, event := range events {
+		if event.Scope != eventstream.ScopeSubagent || event.ScopeID != "task-review" {
+			t.Fatalf("approval review scope = %q/%q, want subagent/task-review", event.Scope, event.ScopeID)
+		}
+		if event.ParentTool == nil || event.ParentTool.ToolCallID != "spawn-call-1" {
+			t.Fatalf("approval review parent = %#v, want spawn-call-1", event.ParentTool)
+		}
+		if event.Delivery == nil || event.Delivery.Mode != eventstream.DeliveryTransient {
+			t.Fatalf("approval review delivery = %#v, want transient", event.Delivery)
+		}
+		if event.Position != nil {
+			t.Fatalf("approval review position = %#v, want no invented durable position", event.Position)
+		}
 	}
 }
 
@@ -858,12 +916,33 @@ func TestTurnHandleEventsAfterReturnsCursorNotFound(t *testing.T) {
 }
 
 func newTestTurnHandle() *turnHandle {
+	ref := session.SessionRef{
+		AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+	}
 	return newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		handleID:   "h1",
+		runID:      "run-1",
+		turnID:     "turn-1",
+		sessionRef: ref,
+		persistApproval: func(req *agent.ApprovalRequest, requestID eventstream.ApprovalRequestID) (*session.Event, error) {
+			permission := approval.ProtocolApprovalFromPayload(canonicalApprovalPayload(req))
+			event := &session.Event{
+				ID:                "test-" + string(requestID),
+				SessionID:         ref.SessionID,
+				Seq:               1,
+				Type:              session.EventTypeCustom,
+				Visibility:        session.VisibilityMirror,
+				ApprovalRequestID: string(requestID),
+				Scope:             &session.EventScope{TurnID: "turn-1", Source: "approval"},
+				Protocol: &session.EventProtocol{
+					Method:     session.ProtocolMethodRequestPermission,
+					Permission: permission,
+				},
+			}
+			if origin := canonicalOriginFromApproval(req, ref, "turn-1"); origin != nil {
+				event.ChildOrigin = approvalChildOrigin(req, origin, requestID)
+			}
+			return event, nil
 		},
 		createdAt: time.Unix(100, 0),
 	})
@@ -914,6 +993,9 @@ func assertChildPermissionEnvelope(t *testing.T, env eventstream.Envelope, reque
 	}
 	if env.Delivery == nil || env.Delivery.Mode != eventstream.DeliveryMirror {
 		t.Fatalf("child delivery = %#v, want durable mirror delivery", env.Delivery)
+	}
+	if env.Position == nil || env.Position.Durable == nil || env.Position.Validate() != nil {
+		t.Fatalf("child position = %#v, want valid durable position", env.Position)
 	}
 	if env.Permission == nil || env.Permission.ToolCall.ToolCallID != "shared-child-call" || len(env.Permission.Options) != 1 || env.Permission.Options[0].OptionID != "allow_once" {
 		t.Fatalf("child ACP permission = %#v, want preserved tool call and options", env.Permission)

@@ -34,6 +34,23 @@ import (
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
+type burstTestAgent struct {
+	count int
+}
+
+func (a burstTestAgent) Name() string { return "burst" }
+
+func (a burstTestAgent) Run(agent.Context) iter.Seq2[*session.Event, error] {
+	return func(yield func(*session.Event, error) bool) {
+		for i := 0; i < a.count; i++ {
+			message := model.NewTextMessage(model.RoleAssistant, fmt.Sprintf("event-%03d", i))
+			if !yield(&session.Event{Type: session.EventTypeAssistant, Message: &message}, nil) {
+				return
+			}
+		}
+	}
+}
+
 func TestNormalizeEventPreservesIDOnlyExecutor(t *testing.T) {
 	t.Parallel()
 
@@ -155,6 +172,74 @@ func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 	}
 	if state.Status != agent.RunLifecycleStatusCompleted {
 		t.Fatalf("state.Status = %q, want %q", state.Status, agent.RunLifecycleStatusCompleted)
+	}
+}
+
+func TestRuntimeCompletionAndPersistenceDoNotWaitForEventConsumer(t *testing.T) {
+	sessions, activeSession := newTestSessionService(t, "sess-observer-gap")
+	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, RunIDGenerator: func() string { return "run-observer-gap" }})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	const assistantEvents = runnerEventQueueCapacity + 32
+	result, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "produce a burst",
+		Agent:      burstTestAgent{count: assistantEvents},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	waiter, ok := result.Handle.(agent.RunnerCompletionWaiter)
+	if !ok {
+		t.Fatal("Runner does not implement RunnerCompletionWaiter")
+	}
+	completionCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := waiter.WaitCompletion(completionCtx); err != nil {
+		t.Fatalf("WaitCompletion() error = %v", err)
+	}
+
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	if got, want := len(loaded.Events), assistantEvents+1; got != want {
+		t.Fatalf("len(loaded.Events) = %d, want %d durable events", got, want)
+	}
+	lastEventText := fmt.Sprintf("event-%03d", assistantEvents-1)
+	if got := session.EventText(loaded.Events[len(loaded.Events)-1]); got != lastEventText {
+		t.Fatalf("last durable event = %q, want %q", got, lastEventText)
+	}
+	state, err := runtime.RunState(context.Background(), activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("RunState() error = %v", err)
+	}
+	if state.Status != agent.RunLifecycleStatusCompleted {
+		t.Fatalf("RunState().Status = %q, want completed", state.Status)
+	}
+
+	var (
+		gap      *agent.EventStreamGapError
+		retained []*session.Event
+	)
+	for event, seqErr := range result.Handle.Events() {
+		if seqErr != nil {
+			if !errors.As(seqErr, &gap) {
+				t.Fatalf("Events() error = %v", seqErr)
+			}
+			continue
+		}
+		retained = append(retained, event)
+	}
+	if gap == nil || gap.Dropped != assistantEvents+1-runnerEventQueueCapacity {
+		t.Fatalf("Events() gap = %#v, want %d dropped", gap, assistantEvents+1-runnerEventQueueCapacity)
+	}
+	if len(retained) != runnerEventQueueCapacity {
+		t.Fatalf("Events() retained %d events, want %d", len(retained), runnerEventQueueCapacity)
+	}
+	if got := session.EventText(retained[len(retained)-1]); got != lastEventText {
+		t.Fatalf("last retained event = %q, want %q", got, lastEventText)
 	}
 }
 
@@ -403,6 +488,9 @@ func drainRunnerEvents(t *testing.T, handle agent.Runner) ([]*session.Event, err
 	var events []*session.Event
 	for event, seqErr := range handle.Events() {
 		if seqErr != nil {
+			if _, ok := agent.AsEventStreamGap(seqErr); ok {
+				continue
+			}
 			return events, seqErr
 		}
 		if event != nil {

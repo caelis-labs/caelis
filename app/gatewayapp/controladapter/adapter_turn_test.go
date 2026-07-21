@@ -148,6 +148,39 @@ func TestGatewayTurnHistoricalUnstampedTerminalCannotEndCurrentTurn(t *testing.T
 	assertAdapterLifecycleState(t, out[1], eventstream.LifecycleStateCompleted)
 }
 
+func TestGatewayTurnApprovalSettlementCannotEndCurrentTurn(t *testing.T) {
+	events := make(chan eventstream.Envelope, 3)
+	events <- eventstream.Envelope{
+		Kind:              eventstream.KindLifecycle,
+		SessionID:         "session-1",
+		HandleID:          "handle-1",
+		RunID:             "run-1",
+		TurnID:            "turn-1",
+		Scope:             eventstream.ScopeMain,
+		ApprovalRequestID: "approval-1",
+		Lifecycle:         &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted, Reason: "resolved"},
+	}
+	events <- eventstream.Envelope{
+		Kind: eventstream.KindNotice, SessionID: "session-1",
+		HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1",
+		Scope: eventstream.ScopeMain, Notice: "current turn continued",
+	}
+	events <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(2, 0))
+	close(events)
+	turn := &gatewayTurn{
+		handle:       &testGatewayTurnHandle{},
+		subscription: &errorFeedSubscription{events: events},
+	}
+
+	out := collectAdapterTurnEvents(turn.Events())
+	if len(out) != 3 || out[0].ApprovalRequestID != "approval-1" || out[1].Notice != "current turn continued" {
+		t.Fatalf("approval settlement ended current turn: %#v", out)
+	}
+	if !eventstream.IsTurnTerminalLifecycle(out[2]) {
+		t.Fatalf("last event = %#v, want Turn terminal", out[2])
+	}
+}
+
 func TestGatewayTurnCloseUnblocksUnreadSubscriptionDelivery(t *testing.T) {
 	input := make(chan eventstream.Envelope)
 	handle := newBrokerTestHandle(nil)
