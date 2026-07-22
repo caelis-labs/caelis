@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 func (s *Stack) StartSession(ctx context.Context, preferredSessionID string, bindingKey string) (session.Session, error) {
@@ -25,13 +25,13 @@ func (s *Stack) StartSession(ctx context.Context, preferredSessionID string, bin
 	if gw == nil {
 		return session.Session{}, fmt.Errorf("gatewayapp: gateway is unavailable")
 	}
-	return gw.StartSession(ctx, gateway.StartSessionRequest{
+	return gw.StartSession(ctx, kernel.StartSessionRequest{
 		AppName:            s.AppName,
 		UserID:             s.UserID,
 		Workspace:          s.Workspace,
 		PreferredSessionID: strings.TrimSpace(preferredSessionID),
 		BindingKey:         strings.TrimSpace(bindingKey),
-		Binding: gateway.BindingDescriptor{
+		Binding: kernel.BindingDescriptor{
 			Surface: strings.TrimSpace(bindingKey),
 			Owner:   s.AppName,
 		},
@@ -111,7 +111,7 @@ func (s *Stack) CompactSession(ctx context.Context, ref session.SessionRef) erro
 	if gw == nil || gw.Resolver() == nil {
 		return fmt.Errorf("gatewayapp: resolver is unavailable")
 	}
-	resolved, err := gw.Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: ref})
+	resolved, err := gw.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: ref})
 	if err != nil {
 		return err
 	}

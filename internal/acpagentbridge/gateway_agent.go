@@ -8,8 +8,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/version"
-	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
@@ -17,8 +17,8 @@ import (
 type GatewayAgentConfig struct {
 	Runtime             agent.Runtime
 	Sessions            session.Service
-	Resolver            gateway.RuntimeResolver
-	ApprovalReviewer    gateway.ApprovalReviewer
+	Resolver            kernel.RuntimeResolver
+	ApprovalReviewer    kernel.ApprovalReviewer
 	Assembly            assemblyapi.ResolvedAssembly
 	AppName             string
 	UserID              string
@@ -75,7 +75,7 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		Runtime:  cfg.Runtime,
 		Sessions: cfg.Sessions,
 		BuildAgentSpec: func(ctx context.Context, session session.Session, req acp.PromptRequest) (agent.AgentSpec, error) {
-			resolved, err := cfg.Resolver.ResolveTurn(ctx, gateway.TurnIntent{
+			resolved, err := cfg.Resolver.ResolveTurn(ctx, kernel.TurnIntent{
 				SessionRef: session.SessionRef,
 				Surface:    "acp",
 			})

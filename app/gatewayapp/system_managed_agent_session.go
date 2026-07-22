@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 const (
@@ -216,7 +216,7 @@ func (s *systemManagedAgentSession) commit(
 	cursor systemManagedAgentTranscriptCursor,
 	promptEvent *session.Event,
 	assistantEvent *session.Event,
-) (*gateway.ApprovalReviewTrace, bool, error) {
+) (*kernel.ApprovalReviewTrace, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.version != version {
@@ -285,7 +285,7 @@ func (s *systemManagedAgentSession) commit(
 	s.events = append(s.events, session.CloneEvent(storedPrompt), session.CloneEvent(storedAssistant))
 	s.cursor = cursor
 	s.version++
-	trace := &gateway.ApprovalReviewTrace{
+	trace := &kernel.ApprovalReviewTrace{
 		SessionID:        strings.TrimSpace(s.session.SessionID),
 		PromptEventID:    strings.TrimSpace(storedPrompt.ID),
 		AssistantEventID: strings.TrimSpace(storedAssistant.ID),

@@ -13,21 +13,22 @@ const (
 	EventMetaRoot = metautil.Root
 
 	EventMetaVersion   = metautil.Version
-	EventMetaTransient = "transient"
+	EventMetaTransient = metautil.Transient
 	EventMetaRuntime   = metautil.Runtime
 
-	EventMetaRuntimeTool       = "tool"
-	EventMetaRuntimeToolName   = "name"
-	EventMetaRuntimeToolAction = "action"
-	EventMetaRuntimeToolInput  = "input"
-	EventMetaRuntimeTargetKind = "target_kind"
-	EventMetaRuntimeTargetID   = "target_id"
+	EventMetaRuntimeTool             = metautil.RuntimeTool
+	EventMetaRuntimeToolName         = metautil.RuntimeToolName
+	EventMetaRuntimeToolAction       = metautil.RuntimeToolAction
+	EventMetaRuntimeToolInput        = metautil.RuntimeToolInput
+	EventMetaRuntimeToolStatusDetail = metautil.RuntimeToolStatusDetail
+	EventMetaRuntimeTargetKind       = metautil.RuntimeTargetKind
+	EventMetaRuntimeTargetID         = metautil.RuntimeTargetID
 
-	EventMetaRuntimeTask           = "task"
+	EventMetaRuntimeTask           = metautil.RuntimeTask
 	EventMetaRuntimeTaskKind       = "kind"
-	EventMetaRuntimeTaskID         = "task_id"
+	EventMetaRuntimeTaskID         = metautil.RuntimeTaskID
 	EventMetaRuntimeTaskInternalID = "internal_task_id"
-	EventMetaRuntimeTaskTerminalID = "terminal_id"
+	EventMetaRuntimeTaskTerminalID = metautil.RuntimeTaskTerminalID
 	EventMetaRuntimeTaskSessionID  = "session_id"
 	EventMetaRuntimeTaskHandle     = "handle"
 	EventMetaRuntimeTaskState      = "state"
@@ -36,11 +37,11 @@ const (
 	EventMetaRuntimeTaskError      = "error"
 	EventMetaRuntimeTaskFinal      = "final_message"
 
-	EventMetaRuntimeStream             = "stream"
-	EventMetaRuntimeStreamMode         = "mode"
-	EventMetaRuntimeStreamParentCallID = "parent_call_id"
-	EventMetaRuntimeStreamParentTool   = "parent_tool"
-	EventMetaRuntimeStreamParentTaskID = "parent_task_id"
+	EventMetaRuntimeStream             = metautil.RuntimeStream
+	EventMetaRuntimeStreamMode         = metautil.RuntimeStreamMode
+	EventMetaRuntimeStreamParentCallID = metautil.RuntimeStreamParentCallID
+	EventMetaRuntimeStreamParentTool   = metautil.RuntimeStreamParentTool
+	EventMetaRuntimeStreamParentTaskID = metautil.RuntimeStreamParentTaskID
 )
 
 // EventMetaString returns a trimmed string from _meta using a stable path.

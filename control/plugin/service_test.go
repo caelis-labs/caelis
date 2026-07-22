@@ -119,7 +119,7 @@ func TestServiceAddPathUsesHostState(t *testing.T) {
 	}
 	wantMutation := []recordedMutation{{
 		GuardAction:   "add plugin",
-		FailureAction: "rebuild gateway after adding plugin",
+		FailureAction: "add plugin",
 		Reconfigure:   true,
 	}}
 	if !reflect.DeepEqual(host.mutations, wantMutation) {

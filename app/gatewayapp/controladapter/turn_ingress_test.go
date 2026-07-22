@@ -9,7 +9,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -130,7 +130,7 @@ func (h *brokerTestHandle) ACPEvents() <-chan eventstream.Envelope {
 	}
 	return h.events
 }
-func (*brokerTestHandle) Submit(context.Context, gateway.SubmitRequest) error { return nil }
+func (*brokerTestHandle) Submit(context.Context, kernel.SubmitRequest) error { return nil }
 func (h *brokerTestHandle) Cancel() agent.CancelResult {
 	h.cancelCalls.Add(1)
 	if h.cancelFn != nil {

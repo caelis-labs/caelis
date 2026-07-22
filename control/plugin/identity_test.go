@@ -57,6 +57,18 @@ func TestSamePluginRoot(t *testing.T) {
 	}
 }
 
+func TestPluginConfigIndexByIDTrimsAndFoldsCase(t *testing.T) {
+	t.Parallel()
+
+	configs := []Config{{ID: " DrawIO "}, {ID: "other"}}
+	if got := pluginConfigIndexByID(configs, " drawio "); got != 0 {
+		t.Fatalf("pluginConfigIndexByID() = %d, want 0", got)
+	}
+	if got := pluginConfigIndexByID(configs, "missing"); got != -1 {
+		t.Fatalf("pluginConfigIndexByID(missing) = %d, want -1", got)
+	}
+}
+
 func TestUpsertLocalPluginConfigMatchesByIDOnly(t *testing.T) {
 	t.Parallel()
 

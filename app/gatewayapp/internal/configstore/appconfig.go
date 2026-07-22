@@ -9,6 +9,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/control/plugin"
 )
 
 // SchemaVersionV2 is the first AppConfig schema with one ModelProfile catalog
@@ -121,8 +122,8 @@ func Normalize(doc AppConfig) AppConfig {
 	doc.AgentBindings = agentbinding.NormalizeConfiguration(doc.AgentBindings)
 	doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
-	doc.Plugins = DedupePluginConfigs(doc.Plugins)
-	doc.PluginMarketplaces = DedupeMarketplaceConfigs(doc.PluginMarketplaces)
+	doc.Plugins = plugin.DedupeConfigs(doc.Plugins)
+	doc.PluginMarketplaces = plugin.DedupeMarketplaceConfigs(doc.PluginMarketplaces)
 	return doc
 }
 
@@ -212,14 +213,14 @@ func validateCurrentRecordIdentities(doc AppConfig) error {
 
 	pluginIDs := make(map[string]struct{}, len(doc.Plugins))
 	for _, raw := range doc.Plugins {
-		id := strings.ToLower(strings.TrimSpace(NormalizePluginConfig(raw).ID))
+		id := strings.ToLower(strings.TrimSpace(plugin.NormalizeConfig(raw).ID))
 		if id != "" && recordIdentityExists(pluginIDs, id) {
 			return fmt.Errorf("gatewayapp: duplicate plugin %q", id)
 		}
 	}
 	marketplaceNames := make(map[string]struct{}, len(doc.PluginMarketplaces))
 	for _, raw := range doc.PluginMarketplaces {
-		name := strings.ToLower(strings.TrimSpace(NormalizeMarketplaceConfig(raw).Name))
+		name := strings.ToLower(strings.TrimSpace(plugin.NormalizeMarketplaceConfig(raw).Name))
 		if name != "" && recordIdentityExists(marketplaceNames, name) {
 			return fmt.Errorf("gatewayapp: duplicate plugin marketplace %q", name)
 		}

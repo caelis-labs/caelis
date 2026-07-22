@@ -19,9 +19,15 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 	}{
 		{
 			name:       "ports reject repository internals",
-			rel:        "ports/gateway/service.go",
+			rel:        "ports/controlcommand/registry.go",
 			importPath: modulePath + "/internal/kernel",
 			want:       "ports must not depend on internal packages",
+		},
+		{
+			name:       "deleted gateway port retains replacement",
+			rel:        "app/gatewayapp/stack.go",
+			importPath: modulePath + "/ports/gateway",
+			want:       "production code must not depend on ports/gateway; use internal/kernel",
 		},
 		{
 			name:       "internal kernel rejects implementation packages",
@@ -153,15 +159,15 @@ func TestSemanticBoundaryRuleRejectsSurfaceGatewayEventConsumption(t *testing.T)
 	const modulePath = "github.com/caelis-labs/caelis"
 	source := `package demo
 
-import "github.com/caelis-labs/caelis/ports/gateway"
+import "github.com/caelis-labs/caelis/internal/kernel"
 
-func consume(event gateway.Event) string {
+func consume(event kernel.Event) string {
 	return string(event.Kind)
 }
 `
 	rule, subject, _ := semanticRuleForSource(t, "surfaces/gui/demo.go", source, modulePath)
-	if !strings.Contains(rule, "eventstream.Envelope") || subject != "gateway.Event" {
-		t.Fatalf("semantic rule = (%q, %q), want gateway.Event surface rejection", rule, subject)
+	if !strings.Contains(rule, "eventstream.Envelope") || subject != "kernel.Event" {
+		t.Fatalf("semantic rule = (%q, %q), want kernel.Event surface rejection", rule, subject)
 	}
 }
 
@@ -367,9 +373,10 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			wantSub: "impl/policy",
 		},
 		{
-			name: "retained ports gateway path passes",
-			rel:  "ports/gateway/types.go",
-			want: "",
+			name:    "deleted ports gateway path fails",
+			rel:     "ports/gateway/types.go",
+			want:    "must not recreate ports/gateway; current Control gateway contracts belong to internal/kernel",
+			wantSub: "ports/gateway",
 		},
 		{
 			name:    "deleted ports plugin path fails",

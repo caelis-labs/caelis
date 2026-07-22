@@ -11,7 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 func (d *Adapter) StartAgentRun(ctx context.Context, target string, prompt string, attachments []Attachment) (Turn, error) {
@@ -80,7 +80,7 @@ func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequ
 	}
 	labelBase := firstNonEmpty(req.LabelBase, agent)
 	label := d.allocateSideAgentLabel(ctx, activeSession.SessionRef, labelBase)
-	startReq := gateway.StartParticipantRequest{
+	startReq := kernel.StartParticipantRequest{
 		SessionRef:   activeSession.SessionRef,
 		BindingKey:   d.bindingKey,
 		Agent:        agent,
@@ -94,7 +94,7 @@ func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequ
 		ContentParts: contentParts,
 	}
 	if req.Transient {
-		startReq.Lifecycle = gateway.ParticipantLifecycleTransient
+		startReq.Lifecycle = kernel.ParticipantLifecycleTransient
 		startReq.DetachSource = "side_agent_complete"
 	}
 
@@ -127,7 +127,7 @@ func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequ
 func (d *Adapter) allocateSideAgentLabel(ctx context.Context, ref session.SessionRef, agent string) string {
 	used := map[string]struct{}{}
 	if gw, err := d.gatewayControlPlane(); err == nil {
-		if state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref}); err == nil {
+		if state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: ref}); err == nil {
 			for _, participant := range state.Participants {
 				label := taskapi.NormalizeHandle(participant.Label)
 				if label != "" {
@@ -161,7 +161,7 @@ func (d *Adapter) ContinueAgentRun(ctx context.Context, handle string, prompt st
 	if err != nil {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: establish sidecar feed boundary: %w", err)
 	}
-	result, err := gw.PromptParticipant(ctx, gateway.PromptParticipantRequest{
+	result, err := gw.PromptParticipant(ctx, kernel.PromptParticipantRequest{
 		SessionRef:    activeSession.SessionRef,
 		BindingKey:    d.bindingKey,
 		ParticipantID: participantID,

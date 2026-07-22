@@ -15,7 +15,6 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/plugin"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
 func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
@@ -44,7 +43,7 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 	}
 	stack.gateway = gw
 
-	handle, err := stack.currentGateway().BeginTurn(ctx, gateway.BeginTurnRequest{
+	handle, err := stack.currentGateway().BeginTurn(ctx, kernelimpl.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      "hold active",
 	})
@@ -252,7 +251,7 @@ func TestRebuildGatewayRejectsActiveTurnBeforePlanLoad(t *testing.T) {
 	}
 	stack.gateway = gw
 
-	handle, err := stack.currentGateway().BeginTurn(ctx, gateway.BeginTurnRequest{
+	handle, err := stack.currentGateway().BeginTurn(ctx, kernelimpl.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "hold active",
 	})
@@ -384,7 +383,7 @@ func TestInstallGatewayRuntimeBundleRejectsLateActiveTurnAndClosesBundle(t *test
 	}
 	stack.gateway = oldGateway
 
-	handle, err := stack.currentGateway().BeginTurn(ctx, gateway.BeginTurnRequest{
+	handle, err := stack.currentGateway().BeginTurn(ctx, kernelimpl.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "hold active",
 	})
@@ -496,8 +495,8 @@ func poisonConfigStorePath(t *testing.T, stack *Stack) {
 
 type blockingResolver struct{}
 
-func (blockingResolver) ResolveTurn(context.Context, gateway.TurnIntent) (gateway.ResolvedTurn, error) {
-	return gateway.ResolvedTurn{RunRequest: agent.RunRequest{}}, nil
+func (blockingResolver) ResolveTurn(context.Context, kernelimpl.TurnIntent) (kernelimpl.ResolvedTurn, error) {
+	return kernelimpl.ResolvedTurn{RunRequest: agent.RunRequest{}}, nil
 }
 
 type blockingRuntime struct {

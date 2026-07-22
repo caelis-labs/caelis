@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 // SetSessionMode persists one per-session approval routing mode override for
@@ -27,7 +27,7 @@ func (s *Stack) SetSessionMode(ctx context.Context, ref session.SessionRef, mode
 		if next == nil {
 			next = map[string]any{}
 		}
-		next[gateway.StateCurrentApprovalMode] = normalized
+		next[kernel.StateCurrentApprovalMode] = normalized
 		return next, nil
 	})
 	if err != nil {
@@ -85,10 +85,10 @@ func (s *Stack) SessionRuntimeState(ctx context.Context, ref session.SessionRef)
 	if err != nil {
 		return SessionRuntimeState{}, err
 	}
-	if key := gateway.UnsupportedLegacyStateKey(state); key != "" {
+	if key := kernel.UnsupportedLegacyStateKey(state); key != "" {
 		return SessionRuntimeState{}, fmt.Errorf("gatewayapp: %w: session state contains legacy key %q", session.ErrUnsupportedLegacyFormat, key)
 	}
-	modelRef := gateway.CurrentModelAlias(state)
+	modelRef := kernel.CurrentModelAlias(state)
 	modelID := ""
 	modelAlias := ""
 	if s.lookup != nil && modelRef != "" {
@@ -100,9 +100,9 @@ func (s *Stack) SessionRuntimeState(ctx context.Context, ref session.SessionRef)
 	return SessionRuntimeState{
 		ModelID:         modelID,
 		ModelAlias:      modelAlias,
-		ReasoningEffort: gateway.CurrentReasoningEffort(state),
-		SessionMode:     gateway.CurrentSessionModeOrDefault(state, s.runtime.ApprovalMode),
-		PolicyProfile:   firstNonEmpty(gateway.CurrentPolicyProfile(state), policyProfile(s.runtime.PolicyProfile)),
+		ReasoningEffort: kernel.CurrentReasoningEffort(state),
+		SessionMode:     kernel.CurrentSessionModeOrDefault(state, s.runtime.ApprovalMode),
+		PolicyProfile:   firstNonEmpty(kernel.CurrentPolicyProfile(state), policyProfile(s.runtime.PolicyProfile)),
 	}, nil
 }
 

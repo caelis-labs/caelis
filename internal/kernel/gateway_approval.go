@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	gatewayapi "github.com/caelis-labs/caelis/ports/gateway"
 )
 
 type approvalRequesterFunc func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)
@@ -245,7 +244,7 @@ func (g *Gateway) approvalReviewTraceSessionAccounting(ctx context.Context, trac
 		if event == nil || strings.TrimSpace(event.ID) != assistantEventID {
 			continue
 		}
-		return gatewayapi.UsageSnapshotFromSessionEvent(event), approvalReviewAccountingInvocationFromSessionEvent(event), nil
+		return UsageSnapshotFromSessionEvent(event), approvalReviewAccountingInvocationFromSessionEvent(event), nil
 	}
 	return nil, nil, nil
 }
@@ -281,7 +280,7 @@ func (g *Gateway) persistApprovalReviewSessionAccounting(ctx context.Context, re
 		if invocation != nil && strings.TrimSpace(invocation.Provider) != "" {
 			existingProvider = strings.TrimSpace(invocation.Provider)
 		}
-		if existing := gatewayapi.UsageSnapshotFromMapForProvider(anyMapValue(accounting["auto_review"]), existingProvider); existing != nil {
+		if existing := UsageSnapshotFromMapForProvider(anyMapValue(accounting["auto_review"]), existingProvider); existing != nil {
 			total = *existing
 		}
 		addUsageSnapshot(&total, usageCopy)
@@ -317,7 +316,7 @@ func addUsageByModelState(existing any, invocation session.EventInvocation, usag
 			continue
 		}
 		total := UsageSnapshot{}
-		if existingUsage := gatewayapi.UsageSnapshotFromMapForProvider(anyMapValue(item["usage"]), invocation.Provider); existingUsage != nil {
+		if existingUsage := UsageSnapshotFromMapForProvider(anyMapValue(item["usage"]), invocation.Provider); existingUsage != nil {
 			total = *existingUsage
 		}
 		addUsageSnapshot(&total, usage)

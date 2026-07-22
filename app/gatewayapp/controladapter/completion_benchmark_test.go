@@ -7,18 +7,18 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 type completionBenchmarkGateway struct {
 	sessions session.Service
 }
 
-func (g completionBenchmarkGateway) ResumeSession(context.Context, gateway.ResumeSessionRequest) (session.LoadedSession, error) {
+func (g completionBenchmarkGateway) ResumeSession(context.Context, kernel.ResumeSessionRequest) (session.LoadedSession, error) {
 	return session.LoadedSession{}, nil
 }
 
-func (g completionBenchmarkGateway) ListSessions(ctx context.Context, req gateway.ListSessionsRequest) (session.SessionList, error) {
+func (g completionBenchmarkGateway) ListSessions(ctx context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
 	return g.sessions.ListSessions(ctx, session.ListSessionsRequest{
 		AppName:      req.AppName,
 		UserID:       req.UserID,

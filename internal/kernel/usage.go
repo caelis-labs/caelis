@@ -1,4 +1,4 @@
-package gateway
+package kernel
 
 import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"

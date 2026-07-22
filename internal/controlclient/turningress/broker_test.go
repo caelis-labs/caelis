@@ -8,7 +8,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -242,7 +242,7 @@ func (*barrierTestHandle) CreatedAt() time.Time             { return time.Unix(1
 func (h *barrierTestHandle) ACPEvents() <-chan eventstream.Envelope {
 	return h.events
 }
-func (*barrierTestHandle) Submit(context.Context, gateway.SubmitRequest) error { return nil }
+func (*barrierTestHandle) Submit(context.Context, kernel.SubmitRequest) error { return nil }
 func (*barrierTestHandle) Cancel() agent.CancelResult {
 	return agent.CancelResult{Status: agent.CancelStatusCancelled}
 }

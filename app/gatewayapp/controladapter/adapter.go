@@ -9,7 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 type Adapter struct {
@@ -250,9 +250,9 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 		if !isBuiltInControllerSession(activeSession) || !activeKernelTurnForSession(gw.ActiveTurns(), activeSession.SessionRef) {
 			return nil, noActiveTurnSubmissionError()
 		}
-		err := gw.SubmitActiveTurn(ctx, gateway.SubmitActiveTurnRequest{
+		err := gw.SubmitActiveTurn(ctx, kernel.SubmitActiveTurnRequest{
 			SessionRef:   activeSession.SessionRef,
-			Kind:         gateway.SubmissionKindConversation,
+			Kind:         kernel.SubmissionKindConversation,
 			Text:         rawInput,
 			DisplayText:  displayInput,
 			ContentParts: contentParts,
@@ -269,7 +269,7 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 	if err != nil {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: establish turn feed boundary: %w", err)
 	}
-	result, err := gw.BeginTurn(ctx, gateway.BeginTurnRequest{
+	result, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
 		SessionRef:   activeSession.SessionRef,
 		Input:        rawInput,
 		DisplayInput: displayInput,
@@ -298,15 +298,15 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 	return d.newGatewayTurnWithSubscription(result.Handle, feedSubscription, true, ctx), nil
 }
 
-func activeKernelTurnForSession(active []gateway.ActiveTurnState, ref session.SessionRef) bool {
+func activeKernelTurnForSession(active []kernel.ActiveTurnState, ref session.SessionRef) bool {
 	kind, ok := activeTurnKindForSession(active, ref)
 	if !ok {
 		return false
 	}
-	return kind == "" || strings.EqualFold(kind, string(gateway.ActiveTurnKindKernel))
+	return kind == "" || strings.EqualFold(kind, string(kernel.ActiveTurnKindKernel))
 }
 
-func activeTurnKindForSession(active []gateway.ActiveTurnState, ref session.SessionRef) (string, bool) {
+func activeTurnKindForSession(active []kernel.ActiveTurnState, ref session.SessionRef) (string, bool) {
 	state, ok := activeTurnStateForSession(active, ref)
 	if !ok {
 		return "", false
@@ -314,17 +314,17 @@ func activeTurnKindForSession(active []gateway.ActiveTurnState, ref session.Sess
 	return strings.TrimSpace(string(state.Kind)), true
 }
 
-func activeTurnStateForSession(active []gateway.ActiveTurnState, ref session.SessionRef) (gateway.ActiveTurnState, bool) {
+func activeTurnStateForSession(active []kernel.ActiveTurnState, ref session.SessionRef) (kernel.ActiveTurnState, bool) {
 	sessionID := strings.TrimSpace(ref.SessionID)
 	if sessionID == "" {
-		return gateway.ActiveTurnState{}, false
+		return kernel.ActiveTurnState{}, false
 	}
 	for _, item := range active {
 		if strings.TrimSpace(item.SessionRef.SessionID) == sessionID {
 			return item, true
 		}
 	}
-	return gateway.ActiveTurnState{}, false
+	return kernel.ActiveTurnState{}, false
 }
 
 func isBuiltInControllerSession(activeSession session.Session) bool {
@@ -337,7 +337,7 @@ func isBuiltInControllerSession(activeSession session.Session) bool {
 }
 
 func noActiveTurnSubmissionError() error {
-	return gateway.NoActiveRunError("")
+	return kernel.NoActiveRunError("")
 }
 
 func (d *Adapter) Interrupt(ctx context.Context) error {
@@ -356,7 +356,7 @@ func (d *Adapter) Interrupt(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := gw.Interrupt(ctx, gateway.InterruptRequest{
+	if err := gw.Interrupt(ctx, kernel.InterruptRequest{
 		SessionRef: activeSession.SessionRef,
 		BindingKey: d.bindingKey,
 		Reason:     "tui interrupt",
@@ -426,7 +426,7 @@ func (d *Adapter) ListSessions(ctx context.Context, limit int) ([]ResumeCandidat
 	if err != nil {
 		return nil, err
 	}
-	result, err := gw.ListSessions(ctx, gateway.ListSessionsRequest{
+	result, err := gw.ListSessions(ctx, kernel.ListSessionsRequest{
 		AppName:      d.stack.Session.AppName,
 		UserID:       d.stack.Session.UserID,
 		WorkspaceKey: d.stack.Session.Workspace.Key,
@@ -474,7 +474,7 @@ func (d *Adapter) AgentStatus(ctx context.Context) (AgentStatusSnapshot, error) 
 	if err != nil {
 		return AgentStatusSnapshot{}, err
 	}
-	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{
+	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{
 		SessionRef: activeSession.SessionRef,
 	})
 	if err != nil {
@@ -515,7 +515,7 @@ func (d *Adapter) AgentStatus(ctx context.Context) (AgentStatusSnapshot, error) 
 	return status, nil
 }
 
-func agentParticipantSnapshot(participant gateway.ParticipantState) AgentParticipantSnapshot {
+func agentParticipantSnapshot(participant kernel.ParticipantState) AgentParticipantSnapshot {
 	return AgentParticipantSnapshot{
 		ID:        strings.TrimSpace(participant.ID),
 		Label:     strings.TrimSpace(firstNonEmpty(participant.Label, participant.ID)),
@@ -533,7 +533,7 @@ func (d *Adapter) HandoffAgent(ctx context.Context, target string) (AgentStatusS
 		return AgentStatusSnapshot{}, err
 	}
 	target = strings.TrimSpace(target)
-	req := gateway.HandoffControllerRequest{
+	req := kernel.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		BindingKey: d.bindingKey,
 		Source:     "user_agent_handoff",

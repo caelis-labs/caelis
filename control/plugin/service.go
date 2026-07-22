@@ -16,8 +16,9 @@ import (
 // ErrHostUnavailable reports use of a Service that has no application host.
 var ErrHostUnavailable = errors.New("plugin service: host is unavailable")
 
-// Service owns Plugin discovery, lifecycle, installation, and marketplace
-// operations while delegating persistence and Runtime replacement to its host.
+// Service owns Plugin discovery, lifecycle, installation, marketplace
+// operations, and the Control Plugin Info view while delegating the product
+// data root, persistence, Runtime replacement, and live MCP probing to its host.
 type Service struct {
 	host Host
 }
@@ -245,7 +246,7 @@ func (s Service) addPath(ctx context.Context, path string, opts pluginAddPathOpt
 	var info Info
 	if err := s.updateState(ctx, Mutation{
 		GuardAction:   "add plugin",
-		FailureAction: "rebuild gateway after adding plugin",
+		FailureAction: "add plugin",
 		Reconfigure:   true,
 		Apply: func(state *State) error {
 			switch opts.UpsertMode {
@@ -268,14 +269,14 @@ func (s Service) addPath(ctx context.Context, path string, opts pluginAddPathOpt
 	return info, nil
 }
 
-// Enable marks a registered plugin as enabled and rebuilds the gateway.
-// If the rebuild fails the config is rolled back.
+// Enable marks a registered plugin as enabled and requests Runtime
+// reconfiguration. If host reconfiguration fails, the config is rolled back.
 func (s Service) Enable(ctx context.Context, id string) (Info, error) {
 	return s.setEnabled(ctx, id, true)
 }
 
-// Disable marks a registered plugin as disabled and rebuilds the gateway.
-// If the rebuild fails the config is rolled back.
+// Disable marks a registered plugin as disabled and requests Runtime
+// reconfiguration. If host reconfiguration fails, the config is rolled back.
 func (s Service) Disable(ctx context.Context, id string) (Info, error) {
 	return s.setEnabled(ctx, id, false)
 }
@@ -293,9 +294,9 @@ func (s Service) setEnabled(ctx context.Context, id string, enabled bool) (Info,
 		FailureAction: action,
 		Reconfigure:   true,
 		Apply: func(state *State) error {
-			foundIdx, err := findPluginConfigIndex(*state, id)
-			if err != nil {
-				return err
+			foundIdx := pluginConfigIndexByID(state.Plugins, id)
+			if foundIdx < 0 {
+				return fmt.Errorf("plugin service: plugin not found: %s", id)
 			}
 			state.Plugins[foundIdx].Enabled = enabled
 			return nil
@@ -312,20 +313,20 @@ func (s Service) setEnabled(ctx context.Context, id string, enabled bool) (Info,
 	return info, nil
 }
 
-// Remove removes a plugin from the registry and rebuilds the gateway.
-// If the rebuild fails the config is rolled back.
+// Remove removes a plugin from the registry and requests Runtime
+// reconfiguration. If host reconfiguration fails, the config is rolled back.
 func (s Service) Remove(ctx context.Context, id string) error {
 	id = strings.ToLower(strings.TrimSpace(id))
 
 	var removed Config
 	if err := s.updateState(ctx, Mutation{
 		GuardAction:   "remove plugin",
-		FailureAction: "rebuild gateway after removing plugin",
+		FailureAction: "remove plugin",
 		Reconfigure:   true,
 		Apply: func(state *State) error {
-			foundIdx, err := findPluginConfigIndex(*state, id)
-			if err != nil {
-				return err
+			foundIdx := pluginConfigIndexByID(state.Plugins, id)
+			if foundIdx < 0 {
+				return fmt.Errorf("plugin service: plugin not found: %s", id)
 			}
 			removed = state.Plugins[foundIdx]
 			state.Plugins = append(state.Plugins[:foundIdx], state.Plugins[foundIdx+1:]...)
@@ -353,9 +354,9 @@ func (s Service) Inspect(ctx context.Context, id string) (Info, error) {
 }
 
 func (s Service) inspectState(doc State, id string) (Info, error) {
-	foundIdx, err := findPluginConfigIndex(doc, id)
-	if err != nil {
-		return Info{}, err
+	foundIdx := pluginConfigIndexByID(doc.Plugins, id)
+	if foundIdx < 0 {
+		return Info{}, fmt.Errorf("plugin service: plugin not found: %s", id)
 	}
 
 	pCfg := doc.Plugins[foundIdx]
@@ -363,16 +364,6 @@ func (s Service) inspectState(doc State, id string) (Info, error) {
 	s.enrichPluginInfoFromManifest(&info, pCfg)
 
 	return info, nil
-}
-
-func findPluginConfigIndex(doc State, id string) (int, error) {
-	id = strings.ToLower(strings.TrimSpace(id))
-	for i, pCfg := range doc.Plugins {
-		if strings.ToLower(strings.TrimSpace(pCfg.ID)) == id {
-			return i, nil
-		}
-	}
-	return -1, fmt.Errorf("plugin service: plugin not found: %s", id)
 }
 
 func (s Service) pluginInfoFromConfig(pCfg Config) Info {

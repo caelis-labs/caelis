@@ -30,6 +30,29 @@ func CurrentApprovalModeOrDefault(state map[string]any, fallback ApprovalMode) A
 	return NormalizeApprovalMode(string(fallback))
 }
 
+type ApprovalOption = approval.Option
+type ApprovalStatus = approval.Status
+
+const (
+	ApprovalStatusPending  = approval.StatusPending
+	ApprovalStatusApproved = approval.StatusApproved
+	ApprovalStatusRejected = approval.StatusRejected
+	ApprovalStatusSelected = approval.StatusSelected
+)
+
+type ApprovalReviewStatus = approval.ReviewStatus
+
+const (
+	ApprovalReviewStatusInProgress = approval.ReviewStatusInProgress
+	ApprovalReviewStatusApproved   = approval.ReviewStatusApproved
+	ApprovalReviewStatusDenied     = approval.ReviewStatusDenied
+	ApprovalReviewStatusTimedOut   = approval.ReviewStatusTimedOut
+	ApprovalReviewStatusFailed     = approval.ReviewStatusFailed
+)
+
+type ApprovalPayload = approval.Payload
+type ApprovalReviewTrace = approval.ReviewTrace
+
 type ApprovalReviewRequest = approval.Request
 type ApprovalReviewResult = approval.Decision
 type ApprovalReviewer = approval.Reviewer

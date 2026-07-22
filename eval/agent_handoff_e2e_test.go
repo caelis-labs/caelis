@@ -20,8 +20,8 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlassembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	controlpromptrouter "github.com/caelis-labs/caelis/internal/controlpromptrouter"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
-	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -134,7 +134,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	if got := strings.TrimSpace(directOutput); got != "opus owns this turn" {
 		t.Fatalf("direct Agent output = %q, want %q", got, "opus owns this turn")
 	}
-	state, err := stack.KernelControlPlane().ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: active.SessionRef})
+	state, err := stack.KernelControlPlane().ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatalf("ControlPlaneState(after profile run) error = %v", err)
 	}
@@ -167,7 +167,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	if _, err := driver.HandoffAgent(ctx, agentID); err != nil {
 		t.Fatalf("HandoffAgent(%s) error = %v", agentID, err)
 	}
-	state, err = stack.KernelControlPlane().ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: active.SessionRef})
+	state, err = stack.KernelControlPlane().ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatalf("ControlPlaneState(after handoff) error = %v", err)
 	}
@@ -193,7 +193,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	if _, err := driver.HandoffAgent(ctx, "local"); err != nil {
 		t.Fatalf("HandoffAgent(local) error = %v", err)
 	}
-	state, err = stack.KernelControlPlane().ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: active.SessionRef})
+	state, err = stack.KernelControlPlane().ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatalf("ControlPlaneState(after return) error = %v", err)
 	}

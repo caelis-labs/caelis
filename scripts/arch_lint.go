@@ -148,7 +148,7 @@ func surfaceGatewayConsumptionRule(rel string, file *ast.File, fset *token.FileS
 	if !strings.HasPrefix(rel, "surfaces/") || strings.HasSuffix(rel, "_test.go") || file == nil {
 		return "", "", 0
 	}
-	gatewayNames := importNames(file, modulePath+"/ports/gateway")
+	gatewayNames := importNames(file, modulePath+"/internal/kernel")
 	if len(gatewayNames) == 0 {
 		return "", "", 0
 	}
@@ -172,19 +172,19 @@ func surfaceGatewayConsumptionRule(rel string, file *ast.File, fset *token.FileS
 			switch selector.Sel.Name {
 			case "Event":
 				subject = ident.Name + "." + selector.Sel.Name
-				rule = "surfaces must consume eventstream.Envelope instead of gateway.Event"
+				rule = "surfaces must consume eventstream.Envelope instead of kernel.Event"
 				line = fset.Position(selector.Pos()).Line
 				return false
 			case "AssistantText", "PromptTokens", "CompletionTokens", "ReasoningTokens", "TotalTokens":
 				subject = ident.Name + "." + selector.Sel.Name
-				rule = "surfaces must parse eventstream.Envelope instead of gateway payload helpers"
+				rule = "surfaces must parse eventstream.Envelope instead of kernel payload helpers"
 				line = fset.Position(selector.Pos()).Line
 				return false
 			}
 		}
 		if selector.Sel.Name == "Events" && gatewayTurnHandles[ident.Name] {
 			subject = ident.Name + ".Events()"
-			rule = "surfaces must consume ACPEventsFromGatewayHandle/eventstream.Envelope instead of gateway.TurnHandle.Events"
+			rule = "surfaces must consume ACPEventsFromGatewayHandle/eventstream.Envelope instead of kernel.TurnHandle.Events"
 			line = fset.Position(selector.Pos()).Line
 			return false
 		}
@@ -470,6 +470,9 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		return ""
 	}
 	target := strings.TrimPrefix(importPath, modulePath+"/")
+	if target == "ports/gateway" || strings.HasPrefix(target, "ports/gateway/") {
+		return "production code must not depend on ports/gateway; use internal/kernel"
+	}
 	if temporaryArchitectureException(rel, target) {
 		return ""
 	}
@@ -508,9 +511,6 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	case strings.HasPrefix(rel, "agent-sdk/"):
 		if startsWithAny(target, "app/", "surfaces/", "protocol/acp/", "internal/acpagentbridge/") {
 			return "agent-sdk must not depend on product-host, surface, ACP protocol, or ACP implementation packages"
-		}
-		if target == "ports/gateway" || strings.HasPrefix(target, "ports/gateway/") {
-			return "agent-sdk must not depend on ports/gateway"
 		}
 		if leaf := agentSDKSandboxMovedLeaf(rel); leaf != "" {
 			if rule := agentSDKSandboxMovedLeafForbiddenDependency(leaf, target); rule != "" {
@@ -662,6 +662,8 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "", "", 0
 	}
 	switch {
+	case pkg == "ports/gateway" || strings.HasPrefix(pkg, "ports/gateway/"):
+		return "must not recreate ports/gateway; current Control gateway contracts belong to internal/kernel", pkg, 1
 	case pkg == "impl/model/catalog" || strings.HasPrefix(pkg, "impl/model/catalog/"):
 		return "must not recreate impl/model/catalog; concrete model catalogs belong to Control", pkg, 1
 	case pkg == "impl/model/internal/codefreecaps" || strings.HasPrefix(pkg, "impl/model/internal/codefreecaps/"):

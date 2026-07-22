@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
@@ -62,7 +62,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 
-	updated, err := stack.KernelControlPlane().HandoffController(context.Background(), gateway.HandoffControllerRequest{
+	updated, err := stack.KernelControlPlane().HandoffController(context.Background(), kernel.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,
 		Agent:      "codex",
@@ -76,7 +76,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 		t.Fatalf("controller kind = %q, want %q", updated.Controller.Kind, session.ControllerKindACP)
 	}
 
-	state, err := stack.KernelControlPlane().ControlPlaneState(context.Background(), gateway.ControlPlaneStateRequest{
+	state, err := stack.KernelControlPlane().ControlPlaneState(context.Background(), kernel.ControlPlaneStateRequest{
 		SessionRef: activeSession.SessionRef,
 	})
 	if err != nil {
@@ -179,7 +179,7 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	updated, err := stack.KernelControlPlane().HandoffController(context.Background(), gateway.HandoffControllerRequest{
+	updated, err := stack.KernelControlPlane().HandoffController(context.Background(), kernel.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,
 		Agent:      "codex",
@@ -191,7 +191,7 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	result, err := stack.KernelTurns().BeginTurn(ctx, gateway.BeginTurnRequest{
+	result, err := stack.KernelTurns().BeginTurn(ctx, kernel.BeginTurnRequest{
 		SessionRef: updated.SessionRef,
 		Input:      "run a simple command",
 		Surface:    "headless-acp-command-shape-e2e",

@@ -16,7 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
@@ -94,7 +94,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 	claudeAgent := connectClaudeAgentForE2E(ctx, t, stack)
-	updated, err := stack.KernelControlPlane().HandoffController(ctx, gateway.HandoffControllerRequest{
+	updated, err := stack.KernelControlPlane().HandoffController(ctx, kernel.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,
 		Agent:      claudeAgent,
@@ -124,7 +124,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 		t.Fatalf("RunOnce(first Claude turn) output = %q, want marker %q", result.Output, marker)
 	}
 
-	resumed, err := stack.KernelControlPlane().HandoffController(ctx, gateway.HandoffControllerRequest{
+	resumed, err := stack.KernelControlPlane().HandoffController(ctx, kernel.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,
 		Agent:      claudeAgent,

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
-	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -280,7 +280,7 @@ func TestGatewayTurnSubmitApprovalForwardsRequestID(t *testing.T) {
 		t.Fatalf("gateway submissions = %#v, want one", handle.submitted)
 	}
 	got := handle.submitted[0]
-	if got.Kind != gateway.SubmissionKindApproval || got.Approval == nil {
+	if got.Kind != kernel.SubmissionKindApproval || got.Approval == nil {
 		t.Fatalf("gateway submission = %#v, want approval", got)
 	}
 	if got.Approval.RequestID != "approval-child-1" || got.Approval.OptionID != "allow_once" || got.Approval.Reason != "approved" || got.Approval.ReviewText != "reviewed" {
@@ -290,7 +290,7 @@ func TestGatewayTurnSubmitApprovalForwardsRequestID(t *testing.T) {
 
 type testGatewayTurnHandle struct {
 	acpEvents <-chan eventstream.Envelope
-	submitted []gateway.SubmitRequest
+	submitted []kernel.SubmitRequest
 }
 
 type errorFeedSubscription struct {
@@ -320,12 +320,12 @@ func (h *testGatewayTurnHandle) SessionRef() session.SessionRef {
 	return session.SessionRef{SessionID: "session-1"}
 }
 func (h *testGatewayTurnHandle) CreatedAt() time.Time { return time.Time{} }
-func (h *testGatewayTurnHandle) Submit(_ context.Context, req gateway.SubmitRequest) error {
+func (h *testGatewayTurnHandle) Submit(_ context.Context, req kernel.SubmitRequest) error {
 	h.submitted = append(h.submitted, req)
 	return nil
 }
-func (h *testGatewayTurnHandle) Cancel() gateway.CancelResult { return gateway.CancelResult{} }
-func (h *testGatewayTurnHandle) Close() error                 { return nil }
+func (h *testGatewayTurnHandle) Cancel() kernel.CancelResult { return kernel.CancelResult{} }
+func (h *testGatewayTurnHandle) Close() error                { return nil }
 func (h *testGatewayTurnHandle) ACPEvents() <-chan eventstream.Envelope {
 	return h.acpEvents
 }

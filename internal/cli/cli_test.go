@@ -15,10 +15,10 @@ import (
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
 	"github.com/caelis-labs/caelis/internal/updater"
 	"github.com/caelis-labs/caelis/internal/version"
-	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -405,7 +405,7 @@ func TestStreamHandleIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 		{
 			Kind: eventstream.KindApprovalReview,
 			ApprovalReview: &eventstream.ApprovalReview{
-				Status: string(gateway.ApprovalReviewStatusInProgress),
+				Status: string(kernel.ApprovalReviewStatusInProgress),
 			},
 		},
 		{
@@ -644,7 +644,7 @@ func TestRunSandboxCleanSubcommandAliasesReset(t *testing.T) {
 
 type fakeHandle struct {
 	events    chan eventstream.Envelope
-	submits   []gateway.SubmitRequest
+	submits   []kernel.SubmitRequest
 	closed    bool
 	cancelled bool
 }
@@ -666,13 +666,13 @@ func (h *fakeHandle) SessionRef() session.SessionRef {
 }
 func (h *fakeHandle) CreatedAt() time.Time                   { return time.Time{} }
 func (h *fakeHandle) ACPEvents() <-chan eventstream.Envelope { return h.events }
-func (h *fakeHandle) Submit(_ context.Context, req gateway.SubmitRequest) error {
+func (h *fakeHandle) Submit(_ context.Context, req kernel.SubmitRequest) error {
 	h.submits = append(h.submits, req)
 	return nil
 }
-func (h *fakeHandle) Cancel() gateway.CancelResult {
+func (h *fakeHandle) Cancel() kernel.CancelResult {
 	h.cancelled = true
-	return gateway.CancelResult{Status: gateway.CancelStatusCancelled}
+	return kernel.CancelResult{Status: kernel.CancelStatusCancelled}
 }
 func (h *fakeHandle) Close() error {
 	h.closed = true

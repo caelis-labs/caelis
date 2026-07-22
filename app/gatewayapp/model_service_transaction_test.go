@@ -16,7 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelprofile"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 func TestConnectStoresProviderAPIKeyBehindOpaqueReference(t *testing.T) {
@@ -161,7 +161,7 @@ func TestUseModelRollsForwardAfterCommittedConfigWriteFault(t *testing.T) {
 	if stateErr != nil {
 		t.Fatal(stateErr)
 	}
-	if got := gateway.CurrentModelAlias(state); got != modelID {
+	if got := kernel.CurrentModelAlias(state); got != modelID {
 		t.Fatalf("Session model alias = %q, want %q", got, modelID)
 	}
 }
@@ -330,7 +330,7 @@ func TestDeleteModelRollsForwardAfterCommittedConfigWriteFault(t *testing.T) {
 			if stateErr != nil {
 				t.Fatal(stateErr)
 			}
-			if got := gateway.CurrentModelAlias(state); got != "" {
+			if got := kernel.CurrentModelAlias(state); got != "" {
 				t.Fatalf("Session retained deleted model alias %q", got)
 			}
 		})
@@ -436,7 +436,7 @@ func TestUseModelRollsBackConfigWhenSessionStateUpdateFails(t *testing.T) {
 	if stateErr != nil {
 		t.Fatal(stateErr)
 	}
-	if got, _ := state[gateway.StateCurrentModelAlias].(string); got != originalID {
+	if got, _ := state[kernel.StateCurrentModelAlias].(string); got != originalID {
 		t.Fatalf("session model state = %q, want %q", got, originalID)
 	}
 }

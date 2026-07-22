@@ -9,10 +9,10 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func (r *guardianApprovalReviewer) reviewSessionFor(ctx context.Context, req gateway.ApprovalReviewRequest, activeSession session.Session) (*systemManagedAgentSession, error) {
+func (r *guardianApprovalReviewer) reviewSessionFor(ctx context.Context, req kernel.ApprovalReviewRequest, activeSession session.Session) (*systemManagedAgentSession, error) {
 	if r == nil || r.systemSessions == nil {
 		return nil, fmt.Errorf("approval reviewer requires session history")
 	}

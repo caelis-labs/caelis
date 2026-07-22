@@ -19,9 +19,9 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/version"
 	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
-	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
@@ -421,7 +421,7 @@ func renderConfiguredModelText(alias string, provider string, model string) stri
 	return provider + "/" + model
 }
 
-func streamHandle(ctx context.Context, handle gateway.TurnHandle, stdout io.Writer, stderr io.Writer) error {
+func streamHandle(ctx context.Context, handle kernel.TurnHandle, stdout io.Writer, stderr io.Writer) error {
 	if handle == nil {
 		return nil
 	}
@@ -434,12 +434,12 @@ func streamHandle(ctx context.Context, handle gateway.TurnHandle, stdout io.Writ
 		}
 		if env.Kind == eventstream.KindRequestPermission {
 			fmt.Fprintln(stderr, "[approval] denied by default")
-			if err := handle.Submit(ctx, gateway.SubmitRequest{
-				Kind: gateway.SubmissionKindApproval,
-				Approval: &gateway.ApprovalDecision{
+			if err := handle.Submit(ctx, kernel.SubmitRequest{
+				Kind: kernel.SubmissionKindApproval,
+				Approval: &kernel.ApprovalDecision{
 					RequestID: env.ApprovalRequestID,
 					Approved:  false,
-					Outcome:   string(gateway.ApprovalStatusRejected),
+					Outcome:   string(kernel.ApprovalStatusRejected),
 				},
 			}); err != nil {
 				return err

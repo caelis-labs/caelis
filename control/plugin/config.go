@@ -63,9 +63,11 @@ type Mutation struct {
 	AfterCommit   func(State) error
 }
 
-// Host is the narrow application seam required by the Control Plugin service.
-// UpdatePluginState must invoke Apply and AfterCommit synchronously according
-// to the Mutation contract.
+// Host supplies the application-owned environment and effect boundary required
+// by the Control Plugin service: the product data root for managed installs,
+// Plugin state persistence, fenced Runtime replacement and rollback, and a
+// read-only live MCP status probe. UpdatePluginState must invoke Apply and
+// AfterCommit synchronously according to the Mutation contract.
 type Host interface {
 	StoreDir() string
 	LoadPluginState(context.Context) (State, error)

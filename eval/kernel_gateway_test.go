@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -47,7 +47,7 @@ func TestGatewayProviderLiveReasoningBoundaryFromLocalConfigE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	result, err := stack.KernelTurns().BeginTurn(ctx, gateway.BeginTurnRequest{
+	result, err := stack.KernelTurns().BeginTurn(ctx, kernel.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "介绍一下你自己。",
 		Surface:    "cli-tui",

@@ -12,8 +12,8 @@ import (
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
-	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
 const resumeCompletionPageLimit = 200
@@ -71,7 +71,7 @@ func (d *Adapter) CompleteResume(ctx context.Context, query string, limit int) (
 	matched := make([]ResumeCandidate, 0, limit)
 	cursor := ""
 	for {
-		result, err := gw.ListSessions(ctx, gateway.ListSessionsRequest{
+		result, err := gw.ListSessions(ctx, kernel.ListSessionsRequest{
 			AppName: d.stack.Session.AppName, UserID: d.stack.Session.UserID,
 			WorkspaceKey: d.stack.Session.Workspace.Key,
 			Cursor:       cursor, Limit: resumeCompletionPageLimit,
@@ -471,7 +471,7 @@ func (d *Adapter) completeAgentParticipants(ctx context.Context, query string, l
 	if err != nil {
 		return nil, err
 	}
-	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{
+	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{
 		SessionRef: activeSession.SessionRef,
 	})
 	if err != nil {
@@ -566,7 +566,7 @@ func (d *Adapter) resolveParticipantID(ctx context.Context, ref session.SessionR
 	if err != nil {
 		return "", err
 	}
-	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref})
+	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: ref})
 	if err != nil {
 		return "", err
 	}

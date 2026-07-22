@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
@@ -527,7 +527,7 @@ func TestNewLocalStackRunsSessionStartHook(t *testing.T) {
 		t.Fatal("expected non-nil gateway from stack")
 	}
 
-	res, err := gw.BeginTurn(ctx, gateway.BeginTurnRequest{
+	res, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
 		SessionRef: sess.SessionRef,
 		Input:      "run turn",
 	})

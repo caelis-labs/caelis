@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 func TestNormalizeCompletionLimitAllowsPagedCompletion(t *testing.T) {
@@ -26,16 +26,16 @@ func TestNormalizeCompletionLimitAllowsPagedCompletion(t *testing.T) {
 }
 
 type pagedResumeCompletionGateway struct {
-	requests []gateway.ListSessionsRequest
+	requests []kernel.ListSessionsRequest
 	pages    map[string]session.SessionList
 	errors   map[string]error
 }
 
-func (g *pagedResumeCompletionGateway) ResumeSession(context.Context, gateway.ResumeSessionRequest) (session.LoadedSession, error) {
+func (g *pagedResumeCompletionGateway) ResumeSession(context.Context, kernel.ResumeSessionRequest) (session.LoadedSession, error) {
 	return session.LoadedSession{}, nil
 }
 
-func (g *pagedResumeCompletionGateway) ListSessions(_ context.Context, req gateway.ListSessionsRequest) (session.SessionList, error) {
+func (g *pagedResumeCompletionGateway) ListSessions(_ context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
 	g.requests = append(g.requests, req)
 	if err := g.errors[req.Cursor]; err != nil {
 		return session.SessionList{}, err

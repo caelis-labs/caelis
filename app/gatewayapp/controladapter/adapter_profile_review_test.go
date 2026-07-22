@@ -12,7 +12,7 @@ import (
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -112,20 +112,20 @@ func TestAdapterStartReviewUsesHiddenReviewerProfile(t *testing.T) {
 type reviewProfileGatewayService struct {
 	activeSubmitGatewayService
 	session    session.Session
-	handle     gateway.TurnHandle
-	attachReqs []gateway.AttachParticipantRequest
-	promptReqs []gateway.PromptParticipantRequest
-	detachReqs []gateway.DetachParticipantRequest
+	handle     kernel.TurnHandle
+	attachReqs []kernel.AttachParticipantRequest
+	promptReqs []kernel.PromptParticipantRequest
+	detachReqs []kernel.DetachParticipantRequest
 }
 
-func (*reviewProfileGatewayService) HandoffController(context.Context, gateway.HandoffControllerRequest) (session.Session, error) {
+func (*reviewProfileGatewayService) HandoffController(context.Context, kernel.HandoffControllerRequest) (session.Session, error) {
 	return session.Session{}, nil
 }
 
-func (g *reviewProfileGatewayService) ControlPlaneState(context.Context, gateway.ControlPlaneStateRequest) (gateway.ControlPlaneState, error) {
-	participants := make([]gateway.ParticipantState, 0, len(g.session.Participants))
+func (g *reviewProfileGatewayService) ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error) {
+	participants := make([]kernel.ParticipantState, 0, len(g.session.Participants))
 	for _, participant := range g.session.Participants {
-		participants = append(participants, gateway.ParticipantState{
+		participants = append(participants, kernel.ParticipantState{
 			ID:        participant.ID,
 			Kind:      participant.Kind,
 			Role:      participant.Role,
@@ -135,14 +135,14 @@ func (g *reviewProfileGatewayService) ControlPlaneState(context.Context, gateway
 			Source:    participant.Source,
 		})
 	}
-	return gateway.ControlPlaneState{
+	return kernel.ControlPlaneState{
 		SessionRef:   g.session.SessionRef,
-		Controller:   gateway.ControllerState{Kind: g.session.Controller.Kind},
+		Controller:   kernel.ControllerState{Kind: g.session.Controller.Kind},
 		Participants: participants,
 	}, nil
 }
 
-func (g *reviewProfileGatewayService) AttachParticipant(_ context.Context, req gateway.AttachParticipantRequest) (session.Session, error) {
+func (g *reviewProfileGatewayService) AttachParticipant(_ context.Context, req kernel.AttachParticipantRequest) (session.Session, error) {
 	g.attachReqs = append(g.attachReqs, req)
 	g.session.Participants = append(g.session.Participants, session.ParticipantBinding{
 		ID:        "side-reviewer",
@@ -157,13 +157,13 @@ func (g *reviewProfileGatewayService) AttachParticipant(_ context.Context, req g
 	return session.CloneSession(g.session), nil
 }
 
-func (g *reviewProfileGatewayService) PromptParticipant(_ context.Context, req gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error) {
+func (g *reviewProfileGatewayService) PromptParticipant(_ context.Context, req kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error) {
 	g.promptReqs = append(g.promptReqs, req)
-	return gateway.BeginTurnResult{Session: session.CloneSession(g.session), Handle: g.handle}, nil
+	return kernel.BeginTurnResult{Session: session.CloneSession(g.session), Handle: g.handle}, nil
 }
 
-func (g *reviewProfileGatewayService) StartParticipant(ctx context.Context, req gateway.StartParticipantRequest) (gateway.BeginTurnResult, error) {
-	updated, err := g.AttachParticipant(ctx, gateway.AttachParticipantRequest{
+func (g *reviewProfileGatewayService) StartParticipant(ctx context.Context, req kernel.StartParticipantRequest) (kernel.BeginTurnResult, error) {
+	updated, err := g.AttachParticipant(ctx, kernel.AttachParticipantRequest{
 		SessionRef: req.SessionRef,
 		BindingKey: req.BindingKey,
 		Agent:      req.Agent,
@@ -173,9 +173,9 @@ func (g *reviewProfileGatewayService) StartParticipant(ctx context.Context, req 
 		Placement:  req.Placement,
 	})
 	if err != nil {
-		return gateway.BeginTurnResult{}, err
+		return kernel.BeginTurnResult{}, err
 	}
-	result, err := g.PromptParticipant(ctx, gateway.PromptParticipantRequest{
+	result, err := g.PromptParticipant(ctx, kernel.PromptParticipantRequest{
 		SessionRef:    updated.SessionRef,
 		BindingKey:    req.BindingKey,
 		ParticipantID: "side-reviewer",
@@ -186,17 +186,17 @@ func (g *reviewProfileGatewayService) StartParticipant(ctx context.Context, req 
 		Source:        req.Source,
 	})
 	if err != nil {
-		_, _ = g.DetachParticipant(ctx, gateway.DetachParticipantRequest{
+		_, _ = g.DetachParticipant(ctx, kernel.DetachParticipantRequest{
 			SessionRef:    updated.SessionRef,
 			BindingKey:    req.BindingKey,
 			ParticipantID: "side-reviewer",
 			Source:        "side_agent_prompt_rollback",
 		})
-		return gateway.BeginTurnResult{}, err
+		return kernel.BeginTurnResult{}, err
 	}
-	if req.Lifecycle == gateway.ParticipantLifecycleTransient {
+	if req.Lifecycle == kernel.ParticipantLifecycleTransient {
 		if result.Handle == nil {
-			_, _ = g.DetachParticipant(ctx, gateway.DetachParticipantRequest{
+			_, _ = g.DetachParticipant(ctx, kernel.DetachParticipantRequest{
 				SessionRef:    updated.SessionRef,
 				BindingKey:    req.BindingKey,
 				ParticipantID: "side-reviewer",
@@ -204,7 +204,7 @@ func (g *reviewProfileGatewayService) StartParticipant(ctx context.Context, req 
 			})
 		} else if handle, ok := result.Handle.(*reviewProfileHandle); ok {
 			handle.onFinish(func() {
-				_, _ = g.DetachParticipant(ctx, gateway.DetachParticipantRequest{
+				_, _ = g.DetachParticipant(ctx, kernel.DetachParticipantRequest{
 					SessionRef:    updated.SessionRef,
 					BindingKey:    req.BindingKey,
 					ParticipantID: "side-reviewer",
@@ -216,7 +216,7 @@ func (g *reviewProfileGatewayService) StartParticipant(ctx context.Context, req 
 	return result, nil
 }
 
-func (g *reviewProfileGatewayService) DetachParticipant(_ context.Context, req gateway.DetachParticipantRequest) (session.Session, error) {
+func (g *reviewProfileGatewayService) DetachParticipant(_ context.Context, req kernel.DetachParticipantRequest) (session.Session, error) {
 	g.detachReqs = append(g.detachReqs, req)
 	kept := g.session.Participants[:0]
 	for _, participant := range g.session.Participants {
@@ -276,7 +276,7 @@ func (h *reviewProfileHandle) CreatedAt() time.Time { return time.Time{} }
 func (h *reviewProfileHandle) ACPEvents() <-chan eventstream.Envelope {
 	return h.acpEvents
 }
-func (h *reviewProfileHandle) Submit(context.Context, gateway.SubmitRequest) error {
+func (h *reviewProfileHandle) Submit(context.Context, kernel.SubmitRequest) error {
 	return nil
 }
 func (h *reviewProfileHandle) Cancel() agent.CancelResult {

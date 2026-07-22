@@ -11,7 +11,6 @@ import (
 
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/ports/gateway"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -398,7 +397,7 @@ func TestPluginServiceRemoveRollbackOnRebuildFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("Remove(goodplugin) expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "failed to rebuild gateway after removing plugin") {
+	if !strings.Contains(err.Error(), "failed to remove plugin") {
 		t.Errorf("unexpected error: %v", err)
 	}
 
@@ -617,7 +616,7 @@ func TestPluginServiceRejectsWhileActiveTurn(t *testing.T) {
 	}
 	stack.gateway = gw
 
-	handle, err := stack.currentGateway().BeginTurn(ctx, gateway.BeginTurnRequest{
+	handle, err := stack.currentGateway().BeginTurn(ctx, kernelimpl.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "hold active",
 	})

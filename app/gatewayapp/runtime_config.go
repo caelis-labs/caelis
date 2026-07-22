@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
 type stackRuntimeConfig struct {
@@ -143,11 +142,11 @@ func cloneStringSlicePreserveNil(in []string) []string {
 func approvalMode(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "manual":
-		return string(gateway.ApprovalModeManual)
+		return string(kernelimpl.ApprovalModeManual)
 	case "", "auto", "auto-review", "auto_review", "autoreview", "default", "plan", "full_control", "full_access":
-		return string(gateway.ApprovalModeAutoReview)
+		return string(kernelimpl.ApprovalModeAutoReview)
 	default:
-		return string(gateway.ApprovalModeAutoReview)
+		return string(kernelimpl.ApprovalModeAutoReview)
 	}
 }
 

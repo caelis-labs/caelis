@@ -10,7 +10,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 const (
@@ -41,7 +41,7 @@ type guardianPromptMode struct {
 }
 
 type approvalReviewAccounting struct {
-	usage      *gateway.UsageSnapshot
+	usage      *kernel.UsageSnapshot
 	invocation *session.EventInvocation
 }
 
@@ -69,7 +69,7 @@ type guardianTranscriptEntry struct {
 // newModelApprovalReviewer keeps the historical constructor name used by local
 // stack setup and tests while the concrete implementation is now a no-tool
 // guardian agent.
-func newModelApprovalReviewer(sessions ...session.Service) gateway.ApprovalReviewer {
+func newModelApprovalReviewer(sessions ...session.Service) kernel.ApprovalReviewer {
 	var service session.Service
 	if len(sessions) > 0 {
 		service = sessions[0]
@@ -77,7 +77,7 @@ func newModelApprovalReviewer(sessions ...session.Service) gateway.ApprovalRevie
 	return newGuardianApprovalReviewer(service)
 }
 
-func newGuardianApprovalReviewer(service session.Service) gateway.ApprovalReviewer {
+func newGuardianApprovalReviewer(service session.Service) kernel.ApprovalReviewer {
 	return &guardianApprovalReviewer{
 		sessions:       service,
 		systemAgents:   newSystemManagedAgentRuntime(nil),
@@ -87,12 +87,12 @@ func newGuardianApprovalReviewer(service session.Service) gateway.ApprovalReview
 	}
 }
 
-func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req gateway.ApprovalReviewRequest) (gateway.ApprovalReviewResult, error) {
+func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req kernel.ApprovalReviewRequest) (kernel.ApprovalReviewResult, error) {
 	if req.Model == nil {
-		return gateway.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires the current session model")
+		return kernel.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires the current session model")
 	}
 	if r == nil || r.sessions == nil {
-		return gateway.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires session history")
+		return kernel.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires session history")
 	}
 	timeout := r.timeout
 	if timeout <= 0 {
@@ -103,14 +103,14 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req gatew
 
 	_, _, assistantEvent, parsed, trace, err := r.runGuardianReview(ctx, req)
 	if err != nil {
-		return gateway.ApprovalReviewResult{}, err
+		return kernel.ApprovalReviewResult{}, err
 	}
 	r.storeApprovalReviewAccounting(req.ReviewID, approvalReviewAccountingFromEvent(assistantEvent))
 	approved := strings.EqualFold(strings.TrimSpace(parsed.Outcome), "allow")
 	risk := normalizeReviewLabel(parsed.RiskLevel, "unknown")
 	authorization := normalizeAuthorizationLabel(parsed.UserAuthorization, "unknown")
 	rationale := firstNonEmpty(parsed.Rationale, "approval reviewer returned no rationale")
-	result := gateway.ApprovalReviewResult{
+	result := kernel.ApprovalReviewResult{
 		Approved:       approved,
 		Outcome:        approvalOutcome(approved),
 		Risk:           risk,
@@ -125,9 +125,9 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req gatew
 
 func (r *guardianApprovalReviewer) ApprovalReviewAccounting(
 	_ context.Context,
-	req gateway.ApprovalReviewRequest,
-	_ gateway.ApprovalReviewResult,
-) (*gateway.UsageSnapshot, *session.EventInvocation, error) {
+	req kernel.ApprovalReviewRequest,
+	_ kernel.ApprovalReviewResult,
+) (*kernel.UsageSnapshot, *session.EventInvocation, error) {
 	accounting, ok := r.takeApprovalReviewAccounting(req.ReviewID)
 	if !ok {
 		return nil, nil, nil
@@ -162,7 +162,7 @@ func (r *guardianApprovalReviewer) takeApprovalReviewAccounting(reviewID string)
 
 func approvalReviewAccountingFromEvent(event *session.Event) approvalReviewAccounting {
 	return approvalReviewAccounting{
-		usage:      gateway.UsageSnapshotFromSessionEvent(event),
+		usage:      kernel.UsageSnapshotFromSessionEvent(event),
 		invocation: approvalInvocationFromEvent(event),
 	}
 }
@@ -180,8 +180,8 @@ func approvalInvocationFromEvent(event *session.Event) *session.EventInvocation 
 
 func (r *guardianApprovalReviewer) runGuardianReview(
 	ctx context.Context,
-	req gateway.ApprovalReviewRequest,
-) (guardianPromptItems, *session.Event, *session.Event, guardianReviewModelOutput, *gateway.ApprovalReviewTrace, error) {
+	req kernel.ApprovalReviewRequest,
+) (guardianPromptItems, *session.Event, *session.Event, guardianReviewModelOutput, *kernel.ApprovalReviewTrace, error) {
 	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
 	if err != nil {
 		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, nil, err
@@ -281,7 +281,7 @@ const (
 func buildGuardianPromptItems(
 	parentEvents []*session.Event,
 	mode guardianPromptMode,
-	req gateway.ApprovalReviewRequest,
+	req kernel.ApprovalReviewRequest,
 ) (guardianPromptItems, error) {
 	entries, cursor := collectGuardianTranscriptEntries(parentEvents)
 	var selected []guardianTranscriptEntry
@@ -645,7 +645,7 @@ func isGuardianToolEntry(entry guardianTranscriptEntry) bool {
 	return strings.HasPrefix(strings.TrimSpace(entry.Kind), "tool ")
 }
 
-func guardianPlannedActionJSON(req gateway.ApprovalReviewRequest) (string, bool, error) {
+func guardianPlannedActionJSON(req kernel.ApprovalReviewRequest) (string, bool, error) {
 	action := map[string]any{}
 	toolName := ""
 	if req.Approval != nil {
@@ -878,9 +878,9 @@ func canonicalGuardianAuthorizationLabel(value string) (string, bool) {
 
 func approvalOutcome(approved bool) string {
 	if approved {
-		return string(gateway.ApprovalStatusApproved)
+		return string(kernel.ApprovalStatusApproved)
 	}
-	return string(gateway.ApprovalStatusRejected)
+	return string(kernel.ApprovalStatusRejected)
 }
 
 func normalizeReviewLabel(value string, fallback string) string {
@@ -1054,4 +1054,4 @@ func boolPtr(value bool) *bool {
 	return &value
 }
 
-var _ gateway.ApprovalReviewer = (*guardianApprovalReviewer)(nil)
+var _ kernel.ApprovalReviewer = (*guardianApprovalReviewer)(nil)

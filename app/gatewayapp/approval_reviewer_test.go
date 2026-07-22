@@ -19,7 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
@@ -221,7 +221,7 @@ func TestApprovalReviewerSelectsExplicitApprovalOption(t *testing.T) {
 	}
 	reviewer := newModelApprovalReviewer(service)
 	req := approvalReviewerTestRequest(activeSession, testModel, "run command", map[string]any{"cmd": "pwd"})
-	req.Approval.Options = []gateway.ApprovalOption{
+	req.Approval.Options = []kernel.ApprovalOption{
 		{ID: "allow_once", Name: "Allow once", Kind: "allow"},
 		{ID: "reject", Name: "Reject", Kind: "reject"},
 	}
@@ -261,7 +261,7 @@ func TestApprovalReviewerSelectedOptionOverridesOutcome(t *testing.T) {
 	}
 	reviewer := newModelApprovalReviewer(service)
 	req := approvalReviewerTestRequest(activeSession, testModel, "run command", map[string]any{"cmd": "pwd"})
-	req.Approval.Options = []gateway.ApprovalOption{
+	req.Approval.Options = []kernel.ApprovalOption{
 		{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
 		{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
 	}
@@ -271,7 +271,7 @@ func TestApprovalReviewerSelectedOptionOverridesOutcome(t *testing.T) {
 		t.Fatalf("ReviewApproval() error = %v", err)
 	}
 	result = finalizeApprovalReviewerTestResult(req, result)
-	if result.Approved || result.OptionID != "reject_once" || result.Outcome != string(gateway.ApprovalStatusSelected) {
+	if result.Approved || result.OptionID != "reject_once" || result.Outcome != string(kernel.ApprovalStatusSelected) {
 		t.Fatalf("result = %#v, want selected reject_once denial", result)
 	}
 	if !strings.Contains(result.DisplayText, "denied") {
@@ -1137,7 +1137,7 @@ func TestApprovalReviewerConcurrentReviewsDoNotMutateParentSession(t *testing.T)
 }
 
 func TestApprovalReviewerRejectsMissingRequestModel(t *testing.T) {
-	_, err := newModelApprovalReviewer(nil).ReviewApproval(context.Background(), gateway.ApprovalReviewRequest{})
+	_, err := newModelApprovalReviewer(nil).ReviewApproval(context.Background(), kernel.ApprovalReviewRequest{})
 	if err == nil || !strings.Contains(err.Error(), "current session model") {
 		t.Fatalf("ReviewApproval() error = %v, want current session model error", err)
 	}
@@ -1145,7 +1145,7 @@ func TestApprovalReviewerRejectsMissingRequestModel(t *testing.T) {
 
 func TestApprovalReviewerRejectsMissingSessionHistory(t *testing.T) {
 	testModel := &approvalReviewerFakeModel{responses: []string{`{"outcome":"allow"}`}}
-	_, err := newModelApprovalReviewer(nil).ReviewApproval(context.Background(), gateway.ApprovalReviewRequest{
+	_, err := newModelApprovalReviewer(nil).ReviewApproval(context.Background(), kernel.ApprovalReviewRequest{
 		Model: testModel,
 	})
 	if err == nil || !strings.Contains(err.Error(), "session history") {
@@ -1464,20 +1464,20 @@ func appendApprovalReviewerTextEvent(
 	}
 }
 
-func approvalReviewerTestRequest(activeSession session.Session, llm model.LLM, reason string, input map[string]any) gateway.ApprovalReviewRequest {
+func approvalReviewerTestRequest(activeSession session.Session, llm model.LLM, reason string, input map[string]any) kernel.ApprovalReviewRequest {
 	raw, _ := json.Marshal(input)
-	return gateway.ApprovalReviewRequest{
+	return kernel.ApprovalReviewRequest{
 		SessionRef: activeSession.SessionRef,
-		Mode:       gateway.ApprovalModeAutoReview,
+		Mode:       kernel.ApprovalModeAutoReview,
 		ReviewID:   "review-test",
 		RunID:      "run-test",
 		TurnID:     "turn-test",
 		Model:      llm,
-		Approval: &gateway.ApprovalPayload{
+		Approval: &kernel.ApprovalPayload{
 			ToolName: "custom_tool",
 			RawInput: input,
 			Reason:   reason,
-			Status:   gateway.ApprovalStatusPending,
+			Status:   kernel.ApprovalStatusPending,
 		},
 		RuntimeRequest: agent.ApprovalRequest{
 			Tool: tool.Definition{Name: "custom_tool"},
@@ -1486,11 +1486,11 @@ func approvalReviewerTestRequest(activeSession session.Session, llm model.LLM, r
 	}
 }
 
-func finalizeApprovalReviewerTestResult(req gateway.ApprovalReviewRequest, result gateway.ApprovalReviewResult) gateway.ApprovalReviewResult {
+func finalizeApprovalReviewerTestResult(req kernel.ApprovalReviewRequest, result kernel.ApprovalReviewResult) kernel.ApprovalReviewResult {
 	return approval.FinalizeReviewResult(req.Approval, result)
 }
 
-func approvalReviewerSystemSession(t *testing.T, reviewer gateway.ApprovalReviewer, activeSession session.Session) *systemManagedAgentSession {
+func approvalReviewerSystemSession(t *testing.T, reviewer kernel.ApprovalReviewer, activeSession session.Session) *systemManagedAgentSession {
 	t.Helper()
 	guardian, ok := reviewer.(*guardianApprovalReviewer)
 	if !ok {

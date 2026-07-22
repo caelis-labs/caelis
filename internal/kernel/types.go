@@ -1,154 +1,445 @@
 package kernel
 
-import gateway "github.com/caelis-labs/caelis/ports/gateway"
+import (
+	"context"
+	"time"
 
-type BeginTurnRequest = gateway.BeginTurnRequest
-type TurnIntent = gateway.TurnIntent
-type StartSessionRequest = gateway.StartSessionRequest
-type LoadSessionRequest = gateway.LoadSessionRequest
-type ResumeSessionRequest = gateway.ResumeSessionRequest
-type ListSessionsRequest = gateway.ListSessionsRequest
-type InterruptRequest = gateway.InterruptRequest
-type BindingDescriptor = gateway.BindingDescriptor
-type BindSessionRequest = gateway.BindSessionRequest
-type HandoffControllerRequest = gateway.HandoffControllerRequest
-type AttachParticipantRequest = gateway.AttachParticipantRequest
-type PromptParticipantRequest = gateway.PromptParticipantRequest
-type StartParticipantRequest = gateway.StartParticipantRequest
-type DetachParticipantRequest = gateway.DetachParticipantRequest
-type ControlPlaneStateRequest = gateway.ControlPlaneStateRequest
-type ActiveTurnState = gateway.ActiveTurnState
-type ActiveTurnKind = gateway.ActiveTurnKind
-type ControllerState = gateway.ControllerState
-type ParticipantState = gateway.ParticipantState
-type ACPProjectionState = gateway.ACPProjectionState
-type ContinuityState = gateway.ContinuityState
-type ControlPlaneState = gateway.ControlPlaneState
-type ResolvedTurn = gateway.ResolvedTurn
-type TurnResolver = gateway.TurnResolver
-type ControllerTurnResolver = gateway.ControllerTurnResolver
-type RequestPolicy = gateway.RequestPolicy
-type SurfaceClass = gateway.SurfaceClass
-type EventKind = gateway.EventKind
-type UsageSnapshot = gateway.UsageSnapshot
-type NarrativeRole = gateway.NarrativeRole
-type EventScope = gateway.EventScope
-type NarrativePayload = gateway.NarrativePayload
-type ToolStatus = gateway.ToolStatus
-type ToolCallPayload = gateway.ToolCallPayload
-type ToolResultPayload = gateway.ToolResultPayload
-type PlanEntryPayload = gateway.PlanEntryPayload
-type PlanPayload = gateway.PlanPayload
-type ApprovalOption = gateway.ApprovalOption
-type ApprovalStatus = gateway.ApprovalStatus
-type ApprovalReviewStatus = gateway.ApprovalReviewStatus
-type ApprovalPayload = gateway.ApprovalPayload
-type ParticipantAction = gateway.ParticipantAction
-type ParticipantLifecycle = gateway.ParticipantLifecycle
-type ParticipantPayload = gateway.ParticipantPayload
-type LifecycleStatus = gateway.LifecycleStatus
-type LifecyclePayload = gateway.LifecyclePayload
-type EventOrigin = gateway.EventOrigin
-type SubmissionKind = gateway.SubmissionKind
-type CancelStatus = gateway.CancelStatus
-type CancelResult = gateway.CancelResult
-type ApprovalDecision = gateway.ApprovalDecision
-type SubmitRequest = gateway.SubmitRequest
-type SubmitActiveTurnRequest = gateway.SubmitActiveTurnRequest
-type BeginTurnResult = gateway.BeginTurnResult
-type TurnHandle = gateway.TurnHandle
-
-const (
-	ActiveTurnKindKernel      = gateway.ActiveTurnKindKernel
-	ActiveTurnKindParticipant = gateway.ActiveTurnKindParticipant
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
-const (
-	ParticipantLifecyclePersistent = gateway.ParticipantLifecyclePersistent
-	ParticipantLifecycleTransient  = gateway.ParticipantLifecycleTransient
-)
+type BeginTurnRequest struct {
+	SessionRef   session.SessionRef
+	Input        string
+	DisplayInput string
+	ContentParts []model.ContentPart
+	ModeName     string
+	ModelHint    string
+	Surface      string
+	Metadata     map[string]any
+	Request      agent.ModelRequestOptions
+}
+
+type TurnIntent = BeginTurnRequest
+
+type StartSessionRequest struct {
+	AppName            string
+	UserID             string
+	Workspace          session.WorkspaceRef
+	PreferredSessionID string
+	Title              string
+	Metadata           map[string]any
+	BindingKey         string
+	Binding            BindingDescriptor
+}
+
+type LoadSessionRequest struct {
+	SessionRef       session.SessionRef
+	Limit            int
+	IncludeTransient bool
+	BindingKey       string
+	Binding          BindingDescriptor
+}
+
+type ResumeSessionRequest struct {
+	AppName          string
+	UserID           string
+	Workspace        session.WorkspaceRef
+	SessionID        string
+	ExcludeSessionID string
+	Limit            int
+	IncludeTransient bool
+	// MetadataOnly binds and returns the authorized Session without reading
+	// event history. The caller must obtain replay from the Control Session Feed.
+	MetadataOnly bool
+	BindingKey   string
+	Binding      BindingDescriptor
+}
+
+type ListSessionsRequest struct {
+	AppName      string
+	UserID       string
+	WorkspaceKey string
+	Cursor       string
+	Limit        int
+}
+
+type InterruptRequest struct {
+	SessionRef    session.SessionRef
+	BindingKey    string
+	Reason        string
+	HandleID      string
+	RunID         string
+	TurnID        string
+	Kind          ActiveTurnKind
+	ParticipantID string
+}
+
+type BindingDescriptor struct {
+	Surface   string    `json:"surface,omitempty"`
+	ActorKind string    `json:"actor_kind,omitempty"`
+	ActorID   string    `json:"actor_id,omitempty"`
+	Owner     string    `json:"owner,omitempty"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+}
+
+type BindSessionRequest struct {
+	SessionRef session.SessionRef `json:"session_ref"`
+	BindingKey string             `json:"binding_key,omitempty"`
+	Binding    BindingDescriptor  `json:"binding,omitempty"`
+}
+
+type HandoffControllerRequest struct {
+	SessionRef session.SessionRef
+	BindingKey string
+	Kind       session.ControllerKind
+	Agent      string
+	Source     string
+	Reason     string
+}
+
+// AttachParticipantRequest attaches one ACP-backed participant to the current
+// session control plane without replacing the main controller.
+type AttachParticipantRequest struct {
+	SessionRef session.SessionRef
+	BindingKey string
+	// Agent is used only by internal non-ACP participant assembly. When
+	// Placement selects an Agent endpoint, Gateway derives the identity from
+	// Placement.Agent and ignores this field.
+	Agent     string
+	Role      session.ParticipantRole
+	Source    string
+	Label     string
+	Placement placement.Placement
+}
+
+// DetachParticipantRequest removes one attached participant from the current
+// session control plane.
+type DetachParticipantRequest struct {
+	SessionRef    session.SessionRef
+	BindingKey    string
+	ParticipantID string
+	Source        string
+}
+
+type PromptParticipantRequest struct {
+	SessionRef    session.SessionRef
+	BindingKey    string
+	ParticipantID string
+	Input         string
+	DisplayInput  string
+	DisplayTitle  string
+	ContentParts  []model.ContentPart
+	Source        string
+}
+
+// ParticipantLifecycle controls whether one started participant remains
+// attached after the first prompt turn or detaches when that turn finishes.
+type ParticipantLifecycle string
 
 const (
-	SurfaceClassInteractive = gateway.SurfaceClassInteractive
-	SurfaceClassBatch       = gateway.SurfaceClassBatch
+	ParticipantLifecyclePersistent ParticipantLifecycle = "persistent"
+	ParticipantLifecycleTransient  ParticipantLifecycle = "transient"
 )
+
+type StartParticipantRequest struct {
+	SessionRef   session.SessionRef
+	BindingKey   string
+	Agent        string
+	Role         session.ParticipantRole
+	Label        string
+	Placement    placement.Placement
+	Input        string
+	DisplayInput string
+	DisplayTitle string
+	ContentParts []model.ContentPart
+	Source       string
+	Lifecycle    ParticipantLifecycle
+	DetachSource string
+}
+
+type ControlPlaneStateRequest struct {
+	SessionRef session.SessionRef
+	BindingKey string
+}
+
+type ActiveTurnState struct {
+	SessionRef    session.SessionRef `json:"session_ref"`
+	Kind          ActiveTurnKind     `json:"kind,omitempty"`
+	ParticipantID string             `json:"participant_id,omitempty"`
+	HandleID      string             `json:"handle_id,omitempty"`
+	RunID         string             `json:"run_id,omitempty"`
+	TurnID        string             `json:"turn_id,omitempty"`
+	StartedAt     time.Time          `json:"started_at,omitempty"`
+}
+
+type ActiveTurnKind string
 
 const (
-	EventKindUserMessage       = gateway.EventKindUserMessage
-	EventKindAssistantMessage  = gateway.EventKindAssistantMessage
-	EventKindPlanUpdate        = gateway.EventKindPlanUpdate
-	EventKindToolCall          = gateway.EventKindToolCall
-	EventKindToolResult        = gateway.EventKindToolResult
-	EventKindParticipant       = gateway.EventKindParticipant
-	EventKindHandoff           = gateway.EventKindHandoff
-	EventKindCompact           = gateway.EventKindCompact
-	EventKindNotice            = gateway.EventKindNotice
-	EventKindSystemMessage     = gateway.EventKindSystemMessage
-	EventKindApprovalRequested = gateway.EventKindApprovalRequested
-	EventKindApprovalReview    = gateway.EventKindApprovalReview
-	EventKindLifecycle         = gateway.EventKindLifecycle
+	ActiveTurnKindKernel      ActiveTurnKind = "kernel"
+	ActiveTurnKindParticipant ActiveTurnKind = "participant"
 )
+
+type ControllerState struct {
+	Kind            session.ControllerKind `json:"kind,omitempty"`
+	ControllerID    string                 `json:"controller_id,omitempty"`
+	AgentName       string                 `json:"agent_name,omitempty"`
+	Label           string                 `json:"label,omitempty"`
+	EpochID         string                 `json:"epoch_id,omitempty"`
+	RemoteSessionID string                 `json:"remote_session_id,omitempty"`
+	ContextSyncSeq  uint64                 `json:"context_sync_seq,omitempty"`
+	AttachedAt      time.Time              `json:"attached_at,omitempty"`
+	Source          string                 `json:"source,omitempty"`
+}
+
+type ParticipantState struct {
+	ID             string                  `json:"id,omitempty"`
+	Kind           session.ParticipantKind `json:"kind,omitempty"`
+	Role           session.ParticipantRole `json:"role,omitempty"`
+	AgentName      string                  `json:"agent_name,omitempty"`
+	Label          string                  `json:"label,omitempty"`
+	SessionID      string                  `json:"session_id,omitempty"`
+	Source         string                  `json:"source,omitempty"`
+	ParentTurnID   string                  `json:"parent_turn_id,omitempty"`
+	DelegationID   string                  `json:"delegation_id,omitempty"`
+	ContextSyncSeq uint64                  `json:"context_sync_seq,omitempty"`
+	AttachedAt     time.Time               `json:"attached_at,omitempty"`
+	ControllerRef  string                  `json:"controller_ref,omitempty"`
+}
+
+type ACPProjectionState struct {
+	Cursor    string `json:"cursor,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	EventType string `json:"event_type,omitempty"`
+}
+
+type ContinuityState struct {
+	LastEventCursor    string             `json:"last_event_cursor,omitempty"`
+	ControllerCursor   string             `json:"controller_cursor,omitempty"`
+	ParticipantCursors map[string]string  `json:"participant_cursors,omitempty"`
+	ACPProjection      ACPProjectionState `json:"acp_projection,omitempty"`
+}
+
+type ControlPlaneState struct {
+	SessionRef    session.SessionRef `json:"session_ref"`
+	Controller    ControllerState    `json:"controller"`
+	Participants  []ParticipantState `json:"participants,omitempty"`
+	Continuity    ContinuityState    `json:"continuity,omitempty"`
+	RunState      agent.RunState     `json:"run_state,omitempty"`
+	HasActiveTurn bool               `json:"has_active_turn,omitempty"`
+}
+
+type ResolvedTurn struct {
+	RunRequest agent.RunRequest
+}
+
+type EventKind string
 
 const (
-	NarrativeRoleUser      = gateway.NarrativeRoleUser
-	NarrativeRoleAssistant = gateway.NarrativeRoleAssistant
-	NarrativeRoleReasoning = gateway.NarrativeRoleReasoning
-	NarrativeRoleSystem    = gateway.NarrativeRoleSystem
-	NarrativeRoleNotice    = gateway.NarrativeRoleNotice
+	EventKindUserMessage       EventKind = "user_message"
+	EventKindAssistantMessage  EventKind = "assistant_message"
+	EventKindPlanUpdate        EventKind = "plan_update"
+	EventKindToolCall          EventKind = "tool_call"
+	EventKindToolResult        EventKind = "tool_result"
+	EventKindParticipant       EventKind = "participant"
+	EventKindHandoff           EventKind = "handoff"
+	EventKindCompact           EventKind = "compact"
+	EventKindNotice            EventKind = "notice"
+	EventKindSystemMessage     EventKind = "system_message"
+	EventKindApprovalRequested EventKind = "approval_requested"
+	EventKindApprovalReview    EventKind = "approval_review"
+	EventKindLifecycle         EventKind = "lifecycle"
 )
+
+type UsageSnapshot = session.UsageSnapshot
+
+type NarrativeRole string
 
 const (
-	EventScopeMain        = gateway.EventScopeMain
-	EventScopeParticipant = gateway.EventScopeParticipant
-	EventScopeSubagent    = gateway.EventScopeSubagent
+	NarrativeRoleUser      NarrativeRole = "user"
+	NarrativeRoleAssistant NarrativeRole = "assistant"
+	NarrativeRoleReasoning NarrativeRole = "reasoning"
+	NarrativeRoleSystem    NarrativeRole = "system"
+	NarrativeRoleNotice    NarrativeRole = "notice"
 )
+
+type EventScope string
 
 const (
-	ToolStatusStarted         = gateway.ToolStatusStarted
-	ToolStatusRunning         = gateway.ToolStatusRunning
-	ToolStatusWaitingApproval = gateway.ToolStatusWaitingApproval
-	ToolStatusCompleted       = gateway.ToolStatusCompleted
-	ToolStatusFailed          = gateway.ToolStatusFailed
-	ToolStatusInterrupted     = gateway.ToolStatusInterrupted
-	ToolStatusCancelled       = gateway.ToolStatusCancelled
+	EventScopeMain        EventScope = "main"
+	EventScopeParticipant EventScope = "participant"
+	EventScopeSubagent    EventScope = "subagent"
 )
+
+type NarrativePayload struct {
+	Role          NarrativeRole `json:"role,omitempty"`
+	Actor         string        `json:"actor,omitempty"`
+	Text          string        `json:"text,omitempty"`
+	ReasoningText string        `json:"reasoning_text,omitempty"`
+	Final         bool          `json:"final,omitempty"`
+	Visibility    string        `json:"visibility,omitempty"`
+	UpdateType    string        `json:"update_type,omitempty"`
+	Scope         EventScope    `json:"scope,omitempty"`
+	ParticipantID string        `json:"participant_id,omitempty"`
+}
+
+type ToolStatus string
 
 const (
-	ApprovalStatusPending  = gateway.ApprovalStatusPending
-	ApprovalStatusApproved = gateway.ApprovalStatusApproved
-	ApprovalStatusRejected = gateway.ApprovalStatusRejected
-	ApprovalStatusSelected = gateway.ApprovalStatusSelected
+	ToolStatusStarted         ToolStatus = "started"
+	ToolStatusRunning         ToolStatus = "running"
+	ToolStatusWaitingApproval ToolStatus = "waiting_approval"
+	ToolStatusCompleted       ToolStatus = "completed"
+	ToolStatusFailed          ToolStatus = "failed"
+	ToolStatusInterrupted     ToolStatus = "interrupted"
+	ToolStatusCancelled       ToolStatus = "cancelled"
 )
+
+type ToolCallPayload struct {
+	CallID        string                            `json:"call_id,omitempty"`
+	ToolName      string                            `json:"tool_name,omitempty"`
+	ToolKind      string                            `json:"tool_kind,omitempty"`
+	ToolTitle     string                            `json:"tool_title,omitempty"`
+	RawInput      map[string]any                    `json:"raw_input,omitempty"`
+	Content       []session.ProtocolToolCallContent `json:"content,omitempty"`
+	Status        ToolStatus                        `json:"status,omitempty"`
+	Actor         string                            `json:"actor,omitempty"`
+	Scope         EventScope                        `json:"scope,omitempty"`
+	ParticipantID string                            `json:"participant_id,omitempty"`
+}
+
+type ToolResultPayload struct {
+	CallID        string                            `json:"call_id,omitempty"`
+	ToolName      string                            `json:"tool_name,omitempty"`
+	ToolKind      string                            `json:"tool_kind,omitempty"`
+	ToolTitle     string                            `json:"tool_title,omitempty"`
+	RawInput      map[string]any                    `json:"raw_input,omitempty"`
+	RawOutput     map[string]any                    `json:"raw_output,omitempty"`
+	Content       []session.ProtocolToolCallContent `json:"content,omitempty"`
+	Status        ToolStatus                        `json:"status,omitempty"`
+	Error         bool                              `json:"error,omitempty"`
+	Actor         string                            `json:"actor,omitempty"`
+	Scope         EventScope                        `json:"scope,omitempty"`
+	ParticipantID string                            `json:"participant_id,omitempty"`
+}
+
+type PlanEntryPayload struct {
+	Content  string `json:"content,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Priority string `json:"priority,omitempty"`
+}
+
+type PlanPayload struct {
+	Entries []PlanEntryPayload `json:"entries,omitempty"`
+}
+
+type ParticipantAction string
 
 const (
-	ApprovalReviewStatusInProgress = gateway.ApprovalReviewStatusInProgress
-	ApprovalReviewStatusApproved   = gateway.ApprovalReviewStatusApproved
-	ApprovalReviewStatusDenied     = gateway.ApprovalReviewStatusDenied
-	ApprovalReviewStatusTimedOut   = gateway.ApprovalReviewStatusTimedOut
-	ApprovalReviewStatusFailed     = gateway.ApprovalReviewStatusFailed
+	ParticipantActionAttached ParticipantAction = "attached"
+	ParticipantActionDetached ParticipantAction = "detached"
 )
+
+type ParticipantPayload struct {
+	ParticipantID   string            `json:"participant_id,omitempty"`
+	ParticipantKind string            `json:"participant_kind,omitempty"`
+	Role            string            `json:"role,omitempty"`
+	Label           string            `json:"label,omitempty"`
+	Action          ParticipantAction `json:"action,omitempty"`
+	SessionID       string            `json:"session_id,omitempty"`
+	ParentTurnID    string            `json:"parent_turn_id,omitempty"`
+	DelegationID    string            `json:"delegation_id,omitempty"`
+	Actor           string            `json:"actor,omitempty"`
+	Scope           EventScope        `json:"scope,omitempty"`
+}
+
+type LifecycleStatus string
 
 const (
-	ParticipantActionAttached = gateway.ParticipantActionAttached
-	ParticipantActionDetached = gateway.ParticipantActionDetached
+	LifecycleStatusRunning         LifecycleStatus = "running"
+	LifecycleStatusWaitingApproval LifecycleStatus = "waiting_approval"
+	LifecycleStatusInterrupted     LifecycleStatus = "interrupted"
+	LifecycleStatusFailed          LifecycleStatus = "failed"
+	LifecycleStatusCompleted       LifecycleStatus = "completed"
 )
+
+type LifecyclePayload struct {
+	Status        LifecycleStatus `json:"status,omitempty"`
+	Reason        string          `json:"reason,omitempty"`
+	Actor         string          `json:"actor,omitempty"`
+	Scope         EventScope      `json:"scope,omitempty"`
+	ParticipantID string          `json:"participant_id,omitempty"`
+}
+
+type EventOrigin struct {
+	Scope                EventScope `json:"scope,omitempty"`
+	ScopeID              string     `json:"scope_id,omitempty"`
+	Source               string     `json:"source,omitempty"`
+	Actor                string     `json:"actor,omitempty"`
+	ParticipantID        string     `json:"participant_id,omitempty"`
+	ParticipantKind      string     `json:"participant_kind,omitempty"`
+	ParticipantSessionID string     `json:"participant_session_id,omitempty"`
+}
+
+type SubmissionKind = agent.SubmissionKind
 
 const (
-	LifecycleStatusRunning         = gateway.LifecycleStatusRunning
-	LifecycleStatusWaitingApproval = gateway.LifecycleStatusWaitingApproval
-	LifecycleStatusInterrupted     = gateway.LifecycleStatusInterrupted
-	LifecycleStatusFailed          = gateway.LifecycleStatusFailed
-	LifecycleStatusCompleted       = gateway.LifecycleStatusCompleted
+	SubmissionKindConversation                = agent.SubmissionKindConversation
+	SubmissionKindApproval     SubmissionKind = "approval"
 )
+
+type CancelStatus = agent.CancelStatus
+type CancelResult = agent.CancelResult
 
 const (
-	SubmissionKindConversation = gateway.SubmissionKindConversation
-	SubmissionKindApproval     = gateway.SubmissionKindApproval
+	CancelStatusCancelled        = agent.CancelStatusCancelled
+	CancelStatusAlreadyCancelled = agent.CancelStatusAlreadyCancelled
 )
 
-const (
-	CancelStatusCancelled        = gateway.CancelStatusCancelled
-	CancelStatusAlreadyCancelled = gateway.CancelStatusAlreadyCancelled
-)
+type ApprovalDecision struct {
+	RequestID  eventstream.ApprovalRequestID
+	Outcome    string
+	OptionID   string
+	Approved   bool
+	Reason     string
+	ReviewText string
+}
 
-var ClassifySurface = gateway.ClassifySurface
+type SubmitRequest struct {
+	Kind         SubmissionKind
+	Text         string
+	DisplayText  string
+	ContentParts []model.ContentPart
+	Metadata     map[string]any
+	Approval     *ApprovalDecision
+}
+
+type SubmitActiveTurnRequest struct {
+	SessionRef   session.SessionRef
+	Kind         SubmissionKind
+	Text         string
+	DisplayText  string
+	ContentParts []model.ContentPart
+	Metadata     map[string]any
+	Approval     *ApprovalDecision
+}
+
+type BeginTurnResult struct {
+	Session session.Session
+	Handle  TurnHandle
+}
+
+type TurnHandle interface {
+	HandleID() string
+	RunID() string
+	TurnID() string
+	SessionRef() session.SessionRef
+	CreatedAt() time.Time
+	ACPEvents() <-chan eventstream.Envelope
+	Submit(context.Context, SubmitRequest) error
+	Cancel() agent.CancelResult
+	Close() error
+}

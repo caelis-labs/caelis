@@ -5,10 +5,10 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func guardianApprovalOptionsJSON(payload *gateway.ApprovalPayload) (string, bool, error) {
+func guardianApprovalOptionsJSON(payload *kernel.ApprovalPayload) (string, bool, error) {
 	if payload == nil {
 		return "", false, nil
 	}
@@ -23,7 +23,7 @@ func guardianApprovalOptionsJSON(payload *gateway.ApprovalPayload) (string, bool
 	return string(raw), true, nil
 }
 
-func guardianOutputSpec(payload *gateway.ApprovalPayload) *model.OutputSpec {
+func guardianOutputSpec(payload *kernel.ApprovalPayload) *model.OutputSpec {
 	properties := map[string]any{
 		"risk_level": map[string]any{
 			"type": "string",
@@ -63,7 +63,7 @@ func guardianOutputSpec(payload *gateway.ApprovalPayload) *model.OutputSpec {
 // without requiring native schema output from providers such as Codex OAuth.
 // The fixed Guardian instructions and parser still enforce the JSON shape when
 // the model can only return plain text.
-func guardianOutputSpecForModel(llm model.LLM, payload *gateway.ApprovalPayload) *model.OutputSpec {
+func guardianOutputSpecForModel(llm model.LLM, payload *kernel.ApprovalPayload) *model.OutputSpec {
 	output := guardianOutputSpec(payload)
 	capabilities, declared := model.CapabilitiesOf(llm)
 	if declared && capabilities.StructuredOutput {

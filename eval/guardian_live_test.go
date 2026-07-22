@@ -16,7 +16,7 @@ import (
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -191,7 +191,7 @@ func runGuardianE2EScenario(t *testing.T, modelAlias string, scenario guardianE2
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	turn, err := stack.KernelTurns().BeginTurn(ctx, gateway.BeginTurnRequest{
+	turn, err := stack.KernelTurns().BeginTurn(ctx, kernel.BeginTurnRequest{
 		SessionRef: active.SessionRef,
 		Input:      scenario.prompt,
 		Surface:    "guardian-live-e2e",

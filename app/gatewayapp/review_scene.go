@@ -3,7 +3,7 @@ package gatewayapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 const guardianSceneID = "guardian"
@@ -26,7 +26,7 @@ Be demanding about quality, not only correctness:
 
 Default to analysis only. Keep residual summary secondary to findings.`
 
-func (s *Stack) newModelApprovalReviewer() gateway.ApprovalReviewer {
+func (s *Stack) newModelApprovalReviewer() kernel.ApprovalReviewer {
 	return newModelApprovalReviewer(s.Sessions)
 }
 

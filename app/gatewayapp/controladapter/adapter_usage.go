@@ -8,32 +8,32 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func (d *Adapter) sessionTokenUsage(ctx context.Context, ref session.SessionRef) (gateway.UsageSnapshot, error) {
+func (d *Adapter) sessionTokenUsage(ctx context.Context, ref session.SessionRef) (kernel.UsageSnapshot, error) {
 	breakdown, err := d.sessionTokenUsageBreakdown(ctx, ref)
 	if err != nil {
-		return gateway.UsageSnapshot{}, err
+		return kernel.UsageSnapshot{}, err
 	}
 	return breakdown.Total, nil
 }
 
 type sessionTokenUsageBreakdown struct {
-	Total      gateway.UsageSnapshot
-	Main       gateway.UsageSnapshot
-	Subagents  gateway.UsageSnapshot
-	AutoReview gateway.UsageSnapshot
+	Total      kernel.UsageSnapshot
+	Main       kernel.UsageSnapshot
+	Subagents  kernel.UsageSnapshot
+	AutoReview kernel.UsageSnapshot
 	ByModel    map[string]modelUsageSnapshot
 }
 
 type modelUsageSnapshot struct {
 	Provider string
 	Model    string
-	Usage    gateway.UsageSnapshot
+	Usage    kernel.UsageSnapshot
 }
 
-func usageSnapshotFromKernel(usage gateway.UsageSnapshot) UsageSnapshot {
+func usageSnapshotFromKernel(usage kernel.UsageSnapshot) UsageSnapshot {
 	return UsageSnapshot{
 		PromptTokens:      usage.PromptTokens,
 		CachedInputTokens: usage.CachedInputTokens,
@@ -83,7 +83,7 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 	lastToolCallUsageKey := ""
 	lastUsageWasToolCall := false
 	for _, event := range events {
-		one := gateway.UsageSnapshotFromSessionEvent(event)
+		one := kernel.UsageSnapshotFromSessionEvent(event)
 		if one == nil {
 			if session.EventTypeOf(event) != session.EventTypeToolCall {
 				lastToolCallUsageKey = ""
@@ -97,11 +97,11 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 			continue
 		}
 		invocation, hasInvocation := invocationFromSessionEvent(event)
-		provider := gateway.UsageProviderFromSessionEvent(event)
+		provider := kernel.UsageProviderFromSessionEvent(event)
 		if provider == "" && hasInvocation {
 			provider = invocation.Provider
 		}
-		usage := gateway.NormalizeUsageForDisplay(*one, provider)
+		usage := kernel.NormalizeUsageForDisplay(*one, provider)
 		breakdown.add(usageCategoryFromSessionEvent(event, fallbackCategory), usage)
 		if hasInvocation {
 			breakdown.addModel(invocation.Provider, invocation.Model, usage)
@@ -119,11 +119,11 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 
 func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsageBreakdown {
 	var breakdown sessionTokenUsageBreakdown
-	accounting := mapAnyValue(state[gateway.StateUsageAccounting])
+	accounting := mapAnyValue(state[kernel.StateUsageAccounting])
 	autoReviewProvider := anyString(accounting["auto_review_provider"])
 	autoReviewModel := anyString(accounting["auto_review_model"])
-	autoReviewUsage := gateway.UsageSnapshotFromMapForProvider(mapAnyValue(accounting[tokenUsageCategoryAutoReview]), autoReviewProvider)
-	var autoReviewByModel gateway.UsageSnapshot
+	autoReviewUsage := kernel.UsageSnapshotFromMapForProvider(mapAnyValue(accounting[tokenUsageCategoryAutoReview]), autoReviewProvider)
+	var autoReviewByModel kernel.UsageSnapshot
 	hasAutoReviewByModel := false
 	for _, item := range anySliceValue(accounting["by_model"]) {
 		row := mapAnyValue(item)
@@ -134,17 +134,17 @@ func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsage
 			continue
 		}
 		invocation := session.EventInvocation{Provider: anyString(row["provider"]), Model: anyString(row["model"])}
-		usage := gateway.UsageSnapshotFromMapForProvider(mapAnyValue(row["usage"]), invocation.Provider)
+		usage := kernel.UsageSnapshotFromMapForProvider(mapAnyValue(row["usage"]), invocation.Provider)
 		if usage == nil {
 			continue
 		}
-		normalized := gateway.NormalizeUsageForDisplay(*usage, invocation.Provider)
+		normalized := kernel.NormalizeUsageForDisplay(*usage, invocation.Provider)
 		addUsageSnapshot(&autoReviewByModel, normalized)
 		hasAutoReviewByModel = true
 		breakdown.addModel(invocation.Provider, invocation.Model, normalized)
 	}
 	if autoReviewUsage != nil {
-		usage := gateway.NormalizeUsageForDisplay(*autoReviewUsage, autoReviewProvider)
+		usage := kernel.NormalizeUsageForDisplay(*autoReviewUsage, autoReviewProvider)
 		if hasAutoReviewByModel {
 			// by_model rows are the authoritative auto-review attribution when
 			// present; the aggregate is retained only for older snapshots.
@@ -157,7 +157,7 @@ func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsage
 	return breakdown
 }
 
-func (u *sessionTokenUsageBreakdown) add(category string, usage gateway.UsageSnapshot) {
+func (u *sessionTokenUsageBreakdown) add(category string, usage kernel.UsageSnapshot) {
 	if u == nil {
 		return
 	}
@@ -172,7 +172,7 @@ func (u *sessionTokenUsageBreakdown) add(category string, usage gateway.UsageSna
 	}
 }
 
-func (u *sessionTokenUsageBreakdown) addModel(provider string, modelName string, usage gateway.UsageSnapshot) {
+func (u *sessionTokenUsageBreakdown) addModel(provider string, modelName string, usage kernel.UsageSnapshot) {
 	if u == nil {
 		return
 	}
@@ -205,7 +205,7 @@ func (u *sessionTokenUsageBreakdown) addBreakdown(other sessionTokenUsageBreakdo
 	}
 }
 
-func addUsageSnapshot(total *gateway.UsageSnapshot, usage gateway.UsageSnapshot) {
+func addUsageSnapshot(total *kernel.UsageSnapshot, usage kernel.UsageSnapshot) {
 	if total == nil {
 		return
 	}
@@ -378,7 +378,7 @@ func (d *Adapter) subagentSessionRefs(ctx context.Context, ref session.SessionRe
 	return out
 }
 
-func usageSnapshotDedupeKey(usage gateway.UsageSnapshot) string {
+func usageSnapshotDedupeKey(usage kernel.UsageSnapshot) string {
 	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 && usage.TotalTokens == 0 {
 		return ""
 	}

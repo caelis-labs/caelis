@@ -12,7 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
 // Connect reconfigures the model provider on the live stack. The new config
@@ -183,11 +182,11 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 		if next == nil {
 			next = map[string]any{}
 		}
-		next[gateway.StateCurrentModelAlias] = cfg.ID
+		next[kernelimpl.StateCurrentModelAlias] = cfg.ID
 		if reasoning != "" {
-			next[gateway.StateCurrentReasoningEffort] = reasoning
+			next[kernelimpl.StateCurrentReasoningEffort] = reasoning
 		} else {
-			delete(next, gateway.StateCurrentReasoningEffort)
+			delete(next, kernelimpl.StateCurrentReasoningEffort)
 		}
 		return next, nil
 	}); err != nil {
@@ -271,10 +270,10 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 		if next == nil {
 			next = map[string]any{}
 		}
-		current, _ := next[gateway.StateCurrentModelAlias].(string)
+		current, _ := next[kernelimpl.StateCurrentModelAlias].(string)
 		if alias == "" || strings.EqualFold(strings.TrimSpace(current), cfg.ID) || strings.EqualFold(strings.TrimSpace(current), cfg.Alias) || !hasDefault {
-			delete(next, gateway.StateCurrentModelAlias)
-			delete(next, gateway.StateCurrentReasoningEffort)
+			delete(next, kernelimpl.StateCurrentModelAlias)
+			delete(next, kernelimpl.StateCurrentReasoningEffort)
 		}
 		return next, nil
 	}); err != nil {
@@ -451,7 +450,7 @@ func (s *Stack) ListModelChoices(ctx context.Context, ref session.SessionRef) ([
 		if err != nil {
 			return nil, err
 		}
-		if modelRef := gateway.CurrentModelAlias(state); modelRef != "" {
+		if modelRef := kernelimpl.CurrentModelAlias(state); modelRef != "" {
 			if cfg, ok := s.lookup.Config(modelRef); ok {
 				choices = append(choices, modelChoiceFromConfig(cfg))
 			}

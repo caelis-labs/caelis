@@ -443,13 +443,19 @@ func currentApprovalModeOverride(state map[string]any) (ApprovalMode, bool) {
 	return ApprovalModeAutoReview, false
 }
 
-func unsupportedLegacyStateKey(state map[string]any) string {
+// UnsupportedLegacyStateKey returns the first old session-state key that should
+// no longer be interpreted as runtime configuration.
+func UnsupportedLegacyStateKey(state map[string]any) string {
 	for _, key := range unsupportedLegacyStateKeys {
 		if value, _ := state[key].(string); strings.TrimSpace(value) != "" {
 			return key
 		}
 	}
 	return ""
+}
+
+func unsupportedLegacyStateKey(state map[string]any) string {
+	return UnsupportedLegacyStateKey(state)
 }
 
 func normalizeSessionMode(mode string) string {

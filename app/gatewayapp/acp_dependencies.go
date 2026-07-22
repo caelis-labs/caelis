@@ -6,15 +6,15 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 type ACPAgentDependencies struct {
 	Runtime          agent.Runtime
 	Sessions         session.Service
-	Resolver         gateway.RuntimeResolver
-	ApprovalReviewer gateway.ApprovalReviewer
+	Resolver         kernel.RuntimeResolver
+	ApprovalReviewer kernel.ApprovalReviewer
 	Assembly         assembly.ResolvedAssembly
 	AppName          string
 	UserID           string
@@ -26,8 +26,8 @@ func (s *Stack) ACPAgentDependencies() (ACPAgentDependencies, error) {
 		return ACPAgentDependencies{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	s.mu.RLock()
-	var resolver gateway.RuntimeResolver
-	var reviewer gateway.ApprovalReviewer
+	var resolver kernel.RuntimeResolver
+	var reviewer kernel.ApprovalReviewer
 	if s.gateway != nil {
 		resolver = s.gateway.Resolver()
 		reviewer = s.gateway.ApprovalReviewer()

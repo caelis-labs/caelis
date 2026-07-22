@@ -16,37 +16,37 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
-	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
 // GatewayTurnService exposes the turn operations used by Adapter.
 type GatewayTurnService interface {
-	BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error)
-	SubmitActiveTurn(context.Context, gateway.SubmitActiveTurnRequest) error
-	Interrupt(context.Context, gateway.InterruptRequest) error
-	ActiveTurns() []gateway.ActiveTurnState
+	BeginTurn(context.Context, kernel.BeginTurnRequest) (kernel.BeginTurnResult, error)
+	SubmitActiveTurn(context.Context, kernel.SubmitActiveTurnRequest) error
+	Interrupt(context.Context, kernel.InterruptRequest) error
+	ActiveTurns() []kernel.ActiveTurnState
 }
 
 // GatewaySessionService exposes the session operations used by Adapter.
 type GatewaySessionService interface {
-	ResumeSession(context.Context, gateway.ResumeSessionRequest) (session.LoadedSession, error)
-	ListSessions(context.Context, gateway.ListSessionsRequest) (session.SessionList, error)
+	ResumeSession(context.Context, kernel.ResumeSessionRequest) (session.LoadedSession, error)
+	ListSessions(context.Context, kernel.ListSessionsRequest) (session.SessionList, error)
 }
 
 // GatewayControlPlaneService exposes controller and participant operations used by Adapter.
 type GatewayControlPlaneService interface {
-	ControlPlaneState(context.Context, gateway.ControlPlaneStateRequest) (gateway.ControlPlaneState, error)
-	HandoffController(context.Context, gateway.HandoffControllerRequest) (session.Session, error)
-	AttachParticipant(context.Context, gateway.AttachParticipantRequest) (session.Session, error)
-	PromptParticipant(context.Context, gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error)
-	StartParticipant(context.Context, gateway.StartParticipantRequest) (gateway.BeginTurnResult, error)
-	DetachParticipant(context.Context, gateway.DetachParticipantRequest) (session.Session, error)
+	ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error)
+	HandoffController(context.Context, kernel.HandoffControllerRequest) (session.Session, error)
+	AttachParticipant(context.Context, kernel.AttachParticipantRequest) (session.Session, error)
+	PromptParticipant(context.Context, kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error)
+	StartParticipant(context.Context, kernel.StartParticipantRequest) (kernel.BeginTurnResult, error)
+	DetachParticipant(context.Context, kernel.DetachParticipantRequest) (session.Session, error)
 }
 
 // GatewayStreamProvider exposes stream subscription access used by Adapter.
 type GatewayStreamProvider interface {
-	gateway.StreamProvider
+	kernel.StreamProvider
 }
 
 type ModelConfig = modelconfig.Config

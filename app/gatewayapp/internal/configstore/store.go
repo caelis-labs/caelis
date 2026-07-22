@@ -358,23 +358,3 @@ func DedupeStrings(values []string) []string {
 	}
 	return out
 }
-
-func DedupePluginConfigs(configs []PluginConfig) []PluginConfig {
-	return plugin.DedupeConfigs(configs)
-}
-
-func DedupeMarketplaceConfigs(configs []MarketplaceConfig) []MarketplaceConfig {
-	return plugin.DedupeMarketplaceConfigs(configs)
-}
-
-func UpsertMarketplaceConfig(configs []MarketplaceConfig, entry MarketplaceConfig) []MarketplaceConfig {
-	return plugin.UpsertMarketplaceConfig(configs, entry)
-}
-
-func NormalizeMarketplaceConfig(in MarketplaceConfig) MarketplaceConfig {
-	return plugin.NormalizeMarketplaceConfig(in)
-}
-
-func NormalizePluginConfig(in PluginConfig) PluginConfig {
-	return plugin.NormalizeConfig(in)
-}

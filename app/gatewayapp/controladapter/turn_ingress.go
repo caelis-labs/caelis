@@ -5,18 +5,18 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/controlclient/turningress"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
-	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
-func newGatewayTurn(handle gateway.TurnHandle) *gatewayTurn {
+func newGatewayTurn(handle kernel.TurnHandle) *gatewayTurn {
 	return &gatewayTurn{
 		handle: handle,
 		feed:   turningress.New(handle),
 	}
 }
 
-func (d *Adapter) newGatewayTurn(handle gateway.TurnHandle) *gatewayTurn {
+func (d *Adapter) newGatewayTurn(handle kernel.TurnHandle) *gatewayTurn {
 	return d.newGatewayTurnWithSubscription(handle, nil, false)
 }
 
@@ -36,7 +36,7 @@ func (d *Adapter) subscribeGatewayTurn(ref session.SessionRef) (controlclientpor
 }
 
 func (d *Adapter) newGatewayTurnWithSubscription(
-	handle gateway.TurnHandle,
+	handle kernel.TurnHandle,
 	prepared controlclientport.FeedSubscription,
 	preparedBeforeTurn bool,
 	ownerContexts ...context.Context,

@@ -35,7 +35,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
-	"github.com/caelis-labs/caelis/ports/gateway"
+
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acptaskstream "github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
@@ -112,7 +112,7 @@ type Stack struct {
 
 // KernelTurns returns the current gateway turn service without exposing the
 // broader session/control-plane aggregate to callers that only submit turns.
-func (s *Stack) KernelTurns() gateway.TurnService {
+func (s *Stack) KernelTurns() kernelimpl.TurnService {
 	if gw := s.currentGateway(); gw != nil {
 		return gw
 	}
@@ -121,7 +121,7 @@ func (s *Stack) KernelTurns() gateway.TurnService {
 
 // KernelSessions returns the current gateway session service without exposing
 // turn or control-plane operations to session-only callers.
-func (s *Stack) KernelSessions() gateway.SessionService {
+func (s *Stack) KernelSessions() kernelimpl.SessionService {
 	if gw := s.currentGateway(); gw != nil {
 		return gw
 	}
@@ -130,7 +130,7 @@ func (s *Stack) KernelSessions() gateway.SessionService {
 
 // KernelControlPlane returns the current gateway control-plane service without
 // exposing turn/session operations to controller-only callers.
-func (s *Stack) KernelControlPlane() gateway.ControlPlaneService {
+func (s *Stack) KernelControlPlane() kernelimpl.ControlPlaneService {
 	if gw := s.currentGateway(); gw != nil {
 		return gw
 	}
@@ -139,7 +139,7 @@ func (s *Stack) KernelControlPlane() gateway.ControlPlaneService {
 
 // KernelStreams returns the current gateway stream provider without exposing
 // gateway control or session operations.
-func (s *Stack) KernelStreams() gateway.StreamProvider {
+func (s *Stack) KernelStreams() kernelimpl.StreamProvider {
 	if gw := s.currentGateway(); gw != nil {
 		return gw
 	}

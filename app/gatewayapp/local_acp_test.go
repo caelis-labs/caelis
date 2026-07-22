@@ -16,7 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
@@ -28,7 +28,7 @@ func TestLocalStackInjectsOnlySelfUntilProfileIsBound(t *testing.T) {
 			Args: []string{"run", "./internal/acpe2eagent"}, WorkDir: repoRootForGatewayAppTest(t),
 		}},
 	})
-	resolved, err := stack.currentGateway().Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: activeSession.SessionRef})
+	resolved, err := stack.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: activeSession.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn() error = %v", err)
 	}
@@ -48,7 +48,7 @@ func TestLocalStackInjectsOnlySelfUntilProfileIsBound(t *testing.T) {
 	}
 
 	bindProfileToModelForToolTest(t, stack, agentbinding.HandleOrbit)
-	resolved, err = stack.currentGateway().Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: activeSession.SessionRef})
+	resolved, err = stack.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: activeSession.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(bound Orbit) error = %v", err)
 	}

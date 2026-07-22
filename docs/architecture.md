@@ -8,10 +8,12 @@ Presentation surfaces -> Control layer -> Agent Runtime / SDK
 
 `agent-sdk/*` is the long-lived reusable package and dependency boundary inside
 the root `github.com/caelis-labs/caelis` Go module. It has no separate module,
-version, release, or test lifecycle. The durable home for product-control
-contracts and implementations is `control/*`. Remaining `ports/*` packages are
-frozen transitional contracts, and remaining root `internal/*` packages are
-Caelis application glue awaiting bounded migration where appropriate.
+version, release, or test lifecycle. Coherent, stable product-control
+capabilities belong in `control/*`. Today `app/gatewayapp`, `internal/kernel`,
+other `internal/control*` packages, and `control/*` form one Control
+implementation domain; physical package movement is not itself an architecture
+goal. Remaining `ports/*` packages are frozen transitional contracts and retire
+through bounded, independently verified slices.
 
 ## Layers
 
@@ -104,9 +106,11 @@ Document responsibilities are intentionally separate:
   as discovery configuration.
 - `control/plugin`: Control-owned plugin configuration, manifest discovery,
   identity, marketplace/install resolution, lifecycle mutation, and normalized
-  hook, skill, MCP server, and external Agent contributions. The application
-  host supplies only atomic persistence, active-Turn fencing, Runtime
-  replacement, and rollback through the package's narrow `Host` seam.
+  hook, skill, MCP server, and external Agent contributions. Its `Info` view is
+  also Control-owned and may include live MCP server status. The application
+  host supplies the product data root used for managed installs, atomic state
+  persistence, active-Turn fencing, Runtime replacement and rollback, plus the
+  read-only live MCP status probe required to build that view.
 - `ports/controlclient`: frozen transitional transport-neutral product-client
   commands, outcomes, bootstrap state, and Session-feed subscription contracts.
 - `internal/controlclient`: transitional implementation of Control-owned
@@ -126,15 +130,20 @@ Document responsibilities are intentionally separate:
 - `internal/controlassembly`: product Agent assembly resolution.
 - `internal/controlplane`: shared-ledger routing, endpoint lifecycle/recovery,
   and handoff coordination.
-- `app/gatewayapp`, `internal/kernel`: remaining Control host integration and
-  runtime coordination hotspots.
+- `app/gatewayapp`: the current product Control host and composition entry.
+- `internal/kernel`: Control-owned Session/Turn coordination, gateway
+  contracts, and their current implementation. The contracts formerly exposed
+  by `ports/gateway` now have one authority here rather than a forwarding port.
+- other `internal/control*` packages: current Control integration
+  implementations that may converge with adjacent `app/*` and `control/*`
+  ownership before any later package split.
 - `protocol/acp/control.Service` and `app/gatewayapp/controladapter`:
   transitional in-process ACP/TUI command adapters. Do not add product-client
   operations to these aggregate interfaces or to `ports/*`; new capabilities
   belong in coherent `control/*` packages.
-- `ports/gateway`, `ports/controlcommand`, and `ports/controlprompt`: frozen
-  transitional product-host contracts that stay outside the SDK and migrate
-  toward `control/*` by bounded slices.
+- `ports/controlcommand` and `ports/controlprompt`: frozen transitional
+  product-host contracts that stay outside the SDK and retire through bounded
+  slices as their current Control owners converge.
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
   product integration adapters that make external endpoints implement the same
   SDK controller/participant contracts used by built-in Agents.

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -14,7 +14,7 @@ import (
 // feed. Task output is deliberately absent: each Task is delivered through
 // control/taskstream and can outlive this broker.
 type Broker struct {
-	handle   gateway.TurnHandle
+	handle   kernel.TurnHandle
 	identity turnIdentity
 
 	ctx    context.Context
@@ -35,7 +35,7 @@ type Broker struct {
 }
 
 // New constructs the main-only ingress for one request-scoped Control turn.
-func New(handle gateway.TurnHandle) *Broker {
+func New(handle kernel.TurnHandle) *Broker {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Broker{
 		handle:   handle,
@@ -314,7 +314,7 @@ type turnIdentity struct {
 	turnID   string
 }
 
-func newTurnIdentity(handle gateway.TurnHandle) turnIdentity {
+func newTurnIdentity(handle kernel.TurnHandle) turnIdentity {
 	if handle == nil {
 		return turnIdentity{}
 	}

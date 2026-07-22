@@ -14,7 +14,7 @@ import (
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
-	"github.com/caelis-labs/caelis/ports/gateway"
+
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -66,7 +66,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
 		if turn, ok := gw.ActiveTurn(active.SessionID); ok {
-			err = gw.Interrupt(ctx, gateway.InterruptRequest{
+			err = gw.Interrupt(ctx, kernelimpl.InterruptRequest{
 				SessionRef: active.SessionRef, Reason: "session closed by control client",
 				HandleID: turn.HandleID, RunID: turn.RunID, TurnID: turn.TurnID,
 				Kind: turn.Kind, ParticipantID: turn.ParticipantID,
@@ -92,7 +92,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		result, err := gw.BeginTurn(ctx, gateway.BeginTurnRequest{
+		result, err := gw.BeginTurn(ctx, kernelimpl.BeginTurnRequest{
 			SessionRef: active.SessionRef, Input: req.Input, DisplayInput: req.DisplayInput, Surface: "control-client",
 			Metadata: map[string]any{"operation_id": req.OperationID},
 		})
@@ -109,14 +109,14 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		err = gw.SubmitActiveTurn(ctx, gateway.SubmitActiveTurnRequest{SessionRef: active.SessionRef, Kind: gateway.SubmissionKindConversation, Text: req.Input, DisplayText: req.DisplayInput, Metadata: map[string]any{"operation_id": req.OperationID}})
+		err = gw.SubmitActiveTurn(ctx, kernelimpl.SubmitActiveTurnRequest{SessionRef: active.SessionRef, Kind: kernelimpl.SubmissionKindConversation, Text: req.Input, DisplayText: req.DisplayInput, Metadata: map[string]any{"operation_id": req.OperationID}})
 		return sessionCommandResult(active), classifyControlBackendError(err)
 	case controlport.CancelRequest:
 		active, err := s.checkControlTurnTarget(ctx, req.WriteBase, req.Target)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		err = gw.Interrupt(ctx, gateway.InterruptRequest{
+		err = gw.Interrupt(ctx, kernelimpl.InterruptRequest{
 			SessionRef: active.SessionRef, Reason: req.Reason,
 			HandleID: req.Target.HandleID, RunID: req.Target.RunID, TurnID: req.Target.TurnID,
 		})
@@ -126,7 +126,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		err = gw.SubmitActiveTurn(ctx, gateway.SubmitActiveTurnRequest{SessionRef: active.SessionRef, Kind: gateway.SubmissionKindApproval, Approval: &gateway.ApprovalDecision{
+		err = gw.SubmitActiveTurn(ctx, kernelimpl.SubmitActiveTurnRequest{SessionRef: active.SessionRef, Kind: kernelimpl.SubmissionKindApproval, Approval: &kernelimpl.ApprovalDecision{
 			RequestID: eventstream.ApprovalRequestID(req.ApprovalRequestID), Outcome: req.Outcome, OptionID: req.OptionID,
 			Approved: req.Approved, Reason: req.Reason, ReviewText: req.ReviewText,
 		}})
@@ -140,7 +140,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		updated, err := gw.AttachParticipant(ctx, gateway.AttachParticipantRequest{
+		updated, err := gw.AttachParticipant(ctx, kernelimpl.AttachParticipantRequest{
 			SessionRef: active.SessionRef,
 			Role:       req.Role,
 			Label:      req.Label,
@@ -153,7 +153,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		result, err := gw.PromptParticipant(ctx, gateway.PromptParticipantRequest{SessionRef: active.SessionRef, ParticipantID: req.ParticipantID, Input: req.Input, DisplayInput: req.DisplayInput, Source: "control-client"})
+		result, err := gw.PromptParticipant(ctx, kernelimpl.PromptParticipantRequest{SessionRef: active.SessionRef, ParticipantID: req.ParticipantID, Input: req.Input, DisplayInput: req.DisplayInput, Source: "control-client"})
 		if err == nil && result.Handle != nil {
 			s.attachControlClientHandle(result.Handle)
 		}
@@ -168,13 +168,13 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
 		turn, ok := gw.ActiveTurn(active.SessionID)
-		if !ok || turn.Kind != gateway.ActiveTurnKindParticipant || strings.TrimSpace(turn.ParticipantID) != strings.TrimSpace(req.ParticipantID) {
+		if !ok || turn.Kind != kernelimpl.ActiveTurnKindParticipant || strings.TrimSpace(turn.ParticipantID) != strings.TrimSpace(req.ParticipantID) {
 			return sessionCommandResult(active), controlport.NewOutcomeError(controlport.OutcomeConflicted, errors.New("controlclient: active turn is not the requested participant turn"))
 		}
-		err = gw.Interrupt(ctx, gateway.InterruptRequest{
+		err = gw.Interrupt(ctx, kernelimpl.InterruptRequest{
 			SessionRef: active.SessionRef, Reason: req.Reason,
 			HandleID: req.Target.HandleID, RunID: req.Target.RunID, TurnID: req.Target.TurnID,
-			Kind: gateway.ActiveTurnKindParticipant, ParticipantID: req.ParticipantID,
+			Kind: kernelimpl.ActiveTurnKindParticipant, ParticipantID: req.ParticipantID,
 		})
 		return sessionCommandResult(active), classifyControlBackendError(err)
 	case controlport.DetachParticipantRequest:
@@ -182,14 +182,14 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		updated, err := gw.DetachParticipant(ctx, gateway.DetachParticipantRequest{SessionRef: active.SessionRef, ParticipantID: req.ParticipantID, Source: req.Source})
+		updated, err := gw.DetachParticipant(ctx, kernelimpl.DetachParticipantRequest{SessionRef: active.SessionRef, ParticipantID: req.ParticipantID, Source: req.Source})
 		return sessionCommandResult(updated), classifyControlBackendError(err)
 	case controlport.HandoffRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		updated, err := gw.HandoffController(ctx, gateway.HandoffControllerRequest{SessionRef: active.SessionRef, Kind: req.Kind, Agent: req.Agent, Source: req.Source, Reason: req.Reason})
+		updated, err := gw.HandoffController(ctx, kernelimpl.HandoffControllerRequest{SessionRef: active.SessionRef, Kind: req.Kind, Agent: req.Agent, Source: req.Source, Reason: req.Reason})
 		return sessionCommandResult(updated), classifyControlBackendError(err)
 	default:
 		return controlport.CommandResult{}, fmt.Errorf("gatewayapp: unsupported control command %q (%T)", action, request)
@@ -270,7 +270,7 @@ func (s *Stack) checkControlApprovalTarget(ctx context.Context, base controlport
 	return active, nil
 }
 
-func waitControlTurnStopped(ctx context.Context, gw *kernelimpl.Gateway, target gateway.ActiveTurnState) error {
+func waitControlTurnStopped(ctx context.Context, gw *kernelimpl.Gateway, target kernelimpl.ActiveTurnState) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -304,13 +304,13 @@ func classifyControlBackendError(err error) error {
 	if errors.As(err, &outcomeErr) {
 		return err
 	}
-	var gatewayErr *gateway.Error
+	var gatewayErr *kernelimpl.Error
 	if errors.As(err, &gatewayErr) {
 		switch gatewayErr.Kind {
-		case gateway.KindValidation:
+		case kernelimpl.KindValidation:
 			coded := errorcode.Wrap(errorcode.InvalidArgument, gatewayErr.Error(), err)
 			return controlport.NewOutcomeError(controlport.OutcomeRejected, coded)
-		case gateway.KindConflict, gateway.KindApproval:
+		case kernelimpl.KindConflict, kernelimpl.KindApproval:
 			coded := errorcode.Wrap(errorcode.Conflict, "gatewayapp: command conflict", err)
 			return controlport.NewOutcomeError(controlport.OutcomeConflicted, coded)
 		}

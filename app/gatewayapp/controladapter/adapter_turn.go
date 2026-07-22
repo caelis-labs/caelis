@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/internal/controlclient/turningress"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
-	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 type gatewayTurn struct {
-	handle gateway.TurnHandle
+	handle kernel.TurnHandle
 	feed   *turningress.Broker
 	// sessionFeed remains available after the prepared subscription is closed.
 	// Stop/failure takeover reattaches the same ingress here so sibling SSE/GUI
@@ -378,9 +378,9 @@ func (t *gatewayTurn) isMainTerminal(envelope eventstream.Envelope) bool {
 }
 
 func (t *gatewayTurn) SubmitApproval(ctx context.Context, decision ApprovalDecision) error {
-	return t.handle.Submit(ctx, gateway.SubmitRequest{
-		Kind: gateway.SubmissionKindApproval,
-		Approval: &gateway.ApprovalDecision{
+	return t.handle.Submit(ctx, kernel.SubmitRequest{
+		Kind: kernel.SubmissionKindApproval,
+		Approval: &kernel.ApprovalDecision{
 			RequestID:  decision.RequestID,
 			Outcome:    strings.TrimSpace(decision.Outcome),
 			OptionID:   strings.TrimSpace(decision.OptionID),

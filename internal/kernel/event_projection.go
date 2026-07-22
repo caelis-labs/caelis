@@ -7,7 +7,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	gatewayapi "github.com/caelis-labs/caelis/ports/gateway"
 )
 
 func replayClientEvents(events []*session.Event) []*session.Event {
@@ -35,12 +34,6 @@ func cursorNotFoundError(cursor string) error {
 		Message:     "gateway: cursor not found",
 		Detail:      cursor,
 	}
-}
-
-// UsageSnapshotFromMap projects one provider-style usage payload into the
-// canonical gateway usage contract.
-func UsageSnapshotFromMap(payload map[string]any) *UsageSnapshot {
-	return gatewayapi.UsageSnapshotFromMap(payload)
 }
 
 func canonicalOriginFromApproval(req *agent.ApprovalRequest, fallbackRef session.SessionRef, fallbackTurnID string) *EventOrigin {

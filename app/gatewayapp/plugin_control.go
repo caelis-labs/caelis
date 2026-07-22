@@ -14,8 +14,8 @@ type PluginInfo = plugin.Info
 type MarketplaceInfo = plugin.MarketplaceInfo
 
 // Plugins exposes the Control-owned Plugin service through this application
-// host. GatewayApp supplies only persistence, mutation fencing, and Runtime
-// replacement.
+// host. GatewayApp supplies its product data root, persistence and mutation
+// fencing, Runtime replacement and rollback, and live MCP status snapshots.
 func (s *Stack) Plugins() PluginService {
 	return plugin.NewService(pluginHost{stack: s})
 }

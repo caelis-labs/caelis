@@ -7,15 +7,15 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
-	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type gatewaySessionBinder interface {
-	BindSession(context.Context, gateway.BindSessionRequest) error
+	BindSession(context.Context, kernel.BindSessionRequest) error
 }
 
 // ResumeSession stages target resolution and Control bootstrap before changing
@@ -33,7 +33,7 @@ func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionS
 	if err != nil {
 		return SessionSnapshot{}, err
 	}
-	target, err := gw.ResumeSession(ctx, gateway.ResumeSessionRequest{
+	target, err := gw.ResumeSession(ctx, kernel.ResumeSessionRequest{
 		AppName: d.stack.Session.AppName, UserID: d.stack.Session.UserID,
 		SessionID: strings.TrimSpace(sessionID), MetadataOnly: true,
 		// Empty BindingKey makes target resolution read-only. The binding is
@@ -76,10 +76,10 @@ func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionS
 	if !ok {
 		return SessionSnapshot{}, missingRuntimeDependency("gateway session binding")
 	}
-	if err := binder.BindSession(ctx, gateway.BindSessionRequest{
+	if err := binder.BindSession(ctx, kernel.BindSessionRequest{
 		SessionRef: target.Session.SessionRef,
 		BindingKey: d.bindingKey,
-		Binding:    gateway.BindingDescriptor{Surface: d.bindingKey, Owner: d.stack.Session.AppName},
+		Binding:    kernel.BindingDescriptor{Surface: d.bindingKey, Owner: d.stack.Session.AppName},
 	}); err != nil {
 		return SessionSnapshot{}, err
 	}
@@ -203,9 +203,9 @@ func (r *sessionReconnect) SubmitApproval(ctx context.Context, decision Approval
 	if err != nil {
 		return err
 	}
-	return turns.SubmitActiveTurn(ctx, gateway.SubmitActiveTurnRequest{
-		SessionRef: r.ref, Kind: gateway.SubmissionKindApproval,
-		Approval: &gateway.ApprovalDecision{
+	return turns.SubmitActiveTurn(ctx, kernel.SubmitActiveTurnRequest{
+		SessionRef: r.ref, Kind: kernel.SubmissionKindApproval,
+		Approval: &kernel.ApprovalDecision{
 			RequestID: decision.RequestID, Outcome: strings.TrimSpace(decision.Outcome),
 			OptionID: strings.TrimSpace(decision.OptionID), Approved: decision.Approved,
 			Reason: strings.TrimSpace(decision.Reason), ReviewText: strings.TrimSpace(decision.ReviewText),
@@ -218,7 +218,7 @@ func (r *sessionReconnect) Cancel() {
 	if err != nil {
 		return
 	}
-	_ = turns.Interrupt(context.Background(), gateway.InterruptRequest{
+	_ = turns.Interrupt(context.Background(), kernel.InterruptRequest{
 		SessionRef: r.ref, BindingKey: r.bindingKey, Reason: "reconnected surface interrupt",
 	})
 }

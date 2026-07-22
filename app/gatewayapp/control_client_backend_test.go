@@ -19,7 +19,7 @@ import (
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
-	"github.com/caelis-labs/caelis/ports/gateway"
+
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -41,15 +41,15 @@ func TestClassifyControlBackendErrorAddsTypedHTTPCategories(t *testing.T) {
 	}{
 		{
 			name: "validation",
-			err: &gateway.Error{
-				Kind: gateway.KindValidation, Code: gateway.CodeInvalidRequest, Message: "invalid prompt",
+			err: &kernelimpl.Error{
+				Kind: kernelimpl.KindValidation, Code: kernelimpl.CodeInvalidRequest, Message: "invalid prompt",
 			},
 			outcome: controlport.OutcomeRejected,
 			code:    errorcode.InvalidArgument,
 		},
 		{
 			name:    "internal",
-			err:     &gateway.Error{Kind: gateway.KindInternal, Code: gateway.CodeInternal, Message: "private failure"},
+			err:     &kernelimpl.Error{Kind: kernelimpl.KindInternal, Code: kernelimpl.CodeInternal, Message: "private failure"},
 			outcome: controlport.OutcomeUnknown,
 			code:    errorcode.Unknown,
 		},
@@ -196,14 +196,14 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 			Status:        &status,
 		},
 		Meta: map[string]any{
-			gateway.EventMetaRoot: map[string]any{
-				gateway.EventMetaRuntime: map[string]any{
-					gateway.EventMetaRuntimeTool: map[string]any{
-						gateway.EventMetaRuntimeToolName: "RUN_COMMAND",
+			kernelimpl.EventMetaRoot: map[string]any{
+				kernelimpl.EventMetaRuntime: map[string]any{
+					kernelimpl.EventMetaRuntimeTool: map[string]any{
+						kernelimpl.EventMetaRuntimeToolName: "RUN_COMMAND",
 					},
-					gateway.EventMetaRuntimeTask: map[string]any{
-						gateway.EventMetaRuntimeTaskID:         "task-1",
-						gateway.EventMetaRuntimeTaskTerminalID: "terminal-1",
+					kernelimpl.EventMetaRuntimeTask: map[string]any{
+						kernelimpl.EventMetaRuntimeTaskID:         "task-1",
+						kernelimpl.EventMetaRuntimeTaskTerminalID: "terminal-1",
 					},
 				},
 			},
@@ -344,7 +344,7 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := kernel.BeginTurn(ctx, gateway.BeginTurnRequest{SessionRef: active.SessionRef, Input: "wait"})
+	turn, err := kernel.BeginTurn(ctx, kernelimpl.BeginTurnRequest{SessionRef: active.SessionRef, Input: "wait"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,12 +414,12 @@ func TestControlClientCancelParticipantRejectsMainTurnWithArbitraryParticipantID
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := kernel.BeginTurn(ctx, gateway.BeginTurnRequest{SessionRef: active.SessionRef, Input: "wait"})
+	started, err := kernel.BeginTurn(ctx, kernelimpl.BeginTurnRequest{SessionRef: active.SessionRef, Input: "wait"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := kernel.Interrupt(ctx, gateway.InterruptRequest{SessionRef: active.SessionRef}); err != nil {
+		if err := kernel.Interrupt(ctx, kernelimpl.InterruptRequest{SessionRef: active.SessionRef}); err != nil {
 			t.Errorf("interrupt main turn: %v", err)
 		}
 	}()
@@ -466,8 +466,8 @@ func (runtime controlClientIngressRuntime) Streams() stream.Service {
 
 type controlClientIngressResolver struct{}
 
-func (controlClientIngressResolver) ResolveTurn(context.Context, gateway.TurnIntent) (gateway.ResolvedTurn, error) {
-	return gateway.ResolvedTurn{}, nil
+func (controlClientIngressResolver) ResolveTurn(context.Context, kernelimpl.TurnIntent) (kernelimpl.ResolvedTurn, error) {
+	return kernelimpl.ResolvedTurn{}, nil
 }
 
 type controlClientIngressStream struct {
@@ -517,7 +517,9 @@ func (*controlClientIngressHandle) CreatedAt() time.Time { return time.Time{} }
 func (handle *controlClientIngressHandle) ACPEvents() <-chan eventstream.Envelope {
 	return handle.events
 }
-func (*controlClientIngressHandle) Submit(context.Context, gateway.SubmitRequest) error { return nil }
+func (*controlClientIngressHandle) Submit(context.Context, kernelimpl.SubmitRequest) error {
+	return nil
+}
 func (*controlClientIngressHandle) Cancel() agent.CancelResult {
 	return agent.CancelResult{Status: agent.CancelStatusCancelled}
 }
@@ -551,7 +553,7 @@ func (*controlClientAttachmentFailureHandle) CreatedAt() time.Time { return time
 func (handle *controlClientAttachmentFailureHandle) ACPEvents() <-chan eventstream.Envelope {
 	return handle.events
 }
-func (*controlClientAttachmentFailureHandle) Submit(context.Context, gateway.SubmitRequest) error {
+func (*controlClientAttachmentFailureHandle) Submit(context.Context, kernelimpl.SubmitRequest) error {
 	return nil
 }
 func (handle *controlClientAttachmentFailureHandle) Cancel() agent.CancelResult {

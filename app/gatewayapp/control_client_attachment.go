@@ -5,12 +5,12 @@ import (
 	"errors"
 
 	"github.com/caelis-labs/caelis/internal/controlclient/turningress"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
-	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
-func (s *Stack) attachControlClientHandle(handle gateway.TurnHandle) {
+func (s *Stack) attachControlClientHandle(handle kernel.TurnHandle) {
 	if handle == nil {
 		return
 	}
