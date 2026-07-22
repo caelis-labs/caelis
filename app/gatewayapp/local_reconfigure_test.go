@@ -23,7 +23,7 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 
 	ctx := context.Background()
 	stack, session := newLocalStateTestStack(t)
-	altAlias, err := stack.Connect(ModelConfig{
+	altProfile, err := stack.Connect(ModelConfig{
 		Provider: "ollama",
 		API:      providers.APIOllama,
 		Model:    "alt-model",
@@ -31,6 +31,7 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect(alt-model) error = %v", err)
 	}
+	altAlias := altProfile.Backend.Provider.ModelConfigID
 
 	blocking := &blockingRuntime{session: session, release: make(chan struct{})}
 	gw, err := kernelimpl.New(kernelimpl.Config{
@@ -54,7 +55,7 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 	if got := len(stack.currentGateway().ActiveTurns()); got != 1 {
 		t.Fatalf("ActiveTurns() len = %d, want 1", got)
 	}
-	acpCommand := writeAgentRosterExecutable(t, t.TempDir(), "active-turn-acp")
+	acpCommand := writeExternalAgentExecutable(t, t.TempDir(), "active-turn-acp")
 	acpRequest := controlagents.ConnectRequest{
 		AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand, CommandLine: acpCommand,
 		ModelID: "opus", CWD: stack.Workspace.CWD,
@@ -68,18 +69,15 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 		CWD: stack.Workspace.CWD, SelectedModelID: "opus", Models: []controlagents.RemoteModel{{ID: "opus", Name: "Opus"}},
 	}
 	disconnectConnection := controlagents.Connection{
-		ID: "disconnect-acp", Launcher: controlagents.Launcher{Command: writeAgentRosterExecutable(t, t.TempDir(), "disconnect-acp")},
+		ID: "disconnect-acp", Launcher: controlagents.Launcher{Command: writeExternalAgentExecutable(t, t.TempDir(), "disconnect-acp")},
 	}
 	doc, err := stack.store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	doc.AgentRoster = controlagents.Configuration{
+	doc.ExternalAgents = controlagents.Configuration{
 		Connections: []controlagents.Connection{disconnectConnection},
-		Agents: []controlagents.Agent{{
-			ID: "disconnect-agent", Backing: controlagents.AgentBacking{ConnectionID: disconnectConnection.ID},
-			Defaults: controlagents.SessionOptions{ModelID: "opus"},
-		}},
+		Agents:      []controlagents.Agent{{ID: "disconnect-agent", ConnectionID: disconnectConnection.ID}},
 		Discoveries: []controlagents.DiscoverySnapshot{{ConnectionID: disconnectConnection.ID, SelectedModelID: "opus"}},
 	}
 	if err := stack.store.Save(doc); err != nil {
@@ -120,7 +118,7 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Load() error = %v", err)
 				}
-				if _, ok := controlagents.LookupConnection(doc.AgentRoster, acpConnection.ID); ok {
+				if _, ok := controlagents.LookupConnection(doc.ExternalAgents, acpConnection.ID); ok {
 					t.Fatal("ConnectACP() persisted a connection while an active turn was running")
 				}
 			},
@@ -137,10 +135,10 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Load() error = %v", err)
 				}
-				if _, ok := controlagents.LookupAgent(doc.AgentRoster, "disconnect-agent"); !ok {
+				if _, ok := controlagents.LookupAgent(doc.ExternalAgents, "disconnect-agent"); !ok {
 					t.Fatal("DisconnectACP() removed an Agent while an active turn was running")
 				}
-				if _, ok := controlagents.LookupConnection(doc.AgentRoster, disconnectConnection.ID); !ok {
+				if _, ok := controlagents.LookupConnection(doc.ExternalAgents, disconnectConnection.ID); !ok {
 					t.Fatal("DisconnectACP() removed a Connection while an active turn was running")
 				}
 			},

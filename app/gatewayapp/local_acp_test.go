@@ -12,8 +12,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
-	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
+	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/ports/gateway"
@@ -47,7 +47,7 @@ func TestLocalStackInjectsOnlySelfUntilProfileIsBound(t *testing.T) {
 		t.Fatal("SPAWN Agent is required despite self default")
 	}
 
-	bindProfileToModelForToolTest(t, stack, controldelegation.ProfileOrbit)
+	bindProfileToModelForToolTest(t, stack, agentbinding.HandleOrbit)
 	resolved, err = stack.currentGateway().Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: activeSession.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(bound Orbit) error = %v", err)
@@ -78,7 +78,7 @@ func TestACPSurfaceAvailableCommandsExposeOnlyBoundProfilesAndHideRosterAgents(t
 			t.Fatalf("AvailableCommands() = %#v, should hide unbound /%s", commands, profile)
 		}
 	}
-	bindProfileToModelForToolTest(t, stack, controldelegation.ProfileOrbit)
+	bindProfileToModelForToolTest(t, stack, agentbinding.HandleOrbit)
 	commands, err = stack.ACPSurface(nil, false, nil).AvailableCommands(context.Background(), activeSession.SessionID)
 	if err != nil {
 		t.Fatalf("AvailableCommands(bound Orbit) error = %v", err)
@@ -98,32 +98,30 @@ func TestACPSurfaceAvailableCommandsExposeOnlyBoundProfilesAndHideRosterAgents(t
 	}
 }
 
-func bindProfileToModelForToolTest(t *testing.T, stack *Stack, profile controldelegation.Profile) {
+func bindProfileToModelForToolTest(t *testing.T, stack *Stack, handle agentbinding.Handle) {
 	t.Helper()
-	modelID, err := stack.Connect(ModelConfig{
+	modelProfile, err := stack.Connect(ModelConfig{
 		Provider: "ollama",
 		API:      providers.APIOllama,
-		Model:    "bound-" + string(profile),
+		Model:    "bound-" + string(handle),
 	})
 	if err != nil {
-		t.Fatalf("Connect(bound %s model) error = %v", profile, err)
+		t.Fatalf("Connect(bound %s model) error = %v", handle, err)
 	}
-	agentID := modelBackedAgentIDForTest(t, stack, modelID)
-	if _, err = stack.Delegation().BindDelegation(context.Background(), controldelegation.BindRequest{
-		Profile: profile,
-		AgentID: agentID,
+	if _, err = stack.AgentBindings().BindAgentBinding(context.Background(), agentbinding.Binding{
+		Handle: handle, ProfileID: modelProfile.ID, Effort: modelProfile.Effort.DefaultEffort,
 	}); err != nil {
-		t.Fatalf("BindDelegation(%s) error = %v", profile, err)
+		t.Fatalf("BindAgentBinding(%s) error = %v", handle, err)
 	}
 }
 
 func TestACPProfileCommandDescriptionIncludesBoundModel(t *testing.T) {
-	detail := availableProfileDescription(controldelegation.ProfileStatus{
-		Definition: controldelegation.Definition{Profile: controldelegation.ProfileOrbit, Description: "General implementation."},
-		Binding: controldelegation.Binding{
-			Profile: controldelegation.ProfileOrbit, Target: controldelegation.TargetAgent, AgentID: "sol", ReasoningEffort: "high",
+	detail := availableProfileDescription(agentbinding.HandleStatus{
+		Definition: agentbinding.Definition{Handle: agentbinding.HandleOrbit, Description: "General implementation."},
+		Binding: agentbinding.Binding{
+			Handle: agentbinding.HandleOrbit, ProfileID: "provider:sol", Effort: "high",
 		},
-		Agent: controlagents.Agent{ID: "sol", Backing: controlagents.AgentBacking{ModelAlias: "openai-codex/gpt-5.6-sol"}},
+		Profile: modelprofile.ModelProfile{ID: "provider:sol", DisplayName: "openai-codex/gpt-5.6-sol"},
 	})
 	for _, want := range []string{"General implementation", "openai-codex/gpt-5.6-sol", "[high]"} {
 		if !strings.Contains(detail, want) {
@@ -166,8 +164,8 @@ func newStackWithAssemblyForToolTest(t *testing.T, resolved assembly.ResolvedAss
 	return stack, activeSession
 }
 
-// Kept as a semantic alias for focused roster tests that predate fixed system
-// scenes. There is no longer a switch that disables Guardian or Reviewer.
+// Kept as a semantic alias for focused catalog tests that need an initially
+// empty ModelProfile set. Guardian and Reviewer are always available scenes.
 func newStackForToolTestWithoutProfiles(t *testing.T, resolved assembly.ResolvedAssembly) *Stack {
 	t.Helper()
 	return newStackForToolTest(t, resolved)

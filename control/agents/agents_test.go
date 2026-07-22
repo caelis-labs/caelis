@@ -18,13 +18,9 @@ func TestConfigurationRosterResolvesStableAgentPlacement(t *testing.T) {
 			},
 		}},
 		Agents: []Agent{{
-			ID:      "Opus",
-			Name:    "Opus",
-			Backing: AgentBacking{ConnectionID: "Claude"},
-			Defaults: SessionOptions{
-				ModelID:      "claude-opus-4-8",
-				ConfigValues: map[string]string{"effort": "max"},
-			},
+			ID:           "Claude",
+			Name:         "Claude",
+			ConnectionID: "Claude",
 		}},
 	}
 	if err := ValidateConfiguration(cfg); err != nil {
@@ -32,32 +28,29 @@ func TestConfigurationRosterResolvesStableAgentPlacement(t *testing.T) {
 	}
 	cfg = NormalizeConfiguration(cfg)
 
-	agent, connection, err := ResolveAgent(cfg, "OPUS")
+	agent, connection, err := ResolveAgent(cfg, "CLAUDE")
 	if err != nil {
 		t.Fatalf("ResolveAgent() error = %v", err)
 	}
-	if agent.ID != "opus" || connection.ID != "claude" {
+	if agent.ID != "claude" || connection.ID != "claude" {
 		t.Fatalf("ResolveAgent() = %#v %#v", agent, connection)
-	}
-	if agent.Defaults.ModelID != "claude-opus-4-8" || agent.Defaults.ConfigValues["effort"] != "max" {
-		t.Fatalf("ResolveAgent().Defaults = %#v", agent.Defaults)
 	}
 
 	listed := ListAgents(cfg)
-	listed[0].Defaults.ConfigValues["effort"] = "low"
-	again, _, err := ResolveAgent(cfg, "opus")
+	listed[0].Name = "changed"
+	again, _, err := ResolveAgent(cfg, "claude")
 	if err != nil {
 		t.Fatalf("ResolveAgent(second) error = %v", err)
 	}
-	if again.Defaults.ConfigValues["effort"] != "max" {
-		t.Fatalf("ListAgents() leaked mutable defaults: %#v", again.Defaults)
+	if again.Name != "Claude" {
+		t.Fatalf("ListAgents() leaked mutation: %#v", again)
 	}
 }
 
 func TestConfigurationRejectsUnknownAgentConnection(t *testing.T) {
 	t.Parallel()
 
-	err := ValidateConfiguration(Configuration{Agents: []Agent{{ID: "opus", Backing: AgentBacking{ConnectionID: "missing"}}}})
+	err := ValidateConfiguration(Configuration{Agents: []Agent{{ID: "opus", ConnectionID: "missing"}}})
 	if err == nil {
 		t.Fatal("ValidateConfiguration() error = nil, want unknown connection")
 	}
@@ -72,8 +65,8 @@ func TestConfigurationRejectsDuplicateAgentIdentity(t *testing.T) {
 			{ID: "codex", Launcher: Launcher{Command: "codex-acp"}},
 		},
 		Agents: []Agent{
-			{ID: "reviewer", Backing: AgentBacking{ConnectionID: "claude"}},
-			{ID: "REVIEWER", Backing: AgentBacking{ConnectionID: "codex"}},
+			{ID: "reviewer", ConnectionID: "claude"},
+			{ID: "REVIEWER", ConnectionID: "codex"},
 		},
 	})
 	if err == nil {
@@ -81,39 +74,13 @@ func TestConfigurationRejectsDuplicateAgentIdentity(t *testing.T) {
 	}
 }
 
-func TestConfigurationAcceptsConfiguredModelBacking(t *testing.T) {
+func TestConfigurationRejectsMissingConnection(t *testing.T) {
 	t.Parallel()
 
-	cfg := Configuration{Agents: []Agent{{
-		ID:      "deepseek",
-		Backing: AgentBacking{ModelAlias: "deepseek@default/deepseek/deepseek-v4-pro"},
-	}}}
-	if err := ValidateConfiguration(cfg); err != nil {
-		t.Fatalf("ValidateConfiguration() error = %v", err)
-	}
-	agent, connection, err := ResolveAgent(cfg, "deepseek")
-	if err != nil {
-		t.Fatalf("ResolveAgent() error = %v", err)
-	}
-	if agent.Backing.ModelAlias == "" || connection.ID != "" {
-		t.Fatalf("ResolveAgent() = %#v %#v, want configured-model backing", agent, connection)
-	}
-}
-
-func TestConfigurationRejectsAmbiguousOrMissingBacking(t *testing.T) {
-	t.Parallel()
-
-	for _, agent := range []Agent{
-		{ID: "missing"},
-		{ID: "ambiguous", Backing: AgentBacking{ModelAlias: "model", ConnectionID: "acp"}},
-	} {
-		err := ValidateConfiguration(Configuration{
-			Connections: []Connection{{ID: "acp", Launcher: Launcher{Command: "acp"}}},
-			Agents:      []Agent{agent},
-		})
-		if err == nil {
-			t.Fatalf("ValidateConfiguration(%#v) error = nil, want exactly-one rejection", agent)
-		}
+	agent := Agent{ID: "missing"}
+	err := ValidateConfiguration(Configuration{Agents: []Agent{agent}})
+	if err == nil {
+		t.Fatalf("ValidateConfiguration(%#v) error = nil, want connection rejection", agent)
 	}
 }
 

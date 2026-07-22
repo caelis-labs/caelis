@@ -1,9 +1,7 @@
 package configstore
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,28 +9,8 @@ import (
 	"sync"
 
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
-	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelconfig"
-	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
 )
-
-type AppConfig struct {
-	Models PersistedModelConfig `json:"models,omitempty"`
-	// AgentRoster is authoritative for stable user-selected Agents used by
-	// dispatch, Spawn target resolution, and Control-authorized handoff.
-	AgentRoster controlagents.Configuration `json:"agent_roster,omitempty"`
-	// Delegation maps the fixed Caelis capability profiles to identities in the
-	// authoritative AgentRoster. Missing configurable bindings remain unbound.
-	Delegation controldelegation.Configuration `json:"delegation,omitempty"`
-	// SystemAgents binds fixed Control-managed scenes to model-backed roster
-	// Agents without making those scenes delegation profiles.
-	SystemAgents       controlsystemagent.Configuration `json:"system_agents,omitempty"`
-	Sandbox            SandboxConfig                    `json:"sandbox,omitempty"`
-	Runtime            RuntimeConfig                    `json:"runtime,omitempty"`
-	Plugins            []PluginConfig                   `json:"plugins,omitempty"`
-	PluginMarketplaces []MarketplaceConfig              `json:"plugin_marketplaces,omitempty"`
-}
 
 type MarketplaceConfig struct {
 	Name                              string   `json:"name,omitempty"`
@@ -73,16 +51,21 @@ type RuntimeConfig struct {
 	PolicyProfile string `json:"policy_profile,omitempty"`
 }
 
+// PersistedModelConfig is the current provider infrastructure shape. Provider
+// endpoints are deliberately named separately from product ModelProfiles.
 type PersistedModelConfig struct {
-	DefaultAlias string                      `json:"default_alias,omitempty"`
-	DefaultID    string                      `json:"default_model_id,omitempty"`
-	Profiles     []modelconfig.ProfileConfig `json:"profiles,omitempty"`
-	Configs      []modelconfig.Config        `json:"configs,omitempty"`
+	DefaultAlias      string                               `json:"default_alias,omitempty"`
+	DefaultID         string                               `json:"default_model_id,omitempty"`
+	ProviderEndpoints []modelconfig.ProviderEndpointConfig `json:"provider_endpoints,omitempty"`
+	Configs           []modelconfig.Config                 `json:"configs,omitempty"`
 }
 
 type Store struct {
-	mu   sync.Mutex
-	path string
+	mu             sync.Mutex
+	path           string
+	writeOps       AtomicWriteOps
+	backupWriteOps AtomicWriteOps
+	migration      MigrationReport
 }
 
 func New(root string) *Store {
@@ -110,231 +93,31 @@ func (s *Store) SetPath(path string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.path = strings.TrimSpace(path)
+	path = strings.TrimSpace(path)
+	if path != s.path {
+		s.migration = MigrationReport{}
+	}
+	s.path = path
+}
+
+// MigrationReport returns a detached report for the legacy conversion most
+// recently observed by this Store. The report is process-local operational
+// state and is not persisted in AppConfig.
+func (s *Store) MigrationReport() MigrationReport {
+	if s == nil {
+		return MigrationReport{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneMigrationReport(s.migration)
 }
 
 func LoadAppConfig(root string) (AppConfig, error) {
 	store := New(root)
 	if store == nil {
-		return AppConfig{}, nil
+		return AppConfig{SchemaVersion: SchemaVersionV2}, nil
 	}
 	return store.Load()
-}
-
-func (s *Store) Load() (AppConfig, error) {
-	if s == nil {
-		return AppConfig{}, nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if strings.TrimSpace(s.path) == "" {
-		return AppConfig{}, nil
-	}
-	return s.loadUnlocked()
-}
-
-func (s *Store) loadUnlocked() (AppConfig, error) {
-	data, err := os.ReadFile(s.path)
-	if err == nil {
-		if err := rejectUnsupportedLegacyModelConfig(data); err != nil {
-			return AppConfig{}, err
-		}
-		var doc AppConfig
-		if err := json.Unmarshal(data, &doc); err != nil {
-			return AppConfig{}, fmt.Errorf("gatewayapp: decode app config: %w", err)
-		}
-		doc.Models.Profiles = dedupeModelProfiles(doc.Models.Profiles)
-		doc.Models.Configs = dedupeModelConfigs(doc.Models.Configs)
-		if err := controlagents.ValidateConfiguration(doc.AgentRoster); err != nil {
-			return AppConfig{}, fmt.Errorf("gatewayapp: invalid agent roster: %w", err)
-		}
-		if err := validateAgentRosterModels(doc.AgentRoster, doc.Models.Configs); err != nil {
-			return AppConfig{}, err
-		}
-		if err := controldelegation.ValidateConfiguration(doc.Delegation, doc.AgentRoster, doc.Models.Configs); err != nil {
-			return AppConfig{}, fmt.Errorf("gatewayapp: invalid delegation configuration: %w", err)
-		}
-		if err := controlsystemagent.ValidateConfiguration(doc.SystemAgents, doc.AgentRoster, doc.Models.Configs); err != nil {
-			return AppConfig{}, fmt.Errorf("gatewayapp: invalid system Agent configuration: %w", err)
-		}
-		doc.AgentRoster = controlagents.NormalizeConfiguration(doc.AgentRoster)
-		doc.Delegation = controldelegation.NormalizeConfiguration(doc.Delegation)
-		doc.SystemAgents = controlsystemagent.NormalizeConfiguration(doc.SystemAgents)
-		doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
-		doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
-		doc.Plugins = DedupePluginConfigs(doc.Plugins)
-		doc.PluginMarketplaces = DedupeMarketplaceConfigs(doc.PluginMarketplaces)
-		return doc, nil
-	}
-	if !os.IsNotExist(err) {
-		return AppConfig{}, err
-	}
-	return AppConfig{}, nil
-}
-
-func rejectUnsupportedLegacyModelConfig(data []byte) error {
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(data, &root); err != nil {
-		return nil
-	}
-	if key := firstLegacyKey(root, "Models"); key != "" {
-		return fmt.Errorf("gatewayapp: unsupported legacy uppercase model config key %q", key)
-	}
-	modelsRaw, ok := root["models"]
-	if !ok {
-		return nil
-	}
-	var models map[string]json.RawMessage
-	if err := json.Unmarshal(modelsRaw, &models); err != nil {
-		return nil
-	}
-	if key := firstLegacyKey(models, "DefaultAlias", "DefaultID", "Profiles", "Configs"); key != "" {
-		return fmt.Errorf("gatewayapp: unsupported legacy uppercase model config key %q", key)
-	}
-	if err := rejectLegacyModelArrayKeys(models["configs"], "models.configs", legacyModelConfigKeys...); err != nil {
-		return err
-	}
-	if err := rejectLegacyModelArrayKeys(models["profiles"], "models.profiles", legacyModelProfileKeys...); err != nil {
-		return err
-	}
-	return nil
-}
-
-func rejectLegacyModelArrayKeys(raw json.RawMessage, path string, legacyKeys ...string) error {
-	if len(raw) == 0 {
-		return nil
-	}
-	var entries []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		return nil
-	}
-	for i, entry := range entries {
-		if key := firstLegacyKey(entry, legacyKeys...); key != "" {
-			return fmt.Errorf("gatewayapp: unsupported legacy uppercase model config key %q at %s[%d]", key, path, i)
-		}
-	}
-	return nil
-}
-
-func firstLegacyKey(values map[string]json.RawMessage, legacyKeys ...string) string {
-	for _, key := range legacyKeys {
-		if _, ok := values[key]; ok {
-			return key
-		}
-	}
-	return ""
-}
-
-var legacyModelConfigKeys = []string{
-	"ID",
-	"Alias",
-	"Provider",
-	"ProfileID",
-	"EndpointID",
-	"API",
-	"Model",
-	"BaseURL",
-	"Token",
-	"TokenEnv",
-	"CredentialRef",
-	"PersistToken",
-	"AuthType",
-	"HeaderKey",
-	"ContextWindowTokens",
-	"ReasoningEffort",
-	"DefaultReasoningEffort",
-	"ReasoningLevels",
-	"ReasoningMode",
-	"MaxOutputTok",
-	"Timeout",
-	"StreamFirstEventTimeout",
-}
-
-var legacyModelProfileKeys = []string{
-	"ID",
-	"Provider",
-	"EndpointID",
-	"API",
-	"BaseURL",
-	"Token",
-	"TokenEnv",
-	"CredentialRef",
-	"PersistToken",
-	"AuthType",
-	"HeaderKey",
-	"Timeout",
-	"StreamFirstEventTimeout",
-}
-
-func (s *Store) Save(doc AppConfig) error {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if strings.TrimSpace(s.path) == "" {
-		return nil
-	}
-	doc.Models = normalizePersistedModelsForSave(doc.Models)
-	doc.Models.Configs = dedupeModelConfigsForSave(doc.Models.Configs)
-	doc.Models.Profiles = dedupeModelProfilesForSave(doc.Models.Profiles)
-	if err := controlagents.ValidateConfiguration(doc.AgentRoster); err != nil {
-		return fmt.Errorf("gatewayapp: invalid agent roster: %w", err)
-	}
-	if err := validateAgentRosterModels(doc.AgentRoster, doc.Models.Configs); err != nil {
-		return err
-	}
-	if err := controldelegation.ValidateConfiguration(doc.Delegation, doc.AgentRoster, doc.Models.Configs); err != nil {
-		return fmt.Errorf("gatewayapp: invalid delegation configuration: %w", err)
-	}
-	if err := controlsystemagent.ValidateConfiguration(doc.SystemAgents, doc.AgentRoster, doc.Models.Configs); err != nil {
-		return fmt.Errorf("gatewayapp: invalid system Agent configuration: %w", err)
-	}
-	doc.AgentRoster = controlagents.NormalizeConfiguration(doc.AgentRoster)
-	doc.Delegation = controldelegation.NormalizeConfiguration(doc.Delegation)
-	doc.SystemAgents = controlsystemagent.NormalizeConfiguration(doc.SystemAgents)
-	doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
-	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
-	doc.Plugins = DedupePluginConfigs(doc.Plugins)
-	doc.PluginMarketplaces = DedupeMarketplaceConfigs(doc.PluginMarketplaces)
-	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return fmt.Errorf("gatewayapp: encode app config: %w", err)
-	}
-	if err := AtomicWriteFile(s.path, data, 0o600, AtomicWriteOps{}); err != nil {
-		return err
-	}
-	if err := os.Chmod(s.path, 0o600); err != nil {
-		return err
-	}
-	return nil
-}
-
-func validateAgentRosterModels(roster controlagents.Configuration, configs []modelconfig.Config) error {
-	configured := make(map[string]struct{}, len(configs))
-	for _, cfg := range configs {
-		cfg = modelconfig.NormalizeConfig(cfg)
-		if cfg.ID != "" {
-			configured[strings.ToLower(strings.TrimSpace(cfg.ID))] = struct{}{}
-		}
-	}
-	for _, agent := range controlagents.ListAgents(roster) {
-		modelAlias := strings.ToLower(strings.TrimSpace(agent.Backing.ModelAlias))
-		if modelAlias == "" {
-			continue
-		}
-		if _, ok := configured[modelAlias]; !ok {
-			return fmt.Errorf("gatewayapp: roster agent %q references unknown configured model %q", agent.ID, agent.Backing.ModelAlias)
-		}
-	}
-	return nil
 }
 
 type AtomicWriteOps struct {
@@ -342,6 +125,41 @@ type AtomicWriteOps struct {
 	Rename     func(string, string) error
 	Chmod      func(string, os.FileMode) error
 	FsyncDir   func(string) error
+}
+
+// CommittedWriteError reports a write failure after the destination file has
+// already been replaced. Callers must roll forward from the new file instead
+// of restoring state that the file now references.
+type CommittedWriteError struct {
+	err error
+}
+
+func (e *CommittedWriteError) Error() string {
+	if e == nil || e.err == nil {
+		return "committed write failed"
+	}
+	return e.err.Error()
+}
+
+func (e *CommittedWriteError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+// WriteCommitted reports whether err represents a failure after the write's
+// commit point. It remains true through ordinary wrapping and errors.Join.
+func WriteCommitted(err error) bool {
+	var committed *CommittedWriteError
+	return errors.As(err, &committed)
+}
+
+func writeCommittedError(err error) error {
+	if err == nil || WriteCommitted(err) {
+		return err
+	}
+	return &CommittedWriteError{err: err}
 }
 
 func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWriteOps) error {
@@ -390,29 +208,37 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 	}
 	if err := ops.Rename(tmpPath, path); err != nil {
 		if !renameProvided && runtime.GOOS == "windows" {
-			if fallbackErr := writeFileInPlace(path, data, perm, ops.Chmod); fallbackErr == nil {
+			fallbackCommitted, fallbackErr := writeFileInPlace(path, data, perm, ops.Chmod)
+			if fallbackErr == nil {
 				if fsyncErr := ops.FsyncDir(dir); fsyncErr != nil {
-					return fsyncErr
+					return writeCommittedError(fsyncErr)
 				}
 				return nil
-			} else {
-				return errors.Join(err, fallbackErr)
 			}
+			fallbackErr = errors.Join(err, fallbackErr)
+			if fallbackCommitted {
+				return writeCommittedError(fallbackErr)
+			}
+			return fallbackErr
 		}
 		return err
 	}
 	committed = true
 	if err := ops.Chmod(path, perm); err != nil {
-		return err
+		return writeCommittedError(err)
 	}
-	return ops.FsyncDir(dir)
+	if err := ops.FsyncDir(dir); err != nil {
+		return writeCommittedError(err)
+	}
+	return nil
 }
 
-func writeFileInPlace(path string, data []byte, perm os.FileMode, chmod func(string, os.FileMode) error) error {
+func writeFileInPlace(path string, data []byte, perm os.FileMode, chmod func(string, os.FileMode) error) (bool, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
-		return err
+		return false, err
 	}
+	committed := true
 	writeErr := func() error {
 		if _, err := file.Write(data); err != nil {
 			return err
@@ -421,46 +247,21 @@ func writeFileInPlace(path string, data []byte, perm os.FileMode, chmod func(str
 	}()
 	closeErr := file.Close()
 	if writeErr != nil {
-		return writeErr
+		return committed, writeErr
 	}
 	if closeErr != nil {
-		return closeErr
+		return committed, closeErr
 	}
 	if chmod != nil {
-		return chmod(path, perm)
+		return committed, chmod(path, perm)
 	}
-	return nil
-}
-
-func dedupeModelConfigs(configs []modelconfig.Config) []modelconfig.Config {
-	if len(configs) == 0 {
-		return nil
-	}
-	out := make([]modelconfig.Config, 0, len(configs))
-	seen := make(map[string]struct{}, len(configs))
-	for _, cfg := range configs {
-		hadPersistedToken := strings.TrimSpace(cfg.Token) != ""
-		cfg = modelconfig.NormalizeConfig(cfg)
-		if hadPersistedToken {
-			cfg.PersistToken = true
-		}
-		if cfg.ID == "" {
-			continue
-		}
-		key := strings.ToLower(strings.TrimSpace(cfg.ID))
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, cfg)
-	}
-	return out
+	return committed, nil
 }
 
 func normalizePersistedModelsForSave(models PersistedModelConfig) PersistedModelConfig {
 	for _, cfg := range models.Configs {
-		if modelconfig.ConfigCarriesProfileFields(cfg) {
-			models.Profiles = append(models.Profiles, modelconfig.ProfileFromConfig(cfg))
+		if modelconfig.ConfigCarriesProviderEndpointFields(cfg) {
+			models.ProviderEndpoints = append(models.ProviderEndpoints, modelconfig.ProviderEndpointFromConfig(cfg))
 		}
 	}
 	return models
@@ -487,48 +288,23 @@ func dedupeModelConfigsForSave(configs []modelconfig.Config) []modelconfig.Confi
 	return out
 }
 
-func dedupeModelProfiles(profiles []modelconfig.ProfileConfig) []modelconfig.ProfileConfig {
-	if len(profiles) == 0 {
+func dedupeProviderEndpointsForSave(endpoints []modelconfig.ProviderEndpointConfig) []modelconfig.ProviderEndpointConfig {
+	if len(endpoints) == 0 {
 		return nil
 	}
-	out := make([]modelconfig.ProfileConfig, 0, len(profiles))
-	seen := make(map[string]struct{}, len(profiles))
-	for _, profile := range profiles {
-		hadPersistedToken := strings.TrimSpace(profile.Token) != ""
-		profile = modelconfig.NormalizeProfileConfig(profile)
-		if hadPersistedToken {
-			profile.PersistToken = true
-		}
-		if profile.ID == "" {
+	out := make([]modelconfig.ProviderEndpointConfig, 0, len(endpoints))
+	seen := make(map[string]struct{}, len(endpoints))
+	for _, endpoint := range endpoints {
+		endpoint = modelconfig.SanitizePersistedProviderEndpoint(endpoint)
+		if endpoint.ID == "" {
 			continue
 		}
-		key := strings.ToLower(strings.TrimSpace(profile.ID))
+		key := strings.ToLower(strings.TrimSpace(endpoint.ID))
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
-		out = append(out, profile)
-	}
-	return out
-}
-
-func dedupeModelProfilesForSave(profiles []modelconfig.ProfileConfig) []modelconfig.ProfileConfig {
-	if len(profiles) == 0 {
-		return nil
-	}
-	out := make([]modelconfig.ProfileConfig, 0, len(profiles))
-	seen := make(map[string]struct{}, len(profiles))
-	for _, profile := range profiles {
-		profile = modelconfig.SanitizePersistedProfile(profile)
-		if profile.ID == "" {
-			continue
-		}
-		key := strings.ToLower(strings.TrimSpace(profile.ID))
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, profile)
+		out = append(out, endpoint)
 	}
 	return out
 }

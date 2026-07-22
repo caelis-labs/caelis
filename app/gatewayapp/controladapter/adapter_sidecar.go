@@ -5,62 +5,55 @@ import (
 	"fmt"
 	"strings"
 
+	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
+	"github.com/caelis-labs/caelis/control/agentbinding"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
 func (d *Adapter) StartAgentRun(ctx context.Context, target string, prompt string, attachments []Attachment) (Turn, error) {
-	profile := controldelegation.NormalizeProfile(controldelegation.Profile(target))
-	if !controldelegation.IsDirectRunProfile(string(profile)) {
+	handle := agentbinding.NormalizeHandle(agentbinding.Handle(target))
+	if !agentbinding.IsDirectRun(handle) {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: %q is not a direct delegation profile", strings.TrimSpace(target))
 	}
-	if d == nil || d.stack == nil || d.stack.Delegation.StatusFn == nil {
-		return nil, missingRuntimeDependency("delegation status")
+	if d == nil || d.stack == nil || d.stack.AgentBinding.ResolveFn == nil {
+		return nil, missingRuntimeDependency("delegation placement")
 	}
-	status, err := d.stack.Delegation.StatusFn(delegationContext(ctx))
+	placement, err := d.stack.AgentBinding.ResolveFn(bindingContext(ctx), handle)
 	if err != nil {
 		return nil, err
 	}
-	agent := ""
-	reasoningEffort := ""
-	for _, item := range status.Profiles {
-		if item.Definition.Profile != profile && item.Binding.Profile != profile {
-			continue
-		}
-		if item.Binding.Target != controldelegation.TargetAgent || strings.TrimSpace(item.Agent.ID) == "" {
-			return nil, fmt.Errorf("app/gatewayapp/controladapter: /%s is not bound; run /subagent bind %s to choose an Agent", profile, profile)
-		}
-		agent = strings.TrimSpace(item.Agent.ID)
-		reasoningEffort = strings.TrimSpace(item.Binding.ReasoningEffort)
-		break
+	agent := strings.TrimSpace(placement.Agent)
+	if placement.Kind == sdkplacement.KindModel {
+		agent = string(handle)
 	}
 	if agent == "" {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: delegation profile %q is unavailable", profile)
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: delegation handle %q has no executable endpoint", handle)
 	}
 	return d.startSidecarTurn(ctx, startSidecarTurnRequest{
-		Agent:           agent,
-		ReasoningEffort: reasoningEffort,
-		LabelBase:       string(profile),
-		Prompt:          prompt,
-		DisplayInput:    displayInputWithAttachments(prompt, attachments),
-		Attachments:     attachments,
-		Source:          controldelegation.DirectRunSource(profile),
+		Agent:        agent,
+		Placement:    placement,
+		LabelBase:    string(handle),
+		Prompt:       prompt,
+		DisplayInput: displayInputWithAttachments(prompt, attachments),
+		Attachments:  attachments,
+		Source:       controlagents.DirectRunSource(handle),
 	})
 }
 
 type startSidecarTurnRequest struct {
-	Agent           string
-	ReasoningEffort string
-	LabelBase       string
-	Prompt          string
-	DisplayInput    string
-	DisplayTitle    string
-	Attachments     []Attachment
-	Source          string
-	Transient       bool
+	Agent        string
+	Placement    sdkplacement.Placement
+	LabelBase    string
+	Prompt       string
+	DisplayInput string
+	DisplayTitle string
+	Attachments  []Attachment
+	Source       string
+	Transient    bool
 }
 
 func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequest) (Turn, error) {
@@ -88,17 +81,17 @@ func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequ
 	labelBase := firstNonEmpty(req.LabelBase, agent)
 	label := d.allocateSideAgentLabel(ctx, activeSession.SessionRef, labelBase)
 	startReq := gateway.StartParticipantRequest{
-		SessionRef:      activeSession.SessionRef,
-		BindingKey:      d.bindingKey,
-		Agent:           agent,
-		ReasoningEffort: strings.TrimSpace(req.ReasoningEffort),
-		Role:            session.ParticipantRoleSidecar,
-		Source:          source,
-		Label:           label,
-		Input:           prompt,
-		DisplayInput:    strings.TrimSpace(req.DisplayInput),
-		DisplayTitle:    strings.TrimSpace(req.DisplayTitle),
-		ContentParts:    contentParts,
+		SessionRef:   activeSession.SessionRef,
+		BindingKey:   d.bindingKey,
+		Agent:        agent,
+		Placement:    req.Placement,
+		Role:         session.ParticipantRoleSidecar,
+		Source:       source,
+		Label:        label,
+		Input:        prompt,
+		DisplayInput: strings.TrimSpace(req.DisplayInput),
+		DisplayTitle: strings.TrimSpace(req.DisplayTitle),
+		ContentParts: contentParts,
 	}
 	if req.Transient {
 		startReq.Lifecycle = gateway.ParticipantLifecycleTransient

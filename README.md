@@ -101,11 +101,12 @@ If no model is configured yet, start the TUI and run `/connect`.
 
 Use `/subagent` to configure the fixed Caelis delegation profiles: Breeze for
 fast bounded work, Orbit for general implementation and review, and Zenith for
-deep or high-risk analysis. Unbound profiles use the current Session model and
-reasoning effort (`self`); connected model or ACP Agent IDs remain configuration
-targets instead of being exposed directly in the model-facing Spawn catalog.
-Deleting a bound model or disconnecting a bound ACP Agent automatically returns
-the affected profiles to `self`; no separate reset command is required.
+deep or high-risk analysis. Each binding selects one connected `ModelProfile`
+and an explicit reasoning effort. `self` separately uses the current Session
+profile and effort; an unbound fixed profile is not exposed in Spawn or direct
+run catalogs. Provider and ACP connections both produce `ModelProfile` choices,
+while raw model and external Agent IDs remain hidden from the model-facing Spawn
+catalog. Guardian and Reviewer accept provider profiles only.
 
 To use a ChatGPT subscription as the primary model path, choose the `codex`
 model provider in `/connect` and complete the guided sign-in. Caelis opens a

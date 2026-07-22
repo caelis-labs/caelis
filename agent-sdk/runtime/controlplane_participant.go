@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -55,13 +56,13 @@ func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachPartici
 		return session.Session{}, fmt.Errorf("agent-sdk/runtime: participant lifecycle store does not support atomic event persistence")
 	}
 	binding, err := r.controllers.Attach(ctx, controller.AttachRequest{
-		SessionRef:      ref,
-		Session:         activeSession,
-		Agent:           strings.TrimSpace(req.Agent),
-		Role:            req.Role,
-		Source:          strings.TrimSpace(req.Source),
-		Label:           strings.TrimSpace(req.Label),
-		ReasoningEffort: strings.TrimSpace(req.ReasoningEffort),
+		SessionRef: ref,
+		Session:    activeSession,
+		Agent:      strings.TrimSpace(req.Agent),
+		Role:       req.Role,
+		Source:     strings.TrimSpace(req.Source),
+		Label:      strings.TrimSpace(req.Label),
+		Placement:  req.Placement,
 	})
 	if err != nil {
 		return session.Session{}, err
@@ -534,7 +535,7 @@ func (r *Runtime) ensureACPParticipantRun(
 		return session.Session{}, session.ParticipantBinding{}, err
 	}
 	attached = normalizeRehydratedACPParticipantBinding(binding, attached)
-	if attached == binding {
+	if reflect.DeepEqual(attached, binding) {
 		return activeSession, attached, nil
 	}
 	updated, err := r.sessions.PutParticipant(ctx, session.PutParticipantRequest{
@@ -591,8 +592,8 @@ func normalizeRehydratedACPParticipantBinding(original session.ParticipantBindin
 	if out.Label == "" {
 		out.Label = firstNonEmpty(strings.TrimSpace(original.Label), strings.TrimSpace(out.AgentName), strings.TrimSpace(out.ID))
 	}
-	if out.ReasoningEffort == "" {
-		out.ReasoningEffort = strings.TrimSpace(original.ReasoningEffort)
+	if out.Placement.Kind == "" {
+		out.Placement = original.Placement
 	}
 	if out.Source == "" {
 		out.Source = strings.TrimSpace(original.Source)

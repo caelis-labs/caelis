@@ -161,15 +161,11 @@ func slashConnectWithContext(ctx context.Context, service control.Service, agent
 		if err != nil {
 			return TaskResultMsg{Err: friendlyCommandError("connect ACP agent", err)}
 		}
-		names := make([]string, 0, len(result.Agents))
-		for _, agent := range result.Agents {
-			name := strings.TrimSpace(agent.ID)
-			if model := strings.TrimSpace(agent.Defaults.ModelID); model != "" {
-				name += " (" + model + ")"
-			}
-			names = append(names, name)
+		names := make([]string, 0, len(result.Profiles))
+		for _, profile := range result.Profiles {
+			names = append(names, strings.TrimSpace(profile.DisplayName)+" ["+strings.TrimSpace(profile.ID)+"]")
 		}
-		sendNotice(send, "connected ACP Agents: "+strings.Join(names, ", ")+"\nnext: /subagent bind assigns Breeze, Orbit, or Zenith")
+		sendNotice(send, "connected ACP ModelProfiles: "+strings.Join(names, ", ")+"\nnext: /subagent bind assigns Breeze, Orbit, or Zenith")
 		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}

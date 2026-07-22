@@ -118,37 +118,40 @@ ACP-native collaboration does not mean that raw ACP payloads are the only
 persisted/model-visible truth, that external Agents are trusted by default, or
 that every transport and presentation type belongs in the SDK.
 
-## User Agent identity and connection
+## Model profiles, external Agent identity, and connection
 
-The product exposes one Control-owned Agent identity regardless of execution
-backend. An Agent is backed by exactly one already configured built-in model or
-one local external ACP connection; it has no reusable role prompt. The main
-Agent supplies the concrete task when it delegates, and Control supplies the
-fixed scene prompt for Guardian and Reviewer.
+`ModelProfile` is the only product-level selectable model identity. A profile
+references exactly one backend:
 
-`/connect` first distinguishes a model provider from a local ACP Agent. Model
-selection persists both the model configuration and its stable Agent identity
-in one transaction. Local ACP setup records an explicit launcher (package
-runner, global npm install, Caelis-managed install, an existing native command
-on `PATH`, or a custom command). The user-facing identity remains provider-first
-while the selected model is display metadata and a session default. A
-short-lived empty ACP Session discovers the model catalog; after the user picks
-one model, another short-lived Session selects that model before discovering
-its model-scoped option catalog. Each `/connect` completion creates or updates
-exactly one stable Agent, so its defaults cannot be shared accidentally with a
-sibling model. The selected defaults and model-scoped discovery snapshot are
-persisted, but temporary Session IDs are not. Every real or resumed ACP Session
-revalidates and applies those defaults before its first prompt; stale choices
-fail closed.
+- a configured provider model; or
+- one stable external ACP Agent plus one exact remote model, its non-effort
+  Session defaults, and its effort capability.
 
-Interactive model-provider credentials are Control-owned. Persisted model
-profiles contain only an opaque credential reference; provider SDK adapters
-receive an authenticated HTTP client assembled by the product host. The Codex
-OAuth provider follows this path with one account and a fixed ChatGPT endpoint,
-so it can back the primary/controller Agent like any built-in model provider.
-It is not represented as an ACP child-Agent connection. Encrypted provider
-reasoning needed for stateless Responses continuation remains canonical SDK
-replay metadata and survives Session reconstruction.
+Provider endpoint configuration is infrastructure, not a second profile
+catalog. External Agent identity is connection-scoped: one ACP connection owns
+one stable Agent regardless of how many sibling models it advertises. Remote
+model selection and model-scoped defaults belong to sibling `ModelProfile`
+entries, never to synthetic Agents.
+
+`/connect` produces standard `ModelProfile` values for both provider and ACP
+paths. Provider connection persists the endpoint/model configuration and
+profile in one transaction. Local ACP setup records an explicit launcher
+(package runner, global npm install, Caelis-managed install, an existing native
+command on `PATH`, or a custom command), discovers remote models, and creates or
+updates one profile per selected model while retaining the same Agent identity.
+Temporary ACP Session IDs are never persisted. A real or resumed ACP Session
+applies the frozen remote model first, then deterministic non-effort defaults,
+then the exact effort option last; missing or stale capabilities fail before
+the first prompt.
+
+Interactive provider credentials are Control-owned. AppConfig v2 persists
+provider endpoints under `provider_endpoints` and stores only an opaque
+credential reference. API keys or environment-variable sources live in the
+credential store; managed OAuth remains referenced by its maintained identity.
+The Codex OAuth provider follows the provider path and is not represented as an
+ACP child Agent. Encrypted provider reasoning needed for stateless Responses
+continuation remains canonical SDK replay metadata and survives Session
+reconstruction.
 
 Caelis-managed npm adapters use an isolated immutable directory per adapter
 version. Installation writes only to a unique staging directory, validates the
@@ -158,36 +161,47 @@ attempt without modifying a previously usable adapter or another adapter's
 installation. Setup progress is transient Control metadata that Surfaces may
 render; it is not persisted in the Agent roster or Session history.
 
-`/connect disconnect` removes one external Agent identity from the same roster.
-Sibling model Agents keep their shared ACP connection; removing the final
-reference also removes the connection and its discovery snapshots. Disconnect
-never uninstalls the external or Caelis-managed adapter, never deletes prior
-Sessions, and is rejected while a Turn is active or while the selected Agent
-controls the current task.
+Deleting a provider model removes its provider profile and ordinary handle
+bindings that reference it. `/connect disconnect` removes one connection-scoped
+ACP Agent, every sibling `ModelProfile` backed by that Agent, and their ordinary
+handle bindings; it also removes the connection and discovery snapshots. A
+profile bound to Guardian or Reviewer must be rebound or reset first.
+Disconnect never uninstalls an adapter or deletes prior Sessions, and active
+execution still fails closed.
 
-The same roster supplies delegation and system-Agent binding targets, plus
-Control-authorized handoff targets. Roster identities are configuration data;
-connecting a model or external ACP Agent never creates a raw slash command for
-that Agent ID. Model-visible Spawn always exposes `self` and exposes the fixed
-capability profiles `breeze`, `orbit`, and `zenith` only when each one has an
-explicit roster Agent binding; it never expands every connected Agent or model
-ID into the tool schema. `self` inherits the current Session model and effective
-reasoning effort. An unbound configurable profile is absent from both Spawn and
-the user-facing slash catalog; a manually entered direct run still fails closed.
-`/subagent` first offers `list` and `bind`; it binds Breeze, Orbit, or Zenith to
-one roster Agent and may
-override effort only for model-backed Agents; external ACP Agents retain their
-own defaults. The same command binds Guardian and Reviewer only to model-backed
-Agents and may override their reasoning effort, with an unbound system Agent
-retaining its product default. Removing a
-roster Agent atomically drops its profile and system-Agent bindings. Control
-resolves the profile to a concrete Agent/model/effort
-placement before writing the durable Spawn intent and persists that placement
-and its fingerprint with the task, so later configuration changes cannot alter
-recovery. A direct profile slash run applies the same effort override before
-the participant's first ACP prompt and records it in the durable participant
-binding so reattachment preserves the execution choice. This is a projection
-over the one roster, not a second Agent catalog.
+`/subagent bind` maps one fixed handle to exactly one `ModelProfile` plus one
+explicit canonical effort. Breeze, Orbit, and Zenith accept provider or ACP
+profiles. Guardian and Reviewer accept provider profiles only; ACP selection is
+rejected as a typed unsupported-backend error. `self` is an independent Spawn
+handle that freezes the current Session profile and effort; it is not an
+implicit fallback for an unbound fixed handle. The current main controller
+Session is intentionally provider-backed: model assembly passes its resolved
+provider `ProfileID` and canonical effort to Spawn as a typed Session context.
+Spawn does not reconstruct that identity from a model alias, and a missing or
+non-provider Session profile fails before child work is prepared. Unbound fixed
+handles are absent from Spawn and direct-run catalogs. An ACP-controlled Turn
+has no local provider Session selection and therefore does not advertise the
+`self` Spawn target.
+
+Spawn, Delegate, direct profile runs, Guardian, and Reviewer all call the same
+Control handle resolver. Participant attach instead calls the explicit
+profile-and-effort selector, so handle requests cannot accidentally carry
+participant-only fields. Both operations read the same AppConfig snapshot, map
+canonical effort to exact backend configuration, and seal an SDK `Placement`.
+Control stores that whole placement and its configuration fingerprint with
+durable task or participant intent. Runtime consumes it directly and never
+looks up `ProfileID` again. Rebinding a handle therefore cannot change already
+prepared work; deletion or mutation of the referenced backend makes recovery
+fail closed. Participant reattach reuses the persisted placement. Lifecycle
+audit metadata exposes only `profile_id` and canonical `reasoning_effort`, not
+credentials or remote configuration values.
+
+Session document v1 predates durable participant Placement. Its reader retains
+the Session, State, controller, subagents, and any ACP participant that already
+has a valid sealed Placement; unsafe ACP bindings are omitted without guessing
+current AppConfig and without rewriting on read. The file Store records those
+omissions in a sanitized process-local migration report that Doctor surfaces
+for the current process. A later ordinary Session mutation writes document v2.
 
 Presentation command resolution is deterministic: core command, fixed profile,
 addressable profile run such as `/breeze(lina)`, then a non-Agent slash command

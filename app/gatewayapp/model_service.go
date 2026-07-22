@@ -7,30 +7,31 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
-	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/modelprofile"
+	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
 // Connect reconfigures the model provider on the live stack. The new config
 // takes effect for subsequent turns.
-func (s *Stack) Connect(cfg ModelConfig) (string, error) {
-	modelIDs, err := s.ConnectModels([]ModelConfig{cfg})
+func (s *Stack) Connect(cfg ModelConfig) (modelprofile.ModelProfile, error) {
+	profiles, err := s.ConnectModels([]ModelConfig{cfg})
 	if err != nil {
-		return "", err
+		return modelprofile.ModelProfile{}, err
 	}
-	if len(modelIDs) == 0 {
-		return "", fmt.Errorf("gatewayapp: connect produced no model")
+	if len(profiles) == 0 {
+		return modelprofile.ModelProfile{}, fmt.Errorf("gatewayapp: connect produced no model profile")
 	}
-	return modelIDs[0], nil
+	return profiles[0], nil
 }
 
 // ConnectModels atomically persists one or more provider-backed models. An
 // existing default remains active; the first connected model becomes the
 // default only when no model has been configured yet.
-func (s *Stack) ConnectModels(configs []ModelConfig) ([]string, error) {
+func (s *Stack) ConnectModels(configs []ModelConfig) (profiles []modelprofile.ModelProfile, err error) {
 	if s == nil {
 		return nil, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -39,14 +40,23 @@ func (s *Stack) ConnectModels(configs []ModelConfig) ([]string, error) {
 	}
 	s.reconfigureMu.Lock()
 	defer s.reconfigureMu.Unlock()
-	s.agentRosterMu.Lock()
-	defer s.agentRosterMu.Unlock()
+	s.assemblyMutationMu.Lock()
+	defer s.assemblyMutationMu.Unlock()
 	if err := s.rejectReconfigureWhileActive("connect model"); err != nil {
 		return nil, err
 	}
 	if s.lookup == nil {
 		return nil, fmt.Errorf("gatewayapp: model lookup unavailable")
 	}
+	configs, credentialTxn, err := s.prepareProviderCredentials(configs)
+	if err != nil {
+		return nil, errors.Join(err, credentialTxn.rollback())
+	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, credentialTxn.rollback())
+		}
+	}()
 	txn, err := s.beginModelConfigTransaction()
 	if err != nil {
 		return nil, err
@@ -73,31 +83,39 @@ func (s *Stack) ConnectModels(configs []ModelConfig) ([]string, error) {
 	if err != nil {
 		return nil, txn.rollback(err)
 	}
-	rosterSelections := make([]controlagents.ModelBackingSelection, 0, len(modelIDs))
+	profiles = make([]modelprofile.ModelProfile, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
-		model, ok := s.lookup.Config(modelID)
+		configured, ok := s.lookup.Config(modelID)
 		if !ok {
 			return nil, txn.rollback(fmt.Errorf("gatewayapp: connected model %q is unavailable", modelID))
 		}
-		rosterSelections = append(rosterSelections, controlagents.ModelBackingSelection{
-			Alias: model.ID, Name: firstNonEmpty(model.Alias, model.Model, model.ID), Namespace: model.Provider,
-		})
+		profile, err := modelprofilebuilder.FromProvider(configured)
+		if err != nil {
+			return nil, txn.rollback(fmt.Errorf("gatewayapp: build model profile for %q: %w", modelID, err))
+		}
+		profiles = append(profiles, profile)
 	}
-	nextRoster, _, err := controlagents.UpsertModelBackedAgents(doc.AgentRoster, rosterSelections, rosterAgentNameAllowed)
-	if err != nil {
-		return nil, txn.rollback(err)
-	}
-	txn.captureAgentRoster(doc.AgentRoster)
+	txn.captureConfig(doc)
 	doc.Models = s.lookup.Snapshot()
-	doc.AgentRoster = nextRoster
+	doc.ModelProfiles, err = modelprofile.Upsert(doc.ModelProfiles, profiles...)
+	if err != nil {
+		return nil, txn.rollback(fmt.Errorf("gatewayapp: update model profile catalog: %w", err))
+	}
+	doc.ModelProfiles.DefaultProfileID = modelprofile.BuildProviderID(s.lookup.DefaultID())
 	if err := s.store.Save(doc); err != nil {
+		if configstore.WriteCommitted(err) {
+			txn.markStoreSaved()
+			credentialTxn.commit()
+			return profiles, errors.Join(err, s.refreshConfiguredAgentsFromStore())
+		}
 		return nil, txn.rollback(err)
 	}
 	txn.markStoreSaved()
 	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
 		return nil, txn.rollback(err)
 	}
-	return modelIDs, nil
+	credentialTxn.commit()
+	return profiles, nil
 }
 
 // UseModel persists one per-session model alias override for subsequent turns.
@@ -107,8 +125,8 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 	}
 	s.reconfigureMu.Lock()
 	defer s.reconfigureMu.Unlock()
-	s.agentRosterMu.Lock()
-	defer s.agentRosterMu.Unlock()
+	s.assemblyMutationMu.Lock()
+	defer s.assemblyMutationMu.Unlock()
 	if err := s.rejectReconfigureWhileActive("switch model"); err != nil {
 		return err
 	}
@@ -148,12 +166,16 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 	}
 	s.lookup.SetDefault(cfg.ID)
 	txn.applyResolver()
-	if err := s.saveModelConfigs(); err != nil {
-		return txn.rollback(err)
+	saveErr := s.saveModelConfigs()
+	if saveErr != nil && !configstore.WriteCommitted(saveErr) {
+		return txn.rollback(saveErr)
 	}
 	txn.markStoreSaved()
 	s.setRuntimeDefaultModelFromLookup()
 	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
+		if saveErr != nil {
+			return errors.Join(saveErr, err)
+		}
 		return txn.rollback(err)
 	}
 	if _, err := s.updateSessionState(ctx, ref, func(state map[string]any) (map[string]any, error) {
@@ -169,9 +191,12 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 		}
 		return next, nil
 	}); err != nil {
+		if saveErr != nil {
+			return errors.Join(saveErr, err)
+		}
 		return txn.rollbackWithState(ctx, ref, previousState, err)
 	}
-	return nil
+	return saveErr
 }
 
 // DeleteModel clears one per-session model alias override when it matches the
@@ -182,8 +207,8 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 	}
 	s.reconfigureMu.Lock()
 	defer s.reconfigureMu.Unlock()
-	s.agentRosterMu.Lock()
-	defer s.agentRosterMu.Unlock()
+	s.assemblyMutationMu.Lock()
+	defer s.assemblyMutationMu.Unlock()
 	if err := s.rejectReconfigureWhileActive("delete model"); err != nil {
 		return err
 	}
@@ -213,28 +238,32 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 	if err != nil {
 		return err
 	}
-	nextRoster := controlagents.RemoveModelBackedAgent(doc.AgentRoster, cfg.ID)
-	if err := s.rejectRemovedLiveACPAgents(ctx, doc.AgentRoster, nextRoster); err != nil {
+	profileID := modelprofile.BuildProviderID(cfg.ID)
+	nextBindings, err := agentbinding.PrepareProfileRemoval(doc.AgentBindings, profileID)
+	if err != nil {
 		return err
 	}
+	nextProfiles := modelprofile.Remove(doc.ModelProfiles, profileID)
 	if err := s.lookup.Delete(alias); err != nil {
 		return err
 	}
 	hasDefault := strings.TrimSpace(s.lookup.DefaultID()) != ""
 	txn.applyResolver()
-	txn.captureAgentRoster(doc.AgentRoster)
-	txn.captureDelegation(doc.Delegation)
-	txn.captureSystemAgents(doc.SystemAgents)
+	txn.captureConfig(doc)
 	doc.Models = s.lookup.Snapshot()
-	doc.Delegation = resetRemovedDelegationBindings(doc.Delegation, doc.AgentRoster, nextRoster)
-	doc.SystemAgents = resetRemovedSystemAgentBindings(doc.SystemAgents, doc.AgentRoster, nextRoster)
-	doc.AgentRoster = nextRoster
-	if err := s.store.Save(doc); err != nil {
-		return txn.rollback(err)
+	doc.ModelProfiles = nextProfiles
+	doc.ModelProfiles.DefaultProfileID = modelprofile.BuildProviderID(s.lookup.DefaultID())
+	doc.AgentBindings = nextBindings
+	saveErr := s.store.Save(doc)
+	if saveErr != nil && !configstore.WriteCommitted(saveErr) {
+		return txn.rollback(saveErr)
 	}
 	txn.markStoreSaved()
 	s.setRuntimeDefaultModelFromLookup()
 	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
+		if saveErr != nil {
+			return errors.Join(saveErr, err)
+		}
 		return txn.rollback(err)
 	}
 	if _, err := s.updateSessionState(ctx, ref, func(state map[string]any) (map[string]any, error) {
@@ -249,9 +278,12 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 		}
 		return next, nil
 	}); err != nil {
+		if saveErr != nil {
+			return errors.Join(saveErr, err)
+		}
 		return txn.rollbackWithState(ctx, ref, previousState, err)
 	}
-	return nil
+	return saveErr
 }
 
 type modelConfigTransaction struct {
@@ -260,12 +292,8 @@ type modelConfigTransaction struct {
 	previousLookup        persistedModelConfig
 	previousContextWindow int
 	previousRuntime       stackRuntimeConfig
-	previousAgentRoster   controlagents.Configuration
-	restoreAgentRoster    bool
-	previousDelegation    controldelegation.Configuration
-	restoreDelegation     bool
-	previousSystemAgents  controlsystemagent.Configuration
-	restoreSystemAgents   bool
+	previousConfig        AppConfig
+	restoreConfig         bool
 	storeSaved            bool
 }
 
@@ -306,28 +334,12 @@ func (t *modelConfigTransaction) markStoreSaved() {
 	}
 }
 
-func (t *modelConfigTransaction) captureAgentRoster(roster controlagents.Configuration) {
+func (t *modelConfigTransaction) captureConfig(configuration AppConfig) {
 	if t == nil {
 		return
 	}
-	t.previousAgentRoster = controlagents.NormalizeConfiguration(roster)
-	t.restoreAgentRoster = true
-}
-
-func (t *modelConfigTransaction) captureDelegation(configuration controldelegation.Configuration) {
-	if t == nil {
-		return
-	}
-	t.previousDelegation = controldelegation.NormalizeConfiguration(configuration)
-	t.restoreDelegation = true
-}
-
-func (t *modelConfigTransaction) captureSystemAgents(configuration controlsystemagent.Configuration) {
-	if t == nil {
-		return
-	}
-	t.previousSystemAgents = controlsystemagent.NormalizeConfiguration(configuration)
-	t.restoreSystemAgents = true
+	t.previousConfig = configuration
+	t.restoreConfig = true
 }
 
 func (t *modelConfigTransaction) rollback(cause error) error {
@@ -343,26 +355,27 @@ func (t *modelConfigTransaction) rollback(cause error) error {
 		return cause
 	}
 	var saveErr error
-	if t.restoreAgentRoster && t.restoreDelegation && t.restoreSystemAgents {
-		saveErr = t.stack.saveModelConfigsAgentRosterDelegationAndSystemAgents(
-			t.previousAgentRoster,
-			t.previousDelegation,
-			t.previousSystemAgents,
-		)
-	} else if t.restoreAgentRoster && t.restoreDelegation {
-		saveErr = t.stack.saveModelConfigsAgentRosterAndDelegation(t.previousAgentRoster, t.previousDelegation)
-	} else if t.restoreAgentRoster {
-		saveErr = t.stack.saveModelConfigsAndAgentRoster(t.previousAgentRoster)
+	if t.restoreConfig {
+		saveErr = t.stack.store.Save(t.previousConfig)
 	} else {
 		saveErr = t.stack.saveModelConfigs()
 	}
-	if saveErr != nil {
+	if saveErr != nil && !configstore.WriteCommitted(saveErr) {
 		return errors.Join(cause, fmt.Errorf("gatewayapp: rollback model config save failed: %w", saveErr))
 	}
-	if refreshErr := t.stack.refreshConfiguredAgentsFromStore(); refreshErr != nil {
-		return errors.Join(cause, fmt.Errorf("gatewayapp: rollback Agent assembly refresh failed: %w", refreshErr))
+	refreshErr := t.stack.refreshConfiguredAgentsFromStore()
+	return errors.Join(
+		cause,
+		wrapOptionalError("gatewayapp: rollback model config save failed", saveErr),
+		wrapOptionalError("gatewayapp: rollback Agent assembly refresh failed", refreshErr),
+	)
+}
+
+func wrapOptionalError(message string, err error) error {
+	if err == nil {
+		return nil
 	}
-	return cause
+	return fmt.Errorf("%s: %w", message, err)
 }
 
 func (t *modelConfigTransaction) rollbackWithState(ctx context.Context, ref session.SessionRef, previousState map[string]any, cause error) error {

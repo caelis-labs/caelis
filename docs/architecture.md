@@ -73,15 +73,25 @@ Document responsibilities are intentionally separate:
   require custom advanced configuration.
 - `control/modelconfig`: Control-owned provider and endpoint onboarding
   templates, provider authentication orchestration, authenticated model
-  selection, persisted model/profile configuration semantics, and complete SDK
-  model construction. Presentation adapters map requests into this package;
-  `app/gatewayapp` only persists the resulting configuration and installs the
-  selected model into its runtime transaction.
-- `control/agents`: Control-owned user Agent roster. Each Agent has exactly one
-  backing: a configured built-in model alias or an external ACP connection.
-  External connections carry launch declarations, per-Agent model/config
-  defaults, and discovery snapshots; all Agents share stable Agent/run slash
-  naming. Live ACP Session IDs remain execution state and are never persisted
+  selection, provider endpoint persistence, and complete SDK model
+  construction. Provider endpoints are infrastructure and are not selectable
+  `ModelProfile` values. Persisted AppConfig contains only an opaque credential
+  reference; credential material remains in the Control credential store.
+- `control/modelprofile`: the single product-level selectable model catalog.
+  Every entry references either one configured provider model or one external
+  ACP Agent plus one exact remote model, defaults, and canonical-to-wire effort
+  mapping. `/connect` produces these profiles for both backend kinds.
+- `control/agentbinding`: fixed handle bindings. Breeze, Orbit, Zenith,
+  Guardian, and Reviewer bind to exactly one `ModelProfile` and one explicit
+  canonical effort.
+- `control/placement`: the Control-owned placement boundary. Fixed-handle work
+  uses its handle resolver; participant attach uses its explicit profile-and-
+  effort selector. Both paths consume the same immutable snapshot and sealing
+  rules before durable work is prepared.
+- `control/agents`: external ACP connection identity and lifecycle. One stable
+  Agent represents one connection; sibling remote models are separate
+  `ModelProfile` entries and never become synthetic Agents or Agent-owned
+  defaults. Live ACP Session IDs remain execution state and are never persisted
   as discovery configuration.
 - `ports/controlclient`: frozen transitional transport-neutral product-client
   commands, outcomes, bootstrap state, and Session-feed subscription contracts.

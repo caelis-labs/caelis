@@ -5,27 +5,22 @@ import (
 	"testing"
 )
 
-func TestListDisconnectCandidatesOnlyIncludesExternalRosterAgents(t *testing.T) {
+func TestListDisconnectCandidatesOnlyIncludesConnectionScopedExternalAgents(t *testing.T) {
 	t.Parallel()
 
 	roster := Configuration{
 		Connections: []Connection{{ID: "claude", Launcher: Launcher{Command: "claude-agent-acp"}}},
-		Agents: []Agent{
-			{ID: "opus", Name: "Claude Opus", Backing: AgentBacking{ConnectionID: "claude"}, Defaults: SessionOptions{ModelID: "opus"}},
-			{ID: "sonnet", Name: "Claude Sonnet", Backing: AgentBacking{ConnectionID: "claude"}, Defaults: SessionOptions{ModelID: "sonnet"}},
-			{ID: "deepseek", Name: "DeepSeek", Backing: AgentBacking{ModelAlias: "deepseek"}},
-		},
+		Agents:      []Agent{{ID: "claude", Name: "Claude", ConnectionID: "claude"}},
 	}
 	want := []DisconnectCandidate{
-		{AgentID: "opus", Name: "Claude Opus", ConnectionID: "claude", SiblingCount: 1},
-		{AgentID: "sonnet", Name: "Claude Sonnet", ConnectionID: "claude", SiblingCount: 1},
+		{AgentID: "claude", Name: "Claude", ConnectionID: "claude", LastOnConnection: true},
 	}
 	if got := ListDisconnectCandidates(roster); !reflect.DeepEqual(got, want) {
 		t.Fatalf("ListDisconnectCandidates() = %#v, want %#v", got, want)
 	}
 }
 
-func TestDisconnectExternalAgentReleasesSharedConnectionOnlyAfterLastReference(t *testing.T) {
+func TestDisconnectExternalAgentReleasesConnectionAndSiblingModelDiscoveries(t *testing.T) {
 	t.Parallel()
 
 	roster := Configuration{
@@ -34,9 +29,8 @@ func TestDisconnectExternalAgentReleasesSharedConnectionOnlyAfterLastReference(t
 			{ID: "codex", Launcher: Launcher{Command: "codex-acp"}},
 		},
 		Agents: []Agent{
-			{ID: "opus", Backing: AgentBacking{ConnectionID: "claude"}, Defaults: SessionOptions{ModelID: "opus"}},
-			{ID: "sonnet", Backing: AgentBacking{ConnectionID: "claude"}, Defaults: SessionOptions{ModelID: "sonnet"}},
-			{ID: "codex", Backing: AgentBacking{ConnectionID: "codex"}, Defaults: SessionOptions{ModelID: "sol"}},
+			{ID: "claude", ConnectionID: "claude"},
+			{ID: "codex", ConnectionID: "codex"},
 		},
 		Discoveries: []DiscoverySnapshot{
 			{ConnectionID: "claude", SelectedModelID: "opus"},
@@ -45,31 +39,15 @@ func TestDisconnectExternalAgentReleasesSharedConnectionOnlyAfterLastReference(t
 		},
 	}
 
-	next, first, err := DisconnectExternalAgent(roster, "OPUS")
+	next, result, err := DisconnectExternalAgent(roster, "CLAUDE")
 	if err != nil {
-		t.Fatalf("DisconnectExternalAgent(opus) error = %v", err)
+		t.Fatalf("DisconnectExternalAgent(claude) error = %v", err)
 	}
-	if first.Agent.ID != "opus" || first.ConnectionID != "claude" || first.ConnectionRemoved {
-		t.Fatalf("first result = %#v, want shared connection retained", first)
-	}
-	if _, ok := LookupConnection(next, "claude"); !ok || len(next.Discoveries) != 2 {
-		t.Fatalf("shared roster = %#v, want connection retained and removed model discovery released", next)
-	}
-	for _, snapshot := range next.Discoveries {
-		if snapshot.ConnectionID == "claude" && snapshot.SelectedModelID != "sonnet" {
-			t.Fatalf("shared discoveries = %#v, want only sonnet on claude", next.Discoveries)
-		}
-	}
-
-	next, last, err := DisconnectExternalAgent(next, "sonnet")
-	if err != nil {
-		t.Fatalf("DisconnectExternalAgent(sonnet) error = %v", err)
-	}
-	if !last.ConnectionRemoved {
-		t.Fatalf("last result = %#v, want connection released", last)
+	if result.Agent.ID != "claude" || result.ConnectionID != "claude" || !result.ConnectionRemoved {
+		t.Fatalf("result = %#v, want connection removed", result)
 	}
 	if _, ok := LookupConnection(next, "claude"); ok {
-		t.Fatalf("final roster still contains released connection: %#v", next.Connections)
+		t.Fatalf("roster retained disconnected connection: %#v", next)
 	}
 	if got, want := len(next.Discoveries), 1; got != want || next.Discoveries[0].ConnectionID != "codex" {
 		t.Fatalf("discoveries = %#v, want only unrelated codex snapshot", next.Discoveries)
@@ -79,12 +57,27 @@ func TestDisconnectExternalAgentReleasesSharedConnectionOnlyAfterLastReference(t
 	}
 }
 
-func TestDisconnectExternalAgentRejectsModelBackedAgent(t *testing.T) {
+func TestDisconnectExternalAgentRejectsMultipleAgentIdentitiesForConnection(t *testing.T) {
 	t.Parallel()
 
-	roster := Configuration{Agents: []Agent{{ID: "deepseek", Backing: AgentBacking{ModelAlias: "deepseek"}}}}
+	roster := Configuration{
+		Connections: []Connection{{ID: "claude", Launcher: Launcher{Command: "claude-agent-acp"}}},
+		Agents: []Agent{
+			{ID: "opus", ConnectionID: "claude"},
+			{ID: "sonnet", ConnectionID: "claude"},
+		},
+	}
+	if _, _, err := DisconnectExternalAgent(roster, "opus"); err == nil {
+		t.Fatal("DisconnectExternalAgent(multiple identities) error = nil")
+	}
+}
+
+func TestDisconnectExternalAgentRejectsInvalidOrMissingAgent(t *testing.T) {
+	t.Parallel()
+
+	roster := Configuration{Agents: []Agent{{ID: "deepseek"}}}
 	if _, _, err := DisconnectExternalAgent(roster, "deepseek"); err == nil {
-		t.Fatal("DisconnectExternalAgent(model-backed) error = nil")
+		t.Fatal("DisconnectExternalAgent(invalid Agent) error = nil")
 	}
 	if _, _, err := DisconnectExternalAgent(roster, "missing"); err == nil {
 		t.Fatal("DisconnectExternalAgent(missing) error = nil")

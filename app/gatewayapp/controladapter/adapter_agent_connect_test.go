@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
 func TestAdapterACPConnectDiscoveryIsReusedForModelsConfigAndPersist(t *testing.T) {
@@ -52,7 +53,7 @@ func TestAdapterACPConnectDiscoveryIsReusedForModelsConfigAndPersist(t *testing.
 				if req.Discovery == nil || req.Discovery.SelectedModelID != "opus" || len(req.Discovery.Models) != 1 {
 					t.Fatalf("ConnectACP discovery = %#v, want cached snapshot", req.Discovery)
 				}
-				return controlagents.ConnectResult{Agents: []controlagents.Agent{{ID: "opus"}}, Discovery: *req.Discovery}, nil
+				return controlagents.ConnectResult{Profiles: []modelprofile.ModelProfile{{ID: "acp:claude:opus"}}, Discovery: *req.Discovery}, nil
 			},
 		},
 	}}
@@ -139,7 +140,7 @@ func TestAdapterACPConnectDoesNotUseExpiredDiscovery(t *testing.T) {
 			},
 			ConnectFn: func(_ context.Context, req controlagents.ConnectRequest) (controlagents.ConnectResult, error) {
 				connectedDiscovery = req.Discovery
-				return controlagents.ConnectResult{Agents: []controlagents.Agent{{ID: "opus"}}}, nil
+				return controlagents.ConnectResult{Profiles: []modelprofile.ModelProfile{{ID: "acp:claude:opus"}}}, nil
 			},
 		},
 	}}

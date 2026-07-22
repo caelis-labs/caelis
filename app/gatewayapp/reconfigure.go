@@ -18,9 +18,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
-	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
+	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -39,55 +38,7 @@ func (s *Stack) saveModelConfigs() error {
 		return err
 	}
 	doc.Models = s.lookup.Snapshot()
-	return s.store.Save(doc)
-}
-
-func (s *Stack) saveModelConfigsAndAgentRoster(roster controlagents.Configuration) error {
-	if s == nil || s.store == nil || s.lookup == nil {
-		return nil
-	}
-	doc, err := s.store.Load()
-	if err != nil {
-		return err
-	}
-	doc.Models = s.lookup.Snapshot()
-	doc.AgentRoster = controlagents.NormalizeConfiguration(roster)
-	return s.store.Save(doc)
-}
-
-func (s *Stack) saveModelConfigsAgentRosterAndDelegation(
-	roster controlagents.Configuration,
-	delegation controldelegation.Configuration,
-) error {
-	if s == nil || s.store == nil || s.lookup == nil {
-		return nil
-	}
-	doc, err := s.store.Load()
-	if err != nil {
-		return err
-	}
-	doc.Models = s.lookup.Snapshot()
-	doc.AgentRoster = controlagents.NormalizeConfiguration(roster)
-	doc.Delegation = controldelegation.NormalizeConfiguration(delegation)
-	return s.store.Save(doc)
-}
-
-func (s *Stack) saveModelConfigsAgentRosterDelegationAndSystemAgents(
-	roster controlagents.Configuration,
-	delegation controldelegation.Configuration,
-	systemAgents controlsystemagent.Configuration,
-) error {
-	if s == nil || s.store == nil || s.lookup == nil {
-		return nil
-	}
-	doc, err := s.store.Load()
-	if err != nil {
-		return err
-	}
-	doc.Models = s.lookup.Snapshot()
-	doc.AgentRoster = controlagents.NormalizeConfiguration(roster)
-	doc.Delegation = controldelegation.NormalizeConfiguration(delegation)
-	doc.SystemAgents = controlsystemagent.NormalizeConfiguration(systemAgents)
+	doc.ModelProfiles.DefaultProfileID = modelprofile.BuildProviderID(s.lookup.DefaultID())
 	return s.store.Save(doc)
 }
 
@@ -338,7 +289,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		Sessions:              s.Sessions,
 		Controllers:           localCfg.Controllers,
 		Context:               contextRouter,
-		ControllerBindingGate: s.agentRosterMu.RLocker(),
+		ControllerBindingGate: s.assemblyMutationMu.RLocker(),
 	})
 	if err != nil {
 		bundle.Close()
@@ -389,16 +340,16 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		Tools:             tools,
 		BaseMetadata:      cloneMap(effectiveBaseMetadata),
 		ApprovalModelResolver: func(ctx context.Context, _ session.SessionRef) (model.LLM, bool, error) {
-			resolved, bound, err := s.resolveSystemAgentModel(ctx, controlsystemagent.Guardian, runtimeCfg.ContextWindow)
+			resolved, bound, err := s.resolveSystemAgentModel(ctx, agentbinding.HandleGuardian, runtimeCfg.ContextWindow)
 			if err != nil {
 				return nil, false, err
 			}
 			return withSystemAgentReasoningEffort(resolved), bound, nil
 		},
 		ToolAugmenter: func(ctx context.Context, req kernelimpl.ToolAugmentContext) (kernelimpl.ToolAugmentation, error) {
-			s.agentRosterMu.RLock()
-			agents, targets, err := s.delegationSpawnConfiguration(req.EffectiveModelRef, req.EffectiveReasoningEffort)
-			s.agentRosterMu.RUnlock()
+			s.assemblyMutationMu.RLock()
+			agents, targets, err := s.delegationSpawnConfiguration(req.Session)
+			s.assemblyMutationMu.RUnlock()
 			if err != nil {
 				return kernelimpl.ToolAugmentation{}, err
 			}
@@ -447,7 +398,7 @@ func (s *Stack) installGatewayRuntimeBundle(oldGateway *kernelimpl.Gateway, bund
 		return err
 	}
 	// A caller may already hold the old Gateway pointer and begin a handoff once
-	// the roster mutation gate opens. Revoke removed Agents from that shared
+	// the assembly mutation gate opens. Revoke removed Agents from that shared
 	// registry before publishing the replacement runtime as well.
 	s.mu.RLock()
 	oldControlPlane := s.acpControlPlane

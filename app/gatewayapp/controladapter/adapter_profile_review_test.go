@@ -9,7 +9,9 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -33,6 +35,13 @@ func TestAdapterStartReviewUsesHiddenReviewerProfile(t *testing.T) {
 		session: activeSession,
 		handle:  reviewProfileTurnHandle(activeSession.SessionRef),
 	}
+	reviewerPlacement, err := sdkplacement.Seal(sdkplacement.Placement{
+		Kind: sdkplacement.KindModel, ProfileID: "provider:reviewer", Model: "reviewer-model",
+		ReasoningEffort: "high", ConfigFingerprint: "reviewer-config",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
 		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
@@ -41,6 +50,9 @@ func TestAdapterStartReviewUsesHiddenReviewerProfile(t *testing.T) {
 				return session.CloneSession(gw.session), nil
 			},
 		},
+		AgentBinding: AgentBindingRuntimeDeps{ResolveFn: func(context.Context, agentbinding.Handle) (sdkplacement.Placement, error) {
+			return reviewerPlacement, nil
+		}},
 	}, activeSession.SessionID, "surface", "ollama/llama3")
 	if err != nil {
 		t.Fatalf("NewAdapter() error = %v", err)
@@ -140,6 +152,7 @@ func (g *reviewProfileGatewayService) AttachParticipant(_ context.Context, req g
 		Label:     req.Label,
 		SessionID: "remote-reviewer",
 		Source:    req.Source,
+		Placement: req.Placement,
 	})
 	return session.CloneSession(g.session), nil
 }
@@ -151,13 +164,13 @@ func (g *reviewProfileGatewayService) PromptParticipant(_ context.Context, req g
 
 func (g *reviewProfileGatewayService) StartParticipant(ctx context.Context, req gateway.StartParticipantRequest) (gateway.BeginTurnResult, error) {
 	updated, err := g.AttachParticipant(ctx, gateway.AttachParticipantRequest{
-		SessionRef:      req.SessionRef,
-		BindingKey:      req.BindingKey,
-		Agent:           req.Agent,
-		Role:            req.Role,
-		Source:          req.Source,
-		Label:           req.Label,
-		ReasoningEffort: req.ReasoningEffort,
+		SessionRef: req.SessionRef,
+		BindingKey: req.BindingKey,
+		Agent:      req.Agent,
+		Role:       req.Role,
+		Source:     req.Source,
+		Label:      req.Label,
+		Placement:  req.Placement,
 	})
 	if err != nil {
 		return gateway.BeginTurnResult{}, err

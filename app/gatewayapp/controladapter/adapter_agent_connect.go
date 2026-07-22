@@ -58,7 +58,7 @@ func (d *Adapter) DiscoverACPConnection(ctx context.Context, req controlagents.C
 }
 
 // ConnectACP validates and persists the explicitly selected remote model as a
-// stable user-addressable Agent.
+// standard ModelProfile.
 func (d *Adapter) ConnectACP(ctx context.Context, req controlagents.ConnectRequest) (controlagents.ConnectResult, error) {
 	if d == nil || d.stack == nil || d.stack.Agent.ConnectFn == nil {
 		return controlagents.ConnectResult{}, missingRuntimeDependency("ACP agent connect")
@@ -82,8 +82,8 @@ func (d *Adapter) ConnectACP(ctx context.Context, req controlagents.ConnectReque
 	if err != nil {
 		return controlagents.ConnectResult{}, err
 	}
-	if len(result.Agents) == 0 {
-		return controlagents.ConnectResult{}, fmt.Errorf("app/gatewayapp/controladapter: ACP connect returned no Agents")
+	if len(result.Profiles) == 0 {
+		return controlagents.ConnectResult{}, fmt.Errorf("app/gatewayapp/controladapter: ACP connect returned no ModelProfiles")
 	}
 	d.mu.Lock()
 	endpointKey := acpDiscoveryEndpointKey(req)
@@ -104,9 +104,9 @@ func (d *Adapter) DisconnectCandidates(ctx context.Context) ([]controlagents.Dis
 	return d.stack.Agent.DisconnectCandidatesFn(ctx)
 }
 
-// DisconnectACP removes one external roster Agent without uninstalling its ACP
-// adapter. If it releases the final Connection reference, endpoint-scoped
-// discovery completions are invalidated as well.
+// DisconnectACP removes the selected external Agent's profiles without
+// uninstalling its ACP adapter. If it releases the final Connection reference,
+// endpoint-scoped discovery completions are invalidated as well.
 func (d *Adapter) DisconnectACP(ctx context.Context, agentID string) (controlagents.DisconnectResult, error) {
 	if d == nil || d.stack == nil || d.stack.Agent.DisconnectFn == nil {
 		return controlagents.DisconnectResult{}, missingRuntimeDependency("ACP Agent disconnect")

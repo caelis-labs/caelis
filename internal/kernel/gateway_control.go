@@ -50,13 +50,17 @@ func (g *Gateway) AttachParticipant(ctx context.Context, req AttachParticipantRe
 	if err != nil {
 		return session.Session{}, err
 	}
+	agentName := strings.TrimSpace(req.Agent)
+	if placedAgent := strings.TrimSpace(req.Placement.Agent); placedAgent != "" {
+		agentName = placedAgent
+	}
 	activeSession, err := g.control.AttachParticipant(ctx, agent.AttachParticipantRequest{
-		SessionRef:      ref,
-		Agent:           strings.TrimSpace(req.Agent),
-		Role:            req.Role,
-		Source:          strings.TrimSpace(req.Source),
-		Label:           strings.TrimSpace(req.Label),
-		ReasoningEffort: strings.TrimSpace(req.ReasoningEffort),
+		SessionRef: ref,
+		Agent:      agentName,
+		Role:       req.Role,
+		Source:     strings.TrimSpace(req.Source),
+		Label:      strings.TrimSpace(req.Label),
+		Placement:  req.Placement,
 	})
 	if err != nil {
 		return session.Session{}, err

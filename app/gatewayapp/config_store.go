@@ -38,7 +38,7 @@ func LoadAppConfig(root string) (AppConfig, error) {
 	if err != nil {
 		return AppConfig{}, err
 	}
-	if err := validateProductAgentRoster(doc.AgentRoster); err != nil {
+	if err := validateExternalAgents(doc.ExternalAgents); err != nil {
 		return AppConfig{}, err
 	}
 	return doc, nil
@@ -53,41 +53,50 @@ func (s *appConfigStore) Load() (AppConfig, error) {
 	if err != nil {
 		return AppConfig{}, err
 	}
-	if err := validateProductAgentRoster(doc.AgentRoster); err != nil {
+	if err := validateExternalAgents(doc.ExternalAgents); err != nil {
 		return AppConfig{}, err
 	}
 	return doc, nil
+}
+
+func (s *appConfigStore) MigrationReport() configstore.MigrationReport {
+	if s == nil || s.inner == nil {
+		return configstore.MigrationReport{}
+	}
+	s.inner.SetPath(s.path)
+	return s.inner.MigrationReport()
 }
 
 func (s *appConfigStore) Save(doc AppConfig) error {
 	if s == nil || s.inner == nil {
 		return nil
 	}
-	if err := validateProductAgentRoster(doc.AgentRoster); err != nil {
+	if err := validateExternalAgents(doc.ExternalAgents); err != nil {
 		return err
 	}
 	if s.saveHook != nil {
 		if err := s.saveHook(doc); err != nil {
+			if configstore.WriteCommitted(err) && s.savedHook != nil {
+				s.savedHook()
+			}
 			return err
 		}
 	}
 	s.inner.SetPath(s.path)
-	if err := s.inner.Save(doc); err != nil {
-		return err
-	}
-	if s.savedHook != nil {
+	err := s.inner.Save(doc)
+	if s.savedHook != nil && (err == nil || configstore.WriteCommitted(err)) {
 		s.savedHook()
 	}
-	return nil
+	return err
 }
 
-func validateProductAgentRoster(roster controlagents.Configuration) error {
-	if err := controlagents.ValidateConfiguration(roster); err != nil {
-		return fmt.Errorf("gatewayapp: invalid Agent roster: %w", err)
+func validateExternalAgents(configuration controlagents.Configuration) error {
+	if err := controlagents.ValidateConfiguration(configuration); err != nil {
+		return fmt.Errorf("gatewayapp: invalid external Agent configuration: %w", err)
 	}
-	for _, agent := range controlagents.ListAgents(roster) {
-		if forbiddenRosterAgentID(agent.ID) {
-			return fmt.Errorf("gatewayapp: roster Agent %q conflicts with a product command or system Agent", agent.ID)
+	for _, agent := range controlagents.ListAgents(configuration) {
+		if forbiddenExternalAgentID(agent.ID) {
+			return fmt.Errorf("gatewayapp: external Agent %q conflicts with a product command or system Agent", agent.ID)
 		}
 	}
 	return nil

@@ -188,14 +188,14 @@ func testRuntimeModelChoices(choices []gatewayapp.ModelChoice, err error) ([]Mod
 	out := make([]ModelChoice, 0, len(choices))
 	for _, choice := range choices {
 		out = append(out, ModelChoice{
-			ID:         choice.ID,
-			Alias:      choice.Alias,
-			Provider:   choice.Provider,
-			Model:      choice.Model,
-			ProfileID:  choice.ProfileID,
-			EndpointID: choice.EndpointID,
-			BaseURL:    choice.BaseURL,
-			Detail:     choice.Detail,
+			ID:                 choice.ID,
+			Alias:              choice.Alias,
+			Provider:           choice.Provider,
+			Model:              choice.Model,
+			ProviderEndpointID: choice.ProviderEndpointID,
+			EndpointID:         choice.EndpointID,
+			BaseURL:            choice.BaseURL,
+			Detail:             choice.Detail,
 		})
 	}
 	return out, nil

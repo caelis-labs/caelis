@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	prompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
@@ -100,7 +100,7 @@ func (r Router) shouldDispatchSlash(ctx context.Context, cmd string) bool {
 		}
 		return r.dynamicSlashAllowed(ctx, cmd)
 	}
-	return controldelegation.IsDirectRunProfile(cmd) || r.isDirectAgentRun(ctx, cmd)
+	return agentbinding.IsDirectRun(agentbinding.Handle(cmd)) || r.isDirectAgentRun(ctx, cmd)
 }
 
 func (r Router) dispatchPrivateSlash(ctx context.Context, req prompt.PrivateSlashRequest) (prompt.Result, bool, error) {
@@ -192,13 +192,13 @@ func (r Router) isRemoteControllerCommand(ctx context.Context, name string) bool
 func directAgentRuns(status control.AgentStatusSnapshot) []controlagents.Run {
 	runs := make([]controlagents.Run, 0, len(status.Participants))
 	for _, participant := range status.Participants {
-		runs = append(runs, controldelegation.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))
+		runs = append(runs, controlagents.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))
 	}
 	return runs
 }
 
 func availableAgentCommandName(name string) bool {
-	return controldelegation.IsDirectRunProfile(name)
+	return agentbinding.IsDirectRun(agentbinding.Handle(name))
 }
 
 func notice(text string) eventstream.Envelope {

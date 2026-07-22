@@ -43,14 +43,20 @@ func (d *Adapter) Connect(ctx context.Context, cfg ConnectConfig) (StatusSnapsho
 	if d.stack.Model.ConnectModelsFn == nil {
 		return StatusSnapshot{}, missingRuntimeDependency("connect")
 	}
-	aliases, err := d.stack.Model.ConnectModelsFn(assembled)
+	profiles, err := d.stack.Model.ConnectModelsFn(assembled)
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
-	if len(aliases) == 0 {
-		return StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: connect returned no model aliases")
+	if len(profiles) == 0 {
+		return StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: connect returned no model profiles")
 	}
-	alias := aliases[0]
+	alias := ""
+	if profiles[0].Backend.Provider != nil {
+		alias = profiles[0].Backend.Provider.ModelConfigID
+	}
+	if alias == "" {
+		return StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: provider connect returned a non-provider profile")
+	}
 	if activeSession, ok := d.currentSession(); ok && alias != "" && !hadConfiguredModel {
 		if d.stack.Model.UseFn == nil {
 			return StatusSnapshot{}, missingRuntimeDependency("use model")

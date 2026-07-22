@@ -10,7 +10,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -49,7 +48,7 @@ func TestEnsureAuthenticatedCompletesPKCECallback(t *testing.T) {
 	accountID := "account-from-id-token"
 	var tokenCalls atomic.Int32
 	var authorizationQuery url.Values
-	issuer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	issuer := newInMemoryHTTPServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		tokenCalls.Add(1)
 		if request.URL.Path != "/oauth/token" {
 			http.NotFound(writer, request)
@@ -80,12 +79,10 @@ func TestEnsureAuthenticatedCompletesPKCECallback(t *testing.T) {
 	}))
 	defer issuer.Close()
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	listener, callbackClient := newMemoryCallbackHarness(t)
 	credentialPath := DefaultCredentialPath(t.TempDir())
 	manager, err := NewManager(Options{
+		HTTPClient:     issuer.Client(),
 		Issuer:         issuer.URL,
 		CredentialPath: credentialPath,
 		Clock:          func() time.Time { return now },
@@ -112,7 +109,7 @@ func TestEnsureAuthenticatedCompletesPKCECallback(t *testing.T) {
 				t.Errorf("scope = %q, want %q", got, oauthScope)
 			}
 			callback := "http://" + listener.Addr().String() + "/auth/callback?code=code-1&state=" + url.QueryEscape(authorizationQuery.Get("state"))
-			response, err := http.Get(callback)
+			response, err := callbackClient.Get(callback)
 			if err != nil {
 				return err
 			}
@@ -168,15 +165,13 @@ func TestEnsureAuthenticatedCompletesPKCECallback(t *testing.T) {
 
 func TestEnsureAuthenticatedRejectsCallbackStateMismatch(t *testing.T) {
 	var tokenCalls atomic.Int32
-	issuer := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	issuer := newInMemoryHTTPServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		tokenCalls.Add(1)
 	}))
 	defer issuer.Close()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	listener, callbackClient := newMemoryCallbackHarness(t)
 	manager, err := NewManager(Options{
+		HTTPClient:     issuer.Client(),
 		Issuer:         issuer.URL,
 		CredentialPath: DefaultCredentialPath(t.TempDir()),
 		Headless:       func() bool { return false },
@@ -184,7 +179,7 @@ func TestEnsureAuthenticatedRejectsCallbackStateMismatch(t *testing.T) {
 			return listener, nil
 		},
 		BrowserOpener: func(string) error {
-			response, err := http.Get("http://" + listener.Addr().String() + "/auth/callback?code=code-1&state=wrong")
+			response, err := callbackClient.Get("http://" + listener.Addr().String() + "/auth/callback?code=code-1&state=wrong")
 			if err != nil {
 				return err
 			}
@@ -211,12 +206,13 @@ func TestEnsureAuthenticatedDoesNotReplaceTransientRefreshFailureWithLogin(t *te
 	if err := writeStoredCredentials(credentialPath, storedCredentials{Version: credentialSchemaVersion, RefreshToken: "refresh", AccountID: "account"}); err != nil {
 		t.Fatal(err)
 	}
-	issuer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+	issuer := newInMemoryHTTPServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		http.Error(writer, "temporarily unavailable", http.StatusServiceUnavailable)
 	}))
 	defer issuer.Close()
 	var browserCalls atomic.Int32
 	manager, err := NewManager(Options{
+		HTTPClient:     issuer.Client(),
 		Issuer:         issuer.URL,
 		CredentialPath: credentialPath,
 		Headless:       func() bool { return false },
@@ -245,7 +241,7 @@ func TestEnsureAuthenticatedRequiresLoginWhenRefreshChangesAccount(t *testing.T)
 	if err := writeStoredCredentials(credentialPath, storedCredentials{Version: credentialSchemaVersion, RefreshToken: "refresh", AccountID: "account-selected"}); err != nil {
 		t.Fatal(err)
 	}
-	issuer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+	issuer := newInMemoryHTTPServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, writer, tokenResponse{
 			AccessToken:  jwtForTest("account-other", nil, now.Add(time.Hour)),
 			RefreshToken: "refresh-other",
@@ -253,6 +249,7 @@ func TestEnsureAuthenticatedRequiresLoginWhenRefreshChangesAccount(t *testing.T)
 	}))
 	defer issuer.Close()
 	manager, err := NewManager(Options{
+		HTTPClient:     issuer.Client(),
 		Issuer:         issuer.URL,
 		CredentialPath: credentialPath,
 		Clock:          func() time.Time { return now },
@@ -318,7 +315,7 @@ func TestRefreshSingleflightRotatesCredentialAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	var refreshCalls atomic.Int32
-	issuer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	issuer := newInMemoryHTTPServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		refreshCalls.Add(1)
 		var body refreshRequest
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
@@ -335,6 +332,7 @@ func TestRefreshSingleflightRotatesCredentialAtomically(t *testing.T) {
 	defer issuer.Close()
 
 	manager, err := NewManager(Options{
+		HTTPClient:     issuer.Client(),
 		Issuer:         issuer.URL,
 		CredentialPath: credentialPath,
 		Clock:          func() time.Time { return now },
@@ -417,7 +415,7 @@ func TestRefreshCoordinatesManagersAndReusesPersistedAccess(t *testing.T) {
 	var refreshMu sync.Mutex
 	currentRefresh := "refresh-0"
 	refreshCalls := 0
-	issuer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	issuer := newInMemoryHTTPServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		var body refreshRequest
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			http.Error(writer, err.Error(), http.StatusBadRequest)
@@ -444,7 +442,7 @@ func TestRefreshCoordinatesManagersAndReusesPersistedAccess(t *testing.T) {
 	})}
 	clients := make([]*http.Client, 0, 2)
 	for range 2 {
-		manager, err := NewManager(Options{Issuer: issuer.URL, CredentialPath: credentialPath, Clock: func() time.Time { return now }})
+		manager, err := NewManager(Options{HTTPClient: issuer.Client(), Issuer: issuer.URL, CredentialPath: credentialPath, Clock: func() time.Time { return now }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -564,12 +562,12 @@ func TestAuthenticatedClientInvalidatesUnauthorizedTokenWithoutRetryingRequest(t
 		t.Fatal(err)
 	}
 	var refreshCalls atomic.Int32
-	issuer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+	issuer := newInMemoryHTTPServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		refreshCalls.Add(1)
 		writeJSON(t, writer, tokenResponse{AccessToken: jwtForTest("account", nil, now.Add(time.Hour)), RefreshToken: "refresh-new"})
 	}))
 	defer issuer.Close()
-	manager, err := NewManager(Options{Issuer: issuer.URL, CredentialPath: credentialPath, Clock: func() time.Time { return now }})
+	manager, err := NewManager(Options{HTTPClient: issuer.Client(), Issuer: issuer.URL, CredentialPath: credentialPath, Clock: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -620,13 +618,13 @@ func TestExpiredRefreshIsTerminalThroughProviderRetryLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 	var refreshCalls atomic.Int32
-	issuer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+	issuer := newInMemoryHTTPServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		refreshCalls.Add(1)
 		writer.WriteHeader(http.StatusBadRequest)
 		writeJSON(t, writer, tokenEndpointError{Error: map[string]any{"code": "refresh_token_expired", "message": "refresh token expired"}})
 	}))
 	defer issuer.Close()
-	manager, err := NewManager(Options{Issuer: issuer.URL, CredentialPath: credentialPath})
+	manager, err := NewManager(Options{HTTPClient: issuer.Client(), Issuer: issuer.URL, CredentialPath: credentialPath})
 	if err != nil {
 		t.Fatal(err)
 	}

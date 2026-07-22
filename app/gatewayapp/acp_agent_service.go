@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -9,10 +10,12 @@ import (
 	"sort"
 	"strings"
 
+	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
+	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	pluginapi "github.com/caelis-labs/caelis/ports/plugin"
@@ -162,7 +165,47 @@ func (s *Stack) configuredAssemblyWithPluginAgents(base assembly.ResolvedAssembl
 	if err != nil {
 		return assembly.ResolvedAssembly{}, err
 	}
-	return s.withAgentRosterACPAgents(resolved, runtimeCfg)
+	resolved, err = s.withExternalACPAgents(resolved, runtimeCfg)
+	if err != nil {
+		return assembly.ResolvedAssembly{}, err
+	}
+	return s.withDirectProfileAgents(resolved, runtimeCfg)
+}
+
+func (s *Stack) withDirectProfileAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
+	out := assembly.CloneResolvedAssembly(resolved)
+	if s == nil || s.store == nil || s.lookup == nil {
+		return out, nil
+	}
+	snapshot, err := s.placementSnapshot(context.Background())
+	if err != nil {
+		return assembly.ResolvedAssembly{}, err
+	}
+	for _, handle := range agentbinding.DirectRunHandles() {
+		if _, ok := agentbinding.Lookup(snapshot.placement.Bindings, handle); !ok {
+			continue
+		}
+		placement, err := s.resolveHandlePlacement(context.Background(), controlplacement.HandleRequest{
+			Handle: handle, Purpose: controlplacement.PurposeDirect,
+		})
+		if err != nil {
+			return assembly.ResolvedAssembly{}, err
+		}
+		if placement.Kind != sdkplacement.KindModel {
+			continue
+		}
+		configured, err := s.lookup.ResolveConfig(placement.Model)
+		if err != nil {
+			return assembly.ResolvedAssembly{}, err
+		}
+		configured.ReasoningEffort = placement.ReasoningEffort
+		materialized, err := s.materializeDelegatedModel(string(handle), configured, runtimeCfg)
+		if err != nil {
+			return assembly.ResolvedAssembly{}, err
+		}
+		out.Agents = append(out.Agents, materialized)
+	}
+	return out, nil
 }
 
 func (s *Stack) withReviewerAgent(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
@@ -172,33 +215,28 @@ func (s *Stack) withReviewerAgent(resolved assembly.ResolvedAssembly, runtimeCfg
 			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: host agent %q conflicts with the fixed Reviewer scene", ReviewerAgentID)
 		}
 	}
-	reviewerModel := runtimeCfg.Model
-	if s.store != nil {
-		doc, loadErr := s.store.Load()
-		if loadErr != nil {
-			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: load Reviewer model binding: %w", loadErr)
+	if s.store == nil {
+		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer placement: app config store unavailable")
+	}
+	placement, resolveErr := s.resolveHandlePlacement(context.Background(), controlplacement.HandleRequest{
+		Handle: agentbinding.HandleReviewer, Purpose: controlplacement.PurposeReviewer,
+	})
+	if resolveErr != nil {
+		var unavailable *controlplacement.DefaultProfileError
+		if errors.As(resolveErr, &unavailable) {
+			return out, nil
 		}
-		configured, bound, resolveErr := controlsystemagent.ResolveModel(
-			doc.SystemAgents,
-			controlsystemagent.Reviewer,
-			doc.AgentRoster,
-			doc.Models.Configs,
-		)
-		if resolveErr != nil {
-			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer model binding: %w", resolveErr)
-		}
-		if bound {
-			if s.lookup == nil {
-				return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer model binding: model lookup unavailable")
-			}
-			reviewerModel, resolveErr = s.lookup.ResolveConfig(configured.ID)
-			if resolveErr != nil {
-				return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer model %q: %w", configured.ID, resolveErr)
-			}
-			if configured.ReasoningEffort != "" {
-				reviewerModel.ReasoningEffort = configured.ReasoningEffort
-			}
-		}
+		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer placement: %w", resolveErr)
+	}
+	if s.lookup == nil {
+		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer model: model lookup unavailable")
+	}
+	reviewerModel, resolveErr := s.lookup.ResolveConfig(placement.Model)
+	if resolveErr != nil {
+		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer placement %q: %w", placement.ProfileID, resolveErr)
+	}
+	if placement.ReasoningEffort != "" {
+		reviewerModel.ReasoningEffort = placement.ReasoningEffort
 	}
 	reviewer, err := configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		Config: Config{
@@ -229,17 +267,17 @@ func (s *Stack) withReviewerAgent(resolved assembly.ResolvedAssembly, runtimeCfg
 	return out, nil
 }
 
-func (s *Stack) withAgentRosterACPAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
+func (s *Stack) withExternalACPAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	out := assembly.CloneResolvedAssembly(resolved)
 	if s == nil || s.store == nil {
 		return out, nil
 	}
 	doc, err := s.store.Load()
 	if err != nil {
-		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: load agent roster: %w", err)
+		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: load external Agent configuration: %w", err)
 	}
-	if err := controlagents.ValidateConfiguration(doc.AgentRoster); err != nil {
-		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: invalid agent roster: %w", err)
+	if err := controlagents.ValidateConfiguration(doc.ExternalAgents); err != nil {
+		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: invalid external Agent configuration: %w", err)
 	}
 	seen := make(map[string]struct{}, len(out.Agents))
 	for _, existing := range out.Agents {
@@ -247,18 +285,18 @@ func (s *Stack) withAgentRosterACPAgents(resolved assembly.ResolvedAssembly, run
 			seen[id] = struct{}{}
 		}
 	}
-	for _, agent := range controlagents.ListAgents(doc.AgentRoster) {
-		if forbiddenRosterAgentID(agent.ID) {
-			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: roster agent %q conflicts with a product command or system agent", agent.ID)
+	for _, agent := range controlagents.ListAgents(doc.ExternalAgents) {
+		if forbiddenExternalAgentID(agent.ID) {
+			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: external Agent %q conflicts with a product command or system Agent", agent.ID)
 		}
 		if _, exists := seen[agent.ID]; exists {
-			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: roster agent %q conflicts with an existing agent", agent.ID)
+			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: external Agent %q conflicts with an existing Agent", agent.ID)
 		}
-		resolvedAgent, connection, err := controlagents.ResolveAgent(doc.AgentRoster, agent.ID)
+		resolvedAgent, connection, err := controlagents.ResolveAgent(doc.ExternalAgents, agent.ID)
 		if err != nil {
-			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve roster agent %q: %w", agent.ID, err)
+			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve external Agent %q: %w", agent.ID, err)
 		}
-		materialized, err := s.materializeRosterAgent(resolvedAgent, connection, runtimeCfg)
+		materialized, err := s.materializeExternalAgent(resolvedAgent, connection)
 		if err != nil {
 			return assembly.ResolvedAssembly{}, err
 		}
@@ -268,54 +306,18 @@ func (s *Stack) withAgentRosterACPAgents(resolved assembly.ResolvedAssembly, run
 	return out, nil
 }
 
-func (s *Stack) materializeRosterAgent(agent controlagents.Agent, connection controlagents.Connection, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
-	if modelAlias := strings.TrimSpace(agent.Backing.ModelAlias); modelAlias != "" {
-		if s.lookup == nil {
-			return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: materialize roster agent %q: model lookup unavailable", agent.ID)
-		}
-		model, err := s.lookup.ResolveConfig(modelAlias)
-		if err != nil {
-			return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: materialize roster agent %q: %w", agent.ID, err)
-		}
-		return s.materializeModelRosterAgent(agent.ID, agent.Name, model, runtimeCfg)
+func (s *Stack) materializeExternalAgent(agent controlagents.Agent, connection controlagents.Connection) (assembly.AgentConfig, error) {
+	if strings.TrimSpace(agent.ConnectionID) == "" || !strings.EqualFold(agent.ConnectionID, connection.ID) {
+		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: external Agent %q has no matching ACP connection", agent.ID)
 	}
 	return assembly.AgentConfig{
-		Name:           agent.ID,
-		Description:    agent.Name,
-		Command:        connection.Launcher.Command,
-		Args:           append([]string(nil), connection.Launcher.Args...),
-		Env:            maps.Clone(connection.Launcher.Env),
-		WorkDir:        connection.Launcher.WorkDir,
-		SessionOptions: controlagents.NormalizeSessionOptions(agent.Defaults),
+		Name:        agent.ID,
+		Description: agent.Name,
+		Command:     connection.Launcher.Command,
+		Args:        append([]string(nil), connection.Launcher.Args...),
+		Env:         maps.Clone(connection.Launcher.Env),
+		WorkDir:     connection.Launcher.WorkDir,
 	}, nil
-}
-
-func (s *Stack) materializeModelRosterAgent(name string, description string, model ModelConfig, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
-	materialized, err := configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
-		Config: Config{
-			AppName:                   s.AppName,
-			UserID:                    s.UserID,
-			StoreDir:                  s.storeDir,
-			ControlOperationRetention: s.controlOperationRetention,
-			WorkspaceKey:              s.Workspace.Key,
-			WorkspaceCWD:              s.Workspace.CWD,
-			PolicyProfile:             runtimeCfg.PolicyProfile,
-			ContextWindow:             effectiveDelegationContextWindow(model, runtimeCfg.ContextWindow),
-			SystemPrompt:              runtimeCfg.SystemPrompt,
-			Model:                     model,
-		},
-		AppName:      s.AppName,
-		UserID:       s.UserID,
-		StoreDir:     s.storeDir,
-		WorkspaceKey: s.Workspace.Key,
-		WorkspaceCWD: s.Workspace.CWD,
-	})
-	if err != nil {
-		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: materialize roster agent %q: %w", name, err)
-	}
-	materialized.Name = strings.TrimSpace(name)
-	materialized.Description = strings.TrimSpace(description)
-	return materialized, nil
 }
 
 func (s *Stack) withPluginACPAgents(resolved assembly.ResolvedAssembly, pluginAgents []pluginAgentContribution) (assembly.ResolvedAssembly, error) {
@@ -349,7 +351,7 @@ func pluginAgentContributionToAssembly(pluginID string, in pluginapi.AgentContri
 	if name == "" {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: plugin %q agent name is required", strings.TrimSpace(pluginID))
 	}
-	if forbiddenRosterAgentID(name) {
+	if forbiddenExternalAgentID(name) {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: plugin %q agent %q conflicts with a product command or system Agent", strings.TrimSpace(pluginID), name)
 	}
 	command := strings.TrimSpace(in.Command)

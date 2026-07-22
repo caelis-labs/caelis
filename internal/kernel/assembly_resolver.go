@@ -11,6 +11,7 @@ import (
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
@@ -39,7 +40,11 @@ var unsupportedLegacyStateKeys = []string{
 }
 
 type ModelResolution struct {
-	Model                  model.LLM
+	Model model.LLM
+	// ProfileID is the Control-owned selectable identity that produced Model.
+	// The current main Session is provider-backed; hosts must supply its
+	// provider ModelProfile rather than making tool assembly derive it again.
+	ProfileID              string
 	ReasoningEffort        string
 	DefaultReasoningEffort string
 }
@@ -86,10 +91,9 @@ type AssemblyResolver struct {
 type ToolAugmenter func(context.Context, ToolAugmentContext) (ToolAugmentation, error)
 
 type ToolAugmentContext struct {
-	SessionRef               session.SessionRef
-	State                    map[string]any
-	EffectiveModelRef        string
-	EffectiveReasoningEffort string
+	SessionRef session.SessionRef
+	State      map[string]any
+	Session    controlplacement.SessionContext
 }
 
 type ToolAugmentation struct {
@@ -156,7 +160,7 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 	if err != nil {
 		return ResolvedTurn{}, err
 	}
-	spec, err := resolveAgentSpecWith(ctx, snap, intent, state, alias, modelResolution)
+	spec, err := resolveAgentSpecWith(ctx, snap, intent, state, modelResolution)
 	if err != nil {
 		return ResolvedTurn{}, err
 	}
@@ -179,7 +183,7 @@ func (r *AssemblyResolver) ResolveControllerTurn(ctx context.Context, intent Tur
 	if key := unsupportedLegacyStateKey(state); key != "" {
 		return ResolvedTurn{}, fmt.Errorf("gateway: %w: session state contains legacy key %q", session.ErrUnsupportedLegacyFormat, key)
 	}
-	spec, err := resolveAgentSpecWith(ctx, r.snapshot(), intent, state, "", ModelResolution{})
+	spec, err := resolveAgentSpecWith(ctx, r.snapshot(), intent, state, ModelResolution{})
 	if err != nil {
 		return ResolvedTurn{}, err
 	}
@@ -319,18 +323,28 @@ func (r *AssemblyResolver) resolveMetadata(intent TurnIntent, state map[string]a
 	return resolveMetadataWith(snap.baseMetadata, snap.assembly, intent, state, model)
 }
 
-func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, intent TurnIntent, state map[string]any, modelRef string, modelResolution ModelResolution) (agent.AgentSpec, error) {
+func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, intent TurnIntent, state map[string]any, modelResolution ModelResolution) (agent.AgentSpec, error) {
 	metadata, err := resolveMetadataWith(snap.baseMetadata, snap.assembly, intent, state, modelResolution)
 	if err != nil {
 		return agent.AgentSpec{}, err
 	}
 	tools := append([]tool.Tool(nil), snap.tools...)
 	if snap.toolAugmenter != nil {
+		sessionEffort := strings.TrimSpace(stringMetadata(metadata, "reasoning_effort"))
+		if sessionEffort == "" {
+			// A ModelProfile always has an explicit effort capability. Provider
+			// models without reasoning selectors materialize that capability as
+			// the canonical "none" value even though runtime model metadata omits
+			// reasoning_effort entirely.
+			sessionEffort = "none"
+		}
 		augmentation, err := snap.toolAugmenter(ctx, ToolAugmentContext{
-			SessionRef:               intent.SessionRef,
-			State:                    cloneMap(state),
-			EffectiveModelRef:        strings.TrimSpace(modelRef),
-			EffectiveReasoningEffort: stringMetadata(metadata, "reasoning_effort"),
+			SessionRef: intent.SessionRef,
+			State:      cloneMap(state),
+			Session: controlplacement.SessionContext{
+				ProfileID: modelResolution.ProfileID,
+				Effort:    sessionEffort,
+			},
 		})
 		if err != nil {
 			return agent.AgentSpec{}, err

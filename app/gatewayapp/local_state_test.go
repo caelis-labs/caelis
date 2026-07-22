@@ -28,7 +28,7 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
 
-	alias, err := stack.Connect(ModelConfig{
+	profile, err := stack.Connect(ModelConfig{
 		Provider: "ollama",
 		API:      providers.APIOllama,
 		Model:    "alt-model",
@@ -36,6 +36,7 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
+	alias := profile.Backend.Provider.ModelConfigID
 	if err := stack.UseModel(ctx, activeSession.SessionRef, alias); err != nil {
 		t.Fatalf("UseModel() error = %v", err)
 	}
@@ -369,7 +370,7 @@ func TestStackDeleteModelRemovesConfiguredAlias(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
 
-	alias, err := stack.Connect(ModelConfig{
+	connected, err := stack.Connect(ModelConfig{
 		Provider: "ollama",
 		API:      providers.APIOllama,
 		Model:    "alt-model",
@@ -377,6 +378,7 @@ func TestStackDeleteModelRemovesConfiguredAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
+	alias := connected.Backend.Provider.ModelConfigID
 	if err := stack.UseModel(ctx, activeSession.SessionRef, alias); err != nil {
 		t.Fatalf("UseModel() error = %v", err)
 	}
@@ -418,7 +420,7 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	firstID, err := stack.Connect(ModelConfig{
+	firstProfile, err := stack.Connect(ModelConfig{
 		Provider:     "deepseek",
 		API:          providers.APIDeepSeek,
 		Model:        "deepseek-v4-flash",
@@ -428,7 +430,8 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect(first) error = %v", err)
 	}
-	secondID, err := stack.Connect(ModelConfig{
+	firstID := firstProfile.Backend.Provider.ModelConfigID
+	secondProfile, err := stack.Connect(ModelConfig{
 		Provider: "deepseek",
 		API:      providers.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
@@ -436,6 +439,7 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect(second) error = %v", err)
 	}
+	secondID := secondProfile.Backend.Provider.ModelConfigID
 	if err := stack.DeleteModel(ctx, activeSession.SessionRef, firstID); err != nil {
 		t.Fatalf("DeleteModel(first) error = %v", err)
 	}
@@ -443,8 +447,8 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAppConfig(after first delete) error = %v", err)
 	}
-	if len(doc.Models.Profiles) != 1 {
-		t.Fatalf("profiles after deleting one model = %#v, want shared profile retained", doc.Models.Profiles)
+	if len(doc.Models.ProviderEndpoints) != 1 {
+		t.Fatalf("provider endpoints after deleting one model = %#v, want shared endpoint retained", doc.Models.ProviderEndpoints)
 	}
 	if err := stack.DeleteModel(ctx, activeSession.SessionRef, secondID); err != nil {
 		t.Fatalf("DeleteModel(second) error = %v", err)
@@ -453,8 +457,8 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAppConfig(after second delete) error = %v", err)
 	}
-	if len(doc.Models.Profiles) != 0 {
-		t.Fatalf("profiles after deleting last model = %#v, want none", doc.Models.Profiles)
+	if len(doc.Models.ProviderEndpoints) != 0 {
+		t.Fatalf("provider endpoints after deleting last model = %#v, want none", doc.Models.ProviderEndpoints)
 	}
 }
 
@@ -482,7 +486,7 @@ func TestStackUseModelReportsAmbiguousVisibleAlias(t *testing.T) {
 func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
-	apiID, err := stack.Connect(ModelConfig{
+	apiProfile, err := stack.Connect(ModelConfig{
 		Provider: "xiaomi",
 		API:      providers.APIMimo,
 		Model:    "mimo-v2.5-pro",
@@ -491,7 +495,8 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect(api) error = %v", err)
 	}
-	tokenPlanID, err := stack.Connect(ModelConfig{
+	apiID := apiProfile.Backend.Provider.ModelConfigID
+	tokenPlanProfile, err := stack.Connect(ModelConfig{
 		Provider: "xiaomi",
 		API:      providers.APIMimo,
 		Model:    "mimo-v2.5-pro",
@@ -500,6 +505,7 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect(token plan) error = %v", err)
 	}
+	tokenPlanID := tokenPlanProfile.Backend.Provider.ModelConfigID
 	if err := stack.UseModel(ctx, activeSession.SessionRef, tokenPlanID); err != nil {
 		t.Fatalf("UseModel(token plan) error = %v", err)
 	}
@@ -553,7 +559,7 @@ func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	alias, err := stack.Connect(ModelConfig{
+	connected, err := stack.Connect(ModelConfig{
 		Provider:        "deepseek",
 		API:             providers.APIDeepSeek,
 		Model:           "deepseek-v4-pro",
@@ -562,6 +568,7 @@ func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
+	alias := connected.Backend.Provider.ModelConfigID
 	if err := stack.UseModel(ctx, activeSession.SessionRef, alias, "high"); err != nil {
 		t.Fatalf("UseModel() error = %v", err)
 	}
@@ -631,7 +638,7 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 
-	minimaxAlias, err := stack.Connect(ModelConfig{
+	minimaxProfile, err := stack.Connect(ModelConfig{
 		Provider: "minimax",
 		Model:    "MiniMax-M2.7-highspeed",
 		Token:    "minimax-secret",
@@ -639,6 +646,7 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect(minimax) error = %v", err)
 	}
+	minimaxAlias := minimaxProfile.Backend.Provider.ModelConfigID
 	if _, err := stack.Connect(ModelConfig{
 		Provider: "deepseek",
 		API:      providers.APIDeepSeek,

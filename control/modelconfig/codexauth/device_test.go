@@ -8,7 +8,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync/atomic"
@@ -27,6 +26,7 @@ func TestEnsureAuthenticatedUsesDeviceCodeInHeadlessEnvironment(t *testing.T) {
 	var browserCalls atomic.Int32
 	var listenerCalls atomic.Int32
 	manager, err := NewManager(Options{
+		HTTPClient:     issuer.Client(),
 		Issuer:         issuer.URL,
 		CredentialPath: DefaultCredentialPath(t.TempDir()),
 		Clock:          func() time.Time { return now },
@@ -65,12 +65,10 @@ func TestEnsureAuthenticatedFallsBackToDeviceCodeWhenBrowserCannotOpen(t *testin
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	issuer, calls := newDeviceAuthTestServer(t, now)
 	defer issuer.Close()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	listener, _ := newMemoryCallbackHarness(t)
 	var browserCalls atomic.Int32
 	manager, err := NewManager(Options{
+		HTTPClient:     issuer.Client(),
 		Issuer:         issuer.URL,
 		CredentialPath: DefaultCredentialPath(t.TempDir()),
 		Clock:          func() time.Time { return now },
@@ -103,7 +101,7 @@ func TestEnsureAuthenticatedHeadlessDeviceUnavailableWaitsForManualBrowserCallba
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	var userCodeCalls atomic.Int32
 	var tokenCalls atomic.Int32
-	issuer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	issuer := newInMemoryHTTPServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/accounts/deviceauth/usercode":
 			userCodeCalls.Add(1)
@@ -125,12 +123,10 @@ func TestEnsureAuthenticatedHeadlessDeviceUnavailableWaitsForManualBrowserCallba
 		}
 	}))
 	defer issuer.Close()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	listener, callbackClient := newMemoryCallbackHarness(t)
 	var browserCalls atomic.Int32
 	manager, err := NewManager(Options{
+		HTTPClient:     issuer.Client(),
 		Issuer:         issuer.URL,
 		CredentialPath: DefaultCredentialPath(t.TempDir()),
 		Clock:          func() time.Time { return now },
@@ -177,7 +173,7 @@ func TestEnsureAuthenticatedHeadlessDeviceUnavailableWaitsForManualBrowserCallba
 		t.Fatalf("manual authorization URL omitted state: %q", authorizationURL)
 	}
 	callback := "http://" + listener.Addr().String() + "/auth/callback?code=manual-code&state=" + url.QueryEscape(state)
-	response, err := http.Get(callback)
+	response, err := callbackClient.Get(callback)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,13 +197,13 @@ type deviceAuthCalls struct {
 	token    atomic.Int32
 }
 
-func newDeviceAuthTestServer(t *testing.T, now time.Time) (*httptest.Server, *deviceAuthCalls) {
+func newDeviceAuthTestServer(t *testing.T, now time.Time) (*inMemoryHTTPServer, *deviceAuthCalls) {
 	t.Helper()
 	const verifier = "device-pkce-verifier"
 	digest := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(digest[:])
 	calls := &deviceAuthCalls{}
-	issuer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	issuer := newInMemoryHTTPServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/accounts/deviceauth/usercode":
 			calls.userCode.Add(1)
@@ -248,7 +244,7 @@ func newDeviceAuthTestServer(t *testing.T, now time.Time) (*httptest.Server, *de
 			if request.Form.Get("grant_type") != "authorization_code" || request.Form.Get("client_id") != ClientID || request.Form.Get("code") != "device-authorization-code" || request.Form.Get("code_verifier") != verifier {
 				t.Errorf("device authorization exchange = %#v", request.Form)
 			}
-			if got, want := request.Form.Get("redirect_uri"), "http://"+request.Host+"/deviceauth/callback"; got != want {
+			if got, want := request.Form.Get("redirect_uri"), testIssuerURL+"/deviceauth/callback"; got != want {
 				t.Errorf("device redirect_uri = %q, want %q", got, want)
 			}
 			writeJSON(t, writer, tokenResponse{

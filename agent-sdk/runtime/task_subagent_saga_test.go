@@ -844,10 +844,10 @@ func TestSubagentSpawnSagaFileRoundTripWholeObjects(t *testing.T) {
 	}
 	durableTarget := delegation.Target{
 		Selector: "orbit",
-		Placement: delegation.Placement{
+		Placement: mustSealPlacement(t, delegation.Placement{
 			Kind: delegation.PlacementModel, Model: "provider/model", ReasoningEffort: "high",
-			ConfigFingerprint: "config-v1", Fingerprint: "placement-v1",
-		},
+			ConfigFingerprint: "config-v1",
+		}),
 	}
 	snapshot, err := runtime.tasks.StartSubagentTarget(context.Background(), active, active.SessionRef, runner, durableTarget, taskapi.SubagentStartRequest{
 		SpawnID: "file-roundtrip", Prompt: "review", Source: "test", Role: session.ParticipantRoleSidecar,
@@ -862,6 +862,9 @@ func TestSubagentSpawnSagaFileRoundTripWholeObjects(t *testing.T) {
 	wantSession, err := sessions.Session(context.Background(), active.SessionRef)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(wantSession.Participants) != 1 || !reflect.DeepEqual(wantSession.Participants[0].Placement, durableTarget.Placement) {
+		t.Fatalf("durable participant placement = %#v, want %#v", wantSession.Participants, durableTarget.Placement)
 	}
 	wantEvents, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {

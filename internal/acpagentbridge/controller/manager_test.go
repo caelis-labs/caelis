@@ -11,6 +11,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
@@ -36,6 +37,19 @@ func TestContentChunkTextPreservesStreamWhitespace(t *testing.T) {
 	if got != "hello " {
 		t.Fatalf("contentChunkText() = %q, want trailing space preserved", got)
 	}
+}
+
+func mustParticipantPlacement(t *testing.T, agentName string) placement.Placement {
+	t.Helper()
+	frozen, err := placement.Seal(placement.Placement{
+		Kind: placement.KindAgent, ProfileID: "acp:" + agentName + ":model",
+		Agent: agentName, Model: "model", ReasoningEffort: "none",
+		ConfigFingerprint: "sha256:test-config",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return frozen
 }
 
 func TestNormalizeACPUpdateEventPreservesContentChunkMessageIDAndMeta(t *testing.T) {
@@ -770,9 +784,10 @@ func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
 	}
 
 	participant, err := manager.Attach(context.Background(), controller.AttachRequest{
-		Session: parentSession,
-		Agent:   "helper",
-		Label:   "helper",
+		Session:   parentSession,
+		Agent:     "helper",
+		Label:     "helper",
+		Placement: mustParticipantPlacement(t, "helper"),
 	})
 	if err != nil {
 		t.Fatalf("Attach() error = %v", err)
@@ -850,9 +865,10 @@ func TestManagerRejectsImagePromptWithoutACPImageCapability(t *testing.T) {
 	}
 
 	participant, err := manager.Attach(context.Background(), controller.AttachRequest{
-		Session: parentSession,
-		Agent:   "helper",
-		Label:   "helper",
+		Session:   parentSession,
+		Agent:     "helper",
+		Label:     "helper",
+		Placement: mustParticipantPlacement(t, "helper"),
 	})
 	if err != nil {
 		t.Fatalf("Attach() error = %v", err)
@@ -1287,8 +1303,8 @@ func TestManagerAttachRehydratesPersistedParticipant(t *testing.T) {
 		if cfg.Name != "tova" {
 			t.Fatalf("startClient cfg = %q, want tova", cfg.Name)
 		}
-		if got := cfg.SessionOptions.ConfigValues["reasoning_effort"]; got != "xhigh" {
-			t.Fatalf("startClient reasoning effort = %q, want xhigh", got)
+		if cfg.SessionOptions.ModelID != "opus" || cfg.SessionOptions.ConfigValues["thought_level"] != "very-high" {
+			t.Fatalf("startClient placement options = %#v", cfg.SessionOptions)
 		}
 		return nil, resumeRemoteSessionID, controllerClientState{}, nil
 	}
@@ -1303,18 +1319,26 @@ func TestManagerAttachRehydratesPersistedParticipant(t *testing.T) {
 			EpochID: "epoch-1",
 		},
 	}
+	frozen, err := placement.Seal(placement.Placement{
+		Kind: placement.KindAgent, ProfileID: "acp:tova:opus", Agent: "tova", Model: "opus",
+		ReasoningEffort: "xhigh", SessionConfigValues: map[string]string{"thought_level": "very-high"},
+		ConfigFingerprint: "sha256:config",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	persisted := session.ParticipantBinding{
-		ID:              "codex-3",
-		Kind:            session.ParticipantKindACP,
-		Role:            session.ParticipantRoleSidecar,
-		AgentName:       "tova",
-		Label:           "@tova",
-		ReasoningEffort: "xhigh",
-		SessionID:       "remote-tova",
-		Source:          "tui_agent_add",
-		ContextSyncSeq:  7,
-		AttachedAt:      time.Unix(50, 0),
-		ControllerRef:   "epoch-1",
+		ID:             "codex-3",
+		Kind:           session.ParticipantKindACP,
+		Role:           session.ParticipantRoleSidecar,
+		AgentName:      "tova",
+		Label:          "@tova",
+		Placement:      frozen,
+		SessionID:      "remote-tova",
+		Source:         "tui_agent_add",
+		ContextSyncSeq: 7,
+		AttachedAt:     time.Unix(50, 0),
+		ControllerRef:  "epoch-1",
 	}
 	binding, err := manager.Attach(context.Background(), controller.AttachRequest{
 		Session: parentSession,
@@ -1327,7 +1351,7 @@ func TestManagerAttachRehydratesPersistedParticipant(t *testing.T) {
 	if resumed != "remote-tova" {
 		t.Fatalf("resumeRemoteSessionID = %q, want remote-tova", resumed)
 	}
-	if binding.ID != "codex-3" || binding.SessionID != "remote-tova" || binding.ContextSyncSeq != 7 || binding.Label != "@tova" || binding.ReasoningEffort != "xhigh" {
+	if binding.ID != "codex-3" || binding.SessionID != "remote-tova" || binding.ContextSyncSeq != 7 || binding.Label != "@tova" || binding.Placement.Fingerprint != frozen.Fingerprint {
 		t.Fatalf("binding = %#v, want persisted participant binding", binding)
 	}
 
@@ -1379,6 +1403,19 @@ func TestManagerDetachMatchesDelegationAndAttachmentGeneration(t *testing.T) {
 	}
 	if manager.participants[key] != nil {
 		t.Fatal("matching detach left the endpoint attached")
+	}
+}
+
+func TestApplyACPParticipantEventScopeIncludesPlacementAuditIdentity(t *testing.T) {
+	t.Parallel()
+
+	event := &session.Event{}
+	applyACPParticipantEventScope(event, session.ParticipantBinding{
+		ID: "participant-1", Label: "@tova",
+		Placement: placement.Placement{ProfileID: "acp:tova:opus", ReasoningEffort: "xhigh"},
+	}, "tova")
+	if event.Meta["profile_id"] != "acp:tova:opus" || event.Meta["reasoning_effort"] != "xhigh" {
+		t.Fatalf("participant audit meta = %#v", event.Meta)
 	}
 }
 
@@ -1437,7 +1474,10 @@ func TestManagerScopesParticipantIdentityByParentSession(t *testing.T) {
 		starts++
 		return nil, fmt.Sprintf("remote-%d", starts), controllerClientState{}, nil
 	}
-	binding := session.ParticipantBinding{ID: "shared", DelegationID: "delegation-shared", AttachmentGeneration: "durable-generation"}
+	binding := session.ParticipantBinding{
+		ID: "shared", DelegationID: "delegation-shared", AttachmentGeneration: "durable-generation",
+		Placement: mustParticipantPlacement(t, "helper"),
+	}
 	sessionA := session.Session{SessionRef: session.SessionRef{SessionID: "session-a"}}
 	sessionB := session.Session{SessionRef: session.SessionRef{SessionID: "session-b"}}
 	attachedA, err := manager.Attach(context.Background(), controller.AttachRequest{Session: sessionA, Agent: "helper", Binding: binding})
@@ -1487,7 +1527,10 @@ func TestManagerNewClientAlwaysRotatesAttachmentGeneration(t *testing.T) {
 		return manager
 	}
 	parent := session.Session{SessionRef: session.SessionRef{SessionID: "generation-session"}}
-	persisted := session.ParticipantBinding{ID: "shared", DelegationID: "delegation", AttachmentGeneration: "old-generation"}
+	persisted := session.ParticipantBinding{
+		ID: "shared", DelegationID: "delegation", AttachmentGeneration: "old-generation",
+		Placement: mustParticipantPlacement(t, "helper"),
+	}
 	firstManager := newManager("remote-first")
 	first, err := firstManager.Attach(context.Background(), controller.AttachRequest{Session: parent, Agent: "helper", Binding: persisted})
 	if err != nil {
@@ -1559,6 +1602,7 @@ func TestManagerAttachResetsParticipantCheckpointForFreshRemoteSession(t *testin
 			Label:          "@tova",
 			SessionID:      "stale-remote",
 			ContextSyncSeq: 42,
+			Placement:      mustParticipantPlacement(t, "tova"),
 		},
 	})
 	if err != nil {

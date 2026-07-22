@@ -16,8 +16,8 @@ func (s *Stack) SetSandboxBackend(_ context.Context, backend string) (SandboxSta
 	}
 	s.reconfigureMu.Lock()
 	defer s.reconfigureMu.Unlock()
-	s.agentRosterMu.Lock()
-	defer s.agentRosterMu.Unlock()
+	s.assemblyMutationMu.Lock()
+	defer s.assemblyMutationMu.Unlock()
 	if err := s.rejectReconfigureWhileActive("change sandbox backend"); err != nil {
 		return SandboxStatus{}, err
 	}

@@ -51,7 +51,7 @@ func TestEveryHandlerUsesTypedHTTPErrorMappingGolden(t *testing.T) {
 		{name: "steer", method: http.MethodPost, path: "/sessions/session-1/steer", body: `{"input":"continue","target":{"handle_id":"handle-1","run_id":"run-1","turn_id":"turn-1"}}`, command: true},
 		{name: "cancel", method: http.MethodPost, path: "/sessions/session-1/cancel", body: `{"target":{"handle_id":"handle-1","run_id":"run-1","turn_id":"turn-1"}}`, command: true},
 		{name: "resolve approval", method: http.MethodPost, path: "/sessions/session-1/approvals/approval-1/resolve", body: `{"outcome":"selected","option_id":"allow_once","approved":true,"target":{"handle_id":"handle-1","run_id":"run-1","turn_id":"turn-1"}}`, command: true},
-		{name: "attach participant", method: http.MethodPost, path: "/sessions/session-1/participants", body: `{"agent":"reviewer","role":"sidecar"}`, command: true},
+		{name: "attach participant", method: http.MethodPost, path: "/sessions/session-1/participants", body: `{"profile_id":"acp:reviewer","effort":"high","role":"sidecar"}`, command: true},
 		{name: "prompt participant", method: http.MethodPost, path: "/sessions/session-1/participants/participant-1/prompt", body: `{"input":"review"}`, command: true},
 		{name: "cancel participant", method: http.MethodPost, path: "/sessions/session-1/participants/participant-1/cancel", body: `{"target":{"handle_id":"handle-1","run_id":"run-1","turn_id":"turn-1"}}`, command: true},
 		{name: "detach participant", method: http.MethodDelete, path: "/sessions/session-1/participants/participant-1", command: true},

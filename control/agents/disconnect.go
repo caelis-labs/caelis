@@ -55,14 +55,14 @@ func ListDisconnectCandidates(current Configuration) []DisconnectCandidate {
 	current = NormalizeConfiguration(current)
 	connectionReferences := make(map[string]int, len(current.Connections))
 	for _, agent := range current.Agents {
-		if agent.Backing.ConnectionID != "" {
-			connectionReferences[agent.Backing.ConnectionID]++
+		if agent.ConnectionID != "" {
+			connectionReferences[agent.ConnectionID]++
 		}
 	}
 
 	out := make([]DisconnectCandidate, 0, len(current.Agents))
 	for _, agent := range current.Agents {
-		connectionID := strings.TrimSpace(agent.Backing.ConnectionID)
+		connectionID := strings.TrimSpace(agent.ConnectionID)
 		if connectionID == "" {
 			continue
 		}
@@ -78,12 +78,10 @@ func ListDisconnectCandidates(current Configuration) []DisconnectCandidate {
 	return out
 }
 
-// DisconnectExternalAgent removes exactly one external ACP Agent. Its shared
-// Connection remains while sibling Agents reference the endpoint. The removed
-// Agent's model-scoped discoveries are released immediately; the final
-// reference releases every remaining discovery and the Connection. Adapter
-// installation is not represented by Configuration and is deliberately left
-// untouched.
+// DisconnectExternalAgent removes one connection-scoped external ACP Agent,
+// its Connection, and all sibling-model discovery snapshots. A valid v2 product
+// configuration has exactly one Agent per Connection. Adapter installation is
+// not represented by Configuration and is deliberately left untouched.
 func DisconnectExternalAgent(current Configuration, agentID string) (Configuration, DisconnectResult, error) {
 	current = NormalizeConfiguration(current)
 	if err := ValidateConfiguration(current); err != nil {
@@ -97,34 +95,33 @@ func DisconnectExternalAgent(current Configuration, agentID string) (Configurati
 	if !ok {
 		return Configuration{}, DisconnectResult{}, fmt.Errorf("control/agents: Agent %q not found", agentID)
 	}
-	connectionID := strings.TrimSpace(removed.Backing.ConnectionID)
+	connectionID := strings.TrimSpace(removed.ConnectionID)
 	if connectionID == "" {
 		return Configuration{}, DisconnectResult{}, fmt.Errorf("control/agents: Agent %q is not backed by an external ACP connection", removed.ID)
 	}
 
 	next := Configuration{}
-	connectionReferences := 0
 	for _, agent := range current.Agents {
 		if agent.ID == removed.ID {
 			continue
 		}
-		next.Agents = append(next.Agents, agent)
-		if agent.Backing.ConnectionID == connectionID {
-			connectionReferences++
+		if agent.ConnectionID == connectionID {
+			return Configuration{}, DisconnectResult{}, fmt.Errorf(
+				"control/agents: connection %q has multiple Agent identities; migrate configuration before disconnecting",
+				connectionID,
+			)
 		}
+		next.Agents = append(next.Agents, agent)
 	}
-	connectionRemoved := connectionReferences == 0
 	for _, connection := range current.Connections {
-		if connectionRemoved && connection.ID == connectionID {
+		if connection.ID == connectionID {
 			continue
 		}
 		next.Connections = append(next.Connections, connection)
 	}
 	for _, snapshot := range current.Discoveries {
 		if snapshot.ConnectionID == connectionID {
-			if connectionRemoved || snapshot.SelectedModelID == removed.Defaults.ModelID {
-				continue
-			}
+			continue
 		}
 		next.Discoveries = append(next.Discoveries, snapshot)
 	}
@@ -135,6 +132,6 @@ func DisconnectExternalAgent(current Configuration, agentID string) (Configurati
 	return next, DisconnectResult{
 		Agent:             removed,
 		ConnectionID:      connectionID,
-		ConnectionRemoved: connectionRemoved,
+		ConnectionRemoved: true,
 	}, nil
 }

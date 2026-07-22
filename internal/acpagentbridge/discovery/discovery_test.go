@@ -108,21 +108,8 @@ func TestDiscoverCancellationTerminatesProcess(t *testing.T) {
 		_, err := (Service{}).Discover(ctx, helperConnection(markerDir, "block"), markerDir, "")
 		result <- err
 	}()
-	pidPath := filepath.Join(markerDir, "pid")
-	var pid int
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		raw, err := os.ReadFile(pidPath)
-		if err == nil {
-			pid, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if pid <= 0 {
-		cancel()
-		t.Fatal("helper process did not publish its pid")
-	}
+	waitForDiscoveryMarker(t, filepath.Join(markerDir, "initialize-ready"), 3*time.Second)
+	pid := readDiscoveryHelperPID(t, filepath.Join(markerDir, "pid"))
 	cancel()
 	select {
 	case err := <-result:
@@ -132,13 +119,7 @@ func TestDiscoverCancellationTerminatesProcess(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Discover() did not return after cancellation")
 	}
-	for time.Now().Before(deadline) {
-		if err := exec.Command("kill", "-0", strconv.Itoa(pid)).Run(); err != nil {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("helper process %d is still alive after Discover returned", pid)
+	waitForDiscoveryHelperExit(t, pid, 2*time.Second)
 }
 
 func TestDiscoverBoundsUnresponsiveSessionCloseAndTerminatesProcess(t *testing.T) {
@@ -159,22 +140,57 @@ func TestDiscoverBoundsUnresponsiveSessionCloseAndTerminatesProcess(t *testing.T
 	if elapsed := time.Since(started); elapsed > 2*time.Second {
 		t.Fatalf("Discover() elapsed = %v, want bounded cleanup", elapsed)
 	}
-	rawPID, readErr := os.ReadFile(filepath.Join(markerDir, "pid"))
-	if readErr != nil {
-		t.Fatalf("read helper pid: %v", readErr)
+	pid := readDiscoveryHelperPID(t, filepath.Join(markerDir, "pid"))
+	waitForDiscoveryHelperExit(t, pid, 2*time.Second)
+}
+
+func waitForDiscoveryMarker(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if raw, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(raw)) != "" {
+			return
+		}
+		select {
+		case <-timer.C:
+			t.Fatalf("helper process did not publish marker %q", filepath.Base(path))
+		case <-ticker.C:
+		}
 	}
-	pid, parseErr := strconv.Atoi(strings.TrimSpace(string(rawPID)))
-	if parseErr != nil || pid <= 0 {
-		t.Fatalf("helper pid = %q, %v", rawPID, parseErr)
+}
+
+func readDiscoveryHelperPID(t *testing.T, path string) int {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read helper pid: %v", err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 0 {
+		t.Fatalf("helper pid = %q, %v", raw, err)
+	}
+	return pid
+}
+
+func waitForDiscoveryHelperExit(t *testing.T, pid int, timeout time.Duration) {
+	t.Helper()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
 		if err := exec.Command("kill", "-0", strconv.Itoa(pid)).Run(); err != nil {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-timer.C:
+			t.Fatalf("helper process %d is still alive after Discover returned", pid)
+		case <-ticker.C:
+		}
 	}
-	t.Fatalf("helper process %d is still alive after bounded session/close cleanup", pid)
 }
 
 func helperConnection(markerDir string, mode string) controlagents.Connection {
@@ -199,7 +215,9 @@ func TestDiscoveryHelperProcess(t *testing.T) {
 	}
 	markerDir := os.Getenv("CAELIS_DISCOVERY_MARKER")
 	writeMarker := func(name string, value string) {
-		_ = os.WriteFile(filepath.Join(markerDir, name), []byte(value), 0o600)
+		if err := writeDiscoveryMarker(markerDir, name, value); err != nil {
+			panic(err)
+		}
 	}
 	conn := jsonrpc.New(os.Stdin, os.Stdout)
 	_ = conn.Serve(context.Background(), func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
@@ -207,6 +225,7 @@ func TestDiscoveryHelperProcess(t *testing.T) {
 		case client.MethodInitialize:
 			if mode == "block" {
 				writeMarker("pid", strconv.Itoa(os.Getpid()))
+				writeMarker("initialize-ready", "yes")
 				select {}
 			}
 			response := client.InitializeResponse{ProtocolVersion: 1, AgentCapabilities: schema.AgentCapabilities{SessionCapabilities: map[string]json.RawMessage{"close": json.RawMessage(`{}`)}}}
@@ -262,4 +281,25 @@ func TestDiscoveryHelperProcess(t *testing.T) {
 	}, nil)
 	writeMarker("process-exit", "yes")
 	os.Exit(0)
+}
+
+func writeDiscoveryMarker(markerDir, name, value string) error {
+	temp, err := os.CreateTemp(markerDir, "."+name+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if err := temp.Chmod(0o600); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if _, err := temp.WriteString(value); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, filepath.Join(markerDir, name))
 }

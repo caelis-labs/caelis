@@ -133,11 +133,12 @@ type ApprovalState struct {
 }
 
 type AttachParticipantRequest struct {
-	Agent                   string          `json:"agent"`
+	Effort                  string          `json:"effort"`
 	ExpectedControllerEpoch *string         `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal  `json:"expected_revision,omitempty"`
 	Label                   *string         `json:"label,omitempty"`
 	OperationId             *string         `json:"operation_id,omitempty"`
+	ProfileId               string          `json:"profile_id"`
 	Role                    ParticipantRole `json:"role,omitempty"`
 	SessionId               *string         `json:"session_id,omitempty"`
 	Source                  *string         `json:"source,omitempty"`

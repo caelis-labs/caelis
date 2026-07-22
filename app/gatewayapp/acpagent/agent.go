@@ -7,8 +7,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	controlpromptrouter "github.com/caelis-labs/caelis/internal/controlpromptrouter"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
@@ -41,16 +41,16 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 			router := controlpromptrouter.New(controlprompt.RouterConfig{
 				Service: driver,
 				CommandNames: func(ctx context.Context, service control.Service) []string {
-					var delegationStatus controldelegation.Status
-					if delegationService, ok := service.(controldelegation.Service); ok {
-						delegationStatus, _ = delegationService.DelegationStatus(ctx)
+					var bindingStatus agentbinding.Status
+					if bindingService, ok := service.(agentbinding.Service); ok {
+						bindingStatus, _ = bindingService.AgentBindingStatus(ctx)
 					}
-					out := acpPromptCommandNames(delegationStatus)
+					out := acpPromptCommandNames(bindingStatus)
 					status, err := service.AgentStatus(ctx)
 					if err != nil {
 						return out
 					}
-					return controlagents.AppendRunNames(out, acpDirectAgentRuns(status), controldelegation.IsDirectRunProfile)
+					return controlagents.AppendRunNames(out, acpDirectAgentRuns(status), directRunName)
 				},
 				CoreCommandAllowed: func(_ context.Context, command string) bool {
 					return controlcommands.IsACPKnown(command)
@@ -64,21 +64,17 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 	})
 }
 
-func acpPromptCommandNames(status controldelegation.Status) []string {
+func acpPromptCommandNames(status agentbinding.Status) []string {
 	bound := map[string]struct{}{}
-	for _, profile := range status.Profiles {
-		if !controldelegation.IsProfileBound(profile) {
+	for _, handle := range status.Handles {
+		if !agentbinding.IsDirectRun(handle.Definition.Handle) || !agentbinding.IsBound(handle) {
 			continue
 		}
-		name := profile.Definition.Profile
-		if name == "" {
-			name = profile.Binding.Profile
-		}
-		bound[string(name)] = struct{}{}
+		bound[string(handle.Definition.Handle)] = struct{}{}
 	}
 	out := make([]string, 0, len(controlcommands.DefaultACPNames()))
 	for _, name := range controlcommands.DefaultACPNames() {
-		if controldelegation.IsDirectRunProfile(name) {
+		if directRunName(name) {
 			if _, ok := bound[name]; !ok {
 				continue
 			}
@@ -89,13 +85,17 @@ func acpPromptCommandNames(status controldelegation.Status) []string {
 }
 
 func acpAgentCommandAllowed(command string) bool {
-	return controldelegation.IsDirectRunProfile(command)
+	return directRunName(command)
 }
 
 func acpDirectAgentRuns(status control.AgentStatusSnapshot) []controlagents.Run {
 	runs := make([]controlagents.Run, 0, len(status.Participants))
 	for _, participant := range status.Participants {
-		runs = append(runs, controldelegation.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))
+		runs = append(runs, controlagents.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))
 	}
 	return runs
+}
+
+func directRunName(name string) bool {
+	return agentbinding.IsDirectRun(agentbinding.Handle(name))
 }

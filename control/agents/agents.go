@@ -1,5 +1,5 @@
-// Package agents defines Control-owned Agent identities, external ACP
-// connections, and their persisted default session placement.
+// Package agents defines Control-owned external ACP Agent identities,
+// connections, discovery data, and concrete runtime session options.
 package agents
 
 import (
@@ -26,8 +26,8 @@ const (
 )
 
 // Launcher is the complete process declaration for one external ACP endpoint.
-// Model selection deliberately does not belong in this type; it is a
-// per-Agent default session option.
+// Model selection deliberately does not belong in this type; standard
+// ModelProfiles own remote model and default selection.
 type Launcher struct {
 	Kind    LaunchKind        `json:"kind,omitempty"`
 	Command string            `json:"command,omitempty"`
@@ -43,30 +43,21 @@ type Connection struct {
 	Launcher Launcher `json:"launcher,omitempty"`
 }
 
-// SessionOptions are desired defaults applied after ACP session creation or
-// resume and before the first prompt. ConfigValues contains adapter-declared
-// option IDs such as reasoning effort; ModelID remains separate so the bridge
-// can choose set_config_option or set_model from the current handshake.
+// SessionOptions are concrete values applied after ACP session creation or
+// resume and before the first prompt. ModelID is applied first, non-effort
+// ConfigValues next, and ReasoningEffortConfigID last.
 type SessionOptions struct {
-	ModelID      string            `json:"model_id,omitempty"`
-	ConfigValues map[string]string `json:"config_values,omitempty"`
+	ModelID                 string            `json:"model_id,omitempty"`
+	ConfigValues            map[string]string `json:"config_values,omitempty"`
+	ReasoningEffortConfigID string            `json:"reasoning_effort_config_id,omitempty"`
 }
 
-// AgentBacking selects exactly one execution backend for an Agent. ModelAlias
-// is the profile-qualified alias of a configured built-in model; ConnectionID
-// identifies an external ACP endpoint.
-type AgentBacking struct {
-	ModelAlias   string `json:"model_alias,omitempty"`
-	ConnectionID string `json:"connection_id,omitempty"`
-}
-
-// Agent is one stable user-facing Agent identity. It contains no scenario
-// prompt; Control supplies the concrete task when the Agent is run.
+// Agent is one stable external connection identity. It contains no scenario
+// prompt or model selection; Control supplies both through a frozen Placement.
 type Agent struct {
-	ID       string         `json:"id,omitempty"`
-	Name     string         `json:"name,omitempty"`
-	Backing  AgentBacking   `json:"backing,omitempty"`
-	Defaults SessionOptions `json:"defaults,omitempty"`
+	ID           string `json:"id,omitempty"`
+	Name         string `json:"name,omitempty"`
+	ConnectionID string `json:"connection_id,omitempty"`
 }
 
 // ConfigChoice is one value advertised for a session config option.
@@ -182,12 +173,9 @@ func ResolveAgent(in Configuration, id string) (Agent, Connection, error) {
 	if !ok {
 		return Agent{}, Connection{}, fmt.Errorf("control/agents: agent %q not found", strings.TrimSpace(id))
 	}
-	if agent.Backing.ModelAlias != "" {
-		return agent, Connection{}, nil
-	}
-	connection, ok := LookupConnection(in, agent.Backing.ConnectionID)
+	connection, ok := LookupConnection(in, agent.ConnectionID)
 	if !ok {
-		return Agent{}, Connection{}, fmt.Errorf("control/agents: agent %q references unknown connection %q", agent.ID, agent.Backing.ConnectionID)
+		return Agent{}, Connection{}, fmt.Errorf("control/agents: agent %q references unknown connection %q", agent.ID, agent.ConnectionID)
 	}
 	return agent, connection, nil
 }
@@ -241,7 +229,10 @@ func NormalizeConnection(in Connection) Connection {
 
 // NormalizeSessionOptions returns detached desired session defaults.
 func NormalizeSessionOptions(in SessionOptions) SessionOptions {
-	out := SessionOptions{ModelID: strings.TrimSpace(in.ModelID)}
+	out := SessionOptions{
+		ModelID:                 strings.TrimSpace(in.ModelID),
+		ReasoningEffortConfigID: strings.TrimSpace(in.ReasoningEffortConfigID),
+	}
 	for key, value := range in.ConfigValues {
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
@@ -259,13 +250,9 @@ func NormalizeSessionOptions(in SessionOptions) SessionOptions {
 // NormalizeAgent returns a detached canonical Agent.
 func NormalizeAgent(in Agent) Agent {
 	out := Agent{
-		ID:   NormalizeName(in.ID),
-		Name: strings.TrimSpace(in.Name),
-		Backing: AgentBacking{
-			ModelAlias:   strings.ToLower(strings.TrimSpace(in.Backing.ModelAlias)),
-			ConnectionID: normalizeID(in.Backing.ConnectionID),
-		},
-		Defaults: NormalizeSessionOptions(in.Defaults),
+		ID:           NormalizeName(in.ID),
+		Name:         strings.TrimSpace(in.Name),
+		ConnectionID: normalizeID(in.ConnectionID),
 	}
 	if out.Name == "" {
 		out.Name = out.ID
@@ -282,23 +269,15 @@ func ValidateAgent(in Agent, connections []Connection) error {
 	if !IsName(agent.ID) {
 		return fmt.Errorf("control/agents: agent id %q is not a valid addressable name", agent.ID)
 	}
-	hasModel := agent.Backing.ModelAlias != ""
-	hasConnection := agent.Backing.ConnectionID != ""
-	if hasModel == hasConnection {
-		return fmt.Errorf("control/agents: agent %q must select exactly one configured model or external ACP connection", agent.ID)
-	}
-	if hasModel {
-		if agent.Defaults.ModelID != "" || len(agent.Defaults.ConfigValues) > 0 {
-			return fmt.Errorf("control/agents: model-backed agent %q cannot declare external ACP session defaults", agent.ID)
-		}
-		return nil
+	if agent.ConnectionID == "" {
+		return fmt.Errorf("control/agents: agent %q requires an external ACP connection", agent.ID)
 	}
 	for _, connection := range connections {
-		if NormalizeConnection(connection).ID == agent.Backing.ConnectionID {
+		if NormalizeConnection(connection).ID == agent.ConnectionID {
 			return nil
 		}
 	}
-	return fmt.Errorf("control/agents: agent %q references unknown connection %q", agent.ID, agent.Backing.ConnectionID)
+	return fmt.Errorf("control/agents: agent %q references unknown connection %q", agent.ID, agent.ConnectionID)
 }
 
 // LaunchFingerprint identifies changes that invalidate cached discovery data.

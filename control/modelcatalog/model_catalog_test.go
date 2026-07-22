@@ -42,6 +42,18 @@ func TestLookupSuggestedModelCapabilitiesSupportsOpenAICompatible(t *testing.T) 
 	}
 }
 
+func TestCompareReasoningEffortUsesCanonicalOrder(t *testing.T) {
+	ordered := []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "provider-specific"}
+	for i := 1; i < len(ordered); i++ {
+		if got := CompareReasoningEffort(ordered[i-1], ordered[i]); got >= 0 {
+			t.Fatalf("CompareReasoningEffort(%q, %q) = %d, want less than zero", ordered[i-1], ordered[i], got)
+		}
+	}
+	if got := CompareReasoningEffort("very-high", "xhigh"); got != 0 {
+		t.Fatalf("CompareReasoningEffort(very-high, xhigh) = %d, want zero", got)
+	}
+}
+
 func TestLookupSuggestedModelCapabilitiesUsesCodeFreeCatalogForGLM51(t *testing.T) {
 	caps, ok := LookupSuggestedModelCapabilities("codefree", "GLM-5.1")
 	if !ok {

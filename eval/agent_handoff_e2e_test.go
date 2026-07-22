@@ -16,8 +16,8 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	controlassembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	controlpromptrouter "github.com/caelis-labs/caelis/internal/controlpromptrouter"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
@@ -105,11 +105,11 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stack.Close() })
 
-	if _, err := stack.Delegation().BindDelegation(ctx, controldelegation.BindRequest{
-		Profile: controldelegation.ProfileOrbit,
+	if _, err := stack.AgentBindings().BindAgentBinding(ctx, agentbinding.Binding{
+		Handle:  agentbinding.HandleOrbit,
 		AgentID: agentID,
 	}); err != nil {
-		t.Fatalf("BindDelegation(orbit) error = %v", err)
+		t.Fatalf("BindAgentBinding(orbit) error = %v", err)
 	}
 	active, err := stack.StartSession(ctx, "agent-handoff-e2e", "surface-handoff-e2e")
 	if err != nil {
@@ -140,7 +140,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	}
 	continuedCommand := ""
 	for _, participant := range state.Participants {
-		if participant.Source == controldelegation.DirectRunSource(controldelegation.ProfileOrbit) {
+		if participant.Source == controlagents.DirectRunSource(agentbinding.HandleOrbit) {
 			continuedCommand = "/" + controlagents.FormatRunName("orbit", participant.Label)
 			break
 		}

@@ -61,6 +61,8 @@ func participantLifecycleEvent(activeSession session.Session, binding session.Pa
 			"agent":                 binding.AgentName,
 			"handle":                strings.TrimPrefix(strings.TrimSpace(binding.Label), "@"),
 			"label":                 binding.Label,
+			"profile_id":            binding.Placement.ProfileID,
+			"reasoning_effort":      binding.Placement.ReasoningEffort,
 			"session_id":            binding.SessionID,
 			"controller_ref":        binding.ControllerRef,
 			"delegation_id":         binding.DelegationID,

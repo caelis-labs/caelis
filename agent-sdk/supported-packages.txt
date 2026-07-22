@@ -4,6 +4,7 @@ github.com/caelis-labs/caelis/agent-sdk
 github.com/caelis-labs/caelis/agent-sdk/approval
 github.com/caelis-labs/caelis/agent-sdk/errorcode
 github.com/caelis-labs/caelis/agent-sdk/model
+github.com/caelis-labs/caelis/agent-sdk/placement
 github.com/caelis-labs/caelis/agent-sdk/policy
 github.com/caelis-labs/caelis/agent-sdk/runtime
 github.com/caelis-labs/caelis/agent-sdk/runtime/compact

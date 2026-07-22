@@ -486,7 +486,7 @@
         "unevaluatedProperties": false
       },
       "AttachParticipantRequest": {
-        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["agent"], "properties": {"agent": {"type": "string", "minLength": 1}, "role": {"$ref": "#/components/schemas/ParticipantRole"}, "label": {"type": "string"}, "source": {"type": "string"}}}],
+        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["profile_id", "effort"], "properties": {"profile_id": {"type": "string", "minLength": 1}, "effort": {"type": "string", "minLength": 1}, "role": {"$ref": "#/components/schemas/ParticipantRole"}, "label": {"type": "string"}, "source": {"type": "string"}}}],
         "unevaluatedProperties": false
       },
       "PromptParticipantRequest": {

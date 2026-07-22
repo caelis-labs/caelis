@@ -7,15 +7,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
-	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 type subagentConfigurationService interface {
-	controldelegation.Service
-	controlsystemagent.Service
+	agentbinding.Service
 }
 
 func subagentWizard() WizardDef {
@@ -105,124 +103,75 @@ func completeSubagentSlashArgs(
 		}, query, limit), true, nil
 	case command == "subagent-bindable":
 		candidates := make([]SlashArgCandidate, 0, 5)
-		for _, definition := range controldelegation.Definitions() {
+		for _, definition := range agentbinding.Definitions() {
 			if !definition.Configurable {
 				continue
 			}
 			candidates = append(candidates, SlashArgCandidate{
-				Value: string(definition.Profile), Display: definition.Name, Detail: definition.Description,
-			})
-		}
-		for _, definition := range controlsystemagent.Definitions() {
-			candidates = append(candidates, SlashArgCandidate{
-				Value: string(definition.ID), Display: definition.Name, Detail: definition.Description,
+				Value: string(definition.Handle), Display: definition.Name, Detail: definition.Description,
 			})
 		}
 		return filterSubagentSlashCandidates(candidates, query, limit), true, nil
 	case strings.HasPrefix(command, "subagent-target:"):
-		subject := strings.TrimSpace(strings.TrimPrefix(command, "subagent-target:"))
-		if isSystemAgentID(subject) {
-			status, err := service.SystemAgentStatus(contextOrBackground(ctx))
-			if err != nil {
-				return nil, true, err
-			}
-			candidates := []SlashArgCandidate{{
-				Value: "default", Display: "Main Agent default", Detail: "Follow the product's default model behavior",
-			}}
-			for _, target := range status.Targets {
-				alias := firstNonEmpty(strings.TrimSpace(target.Model.Alias), strings.TrimSpace(target.Model.ID))
-				detail := strings.Join(compactNonEmpty([]string{target.Model.Provider, target.Model.Model}), " · ")
-				candidates = append(candidates, SlashArgCandidate{
-					Value: target.Agent.ID, Display: alias, Detail: detail,
-				})
-			}
-			return filterSubagentSlashCandidates(candidates, query, limit), true, nil
-		}
-		status, err := service.DelegationStatus(contextOrBackground(ctx))
+		handle := agentbinding.NormalizeHandle(agentbinding.Handle(strings.TrimPrefix(command, "subagent-target:")))
+		status, err := service.AgentBindingStatus(contextOrBackground(ctx))
 		if err != nil {
 			return nil, true, err
 		}
-		candidates := []SlashArgCandidate{{
-			Value: "self", Display: "Unbound · self", Detail: "Remove the explicit binding and hide this profile from Spawn and slash commands",
-		}}
-		for _, target := range status.Targets {
-			agentID := strings.TrimSpace(target.Agent.ID)
-			if agentID == "" || strings.EqualFold(agentID, "self") {
+		candidates := make([]SlashArgCandidate, 0, len(status.Targets)+1)
+		if agentbinding.IsSystem(handle) {
+			candidates = append(candidates, SlashArgCandidate{
+				Value: "default", Display: "Main Agent default", Detail: "Follow the product's default model behavior",
+			})
+		} else {
+			candidates = append(candidates, SlashArgCandidate{
+				Value: "self", Display: "Unbound · self", Detail: "Remove the explicit binding and hide this profile from Spawn and slash commands",
+			})
+		}
+		for _, profile := range status.Targets {
+			if !agentbinding.SupportsProfile(handle, profile) {
 				continue
 			}
-			detail := "External ACP Agent · uses the Agent's model and session defaults"
-			if alias := strings.TrimSpace(target.Agent.Backing.ModelAlias); alias != "" {
-				detail = "Model-backed Agent · " + alias + " · Agent default effort"
-				if len(target.ReasoningLevels) > 0 {
-					detail = "Model-backed Agent · " + alias + " · efforts: " + strings.Join(target.ReasoningLevels, ", ")
-				}
-			} else if modelID := strings.TrimSpace(target.Agent.Defaults.ModelID); modelID != "" {
-				detail = "External ACP Agent · " + modelID + " · uses Agent defaults"
+			efforts := make([]string, 0, len(profile.Effort.Choices))
+			for _, choice := range profile.Effort.Choices {
+				efforts = append(efforts, choice.Canonical)
 			}
+			detail := string(profile.Kind()) + " ModelProfile · efforts: " + strings.Join(efforts, ", ")
 			candidates = append(candidates, SlashArgCandidate{
-				Value: agentID, Display: "/" + agentID, Detail: detail,
+				Value: profile.ID, Display: profile.DisplayName, Detail: detail,
 			})
 		}
 		return filterSubagentSlashCandidates(candidates, query, limit), true, nil
 	case strings.HasPrefix(command, "subagent-effort:"):
 		subjectAndTarget := strings.SplitN(strings.TrimPrefix(command, "subagent-effort:"), ":", 2)
-		subject := ""
-		agentID := strings.TrimSpace(subjectAndTarget[0])
+		handle := agentbinding.Handle("")
+		profileID := strings.TrimSpace(subjectAndTarget[0])
 		if len(subjectAndTarget) == 2 {
-			subject = strings.TrimSpace(subjectAndTarget[0])
-			agentID = strings.TrimSpace(subjectAndTarget[1])
+			handle = agentbinding.NormalizeHandle(agentbinding.Handle(subjectAndTarget[0]))
+			profileID = strings.TrimSpace(subjectAndTarget[1])
 		}
-		if strings.EqualFold(agentID, "self") {
+		if strings.EqualFold(profileID, "self") || strings.EqualFold(profileID, "default") {
 			return filterSubagentSlashCandidates([]SlashArgCandidate{{
 				Value: "default", Display: "Unbound", Detail: "Remove the explicit profile binding",
 			}}, query, limit), true, nil
 		}
-		if isSystemAgentID(subject) {
-			status, err := service.SystemAgentStatus(contextOrBackground(ctx))
-			if err != nil {
-				return nil, true, err
-			}
-			for _, target := range status.Targets {
-				if !strings.EqualFold(strings.TrimSpace(target.Agent.ID), agentID) {
-					continue
-				}
-				candidates := []SlashArgCandidate{{
-					Value: "default", Display: "Agent default", Detail: "Use the model-backed Agent's configured effort",
-				}}
-				for _, raw := range target.Model.ReasoningLevels {
-					effort := strings.TrimSpace(raw)
-					if effort == "" || strings.EqualFold(effort, "default") {
-						continue
-					}
-					candidates = append(candidates, SlashArgCandidate{
-						Value: effort, Display: "Reasoning effort: " + effort, Detail: "Override this system Agent only",
-					})
-				}
-				return filterSubagentSlashCandidates(candidates, query, limit), true, nil
-			}
-			return nil, true, nil
-		}
-		status, err := service.DelegationStatus(contextOrBackground(ctx))
+		status, err := service.AgentBindingStatus(contextOrBackground(ctx))
 		if err != nil {
 			return nil, true, err
 		}
-		for _, target := range status.Targets {
-			if !strings.EqualFold(strings.TrimSpace(target.Agent.ID), agentID) {
+		for _, profile := range status.Targets {
+			if !strings.EqualFold(strings.TrimSpace(profile.ID), profileID) || !agentbinding.SupportsProfile(handle, profile) {
 				continue
 			}
-			candidates := []SlashArgCandidate{{
-				Value: "default", Display: "Agent default", Detail: "Use the Agent's configured session defaults",
-			}}
-			if strings.TrimSpace(target.Agent.Backing.ModelAlias) == "" {
-				return filterSubagentSlashCandidates(candidates, query, limit), true, nil
-			}
-			for _, raw := range target.ReasoningLevels {
-				effort := strings.TrimSpace(raw)
-				if effort == "" || strings.EqualFold(effort, "default") {
-					continue
+			candidates := make([]SlashArgCandidate, 0, len(profile.Effort.Choices))
+			for _, choice := range profile.Effort.Choices {
+				effort := strings.TrimSpace(choice.Canonical)
+				detail := "Bind this delegation profile explicitly"
+				if agentbinding.IsSystem(handle) {
+					detail = "Bind this system Agent explicitly"
 				}
 				candidates = append(candidates, SlashArgCandidate{
-					Value: effort, Display: "Reasoning effort: " + effort, Detail: "Override this delegation profile only",
+					Value: effort, Display: "Reasoning effort: " + effort, Detail: detail,
 				})
 			}
 			return filterSubagentSlashCandidates(candidates, query, limit), true, nil
@@ -245,19 +194,12 @@ func slashSubagentWithContext(ctx context.Context, service subagentConfiguration
 	action, rest, _ := controlprompt.ParseFirst(strings.TrimSpace(args))
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "", "list":
-		delegationStatus, err := service.DelegationStatus(contextOrBackground(ctx))
+		status, err := service.AgentBindingStatus(contextOrBackground(ctx))
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("list subagent profiles", err)}
-		}
-		systemStatus, err := service.SystemAgentStatus(contextOrBackground(ctx))
-		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("list system Agents", err)}
+			return TaskResultMsg{Err: friendlyCommandError("list subagent bindings", err)}
 		}
 		if send != nil {
-			send(SlashCommandResultMsg{Result: control.NewTableSlashResult(
-				"subagent",
-				subagentStatusTable(delegationStatus, systemStatus),
-			)})
+			send(SlashCommandResultMsg{Result: control.NewTableSlashResult("subagent", subagentStatusTable(status))})
 		}
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "bind":
@@ -267,48 +209,36 @@ func slashSubagentWithContext(ctx context.Context, service subagentConfiguration
 			sendNotice(send, subagentUsageText())
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
-		if isSystemAgentID(subject) {
-			id := controlsystemagent.NormalizeID(controlsystemagent.ID(subject))
-			var (
-				status controlsystemagent.Status
-				err    error
-			)
-			if strings.EqualFold(strings.TrimSpace(target), "default") || strings.EqualFold(strings.TrimSpace(target), "self") {
-				if strings.TrimSpace(effort) != "" {
-					return TaskResultMsg{Err: friendlyCommandError("bind system Agent", fmt.Errorf("default does not accept a reasoning effort override"))}
-				}
-				status, err = service.ResetSystemAgent(contextOrBackground(ctx), id)
-			} else {
-				status, err = service.BindSystemAgent(contextOrBackground(ctx), controlsystemagent.BindRequest{
-					ID: id, AgentID: target, ReasoningEffort: effort,
-				})
-			}
-			if err != nil {
-				return TaskResultMsg{Err: friendlyCommandError("bind system Agent", err)}
-			}
-			sendNotice(send, formatSystemAgentBindingNotice(status, id))
-			return TaskResultMsg{SuppressTurnDivider: true}
-		}
-		profile := controldelegation.Profile(subject)
+		handle := agentbinding.NormalizeHandle(agentbinding.Handle(subject))
+		system := agentbinding.IsSystem(handle)
 		var (
-			status controldelegation.Status
+			status agentbinding.Status
 			err    error
 		)
-		if strings.EqualFold(strings.TrimSpace(target), "self") {
+		resetTarget := strings.EqualFold(strings.TrimSpace(target), "self") ||
+			strings.EqualFold(strings.TrimSpace(target), "default")
+		if resetTarget {
 			if strings.TrimSpace(effort) != "" {
-				return TaskResultMsg{Err: friendlyCommandError("bind subagent profile", fmt.Errorf("self does not accept a reasoning effort override"))}
+				label := "self"
+				if system {
+					label = "default"
+				}
+				return TaskResultMsg{Err: friendlyCommandError("reset subagent binding", fmt.Errorf("%s does not accept a reasoning effort override", label))}
 			}
-			status, err = service.ResetDelegation(contextOrBackground(ctx), profile)
+			status, err = service.ResetAgentBinding(contextOrBackground(ctx), handle)
 		} else {
-			status, err = service.BindDelegation(contextOrBackground(ctx), controldelegation.BindRequest{
-				Profile: profile, AgentID: target, ReasoningEffort: effort,
+			if strings.TrimSpace(effort) == "" {
+				return TaskResultMsg{Err: friendlyCommandError("bind subagent handle", fmt.Errorf("an explicit effort is required"))}
+			}
+			status, err = service.BindAgentBinding(contextOrBackground(ctx), agentbinding.Binding{
+				Handle: handle, ProfileID: target, Effort: effort,
 			})
 		}
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("bind subagent profile", err)}
+			return TaskResultMsg{Err: friendlyCommandError("update subagent binding", err)}
 		}
-		sendNotice(send, formatSubagentBindingNotice(status, profile))
-		if controlService, ok := any(service).(control.Service); ok {
+		sendNotice(send, formatAgentBindingNotice(status, handle))
+		if controlService, ok := any(service).(control.Service); ok && !system {
 			refreshAgentSlashCommandsViaSendWithContext(ctx, controlService, send)
 		}
 		return TaskResultMsg{SuppressTurnDivider: true}
@@ -319,140 +249,79 @@ func slashSubagentWithContext(ctx context.Context, service subagentConfiguration
 }
 
 func subagentUsageText() string {
-	return "usage: /subagent list | /subagent bind <breeze|orbit|zenith> <self|agent> [effort] | /subagent bind <guardian|reviewer> <default|model-agent> [effort]\nrun /subagent to choose list or bind"
+	return "usage: /subagent list | /subagent bind <breeze|orbit|zenith> <self|profile-id> <effort> | /subagent bind <guardian|reviewer> <default|provider-profile-id> <effort>\nrun /subagent to choose list or bind"
 }
 
-func subagentStatusTable(status controldelegation.Status, systemStatus controlsystemagent.Status) control.SlashTableSnapshot {
-	profiles := make([][]string, 0, len(status.Profiles))
-	for _, profile := range status.Profiles {
-		profiles = append(profiles, subagentProfileStatusRow(profile))
-	}
-	systemAgents := make([][]string, 0, len(systemStatus.Agents))
-	for _, systemAgent := range systemStatus.Agents {
-		systemAgents = append(systemAgents, systemAgentStatusRow(systemAgent))
+func subagentStatusTable(status agentbinding.Status) control.SlashTableSnapshot {
+	delegationRows := make([][]string, 0, 4)
+	systemRows := make([][]string, 0, 2)
+	for _, handle := range status.Handles {
+		row := agentBindingStatusRow(handle)
+		if handle.Definition.Class == agentbinding.HandleClassSystem {
+			systemRows = append(systemRows, row)
+		} else {
+			delegationRows = append(delegationRows, row)
+		}
 	}
 	return control.SlashTableSnapshot{
 		Title: "Subagents",
 		Sections: []control.SlashTableSection{
-			{
-				Title:   "Delegation Profiles",
-				Columns: []string{"Profile", "Name", "Binding"},
-				Rows:    profiles,
-			},
-			{
-				Title:   "System Agents",
-				Columns: []string{"Agent", "Name", "Binding"},
-				Rows:    systemAgents,
-			},
+			{Title: "Delegation Profiles", Columns: []string{"Profile", "Name", "Binding"}, Rows: delegationRows},
+			{Title: "System Agents", Columns: []string{"Agent", "Name", "Binding"}, Rows: systemRows},
 		},
 	}
 }
 
-func formatSubagentProfileBinding(status controldelegation.Status, profile controldelegation.Profile) string {
-	profile = controldelegation.NormalizeProfile(profile)
-	for _, item := range status.Profiles {
-		if item.Definition.Profile == profile || item.Binding.Profile == profile {
-			return formatSubagentProfileStatus(item)
+func formatAgentBinding(status agentbinding.Status, handle agentbinding.Handle) string {
+	handle = agentbinding.NormalizeHandle(handle)
+	for _, item := range status.Handles {
+		if item.Definition.Handle == handle || item.Binding.Handle == handle {
+			return strings.Join(agentBindingStatusRow(item), "  ")
 		}
 	}
-	return string(profile)
+	return string(handle)
 }
 
-func formatSubagentBindingNotice(status controldelegation.Status, profile controldelegation.Profile) string {
-	return "subagent updated " + formatSubagentProfileBinding(status, profile)
-}
-
-func formatSubagentProfileStatus(profile controldelegation.ProfileStatus) string {
-	row := subagentProfileStatusRow(profile)
-	return strings.Join(row, "  ")
-}
-
-func subagentProfileStatusRow(profile controldelegation.ProfileStatus) []string {
-	profileID := profile.Definition.Profile
-	if profileID == "" {
-		profileID = profile.Binding.Profile
+func formatAgentBindingNotice(status agentbinding.Status, handle agentbinding.Handle) string {
+	prefix := "subagent updated "
+	if agentbinding.IsSystem(handle) {
+		prefix = "system Agent updated "
 	}
-	name := strings.TrimSpace(profile.Definition.Name)
-	if name == "" {
-		name = string(profileID)
+	return prefix + formatAgentBinding(status, handle)
+}
+
+func agentBindingStatusRow(status agentbinding.HandleStatus) []string {
+	handle := status.Definition.Handle
+	if handle == "" {
+		handle = status.Binding.Handle
 	}
+	name := firstNonEmpty(strings.TrimSpace(status.Definition.Name), string(handle))
 	target := "Unbound"
-	if profileID == controldelegation.ProfileSelf {
+	switch {
+	case handle == agentbinding.HandleSelf:
 		target = "Current Session controller and effort"
+	case agentbinding.IsSystem(handle):
+		target = "Main Agent default"
 	}
-	if profile.Binding.Target == controldelegation.TargetAgent {
-		agentID := strings.TrimSpace(profile.Agent.ID)
-		if agentID == "" {
-			agentID = strings.TrimSpace(profile.Binding.AgentID)
-		}
-		target = "/" + agentID
-		if alias := strings.TrimSpace(profile.Agent.Backing.ModelAlias); alias != "" {
-			target += " · " + alias
-			if effort := strings.TrimSpace(profile.Binding.ReasoningEffort); effort != "" {
-				target += " [" + effort + "]"
-			} else {
-				target += " [Agent default]"
-			}
-		} else {
-			if modelID := strings.TrimSpace(profile.Agent.Defaults.ModelID); modelID != "" {
-				target += " · " + modelID
-			}
-			target += " · ACP Agent defaults"
-		}
+	if strings.TrimSpace(status.Binding.ProfileID) != "" {
+		target = firstNonEmpty(strings.TrimSpace(status.Profile.DisplayName), strings.TrimSpace(status.Binding.ProfileID))
+		target += " [" + strings.TrimSpace(status.Binding.Effort) + "]"
 	}
-	return []string{string(profileID), name, target}
+	return []string{string(handle), name, target}
 }
 
-func subagentProfileCommandDetail(profile controldelegation.ProfileStatus) string {
-	description := strings.TrimSpace(profile.Definition.Description)
-	if profile.Binding.Target != controldelegation.TargetAgent {
+func subagentProfileCommandDetail(status agentbinding.HandleStatus) string {
+	description := strings.TrimSpace(status.Definition.Description)
+	if strings.TrimSpace(status.Binding.ProfileID) == "" {
 		return strings.Join(compactNonEmpty([]string{description, "unbound · configure with /subagent bind"}), " · ")
 	}
-	target := strings.TrimSpace(profile.Agent.Backing.ModelAlias)
-	if target == "" {
-		target = strings.Join(compactNonEmpty([]string{profile.Agent.ID, profile.Agent.Defaults.ModelID}), "/")
-	}
-	if effort := strings.TrimSpace(profile.Binding.ReasoningEffort); effort != "" {
+	target := firstNonEmpty(strings.TrimSpace(status.Profile.DisplayName), strings.TrimSpace(status.Binding.ProfileID))
+	if effort := strings.TrimSpace(status.Binding.Effort); effort != "" {
 		target += " [" + effort + "]"
 	}
 	return strings.Join(compactNonEmpty([]string{description, target}), " · ")
 }
 
-func formatSystemAgentStatus(status controlsystemagent.AgentStatus) string {
-	return strings.Join(systemAgentStatusRow(status), "  ")
-}
-
-func systemAgentStatusRow(status controlsystemagent.AgentStatus) []string {
-	id := status.Definition.ID
-	name := firstNonEmpty(strings.TrimSpace(status.Definition.Name), string(id))
-	target := "Main Agent default"
-	if status.Binding.AgentID != "" {
-		target = firstNonEmpty(strings.TrimSpace(status.Agent.Backing.ModelAlias), strings.TrimSpace(status.Agent.ID))
-		if effort := strings.TrimSpace(status.Binding.ReasoningEffort); effort != "" {
-			target += " [" + effort + "]"
-		} else {
-			target += " [Agent default]"
-		}
-	}
-	return []string{string(id), name, target}
-}
-
-func formatSystemAgentBindingNotice(status controlsystemagent.Status, id controlsystemagent.ID) string {
-	id = controlsystemagent.NormalizeID(id)
-	for _, item := range status.Agents {
-		if item.Definition.ID == id || item.Binding.ID == id {
-			return "system Agent updated " + formatSystemAgentStatus(item)
-		}
-	}
-	return "system Agent updated " + string(id)
-}
-
 func isSystemAgentID(value string) bool {
-	id := controlsystemagent.NormalizeID(controlsystemagent.ID(value))
-	for _, definition := range controlsystemagent.Definitions() {
-		if definition.ID == id {
-			return true
-		}
-	}
-	return false
+	return agentbinding.IsSystem(agentbinding.Handle(value))
 }

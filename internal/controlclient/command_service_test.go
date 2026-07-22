@@ -64,11 +64,11 @@ func TestEveryWriteCommandAuthorizationIdempotencyCASAndUnknownOutcome(t *testin
 			return s.ResolveApproval(context.Background(), p, controlport.ResolveApprovalRequest{WriteBase: controlport.WriteBase{OperationID: op, SessionID: "session-1", ExpectedRevision: &revision, ExpectedControllerEpoch: epoch}, Target: target, ApprovalRequestID: "approval-1", Outcome: "selected", OptionID: option, Approved: !changed})
 		}},
 		{"participant attach", controlport.ActionParticipantAttach, func(s *CommandService, p controlport.Principal, op string, changed bool) (controlport.CommandResult, error) {
-			agent := "reviewer"
+			profileID := "acp:reviewer"
 			if changed {
-				agent = "changed"
+				profileID = "acp:changed"
 			}
-			return s.AttachParticipant(context.Background(), p, controlport.AttachParticipantRequest{WriteBase: controlport.WriteBase{OperationID: op, SessionID: "session-1", ExpectedRevision: &revision, ExpectedControllerEpoch: epoch}, Agent: agent})
+			return s.AttachParticipant(context.Background(), p, controlport.AttachParticipantRequest{WriteBase: controlport.WriteBase{OperationID: op, SessionID: "session-1", ExpectedRevision: &revision, ExpectedControllerEpoch: epoch}, ProfileID: profileID, Effort: "high"})
 		}},
 		{"participant prompt", controlport.ActionParticipantPrompt, func(s *CommandService, p controlport.Principal, op string, changed bool) (controlport.CommandResult, error) {
 			input := "review"
@@ -153,6 +153,30 @@ func TestSessionAuthorizerRejectsCrossPrincipalSession(t *testing.T) {
 	}
 	if err := authorizer.Authorize(context.Background(), controlport.Principal{ID: "other"}, controlport.ActionPrompt, "session-1"); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("cross-principal error = %v", err)
+	}
+}
+
+func TestAttachParticipantRequiresProfileAndEffort(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		profileID string
+		effort    string
+	}{
+		{name: "profile", effort: "high"},
+		{name: "effort", profileID: "acp:helper"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			backend := &recordingCommandBackend{}
+			service := newTestCommandService(t, allowAuthorizer{}, NewMemoryOperationStore(), backend)
+			result, err := service.AttachParticipant(context.Background(), controlport.Principal{ID: "owner"}, controlport.AttachParticipantRequest{
+				WriteBase: controlport.WriteBase{OperationID: "attach-" + test.name, SessionID: "session-1"},
+				ProfileID: test.profileID,
+				Effort:    test.effort,
+			})
+			if errorcode.CodeOf(err) != errorcode.InvalidArgument || result.Outcome != controlport.OutcomeRejected || backend.calls != 0 {
+				t.Fatalf("AttachParticipant() = %#v, %v, calls=%d", result, err, backend.calls)
+			}
+		})
 	}
 }
 

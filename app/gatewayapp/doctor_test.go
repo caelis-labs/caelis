@@ -3,14 +3,130 @@ package gatewayapp
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
-func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
+type doctorSessionMigrationReporter struct {
+	session.Service
+	report sessionfile.MigrationReport
+}
+
+func (r doctorSessionMigrationReporter) MigrationReport() sessionfile.MigrationReport {
+	return r.report
+}
+
+func TestDoctorReportsObservedLegacySessionParticipantDrop(t *testing.T) {
+	root := t.TempDir()
+	workdir := t.TempDir()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName: "caelis", UserID: "doctor-session-migration", StoreDir: root,
+		WorkspaceKey: workdir, WorkspaceCWD: workdir, Assembly: assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	stack.Sessions = doctorSessionMigrationReporter{
+		Service: stack.Sessions,
+		report: sessionfile.MigrationReport{
+			FromVersion: 1,
+			Dropped: []sessionfile.MigrationDrop{{
+				SessionRef: session.SessionRef{SessionID: "legacy-session"},
+				Category:   "acp_participant",
+				Identity:   "participants[2]",
+				Reason:     "invalid_sealed_placement",
+			}},
+		},
+	}
+
+	report, err := stack.Doctor(context.Background(), DoctorRequest{})
+	if err != nil {
+		t.Fatalf("Doctor() error = %v", err)
+	}
+	warnings := strings.Join(report.Warnings, "\n")
+	for _, want := range []string{
+		"legacy Session document version 1 skipped 1 unsafe participant binding",
+		"legacy Session legacy-session skipped participants[2]: category=acp_participant reason=invalid_sealed_placement",
+	} {
+		if !strings.Contains(warnings, want) {
+			t.Fatalf("Doctor warnings = %q, want %q", warnings, want)
+		}
+	}
+}
+
+func TestDoctorReportsLossyLegacyMigrationWithoutLeakingRawConfig(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workdir := t.TempDir()
+	const secret = "doctor-legacy-secret"
+	raw := `{
+  "models": {"configs": [{
+    "provider": "openai-codex",
+    "model": "gpt-5.6",
+    "credential_ref": "codex-oauth",
+    "token": "` + secret + `",
+    "persist_token": true,
+    "reasoning_mode": "effort",
+    "reasoning_levels": ["low", "high"],
+    "default_reasoning_effort": "high"
+  }]},
+  "agent_roster": {"discoveries": [{
+    "connection_id": "missing",
+    "models": [{"id": "remote", "name": "Remote"}]
+  }]},
+  "delegation": {"bindings": [{
+    "profile": "orbit",
+    "target": "agent",
+    "agent_id": "missing"
+  }]}
+}`
+	configPath := filepath.Join(root, "config.json")
+	if err := os.WriteFile(configPath, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "doctor-migration-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	report, err := stack.Doctor(ctx, DoctorRequest{})
+	if err != nil {
+		t.Fatalf("Doctor() error = %v", err)
+	}
+	warnings := strings.Join(report.Warnings, "\n")
+	for _, want := range []string{
+		"original backed up at " + configPath + ".v1.bak",
+		"agent_roster.discoveries[0]",
+		"delegation.bindings[0]",
+	} {
+		if !strings.Contains(warnings, want) {
+			t.Fatalf("Doctor warnings = %q, want %q", warnings, want)
+		}
+	}
+	if strings.Contains(warnings, secret) {
+		t.Fatalf("Doctor warnings leaked legacy credential: %q", warnings)
+	}
+	backup, err := os.ReadFile(configPath + ".v1.bak")
+	if err != nil || string(backup) != raw {
+		t.Fatalf("legacy backup = %q, %v; want original bytes", backup, err)
+	}
+}
+
+func TestDoctorReportFindsAPIKeyThroughCredentialReferenceAfterReload(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	workdir := t.TempDir()
@@ -31,7 +147,7 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	alias, err := stack.Connect(ModelConfig{
+	profile, err := stack.Connect(ModelConfig{
 		Provider: "minimax",
 		API:      providers.APIAnthropicCompatible,
 		Model:    "MiniMax-M1",
@@ -40,7 +156,7 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	if err := stack.UseModel(ctx, session.SessionRef, alias); err != nil {
+	if err := stack.UseModel(ctx, session.SessionRef, profile.Backend.Provider.ModelConfigID); err != nil {
 		t.Fatalf("UseModel() error = %v", err)
 	}
 	if _, err := stack.SetSessionMode(ctx, session.SessionRef, "manual"); err != nil {
@@ -69,8 +185,8 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 	if report.ActiveProvider != "minimax" || report.ActiveModel != "MiniMax-M1" {
 		t.Fatalf("Doctor() provider/model = %q/%q, want minimax/MiniMax-M1", report.ActiveProvider, report.ActiveModel)
 	}
-	if !report.MissingAPIKey {
-		t.Fatal("Doctor().MissingAPIKey = false, want true after token is redacted from persisted config")
+	if report.MissingAPIKey {
+		t.Fatal("Doctor().MissingAPIKey = true, want credential-store reference to remain available")
 	}
 	if report.SessionMode != "manual" {
 		t.Fatalf("Doctor().SessionMode = %q, want manual", report.SessionMode)

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 )
 
 // Agent is the LLM-visible descriptor of one spawnable ACP agent.
@@ -16,27 +18,20 @@ type Agent struct {
 // PlacementKind identifies the reusable execution backend captured for a
 // delegated child. Product-specific profile selection is resolved before this
 // value enters the Runtime.
-type PlacementKind string
+type PlacementKind = sdkplacement.Kind
 
 const (
 	// PlacementAgent runs an already assembled external or built-in Agent.
-	PlacementAgent PlacementKind = "agent"
+	PlacementAgent = sdkplacement.KindAgent
 	// PlacementModel runs one configured model through the host's local child
 	// endpoint factory.
-	PlacementModel PlacementKind = "model"
+	PlacementModel = sdkplacement.KindModel
 )
 
 // Placement is the typed durable execution decision behind a model-visible
 // Spawn selector. ConfigFingerprint lets the host fail closed when a prepared
 // Spawn is recovered after its referenced configuration changed.
-type Placement struct {
-	Kind              PlacementKind `json:"kind,omitempty"`
-	Agent             string        `json:"agent,omitempty"`
-	Model             string        `json:"model,omitempty"`
-	ReasoningEffort   string        `json:"reasoning_effort,omitempty"`
-	ConfigFingerprint string        `json:"config_fingerprint,omitempty"`
-	Fingerprint       string        `json:"fingerprint,omitempty"`
-}
+type Placement = sdkplacement.Placement
 
 // Target combines one stable model-visible selector with its resolved durable
 // execution placement.
@@ -145,17 +140,8 @@ func ValidateTarget(raw Target) error {
 	if target.Selector == "" {
 		return fmt.Errorf("agent-sdk/task/delegation: target selector is required")
 	}
-	switch target.Placement.Kind {
-	case PlacementAgent:
-		if target.Placement.Agent == "" {
-			return fmt.Errorf("agent-sdk/task/delegation: Agent placement requires an Agent")
-		}
-	case PlacementModel:
-		if target.Placement.Model == "" {
-			return fmt.Errorf("agent-sdk/task/delegation: model placement requires a model")
-		}
-	default:
-		return fmt.Errorf("agent-sdk/task/delegation: unsupported placement kind %q", target.Placement.Kind)
+	if err := sdkplacement.Validate(target.Placement); err != nil {
+		return fmt.Errorf("agent-sdk/task/delegation: %w", err)
 	}
 	return nil
 }
@@ -178,14 +164,7 @@ func CloneResult(in Result) Result {
 
 // NormalizePlacement returns one canonical detached placement.
 func NormalizePlacement(in Placement) Placement {
-	return Placement{
-		Kind:              PlacementKind(strings.ToLower(strings.TrimSpace(string(in.Kind)))),
-		Agent:             strings.TrimSpace(in.Agent),
-		Model:             strings.ToLower(strings.TrimSpace(in.Model)),
-		ReasoningEffort:   strings.ToLower(strings.TrimSpace(in.ReasoningEffort)),
-		ConfigFingerprint: strings.ToLower(strings.TrimSpace(in.ConfigFingerprint)),
-		Fingerprint:       strings.ToLower(strings.TrimSpace(in.Fingerprint)),
-	}
+	return sdkplacement.Normalize(in)
 }
 
 // NormalizeTarget returns one canonical detached target.

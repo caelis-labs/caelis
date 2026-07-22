@@ -6,27 +6,26 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/modelconfig"
-	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
+	"github.com/caelis-labs/caelis/control/modelprofile"
+	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func TestSystemAgentServicePersistsModelBindingAndRefreshesReviewerAssembly(t *testing.T) {
+func TestAgentBindingServicePersistsSystemBindingAndRefreshesReviewerAssembly(t *testing.T) {
 	configuredModel := modelconfig.NormalizeConfig(modelconfig.Config{
 		Alias: "openai-codex/gpt-5.6-sol", Provider: "openai-codex", Model: "gpt-5.6-sol",
 		ReasoningLevels: []string{"high", "xhigh"},
 	})
 	store := newAppConfigStore(t.TempDir())
+	profile, err := modelprofilebuilder.FromProvider(configuredModel)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := store.Save(AppConfig{
-		Models: persistedModelConfig{Configs: []ModelConfig{configuredModel}},
-		AgentRoster: controlagents.Configuration{
-			Connections: []controlagents.Connection{{ID: "claude", Launcher: controlagents.Launcher{Command: "claude-acp"}}},
-			Agents: []controlagents.Agent{
-				{ID: "sol", Backing: controlagents.AgentBacking{ModelAlias: configuredModel.ID}},
-				{ID: "claude", Backing: controlagents.AgentBacking{ConnectionID: "claude"}},
-			},
-		},
+		Models:        persistedModelConfig{Configs: []ModelConfig{configuredModel}},
+		ModelProfiles: modelprofile.Configuration{DefaultProfileID: profile.ID, Profiles: []modelprofile.ModelProfile{profile}},
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -35,38 +34,38 @@ func TestSystemAgentServicePersistsModelBindingAndRefreshesReviewerAssembly(t *t
 		refreshes++
 		return nil
 	}}
-	service := stack.SystemAgents()
-	status, err := service.BindSystemAgent(context.Background(), controlsystemagent.BindRequest{
-		ID: controlsystemagent.Reviewer, AgentID: "sol", ReasoningEffort: "xhigh",
+	service := stack.AgentBindings()
+	status, err := service.BindAgentBinding(context.Background(), agentbinding.Binding{
+		Handle: agentbinding.HandleReviewer, ProfileID: profile.ID, Effort: "xhigh",
 	})
 	if err != nil {
-		t.Fatalf("BindSystemAgent() error = %v", err)
+		t.Fatalf("BindAgentBinding() error = %v", err)
 	}
 	if refreshes != 1 {
 		t.Fatalf("runtime refreshes = %d, want 1", refreshes)
 	}
-	assertSystemAgentTarget(t, status, controlsystemagent.Reviewer, "sol")
-	if len(status.Targets) != 1 || status.Targets[0].Agent.ID != "sol" || status.Targets[0].Model.ID != configuredModel.ID {
-		t.Fatalf("eligible targets = %#v, want only model-backed sol", status.Targets)
+	assertAgentBindingTarget(t, status, agentbinding.HandleReviewer, profile.ID)
+	if len(status.Targets) != 1 || status.Targets[0].ID != profile.ID {
+		t.Fatalf("eligible targets = %#v, want only provider profile %q", status.Targets, profile.ID)
 	}
 
 	loaded, err := store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	binding, ok := controlsystemagent.LookupBinding(loaded.SystemAgents, controlsystemagent.Reviewer)
-	if !ok || binding.AgentID != "sol" || binding.ReasoningEffort != "xhigh" {
+	binding, ok := agentbinding.Lookup(loaded.AgentBindings, agentbinding.HandleReviewer)
+	if !ok || binding.ProfileID != profile.ID || binding.Effort != "xhigh" {
 		t.Fatalf("persisted Reviewer binding = %#v, ok=%v", binding, ok)
 	}
 
-	status, err = service.ResetSystemAgent(context.Background(), controlsystemagent.Reviewer)
+	status, err = service.ResetAgentBinding(context.Background(), agentbinding.HandleReviewer)
 	if err != nil {
-		t.Fatalf("ResetSystemAgent() error = %v", err)
+		t.Fatalf("ResetAgentBinding() error = %v", err)
 	}
 	if refreshes != 2 {
 		t.Fatalf("runtime refreshes = %d, want 2", refreshes)
 	}
-	assertSystemAgentTarget(t, status, controlsystemagent.Reviewer, "")
+	assertAgentBindingTarget(t, status, agentbinding.HandleReviewer, "")
 }
 
 func TestSystemAgentReasoningModelOverridesSceneFallback(t *testing.T) {
@@ -107,18 +106,4 @@ func (m *systemAgentReasoningRecorder) Generate(_ context.Context, req *model.Re
 
 func (*systemAgentReasoningRecorder) Capabilities() model.Capabilities {
 	return model.Capabilities{StructuredOutput: true}
-}
-
-func assertSystemAgentTarget(t *testing.T, status controlsystemagent.Status, id controlsystemagent.ID, agentID string) {
-	t.Helper()
-	for _, item := range status.Agents {
-		if item.Definition.ID != id {
-			continue
-		}
-		if item.Binding.AgentID != agentID || (agentID != "" && item.Agent.ID != agentID) {
-			t.Fatalf("system Agent %q status = %#v, want Agent %q", id, item, agentID)
-		}
-		return
-	}
-	t.Fatalf("system Agent %q missing from status %#v", id, status)
 }

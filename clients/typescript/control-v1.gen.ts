@@ -137,11 +137,12 @@ export interface ApprovalState {
 }
 
 export interface AttachParticipantRequest {
-  agent: string;
+  effort: string;
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
   label?: string;
   operation_id?: string;
+  profile_id: string;
   role?: ParticipantRole;
   session_id?: string;
   source?: string;

@@ -50,6 +50,33 @@ func TestHTTPCreateUsesTrustedPrincipalAndHeaderContracts(t *testing.T) {
 	}
 }
 
+func TestHTTPParticipantAttachUsesProfileAndEffortContract(t *testing.T) {
+	service := &fakeService{}
+	server := newTestServer(t, service, 0)
+	request := httptest.NewRequest(http.MethodPost, apiPrefix+"/sessions/session-1/participants", strings.NewReader(`{"profile_id":"acp:helper","effort":"xhigh","role":"sidecar","label":"Helper"}`))
+	authorizeTestRequest(request)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "attach-operation-1")
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if service.attached.ProfileID != "acp:helper" || service.attached.Effort != "xhigh" || service.attached.SessionID != "session-1" || service.attached.OperationID != "attach-operation-1" {
+		t.Fatalf("attach request = %#v", service.attached)
+	}
+
+	legacy := httptest.NewRequest(http.MethodPost, apiPrefix+"/sessions/session-1/participants", strings.NewReader(`{"agent":"helper","role":"sidecar"}`))
+	authorizeTestRequest(legacy)
+	legacy.Header.Set("Content-Type", "application/json")
+	legacy.Header.Set("Idempotency-Key", "attach-operation-2")
+	legacyRecorder := httptest.NewRecorder()
+	server.ServeHTTP(legacyRecorder, legacy)
+	if legacyRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("legacy agent request status=%d body=%s", legacyRecorder.Code, legacyRecorder.Body.String())
+	}
+}
+
 func TestSSEUsesCursorIDAndWholeEnvelopeData(t *testing.T) {
 	want := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, Cursor: "signed-cursor-1", SessionID: "session-1",
@@ -358,6 +385,7 @@ type fakeService struct {
 	controlclient.Service
 	principal    controlclient.Principal
 	created      controlclient.CreateSessionRequest
+	attached     controlclient.AttachParticipantRequest
 	subscription controlclient.FeedSubscription
 	listCalls    int
 	inspectErr   error
@@ -371,6 +399,11 @@ func (s *fakeService) CreateSession(_ context.Context, principal controlclient.P
 	s.principal = principal
 	s.created = req
 	return controlclient.CommandResult{OperationID: req.OperationID, Outcome: controlclient.OutcomeCommitted, SessionID: "session-created", Revision: 1}, nil
+}
+func (s *fakeService) AttachParticipant(_ context.Context, principal controlclient.Principal, req controlclient.AttachParticipantRequest) (controlclient.CommandResult, error) {
+	s.principal = principal
+	s.attached = req
+	return controlclient.CommandResult{OperationID: req.OperationID, Outcome: controlclient.OutcomeCommitted, SessionID: req.SessionID, Revision: 2}, nil
 }
 func (s *fakeService) InspectSession(context.Context, controlclient.Principal, controlclient.StateRequest) (controlclient.SessionState, error) {
 	return controlclient.SessionState{}, s.inspectErr

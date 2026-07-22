@@ -241,7 +241,9 @@ derives and validates the final assembled model/tool/sandbox requirements.
   the exact persisted entry; consumers validate and adopt that revision instead
   of treating an already committed write as absent.
 - Participant lifecycle stores treat participant ID plus delegation ID as one
-  durable identity. Live ACP endpoints additionally carry an attachment
+  durable identity. Each binding also persists the complete frozen
+  `placement.Placement`; attach and reattach consume that value directly and do
+  not resolve its audit-only `ProfileID`. Live ACP endpoints additionally carry an attachment
   generation and are indexed by parent SessionID plus participant ID. Every new
   endpoint client rotates generation across reconnect/restart; compensation and
   detach must conditionally match delegation and generation so a stale

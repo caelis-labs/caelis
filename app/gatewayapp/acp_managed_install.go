@@ -534,7 +534,7 @@ func (s *Stack) cleanupLegacyManagedACPInstallIfUnused() {
 	if err != nil {
 		return
 	}
-	_ = cleanupLegacyManagedACPInstall(s.managedACPAgentRoot(), doc.AgentRoster)
+	_ = cleanupLegacyManagedACPInstall(s.managedACPAgentRoot(), doc.ExternalAgents)
 }
 
 func cleanupLegacyManagedACPInstall(baseRoot string, roster controlagents.Configuration) error {

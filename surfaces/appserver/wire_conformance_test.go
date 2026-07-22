@@ -99,7 +99,7 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		"SteerRequest":             controlclient.SteerRequest{WriteBase: base, Target: target, Input: "continue"},
 		"CancelRequest":            controlclient.CancelRequest{WriteBase: base, Target: target, Reason: "stop"},
 		"ResolveApprovalRequest":   controlclient.ResolveApprovalRequest{WriteBase: base, Target: target, ApprovalRequestID: "approval-1", Outcome: "selected", OptionID: schema.PermAllowOnce, Approved: true},
-		"AttachParticipantRequest": controlclient.AttachParticipantRequest{WriteBase: base, Agent: "reviewer", Role: session.ParticipantRoleSidecar, Label: "Reviewer", Source: "control"},
+		"AttachParticipantRequest": controlclient.AttachParticipantRequest{WriteBase: base, ProfileID: "acp:reviewer", Effort: "high", Role: session.ParticipantRoleSidecar, Label: "Reviewer", Source: "control"},
 		"PromptParticipantRequest": controlclient.PromptParticipantRequest{WriteBase: base, ParticipantID: "participant-1", Input: "review"},
 		"CancelParticipantRequest": controlclient.CancelParticipantRequest{WriteBase: base, ParticipantID: "participant-1", Target: target, Reason: "stop"},
 		"DetachParticipantRequest": controlclient.DetachParticipantRequest{WriteBase: base, ParticipantID: "participant-1", Source: "control"},

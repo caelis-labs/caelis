@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
@@ -239,9 +239,9 @@ func TestACPPromptCommandNamesExposeOnlyBoundProfilesAndHideAgentCatalog(t *test
 	}); err != nil {
 		t.Fatalf("Connect(bound Orbit model) error = %v", err)
 	}
-	delegationStatus, err := stack.Delegation().DelegationStatus(context.Background())
+	delegationStatus, err := stack.AgentBindings().AgentBindingStatus(context.Background())
 	if err != nil {
-		t.Fatalf("DelegationStatus() error = %v", err)
+		t.Fatalf("AgentBindingStatus() error = %v", err)
 	}
 	commands := acpPromptCommandNames(delegationStatus)
 	for _, profile := range []string{"breeze", "orbit", "zenith"} {
@@ -252,12 +252,13 @@ func TestACPPromptCommandNamesExposeOnlyBoundProfilesAndHideAgentCatalog(t *test
 	if len(delegationStatus.Targets) == 0 {
 		t.Fatal("test setup has no delegation targets")
 	}
-	delegationStatus, err = stack.Delegation().BindDelegation(context.Background(), controldelegation.BindRequest{
-		Profile: controldelegation.ProfileOrbit,
-		AgentID: delegationStatus.Targets[0].Agent.ID,
+	delegationStatus, err = stack.AgentBindings().BindAgentBinding(context.Background(), agentbinding.Binding{
+		Handle:    agentbinding.HandleOrbit,
+		ProfileID: delegationStatus.Targets[0].ID,
+		Effort:    delegationStatus.Targets[0].Effort.DefaultEffort,
 	})
 	if err != nil {
-		t.Fatalf("BindDelegation(Orbit) error = %v", err)
+		t.Fatalf("BindAgentBinding(Orbit) error = %v", err)
 	}
 	commands = acpPromptCommandNames(delegationStatus)
 	if !containsCommand(commands, "orbit") {

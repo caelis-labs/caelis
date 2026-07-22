@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"testing"
 
@@ -15,7 +14,7 @@ func TestOpenAICodexSearchWebUsesStandaloneSearchEndpoint(t *testing.T) {
 	t.Parallel()
 
 	var body openAICodexSearchRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/alpha/search" {
 			t.Errorf("path = %q, want /alpha/search", r.URL.Path)
 		}

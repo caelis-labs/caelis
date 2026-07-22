@@ -167,8 +167,8 @@ func (s PluginService) addPath(ctx context.Context, path string, opts pluginAddP
 
 	s.stack.reconfigureMu.Lock()
 	defer s.stack.reconfigureMu.Unlock()
-	s.stack.agentRosterMu.Lock()
-	defer s.stack.agentRosterMu.Unlock()
+	s.stack.assemblyMutationMu.Lock()
+	defer s.stack.assemblyMutationMu.Unlock()
 	if err := s.stack.rejectReconfigureWhileActive("add plugin"); err != nil {
 		return PluginInfo{}, err
 	}
@@ -223,8 +223,8 @@ func (s PluginService) Enable(ctx context.Context, id string) (PluginInfo, error
 
 	s.stack.reconfigureMu.Lock()
 	defer s.stack.reconfigureMu.Unlock()
-	s.stack.agentRosterMu.Lock()
-	defer s.stack.agentRosterMu.Unlock()
+	s.stack.assemblyMutationMu.Lock()
+	defer s.stack.assemblyMutationMu.Unlock()
 	if err := s.stack.rejectReconfigureWhileActive("enable plugin"); err != nil {
 		return PluginInfo{}, err
 	}
@@ -262,8 +262,8 @@ func (s PluginService) Disable(ctx context.Context, id string) (PluginInfo, erro
 
 	s.stack.reconfigureMu.Lock()
 	defer s.stack.reconfigureMu.Unlock()
-	s.stack.agentRosterMu.Lock()
-	defer s.stack.agentRosterMu.Unlock()
+	s.stack.assemblyMutationMu.Lock()
+	defer s.stack.assemblyMutationMu.Unlock()
 	if err := s.stack.rejectReconfigureWhileActive("disable plugin"); err != nil {
 		return PluginInfo{}, err
 	}
@@ -301,8 +301,8 @@ func (s PluginService) Remove(ctx context.Context, id string) error {
 
 	s.stack.reconfigureMu.Lock()
 	defer s.stack.reconfigureMu.Unlock()
-	s.stack.agentRosterMu.Lock()
-	defer s.stack.agentRosterMu.Unlock()
+	s.stack.assemblyMutationMu.Lock()
+	defer s.stack.assemblyMutationMu.Unlock()
 	if err := s.stack.rejectReconfigureWhileActive("remove plugin"); err != nil {
 		return err
 	}

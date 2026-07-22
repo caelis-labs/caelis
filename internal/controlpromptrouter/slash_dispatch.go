@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	prompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
@@ -210,7 +210,7 @@ func (r Router) dispatchAgentRun(ctx context.Context, command string, promptText
 	command = strings.ToLower(strings.TrimSpace(command))
 	promptText = strings.TrimSpace(promptText)
 	if promptText == "" && len(attachments) == 0 {
-		if controldelegation.IsDirectRunProfile(command) || r.isDirectAgentRun(ctx, command) {
+		if agentbinding.IsDirectRun(agentbinding.Handle(command)) || r.isDirectAgentRun(ctx, command) {
 			return r.noticeResult(fmt.Sprintf("usage: /%s <prompt>", command)), nil
 		}
 		return r.noticeResult(fmt.Sprintf("unknown command: /%s\nrun /help to list available commands", command)), nil

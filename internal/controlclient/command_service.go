@@ -47,7 +47,8 @@ func (s *CommandService) ResolveApproval(ctx context.Context, principal controlp
 	return s.execute(ctx, principal, controlport.ActionApprovalResolve, req.WriteBase, req.ApprovalRequestID+":"+turnTargetKey(req.Target), req)
 }
 func (s *CommandService) AttachParticipant(ctx context.Context, principal controlport.Principal, req controlport.AttachParticipantRequest) (controlport.CommandResult, error) {
-	return s.execute(ctx, principal, controlport.ActionParticipantAttach, req.WriteBase, req.Agent, req)
+	target := strings.TrimSpace(req.ProfileID) + ":" + strings.TrimSpace(req.Effort)
+	return s.execute(ctx, principal, controlport.ActionParticipantAttach, req.WriteBase, target, req)
 }
 func (s *CommandService) PromptParticipant(ctx context.Context, principal controlport.Principal, req controlport.PromptParticipantRequest) (controlport.CommandResult, error) {
 	return s.execute(ctx, principal, controlport.ActionParticipantPrompt, req.WriteBase, req.ParticipantID, req)
@@ -217,8 +218,8 @@ func validateCommandRequest(action controlport.Action, request any) error {
 		if err := requireSession(typed.SessionID); err != nil {
 			return err
 		}
-		if strings.TrimSpace(typed.Agent) == "" {
-			return errors.New("controlclient: participant agent is required")
+		if strings.TrimSpace(typed.ProfileID) == "" || strings.TrimSpace(typed.Effort) == "" {
+			return errors.New("controlclient: participant profile_id and effort are required")
 		}
 	case controlport.PromptParticipantRequest:
 		if err := requireSession(typed.SessionID); err != nil {

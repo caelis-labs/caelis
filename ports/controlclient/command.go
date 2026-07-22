@@ -114,10 +114,11 @@ type ResolveApprovalRequest struct {
 
 type AttachParticipantRequest struct {
 	WriteBase
-	Agent  string                  `json:"agent"`
-	Role   session.ParticipantRole `json:"role,omitempty"`
-	Label  string                  `json:"label,omitempty"`
-	Source string                  `json:"source,omitempty"`
+	ProfileID string                  `json:"profile_id"`
+	Effort    string                  `json:"effort"`
+	Role      session.ParticipantRole `json:"role,omitempty"`
+	Label     string                  `json:"label,omitempty"`
+	Source    string                  `json:"source,omitempty"`
 }
 
 type PromptParticipantRequest struct {

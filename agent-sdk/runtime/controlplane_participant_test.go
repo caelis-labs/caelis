@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -18,7 +19,11 @@ func TestParticipantLifecycleEventUsesNormalizedACPParticipantSemantics(t *testi
 
 	event := participantLifecycleEvent(
 		session.Session{Controller: session.ControllerBinding{Kind: session.ControllerKindKernel, ControllerID: "kernel-1", EpochID: "epoch-1"}},
-		session.ParticipantBinding{ID: "participant-1", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar, SessionID: "remote-1", AgentName: "codex", Label: "@lina"},
+		session.ParticipantBinding{
+			ID: "participant-1", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar,
+			SessionID: "remote-1", AgentName: "codex", Label: "@lina",
+			Placement: placement.Placement{ProfileID: "acp:codex:gpt", ReasoningEffort: "high"},
+		},
 		"attached",
 		time.Unix(1, 0),
 	)
@@ -31,6 +36,9 @@ func TestParticipantLifecycleEventUsesNormalizedACPParticipantSemantics(t *testi
 	}
 	if event.Meta["agent"] != "codex" || event.Meta["handle"] != "lina" {
 		t.Fatalf("participant display meta = %#v, want typed Agent and human handle", event.Meta)
+	}
+	if event.Meta["profile_id"] != "acp:codex:gpt" || event.Meta["reasoning_effort"] != "high" {
+		t.Fatalf("participant placement audit meta = %#v, want profile and effort", event.Meta)
 	}
 }
 
@@ -74,13 +82,21 @@ func TestRuntimeParticipantLifecycleMayOverlapActiveTurnLease(t *testing.T) {
 		AgentName: "claude", Label: "@claude", SessionID: "remote-claude",
 		AttachmentGeneration: "generation-1",
 	}
+	frozen, err := placement.Seal(placement.Placement{
+		Kind: placement.KindAgent, ProfileID: "acp:claude:model", Agent: "claude", Model: "opus",
+		ReasoningEffort: "xhigh", SessionConfigValues: map[string]string{"thought_level": "very-high"},
+		ConfigFingerprint: "sha256:config",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	backend := stubACPController{
 		attach: func(_ context.Context, req controller.AttachRequest) (session.ParticipantBinding, error) {
-			if req.ReasoningEffort != "xhigh" {
-				t.Fatalf("Attach reasoning effort = %q, want xhigh", req.ReasoningEffort)
+			if req.Placement.Fingerprint != frozen.Fingerprint {
+				t.Fatalf("Attach placement = %#v, want %#v", req.Placement, frozen)
 			}
 			attached := binding
-			attached.ReasoningEffort = req.ReasoningEffort
+			attached.Placement = req.Placement
 			return attached, nil
 		},
 		detach: func(_ context.Context, req controller.DetachRequest) error {
@@ -97,12 +113,12 @@ func TestRuntimeParticipantLifecycleMayOverlapActiveTurnLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	attached, err := runtime.AttachParticipant(context.Background(), agent.AttachParticipantRequest{
-		SessionRef: active.SessionRef, Agent: "claude", Role: session.ParticipantRoleSidecar, ReasoningEffort: "xhigh",
+		SessionRef: active.SessionRef, Agent: "claude", Role: session.ParticipantRoleSidecar, Placement: frozen,
 	})
 	if err != nil {
 		t.Fatalf("AttachParticipant() during active Turn error = %v", err)
 	}
-	if durable, ok := participantBinding(attached, binding.ID); !ok || durable.AttachmentGeneration != binding.AttachmentGeneration || durable.ReasoningEffort != "xhigh" {
+	if durable, ok := participantBinding(attached, binding.ID); !ok || durable.AttachmentGeneration != binding.AttachmentGeneration || durable.Placement.Fingerprint != frozen.Fingerprint {
 		t.Fatalf("attached participant = %#v, want exact durable generation", durable)
 	}
 	detached, err := runtime.DetachParticipant(context.Background(), agent.DetachParticipantRequest{

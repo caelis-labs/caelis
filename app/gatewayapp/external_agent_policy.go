@@ -6,11 +6,11 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
-func rosterAgentNameAllowed(id string) bool {
-	return !forbiddenRosterAgentID(id)
+func externalAgentNameAllowed(id string) bool {
+	return !forbiddenExternalAgentID(id)
 }
 
-func forbiddenRosterAgentID(id string) bool {
+func forbiddenExternalAgentID(id string) bool {
 	id = controlagents.NormalizeName(id)
 	if id == "" || !controlagents.IsName(id) {
 		return true

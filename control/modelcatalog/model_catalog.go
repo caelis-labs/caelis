@@ -250,6 +250,55 @@ func NormalizeReasoningEffort(input string) string {
 	}
 }
 
+// CompareReasoningEffort compares canonical reasoning efforts from least to
+// most intensive. Known efforts sort before unknown provider-specific values;
+// unknown values use their normalized lexical order for determinism.
+func CompareReasoningEffort(left, right string) int {
+	left = NormalizeReasoningEffort(left)
+	right = NormalizeReasoningEffort(right)
+	leftRank, leftKnown := reasoningEffortRank(left)
+	rightRank, rightKnown := reasoningEffortRank(right)
+	switch {
+	case leftKnown && !rightKnown:
+		return -1
+	case !leftKnown && rightKnown:
+		return 1
+	case leftKnown && rightKnown && leftRank < rightRank:
+		return -1
+	case leftKnown && rightKnown && leftRank > rightRank:
+		return 1
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func reasoningEffortRank(value string) (int, bool) {
+	switch value {
+	case "none":
+		return 0, true
+	case "minimal":
+		return 1, true
+	case "low":
+		return 2, true
+	case "medium":
+		return 3, true
+	case "high":
+		return 4, true
+	case "xhigh":
+		return 5, true
+	case "max":
+		return 6, true
+	case "ultra":
+		return 7, true
+	default:
+		return 0, false
+	}
+}
+
 // SupportedReasoningEfforts returns supported effort levels for the model.
 // Empty means no effort levels are supported (toggle/budget-only) or unknown.
 func SupportedReasoningEfforts(provider, modelName string) []string {

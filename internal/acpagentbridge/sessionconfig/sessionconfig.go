@@ -74,9 +74,19 @@ func Apply(ctx context.Context, acpClient Client, sessionID string, state State,
 
 	keys := make([]string, 0, len(desired.ConfigValues))
 	for key := range desired.ConfigValues {
+		if strings.EqualFold(strings.TrimSpace(key), desired.ReasoningEffortConfigID) {
+			continue
+		}
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+	if effortID := strings.TrimSpace(desired.ReasoningEffortConfigID); effortID != "" {
+		if optionID, ok := matchingConfigValueKey(desired.ConfigValues, effortID); ok {
+			keys = append(keys, optionID)
+		} else {
+			return State{}, fmt.Errorf("internal/acpagentbridge/sessionconfig: effort config option %q has no desired value", effortID)
+		}
+	}
 	for _, configID := range keys {
 		value := desired.ConfigValues[configID]
 		option, ok := findConfigOption(state.ConfigOptions, configID)
@@ -106,6 +116,15 @@ func Apply(ctx context.Context, acpClient Client, sessionID string, state State,
 		}
 	}
 	return state, nil
+}
+
+func matchingConfigValueKey(values map[string]string, id string) (string, bool) {
+	for key := range values {
+		if strings.EqualFold(strings.TrimSpace(key), strings.TrimSpace(id)) {
+			return key, true
+		}
+	}
+	return "", false
 }
 
 // Snapshot converts a real ACP session handshake into a cacheable Control view.

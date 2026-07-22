@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
@@ -218,7 +219,7 @@ func TestAssembleConnectBuildsManagedCodexOAuthProfile(t *testing.T) {
 	if cfg.CredentialRef != CodexOAuthCredentialRef || cfg.Token != "" || cfg.TokenEnv != "" || cfg.PersistToken {
 		t.Fatalf("codex credentials leaked into model config = %#v", cfg)
 	}
-	if cfg.BaseURL != CodexOAuthBaseURL || cfg.ProfileID != "openai-codex@default" {
+	if cfg.BaseURL != CodexOAuthBaseURL || cfg.ProviderEndpointID != "openai-codex@default" {
 		t.Fatalf("codex endpoint identity = %#v", cfg)
 	}
 }
@@ -336,10 +337,10 @@ func TestResolveCodexOAuthModelDefaultsUseCodexCatalogMetadata(t *testing.T) {
 	}
 }
 
-func TestSanitizePersistedCodexProfileKeepsReferenceOnly(t *testing.T) {
+func TestSanitizePersistedCodexProviderEndpointKeepsReferenceOnly(t *testing.T) {
 	t.Parallel()
 
-	profile := SanitizePersistedProfile(ProfileConfig{
+	endpoint := SanitizePersistedProviderEndpoint(ProviderEndpointConfig{
 		Provider:      "openai-codex",
 		BaseURL:       CodexOAuthBaseURL,
 		CredentialRef: CodexOAuthCredentialRef,
@@ -347,8 +348,8 @@ func TestSanitizePersistedCodexProfileKeepsReferenceOnly(t *testing.T) {
 		TokenEnv:      "SHOULD_NOT_SURVIVE",
 		PersistToken:  true,
 	})
-	if profile.CredentialRef != CodexOAuthCredentialRef || profile.Token != "" || profile.TokenEnv != "" || profile.PersistToken {
-		t.Fatalf("SanitizePersistedProfile(codex) = %#v", profile)
+	if endpoint.CredentialRef != CodexOAuthCredentialRef || endpoint.Token != "" || endpoint.TokenEnv != "" || endpoint.PersistToken {
+		t.Fatalf("SanitizePersistedProviderEndpoint(codex) = %#v", endpoint)
 	}
 }
 
@@ -391,5 +392,26 @@ func TestBuildModelConstructsSDKModelFromControlConfig(t *testing.T) {
 	withContext, ok := resolved.Model.(contextWindowModel)
 	if !ok || withContext.ContextWindowTokens() != 131072 {
 		t.Fatalf("built context model = %#v, %v", withContext, ok)
+	}
+}
+
+func TestApplyConfigProviderEndpointFieldsRetainsOmittedCredential(t *testing.T) {
+	t.Parallel()
+
+	current := NormalizeProviderEndpoint(ProviderEndpointConfig{
+		Provider:      "ollama",
+		CredentialRef: "apikey:ollama/default",
+	})
+	got := ApplyConfigProviderEndpointFields(current, Config{
+		Provider:                "ollama",
+		Model:                   "qwen3",
+		BaseURL:                 "http://localhost:11434",
+		StreamFirstEventTimeout: 5 * time.Minute,
+	})
+	if got.ID != current.ID || got.CredentialRef != current.CredentialRef {
+		t.Fatalf("ApplyConfigProviderEndpointFields() identity/credential = %#v, want ID %q and credential %q", got, current.ID, current.CredentialRef)
+	}
+	if got.BaseURL != "http://localhost:11434" || got.StreamFirstEventTimeout != 5*time.Minute {
+		t.Fatalf("ApplyConfigProviderEndpointFields() settings = %#v", got)
 	}
 }

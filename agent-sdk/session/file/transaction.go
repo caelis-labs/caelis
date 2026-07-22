@@ -189,10 +189,11 @@ func (s *Store) recoverTransactions() error {
 		if err != nil {
 			return err
 		}
-		record, err := decodePersistedTransaction(data)
+		record, report, err := decodePersistedTransactionWithReport(data)
 		if err != nil {
 			return fmt.Errorf("agent-sdk/session/file: decode committed transaction %s: %w", path, err)
 		}
+		s.recordMigrationReport(report)
 		if err := s.applyTransaction(path, record); err != nil {
 			return err
 		}
@@ -201,6 +202,11 @@ func (s *Store) recoverTransactions() error {
 }
 
 func decodePersistedTransaction(data []byte) (persistedTransaction, error) {
+	record, _, err := decodePersistedTransactionWithReport(data)
+	return record, err
+}
+
+func decodePersistedTransactionWithReport(data []byte) (persistedTransaction, MigrationReport, error) {
 	var raw struct {
 		Kind     string            `json:"kind"`
 		Version  int               `json:"version"`
@@ -208,28 +214,30 @@ func decodePersistedTransaction(data []byte) (persistedTransaction, error) {
 		Events   []json.RawMessage `json:"events"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return persistedTransaction{}, err
+		return persistedTransaction{}, MigrationReport{}, err
 	}
 	record := persistedTransaction{Kind: raw.Kind, Version: raw.Version}
-	if err := json.Unmarshal(raw.Document, &record.Document); err != nil {
-		return persistedTransaction{}, err
+	document, report, err := decodePersistedDocumentWithReport(raw.Document)
+	if err != nil {
+		return persistedTransaction{}, MigrationReport{}, err
 	}
+	record.Document = document
 	record.Events = make([]*session.Event, 0, len(raw.Events))
 	for index, eventRaw := range raw.Events {
 		migrated, err := session.MigrateEventJSON(eventRaw)
 		if err != nil {
-			return persistedTransaction{}, fmt.Errorf("migrate event %d: %w", index, err)
+			return persistedTransaction{}, MigrationReport{}, fmt.Errorf("migrate event %d: %w", index, err)
 		}
 		var event session.Event
 		if err := json.Unmarshal(migrated, &event); err != nil {
-			return persistedTransaction{}, fmt.Errorf("decode event %d: %w", index, err)
+			return persistedTransaction{}, MigrationReport{}, fmt.Errorf("decode event %d: %w", index, err)
 		}
 		if err := session.ValidateDurableCoreEvent(&event); err != nil {
-			return persistedTransaction{}, fmt.Errorf("validate event %d: %w", index, err)
+			return persistedTransaction{}, MigrationReport{}, fmt.Errorf("validate event %d: %w", index, err)
 		}
 		record.Events = append(record.Events, &event)
 	}
-	return record, nil
+	return record, report, nil
 }
 
 func (s *Store) applyTransaction(path string, record persistedTransaction) error {

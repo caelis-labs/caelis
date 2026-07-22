@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 )
@@ -35,6 +36,7 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSess
 		Role:          role,
 		AgentName:     strings.TrimSpace(task.agent),
 		Label:         mention,
+		Placement:     delegationPlacement(task),
 		SessionID:     strings.TrimSpace(task.anchor.SessionID),
 		Source:        firstNonEmpty(strings.TrimSpace(taskStringValue(task.metadata["source"])), "agent_spawn"),
 		ParentTurnID:  strings.TrimSpace(parentCall),
@@ -62,13 +64,15 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSess
 			},
 		},
 		Meta: map[string]any{
-			"task_id":    task.ref.TaskID,
-			"agent":      task.agent,
-			"agent_id":   task.anchor.AgentID,
-			"handle":     handle,
-			"mention":    mention,
-			"session_id": task.anchor.SessionID,
-			"state":      string(task.state),
+			"task_id":          task.ref.TaskID,
+			"agent":            task.agent,
+			"agent_id":         task.anchor.AgentID,
+			"handle":           handle,
+			"mention":          mention,
+			"profile_id":       task.target.Placement.ProfileID,
+			"reasoning_effort": task.target.Placement.ReasoningEffort,
+			"session_id":       task.anchor.SessionID,
+			"state":            string(task.state),
 		},
 	}
 	_, _, err = lifecycle.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
@@ -76,6 +80,13 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSess
 		ExpectedDelegationID: stringPointer(task.ref.TaskID), Binding: binding, Event: event,
 	})
 	return err
+}
+
+func delegationPlacement(task *subagentTask) placement.Placement {
+	if task == nil {
+		return placement.Placement{}
+	}
+	return placement.Normalize(task.target.Placement)
 }
 
 func (tm *taskRuntime) updateSubagentParticipant(ctx context.Context, task *subagentTask, action string) error {
@@ -103,14 +114,16 @@ func (tm *taskRuntime) updateSubagentParticipant(ctx context.Context, task *suba
 			},
 		},
 		Meta: map[string]any{
-			"task_id":        task.ref.TaskID,
-			"agent":          task.agent,
-			"agent_id":       task.anchor.AgentID,
-			"handle":         task.handle,
-			"mention":        "@" + strings.TrimPrefix(task.handle, "@"),
-			"session_id":     task.anchor.SessionID,
-			"state":          string(task.state),
-			"output_preview": taskRawStringValue(task.result["output_preview"]),
+			"task_id":          task.ref.TaskID,
+			"agent":            task.agent,
+			"agent_id":         task.anchor.AgentID,
+			"handle":           task.handle,
+			"mention":          "@" + strings.TrimPrefix(task.handle, "@"),
+			"profile_id":       task.target.Placement.ProfileID,
+			"reasoning_effort": task.target.Placement.ReasoningEffort,
+			"session_id":       task.anchor.SessionID,
+			"state":            string(task.state),
+			"output_preview":   taskRawStringValue(task.result["output_preview"]),
 		},
 	})
 	return err

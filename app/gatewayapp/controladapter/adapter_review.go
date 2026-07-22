@@ -2,15 +2,25 @@ package controladapter
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 )
 
 func (d *Adapter) StartReview(ctx context.Context, instructions string, attachments []Attachment) (Turn, error) {
+	if d == nil || d.stack == nil || d.stack.AgentBinding.ResolveFn == nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: system Agent placement is unavailable")
+	}
+	placement, err := d.stack.AgentBinding.ResolveFn(bindingContext(ctx), agentbinding.HandleReviewer)
+	if err != nil {
+		return nil, err
+	}
 	prompt, attachmentOffset := gatewayapp.ReviewPrompt(instructions)
 	return d.startSidecarTurn(ctx, startSidecarTurnRequest{
 		Agent:        gatewayapp.ReviewerAgentID,
+		Placement:    placement,
 		LabelBase:    gatewayapp.ReviewerAgentID,
 		Prompt:       prompt,
 		DisplayInput: displayInputWithAttachments(instructions, attachments),

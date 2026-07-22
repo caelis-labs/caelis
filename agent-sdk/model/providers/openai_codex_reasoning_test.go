@@ -2,7 +2,6 @@ package providers
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -11,7 +10,7 @@ import (
 func TestOpenAICodexReasoningSummaryIndexesBecomeStepBoundaries(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		writeOpenAICodexSSE(t, w,
 			map[string]any{"type": "response.output_item.added", "output_index": 0, "item": map[string]any{"id": "rs_1", "type": "reasoning", "summary": []any{}}},

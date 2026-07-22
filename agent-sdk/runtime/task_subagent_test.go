@@ -10,6 +10,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -24,6 +25,15 @@ import (
 
 func ptrModelMessage(message model.Message) *model.Message {
 	return &message
+}
+
+func mustSealPlacement(t *testing.T, value placement.Placement) placement.Placement {
+	t.Helper()
+	sealed, err := placement.Seal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sealed
 }
 
 func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *testing.T) {
@@ -1291,9 +1301,9 @@ func TestRuntimeSpawnToolPersistsResolvedPlacementBeforeSpawn(t *testing.T) {
 			map[string]spawn.Target{
 				"orbit": {
 					Selector: "orbit",
-					Placement: delegation.Placement{
-						Kind: delegation.PlacementModel, Model: "provider/model", ReasoningEffort: "high", Fingerprint: "placement-v1",
-					},
+					Placement: mustSealPlacement(t, delegation.Placement{
+						Kind: delegation.PlacementModel, Model: "provider/model", ReasoningEffort: "high", ConfigFingerprint: "config-v1",
+					}),
 				},
 			},
 		),
@@ -1319,7 +1329,7 @@ func TestRuntimeSpawnToolPersistsResolvedPlacementBeforeSpawn(t *testing.T) {
 		t.Fatalf("Get(task) error = %v", err)
 	}
 	target := taskSpecTarget(entry.Spec, "target")
-	if target.Selector != "orbit" || target.Placement.Model != "provider/model" || target.Placement.ReasoningEffort != "high" || target.Placement.Fingerprint != "placement-v1" {
+	if target.Selector != "orbit" || target.Placement.Model != "provider/model" || target.Placement.ReasoningEffort != "high" || !strings.HasPrefix(target.Placement.Fingerprint, "sha256:") {
 		t.Fatalf("durable target = %#v", target)
 	}
 	if _, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{

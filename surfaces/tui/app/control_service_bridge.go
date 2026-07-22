@@ -14,9 +14,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
-	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
@@ -217,8 +216,7 @@ type ControlServices interface {
 	control.Service
 	controlagents.Connector
 	controlagents.Disconnector
-	controldelegation.Service
-	controlsystemagent.Service
+	agentbinding.Service
 }
 
 // ConfigFromControlService populates Config callbacks from Control services.
@@ -665,13 +663,13 @@ func acpSlashCommands(base []string, status control.AgentStatusSnapshot) []strin
 func tuiDirectAgentRuns(status control.AgentStatusSnapshot) []controlagents.Run {
 	runs := make([]controlagents.Run, 0, len(status.Participants))
 	for _, participant := range status.Participants {
-		runs = append(runs, controldelegation.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))
+		runs = append(runs, controlagents.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))
 	}
 	return runs
 }
 
 func tuiAgentCommandNameAllowed(name string) bool {
-	return controldelegation.IsDirectRunProfile(name)
+	return agentbinding.IsDirectRun(agentbinding.Handle(name))
 }
 
 func tuiRemoteControllerCommandNameAllowed(name string) bool {
@@ -681,23 +679,19 @@ func tuiRemoteControllerCommandNameAllowed(name string) bool {
 
 func boundDirectProfileNames(ctx context.Context, service control.Service) map[string]struct{} {
 	out := map[string]struct{}{}
-	delegation, ok := service.(controldelegation.Service)
+	bindings, ok := service.(agentbinding.Service)
 	if !ok {
 		return out
 	}
-	status, err := delegation.DelegationStatus(contextOrBackground(ctx))
+	status, err := bindings.AgentBindingStatus(contextOrBackground(ctx))
 	if err != nil {
 		return out
 	}
-	for _, profile := range status.Profiles {
-		if !controldelegation.IsProfileBound(profile) {
+	for _, handle := range status.Handles {
+		if !agentbinding.IsDirectRun(handle.Definition.Handle) || !agentbinding.IsBound(handle) {
 			continue
 		}
-		name := profile.Definition.Profile
-		if name == "" {
-			name = profile.Binding.Profile
-		}
-		out[string(name)] = struct{}{}
+		out[string(handle.Definition.Handle)] = struct{}{}
 	}
 	return out
 }
@@ -707,7 +701,7 @@ func projectBoundDirectProfileCommands(commands []string, bound map[string]struc
 	seen := make(map[string]struct{}, len(commands)+len(bound))
 	for _, command := range commands {
 		name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command, "/")))
-		if controldelegation.IsDirectRunProfile(name) {
+		if agentbinding.IsDirectRun(agentbinding.Handle(name)) {
 			if _, ok := bound[name]; !ok {
 				continue
 			}
@@ -718,8 +712,8 @@ func projectBoundDirectProfileCommands(commands []string, bound map[string]struc
 		out = append(out, command)
 		seen[name] = struct{}{}
 	}
-	for _, profile := range controldelegation.DirectRunProfiles() {
-		name := string(profile)
+	for _, handle := range agentbinding.DirectRunHandles() {
+		name := string(handle)
 		if _, ok := bound[name]; !ok {
 			continue
 		}
@@ -752,13 +746,13 @@ func profileCommandDetailsWithContext(ctx context.Context, service control.Servi
 	}
 	ctx = contextOrBackground(ctx)
 	details := map[string]string{}
-	if delegation, ok := service.(controldelegation.Service); ok {
-		if status, err := delegation.DelegationStatus(ctx); err == nil {
-			for _, profile := range status.Profiles {
-				if !controldelegation.IsProfileBound(profile) {
+	if bindings, ok := service.(agentbinding.Service); ok {
+		if status, err := bindings.AgentBindingStatus(ctx); err == nil {
+			for _, handle := range status.Handles {
+				if !agentbinding.IsDirectRun(handle.Definition.Handle) || !agentbinding.IsBound(handle) {
 					continue
 				}
-				details[string(profile.Definition.Profile)] = subagentProfileCommandDetail(profile)
+				details[string(handle.Definition.Handle)] = subagentProfileCommandDetail(handle)
 			}
 		}
 	}

@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"time"
 
+	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
-	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
@@ -51,20 +52,22 @@ type GatewayStreamProvider interface {
 type ModelConfig = modelconfig.Config
 
 type ModelChoice struct {
-	ID         string
-	Alias      string
-	Provider   string
-	Model      string
-	ProfileID  string
-	EndpointID string
-	BaseURL    string
-	Detail     string
+	ID                 string
+	Alias              string
+	Provider           string
+	Model              string
+	ProviderEndpointID string
+	EndpointID         string
+	BaseURL            string
+	Detail             string
 }
 
-type SystemAgentRuntimeDeps struct {
-	StatusFn func(context.Context) (controlsystemagent.Status, error)
-	BindFn   func(context.Context, controlsystemagent.BindRequest) (controlsystemagent.Status, error)
-	ResetFn  func(context.Context, controlsystemagent.ID) (controlsystemagent.Status, error)
+// AgentBindingRuntimeDeps carries the one Control-owned fixed-handle service.
+type AgentBindingRuntimeDeps struct {
+	StatusFn  func(context.Context) (agentbinding.Status, error)
+	BindFn    func(context.Context, agentbinding.Binding) (agentbinding.Status, error)
+	ResetFn   func(context.Context, agentbinding.Handle) (agentbinding.Status, error)
+	ResolveFn func(context.Context, agentbinding.Handle) (sdkplacement.Placement, error)
 }
 
 type SessionRuntimeState struct {
@@ -204,13 +207,6 @@ type AgentRuntimeDeps struct {
 	ListFn                 func() []ACPAgentInfo
 }
 
-// DelegationRuntimeDeps carries the Control-owned fixed profile bindings.
-type DelegationRuntimeDeps struct {
-	StatusFn func(context.Context) (controldelegation.Status, error)
-	BindFn   func(context.Context, controldelegation.BindRequest) (controldelegation.Status, error)
-	ResetFn  func(context.Context, controldelegation.Profile) (controldelegation.Status, error)
-}
-
 // ModelRuntimeDeps carries model catalog and mutation capabilities. Metadata
 // reads can return zero values when absent; connect/use/delete operations fail
 // when invoked without their backing hooks.
@@ -219,7 +215,7 @@ type ModelRuntimeDeps struct {
 	ConfigFn               func(string) (ModelConfig, bool)
 	SessionUsageSnapshotFn func(context.Context, session.SessionRef, string) (compact.UsageSnapshot, error)
 	ProviderUsageFn        func(context.Context, string) (providerusage.Snapshot, bool, error)
-	ConnectModelsFn        func([]ModelConfig) ([]string, error)
+	ConnectModelsFn        func([]ModelConfig) ([]modelprofile.ModelProfile, error)
 	UseFn                  func(context.Context, session.SessionRef, string, ...string) error
 	DeleteFn               func(context.Context, session.SessionRef, string) error
 	ListAliasesFn          func(context.Context, session.SessionRef) ([]string, error)
@@ -259,8 +255,7 @@ type RuntimeStack struct {
 	Session          SessionRuntimeDeps
 	Status           StatusRuntimeDeps
 	Agent            AgentRuntimeDeps
-	Delegation       DelegationRuntimeDeps
-	SystemAgent      SystemAgentRuntimeDeps
+	AgentBinding     AgentBindingRuntimeDeps
 	Model            ModelRuntimeDeps
 	Sandbox          SandboxRuntimeDeps
 	Skill            SkillRuntimeDeps

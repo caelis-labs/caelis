@@ -79,6 +79,32 @@ func TestApplyConfigModelAndEffortBeforePrompt(t *testing.T) {
 	}
 }
 
+func TestApplyPlacesEffortAfterNonEffortDefaults(t *testing.T) {
+	t.Parallel()
+
+	options := func(mode, effort string) []client.SessionConfigOption {
+		return []client.SessionConfigOption{
+			{ID: "a_effort", Type: "select", CurrentValue: effort, Options: []client.SessionConfigSelectOption{{Value: "high"}, {Value: "max"}}},
+			{ID: "z_mode", Type: "select", CurrentValue: mode, Options: []client.SessionConfigSelectOption{{Value: "ask"}, {Value: "code"}}},
+		}
+	}
+	acpClient := &fakeClient{responses: []client.SetSessionConfigOptionResponse{
+		{ConfigOptions: options("code", "high")},
+		{ConfigOptions: options("code", "max")},
+	}}
+	_, err := Apply(context.Background(), acpClient, "session-order", State{ConfigOptions: options("ask", "high")}, controlagents.SessionOptions{
+		ConfigValues:            map[string]string{"a_effort": "max", "z_mode": "code"},
+		ReasoningEffortConfigID: "a_effort",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"config:session-order:z_mode:code", "config:session-order:a_effort:max"}
+	if !reflect.DeepEqual(acpClient.calls, want) {
+		t.Fatalf("calls = %#v, want non-effort then effort %#v", acpClient.calls, want)
+	}
+}
+
 func TestApplyUsesSetModelWhenOnlyModelsAreAdvertised(t *testing.T) {
 	t.Parallel()
 

@@ -6,6 +6,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -91,13 +92,13 @@ func TestNormalizeAttachDetachHandoffRequests(t *testing.T) {
 	t.Parallel()
 
 	attach := NormalizeAttachRequest(AttachRequest{
-		SessionRef:      session.SessionRef{SessionID: " sid "},
-		Agent:           " agent ",
-		Source:          " source ",
-		Label:           " label ",
-		ReasoningEffort: " xhigh ",
+		SessionRef: session.SessionRef{SessionID: " sid "},
+		Agent:      " agent ",
+		Source:     " source ",
+		Label:      " label ",
+		Placement:  placement.Placement{Kind: placement.KindAgent, Agent: " agent ", ReasoningEffort: " XHIGH "},
 	})
-	if attach.SessionRef.SessionID != "sid" || attach.Agent != "agent" || attach.Source != "source" || attach.Label != "label" || attach.ReasoningEffort != "xhigh" {
+	if attach.SessionRef.SessionID != "sid" || attach.Agent != "agent" || attach.Source != "source" || attach.Label != "label" || attach.Placement.ReasoningEffort != "xhigh" {
 		t.Fatalf("normalized attach = %+v", attach)
 	}
 

@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
@@ -134,7 +136,17 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		updated, err := gw.AttachParticipant(ctx, gateway.AttachParticipantRequest{SessionRef: active.SessionRef, Agent: req.Agent, Role: req.Role, Label: req.Label, Source: req.Source})
+		participantPlacement, err := s.resolveControlParticipantPlacement(ctx, req.ProfileID, req.Effort)
+		if err != nil {
+			return sessionCommandResult(active), classifyControlBackendError(err)
+		}
+		updated, err := gw.AttachParticipant(ctx, gateway.AttachParticipantRequest{
+			SessionRef: active.SessionRef,
+			Role:       req.Role,
+			Label:      req.Label,
+			Source:     req.Source,
+			Placement:  participantPlacement,
+		})
 		return sessionCommandResult(updated), classifyControlBackendError(err)
 	case controlport.PromptParticipantRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
@@ -182,6 +194,25 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 	default:
 		return controlport.CommandResult{}, fmt.Errorf("gatewayapp: unsupported control command %q (%T)", action, request)
 	}
+}
+
+func (s *Stack) resolveControlParticipantPlacement(ctx context.Context, profileID, effort string) (sdkplacement.Placement, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return sdkplacement.Placement{}, err
+	}
+	resolved, err := s.resolveParticipantPlacement(ctx, profileID, effort)
+	if err != nil {
+		var selectionErr *controlplacement.ParticipantSelectionError
+		if errors.As(err, &selectionErr) {
+			coded := errorcode.Wrap(errorcode.InvalidArgument, "gatewayapp: invalid participant placement", err)
+			return sdkplacement.Placement{}, controlport.NewOutcomeError(controlport.OutcomeRejected, coded)
+		}
+		return sdkplacement.Placement{}, err
+	}
+	return resolved, nil
 }
 
 func (s *Stack) checkControlCommandCAS(ctx context.Context, base controlport.WriteBase) (session.Session, error) {

@@ -9,6 +9,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -52,8 +53,9 @@ type AttachRequest struct {
 	Role       session.ParticipantRole    `json:"role,omitempty"`
 	Source     string                     `json:"source,omitempty"`
 	Label      string                     `json:"label,omitempty"`
-	// ReasoningEffort is applied to a new ACP participant before prompting it.
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Placement is the already resolved execution choice applied before the
+	// first prompt and reused for reattachment.
+	Placement placement.Placement `json:"placement"`
 }
 
 // DetachRequest removes one ACP-backed participant attachment.
@@ -196,7 +198,7 @@ func NormalizeAttachRequest(in AttachRequest) AttachRequest {
 	out.Agent = strings.TrimSpace(in.Agent)
 	out.Source = strings.TrimSpace(in.Source)
 	out.Label = strings.TrimSpace(in.Label)
-	out.ReasoningEffort = strings.TrimSpace(in.ReasoningEffort)
+	out.Placement = placement.Normalize(in.Placement)
 	return out
 }
 

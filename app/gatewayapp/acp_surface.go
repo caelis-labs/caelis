@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	"github.com/caelis-labs/caelis/protocol/acp"
@@ -208,18 +208,14 @@ func (p gatewayACPSurface) PromptCapabilities(context.Context) (acp.PromptCapabi
 }
 
 func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID string) ([]acp.AvailableCommand, error) {
-	boundProfiles := map[string]controldelegation.ProfileStatus{}
+	boundProfiles := map[string]agentbinding.HandleStatus{}
 	if p.stack != nil {
-		if status, err := p.stack.Delegation().DelegationStatus(ctx); err == nil {
-			for _, profile := range status.Profiles {
-				if !controldelegation.IsProfileBound(profile) {
+		if status, err := p.stack.AgentBindings().AgentBindingStatus(ctx); err == nil {
+			for _, handle := range status.Handles {
+				if !agentbinding.IsDirectRun(handle.Definition.Handle) || !agentbinding.IsBound(handle) {
 					continue
 				}
-				name := profile.Definition.Profile
-				if name == "" {
-					name = profile.Binding.Profile
-				}
-				boundProfiles[string(name)] = profile
+				boundProfiles[string(handle.Definition.Handle)] = handle
 			}
 		}
 	}
@@ -230,7 +226,7 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 			continue
 		}
 		profile, isProfile := boundProfiles[strings.ToLower(strings.TrimSpace(spec.Name))]
-		if controldelegation.IsDirectRunProfile(spec.Name) && !isProfile {
+		if agentbinding.IsDirectRun(agentbinding.Handle(spec.Name)) && !isProfile {
 			continue
 		}
 		cmd := acp.AvailableCommand{
@@ -254,14 +250,16 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 			}
 			runs := make([]controlagents.Run, 0, len(activeSession.Participants))
 			for _, participant := range activeSession.Participants {
-				runs = append(runs, controldelegation.DirectRunFromParticipant(
+				runs = append(runs, controlagents.DirectRunFromParticipant(
 					participant.Label,
 					string(participant.Kind),
 					string(participant.Role),
 					participant.Source,
 				))
 			}
-			for _, name := range controlagents.AppendRunNames(nil, runs, controldelegation.IsDirectRunProfile) {
+			for _, name := range controlagents.AppendRunNames(nil, runs, func(name string) bool {
+				return agentbinding.IsDirectRun(agentbinding.Handle(name))
+			}) {
 				if _, exists := seen[name]; exists {
 					continue
 				}
@@ -309,19 +307,13 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 	return commands, nil
 }
 
-func availableProfileDescription(profile controldelegation.ProfileStatus) string {
+func availableProfileDescription(profile agentbinding.HandleStatus) string {
 	description := strings.TrimSpace(profile.Definition.Description)
-	if profile.Binding.Target != controldelegation.TargetAgent {
+	if strings.TrimSpace(profile.Binding.ProfileID) == "" {
 		return firstNonEmpty(description+" Unbound; configure it with /subagent bind.", description)
 	}
-	target := strings.TrimSpace(profile.Agent.Backing.ModelAlias)
-	if target == "" {
-		target = strings.TrimSpace(firstNonEmpty(profile.Agent.Name, profile.Agent.ID, profile.Binding.AgentID))
-		if modelID := strings.TrimSpace(profile.Agent.Defaults.ModelID); modelID != "" {
-			target += " · " + modelID
-		}
-	}
-	if effort := strings.TrimSpace(profile.Binding.ReasoningEffort); effort != "" {
+	target := strings.TrimSpace(firstNonEmpty(profile.Profile.DisplayName, profile.Binding.ProfileID))
+	if effort := strings.TrimSpace(profile.Binding.Effort); effort != "" {
 		target += " [" + effort + "]"
 	}
 	if description == "" {

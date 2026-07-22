@@ -16,6 +16,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -34,8 +35,6 @@ type Config struct {
 	ClientInfo *client.Implementation
 	Clock      func() time.Time
 }
-
-const participantReasoningEffortConfigID = "reasoning_effort"
 
 type Manager struct {
 	registry    *subagent.Registry
@@ -701,14 +700,24 @@ func (m *Manager) startParticipant(
 ) (*participantRun, error) {
 	var run *participantRun
 	existing := session.CloneParticipantBinding(req.Binding)
-	reasoningEffort := firstNonEmpty(strings.TrimSpace(req.ReasoningEffort), strings.TrimSpace(existing.ReasoningEffort))
-	if reasoningEffort != "" {
-		cfg.SessionOptions = controlagents.NormalizeSessionOptions(cfg.SessionOptions)
-		cfg.SessionOptions.ConfigValues = maps.Clone(cfg.SessionOptions.ConfigValues)
-		if cfg.SessionOptions.ConfigValues == nil {
-			cfg.SessionOptions.ConfigValues = make(map[string]string, 1)
-		}
-		cfg.SessionOptions.ConfigValues[participantReasoningEffortConfigID] = reasoningEffort
+	placement := sdkplacement.Normalize(req.Placement)
+	if placement.Kind == "" {
+		placement = existing.Placement
+	}
+	if err := sdkplacement.ValidateSealed(placement); err != nil {
+		return nil, fmt.Errorf("internal/acpagentbridge/controller: participant placement is invalid: %w", err)
+	}
+	if placement.Kind == sdkplacement.KindAgent && !strings.EqualFold(strings.TrimSpace(placement.Agent), strings.TrimSpace(req.Agent)) {
+		return nil, fmt.Errorf(
+			"internal/acpagentbridge/controller: participant Agent %q does not match frozen placement Agent %q",
+			strings.TrimSpace(req.Agent),
+			placement.Agent,
+		)
+	}
+	cfg.SessionOptions = controlagents.SessionOptions{
+		ModelID:                 strings.TrimSpace(placement.Model),
+		ConfigValues:            maps.Clone(placement.SessionConfigValues),
+		ReasoningEffortConfigID: placement.ReasoningEffortConfigID,
 	}
 	resumeRemoteSessionID := strings.TrimSpace(existing.SessionID)
 	client, remoteSessionID, state, err := m.startClient(ctx, parentSession.CWD, cfg, resumeRemoteSessionID, func(env client.UpdateEnvelope) {
@@ -773,7 +782,7 @@ func (m *Manager) startParticipant(
 			Role:                 role,
 			AgentName:            agentName,
 			Label:                label,
-			ReasoningEffort:      reasoningEffort,
+			Placement:            placement,
 			SessionID:            remoteSessionID,
 			Source:               firstNonEmpty(req.Source, existing.Source, "user_attach"),
 			ParentTurnID:         strings.TrimSpace(existing.ParentTurnID),
@@ -1560,6 +1569,12 @@ func applyACPParticipantEventScope(event *session.Event, binding session.Partici
 	if label := strings.TrimSpace(binding.Label); label != "" {
 		event.Meta["mention"] = label
 		event.Meta["handle"] = strings.TrimPrefix(label, "@")
+	}
+	if profileID := strings.TrimSpace(binding.Placement.ProfileID); profileID != "" {
+		event.Meta["profile_id"] = profileID
+	}
+	if effort := strings.TrimSpace(binding.Placement.ReasoningEffort); effort != "" {
+		event.Meta["reasoning_effort"] = effort
 	}
 }
 

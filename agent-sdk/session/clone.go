@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 )
 
 // NormalizeSessionRef returns one normalized session ref.
@@ -150,7 +151,7 @@ func CloneParticipantBinding(in ParticipantBinding) ParticipantBinding {
 		Role:                 in.Role,
 		AgentName:            strings.TrimSpace(in.AgentName),
 		Label:                strings.TrimSpace(in.Label),
-		ReasoningEffort:      strings.TrimSpace(in.ReasoningEffort),
+		Placement:            placement.Normalize(in.Placement),
 		SessionID:            strings.TrimSpace(in.SessionID),
 		Source:               strings.TrimSpace(in.Source),
 		ParentTurnID:         strings.TrimSpace(in.ParentTurnID),

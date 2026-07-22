@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync"
@@ -24,7 +23,7 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	var mu sync.Mutex
 	var bodies []map[string]any
 	var requestCount atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {
 			t.Errorf("path = %q, want /responses", r.URL.Path)
 		}
@@ -192,7 +191,7 @@ func TestOpenAICodexTokenOnlyReasoningAndPrematureEOF(t *testing.T) {
 		t.Fatalf("replay input = %#v", inputs[0])
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		writeOpenAICodexSSE(t, w, map[string]any{"type": "response.output_text.delta", "item_id": "msg_1", "delta": "partial"})
 	}))
@@ -238,7 +237,7 @@ func TestOpenAICodexErrorsAreClassified(t *testing.T) {
 
 	t.Run("http auth is terminal", func(t *testing.T) {
 		var requests atomic.Int32
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			requests.Add(1)
 			http.Error(w, `{"error":"expired"}`, http.StatusUnauthorized)
 		}))
@@ -254,7 +253,7 @@ func TestOpenAICodexErrorsAreClassified(t *testing.T) {
 	})
 
 	t.Run("stream context overflow", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			writeOpenAICodexSSE(t, w, map[string]any{"type": "response.failed", "response": map[string]any{"error": map[string]any{"code": "context_length_exceeded", "message": "context is too long"}}})
 		}))
@@ -309,7 +308,7 @@ func TestOpenAICodexLongSessionAffinityIsBoundedOnWire(t *testing.T) {
 	wantAffinity := openAICodexRequestAffinity(longAffinity)
 	var gotHeader string
 	var gotPromptCache string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotHeader = r.Header.Get("session-id")
 		var body struct {
 			PromptCache string `json:"prompt_cache_key"`

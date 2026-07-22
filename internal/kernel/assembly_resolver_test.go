@@ -188,7 +188,7 @@ func TestAssemblyResolverToolAugmenterReceivesEffectiveModelAndEffort(t *testing
 			if alias != "provider/model-id" {
 				t.Fatalf("ResolveModel alias = %q", alias)
 			}
-			return ModelResolution{Model: fakeLLM{name: "selected"}, DefaultReasoningEffort: "medium"}, nil
+			return ModelResolution{Model: fakeLLM{name: "selected"}, ProfileID: "provider:provider/model-id", DefaultReasoningEffort: "medium"}, nil
 		}),
 		ToolAugmenter: func(_ context.Context, ctx ToolAugmentContext) (ToolAugmentation, error) {
 			got = ctx
@@ -202,7 +202,7 @@ func TestAssemblyResolverToolAugmenterReceivesEffectiveModelAndEffort(t *testing
 	if err != nil {
 		t.Fatalf("ResolveTurn() error = %v", err)
 	}
-	if got.EffectiveModelRef != "provider/model-id" || got.EffectiveReasoningEffort != "high" {
+	if got.Session.ProfileID != "provider:provider/model-id" || got.Session.Effort != "high" {
 		t.Fatalf("ToolAugmentContext = %#v", got)
 	}
 }

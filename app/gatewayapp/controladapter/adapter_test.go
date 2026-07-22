@@ -17,6 +17,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -24,8 +25,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/testenv"
@@ -1417,27 +1418,27 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	if cfg.ID != "deepseek@default/deepseek/deepseek-v4-flash" {
 		t.Fatalf("persisted model id = %q, want readable profile/model alias id", cfg.ID)
 	}
-	if cfg.ProfileID != "deepseek@default" {
-		t.Fatalf("persisted profile id = %q, want deepseek@default", cfg.ProfileID)
+	if cfg.ProviderEndpointID != "deepseek@default" {
+		t.Fatalf("persisted provider endpoint id = %q, want deepseek@default", cfg.ProviderEndpointID)
 	}
 	if cfg.Provider != "" || cfg.BaseURL != "" || cfg.Token != "" || cfg.TokenEnv != "" {
 		t.Fatalf("persisted model leaked profile fields: %#v", cfg)
 	}
-	var conn gatewayapp.ModelProfileConfig
-	for _, item := range doc.Models.Profiles {
-		if strings.EqualFold(item.ID, cfg.ProfileID) {
+	var conn gatewayapp.ProviderEndpointConfig
+	for _, item := range doc.Models.ProviderEndpoints {
+		if strings.EqualFold(item.ID, cfg.ProviderEndpointID) {
 			conn = item
 			break
 		}
 	}
 	if conn.ID == "" {
-		t.Fatalf("persisted profiles = %#v, missing %q", doc.Models.Profiles, cfg.ProfileID)
+		t.Fatalf("persisted provider endpoints = %#v, missing %q", doc.Models.ProviderEndpoints, cfg.ProviderEndpointID)
 	}
 	if conn.Provider != "deepseek" {
 		t.Fatalf("persisted profile provider = %q, want deepseek", conn.Provider)
 	}
-	if conn.Token != "secret" || !conn.PersistToken {
-		t.Fatalf("persisted profile token/persist = %q/%v, want pasted API key persisted", conn.Token, conn.PersistToken)
+	if conn.Token != "" || conn.PersistToken || !strings.HasPrefix(conn.CredentialRef, "apikey:") {
+		t.Fatalf("persisted profile credential = token:%q persist:%v ref:%q, want opaque API-key reference", conn.Token, conn.PersistToken, conn.CredentialRef)
 	}
 	if conn.TokenEnv != "" {
 		t.Fatalf("persisted profile token_env = %q, want empty for pasted API key", conn.TokenEnv)
@@ -1448,8 +1449,17 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	if cfg.MaxOutputTok != 32768 {
 		t.Fatalf("persisted max output = %d, want 32768", cfg.MaxOutputTok)
 	}
-	if cfg.ReasoningEffort != "high" || cfg.DefaultReasoningEffort != "high" {
-		t.Fatalf("persisted reasoning effort/default = %q/%q, want high/high", cfg.ReasoningEffort, cfg.DefaultReasoningEffort)
+	if cfg.ReasoningEffort != "high" || cfg.DefaultReasoningEffort != "" {
+		t.Fatalf("persisted reasoning effort/default = %q/%q, want compact high/empty", cfg.ReasoningEffort, cfg.DefaultReasoningEffort)
+	}
+	var standardDefault string
+	for _, profile := range doc.ModelProfiles.Profiles {
+		if profile.Backend.Provider != nil && profile.Backend.Provider.ModelConfigID == cfg.ID {
+			standardDefault = profile.Effort.DefaultEffort
+		}
+	}
+	if standardDefault != "high" {
+		t.Fatalf("standard ModelProfile default effort = %q, want high", standardDefault)
 	}
 	if !equalStrings(cfg.ReasoningLevels, []string{"none", "high", "max"}) {
 		t.Fatalf("persisted reasoning levels = %#v, want none/high/max", cfg.ReasoningLevels)
@@ -1476,6 +1486,7 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 		`"reasoning_mode":`,
 		`"timeout":`,
 		`"persist_token":`,
+		`"token": "secret"`,
 	} {
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("config contains redundant key %s", forbidden)
@@ -1486,11 +1497,11 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 		`"id": "deepseek@default"`,
 		`"id": "deepseek@default/deepseek/deepseek-v4-flash"`,
 		`"alias": "deepseek/deepseek-v4-flash"`,
-		`"profile_id": "deepseek@default"`,
+		`"provider_endpoint_id": "deepseek@default"`,
 		`"provider": "deepseek"`,
 		`"model": "deepseek-v4-flash"`,
 		`"base_url": "https://api.deepseek.com/anthropic"`,
-		`"token": "secret"`,
+		`"credential_ref": "apikey:`,
 		`"context_window_tokens": 1048576`,
 		`"reasoning_effort": "high"`,
 		`"max_output_tokens": 32768`,
@@ -1544,21 +1555,24 @@ func TestAdapterConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) {
 	if cfg.Alias == "" {
 		t.Fatalf("persisted configs = %#v, want deepseek/deepseek-v4-flash", doc.Models.Configs)
 	}
-	var conn gatewayapp.ModelProfileConfig
-	for _, item := range doc.Models.Profiles {
-		if strings.EqualFold(item.ID, cfg.ProfileID) {
+	var conn gatewayapp.ProviderEndpointConfig
+	for _, item := range doc.Models.ProviderEndpoints {
+		if strings.EqualFold(item.ID, cfg.ProviderEndpointID) {
 			conn = item
 			break
 		}
 	}
 	if conn.ID == "" {
-		t.Fatalf("persisted profiles = %#v, missing %q", doc.Models.Profiles, cfg.ProfileID)
+		t.Fatalf("persisted provider endpoints = %#v, missing %q", doc.Models.ProviderEndpoints, cfg.ProviderEndpointID)
 	}
 	if conn.Token != "" || conn.PersistToken {
 		t.Fatalf("persisted profile token/persist = %q/%v, want no plaintext token for env auth", conn.Token, conn.PersistToken)
 	}
-	if conn.TokenEnv != "DEEPSEEK_API_KEY" {
-		t.Fatalf("persisted profile token_env = %q, want DEEPSEEK_API_KEY", conn.TokenEnv)
+	if conn.TokenEnv != "" || !strings.HasPrefix(conn.CredentialRef, "apikey:") {
+		t.Fatalf("persisted profile credential = env:%q ref:%q, want opaque reference", conn.TokenEnv, conn.CredentialRef)
+	}
+	if raw := readAdapterConfigForTest(t, root); strings.Contains(raw, "DEEPSEEK_API_KEY") {
+		t.Fatalf("AppConfig leaked credential source: %s", raw)
 	}
 }
 
@@ -2368,7 +2382,7 @@ func TestAdapterStartAgentRunRollsBackAttachmentOnPromptConflict(t *testing.T) {
 				return []ACPAgentInfo{{Name: "copilot", Description: "ACP sidecar agent."}}
 			},
 		},
-		Delegation: boundDelegationRuntimeForTest(controldelegation.ProfileOrbit, "copilot", "high"),
+		AgentBinding: boundAgentBindingRuntimeForTest(agentbinding.HandleOrbit, "copilot", "high"),
 	}, activeSession.SessionID, "surface", "ollama/llama3")
 	if err != nil {
 		t.Fatalf("NewAdapter() error = %v", err)
@@ -2423,11 +2437,13 @@ func TestAdapterStartAgentRunFailsClosedWhenProfileIsUnbound(t *testing.T) {
 	t.Parallel()
 
 	driver, err := NewAdapter(context.Background(), &RuntimeStack{
-		Delegation: DelegationRuntimeDeps{StatusFn: func(context.Context) (controldelegation.Status, error) {
-			return controldelegation.Status{Profiles: []controldelegation.ProfileStatus{{
-				Definition: controldelegation.Definition{Profile: controldelegation.ProfileBreeze, Configurable: true},
-				Binding:    controldelegation.Binding{Profile: controldelegation.ProfileBreeze, Target: controldelegation.TargetSelf},
+		AgentBinding: AgentBindingRuntimeDeps{StatusFn: func(context.Context) (agentbinding.Status, error) {
+			return agentbinding.Status{Handles: []agentbinding.HandleStatus{{
+				Definition: agentbinding.Definition{Handle: agentbinding.HandleBreeze, Configurable: true},
+				Binding:    agentbinding.Binding{Handle: agentbinding.HandleBreeze},
 			}}}, nil
+		}, ResolveFn: func(context.Context, agentbinding.Handle) (sdkplacement.Placement, error) {
+			return sdkplacement.Placement{}, errors.New("/breeze is not bound")
 		}},
 	}, "", "surface", "ollama/llama3")
 	if err != nil {
@@ -2471,7 +2487,7 @@ func TestAdapterStartAgentRunKeepsRunAttachedForFollowUp(t *testing.T) {
 				return []ACPAgentInfo{{Name: "copilot", Description: "ACP sidecar agent."}}
 			},
 		},
-		Delegation: boundDelegationRuntimeForTest(controldelegation.ProfileOrbit, "copilot", "high"),
+		AgentBinding: boundAgentBindingRuntimeForTest(agentbinding.HandleOrbit, "copilot", "high"),
 	}, activeSession.SessionID, "surface", "ollama/llama3")
 	if err != nil {
 		t.Fatalf("NewAdapter() error = %v", err)
@@ -2490,11 +2506,11 @@ func TestAdapterStartAgentRunKeepsRunAttachedForFollowUp(t *testing.T) {
 	if len(gw.session.Participants) != 1 || gw.session.Participants[0].ID != "side-new" {
 		t.Fatalf("Participants after first prompt = %#v, want one attached copilot sidecar", gw.session.Participants)
 	}
-	if participant := gw.session.Participants[0]; participant.AgentName != "copilot" || participant.Source != controldelegation.DirectRunSource(controldelegation.ProfileOrbit) {
+	if participant := gw.session.Participants[0]; participant.AgentName != "copilot" || participant.Source != controlagents.DirectRunSource(agentbinding.HandleOrbit) {
 		t.Fatalf("profile participant = %#v, want copilot placement with Orbit source", participant)
 	}
-	if participant := gw.session.Participants[0]; participant.ReasoningEffort != "high" {
-		t.Fatalf("profile participant reasoning effort = %q, want high", participant.ReasoningEffort)
+	if participant := gw.session.Participants[0]; participant.Placement.ReasoningEffort != "high" {
+		t.Fatalf("profile participant reasoning effort = %q, want high", participant.Placement.ReasoningEffort)
 	}
 	handle := strings.TrimPrefix(gw.session.Participants[0].Label, "@")
 	if !agenthandle.ContainsPoolName(handle) {
@@ -3459,21 +3475,21 @@ func TestAdapterConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
 	if cfg.ID != "xiaomi@token-plan-cn/xiaomi/mimo-v2.5-pro" {
 		t.Fatalf("persisted model id = %q, want readable profile/model alias id", cfg.ID)
 	}
-	if cfg.ProfileID != "xiaomi@token-plan-cn" {
-		t.Fatalf("persisted profile id = %q, want xiaomi@token-plan-cn", cfg.ProfileID)
+	if cfg.ProviderEndpointID != "xiaomi@token-plan-cn" {
+		t.Fatalf("persisted provider endpoint id = %q, want xiaomi@token-plan-cn", cfg.ProviderEndpointID)
 	}
 	if cfg.Provider != "" || cfg.BaseURL != "" || cfg.Token != "" || cfg.TokenEnv != "" {
 		t.Fatalf("persisted model leaked profile fields: %#v", cfg)
 	}
-	var profile gatewayapp.ModelProfileConfig
-	for _, item := range doc.Models.Profiles {
-		if strings.EqualFold(item.ID, cfg.ProfileID) {
+	var profile gatewayapp.ProviderEndpointConfig
+	for _, item := range doc.Models.ProviderEndpoints {
+		if strings.EqualFold(item.ID, cfg.ProviderEndpointID) {
 			profile = item
 			break
 		}
 	}
 	if profile.ID == "" {
-		t.Fatalf("persisted profiles = %#v, missing %q", doc.Models.Profiles, cfg.ProfileID)
+		t.Fatalf("persisted provider endpoints = %#v, missing %q", doc.Models.ProviderEndpoints, cfg.ProviderEndpointID)
 	}
 	if profile.Provider != "xiaomi" {
 		t.Fatalf("profile provider = %q, want xiaomi", profile.Provider)
@@ -3481,8 +3497,8 @@ func TestAdapterConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
 	if profile.BaseURL != modelconfig.XiaomiTokenPlanCNBaseURL {
 		t.Fatalf("profile base_url = %q, want %q", profile.BaseURL, modelconfig.XiaomiTokenPlanCNBaseURL)
 	}
-	if profile.TokenEnv != "MIMO_TOKEN_PLAN_API_KEY" {
-		t.Fatalf("profile token_env = %q, want MIMO_TOKEN_PLAN_API_KEY", profile.TokenEnv)
+	if profile.TokenEnv != "" || !strings.HasPrefix(profile.CredentialRef, "apikey:") {
+		t.Fatalf("profile credential = env:%q ref:%q, want opaque reference", profile.TokenEnv, profile.CredentialRef)
 	}
 }
 
@@ -3529,8 +3545,8 @@ func TestAdapterConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.T) {
 	if sameAlias != 2 {
 		t.Fatalf("persisted configs = %#v, want two xiaomi/mimo-v2.5-pro bindings", doc.Models.Configs)
 	}
-	if len(doc.Models.Profiles) != 2 {
-		t.Fatalf("persisted profiles = %#v, want two endpoint profiles", doc.Models.Profiles)
+	if len(doc.Models.ProviderEndpoints) != 2 {
+		t.Fatalf("persisted provider endpoints = %#v, want two endpoints", doc.Models.ProviderEndpoints)
 	}
 
 	candidates, err := driver.CompleteSlashArg(ctx, "model use", "xiaomi/mimo-v2.5-pro", 10)
@@ -3620,11 +3636,11 @@ func TestAdapterConnectReusesExistingEndpointAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAppConfig() error = %v", err)
 	}
-	if len(doc.Models.Profiles) != 1 {
-		t.Fatalf("persisted profiles = %#v, want one shared profile", doc.Models.Profiles)
+	if len(doc.Models.ProviderEndpoints) != 1 {
+		t.Fatalf("persisted provider endpoints = %#v, want one shared endpoint", doc.Models.ProviderEndpoints)
 	}
-	if got := doc.Models.Profiles[0].TokenEnv; got != "XIAOMI_API_KEY" {
-		t.Fatalf("shared profile token_env = %q, want XIAOMI_API_KEY", got)
+	if got := doc.Models.ProviderEndpoints[0]; got.TokenEnv != "" || !strings.HasPrefix(got.CredentialRef, "apikey:") {
+		t.Fatalf("shared profile credential = %#v, want opaque reference", got)
 	}
 }
 
@@ -4402,14 +4418,14 @@ func (g *sideAgentRollbackGatewayService) ControlPlaneState(context.Context, gat
 func (g *sideAgentRollbackGatewayService) AttachParticipant(_ context.Context, req gateway.AttachParticipantRequest) (session.Session, error) {
 	g.attachReqs = append(g.attachReqs, req)
 	g.session.Participants = append(g.session.Participants, session.ParticipantBinding{
-		ID:              "side-new",
-		Kind:            session.ParticipantKindACP,
-		Role:            req.Role,
-		AgentName:       req.Agent,
-		Label:           req.Label,
-		ReasoningEffort: req.ReasoningEffort,
-		SessionID:       "remote-new",
-		Source:          req.Source,
+		ID:        "side-new",
+		Kind:      session.ParticipantKindACP,
+		Role:      req.Role,
+		AgentName: req.Agent,
+		Label:     req.Label,
+		Placement: req.Placement,
+		SessionID: "remote-new",
+		Source:    req.Source,
 	})
 	return session.CloneSession(g.session), nil
 }
@@ -4421,13 +4437,13 @@ func (g *sideAgentRollbackGatewayService) PromptParticipant(_ context.Context, r
 
 func (g *sideAgentRollbackGatewayService) StartParticipant(ctx context.Context, req gateway.StartParticipantRequest) (gateway.BeginTurnResult, error) {
 	updated, err := g.AttachParticipant(ctx, gateway.AttachParticipantRequest{
-		SessionRef:      req.SessionRef,
-		BindingKey:      req.BindingKey,
-		Agent:           req.Agent,
-		Role:            req.Role,
-		Source:          req.Source,
-		Label:           req.Label,
-		ReasoningEffort: req.ReasoningEffort,
+		SessionRef: req.SessionRef,
+		BindingKey: req.BindingKey,
+		Agent:      req.Agent,
+		Role:       req.Role,
+		Source:     req.Source,
+		Label:      req.Label,
+		Placement:  req.Placement,
 	})
 	if err != nil {
 		return gateway.BeginTurnResult{}, err
@@ -4480,18 +4496,21 @@ func (g *sideAgentRollbackGatewayService) DetachParticipant(_ context.Context, r
 	return session.CloneSession(g.session), nil
 }
 
-func boundDelegationRuntimeForTest(profile controldelegation.Profile, agentID, reasoningEffort string) DelegationRuntimeDeps {
-	return DelegationRuntimeDeps{StatusFn: func(context.Context) (controldelegation.Status, error) {
-		return controldelegation.Status{Profiles: []controldelegation.ProfileStatus{{
-			Definition: controldelegation.Definition{Profile: profile, Configurable: true},
-			Binding: controldelegation.Binding{
-				Profile:         profile,
-				Target:          controldelegation.TargetAgent,
-				AgentID:         agentID,
-				ReasoningEffort: reasoningEffort,
-			},
-			Agent: controlagents.Agent{ID: agentID},
+func boundAgentBindingRuntimeForTest(handle agentbinding.Handle, agentID, reasoningEffort string) AgentBindingRuntimeDeps {
+	resolved, err := sdkplacement.Seal(sdkplacement.Placement{
+		Kind: sdkplacement.KindAgent, ProfileID: "acp:test:profile", Agent: agentID, Model: "test-model",
+		ReasoningEffort: reasoningEffort, ConfigFingerprint: "test-config",
+	})
+	if err != nil {
+		panic(err)
+	}
+	return AgentBindingRuntimeDeps{StatusFn: func(context.Context) (agentbinding.Status, error) {
+		return agentbinding.Status{Handles: []agentbinding.HandleStatus{{
+			Definition: agentbinding.Definition{Handle: handle, Configurable: true},
+			Binding:    agentbinding.Binding{Handle: handle, ProfileID: resolved.ProfileID, Effort: reasoningEffort},
 		}}}, nil
+	}, ResolveFn: func(context.Context, agentbinding.Handle) (sdkplacement.Placement, error) {
+		return resolved, nil
 	}}
 }
 
@@ -4573,6 +4592,15 @@ func repoRootForAdapterTest(t *testing.T) string {
 func setHomeForAdapterTest(t *testing.T, home string) {
 	t.Helper()
 	testenv.SetHome(t, home)
+}
+
+func readAdapterConfigForTest(t *testing.T, root string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 func agentCandidatesHaveName(candidates []AgentCandidate, name string) bool {

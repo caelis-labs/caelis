@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
@@ -54,12 +55,12 @@ func (s *Stack) ACPSurface(modes acp.ModeProvider, useFallbackModes bool, config
 	return newGatewayACPSurface(s, modes, useFallbackModes, configs)
 }
 
-func (s ModelService) Connect(cfg ModelConfig) (string, error) {
+func (s ModelService) Connect(cfg ModelConfig) (modelprofile.ModelProfile, error) {
 	return s.stack.Connect(cfg)
 }
 
-// ConnectModels atomically adds one or more models sharing a provider profile.
-func (s ModelService) ConnectModels(configs []ModelConfig) ([]string, error) {
+// ConnectModels atomically adds one or more models sharing a provider endpoint.
+func (s ModelService) ConnectModels(configs []ModelConfig) ([]modelprofile.ModelProfile, error) {
 	return s.stack.ConnectModels(configs)
 }
 

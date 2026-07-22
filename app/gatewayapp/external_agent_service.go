@@ -8,9 +8,11 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
-	controlsystemagent "github.com/caelis-labs/caelis/control/systemagent"
+	"github.com/caelis-labs/caelis/control/modelprofile"
+	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/discovery"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	"github.com/caelis-labs/caelis/internal/version"
@@ -43,8 +45,9 @@ func (s *Stack) DiscoverACPConnection(ctx context.Context, req controlagents.Con
 	return s.acpDiscoveryService().Discover(ctx, connection, cwd, req.ModelID)
 }
 
-// ConnectACP persists one model-scoped discovery as a stable Agent. External
-// process I/O happens before the fenced configuration transaction.
+// ConnectACP persists one stable external Agent and one model-scoped
+// ModelProfile. External process I/O happens before the fenced configuration
+// transaction.
 func (s *Stack) ConnectACP(ctx context.Context, req controlagents.ConnectRequest) (controlagents.ConnectResult, error) {
 	if s == nil || s.store == nil {
 		return controlagents.ConnectResult{}, fmt.Errorf("gatewayapp: app config store unavailable")
@@ -83,8 +86,8 @@ func (s *Stack) ConnectACP(ctx context.Context, req controlagents.ConnectRequest
 
 	s.reconfigureMu.Lock()
 	defer s.reconfigureMu.Unlock()
-	s.agentRosterMu.Lock()
-	defer s.agentRosterMu.Unlock()
+	s.assemblyMutationMu.Lock()
+	defer s.assemblyMutationMu.Unlock()
 	if err := s.rejectReconfigureWhileActive("connect ACP Agent"); err != nil {
 		return controlagents.ConnectResult{}, err
 	}
@@ -93,33 +96,44 @@ func (s *Stack) ConnectACP(ctx context.Context, req controlagents.ConnectRequest
 		return controlagents.ConnectResult{}, err
 	}
 	previous := doc
-	next, agent, err := controlagents.UpsertExternalAgent(
-		doc.AgentRoster,
+	next, agent, err := controlagents.UpsertExternalConnection(
+		doc.ExternalAgents,
 		connection,
-		model,
-		defaults,
 		snapshot,
-		rosterAgentNameAllowed,
+		externalAgentNameAllowed,
 	)
 	if err != nil {
-		return controlagents.ConnectResult{}, fmt.Errorf("gatewayapp: update Agent roster: %w", err)
+		return controlagents.ConnectResult{}, fmt.Errorf("gatewayapp: update external Agent configuration: %w", err)
 	}
-	doc.AgentRoster = next
-	if err := s.store.Save(doc); err != nil {
-		return controlagents.ConnectResult{}, err
+	profile, err := modelprofilebuilder.FromACP(agent, connection, model, defaults, snapshot)
+	if err != nil {
+		return controlagents.ConnectResult{}, fmt.Errorf("gatewayapp: build ACP model profile: %w", err)
+	}
+	doc.ExternalAgents = next
+	doc.ModelProfiles, err = modelprofile.Upsert(doc.ModelProfiles, profile)
+	if err != nil {
+		return controlagents.ConnectResult{}, fmt.Errorf("gatewayapp: update model profile catalog: %w", err)
+	}
+	result := controlagents.ConnectResult{
+		Connection: connection,
+		Profiles:   []modelprofile.ModelProfile{profile},
+		Discovery:  snapshot,
+	}
+	saveErr := s.store.Save(doc)
+	if saveErr != nil && !configstore.WriteCommitted(saveErr) {
+		return controlagents.ConnectResult{}, saveErr
 	}
 	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
-		return controlagents.ConnectResult{}, s.rollbackAgentRoster(previous, err)
+		if saveErr != nil {
+			return result, errors.Join(saveErr, err)
+		}
+		return controlagents.ConnectResult{}, s.rollbackExternalAgentConfig(previous, err)
 	}
 	if connection.Launcher.Kind == controlagents.LaunchKindManaged &&
 		pathWithinRoot(connection.Launcher.Command, filepath.Join(s.managedACPAgentRoot(), "installations")) {
 		s.cleanupLegacyManagedACPInstallIfUnused()
 	}
-	return controlagents.ConnectResult{
-		Connection: connection,
-		Agents:     []controlagents.Agent{agent},
-		Discovery:  snapshot,
-	}, nil
+	return result, saveErr
 }
 
 // DisconnectCandidates returns only user-configured external ACP Agents. It
@@ -141,12 +155,12 @@ func (s *Stack) DisconnectCandidates(ctx context.Context) ([]controlagents.Disco
 	if err != nil {
 		return nil, err
 	}
-	return controlagents.ListDisconnectCandidates(doc.AgentRoster), nil
+	return controlagents.ListDisconnectCandidates(doc.ExternalAgents), nil
 }
 
-// DisconnectACP removes exactly one user-configured external ACP Agent. A
-// shared Connection remains until its final Agent reference is removed. Adapter
-// installation is deliberately outside the roster transaction and is retained.
+// DisconnectACP removes one connection-scoped external ACP Agent and every
+// sibling ModelProfile backed by it. Adapter installation is deliberately
+// outside the configuration transaction and is retained.
 func (s *Stack) DisconnectACP(ctx context.Context, agentID string) (controlagents.DisconnectResult, error) {
 	if s == nil || s.store == nil {
 		return controlagents.DisconnectResult{}, fmt.Errorf("gatewayapp: app config store unavailable")
@@ -160,8 +174,8 @@ func (s *Stack) DisconnectACP(ctx context.Context, agentID string) (controlagent
 
 	s.reconfigureMu.Lock()
 	defer s.reconfigureMu.Unlock()
-	s.agentRosterMu.Lock()
-	defer s.agentRosterMu.Unlock()
+	s.assemblyMutationMu.Lock()
+	defer s.assemblyMutationMu.Unlock()
 	if err := s.rejectReconfigureWhileActive("disconnect ACP Agent"); err != nil {
 		return controlagents.DisconnectResult{}, err
 	}
@@ -170,22 +184,35 @@ func (s *Stack) DisconnectACP(ctx context.Context, agentID string) (controlagent
 		return controlagents.DisconnectResult{}, err
 	}
 	previous := doc
-	next, result, err := controlagents.DisconnectExternalAgent(doc.AgentRoster, agentID)
+	next, result, err := controlagents.DisconnectExternalAgent(doc.ExternalAgents, agentID)
 	if err != nil {
 		return controlagents.DisconnectResult{}, fmt.Errorf("gatewayapp: %w", err)
 	}
-	if err := s.rejectRemovedLiveACPAgents(ctx, doc.AgentRoster, next); err != nil {
+	if err := s.rejectRemovedLiveACPAgents(ctx, doc.ExternalAgents, next); err != nil {
 		return controlagents.DisconnectResult{}, err
 	}
-	doc.Delegation = resetRemovedDelegationBindings(doc.Delegation, doc.AgentRoster, next)
-	doc.AgentRoster = next
-	if err := s.store.Save(doc); err != nil {
-		return controlagents.DisconnectResult{}, err
+	for _, profile := range modelprofile.NormalizeConfiguration(doc.ModelProfiles).Profiles {
+		if profile.Kind() != modelprofile.BackendACP || profile.Backend.ACP.AgentID != result.Agent.ID {
+			continue
+		}
+		doc.AgentBindings, err = agentbinding.PrepareProfileRemoval(doc.AgentBindings, profile.ID)
+		if err != nil {
+			return controlagents.DisconnectResult{}, err
+		}
+		doc.ModelProfiles = modelprofile.Remove(doc.ModelProfiles, profile.ID)
+	}
+	doc.ExternalAgents = next
+	saveErr := s.store.Save(doc)
+	if saveErr != nil && !configstore.WriteCommitted(saveErr) {
+		return controlagents.DisconnectResult{}, saveErr
 	}
 	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
-		return controlagents.DisconnectResult{}, s.rollbackAgentRoster(previous, err)
+		if saveErr != nil {
+			return result, errors.Join(saveErr, err)
+		}
+		return controlagents.DisconnectResult{}, s.rollbackExternalAgentConfig(previous, err)
 	}
-	return result, nil
+	return result, saveErr
 }
 
 func (s *Stack) rejectRemovedLiveACPAgents(ctx context.Context, before controlagents.Configuration, after controlagents.Configuration) error {
@@ -212,33 +239,9 @@ func removedAgentIDs(before controlagents.Configuration, after controlagents.Con
 	return removed
 }
 
-func resetRemovedDelegationBindings(
-	current controldelegation.Configuration,
-	before controlagents.Configuration,
-	after controlagents.Configuration,
-) controldelegation.Configuration {
-	next := current
-	for _, agentID := range removedAgentIDs(before, after) {
-		next, _ = controldelegation.ResetAgentBindings(next, agentID)
-	}
-	return next
-}
-
-func resetRemovedSystemAgentBindings(
-	current controlsystemagent.Configuration,
-	before controlagents.Configuration,
-	after controlagents.Configuration,
-) controlsystemagent.Configuration {
-	next := current
-	for _, agentID := range removedAgentIDs(before, after) {
-		next = controlsystemagent.ResetAgentBindings(next, agentID)
-	}
-	return next
-}
-
 // rejectBoundACPAgent is the Control-owned safety gate for durable controller
 // ownership. Closed historical Sessions retain their binding for replay but
-// are not recoverable work and therefore do not block roster cleanup.
+// are not recoverable work and therefore do not block external configuration cleanup.
 func (s *Stack) rejectBoundACPAgent(ctx context.Context, agentID string) error {
 	if s.Sessions == nil {
 		return fmt.Errorf("gatewayapp: session service unavailable while disconnecting Agent %q", agentID)
@@ -299,10 +302,10 @@ func discoveryMatches(snapshot *controlagents.DiscoverySnapshot, connection cont
 		normalized.SelectedModelID == strings.TrimSpace(modelID)
 }
 
-func (s *Stack) rollbackAgentRoster(previous AppConfig, cause error) error {
+func (s *Stack) rollbackExternalAgentConfig(previous AppConfig, cause error) error {
 	var rollbackErrs []error
 	if err := s.store.Save(previous); err != nil {
-		rollbackErrs = append(rollbackErrs, fmt.Errorf("gatewayapp: rollback Agent roster save failed: %w", err))
+		rollbackErrs = append(rollbackErrs, fmt.Errorf("gatewayapp: rollback external Agent config save failed: %w", err))
 	}
 	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
 		rollbackErrs = append(rollbackErrs, fmt.Errorf("gatewayapp: rollback Agent assembly refresh failed: %w", err))

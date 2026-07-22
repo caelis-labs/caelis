@@ -6,6 +6,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -103,13 +104,16 @@ type HandoffControllerRequest struct {
 // AttachParticipantRequest attaches one ACP-backed participant to the current
 // session control plane without replacing the main controller.
 type AttachParticipantRequest struct {
-	SessionRef      session.SessionRef
-	BindingKey      string
-	Agent           string
-	Role            session.ParticipantRole
-	Source          string
-	Label           string
-	ReasoningEffort string
+	SessionRef session.SessionRef
+	BindingKey string
+	// Agent is used only by internal non-ACP participant assembly. When
+	// Placement selects an Agent endpoint, Gateway derives the identity from
+	// Placement.Agent and ignores this field.
+	Agent     string
+	Role      session.ParticipantRole
+	Source    string
+	Label     string
+	Placement placement.Placement
 }
 
 // DetachParticipantRequest removes one attached participant from the current
@@ -142,19 +146,19 @@ const (
 )
 
 type StartParticipantRequest struct {
-	SessionRef      session.SessionRef
-	BindingKey      string
-	Agent           string
-	Role            session.ParticipantRole
-	Label           string
-	ReasoningEffort string
-	Input           string
-	DisplayInput    string
-	DisplayTitle    string
-	ContentParts    []model.ContentPart
-	Source          string
-	Lifecycle       ParticipantLifecycle
-	DetachSource    string
+	SessionRef   session.SessionRef
+	BindingKey   string
+	Agent        string
+	Role         session.ParticipantRole
+	Label        string
+	Placement    placement.Placement
+	Input        string
+	DisplayInput string
+	DisplayTitle string
+	ContentParts []model.ContentPart
+	Source       string
+	Lifecycle    ParticipantLifecycle
+	DetachSource string
 }
 
 type ControlPlaneStateRequest struct {

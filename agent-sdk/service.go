@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -145,9 +146,9 @@ type AttachParticipantRequest struct {
 	Role       session.ParticipantRole `json:"role,omitempty"`
 	Source     string                  `json:"source,omitempty"`
 	Label      string                  `json:"label,omitempty"`
-	// ReasoningEffort optionally configures the participant's ACP session
-	// before its first prompt and is preserved for durable reattachment.
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Placement is resolved and sealed by Control before attach, then preserved
+	// verbatim for durable reattachment.
+	Placement placement.Placement `json:"placement"`
 }
 
 // DetachParticipantRequest removes one attached participant and releases

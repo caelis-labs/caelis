@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -19,9 +20,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
+	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
+	"github.com/caelis-labs/caelis/control/modelprofile"
+	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
@@ -50,7 +55,7 @@ type Config struct {
 }
 
 type ModelConfig = modelconfig.Config
-type ModelProfileConfig = modelconfig.ProfileConfig
+type ProviderEndpointConfig = modelconfig.ProviderEndpointConfig
 type ModelChoice = modelconfig.Choice
 
 // DefaultControlOperationRetention is the production replay guarantee for
@@ -69,29 +74,30 @@ type Stack struct {
 	leaseOwnerID              string
 	mu                        sync.RWMutex
 	reconfigureMu             sync.Mutex
-	// agentRosterMu serializes live Agent assembly mutations with durable
+	// assemblyMutationMu serializes live Agent assembly mutations with durable
 	// controller binding changes. Coordinators receive its read side.
-	agentRosterMu             sync.RWMutex
-	delegationCacheMu         sync.RWMutex
-	delegationCache           *delegationResolutionSnapshot
-	delegationCacheGeneration uint64
-	runtime                   stackRuntimeConfig
-	sandbox                   SandboxConfig
-	exec                      sandbox.Runtime
-	engine                    *runtime.Runtime
-	placement                 controlplane.PlacementExecutor
-	acpControlPlane           *acpassembly.ControlPlane
-	taskStore                 task.Store
-	controlFeeds              controlclientport.FeedRegistry
-	controlState              controlclientport.StateReader
-	controlCommands           controlclientport.CommandClient
-	controlClient             controlclientport.Service
-	operations                *internalcontrolclient.FileOperationStore
-	approvalRecovery          *internalcontrolclient.ApprovalRecoveryGate
-	gateway                   *kernelimpl.Gateway
-	mcpMgr                    *mcp.Manager
-	codexAuth                 *codexauth.Manager
-	providerUsage             *providerusage.Registry
+	assemblyMutationMu       sync.RWMutex
+	placementCacheMu         sync.RWMutex
+	placementCache           *placementSnapshot
+	placementCacheGeneration uint64
+	runtime                  stackRuntimeConfig
+	sandbox                  SandboxConfig
+	exec                     sandbox.Runtime
+	engine                   *runtime.Runtime
+	placement                controlplane.PlacementExecutor
+	acpControlPlane          *acpassembly.ControlPlane
+	taskStore                task.Store
+	controlFeeds             controlclientport.FeedRegistry
+	controlState             controlclientport.StateReader
+	controlCommands          controlclientport.CommandClient
+	controlClient            controlclientport.Service
+	operations               *internalcontrolclient.FileOperationStore
+	approvalRecovery         *internalcontrolclient.ApprovalRecoveryGate
+	gateway                  *kernelimpl.Gateway
+	mcpMgr                   *mcp.Manager
+	codexAuth                *codexauth.Manager
+	apiKeyCredentials        *credentialstore.Store
+	providerUsage            *providerusage.Registry
 
 	// Optional test seam; nil uses the platform lifecycle runtime factory.
 	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
@@ -259,6 +265,19 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
+	apiKeyCredentials, err := credentialstore.New(storeDir)
+	if err != nil {
+		return nil, err
+	}
+	credentialBootstrap := &providerCredentialTransaction{}
+	if normalized := modelconfig.NormalizeConfig(cfg.Model); normalized.Provider != "" && normalized.Model != "" {
+		prepared, txn, prepareErr := (&Stack{apiKeyCredentials: apiKeyCredentials}).prepareProviderCredentials([]ModelConfig{normalized})
+		credentialBootstrap = txn
+		if prepareErr != nil {
+			return nil, errors.Join(prepareErr, credentialBootstrap.rollback())
+		}
+		cfg.Model = prepared[0]
+	}
 	effectiveApprovalMode := approvalMode(firstNonEmpty(cfg.ApprovalMode, doc.Runtime.ApprovalMode))
 	effectivePolicyProfile := policyProfile(firstNonEmpty(cfg.PolicyProfile, doc.Runtime.PolicyProfile))
 	baseAssembly := assembly.CloneResolvedAssembly(cfg.Assembly)
@@ -293,8 +312,32 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	})
 	lookup, err := newModelLookup(configStore, cfg.Model, cfg.ContextWindow)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, credentialBootstrap.rollback())
 	}
+	modelSnapshot := lookup.Snapshot()
+	providerProfiles := make([]modelprofile.ModelProfile, 0, len(modelSnapshot.Configs))
+	for _, configured := range modelSnapshot.Configs {
+		profile, profileErr := modelprofilebuilder.FromProvider(configured)
+		if profileErr != nil {
+			return nil, errors.Join(profileErr, credentialBootstrap.rollback())
+		}
+		providerProfiles = append(providerProfiles, profile)
+	}
+	if len(providerProfiles) > 0 {
+		doc.Models = modelSnapshot
+		doc.ModelProfiles, err = modelprofile.Upsert(doc.ModelProfiles, providerProfiles...)
+		if err != nil {
+			return nil, errors.Join(err, credentialBootstrap.rollback())
+		}
+		doc.ModelProfiles.DefaultProfileID = modelprofile.BuildProviderID(modelSnapshot.DefaultID)
+		if err := configStore.Save(doc); err != nil {
+			if configstore.WriteCommitted(err) {
+				credentialBootstrap.commit()
+			}
+			return nil, errors.Join(err, credentialBootstrap.rollback())
+		}
+	}
+	credentialBootstrap.commit()
 	lookup.resolveHTTPClient = func(ctx context.Context, modelCfg ModelConfig) (*http.Client, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -307,6 +350,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		}
 		return codexAuth.AuthenticatedClient(modelCfg.HTTPClient)
 	}
+	lookup.resolveAPIKey = apiKeyCredentials.Get
 	sandboxCfg := mergeSandboxConfig(doc.Sandbox, cfg.Sandbox)
 	leaseOwnerID, err := newStackLeaseOwnerID()
 	if err != nil {
@@ -320,15 +364,16 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			Key: workspaceKey,
 			CWD: workspaceCWD,
 		},
-		lookup:           lookup,
-		store:            configStore,
-		storeDir:         storeDir,
-		leaseOwnerID:     leaseOwnerID,
-		taskStore:        taskStore,
-		controlFeeds:     controlFeeds,
-		approvalRecovery: approvalRecovery,
-		codexAuth:        codexAuth,
-		providerUsage:    providerUsage,
+		lookup:            lookup,
+		store:             configStore,
+		storeDir:          storeDir,
+		leaseOwnerID:      leaseOwnerID,
+		taskStore:         taskStore,
+		controlFeeds:      controlFeeds,
+		approvalRecovery:  approvalRecovery,
+		codexAuth:         codexAuth,
+		apiKeyCredentials: apiKeyCredentials,
+		providerUsage:     providerUsage,
 		runtime: stackRuntimeConfig{
 			ApprovalMode:  effectiveApprovalMode,
 			PolicyProfile: effectivePolicyProfile,
@@ -342,8 +387,8 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		},
 		sandbox: sandboxCfg,
 	}
-	stack.delegationCache = newDelegationResolutionSnapshot(doc)
-	configStore.savedHook = stack.invalidateDelegationResolutionSnapshot
+	stack.placementCache = newPlacementSnapshot(doc)
+	configStore.savedHook = stack.invalidatePlacementSnapshot
 	controlState, err := internalcontrolclient.NewStateService(internalcontrolclient.StateServiceConfig{
 		Sessions: sessions, Runtime: stack, Feeds: controlFeeds,
 	})

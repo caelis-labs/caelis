@@ -8,8 +8,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
@@ -21,9 +22,9 @@ type acpConnectControlStub struct {
 
 type modelConnectControlStub struct {
 	control.Service
-	agents           []control.AgentCandidate
-	status           control.AgentStatusSnapshot
-	delegationStatus controldelegation.Status
+	agents        []control.AgentCandidate
+	status        control.AgentStatusSnapshot
+	bindingStatus agentbinding.Status
 }
 
 func (*modelConnectControlStub) Connect(context.Context, control.ConnectConfig) (control.StatusSnapshot, error) {
@@ -41,16 +42,16 @@ func (s *modelConnectControlStub) ListAgents(context.Context, int) ([]control.Ag
 	return []control.AgentCandidate{{Name: "sol", Description: "GPT 5.6 Sol"}}, nil
 }
 
-func (s *modelConnectControlStub) DelegationStatus(context.Context) (controldelegation.Status, error) {
-	return s.delegationStatus, nil
+func (s *modelConnectControlStub) AgentBindingStatus(context.Context) (agentbinding.Status, error) {
+	return s.bindingStatus, nil
 }
 
-func (s *modelConnectControlStub) BindDelegation(_ context.Context, _ controldelegation.BindRequest) (controldelegation.Status, error) {
-	return s.delegationStatus, nil
+func (s *modelConnectControlStub) BindAgentBinding(_ context.Context, _ agentbinding.Binding) (agentbinding.Status, error) {
+	return s.bindingStatus, nil
 }
 
-func (s *modelConnectControlStub) ResetDelegation(_ context.Context, _ controldelegation.Profile) (controldelegation.Status, error) {
-	return s.delegationStatus, nil
+func (s *modelConnectControlStub) ResetAgentBinding(_ context.Context, _ agentbinding.Handle) (agentbinding.Status, error) {
+	return s.bindingStatus, nil
 }
 
 func (s *acpConnectControlStub) DiscoverACPConnection(_ context.Context, _ controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
@@ -59,7 +60,7 @@ func (s *acpConnectControlStub) DiscoverACPConnection(_ context.Context, _ contr
 
 func (s *acpConnectControlStub) ConnectACP(_ context.Context, req controlagents.ConnectRequest) (controlagents.ConnectResult, error) {
 	s.req = req
-	return controlagents.ConnectResult{Agents: []controlagents.Agent{{ID: "opus"}}}, nil
+	return controlagents.ConnectResult{Profiles: []modelprofile.ModelProfile{{ID: "acp:claude:opus"}}}, nil
 }
 
 func (s *acpConnectControlStub) DisconnectCandidates(context.Context) ([]controlagents.DisconnectCandidate, error) {
@@ -162,7 +163,7 @@ func TestAgentSlashCommandsHideRosterAndKeepProfileRunsSessionScoped(t *testing.
 		status: control.AgentStatusSnapshot{Participants: []control.AgentParticipantSnapshot{{
 			ID: "participant-1", Label: "@lina", AgentName: "codex", Kind: "acp", Role: "sidecar", Source: "slash_profile_breeze",
 		}}},
-		delegationStatus: subagentTestStatus(),
+		bindingStatus: subagentTestStatus(),
 	}
 
 	before := appendAgentSlashCommandsWithContext(context.Background(), service, DefaultCommands())

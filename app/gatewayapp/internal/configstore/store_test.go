@@ -2,18 +2,83 @@ package configstore
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
-func TestStorePersistsManagedCredentialReferenceWithoutOAuthTokens(t *testing.T) {
+func TestAtomicWriteFileCommitBoundary(t *testing.T) {
+	t.Parallel()
+
+	for name, writeOps := range map[string]func(string, error) AtomicWriteOps{
+		"destination chmod": func(path string, fault error) AtomicWriteOps {
+			return AtomicWriteOps{Chmod: func(candidate string, mode os.FileMode) error {
+				if candidate == path {
+					return fault
+				}
+				return os.Chmod(candidate, mode)
+			}}
+		},
+		"directory fsync": func(_ string, fault error) AtomicWriteOps {
+			return AtomicWriteOps{FsyncDir: func(string) error { return fault }}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "config.json")
+			original := []byte("old")
+			if err := os.WriteFile(path, original, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			fault := errors.New(name + " failed")
+			err := AtomicWriteFile(path, []byte("new"), 0o600, writeOps(path, fault))
+			if !errors.Is(err, fault) || !WriteCommitted(err) {
+				t.Fatalf("AtomicWriteFile() error = %v, want committed %v", err, fault)
+			}
+			got, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if string(got) != "new" {
+				t.Fatalf("destination = %q, want committed content", got)
+			}
+		})
+	}
+
+	t.Run("rename", func(t *testing.T) {
+		t.Parallel()
+
+		path := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		fault := errors.New("rename failed")
+		err := AtomicWriteFile(path, []byte("new"), 0o600, AtomicWriteOps{
+			Rename: func(string, string) error { return fault },
+		})
+		if !errors.Is(err, fault) || WriteCommitted(err) {
+			t.Fatalf("AtomicWriteFile() error = %v, want uncommitted %v", err, fault)
+		}
+		got, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if string(got) != "old" {
+			t.Fatalf("destination = %q, want original content", got)
+		}
+	})
+}
+
+func TestStorePersistsManagedCredentialReferenceWithoutCredentialMaterial(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -24,33 +89,63 @@ func TestStorePersistsManagedCredentialReferenceWithoutOAuthTokens(t *testing.T)
 		Model:         "gpt-5.5",
 		BaseURL:       modelconfig.CodexOAuthBaseURL,
 		CredentialRef: modelconfig.CodexOAuthCredentialRef,
-		Token:         "must-not-persist",
-		PersistToken:  true,
 	})
-	if err := store.Save(AppConfig{Models: PersistedModelConfig{DefaultID: model.ID, Configs: []modelconfig.Config{model}}}); err != nil {
+	profile := testProviderProfile(model, "none")
+	if err := store.Save(AppConfig{
+		Models:        PersistedModelConfig{DefaultID: model.ID, Configs: []modelconfig.Config{model}},
+		ModelProfiles: modelprofile.Configuration{DefaultProfileID: profile.ID, Profiles: []modelprofile.ModelProfile{profile}},
+	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(root, "config.json"))
 	if err != nil {
 		t.Fatalf("ReadFile(config.json) error = %v", err)
 	}
-	if strings.Contains(string(raw), "must-not-persist") || !strings.Contains(string(raw), `"credential_ref": "codex:default"`) {
+	if !strings.Contains(string(raw), `"credential_ref": "codex:default"`) || !strings.Contains(string(raw), `"provider_endpoints"`) {
 		t.Fatalf("persisted config = %s", raw)
 	}
 	loaded, err := store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if len(loaded.Models.Profiles) != 1 || loaded.Models.Profiles[0].CredentialRef != modelconfig.CodexOAuthCredentialRef || loaded.Models.Profiles[0].Token != "" {
-		t.Fatalf("loaded managed profile = %#v", loaded.Models.Profiles)
+	if len(loaded.Models.ProviderEndpoints) != 1 || loaded.Models.ProviderEndpoints[0].CredentialRef != modelconfig.CodexOAuthCredentialRef || loaded.Models.ProviderEndpoints[0].Token != "" {
+		t.Fatalf("loaded managed provider endpoint = %#v", loaded.Models.ProviderEndpoints)
 	}
 }
 
-func TestStorePersistsUserAgentRoster(t *testing.T) {
+func TestStoreRejectsCredentialMaterialEvenAlongsideOpaqueReference(t *testing.T) {
+	t.Parallel()
+
+	for name, mutate := range map[string]func(*modelconfig.Config){
+		"token":        func(configured *modelconfig.Config) { configured.Token = "must-not-persist" },
+		"environment":  func(configured *modelconfig.Config) { configured.TokenEnv = "SECRET_ENV" },
+		"persist flag": func(configured *modelconfig.Config) { configured.PersistToken = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			configured := modelconfig.Config{
+				Provider: "deepseek", Model: "reasoner", CredentialRef: "apikey:deepseek:test",
+			}
+			mutate(&configured)
+			err := New(t.TempDir()).Save(AppConfig{Models: PersistedModelConfig{Configs: []modelconfig.Config{configured}}})
+			if err == nil || !strings.Contains(err.Error(), "credential store") {
+				t.Fatalf("Save() error = %v, want credential-store boundary", err)
+			}
+		})
+	}
+}
+
+func TestStorePersistsExternalAgentAndACPModelProfile(t *testing.T) {
 	t.Parallel()
 
 	store := New(t.TempDir())
-	doc := AppConfig{AgentRoster: controlagents.Configuration{
+	profile := modelprofile.ModelProfile{
+		ID: "acp:claude:opus", DisplayName: "Claude Opus",
+		Backend: modelprofile.Backend{ACP: &modelprofile.ACPBackend{
+			AgentID: "claude", RemoteModelID: "claude-opus-4-8", SessionDefaults: map[string]string{"mode": "code"},
+		}},
+		Effort: modelprofile.EffortCapability{DefaultEffort: "xhigh", ACPConfigID: "effort", Choices: []modelprofile.EffortChoice{{Canonical: "xhigh", WireValue: "max"}}},
+	}
+	doc := AppConfig{ExternalAgents: controlagents.Configuration{
 		Connections: []controlagents.Connection{{
 			ID: "claude",
 			Launcher: controlagents.Launcher{
@@ -60,14 +155,10 @@ func TestStorePersistsUserAgentRoster(t *testing.T) {
 			},
 		}},
 		Agents: []controlagents.Agent{{
-			ID:      "opus",
-			Backing: controlagents.AgentBacking{ConnectionID: "claude"},
-			Defaults: controlagents.SessionOptions{
-				ModelID:      "claude-opus-4-8",
-				ConfigValues: map[string]string{"effort": "max"},
-			},
+			ID:           "claude",
+			ConnectionID: "claude",
 		}},
-	}}
+	}, ModelProfiles: modelprofile.Configuration{Profiles: []modelprofile.ModelProfile{profile}}}
 	if err := store.Save(doc); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -75,45 +166,17 @@ func TestStorePersistsUserAgentRoster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	agent, connection, err := controlagents.ResolveAgent(loaded.AgentRoster, "opus")
+	agent, connection, err := controlagents.ResolveAgent(loaded.ExternalAgents, "claude")
 	if err != nil {
 		t.Fatalf("ResolveAgent() error = %v", err)
 	}
-	if connection.Launcher.Command != "npx" || agent.Defaults.ModelID != "claude-opus-4-8" || agent.Defaults.ConfigValues["effort"] != "max" {
-		t.Fatalf("loaded roster placement = %#v %#v", agent, connection)
+	loadedProfile, ok := modelprofile.Lookup(loaded.ModelProfiles, profile.ID)
+	if connection.Launcher.Command != "npx" || agent.ConnectionID != connection.ID || !ok || loadedProfile.Backend.ACP.SessionDefaults["mode"] != "code" {
+		t.Fatalf("loaded external Agent/profile = %#v %#v %#v", agent, connection, loadedProfile)
 	}
 }
 
-func TestStorePersistsModelBackedAgentAndRejectsStaleModelReference(t *testing.T) {
-	t.Parallel()
-
-	store := New(t.TempDir())
-	model := modelconfig.NormalizeConfig(modelconfig.Config{Provider: "ollama", Model: "deepseek-v4-pro"})
-	doc := AppConfig{
-		Models: PersistedModelConfig{DefaultID: model.ID, Configs: []modelconfig.Config{model}},
-		AgentRoster: controlagents.Configuration{Agents: []controlagents.Agent{{
-			ID: "deepseek-v4-pro", Backing: controlagents.AgentBacking{ModelAlias: model.ID},
-		}}},
-	}
-	if err := store.Save(doc); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-	loaded, err := store.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	agent, ok := controlagents.LookupAgent(loaded.AgentRoster, "deepseek-v4-pro")
-	if !ok || agent.Backing.ModelAlias != model.ID {
-		t.Fatalf("loaded model-backed Agent = %#v, %v", agent, ok)
-	}
-
-	doc.Models.Configs = nil
-	if err := store.Save(doc); err == nil {
-		t.Fatal("Save(stale model Agent) error = nil, want unknown configured model rejection")
-	}
-}
-
-func TestStorePersistsDelegationBindingsAndRejectsStaleAgentReference(t *testing.T) {
+func TestStorePersistsUnifiedBindingAndRejectsStaleProfileReference(t *testing.T) {
 	t.Parallel()
 
 	store := New(t.TempDir())
@@ -123,24 +186,17 @@ func TestStorePersistsDelegationBindingsAndRejectsStaleAgentReference(t *testing
 		ReasoningMode:   "effort",
 		ReasoningLevels: []string{"low", "medium", "high", "xhigh"},
 	})
-	roster := controlagents.Configuration{Agents: []controlagents.Agent{{
-		ID: "codex", Backing: controlagents.AgentBacking{ModelAlias: model.ID},
-	}}}
-	delegation, err := controldelegation.BindAgent(
-		controldelegation.Configuration{},
-		controldelegation.ProfileOrbit,
-		"codex",
-		"high",
-		roster,
-		[]modelconfig.Config{model},
-	)
+	profile := testProviderProfile(model, "high")
+	bindings, err := agentbinding.Bind(agentbinding.Configuration{}, agentbinding.Binding{
+		Handle: agentbinding.HandleOrbit, ProfileID: profile.ID, Effort: "high",
+	}, modelprofile.Configuration{Profiles: []modelprofile.ModelProfile{profile}})
 	if err != nil {
 		t.Fatalf("BindAgent() error = %v", err)
 	}
 	doc := AppConfig{
-		Models:      PersistedModelConfig{DefaultID: model.ID, Configs: []modelconfig.Config{model}},
-		AgentRoster: roster,
-		Delegation:  delegation,
+		Models:        PersistedModelConfig{DefaultID: model.ID, Configs: []modelconfig.Config{model}},
+		ModelProfiles: modelprofile.Configuration{DefaultProfileID: profile.ID, Profiles: []modelprofile.ModelProfile{profile}},
+		AgentBindings: bindings,
 	}
 	if err := store.Save(doc); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -149,17 +205,14 @@ func TestStorePersistsDelegationBindingsAndRejectsStaleAgentReference(t *testing
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	resolved, err := controldelegation.Resolve(loaded.Delegation, controldelegation.ProfileOrbit, loaded.AgentRoster, loaded.Models.Configs)
-	if err != nil {
-		t.Fatalf("Resolve() error = %v", err)
-	}
-	if resolved.Agent.ID != "codex" || resolved.Binding.ReasoningEffort != "high" {
-		t.Fatalf("loaded delegation = %#v", resolved)
+	resolved, ok := agentbinding.Lookup(loaded.AgentBindings, agentbinding.HandleOrbit)
+	if !ok || resolved.ProfileID != profile.ID || resolved.Effort != "high" {
+		t.Fatalf("loaded binding = %#v, %v", resolved, ok)
 	}
 
-	doc.AgentRoster = controlagents.Configuration{}
-	if err := store.Save(doc); err == nil || !strings.Contains(err.Error(), "unknown Agent") {
-		t.Fatalf("Save(stale binding) error = %v, want unknown Agent", err)
+	doc.ModelProfiles = modelprofile.Configuration{}
+	if err := store.Save(doc); err == nil || !strings.Contains(err.Error(), "unknown profile") {
+		t.Fatalf("Save(stale binding) error = %v, want unknown profile", err)
 	}
 }
 
@@ -216,4 +269,16 @@ func TestStoreSetPathConcurrentWithLoadSave(t *testing.T) {
 	workers.Wait()
 	cancel()
 	setters.Wait()
+}
+
+func testProviderProfile(model modelconfig.Config, effort string) modelprofile.ModelProfile {
+	choices := []modelprofile.EffortChoice{{Canonical: effort, WireValue: effort}}
+	if effort == "none" {
+		choices[0].WireValue = "none"
+	}
+	return modelprofile.ModelProfile{
+		ID: modelprofile.BuildProviderID(model.ID), DisplayName: model.ID,
+		Backend: modelprofile.Backend{Provider: &modelprofile.ProviderBackend{ModelConfigID: model.ID}},
+		Effort:  modelprofile.EffortCapability{DefaultEffort: effort, Choices: choices},
+	}
 }

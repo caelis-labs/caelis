@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
 // LauncherChoice is the user-selected setup strategy for a local ACP endpoint.
@@ -107,7 +109,7 @@ func ResolveDiscoverySelection(snapshot DiscoverySnapshot, modelID string, confi
 
 // ConnectResult is the completed persisted roster selection.
 type ConnectResult struct {
-	Connection Connection        `json:"connection"`
-	Agents     []Agent           `json:"agents"`
-	Discovery  DiscoverySnapshot `json:"discovery"`
+	Connection Connection                  `json:"connection"`
+	Profiles   []modelprofile.ModelProfile `json:"profiles"`
+	Discovery  DiscoverySnapshot           `json:"discovery"`
 }

@@ -1,6 +1,7 @@
 package gatewayapp
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/ports/gateway"
@@ -33,13 +34,13 @@ type stackRuntimeConfig struct {
 
 func (s *Stack) delegationAgentsForSpawn() []delegation.Agent {
 	if s == nil {
-		return delegationAgentsForConfiguration(controldelegation.Configuration{})
+		return delegationAgentsForBindings(agentbinding.Configuration{}, true)
 	}
-	snapshot, err := s.loadDelegationResolutionSnapshot()
+	snapshot, err := s.placementSnapshot(context.Background())
 	if err != nil {
-		return delegationAgentsForConfiguration(controldelegation.Configuration{})
+		return delegationAgentsForBindings(agentbinding.Configuration{}, true)
 	}
-	return delegationAgentsForConfiguration(snapshot.configuration)
+	return delegationAgentsForBindings(snapshot.placement.Bindings, true)
 }
 
 func systemPromptWithDelegationGuidance(systemPrompt string) string {

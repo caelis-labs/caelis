@@ -11,6 +11,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -868,15 +869,18 @@ func TestAttachParticipantDelegatesToInjectedControlAndUpdatesBinding(t *testing
 
 	updated, err := gw.AttachParticipant(context.Background(), AttachParticipantRequest{
 		BindingKey: "surface-agent",
-		Agent:      "copilot",
+		Agent:      "untrusted-request-agent",
 		Role:       session.ParticipantRoleSidecar,
 		Source:     "user_attach",
 		Label:      "Copilot",
+		Placement: sdkplacement.Placement{
+			Kind: sdkplacement.KindAgent, Agent: "copilot", ProfileID: "acp:copilot",
+		},
 	})
 	if err != nil {
 		t.Fatalf("AttachParticipant() error = %v", err)
 	}
-	if len(updated.Participants) != 1 || rt.attachReq.Agent != "copilot" || rt.attachReq.SessionRef.SessionID != "s1" {
+	if len(updated.Participants) != 1 || rt.attachReq.Agent != "copilot" || rt.attachReq.SessionRef.SessionID != "s1" || rt.attachReq.Placement.Agent != "copilot" {
 		t.Fatalf("updated=%+v attachReq=%+v", updated, rt.attachReq)
 	}
 	if current, ok := gw.CurrentSession("surface-agent"); !ok || current.SessionID != "s1" {

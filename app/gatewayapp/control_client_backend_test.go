@@ -14,6 +14,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
@@ -67,6 +69,62 @@ func TestClassifyControlBackendErrorTreatsUnclassifiedFailureAsUnknown(t *testin
 	var outcomeErr *controlport.OutcomeError
 	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlport.OutcomeUnknown {
 		t.Fatalf("classifyControlBackendError() = %v, want unknown outcome", err)
+	}
+}
+
+func TestControlParticipantPlacementRejectsOnlyInvalidSelections(t *testing.T) {
+	store := newAppConfigStore(t.TempDir())
+	profile := modelprofile.ModelProfile{
+		ID:          "acp:claude:opus",
+		DisplayName: "Claude Opus",
+		Backend: modelprofile.Backend{ACP: &modelprofile.ACPBackend{
+			AgentID: "claude", RemoteModelID: "opus",
+		}},
+		Effort: modelprofile.EffortCapability{
+			DefaultEffort: "xhigh",
+			Choices:       []modelprofile.EffortChoice{{Canonical: "xhigh", WireValue: "max"}},
+			ACPConfigID:   "effort",
+		},
+	}
+	if err := store.Save(AppConfig{
+		ExternalAgents: controlagents.Configuration{
+			Connections: []controlagents.Connection{{
+				ID: "claude", Launcher: controlagents.Launcher{Command: "claude-acp"},
+			}},
+			Agents: []controlagents.Agent{{ID: "claude", ConnectionID: "claude"}},
+		},
+		ModelProfiles: modelprofile.Configuration{Profiles: []modelprofile.ModelProfile{profile}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stack := &Stack{store: store}
+	for _, selection := range []struct {
+		profileID string
+		effort    string
+	}{
+		{profileID: "acp:missing", effort: "xhigh"},
+		{profileID: profile.ID, effort: "low"},
+	} {
+		_, err := stack.resolveControlParticipantPlacement(context.Background(), selection.profileID, selection.effort)
+		var outcomeErr *controlport.OutcomeError
+		if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlport.OutcomeRejected || errorcode.CodeOf(err) != errorcode.InvalidArgument {
+			t.Fatalf("resolveControlParticipantPlacement(%q, %q) = %v, want rejected invalid_argument", selection.profileID, selection.effort, err)
+		}
+	}
+}
+
+func TestControlParticipantPlacementStoreFailureRemainsUnknown(t *testing.T) {
+	store := newAppConfigStore(t.TempDir())
+	store.path = t.TempDir()
+	stack := &Stack{store: store}
+	_, err := stack.resolveControlParticipantPlacement(context.Background(), "acp:claude:opus", "xhigh")
+	if err == nil || errorcode.CodeOf(err) == errorcode.InvalidArgument {
+		t.Fatalf("resolveControlParticipantPlacement(store failure) = %v, want internal failure", err)
+	}
+	classified := classifyControlBackendError(err)
+	var outcomeErr *controlport.OutcomeError
+	if !errors.As(classified, &outcomeErr) || outcomeErr.Outcome != controlport.OutcomeUnknown || errorcode.CodeOf(classified) != errorcode.Unknown {
+		t.Fatalf("classifyControlBackendError(store failure) = %v, want unknown outcome", classified)
 	}
 }
 

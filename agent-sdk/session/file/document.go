@@ -45,23 +45,56 @@ func (s *Store) readDocumentAt(path string) (persistedDocument, error) {
 	if err := rejectUnsupportedLegacyDocument(data, path); err != nil {
 		return persistedDocument{}, err
 	}
-	var doc persistedDocument
-	if err := json.Unmarshal(data, &doc); err != nil {
+	doc, report, err := decodePersistedDocumentWithReport(data)
+	if err != nil {
 		return persistedDocument{}, fmt.Errorf("agent-sdk/session/file: decode %s: %w", path, err)
 	}
-	if doc.Kind != documentKind || doc.Version != documentVersion {
-		return persistedDocument{}, fmt.Errorf(
-			"agent-sdk/session/file: unsupported document %q version %d",
-			doc.Kind,
-			doc.Version,
-		)
-	}
+	s.recordMigrationReport(report)
 	doc.Session = session.CloneSession(doc.Session)
 	if doc.State != nil {
 		doc.State = cloneState(doc.State)
 	}
 	doc.PendingApprovals = clonePendingApprovals(doc.PendingApprovals)
 	return doc, nil
+}
+
+func decodePersistedDocument(data []byte) (persistedDocument, error) {
+	doc, _, err := decodePersistedDocumentWithReport(data)
+	return doc, err
+}
+
+func decodePersistedDocumentWithReport(data []byte) (persistedDocument, MigrationReport, error) {
+	var header struct {
+		Kind    string `json:"kind"`
+		Version int    `json:"version"`
+	}
+	if err := json.Unmarshal(data, &header); err != nil {
+		return persistedDocument{}, MigrationReport{}, err
+	}
+	if header.Kind != documentKind {
+		return persistedDocument{}, MigrationReport{}, fmt.Errorf(
+			"agent-sdk/session/file: unsupported document %q version %d",
+			header.Kind,
+			header.Version,
+		)
+	}
+
+	switch header.Version {
+	case documentVersion:
+		var doc persistedDocument
+		if err := json.Unmarshal(data, &doc); err != nil {
+			return persistedDocument{}, MigrationReport{}, err
+		}
+		return doc, MigrationReport{}, nil
+	case legacyV1DocumentVersion:
+		return decodeLegacyV1DocumentWithReport(data)
+	default:
+		return persistedDocument{}, MigrationReport{}, fmt.Errorf(
+			"agent-sdk/session/file: unsupported document %q version %d",
+			header.Kind,
+			header.Version,
+		)
+	}
 }
 
 func rejectUnsupportedLegacyDocument(data []byte, path string) error {

@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controldelegation "github.com/caelis-labs/caelis/control/delegation"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
@@ -586,8 +585,8 @@ func (d *Adapter) resolveParticipantID(ctx context.Context, ref session.SessionR
 			continue
 		}
 		if directRun {
-			profile, profileRun := controldelegation.DirectRunProfileFromSource(participant.Source)
-			if profileRun && strings.EqualFold(string(profile), runAgent) &&
+			handle, profileRun := controlagents.DirectRunHandleFromSource(participant.Source)
+			if profileRun && strings.EqualFold(string(handle), runAgent) &&
 				strings.EqualFold(taskapi.NormalizeHandle(label), runHandle) {
 				return id, nil
 			}

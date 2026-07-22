@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -18,25 +19,26 @@ var errAmbiguousModelAlias = errors.New("ambiguous model alias")
 type modelLookup struct {
 	mu                sync.RWMutex
 	configs           map[string]ModelConfig
-	profiles          map[string]ModelProfileConfig
+	providerEndpoints map[string]ProviderEndpointConfig
 	contextWindow     int
 	defaultID         string
 	resolveHTTPClient func(context.Context, ModelConfig) (*http.Client, error)
+	resolveAPIKey     func(context.Context, string) (string, error)
 }
 
 func newModelLookup(store *appConfigStore, cfg ModelConfig, contextWindow int) (*modelLookup, error) {
 	lookup := &modelLookup{
-		configs:       map[string]ModelConfig{},
-		profiles:      map[string]ModelProfileConfig{},
-		contextWindow: contextWindow,
+		configs:           map[string]ModelConfig{},
+		providerEndpoints: map[string]ProviderEndpointConfig{},
+		contextWindow:     contextWindow,
 	}
 	if store != nil {
 		doc, err := store.Load()
 		if err != nil {
 			return nil, err
 		}
-		for _, item := range doc.Models.Profiles {
-			if _, err := lookup.UpsertProfile(item); err != nil {
+		for _, item := range doc.Models.ProviderEndpoints {
+			if _, err := lookup.UpsertProviderEndpoint(item); err != nil {
 				return nil, err
 			}
 		}
@@ -131,14 +133,14 @@ func (l *modelLookup) ListModelChoices() []ModelChoice {
 func (l *modelLookup) modelChoiceLocked(cfg ModelConfig) ModelChoice {
 	cfg = l.hydrateModelConfigLocked(cfg)
 	return ModelChoice{
-		ID:         cfg.ID,
-		Alias:      cfg.Alias,
-		Provider:   cfg.Provider,
-		Model:      cfg.Model,
-		ProfileID:  cfg.ProfileID,
-		EndpointID: cfg.EndpointID,
-		BaseURL:    cfg.BaseURL,
-		Detail:     modelChoiceDetail(cfg),
+		ID:                 cfg.ID,
+		Alias:              cfg.Alias,
+		Provider:           cfg.Provider,
+		Model:              cfg.Model,
+		ProviderEndpointID: cfg.ProviderEndpointID,
+		EndpointID:         cfg.EndpointID,
+		BaseURL:            cfg.BaseURL,
+		Detail:             modelChoiceDetail(cfg),
 	}
 }
 
@@ -181,7 +183,7 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 	if !ok {
 		return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: unknown model alias %q", alias)
 	}
-	return resolveModelFromConfig(ctx, cfg, fallbackContextWindow, contextWindow, l.resolveHTTPClient)
+	return resolveModelFromConfig(ctx, cfg, fallbackContextWindow, contextWindow, l.resolveHTTPClient, l.resolveAPIKey)
 }
 
 func (l *modelLookup) ResolveModelConfig(ctx context.Context, cfg ModelConfig, contextWindow int) (kernelimpl.ModelResolution, error) {
@@ -191,19 +193,39 @@ func (l *modelLookup) ResolveModelConfig(ctx context.Context, cfg ModelConfig, c
 	l.mu.RLock()
 	fallbackContextWindow := l.contextWindow
 	l.mu.RUnlock()
-	return resolveModelFromConfig(ctx, cfg, fallbackContextWindow, contextWindow, l.resolveHTTPClient)
+	return resolveModelFromConfig(ctx, cfg, fallbackContextWindow, contextWindow, l.resolveHTTPClient, l.resolveAPIKey)
 }
 
-func resolveModelFromConfig(ctx context.Context, cfg ModelConfig, fallbackContextWindow int, contextWindow int, resolveHTTPClient func(context.Context, ModelConfig) (*http.Client, error)) (kernelimpl.ModelResolution, error) {
+func resolveModelFromConfig(
+	ctx context.Context,
+	cfg ModelConfig,
+	fallbackContextWindow int,
+	contextWindow int,
+	resolveHTTPClient func(context.Context, ModelConfig) (*http.Client, error),
+	resolveAPIKey func(context.Context, string) (string, error),
+) (kernelimpl.ModelResolution, error) {
 	if strings.TrimSpace(cfg.CredentialRef) != "" {
-		if resolveHTTPClient == nil {
-			return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: managed model credential %q is unavailable", cfg.CredentialRef)
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(cfg.CredentialRef)), "apikey:") {
+			if resolveAPIKey == nil {
+				return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: managed model credential %q is unavailable", cfg.CredentialRef)
+			}
+			token, err := resolveAPIKey(ctx, cfg.CredentialRef)
+			if err != nil {
+				return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: resolve model credential %q: %w", cfg.CredentialRef, err)
+			}
+			cfg.Token = token
+			cfg.TokenEnv = ""
+			cfg.PersistToken = false
+		} else {
+			if resolveHTTPClient == nil {
+				return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: managed model credential %q is unavailable", cfg.CredentialRef)
+			}
+			client, err := resolveHTTPClient(ctx, cfg)
+			if err != nil {
+				return kernelimpl.ModelResolution{}, err
+			}
+			cfg.HTTPClient = client
 		}
-		client, err := resolveHTTPClient(ctx, cfg)
-		if err != nil {
-			return kernelimpl.ModelResolution{}, err
-		}
-		cfg.HTTPClient = client
 	}
 	resolved, err := modelconfig.BuildModel(cfg, fallbackContextWindow, contextWindow)
 	if err != nil {
@@ -211,6 +233,7 @@ func resolveModelFromConfig(ctx context.Context, cfg ModelConfig, fallbackContex
 	}
 	return kernelimpl.ModelResolution{
 		Model:                  resolved.Model,
+		ProfileID:              modelprofile.BuildProviderID(cfg.ID),
 		ReasoningEffort:        resolved.ReasoningEffort,
 		DefaultReasoningEffort: resolved.DefaultReasoningEffort,
 	}, nil
@@ -226,21 +249,21 @@ func (l *modelLookup) HasAlias(alias string) bool {
 	return ok || errors.Is(err, errAmbiguousModelAlias)
 }
 
-func (l *modelLookup) UpsertProfile(profile ModelProfileConfig) (string, error) {
+func (l *modelLookup) UpsertProviderEndpoint(endpoint ProviderEndpointConfig) (string, error) {
 	if l == nil {
 		return "", fmt.Errorf("gatewayapp: model lookup is nil")
 	}
-	profile = normalizeModelProfileConfig(profile)
-	if profile.Provider == "" {
+	endpoint = normalizeProviderEndpointConfig(endpoint)
+	if endpoint.Provider == "" {
 		return "", fmt.Errorf("gatewayapp: provider is required")
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.profiles == nil {
-		l.profiles = map[string]ModelProfileConfig{}
+	if l.providerEndpoints == nil {
+		l.providerEndpoints = map[string]ProviderEndpointConfig{}
 	}
-	l.profiles[strings.ToLower(profile.ID)] = profile
-	return profile.ID, nil
+	l.providerEndpoints[strings.ToLower(endpoint.ID)] = endpoint
+	return endpoint.ID, nil
 }
 
 func (l *modelLookup) Upsert(cfg ModelConfig) (string, error) {
@@ -251,31 +274,37 @@ func (l *modelLookup) upsert(cfg ModelConfig, setDefault bool) (string, error) {
 	if l == nil {
 		return "", fmt.Errorf("gatewayapp: model lookup is nil")
 	}
-	updatesProfileAuth := modelConfigCarriesProfileAuth(cfg)
+	rawConfig := cfg
 	cfg = normalizeModelConfig(cfg)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.configs == nil {
 		l.configs = map[string]ModelConfig{}
 	}
-	if l.profiles == nil {
-		l.profiles = map[string]ModelProfileConfig{}
+	if l.providerEndpoints == nil {
+		l.providerEndpoints = map[string]ProviderEndpointConfig{}
 	}
-	profile, ok := l.profiles[strings.ToLower(strings.TrimSpace(cfg.ProfileID))]
+	endpoint, ok := l.providerEndpoints[strings.ToLower(strings.TrimSpace(cfg.ProviderEndpointID))]
 	if ok {
-		cfg.Provider = firstNonEmpty(cfg.Provider, profile.Provider)
-		cfg.EndpointID = firstNonEmpty(cfg.EndpointID, profile.EndpointID)
+		endpoint = modelconfig.ApplyConfigProviderEndpointFields(endpoint, rawConfig)
+		cfg.Provider = firstNonEmpty(cfg.Provider, endpoint.Provider)
+		cfg.EndpointID = firstNonEmpty(cfg.EndpointID, endpoint.EndpointID)
 		cfg = normalizeModelConfig(cfg)
 	}
 	if cfg.Provider == "" || cfg.Model == "" {
 		return "", fmt.Errorf("gatewayapp: provider and model are required")
 	}
-	if !ok || updatesProfileAuth {
-		profile = modelProfileFromModelConfig(cfg)
+	if !ok {
+		endpoint = providerEndpointFromModelConfig(cfg)
 	}
-	l.profiles[strings.ToLower(profile.ID)] = profile
-	cfg.ProfileID = profile.ID
-	cfg = mergeModelConfigProfile(cfg, profile)
+	l.providerEndpoints[strings.ToLower(endpoint.ID)] = endpoint
+	for id, existing := range l.configs {
+		if strings.EqualFold(strings.TrimSpace(existing.ProviderEndpointID), endpoint.ID) {
+			l.configs[id] = mergeModelConfigProviderEndpoint(existing, endpoint)
+		}
+	}
+	cfg.ProviderEndpointID = endpoint.ID
+	cfg = mergeModelConfigProviderEndpoint(cfg, endpoint)
 	l.configs[strings.ToLower(cfg.ID)] = cfg
 	if setDefault {
 		l.defaultID = cfg.ID
@@ -304,8 +333,8 @@ func (l *modelLookup) Delete(alias string) error {
 		return fmt.Errorf("gatewayapp: unknown model alias %q", alias)
 	}
 	delete(l.configs, strings.ToLower(cfg.ID))
-	if !l.profileReferencedLocked(cfg.ProfileID) {
-		delete(l.profiles, strings.ToLower(strings.TrimSpace(cfg.ProfileID)))
+	if !l.providerEndpointReferencedLocked(cfg.ProviderEndpointID) {
+		delete(l.providerEndpoints, strings.ToLower(strings.TrimSpace(cfg.ProviderEndpointID)))
 	}
 	if strings.EqualFold(l.defaultID, cfg.ID) {
 		l.defaultID = ""
@@ -352,22 +381,22 @@ func (l *modelLookup) Snapshot() persistedModelConfig {
 	sort.Slice(configs, func(i, j int) bool {
 		return strings.ToLower(strings.TrimSpace(configs[i].Alias+" "+configs[i].ID)) < strings.ToLower(strings.TrimSpace(configs[j].Alias+" "+configs[j].ID))
 	})
-	profiles := make([]ModelProfileConfig, 0, len(l.profiles))
-	for _, profile := range l.profiles {
-		profiles = append(profiles, profile)
+	endpoints := make([]ProviderEndpointConfig, 0, len(l.providerEndpoints))
+	for _, endpoint := range l.providerEndpoints {
+		endpoints = append(endpoints, endpoint)
 	}
-	sort.Slice(profiles, func(i, j int) bool {
-		return strings.ToLower(strings.TrimSpace(profiles[i].ID)) < strings.ToLower(strings.TrimSpace(profiles[j].ID))
+	sort.Slice(endpoints, func(i, j int) bool {
+		return strings.ToLower(strings.TrimSpace(endpoints[i].ID)) < strings.ToLower(strings.TrimSpace(endpoints[j].ID))
 	})
 	defaultAlias := ""
 	if cfg, ok := l.configs[strings.ToLower(strings.TrimSpace(l.defaultID))]; ok {
 		defaultAlias = cfg.Alias
 	}
 	return persistedModelConfig{
-		DefaultAlias: defaultAlias,
-		DefaultID:    l.defaultID,
-		Profiles:     profiles,
-		Configs:      configs,
+		DefaultAlias:      defaultAlias,
+		DefaultID:         l.defaultID,
+		ProviderEndpoints: endpoints,
+		Configs:           configs,
 	}
 }
 
@@ -378,11 +407,11 @@ func (l *modelLookup) Restore(snapshot persistedModelConfig, contextWindow int) 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.configs = map[string]ModelConfig{}
-	l.profiles = map[string]ModelProfileConfig{}
-	for _, profile := range snapshot.Profiles {
-		profile = normalizeModelProfileConfig(profile)
-		if profile.ID != "" {
-			l.profiles[strings.ToLower(profile.ID)] = profile
+	l.providerEndpoints = map[string]ProviderEndpointConfig{}
+	for _, endpoint := range snapshot.ProviderEndpoints {
+		endpoint = normalizeProviderEndpointConfig(endpoint)
+		if endpoint.ID != "" {
+			l.providerEndpoints[strings.ToLower(endpoint.ID)] = endpoint
 		}
 	}
 	for _, cfg := range snapshot.Configs {
@@ -462,13 +491,13 @@ func (l *modelLookup) resolveConfigLocked(ref string) (ModelConfig, bool, error)
 	return l.hydrateModelConfigLocked(match), true, nil
 }
 
-func (l *modelLookup) profileReferencedLocked(profileID string) bool {
+func (l *modelLookup) providerEndpointReferencedLocked(profileID string) bool {
 	profileID = strings.ToLower(strings.TrimSpace(profileID))
 	if profileID == "" {
 		return false
 	}
 	for _, cfg := range l.configs {
-		if strings.EqualFold(strings.TrimSpace(cfg.ProfileID), profileID) {
+		if strings.EqualFold(strings.TrimSpace(cfg.ProviderEndpointID), profileID) {
 			return true
 		}
 	}
@@ -477,14 +506,14 @@ func (l *modelLookup) profileReferencedLocked(profileID string) bool {
 
 func (l *modelLookup) hydrateModelConfigLocked(cfg ModelConfig) ModelConfig {
 	cfg = normalizeModelConfig(cfg)
-	if l == nil || strings.TrimSpace(cfg.ProfileID) == "" {
+	if l == nil || strings.TrimSpace(cfg.ProviderEndpointID) == "" {
 		return cfg
 	}
-	profile, ok := l.profiles[strings.ToLower(strings.TrimSpace(cfg.ProfileID))]
+	endpoint, ok := l.providerEndpoints[strings.ToLower(strings.TrimSpace(cfg.ProviderEndpointID))]
 	if !ok {
 		return cfg
 	}
-	return mergeModelConfigProfile(cfg, profile)
+	return mergeModelConfigProviderEndpoint(cfg, endpoint)
 }
 
 func modelChoiceDetail(cfg ModelConfig) string {
@@ -503,20 +532,16 @@ func normalizeModelConfig(cfg ModelConfig) ModelConfig {
 	return modelconfig.NormalizeConfig(cfg)
 }
 
-func normalizeModelProfileConfig(profile ModelProfileConfig) ModelProfileConfig {
-	return modelconfig.NormalizeProfileConfig(profile)
+func normalizeProviderEndpointConfig(endpoint ProviderEndpointConfig) ProviderEndpointConfig {
+	return modelconfig.NormalizeProviderEndpoint(endpoint)
 }
 
-func modelProfileFromModelConfig(cfg ModelConfig) ModelProfileConfig {
-	return modelconfig.ProfileFromConfig(cfg)
+func providerEndpointFromModelConfig(cfg ModelConfig) ProviderEndpointConfig {
+	return modelconfig.ProviderEndpointFromConfig(cfg)
 }
 
-func modelConfigCarriesProfileAuth(cfg ModelConfig) bool {
-	return modelconfig.ConfigCarriesProfileAuth(cfg)
-}
-
-func mergeModelConfigProfile(cfg ModelConfig, profile ModelProfileConfig) ModelConfig {
-	return modelconfig.MergeConfigProfile(cfg, profile)
+func mergeModelConfigProviderEndpoint(cfg ModelConfig, endpoint ProviderEndpointConfig) ModelConfig {
+	return modelconfig.MergeConfigProviderEndpoint(cfg, endpoint)
 }
 
 func modelConfigSupportsReasoningEffort(cfg ModelConfig, effort string) bool {

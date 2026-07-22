@@ -1,4 +1,4 @@
-// Package modelconfig owns Caelis provider profiles, configured model records,
+// Package modelconfig owns Caelis provider endpoints, configured model records,
 // onboarding templates, and construction of SDK model implementations.
 package modelconfig
 
@@ -16,17 +16,19 @@ import (
 
 // Config is the complete Control-owned configuration for one selectable model.
 type Config struct {
-	ID         string            `json:"id,omitempty"`
-	Alias      string            `json:"alias,omitempty"`
-	Provider   string            `json:"provider,omitempty"`
-	ProfileID  string            `json:"profile_id,omitempty"`
-	EndpointID string            `json:"endpoint_id,omitempty"`
-	API        providers.APIType `json:"api,omitempty"`
-	Model      string            `json:"model,omitempty"`
-	BaseURL    string            `json:"base_url,omitempty"`
-	HTTPClient *http.Client      `json:"-"`
-	Token      string            `json:"token,omitempty"`
-	TokenEnv   string            `json:"token_env,omitempty"`
+	ID       string `json:"id,omitempty"`
+	Alias    string `json:"alias,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	// ProviderEndpointID references the provider endpoint infrastructure used
+	// by this configured model. It is not a product ModelProfile ID.
+	ProviderEndpointID string            `json:"provider_endpoint_id,omitempty"`
+	EndpointID         string            `json:"endpoint_id,omitempty"`
+	API                providers.APIType `json:"api,omitempty"`
+	Model              string            `json:"model,omitempty"`
+	BaseURL            string            `json:"base_url,omitempty"`
+	HTTPClient         *http.Client      `json:"-"`
+	Token              string            `json:"token,omitempty"`
+	TokenEnv           string            `json:"token_env,omitempty"`
 	// CredentialRef identifies a Control-owned credential without persisting
 	// the credential material in the model profile.
 	CredentialRef string `json:"credential_ref,omitempty"`
@@ -44,8 +46,10 @@ type Config struct {
 	StreamFirstEventTimeout time.Duration      `json:"stream_first_event_timeout,omitempty"`
 }
 
-// ProfileConfig stores endpoint and credential data shared by configured models.
-type ProfileConfig struct {
+// ProviderEndpointConfig stores endpoint and credential data shared by
+// configured provider models. It is infrastructure configuration, not a
+// product-selectable modelprofile.ModelProfile.
+type ProviderEndpointConfig struct {
 	ID                      string             `json:"id,omitempty"`
 	Provider                string             `json:"provider,omitempty"`
 	EndpointID              string             `json:"endpoint_id,omitempty"`
@@ -64,14 +68,14 @@ type ProfileConfig struct {
 
 // Choice is the presentation-neutral identity of one configured model.
 type Choice struct {
-	ID         string
-	Alias      string
-	Provider   string
-	Model      string
-	ProfileID  string
-	EndpointID string
-	BaseURL    string
-	Detail     string
+	ID                 string
+	Alias              string
+	Provider           string
+	Model              string
+	ProviderEndpointID string
+	EndpointID         string
+	BaseURL            string
+	Detail             string
 }
 
 // NormalizeConfig canonicalizes identifiers, endpoint defaults, credentials,
@@ -82,15 +86,15 @@ func NormalizeConfig(cfg Config) Config {
 	cfg.Model = strings.TrimSpace(cfg.Model)
 	cfg.CredentialRef = strings.ToLower(strings.TrimSpace(cfg.CredentialRef))
 	cfg.EndpointID = NormalizeEndpointID(cfg.Provider, cfg.EndpointID, cfg.BaseURL, cfg.API)
-	cfg.ProfileID = strings.ToLower(strings.TrimSpace(cfg.ProfileID))
-	if cfg.ProfileID == "" {
-		cfg.ProfileID = BuildProfileID(cfg.Provider, cfg.EndpointID, cfg.BaseURL)
+	cfg.ProviderEndpointID = strings.ToLower(strings.TrimSpace(cfg.ProviderEndpointID))
+	if cfg.ProviderEndpointID == "" {
+		cfg.ProviderEndpointID = BuildProviderEndpointID(cfg.Provider, cfg.EndpointID, cfg.BaseURL)
 	}
 	cfg.Alias = strings.ToLower(strings.TrimSpace(cfg.Alias))
 	if cfg.Alias == "" {
 		cfg.Alias = BuildAlias(cfg.Provider, cfg.Model)
 	}
-	if id := BuildModelID(cfg.ProfileID, cfg.Alias); id != "" {
+	if id := BuildModelID(cfg.ProviderEndpointID, cfg.Alias); id != "" {
 		cfg.ID = id
 	}
 	if cfg.API == "" {
@@ -118,32 +122,32 @@ func NormalizeConfig(cfg Config) Config {
 	return cfg
 }
 
-// NormalizeProfileConfig canonicalizes one shared provider profile.
-func NormalizeProfileConfig(profile ProfileConfig) ProfileConfig {
-	profile.ID = strings.ToLower(strings.TrimSpace(profile.ID))
-	profile.Provider = strings.ToLower(strings.TrimSpace(profile.Provider))
-	profile.CredentialRef = strings.ToLower(strings.TrimSpace(profile.CredentialRef))
-	profile.EndpointID = NormalizeEndpointID(profile.Provider, profile.EndpointID, profile.BaseURL, profile.API)
-	if profile.ID == "" {
-		profile.ID = BuildProfileID(profile.Provider, profile.EndpointID, profile.BaseURL)
+// NormalizeProviderEndpoint canonicalizes one shared provider endpoint.
+func NormalizeProviderEndpoint(endpoint ProviderEndpointConfig) ProviderEndpointConfig {
+	endpoint.ID = strings.ToLower(strings.TrimSpace(endpoint.ID))
+	endpoint.Provider = strings.ToLower(strings.TrimSpace(endpoint.Provider))
+	endpoint.CredentialRef = strings.ToLower(strings.TrimSpace(endpoint.CredentialRef))
+	endpoint.EndpointID = NormalizeEndpointID(endpoint.Provider, endpoint.EndpointID, endpoint.BaseURL, endpoint.API)
+	if endpoint.ID == "" {
+		endpoint.ID = BuildProviderEndpointID(endpoint.Provider, endpoint.EndpointID, endpoint.BaseURL)
 	}
-	if profile.API == "" {
-		profile.API = DefaultAPIForProvider(profile.Provider)
+	if endpoint.API == "" {
+		endpoint.API = DefaultAPIForProvider(endpoint.Provider)
 	}
-	if profile.AuthType == "" {
-		profile.AuthType = DefaultAuthTypeForProvider(profile.Provider)
+	if endpoint.AuthType == "" {
+		endpoint.AuthType = DefaultAuthTypeForProvider(endpoint.Provider)
 	}
-	if profile.Token == "" && strings.TrimSpace(profile.TokenEnv) != "" {
-		profile.Token = strings.TrimSpace(os.Getenv(strings.TrimSpace(profile.TokenEnv)))
+	if endpoint.Token == "" && strings.TrimSpace(endpoint.TokenEnv) != "" {
+		endpoint.Token = strings.TrimSpace(os.Getenv(strings.TrimSpace(endpoint.TokenEnv)))
 	}
-	return profile
+	return endpoint
 }
 
-// ProfileFromConfig extracts shared endpoint and authentication fields.
-func ProfileFromConfig(cfg Config) ProfileConfig {
+// ProviderEndpointFromConfig extracts shared endpoint and authentication fields.
+func ProviderEndpointFromConfig(cfg Config) ProviderEndpointConfig {
 	cfg = NormalizeConfig(cfg)
-	return NormalizeProfileConfig(ProfileConfig{
-		ID:                      cfg.ProfileID,
+	return NormalizeProviderEndpoint(ProviderEndpointConfig{
+		ID:                      cfg.ProviderEndpointID,
 		Provider:                cfg.Provider,
 		EndpointID:              cfg.EndpointID,
 		API:                     cfg.API,
@@ -160,8 +164,67 @@ func ProfileFromConfig(cfg Config) ProfileConfig {
 	})
 }
 
-// ConfigCarriesProfileFields reports whether cfg contains any profile-owned data.
-func ConfigCarriesProfileFields(cfg Config) bool {
+// ApplyConfigProviderEndpointFields overlays endpoint-owned values that are
+// explicitly present in cfg onto one existing shared provider endpoint.
+// Omitted values retain the current endpoint truth, so adding a model cannot
+// accidentally clear credentials or connection settings.
+func ApplyConfigProviderEndpointFields(current ProviderEndpointConfig, cfg Config) ProviderEndpointConfig {
+	raw := cfg
+	candidate := ProviderEndpointFromConfig(cfg)
+	current = NormalizeProviderEndpoint(current)
+	if current.ID == "" {
+		current.ID = candidate.ID
+	}
+	if strings.TrimSpace(raw.Provider) != "" {
+		current.Provider = candidate.Provider
+	}
+	if strings.TrimSpace(raw.EndpointID) != "" {
+		current.EndpointID = candidate.EndpointID
+	}
+	if raw.API != "" {
+		current.API = candidate.API
+	}
+	if strings.TrimSpace(raw.BaseURL) != "" {
+		current.BaseURL = candidate.BaseURL
+	}
+	if raw.HTTPClient != nil {
+		current.HTTPClient = raw.HTTPClient
+	}
+	if strings.TrimSpace(raw.Token) != "" {
+		current.Token = candidate.Token
+		current.TokenEnv = ""
+	}
+	if strings.TrimSpace(raw.TokenEnv) != "" {
+		current.Token = candidate.Token
+		current.TokenEnv = candidate.TokenEnv
+	}
+	if strings.TrimSpace(raw.CredentialRef) != "" {
+		current.CredentialRef = candidate.CredentialRef
+		current.Token = ""
+		current.TokenEnv = ""
+		current.PersistToken = false
+	}
+	if raw.PersistToken {
+		current.PersistToken = true
+	}
+	if raw.AuthType != "" {
+		current.AuthType = candidate.AuthType
+	}
+	if strings.TrimSpace(raw.HeaderKey) != "" {
+		current.HeaderKey = candidate.HeaderKey
+	}
+	if raw.Timeout > 0 {
+		current.Timeout = raw.Timeout
+	}
+	if raw.StreamFirstEventTimeout > 0 {
+		current.StreamFirstEventTimeout = raw.StreamFirstEventTimeout
+	}
+	return NormalizeProviderEndpoint(current)
+}
+
+// ConfigCarriesProviderEndpointFields reports whether cfg contains any
+// provider-endpoint-owned data.
+func ConfigCarriesProviderEndpointFields(cfg Config) bool {
 	return strings.TrimSpace(cfg.Provider) != "" ||
 		strings.TrimSpace(cfg.EndpointID) != "" ||
 		strings.TrimSpace(cfg.BaseURL) != "" ||
@@ -176,8 +239,9 @@ func ConfigCarriesProfileFields(cfg Config) bool {
 		cfg.StreamFirstEventTimeout > 0
 }
 
-// ConfigCarriesProfileAuth reports whether cfg can update stored credentials.
-func ConfigCarriesProfileAuth(cfg Config) bool {
+// ConfigCarriesProviderEndpointAuth reports whether cfg can update stored
+// provider endpoint credentials.
+func ConfigCarriesProviderEndpointAuth(cfg Config) bool {
 	return strings.TrimSpace(cfg.Token) != "" ||
 		strings.TrimSpace(cfg.TokenEnv) != "" ||
 		strings.TrimSpace(cfg.CredentialRef) != "" ||
@@ -186,27 +250,27 @@ func ConfigCarriesProfileAuth(cfg Config) bool {
 		cfg.HTTPClient != nil
 }
 
-// MergeConfigProfile hydrates a model record from its provider profile.
-func MergeConfigProfile(cfg Config, profile ProfileConfig) Config {
+// MergeConfigProviderEndpoint hydrates a model record from its provider endpoint.
+func MergeConfigProviderEndpoint(cfg Config, endpoint ProviderEndpointConfig) Config {
 	cfg = NormalizeConfig(cfg)
-	profile = NormalizeProfileConfig(profile)
-	cfg.ProfileID = profile.ID
-	cfg.Provider = firstNonEmpty(profile.Provider, cfg.Provider)
-	cfg.EndpointID = profile.EndpointID
-	cfg.API = FirstNonEmptyAPI(profile.API, cfg.API)
-	cfg.BaseURL = firstNonEmpty(profile.BaseURL, cfg.BaseURL)
-	cfg.HTTPClient = FirstNonNilHTTPClient(profile.HTTPClient, cfg.HTTPClient)
-	cfg.Token = firstNonEmpty(profile.Token, cfg.Token)
-	cfg.TokenEnv = firstNonEmpty(profile.TokenEnv, cfg.TokenEnv)
-	cfg.CredentialRef = firstNonEmpty(profile.CredentialRef, cfg.CredentialRef)
-	cfg.PersistToken = profile.PersistToken || cfg.PersistToken
-	cfg.AuthType = FirstNonEmptyAuthType(profile.AuthType, cfg.AuthType)
-	cfg.HeaderKey = firstNonEmpty(profile.HeaderKey, cfg.HeaderKey)
-	if profile.Timeout > 0 {
-		cfg.Timeout = profile.Timeout
+	endpoint = NormalizeProviderEndpoint(endpoint)
+	cfg.ProviderEndpointID = endpoint.ID
+	cfg.Provider = firstNonEmpty(endpoint.Provider, cfg.Provider)
+	cfg.EndpointID = endpoint.EndpointID
+	cfg.API = FirstNonEmptyAPI(endpoint.API, cfg.API)
+	cfg.BaseURL = firstNonEmpty(endpoint.BaseURL, cfg.BaseURL)
+	cfg.HTTPClient = FirstNonNilHTTPClient(endpoint.HTTPClient, cfg.HTTPClient)
+	cfg.Token = firstNonEmpty(endpoint.Token, cfg.Token)
+	cfg.TokenEnv = firstNonEmpty(endpoint.TokenEnv, cfg.TokenEnv)
+	cfg.CredentialRef = firstNonEmpty(endpoint.CredentialRef, cfg.CredentialRef)
+	cfg.PersistToken = endpoint.PersistToken || cfg.PersistToken
+	cfg.AuthType = FirstNonEmptyAuthType(endpoint.AuthType, cfg.AuthType)
+	cfg.HeaderKey = firstNonEmpty(endpoint.HeaderKey, cfg.HeaderKey)
+	if endpoint.Timeout > 0 {
+		cfg.Timeout = endpoint.Timeout
 	}
-	if profile.StreamFirstEventTimeout > 0 {
-		cfg.StreamFirstEventTimeout = profile.StreamFirstEventTimeout
+	if endpoint.StreamFirstEventTimeout > 0 {
+		cfg.StreamFirstEventTimeout = endpoint.StreamFirstEventTimeout
 	}
 	return NormalizeConfig(cfg)
 }
@@ -214,7 +278,7 @@ func MergeConfigProfile(cfg Config, profile ProfileConfig) Config {
 // SupportsReasoningEffort reports whether cfg accepts an effort value.
 func SupportsReasoningEffort(cfg Config, effort string) bool {
 	effort = strings.ToLower(strings.TrimSpace(effort))
-	if effort == "" {
+	if effort == "" || effort == "none" {
 		return true
 	}
 	for _, level := range cfg.ReasoningLevels {
@@ -249,7 +313,7 @@ func SanitizePersistedConfig(cfg Config) Config {
 	if cfg.ReasoningMode == modelcatalog.ReasoningModeForModel(cfg.Provider, cfg.Model) {
 		cfg.ReasoningMode = ""
 	}
-	if cfg.ProfileID != "" {
+	if cfg.ProviderEndpointID != "" {
 		cfg.Provider = ""
 		cfg.EndpointID = ""
 		cfg.API = ""
@@ -285,26 +349,26 @@ func SanitizePersistedConfig(cfg Config) Config {
 	return cfg
 }
 
-// SanitizePersistedProfile removes transient fields and non-persisted secrets.
-func SanitizePersistedProfile(profile ProfileConfig) ProfileConfig {
-	profile = NormalizeProfileConfig(profile)
-	if profile.CredentialRef != "" {
-		profile.Token = ""
-		profile.TokenEnv = ""
-		profile.PersistToken = false
-	} else if !profile.PersistToken {
-		profile.Token = ""
+// SanitizePersistedProviderEndpoint removes transient fields and credentials.
+func SanitizePersistedProviderEndpoint(endpoint ProviderEndpointConfig) ProviderEndpointConfig {
+	endpoint = NormalizeProviderEndpoint(endpoint)
+	if endpoint.CredentialRef != "" {
+		endpoint.Token = ""
+		endpoint.TokenEnv = ""
+		endpoint.PersistToken = false
+	} else if !endpoint.PersistToken {
+		endpoint.Token = ""
 	}
-	if profile.API == DefaultAPIForProvider(profile.Provider) {
-		profile.API = ""
+	if endpoint.API == DefaultAPIForProvider(endpoint.Provider) {
+		endpoint.API = ""
 	}
-	if profile.AuthType == DefaultAuthTypeForProvider(profile.Provider) {
-		profile.AuthType = ""
+	if endpoint.AuthType == DefaultAuthTypeForProvider(endpoint.Provider) {
+		endpoint.AuthType = ""
 	}
-	profile.PersistToken = false
-	profile.HTTPClient = nil
-	profile.Timeout = 0
-	return profile
+	endpoint.PersistToken = false
+	endpoint.HTTPClient = nil
+	endpoint.Timeout = 0
+	return endpoint
 }
 
 // DefaultAuthTypeForProvider returns the maintained authentication scheme.
@@ -332,8 +396,8 @@ func BuildAlias(provider string, modelName string) string {
 	return strings.ToLower(provider + "/" + modelName)
 }
 
-// BuildProfileID returns a stable provider-endpoint identity.
-func BuildProfileID(provider string, endpointID string, baseURL string) string {
+// BuildProviderEndpointID returns a stable provider-endpoint identity.
+func BuildProviderEndpointID(provider string, endpointID string, baseURL string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	endpointID = sanitizeConfigIDPart(firstNonEmpty(strings.TrimSpace(endpointID), "default"))
 	if endpointID == "custom" || strings.HasPrefix(endpointID, "custom-") {
@@ -383,8 +447,8 @@ func NormalizeEndpointID(provider string, endpointID string, baseURL string, api
 // ChoiceDetail returns a concise endpoint description for a configured model.
 func ChoiceDetail(cfg Config) string {
 	parts := []string{}
-	if profileID := strings.TrimSpace(cfg.ProfileID); profileID != "" {
-		parts = append(parts, "profile:"+profileID)
+	if endpointID := strings.TrimSpace(cfg.ProviderEndpointID); endpointID != "" {
+		parts = append(parts, "endpoint:"+endpointID)
 	}
 	if endpoint := strings.TrimSpace(cfg.EndpointID); endpoint != "" && endpoint != "default" {
 		parts = append(parts, endpoint)
@@ -408,14 +472,14 @@ func ChoiceDetail(cfg Config) string {
 func ChoiceFromConfig(cfg Config) Choice {
 	cfg = NormalizeConfig(cfg)
 	return Choice{
-		ID:         cfg.ID,
-		Alias:      cfg.Alias,
-		Provider:   cfg.Provider,
-		Model:      cfg.Model,
-		ProfileID:  cfg.ProfileID,
-		EndpointID: cfg.EndpointID,
-		BaseURL:    cfg.BaseURL,
-		Detail:     ChoiceDetail(cfg),
+		ID:                 cfg.ID,
+		Alias:              cfg.Alias,
+		Provider:           cfg.Provider,
+		Model:              cfg.Model,
+		ProviderEndpointID: cfg.ProviderEndpointID,
+		EndpointID:         cfg.EndpointID,
+		BaseURL:            cfg.BaseURL,
+		Detail:             ChoiceDetail(cfg),
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	sandboxport "github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 )
 
@@ -132,8 +133,7 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	if cfg, ok := s.modelConfigForAlias(firstNonEmpty(modelRef, alias)); ok {
 		report.ActiveProvider = strings.TrimSpace(cfg.Provider)
 		report.ActiveModel = strings.TrimSpace(cfg.Model)
-		report.MissingAPIKey = modelConfigMissingAPIKey(cfg)
-		report.TokenSource = modelConfigTokenSource(cfg)
+		report.MissingAPIKey, report.TokenSource = s.modelCredentialStatus(cfg)
 		report.PersistedPlaintextToken = cfg.PersistToken && strings.TrimSpace(cfg.Token) != ""
 		if report.PersistedPlaintextToken {
 			report.Warnings = append(report.Warnings, "plaintext token persistence is enabled; prefer token_env")
@@ -194,6 +194,8 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	if !report.ConfigPermissionsSecure && strings.TrimSpace(report.ConfigPath) != "" {
 		report.Warnings = append(report.Warnings, "config file permissions are not secure")
 	}
+	report.Warnings = append(report.Warnings, s.configMigrationWarnings()...)
+	report.Warnings = append(report.Warnings, s.sessionMigrationWarnings()...)
 	report.Warnings = append(report.Warnings, s.legacyPluginSkillCopyWarnings()...)
 
 	if gw := s.KernelTurns(); gw != nil {
@@ -211,6 +213,98 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	}
 
 	return report, nil
+}
+
+func (s *Stack) sessionMigrationWarnings() []string {
+	if s == nil || s.Sessions == nil {
+		return nil
+	}
+	reporter, ok := s.Sessions.(interface {
+		MigrationReport() sessionfile.MigrationReport
+	})
+	if !ok {
+		return nil
+	}
+	report := reporter.MigrationReport()
+	if len(report.Dropped) == 0 {
+		return nil
+	}
+	warnings := []string{fmt.Sprintf(
+		"legacy Session document version %d skipped %d unsafe participant binding(s)",
+		report.FromVersion,
+		len(report.Dropped),
+	)}
+	for _, dropped := range report.Dropped {
+		warnings = append(warnings, fmt.Sprintf(
+			"legacy Session %s skipped %s: category=%s reason=%s",
+			firstNonEmpty(strings.TrimSpace(dropped.SessionRef.SessionID), "unknown"),
+			firstNonEmpty(strings.TrimSpace(dropped.Identity), "participant"),
+			firstNonEmpty(strings.TrimSpace(dropped.Category), "unknown"),
+			firstNonEmpty(strings.TrimSpace(dropped.Reason), "unknown"),
+		))
+	}
+	return warnings
+}
+
+func (s *Stack) configMigrationWarnings() []string {
+	if s == nil || s.store == nil {
+		return nil
+	}
+	report := s.store.MigrationReport()
+	if report.FromSchema == 0 && !report.Migrated && !report.SourcePreserved && !report.ExplicitReplacement &&
+		strings.TrimSpace(report.BackupPath) == "" && len(report.Dropped) == 0 {
+		return nil
+	}
+	warnings := make([]string, 0, len(report.Dropped)+2)
+	switch {
+	case report.Migrated:
+		warnings = append(warnings, fmt.Sprintf(
+			"legacy AppConfig schema %d migrated to the current schema; original backed up at %s",
+			report.FromSchema,
+			firstNonEmpty(strings.TrimSpace(report.BackupPath), "unknown path"),
+		))
+	case report.ExplicitReplacement:
+		warnings = append(warnings, fmt.Sprintf(
+			"legacy AppConfig schema %d was replaced by an explicit current configuration; original backed up at %s",
+			report.FromSchema,
+			firstNonEmpty(strings.TrimSpace(report.BackupPath), "unknown path"),
+		))
+	case report.SourcePreserved:
+		warnings = append(warnings, fmt.Sprintf(
+			"legacy AppConfig schema %d remains in place; no current configuration was committed",
+			report.FromSchema,
+		))
+	}
+	if len(report.Dropped) > 0 {
+		warnings = append(warnings, fmt.Sprintf("legacy AppConfig migration skipped %d unsafe record(s)", len(report.Dropped)))
+	}
+	for _, dropped := range report.Dropped {
+		warnings = append(warnings, fmt.Sprintf(
+			"legacy AppConfig skipped %s: category=%s reason=%s",
+			firstNonEmpty(strings.TrimSpace(dropped.Identity), "record"),
+			firstNonEmpty(strings.TrimSpace(dropped.Category), "unknown"),
+			firstNonEmpty(strings.TrimSpace(dropped.Reason), "unknown"),
+		))
+	}
+	return warnings
+}
+
+func (s *Stack) modelCredentialStatus(cfg ModelConfig) (bool, string) {
+	ref := strings.TrimSpace(cfg.CredentialRef)
+	if ref == "" || !strings.HasPrefix(strings.ToLower(ref), "apikey:") {
+		return modelConfigMissingAPIKey(cfg), modelConfigTokenSource(cfg)
+	}
+	if s == nil || s.apiKeyCredentials == nil {
+		return true, "credential:" + ref
+	}
+	source, err := s.apiKeyCredentials.LookupSource(context.Background(), ref)
+	if err != nil {
+		return true, "credential:" + ref
+	}
+	if source.Environment != "" {
+		return strings.TrimSpace(os.Getenv(source.Environment)) == "", "credential-env:" + source.Environment
+	}
+	return strings.TrimSpace(source.APIKey) == "", "credential:" + ref
 }
 
 func (s *Stack) legacyPluginSkillCopyWarnings() []string {

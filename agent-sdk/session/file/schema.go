@@ -9,7 +9,7 @@ import (
 
 const (
 	documentKind                      = "caelis.sdk.session"
-	documentVersion                   = 1
+	documentVersion                   = 2
 	indexVersion                      = 3
 	indexFilename                     = ".sessions.index.sqlite"
 	lockFilename                      = ".sessions.lock"
@@ -41,6 +41,8 @@ type Config struct {
 // Store is the file-backed implementation of session.Service.
 type Store struct {
 	mu                      contextMutex
+	legacyMigrationMu       sync.Mutex
+	legacyMigration         MigrationReport
 	rootDir                 string
 	sessionIDGenerator      func() string
 	eventIDGenerator        func() string

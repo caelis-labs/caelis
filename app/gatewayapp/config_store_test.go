@@ -1,6 +1,7 @@
 package gatewayapp
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,118 +10,65 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 )
 
-func TestAppConfigStoreSaveUsesSecurePermissionsAndRedactsTokenByDefault(t *testing.T) {
+func TestAppConfigStoreRejectsCredentialMaterial(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	store := newAppConfigStore(root)
-	err := store.Save(AppConfig{
-		Models: persistedModelConfig{
-			DefaultAlias: "minimax/minimax-m1",
-			Configs: []ModelConfig{{
-				Alias:    "minimax/minimax-m1",
-				Provider: "minimax",
-				API:      providers.APIAnthropicCompatible,
-				Model:    "MiniMax-M1",
-				Token:    "super-secret",
-				TokenEnv: "MINIMAX_API_KEY",
-			}},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-
-	doc, err := store.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if len(doc.Models.Configs) != 1 {
-		t.Fatalf("len(doc.Models.Configs) = %d, want 1", len(doc.Models.Configs))
-	}
-	if got := doc.Models.Configs[0].Token; got != "" {
-		t.Fatalf("persisted token = %q, want redacted empty token", got)
-	}
-	if len(doc.Models.Profiles) != 1 {
-		t.Fatalf("len(doc.Models.Profiles) = %d, want 1", len(doc.Models.Profiles))
-	}
-	if got := doc.Models.Profiles[0].TokenEnv; got != "MINIMAX_API_KEY" {
-		t.Fatalf("persisted profile token_env = %q, want MINIMAX_API_KEY", got)
-	}
-	raw := readConfigFileForTest(t, root)
-	for _, forbidden := range []string{"Token", "TokenEnv", "AuthType", "HeaderKey", "PersistToken", "MaxOutputTok"} {
-		if strings.Contains(raw, forbidden) {
-			t.Fatalf("config contains legacy/noisy key %q:\n%s", forbidden, raw)
-		}
-	}
-	if !strings.Contains(raw, `"token_env": "MINIMAX_API_KEY"`) {
-		t.Fatalf("config = %s, want compact token_env key", raw)
-	}
-
-	if runtime.GOOS == "windows" {
-		return
-	}
-	configInfo, err := os.Stat(filepath.Join(root, "config.json"))
-	if err != nil {
-		t.Fatalf("Stat(config.json) error = %v", err)
-	}
-	if got := configInfo.Mode().Perm(); got != 0o600 {
-		t.Fatalf("config.json mode = %#o, want %#o", got, os.FileMode(0o600))
-	}
-	dirInfo, err := os.Stat(root)
-	if err != nil {
-		t.Fatalf("Stat(root) error = %v", err)
-	}
-	if got := dirInfo.Mode().Perm() & 0o077; got != 0 {
-		t.Fatalf("root mode = %#o, want no group/world bits", dirInfo.Mode().Perm())
+	for name, configured := range map[string]ModelConfig{
+		"token":     {Provider: "deepseek", Model: "reasoner", Token: "secret"},
+		"token env": {Provider: "deepseek", Model: "reasoner", TokenEnv: "DEEPSEEK_API_KEY"},
+		"flag":      {Provider: "deepseek", Model: "reasoner", PersistToken: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			err := newAppConfigStore(root).Save(AppConfig{Models: persistedModelConfig{Configs: []ModelConfig{configured}}})
+			if err == nil || !strings.Contains(err.Error(), "credential store") {
+				t.Fatalf("Save() error = %v, want credential-store diagnostic", err)
+			}
+			if _, statErr := os.Stat(filepath.Join(root, "config.json")); !os.IsNotExist(statErr) {
+				t.Fatalf("config file after rejected write: %v", statErr)
+			}
+		})
 	}
 }
 
-func TestAppConfigStoreCanPersistTokenOnlyWhenExplicitlyEnabled(t *testing.T) {
-	t.Parallel()
-
+func TestNewLocalStackStoresStartupAPIKeyBehindOpaqueReference(t *testing.T) {
 	root := t.TempDir()
-	store := newAppConfigStore(root)
-	err := store.Save(AppConfig{
-		Models: persistedModelConfig{
-			DefaultAlias: "deepseek/reasoner",
-			Configs: []ModelConfig{{
-				Alias:        "deepseek/reasoner",
-				Provider:     "deepseek",
-				API:          providers.APIDeepSeek,
-				Model:        "deepseek-v4-pro",
-				Token:        "persist-me",
-				PersistToken: true,
-			}},
-		},
+	secret := "startup-secret"
+	stack, err := NewLocalStack(Config{
+		StoreDir: root, WorkspaceKey: "credential-test", WorkspaceCWD: t.TempDir(),
+		Model: ModelConfig{Provider: "deepseek", API: providers.APIDeepSeek, Model: "reasoner", Token: secret},
 	})
 	if err != nil {
-		t.Fatalf("Save() error = %v", err)
+		t.Fatal(err)
 	}
-
-	doc, err := store.Load()
+	doc, err := stack.store.Load()
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatal(err)
 	}
-	if len(doc.Models.Profiles) != 1 || doc.Models.Profiles[0].Token != "persist-me" {
-		t.Fatalf("persisted profiles = %#v, want explicit token persistence", doc.Models.Profiles)
+	if len(doc.Models.ProviderEndpoints) != 1 || !strings.HasPrefix(doc.Models.ProviderEndpoints[0].CredentialRef, "apikey:") {
+		t.Fatalf("persisted provider endpoints = %#v, want opaque credential reference", doc.Models.ProviderEndpoints)
 	}
 	raw := readConfigFileForTest(t, root)
-	if !strings.Contains(raw, `"token": "persist-me"`) {
-		t.Fatalf("config = %s, want compact persisted token field", raw)
+	if strings.Contains(raw, secret) || strings.Contains(raw, `"token"`) || strings.Contains(raw, `"token_env"`) {
+		t.Fatalf("config persisted credential material:\n%s", raw)
 	}
-	for _, forbidden := range []string{"Alias", "API", "AuthType", "HeaderKey", "TokenEnv", "PersistToken", "persist_token", "DefaultReasoningEffort", "Timeout", "timeout"} {
-		if strings.Contains(raw, forbidden) {
-			t.Fatalf("config contains legacy/derived key %q:\n%s", forbidden, raw)
+	if runtime.GOOS != "windows" {
+		info, statErr := os.Stat(filepath.Join(root, "config.json"))
+		if statErr != nil {
+			t.Fatal(statErr)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("config permissions = %#o, want 0600", info.Mode().Perm())
 		}
 	}
 }
 
-func TestAppConfigStoreDoesNotPersistEnvHydratedToken(t *testing.T) {
+func TestLegacyMigrationMovesEnvironmentCredentialBehindOpaqueReference(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CAELIS_CONFIG_STORE_TOKEN", "env-secret")
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatalf("MkdirAll(root) error = %v", err)
 	}
@@ -133,7 +81,7 @@ func TestAppConfigStoreDoesNotPersistEnvHydratedToken(t *testing.T) {
         "provider": "deepseek",
         "api": "deepseek",
         "model": "deepseek-reasoner",
-        "token_env": "CAELIS_CONFIG_STORE_TOKEN"
+        "token_env": "DEEPSEEK_API_KEY"
       }
     ]
   }
@@ -144,27 +92,22 @@ func TestAppConfigStoreDoesNotPersistEnvHydratedToken(t *testing.T) {
 	store := newAppConfigStore(root)
 	doc, err := store.Load()
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatal(err)
 	}
-	if len(doc.Models.Configs) != 1 {
-		t.Fatalf("len(configs) = %d, want 1", len(doc.Models.Configs))
-	}
-	cfg := doc.Models.Configs[0]
-	if cfg.Token != "env-secret" {
-		t.Fatalf("loaded token = %q, want env token for runtime use", cfg.Token)
-	}
-	if cfg.PersistToken {
-		t.Fatal("loaded env token set PersistToken=true, want false")
-	}
-	if err := store.Save(doc); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if len(doc.Models.ProviderEndpoints) != 1 || !strings.HasPrefix(doc.Models.ProviderEndpoints[0].CredentialRef, "apikey:") {
+		t.Fatalf("migrated provider endpoints = %#v", doc.Models.ProviderEndpoints)
 	}
 	persisted := readConfigFileForTest(t, root)
-	if strings.Contains(persisted, "env-secret") || strings.Contains(persisted, `"token"`) {
-		t.Fatalf("config persisted env token:\n%s", persisted)
+	if strings.Contains(persisted, "DEEPSEEK_API_KEY") || !strings.Contains(persisted, `"schema_version": 2`) {
+		t.Fatalf("migrated AppConfig = %s", persisted)
 	}
-	if !strings.Contains(persisted, `"token_env": "CAELIS_CONFIG_STORE_TOKEN"`) {
-		t.Fatalf("config = %s, want token_env retained", persisted)
+	credentials, err := credentialstore.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := credentials.LookupSource(context.Background(), doc.Models.ProviderEndpoints[0].CredentialRef)
+	if err != nil || source.Environment != "DEEPSEEK_API_KEY" {
+		t.Fatalf("credential source = %#v, %v", source, err)
 	}
 }
 
@@ -308,8 +251,8 @@ func TestAppConfigStoreIgnoresIntermediateConnectionsConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if len(doc.Models.Profiles) != 0 {
-		t.Fatalf("profiles loaded from intermediate connections = %#v, want none", doc.Models.Profiles)
+	if len(doc.Models.ProviderEndpoints) != 0 {
+		t.Fatalf("provider endpoints loaded from intermediate connections = %#v, want none", doc.Models.ProviderEndpoints)
 	}
 	if err := store.Save(doc); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -320,7 +263,7 @@ func TestAppConfigStoreIgnoresIntermediateConnectionsConfig(t *testing.T) {
 	}
 }
 
-func TestAppConfigStoreRejectsLegacyUppercaseModelConfig(t *testing.T) {
+func TestAppConfigStoreMigratesRecognizableLegacyUppercaseModelConfig(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -347,16 +290,40 @@ func TestAppConfigStoreRejectsLegacyUppercaseModelConfig(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "config.json"), []byte(raw), 0o600); err != nil {
 		t.Fatalf("WriteFile(config.json) error = %v", err)
 	}
-	_, err := LoadAppConfig(root)
-	if err == nil {
-		t.Fatal("LoadAppConfig() error = nil, want unsupported legacy format")
+	doc, err := LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "unsupported legacy uppercase model config") {
-		t.Fatalf("LoadAppConfig() error = %v, want unsupported legacy uppercase model config", err)
+	if doc.SchemaVersion != configstore.SchemaVersionV2 || len(doc.Models.Configs) != 1 || len(doc.Models.ProviderEndpoints) != 1 || len(doc.ModelProfiles.Profiles) != 1 {
+		t.Fatalf("LoadAppConfig() = %#v, want one migrated provider profile", doc)
+	}
+	if got := readConfigFileForTest(t, root); strings.Contains(got, "legacy-token") || !strings.Contains(got, `"schema_version": 2`) {
+		t.Fatalf("migrated AppConfig = %s", got)
+	}
+	backup, err := os.ReadFile(filepath.Join(root, "config.json.v1.bak"))
+	if err != nil || string(backup) != raw {
+		t.Fatalf("legacy backup = %q, %v; want original bytes", backup, err)
+	}
+	if runtime.GOOS != "windows" {
+		info, statErr := os.Stat(filepath.Join(root, "config.json.v1.bak"))
+		if statErr != nil {
+			t.Fatal(statErr)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("legacy backup permissions = %#o, want 0600", info.Mode().Perm())
+		}
+	}
+	credentials, err := credentialstore.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := credentials.LookupSource(context.Background(), doc.Models.ProviderEndpoints[0].CredentialRef)
+	if err != nil || source.APIKey != "legacy-token" {
+		t.Fatalf("credential source = %#v, %v", source, err)
 	}
 }
 
-func TestAppConfigStoreRejectsLegacyUppercaseModelsKey(t *testing.T) {
+func TestAppConfigStoreIgnoresUnrecognizedLegacyUppercaseModelsKey(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -371,12 +338,23 @@ func TestAppConfigStoreRejectsLegacyUppercaseModelsKey(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "config.json"), []byte(raw), 0o600); err != nil {
 		t.Fatalf("WriteFile(config.json) error = %v", err)
 	}
-	_, err := LoadAppConfig(root)
-	if err == nil {
-		t.Fatal("LoadAppConfig() error = nil, want unsupported legacy format")
+	doc, err := LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "unsupported legacy uppercase model config") {
-		t.Fatalf("LoadAppConfig() error = %v, want unsupported legacy uppercase model config", err)
+	if doc.SchemaVersion != configstore.SchemaVersionV2 || len(doc.Models.Configs) != 0 {
+		t.Fatalf("LoadAppConfig() = %#v, want empty current configuration", doc)
+	}
+	if got := readConfigFileForTest(t, root); got != raw {
+		t.Fatalf("legacy file was rewritten:\n%s", got)
+	}
+	replacement := newAppConfigStore(root)
+	if err := replacement.Save(AppConfig{}); err != nil {
+		t.Fatalf("Save(current replacement) error = %v", err)
+	}
+	backup, err := os.ReadFile(filepath.Join(root, "config.json.v1.bak"))
+	if err != nil || string(backup) != raw {
+		t.Fatalf("explicit replacement backup = %q, %v; want original bytes", backup, err)
 	}
 }
 
