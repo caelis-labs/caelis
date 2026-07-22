@@ -12,8 +12,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
 func TestFileOperationStoreConcurrentBeginAcrossInstances(t *testing.T) {
@@ -101,10 +99,10 @@ func TestOperationStoreCompleteIsIdempotentAndNeverOverwrites(t *testing.T) {
 			if _, created, err := test.store.Begin(context.Background(), intent); err != nil || !created {
 				t.Fatalf("Begin() = created %v, error %v", created, err)
 			}
-			want := controlport.CommandResult{
+			want := CommandResult{
 				OperationID: intent.OperationID,
 				SessionID:   intent.SessionID,
-				Outcome:     controlport.OutcomeCommitted,
+				Outcome:     OutcomeCommitted,
 				Revision:    7,
 			}
 			if _, err := test.store.Complete(context.Background(), intent, want); err != nil {
@@ -114,7 +112,7 @@ func TestOperationStoreCompleteIsIdempotentAndNeverOverwrites(t *testing.T) {
 				t.Fatalf("Complete(idempotent) = %#v, %v", record, err)
 			}
 			changed := want
-			changed.Outcome = controlport.OutcomeRejected
+			changed.Outcome = OutcomeRejected
 			changed.Detail = "late writer"
 			record, err := test.store.Complete(context.Background(), intent, changed)
 			if !errors.Is(err, ErrOperationConflict) || record.Result == nil || *record.Result != want {
@@ -134,12 +132,12 @@ func TestFileOperationStoreConcurrentCompleteChoosesOneImmutableResult(t *testin
 	if _, created, err := NewFileOperationStore(root).Begin(context.Background(), intent); err != nil || !created {
 		t.Fatalf("Begin() = created %v, error %v", created, err)
 	}
-	results := []controlport.CommandResult{
-		{OperationID: intent.OperationID, SessionID: intent.SessionID, Outcome: controlport.OutcomeCommitted, Revision: 7},
-		{OperationID: intent.OperationID, SessionID: intent.SessionID, Outcome: controlport.OutcomeRejected, Detail: "competing result"},
+	results := []CommandResult{
+		{OperationID: intent.OperationID, SessionID: intent.SessionID, Outcome: OutcomeCommitted, Revision: 7},
+		{OperationID: intent.OperationID, SessionID: intent.SessionID, Outcome: OutcomeRejected, Detail: "competing result"},
 	}
 	type completion struct {
-		requested controlport.CommandResult
+		requested CommandResult
 		record    OperationRecord
 		err       error
 	}
@@ -154,7 +152,7 @@ func TestFileOperationStoreConcurrentCompleteChoosesOneImmutableResult(t *testin
 		}()
 	}
 	close(start)
-	var winner *controlport.CommandResult
+	var winner *CommandResult
 	conflicts := 0
 	for range results {
 		result := <-completed
@@ -183,13 +181,13 @@ func TestFileOperationStoreConcurrentCompleteChoosesOneImmutableResult(t *testin
 func TestCommandServiceConcurrentDuplicateDoesNotStealCompletion(t *testing.T) {
 	backend := &blockingOperationBackend{started: make(chan struct{}), release: make(chan struct{})}
 	service := newTestCommandService(t, allowAuthorizer{}, NewMemoryOperationStore(), backend)
-	principal := controlport.Principal{ID: "owner"}
-	req := controlport.PromptRequest{
-		WriteBase: controlport.WriteBase{OperationID: "in-flight", SessionID: "session-1"},
+	principal := Principal{ID: "owner"}
+	req := PromptRequest{
+		WriteBase: WriteBase{OperationID: "in-flight", SessionID: "session-1"},
 		Input:     "hello",
 	}
 	type response struct {
-		result controlport.CommandResult
+		result CommandResult
 		err    error
 	}
 	first := make(chan response, 1)
@@ -204,12 +202,12 @@ func TestCommandServiceConcurrentDuplicateDoesNotStealCompletion(t *testing.T) {
 	}
 
 	inFlight, err := service.Prompt(context.Background(), principal, req)
-	if err != nil || inFlight.Outcome != controlport.OutcomeUnknown || backend.calls.Load() != 1 {
+	if err != nil || inFlight.Outcome != OutcomeUnknown || backend.calls.Load() != 1 {
 		t.Fatalf("in-flight retry = %#v, %v, calls %d", inFlight, err, backend.calls.Load())
 	}
 	close(backend.release)
 	completed := <-first
-	if completed.err != nil || completed.result.Outcome != controlport.OutcomeCommitted {
+	if completed.err != nil || completed.result.Outcome != OutcomeCommitted {
 		t.Fatalf("creator completion = %#v, %v", completed.result, completed.err)
 	}
 	replayed, err := service.Prompt(context.Background(), principal, req)
@@ -333,7 +331,7 @@ func TestFileOperationStoreCompleteAndSweepAcrossProcesses(t *testing.T) {
 		}
 	}
 
-	want := operationStoreTestResult(intent, controlport.OutcomeCommitted)
+	want := operationStoreTestResult(intent, OutcomeCommitted)
 	reloaded, created, err := NewFileOperationStore(root).Begin(context.Background(), intent)
 	if err != nil || created || reloaded.Result == nil || *reloaded.Result != want {
 		t.Fatalf("reloaded = %#v, created %v, error %v; want %#v", reloaded, created, err, want)
@@ -402,7 +400,7 @@ func TestFileOperationStoreProcessHelper(t *testing.T) {
 		)
 	case "complete":
 		intent := operationStoreTestIntent("cross-process-complete-sweep", "digest-a")
-		_, err = store.Complete(context.Background(), intent, operationStoreTestResult(intent, controlport.OutcomeCommitted))
+		_, err = store.Complete(context.Background(), intent, operationStoreTestResult(intent, OutcomeCommitted))
 	case "sweep":
 		_, err = store.Sweep(context.Background())
 	default:
@@ -430,7 +428,7 @@ func operationStoreTestIntent(operationID, digest string) OperationIntent {
 	return OperationIntent{
 		PrincipalID: "owner",
 		OperationID: operationID,
-		Action:      controlport.ActionPrompt,
+		Action:      ActionPrompt,
 		SessionID:   "session-1",
 		Target:      "session-1",
 		Digest:      digest,
@@ -469,16 +467,16 @@ type blockingOperationBackend struct {
 
 func (b *blockingOperationBackend) ExecuteControlCommand(
 	ctx context.Context,
-	_ controlport.Principal,
-	_ controlport.Action,
+	_ Principal,
+	_ Action,
 	_ any,
-) (controlport.CommandResult, error) {
+) (CommandResult, error) {
 	b.calls.Add(1)
 	b.startOnce.Do(func() { close(b.started) })
 	select {
 	case <-ctx.Done():
-		return controlport.CommandResult{}, ctx.Err()
+		return CommandResult{}, ctx.Err()
 	case <-b.release:
-		return controlport.CommandResult{Outcome: controlport.OutcomeCommitted, Revision: 9}, nil
+		return CommandResult{Outcome: OutcomeCommitted, Revision: 9}, nil
 	}
 }

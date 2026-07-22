@@ -9,9 +9,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 )
 
 type oneSessionPerPageService struct {
@@ -196,7 +196,7 @@ func TestDisconnectACPIgnoresClosedHistoricalControllerBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := internalcontrolclient.CloseSession(ctx, stack.Sessions, bound, "test completed"); err != nil {
+	if _, err := controlclient.CloseSession(ctx, stack.Sessions, bound, "test completed"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := stack.DisconnectACP(ctx, "codex"); err != nil {

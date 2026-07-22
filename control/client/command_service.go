@@ -8,13 +8,12 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
 type CommandServiceConfig struct {
 	Authorizer Authorizer
 	Operations OperationStore
-	Backend    controlport.CommandBackend
+	Backend    CommandBackend
 }
 
 type CommandService struct{ config CommandServiceConfig }
@@ -28,59 +27,59 @@ func NewCommandService(config CommandServiceConfig) (*CommandService, error) {
 	return &CommandService{config: config}, nil
 }
 
-func (s *CommandService) CreateSession(ctx context.Context, principal controlport.Principal, req controlport.CreateSessionRequest) (controlport.CommandResult, error) {
-	return s.execute(ctx, principal, controlport.ActionSessionCreate, req.WriteBase, createSessionTarget(req), req)
+func (s *CommandService) CreateSession(ctx context.Context, principal Principal, req CreateSessionRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionSessionCreate, req.WriteBase, createSessionTarget(req), req)
 }
-func (s *CommandService) CloseSession(ctx context.Context, principal controlport.Principal, req controlport.CloseSessionRequest) (controlport.CommandResult, error) {
-	return s.execute(ctx, principal, controlport.ActionSessionClose, req.WriteBase, req.SessionID, req)
+func (s *CommandService) CloseSession(ctx context.Context, principal Principal, req CloseSessionRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionSessionClose, req.WriteBase, req.SessionID, req)
 }
-func (s *CommandService) Prompt(ctx context.Context, principal controlport.Principal, req controlport.PromptRequest) (controlport.CommandResult, error) {
-	return s.execute(ctx, principal, controlport.ActionPrompt, req.WriteBase, req.SessionID, req)
+func (s *CommandService) Prompt(ctx context.Context, principal Principal, req PromptRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionPrompt, req.WriteBase, req.SessionID, req)
 }
-func (s *CommandService) Steer(ctx context.Context, principal controlport.Principal, req controlport.SteerRequest) (controlport.CommandResult, error) {
-	return s.execute(ctx, principal, controlport.ActionSteer, req.WriteBase, turnTargetKey(req.Target), req)
+func (s *CommandService) Steer(ctx context.Context, principal Principal, req SteerRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionSteer, req.WriteBase, turnTargetKey(req.Target), req)
 }
-func (s *CommandService) Cancel(ctx context.Context, principal controlport.Principal, req controlport.CancelRequest) (controlport.CommandResult, error) {
-	return s.execute(ctx, principal, controlport.ActionCancel, req.WriteBase, turnTargetKey(req.Target), req)
+func (s *CommandService) Cancel(ctx context.Context, principal Principal, req CancelRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionCancel, req.WriteBase, turnTargetKey(req.Target), req)
 }
-func (s *CommandService) ResolveApproval(ctx context.Context, principal controlport.Principal, req controlport.ResolveApprovalRequest) (controlport.CommandResult, error) {
-	return s.execute(ctx, principal, controlport.ActionApprovalResolve, req.WriteBase, req.ApprovalRequestID+":"+turnTargetKey(req.Target), req)
+func (s *CommandService) ResolveApproval(ctx context.Context, principal Principal, req ResolveApprovalRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionApprovalResolve, req.WriteBase, req.ApprovalRequestID+":"+turnTargetKey(req.Target), req)
 }
-func (s *CommandService) AttachParticipant(ctx context.Context, principal controlport.Principal, req controlport.AttachParticipantRequest) (controlport.CommandResult, error) {
+func (s *CommandService) AttachParticipant(ctx context.Context, principal Principal, req AttachParticipantRequest) (CommandResult, error) {
 	target := strings.TrimSpace(req.ProfileID) + ":" + strings.TrimSpace(req.Effort)
-	return s.execute(ctx, principal, controlport.ActionParticipantAttach, req.WriteBase, target, req)
+	return s.execute(ctx, principal, ActionParticipantAttach, req.WriteBase, target, req)
 }
-func (s *CommandService) PromptParticipant(ctx context.Context, principal controlport.Principal, req controlport.PromptParticipantRequest) (controlport.CommandResult, error) {
-	return s.execute(ctx, principal, controlport.ActionParticipantPrompt, req.WriteBase, req.ParticipantID, req)
+func (s *CommandService) PromptParticipant(ctx context.Context, principal Principal, req PromptParticipantRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionParticipantPrompt, req.WriteBase, req.ParticipantID, req)
 }
-func (s *CommandService) CancelParticipant(ctx context.Context, principal controlport.Principal, req controlport.CancelParticipantRequest) (controlport.CommandResult, error) {
-	return s.execute(ctx, principal, controlport.ActionParticipantCancel, req.WriteBase, req.ParticipantID+":"+turnTargetKey(req.Target), req)
+func (s *CommandService) CancelParticipant(ctx context.Context, principal Principal, req CancelParticipantRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionParticipantCancel, req.WriteBase, req.ParticipantID+":"+turnTargetKey(req.Target), req)
 }
-func (s *CommandService) DetachParticipant(ctx context.Context, principal controlport.Principal, req controlport.DetachParticipantRequest) (controlport.CommandResult, error) {
-	return s.execute(ctx, principal, controlport.ActionParticipantDetach, req.WriteBase, req.ParticipantID, req)
+func (s *CommandService) DetachParticipant(ctx context.Context, principal Principal, req DetachParticipantRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionParticipantDetach, req.WriteBase, req.ParticipantID, req)
 }
-func (s *CommandService) Handoff(ctx context.Context, principal controlport.Principal, req controlport.HandoffRequest) (controlport.CommandResult, error) {
-	return s.execute(ctx, principal, controlport.ActionControllerHandoff, req.WriteBase, string(req.Kind)+":"+req.Agent, req)
+func (s *CommandService) Handoff(ctx context.Context, principal Principal, req HandoffRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionControllerHandoff, req.WriteBase, string(req.Kind)+":"+req.Agent, req)
 }
 
-func (s *CommandService) execute(ctx context.Context, principal controlport.Principal, action controlport.Action, base controlport.WriteBase, target string, request any) (controlport.CommandResult, error) {
+func (s *CommandService) execute(ctx context.Context, principal Principal, action Action, base WriteBase, target string, request any) (CommandResult, error) {
 	operationID := strings.TrimSpace(base.OperationID)
 	sessionID := strings.TrimSpace(base.SessionID)
 	if operationID == "" {
 		err := errorcode.New(errorcode.InvalidArgument, "controlclient: operation_id is required")
-		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, publicCommandDetail(err, controlport.OutcomeRejected)), err
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(err, OutcomeRejected)), err
 	}
 	if err := validateCommandRequest(action, request); err != nil {
 		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
-		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, publicCommandDetail(coded, controlport.OutcomeRejected)), coded
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected)), coded
 	}
 	if err := s.config.Authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
-		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, publicCommandDetail(err, controlport.OutcomeRejected)), err
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(err, OutcomeRejected)), err
 	}
 	digest, err := requestDigest(request)
 	if err != nil {
 		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
-		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, publicCommandDetail(coded, controlport.OutcomeRejected)), coded
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected)), coded
 	}
 	intent := OperationIntent{
 		PrincipalID: strings.TrimSpace(principal.ID), OperationID: operationID, Action: action,
@@ -88,11 +87,11 @@ func (s *CommandService) execute(ctx context.Context, principal controlport.Prin
 	}
 	record, created, err := s.config.Operations.Begin(ctx, intent)
 	if errors.Is(err, ErrOperationConflict) {
-		return commandFailure(operationID, sessionID, controlport.OutcomeConflicted, publicCommandDetail(err, controlport.OutcomeConflicted)), err
+		return commandFailure(operationID, sessionID, OutcomeConflicted, publicCommandDetail(err, OutcomeConflicted)), err
 	}
 	if err != nil {
 		coded := internalCommandError("controlclient: begin operation", err)
-		return commandFailure(operationID, sessionID, controlport.OutcomeRejected, publicCommandDetail(coded, controlport.OutcomeRejected)), coded
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected)), coded
 	}
 	if !created {
 		if record.Result != nil {
@@ -101,7 +100,7 @@ func (s *CommandService) execute(ctx context.Context, principal controlport.Prin
 		// An intent without a result may still be executing in this or another
 		// process. Report the conservative outcome without claiming completion;
 		// only the creator may persist the eventual result.
-		unknown := commandFailure(operationID, sessionID, controlport.OutcomeUnknown, "operation intent exists without a provable result")
+		unknown := commandFailure(operationID, sessionID, OutcomeUnknown, "operation intent exists without a provable result")
 		return unknown, nil
 	}
 
@@ -113,13 +112,13 @@ func (s *CommandService) execute(ctx context.Context, principal controlport.Prin
 	if dispatchErr != nil {
 		result = resultForBackendError(result, dispatchErr)
 	} else if !result.Outcome.Valid() {
-		result.Outcome = controlport.OutcomeCommitted
+		result.Outcome = OutcomeCommitted
 	}
 	completionCtx, cancelCompletion := operationCompletionContext(ctx)
 	defer cancelCompletion()
 	if _, completeErr := s.config.Operations.Complete(completionCtx, intent, result); completeErr != nil {
 		coded := internalCommandError("controlclient: complete operation", completeErr)
-		return commandFailure(operationID, result.SessionID, controlport.OutcomeUnknown, publicCommandDetail(coded, controlport.OutcomeUnknown)), coded
+		return commandFailure(operationID, result.SessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown)), coded
 	}
 	return result, dispatchErr
 }
@@ -135,15 +134,15 @@ func operationCompletionContext(ctx context.Context) (context.Context, context.C
 	return context.WithTimeout(context.WithoutCancel(ctx), operationCompletionTimeout)
 }
 
-func resultForBackendError(result controlport.CommandResult, err error) controlport.CommandResult {
-	var outcomeErr *controlport.OutcomeError
+func resultForBackendError(result CommandResult, err error) CommandResult {
+	var outcomeErr *OutcomeError
 	if errors.As(err, &outcomeErr) && outcomeErr.Outcome.Valid() {
 		result.Outcome = outcomeErr.Outcome
 	} else {
 		// An unclassified backend error does not prove that the effect was
 		// rejected before commit. Preserve the conservative outcome so retention
 		// cannot later erase the only guard against repeating an external effect.
-		result.Outcome = controlport.OutcomeUnknown
+		result.Outcome = OutcomeUnknown
 	}
 	result.Detail = publicCommandDetail(err, result.Outcome)
 	return result
@@ -156,7 +155,7 @@ func internalCommandError(message string, err error) error {
 	return errorcode.Wrap(errorcode.Internal, message, err)
 }
 
-func publicCommandDetail(err error, outcome controlport.Outcome) string {
+func publicCommandDetail(err error, outcome Outcome) string {
 	switch errorcode.CodeOf(err) {
 	case errorcode.InvalidArgument:
 		return strings.TrimSpace(err.Error())
@@ -170,79 +169,79 @@ func publicCommandDetail(err error, outcome controlport.Outcome) string {
 		return "effect outcome cannot be proven"
 	}
 	switch outcome {
-	case controlport.OutcomeUnknown:
+	case OutcomeUnknown:
 		return "effect outcome cannot be proven"
-	case controlport.OutcomeConflicted:
+	case OutcomeConflicted:
 		return "conflict"
-	case controlport.OutcomeRejected:
+	case OutcomeRejected:
 		return "command rejected"
 	default:
 		return ""
 	}
 }
 
-func commandFailure(operationID, sessionID string, outcome controlport.Outcome, detail string) controlport.CommandResult {
-	return controlport.CommandResult{OperationID: operationID, SessionID: sessionID, Outcome: outcome, Detail: strings.TrimSpace(detail)}
+func commandFailure(operationID, sessionID string, outcome Outcome, detail string) CommandResult {
+	return CommandResult{OperationID: operationID, SessionID: sessionID, Outcome: outcome, Detail: strings.TrimSpace(detail)}
 }
 
-func validateCommandRequest(action controlport.Action, request any) error {
+func validateCommandRequest(action Action, request any) error {
 	switch typed := request.(type) {
-	case controlport.CreateSessionRequest:
+	case CreateSessionRequest:
 		return nil
-	case controlport.CloseSessionRequest:
+	case CloseSessionRequest:
 		return requireSession(typed.SessionID)
-	case controlport.PromptRequest:
+	case PromptRequest:
 		if err := requireSession(typed.SessionID); err != nil {
 			return err
 		}
 		if strings.TrimSpace(typed.Input) == "" {
 			return errors.New("controlclient: prompt input is required")
 		}
-	case controlport.SteerRequest:
+	case SteerRequest:
 		if err := requireSessionAndTurn(typed.SessionID, typed.Target); err != nil {
 			return err
 		}
 		if strings.TrimSpace(typed.Input) == "" {
 			return errors.New("controlclient: steer input is required")
 		}
-	case controlport.CancelRequest:
+	case CancelRequest:
 		return requireSessionAndTurn(typed.SessionID, typed.Target)
-	case controlport.ResolveApprovalRequest:
+	case ResolveApprovalRequest:
 		if err := requireSessionAndTurn(typed.SessionID, typed.Target); err != nil {
 			return err
 		}
 		if strings.TrimSpace(typed.ApprovalRequestID) == "" {
 			return errors.New("controlclient: approval_request_id is required")
 		}
-	case controlport.AttachParticipantRequest:
+	case AttachParticipantRequest:
 		if err := requireSession(typed.SessionID); err != nil {
 			return err
 		}
 		if strings.TrimSpace(typed.ProfileID) == "" || strings.TrimSpace(typed.Effort) == "" {
 			return errors.New("controlclient: participant profile_id and effort are required")
 		}
-	case controlport.PromptParticipantRequest:
+	case PromptParticipantRequest:
 		if err := requireSession(typed.SessionID); err != nil {
 			return err
 		}
 		if strings.TrimSpace(typed.ParticipantID) == "" || strings.TrimSpace(typed.Input) == "" {
 			return errors.New("controlclient: participant id and input are required")
 		}
-	case controlport.CancelParticipantRequest:
+	case CancelParticipantRequest:
 		if err := requireSessionAndTurn(typed.SessionID, typed.Target); err != nil {
 			return err
 		}
 		if strings.TrimSpace(typed.ParticipantID) == "" {
 			return errors.New("controlclient: participant id is required")
 		}
-	case controlport.DetachParticipantRequest:
+	case DetachParticipantRequest:
 		if err := requireSession(typed.SessionID); err != nil {
 			return err
 		}
 		if strings.TrimSpace(typed.ParticipantID) == "" {
 			return errors.New("controlclient: participant id is required")
 		}
-	case controlport.HandoffRequest:
+	case HandoffRequest:
 		if err := requireSession(typed.SessionID); err != nil {
 			return err
 		}
@@ -262,7 +261,7 @@ func requireSession(sessionID string) error {
 	return nil
 }
 
-func requireSessionAndTurn(sessionID string, target controlport.TurnTarget) error {
+func requireSessionAndTurn(sessionID string, target TurnTarget) error {
 	if err := requireSession(sessionID); err != nil {
 		return err
 	}
@@ -272,10 +271,10 @@ func requireSessionAndTurn(sessionID string, target controlport.TurnTarget) erro
 	return nil
 }
 
-func turnTargetKey(target controlport.TurnTarget) string {
+func turnTargetKey(target TurnTarget) string {
 	return strings.TrimSpace(target.HandleID) + ":" + strings.TrimSpace(target.RunID) + ":" + strings.TrimSpace(target.TurnID)
 }
 
-func createSessionTarget(req controlport.CreateSessionRequest) string {
+func createSessionTarget(req CreateSessionRequest) string {
 	return strings.TrimSpace(req.PreferredSessionID) + ":" + strings.TrimSpace(req.WorkspaceKey)
 }

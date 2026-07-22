@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlclientapi "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -20,13 +21,14 @@ type EventBatch struct {
 	BoundaryCursor string                 `json:"boundary_cursor,omitempty"`
 }
 
-// Service is the complete transport-neutral client boundary consumed by
-// presentation and network adapters.
+// Service composes the Control-owned command boundary with the transitional
+// Session state and feed contracts consumed by presentation and network
+// adapters.
 type Service interface {
-	CommandClient
-	ListSessions(context.Context, Principal, ListSessionsRequest) (session.SessionList, error)
-	InspectSession(context.Context, Principal, StateRequest) (SessionState, error)
-	Reconnect(context.Context, Principal, ReconnectRequest) (ReconnectResult, error)
-	Events(context.Context, Principal, SubscribeRequest) (EventBatch, error)
-	Subscribe(context.Context, Principal, SubscribeRequest) (SubscribeResult, error)
+	controlclientapi.CommandClient
+	ListSessions(context.Context, controlclientapi.Principal, ListSessionsRequest) (session.SessionList, error)
+	InspectSession(context.Context, controlclientapi.Principal, StateRequest) (SessionState, error)
+	Reconnect(context.Context, controlclientapi.Principal, ReconnectRequest) (ReconnectResult, error)
+	Events(context.Context, controlclientapi.Principal, SubscribeRequest) (EventBatch, error)
+	Subscribe(context.Context, controlclientapi.Principal, SubscribeRequest) (SubscribeResult, error)
 }

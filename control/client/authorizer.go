@@ -7,13 +7,12 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
 var ErrUnauthorized = errorcode.New(errorcode.PermissionDenied, "controlclient: permission denied")
 
 type Authorizer interface {
-	Authorize(context.Context, controlport.Principal, controlport.Action, string) error
+	Authorize(context.Context, Principal, Action, string) error
 }
 
 // SessionAuthorizer enforces owner-by-principal access to an explicit Session
@@ -24,13 +23,13 @@ type SessionAuthorizer struct {
 	}
 }
 
-func (a SessionAuthorizer) Authorize(ctx context.Context, principal controlport.Principal, action controlport.Action, sessionID string) error {
+func (a SessionAuthorizer) Authorize(ctx context.Context, principal Principal, action Action, sessionID string) error {
 	principal.ID = strings.TrimSpace(principal.ID)
 	if principal.ID == "" {
 		return ErrUnauthorized
 	}
 	switch action {
-	case controlport.ActionSessionCreate, controlport.ActionSessionList:
+	case ActionSessionCreate, ActionSessionList:
 		return nil
 	}
 	if a.Sessions == nil || strings.TrimSpace(sessionID) == "" {
@@ -46,10 +45,10 @@ func (a SessionAuthorizer) Authorize(ctx context.Context, principal controlport.
 		}
 		return errorcode.Wrap(errorcode.Internal, "controlclient: load session for authorization", err)
 	}
-	if !hasRole(principal.Roles, "admin") && strings.TrimSpace(active.UserID) != principal.ID {
+	if !principal.HasRole("admin") && strings.TrimSpace(active.UserID) != principal.ID {
 		return ErrUnauthorized
 	}
-	if action != controlport.ActionSessionInspect && action != controlport.ActionSessionClose {
+	if action != ActionSessionInspect && action != ActionSessionClose {
 		stateReader, ok := a.Sessions.(session.StateReader)
 		if !ok {
 			return errorcode.New(errorcode.Internal, "controlclient: session lifecycle authorization is unavailable")
@@ -63,13 +62,4 @@ func (a SessionAuthorizer) Authorize(ctx context.Context, principal controlport.
 		}
 	}
 	return nil
-}
-
-func hasRole(roles []string, want string) bool {
-	for _, role := range roles {
-		if strings.EqualFold(strings.TrimSpace(role), want) {
-			return true
-		}
-	}
-	return false
 }

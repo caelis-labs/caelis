@@ -22,6 +22,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
@@ -63,7 +64,7 @@ type ModelChoice = modelconfig.Choice
 
 // DefaultControlOperationRetention is the production replay guarantee for
 // proven terminal Control operations.
-const DefaultControlOperationRetention = internalcontrolclient.DefaultOperationTerminalRetention
+const DefaultControlOperationRetention = controlclient.DefaultOperationTerminalRetention
 
 type Stack struct {
 	Sessions                  session.Service
@@ -92,10 +93,10 @@ type Stack struct {
 	taskStore                task.Store
 	controlFeeds             controlclientport.FeedRegistry
 	controlState             controlclientport.StateReader
-	controlCommands          controlclientport.CommandClient
+	controlCommands          controlclient.CommandClient
 	controlClient            controlclientport.Service
 	taskStreams              acptaskstream.Service
-	operations               *internalcontrolclient.FileOperationStore
+	operations               *controlclient.FileOperationStore
 	approvalRecovery         *internalcontrolclient.ApprovalRecoveryGate
 	gateway                  *kernelimpl.Gateway
 	mcpMgr                   *mcp.Manager
@@ -173,7 +174,7 @@ func (s *Stack) ControlClientReconnect() controlclientport.ReconnectReader {
 }
 
 // ControlClientCommands returns the request-scoped authorized command service.
-func (s *Stack) ControlClientCommands() controlclientport.CommandClient {
+func (s *Stack) ControlClientCommands() controlclient.CommandClient {
 	if s == nil {
 		return nil
 	}
@@ -409,9 +410,9 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	stack.controlState = controlState
-	controlOperations, err := internalcontrolclient.NewFileOperationStoreWithConfig(
+	controlOperations, err := controlclient.NewFileOperationStoreWithConfig(
 		filepath.Join(storeDir, "control-operations"),
-		internalcontrolclient.OperationRetentionConfig{TerminalRetention: cfg.ControlOperationRetention},
+		controlclient.OperationRetentionConfig{TerminalRetention: cfg.ControlOperationRetention},
 	)
 	if err != nil {
 		return nil, err
@@ -425,8 +426,8 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	}
 	stack.controlOperationRetention = effectiveOperationRetention
 	stack.operations = controlOperations
-	controlCommands, err := internalcontrolclient.NewCommandService(internalcontrolclient.CommandServiceConfig{
-		Authorizer: internalcontrolclient.SessionAuthorizer{Sessions: sessions},
+	controlCommands, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
+		Authorizer: controlclient.SessionAuthorizer{Sessions: sessions},
 		Operations: controlOperations,
 		Backend:    stack,
 	})
@@ -436,7 +437,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	stack.controlCommands = controlCommands
 	controlClient, err := internalcontrolclient.NewClient(internalcontrolclient.ClientConfig{
 		Commands: controlCommands, State: controlState, Feeds: controlFeeds,
-		Authorizer: internalcontrolclient.SessionAuthorizer{Sessions: sessions}, Sessions: sessions,
+		Authorizer: controlclient.SessionAuthorizer{Sessions: sessions}, Sessions: sessions,
 	})
 	if err != nil {
 		return nil, err
@@ -451,7 +452,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			}
 			return provider.Streams()
 		},
-		Authorizer: taskStreamAuthorizer{inner: internalcontrolclient.SessionAuthorizer{Sessions: sessions}},
+		Authorizer: taskStreamAuthorizer{inner: controlclient.SessionAuthorizer{Sessions: sessions}},
 		Secret:     cursorSecret,
 	})
 	if err != nil {

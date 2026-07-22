@@ -15,7 +15,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/surfaces/appserver"
 )
 

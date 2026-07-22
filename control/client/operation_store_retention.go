@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
 const (
@@ -621,9 +619,9 @@ func operationRecordRetentionDeadline(record OperationRecord, fallback time.Dura
 	return record.UpdatedAt.Add(retention), nil
 }
 
-func terminalOperationOutcome(outcome controlport.Outcome) bool {
+func terminalOperationOutcome(outcome Outcome) bool {
 	switch outcome {
-	case controlport.OutcomeCommitted, controlport.OutcomeConflicted, controlport.OutcomeRejected:
+	case OutcomeCommitted, OutcomeConflicted, OutcomeRejected:
 		return true
 	default:
 		return false
@@ -637,7 +635,7 @@ func operationRecordHasReclaimableTerminalOutcome(record OperationRecord) bool {
 	// Before schema v1, unclassified backend failures were persisted as
 	// rejected even when their external effect was unknown. Those records are
 	// permanent tombstones unless an explicit reconciliation contract is added.
-	return record.Version != 0 || record.Result.Outcome != controlport.OutcomeRejected
+	return record.Version != 0 || record.Result.Outcome != OutcomeRejected
 }
 
 func maxOperationRetention(values ...time.Duration) time.Duration {

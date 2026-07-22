@@ -11,8 +11,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
 type retentionTestStore interface {
@@ -48,7 +46,7 @@ func TestOperationStoreRetentionWindowReplayConflictAndReuse(t *testing.T) {
 			if _, created, err := store.Begin(context.Background(), intent); err != nil || !created {
 				t.Fatalf("Begin() = created %v, error %v", created, err)
 			}
-			want := operationStoreTestResult(intent, controlport.OutcomeCommitted)
+			want := operationStoreTestResult(intent, OutcomeCommitted)
 			completed, err := store.Complete(context.Background(), intent, want)
 			if err != nil || completed.Result == nil || *completed.Result != want {
 				t.Fatalf("Complete() = %#v, %v", completed, err)
@@ -89,12 +87,12 @@ func TestOperationStoreSweepOnlyRemovesProvenTerminalRecords(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 2, 0, 0, 0, time.UTC)}
 			store := newRetentionTestStore(t, kind, config, clock)
-			outcomes := map[string]controlport.Outcome{
-				"committed":  controlport.OutcomeCommitted,
-				"rejected":   controlport.OutcomeRejected,
-				"conflicted": controlport.OutcomeConflicted,
-				"accepted":   controlport.OutcomeAccepted,
-				"unknown":    controlport.OutcomeUnknown,
+			outcomes := map[string]Outcome{
+				"committed":  OutcomeCommitted,
+				"rejected":   OutcomeRejected,
+				"conflicted": OutcomeConflicted,
+				"accepted":   OutcomeAccepted,
+				"unknown":    OutcomeUnknown,
 			}
 			intents := map[string]OperationIntent{}
 			for name, outcome := range outcomes {
@@ -152,7 +150,7 @@ func TestFileOperationStoreLegacyRejectedRemainsIndeterminate(t *testing.T) {
 	}, clock)
 	intent := operationStoreTestIntent("legacy-rejected", "digest")
 	intent.CreatedAt = clock.Now().Add(-3 * time.Hour)
-	result := operationStoreTestResult(intent, controlport.OutcomeRejected)
+	result := operationStoreTestResult(intent, OutcomeRejected)
 	legacy := OperationRecord{
 		Intent:    intent,
 		Result:    &result,
@@ -187,7 +185,7 @@ func TestOperationStoreSweepRacingCompleteRetainsCommittedResult(t *testing.T) {
 					t.Fatalf("Begin(%d) = created %v, error %v", index, created, err)
 				}
 				clock.Advance(2 * time.Hour)
-				want := operationStoreTestResult(intent, controlport.OutcomeCommitted)
+				want := operationStoreTestResult(intent, OutcomeCommitted)
 				start := make(chan struct{})
 				errs := make(chan error, 2)
 				go func() {
@@ -274,7 +272,7 @@ func TestFileOperationStoreParseableRetentionCorruptionFailsSafe(t *testing.T) {
 	record.RetainUntil = record.UpdatedAt.Add(time.Nanosecond)
 	writeRawOperationRecord(t, store, intent, record)
 	missingSnapshotIntent := operationStoreTestIntent("missing-retention-snapshot", "digest")
-	missingSnapshot := retainedTestRecord(clock.Now(), missingSnapshotIntent, controlport.OutcomeUnknown)
+	missingSnapshot := retainedTestRecord(clock.Now(), missingSnapshotIntent, OutcomeUnknown)
 	missingSnapshot.TerminalRetentionNanoseconds = 0
 	writeRawOperationRecord(t, store, missingSnapshotIntent, missingSnapshot)
 
@@ -316,7 +314,7 @@ func TestFileOperationStoreForegroundReadsRejectSymlinks(t *testing.T) {
 	if _, _, err := store.Begin(context.Background(), intent); err == nil {
 		t.Fatal("Begin(symlink) succeeded")
 	}
-	if _, err := store.Complete(context.Background(), intent, operationStoreTestResult(intent, controlport.OutcomeCommitted)); err == nil {
+	if _, err := store.Complete(context.Background(), intent, operationStoreTestResult(intent, OutcomeCommitted)); err == nil {
 		t.Fatal("Complete(symlink) succeeded")
 	}
 	assertPathExists(t, canonical)
@@ -353,7 +351,7 @@ func TestFileOperationStoreSweepSyncsDirectoryAfterRecordRemoval(t *testing.T) {
 	if _, created, err := store.Begin(context.Background(), intent); err != nil || !created {
 		t.Fatalf("Begin() = created %v, error %v", created, err)
 	}
-	if _, err := store.Complete(context.Background(), intent, operationStoreTestResult(intent, controlport.OutcomeCommitted)); err != nil {
+	if _, err := store.Complete(context.Background(), intent, operationStoreTestResult(intent, OutcomeCommitted)); err != nil {
 		t.Fatal(err)
 	}
 	path := store.path(intent)
@@ -382,7 +380,7 @@ func TestFileOperationStoreInterruptedSweepFailsSafeAfterRemove(t *testing.T) {
 	if _, created, err := store.Begin(context.Background(), intent); err != nil || !created {
 		t.Fatalf("Begin() = created %v, error %v", created, err)
 	}
-	if _, err := store.Complete(context.Background(), intent, operationStoreTestResult(intent, controlport.OutcomeCommitted)); err != nil {
+	if _, err := store.Complete(context.Background(), intent, operationStoreTestResult(intent, OutcomeCommitted)); err != nil {
 		t.Fatal(err)
 	}
 	path := store.path(intent)
@@ -413,7 +411,7 @@ func TestFileOperationStoreSparseSweepClosesDirectoryCursor(t *testing.T) {
 		SweepTimeLimit:    time.Second,
 	}, clock)
 	intent := operationStoreTestIntent("sparse-directory", "digest")
-	writeRawOperationRecord(t, store, intent, retainedTestRecord(clock.Now(), intent, controlport.OutcomeUnknown))
+	writeRawOperationRecord(t, store, intent, retainedTestRecord(clock.Now(), intent, OutcomeUnknown))
 
 	result, err := store.Sweep(context.Background())
 	if err != nil || result.More {
@@ -446,7 +444,7 @@ func TestFileOperationStoreSweepIsBoundedAndCursorMakesProgress(t *testing.T) {
 	}, clock)
 	for index := range protected {
 		intent := operationStoreTestIntent(fmt.Sprintf("bounded-unknown-%03d", index), "digest")
-		writeRawOperationRecord(t, store, intent, retainedTestRecord(clock.Now(), intent, controlport.OutcomeUnknown))
+		writeRawOperationRecord(t, store, intent, retainedTestRecord(clock.Now(), intent, OutcomeUnknown))
 	}
 	for index := range expired {
 		intent := operationStoreTestIntent(fmt.Sprintf("bounded-expired-%03d", index), "digest")
@@ -584,7 +582,7 @@ func TestFileOperationStoreConcurrentSweepWaitHonorsContext(t *testing.T) {
 	if _, created, err := store.Begin(context.Background(), intent); err != nil || !created {
 		t.Fatalf("Begin() = created %v, error %v", created, err)
 	}
-	if _, err := store.Complete(context.Background(), intent, operationStoreTestResult(intent, controlport.OutcomeCommitted)); err != nil {
+	if _, err := store.Complete(context.Background(), intent, operationStoreTestResult(intent, OutcomeCommitted)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sweepRetentionCycle(context.Background(), store); err != nil {
@@ -683,7 +681,7 @@ func TestFileOperationStorePolicyChangeAllowsInFlightComplete(t *testing.T) {
 		t.Fatalf("Begin() = %#v, created %v, error %v", started, created, err)
 	}
 	reconfigured := newFileRetentionTestStore(t, root, OperationRetentionConfig{TerminalRetention: 3 * time.Hour}, clock)
-	want := operationStoreTestResult(intent, controlport.OutcomeCommitted)
+	want := operationStoreTestResult(intent, OutcomeCommitted)
 	completed, err := first.Complete(context.Background(), intent, want)
 	if err != nil || completed.Result == nil || *completed.Result != want ||
 		time.Duration(completed.TerminalRetentionNanoseconds) != 2*time.Hour {
@@ -708,7 +706,7 @@ func TestFileOperationStoreLegacyRetentionUsesPolicyHighWaterMark(t *testing.T) 
 	}, clock)
 	intent := operationStoreTestIntent("legacy-policy-high-water", "digest")
 	intent.CreatedAt = clock.Now().Add(-20 * 24 * time.Hour)
-	result := operationStoreTestResult(intent, controlport.OutcomeCommitted)
+	result := operationStoreTestResult(intent, OutcomeCommitted)
 	legacy := OperationRecord{
 		Intent:    intent,
 		Result:    &result,
@@ -799,8 +797,8 @@ func newRetentionRaceStores(
 	return newFileRetentionTestStore(t, root, config, clock), newFileRetentionTestStore(t, root, config, clock)
 }
 
-func operationStoreTestResult(intent OperationIntent, outcome controlport.Outcome) controlport.CommandResult {
-	return controlport.CommandResult{
+func operationStoreTestResult(intent OperationIntent, outcome Outcome) CommandResult {
+	return CommandResult{
 		OperationID: intent.OperationID,
 		SessionID:   intent.SessionID,
 		Outcome:     outcome,
@@ -828,7 +826,7 @@ func sweepRetentionCycle(ctx context.Context, store retentionTestStore) (Operati
 	return total, errors.New("operation retention sweep did not complete a bounded traversal")
 }
 
-func retainedTestRecord(now time.Time, intent OperationIntent, outcome controlport.Outcome) OperationRecord {
+func retainedTestRecord(now time.Time, intent OperationIntent, outcome Outcome) OperationRecord {
 	created := now.Add(-2 * time.Hour)
 	updated := now.Add(-time.Hour)
 	intent.CreatedAt = created
@@ -847,7 +845,7 @@ func retainedTestRecord(now time.Time, intent OperationIntent, outcome controlpo
 }
 
 func expiredTestRecord(now time.Time, intent OperationIntent) OperationRecord {
-	return retainedTestRecord(now, intent, controlport.OutcomeCommitted)
+	return retainedTestRecord(now, intent, OutcomeCommitted)
 }
 
 func writeRawOperationRecord(t *testing.T, store *FileOperationStore, intent OperationIntent, record OperationRecord) {

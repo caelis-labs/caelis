@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlclientapi "github.com/caelis-labs/caelis/control/client"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -34,7 +35,7 @@ func TestClientEventsNeverCrossesCapturedBoundaryDuringLiveSplice(t *testing.T) 
 		}
 		result := make(chan eventsResult, 1)
 		go func() {
-			batch, err := client.Events(context.Background(), controlport.Principal{ID: "owner"}, controlport.SubscribeRequest{SessionID: "session-1"})
+			batch, err := client.Events(context.Background(), controlclientapi.Principal{ID: "owner"}, controlport.SubscribeRequest{SessionID: "session-1"})
 			result <- eventsResult{batch: batch, err: err}
 		}()
 
@@ -104,6 +105,6 @@ func (r singleSessionFeedRegistry) Session(session.SessionRef) (controlport.Sess
 
 type eventBatchAllowAuthorizer struct{}
 
-func (eventBatchAllowAuthorizer) Authorize(context.Context, controlport.Principal, controlport.Action, string) error {
+func (eventBatchAllowAuthorizer) Authorize(context.Context, controlclientapi.Principal, controlclientapi.Action, string) error {
 	return nil
 }

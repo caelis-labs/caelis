@@ -19,11 +19,13 @@ and request-scoped command contract:
 
 ```text
 TUI / headless / ACP bridge ----+
-                                +-> ports/controlclient (transitional) -> Control
-HTTP JSON + SSE app-server -----+          |
-                                           +-> Session Feed Broker
-                                                |- durable session.Event lane
-                                                `- transient live lane
+                                +-> control/client commands ------------+-> Control
+HTTP JSON + SSE app-server -----+                                       |
+                                +-> ports/controlclient state/feed -----+
+                                         (transitional)                 |
+                                                                        +-> Session Feed Broker
+                                                                             |- durable session.Event lane
+                                                                             `- transient live lane
 ```
 
 The protocol has three independent compatibility dimensions:
@@ -376,15 +378,27 @@ followed by parent-directory sync; Windows document/WAL replacement uses
 
 ## Request-Scoped Control Commands
 
-`ports/controlclient` is transport-neutral and deliberately narrower than
-`protocol/acp/control.Service`. It owns principals, command requests/outcomes,
-SessionState, subscriptions, and capabilities; it does not own persistence,
-ACP wire DTOs, HTTP, or runtime assembly.
+`control/client` owns the transport-neutral product command boundary. It owns
+trusted principals, command requests and typed outcomes, Session authorization,
+dispatch, lifecycle gating, and the durable idempotency operation ledger. It
+does not own ACP wire DTOs, HTTP, Runtime assembly, or Session feed projection.
 
-This describes the accepted M2 API and current import path, not the long-term
-package destination. The path is frozen: new Control operations and domains
-belong under `control/*`, while later bounded migrations preserve the accepted
-wire and replay semantics.
+`ports/controlclient` retains only the transitional Session list, bootstrap
+state, reconnect, and feed subscription contracts. Its aggregate `Service`
+embeds `control/client.CommandClient` so existing clients still consume one
+object, without giving the port ownership of command semantics.
+
+This describes the accepted M2 API at its current ownership boundary. New
+Control operations and domains belong under coherent `control/*` packages;
+later bounded migrations of the remaining port must preserve the accepted wire
+and replay semantics.
+
+The next bounded package-retirement slice moves the remaining Session
+list/bootstrap/state/reconnect/feed contracts and implementation out of
+`ports/controlclient` and `internal/controlclient`. Until that slice completes,
+consumers that cross both command and observation boundaries name both owners
+explicitly. The port must not alias command types back merely to hide that
+temporary split.
 
 Every write contains:
 
@@ -415,7 +429,7 @@ handle/run/turn, active kind, and participant ID all match in Gateway Control.
 
 ### Authorization
 
-`internal/controlclient.Authorizer` authorizes the trusted principal against
+`control/client.Authorizer` authorizes the trusted principal against
 the explicit Session ID and action. Workspace/CWD may constrain policy but may
 not resolve identity. Cross-principal access and a body-supplied principal are
 rejected. HTTP bearer/token credentials are never accepted from a query
@@ -504,7 +518,7 @@ and may still accumulate. A future reconciliation API may move them only to a
 proved terminal outcome using the downstream transaction/event/task identity;
 ordinary age is not proof.
 
-Maintenance is Control persistence behavior in `internal/controlclient`, not an
+Maintenance is Control persistence behavior in `control/client`, not an
 SDK, Surface, or wire-protocol concern. `MemoryOperationStore` and
 `FileOperationStore` expose the same bounded `Sweep` semantics and lightweight
 result counts. `FileOperationStore` opportunistically starts a traversal from
@@ -532,11 +546,12 @@ explicit `Sweep` but opportunistic maintenance never changes the outcome of
 
 The checked-in OpenAPI 3.1 document is the HTTP wire truth. Generation uses a
 pinned tool version and produces checked-in standalone Go DTOs and TypeScript
-types. A production conformance gate marshals every `ports/controlclient`
-request/response, every Envelope kind, every standard ACP update, and a raw ACP
-extension through the real Go wire types and validates the JSON against the
-OpenAPI component schemas. A second gate decodes and re-encodes a complete raw
-extension Envelope through the generated Go DTOs and requires JSON equivalence.
+types. A production conformance gate marshals every `control/client` command
+request/response, every `ports/controlclient` state/feed response, every
+Envelope kind, every standard ACP update, and a raw ACP extension through the
+real Go wire types and validates the JSON against the OpenAPI component
+schemas. A second gate decodes and re-encodes a complete raw extension Envelope
+through the generated Go DTOs and requires JSON equivalence.
 `make client-protocol-generate` refreshes generated files;
 `make client-protocol-check` proves a clean regeneration and is part of
 `make commit-check`.
@@ -695,15 +710,16 @@ participant/handoff policy, or persistence logic.
 | canonical events, child typed origin, paged Session Reader | `agent-sdk/session` |
 | Envelope, delivery mode, feed position, cursor codec contract | `protocol/acp/eventstream` |
 | ACP semantic projection | `protocol/acp/projector` |
-| transport-neutral commands and SessionState | `ports/controlclient` (transitional, frozen) |
-| feed broker, legacy child-mirror filter, operation store, authorizer, command service | `internal/controlclient` (transitional toward `control/*`) |
+| principals, transport-neutral commands/outcomes, authorization, operation ledger, lifecycle gate | `control/client` |
+| Session list/bootstrap/state/feed contracts and aggregate Service | `ports/controlclient` (transitional, frozen) |
+| feed broker, legacy child-mirror filter, approval recovery, state assembly, aggregate client | `internal/controlclient` (transitional toward `control/*`) |
 | main-only Turn ingress | `internal/controlclient/turningress` |
 | Session-authorized transient Task directory and cursor-stamped records | `control/taskstream` |
 | Task record to ACP Envelope projection | `protocol/acp/taskstream` |
 | HTTP/SSE DTO mapping and authentication extraction | `surfaces/appserver` |
 | dependency assembly, listener configuration, persistent secret path | `app/*` and `cmd/caelis` |
 
-`surfaces/appserver` may import `ports/controlclient`,
+`surfaces/appserver` may import `control/client`, `ports/controlclient`,
 `protocol/acp/taskstream`, and `protocol/acp/eventstream`; it must not import
 `app/*`, repository
 `internal/*`, `agent-sdk/runtime`, policy, or session persistence

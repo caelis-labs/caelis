@@ -111,18 +111,25 @@ Document responsibilities are intentionally separate:
   host supplies the product data root used for managed installs, atomic state
   persistence, active-Turn fencing, Runtime replacement and rollback, plus the
   read-only live MCP status probe required to build that view.
-- `ports/controlclient`: frozen transitional transport-neutral product-client
-  commands, outcomes, bootstrap state, and Session-feed subscription contracts.
-- `internal/controlclient`: transitional implementation of Control-owned
-  authorization, operation ledger, command dispatch, Session feed/replay,
-  legacy-child-mirror filtering, approval recovery, and state assembly pending coherent
-  migration under `control/*`.
+- `control/client`: transport-neutral product command requests and outcomes,
+  trusted principals and Session authorization, command dispatch, the durable
+  idempotency operation ledger, and the Session lifecycle write gate. These are
+  Control contracts and behavior, not ACP wire or Surface APIs.
+- `ports/controlclient`: frozen transitional Session list/bootstrap/state/feed
+  contracts. Its aggregate `Service` composes `control/client.CommandClient`
+  but does not own, redefine, or alias the command contract. The temporary
+  split remains explicit until the state/feed retirement slice removes this
+  final port.
+- `internal/controlclient`: transitional Session feed/replay,
+  legacy-child-mirror filtering, approval recovery, state assembly, and the
+  aggregate client that joins those reads with `control/client` commands.
   `internal/controlclient/turningress` accepts only the owning main Turn
   producer. Task output never fans into this ingress and cannot delay its
   terminal.
 - `surfaces/appserver`: thin HTTP JSON/SSE and authentication mapping over
-  `ports/controlclient` plus `protocol/acp/taskstream`; `app/controlserver`
-  owns production listener assembly and fail-closed network configuration.
+  `control/client`, `ports/controlclient`, and `protocol/acp/taskstream`;
+  `app/controlserver` owns production listener assembly and fail-closed
+  network configuration.
 - `internal/controlprompt`: current Control-owned surface-neutral prompt input
   contract, command catalog, parsing helpers, connect-wizard state, and shared
   slash orchestration over transitional `protocol/acp/control.Service`.
@@ -193,11 +200,12 @@ Current SDK package ownership:
 The current migration has moved reusable runtime, model, tool, session,
 sandbox, task, policy, skill, and display contracts and implementations into
 `agent-sdk/*`. SDK-owned `ports/*` and global `impl/*` compatibility paths have
-been removed; the remaining `ports/controlclient` package is the frozen
-transitional product-client contract, concrete model catalog data lives under
-`control/modelcatalog`, provider/model configuration and construction live under
-`control/modelconfig`, and Caelis ACP agent bridge code now lives under
-`internal/acpagentbridge`.
+been removed; the remaining `ports/controlclient` package contains only the
+frozen transitional Session list/bootstrap/state/feed contracts. Product
+commands and their operation ledger live in `control/client`, concrete model
+catalog data lives under `control/modelcatalog`, provider/model configuration
+and construction live under `control/modelconfig`, and Caelis ACP agent bridge
+code now lives under `internal/acpagentbridge`.
 
 Repeatable SDK boundary gates:
 

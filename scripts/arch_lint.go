@@ -132,6 +132,9 @@ func readModulePath(path string) (string, error) {
 }
 
 func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
+	if rule, subject, line := controlClientPortCommandTypeRule(rel, file, fset, modulePath); rule != "" {
+		return rule, subject, line
+	}
 	if rule, subject, line := surfaceGatewayConsumptionRule(rel, file, fset, modulePath); rule != "" {
 		return rule, subject, line
 	}
@@ -142,6 +145,59 @@ func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modul
 		return rule, subject, line
 	}
 	return "", "", 0
+}
+
+func controlClientPortCommandTypeRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
+	if !strings.HasPrefix(rel, "ports/controlclient/") || strings.HasSuffix(rel, "_test.go") || file == nil {
+		return "", "", 0
+	}
+	controlClientNames := importNames(file, modulePath+"/control/client")
+	var subject string
+	var line int
+	ast.Inspect(file, func(node ast.Node) bool {
+		if subject != "" {
+			return false
+		}
+		typeSpec, ok := node.(*ast.TypeSpec)
+		if !ok || (!isControlClientCommandType(typeSpec.Name.Name) && !isControlClientCommandAlias(typeSpec, controlClientNames)) {
+			return true
+		}
+		subject = typeSpec.Name.Name
+		line = fset.Position(typeSpec.Pos()).Line
+		return false
+	})
+	if subject == "" {
+		return "", "", 0
+	}
+	return "ports/controlclient must not define or alias Control command types; use control/client", subject, line
+}
+
+func isControlClientCommandAlias(typeSpec *ast.TypeSpec, controlClientNames map[string]bool) bool {
+	if typeSpec == nil || !typeSpec.Assign.IsValid() || len(controlClientNames) == 0 {
+		return false
+	}
+	selector, ok := typeSpec.Type.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	ident, ok := selector.X.(*ast.Ident)
+	return ok && controlClientNames[ident.Name]
+}
+
+func isControlClientCommandType(name string) bool {
+	switch name {
+	case "Principal", "Action", "Outcome", "OutcomeError", "WriteBase", "TurnTarget",
+		"CreateSessionRequest", "CloseSessionRequest", "PromptRequest", "SteerRequest",
+		"CancelRequest", "ResolveApprovalRequest", "AttachParticipantRequest",
+		"PromptParticipantRequest", "CancelParticipantRequest", "DetachParticipantRequest",
+		"HandoffRequest", "CommandResult", "CommandBackend", "CommandClient", "Authorizer",
+		"SessionAuthorizer", "OperationIntent", "OperationRecord", "OperationStore",
+		"MemoryOperationStore", "FileOperationStore", "OperationRetentionConfig",
+		"OperationSweepResult", "CommandServiceConfig", "CommandService":
+		return true
+	default:
+		return false
+	}
 }
 
 func surfaceGatewayConsumptionRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {

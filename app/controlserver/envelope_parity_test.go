@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -51,8 +52,8 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 
 	server, err := appserver.New(appserver.Config{
 		Service: parityService{feed: feed},
-		Authenticator: appserver.AuthenticatorFunc(func(*http.Request) (controlport.Principal, error) {
-			return controlport.Principal{ID: "owner"}, nil
+		Authenticator: appserver.AuthenticatorFunc(func(*http.Request) (controlclient.Principal, error) {
+			return controlclient.Principal{ID: "owner"}, nil
 		}),
 		AllowedHosts: []string{"127.0.0.1"}, Heartbeat: time.Hour,
 	})
@@ -128,7 +129,7 @@ type parityService struct {
 	feed controlport.SessionFeed
 }
 
-func (s parityService) Subscribe(ctx context.Context, _ controlport.Principal, req controlport.SubscribeRequest) (controlport.SubscribeResult, error) {
+func (s parityService) Subscribe(ctx context.Context, _ controlclient.Principal, req controlport.SubscribeRequest) (controlport.SubscribeResult, error) {
 	return s.feed.Subscribe(ctx, req)
 }
 

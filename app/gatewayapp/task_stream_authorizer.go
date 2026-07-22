@@ -3,15 +3,15 @@ package gatewayapp
 import (
 	"context"
 
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
-	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
-	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
-// taskStreamAuthorizer adapts the existing Session ownership policy without
-// coupling the Control Task stream package to the transitional client port.
+// taskStreamAuthorizer adapts command-client Session ownership policy to the
+// independent Task observation contract. The explicit principal mapping keeps
+// taskstream free of command request vocabulary.
 type taskStreamAuthorizer struct {
-	inner internalcontrolclient.SessionAuthorizer
+	inner controlclient.SessionAuthorizer
 }
 
 func (a taskStreamAuthorizer) AuthorizeTaskStream(ctx context.Context, principal controltaskstream.Principal, sessionID string) error {

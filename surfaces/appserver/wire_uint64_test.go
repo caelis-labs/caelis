@@ -10,7 +10,8 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
+	controlclient "github.com/caelis-labs/caelis/control/client"
+	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/appserver/generated"
@@ -57,16 +58,16 @@ func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
 			}
 			assertGeneratedDecimal(t, resultDTO.Revision, value, "CommandResult.revision")
 
-			state := controlclient.SessionState{
-				ProtocolVersion: 1, EnvelopeVersion: controlclient.EnvelopeVersion, APIVersion: controlclient.HTTPAPIVersion,
-				SessionID: "session-1", Revision: value, ResumeMode: controlclient.ResumeModeExact,
+			state := controlclientport.SessionState{
+				ProtocolVersion: 1, EnvelopeVersion: controlclientport.EnvelopeVersion, APIVersion: controlclientport.HTTPAPIVersion,
+				SessionID: "session-1", Revision: value, ResumeMode: controlclientport.ResumeModeExact,
 				BoundaryPosition: &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
 					Anchor: eventstream.DurableFeedPosition{Seq: value}, Generation: "generation-1", Sequence: value,
 				}},
-				Run:          controlclient.RunState{},
+				Run:          controlclientport.RunState{},
 				Controller:   session.ControllerBinding{ContextSyncSeq: value},
 				Participants: []session.ParticipantBinding{{ID: "participant-1", ContextSyncSeq: value}},
-				Approval:     controlclient.ApprovalState{}, Capabilities: controlclient.ClientCapabilities{CaelisTerminalStream: true},
+				Approval:     controlclientport.ApprovalState{}, Capabilities: controlclientport.ClientCapabilities{CaelisTerminalStream: true},
 			}
 			stateJSON := mustMarshalWire(t, state)
 			var stateDTO generated.SessionState

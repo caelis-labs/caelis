@@ -11,10 +11,10 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/discovery"
-	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
@@ -265,7 +265,7 @@ func (s *Stack) rejectBoundACPAgent(ctx context.Context, agentID string) error {
 				!strings.EqualFold(strings.TrimSpace(controllerAgent), agentID) {
 				continue
 			}
-			closed, err := internalcontrolclient.IsSessionClosed(ctx, s.Sessions, active.SessionRef)
+			closed, err := controlclient.IsSessionClosed(ctx, s.Sessions, active.SessionRef)
 			if err != nil {
 				return fmt.Errorf("gatewayapp: inspect Session %q before disconnecting Agent %q: %w", active.SessionID, agentID, err)
 			}

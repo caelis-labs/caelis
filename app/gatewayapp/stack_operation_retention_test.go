@@ -6,8 +6,7 @@ import (
 	"testing"
 	"time"
 
-	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 )
 
 func TestStackAssemblesConfiguredControlOperationRetention(t *testing.T) {
@@ -29,10 +28,10 @@ func TestStackAssemblesConfiguredControlOperationRetention(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer stack.Close()
-			intent := internalcontrolclient.OperationIntent{
+			intent := controlclient.OperationIntent{
 				PrincipalID: "owner",
 				OperationID: "assembly-retention",
-				Action:      controlport.ActionPrompt,
+				Action:      controlclient.ActionPrompt,
 				SessionID:   "session-1",
 				Target:      "session-1",
 				Digest:      "digest",
@@ -55,9 +54,9 @@ func TestStackAssemblesConfiguredControlOperationRetention(t *testing.T) {
 func TestStackAdoptsExistingControlOperationRetentionForSelfACP(t *testing.T) {
 	storeDir := t.TempDir()
 	operationRoot := filepath.Join(storeDir, "control-operations")
-	seed, err := internalcontrolclient.NewFileOperationStoreWithConfig(
+	seed, err := controlclient.NewFileOperationStoreWithConfig(
 		operationRoot,
-		internalcontrolclient.OperationRetentionConfig{TerminalRetention: 6 * time.Hour},
+		controlclient.OperationRetentionConfig{TerminalRetention: 6 * time.Hour},
 	)
 	if err != nil {
 		t.Fatal(err)

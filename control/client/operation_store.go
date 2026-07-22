@@ -15,33 +15,32 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
 var ErrOperationConflict = errorcode.New(errorcode.Conflict, "controlclient: operation id is bound to another request")
 
 type OperationIntent struct {
-	PrincipalID string             `json:"principal_id"`
-	OperationID string             `json:"operation_id"`
-	Action      controlport.Action `json:"action"`
-	SessionID   string             `json:"session_id,omitempty"`
-	Target      string             `json:"target,omitempty"`
-	Digest      string             `json:"digest"`
-	CreatedAt   time.Time          `json:"created_at"`
+	PrincipalID string    `json:"principal_id"`
+	OperationID string    `json:"operation_id"`
+	Action      Action    `json:"action"`
+	SessionID   string    `json:"session_id,omitempty"`
+	Target      string    `json:"target,omitempty"`
+	Digest      string    `json:"digest"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type OperationRecord struct {
-	Version                      int                        `json:"version,omitempty"`
-	Intent                       OperationIntent            `json:"intent"`
-	Result                       *controlport.CommandResult `json:"result,omitempty"`
-	TerminalRetentionNanoseconds int64                      `json:"terminal_retention_nanoseconds,omitempty"`
-	RetainUntil                  time.Time                  `json:"retain_until,omitempty"`
-	UpdatedAt                    time.Time                  `json:"updated_at"`
+	Version                      int             `json:"version,omitempty"`
+	Intent                       OperationIntent `json:"intent"`
+	Result                       *CommandResult  `json:"result,omitempty"`
+	TerminalRetentionNanoseconds int64           `json:"terminal_retention_nanoseconds,omitempty"`
+	RetainUntil                  time.Time       `json:"retain_until,omitempty"`
+	UpdatedAt                    time.Time       `json:"updated_at"`
 }
 
 type OperationStore interface {
 	Begin(context.Context, OperationIntent) (OperationRecord, bool, error)
-	Complete(context.Context, OperationIntent, controlport.CommandResult) (OperationRecord, error)
+	Complete(context.Context, OperationIntent, CommandResult) (OperationRecord, error)
 }
 
 type MemoryOperationStore struct {
@@ -119,7 +118,7 @@ func (s *MemoryOperationStore) Begin(ctx context.Context, intent OperationIntent
 	return cloneOperationRecord(record), true, nil
 }
 
-func (s *MemoryOperationStore) Complete(ctx context.Context, intent OperationIntent, result controlport.CommandResult) (OperationRecord, error) {
+func (s *MemoryOperationStore) Complete(ctx context.Context, intent OperationIntent, result CommandResult) (OperationRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := contextError(ctx); err != nil {
@@ -368,7 +367,7 @@ func (s *FileOperationStore) Begin(ctx context.Context, intent OperationIntent) 
 	return cloneOperationRecord(record), created, nil
 }
 
-func (s *FileOperationStore) Complete(ctx context.Context, intent OperationIntent, result controlport.CommandResult) (OperationRecord, error) {
+func (s *FileOperationStore) Complete(ctx context.Context, intent OperationIntent, result CommandResult) (OperationRecord, error) {
 	if strings.TrimSpace(result.OperationID) != strings.TrimSpace(intent.OperationID) {
 		return OperationRecord{}, ErrOperationConflict
 	}

@@ -15,6 +15,7 @@ import (
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
@@ -26,8 +27,8 @@ import (
 
 func TestClassifyControlBackendErrorTreatsLeaseConflictAsConflict(t *testing.T) {
 	err := classifyControlBackendError(&session.LeaseConflictError{SessionID: "session-1", Detail: "active execution lease"})
-	var outcomeErr *controlport.OutcomeError
-	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlport.OutcomeConflicted {
+	var outcomeErr *controlclient.OutcomeError
+	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeConflicted {
 		t.Fatalf("classifyControlBackendError() = %v, want conflicted outcome", err)
 	}
 }
@@ -36,7 +37,7 @@ func TestClassifyControlBackendErrorAddsTypedHTTPCategories(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		err     error
-		outcome controlport.Outcome
+		outcome controlclient.Outcome
 		code    errorcode.Code
 	}{
 		{
@@ -44,19 +45,19 @@ func TestClassifyControlBackendErrorAddsTypedHTTPCategories(t *testing.T) {
 			err: &kernelimpl.Error{
 				Kind: kernelimpl.KindValidation, Code: kernelimpl.CodeInvalidRequest, Message: "invalid prompt",
 			},
-			outcome: controlport.OutcomeRejected,
+			outcome: controlclient.OutcomeRejected,
 			code:    errorcode.InvalidArgument,
 		},
 		{
 			name:    "internal",
 			err:     &kernelimpl.Error{Kind: kernelimpl.KindInternal, Code: kernelimpl.CodeInternal, Message: "private failure"},
-			outcome: controlport.OutcomeUnknown,
+			outcome: controlclient.OutcomeUnknown,
 			code:    errorcode.Unknown,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := classifyControlBackendError(tt.err)
-			var outcomeErr *controlport.OutcomeError
+			var outcomeErr *controlclient.OutcomeError
 			if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != tt.outcome || errorcode.CodeOf(err) != tt.code {
 				t.Fatalf("classifyControlBackendError() = %v (outcome %#v, code %q)", err, outcomeErr, errorcode.CodeOf(err))
 			}
@@ -66,8 +67,8 @@ func TestClassifyControlBackendErrorAddsTypedHTTPCategories(t *testing.T) {
 
 func TestClassifyControlBackendErrorTreatsUnclassifiedFailureAsUnknown(t *testing.T) {
 	err := classifyControlBackendError(errors.New("effect boundary failed without proof"))
-	var outcomeErr *controlport.OutcomeError
-	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlport.OutcomeUnknown {
+	var outcomeErr *controlclient.OutcomeError
+	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeUnknown {
 		t.Fatalf("classifyControlBackendError() = %v, want unknown outcome", err)
 	}
 }
@@ -106,8 +107,8 @@ func TestControlParticipantPlacementRejectsOnlyInvalidSelections(t *testing.T) {
 		{profileID: profile.ID, effort: "low"},
 	} {
 		_, err := stack.resolveControlParticipantPlacement(context.Background(), selection.profileID, selection.effort)
-		var outcomeErr *controlport.OutcomeError
-		if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlport.OutcomeRejected || errorcode.CodeOf(err) != errorcode.InvalidArgument {
+		var outcomeErr *controlclient.OutcomeError
+		if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeRejected || errorcode.CodeOf(err) != errorcode.InvalidArgument {
 			t.Fatalf("resolveControlParticipantPlacement(%q, %q) = %v, want rejected invalid_argument", selection.profileID, selection.effort, err)
 		}
 	}
@@ -122,8 +123,8 @@ func TestControlParticipantPlacementStoreFailureRemainsUnknown(t *testing.T) {
 		t.Fatalf("resolveControlParticipantPlacement(store failure) = %v, want internal failure", err)
 	}
 	classified := classifyControlBackendError(err)
-	var outcomeErr *controlport.OutcomeError
-	if !errors.As(classified, &outcomeErr) || outcomeErr.Outcome != controlport.OutcomeUnknown || errorcode.CodeOf(classified) != errorcode.Unknown {
+	var outcomeErr *controlclient.OutcomeError
+	if !errors.As(classified, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeUnknown || errorcode.CodeOf(classified) != errorcode.Unknown {
 		t.Fatalf("classifyControlBackendError(store failure) = %v, want unknown outcome", classified)
 	}
 }
@@ -299,21 +300,21 @@ func TestCommittedCommandKeepsOutcomeWhenFeedPrimeFailsAndLedgerReplays(t *testi
 		Sessions: sessions, AppName: "caelis", controlFeeds: controlClientFeedRegistry{feed: feed}, gateway: kernel,
 	}
 	backend := &countingControlClientBackend{backend: stack}
-	commands, err := internalcontrolclient.NewCommandService(internalcontrolclient.CommandServiceConfig{
+	commands, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
 		Authorizer: controlClientAllowAuthorizer{},
-		Operations: internalcontrolclient.NewMemoryOperationStore(),
+		Operations: controlclient.NewMemoryOperationStore(),
 		Backend:    backend,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := controlport.CreateSessionRequest{
-		WriteBase:          controlport.WriteBase{OperationID: "operation-prime-failure"},
+	request := controlclient.CreateSessionRequest{
+		WriteBase:          controlclient.WriteBase{OperationID: "operation-prime-failure"},
 		PreferredSessionID: "session-prime-failure",
 	}
-	principal := controlport.Principal{ID: "owner"}
+	principal := controlclient.Principal{ID: "owner"}
 	first, err := commands.CreateSession(context.Background(), principal, request)
-	if err != nil || first.Outcome != controlport.OutcomeCommitted || first.Detail != controlFeedCatchUpWarning {
+	if err != nil || first.Outcome != controlclient.OutcomeCommitted || first.Detail != controlFeedCatchUpWarning {
 		t.Fatalf("first result = %#v, %v, want committed result with feed warning", first, err)
 	}
 	replayed, err := commands.CreateSession(context.Background(), principal, request)
@@ -367,10 +368,10 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	defer subscription.Close()
 	stack := &Stack{Sessions: sessions, controlFeeds: feeds, gateway: kernel}
 	expected := active.Revision
-	result, err := stack.ExecuteControlCommand(ctx, controlport.Principal{ID: "owner"}, controlport.ActionSessionClose, controlport.CloseSessionRequest{
-		WriteBase: controlport.WriteBase{SessionID: active.SessionID, ExpectedRevision: &expected},
+	result, err := stack.ExecuteControlCommand(ctx, controlclient.Principal{ID: "owner"}, controlclient.ActionSessionClose, controlclient.CloseSessionRequest{
+		WriteBase: controlclient.WriteBase{SessionID: active.SessionID, ExpectedRevision: &expected},
 	})
-	if err != nil || result.Outcome != controlport.OutcomeCommitted || result.Revision <= active.Revision {
+	if err != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision <= active.Revision {
 		t.Fatalf("CloseSession result = %#v, %v", result, err)
 	}
 	select {
@@ -389,10 +390,10 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err = stack.ExecuteControlCommand(ctx, controlport.Principal{ID: "owner"}, controlport.ActionPrompt, controlport.PromptRequest{
-		WriteBase: controlport.WriteBase{SessionID: active.SessionID}, Input: "must be rejected",
+	result, err = stack.ExecuteControlCommand(ctx, controlclient.Principal{ID: "owner"}, controlclient.ActionPrompt, controlclient.PromptRequest{
+		WriteBase: controlclient.WriteBase{SessionID: active.SessionID}, Input: "must be rejected",
 	})
-	if !errors.Is(err, internalcontrolclient.ErrSessionClosed) || result.Revision != current.Revision {
+	if !errors.Is(err, controlclient.ErrSessionClosed) || result.Revision != current.Revision {
 		t.Fatalf("prompt after close = %#v, %v", result, err)
 	}
 	_ = turn.Handle.Close()
@@ -424,12 +425,12 @@ func TestControlClientCancelParticipantRejectsMainTurnWithArbitraryParticipantID
 		}
 	}()
 	stack := &Stack{Sessions: sessions, gateway: kernel}
-	result, err := stack.ExecuteControlCommand(ctx, controlport.Principal{ID: "owner"}, controlport.ActionParticipantCancel, controlport.CancelParticipantRequest{
-		WriteBase: controlport.WriteBase{SessionID: active.SessionID}, ParticipantID: "not-the-main-turn",
-		Target: controlport.TurnTarget{HandleID: started.Handle.HandleID(), RunID: started.Handle.RunID(), TurnID: started.Handle.TurnID()},
+	result, err := stack.ExecuteControlCommand(ctx, controlclient.Principal{ID: "owner"}, controlclient.ActionParticipantCancel, controlclient.CancelParticipantRequest{
+		WriteBase: controlclient.WriteBase{SessionID: active.SessionID}, ParticipantID: "not-the-main-turn",
+		Target: controlclient.TurnTarget{HandleID: started.Handle.HandleID(), RunID: started.Handle.RunID(), TurnID: started.Handle.TurnID()},
 	})
-	var outcomeErr *controlport.OutcomeError
-	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlport.OutcomeConflicted || result.Outcome != controlport.OutcomeCommitted {
+	var outcomeErr *controlclient.OutcomeError
+	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeConflicted || result.Outcome != controlclient.OutcomeCommitted {
 		t.Fatalf("participant cancel against main = %#v, %v", result, err)
 	}
 	if _, ok := kernel.ActiveTurn(active.SessionID); !ok {
@@ -615,21 +616,21 @@ func (*controlClientSessionFeed) Boundary() (*eventstream.FeedPosition, string) 
 
 type controlClientAllowAuthorizer struct{}
 
-func (controlClientAllowAuthorizer) Authorize(context.Context, controlport.Principal, controlport.Action, string) error {
+func (controlClientAllowAuthorizer) Authorize(context.Context, controlclient.Principal, controlclient.Action, string) error {
 	return nil
 }
 
 type countingControlClientBackend struct {
-	backend controlport.CommandBackend
+	backend controlclient.CommandBackend
 	calls   atomic.Int32
 }
 
 func (backend *countingControlClientBackend) ExecuteControlCommand(
 	ctx context.Context,
-	principal controlport.Principal,
-	action controlport.Action,
+	principal controlclient.Principal,
+	action controlclient.Action,
 	request any,
-) (controlport.CommandResult, error) {
+) (controlclient.CommandResult, error) {
 	backend.calls.Add(1)
 	return backend.backend.ExecuteControlCommand(ctx, principal, action, request)
 }

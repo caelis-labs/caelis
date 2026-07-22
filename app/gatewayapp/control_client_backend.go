@@ -10,10 +10,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
-	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -25,13 +24,13 @@ const controlFeedCatchUpWarning = "session mutation committed; live feed catch-u
 // ExecuteControlCommand is the app assembly adapter for already-authorized
 // transport-neutral commands. The request's operation ID is forwarded in
 // downstream metadata wherever the current gateway contract accepts it.
-func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport.Principal, action controlport.Action, request any) (result controlport.CommandResult, commandErr error) {
+func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclient.Principal, action controlclient.Action, request any) (result controlclient.CommandResult, commandErr error) {
 	if s == nil {
-		return controlport.CommandResult{}, errors.New("gatewayapp: stack is unavailable")
+		return controlclient.CommandResult{}, errors.New("gatewayapp: stack is unavailable")
 	}
 	gw := s.currentGateway()
 	if gw == nil {
-		return controlport.CommandResult{}, errors.New("gatewayapp: gateway is unavailable")
+		return controlclient.CommandResult{}, errors.New("gatewayapp: gateway is unavailable")
 	}
 	defer func() {
 		if commandErr != nil || strings.TrimSpace(result.SessionID) == "" {
@@ -53,14 +52,14 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 		}
 	}()
 	switch req := request.(type) {
-	case controlport.CreateSessionRequest:
+	case controlclient.CreateSessionRequest:
 		created, err := s.Sessions.StartSession(ctx, session.StartSessionRequest{
 			AppName: s.AppName, UserID: strings.TrimSpace(principal.ID),
 			Workspace:          session.WorkspaceRef{Key: strings.TrimSpace(req.WorkspaceKey), CWD: strings.TrimSpace(req.CWD)},
 			PreferredSessionID: strings.TrimSpace(req.PreferredSessionID), Title: strings.TrimSpace(req.Title), Metadata: req.Metadata,
 		})
 		return sessionCommandResult(created), classifyControlBackendError(err)
-	case controlport.CloseSessionRequest:
+	case controlclient.CloseSessionRequest:
 		active, err := s.checkControlCommandCASAllowClosed(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -82,12 +81,12 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		updated, err := internalcontrolclient.CloseSession(ctx, s.Sessions, active, "closed by control client")
+		updated, err := controlclient.CloseSession(ctx, s.Sessions, active, "closed by control client")
 		if err == nil || session.IsCommitted(err) {
 			gw.CloseSessionApprovals(active.SessionRef, "session_closed")
 		}
 		return sessionCommandResult(updated), classifyControlBackendError(err)
-	case controlport.PromptRequest:
+	case controlclient.PromptRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -101,17 +100,17 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 		}
 		out := sessionCommandResult(result.Session)
 		if result.Handle != nil {
-			out.Target = controlport.TurnTarget{HandleID: result.Handle.HandleID(), RunID: result.Handle.RunID(), TurnID: result.Handle.TurnID()}
+			out.Target = controlclient.TurnTarget{HandleID: result.Handle.HandleID(), RunID: result.Handle.RunID(), TurnID: result.Handle.TurnID()}
 		}
 		return out, classifyControlBackendError(err)
-	case controlport.SteerRequest:
+	case controlclient.SteerRequest:
 		active, err := s.checkControlTurnTarget(ctx, req.WriteBase, req.Target)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
 		err = gw.SubmitActiveTurn(ctx, kernelimpl.SubmitActiveTurnRequest{SessionRef: active.SessionRef, Kind: kernelimpl.SubmissionKindConversation, Text: req.Input, DisplayText: req.DisplayInput, Metadata: map[string]any{"operation_id": req.OperationID}})
 		return sessionCommandResult(active), classifyControlBackendError(err)
-	case controlport.CancelRequest:
+	case controlclient.CancelRequest:
 		active, err := s.checkControlTurnTarget(ctx, req.WriteBase, req.Target)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -121,7 +120,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 			HandleID: req.Target.HandleID, RunID: req.Target.RunID, TurnID: req.Target.TurnID,
 		})
 		return sessionCommandResult(active), classifyControlBackendError(err)
-	case controlport.ResolveApprovalRequest:
+	case controlclient.ResolveApprovalRequest:
 		active, err := s.checkControlApprovalTarget(ctx, req.WriteBase, req.Target, req.ApprovalRequestID)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -131,7 +130,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 			Approved: req.Approved, Reason: req.Reason, ReviewText: req.ReviewText,
 		}})
 		return sessionCommandResult(active), classifyControlBackendError(err)
-	case controlport.AttachParticipantRequest:
+	case controlclient.AttachParticipantRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -148,7 +147,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 			Placement:  participantPlacement,
 		})
 		return sessionCommandResult(updated), classifyControlBackendError(err)
-	case controlport.PromptParticipantRequest:
+	case controlclient.PromptParticipantRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -159,17 +158,17 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 		}
 		out := sessionCommandResult(result.Session)
 		if result.Handle != nil {
-			out.Target = controlport.TurnTarget{HandleID: result.Handle.HandleID(), RunID: result.Handle.RunID(), TurnID: result.Handle.TurnID()}
+			out.Target = controlclient.TurnTarget{HandleID: result.Handle.HandleID(), RunID: result.Handle.RunID(), TurnID: result.Handle.TurnID()}
 		}
 		return out, classifyControlBackendError(err)
-	case controlport.CancelParticipantRequest:
+	case controlclient.CancelParticipantRequest:
 		active, err := s.checkControlTurnTarget(ctx, req.WriteBase, req.Target)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
 		turn, ok := gw.ActiveTurn(active.SessionID)
 		if !ok || turn.Kind != kernelimpl.ActiveTurnKindParticipant || strings.TrimSpace(turn.ParticipantID) != strings.TrimSpace(req.ParticipantID) {
-			return sessionCommandResult(active), controlport.NewOutcomeError(controlport.OutcomeConflicted, errors.New("controlclient: active turn is not the requested participant turn"))
+			return sessionCommandResult(active), controlclient.NewOutcomeError(controlclient.OutcomeConflicted, errors.New("controlclient: active turn is not the requested participant turn"))
 		}
 		err = gw.Interrupt(ctx, kernelimpl.InterruptRequest{
 			SessionRef: active.SessionRef, Reason: req.Reason,
@@ -177,14 +176,14 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 			Kind: kernelimpl.ActiveTurnKindParticipant, ParticipantID: req.ParticipantID,
 		})
 		return sessionCommandResult(active), classifyControlBackendError(err)
-	case controlport.DetachParticipantRequest:
+	case controlclient.DetachParticipantRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
 		updated, err := gw.DetachParticipant(ctx, kernelimpl.DetachParticipantRequest{SessionRef: active.SessionRef, ParticipantID: req.ParticipantID, Source: req.Source})
 		return sessionCommandResult(updated), classifyControlBackendError(err)
-	case controlport.HandoffRequest:
+	case controlclient.HandoffRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -192,7 +191,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 		updated, err := gw.HandoffController(ctx, kernelimpl.HandoffControllerRequest{SessionRef: active.SessionRef, Kind: req.Kind, Agent: req.Agent, Source: req.Source, Reason: req.Reason})
 		return sessionCommandResult(updated), classifyControlBackendError(err)
 	default:
-		return controlport.CommandResult{}, fmt.Errorf("gatewayapp: unsupported control command %q (%T)", action, request)
+		return controlclient.CommandResult{}, fmt.Errorf("gatewayapp: unsupported control command %q (%T)", action, request)
 	}
 }
 
@@ -208,22 +207,22 @@ func (s *Stack) resolveControlParticipantPlacement(ctx context.Context, profileI
 		var selectionErr *controlplacement.ParticipantSelectionError
 		if errors.As(err, &selectionErr) {
 			coded := errorcode.Wrap(errorcode.InvalidArgument, "gatewayapp: invalid participant placement", err)
-			return sdkplacement.Placement{}, controlport.NewOutcomeError(controlport.OutcomeRejected, coded)
+			return sdkplacement.Placement{}, controlclient.NewOutcomeError(controlclient.OutcomeRejected, coded)
 		}
 		return sdkplacement.Placement{}, err
 	}
 	return resolved, nil
 }
 
-func (s *Stack) checkControlCommandCAS(ctx context.Context, base controlport.WriteBase) (session.Session, error) {
+func (s *Stack) checkControlCommandCAS(ctx context.Context, base controlclient.WriteBase) (session.Session, error) {
 	return s.checkControlCommandCASMode(ctx, base, false)
 }
 
-func (s *Stack) checkControlCommandCASAllowClosed(ctx context.Context, base controlport.WriteBase) (session.Session, error) {
+func (s *Stack) checkControlCommandCASAllowClosed(ctx context.Context, base controlclient.WriteBase) (session.Session, error) {
 	return s.checkControlCommandCASMode(ctx, base, true)
 }
 
-func (s *Stack) checkControlCommandCASMode(ctx context.Context, base controlport.WriteBase, allowClosed bool) (session.Session, error) {
+func (s *Stack) checkControlCommandCASMode(ctx context.Context, base controlclient.WriteBase, allowClosed bool) (session.Session, error) {
 	active, err := s.Sessions.Session(ctx, session.SessionRef{SessionID: strings.TrimSpace(base.SessionID)})
 	if err != nil {
 		return session.Session{}, err
@@ -235,37 +234,37 @@ func (s *Stack) checkControlCommandCASMode(ctx context.Context, base controlport
 		return active, fmt.Errorf("controlclient: expected controller epoch %q, actual %q: %w", expected, active.Controller.EpochID, session.ErrRevisionConflict)
 	}
 	if !allowClosed {
-		closed, err := internalcontrolclient.IsSessionClosed(ctx, s.Sessions, active.SessionRef)
+		closed, err := controlclient.IsSessionClosed(ctx, s.Sessions, active.SessionRef)
 		if err != nil {
 			return active, err
 		}
 		if closed {
-			return active, internalcontrolclient.ErrSessionClosed
+			return active, controlclient.ErrSessionClosed
 		}
 	}
 	return active, nil
 }
 
-func (s *Stack) checkControlTurnTarget(ctx context.Context, base controlport.WriteBase, target controlport.TurnTarget) (session.Session, error) {
+func (s *Stack) checkControlTurnTarget(ctx context.Context, base controlclient.WriteBase, target controlclient.TurnTarget) (session.Session, error) {
 	active, err := s.checkControlCommandCAS(ctx, base)
 	if err != nil {
 		return active, err
 	}
 	turn, ok := s.currentGateway().ActiveTurn(active.SessionID)
 	if !ok || turn.HandleID != strings.TrimSpace(target.HandleID) || turn.RunID != strings.TrimSpace(target.RunID) || turn.TurnID != strings.TrimSpace(target.TurnID) {
-		return active, controlport.NewOutcomeError(controlport.OutcomeConflicted, errors.New("controlclient: live turn target changed"))
+		return active, controlclient.NewOutcomeError(controlclient.OutcomeConflicted, errors.New("controlclient: live turn target changed"))
 	}
 	return active, nil
 }
 
-func (s *Stack) checkControlApprovalTarget(ctx context.Context, base controlport.WriteBase, target controlport.TurnTarget, requestID string) (session.Session, error) {
+func (s *Stack) checkControlApprovalTarget(ctx context.Context, base controlclient.WriteBase, target controlclient.TurnTarget, requestID string) (session.Session, error) {
 	active, err := s.checkControlCommandCAS(ctx, base)
 	if err != nil {
 		return active, err
 	}
 	turn, ok := s.currentGateway().ApprovalTarget(active.SessionID, eventstream.ApprovalRequestID(strings.TrimSpace(requestID)))
 	if !ok || turn.HandleID != strings.TrimSpace(target.HandleID) || turn.RunID != strings.TrimSpace(target.RunID) || turn.TurnID != strings.TrimSpace(target.TurnID) {
-		return active, controlport.NewOutcomeError(controlport.OutcomeConflicted, errors.New("controlclient: approval turn target changed"))
+		return active, controlclient.NewOutcomeError(controlclient.OutcomeConflicted, errors.New("controlclient: approval turn target changed"))
 	}
 	return active, nil
 }
@@ -282,7 +281,7 @@ func waitControlTurnStopped(ctx context.Context, gw *kernelimpl.Gateway, target 
 			return nil
 		}
 		if current.HandleID != target.HandleID || current.RunID != target.RunID || current.TurnID != target.TurnID {
-			return controlport.NewOutcomeError(controlport.OutcomeConflicted, errors.New("controlclient: another turn started while closing the session"))
+			return controlclient.NewOutcomeError(controlclient.OutcomeConflicted, errors.New("controlclient: another turn started while closing the session"))
 		}
 		select {
 		case <-ctx.Done():
@@ -292,15 +291,15 @@ func waitControlTurnStopped(ctx context.Context, gw *kernelimpl.Gateway, target 
 	}
 }
 
-func sessionCommandResult(active session.Session) controlport.CommandResult {
-	return controlport.CommandResult{Outcome: controlport.OutcomeCommitted, SessionID: active.SessionID, Revision: active.Revision}
+func sessionCommandResult(active session.Session) controlclient.CommandResult {
+	return controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted, SessionID: active.SessionID, Revision: active.Revision}
 }
 
 func classifyControlBackendError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var outcomeErr *controlport.OutcomeError
+	var outcomeErr *controlclient.OutcomeError
 	if errors.As(err, &outcomeErr) {
 		return err
 	}
@@ -309,15 +308,15 @@ func classifyControlBackendError(err error) error {
 		switch gatewayErr.Kind {
 		case kernelimpl.KindValidation:
 			coded := errorcode.Wrap(errorcode.InvalidArgument, gatewayErr.Error(), err)
-			return controlport.NewOutcomeError(controlport.OutcomeRejected, coded)
+			return controlclient.NewOutcomeError(controlclient.OutcomeRejected, coded)
 		case kernelimpl.KindConflict, kernelimpl.KindApproval:
 			coded := errorcode.Wrap(errorcode.Conflict, "gatewayapp: command conflict", err)
-			return controlport.NewOutcomeError(controlport.OutcomeConflicted, coded)
+			return controlclient.NewOutcomeError(controlclient.OutcomeConflicted, coded)
 		}
 	}
 	if errors.Is(err, session.ErrRevisionConflict) || errors.Is(err, session.ErrLeaseConflict) {
 		coded := errorcode.Wrap(errorcode.Conflict, "gatewayapp: session conflict", err)
-		return controlport.NewOutcomeError(controlport.OutcomeConflicted, coded)
+		return controlclient.NewOutcomeError(controlclient.OutcomeConflicted, coded)
 	}
 	if session.IsCommitted(err) {
 		return nil
@@ -325,5 +324,5 @@ func classifyControlBackendError(err error) error {
 	// Only an explicitly typed rejected error proves that no effect committed.
 	// Ordinary backend failures remain unknown so the operation ledger cannot
 	// expire their idempotency guard and replay a possible external effect.
-	return controlport.NewOutcomeError(controlport.OutcomeUnknown, err)
+	return controlclient.NewOutcomeError(controlclient.OutcomeUnknown, err)
 }

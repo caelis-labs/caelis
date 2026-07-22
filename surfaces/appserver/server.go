@@ -13,7 +13,8 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
+	controlclient "github.com/caelis-labs/caelis/control/client"
+	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
@@ -27,9 +28,9 @@ const (
 )
 
 type resumeBoundary struct {
-	ResumeMode     controlclient.ResumeMode `json:"resume_mode"`
-	TransientGap   bool                     `json:"transient_gap,omitempty"`
-	BoundaryCursor string                   `json:"boundary_cursor,omitempty"`
+	ResumeMode     controlclientport.ResumeMode `json:"resume_mode"`
+	TransientGap   bool                         `json:"transient_gap,omitempty"`
+	BoundaryCursor string                       `json:"boundary_cursor,omitempty"`
 }
 
 type Authenticator interface {
@@ -43,7 +44,7 @@ func (f AuthenticatorFunc) Authenticate(request *http.Request) (controlclient.Pr
 }
 
 type Config struct {
-	Service       controlclient.Service
+	Service       controlclientport.Service
 	TaskStreams   taskstream.Service
 	Authenticator Authenticator
 	AllowedHosts  []string
@@ -247,7 +248,7 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	result, err := s.config.Service.ListSessions(r.Context(), principal, controlclient.ListSessionsRequest{WorkspaceKey: r.URL.Query().Get("workspace_key"), Cursor: r.URL.Query().Get("cursor"), Limit: limit})
+	result, err := s.config.Service.ListSessions(r.Context(), principal, controlclientport.ListSessionsRequest{WorkspaceKey: r.URL.Query().Get("workspace_key"), Cursor: r.URL.Query().Get("cursor"), Limit: limit})
 	writeJSONResult(w, result, err)
 }
 
@@ -282,7 +283,7 @@ func (s *Server) sessionState(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.config.Service.InspectSession(r.Context(), principal, controlclient.StateRequest{SessionID: r.PathValue("session_id")})
+	result, err := s.config.Service.InspectSession(r.Context(), principal, controlclientport.StateRequest{SessionID: r.PathValue("session_id")})
 	writeJSONResult(w, result, err)
 }
 
@@ -295,7 +296,7 @@ func (s *Server) sessionEvents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.config.Service.Events(r.Context(), principal, controlclient.SubscribeRequest{SessionID: r.PathValue("session_id"), Cursor: cursor})
+	result, err := s.config.Service.Events(r.Context(), principal, controlclientport.SubscribeRequest{SessionID: r.PathValue("session_id"), Cursor: cursor})
 	writeJSONResult(w, result, err)
 }
 
@@ -308,7 +309,7 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.config.Service.Subscribe(r.Context(), principal, controlclient.SubscribeRequest{SessionID: r.PathValue("session_id"), Cursor: cursor})
+	result, err := s.config.Service.Subscribe(r.Context(), principal, controlclientport.SubscribeRequest{SessionID: r.PathValue("session_id"), Cursor: cursor})
 	if err != nil {
 		writeMappedError(w, err)
 		return
@@ -354,7 +355,7 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request) {
 					events = result.Subscription.Events()
 					continue
 				}
-				var gap *controlclient.FeedGapError
+				var gap *controlclientport.FeedGapError
 				if errors.As(result.Subscription.Err(), &gap) {
 					retry, marshalErr := json.Marshal(resumeBoundary{
 						ResumeMode: gap.Mode, TransientGap: gap.TransientGap, BoundaryCursor: gap.RetryCursor,

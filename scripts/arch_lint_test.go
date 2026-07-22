@@ -177,6 +177,54 @@ func readAlias(event *session.Event) string {
 	}
 }
 
+func TestSemanticBoundaryRuleRejectsRenamedControlClientPortCommandAlias(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/caelis-labs/caelis"
+	const source = `package controlclient
+
+import controlclientapi "github.com/caelis-labs/caelis/control/client"
+
+type TrustedPrincipal = controlclientapi.Principal
+`
+	rule, subject, _ := semanticRuleForSource(t, "ports/controlclient/compat.go", source, modulePath)
+	if !strings.Contains(rule, "must not define or alias Control command types") || subject != "TrustedPrincipal" {
+		t.Fatalf("semantic rule = (%q, %q), want command alias rejection", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleRejectsControlClientPortCommandTypeDefinition(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/caelis-labs/caelis"
+	const source = `package controlclient
+
+type Principal struct{}
+`
+	rule, subject, _ := semanticRuleForSource(t, "ports/controlclient/compat.go", source, modulePath)
+	if !strings.Contains(rule, "must not define or alias Control command types") || subject != "Principal" {
+		t.Fatalf("semantic rule = (%q, %q), want command type definition rejection", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleAllowsControlClientCommandComposition(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/caelis-labs/caelis"
+	const source = `package controlclient
+
+import controlclientapi "github.com/caelis-labs/caelis/control/client"
+
+type Service interface {
+	controlclientapi.CommandClient
+}
+`
+	rule, subject, _ := semanticRuleForSource(t, "ports/controlclient/service.go", source, modulePath)
+	if rule != "" || subject != "" {
+		t.Fatalf("semantic rule = (%q, %q), want command composition allowed", rule, subject)
+	}
+}
+
 func TestSemanticBoundaryRuleRejectsSurfaceGatewayEventConsumption(t *testing.T) {
 	t.Parallel()
 

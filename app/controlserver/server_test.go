@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 )
 
 func TestResolveNetworkConfigRequiresTLSOffLoopback(t *testing.T) {

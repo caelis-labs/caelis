@@ -3,6 +3,7 @@ package controlclient
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -12,6 +13,21 @@ import (
 type Principal struct {
 	ID    string   `json:"id"`
 	Roles []string `json:"roles,omitempty"`
+}
+
+// HasRole reports whether the principal has role, ignoring surrounding
+// whitespace and case.
+func (p Principal) HasRole(role string) bool {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return false
+	}
+	for _, assigned := range p.Roles {
+		if strings.EqualFold(strings.TrimSpace(assigned), role) {
+			return true
+		}
+	}
+	return false
 }
 
 type Action string

@@ -8,7 +8,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
 func TestCloseSessionRequiresQuiescentLeaseAndIsIdempotent(t *testing.T) {
@@ -67,14 +66,14 @@ func TestCloseSessionRequiresQuiescentLeaseAndIsIdempotent(t *testing.T) {
 	}
 
 	authorizer := SessionAuthorizer{Sessions: service}
-	principal := controlport.Principal{ID: "owner"}
-	if err := authorizer.Authorize(ctx, principal, controlport.ActionPrompt, active.SessionID); !errors.Is(err, ErrSessionClosed) {
+	principal := Principal{ID: "owner"}
+	if err := authorizer.Authorize(ctx, principal, ActionPrompt, active.SessionID); !errors.Is(err, ErrSessionClosed) {
 		t.Fatalf("closed prompt authorization = %v", err)
 	}
-	if err := authorizer.Authorize(ctx, principal, controlport.ActionSessionInspect, active.SessionID); err != nil {
+	if err := authorizer.Authorize(ctx, principal, ActionSessionInspect, active.SessionID); err != nil {
 		t.Fatalf("closed inspect authorization = %v", err)
 	}
-	if err := authorizer.Authorize(ctx, principal, controlport.ActionSessionClose, active.SessionID); err != nil {
+	if err := authorizer.Authorize(ctx, principal, ActionSessionClose, active.SessionID); err != nil {
 		t.Fatalf("repeated close authorization = %v", err)
 	}
 }
