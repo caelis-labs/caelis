@@ -18,10 +18,10 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 		want       string
 	}{
 		{
-			name:       "ports reject repository internals",
-			rel:        "ports/controlclient/service.go",
-			importPath: modulePath + "/internal/kernel",
-			want:       "ports must not depend on internal packages",
+			name:       "retired control client port retains replacement",
+			rel:        "surfaces/appserver/server.go",
+			importPath: modulePath + "/ports/controlclient",
+			want:       "production code must not depend on ports/controlclient; use control/client",
 		},
 		{
 			name:       "deleted gateway port retains replacement",
@@ -108,6 +108,30 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "",
 		},
 		{
+			name:       "control client accepts shared ACP feed vocabulary",
+			rel:        "control/client/feed.go",
+			importPath: modulePath + "/protocol/acp/eventstream",
+			want:       "",
+		},
+		{
+			name:       "control client accepts shared ACP projector",
+			rel:        "control/client/feed_backfill.go",
+			importPath: modulePath + "/protocol/acp/projector",
+			want:       "",
+		},
+		{
+			name:       "other control packages reject ACP protocol dependencies",
+			rel:        "control/modelconfig/build.go",
+			importPath: modulePath + "/protocol/acp/schema",
+			want:       "control must depend only on Control peers and reusable SDK packages",
+		},
+		{
+			name:       "control client rejects unrelated ACP adapters",
+			rel:        "control/client/client.go",
+			importPath: modulePath + "/protocol/acp/control",
+			want:       "control must depend only on Control peers and reusable SDK packages",
+		},
+		{
 			name:       "control rejects app implementation packages",
 			rel:        "control/modelconfig/connect.go",
 			importPath: modulePath + "/app/gatewayapp",
@@ -174,54 +198,6 @@ func readAlias(event *session.Event) string {
 	rule, subject, _ := semanticRuleForSource(t, "internal/kernel/demo.go", source, modulePath)
 	if !strings.Contains(rule, "EventProtocol") || subject != "protocol.Participant" {
 		t.Fatalf("semantic rule = (%q, %q), want EventProtocol alias rejection", rule, subject)
-	}
-}
-
-func TestSemanticBoundaryRuleRejectsRenamedControlClientPortCommandAlias(t *testing.T) {
-	t.Parallel()
-
-	const modulePath = "github.com/caelis-labs/caelis"
-	const source = `package controlclient
-
-import controlclientapi "github.com/caelis-labs/caelis/control/client"
-
-type TrustedPrincipal = controlclientapi.Principal
-`
-	rule, subject, _ := semanticRuleForSource(t, "ports/controlclient/compat.go", source, modulePath)
-	if !strings.Contains(rule, "must not define or alias Control command types") || subject != "TrustedPrincipal" {
-		t.Fatalf("semantic rule = (%q, %q), want command alias rejection", rule, subject)
-	}
-}
-
-func TestSemanticBoundaryRuleRejectsControlClientPortCommandTypeDefinition(t *testing.T) {
-	t.Parallel()
-
-	const modulePath = "github.com/caelis-labs/caelis"
-	const source = `package controlclient
-
-type Principal struct{}
-`
-	rule, subject, _ := semanticRuleForSource(t, "ports/controlclient/compat.go", source, modulePath)
-	if !strings.Contains(rule, "must not define or alias Control command types") || subject != "Principal" {
-		t.Fatalf("semantic rule = (%q, %q), want command type definition rejection", rule, subject)
-	}
-}
-
-func TestSemanticBoundaryRuleAllowsControlClientCommandComposition(t *testing.T) {
-	t.Parallel()
-
-	const modulePath = "github.com/caelis-labs/caelis"
-	const source = `package controlclient
-
-import controlclientapi "github.com/caelis-labs/caelis/control/client"
-
-type Service interface {
-	controlclientapi.CommandClient
-}
-`
-	rule, subject, _ := semanticRuleForSource(t, "ports/controlclient/service.go", source, modulePath)
-	if rule != "" || subject != "" {
-		t.Fatalf("semantic rule = (%q, %q), want command composition allowed", rule, subject)
 	}
 }
 
@@ -366,6 +342,18 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 		want    string
 		wantSub string
 	}{
+		{
+			name:    "deleted product control client port fails",
+			rel:     "ports/controlclient/service.go",
+			want:    "must not recreate ports/controlclient; product client contracts and behavior belong to control/client",
+			wantSub: "ports/controlclient",
+		},
+		{
+			name:    "unknown ports path fails",
+			rel:     "ports/newdomain/types.go",
+			want:    "must not recreate the retired ports tree; place contracts with their control, agent-sdk, or internal owner",
+			wantSub: "ports/newdomain",
+		},
 		{
 			name:    "deleted ports model path fails without imports",
 			rel:     "ports/model/types.go",

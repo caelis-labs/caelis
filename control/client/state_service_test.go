@@ -9,7 +9,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -35,9 +34,9 @@ func TestStateServiceReturnsTypedConsistentBootstrapBySessionID(t *testing.T) {
 		Controller:   session.ControllerBinding{Kind: session.ControllerKindACP, EpochID: "epoch-1"},
 		Participants: []session.ParticipantBinding{{ID: "participant-1", Kind: session.ParticipantKindACP}},
 	}}
-	runtime := staticRuntimeStateReader{state: controlport.RuntimeState{
-		Run: controlport.RunState{Active: true, Status: "waiting_approval", HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1", WaitingApproval: true},
-		Approval: controlport.ApprovalState{Active: &controlport.ActiveApproval{
+	runtime := staticRuntimeStateReader{state: RuntimeState{
+		Run: RunState{Active: true, Status: "waiting_approval", HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1", WaitingApproval: true},
+		Approval: ApprovalState{Active: &ActiveApproval{
 			RequestID: "approval-1", Scope: eventstream.ScopeMain,
 			Permission: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call-1", Name: "WRITE"}},
 		}, QueuedCount: 2},
@@ -46,7 +45,7 @@ func TestStateServiceReturnsTypedConsistentBootstrapBySessionID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := service.State(context.Background(), controlport.StateRequest{SessionID: "session-1"})
+	state, err := service.State(context.Background(), StateRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +79,7 @@ func TestStateServiceDoesNotStarveWhileSessionRevisionChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := service.State(context.Background(), controlport.StateRequest{SessionID: "session-1"})
+	state, err := service.State(context.Background(), StateRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatalf("State error = %v, want bounded successful bootstrap", err)
 	}
@@ -141,7 +140,7 @@ func TestStateServiceReconnectSucceedsDuringContinuousPublish(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	state, err := service.State(ctx, controlport.StateRequest{SessionID: "session-1"})
+	state, err := service.State(ctx, StateRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatalf("State during continuous Publish = %v", err)
 	}
@@ -179,8 +178,8 @@ func TestStateServiceMapsCheckpointLagToRevisionConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = service.State(context.Background(), controlport.StateRequest{SessionID: "session-1"})
-	if !errors.Is(err, controlport.ErrStateRevisionConflict) || errorcode.CodeOf(err) != errorcode.Conflict {
+	_, err = service.State(context.Background(), StateRequest{SessionID: "session-1"})
+	if !errors.Is(err, ErrStateRevisionConflict) || errorcode.CodeOf(err) != errorcode.Conflict {
 		t.Fatalf("State error = %v (code %q), want ErrStateRevisionConflict", err, errorcode.CodeOf(err))
 	}
 }
@@ -213,12 +212,12 @@ func TestReconnectStateUsesExactFeedCutModeGapAndBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fallback, err := service.Reconnect(context.Background(), controlport.ReconnectRequest{SessionID: "session-1", Cursor: firstCursor})
+	fallback, err := service.Reconnect(context.Background(), ReconnectRequest{SessionID: "session-1", Cursor: firstCursor})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer fallback.Subscription.Close()
-	if fallback.State.ResumeMode != controlport.ResumeModeDurableFallback || !fallback.State.TransientGap {
+	if fallback.State.ResumeMode != ResumeModeDurableFallback || !fallback.State.TransientGap {
 		t.Fatalf("fallback state = %#v", fallback.State)
 	}
 	decoded, err := codec.Decode("session-1", fallback.State.BoundaryCursor)
@@ -231,12 +230,12 @@ func TestReconnectStateUsesExactFeedCutModeGapAndBoundary(t *testing.T) {
 		t.Fatalf("fallback backfill = %#v", backfill)
 	}
 	_, currentCursor := feed.Boundary()
-	exact, err := service.Reconnect(context.Background(), controlport.ReconnectRequest{SessionID: "session-1", Cursor: currentCursor})
+	exact, err := service.Reconnect(context.Background(), ReconnectRequest{SessionID: "session-1", Cursor: currentCursor})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer exact.Subscription.Close()
-	if exact.State.ResumeMode != controlport.ResumeModeExact || exact.State.TransientGap {
+	if exact.State.ResumeMode != ResumeModeExact || exact.State.TransientGap {
 		t.Fatalf("exact state = %#v", exact.State)
 	}
 }
@@ -268,8 +267,8 @@ func (r *changingStateSessionReader) Session(_ context.Context, ref session.Sess
 	return session.Session{SessionRef: session.SessionRef{SessionID: ref.SessionID}, Revision: r.revision}, nil
 }
 
-type staticRuntimeStateReader struct{ state controlport.RuntimeState }
+type staticRuntimeStateReader struct{ state RuntimeState }
 
-func (r staticRuntimeStateReader) ControlClientRuntimeState(context.Context, session.SessionRef) (controlport.RuntimeState, error) {
+func (r staticRuntimeStateReader) ControlClientRuntimeState(context.Context, session.SessionRef) (RuntimeState, error) {
 	return r.state, nil
 }

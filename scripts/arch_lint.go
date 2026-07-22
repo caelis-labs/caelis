@@ -132,9 +132,6 @@ func readModulePath(path string) (string, error) {
 }
 
 func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
-	if rule, subject, line := controlClientPortCommandTypeRule(rel, file, fset, modulePath); rule != "" {
-		return rule, subject, line
-	}
 	if rule, subject, line := surfaceGatewayConsumptionRule(rel, file, fset, modulePath); rule != "" {
 		return rule, subject, line
 	}
@@ -145,59 +142,6 @@ func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modul
 		return rule, subject, line
 	}
 	return "", "", 0
-}
-
-func controlClientPortCommandTypeRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
-	if !strings.HasPrefix(rel, "ports/controlclient/") || strings.HasSuffix(rel, "_test.go") || file == nil {
-		return "", "", 0
-	}
-	controlClientNames := importNames(file, modulePath+"/control/client")
-	var subject string
-	var line int
-	ast.Inspect(file, func(node ast.Node) bool {
-		if subject != "" {
-			return false
-		}
-		typeSpec, ok := node.(*ast.TypeSpec)
-		if !ok || (!isControlClientCommandType(typeSpec.Name.Name) && !isControlClientCommandAlias(typeSpec, controlClientNames)) {
-			return true
-		}
-		subject = typeSpec.Name.Name
-		line = fset.Position(typeSpec.Pos()).Line
-		return false
-	})
-	if subject == "" {
-		return "", "", 0
-	}
-	return "ports/controlclient must not define or alias Control command types; use control/client", subject, line
-}
-
-func isControlClientCommandAlias(typeSpec *ast.TypeSpec, controlClientNames map[string]bool) bool {
-	if typeSpec == nil || !typeSpec.Assign.IsValid() || len(controlClientNames) == 0 {
-		return false
-	}
-	selector, ok := typeSpec.Type.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	ident, ok := selector.X.(*ast.Ident)
-	return ok && controlClientNames[ident.Name]
-}
-
-func isControlClientCommandType(name string) bool {
-	switch name {
-	case "Principal", "Action", "Outcome", "OutcomeError", "WriteBase", "TurnTarget",
-		"CreateSessionRequest", "CloseSessionRequest", "PromptRequest", "SteerRequest",
-		"CancelRequest", "ResolveApprovalRequest", "AttachParticipantRequest",
-		"PromptParticipantRequest", "CancelParticipantRequest", "DetachParticipantRequest",
-		"HandoffRequest", "CommandResult", "CommandBackend", "CommandClient", "Authorizer",
-		"SessionAuthorizer", "OperationIntent", "OperationRecord", "OperationStore",
-		"MemoryOperationStore", "FileOperationStore", "OperationRetentionConfig",
-		"OperationSweepResult", "CommandServiceConfig", "CommandService":
-		return true
-	default:
-		return false
-	}
 }
 
 func surfaceGatewayConsumptionRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
@@ -538,6 +482,9 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if target == "ports/controlcommand" || strings.HasPrefix(target, "ports/controlcommand/") {
 		return "production code must not depend on ports/controlcommand; use internal/controlprompt"
 	}
+	if target == "ports/controlclient" || strings.HasPrefix(target, "ports/controlclient/") {
+		return "production code must not depend on ports/controlclient; use control/client"
+	}
 	if target == "internal/controlpromptrouter" || strings.HasPrefix(target, "internal/controlpromptrouter/") {
 		return "production code must not depend on internal/controlpromptrouter; use internal/controlprompt"
 	}
@@ -550,11 +497,17 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if target == "ports/plugin" || strings.HasPrefix(target, "ports/plugin/") {
 		return "production code must not depend on ports/plugin; use control/plugin"
 	}
+	if target == "ports" || strings.HasPrefix(target, "ports/") {
+		return "production code must not depend on retired ports packages; use the owning control, agent-sdk, or internal package"
+	}
 	if rule := deletedSDKImplImportRule(target); rule != "" {
 		return rule
 	}
 	switch {
 	case strings.HasPrefix(rel, "control/"):
+		if allowedControlClientProtocolTarget(rel, target) {
+			return ""
+		}
 		if startsWithAny(target, "app/", "surfaces/", "protocol/", "ports/", "internal/") {
 			return "control must depend only on Control peers and reusable SDK packages"
 		}
@@ -645,6 +598,15 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	return ""
 }
 
+func allowedControlClientProtocolTarget(rel string, target string) bool {
+	return strings.HasPrefix(rel, "control/client/") && pathIn(target,
+		"protocol/acp/eventstream",
+		"protocol/acp/metautil",
+		"protocol/acp/projector",
+		"protocol/acp/schema",
+	)
+}
+
 type deletedSDKImplPath struct {
 	prefix string
 	sdk    string
@@ -730,6 +692,8 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "", "", 0
 	}
 	switch {
+	case pkg == "ports/controlclient" || strings.HasPrefix(pkg, "ports/controlclient/"):
+		return "must not recreate ports/controlclient; product client contracts and behavior belong to control/client", pkg, 1
 	case pkg == "ports/gateway" || strings.HasPrefix(pkg, "ports/gateway/"):
 		return "must not recreate ports/gateway; current Control gateway contracts belong to internal/kernel", pkg, 1
 	case pkg == "ports/controlprompt/connectwizard" || strings.HasPrefix(pkg, "ports/controlprompt/connectwizard/"):
@@ -759,6 +723,9 @@ func removedPackageFileRule(rel string) (string, string, int) {
 	}
 	if isMigratedRuntimePortsPackage(pkg) {
 		return sdkOwnedPortsCompatFileMessage(pkg), pkg, 1
+	}
+	if pkg == "ports" || strings.HasPrefix(pkg, "ports/") {
+		return "must not recreate the retired ports tree; place contracts with their control, agent-sdk, or internal owner", pkg, 1
 	}
 	if mapping, ok := deletedSDKImplPathMatch(pkg); ok {
 		return fmt.Sprintf("must not recreate %s; use %s", mapping.prefix, mapping.sdk), pkg, 1

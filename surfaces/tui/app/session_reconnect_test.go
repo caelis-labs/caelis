@@ -10,8 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"

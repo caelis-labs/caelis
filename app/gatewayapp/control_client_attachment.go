@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlclient/turningress"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -30,7 +30,7 @@ func (s *Stack) attachControlClientHandle(handle kernel.TurnHandle) {
 
 func superviseControlClientAttachment(
 	ingress *turningress.Broker,
-	feed controlport.SessionFeed,
+	feed controlclient.SessionFeed,
 	events <-chan eventstream.Envelope,
 	attachment <-chan error,
 ) {
@@ -41,7 +41,7 @@ func superviseControlClientAttachment(
 
 func finishFailedControlClientAttachment(
 	ingress *turningress.Broker,
-	feed controlport.SessionFeed,
+	feed controlclient.SessionFeed,
 	events <-chan eventstream.Envelope,
 	err error,
 ) {

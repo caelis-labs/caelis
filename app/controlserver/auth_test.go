@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/surfaces/appserver"
 )
 
@@ -55,12 +54,12 @@ func TestAllowedHostAndProductionBearerReachService(t *testing.T) {
 }
 
 type authBoundaryService struct {
-	controlclientport.Service
+	controlclient.Service
 	calls     int
 	principal controlclient.Principal
 }
 
-func (s *authBoundaryService) ListSessions(_ context.Context, principal controlclient.Principal, _ controlclientport.ListSessionsRequest) (session.SessionList, error) {
+func (s *authBoundaryService) ListSessions(_ context.Context, principal controlclient.Principal, _ controlclient.ListSessionsRequest) (session.SessionList, error) {
 	s.calls++
 	s.principal = principal
 	return session.SessionList{}, nil

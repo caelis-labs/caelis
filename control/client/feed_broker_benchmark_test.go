@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -26,7 +25,7 @@ func BenchmarkFeedBrokerReconnectFirstEnvelope(b *testing.B) {
 			b.ResetTimer()
 			for range b.N {
 				broker, _ := newBenchmarkFeedBroker(b, reader)
-				result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+				result, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1"})
 				if err != nil {
 					b.Fatal(err)
 				}

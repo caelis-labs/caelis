@@ -19,10 +19,8 @@ and request-scoped command contract:
 
 ```text
 TUI / headless / ACP bridge ----+
-                                +-> control/client commands ------------+-> Control
-HTTP JSON + SSE app-server -----+                                       |
-                                +-> ports/controlclient state/feed -----+
-                                         (transitional)                 |
+                                +-> control/client ----------------------+-> Control
+HTTP JSON + SSE app-server -----+    commands + state/feed               |
                                                                         +-> Session Feed Broker
                                                                              |- durable session.Event lane
                                                                              `- transient live lane
@@ -178,8 +176,8 @@ or cancels an asynchronous Spawn.
 
 ## Task Stream Service
 
-`control/taskstream` is a coherent capability and does not extend the frozen
-`ports/controlclient` or `protocol/acp/control.Service` contracts. It exposes
+`control/taskstream` is a coherent capability and does not extend
+`control/client.Service` or `protocol/acp/control.Service`. It exposes
 Task directory, finite records, and one-Task subscription operations;
 `protocol/acp/taskstream` projects those records into the ACP Envelopes consumed
 by Surfaces. Each directory descriptor includes the public Session-unique
@@ -378,27 +376,19 @@ followed by parent-directory sync; Windows document/WAL replacement uses
 
 ## Request-Scoped Control Commands
 
-`control/client` owns the transport-neutral product command boundary. It owns
-trusted principals, command requests and typed outcomes, Session authorization,
-dispatch, lifecycle gating, and the durable idempotency operation ledger. It
-does not own ACP wire DTOs, HTTP, Runtime assembly, or Session feed projection.
+`control/client` owns the complete product client boundary. It owns trusted
+principals, command requests and typed outcomes, Session authorization,
+dispatch, lifecycle gating, list/bootstrap/reconnect state, feed/replay
+coordination, approval recovery, and the durable idempotency operation ledger.
+Its Session feed consumes the shared ACP projector and publishes the shared
+`eventstream.Envelope` vocabulary; `protocol/acp` continues to own that
+projection and wire vocabulary, while Control owns authorization, state
+assembly, replay coordination, and broker lifecycle. It does not own HTTP DTOs
+or Runtime assembly.
 
-`ports/controlclient` retains only the transitional Session list, bootstrap
-state, reconnect, and feed subscription contracts. Its aggregate `Service`
-embeds `control/client.CommandClient` so existing clients still consume one
-object, without giving the port ownership of command semantics.
-
-This describes the accepted M2 API at its current ownership boundary. New
-Control operations and domains belong under coherent `control/*` packages;
-later bounded migrations of the remaining port must preserve the accepted wire
-and replay semantics.
-
-The next bounded package-retirement slice moves the remaining Session
-list/bootstrap/state/reconnect/feed contracts and implementation out of
-`ports/controlclient` and `internal/controlclient`. Until that slice completes,
-consumers that cross both command and observation boundaries name both owners
-explicitly. The port must not alias command types back merely to hide that
-temporary split.
+This describes the accepted M2 API at its final package ownership boundary.
+New Control operations and domains belong under coherent `control/*` packages;
+the retired `ports/*` tree must not be recreated.
 
 Every write contains:
 
@@ -547,7 +537,7 @@ explicit `Sweep` but opportunistic maintenance never changes the outcome of
 The checked-in OpenAPI 3.1 document is the HTTP wire truth. Generation uses a
 pinned tool version and produces checked-in standalone Go DTOs and TypeScript
 types. A production conformance gate marshals every `control/client` command
-request/response, every `ports/controlclient` state/feed response, every
+request/response, every `control/client` state/feed response, every
 Envelope kind, every standard ACP update, and a raw ACP extension through the
 real Go wire types and validates the JSON against the OpenAPI component
 schemas. A second gate decodes and re-encodes a complete raw extension Envelope
@@ -710,17 +700,15 @@ participant/handoff policy, or persistence logic.
 | canonical events, child typed origin, paged Session Reader | `agent-sdk/session` |
 | Envelope, delivery mode, feed position, cursor codec contract | `protocol/acp/eventstream` |
 | ACP semantic projection | `protocol/acp/projector` |
-| principals, transport-neutral commands/outcomes, authorization, operation ledger, lifecycle gate | `control/client` |
-| Session list/bootstrap/state/feed contracts and aggregate Service | `ports/controlclient` (transitional, frozen) |
-| feed broker, legacy child-mirror filter, approval recovery, state assembly, aggregate client | `internal/controlclient` (transitional toward `control/*`) |
+| principals, commands/outcomes, authorization, list/bootstrap/reconnect, Session feed/replay, approval recovery, aggregate client, operation ledger, lifecycle gate | `control/client` |
 | main-only Turn ingress | `internal/controlclient/turningress` |
 | Session-authorized transient Task directory and cursor-stamped records | `control/taskstream` |
 | Task record to ACP Envelope projection | `protocol/acp/taskstream` |
 | HTTP/SSE DTO mapping and authentication extraction | `surfaces/appserver` |
 | dependency assembly, listener configuration, persistent secret path | `app/*` and `cmd/caelis` |
 
-`surfaces/appserver` may import `control/client`, `ports/controlclient`,
-`protocol/acp/taskstream`, and `protocol/acp/eventstream`; it must not import
+`surfaces/appserver` may import `control/client`, `protocol/acp/taskstream`, and
+`protocol/acp/eventstream`; it must not import
 `app/*`, repository
 `internal/*`, `agent-sdk/runtime`, policy, or session persistence
 implementations. `agent-sdk/*` must not import `protocol/*`, `ports/*`,

@@ -10,7 +10,6 @@ import (
 	"strconv"
 
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -96,9 +95,9 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case controlclient.CommandResult:
 		return marshalCommandResult(typed)
-	case controlclientport.SessionState:
+	case controlclient.SessionState:
 		return marshalSessionState(typed)
-	case controlclientport.EventBatch:
+	case controlclient.EventBatch:
 		return marshalEventBatch(typed)
 	case taskstream.Batch:
 		return marshalTaskEventBatch(typed)
@@ -156,7 +155,7 @@ func marshalCommandResult(result controlclient.CommandResult) ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-func marshalSessionState(state controlclientport.SessionState) ([]byte, error) {
+func marshalSessionState(state controlclient.SessionState) ([]byte, error) {
 	if err := validateSafeInt("queued_count", state.Approval.QueuedCount); err != nil {
 		return nil, err
 	}
@@ -208,12 +207,12 @@ func marshalBinding(binding any, contextSyncSeq uint64) (json.RawMessage, error)
 	return json.Marshal(fields)
 }
 
-func marshalEventBatch(batch controlclientport.EventBatch) ([]byte, error) {
+func marshalEventBatch(batch controlclient.EventBatch) ([]byte, error) {
 	type wireBatch struct {
-		Events         []json.RawMessage            `json:"events,omitempty"`
-		ResumeMode     controlclientport.ResumeMode `json:"resume_mode"`
-		TransientGap   bool                         `json:"transient_gap,omitempty"`
-		BoundaryCursor string                       `json:"boundary_cursor,omitempty"`
+		Events         []json.RawMessage        `json:"events,omitempty"`
+		ResumeMode     controlclient.ResumeMode `json:"resume_mode"`
+		TransientGap   bool                     `json:"transient_gap,omitempty"`
+		BoundaryCursor string                   `json:"boundary_cursor,omitempty"`
 	}
 	out := wireBatch{
 		ResumeMode: batch.ResumeMode, TransientGap: batch.TransientGap, BoundaryCursor: batch.BoundaryCursor,

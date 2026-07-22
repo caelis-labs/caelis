@@ -32,10 +32,8 @@ import (
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acptaskstream "github.com/caelis-labs/caelis/protocol/acp/taskstream"
@@ -91,13 +89,13 @@ type Stack struct {
 	placement                controlplane.PlacementExecutor
 	acpControlPlane          *acpassembly.ControlPlane
 	taskStore                task.Store
-	controlFeeds             controlclientport.FeedRegistry
-	controlState             controlclientport.StateReader
+	controlFeeds             controlclient.FeedRegistry
+	controlState             controlclient.StateReader
 	controlCommands          controlclient.CommandClient
-	controlClient            controlclientport.Service
+	controlClient            controlclient.Service
 	taskStreams              acptaskstream.Service
 	operations               *controlclient.FileOperationStore
-	approvalRecovery         *internalcontrolclient.ApprovalRecoveryGate
+	approvalRecovery         *controlclient.ApprovalRecoveryGate
 	gateway                  *kernelimpl.Gateway
 	mcpMgr                   *mcp.Manager
 	codexAuth                *codexauth.Manager
@@ -149,7 +147,7 @@ func (s *Stack) KernelStreams() kernelimpl.StreamProvider {
 
 // ControlClientFeeds returns the Control-owned Session feed registry shared by
 // every in-process and network adapter.
-func (s *Stack) ControlClientFeeds() controlclientport.FeedRegistry {
+func (s *Stack) ControlClientFeeds() controlclient.FeedRegistry {
 	if s == nil {
 		return nil
 	}
@@ -157,7 +155,7 @@ func (s *Stack) ControlClientFeeds() controlclientport.FeedRegistry {
 }
 
 // ControlClientState returns the typed reconnect bootstrap reader.
-func (s *Stack) ControlClientState() controlclientport.StateReader {
+func (s *Stack) ControlClientState() controlclient.StateReader {
 	if s == nil {
 		return nil
 	}
@@ -165,11 +163,11 @@ func (s *Stack) ControlClientState() controlclientport.StateReader {
 }
 
 // ControlClientReconnect returns the atomic typed bootstrap/splice service.
-func (s *Stack) ControlClientReconnect() controlclientport.ReconnectReader {
+func (s *Stack) ControlClientReconnect() controlclient.ReconnectReader {
 	if s == nil {
 		return nil
 	}
-	reconnect, _ := s.controlState.(controlclientport.ReconnectReader)
+	reconnect, _ := s.controlState.(controlclient.ReconnectReader)
 	return reconnect
 }
 
@@ -182,7 +180,7 @@ func (s *Stack) ControlClientCommands() controlclient.CommandClient {
 }
 
 // ControlClient returns the complete transport-neutral client service.
-func (s *Stack) ControlClient() controlclientport.Service {
+func (s *Stack) ControlClient() controlclient.Service {
 	if s == nil {
 		return nil
 	}
@@ -200,10 +198,10 @@ func (s *Stack) TaskStreams() acptaskstream.Service {
 
 // ControlClientRuntimeState delegates bootstrap live-state reads to the
 // currently installed Control gateway.
-func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (controlclientport.RuntimeState, error) {
+func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (controlclient.RuntimeState, error) {
 	gateway := s.currentGateway()
 	if gateway == nil {
-		return controlclientport.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
+		return controlclient.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
 	}
 	return gateway.ControlClientRuntimeState(ctx, ref)
 }
@@ -300,7 +298,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	})
 	sessions := sessionStore
 	taskStore := sessionfile.NewTaskStore(sessionStore)
-	approvalRecovery := internalcontrolclient.NewApprovalRecoveryGate(sessions)
+	approvalRecovery := controlclient.NewApprovalRecoveryGate(sessions)
 	cursorSecret, err := loadOrCreateControlClientCursorSecret(storeDir)
 	if err != nil {
 		return nil, err
@@ -309,7 +307,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	controlFeeds, err := internalcontrolclient.NewFeedRegistry(internalcontrolclient.FeedRegistryConfig{
+	controlFeeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{
 		Reader: sessions, CursorCodec: cursorCodec,
 	})
 	if err != nil {
@@ -403,7 +401,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	}
 	stack.placementCache = newPlacementSnapshot(doc)
 	configStore.savedHook = stack.invalidatePlacementSnapshot
-	controlState, err := internalcontrolclient.NewStateService(internalcontrolclient.StateServiceConfig{
+	controlState, err := controlclient.NewStateService(controlclient.StateServiceConfig{
 		Sessions: sessions, Runtime: stack, Feeds: controlFeeds,
 	})
 	if err != nil {
@@ -435,7 +433,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	stack.controlCommands = controlCommands
-	controlClient, err := internalcontrolclient.NewClient(internalcontrolclient.ClientConfig{
+	controlClient, err := controlclient.NewClient(controlclient.ClientConfig{
 		Commands: controlCommands, State: controlState, Feeds: controlFeeds,
 		Authorizer: controlclient.SessionAuthorizer{Sessions: sessions}, Sessions: sessions,
 	})

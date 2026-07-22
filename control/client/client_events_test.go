@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclientapi "github.com/caelis-labs/caelis/control/client"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -30,12 +28,12 @@ func TestClientEventsNeverCrossesCapturedBoundaryDuringLiveSplice(t *testing.T) 
 			Authorizer: eventBatchAllowAuthorizer{},
 		}}
 		type eventsResult struct {
-			batch controlport.EventBatch
+			batch EventBatch
 			err   error
 		}
 		result := make(chan eventsResult, 1)
 		go func() {
-			batch, err := client.Events(context.Background(), controlclientapi.Principal{ID: "owner"}, controlport.SubscribeRequest{SessionID: "session-1"})
+			batch, err := client.Events(context.Background(), Principal{ID: "owner"}, SubscribeRequest{SessionID: "session-1"})
 			result <- eventsResult{batch: batch, err: err}
 		}()
 
@@ -96,15 +94,15 @@ func (r *backfillSplicePageReader) EventsPage(ctx context.Context, req session.E
 }
 
 type singleSessionFeedRegistry struct {
-	feed controlport.SessionFeed
+	feed SessionFeed
 }
 
-func (r singleSessionFeedRegistry) Session(session.SessionRef) (controlport.SessionFeed, error) {
+func (r singleSessionFeedRegistry) Session(session.SessionRef) (SessionFeed, error) {
 	return r.feed, nil
 }
 
 type eventBatchAllowAuthorizer struct{}
 
-func (eventBatchAllowAuthorizer) Authorize(context.Context, controlclientapi.Principal, controlclientapi.Action, string) error {
+func (eventBatchAllowAuthorizer) Authorize(context.Context, Principal, Action, string) error {
 	return nil
 }

@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlclient/turningress"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -20,9 +20,9 @@ type gatewayTurn struct {
 	// sessionFeed remains available after the prepared subscription is closed.
 	// Stop/failure takeover reattaches the same ingress here so sibling SSE/GUI
 	// subscribers still observe the authoritative producer-barrier terminal.
-	sessionFeed controlclientport.SessionFeed
+	sessionFeed controlclient.SessionFeed
 
-	subscription   controlclientport.FeedSubscription
+	subscription   controlclient.FeedSubscription
 	attachment     <-chan error
 	attach         func() <-chan error
 	eventsOnce     sync.Once

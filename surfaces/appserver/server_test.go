@@ -19,7 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/appserver/generated"
@@ -99,7 +98,7 @@ func TestSSEUsesCursorIDAndWholeEnvelopeData(t *testing.T) {
 	server.ServeHTTP(recorder, request)
 	response := recorder.Result()
 	defer response.Body.Close()
-	if response.Header.Get(resumeModeHeader) != string(controlclientport.ResumeModeExact) || response.Header.Get(transientGapHeader) != "false" || response.Header.Get(boundaryCursorHeader) != "signed-cursor-1" {
+	if response.Header.Get(resumeModeHeader) != string(controlclient.ResumeModeExact) || response.Header.Get(transientGapHeader) != "false" || response.Header.Get(boundaryCursorHeader) != "signed-cursor-1" {
 		t.Fatalf("SSE resume headers = %#v", response.Header)
 	}
 	reader := bufio.NewReader(response.Body)
@@ -113,7 +112,7 @@ func TestSSEUsesCursorIDAndWholeEnvelopeData(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace([]byte(strings.TrimPrefix(resumeData, "data: "))), &boundary); err != nil {
 		t.Fatal(err)
 	}
-	if boundary.ResumeMode != controlclientport.ResumeModeExact || boundary.TransientGap || boundary.BoundaryCursor != "signed-cursor-1" {
+	if boundary.ResumeMode != controlclient.ResumeModeExact || boundary.TransientGap || boundary.BoundaryCursor != "signed-cursor-1" {
 		t.Fatalf("resume boundary = %#v", boundary)
 	}
 	idLine, _ := reader.ReadString('\n')
@@ -144,9 +143,9 @@ func TestSSEUsesCursorIDAndWholeEnvelopeData(t *testing.T) {
 
 func TestSSEReportsTypedGapWithRetryCursor(t *testing.T) {
 	subscription := newTestSubscription()
-	subscription.err = &controlclientport.FeedGapError{
+	subscription.err = &controlclient.FeedGapError{
 		Cause: errors.New("splice overtaken"), RetryCursor: "retry-cursor",
-		Mode: controlclientport.ResumeModeDurableFallback, TransientGap: true,
+		Mode: controlclient.ResumeModeDurableFallback, TransientGap: true,
 	}
 	server := newTestServer(t, &fakeService{subscription: subscription}, time.Hour)
 	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/stream", nil)
@@ -383,16 +382,16 @@ func TestOpenAPI31ContainsEveryGeneratedOperation(t *testing.T) {
 }
 
 type fakeService struct {
-	controlclientport.Service
+	controlclient.Service
 	principal    controlclient.Principal
 	created      controlclient.CreateSessionRequest
 	attached     controlclient.AttachParticipantRequest
-	subscription controlclientport.FeedSubscription
+	subscription controlclient.FeedSubscription
 	listCalls    int
 	inspectErr   error
 }
 
-func (s *fakeService) ListSessions(context.Context, controlclient.Principal, controlclientport.ListSessionsRequest) (session.SessionList, error) {
+func (s *fakeService) ListSessions(context.Context, controlclient.Principal, controlclient.ListSessionsRequest) (session.SessionList, error) {
 	s.listCalls++
 	return session.SessionList{}, nil
 }
@@ -406,14 +405,14 @@ func (s *fakeService) AttachParticipant(_ context.Context, principal controlclie
 	s.attached = req
 	return controlclient.CommandResult{OperationID: req.OperationID, Outcome: controlclient.OutcomeCommitted, SessionID: req.SessionID, Revision: 2}, nil
 }
-func (s *fakeService) InspectSession(context.Context, controlclient.Principal, controlclientport.StateRequest) (controlclientport.SessionState, error) {
-	return controlclientport.SessionState{}, s.inspectErr
+func (s *fakeService) InspectSession(context.Context, controlclient.Principal, controlclient.StateRequest) (controlclient.SessionState, error) {
+	return controlclient.SessionState{}, s.inspectErr
 }
-func (s *fakeService) Subscribe(context.Context, controlclient.Principal, controlclientport.SubscribeRequest) (controlclientport.SubscribeResult, error) {
-	return controlclientport.SubscribeResult{Subscription: s.subscription, Mode: controlclientport.ResumeModeExact, BoundaryCursor: "signed-cursor-1"}, nil
+func (s *fakeService) Subscribe(context.Context, controlclient.Principal, controlclient.SubscribeRequest) (controlclient.SubscribeResult, error) {
+	return controlclient.SubscribeResult{Subscription: s.subscription, Mode: controlclient.ResumeModeExact, BoundaryCursor: "signed-cursor-1"}, nil
 }
 
-func newTestServer(t *testing.T, service controlclientport.Service, heartbeat time.Duration) *Server {
+func newTestServer(t *testing.T, service controlclient.Service, heartbeat time.Duration) *Server {
 	t.Helper()
 	server, err := New(Config{
 		Service: service, Authenticator: testAuthenticator(),

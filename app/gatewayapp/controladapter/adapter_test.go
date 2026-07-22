@@ -27,12 +27,12 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
-	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
 func encryptCodeFreeAPIKeyForRuntimeTest(t *testing.T, apiKey string) string {
@@ -331,11 +331,11 @@ func TestAdapterResumeCommitsAtomicReconnectAndSteersActiveTurn(t *testing.T) {
 			HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1",
 		}},
 	}
-	reconnect := &fixedReconnectReader{result: controlclientport.ReconnectResult{
-		State: controlclientport.SessionState{
-			SessionID: target.SessionID, ResumeMode: controlclientport.ResumeModeExact,
-			Run: controlclientport.RunState{Active: true, HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
-			Approval: controlclientport.ApprovalState{Active: &controlclientport.ActiveApproval{
+	reconnect := &fixedReconnectReader{result: controlclient.ReconnectResult{
+		State: controlclient.SessionState{
+			SessionID: target.SessionID, ResumeMode: controlclient.ResumeModeExact,
+			Run: controlclient.RunState{Active: true, HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
+			Approval: controlclient.ApprovalState{Active: &controlclient.ActiveApproval{
 				RequestID: "approval-1", Permission: &session.ProtocolApproval{},
 			}},
 		},
@@ -4503,11 +4503,11 @@ func (g *activeSubmitGatewayService) ActiveTurns() []kernel.ActiveTurnState {
 }
 
 type fixedReconnectReader struct {
-	result controlclientport.ReconnectResult
+	result controlclient.ReconnectResult
 	err    error
 }
 
-func (r *fixedReconnectReader) Reconnect(context.Context, controlclientport.ReconnectRequest) (controlclientport.ReconnectResult, error) {
+func (r *fixedReconnectReader) Reconnect(context.Context, controlclient.ReconnectRequest) (controlclient.ReconnectResult, error) {
 	return r.result, r.err
 }
 

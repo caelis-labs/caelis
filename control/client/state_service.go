@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
 // StateServiceConfig supplies bootstrap sources owned below presentation.
@@ -15,8 +14,8 @@ type StateServiceConfig struct {
 	Sessions interface {
 		Session(context.Context, session.SessionRef) (session.Session, error)
 	}
-	Runtime controlport.RuntimeStateReader
-	Feeds   controlport.FeedRegistry
+	Runtime RuntimeStateReader
+	Feeds   FeedRegistry
 }
 
 // StateService assembles revision/boundary-consistent SessionState.
@@ -33,17 +32,17 @@ func NewStateService(config StateServiceConfig) (*StateService, error) {
 // State returns one consistent bootstrap selected only by Session ID. It uses
 // the same reconnect cut as a live subscriber, then immediately releases the
 // diagnostic subscription.
-func (s *StateService) State(ctx context.Context, req controlport.StateRequest) (controlport.SessionState, error) {
+func (s *StateService) State(ctx context.Context, req StateRequest) (SessionState, error) {
 	if s == nil {
-		return controlport.SessionState{}, errors.New("controlclient: nil state service")
+		return SessionState{}, errors.New("controlclient: nil state service")
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	if sessionID == "" {
-		return controlport.SessionState{}, session.ErrInvalidSession
+		return SessionState{}, session.ErrInvalidSession
 	}
-	result, err := s.Reconnect(ctx, controlport.ReconnectRequest{SessionID: sessionID})
+	result, err := s.Reconnect(ctx, ReconnectRequest{SessionID: sessionID})
 	if err != nil {
-		return controlport.SessionState{}, err
+		return SessionState{}, err
 	}
 	if result.Subscription != nil {
 		_ = result.Subscription.Close()

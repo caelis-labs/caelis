@@ -12,8 +12,8 @@ version, release, or test lifecycle. Coherent, stable product-control
 capabilities belong in `control/*`. Today `app/gatewayapp`, `internal/kernel`,
 other `internal/control*` packages, and `control/*` form one Control
 implementation domain; physical package movement is not itself an architecture
-goal. Remaining `ports/*` packages are frozen transitional contracts and retire
-through bounded, independently verified slices.
+goal. The transitional `ports/*` tree has retired through bounded,
+independently verified slices and must not be recreated.
 
 ## Layers
 
@@ -111,23 +111,18 @@ Document responsibilities are intentionally separate:
   host supplies the product data root used for managed installs, atomic state
   persistence, active-Turn fencing, Runtime replacement and rollback, plus the
   read-only live MCP status probe required to build that view.
-- `control/client`: transport-neutral product command requests and outcomes,
-  trusted principals and Session authorization, command dispatch, the durable
-  idempotency operation ledger, and the Session lifecycle write gate. These are
-  Control contracts and behavior, not ACP wire or Surface APIs.
-- `ports/controlclient`: frozen transitional Session list/bootstrap/state/feed
-  contracts. Its aggregate `Service` composes `control/client.CommandClient`
-  but does not own, redefine, or alias the command contract. The temporary
-  split remains explicit until the state/feed retirement slice removes this
-  final port.
-- `internal/controlclient`: transitional Session feed/replay,
-  legacy-child-mirror filtering, approval recovery, state assembly, and the
-  aggregate client that joins those reads with `control/client` commands.
-  `internal/controlclient/turningress` accepts only the owning main Turn
-  producer. Task output never fans into this ingress and cannot delay its
-  terminal.
+- `control/client`: the complete product-facing Control client. It owns trusted
+  principals, transport-neutral commands and outcomes, Session authorization,
+  list/bootstrap/reconnect state, feed/replay coordination, legacy-child-mirror
+  filtering, approval recovery, the aggregate client, the durable idempotency
+  operation ledger, and the Session lifecycle write gate. Its feed uses the
+  shared ACP projection and `eventstream.Envelope` vocabulary without moving
+  Control authorization, state, or broker ownership into `protocol/acp`.
+- `internal/controlclient/turningress`: private main-Turn ingress glue between
+  `internal/kernel` handles and the Control-owned Session feed. Task output
+  never fans into this ingress and cannot delay its terminal.
 - `surfaces/appserver`: thin HTTP JSON/SSE and authentication mapping over
-  `control/client`, `ports/controlclient`, and `protocol/acp/taskstream`;
+  `control/client` and `protocol/acp/taskstream`;
   `app/controlserver` owns production listener assembly and fail-closed
   network configuration.
 - `internal/controlprompt`: current Control-owned surface-neutral prompt input
@@ -145,8 +140,8 @@ Document responsibilities are intentionally separate:
   ownership before any later package split.
 - `protocol/acp/control.Service` and `app/gatewayapp/controladapter`:
   transitional in-process ACP/TUI command adapters. Do not add product-client
-  operations to these aggregate interfaces or to `ports/*`; new capabilities
-  belong in coherent `control/*` packages.
+  operations to these aggregate interfaces or recreate `ports/*`; new
+  capabilities belong in coherent `control/*` packages.
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
   product integration adapters that make external endpoints implement the same
   SDK controller/participant contracts used by built-in Agents.
@@ -199,13 +194,13 @@ Current SDK package ownership:
 
 The current migration has moved reusable runtime, model, tool, session,
 sandbox, task, policy, skill, and display contracts and implementations into
-`agent-sdk/*`. SDK-owned `ports/*` and global `impl/*` compatibility paths have
-been removed; the remaining `ports/controlclient` package contains only the
-frozen transitional Session list/bootstrap/state/feed contracts. Product
-commands and their operation ledger live in `control/client`, concrete model
-catalog data lives under `control/modelcatalog`, provider/model configuration
-and construction live under `control/modelconfig`, and Caelis ACP agent bridge
-code now lives under `internal/acpagentbridge`.
+`agent-sdk/*`. SDK-owned `ports/*`, the product `ports/controlclient`, and
+global `impl/*` compatibility paths have been removed. Product commands,
+Session client state/feed, approval recovery, and the operation ledger live in
+`control/client`; concrete model catalog data lives under
+`control/modelcatalog`, provider/model configuration and construction live
+under `control/modelconfig`, and Caelis ACP agent bridge code now lives under
+`internal/acpagentbridge`.
 
 Repeatable SDK boundary gates:
 

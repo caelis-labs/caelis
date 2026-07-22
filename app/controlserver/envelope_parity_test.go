@@ -15,8 +15,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/appserver"
 )
@@ -26,7 +24,7 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := internalcontrolclient.NewFeedRegistry(internalcontrolclient.FeedRegistryConfig{CursorCodec: codec})
+	registry, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{CursorCodec: codec})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +41,7 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	inProcess, err := feed.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+	inProcess, err := feed.Subscribe(context.Background(), controlclient.SubscribeRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,11 +123,11 @@ func decimalizeParityPosition(value any, position *eventstream.FeedPosition) {
 }
 
 type parityService struct {
-	controlport.Service
-	feed controlport.SessionFeed
+	controlclient.Service
+	feed controlclient.SessionFeed
 }
 
-func (s parityService) Subscribe(ctx context.Context, _ controlclient.Principal, req controlport.SubscribeRequest) (controlport.SubscribeResult, error) {
+func (s parityService) Subscribe(ctx context.Context, _ controlclient.Principal, req controlclient.SubscribeRequest) (controlclient.SubscribeResult, error) {
 	return s.feed.Subscribe(ctx, req)
 }
 

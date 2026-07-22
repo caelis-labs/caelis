@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlclient/turningress"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
 func newGatewayTurn(handle kernel.TurnHandle) *gatewayTurn {
@@ -20,7 +20,7 @@ func (d *Adapter) newGatewayTurn(handle kernel.TurnHandle) *gatewayTurn {
 	return d.newGatewayTurnWithSubscription(handle, nil, false)
 }
 
-func (d *Adapter) subscribeGatewayTurn(ref session.SessionRef) (controlclientport.FeedSubscription, error) {
+func (d *Adapter) subscribeGatewayTurn(ref session.SessionRef) (controlclient.FeedSubscription, error) {
 	if d == nil || d.stack == nil || d.stack.ControlFeeds == nil {
 		return nil, nil
 	}
@@ -37,7 +37,7 @@ func (d *Adapter) subscribeGatewayTurn(ref session.SessionRef) (controlclientpor
 
 func (d *Adapter) newGatewayTurnWithSubscription(
 	handle kernel.TurnHandle,
-	prepared controlclientport.FeedSubscription,
+	prepared controlclient.FeedSubscription,
 	preparedBeforeTurn bool,
 	ownerContexts ...context.Context,
 ) *gatewayTurn {

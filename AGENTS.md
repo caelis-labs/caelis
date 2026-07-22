@@ -14,9 +14,9 @@
 - The control layer owns orchestration: lifecycle, Agent assembly, permissions, Guardian/Reviewer/system agents, future Agent Manage Loop coordination, endpoint selection, and handoff authorization. Agents must not autonomously commit handoff.
 - Agent Runtime / SDK packages should be reusable below the application and must not depend on presentation, product assembly, or one transport implementation.
 - Do not build a deterministic workflow graph/node engine. Dynamic orchestration belongs to the control-layer Agent Manage Loop.
-- Prefer reusable public contracts in `agent-sdk/*` and coherent product-control packages in `control/*`; existing `ports/*` packages are transitional and frozen except for migrations or fixes to their current contracts. Keep private glue in `internal/*`, and avoid mixing app-control contracts with reusable runtime contracts.
+- Prefer reusable public contracts in `agent-sdk/*` and coherent product-control packages in `control/*`; the retired `ports/*` tree must not be recreated. Keep private glue in `internal/*`, and avoid mixing app-control contracts with reusable runtime contracts.
 - `agent-sdk/*` is a package tree in the root Go module, not a nested module. SDK packages must not depend on `control/*`, `app/*`, `surfaces/*`, `protocol/acp/*`, product-host `ports/*`, or repository `internal/*` packages outside the `agent-sdk` package tree.
-- `ports/controlclient` is the current transport-neutral product client contract and `internal/controlclient` is its current implementation, but both paths are transitional. New Control capabilities belong in coherent `control/*` packages; do not add new operations to `ports/*`, `protocol/acp/control.Service`, or Surface-private APIs. `surfaces/appserver` only maps HTTP/SSE and authentication.
+- `control/client` owns the product client contract and implementation: commands, Session list/bootstrap/reconnect, feed/replay, approval recovery, and the aggregate Service. New Control capabilities belong in coherent `control/*` packages; do not recreate `ports/*` or add product operations to `protocol/acp/control.Service` or Surface-private APIs. `surfaces/appserver` only maps HTTP/SSE and authentication.
 - All current clients consume the Control-owned Session feed. Keep Turn/task ingress in `internal/controlclient/turningress`; do not let a Surface discover `StreamSubscriber`, rebuild replay, or publish a second permission path.
 - `Envelope.Cursor` is the only public resume token. Delivery, parent relation, scope, position, and approval identity use typed Envelope fields; `_meta` must not become a correlation, ordering, durability, or authorization source.
 - Session semantic writes are fenced. Runtime writes carry the current execution lease guard for the complete asynchronous producer lifetime; overlapping Control writes use an explicit allowed purpose and matching fence when required. Never catch `ErrLeaseConflict` and retry unfenced. `SnapshotState` is a pure read; durable State repair uses a revision-checked guarded mutation.
@@ -36,7 +36,7 @@
 - Run `gofmt` on touched Go files, focused `go test` packages for changed behavior, and `git diff --check`.
 - Before committing, run `make commit-check`; it includes formatting, `golangci-lint`, `arch-lint`, the SDK package-boundary gate, vet, tests, and build.
 - Run `make arch-lint` after import, package ownership, gateway/eventstream, or session protocol changes.
-- Run `make client-protocol-check` after changing OpenAPI, generated clients, Envelope wire shapes, or `ports/controlclient` JSON contracts.
+- Run `make client-protocol-check` after changing OpenAPI, generated clients, Envelope wire shapes, or `control/client` JSON contracts.
 - Lease, concurrency, persistence, broker, or lifecycle changes require focused `go test -race` coverage; release candidates run the Agent SDK race suite documented in `docs/release.md`.
 - Persistence or replay changes need round-trip tests comparing rebuilt model context with runtime-produced context.
 - Projection/UI reload tests do not replace model-context round-trip tests.

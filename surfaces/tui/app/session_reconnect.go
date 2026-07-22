@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )

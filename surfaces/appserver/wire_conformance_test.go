@@ -15,7 +15,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/appserver/generated"
@@ -125,15 +124,15 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		SessionRef: session.SessionRef{AppName: "caelis", UserID: "owner", SessionID: "session-1", WorkspaceKey: "workspace-1"},
 		CWD:        "/tmp/workspace", Title: "Session", UpdatedAt: time.Unix(100, 0).UTC(), Metadata: map[string]any{"source": "test"},
 	}}})
-	state := controlclientport.SessionState{
-		ProtocolVersion: 1, EnvelopeVersion: controlclientport.EnvelopeVersion, APIVersion: controlclientport.HTTPAPIVersion,
-		SessionID: "session-1", Revision: 8, ResumeMode: controlclientport.ResumeModeExact,
-		Run: controlclientport.RunState{}, Controller: session.ControllerBinding{}, Approval: controlclientport.ApprovalState{},
-		Capabilities: controlclientport.ClientCapabilities{CaelisTerminalStream: true},
+	state := controlclient.SessionState{
+		ProtocolVersion: 1, EnvelopeVersion: controlclient.EnvelopeVersion, APIVersion: controlclient.HTTPAPIVersion,
+		SessionID: "session-1", Revision: 8, ResumeMode: controlclient.ResumeModeExact,
+		Run: controlclient.RunState{}, Controller: session.ControllerBinding{}, Approval: controlclient.ApprovalState{},
+		Capabilities: controlclient.ClientCapabilities{CaelisTerminalStream: true},
 	}
 	validateWireValue(t, "SessionState", state)
-	validateWireValue(t, "ResumeBoundary", resumeBoundary{ResumeMode: controlclientport.ResumeModeExact, BoundaryCursor: "cursor-1"})
-	validateWireValue(t, "EventBatch", controlclientport.EventBatch{ResumeMode: controlclientport.ResumeModeExact, Events: []eventstream.Envelope{noticeEnvelope()}})
+	validateWireValue(t, "ResumeBoundary", resumeBoundary{ResumeMode: controlclient.ResumeModeExact, BoundaryCursor: "cursor-1"})
+	validateWireValue(t, "EventBatch", controlclient.EventBatch{ResumeMode: controlclient.ResumeModeExact, Events: []eventstream.Envelope{noticeEnvelope()}})
 }
 
 func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {

@@ -7,7 +7,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -89,7 +88,7 @@ func TestProcessRestartRebuildsDurableClientStateFromSessionTruth(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := stateService.State(ctx, controlport.StateRequest{SessionID: "session-1"})
+	state, err := stateService.State(ctx, StateRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +99,7 @@ func TestProcessRestartRebuildsDurableClientStateFromSessionTruth(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	replayed, err := feed.Subscribe(ctx, controlport.SubscribeRequest{SessionID: "session-1"})
+	replayed, err := feed.Subscribe(ctx, SubscribeRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}

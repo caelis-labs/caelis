@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -90,14 +90,14 @@ func TestGatewayTurnSubscriptionFailureEmitsErrorAndInterruptedTerminal(t *testi
 	close(events)
 	turn := &gatewayTurn{
 		handle:       &testGatewayTurnHandle{},
-		subscription: &errorFeedSubscription{events: events, err: controlclientport.ErrSlowConsumer},
+		subscription: &errorFeedSubscription{events: events, err: controlclient.ErrSlowConsumer},
 	}
 
 	out := collectAdapterTurnEvents(turn.Events())
 	if len(out) != 3 {
 		t.Fatalf("events = %#v, want child envelope, delivery error, interrupted terminal", out)
 	}
-	if out[0].Scope != eventstream.ScopeSubagent || out[1].Kind != eventstream.KindError || !errors.Is(out[1].Err, controlclientport.ErrSlowConsumer) {
+	if out[0].Scope != eventstream.ScopeSubagent || out[1].Kind != eventstream.KindError || !errors.Is(out[1].Err, controlclient.ErrSlowConsumer) {
 		t.Fatalf("subscription failure sequence = %#v", out)
 	}
 	assertAdapterLifecycleState(t, out[2], eventstream.LifecycleStateInterrupted)

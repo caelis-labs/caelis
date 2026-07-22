@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
 func TestHTTPStatusMappingUsesTypedErrorsNotMessages(t *testing.T) {
@@ -130,20 +129,20 @@ func (s *errorMappingService) result() (controlclient.CommandResult, error) {
 	return controlclient.CommandResult{OperationID: "operation-1", Outcome: outcome}, s.err
 }
 
-func (s *errorMappingService) ListSessions(context.Context, controlclient.Principal, controlclientport.ListSessionsRequest) (session.SessionList, error) {
+func (s *errorMappingService) ListSessions(context.Context, controlclient.Principal, controlclient.ListSessionsRequest) (session.SessionList, error) {
 	return session.SessionList{}, s.err
 }
-func (s *errorMappingService) InspectSession(context.Context, controlclient.Principal, controlclientport.StateRequest) (controlclientport.SessionState, error) {
-	return controlclientport.SessionState{}, s.err
+func (s *errorMappingService) InspectSession(context.Context, controlclient.Principal, controlclient.StateRequest) (controlclient.SessionState, error) {
+	return controlclient.SessionState{}, s.err
 }
-func (s *errorMappingService) Reconnect(context.Context, controlclient.Principal, controlclientport.ReconnectRequest) (controlclientport.ReconnectResult, error) {
-	return controlclientport.ReconnectResult{}, s.err
+func (s *errorMappingService) Reconnect(context.Context, controlclient.Principal, controlclient.ReconnectRequest) (controlclient.ReconnectResult, error) {
+	return controlclient.ReconnectResult{}, s.err
 }
-func (s *errorMappingService) Events(context.Context, controlclient.Principal, controlclientport.SubscribeRequest) (controlclientport.EventBatch, error) {
-	return controlclientport.EventBatch{}, s.err
+func (s *errorMappingService) Events(context.Context, controlclient.Principal, controlclient.SubscribeRequest) (controlclient.EventBatch, error) {
+	return controlclient.EventBatch{}, s.err
 }
-func (s *errorMappingService) Subscribe(context.Context, controlclient.Principal, controlclientport.SubscribeRequest) (controlclientport.SubscribeResult, error) {
-	return controlclientport.SubscribeResult{}, s.err
+func (s *errorMappingService) Subscribe(context.Context, controlclient.Principal, controlclient.SubscribeRequest) (controlclient.SubscribeResult, error) {
+	return controlclient.SubscribeResult{}, s.err
 }
 func (s *errorMappingService) CreateSession(context.Context, controlclient.Principal, controlclient.CreateSessionRequest) (controlclient.CommandResult, error) {
 	return s.result()

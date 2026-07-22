@@ -1,5 +1,3 @@
-// Package controlclient defines the transitional transport-neutral Session
-// state and feed contracts. Product command contracts belong to control/client.
 package controlclient
 
 import (

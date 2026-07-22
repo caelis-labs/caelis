@@ -13,7 +13,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
@@ -467,14 +466,14 @@ func (b *FeedBroker) publishLocked(
 			continue
 		}
 		if !subscriber.tryReserve() {
-			b.stopSubscriberLocked(subscriber, controlport.ErrSlowConsumer)
+			b.stopSubscriberLocked(subscriber, ErrSlowConsumer)
 			continue
 		}
 		select {
 		case subscriber.input <- eventstream.CloneEnvelope(envelope):
 		default:
 			subscriber.release()
-			b.stopSubscriberLocked(subscriber, controlport.ErrSlowConsumer)
+			b.stopSubscriberLocked(subscriber, ErrSlowConsumer)
 		}
 	}
 	return true, eventstream.CloneEnvelope(envelope), nil
@@ -571,7 +570,7 @@ func (b *FeedBroker) appendTargetPendingLocked(subscriber *feedSubscription, env
 		return
 	}
 	if len(subscriber.targetPending) >= b.ringEvents || subscriber.targetPendingBytes+encodedBytes > b.ringBytes {
-		b.stopSubscriberLocked(subscriber, controlport.ErrSlowConsumer)
+		b.stopSubscriberLocked(subscriber, ErrSlowConsumer)
 		return
 	}
 	subscriber.targetPending = append(subscriber.targetPending, eventstream.CloneEnvelope(envelope))
@@ -658,7 +657,7 @@ func (b *FeedBroker) deliverTargetBatch(
 		if !reserved {
 			if stalled {
 				b.mu.Lock()
-				b.stopSubscriberLocked(target, controlport.ErrSlowConsumer)
+				b.stopSubscriberLocked(target, ErrSlowConsumer)
 				b.mu.Unlock()
 			}
 			return false
@@ -670,7 +669,7 @@ func (b *FeedBroker) deliverTargetBatch(
 			case target.input <- eventstream.CloneEnvelope(envelope):
 			default:
 				target.release()
-				b.stopSubscriberLocked(target, controlport.ErrSlowConsumer)
+				b.stopSubscriberLocked(target, ErrSlowConsumer)
 				active = false
 			}
 		} else {
@@ -736,7 +735,7 @@ func (b *FeedBroker) prepareEnvelopeLocked(envelope *eventstream.Envelope) error
 // after the Surface claims Events. Like every Session subscription, it has an
 // independent bounded queue and is disconnected if its consumer falls behind;
 // it can never stall another ingress or the durable sequencer.
-func (b *FeedBroker) SubscribeFromNow(ctx context.Context) (controlport.FeedSubscription, error) {
+func (b *FeedBroker) SubscribeFromNow(ctx context.Context) (FeedSubscription, error) {
 	if b == nil {
 		return nil, errors.New("controlclient: nil feed broker")
 	}
@@ -778,7 +777,7 @@ func (b *FeedBroker) Attach(events <-chan eventstream.Envelope) <-chan error {
 // sequencer, so only this ingress waits for its Surface while sibling
 // publication remains non-blocking.
 func (b *FeedBroker) AttachTo(
-	subscription controlport.FeedSubscription,
+	subscription FeedSubscription,
 	events <-chan eventstream.Envelope,
 ) <-chan error {
 	target, ok := subscription.(*feedSubscription)
@@ -879,7 +878,7 @@ func (b *FeedBroker) attach(
 					}
 					lastErr = err
 					if attemptTarget != nil && attemptCtx.Err() != nil && b.ctx.Err() == nil {
-						if targetErr := attemptTarget.Err(); targetErr == nil || errors.Is(targetErr, controlport.ErrSlowConsumer) {
+						if targetErr := attemptTarget.Err(); targetErr == nil || errors.Is(targetErr, ErrSlowConsumer) {
 							detachedByClose = targetErr == nil
 							detachAndRetry = true
 							break
@@ -898,7 +897,7 @@ func (b *FeedBroker) attach(
 							<-timer.C
 						}
 						if attemptTarget != nil && b.ctx.Err() == nil {
-							if targetErr := attemptTarget.Err(); targetErr == nil || errors.Is(targetErr, controlport.ErrSlowConsumer) {
+							if targetErr := attemptTarget.Err(); targetErr == nil || errors.Is(targetErr, ErrSlowConsumer) {
 								detachedByClose = targetErr == nil
 								detachAndRetry = true
 								break
@@ -1012,10 +1011,10 @@ func (b *FeedBroker) stopSubscriberLocked(subscriber *feedSubscription, err erro
 		return
 	}
 	delete(b.subscribers, subscriber)
-	if errors.Is(err, controlport.ErrSlowConsumer) {
-		err = &controlport.FeedGapError{
+	if errors.Is(err, ErrSlowConsumer) {
+		err = &FeedGapError{
 			Cause: err, RetryCursor: subscriber.retryFrom(),
-			Mode: controlport.ResumeModeDurableFallback, TransientGap: true,
+			Mode: ResumeModeDurableFallback, TransientGap: true,
 		}
 	}
 	subscriber.targetHold = false
@@ -1314,8 +1313,8 @@ func randomFeedGeneration() string {
 	return fmt.Sprintf("generation-%d", time.Now().UnixNano())
 }
 
-// FeedRegistry owns at most one broker for each Session ID.
-type FeedRegistry struct {
+// feedRegistry owns at most one broker for each Session ID.
+type feedRegistry struct {
 	config FeedRegistryConfig
 	mu     sync.Mutex
 	feeds  map[string]*FeedBroker
@@ -1334,15 +1333,15 @@ type FeedRegistryConfig struct {
 }
 
 // NewFeedRegistry constructs a process-local Session broker registry.
-func NewFeedRegistry(config FeedRegistryConfig) (*FeedRegistry, error) {
+func NewFeedRegistry(config FeedRegistryConfig) (FeedRegistry, error) {
 	if config.CursorCodec == nil {
 		return nil, errors.New("controlclient: feed registry cursor codec is required")
 	}
-	return &FeedRegistry{config: config, feeds: map[string]*FeedBroker{}}, nil
+	return &feedRegistry{config: config, feeds: map[string]*FeedBroker{}}, nil
 }
 
 // Session returns the stable broker for one Session.
-func (r *FeedRegistry) Session(ref session.SessionRef) (controlport.SessionFeed, error) {
+func (r *feedRegistry) Session(ref session.SessionRef) (SessionFeed, error) {
 	if r == nil {
 		return nil, errors.New("controlclient: nil feed registry")
 	}
@@ -1367,3 +1366,5 @@ func (r *FeedRegistry) Session(ref session.SessionRef) (controlport.SessionFeed,
 	r.feeds[ref.SessionID] = broker
 	return broker, nil
 }
+
+var _ FeedRegistry = (*feedRegistry)(nil)

@@ -6,39 +6,38 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type checkpointSessionFeed interface {
-	subscribeCheckpoint(context.Context, controlport.SubscribeRequest) (controlport.SubscribeResult, session.EventCheckpoint, error)
+	subscribeCheckpoint(context.Context, SubscribeRequest) (SubscribeResult, session.EventCheckpoint, error)
 }
 
 // Reconnect registers the continuation first and assembles typed state from
 // that exact feed cut. It never waits for a quiescent publish window.
 func (s *StateService) Reconnect(
 	ctx context.Context,
-	req controlport.ReconnectRequest,
-) (controlport.ReconnectResult, error) {
+	req ReconnectRequest,
+) (ReconnectResult, error) {
 	if s == nil {
-		return controlport.ReconnectResult{}, errors.New("controlclient: nil state service")
+		return ReconnectResult{}, errors.New("controlclient: nil state service")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	if sessionID == "" {
-		return controlport.ReconnectResult{}, session.ErrInvalidSession
+		return ReconnectResult{}, session.ErrInvalidSession
 	}
 	ref := session.SessionRef{SessionID: sessionID}
 	feed, err := s.config.Feeds.Session(ref)
 	if err != nil {
-		return controlport.ReconnectResult{}, err
+		return ReconnectResult{}, err
 	}
 
-	subscribeRequest := controlport.SubscribeRequest{SessionID: sessionID, Cursor: strings.TrimSpace(req.Cursor)}
-	var subscribed controlport.SubscribeResult
+	subscribeRequest := SubscribeRequest{SessionID: sessionID, Cursor: strings.TrimSpace(req.Cursor)}
+	var subscribed SubscribeResult
 	var checkpoint session.EventCheckpoint
 	if prepared, ok := feed.(checkpointSessionFeed); ok {
 		subscribed, checkpoint, err = prepared.subscribeCheckpoint(ctx, subscribeRequest)
@@ -50,12 +49,12 @@ func (s *StateService) Reconnect(
 		// checkpoint. Expose that expected bootstrap race as a stable retryable
 		// conflict instead of leaking it as an opaque HTTP 500.
 		if errors.Is(err, errDurableCheckpointBehindAcceptedFeed) {
-			return controlport.ReconnectResult{}, controlport.ErrStateRevisionConflict
+			return ReconnectResult{}, ErrStateRevisionConflict
 		}
-		return controlport.ReconnectResult{}, err
+		return ReconnectResult{}, err
 	}
 	if subscribed.Subscription == nil {
-		return controlport.ReconnectResult{}, errors.New("controlclient: reconnect feed returned no continuation")
+		return ReconnectResult{}, errors.New("controlclient: reconnect feed returned no continuation")
 	}
 	abort := true
 	defer func() {
@@ -68,28 +67,28 @@ func (s *StateService) Reconnect(
 	if strings.TrimSpace(activeSession.SessionID) == "" {
 		activeSession, err = s.config.Sessions.Session(ctx, ref)
 		if err != nil {
-			return controlport.ReconnectResult{}, err
+			return ReconnectResult{}, err
 		}
 	}
 	runtimeState, err := s.config.Runtime.ControlClientRuntimeState(ctx, activeSession.SessionRef)
 	if err != nil {
-		return controlport.ReconnectResult{}, err
+		return ReconnectResult{}, err
 	}
 	state := sessionStateAtFeedCut(activeSession, runtimeState, subscribed)
 	abort = false
-	return controlport.ReconnectResult{State: state, Subscription: subscribed.Subscription}, nil
+	return ReconnectResult{State: state, Subscription: subscribed.Subscription}, nil
 }
 
 func sessionStateAtFeedCut(
 	activeSession session.Session,
-	runtimeState controlport.RuntimeState,
-	subscribed controlport.SubscribeResult,
-) controlport.SessionState {
+	runtimeState RuntimeState,
+	subscribed SubscribeResult,
+) SessionState {
 	position := eventstream.CloneFeedPosition(subscribed.BoundaryPosition)
-	return controlport.SessionState{
+	return SessionState{
 		ProtocolVersion:  schema.CurrentProtocolVersion,
-		EnvelopeVersion:  controlport.EnvelopeVersion,
-		APIVersion:       controlport.HTTPAPIVersion,
+		EnvelopeVersion:  EnvelopeVersion,
+		APIVersion:       HTTPAPIVersion,
 		SessionID:        activeSession.SessionID,
 		Revision:         activeSession.Revision,
 		WorkspaceKey:     activeSession.WorkspaceKey,
@@ -104,7 +103,7 @@ func sessionStateAtFeedCut(
 		Controller:       activeSession.Controller,
 		Participants:     append([]session.ParticipantBinding(nil), activeSession.Participants...),
 		Approval:         runtimeState.Approval,
-		Capabilities: controlport.ClientCapabilities{
+		Capabilities: ClientCapabilities{
 			ClientManagedTerminal: false, CaelisTerminalStream: true,
 			GoalBootstrapSupported: false, ManageLoopBootstrapSupported: false,
 		},

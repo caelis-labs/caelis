@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )

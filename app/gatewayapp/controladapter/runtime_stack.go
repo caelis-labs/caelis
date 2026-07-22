@@ -12,12 +12,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
 // GatewayTurnService exposes the turn operations used by Adapter.
@@ -250,8 +250,8 @@ type SandboxRuntimeDeps struct {
 
 type RuntimeStack struct {
 	Gateway          GatewayRuntimeDeps
-	ControlFeeds     controlclientport.FeedRegistry
-	ControlReconnect controlclientport.ReconnectReader
+	ControlFeeds     controlclient.FeedRegistry
+	ControlReconnect controlclient.ReconnectReader
 	Session          SessionRuntimeDeps
 	Status           StatusRuntimeDeps
 	Agent            AgentRuntimeDeps

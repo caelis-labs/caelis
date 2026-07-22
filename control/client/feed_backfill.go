@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 )
@@ -31,33 +30,33 @@ type feedBackfillPlan struct {
 // Subscribe prepares a bounded page+ring replay and returns before the full
 // history is constructed. The worker splices into ordinary live fanout only
 // after the captured prefix has been delivered.
-func (b *FeedBroker) Subscribe(ctx context.Context, req controlport.SubscribeRequest) (controlport.SubscribeResult, error) {
+func (b *FeedBroker) Subscribe(ctx context.Context, req SubscribeRequest) (SubscribeResult, error) {
 	result, _, err := b.subscribeCheckpoint(ctx, req)
 	return result, err
 }
 
 // subscribeCheckpoint also returns the durable Session cut used by reconnect
-// state assembly. It is intentionally package-private so the public feed port
-// remains presentation-neutral and compact.
+// state assembly. It is intentionally package-private so the public feed
+// contract remains presentation-neutral and compact.
 func (b *FeedBroker) subscribeCheckpoint(
 	ctx context.Context,
-	req controlport.SubscribeRequest,
-) (controlport.SubscribeResult, session.EventCheckpoint, error) {
+	req SubscribeRequest,
+) (SubscribeResult, session.EventCheckpoint, error) {
 	if b == nil {
-		return controlport.SubscribeResult{}, session.EventCheckpoint{}, errors.New("controlclient: nil feed broker")
+		return SubscribeResult{}, session.EventCheckpoint{}, errors.New("controlclient: nil feed broker")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if strings.TrimSpace(req.SessionID) != b.ref.SessionID {
-		return controlport.SubscribeResult{}, session.EventCheckpoint{}, eventstream.ErrCursorSessionMismatch
+		return SubscribeResult{}, session.EventCheckpoint{}, eventstream.ErrCursorSessionMismatch
 	}
 	var requested eventstream.FeedPosition
 	var err error
 	if strings.TrimSpace(req.Cursor) != "" {
 		requested, err = b.codec.Decode(b.ref.SessionID, req.Cursor)
 		if err != nil {
-			return controlport.SubscribeResult{}, session.EventCheckpoint{}, err
+			return SubscribeResult{}, session.EventCheckpoint{}, err
 		}
 	}
 
@@ -72,21 +71,21 @@ func (b *FeedBroker) subscribeCheckpoint(
 		requested,
 	)
 	if err != nil {
-		return controlport.SubscribeResult{}, session.EventCheckpoint{}, err
+		return SubscribeResult{}, session.EventCheckpoint{}, err
 	}
 
 	result, plan, err := b.prepareBackfillPlan(ctx, req, requested, checkpoint, ring, startAcceptID, transientHistoryUnknown)
 	if err != nil {
-		return controlport.SubscribeResult{}, session.EventCheckpoint{}, err
+		return SubscribeResult{}, session.EventCheckpoint{}, err
 	}
 	b.mu.Lock()
 	overtaken := b.evictedAccept > startAcceptID
 	b.mu.Unlock()
 	if overtaken {
-		return controlport.SubscribeResult{}, session.EventCheckpoint{}, &controlport.FeedGapError{
+		return SubscribeResult{}, session.EventCheckpoint{}, &FeedGapError{
 			Cause:       errors.New("controlclient: reconnect splice was overtaken before subscription handoff"),
 			RetryCursor: b.initialRetryCursor(req.Cursor),
-			Mode:        controlport.ResumeModeDurableFallback, TransientGap: true,
+			Mode:        ResumeModeDurableFallback, TransientGap: true,
 		}
 	}
 	subscriber := newFeedSubscription(b, b.queueSize)
@@ -183,16 +182,16 @@ func (b *FeedBroker) installColdCheckpointLocked(checkpoint session.EventCheckpo
 // the checkpoint path above and never scan full history before returning.
 func (b *FeedBroker) subscribePrimedFallback(
 	ctx context.Context,
-	req controlport.SubscribeRequest,
+	req SubscribeRequest,
 	requested eventstream.FeedPosition,
-) (controlport.SubscribeResult, session.EventCheckpoint, error) {
+) (SubscribeResult, session.EventCheckpoint, error) {
 	if err := b.Prime(ctx); err != nil {
-		return controlport.SubscribeResult{}, session.EventCheckpoint{}, err
+		return SubscribeResult{}, session.EventCheckpoint{}, err
 	}
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
-		return controlport.SubscribeResult{}, session.EventCheckpoint{}, errors.New("controlclient: feed broker is closed")
+		return SubscribeResult{}, session.EventCheckpoint{}, errors.New("controlclient: feed broker is closed")
 	}
 	b.evictLocked()
 	ring := cloneFeedRing(b.ring)
@@ -203,7 +202,7 @@ func (b *FeedBroker) subscribePrimedFallback(
 	checkpoint := session.EventCheckpoint{ThroughSeq: throughSeq}
 	result, plan, err := b.prepareBackfillPlan(ctx, req, requested, checkpoint, ring, startAcceptID, unknown)
 	if err != nil {
-		return controlport.SubscribeResult{}, session.EventCheckpoint{}, err
+		return SubscribeResult{}, session.EventCheckpoint{}, err
 	}
 	subscriber := newFeedSubscription(b, b.queueSize)
 	subscriber.retryCursor = b.initialRetryCursor(req.Cursor)
@@ -216,22 +215,22 @@ func (b *FeedBroker) subscribePrimedFallback(
 
 func (b *FeedBroker) prepareBackfillPlan(
 	ctx context.Context,
-	req controlport.SubscribeRequest,
+	req SubscribeRequest,
 	requested eventstream.FeedPosition,
 	checkpoint session.EventCheckpoint,
 	ring []feedRingItem,
 	startAcceptID uint64,
 	transientHistoryUnknown bool,
-) (controlport.SubscribeResult, *feedBackfillPlan, error) {
+) (SubscribeResult, *feedBackfillPlan, error) {
 	exactIndex := findRingCursor(ring, req.Cursor)
-	mode := controlport.ResumeModeExact
+	mode := ResumeModeExact
 	transientGap := false
 	selectedRing := ring
 	switch {
 	case strings.TrimSpace(req.Cursor) != "" && exactIndex >= 0:
 		selectedRing = cloneFeedRing(ring[exactIndex+1:])
 	case strings.TrimSpace(req.Cursor) != "":
-		mode = controlport.ResumeModeDurableFallback
+		mode = ResumeModeDurableFallback
 		transientGap = true
 		// A missing transient cursor cannot prove which retained process-local
 		// frames the caller already saw. Rebuild only durable truth and let the
@@ -248,7 +247,7 @@ func (b *FeedBroker) prepareBackfillPlan(
 		var err error
 		boundaryCursor, err = b.codec.Encode(b.ref.SessionID, *boundaryPosition)
 		if err != nil {
-			return controlport.SubscribeResult{}, nil, err
+			return SubscribeResult{}, nil, err
 		}
 	}
 
@@ -258,20 +257,20 @@ func (b *FeedBroker) prepareBackfillPlan(
 	}
 	if checkpoint.ThroughSeq > 0 {
 		if b.reader == nil {
-			return controlport.SubscribeResult{}, nil, errors.New("controlclient: durable feed reader is unavailable")
+			return SubscribeResult{}, nil, errors.New("controlclient: durable feed reader is unavailable")
 		}
 		pageRequest := durablePageRequest(b.ref, requested, checkpoint.ThroughSeq)
 		page, err := b.reader.EventsPage(ctx, pageRequest)
 		if err != nil {
-			return controlport.SubscribeResult{}, nil, err
+			return SubscribeResult{}, nil, err
 		}
 		if err := validateBackfillPage(pageRequest, page); err != nil {
-			return controlport.SubscribeResult{}, nil, err
+			return SubscribeResult{}, nil, err
 		}
 		plan.firstPage = page
 		plan.hasFirstPage = true
 	}
-	return controlport.SubscribeResult{
+	return SubscribeResult{
 		Mode: mode, TransientGap: transientGap, BoundaryCursor: boundaryCursor,
 		BoundaryPosition: eventstream.CloneFeedPosition(boundaryPosition),
 	}, plan, nil
@@ -340,9 +339,9 @@ func (p *feedBackfillPlan) gapError(subscriber *feedSubscription, cause error) e
 	if subscriber != nil {
 		retryCursor = firstNonEmptyCursor(subscriber.retryFrom(), retryCursor)
 	}
-	return &controlport.FeedGapError{
+	return &FeedGapError{
 		Cause: cause, RetryCursor: retryCursor,
-		Mode: controlport.ResumeModeDurableFallback, TransientGap: true,
+		Mode: ResumeModeDurableFallback, TransientGap: true,
 	}
 }
 

@@ -58,7 +58,7 @@ including:
 - `app/*`
 - `surfaces/*`
 - `protocol/acp/*`
-- the remaining product-host `ports/controlclient` package
+- the retired product-host `ports/*` tree
 - repository `internal/*` packages outside the `agent-sdk` package tree
 
 Those packages belong to the Caelis product host and surface layers. The ban on

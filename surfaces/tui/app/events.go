@@ -6,7 +6,7 @@ package tuiapp
 import (
 	"time"
 
-	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 )

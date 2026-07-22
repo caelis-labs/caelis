@@ -39,10 +39,12 @@ Presentation surfaces -> Control layer -> Agent Runtime / SDK
 - ACP is the shared semantic language for built-in and external Agents and the
   payload vocabulary projected to clients. SDK-normalized semantics flow
   outward to `protocol/acp`; product wire types do not flow inward.
-- `ports/controlclient` is the product-client contract;
-  `internal/controlclient` owns its Control implementation; HTTP/SSE remains a
-  thin Surface adapter. Transitional `protocol/acp/control.Service` must not
-  grow into a second product API.
+- `control/client` owns the product-client contract and implementation,
+  including commands, Session list/bootstrap/reconnect, feed/replay, and
+  approval recovery. `internal/controlclient/turningress` remains private
+  main-Turn ingress glue, and HTTP/SSE remains a thin Surface adapter.
+  Transitional `protocol/acp/control.Service` must not grow into a second
+  product API.
 - Canonical durable facts, not transcript caches or undocumented `_meta`, are
   replay truth. Typed Envelope fields own scope, relation, delivery, position,
   approval identity, and resume semantics.

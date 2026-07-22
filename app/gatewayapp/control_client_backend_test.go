@@ -17,9 +17,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/modelprofile"
-	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -147,7 +145,7 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeds, err := internalcontrolclient.NewFeedRegistry(internalcontrolclient.FeedRegistryConfig{
+	feeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{
 		Reader: sessions, CursorCodec: codec,
 	})
 	if err != nil {
@@ -353,7 +351,7 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeds, err := internalcontrolclient.NewFeedRegistry(internalcontrolclient.FeedRegistryConfig{Reader: sessions, CursorCodec: codec})
+	feeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{Reader: sessions, CursorCodec: codec})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,11 +570,11 @@ func (handle *controlClientAttachmentFailureHandle) Cancel() agent.CancelResult 
 func (*controlClientAttachmentFailureHandle) Close() error { return nil }
 
 type controlClientFeedRegistry struct {
-	feed controlport.SessionFeed
+	feed controlclient.SessionFeed
 	err  error
 }
 
-func (registry controlClientFeedRegistry) Session(session.SessionRef) (controlport.SessionFeed, error) {
+func (registry controlClientFeedRegistry) Session(session.SessionRef) (controlclient.SessionFeed, error) {
 	return registry.feed, registry.err
 }
 
@@ -591,10 +589,10 @@ func (feed *controlClientSessionFeed) Prime(context.Context) error {
 	return feed.primeErr
 }
 func (*controlClientSessionFeed) Publish(eventstream.Envelope) error { return nil }
-func (*controlClientSessionFeed) Subscribe(context.Context, controlport.SubscribeRequest) (controlport.SubscribeResult, error) {
-	return controlport.SubscribeResult{}, errors.New("test feed does not support Subscribe")
+func (*controlClientSessionFeed) Subscribe(context.Context, controlclient.SubscribeRequest) (controlclient.SubscribeResult, error) {
+	return controlclient.SubscribeResult{}, errors.New("test feed does not support Subscribe")
 }
-func (*controlClientSessionFeed) SubscribeFromNow(context.Context) (controlport.FeedSubscription, error) {
+func (*controlClientSessionFeed) SubscribeFromNow(context.Context) (controlclient.FeedSubscription, error) {
 	return nil, errors.New("test feed does not support SubscribeFromNow")
 }
 func (feed *controlClientSessionFeed) Attach(events <-chan eventstream.Envelope) <-chan error {
@@ -609,7 +607,7 @@ func (feed *controlClientSessionFeed) Attach(events <-chan eventstream.Envelope)
 	}()
 	return result
 }
-func (feed *controlClientSessionFeed) AttachTo(_ controlport.FeedSubscription, events <-chan eventstream.Envelope) <-chan error {
+func (feed *controlClientSessionFeed) AttachTo(_ controlclient.FeedSubscription, events <-chan eventstream.Envelope) <-chan error {
 	return feed.Attach(events)
 }
 func (*controlClientSessionFeed) Boundary() (*eventstream.FeedPosition, string) { return nil, "" }

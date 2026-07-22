@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -66,10 +65,10 @@ func TestFeedBrokerDurableSequencerSerializesGapFillAndPublishesOnce(t *testing.
 		t.Fatal(err)
 	}
 
-	resultCh := make(chan controlport.SubscribeResult, 1)
+	resultCh := make(chan SubscribeResult, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1", Cursor: resume})
+		result, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1", Cursor: resume})
 		resultCh <- result
 		errCh <- err
 	}()
@@ -90,7 +89,7 @@ func TestFeedBrokerDurableSequencerSerializesGapFillAndPublishesOnce(t *testing.
 		t.Fatal(err)
 	}
 	defer result.Subscription.Close()
-	if result.Mode != controlport.ResumeModeDurableFallback || !result.TransientGap {
+	if result.Mode != ResumeModeDurableFallback || !result.TransientGap {
 		t.Fatalf("result = %#v, want durable fallback with transient gap", result)
 	}
 	got := receiveEnvelopes(t, result.Subscription.Backfill(), 2)
@@ -108,10 +107,10 @@ func TestFeedBrokerReconnectCheckpointRetainsConcurrentTransientPublish(t *testi
 		started: make(chan struct{}), release: make(chan struct{}),
 	}
 	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{RingEvents: 8, SubscriberQueue: 2})
-	resultCh := make(chan controlport.SubscribeResult, 1)
+	resultCh := make(chan SubscribeResult, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+		result, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1"})
 		resultCh <- result
 		errCh <- err
 	}()
@@ -334,12 +333,12 @@ func TestFeedBrokerExactReconnectPreservesTransientBytes(t *testing.T) {
 	if err := broker.Publish(second); err != nil {
 		t.Fatal(err)
 	}
-	result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1", Cursor: cursor})
+	result, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1", Cursor: cursor})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer result.Subscription.Close()
-	if result.Mode != controlport.ResumeModeExact || result.TransientGap {
+	if result.Mode != ResumeModeExact || result.TransientGap {
 		t.Fatalf("result = %#v, want exact", result)
 	}
 	got := receiveEnvelopes(t, result.Subscription.Backfill(), 1)[0]
@@ -360,7 +359,7 @@ func TestFeedBrokerExactReconnectDeliversBashSpawnAndFinalExactlyOnce(t *testing
 		t.Fatal(err)
 	}
 	_, cursor := broker.Boundary()
-	result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1", Cursor: cursor})
+	result, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1", Cursor: cursor})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,12 +407,12 @@ func TestFeedBrokerEmptyCursorReplayPreservesRetainedTransientInterleaving(t *te
 		t.Fatal(err)
 	}
 
-	result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+	result, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer result.Subscription.Close()
-	if result.Mode != controlport.ResumeModeExact || result.TransientGap {
+	if result.Mode != ResumeModeExact || result.TransientGap {
 		t.Fatalf("result = %#v, want exact retained replay", result)
 	}
 	got := receiveEnvelopes(t, result.Subscription.Backfill(), 3)
@@ -487,7 +486,7 @@ func TestFeedBrokerEmptyCursorReplaySignalsEvictedTransientGap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+	result, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,12 +511,12 @@ func TestFeedBrokerEvictionFallsBackToDurableReplay(t *testing.T) {
 	if err := broker.Publish(projectedEnvelope(2, "two")); err != nil {
 		t.Fatal(err)
 	}
-	result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1", Cursor: cursor})
+	result, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1", Cursor: cursor})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer result.Subscription.Close()
-	if result.Mode != controlport.ResumeModeDurableFallback || !result.TransientGap {
+	if result.Mode != ResumeModeDurableFallback || !result.TransientGap {
 		t.Fatalf("result = %#v", result)
 	}
 	got := receiveEnvelopes(t, result.Subscription.Backfill(), 1)
@@ -535,12 +534,12 @@ func TestFeedBrokerFallbackSignalsEmptyBackfill(t *testing.T) {
 	if err := broker.Publish(terminalEnvelope("second")); err != nil {
 		t.Fatal(err)
 	}
-	result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1", Cursor: cursor})
+	result, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1", Cursor: cursor})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer result.Subscription.Close()
-	if result.Mode != controlport.ResumeModeDurableFallback || !result.TransientGap {
+	if result.Mode != ResumeModeDurableFallback || !result.TransientGap {
 		t.Fatalf("result = %#v, want durable fallback with transient gap", result)
 	}
 	select {
@@ -563,7 +562,7 @@ func TestFeedBrokerStreamingBackfillSplicesMoreThanSubscriberQueue(t *testing.T)
 	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{
 		RingEvents: 600, SubscriberQueue: 1,
 	})
-	result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+	result, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,7 +603,7 @@ func TestFeedBrokerStreamingBackfillReturnsTypedRetryCursorWhenRingOvertaken(t *
 	events := []*session.Event{durableProtocolEvent(1, "history")}
 	reader := &checkpointPageReader{events: events, active: session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}}}
 	broker, codec := newTestFeedBroker(t, reader, FeedBrokerConfig{RingEvents: 4, SubscriberQueue: 1})
-	result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+	result, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -617,7 +616,7 @@ func TestFeedBrokerStreamingBackfillReturnsTypedRetryCursorWhenRingOvertaken(t *
 	_ = receiveEnvelopes(t, result.Subscription.Backfill(), 1)
 	for range result.Subscription.Events() {
 	}
-	var gap *controlport.FeedGapError
+	var gap *FeedGapError
 	if !errors.As(result.Subscription.Err(), &gap) || !gap.TransientGap || gap.RetryCursor == "" {
 		t.Fatalf("subscription error = %#v, want typed gap with retry cursor", result.Subscription.Err())
 	}
@@ -637,7 +636,7 @@ func TestFeedBrokerPreflightOvertakeReturnsSafeStartRetryCursor(t *testing.T) {
 	broker, codec := newTestFeedBroker(t, reader, FeedBrokerConfig{RingEvents: 4, SubscriberQueue: 1})
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+		_, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1"})
 		errCh <- err
 	}()
 	<-reader.started
@@ -648,7 +647,7 @@ func TestFeedBrokerPreflightOvertakeReturnsSafeStartRetryCursor(t *testing.T) {
 	}
 	close(reader.release)
 	err := <-errCh
-	var gap *controlport.FeedGapError
+	var gap *FeedGapError
 	if !errors.As(err, &gap) || gap.RetryCursor == "" || !gap.TransientGap {
 		t.Fatalf("Subscribe error = %#v, want typed preflight gap with retry cursor", err)
 	}
@@ -704,7 +703,7 @@ func TestFeedBrokerEvictsByEncodedBytesAndTTL(t *testing.T) {
 
 func TestFeedBrokerDisconnectsSlowSubscriberWithoutBlockingPublish(t *testing.T) {
 	broker, _ := newTestFeedBroker(t, nil, FeedBrokerConfig{SubscriberQueue: 1})
-	result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+	result, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -726,10 +725,10 @@ func TestFeedBrokerDisconnectsSlowSubscriberWithoutBlockingPublish(t *testing.T)
 		}
 	}
 	deadline = time.Now().Add(time.Second)
-	for !errors.Is(subscription.Err(), controlport.ErrSlowConsumer) && time.Now().Before(deadline) {
+	for !errors.Is(subscription.Err(), ErrSlowConsumer) && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if !errors.Is(subscription.Err(), controlport.ErrSlowConsumer) {
+	if !errors.Is(subscription.Err(), ErrSlowConsumer) {
 		t.Fatalf("subscription error = %v, want slow consumer", subscription.Err())
 	}
 }
@@ -766,10 +765,10 @@ func TestFeedBrokerUnreadInternalSubscriberDoesNotBlockActiveSibling(t *testing.
 	}
 
 	deadline := time.Now().Add(time.Second)
-	for !errors.Is(unread.Err(), controlport.ErrSlowConsumer) && time.Now().Before(deadline) {
+	for !errors.Is(unread.Err(), ErrSlowConsumer) && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if !errors.Is(unread.Err(), controlport.ErrSlowConsumer) {
+	if !errors.Is(unread.Err(), ErrSlowConsumer) {
 		t.Fatalf("unread subscription error = %v, want slow consumer", unread.Err())
 	}
 	position, cursor := broker.Boundary()
@@ -1058,10 +1057,10 @@ func TestFeedBrokerAttachToDisconnectsStalledSurfaceWithinBound(t *testing.T) {
 	attached := broker.AttachTo(subscription, ingress)
 
 	deadline := time.Now().Add(time.Second)
-	for !errors.Is(subscription.Err(), controlport.ErrSlowConsumer) && time.Now().Before(deadline) {
+	for !errors.Is(subscription.Err(), ErrSlowConsumer) && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if !errors.Is(subscription.Err(), controlport.ErrSlowConsumer) {
+	if !errors.Is(subscription.Err(), ErrSlowConsumer) {
 		t.Fatalf("stalled subscription error = %v, want slow consumer", subscription.Err())
 	}
 	select {
@@ -1100,7 +1099,7 @@ func TestFeedBrokerAttachToDoesNotRepublishGloballyAcceptedStalledEvent(t *testi
 	close(ingress)
 	attached := broker.AttachTo(target, ingress)
 	waitFeedAttachmentClosed(t, attached, "globally accepted target stall")
-	if !errors.Is(target.Err(), controlport.ErrSlowConsumer) {
+	if !errors.Is(target.Err(), ErrSlowConsumer) {
 		t.Fatalf("target error = %v, want slow consumer", target.Err())
 	}
 
@@ -1147,7 +1146,7 @@ func TestFeedBrokerAttachToBoundsTargetHoldByEncodedBytes(t *testing.T) {
 	close(ingress)
 	attached := broker.AttachTo(target, ingress)
 	waitFeedAttachmentClosed(t, attached, "encoded-byte bounded target hold")
-	if !errors.Is(target.Err(), controlport.ErrSlowConsumer) {
+	if !errors.Is(target.Err(), ErrSlowConsumer) {
 		t.Fatalf("byte-bounded target error = %v, want slow consumer", target.Err())
 	}
 	got := receiveEnvelopes(t, sibling.Events(), 2)
@@ -1447,7 +1446,7 @@ func TestFeedBrokerRestartPrimesDurableBoundaryAndBootstrap(t *testing.T) {
 		t.Fatalf("decoded boundary = %#v, want durable seq 2", decoded)
 	}
 
-	result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+	result, err := broker.Subscribe(context.Background(), SubscribeRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
@@ -1588,7 +1587,7 @@ func waitFeedTransientSequence(t *testing.T, broker *FeedBroker, want uint64) {
 	t.Fatalf("feed transient boundary = %#v, want sequence >= %d", position, want)
 }
 
-func waitFeedSubscriptionClosed(t *testing.T, subscription controlport.FeedSubscription, name string) {
+func waitFeedSubscriptionClosed(t *testing.T, subscription FeedSubscription, name string) {
 	t.Helper()
 	deadline := time.After(time.Second)
 	for {

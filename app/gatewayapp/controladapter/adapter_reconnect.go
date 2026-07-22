@@ -7,8 +7,8 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
@@ -46,7 +46,7 @@ func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionS
 	if d.stack.ControlReconnect == nil {
 		return SessionSnapshot{}, missingRuntimeDependency("control client reconnect")
 	}
-	bootstrapped, err := d.stack.ControlReconnect.Reconnect(ctx, controlclientport.ReconnectRequest{
+	bootstrapped, err := d.stack.ControlReconnect.Reconnect(ctx, controlclient.ReconnectRequest{
 		SessionID: target.Session.SessionID,
 	})
 	if err != nil {
@@ -93,8 +93,8 @@ func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionS
 }
 
 type sessionReconnect struct {
-	state        controlclientport.SessionState
-	subscription controlclientport.FeedSubscription
+	state        controlclient.SessionState
+	subscription controlclient.FeedSubscription
 	turns        func() GatewayTurnService
 	ref          session.SessionRef
 	bindingKey   string
@@ -104,9 +104,9 @@ type sessionReconnect struct {
 
 var _ control.SessionReconnect = (*sessionReconnect)(nil)
 
-func (r *sessionReconnect) State() controlclientport.SessionState {
+func (r *sessionReconnect) State() controlclient.SessionState {
 	if r == nil {
-		return controlclientport.SessionState{}
+		return controlclient.SessionState{}
 	}
 	return cloneReconnectState(r.state)
 }
@@ -243,7 +243,7 @@ func (r *sessionReconnect) gatewayTurns() (GatewayTurnService, error) {
 	return turns, nil
 }
 
-func cloneReconnectState(in controlclientport.SessionState) controlclientport.SessionState {
+func cloneReconnectState(in controlclient.SessionState) controlclient.SessionState {
 	out := in
 	out.Metadata = session.CloneState(in.Metadata)
 	out.BoundaryPosition = eventstream.CloneFeedPosition(in.BoundaryPosition)
