@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	commands "github.com/caelis-labs/caelis/ports/controlcommand"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 type RuntimeConfig struct {
@@ -233,7 +233,7 @@ func LookupBuiltInAgent(name string) (assembly.AgentConfig, bool) {
 
 func ReservedSlashCommandName(name string) bool {
 	name = strings.TrimSpace(name)
-	return commands.IsKnown(name) || strings.EqualFold(name, "sandbox") || strings.EqualFold(name, "lead")
+	return controlprompt.IsKnown(name) || strings.EqualFold(name, "sandbox") || strings.EqualFold(name, "lead")
 }
 
 func cloneStringMap(in map[string]string) map[string]string {

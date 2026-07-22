@@ -10,9 +10,8 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
-	controlpromptrouter "github.com/caelis-labs/caelis/internal/controlpromptrouter"
-	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
-	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
+
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
@@ -41,7 +40,7 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 			if err != nil {
 				return nil, err
 			}
-			router := controlpromptrouter.New(controlprompt.RouterConfig{
+			router := controlprompt.New(controlprompt.RouterConfig{
 				Service: driver,
 				CommandNames: func(ctx context.Context, service control.Service) []string {
 					var bindingStatus agentbinding.Status
@@ -56,7 +55,7 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 					return controlagents.AppendRunNames(out, acpDirectAgentRuns(status), directRunName)
 				},
 				CoreCommandAllowed: func(_ context.Context, command string) bool {
-					return controlcommands.IsACPKnown(command)
+					return controlprompt.IsACPKnown(command)
 				},
 				DynamicCommandAllowed: func(_ context.Context, command string) bool {
 					return acpAgentCommandAllowed(command)
@@ -75,8 +74,8 @@ func acpPromptCommandNames(status agentbinding.Status) []string {
 		}
 		bound[string(handle.Definition.Handle)] = struct{}{}
 	}
-	out := make([]string, 0, len(controlcommands.DefaultACPNames()))
-	for _, name := range controlcommands.DefaultACPNames() {
+	out := make([]string, 0, len(controlprompt.DefaultACPNames()))
+	for _, name := range controlprompt.DefaultACPNames() {
 		if directRunName(name) {
 			if _, ok := bound[name]; !ok {
 				continue

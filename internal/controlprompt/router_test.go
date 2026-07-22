@@ -1,4 +1,4 @@
-package controlpromptrouter
+package controlprompt
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
-	prompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -26,8 +25,8 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 			ContextWindowTokens: 1000000,
 		},
 	}}
-	router := New(prompt.RouterConfig{Service: svc})
-	status, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/status"}})
+	router := New(RouterConfig{Service: svc})
+	status, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/status"}})
 	if err != nil {
 		t.Fatalf("Route(/status) error = %v", err)
 	}
@@ -46,21 +45,21 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	if text := control.FormatSlashResult(*status.SlashResult); !strings.Contains(text, "ollama/llama3") {
 		t.Fatalf("FormatSlashResult(/status) = %q, want model text", text)
 	}
-	model, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/model use fast high"}})
+	model, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/model use fast high"}})
 	if err != nil {
 		t.Fatalf("Route(/model use) error = %v", err)
 	}
 	if svc.usedModel != "fast" || svc.usedReasoning != "high" || model.StatusUpdate == nil {
 		t.Fatalf("model route used model=%q reasoning=%q status=%#v", svc.usedModel, svc.usedReasoning, model.StatusUpdate)
 	}
-	deleted, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/model del fast"}})
+	deleted, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/model del fast"}})
 	if err != nil {
 		t.Fatalf("Route(/model del) error = %v", err)
 	}
 	if !deleted.RefreshCommands {
 		t.Fatalf("Route(/model del).RefreshCommands = false, want refreshed Agent slash commands")
 	}
-	compactResult, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/compact"}})
+	compactResult, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/compact"}})
 	if err != nil {
 		t.Fatalf("Route(/compact) error = %v", err)
 	}
@@ -76,7 +75,7 @@ func TestRouterResumeReturnsLiveReconnectWithoutSuccessNotice(t *testing.T) {
 	t.Parallel()
 
 	svc := &fakeService{}
-	result, err := New(prompt.RouterConfig{Service: svc}).Route(context.Background(), prompt.Request{
+	result, err := New(RouterConfig{Service: svc}).Route(context.Background(), Request{
 		Submission: control.Submission{Text: "/resume resumed-session"},
 	})
 	if err != nil {
@@ -106,7 +105,7 @@ func TestRouterResumePropagatesTypedGapWithoutPersistentNotice(t *testing.T) {
 			SessionID: "resumed-session", ResumeMode: controlclient.ResumeModeDurableFallback, TransientGap: true,
 		}},
 	}}
-	result, err := New(prompt.RouterConfig{Service: svc}).Route(context.Background(), prompt.Request{
+	result, err := New(RouterConfig{Service: svc}).Route(context.Background(), Request{
 		Submission: control.Submission{Text: "/resume resumed-session"},
 	})
 	if err != nil {
@@ -122,7 +121,7 @@ func TestRouterResumePropagatesTypedGapWithoutPersistentNotice(t *testing.T) {
 
 func TestRouterResumeBootstrapFailureHasNoDestructiveSideEffects(t *testing.T) {
 	svc := &fakeService{resumeErr: errors.New("bootstrap failed")}
-	result, err := New(prompt.RouterConfig{Service: svc}).Route(context.Background(), prompt.Request{
+	result, err := New(RouterConfig{Service: svc}).Route(context.Background(), Request{
 		Submission: control.Submission{Text: "/resume resumed-session"},
 	})
 	if err == nil {
@@ -137,7 +136,7 @@ func TestRouterNewDefersStatusUntilAfterHistoryClear(t *testing.T) {
 	t.Parallel()
 
 	svc := &fakeService{}
-	result, err := New(prompt.RouterConfig{Service: svc}).Route(context.Background(), prompt.Request{
+	result, err := New(RouterConfig{Service: svc}).Route(context.Background(), Request{
 		Submission: control.Submission{Text: "/new"},
 	})
 	if err != nil {
@@ -156,14 +155,14 @@ func TestRouterNewDefersStatusUntilAfterHistoryClear(t *testing.T) {
 
 func TestRouterHelpReturnsStructuredPayload(t *testing.T) {
 	svc := &fakeService{}
-	router := New(prompt.RouterConfig{
+	router := New(RouterConfig{
 		Service: svc,
 		CommandNames: func(context.Context, control.Service) []string {
 			return []string{"help", "status", "breeze"}
 		},
 	})
 
-	help, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/help"}})
+	help, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/help"}})
 	if err != nil {
 		t.Fatalf("Route(/help) error = %v", err)
 	}
@@ -190,15 +189,15 @@ func TestRouterFixedProfileRejectsRawAgentAndRoutesNormalPrompt(t *testing.T) {
 		agents: []control.AgentCandidate{{Name: "helper", Description: "bounded helper"}},
 		turn:   &fakeTurn{id: "turn-1"},
 	}
-	router := New(prompt.RouterConfig{Service: svc})
-	raw, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper inspect repo"}})
+	router := New(RouterConfig{Service: svc})
+	raw, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/helper inspect repo"}})
 	if err != nil {
 		t.Fatalf("Route(/helper) error = %v", err)
 	}
 	if !raw.Handled || !strings.Contains(firstNotice(raw), "unknown command: /helper") || svc.startedAgent != "" {
 		t.Fatalf("raw Agent route = %#v started=%q, want hidden", raw, svc.startedAgent)
 	}
-	dynamic, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{
+	dynamic, err := router.Route(context.Background(), Request{Submission: control.Submission{
 		Text:        "/breeze inspect repo",
 		Attachments: []control.Attachment{{Name: "img.png", Offset: len([]rune("/breeze inspect "))}},
 	}})
@@ -211,21 +210,21 @@ func TestRouterFixedProfileRejectsRawAgentAndRoutesNormalPrompt(t *testing.T) {
 	if len(svc.startedAttachments) != 1 || svc.startedAttachments[0].Offset != len([]rune("inspect ")) {
 		t.Fatalf("dynamic attachments = %#v", svc.startedAttachments)
 	}
-	normalAt, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "@side continue"}})
+	normalAt, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "@side continue"}})
 	if err != nil {
 		t.Fatalf("Route(@side) error = %v", err)
 	}
 	if normalAt.Turn == nil || svc.submitted.Text != "@side continue" || svc.continuedHandle != "" {
 		t.Fatalf("@ text route turn=%#v submitted=%#v continued=%q, want normal prompt", normalAt.Turn, svc.submitted, svc.continuedHandle)
 	}
-	unknown, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/unknown command"}})
+	unknown, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/unknown command"}})
 	if err != nil {
 		t.Fatalf("Route(/unknown) error = %v", err)
 	}
 	if !unknown.Handled || !strings.Contains(firstNotice(unknown), "unknown command: /unknown") {
 		t.Fatalf("Route(/unknown) = %#v, want fail-closed notice", unknown)
 	}
-	normal, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "hello"}})
+	normal, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "hello"}})
 	if err != nil {
 		t.Fatalf("Route(normal) error = %v", err)
 	}
@@ -243,20 +242,20 @@ func TestRouterDirectAgentRunSlashContinuesAddressableRun(t *testing.T) {
 		}},
 		turn: &fakeTurn{id: "turn-1"},
 	}
-	router := New(prompt.RouterConfig{
+	router := New(RouterConfig{
 		Service: svc,
 		DynamicCommandAllowed: func(_ context.Context, command string) bool {
 			return command == "breeze"
 		},
 	})
-	result, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/breeze(lina) continue"}})
+	result, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/breeze(lina) continue"}})
 	if err != nil {
 		t.Fatalf("Route(/helper(lina)) error = %v", err)
 	}
 	if result.Turn == nil || svc.continuedHandle != "breeze(lina)" || svc.continuedPrompt != "continue" || svc.startedAgent != "" {
 		t.Fatalf("Route(/breeze(lina)) = %#v continued=%q prompt=%q started=%q", result, svc.continuedHandle, svc.continuedPrompt, svc.startedAgent)
 	}
-	delegated, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/breeze(maya) continue"}})
+	delegated, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/breeze(maya) continue"}})
 	if err != nil {
 		t.Fatalf("Route(/helper(maya)) error = %v", err)
 	}
@@ -279,9 +278,9 @@ func TestRouterPrioritizesCoreAndAgentRunsBeforeRemoteControllerCommands(t *test
 		},
 		turn: &fakeTurn{id: "turn-1"},
 	}
-	router := New(prompt.RouterConfig{Service: svc})
+	router := New(RouterConfig{Service: svc})
 	attachment := control.Attachment{Name: "remote.png", Offset: len([]rune("/foo remote"))}
-	remote, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{
+	remote, err := router.Route(context.Background(), Request{Submission: control.Submission{
 		Text: "/foo remote", Attachments: []control.Attachment{attachment},
 	}})
 	if err != nil {
@@ -291,7 +290,7 @@ func TestRouterPrioritizesCoreAndAgentRunsBeforeRemoteControllerCommands(t *test
 		t.Fatalf("Route(/foo) = %#v submitted=%#v, want original remote prompt", remote, svc.submitted)
 	}
 	svc.submitted = control.Submission{}
-	agent, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/orbit inspect"}})
+	agent, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/orbit inspect"}})
 	if err != nil {
 		t.Fatalf("Route(/helper) error = %v", err)
 	}
@@ -299,7 +298,7 @@ func TestRouterPrioritizesCoreAndAgentRunsBeforeRemoteControllerCommands(t *test
 		t.Fatalf("Route(/orbit) = %#v started=%q submitted=%#v, want profile run", agent, svc.startedAgent, svc.submitted)
 	}
 	svc.submitted = control.Submission{}
-	run, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/orbit(lina) continue"}})
+	run, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/orbit(lina) continue"}})
 	if err != nil {
 		t.Fatalf("Route(/helper(lina)) error = %v", err)
 	}
@@ -307,7 +306,7 @@ func TestRouterPrioritizesCoreAndAgentRunsBeforeRemoteControllerCommands(t *test
 		t.Fatalf("Route(/orbit(lina)) = %#v continued=%q submitted=%#v, want continuation", run, svc.continuedHandle, svc.submitted)
 	}
 	svc.submitted = control.Submission{}
-	core, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/status"}})
+	core, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/status"}})
 	if err != nil {
 		t.Fatalf("Route(/status) error = %v", err)
 	}
@@ -323,7 +322,7 @@ func TestRouterDoesNotForwardRemovedLeadCommandToRemoteController(t *testing.T) 
 		},
 		turn: &fakeTurn{id: "turn-1"},
 	}
-	result, err := New(prompt.RouterConfig{Service: svc}).Route(context.Background(), prompt.Request{
+	result, err := New(RouterConfig{Service: svc}).Route(context.Background(), Request{
 		Submission: control.Submission{Text: "/lead helper"},
 	})
 	if err != nil {
@@ -339,27 +338,27 @@ func TestRouterDynamicCommandAllowedOnlyPermitsFixedProfiles(t *testing.T) {
 		agents: []control.AgentCandidate{{Name: "reviewer"}, {Name: "helper"}},
 		turn:   &fakeTurn{id: "turn-1"},
 	}
-	router := New(prompt.RouterConfig{
+	router := New(RouterConfig{
 		Service: svc,
 		DynamicCommandAllowed: func(_ context.Context, command string) bool {
 			return command == "breeze"
 		},
 	})
-	hidden, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/reviewer inspect"}})
+	hidden, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/reviewer inspect"}})
 	if err != nil {
 		t.Fatalf("Route(/reviewer) error = %v", err)
 	}
 	if !hidden.Handled || !strings.Contains(firstNotice(hidden), "unknown command: /reviewer") || svc.startedAgent != "" {
 		t.Fatalf("Route(/reviewer) = %#v startedAgent=%q, want fail-closed notice", hidden, svc.startedAgent)
 	}
-	raw, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper inspect"}})
+	raw, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/helper inspect"}})
 	if err != nil {
 		t.Fatalf("Route(/helper) error = %v", err)
 	}
 	if !raw.Handled || !strings.Contains(firstNotice(raw), "unknown command: /helper") || svc.startedAgent != "" {
 		t.Fatalf("Route(/helper) = %#v agent=%q, want raw Agent hidden", raw, svc.startedAgent)
 	}
-	allowed, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/breeze inspect"}})
+	allowed, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/breeze inspect"}})
 	if err != nil {
 		t.Fatalf("Route(/breeze) error = %v", err)
 	}
@@ -370,8 +369,8 @@ func TestRouterDynamicCommandAllowedOnlyPermitsFixedProfiles(t *testing.T) {
 
 func TestRouterReviewForwardsAttachmentsForPromptRange(t *testing.T) {
 	svc := &fakeService{turn: &fakeTurn{id: "turn-1"}}
-	router := New(prompt.RouterConfig{Service: svc})
-	result, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{
+	router := New(RouterConfig{Service: svc})
+	result, err := router.Route(context.Background(), Request{Submission: control.Submission{
 		Text: "/review inspect screenshot",
 		Attachments: []control.Attachment{{
 			Name:     "inline.png",
@@ -399,9 +398,9 @@ func TestRouterReviewForwardsAttachmentsForPromptRange(t *testing.T) {
 
 func TestRouterRemovedAgentCommandsFailClosed(t *testing.T) {
 	svc := &fakeService{}
-	router := New(prompt.RouterConfig{Service: svc})
+	router := New(RouterConfig{Service: svc})
 
-	install, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/agent install claude"}})
+	install, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/agent install claude"}})
 	if err != nil {
 		t.Fatalf("Route(/agent install) error = %v", err)
 	}
@@ -409,7 +408,7 @@ func TestRouterRemovedAgentCommandsFailClosed(t *testing.T) {
 		t.Fatalf("Route(/agent install) = %#v, want removed command", install)
 	}
 
-	addInstall, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/agent add --install claude"}})
+	addInstall, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/agent add --install claude"}})
 	if err != nil {
 		t.Fatalf("Route(/agent add --install) error = %v", err)
 	}
@@ -422,20 +421,20 @@ func TestRouterCoreCommandAllowedFiltersSharedSlash(t *testing.T) {
 	svc := &fakeService{status: control.StatusSnapshot{
 		ModelStatus: control.StatusModel{Display: "ollama/llama3"},
 	}}
-	router := New(prompt.RouterConfig{
+	router := New(RouterConfig{
 		Service: svc,
 		CoreCommandAllowed: func(_ context.Context, command string) bool {
 			return command == "status"
 		},
 	})
-	status, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/status"}})
+	status, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/status"}})
 	if err != nil {
 		t.Fatalf("Route(/status) error = %v", err)
 	}
 	if !status.Handled || status.SlashResult == nil || !strings.Contains(control.FormatSlashResult(*status.SlashResult), "ollama/llama3") {
 		t.Fatalf("Route(/status) = %#v, want handled status", status)
 	}
-	newSession, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/new"}})
+	newSession, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/new"}})
 	if err != nil {
 		t.Fatalf("Route(/new) error = %v", err)
 	}
@@ -446,13 +445,13 @@ func TestRouterCoreCommandAllowedFiltersSharedSlash(t *testing.T) {
 
 func TestRouterCoreCommandAllowedBypassesTUIActiveACPGate(t *testing.T) {
 	svc := &fakeService{controllerKind: "acp"}
-	router := New(prompt.RouterConfig{
+	router := New(RouterConfig{
 		Service: svc,
 		CoreCommandAllowed: func(_ context.Context, command string) bool {
 			return command == "compact"
 		},
 	})
-	result, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/compact"}})
+	result, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/compact"}})
 	if err != nil {
 		t.Fatalf("Route(/compact) error = %v", err)
 	}
@@ -461,7 +460,7 @@ func TestRouterCoreCommandAllowedBypassesTUIActiveACPGate(t *testing.T) {
 	}
 }
 
-func firstNotice(result prompt.Result) string {
+func firstNotice(result Result) string {
 	for _, env := range result.Events {
 		if env.Kind == eventstream.KindNotice {
 			return strings.TrimSpace(env.Notice)

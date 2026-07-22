@@ -9,8 +9,8 @@ import (
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
-	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
-	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
+
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
@@ -65,19 +65,15 @@ func executeTUIPrivateSlashCommandWithContext(ctx context.Context, service Contr
 	if cmd == "" {
 		return executeLineResult{}, false
 	}
-	if controlcommands.IsSharedKnown(cmd) || !controlcommands.IsKnown(cmd) {
+	if controlprompt.IsSharedKnown(cmd) || !controlprompt.IsKnown(cmd) {
 		return executeLineResult{}, false
 	}
 	if _, activeACP := control.ActiveACPStatus(ctx, service); activeACP {
-		if !controlcommands.IsLocalDuringACP(cmd) {
+		if !controlprompt.IsLocalDuringACP(cmd) {
 			return executeLineResult{}, false
 		}
 	}
 	return dispatchTUIPrivateSlashCommandWithContext(ctx, service, sender, cmd, args), true
-}
-
-func isCoreLocalSlashCommand(cmd string) bool {
-	return controlcommands.IsLocalDuringACP(cmd)
 }
 
 func controlServiceCanSubmitRunningPrompt(ctx context.Context, service control.Service) bool {
@@ -128,11 +124,11 @@ func slashConnectWithContext(ctx context.Context, service control.Service, agent
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
 		if agents == nil {
-			return TaskResultMsg{Err: friendlyCommandError("disconnect ACP Agent", fmt.Errorf("ACP Agent roster service is unavailable"))}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("disconnect ACP Agent", fmt.Errorf("ACP Agent roster service is unavailable"))}
 		}
 		result, err := agents.DisconnectACP(ctx, agentID)
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("disconnect ACP Agent", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("disconnect ACP Agent", err)}
 		}
 		message := "disconnected /" + strings.TrimSpace(result.Agent.ID)
 		if result.ConnectionRemoved {
@@ -148,10 +144,10 @@ func slashConnectWithContext(ctx context.Context, service control.Service, agent
 	if strings.EqualFold(strings.TrimSpace(kind), "acp") {
 		payload, err := parseACPConnectWizardPayload(payloadText)
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("connect ACP agent", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("connect ACP agent", err)}
 		}
 		if agents == nil {
-			return TaskResultMsg{Err: friendlyCommandError("connect ACP agent", fmt.Errorf("ACP connection service is unavailable"))}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("connect ACP agent", fmt.Errorf("ACP connection service is unavailable"))}
 		}
 		result, err := agents.ConnectACP(ctx, controlagents.ConnectRequest{
 			AdapterID: payload.Agent, Launcher: payload.Launcher,
@@ -159,7 +155,7 @@ func slashConnectWithContext(ctx context.Context, service control.Service, agent
 			ConfigValues: payload.ConfigValues,
 		})
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("connect ACP agent", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("connect ACP agent", err)}
 		}
 		names := make([]string, 0, len(result.Profiles))
 		for _, profile := range result.Profiles {
@@ -169,7 +165,7 @@ func slashConnectWithContext(ctx context.Context, service control.Service, agent
 		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	cfg := parseConnectArgs(args)
+	cfg := controlprompt.ParseConnectArgs(args)
 	if cfg.Provider == "" || cfg.Model == "" {
 		sendNotice(send, "usage: /connect\nrun /connect to open the guided setup wizard")
 		return TaskResultMsg{SuppressTurnDivider: true}
@@ -179,7 +175,7 @@ func slashConnectWithContext(ctx context.Context, service control.Service, agent
 	}
 	status, err := service.Connect(ctx, cfg)
 	if err != nil {
-		return TaskResultMsg{Err: friendlyCommandError("connect", err)}
+		return TaskResultMsg{Err: controlprompt.FriendlyCommandError("connect", err)}
 	}
 	aliases := connectedModelAliases(cfg)
 	connected := strings.Join(aliases, ", ")

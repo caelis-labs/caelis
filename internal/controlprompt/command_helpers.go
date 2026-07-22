@@ -1,4 +1,4 @@
-package controlcommand
+package controlprompt
 
 import (
 	"fmt"

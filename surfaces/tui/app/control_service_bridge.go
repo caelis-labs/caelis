@@ -16,8 +16,8 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
-	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
+
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/statusbar"
@@ -405,7 +405,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 			if err != nil {
 				return "", err
 			}
-			return modeToggleHint(status), nil
+			return controlprompt.ModeToggleHint(status), nil
 		}
 	}
 
@@ -502,7 +502,7 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 		Attachments: convertAttachments(sub.Attachments),
 	})
 	if err != nil {
-		return executeLineResult{completion: TaskResultMsg{Err: friendlyCommandError("submit", err)}}
+		return executeLineResult{completion: TaskResultMsg{Err: controlprompt.FriendlyCommandError("submit", err)}}
 	}
 	if turn == nil {
 		return executeLineResult{completion: TaskResultMsg{ContinueRunning: true, SuppressTurnDivider: true}}
@@ -528,7 +528,7 @@ func executeControlPromptResult(ctx context.Context, service control.Service, se
 			send(SessionReconnectMsg{State: result.Reconnect.State()})
 		}
 		if err := streamReconnectBackfill(ctx, result.Reconnect, send); err != nil {
-			return executeLineResult{completion: TaskResultMsg{Err: friendlyCommandError("resume session feed", err)}}
+			return executeLineResult{completion: TaskResultMsg{Err: controlprompt.FriendlyCommandError("resume session feed", err)}}
 		}
 	} else if result.ClearHistory && send != nil {
 		send(ClearHistoryMsg{})
@@ -616,7 +616,7 @@ func appendAgentSlashCommandsWithContext(ctx context.Context, service control.Se
 
 func localACPCommands() []string {
 	out := make([]string, 0)
-	for _, spec := range controlcommands.DefaultSpecs() {
+	for _, spec := range controlprompt.DefaultSpecs() {
 		if spec.LocalDuringACP && !spec.Hidden {
 			out = append(out, spec.Name)
 		}
@@ -674,7 +674,7 @@ func tuiAgentCommandNameAllowed(name string) bool {
 
 func tuiRemoteControllerCommandNameAllowed(name string) bool {
 	name = strings.TrimSpace(name)
-	return !controlcommands.IsKnown(name) && !strings.EqualFold(name, "sandbox") && !strings.EqualFold(name, "lead")
+	return !controlprompt.IsKnown(name) && !strings.EqualFold(name, "sandbox") && !strings.EqualFold(name, "lead")
 }
 
 func boundDirectProfileNames(ctx context.Context, service control.Service) map[string]struct{} {

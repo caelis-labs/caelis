@@ -123,10 +123,9 @@ Document responsibilities are intentionally separate:
 - `surfaces/appserver`: thin HTTP JSON/SSE and authentication mapping over
   `ports/controlclient` plus `protocol/acp/taskstream`; `app/controlserver`
   owns production listener assembly and fail-closed network configuration.
-- `ports/controlcommand`, `ports/controlprompt`: frozen transitional command
-  catalog plus prompt request/result parsing contracts.
-- `internal/controlpromptrouter`: shared app-control slash orchestration over
-  `protocol/acp/control.Service`.
+- `internal/controlprompt`: current Control-owned surface-neutral prompt input
+  contract, command catalog, parsing helpers, connect-wizard state, and shared
+  slash orchestration over transitional `protocol/acp/control.Service`.
 - `internal/controlassembly`: product Agent assembly resolution.
 - `internal/controlplane`: shared-ledger routing, endpoint lifecycle/recovery,
   and handoff coordination.
@@ -141,9 +140,6 @@ Document responsibilities are intentionally separate:
   transitional in-process ACP/TUI command adapters. Do not add product-client
   operations to these aggregate interfaces or to `ports/*`; new capabilities
   belong in coherent `control/*` packages.
-- `ports/controlcommand` and `ports/controlprompt`: frozen transitional
-  product-host contracts that stay outside the SDK and retire through bounded
-  slices as their current Control owners converge.
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
   product integration adapters that make external endpoints implement the same
   SDK controller/participant contracts used by built-in Agents.
@@ -197,8 +193,8 @@ Current SDK package ownership:
 The current migration has moved reusable runtime, model, tool, session,
 sandbox, task, policy, skill, and display contracts and implementations into
 `agent-sdk/*`. SDK-owned `ports/*` and global `impl/*` compatibility paths have
-been removed; the remaining `ports/*` packages are frozen transitional
-product-host contracts, concrete model catalog data lives under
+been removed; the remaining `ports/controlclient` package is the frozen
+transitional product-client contract, concrete model catalog data lives under
 `control/modelcatalog`, provider/model configuration and construction live under
 `control/modelconfig`, and Caelis ACP agent bridge code now lives under
 `internal/acpagentbridge`.

@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
-// Router routes one prompt submission through the app-control prompt layer.
+// Router routes one submission through the Control-owned prompt contract.
 type Router interface {
 	Route(context.Context, Request) (Result, error)
 }

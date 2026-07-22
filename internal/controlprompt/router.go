@@ -1,4 +1,4 @@
-package controlpromptrouter
+package controlprompt
 
 import (
 	"context"
@@ -7,23 +7,22 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
-	prompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
-// Router dispatches surface-neutral prompt input through control.Service.
-type Router struct {
+// router dispatches surface-neutral prompt input through control.Service.
+type router struct {
 	service               control.Service
 	commandNames          func(context.Context, control.Service) []string
 	coreCommandAllowed    func(context.Context, string) bool
 	dynamicCommandAllowed func(context.Context, string) bool
-	privateSlashHandler   prompt.PrivateSlashHandler
+	privateSlashHandler   PrivateSlashHandler
 }
 
-func New(cfg prompt.RouterConfig) prompt.Router {
-	return Router{
+// New builds the shared surface-neutral prompt router.
+func New(cfg RouterConfig) Router {
+	return router{
 		service:               cfg.Service,
 		commandNames:          cfg.CommandNames,
 		coreCommandAllowed:    cfg.CoreCommandAllowed,
@@ -32,14 +31,14 @@ func New(cfg prompt.RouterConfig) prompt.Router {
 	}
 }
 
-func (r Router) Route(ctx context.Context, req prompt.Request) (prompt.Result, error) {
+func (r router) Route(ctx context.Context, req Request) (Result, error) {
 	ctx = contextOrBackground(ctx)
 	if r.service == nil {
-		return prompt.Result{}, fmt.Errorf("control prompt: service is required")
+		return Result{}, fmt.Errorf("control prompt: service is required")
 	}
 	text := strings.TrimSpace(req.Submission.Text)
-	if cmd, args, argsStart, ok := prompt.ParseSlash(text); ok {
-		if result, handled, err := r.dispatchPrivateSlash(ctx, prompt.PrivateSlashRequest{
+	if cmd, args, argsStart, ok := ParseSlash(text); ok {
+		if result, handled, err := r.dispatchPrivateSlash(ctx, PrivateSlashRequest{
 			Command:     cmd,
 			Args:        args,
 			ArgsStart:   argsStart,
@@ -52,12 +51,12 @@ func (r Router) Route(ctx context.Context, req prompt.Request) (prompt.Result, e
 			if r.isRemoteControllerCommand(ctx, cmd) {
 				turn, err := r.service.Submit(ctx, req.Submission)
 				if err != nil {
-					return prompt.Result{}, controlcommands.FriendlyCommandError("submit", err)
+					return Result{}, FriendlyCommandError("submit", err)
 				}
 				if turn == nil {
-					return prompt.Result{Handled: true, ContinueRunning: true, SuppressTurnDivider: true}, nil
+					return Result{Handled: true, ContinueRunning: true, SuppressTurnDivider: true}, nil
 				}
-				return prompt.Result{Handled: true, Turn: turn}, nil
+				return Result{Handled: true, Turn: turn}, nil
 			}
 			return r.noticeResult(fmt.Sprintf("unknown command: /%s\nrun /help to list available commands", cmd)), nil
 		}
@@ -65,20 +64,20 @@ func (r Router) Route(ctx context.Context, req prompt.Request) (prompt.Result, e
 	}
 	turn, err := r.service.Submit(ctx, req.Submission)
 	if err != nil {
-		return prompt.Result{}, controlcommands.FriendlyCommandError("submit", err)
+		return Result{}, FriendlyCommandError("submit", err)
 	}
 	if turn == nil {
-		return prompt.Result{Handled: true, ContinueRunning: true, SuppressTurnDivider: true}, nil
+		return Result{Handled: true, ContinueRunning: true, SuppressTurnDivider: true}, nil
 	}
-	return prompt.Result{Handled: true, Turn: turn}, nil
+	return Result{Handled: true, Turn: turn}, nil
 }
 
-func (r Router) shouldDispatchSlash(ctx context.Context, cmd string) bool {
+func (r router) shouldDispatchSlash(ctx context.Context, cmd string) bool {
 	cmd = strings.ToLower(strings.TrimSpace(cmd))
 	if cmd == "" {
 		return false
 	}
-	if controlcommands.IsSharedKnown(cmd) {
+	if IsSharedKnown(cmd) {
 		if !r.coreSlashAllowed(ctx, cmd) {
 			return false
 		}
@@ -88,7 +87,7 @@ func (r Router) shouldDispatchSlash(ctx context.Context, cmd string) bool {
 			return true
 		}
 		if control.ACPControllerActive(ctx, r.service) {
-			return controlcommands.IsLocalDuringACP(cmd)
+			return IsLocalDuringACP(cmd)
 		}
 		return true
 	}
@@ -103,9 +102,9 @@ func (r Router) shouldDispatchSlash(ctx context.Context, cmd string) bool {
 	return agentbinding.IsDirectRun(agentbinding.Handle(cmd)) || r.isDirectAgentRun(ctx, cmd)
 }
 
-func (r Router) dispatchPrivateSlash(ctx context.Context, req prompt.PrivateSlashRequest) (prompt.Result, bool, error) {
+func (r router) dispatchPrivateSlash(ctx context.Context, req PrivateSlashRequest) (Result, bool, error) {
 	if r.privateSlashHandler == nil {
-		return prompt.Result{}, false, nil
+		return Result{}, false, nil
 	}
 	result, handled, err := r.privateSlashHandler(contextOrBackground(ctx), req)
 	if !handled || err != nil {
@@ -117,44 +116,44 @@ func (r Router) dispatchPrivateSlash(ctx context.Context, req prompt.PrivateSlas
 	return result, true, nil
 }
 
-func (r Router) coreSlashAllowed(ctx context.Context, cmd string) bool {
+func (r router) coreSlashAllowed(ctx context.Context, cmd string) bool {
 	if r.coreCommandAllowed == nil {
 		return true
 	}
 	return r.coreCommandAllowed(contextOrBackground(ctx), strings.ToLower(strings.TrimSpace(cmd)))
 }
 
-func (r Router) dynamicSlashAllowed(ctx context.Context, cmd string) bool {
+func (r router) dynamicSlashAllowed(ctx context.Context, cmd string) bool {
 	if r.dynamicCommandAllowed == nil {
 		return true
 	}
 	return r.dynamicCommandAllowed(contextOrBackground(ctx), strings.ToLower(strings.TrimSpace(cmd)))
 }
 
-func (r Router) helpCommandNames(ctx context.Context) []string {
+func (r router) helpCommandNames(ctx context.Context) []string {
 	if r.commandNames != nil {
 		return r.commandNames(ctx, r.service)
 	}
-	return controlcommands.DefaultSharedNames()
+	return DefaultSharedNames()
 }
 
-func (r Router) noticeResult(text string) prompt.Result {
-	return prompt.Result{
+func (r router) noticeResult(text string) Result {
+	return Result{
 		Handled:             true,
 		Events:              []eventstream.Envelope{notice(text)},
 		SuppressTurnDivider: true,
 	}
 }
 
-func (r Router) slashResult(result control.SlashCommandResult) prompt.Result {
-	return prompt.Result{
+func (r router) slashResult(result control.SlashCommandResult) Result {
+	return Result{
 		Handled:             true,
 		SlashResult:         &result,
 		SuppressTurnDivider: true,
 	}
 }
 
-func (r Router) isDirectAgentRun(ctx context.Context, name string) bool {
+func (r router) isDirectAgentRun(ctx context.Context, name string) bool {
 	status, err := r.service.AgentStatus(contextOrBackground(ctx))
 	if err != nil {
 		return false
@@ -162,9 +161,9 @@ func (r Router) isDirectAgentRun(ctx context.Context, name string) bool {
 	return controlagents.RunNameAllowed(directAgentRuns(status), name, availableAgentCommandName)
 }
 
-func (r Router) isRemoteControllerCommand(ctx context.Context, name string) bool {
+func (r router) isRemoteControllerCommand(ctx context.Context, name string) bool {
 	name = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(name, "/")))
-	if name == "" || controlcommands.IsKnown(name) || strings.EqualFold(name, "lead") {
+	if name == "" || IsKnown(name) || strings.EqualFold(name, "lead") {
 		return false
 	}
 	status, err := r.service.AgentStatus(contextOrBackground(ctx))

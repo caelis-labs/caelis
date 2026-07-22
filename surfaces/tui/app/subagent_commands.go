@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
@@ -196,7 +196,7 @@ func slashSubagentWithContext(ctx context.Context, service subagentConfiguration
 	case "", "list":
 		status, err := service.AgentBindingStatus(contextOrBackground(ctx))
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("list subagent bindings", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("list subagent bindings", err)}
 		}
 		if send != nil {
 			send(SlashCommandResultMsg{Result: control.NewTableSlashResult("subagent", subagentStatusTable(status))})
@@ -223,19 +223,19 @@ func slashSubagentWithContext(ctx context.Context, service subagentConfiguration
 				if system {
 					label = "default"
 				}
-				return TaskResultMsg{Err: friendlyCommandError("reset subagent binding", fmt.Errorf("%s does not accept a reasoning effort override", label))}
+				return TaskResultMsg{Err: controlprompt.FriendlyCommandError("reset subagent binding", fmt.Errorf("%s does not accept a reasoning effort override", label))}
 			}
 			status, err = service.ResetAgentBinding(contextOrBackground(ctx), handle)
 		} else {
 			if strings.TrimSpace(effort) == "" {
-				return TaskResultMsg{Err: friendlyCommandError("bind subagent handle", fmt.Errorf("an explicit effort is required"))}
+				return TaskResultMsg{Err: controlprompt.FriendlyCommandError("bind subagent handle", fmt.Errorf("an explicit effort is required"))}
 			}
 			status, err = service.BindAgentBinding(contextOrBackground(ctx), agentbinding.Binding{
 				Handle: handle, ProfileID: target, Effort: effort,
 			})
 		}
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("update subagent binding", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("update subagent binding", err)}
 		}
 		sendNotice(send, formatAgentBindingNotice(status, handle))
 		if controlService, ok := any(service).(control.Service); ok && !system {

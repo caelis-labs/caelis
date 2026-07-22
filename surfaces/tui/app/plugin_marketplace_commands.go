@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
@@ -22,14 +22,14 @@ func slashPluginMarketplaceWithContext(ctx context.Context, service control.Plug
 		}
 		marketplace, err := service.AddMarketplace(ctx, source)
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("plugin marketplace add", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("plugin marketplace add", err)}
 		}
 		sendNotice(send, fmt.Sprintf("added marketplace %s successfully\n\n%s", marketplace.Name, formatMarketplaceDetail(marketplace)))
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "list":
 		marketplaces, err := service.ListMarketplaces(ctx)
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("plugin marketplace list", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("plugin marketplace list", err)}
 		}
 		if len(marketplaces) == 0 {
 			sendNotice(send, "no plugin marketplaces\nnext: /plugin marketplace add <source>")
@@ -49,7 +49,7 @@ func slashPluginMarketplaceWithContext(ctx context.Context, service control.Plug
 		}
 		marketplace, err := service.UpdateMarketplace(ctx, name)
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("plugin marketplace update", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("plugin marketplace update", err)}
 		}
 		sendNotice(send, fmt.Sprintf("updated marketplace %s successfully\n\n%s", marketplace.Name, formatMarketplaceDetail(marketplace)))
 		return TaskResultMsg{SuppressTurnDivider: true}
@@ -60,7 +60,7 @@ func slashPluginMarketplaceWithContext(ctx context.Context, service control.Plug
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
 		if err := service.RemoveMarketplace(ctx, name); err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("plugin marketplace rm", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("plugin marketplace rm", err)}
 		}
 		sendNotice(send, fmt.Sprintf("removed marketplace %s successfully", name))
 		return TaskResultMsg{SuppressTurnDivider: true}

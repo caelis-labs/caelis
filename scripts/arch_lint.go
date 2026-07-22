@@ -473,6 +473,18 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if target == "ports/gateway" || strings.HasPrefix(target, "ports/gateway/") {
 		return "production code must not depend on ports/gateway; use internal/kernel"
 	}
+	if target == "ports/controlprompt/connectwizard" || strings.HasPrefix(target, "ports/controlprompt/connectwizard/") {
+		return "production code must not depend on ports/controlprompt/connectwizard; use internal/controlprompt/connectwizard"
+	}
+	if target == "ports/controlprompt" || strings.HasPrefix(target, "ports/controlprompt/") {
+		return "production code must not depend on ports/controlprompt; use internal/controlprompt"
+	}
+	if target == "ports/controlcommand" || strings.HasPrefix(target, "ports/controlcommand/") {
+		return "production code must not depend on ports/controlcommand; use internal/controlprompt"
+	}
+	if target == "internal/controlpromptrouter" || strings.HasPrefix(target, "internal/controlpromptrouter/") {
+		return "production code must not depend on internal/controlpromptrouter; use internal/controlprompt"
+	}
 	if temporaryArchitectureException(rel, target) {
 		return ""
 	}
@@ -664,6 +676,14 @@ func removedPackageFileRule(rel string) (string, string, int) {
 	switch {
 	case pkg == "ports/gateway" || strings.HasPrefix(pkg, "ports/gateway/"):
 		return "must not recreate ports/gateway; current Control gateway contracts belong to internal/kernel", pkg, 1
+	case pkg == "ports/controlprompt/connectwizard" || strings.HasPrefix(pkg, "ports/controlprompt/connectwizard/"):
+		return "must not recreate ports/controlprompt/connectwizard; use internal/controlprompt/connectwizard", pkg, 1
+	case pkg == "ports/controlprompt" || strings.HasPrefix(pkg, "ports/controlprompt/"):
+		return "must not recreate ports/controlprompt; use internal/controlprompt", pkg, 1
+	case pkg == "ports/controlcommand" || strings.HasPrefix(pkg, "ports/controlcommand/"):
+		return "must not recreate ports/controlcommand; use internal/controlprompt", pkg, 1
+	case pkg == "internal/controlpromptrouter" || strings.HasPrefix(pkg, "internal/controlpromptrouter/"):
+		return "must not recreate internal/controlpromptrouter; prompt contracts and routing belong to internal/controlprompt", pkg, 1
 	case pkg == "impl/model/catalog" || strings.HasPrefix(pkg, "impl/model/catalog/"):
 		return "must not recreate impl/model/catalog; concrete model catalogs belong to Control", pkg, 1
 	case pkg == "impl/model/internal/codefreecaps" || strings.HasPrefix(pkg, "impl/model/internal/codefreecaps/"):

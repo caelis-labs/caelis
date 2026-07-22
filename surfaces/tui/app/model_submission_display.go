@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -246,7 +247,7 @@ func (m *Model) tryOpenSlashArgPicker(line string) bool {
 }
 
 func slashCommandCanOpenArgPicker(command string) bool {
-	spec, ok := lookupSlashCommandSpec(command)
+	spec, ok := controlprompt.Lookup(command)
 	if !ok {
 		return false
 	}

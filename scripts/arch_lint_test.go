@@ -19,7 +19,7 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 	}{
 		{
 			name:       "ports reject repository internals",
-			rel:        "ports/controlcommand/registry.go",
+			rel:        "ports/controlclient/service.go",
 			importPath: modulePath + "/internal/kernel",
 			want:       "ports must not depend on internal packages",
 		},
@@ -28,6 +28,30 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			rel:        "app/gatewayapp/stack.go",
 			importPath: modulePath + "/ports/gateway",
 			want:       "production code must not depend on ports/gateway; use internal/kernel",
+		},
+		{
+			name:       "deleted control command port retains replacement",
+			rel:        "surfaces/tui/app/defaults.go",
+			importPath: modulePath + "/ports/controlcommand",
+			want:       "production code must not depend on ports/controlcommand; use internal/controlprompt",
+		},
+		{
+			name:       "deleted control prompt port retains replacement",
+			rel:        "internal/acpagentbridge/runtime_agent.go",
+			importPath: modulePath + "/ports/controlprompt",
+			want:       "production code must not depend on ports/controlprompt; use internal/controlprompt",
+		},
+		{
+			name:       "deleted connect wizard port retains replacement",
+			rel:        "surfaces/tui/app/defaults.go",
+			importPath: modulePath + "/ports/controlprompt/connectwizard",
+			want:       "production code must not depend on ports/controlprompt/connectwizard; use internal/controlprompt/connectwizard",
+		},
+		{
+			name:       "deleted prompt router retains replacement",
+			rel:        "internal/cli/tui.go",
+			importPath: modulePath + "/internal/controlpromptrouter",
+			want:       "production code must not depend on internal/controlpromptrouter; use internal/controlprompt",
 		},
 		{
 			name:       "internal kernel rejects implementation packages",
@@ -385,14 +409,28 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			wantSub: "ports/plugin",
 		},
 		{
-			name: "retained ports controlcommand path passes",
-			rel:  "ports/controlcommand/registry.go",
-			want: "",
+			name:    "deleted ports controlcommand path fails",
+			rel:     "ports/controlcommand/registry.go",
+			want:    "must not recreate ports/controlcommand; use internal/controlprompt",
+			wantSub: "ports/controlcommand",
 		},
 		{
-			name: "retained ports controlprompt path passes",
-			rel:  "ports/controlprompt/prompt.go",
-			want: "",
+			name:    "deleted ports controlprompt path fails",
+			rel:     "ports/controlprompt/prompt.go",
+			want:    "must not recreate ports/controlprompt; use internal/controlprompt",
+			wantSub: "ports/controlprompt",
+		},
+		{
+			name:    "deleted connect wizard path fails",
+			rel:     "ports/controlprompt/connectwizard/state.go",
+			want:    "must not recreate ports/controlprompt/connectwizard; use internal/controlprompt/connectwizard",
+			wantSub: "ports/controlprompt/connectwizard",
+		},
+		{
+			name:    "deleted prompt router path fails",
+			rel:     "internal/controlpromptrouter/router.go",
+			want:    "must not recreate internal/controlpromptrouter; prompt contracts and routing belong to internal/controlprompt",
+			wantSub: "internal/controlpromptrouter",
 		},
 		{
 			name:    "deleted ports agentprofile path fails",

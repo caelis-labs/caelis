@@ -11,7 +11,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
-	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
+	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 )
 
 type connectModelChoice struct {

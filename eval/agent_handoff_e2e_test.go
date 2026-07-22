@@ -19,9 +19,9 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlassembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	controlpromptrouter "github.com/caelis-labs/caelis/internal/controlpromptrouter"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
+
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -124,7 +124,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 		defer cleanupCancel()
 		_, _ = driver.HandoffAgent(cleanupCtx, "local")
 	})
-	routed := routedHandoffStarter{router: controlpromptrouter.New(controlprompt.RouterConfig{Service: driver})}
+	routed := routedHandoffStarter{router: controlprompt.New(controlprompt.RouterConfig{Service: driver})}
 
 	directCommand := "/orbit"
 	directOutput, err := runScopedAgentOnce(ctx, routed, control.Submission{Text: directCommand + " inspect side"})

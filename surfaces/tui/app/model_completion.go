@@ -9,6 +9,8 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 // ---------------------------------------------------------------------------
@@ -989,7 +991,7 @@ func (m *Model) isConfiguredSlashControlLine(line string) bool {
 	if !m.isCommandAvailable(name) {
 		return false
 	}
-	_, ok := lookupSlashCommandSpec(name)
+	_, ok := controlprompt.Lookup(name)
 	return ok
 }
 

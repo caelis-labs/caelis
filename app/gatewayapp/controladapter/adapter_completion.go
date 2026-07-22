@@ -12,8 +12,8 @@ import (
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 )
 
 const resumeCompletionPageLimit = 200
@@ -133,7 +133,7 @@ func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query st
 	if alias, ok := strings.CutPrefix(normalizedCommand, "model use "); ok {
 		return d.completeModelReasoningLevels(ctx, alias, query, limit)
 	}
-	candidates := controlcommands.RootArgCandidates(command)
+	candidates := controlprompt.RootArgCandidates(command)
 	out := make([]SlashArgCandidate, 0, min(limit, len(candidates)))
 	for _, candidate := range candidates {
 		if query != "" && !hasSlashArgPrefix(query, candidate.Value, candidate.Display, candidate.Detail) {

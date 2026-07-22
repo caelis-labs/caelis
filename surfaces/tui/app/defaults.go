@@ -8,22 +8,18 @@ import (
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
-	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
-	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
+	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 )
 
 // defaults.go provides DefaultCommands and DefaultWizards for the TUI shell.
-
-func lookupSlashCommandSpec(name string) (controlcommands.CommandSpec, bool) {
-	return controlcommands.Lookup(name)
-}
 
 func defaultHelpText() string {
 	return helpTextForCommands(DefaultCommands())
 }
 
 func helpTextForCommands(commands []string) string {
-	return controlcommands.HelpText(commands) + "\n\n" + shortcutHelpTextForPlatform(runtime.GOOS, isWSL())
+	return controlprompt.HelpText(commands) + "\n\n" + shortcutHelpTextForPlatform(runtime.GOOS, isWSL())
 }
 
 type shortcutHelpRow struct {
@@ -156,7 +152,7 @@ func joinNonEmpty(parts []string, sep string) string {
 
 // DefaultCommands returns the set of slash commands available in the TUI.
 func DefaultCommands() []string {
-	return controlcommands.DefaultNames()
+	return controlprompt.DefaultNames()
 }
 
 func (m *Model) commandCompletionDetail(command string) string {
@@ -169,7 +165,7 @@ func (m *Model) commandCompletionDetail(command string) string {
 			return detail
 		}
 	}
-	if spec, ok := controlcommands.Lookup(name); ok {
+	if spec, ok := controlprompt.Lookup(name); ok {
 		return strings.TrimSpace(spec.Description)
 	}
 	return "Send a prompt to the registered ACP agent"

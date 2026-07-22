@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
+	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 )
 
 func TestRenderSlashArgListUsesWizardHintInsteadOfInternalConnectPayload(t *testing.T) {

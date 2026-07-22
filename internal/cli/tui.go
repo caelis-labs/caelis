@@ -11,7 +11,7 @@ import (
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
-	controlpromptrouter "github.com/caelis-labs/caelis/internal/controlpromptrouter"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/updater"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
@@ -38,7 +38,7 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appC
 		ShowWelcomeCard:     true,
 		Commands:            tuiapp.DefaultCommands(),
 		Wizards:             tuiapp.DefaultWizards(),
-		PromptRouterFactory: controlpromptrouter.New,
+		PromptRouterFactory: controlprompt.New,
 		RenderFPS:           envInt("CAELIS_TUI_RENDER_FPS", 0),
 		TaskStreams:         stack.TaskStreams(),
 		TaskStreamPrincipal: taskstream.Principal{ID: stack.UserID},

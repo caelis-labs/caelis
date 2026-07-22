@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/modelconfig"
-	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
+	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 )
 
 func TestCodexConnectCompletionUsesAccountCatalogAndEffective56Context(t *testing.T) {

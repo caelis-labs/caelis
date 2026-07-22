@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
-	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
@@ -219,9 +219,9 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 			}
 		}
 	}
-	commands := make([]acp.AvailableCommand, 0, len(controlcommands.DefaultACPSpecs()))
+	commands := make([]acp.AvailableCommand, 0, len(controlprompt.DefaultACPSpecs()))
 	seen := map[string]struct{}{}
-	for _, spec := range controlcommands.DefaultACPSpecs() {
+	for _, spec := range controlprompt.DefaultACPSpecs() {
 		if spec.Hidden {
 			continue
 		}

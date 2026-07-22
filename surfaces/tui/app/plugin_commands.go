@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
@@ -21,7 +21,7 @@ func slashPluginWithContext(ctx context.Context, service control.PluginService, 
 	case "manage":
 		plugins, err := service.ListPlugins(ctx)
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("plugin manage", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("plugin manage", err)}
 		}
 		if len(plugins) == 0 {
 			sendNotice(send, "no installed plugins\nnext: /plugin install <plugin@marketplace|path>")
@@ -37,7 +37,7 @@ func slashPluginWithContext(ctx context.Context, service control.PluginService, 
 		}
 		p, err := service.InstallPlugin(ctx, target)
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("plugin install", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("plugin install", err)}
 		}
 		sendNotice(send, fmt.Sprintf("installed plugin %s successfully\n\n%s", p.ID, formatPluginDetail(p)))
 		return TaskResultMsg{SuppressTurnDivider: true}
@@ -51,7 +51,7 @@ func slashPluginWithContext(ctx context.Context, service control.PluginService, 
 		}
 		err := service.RemovePlugin(ctx, target)
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("plugin rm", err)}
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("plugin rm", err)}
 		}
 		sendNotice(send, fmt.Sprintf("removed plugin %s successfully", target))
 		return TaskResultMsg{SuppressTurnDivider: true}

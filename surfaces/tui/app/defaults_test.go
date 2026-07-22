@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
-	got := controlcommands.DefaultNamesForPlatform("linux")
+	got := controlprompt.DefaultNamesForPlatform("linux")
 	want := []string{
 		"help",
 		"review",
@@ -32,7 +32,7 @@ func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
 		t.Fatalf("DefaultNamesForPlatform(linux) = %#v, want %#v", got, want)
 	}
 
-	windows := controlcommands.DefaultNamesForPlatform("windows")
+	windows := controlprompt.DefaultNamesForPlatform("windows")
 	if !sliceContainsString(windows, "doctor") {
 		t.Fatalf("DefaultNamesForPlatform(windows) = %#v, want doctor", windows)
 	}

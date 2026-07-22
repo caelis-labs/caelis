@@ -6,6 +6,8 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -1372,7 +1374,7 @@ func (m *Model) deferLocalUserDisplayLine(line string) bool {
 	if name == "" {
 		return false
 	}
-	if strings.EqualFold(name, "review") && isCoreLocalSlashCommand(name) {
+	if strings.EqualFold(name, "review") && controlprompt.IsLocalDuringACP(name) {
 		return true
 	}
 	return m.isKnownDynamicAgentSlashLine(line)
@@ -1403,7 +1405,7 @@ func (m *Model) isKnownDynamicAgentSlashLine(line string) bool {
 	if name == "" || m == nil {
 		return false
 	}
-	if _, ok := lookupSlashCommandSpec(name); ok {
+	if _, ok := controlprompt.Lookup(name); ok {
 		return false
 	}
 	for _, command := range m.cfg.Commands {

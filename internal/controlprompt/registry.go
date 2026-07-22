@@ -1,4 +1,4 @@
-package controlcommand
+package controlprompt
 
 import (
 	"runtime"
@@ -7,7 +7,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
-// CommandSpec describes one slash command exposed by the TUI command registry.
+// CommandSpec describes one slash command in the shared Control prompt catalog.
 type CommandSpec struct {
 	Name             string
 	Usage            string
