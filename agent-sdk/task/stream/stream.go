@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"strings"
 	"time"
@@ -31,12 +32,15 @@ type Frame struct {
 	Cursor Cursor `json:"cursor,omitempty"`
 	// TruncatedBefore is the earliest absolute output byte still retained when
 	// the requested cursor predates a bounded live buffer.
-	TruncatedBefore int64          `json:"truncated_before,omitempty"`
-	Running         bool           `json:"running,omitempty"`
-	Closed          bool           `json:"closed,omitempty"`
-	ExitCode        *int           `json:"exit_code,omitempty"`
-	Event           *session.Event `json:"event,omitempty"`
-	UpdatedAt       time.Time      `json:"updated_at,omitempty"`
+	TruncatedBefore int64 `json:"truncated_before,omitempty"`
+	// EventsTruncatedBefore is the earliest absolute event cursor still
+	// retained by this task stream. It is independent from command bytes.
+	EventsTruncatedBefore int64          `json:"events_truncated_before,omitempty"`
+	Running               bool           `json:"running,omitempty"`
+	Closed                bool           `json:"closed,omitempty"`
+	ExitCode              *int           `json:"exit_code,omitempty"`
+	Event                 *session.Event `json:"event,omitempty"`
+	UpdatedAt             time.Time      `json:"updated_at,omitempty"`
 }
 
 // Snapshot is one point-in-time stream read result.
@@ -48,12 +52,19 @@ type Snapshot struct {
 	State     string  `json:"state,omitempty"`
 	// TruncatedBefore is copied to delivered frames so consumers can make a
 	// missing prefix visible instead of treating a retained suffix as complete.
-	TruncatedBefore int64     `json:"truncated_before,omitempty"`
-	Running         bool      `json:"running,omitempty"`
-	SupportsInput   bool      `json:"supports_input,omitempty"`
-	ExitCode        *int      `json:"exit_code,omitempty"`
-	StartedAt       time.Time `json:"started_at,omitempty"`
-	UpdatedAt       time.Time `json:"updated_at,omitempty"`
+	TruncatedBefore       int64 `json:"truncated_before,omitempty"`
+	EventsTruncatedBefore int64 `json:"events_truncated_before,omitempty"`
+	Running               bool  `json:"running,omitempty"`
+	// SupportsInput is the owning Task's Task-plane input capability. For a
+	// completed subagent it means TASK write may Continue the same Task; it is
+	// not a terminal stdin capability.
+	SupportsInput bool `json:"supports_input,omitempty"`
+	// TerminalFramed means the producer owns explicit terminal-frame delivery;
+	// consumers must not infer another close from Running=false.
+	TerminalFramed bool      `json:"terminal_framed,omitempty"`
+	ExitCode       *int      `json:"exit_code,omitempty"`
+	StartedAt      time.Time `json:"started_at,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at,omitempty"`
 }
 
 // ReadRequest asks for one incremental stream read from one cursor.
@@ -67,6 +78,10 @@ type SubscribeRequest struct {
 	Ref          Ref           `json:"ref,omitempty"`
 	Cursor       Cursor        `json:"cursor,omitempty"`
 	PollInterval time.Duration `json:"poll_interval,omitempty"`
+	// FollowContinues keeps a completed Task whose Task-plane SupportsInput
+	// capability is true open so a later Continue is delivered on the same
+	// Task stream. It does not imply terminal stdin ownership.
+	FollowContinues bool `json:"follow_continues,omitempty"`
 }
 
 // Service is the unified output read/subscribe surface used by app-layer
@@ -100,6 +115,19 @@ func NormalizeRef(in Ref) Ref {
 	}
 }
 
+// ValidateRef requires the canonical task-stream address. TerminalID is
+// display and turn metadata; it is never an alternative resource identity.
+func ValidateRef(in Ref) error {
+	ref := NormalizeRef(in)
+	if ref.SessionID == "" {
+		return fmt.Errorf("task stream: session_id is required")
+	}
+	if ref.TaskID == "" {
+		return fmt.Errorf("task stream: task_id is required")
+	}
+	return nil
+}
+
 // CloneCursor returns one normalized cursor copy.
 func CloneCursor(in Cursor) Cursor {
 	if in.Output < 0 {
@@ -119,6 +147,9 @@ func CloneFrame(in Frame) Frame {
 	if out.TruncatedBefore < 0 {
 		out.TruncatedBefore = 0
 	}
+	if out.EventsTruncatedBefore < 0 {
+		out.EventsTruncatedBefore = 0
+	}
 	if in.ExitCode != nil {
 		code := *in.ExitCode
 		out.ExitCode = &code
@@ -134,6 +165,9 @@ func CloneSnapshot(in Snapshot) Snapshot {
 	out.Cursor = CloneCursor(in.Cursor)
 	if out.TruncatedBefore < 0 {
 		out.TruncatedBefore = 0
+	}
+	if out.EventsTruncatedBefore < 0 {
+		out.EventsTruncatedBefore = 0
 	}
 	if in.ExitCode != nil {
 		code := *in.ExitCode

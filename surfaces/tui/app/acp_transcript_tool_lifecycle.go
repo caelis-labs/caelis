@@ -217,8 +217,8 @@ func toolLifecycleHeaderEvent(start SubagentEvent, final SubagentEvent, hasFinal
 		if toolKind := strings.TrimSpace(final.ToolKind); toolKind != "" {
 			header.ToolKind = toolKind
 		}
-		if taskID := strings.TrimSpace(final.TaskID); taskID != "" {
-			header.TaskID = taskID
+		if taskHandle := strings.TrimSpace(final.TaskHandle); taskHandle != "" {
+			header.TaskHandle = taskHandle
 		}
 		if action := strings.TrimSpace(final.TaskAction); action != "" {
 			header.TaskAction = action
@@ -330,7 +330,7 @@ func taskWriteLifecycleHeader(ev SubagentEvent, err bool) string {
 	if _, detail := splitTaskAction(ev.Args); detail != "" {
 		return standardVerbLifecycleHeader("Write", detail, err)
 	}
-	handle := taskHandleDisplay(ev.TaskID)
+	handle := taskHandleDisplay(ev.TaskHandle)
 	input := normalizeTaskWriteDisplayInput(ev.TaskInput)
 	if input == "" {
 		_, detail := splitTaskAction(ev.Args)

@@ -95,20 +95,19 @@ scope ID, child ACP Session, child source identity, and projection-relevant
 payload. Repeating the same identity and payload deduplicates; a changed payload
 under the same identity returns `session.ErrEventConflict`.
 
-Child input follows this order:
+Historical child input followed this order:
 
 ```text
-child Frame.Event
-  -> normalize semantic session.Event
-  -> assign typed child origin and stable source identity
-  -> append VisibilityMirror to the parent Session
-  -> project the stored event (including Seq)
-  -> publish through the Session Feed Broker
+legacy child VisibilityMirror
+  -> identify typed ChildOrigin
+  -> retain approval and participant control facts
+  -> filter child live-output mirrors from Session Feed projection
 ```
 
-The parent receives only one canonical Spawn/Task final result. Child message,
-thought, tool, diff, location, plan, permission, and lifecycle mirrors never
-enter parent model context.
+New child frames bypass Session persistence and are available only through
+`control/taskstream`. The parent still receives one canonical Spawn/Task final
+result. Child message, thought, tool, diff, location, and plan frames never
+enter parent model context. Permission remains a Session-scoped Control fact.
 
 ### Projection identity and feed position
 
@@ -160,22 +159,40 @@ subscribers. It is owned by Control. The first-party adapter registers a
 `SubscribeFromNow` boundary before `BeginTurn`, then attaches Turn ingress only
 after the Surface claims `Turn.Events`; there is no interval in which a live
 Turn can overflow a subscription that the caller is not yet able to consume.
-The existing Turn live-feed broker is narrowed to
-Turn ingress and retains source `Read`, cursor commit, final-source barrier,
-drain/ack, and unique main-terminal behavior.
+The Turn live-feed broker is narrowed to the main ACP producer and unique main
+terminal behavior. It has no Task source readers, Task cursor commit, or final
+Task barrier.
 
 The Session broker is the sole consumer of the Turn ingress feed. It publishes:
 
 - durable lane: projections of stored `session.Event` values with canonical or
-  mirror delivery;
-- transient lane: exact RunCommand bytes, notices, and lifecycle that has no
-  durable source.
+  retained control-mirror delivery;
+- transient lane: main notices and main lifecycle with no durable source.
 
 TUI, headless, ACP bridge, and app-server receive independent subscriptions.
 Closing a subscriber never cancels a Runtime Turn, Spawn, participant, or task.
-A child terminal closes only its child scope. The Turn ingress final-read
-barrier flushes already materialized frames and never waits for or cancels an
-asynchronous Spawn.
+A child terminal exists only on its Task stream. Main ingress never waits for
+or cancels an asynchronous Spawn.
+
+## Task Stream Service
+
+`control/taskstream` is a coherent capability and does not extend the frozen
+`ports/controlclient` or `protocol/acp/control.Service` contracts. It exposes
+Task directory, finite records, and one-Task subscription operations;
+`protocol/acp/taskstream` projects those records into the ACP Envelopes consumed
+by Surfaces. Each directory descriptor includes the public Session-unique
+`handle`, the opaque `task_id`, typed `parent_tool`, and (for Spawn) the selected
+`agent_handle`. People and models use `handle` for Task control. A Surface uses
+the directory to resolve a visible handle or parent tool to `task_id`, then uses
+that internal ID only for the observation endpoint. The HTTP mapping is:
+
+- `GET /api/control/v1/sessions/{session_id}/tasks`
+- `GET /api/control/v1/sessions/{session_id}/tasks/{task_id}/events`
+- `GET /api/control/v1/sessions/{session_id}/tasks/{task_id}/stream`
+
+Task SSE uses the same complete Envelope DTO, `Last-Event-ID`, `after`, and
+ResumeBoundary conventions as Session SSE. Closing SSE is delivery-only; Task
+cancel remains on the existing authorized TASK/Control path.
 
 ### Bounds and slow consumers
 
@@ -216,10 +233,10 @@ delivery and continues publishing that same ingress into the shared Session
 feed until handle `ACPEvents` closes after Runtime producer and lease
 completion. The Turn ingress broker records its single authoritative final
 error/terminal; the local wrapper and sibling TUI, SSE, or GUI subscribers use
-that same state and identity. Source-delivery failure likewise cancels once and
-waits for producer close before the final-source barrier and unique `failed`
-terminal. `Close` remains an explicit delivery teardown, emits no synthetic
-terminal, and is not a substitute for these barriers.
+that same state and identity. Main-source delivery failure likewise cancels
+once and waits only for the main producer close before its unique `failed`
+terminal. `Close` remains an explicit delivery teardown and emits no synthetic
+terminal. Task subscriptions are outside this barrier.
 
 The ring keeps cloned whole Envelopes. Byte accounting uses the encoded
 Envelope size used by the wire codec. Eviction preserves order and may remove
@@ -266,10 +283,11 @@ Subscribe returns one of:
   process generation. Backfill begins after the token's last durable anchor and
   sets `transient_gap=true`.
 
-In the same process while the ring retains the cursor, RunCommand bytes,
-ANSI sequences, UTF-8 fragments, cursor order, and exit state are exact and
-nonduplicated. After process restart only canonical and mirror delivery is
-guaranteed.
+RunCommand bytes no longer occupy this Session ring. In the same process,
+`control/taskstream` retains exact ANSI/UTF-8 text, byte and event cursors, and
+exit state within its bounded Task window. A process restart returns a typed
+current-state fallback and transient gap rather than reconstructing output from
+Session replay.
 
 ## SessionState and Approval Reconnect
 
@@ -678,14 +696,17 @@ participant/handoff policy, or persistence logic.
 | Envelope, delivery mode, feed position, cursor codec contract | `protocol/acp/eventstream` |
 | ACP semantic projection | `protocol/acp/projector` |
 | transport-neutral commands and SessionState | `ports/controlclient` (transitional, frozen) |
-| feed broker, durable child recorder, operation store, authorizer, command service | `internal/controlclient` (transitional toward `control/*`) |
-| shared Turn/task ingress and final-read barrier | `internal/controlclient/turningress`; every in-process and network adapter consumes the same merged feed |
+| feed broker, legacy child-mirror filter, operation store, authorizer, command service | `internal/controlclient` (transitional toward `control/*`) |
+| main-only Turn ingress | `internal/controlclient/turningress` |
+| Session-authorized transient Task directory and cursor-stamped records | `control/taskstream` |
+| Task record to ACP Envelope projection | `protocol/acp/taskstream` |
 | HTTP/SSE DTO mapping and authentication extraction | `surfaces/appserver` |
 | dependency assembly, listener configuration, persistent secret path | `app/*` and `cmd/caelis` |
 
-`surfaces/appserver` may import `ports/controlclient` and
-`protocol/acp/eventstream`; it must not import `app/*`, repository
-`internal/*`, `agent-sdk/runtime`, policy, task stream, or session persistence
+`surfaces/appserver` may import `ports/controlclient`,
+`protocol/acp/taskstream`, and `protocol/acp/eventstream`; it must not import
+`app/*`, repository
+`internal/*`, `agent-sdk/runtime`, policy, or session persistence
 implementations. `agent-sdk/*` must not import `protocol/*`, `ports/*`,
 `surfaces/*`, `app/*`, or repository `internal/*`.
 
@@ -729,7 +750,8 @@ comparisons where applicable.
 | Gate | Required evidence |
 | --- | --- |
 | M2-A protocol | typed delivery modes; typed durable child origin; stable idempotency conflict; paged Reader; canonical+mirror client filter; no synthetic task-panel replay; child semantic fixtures; parent model-context round trip unchanged |
-| M2-B broker | ordered durable sequencer and gap fill; live publication of scanned commits; atomic subscribe under concurrent transient publish; exact and durable fallback modes; bounded ring/TTL/bytes without forgetting durable dedupe; slow-subscriber disconnect; forged/version/cross-Session cursor rejection; exact RunCommand bytes/ANSI/UTF-8/exit reconnect; child terminal and final-read barrier behavior |
+| M2-B broker | ordered durable sequencer and gap fill; live publication of scanned commits; atomic subscribe under concurrent transient publish; exact and durable fallback modes; bounded ring/TTL/bytes without forgetting durable dedupe; slow-subscriber disconnect; forged/version/cross-Session cursor rejection; main-only terminal barrier; historical child-output mirror filtering |
+| Task stream | Session authorization and ownership; cross-Task cursor rejection; exact retained command bytes and subagent frames; Continue cursor continuity; eviction, oversized-frame, generation, and slow-consumer gaps; close without cancel |
 | M2-C state/approval | revision-consistent SessionState; request-scoped StateWriter revision/lease fencing in file and memory stores; pure-read SnapshotState for missing compatibility state; global Session identity; Session-scoped FIFO across Turn owners; detached child after parent terminal; active mirror-before-publish under Runtime lease; reconnect resolution; stale/duplicate/queued conflicts; cancel/close/terminal/startup sweep |
 | M2-D commands | all named commands are request-scoped; trusted-principal authorization; operation intent before effect; duplicate and changed-payload behavior; revision/epoch/turn conflicts; semantic close gate; exact participant-kind/identity cancel; explicit unknown-outcome coverage for every write |
 | M2-E app-server | strict checked-in OpenAPI 3.1 wire schemas with actual response statuses and explicit raw ACP extensions; schema-driven standalone Go and complete TypeScript outputs; all-request/response/Envelope JSON Schema conformance plus generated-Go raw Envelope round-trip equivalence; HTTP golden tests; SSE resume boundary metadata, Cursor/data parity, and heartbeat comments; production `caelis serve`; loopback/auth fail-closed configuration; thin-surface dependency test |

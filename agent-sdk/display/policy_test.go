@@ -130,13 +130,13 @@ func TestCleanSubagentFinalOutput(t *testing.T) {
 
 func TestTaskMetadataDisplayPolicy(t *testing.T) {
 	meta := map[string]any{"caelis": map[string]any{"runtime": map[string]any{"tool": map[string]any{
-		"target_id":   "sidecar",
-		"action":      "write",
-		"input":       "continue",
-		"target_kind": "subagent",
+		"target_handle": "sidecar",
+		"action":        "write",
+		"input":         "continue",
+		"target_kind":   "subagent",
 	}}}}
-	if got := ToolTaskID(nil, nil, meta); got != "sidecar" {
-		t.Fatalf("ToolTaskID() = %q", got)
+	if got := ToolTaskHandle(nil, nil, meta); got != "sidecar" {
+		t.Fatalf("ToolTaskHandle() = %q", got)
 	}
 	if got := ToolTaskAction(nil, nil, meta); got != "write" {
 		t.Fatalf("ToolTaskAction() = %q", got)

@@ -33,8 +33,6 @@ import (
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
 func encryptCodeFreeAPIKeyForRuntimeTest(t *testing.T, apiKey string) string {
@@ -133,63 +131,6 @@ func closeAdapterTestTurn(t *testing.T, turn Turn) {
 			t.Fatal("turn did not close after cancel")
 		}
 	}
-}
-
-func TestStreamRequestFromProjectedSemanticSpawnRunningEvent(t *testing.T) {
-	t.Parallel()
-
-	event := session.CanonicalizeEvent(&session.Event{
-		SessionID:  "root-session",
-		Type:       session.EventTypeToolResult,
-		Visibility: session.VisibilityCanonical,
-		Tool: &session.EventTool{
-			ID:     "spawn-1",
-			Name:   "SPAWN",
-			Status: "running",
-			Input:  map[string]any{"agent": "explorer", "prompt": "inspect files"},
-			Output: map[string]any{"task_id": "reya", "state": "running"},
-			Content: []session.EventToolContent{{
-				Type:       "terminal",
-				TerminalID: "subagent-task-1",
-			}},
-		},
-		Meta: map[string]any{
-			"caelis": map[string]any{
-				"version": 1,
-				"runtime": map[string]any{
-					"tool": map[string]any{"name": "SPAWN"},
-					"task": map[string]any{
-						"task_id":       "reya",
-						"terminal_id":   "subagent-task-1",
-						"output_cursor": int64(0),
-						"running":       true,
-						"state":         "running",
-					},
-				},
-			},
-		},
-	})
-	base := eventstream.Envelope{
-		SessionID: "root-session",
-		Scope:     eventstream.ScopeMain,
-		ScopeID:   "root-session",
-		Meta:      event.Meta,
-	}
-	events := acpprojector.ProjectSessionEventEnvelope(base, event)
-	for _, acpEnv := range events {
-		req, ok := streamRequestFromACPEvent(acpEnv)
-		if !ok {
-			continue
-		}
-		if req.CallID != "spawn-1" || req.ToolName != "SPAWN" {
-			t.Fatalf("stream request identity = %#v, want spawn-1/SPAWN", req)
-		}
-		if req.Ref.SessionID != "root-session" || req.Ref.TaskID != "reya" || req.Ref.TerminalID != "subagent-task-1" {
-			t.Fatalf("stream request ref = %#v, want root-session/reya/subagent-task-1", req.Ref)
-		}
-		return
-	}
-	t.Fatalf("projected ACP envelopes did not produce stream request: %#v", events)
 }
 
 func TestAdapterUsesCurrentTurnServiceAfterSandboxRebuild(t *testing.T) {

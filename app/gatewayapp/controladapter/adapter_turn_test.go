@@ -15,7 +15,7 @@ import (
 func TestGatewayTurnEventsSynthesizesCompletedForEmptyStream(t *testing.T) {
 	events := make(chan eventstream.Envelope)
 	close(events)
-	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: events}, nil)
+	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: events})
 
 	out := collectAdapterTurnEvents(turn.Events())
 	if len(out) != 1 {
@@ -28,7 +28,7 @@ func TestGatewayTurnEventsSynthesizesFailedAfterError(t *testing.T) {
 	events := make(chan eventstream.Envelope, 1)
 	events <- eventstream.Error(errors.New("provider failed"))
 	close(events)
-	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: events}, nil)
+	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: events})
 
 	out := collectAdapterTurnEvents(turn.Events())
 	if len(out) != 2 {
@@ -44,7 +44,7 @@ func TestGatewayTurnEventsSynthesizesCancelledAfterCancelError(t *testing.T) {
 	events := make(chan eventstream.Envelope, 1)
 	events <- eventstream.Error(errors.New("providers: context canceled"))
 	close(events)
-	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: events}, nil)
+	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: events})
 
 	out := collectAdapterTurnEvents(turn.Events())
 	if len(out) != 2 {
@@ -58,7 +58,7 @@ func TestGatewayTurnEventsForwardsExplicitTerminalOnce(t *testing.T) {
 	acpEvents <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Time{})
 	acpEvents <- eventstream.TurnFailed("handle-1", "run-1", "turn-1", "late", time.Time{})
 	close(acpEvents)
-	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: acpEvents}, nil)
+	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: acpEvents})
 
 	out := collectAdapterTurnEvents(turn.Events())
 	if len(out) != 1 {
@@ -70,7 +70,7 @@ func TestGatewayTurnEventsForwardsExplicitTerminalOnce(t *testing.T) {
 func TestGatewayTurnEventsReturnsSameStream(t *testing.T) {
 	events := make(chan eventstream.Envelope)
 	close(events)
-	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: events}, nil)
+	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: events})
 
 	first := turn.Events()
 	second := turn.Events()
@@ -263,7 +263,7 @@ func TestGatewayTurnCloseUnblocksHalfReadSubscriptionDelivery(t *testing.T) {
 
 func TestGatewayTurnSubmitApprovalForwardsRequestID(t *testing.T) {
 	handle := &testGatewayTurnHandle{}
-	turn := newGatewayTurn(handle, nil)
+	turn := newGatewayTurn(handle)
 
 	err := turn.SubmitApproval(context.Background(), ApprovalDecision{
 		RequestID:  "approval-child-1",

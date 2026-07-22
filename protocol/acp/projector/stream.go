@@ -6,7 +6,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -30,10 +29,9 @@ type StreamRequest struct {
 	ToolName       string
 	ParentCallID   string
 	ParentToolName string
-	// TargetKind distinguishes the physical task family behind a TASK call.
-	TargetKind taskapi.Kind
-	// Observer marks a TASK wait that does not own a second physical stream.
-	Observer          bool
+	// TaskHandle is the Session-scoped public Task identity used only for
+	// display metadata. Ref.TaskID remains the typed stream address.
+	TaskHandle        string
 	RawInput          map[string]any
 	Ref               stream.Ref
 	DisplayTerminalID string
@@ -70,30 +68,48 @@ func (r StreamRequest) Key() string {
 	}, "|")
 }
 
-// ProjectStreamFrame projects one runtime stream frame into transient
-// ACP-native envelopes for live clients.
-func ProjectStreamFrame(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
-	parent := parentStreamFrameEvents(req, frame)
+// ProjectTaskStreamFrame projects one frame for the Task-owned stream. It never
+// manufactures a parent Spawn or Task update. Parent status and results remain
+// on the Session feed.
+func ProjectTaskStreamFrame(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
+	if !delegatedParentStream(req) {
+		return commandTaskStreamFrameEvents(req, frame)
+	}
 	embedded := streamFrameEmbeddedEvents(req, frame)
-	out := make([]eventstream.Envelope, 0, len(embedded)+len(parent))
-	out = append(out, embedded...)
-	out = append(out, parent...)
-	return out
-}
-
-func parentStreamFrameEvents(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
-	if delegatedParentStream(req) {
-		// TASK wait is an observer of the Spawn-owned physical stream. Its own
-		// canonical tool result is already emitted by Runtime, so replaying a
-		// synthetic parent close here would duplicate or reorder that result.
-		if req.Observer {
-			return nil
-		}
+	if len(embedded) > 0 {
 		if frame.Closed {
-			return []eventstream.Envelope{delegatedFinalFrameEvent(req, frame)}
+			for i := range embedded {
+				embedded[i].Final = true
+			}
 		}
+		return embedded
+	}
+	if !frame.Closed {
 		return nil
 	}
+	state := strings.ToLower(strings.TrimSpace(frame.State))
+	if !eventstream.IsTerminalLifecycleState(state) {
+		state = eventstream.LifecycleStateUnknown
+	}
+	occurredAt := frame.UpdatedAt
+	if occurredAt.IsZero() {
+		occurredAt = time.Now()
+	}
+	return []eventstream.Envelope{{
+		Kind:       eventstream.KindLifecycle,
+		SessionID:  strings.TrimSpace(req.SessionRef.SessionID),
+		TurnID:     firstNonEmpty(strings.TrimSpace(frame.Ref.TerminalID), strings.TrimSpace(req.SourceID)),
+		OccurredAt: occurredAt,
+		Scope:      eventstream.ScopeSubagent,
+		ScopeID:    firstNonEmpty(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID)),
+		ParentTool: streamParentToolRelation(req),
+		Delivery:   streamFrameDelivery(),
+		Lifecycle:  &eventstream.Lifecycle{State: state},
+		Final:      true,
+	}}
+}
+
+func commandTaskStreamFrameEvents(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
 	if frame.Closed {
 		return []eventstream.Envelope{streamFinalFrameEvent(req, frame)}
 	}
@@ -121,35 +137,6 @@ func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.En
 	return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, streamFrameMeta("final"), true)
 }
 
-func delegatedFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
-	status, isErr := subagentFinalToolStatus(frame)
-	finalMessage := display.CleanSubagentFinalOutput(frame.Text)
-	if terminalID := strings.TrimSpace(req.Ref.TerminalID); terminalID != "" {
-		frame = stream.CloneFrame(frame)
-		frame.Ref.TerminalID = terminalID
-	}
-	env := streamToolUpdateEnvelope(req, frame, status, true, isErr, "", streamFrameMeta("final"), false)
-	update, _ := env.Update.(ToolCallUpdate)
-	taskID := firstNonEmpty(req.Ref.TaskID, frame.Ref.TaskID)
-	update.Meta = streamFrameToolMeta(update.Meta, req.RawInput, map[string]any{
-		"task_id":     taskID,
-		"terminal_id": firstNonEmpty(req.Ref.TerminalID, frame.Ref.TerminalID),
-		"running":     false,
-		"state":       status,
-		"result":      finalMessage,
-	}, "", taskID)
-	update.Meta = metautil.WithCompactRuntimeSection(update.Meta, metautil.RuntimeTask, map[string]any{
-		metautil.RuntimeTaskID:         taskID,
-		metautil.RuntimeTaskTerminalID: firstNonEmpty(req.Ref.TerminalID, frame.Ref.TerminalID),
-		"output_cursor":                frame.Cursor.Output,
-		"running":                      false,
-		"state":                        status,
-		"result":                       finalMessage,
-	})
-	env.Update = update
-	return env
-}
-
 func streamDisplayTerminalID(req StreamRequest, frame stream.Frame) string {
 	return firstNonEmpty(req.DisplayTerminalID, frame.Ref.TerminalID, req.Ref.TerminalID, req.CallID)
 }
@@ -162,26 +149,11 @@ func streamTerminalExitID(req StreamRequest, frame stream.Frame) string {
 }
 
 func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status string, includeStatus bool, isErr bool, terminalText string, meta map[string]any, includeDisplayTerminal bool) eventstream.Envelope {
-	terminalID := firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID)
 	if frame.TruncatedBefore > 0 {
 		meta = metautil.WithCompactRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
 			metautil.RuntimeStreamTruncated: true,
 			metautil.RuntimeStreamBefore:    frame.TruncatedBefore,
 		})
-	}
-	metaOutput := map[string]any{
-		"task_id":       firstNonEmpty(frame.Ref.TaskID, req.Ref.TaskID),
-		"terminal_id":   terminalID,
-		"running":       status == toolStatusRunning,
-		"state":         streamFrameState(frame),
-		"output_cursor": frame.Cursor.Output,
-	}
-	if status != toolStatusRunning {
-		metaOutput["running"] = false
-		metaOutput["state"] = acpToolStatus(status)
-	}
-	if state := strings.TrimSpace(frame.State); state != "" {
-		metaOutput["state"] = state
 	}
 	occurredAt := frame.UpdatedAt
 	if occurredAt.IsZero() {
@@ -190,7 +162,7 @@ func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status stri
 	update := ToolCallUpdate{
 		SessionUpdate: UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(req.CallID),
-		Meta:          streamFrameToolMeta(meta, req.RawInput, metaOutput, "", firstNonEmpty(frame.Ref.TaskID, req.Ref.TaskID)),
+		Meta:          streamFrameToolMeta(meta, req.RawInput, nil, "", req.TaskHandle),
 	}
 	if terminalText != "" {
 		update.Meta = metautil.WithTerminalOutput(update.Meta, streamDisplayTerminalID(req, frame), terminalText)
@@ -250,14 +222,19 @@ func streamFrameMetaForEnvelope(isErr bool) map[string]any {
 func subagentFinalToolStatus(frame stream.Frame) (string, bool) {
 	state := strings.ToLower(strings.TrimSpace(frame.State))
 	switch state {
+	case "completed":
+		return schema.ToolStatusCompleted, false
 	case "failed":
 		return schema.ToolStatusFailed, true
 	case "interrupted":
 		return toolStatusInterrupted, true
 	case "cancelled", "canceled":
 		return toolStatusCancelled, true
+	case "terminated", "unknown_outcome":
+		return state, true
+	default:
+		return eventstream.LifecycleStateUnknown, true
 	}
-	return schema.ToolStatusCompleted, false
 }
 
 func streamFinalTerminalText(text string) string {
@@ -271,13 +248,13 @@ func streamFinalTerminalText(text string) string {
 	return text
 }
 
-func streamFrameToolMeta(meta map[string]any, input map[string]any, output map[string]any, action string, taskID string) map[string]any {
+func streamFrameToolMeta(meta map[string]any, input map[string]any, output map[string]any, action string, taskHandle string) map[string]any {
 	values := map[string]any{}
 	if action = firstNonEmpty(action, stringValue(output["action"]), stringValue(input["action"])); action != "" {
 		values[metautil.RuntimeToolAction] = action
 	}
-	if taskID = firstNonEmpty(taskID, stringValue(output["handle"]), stringValue(output["task_id"]), stringValue(input["task_id"])); taskID != "" {
-		values[metautil.RuntimeTargetID] = taskID
+	if taskHandle = firstNonEmpty(taskHandle, stringValue(output["handle"]), stringValue(input["handle"])); taskHandle != "" {
+		values[metautil.RuntimeTargetHandle] = taskHandle
 	}
 	for _, key := range []string{"agent", "handle", "mention", "prompt", "target_kind", "input"} {
 		if value := firstNonEmpty(stringValue(output[key]), stringValue(input[key])); value != "" {
@@ -328,6 +305,7 @@ func streamFrameEmbeddedEvents(req StreamRequest, frame stream.Frame) []eventstr
 		TurnID:   req.TurnID,
 	})
 	out := ProjectSessionEventEnvelope(base, event)
+	out = taskStreamPrimaryEnvelope(out)
 	if taskID := firstNonEmpty(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID)); taskID != "" {
 		for i := range out {
 			if out[i].Scope == eventstream.ScopeSubagent {
@@ -348,6 +326,22 @@ func streamFrameEmbeddedEvents(req StreamRequest, frame stream.Frame) []eventstr
 		}
 	}
 	return out
+}
+
+func taskStreamPrimaryEnvelope(events []eventstream.Envelope) []eventstream.Envelope {
+	if len(events) <= 1 {
+		return events
+	}
+	// One SDK Task frame is one public resume unit. Generic Session projection
+	// may append a sibling usage_update to a narrative event, but publishing
+	// both with the frame cursor would make a mid-record resume lossy. Keep the
+	// semantic event; a usage-only frame still projects its usage envelope.
+	for _, envelope := range events {
+		if eventstream.UpdateType(envelope.Update) != schema.UpdateUsage {
+			return []eventstream.Envelope{envelope}
+		}
+	}
+	return events[:1]
 }
 
 func streamParentToolRelation(req StreamRequest) *eventstream.ParentToolRelation {
@@ -401,16 +395,6 @@ const (
 	toolStatusInterrupted = "interrupted"
 	toolStatusCancelled   = "cancelled"
 )
-
-func streamFrameState(frame stream.Frame) string {
-	if frame.Running {
-		return "running"
-	}
-	if frame.Closed {
-		return "completed"
-	}
-	return ""
-}
 
 func stringValue(value any) string {
 	if text, ok := value.(string); ok {

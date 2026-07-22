@@ -48,6 +48,168 @@ func TestStreamReadCommandUsesCallbackOutputWithoutReadFallback(t *testing.T) {
 	}
 }
 
+func TestStreamReadCommandRejectsOutputAfterTerminalFrame(t *testing.T) {
+	t.Parallel()
+
+	task := &commandTask{
+		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:     session.SessionRef{SessionID: "session-1"},
+		session:        &liveOutputRaceSession{},
+		state:          taskapi.StateUnknownOutcome,
+		createdAt:      time.Now(),
+		outputCallback: true,
+	}
+	service := &streamService{}
+
+	closed, err := service.readCommand(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatalf("readCommand() error = %v", err)
+	}
+	if len(closed.Frames) != 1 || !closed.Frames[0].Closed || closed.Frames[0].State != string(taskapi.StateUnknownOutcome) {
+		t.Fatalf("initial frames = %#v, want one unknown_outcome close", closed.Frames)
+	}
+
+	task.appendOutput("late output must not reopen the stream\n")
+	resumed, err := service.readCommand(context.Background(), task, closed.Cursor)
+	if err != nil {
+		t.Fatalf("second readCommand() error = %v", err)
+	}
+	if len(resumed.Frames) != 0 || resumed.Cursor != closed.Cursor {
+		t.Fatalf("post-terminal read = %#v, want unchanged terminal cursor and no frames", resumed)
+	}
+	task.mu.Lock()
+	output := task.output
+	task.mu.Unlock()
+	if output != "" {
+		t.Fatalf("post-terminal aggregate output = %q, want rejected", output)
+	}
+}
+
+func TestStreamReadRehydratedUnknownOutcomeWithoutSession(t *testing.T) {
+	t.Parallel()
+
+	entry := &taskapi.Entry{
+		TaskID:    "task-1",
+		Session:   session.SessionRef{SessionID: "session-1"},
+		State:     taskapi.StateRunning,
+		Running:   true,
+		CreatedAt: time.Unix(100, 0),
+		UpdatedAt: time.Unix(200, 0),
+		Metadata:  map[string]any{"command_phase": commandPhaseEffectClaimed},
+	}
+	task, err := (&taskRuntime{}).rehydrateCommandTask(entry)
+	if err != nil {
+		t.Fatalf("rehydrateCommandTask() error = %v", err)
+	}
+	if task.session != nil {
+		t.Fatalf("rehydrated session = %#v, want no observable sandbox handle", task.session)
+	}
+
+	snapshot, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatalf("readCommand() error = %v", err)
+	}
+	if snapshot.State != string(taskapi.StateUnknownOutcome) || snapshot.Running || !snapshot.TerminalFramed {
+		t.Fatalf("snapshot = %#v, want terminal unknown_outcome", snapshot)
+	}
+	if snapshot.ExitCode != nil {
+		t.Fatalf("snapshot.ExitCode = %v, want unavailable exit status", *snapshot.ExitCode)
+	}
+	if len(snapshot.Frames) != 1 || !snapshot.Frames[0].Closed || snapshot.Frames[0].State != string(taskapi.StateUnknownOutcome) {
+		t.Fatalf("frames = %#v, want one unknown_outcome close", snapshot.Frames)
+	}
+	if snapshot.Frames[0].ExitCode != nil {
+		t.Fatalf("close frame ExitCode = %v, want unavailable exit status", *snapshot.Frames[0].ExitCode)
+	}
+}
+
+func TestStreamSubscribeFollowsOnlyAReopenedSubagentContinue(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "session-1", TerminalID: "task-1:1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		state:      taskapi.StateCompleted,
+		turnSeq:    1,
+		createdAt:  time.Now(),
+		result:     map[string]any{"result": "first turn"},
+	}
+	service := newStreamService(&taskRuntime{
+		tasks:     map[string]*commandTask{},
+		subagents: map[string]*subagentTask{task.ref.TaskID: task},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	frames := make(chan stream.Frame, 4)
+	done := make(chan error, 1)
+	go func() {
+		for frame, err := range service.Subscribe(ctx, stream.SubscribeRequest{
+			Ref:          stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
+			PollInterval: time.Millisecond, FollowContinues: true,
+		}) {
+			if err != nil {
+				done <- err
+				return
+			}
+			if frame != nil {
+				frames <- stream.CloneFrame(*frame)
+			}
+		}
+		done <- nil
+	}()
+
+	first := receiveStreamFrame(t, frames)
+	if !first.Closed || first.State != string(taskapi.StateCompleted) {
+		t.Fatalf("first frame = %#v, want completed turn close", first)
+	}
+	task.applyStreamFrames([]stream.Frame{{
+		Text: "late first-turn output", State: string(taskapi.StateRunning), Running: true,
+	}})
+	task.mu.Lock()
+	lateState, lateRunning, lateResult := task.state, task.running, task.result["output_preview"]
+	task.mu.Unlock()
+	if lateState != taskapi.StateCompleted || lateRunning || lateResult != nil {
+		t.Fatalf("late frame changed closed Task to state=%q running=%t result=%#v", lateState, lateRunning, lateResult)
+	}
+	select {
+	case frame := <-frames:
+		t.Fatalf("post-terminal frame was delivered before Continue: %#v", frame)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	task.beginContinuationTurn()
+	task.mu.Lock()
+	task.state = taskapi.StateRunning
+	task.running = true
+	task.mu.Unlock()
+	task.applyStreamFrames([]stream.Frame{{Text: "continued output", Running: true}})
+	continued := receiveStreamFrame(t, frames)
+	if continued.Closed || continued.Text != "continued output" || continued.Ref.TerminalID != "task-1:2" || continued.Cursor.Events <= first.Cursor.Events {
+		t.Fatalf("continued frame = %#v, want reopened Task stream with a higher absolute cursor", continued)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("Subscribe() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Subscribe() did not stop after cancellation")
+	}
+}
+
+func receiveStreamFrame(t *testing.T, frames <-chan stream.Frame) stream.Frame {
+	t.Helper()
+	select {
+	case frame := <-frames:
+		return frame
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Task stream frame")
+		return stream.Frame{}
+	}
+}
+
 func TestStreamReadCommandUsesReadOutputFallbackWithoutCallbackSource(t *testing.T) {
 	t.Parallel()
 
@@ -524,6 +686,56 @@ func TestCommandLiveOutputBufferIsBoundedAndCursorStable(t *testing.T) {
 	task.mu.Unlock()
 }
 
+func TestCommandStreamAssignsOneMonotonicEventCursorPerOutputFrame(t *testing.T) {
+	t.Parallel()
+
+	task := &commandTask{
+		ref:            taskapi.Ref{TaskID: "task-1", TerminalID: "term-1"},
+		sessionRef:     session.SessionRef{SessionID: "session-1"},
+		session:        &liveOutputRaceSession{},
+		state:          taskapi.StateRunning,
+		running:        true,
+		createdAt:      time.Now(),
+		outputCallback: true,
+	}
+	task.appendOutput("first")
+	task.appendOutput("second")
+
+	first, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Frames) != 2 || first.Frames[0].Cursor.Events != 1 || first.Frames[1].Cursor.Events != 2 || first.Cursor.Events != 2 {
+		t.Fatalf("first command stream = %#v, want two independently sequenced frames", first)
+	}
+	second, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{Output: int64(len("first")), Events: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Frames) != 1 || second.Frames[0].Text != "second" || second.Frames[0].Cursor.Events != 2 {
+		t.Fatalf("resumed command stream = %#v, want only second frame", second)
+	}
+}
+
+func TestCommandUnknownOutcomeIsExplicitTerminalFrame(t *testing.T) {
+	t.Parallel()
+
+	task := &commandTask{
+		ref:        taskapi.Ref{TaskID: "task-1", TerminalID: "term-1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		session:    &liveOutputRaceSession{},
+		state:      taskapi.StateUnknownOutcome,
+		createdAt:  time.Now(),
+	}
+	snapshot, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Running || snapshot.State != string(taskapi.StateUnknownOutcome) || len(snapshot.Frames) != 1 || !snapshot.Frames[0].Closed || snapshot.Frames[0].ExitCode != nil {
+		t.Fatalf("unknown command stream = %#v, want one terminal unknown-outcome frame without inferred exit", snapshot)
+	}
+}
+
 func TestCommandLiveOutputTruncationKeepsUTF8BoundaryAndSignalsGap(t *testing.T) {
 	t.Parallel()
 
@@ -622,6 +834,58 @@ func TestStreamReadSubagentCursorUsesStableRawOutput(t *testing.T) {
 	}
 	if got := streamFrameText(second.Frames); got != "def" {
 		t.Fatalf("second frame text = %q, want exact appended chunk", got)
+	}
+}
+
+func TestSubagentOversizedFrameAdvancesCursorAndMarksTransientGap(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref:        taskapi.Ref{TaskID: "task-1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt:  time.Now(),
+		state:      taskapi.StateRunning,
+		running:    true,
+	}
+	task.mu.Lock()
+	task.appendStreamFrameLocked(stream.Frame{Text: strings.Repeat("x", subagentStreamByteCap+1), Running: true})
+	retainedOutput := task.stdout
+	task.mu.Unlock()
+
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retainedOutput != "" || snapshot.Cursor.Events != 1 || snapshot.Cursor.Output != subagentStreamByteCap+1 || len(snapshot.Frames) != 1 {
+		t.Fatalf("oversized subagent stream = %#v retained=%d, want cursor-only marker", snapshot, len(retainedOutput))
+	}
+	if frame := snapshot.Frames[0]; frame.Text != "" || frame.Event != nil || frame.EventsTruncatedBefore != 1 {
+		t.Fatalf("oversized frame marker = %#v, want explicit event gap", frame)
+	}
+}
+
+func TestSubagentFrameRingEvictionReportsEventLowerBound(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref:        taskapi.Ref{TaskID: "task-1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt:  time.Now(),
+		state:      taskapi.StateRunning,
+		running:    true,
+	}
+	task.mu.Lock()
+	for i := 0; i < subagentStreamFrameCap+1; i++ {
+		task.appendStreamFrameLocked(stream.Frame{Text: "x", Running: true})
+	}
+	task.mu.Unlock()
+
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Frames) != subagentStreamFrameCap || snapshot.EventsTruncatedBefore != 1 || snapshot.Cursor.Events != subagentStreamFrameCap+1 {
+		t.Fatalf("evicted subagent stream = frames:%d lower:%d cursor:%d", len(snapshot.Frames), snapshot.EventsTruncatedBefore, snapshot.Cursor.Events)
 	}
 }
 

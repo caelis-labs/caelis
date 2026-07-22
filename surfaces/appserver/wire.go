@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 const maxSafeJSONInteger = uint64(1<<53 - 1)
@@ -98,11 +99,31 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalSessionState(typed)
 	case controlclient.EventBatch:
 		return marshalEventBatch(typed)
+	case taskstream.Batch:
+		return marshalTaskEventBatch(typed)
 	case eventstream.Envelope:
 		return marshalEnvelope(typed)
 	default:
 		return json.Marshal(value)
 	}
+}
+
+func marshalTaskEventBatch(batch taskstream.Batch) ([]byte, error) {
+	type wireBatch struct {
+		Events         []json.RawMessage     `json:"events,omitempty"`
+		ResumeMode     taskstream.ResumeMode `json:"resume_mode"`
+		TransientGap   bool                  `json:"transient_gap,omitempty"`
+		BoundaryCursor string                `json:"boundary_cursor,omitempty"`
+	}
+	out := wireBatch{ResumeMode: batch.ResumeMode, TransientGap: batch.TransientGap, BoundaryCursor: batch.BoundaryCursor}
+	for _, envelope := range batch.Events {
+		raw, err := marshalEnvelope(envelope)
+		if err != nil {
+			return nil, err
+		}
+		out.Events = append(out.Events, raw)
+	}
+	return json.Marshal(out)
 }
 
 func marshalWriteRequest(request any, expectedRevision *uint64) ([]byte, error) {

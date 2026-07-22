@@ -223,7 +223,11 @@ type runtimeSpawnTool struct {
 }
 
 func (t runtimeSpawnTool) Definition() tool.Definition {
-	return tool.CloneDefinition(t.base.Definition())
+	def := tool.CloneDefinition(t.base.Definition())
+	// Runtime serializes only the short participant-binding commit. External
+	// child startup and stream production are independent per Task.
+	def.Capabilities.ParallelSafe = true
+	return def
 }
 
 func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
@@ -428,13 +432,13 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if !ok || strings.TrimSpace(action) == "" {
 		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "action")
 	}
-	taskID, ok := stringArg(args, "task_id")
-	if !ok || strings.TrimSpace(taskID) == "" {
-		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "task_id")
+	handle, ok := stringArg(args, "handle")
+	if !ok || strings.TrimSpace(handle) == "" {
+		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "handle")
 	}
-	taskIDs := splitTaskControlIDs(taskID)
-	if len(taskIDs) == 0 {
-		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "task_id")
+	handles := splitTaskControlHandles(handle)
+	if len(handles) == 0 {
+		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "handle")
 	}
 	input, _ := stringArg(args, "input")
 	normalizedAction := strings.ToLower(strings.TrimSpace(action))
@@ -443,16 +447,20 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	default:
 		return tool.Result{}, fmt.Errorf("tool: invalid action %q", action)
 	}
-	if len(taskIDs) > 1 && normalizedAction != "write" {
-		result := t.callBatchTaskControl(ctx, call, normalizedAction, taskIDs, input)
+	if len(handles) > 1 && normalizedAction != "write" {
+		result := t.callBatchTaskControl(ctx, call, normalizedAction, handles, input)
 		return result, nil
 	}
 	yield := time.Duration(0)
 	if normalizedAction == "wait" {
 		yield = taskWaitMaxYield
 	}
+	identity, err := t.tasks.resolveTaskHandle(ctx, t.sessionRef, handles[0])
+	if err != nil {
+		return tool.Result{}, err
+	}
 	req := taskapi.ControlRequest{
-		TaskID:    taskIDs[0],
+		TaskID:    identity.taskID,
 		Yield:     yield,
 		Input:     input,
 		Principal: session.ActorKindTool,
@@ -480,10 +488,10 @@ func durationMillis(value time.Duration) int {
 	return int(value / time.Millisecond)
 }
 
-func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Call, action string, taskIDs []string, input string) tool.Result {
-	items := make([]taskBatchControlItem, 0, len(taskIDs))
+func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Call, action string, handles []string, input string) tool.Result {
+	items := make([]taskBatchControlItem, 0, len(handles))
 	started := time.Now()
-	for _, id := range taskIDs {
+	for _, handle := range handles {
 		yield := time.Duration(0)
 		if strings.EqualFold(action, "wait") {
 			yield = taskWaitMaxYield
@@ -496,8 +504,13 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Cal
 				yield -= elapsed
 			}
 		}
+		identity, resolveErr := t.tasks.resolveTaskHandle(ctx, t.sessionRef, handle)
+		if resolveErr != nil {
+			items = append(items, taskBatchControlItem{Handle: handle, Err: resolveErr})
+			continue
+		}
 		req := taskapi.ControlRequest{
-			TaskID:    id,
+			TaskID:    identity.taskID,
 			Yield:     yield,
 			Input:     input,
 			Principal: session.ActorKindTool,
@@ -512,10 +525,10 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Cal
 			actualWaitMS = durationMillis(time.Since(itemStarted))
 		}
 		if err != nil {
-			items = append(items, taskBatchControlItem{TaskID: id, Err: err, ActualWaitMS: actualWaitMS})
+			items = append(items, taskBatchControlItem{Handle: handle, Err: err, ActualWaitMS: actualWaitMS})
 			continue
 		}
-		items = append(items, taskBatchControlItem{TaskID: id, Snapshot: snapshot, OK: true, ActualWaitMS: actualWaitMS})
+		items = append(items, taskBatchControlItem{Handle: handle, Snapshot: snapshot, OK: true, ActualWaitMS: actualWaitMS})
 	}
 	actualWaitMS := 0
 	if strings.EqualFold(action, "wait") {
@@ -540,8 +553,8 @@ func (t runtimeTaskTool) callTaskControl(ctx context.Context, action string, req
 	}
 }
 
-func splitTaskControlIDs(taskID string) []string {
-	parts := strings.Split(taskID, ",")
+func splitTaskControlHandles(handle string) []string {
+	parts := strings.Split(handle, ",")
 	out := make([]string, 0, len(parts))
 	seen := map[string]bool{}
 	for _, part := range parts {
@@ -564,7 +577,7 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 	toolMeta["name"] = names.Task
 	toolMeta["action"] = strings.ToLower(strings.TrimSpace(action))
 	toolMeta["target_kind"] = strings.TrimSpace(string(snapshot.Kind))
-	toolMeta["target_id"] = taskVisibleID(snapshot)
+	toolMeta["target_handle"] = taskPublicHandle(snapshot)
 	if strings.EqualFold(strings.TrimSpace(action), "wait") {
 		toolMeta["effective_yield_time_ms"] = int(taskWaitMaxYield / time.Millisecond)
 		toolMeta["actual_wait_time_ms"] = actualWaitMS
@@ -583,7 +596,7 @@ func taskBatchToolResultEventMeta(existing map[string]any, action string, input 
 	toolMeta := taskRuntimeMetaSection(out, "tool")
 	toolMeta["name"] = names.Task
 	toolMeta["action"] = strings.ToLower(strings.TrimSpace(action))
-	toolMeta["target_ids"] = taskBatchVisibleIDs(items)
+	toolMeta["target_handles"] = taskBatchVisibleHandles(items)
 	toolMeta["target_count"] = len(items)
 	if failed := taskBatchErrorCount(items); failed > 0 {
 		toolMeta["failed_count"] = failed
@@ -599,7 +612,7 @@ func taskBatchToolResultEventMeta(existing map[string]any, action string, input 
 		toolMeta["input"] = strings.TrimSpace(input)
 	}
 	taskMeta := taskRuntimeMetaSection(out, "task")
-	taskMeta["task_ids"] = taskBatchVisibleIDs(items)
+	taskMeta["handles"] = taskBatchVisibleHandles(items)
 	taskMeta["count"] = len(items)
 	if failed := taskBatchErrorCount(items); failed > 0 {
 		taskMeta["failed_count"] = failed
@@ -610,15 +623,15 @@ func taskBatchToolResultEventMeta(existing map[string]any, action string, input 
 	return out
 }
 
-func taskBatchVisibleIDs(items []taskBatchControlItem) []string {
+func taskBatchVisibleHandles(items []taskBatchControlItem) []string {
 	out := make([]string, 0, len(items))
 	for _, item := range items {
-		id := strings.TrimSpace(item.TaskID)
-		if id == "" && item.OK {
-			id = taskVisibleID(item.Snapshot)
+		handle := strings.TrimSpace(item.Handle)
+		if handle == "" && item.OK {
+			handle = taskPublicHandle(item.Snapshot)
 		}
-		if id != "" {
-			out = append(out, id)
+		if handle != "" {
+			out = append(out, handle)
 		}
 	}
 	return out

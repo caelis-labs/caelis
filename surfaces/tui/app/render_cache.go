@@ -806,7 +806,7 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 		} else {
 			builder.addString(event.Output)
 		}
-		builder.addString(event.TaskID)
+		builder.addString(event.TaskHandle)
 		builder.addString(event.TaskAction)
 		builder.addString(event.TaskInput)
 		builder.addString(event.TaskTargetKind)

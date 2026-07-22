@@ -1351,7 +1351,7 @@ func jsonStringForTest(value string) string {
 type commandTaskLoopRuntimeModel struct {
 	t      *testing.T
 	calls  int
-	taskID string
+	handle string
 }
 
 func (m *commandTaskLoopRuntimeModel) Name() string { return "command-task-loop" }
@@ -1360,7 +1360,7 @@ func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Req
 	m.calls++
 	callIndex := m.calls
 	if callIndex == 2 {
-		m.taskID = mustFindTaskID(m.t, req)
+		m.handle = mustFindTaskHandle(m.t, req)
 	}
 	return func(yield func(*model.StreamEvent, error) bool) {
 		switch callIndex {
@@ -1391,8 +1391,8 @@ func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Req
 						ID:   "task-wait-1",
 						Name: tasktool.ToolName,
 						Args: string(mustJSONRaw(map[string]any{
-							"action":  "wait",
-							"task_id": m.taskID,
+							"action": "wait",
+							"handle": m.handle,
 						})),
 					}}, ""),
 					TurnComplete: true,
@@ -1416,7 +1416,7 @@ func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Req
 	}
 }
 
-func mustFindTaskID(t *testing.T, req *model.Request) string {
+func mustFindTaskHandle(t *testing.T, req *model.Request) string {
 	t.Helper()
 	if req == nil {
 		t.Fatal("request = nil")
@@ -1432,14 +1432,14 @@ func mustFindTaskID(t *testing.T, req *model.Request) string {
 				if err := json.Unmarshal(part.JSONValue(), &payload); err != nil {
 					continue
 				}
-				if taskID, _ := payload["task_id"].(string); strings.TrimSpace(taskID) != "" {
-					return strings.TrimSpace(taskID)
+				if handle, _ := payload["handle"].(string); strings.TrimSpace(handle) != "" {
+					return strings.TrimSpace(handle)
 				}
 			}
 		}
 	}
 	raw, _ := json.MarshalIndent(req, "", "  ")
-	t.Fatalf("did not find yielded task_id in request transcript:\n%s", string(raw))
+	t.Fatalf("did not find yielded Task handle in request transcript:\n%s", string(raw))
 	return ""
 }
 
@@ -1472,7 +1472,7 @@ func (m *spawnTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Reque
 	m.calls++
 	callIndex := m.calls
 	if callIndex == 2 {
-		m.taskID = mustFindTaskID(m.t, req)
+		m.taskID = mustFindTaskHandle(m.t, req)
 	}
 	return func(yield func(*model.StreamEvent, error) bool) {
 		switch callIndex {
@@ -1502,8 +1502,8 @@ func (m *spawnTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Reque
 						ID:   "task-wait-spawn-1",
 						Name: tasktool.ToolName,
 						Args: string(mustJSONRaw(map[string]any{
-							"action":  "wait",
-							"task_id": m.taskID,
+							"action": "wait",
+							"handle": m.taskID,
 						})),
 					}}, ""),
 					TurnComplete: true,
@@ -1531,7 +1531,7 @@ func (m *spawnApprovalTaskLoopRuntimeModel) Generate(_ context.Context, req *mod
 	m.calls++
 	callIndex := m.calls
 	if callIndex == 2 {
-		m.taskID = mustFindTaskID(m.t, req)
+		m.taskID = mustFindTaskHandle(m.t, req)
 	}
 	agent := strings.TrimSpace(m.agent)
 	if agent == "" {
@@ -1565,8 +1565,8 @@ func (m *spawnApprovalTaskLoopRuntimeModel) Generate(_ context.Context, req *mod
 						ID:   "task-wait-spawn-approval-1",
 						Name: tasktool.ToolName,
 						Args: string(mustJSONRaw(map[string]any{
-							"action":  "wait",
-							"task_id": m.taskID,
+							"action": "wait",
+							"handle": m.taskID,
 						})),
 					}}, ""),
 					TurnComplete: true,
@@ -1594,7 +1594,7 @@ func (m *spawnProbeTaskLoopRuntimeModel) Generate(_ context.Context, req *model.
 	m.calls++
 	callIndex := m.calls
 	if callIndex == 2 {
-		m.taskID = mustFindTaskID(m.t, req)
+		m.taskID = mustFindTaskHandle(m.t, req)
 	}
 	return func(yield func(*model.StreamEvent, error) bool) {
 		switch callIndex {
@@ -1624,8 +1624,8 @@ func (m *spawnProbeTaskLoopRuntimeModel) Generate(_ context.Context, req *model.
 						ID:   "task-wait-spawn-probe-1",
 						Name: tasktool.ToolName,
 						Args: string(mustJSONRaw(map[string]any{
-							"action":  "wait",
-							"task_id": m.taskID,
+							"action": "wait",
+							"handle": m.taskID,
 						})),
 					}}, ""),
 					TurnComplete: true,
@@ -1649,17 +1649,17 @@ func (m *spawnProbeTaskLoopRuntimeModel) Generate(_ context.Context, req *model.
 	}
 }
 
-func mustSessionTaskID(t *testing.T, events []*session.Event) string {
+func mustSessionTaskHandle(t *testing.T, events []*session.Event) string {
 	t.Helper()
 	for _, event := range events {
 		if event == nil {
 			continue
 		}
-		if taskID := taskIDFromSessionEvent(event); strings.TrimSpace(taskID) != "" {
-			return taskID
+		if handle := taskHandleFromSessionEvent(event); strings.TrimSpace(handle) != "" {
+			return handle
 		}
 	}
-	t.Fatal("did not find task_id in persisted session events")
+	t.Fatal("did not find Task handle in persisted session events")
 	return ""
 }
 
@@ -1683,10 +1683,10 @@ func eventToolRawInput(event *session.Event) map[string]any {
 	return nil
 }
 
-func taskIDFromSessionEvent(event *session.Event) string {
+func taskHandleFromSessionEvent(event *session.Event) string {
 	for _, values := range []map[string]any{eventToolRawOutput(event), eventToolRawInput(event)} {
-		if taskID, _ := values["task_id"].(string); strings.TrimSpace(taskID) != "" {
-			return strings.TrimSpace(taskID)
+		if handle, _ := values["handle"].(string); strings.TrimSpace(handle) != "" {
+			return strings.TrimSpace(handle)
 		}
 	}
 	return ""
@@ -2083,11 +2083,11 @@ func startProbeCommandTask(t *testing.T, activeSession session.Session, runtime 
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, result, "task")["task_id"].(string)
-	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("command result metadata = %#v, want task_id", result.Metadata)
+	handle, _ := testToolResultRuntimeMeta(t, result, "task")["handle"].(string)
+	if strings.TrimSpace(handle) == "" {
+		t.Fatalf("command result metadata = %#v, want handle", result.Metadata)
 	}
-	return taskID
+	return handle
 }
 
 func callRuntimeTaskTool(t *testing.T, taskTool runtimeTaskTool, args map[string]any) tool.Result {
@@ -2166,8 +2166,8 @@ func assertRunningTaskSnapshot(t *testing.T, result tool.Result) {
 	if got, _ := payload["state"].(string); got != string(taskapi.StateRunning) {
 		t.Fatalf("snapshot state = %q, want %q", got, taskapi.StateRunning)
 	}
-	if strings.TrimSpace(testStringValue(payload["task_id"])) == "" {
-		t.Fatalf("snapshot task_id missing: %#v", payload)
+	if strings.TrimSpace(testStringValue(payload["handle"])) == "" {
+		t.Fatalf("snapshot handle missing: %#v", payload)
 	}
 }
 

@@ -17,7 +17,8 @@ func FramesForSnapshot(snapshot Snapshot) []Frame {
 		frames = append(frames, cloned)
 		hasClosedFrame = hasClosedFrame || cloned.Closed
 	}
-	if snapshot.Running || hasClosedFrame {
+	terminal := IsTerminalState(snapshot.State) || snapshot.ExitCode != nil
+	if hasClosedFrame || snapshot.TerminalFramed || !terminal {
 		return frames
 	}
 
@@ -26,17 +27,29 @@ func FramesForSnapshot(snapshot Snapshot) []Frame {
 		closeText = snapshot.FinalText
 	}
 	frames = append(frames, Frame{
-		Ref:             NormalizeRef(snapshot.Ref),
-		Text:            closeText,
-		State:           closedState(snapshot),
-		Cursor:          CloneCursor(snapshot.Cursor),
-		TruncatedBefore: snapshot.TruncatedBefore,
-		Running:         false,
-		Closed:          true,
-		ExitCode:        cloneExitCode(snapshot.ExitCode),
-		UpdatedAt:       snapshot.UpdatedAt,
+		Ref:                   NormalizeRef(snapshot.Ref),
+		Text:                  closeText,
+		State:                 closedState(snapshot),
+		Cursor:                CloneCursor(snapshot.Cursor),
+		TruncatedBefore:       snapshot.TruncatedBefore,
+		EventsTruncatedBefore: snapshot.EventsTruncatedBefore,
+		Running:               false,
+		Closed:                true,
+		ExitCode:              cloneExitCode(snapshot.ExitCode),
+		UpdatedAt:             snapshot.UpdatedAt,
 	})
 	return frames
+}
+
+// IsTerminalState reports whether a task state proves that the current task
+// turn has ended. A non-running observation is not terminal evidence.
+func IsTerminalState(state string) bool {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "completed", "failed", "interrupted", "cancelled", "canceled", "terminated", "unknown_outcome":
+		return true
+	default:
+		return false
+	}
 }
 
 // closedState normalizes a terminal snapshot state to the stream lifecycle
@@ -52,6 +65,10 @@ func closedState(snapshot Snapshot) string {
 		return "interrupted"
 	case "cancelled", "canceled":
 		return "cancelled"
+	case "terminated":
+		return "terminated"
+	case "unknown_outcome":
+		return "unknown_outcome"
 	}
 	if snapshot.ExitCode != nil && *snapshot.ExitCode != 0 {
 		if *snapshot.ExitCode < 0 {
@@ -59,7 +76,7 @@ func closedState(snapshot Snapshot) string {
 		}
 		return "failed"
 	}
-	return "completed"
+	return "unknown_outcome"
 }
 
 func cloneExitCode(in *int) *int {
@@ -88,6 +105,9 @@ func normalizeClosedFrame(snapshot Snapshot, frame Frame) Frame {
 	}
 	if frame.TruncatedBefore == 0 {
 		frame.TruncatedBefore = snapshot.TruncatedBefore
+	}
+	if frame.EventsTruncatedBefore == 0 {
+		frame.EventsTruncatedBefore = snapshot.EventsTruncatedBefore
 	}
 	frame.Running = false
 	frame.Closed = true

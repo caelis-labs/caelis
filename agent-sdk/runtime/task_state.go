@@ -19,6 +19,8 @@ const (
 	taskWaitMaxYield                = time.Minute
 	taskCancelWait                  = 10 * time.Millisecond
 	commandLiveOutputBufferCapBytes = 64 * 1024
+	subagentStreamFrameCap          = 1024
+	subagentStreamByteCap           = 4 * 1024 * 1024
 )
 
 type taskRuntime struct {
@@ -45,6 +47,7 @@ type sandboxSessionRefOpener interface {
 
 type commandTask struct {
 	ref           taskapi.Ref
+	handle        string
 	sessionRef    session.SessionRef
 	session       sandbox.Session
 	command       string
@@ -68,6 +71,10 @@ type commandTask struct {
 	outputCallback bool
 	result         map[string]any
 	metadata       map[string]any
+
+	streamFrames         []stream.Frame
+	streamEventBase      int64
+	streamTerminalFramed bool
 }
 
 type subagentTask struct {
@@ -93,33 +100,40 @@ type subagentTask struct {
 	result   map[string]any
 	metadata map[string]any
 
-	stdout       string
-	stderr       string
-	stdoutCursor int64
-	stderrCursor int64
-	turnSeq      int64
-	streamFrames []stream.Frame
+	stdout           string
+	stderr           string
+	stdoutCursor     int64
+	stderrCursor     int64
+	turnSeq          int64
+	streamFrames     []stream.Frame
+	streamFrameSizes []int
+	// Stream cursors are absolute for the Task lifetime and do not reset when
+	// Continue starts another child turn.
+	streamEventBase      int64
+	streamOutputCursor   int64
+	streamBytes          int
+	streamTerminalFramed bool
 }
 
 type subagentContinuationCheckpoint struct {
-	stdout       string
-	stderr       string
-	stdoutCursor int64
-	stderrCursor int64
-	streamFrames []stream.Frame
-	turnSeq      int64
+	stdout         string
+	stderr         string
+	stdoutCursor   int64
+	stderrCursor   int64
+	turnSeq        int64
+	terminalFramed bool
 }
 
-// beginContinuationTurn snapshots local stream state, advances turnSeq, and
-// clears in-memory stream buffers for the next child turn.
+// beginContinuationTurn snapshots current-turn result state, advances turnSeq,
+// and reopens the same absolute Task stream for the next child turn. Retained
+// frames and absolute event/output cursors deliberately survive Continue.
 func (task *subagentTask) beginContinuationTurn() subagentContinuationCheckpoint {
 	task.mu.Lock()
 	defer task.mu.Unlock()
 	checkpoint := subagentContinuationCheckpoint{
 		stdout: task.stdout, stderr: task.stderr,
 		stdoutCursor: task.stdoutCursor, stderrCursor: task.stderrCursor,
-		streamFrames: append([]stream.Frame(nil), task.streamFrames...),
-		turnSeq:      task.turnSeq,
+		turnSeq: task.turnSeq, terminalFramed: task.streamTerminalFramed,
 	}
 	task.turnSeq++
 	if task.turnSeq <= 0 {
@@ -129,7 +143,7 @@ func (task *subagentTask) beginContinuationTurn() subagentContinuationCheckpoint
 	task.stderr = ""
 	task.stdoutCursor = 0
 	task.stderrCursor = 0
-	task.streamFrames = nil
+	task.streamTerminalFramed = false
 	if task.metadata != nil {
 		delete(task.metadata, "final_event_persisted")
 	}
@@ -148,8 +162,8 @@ func (task *subagentTask) restoreContinuationTurn(checkpoint subagentContinuatio
 	task.stderr = checkpoint.stderr
 	task.stdoutCursor = checkpoint.stdoutCursor
 	task.stderrCursor = checkpoint.stderrCursor
-	task.streamFrames = checkpoint.streamFrames
 	task.turnSeq = checkpoint.turnSeq
+	task.streamTerminalFramed = checkpoint.terminalFramed
 }
 
 func newTaskRuntime(runtime *Runtime, store taskapi.Store) *taskRuntime {

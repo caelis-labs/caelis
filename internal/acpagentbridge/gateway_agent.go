@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 type GatewayAgentConfig struct {
@@ -24,6 +25,8 @@ type GatewayAgentConfig struct {
 	WorkspaceKey        string
 	SurfaceBuilder      SurfaceBuilder
 	PromptRouterFactory PromptRouterFactory
+	TaskStreams         taskstream.Service
+	TaskStreamPrincipal taskstream.Principal
 }
 
 type SurfaceRequest struct {
@@ -88,6 +91,8 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		Commands:              surface,
 		PromptRouterFactory:   cfg.PromptRouterFactory,
 		PromptCaps:            surface,
+		TaskStreams:           cfg.TaskStreams,
+		TaskStreamPrincipal:   cfg.TaskStreamPrincipal,
 		ApprovalReviewer:      cfg.ApprovalReviewer,
 		ApprovalModelResolver: cfg.Resolver,
 		AppName:               cfg.AppName,

@@ -229,7 +229,7 @@ func (r *Runtime) WaitSubagentTask(
 }
 
 func subagentTaskIDForHandle(activeSession session.Session, handle string) (string, session.ParticipantBinding, bool) {
-	handle = normalizeSubagentHandle(handle)
+	handle = normalizeTaskHandle(handle)
 	if handle == "" {
 		return "", session.ParticipantBinding{}, false
 	}
@@ -237,7 +237,7 @@ func subagentTaskIDForHandle(activeSession session.Session, handle string) (stri
 		if participant.Kind != session.ParticipantKindSubagent || participant.Role != session.ParticipantRoleSidecar {
 			continue
 		}
-		if normalizeSubagentHandle(participant.Label) != handle {
+		if normalizeTaskHandle(participant.Label) != handle {
 			continue
 		}
 		taskID := strings.TrimSpace(participant.DelegationID)
@@ -303,28 +303,6 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRe
 	lookupID := strings.TrimSpace(taskID)
 	tm.mu.RLock()
 	task, ok := tm.subagents[lookupID]
-	if !ok {
-		handle := normalizeSubagentHandle(lookupID)
-		var matches []*subagentTask
-		for _, candidate := range tm.subagents {
-			if candidate == nil {
-				continue
-			}
-			if strings.TrimSpace(candidate.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
-				continue
-			}
-			if normalizeSubagentHandle(candidate.handle) == handle {
-				matches = append(matches, candidate)
-			}
-		}
-		if len(matches) == 1 {
-			task = matches[0]
-			ok = true
-		} else if len(matches) > 1 {
-			tm.mu.RUnlock()
-			return nil, fmt.Errorf("agent-sdk/runtime: subagent handle %q is ambiguous; use the task id", lookupID)
-		}
-	}
 	tm.mu.RUnlock()
 	if ok && task != nil {
 		if strings.TrimSpace(task.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
@@ -336,9 +314,6 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRe
 		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
 	}
 	entry, err := tm.store.Get(ctx, lookupID)
-	if err != nil || entry == nil {
-		entry, err = tm.lookupStoredSubagentByHandle(ctx, ref, lookupID)
-	}
 	if err != nil || entry == nil {
 		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
 	}
@@ -359,7 +334,7 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRe
 		return current, nil
 	}
 	tm.subagents[rehydrated.ref.TaskID] = rehydrated
-	tm.rememberSubagentHandleLocked(rehydrated.sessionRef.SessionID, rehydrated.handle)
+	tm.rememberTaskHandleLocked(rehydrated.sessionRef.SessionID, rehydrated.handle)
 	tm.mu.Unlock()
 	return rehydrated, nil
 }
@@ -415,7 +390,7 @@ func (tm *taskRuntime) lookupSubagentCanonical(ctx context.Context, ref session.
 		}
 	}
 	tm.subagents[taskID] = fresh
-	tm.rememberSubagentHandleLocked(fresh.sessionRef.SessionID, fresh.handle)
+	tm.rememberTaskHandleLocked(fresh.sessionRef.SessionID, fresh.handle)
 	tm.mu.Unlock()
 	return fresh, nil
 }
@@ -439,21 +414,6 @@ func (tm *taskRuntime) invalidateSubagentTask(ref session.SessionRef, taskID str
 		delete(tm.subagents, taskID)
 	}
 	tm.mu.Unlock()
-}
-
-func (tm *taskRuntime) lookupStoredSubagentByHandle(ctx context.Context, ref session.SessionRef, handle string) (*taskapi.Entry, error) {
-	if tm == nil || tm.store == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", handle)
-	}
-	handle = normalizeSubagentHandle(handle)
-	if handle == "" {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", handle)
-	}
-	entry, err := tm.store.GetSessionTaskByHandle(ctx, ref, taskapi.KindSubagent, handle)
-	if err != nil {
-		return nil, err
-	}
-	return taskapi.CloneEntry(entry), nil
 }
 
 func (tm *taskRuntime) hasActiveSubagentTask(entry *taskapi.Entry) bool {
@@ -549,13 +509,12 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		anchor: delegation.Anchor{
 			TaskID:    strings.TrimSpace(entry.TaskID),
 			SessionID: taskSpecString(entry.Spec, "session_id"),
-			Agent:     target.ExecutionAgent(),
 			AgentID:   taskSpecString(entry.Spec, "agent_id"),
 		},
 		runner:    tm.runtime.subagents,
 		agent:     target.Selector,
 		target:    target,
-		handle:    firstNonEmpty(taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"])),
+		handle:    firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"])),
 		title:     strings.TrimSpace(entry.Title),
 		prompt:    taskSpecString(entry.Spec, "prompt"),
 		createdAt: entry.CreatedAt,
@@ -600,8 +559,7 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 	if t.metadata == nil {
 		t.metadata = map[string]any{}
 	}
-	t.metadata["task_id"] = t.handle
-	t.metadata["internal_task_id"] = t.ref.TaskID
+	t.metadata["task_id"] = t.ref.TaskID
 	t.metadata["task_kind"] = string(taskapi.KindSubagent)
 	t.metadata["agent"] = t.agent
 	t.metadata["agent_id"] = t.anchor.AgentID
@@ -628,7 +586,6 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 		delete(t.result, "result")
 		delete(t.result, "final_message")
 	}
-	t.result["task_id"] = t.handle
 	t.result["handle"] = t.handle
 	t.result["mention"] = "@" + strings.TrimPrefix(t.handle, "@")
 	t.result["agent"] = t.agent
@@ -664,14 +621,12 @@ func (t *subagentTask) applyInterruptedLocked(reason string) {
 	t.result["error"] = reason
 	t.result["result"] = reason
 	t.result["output_preview"] = reason
-	t.result["task_id"] = t.handle
 	t.result["handle"] = t.handle
 	t.result["mention"] = "@" + strings.TrimPrefix(t.handle, "@")
 	t.result["agent"] = t.agent
 	t.metadata["state"] = string(taskapi.StateInterrupted)
 	t.metadata["interrupted_reason"] = reason
-	t.metadata["task_id"] = t.handle
-	t.metadata["internal_task_id"] = t.ref.TaskID
+	t.metadata["task_id"] = t.ref.TaskID
 	t.metadata["task_kind"] = string(taskapi.KindSubagent)
 	t.metadata["agent"] = t.agent
 	t.metadata["agent_id"] = t.anchor.AgentID
@@ -710,6 +665,7 @@ func (t *subagentTask) snapshotLocked() taskapi.Snapshot {
 	metadata["turn_seq"] = t.turnSeq
 	return taskapi.CloneSnapshot(taskapi.Snapshot{
 		Ref:            t.ref,
+		Handle:         t.handle,
 		Revision:       t.revision,
 		Kind:           taskapi.KindSubagent,
 		Title:          t.title,
@@ -722,7 +678,7 @@ func (t *subagentTask) snapshotLocked() taskapi.Snapshot {
 		Lease:          taskapi.CloneLease(t.lease),
 		StdoutCursor:   t.stdoutCursor,
 		StderrCursor:   t.stderrCursor,
-		EventCursor:    int64(len(t.streamFrames)),
+		EventCursor:    t.streamEventBase + int64(len(t.streamFrames)),
 		Result:         result,
 		Metadata:       metadata,
 	})
@@ -734,6 +690,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 	}
 	return &taskapi.Entry{
 		TaskID:         t.ref.TaskID,
+		Handle:         t.handle,
 		Revision:       t.revision,
 		Kind:           taskapi.KindSubagent,
 		Session:        t.sessionRef,

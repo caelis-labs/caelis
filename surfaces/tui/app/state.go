@@ -14,6 +14,7 @@ import (
 
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -152,6 +153,8 @@ type Config struct {
 	CommandDetails         map[string]string
 	Wizards                []WizardDef
 	ControlService         control.Service
+	TaskStreams            taskstream.Service
+	TaskStreamPrincipal    taskstream.Principal
 	ProgramSender          *ProgramSender
 	PromptRouterFactory    controlprompt.RouterFactory
 	OnStart                func()
@@ -376,6 +379,20 @@ type Model struct {
 	welcomeCardPending bool
 	liveTurn           liveTurnState
 	compactNoticePair  compactNoticePairState
+
+	// Task output is transient and independently subscribed from the Session
+	// feed. These maps are mutated only by the Bubble Tea update loop.
+	currentSessionID         string
+	taskStreamWanted         map[string]bool
+	taskStreamTokens         map[string]uint64
+	taskStreamSubscriptions  map[string]taskstream.Subscription
+	taskStreamCursors        map[string]string
+	taskStreamIDsByHandle    map[string]string
+	taskStreamHandlesByID    map[string]string
+	taskStreamResolveTokens  map[string]uint64
+	taskStreamResolveRetries map[string]int
+	taskStreamRetries        map[string]int
+	taskStreamNextToken      uint64
 
 	// Transient log replacement tracking — now uses block IDs.
 	transientBlockID string

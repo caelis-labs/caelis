@@ -141,6 +141,7 @@ func TestLeasedRuntimeHeartbeatWaitsThroughFileRootContentionWithinTTL(t *testin
 		SessionLeaseService: primary,
 		started:             make(chan time.Duration, 1),
 		completed:           make(chan observedHeartbeatResult, 1),
+		firstProceed:        make(chan struct{}),
 	}
 	runner := newLeaseTestRunner("run-root-contention")
 	wrapper, err := NewLeasedRuntime(LeasedRuntimeConfig{
@@ -153,6 +154,14 @@ func TestLeasedRuntimeHeartbeatWaitsThroughFileRootContentionWithinTTL(t *testin
 	run, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
+	}
+	var heartbeatProceedOnce sync.Once
+	proceedHeartbeat := func() { heartbeatProceedOnce.Do(func() { close(leasing.firstProceed) }) }
+	defer proceedHeartbeat()
+	select {
+	case <-leasing.started:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat did not reach the file-root contention gate")
 	}
 
 	lockHeld := make(chan struct{})
@@ -184,16 +193,10 @@ func TestLeasedRuntimeHeartbeatWaitsThroughFileRootContentionWithinTTL(t *testin
 	case <-time.After(time.Second):
 		t.Fatal("file root lock was not acquired")
 	}
-	var heartbeatBudget time.Duration
-	select {
-	case heartbeatBudget = <-leasing.started:
-	case <-time.After(time.Second):
-		t.Fatal("heartbeat did not start behind the file root lock")
-	}
-	if heartbeatBudget < ttl/2 {
-		t.Fatalf("heartbeat context budget = %v, want lease-validity budget rather than one %v interval", heartbeatBudget, interval)
-	}
+	proceedHeartbeat()
 
+	// Holding the root lock for several heartbeat intervals proves the renewal
+	// uses the current lease-validity deadline rather than an interval timeout.
 	timer := time.NewTimer(3 * interval)
 	<-timer.C
 	release()
@@ -923,9 +926,10 @@ type observedHeartbeatResult struct {
 
 type observedHeartbeatLeaseService struct {
 	session.SessionLeaseService
-	started   chan time.Duration
-	completed chan observedHeartbeatResult
-	once      sync.Once
+	started      chan time.Duration
+	completed    chan observedHeartbeatResult
+	firstProceed chan struct{}
+	once         sync.Once
 }
 
 func (s *observedHeartbeatLeaseService) HeartbeatSessionLease(
@@ -936,7 +940,23 @@ func (s *observedHeartbeatLeaseService) HeartbeatSessionLease(
 	if deadline, ok := ctx.Deadline(); ok {
 		budget = time.Until(deadline)
 	}
-	s.once.Do(func() { s.started <- budget })
+	first := false
+	s.once.Do(func() {
+		first = true
+		s.started <- budget
+	})
+	if first && s.firstProceed != nil {
+		select {
+		case <-s.firstProceed:
+		case <-ctx.Done():
+			result := observedHeartbeatResult{err: ctx.Err()}
+			select {
+			case s.completed <- result:
+			default:
+			}
+			return session.SessionLease{}, result.err
+		}
+	}
 	lease, err := s.SessionLeaseService.HeartbeatSessionLease(ctx, req)
 	select {
 	case s.completed <- observedHeartbeatResult{lease: lease, err: err}:

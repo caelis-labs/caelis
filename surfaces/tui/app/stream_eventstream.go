@@ -12,6 +12,7 @@ import (
 )
 
 func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea.Cmd) {
+	m.observeTaskStreamSession(env)
 	if env.Err != nil || env.Kind == eventstream.KindError {
 		return m, nil
 	}
@@ -22,15 +23,19 @@ func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea
 		if !m.turnRunning() && !terminalLifecycleHasTranscriptIdentity(env) {
 			return m, nil
 		}
-		model, cmd := m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: ProjectACPEventToTranscriptEvents(env)})
+		model, cmd := m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: m.projectACPEventToTranscriptEvents(env)})
 		if next, ok := model.(*Model); ok {
 			m = next
 		}
 		finishCmd, _ := m.finishLiveTurnFromEnvelope(env)
 		return m, tea.Batch(cmd, finishCmd)
 	}
-	model, cmd := m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: ProjectACPEventToTranscriptEvents(env)})
-	return model, tea.Batch(m.applyACPRunningActivity(env), cmd)
+	model, cmd := m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: m.projectACPEventToTranscriptEvents(env)})
+	if next, ok := model.(*Model); ok {
+		m = next
+	}
+	m.observeTaskStreamAnchor(env)
+	return m, tea.Batch(m.applyACPRunningActivity(env), cmd)
 }
 
 type compactNoticeSource uint8

@@ -1,11 +1,9 @@
 package turningress
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -43,34 +41,6 @@ func validateIngressEnvelope(envelope eventstream.Envelope) error {
 	return nil
 }
 
-func validateIngressEnvelopes(envelopes []eventstream.Envelope) error {
-	for _, envelope := range envelopes {
-		if err := validateIngressEnvelope(envelope); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateStoredChildEvents(events []*session.Event) error {
-	for index, event := range events {
-		if event == nil {
-			return &ingressDeliveryError{
-				delivery: eventstream.DeliveryMirror,
-				cause:    fmt.Errorf("child recorder returned no stored event at index %d", index),
-			}
-		}
-		if strings.TrimSpace(event.ID) == "" || event.Seq == 0 {
-			return &ingressDeliveryError{
-				delivery: eventstream.DeliveryMirror,
-				eventID:  strings.TrimSpace(event.ID),
-				cause:    fmt.Errorf("child recorder returned an event without a durable position at index %d", index),
-			}
-		}
-	}
-	return nil
-}
-
 func newIngressDeliveryError(envelope eventstream.Envelope, cause error) error {
 	mode := eventstream.DeliveryMode("")
 	if envelope.Delivery != nil {
@@ -83,9 +53,4 @@ func newIngressDeliveryError(envelope eventstream.Envelope, cause error) error {
 		eventID:  strings.TrimSpace(envelope.EventID),
 		cause:    cause,
 	}
-}
-
-func isIngressDeliveryError(err error) bool {
-	var target *ingressDeliveryError
-	return errors.As(err, &target)
 }

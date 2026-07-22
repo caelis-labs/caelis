@@ -183,6 +183,8 @@ const (
 	LifecycleStateFailed      = "failed"
 	LifecycleStateInterrupted = "interrupted"
 	LifecycleStateCancelled   = "cancelled"
+	LifecycleStateTerminated  = "terminated"
+	LifecycleStateUnknown     = "unknown_outcome"
 )
 
 func Error(err error) Envelope {
@@ -296,7 +298,7 @@ func IsCancelledReason(reason string) bool {
 
 func IsTerminalLifecycleState(state string) bool {
 	switch strings.ToLower(strings.TrimSpace(state)) {
-	case LifecycleStateCompleted, LifecycleStateFailed, LifecycleStateInterrupted, LifecycleStateCancelled, "canceled", "terminated":
+	case LifecycleStateCompleted, LifecycleStateFailed, LifecycleStateInterrupted, LifecycleStateCancelled, LifecycleStateTerminated, LifecycleStateUnknown, "canceled":
 		return true
 	default:
 		return false

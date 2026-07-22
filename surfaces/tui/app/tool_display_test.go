@@ -2,6 +2,22 @@ package tuiapp
 
 import "testing"
 
+func TestTaskDisplayUsesPublicHandleBeforeLegacyTaskID(t *testing.T) {
+	t.Parallel()
+
+	if got := taskControlDisplay(map[string]any{"action": "wait", "handle": "zuri", "task_id": "opaque-123"}); got != "Wait zuri" {
+		t.Fatalf("taskControlDisplay() = %q, want public handle", got)
+	}
+	meta := map[string]any{"caelis": map[string]any{"runtime": map[string]any{
+		"tool": map[string]any{"target_handle": "zuri", "target_id": "legacy"},
+		"task": map[string]any{"handle": "zuri", "task_id": "opaque-123"},
+	}}}
+	output := toolDisplayMetaOutput("TASK", meta)
+	if output["handle"] != "zuri" || output["task_id"] != nil {
+		t.Fatalf("toolDisplayMetaOutput() = %#v, want handle-only display identity", output)
+	}
+}
+
 func TestCompactPathDisplayWithBaseHandlesWindowsPaths(t *testing.T) {
 	t.Parallel()
 

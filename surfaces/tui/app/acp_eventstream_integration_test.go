@@ -612,7 +612,7 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 	if event.Kind != SEToolCall || event.CallID != "spawn-1" || event.Name != "SPAWN" {
 		t.Fatalf("spawn event = %#v, want SPAWN tool call", event)
 	}
-	if event.TaskID != "task-1" || !strings.Contains(event.Output, "subagent found the issue") {
+	if event.TaskHandle != "task-1" || !strings.Contains(event.Output, "subagent found the issue") {
 		t.Fatalf("spawn event = %#v, want anchored subagent output", event)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	controlpromptrouter "github.com/caelis-labs/caelis/internal/controlpromptrouter"
 	"github.com/caelis-labs/caelis/internal/updater"
 	"github.com/caelis-labs/caelis/internal/version"
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 	"github.com/caelis-labs/caelis/surfaces/tui/app"
 )
 
@@ -39,6 +40,8 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appC
 		Wizards:             tuiapp.DefaultWizards(),
 		PromptRouterFactory: controlpromptrouter.New,
 		RenderFPS:           envInt("CAELIS_TUI_RENDER_FPS", 0),
+		TaskStreams:         stack.TaskStreams(),
+		TaskStreamPrincipal: taskstream.Principal{ID: stack.UserID},
 		OnStart: func() {
 			stack.StartApprovalRecovery(programCtx)
 			startTUISandboxRefresh(programCtx, stack, sender)

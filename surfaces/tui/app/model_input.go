@@ -1445,9 +1445,23 @@ func (m *Model) tryToggleFoldToken(blockID string, token string) bool {
 	}
 	switch blk := m.doc.Find(strings.TrimSpace(blockID)).(type) {
 	case *ParticipantTurnBlock:
-		return blk.toggleToolPanelClick(callID)
+		handle := taskHandleForToolPanel(blk.Events, callID)
+		if !blk.toggleToolPanelClick(callID) {
+			return false
+		}
+		if handle != "" {
+			m.wantTaskStreamForPanel(callID, handle, m.taskHandleHasExpandedPanel(handle))
+		}
+		return true
 	case *MainACPTurnBlock:
-		return blk.toggleToolPanelClick(callID)
+		handle := taskHandleForToolPanel(blk.Events, callID)
+		if !blk.toggleToolPanelClick(callID) {
+			return false
+		}
+		if handle != "" {
+			m.wantTaskStreamForPanel(callID, handle, m.taskHandleHasExpandedPanel(handle))
+		}
+		return true
 	default:
 		return false
 	}

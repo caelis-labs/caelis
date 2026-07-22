@@ -294,9 +294,8 @@ func TestSubagentControlReloadsNewerDurableRevisionBeforeDispatch(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	handle := taskStringValue(started.Metadata["handle"])
 	snapshot, err := runtime.tasks.Wait(context.Background(), active.SessionRef, taskapi.ControlRequest{
-		TaskID: handle, Principal: session.ActorKindUser,
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindUser,
 	})
 	if err != nil {
 		t.Fatal(err)

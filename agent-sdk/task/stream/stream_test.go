@@ -2,10 +2,55 @@ package stream
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
+
+func TestValidateRefRequiresSessionAndTaskIdentity(t *testing.T) {
+	t.Parallel()
+
+	if err := ValidateRef(Ref{SessionID: "session-1", TaskID: "task-1"}); err != nil {
+		t.Fatalf("ValidateRef(valid) error = %v", err)
+	}
+	for _, test := range []struct {
+		name string
+		ref  Ref
+		want string
+	}{
+		{name: "bare task", ref: Ref{TaskID: "task-1"}, want: "session_id"},
+		{name: "bare session", ref: Ref{SessionID: "session-1"}, want: "task_id"},
+		{name: "terminal only", ref: Ref{TerminalID: "terminal-1"}, want: "session_id"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := ValidateRef(test.ref); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ValidateRef(%#v) error = %v, want %s requirement", test.ref, err, test.want)
+			}
+		})
+	}
+}
+
+func TestTaskStreamTerminalStatesRequireExplicitEvidence(t *testing.T) {
+	t.Parallel()
+
+	for _, state := range []string{"completed", "failed", "cancelled", "interrupted", "terminated", "unknown_outcome"} {
+		if !IsTerminalState(state) {
+			t.Errorf("IsTerminalState(%q) = false, want true", state)
+		}
+	}
+	for _, state := range []string{"", "prepared", "running", "waiting_input", "waiting_approval"} {
+		if IsTerminalState(state) {
+			t.Errorf("IsTerminalState(%q) = true, want false", state)
+		}
+		frames := FramesForSnapshot(Snapshot{
+			Ref: Ref{SessionID: "session-1", TaskID: "task-1"}, State: state, Running: false,
+		})
+		if len(frames) != 0 {
+			t.Errorf("FramesForSnapshot(%q) = %#v, want no inferred completion", state, frames)
+		}
+	}
+}
 
 func TestFrameEventJSONRoundTrip(t *testing.T) {
 	t.Parallel()

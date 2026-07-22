@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
@@ -294,7 +298,7 @@ func TestSubagentRejectsUnknownNeutralRoleBeforeSpawn(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unsupported subagent participant role") {
 		t.Fatalf("StartSubagent(unknown role) error = %v, want fail-closed rejection", err)
 	}
-	if runner.spawnTargetRequest.Target.ExecutionAgent() != "" {
+	if runner.spawnTargetRequest.Target.Selector != "" {
 		t.Fatalf("Spawn() request = %#v, want no external spawn before role validation", runner.spawnRequest)
 	}
 }
@@ -394,7 +398,6 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsSubagentResult(t *testing.T) 
 			Name:   "SPAWN",
 			Status: "completed",
 			Output: map[string]any{
-				"task_id":       handle,
 				"handle":        handle,
 				"state":         string(task.StateCompleted),
 				"agent":         "helper",
@@ -417,27 +420,27 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsSubagentResult(t *testing.T) 
 	}
 }
 
-func TestLookupStoredSubagentByHandleUsesStoreHandleLookup(t *testing.T) {
+func TestResolveTaskHandleUsesStoreHandleLookup(t *testing.T) {
 	ctx := context.Background()
 	runtime, activeSession := newSubagentTaskTestRuntime(t, &recordingSubagentRunner{})
 	store := &handleLookupTaskStore{
 		entry: &task.Entry{
 			TaskID:  "task-indexed",
+			Handle:  "maya",
 			Kind:    task.KindSubagent,
 			Session: activeSession.SessionRef,
 			State:   task.StateCompleted,
-			Spec:    map[string]any{"handle": "maya"},
 			Result:  map[string]any{"state": "completed"},
 		},
 	}
 	runtime.tasks.store = store
 
-	entry, err := runtime.tasks.lookupStoredSubagentByHandle(ctx, activeSession.SessionRef, "@maya")
+	identity, err := runtime.tasks.resolveTaskHandle(ctx, activeSession.SessionRef, "@maya")
 	if err != nil {
-		t.Fatalf("lookupStoredSubagentByHandle() error = %v", err)
+		t.Fatalf("resolveTaskHandle() error = %v", err)
 	}
-	if entry.TaskID != "task-indexed" {
-		t.Fatalf("lookupStoredSubagentByHandle() task = %q, want task-indexed", entry.TaskID)
+	if identity.taskID != "task-indexed" || identity.kind != task.KindSubagent {
+		t.Fatalf("resolveTaskHandle() identity = %#v, want task-indexed subagent", identity)
 	}
 	if !store.handleLookupCalled {
 		t.Fatal("store handle lookup was not used")
@@ -466,9 +469,9 @@ func (s *handleLookupTaskStore) ListSession(context.Context, session.SessionRef)
 	return nil, errors.New("ListSession should not be used for handle lookup")
 }
 
-func (s *handleLookupTaskStore) GetSessionTaskByHandle(_ context.Context, ref session.SessionRef, kind task.Kind, handle string) (*task.Entry, error) {
+func (s *handleLookupTaskStore) GetSessionTaskByHandle(_ context.Context, ref session.SessionRef, handle string) (*task.Entry, error) {
 	s.handleLookupCalled = true
-	if kind != task.KindSubagent || task.NormalizeHandle(handle) != "maya" {
+	if task.NormalizeHandle(handle) != "maya" {
 		return nil, errors.New("not found")
 	}
 	return task.CloneEntry(s.entry), nil
@@ -490,7 +493,7 @@ func TestTaskToolResultEventMetaMarksSubagentWriteTarget(t *testing.T) {
 	}
 	runtimeMeta, _ := caelis["runtime"].(map[string]any)
 	targetTool, _ := runtimeMeta["tool"].(map[string]any)
-	if targetTool["name"] != "Task" || targetTool["action"] != "write" || targetTool["target_kind"] != "subagent" || targetTool["target_id"] != "maya" || targetTool["input"] != "请追加两行" {
+	if targetTool["name"] != "Task" || targetTool["action"] != "write" || targetTool["target_kind"] != "subagent" || targetTool["target_handle"] != "maya" || targetTool["input"] != "请追加两行" {
 		t.Fatalf("runtime.tool = %#v, want Task write subagent target", targetTool)
 	}
 }
@@ -554,7 +557,7 @@ func TestSideAndDelegatedSubagentsHaveSeparateControlSurfaces(t *testing.T) {
 		t.Fatalf("StartSubagent(side) error = %v", err)
 	}
 	if _, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID:    taskStringValue(side.Result["handle"]),
+		TaskID:    side.Ref.TaskID,
 		Principal: session.ActorKindTool,
 		Source:    "agent_tool",
 	}); err == nil || !strings.Contains(err.Error(), "tool principal") {
@@ -665,7 +668,7 @@ func TestTaskWriteCanContinueCompletedSpawnChildRepeatedly(t *testing.T) {
 	}
 }
 
-func TestTaskWriteClearsPreviousSubagentStreamFrames(t *testing.T) {
+func TestTaskWriteContinuesSubagentStreamCursorAcrossTurns(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult:    delegation.Result{State: delegation.StateCompleted},
@@ -693,8 +696,8 @@ func TestTaskWriteClearsPreviousSubagentStreamFrames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read(first) error = %v", err)
 	}
-	if len(first.Frames) != 1 || first.Frames[0].Text != "first streamed\n" {
-		t.Fatalf("first frames = %#v, want first streamed frame", first.Frames)
+	if len(first.Frames) != 2 || first.Frames[0].Text != "first streamed\n" || !first.Frames[1].Closed {
+		t.Fatalf("first frames = %#v, want first streamed frame and terminal frame", first.Frames)
 	}
 
 	if _, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
@@ -710,16 +713,23 @@ func TestTaskWriteClearsPreviousSubagentStreamFrames(t *testing.T) {
 		Running: true,
 	})
 	second, err := runtime.Streams().Read(ctx, stream.ReadRequest{
-		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
+		Ref:    stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
+		Cursor: first.Cursor,
 	})
 	if err != nil {
 		t.Fatalf("Read(second) error = %v", err)
 	}
-	if len(second.Frames) != 1 || second.Frames[0].Text != "second streamed" {
-		t.Fatalf("second frames = %#v, want only follow-up output", second.Frames)
+	if len(second.Frames) != 2 || second.Frames[0].Text != "second streamed" || !second.Frames[1].Closed {
+		t.Fatalf("second frames = %#v, want follow-up output and its terminal frame", second.Frames)
 	}
 	if strings.Contains(second.Frames[0].Text, "first streamed") {
 		t.Fatalf("second read replayed previous turn output: %#v", second.Frames)
+	}
+	if second.Cursor.Events <= first.Cursor.Events {
+		t.Fatalf("continued event cursor = %d, want greater than first turn cursor %d", second.Cursor.Events, first.Cursor.Events)
+	}
+	if second.Cursor.Output <= first.Cursor.Output {
+		t.Fatalf("continued output cursor = %d, want greater than first turn cursor %d", second.Cursor.Output, first.Cursor.Output)
 	}
 }
 
@@ -1059,8 +1069,8 @@ func TestSubagentStructuredToolFramesStillSurfaceFinalResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read(first structured frame) error = %v", err)
 	}
-	if len(first.Frames) != 2 || first.Frames[0].Event == nil || strings.TrimSpace(first.Frames[1].Text) != "final answer" {
-		t.Fatalf("first frames = %#v, want tool frame followed by final answer", first.Frames)
+	if len(first.Frames) != 3 || first.Frames[0].Event == nil || strings.TrimSpace(first.Frames[1].Text) != "final answer" || !first.Frames[2].Closed {
+		t.Fatalf("first frames = %#v, want tool frame, final answer, and terminal frame", first.Frames)
 	}
 	if first.Frames[0].Text != "" {
 		t.Fatalf("first frame text = %q, want no final result mixed into tool frame", first.Frames[0].Text)
@@ -1211,6 +1221,215 @@ func TestRuntimeSpawnToolRejectsYieldTimeMS(t *testing.T) {
 	}
 }
 
+func TestRuntimeSpawnToolIsParallelSafeAndConcurrentAttachmentsConverge(t *testing.T) {
+	t.Parallel()
+
+	runner := newOverlappingSubagentRunner(3)
+	runner.autoRelease = true
+	defer func() {
+		select {
+		case <-runner.release:
+		default:
+			close(runner.release)
+		}
+	}()
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	wrapped := runtimeSpawnTool{
+		base: spawn.New([]delegation.Agent{{Name: "self"}}), session: activeSession,
+		sessionRef: activeSession.SessionRef, tasks: runtime.tasks, runner: runner,
+	}
+	if !wrapped.Definition().Capabilities.ParallelSafe {
+		t.Fatal("runtime Spawn wrapper is not ParallelSafe")
+	}
+	stepModel := &threeSpawnStepModel{}
+	chatAgent, err := chat.NewWithTools("chat", stepModel, []tool.Tool{wrapped}, "Use Spawn.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := model.NewTextMessage(model.RoleUser, "inspect three things")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, runErr := range chatAgent.Run(agent.NewContext(agent.ContextSpec{
+		Context: ctx, Session: activeSession,
+		Events: []*session.Event{{Type: session.EventTypeUser, Message: &user, Text: "inspect three things"}},
+	})) {
+		if runErr != nil {
+			t.Fatalf("same-step Spawn run error = %v", runErr)
+		}
+	}
+	if runner.maxActive() < 3 {
+		t.Fatalf("external Spawn max concurrency = %d, want 3", runner.maxActive())
+	}
+	if want := []string{"spawn-1", "spawn-2", "spawn-3"}; !equalStrings(stepModel.resultCallIDs, want) {
+		t.Fatalf("tool result call order = %v, want %v", stepModel.resultCallIDs, want)
+	}
+	visibleTaskIDs := map[string]struct{}{}
+	for _, taskID := range stepModel.resultTaskIDs {
+		visibleTaskIDs[taskID] = struct{}{}
+	}
+	if len(visibleTaskIDs) != 3 {
+		t.Fatalf("visible Task ids = %v, want three ordered Spawn results", stepModel.resultTaskIDs)
+	}
+	entries, err := runtime.tasks.store.ListSession(context.Background(), activeSession.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskIDs := map[string]struct{}{}
+	for _, entry := range entries {
+		taskIDs[entry.TaskID] = struct{}{}
+		if entry.Session.SessionID != activeSession.SessionID {
+			t.Fatalf("Task %q belongs to Session %q, want %q", entry.TaskID, entry.Session.SessionID, activeSession.SessionID)
+		}
+	}
+	if len(taskIDs) != 3 {
+		t.Fatalf("Task ids = %v, want three isolated Tasks", taskIDs)
+	}
+	loaded, err := runtime.sessions.Session(context.Background(), activeSession.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Participants) != 3 {
+		t.Fatalf("participants = %#v, want all three concurrent attachments", loaded.Participants)
+	}
+}
+
+type threeSpawnStepModel struct {
+	calls         int
+	resultCallIDs []string
+	resultTaskIDs []string
+}
+
+func (*threeSpawnStepModel) Name() string { return "three-spawn-step" }
+
+func (*threeSpawnStepModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
+
+func (m *threeSpawnStepModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	m.calls++
+	callIndex := m.calls
+	if callIndex == 2 {
+		for _, message := range req.Messages {
+			for _, result := range message.ToolResults() {
+				m.resultCallIDs = append(m.resultCallIDs, result.ToolUseID)
+				for _, part := range result.Content {
+					if part.Kind != model.PartKindJSON || part.JSON == nil {
+						continue
+					}
+					var payload map[string]any
+					if json.Unmarshal(part.JSONValue(), &payload) == nil {
+						if handle, _ := payload["handle"].(string); strings.TrimSpace(handle) != "" {
+							m.resultTaskIDs = append(m.resultTaskIDs, strings.TrimSpace(handle))
+						}
+					}
+				}
+			}
+		}
+	}
+	return func(yield func(*model.StreamEvent, error) bool) {
+		response := &model.Response{
+			TurnComplete: true, StepComplete: true, Status: model.ResponseStatusCompleted,
+		}
+		if callIndex == 1 {
+			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{
+				{ID: "spawn-1", Name: spawn.ToolName, Args: `{"agent":"self","prompt":"inspect one"}`},
+				{ID: "spawn-2", Name: spawn.ToolName, Args: `{"agent":"self","prompt":"inspect two"}`},
+				{ID: "spawn-3", Name: spawn.ToolName, Args: `{"agent":"self","prompt":"inspect three"}`},
+			}, "")
+			response.FinishReason = model.FinishReasonToolCalls
+		} else {
+			response.Message = model.NewTextMessage(model.RoleAssistant, "done")
+			response.FinishReason = model.FinishReasonStop
+		}
+		yield(&model.StreamEvent{Type: model.StreamEventTurnDone, Response: response}, nil)
+	}
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for index := range got {
+		if got[index] != want[index] {
+			return false
+		}
+	}
+	return true
+}
+
+type overlappingSubagentRunner struct {
+	want    int
+	ready   chan struct{}
+	release chan struct{}
+
+	mu          sync.Mutex
+	active      int
+	maxSeen     int
+	spawnedID   int
+	autoRelease bool
+	releaseOnce sync.Once
+}
+
+func newOverlappingSubagentRunner(want int) *overlappingSubagentRunner {
+	return &overlappingSubagentRunner{want: want, ready: make(chan struct{}, want), release: make(chan struct{})}
+}
+
+func (r *overlappingSubagentRunner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
+	r.mu.Lock()
+	r.active++
+	if r.active > r.maxSeen {
+		r.maxSeen = r.active
+	}
+	r.spawnedID++
+	id := r.spawnedID
+	if r.autoRelease && r.active >= r.want {
+		r.releaseOnce.Do(func() { close(r.release) })
+	}
+	r.mu.Unlock()
+	r.ready <- struct{}{}
+	select {
+	case <-ctx.Done():
+		return delegation.Anchor{}, delegation.Result{}, ctx.Err()
+	case <-r.release:
+	}
+	r.mu.Lock()
+	r.active--
+	r.mu.Unlock()
+	taskID := strings.TrimSpace(spawn.TaskID)
+	return delegation.Anchor{SessionID: fmt.Sprintf("child-%d", id), Agent: req.Agent, AgentID: taskID}, delegation.Result{
+		State: delegation.StateRunning, Running: true,
+	}, nil
+}
+
+func (r *overlappingSubagentRunner) Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error) {
+	return delegation.Result{}, nil
+}
+
+func (r *overlappingSubagentRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
+	return delegation.Result{State: delegation.StateRunning, Running: true}, nil
+}
+
+func (r *overlappingSubagentRunner) Cancel(context.Context, delegation.Anchor) error { return nil }
+
+func (r *overlappingSubagentRunner) waitUntilOverlapping(t *testing.T) {
+	t.Helper()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for i := 0; i < r.want; i++ {
+		select {
+		case <-r.ready:
+		case <-timer.C:
+			t.Fatalf("only %d/%d Spawn calls reached the external runner", i, r.want)
+		}
+	}
+}
+
+func (r *overlappingSubagentRunner) maxActive() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.maxSeen
+}
+
 func TestRuntimeSpawnToolRejectsUnknownArgsBeforeRequiredPrompt(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
@@ -1264,8 +1483,8 @@ func TestRuntimeSpawnToolAllowsSelfDefaultAndRejectsRawACPWhenEnumExists(t *test
 		if _, err := targetTool.Call(ctx, tool.Call{ID: fmt.Sprintf("spawn-%d", index+1), Name: spawn.ToolName, Input: raw}); err != nil {
 			t.Fatalf("SPAWN Call(%v) error = %v", input, err)
 		}
-		if runner.spawnTargetRequest.Target.ExecutionAgent() != "self" {
-			t.Fatalf("spawn agent = %q, want self", runner.spawnTargetRequest.Target.ExecutionAgent())
+		if runner.spawnTargetRequest.Target.Selector != "self" {
+			t.Fatalf("spawn selector = %q, want self", runner.spawnTargetRequest.Target.Selector)
 		}
 	}
 
@@ -1284,8 +1503,8 @@ func TestRuntimeSpawnToolAllowsSelfDefaultAndRejectsRawACPWhenEnumExists(t *test
 	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-reviewer", Name: spawn.ToolName, Input: raw}); err != nil {
 		t.Fatalf("SPAWN Call(reviewer) error = %v", err)
 	}
-	if runner.spawnTargetRequest.Target.ExecutionAgent() != "reviewer" {
-		t.Fatalf("spawn agent = %q, want reviewer", runner.spawnTargetRequest.Target.ExecutionAgent())
+	if runner.spawnTargetRequest.Target.Selector != "reviewer" {
+		t.Fatalf("spawn selector = %q, want reviewer", runner.spawnTargetRequest.Target.Selector)
 	}
 }
 
@@ -1320,8 +1539,8 @@ func TestRuntimeSpawnToolPersistsResolvedPlacementBeforeSpawn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SPAWN Call() error = %v", err)
 	}
-	if runner.spawnTargetRequest.Target.ExecutionAgent() != "orbit" {
-		t.Fatalf("runner Agent = %q, want stable selector", runner.spawnTargetRequest.Target.ExecutionAgent())
+	if runner.spawnTargetRequest.Target.Selector != "orbit" {
+		t.Fatalf("runner selector = %q, want stable selector", runner.spawnTargetRequest.Target.Selector)
 	}
 	taskID := runner.spawnContext.TaskID
 	entry, err := runtime.tasks.store.Get(ctx, strings.TrimSpace(taskID))
@@ -1362,8 +1581,8 @@ func TestRuntimeSpawnToolKeepsImplicitSelfFallback(t *testing.T) {
 	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-1", Name: spawn.ToolName, Input: raw}); err != nil {
 		t.Fatalf("SPAWN Call(implicit self) error = %v", err)
 	}
-	if runner.spawnTargetRequest.Target.ExecutionAgent() != "self" {
-		t.Fatalf("spawn agent = %q, want self", runner.spawnTargetRequest.Target.ExecutionAgent())
+	if runner.spawnTargetRequest.Target.Selector != "self" {
+		t.Fatalf("spawn selector = %q, want self", runner.spawnTargetRequest.Target.Selector)
 	}
 	raw, err = json.Marshal(map[string]any{"agent": "codex", "prompt": "inspect this"})
 	if err != nil {
@@ -1517,7 +1736,7 @@ func (r *recordingSubagentRunner) Spawn(_ context.Context, spawn subagent.SpawnC
 
 func (r *recordingSubagentRunner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (delegation.Anchor, delegation.Result, error) {
 	r.spawnTargetRequest = delegation.CloneTargetRequest(req)
-	return r.Spawn(ctx, spawn, delegation.Request{Agent: req.Target.ExecutionAgent(), Prompt: req.Prompt})
+	return r.Spawn(ctx, spawn, delegation.Request{Agent: req.Target.Selector, Prompt: req.Prompt})
 }
 
 func (r *recordingSubagentRunner) Continue(_ context.Context, anchor delegation.Anchor, req delegation.ContinueRequest) (delegation.Result, error) {

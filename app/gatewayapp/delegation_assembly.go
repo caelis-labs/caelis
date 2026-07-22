@@ -115,7 +115,10 @@ func (s *Stack) resolveDelegationPlacement(req sdkdelegation.TargetRequest, runt
 			return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve delegated model %q: %w", target.Placement.Model, err)
 		}
 		configured.ReasoningEffort = target.Placement.ReasoningEffort
-		return s.materializeDelegatedModel(target.Selector, configured, runtimeCfg)
+		// The selector is the public AgentHandle. The materialized child keeps
+		// the backend model identity; otherwise a handle such as "zenith" is
+		// accidentally treated as the ACP Agent selected by the Placement.
+		return s.materializeDelegatedModel("", configured, runtimeCfg)
 	case sdkplacement.KindAgent:
 		agent, connection, err := controlagents.ResolveAgent(snapshot.placement.Agents, target.Placement.Agent)
 		if err != nil {
@@ -125,7 +128,6 @@ func (s *Stack) resolveDelegationPlacement(req sdkdelegation.TargetRequest, runt
 		if err != nil {
 			return assembly.AgentConfig{}, err
 		}
-		materialized.Name = target.Selector
 		materialized.SessionOptions = controlagents.SessionOptions{
 			ModelID:                 target.Placement.Model,
 			ConfigValues:            maps.Clone(target.Placement.SessionConfigValues),
@@ -160,7 +162,12 @@ func (s *Stack) materializeDelegatedModel(name string, configured ModelConfig, r
 	if err != nil {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: materialize delegated model %q: %w", name, err)
 	}
-	materialized.Name = strings.TrimSpace(name)
+	if name = strings.TrimSpace(name); name != "" {
+		// Direct profile assembly still needs the configured handle as its
+		// lookup name. Delegated Placement materialization passes an empty name
+		// so public handles do not overwrite execution identity.
+		materialized.Name = name
+	}
 	materialized.Description = "Caelis delegated model"
 	return materialized, nil
 }

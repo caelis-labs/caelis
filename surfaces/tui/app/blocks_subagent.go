@@ -56,12 +56,14 @@ type SubagentEvent struct {
 	OutputSynthetic         bool
 	OutputTerminal          bool
 	OutputGapBefore         bool
-	TaskID                  string
-	TaskAction              string
-	TaskInput               string
-	TaskTargetKind          string
-	Done                    bool
-	Err                     bool
+	// TaskHandle is presentation identity only. Runtime TaskID never enters a
+	// transcript panel.
+	TaskHandle     string
+	TaskAction     string
+	TaskInput      string
+	TaskTargetKind string
+	Done           bool
+	Err            bool
 	// Plan fields.
 	PlanEntries []planEntryState
 

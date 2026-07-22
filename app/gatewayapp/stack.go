@@ -19,6 +19,7 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/modelconfig"
@@ -27,6 +28,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
+	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
@@ -35,6 +37,7 @@ import (
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	acptaskstream "github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 type Config struct {
@@ -91,6 +94,7 @@ type Stack struct {
 	controlState             controlclientport.StateReader
 	controlCommands          controlclientport.CommandClient
 	controlClient            controlclientport.Service
+	taskStreams              acptaskstream.Service
 	operations               *internalcontrolclient.FileOperationStore
 	approvalRecovery         *internalcontrolclient.ApprovalRecoveryGate
 	gateway                  *kernelimpl.Gateway
@@ -182,6 +186,15 @@ func (s *Stack) ControlClient() controlclientport.Service {
 		return nil
 	}
 	return s.controlClient
+}
+
+// TaskStreams returns the Control-owned, Session-authorized Task stream
+// service used by in-process and HTTP presentation adapters.
+func (s *Stack) TaskStreams() acptaskstream.Service {
+	if s == nil {
+		return nil
+	}
+	return s.taskStreams
 }
 
 // ControlClientRuntimeState delegates bootstrap live-state reads to the
@@ -429,6 +442,22 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	stack.controlClient = controlClient
+	controlTaskStreams, err := controltaskstream.New(controltaskstream.Config{
+		Tasks: taskStore,
+		Streams: func() stream.Service {
+			provider := stack.KernelStreams()
+			if provider == nil {
+				return nil
+			}
+			return provider.Streams()
+		},
+		Authorizer: taskStreamAuthorizer{inner: internalcontrolclient.SessionAuthorizer{Sessions: sessions}},
+		Secret:     cursorSecret,
+	})
+	if err != nil {
+		return nil, err
+	}
+	stack.taskStreams = acptaskstream.New(controlTaskStreams)
 	if err := stack.rebuildGateway(); err != nil {
 		return nil, err
 	}

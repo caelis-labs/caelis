@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/caelis-labs/caelis/internal/controlclient/turningress"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -15,7 +16,7 @@ import (
 
 type gatewayTurn struct {
 	handle gateway.TurnHandle
-	feed   *liveFeedBroker
+	feed   *turningress.Broker
 	// sessionFeed remains available after the prepared subscription is closed.
 	// Stop/failure takeover reattaches the same ingress here so sibling SSE/GUI
 	// subscribers still observe the authoritative producer-barrier terminal.

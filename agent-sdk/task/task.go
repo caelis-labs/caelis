@@ -46,7 +46,10 @@ type Ref struct {
 
 // Snapshot is one provider-neutral task status payload.
 type Snapshot struct {
-	Ref            Ref                 `json:"ref,omitempty"`
+	Ref Ref `json:"ref,omitempty"`
+	// Handle is the stable Session-scoped identity exposed to users and Agents.
+	// Runtime and stream operations continue to address the Task by Ref.TaskID.
+	Handle         string              `json:"handle,omitempty"`
 	Revision       uint64              `json:"revision,omitempty"`
 	Kind           Kind                `json:"kind,omitempty"`
 	Title          string              `json:"title,omitempty"`
@@ -126,7 +129,10 @@ type ControlRequest struct {
 
 // Entry is one durable task persistence record.
 type Entry struct {
-	TaskID         string              `json:"task_id,omitempty"`
+	TaskID string `json:"task_id,omitempty"`
+	// Handle is unique within the owning Session and is never reused there.
+	// It is stored with the existing Task record rather than in a second index.
+	Handle         string              `json:"handle,omitempty"`
 	Revision       uint64              `json:"revision,omitempty"`
 	Kind           Kind                `json:"kind,omitempty"`
 	Session        session.SessionRef  `json:"session,omitempty"`
@@ -158,8 +164,25 @@ type Store interface {
 	Upsert(context.Context, *Entry) error
 	Get(context.Context, string) (*Entry, error)
 	ListSession(context.Context, session.SessionRef) ([]*Entry, error)
-	GetSessionTaskByHandle(context.Context, session.SessionRef, Kind, string) (*Entry, error)
+	GetSessionTaskByHandle(context.Context, session.SessionRef, string) (*Entry, error)
 }
+
+// HandleConflictError reports two Task records claiming the same public
+// identity in one Session. Callers must not guess a winner.
+type HandleConflictError struct {
+	SessionID string
+	Handle    string
+	TaskID    string
+}
+
+func (e *HandleConflictError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("agent-sdk/task: task handle %q already belongs to task %q in session %q", NormalizeHandle(e.Handle), strings.TrimSpace(e.TaskID), strings.TrimSpace(e.SessionID))
+}
+
+func (e *HandleConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
 
 // PutRequest conditionally creates or replaces one task entry. Revision zero
 // is the expected revision for a create. Reference stores derive the owning
@@ -326,6 +349,7 @@ func CloneRef(in Ref) Ref {
 func CloneSnapshot(in Snapshot) Snapshot {
 	out := in
 	out.Ref = CloneRef(in.Ref)
+	out.Handle = NormalizeHandle(in.Handle)
 	out.Title = strings.TrimSpace(in.Title)
 	out.Result = jsonvalue.CloneMap(in.Result)
 	out.Metadata = jsonvalue.CloneMap(in.Metadata)
@@ -348,6 +372,7 @@ func CloneEntry(in *Entry) *Entry {
 	}
 	out := *in
 	out.TaskID = strings.TrimSpace(in.TaskID)
+	out.Handle = NormalizeHandle(in.Handle)
 	out.Kind = Kind(strings.TrimSpace(string(in.Kind)))
 	out.Session = session.NormalizeSessionRef(in.Session)
 	out.Title = strings.TrimSpace(in.Title)

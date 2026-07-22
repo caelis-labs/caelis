@@ -27,7 +27,7 @@ func updateLinkedSpawnEvent(events []SubagentEvent, callID string, taskID string
 	}
 	for i := len(events) - 1; i >= 0; i-- {
 		ev := &events[i]
-		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskID) != taskID {
+		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskHandle) != taskID {
 			continue
 		}
 		if !strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
@@ -74,7 +74,7 @@ func linkedTerminalCommandForTask(events []SubagentEvent, taskID string) string 
 	}
 	for i := len(events) - 1; i >= 0; i-- {
 		ev := events[i]
-		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskID) != taskID || !isTerminalPanelToolEvent(ev) {
+		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskHandle) != taskID || !isTerminalPanelToolEvent(ev) {
 			continue
 		}
 		if strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
@@ -101,7 +101,7 @@ func updateLinkedTaskWriteEvent(events []SubagentEvent, taskID string, output st
 		if ev.Kind != SEToolCall {
 			continue
 		}
-		if strings.TrimSpace(ev.TaskID) != taskID {
+		if strings.TrimSpace(ev.TaskHandle) != taskID {
 			continue
 		}
 		if strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {

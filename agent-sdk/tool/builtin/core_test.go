@@ -199,7 +199,8 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireDescriptionContains(t, defs[shell.RunCommandToolName], "repository inspection", "Do not prefix with cd", "workdir", "yield_time_ms", "Prefer use_default")
 	requireAnnotations(t, defs[shell.RunCommandToolName], false, true, false, true)
 
-	requireStringMinLength(t, defs[task.ToolName], "task_id", 1)
+	requireStringMinLength(t, defs[task.ToolName], "handle", 1)
+	requireNoProperty(t, defs[task.ToolName], "task_id")
 	requireNoProperty(t, defs[task.ToolName], "yield_time_ms")
 	requireNoProperty(t, defs[task.ToolName], "wait_until_done")
 	requireDescriptionContains(t, defs[task.ToolName], "Control an async task", "terminal stdin", "follow-up prompt", "Always wait")

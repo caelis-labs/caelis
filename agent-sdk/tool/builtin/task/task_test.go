@@ -30,6 +30,12 @@ func TestTaskDescriptionGuidesContinuingSubagentConversation(t *testing.T) {
 func TestTaskSchemaUsesFixedWaitBudget(t *testing.T) {
 	def := New().Definition()
 	props, _ := def.InputSchema["properties"].(map[string]any)
+	if _, ok := props["handle"]; !ok {
+		t.Fatalf("handle property missing: %#v", props)
+	}
+	if _, ok := props["task_id"]; ok {
+		t.Fatalf("task_id property unexpectedly exposed: %#v", props)
+	}
 	if _, ok := props["wait_until_done"]; ok {
 		t.Fatalf("wait_until_done property unexpectedly exposed: %#v", props["wait_until_done"])
 	}
@@ -67,7 +73,7 @@ func TestTaskCallRejectsUnknownArgsBeforeRuntimeWrapperError(t *testing.T) {
 
 	raw, _ := json.Marshal(map[string]any{
 		"action":     "wait",
-		"task_id":    "task-1",
+		"handle":     "zuri",
 		"unexpected": true,
 	})
 	_, err := New().Call(context.Background(), tool.Call{Name: ToolName, Input: raw})
@@ -84,7 +90,7 @@ func TestTaskCallSilentlyAcceptsLegacyYieldTime(t *testing.T) {
 
 	raw, _ := json.Marshal(map[string]any{
 		"action":        "wait",
-		"task_id":       "task-1",
+		"handle":        "zuri",
 		"yield_time_ms": -1,
 	})
 	_, err := New().Call(context.Background(), tool.Call{Name: ToolName, Input: raw})

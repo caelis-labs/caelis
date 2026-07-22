@@ -65,7 +65,7 @@ func Handler(stack *gatewayapp.Stack, config Config) (http.Handler, error) {
 		return nil, errors.New("controlserver: authenticator is required for an HTTP handler")
 	}
 	server, err := appserver.New(appserver.Config{
-		Service: stack.ControlClient(), Authenticator: config.Authenticator,
+		Service: stack.ControlClient(), TaskStreams: stack.TaskStreams(), Authenticator: config.Authenticator,
 		AllowedHosts: append([]string(nil), config.AllowedHosts...), Heartbeat: config.Heartbeat,
 	})
 	if err != nil {

@@ -118,8 +118,14 @@ func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any 
 	taskMeta := transcript.RuntimeTaskMeta(meta)
 	switch names.CanonicalOrSelf(toolName) {
 	case names.RunCommand, names.Spawn, names.Task:
-		if taskID := firstNonEmpty(asString(toolMeta["target_id"]), asString(taskMeta["task_id"])); taskID != "" {
-			out["task_id"] = taskID
+		if handle := firstNonEmpty(
+			asString(toolMeta["target_handle"]),
+			asString(taskMeta["handle"]),
+			// Legacy display-only fallbacks keep historical transcripts readable.
+			asString(toolMeta["target_id"]),
+			asString(taskMeta["task_id"]),
+		); handle != "" {
+			out["handle"] = handle
 		}
 		for _, key := range []string{"yield_time_ms", "effective_yield_time_ms", "yield_time_ms_defaulted"} {
 			if value, ok := toolMeta[key]; ok {

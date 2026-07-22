@@ -149,8 +149,8 @@ func TestStartCommandWaitErrorReturnsStableTaskAndPreservesUnknownOutcome(t *tes
 	if !errors.Is(err, waitErr) || !errors.Is(err, statusErr) {
 		t.Fatalf("StartCommand() error = %v, want wait and status uncertainty", err)
 	}
-	if snapshot.Ref.TaskID == "" || snapshot.State != taskapi.StateUnknownOutcome || !snapshot.Running {
-		t.Fatalf("StartCommand() snapshot = %#v, want reachable durable unknown outcome", snapshot)
+	if snapshot.Ref.TaskID == "" || snapshot.State != taskapi.StateUnknownOutcome || snapshot.Running {
+		t.Fatalf("StartCommand() snapshot = %#v, want terminal durable unknown outcome", snapshot)
 	}
 	if handle.terminated {
 		t.Fatal("transient Wait/Status uncertainty must not issue an unconfirmed Terminate")
@@ -159,8 +159,8 @@ func TestStartCommandWaitErrorReturnsStableTaskAndPreservesUnknownOutcome(t *tes
 	if getErr != nil {
 		t.Fatal(getErr)
 	}
-	if entry.State != taskapi.StateUnknownOutcome || !entry.Running || taskStringValue(entry.Metadata["command_phase"]) != commandPhaseUnknown {
-		t.Fatalf("durable entry = %#v, want retained unknown live command", entry)
+	if entry.State != taskapi.StateUnknownOutcome || entry.Running || taskStringValue(entry.Metadata["command_phase"]) != commandPhaseUnknown {
+		t.Fatalf("durable entry = %#v, want retained terminal unknown command", entry)
 	}
 	runtime.tasks.mu.RLock()
 	retained := runtime.tasks.tasks[snapshot.Ref.TaskID]
@@ -204,15 +204,15 @@ func TestStartCommandReadOutputErrorReturnsDurableUnknownTaskID(t *testing.T) {
 	if !errors.Is(err, readErr) {
 		t.Fatalf("StartCommand() error = %v, want %v", err, readErr)
 	}
-	if snapshot.Ref.TaskID == "" || snapshot.State != taskapi.StateUnknownOutcome || !snapshot.Running {
-		t.Fatalf("StartCommand() snapshot = %#v, want reachable durable unknown task", snapshot)
+	if snapshot.Ref.TaskID == "" || snapshot.State != taskapi.StateUnknownOutcome || snapshot.Running {
+		t.Fatalf("StartCommand() snapshot = %#v, want terminal durable unknown task", snapshot)
 	}
 	entry, getErr := store.Get(context.Background(), snapshot.Ref.TaskID)
 	if getErr != nil {
 		t.Fatal(getErr)
 	}
-	if entry.State != taskapi.StateUnknownOutcome || !entry.Running || taskStringValue(entry.Metadata["command_phase"]) != commandPhaseUnknown {
-		t.Fatalf("durable entry = %#v, want retryable output-recovery state", entry)
+	if entry.State != taskapi.StateUnknownOutcome || entry.Running || taskStringValue(entry.Metadata["command_phase"]) != commandPhaseUnknown {
+		t.Fatalf("durable entry = %#v, want terminal output-recovery state", entry)
 	}
 }
 
@@ -409,8 +409,8 @@ func TestStartCommandRetainsLiveHandleWhenInitialPersistenceAndTerminateFail(t *
 	if !errors.Is(err, terminateErr) {
 		t.Fatalf("StartCommand() error = %v, want terminate failure", err)
 	}
-	if snapshot.Ref.TaskID == "" || snapshot.State != taskapi.StateUnknownOutcome || !snapshot.Running {
-		t.Fatalf("StartCommand() snapshot = %#v, want retained running unknown-outcome task", snapshot)
+	if snapshot.Ref.TaskID == "" || snapshot.State != taskapi.StateUnknownOutcome || snapshot.Running {
+		t.Fatalf("StartCommand() snapshot = %#v, want retained terminal unknown-outcome task", snapshot)
 	}
 	runtime.tasks.mu.RLock()
 	retained := runtime.tasks.tasks[snapshot.Ref.TaskID]
@@ -478,8 +478,8 @@ func TestRuntimeCommandToolReturnsUnknownTaskIDOnTripleFailure(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if taskID, _ := payload["task_id"].(string); strings.TrimSpace(taskID) == "" {
-		t.Fatalf("Call() payload = %#v, want recoverable task_id", payload)
+	if handle, _ := payload["handle"].(string); strings.TrimSpace(handle) == "" {
+		t.Fatalf("Call() payload = %#v, want recoverable handle", payload)
 	}
 }
 
@@ -767,8 +767,8 @@ func TestLookupCommandCanonicalDoesNotRegressNewerDurableUnknownOutcome(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if task.state != taskapi.StateUnknownOutcome || !task.running {
-		t.Fatalf("canonical task state/running = %q/%v, want durable unknown/true", task.state, task.running)
+	if task.state != taskapi.StateUnknownOutcome || task.running {
+		t.Fatalf("canonical task state/running = %q/%v, want terminal durable unknown", task.state, task.running)
 	}
 	storedAfter, err := taskStore.Get(context.Background(), entry.TaskID)
 	if err != nil {

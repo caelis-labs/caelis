@@ -111,6 +111,61 @@
         }
       }
     },
+    "/sessions/{session_id}/tasks": {
+      "get": {
+        "operationId": "listSessionTasks",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "responses": {
+          "200": {"description": "Session Task directory", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TaskList"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"}
+        }
+      }
+    },
+    "/sessions/{session_id}/tasks/{task_id}/events": {
+      "get": {
+        "operationId": "getTaskEvents",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/TaskID"}, {"$ref": "#/components/parameters/After"}],
+        "responses": {
+          "200": {"description": "Finite retained Task stream suffix", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TaskEventBatch"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"}
+        }
+      }
+    },
+    "/sessions/{session_id}/tasks/{task_id}/stream": {
+      "get": {
+        "operationId": "streamTaskEvents",
+        "parameters": [
+          {"$ref": "#/components/parameters/SessionID"},
+          {"$ref": "#/components/parameters/TaskID"},
+          {"$ref": "#/components/parameters/After"},
+          {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream for one Task. The first named event is TaskResumeBoundary metadata.",
+            "headers": {
+              "Caelis-Resume-Mode": {"schema": {"$ref": "#/components/schemas/TaskResumeMode"}},
+              "Caelis-Transient-Gap": {"schema": {"type": "boolean"}},
+              "Caelis-Boundary-Cursor": {"schema": {"type": "string"}}
+            },
+            "content": {"text/event-stream": {"schema": {"type": "string"}}}
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"}
+        }
+      }
+    },
     "/sessions/{session_id}/prompt": {
       "post": {
         "operationId": "promptSession",
@@ -264,6 +319,7 @@
     "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}},
     "parameters": {
       "SessionID": {"name": "session_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
+      "TaskID": {"name": "task_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
       "ParticipantID": {"name": "participant_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
       "IdempotencyKey": {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 1}},
       "IfMatch": {"name": "If-Match", "in": "header", "schema": {"type": "string"}},
@@ -414,6 +470,9 @@
       },
       "Outcome": {"type": "string", "enum": ["accepted", "committed", "conflicted", "rejected", "unknown"]},
       "ResumeMode": {"type": "string", "enum": ["exact", "durable_fallback"]},
+      "TaskResumeMode": {"type": "string", "enum": ["exact", "current_state"]},
+      "TaskKind": {"type": "string", "enum": ["command", "subagent"]},
+      "TaskState": {"type": "string", "enum": ["prepared", "running", "waiting_input", "waiting_approval", "completed", "failed", "cancelled", "interrupted", "terminated", "unknown_outcome"]},
       "ControllerKind": {"type": "string", "enum": ["kernel", "acp"]},
       "ParticipantKind": {"type": "string", "enum": ["acp", "subagent"]},
       "ParticipantRole": {"type": "string", "enum": ["sidecar", "delegated", "observer"]},
@@ -619,6 +678,20 @@
       },
       "ResumeBoundary": {"type": "object", "additionalProperties": false, "required": ["resume_mode"], "properties": {"resume_mode": {"$ref": "#/components/schemas/ResumeMode"}, "transient_gap": {"type": "boolean"}, "boundary_cursor": {"type": "string"}}},
       "EventBatch": {"type": "object", "additionalProperties": false, "required": ["resume_mode"], "properties": {"events": {"type": "array", "items": {"$ref": "#/components/schemas/Envelope"}}, "resume_mode": {"$ref": "#/components/schemas/ResumeMode"}, "transient_gap": {"type": "boolean"}, "boundary_cursor": {"type": "string"}}},
+      "TaskDescriptor": {
+        "type": "object", "additionalProperties": false,
+        "required": ["session_id", "task_id", "handle", "kind", "state", "running"],
+        "properties": {
+          "session_id": {"type": "string"}, "task_id": {"type": "string"}, "handle": {"type": "string", "minLength": 1}, "agent_handle": {"type": "string"}, "kind": {"$ref": "#/components/schemas/TaskKind"},
+          "title": {"type": "string"}, "state": {"$ref": "#/components/schemas/TaskState"}, "running": {"type": "boolean"},
+          "supports_input": {"type": "boolean"}, "supports_cancel": {"type": "boolean"},
+          "parent_tool": {"$ref": "#/components/schemas/ParentToolRelation"}, "participant_id": {"type": "string"},
+          "current_turn_id": {"type": "string"}, "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "TaskList": {"type": "object", "additionalProperties": false, "properties": {"tasks": {"type": "array", "items": {"$ref": "#/components/schemas/TaskDescriptor"}}}},
+      "TaskResumeBoundary": {"type": "object", "additionalProperties": false, "required": ["resume_mode"], "properties": {"resume_mode": {"$ref": "#/components/schemas/TaskResumeMode"}, "transient_gap": {"type": "boolean"}, "boundary_cursor": {"type": "string"}}},
+      "TaskEventBatch": {"type": "object", "additionalProperties": false, "required": ["resume_mode"], "properties": {"events": {"type": "array", "items": {"$ref": "#/components/schemas/Envelope"}}, "resume_mode": {"$ref": "#/components/schemas/TaskResumeMode"}, "transient_gap": {"type": "boolean"}, "boundary_cursor": {"type": "string"}}},
       "SessionRef": {"type": "object", "additionalProperties": false, "properties": {"app_name": {"type": "string"}, "user_id": {"type": "string"}, "session_id": {"type": "string"}, "workspace_key": {"type": "string"}}},
       "ControllerBinding": {"type": "object", "additionalProperties": false, "properties": {"kind": {"$ref": "#/components/schemas/ControllerKind"}, "controller_id": {"type": "string"}, "agent_name": {"type": "string"}, "label": {"type": "string"}, "epoch_id": {"type": "string"}, "remote_session_id": {"type": "string"}, "context_sync_seq": {"$ref": "#/components/schemas/Uint64Decimal"}, "attached_at": {"type": "string", "format": "date-time"}, "source": {"type": "string"}}},
       "ParticipantBinding": {"type": "object", "additionalProperties": false, "properties": {"id": {"type": "string"}, "kind": {"$ref": "#/components/schemas/ParticipantKind"}, "role": {"$ref": "#/components/schemas/ParticipantRole"}, "agent_name": {"type": "string"}, "label": {"type": "string"}, "session_id": {"type": "string"}, "source": {"type": "string"}, "parent_turn_id": {"type": "string"}, "delegation_id": {"type": "string"}, "attachment_generation": {"type": "string"}, "context_sync_seq": {"$ref": "#/components/schemas/Uint64Decimal"}, "attached_at": {"type": "string", "format": "date-time"}, "controller_ref": {"type": "string"}}},

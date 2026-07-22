@@ -1,7 +1,10 @@
 package runtime
 
 import (
+	"encoding/json"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -59,7 +62,8 @@ func (t *subagentTask) seedStreamFromResult(result delegation.Result) {
 		return
 	}
 	text := result.Result
-	if taskOutputHasNonBlankLine(text) && subagentFramesContainAssistantText(t.streamFrames) {
+	turnID := subagentTurnID(t.ref.TaskID, t.turnSeq)
+	if taskOutputHasNonBlankLine(text) && subagentFramesContainAssistantTextForTurn(t.streamFrames, turnID) {
 		return
 	}
 	if !taskOutputHasNonBlankLine(text) {
@@ -67,11 +71,31 @@ func (t *subagentTask) seedStreamFromResult(result delegation.Result) {
 			return
 		}
 		text = result.OutputPreview
+		if taskOutputHasNonBlankLine(text) {
+			// A preview is useful to a transient reader but is not proof of a
+			// canonical assistant result. Keep it out of the structured frame
+			// set used by side-agent dialogue persistence.
+			t.appendStreamLocked(text)
+		}
+		return
 	}
 	if !taskOutputHasNonBlankLine(text) {
 		return
 	}
-	t.appendStreamLocked(text)
+	t.appendStreamFrameLocked(stream.Frame{Text: text, Running: false})
+}
+
+func subagentFramesContainAssistantTextForTurn(frames []stream.Frame, turnID string) bool {
+	turnID = strings.TrimSpace(turnID)
+	for _, frame := range frames {
+		if strings.TrimSpace(frame.Ref.TerminalID) != turnID {
+			continue
+		}
+		if strings.TrimSpace(subagentFrameAssistantText(frame)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func subagentFramesContainAssistantText(frames []stream.Frame) bool {
@@ -96,11 +120,14 @@ func (t *subagentTask) applyStreamFramesLocked(frames []stream.Frame) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, frame := range frames {
+		if t.streamTerminalFramed {
+			continue
+		}
 		text := subagentFrameAssistantText(frame)
 		if text == "" {
 			text = frame.Text
 		}
-		if frame.Event != nil || text != "" {
+		if frame.Event != nil || text != "" || frame.Closed {
 			cloned := stream.CloneFrame(frame)
 			if cloned.Text == "" {
 				cloned.Text = text
@@ -114,7 +141,8 @@ func (t *subagentTask) applyStreamFramesLocked(frames []stream.Frame) {
 				}
 				cloned.Event.Scope.TurnID = firstNonEmpty(strings.TrimSpace(cloned.Event.Scope.TurnID), subagentTurnID(t.ref.TaskID, t.turnSeq))
 			}
-			t.streamFrames = append(t.streamFrames, cloned)
+			t.appendStreamFrameLocked(cloned)
+			t.streamTerminalFramed = t.streamTerminalFramed || cloned.Closed
 		}
 		if text == "" {
 			if frame.State != "" {
@@ -125,7 +153,6 @@ func (t *subagentTask) applyStreamFramesLocked(frames []stream.Frame) {
 			}
 			continue
 		}
-		t.appendStreamLocked(text)
 		if t.result == nil {
 			t.result = map[string]any{}
 		}
@@ -159,6 +186,97 @@ func (t *subagentTask) appendStreamLocked(text string) {
 	if t == nil || text == "" {
 		return
 	}
-	t.stdout += text
+	t.streamOutputCursor += int64(len([]byte(text)))
+	t.appendRetainedSubagentTextLocked(text)
+}
+
+func (t *subagentTask) appendRetainedSubagentTextLocked(text string) {
+	if t == nil || text == "" {
+		return
+	}
+	raw := append([]byte(t.stdout), []byte(text)...)
+	if len(raw) > subagentStreamByteCap {
+		dropped := len(raw) - subagentStreamByteCap
+		for dropped < len(raw) && !utf8.RuneStart(raw[dropped]) {
+			dropped++
+		}
+		raw = raw[dropped:]
+	}
+	t.stdout = string(raw)
 	t.stdoutCursor = int64(len([]byte(t.stdout)))
+}
+
+func (t *subagentTask) appendStreamFrameLocked(frame stream.Frame) {
+	if t == nil || t.streamTerminalFramed {
+		return
+	}
+	frame = stream.CloneFrame(frame)
+	text := subagentFrameAssistantText(frame)
+	if text == "" {
+		text = frame.Text
+	}
+	if frame.Text == "" {
+		frame.Text = text
+	}
+	frame.Ref.TaskID = firstNonEmpty(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(t.ref.TaskID))
+	frame.Ref.SessionID = firstNonEmpty(strings.TrimSpace(frame.Ref.SessionID), strings.TrimSpace(t.sessionRef.SessionID))
+	frame.Ref.TerminalID = firstNonEmpty(strings.TrimSpace(frame.Ref.TerminalID), subagentTurnID(t.ref.TaskID, t.turnSeq))
+	frame.Cursor = stream.Cursor{
+		Output: t.streamOutputCursor + int64(len([]byte(text))),
+		Events: t.streamEventBase + int64(len(t.streamFrames)) + 1,
+	}
+	frameBytes := subagentStreamFrameSize(frame)
+	if frameBytes > subagentStreamByteCap {
+		t.streamOutputCursor = frame.Cursor.Output
+		frame.Text = ""
+		frame.Event = nil
+		// Preserve the absolute event position while making the missing body
+		// explicit to readers. Control projects this boundary as a transient gap.
+		frame.EventsTruncatedBefore = frame.Cursor.Events
+		frameBytes = subagentStreamFrameSize(frame)
+	} else if text != "" {
+		t.streamOutputCursor = frame.Cursor.Output
+		t.appendRetainedSubagentTextLocked(text)
+	}
+	t.streamFrames = append(t.streamFrames, frame)
+	t.streamFrameSizes = append(t.streamFrameSizes, frameBytes)
+	t.streamBytes += frameBytes
+	for len(t.streamFrames) > 0 && (len(t.streamFrames) > subagentStreamFrameCap || t.streamBytes > subagentStreamByteCap) {
+		evictedBytes := subagentStreamFrameSize(t.streamFrames[0])
+		if len(t.streamFrameSizes) > 0 {
+			evictedBytes = t.streamFrameSizes[0]
+			t.streamFrameSizes[0] = 0
+			t.streamFrameSizes = t.streamFrameSizes[1:]
+		}
+		t.streamBytes -= evictedBytes
+		t.streamFrames[0] = stream.Frame{}
+		t.streamFrames = t.streamFrames[1:]
+		t.streamEventBase++
+	}
+}
+
+func (t *subagentTask) ensureTerminalStreamFrameLocked() {
+	if t == nil || t.running || !stream.IsTerminalState(string(t.state)) || t.streamTerminalFramed {
+		return
+	}
+	t.appendStreamFrameLocked(stream.Frame{
+		Ref: stream.Ref{
+			SessionID:  strings.TrimSpace(t.sessionRef.SessionID),
+			TaskID:     strings.TrimSpace(t.ref.TaskID),
+			TerminalID: subagentTurnID(t.ref.TaskID, t.turnSeq),
+		},
+		State:     string(t.state),
+		Running:   false,
+		Closed:    true,
+		UpdatedAt: time.Now(),
+	})
+	t.streamTerminalFramed = true
+}
+
+func subagentStreamFrameSize(frame stream.Frame) int {
+	data, err := json.Marshal(frame)
+	if err != nil {
+		return len(frame.Text)
+	}
+	return len(data)
 }

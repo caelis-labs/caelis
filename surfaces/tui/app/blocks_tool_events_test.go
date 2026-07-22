@@ -229,7 +229,7 @@ func TestLinkedSubagentFailureFinalReplacesLiveChildNarrative(t *testing.T) {
 				Name:   test.ownerName,
 				Output: "正在检查…",
 				Meta: ToolUpdateMeta{
-					TaskID:          "task-1",
+					TaskHandle:      "task-1",
 					TaskAction:      test.ownerAction,
 					OutputNarrative: true,
 				},
@@ -241,7 +241,7 @@ func TestLinkedSubagentFailureFinalReplacesLiveChildNarrative(t *testing.T) {
 				Final:  true,
 				Err:    test.err,
 				Meta: ToolUpdateMeta{
-					TaskID:     "task-1",
+					TaskHandle: "task-1",
 					ToolStatus: test.status,
 				},
 			}, map[string]int{})
@@ -291,7 +291,7 @@ func TestLinkedCompletedSpawnFinalRespectsChildNarrativeProvenance(t *testing.T)
 				Output: test.existing,
 				Final:  true,
 				Meta: ToolUpdateMeta{
-					TaskID:          "task-1",
+					TaskHandle:      "task-1",
 					OutputNarrative: test.outputNarrative,
 				},
 			}, map[string]int{})
@@ -300,7 +300,7 @@ func TestLinkedCompletedSpawnFinalRespectsChildNarrativeProvenance(t *testing.T)
 				Name:   "SPAWN",
 				Output: test.observerFinal,
 				Final:  true,
-				Meta:   ToolUpdateMeta{TaskID: "task-1"},
+				Meta:   ToolUpdateMeta{TaskHandle: "task-1"},
 			}, map[string]int{})
 
 			if !changed || len(events) != 1 {
@@ -317,7 +317,7 @@ func TestLinkedCompletedSpawnFinalRespectsChildNarrativeProvenance(t *testing.T)
 				CallID: "spawn-late-observer",
 				Name:   "SPAWN",
 				Output: "。",
-				Meta:   ToolUpdateMeta{TaskID: "task-1"},
+				Meta:   ToolUpdateMeta{TaskHandle: "task-1"},
 			}, map[string]int{})
 			if !changed || len(events) != 1 {
 				t.Fatalf("late linked snapshot events = %#v changed=%v, want one completed Spawn", events, changed)
@@ -338,7 +338,7 @@ func TestLinkedCompletedTaskWriteFinalDoesNotTruncateChildNarrative(t *testing.T
 		Output: "完整的子代理输出。",
 		Final:  true,
 		Meta: ToolUpdateMeta{
-			TaskID:          "task-1",
+			TaskHandle:      "task-1",
 			TaskAction:      "write",
 			OutputNarrative: true,
 		},
@@ -348,7 +348,7 @@ func TestLinkedCompletedTaskWriteFinalDoesNotTruncateChildNarrative(t *testing.T
 		Name:   "SPAWN",
 		Output: "。",
 		Final:  true,
-		Meta:   ToolUpdateMeta{TaskID: "task-1"},
+		Meta:   ToolUpdateMeta{TaskHandle: "task-1"},
 	}, map[string]int{})
 
 	if !changed || len(events) != 1 {

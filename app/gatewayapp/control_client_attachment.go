@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	"github.com/caelis-labs/caelis/internal/controlclient/turningress"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
@@ -16,13 +14,7 @@ func (s *Stack) attachControlClientHandle(handle gateway.TurnHandle) {
 	if handle == nil {
 		return
 	}
-	ingress := turningress.New(handle, func() stream.Service {
-		provider := s.KernelStreams()
-		if provider == nil {
-			return nil
-		}
-		return provider.Streams()
-	}, internalcontrolclient.NewChildRecorder(s.Sessions))
+	ingress := turningress.New(handle)
 	events := ingress.Events()
 	if s.controlFeeds == nil {
 		go finishFailedControlClientAttachment(ingress, nil, events, errors.New("gatewayapp: control session feed is unavailable"))

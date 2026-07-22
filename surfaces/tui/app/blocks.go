@@ -285,7 +285,7 @@ func (b *MainACPTurnBlock) markSubagentNarrativeBoundary(callID string, taskID s
 			continue
 		}
 		direct := callID != "" && strings.TrimSpace(event.CallID) == callID
-		linked := taskID != "" && strings.TrimSpace(event.TaskID) == taskID &&
+		linked := taskID != "" && strings.TrimSpace(event.TaskHandle) == taskID &&
 			(strings.EqualFold(toolSemanticName(event.Name, event.ToolKind), "SPAWN") ||
 				strings.EqualFold(toolSemanticName(event.Name, event.ToolKind), "TASK"))
 		if !direct && !linked {

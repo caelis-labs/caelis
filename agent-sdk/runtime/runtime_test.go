@@ -3175,20 +3175,24 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 	if len(loaded.Events) < 6 {
 		t.Fatalf("len(loaded.Events) = %d, want >= 6", len(loaded.Events))
 	}
-	var sawTaskID bool
+	var sawTaskHandle bool
 	for _, event := range loaded.Events {
 		if event == nil || event.Type != session.EventTypeToolResult {
 			continue
 		}
-		if taskID := taskIDFromSessionEvent(event); strings.TrimSpace(taskID) != "" {
-			sawTaskID = true
+		if handle := taskHandleFromSessionEvent(event); strings.TrimSpace(handle) != "" {
+			sawTaskHandle = true
 			break
 		}
 	}
-	if !sawTaskID {
-		t.Fatal("expected persisted tool result with task_id metadata")
+	if !sawTaskHandle {
+		t.Fatal("expected persisted tool result with a public Task handle")
 	}
-	task, err := runtime.tasks.lookupCommand(context.Background(), activeSession.SessionRef, mustSessionTaskID(t, loaded.Events))
+	identity, err := runtime.tasks.resolveTaskHandle(context.Background(), activeSession.SessionRef, mustSessionTaskHandle(t, loaded.Events))
+	if err != nil {
+		t.Fatalf("resolve persisted Task handle: %v", err)
+	}
+	task, err := runtime.tasks.lookupCommand(context.Background(), activeSession.SessionRef, identity.taskID)
 	if err != nil {
 		t.Fatalf("task fallback lookup error = %v", err)
 	}
@@ -3210,7 +3214,7 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 	snap, err := terminals.Read(context.Background(), stream.ReadRequest{
 		Ref: stream.Ref{
 			SessionID: activeSession.SessionID,
-			TaskID:    mustSessionTaskID(t, loaded.Events),
+			TaskID:    identity.taskID,
 		},
 	})
 	if err != nil {
@@ -3243,9 +3247,9 @@ func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveCommand(t *testing.T) {
 		"workdir":       ".",
 		"yield_time_ms": shellRunningYieldMillisForTest(0),
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
-	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
+	handle, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	if strings.TrimSpace(handle) == "" {
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
 	}
 
 	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
@@ -3253,9 +3257,9 @@ func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveCommand(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action":  "write",
-		"task_id": taskID,
-		"input":   "Codex",
+		"action": "write",
+		"handle": handle,
+		"input":  "Codex",
 	})
 	if payload := testToolResultPayload(t, taskResult); payload["state"] != string(taskapi.StateRunning) {
 		t.Fatalf("task write result = %#v, want running before explicit wait", payload)
@@ -3265,8 +3269,8 @@ func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveCommand(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action":  "wait",
-		"task_id": taskID,
+		"action": "wait",
+		"handle": handle,
 	})
 	if len(taskResult.Content) == 0 || taskResult.Content[0].JSON == nil {
 		t.Fatalf("task result content = %#v, want json payload", taskResult.Content)
@@ -3766,16 +3770,16 @@ func TestRuntimeTaskWaitErrorDoesNotTerminateRunningCommand(t *testing.T) {
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
-	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
+	handle, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	if strings.TrimSpace(handle) == "" {
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
 	}
 
 	waitErr := errors.New("transient wait failure")
 	fakeSession.waitErr = waitErr
 	raw, err := json.Marshal(map[string]any{
-		"action":  "wait",
-		"task_id": taskID,
+		"action": "wait",
+		"handle": handle,
 	})
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
@@ -3795,11 +3799,15 @@ func TestRuntimeTaskWaitErrorDoesNotTerminateRunningCommand(t *testing.T) {
 	if fakeSession.terminated {
 		t.Fatal("session.terminated = true, want running task left alone")
 	}
+	identity, resolveErr := runtime.tasks.resolveTaskHandle(context.Background(), activeSession.SessionRef, handle)
+	if resolveErr != nil {
+		t.Fatalf("resolve running command handle: %v", resolveErr)
+	}
 	runtime.tasks.mu.RLock()
-	_, active := runtime.tasks.tasks[taskID]
+	_, active := runtime.tasks.tasks[identity.taskID]
 	runtime.tasks.mu.RUnlock()
 	if !active {
-		t.Fatalf("task %q not active after wait-side error", taskID)
+		t.Fatalf("task %q not active after wait-side error", handle)
 	}
 }
 
@@ -3819,9 +3827,9 @@ func TestRuntimeTaskWaitUsesFixedMaximumYield(t *testing.T) {
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
 	}
 
 	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
@@ -3829,8 +3837,8 @@ func TestRuntimeTaskWaitUsesFixedMaximumYield(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action":  "wait",
-		"task_id": taskID,
+		"action": "wait",
+		"handle": taskID,
 	})
 
 	if got := fake.session.lastWait; got != taskWaitMaxYield {
@@ -3854,7 +3862,12 @@ func TestRuntimeCommandTaskIDUsesShortUID(t *testing.T) {
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
-	taskID := startProbeCommandTask(t, activeSession, runtime, fake)
+	handle := startProbeCommandTask(t, activeSession, runtime, fake)
+	identity, err := runtime.tasks.resolveTaskHandle(context.Background(), activeSession.SessionRef, handle)
+	if err != nil {
+		t.Fatalf("resolve command handle: %v", err)
+	}
+	taskID := identity.taskID
 
 	if !isShortHexTaskID(taskID) {
 		t.Fatalf("task_id = %q, want short hex uid", taskID)
@@ -3893,7 +3906,7 @@ func TestRuntimeTaskWaitIgnoresLegacyAgentYield(t *testing.T) {
 		tasks:      runtime.tasks,
 	}, map[string]any{
 		"action":        "wait",
-		"task_id":       taskID,
+		"handle":        taskID,
 		"yield_time_ms": -1,
 	})
 
@@ -3920,8 +3933,8 @@ func TestRuntimeTaskWaitAcceptsCommaSeparatedTaskIDs(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action":  "wait",
-		"task_id": taskOne + ", " + taskTwo,
+		"action": "wait",
+		"handle": taskOne + ", " + taskTwo,
 	})
 
 	if fakeOne.session.lastWait > taskWaitMaxYield || fakeTwo.session.lastWait > taskWaitMaxYield {
@@ -3945,8 +3958,8 @@ func TestRuntimeTaskWaitAcceptsCommaSeparatedTaskIDs(t *testing.T) {
 		}
 	}
 	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
-	if got := stringSliceFromAny(toolMeta["target_ids"]); !reflect.DeepEqual(got, []string{taskOne, taskTwo}) {
-		t.Fatalf("target_ids = %#v, want [%s %s]", toolMeta["target_ids"], taskOne, taskTwo)
+	if got := stringSliceFromAny(toolMeta["target_handles"]); !reflect.DeepEqual(got, []string{taskOne, taskTwo}) {
+		t.Fatalf("target_handles = %#v, want [%s %s]", toolMeta["target_handles"], taskOne, taskTwo)
 	}
 }
 
@@ -3964,8 +3977,8 @@ func TestRuntimeTaskBatchWaitUsesSharedYieldBudget(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action":  "wait",
-		"task_id": taskOne + "," + taskTwo,
+		"action": "wait",
+		"handle": taskOne + "," + taskTwo,
 	})
 
 	if len(fakeOne.session.waitCalls) < 2 || len(fakeTwo.session.waitCalls) < 2 {
@@ -3995,8 +4008,8 @@ func TestRuntimeTaskCancelAcceptsCommaSeparatedTaskIDs(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action":  "cancel",
-		"task_id": taskOne + "," + taskTwo,
+		"action": "cancel",
+		"handle": taskOne + "," + taskTwo,
 	})
 
 	if !fakeOne.session.terminated || !fakeTwo.session.terminated {
@@ -4011,8 +4024,8 @@ func TestRuntimeTaskCancelAcceptsCommaSeparatedTaskIDs(t *testing.T) {
 		t.Fatalf("payload[tasks] = %#v, want 2 tasks", payload["tasks"])
 	}
 	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
-	if got := stringSliceFromAny(toolMeta["target_ids"]); !reflect.DeepEqual(got, []string{taskOne, taskTwo}) {
-		t.Fatalf("target_ids = %#v, want [%s %s]", toolMeta["target_ids"], taskOne, taskTwo)
+	if got := stringSliceFromAny(toolMeta["target_handles"]); !reflect.DeepEqual(got, []string{taskOne, taskTwo}) {
+		t.Fatalf("target_handles = %#v, want [%s %s]", toolMeta["target_handles"], taskOne, taskTwo)
 	}
 }
 
@@ -4028,8 +4041,8 @@ func TestRuntimeTaskBatchCancelReturnsPartialFailurePayload(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action":  "cancel",
-		"task_id": taskOne + ",stale-id",
+		"action": "cancel",
+		"handle": taskOne + ",stale-id",
 	})
 
 	if !fakeOne.session.terminated {
@@ -4047,15 +4060,15 @@ func TestRuntimeTaskBatchCancelReturnsPartialFailurePayload(t *testing.T) {
 		t.Fatalf("payload[tasks] = %#v, want success and error entries", payload["tasks"])
 	}
 	second, _ := tasks[1].(map[string]any)
-	if got, _ := second["task_id"].(string); got != "stale-id" {
-		t.Fatalf("second task_id = %q, want stale-id", got)
+	if got, _ := second["handle"].(string); got != "stale-id" {
+		t.Fatalf("second handle = %q, want stale-id", got)
 	}
 	if errText, _ := second["error"].(string); !strings.Contains(errText, "not found") {
 		t.Fatalf("second error = %q, want not found", errText)
 	}
 	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
-	if got := stringSliceFromAny(toolMeta["target_ids"]); !reflect.DeepEqual(got, []string{taskOne, "stale-id"}) {
-		t.Fatalf("target_ids = %#v, want [%s stale-id]", toolMeta["target_ids"], taskOne)
+	if got := stringSliceFromAny(toolMeta["target_handles"]); !reflect.DeepEqual(got, []string{taskOne, "stale-id"}) {
+		t.Fatalf("target_handles = %#v, want [%s stale-id]", toolMeta["target_handles"], taskOne)
 	}
 	if got := toolMeta["failed_count"]; got != 1 {
 		t.Fatalf("failed_count = %#v, want 1", got)
@@ -4072,9 +4085,9 @@ func TestRuntimeTaskWriteWithCommaSeparatedTaskIDsUsesFirst(t *testing.T) {
 	taskTwo := startProbeCommandTask(t, activeSession, runtime, fakeTwo)
 
 	raw, err := json.Marshal(map[string]any{
-		"action":  "write",
-		"task_id": taskOne + "," + taskTwo,
-		"input":   "hello",
+		"action": "write",
+		"handle": taskOne + "," + taskTwo,
+		"input":  "hello",
 	})
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
@@ -4088,8 +4101,8 @@ func TestRuntimeTaskWriteWithCommaSeparatedTaskIDsUsesFirst(t *testing.T) {
 		t.Fatalf("TASK write with multiple task ids error = %v", err)
 	}
 	toolMeta := testToolResultRuntimeMeta(t, result, "tool")
-	if got := toolMeta["target_id"]; got != taskOne {
-		t.Fatalf("target_id = %#v, want first task %q", got, taskOne)
+	if got := toolMeta["target_handle"]; got != taskOne {
+		t.Fatalf("target_handle = %#v, want first task %q", got, taskOne)
 	}
 }
 
@@ -4110,9 +4123,9 @@ func TestRuntimeTaskWaitReturnsTailWhileRunningAndFullWhenCompleted(t *testing.T
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
 	}
 
 	fakeSession.stdout = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\n"
@@ -4126,8 +4139,8 @@ func TestRuntimeTaskWaitReturnsTailWhileRunningAndFullWhenCompleted(t *testing.T
 		tasks:      runtime.tasks,
 	}
 	runningResult := callRuntimeTaskTool(t, taskTool, map[string]any{
-		"action":  "wait",
-		"task_id": taskID,
+		"action": "wait",
+		"handle": taskID,
 	})
 	runningPayload := testToolResultPayload(t, runningResult)
 	wantTail := "...3 lines hidden...\nline 4\nline 5\nline 6\nline 7\nline 8\n"
@@ -4142,8 +4155,8 @@ func TestRuntimeTaskWaitReturnsTailWhileRunningAndFullWhenCompleted(t *testing.T
 	fakeSession.statusRunning = &completed
 	fakeSession.result = sandbox.CommandResult{Stdout: fakeSession.stdout, ExitCode: 0}
 	completedResult := callRuntimeTaskTool(t, taskTool, map[string]any{
-		"action":  "wait",
-		"task_id": taskID,
+		"action": "wait",
+		"handle": taskID,
 	})
 	completedPayload := testToolResultPayload(t, completedResult)
 	if got, _ := completedPayload["result"].(string); got != fakeSession.stdout {
@@ -4171,9 +4184,9 @@ func TestRuntimeTaskWaitAddsWindowsMSYSSSHSignalPipeHintWhenCompleted(t *testing
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
 	}
 
 	completed := false
@@ -4194,8 +4207,8 @@ fatal: Could not read from remote repository.`
 		tasks:      runtime.tasks,
 	}
 	completedResult := callRuntimeTaskTool(t, taskTool, map[string]any{
-		"action":  "wait",
-		"task_id": taskID,
+		"action": "wait",
+		"handle": taskID,
 	})
 	payload := testToolResultPayload(t, completedResult)
 	if text, _ := payload["result"].(string); !strings.Contains(text, "couldn't create signal pipe") {
@@ -4302,8 +4315,8 @@ func TestTaskControlSnapshotToolResultSimplifiesCancelPayload(t *testing.T) {
 
 	result := taskControlSnapshotToolResult(
 		tool.Call{ID: "task-cancel-1", Name: tasktool.ToolName, Input: mustJSONRaw(map[string]any{
-			"action":  "cancel",
-			"task_id": "task-1",
+			"action": "cancel",
+			"handle": "task-1",
 		})},
 		tool.Definition{Name: tasktool.ToolName},
 		taskapi.Snapshot{
@@ -4322,8 +4335,8 @@ func TestTaskControlSnapshotToolResultSimplifiesCancelPayload(t *testing.T) {
 	)
 
 	payload := testToolResultPayload(t, result)
-	if got, _ := payload["task_id"].(string); got != "task-1" {
-		t.Fatalf("payload[task_id] = %q, want task-1", got)
+	if got, _ := payload["handle"].(string); got != "task-1" {
+		t.Fatalf("payload[handle] = %q, want task-1", got)
 	}
 	if got, _ := payload["state"].(string); got != string(taskapi.StateCancelled) {
 		t.Fatalf("payload[state] = %q, want cancelled", got)
@@ -4461,15 +4474,18 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
-	if got := payload["task_id"]; got != "jeff" {
-		t.Fatalf("payload[task_id] = %#v, want handle jeff", got)
+	if got := payload["handle"]; got != "jeff" {
+		t.Fatalf("payload[handle] = %#v, want jeff", got)
 	}
 	if got := payload["final_message"]; got != "done" {
 		t.Fatalf("payload[final_message] = %#v, want done", got)
 	}
 	taskMeta := testToolResultRuntimeMeta(t, result, "task")
-	if got := taskMeta["task_id"]; got != "jeff" {
-		t.Fatalf("metadata task_id = %#v, want handle jeff", got)
+	if got := taskMeta["task_id"]; got != "task-1" {
+		t.Fatalf("metadata task_id = %#v, want internal task-1", got)
+	}
+	if got := taskMeta["handle"]; got != "jeff" {
+		t.Fatalf("metadata handle = %#v, want jeff", got)
 	}
 	if got := taskMeta["prompt"]; got != "summarize startup output" {
 		t.Fatalf("metadata prompt = %#v, want prompt preserved for SPAWN display", got)
@@ -4482,7 +4498,7 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 			t.Fatalf("payload contains %q: %#v", key, payload)
 		}
 	}
-	for _, key := range []string{"handle", "mention", "agent", "agent_id", "internal_task_id", "terminal_id"} {
+	for _, key := range []string{"mention", "agent", "agent_id", "internal_task_id", "terminal_id"} {
 		if _, ok := payload[key]; ok {
 			t.Fatalf("payload contains %q: %#v", key, payload)
 		}
@@ -4562,8 +4578,8 @@ func TestRuntimeTaskToolResolvesSubagentHandle(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action":  "wait",
-		"task_id": "ella",
+		"action": "wait",
+		"handle": "ella",
 	})
 	var payload map[string]any
 	if len(result.Content) == 0 || result.Content[0].JSON == nil {
@@ -4572,8 +4588,8 @@ func TestRuntimeTaskToolResolvesSubagentHandle(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
-	if got := payload["task_id"]; got != "ella" {
-		t.Fatalf("payload[task_id] = %#v, want handle ella", got)
+	if got := payload["handle"]; got != "ella" {
+		t.Fatalf("payload[handle] = %#v, want ella", got)
 	}
 	taskMeta := testToolResultRuntimeMeta(t, result, "task")
 	if _, ok := taskMeta["internal_task_id"]; ok {
@@ -4612,8 +4628,8 @@ func TestRuntimeTaskToolScopesSubagentHandleToSession(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action":  "wait",
-		"task_id": "ella",
+		"action": "wait",
+		"handle": "ella",
 	})
 	var payload map[string]any
 	if len(result.Content) == 0 || result.Content[0].JSON == nil {
@@ -4656,8 +4672,8 @@ func TestRuntimeTaskToolRejectsAmbiguousSubagentHandle(t *testing.T) {
 		tasks:      runtime.tasks,
 	}
 	raw, err := json.Marshal(map[string]any{
-		"action":  "wait",
-		"task_id": "ella",
+		"action": "wait",
+		"handle": "ella",
 	})
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)

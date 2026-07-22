@@ -156,7 +156,7 @@ func (m *Model) absorbCommandTaskResult(mutation *transcriptToolMutation) *MainA
 		!renderableTextHasContent(mutation.output) {
 		return nil
 	}
-	taskID := strings.TrimSpace(mutation.meta.TaskID)
+	taskID := strings.TrimSpace(mutation.meta.TaskHandle)
 	if taskID == "" {
 		return nil
 	}
@@ -169,7 +169,7 @@ func (m *Model) absorbCommandTaskResult(mutation *transcriptToolMutation) *MainA
 		for j := len(block.Events) - 1; j >= 0; j-- {
 			owner := &block.Events[j]
 			ownerName := toolSemanticName(owner.Name, owner.ToolKind)
-			if owner.Kind != SEToolCall || strings.TrimSpace(owner.TaskID) != taskID ||
+			if owner.Kind != SEToolCall || strings.TrimSpace(owner.TaskHandle) != taskID ||
 				!isTerminalPanelToolEvent(*owner) || strings.EqualFold(ownerName, "SPAWN") || strings.EqualFold(ownerName, "TASK") {
 				continue
 			}
@@ -208,7 +208,7 @@ func (m *Model) mainBlockForStreamOwner(event TranscriptEvent, mutation transcri
 		return nil
 	}
 	callID := strings.TrimSpace(mutation.callID)
-	taskID := strings.TrimSpace(mutation.meta.TaskID)
+	taskID := strings.TrimSpace(mutation.meta.TaskHandle)
 	if callID == "" || taskID == "" {
 		return nil
 	}
@@ -232,7 +232,7 @@ func mainACPBlockHasStreamOwner(block *MainACPTurnBlock, callID string, taskID s
 	semanticName := toolSemanticName(toolName, "")
 	for i := len(block.Events) - 1; i >= 0; i-- {
 		event := block.Events[i]
-		if event.Kind != SEToolCall || strings.TrimSpace(event.CallID) != callID || strings.TrimSpace(event.TaskID) != taskID {
+		if event.Kind != SEToolCall || strings.TrimSpace(event.CallID) != callID || strings.TrimSpace(event.TaskHandle) != taskID {
 			continue
 		}
 		eventName := toolSemanticName(event.Name, event.ToolKind)

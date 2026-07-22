@@ -41,7 +41,7 @@ func (*committedResultTaskStore) Get(context.Context, string) (*taskapi.Entry, e
 func (*committedResultTaskStore) ListSession(context.Context, session.SessionRef) ([]*taskapi.Entry, error) {
 	return nil, nil
 }
-func (*committedResultTaskStore) GetSessionTaskByHandle(context.Context, session.SessionRef, taskapi.Kind, string) (*taskapi.Entry, error) {
+func (*committedResultTaskStore) GetSessionTaskByHandle(context.Context, session.SessionRef, string) (*taskapi.Entry, error) {
 	return nil, errors.New("not found")
 }
 func (*committedResultTaskStore) Put(_ context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {

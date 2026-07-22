@@ -39,6 +39,9 @@ type resolvedStreamReader func(context.Context, stream.Cursor) (stream.Snapshot,
 // promoted from the deferred durable entry; re-resolving during that interval
 // would close an active subscription against an empty reconstructed snapshot.
 func (s *streamService) resolveReader(ctx context.Context, ref stream.Ref) (resolvedStreamReader, error) {
+	if err := stream.ValidateRef(ref); err != nil {
+		return nil, err
+	}
 	task, err := s.resolveTask(ctx, ref)
 	if err == nil {
 		return func(readCtx context.Context, cursor stream.Cursor) (stream.Snapshot, error) {
@@ -47,7 +50,7 @@ func (s *streamService) resolveReader(ctx context.Context, ref stream.Ref) (reso
 	}
 	subagent, subagentErr := s.resolveSubagent(ctx, ref)
 	if subagentErr != nil {
-		return nil, err
+		return nil, subagentErr
 	}
 	return func(readCtx context.Context, cursor stream.Cursor) (stream.Snapshot, error) {
 		return s.readSubagent(readCtx, subagent, cursor)
@@ -55,17 +58,28 @@ func (s *streamService) resolveReader(ctx context.Context, ref stream.Ref) (reso
 }
 
 func (s *streamService) readCommand(ctx context.Context, task *commandTask, cursor stream.Cursor) (stream.Snapshot, error) {
-	status, err := task.session.Status(ctx)
+	commandSession := task.session
+	hasExitStatus := commandSession != nil
+	var (
+		status sandbox.SessionStatus
+		err    error
+	)
+	if commandSession != nil {
+		status, err = commandSession.Status(ctx)
+	} else {
+		status, err = commandStatusWithoutSession(task)
+	}
 	if err != nil {
 		return stream.Snapshot{}, err
 	}
 	task.mu.Lock()
+	task.ensureCommandOutputSeedLocked()
 	stdoutCursor := task.stdoutCursor
 	stderrCursor := task.stderrCursor
-	useReadOutput := !task.outputCallback
+	useReadOutput := commandSession != nil && !task.outputCallback
 	task.mu.Unlock()
 	if useReadOutput {
-		stdout, stderr, nextStdout, nextStderr, err := task.session.ReadOutput(ctx, stdoutCursor, stderrCursor)
+		stdout, stderr, nextStdout, nextStderr, err := commandSession.ReadOutput(ctx, stdoutCursor, stderrCursor)
 		if err != nil {
 			return stream.Snapshot{}, err
 		}
@@ -77,13 +91,16 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 	}
 	var result sandbox.CommandResult
 	var resultErr error
-	if !status.Running {
-		result, resultErr = task.session.Result(ctx)
+	if commandSession != nil && !status.Running {
+		result, resultErr = commandSession.Result(ctx)
 	}
 	task.mu.Lock()
-	state := stateFromStatus(status)
+	state := task.state
+	if !stream.IsTerminalState(string(state)) {
+		state = stateFromStatus(status)
+	}
 	task.state = state
-	task.running = status.Running
+	task.running = status.Running && !stream.IsTerminalState(string(state))
 	outputCursor := task.outputCursorLocked()
 	finalText := ""
 	if !status.Running {
@@ -91,10 +108,20 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 		task.reconcileFinalOutputLocked(terminalOutputText(task.output, result.Stdout, result.Stderr))
 		outputCursor = task.outputCursorLocked()
 	}
+	task.ensureCommandTerminalFrameLocked(state, status, hasExitStatus)
 	truncatedBefore := int64(0)
 	if cursor.Output < task.outputBase {
 		truncatedBefore = task.outputBase
 	}
+	eventsTruncatedBefore := int64(0)
+	if cursor.Events < task.streamEventBase {
+		eventsTruncatedBefore = task.streamEventBase
+	}
+	eventCursor := task.streamEventBase
+	if count := len(task.streamFrames); count > 0 {
+		eventCursor = task.streamFrames[count-1].Cursor.Events
+	}
+	running := status.Running && !stream.IsTerminalState(string(state))
 	snap := stream.Snapshot{
 		Ref: stream.Ref{
 			SessionID:  strings.TrimSpace(task.sessionRef.SessionID),
@@ -103,31 +130,69 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 		},
 		Cursor: stream.Cursor{
 			Output: outputCursor,
+			Events: eventCursor,
 		},
-		TruncatedBefore: truncatedBefore,
-		Running:         status.Running,
-		State:           string(state),
-		SupportsInput:   status.SupportsInput,
-		StartedAt:       status.StartedAt,
-		UpdatedAt:       status.UpdatedAt,
+		TruncatedBefore:       truncatedBefore,
+		EventsTruncatedBefore: eventsTruncatedBefore,
+		Running:               running,
+		State:                 string(state),
+		SupportsInput:         status.SupportsInput && !stream.IsTerminalState(string(state)),
+		TerminalFramed:        task.streamTerminalFramed,
+		StartedAt:             status.StartedAt,
+		UpdatedAt:             status.UpdatedAt,
 	}
-	if !status.Running {
-		exitCode := status.ExitCode
-		snap.ExitCode = &exitCode
+	if !status.Running && stream.IsTerminalState(string(state)) {
 		snap.FinalText = finalText
+		if hasExitStatus {
+			exitCode := status.ExitCode
+			snap.ExitCode = &exitCode
+		}
 	}
-	if delta := task.outputFromCursorLocked(cursor.Output); delta != "" {
-		snap.Frames = append(snap.Frames, stream.Frame{
-			Ref:             snap.Ref,
-			Text:            delta,
-			Cursor:          snap.Cursor,
-			TruncatedBefore: truncatedBefore,
-			Running:         status.Running,
-			UpdatedAt:       status.UpdatedAt,
-		})
+	for _, retained := range task.streamFrames {
+		if retained.Cursor.Events <= cursor.Events {
+			continue
+		}
+		frame := stream.CloneFrame(retained)
+		frame.Ref = snap.Ref
+		frame.TruncatedBefore = truncatedBefore
+		frame.EventsTruncatedBefore = eventsTruncatedBefore
+		if frame.Text != "" {
+			end := frame.Cursor.Output
+			start := end - int64(len([]byte(frame.Text)))
+			delivered := max(cursor.Output, task.outputBase)
+			switch {
+			case delivered >= end:
+				frame.Text = ""
+			case delivered > start:
+				frame.Text = sliceStringFromByteCursor(frame.Text, delivered-start)
+			}
+		}
+		if frame.Text != "" || frame.Event != nil || frame.Closed {
+			snap.Frames = append(snap.Frames, frame)
+		}
 	}
 	task.mu.Unlock()
 	return stream.CloneSnapshot(snap), nil
+}
+
+func commandStatusWithoutSession(task *commandTask) (sandbox.SessionStatus, error) {
+	if task == nil {
+		return sandbox.SessionStatus{}, fmt.Errorf("agent-sdk/runtime: command task is required")
+	}
+	task.mu.Lock()
+	defer task.mu.Unlock()
+	if task.running || !stream.IsTerminalState(string(task.state)) {
+		return sandbox.SessionStatus{}, fmt.Errorf("agent-sdk/runtime: command task %q has no observable sandbox session", task.ref.TaskID)
+	}
+	return sandbox.SessionStatus{
+		Terminal: sandbox.TerminalRef{
+			SessionID:  strings.TrimSpace(task.ref.SessionID),
+			TerminalID: strings.TrimSpace(task.ref.TerminalID),
+		},
+		Running:   false,
+		StartedAt: task.createdAt,
+		UpdatedAt: task.createdAt,
+	}, nil
 }
 
 func (s *streamService) readSubagent(ctx context.Context, sub *subagentTask, cursor stream.Cursor) (stream.Snapshot, error) {
@@ -151,17 +216,24 @@ func (s *streamService) readSubagent(ctx context.Context, sub *subagentTask, cur
 	}
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
+	sub.ensureTerminalStreamFrameLocked()
 	output := subagentStreamOutput(sub.stdout, sub.stderr)
-	delta := sliceStringFromByteCursor(output, cursor.Output)
-	nextOutput := int64(len([]byte(output)))
-	nextEvents := int64(len(sub.streamFrames))
+	if buffered := int64(len([]byte(output))); sub.streamOutputCursor < buffered {
+		sub.streamOutputCursor = buffered
+	}
+	nextOutput := sub.streamOutputCursor
+	nextEvents := sub.streamEventBase + int64(len(sub.streamFrames))
 	state := sub.state
 	if state == "" {
 		if sub.running {
 			state = task.StateRunning
 		} else {
-			state = task.StateCompleted
+			state = task.StateUnknownOutcome
 		}
+	}
+	eventsTruncatedBefore := int64(0)
+	if cursor.Events < sub.streamEventBase {
+		eventsTruncatedBefore = sub.streamEventBase
 	}
 	snap := stream.Snapshot{
 		Ref: stream.Ref{
@@ -173,11 +245,13 @@ func (s *streamService) readSubagent(ctx context.Context, sub *subagentTask, cur
 			Output: nextOutput,
 			Events: nextEvents,
 		},
-		Running:       sub.running,
-		State:         string(state),
-		SupportsInput: false,
-		StartedAt:     sub.createdAt,
-		UpdatedAt:     time.Now(),
+		EventsTruncatedBefore: eventsTruncatedBefore,
+		Running:               sub.running,
+		State:                 string(state),
+		SupportsInput:         !sub.running && state == task.StateCompleted,
+		TerminalFramed:        !sub.running && stream.IsTerminalState(string(state)),
+		StartedAt:             sub.createdAt,
+		UpdatedAt:             time.Now(),
 	}
 	if !sub.running {
 		snap.FinalText = firstNonBlankTaskOutput(
@@ -188,36 +262,40 @@ func (s *streamService) readSubagent(ctx context.Context, sub *subagentTask, cur
 			"(no output)",
 		)
 	}
-	deliveredTextFrame := false
 	if start := cursor.Events; start < nextEvents {
-		if start < 0 {
-			start = 0
+		if start < sub.streamEventBase {
+			start = sub.streamEventBase
 		}
-		for _, frame := range sub.streamFrames[start:] {
+		for _, frame := range sub.streamFrames[start-sub.streamEventBase:] {
 			cloned := stream.CloneFrame(frame)
 			terminalID := strings.TrimSpace(cloned.Ref.TerminalID)
 			cloned.Ref = snap.Ref
 			if terminalID != "" {
 				cloned.Ref.TerminalID = terminalID
 			}
-			cloned.Cursor = snap.Cursor
+			cloned.EventsTruncatedBefore = max(cloned.EventsTruncatedBefore, eventsTruncatedBefore)
 			if cloned.UpdatedAt.IsZero() {
 				cloned.UpdatedAt = snap.UpdatedAt
-			}
-			if cloned.Text != "" {
-				deliveredTextFrame = true
 			}
 			snap.Frames = append(snap.Frames, cloned)
 		}
 	}
-	if delta != "" && !deliveredTextFrame {
-		snap.Frames = append(snap.Frames, stream.Frame{
-			Ref:       snap.Ref,
-			Text:      delta,
-			Cursor:    snap.Cursor,
-			Running:   sub.running,
-			UpdatedAt: snap.UpdatedAt,
-		})
+	// Older in-process producers may populate only the aggregate text buffer.
+	// Keep that fallback local to a task with no structured frames; normal
+	// producers publish cursor-owned frames through PublishStream.
+	if len(sub.streamFrames) == 0 && output != "" {
+		turnBase := nextOutput - int64(len([]byte(output)))
+		if cursor.Output >= turnBase {
+			if delta := sliceStringFromByteCursor(output, cursor.Output-turnBase); delta != "" {
+				snap.Frames = append(snap.Frames, stream.Frame{
+					Ref:       snap.Ref,
+					Text:      delta,
+					Cursor:    snap.Cursor,
+					Running:   sub.running,
+					UpdatedAt: snap.UpdatedAt,
+				})
+			}
+		}
 	}
 	return stream.CloneSnapshot(snap), nil
 }
@@ -250,7 +328,8 @@ func (s *streamService) Subscribe(ctx context.Context, req stream.SubscribeReque
 			// The cursor represents the whole source snapshot. Advance it only
 			// after every frame from that snapshot was accepted by the consumer.
 			cursor = stream.CloneCursor(snap.Cursor)
-			if !snap.Running {
+			followContinue := req.FollowContinues && snap.SupportsInput
+			if !snap.Running && !followContinue {
 				return
 			}
 			timer := time.NewTimer(poll)
@@ -330,99 +409,22 @@ func (s *streamService) resolveTask(ctx context.Context, ref stream.Ref) (*comma
 	if s == nil || s.tasks == nil {
 		return nil, fmt.Errorf("agent-sdk/runtime: terminal service is unavailable")
 	}
-	if ref.SessionID == "" {
-		return nil, fmt.Errorf("agent-sdk/runtime: session_id is required")
-	}
-	sessionRef := session.SessionRef{SessionID: ref.SessionID}
-	if ref.TaskID != "" {
-		return s.tasks.lookupCommand(ctx, sessionRef, ref.TaskID)
-	}
-	if ref.TerminalID == "" {
-		return nil, fmt.Errorf("agent-sdk/runtime: task_id or terminal_id is required")
-	}
-	s.tasks.mu.RLock()
-	for _, task := range s.tasks.tasks {
-		if task == nil {
-			continue
-		}
-		if strings.TrimSpace(task.sessionRef.SessionID) != ref.SessionID {
-			continue
-		}
-		if strings.TrimSpace(task.ref.TerminalID) == ref.TerminalID {
-			s.tasks.mu.RUnlock()
-			return task, nil
-		}
-	}
-	s.tasks.mu.RUnlock()
-	if s.tasks.store == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: terminal %q not found", ref.TerminalID)
-	}
-	entries, err := s.tasks.store.ListSession(ctx, sessionRef)
-	if err != nil {
+	if err := stream.ValidateRef(ref); err != nil {
 		return nil, err
 	}
-	for _, entry := range entries {
-		if entry == nil || strings.TrimSpace(entry.Terminal.TerminalID) != ref.TerminalID {
-			continue
-		}
-		hydrated, err := s.tasks.store.Get(ctx, strings.TrimSpace(entry.TaskID))
-		if err != nil {
-			return nil, err
-		}
-		return s.tasks.rehydrateCommandTask(hydrated)
-	}
-	return nil, fmt.Errorf("agent-sdk/runtime: terminal %q not found", ref.TerminalID)
+	sessionRef := session.SessionRef{SessionID: ref.SessionID}
+	return s.tasks.lookupCommand(ctx, sessionRef, ref.TaskID)
 }
 
 func (s *streamService) resolveSubagent(ctx context.Context, ref stream.Ref) (*subagentTask, error) {
 	if s == nil || s.tasks == nil {
 		return nil, fmt.Errorf("agent-sdk/runtime: terminal service is unavailable")
 	}
-	if ref.SessionID == "" {
-		return nil, fmt.Errorf("agent-sdk/runtime: session_id is required")
-	}
-	sessionRef := session.SessionRef{SessionID: ref.SessionID}
-	if ref.TaskID != "" {
-		return s.tasks.lookupSubagent(ctx, sessionRef, ref.TaskID)
-	}
-	if ref.TerminalID == "" {
-		return nil, fmt.Errorf("agent-sdk/runtime: task_id or terminal_id is required")
-	}
-	s.tasks.mu.RLock()
-	for _, task := range s.tasks.subagents {
-		if task == nil {
-			continue
-		}
-		if strings.TrimSpace(task.sessionRef.SessionID) != ref.SessionID {
-			continue
-		}
-		if strings.TrimSpace(task.ref.TerminalID) == ref.TerminalID {
-			s.tasks.mu.RUnlock()
-			return task, nil
-		}
-	}
-	s.tasks.mu.RUnlock()
-	if s.tasks.store == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: terminal %q not found", ref.TerminalID)
-	}
-	entries, err := s.tasks.store.ListSession(ctx, sessionRef)
-	if err != nil {
+	if err := stream.ValidateRef(ref); err != nil {
 		return nil, err
 	}
-	for _, entry := range entries {
-		if entry == nil || entry.Kind != "subagent" {
-			continue
-		}
-		if firstNonEmpty(taskSpecString(entry.Spec, "terminal_id"), subagentTerminalID(entry.TaskID)) != ref.TerminalID {
-			continue
-		}
-		hydrated, err := s.tasks.store.Get(ctx, strings.TrimSpace(entry.TaskID))
-		if err != nil {
-			return nil, err
-		}
-		return s.tasks.rehydrateSubagentTask(hydrated), nil
-	}
-	return nil, fmt.Errorf("agent-sdk/runtime: terminal %q not found", ref.TerminalID)
+	sessionRef := session.SessionRef{SessionID: ref.SessionID}
+	return s.tasks.lookupSubagent(ctx, sessionRef, ref.TaskID)
 }
 
 func sliceStringFromByteCursor(text string, cursor int64) string {

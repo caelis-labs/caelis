@@ -73,7 +73,7 @@ func taskControlSnapshotToolResult(call tool.Call, def tool.Definition, snapshot
 }
 
 type taskBatchControlItem struct {
-	TaskID       string
+	Handle       string
 	Snapshot     taskapi.Snapshot
 	Err          error
 	OK           bool
@@ -111,8 +111,8 @@ func taskBatchControlPayload(items []taskBatchControlItem, action string, actual
 	for _, item := range items {
 		if item.Err != nil {
 			payload := map[string]any{
-				"task_id": strings.TrimSpace(item.TaskID),
-				"error":   item.Err.Error(),
+				"handle": strings.TrimSpace(item.Handle),
+				"error":  item.Err.Error(),
 			}
 			if normalizedAction == "wait" {
 				payload["actual_wait_time_ms"] = item.ActualWaitMS
@@ -159,24 +159,21 @@ func taskBatchErrorCount(items []taskBatchControlItem) int {
 
 func taskCancelToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	return map[string]any{
-		"task_id": taskVisibleID(snapshot),
-		"state":   string(snapshot.State),
+		"handle": taskPublicHandle(snapshot),
+		"state":  string(snapshot.State),
 	}
 }
 
 func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {
 	meta := map[string]any{}
 	taskMeta := taskRuntimeMetaSection(meta, "task")
-	visibleTaskID := taskVisibleID(snapshot)
 	taskMeta["kind"] = strings.TrimSpace(string(snapshot.Kind))
 	taskMeta["state"] = strings.TrimSpace(string(snapshot.State))
 	taskMeta["running"] = snapshot.Running
-	taskMeta["task_id"] = visibleTaskID
+	taskMeta["task_id"] = strings.TrimSpace(snapshot.Ref.TaskID)
+	taskMeta["handle"] = taskPublicHandle(snapshot)
 	if sessionID := strings.TrimSpace(snapshot.Ref.SessionID); sessionID != "" {
 		taskMeta["session_id"] = sessionID
-	}
-	if internalTaskID := strings.TrimSpace(snapshot.Ref.TaskID); snapshot.Kind != taskapi.KindSubagent && internalTaskID != "" && internalTaskID != visibleTaskID {
-		taskMeta["internal_task_id"] = internalTaskID
 	}
 	if cursor, ok := taskInt64Value(snapshot.Metadata["output_cursor"]); ok && cursor >= 0 {
 		taskMeta["output_cursor"] = cursor
@@ -223,9 +220,8 @@ func taskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 }
 
 func commandTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
-	visibleTaskID := taskVisibleID(snapshot)
 	payload := map[string]any{
-		"task_id": visibleTaskID,
+		"handle": taskPublicHandle(snapshot),
 	}
 	if snapshot.Running {
 		payload["state"] = string(snapshot.State)
@@ -255,8 +251,8 @@ func commandTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 
 func subagentTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	payload := map[string]any{
-		"task_id": taskVisibleID(snapshot),
-		"state":   string(snapshot.State),
+		"handle": taskPublicHandle(snapshot),
+		"state":  string(snapshot.State),
 	}
 	if snapshot.Running {
 		if preview := taskRawStringValue(snapshot.Result["output_preview"]); taskOutputHasNonBlankLine(preview) {
@@ -274,13 +270,8 @@ func subagentTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	return payload
 }
 
-func taskVisibleID(snapshot taskapi.Snapshot) string {
-	if snapshot.Kind == taskapi.KindSubagent {
-		if handle := firstNonEmpty(taskStringValue(snapshot.Result["handle"]), taskStringValue(snapshot.Metadata["handle"])); handle != "" {
-			return normalizeSubagentHandle(handle)
-		}
-	}
-	return strings.TrimSpace(snapshot.Ref.TaskID)
+func taskPublicHandle(snapshot taskapi.Snapshot) string {
+	return normalizeTaskHandle(firstNonEmpty(snapshot.Handle, taskStringValue(snapshot.Result["handle"]), taskStringValue(snapshot.Metadata["handle"]), strings.TrimSpace(snapshot.Ref.TaskID)))
 }
 
 func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entry) error {

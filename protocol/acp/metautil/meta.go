@@ -23,6 +23,7 @@ const (
 	RuntimeToolInput        = "input"
 	RuntimeToolStatusDetail = "status_detail"
 	RuntimeTargetKind       = "target_kind"
+	RuntimeTargetHandle     = "target_handle"
 	RuntimeTargetID         = "target_id"
 
 	RuntimeTask           = "task"

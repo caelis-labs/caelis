@@ -43,20 +43,36 @@ func TestProcessRestartRebuildsDurableClientStateFromSessionTruth(t *testing.T) 
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	recorder := NewChildRecorder(beforeRestart)
 	origin := session.EventChildOrigin{
 		Scope: session.EventChildScopeSubagent, ScopeID: "task-1", TaskID: "task-1", DelegationID: "task-1",
 		SourceEventID: "child-message", ParentTool: session.EventParentTool{CallID: "spawn-1", Name: "Spawn"},
 	}
-	if _, err := recorder.Record(ctx, ChildRecordRequest{SessionRef: active.SessionRef, Origin: origin, Event: childProtocolUpdate(session.EventTypeAssistant, session.ProtocolUpdate{
-		SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), MessageID: "child-message", Content: session.ProtocolTextContent("nested child"),
-	})}); err != nil {
+	childMessage := &session.Event{
+		ID: "legacy-child-message", Type: session.EventTypeAssistant, Visibility: session.VisibilityMirror,
+		ChildOrigin: &origin,
+		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), MessageID: "child-message", Content: session.ProtocolTextContent("nested child"),
+		}},
+	}
+	if _, err := beforeRestart.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: childMessage}); err != nil {
 		t.Fatal(err)
 	}
 	origin.SourceEventID = "child-tool"
-	if _, err := recorder.Record(ctx, ChildRecordRequest{SessionRef: active.SessionRef, Origin: origin, Event: childProtocolUpdate(session.EventTypeToolResult, session.ProtocolUpdate{
-		SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate), ToolCallID: "child-call", Status: "completed", RawOutput: map[string]any{"result": "ok"},
-	})}); err != nil {
+	childTool := &session.Event{
+		ID: "legacy-child-tool", Type: session.EventTypeToolResult, Visibility: session.VisibilityMirror,
+		ChildOrigin: &origin,
+		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate), ToolCallID: "child-call", Status: "completed", RawOutput: map[string]any{"result": "ok"},
+		}},
+	}
+	if _, err := beforeRestart.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: childTool}); err != nil {
+		t.Fatal(err)
+	}
+	participantProtocol := session.NewParticipantProtocol(session.ProtocolParticipant{Action: "attached"})
+	if _, err := beforeRestart.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{
+		ID: "participant-control-fact", Type: session.EventTypeParticipant, Visibility: session.VisibilityMirror,
+		Actor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "participant-1"}, Protocol: &participantProtocol,
+	}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -89,10 +105,14 @@ func TestProcessRestartRebuildsDurableClientStateFromSessionTruth(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer replayed.Subscription.Close()
-	events := receiveEnvelopes(t, replayed.Subscription.Backfill(), 3)
+	events := receiveEnvelopes(t, replayed.Subscription.Backfill(), 2)
 	if events[0].Delivery == nil || events[0].Delivery.Mode != eventstream.DeliveryCanonical ||
-		events[1].Delivery == nil || events[1].Delivery.Mode != eventstream.DeliveryMirror || events[1].ScopeID != "task-1" ||
-		events[2].Delivery == nil || events[2].Delivery.Mode != eventstream.DeliveryMirror || events[2].ScopeID != "task-1" {
+		events[1].Delivery == nil || events[1].Delivery.Mode != eventstream.DeliveryMirror || events[1].Kind != eventstream.KindParticipant {
 		t.Fatalf("restart durable replay = %#v", events)
+	}
+	for _, event := range events {
+		if event.Scope == eventstream.ScopeSubagent {
+			t.Fatalf("restart replay exposed retired child stream mirror: %#v", event)
+		}
 	}
 }

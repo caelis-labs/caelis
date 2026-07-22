@@ -88,6 +88,15 @@ Document responsibilities are intentionally separate:
   uses its handle resolver; participant attach uses its explicit profile-and-
   effort selector. Both paths consume the same immutable snapshot and sealing
   rules before durable work is prepared.
+- `control/taskstream`: the Control-owned, Session-authorized directory and
+  transient record service for existing Tasks. A stream is addressed only by
+  `(SessionID, TaskID)`, while the directory exposes the Session-unique public
+  Task handle used by people, models, and Task control. Surfaces resolve that
+  handle or its typed parent-tool relation through the directory before using
+  the opaque TaskID; they never recover identity from `_meta`. This adds no
+  Execution lifecycle, durable output store, or schema.
+  `protocol/acp/taskstream` is the protocol adapter that projects those records
+  into transient Envelopes for Surfaces.
 - `control/agents`: external ACP connection identity and lifecycle. One stable
   Agent represents one connection; sibling remote models are separate
   `ModelProfile` entries and never become synthetic Agents or Agent-owned
@@ -97,13 +106,14 @@ Document responsibilities are intentionally separate:
   commands, outcomes, bootstrap state, and Session-feed subscription contracts.
 - `internal/controlclient`: transitional implementation of Control-owned
   authorization, operation ledger, command dispatch, Session feed/replay,
-  child recorder, approval recovery, and state assembly pending coherent
+  legacy-child-mirror filtering, approval recovery, and state assembly pending coherent
   migration under `control/*`.
-  `internal/controlclient/turningress` is the one shared
-  Turn/task ingress and does not own task execution.
+  `internal/controlclient/turningress` accepts only the owning main Turn
+  producer. Task output never fans into this ingress and cannot delay its
+  terminal.
 - `surfaces/appserver`: thin HTTP JSON/SSE and authentication mapping over
-  `ports/controlclient`; `app/controlserver` owns production listener assembly
-  and fail-closed network configuration.
+  `ports/controlclient` plus `protocol/acp/taskstream`; `app/controlserver`
+  owns production listener assembly and fail-closed network configuration.
 - `ports/controlcommand`, `ports/controlprompt`: frozen transitional command
   catalog plus prompt request/result parsing contracts.
 - `internal/controlpromptrouter`: shared app-control slash orchestration over

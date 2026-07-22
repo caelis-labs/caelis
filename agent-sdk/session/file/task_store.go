@@ -217,17 +217,13 @@ func (s *TaskStore) ListSession(ctx context.Context, ref session.SessionRef) ([]
 	return out, nil
 }
 
-func (s *TaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.SessionRef, kind taskapi.Kind, handle string) (*taskapi.Entry, error) {
+func (s *TaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.SessionRef, handle string) (*taskapi.Entry, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: task handle %q not found", strings.TrimSpace(handle))
 	}
 	ref = session.NormalizeSessionRef(ref)
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return nil, fmt.Errorf("agent-sdk/session/file: session_id is required")
-	}
-	kind = taskapi.Kind(strings.TrimSpace(string(kind)))
-	if kind == "" {
-		return nil, fmt.Errorf("agent-sdk/session/file: task kind is required")
 	}
 	handle = taskapi.NormalizeHandle(handle)
 	if handle == "" {
@@ -241,7 +237,7 @@ func (s *TaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.Sess
 
 	var out *taskapi.Entry
 	if err := s.store.withRootReadLockContext(ctx, func() error {
-		entry, err := s.store.getSessionTaskIndexByHandle(ref, kind, handle)
+		entry, err := s.store.getSessionTaskIndexByHandle(ref, handle)
 		if err != nil {
 			return err
 		}
@@ -276,6 +272,19 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 	row, err := taskIndexRowFromEntry(next)
 	if err != nil {
 		return nil, err
+	}
+	if row.handle != "" {
+		var conflictingTaskID string
+		err := tx.QueryRow(
+			`SELECT task_id FROM tasks WHERE session_id = ? AND handle = ? AND task_id <> ? LIMIT 1`,
+			row.sessionID, row.handle, row.taskID,
+		).Scan(&conflictingTaskID)
+		switch {
+		case err == nil:
+			return nil, &taskapi.HandleConflictError{SessionID: row.sessionID, Handle: row.handle, TaskID: conflictingTaskID}
+		case !errors.Is(err, sql.ErrNoRows):
+			return nil, fmt.Errorf("agent-sdk/session/file: check task handle uniqueness: %w", err)
+		}
 	}
 
 	_, err = tx.Exec(
@@ -403,7 +412,7 @@ func (s *Store) listTaskIndex(ref session.SessionRef) ([]*taskapi.Entry, error) 
 	return out, nil
 }
 
-func (s *Store) getSessionTaskIndexByHandle(ref session.SessionRef, kind taskapi.Kind, handle string) (*taskapi.Entry, error) {
+func (s *Store) getSessionTaskIndexByHandle(ref session.SessionRef, handle string) (*taskapi.Entry, error) {
 	db, err := s.openSessionIndex()
 	if err != nil {
 		return nil, err
@@ -411,9 +420,8 @@ func (s *Store) getSessionTaskIndexByHandle(ref session.SessionRef, kind taskapi
 	defer db.Close()
 
 	rows, err := db.Query(
-		taskIndexSelectSQL()+` WHERE session_id = ? AND kind = ? AND handle = ? ORDER BY updated_at_ns DESC, task_id ASC LIMIT 2`,
+		taskIndexSelectSQL()+` WHERE session_id = ? AND handle = ? ORDER BY updated_at_ns DESC, task_id ASC LIMIT 2`,
 		strings.TrimSpace(ref.SessionID),
-		strings.TrimSpace(string(kind)),
 		taskapi.NormalizeHandle(handle),
 	)
 	if err != nil {
@@ -447,7 +455,7 @@ func taskIndexSelectSQL() string {
 		task_id, revision, kind, app_name, user_id, session_id, workspace_key, title, state,
 		running, supports_input, supports_cancel,
 		created_at_ns, updated_at_ns, heartbeat_at_ns, lease_id, lease_owner_id, lease_revision, lease_acquired_at_ns, lease_expires_at_ns,
-		stdout_cursor, stderr_cursor, event_cursor,
+		stdout_cursor, stderr_cursor, event_cursor, handle,
 		spec_json, result_json, metadata_json, terminal_json
 	FROM tasks`
 }
@@ -527,7 +535,7 @@ func taskIndexRowFromEntry(entry *taskapi.Entry) (taskIndexRow, error) {
 		stdoutCursor:    entry.StdoutCursor,
 		stderrCursor:    entry.StderrCursor,
 		eventCursor:     entry.EventCursor,
-		handle:          taskapi.NormalizeHandle(firstNonEmpty(taskIndexString(entry.Result, "handle"), taskIndexString(entry.Metadata, "handle"), taskIndexString(entry.Spec, "handle"))),
+		handle:          taskapi.NormalizeHandle(firstNonEmpty(entry.Handle, taskIndexString(entry.Result, "handle"), taskIndexString(entry.Metadata, "handle"), taskIndexString(entry.Spec, "handle"))),
 		specJSON:        specJSON,
 		resultJSON:      resultJSON,
 		metadataJSON:    metadataJSON,
@@ -560,6 +568,7 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		stdoutCursor      int64
 		stderrCursor      int64
 		eventCursor       int64
+		handle            string
 		specRaw           string
 		resultRaw         string
 		metadataRaw       string
@@ -589,6 +598,7 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		&stdoutCursor,
 		&stderrCursor,
 		&eventCursor,
+		&handle,
 		&specRaw,
 		&resultRaw,
 		&metadataRaw,
@@ -613,7 +623,13 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		return nil, err
 	}
 	return taskapi.CloneEntry(&taskapi.Entry{
-		TaskID:   strings.TrimSpace(taskID),
+		TaskID: strings.TrimSpace(taskID),
+		Handle: taskapi.NormalizeHandle(firstNonEmpty(
+			handle,
+			taskIndexString(result, "handle"),
+			taskIndexString(metadata, "handle"),
+			taskIndexString(spec, "handle"),
+		)),
 		Revision: revision,
 		Kind:     taskapi.Kind(strings.TrimSpace(kind)),
 		Session: session.NormalizeSessionRef(session.SessionRef{

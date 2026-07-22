@@ -14,6 +14,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 const apiPrefix = "/api/control/v1"
@@ -43,6 +44,7 @@ func (f AuthenticatorFunc) Authenticate(request *http.Request) (controlclient.Pr
 
 type Config struct {
 	Service       controlclient.Service
+	TaskStreams   taskstream.Service
 	Authenticator Authenticator
 	AllowedHosts  []string
 	Heartbeat     time.Duration
@@ -94,6 +96,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/state", s.sessionState)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/events", s.sessionEvents)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/stream", s.streamSessionEvents)
+	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks", s.listTasks)
+	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/events", s.taskEvents)
+	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/stream", s.streamTaskEvents)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/prompt", s.prompt)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/steer", s.steer)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/cancel", s.cancel)
@@ -103,6 +108,118 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/participants/{participant_id}/cancel", s.cancelParticipant)
 	s.mux.HandleFunc("DELETE "+apiPrefix+"/sessions/{session_id}/participants/{participant_id}", s.detachParticipant)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/handoff", s.handoff)
+}
+
+func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	if s.config.TaskStreams == nil {
+		writeMappedError(w, errorcode.New(errorcode.Unavailable, "appserver: task streams are unavailable"))
+		return
+	}
+	result, err := s.config.TaskStreams.List(r.Context(), taskStreamPrincipal(principal), taskstream.ListRequest{SessionID: r.PathValue("session_id")})
+	writeJSONResult(w, result, err)
+}
+
+func (s *Server) taskEvents(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	if s.config.TaskStreams == nil {
+		writeMappedError(w, errorcode.New(errorcode.Unavailable, "appserver: task streams are unavailable"))
+		return
+	}
+	cursor, ok := resumeCursor(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.config.TaskStreams.Events(r.Context(), taskStreamPrincipal(principal), taskstream.ReadRequest{
+		SessionID: r.PathValue("session_id"), TaskID: r.PathValue("task_id"), Cursor: cursor,
+	})
+	writeJSONResult(w, result, err)
+}
+
+func (s *Server) streamTaskEvents(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	if s.config.TaskStreams == nil {
+		writeMappedError(w, errorcode.New(errorcode.Unavailable, "appserver: task streams are unavailable"))
+		return
+	}
+	cursor, ok := resumeCursor(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.config.TaskStreams.Subscribe(r.Context(), taskStreamPrincipal(principal), taskstream.SubscribeRequest{
+		SessionID: r.PathValue("session_id"), TaskID: r.PathValue("task_id"), Cursor: cursor,
+	})
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+	defer result.Subscription.Close()
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming is unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Set(resumeModeHeader, string(result.ResumeMode))
+	w.Header().Set(transientGapHeader, strconv.FormatBool(result.TransientGap))
+	if result.BoundaryCursor != "" {
+		w.Header().Set(boundaryCursorHeader, result.BoundaryCursor)
+	}
+	w.WriteHeader(http.StatusOK)
+	boundary, err := json.Marshal(map[string]any{
+		"resume_mode": result.ResumeMode, "transient_gap": result.TransientGap, "boundary_cursor": result.BoundaryCursor,
+	})
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", resumeEventName, boundary)
+	flusher.Flush()
+	heartbeat := time.NewTicker(s.config.Heartbeat)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeat.C:
+			_, _ = fmt.Fprint(w, ": heartbeat\n\n")
+			flusher.Flush()
+		case envelope, open := <-result.Subscription.Events():
+			if !open {
+				if errors.Is(result.Subscription.Err(), taskstream.ErrSlowConsumer) {
+					retry, marshalErr := json.Marshal(map[string]any{
+						"resume_mode": taskstream.ResumeModeCurrentState, "transient_gap": true,
+						"boundary_cursor": result.Subscription.LastCursor(),
+					})
+					if marshalErr == nil {
+						_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", resumeEventName, retry)
+						flusher.Flush()
+					}
+				}
+				return
+			}
+			data, marshalErr := marshalEnvelope(envelope)
+			if marshalErr != nil {
+				return
+			}
+			_, _ = fmt.Fprintf(w, "id: %s\ndata: %s\n\n", envelope.Cursor, data)
+			flusher.Flush()
+		}
+	}
+}
+
+func taskStreamPrincipal(principal controlclient.Principal) taskstream.Principal {
+	return taskstream.Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)}
 }
 
 func (s *Server) principal(request *http.Request) (controlclient.Principal, error) {

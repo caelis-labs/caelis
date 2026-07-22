@@ -188,6 +188,11 @@ Control handle resolver. Participant attach instead calls the explicit
 profile-and-effort selector, so handle requests cannot accidentally carry
 participant-only fields. Both operations read the same AppConfig snapshot, map
 canonical effort to exact backend configuration, and seal an SDK `Placement`.
+The fixed handle remains the model-visible `Target.Selector`; it is never the
+execution Agent name. After resolution, all startup and continuation behavior
+comes from the sealed Placement. An ACP-backed `zenith` may therefore execute
+the `grok` Agent without either identity overwriting or validating against the
+other.
 Control stores that whole placement and its configuration fingerprint with
 durable task or participant intent. Runtime consumes it directly and never
 looks up `ProfileID` again. Rebinding a handle therefore cannot change already
@@ -219,6 +224,32 @@ Task, Spawn, and delegation primitives may use those roles. Caelis does not
 need a generalized `Agent.asTool` abstraction. A delegated result enters parent
 model context through a canonical task/tool/message fact, never through
 transient child stream output.
+
+Every Task has two deliberately non-interchangeable identities. `Handle` is
+unique for the lifetime of the owning Session and is the only identity exposed
+in RunCommand/Spawn results and accepted by the model-facing Task wait, write,
+and cancel tool. `TaskID` is opaque infrastructure identity used by Runtime,
+Control, persistence, and observation streams. The existing Task record stores
+the handle; there is no second lifecycle or mapping store. Internal Task APIs
+never guess whether one string is a handle or a TaskID: the model boundary
+resolves the handle once, then passes the TaskID downward.
+
+`agent-sdk/task/stream` is the reusable process-local observation contract for
+an existing Task. Its infrastructure address is `(SessionID, TaskID)`;
+`TerminalID` and turn IDs describe the current Task turn but are not resources.
+Continue keeps the Task and its absolute event cursor, resets only the
+current-turn result aggregator, and publishes another explicit turn terminal
+on the same stream.
+Command bytes retain a 64 KiB suffix. Subagent frames retain at most 1,024
+frames or 4 MiB. Reads older than either retained lower bound report a typed
+gap. `Running=false`, EOF, or an unavailable source is never completion
+evidence; only `completed`, `failed`, `cancelled`, `interrupted`, `terminated`,
+or `unknown_outcome` is terminal.
+
+These buffers are not persistence. Durable Task state and canonical result stay
+in the existing Task store, while the Session remains the only product
+lifecycle and parent model-context container. The SDK defines no ExecutionID,
+execution directory, output journal, or product authorization surface.
 
 The SDK may define neutral endpoint, controller, participant, cancellation,
 transfer, and recovery contracts. Control owns the handoff operation:

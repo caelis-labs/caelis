@@ -64,12 +64,13 @@ type Runner struct {
 }
 
 type childRun struct {
-	anchor delegation.Anchor
-	client *client.Client
-	taskID string
-	sink   stream.Sink
-	ctx    context.Context
-	cancel context.CancelFunc
+	anchor    delegation.Anchor
+	agentName string
+	client    *client.Client
+	taskID    string
+	sink      stream.Sink
+	ctx       context.Context
+	cancel    context.CancelFunc
 
 	mu             sync.RWMutex
 	state          delegation.State
@@ -122,6 +123,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		sink:      spawn.Streams,
 		updatedAt: r.clock(),
 		done:      make(chan struct{}),
+		agentName: strings.TrimSpace(cfg.Name),
 	}
 	detachedCtx := detachedChildContext(ctx)
 	childCtx, childCancel := context.WithCancel(detachedCtx)
@@ -182,7 +184,6 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 	anchor := delegation.Anchor{
 		TaskID:    strings.TrimSpace(spawn.TaskID),
 		SessionID: strings.TrimSpace(sessionResp.SessionID),
-		Agent:     cfg.Name,
 		AgentID:   agentID,
 	}
 	run.anchor = anchor
@@ -237,9 +238,9 @@ func (r *Runner) resolveSpawnConfig(ctx context.Context, spawn subagent.SpawnCon
 			}
 			return cfg, nil
 		}
-		return r.registry.Resolve(req.Target.ExecutionAgent())
+		return r.registry.Resolve(strings.TrimSpace(placement.Agent))
 	case "":
-		return r.registry.Resolve(req.Target.ExecutionAgent())
+		return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: placement is required")
 	default:
 		return AgentConfig{}, fmt.Errorf("internal/acpagentbridge/subagent: unsupported placement kind %q", placement.Kind)
 	}
@@ -634,7 +635,7 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 		Source: "acp_subagent",
 		Controller: session.ControllerRef{
 			Kind: session.ControllerKindACP,
-			ID:   strings.TrimSpace(firstNonEmpty(run.anchor.Agent, run.anchor.AgentID)),
+			ID:   strings.TrimSpace(firstNonEmpty(run.agentName, run.anchor.AgentID)),
 		},
 		Participant: session.ParticipantRef{
 			ID:           strings.TrimSpace(firstNonEmpty(run.anchor.AgentID, run.taskID, run.anchor.TaskID)),
@@ -649,7 +650,7 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 	actor := session.ActorRef{
 		Kind: session.ActorKindParticipant,
 		ID:   strings.TrimSpace(firstNonEmpty(run.anchor.AgentID, run.taskID, run.anchor.TaskID)),
-		Name: strings.TrimSpace(firstNonEmpty(run.anchor.Agent, run.anchor.AgentID)),
+		Name: strings.TrimSpace(firstNonEmpty(run.agentName, run.anchor.AgentID)),
 	}
 	opts := acpingress.Options{
 		At:         at,
@@ -662,7 +663,7 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 				"runtime": map[string]any{
 					"subagent": map[string]any{
 						"task_id":    strings.TrimSpace(firstNonEmpty(run.taskID, run.anchor.TaskID)),
-						"agent":      strings.TrimSpace(run.anchor.Agent),
+						"agent":      strings.TrimSpace(run.agentName),
 						"agent_id":   strings.TrimSpace(run.anchor.AgentID),
 						"session_id": strings.TrimSpace(firstNonEmpty(env.SessionID, run.anchor.SessionID)),
 					},

@@ -8,11 +8,8 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
 func TestTurnIdentityMatchesKnownIDs(t *testing.T) {
@@ -60,7 +57,7 @@ func TestTurnIdentityMatchesKnownIDs(t *testing.T) {
 
 func TestBrokerHoldsSourceTerminalUntilProducerChannelCloses(t *testing.T) {
 	handle := newBarrierTestHandle()
-	broker := New(handle, nil)
+	broker := New(handle)
 	events := broker.Events()
 	handle.events <- eventstream.TurnCompleted(handle.HandleID(), handle.RunID(), handle.TurnID(), time.Now())
 
@@ -97,12 +94,88 @@ func TestBrokerApprovalSettlementDoesNotReplaceTurnTerminal(t *testing.T) {
 	}
 	close(handle.events)
 
-	got := collectBrokerBarrierEvents(New(handle, nil).Events())
+	got := collectBrokerBarrierEvents(New(handle).Events())
 	if len(got) != 2 || got[0].ApprovalRequestID != "approval-1" {
 		t.Fatalf("events = %#v, want approval settlement followed by Turn terminal", got)
 	}
 	if !eventstream.IsTurnTerminalLifecycle(got[1]) || got[1].ApprovalRequestID != "" {
 		t.Fatalf("last event = %#v, want independent Turn terminal", got[1])
+	}
+}
+
+func TestBrokerKeepsSubagentControlFactsOutOfTaskStreamFilter(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name string
+		env  eventstream.Envelope
+	}{
+		{
+			name: "permission request",
+			env: eventstream.Envelope{
+				Kind: eventstream.KindRequestPermission,
+			},
+		},
+		{
+			name: "approval review",
+			env: eventstream.Envelope{
+				Kind:           eventstream.KindApprovalReview,
+				ApprovalReview: &eventstream.ApprovalReview{Status: "in_progress"},
+			},
+		},
+		{
+			name: "approval settlement",
+			env: eventstream.Envelope{
+				Kind:              eventstream.KindLifecycle,
+				ApprovalRequestID: "approval-1",
+				Lifecycle:         &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
+			},
+		},
+		{
+			name: "participant lifecycle",
+			env: eventstream.Envelope{
+				Kind:        eventstream.KindParticipant,
+				Participant: &eventstream.Participant{State: "attached"},
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handle := newBarrierTestHandle()
+			tt.env.SessionID = handle.ref.SessionID
+			tt.env.HandleID = handle.HandleID()
+			tt.env.RunID = handle.RunID()
+			tt.env.TurnID = handle.TurnID()
+			tt.env.Scope = eventstream.ScopeSubagent
+			handle.events <- tt.env
+			close(handle.events)
+
+			got := collectBrokerBarrierEvents(New(handle).Events())
+			if len(got) != 2 || got[0].Kind != tt.env.Kind || !eventstream.IsTurnTerminalLifecycle(got[1]) {
+				t.Fatalf("events = %#v, want child control fact followed by Turn terminal", got)
+			}
+		})
+	}
+}
+
+func TestBrokerDropsSubagentTaskStreamObservation(t *testing.T) {
+	t.Parallel()
+
+	handle := newBarrierTestHandle()
+	handle.events <- eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: handle.ref.SessionID,
+		HandleID:  handle.HandleID(),
+		RunID:     handle.RunID(),
+		TurnID:    handle.TurnID(),
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "task-1",
+		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+	}
+	close(handle.events)
+
+	got := collectBrokerBarrierEvents(New(handle).Events())
+	if len(got) != 1 || !eventstream.IsTurnTerminalLifecycle(got[0]) {
+		t.Fatalf("events = %#v, want only Turn terminal", got)
 	}
 }
 
@@ -114,7 +187,7 @@ func TestBrokerLateAttachDoesNotPreserveSuccessAfterDrainCancellation(t *testing
 
 	// The producer is already complete when the Control delivery broker attaches.
 	// Buffered cancellation truth must replace the earlier success candidate.
-	got := collectBrokerBarrierEvents(New(handle, nil).Events())
+	got := collectBrokerBarrierEvents(New(handle).Events())
 	if len(got) != 2 || got[0].Kind != eventstream.KindError || got[1].Lifecycle == nil ||
 		got[1].Lifecycle.State != eventstream.LifecycleStateCancelled {
 		t.Fatalf("late attach events = %#v, want error then cancelled terminal", got)
@@ -137,7 +210,7 @@ func TestBrokerRejectsDurableMainEnvelopeWithoutPosition(t *testing.T) {
 	}
 	close(handle.events)
 
-	events := collectBrokerBarrierEvents(New(handle, nil).Events())
+	events := collectBrokerBarrierEvents(New(handle).Events())
 	if len(events) != 2 || events[0].Kind != eventstream.KindError || events[0].Err == nil {
 		t.Fatalf("invalid ingress events = %#v, want error and failed terminal", events)
 	}
@@ -147,45 +220,6 @@ func TestBrokerRejectsDurableMainEnvelopeWithoutPosition(t *testing.T) {
 	if events[1].Lifecycle == nil || events[1].Lifecycle.State != eventstream.LifecycleStateFailed {
 		t.Fatalf("invalid ingress terminal = %#v, want failed", events[1])
 	}
-}
-
-func TestBrokerRejectsChildRecorderEventWithoutDurablePosition(t *testing.T) {
-	recorder := internalcontrolclient.NewChildRecorder(zeroPositionAppender{})
-	broker := New(nil, nil, recorder)
-	ref := stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "terminal-1"}
-	err := broker.acceptSourceSnapshot(context.Background(), acpprojector.StreamRequest{
-		SessionRef: session.SessionRef{SessionID: "session-1"},
-		CallID:     "spawn-call-1",
-		ToolName:   "SPAWN",
-		Ref:        ref,
-	}, stream.Snapshot{
-		Ref:     ref,
-		Running: true,
-		Cursor:  stream.Cursor{Events: 1},
-		Frames: []stream.Frame{{
-			Ref:     ref,
-			Running: true,
-			Event: &session.Event{
-				Type:       session.EventTypeLifecycle,
-				Lifecycle:  &session.EventLifecycle{Status: "running"},
-				Visibility: session.VisibilityCanonical,
-			},
-		}},
-	}, 0)
-	if err == nil || !isIngressDeliveryError(err) || !strings.Contains(err.Error(), "child recorder returned an event without a durable position") {
-		t.Fatalf("acceptSourceSnapshot() error = %v, want durable child position failure", err)
-	}
-	select {
-	case batch := <-broker.batches:
-		t.Fatalf("invalid stored child batch was published: %#v", batch)
-	default:
-	}
-}
-
-type zeroPositionAppender struct{}
-
-func (zeroPositionAppender) AppendEvent(_ context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	return session.CloneEvent(req.Event), nil
 }
 
 type barrierTestHandle struct {

@@ -57,8 +57,12 @@ const (
 type Anchor struct {
 	TaskID    string `json:"task_id,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
-	Agent     string `json:"agent,omitempty"`
-	AgentID   string `json:"agent_id,omitempty"`
+	// Agent is legacy diagnostic data only. Runtime execution and validation
+	// must use the frozen Target.Placement and never compare this value with a
+	// model-visible selector.
+	// Deprecated: ignored by Runtime and adapters.
+	Agent   string `json:"agent,omitempty"`
+	AgentID string `json:"agent_id,omitempty"`
 }
 
 // Request describes one delegated child prompt. System-controlled execution
@@ -173,15 +177,4 @@ func NormalizeTarget(in Target) Target {
 		Selector:  strings.TrimSpace(in.Selector),
 		Placement: NormalizePlacement(in.Placement),
 	}
-}
-
-// ExecutionAgent returns the assembled Agent identity used for a placement.
-// Model placements use the stable selector because their concrete launch
-// declaration is resolved dynamically by the host.
-func (t Target) ExecutionAgent() string {
-	t = NormalizeTarget(t)
-	if t.Placement.Kind == PlacementAgent && t.Placement.Agent != "" {
-		return t.Placement.Agent
-	}
-	return t.Selector
 }

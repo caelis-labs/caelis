@@ -245,6 +245,9 @@ func (b *FeedBroker) primeStorageLocked(
 			if event.Seq > observedSeq {
 				observedSeq = event.Seq
 			}
+			if suppressHistoricalChildStreamMirror(event) {
+				continue
+			}
 			base := acpprojector.EnvelopeBaseFromSessionEvent(b.ref, event, acpprojector.SessionEventTransport{})
 			for _, envelope := range acpprojector.ProjectSessionEventEnvelope(base, event) {
 				if envelope.Position == nil || envelope.Position.Durable == nil {

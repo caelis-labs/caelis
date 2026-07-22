@@ -14,6 +14,7 @@ import (
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
@@ -22,14 +23,16 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 		return nil, err
 	}
 	return runtimeacp.NewGatewayAgent(runtimeacp.GatewayAgentConfig{
-		Runtime:          deps.Runtime,
-		Sessions:         deps.Sessions,
-		Resolver:         deps.Resolver,
-		ApprovalReviewer: deps.ApprovalReviewer,
-		Assembly:         deps.Assembly,
-		AppName:          deps.AppName,
-		UserID:           deps.UserID,
-		WorkspaceKey:     strings.TrimSpace(stack.Workspace.Key),
+		Runtime:             deps.Runtime,
+		Sessions:            deps.Sessions,
+		Resolver:            deps.Resolver,
+		ApprovalReviewer:    deps.ApprovalReviewer,
+		Assembly:            deps.Assembly,
+		AppName:             deps.AppName,
+		UserID:              deps.UserID,
+		WorkspaceKey:        strings.TrimSpace(stack.Workspace.Key),
+		TaskStreams:         deps.TaskStreams,
+		TaskStreamPrincipal: taskstream.Principal{ID: deps.UserID},
 		SurfaceBuilder: func(req runtimeacp.SurfaceRequest) runtimeacp.Surface {
 			return stack.ACPSurface(req.Modes, req.UseFallbackModes, req.Config)
 		},

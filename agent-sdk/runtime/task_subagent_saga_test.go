@@ -103,10 +103,10 @@ func (s *sagaTaskStore) ListSession(_ context.Context, ref session.SessionRef) (
 	return out, nil
 }
 
-func (s *sagaTaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.SessionRef, kind taskapi.Kind, handle string) (*taskapi.Entry, error) {
+func (s *sagaTaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.SessionRef, handle string) (*taskapi.Entry, error) {
 	entries, _ := s.ListSession(ctx, ref)
 	for _, entry := range entries {
-		if entry.Kind == kind && taskSpecString(entry.Spec, "handle") == handle {
+		if taskapi.NormalizeHandle(firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"))) == taskapi.NormalizeHandle(handle) {
 			return entry, nil
 		}
 	}
@@ -123,7 +123,9 @@ type placementSagaRunner struct{ sagaRunner }
 
 func (r *placementSagaRunner) SpawnTarget(_ context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (delegation.Anchor, delegation.Result, error) {
 	r.spawnCalls++
-	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-saga", Agent: req.Target.ExecutionAgent(), AgentID: "child-agent-saga"}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted, Result: "saga result"}, nil
+	// The runner may report its concrete backend Agent identity. Runtime must
+	// not compare it with the public Target.Selector ("orbit" in the test).
+	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-saga", Agent: "backend-agent", AgentID: "child-agent-saga"}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted, Result: "saga result"}, nil
 }
 
 func (r *sagaRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
@@ -912,8 +914,8 @@ func (s *upsertOnlySagaStore) Get(ctx context.Context, taskID string) (*taskapi.
 func (s *upsertOnlySagaStore) ListSession(ctx context.Context, ref session.SessionRef) ([]*taskapi.Entry, error) {
 	return s.base.ListSession(ctx, ref)
 }
-func (s *upsertOnlySagaStore) GetSessionTaskByHandle(ctx context.Context, ref session.SessionRef, kind taskapi.Kind, handle string) (*taskapi.Entry, error) {
-	return s.base.GetSessionTaskByHandle(ctx, ref, kind, handle)
+func (s *upsertOnlySagaStore) GetSessionTaskByHandle(ctx context.Context, ref session.SessionRef, handle string) (*taskapi.Entry, error) {
+	return s.base.GetSessionTaskByHandle(ctx, ref, handle)
 }
 
 type countingSagaRunner struct{ spawnCalls atomic.Int32 }

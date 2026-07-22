@@ -64,7 +64,7 @@ func canonicalTaskBatchOutputs(value any) ([]map[string]any, bool) {
 }
 
 func canonicalTaskBatchOutputSyncable(output map[string]any) bool {
-	if len(output) == 0 || strings.TrimSpace(taskStringValue(output["task_id"])) == "" {
+	if len(output) == 0 || strings.TrimSpace(firstNonEmpty(taskStringValue(output["handle"]), taskStringValue(output["task_id"]))) == "" {
 		return false
 	}
 	if _, hasError := output["error"]; hasError && strings.TrimSpace(taskStringValue(output["state"])) == "" {
@@ -75,10 +75,29 @@ func canonicalTaskBatchOutputSyncable(output map[string]any) bool {
 
 func (tm *taskRuntime) syncCanonicalToolOutput(ctx context.Context, ref session.SessionRef, toolName string, targetKind string, output map[string]any, event *session.Event) error {
 	taskID := firstNonEmpty(
-		taskStringValue(output["task_id"]),
 		taskRuntimeMetaString(event.Meta, "task", "task_id"),
-		taskRuntimeMetaString(event.Meta, "tool", "target_id"),
 	)
+	// Pre-TaskHandle canonical history exposed the internal TaskID in task_id.
+	// Keep that history replayable without treating opaque IDs as public
+	// handles. New results carry handle and keep TaskID in runtime metadata.
+	if taskID == "" {
+		legacyTaskID := strings.TrimSpace(taskStringValue(output["task_id"]))
+		if legacyTaskID != "" {
+			if entry, err := tm.store.Get(ctx, legacyTaskID); err == nil && entry != nil && strings.TrimSpace(entry.Session.SessionID) == strings.TrimSpace(ref.SessionID) {
+				taskID = legacyTaskID
+			}
+		}
+	}
+	if taskID == "" {
+		handle := taskStringValue(output["handle"])
+		if handle != "" {
+			identity, err := tm.resolveTaskHandle(ctx, ref, handle)
+			if err != nil {
+				return err
+			}
+			taskID = identity.taskID
+		}
+	}
 	if taskID == "" {
 		return nil
 	}
@@ -135,11 +154,6 @@ func (tm *taskRuntime) storedTaskEntry(ctx context.Context, ref session.SessionR
 	}
 	if entry, err := tm.store.Get(ctx, taskID); err == nil && entry != nil && storedTaskEntryMatches(entry, ref, kind) {
 		return entry, true
-	}
-	if kind == taskapi.KindSubagent {
-		if entry, err := tm.lookupStoredSubagentByHandle(ctx, ref, taskID); err == nil && entry != nil && storedTaskEntryMatches(entry, ref, kind) {
-			return entry, true
-		}
 	}
 	return nil, false
 }
@@ -243,7 +257,7 @@ func canonicalTaskHistoryOutputs(event *session.Event) []canonicalTaskHistoryOut
 		return out
 	}
 	output := session.CloneState(event.Tool.Output)
-	if len(output) == 0 || strings.TrimSpace(taskStringValue(output["task_id"])) == "" {
+	if len(output) == 0 || strings.TrimSpace(firstNonEmpty(taskStringValue(output["handle"]), taskStringValue(output["task_id"]))) == "" {
 		return nil
 	}
 	return []canonicalTaskHistoryOutput{{
@@ -291,7 +305,7 @@ func addCanonicalTaskMatchKey(keys map[string]bool, kind taskapi.Kind, value str
 	}
 	keys[value] = true
 	if kind == taskapi.KindSubagent {
-		if handle := normalizeSubagentHandle(value); handle != "" {
+		if handle := normalizeTaskHandle(value); handle != "" {
 			keys[handle] = true
 		}
 	}
@@ -306,7 +320,7 @@ func canonicalTaskMatchKeyExists(keys map[string]bool, kind taskapi.Kind, value 
 		return true
 	}
 	if kind == taskapi.KindSubagent {
-		return keys[normalizeSubagentHandle(value)]
+		return keys[normalizeTaskHandle(value)]
 	}
 	return false
 }

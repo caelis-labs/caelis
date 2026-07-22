@@ -20,6 +20,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 // BuildAgentSpecFunc assembles the runtime-facing agent spec for one ACP
@@ -48,6 +49,8 @@ type Config struct {
 	Commands              acp.CommandProvider
 	PromptRouterFactory   PromptRouterFactory
 	PromptCaps            acp.PromptCapabilitiesProvider
+	TaskStreams           taskstream.Service
+	TaskStreamPrincipal   taskstream.Principal
 	ApprovalReviewer      approval.Reviewer
 	ApprovalModelResolver ApprovalModelResolver
 	AppName               string
@@ -71,6 +74,8 @@ type RuntimeAgent struct {
 	commands              acp.CommandProvider
 	promptRouterFactory   PromptRouterFactory
 	promptCaps            acp.PromptCapabilitiesProvider
+	taskStreams           taskstream.Service
+	taskStreamPrincipal   taskstream.Principal
 	approvalReviewer      approval.Reviewer
 	approvalModelResolver ApprovalModelResolver
 	appName               string
@@ -81,6 +86,7 @@ type RuntimeAgent struct {
 	mu           sync.Mutex
 	cancels      map[string]context.CancelFunc
 	terminalRefs map[string]stream.Ref
+	taskMuxes    map[string]map[*acpTaskStreamMux]struct{}
 }
 
 // New constructs one runtime-backed ACP agent.
@@ -135,6 +141,8 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		commands:              cfg.Commands,
 		promptRouterFactory:   cfg.PromptRouterFactory,
 		promptCaps:            cfg.PromptCaps,
+		taskStreams:           cfg.TaskStreams,
+		taskStreamPrincipal:   cfg.TaskStreamPrincipal,
 		approvalReviewer:      cfg.ApprovalReviewer,
 		approvalModelResolver: cfg.ApprovalModelResolver,
 		appName:               appName,
@@ -143,6 +151,7 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		agentInfo:             normalizeAgentInfo(cfg.AgentInfo, appName),
 		cancels:               map[string]context.CancelFunc{},
 		terminalRefs:          map[string]stream.Ref{},
+		taskMuxes:             map[string]map[*acpTaskStreamMux]struct{}{},
 	}, nil
 }
 
@@ -340,6 +349,7 @@ func (a *RuntimeAgent) CloseSession(ctx context.Context, req acp.CloseSessionReq
 	a.mu.Lock()
 	delete(a.cancels, sessionID)
 	a.mu.Unlock()
+	a.closeACPTaskStreamMuxes(sessionID)
 	return acp.CloseSessionResponse{}, nil
 }
 

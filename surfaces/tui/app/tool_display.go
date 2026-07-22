@@ -626,7 +626,7 @@ func genericToolArgs(raw map[string]any) string {
 
 func taskControlDisplay(raw map[string]any) string {
 	action := strings.ToUpper(strings.TrimSpace(asString(raw["action"])))
-	handle := taskHandleDisplay(asString(raw["task_id"]))
+	handle := taskHandleDisplay(firstNonEmpty(asString(raw["handle"]), asString(raw["task_id"])))
 	switch action {
 	case "WAIT":
 		duration := ""
@@ -730,8 +730,8 @@ func taskControlDisplayFallback(values ...string) string {
 	return ""
 }
 
-func taskDisplayArgsWithTaskID(args string, taskID string) string {
-	handle := taskHandleDisplay(taskID)
+func taskDisplayArgsWithHandle(args string, taskHandle string) string {
+	handle := taskHandleDisplay(taskHandle)
 	if handle == "" {
 		return args
 	}

@@ -423,13 +423,13 @@ func isSubagentTaskWriteEvent(events []SubagentEvent, idx int) bool {
 	if strings.EqualFold(strings.TrimSpace(ev.TaskTargetKind), "subagent") {
 		return true
 	}
-	taskID := strings.TrimSpace(ev.TaskID)
+	taskID := strings.TrimSpace(ev.TaskHandle)
 	if taskID == "" {
 		return false
 	}
 	for i := idx - 1; i >= 0; i-- {
 		prev := events[i]
-		if prev.Kind != SEToolCall || strings.TrimSpace(prev.TaskID) != taskID {
+		if prev.Kind != SEToolCall || strings.TrimSpace(prev.TaskHandle) != taskID {
 			continue
 		}
 		if strings.EqualFold(toolSemanticName(prev.Name, prev.ToolKind), "SPAWN") {

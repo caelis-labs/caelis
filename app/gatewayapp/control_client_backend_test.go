@@ -128,7 +128,7 @@ func TestControlParticipantPlacementStoreFailureRemainsUnknown(t *testing.T) {
 	}
 }
 
-func TestAttachControlClientHandleUsesSharedTaskIngress(t *testing.T) {
+func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 	t.Parallel()
 
 	sessions := sessionmemory.NewStore(sessionmemory.Config{
@@ -211,13 +211,10 @@ func TestAttachControlClientHandleUsesSharedTaskIngress(t *testing.T) {
 	}
 	first := receiveControlClientIngressEnvelope(t, subscription.Events())
 	assertControlClientIngressTool(t, first, "run-command-1")
-	waitControlClientIngressSignal(t, taskStream.started)
-	close(taskStream.release)
-
-	projected := receiveControlClientIngressEnvelope(t, subscription.Events())
-	assertControlClientIngressTool(t, projected, "run-command-1")
-	if projected.Delivery == nil || projected.Delivery.Mode != eventstream.DeliveryTransient {
-		t.Fatalf("task stream delivery = %#v, want transient", projected.Delivery)
+	select {
+	case <-taskStream.started:
+		t.Fatal("Session ingress read the Task stream")
+	case <-time.After(50 * time.Millisecond):
 	}
 
 	mainEvents <- eventstream.TurnCompleted(handle.HandleID(), handle.RunID(), handle.TurnID(), time.Now())

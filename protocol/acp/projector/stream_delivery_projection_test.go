@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
-func TestProjectStreamFrameSeparatesDelegatedSemanticsFromCommandTerminalOutput(t *testing.T) {
+func TestProjectTaskStreamFrameSeparatesDelegatedSemanticsFromCommandTerminalOutput(t *testing.T) {
 	t.Parallel()
 
 	taskRequest := spawnStreamRequestForTest()
@@ -60,7 +60,7 @@ func TestProjectStreamFrameSeparatesDelegatedSemanticsFromCommandTerminalOutput(
 				Closed: true,
 				State:  "completed",
 			},
-			want: []streamFrameEnvelopeExpectation{{transient: true}},
+			want: []streamFrameEnvelopeExpectation{{parentCallID: "spawn-call-1", parentTool: "SPAWN", transient: true}},
 		},
 		{
 			name: "run command running",
@@ -93,9 +93,9 @@ func TestProjectStreamFrameSeparatesDelegatedSemanticsFromCommandTerminalOutput(
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			events := ProjectStreamFrame(tt.req, tt.frame)
+			events := ProjectTaskStreamFrame(tt.req, tt.frame)
 			if len(events) != len(tt.want) {
-				t.Fatalf("ProjectStreamFrame() returned %d events, want %d: %#v", len(events), len(tt.want), events)
+				t.Fatalf("ProjectTaskStreamFrame() returned %d events, want %d: %#v", len(events), len(tt.want), events)
 			}
 			for i, want := range tt.want {
 				assertStreamFrameEnvelopeExpectation(t, events[i], want)

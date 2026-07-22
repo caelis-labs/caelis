@@ -7,6 +7,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 type ACPAgentDependencies struct {
@@ -17,6 +18,7 @@ type ACPAgentDependencies struct {
 	Assembly         assembly.ResolvedAssembly
 	AppName          string
 	UserID           string
+	TaskStreams      taskstream.Service
 }
 
 func (s *Stack) ACPAgentDependencies() (ACPAgentDependencies, error) {
@@ -38,6 +40,7 @@ func (s *Stack) ACPAgentDependencies() (ACPAgentDependencies, error) {
 		Assembly:         s.runtime.Assembly,
 		AppName:          s.AppName,
 		UserID:           s.UserID,
+		TaskStreams:      s.taskStreams,
 	}
 	s.mu.RUnlock()
 	if deps.Runtime == nil {

@@ -62,31 +62,55 @@ func (tm *taskRuntime) resolveControlIdentity(ctx context.Context, ref session.S
 		tm.mu.RUnlock()
 		return taskControlIdentity{taskID: lookupID, kind: taskapi.KindSubagent}, nil
 	}
-	handle := normalizeSubagentHandle(lookupID)
-	var matchedID string
-	for taskID, candidate := range tm.subagents {
-		if candidate == nil || strings.TrimSpace(candidate.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) || normalizeSubagentHandle(candidate.handle) != handle {
-			continue
-		}
-		if matchedID != "" && matchedID != taskID {
-			tm.mu.RUnlock()
-			return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: subagent handle %q is ambiguous; use the task id", lookupID)
-		}
-		matchedID = taskID
-	}
 	tm.mu.RUnlock()
-	if matchedID != "" {
-		return taskControlIdentity{taskID: matchedID, kind: taskapi.KindSubagent}, nil
-	}
 	if tm.store == nil {
 		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task %q not found", lookupID)
 	}
 	entry, err := tm.store.Get(ctx, lookupID)
-	if err != nil || entry == nil {
-		entry, err = tm.lookupStoredSubagentByHandle(ctx, ref, lookupID)
-	}
 	if err != nil || entry == nil || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) {
 		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task %q not found", lookupID)
+	}
+	return taskControlIdentity{taskID: strings.TrimSpace(entry.TaskID), kind: entry.Kind}, nil
+}
+
+// resolveTaskHandle is the single user/model boundary that translates one
+// Session-scoped public Handle into the TaskID consumed by Runtime internals.
+// No low-level Task lookup may fall back between the two identity domains.
+func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.SessionRef, rawHandle string) (taskControlIdentity, error) {
+	handle := normalizeTaskHandle(rawHandle)
+	ref = session.NormalizeSessionRef(ref)
+	if handle == "" {
+		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task handle is required")
+	}
+	tm.mu.RLock()
+	var matched taskControlIdentity
+	for taskID, command := range tm.tasks {
+		if command == nil || strings.TrimSpace(command.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) || normalizeTaskHandle(command.handle) != handle {
+			continue
+		}
+		matched = taskControlIdentity{taskID: taskID, kind: taskapi.KindCommand}
+		break
+	}
+	for taskID, subagent := range tm.subagents {
+		if subagent == nil || strings.TrimSpace(subagent.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) || normalizeTaskHandle(subagent.handle) != handle {
+			continue
+		}
+		if matched.taskID != "" && matched.taskID != taskID {
+			tm.mu.RUnlock()
+			return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task handle %q is ambiguous", handle)
+		}
+		matched = taskControlIdentity{taskID: taskID, kind: taskapi.KindSubagent}
+	}
+	tm.mu.RUnlock()
+	if matched.taskID != "" {
+		return matched, nil
+	}
+	if tm.store == nil {
+		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task handle %q not found", handle)
+	}
+	entry, err := tm.store.GetSessionTaskByHandle(ctx, ref, handle)
+	if err != nil || entry == nil || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) || normalizeTaskHandle(entry.Handle) != handle {
+		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task handle %q not found", handle)
 	}
 	return taskControlIdentity{taskID: strings.TrimSpace(entry.TaskID), kind: entry.Kind}, nil
 }

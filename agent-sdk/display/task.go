@@ -2,10 +2,14 @@ package display
 
 import "strings"
 
-func ToolTaskID(input map[string]any, output map[string]any, meta map[string]any) string {
+// ToolTaskHandle returns the public Session-scoped Task identity used in
+// model-visible tool input and output. Legacy task_id payloads are accepted
+// only here so historical transcripts remain readable.
+func ToolTaskHandle(input map[string]any, output map[string]any, meta map[string]any) string {
 	return firstNonEmpty(
-		MetaString(meta, "caelis", "runtime", "tool", "target_id"),
+		MetaString(meta, "caelis", "runtime", "tool", "target_handle"),
 		MapString(output, "handle"),
+		MapString(input, "handle"),
 		MapString(output, "task_id"),
 		MapString(input, "task_id"),
 	)

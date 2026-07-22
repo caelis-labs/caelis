@@ -98,10 +98,12 @@ type Event struct {
 	// ToolOutputGapBefore is a render-only notice that exact terminal bytes
 	// before this event are unavailable. It is never part of ToolOutput.
 	ToolOutputGapBefore bool
-	ToolTaskID          string
-	ToolTaskAction      string
-	ToolTaskInput       string
-	ToolTaskTargetKind  string
+	// ToolTaskHandle is the Session-scoped public identity shown to users. It
+	// must never carry the opaque TaskID used by Task stream endpoints.
+	ToolTaskHandle     string
+	ToolTaskAction     string
+	ToolTaskInput      string
+	ToolTaskTargetKind string
 
 	PlanEntries []PlanEntry
 

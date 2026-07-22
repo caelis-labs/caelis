@@ -445,6 +445,9 @@ func (it *durableEnvelopeIterator) takePage() (session.EventPage, error) {
 func (it *durableEnvelopeIterator) projectPage(page session.EventPage) ([]eventstream.Envelope, error) {
 	out := make([]eventstream.Envelope, 0, len(page.Events))
 	for _, event := range page.Events {
+		if suppressHistoricalChildStreamMirror(event) {
+			continue
+		}
 		base := acpprojector.EnvelopeBaseFromSessionEvent(it.plan.broker.ref, event, acpprojector.SessionEventTransport{})
 		for _, envelope := range acpprojector.ProjectSessionEventEnvelope(base, event) {
 			if envelope.Position == nil || envelope.Position.Durable == nil ||

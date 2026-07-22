@@ -14,7 +14,7 @@ import (
 	"unicode"
 )
 
-const generatorVersion = "caelis-client-protocol-gen/v2.4.0"
+const generatorVersion = "caelis-client-protocol-gen/v2.5.0"
 
 var check = flag.Bool("check", false, "verify generated output without writing")
 
@@ -104,13 +104,14 @@ func validateSpec(spec openAPISpec) error {
 	if spec.OpenAPI != "3.1.0" {
 		return fmt.Errorf("openapi version = %q, want 3.1.0", spec.OpenAPI)
 	}
-	if len(operationIDs(spec)) != 15 {
-		return fmt.Errorf("operation count = %d, want 15", len(operationIDs(spec)))
+	if len(operationIDs(spec)) != 18 {
+		return fmt.Errorf("operation count = %d, want 18", len(operationIDs(spec)))
 	}
 	required := []string{
 		"CreateSessionRequest", "CloseSessionRequest", "PromptRequest", "SteerRequest", "CancelRequest",
 		"ResolveApprovalRequest", "AttachParticipantRequest", "PromptParticipantRequest", "CancelParticipantRequest",
 		"DetachParticipantRequest", "HandoffRequest", "CommandResult", "SessionState", "Envelope", "EventBatch",
+		"TaskDescriptor", "TaskList", "TaskResumeBoundary", "TaskEventBatch",
 	}
 	for _, name := range required {
 		if spec.Components.Schemas[name] == nil {

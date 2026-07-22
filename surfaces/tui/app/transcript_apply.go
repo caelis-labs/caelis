@@ -447,14 +447,14 @@ func (m *Model) applyAnchoredSubagentNarrativeToTool(event TranscriptEvent) (tea
 	toolName := strings.TrimSpace(event.AnchorToolName)
 	meta := ToolUpdateMeta{
 		ToolKind:        "execute",
-		TaskID:          strings.TrimSpace(event.ScopeID),
+		TaskHandle:      strings.TrimSpace(event.ScopeID),
 		MessageID:       strings.TrimSpace(event.MessageID),
 		OutputNarrative: true,
 	}
 	// A later Turn may observe the same physical child through TASK write. Keep
 	// that continuation in the current panel instead of reopening the original
 	// completed Spawn panel solely because ParentTool still names its owner.
-	if block := m.activeMainTaskWriteBlock(meta.TaskID); block != nil {
+	if block := m.activeMainTaskWriteBlock(meta.TaskHandle); block != nil {
 		block.UpdateToolWithMeta(callID, toolName, "", text, false, false, meta)
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
@@ -491,7 +491,7 @@ func (m *Model) activeMainTaskWriteBlock(taskID string) *MainACPTurnBlock {
 	}
 	for i := len(block.Events) - 1; i >= 0; i-- {
 		ev := block.Events[i]
-		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskID) != taskID {
+		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskHandle) != taskID {
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(ev.Name), "TASK") && taskEventAction(ev) == "write" {
@@ -554,7 +554,7 @@ func transcriptParticipantTurnKey(event TranscriptEvent) string {
 
 func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 	return ToolUpdateMeta{
-		TaskID:          event.ToolTaskID,
+		TaskHandle:      event.ToolTaskHandle,
 		TaskAction:      event.ToolTaskAction,
 		TaskInput:       event.ToolTaskInput,
 		TaskTargetKind:  event.ToolTaskTargetKind,

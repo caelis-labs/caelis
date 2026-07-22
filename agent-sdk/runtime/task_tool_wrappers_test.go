@@ -151,14 +151,14 @@ func TestRuntimeTaskWaitRejectsTimeoutMSAlias(t *testing.T) {
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
-	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
+	handle, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	if strings.TrimSpace(handle) == "" {
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
 	}
 
 	raw := mustJSONRaw(map[string]any{
 		"action":     "wait",
-		"task_id":    taskID,
+		"handle":     handle,
 		"timeout_ms": "45000",
 	})
 	_, err := (runtimeTaskTool{

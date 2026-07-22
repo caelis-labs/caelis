@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -106,17 +107,26 @@ func NewModel(cfg Config) *Model {
 		OverlayState: OverlayState{
 			palette: palette,
 		},
-		selectionStart:      textSelectionPoint{line: -1, col: -1},
-		selectionEnd:        textSelectionPoint{line: -1, col: -1},
-		inputSelectionStart: textSelectionPoint{line: -1, col: -1},
-		inputSelectionEnd:   textSelectionPoint{line: -1, col: -1},
-		fixedSelectionArea:  fixedSelectionNone,
-		fixedSelectionStart: textSelectionPoint{line: -1, col: -1},
-		fixedSelectionEnd:   textSelectionPoint{line: -1, col: -1},
-		inputLatencyWindow:  make([]time.Duration, 0, 128),
-		diag:                newDiagnostics(),
-		focused:             true,
-		welcomeCardPending:  cfg.ShowWelcomeCard,
+		selectionStart:           textSelectionPoint{line: -1, col: -1},
+		selectionEnd:             textSelectionPoint{line: -1, col: -1},
+		inputSelectionStart:      textSelectionPoint{line: -1, col: -1},
+		inputSelectionEnd:        textSelectionPoint{line: -1, col: -1},
+		fixedSelectionArea:       fixedSelectionNone,
+		fixedSelectionStart:      textSelectionPoint{line: -1, col: -1},
+		fixedSelectionEnd:        textSelectionPoint{line: -1, col: -1},
+		inputLatencyWindow:       make([]time.Duration, 0, 128),
+		diag:                     newDiagnostics(),
+		focused:                  true,
+		welcomeCardPending:       cfg.ShowWelcomeCard,
+		taskStreamWanted:         map[string]bool{},
+		taskStreamTokens:         map[string]uint64{},
+		taskStreamSubscriptions:  map[string]taskstream.Subscription{},
+		taskStreamCursors:        map[string]string{},
+		taskStreamIDsByHandle:    map[string]string{},
+		taskStreamHandlesByID:    map[string]string{},
+		taskStreamResolveTokens:  map[string]uint64{},
+		taskStreamResolveRetries: map[string]int{},
+		taskStreamRetries:        map[string]int{},
 	}
 	m.help = help.New()
 	m.applyTheme(theme)
@@ -212,6 +222,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.flushPendingDeferredBatches()
 
 	switch typed := msg.(type) {
+	case taskStreamOpenedMsg:
+		return m.handleTaskStreamOpened(typed)
+
+	case taskStreamBatchMsg:
+		return m.handleTaskStreamBatch(typed)
+
+	case taskStreamClosedMsg:
+		return m.handleTaskStreamClosed(typed)
+
+	case taskStreamResolvedMsg:
+		return m.handleTaskStreamResolved(typed)
+
+	case taskStreamResolveRetryMsg:
+		return m.handleTaskStreamResolveRetry(typed)
+
+	case taskStreamSubscribeRetryMsg:
+		return m.handleTaskStreamSubscribeRetry(typed)
+
 	case tea.WindowSizeMsg:
 		m.width = typed.Width
 		m.height = typed.Height

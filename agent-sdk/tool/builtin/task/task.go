@@ -11,7 +11,7 @@ import (
 
 const ToolName = names.Task
 
-var allowedArgs = []string{"action", "task_id", "input", "yield_time_ms"}
+var allowedArgs = []string{"action", "handle", "input", "yield_time_ms"}
 
 func ValidateArgs(args map[string]any) error {
 	return tool.RejectUnknownArgs(args, allowedArgs...)
@@ -36,17 +36,17 @@ func (Tool) Definition() tool.Definition {
 					"enum":        []string{"wait", "write", "cancel"},
 					"description": "Control action: wait observes for at most one minute, write delivers input, cancel stops.",
 				},
-				"task_id": map[string]any{
+				"handle": map[string]any{
 					"type":        "string",
 					"minLength":   1,
-					"description": "One or more task handles from returned JSON task_id fields. Separate multiple handles with commas.",
+					"description": "One or more Session-scoped handles returned by RunCommand or Spawn. Separate multiple handles with commas.",
 				},
 				"input": map[string]any{
 					"type":        "string",
 					"description": "Text for write. RunCommand receives terminal stdin; completed Spawn receives a follow-up prompt.",
 				},
 			},
-			"required":             []string{"action", "task_id"},
+			"required":             []string{"action", "handle"},
 			"additionalProperties": false,
 		},
 		Metadata: toolutil.AnnotationMetadata(false, true, false, true),

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -381,7 +380,7 @@ func TestTaskStoreNilReceiverReturnsErrors(t *testing.T) {
 	if _, err := store.ListSession(context.Background(), taskSessionRef("sess-1")); err == nil {
 		t.Fatal("ListSession(nil receiver) succeeded, want error")
 	}
-	if _, err := store.GetSessionTaskByHandle(context.Background(), taskSessionRef("sess-1"), task.KindSubagent, "reviewer"); err == nil {
+	if _, err := store.GetSessionTaskByHandle(context.Background(), taskSessionRef("sess-1"), "reviewer"); err == nil {
 		t.Fatal("GetSessionTaskByHandle(nil receiver) succeeded, want error")
 	}
 }
@@ -397,7 +396,7 @@ func TestTaskStoreGetSessionTaskByHandleUsesIndexedHandle(t *testing.T) {
 		Kind:    task.KindCommand,
 		Session: ref,
 		State:   task.StateCompleted,
-		Spec:    map[string]any{"handle": "reviewer"},
+		Handle:  "command-decoy",
 		Result:  map[string]any{"state": "completed"},
 	}); err != nil {
 		t.Fatalf("Upsert(command decoy) error = %v", err)
@@ -407,7 +406,7 @@ func TestTaskStoreGetSessionTaskByHandleUsesIndexedHandle(t *testing.T) {
 		Kind:    task.KindSubagent,
 		Session: taskSessionRef("sess-other"),
 		State:   task.StateCompleted,
-		Spec:    map[string]any{"handle": "reviewer"},
+		Handle:  "reviewer",
 		Result:  map[string]any{"state": "completed"},
 	}); err != nil {
 		t.Fatalf("Upsert(other session) error = %v", err)
@@ -417,13 +416,13 @@ func TestTaskStoreGetSessionTaskByHandleUsesIndexedHandle(t *testing.T) {
 		Kind:    task.KindSubagent,
 		Session: ref,
 		State:   task.StateCompleted,
-		Spec:    map[string]any{"handle": "Reviewer"},
+		Handle:  "Reviewer",
 		Result:  map[string]any{"state": "completed"},
 	}); err != nil {
 		t.Fatalf("Upsert(target) error = %v", err)
 	}
 
-	got, err := store.GetSessionTaskByHandle(context.Background(), ref, task.KindSubagent, "@REVIEWER")
+	got, err := store.GetSessionTaskByHandle(context.Background(), ref, "@REVIEWER")
 	if err != nil {
 		t.Fatalf("GetSessionTaskByHandle() error = %v", err)
 	}
@@ -432,28 +431,34 @@ func TestTaskStoreGetSessionTaskByHandleUsesIndexedHandle(t *testing.T) {
 	}
 }
 
-func TestTaskStoreGetSessionTaskByHandleRejectsAmbiguousHandle(t *testing.T) {
+func TestTaskStoreRejectsDuplicateSessionHandle(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	store := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
 	ref := taskSessionRef("sess-ambiguous")
-	for _, id := range []string{"task-a", "task-b"} {
-		if err := store.Upsert(context.Background(), &task.Entry{
+	for index, id := range []string{"task-a", "task-b"} {
+		kind := task.KindSubagent
+		if index == 1 {
+			kind = task.KindCommand
+		}
+		err := store.Upsert(context.Background(), &task.Entry{
 			TaskID:  id,
-			Kind:    task.KindSubagent,
+			Handle:  "reviewer",
+			Kind:    kind,
 			Session: ref,
 			State:   task.StateCompleted,
-			Spec:    map[string]any{"handle": "reviewer"},
 			Result:  map[string]any{"state": "completed"},
-		}); err != nil {
+		})
+		if index == 0 && err != nil {
 			t.Fatalf("Upsert(%s) error = %v", id, err)
 		}
-	}
-
-	_, err := store.GetSessionTaskByHandle(context.Background(), ref, task.KindSubagent, "reviewer")
-	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
-		t.Fatalf("GetSessionTaskByHandle() error = %v, want ambiguous", err)
+		if index == 1 {
+			var conflict *task.HandleConflictError
+			if !errors.As(err, &conflict) {
+				t.Fatalf("Upsert(%s) error = %v, want HandleConflictError", id, err)
+			}
+		}
 	}
 }
 

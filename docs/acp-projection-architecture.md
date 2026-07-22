@@ -111,6 +111,16 @@ cannot suppress or be mistaken for the later final assistant message.
 service, subscription lifecycle, ordering, and backpressure path. They do not
 share rendering semantics.
 
+RunCommand and Spawn canonical results expose a Session-unique Task `handle`,
+not the opaque Runtime `TaskID`. The Task stream directory carries both, plus
+typed `parent_tool` and the Spawn `agent_handle`. A Task-aware Surface resolves
+the expanded panel through that directory and subscribes with `(SessionID,
+TaskID)`. Child envelopes keep `scope_id=TaskID` for unambiguous protocol
+correlation, but the TUI projects that ID back to the public handle only at its
+display boundary. `_meta` is not used for discovery, authorization, or cursor
+identity. Command stream display metadata carries `target_handle`; it never
+copies the opaque TaskID into the legacy `target_id` display key.
+
 Local command execution projects valid UTF-8 terminal text deltas through the
 documented Caelis extension. Sandbox session storage keeps the underlying raw
 bytes; live text ingress reassembles split UTF-8 runes independently for stdout
@@ -162,10 +172,11 @@ requests are Control interactions: the bridge normalizes them into an SDK
 `ApprovalRequest`, and Control emits the permission Envelope rather than a task
 stream frame. Caelis Envelope `scope`, `scope_id`, and `parent_tool` fields
 associate those payloads with the parent Spawn call and durable task identity.
-The Control child recorder first persists semantic child events as
-`VisibilityMirror`; their published `delivery.mode=mirror` position is durable
-and replayable without entering parent model context. Exact task bytes and
-other events with no stored semantic source use `delivery.mode=transient`.
+Task stream frames are process-local and always publish with
+`delivery.mode=transient`; they are not appended to the parent Session. Older
+databases may still contain historical child `VisibilityMirror` rows. Session
+Feed projection filters those live-output mirrors while retaining approvals and
+participant lifecycle facts; no data migration is required.
 Session canonicalization may remove a redundant `Protocol.Update` when the
 same narrative already exists in `Message`; the normalized
 `EventScope.ACP.EventType` remains the typed update identity. Durable
@@ -176,11 +187,11 @@ only the parent tool status/result closes that lifecycle.
 `parent_tool` records the delegated relationship in either lane. Spawn and Task
 stream frames never emit a parent tool terminal/text copy of child activity,
 including when a runtime has materialized `Frame.Text` from a semantic child
-event. The parent receives one canonical status/result summary when the
-delegated stream closes. These are Caelis Envelope extensions, never custom
-fields in an ACP update payload root. Envelope-native Surfaces, including a
-future GUI, render the same replayable scoped ACP payloads with the components
-used for a main Agent.
+event. The parent receives its canonical status/result through the ordinary
+Session tool-result path, independently from Task-stream closure. These are
+Caelis Envelope extensions, never custom fields in an ACP update payload root.
+Envelope-native Surfaces, including a future GUI, render the same scoped ACP
+payloads with the components used for a main Agent.
 
 A projected event may claim `canonical` or `mirror` delivery only after storage
 has supplied both its Event ID and Session sequence. Live unstored projections
@@ -191,15 +202,11 @@ producers.
 The standard ACP stdio `session/update` notification carries only `sessionId`
 and `update`; it cannot carry the surrounding Caelis Envelope `scope` or
 `parent_tool`. Forwarding a scoped child update unchanged would therefore
-flatten it into the main Agent transcript in Zed. At this presentation boundary
-only, the ACP bridge uses the typed Envelope relation to render child narrative,
-tool activity, plan, and nested terminal text as `_meta.terminal_output` updates
-for the already-mounted parent Spawn terminal. It suppresses the corresponding
-bare child update on that wire path. The child narrative `final` marker does not
-emit `terminal_exit`; the canonical parent Spawn status/result supplies the one
-terminal close. This lossy compatibility rendering is neither replay authority
-nor a second relation path: it never derives ownership from `_meta`, while the
-Control feed and durable child mirror retain the original structured semantics.
+flatten it into the main Agent transcript. The bridge does not subscribe to or
+forward subagent Task streams on that wire. It subscribes only to RunCommand
+Task streams when a compatible terminal is already mounted, projecting their
+`_meta.terminal_output` bytes without creating a second Task or persistence
+path. The canonical parent Spawn status/result remains on the Session feed.
 
 A completed main-scope Task wait remains a model-visible canonical result even
 when the physical task panel belongs to an earlier Spawn call. Its canonical
@@ -209,58 +216,45 @@ the typed relation to complete the original Spawn panel and consume the
 observer result instead of rendering a second physical panel. They never
 recover this relation from `_meta` or a Surface-private replay path.
 
-`internal/controlclient/turningress.Broker` owns the shared per-Turn fan-in. The
-Gateway Control client backend and the transitional ACP/TUI adapter both use
-that implementation; the adapter's former live-feed broker is now only an
-alias. Turningress derives `StreamRequest` values from main ACP tool updates,
-deduplicates by `StreamRequest.Key`, and uses cursor-owned
-`stream.Service.Read` snapshots to project each source frame through
-`projector.ProjectStreamFrame`. The Control Session Feed Broker attaches to
-that ingress and gives TUI, headless, the ACP bridge, and app-server independent
-subscriptions to the same ordered Envelopes. No Surface discovers a second task
-stream from a rendered update.
+`internal/controlclient/turningress.Broker` carries only the main Runtime ACP
+producer into the Control Session Feed. It rejects stale scoped subagent
+payloads, performs no Task discovery or final Task read, and emits the main
+terminal as soon as the main producer closes. A Task read, disconnect, gap, or
+failure therefore cannot fail or delay the parent Turn.
 
-The main update is accepted before its task delivery starts; each task source
-retains its own cursor/event order; and a projected child semantic event remains
-before the one parent final status/result update when its source closes.
+`control/taskstream` is the only product-facing Task output authority. `List`
+derives descriptors from the existing Task store; `Events` reads a retained
+suffix; `Subscribe` owns one disposable delivery subscription. Control checks
+Session visibility and Task ownership before calling the SDK stream service.
+It emits neutral cursor-stamped records; `protocol/acp/taskstream` is the thin
+adapter that projects those records into Envelopes for Surfaces. The signed
+`Envelope.Cursor` binds protocol version, SessionID, TaskID, process generation,
+SDK cursor, and transient sequence. An evicted cursor or a previous process
+generation returns `resume_mode=current_state`, `transient_gap=true`, and a new
+boundary cursor. No Task output or cursor is written to SQLite or a file.
 
-One physical task stream has one stable source identity even when a Turn emits
-both the original `Spawn`/`RunCommand` update and later `Task wait` observers.
-A same-Turn observer never opens another reader. If a detached task is observed
-by a later Turn, that broker promotes the observer to the original typed parent
-tool/call identity and re-reads from a replay-safe zero cursor: Runtime's current
-cursor is not proof of what Control accepted. Durable child-origin idempotency
-suppresses the already recorded prefix and publishes only the missing suffix;
-the shared Session feed likewise reconciles RunCommand byte ranges by physical
-task/terminal identity and absolute output cursor, trimming only an already
-accepted replay prefix while preserving identical bytes at a later cursor.
-RunCommand therefore keeps retained terminal text, ANSI, UTF-8 boundaries,
-cursor, and exit state. If the bounded Runtime buffer has evicted an earlier
-prefix, the typed truncation boundary is projected and Surfaces show that gap
-explicitly.
-Repeated source-read failures are bounded. The broker cancels the owning
-Runtime handle once, continues draining its authoritative `ACPEvents` until the
-producer closes and releases its execution lease, then performs the final
-source barrier and publishes one typed main error plus `failed` terminal.
+Each Task frame projects to at most one ACP Envelope. Subagents use
+`scope=subagent`, `scope_id=TaskID`, and typed `parent_tool`; command terminal
+bytes remain mounted on their RunCommand tool but are served only through that
+Task endpoint. Subscriber queues are bounded to 128 Envelopes or 1 MiB. A slow
+subscriber is disconnected locally and cannot backpressure Runtime, the main
+Session Feed, or another Task.
+Task-aware Surfaces retry transient directory and delivery failures with
+bounded backoff while the panel remains expanded, resume from the last public
+cursor, and surface non-recoverable failures instead of leaving a silent panel.
 
-The current running-task stream anchor is a private, transitional Control input
-parse of the source tool update's runtime task metadata. It is confined to
-live-delivery discovery; it does not restore metadata-based `ParentTool` or
-`Delivery`, and it does not supply correlation, ordering, or durability facts
-to a Surface. A future typed running-task anchor or small Control DTO should
-replace this parse rather than extending the metadata path.
+Each Control subscriber currently owns one SDK polling subscription for one
+Task. This keeps cancellation and slow-consumer failure local and is bounded by
+the number of explicitly expanded panels or connected Task SSE clients. If
+measured fan-out makes polling material, the optimization belongs in a shared
+per-Task Control watcher that preserves the same per-subscriber queues and
+cursors; Surfaces must not bypass Control or acquire Runtime streams directly.
 
-A Turn feed owns only live client delivery. A matching main lifecycle terminal
-first prevents new sources, requests one immediate final `Read` from each
-already-started source, and advances a source cursor only after its complete
-snapshot has been accepted by the broker. It then drains all accepted batches,
-waits for those source acknowledgements, ends the broker delivery contexts, and
-emits the one final Turn frame. The final read flushes only frames materialized
-at that instant; it neither waits for nor cancels an asynchronous Spawn or
-other task runtime work. Task-runtime lifecycle remains owned by the
-Runtime/Control task plane. Scoped
-subagent/participant lifecycle envelopes close only their own displayed
-execution and cannot terminate the parent Turn.
+Standard ACP stdio has no scoped multi-stream primitive, so it does not receive
+flattened child live tokens. The compatibility bridge may subscribe to a
+RunCommand Task while its parent terminal is mounted and project only
+`_meta.terminal_output`; it never forwards subagent streams as main
+`session/update` traffic.
 
 The first-party Session-feed boundary is registered before `BeginTurn`, but its
 Turn ingress is attached only after the Surface claims `Turn.Events`. This
@@ -328,7 +322,7 @@ Guardian/auto-review are different resolvers of the same active queue head;
 auto-review never calls its approver before that request is active.
 
 The ACP child runner no longer emits a permission `Frame.Event`, and
-`ProjectStreamFrame` does not project permission frames as an alternate route.
+`ProjectTaskStreamFrame` does not project permission frames as an alternate route.
 The live broker therefore receives the Control-published Envelope through the
 same Turn feed as main and direct AgentRun delivery. TUI, headless, and the ACP prompt
 bridge only return that ID plus the user's decision through

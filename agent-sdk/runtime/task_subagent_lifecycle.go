@@ -15,9 +15,20 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSess
 	if tm == nil || tm.runtime == nil || tm.runtime.sessions == nil || task == nil {
 		return nil
 	}
+	// Concurrent Spawn calls may finish their external effects together. Keep
+	// only the revision-checked participant binding commit serial so each caller
+	// reloads the latest Session revision without serializing child startup. The
+	// reload and guarded commit intentionally share this lock; moving either side
+	// out would let sibling attachments submit the same stale revision.
+	tm.runtime.participantMu.Lock()
+	defer tm.runtime.participantMu.Unlock()
 	handle := strings.TrimSpace(task.handle)
 	if handle == "" {
-		handle = tm.reserveSubagentHandle(activeSession, task.sessionRef, task.agent)
+		var err error
+		handle, err = tm.reserveTaskHandle(ctx, activeSession, task.sessionRef, taskapi.KindSubagent, task.agent)
+		if err != nil {
+			return err
+		}
 		task.handle = handle
 	}
 	mention := "@" + strings.TrimPrefix(handle, "@")

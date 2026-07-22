@@ -85,6 +85,9 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 	}
 	sessionID := promptRouterResultSessionID(activeSession, result)
 	outboundFilter := newACPNarrativeFilter(suppressUserEcho)
+	taskMux := a.startACPTaskStreamMux(ctx, sessionID)
+	taskEvents := taskMux.Events()
+	defer a.detachACPTaskStreamMux(ctx, taskMux, cb, sessionID, outboundFilter)
 	if result.SlashResult != nil {
 		text := strings.TrimSpace(control.FormatSlashResult(*result.SlashResult))
 		if text != "" {
@@ -100,6 +103,7 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 		if err := a.emitControlEnvelope(ctx, cb, sessionID, nil, env, outboundFilter); err != nil {
 			return err
 		}
+		taskMux.Observe(env)
 	}
 	if result.Reconnect != nil {
 		defer result.Reconnect.Close()
@@ -124,6 +128,7 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 			if err := a.emitControlEnvelope(ctx, cb, sessionID, result.Reconnect, env, outboundFilter); err != nil {
 				return err
 			}
+			taskMux.Observe(env)
 		}
 	}
 	if err := a.emitPromptRouterSideEffects(ctx, cb, activeSession, result); err != nil {
@@ -138,6 +143,14 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 			select {
 			case <-ctx.Done():
 				return context.Canceled
+			case taskEnvelope, ok := <-taskEvents:
+				if !ok {
+					taskEvents = nil
+					continue
+				}
+				if err := a.emitControlEnvelope(ctx, cb, sessionID, nil, taskEnvelope, outboundFilter); err != nil {
+					return err
+				}
 			case env, ok := <-events:
 				if !ok {
 					events = nil
@@ -146,6 +159,7 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 				if err := a.emitControlEnvelope(ctx, cb, sessionID, result.Reconnect, env, outboundFilter); err != nil {
 					return err
 				}
+				taskMux.Observe(env)
 			}
 		}
 		return result.Reconnect.Err()
@@ -158,6 +172,15 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 		case <-ctx.Done():
 			_ = result.Turn.Close()
 			return context.Canceled
+		case taskEnvelope, ok := <-taskEvents:
+			if !ok {
+				taskEvents = nil
+				continue
+			}
+			if err := a.emitControlEnvelope(ctx, cb, sessionID, nil, taskEnvelope, outboundFilter); err != nil {
+				_ = result.Turn.Close()
+				return err
+			}
 		case env, ok := <-events:
 			if !ok {
 				events = nil
@@ -167,6 +190,7 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 				_ = result.Turn.Close()
 				return err
 			}
+			taskMux.Observe(env)
 		}
 	}
 	closeErr := result.Turn.Close()

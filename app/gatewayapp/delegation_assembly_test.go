@@ -6,9 +6,54 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	sdkdelegation "github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/control/agentbinding"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
+
+func TestDelegationAgentHandleKeepsACPPlacementIdentity(t *testing.T) {
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+	profile := modelprofile.ModelProfile{
+		ID: "acp:grok:deep", DisplayName: "Grok Deep",
+		Backend: modelprofile.Backend{ACP: &modelprofile.ACPBackend{AgentID: "grok", RemoteModelID: "deep"}},
+		Effort: modelprofile.EffortCapability{
+			DefaultEffort: "none",
+			Choices:       []modelprofile.EffortChoice{{Canonical: "none"}},
+		},
+	}
+	if err := stack.store.Save(AppConfig{
+		ExternalAgents: controlagents.Configuration{
+			Connections: []controlagents.Connection{{
+				ID: "grok", Name: "Grok", Launcher: controlagents.Launcher{Kind: controlagents.LaunchKindExecutable, Command: "grok-acp"},
+			}},
+			Agents: []controlagents.Agent{{ID: "grok", Name: "Grok", ConnectionID: "grok"}},
+		},
+		ModelProfiles: modelprofile.Configuration{Profiles: []modelprofile.ModelProfile{profile}},
+		AgentBindings: agentbinding.Configuration{Bindings: []agentbinding.Binding{{
+			Handle: agentbinding.HandleZenith, ProfileID: profile.ID, Effort: "none",
+		}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	targets, err := stack.delegationSpawnTargets(controlplacement.SessionContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := targets[string(agentbinding.HandleZenith)]
+	if target.Selector != "zenith" || target.Placement.Agent != "grok" {
+		t.Fatalf("resolved target = %#v, want AgentHandle zenith backed by ACP Agent grok", target)
+	}
+	materialized, err := stack.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: target}, stack.runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if materialized.Name != "grok" || materialized.Command != "grok-acp" {
+		t.Fatalf("materialized Agent = %#v, want execution identity grok", materialized)
+	}
+}
 
 func TestSelfDelegationPlacementTracksEffectiveSessionModelAndEffort(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})

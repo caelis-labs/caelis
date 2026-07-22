@@ -56,7 +56,7 @@ func TestTerminalToolPanelCacheKeyUsesBoundedTail(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 
 	longOutput := strings.Join(numberedToolLines(500), "\n")
-	block.UpdateToolWithMeta("call-1", "RUN_COMMAND", "go test", longOutput, false, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("call-1", "RUN_COMMAND", "go test", longOutput, false, false, ToolUpdateMeta{TaskHandle: "task-1"})
 	_ = block.Render(ctx)
 	cache := block.toolPanelRenderCache["call-1"]
 	if cache.lastInputBytes >= len(longOutput) {

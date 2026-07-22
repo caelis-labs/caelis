@@ -17,7 +17,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		toolName = refinedName
 		semanticName = refinedName
 	}
-	toolTaskID := display.ToolTaskID(rawInput, nil, input.Meta)
+	toolTaskHandle := display.ToolTaskHandle(rawInput, nil, input.Meta)
 	content := acpToolContentToDisplay(input.Content)
 	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
 	displayInput := rawInput
@@ -26,7 +26,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 	}
 	toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
 	if strings.EqualFold(semanticName, "TASK") {
-		toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
+		toolArgs = taskDisplayArgsWithHandle(toolArgs, toolTaskHandle)
 	}
 	return TranscriptEvent{
 		Kind:               TranscriptEventTool,
@@ -43,7 +43,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolFullArgs:       toolDisplayFullArgs(semanticName, rawInput),
 		ToolStatus:         status,
 		ToolTerminal:       toolTerminal,
-		ToolTaskID:         toolTaskID,
+		ToolTaskHandle:     toolTaskHandle,
 		ToolTaskAction:     display.ToolTaskAction(rawInput, nil, input.Meta),
 		ToolTaskInput:      display.ToolTaskInput(rawInput, nil, input.Meta),
 		ToolTaskTargetKind: display.ToolTaskTargetKind(rawInput, nil, input.Meta),
@@ -120,11 +120,12 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		toolOutputSynthetic = false
 	}
 	toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
-	toolTaskID := firstNonEmpty(
+	toolTaskHandle := firstNonEmpty(
 		display.MapString(rawOutput, "handle"),
+		display.MapString(rawInput, "handle"),
 		display.MapString(rawOutput, "task_id"),
 		display.MapString(rawInput, "task_id"),
-		display.ToolTaskID(rawInput, taskOutput, input.Meta),
+		display.ToolTaskHandle(rawInput, taskOutput, input.Meta),
 	)
 	toolTaskAction := firstNonEmpty(
 		display.MapString(rawOutput, "action"),
@@ -141,7 +142,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		display.ToolTaskTargetKind(rawInput, taskOutput, input.Meta),
 	)
 	if strings.EqualFold(semanticName, "TASK") {
-		toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
+		toolArgs = taskDisplayArgsWithHandle(toolArgs, toolTaskHandle)
 	}
 	if !toolErr {
 		if summary := toolDisplayStructuredSummary(semanticName, rawInput, summaryOutput, input.Meta); summary != "" {
@@ -176,7 +177,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolOutputSynthetic: toolOutputSynthetic,
 		ToolOutputTerminal:  toolOutputHasTerminalData,
 		ToolOutputGapBefore: toolOutputGapBefore,
-		ToolTaskID:          toolTaskID,
+		ToolTaskHandle:      toolTaskHandle,
 		ToolTaskAction:      toolTaskAction,
 		ToolTaskInput:       toolTaskInput,
 		ToolTaskTargetKind:  toolTaskTargetKind,

@@ -118,7 +118,6 @@ func (tm *taskRuntime) executeClaimedSubagentContinue(ctx context.Context, task 
 		return task.snapshot(), err
 	}
 	result, err := task.runner.Continue(ctx, delegation.CloneAnchor(task.anchor), delegation.ContinueRequest{
-		Agent:       firstNonEmpty(strings.TrimSpace(task.anchor.Agent), strings.TrimSpace(task.agent)),
 		Prompt:      contextprompt.ComposeTextPrompt(contextTransfer, prompt),
 		YieldTimeMS: yieldMS,
 	})
