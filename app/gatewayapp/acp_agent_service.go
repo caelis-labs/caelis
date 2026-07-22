@@ -16,9 +16,9 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
+	pluginapi "github.com/caelis-labs/caelis/control/plugin"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	pluginapi "github.com/caelis-labs/caelis/ports/plugin"
 )
 
 type ACPAgentInfo struct {
@@ -126,14 +126,14 @@ func (s *Stack) refreshAgentAssembly() error {
 }
 
 func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, plugins []PluginConfig, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
-	pluginAgents, err := s.resolvePluginAgentContributions(plugins)
+	contributions, err := resolveGatewayPluginContributions(plugins)
 	if err != nil {
 		return assembly.ResolvedAssembly{}, err
 	}
-	return s.configuredAssemblyWithPluginAgents(base, pluginAgents, runtimeCfg)
+	return s.configuredAssemblyWithPluginAgents(base, contributions.Agents, runtimeCfg)
 }
 
-func (s *Stack) configuredAssemblyWithPluginAgents(base assembly.ResolvedAssembly, pluginAgents []pluginAgentContribution, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
+func (s *Stack) configuredAssemblyWithPluginAgents(base assembly.ResolvedAssembly, pluginAgents []pluginapi.AgentRegistration, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	self, err := defaultSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		Config: Config{
 			AppName:                   s.AppName,
@@ -320,7 +320,7 @@ func (s *Stack) materializeExternalAgent(agent controlagents.Agent, connection c
 	}, nil
 }
 
-func (s *Stack) withPluginACPAgents(resolved assembly.ResolvedAssembly, pluginAgents []pluginAgentContribution) (assembly.ResolvedAssembly, error) {
+func (s *Stack) withPluginACPAgents(resolved assembly.ResolvedAssembly, pluginAgents []pluginapi.AgentRegistration) (assembly.ResolvedAssembly, error) {
 	out := assembly.CloneResolvedAssembly(resolved)
 	seen := map[string]struct{}{}
 	for _, agent := range out.Agents {

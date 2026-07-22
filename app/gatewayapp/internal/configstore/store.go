@@ -10,32 +10,11 @@ import (
 
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/plugin"
 )
 
-type MarketplaceConfig struct {
-	Name                              string   `json:"name,omitempty"`
-	Description                       string   `json:"description,omitempty"`
-	Owner                             string   `json:"owner,omitempty"`
-	Source                            string   `json:"source,omitempty"`
-	Root                              string   `json:"root,omitempty"`
-	Version                           string   `json:"version,omitempty"`
-	RepoURL                           string   `json:"repo_url,omitempty"`
-	PluginRoot                        string   `json:"plugin_root,omitempty"`
-	AllowCrossMarketplaceDependencies []string `json:"allow_cross_marketplace_dependencies,omitempty"`
-}
-
-type PluginConfig struct {
-	ID          string `json:"id,omitempty"`
-	Name        string `json:"name,omitempty"`
-	Root        string `json:"root,omitempty"`
-	Manifest    string `json:"manifest,omitempty"`
-	Kind        string `json:"kind,omitempty"`
-	Enabled     bool   `json:"enabled"`
-	Version     string `json:"version,omitempty"`
-	Description string `json:"description,omitempty"`
-	Managed     bool   `json:"managed,omitempty"`
-	CacheRoot   string `json:"cache_root,omitempty"`
-}
+type MarketplaceConfig = plugin.MarketplaceConfig
+type PluginConfig = plugin.Config
 
 type SandboxConfig struct {
 	RequestedType    string   `json:"requested_type,omitempty"`
@@ -381,101 +360,21 @@ func DedupeStrings(values []string) []string {
 }
 
 func DedupePluginConfigs(configs []PluginConfig) []PluginConfig {
-	if len(configs) == 0 {
-		return nil
-	}
-	out := make([]PluginConfig, 0, len(configs))
-	seen := make(map[string]struct{}, len(configs))
-	for _, cfg := range configs {
-		cfg = NormalizePluginConfig(cfg)
-		if cfg.ID == "" {
-			continue
-		}
-		key := strings.ToLower(strings.TrimSpace(cfg.ID))
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, cfg)
-	}
-	return out
+	return plugin.DedupeConfigs(configs)
 }
 
 func DedupeMarketplaceConfigs(configs []MarketplaceConfig) []MarketplaceConfig {
-	if len(configs) == 0 {
-		return nil
-	}
-	out := make([]MarketplaceConfig, 0, len(configs))
-	seen := make(map[string]struct{}, len(configs))
-	for _, cfg := range configs {
-		cfg = NormalizeMarketplaceConfig(cfg)
-		if cfg.Name == "" {
-			continue
-		}
-		key := strings.ToLower(strings.TrimSpace(cfg.Name))
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, cfg)
-	}
-	return out
+	return plugin.DedupeMarketplaceConfigs(configs)
 }
 
 func UpsertMarketplaceConfig(configs []MarketplaceConfig, entry MarketplaceConfig) []MarketplaceConfig {
-	entry = NormalizeMarketplaceConfig(entry)
-	if entry.Name == "" {
-		return DedupeMarketplaceConfigs(configs)
-	}
-	key := strings.ToLower(strings.TrimSpace(entry.Name))
-	out := make([]MarketplaceConfig, 0, len(configs)+1)
-	replaced := false
-	for _, cfg := range configs {
-		cfg = NormalizeMarketplaceConfig(cfg)
-		if cfg.Name == "" {
-			continue
-		}
-		if strings.ToLower(strings.TrimSpace(cfg.Name)) == key {
-			if !replaced {
-				out = append(out, entry)
-				replaced = true
-			}
-			continue
-		}
-		out = append(out, cfg)
-	}
-	if !replaced {
-		out = append(out, entry)
-	}
-	return out
+	return plugin.UpsertMarketplaceConfig(configs, entry)
 }
 
 func NormalizeMarketplaceConfig(in MarketplaceConfig) MarketplaceConfig {
-	out := in
-	out.Name = strings.TrimSpace(in.Name)
-	out.Description = strings.TrimSpace(in.Description)
-	out.Owner = strings.TrimSpace(in.Owner)
-	out.Source = strings.TrimSpace(in.Source)
-	out.Root = strings.TrimSpace(in.Root)
-	out.Version = strings.TrimSpace(in.Version)
-	out.RepoURL = strings.TrimSpace(in.RepoURL)
-	out.PluginRoot = strings.TrimSpace(in.PluginRoot)
-	out.AllowCrossMarketplaceDependencies = DedupeStrings(in.AllowCrossMarketplaceDependencies)
-	return out
+	return plugin.NormalizeMarketplaceConfig(in)
 }
 
 func NormalizePluginConfig(in PluginConfig) PluginConfig {
-	out := in
-	out.ID = strings.ToLower(strings.TrimSpace(in.ID))
-	out.Name = strings.TrimSpace(in.Name)
-	out.Root = strings.TrimSpace(in.Root)
-	out.Manifest = strings.TrimSpace(in.Manifest)
-	out.Kind = strings.ToLower(strings.TrimSpace(in.Kind))
-	out.Version = strings.TrimSpace(in.Version)
-	out.Description = strings.TrimSpace(in.Description)
-	out.CacheRoot = strings.TrimSpace(in.CacheRoot)
-	if !out.Managed {
-		out.CacheRoot = ""
-	}
-	return out
+	return plugin.NormalizeConfig(in)
 }

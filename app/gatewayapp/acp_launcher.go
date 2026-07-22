@@ -11,8 +11,8 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/pluginregistry"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/plugin"
 )
 
 type globalACPAgentInstallRequest struct {
@@ -231,7 +231,7 @@ func absoluteExecutablePath(command string) (string, error) {
 }
 
 func splitACPCommandLine(commandLine string) (string, []string, error) {
-	command, args, err := pluginregistry.SplitCommand(commandLine)
+	command, args, err := plugin.SplitCommand(commandLine)
 	if err != nil {
 		return "", nil, fmt.Errorf("gatewayapp: parse custom ACP command: %w", err)
 	}

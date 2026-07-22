@@ -8,8 +8,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/plugin"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/ports/plugin"
 )
 
 func TestExternalAgentAssemblyDoesNotOwnModelDefaults(t *testing.T) {
@@ -60,7 +60,7 @@ func TestPluginAgentCollisionFailsClosed(t *testing.T) {
 	stack := &Stack{}
 	_, err := stack.withPluginACPAgents(assembly.ResolvedAssembly{Agents: []assembly.AgentConfig{{
 		Name: "opus", Command: "existing-opus",
-	}}}, []pluginAgentContribution{{
+	}}}, []plugin.AgentRegistration{{
 		PluginID: "duplicate-plugin",
 		Agent:    plugin.AgentContribution{Name: "opus", Command: "plugin-opus"},
 	}})

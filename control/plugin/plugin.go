@@ -1,7 +1,10 @@
+// Package plugin owns product plugin configuration, discovery, installation,
+// marketplace resolution, lifecycle mutation, and normalized contributions.
 package plugin
 
 import sdkmcp "github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 
+// ManifestKind identifies a supported plugin manifest format.
 type ManifestKind string
 
 const (
@@ -9,6 +12,7 @@ const (
 	ManifestKindClaude ManifestKind = "claude"
 )
 
+// InstalledPlugin is the normalized product view of one installed plugin.
 type InstalledPlugin struct {
 	ID          string
 	Name        string
@@ -25,12 +29,14 @@ type InstalledPlugin struct {
 	InstalledAt string
 }
 
+// SkillContribution describes one plugin-provided skill tree.
 type SkillContribution struct {
 	Namespace string
 	Root      string
 	Disabled  []string
 }
 
+// HookEvent identifies a product lifecycle point supported by plugin hooks.
 type HookEvent string
 
 const (
@@ -40,6 +46,7 @@ const (
 	HookEventPostToolUse      HookEvent = "PostToolUse"
 )
 
+// HookSpec is the normalized executable configuration for one plugin hook.
 type HookSpec struct {
 	PluginID   string
 	Event      HookEvent
@@ -52,6 +59,7 @@ type HookSpec struct {
 	PluginDir  string
 }
 
+// MCPServerSpec reuses the SDK MCP server configuration contract.
 type MCPServerSpec = sdkmcp.ServerSpec
 
 const (
@@ -60,10 +68,12 @@ const (
 	MCPTransportSSE            = sdkmcp.TransportSSE
 )
 
+// NormalizeMCPTransport returns the canonical SDK transport name.
 func NormalizeMCPTransport(transport, command, url string) string {
 	return sdkmcp.NormalizeTransport(transport, command, url)
 }
 
+// AgentContribution describes one external Agent contributed by a plugin.
 type AgentContribution struct {
 	Name        string
 	Description string

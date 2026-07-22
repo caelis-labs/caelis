@@ -1,12 +1,10 @@
-package pluginregistry
+package plugin
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/caelis-labs/caelis/ports/plugin"
 )
 
 func TestResolveSafePath(t *testing.T) {
@@ -126,20 +124,20 @@ func TestParseCaelisPlugin(t *testing.T) {
 	if p.Name != "Test Caelis Plugin" {
 		t.Errorf("Name = %q, want %q", p.Name, "Test Caelis Plugin")
 	}
-	if p.Kind != plugin.ManifestKindCaelis {
-		t.Errorf("Kind = %q, want %q", p.Kind, plugin.ManifestKindCaelis)
+	if p.Kind != ManifestKindCaelis {
+		t.Errorf("Kind = %q, want %q", p.Kind, ManifestKindCaelis)
 	}
 	if len(p.Skills) != 1 || p.Skills[0].Namespace != "testns" {
 		t.Errorf("unexpected skills: %+v", p.Skills)
 	}
-	if len(p.Hooks) != 1 || p.Hooks[0].Event != plugin.HookEventSessionStart {
+	if len(p.Hooks) != 1 || p.Hooks[0].Event != HookEventSessionStart {
 		t.Errorf("unexpected hooks: %+v", p.Hooks)
 	}
 	if len(p.MCPServers) != 1 || p.MCPServers[0].Name != "myserver" {
 		t.Errorf("unexpected MCP servers: %+v", p.MCPServers)
 	}
-	if p.MCPServers[0].Transport != plugin.MCPTransportStdio {
-		t.Errorf("MCP transport = %q, want %q", p.MCPServers[0].Transport, plugin.MCPTransportStdio)
+	if p.MCPServers[0].Transport != MCPTransportStdio {
+		t.Errorf("MCP transport = %q, want %q", p.MCPServers[0].Transport, MCPTransportStdio)
 	}
 }
 
@@ -197,14 +195,14 @@ func TestParseClaudePlugin(t *testing.T) {
 	if p.Name != "Test Claude Plugin" {
 		t.Errorf("Name = %q, want %q", p.Name, "Test Claude Plugin")
 	}
-	if p.Kind != plugin.ManifestKindClaude {
-		t.Errorf("Kind = %q, want %q", p.Kind, plugin.ManifestKindClaude)
+	if p.Kind != ManifestKindClaude {
+		t.Errorf("Kind = %q, want %q", p.Kind, ManifestKindClaude)
 	}
 	if len(p.Hooks) != 1 {
 		t.Fatalf("expected 1 hook, got %d", len(p.Hooks))
 	}
 	h := p.Hooks[0]
-	if h.Event != plugin.HookEventSessionStart || h.RawCommand != "bash start.sh --foo" {
+	if h.Event != HookEventSessionStart || h.RawCommand != "bash start.sh --foo" {
 		t.Errorf("unexpected hook contents: %+v", h)
 	}
 }
@@ -360,12 +358,12 @@ func TestParseMCPRemoteTransports(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParsePlugin failed: %v", err)
 	}
-	servers := map[string]plugin.MCPServerSpec{}
+	servers := map[string]MCPServerSpec{}
 	for _, server := range p.MCPServers {
 		servers[server.Name] = server
 	}
-	if servers["httpServer"].Transport != plugin.MCPTransportStreamableHTTP {
-		t.Errorf("httpServer transport = %q, want %q", servers["httpServer"].Transport, plugin.MCPTransportStreamableHTTP)
+	if servers["httpServer"].Transport != MCPTransportStreamableHTTP {
+		t.Errorf("httpServer transport = %q, want %q", servers["httpServer"].Transport, MCPTransportStreamableHTTP)
 	}
 	if servers["httpServer"].URL != "https://example.test/mcp" || servers["httpServer"].Headers["Authorization"] != "Bearer token" {
 		t.Errorf("httpServer remote config not preserved: %+v", servers["httpServer"])
@@ -373,8 +371,8 @@ func TestParseMCPRemoteTransports(t *testing.T) {
 	if servers["httpServer"].WorkDir != "" {
 		t.Errorf("httpServer WorkDir = %q, want empty for remote transport", servers["httpServer"].WorkDir)
 	}
-	if servers["sseServer"].Transport != plugin.MCPTransportSSE {
-		t.Errorf("sseServer transport = %q, want %q", servers["sseServer"].Transport, plugin.MCPTransportSSE)
+	if servers["sseServer"].Transport != MCPTransportSSE {
+		t.Errorf("sseServer transport = %q, want %q", servers["sseServer"].Transport, MCPTransportSSE)
 	}
 }
 
@@ -444,8 +442,8 @@ func TestParseSupportedManifestIgnoresUnsupportedLegacyManifest(t *testing.T) {
 		t.Fatalf("ParsePlugin failed: %v", err)
 	}
 
-	if p.Kind != plugin.ManifestKindClaude {
-		t.Fatalf("Kind = %q, want %q", p.Kind, plugin.ManifestKindClaude)
+	if p.Kind != ManifestKindClaude {
+		t.Fatalf("Kind = %q, want %q", p.Kind, ManifestKindClaude)
 	}
 	if len(p.Hooks) != 1 || p.Hooks[0].RawCommand != "bash session-start.sh" {
 		t.Errorf("lost Claude SessionStart hook: %+v", p.Hooks)

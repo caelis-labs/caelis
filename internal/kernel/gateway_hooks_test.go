@@ -16,8 +16,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/internal/kernel/hooks"
-	"github.com/caelis-labs/caelis/ports/plugin"
 )
 
 func pluginHookEvents(events []*session.Event) []*session.Event {

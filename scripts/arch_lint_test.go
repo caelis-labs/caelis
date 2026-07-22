@@ -42,6 +42,12 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "production code must not depend on ports/model; use agent-sdk/model",
 		},
 		{
+			name:       "migrated plugin port retains replacement",
+			rel:        "internal/kernel/gateway.go",
+			importPath: modulePath + "/ports/plugin",
+			want:       "production code must not depend on ports/plugin; use control/plugin",
+		},
+		{
 			name:       "sdk may use sdk internal helpers",
 			rel:        "agent-sdk/runtime/runtime.go",
 			importPath: modulePath + "/agent-sdk/internal/runstate",
@@ -104,7 +110,7 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 		{
 			name:       "skill discovery rejects unrelated product package",
 			rel:        "app/gatewayapp/internal/skilldiscovery/bridge.go",
-			importPath: modulePath + "/ports/plugin",
+			importPath: modulePath + "/control/plugin",
 			want:       "app/gatewayapp/internal/skilldiscovery must only depend on agent-sdk/skill and agent-sdk/skill/fs",
 		},
 	}
@@ -343,6 +349,12 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			wantSub: "app/gatewayapp/internal/modelregistry",
 		},
 		{
+			name:    "deleted gateway plugin registry path fails",
+			rel:     "app/gatewayapp/internal/pluginregistry/parser.go",
+			want:    "must not recreate app/gatewayapp/internal/pluginregistry; plugin discovery belongs to control/plugin",
+			wantSub: "app/gatewayapp/internal/pluginregistry",
+		},
+		{
 			name:    "deleted impl sandbox host path fails",
 			rel:     "impl/sandbox/host/runtime.go",
 			want:    "must not recreate impl/sandbox/host; use agent-sdk/sandbox/host",
@@ -360,9 +372,10 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "retained ports plugin path passes",
-			rel:  "ports/plugin/plugin.go",
-			want: "",
+			name:    "deleted ports plugin path fails",
+			rel:     "ports/plugin/plugin.go",
+			want:    "must not recreate ports/plugin; plugin contracts belong to control/plugin",
+			wantSub: "ports/plugin",
 		},
 		{
 			name: "retained ports controlcommand path passes",

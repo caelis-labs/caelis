@@ -20,13 +20,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/control/plugin"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/sandboxrouter"
-	"github.com/caelis-labs/caelis/ports/plugin"
 )
 
 func (s *Stack) saveModelConfigs() error {
@@ -111,7 +111,7 @@ func (s *Stack) rejectRemovedAssemblyAgents(ctx context.Context, before []assemb
 type gatewayBuildPlan struct {
 	SandboxConfig SandboxConfig
 	RuntimeConfig stackRuntimeConfig
-	Plugins       pluginContributions
+	Plugins       plugin.Contributions
 }
 
 type gatewayRuntimeBundle struct {
@@ -165,7 +165,7 @@ func (s *Stack) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runtimeCfg stackR
 		return gatewayBuildPlan{}, err
 	}
 	skillDirs := stackSkillDiscoveryDirs(s.Workspace.CWD, runtimeCfg.SkillDirs)
-	contribs, err := s.resolvePluginContributions(doc.Plugins)
+	contribs, err := resolveGatewayPluginContributions(doc.Plugins)
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
@@ -448,79 +448,12 @@ func stackSkillDiscoveryDirs(workspaceDir string, configured []string) []string 
 	return DefaultSkillDiscoveryDirs(workspaceDir)
 }
 
-type pluginContributions struct {
-	SkillBundles      []skill.PluginBundle
-	SessionStartHooks []plugin.HookSpec
-	MCPServerSpecs    []plugin.MCPServerSpec
-	Agents            []pluginAgentContribution
-}
-
-type pluginAgentContribution struct {
-	PluginID string
-	Agent    plugin.AgentContribution
-}
-
-func (s *Stack) resolvePluginContributions(configs []PluginConfig) (pluginContributions, error) {
-	var out pluginContributions
-	for _, pCfg := range configs {
-		p, err := parseConfiguredPlugin(pCfg)
-		if err != nil {
-			if pCfg.Enabled {
-				return out, fmt.Errorf("gatewayapp: parse enabled plugin %q failed: %w", pCfg.ID, err)
-			}
-			continue
-		}
-		bundles := pluginSkillBundles(p, pCfg.Enabled)
-		out.SkillBundles = append(out.SkillBundles, bundles...)
-		if !pCfg.Enabled {
-			continue
-		}
-		for _, hook := range p.Hooks {
-			if hook.Event == plugin.HookEventSessionStart {
-				out.SessionStartHooks = append(out.SessionStartHooks, hook)
-			}
-		}
-		out.MCPServerSpecs = append(out.MCPServerSpecs, p.MCPServers...)
-		for _, contributed := range p.Agents {
-			out.Agents = append(out.Agents, pluginAgentContribution{
-				PluginID: p.ID,
-				Agent:    contributed,
-			})
-		}
-	}
-	return out, nil
-}
-
-func (s *Stack) resolvePluginAgentContributions(configs []PluginConfig) ([]pluginAgentContribution, error) {
-	contribs, err := s.resolvePluginContributions(configs)
+// resolveGatewayPluginContributions gives persisted configuration failures an
+// application-boundary prefix at both initial assembly and live refresh sites.
+func resolveGatewayPluginContributions(configs []PluginConfig) (plugin.Contributions, error) {
+	contributions, err := plugin.ResolveContributions(configs)
 	if err != nil {
-		return nil, err
+		return plugin.Contributions{}, fmt.Errorf("gatewayapp: %w", err)
 	}
-	return contribs.Agents, nil
-}
-
-func pluginSkillBundles(p plugin.InstalledPlugin, enabled bool) []skill.PluginBundle {
-	if len(p.Skills) == 0 {
-		return nil
-	}
-	out := make([]skill.PluginBundle, 0, len(p.Skills))
-	pluginID := strings.TrimSpace(p.ID)
-	for _, sc := range p.Skills {
-		root := strings.TrimSpace(sc.Root)
-		if root == "" {
-			continue
-		}
-		namespace := strings.TrimSpace(sc.Namespace)
-		if namespace == "" {
-			namespace = pluginID
-		}
-		out = append(out, skill.PluginBundle{
-			Plugin:    pluginID,
-			Namespace: namespace,
-			Root:      root,
-			Disabled:  append([]string(nil), sc.Disabled...),
-			Enabled:   enabled,
-		})
-	}
-	return out
+	return contributions, nil
 }

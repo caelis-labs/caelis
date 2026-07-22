@@ -1,4 +1,4 @@
-package gatewayapp
+package plugin
 
 import (
 	"context"
@@ -7,10 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 )
 
+// MarketplaceInfo is the current Control view of one configured marketplace.
 type MarketplaceInfo struct {
 	Name                              string
 	Description                       string
@@ -70,10 +69,68 @@ type pluginMarketplaceSource struct {
 	Registry string `json:"registry"`
 }
 
+func readPluginMarketplaceManifest(root string) (pluginMarketplaceManifest, error) {
+	path := filepath.Join(root, ".claude-plugin", "marketplace.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return pluginMarketplaceManifest{}, fmt.Errorf("plugin service: read marketplace manifest: %w", err)
+	}
+	var manifest pluginMarketplaceManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return pluginMarketplaceManifest{}, fmt.Errorf("plugin service: decode marketplace manifest: %w", err)
+	}
+	return manifest, nil
+}
+
+func findMarketplacePlugin(manifest pluginMarketplaceManifest, name string) (pluginMarketplaceEntry, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, entry := range manifest.Plugins {
+		if strings.EqualFold(strings.TrimSpace(entry.Name), name) {
+			return entry, true
+		}
+	}
+	return pluginMarketplaceEntry{}, false
+}
+
+func safeJoinPluginPath(root string, relativePath string) (string, error) {
+	rootAbs, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return "", err
+	}
+	joined, err := filepath.Abs(filepath.Join(rootAbs, strings.TrimSpace(relativePath)))
+	if err != nil {
+		return "", err
+	}
+	if !PathWithinRoot(rootAbs, joined) {
+		return "", fmt.Errorf("plugin service: plugin source path escapes marketplace root: %s", relativePath)
+	}
+	info, err := os.Stat(joined)
+	if err != nil {
+		return "", fmt.Errorf("plugin service: plugin source path does not exist: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("plugin service: plugin source path is not a directory: %s", joined)
+	}
+	rootReal, err := filepath.EvalSymlinks(rootAbs)
+	if err != nil {
+		return "", fmt.Errorf("plugin service: marketplace root is unavailable: %w", err)
+	}
+	joinedReal, err := filepath.EvalSymlinks(joined)
+	if err != nil {
+		return "", fmt.Errorf("plugin service: plugin source path does not exist: %w", err)
+	}
+	rootReal = filepath.Clean(rootReal)
+	joinedReal = filepath.Clean(joinedReal)
+	if !PathWithinRoot(rootReal, joinedReal) {
+		return "", fmt.Errorf("plugin service: plugin source path escapes marketplace root: %s", relativePath)
+	}
+	return joined, nil
+}
+
 // AddMarketplace registers a Claude Code compatible marketplace and persists it.
-func (s PluginService) AddMarketplace(ctx context.Context, source string) (MarketplaceInfo, error) {
-	if s.stack == nil || s.stack.store == nil {
-		return MarketplaceInfo{}, fmt.Errorf("plugin service: stack store is unavailable")
+func (s Service) AddMarketplace(ctx context.Context, source string) (MarketplaceInfo, error) {
+	if _, err := s.requireHost(); err != nil {
+		return MarketplaceInfo{}, err
 	}
 	source = strings.TrimSpace(source)
 	if source == "" {
@@ -91,17 +148,6 @@ func (s PluginService) AddMarketplace(ctx context.Context, source string) (Marke
 		return MarketplaceInfo{}, fmt.Errorf("plugin service: marketplace manifest is missing name")
 	}
 
-	s.stack.reconfigureMu.Lock()
-	defer s.stack.reconfigureMu.Unlock()
-	if err := s.stack.rejectReconfigureWhileActive("add marketplace"); err != nil {
-		return MarketplaceInfo{}, err
-	}
-
-	oldDoc, err := s.stack.store.Load()
-	if err != nil {
-		return MarketplaceInfo{}, err
-	}
-	doc := cloneAppConfig(oldDoc)
 	entry := MarketplaceConfig{
 		Name:                              strings.TrimSpace(manifest.Name),
 		Description:                       marketplaceDescription(manifest),
@@ -111,25 +157,27 @@ func (s PluginService) AddMarketplace(ctx context.Context, source string) (Marke
 		Version:                           marketplaceVersion(manifest),
 		RepoURL:                           repoURL,
 		PluginRoot:                        strings.TrimSpace(manifest.Metadata.PluginRoot),
-		AllowCrossMarketplaceDependencies: normalizeMarketplaceNameList(manifest.AllowCrossMarketplaceDependencies),
+		AllowCrossMarketplaceDependencies: dedupeStrings(manifest.AllowCrossMarketplaceDependencies),
 	}
-	doc.PluginMarketplaces = configstore.UpsertMarketplaceConfig(doc.PluginMarketplaces, entry)
-	if err := s.stack.store.Save(doc); err != nil {
+	if err := s.updateState(ctx, Mutation{
+		GuardAction: "add marketplace",
+		Apply: func(state *State) error {
+			state.Marketplaces = UpsertMarketplaceConfig(state.Marketplaces, entry)
+			return nil
+		},
+	}); err != nil {
 		return MarketplaceInfo{}, err
 	}
 	return marketplaceInfoFromManifest(entry, manifest), nil
 }
 
-func (s PluginService) ListMarketplaces(ctx context.Context) ([]MarketplaceInfo, error) {
-	if s.stack == nil || s.stack.store == nil {
-		return nil, fmt.Errorf("plugin service: stack store is unavailable")
-	}
-	doc, err := s.stack.store.Load()
+func (s Service) ListMarketplaces(ctx context.Context) ([]MarketplaceInfo, error) {
+	doc, err := s.loadState(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]MarketplaceInfo, 0, len(doc.PluginMarketplaces))
-	for _, entry := range doc.PluginMarketplaces {
+	out := make([]MarketplaceInfo, 0, len(doc.Marketplaces))
+	for _, entry := range doc.Marketplaces {
 		info := marketplaceInfoFromConfig(entry)
 		if manifest, err := readPluginMarketplaceManifest(entry.Root); err == nil {
 			info.PluginCount = len(manifest.Plugins)
@@ -145,12 +193,9 @@ func (s PluginService) ListMarketplaces(ctx context.Context) ([]MarketplaceInfo,
 	return out, nil
 }
 
-func (s PluginService) UpdateMarketplace(ctx context.Context, name string) (MarketplaceInfo, error) {
-	if s.stack == nil || s.stack.store == nil {
-		return MarketplaceInfo{}, fmt.Errorf("plugin service: stack store is unavailable")
-	}
+func (s Service) UpdateMarketplace(ctx context.Context, name string) (MarketplaceInfo, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
-	doc, err := s.stack.store.Load()
+	doc, err := s.loadState(ctx)
 	if err != nil {
 		return MarketplaceInfo{}, err
 	}
@@ -167,61 +212,47 @@ func (s PluginService) UpdateMarketplace(ctx context.Context, name string) (Mark
 		return MarketplaceInfo{}, err
 	}
 
-	s.stack.reconfigureMu.Lock()
-	defer s.stack.reconfigureMu.Unlock()
-	if err := s.stack.rejectReconfigureWhileActive("update marketplace"); err != nil {
-		return MarketplaceInfo{}, err
-	}
-
-	oldDoc, err := s.stack.store.Load()
-	if err != nil {
-		return MarketplaceInfo{}, err
-	}
-	doc = cloneAppConfig(oldDoc)
-	_, entry, ok = findMarketplaceConfig(doc, name)
-	if !ok {
-		return MarketplaceInfo{}, fmt.Errorf("plugin service: marketplace not found: %s", name)
-	}
-	entry.Root = root
-	entry.RepoURL = repoURL
-	entry.Description = marketplaceDescription(manifest)
-	entry.Version = marketplaceVersion(manifest)
-	entry.Owner = strings.TrimSpace(manifest.Owner.Name)
-	entry.PluginRoot = strings.TrimSpace(manifest.Metadata.PluginRoot)
-	entry.AllowCrossMarketplaceDependencies = normalizeMarketplaceNameList(manifest.AllowCrossMarketplaceDependencies)
-	doc.PluginMarketplaces = configstore.UpsertMarketplaceConfig(doc.PluginMarketplaces, entry)
-	if err := s.stack.store.Save(doc); err != nil {
+	if err := s.updateState(ctx, Mutation{
+		GuardAction: "update marketplace",
+		Apply: func(state *State) error {
+			_, current, ok := findMarketplaceConfig(*state, name)
+			if !ok {
+				return fmt.Errorf("plugin service: marketplace not found: %s", name)
+			}
+			current.Root = root
+			current.RepoURL = repoURL
+			current.Description = marketplaceDescription(manifest)
+			current.Version = marketplaceVersion(manifest)
+			current.Owner = strings.TrimSpace(manifest.Owner.Name)
+			current.PluginRoot = strings.TrimSpace(manifest.Metadata.PluginRoot)
+			current.AllowCrossMarketplaceDependencies = dedupeStrings(manifest.AllowCrossMarketplaceDependencies)
+			state.Marketplaces = UpsertMarketplaceConfig(state.Marketplaces, current)
+			entry = current
+			return nil
+		},
+	}); err != nil {
 		return MarketplaceInfo{}, err
 	}
 	return marketplaceInfoFromManifest(entry, manifest), nil
 }
 
-func (s PluginService) RemoveMarketplace(ctx context.Context, name string) error {
-	if s.stack == nil || s.stack.store == nil {
-		return fmt.Errorf("plugin service: stack store is unavailable")
-	}
+func (s Service) RemoveMarketplace(ctx context.Context, name string) error {
 	name = strings.ToLower(strings.TrimSpace(name))
 
-	s.stack.reconfigureMu.Lock()
-	defer s.stack.reconfigureMu.Unlock()
-	if err := s.stack.rejectReconfigureWhileActive("remove marketplace"); err != nil {
-		return err
-	}
-
-	oldDoc, err := s.stack.store.Load()
-	if err != nil {
-		return err
-	}
-	doc := cloneAppConfig(oldDoc)
-	idx, _, ok := findMarketplaceConfig(doc, name)
-	if !ok {
-		return fmt.Errorf("plugin service: marketplace not found: %s", name)
-	}
-	doc.PluginMarketplaces = append(doc.PluginMarketplaces[:idx], doc.PluginMarketplaces[idx+1:]...)
-	return s.stack.store.Save(doc)
+	return s.updateState(ctx, Mutation{
+		GuardAction: "remove marketplace",
+		Apply: func(state *State) error {
+			idx, _, ok := findMarketplaceConfig(*state, name)
+			if !ok {
+				return fmt.Errorf("plugin service: marketplace not found: %s", name)
+			}
+			state.Marketplaces = append(state.Marketplaces[:idx], state.Marketplaces[idx+1:]...)
+			return nil
+		},
+	})
 }
 
-func (s PluginService) fetchMarketplaceRoot(ctx context.Context, source string) (root string, repoURL string, err error) {
+func (s Service) fetchMarketplaceRoot(ctx context.Context, source string) (root string, repoURL string, err error) {
 	source = strings.TrimSpace(source)
 	if absPath, absErr := filepath.Abs(source); absErr == nil {
 		if fi, statErr := os.Stat(absPath); statErr == nil && fi.IsDir() {
@@ -235,7 +266,11 @@ func (s PluginService) fetchMarketplaceRoot(ctx context.Context, source string) 
 	if err != nil {
 		return "", "", err
 	}
-	root = filepath.Join(s.stack.storeDir, "plugins", "marketplaces", marketplaceCacheDirName(source))
+	storeDir, err := s.storeDirectory()
+	if err != nil {
+		return "", "", err
+	}
+	root = filepath.Join(storeDir, "plugins", "marketplaces", marketplaceCacheDirName(source))
 	if err := cloneOrRefreshGitRepo(ctx, repoURL, "", root, ""); err != nil {
 		return "", "", fmt.Errorf("plugin service: fetch marketplace %q: %w", source, err)
 	}
@@ -245,28 +280,27 @@ func (s PluginService) fetchMarketplaceRoot(ctx context.Context, source string) 
 	return root, repoURL, nil
 }
 
-func (s PluginService) resolveMarketplaceRoot(ctx context.Context, ref string) (string, error) {
+func (s Service) resolveMarketplaceRoot(ctx context.Context, ref string) (string, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return "", fmt.Errorf("plugin service: marketplace is required")
 	}
-	if s.stack != nil && s.stack.store != nil {
-		doc, err := s.stack.store.Load()
-		if err == nil {
-			if _, entry, ok := findMarketplaceConfig(doc, ref); ok {
-				if strings.TrimSpace(entry.Root) != "" {
-					if fi, statErr := os.Stat(entry.Root); statErr == nil && fi.IsDir() {
-						return entry.Root, nil
-					}
-				}
-				if strings.TrimSpace(entry.Source) != "" {
-					root, _, err := s.fetchMarketplaceRoot(ctx, entry.Source)
-					if err != nil {
-						return "", err
-					}
-					return root, nil
-				}
+	doc, err := s.loadState(ctx)
+	if err != nil {
+		return "", err
+	}
+	if _, entry, ok := findMarketplaceConfig(doc, ref); ok {
+		if strings.TrimSpace(entry.Root) != "" {
+			if fi, statErr := os.Stat(entry.Root); statErr == nil && fi.IsDir() {
+				return entry.Root, nil
 			}
+		}
+		if strings.TrimSpace(entry.Source) != "" {
+			root, _, err := s.fetchMarketplaceRoot(ctx, entry.Source)
+			if err != nil {
+				return "", err
+			}
+			return root, nil
 		}
 	}
 	if absPath, err := filepath.Abs(ref); err == nil {
@@ -278,7 +312,7 @@ func (s PluginService) resolveMarketplaceRoot(ctx context.Context, ref string) (
 	return root, err
 }
 
-func (s PluginService) resolveMarketplacePluginRoot(ctx context.Context, marketplaceRoot string, manifest pluginMarketplaceManifest, entry pluginMarketplaceEntry) (string, error) {
+func (s Service) resolveMarketplacePluginRoot(ctx context.Context, marketplaceRoot string, manifest pluginMarketplaceManifest, entry pluginMarketplaceEntry) (string, error) {
 	if len(entry.Source) == 0 {
 		return "", fmt.Errorf("plugin service: marketplace plugin %q has no source", entry.Name)
 	}
@@ -355,11 +389,15 @@ type pluginMarketplaceDependency struct {
 	Version     string
 }
 
-func (s PluginService) cloneMarketplacePluginSource(ctx context.Context, repoURL string, ref string, sha string, subpath string, cacheKey pluginInstallCacheKey) (string, error) {
+func (s Service) cloneMarketplacePluginSource(ctx context.Context, repoURL string, ref string, sha string, subpath string, cacheKey pluginInstallCacheKey) (string, error) {
 	cacheKey.RepoURL = strings.TrimSpace(repoURL)
 	cacheKey.Ref = strings.TrimSpace(firstNonEmpty(ref, sha))
 	cacheKey.Subpath = strings.TrimSpace(subpath)
-	root := filepath.Join(s.stack.storeDir, "plugins", "installed", pluginInstallCacheDirName(cacheKey))
+	storeDir, err := s.storeDirectory()
+	if err != nil {
+		return "", err
+	}
+	root := filepath.Join(storeDir, "plugins", "installed", pluginInstallCacheDirName(cacheKey))
 	if err := cloneOrRefreshGitRepo(ctx, repoURL, ref, root, sha); err != nil {
 		return "", err
 	}
@@ -369,7 +407,7 @@ func (s PluginService) cloneMarketplacePluginSource(ctx context.Context, repoURL
 	return safeJoinPluginPath(root, subpath)
 }
 
-func (s PluginService) resolveNPMSource(_ context.Context, source pluginMarketplaceSource, _ pluginInstallCacheKey) (string, error) {
+func (s Service) resolveNPMSource(_ context.Context, source pluginMarketplaceSource, _ pluginInstallCacheKey) (string, error) {
 	pkg := strings.TrimSpace(source.Package)
 	if pkg == "" {
 		return "", fmt.Errorf("plugin service: npm source is missing package")
@@ -477,27 +515,6 @@ func marketplaceVersion(manifest pluginMarketplaceManifest) string {
 	return firstNonEmpty(manifest.Version, manifest.Metadata.Version)
 }
 
-func normalizeMarketplaceNameList(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(values))
-	seen := map[string]struct{}{}
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		key := strings.ToLower(trimmed)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, trimmed)
-	}
-	return out
-}
-
 func marketplaceInfoFromConfig(entry MarketplaceConfig) MarketplaceInfo {
 	return MarketplaceInfo{
 		Name:                              entry.Name,
@@ -520,14 +537,14 @@ func marketplaceInfoFromManifest(entry MarketplaceConfig, manifest pluginMarketp
 		Root:                              entry.Root,
 		Version:                           firstNonEmpty(entry.Version, marketplaceVersion(manifest)),
 		PluginRoot:                        firstNonEmpty(entry.PluginRoot, manifest.Metadata.PluginRoot),
-		AllowCrossMarketplaceDependencies: normalizeMarketplaceNameList(append(entry.AllowCrossMarketplaceDependencies, manifest.AllowCrossMarketplaceDependencies...)),
+		AllowCrossMarketplaceDependencies: dedupeStrings(append(entry.AllowCrossMarketplaceDependencies, manifest.AllowCrossMarketplaceDependencies...)),
 		PluginCount:                       len(manifest.Plugins),
 	}
 }
 
-func findMarketplaceConfig(doc AppConfig, name string) (int, MarketplaceConfig, bool) {
+func findMarketplaceConfig(doc State, name string) (int, MarketplaceConfig, bool) {
 	name = strings.ToLower(strings.TrimSpace(name))
-	for i, entry := range doc.PluginMarketplaces {
+	for i, entry := range doc.Marketplaces {
 		if strings.ToLower(strings.TrimSpace(entry.Name)) == name {
 			return i, entry, true
 		}

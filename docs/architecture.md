@@ -102,6 +102,11 @@ Document responsibilities are intentionally separate:
   `ModelProfile` entries and never become synthetic Agents or Agent-owned
   defaults. Live ACP Session IDs remain execution state and are never persisted
   as discovery configuration.
+- `control/plugin`: Control-owned plugin configuration, manifest discovery,
+  identity, marketplace/install resolution, lifecycle mutation, and normalized
+  hook, skill, MCP server, and external Agent contributions. The application
+  host supplies only atomic persistence, active-Turn fencing, Runtime
+  replacement, and rollback through the package's narrow `Host` seam.
 - `ports/controlclient`: frozen transitional transport-neutral product-client
   commands, outcomes, bootstrap state, and Session-feed subscription contracts.
 - `internal/controlclient`: transitional implementation of Control-owned
@@ -127,10 +132,9 @@ Document responsibilities are intentionally separate:
   transitional in-process ACP/TUI command adapters. Do not add product-client
   operations to these aggregate interfaces or to `ports/*`; new capabilities
   belong in coherent `control/*` packages.
-- `ports/gateway`, `ports/plugin`, `ports/controlcommand`, and
-  `ports/controlprompt`: frozen transitional
-  product-host contracts that stay outside the SDK and migrate toward
-  `control/*` by bounded slices.
+- `ports/gateway`, `ports/controlcommand`, and `ports/controlprompt`: frozen
+  transitional product-host contracts that stay outside the SDK and migrate
+  toward `control/*` by bounded slices.
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
   product integration adapters that make external endpoints implement the same
   SDK controller/participant contracts used by built-in Agents.

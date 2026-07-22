@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/ports/plugin"
+	"github.com/caelis-labs/caelis/control/plugin"
 )
 
 const MaxHookOutputBytes = 32768

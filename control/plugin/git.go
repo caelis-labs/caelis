@@ -1,10 +1,11 @@
-package gatewayapp
+package plugin
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,32 @@ type pluginInstallCacheKey struct {
 	Subpath     string
 	Marketplace string
 	PluginName  string
+}
+
+func safePluginCacheName(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if parsed, err := url.Parse(value); err == nil && parsed.Host != "" {
+		value = parsed.Host + parsed.Path
+	}
+	var result strings.Builder
+	lastDash := false
+	for _, character := range value {
+		alphanumeric := (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9')
+		if alphanumeric {
+			result.WriteRune(character)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			result.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(result.String(), "-")
+	if out == "" {
+		return "plugin"
+	}
+	return out
 }
 
 func stableShortHash(material string) string {

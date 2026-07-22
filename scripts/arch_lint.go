@@ -476,6 +476,9 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if isMigratedRuntimePortsPackage(target) {
 		return sdkOwnedPortsImportMessage(target)
 	}
+	if target == "ports/plugin" || strings.HasPrefix(target, "ports/plugin/") {
+		return "production code must not depend on ports/plugin; use control/plugin"
+	}
 	if rule := deletedSDKImplImportRule(target); rule != "" {
 		return rule
 	}
@@ -669,8 +672,12 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "must not recreate agent-sdk/model/codefreecaps; concrete model metadata belongs to control/modelcatalog", pkg, 1
 	case pkg == "app/gatewayapp/internal/modelregistry" || strings.HasPrefix(pkg, "app/gatewayapp/internal/modelregistry/"):
 		return "must not recreate app/gatewayapp/internal/modelregistry; model configuration belongs to Control", pkg, 1
+	case pkg == "app/gatewayapp/internal/pluginregistry" || strings.HasPrefix(pkg, "app/gatewayapp/internal/pluginregistry/"):
+		return "must not recreate app/gatewayapp/internal/pluginregistry; plugin discovery belongs to control/plugin", pkg, 1
 	case pkg == "ports/agentprofile" || strings.HasPrefix(pkg, "ports/agentprofile/"):
 		return "must not recreate ports/agentprofile; user Agents belong to control/agents and fixed scenes belong to Control", pkg, 1
+	case pkg == "ports/plugin" || strings.HasPrefix(pkg, "ports/plugin/"):
+		return "must not recreate ports/plugin; plugin contracts belong to control/plugin", pkg, 1
 	}
 	if isMigratedRuntimePortsPackage(pkg) {
 		return sdkOwnedPortsCompatFileMessage(pkg), pkg, 1

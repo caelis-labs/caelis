@@ -1,4 +1,4 @@
-package pluginregistry
+package plugin
 
 import (
 	"encoding/json"
@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/caelis-labs/caelis/ports/plugin"
 )
 
 type CaelisPluginJSON struct {
@@ -76,6 +74,8 @@ type ClaudeHook struct {
 	Args    []string `json:"args"`
 }
 
+// ResolveSafePath resolves a plugin-relative path without allowing lexical or
+// symlink traversal outside the plugin root.
 func ResolveSafePath(pluginRoot, relativePath string) (string, error) {
 	cleanRoot := filepath.Clean(pluginRoot)
 	realRoot, err := filepath.EvalSymlinks(cleanRoot)
@@ -90,7 +90,7 @@ func ResolveSafePath(pluginRoot, relativePath string) (string, error) {
 
 	// 1. Lexical prefix boundary check
 	if !PathWithinRoot(cleanRoot, cleanJoined) {
-		return "", fmt.Errorf("pluginregistry: path traversal escape detected: %s escapes %s", relativePath, pluginRoot)
+		return "", fmt.Errorf("plugin manifest: path traversal escape detected: %s escapes %s", relativePath, pluginRoot)
 	}
 
 	// 2. Physical boundary check by resolving symlinks on the longest existing parent path
@@ -103,7 +103,7 @@ func ResolveSafePath(pluginRoot, relativePath string) (string, error) {
 		if err == nil {
 			realCurrent = filepath.Clean(realCurrent)
 			if !PathWithinRoot(realRoot, realCurrent) {
-				return "", fmt.Errorf("pluginregistry: path traversal escape detected (via parent symlink): %s escapes %s", relativePath, pluginRoot)
+				return "", fmt.Errorf("plugin manifest: path traversal escape detected (via parent symlink): %s escapes %s", relativePath, pluginRoot)
 			}
 			realPrefix = realCurrent
 			displayPrefix = current
@@ -130,6 +130,7 @@ func ResolveSafePath(pluginRoot, relativePath string) (string, error) {
 	return cleanJoined, nil
 }
 
+// PathWithinRoot reports whether target is root itself or a descendant.
 func PathWithinRoot(root, target string) bool {
 	root = filepath.Clean(root)
 	target = filepath.Clean(target)
@@ -164,11 +165,12 @@ func pathContainsSymlink(root, target string) bool {
 	return false
 }
 
-func ParsePlugin(root string) (plugin.InstalledPlugin, error) {
+// ParsePlugin discovers and normalizes supported manifests under root.
+func ParsePlugin(root string) (InstalledPlugin, error) {
 	root = filepath.Clean(root)
 	pluginID := strings.ToLower(filepath.Base(root))
 
-	p := plugin.InstalledPlugin{
+	p := InstalledPlugin{
 		ID:   pluginID,
 		Root: root,
 	}
@@ -181,9 +183,9 @@ func ParsePlugin(root string) (plugin.InstalledPlugin, error) {
 		hasAnyManifest = true
 		cp, err := parseCaelisPluginRaw(root, caelisPath)
 		if err != nil {
-			return plugin.InstalledPlugin{}, fmt.Errorf("pluginregistry: parse caelis manifest: %w", err)
+			return InstalledPlugin{}, fmt.Errorf("plugin manifest: parse caelis manifest: %w", err)
 		}
-		p.Kind = plugin.ManifestKindCaelis
+		p.Kind = ManifestKindCaelis
 		p.Manifest = caelisPath
 		mergeInstalledPlugin(&p, cp)
 	}
@@ -194,17 +196,17 @@ func ParsePlugin(root string) (plugin.InstalledPlugin, error) {
 		hasAnyManifest = true
 		clp, err := parseClaudePluginRaw(root, claudePath)
 		if err != nil {
-			return plugin.InstalledPlugin{}, fmt.Errorf("pluginregistry: parse claude manifest: %w", err)
+			return InstalledPlugin{}, fmt.Errorf("plugin manifest: parse claude manifest: %w", err)
 		}
 		if p.Kind == "" {
-			p.Kind = plugin.ManifestKindClaude
+			p.Kind = ManifestKindClaude
 			p.Manifest = claudePath
 		}
 		mergeInstalledPlugin(&p, clp)
 	}
 
 	if !hasAnyManifest {
-		return plugin.InstalledPlugin{}, fmt.Errorf("pluginregistry: no valid manifest found in %s", root)
+		return InstalledPlugin{}, fmt.Errorf("plugin manifest: no valid manifest found in %s", root)
 	}
 
 	// Ensure implicit skills are added if skills are empty
@@ -215,7 +217,7 @@ func ParsePlugin(root string) (plugin.InstalledPlugin, error) {
 	return p, nil
 }
 
-func mergeInstalledPlugin(dest *plugin.InstalledPlugin, src plugin.InstalledPlugin) {
+func mergeInstalledPlugin(dest *InstalledPlugin, src InstalledPlugin) {
 	if dest.Name == "" || dest.Name == dest.ID {
 		dest.Name = src.Name
 	}
@@ -231,67 +233,67 @@ func mergeInstalledPlugin(dest *plugin.InstalledPlugin, src plugin.InstalledPlug
 	dest.Agents = append(dest.Agents, src.Agents...)
 }
 
-func parseCaelisPluginRaw(root, manifestPath string) (plugin.InstalledPlugin, error) {
+func parseCaelisPluginRaw(root, manifestPath string) (InstalledPlugin, error) {
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return plugin.InstalledPlugin{}, err
+		return InstalledPlugin{}, err
 	}
 	var manifest CaelisPluginJSON
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return plugin.InstalledPlugin{}, err
+		return InstalledPlugin{}, err
 	}
 
 	pluginID := strings.ToLower(filepath.Base(root))
-	p := plugin.InstalledPlugin{
+	p := InstalledPlugin{
 		ID:          pluginID,
 		Name:        firstNonEmpty(manifest.Name, pluginID),
 		Version:     manifest.Version,
 		Root:        root,
 		Manifest:    manifestPath,
-		Kind:        plugin.ManifestKindCaelis,
+		Kind:        ManifestKindCaelis,
 		Description: manifest.Description,
 	}
 
 	skills, err := skillContributionsFromObjects(root, pluginID, manifest.Skills)
 	if err != nil {
-		return plugin.InstalledPlugin{}, err
+		return InstalledPlugin{}, err
 	}
 	p.Skills = append(p.Skills, skills...)
 
 	hooks, err := caelisHooksFromManifest(root, pluginID, manifest.Hooks)
 	if err != nil {
-		return plugin.InstalledPlugin{}, err
+		return InstalledPlugin{}, err
 	}
 	p.Hooks = append(p.Hooks, hooks...)
 
 	mcpSpecs, err := mcpServerSpecsFromMap(root, pluginID, manifest.MCPServers)
 	if err != nil {
-		return plugin.InstalledPlugin{}, err
+		return InstalledPlugin{}, err
 	}
 	p.MCPServers = append(p.MCPServers, mcpSpecs...)
 
 	agents, err := agentContributionsFromManifest(root, manifest.Agents)
 	if err != nil {
-		return plugin.InstalledPlugin{}, err
+		return InstalledPlugin{}, err
 	}
 	p.Agents = append(p.Agents, agents...)
 
 	return p, nil
 }
 
-func buildMCPServerSpec(root, pluginID, name string, mcp CaelisMCPServerSpec) (plugin.MCPServerSpec, error) {
-	transport := plugin.NormalizeMCPTransport(firstNonEmpty(mcp.Transport, mcp.Type), mcp.Command, mcp.URL)
+func buildMCPServerSpec(root, pluginID, name string, mcp CaelisMCPServerSpec) (MCPServerSpec, error) {
+	transport := NormalizeMCPTransport(firstNonEmpty(mcp.Transport, mcp.Type), mcp.Command, mcp.URL)
 	resolvedWorkDir := ""
 	if mcp.WorkDir != "" {
 		var err error
 		resolvedWorkDir, err = ResolveSafePath(root, mcp.WorkDir)
 		if err != nil {
-			return plugin.MCPServerSpec{}, fmt.Errorf("pluginregistry: invalid workDir %q: %w", mcp.WorkDir, err)
+			return MCPServerSpec{}, fmt.Errorf("plugin manifest: invalid workDir %q: %w", mcp.WorkDir, err)
 		}
-	} else if transport == plugin.MCPTransportStdio {
+	} else if transport == MCPTransportStdio {
 		resolvedWorkDir = root
 	}
-	return plugin.MCPServerSpec{
+	return MCPServerSpec{
 		PluginID:  pluginID,
 		Name:      name,
 		Transport: transport,
@@ -304,41 +306,41 @@ func buildMCPServerSpec(root, pluginID, name string, mcp CaelisMCPServerSpec) (p
 	}, nil
 }
 
-func parseClaudePluginRaw(root, manifestPath string) (plugin.InstalledPlugin, error) {
+func parseClaudePluginRaw(root, manifestPath string) (InstalledPlugin, error) {
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return plugin.InstalledPlugin{}, err
+		return InstalledPlugin{}, err
 	}
 	var manifest ClaudePluginJSON
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return plugin.InstalledPlugin{}, err
+		return InstalledPlugin{}, err
 	}
 
 	pluginID := strings.ToLower(filepath.Base(root))
-	p := plugin.InstalledPlugin{
+	p := InstalledPlugin{
 		ID:          pluginID,
 		Name:        firstNonEmpty(manifest.Name, pluginID),
 		Version:     manifest.Version,
 		Root:        root,
 		Manifest:    manifestPath,
-		Kind:        plugin.ManifestKindClaude,
+		Kind:        ManifestKindClaude,
 		Description: manifest.Description,
 	}
 
 	hooks, err := parseHooksFile(root, pluginID)
 	if err != nil {
-		return plugin.InstalledPlugin{}, err
+		return InstalledPlugin{}, err
 	}
 	p.Hooks = append(p.Hooks, hooks...)
 
 	return p, nil
 }
 
-func skillContributionsFromObjects(root, pluginID string, objects []CaelisSkillContribution) ([]plugin.SkillContribution, error) {
+func skillContributionsFromObjects(root, pluginID string, objects []CaelisSkillContribution) ([]SkillContribution, error) {
 	if len(objects) == 0 {
 		return nil, nil
 	}
-	out := make([]plugin.SkillContribution, 0, len(objects))
+	out := make([]SkillContribution, 0, len(objects))
 	for _, sc := range objects {
 		if strings.TrimSpace(sc.Root) == "" {
 			continue
@@ -351,7 +353,7 @@ func skillContributionsFromObjects(root, pluginID string, objects []CaelisSkillC
 		if namespace == "" {
 			namespace = pluginID
 		}
-		out = append(out, plugin.SkillContribution{
+		out = append(out, SkillContribution{
 			Namespace: namespace,
 			Root:      resolvedRoot,
 			Disabled:  append([]string(nil), sc.Disabled...),
@@ -360,25 +362,25 @@ func skillContributionsFromObjects(root, pluginID string, objects []CaelisSkillC
 	return out, nil
 }
 
-func caelisHooksFromManifest(root, pluginID string, hooks map[string][]CaelisHookSpec) ([]plugin.HookSpec, error) {
+func caelisHooksFromManifest(root, pluginID string, hooks map[string][]CaelisHookSpec) ([]HookSpec, error) {
 	if len(hooks) == 0 {
 		return nil, nil
 	}
-	var out []plugin.HookSpec
+	var out []HookSpec
 	for _, eventName := range sortedKeys(hooks) {
-		event := plugin.HookEvent(eventName)
+		event := HookEvent(eventName)
 		for _, spec := range hooks[eventName] {
 			var resolvedWorkDir string
 			if spec.WorkDir != "" {
 				var err error
 				resolvedWorkDir, err = ResolveSafePath(root, spec.WorkDir)
 				if err != nil {
-					return nil, fmt.Errorf("pluginregistry: invalid workDir %q: %w", spec.WorkDir, err)
+					return nil, fmt.Errorf("plugin manifest: invalid workDir %q: %w", spec.WorkDir, err)
 				}
 			} else {
 				resolvedWorkDir = root
 			}
-			out = append(out, plugin.HookSpec{
+			out = append(out, HookSpec{
 				PluginID:   pluginID,
 				Event:      event,
 				Command:    spec.Command,
@@ -394,11 +396,11 @@ func caelisHooksFromManifest(root, pluginID string, hooks map[string][]CaelisHoo
 	return out, nil
 }
 
-func parseHooksFile(root, pluginID string) ([]plugin.HookSpec, error) {
+func parseHooksFile(root, pluginID string) ([]HookSpec, error) {
 	return parseHooksFileAt(root, pluginID, filepath.Join(root, "hooks", "hooks.json"), false)
 }
 
-func parseHooksFileAt(root, pluginID string, hooksPath string, required bool) ([]plugin.HookSpec, error) {
+func parseHooksFileAt(root, pluginID string, hooksPath string, required bool) ([]HookSpec, error) {
 	hooksData, err := os.ReadFile(hooksPath)
 	if err != nil {
 		if !required && os.IsNotExist(err) {
@@ -410,10 +412,10 @@ func parseHooksFileAt(root, pluginID string, hooksPath string, required bool) ([
 	if err := json.Unmarshal(hooksData, &hookManifest); err != nil {
 		return nil, fmt.Errorf("decode hooks.json: %w", err)
 	}
-	var out []plugin.HookSpec
+	var out []HookSpec
 	for _, eventName := range sortedKeys(hookManifest.Hooks) {
 		groups := hookManifest.Hooks[eventName]
-		event := plugin.HookEvent(eventName)
+		event := HookEvent(eventName)
 		for _, group := range groups {
 			for _, hook := range group.Hooks {
 				cmd, args, err := SplitCommand(hook.Command)
@@ -423,7 +425,7 @@ func parseHooksFileAt(root, pluginID string, hooksPath string, required bool) ([
 				if len(hook.Args) > 0 {
 					args = append(args, hook.Args...)
 				}
-				out = append(out, plugin.HookSpec{
+				out = append(out, HookSpec{
 					PluginID:   pluginID,
 					Event:      event,
 					Command:    cmd,
@@ -438,11 +440,11 @@ func parseHooksFileAt(root, pluginID string, hooksPath string, required bool) ([
 	return out, nil
 }
 
-func mcpServerSpecsFromMap(root, pluginID string, servers map[string]CaelisMCPServerSpec) ([]plugin.MCPServerSpec, error) {
+func mcpServerSpecsFromMap(root, pluginID string, servers map[string]CaelisMCPServerSpec) ([]MCPServerSpec, error) {
 	if len(servers) == 0 {
 		return nil, nil
 	}
-	out := make([]plugin.MCPServerSpec, 0, len(servers))
+	out := make([]MCPServerSpec, 0, len(servers))
 	for _, name := range sortedKeys(servers) {
 		spec, err := buildMCPServerSpec(root, pluginID, name, servers[name])
 		if err != nil {
@@ -453,23 +455,23 @@ func mcpServerSpecsFromMap(root, pluginID string, servers map[string]CaelisMCPSe
 	return out, nil
 }
 
-func agentContributionsFromManifest(root string, agents []CaelisAgentContribution) ([]plugin.AgentContribution, error) {
+func agentContributionsFromManifest(root string, agents []CaelisAgentContribution) ([]AgentContribution, error) {
 	if len(agents) == 0 {
 		return nil, nil
 	}
-	out := make([]plugin.AgentContribution, 0, len(agents))
+	out := make([]AgentContribution, 0, len(agents))
 	for _, agent := range agents {
 		var resolvedWorkDir string
 		if agent.WorkDir != "" {
 			var err error
 			resolvedWorkDir, err = ResolveSafePath(root, agent.WorkDir)
 			if err != nil {
-				return nil, fmt.Errorf("pluginregistry: invalid workDir %q: %w", agent.WorkDir, err)
+				return nil, fmt.Errorf("plugin manifest: invalid workDir %q: %w", agent.WorkDir, err)
 			}
 		} else {
 			resolvedWorkDir = root
 		}
-		out = append(out, plugin.AgentContribution{
+		out = append(out, AgentContribution{
 			Name:        agent.Name,
 			Description: agent.Description,
 			Command:     agent.Command,
@@ -558,7 +560,7 @@ func SplitCommand(cmdLine string) (string, []string, error) {
 	return args[0], args[1:], nil
 }
 
-func addImplicitSkills(root, pluginID string, p *plugin.InstalledPlugin) {
+func addImplicitSkills(root, pluginID string, p *InstalledPlugin) {
 	for _, skillsDir := range []string{
 		filepath.Join(root, "skills"),
 		filepath.Join(root, ".claude", "skills"),
@@ -566,7 +568,7 @@ func addImplicitSkills(root, pluginID string, p *plugin.InstalledPlugin) {
 		if info, err := os.Stat(skillsDir); err != nil || !info.IsDir() {
 			continue
 		}
-		p.Skills = append(p.Skills, plugin.SkillContribution{
+		p.Skills = append(p.Skills, SkillContribution{
 			Namespace: pluginID,
 			Root:      skillsDir,
 		})

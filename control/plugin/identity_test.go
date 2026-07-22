@@ -1,11 +1,9 @@
-package gatewayapp
+package plugin
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	pluginapi "github.com/caelis-labs/caelis/ports/plugin"
 )
 
 func TestPluginConfigID(t *testing.T) {
@@ -64,11 +62,11 @@ func TestUpsertLocalPluginConfigMatchesByIDOnly(t *testing.T) {
 
 	otherRoot := filepath.Join(t.TempDir(), "other")
 	pluginRoot := filepath.Join(t.TempDir(), "plugin")
-	doc := AppConfig{Plugins: []PluginConfig{
+	doc := State{Plugins: []Config{
 		{ID: "drawio", Root: otherRoot, Name: "other"},
 		{ID: "claude-code", Root: pluginRoot, Name: "old"},
 	}}
-	next := PluginConfig{ID: "drawio", Root: pluginRoot, Name: "new"}
+	next := Config{ID: "drawio", Root: pluginRoot, Name: "new"}
 
 	upsertLocalPluginConfig(&doc, next)
 
@@ -88,11 +86,11 @@ func TestUpsertMarketplacePluginConfigMatchesRootBeforeID(t *testing.T) {
 
 	otherRoot := filepath.Join(t.TempDir(), "other")
 	pluginRoot := filepath.Join(t.TempDir(), "plugin")
-	doc := AppConfig{Plugins: []PluginConfig{
+	doc := State{Plugins: []Config{
 		{ID: "unrelated", Root: otherRoot, Name: "other"},
 		{ID: "claude-code", Root: pluginRoot, Name: "old"},
 	}}
-	next := PluginConfig{ID: "drawio", Root: pluginRoot, Name: "new"}
+	next := Config{ID: "drawio", Root: pluginRoot, Name: "new"}
 
 	if err := upsertMarketplacePluginConfig(&doc, next); err != nil {
 		t.Fatalf("upsertMarketplacePluginConfig() error = %v", err)
@@ -113,11 +111,11 @@ func TestUpsertMarketplacePluginConfigRejectsIDCollision(t *testing.T) {
 
 	otherRoot := filepath.Join(t.TempDir(), "other")
 	pluginRoot := filepath.Join(t.TempDir(), "plugin")
-	doc := AppConfig{Plugins: []PluginConfig{
+	doc := State{Plugins: []Config{
 		{ID: "drawio", Root: otherRoot, Name: "other"},
 		{ID: "claude-code", Root: pluginRoot, Name: "old"},
 	}}
-	next := PluginConfig{ID: "drawio", Root: pluginRoot, Name: "new"}
+	next := Config{ID: "drawio", Root: pluginRoot, Name: "new"}
 
 	if err := upsertMarketplacePluginConfig(&doc, next); err == nil {
 		t.Fatal("upsertMarketplacePluginConfig() error = nil, want ID collision")
@@ -132,10 +130,10 @@ func TestUpsertMarketplacePluginConfigUpdatesSameIDAtNewRoot(t *testing.T) {
 
 	oldRoot := filepath.Join(t.TempDir(), "old")
 	newRoot := filepath.Join(t.TempDir(), "new")
-	doc := AppConfig{Plugins: []PluginConfig{
+	doc := State{Plugins: []Config{
 		{ID: "drawio", Root: oldRoot, Name: "old"},
 	}}
-	next := PluginConfig{ID: "drawio", Root: newRoot, Name: "new"}
+	next := Config{ID: "drawio", Root: newRoot, Name: "new"}
 
 	if err := upsertMarketplacePluginConfig(&doc, next); err != nil {
 		t.Fatalf("upsertMarketplacePluginConfig() error = %v", err)
@@ -148,9 +146,9 @@ func TestUpsertMarketplacePluginConfigUpdatesSameIDAtNewRoot(t *testing.T) {
 func TestPluginWithConfiguredIDRewritesRuntimeContributionIDs(t *testing.T) {
 	t.Parallel()
 
-	p := pluginapi.InstalledPlugin{
+	p := InstalledPlugin{
 		ID: "claude-code",
-		Skills: []pluginapi.SkillContribution{
+		Skills: []SkillContribution{
 			{
 				Namespace: "claude-code",
 				Root:      "/tmp/plugin/skills",
@@ -162,11 +160,11 @@ func TestPluginWithConfiguredIDRewritesRuntimeContributionIDs(t *testing.T) {
 				Disabled:  []string{"claude-code:custom-local"},
 			},
 		},
-		Hooks: []pluginapi.HookSpec{{
+		Hooks: []HookSpec{{
 			PluginID: "claude-code",
-			Event:    pluginapi.HookEventSessionStart,
+			Event:    HookEventSessionStart,
 		}},
-		MCPServers: []pluginapi.MCPServerSpec{{
+		MCPServers: []MCPServerSpec{{
 			PluginID: "claude-code",
 			Name:     "drawio",
 		}},

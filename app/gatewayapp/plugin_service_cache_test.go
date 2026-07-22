@@ -23,8 +23,20 @@ func TestPluginServiceRemoveOnlyDeletesManagedInstallCache(t *testing.T) {
 	cacheRoot := filepath.Join(storeDir, "plugins", "installed", "cached-plugin")
 	managedPlugin := filepath.Join(cacheRoot, "plugin")
 	buildMinimalPluginDir(t, managedPlugin, `{"name":"managed","version":"1.0.0"}`)
-	if _, err := stack.Plugins().addPath(ctx, managedPlugin, pluginAddPathOptions{Managed: true, CacheRoot: cacheRoot}); err != nil {
-		t.Fatalf("add managed plugin: %v", err)
+	doc, err := stack.store.Load()
+	if err != nil {
+		t.Fatalf("load plugin config: %v", err)
+	}
+	doc.Plugins = []PluginConfig{{
+		ID:        "plugin",
+		Name:      "managed",
+		Root:      managedPlugin,
+		Enabled:   false,
+		Managed:   true,
+		CacheRoot: cacheRoot,
+	}}
+	if err := stack.store.Save(doc); err != nil {
+		t.Fatalf("save managed plugin config: %v", err)
 	}
 	if err := stack.Plugins().Remove(ctx, "plugin"); err != nil {
 		t.Fatalf("Remove(managed) error = %v", err)
