@@ -80,7 +80,7 @@ func TestEventLogCacheInvalidatesAfterTruncateAndKeepsResultsIsolated(t *testing
 	if !ok {
 		t.Fatalf("checkpoint seq %d missing", first.NextSeq)
 	}
-	if err := rollbackEventLogAppend(logPath, checkpoint.Offset); err != nil {
+	if err := rollbackEventLogAppend(store.durability, logPath, checkpoint.Offset); err != nil {
 		t.Fatal(err)
 	}
 

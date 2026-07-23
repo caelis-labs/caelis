@@ -68,8 +68,6 @@ func buildMarketplaceInstallFixture(t *testing.T, tmp string, fixture marketplac
 }
 
 func TestPluginServiceInstallFromClaudeMarketplaceDirectory(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
@@ -102,8 +100,6 @@ func TestPluginServiceInstallFromClaudeMarketplaceDirectory(t *testing.T) {
 }
 
 func TestPluginServiceInstallFromMarketplaceUsesEntryNameWhenSourceDirDiffers(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
@@ -149,8 +145,6 @@ func TestPluginServiceInstallFromMarketplaceUsesEntryNameWhenSourceDirDiffers(t 
 }
 
 func TestPluginServiceMarketplaceInstallRenamesExistingSameRoot(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
@@ -202,8 +196,6 @@ func TestPluginServiceMarketplaceInstallRenamesExistingSameRoot(t *testing.T) {
 }
 
 func TestPluginServiceMarketplaceInstallUpdatesSameIDAtNewRoot(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
@@ -253,8 +245,6 @@ func TestPluginServiceMarketplaceInstallUpdatesSameIDAtNewRoot(t *testing.T) {
 }
 
 func TestPluginServiceMarketplaceInstallRejectsIDCollisionOnRootRename(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")

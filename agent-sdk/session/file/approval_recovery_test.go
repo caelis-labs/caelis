@@ -343,10 +343,12 @@ func TestPendingApprovalsReleasesLocksBetweenLegacySessions(t *testing.T) {
 }
 
 func TestPendingApprovalsUsesStableNamespaceSnapshotWithoutRecoveryScanAmplification(t *testing.T) {
+	// This high-cardinality test exercises snapshot/recovery ordering; crash
+	// durability and sync failure classification have dedicated coverage.
 	root := t.TempDir()
 	base := time.Date(2026, time.July, 13, 12, 0, 0, 0, time.UTC)
 	var recoveryScans atomic.Int64
-	setupStore := NewStore(Config{RootDir: root, Clock: func() time.Time { return base }})
+	setupStore := newLogicalTestStore(t, Config{RootDir: root, Clock: func() time.Time { return base }})
 	setupStore.transactionRecoveryScan = func() { recoveryScans.Add(1) }
 	setup := setupStore
 	ctx := context.Background()
@@ -370,12 +372,12 @@ func TestPendingApprovalsUsesStableNamespaceSnapshotWithoutRecoveryScanAmplifica
 		t.Fatal(err)
 	}
 
-	recoveryStore := NewStore(Config{RootDir: root})
+	recoveryStore := newLogicalTestStore(t, Config{RootDir: root})
 	recoveryStore.transactionRecoveryScan = func() { recoveryScans.Add(1) }
 	var reorderOnce sync.Once
 	recoveryStore.approvalRecoverySessionDone = func(session.SessionRef) {
 		reorderOnce.Do(func() {
-			mutator := NewStore(Config{RootDir: root, Clock: func() time.Time { return base.Add(time.Hour) }})
+			mutator := newLogicalTestStore(t, Config{RootDir: root, Clock: func() time.Time { return base.Add(time.Hour) }})
 			if _, err := mutator.ReplaceState(context.Background(), session.ReplaceStateRequest{
 				SessionRef:    target.SessionRef,
 				State:         map[string]any{"reordered": true},

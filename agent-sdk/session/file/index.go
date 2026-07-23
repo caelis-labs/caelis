@@ -166,7 +166,7 @@ func (s *Store) upsertSessionIndex(sess session.Session, documentPath string) er
 	if err != nil {
 		return fmt.Errorf("agent-sdk/session/file: upsert session index: %w", err)
 	}
-	return syncDir(filepath.Dir(s.sessionIndexPath()))
+	return s.durability.SyncDirectory(filepath.Dir(s.sessionIndexPath()))
 }
 
 func (s *Store) sessionIndexEntry(sess session.Session, documentPath string) sessionIndexEntry {
@@ -266,6 +266,10 @@ func (s *Store) openSessionIndex() (*sql.DB, error) {
 	if _, err := db.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("agent-sdk/session/file: configure session index busy timeout: %w", err)
+	}
+	if err := s.durability.ConfigureSQLite(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("agent-sdk/session/file: configure session index durability: %w", err)
 	}
 	if err := ensureSessionIndexSchema(db); err != nil {
 		db.Close()

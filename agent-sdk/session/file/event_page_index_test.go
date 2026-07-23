@@ -146,7 +146,7 @@ func TestEventsPageCheckpointInvalidatesAfterTruncate(t *testing.T) {
 	if !ok {
 		t.Fatalf("checkpoint seq 100 missing: %#v", index)
 	}
-	if err := rollbackEventLogAppend(logPath, checkpoint.Offset); err != nil {
+	if err := rollbackEventLogAppend(store.durability, logPath, checkpoint.Offset); err != nil {
 		t.Fatal(err)
 	}
 

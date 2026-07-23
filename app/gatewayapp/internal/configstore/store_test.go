@@ -18,6 +18,29 @@ import (
 func TestAtomicWriteFileCommitBoundary(t *testing.T) {
 	t.Parallel()
 
+	t.Run("temporary file fsync", func(t *testing.T) {
+		t.Parallel()
+
+		path := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		fault := errors.New("temporary file fsync failed")
+		err := AtomicWriteFile(path, []byte("new"), 0o600, AtomicWriteOps{
+			SyncFile: func(*os.File) error { return fault },
+		})
+		if !errors.Is(err, fault) || WriteCommitted(err) {
+			t.Fatalf("AtomicWriteFile() error = %v, want uncommitted %v", err, fault)
+		}
+		got, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if string(got) != "old" {
+			t.Fatalf("destination = %q, want original content", got)
+		}
+	})
+
 	for name, writeOps := range map[string]func(string, error) AtomicWriteOps{
 		"destination chmod": func(path string, fault error) AtomicWriteOps {
 			return AtomicWriteOps{Chmod: func(candidate string, mode os.FileMode) error {
@@ -223,6 +246,13 @@ func TestStoreSetPathConcurrentWithLoadSave(t *testing.T) {
 	store := New(root)
 	if store == nil {
 		t.Fatal("New() = nil")
+	}
+	// This test exercises Store locking and atomic path replacement, not the
+	// durability barriers covered by TestAtomicWriteFileCommitBoundary. Avoid
+	// making its 400 deliberately contended writes depend on host fsync speed.
+	store.writeOps = AtomicWriteOps{
+		SyncFile: func(*os.File) error { return nil },
+		FsyncDir: func(string) error { return nil },
 	}
 	paths := []string{
 		filepath.Join(root, "one", "config.json"),

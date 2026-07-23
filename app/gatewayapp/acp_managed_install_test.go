@@ -300,7 +300,7 @@ func writeManagedACPAdapterFiles(t *testing.T, root string, pkg builtinACPAdapte
 	if err := os.MkdirAll(filepath.Dir(bin), 0o700); err != nil {
 		t.Fatalf("MkdirAll(bin) error = %v", err)
 	}
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := os.WriteFile(bin, []byte("test executable fixture\n"), 0o700); err != nil {
 		t.Fatalf("WriteFile(bin) error = %v", err)
 	}
 }

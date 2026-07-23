@@ -1138,6 +1138,8 @@ func TestStoreAppendTruncatesPartialFinalEventLogRecordBeforeWriting(t *testing.
 }
 
 func TestStoreConcurrentWritersPreserveSessionIndexAcrossStoreInstances(t *testing.T) {
+	// This stress test targets SQLite/Store serialization and complete logical
+	// readback, not host fsync latency or crash-boundary classification.
 	root := t.TempDir()
 	ctx := context.Background()
 	const writers = 32
@@ -1151,7 +1153,7 @@ func TestStoreConcurrentWritersPreserveSessionIndexAcrossStoreInstances(t *testi
 		go func() {
 			defer wg.Done()
 			<-start
-			store := NewStore(Config{
+			store := newLogicalTestStore(t, Config{
 				RootDir: root,
 				Clock: func() time.Time {
 					return baseTime.Add(time.Duration(i) * time.Second)
@@ -1182,7 +1184,7 @@ func TestStoreConcurrentWritersPreserveSessionIndexAcrossStoreInstances(t *testi
 		}
 	}
 
-	list, err := NewStore(Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
+	list, err := newLogicalTestStore(t, Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		WorkspaceKey: "ws-1",
@@ -1197,10 +1199,12 @@ func TestStoreConcurrentWritersPreserveSessionIndexAcrossStoreInstances(t *testi
 }
 
 func TestStoreConcurrentReadersAndWritersAcrossStoreInstances(t *testing.T) {
+	// This stress test targets cross-Store locking and logical persistence;
+	// durability barrier failures have focused coverage.
 	root := t.TempDir()
 	ctx := context.Background()
 	baseTime := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
-	baseStore := NewStore(Config{
+	baseStore := newLogicalTestStore(t, Config{
 		RootDir: root,
 		Clock:   func() time.Time { return baseTime },
 	})
@@ -1228,7 +1232,7 @@ func TestStoreConcurrentReadersAndWritersAcrossStoreInstances(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			store := NewStore(Config{
+			store := newLogicalTestStore(t, Config{
 				RootDir: root,
 				Clock: func() time.Time {
 					return baseTime.Add(time.Duration(i+1) * time.Second)
@@ -1267,7 +1271,7 @@ func TestStoreConcurrentReadersAndWritersAcrossStoreInstances(t *testing.T) {
 		}
 	}
 
-	list, err := NewStore(Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
+	list, err := newLogicalTestStore(t, Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		WorkspaceKey: "ws-1",
@@ -1284,8 +1288,10 @@ func TestStoreConcurrentReadersAndWritersAcrossStoreInstances(t *testing.T) {
 func TestStoreLargeEventListRoundTrip(t *testing.T) {
 	t.Parallel()
 
+	// This high-cardinality test preserves sequential append/readback coverage;
+	// it does not claim to test crash durability on every append.
 	root := t.TempDir()
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-large" },
 	})
@@ -1301,17 +1307,20 @@ func TestStoreLargeEventListRoundTrip(t *testing.T) {
 	const eventCount = 40
 	for i := 0; i < eventCount; i++ {
 		msg := model.NewTextMessage(model.RoleUser, "large event "+strings.Repeat("x", 128))
-		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
-			Type:       session.EventTypeUser,
-			Visibility: session.VisibilityCanonical,
-			Message:    &msg,
-			Text:       msg.TextContent(),
-		}}); err != nil {
+		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{
+			SessionRef: createdSession.SessionRef,
+			Event: &session.Event{
+				Type:       session.EventTypeUser,
+				Visibility: session.VisibilityCanonical,
+				Message:    &msg,
+				Text:       msg.TextContent(),
+			},
+		}); err != nil {
 			t.Fatalf("AppendEvent(%d) error = %v", i, err)
 		}
 	}
 
-	reloaded := NewStore(Config{RootDir: root})
+	reloaded := newLogicalTestStore(t, Config{RootDir: root})
 	events, err := reloaded.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
 	if err != nil {
 		t.Fatalf("Events(reloaded) error = %v", err)

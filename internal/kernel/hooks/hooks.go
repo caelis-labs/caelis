@@ -19,6 +19,21 @@ import (
 
 const MaxHookOutputBytes = 32768
 
+type runOptions struct {
+	shellFallback func(script string, args []string) (string, []string)
+}
+
+func defaultShellFallbackCommand(script string, args []string) (string, []string) {
+	return "/bin/sh", append([]string{script}, args...)
+}
+
+func (options runOptions) shellFallbackCommand(script string, args []string) (string, []string) {
+	if options.shellFallback != nil {
+		return options.shellFallback(script, args)
+	}
+	return defaultShellFallbackCommand(script, args)
+}
+
 type maxBytesWriter struct {
 	w         io.Writer
 	limit     int
@@ -65,6 +80,10 @@ type RunResult struct {
 
 // Run executes a HookSpec with the provided context, session, and workspace directory.
 func Run(ctx context.Context, spec plugin.HookSpec, sessionRef session.SessionRef, workspaceCWD string) RunResult {
+	return run(ctx, spec, sessionRef, workspaceCWD, runOptions{})
+}
+
+func run(ctx context.Context, spec plugin.HookSpec, sessionRef session.SessionRef, workspaceCWD string, options runOptions) RunResult {
 	timeout := 10 * time.Second
 	if spec.Timeout != "" {
 		if d, err := time.ParseDuration(spec.Timeout); err == nil {
@@ -168,7 +187,8 @@ func Run(ctx context.Context, spec plugin.HookSpec, sessionRef session.SessionRe
 		stderrBuf.Reset()
 		stdoutLimitWriter = &maxBytesWriter{w: &stdoutBuf, limit: MaxHookOutputBytes}
 		stderrLimitWriter = &maxBytesWriter{w: &stderrBuf, limit: MaxHookOutputBytes}
-		err = newCmd("/bin/sh", append([]string{cmdName}, cmdArgs...)).Run()
+		shellName, shellArgs := options.shellFallbackCommand(cmdName, cmdArgs)
+		err = newCmd(shellName, shellArgs).Run()
 	}
 	if runCtx.Err() != nil {
 		err = fmt.Errorf("plugin hooks: timeout after %s: %w", timeout, runCtx.Err())

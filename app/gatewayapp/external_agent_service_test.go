@@ -390,7 +390,7 @@ func storedACPAgentInfo(values []ACPAgentInfo, name string) (ACPAgentInfo, bool)
 func writeExternalAgentExecutable(t *testing.T, dir string, name string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := os.WriteFile(path, []byte("test executable fixture\n"), 0o700); err != nil {
 		t.Fatalf("WriteFile(%s) error = %v", path, err)
 	}
 	abs, err := filepath.Abs(path)

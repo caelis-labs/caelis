@@ -45,7 +45,7 @@ func (s *Store) appendEventLogTransaction(documentPath string, events []*session
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, err
 	}
-	if err := truncatePartialEventLogTail(path); err != nil {
+	if err := truncatePartialEventLogTail(s.durability, path); err != nil {
 		return nil, err
 	}
 	var buf bytes.Buffer
@@ -69,33 +69,35 @@ func (s *Store) appendEventLogTransaction(documentPath string, events []*session
 		if err == nil {
 			err = io.ErrShortWrite
 		}
-		_ = file.Truncate(offset)
-		_ = file.Sync()
-		file.Close()
-		return nil, err
+		return nil, errors.Join(err, rollbackOpenEventLogAppend(s.durability, file, offset))
 	}
-	if err := file.Sync(); err != nil {
-		_ = file.Truncate(offset)
-		file.Close()
-		return nil, err
+	if syncErr := s.durability.SyncFile(file); syncErr != nil {
+		return nil, errors.Join(syncErr, rollbackOpenEventLogAppend(s.durability, file, offset))
 	}
 	if err := file.Close(); err != nil {
 		return nil, err
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
-		_ = rollbackEventLogAppend(path, offset)
-		return nil, err
+		return nil, errors.Join(err, rollbackEventLogAppend(s.durability, path, offset))
 	}
-	if err := syncDir(dir); err != nil {
-		_ = rollbackEventLogAppend(path, offset)
-		return nil, err
+	if err := s.durability.SyncDirectory(dir); err != nil {
+		return nil, errors.Join(err, rollbackEventLogAppend(s.durability, path, offset))
 	}
 	return func() error {
-		return rollbackEventLogAppend(path, offset)
+		return rollbackEventLogAppend(s.durability, path, offset)
 	}, nil
 }
 
-func rollbackEventLogAppend(path string, offset int64) error {
+func rollbackOpenEventLogAppend(durability durabilityOps, file *os.File, offset int64) error {
+	truncateErr := file.Truncate(offset)
+	var syncErr error
+	if truncateErr == nil {
+		syncErr = durability.SyncFile(file)
+	}
+	return errors.Join(truncateErr, syncErr, file.Close())
+}
+
+func rollbackEventLogAppend(durability durabilityOps, path string, offset int64) error {
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		if os.IsNotExist(err) && offset == 0 {
@@ -107,14 +109,14 @@ func rollbackEventLogAppend(path string, offset int64) error {
 		file.Close()
 		return err
 	}
-	if err := file.Sync(); err != nil {
+	if err := durability.SyncFile(file); err != nil {
 		file.Close()
 		return err
 	}
 	if err := file.Close(); err != nil {
 		return err
 	}
-	return syncDir(filepath.Dir(path))
+	return durability.SyncDirectory(filepath.Dir(path))
 }
 
 func (s *Store) readEventLog(documentPath string) ([]*session.Event, error) {
@@ -316,7 +318,7 @@ func rejectUnsupportedLegacyEventLogLine(data []byte, path string, lineNo int) e
 	return nil
 }
 
-func truncatePartialEventLogTail(path string) error {
+func truncatePartialEventLogTail(durability durabilityOps, path string) error {
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -358,14 +360,14 @@ func truncatePartialEventLogTail(path string) error {
 				if err := file.Truncate(offset + int64(i) + 1); err != nil {
 					return err
 				}
-				return file.Sync()
+				return durability.SyncFile(file)
 			}
 		}
 	}
 	if err := file.Truncate(0); err != nil {
 		return err
 	}
-	return file.Sync()
+	return durability.SyncFile(file)
 }
 
 func (s *Store) readEventLogIDs(documentPath string) (map[string]bool, error) {

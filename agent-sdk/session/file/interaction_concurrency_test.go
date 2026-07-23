@@ -12,10 +12,12 @@ import (
 )
 
 func TestSessionInteractionsProgressWithConcurrentWriterReaderAndLeaseHeartbeat(t *testing.T) {
+	// This stress test proves lock progress and durable logical readback; host
+	// sync latency and crash-boundary classification are tested separately.
 	root := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	primary := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "active-session" }})
+	primary := newLogicalTestStore(t, Config{RootDir: root, SessionIDGenerator: func() string { return "active-session" }})
 	active, err := primary.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws-1"},
 	})
@@ -51,7 +53,7 @@ func TestSessionInteractionsProgressWithConcurrentWriterReaderAndLeaseHeartbeat(
 	}
 
 	run(func(opCtx context.Context) error {
-		service := NewStore(Config{RootDir: root})
+		service := newLogicalTestStore(t, Config{RootDir: root})
 		current := lease
 		for i := 0; i < 10; i++ {
 			var next session.SessionLease
@@ -71,7 +73,7 @@ func TestSessionInteractionsProgressWithConcurrentWriterReaderAndLeaseHeartbeat(
 		return nil
 	})
 	run(func(opCtx context.Context) error {
-		service := NewStore(Config{RootDir: root})
+		service := newLogicalTestStore(t, Config{RootDir: root})
 		for i := 0; i < 20; i++ {
 			err := measure(func() error {
 				_, appendErr := service.AppendEvent(opCtx, session.AppendEventRequest{
@@ -91,7 +93,7 @@ func TestSessionInteractionsProgressWithConcurrentWriterReaderAndLeaseHeartbeat(
 		return nil
 	})
 	run(func(opCtx context.Context) error {
-		service := NewStore(Config{RootDir: root})
+		service := newLogicalTestStore(t, Config{RootDir: root})
 		for i := 0; i < 20; i++ {
 			err := measure(func() error {
 				_, pageErr := service.EventsPage(opCtx, session.EventPageRequest{
@@ -106,7 +108,7 @@ func TestSessionInteractionsProgressWithConcurrentWriterReaderAndLeaseHeartbeat(
 		return nil
 	})
 	run(func(opCtx context.Context) error {
-		service := NewStore(Config{RootDir: root})
+		service := newLogicalTestStore(t, Config{RootDir: root})
 		err := measure(func() error {
 			_, startErr := service.StartSession(opCtx, session.StartSessionRequest{
 				AppName: "caelis", UserID: "user-1", PreferredSessionID: "new-session",
@@ -120,7 +122,7 @@ func TestSessionInteractionsProgressWithConcurrentWriterReaderAndLeaseHeartbeat(
 		return nil
 	})
 	run(func(opCtx context.Context) error {
-		service := NewStore(Config{RootDir: root})
+		service := newLogicalTestStore(t, Config{RootDir: root})
 		for i := 0; i < 5; i++ {
 			err := measure(func() error {
 				_, loadErr := service.LoadSession(opCtx, session.LoadSessionRequest{
@@ -159,7 +161,7 @@ func TestSessionInteractionsProgressWithConcurrentWriterReaderAndLeaseHeartbeat(
 	}
 	t.Logf("concurrent Store operation latency: n=%d p50=%s p95=%s p99=%s max=%s", len(measured), percentile(50), percentile(95), percentile(99), measured[len(measured)-1])
 
-	reopened := NewStore(Config{RootDir: root})
+	reopened := newLogicalTestStore(t, Config{RootDir: root})
 	list, err := reopened.ListSessions(context.Background(), session.ListSessionsRequest{
 		AppName: "caelis", UserID: "user-1", WorkspaceKey: "ws-1",
 	})

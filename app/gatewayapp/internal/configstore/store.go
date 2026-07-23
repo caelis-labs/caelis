@@ -100,6 +100,7 @@ func LoadAppConfig(root string) (AppConfig, error) {
 
 type AtomicWriteOps struct {
 	CreateTemp func(string, string) (*os.File, error)
+	SyncFile   func(*os.File) error
 	Rename     func(string, string) error
 	Chmod      func(string, os.FileMode) error
 	FsyncDir   func(string) error
@@ -144,6 +145,11 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 	if ops.CreateTemp == nil {
 		ops.CreateTemp = os.CreateTemp
 	}
+	if ops.SyncFile == nil {
+		ops.SyncFile = func(file *os.File) error {
+			return file.Sync()
+		}
+	}
 	renameProvided := ops.Rename != nil
 	if ops.Rename == nil {
 		ops.Rename = os.Rename
@@ -174,7 +180,7 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 		_ = tmp.Close()
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
+	if err := ops.SyncFile(tmp); err != nil {
 		_ = tmp.Close()
 		return err
 	}
@@ -186,7 +192,7 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 	}
 	if err := ops.Rename(tmpPath, path); err != nil {
 		if !renameProvided && runtime.GOOS == "windows" {
-			fallbackCommitted, fallbackErr := writeFileInPlace(path, data, perm, ops.Chmod)
+			fallbackCommitted, fallbackErr := writeFileInPlace(path, data, perm, ops.SyncFile, ops.Chmod)
 			if fallbackErr == nil {
 				if fsyncErr := ops.FsyncDir(dir); fsyncErr != nil {
 					return writeCommittedError(fsyncErr)
@@ -211,7 +217,13 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 	return nil
 }
 
-func writeFileInPlace(path string, data []byte, perm os.FileMode, chmod func(string, os.FileMode) error) (bool, error) {
+func writeFileInPlace(
+	path string,
+	data []byte,
+	perm os.FileMode,
+	syncFile func(*os.File) error,
+	chmod func(string, os.FileMode) error,
+) (bool, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
 		return false, err
@@ -221,7 +233,7 @@ func writeFileInPlace(path string, data []byte, perm os.FileMode, chmod func(str
 		if _, err := file.Write(data); err != nil {
 			return err
 		}
-		return file.Sync()
+		return syncFile(file)
 	}()
 	closeErr := file.Close()
 	if writeErr != nil {

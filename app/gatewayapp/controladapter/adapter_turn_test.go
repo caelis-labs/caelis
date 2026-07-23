@@ -224,10 +224,8 @@ func TestGatewayTurnCloseUnblocksUnreadSubscriptionDelivery(t *testing.T) {
 }
 
 func TestGatewayTurnCloseUnblocksHalfReadSubscriptionDelivery(t *testing.T) {
-	input := make(chan eventstream.Envelope, 2)
+	input := make(chan eventstream.Envelope, 1)
 	input <- eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "first"}
-	input <- eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "second"}
-	close(input)
 	handle := newBrokerTestHandle(nil)
 	turn := &gatewayTurn{
 		handle:       handle,
@@ -237,11 +235,15 @@ func TestGatewayTurnCloseUnblocksHalfReadSubscriptionDelivery(t *testing.T) {
 	if got := <-out; got.Notice != "first" {
 		t.Fatalf("first output = %#v", got)
 	}
-	deadline := time.Now().Add(time.Second)
-	for len(input) != 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if len(input) != 0 {
+	accepted := make(chan struct{})
+	go func() {
+		input <- eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "second"}
+		close(input)
+		close(accepted)
+	}()
+	select {
+	case <-accepted:
+	case <-time.After(time.Second):
 		t.Fatal("relay did not enter blocked second delivery")
 	}
 

@@ -136,7 +136,7 @@ func (s *FileOperationStore) ensureRetentionPolicyLocked() (time.Duration, error
 				persisted,
 				s.retention.TerminalRetention,
 			))
-			if err := writeOperationStoreJSON(path, policy, s.syncDirectory); err != nil {
+			if err := writeOperationStoreJSON(path, policy, s.durability); err != nil {
 				return 0, err
 			}
 			persisted = s.retention.TerminalRetention
@@ -155,7 +155,7 @@ func (s *FileOperationStore) ensureRetentionPolicyLocked() (time.Duration, error
 			TerminalRetentionNanoseconds:       int64(s.retention.TerminalRetention),
 			LegacyTerminalRetentionNanoseconds: int64(s.retention.TerminalRetention),
 		}
-		if err := writeOperationStoreJSON(path, policy, s.syncDirectory); err != nil {
+		if err := writeOperationStoreJSON(path, policy, s.durability); err != nil {
 			return 0, err
 		}
 		s.effectiveRetention = s.retention.TerminalRetention
@@ -361,7 +361,7 @@ func (s *FileOperationStore) sweepDirectoryLocked(
 		}
 	}
 	if removed {
-		if err := s.syncDirectory(s.root); err != nil {
+		if err := s.durability.SyncDirectory(s.root); err != nil {
 			sweepErr = errors.Join(sweepErr, err)
 		}
 	}
@@ -481,7 +481,7 @@ func (s *FileOperationStore) removeCanonicalRecordLocked(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.syncDirectory(filepath.Dir(path)); err != nil {
+	if err := s.durability.SyncDirectory(filepath.Dir(path)); err != nil {
 		return err
 	}
 	_ = cleanupRemovedOperationStoreRecord(cleanupPath)

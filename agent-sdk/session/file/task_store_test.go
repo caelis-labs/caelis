@@ -465,8 +465,10 @@ func TestTaskStoreRejectsDuplicateSessionHandle(t *testing.T) {
 func TestTaskStoreConcurrentUpsertKeepsAllTasks(t *testing.T) {
 	t.Parallel()
 
+	// This stress test proves SQLite task serialization and complete logical
+	// readback; task-index crash durability has separate focused coverage.
 	root := t.TempDir()
-	store := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
+	store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: root, Clock: fixedTaskClock}))
 	var wg sync.WaitGroup
 	for i := 0; i < 24; i++ {
 		i := i

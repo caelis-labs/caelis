@@ -14,6 +14,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -28,25 +29,9 @@ const (
 	pluginE2EFinalMessage = "CAELIS_PLUGIN_E2E_OK"
 )
 
-func TestRealConfigPluginSystemE2E(t *testing.T) {
-	if os.Getenv("CAELIS_REAL_PLUGIN_E2E") != "1" {
-		t.Skip("set CAELIS_REAL_PLUGIN_E2E=1 to run the real-config plugin system E2E")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("UserHomeDir() error = %v", err)
-	}
-	sourceConfig := filepath.Join(home, ".caelis", "config.json")
-	rawConfig, err := os.ReadFile(sourceConfig)
-	if err != nil {
-		t.Fatalf("read %s: %v", sourceConfig, err)
-	}
-	var base AppConfig
-	if err := json.Unmarshal(rawConfig, &base); err != nil {
-		t.Fatalf("decode %s: %v", sourceConfig, err)
-	}
-
+func TestPluginSystemE2E(t *testing.T) {
 	tmp := t.TempDir()
+	setHomeForGatewayAppTest(t, filepath.Join(tmp, "home"))
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "workspace")
 	if err := os.MkdirAll(workspaceDir, 0o700); err != nil {
@@ -54,14 +39,14 @@ func TestRealConfigPluginSystemE2E(t *testing.T) {
 	}
 	pluginRoot := filepath.Join(tmp, "caelis-e2e-plugin")
 	writePluginSystemE2EPlugin(t, pluginRoot)
-	base.Plugins = append(base.Plugins, PluginConfig{
+	base := AppConfig{Plugins: []PluginConfig{{
 		ID:          "caelis-e2e-plugin",
 		Name:        "caelis-e2e-plugin",
 		Version:     "1.0.0",
 		Description: "Caelis plugin system E2E plugin",
 		Root:        pluginRoot,
 		Enabled:     true,
-	})
+	}}}
 	if err := newAppConfigStore(storeDir).Save(base); err != nil {
 		t.Fatalf("save temp config: %v", err)
 	}
@@ -73,6 +58,7 @@ func TestRealConfigPluginSystemE2E(t *testing.T) {
 		StoreDir:     storeDir,
 		WorkspaceKey: "plugin-e2e-workspace",
 		WorkspaceCWD: workspaceDir,
+		SkillDirs:    []string{filepath.Join(tmp, "skills")},
 		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
 			Alias:               "plugin-e2e",
@@ -89,7 +75,7 @@ func TestRealConfigPluginSystemE2E(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("NewLocalStack(real config copy + e2e plugin) error = %v", err)
+		t.Fatalf("NewLocalStack(plugin fixture) error = %v", err)
 	}
 	defer stack.Close()
 
@@ -240,7 +226,7 @@ func (p *pluginSystemE2EProvider) handle(w http.ResponseWriter, r *http.Request)
 						"id":    "call_plugin_e2e_search",
 						"type":  "function",
 						"function": map[string]any{
-							"name":      "tool_search",
+							"name":      tool.ToolSearchToolName,
 							"arguments": `{"query":"read e2e fixture"}`,
 						},
 					}},
@@ -355,7 +341,7 @@ func (p *pluginSystemE2EProvider) observePayload(callIndex int, payload map[stri
 		for _, item := range tools {
 			toolMap, _ := item.(map[string]any)
 			fn, _ := toolMap["function"].(map[string]any)
-			if fn["name"] == "tool_search" {
+			if fn["name"] == tool.ToolSearchToolName {
 				p.sawToolSearch = true
 			}
 			if fn["name"] == pluginE2EToolName {
@@ -396,7 +382,7 @@ func (p *pluginSystemE2EProvider) Assert(t *testing.T, events string) {
 		t.Fatalf("provider did not observe plugin hook context in model request; %s; events=%s", p.summaryLocked(), events)
 	}
 	if !p.sawToolSearch {
-		t.Fatalf("provider did not observe tool_search declaration; %s; events=%s", p.summaryLocked(), events)
+		t.Fatalf("provider did not observe %s declaration; %s; events=%s", tool.ToolSearchToolName, p.summaryLocked(), events)
 	}
 	if p.sawToolBeforeSearch {
 		t.Fatalf("provider observed concrete MCP tool before tool_search result; %s; events=%s", p.summaryLocked(), events)

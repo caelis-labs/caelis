@@ -96,14 +96,14 @@ func (s *Store) markTransactionRecoveryPending() error {
 		_ = file.Close()
 		return err
 	}
-	if err := file.Sync(); err != nil {
+	if err := s.durability.SyncFile(file); err != nil {
 		_ = file.Close()
 		return err
 	}
 	if err := file.Close(); err != nil {
 		return err
 	}
-	return syncDir(root)
+	return s.durability.SyncDirectory(root)
 }
 
 func (s *Store) clearTransactionRecoveryMarker() error {
@@ -114,7 +114,7 @@ func (s *Store) clearTransactionRecoveryMarker() error {
 		}
 		return err
 	}
-	return syncDir(filepath.Dir(path))
+	return s.durability.SyncDirectory(filepath.Dir(path))
 }
 
 func (s *Store) writeTransaction(path string, record persistedTransaction) error {
@@ -146,7 +146,7 @@ func (s *Store) writeTransaction(path string, record persistedTransaction) error
 		tmp.Close()
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
+	if err := s.durability.SyncFile(tmp); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -159,7 +159,7 @@ func (s *Store) writeTransaction(path string, record persistedTransaction) error
 	if err := os.Chmod(path, 0o600); err != nil {
 		return committedDocumentWrite(err)
 	}
-	if err := syncDir(dir); err != nil {
+	if err := s.durability.SyncDirectory(dir); err != nil {
 		return committedDocumentWrite(err)
 	}
 	return nil
@@ -277,7 +277,7 @@ func (s *Store) applyTransaction(path string, record persistedTransaction) error
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err := syncDir(filepath.Dir(path)); err != nil {
+	if err := s.durability.SyncDirectory(filepath.Dir(path)); err != nil {
 		return err
 	}
 	return nil

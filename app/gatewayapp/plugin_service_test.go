@@ -29,6 +29,9 @@ func buildMinimalPluginDir(t *testing.T, root string, manifestJSON string) {
 
 func buildPluginStack(t *testing.T, storeDir, workspaceDir string) *Stack {
 	t.Helper()
+	// Full Stack construction opens SQLite and durable file stores. Callers
+	// intentionally remain serial so host fsync contention does not dominate
+	// otherwise independent plugin assertions.
 	cfg := Config{
 		AppName:      "CAELIS",
 		StoreDir:     storeDir,
@@ -47,8 +50,6 @@ func buildPluginStack(t *testing.T, storeDir, workspaceDir string) *Stack {
 // TestPluginServiceAddPathHappyPath verifies that AddPath registers the plugin
 // and persists the config so List and Inspect see it.
 func TestPluginServiceAddPathHappyPath(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
@@ -113,8 +114,6 @@ func TestPluginServiceAddPathHappyPath(t *testing.T) {
 
 // TestPluginServiceEnableDisableHappyPath exercises Enable→Disable lifecycle.
 func TestPluginServiceEnableDisableHappyPath(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
@@ -230,8 +229,6 @@ func TestPluginServiceAddPathRefreshesSkillPrompt(t *testing.T) {
 
 // TestPluginServiceRemoveHappyPath verifies that Remove deletes the entry.
 func TestPluginServiceRemoveHappyPath(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
@@ -280,8 +277,6 @@ func TestPluginServiceRemoveHappyPath(t *testing.T) {
 // between registration and enable), the config is rolled back so that a
 // subsequent List still shows the plugin as disabled.
 func TestPluginServiceEnableRollbackOnRebuildFailure(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
@@ -355,8 +350,6 @@ func TestPluginServiceEnableRollbackOnRebuildFailure(t *testing.T) {
 // the directory disappear and verify that a second enabled plugin's rollback
 // path works correctly (using Disable to remove and verifying state).
 func TestPluginServiceRemoveRollbackOnRebuildFailure(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
@@ -426,8 +419,6 @@ func TestPluginServiceRemoveRollbackOnRebuildFailure(t *testing.T) {
 // TestPluginServiceListSkipsParseForDisabled verifies that disabled plugins
 // do not trigger a parse error in List output.
 func TestPluginServiceListSkipsParseForDisabled(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
@@ -474,8 +465,6 @@ func TestPluginServiceListSkipsParseForDisabled(t *testing.T) {
 
 // TestPluginServiceNotFoundErrors verifies consistent "not found" errors.
 func TestPluginServiceNotFoundErrors(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
@@ -514,8 +503,6 @@ func TestPluginServiceNotFoundErrors(t *testing.T) {
 
 // TestPluginServiceAddPathRejectsNonDirectory verifies AddPath rejects files.
 func TestPluginServiceAddPathRejectsNonDirectory(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
@@ -542,8 +529,6 @@ func TestPluginServiceAddPathRejectsNonDirectory(t *testing.T) {
 }
 
 func TestPluginServiceDisableRollbackOnRebuildFailure(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
@@ -600,8 +585,6 @@ func TestPluginServiceDisableRollbackOnRebuildFailure(t *testing.T) {
 }
 
 func TestPluginServiceRejectsWhileActiveTurn(t *testing.T) {
-	t.Parallel()
-
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
 
@@ -662,8 +645,6 @@ func TestPluginServiceRejectsWhileActiveTurn(t *testing.T) {
 }
 
 func TestPluginServiceRollbackFailurePath(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")

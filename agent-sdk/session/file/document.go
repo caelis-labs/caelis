@@ -187,7 +187,7 @@ func (s *Store) writeDocumentInternal(doc persistedDocument, injectFault bool, u
 		tmp.Close()
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
+	if err := s.durability.SyncFile(tmp); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -200,7 +200,7 @@ func (s *Store) writeDocumentInternal(doc persistedDocument, injectFault bool, u
 	if err := os.Chmod(path, 0o600); err != nil {
 		return committedDocumentWrite(err)
 	}
-	if err := syncDir(dir); err != nil {
+	if err := s.durability.SyncDirectory(dir); err != nil {
 		return committedDocumentWrite(err)
 	}
 	s.pathCache[pathCacheKey(doc.Session.SessionID, doc.Session.WorkspaceKey)] = path

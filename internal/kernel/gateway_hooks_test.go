@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 	"testing"
 	"time"
@@ -959,8 +960,9 @@ func TestHookHelperProcess(t *testing.T) {
 	case "fail":
 		os.Exit(1)
 	case "sleep":
-		time.Sleep(10 * time.Second)
-		os.Exit(0)
+		interrupt := make(chan os.Signal, 1)
+		signal.Notify(interrupt, os.Interrupt)
+		<-interrupt
 	case "env":
 		fmt.Printf("%s|%s|%s", os.Getenv("TEST_VAR"), os.Getenv("CAELIS_PLUGIN_DIR"), os.Getenv("CAELIS_WORKSPACE_DIR"))
 		os.Exit(0)

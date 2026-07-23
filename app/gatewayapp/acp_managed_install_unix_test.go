@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,6 +16,47 @@ import (
 	"testing"
 	"time"
 )
+
+const fakeNPMProcessModeEnv = "CAELIS_TEST_NPM_PROCESS_MODE"
+
+func TestMain(m *testing.M) {
+	switch os.Getenv(fakeNPMProcessModeEnv) {
+	case "parent":
+		os.Exit(runFakeNPMParentProcess())
+	case "child":
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+		<-signals
+		signal.Stop(signals)
+		os.Exit(0)
+	default:
+		os.Exit(m.Run())
+	}
+}
+
+func runFakeNPMParentProcess() int {
+	executable, err := os.Executable()
+	if err != nil {
+		return 1
+	}
+	child := exec.Command(executable)
+	child.Env = withCommandEnv(os.Environ(), map[string]string{
+		fakeNPMProcessModeEnv: "child",
+	})
+	if err := child.Start(); err != nil {
+		return 1
+	}
+	readyFIFO := os.Getenv("CAELIS_TEST_NPM_READY_FIFO")
+	if err := os.WriteFile(readyFIFO, []byte(strconv.Itoa(child.Process.Pid)+"\n"), 0o600); err != nil {
+		_ = child.Process.Kill()
+		_ = child.Wait()
+		return 1
+	}
+	if err := child.Wait(); err != nil {
+		return 1
+	}
+	return 0
+}
 
 func TestDefaultManagedACPInstallerCancellationKillsNPMProcessGroup(t *testing.T) {
 	binDir := t.TempDir()
@@ -29,16 +72,16 @@ func TestDefaultManagedACPInstallerCancellationKillsNPMProcessGroup(t *testing.T
 	ready := make(chan fakeNPMReady, 1)
 	go readFakeNPMReady(readyReader, ready)
 
-	script := "#!/bin/sh\n" +
-		"sleep 30 &\n" +
-		"child=$!\n" +
-		"printf '%s\\n' \"$child\" > \"$CAELIS_TEST_NPM_READY_FIFO\"\n" +
-		"wait\n"
-	if err := os.WriteFile(filepath.Join(binDir, "npm"), []byte(script), 0o700); err != nil {
-		t.Fatalf("write fake npm: %v", err)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+	if err := os.Symlink(executable, filepath.Join(binDir, "npm")); err != nil {
+		t.Fatalf("link fake npm: %v", err)
 	}
 	t.Setenv("CAELIS_TEST_NPM_READY_FIFO", readyFIFO)
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(fakeNPMProcessModeEnv, "parent")
+	t.Setenv("PATH", binDir)
 	installRoot := t.TempDir()
 	cacheRoot := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())

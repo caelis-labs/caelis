@@ -361,7 +361,7 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 	if err := s.injectTransactionFault("task_index_post_commit"); err != nil {
 		return taskapi.CloneEntry(next), &session.CommittedError{Err: err}
 	}
-	if err := syncDir(filepath.Dir(s.sessionIndexPath())); err != nil {
+	if err := s.durability.SyncDirectory(filepath.Dir(s.sessionIndexPath())); err != nil {
 		return taskapi.CloneEntry(next), &session.CommittedError{Err: err}
 	}
 	return taskapi.CloneEntry(next), nil

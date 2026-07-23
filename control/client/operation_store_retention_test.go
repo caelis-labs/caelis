@@ -143,7 +143,7 @@ func TestOperationStoreSweepOnlyRemovesProvenTerminalRecords(t *testing.T) {
 func TestFileOperationStoreLegacyRejectedRemainsIndeterminate(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 2, 30, 0, 0, time.UTC)}
-	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
 		SweepInterval:     24 * time.Hour,
 		SweepBatchSize:    64,
@@ -216,7 +216,7 @@ func TestOperationStoreSweepRacingCompleteRetainsCommittedResult(t *testing.T) {
 func TestFileOperationStoreSweepReclaimsOldTempAndRetainsCorruptRecords(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 4, 0, 0, 0, time.UTC)}
-	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
 		TempRetention:     time.Hour,
 		SweepInterval:     24 * time.Hour,
@@ -262,7 +262,7 @@ func TestFileOperationStoreSweepReclaimsOldTempAndRetainsCorruptRecords(t *testi
 func TestFileOperationStoreParseableRetentionCorruptionFailsSafe(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 4, 30, 0, 0, time.UTC)}
-	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
 		SweepInterval:     24 * time.Hour,
 		SweepBatchSize:    64,
@@ -291,7 +291,7 @@ func TestFileOperationStoreParseableRetentionCorruptionFailsSafe(t *testing.T) {
 func TestFileOperationStoreForegroundReadsRejectSymlinks(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 4, 45, 0, 0, time.UTC)}
-	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
 		SweepInterval:     24 * time.Hour,
 		SweepBatchSize:    64,
@@ -323,7 +323,7 @@ func TestFileOperationStoreForegroundReadsRejectSymlinks(t *testing.T) {
 func TestFileOperationStoreBeginRejectsMisplacedExpiredRecord(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 4, 50, 0, 0, time.UTC)}
-	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
 		SweepInterval:     24 * time.Hour,
 		SweepBatchSize:    64,
@@ -342,7 +342,7 @@ func TestFileOperationStoreBeginRejectsMisplacedExpiredRecord(t *testing.T) {
 func TestFileOperationStoreSweepSyncsDirectoryAfterRecordRemoval(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 5, 0, 0, 0, time.UTC)}
-	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
 		SweepInterval:     24 * time.Hour,
 		SweepBatchSize:    64,
@@ -357,7 +357,7 @@ func TestFileOperationStoreSweepSyncsDirectoryAfterRecordRemoval(t *testing.T) {
 	path := store.path(intent)
 	clock.Advance(time.Hour + time.Nanosecond)
 	var syncCalls int
-	store.syncDirectory = func(directory string) error {
+	store.durability.syncDirectory = func(directory string) error {
 		syncCalls++
 		assertPathMissing(t, path)
 		return syncOperationStoreDirectory(directory)
@@ -371,7 +371,7 @@ func TestFileOperationStoreSweepSyncsDirectoryAfterRecordRemoval(t *testing.T) {
 func TestFileOperationStoreInterruptedSweepFailsSafeAfterRemove(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 6, 0, 0, 0, time.UTC)}
-	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
 		SweepInterval:     24 * time.Hour,
 		SweepBatchSize:    64,
@@ -386,7 +386,7 @@ func TestFileOperationStoreInterruptedSweepFailsSafeAfterRemove(t *testing.T) {
 	path := store.path(intent)
 	clock.Advance(time.Hour + time.Nanosecond)
 	wantErr := errors.New("injected directory sync interruption")
-	store.syncDirectory = func(string) error {
+	store.durability.syncDirectory = func(string) error {
 		assertPathMissing(t, path)
 		return wantErr
 	}
@@ -395,7 +395,7 @@ func TestFileOperationStoreInterruptedSweepFailsSafeAfterRemove(t *testing.T) {
 		t.Fatalf("Sweep() = %#v, %v", result, err)
 	}
 	assertPathMissing(t, path)
-	store.syncDirectory = syncOperationStoreDirectory
+	store.durability.syncDirectory = syncOperationStoreDirectory
 	if _, created, err := store.Begin(context.Background(), intent); err != nil || !created {
 		t.Fatalf("Begin(after interrupted cleanup) = created %v, error %v", created, err)
 	}
@@ -404,7 +404,7 @@ func TestFileOperationStoreInterruptedSweepFailsSafeAfterRemove(t *testing.T) {
 func TestFileOperationStoreSparseSweepClosesDirectoryCursor(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 6, 30, 0, 0, time.UTC)}
-	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
 		SweepInterval:     24 * time.Hour,
 		SweepBatchSize:    64,
@@ -435,7 +435,7 @@ func TestFileOperationStoreSweepIsBoundedAndCursorMakesProgress(t *testing.T) {
 		protected   = 120
 		corrupt     = 20
 	)
-	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
 		SweepInterval:     24 * time.Hour,
 		SweepBatchSize:    batchSize,
@@ -485,7 +485,7 @@ func TestFileOperationStoreSweepIsBoundedAndCursorMakesProgress(t *testing.T) {
 func TestFileOperationStoreSweepHonorsSoftTimeLimit(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 8, 0, 0, 0, time.UTC)}
-	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
 		SweepInterval:     24 * time.Hour,
 		SweepBatchSize:    64,
@@ -507,7 +507,7 @@ func TestFileOperationStoreOpportunisticSweepUsesMinimumInterval(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)}
 	const interval = 2 * time.Hour
-	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
 		SweepInterval:     interval,
 		SweepBatchSize:    64,
@@ -535,7 +535,7 @@ func TestFileOperationStoreOpportunisticSweepUsesMinimumInterval(t *testing.T) {
 func TestFileOperationStoreOpportunisticSweepCatchesUpAcrossBegins(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 9, 30, 0, 0, time.UTC)}
-	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
 		SweepInterval:     24 * time.Hour,
 		SweepBatchSize:    7,
@@ -572,7 +572,7 @@ func TestFileOperationStoreOpportunisticSweepCatchesUpAcrossBegins(t *testing.T)
 func TestFileOperationStoreConcurrentSweepWaitHonorsContext(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 9, 45, 0, 0, time.UTC)}
-	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	store := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: time.Hour,
 		SweepInterval:     24 * time.Hour,
 		SweepBatchSize:    64,
@@ -593,7 +593,7 @@ func TestFileOperationStoreConcurrentSweepWaitHonorsContext(t *testing.T) {
 	syncStarted := make(chan struct{})
 	releaseSync := make(chan struct{})
 	var syncOnce sync.Once
-	store.syncDirectory = func(directory string) error {
+	store.durability.syncDirectory = func(directory string) error {
 		syncOnce.Do(func() {
 			close(syncStarted)
 			<-releaseSync
@@ -674,13 +674,13 @@ func TestFileOperationStoreRootPolicyChangeFailsOpenStoresClosed(t *testing.T) {
 func TestFileOperationStorePolicyChangeAllowsInFlightComplete(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 9, 55, 0, 0, time.UTC)}
-	first := newFileRetentionTestStore(t, root, OperationRetentionConfig{TerminalRetention: 2 * time.Hour}, clock)
+	first := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{TerminalRetention: 2 * time.Hour}, clock)
 	intent := operationStoreTestIntent("policy-change-in-flight", "digest")
 	started, created, err := first.Begin(context.Background(), intent)
 	if err != nil || !created {
 		t.Fatalf("Begin() = %#v, created %v, error %v", started, created, err)
 	}
-	reconfigured := newFileRetentionTestStore(t, root, OperationRetentionConfig{TerminalRetention: 3 * time.Hour}, clock)
+	reconfigured := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{TerminalRetention: 3 * time.Hour}, clock)
 	want := operationStoreTestResult(intent, OutcomeCommitted)
 	completed, err := first.Complete(context.Background(), intent, want)
 	if err != nil || completed.Result == nil || *completed.Result != want ||
@@ -699,7 +699,7 @@ func TestFileOperationStorePolicyChangeAllowsInFlightComplete(t *testing.T) {
 func TestFileOperationStoreLegacyRetentionUsesPolicyHighWaterMark(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)}
-	original := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	original := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: 30 * 24 * time.Hour,
 		SweepInterval:     24 * time.Hour,
 		SweepBatchSize:    64,
@@ -714,7 +714,7 @@ func TestFileOperationStoreLegacyRetentionUsesPolicyHighWaterMark(t *testing.T) 
 	}
 	writeRawOperationRecord(t, original, intent, legacy)
 
-	lowered := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+	lowered := newLogicalFileRetentionTestStore(t, root, OperationRetentionConfig{
 		TerminalRetention: 24 * time.Hour,
 		SweepInterval:     24 * time.Hour,
 		SweepBatchSize:    64,
@@ -752,14 +752,18 @@ func newRetentionTestStore(
 		store.now = clock.Now
 		return store
 	case "file":
-		return newFileRetentionTestStore(t, filepath.Join(t.TempDir(), "operations"), config, clock)
+		return newLogicalFileRetentionTestStore(t, filepath.Join(t.TempDir(), "operations"), config, clock)
 	default:
 		t.Fatalf("unknown store kind %q", kind)
 		return nil
 	}
 }
 
-func newFileRetentionTestStore(
+// newLogicalFileRetentionTestStore preserves the real file layout, locks,
+// directory traversal, rename, and deletion behavior while excluding host
+// durability latency from retention-policy tests. Focused tests inject and
+// assert the individual persistence barriers.
+func newLogicalFileRetentionTestStore(
 	t *testing.T,
 	root string,
 	config OperationRetentionConfig,
@@ -769,6 +773,10 @@ func newFileRetentionTestStore(
 	store, err := NewFileOperationStoreWithConfig(root, config)
 	if err != nil {
 		t.Fatal(err)
+	}
+	store.durability = operationStoreDurability{
+		syncFile:      func(*os.File) error { return nil },
+		syncDirectory: func(string) error { return nil },
 	}
 	store.now = clock.Now
 	if err := store.Initialize(context.Background()); err != nil {
@@ -794,7 +802,7 @@ func newRetentionRaceStores(
 		return store, store
 	}
 	root := filepath.Join(t.TempDir(), "operations")
-	return newFileRetentionTestStore(t, root, config, clock), newFileRetentionTestStore(t, root, config, clock)
+	return newLogicalFileRetentionTestStore(t, root, config, clock), newLogicalFileRetentionTestStore(t, root, config, clock)
 }
 
 func operationStoreTestResult(intent OperationIntent, outcome Outcome) CommandResult {

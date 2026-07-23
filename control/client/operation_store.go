@@ -177,7 +177,7 @@ type FileOperationStore struct {
 	initialized              bool
 	effectiveRetention       time.Duration
 	effectiveLegacyRetention time.Duration
-	syncDirectory            func(string) error
+	durability               operationStoreDurability
 	sweepMu                  sync.Mutex
 	scanDirectory            *os.File
 	scanPending              []os.DirEntry
@@ -272,7 +272,6 @@ func NewFileOperationStoreWithConfig(root string, config OperationRetentionConfi
 		elapsed:           time.Since,
 		retention:         retention,
 		retentionExplicit: config.TerminalRetention != 0,
-		syncDirectory:     syncOperationStoreDirectory,
 	}, nil
 }
 
@@ -485,10 +484,10 @@ func readOperationRecord(path string) (OperationRecord, error) {
 }
 
 func (s *FileOperationStore) writeOperationRecord(path string, record OperationRecord) error {
-	return writeOperationStoreJSON(path, record, s.syncDirectory)
+	return writeOperationStoreJSON(path, record, s.durability)
 }
 
-func writeOperationStoreJSON(path string, value any, syncDirectory func(string) error) error {
+func writeOperationStoreJSON(path string, value any, durability operationStoreDurability) error {
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
@@ -510,7 +509,7 @@ func writeOperationStoreJSON(path string, value any, syncDirectory func(string) 
 		_ = temp.Close()
 		return err
 	}
-	if err := temp.Sync(); err != nil {
+	if err := durability.SyncFile(temp); err != nil {
 		_ = temp.Close()
 		return err
 	}
@@ -520,10 +519,7 @@ func writeOperationStoreJSON(path string, value any, syncDirectory func(string) 
 	if err := replaceOperationStoreFile(tempPath, path); err != nil {
 		return err
 	}
-	if syncDirectory == nil {
-		syncDirectory = syncOperationStoreDirectory
-	}
-	return syncDirectory(filepath.Dir(path))
+	return durability.SyncDirectory(filepath.Dir(path))
 }
 
 func operationKey(principalID, operationID string) string {

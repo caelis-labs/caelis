@@ -3,7 +3,8 @@ package tuiapp
 import (
 	"errors"
 	"io"
-	"os/exec"
+	"os"
+	"os/signal"
 	"strings"
 	"testing"
 	"time"
@@ -151,21 +152,31 @@ func TestOSC52UsesScreenWrapperOnlyForScreen(t *testing.T) {
 }
 
 func TestRunClipboardCommandTimesOut(t *testing.T) {
-	if _, err := exec.LookPath("sleep"); err != nil {
-		t.Skip("sleep command is unavailable")
-	}
-
 	restore := stubClipboardEnv(t, nil)
 	defer restore()
 
+	t.Setenv("CAELIS_CLIPBOARD_HELPER", "block")
 	clipboardCommandTimeout = 20 * time.Millisecond
-	err := runClipboardCommand(clipboardCommand{name: "sleep", args: []string{"1"}}, "")
+	err := runClipboardCommand(clipboardCommand{
+		name:  os.Args[0],
+		args:  []string{"-test.run=^TestClipboardCommandHelperProcess$"},
+		label: "clipboard helper",
+	}, "")
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
-	if !strings.Contains(err.Error(), "sleep 1: timed out after") {
+	if !strings.Contains(err.Error(), "clipboard helper: timed out after") {
 		t.Fatalf("expected timeout diagnostic, got %q", err.Error())
 	}
+}
+
+func TestClipboardCommandHelperProcess(t *testing.T) {
+	if os.Getenv("CAELIS_CLIPBOARD_HELPER") != "block" {
+		return
+	}
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+	<-interrupt
 }
 
 func TestClipboardCommandLabelRedactsArguments(t *testing.T) {

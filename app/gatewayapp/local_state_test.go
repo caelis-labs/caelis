@@ -126,8 +126,6 @@ func TestPolicyModeDefaultsUnknownAndLegacyValues(t *testing.T) {
 }
 
 func TestNewLocalStackUsesRuntimeConfigApprovalAndPolicyProfile(t *testing.T) {
-	t.Parallel()
-
 	root := t.TempDir()
 	workdir := t.TempDir()
 	store := newAppConfigStore(root)
@@ -171,8 +169,6 @@ func TestNewLocalStackUsesRuntimeConfigApprovalAndPolicyProfile(t *testing.T) {
 }
 
 func TestNewLocalStackPersistsTasksInSessionSQLiteIndex(t *testing.T) {
-	t.Parallel()
-
 	root := t.TempDir()
 	workdir := t.TempDir()
 	stack, err := newGatewayAppTestStack(t, Config{
@@ -1067,10 +1063,8 @@ func TestNewLocalStackInfersCodeFreeAPIFromProvider(t *testing.T) {
 }
 
 func TestDefaultStoreDirUsesHomeDirectory(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		t.Skip("home directory unavailable")
-	}
+	home := t.TempDir()
+	setHomeForGatewayAppTest(t, home)
 	want := filepath.Join(home, ".caelis")
 	if got := defaultStoreDir(); got != want {
 		t.Fatalf("defaultStoreDir() = %q, want %q", got, want)

@@ -18,8 +18,6 @@ import (
 )
 
 func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
-	t.Parallel()
-
 	ctx := context.Background()
 	stack, session := newLocalStateTestStack(t)
 	altProfile, err := stack.Connect(ModelConfig{
@@ -222,8 +220,6 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 }
 
 func TestRebuildGatewayRejectsActiveTurnBeforePlanLoad(t *testing.T) {
-	t.Parallel()
-
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
 	pluginRoot := filepath.Join(t.TempDir(), "malformed-plugin")
@@ -278,8 +274,6 @@ func TestRebuildGatewayRejectsActiveTurnBeforePlanLoad(t *testing.T) {
 }
 
 func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
-	t.Parallel()
-
 	stack, _ := newLocalStateTestStack(t)
 	beforeGateway := stack.gateway
 	beforeExec := stack.exec
@@ -327,8 +321,6 @@ func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
 }
 
 func TestBuildGatewayRuntimeMCPFailureDoesNotSwapStack(t *testing.T) {
-	t.Parallel()
-
 	stack, _ := newLocalStateTestStack(t)
 	beforeGateway := stack.gateway
 	beforeExec := stack.exec
@@ -365,8 +357,6 @@ func TestBuildGatewayRuntimeMCPFailureDoesNotSwapStack(t *testing.T) {
 }
 
 func TestInstallGatewayRuntimeBundleRejectsLateActiveTurnAndClosesBundle(t *testing.T) {
-	t.Parallel()
-
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
 	beforeExec := stack.exec
@@ -431,8 +421,6 @@ func TestInstallGatewayRuntimeBundleRejectsLateActiveTurnAndClosesBundle(t *test
 }
 
 func TestStackConnectRollsBackOnConfigSaveFailure(t *testing.T) {
-	t.Parallel()
-
 	stack, _ := newLocalStateTestStack(t)
 	beforeDefault := stack.DefaultModelID()
 	stack.mu.RLock()
@@ -463,8 +451,6 @@ func TestStackConnectRollsBackOnConfigSaveFailure(t *testing.T) {
 }
 
 func TestStackSetSandboxBackendRollsBackOnConfigSaveFailure(t *testing.T) {
-	t.Parallel()
-
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
 	before := stack.SandboxStatus()

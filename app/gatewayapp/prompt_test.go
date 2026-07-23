@@ -20,7 +20,7 @@ import (
 func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 	globalHome := t.TempDir()
 	setHomeForGatewayAppTest(t, globalHome)
-	t.Setenv("SHELL", "/bin/zsh")
+	t.Setenv("SHELL", "/test/shell")
 	t.Setenv("TZ", "Asia/Shanghai")
 
 	workspace := t.TempDir()
@@ -210,7 +210,7 @@ func TestBuildSystemPromptProtectsWorkspaceDeliveryBoundary(t *testing.T) {
 func TestBuildSystemPromptOmitsDynamicTimeContext(t *testing.T) {
 	globalHome := t.TempDir()
 	setHomeForGatewayAppTest(t, globalHome)
-	t.Setenv("SHELL", "/bin/zsh")
+	t.Setenv("SHELL", "/test/shell")
 	workspace := t.TempDir()
 
 	t.Setenv("TZ", "Asia/Shanghai")
@@ -327,8 +327,6 @@ func TestBuildSystemPromptPreservesSessionOverridePrecedence(t *testing.T) {
 }
 
 func TestNewLocalStackLoadsPluginSkills(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "caelis_store")
 	workspaceDir := filepath.Join(tmp, "workspace")
@@ -401,8 +399,6 @@ func TestNewLocalStackLoadsPluginSkills(t *testing.T) {
 }
 
 func TestNewLocalStackMalformedPluginFails(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "caelis_store")
 	workspaceDir := filepath.Join(tmp, "workspace")
@@ -461,8 +457,6 @@ func TestNewLocalStackMalformedPluginFails(t *testing.T) {
 }
 
 func TestNewLocalStackRunsSessionStartHook(t *testing.T) {
-	t.Parallel()
-
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "caelis_store")
 	workspaceDir := filepath.Join(tmp, "workspace")
@@ -619,9 +613,6 @@ func TestHookHelperProcess(t *testing.T) {
 		os.Exit(0)
 	case "fail":
 		os.Exit(1)
-	case "sleep":
-		time.Sleep(10 * time.Second)
-		os.Exit(0)
 	case "env":
 		fmt.Printf("%s|%s|%s", os.Getenv("TEST_VAR"), os.Getenv("CAELIS_PLUGIN_DIR"), os.Getenv("CAELIS_WORKSPACE_DIR"))
 		os.Exit(0)

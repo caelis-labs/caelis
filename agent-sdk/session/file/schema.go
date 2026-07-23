@@ -53,6 +53,7 @@ type Store struct {
 	eventLogCaches          map[string]*eventLogCache
 	eventLogCacheBytes      int64
 	eventLogCacheClock      uint64
+	durability              durabilityOps
 	writeDocumentFault      func() error
 	transactionFault        func(string) error
 	transactionRecoveryScan func()
