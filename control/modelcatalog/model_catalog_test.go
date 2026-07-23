@@ -54,6 +54,30 @@ func TestCompareReasoningEffortUsesCanonicalOrder(t *testing.T) {
 	}
 }
 
+func TestPreferredReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		levels []string
+		want   string
+	}{
+		{name: "reasoning beats none", levels: []string{"none", "high"}, want: "high"},
+		{name: "medium is preferred", levels: []string{"xhigh", "none", "low", "medium", "high"}, want: "medium"},
+		{name: "lower middle without medium", levels: []string{"max", "low", "high", "xhigh"}, want: "high"},
+		{name: "none only", levels: []string{"none"}, want: "none"},
+		{name: "empty", levels: nil, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := PreferredReasoningEffort(tt.levels); got != tt.want {
+				t.Fatalf("PreferredReasoningEffort(%#v) = %q, want %q", tt.levels, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLookupSuggestedModelCapabilitiesUsesCodeFreeCatalogForGLM51(t *testing.T) {
 	caps, ok := LookupSuggestedModelCapabilities("codefree", "GLM-5.1")
 	if !ok {

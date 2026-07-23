@@ -1,6 +1,7 @@
 package modelcatalog
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
@@ -276,6 +277,38 @@ func CompareReasoningEffort(left, right string) int {
 	}
 }
 
+// PreferredReasoningEffort selects the canonical default for one supported
+// effort set. A reasoning-bearing choice wins over none, and medium wins when
+// available. Otherwise it returns the lower middle reasoning-bearing choice
+// after sorting by intensity: low/high/xhigh selects high, while
+// low/high/xhigh/max also selects high. None is returned only when it is the
+// sole supported choice.
+func PreferredReasoningEffort(levels []string) string {
+	levels = normalizeReasoningEffortList(levels)
+	reasoningLevels := make([]string, 0, len(levels))
+	hasNone := false
+	for _, level := range levels {
+		if level == "none" {
+			hasNone = true
+			continue
+		}
+		if level == "medium" {
+			return level
+		}
+		reasoningLevels = append(reasoningLevels, level)
+	}
+	if len(reasoningLevels) == 0 {
+		if hasNone {
+			return "none"
+		}
+		return ""
+	}
+	sort.SliceStable(reasoningLevels, func(i, j int) bool {
+		return CompareReasoningEffort(reasoningLevels[i], reasoningLevels[j]) < 0
+	})
+	return reasoningLevels[(len(reasoningLevels)-1)/2]
+}
+
 func reasoningEffortRank(value string) (int, bool) {
 	switch value {
 	case "none":
@@ -370,17 +403,17 @@ func DefaultReasoningEffortForModel(provider, modelName string) string {
 		caps, found = LookupSuggestedModelCapabilities(provider, modelName)
 	}
 	if !found {
-		return defaultReasoningEffortFromList(inferReasoningEfforts(provider, modelName))
+		return PreferredReasoningEffort(inferReasoningEfforts(provider, modelName))
 	}
 	normalizeModelCapabilitiesReasoning(&caps)
 	mode := NormalizeReasoningMode(caps.ReasoningMode)
 	if mode != ReasoningModeEffort && mode != ReasoningModeToggle {
-		return defaultReasoningEffortFromList(inferReasoningEfforts(provider, modelName))
+		return PreferredReasoningEffort(inferReasoningEfforts(provider, modelName))
 	}
 	if normalized := NormalizeReasoningEffort(caps.DefaultReasoningEffort); normalized != "" {
 		return normalized
 	}
-	return defaultReasoningEffortFromList(caps.ReasoningEfforts)
+	return PreferredReasoningEffort(caps.ReasoningEfforts)
 }
 
 func NormalizeReasoningMode(input string) string {
@@ -461,21 +494,8 @@ func normalizeModelCapabilitiesReasoning(caps *ModelCapabilities) {
 		return
 	}
 	if caps.DefaultReasoningEffort == "" || !SupportsReasoningEffortList(caps.ReasoningEfforts, caps.DefaultReasoningEffort) {
-		caps.DefaultReasoningEffort = defaultReasoningEffortFromList(caps.ReasoningEfforts)
+		caps.DefaultReasoningEffort = PreferredReasoningEffort(caps.ReasoningEfforts)
 	}
-}
-
-func defaultReasoningEffortFromList(levels []string) string {
-	levels = normalizeReasoningEffortList(levels)
-	for _, preferred := range []string{"medium", "low", "minimal", "high", "xhigh"} {
-		if SupportsReasoningEffortList(levels, preferred) {
-			return preferred
-		}
-	}
-	if len(levels) > 0 {
-		return levels[0]
-	}
-	return ""
 }
 
 func SupportsReasoningEffortList(levels []string, effort string) bool {

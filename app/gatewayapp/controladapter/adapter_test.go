@@ -2145,7 +2145,7 @@ func TestAdapterDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T) {
 	}
 }
 
-func TestAdapterUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
+func TestAdapterUseModelResolvesCaseInsensitiveAliasWithAssembledEffort(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -2177,12 +2177,16 @@ func TestAdapterUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
+	connected, ok := stack.ModelConfig("minimax/minimax-m2.7-highspeed")
+	if !ok || connected.ReasoningEffort != "medium" {
+		t.Fatalf("connected model = %#v, %v, want assembled medium effort", connected, ok)
+	}
 	status, err := driver.UseModel(ctx, "minimax/minimax-m2.7-highspeed")
 	if err != nil {
 		t.Fatalf("UseModel() error = %v", err)
 	}
-	if got := strings.ToLower(strings.TrimSpace(status.ModelStatus.Display)); got != "minimax/minimax-m2.7-highspeed" {
-		t.Fatalf("status model = %q, want minimax/minimax-m2.7-highspeed", status.ModelStatus.Display)
+	if got := strings.ToLower(strings.TrimSpace(status.ModelStatus.Display)); got != "minimax/minimax-m2.7-highspeed [medium]" {
+		t.Fatalf("status model = %q, want minimax/minimax-m2.7-highspeed [medium]", status.ModelStatus.Display)
 	}
 }
 

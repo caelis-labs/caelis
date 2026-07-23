@@ -145,6 +145,110 @@ func TestAssembleConnectUsesModernCompatibleDefaultsAndSupportsExplicitNoReasoni
 	}
 }
 
+func TestAssembleConnectDerivesPreferredEffortForEveryModel(t *testing.T) {
+	t.Parallel()
+
+	configs, err := AssembleConnect(context.Background(), ConnectRequest{
+		Provider: "ollama",
+		Models: []ModelSelection{
+			{Name: "reasoning-toggle", ReasoningLevels: []string{"none", "high"}},
+			{Name: "reasoning-levels", ReasoningLevels: []string{"none", "low", "medium", "high", "xhigh"}},
+		},
+	}, ConnectOptions{})
+	if err != nil {
+		t.Fatalf("AssembleConnect() error = %v", err)
+	}
+	if len(configs) != 2 {
+		t.Fatalf("AssembleConnect() configs = %#v, want two", configs)
+	}
+	if got := configs[0].ReasoningEffort; got != "high" {
+		t.Fatalf("first ReasoningEffort = %q, want high", got)
+	}
+	if got := configs[1].ReasoningEffort; got != "medium" {
+		t.Fatalf("second ReasoningEffort = %q, want medium", got)
+	}
+	for _, cfg := range configs {
+		if cfg.DefaultReasoningEffort != cfg.ReasoningEffort {
+			t.Fatalf("assembled reasoning/default mismatch = %q/%q", cfg.ReasoningEffort, cfg.DefaultReasoningEffort)
+		}
+	}
+}
+
+func TestAssembleConnectResolvesReasoningEffortPrecedence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		provider  string
+		apiKey    string
+		selection ModelSelection
+		want      string
+	}{
+		{
+			name:      "preserve resolved catalog default",
+			provider:  "anthropic",
+			apiKey:    "secret",
+			selection: ModelSelection{Name: "claude-opus-4-8"},
+			want:      "high",
+		},
+		{
+			name:     "rederive unsupported catalog default after levels override",
+			provider: "anthropic",
+			apiKey:   "secret",
+			selection: ModelSelection{
+				Name:            "claude-opus-4-8",
+				ReasoningLevels: []string{"none", "low"},
+			},
+			want: "low",
+		},
+		{
+			name:     "preserve explicit reasoning effort",
+			provider: "ollama",
+			selection: ModelSelection{
+				Name:            "reasoning-model",
+				ReasoningEffort: "low",
+				ReasoningLevels: []string{"none", "low", "medium", "high"},
+			},
+			want: "low",
+		},
+		{
+			name:     "preserve explicit none",
+			provider: "ollama",
+			selection: ModelSelection{
+				Name:            "reasoning-model",
+				ReasoningEffort: "none",
+				ReasoningLevels: []string{"none", "low", "medium", "high"},
+			},
+			want: "none",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			configs, err := AssembleConnect(context.Background(), ConnectRequest{
+				Provider: tt.provider,
+				APIKey:   tt.apiKey,
+				Models:   []ModelSelection{tt.selection},
+			}, ConnectOptions{})
+			if err != nil {
+				t.Fatalf("AssembleConnect() error = %v", err)
+			}
+			if len(configs) != 1 {
+				t.Fatalf("AssembleConnect() configs = %#v, want one", configs)
+			}
+			if configs[0].ReasoningEffort != tt.want || configs[0].DefaultReasoningEffort != tt.want {
+				t.Fatalf(
+					"reasoning/default = %q/%q, want %s/%s",
+					configs[0].ReasoningEffort,
+					configs[0].DefaultReasoningEffort,
+					tt.want,
+					tt.want,
+				)
+			}
+		})
+	}
+}
+
 func TestAssembleConnectAuthenticatesOnceForMultipleModels(t *testing.T) {
 	t.Parallel()
 

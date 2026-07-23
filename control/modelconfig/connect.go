@@ -279,10 +279,17 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 			} else if reasoningMode == "" || reasoningMode == modelcatalog.ReasoningModeNone {
 				reasoningMode = modelcatalog.ReasoningModeEffort
 			}
+			if defaultReasoningEffort != "" &&
+				!modelcatalog.SupportsReasoningEffortList(reasoningLevels, defaultReasoningEffort) {
+				defaultReasoningEffort = ""
+			}
 		}
 		reasoningEffort := modelcatalog.NormalizeReasoningEffort(selection.ReasoningEffort)
 		if reasoningEffort == "" {
 			reasoningEffort = defaultReasoningEffort
+		}
+		if reasoningEffort == "" {
+			reasoningEffort = modelcatalog.PreferredReasoningEffort(reasoningLevels)
 		}
 		if reasoningMode == modelcatalog.ReasoningModeNone {
 			reasoningEffort = ""
