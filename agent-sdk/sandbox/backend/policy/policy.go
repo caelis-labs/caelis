@@ -233,26 +233,6 @@ func FilterExistingPaths(values []string) []string {
 	return filterExistingPaths(values)
 }
 
-// EnsureExplicitWritableRoots creates missing explicit writable-root directories.
-// It never broadens a missing path to an existing parent directory.
-func EnsureExplicitWritableRoots(paths []string) error {
-	for _, raw := range normalizeStringList(paths) {
-		root := WritableRootPath(raw)
-		if root == "" {
-			continue
-		}
-		if _, err := os.Stat(root); err == nil {
-			continue
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-		if err := os.MkdirAll(root, 0o700); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func normalizeStringList(values []string) []string {
 	if len(values) == 0 {
 		return nil

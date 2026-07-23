@@ -18,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/plugin"
@@ -70,7 +71,7 @@ func (s *Stack) rebuildGateway() error {
 	}
 	s.mu.RLock()
 	oldGateway := s.gateway
-	sandboxCfg := effectiveSandboxConfig(s.sandbox, s.Workspace.CWD)
+	sandboxCfg := s.sandbox
 	runtimeCfg := s.runtime
 	s.mu.RUnlock()
 
@@ -160,6 +161,7 @@ func guardNoActiveTurns(gw *kernelimpl.Gateway, action string) error {
 }
 
 func (s *Stack) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runtimeCfg stackRuntimeConfig) (gatewayBuildPlan, error) {
+	sandboxCfg = configstore.DefaultSandboxConfig(sandboxCfg)
 	doc, err := s.store.Load()
 	if err != nil {
 		return gatewayBuildPlan{}, err

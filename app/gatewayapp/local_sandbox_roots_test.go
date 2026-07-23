@@ -1,108 +1,80 @@
 package gatewayapp
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 )
 
-func TestDefaultSkillSandboxRootsIncludeSystemUserGlobalAndWorkspaceSkillDirs(t *testing.T) {
-	home := t.TempDir()
-	setHomeForGatewayAppTest(t, home)
-	workspace := filepath.Join(t.TempDir(), "workspace")
-
-	got := defaultSkillSandboxRoots(workspace)
-	want := []string{
-		filepath.Join(home, ".caelis", "skills", ".system"),
-		filepath.Join(workspace, ".claude", "skills"),
-		filepath.Join(workspace, ".opencode", "skills"),
-		filepath.Join(workspace, ".opencode", "skill"),
-		filepath.Join(workspace, ".agents", "skills"),
-		filepath.Join(workspace, "skills"),
-		filepath.Join(home, ".caelis", "skills"),
-		filepath.Join(home, ".claude", "skills"),
-		filepath.Join(home, ".config", "opencode", "skills"),
-		filepath.Join(home, ".config", "opencode", "skill"),
-		filepath.Join(home, ".agents", "skills"),
-	}
-	for _, root := range want {
-		if !slices.Contains(got, root) {
-			t.Fatalf("defaultSkillSandboxRoots() = %#v, want %q", got, root)
+func TestSandboxPolicyRootMetadataUsesOnlyDiscoveredExternalSkillsAsReadRoots(t *testing.T) {
+	workspace := t.TempDir()
+	externalRoot := filepath.Join(t.TempDir(), "skills", "external")
+	workspaceRoot := filepath.Join(workspace, ".agents", "skills", "workspace")
+	for _, root := range []string{externalRoot, workspaceRoot} {
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			t.Fatalf("MkdirAll(%q) error = %v", root, err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "SKILL.md"), []byte("# Test\n"), 0o600); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", root, err)
 		}
 	}
-}
+	missingRoot := filepath.Join(t.TempDir(), "skills", "missing")
+	externalResolved, err := filepath.EvalSymlinks(externalRoot)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(externalRoot) error = %v", err)
+	}
+	catalog := skill.NewCatalog([]skill.Meta{
+		{Name: "external", Path: filepath.Join(externalRoot, "SKILL.md")},
+		{Name: "workspace", Path: filepath.Join(workspaceRoot, "SKILL.md")},
+		{Name: "missing", Path: filepath.Join(missingRoot, "SKILL.md")},
+	})
 
-func TestSandboxPolicyRootMetadataIncludesConfiguredAndSkillWriteRoots(t *testing.T) {
-	home := t.TempDir()
-	setHomeForGatewayAppTest(t, home)
-	workspace := filepath.Join(t.TempDir(), "workspace")
-
-	got := withSandboxPolicyRootMetadata(map[string]any{
+	got := sandboxpolicy.WithPolicyRootMetadata(map[string]any{
+		"policy_extra_read_roots":  []any{"/existing-read"},
 		"policy_extra_write_roots": []any{"/existing-write"},
 	}, SandboxConfig{
 		ReadableRoots: []string{"/configured-read"},
 		WritableRoots: []string{"/configured-write"},
-	}, workspace)
+	}, workspace, catalog.Metas())
 
 	readRoots, ok := got["policy_extra_read_roots"].([]string)
 	if !ok {
 		t.Fatalf("policy_extra_read_roots = %#v, want []string", got["policy_extra_read_roots"])
 	}
-	if !slices.Contains(readRoots, "/configured-read") {
-		t.Fatalf("policy_extra_read_roots = %#v, want configured readable root", readRoots)
+	for _, root := range []string{"/existing-read", "/configured-read", externalResolved} {
+		if !slices.Contains(readRoots, root) {
+			t.Fatalf("policy_extra_read_roots = %#v, want %q", readRoots, root)
+		}
+	}
+	for _, root := range []string{workspaceRoot, missingRoot, filepath.Join(workspace, "skills")} {
+		if slices.Contains(readRoots, root) {
+			t.Fatalf("policy_extra_read_roots = %#v, did not want %q", readRoots, root)
+		}
 	}
 
 	writeRoots, ok := got["policy_extra_write_roots"].([]string)
 	if !ok {
 		t.Fatalf("policy_extra_write_roots = %#v, want []string", got["policy_extra_write_roots"])
 	}
-	for _, root := range []string{
-		"/existing-write",
-		"/configured-write",
-		filepath.Join(home, ".caelis", "skills", ".system"),
-		filepath.Join(workspace, ".claude", "skills"),
-		filepath.Join(workspace, ".opencode", "skills"),
-		filepath.Join(workspace, ".opencode", "skill"),
-		filepath.Join(home, ".agents", "skills"),
-		filepath.Join(workspace, ".agents", "skills"),
-		filepath.Join(workspace, "skills"),
-		filepath.Join(home, ".caelis", "skills"),
-		filepath.Join(home, ".claude", "skills"),
-		filepath.Join(home, ".config", "opencode", "skills"),
-		filepath.Join(home, ".config", "opencode", "skill"),
-	} {
-		if !slices.Contains(writeRoots, root) {
-			t.Fatalf("policy_extra_write_roots = %#v, want %q", writeRoots, root)
-		}
+	if want := []string{"/existing-write", "/configured-write"}; !slices.Equal(writeRoots, want) {
+		t.Fatalf("policy_extra_write_roots = %#v, want %#v", writeRoots, want)
 	}
 }
 
-func TestEffectiveSandboxConfigAddsSkillWritableRootsWithoutMutatingStoredConfig(t *testing.T) {
-	home := t.TempDir()
-	setHomeForGatewayAppTest(t, home)
-	workspace := filepath.Join(t.TempDir(), "workspace")
+func TestSandboxConfigToPortPreservesOnlyConfiguredWritableRoots(t *testing.T) {
+	workspace := t.TempDir()
 	stored := SandboxConfig{WritableRoots: []string{"/configured-write"}}
 
-	got := effectiveSandboxConfig(stored, workspace)
-	if len(stored.WritableRoots) != 1 || stored.WritableRoots[0] != "/configured-write" {
+	got := sandboxConfigToPort(stored, workspace, t.TempDir())
+
+	if want := []string{"/configured-write"}; !slices.Equal(stored.WritableRoots, want) {
 		t.Fatalf("stored WritableRoots mutated: %#v", stored.WritableRoots)
 	}
-	for _, root := range []string{
-		"/configured-write",
-		filepath.Join(home, ".caelis", "skills", ".system"),
-		filepath.Join(workspace, ".claude", "skills"),
-		filepath.Join(workspace, ".opencode", "skills"),
-		filepath.Join(workspace, ".opencode", "skill"),
-		filepath.Join(home, ".agents", "skills"),
-		filepath.Join(workspace, ".agents", "skills"),
-		filepath.Join(workspace, "skills"),
-		filepath.Join(home, ".caelis", "skills"),
-		filepath.Join(home, ".claude", "skills"),
-		filepath.Join(home, ".config", "opencode", "skills"),
-		filepath.Join(home, ".config", "opencode", "skill"),
-	} {
-		if !slices.Contains(got.WritableRoots, root) {
-			t.Fatalf("effective WritableRoots = %#v, want %q", got.WritableRoots, root)
-		}
+	if want := []string{"/configured-write"}; !slices.Equal(got.WritableRoots, want) {
+		t.Fatalf("port WritableRoots = %#v, want %#v", got.WritableRoots, want)
 	}
 }

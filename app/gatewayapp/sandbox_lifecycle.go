@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 )
 
 type sandboxLifecycleAction = sandbox.LifecycleAction
@@ -39,7 +40,7 @@ func (s *Stack) selectSandboxLifecycleTarget() (sandbox.LifecycleTarget, error) 
 		return sandbox.LifecycleTarget{}, err
 	}
 	if isHostSandboxBackend(snapshot.cfg.RequestedType) {
-		cfg := sandboxConfigToPort(effectiveSandboxConfig(snapshot.cfg, snapshot.workspaceCWD), snapshot.workspaceCWD, snapshot.storeDir)
+		cfg := sandboxConfigToPort(snapshot.cfg, snapshot.workspaceCWD, snapshot.storeDir)
 		return sandbox.LifecycleTarget{Config: cfg, NoOp: true}, nil
 	}
 	target, err := s.sandboxLifecycleRuntime(snapshot.cfg, snapshot.exec, snapshot.workspaceCWD, snapshot.storeDir)
@@ -96,7 +97,7 @@ func isHostSandboxBackend(backend string) bool {
 }
 
 func (s *Stack) sandboxLifecycleRuntime(cfg SandboxConfig, current sandbox.Runtime, workspaceCWD string, storeDir string) (sandbox.LifecycleTarget, error) {
-	portCfg := sandboxConfigToPort(effectiveSandboxConfig(cfg, workspaceCWD), workspaceCWD, storeDir)
+	portCfg := sandboxConfigToPort(cfg, workspaceCWD, storeDir)
 	if s != nil && s.sandboxLifecycleFactory != nil {
 		return s.sandboxLifecycleFactory(portCfg, current)
 	}
@@ -104,6 +105,7 @@ func (s *Stack) sandboxLifecycleRuntime(cfg SandboxConfig, current sandbox.Runti
 }
 
 func sandboxConfigToPort(cfg SandboxConfig, workspaceCWD string, storeDir string) sandbox.Config {
+	cfg = configstore.DefaultSandboxConfig(cfg)
 	return sandbox.Config{
 		CWD:              workspaceCWD,
 		RequestedBackend: sandbox.Backend(cfg.RequestedType),

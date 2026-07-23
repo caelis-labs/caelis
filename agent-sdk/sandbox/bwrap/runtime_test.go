@@ -41,7 +41,7 @@ func TestBuildScopedBwrapArgsKeepsManagedDevMountWithMissingReadRoot(t *testing.
 	assertBwrapManagedMountsNotReadOnly(t, args)
 }
 
-func TestBwrapWritableRootsDoNotBroadenMissingRootToParent(t *testing.T) {
+func TestBwrapWritableRootsSkipMissingRootWithoutCreatingIt(t *testing.T) {
 	root := t.TempDir()
 	workDir := filepath.Join(root, "workspace")
 	fakeHome := filepath.Join(root, "home")
@@ -63,11 +63,14 @@ func TestBwrapWritableRootsDoNotBroadenMissingRootToParent(t *testing.T) {
 	if containsString(roots, fakeHome) {
 		t.Fatalf("Writable roots = %#v, must not grant parent of missing root %q", roots, missingCache)
 	}
-	if !containsString(roots, missingCache) {
-		t.Fatalf("Writable roots = %#v, want explicit missing root %q pre-created and retained", roots, missingCache)
+	if !containsString(roots, workDir) {
+		t.Fatalf("Writable roots = %#v, want existing workspace %q", roots, workDir)
 	}
-	if _, err := os.Stat(missingCache); err != nil {
-		t.Fatalf("Stat(missingCache) error = %v, want pre-created writable root", err)
+	if containsString(roots, missingCache) {
+		t.Fatalf("Writable roots = %#v, did not want missing root %q", roots, missingCache)
+	}
+	if _, err := os.Stat(missingCache); !os.IsNotExist(err) {
+		t.Fatalf("Stat(missingCache) error = %v, want not created", err)
 	}
 }
 

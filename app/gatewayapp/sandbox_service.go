@@ -208,15 +208,3 @@ func normalizeSandboxBackend(backend string) (string, error) {
 func mergeSandboxConfig(stored SandboxConfig, override SandboxConfig) SandboxConfig {
 	return sandboxpolicy.MergeConfig(stored, override)
 }
-
-func effectiveSandboxConfig(cfg SandboxConfig, workspaceDir string) SandboxConfig {
-	return sandboxpolicy.EffectiveConfig(cfg, workspaceDir)
-}
-
-func withSandboxPolicyRootMetadata(metadata map[string]any, cfg SandboxConfig, workspaceDir string) map[string]any {
-	return sandboxpolicy.WithPolicyRootMetadata(metadata, cfg, workspaceDir)
-}
-
-func defaultSkillSandboxRoots(workspaceDir string) []string {
-	return sandboxpolicy.DefaultSkillRoots(workspaceDir)
-}

@@ -127,7 +127,7 @@ func TestAppConfigStoreDoesNotPersistImplicitSandboxNetworkDefault(t *testing.T)
 	if doc.Sandbox.NetworkEnabled != nil {
 		t.Fatalf("Sandbox.NetworkEnabled = %#v, want unset persisted config value", doc.Sandbox.NetworkEnabled)
 	}
-	effective := effectiveSandboxConfig(doc.Sandbox, t.TempDir())
+	effective := configstore.DefaultSandboxConfig(doc.Sandbox)
 	if effective.NetworkEnabled == nil || !*effective.NetworkEnabled {
 		t.Fatalf("effective Sandbox.NetworkEnabled = %#v, want semantic true default", effective.NetworkEnabled)
 	}

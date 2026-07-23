@@ -496,9 +496,7 @@ func bwrapWritableRoots(p policy.Policy, workDir string) ([]string, error) {
 			explicit = append(explicit, policy.WritableRootPath(resolved))
 		}
 	}
-	if err := policy.EnsureExplicitWritableRoots(explicit); err != nil {
-		return nil, err
-	}
+	explicit = policy.FilterExistingPaths(explicit)
 
 	roots := make([]string, 0, len(explicit)+8)
 	roots = append(roots, explicit...)

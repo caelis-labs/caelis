@@ -22,6 +22,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
@@ -506,7 +507,12 @@ func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model Mode
 		baseMetadata["reasoning_effort"] = reasoning
 	}
 	return stackBaseMetadata{
-		Metadata:     withSandboxPolicyRootMetadata(baseMetadata, sandboxCfg, workspaceCWD),
+		Metadata: sandboxpolicy.WithPolicyRootMetadata(
+			baseMetadata,
+			sandboxCfg,
+			workspaceCWD,
+			result.SkillCatalog.Metas(),
+		),
 		SkillCatalog: result.SkillCatalog,
 	}, nil
 }

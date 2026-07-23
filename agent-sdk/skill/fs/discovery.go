@@ -91,22 +91,11 @@ func resolveSkillRef(ref skill.Ref) (string, string, error) {
 	if path == "" {
 		return "", "", fmt.Errorf("skill path is required")
 	}
-	resolved, err := ResolvePath(path)
+	root, err := RootDir(path)
 	if err != nil {
 		return "", "", err
-	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return "", "", err
-	}
-	root := resolved
-	if !info.IsDir() || strings.EqualFold(filepath.Base(resolved), "SKILL.md") {
-		root = filepath.Dir(resolved)
 	}
 	skillPath := filepath.Join(root, "SKILL.md")
-	if _, err := os.Stat(skillPath); err != nil {
-		return "", "", err
-	}
 	return filepath.Clean(root), filepath.Clean(skillPath), nil
 }
 

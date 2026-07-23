@@ -138,20 +138,20 @@ func testWorkspaceRoot() string {
 	return "/workspace"
 }
 
-func TestEnsureExplicitWritableRootsCreatesMissingCacheDir(t *testing.T) {
+func TestFilterExistingPathsSkipsMissingRootWithoutCreatingIt(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	missingCache := filepath.Join(root, "home", ".pnpm-store")
-	if err := EnsureExplicitWritableRoots([]string{missingCache}); err != nil {
-		t.Fatalf("EnsureExplicitWritableRoots() error = %v", err)
+	existingCache := filepath.Join(root, "existing-cache")
+	if err := os.Mkdir(existingCache, 0o700); err != nil {
+		t.Fatalf("Mkdir(existingCache) error = %v", err)
 	}
-	if _, err := os.Stat(missingCache); err != nil {
-		t.Fatalf("Stat(missingCache) error = %v, want created directory", err)
+	if got := FilterExistingPaths([]string{missingCache, existingCache}); !slices.Equal(got, []string{existingCache}) {
+		t.Fatalf("FilterExistingPaths() = %#v, want only %q", got, existingCache)
 	}
-	parent := filepath.Dir(missingCache)
-	if _, err := os.Stat(parent); err != nil {
-		t.Fatalf("Stat(parent) error = %v, want parent created for nested root", err)
+	if _, err := os.Stat(missingCache); !os.IsNotExist(err) {
+		t.Fatalf("Stat(missingCache) error = %v, want not created", err)
 	}
 }
 

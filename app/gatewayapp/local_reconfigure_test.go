@@ -301,7 +301,7 @@ func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
 		t.Fatalf("store.Save() error = %v", err)
 	}
 
-	sandboxCfg := effectiveSandboxConfig(stack.sandbox, stack.Workspace.CWD)
+	sandboxCfg := stack.sandbox
 	_, err := stack.loadGatewayBuildPlan(sandboxCfg, stack.runtime)
 	if err == nil {
 		t.Fatal("loadGatewayBuildPlan() error = nil, want plugin parse failure")
@@ -333,7 +333,7 @@ func TestBuildGatewayRuntimeMCPFailureDoesNotSwapStack(t *testing.T) {
 	beforeGateway := stack.gateway
 	beforeExec := stack.exec
 	beforeMCP := stack.mcpMgr
-	plan, err := stack.loadGatewayBuildPlan(effectiveSandboxConfig(stack.sandbox, stack.Workspace.CWD), stack.runtime)
+	plan, err := stack.loadGatewayBuildPlan(stack.sandbox, stack.runtime)
 	if err != nil {
 		t.Fatalf("loadGatewayBuildPlan() error = %v", err)
 	}
@@ -397,7 +397,7 @@ func TestInstallGatewayRuntimeBundleRejectsLateActiveTurnAndClosesBundle(t *test
 		}
 	}()
 
-	plan, err := stack.loadGatewayBuildPlan(effectiveSandboxConfig(stack.sandbox, stack.Workspace.CWD), stack.runtime)
+	plan, err := stack.loadGatewayBuildPlan(stack.sandbox, stack.runtime)
 	if err != nil {
 		t.Fatalf("loadGatewayBuildPlan() error = %v", err)
 	}

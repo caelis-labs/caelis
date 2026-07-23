@@ -2,12 +2,11 @@ package sandboxpolicy
 
 import (
 	"fmt"
-	"runtime"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/promptassembly"
 )
 
 func NormalizeBackend(backend string) (string, error) {
@@ -50,43 +49,27 @@ func MergeConfig(stored configstore.SandboxConfig, override configstore.SandboxC
 	return configstore.DefaultSandboxConfig(stored)
 }
 
-func EffectiveConfig(cfg configstore.SandboxConfig, workspaceDir string) configstore.SandboxConfig {
-	return EffectiveConfigForGOOS(cfg, workspaceDir, runtime.GOOS)
-}
-
-func EffectiveConfigForGOOS(cfg configstore.SandboxConfig, workspaceDir string, goos string) configstore.SandboxConfig {
-	cfg = configstore.DefaultSandboxConfig(cfg)
-	cfg.WritableRoots = configstore.DedupeStrings(append(cfg.WritableRoots, DefaultSkillRoots(workspaceDir)...))
-	return cfg
-}
-
-func WithPolicyRootMetadata(metadata map[string]any, cfg configstore.SandboxConfig, workspaceDir string) map[string]any {
+func WithPolicyRootMetadata(
+	metadata map[string]any,
+	cfg configstore.SandboxConfig,
+	workspaceDir string,
+	skillMetas []skill.Meta,
+) map[string]any {
 	out := cloneMap(metadata)
 	if out == nil {
 		out = map[string]any{}
 	}
-	effective := EffectiveConfig(cfg, workspaceDir)
-	if len(effective.ReadableRoots) > 0 {
-		out["policy_extra_read_roots"] = mergePolicyRootMetadata(out["policy_extra_read_roots"], effective.ReadableRoots)
+	cfg = configstore.DefaultSandboxConfig(cfg)
+	skillReadRoots := ExternalSkillReadRoots(workspaceDir, skillMetas)
+	readRoots := configstore.DedupeStrings(append(append([]string(nil), cfg.ReadableRoots...), skillReadRoots...))
+	if len(readRoots) > 0 {
+		out["policy_extra_read_roots"] = mergePolicyRootMetadata(out["policy_extra_read_roots"], readRoots)
 	}
-	if len(effective.WritableRoots) > 0 {
-		out["policy_extra_write_roots"] = mergePolicyRootMetadata(out["policy_extra_write_roots"], effective.WritableRoots)
+	if len(cfg.WritableRoots) > 0 {
+		out["policy_extra_write_roots"] = mergePolicyRootMetadata(out["policy_extra_write_roots"], cfg.WritableRoots)
 	}
-	out["policy_network_enabled"] = configstore.SandboxNetworkEnabled(effective)
+	out["policy_network_enabled"] = configstore.SandboxNetworkEnabled(cfg)
 	return out
-}
-
-func DefaultSkillRoots(workspaceDir string) []string {
-	dirs := promptassembly.DefaultSkillDiscoveryDirs(workspaceDir)
-	out := make([]string, 0, len(dirs))
-	for _, dir := range dirs {
-		resolved, err := promptassembly.ResolvePromptPath(dir)
-		if err != nil {
-			continue
-		}
-		out = append(out, resolved)
-	}
-	return configstore.DedupeStrings(out)
 }
 
 func mergePolicyRootMetadata(existing any, values []string) []string {

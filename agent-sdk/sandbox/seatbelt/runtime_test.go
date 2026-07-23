@@ -19,11 +19,16 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/runnerruntime"
 )
 
-func TestSeatbeltWritableRootsDoNotBroadenMissingRootToParent(t *testing.T) {
+func TestSeatbeltWritableRootsSkipMissingRootWithoutCreatingIt(t *testing.T) {
 	root := t.TempDir()
 	workspace := filepath.Join(root, "workspace")
 	fakeHome := filepath.Join(root, "home")
 	missingCache := filepath.Join(fakeHome, ".pnpm-store")
+	for _, dir := range []string{workspace, fakeHome} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatalf("Mkdir(%q) error = %v", dir, err)
+		}
+	}
 
 	roots, err := seatbeltWritableRoots(policy.Policy{
 		Type:          policy.TypeWorkspaceWrite,
@@ -36,11 +41,14 @@ func TestSeatbeltWritableRootsDoNotBroadenMissingRootToParent(t *testing.T) {
 	if containsString(roots, fakeHome) {
 		t.Fatalf("Writable roots = %#v, must not grant parent of missing root %q", roots, missingCache)
 	}
-	if !containsString(roots, missingCache) {
-		t.Fatalf("Writable roots = %#v, want exact missing root %q retained", roots, missingCache)
+	if !containsString(roots, workspace) {
+		t.Fatalf("Writable roots = %#v, want existing workspace %q", roots, workspace)
 	}
-	if _, err := os.Stat(missingCache); err != nil {
-		t.Fatalf("Stat(missingCache) error = %v, want pre-created writable root", err)
+	if containsString(roots, missingCache) {
+		t.Fatalf("Writable roots = %#v, did not want missing root %q", roots, missingCache)
+	}
+	if _, err := os.Stat(missingCache); !os.IsNotExist(err) {
+		t.Fatalf("Stat(missingCache) error = %v, want not created", err)
 	}
 }
 

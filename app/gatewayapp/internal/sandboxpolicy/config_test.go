@@ -61,30 +61,3 @@ func TestMergeConfigAllowsSandboxNetworkOverride(t *testing.T) {
 		t.Fatalf("NetworkEnabled = %#v, want override true", got.NetworkEnabled)
 	}
 }
-
-func TestEffectiveConfigWindowsKeepsAutoForDefaultSandbox(t *testing.T) {
-	t.Parallel()
-
-	got := EffectiveConfigForGOOS(configstore.SandboxConfig{RequestedType: "auto"}, t.TempDir(), "windows")
-	if got.RequestedType != "auto" {
-		t.Fatalf("RequestedType = %q, want auto", got.RequestedType)
-	}
-}
-
-func TestEffectiveConfigWindowsPreservesExplicitSandbox(t *testing.T) {
-	t.Parallel()
-
-	got := EffectiveConfigForGOOS(configstore.SandboxConfig{RequestedType: "windows"}, t.TempDir(), "windows")
-	if got.RequestedType != "windows" {
-		t.Fatalf("RequestedType = %q, want windows", got.RequestedType)
-	}
-}
-
-func TestEffectiveConfigNonWindowsKeepsAuto(t *testing.T) {
-	t.Parallel()
-
-	got := EffectiveConfigForGOOS(configstore.SandboxConfig{RequestedType: "auto"}, t.TempDir(), "linux")
-	if got.RequestedType != "auto" {
-		t.Fatalf("RequestedType = %q, want auto", got.RequestedType)
-	}
-}
