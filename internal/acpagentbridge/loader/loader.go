@@ -81,10 +81,12 @@ func (l *SessionServiceLoader) LoadSession(
 	}
 
 	if cb != nil {
+		spawnReplay := newSpawnReplayProjector(loaded.Events)
 		for _, event := range loaded.Events {
 			if event == nil {
 				continue
 			}
+			base := projector.EnvelopeBaseFromSessionEvent(loaded.Session.SessionRef, event, projector.SessionEventTransport{})
 			notifications, err := projector.ProjectSessionEventNotifications(eventstream.Envelope{
 				SessionID: strings.TrimSpace(req.SessionID),
 			}, event, l.projector)
@@ -92,8 +94,16 @@ func (l *SessionServiceLoader) LoadSession(
 				return schema.LoadSessionResponse{}, err
 			}
 			for _, notification := range notifications {
+				notification = spawnReplay.normalize(event, notification)
 				if err := cb.SessionUpdate(ctx, notification); err != nil {
 					return schema.LoadSessionResponse{}, err
+				}
+				base.Kind = eventstream.KindSessionUpdate
+				base.Update = notification.Update
+				for _, parentClose := range spawnReplay.observedParentCloses(base, notification.SessionID) {
+					if err := cb.SessionUpdate(ctx, parentClose); err != nil {
+						return schema.LoadSessionResponse{}, err
+					}
 				}
 			}
 		}

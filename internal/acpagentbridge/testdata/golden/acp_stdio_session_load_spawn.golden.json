@@ -1,0 +1,282 @@
+[
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "spawn-alpha",
+      "title": "Spawn breeze: alpha work",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "agent": "breeze",
+        "prompt": "alpha work"
+      },
+      "content": [
+        {
+          "type": "terminal",
+          "terminalId": "spawn-alpha"
+        }
+      ],
+      "_meta": {
+        "terminal_info": {
+          "terminal_id": "spawn-alpha"
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "spawn-beta",
+      "title": "Spawn orbit: beta work",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "agent": "orbit",
+        "prompt": "beta work"
+      },
+      "content": [
+        {
+          "type": "terminal",
+          "terminalId": "spawn-beta"
+        }
+      ],
+      "_meta": {
+        "terminal_info": {
+          "terminal_id": "spawn-beta"
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "spawn-alpha",
+      "title": "Spawn",
+      "kind": "execute",
+      "status": "in_progress",
+      "rawOutput": {
+        "handle": "alpha",
+        "parent_call": "spawn-alpha",
+        "parent_tool": "Spawn",
+        "state": "running",
+        "target_kind": "subagent"
+      },
+      "content": [
+        {
+          "type": "terminal",
+          "terminalId": "spawn-alpha"
+        }
+      ],
+      "_meta": {
+        "terminal_info": {
+          "terminal_id": "spawn-alpha"
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "spawn-beta",
+      "title": "Spawn",
+      "kind": "execute",
+      "status": "in_progress",
+      "rawOutput": {
+        "handle": "beta",
+        "parent_call": "spawn-beta",
+        "parent_tool": "Spawn",
+        "state": "running",
+        "target_kind": "subagent"
+      },
+      "content": [
+        {
+          "type": "terminal",
+          "terminalId": "spawn-beta"
+        }
+      ],
+      "_meta": {
+        "terminal_info": {
+          "terminal_id": "spawn-beta"
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "wait-one",
+      "title": "Task wait",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "action": "wait",
+        "handle": "alpha,beta"
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "wait-one",
+      "title": "Task wait",
+      "kind": "execute",
+      "status": "completed",
+      "rawInput": {
+        "action": "wait",
+        "handle": "alpha,beta"
+      },
+      "rawOutput": {
+        "action": "wait",
+        "tasks": [
+          {
+            "final_message": "# Alpha final\n\n- exact markdown\n",
+            "handle": "alpha",
+            "parent_call": "spawn-alpha",
+            "parent_tool": "Spawn",
+            "state": "completed",
+            "target_kind": "subagent"
+          },
+          {
+            "handle": "beta",
+            "parent_call": "spawn-beta",
+            "parent_tool": "Spawn",
+            "state": "running",
+            "target_kind": "subagent"
+          },
+          {
+            "handle": "command",
+            "parent_call": "command-call",
+            "parent_tool": "RunCommand",
+            "state": "completed",
+            "target_kind": "command"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "spawn-alpha",
+      "status": "completed",
+      "rawOutput": {
+        "final_message": "# Alpha final\n\n- exact markdown\n",
+        "handle": "alpha",
+        "parent_call": "spawn-alpha",
+        "parent_tool": "Spawn",
+        "state": "completed",
+        "target_kind": "subagent"
+      },
+      "content": [
+        {
+          "type": "terminal",
+          "terminalId": "spawn-alpha"
+        }
+      ],
+      "_meta": {
+        "terminal_exit": {
+          "signal": null,
+          "terminal_id": "spawn-alpha"
+        },
+        "terminal_info": {
+          "terminal_id": "spawn-alpha"
+        },
+        "terminal_output": {
+          "data": "# Alpha final\n\n- exact markdown\n",
+          "terminal_id": "spawn-alpha"
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "wait-two",
+      "title": "Task wait",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "action": "wait",
+        "handle": "beta"
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "wait-two",
+      "title": "Task wait",
+      "kind": "execute",
+      "status": "completed",
+      "rawInput": {
+        "action": "wait",
+        "handle": "beta"
+      },
+      "rawOutput": {
+        "action": "wait",
+        "tasks": [
+          {
+            "final_message": "Beta final.",
+            "handle": "beta",
+            "parent_call": "spawn-beta",
+            "parent_tool": "Spawn",
+            "state": "completed",
+            "target_kind": "subagent"
+          },
+          {
+            "final_message": "duplicate alpha",
+            "handle": "alpha",
+            "parent_call": "spawn-alpha",
+            "parent_tool": "Spawn",
+            "state": "completed",
+            "target_kind": "subagent"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "spawn-beta",
+      "status": "completed",
+      "rawOutput": {
+        "final_message": "Beta final.",
+        "handle": "beta",
+        "parent_call": "spawn-beta",
+        "parent_tool": "Spawn",
+        "state": "completed",
+        "target_kind": "subagent"
+      },
+      "content": [
+        {
+          "type": "terminal",
+          "terminalId": "spawn-beta"
+        }
+      ],
+      "_meta": {
+        "terminal_exit": {
+          "signal": null,
+          "terminal_id": "spawn-beta"
+        },
+        "terminal_info": {
+          "terminal_id": "spawn-beta"
+        },
+        "terminal_output": {
+          "data": "Beta final.",
+          "terminal_id": "spawn-beta"
+        }
+      }
+    }
+  }
+]

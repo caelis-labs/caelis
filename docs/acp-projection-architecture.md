@@ -182,8 +182,10 @@ same narrative already exists in `Message`; the normalized
 `EventScope.ACP.EventType` remains the typed update identity. Durable
 projection must use that identity when deciding whether a message or thought
 is still streaming, so storage compaction cannot turn token deltas into final
-boundaries. A child narrative boundary never closes its parent Spawn panel;
-only the parent tool status/result closes that lifecycle.
+boundaries. A child narrative `Final` marker never closes its parent Spawn
+panel. A terminal Task-stream lifecycle is separate evidence that the observed
+child turn ended; canonical parent tool status/result remains on the Session
+feed independently from that observation boundary.
 `parent_tool` records the delegated relationship in either lane. Spawn and Task
 stream frames never emit a parent tool terminal/text copy of child activity,
 including when a runtime has materialized `Frame.Text` from a semantic child
@@ -202,19 +204,50 @@ producers.
 The standard ACP stdio `session/update` notification carries only `sessionId`
 and `update`; it cannot carry the surrounding Caelis Envelope `scope` or
 `parent_tool`. Forwarding a scoped child update unchanged would therefore
-flatten it into the main Agent transcript. The bridge does not subscribe to or
-forward subagent Task streams on that wire. It subscribes only to RunCommand
-Task streams when a compatible terminal is already mounted, projecting their
-`_meta.terminal_output` bytes without creating a second Task or persistence
-path. The canonical parent Spawn status/result remains on the Session feed.
+flatten it into the main Agent transcript. The compatibility bridge instead
+subscribes through `control/taskstream` only after a mounted RunCommand or Spawn
+tool update exposes the canonical Task handle. RunCommand bytes keep their
+existing `_meta.terminal_output` projection. A Spawn subscription accepts only
+`scope=subagent` events whose typed `parent_tool` identifies that exact Spawn,
+then renders child message, thought, tool, nested-terminal, plan, and delivery
+notices as append-only `_meta.terminal_output` patches on the mounted Spawn
+terminal. The scoped child updates themselves never enter the main ACP
+transcript.
+
+The typed terminal lifecycle from that Spawn Task is the primary stdio terminal
+signal. After all earlier child frames, the bridge emits one parent
+`tool_call_update` carrying the mapped completed/failed status and
+`_meta.terminal_exit`; it does not require the model to call `Task wait`. This
+is a transient Surface wire-compatibility projection and does not manufacture a
+durable parent result.
+
+`Task wait` remains a model-visible optional observer. The bridge preserves its
+standard ACP update and uses a terminal single-task result only as a fallback
+when lifecycle delivery was unavailable. Batch waits have no single Envelope
+parent relation, so the fallback reads each canonical `rawOutput.tasks[]`
+relation, closes only terminal subagent entries, and ignores running entries.
+A result arriving after the typed lifecycle never emits a second close. When a
+wait becomes readable before its Task lifecycle, the bridge drains the retained
+child suffix through that boundary first, with a bounded fallback if observation
+is unavailable. This adds no second Task, persistence path, or `_meta`-derived
+correlation path.
+
+`session/load` has no live child Task stream to replay. The ACP loader therefore
+uses the same validated Task-wait observation semantics to reconstruct the
+historical Spawn terminal view from durable canonical results. Each terminal
+subagent item projects its exact `final_message` (or failure text) onto the
+typed parent Spawn, followed by the mapped status and `_meta.terminal_exit`;
+running and non-subagent items are ignored. A canonical parent result wins when
+one already exists, and repeated waits never close the same Spawn twice. This is
+a replay-only Surface projection over existing durable facts, not a new Session
+event, Task record, or model-context write.
 
 A completed main-scope Task wait remains a model-visible canonical result even
-when the physical task panel belongs to an earlier Spawn call. Its canonical
-tool output carries `target_kind`, `parent_call`, and `parent_tool`; durable
-projection promotes that ancestry to typed Envelope `parent_tool`. Surfaces use
-the typed relation to complete the original Spawn panel and consume the
-observer result instead of rendering a second physical panel. They never
-recover this relation from `_meta` or a Surface-private replay path.
+when the physical task panel belongs to an earlier Spawn call. A singular result
+promotes `target_kind`, `parent_call`, and `parent_tool` to the typed Envelope
+relation. A batch result retains those canonical fields per item because one
+Envelope cannot identify multiple parents. Surfaces never recover this relation
+from `_meta` or a Surface-private replay path.
 
 `internal/controlclient/turningress.Broker` carries only the main Runtime ACP
 producer into the Control Session Feed. It rejects stale scoped subagent
@@ -250,10 +283,11 @@ measured fan-out makes polling material, the optimization belongs in a shared
 per-Task Control watcher that preserves the same per-subscriber queues and
 cursors; Surfaces must not bypass Control or acquire Runtime streams directly.
 
-Standard ACP stdio has no scoped multi-stream primitive, so it does not receive
+Standard ACP stdio has no scoped multi-stream primitive, so it never receives
 flattened child live tokens. The compatibility bridge may subscribe to a
-RunCommand Task while its parent terminal is mounted and project only
-`_meta.terminal_output`; it never forwards subagent streams as main
+RunCommand or Spawn Task while its parent terminal is mounted. RunCommand keeps
+its direct terminal-byte projection; Spawn child semantics are formatted only
+as `_meta.terminal_output` for that parent terminal and never forwarded as main
 `session/update` traffic.
 
 The first-party Session-feed boundary is registered before `BeginTurn`, but its

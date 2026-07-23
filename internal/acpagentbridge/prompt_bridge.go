@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -156,6 +157,9 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 					events = nil
 					continue
 				}
+				if err := a.drainACPTaskStreamBeforeParentClose(ctx, cb, sessionID, taskMux, &taskEvents, env, outboundFilter); err != nil {
+					return err
+				}
 				if err := a.emitControlEnvelope(ctx, cb, sessionID, result.Reconnect, env, outboundFilter); err != nil {
 					return err
 				}
@@ -186,6 +190,10 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 				events = nil
 				continue
 			}
+			if err := a.drainACPTaskStreamBeforeParentClose(ctx, cb, sessionID, taskMux, &taskEvents, env, outboundFilter); err != nil {
+				_ = result.Turn.Close()
+				return err
+			}
 			if err := a.emitControlEnvelope(ctx, cb, sessionID, result.Turn, env, outboundFilter); err != nil {
 				_ = result.Turn.Close()
 				return err
@@ -196,6 +204,88 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 	closeErr := result.Turn.Close()
 	if closeErr != nil {
 		return closeErr
+	}
+	return nil
+}
+
+const acpTaskStreamParentDrainTimeout = 2 * time.Second
+
+// drainACPTaskStreamBeforeParentClose preserves fallback ordering across the
+// independent Session and Task subscriber queues. The typed child lifecycle is
+// normally the primary terminal signal. If a canonical Task wait result becomes
+// readable first, drain through that lifecycle so retained child suffixes still
+// precede terminal_exit. The bounded fallback keeps broken observation from
+// delaying the canonical Task result indefinitely.
+func (a *RuntimeAgent) drainACPTaskStreamBeforeParentClose(
+	ctx context.Context,
+	cb acp.PromptCallbacks,
+	sessionID string,
+	taskMux *acpTaskStreamMux,
+	taskEvents *<-chan eventstream.Envelope,
+	env eventstream.Envelope,
+	outboundFilter *acpNarrativeFilter,
+) error {
+	observedParents := acpObservedParentClosesFromEnvelope(env)
+	if len(observedParents) == 0 || taskMux == nil || taskEvents == nil || *taskEvents == nil {
+		return nil
+	}
+	timer := time.NewTimer(acpTaskStreamParentDrainTimeout)
+	defer timer.Stop()
+	for _, observed := range observedParents {
+		if outboundFilter != nil && outboundFilter.childTerminal != nil &&
+			!outboundFilter.childTerminal.parentOpen(sessionID, observed.parentCallID) {
+			continue
+		}
+		boundary := taskMux.parentBoundary(observed.parentCallID)
+		if boundary == nil {
+			continue
+		}
+	waitForBoundary:
+		for {
+			select {
+			case <-ctx.Done():
+				return context.Canceled
+			case <-timer.C:
+				return nil
+			case taskEnvelope, open := <-*taskEvents:
+				if !open {
+					*taskEvents = nil
+					return nil
+				}
+				if err := a.emitControlEnvelope(ctx, cb, sessionID, nil, taskEnvelope, outboundFilter); err != nil {
+					return err
+				}
+			case <-boundary:
+				if err := a.drainReadyACPTaskStream(ctx, cb, sessionID, taskEvents, outboundFilter); err != nil {
+					return err
+				}
+				break waitForBoundary
+			}
+		}
+	}
+	return nil
+}
+
+func (a *RuntimeAgent) drainReadyACPTaskStream(
+	ctx context.Context,
+	cb acp.PromptCallbacks,
+	sessionID string,
+	taskEvents *<-chan eventstream.Envelope,
+	outboundFilter *acpNarrativeFilter,
+) error {
+	for taskEvents != nil && *taskEvents != nil {
+		select {
+		case taskEnvelope, open := <-*taskEvents:
+			if !open {
+				*taskEvents = nil
+				return nil
+			}
+			if err := a.emitControlEnvelope(ctx, cb, sessionID, nil, taskEnvelope, outboundFilter); err != nil {
+				return err
+			}
+		default:
+			return nil
+		}
 	}
 	return nil
 }
@@ -360,8 +450,8 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCal
 				if notification.Update == nil {
 					return nil
 				}
-				// A final child narrative chunk is not the parent Spawn terminal.
-				// Only the parent tool result below may close the mounted panel.
+				// A final child narrative chunk is not terminal evidence. The
+				// typed child Task lifecycle or a canonical parent result closes it.
 				return cb.SessionUpdate(ctx, normalizeACPStdioTerminalExtension(notification))
 			}
 		}
@@ -369,9 +459,38 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCal
 		if outboundFilter != nil && outboundFilter.childTerminal != nil {
 			notification = outboundFilter.childTerminal.normalizeParentClose(notification)
 		}
-		return emitFilteredSessionUpdate(ctx, cb, notification, env.Final, source, outboundFilter)
+		if err := emitFilteredSessionUpdate(ctx, cb, notification, env.Final, source, outboundFilter); err != nil {
+			return err
+		}
+		if outboundFilter == nil || outboundFilter.childTerminal == nil {
+			return nil
+		}
+		for _, parentClose := range outboundFilter.childTerminal.projectObservedParentCloses(env, sessionID) {
+			if err := emitFilteredSessionUpdate(ctx, cb, parentClose, true, source, outboundFilter); err != nil {
+				return err
+			}
+		}
+		return nil
 	case eventstream.KindNotice:
+		if outboundFilter != nil && outboundFilter.childTerminal != nil {
+			notification, handled := outboundFilter.childTerminal.projectNotice(env, sessionID)
+			if handled {
+				if notification.Update == nil {
+					return nil
+				}
+				return cb.SessionUpdate(ctx, normalizeACPStdioTerminalExtension(notification))
+			}
+		}
 		return emitACPNotice(ctx, cb, sessionID, env, "", source, outboundFilter)
+	case eventstream.KindLifecycle:
+		if outboundFilter == nil || outboundFilter.childTerminal == nil {
+			return nil
+		}
+		notification, handled := outboundFilter.childTerminal.projectLifecycle(env, sessionID)
+		if !handled || notification.Update == nil {
+			return nil
+		}
+		return emitFilteredSessionUpdate(ctx, cb, notification, true, source, outboundFilter)
 	case eventstream.KindError:
 		if env.Err != nil {
 			return env.Err

@@ -4,9 +4,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
 // acpChildTerminalProjector is the ACP stdio compatibility renderer for
@@ -26,10 +29,13 @@ type acpChildTerminalKey struct {
 }
 
 type acpChildTerminalState struct {
-	started  bool
-	endsLine bool
-	lastKind string
-	tools    map[string]acpChildToolState
+	started           bool
+	endsLine          bool
+	lastKind          string
+	lastNarrativeKind string
+	lastNarrative     string
+	closed            bool
+	tools             map[string]acpChildToolState
 }
 
 type acpChildToolState struct {
@@ -43,7 +49,8 @@ func newACPChildTerminalProjector() *acpChildTerminalProjector {
 
 func isACPChildTerminalEnvelope(env eventstream.Envelope) bool {
 	return env.Scope == eventstream.ScopeSubagent && env.ParentTool != nil &&
-		strings.TrimSpace(env.ParentTool.ToolCallID) != "" && env.Update != nil
+		strings.TrimSpace(env.ParentTool.ToolCallID) != "" &&
+		identity.CanonicalOrSelf(env.ParentTool.ToolName) == identity.Spawn && env.Update != nil
 }
 
 func (p *acpChildTerminalProjector) track(env eventstream.Envelope, fallbackSessionID string) {
@@ -88,7 +95,12 @@ func (p *acpChildTerminalProjector) project(env eventstream.Envelope, fallbackSe
 		state = &acpChildTerminalState{tools: map[string]acpChildToolState{}}
 		p.parents[key] = state
 	}
+	if state.closed {
+		p.mu.Unlock()
+		return acp.SessionNotification{}, true
+	}
 	text, kind, lineOriented := childTerminalSegment(state, env.Update)
+	state.observeNarrative(text, kind)
 	text = state.prepare(text, kind, lineOriented)
 	p.mu.Unlock()
 
@@ -140,9 +152,222 @@ func (p *acpChildTerminalProjector) normalizeParentClose(notification acp.Sessio
 	if !tracked {
 		return notification
 	}
+	p.mu.Lock()
+	if state := p.parents[key]; state != nil {
+		state.closed = true
+	}
+	p.mu.Unlock()
 	update.Meta = metautil.WithTerminalInfo(update.Meta, key.ToolCallID)
 	notification.Update = update
 	return notification
+}
+
+type acpObservedParentClose struct {
+	parentCallID string
+	status       string
+	rawOutput    map[string]any
+}
+
+func acpObservedParentClosesFromEnvelope(env eventstream.Envelope) []acpObservedParentClose {
+	results := projector.SpawnTaskResultsFromEnvelope(env)
+	if len(results) == 0 {
+		return nil
+	}
+	out := make([]acpObservedParentClose, 0, len(results))
+	for _, result := range results {
+		out = append(out, acpObservedParentClose{
+			parentCallID: result.ParentCallID,
+			status:       result.Status,
+			rawOutput:    result.RawOutput,
+		})
+	}
+	return out
+}
+
+// projectObservedParentCloses is the fallback when typed child Task lifecycle
+// delivery was unavailable. A single wait carries one typed Envelope parent; a
+// batch wait carries canonical relations in rawOutput.tasks because one
+// Envelope cannot represent multiple parents. The observer Task update remains
+// a separate standard ACP lifecycle, and a late wait never closes twice.
+func (p *acpChildTerminalProjector) projectObservedParentCloses(env eventstream.Envelope, fallbackSessionID string) []acp.SessionNotification {
+	if p == nil {
+		return nil
+	}
+	observedParents := acpObservedParentClosesFromEnvelope(env)
+	if len(observedParents) == 0 {
+		return nil
+	}
+	notifications := make([]acp.SessionNotification, 0, len(observedParents))
+	for _, observed := range observedParents {
+		if notification, ok := p.projectObservedParentClose(env, fallbackSessionID, observed); ok {
+			notifications = append(notifications, notification)
+		}
+	}
+	return notifications
+}
+
+func (p *acpChildTerminalProjector) projectObservedParentClose(
+	env eventstream.Envelope,
+	fallbackSessionID string,
+	observed acpObservedParentClose,
+) (acp.SessionNotification, bool) {
+	key := acpChildTerminalKey{SessionID: strings.TrimSpace(env.SessionID), ToolCallID: observed.parentCallID}
+	if key.SessionID == "" {
+		key.SessionID = strings.TrimSpace(fallbackSessionID)
+	}
+	status := observed.status
+	if !acpToolStatusFinalString(status) {
+		status = observedSpawnStatus(nil, observed.rawOutput)
+	}
+	text := display.SubagentTaskFinalText(display.MapString(observed.rawOutput, "state"), observed.rawOutput)
+	p.mu.Lock()
+	state := p.parents[key]
+	if state == nil {
+		state = &acpChildTerminalState{tools: map[string]acpChildToolState{}}
+		p.parents[key] = state
+	}
+	if state.closed {
+		p.mu.Unlock()
+		return acp.SessionNotification{}, false
+	}
+	if suffix, cumulative := acpNarrativeUnsentSuffix(state.lastNarrative, text); cumulative {
+		text = suffix
+	}
+	state.closed = true
+	p.mu.Unlock()
+
+	meta := metautil.WithTerminalInfo(nil, observed.parentCallID)
+	meta = metautil.WithTerminalOutput(meta, observed.parentCallID, text)
+	content := []acp.ToolCallContent{{Type: "terminal", TerminalID: observed.parentCallID}}
+
+	return acp.SessionNotification{
+		SessionID: key.SessionID,
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo,
+			ToolCallID:    observed.parentCallID,
+			Status:        &status,
+			RawOutput:     observed.rawOutput,
+			Content:       content,
+			Meta:          meta,
+		},
+	}, true
+}
+
+func (p *acpChildTerminalProjector) parentOpen(sessionID string, parentCallID string) bool {
+	if p == nil {
+		return true
+	}
+	key := acpChildTerminalKey{
+		SessionID:  strings.TrimSpace(sessionID),
+		ToolCallID: strings.TrimSpace(parentCallID),
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	state := p.parents[key]
+	return state == nil || !state.closed
+}
+
+// projectLifecycle closes the mounted Spawn terminal from the typed child Task
+// lifecycle. This is the primary terminal signal because Task wait is an
+// optional observer tool call and may never occur.
+func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, fallbackSessionID string) (acp.SessionNotification, bool) {
+	if p == nil || env.Kind != eventstream.KindLifecycle || env.Scope != eventstream.ScopeSubagent ||
+		env.ParentTool == nil || env.Lifecycle == nil || !eventstream.IsTerminalLifecycleState(env.Lifecycle.State) {
+		return acp.SessionNotification{}, false
+	}
+	parentCallID := strings.TrimSpace(env.ParentTool.ToolCallID)
+	if parentCallID == "" || identity.CanonicalOrSelf(env.ParentTool.ToolName) != identity.Spawn {
+		return acp.SessionNotification{}, false
+	}
+	sessionID := strings.TrimSpace(env.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(fallbackSessionID)
+	}
+	key := acpChildTerminalKey{SessionID: sessionID, ToolCallID: parentCallID}
+	p.mu.Lock()
+	state := p.parents[key]
+	if state == nil {
+		state = &acpChildTerminalState{tools: map[string]acpChildToolState{}}
+		p.parents[key] = state
+	}
+	if state.closed {
+		p.mu.Unlock()
+		return acp.SessionNotification{}, true
+	}
+	state.closed = true
+	p.mu.Unlock()
+
+	status := observedSpawnStatus(nil, map[string]any{"state": env.Lifecycle.State})
+	return acp.SessionNotification{
+		SessionID: sessionID,
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo,
+			ToolCallID:    parentCallID,
+			Status:        &status,
+			Content:       []acp.ToolCallContent{{Type: "terminal", TerminalID: parentCallID}},
+			Meta:          metautil.WithTerminalInfo(nil, parentCallID),
+		},
+	}, true
+}
+
+func (p *acpChildTerminalProjector) projectNotice(env eventstream.Envelope, fallbackSessionID string) (acp.SessionNotification, bool) {
+	if p == nil || env.Kind != eventstream.KindNotice || env.Scope != eventstream.ScopeSubagent ||
+		env.ParentTool == nil || strings.TrimSpace(env.Notice) == "" {
+		return acp.SessionNotification{}, false
+	}
+	parentCallID := strings.TrimSpace(env.ParentTool.ToolCallID)
+	if parentCallID == "" || identity.CanonicalOrSelf(env.ParentTool.ToolName) != identity.Spawn {
+		return acp.SessionNotification{}, false
+	}
+	sessionID := strings.TrimSpace(env.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(fallbackSessionID)
+	}
+	key := acpChildTerminalKey{SessionID: sessionID, ToolCallID: parentCallID}
+	p.mu.Lock()
+	state := p.parents[key]
+	if state == nil {
+		state = &acpChildTerminalState{tools: map[string]acpChildToolState{}}
+		p.parents[key] = state
+	}
+	if state.closed {
+		p.mu.Unlock()
+		return acp.SessionNotification{}, true
+	}
+	text := state.prepare(env.Notice, "notice", true)
+	p.mu.Unlock()
+	if text == "" {
+		return acp.SessionNotification{}, true
+	}
+	status := acp.ToolStatusInProgress
+	meta := metautil.WithCompactRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
+		metautil.RuntimeStreamMode: "append",
+	})
+	meta = metautil.WithTerminalInfo(meta, parentCallID)
+	meta = metautil.WithTerminalOutput(meta, parentCallID, text)
+	return acp.SessionNotification{
+		SessionID: sessionID,
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo,
+			ToolCallID:    parentCallID,
+			Status:        &status,
+			Content:       []acp.ToolCallContent{{Type: "terminal", TerminalID: parentCallID}},
+			Meta:          meta,
+		},
+	}, true
+}
+
+func observedSpawnStatus(taskStatus *string, rawOutput map[string]any) string {
+	switch strings.ToLower(strings.TrimSpace(display.MapString(rawOutput, "state"))) {
+	case "completed", "complete", "succeeded", "success", "done":
+		return acp.ToolStatusCompleted
+	case "failed", "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout":
+		return acp.ToolStatusFailed
+	}
+	if taskStatus != nil && strings.EqualFold(strings.TrimSpace(*taskStatus), acp.ToolStatusFailed) {
+		return acp.ToolStatusFailed
+	}
+	return acp.ToolStatusCompleted
 }
 
 func childTerminalSegment(state *acpChildTerminalState, update acp.Update) (string, string, bool) {
@@ -311,4 +536,20 @@ func (s *acpChildTerminalState) prepare(text string, kind string, lineOriented b
 	s.endsLine = strings.HasSuffix(text, "\n") || strings.HasSuffix(text, "\r")
 	s.lastKind = kind
 	return text
+}
+
+func (s *acpChildTerminalState) observeNarrative(text string, kind string) {
+	if s == nil || text == "" {
+		return
+	}
+	if !strings.HasPrefix(kind, "narrative:") {
+		s.lastNarrativeKind = ""
+		s.lastNarrative = ""
+		return
+	}
+	if kind != s.lastNarrativeKind {
+		s.lastNarrativeKind = kind
+		s.lastNarrative = ""
+	}
+	s.lastNarrative += text
 }

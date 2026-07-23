@@ -17,10 +17,10 @@ import (
 )
 
 // acpTaskStreamMux keeps the standard ACP bridge compatible with mounted
-// RunCommand terminals without flattening subagent semantics into the main
-// session/update stream. After its parent prompt is sealed, active command
-// subscriptions remain available until their Task stream ends. Stopping the
-// mux closes only delivery subscriptions, never Tasks.
+// RunCommand and Spawn terminals without flattening subagent semantics into
+// the main session/update stream. After its parent prompt is sealed, active
+// command subscriptions remain available until their Task stream ends.
+// Stopping the mux closes only delivery subscriptions, never Tasks.
 type acpTaskStreamMux struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -32,6 +32,7 @@ type acpTaskStreamMux struct {
 	mu         sync.Mutex
 	resolving  map[string]struct{}
 	started    map[string]struct{}
+	boundaries map[string]chan struct{}
 	active     int
 	sealed     bool
 	eventsOnce sync.Once
@@ -46,7 +47,7 @@ func newACPTaskStreamMux(parent context.Context, service taskstream.Service, pri
 	return &acpTaskStreamMux{
 		ctx: ctx, cancel: cancel, service: service, principal: principal,
 		sessionID: strings.TrimSpace(sessionID), events: make(chan eventstream.Envelope, 128),
-		resolving: map[string]struct{}{}, started: map[string]struct{}{},
+		resolving: map[string]struct{}{}, started: map[string]struct{}{}, boundaries: map[string]chan struct{}{},
 	}
 }
 
@@ -72,7 +73,7 @@ func (a *RuntimeAgent) startACPTaskStreamMux(parent context.Context, sessionID s
 }
 
 // detachACPTaskStreamMux seals discovery after the parent Prompt ends, then
-// keeps forwarding already-subscribed RunCommand delivery until those Task
+// keeps forwarding already-subscribed terminal delivery until those Task
 // streams end or the Session is closed.
 func (a *RuntimeAgent) detachACPTaskStreamMux(parent context.Context, mux *acpTaskStreamMux, cb acp.PromptCallbacks, sessionID string, filter *acpNarrativeFilter) {
 	if a == nil || mux == nil {
@@ -132,48 +133,58 @@ func (m *acpTaskStreamMux) Observe(envelope eventstream.Envelope) {
 	if m == nil {
 		return
 	}
-	callID, handle, ok := runCommandTaskStreamAnchor(envelope)
+	anchor, ok := acpTaskStreamAnchorFromEnvelope(envelope)
 	if !ok {
 		return
 	}
 	m.mu.Lock()
-	_, resolving := m.resolving[callID]
-	_, started := m.started[callID]
+	_, resolving := m.resolving[anchor.callID]
+	_, started := m.started[anchor.callID]
 	if m.sealed || resolving || started {
 		m.mu.Unlock()
 		return
 	}
-	m.resolving[callID] = struct{}{}
+	m.resolving[anchor.callID] = struct{}{}
+	if m.boundaries[anchor.callID] == nil {
+		m.boundaries[anchor.callID] = make(chan struct{}, 1)
+	}
 	m.active++
 	m.wg.Add(1)
 	m.mu.Unlock()
-	go m.resolveAndForward(callID, handle)
+	go m.resolveAndForward(anchor)
 }
 
-func (m *acpTaskStreamMux) resolveAndForward(callID, handle string) {
+type acpTaskStreamAnchor struct {
+	callID string
+	handle string
+	kind   task.Kind
+}
+
+func (m *acpTaskStreamMux) resolveAndForward(anchor acpTaskStreamAnchor) {
 	defer m.wg.Done()
 	defer m.finishOperation()
 	directory, err := m.service.List(m.ctx, m.principal, taskstream.ListRequest{SessionID: m.sessionID})
 	if err != nil {
-		m.reportResolveFailure(callID, handle, err)
+		m.reportResolveFailure(anchor, err)
 		return
 	}
 	var taskID string
 	for _, descriptor := range directory.Tasks {
-		if descriptor.Kind != task.KindCommand || strings.TrimSpace(descriptor.ParentTool.ToolCallID) != strings.TrimSpace(callID) {
+		if descriptor.Kind != anchor.kind || strings.TrimSpace(descriptor.ParentTool.ToolCallID) != anchor.callID ||
+			identity.CanonicalOrSelf(descriptor.ParentTool.ToolName) != taskStreamParentToolName(anchor.kind) {
 			continue
 		}
-		if descriptorHandle := task.NormalizeHandle(descriptor.Handle); descriptorHandle != "" && descriptorHandle != task.NormalizeHandle(handle) {
+		if descriptorHandle := task.NormalizeHandle(descriptor.Handle); descriptorHandle != "" && descriptorHandle != task.NormalizeHandle(anchor.handle) {
 			continue
 		}
 		if taskID != "" && taskID != strings.TrimSpace(descriptor.TaskID) {
-			m.reportResolveFailure(callID, handle, fmt.Errorf("multiple command Tasks match tool call %q", callID))
+			m.reportResolveFailure(anchor, fmt.Errorf("multiple %s Tasks match tool call %q", anchor.kind, anchor.callID))
 			return
 		}
 		taskID = strings.TrimSpace(descriptor.TaskID)
 	}
 	if taskID == "" {
-		m.reportResolveFailure(callID, handle, fmt.Errorf("task is not discoverable yet"))
+		m.reportResolveFailure(anchor, fmt.Errorf("task is not discoverable yet"))
 		return
 	}
 	result, err := m.service.Subscribe(m.ctx, m.principal, taskstream.SubscribeRequest{
@@ -181,18 +192,24 @@ func (m *acpTaskStreamMux) resolveAndForward(callID, handle string) {
 		TaskID:    taskID,
 	})
 	if err != nil {
-		m.reportResolveFailure(callID, handle, err)
+		m.reportResolveFailure(anchor, err)
 		return
 	}
 	if result.Subscription == nil {
-		m.reportResolveFailure(callID, handle, fmt.Errorf("subscription was not created"))
+		m.reportResolveFailure(anchor, fmt.Errorf("subscription was not created"))
 		return
 	}
 	m.mu.Lock()
-	delete(m.resolving, callID)
-	m.started[callID] = struct{}{}
+	delete(m.resolving, anchor.callID)
+	m.started[anchor.callID] = struct{}{}
 	m.mu.Unlock()
 	defer result.Subscription.Close()
+	sawBoundary := false
+	defer func() {
+		if !sawBoundary {
+			m.signalBoundary(anchor.callID)
+		}
+	}()
 	for events := result.Subscription.Events(); ; {
 		var envelope eventstream.Envelope
 		select {
@@ -201,15 +218,25 @@ func (m *acpTaskStreamMux) resolveAndForward(callID, handle string) {
 		case received, ok := <-events:
 			if !ok {
 				if streamErr := result.Subscription.Err(); streamErr != nil {
-					m.reportResolveFailure(callID, handle, streamErr)
+					m.reportResolveFailure(anchor, streamErr)
 				}
 				return
 			}
 			envelope = received
 		}
-		// Standard ACP has no scoped multi-stream primitive. Only RunCommand's
-		// already-mounted terminal extension is safe to project on the main wire.
-		if envelope.Scope != eventstream.ScopeMain || envelope.Kind != eventstream.KindSessionUpdate || !envelopeHasTerminalDelivery(envelope) {
+		if anchor.kind == task.KindSubagent && envelope.Kind == eventstream.KindLifecycle && envelope.Final {
+			if acpSubagentTaskLifecycleAllowed(anchor, envelope) {
+				select {
+				case <-m.ctx.Done():
+					return
+				case m.events <- envelope:
+				}
+			}
+			sawBoundary = true
+			m.signalBoundary(anchor.callID)
+			return
+		}
+		if !acpTaskStreamEnvelopeAllowed(anchor, envelope) {
 			continue
 		}
 		select {
@@ -220,36 +247,66 @@ func (m *acpTaskStreamMux) resolveAndForward(callID, handle string) {
 	}
 }
 
-func (m *acpTaskStreamMux) reportResolveFailure(callID, handle string, err error) {
+func (m *acpTaskStreamMux) reportResolveFailure(anchor acpTaskStreamAnchor, err error) {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
-	delete(m.resolving, strings.TrimSpace(callID))
-	delete(m.started, strings.TrimSpace(callID))
+	delete(m.resolving, anchor.callID)
+	delete(m.started, anchor.callID)
 	m.mu.Unlock()
-	m.reportUnavailable(handle, err)
+	m.reportUnavailable(anchor, err)
+	m.signalBoundary(anchor.callID)
 }
 
-func (m *acpTaskStreamMux) reportUnavailable(handle string, err error) {
+func (m *acpTaskStreamMux) reportUnavailable(anchor acpTaskStreamAnchor, err error) {
 	if m == nil || err == nil || m.ctx.Err() != nil {
 		return
+	}
+	toolName := identity.RunCommand
+	if anchor.kind == task.KindSubagent {
+		toolName = identity.Spawn
 	}
 	notice := eventstream.Envelope{
 		Kind:      eventstream.KindNotice,
 		SessionID: m.sessionID,
 		Scope:     eventstream.ScopeMain,
 		ScopeID:   m.sessionID,
-		Notice:    fmt.Sprintf("RunCommand live output is unavailable for Task %s: %v", strings.TrimSpace(handle), err),
+		Notice:    fmt.Sprintf("%s live output is unavailable for Task %s: %v", toolName, anchor.handle, err),
 		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Meta: map[string]any{"task_stream": map[string]any{
-			"target_handle": strings.TrimSpace(handle), "unavailable": true,
+			"target_handle": anchor.handle, "unavailable": true,
 		}},
 	}
 	select {
 	case <-m.ctx.Done():
 	case m.events <- notice:
 	}
+}
+
+func (m *acpTaskStreamMux) signalBoundary(callID string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	boundary := m.boundaries[strings.TrimSpace(callID)]
+	m.mu.Unlock()
+	if boundary == nil {
+		return
+	}
+	select {
+	case boundary <- struct{}{}:
+	default:
+	}
+}
+
+func (m *acpTaskStreamMux) parentBoundary(callID string) <-chan struct{} {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.boundaries[strings.TrimSpace(callID)]
 }
 
 func (m *acpTaskStreamMux) Close() {
@@ -262,8 +319,8 @@ func (m *acpTaskStreamMux) Close() {
 	m.closeEvents()
 }
 
-// Seal prevents discovery of new command Tasks while allowing already-started
-// subscriptions to deliver until their Task stream ends.
+// Seal prevents discovery of new terminal-backed Tasks while allowing
+// already-started subscriptions to deliver until their Task stream ends.
 func (m *acpTaskStreamMux) Seal() {
 	if m == nil {
 		return
@@ -299,15 +356,12 @@ func (m *acpTaskStreamMux) closeEvents() {
 	m.eventsOnce.Do(func() { close(m.events) })
 }
 
-func runCommandTaskStreamAnchor(envelope eventstream.Envelope) (string, string, bool) {
+func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStreamAnchor, bool) {
 	if envelope.Kind != eventstream.KindSessionUpdate || (envelope.Scope != "" && envelope.Scope != eventstream.ScopeMain) {
-		return "", "", false
+		return acpTaskStreamAnchor{}, false
 	}
 	meta := eventstream.UpdateMeta(envelope.Update)
 	toolName := metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName)
-	if identity.CanonicalOrSelf(toolName) != identity.RunCommand {
-		return "", "", false
-	}
 	var input, output map[string]any
 	switch update := envelope.Update.(type) {
 	case schema.ToolCall:
@@ -317,11 +371,71 @@ func runCommandTaskStreamAnchor(envelope eventstream.Envelope) (string, string, 
 		input, _ = update.RawInput.(map[string]any)
 		output, _ = update.RawOutput.(map[string]any)
 	default:
-		return "", "", false
+		return acpTaskStreamAnchor{}, false
+	}
+	kind := task.Kind("")
+	switch identity.CanonicalOrSelf(toolName) {
+	case identity.RunCommand:
+		kind = task.KindCommand
+	case identity.Spawn:
+		kind = task.KindSubagent
+	default:
+		if identity.CanonicalOrSelf(display.MapString(output, "parent_tool")) == identity.Spawn &&
+			strings.EqualFold(display.ToolTaskTargetKind(input, output, meta), "subagent") {
+			kind = task.KindSubagent
+		}
+	}
+	if kind == "" {
+		return acpTaskStreamAnchor{}, false
 	}
 	handle := display.ToolTaskHandle(input, output, meta)
 	callID := strings.TrimSpace(taskStreamToolCallID(envelope.Update))
-	return callID, strings.TrimSpace(handle), callID != "" && strings.TrimSpace(handle) != ""
+	handle = strings.TrimSpace(handle)
+	if kind == task.KindSubagent {
+		if parentCall := strings.TrimSpace(display.MapString(output, "parent_call")); parentCall != "" && parentCall != callID {
+			return acpTaskStreamAnchor{}, false
+		}
+	}
+	anchor := acpTaskStreamAnchor{callID: callID, handle: handle, kind: kind}
+	return anchor, callID != "" && handle != ""
+}
+
+func acpTaskStreamEnvelopeAllowed(anchor acpTaskStreamAnchor, envelope eventstream.Envelope) bool {
+	switch anchor.kind {
+	case task.KindCommand:
+		return envelope.Scope == eventstream.ScopeMain && envelope.Kind == eventstream.KindSessionUpdate && envelopeHasTerminalDelivery(envelope)
+	case task.KindSubagent:
+		if envelope.Scope != eventstream.ScopeSubagent || envelope.ParentTool == nil ||
+			strings.TrimSpace(envelope.ParentTool.ToolCallID) != anchor.callID ||
+			identity.CanonicalOrSelf(envelope.ParentTool.ToolName) != identity.Spawn {
+			return false
+		}
+		switch envelope.Kind {
+		case eventstream.KindSessionUpdate:
+			return envelope.Update != nil
+		case eventstream.KindNotice:
+			return strings.TrimSpace(envelope.Notice) != ""
+		}
+	}
+	return false
+}
+
+func acpSubagentTaskLifecycleAllowed(anchor acpTaskStreamAnchor, envelope eventstream.Envelope) bool {
+	return anchor.kind == task.KindSubagent && envelope.Scope == eventstream.ScopeSubagent &&
+		envelope.ParentTool != nil && strings.TrimSpace(envelope.ParentTool.ToolCallID) == anchor.callID &&
+		identity.CanonicalOrSelf(envelope.ParentTool.ToolName) == identity.Spawn &&
+		envelope.Lifecycle != nil && eventstream.IsTerminalLifecycleState(envelope.Lifecycle.State)
+}
+
+func taskStreamParentToolName(kind task.Kind) string {
+	switch kind {
+	case task.KindSubagent:
+		return identity.Spawn
+	case task.KindCommand:
+		return identity.RunCommand
+	default:
+		return ""
+	}
 }
 
 func taskStreamToolCallID(update schema.Update) string {

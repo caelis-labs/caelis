@@ -4,8 +4,83 @@ import (
 	"testing"
 
 	protocolacp "github.com/caelis-labs/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
+
+func TestACPObservedParentClosesFromBatchWaitOnlyTerminalSubagents(t *testing.T) {
+	completed := protocolacp.ToolStatusCompleted
+	envelope := eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain, Final: true,
+		Update: protocolacp.ToolCallUpdate{
+			SessionUpdate: protocolacp.UpdateToolCallInfo,
+			ToolCallID:    "wait-call-1",
+			Status:        &completed,
+			RawInput:      map[string]any{"action": "wait", "handle": "alpha,beta,gamma"},
+			RawOutput: map[string]any{
+				"action": "wait",
+				"tasks": []any{
+					map[string]any{
+						"handle": "alpha", "parent_call": "spawn-alpha", "parent_tool": "Spawn",
+						"state": "completed", "target_kind": "subagent", "final_message": "alpha done",
+					},
+					map[string]any{
+						"handle": "beta", "parent_call": "spawn-beta", "parent_tool": "Spawn",
+						"state": "running", "target_kind": "subagent",
+					},
+					map[string]any{
+						"handle": "gamma", "parent_call": "spawn-gamma", "parent_tool": "Spawn",
+						"state": "failed", "target_kind": "subagent", "error": "gamma failed",
+					},
+					map[string]any{
+						"handle": "command", "parent_call": "command-call", "parent_tool": "RunCommand",
+						"state": "completed", "target_kind": "command",
+					},
+					map[string]any{
+						"handle": "alpha", "parent_call": "spawn-alpha", "parent_tool": "Spawn",
+						"state": "completed", "target_kind": "subagent", "final_message": "duplicate",
+					},
+				},
+			},
+		},
+	}
+
+	observed := acpObservedParentClosesFromEnvelope(envelope)
+	if len(observed) != 2 {
+		t.Fatalf("observed parent closes = %#v, want completed alpha and failed gamma", observed)
+	}
+	if observed[0].parentCallID != "spawn-alpha" || displayMapString(observed[0].rawOutput, "final_message") != "alpha done" {
+		t.Fatalf("first observed parent close = %#v, want alpha result", observed[0])
+	}
+	if observed[1].parentCallID != "spawn-gamma" || displayMapString(observed[1].rawOutput, "error") != "gamma failed" {
+		t.Fatalf("second observed parent close = %#v, want gamma failure", observed[1])
+	}
+
+	projector := newACPChildTerminalProjector()
+	closes := projector.projectObservedParentCloses(envelope, "session-fallback")
+	if len(closes) != 2 {
+		t.Fatalf("projected parent closes = %#v, want two terminal updates", closes)
+	}
+	wantStatus := []string{protocolacp.ToolStatusCompleted, protocolacp.ToolStatusFailed}
+	for index, closeNotification := range closes {
+		normalized := normalizeACPStdioTerminalExtension(closeNotification)
+		update, ok := normalized.Update.(protocolacp.ToolCallUpdate)
+		if !ok || update.Status == nil || *update.Status != wantStatus[index] {
+			t.Fatalf("projected close[%d] = %#v, want status %q", index, normalized, wantStatus[index])
+		}
+		if exit, ok := metautil.TerminalExit(update.Meta); !ok || exit.TerminalID != update.ToolCallID {
+			t.Fatalf("projected close[%d] meta = %#v, want matching terminal_exit", index, update.Meta)
+		}
+	}
+	if duplicate := projector.projectObservedParentCloses(envelope, "session-fallback"); len(duplicate) != 0 {
+		t.Fatalf("late duplicate parent closes = %#v, want none", duplicate)
+	}
+}
+
+func displayMapString(values map[string]any, key string) string {
+	value, _ := values[key].(string)
+	return value
+}
 
 func TestNormalizeACPStdioTerminalExtensionDoesNotInventTerminalForPlainTool(t *testing.T) {
 	notification := normalizeACPStdioTerminalExtension(protocolacp.SessionNotification{
