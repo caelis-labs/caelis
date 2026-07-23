@@ -89,12 +89,12 @@ func (s *Store) appendEventLogTransaction(documentPath string, events []*session
 }
 
 func rollbackOpenEventLogAppend(durability durabilityOps, file *os.File, offset int64) error {
-	truncateErr := file.Truncate(offset)
-	var syncErr error
-	if truncateErr == nil {
-		syncErr = durability.SyncFile(file)
-	}
-	return errors.Join(truncateErr, syncErr, file.Close())
+	// Windows append handles do not reliably grant the access required by
+	// Truncate. Close first, then reopen without O_APPEND so rollback has the
+	// same durable path on every supported platform.
+	path := file.Name()
+	closeErr := file.Close()
+	return errors.Join(closeErr, rollbackEventLogAppend(durability, path, offset))
 }
 
 func rollbackEventLogAppend(durability durabilityOps, path string, offset int64) error {
