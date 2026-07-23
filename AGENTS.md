@@ -37,7 +37,7 @@
 - Before committing, run `make commit-check`; it includes formatting, `golangci-lint`, `arch-lint`, the SDK package-boundary gate, vet, tests, and build.
 - Run `make arch-lint` after import, package ownership, gateway/eventstream, or session protocol changes.
 - Run `make client-protocol-check` after changing OpenAPI, generated clients, Envelope wire shapes, or `control/client` JSON contracts.
-- Lease, concurrency, persistence, broker, or lifecycle changes require focused `go test -race` coverage; release candidates run the Agent SDK race suite documented in `docs/release.md`.
+- Lease, concurrency, persistence, broker, or lifecycle changes require focused `go test -race` coverage in the change that needs it; do not turn that into an unconditional release-time rerun.
 - Persistence or replay changes need round-trip tests comparing rebuilt model context with runtime-produced context.
 - Projection/UI reload tests do not replace model-context round-trip tests.
 - UI or text-output changes should include/update golden or regression coverage and review the rendered/output diff.

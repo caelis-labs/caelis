@@ -7,17 +7,49 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
 
 jobs:
-  quality:
-    uses: ./.github/workflows/quality.yml
-    with:
-      sdk_proxy_version: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-      extended_validation: true
+  wait-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      checks: read
+    steps:
+      - name: Wait for exact-SHA main quality
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          quality_run_id=""
+          for attempt in {1..30}; do
+            quality_run_id="$(
+              gh api --method GET \
+                -f branch=main \
+                -f event=push \
+                -f head_sha="${GITHUB_SHA}" \
+                -f per_page=100 \
+                "/repos/${GITHUB_REPOSITORY}/actions/workflows/quality.yml/runs" \
+                --jq '.workflow_runs | sort_by(.created_at) | last | .id // empty'
+            )"
+            if [[ -n "${quality_run_id}" ]]; then
+              break
+            fi
+            echo "waiting for main quality run for ${GITHUB_SHA} (${attempt}/30)"
+            sleep 10
+          done
+          if [[ -z "${quality_run_id}" ]]; then
+            echo "no main quality run found for ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+          echo "waiting for quality run https://github.com/${GITHUB_REPOSITORY}/actions/runs/${quality_run_id}"
+          gh run watch "${quality_run_id}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --interval 10 \
+            --exit-status
 
   release:
-    needs: quality
+    needs: wait-quality
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: default

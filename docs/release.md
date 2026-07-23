@@ -1,11 +1,31 @@
 # Release
 
-This is the standard release and post-publish verification procedure. Update it
-when the process changes.
+All Go packages, including `agent-sdk/*`, share the root module, root
+`vX.Y.Z` tag, and release lifecycle. A release publishes six CLI archives,
+checksums, and the corresponding npm packages.
 
-All Go packages, including `agent-sdk/*`, are versioned and released with the
-root `github.com/caelis-labs/caelis` module and root `vX.Y.Z` tag. There is no
-separate Agent SDK module or release process.
+## Gate model
+
+Ordinary quality runs once for each pull request and `main` SHA:
+
+- formatting, lint, vet, architecture and SDK boundary checks;
+- generated Control client protocol and maintained-document link checks;
+- all Go tests and builds;
+- native Windows persistence and credential tests.
+
+Pull requests additionally run the focused Agent SDK race suite. The tag
+workflow does not call `quality.yml` or rerun tests, race detection, regression
+groups, proxy smoke, or a snapshot. It waits for the existing `main` push
+quality run with the exact tag commit SHA, then starts GoReleaser and publishes
+the npm packages from that output.
+
+This is an intentional trust boundary: correctness is established before the
+tag through the ordinary change workflow. Release automation owns artifact
+construction and publication, not a second quality policy. Its wait job is only
+coordination: a successful quality run unlocks artifacts, while failure,
+cancellation, or a missing exact-SHA run prevents the release job from starting.
+PR quality remains an earlier signal; it may use a temporary merge SHA and is
+therefore not the release identity.
 
 ## Preflight
 
@@ -13,102 +33,49 @@ separate Agent SDK module or release process.
    with `origin/main`.
 2. Confirm `README.md` points to `https://caelis.dev`,
    `https://caelis.dev/install.sh`, and `https://caelis.dev/install.ps1`.
-3. Confirm the npm trusted publisher for every `@caelis/*` package points to
-   `caelis-labs/caelis`, workflow `release.yml`, environment `default`, and may
-   publish.
-4. Run `make commit-check`, the focused Agent SDK race suite,
-   `make regression`, `make release-dry-run`, and `git diff --check`.
-   Every regression group must print at least one matched test; `[no tests to
-   run]` or an empty selector is a failure.
-5. Review a curated behavioral release summary. Do not use raw commit subjects
-   as the only release note: an intermediate feature may have been removed
-   before the tag.
-6. Commit and push the release-ready SHA to `main`.
-7. Wait for the quality workflow for that exact SHA to succeed before creating
-   the tag. This operator check catches branch-only failures early; the release
-   workflow independently invokes the same reusable quality workflow for the
-   tag SHA before publish.
-8. If running `make sdk-proxy-smoke` without `SDK_PROXY_VERSION`, confirm its
-   automatically selected target is the immediately preceding reachable
-   release. On a candidate tag, the resolver skips the candidate itself.
+3. Confirm every `@caelis/*` npm trusted publisher targets
+   `caelis-labs/caelis`, workflow `release.yml`, environment `default`.
+4. Confirm the intended release SHA is committed and pushed to `main`. The tag
+   may be pushed while its ordinary `quality.yml` run is still active; release
+   automation waits for that exact run. Do not rerun `commit-check` merely
+   because a tag is about to be created.
+5. Review a curated behavioral summary rather than using raw commit subjects as
+   the release note.
 
-The focused race suite for SDK persistence/runtime work is:
-
-```bash
-go test -race ./agent-sdk/policy/... ./agent-sdk/session/... ./agent-sdk/runtime/...
-```
+`make sdk-race`, `make regression`, `make sdk-proxy-smoke`, and
+`make release-dry-run` remain available for a change that specifically needs
+them. They are diagnostic tools, not unconditional release stages.
 
 ## Publish
 
-1. Tag the exact quality-approved commit:
+Create an annotated tag for the quality-approved SHA and push it:
 
-   ```bash
-   git tag -a vX.Y.Z -m vX.Y.Z
-   git push origin vX.Y.Z
-   ```
+```bash
+git tag -a vX.Y.Z -m vX.Y.Z
+git push origin vX.Y.Z
+```
 
-2. The release workflow must publish from the dereferenced tag commit, build
-   all six supported targets, upload checksums, then publish the six platform
-   npm packages before the main npm package.
-3. The release workflow calls `quality.yml` as a reusable workflow at the
-   caller's tag SHA. The publish job declares `needs: quality`, so no GoReleaser
-   or npm publish step can start unless every quality gate succeeds for that
-   exact candidate. The tag name is passed to the no-replace consumer smoke.
+The release workflow starts on the pushed tag, waits for successful exact-SHA
+`main` quality, and then runs its artifact job. It publishes platform npm
+packages only after GoReleaser succeeds, and publishes the main npm package
+last.
 
-## Post-publish Acceptance
+## Post-publish acceptance
 
-Verify all of the following before declaring the release complete:
+Before declaring the release complete:
 
-1. `HEAD`, `origin/main`, the remote tag, and the dereferenced annotated tag
-   resolve to the intended SHA.
-2. The quality and release workflows both succeeded for that SHA.
-3. The GitHub Release is neither draft nor prerelease and contains:
-   - Darwin amd64 and arm64 archives;
-   - Linux amd64 and arm64 archives;
-   - Windows amd64 and arm64 archives;
-   - `checksums.txt`.
-4. Download at least one archive, verify its checksum, and run `caelis version`
-   to confirm both version and commit.
-5. Verify the Go proxy can consume `github.com/caelis-labs/caelis@vX.Y.Z` from a
-   clean external module without a local `replace` directive. Compile every
-   import in `agent-sdk/supported-packages.txt` in that consumer.
-6. Verify npm reports `X.Y.Z` for:
-   - `@caelis/caelis`;
-   - `@caelis/caelis-darwin-arm64` and `-darwin-x64`;
-   - `@caelis/caelis-linux-arm64` and `-linux-x64`;
-   - `@caelis/caelis-windows-arm64` and `-windows-x64`.
-7. Verify the main npm package pins every optional platform dependency to the
-   same version and its installed CLI reports the expected version/commit.
-8. Record the release SHA, workflow URLs, asset check, npm/Go-proxy evidence,
-   and any SDK compatibility decision in the GitHub Release or linked workflow
-   run. Do not create a repository-local release evidence document.
-
-## Required CI Evidence
-
-Release gating should record, rather than merely assume, these results:
-
-- formatting, lint, vet, architecture lint, SDK boundary, tests, and build;
-- focused Agent SDK `-race` coverage;
-- native Windows Session/operation persistence tests, including file locks and
-  write-through atomic replacement;
-- regression suite;
-- documentation-link validation;
-- six-target release snapshot or equivalent build coverage;
-- no-replace consumer smoke against the actual tag/Go proxy.
-
-The reusable quality workflow records the focused Agent SDK race suite,
-regression suite, maintained-document link validation, and clean external Go
-consumer as named steps in addition to the ordinary quality gates. Pull request
-runs compile the current-source quickstart and use the rolling prior release for
-the tagged-artifact smoke, and a tag release supplies its own candidate tag.
-`main` push runs retain that current-source consumer check, ordinary quality,
-build, and real-Windows persistence gates without repeating the release-depth
-race, regression, and tagged-proxy consumer steps; the tag workflow enables
-those extended gates before publication. The tagged gate extracts that tag's
-fixture/allowlist and forbids replace,
-so current API additions are not compiled against an old fixture. The link gate covers `README.md`,
-`agent-sdk/README.md`, and maintained Markdown under `docs/` while ignoring
-example links embedded in vendored skill text.
-
-Local notes are useful diagnostic context, but they are not a substitute for
-publish-gated CI evidence.
+1. Verify `origin/main`, the annotated tag, and the workflow commit resolve to
+   the intended SHA, and both quality and release workflows succeeded.
+2. Verify the public GitHub Release contains Darwin, Linux, and Windows
+   amd64/arm64 archives plus `checksums.txt`.
+3. Download one archive, verify its checksum, and confirm `caelis version`
+   reports the tagged version and commit.
+4. From a clean external module, consume
+   `github.com/caelis-labs/caelis@vX.Y.Z` through the Go proxy without a local
+   `replace` and compile every package in `agent-sdk/supported-packages.txt`.
+5. Verify all seven npm packages report `X.Y.Z`, the main package pins all
+   optional platform dependencies to that version, and its installed CLI
+   reports the tagged commit.
+6. Record the release SHA, workflow URLs, public asset checks, and SDK
+   compatibility decision in the GitHub Release or linked workflow run, not in
+   a repository-local evidence document.

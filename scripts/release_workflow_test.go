@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestReleaseWaitsForReusableQualityOnSameSHA(t *testing.T) {
+func TestReleaseWaitsForExactSHAMainQualityBeforeArtifacts(t *testing.T) {
 	t.Parallel()
 
 	quality := readWorkflow(t, "../.github/workflows/quality.yml")
@@ -16,26 +16,67 @@ func TestReleaseWaitsForReusableQualityOnSameSHA(t *testing.T) {
 	for _, want := range []string{
 		"pull_request:",
 		"push:",
-		"workflow_call:",
 		"make sdk-boundary-check",
 		"make sdk-race",
-		"make regression",
 		"make docs-links",
-		"make sdk-proxy-smoke",
 	} {
 		if !strings.Contains(quality, want) {
 			t.Errorf("quality workflow missing %q", want)
 		}
 	}
 	for _, want := range []string{
-		"quality:",
-		"uses: ./.github/workflows/quality.yml",
-		"sdk_proxy_version: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}",
-		"needs: quality",
+		"wait-quality:",
+		"actions: read",
+		"checks: read",
+		"-f branch=main",
+		"-f event=push",
+		"-f head_sha=\"${GITHUB_SHA}\"",
+		"/actions/workflows/quality.yml/runs",
+		"for attempt in {1..30}",
+		"gh run watch \"${quality_run_id}\"",
+		"--interval 10",
+		"--exit-status",
+		"release:",
+		"needs: wait-quality",
+		"goreleaser/goreleaser-action@v7",
+		"Publish platform packages",
+		"Publish main package",
 	} {
 		if !strings.Contains(release, want) {
 			t.Errorf("release workflow missing %q", want)
 		}
+	}
+	for _, forbidden := range []string{
+		"release-validation:",
+		"uses: ./.github/workflows/quality.yml",
+		"-f status=success",
+		"make ",
+		"sdk-proxy-smoke",
+		"workflow_dispatch:",
+	} {
+		if strings.Contains(release, forbidden) {
+			t.Errorf("release workflow still contains non-artifact work %q", forbidden)
+		}
+	}
+	if !strings.Contains(quality, "sdk-race:\n    if: github.event_name == 'pull_request'") {
+		t.Error("focused SDK race is not scoped to pull requests")
+	}
+	for _, forbidden := range []string{"workflow_call:", "make regression", "make sdk-proxy-smoke"} {
+		if strings.Contains(quality, forbidden) {
+			t.Errorf("quality workflow still contains release-only behavior %q", forbidden)
+		}
+	}
+}
+
+func TestReleaseDryRunDoesNotRepeatOrdinaryQuality(t *testing.T) {
+	t.Parallel()
+
+	makefile := readWorkflow(t, "../Makefile")
+	if !strings.Contains(makefile, "release-dry-run: cache-dirs") {
+		t.Error("release dry run no longer initializes its local cache directories")
+	}
+	if strings.Contains(makefile, "release-dry-run: quality") {
+		t.Error("release dry run repeats the ordinary quality gate")
 	}
 }
 

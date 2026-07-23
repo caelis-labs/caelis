@@ -97,5 +97,5 @@ command-execution-regression: cache-dirs
 test: cache-dirs
 	go test -timeout $(GO_TEST_TIMEOUT) ./...
 
-release-dry-run: quality
+release-dry-run: cache-dirs
 	goreleaser release --clean --snapshot

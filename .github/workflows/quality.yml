@@ -7,17 +7,6 @@ on:
   pull_request:
   push:
     branches: [main]
-  workflow_call:
-    inputs:
-      sdk_proxy_version:
-        description: Tagged root-module version used by the no-replace consumer smoke
-        required: false
-        type: string
-      extended_validation:
-        description: Run release-depth race, regression, and tagged-proxy gates
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -65,22 +54,25 @@ jobs:
       - name: Test
         run: make test
 
-      - name: Focused Agent SDK race
-        if: github.event_name == 'pull_request' || inputs.extended_validation
-        run: make sdk-race
-
-      - name: Regression
-        if: github.event_name == 'pull_request' || inputs.extended_validation
-        run: make regression
-
-      - name: Tagged Agent SDK external consumer
-        if: github.event_name == 'pull_request' || inputs.extended_validation
-        run: make sdk-proxy-smoke
-        env:
-          SDK_PROXY_VERSION: ${{ inputs.sdk_proxy_version }}
-
       - name: Build
         run: make build
+
+  sdk-race:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Focused Agent SDK race
+        run: make sdk-race
 
   windows-persistence:
     runs-on: windows-latest
