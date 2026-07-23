@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -99,6 +100,7 @@ func TestNPMGlobalUpdateRunsNPMInstall(t *testing.T) {
 	globalRoot := t.TempDir()
 	packageDir := filepath.Join(globalRoot, "@caelis", "caelis")
 	var ran []string
+	var progress []ProgressEvent
 	manager := New(Config{
 		StoreDir:       t.TempDir(),
 		CurrentVersion: "v1.0.0",
@@ -132,13 +134,26 @@ func TestNPMGlobalUpdateRunsNPMInstall(t *testing.T) {
 			return nil
 		},
 	})
-	result, err := manager.Update(context.Background(), UpdateOptions{})
+	result, err := manager.Update(context.Background(), UpdateOptions{
+		Progress: func(event ProgressEvent) {
+			progress = append(progress, event)
+		},
+	})
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 	want := []string{"/usr/bin/npm", "install", "-g", "@caelis/caelis@1.2.0", "--registry=https://registry.npmjs.org"}
 	if !result.Updated || !reflect.DeepEqual(ran, want) {
 		t.Fatalf("Update() = %#v, command=%#v, want updated command %#v", result, ran, want)
+	}
+	wantProgress := []ProgressEvent{
+		{Stage: ProgressChecking},
+		{Stage: ProgressChecking, Done: true},
+		{Stage: ProgressInstalling, Detail: MethodNPM},
+		{Stage: ProgressInstalling, Detail: MethodNPM, Done: true},
+	}
+	if !reflect.DeepEqual(progress, wantProgress) {
+		t.Fatalf("progress = %#v, want %#v", progress, wantProgress)
 	}
 }
 
@@ -147,6 +162,7 @@ func TestWindowsNPMGlobalUpdateDefersInstall(t *testing.T) {
 	packageDir := filepath.Join(globalRoot, "@caelis", "caelis")
 	var startName string
 	var startArgs []string
+	var progress []ProgressEvent
 	manager := New(Config{
 		StoreDir:       t.TempDir(),
 		CurrentVersion: "v1.0.0",
@@ -185,13 +201,29 @@ func TestWindowsNPMGlobalUpdateDefersInstall(t *testing.T) {
 			return nil
 		},
 	})
-	result, err := manager.Update(context.Background(), UpdateOptions{})
+	result, err := manager.Update(context.Background(), UpdateOptions{
+		Progress: func(event ProgressEvent) {
+			progress = append(progress, event)
+		},
+	})
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 	wantCommand := []string{"/usr/bin/npm.cmd", "install", "-g", "@caelis/caelis@1.2.0", "--registry=https://registry.npmjs.org"}
 	if !result.Deferred || result.Updated || !reflect.DeepEqual(result.Command, wantCommand) {
 		t.Fatalf("Update() = %#v, want deferred npm command %#v", result, wantCommand)
+	}
+	if result.Reason != windowsNPMDetachedReason {
+		t.Fatalf("Update().Reason = %q, want %q", result.Reason, windowsNPMDetachedReason)
+	}
+	wantProgress := []ProgressEvent{
+		{Stage: ProgressChecking},
+		{Stage: ProgressChecking, Done: true},
+		{Stage: ProgressInstalling, Detail: MethodNPM, Deferred: true},
+		{Stage: ProgressInstalling, Detail: MethodNPM, Done: true, Deferred: true},
+	}
+	if !reflect.DeepEqual(progress, wantProgress) {
+		t.Fatalf("progress = %#v, want %#v", progress, wantProgress)
 	}
 	if startName != "cmd.exe" || len(startArgs) != 5 || startArgs[4] == "" {
 		t.Fatalf("CommandStart(%q, %#v), want cmd.exe start script", startName, startArgs)
@@ -211,6 +243,107 @@ func TestWindowsNPMGlobalUpdateDefersInstall(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("deferred npm script = %q, want fragment %q", text, want)
 		}
+	}
+}
+
+func TestWindowsNPMGlobalUpdateHandsOffToForegroundLauncher(t *testing.T) {
+	globalRoot := t.TempDir()
+	packageDir := filepath.Join(globalRoot, "@caelis", "caelis")
+	handoffDir := filepath.Join(t.TempDir(), "reserved-handoff")
+	executable := filepath.Join(packageDir, "runtime", "caelis.exe")
+	manager := New(Config{
+		StoreDir:       t.TempDir(),
+		CurrentVersion: "v1.0.0",
+		Executable:     executable,
+		GOOS:           "windows",
+		Env: func(key string) string {
+			switch key {
+			case EnvInstallMethod:
+				return MethodNPM
+			case EnvNPMPackageDir:
+				return packageDir
+			case EnvNPMUpdateHandoffDir:
+				return handoffDir
+			default:
+				return ""
+			}
+		},
+		LookPath: func(name string) (string, error) {
+			return "/usr/bin/" + name + ".cmd", nil
+		},
+		CommandOutput: func(_ context.Context, _ string, args []string) ([]byte, error) {
+			switch strings.Join(args, " ") {
+			case "root -g":
+				return []byte(globalRoot + "\n"), nil
+			case "view @caelis/caelis version --registry=https://registry.npmjs.org":
+				return []byte("1.2.0\n"), nil
+			default:
+				t.Fatalf("unexpected CommandOutput args: %#v", args)
+				return nil, nil
+			}
+		},
+		CommandRun: func(context.Context, string, []string, io.Writer, io.Writer) error {
+			t.Fatal("Windows npm handoff must not run npm before the native process exits")
+			return nil
+		},
+		CommandStart: func(string, []string) error {
+			t.Fatal("foreground launcher handoff must not schedule a detached update")
+			return nil
+		},
+	})
+
+	result, err := manager.Update(context.Background(), UpdateOptions{})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if !result.Deferred || !result.Handoff || result.Updated {
+		t.Fatalf("Update() = %#v, want foreground handoff", result)
+	}
+	if info, err := os.Stat(handoffDir); err != nil || !info.IsDir() {
+		t.Fatalf("handoff directory was not created lazily: info=%v err=%v", info, err)
+	}
+	data, err := os.ReadFile(filepath.Join(handoffDir, npmHandoffPlanName))
+	if err != nil {
+		t.Fatalf("read npm handoff plan: %v", err)
+	}
+	var plan npmHandoffPlan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		t.Fatalf("decode npm handoff plan: %v", err)
+	}
+	wantCommand := []string{"/usr/bin/npm.cmd", "install", "-g", "@caelis/caelis@1.2.0", "--registry=https://registry.npmjs.org"}
+	wantPlan := npmHandoffPlan{
+		Version:        1,
+		Command:        wantCommand,
+		CommandLine:    windowsNPMCommandLine(wantCommand),
+		CurrentVersion: "v1.0.0",
+		LatestVersion:  "v1.2.0",
+		Executable:     executable,
+	}
+	lockData, err := os.ReadFile(manager.lockPath())
+	if err != nil {
+		t.Fatalf("read handoff update lock: %v", err)
+	}
+	if !reflect.DeepEqual(plan, wantPlan) {
+		t.Fatalf("handoff plan = %#v, want %#v", plan, wantPlan)
+	}
+	ownershipData, err := os.ReadFile(filepath.Join(handoffDir, npmHandoffOwnershipName))
+	if err != nil {
+		t.Fatalf("read npm handoff ownership: %v", err)
+	}
+	var ownership npmHandoffOwnership
+	if err := json.Unmarshal(ownershipData, &ownership); err != nil {
+		t.Fatalf("decode npm handoff ownership: %v", err)
+	}
+	wantOwnership := npmHandoffOwnership{
+		Version:   1,
+		LockPath:  manager.lockPath(),
+		LockToken: strings.TrimSpace(string(lockData)),
+	}
+	if !reflect.DeepEqual(ownership, wantOwnership) {
+		t.Fatalf("handoff ownership = %#v, want %#v", ownership, wantOwnership)
+	}
+	if _, err := os.Stat(manager.lockPath()); err != nil {
+		t.Fatalf("handoff update lock is not held: %v", err)
 	}
 }
 
@@ -324,7 +457,7 @@ func TestDeferredUpdateStateKeepsCurrentVersionAvailable(t *testing.T) {
 	}
 }
 
-func TestRawUpdateReportsInstallProgress(t *testing.T) {
+func TestRawUpdateReportsStructuredInstallProgress(t *testing.T) {
 	archive := releaseArchive(t, "caelis", []byte("new-binary"))
 	sum := sha256.Sum256(archive)
 	server := newUpdaterTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -345,7 +478,7 @@ func TestRawUpdateReportsInstallProgress(t *testing.T) {
 	if err := os.WriteFile(exe, []byte("old-binary"), 0o755); err != nil {
 		t.Fatalf("write executable: %v", err)
 	}
-	var progress bytes.Buffer
+	var progress []ProgressEvent
 	manager := New(Config{
 		StoreDir:          t.TempDir(),
 		CurrentVersion:    "v1.0.0",
@@ -356,23 +489,30 @@ func TestRawUpdateReportsInstallProgress(t *testing.T) {
 		GitHubReleaseBase: server.URL + "/release",
 		HTTPClient:        server.Client(),
 	})
-	_, err := manager.Update(context.Background(), UpdateOptions{Stderr: &progress})
+	_, err := manager.Update(context.Background(), UpdateOptions{
+		Progress: func(event ProgressEvent) {
+			progress = append(progress, event)
+		},
+	})
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
-	got := progress.String()
-	for _, want := range []string{
-		"Downloading caelis_1.2.0_linux_amd64.tar.gz",
-		"Download complete.",
-		"Verifying checksum",
-		"Checksum OK.",
-		"Extracting caelis",
-		"Installing caelis",
-		"Install complete.",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("progress = %q, want fragment %q", got, want)
-		}
+	archiveName := "caelis_1.2.0_linux_amd64.tar.gz"
+	want := []ProgressEvent{
+		{Stage: ProgressChecking},
+		{Stage: ProgressChecking, Done: true},
+		{Stage: ProgressDownloading, Detail: archiveName},
+		{Stage: ProgressDownloading, Detail: archiveName, Current: int64(len(archive)), Total: int64(len(archive))},
+		{Stage: ProgressDownloading, Detail: archiveName, Current: int64(len(archive)), Total: int64(len(archive)), Done: true},
+		{Stage: ProgressVerifying},
+		{Stage: ProgressVerifying, Done: true},
+		{Stage: ProgressExtracting, Detail: "caelis"},
+		{Stage: ProgressExtracting, Detail: "caelis", Done: true},
+		{Stage: ProgressInstalling, Detail: "caelis"},
+		{Stage: ProgressInstalling, Detail: "caelis", Done: true},
+	}
+	if !reflect.DeepEqual(progress, want) {
+		t.Fatalf("progress = %#v, want %#v", progress, want)
 	}
 }
 

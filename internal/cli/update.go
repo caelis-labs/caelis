@@ -55,12 +55,15 @@ func runUpdateSubcommand(ctx context.Context, args []string, defaultStoreDir str
 }
 
 func runUpdate(ctx context.Context, storeDir string, checkOnly bool, stdout io.Writer, stderr io.Writer) error {
+	renderer := newUpdateProgressRenderer(stderr)
 	result, err := runUpdateOperation(ctx, updateConfig(storeDir), updater.UpdateOptions{
 		CheckOnly: checkOnly,
 		Stdout:    stdout,
 		Stderr:    stderr,
+		Progress:  renderer.Report,
 	})
 	if err != nil {
+		renderer.Fail()
 		return err
 	}
 	return writeUpdateResult(stdout, result)
@@ -94,6 +97,9 @@ func writeVersionResult(w io.Writer, format outputFormat, result versionResult) 
 }
 
 func writeUpdateResult(w io.Writer, result updater.Result) error {
+	if result.Handoff {
+		return nil
+	}
 	_, err := fmt.Fprintln(w, formatUpdateResult(result))
 	return err
 }
@@ -110,10 +116,21 @@ func formatUpdateResult(result updater.Result) string {
 		return "update skipped: " + reason
 	}
 	if result.Deferred {
-		return fmt.Sprintf("update scheduled: %s -> %s (%s). Restart caelis after this process exits.", current, latest, method)
+		message := fmt.Sprintf(
+			"Caelis %s is prepared (current %s via %s). Installation will finish after this process exits.",
+			latest,
+			current,
+			method,
+		)
+		if reason := strings.TrimSpace(result.Reason); reason != "" {
+			message += " " + reason + "."
+		}
+		return message
 	}
 	if result.Updated {
-		return fmt.Sprintf("updated caelis: %s -> %s (%s)", current, latest, method)
+		// Keep this completion contract aligned with executeHandoffPlan in
+		// npm/lib/update-handoff.js; the handoff path intentionally silences Go.
+		return fmt.Sprintf("Caelis %s is ready (updated from %s via %s).", latest, current, method)
 	}
 	if result.Available {
 		return fmt.Sprintf("update available: %s -> %s (%s)", current, latest, method)

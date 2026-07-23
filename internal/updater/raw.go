@@ -17,7 +17,7 @@ import (
 	"strings"
 )
 
-func (m *Manager) installRaw(ctx context.Context, latest string, progress io.Writer) (bool, error) {
+func (m *Manager) installRaw(ctx context.Context, latest string, progress progressReporter) (bool, error) {
 	archiveName, err := rawArchiveName(latest, m.cfg.GOOS, m.cfg.GOARCH)
 	if err != nil {
 		return false, err
@@ -31,36 +31,36 @@ func (m *Manager) installRaw(ctx context.Context, latest string, progress io.Wri
 	defer os.RemoveAll(tmpDir)
 	archivePath := filepath.Join(tmpDir, archiveName)
 	archiveURL := m.releaseAssetURL(latest, archiveName)
-	writeUpdateProgress(progress, "Downloading %s\n", archiveName)
+	reportProgress(progress, ProgressEvent{Stage: ProgressDownloading, Detail: archiveName})
 	if err := m.downloadFile(ctx, client, archiveURL, archivePath, archiveName, progress); err != nil {
 		return false, err
 	}
-	writeUpdateProgress(progress, "Download complete.\n")
-	writeUpdateProgress(progress, "Downloading checksums\n")
 	checksums, err := m.downloadBytes(ctx, client, m.releaseAssetURL(latest, "checksums.txt"), 2<<20)
 	if err != nil {
 		return false, err
 	}
-	writeUpdateProgress(progress, "Verifying checksum\n")
+	reportProgress(progress, ProgressEvent{Stage: ProgressVerifying})
 	if err := verifyChecksum(archiveName, archivePath, checksums); err != nil {
 		return false, err
 	}
-	writeUpdateProgress(progress, "Checksum OK.\n")
+	reportProgress(progress, ProgressEvent{Stage: ProgressVerifying, Done: true})
 	extracted := filepath.Join(tmpDir, binaryName)
-	writeUpdateProgress(progress, "Extracting %s\n", binaryName)
+	reportProgress(progress, ProgressEvent{Stage: ProgressExtracting, Detail: binaryName})
 	if err := extractBinary(archivePath, binaryName, extracted); err != nil {
 		return false, err
 	}
-	writeUpdateProgress(progress, "Installing %s\n", binaryName)
+	reportProgress(progress, ProgressEvent{Stage: ProgressExtracting, Detail: binaryName, Done: true})
+	reportProgress(progress, ProgressEvent{Stage: ProgressInstalling, Detail: binaryName})
 	deferred, err := m.replaceExecutable(extracted)
 	if err != nil {
 		return false, err
 	}
-	if deferred {
-		writeUpdateProgress(progress, "Update scheduled; restart caelis after this process exits.\n")
-	} else {
-		writeUpdateProgress(progress, "Install complete.\n")
-	}
+	reportProgress(progress, ProgressEvent{
+		Stage:    ProgressInstalling,
+		Detail:   binaryName,
+		Done:     true,
+		Deferred: deferred,
+	})
 	return deferred, nil
 }
 
@@ -71,13 +71,6 @@ func (m *Manager) installHTTPClient() *http.Client {
 	clone := *m.cfg.HTTPClient
 	clone.Timeout = 0
 	return &clone
-}
-
-func writeUpdateProgress(w io.Writer, format string, args ...any) {
-	if w == nil {
-		return
-	}
-	_, _ = fmt.Fprintf(w, format, args...)
 }
 
 func (m *Manager) releaseAssetURL(version string, name string) string {
@@ -107,7 +100,7 @@ func rawBinaryName(goos string) string {
 	return "caelis"
 }
 
-func (m *Manager) downloadFile(ctx context.Context, client *http.Client, url string, dest string, label string, progress io.Writer) error {
+func (m *Manager) downloadFile(ctx context.Context, client *http.Client, url string, dest string, label string, progress progressReporter) error {
 	if client == nil {
 		client = &http.Client{}
 	}
@@ -137,12 +130,22 @@ func (m *Manager) downloadFile(ctx context.Context, client *http.Client, url str
 			progress: progress,
 		}
 	}
-	_, copyErr := io.Copy(file, reader)
+	downloaded, copyErr := io.Copy(file, reader)
 	closeErr := file.Close()
 	if copyErr != nil {
 		return copyErr
 	}
-	return closeErr
+	if closeErr != nil {
+		return closeErr
+	}
+	reportProgress(progress, ProgressEvent{
+		Stage:   ProgressDownloading,
+		Detail:  label,
+		Current: downloaded,
+		Total:   resp.ContentLength,
+		Done:    true,
+	})
+	return nil
 }
 
 func (m *Manager) downloadBytes(ctx context.Context, client *http.Client, url string, limit int64) ([]byte, error) {
@@ -171,7 +174,7 @@ type downloadProgressReader struct {
 	downloaded  int64
 	lastPercent int
 	label       string
-	progress    io.Writer
+	progress    progressReporter
 }
 
 func (p *downloadProgressReader) Read(b []byte) (int, error) {
@@ -184,23 +187,18 @@ func (p *downloadProgressReader) Read(b []byte) (int, error) {
 }
 
 func (p *downloadProgressReader) report() {
-	if p.progress == nil {
-		return
-	}
 	if p.total > 0 {
 		percent := int(p.downloaded * 100 / p.total)
 		if percent < 100 && percent-p.lastPercent < 5 {
 			return
 		}
 		p.lastPercent = percent
-		writeUpdateProgress(
-			p.progress,
-			"%s: %s / %s (%d%%)\n",
-			p.label,
-			formatDownloadSize(p.downloaded),
-			formatDownloadSize(p.total),
-			percent,
-		)
+		reportProgress(p.progress, ProgressEvent{
+			Stage:   ProgressDownloading,
+			Detail:  p.label,
+			Current: p.downloaded,
+			Total:   p.total,
+		})
 		return
 	}
 	const step = 5 << 20
@@ -209,20 +207,11 @@ func (p *downloadProgressReader) report() {
 		return
 	}
 	p.lastPercent = milestone
-	writeUpdateProgress(p.progress, "%s: %s downloaded\n", p.label, formatDownloadSize(p.downloaded))
-}
-
-func formatDownloadSize(n int64) string {
-	switch {
-	case n >= 1<<30:
-		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
-	case n >= 1<<20:
-		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
-	default:
-		return fmt.Sprintf("%d B", n)
-	}
+	reportProgress(p.progress, ProgressEvent{
+		Stage:   ProgressDownloading,
+		Detail:  p.label,
+		Current: p.downloaded,
+	})
 }
 
 func verifyChecksum(archiveName string, archivePath string, checksums []byte) error {

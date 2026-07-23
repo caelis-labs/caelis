@@ -20,6 +20,7 @@ const (
 	EnvNPMPackageDir         = "CAELIS_NPM_PACKAGE_DIR"
 	EnvNPMPlatformPackage    = "CAELIS_NPM_PLATFORM_PACKAGE"
 	EnvNPMPlatformPackageDir = "CAELIS_NPM_PLATFORM_PACKAGE_DIR"
+	EnvNPMUpdateHandoffDir   = "CAELIS_NPM_UPDATE_HANDOFF_DIR"
 
 	MethodRaw = "raw"
 	MethodNPM = "npm"
@@ -69,20 +70,24 @@ type UpdateOptions struct {
 	CheckOnly bool
 	Stdout    io.Writer
 	Stderr    io.Writer
+	Progress  func(ProgressEvent)
 }
 
 type Result struct {
-	CurrentVersion string    `json:"current_version,omitempty"`
-	LatestVersion  string    `json:"latest_version,omitempty"`
-	InstallMethod  string    `json:"install_method,omitempty"`
-	Available      bool      `json:"available"`
-	Checked        bool      `json:"checked"`
-	Updated        bool      `json:"updated"`
-	Deferred       bool      `json:"deferred"`
-	Skipped        bool      `json:"skipped"`
-	Reason         string    `json:"reason,omitempty"`
-	Command        []string  `json:"command,omitempty"`
-	LastCheckedAt  time.Time `json:"last_checked_at,omitempty"`
+	CurrentVersion string `json:"current_version,omitempty"`
+	LatestVersion  string `json:"latest_version,omitempty"`
+	InstallMethod  string `json:"install_method,omitempty"`
+	Available      bool   `json:"available"`
+	Checked        bool   `json:"checked"`
+	Updated        bool   `json:"updated"`
+	Deferred       bool   `json:"deferred"`
+	// Handoff reports that the npm launcher will finish this update in the
+	// foreground after the current Windows executable exits.
+	Handoff       bool      `json:"-"`
+	Skipped       bool      `json:"skipped"`
+	Reason        string    `json:"reason,omitempty"`
+	Command       []string  `json:"command,omitempty"`
+	LastCheckedAt time.Time `json:"last_checked_at,omitempty"`
 }
 
 type installSource struct {
@@ -209,15 +214,27 @@ func (m *Manager) Update(ctx context.Context, opts UpdateOptions) (Result, error
 			Reason:         "another update is already running",
 		}, nil
 	}
-	defer releaseLock()
+	// A foreground npm handoff must keep the lock after this process exits.
+	// The launcher receives its exact path in the atomic handoff plan and owns
+	// removal after npm and version verification reach a terminal result.
+	lockTransferred := false
+	defer func() {
+		if !lockTransferred {
+			releaseLock()
+		}
+	}()
 
+	reportProgress(opts.Progress, ProgressEvent{Stage: ProgressChecking})
 	result, err := m.Check(ctx, CheckOptions{Force: true})
+	if err == nil {
+		reportProgress(opts.Progress, ProgressEvent{Stage: ProgressChecking, Done: true})
+	}
 	if err != nil || result.Skipped || !result.Available {
 		return result, err
 	}
 	switch result.InstallMethod {
 	case MethodRaw:
-		deferred, err := m.installRaw(ctx, result.LatestVersion, opts.Stderr)
+		deferred, err := m.installRaw(ctx, result.LatestVersion, opts.Progress)
 		if err != nil {
 			return result, err
 		}
@@ -229,12 +246,23 @@ func (m *Manager) Update(ctx context.Context, opts UpdateOptions) (Result, error
 			return result, err
 		}
 		result.Command = append([]string(nil), cmd...)
-		deferred, err := m.installNPM(ctx, cmd, opts.Stdout, opts.Stderr)
+		installResult, err := m.installNPM(
+			ctx,
+			cmd,
+			result.CurrentVersion,
+			result.LatestVersion,
+			opts.Stdout,
+			opts.Stderr,
+			opts.Progress,
+		)
 		if err != nil {
 			return result, err
 		}
-		result.Deferred = deferred
-		result.Updated = !deferred
+		result.Deferred = installResult.Deferred
+		result.Handoff = installResult.Handoff
+		result.Reason = installResult.Reason
+		result.Updated = !installResult.Deferred
+		lockTransferred = installResult.Handoff
 	default:
 		result.Skipped = true
 		result.Reason = "unsupported install method"

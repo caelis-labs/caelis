@@ -16,6 +16,7 @@
   },
   "files": [
     "bin/caelis.js",
+    "lib/update-handoff.js",
     "README.md",
     "LICENSE"
   ],
@@ -29,6 +30,7 @@
     "arm64"
   ],
   "scripts": {
+    "test": "node --test ./test/*.test.js",
     "prepare": "node ./scripts/prepare.mjs",
     "set-version": "node ./scripts/set-version.mjs",
     "stage-release": "node ./scripts/stage-release.mjs",
