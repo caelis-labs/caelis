@@ -19,7 +19,6 @@ type PluginConfig = plugin.Config
 type SandboxConfig struct {
 	RequestedType    string   `json:"requested_type,omitempty"`
 	HelperPath       string   `json:"helper_path,omitempty"`
-	ReadableRoots    []string `json:"readable_roots,omitempty"`
 	WritableRoots    []string `json:"writable_roots,omitempty"`
 	ReadOnlySubpaths []string `json:"read_only_subpaths,omitempty"`
 	NetworkEnabled   *bool    `json:"network_enabled,omitempty"`
@@ -291,7 +290,6 @@ func dedupeProviderEndpointsForSave(endpoints []modelconfig.ProviderEndpointConf
 func NormalizeSandboxConfig(cfg SandboxConfig) SandboxConfig {
 	cfg.RequestedType = strings.ToLower(strings.TrimSpace(cfg.RequestedType))
 	cfg.HelperPath = strings.TrimSpace(cfg.HelperPath)
-	cfg.ReadableRoots = DedupeStrings(cfg.ReadableRoots)
 	cfg.WritableRoots = DedupeStrings(cfg.WritableRoots)
 	cfg.ReadOnlySubpaths = DedupeStrings(cfg.ReadOnlySubpaths)
 	if cfg.NetworkEnabled != nil {

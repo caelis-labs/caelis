@@ -129,7 +129,6 @@ func NormalizeConfig(cfg Config) Config {
 			cfg.StateDir = abs
 		}
 	}
-	cfg.ReadableRoots = normalizeStringSlice(cfg.ReadableRoots)
 	cfg.WritableRoots = normalizeStringSlice(cfg.WritableRoots)
 	cfg.ReadOnlySubpaths = normalizeStringSlice(cfg.ReadOnlySubpaths)
 	cfg.BackendCandidates = normalizeBackendCandidates(cfg.BackendCandidates)

@@ -13,31 +13,25 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policy"
 )
 
-func TestBuildScopedBwrapArgsKeepsManagedDevMount(t *testing.T) {
+func TestBuildBwrapArgsPreservesHostReadsAndManagedMounts(t *testing.T) {
 	workDir := t.TempDir()
-	args, err := buildBwrapArgs(policy.Policy{
-		Type:          policy.TypeWorkspaceWrite,
-		ReadableRoots: []string{"/dev", "/dev/null", "/proc", "/proc/self"},
+	p := policy.Default(sandbox.Config{
+		CWD:           workDir,
 		WritableRoots: []string{workDir},
-	}, workDir)
+	}, sandbox.Constraints{
+		Permission: sandbox.PermissionWorkspaceWrite,
+	})
+
+	args, err := buildBwrapArgs(p, workDir)
 	if err != nil {
 		t.Fatalf("buildBwrapArgs() error = %v", err)
 	}
-
-	assertBwrapManagedMountsNotReadOnly(t, args)
-}
-
-func TestBuildScopedBwrapArgsKeepsManagedDevMountWithMissingReadRoot(t *testing.T) {
-	workDir := t.TempDir()
-	args, err := buildBwrapArgs(policy.Policy{
-		Type:          policy.TypeWorkspaceWrite,
-		ReadableRoots: []string{filepath.Join(workDir, "missing-read-root")},
-		WritableRoots: []string{workDir},
-	}, workDir)
-	if err != nil {
-		t.Fatalf("buildBwrapArgs() error = %v", err)
+	if !hasBwrapPair(args, "--ro-bind", "/", "/") {
+		t.Fatalf("bwrap args = %#v, want host root mounted read-only", args)
 	}
-
+	if containsString(args, "--tmpfs") {
+		t.Fatalf("bwrap args = %#v, did not want scoped temporary root", args)
+	}
 	assertBwrapManagedMountsNotReadOnly(t, args)
 }
 
@@ -86,94 +80,6 @@ func assertBwrapManagedMountsNotReadOnly(t *testing.T, args []string) {
 		if hasBwrapPair(args, "--ro-bind", path, path) {
 			t.Fatalf("bwrap args = %#v, did not expect read-only bind over managed mount %s", args, path)
 		}
-	}
-}
-
-func TestBwrapMissingMountDiagnosticForHostExistingPath(t *testing.T) {
-	base := t.TempDir()
-	workDir := filepath.Join(base, "workspace")
-	target := "/home/caelis-host-existing/outside/message"
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll(%q) error = %v", workDir, err)
-	}
-	origStat := bwrapStat
-	bwrapStat = func(path string) (os.FileInfo, error) {
-		if path == target {
-			return fakeFileInfo{mode: 0o755}, nil
-		}
-		return origStat(path)
-	}
-	t.Cleanup(func() { bwrapStat = origStat })
-
-	stderr := "ls: 无法访问 '" + target + "': 没有那个文件或目录\n"
-	result := sandbox.CommandResult{
-		Stderr:  stderr,
-		Route:   sandbox.RouteSandbox,
-		Backend: sandbox.BackendBwrap,
-	}
-	result.Error = bwrapMissingMountDiagnostic(result, policy.Policy{
-		Type:          policy.TypeWorkspaceWrite,
-		ReadableRoots: []string{filepath.Join(base, "missing-read-root")},
-		WritableRoots: []string{workDir},
-	}, workDir)
-
-	if result.Stderr != stderr {
-		t.Fatalf("stderr = %q, want raw stderr unchanged %q", result.Stderr, stderr)
-	}
-	if !strings.Contains(result.Error, "Sandbox permission denied") ||
-		!strings.Contains(result.Error, "Host path exists but is not mounted in the sandbox: "+target) {
-		t.Fatalf("error = %q, want sandbox missing-mount diagnostic", result.Error)
-	}
-	if detail, ok := sandbox.SandboxPermissionDetail(result, nil); !ok || detail != result.Error {
-		t.Fatalf("SandboxPermissionDetail() = %q/%v, want %q/true", detail, ok, result.Error)
-	}
-}
-
-func TestBwrapMissingMountDiagnosticIgnoresHostMissingPath(t *testing.T) {
-	base := t.TempDir()
-	workDir := filepath.Join(base, "workspace")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll(%q) error = %v", workDir, err)
-	}
-	stderr := "ls: cannot access '" + filepath.Join(base, "missing") + "': No such file or directory\n"
-
-	result := sandbox.CommandResult{
-		Stderr:  stderr,
-		Route:   sandbox.RouteSandbox,
-		Backend: sandbox.BackendBwrap,
-	}
-	detail := bwrapMissingMountDiagnostic(result, policy.Policy{
-		Type:          policy.TypeWorkspaceWrite,
-		ReadableRoots: []string{filepath.Join(base, "missing-read-root")},
-		WritableRoots: []string{workDir},
-	}, workDir)
-
-	if detail != "" {
-		t.Fatalf("diagnostic = %q, want empty for host-missing path", detail)
-	}
-}
-
-func TestBwrapMissingMountDiagnosticIgnoresMountedPath(t *testing.T) {
-	workDir := t.TempDir()
-	target := filepath.Join(workDir, "message")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		t.Fatalf("MkdirAll(%q) error = %v", target, err)
-	}
-	stderr := "ls: cannot access '" + target + "': No such file or directory\n"
-
-	result := sandbox.CommandResult{
-		Stderr:  stderr,
-		Route:   sandbox.RouteSandbox,
-		Backend: sandbox.BackendBwrap,
-	}
-	detail := bwrapMissingMountDiagnostic(result, policy.Policy{
-		Type:          policy.TypeWorkspaceWrite,
-		ReadableRoots: []string{filepath.Join(workDir, "missing-read-root")},
-		WritableRoots: []string{workDir},
-	}, workDir)
-
-	if detail != "" {
-		t.Fatalf("diagnostic = %q, want empty for mounted path", detail)
 	}
 }
 

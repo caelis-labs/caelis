@@ -261,10 +261,9 @@ func TestPolicyForRequestUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T
 	workspace := t.TempDir()
 	commandDir := filepath.Join(workspace, "subdir")
 	extraWrite := filepath.Join(t.TempDir(), "extra-write")
-	extraRead := filepath.Join(t.TempDir(), "extra-read")
 	hidden := filepath.Join(workspace, "secret")
 	outDir := filepath.Join(workspace, "out")
-	for _, dir := range []string{commandDir, extraWrite, extraRead, hidden, outDir, filepath.Join(workspace, ".git"), filepath.Join(workspace, "vendor")} {
+	for _, dir := range []string{commandDir, extraWrite, hidden, outDir, filepath.Join(workspace, ".git"), filepath.Join(workspace, "vendor")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
 		}
@@ -273,7 +272,6 @@ func TestPolicyForRequestUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T
 		CWD:              workspace,
 		StateDir:         t.TempDir(),
 		WritableRoots:    []string{extraWrite},
-		ReadableRoots:    []string{extraRead},
 		ReadOnlySubpaths: []string{"vendor"},
 	})
 	if err != nil {
@@ -290,7 +288,6 @@ func TestPolicyForRequestUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T
 			Permission: sandbox.PermissionWorkspaceWrite,
 			Network:    sandbox.NetworkDisabled,
 			PathRules: []sandbox.PathRule{
-				{Path: extraRead, Access: sandbox.PathAccessReadOnly},
 				{Path: hidden, Access: sandbox.PathAccessHidden},
 				{Path: filepath.Join(workspace, "out"), Access: sandbox.PathAccessReadWrite},
 			},
@@ -304,10 +301,8 @@ func TestPolicyForRequestUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T
 			t.Fatalf("WriteRoots = %#v, want %q", policy.WriteRoots, want)
 		}
 	}
-	for _, unexpected := range []string{extraRead, hidden} {
-		if containsPath(policy.WriteRoots, unexpected) || containsPath(policy.DenyWritePaths, unexpected) {
-			t.Fatalf("policy unexpectedly consumed read/hidden path %q: %+v", unexpected, policy)
-		}
+	if containsPath(policy.WriteRoots, hidden) || containsPath(policy.DenyWritePaths, hidden) {
+		t.Fatalf("policy unexpectedly consumed hidden path %q: %+v", hidden, policy)
 	}
 	for _, want := range []string{filepath.Join(workspace, ".git"), filepath.Join(workspace, "vendor")} {
 		if !containsPath(policy.DenyWritePaths, want) {
@@ -319,13 +314,12 @@ func TestPolicyForRequestUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T
 	}
 }
 
-func TestFileSystemForIgnoresWindowsReadAndHiddenRoots(t *testing.T) {
+func TestFileSystemForIgnoresWindowsHiddenPathRules(t *testing.T) {
 	workspace := t.TempDir()
-	extraRead := filepath.Join(t.TempDir(), "extra-read")
 	outside := filepath.Join(t.TempDir(), "outside")
 	hidden := filepath.Join(workspace, "secret")
 	gitDir := filepath.Join(workspace, ".git")
-	for _, dir := range []string{extraRead, outside, hidden, gitDir} {
+	for _, dir := range []string{outside, hidden, gitDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
 		}
@@ -339,9 +333,8 @@ func TestFileSystemForIgnoresWindowsReadAndHiddenRoots(t *testing.T) {
 	}
 
 	rt, err := New(sandbox.Config{
-		CWD:           workspace,
-		StateDir:      t.TempDir(),
-		ReadableRoots: []string{extraRead},
+		CWD:      workspace,
+		StateDir: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -350,10 +343,7 @@ func TestFileSystemForIgnoresWindowsReadAndHiddenRoots(t *testing.T) {
 
 	fsys := rt.FileSystemFor(sandbox.Constraints{
 		Permission: sandbox.PermissionWorkspaceWrite,
-		PathRules: []sandbox.PathRule{
-			{Path: extraRead, Access: sandbox.PathAccessReadOnly},
-			{Path: hidden, Access: sandbox.PathAccessHidden},
-		},
+		PathRules:  []sandbox.PathRule{{Path: hidden, Access: sandbox.PathAccessHidden}},
 	})
 	for _, path := range []string{outsideFile, hiddenFile} {
 		if _, err := fsys.ReadFile(path); err != nil {

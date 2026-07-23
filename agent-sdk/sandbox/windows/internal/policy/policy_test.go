@@ -13,9 +13,8 @@ func TestBuildUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T) {
 	workspace := pathutil.Normalize(t.TempDir())
 	commandDir := filepath.Join(workspace, "cmd")
 	extraWrite := pathutil.Normalize(filepath.Join(t.TempDir(), "write"))
-	extraRead := pathutil.Normalize(filepath.Join(t.TempDir(), "read"))
 	hidden := pathutil.Normalize(filepath.Join(workspace, "secret"))
-	for _, dir := range []string{commandDir, extraWrite, extraRead, hidden, filepath.Join(workspace, ".git"), filepath.Join(workspace, "vendor")} {
+	for _, dir := range []string{commandDir, extraWrite, hidden, filepath.Join(workspace, ".git"), filepath.Join(workspace, "vendor")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
 		}
@@ -25,14 +24,12 @@ func TestBuildUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T) {
 		Config: sandbox.Config{
 			CWD:              workspace,
 			WritableRoots:    []string{extraWrite},
-			ReadableRoots:    []string{extraRead},
 			ReadOnlySubpaths: []string{"vendor"},
 		},
 		CommandDir: commandDir,
 		Constraints: sandbox.Constraints{
 			Network: sandbox.NetworkDisabled,
 			PathRules: []sandbox.PathRule{
-				{Path: extraRead, Access: sandbox.PathAccessReadOnly},
 				{Path: extraWrite, Access: sandbox.PathAccessReadWrite},
 				{Path: hidden, Access: sandbox.PathAccessHidden},
 			},
@@ -42,18 +39,13 @@ func TestBuildUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T) {
 	if p.Network != NetworkOnline {
 		t.Fatalf("Network = %q, want online/non-enforced", p.Network)
 	}
-	if len(p.ReadRoots) != 0 || len(p.DenyReadPaths) != 0 {
-		t.Fatalf("read policy = read %#v deny %#v, want no read boundary", p.ReadRoots, p.DenyReadPaths)
-	}
 	for _, want := range []string{workspace, commandDir, extraWrite} {
 		if !containsPath(p.WriteRoots, want) {
 			t.Fatalf("WriteRoots = %#v, want %q", p.WriteRoots, want)
 		}
 	}
-	for _, unexpected := range []string{extraRead, hidden} {
-		if containsPath(p.WriteRoots, unexpected) || containsPath(p.DenyWritePaths, unexpected) {
-			t.Fatalf("policy unexpectedly consumed non-write path %q: %+v", unexpected, p)
-		}
+	if containsPath(p.WriteRoots, hidden) || containsPath(p.DenyWritePaths, hidden) {
+		t.Fatalf("policy unexpectedly consumed hidden path %q: %+v", hidden, p)
 	}
 	for _, want := range []string{filepath.Join(workspace, ".git"), filepath.Join(workspace, "vendor")} {
 		if !containsPath(p.DenyWritePaths, want) {
@@ -70,7 +62,7 @@ func TestBuildFullAccessSkipsRoots(t *testing.T) {
 	if !p.FullAccess {
 		t.Fatal("FullAccess = false, want true")
 	}
-	if len(p.ReadRoots) != 0 || len(p.WriteRoots) != 0 || len(p.DenyWritePaths) != 0 {
+	if len(p.WriteRoots) != 0 || len(p.DenyWritePaths) != 0 {
 		t.Fatalf("policy roots = %+v, want unrestricted nil roots", p)
 	}
 	if p.Network != NetworkOnline {
@@ -85,8 +77,8 @@ func TestCommonGlobalPolicyDoesNotAddReadOrNetworkControls(t *testing.T) {
 	if !containsPath(p.WriteRoots, commonRoot) {
 		t.Fatalf("WriteRoots = %#v, want %q", p.WriteRoots, commonRoot)
 	}
-	if len(p.ReadRoots) != 0 || len(p.DenyReadPaths) != 0 || len(p.DenyWritePaths) != 0 {
-		t.Fatalf("policy = %+v, want no read/deny controls", p)
+	if len(p.DenyWritePaths) != 0 {
+		t.Fatalf("policy = %+v, want no deny controls", p)
 	}
 	if p.Network != NetworkOnline {
 		t.Fatalf("Network = %q, want online/non-enforced", p.Network)

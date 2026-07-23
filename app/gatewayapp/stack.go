@@ -507,12 +507,7 @@ func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model Mode
 		baseMetadata["reasoning_effort"] = reasoning
 	}
 	return stackBaseMetadata{
-		Metadata: sandboxpolicy.WithPolicyRootMetadata(
-			baseMetadata,
-			sandboxCfg,
-			workspaceCWD,
-			result.SkillCatalog.Metas(),
-		),
+		Metadata:     sandboxpolicy.WithPolicyMetadata(baseMetadata, sandboxCfg),
 		SkillCatalog: result.SkillCatalog,
 	}, nil
 }

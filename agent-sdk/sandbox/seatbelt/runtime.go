@@ -306,14 +306,7 @@ func buildSeatbeltProfile(p policy.Policy, workDir string) (string, error) {
 	b.WriteString("(allow process*)\n")
 	b.WriteString("(allow signal (target same-sandbox))\n")
 	b.WriteString("(allow sysctl-read)\n")
-	if roots := policy.ShellReadableRoots(p, workDir); len(roots) > 0 {
-		for _, root := range roots {
-			fmt.Fprintf(&b, "(allow file-read* (subpath %s))\n", sbplString(root))
-			fmt.Fprintf(&b, "(allow file-read-metadata file-test-existence (subpath %s))\n", sbplString(root))
-		}
-	} else {
-		b.WriteString("(allow file-read*)\n")
-	}
+	b.WriteString("(allow file-read*)\n")
 	b.WriteString(seatbeltCoreExtensions)
 	b.WriteString(seatbeltMachServices)
 	b.WriteString(seatbeltDeviceAndFramework)

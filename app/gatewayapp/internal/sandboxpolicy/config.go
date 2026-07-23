@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 )
 
@@ -30,9 +29,6 @@ func MergeConfig(stored configstore.SandboxConfig, override configstore.SandboxC
 	if override.HelperPath != "" {
 		stored.HelperPath = override.HelperPath
 	}
-	if len(override.ReadableRoots) > 0 {
-		stored.ReadableRoots = append([]string(nil), override.ReadableRoots...)
-	}
 	if len(override.WritableRoots) > 0 {
 		stored.WritableRoots = append([]string(nil), override.WritableRoots...)
 	}
@@ -49,30 +45,20 @@ func MergeConfig(stored configstore.SandboxConfig, override configstore.SandboxC
 	return configstore.DefaultSandboxConfig(stored)
 }
 
-func WithPolicyRootMetadata(
-	metadata map[string]any,
-	cfg configstore.SandboxConfig,
-	workspaceDir string,
-	skillMetas []skill.Meta,
-) map[string]any {
+func WithPolicyMetadata(metadata map[string]any, cfg configstore.SandboxConfig) map[string]any {
 	out := cloneMap(metadata)
 	if out == nil {
 		out = map[string]any{}
 	}
 	cfg = configstore.DefaultSandboxConfig(cfg)
-	skillReadRoots := ExternalSkillReadRoots(workspaceDir, skillMetas)
-	readRoots := configstore.DedupeStrings(append(append([]string(nil), cfg.ReadableRoots...), skillReadRoots...))
-	if len(readRoots) > 0 {
-		out["policy_extra_read_roots"] = mergePolicyRootMetadata(out["policy_extra_read_roots"], readRoots)
-	}
 	if len(cfg.WritableRoots) > 0 {
-		out["policy_extra_write_roots"] = mergePolicyRootMetadata(out["policy_extra_write_roots"], cfg.WritableRoots)
+		out["policy_extra_write_roots"] = mergePolicyWriteRoots(out["policy_extra_write_roots"], cfg.WritableRoots)
 	}
 	out["policy_network_enabled"] = configstore.SandboxNetworkEnabled(cfg)
 	return out
 }
 
-func mergePolicyRootMetadata(existing any, values []string) []string {
+func mergePolicyWriteRoots(existing any, values []string) []string {
 	out := make([]string, 0, len(values))
 	seen := map[string]struct{}{}
 	appendOne := func(value string) {

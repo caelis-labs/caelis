@@ -56,21 +56,6 @@ func withPathWriteGrants(base sandbox.Constraints, paths []string) sandbox.Const
 	return out
 }
 
-func filesystemReadToolConstraints(in sandbox.Constraints) sandbox.Constraints {
-	if len(in.PathRules) == 0 {
-		return in
-	}
-	rules := make([]sandbox.PathRule, 0, len(in.PathRules))
-	for _, rule := range in.PathRules {
-		if rule.Access == sandbox.PathAccessReadOnly {
-			continue
-		}
-		rules = append(rules, rule)
-	}
-	in.PathRules = rules
-	return in
-}
-
 func ensureReadPathsOutsideDefaultHiddenRoots(input policy.ToolContext) error {
 	paths, err := candidatePaths(input)
 	if err != nil {

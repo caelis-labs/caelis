@@ -10,29 +10,25 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
 
-func TestDefaultMergesConstraintPathRules(t *testing.T) {
+func TestDefaultMergesWritableAndHiddenConstraintPathRules(t *testing.T) {
 	t.Parallel()
 
 	workspace := testWorkspaceRoot()
-	readOnly := testReadOnlyRoot()
 	p := Default(sandbox.Config{
 		CWD: "/sandbox-cwd",
 	}, sandbox.Constraints{
 		Permission: sandbox.PermissionWorkspaceWrite,
 		PathRules: []sandbox.PathRule{
 			{Path: workspace, Access: sandbox.PathAccessReadWrite},
-			{Path: readOnly, Access: sandbox.PathAccessReadOnly},
+			{Path: "/hidden", Access: sandbox.PathAccessHidden},
 		},
 	})
 
 	if !slices.Contains(p.WritableRoots, workspace) {
 		t.Fatalf("WritableRoots = %#v, want %s from constraints", p.WritableRoots, workspace)
 	}
-	if !slices.Contains(p.ReadableRoots, readOnly) {
-		t.Fatalf("ReadableRoots = %#v, want %s from constraints", p.ReadableRoots, readOnly)
-	}
-	if slices.Contains(p.HiddenRoots, "/hidden") {
-		t.Fatalf("HiddenRoots = %#v, did not expect /hidden without hidden path rule", p.HiddenRoots)
+	if !slices.Contains(p.HiddenRoots, "/hidden") {
+		t.Fatalf("HiddenRoots = %#v, want /hidden from constraints", p.HiddenRoots)
 	}
 }
 
@@ -109,8 +105,8 @@ func TestDefaultFullAccessIgnoresConstraintPathRules(t *testing.T) {
 		},
 	})
 
-	if len(p.WritableRoots) != 0 || len(p.ReadableRoots) != 0 {
-		t.Fatalf("full access roots = readable %#v writable %#v, want unrestricted nil roots", p.ReadableRoots, p.WritableRoots)
+	if len(p.WritableRoots) != 0 {
+		t.Fatalf("full access writable roots = %#v, want unrestricted nil roots", p.WritableRoots)
 	}
 }
 
@@ -153,11 +149,4 @@ func TestFilterExistingPathsSkipsMissingRootWithoutCreatingIt(t *testing.T) {
 	if _, err := os.Stat(missingCache); !os.IsNotExist(err) {
 		t.Fatalf("Stat(missingCache) error = %v, want not created", err)
 	}
-}
-
-func testReadOnlyRoot() string {
-	if runtime.GOOS == "windows" {
-		return `C:\read-only`
-	}
-	return "/read-only"
 }

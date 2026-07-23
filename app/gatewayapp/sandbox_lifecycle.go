@@ -111,7 +111,6 @@ func sandboxConfigToPort(cfg SandboxConfig, workspaceCWD string, storeDir string
 		RequestedBackend: sandbox.Backend(cfg.RequestedType),
 		HelperPath:       cfg.HelperPath,
 		StateDir:         storeDir,
-		ReadableRoots:    append([]string(nil), cfg.ReadableRoots...),
 		WritableRoots:    append([]string(nil), cfg.WritableRoots...),
 		ReadOnlySubpaths: append([]string(nil), cfg.ReadOnlySubpaths...),
 	}
@@ -121,7 +120,6 @@ func sandboxConfigFromPort(cfg sandbox.Config) SandboxConfig {
 	return SandboxConfig{
 		RequestedType:    string(cfg.RequestedBackend),
 		HelperPath:       cfg.HelperPath,
-		ReadableRoots:    append([]string(nil), cfg.ReadableRoots...),
 		WritableRoots:    append([]string(nil), cfg.WritableRoots...),
 		ReadOnlySubpaths: append([]string(nil), cfg.ReadOnlySubpaths...),
 	}

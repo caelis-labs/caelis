@@ -19,9 +19,7 @@ const (
 const CapabilityWrite = "caelis.sandbox.write"
 
 type Policy struct {
-	ReadRoots               []string
 	WriteRoots              []string
-	DenyReadPaths           []string
 	DenyWritePaths          []string
 	Network                 NetworkIdentity
 	CapabilitySIDs          []string

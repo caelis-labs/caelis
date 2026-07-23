@@ -42,6 +42,16 @@ func TestThirdPartyPolicyDecisionConformance(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "unsupported read-only path constraint",
+			decision: policy.Decision{
+				Action: policy.ActionAllow,
+				Constraints: sandbox.Constraints{
+					PathRules: []sandbox.PathRule{{Path: "/toolchain", Access: sandbox.PathAccess("read_only")}},
+				},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

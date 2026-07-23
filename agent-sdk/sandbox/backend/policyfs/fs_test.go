@@ -127,6 +127,34 @@ func TestWriteAllowedWhenExplicitGrantOverridesDefaultGitReadOnlySubpath(t *test
 	}
 }
 
+func TestHostReadsRemainBroad(t *testing.T) {
+	t.Parallel()
+
+	workspace := deniedAbsoluteTestPath("sandbox-policy-workspace")
+	home := deniedAbsoluteTestPath("sandbox-home")
+	fsys := New(testFileSystem{
+		wd:   workspace,
+		home: home,
+	}, func() policy.Policy {
+		return policy.Default(sandbox.Config{
+			CWD: workspace,
+		}, sandbox.Constraints{
+			Permission: sandbox.PermissionWorkspaceWrite,
+			PathRules:  []sandbox.PathRule{{Path: workspace, Access: sandbox.PathAccessReadWrite}},
+		})
+	})
+
+	for _, target := range []string{
+		filepath.Join(home, ".gitconfig"),
+		filepath.Join(home, ".config", "git", "ignore"),
+		filepath.Join(home, ".g", "go", "bin", "go"),
+	} {
+		if _, err := fsys.ReadFile(target); err == nil || errors.Is(err, os.ErrPermission) {
+			t.Fatalf("ReadFile(%q) error = %v, want underlying filesystem result rather than sandbox denial", target, err)
+		}
+	}
+}
+
 func TestHiddenPathRuleDeniesReadAndWrite(t *testing.T) {
 	t.Parallel()
 
@@ -141,7 +169,6 @@ func TestHiddenPathRuleDeniesReadAndWrite(t *testing.T) {
 		}, sandbox.Constraints{
 			Permission: sandbox.PermissionWorkspaceWrite,
 			PathRules: []sandbox.PathRule{
-				{Path: hidden, Access: sandbox.PathAccessReadOnly},
 				{Path: hidden, Access: sandbox.PathAccessReadWrite},
 				{Path: hidden, Access: sandbox.PathAccessHidden},
 			},

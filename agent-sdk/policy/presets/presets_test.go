@@ -190,7 +190,7 @@ func TestDefaultModeAllowsUserConfigReadsButRequiresWriteGrant(t *testing.T) {
 	}
 }
 
-func TestDefaultModeReadToolsDoNotRequireExplicitReadableRootsForOrdinaryReads(t *testing.T) {
+func TestDefaultModeReadToolsDoNotRequireExplicitReadGrantsForOrdinaryReads(t *testing.T) {
 	home := t.TempDir()
 	setHomeForPresetsTest(t, home)
 	configPath := filepath.Join(home, ".config", "ghostty", "config")
@@ -210,8 +210,8 @@ func TestDefaultModeReadToolsDoNotRequireExplicitReadableRootsForOrdinaryReads(t
 		if decision.Action != policy.ActionAllow {
 			t.Fatalf("%s action = %q, want allow (reason=%q)", input.Tool.Name, decision.Action, decision.Reason)
 		}
-		if hasPathRule(decision.Constraints.PathRules, extraReadRoot, sandbox.PathAccessReadOnly) {
-			t.Fatalf("%s PathRules = %#v, want no explicit read root for filesystem read tool", input.Tool.Name, decision.Constraints.PathRules)
+		if hasPathRuleForPath(decision.Constraints.PathRules, extraReadRoot) {
+			t.Fatalf("%s PathRules = %#v, want policy read grant omitted from sandbox constraints", input.Tool.Name, decision.Constraints.PathRules)
 		}
 		if hasPathRule(decision.Constraints.PathRules, filepath.Join(home, ".config", "gh"), sandbox.PathAccessHidden) {
 			t.Fatalf("%s PathRules = %#v, want no sensitive user config hidden root", input.Tool.Name, decision.Constraints.PathRules)
@@ -219,7 +219,7 @@ func TestDefaultModeReadToolsDoNotRequireExplicitReadableRootsForOrdinaryReads(t
 	}
 }
 
-func TestDefaultModeCommandConstraintsKeepExtraReadRoots(t *testing.T) {
+func TestDefaultModeCommandConstraintsDoNotProjectPolicyReadGrants(t *testing.T) {
 	t.Parallel()
 
 	extraReadRoot := testExtraReadRoot()
@@ -233,8 +233,8 @@ func TestDefaultModeCommandConstraintsKeepExtraReadRoots(t *testing.T) {
 	if decision.Action != policy.ActionAllow {
 		t.Fatalf("RUN_COMMAND action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
 	}
-	if !hasPathRule(decision.Constraints.PathRules, extraReadRoot, sandbox.PathAccessReadOnly) {
-		t.Fatalf("PathRules = %#v, want command extra read root", decision.Constraints.PathRules)
+	if hasPathRuleForPath(decision.Constraints.PathRules, extraReadRoot) {
+		t.Fatalf("PathRules = %#v, want policy read grant omitted from sandbox constraints", decision.Constraints.PathRules)
 	}
 }
 
@@ -1040,6 +1040,15 @@ func sandboxCommandDescriptor() sandbox.Descriptor {
 func hasPathRule(rules []sandbox.PathRule, path string, access sandbox.PathAccess) bool {
 	for _, rule := range rules {
 		if samePolicyPathForTest(rule.Path, path) && rule.Access == access {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPathRuleForPath(rules []sandbox.PathRule, path string) bool {
+	for _, rule := range rules {
+		if samePolicyPathForTest(rule.Path, path) {
 			return true
 		}
 	}

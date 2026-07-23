@@ -17,10 +17,9 @@ type policyFileSystem struct {
 	policy func() policy.Policy
 }
 
-// newPolicyFileSystem constrains file-tool filesystem access using the active
-// sandbox policy. Writes are always enforced. Reads remain broad unless the
-// policy declares ReadableRoots, which lets applications opt into a narrower
-// capability model without forcing that behavioral change globally.
+// New constrains file-tool filesystem access using the active sandbox policy.
+// Writes are enforced while reads remain broad except for explicit hidden
+// paths.
 func New(base sandbox.FileSystem, policyFn func() policy.Policy) sandbox.FileSystem {
 	if base == nil || policyFn == nil {
 		return base
@@ -129,15 +128,7 @@ func (f *policyFileSystem) checkReadPath(path string) error {
 	if fsboundary.IsWithinRoots(targetPath, p.HiddenRoots, f.base) {
 		return permissionError("read", targetPath, "path is hidden by sandbox policy")
 	}
-	if len(p.ReadableRoots) == 0 {
-		return nil
-	}
-	if fsboundary.IsWithinRoots(targetPath, p.ReadableRoots, f.base) ||
-		fsboundary.IsWithinRoots(targetPath, p.WritableRoots, f.base) ||
-		fsboundary.IsWithinScratchRoots(targetPath, f.base) {
-		return nil
-	}
-	return permissionError("read", targetPath, "path is outside readable sandbox roots")
+	return nil
 }
 
 func permissionError(_ string, _ string, _ string) error {

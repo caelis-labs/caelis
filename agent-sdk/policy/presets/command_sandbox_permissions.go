@@ -87,20 +87,17 @@ func mergePathRules(base []sandbox.PathRule, extra []sandbox.PathRule) []sandbox
 		}
 		access := rule.Access
 		if access == "" {
-			access = sandbox.PathAccessReadOnly
+			continue
 		}
-		upgraded := false
+		exists := false
 		for i := range out {
 			if filepath.Clean(strings.TrimSpace(out[i].Path)) != path {
 				continue
 			}
-			if out[i].Access == sandbox.PathAccessReadOnly && access == sandbox.PathAccessReadWrite {
-				out[i].Access = sandbox.PathAccessReadWrite
-			}
-			upgraded = true
+			exists = true
 			break
 		}
-		if !upgraded {
+		if !exists {
 			out = append(out, sandbox.PathRule{Path: path, Access: access})
 		}
 	}

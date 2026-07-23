@@ -52,7 +52,7 @@ func WorkspaceWriteMode() policy.Mode {
 	return policy.NamedMode{
 		ID: ModeWorkspaceWrite,
 		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
-			def := baseStrictConstraints(input.Options)
+			def := workspaceWriteConstraints(input.Options)
 			switch toolName(input) {
 			case names.Plan, names.Spawn:
 				return allow(def), nil
@@ -60,9 +60,9 @@ func WorkspaceWriteMode() policy.Mode {
 				if err := ensureReadPathsOutsideDefaultHiddenRoots(input); err != nil {
 					return policyErrorOrDeny(err)
 				}
-				return allow(filesystemReadToolConstraints(def)), nil
+				return allow(def), nil
 			case names.Skill:
-				return allow(filesystemReadToolConstraints(def)), nil
+				return allow(def), nil
 			case names.Write, names.Patch:
 				return decideFilesystemWrite(input, def)
 			case names.Task:
@@ -175,9 +175,9 @@ func approvalTitle(name string, call map[string]any) string {
 	return display.SummarizeToolCallTitle(name, call)
 }
 
-func baseStrictConstraints(opts policy.ModeOptions) sandbox.Constraints {
+func workspaceWriteConstraints(opts policy.ModeOptions) sandbox.Constraints {
 	devWriteRoots := defaultDeveloperWritableRoots()
-	rules := make([]sandbox.PathRule, 0, 2+len(devWriteRoots)+len(opts.ExtraWriteRoots)+len(opts.ExtraReadRoots))
+	rules := make([]sandbox.PathRule, 0, 2+len(devWriteRoots)+len(opts.ExtraWriteRoots))
 	appendRule := func(path string, access sandbox.PathAccess) {
 		path = strings.TrimSpace(path)
 		if path == "" {
@@ -194,9 +194,6 @@ func baseStrictConstraints(opts policy.ModeOptions) sandbox.Constraints {
 	}
 	for _, path := range opts.ExtraWriteRoots {
 		appendRule(path, sandbox.PathAccessReadWrite)
-	}
-	for _, path := range opts.ExtraReadRoots {
-		appendRule(path, sandbox.PathAccessReadOnly)
 	}
 	return sandbox.Constraints{
 		Route:      sandbox.RouteSandbox,

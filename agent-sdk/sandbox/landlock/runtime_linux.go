@@ -454,14 +454,7 @@ func applyLandlockFilesystemPolicy(p policy.Policy, policyCWD string) error {
 	}
 	defer unix.Close(rulesetFD)
 
-	if readableRoots := policy.ShellReadableRoots(p, policyCWD); len(readableRoots) > 0 {
-		for _, root := range readableRoots {
-			access := landlockReadOnlyAccessForPath(root, abi)
-			if err := landlockAddPathRule(rulesetFD, root, access); err != nil {
-				return fmt.Errorf("allow readable root %s: %w", root, err)
-			}
-		}
-	} else if err := landlockAddPathRule(rulesetFD, "/", landlockReadOnlyAccessForPath("/", abi)); err != nil {
+	if err := landlockAddPathRule(rulesetFD, "/", landlockReadOnlyAccessForPath("/", abi)); err != nil {
 		return fmt.Errorf("allow read-only root: %w", err)
 	}
 	if err := landlockAddPathRule(rulesetFD, "/dev/null", landlockFileReadWriteMaskForABI(abi)); err != nil {

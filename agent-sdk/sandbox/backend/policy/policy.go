@@ -21,7 +21,6 @@ const (
 type Policy struct {
 	Type             Type
 	NetworkAccess    bool
-	ReadableRoots    []string
 	WritableRoots    []string
 	HiddenRoots      []string
 	ReadOnlySubpaths []string
@@ -31,7 +30,6 @@ func Default(cfg sandbox.Config, constraints sandbox.Constraints) Policy {
 	p := Policy{
 		Type:             TypeWorkspaceWrite,
 		NetworkAccess:    constraints.Network != sandbox.NetworkDisabled,
-		ReadableRoots:    append([]string(nil), cfg.ReadableRoots...),
 		WritableRoots:    append([]string(nil), cfg.WritableRoots...),
 		ReadOnlySubpaths: append([]string(nil), cfg.ReadOnlySubpaths...),
 	}
@@ -39,7 +37,6 @@ func Default(cfg sandbox.Config, constraints sandbox.Constraints) Policy {
 	case sandbox.PermissionFullAccess:
 		p.Type = TypeDangerFull
 		p.NetworkAccess = true
-		p.ReadableRoots = nil
 		p.WritableRoots = nil
 		p.HiddenRoots = nil
 		p.ReadOnlySubpaths = nil
@@ -56,7 +53,6 @@ func Default(cfg sandbox.Config, constraints sandbox.Constraints) Policy {
 		applyPathRules(&p, constraints.PathRules)
 		p.ReadOnlySubpaths = removeOverriddenReadOnlySubpaths(p.ReadOnlySubpaths, constraints.PathRules, cfg.CWD)
 	}
-	p.ReadableRoots = normalizeStringList(p.ReadableRoots)
 	p.WritableRoots = normalizeStringList(p.WritableRoots)
 	p.HiddenRoots = normalizeStringList(p.HiddenRoots)
 	p.ReadOnlySubpaths = normalizeStringList(p.ReadOnlySubpaths)
@@ -127,69 +123,10 @@ func applyPathRules(p *Policy, rules []sandbox.PathRule) {
 		switch rule.Access {
 		case sandbox.PathAccessReadWrite:
 			p.WritableRoots = append(p.WritableRoots, path)
-		case sandbox.PathAccessReadOnly:
-			p.ReadableRoots = append(p.ReadableRoots, path)
 		case sandbox.PathAccessHidden:
 			p.HiddenRoots = append(p.HiddenRoots, path)
 		}
 	}
-}
-
-func HasExplicitReadableRoots(p Policy) bool {
-	return len(normalizeStringList(p.ReadableRoots)) > 0
-}
-
-func ShellReadableRoots(p Policy, workDir string) []string {
-	if !HasExplicitReadableRoots(p) {
-		return nil
-	}
-	roots := make([]string, 0, len(p.ReadableRoots)+len(p.WritableRoots)+16)
-	for _, one := range p.ReadableRoots {
-		if resolved := ResolveSandboxPath(workDir, one); resolved != "" {
-			roots = append(roots, SandboxPathVariants(resolved)...)
-		}
-	}
-	for _, one := range p.WritableRoots {
-		if resolved := ResolveSandboxPath(workDir, one); resolved != "" {
-			roots = append(roots, SandboxPathVariants(resolved)...)
-		}
-	}
-	roots = append(roots, ScratchReadableRoots()...)
-	roots = append(roots, PlatformReadableRoots(runtime.GOOS)...)
-	return normalizeStringList(filterExistingPaths(roots))
-}
-
-func ScratchReadableRoots() []string {
-	roots := []string{"/tmp", "/var/tmp", "/private/tmp"}
-	if tmp := strings.TrimSpace(os.TempDir()); tmp != "" {
-		roots = append(roots, tmp)
-	}
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		roots = append(roots, filepath.Join(home, ".cache"))
-		roots = append(roots, filepath.Join(home, "Library", "Caches"))
-	}
-	return normalizeStringList(expandSandboxPathVariants(roots))
-}
-
-func PlatformReadableRoots(goos string) []string {
-	switch strings.ToLower(strings.TrimSpace(goos)) {
-	case "darwin":
-		return normalizeStringList(expandSandboxPathVariants([]string{
-			"/System", "/usr", "/bin", "/sbin", "/Library", "/Applications", "/opt", "/private/etc", "/private/var/db/timezone", "/dev",
-		}))
-	default:
-		return normalizeStringList(expandSandboxPathVariants([]string{
-			"/bin", "/usr", "/lib", "/lib64", "/etc", "/dev", "/proc", "/sys", "/run", "/var", "/opt",
-		}))
-	}
-}
-
-func expandSandboxPathVariants(paths []string) []string {
-	values := make([]string, 0, len(paths)*2)
-	for _, one := range paths {
-		values = append(values, SandboxPathVariants(one)...)
-	}
-	return values
 }
 
 func SandboxPathVariants(path string) []string {

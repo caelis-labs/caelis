@@ -10,9 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	stdruntime "runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -204,9 +202,6 @@ func (b *bwrapRunner) Run(ctx context.Context, req runnerruntime.Request) (sandb
 		}
 		return result, fmt.Errorf("tool: bwrap sandbox command produced no output for %s and was terminated; %s", label, commandOutputSummary(result))
 	}
-	if detail := bwrapMissingMountDiagnostic(result, effectivePolicy, workDir); detail != "" {
-		result.Error = detail
-	}
 	return result, fmt.Errorf("tool: bwrap sandbox command failed: %w; %s", waitErr, commandOutputSummary(result))
 }
 
@@ -332,15 +327,7 @@ func buildBwrapArgs(p policy.Policy, workDir string) ([]string, error) {
 	if !p.NetworkAccess {
 		args = append(args, "--unshare-net")
 	}
-	if policy.HasExplicitReadableRoots(p) {
-		rootArgs, err := buildScopedBwrapRootArgs(p, workDir)
-		if err != nil {
-			return nil, err
-		}
-		args = append(args, rootArgs...)
-	} else {
-		args = append(args, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc")
-	}
+	args = append(args, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc")
 	if p.Type != policy.TypeReadOnly {
 		writableRoots, err := bwrapWritableRoots(p, workDir)
 		if err != nil {
@@ -354,136 +341,6 @@ func buildBwrapArgs(p policy.Policy, workDir string) ([]string, error) {
 		args = append(args, "--ro-bind", sub, sub)
 	}
 	return args, nil
-}
-
-func buildScopedBwrapRootArgs(p policy.Policy, workDir string) ([]string, error) {
-	readableRoots := bwrapRegularReadableRoots(policy.ShellReadableRoots(p, workDir))
-	writableRoots, err := bwrapWritableRoots(p, workDir)
-	if err != nil {
-		return nil, err
-	}
-	readOnlySubpaths := bwrapReadOnlySubpaths(p, workDir)
-	destParents := bwrapMountParentDirs(readableRoots, writableRoots, readOnlySubpaths)
-	args := []string{"--tmpfs", "/"}
-	for _, dir := range destParents {
-		args = append(args, "--dir", dir)
-	}
-	args = append(args, "--dev", "/dev", "--proc", "/proc")
-	for _, root := range readableRoots {
-		args = append(args, "--ro-bind", root, root)
-	}
-	return args, nil
-}
-
-var quotedAbsolutePathPattern = regexp.MustCompile(`['"](/[^'"\n]+)['"]`)
-var bwrapStat = os.Stat
-
-func bwrapMissingMountDiagnostic(result sandbox.CommandResult, p policy.Policy, workDir string) string {
-	if !policy.HasExplicitReadableRoots(p) {
-		return ""
-	}
-	mountedRoots, err := bwrapMountedRoots(p, workDir)
-	if err != nil {
-		return ""
-	}
-	if detail := bwrapMissingMountStreamDiagnostic(result.Stderr, mountedRoots); detail != "" {
-		return detail
-	}
-	return bwrapMissingMountStreamDiagnostic(result.Stdout, mountedRoots)
-}
-
-func bwrapMissingMountStreamDiagnostic(text string, mountedRoots []string) string {
-	path := bwrapHostExistingUnmountedPath(text, mountedRoots)
-	if path == "" {
-		return ""
-	}
-	return sandbox.SandboxPermissionDeniedMessage + " Host path exists but is not mounted in the sandbox: " + path
-}
-
-func bwrapHostExistingUnmountedPath(text string, mountedRoots []string) string {
-	for _, line := range strings.Split(text, "\n") {
-		if !bwrapLineLooksLikeMissingPath(line) {
-			continue
-		}
-		for _, match := range quotedAbsolutePathPattern.FindAllStringSubmatch(line, -1) {
-			if len(match) < 2 {
-				continue
-			}
-			path := filepath.Clean(strings.TrimSpace(match[1]))
-			if path == "." || path == string(filepath.Separator) {
-				continue
-			}
-			if _, err := bwrapStat(path); err != nil {
-				continue
-			}
-			if bwrapPathWithinAnyRoot(path, mountedRoots) {
-				continue
-			}
-			return path
-		}
-	}
-	return ""
-}
-
-func bwrapLineLooksLikeMissingPath(line string) bool {
-	lower := strings.ToLower(strings.TrimSpace(line))
-	if lower == "" {
-		return false
-	}
-	return strings.Contains(lower, "no such file or directory") ||
-		strings.Contains(line, "没有那个文件或目录")
-}
-
-func bwrapMountedRoots(p policy.Policy, workDir string) ([]string, error) {
-	roots := make([]string, 0, len(p.ReadableRoots)+len(p.WritableRoots)+len(p.ReadOnlySubpaths)+16)
-	if policy.HasExplicitReadableRoots(p) {
-		roots = append(roots, bwrapRegularReadableRoots(policy.ShellReadableRoots(p, workDir))...)
-	}
-	writableRoots, err := bwrapWritableRoots(p, workDir)
-	if err != nil {
-		return nil, err
-	}
-	roots = append(roots, writableRoots...)
-	roots = append(roots, bwrapReadOnlySubpaths(p, workDir)...)
-	return normalizeStringList(roots), nil
-}
-
-func bwrapPathWithinAnyRoot(path string, roots []string) bool {
-	targets := []string{filepath.Clean(strings.TrimSpace(path))}
-	if resolved, err := filepath.EvalSymlinks(targets[0]); err == nil && strings.TrimSpace(resolved) != "" {
-		targets = append(targets, filepath.Clean(resolved))
-	}
-	for _, target := range normalizeStringList(targets) {
-		for _, root := range roots {
-			root = filepath.Clean(strings.TrimSpace(root))
-			if root == "" || root == "." {
-				continue
-			}
-			if target == root || strings.HasPrefix(target, root+string(filepath.Separator)) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func bwrapRegularReadableRoots(roots []string) []string {
-	out := make([]string, 0, len(roots))
-	for _, root := range roots {
-		if bwrapManagedMountPath(root) {
-			continue
-		}
-		out = append(out, root)
-	}
-	return out
-}
-
-func bwrapManagedMountPath(path string) bool {
-	cleaned := filepath.Clean(strings.TrimSpace(path))
-	return cleaned == "/dev" ||
-		strings.HasPrefix(cleaned, "/dev/") ||
-		cleaned == "/proc" ||
-		strings.HasPrefix(cleaned, "/proc/")
 }
 
 func bwrapWritableRoots(p policy.Policy, workDir string) ([]string, error) {
@@ -515,36 +372,6 @@ func bwrapReadOnlySubpaths(p policy.Policy, workDir string) []string {
 		}
 	}
 	return filterExistingPaths(normalizeStringList(values))
-}
-
-func bwrapMountParentDirs(pathGroups ...[]string) []string {
-	dirs := make([]string, 0, 32)
-	seen := map[string]struct{}{}
-	for _, paths := range pathGroups {
-		for _, target := range paths {
-			current := filepath.Dir(filepath.Clean(strings.TrimSpace(target)))
-			for current != "" && current != "." && current != string(filepath.Separator) {
-				if _, ok := seen[current]; !ok {
-					seen[current] = struct{}{}
-					dirs = append(dirs, current)
-				}
-				parent := filepath.Dir(current)
-				if parent == current {
-					break
-				}
-				current = parent
-			}
-		}
-	}
-	sort.Slice(dirs, func(i, j int) bool {
-		leftDepth := strings.Count(dirs[i], string(filepath.Separator))
-		rightDepth := strings.Count(dirs[j], string(filepath.Separator))
-		if leftDepth != rightDepth {
-			return leftDepth < rightDepth
-		}
-		return dirs[i] < dirs[j]
-	})
-	return dirs
 }
 
 func filterExistingPaths(paths []string) []string {

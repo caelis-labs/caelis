@@ -52,6 +52,24 @@ func TestSeatbeltWritableRootsSkipMissingRootWithoutCreatingIt(t *testing.T) {
 	}
 }
 
+func TestSeatbeltWorkspaceWritePreservesBroadHostReads(t *testing.T) {
+	workspace := t.TempDir()
+	p := policy.Default(sandbox.Config{
+		CWD: workspace,
+	}, sandbox.Constraints{
+		Permission: sandbox.PermissionWorkspaceWrite,
+		PathRules:  []sandbox.PathRule{{Path: workspace, Access: sandbox.PathAccessReadWrite}},
+	})
+
+	profile, err := buildSeatbeltProfile(p, workspace)
+	if err != nil {
+		t.Fatalf("buildSeatbeltProfile() error = %v", err)
+	}
+	if !strings.Contains(profile, "(allow file-read*)\n") {
+		t.Fatalf("seatbelt profile does not preserve broad host reads:\n%s", profile)
+	}
+}
+
 func TestStartAsyncWorkspaceWriteDeniesHomeWrite(t *testing.T) {
 	root := t.TempDir()
 	workspace := filepath.Join(root, "workspace")

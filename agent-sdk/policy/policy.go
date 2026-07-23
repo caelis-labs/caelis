@@ -24,8 +24,10 @@ const (
 // ModeOptions are app-provided runtime facts used by policy presets. The SDK
 // defines the shape, while the app decides actual roots and custom modes.
 type ModeOptions struct {
-	WorkspaceRoot   string   `json:"workspace_root,omitempty"`
-	TempRoot        string   `json:"temp_root,omitempty"`
+	WorkspaceRoot string `json:"workspace_root,omitempty"`
+	TempRoot      string `json:"temp_root,omitempty"`
+	// ExtraReadRoots are app-approved exceptions to sensitive-read policy.
+	// Built-in sandboxes keep host reads broad and do not consume these roots.
 	ExtraReadRoots  []string `json:"extra_read_roots,omitempty"`
 	ExtraWriteRoots []string `json:"extra_write_roots,omitempty"`
 	NetworkEnabled  *bool    `json:"network_enabled,omitempty"`
@@ -260,7 +262,7 @@ func validateConstraints(in sandbox.Constraints) error {
 		if strings.TrimSpace(rule.Path) == "" {
 			return fmt.Errorf("path_rules[%d].path is required", i)
 		}
-		if !oneOf(string(rule.Access), string(sandbox.PathAccessReadOnly), string(sandbox.PathAccessReadWrite), string(sandbox.PathAccessHidden)) {
+		if !oneOf(string(rule.Access), string(sandbox.PathAccessReadWrite), string(sandbox.PathAccessHidden)) {
 			return fmt.Errorf("path_rules[%d].access %q is unsupported", i, rule.Access)
 		}
 	}

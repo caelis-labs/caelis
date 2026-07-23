@@ -205,7 +205,6 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		FallbackInstallHint: route.FallbackInstallHint,
 		HelperPath:          sandboxCfg.HelperPath,
 		StateDir:            s.storeDir,
-		ReadableRoots:       append([]string(nil), sandboxCfg.ReadableRoots...),
 		WritableRoots:       append([]string(nil), sandboxCfg.WritableRoots...),
 		ReadOnlySubpaths:    append([]string(nil), sandboxCfg.ReadOnlySubpaths...),
 	})

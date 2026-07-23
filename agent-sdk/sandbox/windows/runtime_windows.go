@@ -129,10 +129,9 @@ func (r *runtime) FileSystemFor(constraints sandbox.Constraints) sandbox.FileSys
 		return nil
 	}
 	return policyfs.New(r.fs, func() policy.Policy {
+		// Windows workspace-write intentionally does not enforce hidden paths;
+		// only write roots and deny-write carveouts are security policy.
 		p := policy.Default(r.cfg, sandbox.NormalizeConstraints(constraints))
-		// Windows workspace-write intentionally does not enforce read or hidden
-		// roots; only write roots and deny-write carveouts are security policy.
-		p.ReadableRoots = nil
 		p.HiddenRoots = nil
 		return p
 	})

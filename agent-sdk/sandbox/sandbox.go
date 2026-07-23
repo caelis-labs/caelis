@@ -104,7 +104,6 @@ const (
 type PathAccess string
 
 const (
-	PathAccessReadOnly  PathAccess = "read_only"
 	PathAccessReadWrite PathAccess = "read_write"
 	PathAccessHidden    PathAccess = "hidden"
 )
@@ -155,7 +154,6 @@ type Config struct {
 	FallbackInstallHint string    `json:"fallback_install_hint,omitempty"`
 	HelperPath          string    `json:"helper_path,omitempty"`
 	StateDir            string    `json:"state_dir,omitempty"`
-	ReadableRoots       []string  `json:"readable_roots,omitempty"`
 	WritableRoots       []string  `json:"writable_roots,omitempty"`
 	ReadOnlySubpaths    []string  `json:"read_only_subpaths,omitempty"`
 }

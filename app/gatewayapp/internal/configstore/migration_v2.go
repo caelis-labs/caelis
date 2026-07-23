@@ -741,7 +741,6 @@ func legacyDocumentHasSafeContent(doc AppConfig) bool {
 		len(doc.AgentBindings.Bindings) > 0 ||
 		doc.Sandbox.RequestedType != "" ||
 		doc.Sandbox.HelperPath != "" ||
-		len(doc.Sandbox.ReadableRoots) > 0 ||
 		len(doc.Sandbox.WritableRoots) > 0 ||
 		len(doc.Sandbox.ReadOnlySubpaths) > 0 ||
 		doc.Sandbox.NetworkEnabled != nil ||
