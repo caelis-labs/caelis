@@ -56,32 +56,32 @@ func NewRunCommand(cfg RunCommandConfig) (*RunCommandTool, error) {
 func (t *RunCommandTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        RunCommandToolName,
-		Description: "Run a shell command from the session workspace or a specified workdir. Use this for repository inspection, tests, builds, formatting checks, git status/diff inspection, and commands that cannot be expressed by file tools. Do not prefix with cd; set workdir instead. Use yield_time_ms for long-running commands. Prefer use_default. Escalate only when this exact command cannot complete in the sandbox or policy/runtime explicitly requires Host. Each Host grant is one-shot.",
+		Description: "Run a shell command for repository inspection, tests, builds, formatting, version-control operations, or work unavailable through file tools. Use it when the command may complete now or continue as an async Task; prefer dedicated file tools for file operations.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"command": map[string]any{
 					"type":        "string",
 					"minLength":   1,
-					"description": "Command to execute.",
+					"description": "Shell command to execute.",
 				},
 				"workdir": map[string]any{
 					"type":        "string",
-					"description": "Working directory for the command; defaults to the session cwd.",
+					"description": "Working directory; defaults to the session cwd. Set this instead of prefixing command with cd.",
 				},
 				"yield_time_ms": map[string]any{
 					"type":        "integer",
 					"minimum":     0,
-					"description": "Wait before yielding async control.",
+					"description": "Wait before a running command returns as an async Task; not the command timeout. Omit for the 5000 ms default. Use shorter only to yield known long-running or interactive work early; use longer only to await known medium-duration work here.",
 				},
 				"sandbox_permissions": map[string]any{
 					"type":        "string",
-					"description": "Default use_default (sandbox). require_escalated = one-shot Host after this exact command failed in sandbox or policy/runtime explicitly requires Host. Prior Host allows never authorize later commands. Routine work must not escalate when sandboxed execution is sufficient.",
+					"description": "Execution route. Prefer use_default. Use require_escalated only after this command fails in the sandbox or policy/runtime requires Host; approval is one-shot.",
 					"enum":        []string{"use_default", "require_escalated"},
 				},
 				"justification": map[string]any{
 					"type":        "string",
-					"description": "Required with require_escalated. One short sentence: (1) command intent, (2) the concrete sandbox failure or policy/runtime Host requirement, (3) link to the user task. Reject empty/vague/\"faster\"/\"need host\" text.",
+					"description": "Required for require_escalated: one short sentence with command intent, the concrete sandbox failure or Host requirement, and the task link; reject vague reasons.",
 				},
 			},
 			"required":             []string{"command"},

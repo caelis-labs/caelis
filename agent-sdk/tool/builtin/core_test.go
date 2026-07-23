@@ -3,11 +3,14 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
@@ -19,6 +22,15 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+)
+
+// Core tools are always visible to the model, so each definition must leave
+// most of its context budget for the task. Descriptions use rune limits while
+// the aggregate limit measures the serialized model-visible ToolSpec.
+const (
+	maxCoreToolPromptTokens         = 512
+	maxCoreToolDescriptionRunes     = 512
+	maxCorePropertyDescriptionRunes = 240
 )
 
 func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
@@ -196,7 +208,7 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 
 	requireStringMinLength(t, defs[shell.RunCommandToolName], "command", 1)
 	requireIntegerBounds(t, defs[shell.RunCommandToolName], "yield_time_ms", 0, nil)
-	requireDescriptionContains(t, defs[shell.RunCommandToolName], "repository inspection", "Do not prefix with cd", "workdir", "yield_time_ms", "Prefer use_default")
+	requireDescriptionContains(t, defs[shell.RunCommandToolName], "repository inspection", "tests, builds", "async Task", "file tools")
 	requireAnnotations(t, defs[shell.RunCommandToolName], false, true, false, true)
 
 	requireStringMinLength(t, defs[task.ToolName], "handle", 1)
@@ -216,13 +228,42 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 
 	requireStringMinLength(t, defs[web.SearchToolName], "query", 1)
 	requireIntegerBounds(t, defs[web.SearchToolName], "max_results", 1, ptrAny(10))
-	requireDescriptionContains(t, defs[web.SearchToolName], "Search the web", "concise keyword queries", "site:", "provider-native web search", "unavailable", "fall back to WebFetch")
+	requireDescriptionContains(t, defs[web.SearchToolName], "Search the web", "specific result", "visible Markdown links", "provider-native web search", "unavailable", "fall back to WebFetch")
+	requirePropertyDescriptionContains(t, defs[web.SearchToolName], "query", "Concise keyword query", "site:", "filetype:")
 	requireAnnotations(t, defs[web.SearchToolName], true, false, false, true)
 
 	requireStringMinLength(t, defs[web.FetchToolName], "url", 1)
 	requireIntegerBounds(t, defs[web.FetchToolName], "timeout", 1, ptrAny(120))
 	requireDescriptionContains(t, defs[web.FetchToolName], "specific http or https URL", "cleaned markdown", "does not search")
 	requireAnnotations(t, defs[web.FetchToolName], true, false, false, true)
+}
+
+func TestCoreToolsFitModelContextBudgets(t *testing.T) {
+	t.Parallel()
+
+	rt, err := host.New(host.Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("host.New() error = %v", err)
+	}
+	tools, err := BuildCoreTools(CoreToolsConfig{Runtime: rt})
+	if err != nil {
+		t.Fatalf("BuildCoreTools() error = %v", err)
+	}
+	for _, configured := range tools {
+		configured := configured
+		def := configured.Definition()
+		t.Run(def.Name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := tool.EstimateModelPromptTokens([]tool.Tool{configured}); got > maxCoreToolPromptTokens {
+				t.Errorf("model prompt cost = %d tokens, want <= %d", got, maxCoreToolPromptTokens)
+			}
+			if got := utf8.RuneCountInString(strings.TrimSpace(def.Description)); got > maxCoreToolDescriptionRunes {
+				t.Errorf("tool description = %d runes, want <= %d", got, maxCoreToolDescriptionRunes)
+			}
+			requirePropertyDescriptionBudgets(t, def.InputSchema, "")
+		})
+	}
 }
 
 func TestCoreSearchAndGlobSchemasRemainStrict(t *testing.T) {
@@ -579,6 +620,49 @@ func requireDescriptionContains(t *testing.T, def tool.Definition, wants ...stri
 	for _, want := range wants {
 		if !strings.Contains(def.Description, want) {
 			t.Fatalf("%s description missing %q: %q", def.Name, want, def.Description)
+		}
+	}
+}
+
+func requirePropertyDescriptionContains(t *testing.T, def tool.Definition, property string, wants ...string) {
+	t.Helper()
+	description, _ := schemaProperty(t, def, property)["description"].(string)
+	for _, want := range wants {
+		if !strings.Contains(description, want) {
+			t.Fatalf("%s.%s description missing %q: %q", def.Name, property, want, description)
+		}
+	}
+}
+
+func requirePropertyDescriptionBudgets(t *testing.T, schema map[string]any, parent string) {
+	t.Helper()
+
+	properties, _ := schema["properties"].(map[string]any)
+	for _, name := range slices.Sorted(maps.Keys(properties)) {
+		property, _ := properties[name].(map[string]any)
+		if len(property) == 0 {
+			continue
+		}
+		path := name
+		if parent != "" {
+			path = parent + "." + name
+		}
+		description, _ := property["description"].(string)
+		if got := utf8.RuneCountInString(strings.TrimSpace(description)); got > maxCorePropertyDescriptionRunes {
+			t.Errorf("property %s description = %d runes, want <= %d", path, got, maxCorePropertyDescriptionRunes)
+		}
+		requirePropertyDescriptionBudgets(t, property, path)
+		if items, _ := property["items"].(map[string]any); len(items) > 0 {
+			requirePropertyDescriptionBudgets(t, items, path+"[]")
+		}
+		for _, keyword := range []string{"anyOf", "oneOf", "allOf"} {
+			variants, _ := property[keyword].([]any)
+			for index, raw := range variants {
+				variant, _ := raw.(map[string]any)
+				if len(variant) > 0 {
+					requirePropertyDescriptionBudgets(t, variant, fmt.Sprintf("%s.%s[%d]", path, keyword, index))
+				}
+			}
 		}
 	}
 }

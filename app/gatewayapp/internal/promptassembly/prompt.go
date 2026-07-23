@@ -2,7 +2,6 @@ package promptassembly
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -391,15 +390,7 @@ func EstimateModelPromptPrefixTokens(metadata map[string]any, tools []tool.Tool)
 }
 
 func EstimateToolPromptTokens(tools []tool.Tool) int {
-	specs := tool.ModelSpecs(tools)
-	if len(specs) == 0 {
-		return 0
-	}
-	raw, err := json.Marshal(specs)
-	if err != nil {
-		return len(specs) * 64
-	}
-	return EstimatePromptTextTokens(string(raw)) + len(specs)*24
+	return tool.EstimateModelPromptTokens(tools)
 }
 
 func EstimatePromptTextTokens(text string) int {

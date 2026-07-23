@@ -28,7 +28,12 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	if definition.Name != RunCommandToolName {
 		t.Fatalf("Name = %q, want %q", definition.Name, RunCommandToolName)
 	}
-	for _, required := range []string{"specified workdir", "tests, builds", "Prefer use_default", "policy/runtime explicitly requires Host", "one-shot"} {
+	for _, required := range []string{
+		"repository inspection",
+		"tests, builds",
+		"async Task",
+		"file tools",
+	} {
 		if !strings.Contains(definition.Description, required) {
 			t.Fatalf("Description missing %q: %q", required, definition.Description)
 		}
@@ -38,11 +43,11 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	}
 	properties, _ := definition.InputSchema["properties"].(map[string]any)
 	wantDescriptions := map[string]string{
-		"command":             "Command to execute.",
-		"workdir":             "Working directory for the command; defaults to the session cwd.",
-		"yield_time_ms":       "Wait before yielding async control.",
-		"sandbox_permissions": "Default use_default (sandbox). require_escalated = one-shot Host after this exact command failed in sandbox or policy/runtime explicitly requires Host. Prior Host allows never authorize later commands. Routine work must not escalate when sandboxed execution is sufficient.",
-		"justification":       "Required with require_escalated. One short sentence: (1) command intent, (2) the concrete sandbox failure or policy/runtime Host requirement, (3) link to the user task. Reject empty/vague/\"faster\"/\"need host\" text.",
+		"command":             "Shell command to execute.",
+		"workdir":             "Working directory; defaults to the session cwd. Set this instead of prefixing command with cd.",
+		"yield_time_ms":       "Wait before a running command returns as an async Task; not the command timeout. Omit for the 5000 ms default. Use shorter only to yield known long-running or interactive work early; use longer only to await known medium-duration work here.",
+		"sandbox_permissions": "Execution route. Prefer use_default. Use require_escalated only after this command fails in the sandbox or policy/runtime requires Host; approval is one-shot.",
+		"justification":       "Required for require_escalated: one short sentence with command intent, the concrete sandbox failure or Host requirement, and the task link; reject vague reasons.",
 	}
 	if len(properties) != len(wantDescriptions) {
 		t.Fatalf("properties = %#v, want only %v", properties, sortedRunCommandPropertyKeys(wantDescriptions))

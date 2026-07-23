@@ -3593,6 +3593,14 @@ func TestRuntimeRunCommandToolUsesDefaultYieldWhenOmitted(t *testing.T) {
 	assertRunningTaskSnapshot(t, result)
 }
 
+func TestRuntimeRunCommandDefaultYieldIsFiveSeconds(t *testing.T) {
+	t.Parallel()
+
+	if defaultCommandYield != 5*time.Second {
+		t.Fatalf("default command yield = %v, want %v", defaultCommandYield, 5*time.Second)
+	}
+}
+
 func TestRuntimeRunCommandToolKeepsExplicitZeroYield(t *testing.T) {
 	t.Parallel()
 

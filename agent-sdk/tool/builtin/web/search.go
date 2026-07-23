@@ -22,14 +22,14 @@ func NewSearch() *SearchTool {
 func (t *SearchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        SearchToolName,
-		Description: "Search the web for current, external, or unknown information when you do not already have a URL. Use concise keyword queries with the key entity, location, date/time, version, error text, or product name instead of long prose. Put common search operators directly in query, such as site:, filetype:, quoted phrases, OR, or minus terms. Use WebFetch after search when you need to read a specific result URL. In the final response, cite sources with visible Markdown links; never expose result ref_id values or private citation markers. If provider-native web search is unavailable, fall back to WebFetch with a known URL or ask for a search backend.",
+		Description: "Search the web for current, external, or unknown information when no URL is available. Use WebFetch to read a specific result. Cite final sources with visible Markdown links, and do not expose result IDs or private citation markers. If provider-native web search is unavailable, fall back to WebFetch for a known URL or ask for a search backend.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"query": map[string]any{
 					"type":        "string",
 					"minLength":   1,
-					"description": "Search query. Prefer compact keywords and include freshness context when relevant, for example \"上海 天气 2026-06-23\", \"Gemini API web search tool calling\", or \"site:gov.cn 上海 人口 2026\".",
+					"description": "Concise keyword query with key entities, dates, versions, freshness context, or error text. Add operators such as site:, filetype:, quotes, OR, or minus terms when useful.",
 				},
 				"max_results": map[string]any{
 					"type":        "integer",
