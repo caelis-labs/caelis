@@ -16,6 +16,7 @@ import (
 type OutputChunk struct {
 	Stream string
 	Text   string
+	Cursor int64
 }
 
 type Request struct {
@@ -35,6 +36,7 @@ type Runner interface {
 	StartAsync(context.Context, Request) (string, error)
 	WriteInput(sessionID string, input []byte) error
 	ReadOutput(sessionID string, stdoutMarker, stderrMarker int64) (stdout, stderr []byte, newStdoutMarker, newStderrMarker int64, err error)
+	AwaitOutput(context.Context, string, sandbox.OutputCursor) (cmdsession.OutputObservation, error)
 	GetSessionStatus(sessionID string) (cmdsession.SessionStatus, error)
 	WaitSession(context.Context, string, time.Duration) (sandbox.CommandResult, error)
 	TerminateSession(sessionID string) error
@@ -170,6 +172,17 @@ func (s *session) ReadOutput(_ context.Context, stdoutMarker, stderrMarker int64
 	return stdout, stderr, nextStdout, nextStderr, err
 }
 
+func (s *session) AwaitOutput(ctx context.Context, cursor sandbox.OutputCursor) (sandbox.OutputObservation, error) {
+	observation, err := s.runner.AwaitOutput(ctx, s.sessionID, cursor)
+	if err != nil {
+		return sandbox.OutputObservation{}, err
+	}
+	return sandbox.CloneOutputObservation(sandbox.OutputObservation{
+		Cursor: observation.Cursor,
+		Status: translateStatus(s.backend, s.sessionID, observation.Status),
+	}), nil
+}
+
 func (s *session) Status(_ context.Context) (sandbox.SessionStatus, error) {
 	status, err := s.runner.GetSessionStatus(s.sessionID)
 	if err != nil {
@@ -242,7 +255,7 @@ func translateRequest(req sandbox.CommandRequest) Request {
 			if strings.EqualFold(strings.TrimSpace(chunk.Stream), "stderr") {
 				chunk.Text = string(sandbox.NormalizeSandboxPermissionOutput("stderr", []byte(chunk.Text)))
 			}
-			req.OnOutput(sandbox.OutputChunk{Stream: chunk.Stream, Text: chunk.Text})
+			req.OnOutput(sandbox.OutputChunk{Stream: chunk.Stream, Text: chunk.Text, Cursor: chunk.Cursor})
 		},
 	}
 }

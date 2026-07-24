@@ -1438,9 +1438,6 @@ func (m *Model) tryToggleFoldToken(blockID string, token string) bool {
 	if key, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_exploration_stable:"); ok {
 		return m.tryToggleACPExplorationStageToken(blockID, key)
 	}
-	if key, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_task_stage:"); ok {
-		return m.tryToggleACPExplorationStageToken(blockID, key)
-	}
 	callID, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_tool_panel:")
 	if !ok || strings.TrimSpace(callID) == "" {
 		return false

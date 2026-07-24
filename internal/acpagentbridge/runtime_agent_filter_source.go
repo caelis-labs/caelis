@@ -3,9 +3,7 @@ package acpagentbridge
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
 // acpFilterSource identifies one independently replay-deduplicated outbound
@@ -27,9 +25,4 @@ func acpFilterSourceFromEnvelope(env eventstream.Envelope, fallbackSessionID str
 		Scope:     strings.TrimSpace(string(env.Scope)),
 		ScopeID:   strings.TrimSpace(env.ScopeID),
 	}
-}
-
-func acpFilterSourceFromSessionEvent(ref session.SessionRef, event *session.Event) acpFilterSource {
-	base := projector.EnvelopeBaseFromSessionEvent(ref, event, projector.SessionEventTransport{})
-	return acpFilterSourceFromEnvelope(base, ref.SessionID)
 }

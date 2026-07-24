@@ -78,6 +78,8 @@ func reasoningFoldBoundaryEvent(ev SubagentEvent) bool {
 		return len(ev.PlanEntries) > 0
 	case SEApproval:
 		return strings.TrimSpace(ev.ApprovalTool) != "" || strings.TrimSpace(ev.ApprovalCommand) != ""
+	case SESemanticBoundary:
+		return true
 	default:
 		return false
 	}
@@ -95,9 +97,6 @@ func isTerminalACPTranscriptStatus(status string) bool {
 func liveTailHasPotentialDeferredCompactStage(events []SubagentEvent, idx int, status string) bool {
 	if idx < 0 || idx >= len(events) || isTerminalACPTranscriptStatus(status) {
 		return false
-	}
-	if stage, end := potentialTaskStage(events, idx, status); len(taskControlEvents(stage)) > 0 && hasTaskNarrative(stage) && shouldDeferLiveTailStageCompaction(events, end, status) {
-		return true
 	}
 	if stage, end := potentialExplorationStage(events, idx, status); compactExplorationStageHasSummary(stage) && hasExplorationNarrative(stage) && shouldDeferLiveTailStageCompaction(events, end, status) {
 		return true

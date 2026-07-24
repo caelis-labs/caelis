@@ -77,6 +77,8 @@ func (m *Model) observeTaskStreamSession(env eventstream.Envelope) {
 		return
 	}
 	m.closeTaskStreamSubscriptions()
+	m.runningActivityTracker.resetSession()
+	m.refreshRunningActivity()
 	m.currentSessionID = sessionID
 }
 
@@ -492,9 +494,7 @@ func (m *Model) closeTaskStreamSubscriptions() {
 		}
 		delete(m.taskStreamSubscriptions, taskID)
 	}
-	for taskID := range m.taskStreamWanted {
-		m.taskStreamWanted[taskID] = false
-	}
+	m.taskStreamWanted = map[string]bool{}
 	m.taskStreamTokens = map[string]uint64{}
 	m.taskStreamCursors = map[string]string{}
 	m.taskStreamIDsByHandle = map[string]string{}

@@ -45,6 +45,12 @@ func (tm *taskRuntime) Wait(ctx context.Context, ref session.SessionRef, req tas
 	})
 }
 
+func (tm *taskRuntime) Read(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+		return target.Read(ctx, normalized)
+	})
+}
+
 func (tm *taskRuntime) Write(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
 	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
 		return target.Write(ctx, normalized)
@@ -183,6 +189,12 @@ func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {
 		if text, _ := snapshot.Result["result"].(string); text != "" {
 			taskMeta["output_cursor"] = int64(len([]byte(text)))
 		}
+	}
+	if cursor, ok := taskInt64Value(snapshot.Metadata["output_start_cursor"]); ok && cursor >= 0 {
+		taskMeta["output_start_cursor"] = cursor
+	}
+	if delta, ok := snapshot.Metadata["output_delta"].(string); ok && delta != "" {
+		taskMeta["output_delta"] = delta
 	}
 	if snapshot.Kind == taskapi.KindSubagent && snapshot.EventCursor >= 0 {
 		taskMeta["event_cursor"] = snapshot.EventCursor

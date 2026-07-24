@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestPublicClientLifecycleAndLoadE2E(t *testing.T) {
@@ -53,8 +54,8 @@ func TestPublicClientLifecycleAndLoadE2E(t *testing.T) {
 	if resp.StopReason == "" {
 		t.Fatal("Prompt() returned empty stop reason")
 	}
-	if got := collectedUpdateKinds(updates); !containsAll(got, client.UpdateUserMessage, client.UpdateAgentMessage) {
-		t.Fatalf("prompt update kinds = %v, want user+assistant", got)
+	if got := collectedUpdateKinds(updates); containsAll(got, client.UpdateUserMessage) || !containsAll(got, client.UpdateAgentMessage) {
+		t.Fatalf("prompt update kinds = %v, want assistant without echoing the submitted user message", got)
 	}
 	_ = acpClient.Close(ctx)
 
@@ -129,6 +130,13 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 					displayTerminalDone = true
 					mu.Unlock()
 				}
+				if output, ok := metautil.TerminalOutput(call.Meta); ok &&
+					output.TerminalID == "command-approval-1" &&
+					strings.Contains(output.Data, "child approval ok") {
+					mu.Lock()
+					displayTerminalOutput = true
+					mu.Unlock()
+				}
 				for _, content := range call.Content {
 					if content.Type == "terminal" && strings.TrimSpace(content.TerminalID) != "" {
 						if strings.TrimSpace(content.TerminalID) == "command-approval-1" {
@@ -136,11 +144,6 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 							displayTerminalOpen = true
 							terminalID = strings.TrimSpace(content.TerminalID)
 							mu.Unlock()
-							if text := clientTerminalContentText(content); strings.Contains(text, "child approval ok") {
-								mu.Lock()
-								displayTerminalOutput = true
-								mu.Unlock()
-							}
 							if call.Status != nil && *call.Status == "completed" {
 								mu.Lock()
 								displayTerminalFinal = true
@@ -209,29 +212,6 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 			t.Fatalf("display terminal open=%v output=%v final=%v done=%v, want all true", gotOpen, gotOutput, gotFinal, gotDone)
 		case <-time.After(10 * time.Millisecond):
 		}
-	}
-}
-
-func clientTerminalContentText(content client.ToolCallContent) string {
-	switch typed := content.Content.(type) {
-	case client.TextContent:
-		return typed.Text
-	case map[string]any:
-		if typ, _ := typed["type"].(string); typ != "text" {
-			return ""
-		}
-		text, _ := typed["text"].(string)
-		return text
-	default:
-		data, err := json.Marshal(typed)
-		if err != nil {
-			return ""
-		}
-		var decoded client.TextContent
-		if err := json.Unmarshal(data, &decoded); err != nil || decoded.Type != "text" {
-			return ""
-		}
-		return decoded.Text
 	}
 }
 

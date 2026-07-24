@@ -21,11 +21,11 @@ func TestCrossVersionReplayCorpusMatchesRuntimeProducedModelContext(t *testing.T
 	liveAssistantCall := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "call-1", Name: "probe", Args: `{"path":"README.md"}`}}, "")
 	liveEvents := []*session.Event{
 		{Schema: session.EventSchemaVersion, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Message: &liveUser},
-		modelToolCallEvents(liveAssistantCall, nil)[0],
+		modelToolCallEvents(liveAssistantCall, nil, "")[0],
 		toolResultEvent(model.ToolCall{ID: "call-1", Name: "probe", Args: `{"path":"README.md"}`}, tool.Result{
 			ID: "call-1", Name: "probe", Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"value":"ok"}`))},
 		}, nil),
-		modelResponseEvent(model.NewTextMessage(model.RoleAssistant, "done"), nil),
+		modelResponseEvent(model.NewTextMessage(model.RoleAssistant, "done"), nil, ""),
 	}
 	for _, event := range liveEvents {
 		event.Schema = session.EventSchemaVersion

@@ -80,13 +80,49 @@ func TestSpawnTaskResultsFromEnvelopeFiltersBatchItems(t *testing.T) {
 						"handle": "alpha", "parent_call": "spawn-alpha", "parent_tool": "Spawn",
 						"state": "completed", "target_kind": "subagent", "final_message": "duplicate",
 					},
+					map[string]any{
+						"handle": "delta", "parent_call": "spawn-alpha", "parent_tool": "Spawn",
+						"state": "completed", "target_kind": "subagent", "final_message": "reused call ID",
+					},
 				},
 			},
 		},
 	}
 	got := SpawnTaskResultsFromEnvelope(env)
-	if len(got) != 2 || got[0].ParentCallID != "spawn-alpha" || got[0].Status != schema.ToolStatusCompleted ||
-		got[1].ParentCallID != "spawn-gamma" || got[1].Status != schema.ToolStatusFailed {
-		t.Fatalf("SpawnTaskResultsFromEnvelope() = %#v, want completed alpha and failed gamma", got)
+	if len(got) != 3 || got[0].ParentCallID != "spawn-alpha" || got[0].Status != schema.ToolStatusCompleted ||
+		got[1].ParentCallID != "spawn-gamma" || got[1].Status != schema.ToolStatusFailed ||
+		got[2].ParentCallID != "spawn-alpha" || got[2].RawOutput["handle"] != "delta" {
+		t.Fatalf("SpawnTaskResultsFromEnvelope() = %#v, want alpha/gamma plus distinct handle reusing spawn-alpha", got)
+	}
+}
+
+func TestSpawnTaskResultsFromEnvelopeDoesNotDeduplicateMissingHandles(t *testing.T) {
+	completed := schema.ToolStatusCompleted
+	env := eventstream.Envelope{
+		Kind:  eventstream.KindSessionUpdate,
+		Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "wait-batch",
+			Status:        &completed,
+			RawInput:      map[string]any{"action": "wait"},
+			RawOutput: map[string]any{
+				"action": "wait",
+				"tasks": []any{
+					map[string]any{
+						"parent_call": "spawn-reused", "parent_tool": "Spawn",
+						"state": "completed", "target_kind": "subagent", "final_message": "first",
+					},
+					map[string]any{
+						"parent_call": "spawn-reused", "parent_tool": "Spawn",
+						"state": "failed", "target_kind": "subagent", "error": "second",
+					},
+				},
+			},
+		},
+	}
+
+	if got := SpawnTaskResultsFromEnvelope(env); len(got) != 2 {
+		t.Fatalf("SpawnTaskResultsFromEnvelope() = %#v, want both handle-free observations preserved for fail-closed resolution", got)
 	}
 }

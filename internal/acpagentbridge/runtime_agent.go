@@ -464,42 +464,99 @@ func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, 
 	if handle == nil {
 		return nil
 	}
-	defer handle.Close()
 	outboundFilter := newACPNarrativeFilter(suppressUserEcho)
+	taskMux := a.startACPTaskStreamMux(runCtx, ref.SessionID)
+	taskEvents := taskMux.Events()
+	defer a.detachACPTaskStreamMux(runCtx, taskMux, cb, ref.SessionID, outboundFilter)
+	eventCtx, cancelEvents := context.WithCancel(runCtx)
+	defer func() {
+		cancelEvents()
+		_ = handle.Close()
+	}()
+	runEvents := runtimeRunnerEvents(eventCtx, handle)
 	var observationGapSequence uint64
-	for event, seqErr := range handle.Events() {
-		if seqErr != nil {
-			if gap, ok := agent.AsEventStreamGap(seqErr); ok {
-				observationGapSequence++
-				notice := projector.ProjectRuntimeObservationGap(gap.Dropped)
-				notice.SessionID = strings.TrimSpace(ref.SessionID)
-				if err := emitACPNotice(
+	for runEvents != nil {
+		select {
+		case <-runCtx.Done():
+			return context.Canceled
+		case taskEnvelope, ok := <-taskEvents:
+			if !ok {
+				taskEvents = nil
+				continue
+			}
+			if err := a.emitControlEnvelope(runCtx, cb, ref.SessionID, nil, taskEnvelope, outboundFilter); err != nil {
+				return err
+			}
+		case item, ok := <-runEvents:
+			if !ok {
+				runEvents = nil
+				continue
+			}
+			if item.err != nil {
+				if gap, ok := agent.AsEventStreamGap(item.err); ok {
+					observationGapSequence++
+					notice := projector.ProjectRuntimeObservationGap(gap.Dropped)
+					notice.SessionID = strings.TrimSpace(ref.SessionID)
+					if err := emitACPNotice(
+						runCtx,
+						cb,
+						notice.SessionID,
+						notice,
+						fmt.Sprintf("caelis-runtime-observation-%d", observationGapSequence),
+						acpFilterSourceFromEnvelope(notice, ref.SessionID),
+						outboundFilter,
+					); err != nil {
+						return err
+					}
+					continue
+				}
+				if errors.Is(item.err, context.Canceled) {
+					return context.Canceled
+				}
+				return item.err
+			}
+			if item.event == nil {
+				continue
+			}
+			a.rememberTerminalRefFromEvent(item.event)
+			base := projector.EnvelopeBaseFromSessionEvent(ref, item.event, projector.SessionEventTransport{})
+			for _, envelope := range projector.ProjectSessionEventEnvelopeWithProjector(base, item.event, a.projector) {
+				if err := a.emitTaskAwareControlEnvelope(
 					runCtx,
 					cb,
-					notice.SessionID,
-					notice,
-					fmt.Sprintf("caelis-runtime-observation-%d", observationGapSequence),
-					acpFilterSourceFromEnvelope(notice, ref.SessionID),
+					ref.SessionID,
+					nil,
+					taskMux,
+					&taskEvents,
+					envelope,
 					outboundFilter,
 				); err != nil {
 					return err
 				}
-				continue
 			}
-			if errors.Is(seqErr, context.Canceled) {
-				return context.Canceled
-			}
-			return seqErr
-		}
-		if event == nil {
-			continue
-		}
-		a.rememberTerminalRefFromEvent(event)
-		if err := a.emitEvent(runCtx, cb, ref, event, outboundFilter); err != nil {
-			return err
 		}
 	}
-	return nil
+	return a.drainReadyACPTaskStream(runCtx, cb, ref.SessionID, &taskEvents, outboundFilter)
+}
+
+type runtimeRunnerEvent struct {
+	event *session.Event
+	err   error
+}
+
+func runtimeRunnerEvents(ctx context.Context, handle agent.Runner) <-chan runtimeRunnerEvent {
+	events := make(chan runtimeRunnerEvent)
+	go func() {
+		defer close(events)
+		for event, err := range handle.Events() {
+			select {
+			case <-ctx.Done():
+				return
+			case events <- runtimeRunnerEvent{event: event, err: err}:
+			}
+		}
+	}()
+	return events
 }
 
 func (a *RuntimeAgent) Cancel(_ context.Context, req acp.CancelNotification) error {
@@ -572,40 +629,6 @@ func (a *RuntimeAgent) Release(ctx context.Context, req acp.TerminalReleaseReque
 		return acp.ErrCapabilityUnsupported
 	}
 	return adapter.Release(ctx, req)
-}
-
-func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, ref session.SessionRef, event *session.Event, outboundFilter *acpNarrativeFilter) error {
-	if cb == nil || event == nil {
-		return nil
-	}
-	source := acpFilterSourceFromSessionEvent(ref, event)
-	if permission, ok, err := a.projector.ProjectPermissionRequest(event); err != nil {
-		return err
-	} else if ok && permission != nil {
-		if outboundFilter != nil {
-			outboundFilter.resetSource(source)
-		}
-		_, err := cb.RequestPermission(ctx, *permission)
-		return err
-	}
-	notifications, err := a.projector.ProjectNotifications(event)
-	if err != nil {
-		return err
-	}
-	for _, notification := range notifications {
-		filtered := notification
-		if outboundFilter != nil {
-			var ok bool
-			filtered, ok = outboundFilter.filterNotificationWithFinal(filtered, projector.SessionEventFinal(event), source)
-			if !ok {
-				continue
-			}
-		}
-		if err := cb.SessionUpdate(ctx, filtered); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (a *RuntimeAgent) rememberTerminalRefFromEvent(event *session.Event) {

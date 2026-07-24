@@ -590,6 +590,7 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 	t.result["mention"] = "@" + strings.TrimPrefix(t.handle, "@")
 	t.result["agent"] = t.agent
 	t.result["state"] = string(t.state)
+	t.notifyStreamChangeLocked()
 }
 
 func (t *subagentTask) isRunning() bool {
@@ -635,6 +636,7 @@ func (t *subagentTask) applyInterruptedLocked(reason string) {
 	t.metadata["prompt"] = t.prompt
 	t.metadata["session_id"] = t.anchor.SessionID
 	t.metadata["terminal_id"] = t.ref.TerminalID
+	t.notifyStreamChangeLocked()
 }
 
 func (t *subagentTask) snapshot() taskapi.Snapshot {

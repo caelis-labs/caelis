@@ -257,7 +257,7 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 	if b == nil {
 		return
 	}
-	b.onNarrativeBarrier()
+	b.sealNarrativeSegment()
 	events, _, collapse := applyToolEventUpdate(b.Events, toolEventUpdate{
 		CallID: callID,
 		Name:   name,
@@ -330,7 +330,7 @@ func (b *MainACPTurnBlock) UpdatePlan(entries []planEntryState) {
 	if b == nil {
 		return
 	}
-	b.onNarrativeBarrier()
+	b.sealNarrativeSegment()
 	if n := len(b.Events); n > 0 && b.Events[n-1].Kind == SEPlan {
 		b.Events[n-1].PlanEntries = entries
 		return
@@ -349,7 +349,7 @@ func (b *MainACPTurnBlock) SetStatus(state string, approvalTool string, approval
 	collapseTools := false
 	switch b.Status {
 	case "completed", "failed", "interrupted", "cancelled", "canceled", "terminated":
-		b.onNarrativeBarrier()
+		b.sealNarrativeSegment()
 		if b.EndedAt.IsZero() {
 			collapseTools = true
 			if !occurredAt.IsZero() {
@@ -367,7 +367,7 @@ func (b *MainACPTurnBlock) SetStatus(state string, approvalTool string, approval
 	if !strings.EqualFold(b.Status, "waiting_approval") {
 		return
 	}
-	b.onNarrativeBarrier()
+	b.sealNarrativeSegment()
 	if n := len(b.Events); n > 0 && b.Events[n-1].Kind == SEApproval {
 		b.Events[n-1].ApprovalTool = strings.TrimSpace(approvalTool)
 		b.Events[n-1].ApprovalCommand = strings.TrimSpace(approvalCommand)
@@ -384,7 +384,7 @@ func (b *MainACPTurnBlock) AddApprovalReviewEvent(callID, tool, command, status,
 	if b == nil {
 		return
 	}
-	b.onNarrativeBarrier()
+	b.sealNarrativeSegment()
 	b.Events, _ = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, risk, authorization, text)
 }
 
@@ -495,6 +495,7 @@ func hasDeferredLiveTailCompactStage(events []SubagentEvent, status string) bool
 type ParticipantTurnBlock struct {
 	id                    string
 	SessionID             string
+	ParticipantID         string
 	Actor                 string
 	Status                string
 	StartedAt             time.Time
@@ -543,7 +544,7 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 	if b == nil {
 		return
 	}
-	b.onNarrativeBarrier()
+	b.sealNarrativeSegment()
 	events, _, collapse := applyToolEventUpdate(b.Events, toolEventUpdate{
 		CallID: callID,
 		Name:   name,
@@ -563,7 +564,7 @@ func (b *ParticipantTurnBlock) UpdatePlan(entries []planEntryState) {
 	if b == nil {
 		return
 	}
-	b.onNarrativeBarrier()
+	b.sealNarrativeSegment()
 	if n := len(b.Events); n > 0 && b.Events[n-1].Kind == SEPlan {
 		b.Events[n-1].PlanEntries = entries
 		return
@@ -582,7 +583,7 @@ func (b *ParticipantTurnBlock) SetStatus(state string, approvalTool string, appr
 	collapseTools := false
 	switch b.Status {
 	case "completed", "failed", "interrupted", "cancelled", "canceled", "terminated":
-		b.onNarrativeBarrier()
+		b.sealNarrativeSegment()
 		if b.EndedAt.IsZero() {
 			collapseTools = true
 			if !occurredAt.IsZero() {
@@ -600,7 +601,7 @@ func (b *ParticipantTurnBlock) SetStatus(state string, approvalTool string, appr
 	if !strings.EqualFold(b.Status, "waiting_approval") {
 		return
 	}
-	b.onNarrativeBarrier()
+	b.sealNarrativeSegment()
 	if n := len(b.Events); n > 0 && b.Events[n-1].Kind == SEApproval {
 		b.Events[n-1].ApprovalTool = strings.TrimSpace(approvalTool)
 		b.Events[n-1].ApprovalCommand = strings.TrimSpace(approvalCommand)
@@ -617,7 +618,7 @@ func (b *ParticipantTurnBlock) AddApprovalReviewEvent(callID, tool, command, sta
 	if b == nil {
 		return
 	}
-	b.onNarrativeBarrier()
+	b.sealNarrativeSegment()
 	b.Events, _ = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, risk, authorization, text)
 }
 

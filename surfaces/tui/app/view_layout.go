@@ -645,7 +645,7 @@ type fixedRowLayout struct {
 func (m *Model) fixedRowLayout() fixedRowLayout {
 	y := m.viewport.Height()
 	layout := fixedRowLayout{
-		hintY: y + 1 + m.primaryDrawerOffsetHeight() + m.pendingQueueSectionHeight(),
+		hintY: y + 1 + m.primaryDrawerOffsetHeight(),
 	}
 	y += m.preComposerFixedHeight()
 	y += tuikit.ComposerPadTop
@@ -657,7 +657,7 @@ func (m *Model) fixedRowLayout() fixedRowLayout {
 }
 
 func (m *Model) preComposerFixedHeight() int {
-	return 3 + m.primaryDrawerOffsetHeight() + m.pendingQueueSectionHeight()
+	return 3 + m.primaryDrawerOffsetHeight()
 }
 
 func (m *Model) primaryDrawerOffsetHeight() int {
@@ -666,13 +666,6 @@ func (m *Model) primaryDrawerOffsetHeight() int {
 		return 0
 	}
 	return height + 1
-}
-
-func (m *Model) pendingQueueSectionHeight() int {
-	if m.pendingQueue.visibleCount() == 0 || m.width <= 0 {
-		return 0
-	}
-	return 3
 }
 
 func (m *Model) fixedRegionAt(y int) (fixedTextRegion, bool) {

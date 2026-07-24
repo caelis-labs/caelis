@@ -32,7 +32,11 @@ func UTF8OutputForwarder(fn func(OutputChunk)) func(cmdsession.AsyncOutputChunk)
 			delete(decoders, stream)
 		}
 		if text != "" {
-			fn(OutputChunk{Stream: stream, Text: text})
+			cursor := max(chunk.Cursor-int64(decoder.PendingBytes()), 0)
+			if chunk.Final {
+				cursor = chunk.Cursor
+			}
+			fn(OutputChunk{Stream: stream, Text: text, Cursor: cursor})
 		}
 	}
 }

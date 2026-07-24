@@ -63,9 +63,6 @@ func (m *Model) buildHintText() string {
 	if m.runningIndicatorActive() && m.activePrompt == nil {
 		return m.buildRunningHintText()
 	}
-	if text := m.pendingQueueHintText(); text != "" {
-		return text
-	}
 	if m.completionOverlayActive() {
 		return ""
 	}

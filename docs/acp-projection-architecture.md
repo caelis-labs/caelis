@@ -132,6 +132,16 @@ and stderr and replaces genuinely invalid byte sequences explicitly:
 - `_meta.terminal_exit`: local terminal termination state when known.
 - `_meta.caelis.runtime.stream.truncated=true` plus `truncated_before`: the
   requested byte cursor predates Runtime's bounded live buffer.
+- `_meta.caelis.runtime.stream.output_cursor`: the cumulative terminal byte
+  position immediately after this exact delta.
+- `_meta.caelis.runtime.task.output_start_cursor`, `output_cursor`, and
+  `output_delta`: the byte range and exact terminal text represented by one
+  durable Task observation. The model-facing `latest_output` may be compacted;
+  Surfaces reconcile only `output_delta` as terminal bytes. The delta belongs
+  to the observation event and is not copied into the durable Task record.
+
+These output positions are presentation reconciliation metadata, not public
+resume tokens. `Envelope.Cursor` remains the only protocol resume identity.
 
 The current empty `content[type="terminal"]` anchor is not an output transport;
 the Caelis metadata carries the bytes. This is a deliberate compatibility
@@ -232,6 +242,16 @@ child suffix through that boundary first, with a bounded fallback if observation
 is unavailable. This adds no second Task, persistence path, or `_meta`-derived
 correlation path.
 
+The Task control invocation and the Task it observes have independent
+lifecycles. A successful `wait`, `read`, `write`, or `cancel` invocation
+projects ACP tool status `completed` even when its canonical
+`rawOutput.state` says the target is still `running` or ended `failed`; only an
+invocation error projects tool status `failed`. Runtime Task state, owner
+repair, and Surface activity use the observed state. Tool-row lifecycle uses
+the invocation status. A Surface may omit a successful wait/read/cancel panel,
+but the event still seals the current narrative segment and therefore cannot
+erase or merge the reasoning and assistant messages on either side.
+
 `session/load` has no live child Task stream to replay. The ACP loader therefore
 uses the same validated Task-wait observation semantics to reconstruct the
 historical Spawn terminal view from durable canonical results. Each terminal
@@ -248,6 +268,32 @@ promotes `target_kind`, `parent_call`, and `parent_tool` to the typed Envelope
 relation. A batch result retains those canonical fields per item because one
 Envelope cannot identify multiple parents. Surfaces never recover this relation
 from `_meta` or a Surface-private replay path.
+
+`surfaces/transcript` carries `Envelope.EventID` and `ProjectionID` as
+transient reducer identity. Narrative reducers merge by ACP `MessageID`, then
+by source EventID; identity-free deltas may merge only inside the current open
+semantic segment. Every ordered, transcript-bearing semantic boundary seals
+that segment: tool, plan, notice, approval, lifecycle, and a Task control event
+whose physical panel is hidden. Telemetry-only usage and raw extensions do not
+split a narrative message. Source identity and segment state are presentation
+inputs only and are never persisted as a second transcript. A cumulative final
+may remove an already rendered prefix only when the same stable narrative
+identity spans the boundary and the complete sealed prefix matches exactly at
+byte offset zero. Identity-free or divergent finals remain intact; Surfaces do
+not search prior rendered text or infer a prefix from whitespace.
+
+The TUI normalizes each Task/Spawn Envelope once and reuses the resulting typed
+observation for transcript owner presentation and transient activity. Those
+consumers remain deliberately separate: successful Task read/wait controls have
+no physical row, their command observations reconcile into the existing
+RunCommand panel by cumulative output position, Spawn completion uses the
+projector-owned parent result, and the running hint remains non-durable overlay
+state. Exact Task-observation deltas and exact stream frames share cumulative
+byte positions, so either delivery order produces one terminal transcript.
+Legacy compact observations may seed an otherwise empty panel only as a
+replaceable presentation snapshot; they never advance an exact cursor. A handle
+and typed parent call may both identify an active owner; when both are present
+they must agree, otherwise owner completion fails closed.
 
 `internal/controlclient/turningress.Broker` carries only the main Runtime ACP
 producer into the Control Session Feed. It rejects stale scoped subagent
@@ -276,12 +322,15 @@ Task-aware Surfaces retry transient directory and delivery failures with
 bounded backoff while the panel remains expanded, resume from the last public
 cursor, and surface non-recoverable failures instead of leaving a silent panel.
 
-Each Control subscriber currently owns one SDK polling subscription for one
-Task. This keeps cancellation and slow-consumer failure local and is bounded by
-the number of explicitly expanded panels or connected Task SSE clients. If
-measured fan-out makes polling material, the optimization belongs in a shared
-per-Task Control watcher that preserves the same per-subscriber queues and
-cursors; Surfaces must not bypass Control or acquire Runtime streams directly.
+Each Control subscriber owns one SDK event-driven subscription for one Task.
+The Runtime blocks on the Task's level-triggered output/state notifier and
+resumes from the subscriber cursor; it does not poll or consume output.
+Cancellation and slow-consumer failure remain local and bounded by the number
+of explicitly expanded panels or connected Task SSE clients. If measured
+fan-out makes duplicate backend observation material, the optimization belongs
+in a shared per-Task Control watcher that preserves the same per-subscriber
+queues and cursors; Surfaces must not bypass Control or acquire Runtime streams
+directly.
 
 Standard ACP stdio has no scoped multi-stream primitive, so it never receives
 flattened child live tokens. The compatibility bridge may subscribe to a

@@ -262,6 +262,14 @@ func (b *bwrapRunner) ReadOutput(sessionID string, stdoutMarker, stderrMarker in
 	return manager.ReadOutput(sessionID, stdoutMarker, stderrMarker)
 }
 
+func (b *bwrapRunner) AwaitOutput(ctx context.Context, sessionID string, cursor sandbox.OutputCursor) (cmdsession.OutputObservation, error) {
+	manager, err := b.asyncSessionManager()
+	if err != nil {
+		return cmdsession.OutputObservation{}, err
+	}
+	return manager.AwaitOutput(ctx, sessionID, cursor)
+}
+
 func (b *bwrapRunner) GetSessionStatus(sessionID string) (cmdsession.SessionStatus, error) {
 	manager, err := b.asyncSessionManager()
 	if err != nil {

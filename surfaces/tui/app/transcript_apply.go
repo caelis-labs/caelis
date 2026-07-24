@@ -11,13 +11,19 @@ import (
 )
 
 func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, tea.Cmd) {
-	return m.applyTranscriptEvents(msg.Events)
+	model, transcriptCmd := m.applyTranscriptEvents(msg.Events)
+	if next, ok := model.(*Model); ok {
+		m = next
+	}
+	observedSpawnCmd := m.applyObservedSpawnResults(msg.ObservedSpawnResults)
+	return m, tea.Batch(transcriptCmd, observedSpawnCmd)
 }
 
 func (m *Model) applyTranscriptEvents(events []TranscriptEvent) (tea.Model, tea.Cmd) {
 	if len(events) == 0 {
 		return m, nil
 	}
+	m.observeRunningActivityTargets(events)
 	var cmds []tea.Cmd
 	for _, event := range events {
 		model, cmd := m.applyTranscriptEvent(event)
@@ -119,9 +125,10 @@ func (m *Model) applyTranscriptNarrative(event TranscriptEvent) (tea.Model, tea.
 	}
 
 	m.prepareForTranscriptScope(event.Scope)
+	source := narrativeSourceIdentityFromTranscriptEvent(event)
 	switch event.Scope {
 	case ACPProjectionParticipant:
-		return m.handleParticipantTurnStream(transcriptParticipantTurnKey(event), transcriptNarrativeStreamKind(event.NarrativeKind), participantTranscriptActor(event), event.Text, event.Final, event.OccurredAt)
+		return m.handleParticipantTurnStreamEvent(transcriptParticipantTurnKey(event), transcriptNarrativeStreamKind(event.NarrativeKind), participantTranscriptActor(event), event.Text, event.Final, source, event.OccurredAt)
 	case ACPProjectionSubagent:
 		return m.applyTranscriptSubagentNarrative(event)
 	default:
@@ -159,23 +166,24 @@ func (m *Model) applyTranscriptMainNarrative(event TranscriptEvent) (tea.Model, 
 		block.StartedAt = event.OccurredAt
 	}
 	text := tuikit.SanitizeLogText(event.Text)
+	source := narrativeSourceIdentityFromTranscriptEvent(event)
 	if event.NarrativeKind == TranscriptNarrativeReasoning {
 		if event.Final {
-			block.ReplaceFinalStreamChunk(SEReasoning, text, event.OccurredAt)
+			block.ReplaceFinalStreamEvent(SEReasoning, text, source, event.OccurredAt)
 		} else if text != "" {
-			block.AppendStreamChunk(SEReasoning, text, event.OccurredAt)
+			block.AppendStreamEvent(SEReasoning, text, source, event.OccurredAt)
 		}
 	} else {
 		if event.Final {
 			closeLatestReasoningTiming(block.Events, event.OccurredAt)
 		}
 		if event.Final {
-			block.ReplaceFinalStreamChunk(SEAssistant, text, event.OccurredAt)
+			block.ReplaceFinalStreamEvent(SEAssistant, text, source, event.OccurredAt)
 			if !m.turnRunning() {
 				m.closeMainTimelineTailWithState(block, event.OccurredAt, "completed")
 			}
 		} else if text != "" {
-			block.AppendStreamChunk(SEAssistant, text, event.OccurredAt)
+			block.AppendStreamEvent(SEAssistant, text, source, event.OccurredAt)
 		}
 	}
 	m.markViewportBlockDirty(block.BlockID())
@@ -418,12 +426,16 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 
 func (m *Model) applyTranscriptSubagentNarrative(event TranscriptEvent) (tea.Model, tea.Cmd) {
 	if !eventTargetsParentToolPanel(event) {
-		return m.handleParticipantTurnStream(event.ScopeID, transcriptNarrativeStreamKind(event.NarrativeKind), subagentTranscriptActor(event), event.Text, event.Final, event.OccurredAt)
+		return m.handleParticipantTurnStreamEvent(event.ScopeID, transcriptNarrativeStreamKind(event.NarrativeKind), subagentTranscriptActor(event), event.Text, event.Final, narrativeSourceIdentityFromTranscriptEvent(event), event.OccurredAt)
 	}
 	if event.NarrativeKind != TranscriptNarrativeAssistant {
 		return m, nil
 	}
 	return m.applyAnchoredSubagentNarrativeToTool(event)
+}
+
+func narrativeSourceIdentityFromTranscriptEvent(event TranscriptEvent) narrativeSourceIdentity {
+	return newNarrativeSourceIdentity(event.MessageID, event.SourceEventID, event.SourceProjectionID)
 }
 
 func eventTargetsParentToolPanel(event TranscriptEvent) bool {
@@ -554,16 +566,20 @@ func transcriptParticipantTurnKey(event TranscriptEvent) string {
 
 func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 	return ToolUpdateMeta{
-		TaskHandle:      event.ToolTaskHandle,
-		TaskAction:      event.ToolTaskAction,
-		TaskInput:       event.ToolTaskInput,
-		TaskTargetKind:  event.ToolTaskTargetKind,
-		ToolKind:        event.ToolKind,
-		FullArgs:        event.ToolFullArgs,
-		ToolStatus:      event.ToolStatus,
-		Terminal:        event.ToolTerminal,
-		OutputSynthetic: event.ToolOutputSynthetic,
-		OutputTerminal:  event.ToolOutputTerminal,
-		OutputGapBefore: event.ToolOutputGapBefore,
+		TaskHandle:             event.ToolTaskHandle,
+		TaskAction:             event.ToolTaskAction,
+		TaskInput:              event.ToolTaskInput,
+		TaskTargetKind:         event.ToolTaskTargetKind,
+		ToolKind:               event.ToolKind,
+		FullArgs:               event.ToolFullArgs,
+		ToolStatus:             event.ToolStatus,
+		Terminal:               event.ToolTerminal,
+		OutputSynthetic:        event.ToolOutputSynthetic,
+		OutputTerminal:         event.ToolOutputTerminal,
+		OutputGapBefore:        event.ToolOutputGapBefore,
+		OutputCursor:           event.ToolOutputCursor,
+		OutputCursorKnown:      event.ToolOutputCursorKnown,
+		OutputStartCursor:      event.ToolOutputStartCursor,
+		OutputStartCursorKnown: event.ToolOutputStartCursorKnown,
 	}
 }

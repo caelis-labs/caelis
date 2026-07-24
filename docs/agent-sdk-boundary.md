@@ -227,12 +227,12 @@ transient child stream output.
 
 Every Task has two deliberately non-interchangeable identities. `Handle` is
 unique for the lifetime of the owning Session and is the only identity exposed
-in RunCommand/Spawn results and accepted by the model-facing Task wait, write,
-and cancel tool. `TaskID` is opaque infrastructure identity used by Runtime,
-Control, persistence, and observation streams. The existing Task record stores
-the handle; there is no second lifecycle or mapping store. Internal Task APIs
-never guess whether one string is a handle or a TaskID: the model boundary
-resolves the handle once, then passes the TaskID downward.
+in RunCommand/Spawn results and accepted by the model-facing Task wait, read,
+write, and cancel tool. `TaskID` is opaque infrastructure identity used by
+Runtime, Control, persistence, and observation streams. The existing Task
+record stores the handle; there is no second lifecycle or mapping store.
+Internal Task APIs never guess whether one string is a handle or a TaskID: the
+model boundary resolves the handle once, then passes the TaskID downward.
 
 `agent-sdk/task/stream` is the reusable process-local observation contract for
 an existing Task. Its infrastructure address is `(SessionID, TaskID)`;
@@ -245,6 +245,56 @@ frames or 4 MiB. Reads older than either retained lower bound report a typed
 gap. `Running=false`, EOF, or an unavailable source is never completion
 evidence; only `completed`, `failed`, `cancelled`, `interrupted`, `terminated`,
 or `unknown_outcome` is terminal.
+
+Sandbox Session output observation is level-triggered and non-consuming.
+`AwaitOutput` returns when stdout/stderr advances beyond the requested
+`OutputCursor` or the Session becomes terminal; bytes are retrieved only with
+`ReadOutput`. Cursor offsets use the exact byte domain returned by that
+backend's `ReadOutput`, including Windows console decoding and normalization.
+Backends publish progress only after the corresponding output callback returns,
+and publish terminal status only after readers drain and decoder tails flush.
+Cancelling one observer never terminates the process. A cursor ahead of retained
+output fails with the typed cursor-ahead error instead of silently rewinding.
+Each async `OutputChunk` carries the cumulative per-stream backend cursor after
+the raw bytes represented by its text. Runtime commits that cursor, the
+interleaved text, and the unified presentation cursor under one lock; this
+callback is the sole live-ingest authority. `ReadOutput` is a recovery path for
+a rehydrated Task with no attached callback, not a concurrent second writer;
+callback-backed completion does not probe that recovery path again. Recovery
+owns independent stdout/stderr UTF-8 streaming decoders so a rune split across
+two reads is committed only after it is complete. A bounded backend exposes
+retention loss through `OutputReadWindow`; Runtime then publishes an explicit
+stream gap and permanently disqualifies that recovery sequence from becoming a
+coherent durable checkpoint. Runtime keeps the active backend read cursors
+separate from the last durable per-stream and presentation/model checkpoint.
+An incomplete rune therefore advances only the active read cursor; the durable
+marker stops immediately before the pending prefix. A gap checkpoint remains
+explicitly non-coherent but persists its epoch and high presentation baseline,
+so restart neither replays the retained tail nor moves a connected Surface
+backwards. The durable model-resume checkpoint advances only when a Task
+observation has moved the model cursor to the same atomic presentation boundary;
+output ingested before that observation therefore remains recoverable after a
+restart. Terminal Task state separately persists the absolute stream replay
+cursor. Rehydration exposes unavailable live bytes as an explicit truncated
+range; it never maps canonical Result text onto an old live cursor interval,
+because grouped or compacted final text is not necessarily byte-identical to the
+interleaved stream. Canonical Result remains `FinalText`, and its promotion may
+extend but never reduce the replay cursor. The independent stream event baseline
+is also durable for running and terminal Tasks. Rehydration continues numbering
+after that baseline. If a client presents a newer process-local event cursor,
+Runtime does not mutate shared producer state: the absolute byte cursor decides
+which text is new, while that read projects a non-regressing event position. An
+event cursor already beyond a reconstructed terminal close is treated as having
+acknowledged the event plane; durable terminal state and subscription EOF end
+the stream without inventing another close event. The final stdout/stderr result
+remains the model/result view and is never mislabelled as an exact interleaved
+delta or allowed to move the presentation cursor backwards.
+
+Task observation builds on that contract without a second log file or lifecycle
+store. `read` applies only to RunCommand and waits for new output without
+requiring process exit. RunCommand `write` sends stdin and briefly observes the
+resulting output; `wait` remains the terminal-state operation. These observation
+budgets are Runtime policy and are not model-controlled arguments.
 
 These buffers are not persistence. Durable Task state and canonical result stay
 in the existing Task store, while the Session remains the only product
@@ -420,6 +470,13 @@ checkpoint failure never delay normal stream completion, enter the Turn event
 stream, or cancel the Turn. Normal completion, explicit Close, or public Cancel
 invalidates every late watchdog decision. Public Cancel and a concurrently
 validated loop Interrupt still share one underlying cancellation effect.
+
+Task control calls have a separate lifecycle from their target. A successful
+`wait`, `read`, `write`, or `cancel` call is a completed tool invocation; the
+observed Task lifecycle remains canonical in its raw result `state`, including
+`running`, `failed`, and `cancelled`. Invocation failure alone marks the Task
+tool result failed. Consumers must not infer target completion from the Task
+tool-call status.
 
 Hosts may implement OpenTelemetry as an interceptor or sink adapter. The SDK
 does not depend on a telemetry implementation.

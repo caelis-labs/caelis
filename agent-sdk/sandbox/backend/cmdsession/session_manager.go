@@ -163,6 +163,15 @@ func (sm *SessionManager) ReadOutput(id string, stdoutMarker, stderrMarker int64
 	return stdout, stderr, newStdoutMarker, newStderrMarker, nil
 }
 
+// AwaitOutput waits for non-consuming output progress or session completion.
+func (sm *SessionManager) AwaitOutput(ctx context.Context, id string, cursor sandbox.OutputCursor) (OutputObservation, error) {
+	session, err := sm.GetSession(id)
+	if err != nil {
+		return OutputObservation{}, err
+	}
+	return session.AwaitOutput(ctx, cursor)
+}
+
 // TerminateSession forcefully terminates a session.
 func (sm *SessionManager) TerminateSession(id string) error {
 	session, err := sm.GetSession(id)

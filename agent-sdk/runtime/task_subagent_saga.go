@@ -625,6 +625,7 @@ func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task
 				task.result = map[string]any{}
 			}
 			task.result["state"] = string(taskapi.StateUnknownOutcome)
+			task.notifyStreamChangeLocked()
 			task.mu.Unlock()
 			persistErr := tm.markSubagentSpawnPhase(context.WithoutCancel(ctx), task, spawnPhaseUnknownOutcome, errors.Join(cause, cancelErr).Error())
 			return errors.Join(cause, cancelErr, persistErr)
@@ -636,6 +637,7 @@ func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task
 			task.result = map[string]any{}
 		}
 		task.result["state"] = string(taskapi.StateCancelled)
+		task.notifyStreamChangeLocked()
 		task.mu.Unlock()
 		if err := tm.markSubagentSpawnPhase(context.WithoutCancel(ctx), task, spawnPhaseChildCancelled, cause.Error()); err != nil {
 			return errors.Join(cause, err)

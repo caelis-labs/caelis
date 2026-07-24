@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/protocol/acp"
@@ -45,8 +46,12 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 				"handle": "beta", "parent_call": "spawn-beta", "parent_tool": "Spawn",
 				"state": "running", "target_kind": "subagent",
 			}),
-		loadGoldenToolEvent(session.EventTypeToolCall, "wait-one", "Task", "pending",
-			map[string]any{"action": "wait", "handle": "alpha,beta"}, nil),
+		loadGoldenNarrativeToolCall(
+			"wait-one", "Task", `{"action":"wait","handle":"alpha,beta"}`,
+			"The sub-agents are running. I will wait for both results.",
+			"Waiting for alpha and beta.",
+			map[string]any{"action": "wait", "handle": "alpha,beta"},
+		),
 		loadGoldenToolEvent(session.EventTypeToolResult, "wait-one", "Task", "completed",
 			map[string]any{"action": "wait", "handle": "alpha,beta"}, map[string]any{
 				"action": "wait",
@@ -65,8 +70,12 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 					},
 				},
 			}),
-		loadGoldenToolEvent(session.EventTypeToolCall, "wait-two", "Task", "pending",
-			map[string]any{"action": "wait", "handle": "beta"}, nil),
+		loadGoldenNarrativeToolCall(
+			"wait-two", "Task", `{"action":"wait","handle":"beta"}`,
+			"Beta is still running after the first wait. I will wait again.",
+			"Continuing to wait for beta.",
+			map[string]any{"action": "wait", "handle": "beta"},
+		),
 		loadGoldenToolEvent(session.EventTypeToolResult, "wait-two", "Task", "completed",
 			map[string]any{"action": "wait", "handle": "beta"}, map[string]any{
 				"action": "wait",
@@ -81,6 +90,14 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 					},
 				},
 			}),
+		loadGoldenNarrativeToolCall(
+			"read-report", "Read", `{"path":"report.md"}`,
+			"Both sub-agents completed. I will verify the generated report.",
+			"Reading the report now.",
+			map[string]any{"path": "report.md"},
+		),
+		loadGoldenToolEvent(session.EventTypeToolResult, "read-report", "Read", "completed",
+			map[string]any{"path": "report.md"}, map[string]any{"result": "verified"}),
 	}
 	for _, event := range events {
 		if _, err := sessions.AppendEvent(ctx, session.AppendEventRequest{
@@ -127,6 +144,23 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 			t.Fatalf("Spawn %s completed updates = %d, want exactly one", toolCallID, seenFinal[toolCallID])
 		}
 	}
+	assertLoadGoldenToolNarrativeSiblings(t, callbacks.notifications, []loadGoldenNarrativeExpectation{
+		{
+			ToolCallID: "wait-one",
+			Reasoning:  "The sub-agents are running. I will wait for both results.",
+			Assistant:  "Waiting for alpha and beta.",
+		},
+		{
+			ToolCallID: "wait-two",
+			Reasoning:  "Beta is still running after the first wait. I will wait again.",
+			Assistant:  "Continuing to wait for beta.",
+		},
+		{
+			ToolCallID: "read-report",
+			Reasoning:  "Both sub-agents completed. I will verify the generated report.",
+			Assistant:  "Reading the report now.",
+		},
+	})
 
 	got, err := json.MarshalIndent(callbacks.notifications, "", "  ")
 	if err != nil {
@@ -140,6 +174,70 @@ func TestRuntimeAgentACPSessionLoadSpawnGolden(t *testing.T) {
 	if string(got) != string(want) {
 		t.Fatalf("ACP session/load Spawn projection changed\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
+}
+
+type loadGoldenNarrativeExpectation struct {
+	ToolCallID string
+	Reasoning  string
+	Assistant  string
+}
+
+func assertLoadGoldenToolNarrativeSiblings(
+	t *testing.T,
+	notifications []acp.SessionNotification,
+	expectations []loadGoldenNarrativeExpectation,
+) {
+	t.Helper()
+
+	for _, expectation := range expectations {
+		callIndexes := make([]int, 0, 1)
+		for index, notification := range notifications {
+			call, ok := notification.Update.(acp.ToolCall)
+			if ok && call.ToolCallID == expectation.ToolCallID {
+				callIndexes = append(callIndexes, index)
+			}
+		}
+		if len(callIndexes) != 1 {
+			t.Fatalf("tool_call %s indexes = %v, want exactly one", expectation.ToolCallID, callIndexes)
+		}
+		callIndex := callIndexes[0]
+		if callIndex < 2 {
+			t.Fatalf("tool_call %s index = %d, want reasoning and assistant siblings first", expectation.ToolCallID, callIndex)
+		}
+		assertLoadGoldenContentChunk(t, notifications[callIndex-2], acp.UpdateAgentThought, expectation.Reasoning)
+		assertLoadGoldenContentChunk(t, notifications[callIndex-1], acp.UpdateAgentMessage, expectation.Assistant)
+	}
+}
+
+func assertLoadGoldenContentChunk(t *testing.T, notification acp.SessionNotification, kind string, text string) {
+	t.Helper()
+
+	chunk, ok := notification.Update.(acp.ContentChunk)
+	if !ok || chunk.SessionUpdate != kind {
+		t.Fatalf("notification update = %#v, want %s content chunk", notification.Update, kind)
+	}
+	content, ok := chunk.Content.(acp.TextContent)
+	if !ok || content.Text != text {
+		t.Fatalf("%s content = %#v, want exact text %q", kind, chunk.Content, text)
+	}
+}
+
+func loadGoldenNarrativeToolCall(
+	toolCallID string,
+	toolName string,
+	toolArgs string,
+	reasoning string,
+	assistant string,
+	input map[string]any,
+) *session.Event {
+	message := model.MessageFromAssistantParts(assistant, reasoning, []model.ToolCall{{
+		ID:   toolCallID,
+		Name: toolName,
+		Args: toolArgs,
+	}})
+	event := loadGoldenToolEvent(session.EventTypeToolCall, toolCallID, toolName, "pending", input, nil)
+	event.Message = &message
+	return event
 }
 
 func loadGoldenToolEvent(

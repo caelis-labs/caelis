@@ -18,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlassembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -83,17 +84,40 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConnectACP(opus) error = %v", err)
 	}
-	if len(connected.Agents) != 1 || connected.Agents[0].ID != "caelis-acp-e2e-agent" || connected.Agents[0].Name != "caelis-acp-e2e-agent(opus)" {
-		t.Fatalf("ConnectACP(opus) agents = %#v, want provider-scoped Agent name with model detail", connected.Agents)
+	if len(connected.Profiles) != 1 {
+		t.Fatalf("ConnectACP(opus) profiles = %#v, want one ModelProfile", connected.Profiles)
 	}
-	agentID := connected.Agents[0].ID
+	connectedProfile := connected.Profiles[0]
+	if connectedProfile.Backend.ACP == nil ||
+		connectedProfile.Backend.ACP.AgentID != "caelis-acp-e2e-agent" ||
+		connectedProfile.Backend.ACP.RemoteModelID != "opus" {
+		t.Fatalf("ConnectACP(opus) profile backend = %#v, want caelis-acp-e2e-agent/opus", connectedProfile)
+	}
+	if len(connectedProfile.Backend.ACP.SessionDefaults) != 0 ||
+		connectedProfile.Effort.ACPConfigID != "effort" ||
+		connectedProfile.Effort.DefaultEffort != "max" {
+		t.Fatalf("ConnectACP(opus) profile defaults = %#v, want no non-effort defaults and effort=max", connectedProfile)
+	}
+	if wire, ok := connectedProfile.WireEffort("max"); !ok || wire != "max" {
+		t.Fatalf("ConnectACP(opus) WireEffort(max) = %q, %v", wire, ok)
+	}
+	agentID := connectedProfile.Backend.ACP.AgentID
 	persisted, err := gatewayapp.LoadAppConfig(root)
 	if err != nil {
 		t.Fatalf("LoadAppConfig(after connect) error = %v", err)
 	}
-	opus, ok := controlagents.LookupAgent(persisted.AgentRoster, agentID)
-	if !ok || opus.Defaults.ModelID != "opus" || opus.Defaults.ConfigValues["effort"] != "max" {
-		t.Fatalf("persisted opus Agent = %#v, found=%v", opus, ok)
+	persistedAgent, ok := controlagents.LookupAgent(persisted.ExternalAgents, agentID)
+	if !ok || persistedAgent.ConnectionID != connected.Connection.ID {
+		t.Fatalf("persisted external Agent = %#v, found=%v; want connection %q", persistedAgent, ok, connected.Connection.ID)
+	}
+	opus, ok := modelprofile.Lookup(persisted.ModelProfiles, connectedProfile.ID)
+	if !ok || opus.Backend.ACP == nil ||
+		opus.Backend.ACP.AgentID != agentID ||
+		opus.Backend.ACP.RemoteModelID != "opus" ||
+		len(opus.Backend.ACP.SessionDefaults) != 0 ||
+		opus.Effort.ACPConfigID != "effort" ||
+		opus.Effort.DefaultEffort != "max" {
+		t.Fatalf("persisted opus ModelProfile = %#v, found=%v", opus, ok)
 	}
 	discoverySessions := childSessionIDs(t, ctx, childRoot, workdir)
 	if err := stack.Close(); err != nil {
@@ -106,8 +130,9 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	t.Cleanup(func() { _ = stack.Close() })
 
 	if _, err := stack.AgentBindings().BindAgentBinding(ctx, agentbinding.Binding{
-		Handle:  agentbinding.HandleOrbit,
-		AgentID: agentID,
+		Handle:    agentbinding.HandleOrbit,
+		ProfileID: connectedProfile.ID,
+		Effort:    "max",
 	}); err != nil {
 		t.Fatalf("BindAgentBinding(orbit) error = %v", err)
 	}
@@ -174,10 +199,15 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	if state.Controller.Kind != session.ControllerKindACP || !strings.EqualFold(state.Controller.AgentName, agentID) || strings.TrimSpace(state.Controller.EpochID) == "" {
 		t.Fatalf("controller after HandoffAgent(%s) = %+v", agentID, state.Controller)
 	}
-	controllerSessionID := assertOneNewChildSession(t, ctx, childRoot, workdir, afterDirectSessions, map[string]string{
-		"model":  "opus",
-		"effort": "max",
-	}, nil)
+	controllerModel, err := driver.UseModel(ctx, "opus", "max")
+	if err != nil {
+		t.Fatalf("UseModel(opus, max) after HandoffAgent(%s) error = %v", agentID, err)
+	}
+	if controllerModel.ModelStatus.ReasoningEffort != "max" ||
+		!strings.Contains(strings.ToLower(controllerModel.ModelStatus.Display), "opus") {
+		t.Fatalf("ACP controller model status = %#v, want opus/max", controllerModel.ModelStatus)
+	}
+	controllerSessionID := assertOneNewChildSession(t, ctx, childRoot, workdir, afterDirectSessions, nil, nil)
 	afterHandoffSessions := childSessionIDs(t, ctx, childRoot, workdir)
 
 	result, err := headless.RunOnce(ctx, routed, control.Submission{Text: "who owns this turn?"}, headless.Options{})
@@ -187,6 +217,10 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	if got := strings.TrimSpace(result.Output); got != "opus owns this turn" {
 		t.Fatalf("ACP controller output = %q, want %q", got, "opus owns this turn")
 	}
+	assertChildSessionDefaults(t, ctx, childRoot, workdir, controllerSessionID, map[string]string{
+		"model":  "opus",
+		"effort": "max",
+	})
 	assertChildSessionHasUserPrompt(t, ctx, childRoot, workdir, controllerSessionID, "who owns this turn?")
 	assertChildSessionIDsEqual(t, afterHandoffSessions, childSessionIDs(t, ctx, childRoot, workdir))
 
@@ -243,7 +277,9 @@ func runScopedAgentOnce(ctx context.Context, starter headless.Starter, submissio
 		if envelope.Kind == eventstream.KindError && strings.TrimSpace(envelope.Error) != "" {
 			return output, fmt.Errorf("Agent run: %s", strings.TrimSpace(envelope.Error))
 		}
-		if envelope.Kind != eventstream.KindSessionUpdate || envelope.Update == nil {
+		if envelope.Kind != eventstream.KindSessionUpdate ||
+			envelope.Update == nil ||
+			envelope.EventID == "" {
 			continue
 		}
 		update := assistant.ObserveUpdate(envelope.Update)
@@ -342,16 +378,7 @@ func assertOneNewChildSession(
 		t.Fatalf("new child ACP sessions = %#v, want exactly one beyond %#v", newSessions, baseline)
 	}
 	created := newSessions[0]
-	state, err := store.SnapshotState(ctx, created.SessionRef)
-	if err != nil {
-		t.Fatalf("SnapshotState(child ACP %s) error = %v", created.SessionID, err)
-	}
-	values := controlassembly.CurrentConfigValues(state)
-	for id, value := range wantDefaults {
-		if values[id] != value {
-			t.Fatalf("child ACP %s defaults = %#v, want %s=%s", created.SessionID, values, id, value)
-		}
-	}
+	assertChildSessionDefaults(t, ctx, root, workspace, created.SessionID, wantDefaults)
 	if wantUserPrompts != nil {
 		loaded, loadErr := store.LoadSession(ctx, session.LoadSessionRequest{SessionRef: created.SessionRef})
 		if loadErr != nil {
@@ -363,6 +390,33 @@ func assertOneNewChildSession(
 		}
 	}
 	return created.SessionID
+}
+
+func assertChildSessionDefaults(
+	t *testing.T,
+	ctx context.Context,
+	root string,
+	workspace string,
+	sessionID string,
+	wantDefaults map[string]string,
+) {
+	t.Helper()
+	if len(wantDefaults) == 0 {
+		return
+	}
+	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	state, err := store.SnapshotState(ctx, session.SessionRef{
+		AppName: "caelis", UserID: "acp", WorkspaceKey: workspace, SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatalf("SnapshotState(child ACP %s) error = %v", sessionID, err)
+	}
+	values := controlassembly.CurrentConfigValues(state)
+	for id, value := range wantDefaults {
+		if values[id] != value {
+			t.Fatalf("child ACP %s defaults = %#v, want %s=%s", sessionID, values, id, value)
+		}
+	}
 }
 
 func assertChildSessionHasUserPrompt(t *testing.T, ctx context.Context, root string, workspace string, sessionID string, want string) {

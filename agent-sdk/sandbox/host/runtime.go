@@ -17,6 +17,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/consoleoutput"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/outputwait"
 )
 
 // Config defines one host-backed sandbox runtime.
@@ -124,10 +125,10 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 	}
 	if req.OnOutput != nil {
 		if result.Stdout != "" {
-			req.OnOutput(sandbox.OutputChunk{Stream: "stdout", Text: result.Stdout})
+			req.OnOutput(sandbox.OutputChunk{Stream: "stdout", Text: result.Stdout, Cursor: int64(len([]byte(result.Stdout)))})
 		}
 		if result.Stderr != "" {
-			req.OnOutput(sandbox.OutputChunk{Stream: "stderr", Text: result.Stderr})
+			req.OnOutput(sandbox.OutputChunk{Stream: "stderr", Text: result.Stderr, Cursor: int64(len([]byte(result.Stderr)))})
 		}
 	}
 	return result, err
@@ -213,6 +214,7 @@ func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 		updatedAt:     now,
 		done:          make(chan struct{}),
 		onOutput:      req.OnOutput,
+		outputSignal:  make(chan struct{}),
 	}
 	r.mu.Lock()
 	r.sessions[sessionID] = session
@@ -284,6 +286,9 @@ type hostSession struct {
 	stderrTotal   int64
 	stdoutText    hostOutputDecoder
 	stderrText    hostOutputDecoder
+	outputSignal  chan struct{}
+	stdoutCursor  int64
+	stderrCursor  int64
 	running       bool
 	supportsInput bool
 	exitCode      int
@@ -332,10 +337,36 @@ func (s *hostSession) ReadOutput(_ context.Context, stdoutMarker, stderrMarker i
 	return stdout, stderr, newStdoutMarker, newStderrMarker, nil
 }
 
+func (s *hostSession) AwaitOutput(ctx context.Context, cursor sandbox.OutputCursor) (sandbox.OutputObservation, error) {
+	observation, err := outputwait.Await(ctx, cursor, func() outputwait.Snapshot[sandbox.SessionStatus] {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		status := s.statusLocked()
+		return outputwait.Snapshot[sandbox.SessionStatus]{
+			Signal:    s.outputSignal,
+			Published: sandbox.OutputCursor{Stdout: s.stdoutCursor, Stderr: s.stderrCursor},
+			Available: sandbox.OutputCursor{Stdout: s.stdoutTotal, Stderr: s.stderrTotal},
+			Terminal:  !status.Running,
+			Status:    status,
+		}
+	})
+	if err != nil {
+		return sandbox.OutputObservation{}, err
+	}
+	return sandbox.CloneOutputObservation(sandbox.OutputObservation{
+		Cursor: observation.Cursor,
+		Status: observation.Status,
+	}), nil
+}
+
 func (s *hostSession) Status(_ context.Context) (sandbox.SessionStatus, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return sandbox.CloneSessionStatus(sandbox.SessionStatus{
+	return sandbox.CloneSessionStatus(s.statusLocked()), nil
+}
+
+func (s *hostSession) statusLocked() sandbox.SessionStatus {
+	return sandbox.SessionStatus{
 		SessionRef:    s.ref,
 		Terminal:      s.terminal,
 		Running:       s.running,
@@ -343,7 +374,7 @@ func (s *hostSession) Status(_ context.Context) (sandbox.SessionStatus, error) {
 		ExitCode:      s.exitCode,
 		StartedAt:     s.startedAt,
 		UpdatedAt:     s.updatedAt,
-	}), nil
+	}
 }
 
 func (s *hostSession) Wait(ctx context.Context, timeout time.Duration) (sandbox.SessionStatus, error) {
@@ -413,10 +444,17 @@ func (s *hostSession) readStream(reader io.Reader, stream string) {
 				s.stdoutTotal += int64(len(decoded.Stored))
 			}
 			s.updatedAt = time.Now()
+			cursor := s.stdoutTotal
+			committedCursor := s.stdoutText.committedCursor(s.stdoutTotal)
+			if stream == "stderr" {
+				cursor = s.stderrTotal
+				committedCursor = s.stderrText.committedCursor(s.stderrTotal)
+			}
 			s.mu.Unlock()
 			if s.onOutput != nil && len(decoded.Emit) > 0 {
-				s.onOutput(sandbox.OutputChunk{Stream: stream, Text: string(decoded.Emit)})
+				s.onOutput(sandbox.OutputChunk{Stream: stream, Text: string(decoded.Emit), Cursor: committedCursor})
 			}
+			s.publishOutput(stream, cursor)
 		}
 		if err != nil {
 			return
@@ -440,6 +478,8 @@ func (s *hostSession) waitForExit() {
 		s.stderr = consoleoutput.AppendCappedBytes(s.stderr, stderrTail.Stored, hostOutputCap)
 		s.stderrTotal += int64(len(stderrTail.Stored))
 	}
+	stdoutCursor := s.stdoutTotal
+	stderrCursor := s.stderrTotal
 	if s.stdin != nil {
 		_ = s.stdin.Close()
 		s.stdin = nil
@@ -447,19 +487,50 @@ func (s *hostSession) waitForExit() {
 	if s.cmd.ProcessState != nil {
 		s.exitCode = s.cmd.ProcessState.ExitCode()
 	}
-	s.running = false
 	s.updatedAt = time.Now()
 	s.waitErr = err
-	close(s.done)
 	s.mu.Unlock()
 	if s.onOutput != nil {
 		if len(stdoutTail.Emit) > 0 {
-			s.onOutput(sandbox.OutputChunk{Stream: "stdout", Text: string(stdoutTail.Emit)})
+			s.onOutput(sandbox.OutputChunk{Stream: "stdout", Text: string(stdoutTail.Emit), Cursor: stdoutCursor})
 		}
 		if len(stderrTail.Emit) > 0 {
-			s.onOutput(sandbox.OutputChunk{Stream: "stderr", Text: string(stderrTail.Emit)})
+			s.onOutput(sandbox.OutputChunk{Stream: "stderr", Text: string(stderrTail.Emit), Cursor: stderrCursor})
 		}
 	}
+	s.mu.Lock()
+	s.stdoutCursor = stdoutCursor
+	s.stderrCursor = stderrCursor
+	s.running = false
+	s.updatedAt = time.Now()
+	close(s.done)
+	s.notifyOutputLocked()
+	s.mu.Unlock()
+}
+
+func (s *hostSession) publishOutput(stream string, cursor int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch stream {
+	case "stderr":
+		if cursor <= s.stderrCursor {
+			return
+		}
+		s.stderrCursor = cursor
+	default:
+		if cursor <= s.stdoutCursor {
+			return
+		}
+		s.stdoutCursor = cursor
+	}
+	s.notifyOutputLocked()
+}
+
+func (s *hostSession) notifyOutputLocked() {
+	if s.outputSignal != nil {
+		close(s.outputSignal)
+	}
+	s.outputSignal = make(chan struct{})
 }
 
 func (s *hostSession) cleanupProcessGroupAfterExit() {

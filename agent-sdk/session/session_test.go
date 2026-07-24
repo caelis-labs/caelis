@@ -880,6 +880,65 @@ func TestEventProtocolRoundTripPreservesUpdateMessageID(t *testing.T) {
 	}
 }
 
+func TestCanonicalEventMessageIDSurvivesProjectionNormalizationAndRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	message := model.NewTextMessage(model.RoleAssistant, "hello")
+	event := CanonicalizeEvent(&Event{
+		Type:      EventTypeAssistant,
+		MessageID: "msg-1",
+		Message:   &message,
+		Protocol: &EventProtocol{
+			Update: &ProtocolUpdate{
+				SessionUpdate: string(ProtocolUpdateTypeAgentMessage),
+				Content:       ProtocolTextContent("hello"),
+			},
+		},
+	})
+	if event == nil {
+		t.Fatal("CanonicalizeEvent() = nil")
+	}
+	if event.MessageID != "msg-1" || EventMessageID(event) != "msg-1" {
+		t.Fatalf("canonical message identity = %q/%q, want msg-1", event.MessageID, EventMessageID(event))
+	}
+	if event.Protocol != nil {
+		t.Fatalf("redundant projection protocol = %#v, want nil", event.Protocol)
+	}
+
+	raw, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("json.Marshal(Event) error = %v", err)
+	}
+	var decoded Event
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(Event) error = %v", err)
+	}
+	cloned := CloneEvent(&decoded)
+	if decoded.MessageID != "msg-1" || cloned == nil || cloned.MessageID != "msg-1" {
+		t.Fatalf("round-trip message identity = %q/%#v, want msg-1", decoded.MessageID, cloned)
+	}
+}
+
+func TestCanonicalEventAdoptsLegacyProtocolMessageIDBeforeRemovingContent(t *testing.T) {
+	t.Parallel()
+
+	message := model.NewTextMessage(model.RoleAssistant, "hello")
+	event := CanonicalizeEvent(&Event{
+		Type:    EventTypeAssistant,
+		Message: &message,
+		Protocol: &EventProtocol{
+			Update: &ProtocolUpdate{
+				SessionUpdate: string(ProtocolUpdateTypeAgentMessage),
+				MessageID:     "legacy-msg-1",
+				Content:       ProtocolTextContent("hello"),
+			},
+		},
+	})
+	if event == nil || event.MessageID != "legacy-msg-1" || EventMessageID(event) != "legacy-msg-1" {
+		t.Fatalf("canonical legacy identity = %#v, want legacy-msg-1", event)
+	}
+}
+
 func TestEventProtocolRoundTripPreservesParticipantPayload(t *testing.T) {
 	t.Parallel()
 

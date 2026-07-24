@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -40,16 +41,24 @@ func SpawnTaskResultsFromEnvelope(env eventstream.Envelope) []SpawnTaskResult {
 	}
 	if tasks, batch := spawnBatchTaskOutputs(rawOutput["tasks"]); batch {
 		out := make([]SpawnTaskResult, 0, len(tasks))
-		seen := make(map[string]struct{}, len(tasks))
+		type observedTaskIdentity struct {
+			parentCallID string
+			handle       string
+		}
+		seen := make(map[observedTaskIdentity]struct{}, len(tasks))
 		for _, taskOutput := range tasks {
 			parentCallID := strings.TrimSpace(display.MapString(taskOutput, "parent_call"))
 			if parentCallID == "" || !spawnObservedTaskTerminal(taskOutput) {
 				continue
 			}
-			if _, duplicate := seen[parentCallID]; duplicate {
-				continue
+			handle := taskapi.NormalizeHandle(display.MapString(taskOutput, "handle"))
+			if handle != "" {
+				identity := observedTaskIdentity{parentCallID: parentCallID, handle: handle}
+				if _, duplicate := seen[identity]; duplicate {
+					continue
+				}
+				seen[identity] = struct{}{}
 			}
-			seen[parentCallID] = struct{}{}
 			out = append(out, SpawnTaskResult{
 				ParentCallID: parentCallID,
 				Status:       spawnObservedTaskStatus(update.Status, taskOutput),

@@ -48,10 +48,6 @@ func (m *Model) View() tea.View {
 		sections = append(sections, m.placeInMainColumn(drawerView))
 		sections = append(sections, "")
 	}
-	if pendingView := m.renderPendingQueueDrawer(); pendingView != "" {
-		sections = append(sections, m.placeInMainColumn(pendingView))
-		sections = append(sections, "")
-	}
 	if reserve := m.promptModalReservedHeight(); reserve > 0 {
 		for range reserve {
 			sections = append(sections, "")

@@ -33,7 +33,7 @@ func TestDefinitionGuidesWaitingWithTaskTool(t *testing.T) {
 	desc := New([]delegation.Agent{{Name: "codex"}}).Definition().Description
 	for _, want := range []string{
 		"To observe or wait for an existing child task, use Task wait",
-		"returned task_id",
+		"returned handle",
 		"do not call Spawn again",
 	} {
 		if !strings.Contains(desc, want) {

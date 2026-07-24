@@ -53,7 +53,7 @@ func RunOnce(ctx context.Context, starter Starter, submission control.Submission
 	defer turn.Close()
 
 	out := Result{}
-	var assistant schema.FinalAssistantAccumulator
+	var assistant assistantOutputReducer
 	for env := range turn.Events() {
 		if env.Cursor != "" {
 			out.LastCursor = env.Cursor
@@ -82,12 +82,44 @@ func RunOnce(ctx context.Context, starter Starter, submission control.Submission
 		if !isMainSessionUpdate(env) {
 			continue
 		}
-		update := assistant.ObserveUpdate(env.Update)
-		if update.Assistant && update.Text != "" {
-			out.Output = update.Text
+		if text, ok := assistant.Observe(env); ok {
+			out.Output = text
 		}
 	}
 	return out, nil
+}
+
+// assistantOutputReducer keeps exact ACP delta semantics for live updates while
+// allowing one canonical final snapshot to replace its transient delivery.
+// Final is the semantic boundary: EventID is intentionally not required because
+// SDK-only and other process-local producers may not have durable identity.
+type assistantOutputReducer struct {
+	assistant schema.FinalAssistantAccumulator
+}
+
+func (r *assistantOutputReducer) Observe(env eventstream.Envelope) (string, bool) {
+	if r == nil || env.Update == nil {
+		return "", false
+	}
+	if env.Final && assistantMessageUpdate(env.Update) {
+		// Canonical Session projection carries the completed message snapshot,
+		// while an earlier transient projection carries exact live deltas. Reset
+		// only at that typed final boundary so repeated real deltas remain data.
+		r.assistant.Reset()
+	}
+	update := r.assistant.ObserveUpdate(env.Update)
+	return update.Text, update.Assistant && update.Text != ""
+}
+
+func assistantMessageUpdate(update schema.Update) bool {
+	switch typed := update.(type) {
+	case schema.ContentChunk:
+		return typed.SessionUpdate == schema.UpdateAgentMessage
+	case *schema.ContentChunk:
+		return typed != nil && typed.SessionUpdate == schema.UpdateAgentMessage
+	default:
+		return false
+	}
 }
 
 func isMainSessionUpdate(env eventstream.Envelope) bool {

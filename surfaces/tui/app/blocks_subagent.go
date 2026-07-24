@@ -19,6 +19,10 @@ const (
 	SEPlan
 	SEApproval
 	SENotice
+	// SESemanticBoundary is a zero-row structural event. It preserves the
+	// ordering effect of canonical events whose physical panel is suppressed,
+	// so later transcript projections cannot fold narratives across them.
+	SESemanticBoundary
 )
 
 // SubagentEvent is a single event in a subagent's chronological event stream.
@@ -56,6 +60,10 @@ type SubagentEvent struct {
 	OutputSynthetic         bool
 	OutputTerminal          bool
 	OutputGapBefore         bool
+	// OutputCursor is the cumulative byte position represented by terminal
+	// output or a durable compact observation in this panel.
+	OutputCursor      int64
+	OutputCursorKnown bool
 	// TaskHandle is presentation identity only. Runtime TaskID never enters a
 	// transcript panel.
 	TaskHandle     string

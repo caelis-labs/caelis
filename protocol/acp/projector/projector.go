@@ -260,6 +260,11 @@ func explicitAssistantMessageUpdates(event *session.Event) []Update {
 }
 
 func explicitToolCallUpdates(event *session.Event) []Update {
+	// Runtime stores the complete assistant response on the first canonical
+	// tool-call event, while Event.Tool identifies the one physical call owned
+	// by that event. Project the durable narrative siblings first, then exactly
+	// that Event.Tool. Iterating Message.ToolUses here would duplicate calls
+	// that have their own canonical tool-call events.
 	out := inferredAssistantMessageOnly(event)
 	call, ok, err := toolCallForEvent(event)
 	if err != nil || !ok {
@@ -339,10 +344,10 @@ func contentChunk(kind string, text string) ContentChunk {
 
 func contentChunkForEvent(event *session.Event, kind string, text string) ContentChunk {
 	chunk := contentChunk(kind, text)
+	chunk.MessageID = session.EventMessageID(event)
 	// ProtocolUpdate metadata describes that exact ACP update. Do not attach
 	// tool/plan metadata to assistant chunks emitted from the durable Message.
 	if update := session.ProtocolUpdateOf(event); update != nil && normalizeUpdateType(update.SessionUpdate) == kind {
-		chunk.MessageID = strings.TrimSpace(update.MessageID)
 		chunk.Meta = cloneAnyMap(update.Meta)
 	}
 	if kind == UpdateAgentMessage && event != nil {

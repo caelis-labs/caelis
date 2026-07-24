@@ -24,12 +24,14 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	"github.com/caelis-labs/caelis/protocol/acp"
+	acptaskstream "github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 func main() {
@@ -42,6 +44,7 @@ func main() {
 		SessionIDGenerator: newSessionID,
 	})
 	sessions := sessionStore
+	taskStore := sessionfile.NewTaskStore(sessionStore)
 	assembly, err := resolveAssembly()
 	if err != nil {
 		log.Fatal(err)
@@ -58,7 +61,7 @@ func main() {
 	}
 	localCfg := runtime.Config{
 		Sessions:                 sessions,
-		TaskStore:                sessionfile.NewTaskStore(sessionStore),
+		TaskStore:                taskStore,
 		ControllerEventForwarder: acpbridge.NewControllerForwarder(sessions),
 		ControllerContextRouter:  contextRouter,
 		AgentFactory: chat.Factory{
@@ -86,6 +89,15 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	controlTaskStreams, err := controltaskstream.New(controltaskstream.Config{
+		Tasks:      taskStore,
+		Streams:    rt.Streams,
+		Authorizer: acpe2eTaskStreamAuthorizer{sessions: sessions},
+		Secret:     []byte("caelis-acpe2e-taskstream-secret-v1"),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  rt,
 		Sessions: sessions,
@@ -94,11 +106,13 @@ func main() {
 			Title:   "Caelis SDK ACP Agent",
 			Version: "0.1.0",
 		},
-		BuildAgentSpec: func(ctx context.Context, session session.Session, _ acp.PromptRequest) (agent.AgentSpec, error) {
-			return buildSpec(ctx, session, llm, assembly)
+		BuildAgentSpec: func(ctx context.Context, active session.Session, _ acp.PromptRequest) (agent.AgentSpec, error) {
+			return buildSpec(ctx, active, llm, assembly, modeProvider, configProvider)
 		},
-		Modes:  modeProvider,
-		Config: configProvider,
+		Modes:               modeProvider,
+		Config:              configProvider,
+		TaskStreams:         acptaskstream.New(controlTaskStreams),
+		TaskStreamPrincipal: acptaskstream.Principal{ID: "acp"},
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -108,11 +122,38 @@ func main() {
 	}
 }
 
+type acpe2eTaskStreamAuthorizer struct {
+	sessions session.Service
+}
+
+func (a acpe2eTaskStreamAuthorizer) AuthorizeTaskStream(
+	ctx context.Context,
+	principal controltaskstream.Principal,
+	sessionID string,
+) error {
+	if strings.TrimSpace(principal.ID) != "acp" {
+		return fmt.Errorf("acpe2eagent: task stream principal is not authorized")
+	}
+	if a.sessions == nil {
+		return fmt.Errorf("acpe2eagent: session service is unavailable")
+	}
+	_, err := a.sessions.Session(ctx, session.SessionRef{
+		AppName:   "caelis",
+		UserID:    "acp",
+		SessionID: strings.TrimSpace(sessionID),
+	})
+	return err
+}
+
+var _ controltaskstream.Authorizer = acpe2eTaskStreamAuthorizer{}
+
 func resolveLLM() (model.LLM, error) {
 	if mode := strings.TrimSpace(os.Getenv("SDK_ACP_SCRIPTED_MODE")); mode != "" {
 		switch mode {
 		case "async_command":
 			return &scriptedAsyncCommandLLM{}, nil
+		case "interactive_command":
+			return &scriptedInteractiveCommandLLM{}, nil
 		case "approval_command":
 			return &scriptedApprovalCommandLLM{}, nil
 		case "probe_spawn":
@@ -259,7 +300,7 @@ type staticLLM struct {
 func (m staticLLM) Name() string { return "static" }
 
 func (m staticLLM) Capabilities() model.Capabilities {
-	return model.Capabilities{ToolCalls: true, Streaming: true}
+	return scriptedModelCapabilities()
 }
 
 func (m staticLLM) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
@@ -279,8 +320,15 @@ func (m staticLLM) Generate(context.Context, *model.Request) iter.Seq2[*model.St
 	}
 }
 
-func buildSpec(_ context.Context, session session.Session, llm model.LLM, assembly assemblyapi.ResolvedAssembly) (agent.AgentSpec, error) {
-	rt, err := host.New(host.Config{CWD: session.CWD})
+func buildSpec(
+	ctx context.Context,
+	active session.Session,
+	llm model.LLM,
+	assembly assemblyapi.ResolvedAssembly,
+	modes acp.ModeProvider,
+	configs acp.ConfigProvider,
+) (agent.AgentSpec, error) {
+	rt, err := host.New(host.Config{CWD: active.CWD})
 	if err != nil {
 		return agent.AgentSpec{}, err
 	}
@@ -300,11 +348,60 @@ func buildSpec(_ context.Context, session session.Session, llm model.LLM, assemb
 	if len(agents) > 0 {
 		tools = append(tools, spawn.New(agents))
 	}
+	metadata, err := selectedAssemblyMetadata(ctx, active, assembly, modes, configs)
+	if err != nil {
+		return agent.AgentSpec{}, err
+	}
 	return agent.AgentSpec{
-		Name:  "chat",
-		Model: llm,
-		Tools: tools,
+		Name:     "chat",
+		Model:    llm,
+		Tools:    tools,
+		Metadata: metadata,
 	}, nil
+}
+
+func selectedAssemblyMetadata(
+	ctx context.Context,
+	active session.Session,
+	resolved assemblyapi.ResolvedAssembly,
+	modes acp.ModeProvider,
+	configs acp.ConfigProvider,
+) (map[string]any, error) {
+	metadata := map[string]any{}
+	if modes != nil {
+		state, err := modes.SessionModes(ctx, active)
+		if err != nil {
+			return nil, err
+		}
+		if state != nil && strings.TrimSpace(state.CurrentModeID) != "" {
+			mode, ok := assemblyapi.LookupMode(resolved, state.CurrentModeID)
+			if !ok {
+				return nil, fmt.Errorf("acpe2eagent: selected mode %q is not declared", state.CurrentModeID)
+			}
+			assemblyapi.ApplyRuntimeOverrides(metadata, mode.Runtime)
+		}
+	}
+	if configs != nil {
+		options, err := configs.SessionConfigOptions(ctx, active)
+		if err != nil {
+			return nil, err
+		}
+		for _, current := range options {
+			value, ok := current.CurrentValue.(string)
+			if !ok || strings.TrimSpace(value) == "" {
+				return nil, fmt.Errorf("acpe2eagent: selected config %q has a non-string value", current.ID)
+			}
+			option, ok := assemblyapi.LookupConfigSelectOption(resolved, current.ID, value)
+			if !ok {
+				return nil, fmt.Errorf("acpe2eagent: selected config %q value %q is not declared", current.ID, value)
+			}
+			assemblyapi.ApplyRuntimeOverrides(metadata, option.Runtime)
+		}
+	}
+	if len(metadata) == 0 {
+		return nil, nil
+	}
+	return metadata, nil
 }
 
 func splitCommaList(raw string) []string {
@@ -336,24 +433,29 @@ func firstNonEmpty(values ...string) string {
 }
 
 type scriptedAsyncCommandLLM struct {
-	calls  int
-	taskID string
+	calls      int
+	taskHandle string
+}
+
+type scriptedInteractiveCommandLLM struct {
+	calls      int
+	taskHandle string
 }
 
 type scriptedSpawnLLM struct {
-	calls  int
-	taskID string
+	calls      int
+	taskHandle string
 }
 
 type scriptedApprovalCommandLLM struct {
-	calls  int
-	taskID string
+	calls      int
+	taskHandle string
 }
 
 type scriptedProbeSpawnLLM struct{}
 type scriptedSpawnPassthroughLLM struct {
-	calls  int
-	taskID string
+	calls      int
+	taskHandle string
 }
 type scriptedModeConfigLLM struct{}
 
@@ -362,7 +464,7 @@ func (m *scriptedSpawnLLM) Name() string { return "scripted-spawn" }
 func (m *scriptedSpawnLLM) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.calls++
 	if m.calls == 2 {
-		m.taskID = findTaskID(req)
+		m.taskHandle = findTaskHandle(req)
 	}
 	return func(yield func(*model.StreamEvent, error) bool) {
 		switch m.calls {
@@ -392,9 +494,8 @@ func (m *scriptedSpawnLLM) Generate(_ context.Context, req *model.Request) iter.
 						ID:   "task-wait-spawn-1",
 						Name: names.Task,
 						Args: string(mustJSON(map[string]any{
-							"action":        "wait",
-							"task_id":       m.taskID,
-							"yield_time_ms": 300,
+							"action": "wait",
+							"handle": m.taskHandle,
 						})),
 					}}, ""),
 					TurnComplete: true,
@@ -420,16 +521,50 @@ func (m *scriptedSpawnLLM) Generate(_ context.Context, req *model.Request) iter.
 
 func (m *scriptedAsyncCommandLLM) Name() string { return "scripted-async-command" }
 
+func (m *scriptedInteractiveCommandLLM) Name() string { return "scripted-interactive-command" }
+
 func (m *scriptedApprovalCommandLLM) Name() string { return "scripted-approval-command" }
 
 func (m *scriptedProbeSpawnLLM) Name() string       { return "scripted-probe-spawn" }
 func (m *scriptedSpawnPassthroughLLM) Name() string { return "scripted-spawn-passthrough" }
 func (m *scriptedModeConfigLLM) Name() string       { return "scripted-mode-config" }
 
+func (*scriptedAsyncCommandLLM) Capabilities() model.Capabilities {
+	return scriptedModelCapabilities()
+}
+
+func (*scriptedInteractiveCommandLLM) Capabilities() model.Capabilities {
+	return scriptedModelCapabilities()
+}
+
+func (*scriptedApprovalCommandLLM) Capabilities() model.Capabilities {
+	return scriptedModelCapabilities()
+}
+
+func (*scriptedProbeSpawnLLM) Capabilities() model.Capabilities {
+	return scriptedModelCapabilities()
+}
+
+func (*scriptedSpawnLLM) Capabilities() model.Capabilities {
+	return scriptedModelCapabilities()
+}
+
+func (*scriptedSpawnPassthroughLLM) Capabilities() model.Capabilities {
+	return scriptedModelCapabilities()
+}
+
+func (*scriptedModeConfigLLM) Capabilities() model.Capabilities {
+	return scriptedModelCapabilities()
+}
+
+func scriptedModelCapabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true, Streaming: true}
+}
+
 func (m *scriptedAsyncCommandLLM) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.calls++
 	if m.calls == 2 {
-		m.taskID = findTaskID(req)
+		m.taskHandle = findTaskHandle(req)
 	}
 	return func(yield func(*model.StreamEvent, error) bool) {
 		switch m.calls {
@@ -459,11 +594,7 @@ func (m *scriptedAsyncCommandLLM) Generate(_ context.Context, req *model.Request
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   "task-wait-1",
 						Name: names.Task,
-						Args: string(mustJSON(map[string]any{
-							"action":        "wait",
-							"task_id":       m.taskID,
-							"yield_time_ms": 300,
-						})),
+						Args: string(mustJSON(map[string]any{"action": "wait", "handle": m.taskHandle})),
 					}}, ""),
 					TurnComplete: true,
 					StepComplete: true,
@@ -486,10 +617,68 @@ func (m *scriptedAsyncCommandLLM) Generate(_ context.Context, req *model.Request
 	}
 }
 
+func (m *scriptedInteractiveCommandLLM) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	m.calls++
+	if m.calls == 2 {
+		m.taskHandle = findTaskHandle(req)
+	}
+	return func(yield func(*model.StreamEvent, error) bool) {
+		var response model.Response
+		response.TurnComplete = true
+		response.StepComplete = true
+		response.Status = model.ResponseStatusCompleted
+		response.FinishReason = model.FinishReasonToolCalls
+		switch m.calls {
+		case 1:
+			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+				ID:   "command-interactive-1",
+				Name: names.RunCommand,
+				Args: string(mustJSON(map[string]any{
+					"command":       "printf 'interactive ready\\n'; while IFS= read -r line; do printf 'echo:%s\\n' \"$line\"; sleep 0.25; printf 'later:%s\\n' \"$line\"; done",
+					"workdir":       ".",
+					"yield_time_ms": 5,
+				})),
+			}}, "")
+		case 2:
+			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+				ID:   "task-write-interactive-1",
+				Name: names.Task,
+				Args: string(mustJSON(map[string]any{
+					"action": "write",
+					"handle": m.taskHandle,
+					"input":  "ping",
+				})),
+			}}, "")
+		case 3:
+			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+				ID:   "task-read-interactive-1",
+				Name: names.Task,
+				Args: string(mustJSON(map[string]any{
+					"action": "read",
+					"handle": m.taskHandle,
+				})),
+			}}, "")
+		case 4:
+			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+				ID:   "task-cancel-interactive-1",
+				Name: names.Task,
+				Args: string(mustJSON(map[string]any{
+					"action": "cancel",
+					"handle": m.taskHandle,
+				})),
+			}}, "")
+		default:
+			response.Message = model.NewTextMessage(model.RoleAssistant, "acpx interactive command ok")
+			response.FinishReason = model.FinishReasonStop
+		}
+		yield(&model.StreamEvent{Type: model.StreamEventTurnDone, Response: &response}, nil)
+	}
+}
+
 func (m *scriptedApprovalCommandLLM) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.calls++
 	if m.calls == 2 {
-		m.taskID = findTaskID(req)
+		m.taskHandle = findTaskHandle(req)
 	}
 	return func(yield func(*model.StreamEvent, error) bool) {
 		switch m.calls {
@@ -521,11 +710,7 @@ func (m *scriptedApprovalCommandLLM) Generate(_ context.Context, req *model.Requ
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   "task-wait-approval-1",
 						Name: names.Task,
-						Args: string(mustJSON(map[string]any{
-							"action":        "wait",
-							"task_id":       m.taskID,
-							"yield_time_ms": 300,
-						})),
+						Args: string(mustJSON(map[string]any{"action": "wait", "handle": m.taskHandle})),
 					}}, ""),
 					TurnComplete: true,
 					StepComplete: true,
@@ -579,7 +764,7 @@ func (m *scriptedProbeSpawnLLM) Generate(_ context.Context, req *model.Request) 
 func (m *scriptedSpawnPassthroughLLM) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.calls++
 	if m.calls == 2 {
-		m.taskID = findTaskID(req)
+		m.taskHandle = findTaskHandle(req)
 	}
 	resultText := strings.TrimSpace(findTaskResult(req))
 	if resultText == "" {
@@ -612,11 +797,7 @@ func (m *scriptedSpawnPassthroughLLM) Generate(_ context.Context, req *model.Req
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   "task-wait-spawn-pass-1",
 						Name: names.Task,
-						Args: string(mustJSON(map[string]any{
-							"action":        "wait",
-							"task_id":       m.taskID,
-							"yield_time_ms": 300,
-						})),
+						Args: string(mustJSON(map[string]any{"action": "wait", "handle": m.taskHandle})),
 					}}, ""),
 					TurnComplete: true,
 					StepComplete: true,
@@ -687,7 +868,7 @@ func stringifyParts(parts []model.Part) string {
 	return strings.Join(out, "\n")
 }
 
-func findTaskID(req *model.Request) string {
+func findTaskHandle(req *model.Request) string {
 	if req == nil {
 		return ""
 	}
@@ -701,8 +882,8 @@ func findTaskID(req *model.Request) string {
 				if err := json.Unmarshal(part.JSONValue(), &payload); err != nil {
 					continue
 				}
-				if taskID, _ := payload["task_id"].(string); strings.TrimSpace(taskID) != "" {
-					return strings.TrimSpace(taskID)
+				if handle, _ := payload["handle"].(string); strings.TrimSpace(handle) != "" {
+					return strings.TrimSpace(handle)
 				}
 			}
 		}

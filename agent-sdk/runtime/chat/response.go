@@ -29,6 +29,7 @@ func collectFinalResponse(
 	ctx context.Context,
 	llm model.LLM,
 	req *model.Request,
+	messageID string,
 	yieldChunk func(*session.Event) bool,
 ) (*model.Response, error) {
 	var final *model.Response
@@ -54,7 +55,7 @@ func collectFinalResponse(
 				copyEvent.PartDelta = &copyDelta
 				visibleEvent = &copyEvent
 			}
-			if chunk := chunkEventFromStreamEvent(visibleEvent); chunk != nil && yieldChunk != nil {
+			if chunk := chunkEventFromStreamEvent(visibleEvent, messageID); chunk != nil && yieldChunk != nil {
 				if !yieldChunk(chunk) {
 					return nil, context.Canceled
 				}
@@ -70,7 +71,7 @@ func collectFinalResponse(
 				chunk := chunkEventFromStreamEvent(&model.StreamEvent{
 					Type:      model.StreamEventPartDelta,
 					PartDelta: &model.PartDelta{Index: index, Kind: model.PartKindText, TextDelta: pending},
-				})
+				}, messageID)
 				if chunk != nil && !yieldChunk(chunk) {
 					return nil, context.Canceled
 				}
@@ -97,7 +98,7 @@ func modelContextWindowTokens(llm model.LLM) int {
 	return provider.ContextWindowTokens()
 }
 
-func chunkEventFromStreamEvent(event *model.StreamEvent) *session.Event {
+func chunkEventFromStreamEvent(event *model.StreamEvent, messageID string) *session.Event {
 	if event == nil {
 		return nil
 	}
@@ -119,12 +120,14 @@ func chunkEventFromStreamEvent(event *model.StreamEvent) *session.Event {
 		}
 		message := model.NewReasoningMessage(model.RoleAssistant, delta.TextDelta, model.ReasoningVisibilityVisible)
 		return session.MarkUIOnly(&session.Event{
-			Type:    session.EventTypeAssistant,
-			Message: &message,
-			Text:    delta.TextDelta,
+			Type:      session.EventTypeAssistant,
+			MessageID: strings.TrimSpace(messageID),
+			Message:   &message,
+			Text:      delta.TextDelta,
 			Protocol: &session.EventProtocol{
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeAgentThought),
+					MessageID:     strings.TrimSpace(messageID),
 					Content:       session.ProtocolTextContent(delta.TextDelta),
 				},
 			},
@@ -135,12 +138,14 @@ func chunkEventFromStreamEvent(event *model.StreamEvent) *session.Event {
 		}
 		message := model.NewTextMessage(model.RoleAssistant, delta.TextDelta)
 		return session.MarkUIOnly(&session.Event{
-			Type:    session.EventTypeAssistant,
-			Message: &message,
-			Text:    delta.TextDelta,
+			Type:      session.EventTypeAssistant,
+			MessageID: strings.TrimSpace(messageID),
+			Message:   &message,
+			Text:      delta.TextDelta,
 			Protocol: &session.EventProtocol{
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+					MessageID:     strings.TrimSpace(messageID),
 					Content:       session.ProtocolTextContent(delta.TextDelta),
 				},
 			},
@@ -183,10 +188,11 @@ func modelAttemptResetEvent(reset model.AttemptReset) *session.Event {
 	})
 }
 
-func modelResponseEvent(message model.Message, resp *model.Response) *session.Event {
+func modelResponseEvent(message model.Message, resp *model.Response, messageID string) *session.Event {
 	out := &session.Event{
 		Type:       session.EventTypeOf(&session.Event{Message: &message}),
 		Visibility: session.VisibilityCanonical,
+		MessageID:  strings.TrimSpace(messageID),
 		Message:    &message,
 		Text:       message.TextContent(),
 	}
@@ -197,7 +203,7 @@ func modelResponseEvent(message model.Message, resp *model.Response) *session.Ev
 	return out
 }
 
-func modelToolCallEvents(message model.Message, resp *model.Response) []*session.Event {
+func modelToolCallEvents(message model.Message, resp *model.Response, messageID string) []*session.Event {
 	calls := message.ToolCalls()
 	if len(calls) == 0 {
 		return nil
@@ -220,6 +226,7 @@ func modelToolCallEvents(message model.Message, resp *model.Response) []*session
 			Meta:       meta,
 		}
 		if i == 0 {
+			event.MessageID = strings.TrimSpace(messageID)
 			event.Message = &message
 			event.Text = message.TextContent()
 			if resp != nil {

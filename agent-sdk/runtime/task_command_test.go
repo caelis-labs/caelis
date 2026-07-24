@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -30,12 +31,18 @@ type commandStartProbeRuntime struct {
 	starts   int
 	handle   sandbox.Session
 	startErr error
+	output   []sandbox.OutputChunk
 }
 
-func (r *commandStartProbeRuntime) Start(context.Context, sandbox.CommandRequest) (sandbox.Session, error) {
+func (r *commandStartProbeRuntime) Start(_ context.Context, req sandbox.CommandRequest) (sandbox.Session, error) {
 	r.mu.Lock()
 	r.starts++
 	r.mu.Unlock()
+	if req.OnOutput != nil {
+		for _, chunk := range r.output {
+			req.OnOutput(chunk)
+		}
+	}
 	return r.handle, r.startErr
 }
 
@@ -75,6 +82,189 @@ func (s *commandTerminateProbeSession) terminateCalls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.calls
+}
+
+type commandBlockingWaitSession struct {
+	*yieldProbeSandboxSession
+	waitStarted chan struct{}
+	waitRelease chan struct{}
+	startedOnce sync.Once
+}
+
+func (s *commandBlockingWaitSession) Wait(ctx context.Context, _ time.Duration) (sandbox.SessionStatus, error) {
+	s.startedOnce.Do(func() {
+		close(s.waitStarted)
+	})
+	select {
+	case <-ctx.Done():
+		return sandbox.SessionStatus{}, ctx.Err()
+	case <-s.waitRelease:
+		return s.Status(ctx)
+	}
+}
+
+func TestCommandTaskEntryMetadataKeepsObservationDeltaOutOfDurableTaskState(t *testing.T) {
+	t.Parallel()
+
+	got := commandTaskEntryMetadata(map[string]any{
+		"output_cursor":              int64(12),
+		"model_output_cursor":        int64(12),
+		"output_start_cursor":        int64(6),
+		"output_delta":               "exact bytes",
+		"output_checkpoint_coherent": true,
+	}, true)
+	if got["output_cursor"] != int64(12) || got["model_output_cursor"] != int64(12) {
+		t.Fatalf("durable cursors = %#v, want running absolute cursors", got)
+	}
+	if _, ok := got["output_start_cursor"]; ok {
+		t.Fatalf("durable metadata contains observation start: %#v", got)
+	}
+	if _, ok := got["output_delta"]; ok {
+		t.Fatalf("durable metadata contains observation delta: %#v", got)
+	}
+
+	incoherent := commandTaskEntryMetadata(map[string]any{
+		"output_cursor":              int64(12),
+		"model_output_cursor":        int64(12),
+		"output_checkpoint_coherent": false,
+	}, true)
+	if _, ok := incoherent["output_cursor"]; ok {
+		t.Fatalf("incoherent metadata contains output_cursor: %#v", incoherent)
+	}
+	if _, ok := incoherent["model_output_cursor"]; ok {
+		t.Fatalf("incoherent metadata contains model_output_cursor: %#v", incoherent)
+	}
+
+	gap := commandTaskEntryMetadata(map[string]any{
+		"output_cursor":               int64(42),
+		"model_output_cursor":         int64(42),
+		"output_checkpoint_available": true,
+		"output_checkpoint_coherent":  false,
+		"output_recovery_gap":         true,
+	}, true)
+	if gap["output_cursor"] != int64(42) || gap["model_output_cursor"] != int64(42) {
+		t.Fatalf("gap resume metadata lost monotonic presentation cursor: %#v", gap)
+	}
+
+	terminal := commandTaskEntryMetadata(map[string]any{
+		"output_cursor":               int64(42),
+		"model_output_cursor":         int64(42),
+		commandStreamOutputCursorMeta: int64(64),
+		commandStreamEventCursorMeta:  int64(7),
+	}, false)
+	if _, ok := terminal["output_cursor"]; ok {
+		t.Fatalf("terminal metadata contains model resume cursor: %#v", terminal)
+	}
+	if terminal[commandStreamOutputCursorMeta] != int64(64) {
+		t.Fatalf("terminal metadata lost stream replay cursor: %#v", terminal)
+	}
+	if terminal[commandStreamEventCursorMeta] != int64(7) {
+		t.Fatalf("terminal metadata lost stream event baseline: %#v", terminal)
+	}
+}
+
+func TestStartCommandSynchronousOutputBeforeFirstObservationResumesFromDurableStore(t *testing.T) {
+	t.Parallel()
+
+	const (
+		parentCall = "sync-output-before-first-observation"
+		early      = "early\n"
+		later      = "later\n"
+	)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	store := newFileTaskStoreForTest(t)
+	runtime.tasks.store = store
+	running := true
+	handle := &commandBlockingWaitSession{
+		yieldProbeSandboxSession: &yieldProbeSandboxSession{
+			statusRunning: &running,
+			stdout:        early,
+		},
+		waitStarted: make(chan struct{}),
+		waitRelease: make(chan struct{}),
+	}
+	backend := newCommandStartProbe(handle, nil)
+	backend.output = []sandbox.OutputChunk{{
+		Stream: "stdout",
+		Text:   early,
+		Cursor: int64(len([]byte(early))),
+	}}
+	taskID, err := commandTaskID(activeSession.SessionRef, parentCall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type startResult struct {
+		snapshot taskapi.Snapshot
+		err      error
+	}
+	started := make(chan startResult, 1)
+	go func() {
+		snapshot, startErr := runtime.tasks.StartCommand(
+			context.Background(),
+			activeSession,
+			activeSession.SessionRef,
+			backend,
+			taskapi.CommandStartRequest{
+				Command:    "interactive",
+				Workdir:    activeSession.CWD,
+				ParentCall: parentCall,
+				Yield:      time.Minute,
+			},
+		)
+		started <- startResult{snapshot: snapshot, err: startErr}
+	}()
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			close(handle.waitRelease)
+		})
+	}
+	defer release()
+	select {
+	case <-handle.waitStarted:
+	case <-time.After(time.Second):
+		t.Fatal("StartCommand did not reach the post-persistence wait")
+	}
+
+	entry, err := store.Get(context.Background(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputCursor, outputKnown := taskInt64Value(entry.Metadata["output_cursor"])
+	modelCursor, modelKnown := taskInt64Value(entry.Metadata["model_output_cursor"])
+	if entry.StdoutCursor != 0 || !outputKnown || !modelKnown || outputCursor != 0 || modelCursor != 0 {
+		t.Fatalf(
+			"pre-observation durable checkpoint = stdout %d output %d/%v model %d/%v, want previous zero resume point",
+			entry.StdoutCursor,
+			outputCursor,
+			outputKnown,
+			modelCursor,
+			modelKnown,
+		)
+	}
+	if replayCursor, ok := taskInt64Value(entry.Metadata[commandStreamOutputCursorMeta]); !ok || replayCursor != int64(len([]byte(early))) {
+		t.Fatalf("running stream replay cursor = %d/%v, want ingested %d", replayCursor, ok, len([]byte(early)))
+	}
+
+	handle.stdout = early + later
+	restarted := newTaskRuntime(runtime, store)
+	restarted.registerSandboxRuntime(backend)
+	reloaded, err := restarted.lookupCommandCanonical(context.Background(), activeSession.SessionRef, taskID)
+	if err != nil {
+		t.Fatalf("lookupCommandCanonical() after restart error = %v", err)
+	}
+	streamed, err := (&streamService{}).readCommand(context.Background(), reloaded, stream.Cursor{})
+	if err != nil {
+		t.Fatalf("readCommand() after restart error = %v", err)
+	}
+	release()
+	result := <-started
+	if result.err != nil {
+		t.Fatalf("StartCommand() error = %v", result.err)
+	}
+	if got := streamFrameText(streamed.Frames); got != early+later {
+		t.Fatalf("rehydrated stream = %q, want unobserved early output plus later output %q", got, early+later)
+	}
 }
 
 func newCommandStartProbe(handle sandbox.Session, startErr error) *commandStartProbeRuntime {
@@ -188,7 +378,7 @@ func TestStartCommandTransientWaitErrorReturnsPersistedTaskID(t *testing.T) {
 	}
 }
 
-func TestStartCommandReadOutputErrorReturnsDurableUnknownTaskID(t *testing.T) {
+func TestStartCommandCallbackTerminalDoesNotReadRecoveryOutput(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -196,23 +386,35 @@ func TestStartCommandReadOutputErrorReturnsDurableUnknownTaskID(t *testing.T) {
 	runtime.tasks.store = store
 	running := false
 	readErr := errors.New("terminal output temporarily unavailable")
-	handle := &yieldProbeSandboxSession{statusRunning: &running, readErr: readErr}
+	handle := &yieldProbeSandboxSession{
+		statusRunning: &running,
+		readErr:       readErr,
+		result: sandbox.CommandResult{
+			Stdout: "done", ExitCode: 0, Backend: sandbox.BackendHost,
+		},
+	}
 	backend := newCommandStartProbe(handle, nil)
+	backend.output = []sandbox.OutputChunk{{
+		Stream: "stdout", Text: "done", Cursor: int64(len("done")),
+	}}
 	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, backend, taskapi.CommandStartRequest{
 		Command: "printf done", ParentCall: "read-output-unknown", Yield: 0,
 	})
-	if !errors.Is(err, readErr) {
-		t.Fatalf("StartCommand() error = %v, want %v", err, readErr)
+	if err != nil {
+		t.Fatalf("StartCommand() error = %v, want callback-backed completion", err)
 	}
-	if snapshot.Ref.TaskID == "" || snapshot.State != taskapi.StateUnknownOutcome || snapshot.Running {
-		t.Fatalf("StartCommand() snapshot = %#v, want terminal durable unknown task", snapshot)
+	if snapshot.Ref.TaskID == "" || snapshot.State != taskapi.StateCompleted || snapshot.Running {
+		t.Fatalf("StartCommand() snapshot = %#v, want terminal completed task", snapshot)
+	}
+	if got, _ := snapshot.Result["result"].(string); got != "done" {
+		t.Fatalf("StartCommand() result = %q, want callback-backed output", got)
 	}
 	entry, getErr := store.Get(context.Background(), snapshot.Ref.TaskID)
 	if getErr != nil {
 		t.Fatal(getErr)
 	}
-	if entry.State != taskapi.StateUnknownOutcome || entry.Running || taskStringValue(entry.Metadata["command_phase"]) != commandPhaseUnknown {
-		t.Fatalf("durable entry = %#v, want terminal output-recovery state", entry)
+	if entry.State != taskapi.StateCompleted || entry.Running {
+		t.Fatalf("durable entry = %#v, want completed callback-backed command", entry)
 	}
 }
 
@@ -558,7 +760,12 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsCommandResult(t *testing.T) {
 			ExitCode: 0,
 		},
 	}
-	fake := &yieldProbeSandboxRuntime{session: fakeSession}
+	fake := newCommandStartProbe(fakeSession, nil)
+	fake.output = []sandbox.OutputChunk{{
+		Stream: "stdout",
+		Text:   "raw full output\n",
+		Cursor: int64(len([]byte("raw full output\n"))),
+	}}
 	taskStore := newFileTaskStoreForTest(t)
 	runtime.tasks.store = taskStore
 
@@ -570,7 +777,7 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsCommandResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartCommand() error = %v", err)
 	}
-	canonicalText := "canonical truncated output\n"
+	canonicalText := "short\n"
 	eventTime := time.Unix(123, 0).UTC()
 	err = runtime.tasks.syncCanonicalToolResult(context.Background(), activeSession.SessionRef, &session.Event{
 		Type: session.EventTypeToolResult,
@@ -600,8 +807,43 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsCommandResult(t *testing.T) {
 	if got, ok := taskInt64Value(entry.Metadata["output_cursor"]); !ok || got != int64(len([]byte(canonicalText))) {
 		t.Fatalf("stored output_cursor = %#v ok=%v, want canonical result byte length", entry.Metadata["output_cursor"], ok)
 	}
+	if got, ok := taskInt64Value(entry.Metadata[commandStreamOutputCursorMeta]); !ok || got != int64(len([]byte("raw full output\n"))) {
+		t.Fatalf("stored stream replay cursor = %#v ok=%v, want monotonic pre-canonical cursor", entry.Metadata[commandStreamOutputCursorMeta], ok)
+	}
+	if _, exists := entry.Metadata["output_start_cursor"]; exists {
+		t.Fatalf("stored metadata unexpectedly contains observation-only output_start_cursor: %#v", entry.Metadata)
+	}
+	if _, exists := entry.Metadata["output_delta"]; exists {
+		t.Fatalf("stored metadata unexpectedly contains observation-only output_delta: %#v", entry.Metadata)
+	}
 	if !entry.UpdatedAt.Equal(eventTime) {
 		t.Fatalf("stored UpdatedAt = %v, want canonical event time %v", entry.UpdatedAt, eventTime)
+	}
+
+	reloaded, err := newStreamService(runtime.tasks).Read(context.Background(), stream.ReadRequest{
+		Ref: stream.Ref{
+			SessionID: activeSession.SessionID,
+			TaskID:    snapshot.Ref.TaskID,
+		},
+		Cursor: stream.Cursor{Output: 12},
+	})
+	if err != nil {
+		t.Fatalf("stream Read() after canonical durable reload error = %v", err)
+	}
+	if reloaded.Cursor.Output != int64(len([]byte("raw full output\n"))) ||
+		reloaded.TruncatedBefore != int64(len([]byte("raw full output\n"))) {
+		t.Fatalf(
+			"canonical reload cursor/truncation = %d/%d, want monotonic live cursor %d",
+			reloaded.Cursor.Output,
+			reloaded.TruncatedBefore,
+			len([]byte("raw full output\n")),
+		)
+	}
+	if got := streamFrameText(reloaded.Frames); got != "" {
+		t.Fatalf("canonical result was remapped onto an old live cursor range: %q", got)
+	}
+	if reloaded.FinalText != canonicalText {
+		t.Fatalf("canonical reload FinalText = %q, want %q", reloaded.FinalText, canonicalText)
 	}
 }
 

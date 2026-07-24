@@ -1,0 +1,162 @@
+[
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "spawn-call-1",
+      "title": "Spawn breeze: explain your capability",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "agent": "breeze",
+        "prompt": "explain your capability"
+      },
+      "content": [
+        {
+          "type": "terminal",
+          "terminalId": "spawn-call-1"
+        }
+      ],
+      "_meta": {
+        "terminal_info": {
+          "terminal_id": "spawn-call-1"
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "spawn-call-1",
+      "title": "Spawn",
+      "kind": "execute",
+      "status": "in_progress",
+      "rawOutput": {
+        "handle": "yara",
+        "parent_call": "spawn-call-1",
+        "parent_tool": "Spawn",
+        "state": "running",
+        "target_kind": "subagent"
+      },
+      "content": [
+        {
+          "type": "terminal",
+          "terminalId": "spawn-call-1"
+        }
+      ],
+      "_meta": {
+        "terminal_info": {
+          "terminal_id": "spawn-call-1"
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "spawn-call-1",
+      "status": "in_progress",
+      "content": [
+        {
+          "type": "terminal",
+          "terminalId": "spawn-call-1"
+        }
+      ],
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "stream": {
+              "mode": "append"
+            }
+          },
+          "version": 1
+        },
+        "terminal_info": {
+          "terminal_id": "spawn-call-1"
+        },
+        "terminal_output": {
+          "data": "child output before wait",
+          "terminal_id": "spawn-call-1"
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "wait-call-1",
+      "title": "Task wait",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "action": "wait",
+        "handle": "yara"
+      }
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "wait-call-1",
+      "title": "Task wait",
+      "kind": "execute",
+      "status": "completed",
+      "rawInput": {
+        "action": "wait",
+        "handle": "yara"
+      },
+      "rawOutput": {
+        "action": "wait",
+        "tasks": [
+          {
+            "final_message": "exact fallback final",
+            "handle": "yara",
+            "parent_call": "spawn-call-1",
+            "parent_tool": "Spawn",
+            "state": "completed",
+            "target_kind": "subagent"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "spawn-call-1",
+      "status": "completed",
+      "rawOutput": {
+        "final_message": "exact fallback final",
+        "handle": "yara",
+        "parent_call": "spawn-call-1",
+        "parent_tool": "Spawn",
+        "state": "completed",
+        "target_kind": "subagent"
+      },
+      "content": [
+        {
+          "type": "terminal",
+          "terminalId": "spawn-call-1"
+        }
+      ],
+      "_meta": {
+        "terminal_exit": {
+          "signal": null,
+          "terminal_id": "spawn-call-1"
+        },
+        "terminal_info": {
+          "terminal_id": "spawn-call-1"
+        },
+        "terminal_output": {
+          "data": "exact fallback final",
+          "terminal_id": "spawn-call-1"
+        }
+      }
+    }
+  }
+]

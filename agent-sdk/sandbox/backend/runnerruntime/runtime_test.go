@@ -21,6 +21,7 @@ type waitResultTestRunner struct {
 	waitSessionErr    error
 	stdout            []byte
 	stderr            []byte
+	observation       *cmdsession.OutputObservation
 }
 
 func (r *waitResultTestRunner) Run(context.Context, Request) (sandbox.CommandResult, error) {
@@ -35,6 +36,13 @@ func (r *waitResultTestRunner) WriteInput(string, []byte) error { return nil }
 
 func (r *waitResultTestRunner) ReadOutput(string, int64, int64) ([]byte, []byte, int64, int64, error) {
 	return r.stdout, r.stderr, int64(len(r.stdout)), int64(len(r.stderr)), nil
+}
+
+func (r *waitResultTestRunner) AwaitOutput(ctx context.Context, _ string, cursor sandbox.OutputCursor) (cmdsession.OutputObservation, error) {
+	if r.observation != nil {
+		return *r.observation, nil
+	}
+	return r.session.AwaitOutput(ctx, cursor)
 }
 
 func (r *waitResultTestRunner) GetSessionStatus(string) (cmdsession.SessionStatus, error) {
@@ -198,5 +206,39 @@ func TestSessionReadOutputPreservesSandboxCommandPermissionDiagnostics(t *testin
 	}
 	if strings.TrimSpace(string(stderr)) != raw {
 		t.Fatalf("ReadOutput() stderr = %q, want raw command stderr %q", string(stderr), raw)
+	}
+}
+
+func TestSessionAwaitOutputTranslatesBackendStatus(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	runner := &waitResultTestRunner{
+		observation: &cmdsession.OutputObservation{
+			Cursor: sandbox.OutputCursor{Stdout: 7, Stderr: 3},
+			Status: cmdsession.SessionStatus{
+				State:        cmdsession.SessionStateRunning,
+				StartTime:    now,
+				LastActivity: now,
+			},
+		},
+	}
+	sess := &session{
+		backend:   sandbox.BackendBwrap,
+		runner:    runner,
+		sessionID: "session-1",
+	}
+	observation, err := sess.AwaitOutput(context.Background(), sandbox.OutputCursor{})
+	if err != nil {
+		t.Fatalf("AwaitOutput() error = %v", err)
+	}
+	if observation.Cursor != runner.observation.Cursor {
+		t.Fatalf("Cursor = %+v, want %+v", observation.Cursor, runner.observation.Cursor)
+	}
+	if observation.Status.Backend != sandbox.BackendBwrap ||
+		observation.Status.SessionID != "session-1" ||
+		observation.Status.Terminal.TerminalID != "session-1" ||
+		!observation.Status.Running {
+		t.Fatalf("Status = %+v, want translated bwrap session", observation.Status)
 	}
 }

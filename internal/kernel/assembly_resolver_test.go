@@ -207,6 +207,40 @@ func TestAssemblyResolverToolAugmenterReceivesEffectiveModelAndEffort(t *testing
 	}
 }
 
+func TestAssemblyResolverToolAugmenterReceivesNoneForProviderWithoutReasoningSelector(t *testing.T) {
+	t.Parallel()
+
+	var got ToolAugmentContext
+	resolver, err := NewAssemblyResolver(AssemblyResolverConfig{
+		Sessions: snapshotStateFunc(func(context.Context, session.SessionRef) (map[string]any, error) {
+			return map[string]any{}, nil
+		}),
+		DefaultModelAlias: "provider/model-id",
+		ModelLookup: modelLookupFunc(func(_ context.Context, alias string, _ int) (ModelResolution, error) {
+			if alias != "provider/model-id" {
+				t.Fatalf("ResolveModel alias = %q", alias)
+			}
+			return ModelResolution{
+				Model:     fakeLLM{name: "selected"},
+				ProfileID: "provider:provider/model-id",
+			}, nil
+		}),
+		ToolAugmenter: func(_ context.Context, ctx ToolAugmentContext) (ToolAugmentation, error) {
+			got = ctx
+			return ToolAugmentation{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewAssemblyResolver() error = %v", err)
+	}
+	if _, err := resolver.ResolveTurn(context.Background(), TurnIntent{SessionRef: session.SessionRef{SessionID: "s1"}}); err != nil {
+		t.Fatalf("ResolveTurn() error = %v", err)
+	}
+	if got.Session.ProfileID != "provider:provider/model-id" || got.Session.Effort != "none" {
+		t.Fatalf("ToolAugmentContext = %#v, want provider profile with effort none", got)
+	}
+}
+
 func TestAssemblyResolverRejectsLegacySessionState(t *testing.T) {
 	t.Parallel()
 
@@ -268,6 +302,7 @@ func TestAssemblyResolverControllerTurnPreservesPolicyMetadataWithoutModelLookup
 	t.Parallel()
 
 	modelCalls := 0
+	var augmented ToolAugmentContext
 	resolver, err := NewAssemblyResolver(AssemblyResolverConfig{
 		Sessions: snapshotStateFunc(func(context.Context, session.SessionRef) (map[string]any, error) {
 			return map[string]any{
@@ -290,6 +325,11 @@ func TestAssemblyResolverControllerTurnPreservesPolicyMetadataWithoutModelLookup
 			modelCalls++
 			return ModelResolution{Model: fakeLLM{name: "mini"}}, nil
 		}),
+		BaseMetadata: map[string]any{"reasoning_effort": "high"},
+		ToolAugmenter: func(_ context.Context, ctx ToolAugmentContext) (ToolAugmentation, error) {
+			augmented = ctx
+			return ToolAugmentation{}, nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewAssemblyResolver() error = %v", err)
@@ -304,6 +344,9 @@ func TestAssemblyResolverControllerTurnPreservesPolicyMetadataWithoutModelLookup
 	}
 	if modelCalls != 0 {
 		t.Fatalf("model lookup calls = %d, want 0", modelCalls)
+	}
+	if augmented.Session.ProfileID != "" || augmented.Session.Effort != "" {
+		t.Fatalf("controller ToolAugmentContext.Session = %#v, want zero value", augmented.Session)
 	}
 	meta := turn.RunRequest.AgentSpec.Metadata
 	if _, ok := meta[policyapi.MetadataPolicyProfile]; ok {

@@ -8,6 +8,7 @@ import (
 
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
+	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
@@ -72,12 +73,6 @@ type SetHintMsg struct {
 type UpdateCheckResultMsg struct {
 	LatestVersion string
 	Eligible      bool
-}
-
-type RunningActivityMsg struct {
-	Kind   runningActivityKind
-	Detail string
-	Active bool
 }
 
 type TaskResultMsg struct {
@@ -185,8 +180,12 @@ const (
 	ACPProjectionSubagent    = transcript.ScopeSubagent
 )
 
+// TranscriptEventsMsg is one normalized Surface projection batch. Spawn
+// observations are decoded alongside transcript events so live delivery and
+// reconnect never build independent correlation paths from the same Envelope.
 type TranscriptEventsMsg struct {
-	Events []TranscriptEvent
+	Events               []TranscriptEvent
+	ObservedSpawnResults []acpprojector.SpawnTaskResult
 }
 
 type PlanEntry = transcript.PlanEntry

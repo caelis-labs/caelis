@@ -62,28 +62,31 @@ type EventToolContent struct {
 // is the ACP projection/control payload and must not be used as the local model
 // replay source.
 type Event struct {
-	ID                string                 `json:"id,omitempty"`
-	IdempotencyKey    string                 `json:"idempotency_key,omitempty"`
-	SessionID         string                 `json:"session_id,omitempty"`
-	Seq               uint64                 `json:"seq,omitempty"`
-	Schema            int                    `json:"schema,omitempty"`
-	Type              EventType              `json:"type,omitempty"`
-	Visibility        Visibility             `json:"visibility,omitempty"`
-	Time              time.Time              `json:"time,omitempty"`
-	Actor             ActorRef               `json:"actor,omitempty"`
-	Scope             *EventScope            `json:"scope,omitempty"`
-	ChildOrigin       *EventChildOrigin      `json:"child_origin,omitempty"`
-	ApprovalRequestID string                 `json:"approval_request_id,omitempty"`
-	Invocation        *EventInvocation       `json:"invocation,omitempty"`
-	Message           *model.Message         `json:"message,omitempty"`
-	Tool              *EventTool             `json:"tool,omitempty"`
-	PlanPayload       *EventPlanPayload      `json:"plan,omitempty"`
-	Notice            *EventNotice           `json:"notice,omitempty"`
-	Lifecycle         *EventLifecycle        `json:"lifecycle,omitempty"`
-	Journal           *ExecutionJournalEntry `json:"journal,omitempty"`
-	Protocol          *EventProtocol         `json:"protocol,omitempty"`
-	Text              string                 `json:"-"`
-	Meta              map[string]any         `json:"_meta,omitempty"`
+	ID                string            `json:"id,omitempty"`
+	IdempotencyKey    string            `json:"idempotency_key,omitempty"`
+	SessionID         string            `json:"session_id,omitempty"`
+	Seq               uint64            `json:"seq,omitempty"`
+	Schema            int               `json:"schema,omitempty"`
+	Type              EventType         `json:"type,omitempty"`
+	Visibility        Visibility        `json:"visibility,omitempty"`
+	Time              time.Time         `json:"time,omitempty"`
+	Actor             ActorRef          `json:"actor,omitempty"`
+	Scope             *EventScope       `json:"scope,omitempty"`
+	ChildOrigin       *EventChildOrigin `json:"child_origin,omitempty"`
+	ApprovalRequestID string            `json:"approval_request_id,omitempty"`
+	Invocation        *EventInvocation  `json:"invocation,omitempty"`
+	// MessageID identifies one logical message across transient chunks and its
+	// canonical durable event. It is semantic event state, not display metadata.
+	MessageID   string                 `json:"message_id,omitempty"`
+	Message     *model.Message         `json:"message,omitempty"`
+	Tool        *EventTool             `json:"tool,omitempty"`
+	PlanPayload *EventPlanPayload      `json:"plan,omitempty"`
+	Notice      *EventNotice           `json:"notice,omitempty"`
+	Lifecycle   *EventLifecycle        `json:"lifecycle,omitempty"`
+	Journal     *ExecutionJournalEntry `json:"journal,omitempty"`
+	Protocol    *EventProtocol         `json:"protocol,omitempty"`
+	Text        string                 `json:"-"`
+	Meta        map[string]any         `json:"_meta,omitempty"`
 }
 
 // UnmarshalJSON preserves numeric tokens in the open durable metadata map.
@@ -235,6 +238,23 @@ func EventText(event *Event) string {
 	return ""
 }
 
+// EventMessageID returns the stable identity of the logical message carried by
+// an event. Typed identity is authoritative; protocol-native inputs retain a
+// compatibility fallback for ACP narrative chunks that predate MessageID.
+func EventMessageID(event *Event) string {
+	if event == nil {
+		return ""
+	}
+	if messageID := strings.TrimSpace(event.MessageID); messageID != "" {
+		return messageID
+	}
+	update := ProtocolUpdateOf(event)
+	if !protocolUpdateCarriesMessageIdentity(update) {
+		return ""
+	}
+	return strings.TrimSpace(update.MessageID)
+}
+
 // EventDisplayText returns the user-visible text for display-only consumers
 // such as generated session titles. It preserves EventText's model-visible
 // fallback order when no display override is present.
@@ -259,6 +279,7 @@ func CanonicalizeEvent(event *Event) *Event {
 	if out.Type == "" {
 		out.Type = EventTypeOf(out)
 	}
+	out.MessageID = EventMessageID(out)
 	if out.Tool != nil {
 		removeToolProjectionProtocol(out)
 	}

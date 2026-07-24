@@ -26,6 +26,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policyfs"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/consoleoutput"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/outputwait"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/acl"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/job"
@@ -179,10 +180,10 @@ func (r *runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 	}
 	if req.OnOutput != nil {
 		if result.Stdout != "" {
-			req.OnOutput(sandbox.OutputChunk{Stream: "stdout", Text: result.Stdout})
+			req.OnOutput(sandbox.OutputChunk{Stream: "stdout", Text: result.Stdout, Cursor: int64(len([]byte(result.Stdout)))})
 		}
 		if result.Stderr != "" {
-			req.OnOutput(sandbox.OutputChunk{Stream: "stderr", Text: result.Stderr})
+			req.OnOutput(sandbox.OutputChunk{Stream: "stderr", Text: result.Stderr, Cursor: int64(len([]byte(result.Stderr)))})
 		}
 	}
 	return result, err
@@ -272,6 +273,8 @@ func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 		cmd:           cmd,
 		job:           jobObject,
 		stdin:         stdin,
+		stdoutReader:  stdout,
+		stderrReader:  stderr,
 		cancel:        cancel,
 		running:       true,
 		supportsInput: true,
@@ -279,6 +282,7 @@ func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 		updatedAt:     now,
 		done:          make(chan struct{}),
 		onOutput:      req.OnOutput,
+		outputSignal:  make(chan struct{}),
 	}
 	r.mu.Lock()
 	r.sessions[sessionID] = session
@@ -1332,12 +1336,16 @@ type windowsSession struct {
 	ref      sandbox.SessionRef
 	terminal sandbox.TerminalRef
 
-	cmd    *exec.Cmd
-	job    *job.Object
-	stdin  io.WriteCloser
-	cancel context.CancelFunc
-	done   chan struct{}
-	wg     sync.WaitGroup
+	cmd              *exec.Cmd
+	job              *job.Object
+	stdin            io.WriteCloser
+	stdoutReader     io.Closer
+	stderrReader     io.Closer
+	cancel           context.CancelFunc
+	done             chan struct{}
+	wg               sync.WaitGroup
+	finalizeOnce     sync.Once
+	closeReadersOnce sync.Once
 
 	onOutput func(sandbox.OutputChunk)
 
@@ -1348,10 +1356,15 @@ type windowsSession struct {
 	stderrTotal   int64
 	stdoutText    consoleoutput.ConsoleOutputDecoder
 	stderrText    consoleoutput.ConsoleOutputDecoder
+	outputSignal  chan struct{}
+	stdoutCursor  int64
+	stderrCursor  int64
 	running       bool
 	supportsInput bool
 	exitCode      int
 	waitErr       error
+	finalizing    bool
+	callbacks     int
 	doneClosed    bool
 	startedAt     time.Time
 	updatedAt     time.Time
@@ -1386,15 +1399,47 @@ func (s *windowsSession) WriteInput(_ context.Context, input []byte) error {
 func (s *windowsSession) ReadOutput(_ context.Context, stdoutMarker, stderrMarker int64) (stdout, stderr []byte, newStdoutMarker, newStderrMarker int64, err error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if stdoutMarker < 0 {
+		stdoutMarker = 0
+	}
+	if stderrMarker < 0 {
+		stderrMarker = 0
+	}
 	stdout, newStdoutMarker = consoleoutput.CappedOutputSince(s.stdout, s.stdoutTotal, stdoutMarker)
 	stderr, newStderrMarker = consoleoutput.CappedOutputSince(s.stderr, s.stderrTotal, stderrMarker)
 	return stdout, stderr, newStdoutMarker, newStderrMarker, nil
 }
 
+func (s *windowsSession) AwaitOutput(ctx context.Context, cursor sandbox.OutputCursor) (sandbox.OutputObservation, error) {
+	observation, err := outputwait.Await(ctx, cursor, func() outputwait.Snapshot[sandbox.SessionStatus] {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		status := s.statusLocked()
+		return outputwait.Snapshot[sandbox.SessionStatus]{
+			Signal:    s.outputSignal,
+			Published: sandbox.OutputCursor{Stdout: s.stdoutCursor, Stderr: s.stderrCursor},
+			Available: sandbox.OutputCursor{Stdout: s.stdoutTotal, Stderr: s.stderrTotal},
+			Terminal:  !status.Running,
+			Status:    status,
+		}
+	})
+	if err != nil {
+		return sandbox.OutputObservation{}, err
+	}
+	return sandbox.CloneOutputObservation(sandbox.OutputObservation{
+		Cursor: observation.Cursor,
+		Status: observation.Status,
+	}), nil
+}
+
 func (s *windowsSession) Status(_ context.Context) (sandbox.SessionStatus, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return sandbox.CloneSessionStatus(sandbox.SessionStatus{
+	return sandbox.CloneSessionStatus(s.statusLocked()), nil
+}
+
+func (s *windowsSession) statusLocked() sandbox.SessionStatus {
+	return sandbox.SessionStatus{
 		SessionRef:    s.ref,
 		Terminal:      s.terminal,
 		Running:       s.running,
@@ -1402,7 +1447,7 @@ func (s *windowsSession) Status(_ context.Context) (sandbox.SessionStatus, error
 		ExitCode:      s.exitCode,
 		StartedAt:     s.startedAt,
 		UpdatedAt:     s.updatedAt,
-	}), nil
+	}
 }
 
 func (s *windowsSession) Wait(ctx context.Context, timeout time.Duration) (sandbox.SessionStatus, error) {
@@ -1447,12 +1492,17 @@ func (s *windowsSession) Terminate(ctx context.Context) error {
 	s.mu.RLock()
 	cmd := s.cmd
 	running := s.running
+	finalizing := s.finalizing
 	s.mu.RUnlock()
-	if !running {
+	if !running || finalizing {
 		return nil
 	}
 	s.cancel()
 	terminateErr := terminateWindowsCommand(cmd, s.takeJob())
+	if s.outputCallbackActive() {
+		go s.forceTerminationAfterDrain(terminateErr)
+		return terminateErr
+	}
 	timer := time.NewTimer(windowsTerminateDrain)
 	defer timer.Stop()
 	select {
@@ -1497,10 +1547,15 @@ func (s *windowsSession) readStream(reader io.Reader, stream string) {
 				s.stdoutTotal += int64(len(decoded.Stored))
 			}
 			s.updatedAt = time.Now()
+			cursor := s.stdoutTotal
+			if stream == "stderr" {
+				cursor = s.stderrTotal
+			}
 			s.mu.Unlock()
 			if s.onOutput != nil && len(decoded.Emit) > 0 {
-				s.onOutput(sandbox.OutputChunk{Stream: stream, Text: string(decoded.Emit)})
+				s.emitOutput(sandbox.OutputChunk{Stream: stream, Text: string(decoded.Emit), Cursor: cursor})
 			}
+			s.publishOutput(stream, cursor)
 		}
 		if err != nil {
 			return
@@ -1513,6 +1568,22 @@ func (s *windowsSession) waitForExit() {
 	if jobObject := s.takeJob(); jobObject != nil {
 		_ = jobObject.Close()
 	}
+	s.finalize(err, false)
+}
+
+func (s *windowsSession) finalize(err error, forced bool) {
+	selected := false
+	s.finalizeOnce.Do(func() {
+		selected = true
+	})
+	if !selected {
+		<-s.done
+		return
+	}
+
+	s.mu.Lock()
+	s.finalizing = true
+	s.mu.Unlock()
 	s.wg.Wait()
 	s.mu.Lock()
 	stdoutTail := consoleoutput.FlushStreamChunk(&s.stdoutText, consoleoutput.StoreDecoded)
@@ -1525,40 +1596,41 @@ func (s *windowsSession) waitForExit() {
 		s.stderr = consoleoutput.AppendCappedBytes(s.stderr, stderrTail.Stored, windowsOutputCap)
 		s.stderrTotal += int64(len(stderrTail.Stored))
 	}
+	stdoutCursor := s.stdoutTotal
+	stderrCursor := s.stderrTotal
 	if s.stdin != nil {
 		_ = s.stdin.Close()
 		s.stdin = nil
 	}
-	if s.doneClosed {
-		s.updatedAt = time.Now()
-		s.mu.Unlock()
-		if s.onOutput != nil {
-			if len(stdoutTail.Emit) > 0 {
-				s.onOutput(sandbox.OutputChunk{Stream: "stdout", Text: string(stdoutTail.Emit)})
-			}
-			if len(stderrTail.Emit) > 0 {
-				s.onOutput(sandbox.OutputChunk{Stream: "stderr", Text: string(stderrTail.Emit)})
-			}
-		}
-		return
-	}
-	if s.cmd.ProcessState != nil {
+	if !forced && s.cmd != nil && s.cmd.ProcessState != nil {
 		s.exitCode = s.cmd.ProcessState.ExitCode()
+	} else if forced {
+		s.exitCode = -1
 	}
-	s.running = false
 	s.updatedAt = time.Now()
 	s.waitErr = err
-	s.doneClosed = true
-	close(s.done)
+	s.finalizing = true
 	s.mu.Unlock()
 	if s.onOutput != nil {
 		if len(stdoutTail.Emit) > 0 {
-			s.onOutput(sandbox.OutputChunk{Stream: "stdout", Text: string(stdoutTail.Emit)})
+			s.emitOutput(sandbox.OutputChunk{Stream: "stdout", Text: string(stdoutTail.Emit), Cursor: stdoutCursor})
 		}
 		if len(stderrTail.Emit) > 0 {
-			s.onOutput(sandbox.OutputChunk{Stream: "stderr", Text: string(stderrTail.Emit)})
+			s.emitOutput(sandbox.OutputChunk{Stream: "stderr", Text: string(stderrTail.Emit), Cursor: stderrCursor})
 		}
 	}
+	s.mu.Lock()
+	if !s.doneClosed {
+		s.stdoutCursor = stdoutCursor
+		s.stderrCursor = stderrCursor
+		s.running = false
+		s.finalizing = false
+		s.updatedAt = time.Now()
+		s.doneClosed = true
+		close(s.done)
+		s.notifyOutputLocked()
+	}
+	s.mu.Unlock()
 }
 
 func (s *windowsSession) takeJob() *job.Object {
@@ -1570,21 +1642,83 @@ func (s *windowsSession) takeJob() *job.Object {
 }
 
 func (s *windowsSession) forceTerminated(err error) {
+	s.closeOutputReaders()
+	s.finalize(err, true)
+}
+
+func (s *windowsSession) forceTerminationAfterDrain(terminateErr error) {
+	timer := time.NewTimer(windowsTerminateDrain)
+	defer timer.Stop()
+	select {
+	case <-s.done:
+		return
+	case <-timer.C:
+		s.forceTerminated(errors.Join(
+			fmt.Errorf("impl/sandbox/windows: session %q terminated before process wait completed", s.ref.SessionID),
+			terminateErr,
+		))
+	}
+}
+
+func (s *windowsSession) emitOutput(chunk sandbox.OutputChunk) {
+	s.mu.Lock()
+	s.callbacks++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.callbacks--
+		s.mu.Unlock()
+	}()
+	s.onOutput(chunk)
+}
+
+func (s *windowsSession) outputCallbackActive() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.callbacks > 0
+}
+
+func (s *windowsSession) closeOutputReaders() {
+	s.closeReadersOnce.Do(func() {
+		s.mu.RLock()
+		stdout := s.stdoutReader
+		stderr := s.stderrReader
+		s.mu.RUnlock()
+		if stdout != nil {
+			_ = stdout.Close()
+		}
+		if stderr != nil {
+			_ = stderr.Close()
+		}
+	})
+}
+
+func (s *windowsSession) publishOutput(stream string, cursor int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.doneClosed {
 		return
 	}
-	if s.stdin != nil {
-		_ = s.stdin.Close()
-		s.stdin = nil
+	switch stream {
+	case "stderr":
+		if cursor <= s.stderrCursor {
+			return
+		}
+		s.stderrCursor = cursor
+	default:
+		if cursor <= s.stdoutCursor {
+			return
+		}
+		s.stdoutCursor = cursor
 	}
-	s.running = false
-	s.exitCode = -1
-	s.updatedAt = time.Now()
-	s.waitErr = err
-	s.doneClosed = true
-	close(s.done)
+	s.notifyOutputLocked()
+}
+
+func (s *windowsSession) notifyOutputLocked() {
+	if s.outputSignal != nil {
+		close(s.outputSignal)
+	}
+	s.outputSignal = make(chan struct{})
 }
 
 func existingControlDirs(root string) []string {

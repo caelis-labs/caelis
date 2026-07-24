@@ -336,6 +336,8 @@ func syncCanonicalCommandTaskMetadata(entry *taskapi.Entry, output map[string]an
 		cursor := int64(len([]byte(text)))
 		entry.Metadata["output_cursor"] = cursor
 		entry.Metadata["model_output_cursor"] = cursor
+		replayCursor, _ := taskInt64Value(entry.Metadata[commandStreamOutputCursorMeta])
+		entry.Metadata[commandStreamOutputCursorMeta] = max(replayCursor, cursor)
 		return
 	}
 	delete(entry.Metadata, "output_cursor")

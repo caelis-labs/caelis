@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,6 +141,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		contextWindow    = fs.Int("context-window", envInt("CAELIS_CONTEXT_WINDOW", 0), "Context window override")
 		maxOutputTokens  = fs.Int("max-output-tokens", envInt("CAELIS_MAX_OUTPUT_TOKENS", 4096), "Max output tokens")
 		forceInteractive = fs.Bool("interactive", false, "Force interactive local main path")
+		noAnimation      = fs.Bool("no-animation", envBool("CAELIS_TUI_NO_ANIMATION", false), "Reduce TUI motion")
 		doctor           = fs.Bool("doctor", false, "Print runtime/session/sandbox diagnostics and exit")
 		controlListen    = fs.String("listen", envOr("CAELIS_CONTROL_LISTEN", "127.0.0.1:7777"), "Control client HTTP listen address")
 		controlTokenFile = fs.String("control-token-file", envOr("CAELIS_CONTROL_TOKEN_FILE", ""), "Path to the platform-secured Control bearer token file")
@@ -268,7 +270,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		}
 		return runHeadless(ctx, stack, preferredHeadlessSessionID(*sessionID), input, outFmt, stdout)
 	}
-	return runInteractive(ctx, stack, preferredInteractiveSessionID(*sessionID), cfg, renderModelText(cfg), stdin, stdout, stderr)
+	return runInteractive(ctx, stack, preferredInteractiveSessionID(*sessionID), cfg, renderModelText(cfg), tuiOptions{
+		NoAnimation: *noAnimation,
+	}, stdin, stdout, stderr)
 }
 
 func assemblyFromEnv() (assembly.ResolvedAssembly, error) {
@@ -387,8 +391,8 @@ func runSandboxReset(ctx context.Context, stack *gatewayapp.Stack, format output
 	return err
 }
 
-func runInteractive(ctx context.Context, stack *gatewayapp.Stack, sessionID string, cfg gatewayapp.Config, displayModelText string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
-	return runTUI(ctx, stack, strings.TrimSpace(sessionID), cfg, displayModelText, stdin, stdout, stderr)
+func runInteractive(ctx context.Context, stack *gatewayapp.Stack, sessionID string, cfg gatewayapp.Config, displayModelText string, options tuiOptions, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	return runTUI(ctx, stack, strings.TrimSpace(sessionID), cfg, displayModelText, options, stdin, stdout, stderr)
 }
 
 func renderModelText(cfg gatewayapp.Config) string {
@@ -616,6 +620,15 @@ func envInt(key string, fallback int) int {
 	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 		var parsed int
 		if _, err := fmt.Sscanf(value, "%d", &parsed); err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
+func envBool(key string, fallback bool) bool {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		if parsed, err := strconv.ParseBool(value); err == nil {
 			return parsed
 		}
 	}

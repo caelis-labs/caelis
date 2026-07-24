@@ -14,6 +14,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/outputwait"
 	"github.com/google/uuid"
 )
 
@@ -40,9 +41,8 @@ type AsyncSession struct {
 	stdinWriter  io.WriteCloser
 	stdoutBuffer *RingBuffer
 	stderrBuffer *RingBuffer
-	outputChan   chan AsyncOutputChunk
-	doneChan     chan struct{}  // signals readers to stop sending to outputChan
-	readersWg    sync.WaitGroup // tracks reader goroutines for clean shutdown
+	doneChan     chan struct{}
+	readersWg    sync.WaitGroup
 	exitChan     chan int
 	exitCode     atomic.Int32
 	exited       atomic.Bool
@@ -58,12 +58,16 @@ type AsyncSession struct {
 	tty          bool
 	onOutput     func(AsyncOutputChunk)
 	buildCommand func(context.Context, AsyncSessionConfig) (*exec.Cmd, error)
+	outputSignal chan struct{}
+	stdoutCursor int64
+	stderrCursor int64
 }
 
 // AsyncOutputChunk represents a chunk of output from stdout or stderr in async sessions.
 type AsyncOutputChunk struct {
 	Stream    string // "stdout" or "stderr"
 	Data      []byte
+	Cursor    int64 // cumulative raw stream marker after Data
 	Timestamp time.Time
 	// Final marks end-of-stream for this descriptor. Data remains raw bytes;
 	// text adapters use Final to flush any incomplete decoder suffix.
@@ -118,7 +122,6 @@ type AsyncSessionConfig struct {
 
 const (
 	defaultOutputBufferCap = 1024 * 1024 // 1MB
-	outputChannelBuffer    = 256
 )
 
 // NewAsyncSession creates a new async session but does not start it.
@@ -136,7 +139,6 @@ func NewAsyncSession(cfg AsyncSessionConfig) *AsyncSession {
 		StartTime:    time.Now(),
 		stdoutBuffer: NewRingBuffer(cfg.OutputBufferCap),
 		stderrBuffer: NewRingBuffer(cfg.OutputBufferCap),
-		outputChan:   make(chan AsyncOutputChunk, outputChannelBuffer),
 		doneChan:     make(chan struct{}),
 		exitChan:     make(chan int, 1),
 		ctx:          ctx,
@@ -146,6 +148,7 @@ func NewAsyncSession(cfg AsyncSessionConfig) *AsyncSession {
 		tty:          cfg.TTY,
 		onOutput:     cfg.OnOutput,
 		buildCommand: cfg.BuildCommand,
+		outputSignal: make(chan struct{}),
 	}
 	session.state.Store(SessionStateRunning)
 	session.lastActivity.Store(time.Now().UnixNano())
@@ -248,7 +251,9 @@ func (s *AsyncSession) readOutput(reader io.Reader, stream string, buffer *RingB
 	}
 	if s.onOutput != nil {
 		defer func() {
-			s.onOutput(AsyncOutputChunk{Stream: stream, Timestamp: time.Now(), Final: true})
+			s.onOutput(AsyncOutputChunk{
+				Stream: stream, Cursor: buffer.TotalWritten(), Timestamp: time.Now(), Final: true,
+			})
 		}()
 	}
 	buf := make([]byte, 8192)
@@ -267,25 +272,15 @@ func (s *AsyncSession) readOutput(reader io.Reader, stream string, buffer *RingB
 			// Update activity timestamp
 			s.lastActivity.Store(time.Now().UnixNano())
 
-			// Send to output channel only if not shutting down
-			select {
-			case <-s.doneChan:
-				// Session is closing, stop sending
-			case s.outputChan <- AsyncOutputChunk{
-				Stream:    stream,
-				Data:      data,
-				Timestamp: time.Now(),
-			}:
-			default:
-				// Channel full, skip
-			}
 			if s.onOutput != nil {
 				s.onOutput(AsyncOutputChunk{
 					Stream:    stream,
 					Data:      append([]byte(nil), data...),
+					Cursor:    buffer.TotalWritten(),
 					Timestamp: time.Now(),
 				})
 			}
+			s.publishOutput(stream, buffer.TotalWritten())
 		}
 		if err != nil {
 			return
@@ -334,6 +329,7 @@ func (s *AsyncSession) waitForExit() {
 	case s.exitChan <- exitCode:
 	default:
 	}
+	s.notifyOutputLocked()
 }
 
 func (s *AsyncSession) cleanupProcessGroupAfterExit() {
@@ -403,19 +399,64 @@ func (s *AsyncSession) WriteInput(input []byte) error {
 // ReadOutput returns accumulated output since the given markers.
 // Returns stdout data, stderr data, and new markers.
 func (s *AsyncSession) ReadOutput(stdoutMarker, stderrMarker int64) (stdout, stderr []byte, newStdoutMarker, newStderrMarker int64) {
+	if stdoutMarker < 0 {
+		stdoutMarker = 0
+	}
+	if stderrMarker < 0 {
+		stderrMarker = 0
+	}
 	stdout, newStdoutMarker = s.stdoutBuffer.ReadNewSince(stdoutMarker)
 	stderr, newStderrMarker = s.stderrBuffer.ReadNewSince(stderrMarker)
 	return
 }
 
+// OutputObservation reports published output progress for an async session.
+type OutputObservation struct {
+	Cursor sandbox.OutputCursor
+	Status SessionStatus
+}
+
+// AwaitOutput blocks until output advances beyond cursor or the process has
+// fully exited. It does not consume output and caller cancellation does not
+// affect the process.
+func (s *AsyncSession) AwaitOutput(ctx context.Context, cursor sandbox.OutputCursor) (OutputObservation, error) {
+	observation, err := outputwait.Await(ctx, cursor, func() outputwait.Snapshot[SessionStatus] {
+		s.mu.RLock()
+		signal := s.outputSignal
+		available := sandbox.OutputCursor{Stdout: s.stdoutCursor, Stderr: s.stderrCursor}
+		exited := s.exited.Load()
+		s.mu.RUnlock()
+		current := sandbox.OutputCursor{
+			Stdout: s.stdoutBuffer.TotalWritten(),
+			Stderr: s.stderrBuffer.TotalWritten(),
+		}
+		status := s.Status()
+		// A terminal transition publishes its final cursors under the same
+		// lock. Retry if it raced this snapshot so terminal observations
+		// always carry the final published cursor.
+		if !exited && s.exited.Load() {
+			return outputwait.Snapshot[SessionStatus]{Retry: true}
+		}
+		if !exited {
+			status.State = SessionStateRunning
+		}
+		return outputwait.Snapshot[SessionStatus]{
+			Signal:    signal,
+			Published: available,
+			Available: current,
+			Terminal:  exited,
+			Status:    status,
+		}
+	})
+	if err != nil {
+		return OutputObservation{}, err
+	}
+	return OutputObservation{Cursor: observation.Cursor, Status: observation.Status}, nil
+}
+
 // ReadAllOutput returns all buffered output.
 func (s *AsyncSession) ReadAllOutput() (stdout, stderr string) {
 	return string(s.stdoutBuffer.ReadAll()), string(s.stderrBuffer.ReadAll())
-}
-
-// OutputChannel returns a channel that receives output chunks in real-time.
-func (s *AsyncSession) OutputChannel() <-chan AsyncOutputChunk {
-	return s.outputChan
 }
 
 // ExitChannel returns a channel that receives the exit code when the process exits.
@@ -554,22 +595,40 @@ func (s *AsyncSession) Terminate() error {
 func (s *AsyncSession) Close() error {
 	var closeErr error
 	s.closeOnce.Do(func() {
-		// Signal reader goroutines to stop sending to outputChan.
+		// Signal timeout enforcement and terminate the process.
 		close(s.doneChan)
 
 		_ = s.Terminate()
 
-		// Wait for reader goroutines to finish so no goroutine can send
-		// to outputChan after this point.  The goroutines will exit once
-		// the pipes are closed (by process termination) and they see
-		// doneChan is closed.
+		// Wait for reader goroutines to finish draining their pipes.
 		s.readersWg.Wait()
-
-		// Do NOT close outputChan — it is never consumed externally and
-		// closing it was the source of a send-on-closed-channel panic.
-		// The channel and its buffer will be reclaimed by GC.
 	})
 	return closeErr
+}
+
+func (s *AsyncSession) publishOutput(stream string, cursor int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch stream {
+	case "stderr":
+		if cursor <= s.stderrCursor {
+			return
+		}
+		s.stderrCursor = cursor
+	default:
+		if cursor <= s.stdoutCursor {
+			return
+		}
+		s.stdoutCursor = cursor
+	}
+	s.notifyOutputLocked()
+}
+
+func (s *AsyncSession) notifyOutputLocked() {
+	if s.outputSignal != nil {
+		close(s.outputSignal)
+	}
+	s.outputSignal = make(chan struct{})
 }
 
 // GetResult returns a CommandResult if the session has exited.

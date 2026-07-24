@@ -65,15 +65,20 @@ type ApprovalOption struct {
 }
 
 type Event struct {
-	Kind          EventKind
-	Scope         Scope
-	ScopeID       string
-	RunID         string
-	TurnID        string
-	Actor         string
-	ParticipantID string
-	OccurredAt    time.Time
-	Meta          map[string]any
+	Kind    EventKind
+	Scope   Scope
+	ScopeID string
+	// SourceEventID and SourceProjectionID preserve the stable identities of
+	// the ACP Envelope that produced this Surface event. They are reducer
+	// inputs only: Surfaces must not persist them as a second transcript.
+	SourceEventID      string
+	SourceProjectionID string
+	RunID              string
+	TurnID             string
+	Actor              string
+	ParticipantID      string
+	OccurredAt         time.Time
+	Meta               map[string]any
 
 	NarrativeKind NarrativeKind
 	NoticeKind    NoticeKind
@@ -95,6 +100,13 @@ type Event struct {
 	ToolTerminal        bool
 	ToolOutputSynthetic bool
 	ToolOutputTerminal  bool
+	// ToolOutputCursor is the cumulative terminal-output byte position after
+	// ToolOutput. ToolOutputStartCursor is present for durable observation
+	// snapshots whose display text may be compacted rather than byte-exact.
+	ToolOutputCursor           int64
+	ToolOutputCursorKnown      bool
+	ToolOutputStartCursor      int64
+	ToolOutputStartCursorKnown bool
 	// ToolOutputGapBefore is a render-only notice that exact terminal bytes
 	// before this event are unavailable. It is never part of ToolOutput.
 	ToolOutputGapBefore bool

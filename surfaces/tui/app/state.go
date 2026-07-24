@@ -9,7 +9,6 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -22,11 +21,6 @@ const maxInputBarRows = 4
 const ctrlCExitWindow = 2 * time.Second
 const terminalResponseGuardDuration = 1500 * time.Millisecond
 const terminalResponsePendingFlushDelay = 120 * time.Millisecond
-const runningHintRotateEveryTicks = 90
-const runningLightSpeed = 0.55
-const runningLightBandRadius = 5.5
-const runningLightLead = 4.0
-const runningTickerStaticFrameCostThreshold = 40 * time.Millisecond
 const copyHintDuration = 1600 * time.Millisecond
 const inputHorizontalInset = tuikit.InputInset
 const paletteAnimationInterval = 16 * time.Millisecond
@@ -72,65 +66,42 @@ type compactNoticePairState struct {
 
 var runningSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-var runningCarouselLines = []string{
-	"Working on the turn...",
-	"You can add a follow-up while this runs.",
-	"Esc interrupts the current turn.",
-	"Use #path when a specific file matters.",
-	"Reviewing the latest context and tool output.",
-}
-
-type runningActivityKind string
-
-const (
-	runningActivityApprovalReview runningActivityKind = "approval_review"
-	runningActivityInterrupting   runningActivityKind = "interrupting"
-)
-
-type runningActivityState struct {
-	Kind   runningActivityKind
-	Detail string
-}
-
 type Diagnostics struct {
-	Frames                        uint64
-	IncrementalFrames             uint64
-	FullRepaints                  uint64
-	SlowFrames                    uint64
-	LastFrameDuration             time.Duration
-	AvgFrameDuration              time.Duration
-	MaxFrameDuration              time.Duration
-	RenderBytes                   uint64
-	PeakFrameBytes                uint64
-	ViewportFullSyncs             uint64
-	ViewportIncrementalSyncs      uint64
-	ViewportQueuedSyncs           uint64
-	ViewportSkippedSyncs          uint64
-	ViewportSetContentLines       uint64
-	ViewportSetContentLineCount   uint64
-	ViewportSetContentBytes       uint64
-	SelectionVisibleRenders       uint64
-	UpdateMessagesByLane          map[renderEventLane]uint64
-	UpdateMessagesByType          map[string]uint64
-	ViewportSetContentReason      map[string]uint64
-	BlockRenderCallsByKind        map[BlockKind]uint64
-	StreamSmoothingFlushReason    map[string]uint64
-	GlamourRenderCalls            uint64
-	InlineMarkdownCalls           uint64
-	ControlStatusCalls            uint64
-	RunningTickerAnimatedRenders  uint64
-	RunningTickerStaticRenders    uint64
-	RunningTickerStyleCacheMisses uint64
-	DiagnosticsDebugWriteErrors   uint64
-	ProgramSendsAfterClose        uint64
-	LastRenderAt                  time.Time
-	LastInputAt                   time.Time
-	LastInputLatency              time.Duration
-	AvgInputLatency               time.Duration
-	P95InputLatency               time.Duration
-	LastMentionLatency            time.Duration
-	LastResumeLatency             time.Duration
-	RedrawMode                    string
+	Frames                      uint64
+	IncrementalFrames           uint64
+	FullRepaints                uint64
+	SlowFrames                  uint64
+	LastFrameDuration           time.Duration
+	AvgFrameDuration            time.Duration
+	MaxFrameDuration            time.Duration
+	RenderBytes                 uint64
+	PeakFrameBytes              uint64
+	ViewportFullSyncs           uint64
+	ViewportIncrementalSyncs    uint64
+	ViewportQueuedSyncs         uint64
+	ViewportSkippedSyncs        uint64
+	ViewportSetContentLines     uint64
+	ViewportSetContentLineCount uint64
+	ViewportSetContentBytes     uint64
+	SelectionVisibleRenders     uint64
+	UpdateMessagesByLane        map[renderEventLane]uint64
+	UpdateMessagesByType        map[string]uint64
+	ViewportSetContentReason    map[string]uint64
+	BlockRenderCallsByKind      map[BlockKind]uint64
+	StreamSmoothingFlushReason  map[string]uint64
+	GlamourRenderCalls          uint64
+	InlineMarkdownCalls         uint64
+	ControlStatusCalls          uint64
+	DiagnosticsDebugWriteErrors uint64
+	ProgramSendsAfterClose      uint64
+	LastRenderAt                time.Time
+	LastInputAt                 time.Time
+	LastInputLatency            time.Duration
+	AvgInputLatency             time.Duration
+	P95InputLatency             time.Duration
+	LastMentionLatency          time.Duration
+	LastResumeLatency           time.Duration
+	RedrawMode                  string
 }
 
 type viewportFollowState int
@@ -437,11 +408,8 @@ type Model struct {
 	quit    bool
 
 	runningInterruptRequested bool
-	runningTick               uint64
-	runningTip                int
 	runningActivity           runningActivityState
-	runningTickerStyles       []lipgloss.Style
-	runningTickerThemeKey     string
+	runningActivityTracker    runningActivityTracker
 
 	statusModel            string
 	statusContext          string

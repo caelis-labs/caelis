@@ -12,6 +12,7 @@ import (
 
 type taskControlTarget interface {
 	Wait(context.Context, taskapi.ControlRequest) (taskapi.Snapshot, error)
+	Read(context.Context, taskapi.ControlRequest) (taskapi.Snapshot, error)
 	Write(context.Context, taskapi.ControlRequest) (taskapi.Snapshot, error)
 	Cancel(context.Context, taskapi.ControlRequest) (taskapi.Snapshot, error)
 }
@@ -178,11 +179,34 @@ func (t commandControlTarget) Write(ctx context.Context, req taskapi.ControlRequ
 	if t.task.commandOutcomeUnattached() {
 		return t.task.snapshotWithoutSession(t.runtime.runtime.now()), nil
 	}
+	baseline, _, err := t.runtime.syncCommandStream(ctx, t.task)
+	if err != nil {
+		return taskapi.Snapshot{}, err
+	}
 	input := normalizeTaskWriteInput(req.Input)
 	if err := t.task.session.WriteInput(ctx, []byte(input)); err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	return t.runtime.waitCommand(ctx, t.task, req.Yield)
+	if err := t.runtime.observeCommandOutput(ctx, t.task, baseline, req.Yield); err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	return t.runtime.snapshotObservedCommand(ctx, t.task)
+}
+
+func (t commandControlTarget) Read(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	if t.task.commandOutcomeUnattached() {
+		return t.task.snapshotWithoutSession(t.runtime.runtime.now()), nil
+	}
+	baseline, unread, err := t.runtime.syncCommandStream(ctx, t.task)
+	if err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	if !unread {
+		if err := t.runtime.observeCommandOutput(ctx, t.task, baseline, req.Yield); err != nil {
+			return taskapi.Snapshot{}, err
+		}
+	}
+	return t.runtime.snapshotObservedCommand(ctx, t.task)
 }
 
 func (t commandControlTarget) Cancel(ctx context.Context, _ taskapi.ControlRequest) (taskapi.Snapshot, error) {
@@ -199,6 +223,10 @@ func (t subagentControlTarget) Wait(ctx context.Context, req taskapi.ControlRequ
 		return taskapi.Snapshot{}, err
 	}
 	return t.runtime.waitSubagent(ctx, t.task, req.Yield)
+}
+
+func (t subagentControlTarget) Read(context.Context, taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: Task read supports RunCommand handles; use wait for a Spawn result")
 }
 
 func (t subagentControlTarget) Write(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {

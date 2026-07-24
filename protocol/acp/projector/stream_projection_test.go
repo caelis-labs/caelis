@@ -195,6 +195,9 @@ func TestProjectTaskStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	if streamMeta[metautil.RuntimeStreamTruncated] != true || streamMeta[metautil.RuntimeStreamBefore] != int64(12) {
 		t.Fatalf("stream meta = %#v, want typed truncation boundary", streamMeta)
 	}
+	if got, ok := metautil.Int64(update.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeOutputCursor); !ok || got != 15 {
+		t.Fatalf("stream output cursor = %d, %v; want 15, true", got, ok)
+	}
 	toolMeta := metautil.RuntimeSection(update.Meta, metautil.RuntimeTool)
 	if toolMeta[metautil.RuntimeTargetHandle] != "command" {
 		t.Fatalf("tool meta = %#v, want public Task handle", toolMeta)
@@ -259,6 +262,9 @@ func TestProjectTaskStreamFramePreservesClosedCommandExitCode(t *testing.T) {
 		t.Fatalf("terminal exit = %#v, %v; want exit code %d", exit, ok, exitCode)
 	}
 	assertTerminalAnchor(t, update.Content, "call-1")
+	if got, ok := metautil.Int64(update.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeOutputCursor); !ok || got != 3 {
+		t.Fatalf("final stream output cursor = %d, %v; want 3, true", got, ok)
+	}
 }
 
 func TestProjectTaskStreamFramePreservesSplitNewlineFrame(t *testing.T) {

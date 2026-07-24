@@ -127,6 +127,7 @@ func NewModel(cfg Config) *Model {
 		taskStreamResolveTokens:  map[string]uint64{},
 		taskStreamResolveRetries: map[string]int{},
 		taskStreamRetries:        map[string]int{},
+		runningActivityTracker:   newRunningActivityTracker(),
 	}
 	m.help = help.New()
 	m.applyTheme(theme)
@@ -193,7 +194,7 @@ func (m *Model) Init() tea.Cmd {
 	}
 	m.hasCommittedLine = m.doc.Len() > 0
 	m.syncViewportContent()
-	cmds := []tea.Cmd{tickStatusCmd(), m.spinner.Tick}
+	cmds := []tea.Cmd{tickStatusCmd()}
 	if cmd := m.beginStatusRefreshCmd(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -361,14 +362,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case spinner.TickMsg:
 		m.spinnerTickScheduled = false
-		if m.runningIndicatorActive() {
+		if m.runningIndicatorActive() && !m.noAnimation {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			if cmd != nil {
 				m.spinnerTickScheduled = true
-			}
-			if m.turnRunning() && m.activePrompt == nil {
-				m.advanceRunningAnimation()
 			}
 			return m, cmd
 		}
@@ -395,8 +393,6 @@ func (m *Model) applyTheme(theme tuikit.Theme) {
 	}
 	m.theme = theme
 	m.themeCacheKey = themeRenderCacheKey(theme)
-	m.runningTickerStyles = nil
-	m.runningTickerThemeKey = ""
 	clearGlamourCache()
 	configureHelpStyles(&m.help, theme)
 	m.applyPaletteTheme(theme)

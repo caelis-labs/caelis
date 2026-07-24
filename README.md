@@ -90,6 +90,8 @@ Common flags:
 - `-p`: headless prompt text.
 - `-format`: `text` or `json` for headless output.
 - `-interactive`: force TUI mode when stdin is piped.
+- `-no-animation`: reduce TUI motion (also available as
+  `CAELIS_TUI_NO_ANIMATION=true`).
 - `-session`: resume or target a session id.
 - `-store-dir`: override the default store directory.
 - `-workspace-cwd`: set the workspace directory.

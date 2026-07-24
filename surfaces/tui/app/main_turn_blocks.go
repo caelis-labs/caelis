@@ -110,7 +110,7 @@ func (m *Model) mainTimelineBarrier() {
 	}
 	if m.doc != nil {
 		if block, _ := m.doc.Find(blockID).(*MainACPTurnBlock); block != nil {
-			block.onNarrativeBarrier()
+			block.sealNarrativeSegment()
 			m.markViewportBlockDirty(block.BlockID())
 		}
 	}

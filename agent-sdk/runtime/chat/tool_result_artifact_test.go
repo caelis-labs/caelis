@@ -312,7 +312,7 @@ func TestToolResultArtifactPathRoundTripsWithoutPersistingFullResult(t *testing.
 		t.Fatalf("StartSession() error = %v", err)
 	}
 	assistant := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{call}, "")
-	events := append(modelToolCallEvents(assistant, &model.Response{Message: assistant}), resultEvent)
+	events := append(modelToolCallEvents(assistant, &model.Response{Message: assistant}, ""), resultEvent)
 	for _, event := range events {
 		if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: event}); err != nil {
 			t.Fatalf("AppendEvent() error = %v", err)

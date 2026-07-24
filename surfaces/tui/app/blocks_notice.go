@@ -15,6 +15,7 @@ func (b *MainACPTurnBlock) AddNotice(text string, occurredAt time.Time, noticeKi
 	if text == "" {
 		return
 	}
+	b.sealNarrativeSegment()
 	ev := SubagentEvent{Kind: SENotice, Text: text, NoticeKind: noticeKind}
 	if !occurredAt.IsZero() {
 		ev.StartedAt = occurredAt

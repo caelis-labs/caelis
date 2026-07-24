@@ -337,6 +337,60 @@ The supported `sandbox` contracts are platform-neutral. Concrete backends are:
 | Windows | Windows restricted process/ACL/job backend | Uses Windows-only APIs and helper lifecycle. |
 | All supported targets | Host | Command execution without sandbox isolation; it is not a security substitute for a native backend. |
 
+Async Session output uses the same resumable contract on every backend:
+`AwaitOutput(cursor)` observes progress or terminal state without consuming
+bytes, and `ReadOutput` advances the caller-owned stdout/stderr cursors. An
+async `OutputChunk.Cursor` is the cumulative `ReadOutput` marker for that stream
+after the bytes represented by `Text`; split decoder suffixes advance it only
+when their text is emitted. Runtime atomically checkpoints callback text with
+those per-stream markers and uses `ReadOutput` only after rehydration when no
+callback remains attached. Recovery owns independent stdout/stderr streaming
+decoders. `sandbox.OutputReadWindow` detects when a bounded backend evicted
+bytes before its returned suffix; Runtime then publishes an explicit gap and
+does not present that recovery sequence as coherent. Active read cursors are
+separate from the last durable per-stream plus presentation/model checkpoint:
+an incomplete UTF-8 prefix leaves the durable marker before the pending bytes,
+while a gap persists a non-coherent epoch and monotonic high presentation
+baseline so restart cannot replay the retained suffix. Runtime advances the
+durable model-resume checkpoint only after a Task observation has exposed every
+byte through that boundary; a restart before the observation resumes from the
+previous checkpoint instead of skipping already-ingested but unseen output.
+Terminal entries also retain an independent absolute stream replay cursor, so a
+cache loss cannot move a completed stream backwards when its canonical result
+is shorter than the live output window or is still deferred. Rehydration marks
+the unavailable live byte range as truncated and returns canonical Result only
+as final text; it never assigns different canonical bytes to an earlier live
+cursor interval. A separate durable event baseline keeps reconstructed running
+frames and terminal close events monotonic. A resume token newer than the last
+persisted baseline never changes shared state: its absolute byte cursor remains
+authoritative for text delivery, while the event projection never regresses. If
+that token is already beyond a reconstructed close, durable terminal state and
+subscription EOF finish the observation without synthesizing repeat close
+events.
+Agent-facing `Task read` accepts exactly one running RunCommand handle and
+returns after new output or the bounded observation window; it never targets a
+Spawn or a comma-separated batch. Its model payload may compact `latest_output`,
+while per-invocation metadata carries the exact output delta and cumulative
+range for Surface reconciliation. `Task wait` remains the bounded observer for
+RunCommand and Spawn terminal progress.
+macOS/Linux CI must run the cmdsession, host, native-backend, and Runtime
+focused/race suites. Windows code is cross-compiled on non-Windows hosts, but
+real pipe, Job Object, restricted-token, codepage, and force-termination
+semantics require a native runner.
+
+TODO (native Windows acceptance): run
+`go test -race ./agent-sdk/sandbox/windows ./agent-sdk/sandbox/host
+./agent-sdk/sandbox/backend/cmdsession ./agent-sdk/runtime`, then run
+`CAELIS_WINDOWS_SANDBOX_SMOKE_E2E=1 go test
+./agent-sdk/sandbox/windows -run TestSandboxedCommandSmoke -count=1` and
+`CAELIS_WINDOWS_SANDBOX_E2E=1 go test
+./agent-sdk/sandbox/windows -run TestWindowsWorkspaceWriteSandboxE2E -count=1`.
+Acceptance requires monotonically resumable stdout/stderr cursors for split
+Unicode output, final per-stream cursors equal to `ReadOutput`, a presentation
+cursor that cannot regress to a capped `Result`, decoder-tail delivery before
+terminal wake, observer-local cancellation, and no early return from concurrent
+normal/forced finalization.
+
 When backend selection is automatic, `sandbox.New` may expose an explicit host
 fallback in its status if no native candidate is available. Hosts must inspect
 that status and decide whether their policy allows host execution. Requesting a

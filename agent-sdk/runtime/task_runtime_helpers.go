@@ -45,6 +45,9 @@ func (s completedTaskSession) ReadOutput(_ context.Context, stdoutMarker, stderr
 		return nil, nil, 0, 0, nil
 	}
 	stdout, stderr := completedTaskOutput(s.entry.Result)
+	if stdout == noOutputPlaceholder && stderr == "" {
+		stdout = ""
+	}
 	if stdoutMarker < 0 {
 		stdoutMarker = 0
 	}
@@ -58,6 +61,32 @@ func (s completedTaskSession) ReadOutput(_ context.Context, stdoutMarker, stderr
 		stderrMarker = int64(len(stderr))
 	}
 	return []byte(stdout[stdoutMarker:]), []byte(stderr[stderrMarker:]), int64(len(stdout)), int64(len(stderr)), nil
+}
+
+func (s completedTaskSession) AwaitOutput(ctx context.Context, cursor sandbox.OutputCursor) (sandbox.OutputObservation, error) {
+	stdout, stderr := "", ""
+	if s.entry != nil {
+		stdout, stderr = completedTaskOutput(s.entry.Result)
+		if stdout == noOutputPlaceholder && stderr == "" {
+			stdout = ""
+		}
+	}
+	available := sandbox.OutputCursor{
+		Stdout: int64(len([]byte(stdout))),
+		Stderr: int64(len([]byte(stderr))),
+	}
+	cursor = sandbox.NormalizeOutputCursor(cursor)
+	if err := sandbox.ValidateOutputCursor(cursor, available); err != nil {
+		return sandbox.OutputObservation{}, err
+	}
+	status, err := s.Status(ctx)
+	if err != nil {
+		return sandbox.OutputObservation{}, err
+	}
+	return sandbox.OutputObservation{
+		Cursor: available,
+		Status: status,
+	}, nil
 }
 
 func (s completedTaskSession) Status(context.Context) (sandbox.SessionStatus, error) {

@@ -18,11 +18,15 @@ type ToolUpdateMeta struct {
 	OutputNarrative bool
 	// OutputAuthoritative marks a canonical semantic final that must replace a
 	// transient preview for the same physical task panel.
-	OutputAuthoritative bool
-	Terminal            bool
-	OutputSynthetic     bool
-	OutputTerminal      bool
-	OutputGapBefore     bool
+	OutputAuthoritative    bool
+	Terminal               bool
+	OutputSynthetic        bool
+	OutputTerminal         bool
+	OutputGapBefore        bool
+	OutputCursor           int64
+	OutputCursorKnown      bool
+	OutputStartCursor      int64
+	OutputStartCursorKnown bool
 }
 
 type toolEventUpdate struct {
@@ -74,55 +78,59 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	if !update.Final {
 		if i := openIdx; i >= 0 {
 			ev := &out[i]
-			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, messageID, taskHandle, taskAction, taskInput, taskTargetKind, semanticName, update.Meta.Terminal, update.Meta.OutputNarrative, update.Meta.OutputTerminal, update.Meta.OutputGapBefore)
+			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, messageID, taskHandle, taskAction, taskInput, taskTargetKind, semanticName, update.Meta)
 			return out, true, false
 		}
 		out = append(out, SubagentEvent{
-			Kind:            SEToolCall,
-			CallID:          callID,
-			Name:            name,
-			ToolKind:        toolKind,
-			Args:            args,
-			StartArgs:       args,
-			FullArgs:        fullArgs,
-			Output:          output,
-			OutputMessageID: messageID,
-			OutputMessage:   output,
-			OutputNarrative: update.Meta.OutputNarrative,
-			Terminal:        update.Meta.Terminal,
-			OutputSynthetic: update.Meta.OutputSynthetic,
-			OutputTerminal:  update.Meta.OutputTerminal,
-			OutputGapBefore: update.Meta.OutputGapBefore,
-			TaskHandle:      taskHandle,
-			TaskAction:      taskAction,
-			TaskInput:       taskInput,
-			TaskTargetKind:  taskTargetKind,
+			Kind:              SEToolCall,
+			CallID:            callID,
+			Name:              name,
+			ToolKind:          toolKind,
+			Args:              args,
+			StartArgs:         args,
+			FullArgs:          fullArgs,
+			Output:            output,
+			OutputMessageID:   messageID,
+			OutputMessage:     output,
+			OutputNarrative:   update.Meta.OutputNarrative,
+			Terminal:          update.Meta.Terminal,
+			OutputSynthetic:   update.Meta.OutputSynthetic,
+			OutputTerminal:    update.Meta.OutputTerminal,
+			OutputGapBefore:   update.Meta.OutputGapBefore,
+			OutputCursor:      update.Meta.OutputCursor,
+			OutputCursorKnown: update.Meta.OutputCursorKnown,
+			TaskHandle:        taskHandle,
+			TaskAction:        taskAction,
+			TaskInput:         taskInput,
+			TaskTargetKind:    taskTargetKind,
 		})
 		return out, true, false
 	}
 
 	finalEvent := SubagentEvent{
-		Kind:            SEToolCall,
-		CallID:          callID,
-		Name:            name,
-		ToolKind:        toolKind,
-		Args:            args,
-		StartArgs:       args,
-		FullArgs:        fullArgs,
-		Output:          output,
-		OutputMessageID: messageID,
-		OutputMessage:   output,
-		OutputNarrative: update.Meta.OutputNarrative,
-		Terminal:        update.Meta.Terminal,
-		OutputSynthetic: update.Meta.OutputSynthetic,
-		OutputTerminal:  update.Meta.OutputTerminal,
-		OutputGapBefore: update.Meta.OutputGapBefore,
-		Done:            true,
-		Err:             update.Err,
-		TaskHandle:      taskHandle,
-		TaskAction:      taskAction,
-		TaskInput:       taskInput,
-		TaskTargetKind:  taskTargetKind,
+		Kind:              SEToolCall,
+		CallID:            callID,
+		Name:              name,
+		ToolKind:          toolKind,
+		Args:              args,
+		StartArgs:         args,
+		FullArgs:          fullArgs,
+		Output:            output,
+		OutputMessageID:   messageID,
+		OutputMessage:     output,
+		OutputNarrative:   update.Meta.OutputNarrative,
+		Terminal:          update.Meta.Terminal,
+		OutputSynthetic:   update.Meta.OutputSynthetic,
+		OutputTerminal:    update.Meta.OutputTerminal,
+		OutputGapBefore:   update.Meta.OutputGapBefore,
+		OutputCursor:      update.Meta.OutputCursor,
+		OutputCursorKnown: update.Meta.OutputCursorKnown,
+		Done:              true,
+		Err:               update.Err,
+		TaskHandle:        taskHandle,
+		TaskAction:        taskAction,
+		TaskInput:         taskInput,
+		TaskTargetKind:    taskTargetKind,
 	}
 	if i := openToolEventIndexForUpdate(out, update, toolIndex); i >= 0 {
 		ev := &out[i]
@@ -234,7 +242,7 @@ func updateToolEventIndex(index map[string]int, events []SubagentEvent, callID s
 	delete(index, callID)
 }
 
-func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, messageID, taskHandle, taskAction, taskInput, taskTargetKind string, semanticName string, terminal bool, outputNarrative bool, outputTerminal bool, outputGapBefore bool) {
+func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, messageID, taskHandle, taskAction, taskInput, taskTargetKind string, semanticName string, meta ToolUpdateMeta) {
 	if ev == nil {
 		return
 	}
@@ -262,25 +270,26 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 	if ev.TaskTargetKind == "" {
 		ev.TaskTargetKind = taskTargetKind
 	}
-	if terminal {
+	if meta.Terminal {
 		ev.Terminal = true
 	}
-	ev.OutputGapBefore = ev.OutputGapBefore || outputGapBefore
+	ev.OutputGapBefore = ev.OutputGapBefore || meta.OutputGapBefore
 	// Spawn keeps terminal-panel styling, but its live output is structured
 	// child narrative rather than terminal bytes and must retain message scope.
 	terminalOutput := isTerminalPanelToolEvent(*ev) && !strings.EqualFold(semanticName, "SPAWN")
 	if shouldMergeOpenToolOutput(semanticName, output, terminalOutput) {
 		if terminalOutput {
-			if outputTerminal {
-				// ACP terminal_output is an exact byte delta. Repeated lines and
-				// prefix-like chunks are real output, not evidence of a cumulative
-				// snapshot, so append them without overlap guessing.
+			if meta.OutputTerminal && meta.OutputCursorKnown {
+				mergeTerminalOutputByCursor(ev, output, meta)
+			} else if meta.OutputTerminal {
+				// Legacy ACP terminal_output without a cursor is still an exact
+				// byte delta and must not use textual overlap guessing.
 				ev.Output += output
 			} else {
 				ev.Output = mergeCommandStreamChunk(ev.Output, output)
 			}
 		} else {
-			if outputNarrative && ev.OutputNarrativeBoundary {
+			if meta.OutputNarrative && ev.OutputNarrativeBoundary {
 				ev.Output = joinSubagentNarrativeMessages(ev.Output, output)
 				ev.OutputMessage = output
 				ev.OutputMessageID = ""
@@ -292,7 +301,7 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 				ev.OutputMessageID = messageID
 			}
 		}
-		ev.OutputNarrative = ev.OutputNarrative || outputNarrative
+		ev.OutputNarrative = ev.OutputNarrative || meta.OutputNarrative
 		ev.OutputSynthetic = false
 		if terminalOutput {
 			ev.OutputTerminal = true
@@ -329,6 +338,10 @@ func fillFinalToolEventFromExisting(finalEvent *SubagentEvent, existing Subagent
 	}
 	if !finalEvent.Terminal {
 		finalEvent.Terminal = existing.Terminal
+	}
+	if !finalEvent.OutputCursorKnown && existing.OutputCursorKnown {
+		finalEvent.OutputCursor = existing.OutputCursor
+		finalEvent.OutputCursorKnown = true
 	}
 }
 
@@ -372,6 +385,10 @@ func fillMissingFinalToolEventFromExisting(finalEvent *SubagentEvent, existing S
 	if !finalEvent.Terminal {
 		finalEvent.Terminal = existing.Terminal
 	}
+	if !finalEvent.OutputCursorKnown && existing.OutputCursorKnown {
+		finalEvent.OutputCursor = existing.OutputCursor
+		finalEvent.OutputCursorKnown = true
+	}
 }
 
 func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authoritativeFinal bool) {
@@ -386,12 +403,22 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authorita
 	ev.FullArgs = finalEvent.FullArgs
 	ev.Terminal = ev.Terminal || finalEvent.Terminal
 	ev.OutputGapBefore = ev.OutputGapBefore || finalEvent.OutputGapBefore
+	outputReplaced := false
 	if finalToolOutputShouldReplace(*ev, *finalEvent, authoritativeFinal) {
 		ev.Output = finalEvent.Output
 		ev.OutputMessageID = finalEvent.OutputMessageID
 		ev.OutputMessage = finalEvent.OutputMessage
 		ev.OutputSynthetic = finalEvent.OutputSynthetic
 		ev.OutputTerminal = finalEvent.OutputTerminal
+		outputReplaced = true
+	}
+	// A contentless close frame proves lifecycle completion, not delivery of
+	// bytes through its end cursor. Keep the last represented cursor so a
+	// later durable Task observation can still repair the missing suffix.
+	if outputReplaced && finalEvent.Output != "" && finalEvent.OutputCursorKnown &&
+		(!ev.OutputCursorKnown || finalEvent.OutputCursor >= ev.OutputCursor) {
+		ev.OutputCursor = finalEvent.OutputCursor
+		ev.OutputCursorKnown = true
 	}
 	ev.OutputNarrative = ev.OutputNarrative || finalEvent.OutputNarrative
 	ev.Done = true

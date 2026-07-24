@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
@@ -253,6 +254,7 @@ func (t *subagentTask) appendStreamFrameLocked(frame stream.Frame) {
 		t.streamFrames = t.streamFrames[1:]
 		t.streamEventBase++
 	}
+	t.notifyStreamChangeLocked()
 }
 
 func (t *subagentTask) ensureTerminalStreamFrameLocked() {
@@ -271,6 +273,40 @@ func (t *subagentTask) ensureTerminalStreamFrameLocked() {
 		UpdatedAt: time.Now(),
 	})
 	t.streamTerminalFramed = true
+}
+
+// notifyStreamChangeLocked broadcasts one coalesced stream-state change. The
+// caller must hold t.mu so an Await caller can atomically check the current
+// cursor and capture the channel without losing a wakeup.
+func (t *subagentTask) notifyStreamChangeLocked() {
+	if t == nil {
+		return
+	}
+	if t.streamChanged != nil {
+		close(t.streamChanged)
+	}
+	t.streamChanged = make(chan struct{})
+}
+
+func (t *subagentTask) streamChangeWaiterLocked(cursor stream.Cursor, followContinue bool) (<-chan struct{}, bool) {
+	if t == nil {
+		return nil, true
+	}
+	current := stream.Cursor{
+		Output: t.streamOutputCursor,
+		Events: t.streamEventBase + int64(len(t.streamFrames)),
+	}
+	if current.Output > cursor.Output || current.Events > cursor.Events {
+		return nil, true
+	}
+	state := string(t.state)
+	if !t.running && stream.IsTerminalState(state) && (!followContinue || t.state != task.StateCompleted) {
+		return nil, true
+	}
+	if t.streamChanged == nil {
+		t.streamChanged = make(chan struct{})
+	}
+	return t.streamChanged, false
 }
 
 func subagentStreamFrameSize(frame stream.Frame) int {

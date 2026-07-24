@@ -3,8 +3,10 @@ package runtime
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -16,22 +18,25 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
-func TestStreamReadCommandUsesCallbackOutputWithoutReadFallback(t *testing.T) {
+func TestStreamReadCommandUsesCallbackAsSoleLiveIngestAuthority(t *testing.T) {
 	t.Parallel()
 
 	const chunk = "chunk\n"
 	sess := &liveOutputRaceSession{stdout: chunk}
 	task := &commandTask{
-		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
-		sessionRef:     session.SessionRef{SessionID: "session-1"},
-		session:        sess,
-		state:          taskapi.StateRunning,
-		running:        true,
-		createdAt:      time.Now(),
-		outputCallback: true,
+		ref:         taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:  session.SessionRef{SessionID: "session-1"},
+		session:     sess,
+		state:       taskapi.StateRunning,
+		running:     true,
+		createdAt:   time.Now(),
+		outputState: commandOutputState{callback: true},
 	}
-	task.appendOutput(chunk)
-	sess.onRead = func() { t.Fatal("ReadOutput fallback should not be used for callback-backed live output") }
+	task.appendSandboxOutput(sandbox.OutputChunk{
+		Stream: "stdout", Text: chunk, Cursor: int64(len([]byte(chunk))),
+	})
+	readCalled := false
+	sess.onRead = func() { readCalled = true }
 
 	snap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
 	if err != nil {
@@ -46,18 +51,21 @@ func TestStreamReadCommandUsesCallbackOutputWithoutReadFallback(t *testing.T) {
 	if stored != chunk {
 		t.Fatalf("stored output = %q, want live chunk without fallback duplicate", stored)
 	}
+	if readCalled || task.outputState.backend.stdout != int64(len([]byte(chunk))) {
+		t.Fatalf("live ingest = ReadOutput called %v cursor %d, want callback-only cursor %d", readCalled, task.outputState.backend.stdout, len([]byte(chunk)))
+	}
 }
 
 func TestStreamReadCommandRejectsOutputAfterTerminalFrame(t *testing.T) {
 	t.Parallel()
 
 	task := &commandTask{
-		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
-		sessionRef:     session.SessionRef{SessionID: "session-1"},
-		session:        &liveOutputRaceSession{},
-		state:          taskapi.StateUnknownOutcome,
-		createdAt:      time.Now(),
-		outputCallback: true,
+		ref:         taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:  session.SessionRef{SessionID: "session-1"},
+		session:     &liveOutputRaceSession{},
+		state:       taskapi.StateUnknownOutcome,
+		createdAt:   time.Now(),
+		outputState: commandOutputState{callback: true},
 	}
 	service := &streamService{}
 
@@ -123,6 +131,716 @@ func TestStreamReadRehydratedUnknownOutcomeWithoutSession(t *testing.T) {
 	}
 }
 
+func TestStreamReadRehydratedRunningCommandKeepsAbsoluteOutputBaseline(t *testing.T) {
+	t.Parallel()
+
+	const (
+		alreadyObserved = "already observed\n"
+		tail            = "new output\n"
+	)
+	baseline := int64(len([]byte(alreadyObserved)))
+	entry := &taskapi.Entry{
+		TaskID:    "task-1",
+		Session:   session.SessionRef{SessionID: "session-1"},
+		State:     taskapi.StateRunning,
+		Running:   true,
+		CreatedAt: time.Unix(100, 0),
+		UpdatedAt: time.Unix(200, 0),
+		Metadata: map[string]any{
+			"command_phase":              commandPhaseUnknown,
+			"output_cursor":              baseline,
+			"model_output_cursor":        baseline,
+			"output_checkpoint_coherent": true,
+		},
+	}
+	task, err := (&taskRuntime{}).rehydrateCommandTask(entry)
+	if err != nil {
+		t.Fatalf("rehydrateCommandTask() error = %v", err)
+	}
+	if task.outputState.frontier.base != baseline || task.outputState.frontier.model != baseline {
+		t.Fatalf("rehydrated cursors = base %d model %d, want %d", task.outputState.frontier.base, task.outputState.frontier.model, baseline)
+	}
+
+	task.appendOutput(tail)
+	snapshot, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{Output: baseline})
+	if err != nil {
+		t.Fatalf("readCommand() error = %v", err)
+	}
+	if got := streamFrameText(snapshot.Frames); got != tail {
+		t.Fatalf("stream frame text = %q, want %q", got, tail)
+	}
+	if snapshot.Cursor.Output != baseline+int64(len([]byte(tail))) {
+		t.Fatalf("stream output cursor = %d, want %d", snapshot.Cursor.Output, baseline+int64(len([]byte(tail))))
+	}
+}
+
+func TestRehydrateRunningCommandIgnoresLegacyUnfencedOutputCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	entry := &taskapi.Entry{
+		TaskID:       "task-1",
+		Session:      session.SessionRef{SessionID: "session-1"},
+		State:        taskapi.StateRunning,
+		Running:      true,
+		CreatedAt:    time.Unix(100, 0),
+		UpdatedAt:    time.Unix(200, 0),
+		StdoutCursor: 12,
+		Metadata: map[string]any{
+			"command_phase":       commandPhaseUnknown,
+			"output_cursor":       int64(12),
+			"model_output_cursor": int64(12),
+		},
+	}
+	task, err := (&taskRuntime{}).rehydrateCommandTask(entry)
+	if err != nil {
+		t.Fatalf("rehydrateCommandTask() error = %v", err)
+	}
+	if task.outputState.frontier.base != 0 || task.outputState.frontier.model != 0 || task.outputState.backend.stdout != 0 {
+		t.Fatalf("legacy checkpoint restored as coherent: base=%d model=%d stdout=%d", task.outputState.frontier.base, task.outputState.frontier.model, task.outputState.backend.stdout)
+	}
+}
+
+func TestRehydratedRunningCommandResumesFromAtomicCallbackCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	const (
+		shown = "shown\n"
+		tail  = "tail\n"
+	)
+	live := &commandTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		state:      taskapi.StateRunning, running: true, createdAt: time.Now(),
+		outputState: commandOutputState{
+			callback:   true,
+			exact:      true,
+			checkpoint: commandOutputCheckpoint{coherent: true},
+		},
+		metadata: map[string]any{"command_phase": commandPhaseRunning},
+	}
+	live.appendSandboxOutput(sandbox.OutputChunk{
+		Stream: "stdout", Text: shown, Cursor: int64(len([]byte(shown))),
+	})
+	live.mu.Lock()
+	live.outputState.frontier.model = int64(len([]byte(shown)))
+	live.commitOutputResumeCheckpointLocked()
+	live.metadata["output_cursor"] = live.outputState.frontier.model
+	live.metadata["model_output_cursor"] = live.outputState.frontier.model
+	entry := live.entrySnapshot(time.Now())
+	live.mu.Unlock()
+	entry.Terminal = sandbox.TerminalRef{
+		Backend: sandbox.BackendHost, SessionID: "term-session", TerminalID: "term-1",
+	}
+	coherent, _ := entry.Metadata["output_checkpoint_coherent"].(bool)
+	if entry.StdoutCursor != int64(len([]byte(shown))) || !coherent {
+		t.Fatalf("durable checkpoint = %#v, want callback text and stdout marker committed together", entry)
+	}
+
+	running := true
+	sessionHandle := &yieldProbeSandboxSession{statusRunning: &running, stdout: shown + tail}
+	backend := &yieldProbeSandboxRuntime{session: sessionHandle}
+	tasks := newTaskRuntime(&Runtime{clock: time.Now}, nil)
+	tasks.backends[sandbox.BackendHost] = backend
+	rehydrated, err := tasks.rehydrateCommandTask(entry)
+	if err != nil {
+		t.Fatalf("rehydrateCommandTask() error = %v", err)
+	}
+	snapshot, err := (&streamService{}).readCommand(
+		context.Background(),
+		rehydrated,
+		stream.Cursor{Output: int64(len([]byte(shown))), Events: 3},
+	)
+	if err != nil {
+		t.Fatalf("readCommand() error = %v", err)
+	}
+	if got := streamFrameText(snapshot.Frames); got != tail {
+		t.Fatalf("rehydrated stream = %q, want only unseen %q", got, tail)
+	}
+	if snapshot.Cursor.Output != int64(len([]byte(shown+tail))) {
+		t.Fatalf("rehydrated cursor = %d, want %d", snapshot.Cursor.Output, len([]byte(shown+tail)))
+	}
+	if snapshot.Cursor.Events != 3 {
+		t.Fatalf("rehydrated event cursor = %d, want non-regressing caller baseline 3", snapshot.Cursor.Events)
+	}
+	if len(snapshot.Frames) != 1 || snapshot.Frames[0].Cursor.Events != 3 {
+		t.Fatalf("rehydrated frame cursors = %#v, want caller event baseline 3 on the delivery clone", snapshot.Frames)
+	}
+}
+
+func TestRunningEntryBeforeModelObservationKeepsPreviousResumeCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	const (
+		early = "early\n"
+		later = "later\n"
+	)
+	live := &commandTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		state:      taskapi.StateRunning,
+		running:    true,
+		createdAt:  time.Now(),
+		outputState: commandOutputState{
+			callback: true,
+			exact:    true,
+			checkpoint: commandOutputCheckpoint{
+				available: true,
+				coherent:  true,
+			},
+			resume: commandOutputCheckpoint{
+				available: true,
+				coherent:  true,
+			},
+		},
+		metadata: map[string]any{
+			"command_phase": commandPhaseRunning,
+		},
+	}
+	live.appendSandboxOutput(sandbox.OutputChunk{
+		Stream: "stdout",
+		Text:   early,
+		Cursor: int64(len([]byte(early))),
+	})
+
+	live.mu.Lock()
+	entry := live.entrySnapshot(time.Now())
+	live.mu.Unlock()
+	entry.Terminal = sandbox.TerminalRef{
+		Backend: sandbox.BackendHost, SessionID: "term-session", TerminalID: "term-1",
+	}
+	outputCursor, outputKnown := taskInt64Value(entry.Metadata["output_cursor"])
+	modelCursor, modelKnown := taskInt64Value(entry.Metadata["model_output_cursor"])
+	if entry.StdoutCursor != 0 || !outputKnown || !modelKnown || outputCursor != 0 || modelCursor != 0 {
+		t.Fatalf(
+			"pre-observation durable checkpoint = stdout %d output %d/%v model %d/%v, want previous zero resume point",
+			entry.StdoutCursor,
+			outputCursor,
+			outputKnown,
+			modelCursor,
+			modelKnown,
+		)
+	}
+
+	running := true
+	sessionHandle := &yieldProbeSandboxSession{
+		statusRunning: &running,
+		stdout:        early + later,
+	}
+	tasks := newTaskRuntime(&Runtime{clock: time.Now}, nil)
+	tasks.backends[sandbox.BackendHost] = &yieldProbeSandboxRuntime{session: sessionHandle}
+	rehydrated, err := tasks.rehydrateCommandTask(entry)
+	if err != nil {
+		t.Fatalf("rehydrateCommandTask() error = %v", err)
+	}
+	snapshot, err := (&streamService{}).readCommand(context.Background(), rehydrated, stream.Cursor{})
+	if err != nil {
+		t.Fatalf("readCommand() error = %v", err)
+	}
+	if got := streamFrameText(snapshot.Frames); got != early+later {
+		t.Fatalf("rehydrated stream = %q, want unobserved early output plus later output %q", got, early+later)
+	}
+}
+
+func TestRehydrateRunningCommandRejectsCheckpointAheadOfModelObservation(t *testing.T) {
+	t.Parallel()
+
+	const outputCursor = int64(6)
+	entry := &taskapi.Entry{
+		TaskID:       "task-1",
+		Session:      session.SessionRef{SessionID: "session-1"},
+		State:        taskapi.StateRunning,
+		Running:      true,
+		CreatedAt:    time.Unix(100, 0),
+		UpdatedAt:    time.Unix(200, 0),
+		StdoutCursor: outputCursor,
+		Metadata: map[string]any{
+			"command_phase":               commandPhaseUnknown,
+			"output_checkpoint_available": true,
+			"output_checkpoint_coherent":  true,
+			"output_cursor":               outputCursor,
+			"model_output_cursor":         int64(0),
+		},
+	}
+	task, err := (&taskRuntime{}).rehydrateCommandTask(entry)
+	if err != nil {
+		t.Fatalf("rehydrateCommandTask() error = %v", err)
+	}
+	if task.outputState.backend.stdout != 0 || task.outputState.frontier.base != 0 || task.outputState.frontier.model != 0 || task.outputState.resume.available {
+		t.Fatalf(
+			"inconsistent checkpoint restored: stdout=%d base=%d model=%d resume=%v",
+			task.outputState.backend.stdout,
+			task.outputState.frontier.base,
+			task.outputState.frontier.model,
+			task.outputState.resume.available,
+		)
+	}
+}
+
+func TestRehydrateCommandRejectsExhaustedStreamEventCursor(t *testing.T) {
+	t.Parallel()
+
+	entry := &taskapi.Entry{
+		TaskID:    "task-1",
+		Session:   session.SessionRef{SessionID: "session-1"},
+		State:     taskapi.StateCompleted,
+		Running:   false,
+		CreatedAt: time.Unix(100, 0),
+		UpdatedAt: time.Unix(200, 0),
+		Metadata: map[string]any{
+			commandStreamEventCursorMeta: int64(math.MaxInt64),
+		},
+	}
+	if _, err := (&taskRuntime{}).rehydrateCommandTask(entry); err == nil ||
+		!strings.Contains(err.Error(), "event cursor is exhausted") {
+		t.Fatalf("rehydrateCommandTask() error = %v, want exhausted event cursor rejection", err)
+	}
+}
+
+func TestRehydratedCommandRecoveryDecodesSplitUTF8AcrossReads(t *testing.T) {
+	t.Parallel()
+
+	running := true
+	raw := []byte("中")
+	sessionHandle := &yieldProbeSandboxSession{
+		statusRunning: &running,
+		stdout:        "a" + string(raw[:1]),
+	}
+	task := &commandTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: sessionHandle.Ref().SessionID, TerminalID: sessionHandle.Terminal().TerminalID},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		session:    sessionHandle,
+		state:      taskapi.StateRunning,
+		running:    true,
+		createdAt:  time.Now(),
+		metadata:   map[string]any{"command_phase": commandPhaseRunning},
+	}
+	status, err := sessionHandle.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := newTaskRuntime(&Runtime{clock: time.Now}, nil).reconcileCommandStatus(
+		context.Background(),
+		task,
+		status,
+	)
+	if err != nil {
+		t.Fatalf("reconcileCommandStatus() error = %v", err)
+	}
+	if got, _ := first.Result["latest_output"].(string); got != "a" {
+		t.Fatalf("first recovery latest_output = %q, want complete prefix only", got)
+	}
+	task.mu.Lock()
+	firstPending := task.outputState.recoveryStdout.PendingBytes()
+	firstCoherent := task.outputState.checkpoint.coherent
+	entry := task.entrySnapshot(time.Now())
+	task.mu.Unlock()
+	if firstPending != 1 || !firstCoherent {
+		t.Fatalf("first recovery pending/coherent = %d/%v, want 1/true committed prefix", firstPending, firstCoherent)
+	}
+	if entry.StdoutCursor != 1 {
+		t.Fatalf("incomplete recovery persisted stdout cursor %d, want complete-prefix marker 1", entry.StdoutCursor)
+	}
+	if cursor, ok := taskInt64Value(entry.Metadata["output_cursor"]); !ok || cursor != 1 {
+		t.Fatalf("incomplete recovery output checkpoint = %d/%v, want 1/true", cursor, ok)
+	}
+
+	sessionHandle.stdout = "a" + string(raw)
+	tasks := newTaskRuntime(&Runtime{clock: time.Now}, nil)
+	tasks.backends[sandbox.BackendHost] = &yieldProbeSandboxRuntime{session: sessionHandle}
+	rehydrated, err := tasks.rehydrateCommandTask(entry)
+	if err != nil {
+		t.Fatalf("rehydrateCommandTask() error = %v", err)
+	}
+
+	second, err := (&streamService{}).readCommand(context.Background(), rehydrated, stream.Cursor{Output: 1})
+	if err != nil {
+		t.Fatalf("second readCommand() error = %v", err)
+	}
+	if got := streamFrameText(second.Frames); got != "中" || !utf8.ValidString(got) {
+		t.Fatalf("second recovery text = %q valid=%v, want one valid rune", got, utf8.ValidString(got))
+	}
+	rehydrated.mu.Lock()
+	secondPending := rehydrated.outputState.recoveryStdout.PendingBytes()
+	secondCoherent := rehydrated.outputState.checkpoint.coherent
+	secondEntry := rehydrated.entrySnapshot(time.Now())
+	rehydrated.mu.Unlock()
+	if secondPending != 0 || !secondCoherent || secondEntry.StdoutCursor != 1 {
+		t.Fatalf(
+			"pre-observation recovery pending/coherent/resume cursor = %d/%v/%d, want 0/true/1",
+			secondPending,
+			secondCoherent,
+			secondEntry.StdoutCursor,
+		)
+	}
+
+	status, err = sessionHandle.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tasks.reconcileCommandStatus(context.Background(), rehydrated, status); err != nil {
+		t.Fatalf("reconcileCommandStatus() second observation error = %v", err)
+	}
+	rehydrated.mu.Lock()
+	observedEntry := rehydrated.entrySnapshot(time.Now())
+	rehydrated.mu.Unlock()
+	if observedEntry.StdoutCursor != int64(1+len(raw)) {
+		t.Fatalf(
+			"post-observation durable stdout cursor = %d, want %d",
+			observedEntry.StdoutCursor,
+			1+len(raw),
+		)
+	}
+}
+
+func TestRehydratedCommandRecoveryGapIsExplicitAndTerminalCursorDoesNotRegress(t *testing.T) {
+	t.Parallel()
+
+	const (
+		baseline = int64(10)
+		next     = int64(30)
+		tail     = "tail"
+	)
+	running := true
+	sessionHandle := &yieldProbeSandboxSession{
+		statusRunning: &running,
+		result: sandbox.CommandResult{
+			Stdout: tail, ExitCode: 0, Backend: sandbox.BackendHost,
+		},
+		readOutput: func(stdoutCursor int64, stderrCursor int64) ([]byte, []byte, int64, int64, error) {
+			if stdoutCursor < next {
+				return []byte(tail), nil, next, stderrCursor, nil
+			}
+			return nil, nil, next, stderrCursor, nil
+		},
+	}
+	task := &commandTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: sessionHandle.Ref().SessionID, TerminalID: sessionHandle.Terminal().TerminalID},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		session:    sessionHandle,
+		state:      taskapi.StateRunning,
+		running:    true,
+		createdAt:  time.Now(),
+		outputState: commandOutputState{
+			backend:  commandBackendCursor{stdout: baseline},
+			frontier: commandObservationFrontier{base: baseline, model: baseline},
+			checkpoint: commandOutputCheckpoint{
+				backend:   commandBackendCursor{stdout: baseline},
+				output:    baseline,
+				model:     baseline,
+				available: true,
+				coherent:  true,
+			},
+		},
+		metadata: map[string]any{
+			"output_checkpoint_available": true,
+			"command_phase":               commandPhaseRunning,
+			"output_cursor":               baseline,
+			"model_output_cursor":         baseline,
+			"output_checkpoint_coherent":  true,
+		},
+	}
+	status, err := sessionHandle.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := newTaskRuntime(&Runtime{clock: time.Now}, nil).reconcileCommandStatus(
+		context.Background(),
+		task,
+		status,
+	)
+	if err != nil {
+		t.Fatalf("reconcileCommandStatus() running error = %v", err)
+	}
+	runningCursor, ok := taskInt64Value(observed.Metadata["output_cursor"])
+	if !ok || runningCursor <= baseline {
+		t.Fatalf("running output cursor = %d/%v, want > %d", runningCursor, ok, baseline)
+	}
+	streamed, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{Output: baseline})
+	if err != nil {
+		t.Fatalf("readCommand() error = %v", err)
+	}
+	if streamed.TruncatedBefore <= baseline || streamFrameText(streamed.Frames) != tail {
+		t.Fatalf("gap stream = %#v, want explicit gap plus retained %q", streamed, tail)
+	}
+	task.mu.Lock()
+	coherent := task.outputState.checkpoint.coherent
+	entry := task.entrySnapshot(time.Now())
+	task.mu.Unlock()
+	if coherent || entry.StdoutCursor != next {
+		t.Fatalf("gap checkpoint = coherent %v cursor %d, want false/%d", coherent, entry.StdoutCursor, next)
+	}
+	if available, _ := entry.Metadata["output_checkpoint_available"].(bool); !available {
+		t.Fatalf("gap checkpoint is not resumable: %#v", entry.Metadata)
+	}
+	if gap, _ := entry.Metadata["output_recovery_gap"].(bool); !gap {
+		t.Fatalf("gap checkpoint lost gap epoch: %#v", entry.Metadata)
+	}
+	if cursor, ok := taskInt64Value(entry.Metadata["output_cursor"]); !ok || cursor != runningCursor {
+		t.Fatalf("gap presentation checkpoint = %d/%v, want %d/true", cursor, ok, runningCursor)
+	}
+
+	tasks := newTaskRuntime(&Runtime{clock: time.Now}, nil)
+	tasks.backends[sandbox.BackendHost] = &yieldProbeSandboxRuntime{session: sessionHandle}
+	rehydrated, err := tasks.rehydrateCommandTask(entry)
+	if err != nil {
+		t.Fatalf("rehydrateCommandTask() error = %v", err)
+	}
+	if rehydrated.outputState.frontier.base != runningCursor || !rehydrated.outputState.checkpoint.gap {
+		t.Fatalf("rehydrated gap baseline = %d/%v, want %d/true", rehydrated.outputState.frontier.base, rehydrated.outputState.checkpoint.gap, runningCursor)
+	}
+	noReplay, err := (&streamService{}).readCommand(
+		context.Background(),
+		rehydrated,
+		stream.Cursor{Output: runningCursor},
+	)
+	if err != nil {
+		t.Fatalf("rehydrated readCommand() error = %v", err)
+	}
+	if got := streamFrameText(noReplay.Frames); got != "" || noReplay.Cursor.Output != runningCursor {
+		t.Fatalf("rehydrated gap replayed retained tail: %#v", noReplay)
+	}
+
+	const continued = "more"
+	sessionHandle.readOutput = func(stdoutCursor int64, stderrCursor int64) ([]byte, []byte, int64, int64, error) {
+		if stdoutCursor < next+int64(len(continued)) {
+			return []byte(continued), nil, next + int64(len(continued)), stderrCursor, nil
+		}
+		return nil, nil, next + int64(len(continued)), stderrCursor, nil
+	}
+	continuedSnapshot, err := (&streamService{}).readCommand(
+		context.Background(),
+		rehydrated,
+		stream.Cursor{Output: runningCursor},
+	)
+	if err != nil {
+		t.Fatalf("continued readCommand() error = %v", err)
+	}
+	if got := streamFrameText(continuedSnapshot.Frames); got != continued || continuedSnapshot.Cursor.Output <= runningCursor {
+		t.Fatalf("continued gap stream = %#v, want monotonic %q", continuedSnapshot, continued)
+	}
+
+	running = false
+	status, err = sessionHandle.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := tasks.reconcileCommandStatus(
+		context.Background(),
+		rehydrated,
+		status,
+	)
+	if err != nil {
+		t.Fatalf("reconcileCommandStatus() error = %v", err)
+	}
+	terminalCursor, ok := taskInt64Value(completed.Metadata["output_cursor"])
+	if !ok || terminalCursor < continuedSnapshot.Cursor.Output {
+		t.Fatalf("terminal output cursor = %d/%v, want >= continued cursor %d", terminalCursor, ok, continuedSnapshot.Cursor.Output)
+	}
+	if coherent, _ := completed.Metadata["output_checkpoint_coherent"].(bool); coherent {
+		t.Fatalf("terminal recovery gap became coherent: %#v", completed.Metadata)
+	}
+}
+
+func TestStreamAwaitCommandWakesForStateOnlyTerminalTransition(t *testing.T) {
+	t.Parallel()
+
+	sessionHandle := &liveOutputRaceSession{awaitStarted: make(chan struct{}, 1)}
+	task := &commandTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		session:    sessionHandle,
+		state:      taskapi.StateRunning,
+		running:    true,
+		createdAt:  time.Now(),
+		result:     map[string]any{"state": string(taskapi.StateRunning)},
+		metadata:   map[string]any{"state": string(taskapi.StateRunning), "running": true},
+	}
+	service := newStreamService(&taskRuntime{tasks: map[string]*commandTask{task.ref.TaskID: task}})
+	result := make(chan stream.Snapshot, 1)
+	errs := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	go func() {
+		snapshot, err := service.await(ctx, stream.ReadRequest{
+			Ref: stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
+		})
+		if err != nil {
+			errs <- err
+			return
+		}
+		result <- snapshot
+	}()
+
+	select {
+	case <-sessionHandle.awaitStarted:
+	case <-ctx.Done():
+		t.Fatal("command AwaitOutput did not block")
+	}
+	applyCommandEntry(task, &taskapi.Entry{
+		TaskID:  task.ref.TaskID,
+		Session: task.sessionRef,
+		State:   taskapi.StateUnknownOutcome,
+		Running: false,
+		Result:  map[string]any{"state": string(taskapi.StateUnknownOutcome), "error": "cancel outcome unknown"},
+		Metadata: map[string]any{
+			"state": string(taskapi.StateUnknownOutcome), "running": false,
+		},
+		Terminal: task.session.Terminal(),
+	})
+
+	select {
+	case err := <-errs:
+		t.Fatalf("await() error = %v", err)
+	case snapshot := <-result:
+		if snapshot.Running || snapshot.State != string(taskapi.StateUnknownOutcome) || !snapshot.TerminalFramed {
+			t.Fatalf("await() snapshot = %#v, want terminal state-only transition", snapshot)
+		}
+	case <-ctx.Done():
+		t.Fatal("state-only terminal transition did not wake command stream")
+	}
+}
+
+func TestTerminalDurableReloadContinuesEventCursorWithClosedFrame(t *testing.T) {
+	t.Parallel()
+
+	running := true
+	sessionHandle := &yieldProbeSandboxSession{
+		statusRunning: &running,
+		result: sandbox.CommandResult{
+			Stdout:   "one\ntwo\nthree\n",
+			ExitCode: 0,
+			Backend:  sandbox.BackendHost,
+		},
+	}
+	task := &commandTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: sessionHandle.Ref().SessionID, TerminalID: sessionHandle.Terminal().TerminalID},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		session:    sessionHandle,
+		state:      taskapi.StateRunning,
+		running:    true,
+		createdAt:  time.Now(),
+		outputState: commandOutputState{
+			callback:   true,
+			exact:      true,
+			checkpoint: commandOutputCheckpoint{coherent: true},
+		},
+		metadata: map[string]any{"command_phase": commandPhaseRunning},
+	}
+	var stdoutCursor int64
+	for _, text := range []string{"one\n", "two\n", "three\n"} {
+		stdoutCursor += int64(len([]byte(text)))
+		task.appendSandboxOutput(sandbox.OutputChunk{
+			Stream: "stdout",
+			Text:   text,
+			Cursor: stdoutCursor,
+		})
+	}
+	before, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatalf("readCommand() running error = %v", err)
+	}
+	if before.Cursor.Events != 3 {
+		t.Fatalf("running event cursor = %d, want three callback frames", before.Cursor.Events)
+	}
+
+	store := newFileTaskStoreForTest(t)
+	tasks := newTaskRuntime(&Runtime{clock: time.Now}, store)
+	running = false
+	status, err := sessionHandle.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tasks.reconcileCommandStatus(context.Background(), task, status); err != nil {
+		t.Fatalf("reconcileCommandStatus() error = %v", err)
+	}
+	entry, err := store.Get(context.Background(), task.ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eventCursor, ok := taskInt64Value(entry.Metadata[commandStreamEventCursorMeta]); !ok || eventCursor != before.Cursor.Events {
+		t.Fatalf("durable event baseline = %d/%v, want %d", eventCursor, ok, before.Cursor.Events)
+	}
+
+	reloaded, err := newStreamService(tasks).Read(context.Background(), stream.ReadRequest{
+		Ref: stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
+		Cursor: stream.Cursor{
+			Output: before.Cursor.Output,
+			Events: before.Cursor.Events,
+		},
+	})
+	if err != nil {
+		t.Fatalf("stream Read() after durable reload error = %v", err)
+	}
+	if reloaded.Cursor.Events != before.Cursor.Events+1 {
+		t.Fatalf("terminal event cursor = %d, want %d", reloaded.Cursor.Events, before.Cursor.Events+1)
+	}
+	if len(reloaded.Frames) != 1 || !reloaded.Frames[0].Closed ||
+		reloaded.Frames[0].Cursor.Events != before.Cursor.Events+1 {
+		t.Fatalf("terminal reload frames = %#v, want one monotonic closed frame", reloaded.Frames)
+	}
+
+	ahead, err := newStreamService(tasks).Read(context.Background(), stream.ReadRequest{
+		Ref: stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
+		Cursor: stream.Cursor{
+			Output: before.Cursor.Output,
+			Events: math.MaxInt64,
+		},
+	})
+	if err != nil {
+		t.Fatalf("stream Read() with saturated event cursor error = %v", err)
+	}
+	if ahead.Cursor.Events != math.MaxInt64 || !ahead.TerminalFramed {
+		t.Fatalf("saturated event snapshot = %#v, want idempotent acknowledged event plane", ahead)
+	}
+	projected := stream.FramesForSnapshot(ahead)
+	if len(projected) != 0 {
+		t.Fatalf("saturated event projected frames = %#v, want no repeated close beyond acknowledged cursor", projected)
+	}
+	aheadAgain, err := newStreamService(tasks).Read(context.Background(), stream.ReadRequest{
+		Ref: stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
+		Cursor: stream.Cursor{
+			Output: ahead.Cursor.Output,
+			Events: ahead.Cursor.Events,
+		},
+	})
+	if err != nil {
+		t.Fatalf("stream Read() after saturated terminal snapshot error = %v", err)
+	}
+	if aheadAgain.Cursor != ahead.Cursor || len(stream.FramesForSnapshot(aheadAgain)) != 0 {
+		t.Fatalf("saturated terminal read was not idempotent: first=%#v second=%#v", ahead, aheadAgain)
+	}
+
+	normalAgain, err := newStreamService(tasks).Read(context.Background(), stream.ReadRequest{
+		Ref: stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
+		Cursor: stream.Cursor{
+			Output: before.Cursor.Output,
+			Events: before.Cursor.Events,
+		},
+	})
+	if err != nil {
+		t.Fatalf("stream Read() after saturated reader error = %v", err)
+	}
+	if len(normalAgain.Frames) != 1 || !normalAgain.Frames[0].Closed ||
+		normalAgain.Frames[0].Cursor.Events != before.Cursor.Events+1 {
+		t.Fatalf("saturated reader poisoned shared stream state: %#v", normalAgain)
+	}
+}
+
+func TestCompletedTaskSessionAwaitOutputRejectsCursorAhead(t *testing.T) {
+	t.Parallel()
+
+	sessionHandle := completedTaskSession{entry: &taskapi.Entry{
+		State:   taskapi.StateCompleted,
+		Running: false,
+		Result:  map[string]any{"result": "done\n", "exit_code": 0},
+	}}
+	_, err := sessionHandle.AwaitOutput(context.Background(), sandbox.OutputCursor{Stdout: 6})
+	var cursorErr *sandbox.OutputCursorAheadError
+	if !errors.As(err, &cursorErr) {
+		t.Fatalf("AwaitOutput() error = %v, want OutputCursorAheadError", err)
+	}
+}
+
 func TestStreamSubscribeFollowsOnlyAReopenedSubagentContinue(t *testing.T) {
 	t.Parallel()
 
@@ -144,8 +862,8 @@ func TestStreamSubscribeFollowsOnlyAReopenedSubagentContinue(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		for frame, err := range service.Subscribe(ctx, stream.SubscribeRequest{
-			Ref:          stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
-			PollInterval: time.Millisecond, FollowContinues: true,
+			Ref:             stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
+			FollowContinues: true,
 		}) {
 			if err != nil {
 				done <- err
@@ -238,14 +956,14 @@ func TestStreamReadCommandCompletedEmitsUndeliveredCallbackTail(t *testing.T) {
 	const shown = "live\n"
 	const tail = "final\n"
 	task := &commandTask{
-		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
-		sessionRef:     session.SessionRef{SessionID: "session-1"},
-		session:        &liveOutputRaceSession{stdout: shown + tail, completed: true},
-		state:          taskapi.StateRunning,
-		running:        true,
-		createdAt:      time.Now(),
-		output:         shown,
-		outputCallback: true,
+		ref:         taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:  session.SessionRef{SessionID: "session-1"},
+		session:     &liveOutputRaceSession{stdout: shown + tail, completed: true},
+		state:       taskapi.StateRunning,
+		running:     true,
+		createdAt:   time.Now(),
+		output:      shown,
+		outputState: commandOutputState{callback: true},
 	}
 
 	snap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{Output: int64(len(shown))})
@@ -269,14 +987,14 @@ func TestStreamSubscribeEmitsUndeliveredCommandTailBeforeClose(t *testing.T) {
 	const shown = "步骤 5/5: 处理中...\n"
 	const tail = "✅ 任务完成！\n"
 	task := &commandTask{
-		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
-		sessionRef:     session.SessionRef{SessionID: "session-1"},
-		session:        &liveOutputRaceSession{stdout: shown + tail, completed: true},
-		state:          taskapi.StateRunning,
-		running:        true,
-		createdAt:      time.Now(),
-		output:         shown,
-		outputCallback: true,
+		ref:         taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:  session.SessionRef{SessionID: "session-1"},
+		session:     &liveOutputRaceSession{stdout: shown + tail, completed: true},
+		state:       taskapi.StateRunning,
+		running:     true,
+		createdAt:   time.Now(),
+		output:      shown,
+		outputState: commandOutputState{callback: true},
 	}
 	service := newStreamService(&taskRuntime{
 		tasks: map[string]*commandTask{task.ref.TaskID: task},
@@ -321,18 +1039,18 @@ func TestResolvedStreamReaderKeepsLiveTaskAcrossDeferredDurableReplacement(t *te
 	const tail = "✅ 任务完成！\n"
 	sess := &liveOutputRaceSession{stdout: shown + tail}
 	live := &commandTask{
-		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
-		sessionRef:     session.SessionRef{SessionID: "session-1"},
-		session:        sess,
-		state:          taskapi.StateRunning,
-		running:        true,
-		createdAt:      time.Now(),
-		output:         shown,
-		outputCallback: true,
+		ref:         taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:  session.SessionRef{SessionID: "session-1"},
+		session:     sess,
+		state:       taskapi.StateRunning,
+		running:     true,
+		createdAt:   time.Now(),
+		output:      shown,
+		outputState: commandOutputState{callback: true},
 	}
 	tasks := &taskRuntime{tasks: map[string]*commandTask{live.ref.TaskID: live}}
 	service := newStreamService(tasks)
-	read, err := service.resolveReader(context.Background(), stream.Ref{
+	read, _, err := service.resolveReader(context.Background(), stream.Ref{
 		SessionID: live.sessionRef.SessionID,
 		TaskID:    live.ref.TaskID,
 	})
@@ -375,17 +1093,19 @@ func TestCompleteCommandTaskReconcilesCallbackTailForConcurrentSubscribers(t *te
 	const tail = "✅ 任务完成！\n"
 	sess := &liveOutputRaceSession{stdout: shown + tail, completed: true}
 	task := &commandTask{
-		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
-		sessionRef:     session.SessionRef{SessionID: "session-1"},
-		session:        sess,
-		state:          taskapi.StateRunning,
-		running:        true,
-		createdAt:      time.Now(),
-		stdoutCursor:   int64(len([]byte(shown))),
-		output:         shown,
-		outputCallback: true,
-		result:         map[string]any{"state": string(taskapi.StateRunning)},
-		metadata:       map[string]any{"state": string(taskapi.StateRunning), "running": true},
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		session:    sess,
+		state:      taskapi.StateRunning,
+		running:    true,
+		createdAt:  time.Now(),
+		output:     shown,
+		outputState: commandOutputState{
+			backend:  commandBackendCursor{stdout: int64(len([]byte(shown)))},
+			callback: true,
+		},
+		result:   map[string]any{"state": string(taskapi.StateRunning)},
+		metadata: map[string]any{"state": string(taskapi.StateRunning), "running": true},
 	}
 	tasks := newTaskRuntime(&Runtime{clock: time.Now}, nil)
 	tasks.installCommandTask(task)
@@ -394,9 +1114,9 @@ func TestCompleteCommandTaskReconcilesCallbackTailForConcurrentSubscribers(t *te
 		t.Fatalf("Status() error = %v", err)
 	}
 
-	snapshot, err := tasks.completeCommandTaskWithStatus(context.Background(), task, status)
+	snapshot, err := tasks.reconcileCommandStatus(context.Background(), task, status)
 	if err != nil {
-		t.Fatalf("completeCommandTaskWithStatus() error = %v", err)
+		t.Fatalf("reconcileCommandStatus() error = %v", err)
 	}
 	if snapshot.Running || snapshot.State != taskapi.StateCompleted {
 		t.Fatalf("snapshot = %#v, want completed", snapshot)
@@ -410,20 +1130,168 @@ func TestCompleteCommandTaskReconcilesCallbackTailForConcurrentSubscribers(t *te
 	}
 }
 
+func TestCompleteCommandTaskDoesNotHoldTaskLockAcrossResult(t *testing.T) {
+	t.Parallel()
+
+	var task *commandTask
+	sess := &liveOutputRaceSession{
+		stdout:    "tail\n",
+		completed: true,
+		onResult: func() {
+			task.appendOutput("tail\n")
+		},
+	}
+	task = &commandTask{
+		ref:         taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:  session.SessionRef{SessionID: "session-1"},
+		session:     sess,
+		state:       taskapi.StateRunning,
+		running:     true,
+		createdAt:   time.Now(),
+		outputState: commandOutputState{callback: true},
+		result:      map[string]any{"state": string(taskapi.StateRunning)},
+		metadata:    map[string]any{"state": string(taskapi.StateRunning), "running": true},
+	}
+	tasks := newTaskRuntime(&Runtime{clock: time.Now}, nil)
+	status, err := sess.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, completeErr := tasks.reconcileCommandStatus(context.Background(), task, status)
+		done <- completeErr
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("reconcileCommandStatus() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reconcileCommandStatus() deadlocked when Result re-entered the output callback")
+	}
+}
+
+func TestAwaitCommandWakesWhenCallbackAppendsFrame(t *testing.T) {
+	t.Parallel()
+
+	awaitStarted := make(chan struct{}, 1)
+	sess := &liveOutputRaceSession{awaitStarted: awaitStarted}
+	task := &commandTask{
+		ref:         taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:  session.SessionRef{SessionID: "session-1"},
+		session:     sess,
+		state:       taskapi.StateRunning,
+		running:     true,
+		createdAt:   time.Now(),
+		outputState: commandOutputState{callback: true},
+		result:      map[string]any{"state": string(taskapi.StateRunning)},
+		metadata:    map[string]any{"state": string(taskapi.StateRunning), "running": true},
+	}
+	service := &streamService{}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan stream.Snapshot, 1)
+	errs := make(chan error, 1)
+	go func() {
+		snapshot, err := service.awaitCommand(ctx, task, stream.Cursor{}, false)
+		if err != nil {
+			errs <- err
+			return
+		}
+		done <- snapshot
+	}()
+	select {
+	case <-awaitStarted:
+	case <-time.After(time.Second):
+		t.Fatal("AwaitOutput() did not start")
+	}
+
+	task.appendOutput("live\n")
+	select {
+	case snapshot := <-done:
+		if got := streamFrameText(snapshot.Frames); got != "live\n" {
+			t.Fatalf("frame text = %q, want callback output", got)
+		}
+	case err := <-errs:
+		t.Fatalf("awaitCommand() error = %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("awaitCommand() did not wake for an appended callback frame")
+	}
+}
+
+func TestAwaitCommandRetainsOneBackendObserverAcrossStreamWake(t *testing.T) {
+	t.Parallel()
+
+	awaitStarted := make(chan struct{}, 1)
+	sess := &liveOutputRaceSession{awaitStarted: awaitStarted}
+	task := &commandTask{
+		ref:         taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:  session.SessionRef{SessionID: "session-1"},
+		session:     sess,
+		state:       taskapi.StateRunning,
+		running:     true,
+		createdAt:   time.Now(),
+		outputState: commandOutputState{callback: true},
+		result:      map[string]any{"state": string(taskapi.StateRunning)},
+		metadata:    map[string]any{"state": string(taskapi.StateRunning), "running": true},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := (&streamService{}).awaitCommand(ctx, task, stream.Cursor{}, false)
+		done <- err
+	}()
+	select {
+	case <-awaitStarted:
+	case <-ctx.Done():
+		t.Fatal("AwaitOutput() did not start")
+	}
+
+	statusBeforeWake := sess.statusCalls.Load()
+	task.mu.Lock()
+	task.notifyCommandStreamChangeLocked()
+	task.mu.Unlock()
+	deadline := time.Now().Add(time.Second)
+	for sess.statusCalls.Load() <= statusBeforeWake && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := sess.statusCalls.Load(); got <= statusBeforeWake {
+		t.Fatalf("Status() calls = %d, want stream wake to trigger another read after %d", got, statusBeforeWake)
+	}
+	if got := sess.awaitCalls.Load(); got != 1 {
+		t.Fatalf("AwaitOutput() calls = %d, want one retained observer across a stream-only wake", got)
+	}
+
+	task.appendOutput("live\n")
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("awaitCommand() error = %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("awaitCommand() did not return after callback output")
+	}
+}
+
 func TestStreamReadCommandCompletedEmitsUndeliveredTailFrame(t *testing.T) {
 	t.Parallel()
 
 	const shown = "already shown\n"
 	const tail = "final tail\n"
 	task := &commandTask{
-		ref:          taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
-		sessionRef:   session.SessionRef{SessionID: "session-1"},
-		session:      &liveOutputRaceSession{stdout: shown + tail, completed: true},
-		state:        taskapi.StateRunning,
-		running:      true,
-		createdAt:    time.Now(),
-		output:       shown,
-		stdoutCursor: int64(len([]byte(shown))),
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		session:    &liveOutputRaceSession{stdout: shown + tail, completed: true},
+		state:      taskapi.StateRunning,
+		running:    true,
+		createdAt:  time.Now(),
+		output:     shown,
+		outputState: commandOutputState{
+			backend: commandBackendCursor{stdout: int64(len([]byte(shown)))},
+		},
 	}
 
 	snap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{Output: int64(len([]byte(shown)))})
@@ -552,9 +1420,9 @@ func TestCompleteCommandTaskReturnsMergedResultOnly(t *testing.T) {
 		createdAt:  time.Now(),
 	}
 	tm := newTaskRuntime(&Runtime{clock: time.Now}, nil)
-	snap, err := tm.completeCommandTaskWithStatus(context.Background(), task, status)
+	snap, err := tm.reconcileCommandStatus(context.Background(), task, status)
 	if err != nil {
-		t.Fatalf("completeCommandTaskWithStatus() error = %v", err)
+		t.Fatalf("reconcileCommandStatus() error = %v", err)
 	}
 	if _, exists := snap.Result["stdout"]; exists {
 		t.Fatalf("snapshot result unexpectedly contains stdout: %#v", snap.Result)
@@ -587,9 +1455,9 @@ func TestCompleteCommandTaskDoesNotPersistNoOutputPlaceholder(t *testing.T) {
 		createdAt:  time.Now(),
 	}
 	tm := newTaskRuntime(&Runtime{clock: time.Now}, nil)
-	snap, err := tm.completeCommandTaskWithStatus(context.Background(), task, status)
+	snap, err := tm.reconcileCommandStatus(context.Background(), task, status)
 	if err != nil {
-		t.Fatalf("completeCommandTaskWithStatus() error = %v", err)
+		t.Fatalf("reconcileCommandStatus() error = %v", err)
 	}
 	if got, exists := snap.Result["result"]; exists {
 		t.Fatalf("snapshot result = %#v, want no durable no-output placeholder", got)
@@ -623,9 +1491,9 @@ func TestCompleteCommandTaskKeepsBlankOnlyCursorWithoutResult(t *testing.T) {
 		createdAt:  time.Now(),
 	}
 	tm := newTaskRuntime(&Runtime{clock: time.Now}, nil)
-	snap, err := tm.completeCommandTaskWithStatus(context.Background(), task, status)
+	snap, err := tm.reconcileCommandStatus(context.Background(), task, status)
 	if err != nil {
-		t.Fatalf("completeCommandTaskWithStatus() error = %v", err)
+		t.Fatalf("reconcileCommandStatus() error = %v", err)
 	}
 	if got, exists := snap.Result["result"]; exists {
 		t.Fatalf("snapshot result = %#v, want no durable blank-only result", got)
@@ -672,8 +1540,8 @@ func TestCommandLiveOutputBufferIsBoundedAndCursorStable(t *testing.T) {
 	if got := len([]byte(task.output)); got != commandLiveOutputBufferCapBytes {
 		t.Fatalf("retained output bytes = %d, want %d", got, commandLiveOutputBufferCapBytes)
 	}
-	if task.outputBase != 10 {
-		t.Fatalf("outputBase = %d, want dropped byte count 10", task.outputBase)
+	if task.outputState.frontier.base != 10 {
+		t.Fatalf("outputBase = %d, want dropped byte count 10", task.outputState.frontier.base)
 	}
 	cursor := task.outputCursorLocked()
 	task.mu.Unlock()
@@ -690,13 +1558,13 @@ func TestCommandStreamAssignsOneMonotonicEventCursorPerOutputFrame(t *testing.T)
 	t.Parallel()
 
 	task := &commandTask{
-		ref:            taskapi.Ref{TaskID: "task-1", TerminalID: "term-1"},
-		sessionRef:     session.SessionRef{SessionID: "session-1"},
-		session:        &liveOutputRaceSession{},
-		state:          taskapi.StateRunning,
-		running:        true,
-		createdAt:      time.Now(),
-		outputCallback: true,
+		ref:         taskapi.Ref{TaskID: "task-1", TerminalID: "term-1"},
+		sessionRef:  session.SessionRef{SessionID: "session-1"},
+		session:     &liveOutputRaceSession{},
+		state:       taskapi.StateRunning,
+		running:     true,
+		createdAt:   time.Now(),
+		outputState: commandOutputState{callback: true},
 	}
 	task.appendOutput("first")
 	task.appendOutput("second")
@@ -740,13 +1608,13 @@ func TestCommandLiveOutputTruncationKeepsUTF8BoundaryAndSignalsGap(t *testing.T)
 	t.Parallel()
 
 	task := &commandTask{
-		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
-		sessionRef:     session.SessionRef{SessionID: "session-1"},
-		session:        &liveOutputRaceSession{},
-		state:          taskapi.StateRunning,
-		running:        true,
-		createdAt:      time.Now(),
-		outputCallback: true,
+		ref:         taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:  session.SessionRef{SessionID: "session-1"},
+		session:     &liveOutputRaceSession{},
+		state:       taskapi.StateRunning,
+		running:     true,
+		createdAt:   time.Now(),
+		outputState: commandOutputState{callback: true},
 	}
 	task.appendOutput("中" + strings.Repeat("a", commandLiveOutputBufferCapBytes-2))
 
@@ -1130,11 +1998,15 @@ func streamFrameText(frames []stream.Frame) string {
 }
 
 type liveOutputRaceSession struct {
-	stdout    string
-	stderr    string
-	completed bool
-	exitCode  int
-	onRead    func()
+	stdout       string
+	stderr       string
+	completed    bool
+	exitCode     int
+	onRead       func()
+	onResult     func()
+	awaitStarted chan struct{}
+	awaitCalls   atomic.Int64
+	statusCalls  atomic.Int64
 }
 
 func (s *liveOutputRaceSession) Ref() sandbox.SessionRef {
@@ -1168,7 +2040,32 @@ func (s *liveOutputRaceSession) ReadOutput(_ context.Context, stdoutMarker, stde
 	return append([]byte(nil), stdout[stdoutMarker:]...), append([]byte(nil), stderr[stderrMarker:]...), int64(len(stdout)), int64(len(stderr)), nil
 }
 
+func (s *liveOutputRaceSession) AwaitOutput(ctx context.Context, cursor sandbox.OutputCursor) (sandbox.OutputObservation, error) {
+	s.awaitCalls.Add(1)
+	status, err := s.Status(ctx)
+	if err != nil {
+		return sandbox.OutputObservation{}, err
+	}
+	next := sandbox.OutputCursor{Stdout: int64(len([]byte(s.stdout))), Stderr: int64(len([]byte(s.stderr)))}
+	cursor = sandbox.NormalizeOutputCursor(cursor)
+	if err := sandbox.ValidateOutputCursor(cursor, next); err != nil {
+		return sandbox.OutputObservation{}, err
+	}
+	if next.Stdout > cursor.Stdout || next.Stderr > cursor.Stderr || !status.Running {
+		return sandbox.OutputObservation{Cursor: next, Status: status}, nil
+	}
+	if s.awaitStarted != nil {
+		select {
+		case s.awaitStarted <- struct{}{}:
+		default:
+		}
+	}
+	<-ctx.Done()
+	return sandbox.OutputObservation{}, ctx.Err()
+}
+
 func (s *liveOutputRaceSession) Status(context.Context) (sandbox.SessionStatus, error) {
+	s.statusCalls.Add(1)
 	running := !s.completed
 	return sandbox.SessionStatus{
 		SessionRef:    s.Ref(),
@@ -1185,6 +2082,9 @@ func (s *liveOutputRaceSession) Wait(context.Context, time.Duration) (sandbox.Se
 }
 
 func (s *liveOutputRaceSession) Result(context.Context) (sandbox.CommandResult, error) {
+	if s.onResult != nil {
+		s.onResult()
+	}
 	return sandbox.CommandResult{Stdout: s.stdout, Stderr: s.stderr, ExitCode: s.exitCode}, nil
 }
 

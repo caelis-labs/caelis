@@ -20,7 +20,11 @@ import (
 
 const tuiBackgroundUpdateCheckTimeout = 2 * time.Minute
 
-func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appCfg gatewayapp.Config, modelText string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+type tuiOptions struct {
+	NoAnimation bool
+}
+
+func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appCfg gatewayapp.Config, modelText string, options tuiOptions, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	driver, err := local.NewLocalAdapter(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
 	if err != nil {
 		return err
@@ -40,6 +44,7 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appC
 		Wizards:             tuiapp.DefaultWizards(),
 		PromptRouterFactory: controlprompt.New,
 		RenderFPS:           envInt("CAELIS_TUI_RENDER_FPS", 0),
+		NoAnimation:         options.NoAnimation,
 		TaskStreams:         stack.TaskStreams(),
 		TaskStreamPrincipal: taskstream.Principal{ID: stack.UserID},
 		OnStart: func() {

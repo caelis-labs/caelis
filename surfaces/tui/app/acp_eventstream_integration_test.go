@@ -187,6 +187,9 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 			RawInput: taskInput, Meta: taskMeta,
 		},
 	})
+	if model.runningActivity.Phase != runningPhaseWait || model.runningActivity.Target != runningTargetShell {
+		t.Fatalf("runningActivity = %#v, want Wait shell while TASK observes command", model.runningActivity)
+	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCallUpdate{
@@ -199,14 +202,119 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 	})
 
 	blocks := mainACPTurnBlocksForTest(model)
-	if len(blocks) != 2 || len(blocks[0].Events) != 1 || len(blocks[1].Events) != 1 {
-		t.Fatalf("resume blocks = %#v, want command and TASK panels", blocks)
+	if len(blocks) != 1 || len(blocks[0].Events) != 1 {
+		t.Fatalf("resume blocks = %#v, want only the original command panel", blocks)
 	}
-	if command := blocks[0].Events[0]; command.Output != recovered || command.OutputSynthetic || strings.Contains(command.Output, "(no output)") {
-		t.Fatalf("recovered command = %#v, want durable TASK snapshot in empty owner panel", command)
+	if command := blocks[0].Events[0]; command.Output != recovered || !command.OutputSynthetic || strings.Contains(command.Output, "(no output)") {
+		t.Fatalf("recovered command = %#v, want replaceable durable TASK snapshot in empty owner panel", command)
 	}
-	if task := blocks[1].Events[0]; task.CallID != "task-wait-1" || task.Output != "" {
-		t.Fatalf("TASK wait = %#v, want fallback hidden after it fills the owner panel", task)
+	if model.runningActivity.Phase != runningPhaseThinking {
+		t.Fatalf("runningActivity = %#v, want thinking after TASK wait completes", model.runningActivity)
+	}
+}
+
+func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.T) {
+	t.Parallel()
+
+	const (
+		first  = "步骤 1\n"
+		second = "步骤 2\n"
+		third  = "步骤 3\n"
+	)
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(244, 0))
+	apply := func(update schema.Update) {
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1",
+			Scope: eventstream.ScopeMain, Update: update,
+		})
+	}
+	apply(schema.ToolCall{
+		SessionUpdate: schema.UpdateToolCall, ToolCallID: "command-call",
+		Title: "RUN_COMMAND long job", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		RawInput: map[string]any{"command": "long job"},
+		Content:  []schema.ToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
+		Meta:     acpToolNameMeta("RUN_COMMAND"),
+	})
+	running := schema.ToolStatusInProgress
+	firstMeta := runningSnapshotTerminalMeta("RUN_COMMAND", "command-task", "terminal-1", first, "append")
+	firstMeta = metautil.WithRuntimeSection(firstMeta, metautil.RuntimeTask, map[string]any{
+		"handle": "command-3",
+	})
+	firstMeta = metautil.WithRuntimeSection(firstMeta, metautil.RuntimeStream, map[string]any{
+		metautil.RuntimeStreamMode:   "append",
+		metautil.RuntimeOutputCursor: int64(len([]byte(first))),
+	})
+	apply(schema.ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-call",
+		Status: &running, Meta: firstMeta,
+	})
+
+	readInput := map[string]any{"action": "read", "handle": "command-3"}
+	readMeta := metautil.WithRuntimeSection(acpToolNameMeta("TASK"), metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "TASK", metautil.RuntimeToolAction: "read",
+		metautil.RuntimeTargetHandle: "command-3", metautil.RuntimeTargetKind: "command",
+	})
+	readMeta = metautil.WithRuntimeSection(readMeta, metautil.RuntimeTask, map[string]any{
+		metautil.RuntimeTaskID: "command-task", metautil.RuntimeTaskTerminalID: "terminal-1",
+		metautil.RuntimeOutputStart:  int64(len([]byte(first))),
+		metautil.RuntimeOutputCursor: int64(len([]byte(first + second))),
+		metautil.RuntimeOutputDelta:  second,
+		"running":                    true, "state": "running", "handle": "command-3",
+	})
+	apply(schema.ToolCall{
+		SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-read",
+		Title: "TASK read command-3", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		RawInput: readInput, Meta: readMeta,
+	})
+	if model.runningActivity.Phase != runningPhaseRead || model.runningActivity.Target != runningTargetShell {
+		t.Fatalf("runningActivity = %#v, want Read shell", model.runningActivity)
+	}
+	if hint := model.buildHintText(); !strings.Contains(hint, "Read shell") || strings.Contains(hint, "command-3") {
+		t.Fatalf("hint = %q, want semantic read activity without raw handle", hint)
+	}
+	completed := schema.ToolStatusCompleted
+	apply(schema.ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "task-read", Status: &completed,
+		RawInput: readInput,
+		RawOutput: map[string]any{
+			"action": "read", "handle": "command-3", "target_kind": "command",
+			"state": "running", "latest_output": "compact model-only preview\n",
+		},
+		Meta: readMeta,
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	physical := physicalTranscriptEventsForTest(block.Events)
+	if len(physical) != 1 || physical[0].CallID != "command-call" {
+		t.Fatalf("events = %#v, want only the RunCommand panel", block.Events)
+	}
+	if got := physical[0].Output; got != first+second {
+		t.Fatalf("command output after Task read = %q, want %q", got, first+second)
+	}
+
+	duplicateMeta := runningSnapshotTerminalMeta("RUN_COMMAND", "command-task", "terminal-1", second, "append")
+	duplicateMeta = metautil.WithRuntimeSection(duplicateMeta, metautil.RuntimeStream, map[string]any{
+		metautil.RuntimeStreamMode:   "append",
+		metautil.RuntimeOutputCursor: int64(len([]byte(first + second))),
+	})
+	apply(schema.ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-call",
+		Status: &running, Meta: duplicateMeta,
+	})
+	thirdMeta := runningSnapshotTerminalMeta("RUN_COMMAND", "command-task", "terminal-1", third, "append")
+	thirdMeta = metautil.WithRuntimeSection(thirdMeta, metautil.RuntimeStream, map[string]any{
+		metautil.RuntimeStreamMode:   "append",
+		metautil.RuntimeOutputCursor: int64(len([]byte(first + second + third))),
+	})
+	apply(schema.ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-call",
+		Status: &running, Meta: thirdMeta,
+	})
+	block = requireMainACPTurnBlockForTest(t, model)
+	physical = physicalTranscriptEventsForTest(block.Events)
+	if got := physical[0].Output; got != first+second+third {
+		t.Fatalf("command output after overlapping stream = %q, want %q", got, first+second+third)
 	}
 }
 
@@ -1314,6 +1422,7 @@ func TestHandleACPEventEnvelopeAppliesApprovalReview(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindApprovalReview,
 		SessionID: "session-1",
@@ -1324,8 +1433,11 @@ func TestHandleACPEventEnvelopeAppliesApprovalReview(t *testing.T) {
 			Status:     "in_progress",
 		},
 	})
-	if model.runningActivity.Kind != runningActivityApprovalReview || !strings.Contains(model.runningActivity.Detail, "go test") {
-		t.Fatalf("runningActivity = %#v, want approval review command hint", model.runningActivity)
+	if model.runningActivity.Phase != runningPhaseReview {
+		t.Fatalf("runningActivity = %#v, want approval review hint", model.runningActivity)
+	}
+	if hint := model.buildHintText(); strings.Contains(hint, "go test") {
+		t.Fatalf("hint = %q, want activity label without generated command detail", hint)
 	}
 
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -1341,8 +1453,8 @@ func TestHandleACPEventEnvelopeAppliesApprovalReview(t *testing.T) {
 			Text:          "approved by policy",
 		},
 	})
-	if model.runningActivity.Kind == runningActivityApprovalReview {
-		t.Fatalf("runningActivity = %#v, want cleared after terminal review", model.runningActivity)
+	if model.runningActivity.Phase != runningPhaseThinking {
+		t.Fatalf("runningActivity = %#v, want thinking fallback after terminal review", model.runningActivity)
 	}
 	block := requireMainACPTurnBlockForTest(t, model)
 	if len(block.Events) != 1 || block.Events[0].Kind != SEApproval || block.Events[0].ApprovalStatus != "approved" {
@@ -2668,14 +2780,14 @@ func TestMainTimelineRoutesCrossTurnTaskObserverStreamToOriginalCommandPanel(t *
 	})
 
 	blocks := mainACPTurnBlocksForTest(model)
-	if len(blocks) != 2 {
-		t.Fatalf("main blocks = %d, want original command and current TASK blocks", len(blocks))
+	if len(blocks) != 1 {
+		t.Fatalf("main blocks = %d, want only the original command block", len(blocks))
 	}
 	if len(blocks[0].Events) != 1 || blocks[0].Events[0].CallID != "command-1" || blocks[0].Events[0].Output != "initial\ntail\n" {
 		t.Fatalf("original command block = %#v, want observer tail appended in place", blocks[0].Events)
 	}
-	if len(blocks[1].Events) != 1 || blocks[1].Events[0].CallID != "task-wait-1" {
-		t.Fatalf("current TASK block = %#v, want no duplicate command panel", blocks[1].Events)
+	if model.runningActivity.Phase != runningPhaseWait || model.runningActivity.Target != runningTargetShell {
+		t.Fatalf("runningActivity = %#v, want Wait shell while TASK remains in progress", model.runningActivity)
 	}
 }
 

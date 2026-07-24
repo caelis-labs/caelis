@@ -11,7 +11,7 @@ import (
 
 const ToolName = names.Task
 
-var allowedArgs = []string{"action", "handle", "input", "yield_time_ms"}
+var allowedArgs = []string{"action", "handle", "input"}
 
 func ValidateArgs(args map[string]any) error {
 	return tool.RejectUnknownArgs(args, allowedArgs...)
@@ -27,19 +27,19 @@ func New() Tool {
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Control an async task returned by RunCommand or Spawn. For RunCommand, write sends terminal stdin. For Spawn, write sends a follow-up prompt only after the child task has completed. Always wait before relying on a task result.",
+		Description: "Control an async task returned by RunCommand or Spawn. For RunCommand, read observes new output without waiting for exit and accepts exactly one RunCommand handle; read does not support Spawn. RunCommand write sends terminal stdin then briefly awaits its response. Completed Spawn write sends a follow-up prompt. Wait observes either target for at most one minute and may return state=running; call it again when needed.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"wait", "write", "cancel"},
-					"description": "Control action: wait observes for at most one minute, write delivers input, cancel stops.",
+					"enum":        []string{"wait", "read", "write", "cancel"},
+					"description": "wait: one or more RunCommand or Spawn handles; read: exactly one RunCommand handle only, never Spawn; write: exactly one handle; cancel: one or more handles.",
 				},
 				"handle": map[string]any{
 					"type":        "string",
 					"minLength":   1,
-					"description": "One or more Session-scoped handles returned by RunCommand or Spawn. Separate multiple handles with commas.",
+					"description": "A Session-scoped handle returned by RunCommand or Spawn. Only wait and cancel accept comma-separated handles.",
 				},
 				"input": map[string]any{
 					"type":        "string",

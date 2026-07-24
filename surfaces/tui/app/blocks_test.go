@@ -366,11 +366,11 @@ func TestTerminalToolFinalOutputReplacesStreamedOutput(t *testing.T) {
 
 func TestMainACPFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	block.AppendStreamChunk(SEAssistant, "Before tool.")
+	block.AppendStreamEvent(SEAssistant, "Before tool.", narrativeTestSource())
 	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "pwd", "ok", true, false, ToolUpdateMeta{})
-	block.AppendStreamChunk(SEAssistant, "After")
+	block.AppendStreamEvent(SEAssistant, "After", narrativeTestSource())
 
-	block.ReplaceFinalStreamChunk(SEAssistant, "Before tool.\n\nAfter tool done.")
+	block.ReplaceFinalStreamEvent(SEAssistant, "Before tool.\n\nAfter tool done.", narrativeTestSource())
 
 	if len(block.Events) != 3 {
 		t.Fatalf("events = %#v, want pre-tool assistant, tool, post-tool assistant", block.Events)
@@ -386,16 +386,16 @@ func TestMainACPFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 	}
 }
 
-func TestMainACPAppendStreamChunkPreservesPendingPrefixWithoutGhostEvent(t *testing.T) {
+func TestMainACPAppendStreamEventPreservesPendingPrefixWithoutGhostEvent(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 
-	block.AppendStreamChunk(SEAssistant, "    ")
+	block.AppendStreamEvent(SEAssistant, "    ", narrativeTestSource())
 	if len(block.Events) != 0 {
 		t.Fatalf("events = %#v, want no event until pending prefix has renderable content", block.Events)
 	}
-	block.AppendStreamChunk(SEAssistant, "fmt.Println()")
-	block.AppendStreamChunk(SEAssistant, " ")
-	block.AppendStreamChunk(SEAssistant, "tail")
+	block.AppendStreamEvent(SEAssistant, "fmt.Println()", narrativeTestSource())
+	block.AppendStreamEvent(SEAssistant, " ", narrativeTestSource())
+	block.AppendStreamEvent(SEAssistant, "tail", narrativeTestSource())
 
 	if len(block.Events) != 1 {
 		t.Fatalf("events = %#v, want one assistant event", block.Events)
@@ -405,14 +405,14 @@ func TestMainACPAppendStreamChunkPreservesPendingPrefixWithoutGhostEvent(t *test
 	}
 }
 
-func TestParticipantAppendStreamChunkPreservesPendingPrefixWithoutGhostEvent(t *testing.T) {
+func TestParticipantAppendStreamEventPreservesPendingPrefixWithoutGhostEvent(t *testing.T) {
 	block := NewParticipantTurnBlock("session-1", "@agent")
 
-	block.AppendStreamChunk(SEAssistant, "    ")
+	block.AppendStreamEvent(SEAssistant, "    ", narrativeTestSource())
 	if len(block.Events) != 0 {
 		t.Fatalf("events = %#v, want no event until pending prefix has renderable content", block.Events)
 	}
-	block.AppendStreamChunk(SEAssistant, "answer")
+	block.AppendStreamEvent(SEAssistant, "answer", narrativeTestSource())
 
 	if len(block.Events) != 1 {
 		t.Fatalf("events = %#v, want one assistant event", block.Events)
@@ -422,14 +422,14 @@ func TestParticipantAppendStreamChunkPreservesPendingPrefixWithoutGhostEvent(t *
 	}
 }
 
-func TestMainACPReasoningAppendStreamChunkPreservesPendingPrefixWithoutGhostEvent(t *testing.T) {
+func TestMainACPReasoningAppendStreamEventPreservesPendingPrefixWithoutGhostEvent(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 
-	block.AppendStreamChunk(SEReasoning, "  ")
+	block.AppendStreamEvent(SEReasoning, "  ", narrativeTestSource())
 	if len(block.Events) != 0 {
 		t.Fatalf("events = %#v, want no event until pending reasoning prefix has renderable content", block.Events)
 	}
-	block.AppendStreamChunk(SEReasoning, "thinking")
+	block.AppendStreamEvent(SEReasoning, "thinking", narrativeTestSource())
 
 	if len(block.Events) != 1 {
 		t.Fatalf("events = %#v, want one reasoning event", block.Events)
@@ -439,12 +439,12 @@ func TestMainACPReasoningAppendStreamChunkPreservesPendingPrefixWithoutGhostEven
 	}
 }
 
-func TestMainACPAppendStreamChunkClearsPendingPrefixAcrossToolBarrier(t *testing.T) {
+func TestMainACPAppendStreamEventClearsPendingPrefixAcrossToolBarrier(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 
-	block.AppendStreamChunk(SEAssistant, "\n")
+	block.AppendStreamEvent(SEAssistant, "\n", narrativeTestSource())
 	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "pwd", "ok", true, false, ToolUpdateMeta{})
-	block.AppendStreamChunk(SEAssistant, "after")
+	block.AppendStreamEvent(SEAssistant, "after", narrativeTestSource())
 
 	if len(block.Events) != 2 {
 		t.Fatalf("events = %#v, want tool plus assistant event", block.Events)
@@ -457,9 +457,9 @@ func TestMainACPAppendStreamChunkClearsPendingPrefixAcrossToolBarrier(t *testing
 func TestMainACPClearActiveBuffersClearsPendingPrefix(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 
-	block.AppendStreamChunk(SEAssistant, "    ")
+	block.AppendStreamEvent(SEAssistant, "    ", narrativeTestSource())
 	block.ClearActiveBuffers()
-	block.AppendStreamChunk(SEAssistant, "answer")
+	block.AppendStreamEvent(SEAssistant, "answer", narrativeTestSource())
 
 	if len(block.Events) != 1 {
 		t.Fatalf("events = %#v, want one assistant event", block.Events)
@@ -469,10 +469,10 @@ func TestMainACPClearActiveBuffersClearsPendingPrefix(t *testing.T) {
 	}
 }
 
-func TestMainACPFinalStreamChunkMergesPendingPrefixWithoutDuplication(t *testing.T) {
+func TestMainACPFinalStreamEventMergesPendingPrefixWithoutDuplication(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	block.AppendStreamChunk(SEAssistant, "    ")
-	block.ReplaceFinalStreamChunk(SEAssistant, "    fmt.Println()")
+	block.AppendStreamEvent(SEAssistant, "    ", narrativeTestSource())
+	block.ReplaceFinalStreamEvent(SEAssistant, "    fmt.Println()", narrativeTestSource())
 
 	if len(block.Events) != 1 {
 		t.Fatalf("events = %#v, want one assistant event", block.Events)
@@ -482,8 +482,8 @@ func TestMainACPFinalStreamChunkMergesPendingPrefixWithoutDuplication(t *testing
 	}
 
 	block = NewMainACPTurnBlock("session-1")
-	block.AppendStreamChunk(SEAssistant, "    ")
-	block.ReplaceFinalStreamChunk(SEAssistant, "fmt.Println()")
+	block.AppendStreamEvent(SEAssistant, "    ", narrativeTestSource())
+	block.ReplaceFinalStreamEvent(SEAssistant, "fmt.Println()", narrativeTestSource())
 
 	if len(block.Events) != 1 {
 		t.Fatalf("events = %#v, want one assistant event", block.Events)
@@ -508,11 +508,11 @@ func TestVisibleNarrativeEventsFiltersReplayedWhitespaceOnlyNarrative(t *testing
 
 func TestMainACPClearActiveBuffersDropsSpeculativeNarrativeText(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	block.AppendStreamChunk(SEReasoning, "failed thought")
-	block.AppendStreamChunk(SEAssistant, "failed answer")
+	block.AppendStreamEvent(SEReasoning, "failed thought", narrativeTestSource())
+	block.AppendStreamEvent(SEAssistant, "failed answer", narrativeTestSource())
 
 	block.ClearActiveBuffers()
-	block.AppendStreamChunk(SEAssistant, "retry answer")
+	block.AppendStreamEvent(SEAssistant, "retry answer", narrativeTestSource())
 
 	if len(block.Events) != 1 {
 		t.Fatalf("events = %#v, want only retry narrative after reset", block.Events)
@@ -524,11 +524,11 @@ func TestMainACPClearActiveBuffersDropsSpeculativeNarrativeText(t *testing.T) {
 
 func TestParticipantFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 	block := NewParticipantTurnBlock("session-1", "@self")
-	block.AppendStreamChunk(SEAssistant, "Before tool.")
+	block.AppendStreamEvent(SEAssistant, "Before tool.", narrativeTestSource())
 	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "pwd", "ok", true, false, ToolUpdateMeta{})
-	block.AppendStreamChunk(SEAssistant, "After")
+	block.AppendStreamEvent(SEAssistant, "After", narrativeTestSource())
 
-	block.ReplaceFinalStreamChunk(SEAssistant, "Before tool.\n\nAfter tool done.")
+	block.ReplaceFinalStreamEvent(SEAssistant, "Before tool.\n\nAfter tool done.", narrativeTestSource())
 
 	if len(block.Events) != 3 {
 		t.Fatalf("events = %#v, want pre-tool assistant, tool, post-tool assistant", block.Events)

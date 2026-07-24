@@ -246,10 +246,14 @@ func ReportPrepareProgress(ctx context.Context, progress PrepareProgress) {
 	fn(progress)
 }
 
-// OutputChunk is one stdout/stderr streaming fragment.
+// OutputChunk is one stdout/stderr streaming fragment. Cursor is the
+// cumulative backend byte marker for Stream after all raw bytes represented
+// by Text. Async backends must set it so a consumer can atomically checkpoint
+// rendered text with the ReadOutput resume marker.
 type OutputChunk struct {
 	Stream string `json:"stream,omitempty"`
 	Text   string `json:"text,omitempty"`
+	Cursor int64  `json:"cursor,omitempty"`
 }
 
 // CommandRequest is one command execution request.
@@ -306,12 +310,44 @@ type SessionStatus struct {
 	UpdatedAt     time.Time   `json:"updated_at,omitempty"`
 }
 
+// OutputCursor identifies absolute byte offsets in one session's stdout and
+// stderr streams. Each offset is measured in the bytes returned by that
+// backend's ReadOutput implementation.
+type OutputCursor struct {
+	Stdout int64 `json:"stdout,omitempty"`
+	Stderr int64 `json:"stderr,omitempty"`
+}
+
+// OutputReadWindow returns the absolute cursor where data begins and whether
+// the requested marker predates the retained bytes returned by ReadOutput.
+// Backends with bounded buffers expose retention loss through the invariant
+// retainedStart = nextMarker - len(data), without changing the Session method
+// shape or silently presenting a non-contiguous suffix as contiguous output.
+func OutputReadWindow(marker int64, data []byte, nextMarker int64) (retainedStart int64, gapBefore bool) {
+	marker = max(marker, 0)
+	nextMarker = max(nextMarker, 0)
+	retainedStart = max(nextMarker-int64(len(data)), 0)
+	return retainedStart, marker < retainedStart
+}
+
+// OutputObservation reports that output advanced beyond a requested cursor or
+// that the session reached a terminal state. Output remains non-consuming and
+// is read separately through ReadOutput.
+type OutputObservation struct {
+	Cursor OutputCursor  `json:"cursor,omitempty"`
+	Status SessionStatus `json:"status,omitempty"`
+}
+
 // Session represents one async command session.
 type Session interface {
 	Ref() SessionRef
 	Terminal() TerminalRef
 	WriteInput(ctx context.Context, input []byte) error
+	// ReadOutput returns the retained stdout/stderr bytes after each requested
+	// marker and the new absolute markers. When a bounded backend has evicted
+	// part of the requested range, callers detect the gap with OutputReadWindow.
 	ReadOutput(ctx context.Context, stdoutMarker, stderrMarker int64) (stdout, stderr []byte, newStdoutMarker, newStderrMarker int64, err error)
+	AwaitOutput(ctx context.Context, cursor OutputCursor) (OutputObservation, error)
 	Status(ctx context.Context) (SessionStatus, error)
 	Wait(ctx context.Context, timeout time.Duration) (SessionStatus, error)
 	Result(ctx context.Context) (CommandResult, error)
@@ -575,6 +611,25 @@ func CloneSessionStatus(in SessionStatus) SessionStatus {
 	out.SessionRef = CloneSessionRef(in.SessionRef)
 	out.Terminal = CloneTerminalRef(in.Terminal)
 	return out
+}
+
+// NormalizeOutputCursor clamps negative offsets to the beginning of their
+// respective streams.
+func NormalizeOutputCursor(in OutputCursor) OutputCursor {
+	if in.Stdout < 0 {
+		in.Stdout = 0
+	}
+	if in.Stderr < 0 {
+		in.Stderr = 0
+	}
+	return in
+}
+
+// CloneOutputObservation returns one normalized copy of an output observation.
+func CloneOutputObservation(in OutputObservation) OutputObservation {
+	in.Cursor = NormalizeOutputCursor(in.Cursor)
+	in.Status = CloneSessionStatus(in.Status)
+	return in
 }
 
 // ClonePathRules returns one normalized path-rule slice copy.

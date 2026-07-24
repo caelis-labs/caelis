@@ -443,21 +443,31 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	input, _ := stringArg(args, "input")
 	normalizedAction := strings.ToLower(strings.TrimSpace(action))
 	switch normalizedAction {
-	case "wait", "write", "cancel":
+	case "wait", "read", "write", "cancel":
 	default:
 		return tool.Result{}, fmt.Errorf("tool: invalid action %q", action)
 	}
-	if len(handles) > 1 && normalizedAction != "write" {
+	if len(handles) > 1 && (normalizedAction == "read" || normalizedAction == "write") {
+		return tool.Result{}, fmt.Errorf("tool: action %q accepts exactly one handle", normalizedAction)
+	}
+	if len(handles) > 1 {
 		result := t.callBatchTaskControl(ctx, call, normalizedAction, handles, input)
 		return result, nil
-	}
-	yield := time.Duration(0)
-	if normalizedAction == "wait" {
-		yield = taskWaitMaxYield
 	}
 	identity, err := t.tasks.resolveTaskHandle(ctx, t.sessionRef, handles[0])
 	if err != nil {
 		return tool.Result{}, err
+	}
+	yield := time.Duration(0)
+	switch normalizedAction {
+	case "wait":
+		yield = taskWaitMaxYield
+	case "read":
+		yield = taskReadOutputWait
+	case "write":
+		if identity.kind == taskapi.KindCommand {
+			yield = taskWriteOutputWait
+		}
 	}
 	req := taskapi.ControlRequest{
 		TaskID:    identity.taskID,
@@ -544,6 +554,8 @@ func (t runtimeTaskTool) callTaskControl(ctx context.Context, action string, req
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "wait":
 		return t.tasks.Wait(ctx, t.sessionRef, normalizedReq)
+	case "read":
+		return t.tasks.Read(ctx, t.sessionRef, normalizedReq)
 	case "write":
 		return t.tasks.Write(ctx, t.sessionRef, normalizedReq)
 	case "cancel":

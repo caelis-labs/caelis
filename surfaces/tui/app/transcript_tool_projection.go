@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 )
@@ -20,6 +21,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 	toolTaskHandle := display.ToolTaskHandle(rawInput, nil, input.Meta)
 	content := acpToolContentToDisplay(input.Content)
 	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
+	outputCursor, outputCursorKnown, outputStartCursor, outputStartCursorKnown := transcriptToolOutputRange(input.Meta)
 	displayInput := rawInput
 	if strings.EqualFold(semanticName, "TASK") {
 		displayInput = taskDisplayInputForResult(rawInput, toolDisplayMetaOutput(semanticName, input.Meta))
@@ -29,24 +31,28 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		toolArgs = taskDisplayArgsWithHandle(toolArgs, toolTaskHandle)
 	}
 	return TranscriptEvent{
-		Kind:               TranscriptEventTool,
-		Scope:              input.Scope,
-		ScopeID:            input.ScopeID,
-		Actor:              input.Actor,
-		OccurredAt:         input.OccurredAt,
-		Meta:               transcript.CloneAnyMap(input.Meta),
-		ToolCallID:         strings.TrimSpace(input.CallID),
-		ToolName:           toolName,
-		ToolKind:           strings.TrimSpace(input.ToolKind),
-		ToolTitle:          strings.TrimSpace(input.ToolTitle),
-		ToolArgs:           toolArgs,
-		ToolFullArgs:       toolDisplayFullArgs(semanticName, rawInput),
-		ToolStatus:         status,
-		ToolTerminal:       toolTerminal,
-		ToolTaskHandle:     toolTaskHandle,
-		ToolTaskAction:     display.ToolTaskAction(rawInput, nil, input.Meta),
-		ToolTaskInput:      display.ToolTaskInput(rawInput, nil, input.Meta),
-		ToolTaskTargetKind: display.ToolTaskTargetKind(rawInput, nil, input.Meta),
+		Kind:                       TranscriptEventTool,
+		Scope:                      input.Scope,
+		ScopeID:                    input.ScopeID,
+		Actor:                      input.Actor,
+		OccurredAt:                 input.OccurredAt,
+		Meta:                       transcript.CloneAnyMap(input.Meta),
+		ToolCallID:                 strings.TrimSpace(input.CallID),
+		ToolName:                   toolName,
+		ToolKind:                   strings.TrimSpace(input.ToolKind),
+		ToolTitle:                  strings.TrimSpace(input.ToolTitle),
+		ToolArgs:                   toolArgs,
+		ToolFullArgs:               toolDisplayFullArgs(semanticName, rawInput),
+		ToolStatus:                 status,
+		ToolTerminal:               toolTerminal,
+		ToolOutputCursor:           outputCursor,
+		ToolOutputCursorKnown:      outputCursorKnown,
+		ToolOutputStartCursor:      outputStartCursor,
+		ToolOutputStartCursorKnown: outputStartCursorKnown,
+		ToolTaskHandle:             toolTaskHandle,
+		ToolTaskAction:             display.ToolTaskAction(rawInput, nil, input.Meta),
+		ToolTaskInput:              display.ToolTaskInput(rawInput, nil, input.Meta),
+		ToolTaskTargetKind:         display.ToolTaskTargetKind(rawInput, nil, input.Meta),
 	}
 }
 
@@ -114,7 +120,23 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 			toolOutputSynthetic = strings.TrimSpace(toolOutput) != ""
 		}
 	}
+	// Task read/wait keeps latest_output compact for the model, but the
+	// presentation owner needs the exact observed bytes to reconcile with
+	// transient terminal frames without normalization, truncation, or
+	// delivery-order races.
+	if strings.EqualFold(semanticName, "TASK") {
+		if delta, ok := transcriptToolObservationDelta(input.Meta); ok {
+			toolOutput = delta
+			toolOutputHasTerminalData = true
+			toolOutputSynthetic = false
+		} else {
+			// A terminal anchor identifies the observed process, but does not
+			// make a compact Task payload an exact byte delta.
+			toolOutputHasTerminalData = false
+		}
+	}
 	toolOutputGapBefore := toolOutputHasTerminalData && transcript.MetaInt(input.Meta, "caelis", "runtime", "stream", "truncated_before") > 0
+	outputCursor, outputCursorKnown, outputStartCursor, outputStartCursorKnown := transcriptToolOutputRange(input.Meta)
 	if transcript.SuppressToolResultOutput(semanticName, input.ToolKind, toolOutput, toolOutputSynthetic, toolErr) {
 		toolOutput = ""
 		toolOutputSynthetic = false
@@ -157,32 +179,63 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	}
 	toolOutput = toolDisplayPanelOutput(semanticName, toolOutput)
 	return TranscriptEvent{
-		Kind:                TranscriptEventTool,
-		Scope:               input.Scope,
-		ScopeID:             input.ScopeID,
-		Actor:               input.Actor,
-		OccurredAt:          input.OccurredAt,
-		Meta:                transcript.CloneAnyMap(input.Meta),
-		ToolCallID:          strings.TrimSpace(input.CallID),
-		ToolName:            toolName,
-		ToolKind:            strings.TrimSpace(input.ToolKind),
-		ToolTitle:           strings.TrimSpace(input.ToolTitle),
-		ToolArgs:            toolArgs,
-		ToolFullArgs:        toolDisplayFullArgs(semanticName, displayInput),
-		ToolOutput:          toolOutput,
-		ToolStream:          transcript.ToolStream(status, toolErr),
-		ToolStatus:          status,
-		ToolError:           toolErr,
-		ToolTerminal:        toolTerminal,
-		ToolOutputSynthetic: toolOutputSynthetic,
-		ToolOutputTerminal:  toolOutputHasTerminalData,
-		ToolOutputGapBefore: toolOutputGapBefore,
-		ToolTaskHandle:      toolTaskHandle,
-		ToolTaskAction:      toolTaskAction,
-		ToolTaskInput:       toolTaskInput,
-		ToolTaskTargetKind:  toolTaskTargetKind,
-		Final:               transcript.ToolStatusFinal(status, toolErr),
+		Kind:                       TranscriptEventTool,
+		Scope:                      input.Scope,
+		ScopeID:                    input.ScopeID,
+		Actor:                      input.Actor,
+		OccurredAt:                 input.OccurredAt,
+		Meta:                       transcript.CloneAnyMap(input.Meta),
+		ToolCallID:                 strings.TrimSpace(input.CallID),
+		ToolName:                   toolName,
+		ToolKind:                   strings.TrimSpace(input.ToolKind),
+		ToolTitle:                  strings.TrimSpace(input.ToolTitle),
+		ToolArgs:                   toolArgs,
+		ToolFullArgs:               toolDisplayFullArgs(semanticName, displayInput),
+		ToolOutput:                 toolOutput,
+		ToolStream:                 transcript.ToolStream(status, toolErr),
+		ToolStatus:                 status,
+		ToolError:                  toolErr,
+		ToolTerminal:               toolTerminal,
+		ToolOutputSynthetic:        toolOutputSynthetic,
+		ToolOutputTerminal:         toolOutputHasTerminalData,
+		ToolOutputCursor:           outputCursor,
+		ToolOutputCursorKnown:      outputCursorKnown,
+		ToolOutputStartCursor:      outputStartCursor,
+		ToolOutputStartCursorKnown: outputStartCursorKnown,
+		ToolOutputGapBefore:        toolOutputGapBefore,
+		ToolTaskHandle:             toolTaskHandle,
+		ToolTaskAction:             toolTaskAction,
+		ToolTaskInput:              toolTaskInput,
+		ToolTaskTargetKind:         toolTaskTargetKind,
+		Final:                      transcript.ToolStatusFinal(status, toolErr),
 	}, true
+}
+
+func transcriptToolOutputRange(meta map[string]any) (end int64, endKnown bool, start int64, startKnown bool) {
+	streamMode := metautil.String(meta,
+		metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamMode)
+	if streamMode != "" {
+		end, endKnown = metautil.Int64(meta,
+			metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeOutputCursor)
+	} else {
+		end, endKnown = metautil.Int64(meta,
+			metautil.Root, metautil.Runtime, metautil.RuntimeTask, metautil.RuntimeOutputCursor)
+	}
+	start, startKnown = metautil.Int64(meta,
+		metautil.Root, metautil.Runtime, metautil.RuntimeTask, metautil.RuntimeOutputStart)
+	if end < 0 {
+		end, endKnown = 0, false
+	}
+	if start < 0 || (endKnown && start > end) {
+		start, startKnown = 0, false
+	}
+	return end, endKnown, start, startKnown
+}
+
+func transcriptToolObservationDelta(meta map[string]any) (string, bool) {
+	taskMeta := metautil.RuntimeSection(meta, metautil.RuntimeTask)
+	delta, ok := taskMeta[metautil.RuntimeOutputDelta].(string)
+	return delta, ok && delta != ""
 }
 
 func transcriptToolHasTerminal(meta map[string]any, content []acpprojector.ToolContent) bool {

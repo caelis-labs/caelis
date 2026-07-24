@@ -315,6 +315,7 @@ func (tm *taskRuntime) persistSubagentContinuePhase(
 	}
 	task.revision = entry.Revision
 	task.lease = taskapi.CloneLease(entry.Lease)
+	task.notifyStreamChangeLocked()
 	task.mu.Unlock()
 	return nil
 }

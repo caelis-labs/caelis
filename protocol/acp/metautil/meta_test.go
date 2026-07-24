@@ -1,6 +1,9 @@
 package metautil
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestRuntimeSectionReadsCanonicalToolFields(t *testing.T) {
 	t.Parallel()
@@ -54,5 +57,37 @@ func TestTerminalMetaRoundTrip(t *testing.T) {
 	exit, ok := TerminalExit(meta)
 	if !ok || exit.TerminalID != "call-1" || exit.ExitCode == nil || *exit.ExitCode != 0 {
 		t.Fatalf("TerminalExit() = %+v, %v; want exit code 0", exit, ok)
+	}
+}
+
+func TestInt64DistinguishesZeroFromMissingMetadata(t *testing.T) {
+	t.Parallel()
+
+	meta := WithRuntimeSection(nil, RuntimeStream, map[string]any{
+		RuntimeOutputCursor: json.Number("0"),
+	})
+	if got, ok := Int64(meta, Root, Runtime, RuntimeStream, RuntimeOutputCursor); !ok || got != 0 {
+		t.Fatalf("Int64(output_cursor) = %d, %v; want 0, true", got, ok)
+	}
+	if _, ok := Int64(meta, Root, Runtime, RuntimeTask, RuntimeOutputCursor); ok {
+		t.Fatal("Int64(missing task output_cursor) reported a value")
+	}
+	meta = WithRuntimeSection(meta, RuntimeTask, map[string]any{
+		RuntimeOutputCursor: 1.5,
+	})
+	if _, ok := Int64(meta, Root, Runtime, RuntimeTask, RuntimeOutputCursor); ok {
+		t.Fatal("Int64(fractional output_cursor) reported an integer")
+	}
+	meta = WithRuntimeSection(meta, RuntimeTask, map[string]any{
+		RuntimeOutputCursor: float64(1 << 63),
+	})
+	if _, ok := Int64(meta, Root, Runtime, RuntimeTask, RuntimeOutputCursor); ok {
+		t.Fatal("Int64(out-of-range output_cursor) reported an integer")
+	}
+	meta = WithRuntimeSection(meta, RuntimeTask, map[string]any{
+		RuntimeOutputCursor: "12",
+	})
+	if _, ok := Int64(meta, Root, Runtime, RuntimeTask, RuntimeOutputCursor); ok {
+		t.Fatal("Int64(string output_cursor) accepted a non-canonical wire type")
 	}
 }

@@ -75,6 +75,31 @@ func TestNarrativeInlineCodeUsesCompactStyle(t *testing.T) {
 	}
 }
 
+func TestFinalAssistantInlineStrongStaysOnOneLogicalLine(t *testing.T) {
+	t.Parallel()
+
+	const raw = "原来如此！**Task read** 只适用于 RunCommand，Spawn 需要用 **Task wait**。来等待三个子代理完成："
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	rows := renderParticipantTurnNarrativeRowsWithBuffer(
+		"block-1",
+		raw,
+		nil,
+		tuikit.LineStyleAssistant,
+		180,
+		BlockRenderContext{
+			Width:     180,
+			TermWidth: 180,
+			Theme:     model.theme,
+			ThemeKey:  themeRenderCacheKey(model.theme),
+		},
+		false,
+	)
+	plain := renderedPlainRows(rows)
+	if len(plain) != 1 || strings.TrimRight(plain[0], " ") != "· 原来如此！Task read 只适用于 RunCommand，Spawn 需要用 Task wait。来等待三个子代理完成：" {
+		t.Fatalf("rendered rows = %#v, want one assistant row", plain)
+	}
+}
+
 func TestNarrativeInlineCodeStyleScopesAfterCJKText(t *testing.T) {
 	raw := "- **事实优先**：比起猜测，我更倾向于读取仓库中的真实代码。在编辑之前先读或搜索，用 `shell` 验证结果。"
 	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)

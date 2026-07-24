@@ -7,6 +7,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/textstream"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -17,6 +18,9 @@ import (
 const (
 	defaultCommandYield             = 5 * time.Second
 	taskWaitMaxYield                = time.Minute
+	taskWriteOutputWait             = 2 * time.Second
+	taskReadOutputWait              = 30 * time.Second
+	taskOutputQuietPeriod           = 100 * time.Millisecond
 	taskCancelWait                  = 10 * time.Millisecond
 	commandLiveOutputBufferCapBytes = 64 * 1024
 	subagentStreamFrameCap          = 1024
@@ -45,6 +49,95 @@ type sandboxSessionRefOpener interface {
 	OpenSessionRef(sandbox.SessionRef) (sandbox.Session, error)
 }
 
+// commandBackendCursor is the byte domain owned by one sandbox Session. It is
+// deliberately separate from presentation/model cursors: stdout/stderr may
+// advance past a complete UTF-8 prefix before that prefix is safe to publish.
+type commandBackendCursor struct {
+	stdout int64
+	stderr int64
+}
+
+func (cursor commandBackendCursor) outputCursor() sandbox.OutputCursor {
+	return sandbox.OutputCursor{
+		Stdout: max(cursor.stdout, 0),
+		Stderr: max(cursor.stderr, 0),
+	}
+}
+
+func (cursor *commandBackendCursor) advance(next commandBackendCursor) {
+	if cursor == nil {
+		return
+	}
+	cursor.stdout = max(cursor.stdout, next.stdout)
+	cursor.stderr = max(cursor.stderr, next.stderr)
+}
+
+// commandObservationFrontier is the model/presentation view of command output.
+// base is the first retained byte and model is the complete boundary already
+// exposed through a canonical Task observation.
+type commandObservationFrontier struct {
+	base  int64
+	model int64
+}
+
+// commandOutputCheckpoint is one atomic durable recovery boundary. backend,
+// output, and model belong to the same observation epoch; callers must advance
+// the value as a unit rather than independently maxing its scalar fields.
+type commandOutputCheckpoint struct {
+	backend   commandBackendCursor
+	output    int64
+	model     int64
+	available bool
+	coherent  bool
+	gap       bool
+}
+
+func (checkpoint commandOutputCheckpoint) resumable() bool {
+	return checkpoint.available &&
+		(checkpoint.coherent || checkpoint.gap) &&
+		checkpoint.output >= 0 &&
+		checkpoint.output == checkpoint.model
+}
+
+// advance keeps the newest complete boundary. A recovery gap is permanent for
+// the output epoch, so an equal/newer checkpoint cannot silently restore
+// coherence after bytes were lost.
+func (checkpoint *commandOutputCheckpoint) advance(next commandOutputCheckpoint) {
+	if checkpoint == nil || !next.resumable() {
+		return
+	}
+	previousGap := checkpoint.gap
+	switch {
+	case !checkpoint.resumable(), next.output > checkpoint.output:
+		*checkpoint = next
+	case next.output == checkpoint.output:
+		checkpoint.gap = checkpoint.gap || next.gap
+		checkpoint.coherent = checkpoint.coherent && next.coherent
+	}
+	checkpoint.gap = checkpoint.gap || previousGap
+	if checkpoint.gap {
+		checkpoint.coherent = false
+	}
+}
+
+// commandOutputState groups the live ingest path, model frontier, and durable
+// checkpoints. The two checkpoints have distinct owners: checkpoint follows
+// complete output ingestion, while resume advances only after the model
+// frontier catches up to the same atomic boundary.
+type commandOutputState struct {
+	backend    commandBackendCursor
+	frontier   commandObservationFrontier
+	checkpoint commandOutputCheckpoint
+	resume     commandOutputCheckpoint
+
+	live     bool
+	callback bool
+	exact    bool
+
+	recoveryStdout textstream.UTF8Decoder
+	recoveryStderr textstream.UTF8Decoder
+}
+
 type commandTask struct {
 	ref           taskapi.Ref
 	handle        string
@@ -59,22 +152,19 @@ type commandTask struct {
 	revision      uint64
 	lease         taskapi.Lease
 
-	mu             sync.Mutex
-	state          taskapi.State
-	running        bool
-	stdoutCursor   int64
-	stderrCursor   int64
-	modelCursor    int64
-	output         string
-	outputBase     int64
-	outputLive     bool
-	outputCallback bool
-	result         map[string]any
-	metadata       map[string]any
+	outputReadMu sync.Mutex
+	mu           sync.Mutex
+	state        taskapi.State
+	running      bool
+	output       string
+	outputState  commandOutputState
+	result       map[string]any
+	metadata     map[string]any
 
 	streamFrames         []stream.Frame
 	streamEventBase      int64
 	streamTerminalFramed bool
+	streamChanged        chan struct{}
 }
 
 type subagentTask struct {
@@ -113,6 +203,7 @@ type subagentTask struct {
 	streamOutputCursor   int64
 	streamBytes          int
 	streamTerminalFramed bool
+	streamChanged        chan struct{}
 }
 
 type subagentContinuationCheckpoint struct {
@@ -144,6 +235,7 @@ func (task *subagentTask) beginContinuationTurn() subagentContinuationCheckpoint
 	task.stdoutCursor = 0
 	task.stderrCursor = 0
 	task.streamTerminalFramed = false
+	task.notifyStreamChangeLocked()
 	if task.metadata != nil {
 		delete(task.metadata, "final_event_persisted")
 	}
@@ -164,6 +256,7 @@ func (task *subagentTask) restoreContinuationTurn(checkpoint subagentContinuatio
 	task.stderrCursor = checkpoint.stderrCursor
 	task.turnSeq = checkpoint.turnSeq
 	task.streamTerminalFramed = checkpoint.terminalFramed
+	task.notifyStreamChangeLocked()
 }
 
 func newTaskRuntime(runtime *Runtime, store taskapi.Store) *taskRuntime {

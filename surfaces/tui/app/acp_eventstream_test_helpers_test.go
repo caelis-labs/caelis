@@ -10,6 +10,10 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
+func narrativeTestSource() narrativeSourceIdentity {
+	return newNarrativeSourceIdentity("test-message", "test-event", "test-projection")
+}
+
 func parentToolStreamMeta(callID string, toolName string) map[string]any {
 	return metautil.WithRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
 		metautil.RuntimeStreamParentCallID: strings.TrimSpace(callID),
@@ -64,6 +68,16 @@ func mainACPTurnBlocksForTest(model *Model) []*MainACPTurnBlock {
 		}
 	}
 	return blocks
+}
+
+func physicalTranscriptEventsForTest(events []SubagentEvent) []SubagentEvent {
+	physical := make([]SubagentEvent, 0, len(events))
+	for _, event := range events {
+		if event.Kind != SESemanticBoundary {
+			physical = append(physical, event)
+		}
+	}
+	return physical
 }
 
 func countUserNarrativeBlocksForTest(model *Model, text string) int {

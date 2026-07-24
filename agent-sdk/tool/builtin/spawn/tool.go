@@ -105,7 +105,7 @@ func (t Tool) Definition() tool.Definition {
 	}
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Start a bounded delegated child session for work that can proceed independently. Use it for parallel investigation, isolated review, or a clearly scoped subtask, not for final integration or user-facing judgment. The prompt must be self-contained with goal, scope, constraints, expected output, and whether edits are allowed. To observe or wait for an existing child task, use Task wait with the returned task_id; do not call Spawn again.",
+		Description: "Start a bounded delegated child session for work that can proceed independently. Use it for parallel investigation, isolated review, or a clearly scoped subtask, not for final integration or user-facing judgment. The prompt must be self-contained with goal, scope, constraints, expected output, and whether edits are allowed. To observe or wait for an existing child task, use Task wait with the returned handle; do not call Spawn again.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"properties":           props,

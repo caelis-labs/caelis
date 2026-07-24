@@ -32,14 +32,12 @@ func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
 	}
 	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
 	defer mux.Close()
-	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
-		metautil.RuntimeToolName: "RUN_COMMAND",
-	})
+	meta := metautil.WithTerminalInfo(nil, "command-1")
 	mux.Observe(eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
-			RawOutput: map[string]any{"handle": "command", "state": "running"}, Meta: meta,
+			RawOutput: map[string]any{"handle": "command", "state": "running", "target_kind": "command"}, Meta: meta,
 		},
 	})
 	select {
@@ -170,6 +168,109 @@ func TestACPTaskStreamMuxDetachedDeliveryOutlivesParentPrompt(t *testing.T) {
 	agent.closeACPTaskStreamMuxes("session-1")
 	if !sub.closed() {
 		t.Fatal("Session close did not release detached Task delivery")
+	}
+}
+
+func TestEmitTaskAwareControlEnvelopeDrainsChildBeforeRepeatedParentFallbackClose(t *testing.T) {
+	t.Parallel()
+
+	taskEvents := make(chan eventstream.Envelope, 1)
+	taskEvents <- eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "task-yara",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-1",
+			ToolName:   "Spawn",
+		},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			MessageID:     "child-message-1",
+			Content:       schema.TextContent{Type: "text", Text: "retained child output"},
+		},
+	}
+	var taskEventStream <-chan eventstream.Envelope = taskEvents
+	boundary := make(chan struct{}, 1)
+	mux := &acpTaskStreamMux{
+		boundaries: map[string]chan struct{}{"spawn-1": boundary},
+	}
+	mux.signalBoundary("spawn-1")
+
+	completed := schema.ToolStatusCompleted
+	waitEnvelope := eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeMain,
+		Final:     true,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "wait-1",
+			Status:        &completed,
+			RawInput:      map[string]any{"action": "wait", "handle": "yara"},
+			RawOutput: map[string]any{
+				"action": "wait",
+				"tasks": []any{map[string]any{
+					"final_message": "fallback final",
+					"handle":        "yara",
+					"parent_call":   "spawn-1",
+					"parent_tool":   "Spawn",
+					"state":         "completed",
+					"target_kind":   "subagent",
+				}},
+			},
+		},
+	}
+	callbacks := &acpMuxPromptCallbacks{updates: make(chan acp.SessionNotification, 8)}
+	agent := &RuntimeAgent{}
+	filter := newACPNarrativeFilter(false)
+	for range 2 {
+		if err := agent.emitTaskAwareControlEnvelope(
+			context.Background(),
+			callbacks,
+			"session-1",
+			nil,
+			mux,
+			&taskEventStream,
+			waitEnvelope,
+			filter,
+		); err != nil {
+			t.Fatalf("emitTaskAwareControlEnvelope() error = %v", err)
+		}
+	}
+
+	notifications := make([]acp.SessionNotification, 0, len(callbacks.updates))
+	for len(callbacks.updates) > 0 {
+		notifications = append(notifications, <-callbacks.updates)
+	}
+	childOutputIndex := -1
+	parentCloseIndex := -1
+	parentCloses := 0
+	for index, notification := range notifications {
+		update, ok := notification.Update.(schema.ToolCallUpdate)
+		if !ok || update.ToolCallID != "spawn-1" {
+			continue
+		}
+		if output, ok := metautil.TerminalOutput(update.Meta); ok && output.Data == "retained child output" {
+			childOutputIndex = index
+		}
+		if update.Status != nil && *update.Status == schema.ToolStatusCompleted {
+			if _, ok := metautil.TerminalExit(update.Meta); ok {
+				parentCloses++
+				if parentCloseIndex < 0 {
+					parentCloseIndex = index
+				}
+			}
+		}
+	}
+	if childOutputIndex < 0 || parentCloseIndex < 0 || childOutputIndex >= parentCloseIndex {
+		t.Fatalf(
+			"notification order = %#v, want retained child output before observed parent close",
+			notifications,
+		)
+	}
+	if parentCloses != 1 {
+		t.Fatalf("Spawn parent closes = %d, want exactly one after repeated Task wait", parentCloses)
 	}
 }
 

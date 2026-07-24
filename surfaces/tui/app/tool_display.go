@@ -646,6 +646,11 @@ func taskControlDisplay(raw map[string]any) string {
 			parts = append(parts, duration)
 		}
 		return strings.Join(parts, " ")
+	case "READ":
+		if handle != "" {
+			return "Read " + handle
+		}
+		return "Read"
 	case "CANCEL":
 		if handle != "" {
 			return "Cancel " + handle
@@ -718,6 +723,11 @@ func taskControlDisplayFallback(values ...string) string {
 				return "Wait " + detail
 			}
 			return "Wait"
+		case "READ":
+			if detail != "" {
+				return "Read " + detail
+			}
+			return "Read"
 		case "CANCEL":
 			if detail != "" {
 				return "Cancel " + detail
@@ -737,7 +747,7 @@ func taskDisplayArgsWithHandle(args string, taskHandle string) string {
 	}
 	verb, detail := splitTaskAction(args)
 	switch strings.ToLower(strings.TrimSpace(verb)) {
-	case "wait", "cancel", "write":
+	case "wait", "read", "cancel", "write":
 	default:
 		return args
 	}

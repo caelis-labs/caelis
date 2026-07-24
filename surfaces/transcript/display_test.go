@@ -185,6 +185,23 @@ func TestTerminalTaskStillRunning(t *testing.T) {
 	}
 }
 
+func TestTerminalToolOutputTextUsesRunningTaskCommandObservationWithoutTerminalAnchor(t *testing.T) {
+	t.Parallel()
+
+	output := TerminalToolOutputText(ToolOutputFallbackInput{
+		ToolName: "TASK",
+		Status:   ToolStatusCompleted,
+		RawOutput: map[string]any{
+			"target_kind":   "command",
+			"state":         "running",
+			"latest_output": "step 2\n",
+		},
+	})
+	if output != "step 2\n" {
+		t.Fatalf("TerminalToolOutputText() = %q, want Task command observation", output)
+	}
+}
+
 func TestTerminalToolOutputTextPreservesRawWhitespace(t *testing.T) {
 	t.Parallel()
 

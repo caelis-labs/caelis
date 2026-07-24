@@ -238,6 +238,14 @@ func (s *seatbeltRunner) ReadOutput(sessionID string, stdoutMarker, stderrMarker
 	return manager.ReadOutput(sessionID, stdoutMarker, stderrMarker)
 }
 
+func (s *seatbeltRunner) AwaitOutput(ctx context.Context, sessionID string, cursor sandbox.OutputCursor) (cmdsession.OutputObservation, error) {
+	manager, err := s.asyncSessionManager()
+	if err != nil {
+		return cmdsession.OutputObservation{}, err
+	}
+	return manager.AwaitOutput(ctx, sessionID, cursor)
+}
+
 func (s *seatbeltRunner) GetSessionStatus(sessionID string) (cmdsession.SessionStatus, error) {
 	manager, err := s.asyncSessionManager()
 	if err != nil {

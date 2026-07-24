@@ -73,12 +73,13 @@ func toolResultDisplayText(name string, input map[string]any, output map[string]
 	case names.ResultSpawn:
 		return spawnResultText(output, status, isErr)
 	case names.ResultTask:
-		if toolStatusFinal(status, isErr) {
+		observedStatus := firstNonEmpty(toolString(output["state"]), status)
+		if toolStatusFinal(observedStatus, isErr) {
 			if summary := display.CleanSubagentFinalOutput(toolString(output["final_message"])); summary != "" {
 				return summary
 			}
 		}
-		return terminalResultText(output, status, isErr)
+		return terminalResultText(output, observedStatus, isErr)
 	default:
 		return genericResultText(output, isErr)
 	}

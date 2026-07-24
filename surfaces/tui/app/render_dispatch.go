@@ -47,7 +47,7 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 		return renderEventPolicy{lane: renderLaneLog, flushSmoothing: true, dismissHints: true}, true
 	case ParticipantStatusMsg:
 		return renderEventPolicy{lane: renderLaneParticipant, flushSmoothing: true, flushLogChunks: true}, true
-	case PlanUpdateMsg, SetHintMsg, UpdateCheckResultMsg, RunningActivityMsg,
+	case PlanUpdateMsg, SetHintMsg, UpdateCheckResultMsg,
 		SetStatusMsg, StatusRefreshResultMsg, SetCommandsMsg, AttachmentCountMsg,
 		RunningInterruptResultMsg, SandboxProgressMsg, statusRefreshRequestMsg:
 		return renderEventPolicy{lane: renderLaneUIState}, true
@@ -239,9 +239,6 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return model, tea.Batch(policyCmd, cmd), true
 	case UpdateCheckResultMsg:
 		model, cmd := m.handleUpdateCheckResult(typed)
-		return model, tea.Batch(policyCmd, cmd), true
-	case RunningActivityMsg:
-		model, cmd := m.handleRunningActivityMsg(typed)
 		return model, tea.Batch(policyCmd, cmd), true
 	case SetStatusMsg:
 		return m.handleSetStatusMsg(typed), policyCmd, true

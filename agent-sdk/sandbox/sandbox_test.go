@@ -246,6 +246,40 @@ func TestCloneSessionStatusNormalizesSessionRef(t *testing.T) {
 	}
 }
 
+func TestValidateOutputCursorNormalizesNegativeAndRejectsAhead(t *testing.T) {
+	if err := ValidateOutputCursor(
+		OutputCursor{Stdout: -1, Stderr: -2},
+		OutputCursor{},
+	); err != nil {
+		t.Fatalf("ValidateOutputCursor(negative) error = %v", err)
+	}
+
+	err := ValidateOutputCursor(
+		OutputCursor{Stdout: 4, Stderr: 8},
+		OutputCursor{Stdout: 4, Stderr: 7},
+	)
+	var ahead *OutputCursorAheadError
+	if !errors.As(err, &ahead) {
+		t.Fatalf("ValidateOutputCursor() error = %v, want OutputCursorAheadError", err)
+	}
+	if ahead.Stream != "stderr" || ahead.Requested != 8 || ahead.Available != 7 {
+		t.Fatalf("cursor error = %+v", ahead)
+	}
+}
+
+func TestOutputReadWindowDetectsRetainedGap(t *testing.T) {
+	t.Parallel()
+
+	start, gap := OutputReadWindow(10, []byte("tail"), 30)
+	if start != 26 || !gap {
+		t.Fatalf("OutputReadWindow(gap) = %d/%v, want 26/true", start, gap)
+	}
+	start, gap = OutputReadWindow(26, []byte("tail"), 30)
+	if start != 26 || gap {
+		t.Fatalf("OutputReadWindow(contiguous) = %d/%v, want 26/false", start, gap)
+	}
+}
+
 func TestEffectiveConstraintsMergesLegacyFields(t *testing.T) {
 	t.Parallel()
 

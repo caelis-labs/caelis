@@ -266,12 +266,19 @@ func projectorRequest(descriptor controltaskstream.TaskDescriptor, frame sdkstre
 	if descriptor.Kind == task.KindSubagent {
 		scope = eventstream.ScopeSubagent
 	}
+	displayTerminalID := terminalID
+	if descriptor.Kind == task.KindCommand && strings.TrimSpace(descriptor.ParentTool.ToolCallID) != "" {
+		// A RunCommand Task stream is mounted on the parent ACP tool call.
+		// The runtime terminal ID remains the physical stream address, while
+		// stdio terminal output and exit metadata target the mounted call.
+		displayTerminalID = strings.TrimSpace(descriptor.ParentTool.ToolCallID)
+	}
 	return projector.StreamRequest{
 		TurnID: terminalID, SessionRef: session.SessionRef{SessionID: descriptor.SessionID},
 		SourceID: terminalID, CallID: descriptor.ParentTool.ToolCallID, ToolName: toolName,
 		ParentCallID: descriptor.ParentTool.ToolCallID, ParentToolName: toolName, TaskHandle: descriptor.Handle,
 		Ref:               sdkstream.Ref{SessionID: descriptor.SessionID, TaskID: descriptor.TaskID, TerminalID: terminalID},
-		DisplayTerminalID: terminalID, Scope: scope, ParticipantID: descriptor.ParticipantID,
+		DisplayTerminalID: displayTerminalID, Scope: scope, ParticipantID: descriptor.ParticipantID,
 	}
 }
 

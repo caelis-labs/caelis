@@ -3232,7 +3232,7 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveCommand(t *testing.T) {
+func TestRuntimeTaskWriteReturnsInteractiveOutputWithoutWaitingForExit(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -3243,7 +3243,7 @@ func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveCommand(t *testing.T) {
 		tasks:      runtime.tasks,
 	}
 	runCommandResult := callRuntimeRunCommandTool(t, runCommandTool, map[string]any{
-		"command":       shellInteractiveGreetingForTest(),
+		"command":       shellInteractiveGreetingLoopForTest(),
 		"workdir":       ".",
 		"yield_time_ms": shellRunningYieldMillisForTest(0),
 	})
@@ -3261,23 +3261,208 @@ func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveCommand(t *testing.T) {
 		"handle": handle,
 		"input":  "Codex",
 	})
-	if payload := testToolResultPayload(t, taskResult); payload["state"] != string(taskapi.StateRunning) {
-		t.Fatalf("task write result = %#v, want running before explicit wait", payload)
+	payload := testToolResultPayload(t, taskResult)
+	if payload["state"] != string(taskapi.StateRunning) {
+		t.Fatalf("task write result = %#v, want interactive command to remain running", payload)
+	}
+	if latest, _ := payload["latest_output"].(string); !strings.Contains(latest, "hello Codex") {
+		t.Fatalf("task write latest_output = %q, want interactive response", latest)
 	}
 	taskResult = callRuntimeTaskTool(t, runtimeTaskTool{
 		base:       tasktool.New(),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action": "wait",
+		"action": "cancel",
 		"handle": handle,
 	})
-	if len(taskResult.Content) == 0 || taskResult.Content[0].JSON == nil {
-		t.Fatalf("task result content = %#v, want json payload", taskResult.Content)
+	if payload := testToolResultPayload(t, taskResult); payload["state"] != string(taskapi.StateCancelled) {
+		t.Fatalf("task cancel result = %#v, want cancelled cleanup", payload)
 	}
-	payload := string(taskResult.Content[0].JSON.Value)
-	if !strings.Contains(payload, "hello Codex") {
-		t.Fatalf("task write result = %s, want interactive read to receive input line", payload)
+}
+
+func TestRuntimeTaskReadReturnsNewOutputWithoutWaitingForExit(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	runCommandTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, hostRuntimeForTest(t, activeSession.CWD)),
+		session:    activeSession,
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}
+	runCommandResult := callRuntimeRunCommandTool(t, runCommandTool, map[string]any{
+		"command":       shellSleepPrintThenSleepForTest("read-ready\n", 250*time.Millisecond, 10*time.Second),
+		"workdir":       ".",
+		"yield_time_ms": shellRunningYieldMillisForTest(0),
+	})
+	handle, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	if strings.TrimSpace(handle) == "" {
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
+	}
+
+	start := time.Now()
+	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action": "read",
+		"handle": handle,
+	})
+	if elapsed := time.Since(start); elapsed >= 5*time.Second {
+		t.Fatalf("TASK read elapsed = %v, want output-driven return before command exit", elapsed)
+	}
+	payload := testToolResultPayload(t, taskResult)
+	if payload["state"] != string(taskapi.StateRunning) {
+		t.Fatalf("task read result = %#v, want command still running", payload)
+	}
+	if latest, _ := payload["latest_output"].(string); !strings.Contains(latest, "read-ready") {
+		t.Fatalf("task read latest_output = %q, want emitted output", latest)
+	}
+	taskMeta := testToolResultRuntimeMeta(t, taskResult, "task")
+	startCursor, startKnown := taskInt64Value(taskMeta["output_start_cursor"])
+	endCursor, endKnown := taskInt64Value(taskMeta["output_cursor"])
+	if !startKnown || !endKnown || startCursor < 0 || startCursor > endCursor {
+		t.Fatalf("task read output range = [%#v,%#v], want a valid cumulative byte range", taskMeta["output_start_cursor"], taskMeta["output_cursor"])
+	}
+	if delta, _ := taskMeta["output_delta"].(string); !strings.Contains(delta, "read-ready") {
+		t.Fatalf("task read output_delta = %q, want exact observed terminal bytes", delta)
+	}
+	callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action": "cancel",
+		"handle": handle,
+	})
+}
+
+func TestCompletedCommandObservationKeepsExactInterleavedCallbackOutput(t *testing.T) {
+	t.Parallel()
+
+	const (
+		stdout = "out 1\nout 2\n"
+		stderr = "err 1\n"
+		exact  = "out 1\nerr 1\nout 2\n"
+	)
+	running := false
+	sessionHandle := &yieldProbeSandboxSession{
+		statusRunning: &running,
+		stdout:        stdout,
+		stderr:        stderr,
+		result: sandbox.CommandResult{
+			Stdout: stdout, Stderr: stderr, ExitCode: 0, Backend: sandbox.BackendHost,
+		},
+	}
+	task := &commandTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: sessionHandle.Ref().SessionID, TerminalID: sessionHandle.Terminal().TerminalID},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		session:    sessionHandle, command: "interleaved", state: taskapi.StateRunning, running: true,
+		createdAt: time.Now(),
+		outputState: commandOutputState{
+			callback:   true,
+			exact:      true,
+			checkpoint: commandOutputCheckpoint{coherent: true},
+		},
+		metadata: map[string]any{"command_phase": commandPhaseRunning},
+	}
+	task.appendSandboxOutput(sandbox.OutputChunk{Stream: "stdout", Text: "out 1\n", Cursor: 6})
+	task.appendSandboxOutput(sandbox.OutputChunk{Stream: "stderr", Text: "err 1\n", Cursor: 6})
+	task.appendSandboxOutput(sandbox.OutputChunk{Stream: "stdout", Text: "out 2\n", Cursor: 12})
+
+	snapshot, err := newTaskRuntime(&Runtime{clock: time.Now}, nil).reconcileCommandStatus(
+		context.Background(), task, sandbox.SessionStatus{
+			SessionRef: sessionHandle.Ref(), Terminal: sessionHandle.Terminal(), Running: false, ExitCode: 0,
+		},
+	)
+	if err != nil {
+		t.Fatalf("reconcileCommandStatus() error = %v", err)
+	}
+	if got, _ := snapshot.Metadata["output_delta"].(string); got != exact {
+		t.Fatalf("terminal output_delta = %q, want exact callback interleave %q", got, exact)
+	}
+	if got, _ := taskInt64Value(snapshot.Metadata["output_cursor"]); got != int64(len([]byte(exact))) {
+		t.Fatalf("terminal output_cursor = %d, want %d", got, len([]byte(exact)))
+	}
+	if got, _ := snapshot.Result["result"].(string); got != stdout+stderr {
+		t.Fatalf("model result = %q, want grouped stdout/stderr %q", got, stdout+stderr)
+	}
+}
+
+func TestCompletedCommandObservationKeepsAbsoluteCursorWhenResultIsCapped(t *testing.T) {
+	t.Parallel()
+
+	exact := strings.Repeat("x", commandLiveOutputBufferCapBytes+4096)
+	cappedResult := exact[len(exact)-1024:]
+	running := false
+	sessionHandle := &yieldProbeSandboxSession{
+		statusRunning: &running,
+		stdout:        cappedResult,
+		result: sandbox.CommandResult{
+			Stdout: cappedResult, ExitCode: 0, Backend: sandbox.BackendHost,
+		},
+	}
+	task := &commandTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: sessionHandle.Ref().SessionID, TerminalID: sessionHandle.Terminal().TerminalID},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		session:    sessionHandle, command: "large-output", state: taskapi.StateRunning, running: true,
+		createdAt: time.Now(),
+		outputState: commandOutputState{
+			callback:   true,
+			exact:      true,
+			checkpoint: commandOutputCheckpoint{coherent: true},
+		},
+		metadata: map[string]any{"command_phase": commandPhaseRunning},
+	}
+	task.appendSandboxOutput(sandbox.OutputChunk{
+		Stream: "stdout", Text: exact, Cursor: int64(len([]byte(exact))),
+	})
+
+	store := newFileTaskStoreForTest(t)
+	tasks := newTaskRuntime(&Runtime{clock: time.Now}, store)
+	snapshot, err := tasks.reconcileCommandStatus(
+		context.Background(), task, sandbox.SessionStatus{
+			SessionRef: sessionHandle.Ref(), Terminal: sessionHandle.Terminal(), Running: false, ExitCode: 0,
+		},
+	)
+	if err != nil {
+		t.Fatalf("reconcileCommandStatus() error = %v", err)
+	}
+	wantStart := int64(len([]byte(exact)) - commandLiveOutputBufferCapBytes)
+	if got, _ := taskInt64Value(snapshot.Metadata["output_start_cursor"]); got != wantStart {
+		t.Fatalf("terminal output_start_cursor = %d, want retained base %d", got, wantStart)
+	}
+	if got, _ := taskInt64Value(snapshot.Metadata["output_cursor"]); got != int64(len([]byte(exact))) {
+		t.Fatalf("terminal output_cursor = %d, want absolute total %d", got, len([]byte(exact)))
+	}
+	if delta, _ := snapshot.Metadata["output_delta"].(string); len([]byte(delta)) != commandLiveOutputBufferCapBytes {
+		t.Fatalf("terminal output_delta bytes = %d, want retained %d", len([]byte(delta)), commandLiveOutputBufferCapBytes)
+	}
+
+	entry, err := store.Get(context.Background(), task.ref.TaskID)
+	if err != nil {
+		t.Fatalf("task store Get() error = %v", err)
+	}
+	wantCursor := int64(len([]byte(exact)))
+	if replayCursor, ok := taskInt64Value(entry.Metadata[commandStreamOutputCursorMeta]); !ok || replayCursor != wantCursor {
+		t.Fatalf("durable stream replay cursor = %d/%v, want %d", replayCursor, ok, wantCursor)
+	}
+	reloaded, err := newStreamService(tasks).Read(context.Background(), stream.ReadRequest{
+		Ref: stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
+	})
+	if err != nil {
+		t.Fatalf("stream Read() after durable reload error = %v", err)
+	}
+	if reloaded.Cursor.Output != wantCursor || reloaded.TruncatedBefore != wantCursor {
+		t.Fatalf(
+			"durable terminal stream cursor/truncation = %d/%d, want %d/%d",
+			reloaded.Cursor.Output,
+			reloaded.TruncatedBefore,
+			wantCursor,
+			wantCursor,
+		)
 	}
 }
 
@@ -3348,7 +3533,6 @@ func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
 			SessionID: activeSession.SessionID,
 			TaskID:    snapshot.Ref.TaskID,
 		},
-		PollInterval: 10 * time.Millisecond,
 	}) {
 		if seqErr != nil {
 			t.Fatalf("terminal Subscribe() error = %v", seqErr)
@@ -3422,7 +3606,6 @@ func TestRuntimeTerminalSubscribePreservesEchoNewlines(t *testing.T) {
 			SessionID: activeSession.SessionID,
 			TaskID:    snapshot.Ref.TaskID,
 		},
-		PollInterval: 5 * time.Millisecond,
 	}) {
 		if seqErr != nil {
 			t.Fatalf("terminal Subscribe() error = %v", seqErr)
@@ -3513,8 +3696,7 @@ func TestRuntimeTerminalSubscribePreservesCompletionTailDuringTaskWait(t *testin
 				SessionID: activeSession.SessionID,
 				TaskID:    snapshot.Ref.TaskID,
 			},
-			Cursor:       stream.Cursor{Output: cursor},
-			PollInterval: 5 * time.Millisecond,
+			Cursor: stream.Cursor{Output: cursor},
 		}) {
 			if streamErr != nil {
 				result.err = streamErr
@@ -3901,29 +4083,31 @@ func isShortHexTaskID(taskID string) bool {
 	return true
 }
 
-func TestRuntimeTaskWaitIgnoresLegacyAgentYield(t *testing.T) {
+func TestRuntimeTaskWaitRejectsLegacyAgentYield(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
 	taskID := startProbeCommandTask(t, activeSession, runtime, fake)
 
-	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
-		base:       tasktool.New(),
-		sessionRef: activeSession.SessionRef,
-		tasks:      runtime.tasks,
-	}, map[string]any{
+	raw, err := json.Marshal(map[string]any{
 		"action":        "wait",
 		"handle":        taskID,
 		"yield_time_ms": -1,
 	})
-
-	if got := fake.session.lastWait; got != taskWaitMaxYield {
-		t.Fatalf("TASK wait yield = %v, want legacy yield_time_ms ignored and fixed %v", got, taskWaitMaxYield)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
-	if got := toolMeta["effective_yield_time_ms"]; got != float64(60000) && got != 60000 {
-		t.Fatalf("effective_yield_time_ms = %#v, want 60000", got)
+	_, err = (runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}).Call(context.Background(), tool.Call{ID: "task-wait", Name: tasktool.ToolName, Input: raw})
+	if err == nil || !strings.Contains(err.Error(), "yield_"+"time_ms") {
+		t.Fatalf("TASK wait error = %v, want legacy yield timing argument rejection", err)
+	}
+	if got := fake.session.lastWait; got != 0 {
+		t.Fatalf("TASK wait invoked sandbox with legacy argument, lastWait = %v", got)
 	}
 }
 
@@ -4083,7 +4267,7 @@ func TestRuntimeTaskBatchCancelReturnsPartialFailurePayload(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskWriteWithCommaSeparatedTaskIDsUsesFirst(t *testing.T) {
+func TestRuntimeTaskWriteRejectsCommaSeparatedTaskIDs(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -4105,12 +4289,8 @@ func TestRuntimeTaskWriteWithCommaSeparatedTaskIDsUsesFirst(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}).Call(context.Background(), tool.Call{ID: "task-write", Name: tasktool.ToolName, Input: raw})
-	if err != nil {
-		t.Fatalf("TASK write with multiple task ids error = %v", err)
-	}
-	toolMeta := testToolResultRuntimeMeta(t, result, "tool")
-	if got := toolMeta["target_handle"]; got != taskOne {
-		t.Fatalf("target_handle = %#v, want first task %q", got, taskOne)
+	if err == nil || !strings.Contains(err.Error(), "exactly one handle") {
+		t.Fatalf("TASK write with multiple task ids error = %v, want exact-one rejection (result %#v)", err, result)
 	}
 }
 
@@ -4140,7 +4320,9 @@ func TestRuntimeTaskWaitReturnsTailWhileRunningAndFullWhenCompleted(t *testing.T
 	if fakeSession.onOutput == nil {
 		t.Fatal("fake session output callback is nil")
 	}
-	fakeSession.onOutput(sandbox.OutputChunk{Text: fakeSession.stdout})
+	fakeSession.onOutput(sandbox.OutputChunk{
+		Stream: "stdout", Text: fakeSession.stdout, Cursor: int64(len([]byte(fakeSession.stdout))),
+	})
 	taskTool := runtimeTaskTool{
 		base:       tasktool.New(),
 		sessionRef: activeSession.SessionRef,
@@ -4412,6 +4594,11 @@ func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T
 			StderrCursor:   3,
 			SupportsInput:  true,
 			SupportsCancel: true,
+			Metadata: map[string]any{
+				"output_start_cursor": int64(len([]byte("already shown\n"))),
+				"output_cursor":       int64(len([]byte("already shown\nline A\nline B\n"))),
+				"output_delta":        "line A\nline B\n",
+			},
 			Result: map[string]any{
 				"latest_output": "line A\nline B\n",
 				"result":        "already shown\nline A\nline B\n",
@@ -4425,6 +4612,12 @@ func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T
 	}
 	if got := taskMeta["output_cursor"]; got != int64(len([]byte("already shown\nline A\nline B\n"))) {
 		t.Fatalf("metadata output_cursor = %#v, want terminal text length", got)
+	}
+	if got := taskMeta["output_start_cursor"]; got != int64(len([]byte("already shown\n"))) {
+		t.Fatalf("metadata output_start_cursor = %#v, want prior model cursor", got)
+	}
+	if got := taskMeta["output_delta"]; got != "line A\nline B\n" {
+		t.Fatalf("metadata output_delta = %#v, want exact terminal delta", got)
 	}
 	var payload map[string]any
 	if len(result.Content) == 0 || result.Content[0].JSON == nil {
@@ -4602,6 +4795,49 @@ func TestRuntimeTaskToolResolvesSubagentHandle(t *testing.T) {
 	taskMeta := testToolResultRuntimeMeta(t, result, "task")
 	if _, ok := taskMeta["internal_task_id"]; ok {
 		t.Fatalf("metadata internal_task_id = %#v, want omitted", taskMeta["internal_task_id"])
+	}
+}
+
+func TestRuntimeTaskReadRejectsSpawnHandle(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	runtime.tasks.mu.Lock()
+	runtime.tasks.subagents["task-1"] = &subagentTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "child-session"},
+		sessionRef: activeSession.SessionRef,
+		handle:     "ella",
+		state:      taskapi.StateRunning,
+		running:    true,
+		metadata:   map[string]any{"handle": "ella"},
+	}
+	runtime.tasks.mu.Unlock()
+
+	raw, err := json.Marshal(map[string]any{"action": "read", "handle": "ella"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = (runtimeTaskTool{
+		base: tasktool.New(), sessionRef: activeSession.SessionRef, tasks: runtime.tasks,
+	}).Call(context.Background(), tool.Call{ID: "task-read", Name: tasktool.ToolName, Input: raw})
+	if err == nil || !strings.Contains(err.Error(), "read supports RunCommand handles") {
+		t.Fatalf("TASK read Spawn error = %v, want target-kind contract error", err)
+	}
+}
+
+func TestRuntimeTaskReadRejectsBatchHandles(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	raw, err := json.Marshal(map[string]any{"action": "read", "handle": "command-1,command-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = (runtimeTaskTool{
+		base: tasktool.New(), sessionRef: activeSession.SessionRef, tasks: runtime.tasks,
+	}).Call(context.Background(), tool.Call{ID: "task-read", Name: tasktool.ToolName, Input: raw})
+	if err == nil || !strings.Contains(err.Error(), "accepts exactly one handle") {
+		t.Fatalf("TASK read batch error = %v, want single-handle contract error", err)
 	}
 }
 

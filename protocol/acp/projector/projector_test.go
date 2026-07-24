@@ -381,11 +381,11 @@ func TestEventProjectorProjectsDurableContentChunkMessageIDAndMeta(t *testing.T)
 	event := session.CanonicalizeEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeAssistant,
+		MessageID: "msg-1",
 		Message:   &message,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
-				MessageID:     "msg-1",
 				Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
 			},
 		},
@@ -480,6 +480,10 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 		ID:   "call-1",
 		Name: "RUN_COMMAND",
 		Args: `{"command":"date","workdir":"/tmp/work"}`,
+	}, {
+		ID:   "call-2",
+		Name: "Read",
+		Args: `{"path":"result.txt"}`,
 	}})
 	callEvent := session.CanonicalizeEvent(&session.Event{
 		SessionID: "session-1",
@@ -508,12 +512,31 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 	if len(callUpdates) != 3 {
 		t.Fatalf("ProjectEvent(tool call) produced %d updates, want thought + message + tool_call: %#v", len(callUpdates), callUpdates)
 	}
+	thought, ok := callUpdates[0].(ContentChunk)
+	if !ok || thought.SessionUpdate != UpdateAgentThought {
+		t.Fatalf("first update = %#v, want reasoning sibling", callUpdates[0])
+	}
+	if content, ok := thought.Content.(TextContent); !ok || content.Text != "Need output first." {
+		t.Fatalf("reasoning sibling content = %#v, want exact durable reasoning", thought.Content)
+	}
+	assistant, ok := callUpdates[1].(ContentChunk)
+	if !ok || assistant.SessionUpdate != UpdateAgentMessage {
+		t.Fatalf("second update = %#v, want assistant sibling", callUpdates[1])
+	}
+	if content, ok := assistant.Content.(TextContent); !ok || content.Text != "I will run it." {
+		t.Fatalf("assistant sibling content = %#v, want exact durable text", assistant.Content)
+	}
 	call, ok := callUpdates[2].(ToolCall)
 	if !ok {
 		t.Fatalf("tool call update = %T, want ToolCall", callUpdates[2])
 	}
 	if call.ToolCallID != "call-1" || call.Kind != ToolKindExecute || call.Title != "RUN_COMMAND date" {
 		t.Fatalf("tool call = %#v, want RUN_COMMAND execute call", call)
+	}
+	for _, update := range callUpdates {
+		if extra, ok := update.(ToolCall); ok && extra.ToolCallID == "call-2" {
+			t.Fatalf("canonical event duplicated sibling tool_use call-2: %#v", callUpdates)
+		}
 	}
 	assertTerminalAnchor(t, call.Content, "call-1")
 	assertTerminalInfo(t, call.Meta, "call-1")

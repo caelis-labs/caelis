@@ -60,7 +60,16 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 		return text
 	}
 	canonical, _ := names.Resolve(input.ToolName)
-	if !display.IsTerminalPanelTool(input.ToolName, input.ToolKind) && canonical != names.Task {
+	if canonical == names.Task && commandTaskTargetKind(display.ToolTaskTargetKind(nil, input.RawOutput, input.Meta)) {
+		if TerminalTaskStillRunning(input.RawOutput, input.Meta) || !ToolStatusFinal(input.Status, input.Error) {
+			return firstRawNonEmpty(rawDisplayString(input.RawOutput["latest_output"]), rawDisplayString(input.RawOutput["output_preview"]))
+		}
+		if text := display.CommandTaskOutputText(input.RawOutput); text != "" {
+			return text
+		}
+		return ""
+	}
+	if !display.IsTerminalPanelTool(input.ToolName, input.ToolKind) {
 		return ""
 	}
 	if !HasTerminalPanelMeta(input.Meta) {

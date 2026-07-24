@@ -74,6 +74,92 @@ func TestRunOnceAppendsPrefixGrowingACPMessageDeltasExactly(t *testing.T) {
 	}
 }
 
+func TestRunOnceReplacesTransientAssistantWithCanonicalFinal(t *testing.T) {
+	t.Parallel()
+
+	handle := newFakeACPHandle([]eventstream.Envelope{
+		{
+			Kind:     eventstream.KindSessionUpdate,
+			Scope:    eventstream.ScopeMain,
+			Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "provisional"},
+			},
+		},
+		{
+			Kind:         eventstream.KindSessionUpdate,
+			EventID:      "assistant-1",
+			ProjectionID: eventstream.FormatProjectionID("assistant-1", 0),
+			Scope:        eventstream.ScopeMain,
+			Final:        true,
+			Delivery:     &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "canonical answer"},
+			},
+		},
+	})
+	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, control.Submission{Text: "hello"}, Options{})
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Output != "canonical answer" {
+		t.Fatalf("RunOnce() output = %q, want canonical replacement", result.Output)
+	}
+}
+
+func TestRunOncePreservesIdenticalAssistantDeltas(t *testing.T) {
+	t.Parallel()
+
+	handle := newFakeACPHandle([]eventstream.Envelope{
+		{
+			Kind: eventstream.KindSessionUpdate,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				MessageID:     "message-1",
+				Content:       schema.TextContent{Type: "text", Text: "ha"},
+			},
+		},
+		{
+			Kind: eventstream.KindSessionUpdate,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				MessageID:     "message-1",
+				Content:       schema.TextContent{Type: "text", Text: "ha"},
+			},
+		},
+	})
+	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, control.Submission{Text: "hello"}, Options{})
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Output != "haha" {
+		t.Fatalf("RunOnce() output = %q, want both exact deltas", result.Output)
+	}
+}
+
+func TestRunOnceKeepsSDKOnlyAssistantWithoutDurableIdentity(t *testing.T) {
+	t.Parallel()
+
+	handle := newFakeACPHandle([]eventstream.Envelope{{
+		Kind:     eventstream.KindSessionUpdate,
+		Scope:    eventstream.ScopeMain,
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "sdk-only"},
+		},
+	}})
+	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, control.Submission{Text: "hello"}, Options{})
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Output != "sdk-only" {
+		t.Fatalf("RunOnce() output = %q, want identity-free SDK output", result.Output)
+	}
+}
+
 func TestRunOnceIgnoresScopedTraceOutput(t *testing.T) {
 	t.Parallel()
 

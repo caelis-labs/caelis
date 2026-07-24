@@ -188,6 +188,7 @@ func (tm *taskRuntime) persistSubagentCancelPhase(
 		}
 	}
 	task.metadata["cancel_phase"] = string(phase)
+	task.notifyStreamChangeLocked()
 	task.mu.Unlock()
 	return nil
 }

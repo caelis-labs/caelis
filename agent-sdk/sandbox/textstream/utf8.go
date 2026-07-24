@@ -9,6 +9,24 @@ type UTF8Decoder struct {
 	pending []byte
 }
 
+// PendingBytes reports raw bytes not yet represented by decoded output.
+func (d *UTF8Decoder) PendingBytes() int {
+	if d == nil {
+		return 0
+	}
+	return len(d.pending)
+}
+
+// Reset discards an incomplete prefix when the upstream byte stream reports a
+// retention gap. Bytes on opposite sides of a gap must never be decoded as one
+// rune.
+func (d *UTF8Decoder) Reset() {
+	if d == nil {
+		return
+	}
+	d.pending = nil
+}
+
 func (d *UTF8Decoder) Decode(chunk []byte) string {
 	if len(chunk) == 0 {
 		return ""

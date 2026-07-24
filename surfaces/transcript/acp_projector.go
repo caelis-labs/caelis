@@ -149,6 +149,8 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 		}
 	}
 	for i := range out {
+		out[i].SourceEventID = strings.TrimSpace(env.EventID)
+		out[i].SourceProjectionID = strings.TrimSpace(env.ProjectionID)
 		out[i].RunID = strings.TrimSpace(env.RunID)
 		out[i].TurnID = strings.TrimSpace(env.TurnID)
 		out[i].ParticipantID = strings.TrimSpace(env.ParticipantID)

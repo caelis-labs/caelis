@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
@@ -126,6 +127,65 @@ func CloneRuntimeOverrides(in RuntimeOverrides) RuntimeOverrides {
 	}
 	if len(in.ExtraWriteRoots) > 0 {
 		out.ExtraWriteRoots = append([]string(nil), in.ExtraWriteRoots...)
+	}
+	return out
+}
+
+// ApplyRuntimeOverrides merges one selected assembly option into runtime-facing
+// Agent metadata. Callers apply mode first and config selections in declaration
+// order so later, more specific selections replace scalar values.
+func ApplyRuntimeOverrides(metadata map[string]any, overrides RuntimeOverrides) {
+	if metadata == nil {
+		return
+	}
+	if profile := policyapi.NormalizeProfileName(overrides.PolicyMode); profile != "" {
+		metadata[policyapi.MetadataPolicyProfile] = profile
+		delete(metadata, policyapi.MetadataLegacyPolicyMode)
+	}
+	if trimmed := strings.TrimSpace(overrides.SystemPrompt); trimmed != "" {
+		metadata["system_prompt"] = trimmed
+	}
+	if trimmed := strings.TrimSpace(overrides.Reasoning.Effort); trimmed != "" {
+		metadata["reasoning_effort"] = trimmed
+	}
+	if overrides.Reasoning.BudgetTokens > 0 {
+		metadata["reasoning_budget_tokens"] = overrides.Reasoning.BudgetTokens
+	}
+	if len(overrides.ExtraReadRoots) > 0 {
+		metadata["policy_extra_read_roots"] = mergeStringSliceMetadata(metadata["policy_extra_read_roots"], overrides.ExtraReadRoots)
+	}
+	if len(overrides.ExtraWriteRoots) > 0 {
+		metadata["policy_extra_write_roots"] = mergeStringSliceMetadata(metadata["policy_extra_write_roots"], overrides.ExtraWriteRoots)
+	}
+}
+
+func mergeStringSliceMetadata(existing any, values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	appendOne := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	switch typed := existing.(type) {
+	case []string:
+		for _, one := range typed {
+			appendOne(one)
+		}
+	case []any:
+		for _, one := range typed {
+			text, _ := one.(string)
+			appendOne(text)
+		}
+	}
+	for _, one := range values {
+		appendOne(one)
 	}
 	return out
 }

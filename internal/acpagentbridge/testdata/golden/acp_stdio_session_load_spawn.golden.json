@@ -108,6 +108,26 @@
   {
     "sessionId": "session-load-spawn",
     "update": {
+      "sessionUpdate": "agent_thought_chunk",
+      "content": {
+        "type": "text",
+        "text": "The sub-agents are running. I will wait for both results."
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "agent_message_chunk",
+      "content": {
+        "type": "text",
+        "text": "Waiting for alpha and beta."
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "wait-one",
       "title": "Task wait",
@@ -198,6 +218,26 @@
   {
     "sessionId": "session-load-spawn",
     "update": {
+      "sessionUpdate": "agent_thought_chunk",
+      "content": {
+        "type": "text",
+        "text": "Beta is still running after the first wait. I will wait again."
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "agent_message_chunk",
+      "content": {
+        "type": "text",
+        "text": "Continuing to wait for beta."
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "wait-two",
       "title": "Task wait",
@@ -276,6 +316,55 @@
           "data": "Beta final.",
           "terminal_id": "spawn-beta"
         }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "agent_thought_chunk",
+      "content": {
+        "type": "text",
+        "text": "Both sub-agents completed. I will verify the generated report."
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "agent_message_chunk",
+      "content": {
+        "type": "text",
+        "text": "Reading the report now."
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "read-report",
+      "title": "Read report.md",
+      "kind": "read",
+      "status": "pending",
+      "rawInput": {
+        "path": "report.md"
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "read-report",
+      "title": "Read report.md",
+      "kind": "read",
+      "status": "completed",
+      "rawInput": {
+        "path": "report.md"
+      },
+      "rawOutput": {
+        "result": "verified"
       }
     }
   }

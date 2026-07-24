@@ -373,6 +373,7 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 	default:
 		return acpTaskStreamAnchor{}, false
 	}
+	callID := strings.TrimSpace(taskStreamToolCallID(envelope.Update))
 	kind := task.Kind("")
 	switch identity.CanonicalOrSelf(toolName) {
 	case identity.RunCommand:
@@ -380,8 +381,19 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 	case identity.Spawn:
 		kind = task.KindSubagent
 	default:
-		if identity.CanonicalOrSelf(display.MapString(output, "parent_tool")) == identity.Spawn &&
-			strings.EqualFold(display.ToolTaskTargetKind(input, output, meta), "subagent") {
+		targetKind := strings.ToLower(strings.TrimSpace(display.ToolTaskTargetKind(input, output, meta)))
+		terminalInfo, hasTerminalInfo := metautil.TerminalInfo(meta)
+		switch {
+		case targetKind == string(task.KindCommand) &&
+			hasTerminalInfo &&
+			strings.TrimSpace(terminalInfo.TerminalID) == callID:
+			// Standard ACP strips Caelis' private runtime tool-name metadata,
+			// but the typed RunCommand terminal anchor and target kind remain.
+			// The Task directory match below still validates the canonical
+			// parent call before any stream is attached.
+			kind = task.KindCommand
+		case identity.CanonicalOrSelf(display.MapString(output, "parent_tool")) == identity.Spawn &&
+			strings.EqualFold(display.ToolTaskTargetKind(input, output, meta), "subagent"):
 			kind = task.KindSubagent
 		}
 	}
@@ -389,7 +401,6 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 		return acpTaskStreamAnchor{}, false
 	}
 	handle := display.ToolTaskHandle(input, output, meta)
-	callID := strings.TrimSpace(taskStreamToolCallID(envelope.Update))
 	handle = strings.TrimSpace(handle)
 	if kind == task.KindSubagent {
 		if parentCall := strings.TrimSpace(display.MapString(output, "parent_call")); parentCall != "" && parentCall != callID {

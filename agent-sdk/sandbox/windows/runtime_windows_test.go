@@ -3,6 +3,7 @@
 package windows
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -107,6 +109,216 @@ func TestWindowsSessionForceTerminateMarksDone(t *testing.T) {
 	if result.ExitCode != -1 {
 		t.Fatalf("second result.ExitCode = %d, want -1", result.ExitCode)
 	}
+}
+
+func TestWindowsSessionTerminalObservationIncludesDecoderTail(t *testing.T) {
+	t.Parallel()
+
+	tailStarted := make(chan struct{})
+	releaseTail := make(chan struct{})
+	session := &windowsSession{
+		ref: sandbox.SessionRef{
+			Backend:   sandbox.BackendWindows,
+			SessionID: "exec-tail",
+		},
+		terminal: sandbox.TerminalRef{
+			Backend:    sandbox.BackendWindows,
+			SessionID:  "exec-tail",
+			TerminalID: "term-tail",
+		},
+		running:      true,
+		startedAt:    time.Now(),
+		updatedAt:    time.Now(),
+		done:         make(chan struct{}),
+		outputSignal: make(chan struct{}),
+		onOutput: func(chunk sandbox.OutputChunk) {
+			if chunk.Stream == "stdout" {
+				close(tailStarted)
+				<-releaseTail
+			}
+		},
+	}
+	if got := session.stdoutText.Decode([]byte{0xe4, 0xb8}); len(got) != 0 {
+		t.Fatalf("decoder emitted incomplete UTF-8 prefix %q before Flush", got)
+	}
+
+	forceDone := make(chan struct{})
+	go func() {
+		session.forceTerminated(errors.New("forced after partial output"))
+		close(forceDone)
+	}()
+	<-tailStarted
+
+	observation := make(chan sandbox.OutputObservation, 1)
+	go func() {
+		got, _ := session.AwaitOutput(context.Background(), sandbox.OutputCursor{})
+		observation <- got
+	}()
+	select {
+	case got := <-observation:
+		t.Fatalf("terminal observation published before tail callback completed: %+v", got)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	close(releaseTail)
+	select {
+	case <-forceDone:
+	case <-time.After(time.Second):
+		t.Fatal("forceTerminated did not wait for final publication")
+	}
+	got := <-observation
+	if got.Status.Running || got.Cursor.Stdout == 0 {
+		t.Fatalf("terminal observation = %+v, want decoder tail cursor", got)
+	}
+	stdout, _, cursor, _, err := session.ReadOutput(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatalf("ReadOutput() error = %v", err)
+	}
+	if cursor != got.Cursor.Stdout || len(stdout) == 0 {
+		t.Fatalf("ReadOutput() = %q/%d, observation cursor = %d", stdout, cursor, got.Cursor.Stdout)
+	}
+}
+
+func TestWindowsSessionConcurrentFinalizersWaitForTerminalPublish(t *testing.T) {
+	t.Parallel()
+
+	tailStarted := make(chan struct{})
+	releaseTail := make(chan struct{})
+	normalErr := errors.New("normal finalizer")
+	session := &windowsSession{
+		running:      true,
+		done:         make(chan struct{}),
+		outputSignal: make(chan struct{}),
+		onOutput: func(chunk sandbox.OutputChunk) {
+			if chunk.Stream == "stdout" {
+				close(tailStarted)
+				<-releaseTail
+			}
+		},
+	}
+	if got := session.stdoutText.Decode([]byte{0xe4, 0xb8}); len(got) != 0 {
+		t.Fatalf("decoder emitted incomplete UTF-8 prefix %q before Flush", got)
+	}
+
+	go session.finalize(normalErr, false)
+	<-tailStarted
+	forceDone := make(chan struct{})
+	go func() {
+		session.forceTerminated(errors.New("concurrent force"))
+		close(forceDone)
+	}()
+	select {
+	case <-forceDone:
+		t.Fatal("losing finalizer returned before terminal publication")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	close(releaseTail)
+	select {
+	case <-forceDone:
+	case <-time.After(time.Second):
+		t.Fatal("losing finalizer did not observe completed terminal publication")
+	}
+	result, err := session.Result(context.Background())
+	if !errors.Is(err, normalErr) || result.ExitCode != 0 {
+		t.Fatalf("Result() = %+v/%v, want first finalizer result", result, err)
+	}
+}
+
+func TestWindowsSessionTailCallbackCanTerminateWithoutDeadlock(t *testing.T) {
+	t.Parallel()
+
+	callbackDone := make(chan error, 1)
+	session := &windowsSession{
+		running:      true,
+		done:         make(chan struct{}),
+		outputSignal: make(chan struct{}),
+	}
+	session.onOutput = func(chunk sandbox.OutputChunk) {
+		if chunk.Stream == "stdout" {
+			callbackDone <- session.Terminate(context.Background())
+		}
+	}
+	if got := session.stdoutText.Decode([]byte{0xe4, 0xb8}); len(got) != 0 {
+		t.Fatalf("decoder emitted incomplete UTF-8 prefix %q before Flush", got)
+	}
+
+	go session.finalize(nil, false)
+	select {
+	case err := <-callbackDone:
+		if err != nil {
+			t.Fatalf("Terminate() from tail callback error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Terminate() from tail callback deadlocked")
+	}
+	select {
+	case <-session.done:
+	case <-time.After(time.Second):
+		t.Fatal("terminal publication did not complete after tail callback")
+	}
+}
+
+func TestWindowsSessionOutputCallbackCanTerminateWithoutDeadlock(t *testing.T) {
+	t.Parallel()
+
+	callbackDone := make(chan error, 1)
+	session := &windowsSession{
+		running:      true,
+		cancel:       func() {},
+		done:         make(chan struct{}),
+		outputSignal: make(chan struct{}),
+	}
+	session.onOutput = func(sandbox.OutputChunk) {
+		callbackDone <- session.Terminate(context.Background())
+	}
+
+	go session.emitOutput(sandbox.OutputChunk{Stream: "stdout", Text: "stop"})
+	select {
+	case err := <-callbackDone:
+		if err != nil {
+			t.Fatalf("Terminate() from output callback error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Terminate() from output callback deadlocked")
+	}
+	session.finalize(nil, false)
+}
+
+func TestWindowsSessionAwaitOutputDoesNotRegressBlockedSiblingCursor(t *testing.T) {
+	t.Parallel()
+
+	stdoutCallback := make(chan struct{})
+	releaseStdout := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(releaseStdout) })
+	session := &windowsSession{
+		running:      true,
+		outputSignal: make(chan struct{}),
+		onOutput: func(chunk sandbox.OutputChunk) {
+			if chunk.Stream == "stdout" && chunk.Text != "" {
+				close(stdoutCallback)
+				<-releaseStdout
+			}
+		},
+	}
+	session.wg.Add(2)
+	go session.readStream(bytes.NewReader([]byte("x")), "stdout")
+	<-stdoutCallback
+	go session.readStream(bytes.NewReader([]byte("e")), "stderr")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	observation, err := session.AwaitOutput(ctx, sandbox.OutputCursor{Stdout: 1})
+	if err != nil {
+		t.Fatalf("AwaitOutput() error = %v", err)
+	}
+	if observation.Cursor != (sandbox.OutputCursor{Stdout: 1, Stderr: 1}) {
+		t.Fatalf("AwaitOutput().Cursor = %+v, want monotonic stdout 1/stderr 1", observation.Cursor)
+	}
+
+	releaseOnce.Do(func() { close(releaseStdout) })
+	session.wg.Wait()
 }
 
 func TestStatusIsCheapAndDoesNotCreateSIDStore(t *testing.T) {
@@ -1222,6 +1434,62 @@ func TestSandboxedCommandSmoke(t *testing.T) {
 	}
 	if strings.Contains(result.Stderr, "#< CLIXML") || strings.Contains(result.Stderr, "<Objs") || strings.Contains(result.Stderr, "Preparing modules") {
 		t.Fatalf("stderr = %q, want CLIXML/progress stripped", result.Stderr)
+	}
+
+	async, err := rt.Start(ctx, sandbox.CommandRequest{
+		Command: "Write-Output 'first'; Start-Sleep -Milliseconds 50; [Console]::Error.WriteLine('错误'); Start-Sleep -Milliseconds 50; Write-Output '中文'",
+		Dir:     workspace,
+		Constraints: sandbox.Constraints{
+			Route:      sandbox.RouteSandbox,
+			Backend:    sandbox.BackendWindows,
+			Permission: sandbox.PermissionWorkspaceWrite,
+			Network:    sandbox.NetworkEnabled,
+		},
+	})
+	if err != nil {
+		t.Fatalf("async command start error = %v", err)
+	}
+	var stdout strings.Builder
+	var stderr strings.Builder
+	cursor := sandbox.OutputCursor{}
+	for {
+		observation, err := async.AwaitOutput(ctx, cursor)
+		if err != nil {
+			t.Fatalf("AwaitOutput(%+v) error = %v", cursor, err)
+		}
+		out, errOut, nextStdout, nextStderr, err := async.ReadOutput(ctx, cursor.Stdout, cursor.Stderr)
+		if err != nil {
+			t.Fatalf("ReadOutput(%+v) error = %v", cursor, err)
+		}
+		next := sandbox.OutputCursor{Stdout: nextStdout, Stderr: nextStderr}
+		if next.Stdout < observation.Cursor.Stdout || next.Stderr < observation.Cursor.Stderr {
+			t.Fatalf("ReadOutput cursor %+v is behind observation %+v", next, observation.Cursor)
+		}
+		stdout.Write(out)
+		stderr.Write(errOut)
+		cursor = next
+		if !observation.Status.Running {
+			if cursor != observation.Cursor {
+				t.Fatalf("terminal ReadOutput cursor = %+v, observation = %+v", cursor, observation.Cursor)
+			}
+			break
+		}
+	}
+	asyncResult, err := async.Result(ctx)
+	if err != nil {
+		t.Fatalf("async Result() error = %v; result=%+v", err, asyncResult)
+	}
+	if stdout.String() != asyncResult.Stdout || stderr.String() != asyncResult.Stderr {
+		t.Fatalf(
+			"observed output differs from result: stdout=%q/%q stderr=%q/%q",
+			stdout.String(),
+			asyncResult.Stdout,
+			stderr.String(),
+			asyncResult.Stderr,
+		)
+	}
+	if !strings.Contains(stdout.String(), "first") || !strings.Contains(stdout.String(), "中文") || !strings.Contains(stderr.String(), "错误") {
+		t.Fatalf("async observed output = stdout %q stderr %q, want split non-ASCII streams", stdout.String(), stderr.String())
 	}
 
 	result, err = rt.Run(ctx, sandbox.CommandRequest{

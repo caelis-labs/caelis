@@ -72,7 +72,17 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 		{name: "small edits prefer patch", toolName: filesystem.WriteToolName, wants: []string{"Prefer Patch"}},
 		{name: "patch uses exact surgical edits", toolName: filesystem.PatchToolName, wants: []string{"surgical edits", "if_revision"}},
 		{name: "read exposes revision replay guard", toolName: filesystem.ReadToolName, wants: []string{"has_more", "revision", "if_revision"}},
-		{name: "task requires wait before relying", toolName: task.ToolName, wants: []string{"Always wait"}},
+		{
+			name:     "task distinguishes output observation from terminal wait",
+			toolName: task.ToolName,
+			wants: []string{
+				"read observes new output without waiting for exit",
+				"read does not support Spawn",
+				"write sends terminal stdin then briefly awaits its response",
+				"Wait observes either target for at most one minute",
+				"may return state=running",
+			},
+		},
 		{name: "spawn remains bounded", toolName: spawn.ToolName, wants: []string{"bounded delegated child session", "self-contained"}},
 	}
 	for _, check := range checks {

@@ -241,6 +241,14 @@ func (l *landlockRunner) ReadOutput(sessionID string, stdoutMarker, stderrMarker
 	return manager.ReadOutput(sessionID, stdoutMarker, stderrMarker)
 }
 
+func (l *landlockRunner) AwaitOutput(ctx context.Context, sessionID string, cursor sandbox.OutputCursor) (cmdsession.OutputObservation, error) {
+	manager, err := l.asyncSessionManager()
+	if err != nil {
+		return cmdsession.OutputObservation{}, err
+	}
+	return manager.AwaitOutput(ctx, sessionID, cursor)
+}
+
 func (l *landlockRunner) GetSessionStatus(sessionID string) (cmdsession.SessionStatus, error) {
 	manager, err := l.asyncSessionManager()
 	if err != nil {

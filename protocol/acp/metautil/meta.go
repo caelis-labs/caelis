@@ -1,7 +1,9 @@
 package metautil
 
 import (
+	"encoding/json"
 	"maps"
+	"math"
 	"strings"
 )
 
@@ -29,6 +31,9 @@ const (
 	RuntimeTask           = "task"
 	RuntimeTaskID         = "task_id"
 	RuntimeTaskTerminalID = "terminal_id"
+	RuntimeOutputCursor   = "output_cursor"
+	RuntimeOutputStart    = "output_start_cursor"
+	RuntimeOutputDelta    = "output_delta"
 
 	RuntimeObservation        = "observation"
 	RuntimeObservationCode    = "code"
@@ -98,6 +103,40 @@ func Bool(values map[string]any, path ...string) bool {
 	}
 	value, _ := current.(bool)
 	return value
+}
+
+// Int64 returns an integer from _meta together with whether the complete path
+// contains a supported numeric representation.
+func Int64(values map[string]any, path ...string) (int64, bool) {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		current, ok = mapped[key]
+		if !ok {
+			return 0, false
+		}
+	}
+	switch value := current.(type) {
+	case int:
+		return int64(value), true
+	case int64:
+		return value, true
+	case float64:
+		const int64Limit = 1 << 63
+		if math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value ||
+			value < -int64Limit || value >= int64Limit {
+			return 0, false
+		}
+		return int64(value), true
+	case json.Number:
+		parsed, err := value.Int64()
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
 }
 
 // WithRuntimeSection returns a copy of meta with one _meta.caelis.runtime

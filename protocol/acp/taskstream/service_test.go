@@ -11,6 +11,7 @@ import (
 	sdkstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -78,6 +79,55 @@ func TestProjectRecordKeepsTaskScopeAndTransientCursor(t *testing.T) {
 	}
 	if envelope.ParentTool == nil || envelope.ParentTool.ToolCallID != "spawn-1" {
 		t.Fatalf("projected parent tool = %#v", envelope.ParentTool)
+	}
+}
+
+func TestProjectRecordMountsRunCommandOutputOnParentTerminal(t *testing.T) {
+	t.Parallel()
+
+	taskDescriptor := controltaskstream.TaskDescriptor{
+		SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
+		State: task.StateRunning, Running: true, CurrentTurnID: "runtime-terminal-1",
+		ParentTool: controltaskstream.ParentTool{ToolCallID: "command-1", ToolName: "RunCommand"},
+	}
+	output := projectRecord(controltaskstream.Record{
+		Cursor: "cursor-1", Generation: "generation-1", Sequence: 1, Task: taskDescriptor,
+		Frame: &sdkstream.Frame{
+			Ref: sdkstream.Ref{
+				SessionID: "session-1", TaskID: "task-1", TerminalID: "runtime-terminal-1",
+			},
+			Text: "line\n", Running: true, Cursor: sdkstream.Cursor{Output: 5},
+		},
+	})
+	if len(output) != 1 {
+		t.Fatalf("output projection = %#v, want one Envelope", output)
+	}
+	outputMeta := eventstream.UpdateMeta(output[0].Update)
+	if terminalOutput, ok := metautil.TerminalOutput(outputMeta); !ok ||
+		terminalOutput.TerminalID != "command-1" ||
+		terminalOutput.Data != "line\n" {
+		t.Fatalf("terminal output = %#v, want parent command terminal", outputMeta)
+	}
+
+	exitCode := 0
+	final := projectRecord(controltaskstream.Record{
+		Cursor: "cursor-2", Generation: "generation-1", Sequence: 2, Task: taskDescriptor,
+		Frame: &sdkstream.Frame{
+			Ref: sdkstream.Ref{
+				SessionID: "session-1", TaskID: "task-1", TerminalID: "runtime-terminal-1",
+			},
+			State: "completed", Closed: true, ExitCode: &exitCode, Cursor: sdkstream.Cursor{Output: 5},
+		},
+	})
+	if len(final) != 1 {
+		t.Fatalf("final projection = %#v, want one Envelope", final)
+	}
+	finalMeta := eventstream.UpdateMeta(final[0].Update)
+	if terminalExit, ok := metautil.TerminalExit(finalMeta); !ok ||
+		terminalExit.TerminalID != "command-1" ||
+		terminalExit.ExitCode == nil ||
+		*terminalExit.ExitCode != 0 {
+		t.Fatalf("terminal exit = %#v, want parent command terminal", finalMeta)
 	}
 }
 

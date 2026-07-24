@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
@@ -23,19 +24,35 @@ func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea
 		if !m.turnRunning() && !terminalLifecycleHasTranscriptIdentity(env) {
 			return m, nil
 		}
-		model, cmd := m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: m.projectACPEventToTranscriptEvents(env)})
+		presentation := m.projectACPEnvelopePresentation(env)
+		model, cmd := m.handleTranscriptEventsMsg(presentation)
 		if next, ok := model.(*Model); ok {
 			m = next
 		}
 		finishCmd, _ := m.finishLiveTurnFromEnvelope(env)
 		return m, tea.Batch(cmd, finishCmd)
 	}
-	model, cmd := m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: m.projectACPEventToTranscriptEvents(env)})
+	presentation := m.projectACPEnvelopePresentation(env)
+	model, cmd := m.handleTranscriptEventsMsg(presentation)
 	if next, ok := model.(*Model); ok {
 		m = next
 	}
 	m.observeTaskStreamAnchor(env)
-	return m, tea.Batch(m.applyACPRunningActivity(env), cmd)
+	return m, tea.Batch(m.applyACPRunningActivity(env, presentation.Events), cmd)
+}
+
+// projectACPEnvelopePresentation normalizes each Envelope once. Transcript
+// mutation and live activity remain separate Surface consumers of the same
+// typed projection; neither re-parses Task/Spawn relations independently.
+func (m *Model) projectACPEnvelopePresentation(env eventstream.Envelope) TranscriptEventsMsg {
+	return transcriptEventsMsgForEnvelope(m.projectACPEventToTranscriptEvents(env), env)
+}
+
+func transcriptEventsMsgForEnvelope(events []TranscriptEvent, env eventstream.Envelope) TranscriptEventsMsg {
+	return TranscriptEventsMsg{
+		Events:               events,
+		ObservedSpawnResults: acpprojector.SpawnTaskResultsFromEnvelope(env),
+	}
 }
 
 type compactNoticeSource uint8
@@ -107,25 +124,4 @@ func (m *Model) appendEventStreamTranscriptText(text string) (tea.Model, tea.Cmd
 	m.lastCommittedStyle = block.Style
 	m.syncViewportContent()
 	return m, nil
-}
-
-func (m *Model) applyACPRunningActivity(env eventstream.Envelope) tea.Cmd {
-	if m == nil || env.Kind != eventstream.KindApprovalReview || env.ApprovalReview == nil {
-		return nil
-	}
-	switch strings.ToLower(strings.TrimSpace(env.ApprovalReview.Status)) {
-	case "in_progress":
-		msg := RunningActivityMsg{
-			Kind:   runningActivityApprovalReview,
-			Detail: approvalReviewPendingHint(env.ApprovalReview.ToolName, env.ApprovalReview.RawInput, 0),
-			Active: true,
-		}
-		m.handleRunningActivityMsg(msg)
-		return m.resumeRunningAnimationIfNeeded()
-	case "approved", "denied", "timed_out", "failed":
-		m.handleRunningActivityMsg(RunningActivityMsg{Kind: runningActivityApprovalReview})
-		return nil
-	default:
-		return nil
-	}
 }

@@ -206,6 +206,8 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 
 	var sawCommandCall bool
 	var sawCommandUpdate bool
+	var sawCommandOutput bool
+	var sawCommandFinal bool
 	var sawTaskFinal bool
 	for env := range projector.ACPEventsFromGatewayHandle(result.Handle) {
 		switch update := env.Update.(type) {
@@ -233,12 +235,28 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 				terminalInfoID(update.Meta) == "command-async-1" {
 				sawCommandUpdate = true
 			}
+			if output, ok := metautil.TerminalOutput(update.Meta); update.ToolCallID == "command-async-1" &&
+				ok &&
+				output.TerminalID == "command-async-1" &&
+				strings.Contains(output.Data, "acpx async command ok") &&
+				toolContentHasTerminal(update.Content) &&
+				terminalInfoID(update.Meta) == "command-async-1" {
+				sawCommandOutput = true
+			}
+			if update.ToolCallID == "command-async-1" &&
+				stringPtrDebug(update.Status) == schema.ToolStatusCompleted &&
+				toolContentHasTerminal(update.Content) &&
+				terminalInfoID(update.Meta) == "command-async-1" &&
+				terminalExitID(update.Meta) == "command-async-1" {
+				sawCommandFinal = true
+			}
 			if update.ToolCallID == "task-wait-1" &&
 				stringPtrDebug(update.Kind) == schema.ToolKindExecute &&
 				stringPtrDebug(update.Status) == schema.ToolStatusCompleted &&
-				toolContentHasTerminal(update.Content) &&
-				terminalInfoID(update.Meta) == "task-wait-1" &&
-				terminalExitID(update.Meta) == "task-wait-1" {
+				!toolContentHasTerminal(update.Content) &&
+				terminalInfoID(update.Meta) == "" &&
+				terminalExitID(update.Meta) == "" &&
+				isCompletedCommandTaskObservation(update.RawOutput) {
 				sawTaskFinal = true
 			}
 			t.Logf("tool_update call_id=%q title=%q kind=%q status=%q raw_input=%s raw_output=%s meta=%s content=%s",
@@ -259,9 +277,146 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 	if !sawCommandUpdate {
 		t.Fatal("did not capture command tool_update with ACP execute terminal shape")
 	}
-	if !sawTaskFinal {
-		t.Fatal("did not capture TASK final with ACP execute terminal exit shape")
+	if !sawCommandOutput {
+		t.Fatal("did not capture RunCommand output on its mounted ACP terminal")
 	}
+	if !sawCommandFinal {
+		t.Fatal("did not capture RunCommand completed status with terminal_exit")
+	}
+	if !sawTaskFinal {
+		t.Fatal("did not capture TASK completed observation without a duplicate terminal")
+	}
+}
+
+func TestLocalStackGatewayACPInteractiveTaskReadWriteE2E(t *testing.T) {
+	repo := repoRootForGatewayAppTest(t)
+	root := t.TempDir()
+	workdir := t.TempDir()
+
+	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+		AppName:      "caelis",
+		UserID:       "user-1",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly: assembly.ResolvedAssembly{
+			Agents: []assembly.AgentConfig{{
+				Name:        "codex",
+				Description: "ACP main controller.",
+				Command:     "go",
+				Args:        []string{"run", "./internal/acpe2eagent"},
+				WorkDir:     repo,
+				Env: map[string]string{
+					"SDK_ACP_SCRIPTED_MODE": "interactive_command",
+					"SDK_ACP_SESSION_ROOT":  filepath.Join(root, "controller-sessions"),
+				},
+			}},
+		},
+		Model: gatewayapp.ModelConfig{Provider: "minimax", Model: "MiniMax-M2"},
+	})
+	if err != nil {
+		t.Fatalf("gatewayapp.NewLocalStack() error = %v", err)
+	}
+	activeSession, err := stack.StartSession(context.Background(), "gateway-acp-interactive", "surface-acp-interactive")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	updated, err := stack.KernelControlPlane().HandoffController(context.Background(), kernel.HandoffControllerRequest{
+		SessionRef: activeSession.SessionRef,
+		Kind:       session.ControllerKindACP,
+		Agent:      "codex",
+		Source:     "test",
+		Reason:     "exercise interactive Task output",
+	})
+	if err != nil {
+		t.Fatalf("HandoffController() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	result, err := stack.KernelTurns().BeginTurn(ctx, kernel.BeginTurnRequest{
+		SessionRef: updated.SessionRef,
+		Input:      "exercise Task write and read",
+		Surface:    "headless-acp-interactive-e2e",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	if result.Handle == nil {
+		t.Fatal("BeginTurn() returned nil handle")
+	}
+	defer result.Handle.Close()
+
+	var (
+		commandOutput strings.Builder
+		sawWrite      bool
+		sawRead       bool
+		sawCancel     bool
+	)
+	for env := range projector.ACPEventsFromGatewayHandle(result.Handle) {
+		update, ok := env.Update.(schema.ToolCallUpdate)
+		if !ok {
+			continue
+		}
+		if output, ok := metautil.TerminalOutput(update.Meta); ok && update.ToolCallID == "command-interactive-1" {
+			commandOutput.WriteString(output.Data)
+		}
+		raw, _ := update.RawOutput.(map[string]any)
+		if stringPtrDebug(update.Status) != schema.ToolStatusCompleted {
+			continue
+		}
+		switch update.ToolCallID {
+		case "task-write-interactive-1":
+			sawWrite = mapStringValue(raw, "state") == "running" &&
+				strings.Contains(mapStringValue(raw, "latest_output"), "echo:ping")
+		case "task-read-interactive-1":
+			sawRead = mapStringValue(raw, "state") == "running" &&
+				strings.Contains(mapStringValue(raw, "latest_output"), "later:ping")
+		case "task-cancel-interactive-1":
+			sawCancel = mapStringValue(raw, "state") == "cancelled"
+		}
+	}
+	if !sawWrite {
+		t.Fatal("did not capture non-terminal Task write response")
+	}
+	if !sawRead {
+		t.Fatal("did not capture output-driven Task read response")
+	}
+	if !sawCancel {
+		t.Fatal("did not capture interactive command cancellation")
+	}
+	for _, want := range []string{"interactive ready", "echo:ping", "later:ping"} {
+		if !strings.Contains(commandOutput.String(), want) {
+			t.Fatalf("command terminal output = %q, want %q", commandOutput.String(), want)
+		}
+	}
+}
+
+func isCompletedCommandTaskObservation(raw any) bool {
+	output, ok := raw.(map[string]any)
+	if !ok ||
+		strings.TrimSpace(mapStringValue(output, "handle")) != "command" ||
+		strings.TrimSpace(mapStringValue(output, "target_kind")) != "command" ||
+		strings.TrimSpace(mapStringValue(output, "state")) != "completed" ||
+		!strings.Contains(mapStringValue(output, "result"), "acpx async command ok") {
+		return false
+	}
+	switch exitCode := output["exit_code"].(type) {
+	case int:
+		return exitCode == 0
+	case int64:
+		return exitCode == 0
+	case float64:
+		return exitCode == 0
+	default:
+		return false
+	}
+}
+
+func mapStringValue(values map[string]any, key string) string {
+	value, _ := values[key].(string)
+	return value
 }
 
 func debugJSON(value any) string {

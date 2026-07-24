@@ -153,8 +153,24 @@ func TestRunHelpReturnsNil(t *testing.T) {
 	}
 	if got := stderr.String(); !strings.Contains(got, "Usage of caelis:") ||
 		!strings.Contains(got, "Approval mode: auto-review|manual") ||
-		!strings.Contains(got, "Policy profile: workspace-write") {
-		t.Fatalf("stderr = %q, want help usage with approval mode and policy profile", got)
+		!strings.Contains(got, "Policy profile: workspace-write") ||
+		!strings.Contains(got, "Reduce TUI motion") {
+		t.Fatalf("stderr = %q, want help usage with approval, policy, and reduced-motion options", got)
+	}
+}
+
+func TestEnvBoolParsesTUIAnimationSetting(t *testing.T) {
+	t.Setenv("CAELIS_TUI_NO_ANIMATION", "true")
+	if !envBool("CAELIS_TUI_NO_ANIMATION", false) {
+		t.Fatal("envBool(true) = false")
+	}
+	t.Setenv("CAELIS_TUI_NO_ANIMATION", "0")
+	if envBool("CAELIS_TUI_NO_ANIMATION", true) {
+		t.Fatal("envBool(0) = true")
+	}
+	t.Setenv("CAELIS_TUI_NO_ANIMATION", "not-a-bool")
+	if !envBool("CAELIS_TUI_NO_ANIMATION", true) {
+		t.Fatal("envBool(invalid) did not preserve fallback")
 	}
 }
 

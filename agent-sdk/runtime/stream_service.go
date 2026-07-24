@@ -25,7 +25,7 @@ func newStreamService(tasks *taskRuntime) *streamService {
 func (s *streamService) Read(ctx context.Context, req stream.ReadRequest) (stream.Snapshot, error) {
 	ref := stream.NormalizeRef(req.Ref)
 	cursor := stream.CloneCursor(req.Cursor)
-	read, err := s.resolveReader(ctx, ref)
+	read, _, err := s.resolveReader(ctx, ref)
 	if err != nil {
 		return stream.Snapshot{}, err
 	}
@@ -33,28 +33,33 @@ func (s *streamService) Read(ctx context.Context, req stream.ReadRequest) (strea
 }
 
 type resolvedStreamReader func(context.Context, stream.Cursor) (stream.Snapshot, error)
+type resolvedStreamAwaiter func(context.Context, stream.Cursor, bool) (stream.Snapshot, error)
 
 // resolveReader pins one stream operation to the task instance it resolved.
 // A completed task may leave the live registry before its canonical result is
 // promoted from the deferred durable entry; re-resolving during that interval
 // would close an active subscription against an empty reconstructed snapshot.
-func (s *streamService) resolveReader(ctx context.Context, ref stream.Ref) (resolvedStreamReader, error) {
+func (s *streamService) resolveReader(ctx context.Context, ref stream.Ref) (resolvedStreamReader, resolvedStreamAwaiter, error) {
 	if err := stream.ValidateRef(ref); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	task, err := s.resolveTask(ctx, ref)
 	if err == nil {
 		return func(readCtx context.Context, cursor stream.Cursor) (stream.Snapshot, error) {
-			return s.readCommand(readCtx, task, cursor)
-		}, nil
+				return s.readCommand(readCtx, task, cursor)
+			}, func(awaitCtx context.Context, cursor stream.Cursor, followContinue bool) (stream.Snapshot, error) {
+				return s.awaitCommand(awaitCtx, task, cursor, followContinue)
+			}, nil
 	}
 	subagent, subagentErr := s.resolveSubagent(ctx, ref)
 	if subagentErr != nil {
-		return nil, subagentErr
+		return nil, nil, subagentErr
 	}
 	return func(readCtx context.Context, cursor stream.Cursor) (stream.Snapshot, error) {
-		return s.readSubagent(readCtx, subagent, cursor)
-	}, nil
+			return s.readSubagent(readCtx, subagent, cursor)
+		}, func(awaitCtx context.Context, cursor stream.Cursor, followContinue bool) (stream.Snapshot, error) {
+			return s.awaitSubagent(awaitCtx, subagent, cursor, followContinue)
+		}, nil
 }
 
 func (s *streamService) readCommand(ctx context.Context, task *commandTask, cursor stream.Cursor) (stream.Snapshot, error) {
@@ -72,23 +77,36 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 	if err != nil {
 		return stream.Snapshot{}, err
 	}
+	task.outputReadMu.Lock()
 	task.mu.Lock()
 	task.ensureCommandOutputSeedLocked()
-	stdoutCursor := task.stdoutCursor
-	stderrCursor := task.stderrCursor
-	useReadOutput := commandSession != nil && !task.outputCallback
+	stdoutCursor := task.outputState.backend.stdout
+	stderrCursor := task.outputState.backend.stderr
+	useReadOutput := commandSession != nil && !task.outputState.callback
 	task.mu.Unlock()
 	if useReadOutput {
 		stdout, stderr, nextStdout, nextStderr, err := commandSession.ReadOutput(ctx, stdoutCursor, stderrCursor)
 		if err != nil {
+			task.outputReadMu.Unlock()
 			return stream.Snapshot{}, err
 		}
 		task.mu.Lock()
-		task.stdoutCursor = nextStdout
-		task.stderrCursor = nextStderr
-		task.appendOutputLocked(terminalDeltaText(string(stdout), string(stderr)))
+		err = task.ingestRecoveredOutputLocked(
+			stdout,
+			stderr,
+			stdoutCursor,
+			stderrCursor,
+			nextStdout,
+			nextStderr,
+			!status.Running,
+		)
 		task.mu.Unlock()
+		if err != nil {
+			task.outputReadMu.Unlock()
+			return stream.Snapshot{}, err
+		}
 	}
+	task.outputReadMu.Unlock()
 	var result sandbox.CommandResult
 	var resultErr error
 	if commandSession != nil && !status.Running {
@@ -105,13 +123,15 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 	finalText := ""
 	if !status.Running {
 		finalText = terminalFinalText(task.output, result.Stdout, result.Stderr, resultErr)
-		task.reconcileFinalOutputLocked(terminalOutputText(task.output, result.Stdout, result.Stderr))
+		if !task.outputState.exact {
+			task.reconcileFinalOutputLocked(terminalOutputText(task.output, result.Stdout, result.Stderr))
+		}
 		outputCursor = task.outputCursorLocked()
 	}
 	task.ensureCommandTerminalFrameLocked(state, status, hasExitStatus)
 	truncatedBefore := int64(0)
-	if cursor.Output < task.outputBase {
-		truncatedBefore = task.outputBase
+	if cursor.Output < task.outputState.frontier.base {
+		truncatedBefore = task.outputState.frontier.base
 	}
 	eventsTruncatedBefore := int64(0)
 	if cursor.Events < task.streamEventBase {
@@ -121,6 +141,7 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 	if count := len(task.streamFrames); count > 0 {
 		eventCursor = task.streamFrames[count-1].Cursor.Events
 	}
+	eventCursor = max(eventCursor, cursor.Events)
 	running := status.Running && !stream.IsTerminalState(string(state))
 	snap := stream.Snapshot{
 		Ref: stream.Ref{
@@ -149,17 +170,23 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 		}
 	}
 	for _, retained := range task.streamFrames {
-		if retained.Cursor.Events <= cursor.Events {
+		eventAdvanced := retained.Cursor.Events > cursor.Events
+		outputAdvanced := retained.Text != "" && retained.Cursor.Output > cursor.Output
+		if !eventAdvanced && !outputAdvanced {
 			continue
 		}
 		frame := stream.CloneFrame(retained)
 		frame.Ref = snap.Ref
+		// Retained frames are immutable shared state. Project the caller's newer
+		// event cursor only onto this delivery clone so every returned frame
+		// remains a valid non-regressing public resume point.
+		frame.Cursor.Events = max(frame.Cursor.Events, cursor.Events)
 		frame.TruncatedBefore = truncatedBefore
 		frame.EventsTruncatedBefore = eventsTruncatedBefore
 		if frame.Text != "" {
 			end := frame.Cursor.Output
 			start := end - int64(len([]byte(frame.Text)))
-			delivered := max(cursor.Output, task.outputBase)
+			delivered := max(cursor.Output, task.outputState.frontier.base)
 			switch {
 			case delivered >= end:
 				frame.Text = ""
@@ -173,6 +200,136 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 	}
 	task.mu.Unlock()
 	return stream.CloneSnapshot(snap), nil
+}
+
+// await returns once output/events advance beyond the requested cursor or the
+// Task reaches a terminal state. It is level-triggered and non-consuming.
+func (s *streamService) await(ctx context.Context, req stream.ReadRequest) (stream.Snapshot, error) {
+	ref := stream.NormalizeRef(req.Ref)
+	cursor := stream.CloneCursor(req.Cursor)
+	_, await, err := s.resolveReader(ctx, ref)
+	if err != nil {
+		return stream.Snapshot{}, err
+	}
+	return await(ctx, cursor, false)
+}
+
+func (s *streamService) awaitCommand(ctx context.Context, task *commandTask, cursor stream.Cursor, followContinue bool) (stream.Snapshot, error) {
+	if task == nil || task.session == nil {
+		return stream.Snapshot{}, fmt.Errorf("agent-sdk/runtime: command task has no observable sandbox session")
+	}
+	type backendObservation struct {
+		observation sandbox.OutputObservation
+		err         error
+	}
+	backendResults := make(chan backendObservation, 1)
+	backendDone := make(chan struct{})
+	backendCtx, cancelBackend := context.WithCancel(ctx)
+	task.mu.Lock()
+	backendCursor := task.outputState.backend.outputCursor()
+	commandSession := task.session
+	task.mu.Unlock()
+	go func() {
+		defer close(backendDone)
+		defer close(backendResults)
+		for {
+			observation, err := commandSession.AwaitOutput(backendCtx, backendCursor)
+			if err == nil && observation.Status.Running &&
+				observation.Cursor.Stdout <= backendCursor.Stdout &&
+				observation.Cursor.Stderr <= backendCursor.Stderr {
+				err = fmt.Errorf("agent-sdk/runtime: command output observer returned without output or terminal progress")
+			}
+			result := backendObservation{observation: observation, err: err}
+			select {
+			case backendResults <- result:
+			case <-backendCtx.Done():
+				return
+			}
+			if err != nil || !observation.Status.Running {
+				return
+			}
+			next := observation.Cursor
+			if next.Stdout <= backendCursor.Stdout && next.Stderr <= backendCursor.Stderr {
+				return
+			}
+			backendCursor.Stdout = max(backendCursor.Stdout, next.Stdout)
+			backendCursor.Stderr = max(backendCursor.Stderr, next.Stderr)
+		}
+	}()
+	defer func() {
+		cancelBackend()
+		<-backendDone
+	}()
+
+	for {
+		snap, err := s.readCommand(ctx, task, cursor)
+		if err != nil {
+			return stream.Snapshot{}, err
+		}
+		if streamSnapshotReady(snap, cursor, followContinue) {
+			return snap, nil
+		}
+		task.mu.Lock()
+		wait, ready := task.commandStreamChangeWaiterLocked(cursor)
+		if ready {
+			task.mu.Unlock()
+			continue
+		}
+		task.mu.Unlock()
+		// Command streams have two independent level-triggered sources:
+		// callback frames/state transitions notify wait, while AwaitOutput also
+		// observes a zero-output process exit. One backend waiter is retained for
+		// the complete await/subscribe call and re-arms itself after progress;
+		// stream wakes no longer allocate and cancel a new goroutine.
+		select {
+		case <-ctx.Done():
+			return stream.Snapshot{}, ctx.Err()
+		case <-wait:
+		case result, ok := <-backendResults:
+			if !ok {
+				return stream.Snapshot{}, fmt.Errorf("agent-sdk/runtime: command output observer stopped before the stream advanced")
+			}
+			if result.err != nil {
+				return stream.Snapshot{}, result.err
+			}
+		}
+	}
+}
+
+func (s *streamService) awaitSubagent(ctx context.Context, task *subagentTask, cursor stream.Cursor, followContinue bool) (stream.Snapshot, error) {
+	for {
+		snap, err := s.readSubagent(ctx, task, cursor)
+		if err != nil {
+			return stream.Snapshot{}, err
+		}
+		if streamSnapshotReady(snap, cursor, followContinue) {
+			return snap, nil
+		}
+		task.mu.Lock()
+		wait, ready := task.streamChangeWaiterLocked(cursor, followContinue)
+		task.mu.Unlock()
+		if ready {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return stream.Snapshot{}, ctx.Err()
+		case <-wait:
+		}
+	}
+}
+
+func streamSnapshotReady(snap stream.Snapshot, cursor stream.Cursor, followContinue bool) bool {
+	if snap.Cursor.Output > cursor.Output || snap.Cursor.Events > cursor.Events {
+		return true
+	}
+	if snap.TruncatedBefore > cursor.Output || snap.EventsTruncatedBefore > cursor.Events {
+		return true
+	}
+	if snap.Running || !stream.IsTerminalState(snap.State) {
+		return false
+	}
+	return !followContinue || !snap.SupportsInput
 }
 
 func commandStatusWithoutSession(task *commandTask) (sandbox.SessionStatus, error) {
@@ -304,17 +461,13 @@ func (s *streamService) Subscribe(ctx context.Context, req stream.SubscribeReque
 	return func(yield func(*stream.Frame, error) bool) {
 		ref := stream.NormalizeRef(req.Ref)
 		cursor := stream.CloneCursor(req.Cursor)
-		read, err := s.resolveReader(ctx, ref)
+		_, await, err := s.resolveReader(ctx, ref)
 		if err != nil {
 			yield(nil, err)
 			return
 		}
-		poll := req.PollInterval
-		if poll <= 0 {
-			poll = 100 * time.Millisecond
-		}
 		for {
-			snap, err := read(ctx, cursor)
+			snap, err := await(ctx, cursor, req.FollowContinues)
 			if err != nil {
 				yield(nil, err)
 				return
@@ -331,14 +484,6 @@ func (s *streamService) Subscribe(ctx context.Context, req stream.SubscribeReque
 			followContinue := req.FollowContinues && snap.SupportsInput
 			if !snap.Running && !followContinue {
 				return
-			}
-			timer := time.NewTimer(poll)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				yield(nil, ctx.Err())
-				return
-			case <-timer.C:
 			}
 		}
 	}
@@ -359,26 +504,20 @@ func subagentStreamOutput(stdout string, stderr string) string {
 
 func (s *streamService) Wait(ctx context.Context, ref stream.Ref) (stream.Snapshot, error) {
 	ref = stream.NormalizeRef(ref)
-	read, err := s.resolveReader(ctx, ref)
+	_, await, err := s.resolveReader(ctx, ref)
 	if err != nil {
 		return stream.Snapshot{}, err
 	}
-	poll := 100 * time.Millisecond
+	cursor := stream.Cursor{}
 	for {
-		snap, err := read(ctx, stream.Cursor{})
+		snap, err := await(ctx, cursor, false)
 		if err != nil {
 			return stream.Snapshot{}, err
 		}
 		if !snap.Running {
 			return snap, nil
 		}
-		timer := time.NewTimer(poll)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return stream.Snapshot{}, ctx.Err()
-		case <-timer.C:
-		}
+		cursor = stream.CloneCursor(snap.Cursor)
 	}
 }
 

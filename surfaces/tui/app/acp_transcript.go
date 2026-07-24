@@ -58,75 +58,68 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 	}
 	rows := make([]RenderedRow, 0, len(visible)+2)
 	hasContent := false
+	pendingSemanticGap := false
 	lastGroup := acpTranscriptGroupNone
 	for i := 0; i < len(visible); i++ {
 		ev := visible[i]
+		if ev.Kind == SESemanticBoundary {
+			if hasContent {
+				pendingSemanticGap = true
+			}
+			continue
+		}
 		if stableRows, consumed, ok := renderStableExplorationRows(blockID, visible, i, status, width, ctx, opts); ok {
-			rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupExploration, false)
-			rows = append(rows, stableRows...)
-			hasContent = true
-			lastGroup = acpTranscriptGroupExploration
+			if len(stableRows) > 0 {
+				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupExploration, false)
+				rows = appendACPTranscriptSemanticRows(rows, blockID, stableRows, &pendingSemanticGap)
+				hasContent = true
+				lastGroup = acpTranscriptGroupExploration
+			}
 			i = consumed
 			continue
 		}
 		if liveRows, consumed, ok := renderACPLiveExplorationStageRows(blockID, visible, i, status, width, ctx, opts); ok {
-			rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, false)
-			rows = append(rows, liveRows...)
-			hasContent = true
-			lastGroup = acpTranscriptGroupTool
+			if len(liveRows) > 0 {
+				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, false)
+				rows = appendACPTranscriptSemanticRows(rows, blockID, liveRows, &pendingSemanticGap)
+				hasContent = true
+				lastGroup = acpTranscriptGroupTool
+			}
 			i = consumed
 			continue
 		}
 		switch ev.Kind {
 		case SEPlan:
-			rows = append(rows, renderACPPlanRows(blockID, ev, width, ctx)...)
-			hasContent = hasContent || len(ev.PlanEntries) > 0
-			lastGroup = acpTranscriptGroupPlan
-		case SEReasoning:
-			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, width, ctx, opts); ok {
-				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTask, false)
-				rows = append(rows, taskRows...)
+			planRows := renderACPPlanRows(blockID, ev, width, ctx)
+			if len(planRows) > 0 {
+				rows = appendACPTranscriptSemanticRows(rows, blockID, planRows, &pendingSemanticGap)
 				hasContent = true
-				lastGroup = acpTranscriptGroupTask
-				i = consumed
-				continue
+				lastGroup = acpTranscriptGroupPlan
 			}
+		case SEReasoning:
 			if reasoningRows, consumed, ok := renderFoldableReasoningSegment(blockID, visible, i, status, width, ctx, opts); ok {
-				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
-				rows = append(rows, reasoningRows...)
-				hasContent = true
-				lastGroup = acpTranscriptGroupNarrative
+				if len(reasoningRows) > 0 {
+					rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
+					rows = appendACPTranscriptSemanticRows(rows, blockID, reasoningRows, &pendingSemanticGap)
+					hasContent = true
+					lastGroup = acpTranscriptGroupNarrative
+				}
 				i = consumed
 			}
 		case SEAssistant:
-			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, width, ctx, opts); ok {
-				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTask, false)
-				rows = append(rows, taskRows...)
-				hasContent = true
-				lastGroup = acpTranscriptGroupTask
-				i = consumed
-				continue
-			}
 			if renderableTextHasContent(ev.Text) {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
-				rows = append(rows, renderParticipantTurnNarrativeEventRows(blockID, ev, tuikit.LineStyleAssistant, width, ctx, participantNarrativeEventActive(visible, i, status))...)
+				narrativeRows := renderParticipantTurnNarrativeEventRows(blockID, ev, tuikit.LineStyleAssistant, width, ctx, participantNarrativeEventActive(visible, i, status))
+				rows = appendACPTranscriptSemanticRows(rows, blockID, narrativeRows, &pendingSemanticGap)
 				hasContent = true
 				lastGroup = acpTranscriptGroupNarrative
 			}
 		case SEToolCall:
-			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, width, ctx, opts); ok {
-				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTask, false)
-				rows = append(rows, taskRows...)
-				hasContent = true
-				lastGroup = acpTranscriptGroupTask
-				i = consumed
-				continue
-			}
 			toolRows, consumed := renderACPToolLifecycleRows(blockID, visible, i, width, ctx, opts)
 			if len(toolRows) > 0 {
 				attached := lastGroup == acpTranscriptGroupNarrative && toolContinuesPreviousNarrative(visible, i)
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, attached)
-				rows = append(rows, toolRows...)
+				rows = appendACPTranscriptSemanticRows(rows, blockID, toolRows, &pendingSemanticGap)
 				hasContent = true
 				lastGroup = acpTranscriptGroupTool
 			}
@@ -135,7 +128,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			approvalRows := renderACPApprovalReviewRows(blockID, ev, width, ctx)
 			if len(approvalRows) > 0 {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupApproval, false)
-				rows = append(rows, approvalRows...)
+				rows = appendACPTranscriptSemanticRows(rows, blockID, approvalRows, &pendingSemanticGap)
 				hasContent = true
 				lastGroup = acpTranscriptGroupApproval
 			}
@@ -143,10 +136,15 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			noticeRows := renderACPNoticeRows(blockID, ev, width, ctx)
 			if len(noticeRows) > 0 {
 				if isCompactNoticeText(ev.Text) {
-					rows = appendACPCompactNoticeRows(rows, blockID, noticeRows)
+					if pendingSemanticGap {
+						rows = appendACPTranscriptSemanticRows(rows, blockID, noticeRows, &pendingSemanticGap)
+						rows = appendBlankRowIfNeeded(rows, blockID)
+					} else {
+						rows = appendACPCompactNoticeRows(rows, blockID, noticeRows)
+					}
 				} else {
 					rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNotice, false)
-					rows = append(rows, noticeRows...)
+					rows = appendACPTranscriptSemanticRows(rows, blockID, noticeRows, &pendingSemanticGap)
 				}
 				hasContent = true
 				lastGroup = acpTranscriptGroupNotice
@@ -166,7 +164,10 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			rows = append(rows, StyledPlainRow(blockID, placeholder, style.Render(placeholder)))
 		}
 	}
-	rows = append(rows, renderACPStatusRows(blockID, status, width, ctx, opts)...)
+	statusRows := renderACPStatusRows(blockID, status, width, ctx, opts)
+	if len(statusRows) > 0 {
+		rows = appendACPTranscriptSemanticRows(rows, blockID, statusRows, &pendingSemanticGap)
+	}
 	return rows
 }
 
@@ -178,7 +179,6 @@ const (
 	acpTranscriptGroupExploration
 	acpTranscriptGroupTool
 	acpTranscriptGroupApproval
-	acpTranscriptGroupTask
 	acpTranscriptGroupPlan
 	acpTranscriptGroupNotice
 )
@@ -194,6 +194,29 @@ func appendACPTranscriptGroupGap(rows []RenderedRow, blockID string, previous ac
 		return rows
 	}
 	return appendBlankRowIfNeeded(rows, blockID)
+}
+
+func appendACPTranscriptSemanticRows(rows []RenderedRow, blockID string, next []RenderedRow, pending *bool) []RenderedRow {
+	if len(next) == 0 {
+		return rows
+	}
+	if pending == nil || !*pending {
+		return append(rows, next...)
+	}
+	firstVisible := 0
+	for firstVisible < len(next) && strings.TrimSpace(next[firstVisible].Plain) == "" {
+		firstVisible++
+	}
+	if firstVisible == len(next) {
+		return rows
+	}
+	next = next[firstVisible:]
+	for len(rows) > 0 && strings.TrimSpace(rows[len(rows)-1].Plain) == "" {
+		rows = rows[:len(rows)-1]
+	}
+	rows = appendBlankRowIfNeeded(rows, blockID)
+	*pending = false
+	return append(rows, next...)
 }
 
 func appendACPCompactNoticeRows(rows []RenderedRow, blockID string, noticeRows []RenderedRow) []RenderedRow {

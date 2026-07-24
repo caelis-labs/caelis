@@ -73,11 +73,10 @@ type ReadRequest struct {
 	Cursor Cursor `json:"cursor,omitempty"`
 }
 
-// SubscribeRequest asks for one polling stream subscription.
+// SubscribeRequest asks for one stream subscription.
 type SubscribeRequest struct {
-	Ref          Ref           `json:"ref,omitempty"`
-	Cursor       Cursor        `json:"cursor,omitempty"`
-	PollInterval time.Duration `json:"poll_interval,omitempty"`
+	Ref    Ref    `json:"ref,omitempty"`
+	Cursor Cursor `json:"cursor,omitempty"`
 	// FollowContinues keeps a completed Task whose Task-plane SupportsInput
 	// capability is true open so a later Continue is delivered on the same
 	// Task stream. It does not imply terminal stdin ownership.

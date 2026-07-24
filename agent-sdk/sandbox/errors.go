@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
 )
@@ -13,6 +14,49 @@ const HostExecutionRequiresApprovalMessage = "Host execution requires approval. 
 // command result from an infrastructure failure without relying on error text.
 type CommandExitError struct {
 	Err error
+}
+
+// OutputCursorAheadError reports a cursor that is beyond the output currently
+// published by a session. Callers must not silently clamp this condition
+// because it indicates that cursor state belongs to a different stream history.
+type OutputCursorAheadError struct {
+	Stream    string
+	Requested int64
+	Available int64
+}
+
+func (e *OutputCursorAheadError) Error() string {
+	if e == nil {
+		return "sandbox output cursor is ahead"
+	}
+	return fmt.Sprintf(
+		"sandbox %s output cursor %d is ahead of available cursor %d",
+		e.Stream,
+		e.Requested,
+		e.Available,
+	)
+}
+
+// ValidateOutputCursor returns a typed error when requested points beyond
+// available. Negative requested offsets are normalized to zero.
+func ValidateOutputCursor(requested, available OutputCursor) error {
+	requested = NormalizeOutputCursor(requested)
+	available = NormalizeOutputCursor(available)
+	if requested.Stdout > available.Stdout {
+		return &OutputCursorAheadError{
+			Stream:    "stdout",
+			Requested: requested.Stdout,
+			Available: available.Stdout,
+		}
+	}
+	if requested.Stderr > available.Stderr {
+		return &OutputCursorAheadError{
+			Stream:    "stderr",
+			Requested: requested.Stderr,
+			Available: available.Stderr,
+		}
+	}
+	return nil
 }
 
 func (e *CommandExitError) Error() string {

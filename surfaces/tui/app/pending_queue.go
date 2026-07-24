@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -219,32 +218,6 @@ func (p pendingPrompt) displayText() string {
 		return text
 	}
 	return strings.TrimSpace(p.execLine)
-}
-
-func (m *Model) pendingQueueHintText() string {
-	count := m.pendingQueue.visibleCount()
-	if count == 0 {
-		return ""
-	}
-	if count > 1 {
-		return fmt.Sprintf("%d pending messages", count)
-	}
-	return "1 pending message"
-}
-
-func (m *Model) renderPendingQueueDrawer() string {
-	// The drawer previews the next prompt that will be accepted/rendered, so it
-	// uses FIFO order instead of the most recently queued prompt.
-	pending, ok := m.pendingQueue.nextVisible()
-	if !ok || m.width <= 0 {
-		return ""
-	}
-	contentWidth := maxInt(1, m.mainColumnWidth()-(inputHorizontalInset*2))
-	lines := []string{m.theme.SeparatorStyle().Render(strings.Repeat("─", contentWidth))}
-	if pendingLine := m.renderPendingSubmissionLine(pending.displayText()); pendingLine != "" {
-		lines = append(lines, pendingLine)
-	}
-	return insetRenderedBlock(strings.Join(lines, "\n"), inputHorizontalInset)
 }
 
 func (m *Model) renderNextAcceptedPendingPrompt() bool {

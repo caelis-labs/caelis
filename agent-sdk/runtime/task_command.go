@@ -10,15 +10,11 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/commanddiag"
 )
 
 const (
@@ -30,6 +26,9 @@ const (
 	commandPhaseCancelClaimed = "command_cancel_claimed"
 	commandPhaseCancelUnknown = "command_cancel_unknown_outcome"
 	commandPhaseCancelApplied = "command_cancel_effect_applied"
+
+	commandStreamOutputCursorMeta = "stream_output_cursor"
+	commandStreamEventCursorMeta  = "stream_event_cursor"
 )
 
 func commandTaskID(ref session.SessionRef, parentCall string) (string, error) {
@@ -67,17 +66,19 @@ func (tm *taskRuntime) StartCommand(
 ) (taskapi.Snapshot, error) {
 	var (
 		outputTask    *commandTask
-		pendingOutput strings.Builder
+		pendingOutput []sandbox.OutputChunk
 		pendingMu     sync.Mutex
 	)
 	bindOutputTask := func(task *commandTask) {
 		pendingMu.Lock()
 		outputTask = task
-		buffered := pendingOutput.String()
-		pendingOutput.Reset()
+		buffered := append([]sandbox.OutputChunk(nil), pendingOutput...)
+		pendingOutput = nil
 		pendingMu.Unlock()
-		if task != nil && buffered != "" {
-			task.appendOutput(buffered)
+		if task != nil {
+			for _, chunk := range buffered {
+				task.appendSandboxOutput(chunk)
+			}
 		}
 	}
 	sandboxReq := sandbox.CommandRequest{
@@ -91,12 +92,12 @@ func (tm *taskRuntime) StartCommand(
 			pendingMu.Lock()
 			current := outputTask
 			if current == nil {
-				pendingOutput.WriteString(chunk.Text)
+				pendingOutput = append(pendingOutput, chunk)
 				pendingMu.Unlock()
 				return
 			}
 			pendingMu.Unlock()
-			current.appendOutput(chunk.Text)
+			current.appendSandboxOutput(chunk)
 		},
 	}
 	if constraints, ok := req.Constraints.(sandbox.Constraints); ok {
@@ -138,23 +139,36 @@ func (tm *taskRuntime) StartCommand(
 		ref: taskapi.Ref{
 			TaskID: taskID,
 		},
-		handle:         handle,
-		sessionRef:     session.NormalizeSessionRef(ref),
-		command:        strings.TrimSpace(req.Command),
-		workdir:        strings.TrimSpace(req.Workdir),
-		parentCall:     strings.TrimSpace(req.ParentCall),
-		requestDigest:  requestDigest,
-		title:          shell.RunCommandToolName + " " + strings.TrimSpace(req.Command),
-		createdAt:      now,
-		state:          taskapi.StatePrepared,
-		running:        false,
-		outputCallback: true,
+		handle:        handle,
+		sessionRef:    session.NormalizeSessionRef(ref),
+		command:       strings.TrimSpace(req.Command),
+		workdir:       strings.TrimSpace(req.Workdir),
+		parentCall:    strings.TrimSpace(req.ParentCall),
+		requestDigest: requestDigest,
+		title:         shell.RunCommandToolName + " " + strings.TrimSpace(req.Command),
+		createdAt:     now,
+		state:         taskapi.StatePrepared,
+		running:       false,
+		outputState: commandOutputState{
+			callback: true,
+			exact:    true,
+			checkpoint: commandOutputCheckpoint{
+				available: true,
+				coherent:  true,
+			},
+			resume: commandOutputCheckpoint{
+				available: true,
+				coherent:  true,
+			},
+		},
 		metadata: map[string]any{
 			"task_id": taskID, "handle": handle, "task_kind": string(taskapi.KindCommand),
 			"state": string(taskapi.StatePrepared), "running": false,
-			"command_phase":          commandPhaseIntent,
-			"command_request_digest": requestDigest,
-			"parent_call":            strings.TrimSpace(req.ParentCall),
+			"command_phase":               commandPhaseIntent,
+			"command_request_digest":      requestDigest,
+			"parent_call":                 strings.TrimSpace(req.ParentCall),
+			"output_checkpoint_available": true,
+			"output_checkpoint_coherent":  true,
 		},
 		result: map[string]any{"state": string(taskapi.StatePrepared)},
 	}
@@ -271,6 +285,7 @@ func applyCommandEntry(task *commandTask, entry *taskapi.Entry) {
 		return
 	}
 	task.mu.Lock()
+	stateChanged := task.state != entry.State || task.running != entry.Running
 	task.revision = entry.Revision
 	task.handle = firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"]))
 	task.lease = taskapi.CloneLease(entry.Lease)
@@ -283,6 +298,9 @@ func applyCommandEntry(task *commandTask, entry *taskapi.Entry) {
 	}
 	if terminalID := strings.TrimSpace(entry.Terminal.TerminalID); terminalID != "" {
 		task.ref.TerminalID = terminalID
+	}
+	if stateChanged {
+		task.notifyCommandStreamChangeLocked()
 	}
 	task.mu.Unlock()
 }
@@ -374,6 +392,7 @@ func (tm *taskRuntime) handleCommandStartFailure(ctx context.Context, task *comm
 		task.metadata["running"] = false
 		task.metadata["command_phase"] = commandPhaseStartFailed
 		task.result = map[string]any{"state": string(taskapi.StateFailed), "error": strings.TrimSpace(startErr.Error())}
+		task.notifyCommandStreamChangeLocked()
 		failed := task.entrySnapshot(tm.runtime.now())
 		task.mu.Unlock()
 		persistErr := tm.persistTaskEntry(context.WithoutCancel(ctx), failed)
@@ -417,6 +436,7 @@ func (tm *taskRuntime) finalizeCommandStartCleanup(ctx context.Context, task *co
 		"command_phase": commandPhaseStartFailed,
 	}
 	task.result = map[string]any{"state": string(taskapi.StateFailed), "error": reason}
+	task.notifyCommandStreamChangeLocked()
 	entry := task.entrySnapshot(now)
 	task.mu.Unlock()
 	persistErr := tm.persistTaskEntry(context.WithoutCancel(ctx), entry)
@@ -504,6 +524,7 @@ func (tm *taskRuntime) retainCommandAfterFailedInitialPersistence(
 		"state": string(taskapi.StateUnknownOutcome),
 		"error": reason,
 	}
+	task.notifyCommandStreamChangeLocked()
 	entry := task.entrySnapshot(now)
 	task.mu.Unlock()
 	recoveryPersistErr := tm.persistTaskEntry(context.WithoutCancel(ctx), entry)
@@ -525,7 +546,7 @@ func (tm *taskRuntime) waitCommand(ctx context.Context, task *commandTask, yield
 	if err != nil {
 		return tm.reconcileCommandWaitError(ctx, task, err)
 	}
-	return tm.completeCommandTaskWithStatus(ctx, task, status)
+	return tm.reconcileCommandStatus(ctx, task, status)
 }
 
 func (tm *taskRuntime) reconcileCommandWaitError(ctx context.Context, task *commandTask, waitErr error) (taskapi.Snapshot, error) {
@@ -544,7 +565,7 @@ func (tm *taskRuntime) reconcileCommandWaitError(ctx context.Context, task *comm
 		task.mu.Unlock()
 		return snapshot, waitErr
 	}
-	snapshot, completeErr := tm.completeCommandTaskWithStatus(context.WithoutCancel(ctx), task, status)
+	snapshot, completeErr := tm.reconcileCommandStatus(context.WithoutCancel(ctx), task, status)
 	if completeErr != nil {
 		return snapshot, errors.Join(waitErr, completeErr)
 	}
@@ -583,723 +604,4 @@ func (tm *taskRuntime) markCommandUnknown(ctx context.Context, task *commandTask
 	snapshot := task.snapshotLocked(status)
 	task.mu.Unlock()
 	return snapshot, nil
-}
-
-func (tm *taskRuntime) completeCommandTaskWithStatus(ctx context.Context, task *commandTask, status sandbox.SessionStatus) (taskapi.Snapshot, error) {
-	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
-	}
-	stdout, stderr, nextStdout, nextStderr, err := task.session.ReadOutput(ctx, task.stdoutCursor, task.stderrCursor)
-	if err != nil {
-		snapshot, persistErr := tm.markCommandUnknown(context.WithoutCancel(ctx), task, err)
-		return snapshot, errors.Join(err, persistErr)
-	}
-
-	task.mu.Lock()
-	phase := taskStringValue(task.metadata["command_phase"])
-	task.stdoutCursor = nextStdout
-	task.stderrCursor = nextStderr
-	if !task.outputCallback {
-		task.appendOutputLocked(terminalDeltaText(string(stdout), string(stderr)))
-	}
-	outputText := task.output
-	outputCursor := task.outputCursorLocked()
-	state := stateFromStatus(status)
-	if status.Running && commandUnknownWhileRunningPhase(phase) {
-		state = taskapi.StateUnknownOutcome
-	}
-	task.state = state
-	task.running = status.Running
-	task.metadata = map[string]any{
-		"task_id":     task.ref.TaskID,
-		"task_kind":   string(taskapi.KindCommand),
-		"state":       string(state),
-		"running":     status.Running,
-		"session_id":  task.ref.SessionID,
-		"terminal_id": task.ref.TerminalID,
-	}
-	if status.Terminal.TerminalID != "" {
-		task.metadata["terminal_id"] = status.Terminal.TerminalID
-	}
-	if status.Running {
-		if phase != "" {
-			task.metadata["command_phase"] = phase
-		}
-		latestOutput := compactLatestOutput(task.outputFromCursorLocked(task.modelCursor))
-		task.modelCursor = outputCursor
-		task.metadata["output_cursor"] = outputCursor
-		task.metadata["model_output_cursor"] = task.modelCursor
-		task.result = map[string]any{
-			"task_id": task.ref.TaskID,
-			"state":   string(state),
-		}
-		if state == taskapi.StateUnknownOutcome {
-			task.result["error"] = "command effect outcome is not yet confirmed"
-		}
-		if taskOutputHasNonBlankLine(latestOutput) {
-			task.result["latest_output"] = latestOutput
-		}
-		snapshot := task.snapshotLocked(status)
-		entry := task.entrySnapshot(tm.runtime.now())
-		task.mu.Unlock()
-		if err := tm.persistTaskEntry(ctx, entry); err != nil {
-			return snapshot, err
-		}
-		return snapshot, nil
-	}
-
-	result, resultErr := task.session.Result(ctx)
-	stdoutText := result.Stdout
-	stderrText := result.Stderr
-	finalText := terminalFinalText(outputText, stdoutText, stderrText, resultErr)
-	finalOutputText := terminalOutputText(outputText, stdoutText, stderrText)
-	task.reconcileFinalOutputLocked(finalOutputText)
-	task.metadata["output_cursor"] = int64(len([]byte(finalOutputText)))
-	task.metadata["model_output_cursor"] = int64(len([]byte(finalOutputText)))
-	task.result = map[string]any{
-		"state": string(state),
-	}
-	if taskOutputHasNonBlankLine(finalText) && strings.TrimSpace(finalText) != noOutputPlaceholder {
-		task.result["result"] = finalText
-	}
-	if commandExitCodeAvailable(state, result.ExitCode, resultErr) {
-		task.result["exit_code"] = result.ExitCode
-	}
-	if detail, ok := sandbox.SandboxPermissionDetail(result, resultErr); ok {
-		task.result["error"] = detail
-		task.result["error_code"] = string(tool.ErrorCodeSandboxDenied)
-	} else if resultErr != nil && strings.TrimSpace(finalText) == noOutputPlaceholder && !sandbox.IsCommandExit(resultErr) {
-		task.result["error"] = strings.TrimSpace(resultErr.Error())
-		if code, _ := tool.ErrorPayload(resultErr)["error_code"].(string); code != "" {
-			task.result["error_code"] = code
-		}
-	}
-	if diag, ok := commanddiag.Best(commanddiag.Input{
-		ToolName: shell.RunCommandToolName,
-		Command:  task.command,
-		Stdout:   result.Stdout,
-		Stderr:   result.Stderr,
-		Error:    firstNonEmpty(strings.TrimSpace(result.Error), errorText(resultErr)),
-		ExitCode: result.ExitCode,
-		Route:    result.Route,
-		Backend:  result.Backend,
-	}); ok {
-		if hint := strings.TrimSpace(diag.Hint); hint != "" {
-			task.result["system_hint"] = hint
-		}
-	}
-	snapshot := task.snapshotLocked(status)
-	entry := task.entrySnapshot(tm.runtime.now())
-	task.mu.Unlock()
-	if err := tm.persistTaskEntry(ctx, entry); err != nil {
-		return snapshot, err
-	}
-	tm.removeCommandTask(task)
-	return snapshot, nil
-}
-
-func commandCancelPhase(phase string) bool {
-	switch strings.TrimSpace(phase) {
-	case commandPhaseCancelClaimed, commandPhaseCancelUnknown, commandPhaseCancelApplied:
-		return true
-	default:
-		return false
-	}
-}
-
-func commandUnknownWhileRunningPhase(phase string) bool {
-	return strings.TrimSpace(phase) == commandPhaseUnknown ||
-		strings.TrimSpace(phase) == commandPhaseEffectClaimed || commandCancelPhase(phase)
-}
-
-func (tm *taskRuntime) lookupCommand(ctx context.Context, ref session.SessionRef, taskID string) (*commandTask, error) {
-	tm.mu.RLock()
-	task, ok := tm.tasks[strings.TrimSpace(taskID)]
-	tm.mu.RUnlock()
-	if ok && task != nil {
-		if strings.TrimSpace(task.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
-			return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
-		}
-		return task, nil
-	}
-	if tm.store == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
-	}
-	entry, err := tm.store.Get(ctx, strings.TrimSpace(taskID))
-	if err != nil || entry == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
-	}
-	if strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
-	}
-	if entry.Kind != taskapi.KindCommand {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
-	}
-	entry, err = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
-	if err != nil {
-		return nil, err
-	}
-	rehydrated, err := tm.rehydrateCommandTask(entry)
-	if err != nil {
-		return nil, err
-	}
-	tm.mu.Lock()
-	tm.tasks[rehydrated.ref.TaskID] = rehydrated
-	tm.mu.Unlock()
-	return rehydrated, nil
-}
-
-// lookupCommandCanonical reloads durable command state while the caller holds
-// the session-scoped operation claim. A configured store failure is returned
-// before any sandbox side effect; cached state is never used as a fallback.
-func (tm *taskRuntime) lookupCommandCanonical(ctx context.Context, ref session.SessionRef, taskID string) (*commandTask, error) {
-	if tm == nil || tm.store == nil {
-		return tm.lookupCommand(ctx, ref, taskID)
-	}
-	ref = session.NormalizeSessionRef(ref)
-	taskID = strings.TrimSpace(taskID)
-	entry, err := tm.store.Get(ctx, taskID)
-	if err != nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: reload command task %q: %w", taskID, err)
-	}
-	if !storedTaskEntryMatches(entry, ref, taskapi.KindCommand) {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
-	}
-	entry, err = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
-	if err != nil {
-		return nil, err
-	}
-	command, err := tm.commandFromDurableEntry(entry)
-	if err != nil {
-		return nil, err
-	}
-	tm.installCommandTask(command)
-	return command, nil
-}
-
-func (tm *taskRuntime) commandFromDurableEntry(entry *taskapi.Entry) (*commandTask, error) {
-	if tm == nil || entry == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: task entry is required")
-	}
-	tm.mu.RLock()
-	current := tm.tasks[strings.TrimSpace(entry.TaskID)]
-	tm.mu.RUnlock()
-	if current != nil && entry.Running {
-		current.mu.Lock()
-		if !commandCanAdoptDurableEntryLocked(current, entry) {
-			current.mu.Unlock()
-			return tm.rehydrateCommandTask(entry)
-		}
-		current.sessionRef = session.NormalizeSessionRef(entry.Session)
-		current.handle = firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"]))
-		current.command = taskSpecString(entry.Spec, "command")
-		current.workdir = taskSpecString(entry.Spec, "workdir")
-		current.parentCall = taskSpecString(entry.Spec, "parent_call")
-		current.requestDigest = taskSpecString(entry.Spec, "command_request_digest")
-		current.title = strings.TrimSpace(entry.Title)
-		current.createdAt = entry.CreatedAt
-		current.revision = entry.Revision
-		current.lease = taskapi.CloneLease(entry.Lease)
-		current.state = entry.State
-		current.running = entry.Running
-		current.stdoutCursor = entry.StdoutCursor
-		current.stderrCursor = entry.StderrCursor
-		current.result = session.CloneState(entry.Result)
-		current.metadata = session.CloneState(entry.Metadata)
-		current.mu.Unlock()
-		return current, nil
-	}
-	return tm.rehydrateCommandTask(entry)
-}
-
-func commandCanAdoptDurableEntryLocked(current *commandTask, entry *taskapi.Entry) bool {
-	if current == nil || current.session == nil || entry == nil {
-		return false
-	}
-	if commandSessionMatchesEntry(current.session, entry) {
-		return true
-	}
-	phase := taskStringValue(entry.Metadata["command_phase"])
-	return strings.TrimSpace(entry.Terminal.SessionID) == "" &&
-		(phase == commandPhaseEffectClaimed || phase == commandPhaseUnknown) &&
-		current.requestDigest != "" && current.requestDigest == taskSpecString(entry.Spec, "command_request_digest")
-}
-
-func commandSessionMatchesEntry(handle sandbox.Session, entry *taskapi.Entry) bool {
-	if handle == nil || entry == nil {
-		return false
-	}
-	terminal := handle.Terminal()
-	return strings.TrimSpace(terminal.SessionID) != "" &&
-		strings.TrimSpace(terminal.SessionID) == strings.TrimSpace(entry.Terminal.SessionID) &&
-		strings.TrimSpace(terminal.TerminalID) == strings.TrimSpace(entry.Terminal.TerminalID)
-}
-
-func (tm *taskRuntime) cancelCommandClaimed(ctx context.Context, task *commandTask) (taskapi.Snapshot, error) {
-	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: command task is required")
-	}
-	if task.commandOutcomeUnattached() {
-		return task.snapshotWithoutSession(tm.runtime.now()), nil
-	}
-	task.mu.Lock()
-	running := task.running
-	phase := taskStringValue(task.metadata["command_phase"])
-	if !running {
-		task.mu.Unlock()
-		return tm.snapshotExistingCommand(ctx, task, 0)
-	}
-	task.mu.Unlock()
-	switch phase {
-	case commandPhaseCancelClaimed:
-		return tm.executeClaimedCommandCancel(ctx, task)
-	case commandPhaseCancelUnknown:
-		return tm.reconcileCommandCancel(ctx, task, false)
-	case commandPhaseCancelApplied:
-		return tm.reconcileCommandCancel(ctx, task, true)
-	}
-	if _, err := tm.persistCommandCancelPhase(ctx, task, commandPhaseCancelClaimed,
-		"command cancellation was claimed; external effect outcome is not yet known"); err != nil {
-		return task.snapshotWithoutSession(tm.runtime.now()), err
-	}
-	return tm.executeClaimedCommandCancel(ctx, task)
-}
-
-func (tm *taskRuntime) executeClaimedCommandCancel(ctx context.Context, task *commandTask) (taskapi.Snapshot, error) {
-	if task == nil || task.session == nil {
-		return task.snapshotWithoutSession(tm.runtime.now()), errors.New("agent-sdk/runtime: claimed command cancellation has no live session")
-	}
-	if err := task.session.Terminate(ctx); err != nil {
-		status, statusErr := task.session.Status(context.WithoutCancel(ctx))
-		if statusErr == nil && !status.Running {
-			return tm.completeCommandTaskWithStatus(context.WithoutCancel(ctx), task, status)
-		}
-		snapshot, persistErr := tm.persistCommandCancelPhase(context.WithoutCancel(ctx), task, commandPhaseCancelUnknown,
-			"command cancellation outcome could not be confirmed")
-		return snapshot, errors.Join(err, statusErr, persistErr)
-	}
-	if _, err := tm.persistCommandCancelPhase(context.WithoutCancel(ctx), task, commandPhaseCancelApplied,
-		"command cancellation effect completed; terminal status is pending"); err != nil {
-		return task.snapshotWithoutSession(tm.runtime.now()), err
-	}
-	return tm.waitCommand(ctx, task, taskCancelWait)
-}
-
-func (tm *taskRuntime) reconcileCommandCancel(ctx context.Context, task *commandTask, wait bool) (taskapi.Snapshot, error) {
-	if task == nil || task.session == nil {
-		return task.snapshotWithoutSession(tm.runtime.now()), errors.New("agent-sdk/runtime: command cancellation outcome has no live session")
-	}
-	if wait {
-		return tm.waitCommand(ctx, task, taskCancelWait)
-	}
-	status, err := task.session.Status(ctx)
-	if err != nil {
-		return task.snapshotWithoutSession(tm.runtime.now()), err
-	}
-	if !status.Running {
-		return tm.completeCommandTaskWithStatus(ctx, task, status)
-	}
-	task.mu.Lock()
-	snapshot := task.snapshotLocked(status)
-	task.mu.Unlock()
-	return snapshot, nil
-}
-
-func (tm *taskRuntime) persistCommandCancelPhase(ctx context.Context, task *commandTask, phase, reason string) (taskapi.Snapshot, error) {
-	if task == nil {
-		return taskapi.Snapshot{}, errors.New("agent-sdk/runtime: command task is required")
-	}
-	task.mu.Lock()
-	entry := task.entrySnapshot(tm.runtime.now())
-	task.mu.Unlock()
-	entry.State = taskapi.StateUnknownOutcome
-	entry.Running = false
-	entry.Metadata = session.CloneState(entry.Metadata)
-	entry.Metadata["state"] = string(taskapi.StateUnknownOutcome)
-	entry.Metadata["running"] = false
-	entry.Metadata["command_phase"] = phase
-	entry.Result = map[string]any{"state": string(taskapi.StateUnknownOutcome), "error": strings.TrimSpace(reason)}
-	if err := tm.persistTaskEntry(ctx, entry); err != nil {
-		return task.snapshotWithoutSession(tm.runtime.now()), err
-	}
-	applyCommandEntry(task, entry)
-	return task.snapshotWithoutSession(tm.runtime.now()), nil
-}
-
-func (t *commandTask) snapshotLocked(status sandbox.SessionStatus) taskapi.Snapshot {
-	return taskapi.CloneSnapshot(taskapi.Snapshot{
-		Ref:            t.ref,
-		Handle:         t.handle,
-		Revision:       t.revision,
-		Kind:           taskapi.KindCommand,
-		Title:          t.title,
-		State:          t.state,
-		Running:        t.running,
-		SupportsInput:  status.SupportsInput,
-		SupportsCancel: true,
-		CreatedAt:      t.createdAt,
-		UpdatedAt:      status.UpdatedAt,
-		Lease:          taskapi.CloneLease(t.lease),
-		StdoutCursor:   t.stdoutCursor,
-		StderrCursor:   t.stderrCursor,
-		Result:         session.CloneState(t.result),
-		Metadata:       session.CloneState(t.metadata),
-		Terminal:       status.Terminal,
-	})
-}
-
-func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask, error) {
-	if entry == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: task entry is required")
-	}
-	seededOutput, seededFromResult := rehydratedCommandOutput(entry)
-	task := &commandTask{
-		ref: taskapi.Ref{
-			TaskID:     strings.TrimSpace(entry.TaskID),
-			SessionID:  strings.TrimSpace(entry.Terminal.SessionID),
-			TerminalID: strings.TrimSpace(entry.Terminal.TerminalID),
-		},
-		handle:         firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"]), strings.TrimSpace(entry.TaskID)),
-		sessionRef:     session.NormalizeSessionRef(entry.Session),
-		command:        taskSpecString(entry.Spec, "command"),
-		workdir:        taskSpecString(entry.Spec, "workdir"),
-		parentCall:     taskSpecString(entry.Spec, "parent_call"),
-		requestDigest:  taskSpecString(entry.Spec, "command_request_digest"),
-		title:          strings.TrimSpace(entry.Title),
-		createdAt:      entry.CreatedAt,
-		revision:       entry.Revision,
-		lease:          taskapi.CloneLease(entry.Lease),
-		state:          entry.State,
-		running:        entry.Running,
-		stdoutCursor:   entry.StdoutCursor,
-		stderrCursor:   entry.StderrCursor,
-		output:         seededOutput,
-		outputCallback: seededFromResult,
-		result:         session.CloneState(entry.Result),
-		metadata:       session.CloneState(entry.Metadata),
-	}
-	if task.parentCall == "" {
-		task.parentCall = taskStringValue(entry.Metadata["parent_call"])
-	}
-	if task.requestDigest == "" {
-		task.requestDigest = taskStringValue(entry.Metadata["command_request_digest"])
-	}
-	if cursor, ok := taskInt64Value(entry.Metadata["model_output_cursor"]); ok && cursor >= 0 {
-		task.modelCursor = cursor
-	}
-	phase := taskStringValue(entry.Metadata["command_phase"])
-	if phase == commandPhaseIntent {
-		return task, nil
-	}
-	if strings.TrimSpace(entry.Terminal.SessionID) == "" && (phase == commandPhaseEffectClaimed || phase == commandPhaseUnknown) {
-		// A process restart erased the only live observation handle. The external
-		// effect may have happened, but there is no longer an asynchronous producer
-		// that can prove progress. Expose an explicit terminal unknown outcome.
-		task.state = taskapi.StateUnknownOutcome
-		task.running = false
-		if task.metadata == nil {
-			task.metadata = map[string]any{}
-		}
-		task.metadata["state"] = string(taskapi.StateUnknownOutcome)
-		task.metadata["running"] = false
-		task.result = map[string]any{
-			"state": string(taskapi.StateUnknownOutcome),
-			"error": "command effect outcome is unavailable after process restart",
-		}
-		return task, nil
-	}
-	if !entry.Running {
-		task.session = completedTaskSession{entry: taskapi.CloneEntry(entry)}
-		return task, nil
-	}
-	backend := entry.Terminal.Backend
-	if backend == "" {
-		backend = sandbox.BackendHost
-	}
-	tm.mu.RLock()
-	runtime := tm.backends[backend]
-	tm.mu.RUnlock()
-	if runtime == nil {
-		if commandUnknownWhileRunningPhase(phase) {
-			return task, nil
-		}
-		interruptRehydratedCommandTask(task, entry)
-		return task, nil
-	}
-	var (
-		session sandbox.Session
-		err     error
-	)
-	if opener, ok := runtime.(sandboxSessionRefOpener); ok && opener != nil {
-		session, err = opener.OpenSessionRef(sandbox.SessionRef{
-			Backend:   backend,
-			SessionID: strings.TrimSpace(entry.Terminal.SessionID),
-		})
-	} else {
-		session, err = runtime.OpenSession(strings.TrimSpace(entry.Terminal.SessionID))
-	}
-	if err != nil {
-		if commandUnknownWhileRunningPhase(phase) {
-			return task, nil
-		}
-		interruptRehydratedCommandTask(task, entry)
-		return task, nil
-	}
-	task.session = session
-	return task, nil
-}
-
-func interruptRehydratedCommandTask(task *commandTask, entry *taskapi.Entry) {
-	if task == nil || entry == nil {
-		return
-	}
-	task.session = completedTaskSession{entry: taskapi.CloneEntry(entry)}
-	task.running = false
-	task.state = taskapi.StateInterrupted
-	if task.result == nil {
-		task.result = map[string]any{}
-	}
-	task.result["state"] = string(taskapi.StateInterrupted)
-	task.result["error"] = "task interrupted during resume"
-	task.result["result"] = "task interrupted during resume"
-}
-
-func rehydratedCommandOutput(entry *taskapi.Entry) (string, bool) {
-	if entry == nil || entry.Result == nil {
-		return "", false
-	}
-	text := taskRawStringValue(entry.Result["result"])
-	if text == "" {
-		return "", false
-	}
-	if strings.TrimSpace(text) == noOutputPlaceholder && entry.StdoutCursor == 0 && entry.StderrCursor == 0 {
-		return "", true
-	}
-	return text, true
-}
-
-func errorText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return strings.TrimSpace(err.Error())
-}
-
-func (t *commandTask) entrySnapshot(now time.Time) *taskapi.Entry {
-	if t == nil {
-		return nil
-	}
-	var terminal sandbox.TerminalRef
-	if t.session != nil {
-		terminal = t.session.Terminal()
-	}
-	metadata := commandTaskEntryMetadata(t.metadata, t.running)
-	metadata["parent_call"] = t.parentCall
-	metadata["command_request_digest"] = t.requestDigest
-	return &taskapi.Entry{
-		TaskID:         t.ref.TaskID,
-		Handle:         t.handle,
-		Revision:       t.revision,
-		Kind:           taskapi.KindCommand,
-		Session:        t.sessionRef,
-		Title:          t.title,
-		State:          t.state,
-		Running:        t.running,
-		SupportsInput:  true,
-		SupportsCancel: true,
-		CreatedAt:      t.createdAt,
-		UpdatedAt:      now,
-		Lease:          taskapi.CloneLease(t.lease),
-		StdoutCursor:   t.stdoutCursor,
-		StderrCursor:   t.stderrCursor,
-		Spec: map[string]any{
-			"handle":                 t.handle,
-			"command":                t.command,
-			"workdir":                t.workdir,
-			"session_id":             t.ref.SessionID,
-			"parent_call":            t.parentCall,
-			"command_request_digest": t.requestDigest,
-		},
-		Result:   commandTaskEntryResult(t.result, t.running),
-		Metadata: metadata,
-		Terminal: terminal,
-	}
-}
-
-func (t *commandTask) commandOutcomeUnattached() bool {
-	if t == nil {
-		return false
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	phase := taskStringValue(t.metadata["command_phase"])
-	return strings.TrimSpace(t.ref.SessionID) == "" && (phase == commandPhaseEffectClaimed || phase == commandPhaseUnknown)
-}
-
-func (t *commandTask) snapshotWithoutSession(now time.Time) taskapi.Snapshot {
-	if t == nil {
-		return taskapi.Snapshot{}
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.snapshotLocked(sandbox.SessionStatus{Running: t.running, SupportsInput: false, UpdatedAt: now})
-}
-
-func commandTaskEntryResult(result map[string]any, running bool) map[string]any {
-	mode := taskapi.ResultPersistenceCanonical
-	if !running {
-		mode = taskapi.ResultPersistenceDeferred
-	}
-	return taskapi.SanitizeResultForPersistence(result, mode)
-}
-
-func commandTaskEntryMetadata(metadata map[string]any, running bool) map[string]any {
-	out := session.CloneState(metadata)
-	if running {
-		return out
-	}
-	delete(out, "output_cursor")
-	delete(out, "model_output_cursor")
-	return out
-}
-
-func (t *commandTask) appendOutput(text string) {
-	if t == nil || text == "" {
-		return
-	}
-	t.mu.Lock()
-	t.appendOutputLocked(text)
-	t.mu.Unlock()
-}
-
-func (t *commandTask) appendOutputLocked(text string) {
-	if t == nil || text == "" || t.streamTerminalFramed {
-		return
-	}
-	raw := []byte(t.output)
-	raw = append(raw, text...)
-	if commandLiveOutputBufferCapBytes > 0 && len(raw) > commandLiveOutputBufferCapBytes {
-		dropped := len(raw) - commandLiveOutputBufferCapBytes
-		for dropped < len(raw) && !utf8.RuneStart(raw[dropped]) {
-			dropped++
-		}
-		raw = raw[dropped:]
-		t.outputBase += int64(dropped)
-		if t.modelCursor < t.outputBase {
-			t.modelCursor = t.outputBase
-		}
-	}
-	t.output = string(raw)
-	t.outputLive = true
-	t.appendCommandStreamFrameLocked(stream.Frame{
-		Text:    text,
-		Running: t.running,
-	})
-	t.trimCommandStreamFramesLocked()
-}
-
-func (t *commandTask) appendCommandStreamFrameLocked(frame stream.Frame) {
-	if t == nil || t.streamTerminalFramed {
-		return
-	}
-	frame = stream.CloneFrame(frame)
-	frame.Ref = stream.Ref{
-		SessionID:  strings.TrimSpace(t.sessionRef.SessionID),
-		TaskID:     strings.TrimSpace(t.ref.TaskID),
-		TerminalID: strings.TrimSpace(t.ref.TerminalID),
-	}
-	frame.Cursor = stream.Cursor{
-		Output: t.outputCursorLocked(),
-		Events: t.streamEventBase + int64(len(t.streamFrames)) + 1,
-	}
-	t.streamFrames = append(t.streamFrames, frame)
-}
-
-func (t *commandTask) trimCommandStreamFramesLocked() {
-	if t == nil || len(t.streamFrames) == 0 {
-		return
-	}
-	for len(t.streamFrames) > 0 {
-		first := &t.streamFrames[0]
-		end := first.Cursor.Output
-		start := end - int64(len([]byte(first.Text)))
-		if end <= t.outputBase && first.Text != "" {
-			t.streamEventBase = max(t.streamEventBase, first.Cursor.Events)
-			t.streamFrames[0] = stream.Frame{}
-			t.streamFrames = t.streamFrames[1:]
-			continue
-		}
-		if first.Text != "" && start < t.outputBase {
-			first.Text = sliceStringFromByteCursor(first.Text, t.outputBase-start)
-		}
-		break
-	}
-}
-
-func (t *commandTask) ensureCommandOutputSeedLocked() {
-	if t == nil || len(t.streamFrames) != 0 || t.output == "" {
-		return
-	}
-	t.appendCommandStreamFrameLocked(stream.Frame{Text: t.output, Running: t.running})
-}
-
-func (t *commandTask) ensureCommandTerminalFrameLocked(state taskapi.State, status sandbox.SessionStatus, includeExitCode bool) {
-	if t == nil || !stream.IsTerminalState(string(state)) || t.streamTerminalFramed {
-		return
-	}
-	frame := stream.Frame{
-		State:     string(state),
-		Running:   false,
-		Closed:    true,
-		UpdatedAt: status.UpdatedAt,
-	}
-	if !status.Running && includeExitCode {
-		exitCode := status.ExitCode
-		frame.ExitCode = &exitCode
-	}
-	t.appendCommandStreamFrameLocked(frame)
-	t.streamTerminalFramed = true
-}
-
-func (t *commandTask) outputCursorLocked() int64 {
-	if t == nil {
-		return 0
-	}
-	return t.outputBase + int64(len([]byte(t.output)))
-}
-
-func (t *commandTask) outputFromCursorLocked(cursor int64) string {
-	if t == nil || t.output == "" {
-		return ""
-	}
-	if cursor < t.outputBase {
-		cursor = t.outputBase
-	}
-	return sliceStringFromByteCursor(t.output, cursor-t.outputBase)
-}
-
-// reconcileFinalOutputLocked appends only the canonical result suffix that is
-// not yet present in the callback-backed stream. A mismatch is left untouched:
-// stdout/stderr result grouping is not guaranteed to preserve live interleave
-// order, so replacing or appending an unaligned result would duplicate bytes.
-func (t *commandTask) reconcileFinalOutputLocked(finalOutput string) bool {
-	if t == nil {
-		return false
-	}
-	if t.output == "" && t.outputBase == 0 && t.stdoutCursor == 0 && t.stderrCursor == 0 && strings.TrimSpace(finalOutput) == noOutputPlaceholder {
-		return true
-	}
-	base := t.outputBase
-	cursor := t.outputCursorLocked()
-	finalCursor := int64(len([]byte(finalOutput)))
-	if base < 0 || cursor < base || base > finalCursor || cursor > finalCursor {
-		return false
-	}
-	if finalOutput[base:cursor] != t.output {
-		return false
-	}
-	if cursor < finalCursor {
-		t.appendOutputLocked(finalOutput[cursor:])
-	}
-	return true
 }

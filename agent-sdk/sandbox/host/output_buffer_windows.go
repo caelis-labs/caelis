@@ -19,6 +19,10 @@ func (d *hostOutputDecoder) Flush() consoleoutput.StreamChunk {
 	return consoleoutput.FlushStreamChunk(&d.decoder, consoleoutput.StoreDecoded)
 }
 
+func (*hostOutputDecoder) committedCursor(total int64) int64 {
+	return max(total, 0)
+}
+
 func newCappedOutputBuffer(max int) *consoleoutput.CappedBuffer {
 	return consoleoutput.NewCappedBuffer(max)
 }

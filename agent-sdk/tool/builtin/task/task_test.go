@@ -3,18 +3,23 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-func TestTaskDescriptionGuidesContinuingSubagentConversation(t *testing.T) {
+func TestTaskDescriptionGuidesInteractiveCommandsAndSubagentContinuation(t *testing.T) {
 	desc := New().Definition().Description
 	for _, want := range []string{
-		"For RunCommand, write sends terminal stdin.",
-		"For Spawn, write sends a follow-up prompt only after the child task has completed",
-		"Always wait before relying on a task result.",
+		"read observes new output without waiting for exit",
+		"accepts exactly one RunCommand handle",
+		"read does not support Spawn",
+		"RunCommand write sends terminal stdin then briefly awaits its response",
+		"Completed Spawn write sends a follow-up prompt",
+		"Wait observes either target for at most one minute",
+		"may return state=running",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("TASK description missing %q:\n%s", want, desc)
@@ -27,7 +32,7 @@ func TestTaskDescriptionGuidesContinuingSubagentConversation(t *testing.T) {
 	}
 }
 
-func TestTaskSchemaUsesFixedWaitBudget(t *testing.T) {
+func TestTaskSchemaUsesServiceOwnedObservationBudgets(t *testing.T) {
 	def := New().Definition()
 	props, _ := def.InputSchema["properties"].(map[string]any)
 	if _, ok := props["handle"]; !ok {
@@ -43,9 +48,25 @@ func TestTaskSchemaUsesFixedWaitBudget(t *testing.T) {
 		t.Fatalf("yield_time_ms property unexpectedly exposed: %#v", props["yield_time_ms"])
 	}
 	action, _ := props["action"].(map[string]any)
+	enum, _ := action["enum"].([]string)
+	if !slices.Contains(enum, "read") {
+		t.Fatalf("action enum = %#v, want read", enum)
+	}
 	actionDesc, _ := action["description"].(string)
-	if !strings.Contains(actionDesc, "wait observes for at most one minute") {
-		t.Fatalf("action description = %q, want fixed one-minute wait guidance", actionDesc)
+	for _, want := range []string{
+		"wait: one or more RunCommand or Spawn handles",
+		"read: exactly one RunCommand handle only, never Spawn",
+		"write: exactly one handle",
+		"cancel: one or more handles",
+	} {
+		if !strings.Contains(actionDesc, want) {
+			t.Fatalf("action description = %q, want %q", actionDesc, want)
+		}
+	}
+	handle, _ := props["handle"].(map[string]any)
+	handleDesc, _ := handle["description"].(string)
+	if !strings.Contains(handleDesc, "Only wait and cancel accept comma-separated handles") {
+		t.Fatalf("handle description = %q, want batch action restriction", handleDesc)
 	}
 	input, _ := props["input"].(map[string]any)
 	inputDesc, _ := input["description"].(string)
@@ -85,7 +106,7 @@ func TestTaskCallRejectsUnknownArgsBeforeRuntimeWrapperError(t *testing.T) {
 	}
 }
 
-func TestTaskCallSilentlyAcceptsLegacyYieldTime(t *testing.T) {
+func TestTaskCallRejectsLegacyYieldTime(t *testing.T) {
 	t.Parallel()
 
 	raw, _ := json.Marshal(map[string]any{
@@ -95,9 +116,9 @@ func TestTaskCallSilentlyAcceptsLegacyYieldTime(t *testing.T) {
 	})
 	_, err := New().Call(context.Background(), tool.Call{Name: ToolName, Input: raw})
 	if err == nil {
-		t.Fatal("TASK Call() error = nil, want runtime wrapper error")
+		t.Fatal("TASK Call() error = nil, want legacy arg rejection")
 	}
-	if !strings.Contains(err.Error(), "runtime wrapper") || strings.Contains(err.Error(), "yield_time_ms") {
-		t.Fatalf("TASK Call() error = %v, want legacy yield_time_ms accepted before runtime wrapper error", err)
+	if strings.Contains(err.Error(), "runtime wrapper") || !strings.Contains(err.Error(), "yield_time_ms") {
+		t.Fatalf("TASK Call() error = %v, want legacy arg rejection before runtime wrapper error", err)
 	}
 }

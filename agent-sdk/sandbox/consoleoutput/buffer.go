@@ -125,8 +125,9 @@ func AppendCappedBytes(dst []byte, src []byte, max int) []byte {
 	return append(out, src...)
 }
 
-// CappedOutputSince returns bytes after marker from a capped buffer and the new
-// absolute cursor.
+// CappedOutputSince returns retained bytes after marker and the new absolute
+// cursor. Session callers use sandbox.OutputReadWindow on the returned byte
+// length and cursor to distinguish a contiguous read from ring eviction.
 func CappedOutputSince(buf []byte, total int64, marker int64) ([]byte, int64) {
 	if total < 0 {
 		total = 0

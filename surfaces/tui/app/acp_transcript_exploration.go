@@ -66,17 +66,17 @@ func (s *explorationProjectionState) reconcile(events []SubagentEvent, status st
 func collectStableExplorationRuns(events []SubagentEvent, status string) [][]string {
 	var runs [][]string
 	var current []string
-	currentHasNarrative := false
 	flush := func() {
 		if len(current) == 0 {
-			currentHasNarrative = false
 			return
 		}
-		if currentHasNarrative || len(current) >= 2 {
+		// One exploration tool has no density benefit: keep its narrative and
+		// tool row directly visible. Stable containers are reserved for runs
+		// with at least two physical tool calls.
+		if len(current) >= 2 {
 			runs = append(runs, append([]string(nil), current...))
 		}
 		current = nil
-		currentHasNarrative = false
 	}
 	for i := 0; i < len(events); {
 		step, ok := collectExplorationRenderStep(events, i)
@@ -88,7 +88,6 @@ func collectStableExplorationRuns(events []SubagentEvent, status string) [][]str
 		settled := isTerminalACPTranscriptStatus(status) || hasLaterTranscriptStep(events, step.end+1)
 		if step.completedExploration && settled {
 			current = append(current, step.callIDs...)
-			currentHasNarrative = currentHasNarrative || step.hasNarrative
 		} else {
 			flush()
 		}
@@ -102,7 +101,6 @@ type explorationRenderStep struct {
 	start                int
 	end                  int
 	callIDs              []string
-	hasNarrative         bool
 	completedExploration bool
 }
 
@@ -122,12 +120,6 @@ func collectExplorationRenderStep(events []SubagentEvent, idx int) (explorationR
 		start:                start,
 		end:                  i,
 		completedExploration: true,
-	}
-	for j := start; j < i; j++ {
-		if renderableTextHasContent(events[j].Text) {
-			step.hasNarrative = true
-			break
-		}
 	}
 	for i < len(events) && events[i].Kind == SEToolCall {
 		ev := events[i]
@@ -254,6 +246,9 @@ func explorationContainerRange(events []SubagentEvent, idx int, callIDs []string
 	}
 	seen := map[string]bool{}
 	for end := idx; end < len(events); end++ {
+		if events[end].Kind == SESemanticBoundary {
+			return idx, idx, false
+		}
 		if events[end].Kind != SEToolCall {
 			continue
 		}
@@ -362,8 +357,7 @@ func acpStableExplorationClickToken(key string) string {
 }
 
 func compactExplorationStageHasSummary(stage []SubagentEvent) bool {
-	count := countExplorationTools(stage)
-	return count > 0 && (count >= 2 || hasExplorationNarrative(stage))
+	return countExplorationTools(stage) >= 2
 }
 
 func compactExplorationStage(events []SubagentEvent, idx int, status string) ([]SubagentEvent, int) {

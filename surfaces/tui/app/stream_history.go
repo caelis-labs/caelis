@@ -29,6 +29,8 @@ func (m *Model) resetConversationView() {
 	m.hintEntries = nil
 	m.hint = ""
 	m.liveTurn = liveTurnState{}
+	m.runningActivityTracker.endTurn()
+	m.runningActivity = runningActivityState{}
 	m.compactNoticePair = compactNoticePairState{}
 	m.clearSelection()
 	m.clearInputSelection()

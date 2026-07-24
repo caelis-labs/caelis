@@ -20,7 +20,7 @@ func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Mes
 	metaParts := []map[string]any{resultMetadata}
 	metaParts = append(metaParts, extraMeta...)
 	metaParts = append(metaParts, toolMeta(call.Name))
-	status := toolCallStatus(result, rawOutput)
+	status := toolCallStatus(call, result, rawOutput)
 	meta := mergeEventMeta(metaParts...)
 	event := &session.Event{
 		Type: session.EventTypeToolResult,
@@ -116,7 +116,7 @@ func toolResultContent(call model.ToolCall, input map[string]any, output map[str
 
 func suppressTaskControlContent(action string) bool {
 	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "wait", "cancel":
+	case "wait", "read", "cancel":
 		return true
 	default:
 		return false
@@ -142,7 +142,18 @@ func toolCallTitle(call model.ToolCall) string {
 	return name
 }
 
-func toolCallStatus(result tool.Result, rawOutput map[string]any) string {
+func toolCallStatus(call model.ToolCall, result tool.Result, rawOutput map[string]any) string {
+	if result.IsError {
+		return "failed"
+	}
+	// Task is a synchronous control invocation over another asynchronous
+	// operation. A successful wait, write, or cancel call is complete even
+	// when the observed Task remains running or has reached a failed terminal
+	// state. The observed state stays in rawOutput for Task lifecycle
+	// projection and model context.
+	if names.ExecutableOrSelf(call.Name) == names.Task {
+		return "completed"
+	}
 	if state, _ := rawOutput["state"].(string); strings.TrimSpace(state) != "" {
 		switch strings.TrimSpace(state) {
 		case "running", "waiting_input", "waiting_approval":
@@ -152,9 +163,6 @@ func toolCallStatus(result tool.Result, rawOutput map[string]any) string {
 		}
 	}
 	if exitCode, ok := intValue(rawOutput["exit_code"]); ok && exitCode != 0 {
-		return "failed"
-	}
-	if result.IsError {
 		return "failed"
 	}
 	return "completed"

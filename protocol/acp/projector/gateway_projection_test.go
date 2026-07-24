@@ -258,6 +258,7 @@ func TestProjectSessionEventEnvelopeKeepsLiveAndReplayNarrativeAligned(t *testin
 		ID:        "event-1",
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
+		MessageID: "message-1",
 		Message:   &message,
 	}
 
@@ -276,6 +277,12 @@ func TestProjectSessionEventEnvelopeKeepsLiveAndReplayNarrativeAligned(t *testin
 		eventstream.UpdateType(live[2].Update) != schema.UpdateToolCall {
 		t.Fatalf("live projection = %#v, want narrative chunks followed by tool call", live)
 	}
+	for i := 0; i < 2; i++ {
+		chunk, ok := live[i].Update.(schema.ContentChunk)
+		if !ok || chunk.MessageID != "message-1" {
+			t.Fatalf("live narrative[%d] = %#v, want shared typed message identity", i, live[i].Update)
+		}
+	}
 
 	replay := ProjectSessionEventEnvelope(eventstream.Envelope{
 		SessionID: "session-1",
@@ -288,6 +295,12 @@ func TestProjectSessionEventEnvelopeKeepsLiveAndReplayNarrativeAligned(t *testin
 	for i := range live {
 		if eventstream.UpdateType(replay[i].Update) != eventstream.UpdateType(live[i].Update) {
 			t.Fatalf("projection[%d] live=%q replay=%q", i, eventstream.UpdateType(live[i].Update), eventstream.UpdateType(replay[i].Update))
+		}
+	}
+	for i := 0; i < 2; i++ {
+		chunk, ok := replay[i].Update.(schema.ContentChunk)
+		if !ok || chunk.MessageID != "message-1" {
+			t.Fatalf("replay narrative[%d] = %#v, want shared typed message identity", i, replay[i].Update)
 		}
 	}
 }

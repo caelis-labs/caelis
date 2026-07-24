@@ -101,10 +101,9 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 		}
 	}
 	for _, env := range result.Events {
-		if err := a.emitControlEnvelope(ctx, cb, sessionID, nil, env, outboundFilter); err != nil {
+		if err := a.emitTaskAwareControlEnvelope(ctx, cb, sessionID, nil, taskMux, &taskEvents, env, outboundFilter); err != nil {
 			return err
 		}
-		taskMux.Observe(env)
 	}
 	if result.Reconnect != nil {
 		defer result.Reconnect.Close()
@@ -126,10 +125,9 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 			return err
 		}
 		for _, env := range result.Reconnect.BootstrapEvents() {
-			if err := a.emitControlEnvelope(ctx, cb, sessionID, result.Reconnect, env, outboundFilter); err != nil {
+			if err := a.emitTaskAwareControlEnvelope(ctx, cb, sessionID, result.Reconnect, taskMux, &taskEvents, env, outboundFilter); err != nil {
 				return err
 			}
-			taskMux.Observe(env)
 		}
 	}
 	if err := a.emitPromptRouterSideEffects(ctx, cb, activeSession, result); err != nil {
@@ -157,13 +155,9 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 					events = nil
 					continue
 				}
-				if err := a.drainACPTaskStreamBeforeParentClose(ctx, cb, sessionID, taskMux, &taskEvents, env, outboundFilter); err != nil {
+				if err := a.emitTaskAwareControlEnvelope(ctx, cb, sessionID, result.Reconnect, taskMux, &taskEvents, env, outboundFilter); err != nil {
 					return err
 				}
-				if err := a.emitControlEnvelope(ctx, cb, sessionID, result.Reconnect, env, outboundFilter); err != nil {
-					return err
-				}
-				taskMux.Observe(env)
 			}
 		}
 		return result.Reconnect.Err()
@@ -190,15 +184,10 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 				events = nil
 				continue
 			}
-			if err := a.drainACPTaskStreamBeforeParentClose(ctx, cb, sessionID, taskMux, &taskEvents, env, outboundFilter); err != nil {
+			if err := a.emitTaskAwareControlEnvelope(ctx, cb, sessionID, result.Turn, taskMux, &taskEvents, env, outboundFilter); err != nil {
 				_ = result.Turn.Close()
 				return err
 			}
-			if err := a.emitControlEnvelope(ctx, cb, sessionID, result.Turn, env, outboundFilter); err != nil {
-				_ = result.Turn.Close()
-				return err
-			}
-			taskMux.Observe(env)
 		}
 	}
 	closeErr := result.Turn.Close()
@@ -209,6 +198,31 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 }
 
 const acpTaskStreamParentDrainTimeout = 2 * time.Second
+
+// emitTaskAwareControlEnvelope is the single parent-envelope delivery order for
+// both Control turns and the direct Runtime runner. It preserves retained Task
+// output before a fallback parent close, emits the canonical envelope through
+// the standard compatibility projection, then discovers and drains any Task
+// stream mounted by that envelope.
+func (a *RuntimeAgent) emitTaskAwareControlEnvelope(
+	ctx context.Context,
+	cb acp.PromptCallbacks,
+	sessionID string,
+	turn control.Turn,
+	taskMux *acpTaskStreamMux,
+	taskEvents *<-chan eventstream.Envelope,
+	env eventstream.Envelope,
+	outboundFilter *acpNarrativeFilter,
+) error {
+	if err := a.drainACPTaskStreamBeforeParentClose(ctx, cb, sessionID, taskMux, taskEvents, env, outboundFilter); err != nil {
+		return err
+	}
+	if err := a.emitControlEnvelope(ctx, cb, sessionID, turn, env, outboundFilter); err != nil {
+		return err
+	}
+	taskMux.Observe(env)
+	return a.drainReadyACPTaskStream(ctx, cb, sessionID, taskEvents, outboundFilter)
+}
 
 // drainACPTaskStreamBeforeParentClose preserves fallback ordering across the
 // independent Session and Task subscriber queues. The typed child lifecycle is

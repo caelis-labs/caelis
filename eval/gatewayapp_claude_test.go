@@ -196,8 +196,17 @@ func connectClaudeAgentForE2E(ctx context.Context, t *testing.T, stack *gatewaya
 	if err != nil {
 		t.Fatalf("ConnectACP(claude, %s) error = %v", launcher, err)
 	}
-	if len(connected.Agents) != 1 {
-		t.Fatalf("ConnectACP(claude) Agents = %#v, want one", connected.Agents)
+	if len(connected.Profiles) != 1 {
+		t.Fatalf("ConnectACP(claude) profiles = %#v, want one", connected.Profiles)
 	}
-	return connected.Agents[0].ID
+	profile := connected.Profiles[0]
+	if profile.Backend.ACP == nil ||
+		strings.TrimSpace(profile.Backend.ACP.AgentID) == "" ||
+		profile.Backend.ACP.RemoteModelID != req.ModelID {
+		t.Fatalf("ConnectACP(claude) profile = %#v, want ACP backend for model %q", profile, req.ModelID)
+	}
+	if profile.Effort.DefaultEffort == "" || !profile.SupportsEffort(profile.Effort.DefaultEffort) {
+		t.Fatalf("ConnectACP(claude) effort defaults = %#v, want supported default", profile.Effort)
+	}
+	return profile.Backend.ACP.AgentID
 }

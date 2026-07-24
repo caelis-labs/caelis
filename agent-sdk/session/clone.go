@@ -40,6 +40,7 @@ func CloneEvent(in *Event) *Event {
 	out.ID = strings.TrimSpace(in.ID)
 	out.IdempotencyKey = strings.TrimSpace(in.IdempotencyKey)
 	out.SessionID = strings.TrimSpace(in.SessionID)
+	out.MessageID = strings.TrimSpace(in.MessageID)
 	out.Text = in.Text
 	out.Meta = cloneProtocolAnyMap(in.Meta)
 	out.Actor = CloneActorRef(in.Actor)

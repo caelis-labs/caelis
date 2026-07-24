@@ -1,11 +1,14 @@
 package tuiapp
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -21,10 +24,11 @@ func TestDurableTaskWaitFinalCompletesOriginalSpawnPanel(t *testing.T) {
 
 	model := applyCanonicalOutputFidelitySequence(t, acpprojector.SessionEventTransport{})
 	block := requireMainACPTurnBlockForTest(t, model)
-	if len(block.Events) != 1 {
+	physical := physicalTranscriptEventsForTest(block.Events)
+	if len(physical) != 1 {
 		t.Fatalf("events = %#v, want one physical Spawn panel and no TASK result panel", block.Events)
 	}
-	spawn := block.Events[0]
+	spawn := physical[0]
 	if !spawn.Done || spawn.Err || !strings.EqualFold(toolSemanticName(spawn.Name, spawn.ToolKind), "SPAWN") {
 		t.Fatalf("Spawn = %#v, want completed original Spawn call", spawn)
 	}
@@ -86,7 +90,7 @@ func TestDurableTaskWaitFinalCompletesOriginalSpawnPanel(t *testing.T) {
 func TestCanonicalTaskSequenceRendersIdenticallyLiveAndReplay(t *testing.T) {
 	t.Parallel()
 
-	replay := applyCanonicalOutputFidelitySequence(t, acpprojector.SessionEventTransport{})
+	replay := applyCanonicalOutputFidelityReplay(t)
 	live := applyCanonicalOutputFidelitySequence(t, acpprojector.SessionEventTransport{
 		HandleID: "handle-1",
 		RunID:    "run-1",
@@ -101,6 +105,37 @@ func TestCanonicalTaskSequenceRendersIdenticallyLiveAndReplay(t *testing.T) {
 	if !reflect.DeepEqual(live.viewportPlainLines, replay.viewportPlainLines) {
 		t.Fatalf("live output = %#v\nreplay output = %#v", live.viewportPlainLines, replay.viewportPlainLines)
 	}
+}
+
+func applyCanonicalOutputFidelityReplay(t *testing.T) *Model {
+	t.Helper()
+
+	backfill := make(chan eventstream.Envelope, len(canonicalOutputFidelityEvents()))
+	for _, event := range canonicalOutputFidelityEvents() {
+		event = roundTripCanonicalOutputFidelityEvent(t, event)
+		base := acpprojector.EnvelopeBaseFromSessionEvent(
+			session.SessionRef{SessionID: "session-1"},
+			event,
+			acpprojector.SessionEventTransport{},
+		)
+		envelopes := acpprojector.ProjectSessionEventEnvelope(base, event)
+		if len(envelopes) != 1 {
+			t.Fatalf("projection for %s = %#v, want one envelope", event.ID, envelopes)
+		}
+		backfill <- envelopes[0]
+	}
+	close(backfill)
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	reconnect := &tuiReconnect{backfill: backfill}
+	err := streamReconnectBackfill(context.Background(), reconnect, func(message tea.Msg) {
+		next, _ := model.Update(message)
+		model = next.(*Model)
+	})
+	if err != nil {
+		t.Fatalf("replay canonical output fidelity sequence: %v", err)
+	}
+	return model
 }
 
 func applyCanonicalOutputFidelitySequence(t *testing.T, transport acpprojector.SessionEventTransport) *Model {
@@ -202,9 +237,13 @@ func TestNarrativePreservesRepeatedLongLinesParagraphsAndUnicodeMarkers(t *testi
 	}
 
 	block := NewParticipantTurnBlock("participant-1", "@reviewer")
-	block.AppendStreamChunk(SEAssistant, paragraph)
+	block.AppendStreamEvent(SEAssistant, paragraph, narrativeTestSource())
 	block.UpdateToolWithMeta("hidden-tool-1", "READ", "file.go", "", true, false, ToolUpdateMeta{ToolKind: "read"})
-	block.ReplaceFinalStreamChunk(SEAssistant, paragraph)
+	block.ReplaceFinalStreamEvent(
+		SEAssistant,
+		paragraph,
+		newNarrativeSourceIdentity("test-message-2", "test-event-2", "test-projection-2"),
+	)
 	if len(block.Events) != 3 || block.Events[0].Text != paragraph || block.Events[2].Text != paragraph {
 		t.Fatalf("events across tool barrier = %#v, want both identical legal paragraphs preserved", block.Events)
 	}

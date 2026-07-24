@@ -319,7 +319,7 @@ func taskControlLifecycleHeader(ev SubagentEvent) string {
 		verb = "Task"
 	}
 	switch strings.ToLower(strings.TrimSpace(verb)) {
-	case "wait", "cancel":
+	case "wait", "read", "cancel":
 		return standardVerbLifecycleHeader(verb, detail, false)
 	default:
 		return standardVerbLifecycleHeader("Task", ev.Args, false)

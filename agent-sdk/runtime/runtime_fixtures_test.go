@@ -1308,11 +1308,32 @@ func shellPrintThenSleepForTest(text string, delay time.Duration) string {
 	return fmt.Sprintf("printf %s; sleep %.3f", shellQuoteForTest(text), seconds)
 }
 
+func shellSleepPrintThenSleepForTest(text string, before time.Duration, after time.Duration) string {
+	if goruntime.GOOS == "windows" {
+		beforeMS := max(int(before.Milliseconds()), 1)
+		afterMS := max(int(after.Milliseconds()), 1)
+		return fmt.Sprintf("Start-Sleep -Milliseconds %d; [Console]::Out.Write(%s); Start-Sleep -Milliseconds %d", beforeMS, powershellQuoteForTest(text), afterMS)
+	}
+	return fmt.Sprintf(
+		"sleep %.3f; printf %s; sleep %.3f",
+		float64(before)/float64(time.Second),
+		shellQuoteForTest(text),
+		float64(after)/float64(time.Second),
+	)
+}
+
 func shellInteractiveGreetingForTest() string {
 	if goruntime.GOOS == "windows" {
 		return "[Console]::Out.WriteLine('waiting'); $name = [Console]::In.ReadLine(); [Console]::Out.WriteLine('hello ' + $name)"
 	}
 	return "printf 'waiting\n'; read name; printf 'hello %s\n' \"$name\""
+}
+
+func shellInteractiveGreetingLoopForTest() string {
+	if goruntime.GOOS == "windows" {
+		return "[Console]::Out.WriteLine('waiting'); while ($true) { $name = [Console]::In.ReadLine(); if ($null -eq $name) { break }; [Console]::Out.WriteLine('hello ' + $name) }"
+	}
+	return "printf 'waiting\n'; while IFS= read -r name; do printf 'hello %s\n' \"$name\"; done"
 }
 
 func shellRunningYieldMillisForTest(fallback int) int {
@@ -1836,6 +1857,7 @@ type yieldProbeSandboxSession struct {
 	terminated    bool
 	terminateErr  error
 	readErr       error
+	readOutput    func(stdoutCursor int64, stderrCursor int64) ([]byte, []byte, int64, int64, error)
 	stdout        string
 	stderr        string
 	result        sandbox.CommandResult
@@ -1862,12 +1884,32 @@ func (s *yieldProbeSandboxSession) Terminal() sandbox.TerminalRef {
 func (s *yieldProbeSandboxSession) WriteInput(context.Context, []byte) error { return nil }
 
 func (s *yieldProbeSandboxSession) ReadOutput(_ context.Context, stdoutCursor int64, stderrCursor int64) ([]byte, []byte, int64, int64, error) {
+	if s.readOutput != nil {
+		return s.readOutput(stdoutCursor, stderrCursor)
+	}
 	if s.readErr != nil {
 		return nil, nil, stdoutCursor, stderrCursor, s.readErr
 	}
 	stdout, nextStdout := probeOutputFromCursor(s.stdout, stdoutCursor)
 	stderr, nextStderr := probeOutputFromCursor(s.stderr, stderrCursor)
 	return stdout, stderr, nextStdout, nextStderr, nil
+}
+
+func (s *yieldProbeSandboxSession) AwaitOutput(ctx context.Context, cursor sandbox.OutputCursor) (sandbox.OutputObservation, error) {
+	status, err := s.Status(ctx)
+	if err != nil {
+		return sandbox.OutputObservation{}, err
+	}
+	next := sandbox.OutputCursor{Stdout: int64(len([]byte(s.stdout))), Stderr: int64(len([]byte(s.stderr)))}
+	cursor = sandbox.NormalizeOutputCursor(cursor)
+	if err := sandbox.ValidateOutputCursor(cursor, next); err != nil {
+		return sandbox.OutputObservation{}, err
+	}
+	if next.Stdout > cursor.Stdout || next.Stderr > cursor.Stderr || !status.Running {
+		return sandbox.OutputObservation{Cursor: next, Status: status}, nil
+	}
+	<-ctx.Done()
+	return sandbox.OutputObservation{}, ctx.Err()
 }
 
 func (s *yieldProbeSandboxSession) Status(context.Context) (sandbox.SessionStatus, error) {
@@ -1948,6 +1990,19 @@ func (s *runningOnlyProbeSandboxSession) WriteInput(context.Context, []byte) err
 
 func (s *runningOnlyProbeSandboxSession) ReadOutput(context.Context, int64, int64) ([]byte, []byte, int64, int64, error) {
 	return nil, nil, 0, 0, nil
+}
+
+func (s *runningOnlyProbeSandboxSession) AwaitOutput(ctx context.Context, cursor sandbox.OutputCursor) (sandbox.OutputObservation, error) {
+	status, err := s.Status(ctx)
+	if err != nil {
+		return sandbox.OutputObservation{}, err
+	}
+	cursor = sandbox.NormalizeOutputCursor(cursor)
+	if err := sandbox.ValidateOutputCursor(cursor, sandbox.OutputCursor{}); err != nil {
+		return sandbox.OutputObservation{}, err
+	}
+	<-ctx.Done()
+	return sandbox.OutputObservation{Cursor: cursor, Status: status}, ctx.Err()
 }
 
 func (s *runningOnlyProbeSandboxSession) Status(context.Context) (sandbox.SessionStatus, error) {

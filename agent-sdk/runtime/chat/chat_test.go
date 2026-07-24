@@ -809,7 +809,7 @@ func TestToolCallEventsPersistCompleteAssistantMessage(t *testing.T) {
 		},
 	}
 
-	events := modelToolCallEvents(message, resp)
+	events := modelToolCallEvents(message, resp, "message-1")
 	if got, want := len(events), 2; got != want {
 		t.Fatalf("len(events) = %d, want %d", got, want)
 	}
@@ -818,6 +818,12 @@ func TestToolCallEventsPersistCompleteAssistantMessage(t *testing.T) {
 	}
 	if got := session.EventText(events[1]); got != "" {
 		t.Fatalf("second tool-call anchor text = %q, want empty", got)
+	}
+	if events[0].MessageID != "message-1" {
+		t.Fatalf("message owner MessageID = %q, want message-1", events[0].MessageID)
+	}
+	if events[1].MessageID != "" {
+		t.Fatalf("secondary tool anchor MessageID = %q, want empty", events[1].MessageID)
 	}
 	if usage := nestedMap(events[0].Meta, "caelis", "sdk", "usage"); usage == nil {
 		t.Fatalf("tool-call meta = %#v, want usage", events[0].Meta)
@@ -880,14 +886,14 @@ func TestCollectFinalResponseAnnotatesContextWindow(t *testing.T) {
 			TotalTokens:      17,
 		},
 	}
-	final, err := collectFinalResponse(context.Background(), testModel, &model.Request{}, nil)
+	final, err := collectFinalResponse(context.Background(), testModel, &model.Request{}, "", nil)
 	if err != nil {
 		t.Fatalf("collectFinalResponse() error = %v", err)
 	}
 	if final.ContextWindowTokens != 128000 {
 		t.Fatalf("final.ContextWindowTokens = %d, want model context window", final.ContextWindowTokens)
 	}
-	event := modelResponseEvent(final.Message, final)
+	event := modelResponseEvent(final.Message, final, "")
 	if event.Invocation == nil || event.Invocation.ContextWindowTokens != 128000 {
 		t.Fatalf("event.Invocation = %#v, want context window", event.Invocation)
 	}
@@ -947,7 +953,7 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 		Args:             `{"value":"two"}`,
 		ThoughtSignature: "sig-two",
 	}})
-	for _, event := range modelToolCallEvents(assistant, &model.Response{Message: assistant}) {
+	for _, event := range modelToolCallEvents(assistant, &model.Response{Message: assistant}, "") {
 		appendEvent(event)
 	}
 	appendEvent(persistedToolResultEvent("call-1", "ECHO", map[string]any{"value": "one"}, map[string]any{"value": "ok"}))
@@ -1697,8 +1703,8 @@ func TestToolResultEventSuppressesSuccessfulTaskWaitACPContent(t *testing.T) {
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
 	}
-	if got := event.Tool.Status; got != "running" {
-		t.Fatalf("status = %q, want running", got)
+	if got := event.Tool.Status; got != "completed" {
+		t.Fatalf("status = %q, want completed control invocation", got)
 	}
 	content := event.Tool.Content
 	if len(content) != 0 {
@@ -1729,12 +1735,45 @@ func TestToolResultEventSuppressesCompletedTaskWaitACPContent(t *testing.T) {
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
 	}
+	if got := event.Tool.Status; got != "completed" {
+		t.Fatalf("status = %q, want completed control invocation", got)
+	}
 	content := event.Tool.Content
 	if len(content) != 0 {
 		t.Fatalf("content = %#v, want no display content for completed TASK wait", content)
 	}
 	if got, _ := event.Tool.Output["final_message"].(string); got != "child final answer\n" {
 		t.Fatalf("raw output final_message = %q, want model-visible final message preserved", got)
+	}
+}
+
+func TestToolResultEventSuppressesTaskReadACPContent(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID:   "task-read-1",
+		Name: "TASK",
+		Args: `{"action":"read","handle":"command-3"}`,
+	}, tool.Result{
+		ID:   "task-read-1",
+		Name: "TASK",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"action":        "read",
+			"handle":        "command-3",
+			"state":         "running",
+			"target_kind":   "command",
+			"latest_output": "step 2\n",
+		}))},
+	}, nil)
+
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
+	}
+	if content := event.Tool.Content; len(content) != 0 {
+		t.Fatalf("content = %#v, want no separate display content for TASK read", content)
+	}
+	if got, _ := event.Tool.Output["latest_output"].(string); got != "step 2\n" {
+		t.Fatalf("raw output latest_output = %q, want model-visible observation preserved", got)
 	}
 }
 
@@ -1757,6 +1796,9 @@ func TestToolResultEventPreservesTaskWriteACPContent(t *testing.T) {
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
+	}
+	if got := event.Tool.Status; got != "completed" {
+		t.Fatalf("status = %q, want completed control invocation", got)
 	}
 	content := event.Tool.Content
 	if len(content) != 1 {
@@ -1791,8 +1833,8 @@ func TestToolResultEventSuppressesFailedTaskWaitACPContent(t *testing.T) {
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
 	}
-	if got := event.Tool.Status; got != "failed" {
-		t.Fatalf("status = %q, want failed", got)
+	if got := event.Tool.Status; got != "completed" {
+		t.Fatalf("status = %q, want completed control invocation", got)
 	}
 	content := event.Tool.Content
 	if len(content) != 0 {
@@ -1824,8 +1866,90 @@ func TestToolResultEventSuppressesTaskCancelACPContent(t *testing.T) {
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
 	}
+	if got := event.Tool.Status; got != "completed" {
+		t.Fatalf("status = %q, want completed control invocation", got)
+	}
 	if content := event.Tool.Content; len(content) != 0 {
 		t.Fatalf("content = %#v, want no display content for TASK cancel", content)
+	}
+}
+
+func TestToolResultEventMarksTaskInvocationErrorFailed(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID:   "task-wait-1",
+		Name: "TASK",
+		Args: `{"action":"wait","task_id":"command-task"}`,
+	}, tool.Result{
+		ID:      "task-wait-1",
+		Name:    "TASK",
+		IsError: true,
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"state": "running",
+			"error": "task control transport failed",
+		}))},
+	}, nil)
+
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
+	}
+	if got := event.Tool.Status; got != "failed" {
+		t.Fatalf("status = %q, want failed control invocation", got)
+	}
+}
+
+func TestTaskObservedFailureToolResultModelContextRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	call := model.ToolCall{
+		ID:   "task-wait-1",
+		Name: "Task",
+		Args: `{"action":"wait","handle":"command-task"}`,
+	}
+	result := tool.Result{
+		ID:   call.ID,
+		Name: call.Name,
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"handle":    "command-task",
+			"state":     "failed",
+			"result":    "go: module internal registry: network unreachable\n",
+			"error":     "Sandbox permission denied.",
+			"exit_code": 1,
+		}))},
+	}
+	event := toolResultEvent(call, result, nil)
+	replayed, ok := messageFromDurableEvent(event)
+	if !ok {
+		t.Fatal("messageFromDurableEvent() = false, want Task result")
+	}
+	live := toolResultMessage(call, result)
+	if !reflect.DeepEqual(replayed, live) {
+		t.Fatalf("Task result model context changed across durable replay\nlive: %#v\nreplayed: %#v", live, replayed)
+	}
+}
+
+func TestToolResultEventPreservesSpawnObservedRunningStatus(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID:   "spawn-1",
+		Name: "SPAWN",
+		Args: `{"agent":"self","prompt":"inspect"}`,
+	}, tool.Result{
+		ID:   "spawn-1",
+		Name: "SPAWN",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"task_id": "task-1",
+			"state":   "running",
+		}))},
+	}, nil)
+
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
+	}
+	if got := event.Tool.Status; got != "running" {
+		t.Fatalf("status = %q, want Spawn observed running status", got)
 	}
 }
 
@@ -2448,6 +2572,21 @@ func TestChatAgentStreamsAssistantChunksBeforeFinalMessage(t *testing.T) {
 	if events[3].Visibility != session.VisibilityCanonical {
 		t.Fatalf("final event visibility = %q, want canonical", events[3].Visibility)
 	}
+	messageID := events[3].MessageID
+	if messageID == "" {
+		t.Fatal("final event MessageID is empty")
+	}
+	for i, event := range events {
+		if event.MessageID != messageID {
+			t.Fatalf("events[%d].MessageID = %q, want shared response identity %q", i, event.MessageID, messageID)
+		}
+		if i < 3 {
+			update := session.ProtocolUpdateOf(event)
+			if update == nil || update.MessageID != messageID {
+				t.Fatalf("events[%d] protocol MessageID = %#v, want %q", i, update, messageID)
+			}
+		}
+	}
 }
 
 func TestChatAgentDefaultsToNonStreamingRequests(t *testing.T) {
@@ -2499,7 +2638,7 @@ func TestChunkEventFromStreamEventPreservesBoundaryWhitespace(t *testing.T) {
 			Kind:      model.PartKindReasoning,
 			TextDelta: "think ",
 		},
-	})
+	}, "")
 	if reasoning == nil || reasoning.Text != "think " || reasoning.Message == nil || reasoning.Message.ReasoningText() != "think " {
 		t.Fatalf("reasoning chunk = %+v, want boundary whitespace preserved", reasoning)
 	}
@@ -2509,7 +2648,7 @@ func TestChunkEventFromStreamEventPreservesBoundaryWhitespace(t *testing.T) {
 			Kind:      model.PartKindReasoning,
 			TextDelta: " ",
 		},
-	})
+	}, "")
 	if space == nil || space.Text != " " || space.Message == nil || space.Message.ReasoningText() != " " {
 		t.Fatalf("space chunk = %+v, want whitespace-only reasoning chunk preserved", space)
 	}

@@ -125,7 +125,7 @@ func delegatedParentStream(req StreamRequest) bool {
 }
 
 func streamFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
-	return streamToolUpdateEnvelope(req, frame, toolStatusRunning, true, false, frame.Text, streamFrameMeta("append"), true)
+	return streamToolUpdateEnvelope(req, frame, toolStatusRunning, true, false, frame.Text, streamFrameMeta("append", frame.Cursor.Output), true)
 }
 
 func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
@@ -134,7 +134,7 @@ func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.En
 	if frame.Cursor.Output == 0 {
 		finalText = streamFinalTerminalText(frame.Text)
 	}
-	return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, streamFrameMeta("final"), true)
+	return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, streamFrameMeta("final", frame.Cursor.Output), true)
 }
 
 func streamDisplayTerminalID(req StreamRequest, frame stream.Frame) string {
@@ -384,9 +384,10 @@ func streamFrameEventMeta(meta map[string]any) map[string]any {
 	})
 }
 
-func streamFrameMeta(mode string) map[string]any {
+func streamFrameMeta(mode string, outputCursor int64) map[string]any {
 	return metautil.WithCompactRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamMode: strings.TrimSpace(mode),
+		metautil.RuntimeStreamMode:   strings.TrimSpace(mode),
+		metautil.RuntimeOutputCursor: max(outputCursor, 0),
 	})
 }
 

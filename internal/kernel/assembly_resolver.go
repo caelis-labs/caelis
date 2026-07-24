@@ -330,21 +330,10 @@ func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, in
 	}
 	tools := append([]tool.Tool(nil), snap.tools...)
 	if snap.toolAugmenter != nil {
-		sessionEffort := strings.TrimSpace(stringMetadata(metadata, "reasoning_effort"))
-		if sessionEffort == "" {
-			// A ModelProfile always has an explicit effort capability. Provider
-			// models without reasoning selectors materialize that capability as
-			// the canonical "none" value even though runtime model metadata omits
-			// reasoning_effort entirely.
-			sessionEffort = "none"
-		}
 		augmentation, err := snap.toolAugmenter(ctx, ToolAugmentContext{
 			SessionRef: intent.SessionRef,
 			State:      cloneMap(state),
-			Session: controlplacement.SessionContext{
-				ProfileID: modelResolution.ProfileID,
-				Effort:    sessionEffort,
-			},
+			Session:    toolAugmentSessionContext(metadata, modelResolution),
 		})
 		if err != nil {
 			return agent.AgentSpec{}, err
@@ -363,6 +352,24 @@ func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, in
 		Tools:    tools,
 		Metadata: metadata,
 	}, nil
+}
+
+func toolAugmentSessionContext(metadata map[string]any, modelResolution ModelResolution) controlplacement.SessionContext {
+	profileID := strings.TrimSpace(modelResolution.ProfileID)
+	if profileID == "" {
+		// An ACP-controlled Turn has no local provider selection and must not
+		// advertise self. Keep the placement input atomic instead of combining
+		// an absent profile with an effort inherited from generic metadata.
+		return controlplacement.SessionContext{}
+	}
+	effort := strings.TrimSpace(stringMetadata(metadata, "reasoning_effort"))
+	if effort == "" {
+		// A ModelProfile always has an explicit effort capability. Provider
+		// models without reasoning selectors materialize that capability as the
+		// canonical "none" value even when runtime model metadata omits it.
+		effort = "none"
+	}
+	return controlplacement.SessionContext{ProfileID: profileID, Effort: effort}
 }
 
 func resolveMetadataWith(baseMetadata map[string]any, resolved assembly.ResolvedAssembly, intent TurnIntent, state map[string]any, modelResolution ModelResolution) (map[string]any, error) {
@@ -484,7 +491,7 @@ func applyAssemblySelections(metadata map[string]any, resolved assembly.Resolved
 				Message:     fmt.Sprintf("gateway: unknown mode %q", modeID),
 			}
 		}
-		applyRuntimeOverrides(metadata, mode.Runtime)
+		assembly.ApplyRuntimeOverrides(metadata, mode.Runtime)
 	}
 
 	for _, selection := range assemblyConfigSelections(resolved, state) {
@@ -492,7 +499,7 @@ func applyAssemblySelections(metadata map[string]any, resolved assembly.Resolved
 		if !ok {
 			continue
 		}
-		applyRuntimeOverrides(metadata, option.Runtime)
+		assembly.ApplyRuntimeOverrides(metadata, option.Runtime)
 	}
 	return nil
 }
@@ -583,62 +590,6 @@ func defaultAssemblyModeID(resolved assembly.ResolvedAssembly) string {
 		}
 	}
 	return ""
-}
-
-func applyRuntimeOverrides(metadata map[string]any, overrides assembly.RuntimeOverrides) {
-	if metadata == nil {
-		return
-	}
-	if profile := policyapi.NormalizeProfileName(overrides.PolicyMode); profile != "" {
-		metadata[policyapi.MetadataPolicyProfile] = profile
-		delete(metadata, policyapi.MetadataLegacyPolicyMode)
-	}
-	if trimmed := strings.TrimSpace(overrides.SystemPrompt); trimmed != "" {
-		metadata["system_prompt"] = trimmed
-	}
-	if trimmed := strings.TrimSpace(overrides.Reasoning.Effort); trimmed != "" {
-		metadata["reasoning_effort"] = trimmed
-	}
-	if overrides.Reasoning.BudgetTokens > 0 {
-		metadata["reasoning_budget_tokens"] = overrides.Reasoning.BudgetTokens
-	}
-	if len(overrides.ExtraReadRoots) > 0 {
-		metadata["policy_extra_read_roots"] = mergeStringSliceMetadata(metadata["policy_extra_read_roots"], overrides.ExtraReadRoots)
-	}
-	if len(overrides.ExtraWriteRoots) > 0 {
-		metadata["policy_extra_write_roots"] = mergeStringSliceMetadata(metadata["policy_extra_write_roots"], overrides.ExtraWriteRoots)
-	}
-}
-
-func mergeStringSliceMetadata(existing any, values []string) []string {
-	out := make([]string, 0, len(values))
-	seen := map[string]struct{}{}
-	appendOne := func(value string) {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return
-		}
-		if _, ok := seen[value]; ok {
-			return
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	switch typed := existing.(type) {
-	case []string:
-		for _, one := range typed {
-			appendOne(one)
-		}
-	case []any:
-		for _, one := range typed {
-			text, _ := one.(string)
-			appendOne(text)
-		}
-	}
-	for _, one := range values {
-		appendOne(one)
-	}
-	return out
 }
 
 func metadataPolicyProfile(metadata map[string]any) string {

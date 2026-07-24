@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"iter"
 	"os"
 	"sync"
 	"testing"
@@ -17,9 +18,158 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
+
+func TestRuntimeAgentDirectRunnerSpawnFallbackGolden(t *testing.T) {
+	runnerEvents := make(chan *session.Event)
+	subscription := &spawnGoldenSubscription{events: make(chan eventstream.Envelope), closed: make(chan struct{})}
+	streams := &spawnGoldenTaskStreams{
+		subscribed:   make(chan taskstream.SubscribeRequest, 1),
+		subscription: subscription,
+		descriptor: taskstream.TaskDescriptor{
+			SessionID: "session-1", TaskID: "task-yara", Handle: "yara", AgentHandle: "breeze",
+			Kind: task.KindSubagent, State: task.StateRunning, Running: true,
+			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
+		},
+	}
+	runtimeAgent, sessionID := newSpawnGoldenDirectRunnerAgent(t, runnerEvents, streams)
+	callbacks := &spawnGoldenCallbacks{updates: make(chan acp.SessionNotification, 16)}
+	promptErr := make(chan error, 1)
+	go func() {
+		_, err := runtimeAgent.Prompt(context.Background(), acp.PromptRequest{
+			SessionID: sessionID,
+			Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"run"}`)},
+		}, callbacks)
+		promptErr <- err
+	}()
+
+	sendGoldenRunnerEvent(t, runnerEvents, callbacks,
+		loadGoldenToolEvent(
+			session.EventTypeToolCall,
+			"spawn-call-1",
+			"Spawn",
+			"pending",
+			map[string]any{"agent": "breeze", "prompt": "explain your capability"},
+			nil,
+		),
+	)
+	sendGoldenRunnerEvent(t, runnerEvents, callbacks,
+		loadGoldenToolEvent(
+			session.EventTypeToolResult,
+			"spawn-call-1",
+			"Spawn",
+			"running",
+			nil,
+			map[string]any{
+				"handle": "yara", "parent_call": "spawn-call-1", "parent_tool": "Spawn",
+				"state": "running", "target_kind": "subagent",
+			},
+		),
+	)
+	select {
+	case request := <-streams.subscribed:
+		if request.SessionID != "session-1" || request.TaskID != "task-yara" {
+			t.Fatalf("Spawn Task Subscribe request = %#v", request)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("direct Runtime runner did not subscribe the Spawn Task stream")
+	}
+
+	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"}
+	subscription.events <- eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1",
+		Scope: eventstream.ScopeSubagent, ScopeID: "task-yara", ParentTool: parent,
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		Update: acp.ContentChunk{
+			SessionUpdate: acp.UpdateAgentMessage,
+			MessageID:     "child-message-1",
+			Content:       acp.TextContent{Type: "text", Text: "child output before wait"},
+		},
+	}
+	// Direct Runtime delivery must multiplex Task output while the parent Runner
+	// is still waiting for its next Session event.
+	waitGoldenNotification(t, callbacks)
+	if err := subscription.Close(); err != nil {
+		t.Fatalf("close Task subscription: %v", err)
+	}
+
+	sendGoldenRunnerEvent(t, runnerEvents, callbacks,
+		loadGoldenToolEvent(
+			session.EventTypeToolCall,
+			"wait-call-1",
+			"Task",
+			"pending",
+			map[string]any{"action": "wait", "handle": "yara"},
+			nil,
+		),
+	)
+	runnerEvents <- loadGoldenToolEvent(
+		session.EventTypeToolResult,
+		"wait-call-1",
+		"Task",
+		"completed",
+		map[string]any{"action": "wait", "handle": "yara"},
+		map[string]any{
+			"action": "wait",
+			"tasks": []any{map[string]any{
+				"final_message": "exact fallback final",
+				"handle":        "yara",
+				"parent_call":   "spawn-call-1",
+				"parent_tool":   "Spawn",
+				"state":         "completed",
+				"target_kind":   "subagent",
+			}},
+		},
+	)
+	waitGoldenNotification(t, callbacks) // canonical Task wait result
+	waitGoldenNotification(t, callbacks) // observed parent Spawn fallback close
+	close(runnerEvents)
+
+	select {
+	case err := <-promptErr:
+		if err != nil {
+			t.Fatalf("Prompt() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("direct Runtime Prompt did not finish")
+	}
+
+	notifications := callbacks.snapshot()
+	spawnCompleted := 0
+	for _, notification := range notifications {
+		update, ok := notification.Update.(acp.ToolCallUpdate)
+		if !ok || update.ToolCallID != "spawn-call-1" || update.Status == nil || *update.Status != acp.ToolStatusCompleted {
+			continue
+		}
+		spawnCompleted++
+		output, ok := metautil.TerminalOutput(update.Meta)
+		if !ok || output.Data != "exact fallback final" {
+			t.Fatalf("Spawn fallback output = %#v, want exact final message", update)
+		}
+		if _, ok := metautil.TerminalExit(update.Meta); !ok {
+			t.Fatalf("Spawn fallback update = %#v, want terminal_exit", update)
+		}
+	}
+	if spawnCompleted != 1 {
+		t.Fatalf("Spawn completed updates = %d, want exactly one", spawnCompleted)
+	}
+
+	got, err := json.MarshalIndent(notifications, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal direct Runtime ACP notifications: %v", err)
+	}
+	got = append(got, '\n')
+	want, err := os.ReadFile("testdata/golden/acp_stdio_direct_runner_spawn_fallback.golden.json")
+	if err != nil {
+		t.Fatalf("read direct Runtime Spawn golden: %v\n--- got ---\n%s", err, got)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("direct Runtime Spawn fallback changed\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
 
 func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 	spawnStatus := acp.ToolStatusInProgress
@@ -196,6 +346,33 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 	}
 }
 
+func newSpawnGoldenDirectRunnerAgent(
+	t *testing.T,
+	events <-chan *session.Event,
+	streams taskstream.Service,
+) (*runtimeacp.RuntimeAgent, string) {
+	t.Helper()
+	sessions := inmemory.NewStore(inmemory.Config{
+		SessionIDGenerator: func() string { return "session-1" },
+	})
+	runtimeAgent, err := runtimeacp.New(runtimeacp.Config{
+		Runtime: spawnGoldenDirectRuntime{events: events}, Sessions: sessions, TaskStreams: streams,
+		TaskStreamPrincipal: taskstream.Principal{ID: "user-1"},
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{Name: "golden-direct-runtime"}, nil
+		},
+		AppName: "caelis", UserID: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	activeSession, err := runtimeAgent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	return runtimeAgent, activeSession.SessionID
+}
+
 func newSpawnGoldenAgent(t *testing.T, turn *testControlTurn, streams taskstream.Service) (*runtimeacp.RuntimeAgent, string) {
 	t.Helper()
 	sessions := inmemory.NewStore(inmemory.Config{})
@@ -221,6 +398,17 @@ func newSpawnGoldenAgent(t *testing.T, turn *testControlTurn, streams taskstream
 	}
 	router.result.ActiveSessionID = "session-1"
 	return runtimeAgent, activeSession.SessionID
+}
+
+func sendGoldenRunnerEvent(
+	t *testing.T,
+	events chan<- *session.Event,
+	callbacks *spawnGoldenCallbacks,
+	event *session.Event,
+) {
+	t.Helper()
+	events <- event
+	waitGoldenNotification(t, callbacks)
 }
 
 func sendGoldenTurnEnvelope(t *testing.T, turn *testControlTurn, callbacks *spawnGoldenCallbacks, envelope eventstream.Envelope) {
@@ -269,6 +457,45 @@ func (c *spawnGoldenCallbacks) snapshot() []acp.SessionNotification {
 	defer c.mu.Unlock()
 	return append([]acp.SessionNotification(nil), c.notifications...)
 }
+
+type spawnGoldenDirectRuntime struct {
+	events <-chan *session.Event
+}
+
+func (r spawnGoldenDirectRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
+	return agent.RunResult{
+		Session: session.Session{SessionRef: req.SessionRef},
+		Handle:  spawnGoldenDirectRunner(r),
+	}, nil
+}
+
+func (spawnGoldenDirectRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+	return agent.RunState{}, nil
+}
+
+type spawnGoldenDirectRunner struct {
+	events <-chan *session.Event
+}
+
+func (spawnGoldenDirectRunner) RunID() string { return "direct-runner-1" }
+
+func (r spawnGoldenDirectRunner) Events() iter.Seq2[*session.Event, error] {
+	return func(yield func(*session.Event, error) bool) {
+		for event := range r.events {
+			if !yield(event, nil) {
+				return
+			}
+		}
+	}
+}
+
+func (spawnGoldenDirectRunner) Submit(agent.Submission) error { return nil }
+
+func (spawnGoldenDirectRunner) Cancel() agent.CancelResult {
+	return agent.CancelResult{Status: agent.CancelStatusCancelled}
+}
+
+func (spawnGoldenDirectRunner) Close() error { return nil }
 
 type spawnGoldenTaskStreams struct {
 	subscribed   chan taskstream.SubscribeRequest

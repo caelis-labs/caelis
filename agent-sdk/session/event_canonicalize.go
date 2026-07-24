@@ -39,6 +39,9 @@ func ensureProtocolText(event *Event) {
 	if protocol.Update.SessionUpdate == "" {
 		protocol.Update.SessionUpdate = updateType
 	}
+	if protocol.Update.MessageID == "" && protocolUpdateCarriesMessageIdentity(protocol.Update) {
+		protocol.Update.MessageID = strings.TrimSpace(event.MessageID)
+	}
 	if protocol.Update.Content == nil {
 		protocol.Update.Content = ProtocolTextContent(text)
 	}
@@ -57,6 +60,11 @@ func removeModelProjectionContent(event *Event) {
 	if protocolContentIsText(protocol.Update.Content, event.Message.TextContent()) {
 		protocol.Update.Content = nil
 	}
+	if protocolUpdateCarriesMessageIdentity(protocol.Update) &&
+		strings.TrimSpace(event.MessageID) != "" &&
+		strings.TrimSpace(protocol.Update.MessageID) == strings.TrimSpace(event.MessageID) {
+		protocol.Update.MessageID = ""
+	}
 	switch EventTypeOf(event) {
 	case EventTypeUser, EventTypeAssistant:
 		if protocolUpdateHasOnlySessionUpdate(protocol.Update) && protocol.Permission == nil {
@@ -68,6 +76,20 @@ func removeModelProjectionContent(event *Event) {
 		return
 	}
 	event.Protocol = &protocol
+}
+
+func protocolUpdateCarriesMessageIdentity(update *ProtocolUpdate) bool {
+	if update == nil {
+		return false
+	}
+	switch strings.TrimSpace(update.SessionUpdate) {
+	case string(ProtocolUpdateTypeUserMessage),
+		string(ProtocolUpdateTypeAgentMessage),
+		string(ProtocolUpdateTypeAgentThought):
+		return true
+	default:
+		return false
+	}
 }
 
 func removeToolProjectionProtocol(event *Event) {
