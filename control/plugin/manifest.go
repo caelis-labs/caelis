@@ -517,7 +517,16 @@ func SplitCommand(cmdLine string) (string, []string, error) {
 		}
 
 		if r == '\\' && !inSingleQuotes {
-			escaped = true
+			if i+1 == len(trimmed) {
+				escaped = true
+				continue
+			}
+			next := trimmed[i+1]
+			if next == '\\' || next == '"' || (!inDoubleQuotes && (next == '\'' || isCommandWhitespace(next))) {
+				escaped = true
+				continue
+			}
+			current.WriteByte(r)
 			continue
 		}
 
@@ -531,7 +540,7 @@ func SplitCommand(cmdLine string) (string, []string, error) {
 			continue
 		}
 
-		if (r == ' ' || r == '\t' || r == '\n' || r == '\r') && !inDoubleQuotes && !inSingleQuotes {
+		if isCommandWhitespace(r) && !inDoubleQuotes && !inSingleQuotes {
 			if current.Len() > 0 {
 				args = append(args, current.String())
 				current.Reset()
@@ -558,6 +567,10 @@ func SplitCommand(cmdLine string) (string, []string, error) {
 	}
 
 	return args[0], args[1:], nil
+}
+
+func isCommandWhitespace(value byte) bool {
+	return value == ' ' || value == '\t' || value == '\n' || value == '\r'
 }
 
 func addImplicitSkills(root, pluginID string, p *InstalledPlugin) {

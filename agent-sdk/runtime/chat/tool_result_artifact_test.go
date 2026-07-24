@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -35,7 +36,8 @@ func TestToolResultArtifactStoreWritesRawContent(t *testing.T) {
 	assertPrivateFileMode(t, jsonPath)
 	if info, err := os.Stat(store.dir); err != nil {
 		t.Fatalf("Stat(artifact dir) error = %v", err)
-	} else if got := info.Mode().Perm(); got != 0o700 {
+	} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		got := info.Mode().Perm()
 		t.Fatalf("artifact dir mode = %o, want 700", got)
 	}
 
@@ -399,6 +401,9 @@ func assertFileContent(t *testing.T, path string, want []byte) {
 
 func assertPrivateFileMode(t *testing.T, path string) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("Stat(%q) error = %v", path, err)

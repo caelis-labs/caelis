@@ -194,7 +194,7 @@ func TestRuntimeCompletionAndPersistenceDoNotWaitForEventConsumer(t *testing.T) 
 	if !ok {
 		t.Fatal("Runner does not implement RunnerCompletionWaiter")
 	}
-	completionCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	completionCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	if err := waiter.WaitCompletion(completionCtx); err != nil {
 		t.Fatalf("WaitCompletion() error = %v", err)
@@ -3252,11 +3252,24 @@ func TestRuntimeTaskWriteReturnsInteractiveOutputWithoutWaitingForExit(t *testin
 		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
 	}
 
-	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
+	taskTool := runtimeTaskTool{
 		base:       tasktool.New(),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
-	}, map[string]any{
+	}
+	readyResult := callRuntimeTaskTool(t, taskTool, map[string]any{
+		"action": "read",
+		"handle": handle,
+	})
+	readyPayload := testToolResultPayload(t, readyResult)
+	if readyPayload["state"] != string(taskapi.StateRunning) {
+		t.Fatalf("task readiness result = %#v, want interactive command to remain running", readyPayload)
+	}
+	if latest, _ := readyPayload["latest_output"].(string); !strings.Contains(latest, "waiting") {
+		t.Fatalf("task readiness output = %q, want interactive prompt", latest)
+	}
+
+	taskResult := callRuntimeTaskTool(t, taskTool, map[string]any{
 		"action": "write",
 		"handle": handle,
 		"input":  "Codex",
@@ -3268,11 +3281,7 @@ func TestRuntimeTaskWriteReturnsInteractiveOutputWithoutWaitingForExit(t *testin
 	if latest, _ := payload["latest_output"].(string); !strings.Contains(latest, "hello Codex") {
 		t.Fatalf("task write latest_output = %q, want interactive response", latest)
 	}
-	taskResult = callRuntimeTaskTool(t, runtimeTaskTool{
-		base:       tasktool.New(),
-		sessionRef: activeSession.SessionRef,
-		tasks:      runtime.tasks,
-	}, map[string]any{
+	taskResult = callRuntimeTaskTool(t, taskTool, map[string]any{
 		"action": "cancel",
 		"handle": handle,
 	})

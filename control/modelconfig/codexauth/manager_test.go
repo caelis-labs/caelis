@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -682,6 +683,9 @@ func TestFirstAccountIDSupportsOrganizationFallback(t *testing.T) {
 
 func assertCredentialPermissions(t *testing.T, path string) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
 	fileInfo, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)

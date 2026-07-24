@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -55,11 +56,12 @@ func TestResolveACPConnectionLauncherInstallsMissingGlobalAdapter(t *testing.T) 
 		installedACPAdapterPackageMatches = previousMatches
 	})
 	var gotSpec string
+	var installedBin string
 	installed := false
 	installedACPAdapterPackageMatches = func(string, builtinACPAdapterPackage) bool { return installed }
 	runGlobalACPAgentInstall = func(_ context.Context, req globalACPAgentInstallRequest) error {
 		gotSpec = req.InstallSpec
-		writeExternalAgentExecutable(t, binDir, "codex-acp")
+		installedBin = writeExternalAgentExecutable(t, binDir, "codex-acp")
 		installed = true
 		return nil
 	}
@@ -73,8 +75,8 @@ func TestResolveACPConnectionLauncherInstallsMissingGlobalAdapter(t *testing.T) 
 	if gotSpec != "@agentclientprotocol/codex-acp@1.1.2" {
 		t.Fatalf("global install spec = %q, want curated codex adapter", gotSpec)
 	}
-	if !strings.HasSuffix(connection.Launcher.Command, string(filepath.Separator)+"codex-acp") {
-		t.Fatalf("connection launcher = %#v, want installed codex-acp", connection.Launcher)
+	if connection.Launcher.Command != installedBin {
+		t.Fatalf("connection launcher = %#v, want installed %q", connection.Launcher, installedBin)
 	}
 }
 
@@ -389,6 +391,9 @@ func storedACPAgentInfo(values []ACPAgentInfo, name string) (ACPAgentInfo, bool)
 
 func writeExternalAgentExecutable(t *testing.T, dir string, name string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte("test executable fixture\n"), 0o700); err != nil {
 		t.Fatalf("WriteFile(%s) error = %v", path, err)

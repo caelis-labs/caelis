@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -19,6 +20,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/consoleoutput"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/outputwait"
 )
+
+const hostTerminateDrain = 500 * time.Millisecond
 
 // Config defines one host-backed sandbox runtime.
 type Config struct {
@@ -293,6 +296,8 @@ type hostSession struct {
 	supportsInput bool
 	exitCode      int
 	waitErr       error
+	terminating   bool
+	callbacks     int
 	startedAt     time.Time
 	updatedAt     time.Time
 }
@@ -409,16 +414,37 @@ func (s *hostSession) Result(_ context.Context) (sandbox.CommandResult, error) {
 	return result, s.waitErr
 }
 
-func (s *hostSession) Terminate(_ context.Context) error {
-	s.mu.RLock()
+func (s *hostSession) Terminate(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.mu.Lock()
 	cmd := s.cmd
 	running := s.running
-	s.mu.RUnlock()
 	if !running || cmd == nil || cmd.Process == nil {
+		s.mu.Unlock()
 		return nil
 	}
+	s.terminating = true
+	s.mu.Unlock()
+	terminateErr := killProcessTree(cmd.Process)
 	s.cancel()
-	return killProcessTree(cmd.Process)
+	if s.outputCallbackActive() {
+		return terminateErr
+	}
+	timer := time.NewTimer(hostTerminateDrain)
+	defer timer.Stop()
+	select {
+	case <-s.done:
+		return nil
+	case <-ctx.Done():
+		return errors.Join(terminateErr, ctx.Err())
+	case <-timer.C:
+		return errors.Join(
+			terminateErr,
+			fmt.Errorf("impl/sandbox/host: session %q terminated before process wait completed", s.ref.SessionID),
+		)
+	}
 }
 
 func (s *hostSession) readStream(reader io.Reader, stream string) {
@@ -452,7 +478,7 @@ func (s *hostSession) readStream(reader io.Reader, stream string) {
 			}
 			s.mu.Unlock()
 			if s.onOutput != nil && len(decoded.Emit) > 0 {
-				s.onOutput(sandbox.OutputChunk{Stream: stream, Text: string(decoded.Emit), Cursor: committedCursor})
+				s.emitOutput(sandbox.OutputChunk{Stream: stream, Text: string(decoded.Emit), Cursor: committedCursor})
 			}
 			s.publishOutput(stream, cursor)
 		}
@@ -484,7 +510,9 @@ func (s *hostSession) waitForExit() {
 		_ = s.stdin.Close()
 		s.stdin = nil
 	}
-	if s.cmd.ProcessState != nil {
+	if s.terminating {
+		s.exitCode = -1
+	} else if s.cmd.ProcessState != nil {
 		s.exitCode = s.cmd.ProcessState.ExitCode()
 	}
 	s.updatedAt = time.Now()
@@ -492,10 +520,10 @@ func (s *hostSession) waitForExit() {
 	s.mu.Unlock()
 	if s.onOutput != nil {
 		if len(stdoutTail.Emit) > 0 {
-			s.onOutput(sandbox.OutputChunk{Stream: "stdout", Text: string(stdoutTail.Emit), Cursor: stdoutCursor})
+			s.emitOutput(sandbox.OutputChunk{Stream: "stdout", Text: string(stdoutTail.Emit), Cursor: stdoutCursor})
 		}
 		if len(stderrTail.Emit) > 0 {
-			s.onOutput(sandbox.OutputChunk{Stream: "stderr", Text: string(stderrTail.Emit), Cursor: stderrCursor})
+			s.emitOutput(sandbox.OutputChunk{Stream: "stderr", Text: string(stderrTail.Emit), Cursor: stderrCursor})
 		}
 	}
 	s.mu.Lock()
@@ -506,6 +534,24 @@ func (s *hostSession) waitForExit() {
 	close(s.done)
 	s.notifyOutputLocked()
 	s.mu.Unlock()
+}
+
+func (s *hostSession) emitOutput(chunk sandbox.OutputChunk) {
+	s.mu.Lock()
+	s.callbacks++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.callbacks--
+		s.mu.Unlock()
+	}()
+	s.onOutput(chunk)
+}
+
+func (s *hostSession) outputCallbackActive() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.callbacks > 0
 }
 
 func (s *hostSession) publishOutput(stream string, cursor int64) {

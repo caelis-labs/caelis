@@ -476,6 +476,11 @@ func TestSplitCommand(t *testing.T) {
 			args:  []string{"-c", `print("hello")`},
 		},
 		{
+			input: `"C:\Program Files\Agent\agent.exe" --mode "deep review"`,
+			cmd:   `C:\Program Files\Agent\agent.exe`,
+			args:  []string{"--mode", "deep review"},
+		},
+		{
 			input:   `bash -c "unclosed quote`,
 			wantErr: true,
 		},

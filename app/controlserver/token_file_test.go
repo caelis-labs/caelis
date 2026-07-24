@@ -107,7 +107,7 @@ func TestLoadOrCreateBearerTokenFailsClosedForInsecureOrCorruptFiles(t *testing.
 				t.Fatal(err)
 			}
 			if err := os.Symlink(target, path); err != nil {
-				t.Fatal(err)
+				t.Skipf("creating file symlink is unavailable: %v", err)
 			}
 		},
 	} {

@@ -172,6 +172,11 @@ func catastrophicRecursiveDeleteReason(command string, opts policy.ModeOptions) 
 	if !commandContainsRecursiveDelete(command) {
 		return ""
 	}
+	for _, target := range rawRecursiveDeleteTargets(command) {
+		if isCatastrophicDeleteTarget(target, opts) {
+			return "recursive filesystem delete of a system or home root is blocked"
+		}
+	}
 	for _, target := range recursiveDeleteTargets(command, opts) {
 		if isCatastrophicDeleteTarget(target, opts) {
 			return "recursive filesystem delete of a system or home root is blocked"
@@ -201,8 +206,7 @@ func outOfRootsRecursiveDeleteReason(command string, opts policy.ModeOptions) st
 }
 
 func recursiveDeleteTargets(command string, opts policy.ModeOptions) []string {
-	raw := append([]string{}, recursiveRemoveTargets(command)...)
-	raw = append(raw, windowsRecursiveDeleteTargets(command)...)
+	raw := rawRecursiveDeleteTargets(command)
 	if len(raw) == 0 {
 		return nil
 	}
@@ -213,6 +217,11 @@ func recursiveDeleteTargets(command string, opts policy.ModeOptions) []string {
 		}
 	}
 	return out
+}
+
+func rawRecursiveDeleteTargets(command string) []string {
+	out := append([]string{}, recursiveRemoveTargets(command)...)
+	return append(out, windowsRecursiveDeleteTargets(command)...)
 }
 
 func windowsRecursiveDeleteTargets(command string) []string {

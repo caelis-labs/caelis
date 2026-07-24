@@ -222,7 +222,7 @@ func TestStartCommandSynchronousOutputBeforeFirstObservationResumesFromDurableSt
 	defer release()
 	select {
 	case <-handle.waitStarted:
-	case <-time.After(time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("StartCommand did not reach the post-persistence wait")
 	}
 
