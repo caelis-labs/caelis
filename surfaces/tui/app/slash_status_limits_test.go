@@ -1,35 +1,56 @@
 package tuiapp
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 func TestRenderSlashStatusShowsSubscriptionLimits(t *testing.T) {
+	reset := time.Date(2026, time.July, 29, 7, 12, 0, 0, time.Local)
 	lines := renderSlashStatusLines(control.StatusSnapshot{RateLimits: control.StatusRateLimits{
 		Provider: "openai-codex",
 		Plan:     "pro",
 		Limits: []control.StatusRateLimit{{
 			ID: "codex",
 			Windows: []control.StatusRateLimitWindow{{
-				UsedPercent: 5, DurationMinutes: int64((7 * 24 * time.Hour) / time.Minute),
+				UsedPercent: 22, DurationMinutes: int64((7 * 24 * time.Hour) / time.Minute), ResetsAt: reset,
+			}},
+		}, {
+			ID:   "codex_spark",
+			Name: "GPT-5.3-Codex-Spark",
+			Windows: []control.StatusRateLimitWindow{{
+				UsedPercent: 0, DurationMinutes: int64((7 * 24 * time.Hour) / time.Minute),
 			}},
 		}},
 	}})
-	texts := make([]string, 0, len(lines))
-	for _, line := range lines {
-		texts = append(texts, line.Text)
+	limitsStart := slices.IndexFunc(lines, func(line slashOutputLine) bool {
+		return strings.TrimSpace(line.Text) == "Limits"
+	})
+	if limitsStart < 0 {
+		t.Fatalf("rendered status has no Limits section: %#v", lines)
 	}
-	rendered := strings.Join(texts, "\n")
-	for _, want := range []string{"Limits", "Plan:", "pro", "Weekly limit:", "95% left"} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("rendered status = %q, want %q", rendered, want)
-		}
+	limitLines := lines[limitsStart:]
+	rendered := slashOutputPlainForTest(limitLines)
+	want := strings.Join([]string{
+		"Limits",
+		"  Plan:                             pro",
+		"  Weekly limit:                     78% left · resets 2026-07-29 07:12 " + reset.Format("MST"),
+		"  GPT-5.3-Codex-Spark Weekly limit: 100% left",
+	}, "\n")
+	if rendered != want {
+		t.Fatalf("rendered status mismatch:\n--- got ---\n%s\n--- want ---\n%s", rendered, want)
 	}
 	if strings.Contains(rendered, "5h limit") {
 		t.Fatalf("rendered absent five-hour window: %q", rendered)
+	}
+	for _, line := range limitLines[1:] {
+		if line.Style != tuikit.LineStyleKeyValue {
+			t.Fatalf("limit line style = %v, want key-value: %#v", line.Style, line)
+		}
 	}
 }

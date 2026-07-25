@@ -80,6 +80,26 @@ func TestColorizeKeyValueLine_Highlighting(t *testing.T) {
 	}
 }
 
+func TestKeyValueLabelEndIncludesMultiwordColonLabel(t *testing.T) {
+	tests := []struct {
+		line string
+		want string
+	}{
+		{line: "Plan:                               pro", want: "Plan:"},
+		{line: "Weekly limit:                       78% left", want: "Weekly limit:"},
+		{line: "GPT-5.3-Codex-Spark Weekly limit:  100% left", want: "GPT-5.3-Codex-Spark Weekly limit:"},
+		{line: "/model <action>  Switch model", want: "/model"},
+		{line: "source  https://example.com", want: "source"},
+		{line: "reset  2026-07-29 07:12 CST", want: "reset"},
+	}
+	for _, tt := range tests {
+		end := keyValueLabelEnd(tt.line)
+		if end <= 0 || tt.line[:end] != tt.want {
+			t.Errorf("keyValueLabelEnd(%q) = %d (%q), want %q", tt.line, end, tt.line[:max(0, end)], tt.want)
+		}
+	}
+}
+
 func TestColorizeAssistantPrefix(t *testing.T) {
 	theme := DefaultTheme()
 	result := ColorizeLogLine("· hello", LineStyleAssistant, theme)

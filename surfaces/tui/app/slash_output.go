@@ -171,9 +171,7 @@ func renderSlashTableLines(table control.SlashTableSnapshot) []slashOutputLine {
 func renderSlashStatusLines(status control.StatusSnapshot) []slashOutputLine {
 	view := control.StatusDisplayFromSnapshot(status)
 	lines := []slashOutputLine{slashSection("Status")}
-	for _, field := range view.Fields {
-		lines = append(lines, slashField(field.Label, field.Value))
-	}
+	lines = append(lines, renderSlashFields(view.Fields)...)
 	if len(view.Warnings) > 0 {
 		lines = append(lines, slashBlank(), slashSection("Warnings"))
 		for _, warning := range view.Warnings {
@@ -182,12 +180,14 @@ func renderSlashStatusLines(status control.StatusSnapshot) []slashOutputLine {
 	}
 	if !view.RateLimits.Empty() {
 		lines = append(lines, slashBlank(), slashSection("Limits"))
+		fields := make([]control.DisplayField, 0, len(view.RateLimits.Rows)+1)
 		if view.RateLimits.Plan != "" {
-			lines = append(lines, slashField("Plan", view.RateLimits.Plan))
+			fields = append(fields, control.DisplayField{Label: "Plan", Value: view.RateLimits.Plan})
 		}
 		for _, row := range view.RateLimits.Rows {
-			lines = append(lines, slashField(row.Label, row.Value))
+			fields = append(fields, control.DisplayField{Label: row.Label, Value: row.Value})
 		}
+		lines = append(lines, renderSlashFields(fields)...)
 	}
 	if !view.Usage.Empty() {
 		lines = append(lines, slashBlank(), slashSection("Usage"))
@@ -332,13 +332,29 @@ func renderSlashPaddedRowsWithOptions(table [][]string, hasHeader bool) []slashO
 	return lines
 }
 
+func renderSlashFields(fields []control.DisplayField) []slashOutputLine {
+	width := 10
+	for _, field := range fields {
+		width = max(width, len([]rune(strings.TrimSpace(field.Label)+":")))
+	}
+	lines := make([]slashOutputLine, 0, len(fields))
+	for _, field := range fields {
+		lines = append(lines, slashFieldWithWidth(field.Label, field.Value, width))
+	}
+	return lines
+}
+
 func slashField(label, value string) slashOutputLine {
+	return slashFieldWithWidth(label, value, 10)
+}
+
+func slashFieldWithWidth(label, value string, width int) slashOutputLine {
 	label = strings.TrimSpace(label)
 	value = strings.TrimSpace(value)
 	if label == "" {
 		return slashOutputLine{Text: value, Style: tuikit.LineStyleDefault}
 	}
-	return slashOutputLine{Text: "  " + padRightRunes(label+":", 10) + " " + value, Style: tuikit.LineStyleKeyValue}
+	return slashOutputLine{Text: "  " + padRightRunes(label+":", width) + " " + value, Style: tuikit.LineStyleKeyValue}
 }
 
 func slashSection(text string) slashOutputLine {

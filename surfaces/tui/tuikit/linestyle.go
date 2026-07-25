@@ -425,7 +425,7 @@ func highlightStatusValue(val string, theme Theme) string {
 func colorizeKeyValueLine(line string, theme Theme) string {
 	rest := strings.TrimLeft(line, " \t")
 	leading := len(line) - len(rest)
-	keyEnd := strings.IndexAny(rest, " \t")
+	keyEnd := keyValueLabelEnd(rest)
 	if keyEnd <= 0 {
 		return line
 	}
@@ -442,6 +442,25 @@ func colorizeKeyValueLine(line string, theme Theme) string {
 	valStyled := highlightStatusValue(val, theme)
 
 	return strings.Repeat(" ", leading) + keyStyled + valStyled
+}
+
+func keyValueLabelEnd(line string) int {
+	firstSpace := strings.IndexAny(line, " \t")
+	columnGap := strings.Index(line, "  ")
+	for i := 0; i < len(line); i++ {
+		if line[i] != ':' {
+			continue
+		}
+		end := i + 1
+		if end < len(line) && line[end] != ' ' && line[end] != '\t' {
+			continue
+		}
+		if columnGap < 0 || end <= columnGap {
+			return end
+		}
+		break
+	}
+	return firstSpace
 }
 
 func countLeadingSpaces(s string) int {
