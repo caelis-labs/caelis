@@ -367,12 +367,17 @@ authoritative for text delivery, while the event projection never regresses. If
 that token is already beyond a reconstructed close, durable terminal state and
 subscription EOF finish the observation without synthesizing repeat close
 events.
-Agent-facing `Task read` accepts exactly one running RunCommand handle and
-returns after new output or the bounded observation window; it never targets a
-Spawn or a comma-separated batch. Its model payload may compact `latest_output`,
-while per-invocation metadata carries the exact output delta and cumulative
-range for Surface reconciliation. `Task wait` remains the bounded observer for
-RunCommand and Spawn terminal progress.
+Agent-facing `Task read` accepts exactly one RunCommand or Spawn handle. A
+RunCommand read returns after new output or the bounded observation window; its
+model payload may compact `latest_output`, while per-invocation metadata carries
+the exact output delta and cumulative range for Surface reconciliation. A Spawn
+read is immediate and non-blocking: a running child returns `output_preview`,
+while a terminal child returns its exact canonical `final_message`. It does not
+subscribe to child output, wake the parent on future updates, advance pending
+cancellation reconciliation, or turn a zero-wait transport error into child
+interruption. A successful sample may still promote newly observed terminal
+state through the canonical Task result. `Task wait` remains the bounded
+observer for RunCommand and Spawn terminal progress.
 macOS/Linux CI must run the cmdsession, host, native-backend, and Runtime
 focused/race suites. Windows code is cross-compiled on non-Windows hosts, but
 real pipe, Job Object, restricted-token, codepage, and force-termination

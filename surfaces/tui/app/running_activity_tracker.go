@@ -48,15 +48,17 @@ type runningActivityOwner struct {
 // are retained for the Session so late non-terminal projections cannot revive
 // an already closed activity.
 type runningActivityTracker struct {
-	focus          runningActivityState
-	active         map[string]runningActivityState
-	order          []string
-	completed      map[string]struct{}
-	overlay        runningActivityState
-	ownersByHandle map[string]runningActivityOwner
-	ownersByCallID map[string][]runningActivityOwner
-	turnGeneration uint64
-	turnStartedAt  time.Time
+	focus           runningActivityState
+	focusForeground bool
+	foregroundKey   string
+	active          map[string]runningActivityState
+	order           []string
+	completed       map[string]struct{}
+	overlay         runningActivityState
+	ownersByHandle  map[string]runningActivityOwner
+	ownersByCallID  map[string][]runningActivityOwner
+	turnGeneration  uint64
+	turnStartedAt   time.Time
 }
 
 func newRunningActivityTracker() runningActivityTracker {
@@ -89,6 +91,8 @@ func (t *runningActivityTracker) beginTurn(startedAt time.Time) {
 	t.order = t.order[:0]
 	t.overlay = runningActivityState{}
 	t.focus = runningActivityState{Phase: runningPhaseThinking}
+	t.focusForeground = true
+	t.foregroundKey = ""
 	t.turnGeneration++
 	t.turnStartedAt = startedAt
 }
@@ -99,6 +103,8 @@ func (t *runningActivityTracker) endTurn() {
 	t.order = t.order[:0]
 	t.overlay = runningActivityState{}
 	t.focus = runningActivityState{}
+	t.focusForeground = false
+	t.foregroundKey = ""
 	t.turnStartedAt = time.Time{}
 }
 
@@ -115,6 +121,8 @@ func (t *runningActivityTracker) setFocus(phase runningActivityPhase, target run
 		Target: target,
 		Key:    strings.TrimSpace(key),
 	}
+	t.focusForeground = true
+	t.foregroundKey = ""
 }
 
 func (t *runningActivityTracker) start(
@@ -141,14 +149,21 @@ func (t *runningActivityTracker) start(
 	if phase.showsElapsed() {
 		entry.StartedAt = now
 	}
+	_, existed := t.active[key]
 	if previous, exists := t.active[key]; exists {
 		if previous.Phase == phase && !previous.StartedAt.IsZero() {
 			entry.StartedAt = previous.StartedAt
 		}
+		// Keep progress recency for the fallback used only when no explicit
+		// narrative or tool owner holds foreground.
 		t.removeOrderKey(key)
 	}
 	t.active[key] = entry
 	t.order = append(t.order, key)
+	if !existed {
+		t.focusForeground = false
+		t.foregroundKey = key
+	}
 }
 
 func (t *runningActivityTracker) complete(key string) {
@@ -160,6 +175,9 @@ func (t *runningActivityTracker) complete(key string) {
 	t.completed[key] = struct{}{}
 	delete(t.active, key)
 	t.removeOrderKey(key)
+	if t.foregroundKey == key {
+		t.foregroundKey = ""
+	}
 }
 
 func (t *runningActivityTracker) setOverlay(phase runningActivityPhase, key string, now time.Time) {
@@ -184,6 +202,14 @@ func (t *runningActivityTracker) clearOverlay(key string) {
 func (t *runningActivityTracker) visible(turnRunning bool) runningActivityState {
 	if t.overlay.Phase != "" {
 		return t.overlay
+	}
+	if t.focusForeground && t.focus.Phase != "" {
+		return t.focus
+	}
+	if t.foregroundKey != "" {
+		if entry, ok := t.active[t.foregroundKey]; ok {
+			return entry
+		}
 	}
 	for index := len(t.order) - 1; index >= 0; index-- {
 		if entry, ok := t.active[t.order[index]]; ok {

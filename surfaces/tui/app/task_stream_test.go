@@ -239,6 +239,39 @@ func TestTUITaskPanelSurfacesPermanentSubscriptionFailure(t *testing.T) {
 	}
 }
 
+func TestTUITaskPanelSilentlyAdvancesTransientGapBoundary(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.currentSessionID = "session-1"
+	model.taskStreamWanted["task-1"] = true
+	model.taskStreamTokens["task-1"] = 7
+
+	next, _ := model.handleTaskStreamBatch(taskStreamBatchMsg{
+		sessionID: "session-1",
+		taskID:    "task-1",
+		token:     7,
+		events: []eventstream.Envelope{{
+			Kind:      eventstream.KindNotice,
+			SessionID: "session-1",
+			Scope:     eventstream.ScopeSubagent,
+			ScopeID:   "task-1",
+			Cursor:    "boundary-cursor",
+			Notice:    "transient Task output before this boundary is no longer available",
+			Meta: map[string]any{
+				"task_stream": map[string]any{"transient_gap": true},
+			},
+		}},
+	})
+	model = next.(*Model)
+	if got := model.taskStreamCursors["task-1"]; got != "boundary-cursor" {
+		t.Fatalf("Task cursor = %q, want accepted gap boundary", got)
+	}
+	if frame := model.View().Content; strings.Contains(frame, "transient Task output") {
+		t.Fatalf("Task transient gap leaked into TUI frame:\n%s", frame)
+	}
+}
+
 func receiveTUITaskStreamMessage[T any](t *testing.T, messages <-chan tea.Msg) T {
 	t.Helper()
 	select {

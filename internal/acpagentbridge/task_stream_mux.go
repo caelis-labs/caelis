@@ -224,6 +224,9 @@ func (m *acpTaskStreamMux) resolveAndForward(anchor acpTaskStreamAnchor) {
 			}
 			envelope = received
 		}
+		if taskstream.IsTransientGapEnvelope(envelope) {
+			continue
+		}
 		if anchor.kind == task.KindSubagent && envelope.Kind == eventstream.KindLifecycle && envelope.Final {
 			if acpSubagentTaskLifecycleAllowed(anchor, envelope) {
 				select {

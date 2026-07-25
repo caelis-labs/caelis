@@ -62,9 +62,9 @@ type openSpawnOwner struct {
 }
 
 // openMainSpawnOwner resolves the exact still-open presentation owner for a
-// durable Task-wait fallback. Tool-call IDs may be reused across Turns, while a
-// public Task handle is Session-unique. Prefer one exact handle match; when the
-// handle is unavailable, accept only one unambiguous compatible owner.
+// durable terminal Task observation. Tool-call IDs may be reused across Turns,
+// while a public Task handle is Session-unique. Prefer one exact handle match;
+// when the handle is unavailable, accept only one unambiguous compatible owner.
 func (m *Model) openMainSpawnOwner(callID string, handle string) (openSpawnOwner, bool) {
 	if m == nil || m.doc == nil {
 		return openSpawnOwner{}, false

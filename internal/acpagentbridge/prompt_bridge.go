@@ -226,10 +226,10 @@ func (a *RuntimeAgent) emitTaskAwareControlEnvelope(
 
 // drainACPTaskStreamBeforeParentClose preserves fallback ordering across the
 // independent Session and Task subscriber queues. The typed child lifecycle is
-// normally the primary terminal signal. If a canonical Task wait result becomes
-// readable first, drain through that lifecycle so retained child suffixes still
-// precede terminal_exit. The bounded fallback keeps broken observation from
-// delaying the canonical Task result indefinitely.
+// normally the primary terminal signal. If a canonical Task read/wait result
+// becomes readable first, drain through that lifecycle so retained child
+// suffixes still precede terminal_exit. The bounded fallback keeps broken
+// observation from delaying the canonical Task result indefinitely.
 func (a *RuntimeAgent) drainACPTaskStreamBeforeParentClose(
 	ctx context.Context,
 	cb acp.PromptCallbacks,

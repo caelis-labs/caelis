@@ -27,14 +27,14 @@ func New() Tool {
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Control an async task returned by RunCommand or Spawn. For RunCommand, read observes new output without waiting for exit and accepts exactly one RunCommand handle; read does not support Spawn. RunCommand write sends terminal stdin then briefly awaits its response. Completed Spawn write sends a follow-up prompt. Wait observes either target for at most one minute and may return state=running; call it again when needed.",
+		Description: "Control an async task returned by RunCommand or Spawn. Read accepts exactly one handle: for RunCommand it briefly waits for new output without requiring exit; for Spawn it immediately returns the current state with output_preview while running or the exact final_message after completion. RunCommand write sends terminal stdin then briefly awaits its response. Completed Spawn write sends a follow-up prompt. Wait observes either target for at most one minute and may return state=running; call it again when needed.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        []string{"wait", "read", "write", "cancel"},
-					"description": "wait: one or more RunCommand or Spawn handles; read: exactly one RunCommand handle only, never Spawn; write: exactly one handle; cancel: one or more handles.",
+					"description": "wait: one or more RunCommand or Spawn handles; read: exactly one handle, output-driven for RunCommand and an immediate snapshot for Spawn; write: exactly one handle; cancel: one or more handles.",
 				},
 				"handle": map[string]any{
 					"type":        "string",

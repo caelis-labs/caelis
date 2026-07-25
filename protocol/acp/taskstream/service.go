@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
@@ -79,6 +80,15 @@ const (
 )
 
 var ErrSlowConsumer = controltaskstream.ErrSlowConsumer
+
+// IsTransientGapEnvelope reports the recoverable Task-stream boundary emitted
+// when an earlier process generation or retained output prefix is unavailable.
+// Programmatic clients retain the typed fact and cursor; first-party human
+// surfaces may silently continue from the advertised current state.
+func IsTransientGapEnvelope(envelope eventstream.Envelope) bool {
+	return envelope.Kind == eventstream.KindNotice &&
+		metautil.Bool(envelope.Meta, "task_stream", "transient_gap")
+}
 
 type Batch struct {
 	Events         []eventstream.Envelope `json:"events,omitempty"`

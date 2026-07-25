@@ -225,8 +225,13 @@ func (t subagentControlTarget) Wait(ctx context.Context, req taskapi.ControlRequ
 	return t.runtime.waitSubagent(ctx, t.task, req.Yield)
 }
 
-func (t subagentControlTarget) Read(context.Context, taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: Task read supports RunCommand handles; use wait for a Spawn result")
+func (t subagentControlTarget) Read(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	if err := t.runtime.authorizeSubagentControl(t.task, req.Principal, "read"); err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	// Subagent read is a non-blocking status observation. Unlike wait, it never
+	// waits for the child to publish another update or advances cancellation.
+	return t.runtime.observeSubagent(ctx, t.task)
 }
 
 func (t subagentControlTarget) Write(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {

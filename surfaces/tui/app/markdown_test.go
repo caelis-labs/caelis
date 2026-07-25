@@ -78,7 +78,7 @@ func TestNarrativeInlineCodeUsesCompactStyle(t *testing.T) {
 func TestFinalAssistantInlineStrongStaysOnOneLogicalLine(t *testing.T) {
 	t.Parallel()
 
-	const raw = "原来如此！**Task read** 只适用于 RunCommand，Spawn 需要用 **Task wait**。来等待三个子代理完成："
+	const raw = "原来如此！**Task read** 可查看单个任务；这里用 **Task wait** 批量等待三个子代理完成："
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	rows := renderParticipantTurnNarrativeRowsWithBuffer(
 		"block-1",
@@ -95,7 +95,7 @@ func TestFinalAssistantInlineStrongStaysOnOneLogicalLine(t *testing.T) {
 		false,
 	)
 	plain := renderedPlainRows(rows)
-	if len(plain) != 1 || strings.TrimRight(plain[0], " ") != "· 原来如此！Task read 只适用于 RunCommand，Spawn 需要用 Task wait。来等待三个子代理完成：" {
+	if len(plain) != 1 || strings.TrimRight(plain[0], " ") != "· 原来如此！Task read 可查看单个任务；这里用 Task wait 批量等待三个子代理完成：" {
 		t.Fatalf("rendered rows = %#v, want one assistant row", plain)
 	}
 }

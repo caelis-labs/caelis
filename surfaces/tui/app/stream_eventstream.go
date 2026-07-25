@@ -50,8 +50,8 @@ func (m *Model) projectACPEnvelopePresentation(env eventstream.Envelope) Transcr
 
 func transcriptEventsMsgForEnvelope(events []TranscriptEvent, env eventstream.Envelope) TranscriptEventsMsg {
 	return TranscriptEventsMsg{
-		Events:               events,
-		ObservedSpawnResults: acpprojector.SpawnTaskResultsFromEnvelope(env),
+		Events:       events,
+		OwnerRepairs: acpprojector.TaskOwnerRepairsFromEnvelope(env),
 	}
 }
 

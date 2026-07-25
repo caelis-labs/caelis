@@ -11,11 +11,14 @@ import (
 )
 
 func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, tea.Cmd) {
+	// Mount/update transcript owners before applying the correlated repairs;
+	// exact owner resolution intentionally fails closed without a BlockID.
 	model, transcriptCmd := m.applyTranscriptEvents(msg.Events)
 	if next, ok := model.(*Model); ok {
 		m = next
 	}
-	observedSpawnCmd := m.applyObservedSpawnResults(msg.ObservedSpawnResults)
+	observedSpawnCmd := m.applyObservedSpawnResults(msg.OwnerRepairs.Spawns)
+	m.applyObservedCommandResults(msg.OwnerRepairs.Commands)
 	return m, tea.Batch(transcriptCmd, observedSpawnCmd)
 }
 

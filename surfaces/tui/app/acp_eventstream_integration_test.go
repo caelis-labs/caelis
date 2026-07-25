@@ -316,6 +316,47 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 	if got := physical[0].Output; got != first+second+third {
 		t.Fatalf("command output after overlapping stream = %q, want %q", got, first+second+third)
 	}
+
+	terminalReadInput := map[string]any{"action": "read", "handle": "command-3"}
+	terminalReadMeta := metautil.WithRuntimeSection(acpToolNameMeta("TASK"), metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "TASK", metautil.RuntimeToolAction: "read",
+		metautil.RuntimeTargetHandle: "command-3", metautil.RuntimeTargetKind: "command",
+	})
+	apply(schema.ToolCall{
+		SessionUpdate: schema.UpdateToolCall, ToolCallID: "task-read-terminal",
+		Title: "TASK read command-3", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+		RawInput: terminalReadInput, Meta: terminalReadMeta,
+	})
+	if model.runningActivity.Phase != runningPhaseRead {
+		t.Fatalf("runningActivity = %#v, want terminal Read observation in progress", model.runningActivity)
+	}
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		TurnID:    "turn-1",
+		Scope:     eventstream.ScopeMain,
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "command-call",
+			ToolName:   "RUN_COMMAND",
+		},
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "task-read-terminal",
+			Status:        &completed,
+			RawInput:      terminalReadInput,
+			RawOutput: map[string]any{
+				"action": "read", "handle": "command-3", "target_kind": "command",
+				"parent_call": "command-call", "parent_tool": "RUN_COMMAND", "state": "completed",
+			},
+			Meta: terminalReadMeta,
+		},
+	})
+	if _, active := model.runningActivityTracker.active["tool:turn-1:command-call"]; active {
+		t.Fatalf("active activities = %#v, want terminal Task read to close RunCommand owner", model.runningActivityTracker.active)
+	}
+	if model.runningActivity.Phase != runningPhaseThinking {
+		t.Fatalf("runningActivity = %#v, want thinking after Task read and RunCommand both close", model.runningActivity)
+	}
 }
 
 func TestHandleACPEventEnvelopeMergesGrokGlobUpdate(t *testing.T) {

@@ -96,6 +96,77 @@ func TestACPTaskStreamMuxProjectsOnlyRunCommandTerminalOutput(t *testing.T) {
 	}
 }
 
+func TestACPTaskStreamMuxSilencesRecoverableSubagentGap(t *testing.T) {
+	t.Parallel()
+
+	sub := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 3)}
+	service := &acpMuxTestService{
+		requests: make(chan taskstream.SubscribeRequest, 1),
+		sub:      sub,
+		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
+			SessionID: "session-1",
+			TaskID:    "task-1",
+			Handle:    "maia",
+			Kind:      task.KindSubagent,
+			State:     task.StateRunning,
+			Running:   true,
+			ParentTool: taskstream.ParentTool{
+				ToolCallID: "spawn-1",
+				ToolName:   "Spawn",
+			},
+		}}},
+	}
+	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
+	defer mux.Close()
+	mux.Observe(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "spawn-1",
+			RawOutput:     map[string]any{"handle": "maia", "state": "running"},
+			Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+				metautil.RuntimeToolName: "Spawn",
+			}),
+		},
+	})
+	select {
+	case <-service.requests:
+	case <-time.After(time.Second):
+		t.Fatal("Spawn Task stream was not subscribed")
+	}
+
+	parent := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+	sub.events <- eventstream.Envelope{
+		Kind: eventstream.KindNotice, SessionID: "session-1",
+		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", ParentTool: parent,
+		Notice: "transient Task output before this boundary is no longer available",
+		Meta:   map[string]any{"task_stream": map[string]any{"transient_gap": true}},
+	}
+	select {
+	case envelope := <-mux.Events():
+		t.Fatalf("recoverable Task gap reached ACP child terminal: %#v", envelope)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	sub.events <- eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1",
+		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", ParentTool: parent,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			MessageID:     "child-message",
+			Content:       schema.TextContent{Type: "text", Text: "current child output"},
+		},
+	}
+	select {
+	case envelope := <-mux.Events():
+		if envelope.Kind != eventstream.KindSessionUpdate {
+			t.Fatalf("post-gap child envelope = %#v", envelope)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("post-gap child output was not forwarded")
+	}
+}
+
 func TestACPTaskStreamMuxDetachedDeliveryOutlivesParentPrompt(t *testing.T) {
 	t.Parallel()
 

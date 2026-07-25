@@ -143,6 +143,13 @@ and stderr and replaces genuinely invalid byte sequences explicitly:
 These output positions are presentation reconciliation metadata, not public
 resume tokens. `Envelope.Cursor` remains the only protocol resume identity.
 
+An evicted Task prefix or previous process generation projects a typed
+`transient_gap=true` boundary with a replacement cursor. Programmatic Task
+clients retain that resume fact. First-party human surfaces silently advance to
+the boundary and current state because only transient observation output was
+lost; they still surface authorization, availability, and non-recoverable
+subscription failures.
+
 The current empty `content[type="terminal"]` anchor is not an output transport;
 the Caelis metadata carries the bytes. This is a deliberate compatibility
 projection that has been observed to mount and update correctly in the tested
@@ -231,16 +238,16 @@ signal. After all earlier child frames, the bridge emits one parent
 is a transient Surface wire-compatibility projection and does not manufacture a
 durable parent result.
 
-`Task wait` remains a model-visible optional observer. The bridge preserves its
-standard ACP update and uses a terminal single-task result only as a fallback
-when lifecycle delivery was unavailable. Batch waits have no single Envelope
-parent relation, so the fallback reads each canonical `rawOutput.tasks[]`
-relation, closes only terminal subagent entries, and ignores running entries.
-A result arriving after the typed lifecycle never emits a second close. When a
-wait becomes readable before its Task lifecycle, the bridge drains the retained
-child suffix through that boundary first, with a bounded fallback if observation
-is unavailable. This adds no second Task, persistence path, or `_meta`-derived
-correlation path.
+`Task read` and `Task wait` remain model-visible optional observers. The bridge
+preserves their standard ACP updates and uses a terminal single-task result only
+as a fallback when lifecycle delivery was unavailable. Batch waits have no
+single Envelope parent relation, so the fallback reads each canonical
+`rawOutput.tasks[]` relation, closes only terminal subagent entries, and ignores
+running entries. A result arriving after the typed lifecycle never emits a
+second close. When an observation becomes readable before its Task lifecycle,
+the bridge drains the retained child suffix through that boundary first, with a
+bounded fallback if observation is unavailable. This adds no second Task,
+persistence path, or `_meta`-derived correlation path.
 
 The Task control invocation and the Task it observes have independent
 lifecycles. A successful `wait`, `read`, `write`, or `cancel` invocation
@@ -251,23 +258,28 @@ repair, and Surface activity use the observed state. Tool-row lifecycle uses
 the invocation status. A Surface may omit a successful wait/read/cancel panel,
 but the event still seals the current narrative segment and therefore cannot
 erase or merge the reasoning and assistant messages on either side.
+Subagent `read` is a zero-wait snapshot rather than an output subscription:
+running results carry the latest compact `output_preview`, terminal results
+carry the exact canonical `final_message`, and later child output never wakes
+the parent model.
 
 `session/load` has no live child Task stream to replay. The ACP loader therefore
-uses the same validated Task-wait observation semantics to reconstruct the
-historical Spawn terminal view from durable canonical results. Each terminal
-subagent item projects its exact `final_message` (or failure text) onto the
-typed parent Spawn, followed by the mapped status and `_meta.terminal_exit`;
-running and non-subagent items are ignored. A canonical parent result wins when
-one already exists, and repeated waits never close the same Spawn twice. This is
-a replay-only Surface projection over existing durable facts, not a new Session
-event, Task record, or model-context write.
+uses the same validated terminal Task read/wait observation semantics to
+reconstruct the historical Spawn terminal view from durable canonical results.
+Each terminal subagent item projects its exact `final_message` (or failure text)
+onto the typed parent Spawn, followed by the mapped status and
+`_meta.terminal_exit`; running and non-subagent items are ignored. A canonical
+parent result wins when one already exists, and repeated observations never
+close the same Spawn twice. This is a replay-only Surface projection over
+existing durable facts, not a new Session event, Task record, or model-context
+write.
 
-A completed main-scope Task wait remains a model-visible canonical result even
-when the physical task panel belongs to an earlier Spawn call. A singular result
-promotes `target_kind`, `parent_call`, and `parent_tool` to the typed Envelope
-relation. A batch result retains those canonical fields per item because one
-Envelope cannot identify multiple parents. Surfaces never recover this relation
-from `_meta` or a Surface-private replay path.
+A completed main-scope Task read or wait remains a model-visible canonical
+result even when the physical task panel belongs to an earlier Spawn call. A
+singular result promotes `target_kind`, `parent_call`, and `parent_tool` to the
+typed Envelope relation. A batch result retains those canonical fields per item
+because one Envelope cannot identify multiple parents. Surfaces never recover
+this relation from `_meta` or a Surface-private replay path.
 
 `surfaces/transcript` carries `Envelope.EventID` and `ProjectionID` as
 transient reducer identity. Narrative reducers merge by ACP `MessageID`, then
@@ -294,6 +306,11 @@ Legacy compact observations may seed an otherwise empty panel only as a
 replaceable presentation snapshot; they never advance an exact cursor. A handle
 and typed parent call may both identify an active owner; when both are present
 they must agree, otherwise owner completion fails closed.
+The running hint tracks an explicit presentation foreground. New tools may take
+foreground, while a later reasoning or assistant chunk takes it back; progress
+from an already active background tool updates that owner without replacing the
+visible narrative phase. A terminal command state observed by Task read/wait
+closes only the exactly correlated RunCommand owner.
 
 `internal/controlclient/turningress.Broker` carries only the main Runtime ACP
 producer into the Control Session Feed. It rejects stale scoped subagent

@@ -180,12 +180,12 @@ const (
 	ACPProjectionSubagent    = transcript.ScopeSubagent
 )
 
-// TranscriptEventsMsg is one normalized Surface projection batch. Spawn
-// observations are decoded alongside transcript events so live delivery and
+// TranscriptEventsMsg is one normalized Surface projection batch. Task owner
+// repairs are decoded alongside transcript events so live delivery and
 // reconnect never build independent correlation paths from the same Envelope.
 type TranscriptEventsMsg struct {
-	Events               []TranscriptEvent
-	ObservedSpawnResults []acpprojector.SpawnTaskResult
+	Events       []TranscriptEvent
+	OwnerRepairs acpprojector.TaskOwnerRepairs
 }
 
 type PlanEntry = transcript.PlanEntry

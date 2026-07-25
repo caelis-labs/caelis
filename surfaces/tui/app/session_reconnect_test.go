@@ -168,10 +168,10 @@ func TestStreamReconnectBackfillCarriesNormalizedObservedSpawnResult(t *testing.
 	if len(message.Events) != 2 {
 		t.Fatalf("transcript events = %#v, want Spawn call plus hidden Task observation", message.Events)
 	}
-	if len(message.ObservedSpawnResults) != 1 {
-		t.Fatalf("observed Spawn results = %#v, want one normalized terminal child", message.ObservedSpawnResults)
+	if len(message.OwnerRepairs.Spawns) != 1 {
+		t.Fatalf("observed Spawn results = %#v, want one normalized terminal child", message.OwnerRepairs.Spawns)
 	}
-	result := message.ObservedSpawnResults[0]
+	result := message.OwnerRepairs.Spawns[0]
 	if result.ParentCallID != "spawn-call-1" ||
 		result.Status != schema.ToolStatusCompleted ||
 		result.RawOutput["final_message"] != structuredFinalMessageForFidelityTest {

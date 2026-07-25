@@ -291,10 +291,17 @@ remains the model/result view and is never mislabelled as an exact interleaved
 delta or allowed to move the presentation cursor backwards.
 
 Task observation builds on that contract without a second log file or lifecycle
-store. `read` applies only to RunCommand and waits for new output without
-requiring process exit. RunCommand `write` sends stdin and briefly observes the
-resulting output; `wait` remains the terminal-state operation. These observation
-budgets are Runtime policy and are not model-controlled arguments.
+store. RunCommand `read` waits briefly for new output without requiring process
+exit. Subagent `read` is an immediate non-blocking snapshot: it returns
+`state=running` plus the compact `output_preview`, or the exact canonical
+`final_message` once terminal. It does not subscribe to child output or wake the
+parent when another child update arrives. A zero-wait transport error fails the
+read invocation without reclassifying the child as interrupted, and read does
+not advance pending cancellation reconciliation. A successful read may promote
+newly observed terminal state through the ordinary durable Task result path.
+RunCommand `write` sends stdin and briefly observes the resulting output;
+`wait` remains the bounded terminal-progress observer for either target. These
+observation budgets are Runtime policy and are not model-controlled arguments.
 
 These buffers are not persistence. Durable Task state and canonical result stay
 in the existing Task store, while the Session remains the only product
@@ -459,8 +466,8 @@ exact reasoning/assistant tail cycles, or identical tool name+args steps only
 when the content segment since the previous tool call is also identical
 (different thought with the same tool is progress). Stream deltas are
 concatenated without inserted separators; empty tool args fail open. Repeated
-`Task` wait calls are long-running work observation rather than repeated
-execution: each wait resets tool-loop evidence and is never itself counted.
+`Task` wait and read calls are work observation rather than repeated execution:
+each observation resets tool-loop evidence and is never itself counted.
 High-confidence hits claim one interrupt and cancel the live Turn
 (`WatchdogActionInterrupt`); the durable loop checkpoint is best-effort audit,
 not a precondition and not model context. Review runs asynchronously in at most

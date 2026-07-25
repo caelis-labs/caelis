@@ -185,10 +185,11 @@ func acpObservedParentClosesFromEnvelope(env eventstream.Envelope) []acpObserved
 }
 
 // projectObservedParentCloses is the fallback when typed child Task lifecycle
-// delivery was unavailable. A single wait carries one typed Envelope parent; a
-// batch wait carries canonical relations in rawOutput.tasks because one
-// Envelope cannot represent multiple parents. The observer Task update remains
-// a separate standard ACP lifecycle, and a late wait never closes twice.
+// delivery was unavailable. A single read or wait carries one typed Envelope
+// parent; a batch wait carries canonical relations in rawOutput.tasks because
+// one Envelope cannot represent multiple parents. The observer Task update
+// remains a separate standard ACP lifecycle, and a late observation never
+// closes twice.
 func (p *acpChildTerminalProjector) projectObservedParentCloses(env eventstream.Envelope, fallbackSessionID string) []acp.SessionNotification {
 	if p == nil {
 		return nil
@@ -268,7 +269,7 @@ func (p *acpChildTerminalProjector) parentOpen(sessionID string, parentCallID st
 }
 
 // projectLifecycle closes the mounted Spawn terminal from the typed child Task
-// lifecycle. This is the primary terminal signal because Task wait is an
+// lifecycle. This is the primary terminal signal because Task read/wait is an
 // optional observer tool call and may never occur.
 func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, fallbackSessionID string) (acp.SessionNotification, bool) {
 	if p == nil || env.Kind != eventstream.KindLifecycle || env.Scope != eventstream.ScopeSubagent ||

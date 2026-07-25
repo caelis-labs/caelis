@@ -6,11 +6,31 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func TestEnvelopeBaseProjectsCanonicalTaskWaitSpawnParent(t *testing.T) {
-	event := canonicalTaskWaitEventForParentTest()
-	base := EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, event, SessionEventTransport{})
-	if base.ParentTool == nil || base.ParentTool.ToolCallID != "spawn-call-1" || base.ParentTool.ToolName != "Spawn" {
-		t.Fatalf("ParentTool = %#v, want typed Spawn/spawn-call-1 relation", base.ParentTool)
+func TestEnvelopeBaseProjectsCanonicalTaskObservationParent(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		action     string
+		targetKind string
+		parentCall string
+		parentTool string
+	}{
+		{name: "wait Spawn", action: "wait", targetKind: "subagent", parentCall: "spawn-call-1", parentTool: "Spawn"},
+		{name: "read Spawn", action: "read", targetKind: "subagent", parentCall: "spawn-call-1", parentTool: "Spawn"},
+		{name: "wait RunCommand", action: "wait", targetKind: "command", parentCall: "command-call-1", parentTool: "RunCommand"},
+		{name: "read RunCommand terminal alias", action: "read", targetKind: "terminal", parentCall: "command-call-1", parentTool: "RunCommand"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			event := canonicalTaskObservationEventForParentTest(
+				test.action,
+				test.targetKind,
+				test.parentCall,
+				test.parentTool,
+			)
+			base := EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, event, SessionEventTransport{})
+			if base.ParentTool == nil || base.ParentTool.ToolCallID != test.parentCall || base.ParentTool.ToolName != test.parentTool {
+				t.Fatalf("ParentTool = %#v, want typed %s/%s relation", base.ParentTool, test.parentTool, test.parentCall)
+			}
+		})
 	}
 }
 
@@ -33,7 +53,7 @@ func TestEnvelopeBaseDoesNotGuessTaskParentFromMetadataOrIncompletePayload(t *te
 			},
 		},
 		{
-			name: "non wait action",
+			name: "non observation action",
 			mutate: func(event *session.Event) {
 				event.Tool.Input["action"] = "inspect"
 			},
@@ -45,13 +65,7 @@ func TestEnvelopeBaseDoesNotGuessTaskParentFromMetadataOrIncompletePayload(t *te
 			},
 		},
 		{
-			name: "command target",
-			mutate: func(event *session.Event) {
-				event.Tool.Output["target_kind"] = "command"
-			},
-		},
-		{
-			name: "wrong parent tool",
+			name: "parent tool mismatches target",
 			mutate: func(event *session.Event) {
 				event.Tool.Output["parent_tool"] = "RunCommand"
 			},
@@ -65,7 +79,7 @@ func TestEnvelopeBaseDoesNotGuessTaskParentFromMetadataOrIncompletePayload(t *te
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			event := canonicalTaskWaitEventForParentTest()
+			event := canonicalTaskObservationEventForParentTest("wait", "subagent", "spawn-call-1", "Spawn")
 			tt.mutate(event)
 			base := EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, event, SessionEventTransport{})
 			if base.ParentTool != nil {
@@ -75,7 +89,12 @@ func TestEnvelopeBaseDoesNotGuessTaskParentFromMetadataOrIncompletePayload(t *te
 	}
 }
 
-func canonicalTaskWaitEventForParentTest() *session.Event {
+func canonicalTaskObservationEventForParentTest(
+	action string,
+	targetKind string,
+	parentCall string,
+	parentTool string,
+) *session.Event {
 	return &session.Event{
 		ID:         "task-result-1",
 		SessionID:  "session-1",
@@ -85,13 +104,13 @@ func canonicalTaskWaitEventForParentTest() *session.Event {
 			ID:     "task-call-1",
 			Name:   "TASK",
 			Status: "completed",
-			Input:  map[string]any{"action": "wait", "task_id": "helper"},
+			Input:  map[string]any{"action": action, "task_id": "helper"},
 			Output: map[string]any{
 				"task_id":       "helper",
 				"state":         "completed",
-				"target_kind":   "subagent",
-				"parent_call":   "spawn-call-1",
-				"parent_tool":   "SPAWN",
+				"target_kind":   targetKind,
+				"parent_call":   parentCall,
+				"parent_tool":   parentTool,
 				"final_message": "完成",
 			},
 		},

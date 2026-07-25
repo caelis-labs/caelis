@@ -13,9 +13,11 @@ import (
 func TestTaskDescriptionGuidesInteractiveCommandsAndSubagentContinuation(t *testing.T) {
 	desc := New().Definition().Description
 	for _, want := range []string{
-		"read observes new output without waiting for exit",
-		"accepts exactly one RunCommand handle",
-		"read does not support Spawn",
+		"Read accepts exactly one handle",
+		"for RunCommand it briefly waits for new output",
+		"for Spawn it immediately returns the current state",
+		"output_preview",
+		"exact final_message",
 		"RunCommand write sends terminal stdin then briefly awaits its response",
 		"Completed Spawn write sends a follow-up prompt",
 		"Wait observes either target for at most one minute",
@@ -55,7 +57,7 @@ func TestTaskSchemaUsesServiceOwnedObservationBudgets(t *testing.T) {
 	actionDesc, _ := action["description"].(string)
 	for _, want := range []string{
 		"wait: one or more RunCommand or Spawn handles",
-		"read: exactly one RunCommand handle only, never Spawn",
+		"read: exactly one handle, output-driven for RunCommand and an immediate snapshot for Spawn",
 		"write: exactly one handle",
 		"cancel: one or more handles",
 	} {

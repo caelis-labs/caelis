@@ -383,6 +383,9 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 		if cursor := strings.TrimSpace(envelope.Cursor); cursor != "" {
 			m.taskStreamCursors[msg.taskID] = cursor
 		}
+		if taskstream.IsTransientGapEnvelope(envelope) {
+			continue
+		}
 		model, cmd := m.handleACPEventEnvelope(envelope)
 		if next, ok := model.(*Model); ok {
 			m = next

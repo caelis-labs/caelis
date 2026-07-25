@@ -275,8 +275,61 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 		}
 		return taskapi.Snapshot{}, err
 	}
+	return tm.applyObservedSubagentResult(ctx, task, result, true)
+}
+
+// observeSubagent samples the attached child without advancing cancellation or
+// converting a transport observation error into a terminal child state. A
+// successful sample may still promote newly observed canonical result state.
+func (tm *taskRuntime) observeSubagent(ctx context.Context, task *subagentTask) (taskapi.Snapshot, error) {
+	if task == nil {
+		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
+	}
 	task.mu.Lock()
-	task.applyResult(result)
+	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata["cancel_phase"]))
+	runner := task.runner
+	running := task.running
+	anchor := delegation.CloneAnchor(task.anchor)
+	task.mu.Unlock()
+	if cancelPhase != subagentCancelPhaseNone && cancelPhase != subagentCancelPhaseCompleted {
+		return task.snapshot(), nil
+	}
+	if runner == nil || !running {
+		return task.snapshot(), nil
+	}
+	result, err := runner.Wait(ctx, anchor, 0)
+	if err != nil {
+		return task.snapshot(), err
+	}
+	return tm.applyObservedSubagentResult(ctx, task, result, false)
+}
+
+// applyObservedSubagentResult records a successful remote observation. This is
+// the explicit point where either read or wait may durably promote terminal
+// Task state and a completed sidecar's canonical final message. A read-only
+// running sample is returned without mutating or persisting the Task.
+func (tm *taskRuntime) applyObservedSubagentResult(
+	ctx context.Context,
+	task *subagentTask,
+	result delegation.Result,
+	persistRunning bool,
+) (taskapi.Snapshot, error) {
+	task.mu.Lock()
+	if task.running && !persistRunning &&
+		(result.Running || result.State == delegation.StateRunning) {
+		snapshot := task.snapshotLocked()
+		if preview := result.OutputPreview; taskOutputHasNonBlankLine(preview) {
+			snapshot.Result["output_preview"] = preview
+		}
+		task.mu.Unlock()
+		return snapshot, nil
+	}
+	// A Task-stream observer may have applied a terminal result while this
+	// runner sample was in flight. Terminal state is monotonic: persist the
+	// current result instead of reopening it with an older running snapshot.
+	if task.running {
+		task.applyResult(result)
+	}
 	snapshot := task.snapshotLocked()
 	entry := task.entrySnapshot(tm.runtime.now())
 	task.mu.Unlock()

@@ -262,6 +262,11 @@ func TestSubagentControlAuthorizationUsesNeutralPrincipalNotProductSource(t *tes
 	}); err == nil || !strings.Contains(err.Error(), "tool principal") {
 		t.Fatalf("tool principal sidecar error = %v, want isolation error", err)
 	}
+	if _, err := runtime.tasks.Read(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: side.Ref.TaskID, Source: "custom-origin", Principal: session.ActorKindTool,
+	}); err == nil || !strings.Contains(err.Error(), "tool principal") {
+		t.Fatalf("tool principal sidecar read error = %v, want isolation error", err)
+	}
 
 	delegated, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
 		Agent: "helper", Prompt: "delegated", Role: session.ParticipantRoleDelegated,
@@ -275,6 +280,11 @@ func TestSubagentControlAuthorizationUsesNeutralPrincipalNotProductSource(t *tes
 	if err == nil || !strings.Contains(err.Error(), "user principal") {
 		t.Fatalf("user principal delegated error = %v, want isolation error", err)
 	}
+	if _, err := runtime.tasks.Read(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: delegated.Ref.TaskID, Source: "custom-origin", Principal: session.ActorKindUser,
+	}); err == nil || !strings.Contains(err.Error(), "user principal") {
+		t.Fatalf("user principal delegated read error = %v, want isolation error", err)
+	}
 	if _, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
 		TaskID: delegated.Ref.TaskID, Principal: session.ActorKind("unknown"), Source: "agent_tool",
 	}); err == nil || !strings.Contains(err.Error(), "unsupported control principal") {
@@ -284,6 +294,188 @@ func TestSubagentControlAuthorizationUsesNeutralPrincipalNotProductSource(t *tes
 		TaskID: delegated.Ref.TaskID, Source: "controller-looking-source",
 	}); err == nil || !strings.Contains(err.Error(), "unsupported control principal") {
 		t.Fatalf("empty principal error = %v, want fail-closed rejection", err)
+	}
+}
+
+func TestSubagentReadTransportErrorDoesNotInterruptRunningChild(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	waitErr := errors.New("temporary child status transport failure")
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "working"},
+		waitErr:     waitErr,
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "inspect",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+
+	snapshot, err := runtime.tasks.Read(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+	})
+	if !errors.Is(err, waitErr) {
+		t.Fatalf("Read() error = %v, want transport error %v", err, waitErr)
+	}
+	if !snapshot.Running || snapshot.State != task.StateRunning {
+		t.Fatalf("Read() snapshot = %#v, want child to remain running", snapshot)
+	}
+	stored, err := runtime.tasks.store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !stored.Running || stored.State != task.StateRunning {
+		t.Fatalf("stored task = %#v, want read error not to persist interruption", stored)
+	}
+
+	waited, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+	})
+	if err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if waited.Running || waited.State != task.StateInterrupted {
+		t.Fatalf("Wait() = %#v, want recovery observer to interrupt stale child", waited)
+	}
+}
+
+func TestSubagentRunningReadDoesNotAdvanceDurableRevision(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "starting"},
+		waitResult:  delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "still working"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "inspect",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	before, err := runtime.tasks.store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("Get(before read) error = %v", err)
+	}
+
+	snapshot, err := runtime.tasks.Read(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+	})
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if !snapshot.Running || snapshot.State != task.StateRunning ||
+		taskRawStringValue(snapshot.Result["output_preview"]) != "still working" {
+		t.Fatalf("Read() = %#v, want latest running preview", snapshot)
+	}
+	after, err := runtime.tasks.store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("Get(after read) error = %v", err)
+	}
+	if after.Revision != before.Revision {
+		t.Fatalf("running read revision = %d, want unchanged %d", after.Revision, before.Revision)
+	}
+}
+
+func TestSubagentReadDoesNotReopenConcurrentTerminalObservation(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	const finalMessage = "exact concurrent child result"
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "starting"},
+		waitResult:  delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "stale preview"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "inspect",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	runtime.tasks.mu.RLock()
+	subagentTask := runtime.tasks.subagents[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	runner.waitHook = func() {
+		subagentTask.mu.Lock()
+		subagentTask.applyResult(delegation.Result{
+			State:  delegation.StateCompleted,
+			Result: finalMessage,
+		})
+		subagentTask.mu.Unlock()
+	}
+
+	snapshot, err := runtime.tasks.Read(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+	})
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if snapshot.Running || snapshot.State != task.StateCompleted ||
+		taskRawStringValue(snapshot.Result["final_message"]) != finalMessage {
+		t.Fatalf("Read() = %#v, want concurrent terminal result preserved", snapshot)
+	}
+	stored, err := runtime.tasks.store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if stored.Running || stored.State != task.StateCompleted {
+		t.Fatalf("stored task = %#v, want terminal state preserved", stored)
+	}
+	spawnResult, ok := stored.Spec["spawn_result"].(map[string]any)
+	if !ok || taskRawStringValue(spawnResult["final_message"]) != finalMessage {
+		t.Fatalf("stored spawn_result = %#v, want exact terminal result", stored.Spec["spawn_result"])
+	}
+}
+
+func TestSubagentReadDoesNotAdvanceCancellationReconciliation(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		waitResult:  delegation.Result{State: delegation.StateCancelled, Result: "cancelled"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "inspect",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	runtime.tasks.mu.RLock()
+	subagentTask := runtime.tasks.subagents[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	if err := runtime.tasks.persistSubagentCancelPhase(
+		ctx,
+		subagentTask,
+		subagentCancelPhaseApplied,
+		"remote cancellation is pending terminal confirmation",
+		nil,
+		false,
+	); err != nil {
+		t.Fatalf("persistSubagentCancelPhase() error = %v", err)
+	}
+	waitCalls := runner.waitCalls
+
+	snapshot, err := runtime.tasks.Read(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+	})
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if snapshot.State != task.StateUnknownOutcome || !snapshot.Running {
+		t.Fatalf("Read() = %#v, want current cancellation snapshot", snapshot)
+	}
+	if runner.waitCalls != waitCalls {
+		t.Fatalf("runner Wait calls = %d, want read not to advance cancellation from %d", runner.waitCalls, waitCalls)
+	}
+	if phase := subagentCancelPhase(taskStringValue(snapshot.Metadata["cancel_phase"])); phase != subagentCancelPhaseApplied {
+		t.Fatalf("Read() cancel phase = %q, want %q", phase, subagentCancelPhaseApplied)
 	}
 }
 
@@ -1705,6 +1897,9 @@ type recordingSubagentRunner struct {
 	continueAnchor     delegation.Anchor
 	continueAgent      string
 	continuePrompt     string
+	waitYieldMS        int
+	waitCalls          int
+	waitHook           func()
 	waitErr            error
 	publishOnSpawn     bool
 	spawnStreamText    string
@@ -1746,7 +1941,12 @@ func (r *recordingSubagentRunner) Continue(_ context.Context, anchor delegation.
 	return delegation.CloneResult(r.continueResult), nil
 }
 
-func (r *recordingSubagentRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
+func (r *recordingSubagentRunner) Wait(_ context.Context, _ delegation.Anchor, yieldTimeMS int) (delegation.Result, error) {
+	r.waitCalls++
+	r.waitYieldMS = yieldTimeMS
+	if r.waitHook != nil {
+		r.waitHook()
+	}
 	if r.waitErr != nil {
 		return delegation.Result{}, r.waitErr
 	}

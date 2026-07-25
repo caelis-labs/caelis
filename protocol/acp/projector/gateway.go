@@ -121,8 +121,8 @@ func EnvelopeBaseFromSessionEvent(ref session.SessionRef, event *session.Event, 
 	return base
 }
 
-// canonicalTaskParentToolRelation recovers the physical panel relation from
-// the model-visible TASK wait result. The relationship is deliberately read
+// canonicalTaskParentToolRelation recovers the physical panel relation from a
+// model-visible Task read/wait result. The relationship is deliberately read
 // only from canonical tool input/output fields: _meta is not an ordering or
 // correlation contract.
 func canonicalTaskParentToolRelation(event *session.Event) *eventstream.ParentToolRelation {
@@ -134,20 +134,27 @@ func canonicalTaskParentToolRelation(event *session.Event) *eventstream.ParentTo
 		return nil
 	}
 	canonical, _ := names.Resolve(event.Tool.Name)
-	if canonical != names.Task || !strings.EqualFold(stringValue(event.Tool.Input["action"]), "wait") {
+	action := strings.ToLower(stringValue(event.Tool.Input["action"]))
+	if canonical != names.Task || (action != "read" && action != "wait") {
 		return nil
 	}
-	if !strings.EqualFold(stringValue(event.Tool.Output["target_kind"]), "subagent") {
+	var expectedParent string
+	switch strings.ToLower(stringValue(event.Tool.Output["target_kind"])) {
+	case "subagent":
+		expectedParent = names.Spawn
+	case "command", "terminal":
+		expectedParent = names.RunCommand
+	default:
 		return nil
 	}
 	parentCall := stringValue(event.Tool.Output["parent_call"])
 	parentName, _ := names.Resolve(stringValue(event.Tool.Output["parent_tool"]))
-	if parentCall == "" || parentName != names.Spawn {
+	if parentCall == "" || parentName != expectedParent {
 		return nil
 	}
 	return &eventstream.ParentToolRelation{
 		ToolCallID: parentCall,
-		ToolName:   names.Spawn,
+		ToolName:   expectedParent,
 	}
 }
 

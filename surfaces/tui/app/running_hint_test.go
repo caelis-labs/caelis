@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -244,6 +245,91 @@ func TestParallelToolCompletionRestoresRemainingActivity(t *testing.T) {
 	})
 	if m.runningActivity.Phase != runningPhaseThinking || m.runningActivity.Key != "" {
 		t.Fatalf("runningActivity = %#v, want thinking after all parallel tools complete", m.runningActivity)
+	}
+}
+
+func TestNarrativeForegroundOverridesRunningBackgroundTool(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.liveTurn.Active = true
+	command := TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		Scope:      ACPProjectionMain,
+		ToolCallID: "command-1",
+		ToolName:   "RUN_COMMAND",
+	}
+	m.applyTranscriptRunningActivity(command)
+	if m.runningActivity.Phase != runningPhaseWait || m.runningActivity.Target != runningTargetShell {
+		t.Fatalf("runningActivity = %#v, want foreground command", m.runningActivity)
+	}
+
+	m.applyTranscriptRunningActivity(TranscriptEvent{
+		Kind:          TranscriptEventNarrative,
+		NarrativeKind: TranscriptNarrativeAssistant,
+		Scope:         ACPProjectionMain,
+		MessageID:     "response-1",
+	})
+	if m.runningActivity.Phase != runningPhaseResponding {
+		t.Fatalf("runningActivity = %#v, want assistant narrative foreground", m.runningActivity)
+	}
+
+	// A late progress update refreshes the existing owner but must not make a
+	// background command replace an answer already being produced.
+	m.applyTranscriptRunningActivity(command)
+	if m.runningActivity.Phase != runningPhaseResponding {
+		t.Fatalf("runningActivity = %#v, want late command update to remain background", m.runningActivity)
+	}
+
+	spawn := TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		Scope:      ACPProjectionMain,
+		ToolCallID: "spawn-1",
+		ToolName:   "SPAWN",
+	}
+	m.applyTranscriptRunningActivity(spawn)
+	if m.runningActivity.Phase != runningPhaseWait || m.runningActivity.Target != runningTargetSubagent {
+		t.Fatalf("runningActivity = %#v, want newly started Spawn foreground", m.runningActivity)
+	}
+	spawn.Final = true
+	m.applyTranscriptRunningActivity(spawn)
+	if m.runningActivity.Phase != runningPhaseWait || m.runningActivity.Target != runningTargetShell {
+		t.Fatalf("runningActivity = %#v, want active background command after foreground Spawn completes", m.runningActivity)
+	}
+}
+
+func TestObservedTerminalCommandClosesExactRunningActivityOwner(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.liveTurn.Active = true
+	key := "tool:turn-1:command-call"
+	m.runningActivityTracker.start(key, runningPhaseWait, runningTargetShell, time.Unix(1, 0), "command-call")
+	m.runningActivityTracker.observeOwner("command-3", runningActivityOwner{
+		Key:     key,
+		CallID:  "command-call",
+		BlockID: "block-1",
+		Target:  runningTargetShell,
+	})
+	m.refreshRunningActivity()
+
+	m.applyObservedCommandResults([]acpprojector.CommandTaskResult{{
+		ParentCallID: "different-command",
+		Handle:       "command-3",
+	}})
+	if _, active := m.runningActivityTracker.active[key]; !active {
+		t.Fatal("conflicting command observation closed the owner")
+	}
+
+	m.applyObservedCommandResults([]acpprojector.CommandTaskResult{{
+		ParentCallID: "command-call",
+		Handle:       "command-3",
+	}})
+	if _, active := m.runningActivityTracker.active[key]; active {
+		t.Fatalf("active activities = %#v, want exact terminal command owner closed", m.runningActivityTracker.active)
+	}
+	if m.runningActivity.Phase != runningPhaseThinking {
+		t.Fatalf("runningActivity = %#v, want thinking fallback after terminal command", m.runningActivity)
 	}
 }
 

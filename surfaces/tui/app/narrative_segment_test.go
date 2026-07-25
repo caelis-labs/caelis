@@ -115,8 +115,8 @@ func TestCanonicalToolCallKeepsOneAssistantMessageOnOneRenderedRow(t *testing.T)
 
 	const (
 		messageID = "6e4b431c-bf97-45dd-9d74-2adc43f23704"
-		answer    = "原来如此！**Task read** 只适用于 RunCommand，Spawn 需要用 **Task wait**。来等待三个子代理完成："
-		reasoning = "Ah, Task read only works for RunCommand handles, not Spawn handles. For Spawn, we use Task wait."
+		answer    = "原来如此！**Task read** 可查看单个任务；这里用 **Task wait** 批量等待三个子代理完成："
+		reasoning = "Task read accepts one handle. Use Task wait to observe three subagents together."
 	)
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	apply := func(eventID string, event *session.Event) {
@@ -133,7 +133,7 @@ func TestCanonicalToolCallKeepsOneAssistantMessageOnOneRenderedRow(t *testing.T)
 		}
 	}
 	eventIDs := []string{"answer-chunk-1", "answer-chunk-2", "answer-chunk-3"}
-	for index, chunk := range []string{"原来", "如此！", "**Task read** 只适用于 RunCommand，Spawn 需要用 **Task wait**。来等待三个子代理完成："} {
+	for index, chunk := range []string{"原来", "如此！", "**Task read** 可查看单个任务；这里用 **Task wait** 批量等待三个子代理完成："} {
 		message := sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, chunk)
 		apply(eventIDs[index], session.MarkUIOnly(&session.Event{
 			Type: session.EventTypeAssistant, MessageID: messageID, Message: &message,
@@ -172,7 +172,7 @@ func TestCanonicalToolCallKeepsOneAssistantMessageOnOneRenderedRow(t *testing.T)
 			assistantRows = append(assistantRows, strings.TrimSpace(row))
 		}
 	}
-	const rendered = "· 原来如此！Task read 只适用于 RunCommand，Spawn 需要用 Task wait。来等待三个子代理完成："
+	const rendered = "· 原来如此！Task read 可查看单个任务；这里用 Task wait 批量等待三个子代理完成："
 	if len(assistantRows) != 1 || assistantRows[0] != rendered {
 		t.Fatalf("assistant rows = %#v, want one canonical rendered row", assistantRows)
 	}

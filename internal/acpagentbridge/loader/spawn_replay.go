@@ -14,9 +14,9 @@ import (
 )
 
 // spawnReplayProjector reconstructs the stdio Spawn terminal view from durable
-// Session history. Child Task streams are transient, so a canonical Task wait
-// result is the historical source for a child FinalMessage when no durable
-// parent Spawn result exists.
+// Session history. Child Task streams are transient, so a canonical terminal
+// Task read/wait result is the historical source for a child FinalMessage when
+// no durable parent Spawn result exists.
 type spawnReplayProjector struct {
 	closed        map[string]struct{}
 	authoritative map[string]struct{}

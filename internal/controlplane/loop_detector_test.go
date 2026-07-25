@@ -98,6 +98,24 @@ func TestLoopDetectorIgnoresProtocolOnlyTaskWait(t *testing.T) {
 	}
 }
 
+func TestLoopDetectorTripsOnRepeatedImmediateTaskRead(t *testing.T) {
+	t.Parallel()
+
+	d := newGenerationLoopDetector(20, 3, 8)
+	var (
+		hit loopHit
+		ok  bool
+	)
+	for i := 0; i < 3; i++ {
+		hit, ok = d.observe(watchdogToolCall("read-"+strconv.Itoa(i), "TASK", map[string]any{
+			"action": "read", "task_id": "8d7a77b2b254",
+		}))
+	}
+	if !ok || hit.Reason != WatchdogReasonToolLoop || hit.Streak != 3 {
+		t.Fatalf("repeated Task read hit = %#v ok=%v, want tool-loop streak 3", hit, ok)
+	}
+}
+
 func TestLoopDetectorStillCountsRepeatedTaskWrite(t *testing.T) {
 	t.Parallel()
 

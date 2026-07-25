@@ -3,6 +3,8 @@ package tuiapp
 import (
 	"testing"
 
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -235,6 +237,7 @@ func TestObservedSpawnResultClosesBlockAndActivityThroughSameOwner(t *testing.T)
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.currentSessionID = "session-1"
 	model.liveTurn.Active = true
 	block := NewMainACPTurnBlock("turn-1")
 	block.UpdateToolWithMeta("spawn-1", "SPAWN", "inspect", "", false, false, ToolUpdateMeta{TaskHandle: "alpha"})
@@ -260,6 +263,67 @@ func TestObservedSpawnResultClosesBlockAndActivityThroughSameOwner(t *testing.T)
 	}
 	if model.runningActivity.Phase != runningPhaseThinking {
 		t.Fatalf("runningActivity = %#v, want the same owner activity completed", model.runningActivity)
+	}
+}
+
+func TestTerminalTaskReadRepairsSpawnBlockAndActivity(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.currentSessionID = "session-1"
+	model.liveTurn.Active = true
+	block := NewMainACPTurnBlock("turn-1")
+	block.UpdateToolWithMeta("spawn-1", "SPAWN", "inspect", "", false, false, ToolUpdateMeta{TaskHandle: "alpha"})
+	appendObservedSpawnOwner(model, block, "spawn-1", "alpha")
+	model.applyTranscriptRunningActivity(TranscriptEvent{
+		Kind:           TranscriptEventTool,
+		Scope:          ACPProjectionMain,
+		TurnID:         "turn-1",
+		ToolCallID:     "spawn-1",
+		ToolName:       "SPAWN",
+		ToolTaskHandle: "alpha",
+	})
+
+	completed := schema.ToolStatusCompleted
+	taskMeta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName:     "TASK",
+		metautil.RuntimeToolAction:   "read",
+		metautil.RuntimeTargetKind:   "subagent",
+		metautil.RuntimeTargetHandle: "alpha",
+	})
+	envelope := eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		TurnID:    "turn-1",
+		Scope:     eventstream.ScopeMain,
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-1",
+			ToolName:   "SPAWN",
+		},
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "task-read-1",
+			Status:        &completed,
+			RawInput:      map[string]any{"action": "read", "handle": "alpha"},
+			RawOutput: map[string]any{
+				"handle": "alpha", "target_kind": "subagent", "state": "completed",
+				"parent_call": "spawn-1", "parent_tool": "SPAWN",
+				"final_message": "## Exact child result\n\n- done",
+			},
+			Meta: taskMeta,
+		},
+	}
+	repairs := acpprojector.TaskOwnerRepairsFromEnvelope(envelope)
+	if len(repairs.Spawns) != 1 || repairs.Spawns[0].ParentCallID != "spawn-1" {
+		t.Fatalf("Task owner repairs = %#v, want terminal Spawn read repair", repairs)
+	}
+	model = applyACPEnvelopeForTest(t, model, envelope)
+
+	if event := block.Events[0]; !event.Done || event.Err || event.Output != "## Exact child result\n\n- done" {
+		t.Fatalf("Spawn owner = %#v, want exact terminal Task read result", event)
+	}
+	if model.runningActivity.Phase != runningPhaseThinking {
+		t.Fatalf("runningActivity = %#v, want repaired Spawn activity closed", model.runningActivity)
 	}
 }
 

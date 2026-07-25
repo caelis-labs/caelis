@@ -76,8 +76,9 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 			name:     "task distinguishes output observation from terminal wait",
 			toolName: task.ToolName,
 			wants: []string{
-				"read observes new output without waiting for exit",
-				"read does not support Spawn",
+				"Read accepts exactly one handle",
+				"for Spawn it immediately returns the current state",
+				"exact final_message",
 				"write sends terminal stdin then briefly awaits its response",
 				"Wait observes either target for at most one minute",
 				"may return state=running",

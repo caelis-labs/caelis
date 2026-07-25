@@ -25,6 +25,7 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
@@ -4753,6 +4754,9 @@ func TestTaskSnapshotToolResultKeepsSubagentTerminalRefInMetaOnly(t *testing.T) 
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
+	if got := payload["output_preview"]; got != "child is working" {
+		t.Fatalf("payload[output_preview] = %#v, want running child preview", got)
+	}
 	for _, key := range []string{"terminal_id", "output_cursor"} {
 		if _, ok := payload[key]; ok {
 			t.Fatalf("payload contains %q: %#v", key, payload)
@@ -4807,14 +4811,23 @@ func TestRuntimeTaskToolResolvesSubagentHandle(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskReadRejectsSpawnHandle(t *testing.T) {
+func TestRuntimeTaskReadObservesSubagentImmediately(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	runner := &recordingSubagentRunner{
+		waitResult: delegation.Result{
+			State:         delegation.StateRunning,
+			Running:       true,
+			OutputPreview: "Inspecting the latest files",
+		},
+	}
 	runtime.tasks.mu.Lock()
 	runtime.tasks.subagents["task-1"] = &subagentTask{
 		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "child-session"},
 		sessionRef: activeSession.SessionRef,
+		runner:     runner,
+		anchor:     delegation.Anchor{TaskID: "task-1", SessionID: "child-session"},
 		handle:     "ella",
 		state:      taskapi.StateRunning,
 		running:    true,
@@ -4826,11 +4839,37 @@ func TestRuntimeTaskReadRejectsSpawnHandle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = (runtimeTaskTool{
+	taskTool := runtimeTaskTool{
 		base: tasktool.New(), sessionRef: activeSession.SessionRef, tasks: runtime.tasks,
-	}).Call(context.Background(), tool.Call{ID: "task-read", Name: tasktool.ToolName, Input: raw})
-	if err == nil || !strings.Contains(err.Error(), "read supports RunCommand handles") {
-		t.Fatalf("TASK read Spawn error = %v, want target-kind contract error", err)
+	}
+	result, err := taskTool.Call(context.Background(), tool.Call{ID: "task-read", Name: tasktool.ToolName, Input: raw})
+	if err != nil {
+		t.Fatalf("TASK read running Spawn error = %v", err)
+	}
+	payload := testToolResultPayload(t, result)
+	if payload["state"] != "running" || payload["target_kind"] != "subagent" ||
+		payload["output_preview"] != "Inspecting the latest files" {
+		t.Fatalf("TASK read running payload = %#v", payload)
+	}
+	if _, exists := payload["text"]; exists {
+		t.Fatalf("TASK read running payload retained ambiguous text field: %#v", payload)
+	}
+	if runner.waitYieldMS != 0 {
+		t.Fatalf("TASK read yield = %dms, want immediate zero-wait observation", runner.waitYieldMS)
+	}
+
+	runner.waitResult = delegation.Result{
+		State:  delegation.StateCompleted,
+		Result: "## Complete\n\n- exact child result",
+	}
+	result, err = taskTool.Call(context.Background(), tool.Call{ID: "task-read-final", Name: tasktool.ToolName, Input: raw})
+	if err != nil {
+		t.Fatalf("TASK read terminal Spawn error = %v", err)
+	}
+	payload = testToolResultPayload(t, result)
+	if payload["state"] != "completed" || payload["target_kind"] != "subagent" ||
+		payload["final_message"] != "## Complete\n\n- exact child result" {
+		t.Fatalf("TASK read terminal payload = %#v", payload)
 	}
 }
 

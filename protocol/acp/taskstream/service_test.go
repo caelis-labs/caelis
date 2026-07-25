@@ -177,6 +177,15 @@ func TestProjectRecordMakesGapExplicitAndDropsEmptyOversizeMarker(t *testing.T) 
 	if len(projected) != 1 || projected[0].Kind != eventstream.KindNotice || projected[0].Cursor != "cursor-1" {
 		t.Fatalf("gap projection = %#v", projected)
 	}
+	if !IsTransientGapEnvelope(projected[0]) {
+		t.Fatalf("gap projection = %#v, want structured transient-gap identity", projected[0])
+	}
+	if IsTransientGapEnvelope(eventstream.Envelope{
+		Kind: eventstream.KindNotice,
+		Meta: map[string]any{"task_stream": map[string]any{"transient_gap": false}},
+	}) {
+		t.Fatal("ordinary Task notice was classified as a transient gap")
+	}
 
 	marker := controltaskstream.Record{
 		Cursor: "cursor-2", Generation: "generation-1", Sequence: 2, Task: descriptor,

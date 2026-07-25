@@ -268,7 +268,7 @@ func subagentTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	}
 	if snapshot.Running {
 		if preview := taskRawStringValue(snapshot.Result["output_preview"]); taskOutputHasNonBlankLine(preview) {
-			payload["text"] = preview
+			payload["output_preview"] = preview
 		}
 		return payload
 	}

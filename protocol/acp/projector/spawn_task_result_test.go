@@ -40,6 +40,18 @@ func TestSpawnTaskResultsFromEnvelopeUsesTypedSingularParent(t *testing.T) {
 		t.Fatalf("SpawnTaskResultsFromEnvelope() = %#v, want %#v", got, want)
 	}
 
+	readUpdate := env.Update.(schema.ToolCallUpdate)
+	readUpdate.ToolCallID = "read-alpha"
+	readUpdate.RawInput = map[string]any{"action": "read", "handle": "alpha"}
+	env.Update = readUpdate
+	if got := SpawnTaskResultsFromEnvelope(env); !reflect.DeepEqual(got, want) {
+		t.Fatalf("SpawnTaskResultsFromEnvelope(read) = %#v, want %#v", got, want)
+	}
+	repairs := TaskOwnerRepairsFromEnvelope(env)
+	if len(repairs.Spawns) != 1 || len(repairs.Commands) != 0 {
+		t.Fatalf("TaskOwnerRepairsFromEnvelope(read) = %#v, want one Spawn repair", repairs)
+	}
+
 	env.ParentTool = nil
 	env.Meta = map[string]any{"parent_call": "spawn-alpha", "parent_tool": "Spawn"}
 	if got := SpawnTaskResultsFromEnvelope(env); len(got) != 0 {

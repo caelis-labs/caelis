@@ -463,7 +463,9 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	case "wait":
 		yield = taskWaitMaxYield
 	case "read":
-		yield = taskReadOutputWait
+		if identity.kind == taskapi.KindCommand {
+			yield = taskReadOutputWait
+		}
 	case "write":
 		if identity.kind == taskapi.KindCommand {
 			yield = taskWriteOutputWait

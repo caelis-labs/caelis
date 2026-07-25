@@ -49,19 +49,19 @@ func streamReconnectBackfill(
 	}
 	const batchSize = resumeReplayTranscriptBatchSize
 	batch := make([]TranscriptEvent, 0, batchSize)
-	observedSpawnResults := make([]acpprojector.SpawnTaskResult, 0, 1)
+	ownerRepairs := acpprojector.TaskOwnerRepairs{}
 	flush := func() {
-		if (len(batch) == 0 && len(observedSpawnResults) == 0) || send == nil {
+		if (len(batch) == 0 && ownerRepairs.Empty()) || send == nil {
 			batch = batch[:0]
-			observedSpawnResults = observedSpawnResults[:0]
+			ownerRepairs = acpprojector.TaskOwnerRepairs{}
 			return
 		}
 		send(TranscriptEventsMsg{
-			Events:               append([]TranscriptEvent(nil), batch...),
-			ObservedSpawnResults: append([]acpprojector.SpawnTaskResult(nil), observedSpawnResults...),
+			Events:       append([]TranscriptEvent(nil), batch...),
+			OwnerRepairs: ownerRepairs.Clone(),
 		})
 		batch = batch[:0]
-		observedSpawnResults = observedSpawnResults[:0]
+		ownerRepairs = acpprojector.TaskOwnerRepairs{}
 	}
 	for {
 		select {
@@ -77,11 +77,11 @@ func streamReconnectBackfill(
 				envelope,
 			)
 			batch = append(batch, presentation.Events...)
-			observedSpawnResults = append(observedSpawnResults, presentation.ObservedSpawnResults...)
-			// Preserve live ordering when a producer reuses a Spawn call ID in
-			// a later turn: apply each terminal observation before replaying
-			// any subsequent owner with that ID.
-			if len(observedSpawnResults) > 0 || len(batch) >= batchSize {
+			ownerRepairs.Append(presentation.OwnerRepairs)
+			// Preserve live ordering when a producer reuses a parent tool call
+			// ID in a later turn: apply each terminal observation before
+			// replaying any subsequent owner with that ID.
+			if !ownerRepairs.Empty() || len(batch) >= batchSize {
 				flush()
 			}
 		}
