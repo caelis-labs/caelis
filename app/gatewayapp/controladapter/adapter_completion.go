@@ -3,6 +3,7 @@ package controladapter
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -44,16 +45,55 @@ func (d *Adapter) CompleteSkill(ctx context.Context, query string, limit int) ([
 	return sortAndTrimCandidates(scored, limit), nil
 }
 
-func (d *Adapter) skillCompletionMetas(ctx context.Context) ([]skill.Meta, error) {
+func (d *Adapter) ResolveSkill(ctx context.Context, name string) (controlprompt.SkillResolveResult, error) {
+	catalog, err := d.skillCompletionCatalog(ctx)
+	if err != nil {
+		return controlprompt.SkillResolveResult{}, err
+	}
+	return resolveSkillCatalog(catalog, name), nil
+}
+
+func (d *Adapter) skillCompletionCatalog(ctx context.Context) (skill.Catalog, error) {
 	if d == nil || d.stack == nil {
-		return nil, missingRuntimeDependency("skill discovery")
+		return skill.Catalog{}, missingRuntimeDependency("skill discovery")
 	}
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return skill.Catalog{}, err
 		}
 	}
-	return d.stack.Skill.Snapshot().Metas(), nil
+	return d.stack.Skill.Snapshot(), nil
+}
+
+func (d *Adapter) skillCompletionMetas(ctx context.Context) ([]skill.Meta, error) {
+	catalog, err := d.skillCompletionCatalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return catalog.Metas(), nil
+}
+
+func resolveSkillCatalog(catalog skill.Catalog, name string) controlprompt.SkillResolveResult {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return controlprompt.SkillResolveResult{}
+	}
+	meta, status := catalog.Resolve(name)
+	switch status {
+	case skill.ResolveMatched:
+		return controlprompt.SkillResolveResult{Canonical: strings.TrimSpace(meta.Name)}
+	case skill.ResolveAmbiguous:
+		matches := make([]string, 0, len(catalog.MatchingMetas(name)))
+		for _, match := range catalog.MatchingMetas(name) {
+			if canonical := strings.TrimSpace(match.Name); canonical != "" {
+				matches = append(matches, canonical)
+			}
+		}
+		sort.Strings(matches)
+		return controlprompt.SkillResolveResult{Matches: matches}
+	default:
+		return controlprompt.SkillResolveResult{}
+	}
 }
 
 func (d *Adapter) CompleteResume(ctx context.Context, query string, limit int) ([]ResumeCandidate, error) {

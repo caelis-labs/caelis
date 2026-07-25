@@ -215,7 +215,10 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireNoProperty(t, defs[task.ToolName], "task_id")
 	requireNoProperty(t, defs[task.ToolName], "yield_time_ms")
 	requireNoProperty(t, defs[task.ToolName], "wait_until_done")
-	requireDescriptionContains(t, defs[task.ToolName], "Control an async task", "exactly one RunCommand handle", "does not support Spawn", "terminal stdin", "follow-up prompt", "may return state=running")
+	requireDescriptionContains(t, defs[task.ToolName], "Control asynchronous work", "RunCommand or Spawn", "after receiving a task handle", "inspect progress or results")
+	requirePropertyDescriptionContains(t, defs[task.ToolName], "action", "RunCommand briefly waits for output", "Spawn returns output_preview", "exact final_message", "wait observes up to one minute", "may stay running", "write sends input", "cancel stops work")
+	requirePropertyDescriptionContains(t, defs[task.ToolName], "handle", "Session-scoped handle", "Only wait and cancel", "comma-separated handles")
+	requirePropertyDescriptionContains(t, defs[task.ToolName], "input", "Required only for write", "terminal stdin", "completed Spawn", "follow-up prompt")
 	requireAnnotations(t, defs[task.ToolName], false, true, false, true)
 
 	requirePlanSchema(t, defs[plan.ToolName])

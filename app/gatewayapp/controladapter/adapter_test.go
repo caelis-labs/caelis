@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -611,7 +612,7 @@ func TestAdapterSubmitForwardsReferencesToGateway(t *testing.T) {
 		t.Fatalf("NewAdapter() error = %v", err)
 	}
 
-	raw := "$CMPCTL inspect #dict.go"
+	raw := "$CMPCTL inspect @dict.go"
 	turn, err := driver.Submit(ctx, Submission{Text: raw, DisplayText: raw})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
@@ -994,8 +995,13 @@ func TestAdapterCompleteSlashArgConnectSeparatesSourcesAndProviders(t *testing.T
 			break
 		}
 	}
-	if !codexCandidate.NoAuth || !strings.Contains(codexCandidate.Detail, "browser/device oauth") || !strings.Contains(codexCandidate.Detail, "community") {
-		t.Fatalf("codex provider candidate = %#v, want OAuth flow without API-key prompt and explicit community status", codexCandidate)
+	if !codexCandidate.NoAuth || codexCandidate.Detail != "ChatGPT subscription models through Codex" {
+		t.Fatalf("codex provider candidate = %#v, want concise provider description with internal no-auth routing", codexCandidate)
+	}
+	for _, hidden := range []string{"http://", "https://", "env:", "oauth", "API_KEY"} {
+		if strings.Contains(strings.ToLower(codexCandidate.Detail), strings.ToLower(hidden)) {
+			t.Fatalf("codex provider candidate detail = %q, should hide endpoint and auth metadata %q", codexCandidate.Detail, hidden)
+		}
 	}
 	xiaomiEndpoints, err := driver.CompleteSlashArg(ctx, "connect-baseurl:xiaomi", "", 10)
 	if err != nil {
@@ -3897,6 +3903,38 @@ func TestSkillCompletionCandidatePrefersLocalNameForPluginSkill(t *testing.T) {
 	}
 	if _, ok := scoreSkillMeta("superpowers", meta, workspace); !ok {
 		t.Fatal("scoreSkillMeta(\"superpowers\") did not match namespace")
+	}
+}
+
+func TestResolveSkillCatalogUsesExactRuntimeIdentityWithoutCompletionLimit(t *testing.T) {
+	t.Parallel()
+
+	metas := make([]skill.Meta, 0, 1005)
+	for i := 0; i < 1001; i++ {
+		metas = append(metas, skill.Meta{Name: "skill-" + strconv.Itoa(i)})
+	}
+	metas = append(metas,
+		skill.Meta{Name: "workspace:lint", LocalName: "lint"},
+		skill.Meta{Name: "superpowers:ideate", LocalName: "ideate", Source: skill.SourcePlugin, PluginID: "superpowers"},
+		skill.Meta{Name: "one:brainstorm", LocalName: "brainstorm", Source: skill.SourcePlugin, PluginID: "one"},
+		skill.Meta{Name: "two:brainstorm", LocalName: "brainstorm", Source: skill.SourcePlugin, PluginID: "two"},
+	)
+	catalog := skill.NewCatalog(metas)
+
+	if got := resolveSkillCatalog(catalog, "skill-1000"); got.Canonical != "skill-1000" || len(got.Matches) != 0 {
+		t.Fatalf("resolve exact skill beyond completion page = %#v, want skill-1000", got)
+	}
+	if got := resolveSkillCatalog(catalog, "lint"); got.Canonical != "workspace:lint" {
+		t.Fatalf("resolve regular local alias = %#v, want workspace:lint", got)
+	}
+	if got := resolveSkillCatalog(catalog, "ideate"); got.Canonical != "superpowers:ideate" {
+		t.Fatalf("resolve unique plugin local alias = %#v, want superpowers:ideate", got)
+	}
+	if got := resolveSkillCatalog(catalog, "brainstorm"); got.Canonical != "" || !reflect.DeepEqual(got.Matches, []string{"one:brainstorm", "two:brainstorm"}) {
+		t.Fatalf("resolve ambiguous plugin local alias = %#v, want sorted canonical choices", got)
+	}
+	if got := resolveSkillCatalog(catalog, "one:brainstorm"); got.Canonical != "one:brainstorm" {
+		t.Fatalf("resolve canonical plugin skill = %#v, want one:brainstorm", got)
 	}
 }
 

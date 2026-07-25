@@ -1,6 +1,6 @@
 package tuiapp
 
-// renderMentionList renders the @mention candidates as an overlay list.
+// renderMentionList renders @file candidates as an overlay list.
 func (m *Model) renderMentionList() string {
 	if len(m.mentionCandidates) == 0 {
 		return ""
@@ -10,18 +10,7 @@ func (m *Model) renderMentionList() string {
 	lines := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
 		display := completionCandidateDisplay(m.mentionCandidates[i])
-		if m.mentionPrefix != "#" {
-			display = m.mentionPrefix + display
-		}
-		detail := completionCandidateDetail(m.mentionCandidates[i])
-		if m.mentionPrefix == "#" {
-			detail = ""
-		}
-		lines = append(lines, m.renderCompletionTextLine(display, detail, i == m.mentionIndex))
+		lines = append(lines, m.renderCompletionTextLine(display, "", i == m.mentionIndex))
 	}
-	title := "Agents"
-	if m.mentionPrefix == "#" {
-		title = "Files"
-	}
-	return m.renderCompletionOverlay(title, lines)
+	return m.renderCompletionOverlay("Files", lines)
 }

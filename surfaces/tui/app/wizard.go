@@ -184,7 +184,6 @@ func (m *Model) startWizard(def *WizardDef) {
 
 func (m *Model) startWizardWithQuery(def *WizardDef, initialQuery string) {
 	m.clearMention()
-	m.clearSkill()
 	m.clearResume()
 	m.clearSlashCompletion()
 

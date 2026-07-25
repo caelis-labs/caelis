@@ -10,7 +10,7 @@ import (
 func TestScanSubmissionReferencesAllowsNamespacedSkills(t *testing.T) {
 	t.Parallel()
 
-	tokens := ScanSubmissionReferences("$figma:figma-use build #app.go")
+	tokens := ScanSubmissionReferences("$figma:figma-use build @app.go")
 	if len(tokens) != 2 {
 		t.Fatalf("ScanSubmissionReferences() returned %d tokens, want 2: %#v", len(tokens), tokens)
 	}
@@ -46,7 +46,7 @@ func TestProjectSubmissionReferences(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	projected := ProjectSubmissionReferences("$CMPCTL inspect #dict.go", ProjectionOptions{
+	projected := ProjectSubmissionReferences("$CMPCTL inspect @dict.go", ProjectionOptions{
 		WorkspaceDir: workspace,
 		SkillNames:   map[string]string{"cmpctl": "cmpctl"},
 	})
@@ -62,7 +62,7 @@ func TestProjectSubmissionReferences(t *testing.T) {
 			t.Fatalf("projected input missing %q:\n%s", want, projected.Text)
 		}
 	}
-	if strings.Contains(projected.Text, "$CMPCTL") || strings.Contains(projected.Text, "#dict.go") {
+	if strings.Contains(projected.Text, "$CMPCTL") || strings.Contains(projected.Text, "@dict.go") {
 		t.Fatalf("projected input leaked raw references:\n%s", projected.Text)
 	}
 }
@@ -70,12 +70,26 @@ func TestProjectSubmissionReferences(t *testing.T) {
 func TestProjectSubmissionReferencesIgnoresShellVariablesAndMissingFiles(t *testing.T) {
 	t.Parallel()
 
-	projected := ProjectSubmissionReferences("echo $HOME #missing.go", ProjectionOptions{
+	projected := ProjectSubmissionReferences("echo $HOME @missing.go", ProjectionOptions{
 		WorkspaceDir: t.TempDir(),
 		SkillNames:   map[string]string{"cmpctl": "cmpctl"},
 	})
 	if projected.Changed {
 		t.Fatalf("ProjectSubmissionReferences() changed shell/missing refs: %q", projected.Text)
+	}
+}
+
+func TestScanSubmissionReferencesUsesAtOnlyForFiles(t *testing.T) {
+	t.Parallel()
+
+	tokens := ScanSubmissionReferences("email user@example.com and legacy #dict.go")
+	if len(tokens) != 0 {
+		t.Fatalf("ScanSubmissionReferences() = %#v, want email and legacy # syntax ignored", tokens)
+	}
+
+	tokens = ScanSubmissionReferences("read @dict.go")
+	if len(tokens) != 1 || tokens[0].Kind != KindFile || tokens[0].Value != "dict.go" {
+		t.Fatalf("ScanSubmissionReferences(@dict.go) = %#v, want one file token", tokens)
 	}
 }
 

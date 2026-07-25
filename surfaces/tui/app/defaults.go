@@ -161,6 +161,9 @@ func (m *Model) commandCompletionDetail(command string) string {
 		return ""
 	}
 	if m != nil {
+		if detail := strings.TrimSpace(m.slashDetails[strings.ToLower(name)]); detail != "" {
+			return detail
+		}
 		if detail := strings.TrimSpace(m.cfg.CommandDetails[strings.ToLower(name)]); detail != "" {
 			return detail
 		}

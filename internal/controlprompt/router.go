@@ -14,6 +14,7 @@ import (
 // router dispatches surface-neutral prompt input through control.Service.
 type router struct {
 	service               control.Service
+	skillResolver         SkillResolver
 	commandNames          func(context.Context, control.Service) []string
 	coreCommandAllowed    func(context.Context, string) bool
 	dynamicCommandAllowed func(context.Context, string) bool
@@ -22,8 +23,10 @@ type router struct {
 
 // New builds the shared surface-neutral prompt router.
 func New(cfg RouterConfig) Router {
+	resolver, _ := cfg.Service.(SkillResolver)
 	return router{
 		service:               cfg.Service,
+		skillResolver:         resolver,
 		commandNames:          cfg.CommandNames,
 		coreCommandAllowed:    cfg.CoreCommandAllowed,
 		dynamicCommandAllowed: cfg.DynamicCommandAllowed,
@@ -57,6 +60,9 @@ func (r router) Route(ctx context.Context, req Request) (Result, error) {
 					return Result{Handled: true, ContinueRunning: true, SuppressTurnDivider: true}, nil
 				}
 				return Result{Handled: true, Turn: turn}, nil
+			}
+			if result, handled, err := r.dispatchDirectSkill(ctx, cmd, args, argsStart, req.Submission); handled || err != nil {
+				return result, err
 			}
 			return r.noticeResult(fmt.Sprintf("unknown command: /%s\nrun /help to list available commands", cmd)), nil
 		}

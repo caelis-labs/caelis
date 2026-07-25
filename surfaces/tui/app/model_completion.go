@@ -3,7 +3,6 @@ package tuiapp
 import (
 	"context"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -95,8 +94,6 @@ func (m *Model) refreshCompletionOverlaysBeforeAccept(msg tea.KeyMsg) {
 	switch {
 	case len(m.mentionCandidates) > 0:
 		m.refreshMention()
-	case len(m.skillCandidates) > 0:
-		m.refreshSkill()
 	case m.resumeActive || len(m.resumeCandidates) > 0:
 		// Resume completion is asynchronous. Accept/complete never waits for
 		// Control or Store I/O on the Bubble Tea event loop.
@@ -109,7 +106,6 @@ func (m *Model) refreshCompletionOverlaysBeforeAccept(msg tea.KeyMsg) {
 
 func (m *Model) refreshCompletionOverlaysNow() tea.Cmd {
 	m.refreshMention()
-	m.refreshSkill()
 	var resumeCmd tea.Cmd
 	if m.isWizardActive() {
 		if m.resumeActive {
@@ -129,7 +125,7 @@ func (m *Model) refreshCompletionOverlaysNow() tea.Cmd {
 }
 
 // ---------------------------------------------------------------------------
-// # File completion
+// @ File completion
 // ---------------------------------------------------------------------------
 
 const (
@@ -175,7 +171,7 @@ func (m *Model) refreshMentionWithLimit(limit int) {
 		err        error
 	)
 	switch prefix {
-	case "#":
+	case "@":
 		if m.cfg.FileComplete == nil {
 			return
 		}
@@ -206,7 +202,7 @@ func (m *Model) applyMentionCompletion() {
 	}
 	prefix := m.mentionPrefix
 	if prefix == "" {
-		prefix = "#"
+		prefix = "@"
 	}
 	choice := prefix + strings.TrimSpace(m.mentionCandidates[m.mentionIndex].Value)
 	replaced, nextCursor := replaceRuneSpan(m.input, m.mentionStart, m.mentionEnd, choice)
@@ -288,212 +284,6 @@ func (m *Model) loadMoreMentionCandidates() bool {
 }
 
 // ---------------------------------------------------------------------------
-// $skill completion
-// ---------------------------------------------------------------------------
-
-func (m *Model) clearSkill() {
-	m.skillQuery = ""
-	m.skillCandidates = nil
-	m.skillIndex = 0
-	m.skillStart = 0
-	m.skillEnd = 0
-	m.skillLimit = 0
-}
-
-func (m *Model) refreshSkill() {
-	m.refreshSkillWithLimit(0)
-}
-
-func (m *Model) refreshSkillWithLimit(limit int) {
-	previousQuery := m.skillQuery
-	previousLimit := m.skillLimit
-	previousSelected := CompletionCandidate{}
-	if m.skillIndex >= 0 && m.skillIndex < len(m.skillCandidates) {
-		previousSelected = m.skillCandidates[m.skillIndex]
-	}
-	m.clearSkill()
-	if m.cfg.SkillComplete == nil || m.turnRunning() {
-		return
-	}
-	// Don't show skill popup if mention popup is active.
-	if len(m.mentionCandidates) > 0 {
-		return
-	}
-	start, end, query, ok := skillQueryAtCursor(m.input, m.cursor)
-	if !ok {
-		return
-	}
-	limit = nextCompletionRefreshLimit(limit, previousLimit, query == previousQuery)
-	candidates, err := m.cfg.SkillComplete(query, limit)
-	if err != nil || len(candidates) == 0 {
-		return
-	}
-	m.skillQuery = query
-	m.skillCandidates = append([]CompletionCandidate(nil), candidates...)
-	m.skillStart = start
-	m.skillEnd = end
-	m.skillLimit = limit
-	m.skillIndex = preservedCompletionIndex(previousQuery, query, "", "", previousSelected, candidates)
-}
-
-func (m *Model) applySkillCompletion() {
-	if len(m.skillCandidates) == 0 {
-		m.refreshSkill()
-		if len(m.skillCandidates) == 0 {
-			return
-		}
-	}
-	choice := "$" + strings.TrimSpace(m.skillCandidates[m.skillIndex].Value)
-	replaced, nextCursor := replaceRuneSpan(m.input, m.skillStart, m.skillEnd, choice)
-	m.input = replaced
-	m.cursor = nextCursor
-	if m.cursor == len(m.input) {
-		m.input = append(m.input, ' ')
-		m.cursor++
-	}
-	m.clearSkill()
-}
-
-func (m *Model) handleSkillKey(msg tea.KeyMsg) (bool, tea.Cmd) {
-	switch {
-	case key.Matches(msg, m.keys.Back):
-		m.clearSkill()
-		return true, nil
-	case key.Matches(msg, m.keys.ChoosePrev):
-		if len(m.skillCandidates) > 0 {
-			m.skillIndex = wrapSelectionIndex(m.skillIndex, len(m.skillCandidates), -1)
-		}
-		return true, nil
-	case key.Matches(msg, m.keys.ChooseNext):
-		if len(m.skillCandidates) > 0 {
-			m.advanceSkillSelection()
-		}
-		return true, nil
-	case key.Matches(msg, m.keys.Accept), key.Matches(msg, m.keys.Complete):
-		m.applySkillCompletion()
-		m.syncTextareaFromInput()
-		return true, nil
-	default:
-		return false, nil
-	}
-}
-
-func (m *Model) advanceSkillSelection() {
-	if len(m.skillCandidates) == 0 {
-		return
-	}
-	if m.skillIndex < len(m.skillCandidates)-1 {
-		m.skillIndex++
-		return
-	}
-	oldLen := len(m.skillCandidates)
-	if m.loadMoreSkillCandidates() && len(m.skillCandidates) > oldLen {
-		m.skillIndex = oldLen
-		return
-	}
-	m.skillIndex = 0
-}
-
-func (m *Model) loadMoreSkillCandidates() bool {
-	oldLen := len(m.skillCandidates)
-	if !shouldLoadMoreCompletionCandidates(oldLen, m.skillLimit) {
-		return false
-	}
-	limit := nextCompletionPageLimit(m.skillLimit, oldLen)
-	if limit <= m.skillLimit {
-		return false
-	}
-	previousQuery := m.skillQuery
-	previousCandidates := append([]CompletionCandidate(nil), m.skillCandidates...)
-	previousIndex := m.skillIndex
-	previousStart := m.skillStart
-	previousEnd := m.skillEnd
-	m.refreshSkillWithLimit(limit)
-	if len(m.skillCandidates) == 0 {
-		m.skillQuery = previousQuery
-		m.skillCandidates = previousCandidates
-		m.skillIndex = previousIndex
-		m.skillStart = previousStart
-		m.skillEnd = previousEnd
-		m.skillLimit = limit
-	}
-	return len(m.skillCandidates) > oldLen
-}
-
-// renderSkillList renders the $skill candidates as an overlay list.
-func (m *Model) renderSkillList() string {
-	if len(m.skillCandidates) == 0 {
-		return ""
-	}
-	contentWidth := maxInt(24, m.completionOverlayInnerWidth())
-	maxItems := minInt(completionOverlayVisibleItems, len(m.skillCandidates))
-	start, end := completionWindowRange(m.skillIndex, len(m.skillCandidates), maxItems)
-	lines := make([]string, 0, end-start)
-	for i := start; i < end; i++ {
-		selected := i == m.skillIndex
-		lines = append(lines, m.renderSkillCandidateLine(m.skillCandidates[i], selected, contentWidth))
-	}
-	return m.renderCompletionOverlay("", lines)
-}
-
-func (m *Model) renderSkillCandidateLine(candidate CompletionCandidate, selected bool, width int) string {
-	display := completionCandidateDisplay(candidate)
-	kind := completionCandidateKind(candidate)
-	detail := completionCandidateDetail(candidate)
-	return m.renderCompletionCandidateRow(display, kind, detail, selected, width)
-}
-
-func (m *Model) renderCompletionCandidateRow(display string, kind string, detail string, selected bool, width int) string {
-	display = strings.Join(strings.Fields(strings.TrimSpace(display)), " ")
-	kind = strings.Join(strings.Fields(strings.TrimSpace(kind)), " ")
-	detail = strings.Join(strings.Fields(strings.TrimSpace(detail)), " ")
-	nameStyle := m.theme.CommandStyle()
-	if selected {
-		nameStyle = m.theme.CommandActiveStyle()
-	}
-
-	if kind == "" && detail == "" {
-		return nameStyle.Render(truncateTailDisplay(display, maxInt(1, width-2)))
-	}
-
-	nameColumn := minInt(20, maxInt(10, width/5))
-	if width < 72 {
-		nameColumn = minInt(16, maxInt(8, width/4))
-	}
-
-	name := truncateTailDisplay(display, nameColumn)
-	renderedName := nameStyle.Render(name)
-	targetWidth := nameColumn + 2
-
-	line := renderedName
-	used := displayColumns(line)
-
-	if used < targetWidth {
-		line += strings.Repeat(" ", targetWidth-used)
-		used = targetWidth
-	}
-	line += " "
-	used += 1
-
-	if kind != "" {
-		badge := "[" + kind + "]"
-		line += m.theme.HelpHintTextStyle().Render(badge)
-		used += displayColumns(badge)
-		if detail != "" {
-			line += "  "
-			used += 2
-		}
-	}
-	if detail != "" {
-		detailBudget := maxInt(0, width-used)
-		if detailBudget > 0 {
-			line += m.theme.HelpHintTextStyle().Render(truncateTailDisplay(detail, detailBudget))
-		}
-	}
-	return line
-}
-
-// ---------------------------------------------------------------------------
 // /resume completion
 // ---------------------------------------------------------------------------
 
@@ -508,7 +298,6 @@ func (m *Model) clearResume() {
 
 func (m *Model) openResumePicker() {
 	m.clearMention()
-	m.clearSkill()
 	m.clearSlashArg()
 	m.clearSlashCompletion()
 	m.resumeActive = true
@@ -521,7 +310,6 @@ func (m *Model) activateResumePickerFromInput() {
 		return
 	}
 	m.clearMention()
-	m.clearSkill()
 	m.clearSlashArg()
 	m.clearSlashCompletion()
 	m.resumeActive = true
@@ -547,7 +335,7 @@ func (m *Model) updateResumeCandidates() tea.Cmd {
 		return nil
 	}
 	// Avoid overlapping popups.
-	if len(m.mentionCandidates) > 0 || len(m.skillCandidates) > 0 || len(m.slashArgCandidates) > 0 {
+	if len(m.mentionCandidates) > 0 || len(m.slashArgCandidates) > 0 {
 		m.cancelResumeRequest()
 		m.resumeCandidates = nil
 		m.resumeLoaded = false
@@ -688,143 +476,8 @@ func (m *Model) handleResumeKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Slash command completion
-// ---------------------------------------------------------------------------
-
-func (m *Model) refreshSlashCommands() {
-	selected := ""
-	if m.slashIndex >= 0 && m.slashIndex < len(m.slashCandidates) {
-		selected = strings.TrimSpace(m.slashCandidates[m.slashIndex])
-	}
-	m.clearSlashCompletion()
-	if m.turnRunning() || m.slashArgActive || m.isWizardActive() {
-		return
-	}
-	// Avoid overlapping popups.
-	if len(m.mentionCandidates) > 0 || len(m.skillCandidates) > 0 || len(m.resumeCandidates) > 0 || len(m.slashArgCandidates) > 0 {
-		return
-	}
-	query, ok := slashCommandQueryAtCursor(m.input, m.cursor)
-	if !ok {
-		return
-	}
-	candidates := make([]string, 0, len(m.cfg.Commands))
-	for _, cmd := range m.cfg.Commands {
-		full := "/" + strings.TrimSpace(cmd)
-		if full == "/" {
-			continue
-		}
-		if query == "" || strings.HasPrefix(strings.ToLower(full), "/"+strings.ToLower(query)) {
-			candidates = append(candidates, full)
-		}
-	}
-	sort.Strings(candidates)
-	if len(candidates) == 0 {
-		return
-	}
-	m.slashCandidates = candidates
-	m.slashIndex = 0
-	if selected != "" {
-		for i, candidate := range candidates {
-			if candidate == selected {
-				m.slashIndex = i
-				break
-			}
-		}
-	}
-	m.slashPrefix = "/" + query
-}
-
-func (m *Model) applySlashCommandCompletion() {
-	if len(m.slashCandidates) == 0 {
-		m.refreshSlashCommands()
-		if len(m.slashCandidates) == 0 {
-			return
-		}
-	}
-	selected := strings.TrimSpace(m.slashCandidates[m.slashIndex])
-	if selected == "" {
-		return
-	}
-	line := selected + " "
-	m.setInputText(line)
-	m.clearSlashCompletion()
-	m.tryOpenSlashArgPicker(line)
-}
-
-func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
-	switch {
-	case key.Matches(msg, m.keys.Back):
-		if _, ok := slashCommandQueryAtCursor(m.input, m.cursor); ok {
-			m.setInputText("")
-			m.syncTextareaFromInput()
-		}
-		m.clearSlashCompletion()
-		return true, nil
-	case key.Matches(msg, m.keys.ChoosePrev):
-		if len(m.slashCandidates) > 0 {
-			m.slashIndex = wrapSelectionIndex(m.slashIndex, len(m.slashCandidates), -1)
-		}
-		return true, nil
-	case key.Matches(msg, m.keys.ChooseNext):
-		if len(m.slashCandidates) > 0 {
-			m.slashIndex = wrapSelectionIndex(m.slashIndex, len(m.slashCandidates), 1)
-		}
-		return true, nil
-	case key.Matches(msg, m.keys.Complete):
-		m.applySlashCommandCompletion()
-		m.syncTextareaFromInput()
-		if m.resumeActive {
-			return true, m.requestCompletionRefresh()
-		}
-		return true, nil
-	case key.Matches(msg, m.keys.Accept):
-		if m.turnRunning() || len(m.slashCandidates) == 0 {
-			return true, nil
-		}
-		m.applySlashCommandCompletion()
-		m.syncTextareaFromInput()
-		if m.resumeActive {
-			return true, m.requestCompletionRefresh()
-		}
-		return true, nil
-	default:
-		return false, nil
-	}
-}
-
-func (m *Model) renderSlashCommandList() string {
-	if len(m.slashCandidates) == 0 {
-		return ""
-	}
-	maxItems := minInt(8, len(m.slashCandidates))
-	start := 0
-	if m.slashIndex >= maxItems {
-		start = m.slashIndex - maxItems + 1
-	}
-	maxStart := maxInt(0, len(m.slashCandidates)-maxItems)
-	if start > maxStart {
-		start = maxStart
-	}
-	end := minInt(len(m.slashCandidates), start+maxItems)
-	lines := make([]string, 0, end-start)
-	for i := start; i < end; i++ {
-		display := m.slashCandidates[i]
-		lines = append(lines, m.renderCompletionTextLine(display, m.commandCompletionDetail(display), i == m.slashIndex))
-	}
-	return m.renderCompletionOverlay("Commands", lines)
-}
-
-func (m *Model) clearSlashCompletion() {
-	m.slashCandidates = nil
-	m.slashIndex = 0
-	m.slashPrefix = ""
-}
-
 func (m *Model) clearInputOverlays() {
 	m.clearMention()
-	m.clearSkill()
 	m.clearResume()
 	m.clearSlashArg()
 	m.clearSlashCompletion()
@@ -841,7 +494,11 @@ func filterSlashArgCandidates(query string, candidates []SlashArgCandidate) []Sl
 			display = value
 		}
 		detail := strings.TrimSpace(one.Detail)
-		return []string{value, display, detail}
+		values := []string{value, display, detail}
+		if _, local, ok := strings.Cut(value, ":"); ok {
+			values = append(values, local)
+		}
+		return values
 	})
 }
 

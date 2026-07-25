@@ -94,7 +94,6 @@ func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
 	assertFrameContainsInOrder(t, "ACP tool call 120x32", frame, []string{
 		"run the smoke check",
 		"Ran go test ./surfaces/tui/app",
-		"> Type a message, /agent-name prompt, #path/to/file, or $skill",
 		"/tmp/workspace",
 	})
 }

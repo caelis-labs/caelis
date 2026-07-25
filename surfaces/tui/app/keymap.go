@@ -193,7 +193,7 @@ func (m *Model) currentFooterHelp() helpBindings {
 			},
 		}
 	}
-	if m.showPalette || len(m.resumeCandidates) > 0 || m.slashArgActive || len(m.slashCandidates) > 0 || len(m.mentionCandidates) > 0 || len(m.skillCandidates) > 0 {
+	if m.showPalette || len(m.resumeCandidates) > 0 || m.slashArgActive || len(m.slashCandidates) > 0 || len(m.mentionCandidates) > 0 {
 		return helpBindings{
 			short: enabledBindings(m.keys.Back),
 			full: [][]key.Binding{

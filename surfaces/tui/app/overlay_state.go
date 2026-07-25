@@ -8,7 +8,7 @@ import (
 )
 
 // OverlayState groups all overlay-related state: BTW drawer, prompt modal,
-// slash completion, palette, mention/skill completions, resume picker, and
+// slash completion, palette, file mentions, resume picker, and
 // slash-arg overlays. It is embedded in Model so that field access
 // (e.g. m.btwOverlay) continues to work unchanged.
 //
@@ -35,14 +35,9 @@ type OverlayState struct {
 	mentionEnd        int
 	mentionLimit      int
 
-	skillQuery      string
-	skillCandidates []CompletionCandidate
-	skillIndex      int
-	skillStart      int
-	skillEnd        int
-	skillLimit      int
-
 	slashCandidates []string
+	slashDisplays   map[string]string
+	slashDetails    map[string]string
 	slashIndex      int
 	slashPrefix     string
 
@@ -82,7 +77,6 @@ func (o *OverlayState) HasActiveOverlay() bool {
 		o.activePrompt != nil ||
 		o.showPalette ||
 		len(o.mentionCandidates) > 0 ||
-		len(o.skillCandidates) > 0 ||
 		len(o.slashCandidates) > 0 ||
 		o.resumeActive ||
 		o.slashArgActive

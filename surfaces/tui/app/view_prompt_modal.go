@@ -308,8 +308,6 @@ func (m *Model) renderInputOverlay() string {
 	switch {
 	case len(m.mentionCandidates) > 0:
 		return m.renderMentionList()
-	case len(m.skillCandidates) > 0:
-		return m.renderSkillList()
 	case len(m.resumeCandidates) > 0:
 		return m.renderResumeList()
 	case len(m.slashArgCandidates) > 0:

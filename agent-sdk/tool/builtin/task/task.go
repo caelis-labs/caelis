@@ -27,23 +27,23 @@ func New() Tool {
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Control an async task returned by RunCommand or Spawn. Read accepts exactly one handle: for RunCommand it briefly waits for new output without requiring exit; for Spawn it immediately returns the current state with output_preview while running or the exact final_message after completion. RunCommand write sends terminal stdin then briefly awaits its response. Completed Spawn write sends a follow-up prompt. Wait observes either target for at most one minute and may return state=running; call it again when needed.",
+		Description: "Control asynchronous work started by RunCommand or Spawn. Use it after receiving a task handle to inspect progress or results, wait for changes, send input or a follow-up, or cancel work.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        []string{"wait", "read", "write", "cancel"},
-					"description": "wait: one or more RunCommand or Spawn handles; read: exactly one handle, output-driven for RunCommand and an immediate snapshot for Spawn; write: exactly one handle; cancel: one or more handles.",
+					"description": "read inspects progress/results: RunCommand briefly waits for output; Spawn returns output_preview while running or exact final_message when done. wait observes up to one minute and may stay running; write sends input; cancel stops work.",
 				},
 				"handle": map[string]any{
 					"type":        "string",
 					"minLength":   1,
-					"description": "A Session-scoped handle returned by RunCommand or Spawn. Only wait and cancel accept comma-separated handles.",
+					"description": "Pass one Session-scoped handle returned by RunCommand or Spawn. Only wait and cancel accept multiple comma-separated handles.",
 				},
 				"input": map[string]any{
 					"type":        "string",
-					"description": "Text for write. RunCommand receives terminal stdin; completed Spawn receives a follow-up prompt.",
+					"description": "Required only for write. For RunCommand, send terminal stdin and briefly await its response. For a completed Spawn, send the follow-up prompt that starts its next turn.",
 				},
 			},
 			"required":             []string{"action", "handle"},

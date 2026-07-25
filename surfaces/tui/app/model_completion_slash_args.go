@@ -42,7 +42,6 @@ func (m *Model) openSlashArgPicker(command string) {
 	}
 	// Fallback: simple single-step slash-arg (no wizard).
 	m.clearMention()
-	m.clearSkill()
 	m.clearResume()
 	m.clearSlashCompletion()
 	m.slashArgActive = true
@@ -64,7 +63,6 @@ func (m *Model) activateSlashArgPickerFromInput(command string) {
 		return
 	}
 	m.clearMention()
-	m.clearSkill()
 	m.clearResume()
 	m.clearSlashCompletion()
 	m.slashArgActive = true
@@ -109,7 +107,7 @@ func (m *Model) updateSlashArgCandidates() {
 		return
 	}
 	// Avoid overlapping popups.
-	if len(m.mentionCandidates) > 0 || len(m.skillCandidates) > 0 || len(m.resumeCandidates) > 0 {
+	if len(m.mentionCandidates) > 0 || len(m.resumeCandidates) > 0 {
 		m.slashArgCandidates = nil
 		return
 	}

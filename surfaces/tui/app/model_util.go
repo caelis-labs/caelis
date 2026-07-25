@@ -399,7 +399,7 @@ func mentionQueryAtCursor(input []rune, cursor int) (int, int, string, bool) {
 
 func mentionQueryAtCursorWithPrefix(input []rune, cursor int) (int, int, string, string, bool) {
 	start, end, query, prefix, ok := promptrefs.MentionQueryAtCursorWithPrefix(input, cursor)
-	if !ok || prefix != "#" {
+	if !ok || prefix != "@" {
 		return 0, 0, "", "", false
 	}
 	return start, end, query, prefix, true
@@ -661,16 +661,6 @@ func slashCommandQueryAtCursor(input []rune, cursor int) (string, bool) {
 
 func isMentionQueryRune(r rune) bool {
 	return promptrefs.IsMentionQueryRune(r)
-}
-
-// skillQueryAtCursor detects a $skill token at cursor position.
-// Returns the span [start, end) and the query text after '$'.
-func skillQueryAtCursor(input []rune, cursor int) (int, int, string, bool) {
-	return promptrefs.SkillQueryAtCursor(input, cursor)
-}
-
-func isSkillQueryRune(r rune) bool {
-	return promptrefs.IsSkillQueryRune(r)
 }
 
 func replaceRuneSpan(input []rune, start int, end int, replacement string) ([]rune, int) {

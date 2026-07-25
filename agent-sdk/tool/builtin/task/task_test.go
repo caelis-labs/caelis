@@ -10,26 +10,30 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-func TestTaskDescriptionGuidesInteractiveCommandsAndSubagentContinuation(t *testing.T) {
+func TestTaskDescriptionSummarizesPurposeAndWhenToUse(t *testing.T) {
 	desc := New().Definition().Description
 	for _, want := range []string{
-		"Read accepts exactly one handle",
-		"for RunCommand it briefly waits for new output",
-		"for Spawn it immediately returns the current state",
-		"output_preview",
-		"exact final_message",
-		"RunCommand write sends terminal stdin then briefly awaits its response",
-		"Completed Spawn write sends a follow-up prompt",
-		"Wait observes either target for at most one minute",
-		"may return state=running",
+		"Control asynchronous work",
+		"RunCommand or Spawn",
+		"after receiving a task handle",
+		"inspect progress or results",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("TASK description missing %q:\n%s", want, desc)
 		}
 	}
-	for _, forbidden := range []string{"tool-call ID", "harness task", "running/waiting SPAWN", "task_id", "action=wait"} {
+	for _, forbidden := range []string{
+		"tool-call ID",
+		"harness task",
+		"running/waiting SPAWN",
+		"task_id",
+		"output_preview",
+		"final_message",
+		"terminal stdin",
+		"state=running",
+	} {
 		if strings.Contains(desc, forbidden) {
-			t.Fatalf("TASK description contains irrelevant identifier guidance %q:\n%s", forbidden, desc)
+			t.Fatalf("TASK description contains parameter-level guidance %q:\n%s", forbidden, desc)
 		}
 	}
 }
@@ -56,10 +60,12 @@ func TestTaskSchemaUsesServiceOwnedObservationBudgets(t *testing.T) {
 	}
 	actionDesc, _ := action["description"].(string)
 	for _, want := range []string{
-		"wait: one or more RunCommand or Spawn handles",
-		"read: exactly one handle, output-driven for RunCommand and an immediate snapshot for Spawn",
-		"write: exactly one handle",
-		"cancel: one or more handles",
+		"read inspects progress/results",
+		"RunCommand briefly waits for output",
+		"Spawn returns output_preview while running or exact final_message when done",
+		"wait observes up to one minute and may stay running",
+		"write sends input",
+		"cancel stops work",
 	} {
 		if !strings.Contains(actionDesc, want) {
 			t.Fatalf("action description = %q, want %q", actionDesc, want)
@@ -67,12 +73,17 @@ func TestTaskSchemaUsesServiceOwnedObservationBudgets(t *testing.T) {
 	}
 	handle, _ := props["handle"].(map[string]any)
 	handleDesc, _ := handle["description"].(string)
-	if !strings.Contains(handleDesc, "Only wait and cancel accept comma-separated handles") {
-		t.Fatalf("handle description = %q, want batch action restriction", handleDesc)
+	for _, want := range []string{
+		"Pass one Session-scoped handle returned by RunCommand or Spawn",
+		"Only wait and cancel accept multiple comma-separated handles",
+	} {
+		if !strings.Contains(handleDesc, want) {
+			t.Fatalf("handle description = %q, want %q", handleDesc, want)
+		}
 	}
 	input, _ := props["input"].(map[string]any)
 	inputDesc, _ := input["description"].(string)
-	for _, want := range []string{"terminal stdin", "completed Spawn", "follow-up prompt"} {
+	for _, want := range []string{"Required only for write", "terminal stdin", "completed Spawn", "follow-up prompt", "next turn"} {
 		if !strings.Contains(inputDesc, want) {
 			t.Fatalf("input description = %q, want %q", inputDesc, want)
 		}

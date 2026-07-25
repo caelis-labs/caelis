@@ -3,6 +3,7 @@ package controladapter
 import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
@@ -20,6 +21,7 @@ var (
 	_ control.AgentService              = (*Adapter)(nil)
 	_ control.ReviewService             = (*Adapter)(nil)
 	_ control.CompletionService         = (*Adapter)(nil)
+	_ controlprompt.SkillResolver       = (*Adapter)(nil)
 	_ control.PluginService             = (*Adapter)(nil)
 	_ control.LightweightStatusProvider = (*Adapter)(nil)
 )

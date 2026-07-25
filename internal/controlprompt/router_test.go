@@ -71,6 +71,123 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	}
 }
 
+func TestRouterRoutesDirectSkillCommandsWithoutShadowingBuiltins(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeService{
+		skillResolutions: map[string]SkillResolveResult{
+			"lint":       {Canonical: "lint"},
+			"brainstorm": {Canonical: "superpowers:brainstorm"},
+		},
+	}
+	router := New(RouterConfig{Service: svc})
+
+	direct, err := router.Route(context.Background(), Request{Submission: control.Submission{
+		Text:        "/lint inspect this",
+		DisplayText: "/lint inspect this",
+		Mode:        control.SubmissionModeActiveTurn,
+	}})
+	if err != nil {
+		t.Fatalf("Route(/lint) error = %v", err)
+	}
+	if !direct.Handled || svc.submitted.Text != "$lint inspect this" || svc.submitted.DisplayText != "/lint inspect this" || svc.submitted.Mode != control.SubmissionModeActiveTurn {
+		t.Fatalf("Route(/lint) = %#v submission=%#v, want canonical skill submission", direct, svc.submitted)
+	}
+
+	svc.submitted = control.Submission{}
+	shortPlugin, err := router.Route(context.Background(), Request{Submission: control.Submission{
+		Text:        "/brainstorm compare approaches",
+		DisplayText: "/brainstorm compare approaches",
+	}})
+	if err != nil {
+		t.Fatalf("Route(/brainstorm) error = %v", err)
+	}
+	if !shortPlugin.Handled || svc.submitted.Text != "$superpowers:brainstorm compare approaches" || svc.submitted.DisplayText != "/brainstorm compare approaches" {
+		t.Fatalf("Route(/brainstorm) = %#v submission=%#v, want Catalog-aligned canonical skill submission", shortPlugin, svc.submitted)
+	}
+
+	builtin, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/status"}})
+	if err != nil {
+		t.Fatalf("Route(/status) error = %v", err)
+	}
+	if builtin.SlashResult == nil || builtin.SlashResult.Kind != control.SlashCommandResultStatus {
+		t.Fatalf("Route(/status) = %#v, want built-in command to win over same-name skill", builtin)
+	}
+}
+
+func TestRouterDirectSkillPropagatesResolutionFailure(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeService{skillResolveErr: errors.New("runtime skill snapshot unavailable")}
+	result, err := New(RouterConfig{Service: svc}).Route(context.Background(), Request{
+		Submission: control.Submission{Text: "/lint inspect this"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "runtime skill snapshot unavailable") {
+		t.Fatalf("Route(/lint) result=%#v error=%v, want skill resolution failure", result, err)
+	}
+	if notice := firstNotice(result); strings.Contains(notice, "unknown command") {
+		t.Fatalf("Route(/lint) notice = %q, must not misreport a resolution failure as unknown", notice)
+	}
+}
+
+func TestRouterDirectSkillReportsAmbiguousIdentity(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeService{skillResolutions: map[string]SkillResolveResult{
+		"lint": {Matches: []string{"one:lint", "two:lint"}},
+	}}
+	result, err := New(RouterConfig{Service: svc}).Route(context.Background(), Request{
+		Submission: control.Submission{Text: "/lint inspect this"},
+	})
+	if err != nil {
+		t.Fatalf("Route(/lint) error = %v", err)
+	}
+	notice := firstNotice(result)
+	for _, want := range []string{"ambiguous skill: lint", "/one:lint", "/two:lint"} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("Route(/lint) notice = %q, want %q", notice, want)
+		}
+	}
+	if svc.submitted.Text != "" {
+		t.Fatalf("ambiguous direct skill submitted %#v, want no submission", svc.submitted)
+	}
+}
+
+func TestRouterSkillRewritePreservesAttachmentOffsets(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeService{skillResolutions: map[string]SkillResolveResult{
+		"lint": {Canonical: "lint"},
+	}}
+	text := "/lint 看图"
+	attachment := control.Attachment{
+		Name:     "diagram.png",
+		Offset:   len([]rune("/lint 看")),
+		MimeType: "image/png",
+		Data:     "encoded",
+	}
+	result, err := New(RouterConfig{Service: svc}).Route(context.Background(), Request{
+		Submission: control.Submission{Text: text, Attachments: []control.Attachment{attachment}},
+	})
+	if err != nil {
+		t.Fatalf("Route(%q) error = %v", text, err)
+	}
+	if !result.Handled || svc.submitted.Text != "$lint 看图" {
+		t.Fatalf("Route(%q) result=%#v submission=%#v, want canonical skill text", text, result, svc.submitted)
+	}
+	if svc.submitted.DisplayText != text {
+		t.Fatalf("Route(%q) DisplayText = %q, want original user text", text, svc.submitted.DisplayText)
+	}
+	if len(svc.submitted.Attachments) != 1 {
+		t.Fatalf("Route(%q) attachments = %#v, want one", text, svc.submitted.Attachments)
+	}
+	got := svc.submitted.Attachments[0]
+	wantOffset := len([]rune("$lint 看"))
+	if got.Offset != wantOffset || got.Name != attachment.Name || got.MimeType != attachment.MimeType || got.Data != attachment.Data {
+		t.Fatalf("Route(%q) attachment = %#v, want offset=%d and preserved payload", text, got, wantOffset)
+	}
+}
+
 func TestRouterResumeReturnsLiveReconnectWithoutSuccessNotice(t *testing.T) {
 	t.Parallel()
 
@@ -489,6 +606,8 @@ type fakeService struct {
 	agentStatus        control.AgentStatusSnapshot
 	resumeSnapshot     control.SessionSnapshot
 	resumeErr          error
+	skillResolutions   map[string]SkillResolveResult
+	skillResolveErr    error
 }
 
 func (s *fakeService) Status(context.Context) (control.StatusSnapshot, error) {
@@ -615,6 +734,12 @@ func (s *fakeService) CompleteFile(context.Context, string, int) ([]control.Comp
 }
 func (s *fakeService) CompleteSkill(context.Context, string, int) ([]control.CompletionCandidate, error) {
 	return nil, nil
+}
+func (s *fakeService) ResolveSkill(_ context.Context, name string) (SkillResolveResult, error) {
+	if s.skillResolveErr != nil {
+		return SkillResolveResult{}, s.skillResolveErr
+	}
+	return s.skillResolutions[strings.ToLower(strings.TrimSpace(name))], nil
 }
 func (s *fakeService) CompleteResume(context.Context, string, int) ([]control.ResumeCandidate, error) {
 	return nil, nil

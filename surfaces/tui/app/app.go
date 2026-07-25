@@ -38,7 +38,7 @@ func NewModel(cfg Config) *Model {
 	palette.Styles.HelpStyle = theme.HelpHintTextStyle()
 
 	ta := textarea.New()
-	ta.Placeholder = "Type a message, /agent-name prompt, #path/to/file, or $skill"
+	ta.Placeholder = ""
 	ta.Prompt = "> "
 	ta.SetPromptFunc(2, func(info textarea.PromptInfo) string {
 		if info.LineNumber == 0 {

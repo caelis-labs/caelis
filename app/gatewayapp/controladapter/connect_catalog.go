@@ -241,21 +241,13 @@ func completeConnectProviders(query string, limit int) []SlashArgCandidate {
 	templates := modelconfig.ProviderTemplates()
 	out := make([]SlashArgCandidate, 0, len(templates))
 	for _, template := range templates {
-		if query != "" && !strings.Contains(strings.ToLower(template.Label+" "+template.DefaultBaseURL), strings.ToLower(strings.TrimSpace(query))) {
+		if query != "" && !strings.Contains(strings.ToLower(template.Label+" "+template.Description), strings.ToLower(strings.TrimSpace(query))) {
 			continue
-		}
-		detailParts := []string{strings.TrimSpace(template.Description), strings.TrimSpace(template.DefaultBaseURL)}
-		if template.AuthDisplay != "" {
-			detailParts = append(detailParts, template.AuthDisplay)
-		} else if template.NoAuthRequired {
-			detailParts = append(detailParts, "no auth")
-		} else if env := modelconfig.DefaultTokenEnv(template.Provider, template.DefaultBaseURL); env != "" {
-			detailParts = append(detailParts, "env:"+env)
 		}
 		out = append(out, SlashArgCandidate{
 			Value:   template.Label,
 			Display: template.Label,
-			Detail:  strings.Join(compactNonEmpty(detailParts), " · "),
+			Detail:  strings.TrimSpace(template.Description),
 			NoAuth:  template.NoAuthRequired || template.AuthFlow != "",
 		})
 		if len(out) >= limit {

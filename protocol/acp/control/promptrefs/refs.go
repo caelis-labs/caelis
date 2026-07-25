@@ -42,7 +42,7 @@ func ScanSubmissionReferences(text string) []Token {
 				Value: string(input[i+1 : end]),
 			})
 			i = end - 1
-		case '#':
+		case '@':
 			if !referenceBoundary(input, i) {
 				continue
 			}
@@ -74,7 +74,7 @@ func MentionQueryAtCursorWithPrefix(input []rune, cursor int) (int, int, string,
 	for start > 0 && IsMentionQueryRune(input[start-1]) {
 		start--
 	}
-	if start == 0 || (input[start-1] != '@' && input[start-1] != '#') {
+	if start == 0 || input[start-1] != '@' {
 		return 0, 0, "", "", false
 	}
 	at := start - 1

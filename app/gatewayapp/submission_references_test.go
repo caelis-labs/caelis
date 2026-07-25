@@ -68,7 +68,7 @@ func TestProjectSubmissionReferencesProjectsFilesWhenSkillDiscoveryFails(t *test
 
 	projected, err := stack.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
 		Session: session.Session{CWD: workspace},
-		Input:   "$cmpctl inspect #dict.go",
+		Input:   "$cmpctl inspect @dict.go",
 	})
 	if err != nil {
 		t.Fatalf("projectSubmissionReferences() error = %v, want nil for skill discovery error", err)
@@ -95,7 +95,7 @@ func TestProjectSubmissionReferencesDoesNotDiscoverSkillsForFileOnlyReferences(t
 
 	projected, err := stack.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
 		Session: session.Session{CWD: workspace},
-		Input:   "read #dict.go",
+		Input:   "read @dict.go",
 	})
 	if err != nil {
 		t.Fatalf("projectSubmissionReferences() error = %v, want nil for file-only reference", err)

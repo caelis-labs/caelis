@@ -528,12 +528,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	}
-	// $skill overlay — same pattern.
-	if len(m.skillCandidates) > 0 {
-		if handled, cmd := m.handleSkillKey(msg); handled {
-			return m, cmd
-		}
-	}
 	// /resume overlay.
 	if m.resumeActive {
 		if handled, cmd := m.handleResumeKey(msg); handled {
@@ -738,9 +732,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case len(m.mentionCandidates) > 0:
 			m.applyMentionCompletion()
 			m.syncTextareaFromInput()
-		case len(m.skillCandidates) > 0:
-			m.applySkillCompletion()
-			m.syncTextareaFromInput()
 		case len(m.resumeCandidates) > 0:
 			m.applyResumeCompletion()
 			m.syncTextareaFromInput()
@@ -856,7 +847,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncInputFromTextarea()
 		}
 
-		// Trigger @mention / $skill / slash overlays whenever the textarea value
+		// Trigger @mention and slash overlays whenever the textarea value
 		// actually changed. Relying on key metadata alone is not robust across
 		// terminal protocols; under real PTY input some printable keys may not
 		// populate msg.Key().Text even though the composer changed.

@@ -73,15 +73,13 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 		{name: "patch uses exact surgical edits", toolName: filesystem.PatchToolName, wants: []string{"surgical edits", "if_revision"}},
 		{name: "read exposes revision replay guard", toolName: filesystem.ReadToolName, wants: []string{"has_more", "revision", "if_revision"}},
 		{
-			name:     "task distinguishes output observation from terminal wait",
+			name:     "task explains purpose and when to use",
 			toolName: task.ToolName,
 			wants: []string{
-				"Read accepts exactly one handle",
-				"for Spawn it immediately returns the current state",
-				"exact final_message",
-				"write sends terminal stdin then briefly awaits its response",
-				"Wait observes either target for at most one minute",
-				"may return state=running",
+				"Control asynchronous work",
+				"RunCommand or Spawn",
+				"after receiving a task handle",
+				"inspect progress or results",
 			},
 		},
 		{name: "spawn remains bounded", toolName: spawn.ToolName, wants: []string{"bounded delegated child session", "self-contained"}},
@@ -120,6 +118,21 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 		for _, want := range wants {
 			if !strings.Contains(description, want) {
 				t.Fatalf("RunCommand property %s description missing %q: %q", property, want, description)
+			}
+		}
+	}
+
+	taskSpec := toolByName[task.ToolName]
+	taskPropertyGuidance := map[string][]string{
+		"action": {"RunCommand briefly waits for output", "Spawn returns output_preview", "exact final_message", "wait observes up to one minute", "may stay running", "write sends input", "cancel stops work"},
+		"handle": {"Session-scoped handle", "Only wait and cancel", "comma-separated handles"},
+		"input":  {"Required only for write", "terminal stdin", "completed Spawn", "follow-up prompt"},
+	}
+	for property, wants := range taskPropertyGuidance {
+		description := functionPropertyDescription(t, taskSpec, property)
+		for _, want := range wants {
+			if !strings.Contains(description, want) {
+				t.Fatalf("Task property %s description missing %q: %q", property, want, description)
 			}
 		}
 	}

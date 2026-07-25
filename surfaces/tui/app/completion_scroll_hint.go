@@ -15,7 +15,6 @@ func (m *Model) completionOverlayActive() bool {
 		return false
 	}
 	return len(m.mentionCandidates) > 0 ||
-		len(m.skillCandidates) > 0 ||
 		len(m.resumeCandidates) > 0 ||
 		len(m.slashArgCandidates) > 0 ||
 		len(m.slashCandidates) > 0
@@ -39,8 +38,6 @@ func (m *Model) activeCompletionScroll() (completionScrollAffordance, bool) {
 	switch {
 	case len(m.mentionCandidates) > 0:
 		return m.mentionScrollAffordance(), true
-	case len(m.skillCandidates) > 0:
-		return m.skillScrollAffordance(), true
 	case len(m.resumeCandidates) > 0:
 		return m.resumeScrollAffordance(), true
 	case len(m.slashArgCandidates) > 0:
@@ -155,15 +152,6 @@ func (m *Model) mentionScrollAffordance() completionScrollAffordance {
 	start, end := completionWindowRange(m.mentionIndex, total, maxItems)
 	atBottom := m.mentionIndex >= total-1
 	canLoadMore := shouldLoadMoreCompletionCandidates(total, m.mentionLimit)
-	return completionScrollFromWindow(start, end, total, atBottom, canLoadMore)
-}
-
-func (m *Model) skillScrollAffordance() completionScrollAffordance {
-	total := len(m.skillCandidates)
-	maxItems := minInt(completionOverlayVisibleItems, total)
-	start, end := completionWindowRange(m.skillIndex, total, maxItems)
-	atBottom := m.skillIndex >= total-1
-	canLoadMore := shouldLoadMoreCompletionCandidates(total, m.skillLimit)
 	return completionScrollFromWindow(start, end, total, atBottom, canLoadMore)
 }
 

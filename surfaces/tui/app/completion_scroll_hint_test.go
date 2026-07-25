@@ -10,41 +10,31 @@ import (
 )
 
 func TestCompletionListDoesNotRenderEarlierOrMoreLines(t *testing.T) {
-	model := NewModel(Config{
-		SkillComplete: func(query string, limit int) ([]CompletionCandidate, error) {
-			return numberedCompletionCandidates("skill", 12), nil
-		},
-	})
-	model.setInputText("$")
-	model.syncTextareaFromInput()
-	model.refreshSkill()
+	model := NewModel(Config{Commands: numberedSlashCommands("command", 12)})
+	model.setInputText("/")
+	model.refreshSlashCommands()
 	for i := 0; i < 10; i++ {
-		_, _ = model.handleSkillKey(keyPress("down"))
+		_, _ = model.handleSlashCommandKey(keyPress("down"))
 	}
 
-	rendered := ansi.Strip(model.renderSkillList())
+	rendered := ansi.Strip(model.renderSlashCommandList())
 	if strings.Contains(rendered, "earlier") || strings.Contains(rendered, "more") {
-		t.Fatalf("renderSkillList() = %q, should not contain scroll text rows", rendered)
+		t.Fatalf("renderSlashCommandList() = %q, should not contain scroll text rows", rendered)
 	}
 }
 
 func TestCompletionOverlayFooterShowsBelowList(t *testing.T) {
-	model := NewModel(Config{
-		SkillComplete: func(query string, limit int) ([]CompletionCandidate, error) {
-			return numberedCompletionCandidates("skill", 12), nil
-		},
-	})
+	model := NewModel(Config{Commands: numberedSlashCommands("command", 12)})
 	model.width = 100
-	model.setInputText("$")
-	model.syncTextareaFromInput()
-	model.refreshSkill()
+	model.setInputText("/")
+	model.refreshSlashCommands()
 	for i := 0; i < 10; i++ {
-		_, _ = model.handleSkillKey(keyPress("down"))
+		_, _ = model.handleSlashCommandKey(keyPress("down"))
 	}
 
-	rendered := ansi.Strip(model.renderSkillList())
+	rendered := ansi.Strip(model.renderSlashCommandList())
 	if !strings.Contains(rendered, "select") || !strings.Contains(rendered, "enter") {
-		t.Fatalf("renderSkillList() = %q, want unified overlay footer", rendered)
+		t.Fatalf("renderSlashCommandList() = %q, want unified overlay footer", rendered)
 	}
 	if hint := strings.TrimSpace(model.hintRowText()); hint != "" {
 		t.Fatalf("hintRowText() = %q, want empty while completion overlay is active", hint)
@@ -52,31 +42,21 @@ func TestCompletionOverlayFooterShowsBelowList(t *testing.T) {
 }
 
 func TestCompletionOverlayFooterAlwaysShowsWhenOverlayOpen(t *testing.T) {
-	model := NewModel(Config{
-		SkillComplete: func(query string, limit int) ([]CompletionCandidate, error) {
-			return numberedCompletionCandidates("skill", 5), nil
-		},
-	})
+	model := NewModel(Config{Commands: numberedSlashCommands("command", 5)})
 	model.width = 100
-	model.setInputText("$")
-	model.syncTextareaFromInput()
-	model.refreshSkill()
+	model.setInputText("/")
+	model.refreshSlashCommands()
 
-	rendered := ansi.Strip(model.renderSkillList())
+	rendered := ansi.Strip(model.renderSlashCommandList())
 	if !strings.Contains(rendered, "tab fill") {
-		t.Fatalf("renderSkillList() = %q, want unified overlay footer even when list fits", rendered)
+		t.Fatalf("renderSlashCommandList() = %q, want unified overlay footer even when list fits", rendered)
 	}
 }
 
-func TestSkillScrollAffordanceAtTopAndBottom(t *testing.T) {
-	model := NewModel(Config{
-		SkillComplete: func(query string, limit int) ([]CompletionCandidate, error) {
-			return numberedCompletionCandidates("skill", 12), nil
-		},
-	})
-	model.setInputText("$")
-	model.syncTextareaFromInput()
-	model.refreshSkill()
+func TestSlashCommandScrollAffordanceAtTopAndBottom(t *testing.T) {
+	model := NewModel(Config{Commands: numberedSlashCommands("command", 12)})
+	model.setInputText("/")
+	model.refreshSlashCommands()
 
 	aff, ok := model.activeCompletionScroll()
 	if !ok || !aff.Show {
@@ -90,7 +70,7 @@ func TestSkillScrollAffordanceAtTopAndBottom(t *testing.T) {
 	}
 
 	for i := 0; i < 11; i++ {
-		_, _ = model.handleSkillKey(keyPress("down"))
+		_, _ = model.handleSlashCommandKey(keyPress("down"))
 	}
 	aff, ok = model.activeCompletionScroll()
 	if !ok || !aff.Show {
@@ -102,6 +82,14 @@ func TestSkillScrollAffordanceAtTopAndBottom(t *testing.T) {
 	if aff.CanDown {
 		t.Fatalf("CanDown = true at bottom without more pages, want false")
 	}
+}
+
+func numberedSlashCommands(prefix string, count int) []string {
+	out := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		out = append(out, fmt.Sprintf("%s-%02d", prefix, i))
+	}
+	return out
 }
 
 func TestPromptChoiceFooterBelowModal(t *testing.T) {

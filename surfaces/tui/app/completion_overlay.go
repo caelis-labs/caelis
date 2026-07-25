@@ -154,11 +154,3 @@ func completionNameColumnWidth(width int) int {
 		return minInt(16, maxInt(10, width/3))
 	}
 }
-
-func completionCandidateKind(candidate CompletionCandidate) string {
-	return strings.TrimSpace(candidate.Kind)
-}
-
-func completionCandidateDetail(candidate CompletionCandidate) string {
-	return strings.TrimSpace(candidate.Detail)
-}

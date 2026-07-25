@@ -32,7 +32,7 @@ type Config struct {
 	DefaultApprovalMode ApprovalMode
 	ApprovalApprover    approval.Approver
 	ApprovalReviewer    ApprovalReviewer
-	// SubmissionReferences projects surface shorthand such as $skill or #file
+	// SubmissionReferences projects internal skill references and @file
 	// before a turn reaches the model/runtime boundary.
 	SubmissionReferences SubmissionReferenceProjector
 	Clock                func() time.Time

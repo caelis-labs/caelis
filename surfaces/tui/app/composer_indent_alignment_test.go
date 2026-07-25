@@ -100,24 +100,22 @@ func TestComposerSitsOneColumnPastTranscriptGutter(t *testing.T) {
 
 			frame := evalharness.NormalizeFrame(model.View().Content)
 			plain := ansi.Strip(frame)
-			var transcriptIndent, inputIndent, statusIndent int
-			var foundTranscript, foundInput, foundStatus bool
+			inputIndent := model.composerInputColumnOffset()
+			var transcriptIndent, statusIndent int
+			var foundTranscript, foundStatus bool
 			for _, line := range strings.Split(plain, "\n") {
 				trimmed := strings.TrimSpace(line)
 				switch {
 				case !foundTranscript && (strings.Contains(trimmed, "hello user") || strings.Contains(trimmed, "Ran ls")):
 					transcriptIndent = leadingSpaces(line)
 					foundTranscript = true
-				case !foundInput && strings.Contains(trimmed, "Type a message"):
-					inputIndent = leadingSpaces(line)
-					foundInput = true
 				case !foundStatus && strings.Contains(trimmed, "not configured"):
 					statusIndent = leadingSpaces(line)
 					foundStatus = true
 				}
 			}
-			if !foundTranscript || !foundInput || !foundStatus {
-				t.Fatalf("missing rows transcript=%v input=%v status=%v\n%s", foundTranscript, foundInput, foundStatus, plain)
+			if !foundTranscript || !foundStatus {
+				t.Fatalf("missing rows transcript=%v status=%v\n%s", foundTranscript, foundStatus, plain)
 			}
 			if transcriptIndent != tuikit.GutterNarrative {
 				t.Fatalf("transcript indent=%d, want GutterNarrative=%d", transcriptIndent, tuikit.GutterNarrative)

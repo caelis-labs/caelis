@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -502,6 +503,143 @@ func TestSlashCommandSelectionMovesWithArrowKeys(t *testing.T) {
 	}
 }
 
+func TestSlashCompletionMergesSkillsWithoutShadowingCommands(t *testing.T) {
+	model := NewModel(Config{
+		Commands: []string{"help", "status", "reviewer"},
+		SkillComplete: func(string, int) ([]CompletionCandidate, error) {
+			return []CompletionCandidate{
+				{Value: "lint", Display: "lint", Kind: "Skill", Detail: "Run lint checks"},
+				{Value: "status", Display: "status", Kind: "Skill", Detail: "Custom status workflow"},
+				{Value: "custom:status", Display: "status", Kind: "Plugin", Detail: "Namespaced status workflow"},
+				{Value: "reviewer", Display: "reviewer", Kind: "Skill", Detail: "Custom review workflow"},
+				{Value: "superpowers:brainstorm", Display: "brainstorm", Kind: "Plugin", Detail: "superpowers · Explore alternatives"},
+			}, nil
+		},
+	})
+
+	model.setInputText("/")
+	model.refreshSlashCommands()
+
+	counts := map[string]int{}
+	for _, candidate := range model.slashCandidates {
+		counts[candidate]++
+	}
+	for _, want := range []string{"/help", "/status", "/reviewer", "/lint", "/custom:status", "/superpowers:brainstorm"} {
+		if counts[want] != 1 {
+			t.Fatalf("slashCandidates = %#v, want one %s", model.slashCandidates, want)
+		}
+	}
+	if counts["/brainstorm"] != 0 {
+		t.Fatalf("slashCandidates = %#v, plugin skill should use canonical namespace", model.slashCandidates)
+	}
+	if got := model.slashCommandDisplay("/custom:status"); got != "/custom:status" {
+		t.Fatalf("slashCommandDisplay(/custom:status) = %q, want canonical display beside built-in /status", got)
+	}
+	if detail := model.commandCompletionDetail("/lint"); !strings.Contains(detail, "Skill") || !strings.Contains(detail, "Run lint checks") {
+		t.Fatalf("commandCompletionDetail(/lint) = %q, want skill metadata", detail)
+	}
+
+	model.setInputText("/brain")
+	model.refreshSlashCommands()
+	if len(model.slashCandidates) != 1 || model.slashCandidates[0] != "/superpowers:brainstorm" {
+		t.Fatalf("slashCandidates for plugin local query = %#v, want canonical namespaced command", model.slashCandidates)
+	}
+}
+
+func TestSlashCompletionDistinguishesDuplicateSkillLabelsFromCanonicalValues(t *testing.T) {
+	model := NewModel(Config{
+		Commands: []string{"help"},
+		SkillComplete: func(string, int) ([]CompletionCandidate, error) {
+			return []CompletionCandidate{
+				{Value: "one:lint", Display: "lint", Kind: "Plugin", Detail: "one · Run repository lint"},
+				{Value: "two:lint", Display: "lint", Kind: "Plugin", Detail: "two · Run workspace lint"},
+			}, nil
+		},
+	})
+
+	model.setInputText("/")
+	model.refreshSlashCommands()
+
+	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/one:lint", "/two:lint"}) {
+		t.Fatalf("slashCandidates = %#v, want unique canonical command values", got)
+	}
+	for _, command := range []string{"/one:lint", "/two:lint"} {
+		if got := model.slashCommandDisplay(command); got != "/lint" {
+			t.Fatalf("slashCommandDisplay(%q) = %q, want shared local label", command, got)
+		}
+	}
+	if one, two := model.commandCompletionDetail("/one:lint"), model.commandCompletionDetail("/two:lint"); one == two || !strings.Contains(one, "one") || !strings.Contains(two, "two") {
+		t.Fatalf("duplicate label details = %q and %q, want distinct sources", one, two)
+	}
+
+	model.slashIndex = 2
+	model.applySlashCommandCompletion()
+	if got := string(model.input); got != "/two:lint " {
+		t.Fatalf("selected duplicate skill inserted %q, want canonical slash identity", got)
+	}
+}
+
+func TestSlashCompletionRebuildClearsStaleSkillDetails(t *testing.T) {
+	skills := []CompletionCandidate{
+		{Value: "lint", Display: "lint", Kind: "Skill", Detail: "Run lint checks"},
+	}
+	model := NewModel(Config{
+		Commands: []string{"help"},
+		SkillComplete: func(string, int) ([]CompletionCandidate, error) {
+			return skills, nil
+		},
+	})
+	model.setInputText("/")
+	model.refreshSlashCommands()
+	if detail := model.commandCompletionDetail("/lint"); !strings.Contains(detail, "Run lint checks") {
+		t.Fatalf("initial /lint detail = %q, want skill detail", detail)
+	}
+
+	skills = nil
+	model.setInputText("/h")
+	model.refreshSlashCommands()
+	if len(model.slashDetails) != 0 {
+		t.Fatalf("slashDetails after rebuild = %#v, want stale skill metadata cleared", model.slashDetails)
+	}
+}
+
+func TestDollarDoesNotInvokeSkillCompletion(t *testing.T) {
+	calls := 0
+	model := NewModel(Config{
+		Commands: []string{"help"},
+		SkillComplete: func(string, int) ([]CompletionCandidate, error) {
+			calls++
+			return []CompletionCandidate{{Value: "lint", Display: "lint", Kind: "Skill"}}, nil
+		},
+	})
+	model.setInputText("$li")
+	model.syncTextareaFromInput()
+	model.refreshCompletionOverlaysNow()
+
+	if calls != 0 {
+		t.Fatalf("SkillComplete calls = %d, want $ input disconnected from skill completion", calls)
+	}
+	if model.completionOverlayActive() {
+		t.Fatal("$ input opened a completion overlay, want slash-only skill discovery")
+	}
+}
+
+func TestComposerPlaceholderIsEmptyAndPromptRemains(t *testing.T) {
+	model := NewModel(Config{})
+	if model.textarea.Placeholder != "" {
+		t.Fatalf("textarea.Placeholder = %q, want a clean empty composer", model.textarea.Placeholder)
+	}
+	if model.inputPromptPrefix() != "> " {
+		t.Fatalf("inputPromptPrefix() = %q, want the user prompt marker", model.inputPromptPrefix())
+	}
+	if rendered := ansi.Strip(model.renderInputBar()); strings.TrimSpace(rendered) != ">" {
+		t.Fatalf("empty composer rendered %q, want only the user prompt marker", rendered)
+	}
+	if cursor := model.regularInputCursor(); cursor == nil {
+		t.Fatal("empty composer cursor = nil, want a usable focused input area")
+	}
+}
+
 func TestSlashCommandCompletionRefreshesBeforeAcceptingStaleCandidates(t *testing.T) {
 	model := NewModel(Config{
 		Commands: []string{"alpha", "doctor"},
@@ -979,175 +1117,6 @@ func TestResumePrefixTypingUsesTextareaValueAsSourceOfTruth(t *testing.T) {
 	}
 }
 
-func TestSkillCompletionRendersMetadataAndUsesCandidateValue(t *testing.T) {
-	model := NewModel(Config{
-		Commands: DefaultCommands(),
-		SkillComplete: func(query string, limit int) ([]CompletionCandidate, error) {
-			return []CompletionCandidate{
-				{Value: "lint", Display: "lint", Detail: "Run lint checks · ~/.agents/skills/lint/SKILL.md"},
-			}, nil
-		},
-	})
-
-	model.input = []rune("$li")
-	model.cursor = len(model.input)
-	model.refreshSkill()
-	if len(model.skillCandidates) != 1 {
-		t.Fatalf("skillCandidates = %#v, want one candidate", model.skillCandidates)
-	}
-	if !strings.Contains(model.renderSkillList(), "Run lint checks") {
-		t.Fatalf("renderSkillList() = %q, want detail text", model.renderSkillList())
-	}
-	model.applySkillCompletion()
-	if got := string(model.input); got != "$lint " {
-		t.Fatalf("input after skill completion = %q, want $lint ", got)
-	}
-}
-
-func TestSkillCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
-	var gotLimit int
-	model := NewModel(Config{
-		Commands: DefaultCommands(),
-		SkillComplete: func(query string, limit int) ([]CompletionCandidate, error) {
-			gotLimit = limit
-			return numberedCompletionCandidates("skill", 12), nil
-		},
-	})
-
-	model.setInputText("$")
-	model.syncTextareaFromInput()
-	model.refreshSkill()
-	if gotLimit != completionCandidateFetchLimit {
-		t.Fatalf("SkillComplete limit = %d, want %d", gotLimit, completionCandidateFetchLimit)
-	}
-	if len(model.skillCandidates) != 12 {
-		t.Fatalf("skillCandidates = %d, want 12", len(model.skillCandidates))
-	}
-	for i := 0; i < 10; i++ {
-		handled, _ := model.handleSkillKey(keyPress("down"))
-		if !handled {
-			t.Fatal("handleSkillKey(down) = false, want true")
-		}
-	}
-
-	rendered := ansi.Strip(model.renderSkillList())
-	if !strings.Contains(rendered, "skill-10") {
-		t.Fatalf("renderSkillList() = %q, want selected skill-10 visible", rendered)
-	}
-	if strings.Contains(rendered, "skill-00") {
-		t.Fatalf("renderSkillList() = %q, should have scrolled past skill-00", rendered)
-	}
-	if strings.Contains(rendered, "earlier") || strings.Contains(rendered, "more") {
-		t.Fatalf("renderSkillList() = %q, should not contain scroll text rows", rendered)
-	}
-	rendered = ansi.Strip(model.renderSkillList())
-	if !strings.Contains(rendered, "select") {
-		t.Fatalf("renderSkillList() = %q, want unified overlay footer", rendered)
-	}
-}
-
-func TestSkillCompletionLoadsNextPageAtBottomThenWrapsWhenExhausted(t *testing.T) {
-	var limits []int
-	model := NewModel(Config{
-		Commands: DefaultCommands(),
-		SkillComplete: func(query string, limit int) ([]CompletionCandidate, error) {
-			limits = append(limits, limit)
-			return numberedCompletionCandidates("skill", minInt(limit, 65)), nil
-		},
-	})
-
-	model.setInputText("$")
-	model.syncTextareaFromInput()
-	model.refreshSkill()
-	if len(model.skillCandidates) != completionCandidateFetchLimit {
-		t.Fatalf("skillCandidates = %d, want initial page of %d", len(model.skillCandidates), completionCandidateFetchLimit)
-	}
-
-	model.skillIndex = len(model.skillCandidates) - 1
-	handled, _ := model.handleSkillKey(keyPress("down"))
-	if !handled {
-		t.Fatal("handleSkillKey(down) = false, want true")
-	}
-	if want := completionCandidateFetchLimit * 2; limits[len(limits)-1] != want {
-		t.Fatalf("SkillComplete second limit = %d, want %d", limits[len(limits)-1], want)
-	}
-	if len(model.skillCandidates) != 65 {
-		t.Fatalf("skillCandidates after paging = %d, want 65", len(model.skillCandidates))
-	}
-	if model.skillIndex != completionCandidateFetchLimit {
-		t.Fatalf("skillIndex after paging = %d, want %d", model.skillIndex, completionCandidateFetchLimit)
-	}
-
-	callCount := len(limits)
-	model.skillIndex = len(model.skillCandidates) - 1
-	handled, _ = model.handleSkillKey(keyPress("down"))
-	if !handled {
-		t.Fatal("handleSkillKey(down exhausted) = false, want true")
-	}
-	if len(limits) != callCount {
-		t.Fatalf("SkillComplete called after exhausted page: %v", limits)
-	}
-	if model.skillIndex != 0 {
-		t.Fatalf("skillIndex after exhausted down = %d, want wrap to 0", model.skillIndex)
-	}
-}
-
-func TestSkillCompletionListKeepsRowsCompact(t *testing.T) {
-	model := NewModel(Config{})
-	model.width = 120
-	longDetail := "This skill should be used when the user asks to generate a very detailed report with many phases and validation requirements. · ~/.agents/skills/report/SKILL.md"
-	model.skillCandidates = []CompletionCandidate{
-		{Value: "story-init", Display: "story-init", Detail: "Start a new story project."},
-		{Value: "report-builder", Display: "report-builder", Detail: longDetail},
-	}
-	model.skillIndex = 0
-
-	rendered := model.renderSkillList()
-	plain := ansi.Strip(rendered)
-	if strings.Contains(plain, "$report-builder") || strings.Contains(plain, "$story-init") {
-		t.Fatalf("renderSkillList() = %q, should not show $ prefixes in skill rows", plain)
-	}
-	if !strings.Contains(rendered, model.theme.CommandStyle().Render("report-builder")) {
-		t.Fatalf("renderSkillList() = %q, want non-selected skill name rendered with command style", rendered)
-	}
-	if strings.Contains(plain, longDetail) {
-		t.Fatalf("renderSkillList() = %q, non-selected detail should be truncated", plain)
-	}
-	if strings.Contains(plain, "SKILL.md") {
-		t.Fatalf("renderSkillList() = %q, should not show skill file paths in picker rows", plain)
-	}
-}
-
-func TestSkillCompletionListKeepsHeightStableAcrossSelection(t *testing.T) {
-	model := NewModel(Config{})
-	model.width = 120
-	fullDetail := "Assist writers with story planning, character development, plot structuring, chapter writing, timeline tracking, and consistency checking. · ~/.agents/skills/storyboard-manager/SKILL.md"
-	model.skillCandidates = []CompletionCandidate{
-		{Value: "story-init", Display: "story-init", Detail: "Start a story project."},
-		{Value: "storyboard-manager", Display: "storyboard-manager", Detail: fullDetail},
-	}
-	model.skillIndex = 0
-	first := strings.Count(model.renderSkillList(), "\n")
-	model.skillIndex = 1
-	secondRendered := model.renderSkillList()
-	second := strings.Count(secondRendered, "\n")
-
-	plain := ansi.Strip(secondRendered)
-
-	if first != second {
-		t.Fatalf("renderSkillList() line count changed across selection: %d != %d", first, second)
-	}
-	if !strings.Contains(plain, "Assist writer") {
-		t.Fatalf("renderSkillList() = %q, want selected skill short description", plain)
-	}
-	if strings.Contains(plain, "consistency checking.") {
-		t.Fatalf("renderSkillList() = %q, selected detail should stay truncated", plain)
-	}
-	if strings.Contains(plain, "SKILL.md") {
-		t.Fatalf("renderSkillList() = %q, selected detail should not include path metadata", plain)
-	}
-}
-
 func TestSlashCompletionRendersDescriptionsWithoutHeaderOrBorder(t *testing.T) {
 	model := NewModel(Config{Commands: []string{"model", "status"}})
 	model.width = 79 // 设为 79 以测试无边框响应式降级
@@ -1261,18 +1230,12 @@ func TestInputCompletionSelectionsAvoidFocusAccent(t *testing.T) {
 	model.slashIndex = 1
 	cases["slash"] = model.renderSlashCommandList()
 
-	model.mentionPrefix = "#"
+	model.mentionPrefix = "@"
 	model.mentionCandidates = []CompletionCandidate{
 		{Value: "docs/readme.md", Display: "docs/readme.md", Detail: "file"},
 	}
 	model.mentionIndex = 0
 	cases["file"] = model.renderMentionList()
-
-	model.skillCandidates = []CompletionCandidate{
-		{Value: "story-init", Display: "story-init", Detail: "Start a story project."},
-	}
-	model.skillIndex = 0
-	cases["skill"] = model.renderSkillList()
 
 	model.slashArgCandidates = []SlashArgCandidate{
 		{Value: "use", Display: "use", Detail: "switch active model"},
@@ -1373,7 +1336,7 @@ func TestFileCompletionAcceptPreservesSelectedCandidateAcrossRefresh(t *testing.
 				},
 			})
 
-			model.setInputText("#docs/")
+			model.setInputText("@docs/")
 			model.syncTextareaFromInput()
 			model.refreshMention()
 			if len(model.mentionCandidates) != 2 {
@@ -1384,7 +1347,7 @@ func TestFileCompletionAcceptPreservesSelectedCandidateAcrossRefresh(t *testing.
 			_, cmd := model.handleKey(keyPress(keyName))
 			runCompletionCmd(t, model, cmd)
 
-			if got := string(model.input); got != "#docs/message.sql " {
+			if got := string(model.input); got != "@docs/message.sql " {
 				t.Fatalf("input after %s = %q, want selected file path", keyName, got)
 			}
 		})
@@ -1394,7 +1357,7 @@ func TestFileCompletionAcceptPreservesSelectedCandidateAcrossRefresh(t *testing.
 func TestFileCompletionListHidesPrefixAndTypeDetail(t *testing.T) {
 	model := NewModel(Config{})
 	model.width = 120
-	model.mentionPrefix = "#"
+	model.mentionPrefix = "@"
 	model.mentionCandidates = []CompletionCandidate{
 		{Value: "docs/", Display: "docs/", Detail: "directory"},
 		{Value: "docs/message.sql", Display: "docs/message.sql", Detail: "file"},
@@ -1403,7 +1366,7 @@ func TestFileCompletionListHidesPrefixAndTypeDetail(t *testing.T) {
 
 	rendered := ansi.Strip(model.renderMentionList())
 
-	for _, unwanted := range []string{"#docs/", "#docs/message.sql", "#docs/providers", "directory", "file"} {
+	for _, unwanted := range []string{"@docs/", "@docs/message.sql", "@docs/providers", "directory", "file"} {
 		if strings.Contains(rendered, unwanted) {
 			t.Fatalf("renderMentionList() = %q, should not contain %q", rendered, unwanted)
 		}
@@ -1424,7 +1387,7 @@ func TestFileCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
 		},
 	})
 
-	model.setInputText("#")
+	model.setInputText("@")
 	model.syncTextareaFromInput()
 	model.refreshMention()
 	if gotLimit != completionCandidateFetchLimit {
@@ -1464,7 +1427,7 @@ func TestFileCompletionLoadsNextPageAtBottomThenWrapsWhenExhausted(t *testing.T)
 		},
 	})
 
-	model.setInputText("#")
+	model.setInputText("@")
 	model.syncTextareaFromInput()
 	model.refreshMention()
 	if len(model.mentionCandidates) != completionCandidateFetchLimit {
