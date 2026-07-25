@@ -27,7 +27,7 @@ func (m *Model) ensureMainTimelineBlock(event TranscriptEvent) *MainACPTurnBlock
 	}
 	block := NewMainACPTurnBlock(strings.TrimSpace(event.TurnID))
 	m.fillMainTimelineBlockMetadata(block, event)
-	m.doc.Append(block)
+	m.appendMainTranscriptBlock(block)
 	m.mainTimelineTailID = block.BlockID()
 	m.markViewportStructureDirty()
 	return block

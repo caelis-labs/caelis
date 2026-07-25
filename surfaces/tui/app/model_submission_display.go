@@ -25,7 +25,7 @@ func (m *Model) commitUserDisplayLine(displayLine string) {
 		m.insertSpacing(tuikit.LineStyleUser, userLine)
 	}
 	block := NewUserNarrativeBlock(displayLine)
-	m.doc.Append(block)
+	m.appendMainTranscriptBlock(block)
 	m.lastCommittedStyle = tuikit.LineStyleUser
 	m.lastCommittedRaw = userLine
 	m.hasCommittedLine = true

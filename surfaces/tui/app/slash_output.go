@@ -70,7 +70,7 @@ func (m *Model) appendSlashOutputLines(lines []slashOutputLine) (tea.Model, tea.
 		m.appendSlashOutputSpacer()
 	}
 	block := newSlashOutputBlock(lines)
-	m.doc.Append(block)
+	m.appendMainTranscriptBlock(block)
 	m.appendSlashOutputSpacer()
 	m.lastCommittedStyle = lastSlashOutputStyle(lines)
 	m.lastCommittedRaw = lastSlashOutputText(lines)
@@ -185,7 +185,7 @@ func renderSlashStatusLines(status control.StatusSnapshot) []slashOutputLine {
 			fields = append(fields, control.DisplayField{Label: "Plan", Value: view.RateLimits.Plan})
 		}
 		for _, row := range view.RateLimits.Rows {
-			fields = append(fields, control.DisplayField{Label: row.Label, Value: row.Value})
+			fields = append(fields, control.DisplayField(row))
 		}
 		lines = append(lines, renderSlashFields(fields)...)
 	}

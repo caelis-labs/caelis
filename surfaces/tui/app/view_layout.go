@@ -487,6 +487,8 @@ func (m *Model) markCompactHeightBudgetBlocksDirty() {
 	}
 	for _, block := range m.doc.Blocks() {
 		switch b := block.(type) {
+		case *WelcomeBlock:
+			m.markViewportBlockDirty(b.BlockID())
 		case *MainACPTurnBlock:
 			if b.compactHeightBudget.heightSensitive() || hasHeightSensitiveLiveReasoning(b.Events, b.Status) {
 				m.markViewportBlockDirty(b.BlockID())
@@ -558,6 +560,9 @@ func (m *Model) mousePointToContentPoint(x int, y int, clamp bool) (textSelectio
 
 	col := max(x-m.mainColumnX()-tuikit.GutterNarrative, 0)
 	width := displayColumns(m.viewportPlainLines[line])
+	if line < len(m.viewportClickBounds) {
+		width = maxInt(width, m.viewportClickBounds[line].end)
+	}
 	if col > width {
 		col = width
 	}

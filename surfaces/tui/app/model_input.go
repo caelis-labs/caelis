@@ -271,6 +271,16 @@ func (m *Model) handleViewportMouseRelease(mouse tea.Mouse) tea.Cmd {
 	if !m.selecting {
 		return nil
 	}
+	// X10 mouse reporting does not preserve the released button and Bubble Tea
+	// surfaces that release as MouseNone. A selection can only start from a
+	// left-button press, so accept that compatibility form while still
+	// rejecting explicit non-left releases.
+	if mouse.Button != tea.MouseLeft && mouse.Button != tea.MouseNone {
+		m.cancelSelectionAutoScroll()
+		m.selecting = false
+		m.clearSelection()
+		return nil
+	}
 	m.cancelSelectionAutoScroll()
 	point, ok := m.mousePointToContentPoint(mouse.X, mouse.Y, true)
 	if ok {
@@ -279,12 +289,10 @@ func (m *Model) handleViewportMouseRelease(mouse tea.Mouse) tea.Cmd {
 	hadSelectionRange := m.hasSelectionRange()
 	m.selecting = false
 	if !hadSelectionRange {
-		// No text selected — treat as a click; check for panel/header toggles.
-		if m.tryTogglePanelAtClick(mouse) {
-			m.syncViewportContent()
-		}
+		// No text selected — treat as a click; check for panel toggles or welcome actions.
+		cmd := m.tryHandleViewportClick(mouse)
 		m.clearSelection()
-		return nil
+		return cmd
 	}
 	text := m.selectionText()
 	if text == "" {
@@ -300,28 +308,27 @@ func (m *Model) handleViewportMouseRelease(mouse tea.Mouse) tea.Cmd {
 	return cmd
 }
 
-// tryTogglePanelAtClick checks if the click hit a block-local expand toggle.
-func (m *Model) tryTogglePanelAtClick(mouse tea.Mouse) bool {
+func (m *Model) tryHandleViewportClick(mouse tea.Mouse) tea.Cmd {
 	contentLine, ok := m.contentLineAtViewportY(mouse.Y)
 	if !ok {
-		return false
+		return nil
 	}
 	bid := m.viewportBlockIDs[contentLine]
 	if bid == "" {
-		return false
+		return nil
 	}
 	if contentLine >= 0 && contentLine < len(m.viewportClickTokens) {
 		if token := strings.TrimSpace(m.viewportClickTokens[contentLine]); token != "" {
 			if m.tryToggleFoldToken(bid, token) {
-				return true
+				m.syncViewportContent()
+				return nil
+			}
+			if _, ok := welcomeActionForToken(token); ok {
+				return m.tryTriggerWelcomeActionToken(bid, token, contentLine)
 			}
 		}
 	}
-	blk := m.doc.Find(bid)
-	if blk == nil {
-		return false
-	}
-	return false
+	return nil
 }
 
 func (m *Model) handleInputAreaMouse(mouse tea.Mouse, phase mousePhase) (bool, tea.Cmd) {
@@ -752,36 +759,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Send):
 		execLine, displayLine, fileAttachments := m.prepareComposerSubmission()
-		if execLine == "" && len(fileAttachments) == 0 {
-			return m, nil
-		}
-		mode := m.submissionModeForLine(execLine)
-		if m.turnRunning() {
-			if m.isConfiguredSlashControlLine(execLine) && mode != SubmissionModeOverlay {
-				return m, m.showHint("slash commands are unavailable while running", hintOptions{
-					priority:       HintPriorityHigh,
-					clearOnMessage: true,
-					clearAfter:     copyHintDuration,
-				})
-			}
-			return m.submitLineWithDisplayAndAttachmentsOptions(execLine, displayLine, fileAttachments, submitLineOptions{
-				recordHistory: true,
-			})
-		}
-		if (execLine == "/connect" || strings.HasPrefix(execLine, "/connect ")) && m.isCommandAvailable("connect") {
-			if def := m.findWizard("connect"); def != nil {
-				query := strings.TrimSpace(strings.TrimPrefix(execLine, "/connect"))
-				m.startWizardWithQuery(def, query)
-				return m, nil
-			}
-			return m.submitLine("/connect")
-		}
-		if m.tryOpenSlashArgPicker(execLine) {
-			return m, m.requestCompletionRefresh()
-		}
-		return m.submitLineWithDisplayAndAttachmentsOptions(execLine, displayLine, fileAttachments, submitLineOptions{
-			recordHistory: true,
-		})
+		return m.submitInteractiveLine(execLine, displayLine, fileAttachments)
 
 	case key.Matches(msg, m.keys.ImagePaste):
 		if m.turnRunning() {
@@ -1201,6 +1179,43 @@ func (m *Model) submitLine(line string) (tea.Model, tea.Cmd) {
 		})
 	}
 	return m.submitLineWithDisplayAndAttachmentsOptions(strings.TrimSpace(line), m.displayLineWithAttachments(line), inputAttachmentsToSubmission(m.inputAttachments), submitLineOptions{
+		recordHistory: true,
+	})
+}
+
+// submitInteractiveLine is the shared keyboard/mouse entry for a complete
+// composer line. It preserves the existing command availability gates and
+// opens slash pickers or wizards before falling through to normal submission.
+func (m *Model) submitInteractiveLine(execLine string, displayLine string, attachments []Attachment) (tea.Model, tea.Cmd) {
+	execLine = strings.TrimSpace(execLine)
+	if execLine == "" && len(attachments) == 0 {
+		return m, nil
+	}
+	mode := m.submissionModeForLine(execLine)
+	if m.turnRunning() {
+		if m.isConfiguredSlashControlLine(execLine) && mode != SubmissionModeOverlay {
+			return m, m.showHint("slash commands are unavailable while running", hintOptions{
+				priority:       HintPriorityHigh,
+				clearOnMessage: true,
+				clearAfter:     copyHintDuration,
+			})
+		}
+		return m.submitLineWithDisplayAndAttachmentsOptions(execLine, displayLine, attachments, submitLineOptions{
+			recordHistory: true,
+		})
+	}
+	if (execLine == "/connect" || strings.HasPrefix(execLine, "/connect ")) && m.isCommandAvailable("connect") {
+		if def := m.findWizard("connect"); def != nil {
+			query := strings.TrimSpace(strings.TrimPrefix(execLine, "/connect"))
+			m.startWizardWithQuery(def, query)
+			return m, nil
+		}
+		return m.submitLine("/connect")
+	}
+	if m.tryOpenSlashArgPicker(execLine) {
+		return m, m.requestCompletionRefresh()
+	}
+	return m.submitLineWithDisplayAndAttachmentsOptions(execLine, displayLine, attachments, submitLineOptions{
 		recordHistory: true,
 	})
 }

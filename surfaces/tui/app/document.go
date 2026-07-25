@@ -14,12 +14,14 @@ import (
 
 // RenderedRow is one terminal line of output from a block's Render method.
 type RenderedRow struct {
-	Styled     string // ANSI-colored display text
-	Plain      string // plain text for selection/copy
-	BlockID    string // originating block ID
-	ClickToken string // optional interaction token for row-level hit testing
-	PreWrapped bool   // if true, already wrapped to viewport width — skip re-wrapping
-	ACPHeader  bool   // if true, wrap as an ACP transcript header row
+	Styled        string // ANSI-colored display text
+	Plain         string // plain text for selection/copy
+	BlockID       string // originating block ID
+	ClickToken    string // optional interaction token for row-level hit testing
+	ClickStartCol int    // inclusive display-column start; valid when ClickEndCol > ClickStartCol
+	ClickEndCol   int    // exclusive display-column end for a bounded click target
+	PreWrapped    bool   // if true, already wrapped to viewport width — skip re-wrapping
+	ACPHeader     bool   // if true, wrap as an ACP transcript header row
 }
 
 // StyledRow creates a RenderedRow from a styled line, deriving Plain automatically.
@@ -38,8 +40,28 @@ func StyledPlainClickableRow(blockID, plain, styled, clickToken string) Rendered
 	return RenderedRow{Styled: styled, Plain: plain, BlockID: blockID, ClickToken: clickToken}
 }
 
+func StyledPlainBoundedClickableRow(blockID, plain, styled, clickToken string, clickStartCol, clickEndCol int) RenderedRow {
+	return RenderedRow{
+		Styled:        styled,
+		Plain:         plain,
+		BlockID:       blockID,
+		ClickToken:    clickToken,
+		ClickStartCol: clickStartCol,
+		ClickEndCol:   clickEndCol,
+	}
+}
+
 func StyledPlainClickablePreWrappedRow(blockID, plain, styled, clickToken string) RenderedRow {
 	return RenderedRow{Styled: styled, Plain: plain, BlockID: blockID, ClickToken: clickToken, PreWrapped: true}
+}
+
+type clickColumnRange struct {
+	start int
+	end   int
+}
+
+func (r clickColumnRange) valid() bool {
+	return r.end > r.start
 }
 
 // PlainRow creates a RenderedRow from a plain text line (no ANSI).

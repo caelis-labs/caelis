@@ -218,7 +218,7 @@ func (m *Model) handleAnswerStream(actor string, text string, final bool) (tea.M
 		} else {
 			block.appendActiveDelta(text)
 		}
-		m.doc.Append(block)
+		m.appendMainTranscriptBlock(block)
 		m.activeAssistantID = block.BlockID()
 		m.activeAssistantActor = actor
 		m.hasCommittedLine = true
@@ -302,7 +302,7 @@ func (m *Model) handleReasoningStream(actor string, text string, final bool) (te
 			block := NewReasoningBlock(actor)
 			block.Raw = text
 			block.Streaming = false
-			m.doc.Append(block)
+			m.appendMainTranscriptBlock(block)
 			m.hasCommittedLine = true
 			m.lastCommittedStyle = tuikit.LineStyleReasoning
 			m.lastCommittedRaw = "› "
@@ -330,7 +330,7 @@ func (m *Model) handleReasoningStream(actor string, text string, final bool) (te
 	if m.activeReasoningID == "" {
 		block := NewReasoningBlock(actor)
 		block.appendActiveDelta(text)
-		m.doc.Append(block)
+		m.appendMainTranscriptBlock(block)
 		m.activeReasoningID = block.BlockID()
 		m.activeReasoningActor = actor
 		m.hasCommittedLine = true
@@ -879,7 +879,7 @@ func (m *Model) ensureParticipantTurnBlock(sessionID string, actor string) *Part
 		}
 	}
 	block := NewParticipantTurnBlock(sessionID, actor)
-	m.doc.Append(block)
+	m.appendMainTranscriptBlock(block)
 	m.participantTurnIDs[sessionID] = block.BlockID()
 	m.markViewportStructureDirty()
 	return block

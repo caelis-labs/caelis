@@ -375,6 +375,7 @@ type Model struct {
 	viewportPlainLines            []string
 	viewportBlockIDs              []string
 	viewportClickTokens           []string
+	viewportClickBounds           []clickColumnRange
 	frameTopTrim                  int
 	viewport                      viewport.Model
 	viewportFollowState           viewportFollowState

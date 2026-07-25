@@ -23,6 +23,7 @@ type viewportRenderEntry struct {
 	styledLines []string
 	plainLines  []string
 	clickTokens []string
+	clickBounds []clickColumnRange
 }
 
 type viewportRhythmClass string
@@ -79,7 +80,7 @@ func (m *Model) viewportRenderCacheMatchesDocument(ctx BlockRenderContext) bool 
 
 func (m *Model) renderViewportEntry(block Block, cacheKey string, ctx BlockRenderContext) viewportRenderEntry {
 	m.observeBlockRender(block.Kind())
-	styledLines, plainLines, clickTokens := m.wrapRenderedRowsForViewport(block, block.Render(ctx), ctx.Width, ctx)
+	styledLines, plainLines, clickTokens, clickBounds := m.wrapRenderedRowsForViewport(block, block.Render(ctx), ctx.Width, ctx)
 	return viewportRenderEntry{
 		blockID:     block.BlockID(),
 		cacheKey:    cacheKey,
@@ -87,16 +88,18 @@ func (m *Model) renderViewportEntry(block Block, cacheKey string, ctx BlockRende
 		styledLines: styledLines,
 		plainLines:  plainLines,
 		clickTokens: clickTokens,
+		clickBounds: clickBounds,
 	}
 }
 
-func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, wrapWidth int, ctx BlockRenderContext) ([]string, []string, []string) {
+func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, wrapWidth int, ctx BlockRenderContext) ([]string, []string, []string, []clickColumnRange) {
 	if wrapWidth <= 0 {
 		wrapWidth = 1
 	}
 	styledLines := make([]string, 0, len(rawRows)+8)
 	plainLines := make([]string, 0, len(rawRows)+8)
 	clickTokens := make([]string, 0, len(rawRows)+8)
+	clickBounds := make([]clickColumnRange, 0, len(rawRows)+8)
 
 	for _, row := range rawRows {
 		styledLine := m.adaptHistoryLineForViewport(row.Styled, wrapWidth)
@@ -111,6 +114,7 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 				plainLines = append(plainLines, wrappedPlain...)
 				for range wrappedStyled {
 					clickTokens = append(clickTokens, row.ClickToken)
+					clickBounds = append(clickBounds, clickColumnRange{})
 				}
 				continue
 			}
@@ -125,6 +129,7 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 				plainLines = append(plainLines, wrappedPlain...)
 				for range wrappedStyled {
 					clickTokens = append(clickTokens, row.ClickToken)
+					clickBounds = append(clickBounds, clickColumnRange{})
 				}
 				continue
 			}
@@ -159,6 +164,7 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 			styledLines = append(styledLines, "")
 			plainLines = append(plainLines, "")
 			clickTokens = append(clickTokens, row.ClickToken)
+			clickBounds = append(clickBounds, clickColumnRange{})
 			continue
 		}
 
@@ -171,9 +177,38 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 		for range sParts {
 			clickTokens = append(clickTokens, row.ClickToken)
 		}
+		clickBounds = append(clickBounds, wrappedClickColumnRanges(row, plainParts)...)
 	}
 
-	return styledLines, plainLines, clickTokens
+	return styledLines, plainLines, clickTokens, clickBounds
+}
+
+func wrappedClickColumnRanges(row RenderedRow, plainParts []string) []clickColumnRange {
+	out := make([]clickColumnRange, len(plainParts))
+	if row.ClickEndCol <= row.ClickStartCol {
+		return out
+	}
+	sourceStart := maxInt(0, row.ClickStartCol)
+	sourceEnd := maxInt(sourceStart, row.ClickEndCol)
+	if len(out) == 1 {
+		out[0] = clickColumnRange{start: sourceStart, end: sourceEnd}
+		return out
+	}
+	partOffset := 0
+	for i, part := range plainParts {
+		partWidth := displayColumns(part)
+		partEnd := partOffset + partWidth
+		start := maxInt(sourceStart, partOffset)
+		end := minInt(sourceEnd, partEnd)
+		if end > start {
+			out[i] = clickColumnRange{
+				start: start - partOffset,
+				end:   end - partOffset,
+			}
+		}
+		partOffset = partEnd
+	}
+	return out
 }
 
 func isACPTranscriptBlockKind(kind BlockKind) bool {
@@ -351,6 +386,7 @@ func (m *Model) rebuildViewportLineCaches(ctx BlockRenderContext) {
 	plainLines := make([]string, 0, 64)
 	blockIDs := make([]string, 0, 64)
 	clickTokens := make([]string, 0, 64)
+	clickBounds := make([]clickColumnRange, 0, 64)
 
 	var prevEntry *viewportRenderEntry
 	for i := range m.viewportRenderEntries {
@@ -360,12 +396,14 @@ func (m *Model) rebuildViewportLineCaches(ctx BlockRenderContext) {
 			plainLines = append(plainLines, "")
 			blockIDs = append(blockIDs, "")
 			clickTokens = append(clickTokens, "")
+			clickBounds = append(clickBounds, clickColumnRange{})
 		}
 		entry.lineStart = len(styledLines)
 		entry.lineCount = len(entry.styledLines)
 		styledLines = append(styledLines, entry.styledLines...)
 		plainLines = append(plainLines, entry.plainLines...)
 		clickTokens = append(clickTokens, entry.clickTokens...)
+		clickBounds = append(clickBounds, entry.clickBounds...)
 		for range entry.styledLines {
 			blockIDs = append(blockIDs, entry.blockID)
 		}
@@ -380,18 +418,21 @@ func (m *Model) rebuildViewportLineCaches(ctx BlockRenderContext) {
 	blockIDs = append(blockIDs, streamBlockIDs...)
 	for range streamStyled {
 		clickTokens = append(clickTokens, "")
+		clickBounds = append(clickBounds, clickColumnRange{})
 	}
 
 	m.viewportStyledLines = append(m.viewportStyledLines[:0], styledLines...)
 	m.viewportPlainLines = append(m.viewportPlainLines[:0], plainLines...)
 	m.viewportBlockIDs = append(m.viewportBlockIDs[:0], blockIDs...)
 	m.viewportClickTokens = append(m.viewportClickTokens[:0], clickTokens...)
+	m.viewportClickBounds = append(m.viewportClickBounds[:0], clickBounds...)
 }
 
 func (m *Model) syncDirtyViewportRenderEntries(ctx BlockRenderContext) bool {
 	if m == nil ||
 		len(m.dirtyViewportBlocks) == 0 ||
 		m.viewportStructureDirty ||
+		len(m.viewportClickBounds) != len(m.viewportStyledLines) ||
 		m.lastViewportRenderContextKey != viewportRenderContextKey(ctx) {
 		return false
 	}
@@ -430,6 +471,7 @@ func (m *Model) syncDirtyViewportRenderEntries(ctx BlockRenderContext) bool {
 		m.viewportStyledLines = spliceStrings(m.viewportStyledLines, start, count, next.styledLines)
 		m.viewportPlainLines = spliceStrings(m.viewportPlainLines, start, count, next.plainLines)
 		m.viewportClickTokens = spliceStrings(m.viewportClickTokens, start, count, next.clickTokens)
+		m.viewportClickBounds = spliceClickColumnRanges(m.viewportClickBounds, start, count, next.clickBounds)
 		blockIDs := make([]string, len(next.styledLines))
 		for i := range blockIDs {
 			blockIDs[i] = next.blockID
@@ -478,6 +520,14 @@ func (m *Model) shiftViewportEntryLineStartsAfter(changedIndex int, delta int) {
 
 func spliceStrings(base []string, start int, count int, repl []string) []string {
 	out := make([]string, 0, len(base)-count+len(repl))
+	out = append(out, base[:start]...)
+	out = append(out, repl...)
+	out = append(out, base[start+count:]...)
+	return out
+}
+
+func spliceClickColumnRanges(base []clickColumnRange, start int, count int, repl []clickColumnRange) []clickColumnRange {
+	out := make([]clickColumnRange, 0, len(base)-count+len(repl))
 	out = append(out, base[:start]...)
 	out = append(out, repl...)
 	out = append(out, base[start+count:]...)

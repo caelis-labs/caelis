@@ -82,6 +82,16 @@ func (m *Model) refreshHistoryTailState() {
 
 // commitLine colorizes one complete line and appends it to the document.
 func (m *Model) commitLine(line string) {
+	m.commitLineWithAppender(line, m.appendMainTranscriptBlock)
+}
+
+// commitInitialLine preserves the welcome card while startup diagnostics are
+// seeded. Subsequent transcript content uses commitLine and dismisses it.
+func (m *Model) commitInitialLine(line string) {
+	m.commitLineWithAppender(line, m.doc.Append)
+}
+
+func (m *Model) commitLineWithAppender(line string, appendBlock func(Block)) {
 	if strings.TrimSpace(line) == "" && !m.hasCommittedLine {
 		return
 	}
@@ -125,7 +135,7 @@ func (m *Model) commitLine(line string) {
 	}
 
 	block := NewTranscriptBlock(line, style)
-	m.doc.Append(block)
+	appendBlock(block)
 
 	if isRetry {
 		m.transientBlockID = block.BlockID()

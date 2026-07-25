@@ -119,7 +119,7 @@ func (m *Model) appendEventStreamTranscriptText(text string) (tea.Model, tea.Cmd
 	m.finalizeAssistantBlock()
 	m.finalizeReasoningBlock()
 	block := NewTranscriptBlock(text, tuikit.DetectLineStyle(text))
-	m.doc.Append(block)
+	m.appendMainTranscriptBlock(block)
 	m.hasCommittedLine = true
 	m.lastCommittedStyle = block.Style
 	m.syncViewportContent()

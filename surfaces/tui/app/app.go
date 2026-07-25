@@ -190,7 +190,7 @@ func (m *Model) Init() tea.Cmd {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		m.commitLine(line)
+		m.commitInitialLine(line)
 	}
 	m.hasCommittedLine = m.doc.Len() > 0
 	m.syncViewportContent()
