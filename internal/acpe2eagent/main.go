@@ -35,6 +35,17 @@ import (
 )
 
 func main() {
+	if mode := strings.TrimSpace(os.Getenv("SDK_ACP_WIRE_MODE")); mode != "" {
+		switch mode {
+		case "delayed_xsearch":
+			if err := acp.ServeStdio(context.Background(), newDelayedXSearchAgent(), os.Stdin, os.Stdout); err != nil {
+				log.Fatal(err)
+			}
+			return
+		default:
+			log.Fatalf("unknown SDK_ACP_WIRE_MODE %q", mode)
+		}
+	}
 	llm, err := resolveLLM()
 	if err != nil {
 		log.Fatal(err)

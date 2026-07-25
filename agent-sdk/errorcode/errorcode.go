@@ -25,11 +25,16 @@ const (
 	RateLimited        Code = "rate_limited"
 	Overloaded         Code = "overloaded"
 	Timeout            Code = "timeout"
-	Cancelled          Code = "cancelled"
-	Unavailable        Code = "unavailable"
-	Unsupported        Code = "unsupported"
-	UnknownOutcome     Code = "unknown_outcome"
-	Internal           Code = "internal"
+	// Cancelled means a caller, context, or authorized controller requested
+	// cancellation.
+	Cancelled Code = "cancelled"
+	// Interrupted means the executing Agent or Runtime stopped its own work
+	// without a caller cancellation request. It is terminal but not a failure.
+	Interrupted    Code = "interrupted"
+	Unavailable    Code = "unavailable"
+	Unsupported    Code = "unsupported"
+	UnknownOutcome Code = "unknown_outcome"
+	Internal       Code = "internal"
 )
 
 // Coder is implemented by typed SDK errors.

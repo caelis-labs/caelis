@@ -15,7 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
-func TestParticipantPromptUsesLeaseFenceAndWatchdogEnvelope(t *testing.T) {
+func TestParticipantPromptUsesLeaseFenceWithoutOrchestrationWatchdog(t *testing.T) {
 	t.Parallel()
 
 	service := inmemory.NewStore(inmemory.Config{})
@@ -80,12 +80,18 @@ func TestParticipantPromptUsesLeaseFenceAndWatchdogEnvelope(t *testing.T) {
 	if promptCalls != 1 || guard.Authority != session.MutationAuthorityRuntime || guard.FencingToken == 0 {
 		t.Fatalf("participant prompt calls=%d guard=%#v, want one fenced execution", promptCalls, guard)
 	}
-	if participantRunner == nil || participantRunner.cancelCalls.Load() != 1 {
-		t.Fatalf("participant watchdog runner = %#v, want one high-confidence Interrupt", participantRunner)
+	if participantRunner == nil {
+		t.Fatal("participant runner is nil")
+	}
+	participantRunner.mu.Lock()
+	cancelCalls := participantRunner.cancel
+	participantRunner.mu.Unlock()
+	if cancelCalls != 0 {
+		t.Fatalf("participant runner Cancel calls = %d, want no orchestration watchdog", cancelCalls)
 	}
 }
 
-func newParticipantEnvelopeRuntime(t *testing.T, inner agent.Runtime, sessions session.Service, owner string) *WatchdogRuntime {
+func newParticipantEnvelopeRuntime(t *testing.T, inner agent.Runtime, sessions session.Service, owner string) *LeasedRuntime {
 	t.Helper()
 	leasing, ok := sessions.(session.SessionLeaseService)
 	if !ok {
@@ -97,14 +103,7 @@ func newParticipantEnvelopeRuntime(t *testing.T, inner agent.Runtime, sessions s
 	if err != nil {
 		t.Fatal(err)
 	}
-	watchdog, err := NewWatchdogRuntime(WatchdogRuntimeConfig{
-		Runtime: leased, Sessions: sessions,
-		Thresholds: WatchdogThresholds{ToolLoopStreak: 2, TextLoopStreak: 50},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return watchdog
+	return leased
 }
 
 type participantEnvelopeRuntime struct {
@@ -113,7 +112,7 @@ type participantEnvelopeRuntime struct {
 	mu                sync.Mutex
 	promptCalls       int
 	promptGuard       session.MutationGuard
-	participantRunner *controlledWatchdogRunner
+	participantRunner *leaseTestRunner
 	streams           stream.Service
 	approvals         int
 }
@@ -162,11 +161,8 @@ func (r *participantEnvelopeRuntime) PromptParticipant(ctx context.Context, req 
 	}); err != nil {
 		return agent.RunResult{}, err
 	}
-	runner := newControlledWatchdogRunner("participant-run", []*session.Event{
-		sameWatchdogToolCall("participant-call-1"),
-		sameWatchdogToolCall("participant-call-2"),
-		sameWatchdogToolCall("participant-call-3"),
-	}, true)
+	runner := newLeaseTestRunner("participant-run")
+	runner.finish()
 	r.mu.Lock()
 	r.promptCalls++
 	r.promptGuard = guard

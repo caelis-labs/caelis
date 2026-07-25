@@ -353,9 +353,9 @@ from the current canonical Turn:
   second model Turn. It may overlap an active Turn only under the explicit
   `participant` purpose and still requires revision, delegation, attachment
   generation, atomic lifecycle-event, and exact committed-result checks;
-- approval resolution, watchdog audit checkpoints, and validated system-result
-  commits are the other explicitly classified Control writes that may coexist
-  with a live Turn. Unknown Control purposes fail closed while a lease is live;
+- approval resolution and validated system-result commits are the other
+  explicitly classified Control writes that may coexist with a live Turn.
+  Unknown Control purposes fail closed while a lease is live;
 - controller handoff and coordinator binding changes are exclusive. Control
   first acquires and heartbeats the Session execution lease, carries that fence
   on the atomic binding/event commit, and releases it before the new controller
@@ -418,13 +418,13 @@ Control logic using SDK primitives.
 ## Runtime Safety Contract
 
 Fixed generic step/model/tool budgets are not part of the SDK `Run` contract.
-They can abort valid open-ended Agent work. This does not mean execution may be
-unbounded without policy: Control must be able to observe lifecycle, usage,
-elapsed time, repeated action signatures, and progress. The watchdog has one
-narrow active safety action: interrupt a live Turn only after high-confidence
-model-output loop evidence. Other cancellation and confirmation policy belongs
-to explicit Control orchestration, not watchdog capacity handling. The
-production Control host implements this above the fenced Runtime decorator.
+They can abort valid open-ended Agent work. Each Agent implementation instead
+owns safety decisions that require knowledge of its internal Agent Loop. The
+built-in chat Agent observes raw provider-neutral model output and may stop only
+its own loop after high-confidence generation-loop evidence. Control may
+observe lifecycle, usage, elapsed time, and progress, but it does not inspect
+Agent content or acquire an automatic watchdog cancellation authority.
+Explicit cancellation and confirmation policy remains Control orchestration.
 
 Runtime safety also requires:
 
@@ -459,24 +459,41 @@ really exits. The per-Runtime cap therefore acts as a stuck-call circuit
 breaker: saturation is a typed resource-exhaustion failure and never creates
 another guardrail goroutine.
 
-The production Control host also owns a generation-tail loop watchdog above
-Runtime and the session lease wrapper. It is not a wall-clock task timeout. It
-probes the live Runner event stream for high-confidence generation loops:
-exact reasoning/assistant tail cycles, or identical tool name+args steps only
-when the content segment since the previous tool call is also identical
-(different thought with the same tool is progress). Stream deltas are
-concatenated without inserted separators; empty tool args fail open. Repeated
-`Task` wait and read calls are work observation rather than repeated execution:
-each observation resets tool-loop evidence and is never itself counted.
-High-confidence hits claim one interrupt and cancel the live Turn
-(`WatchdogActionInterrupt`); the durable loop checkpoint is best-effort audit,
-not a precondition and not model context. Review runs asynchronously in at most
-eight Runtime-wide slots. Saturation drops that evidence window: there is no
-queue and no capacity-triggered Cancel. Reviewer timeout/failure/panic and
-checkpoint failure never delay normal stream completion, enter the Turn event
-stream, or cancel the Turn. Normal completion, explicit Close, or public Cancel
-invalidates every late watchdog decision. Public Cancel and a concurrently
-validated loop Interrupt still share one underlying cancellation effect.
+The built-in chat Agent creates one generation-tail watchdog for each
+`Agent.Run`. Detection runs synchronously on `model.StreamEvent` values returned
+by `LLM.Generate`, before Session-event projection, Runner buffering, or tool
+execution. Exact reasoning/assistant tail cycles and identical
+content-plus-complete-tool-argument model steps are high-confidence evidence;
+different content or arguments are progress. The complete final model message
+supplies cross-step content identity even when only some parts were streamed;
+streamed deltas are not counted again from the cumulative final response for
+within-step text detection. Provider attempt resets clear partial evidence, and
+empty or invalid tool arguments fail open. Steps consisting only of `Task wait`
+calls are work observation and reset evidence; a mixed step remains ordinary
+loop evidence, as does immediate `Task read`. A hit emits an Agent-owned
+journal lifecycle checkpoint and returns `GenerationLoopError` with
+`errorcode.Interrupted` before the triggering repeated tool can execute.
+`errorcode.Cancelled` remains reserved for caller-, context-, or
+Control-requested cancellation. Both outcomes end the Runtime lifecycle as
+interrupted rather than failed, while the durable execution journal records
+Agent self-stop as `ExecutionInterrupted` and requested cancellation as
+`ExecutionCancelled`. A completed model step with no tool calls clears prior
+tool-loop evidence.
+
+The conservative thresholds are private defaults of the built-in chat Agent.
+There is intentionally no host or Control threshold knob: adding one would
+recreate orchestration ownership over Agent-internal model semantics. A future
+Agent-specific configuration, if justified by evidence, must remain inside
+that Agent implementation.
+
+This watchdog never consumes `session.Event`, Runner, Envelope, ACP update, or
+TraceSink output. Control does not wrap Runtime or participant handles with it.
+External ACP controllers, Side Agents, and spawned third-party Agents therefore
+remain completely outside the parent watchdog; their own endpoint owns Agent
+Loop safety. A Caelis self/model child receives the built-in chat watchdog only
+inside its child process. User-requested cancellation remains a distinct
+Control-authorized operation and must retain the cancellation-request versus
+proven-terminal distinction.
 
 Task control calls have a separate lifecycle from their target. A successful
 `wait`, `read`, `write`, or `cancel` call is a completed tool invocation; the

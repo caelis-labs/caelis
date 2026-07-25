@@ -133,8 +133,8 @@ derives and validates the final assembled model/tool/sandbox requirements.
   file stores validate it in the same atomic write section and return
   `session.ErrLeaseConflict` for an expired or replaced owner.
 - Non-Run Control writes opt in with a named `session.ControlMutationGuard`.
-  Approval resolution, participant attach/detach, watchdog audit, validated
-  system commits, and tests may overlap a live Turn. Participant lifecycle
+  Approval resolution, participant attach/detach, validated system commits,
+  and tests may overlap a live Turn. Participant lifecycle
   remains protected by revision/delegation/generation CAS and atomic event
   persistence. Session lifecycle and configuration writes require a quiescent
   Session. Unknown purposes fail closed; handoff and coordinator binding always
@@ -170,11 +170,20 @@ derives and validates the final assembled model/tool/sandbox requirements.
   unblocks producers and consumers. Natural completion closes production but
   preserves queued events so the selected consumer can drain them. Callers
   that stop iteration early must call `Close`.
-- The Control watchdog may Interrupt a live Turn only for high-confidence
-  generation-loop evidence. Its reviewer is asynchronous and Runtime-wide
-  bounded; capacity saturation drops evidence. Reviewer timeout/failure/panic,
-  checkpoint failure, and decisions arriving after normal completion never
-  become Turn errors or capacity-triggered cancellation.
+- Each Agent implementation owns generation-loop safety at its model boundary.
+  The built-in chat Agent observes raw provider-neutral model output and stops
+  its own loop before executing the triggering repeated tool step. Control does
+  not inspect Agent content for watchdog purposes. In particular, parent
+  Runtime and Control layers never watchdog or automatically cancel external
+  ACP controllers, participants, or spawned third-party Agents.
+- A built-in chat generation-loop stop returns typed
+  `*chat.GenerationLoopError` with `errorcode.Interrupted`. The distinct
+  `errorcode.Cancelled` category means a caller, context, or authorized
+  controller requested cancellation. Runtime maps both to lifecycle
+  `interrupted`; the durable execution journal records them as
+  `ExecutionInterrupted` and `ExecutionCancelled`, respectively. The
+  Agent-owned loop checkpoint is journal visibility; it is not canonical
+  dialogue or client semantic replay.
 - Approval resolution is persisted before a waiting run is awakened.
   `AttachLiveRun(runID)` attaches only to execution still registered in the
   current Runtime process. It is not durable continuation. After restart, a

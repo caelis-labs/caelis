@@ -70,7 +70,6 @@ func TestControlMutationOverlapPolicyFailsUnknownPurposeClosed(t *testing.T) {
 		want    bool
 	}{
 		{purpose: session.ControlMutationPurposeApproval, want: true},
-		{purpose: session.ControlMutationPurposeWatchdog, want: true},
 		{purpose: session.ControlMutationPurposeParticipant, want: true},
 		{purpose: session.ControlMutationPurposeSystemCommit, want: true},
 		{purpose: session.ControlMutationPurposeLifecycle, want: false},

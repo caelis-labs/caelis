@@ -202,12 +202,14 @@ func (r *Runtime) runAttempt(
 		if toolFactOrdinal != nil && scopeRuntimeToolFactIdentity(normalized, runID, turnID, *toolFactOrdinal+1) {
 			(*toolFactOrdinal)++
 		}
-		if session.IsCanonicalHistoryEvent(normalized) {
+		if runtimeAgentEventShouldPersist(normalized) {
 			normalized, err = r.appendRuntimeEventOrLifecycle(ctx, activeSession, ref, turnID, normalized)
 			if err != nil {
 				return batch, emitted, inputPersisted, err
 			}
-			_ = r.tasks.syncCanonicalToolResult(ctx, ref, normalized)
+			if session.IsCanonicalHistoryEvent(normalized) {
+				_ = r.tasks.syncCanonicalToolResult(ctx, ref, normalized)
+			}
 		}
 		batch = append(batch, session.CloneEvent(normalized))
 		if sink != nil {
@@ -226,6 +228,15 @@ func (r *Runtime) runAttempt(
 		return batch, emitted, inputPersisted, err
 	}
 	return batch, emitted, inputPersisted, nil
+}
+
+// runtimeAgentEventShouldPersist keeps semantic history and Agent-owned
+// execution checkpoints durable without promoting journal facts into model or
+// client replay lanes. Journal payloads other than lifecycle checkpoints do
+// not enter the ordinary Agent event path.
+func runtimeAgentEventShouldPersist(event *session.Event) bool {
+	return session.IsCanonicalHistoryEvent(event) ||
+		(session.IsJournal(event) && session.EventTypeOf(event) == session.EventTypeLifecycle)
 }
 
 func (r *Runtime) appendRuntimeEventOrLifecycle(

@@ -30,13 +30,20 @@ func collectFinalResponse(
 	llm model.LLM,
 	req *model.Request,
 	messageID string,
+	watchdog *generationWatchdog,
 	yieldChunk func(*session.Event) bool,
 ) (*model.Response, error) {
 	var final *model.Response
 	textFilters := map[int]*citationMarkerStreamFilter{}
 	textFilterOrder := make([]int, 0)
+	if watchdog != nil {
+		watchdog.beginModelStep()
+	}
 	for event, err := range llm.Generate(ctx, req) {
 		if err != nil {
+			return nil, err
+		}
+		if err := watchdog.observeStreamEvent(event); err != nil {
 			return nil, err
 		}
 		if req != nil && req.Stream {
@@ -80,6 +87,9 @@ func collectFinalResponse(
 	}
 	if final == nil {
 		return nil, errors.New("agent-sdk/runtime/chat: model returned no final response")
+	}
+	if err := watchdog.finishModelStep(final); err != nil {
+		return nil, err
 	}
 	if final.ContextWindowTokens <= 0 {
 		final.ContextWindowTokens = modelContextWindowTokens(llm)

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -289,8 +290,29 @@ func (r *runner) finish() {
 }
 
 func interruptedOrFailedStatus(ctx context.Context, err error) agent.RunLifecycleStatus {
-	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+	if isInterruptedError(ctx, err) {
 		return agent.RunLifecycleStatusInterrupted
 	}
 	return agent.RunLifecycleStatusFailed
+}
+
+func isInterruptedError(ctx context.Context, err error) bool {
+	return errorcode.Is(err, errorcode.Interrupted) || isCancellationError(ctx, err)
+}
+
+func isCancellationError(ctx context.Context, err error) bool {
+	return errors.Is(err, context.Canceled) ||
+		(ctx != nil && errors.Is(ctx.Err(), context.Canceled)) ||
+		errorcode.Is(err, errorcode.Cancelled)
+}
+
+func executionJournalStatus(ctx context.Context, err error) session.ExecutionStatus {
+	switch {
+	case errorcode.Is(err, errorcode.Interrupted):
+		return session.ExecutionInterrupted
+	case isCancellationError(ctx, err):
+		return session.ExecutionCancelled
+	default:
+		return session.ExecutionFailed
+	}
 }

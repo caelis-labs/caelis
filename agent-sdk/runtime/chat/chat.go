@@ -84,6 +84,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
 		messages := messagesFromContext(ctx)
 		stream := a.request.StreamEnabled(false)
+		watchdog := newDefaultGenerationWatchdog()
 		visibility := tool.NewToolVisibility(a.tools)
 		for event := range ctx.Events().All() {
 			if event != nil {
@@ -94,13 +95,19 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			}
 		}
 		for {
-			assistantMessage, calls, final, messageID, ok, err := a.collectCanonicalModelStep(ctx, messages, stream, &visibility, func(event *session.Event) bool {
+			assistantMessage, calls, final, messageID, ok, err := a.collectCanonicalModelStep(ctx, messages, stream, watchdog, &visibility, func(event *session.Event) bool {
 				return yield(event, nil)
 			})
 			if !ok {
 				return
 			}
 			if err != nil {
+				var loopErr *GenerationLoopError
+				if errors.As(err, &loopErr) {
+					if !yield(generationLoopEvent(loopErr), nil) {
+						return
+					}
+				}
 				yield(nil, err)
 				return
 			}
@@ -113,6 +120,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				if a.drainPendingSubmissions(ctx, &messages, func(event *session.Event) bool {
 					return yield(event, nil)
 				}) {
+					watchdog.resetAll()
 					continue
 				}
 				return
@@ -143,9 +151,11 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				}
 			}
 			messages = append(messages, toolMessages...)
-			a.drainPendingSubmissions(ctx, &messages, func(event *session.Event) bool {
+			if a.drainPendingSubmissions(ctx, &messages, func(event *session.Event) bool {
 				return yield(event, nil)
-			})
+			}) {
+				watchdog.resetAll()
+			}
 		}
 	}
 }
@@ -154,6 +164,7 @@ func (a *Agent) collectCanonicalModelStep(
 	ctx agent.Context,
 	messages []model.Message,
 	stream bool,
+	watchdog *generationWatchdog,
 	visibility *tool.ToolVisibility,
 	yield func(*session.Event) bool,
 ) (model.Message, []model.ToolCall, *model.Response, string, bool, error) {
@@ -171,7 +182,7 @@ func (a *Agent) collectCanonicalModelStep(
 		modelCtx := model.WithProviderRequestMetadata(ctx, model.ProviderRequestMetadata{
 			SessionAffinity: ctx.Session().SessionID,
 		})
-		final, err := collectFinalResponse(modelCtx, a.model, request, messageID, yield)
+		final, err := collectFinalResponse(modelCtx, a.model, request, messageID, watchdog, yield)
 		if err != nil {
 			return model.Message{}, nil, nil, "", true, err
 		}

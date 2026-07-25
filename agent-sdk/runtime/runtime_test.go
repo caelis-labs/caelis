@@ -15,6 +15,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -37,6 +38,267 @@ import (
 
 type burstTestAgent struct {
 	count int
+}
+
+func TestRuntimeAgentEventPersistenceBoundary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		event *session.Event
+		want  bool
+	}{
+		{
+			name: "canonical assistant history",
+			event: &session.Event{
+				Type:       session.EventTypeAssistant,
+				Visibility: session.VisibilityCanonical,
+			},
+			want: true,
+		},
+		{
+			name: "Agent lifecycle journal checkpoint",
+			event: &session.Event{
+				Type:       session.EventTypeLifecycle,
+				Visibility: session.VisibilityJournal,
+			},
+			want: true,
+		},
+		{
+			name: "arbitrary tool journal",
+			event: &session.Event{
+				Type:       session.EventTypeToolResult,
+				Visibility: session.VisibilityJournal,
+			},
+		},
+		{
+			name: "UI-only lifecycle",
+			event: &session.Event{
+				Type:       session.EventTypeLifecycle,
+				Visibility: session.VisibilityUIOnly,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := runtimeAgentEventShouldPersist(tt.event); got != tt.want {
+				t.Fatalf("runtimeAgentEventShouldPersist(%#v) = %t, want %t", tt.event, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRuntimePersistsAgentOwnedGenerationWatchdogInterruption(t *testing.T) {
+	t.Parallel()
+
+	sessions, active := newTestSessionService(t, "agent-owned-watchdog")
+	runtime, err := New(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{},
+		PolicyRegistry: staticPolicyRegistry{mode: policy.NamedMode{
+			ID: "allow",
+			Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
+				return policy.Decision{Action: policy.ActionAllow}, nil
+			},
+		}},
+		DefaultPolicyMode: "allow",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testModel := &repeatedRawToolLoopRuntimeModel{}
+	var toolExecutions int
+	echo := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        "ECHO",
+			Description: "echo",
+			InputSchema: map[string]any{"type": "object"},
+			EffectClass: tool.EffectReadOnly,
+		},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			toolExecutions++
+			return tool.Result{
+				ID: call.ID, Name: call.Name,
+				Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))},
+			}, nil
+		},
+	}
+	run, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: active.SessionRef,
+		Input:      "repeat forever",
+		AgentSpec: agent.AgentSpec{
+			Name: "chat", Model: testModel, Tools: []tool.Tool{echo},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var (
+		runErr     error
+		checkpoint *session.Event
+	)
+	for event, eventErr := range run.Handle.Events() {
+		if eventErr != nil {
+			runErr = eventErr
+			continue
+		}
+		if event != nil && event.Lifecycle != nil && event.Lifecycle.Status == "agent_loop_watchdog_checkpoint" {
+			checkpoint = event
+		}
+	}
+	var loopErr *chat.GenerationLoopError
+	if !errors.As(runErr, &loopErr) || !errorcode.Is(runErr, errorcode.Interrupted) {
+		t.Fatalf("runner error = %#v, want coded GenerationLoopError", runErr)
+	}
+	if errorcode.Is(runErr, errorcode.Cancelled) {
+		t.Fatalf("runner error = %#v, Agent self-stop must remain distinct from caller cancellation", runErr)
+	}
+	if checkpoint == nil || checkpoint.Actor.Name != "agent-watchdog" {
+		t.Fatalf("checkpoint = %#v, want Agent-owned watchdog evidence", checkpoint)
+	}
+	if got, want := testModel.calls, 6; got != want {
+		t.Fatalf("model calls = %d, want %d", got, want)
+	}
+	if got, want := toolExecutions, 5; got != want {
+		t.Fatalf("tool executions = %d, want %d; trigger step must not execute", got, want)
+	}
+	state, err := runtime.RunState(context.Background(), active.SessionRef)
+	if err != nil || state.Status != agent.RunLifecycleStatusInterrupted {
+		t.Fatalf("RunState() = %+v, %v; want interrupted", state, err)
+	}
+
+	events, err := sessions.Events(context.Background(), session.EventsRequest{
+		SessionRef: active.SessionRef, IncludeTransient: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var (
+		durableCheckpoint int
+		interruptedKinds  = map[session.JournalKind]bool{}
+	)
+	for _, event := range events {
+		if event.Actor.Name == "control-watchdog" {
+			t.Fatalf("unexpected orchestration watchdog event: %#v", event)
+		}
+		if event.Lifecycle != nil && event.Lifecycle.Status == "agent_loop_watchdog_checkpoint" {
+			durableCheckpoint++
+			if event.Visibility != session.VisibilityJournal {
+				t.Fatalf("Agent watchdog checkpoint visibility = %q, want journal", event.Visibility)
+			}
+			if session.IsCanonicalHistoryEvent(event) || session.IsClientReplayEvent(event) {
+				t.Fatalf("Agent watchdog checkpoint entered canonical/client replay: %#v", event)
+			}
+		}
+		if event.Journal != nil && event.Journal.Execution != nil &&
+			event.Journal.Execution.Status == session.ExecutionInterrupted {
+			interruptedKinds[event.Journal.Execution.Kind] = true
+		}
+	}
+	if durableCheckpoint != 1 {
+		t.Fatalf("durable Agent watchdog checkpoints = %d, want 1", durableCheckpoint)
+	}
+	for _, kind := range []session.JournalKind{session.JournalKindRun, session.JournalKindTurn} {
+		if !interruptedKinds[kind] {
+			t.Fatalf("%s journal missing interrupted terminal: %#v", kind, interruptedKinds)
+		}
+	}
+}
+
+func TestRuntimePersistsCallerCancellationAsCancelled(t *testing.T) {
+	t.Parallel()
+
+	sessions, active := newTestSessionService(t, "caller-cancellation")
+	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocking := &cancellationReportingAgent{started: make(chan struct{})}
+	run, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: active.SessionRef,
+		Input:      "wait",
+		Agent:      blocking,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocking.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Agent did not start")
+	}
+	if result := run.Handle.Cancel(); !result.Cancelled() || result.Err != nil {
+		t.Fatalf("Cancel() = %#v, want accepted cancellation", result)
+	}
+	var runErr error
+	for _, eventErr := range run.Handle.Events() {
+		if eventErr != nil {
+			runErr = eventErr
+		}
+	}
+	if !errors.Is(runErr, context.Canceled) || !errorcode.Is(runErr, errorcode.Cancelled) {
+		t.Fatalf("runner error = %#v, want caller cancellation", runErr)
+	}
+
+	events, err := sessions.Events(context.Background(), session.EventsRequest{
+		SessionRef: active.SessionRef, IncludeTransient: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelledKinds := map[session.JournalKind]bool{}
+	for _, event := range events {
+		if event.Journal != nil && event.Journal.Execution != nil &&
+			event.Journal.Execution.Status == session.ExecutionCancelled {
+			cancelledKinds[event.Journal.Execution.Kind] = true
+		}
+	}
+	for _, kind := range []session.JournalKind{session.JournalKindRun, session.JournalKindTurn} {
+		if !cancelledKinds[kind] {
+			t.Fatalf("%s journal missing cancelled terminal: %#v", kind, cancelledKinds)
+		}
+	}
+}
+
+type cancellationReportingAgent struct {
+	started chan struct{}
+}
+
+func (*cancellationReportingAgent) Name() string { return "cancellation-reporting" }
+
+func (a *cancellationReportingAgent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
+	return func(yield func(*session.Event, error) bool) {
+		close(a.started)
+		<-ctx.Done()
+		yield(nil, ctx.Err())
+	}
+}
+
+type repeatedRawToolLoopRuntimeModel struct {
+	calls int
+}
+
+func (m *repeatedRawToolLoopRuntimeModel) Name() string { return "repeated-raw-tool-loop" }
+
+func (*repeatedRawToolLoopRuntimeModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
+
+func (m *repeatedRawToolLoopRuntimeModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	m.calls++
+	call := m.calls
+	return func(yield func(*model.StreamEvent, error) bool) {
+		yield(model.StreamEventFromResponse(&model.Response{
+			Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+				ID: "call-" + fmt.Sprint(call), Name: "ECHO", Args: `{"value":"pong"}`,
+			}}, ""),
+			TurnComplete: true,
+			StepComplete: true,
+			Status:       model.ResponseStatusCompleted,
+			FinishReason: model.FinishReasonToolCalls,
+		}), nil)
+	}
 }
 
 func (a burstTestAgent) Name() string { return "burst" }

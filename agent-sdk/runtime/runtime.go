@@ -277,10 +277,7 @@ func (r *Runtime) executeKernelTurn(
 		})
 	})
 	if err := lifecycleErr; err != nil {
-		journalStatus := session.ExecutionFailed
-		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-			journalStatus = session.ExecutionCancelled
-		}
+		journalStatus := executionJournalStatus(ctx, err)
 		if journalErr := r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, journalStatus, err.Error()); journalErr != nil {
 			err = errors.Join(err, journalErr)
 		}

@@ -26,7 +26,6 @@ type ControlMutationPurpose string
 const (
 	ControlMutationPurposeApproval      ControlMutationPurpose = "approval"
 	ControlMutationPurposeHandoff       ControlMutationPurpose = "handoff"
-	ControlMutationPurposeWatchdog      ControlMutationPurpose = "watchdog"
 	ControlMutationPurposeCoordinator   ControlMutationPurpose = "coordinator"
 	ControlMutationPurposeParticipant   ControlMutationPurpose = "participant"
 	ControlMutationPurposeLifecycle     ControlMutationPurpose = "session_lifecycle"
@@ -176,7 +175,6 @@ func AuthorizeMutationGuard(active SessionLease, guard MutationGuard, now time.T
 func ControlMutationMayOverlapRuntimeLease(purpose ControlMutationPurpose) bool {
 	switch ControlMutationPurpose(strings.TrimSpace(string(purpose))) {
 	case ControlMutationPurposeApproval,
-		ControlMutationPurposeWatchdog,
 		ControlMutationPurposeParticipant,
 		ControlMutationPurposeSystemCommit,
 		ControlMutationPurposeTest:
@@ -190,7 +188,6 @@ func knownControlMutationPurpose(purpose ControlMutationPurpose) bool {
 	switch purpose {
 	case ControlMutationPurposeApproval,
 		ControlMutationPurposeHandoff,
-		ControlMutationPurposeWatchdog,
 		ControlMutationPurposeCoordinator,
 		ControlMutationPurposeParticipant,
 		ControlMutationPurposeLifecycle,

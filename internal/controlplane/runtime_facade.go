@@ -11,9 +11,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
-// runtimeFacade is the shared decorator shell for Control-owned Runtime wrappers.
-// Lease fencing and watchdog observation differ; capability passthrough and live
-// runner bookkeeping do not.
+// runtimeFacade is the shared decorator shell for Control-owned Runtime
+// wrappers that preserve capability passthrough and live-run bookkeeping.
 type runtimeFacade struct {
 	inner         agent.Runtime
 	runsMu        sync.Mutex

@@ -34,6 +34,7 @@ func TestCodeOfAcrossSupportedSDKContracts(t *testing.T) {
 		{name: "task revision", err: &task.RevisionConflictError{}, code: errorcode.Conflict},
 		{name: "tool error", err: tool.NewError(tool.ErrorCodePermissionDenied, "denied"), code: errorcode.PermissionDenied},
 		{name: "cancelled", err: context.Canceled, code: errorcode.Cancelled},
+		{name: "interrupted", err: errorcode.New(errorcode.Interrupted, "self-stopped"), code: errorcode.Interrupted},
 		{name: "wrapped", err: fmt.Errorf("adapter: %w", errorcode.New(errorcode.Unavailable, "offline")), code: errorcode.Unavailable},
 	}
 	for _, tt := range tests {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"iter"
 	"maps"
 	"reflect"
@@ -886,7 +887,7 @@ func TestCollectFinalResponseAnnotatesContextWindow(t *testing.T) {
 			TotalTokens:      17,
 		},
 	}
-	final, err := collectFinalResponse(context.Background(), testModel, &model.Request{}, "", nil)
+	final, err := collectFinalResponse(context.Background(), testModel, &model.Request{}, "", nil, nil)
 	if err != nil {
 		t.Fatalf("collectFinalResponse() error = %v", err)
 	}
@@ -2654,10 +2655,11 @@ func TestChunkEventFromStreamEventPreservesBoundaryWhitespace(t *testing.T) {
 	}
 }
 
-func TestChatAgentDoesNotImposeFixedToolLoopCap(t *testing.T) {
+func TestChatAgentStopsItsOwnRepeatedRawModelToolLoop(t *testing.T) {
 	t.Parallel()
 
 	testModel := &longToolLoopModel{}
+	var toolCalls int
 	echoTool := tool.NamedTool{
 		Def: tool.Definition{
 			Name:        "ECHO",
@@ -2665,6 +2667,7 @@ func TestChatAgentDoesNotImposeFixedToolLoopCap(t *testing.T) {
 			InputSchema: map[string]any{"type": "object"},
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			toolCalls++
 			return tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
@@ -2690,24 +2693,191 @@ func TestChatAgentDoesNotImposeFixedToolLoopCap(t *testing.T) {
 	})
 
 	var (
-		final  *session.Event
-		runErr error
+		checkpoint *session.Event
+		runErr     error
 	)
 	for event, err := range chatAgent.Run(ctx) {
 		if err != nil {
 			runErr = err
 			break
 		}
+		if event != nil && event.Lifecycle != nil && event.Lifecycle.Status == agentWatchdogCheckpointStatus {
+			checkpoint = event
+		}
+	}
+	var loopErr *GenerationLoopError
+	if !errors.As(runErr, &loopErr) || loopErr.Reason != GenerationToolLoop {
+		t.Fatalf("Run() error = %#v, want Agent-owned tool-loop interruption", runErr)
+	}
+	if checkpoint == nil || checkpoint.Actor.Name != "agent-watchdog" {
+		t.Fatalf("checkpoint = %#v, want Agent-owned lifecycle evidence", checkpoint)
+	}
+	if got, want := testModel.calls, defaultToolLoopStreak; got != want {
+		t.Fatalf("model calls = %d, want %d", got, want)
+	}
+	if got, want := toolCalls, defaultToolLoopStreak-1; got != want {
+		t.Fatalf("tool executions = %d, want %d; repeated trigger step must not execute", got, want)
+	}
+}
+
+func TestChatAgentAllowsProgressingRawModelToolSteps(t *testing.T) {
+	t.Parallel()
+
+	testModel := &longToolLoopModel{progress: true}
+	echoTool := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        "ECHO",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{
+				ID: call.ID, Name: call.Name,
+				Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))},
+			}, nil
+		},
+	}
+	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{echoTool}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-progressing-loop"}},
+		Events: []*session.Event{{
+			Type:    session.EventTypeUser,
+			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "make progress")),
+		}},
+	})
+	var final *session.Event
+	for event, runErr := range chatAgent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v, distinct raw args are progress", runErr)
+		}
 		final = event
-	}
-	if runErr != nil {
-		t.Fatalf("Run() error = %v", runErr)
-	}
-	if final == nil || final.Text != "done" {
-		t.Fatalf("final event = %+v, want assistant done", final)
 	}
 	if got, want := testModel.calls, 10; got != want {
 		t.Fatalf("model calls = %d, want %d", got, want)
+	}
+	if final == nil || strings.TrimSpace(final.Text) != "done" {
+		t.Fatalf("final = %#v, want completed answer", final)
+	}
+}
+
+func TestChatAgentGenerationWatchdogStateIsPerRun(t *testing.T) {
+	t.Parallel()
+
+	testModel := &longToolLoopModel{}
+	var toolCalls int
+	echoTool := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        "ECHO",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			toolCalls++
+			return tool.Result{
+				ID: call.ID, Name: call.Name,
+				Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))},
+			}, nil
+		},
+	}
+	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{echoTool}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(sessionID string) {
+		t.Helper()
+		ctx := agent.NewContext(agent.ContextSpec{
+			Context: context.Background(),
+			Session: session.Session{SessionRef: session.SessionRef{SessionID: sessionID}},
+			Events: []*session.Event{{
+				Type:    session.EventTypeUser,
+				Message: ptrMessage(model.NewTextMessage(model.RoleUser, "loop")),
+			}},
+		})
+		var runErr error
+		for _, eventErr := range chatAgent.Run(ctx) {
+			if eventErr != nil {
+				runErr = eventErr
+			}
+		}
+		var loopErr *GenerationLoopError
+		if !errors.As(runErr, &loopErr) || loopErr.Streak != defaultToolLoopStreak {
+			t.Fatalf("Run(%q) error = %#v, want a fresh full watchdog window", sessionID, runErr)
+		}
+	}
+
+	run("watchdog-run-1")
+	if got, want := toolCalls, defaultToolLoopStreak-1; got != want {
+		t.Fatalf("first run tool calls = %d, want %d", got, want)
+	}
+	testModel.calls = 0
+	run("watchdog-run-2")
+	if got, want := toolCalls, 2*(defaultToolLoopStreak-1); got != want {
+		t.Fatalf("total tool calls = %d, want %d; watchdog evidence leaked across Agent.Run", got, want)
+	}
+}
+
+func TestChatAgentGenerationWatchdogStateIsIsolatedAcrossConcurrentRuns(t *testing.T) {
+	t.Parallel()
+
+	testModel := &concurrentToolLoopModel{}
+	var toolCalls atomic.Int32
+	echoTool := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        "ECHO",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			toolCalls.Add(1)
+			return tool.Result{
+				ID: call.ID, Name: call.Name,
+				Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))},
+			}, nil
+		},
+	}
+	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{echoTool}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	errs := make(chan error, 2)
+	for index := 1; index <= 2; index++ {
+		sessionID := fmt.Sprintf("watchdog-concurrent-%d", index)
+		go func() {
+			ctx := agent.NewContext(agent.ContextSpec{
+				Context: context.Background(),
+				Session: session.Session{SessionRef: session.SessionRef{SessionID: sessionID}},
+				Events: []*session.Event{{
+					Type:    session.EventTypeUser,
+					Message: ptrMessage(model.NewTextMessage(model.RoleUser, "loop")),
+				}},
+			})
+			var runErr error
+			for _, eventErr := range chatAgent.Run(ctx) {
+				if eventErr != nil {
+					runErr = eventErr
+				}
+			}
+			errs <- runErr
+		}()
+	}
+	for range 2 {
+		runErr := <-errs
+		var loopErr *GenerationLoopError
+		if !errors.As(runErr, &loopErr) || loopErr.Streak != defaultToolLoopStreak {
+			t.Fatalf("concurrent Run error = %#v, want independent full watchdog window", runErr)
+		}
+	}
+	if got, want := testModel.calls.Load(), int32(2*defaultToolLoopStreak); got != want {
+		t.Fatalf("model calls = %d, want %d", got, want)
+	}
+	if got, want := toolCalls.Load(), int32(2*(defaultToolLoopStreak-1)); got != want {
+		t.Fatalf("tool calls = %d, want %d", got, want)
 	}
 }
 
@@ -3077,7 +3247,8 @@ func (m *blockingStreamingModel) Generate(_ context.Context, req *model.Request)
 }
 
 type longToolLoopModel struct {
-	calls int
+	calls    int
+	progress bool
 }
 
 func (m *longToolLoopModel) Name() string { return "long-tool-loop" }
@@ -3087,13 +3258,17 @@ func (m *longToolLoopModel) Generate(_ context.Context, _ *model.Request) iter.S
 	callIndex := m.calls
 	return func(yield func(*model.StreamEvent, error) bool) {
 		if callIndex <= 9 {
+			args := `{"value":"pong"}`
+			if m.progress {
+				args = fmt.Sprintf(`{"value":"pong-%d"}`, callIndex)
+			}
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   "call-loop",
 						Name: "ECHO",
-						Args: `{"value":"pong"}`,
+						Args: args,
 					}}, ""),
 					TurnComplete: true,
 					StepComplete: true,
@@ -3111,6 +3286,30 @@ func (m *longToolLoopModel) Generate(_ context.Context, _ *model.Request) iter.S
 				StepComplete: true,
 				Status:       model.ResponseStatusCompleted,
 				FinishReason: model.FinishReasonStop,
+			},
+		}, nil)
+	}
+}
+
+type concurrentToolLoopModel struct {
+	calls atomic.Int32
+}
+
+func (m *concurrentToolLoopModel) Name() string { return "concurrent-tool-loop" }
+
+func (m *concurrentToolLoopModel) Generate(_ context.Context, _ *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	callIndex := m.calls.Add(1)
+	return func(yield func(*model.StreamEvent, error) bool) {
+		yield(&model.StreamEvent{
+			Type: model.StreamEventTurnDone,
+			Response: &model.Response{
+				Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+					ID: "call-" + fmt.Sprint(callIndex), Name: "ECHO", Args: `{"value":"pong"}`,
+				}}, ""),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       model.ResponseStatusCompleted,
+				FinishReason: model.FinishReasonToolCalls,
 			},
 		}, nil)
 	}

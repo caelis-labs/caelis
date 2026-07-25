@@ -228,17 +228,18 @@ producer completion, cancels execution on heartbeat loss, and releases only
 after the producer boundary closes. A lease conflict on an ordinary supported
 user path is therefore a correctness failure, not a retry hint.
 
-Execution capability wiring and the liveness watchdog are Control-owned. The
-watchdog is a generation-tail loop probe for repeated pure-text cycles and
-repeated content-plus-tool-argument steps, including normalized protocol-only
-ACP tool calls. It resets pure-text evidence at tool boundaries and may
-Interrupt only after high-confidence evidence is reviewed. Review is
-asynchronous and bounded to eight active pipelines; saturation drops evidence
-rather than queueing or cancelling a Turn. Reviewer/checkpoint failures do not
-delay or fail normal completion, and normal finish invalidates late decisions.
-This does not restore a fixed SDK step or wall-clock budget. Product source
-policy no longer lives in SDK task code. Module or repository extraction is not
-a goal.
+Execution capability wiring is Control-owned. Generation-loop safety is owned
+inside each Agent implementation instead of by Control orchestration. The
+built-in chat Agent probes its raw provider-neutral model stream and completed
+model step before projecting Session events or executing the next tool. It
+stops only on high-confidence repeated pure-text cycles or identical
+content-plus-complete-tool-argument steps. External ACP controllers,
+participants, and spawned third-party Agents are never inspected or interrupted
+by a Caelis parent watchdog; each endpoint owns its own Agent Loop safety.
+Caelis self/model children get the same built-in protection inside their child
+process. This does not restore a fixed SDK step or wall-clock budget. Product
+source policy no longer lives in SDK task code. Module or repository extraction
+is not a goal.
 
 ## Durable State
 
