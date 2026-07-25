@@ -19,15 +19,16 @@ func (d *Adapter) StartReview(ctx context.Context, instructions string, attachme
 	}
 	prompt, attachmentOffset := gatewayapp.ReviewPrompt(instructions)
 	return d.startSidecarTurn(ctx, startSidecarTurnRequest{
-		Agent:        gatewayapp.ReviewerAgentID,
-		Placement:    placement,
-		LabelBase:    gatewayapp.ReviewerAgentID,
-		Prompt:       prompt,
-		DisplayInput: displayInputWithAttachments(instructions, attachments),
-		DisplayTitle: reviewDisplayTitle(instructions),
-		Attachments:  shiftControlAttachments(attachments, attachmentOffset),
-		Source:       "slash_review",
-		Transient:    true,
+		Agent:          gatewayapp.ReviewerAgentID,
+		Placement:      placement,
+		LabelBase:      gatewayapp.ReviewerAgentID,
+		Prompt:         prompt,
+		DisplayInput:   displayInputWithAttachments(instructions, attachments),
+		DisplayAddress: "/review",
+		DisplayTitle:   reviewDisplayTitle(instructions),
+		Attachments:    shiftControlAttachments(attachments, attachmentOffset),
+		Source:         "slash_review",
+		Transient:      true,
 	})
 }
 

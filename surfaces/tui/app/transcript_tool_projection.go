@@ -78,7 +78,8 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	for key, value := range rawOutput {
 		taskOutput[key] = value
 	}
-	displayInput := rawInput
+	displayMeta := metautil.Section(input.Meta, metautil.Display)
+	displayInput := toolDisplayInputWithRecovered(rawInput, transcript.RawMap(displayMeta[metautil.DisplayToolInput]))
 	if strings.EqualFold(semanticName, "SPAWN") {
 		displayInput = spawnDisplayInputForResult(rawInput, displayOutput)
 	}

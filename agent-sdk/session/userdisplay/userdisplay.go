@@ -9,7 +9,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
-const MetaDisplayInput = "display_input"
+const (
+	MetaDisplayInput   = "display_input"
+	MetaDisplayAddress = "display_address"
+)
 
 const legacyMetaDisplayText = "display_text"
 

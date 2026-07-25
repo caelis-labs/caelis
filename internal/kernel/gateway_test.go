@@ -690,6 +690,9 @@ func TestPromptParticipantProjectsSubmissionReferencesBeforeRuntime(t *testing.T
 		t.Fatalf("PromptParticipant() error = %v", err)
 	}
 	_ = collectHandleEvents(t, result.Handle)
+	if got, want := rt.promptReq.TurnID, result.Handle.TurnID(); got == "" || got != want {
+		t.Fatalf("runtime prompt TurnID = %q, want public participant TurnID %q", got, want)
+	}
 
 	if rt.promptReq.Input != "projected participant input" {
 		t.Fatalf("prompt input = %q, want projected participant input", rt.promptReq.Input)

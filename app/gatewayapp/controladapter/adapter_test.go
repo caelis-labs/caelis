@@ -2485,11 +2485,17 @@ func TestAdapterStartAgentRunKeepsRunAttachedForFollowUp(t *testing.T) {
 	if got, want := len(gw.promptReqs), 2; got != want {
 		t.Fatalf("PromptParticipant requests = %d, want %d", got, want)
 	}
+	if got := gw.promptReqs[0].DisplayAddress; got != "/"+runName {
+		t.Fatalf("initial DisplayAddress = %q, want /%s", got, runName)
+	}
 	if got := gw.promptReqs[1].ParticipantID; got != "side-new" {
 		t.Fatalf("follow-up ParticipantID = %q, want side-new", got)
 	}
 	if got := gw.promptReqs[1].Input; got != "follow up" {
 		t.Fatalf("follow-up input = %q, want trimmed prompt", got)
+	}
+	if got := gw.promptReqs[1].DisplayAddress; got != "/"+runName {
+		t.Fatalf("follow-up DisplayAddress = %q, want /%s", got, runName)
 	}
 
 	for _, participant := range []session.ParticipantBinding{
@@ -4432,14 +4438,15 @@ func (g *sideAgentRollbackGatewayService) StartParticipant(ctx context.Context, 
 		return kernel.BeginTurnResult{}, err
 	}
 	result, err := g.PromptParticipant(ctx, kernel.PromptParticipantRequest{
-		SessionRef:    updated.SessionRef,
-		BindingKey:    req.BindingKey,
-		ParticipantID: "side-new",
-		Input:         req.Input,
-		DisplayInput:  req.DisplayInput,
-		DisplayTitle:  req.DisplayTitle,
-		ContentParts:  req.ContentParts,
-		Source:        req.Source,
+		SessionRef:     updated.SessionRef,
+		BindingKey:     req.BindingKey,
+		ParticipantID:  "side-new",
+		Input:          req.Input,
+		DisplayInput:   req.DisplayInput,
+		DisplayAddress: req.DisplayAddress,
+		DisplayTitle:   req.DisplayTitle,
+		ContentParts:   req.ContentParts,
+		Source:         req.Source,
 	})
 	if err != nil {
 		if _, detachErr := g.DetachParticipant(ctx, kernel.DetachParticipantRequest{

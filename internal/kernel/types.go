@@ -126,14 +126,15 @@ type DetachParticipantRequest struct {
 }
 
 type PromptParticipantRequest struct {
-	SessionRef    session.SessionRef
-	BindingKey    string
-	ParticipantID string
-	Input         string
-	DisplayInput  string
-	DisplayTitle  string
-	ContentParts  []model.ContentPart
-	Source        string
+	SessionRef     session.SessionRef
+	BindingKey     string
+	ParticipantID  string
+	Input          string
+	DisplayInput   string
+	DisplayAddress string
+	DisplayTitle   string
+	ContentParts   []model.ContentPart
+	Source         string
 }
 
 // ParticipantLifecycle controls whether one started participant remains
@@ -146,19 +147,20 @@ const (
 )
 
 type StartParticipantRequest struct {
-	SessionRef   session.SessionRef
-	BindingKey   string
-	Agent        string
-	Role         session.ParticipantRole
-	Label        string
-	Placement    placement.Placement
-	Input        string
-	DisplayInput string
-	DisplayTitle string
-	ContentParts []model.ContentPart
-	Source       string
-	Lifecycle    ParticipantLifecycle
-	DetachSource string
+	SessionRef     session.SessionRef
+	BindingKey     string
+	Agent          string
+	Role           session.ParticipantRole
+	Label          string
+	Placement      placement.Placement
+	Input          string
+	DisplayInput   string
+	DisplayAddress string
+	DisplayTitle   string
+	ContentParts   []model.ContentPart
+	Source         string
+	Lifecycle      ParticipantLifecycle
+	DetachSource   string
 }
 
 type ControlPlaneStateRequest struct {

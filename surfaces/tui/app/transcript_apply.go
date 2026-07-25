@@ -399,7 +399,12 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 		return m.applyTranscriptStatusToParticipantTurn(event, event.State, "", "")
 	default:
 		terminal := eventstream.IsTerminalLifecycleState(event.State)
-		if terminal && !m.turnRunning() && strings.TrimSpace(m.mainTimelineTailID) == "" {
+		// A terminal-only main lifecycle can close a participant-owned Side ACP
+		// turn without carrying any main transcript content. Do not manufacture
+		// an invisible MainACPTurnBlock after the participant footer: it would
+		// hide that footer from finishLiveTurn and produce a second duration
+		// divider for the same user submission.
+		if terminal && strings.TrimSpace(m.mainTimelineTailID) == "" {
 			return m, nil
 		}
 		block := m.ensureMainTimelineBlock(event)

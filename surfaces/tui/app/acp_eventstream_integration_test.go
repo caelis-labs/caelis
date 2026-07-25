@@ -667,6 +667,94 @@ func TestDirectedParticipantUserDisplayUsesAgentAndHumanHandle(t *testing.T) {
 	}
 }
 
+func TestDirectedParticipantUserDisplayPrefersSubmittedAddress(t *testing.T) {
+	t.Parallel()
+
+	event := TranscriptEvent{
+		Scope: ACPProjectionParticipant,
+		Actor: "@wen",
+		Meta: map[string]any{
+			"agent":           "grok",
+			"handle":          "wen",
+			"display_address": "/zenith(wen)",
+		},
+		Text: "introduce yourself",
+	}
+	if got, want := directedParticipantUserDisplay(event), "/zenith(wen) introduce yourself"; got != want {
+		t.Fatalf("directedParticipantUserDisplay() = %q, want %q", got, want)
+	}
+}
+
+func TestParticipantLiveAndFinalWithoutMessageIDRenderExactlyOnce(t *testing.T) {
+	t.Parallel()
+
+	const (
+		turnID = "participant-turn-control-owned"
+		answer = "opus owns this turn"
+	)
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       turnID,
+		TurnID:        turnID,
+		ParticipantID: "grok-1",
+		Actor:         "user",
+		Meta: map[string]any{
+			"agent":           "grok",
+			"handle":          "wen",
+			"display_address": "/zenith(wen)",
+		},
+		Final: true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateUserMessage,
+			Content:       schema.TextContent{Type: "text", Text: "introduce yourself"},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       turnID,
+		TurnID:        turnID,
+		ParticipantID: "grok-1",
+		Actor:         "@wen",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: answer},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       turnID,
+		TurnID:        turnID,
+		ParticipantID: "grok-1",
+		Actor:         "@wen",
+		EventID:       "event-final",
+		ProjectionID:  "projection-final",
+		Final:         true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: answer},
+		},
+	})
+
+	block := model.findParticipantTurnBlock(turnID)
+	if block == nil {
+		t.Fatal("participant turn block missing")
+	}
+	if len(block.Events) != 1 || block.Events[0].Kind != SEAssistant || block.Events[0].Text != answer {
+		t.Fatalf("participant events = %#v, want one final assistant answer", block.Events)
+	}
+	rendered := strings.Join(renderedPlainRows(block.Render(model.blockRenderContext(100))), "\n")
+	if got := strings.Count(rendered, answer); got != 1 {
+		t.Fatalf("rendered assistant answer count = %d, want one\n%s", got, rendered)
+	}
+}
+
 func TestHandleACPEventEnvelopeDisplaysParticipantSkillContentReadAsSkill(t *testing.T) {
 	t.Parallel()
 
@@ -1567,6 +1655,69 @@ func TestForwardTurnEventStreamQueuesLiveACPEnvelopes(t *testing.T) {
 	}
 	if model.turnRunning() {
 		t.Fatal("model turn still running after terminal lifecycle")
+	}
+}
+
+func TestParticipantFooterSuppressesOuterTurnDivider(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Now()
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, true, startedAt)
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "participant-turn-1",
+		TurnID:        "participant-turn-1",
+		ParticipantID: "grok-1",
+		Actor:         "@ivy",
+		OccurredAt:    startedAt.Add(time.Second),
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentThought,
+			Content:       schema.TextContent{Type: "text", Text: "checking"},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "participant-turn-1",
+		TurnID:        "participant-turn-1",
+		ParticipantID: "grok-1",
+		Actor:         "@ivy",
+		OccurredAt:    startedAt.Add(31*time.Second + 100*time.Millisecond),
+		Final:         true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "done"},
+		},
+	})
+
+	participant := model.findParticipantTurnBlock("participant-turn-1")
+	if participant == nil || !participantTurnHasFooter(participant) {
+		t.Fatalf("participant block = %#v, want completed block with duration footer", participant)
+	}
+
+	terminal := eventstream.TurnCompleted("handle-1", "run-1", "main-turn-1", startedAt.Add(34*time.Second+300*time.Millisecond))
+	terminal.SessionID = "session-1"
+	terminal.ScopeID = "session-1"
+	model = applyACPEnvelopeForTest(t, model, terminal)
+
+	var dividerCount, emptyMainCount int
+	for _, docBlock := range model.doc.Blocks() {
+		switch block := docBlock.(type) {
+		case *DividerBlock:
+			dividerCount++
+		case *MainACPTurnBlock:
+			if len(block.Events) == 0 {
+				emptyMainCount++
+			}
+		}
+	}
+	if dividerCount != 0 {
+		t.Fatalf("divider blocks = %d, want participant footer to be the only duration separator", dividerCount)
+	}
+	if emptyMainCount != 0 {
+		t.Fatalf("empty main turn blocks = %d, want terminal-only lifecycle not to create one", emptyMainCount)
 	}
 }
 

@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
@@ -53,12 +54,15 @@ func directedParticipantUserDisplay(event TranscriptEvent) string {
 	if event.Scope != ACPProjectionParticipant {
 		return ""
 	}
-	address := participantRunSlashName(event)
+	address := firstNonEmpty(
+		strings.TrimSpace(asString(event.Meta[userdisplay.MetaDisplayAddress])),
+		participantRunSlashName(event),
+	)
 	if address == "" {
 		return ""
 	}
 	text := firstNonEmpty(
-		strings.TrimSpace(asString(event.Meta["display_input"])),
+		strings.TrimSpace(asString(event.Meta[userdisplay.MetaDisplayInput])),
 		strings.TrimSpace(asString(event.Meta["display_title"])),
 		strings.TrimSpace(event.Text),
 	)
@@ -73,7 +77,7 @@ func directedParticipantUserDequeueText(event TranscriptEvent) string {
 		return strings.TrimSpace(event.Text)
 	}
 	return firstNonEmpty(
-		strings.TrimSpace(asString(event.Meta["display_input"])),
+		strings.TrimSpace(asString(event.Meta[userdisplay.MetaDisplayInput])),
 		strings.TrimSpace(asString(event.Meta["display_title"])),
 		strings.TrimSpace(event.Text),
 	)

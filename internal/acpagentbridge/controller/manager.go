@@ -1109,6 +1109,7 @@ func (r *controllerRun) handleUpdate(clock func() time.Time, env client.UpdateEn
 		return
 	}
 	env.Update = acputil.StripTerminalConsoleFenceUpdate(env.Update)
+	env.Update = normalizeACPToolDisplayUpdate(env.Update)
 	r.mu.Lock()
 	r.applySessionUpdateLocked(clock, env.Update)
 	if r.turnID == "" {
@@ -1506,6 +1507,7 @@ func (r *participantRun) handleUpdate(clock func() time.Time, env client.UpdateE
 		return
 	}
 	env.Update = acputil.StripTerminalConsoleFenceUpdate(env.Update)
+	env.Update = normalizeACPToolDisplayUpdate(env.Update)
 	r.mu.Lock()
 	if r.turnID == "" {
 		r.mu.Unlock()

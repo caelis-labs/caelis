@@ -92,6 +92,9 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 	if summary := genericToolArgs(raw); summary != "" {
 		return summary
 	}
+	if metadataOnlyToolArgs(raw) {
+		return ""
+	}
 	return firstTrimmed(fallback...)
 }
 
@@ -101,7 +104,7 @@ func metadataOnlyToolArgs(raw map[string]any) bool {
 	}
 	for key := range raw {
 		switch strings.ToLower(strings.TrimSpace(key)) {
-		case "metadata", "_meta":
+		case "metadata", "_meta", "backend", "variant":
 			continue
 		default:
 			return false
@@ -343,7 +346,7 @@ func compactMutationTitleDetail(detail string) string {
 
 func searchTitleDisplayArgs(title string) string {
 	title = strings.TrimSpace(title)
-	if title == "" || genericSearchTitle(title) || genericGlobTitle(title) {
+	if title == "" || strings.HasSuffix(title, ":") || genericSearchTitle(title) || genericGlobTitle(title) {
 		return ""
 	}
 	if detail := prefixedTitleDetail(title, "Glob", "Globbing"); detail != "" {
@@ -622,6 +625,25 @@ func genericToolArgs(raw map[string]any) string {
 	default:
 		return ""
 	}
+}
+
+// toolDisplayInputWithRecovered merges explicit display-only invocation input
+// produced by an ACP normalization boundary. RawInput remains authoritative
+// when both sources contain the same key.
+func toolDisplayInputWithRecovered(rawInput map[string]any, recovered map[string]any) map[string]any {
+	if len(recovered) == 0 {
+		return rawInput
+	}
+	merged := transcript.CloneAnyMap(rawInput)
+	if merged == nil {
+		merged = make(map[string]any, len(recovered))
+	}
+	for key, value := range recovered {
+		if _, exists := merged[key]; !exists {
+			merged[key] = value
+		}
+	}
+	return merged
 }
 
 func taskControlDisplay(raw map[string]any) string {

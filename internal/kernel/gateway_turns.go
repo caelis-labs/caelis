@@ -207,14 +207,16 @@ func (g *Gateway) runParticipantTurn(
 	defer g.releaseActive(session.SessionID, handle)
 
 	runReq := agent.PromptParticipantRequest{
-		SessionRef:    session.SessionRef,
-		ParticipantID: strings.TrimSpace(req.ParticipantID),
-		Input:         strings.TrimSpace(req.Input),
-		DisplayInput:  strings.TrimSpace(req.DisplayInput),
-		DisplayTitle:  strings.TrimSpace(req.DisplayTitle),
-		ContentParts:  append([]model.ContentPart(nil), req.ContentParts...),
-		Source:        strings.TrimSpace(req.Source),
-		Stream:        true,
+		SessionRef:     session.SessionRef,
+		ParticipantID:  strings.TrimSpace(req.ParticipantID),
+		TurnID:         strings.TrimSpace(handle.TurnID()),
+		Input:          strings.TrimSpace(req.Input),
+		DisplayInput:   strings.TrimSpace(req.DisplayInput),
+		DisplayAddress: strings.TrimSpace(req.DisplayAddress),
+		DisplayTitle:   strings.TrimSpace(req.DisplayTitle),
+		ContentParts:   append([]model.ContentPart(nil), req.ContentParts...),
+		Source:         strings.TrimSpace(req.Source),
+		Stream:         true,
 	}
 	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		return g.resolveApprovalRequest(ctx, approvalCtx, handle, &req, nil)

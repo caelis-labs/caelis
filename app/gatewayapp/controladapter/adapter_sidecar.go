@@ -34,26 +34,28 @@ func (d *Adapter) StartAgentRun(ctx context.Context, target string, prompt strin
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: delegation handle %q has no executable endpoint", handle)
 	}
 	return d.startSidecarTurn(ctx, startSidecarTurnRequest{
-		Agent:        agent,
-		Placement:    placement,
-		LabelBase:    string(handle),
-		Prompt:       prompt,
-		DisplayInput: displayInputWithAttachments(prompt, attachments),
-		Attachments:  attachments,
-		Source:       controlagents.DirectRunSource(handle),
+		Agent:          agent,
+		Placement:      placement,
+		LabelBase:      string(handle),
+		Prompt:         prompt,
+		DisplayInput:   displayInputWithAttachments(prompt, attachments),
+		DisplayAddress: "/" + string(handle),
+		Attachments:    attachments,
+		Source:         controlagents.DirectRunSource(handle),
 	})
 }
 
 type startSidecarTurnRequest struct {
-	Agent        string
-	Placement    sdkplacement.Placement
-	LabelBase    string
-	Prompt       string
-	DisplayInput string
-	DisplayTitle string
-	Attachments  []Attachment
-	Source       string
-	Transient    bool
+	Agent          string
+	Placement      sdkplacement.Placement
+	LabelBase      string
+	Prompt         string
+	DisplayInput   string
+	DisplayAddress string
+	DisplayTitle   string
+	Attachments    []Attachment
+	Source         string
+	Transient      bool
 }
 
 func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequest) (Turn, error) {
@@ -80,18 +82,25 @@ func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequ
 	}
 	labelBase := firstNonEmpty(req.LabelBase, agent)
 	label := d.allocateSideAgentLabel(ctx, activeSession.SessionRef, labelBase)
+	displayAddress := strings.TrimSpace(req.DisplayAddress)
+	if handle, ok := controlagents.DirectRunHandleFromSource(source); ok {
+		if runName := controlagents.FormatRunName(string(handle), label); runName != "" {
+			displayAddress = "/" + runName
+		}
+	}
 	startReq := kernel.StartParticipantRequest{
-		SessionRef:   activeSession.SessionRef,
-		BindingKey:   d.bindingKey,
-		Agent:        agent,
-		Placement:    req.Placement,
-		Role:         session.ParticipantRoleSidecar,
-		Source:       source,
-		Label:        label,
-		Input:        prompt,
-		DisplayInput: strings.TrimSpace(req.DisplayInput),
-		DisplayTitle: strings.TrimSpace(req.DisplayTitle),
-		ContentParts: contentParts,
+		SessionRef:     activeSession.SessionRef,
+		BindingKey:     d.bindingKey,
+		Agent:          agent,
+		Placement:      req.Placement,
+		Role:           session.ParticipantRoleSidecar,
+		Source:         source,
+		Label:          label,
+		Input:          prompt,
+		DisplayInput:   strings.TrimSpace(req.DisplayInput),
+		DisplayAddress: displayAddress,
+		DisplayTitle:   strings.TrimSpace(req.DisplayTitle),
+		ContentParts:   contentParts,
 	}
 	if req.Transient {
 		startReq.Lifecycle = kernel.ParticipantLifecycleTransient
@@ -162,13 +171,14 @@ func (d *Adapter) ContinueAgentRun(ctx context.Context, handle string, prompt st
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: establish sidecar feed boundary: %w", err)
 	}
 	result, err := gw.PromptParticipant(ctx, kernel.PromptParticipantRequest{
-		SessionRef:    activeSession.SessionRef,
-		BindingKey:    d.bindingKey,
-		ParticipantID: participantID,
-		Input:         prompt,
-		DisplayInput:  displayInputWithAttachments(prompt, attachments),
-		ContentParts:  contentParts,
-		Source:        "user_side_agent",
+		SessionRef:     activeSession.SessionRef,
+		BindingKey:     d.bindingKey,
+		ParticipantID:  participantID,
+		Input:          prompt,
+		DisplayInput:   displayInputWithAttachments(prompt, attachments),
+		DisplayAddress: "/" + strings.TrimPrefix(strings.TrimSpace(handle), "/"),
+		ContentParts:   contentParts,
+		Source:         "user_side_agent",
 	})
 	if err != nil {
 		if feedSubscription != nil {

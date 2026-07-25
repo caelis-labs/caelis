@@ -161,10 +161,17 @@ type DetachParticipantRequest struct {
 
 // PromptParticipantRequest prompts one attached participant.
 type PromptParticipantRequest struct {
-	SessionRef        session.SessionRef  `json:"session_ref"`
-	ParticipantID     string              `json:"participant_id,omitempty"`
-	Input             string              `json:"input,omitempty"`
-	DisplayInput      string              `json:"display_input,omitempty"`
+	SessionRef    session.SessionRef `json:"session_ref"`
+	ParticipantID string             `json:"participant_id,omitempty"`
+	// TurnID is the Control-assigned semantic participant turn identity.
+	// Runtime allocates one only when this field is empty.
+	TurnID       string `json:"turn_id,omitempty"`
+	Input        string `json:"input,omitempty"`
+	DisplayInput string `json:"display_input,omitempty"`
+	// DisplayAddress is the canonical user-visible route (for example,
+	// /zenith(remy)). It is display-only and must not be used as participant
+	// identity.
+	DisplayAddress    string              `json:"display_address,omitempty"`
 	DisplayTitle      string              `json:"display_title,omitempty"`
 	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
 	Source            string              `json:"source,omitempty"`

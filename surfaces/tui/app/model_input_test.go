@@ -476,6 +476,29 @@ func TestFixedFooterHitboxAccountsForComposerChromeRows(t *testing.T) {
 	}
 }
 
+func TestDirectSideAgentSubmissionDefersToCanonicalUserEcho(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{Commands: []string{"breeze", "orbit", "zenith", "review"}})
+	for _, line := range []string{
+		"/breeze inspect",
+		"/orbit implement",
+		"/zenith explain",
+		"/review",
+	} {
+		if !model.deferLocalUserDisplayLine(line) {
+			t.Fatalf("deferLocalUserDisplayLine(%q) = false, want canonical user echo ownership", line)
+		}
+	}
+	if model.deferLocalUserDisplayLine("ordinary prompt") {
+		t.Fatal("ordinary prompt unexpectedly deferred")
+	}
+	unconfigured := NewModel(Config{Commands: []string{"help"}})
+	if unconfigured.deferLocalUserDisplayLine("/zenith explain") {
+		t.Fatal("unconfigured /zenith unexpectedly deferred without a canonical user echo")
+	}
+}
+
 func TestInputClickPreservesComposerRowOffset(t *testing.T) {
 	model := NewModel(Config{})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

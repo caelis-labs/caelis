@@ -55,7 +55,7 @@ func applyACPParticipantEnvelopeScope(env *eventstream.Envelope, binding session
 	participantID := strings.TrimSpace(binding.ID)
 	env.TurnID = strings.TrimSpace(firstNonEmpty(env.TurnID, turnID))
 	env.Scope = eventstream.ScopeParticipant
-	env.ScopeID = participantID
+	env.ScopeID = firstNonEmpty(env.TurnID, participantID)
 	env.ParticipantID = participantID
 	env.Actor = strings.TrimSpace(firstNonEmpty(env.Actor, binding.Label, agent, participantID))
 	env.Meta = applyACPParticipantDisplayMeta(env.Meta, binding, agent)

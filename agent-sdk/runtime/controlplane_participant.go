@@ -376,7 +376,10 @@ func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptPartici
 		releasePrompt()
 		return agent.RunResult{}, err
 	}
-	turnID := r.nextID("participant-turn", nil)
+	turnID := strings.TrimSpace(req.TurnID)
+	if turnID == "" {
+		turnID = r.nextID("participant-turn", nil)
+	}
 	runID := r.nextID("participant-run", nil)
 	runCtx, cancel := context.WithCancel(ctx)
 	handle := newRunner(runID, cancel)
@@ -402,7 +405,7 @@ func (r *Runtime) executeACPParticipantTurn(
 	defer handle.finish()
 	defer releasePrompt()
 	participantID := strings.TrimSpace(req.ParticipantID)
-	if userEvent := participantPromptUserEvent(activeSession, binding, turnID, strings.TrimSpace(req.Source), req.Input, req.DisplayInput, req.DisplayTitle, req.ContentParts, r.now()); userEvent != nil {
+	if userEvent := participantPromptUserEvent(activeSession, binding, turnID, strings.TrimSpace(req.Source), req.Input, req.DisplayInput, req.DisplayAddress, req.DisplayTitle, req.ContentParts, r.now()); userEvent != nil {
 		persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
 			SessionRef:    ref,
 			MutationGuard: session.RuntimeMutationGuard(ctx),
@@ -620,6 +623,7 @@ func participantPromptUserEvent(
 	source string,
 	input string,
 	displayInput string,
+	displayAddress string,
 	displayTitle string,
 	parts []model.ContentPart,
 	now time.Time,
@@ -638,6 +642,9 @@ func participantPromptUserEvent(
 	}
 	if displayTitle := strings.TrimSpace(displayTitle); displayTitle != "" {
 		meta["display_title"] = displayTitle
+	}
+	if displayAddress := strings.TrimSpace(displayAddress); displayAddress != "" {
+		meta[userdisplay.MetaDisplayAddress] = displayAddress
 	}
 	message, displayText, meta := userdisplay.Resolve(input, displayInput, parts, meta)
 	kind := binding.Kind

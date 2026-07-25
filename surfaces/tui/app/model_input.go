@@ -1383,6 +1383,9 @@ func (m *Model) deferLocalUserDisplayLine(line string) bool {
 	if strings.EqualFold(name, "review") && controlprompt.IsLocalDuringACP(name) {
 		return true
 	}
+	if tuiAgentCommandNameAllowed(name) && m.hasConfiguredCommand(name) {
+		return true
+	}
 	return m.isKnownDynamicAgentSlashLine(line)
 }
 
@@ -1412,6 +1415,13 @@ func (m *Model) isKnownDynamicAgentSlashLine(line string) bool {
 		return false
 	}
 	if _, ok := controlprompt.Lookup(name); ok {
+		return false
+	}
+	return m.hasConfiguredCommand(name)
+}
+
+func (m *Model) hasConfiguredCommand(name string) bool {
+	if m == nil {
 		return false
 	}
 	for _, command := range m.cfg.Commands {

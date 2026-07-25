@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"strings"
 	"sync"
@@ -137,7 +138,7 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 	}
 	handleID := g.allocateID("handle")
 	runID := g.allocateID("participant-run")
-	turnID := g.allocateID("participant-turn")
+	turnID := newParticipantTurnID()
 	handle := newTurnHandle(turnHandleConfig{
 		handleID:                handleID,
 		runID:                   runID,
@@ -167,6 +168,13 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 		Session: session,
 		Handle:  handle,
 	}, nil
+}
+
+// newParticipantTurnID allocates the Control-owned identity that is also
+// persisted by Runtime for one participant turn. It must remain globally
+// unique across Gateway process restarts.
+func newParticipantTurnID() string {
+	return "participant-turn-" + strings.ToLower(rand.Text())
 }
 
 func (g *Gateway) ControlPlaneState(ctx context.Context, req ControlPlaneStateRequest) (ControlPlaneState, error) {

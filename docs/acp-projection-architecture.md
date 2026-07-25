@@ -90,6 +90,35 @@ External controller permission ingress and prompt responses route through
 facts use SDK-owned constructors. Architecture lint rejects new direct
 participant/handoff protocol construction outside the SDK semantic owner.
 
+### Participant prompt display address
+
+A canonical participant user event may carry `_meta.display_address` to
+preserve its canonical user-visible route when that route differs from the
+executable Agent endpoint. A persistent direct-run prompt submitted as
+`/zenith ...` is qualified with the allocated human handle in its canonical
+echo, for example `/zenith(remy) ...`; continuation uses that same address.
+Transient routes such as `/review` remain unqualified. This value is
+display-only. Surfaces may use it to render the user echo, but must never use it
+for participant identity, correlation, ordering, resume, authorization, or
+durable ownership. Typed `ParticipantID`, `TurnID`, `ScopeID`, and
+`Envelope.Cursor` retain those roles.
+
+### External tool invocation display recovery
+
+ACP `rawOutput` is tool-owned result data. Surfaces must not reinterpret a
+generic `rawOutput.input` field as invocation arguments. When an external Agent
+reports invocation arguments only in a recognized provider result shape, the
+ACP controller adapter may normalize the safe display subset into
+`_meta.caelis.display.tool_input`. The provider's `rawInput` and `rawOutput`
+remain unchanged while the projected update gains that extension. It is
+display-only and is never an authorization, replay, correlation, or
+model-context source.
+
+The current adapter recognizes Grok's completed `x_keyword_search` result,
+where `rawOutput.input` is serialized JSON, and copies only its non-empty
+`query` into the display extension. Unrecognized tools and malformed payloads
+fail closed, so result fields cannot become fabricated invocation audit data.
+
 ## Runtime Observation Gaps
 
 A slow consumer of a bounded SDK `Runner` stream may miss transient live

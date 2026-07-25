@@ -17,6 +17,7 @@ func normalizeACPUpdateEvent(
 	turnID string,
 	update client.Update,
 ) *session.Event {
+	update = normalizeACPToolDisplayUpdate(update)
 	controller := session.ControllerRef{
 		Kind:    session.ControllerKindACP,
 		ID:      strings.TrimSpace(binding.ControllerID),

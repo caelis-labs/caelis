@@ -430,6 +430,7 @@ func TestParticipantPromptUserEventUsesDisplayInputForProjection(t *testing.T) {
 
 	modelInput := "Load skill `cmpctl` before taking task actions, then follow its instructions.\n\nUser request:\narchive preflight"
 	displayInput := "$cmpctl archive preflight"
+	displayAddress := "/zenith"
 	event := participantPromptUserEvent(
 		session.Session{Controller: session.ControllerBinding{Kind: session.ControllerKindKernel, ControllerID: "kernel-1"}},
 		session.ParticipantBinding{ID: "p-1", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar, AgentName: "helper"},
@@ -437,6 +438,7 @@ func TestParticipantPromptUserEventUsesDisplayInputForProjection(t *testing.T) {
 		"test",
 		modelInput,
 		displayInput,
+		displayAddress,
 		"",
 		nil,
 		time.Unix(1, 0),
@@ -452,6 +454,9 @@ func TestParticipantPromptUserEventUsesDisplayInputForProjection(t *testing.T) {
 	}
 	if got := event.Meta["display_input"]; got != displayInput {
 		t.Fatalf("event.Meta[display_input] = %#v, want %q", got, displayInput)
+	}
+	if got := event.Meta["display_address"]; got != displayAddress {
+		t.Fatalf("event.Meta[display_address] = %#v, want %q", got, displayAddress)
 	}
 	update := session.ProtocolUpdateOf(event)
 	content, _ := update.Content.(map[string]any)

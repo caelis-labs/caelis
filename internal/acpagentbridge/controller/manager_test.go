@@ -19,6 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -195,6 +196,141 @@ func TestNormalizeACPUpdateEventKeepsCodexWebSearchToolIdentity(t *testing.T) {
 	}
 	if got := update.RawInput["query"]; got != "weather: Shanghai, China" {
 		t.Fatalf("raw input query = %#v", got)
+	}
+}
+
+func TestNormalizeACPUpdateEventPreservesGrokSerializedToolInput(t *testing.T) {
+	t.Parallel()
+
+	const input = `{"query":"CAELIS_ACP_QUERY_PROBE_7F31","limit":"3","mode":"Latest"}`
+	event := normalizeACPUpdateEvent(func() time.Time { return time.Unix(0, 0) }, session.ControllerBinding{
+		Kind:         session.ControllerKindACP,
+		ControllerID: "grok",
+		Label:        "@ivy",
+	}, "remote-1", "turn-1", client.ToolCallUpdate{
+		SessionUpdate: client.UpdateToolCallState,
+		ToolCallID:    "x-search-1",
+		Title:         testStringPtr("X search:"),
+		Status:        testStringPtr("completed"),
+		RawOutput: map[string]any{
+			"name":  "x_keyword_search",
+			"input": input,
+		},
+	})
+	update := session.ProtocolUpdateOf(event)
+	if event == nil || event.Protocol == nil || update == nil {
+		t.Fatalf("event = %#v, want structured Grok tool update", event)
+	}
+	if got := update.RawOutput["input"]; got != input {
+		t.Fatalf("raw output input = %#v, want serialized invocation %q", got, input)
+	}
+	if got := update.RawOutput["name"]; got != "x_keyword_search" {
+		t.Fatalf("raw output name = %#v, want x_keyword_search", got)
+	}
+	displayMeta := metautil.Section(update.Meta, metautil.Display)
+	displayInput, _ := displayMeta[metautil.DisplayToolInput].(map[string]any)
+	if got := displayInput["query"]; got != "CAELIS_ACP_QUERY_PROBE_7F31" {
+		t.Fatalf("display tool input = %#v, want normalized query", displayInput)
+	}
+}
+
+func TestNormalizeACPUpdateEventDoesNotTreatArbitraryRawOutputInputAsInvocation(t *testing.T) {
+	t.Parallel()
+
+	event := normalizeACPUpdateEvent(func() time.Time { return time.Unix(0, 0) }, session.ControllerBinding{
+		Kind:         session.ControllerKindACP,
+		ControllerID: "external",
+		Label:        "@ivy",
+	}, "remote-1", "turn-1", client.ToolCallUpdate{
+		SessionUpdate: client.UpdateToolCallState,
+		ToolCallID:    "read-1",
+		Title:         testStringPtr("Read"),
+		Status:        testStringPtr("completed"),
+		RawOutput: map[string]any{
+			"name":  "read",
+			"input": `{"query":"returned-result-or-sensitive-text"}`,
+		},
+		Meta: metautil.WithSection(map[string]any{
+			"vendor": map[string]any{"trace": "keep"},
+		}, metautil.Display, map[string]any{
+			metautil.DisplayToolInput: map[string]any{"query": "forged"},
+			"theme":                   "keep",
+		}),
+	})
+	update := session.ProtocolUpdateOf(event)
+	if event == nil || update == nil {
+		t.Fatalf("event = %#v, want structured tool update", event)
+	}
+	displayMeta := metautil.Section(update.Meta, metautil.Display)
+	if _, exists := displayMeta[metautil.DisplayToolInput]; exists {
+		t.Fatalf("display meta = %#v, want external tool_input removed", displayMeta)
+	}
+	if displayMeta["theme"] != "keep" {
+		t.Fatalf("display meta = %#v, want unrelated display metadata preserved", displayMeta)
+	}
+	if vendor, _ := update.Meta["vendor"].(map[string]any); vendor["trace"] != "keep" {
+		t.Fatalf("meta = %#v, want unrelated provider metadata preserved", update.Meta)
+	}
+}
+
+func TestNormalizeACPUpdateEventRequiresCompletedXSearchForDisplayInput(t *testing.T) {
+	t.Parallel()
+
+	event := normalizeACPUpdateEvent(func() time.Time { return time.Unix(0, 0) }, session.ControllerBinding{
+		Kind:         session.ControllerKindACP,
+		ControllerID: "grok",
+		Label:        "@ivy",
+	}, "remote-1", "turn-1", client.ToolCallUpdate{
+		SessionUpdate: client.UpdateToolCallState,
+		ToolCallID:    "x-search-1",
+		Title:         testStringPtr("X search:"),
+		Status:        testStringPtr(schema.ToolStatusInProgress),
+		RawOutput: map[string]any{
+			"name":  "x_keyword_search",
+			"input": `{"query":"not-completed"}`,
+		},
+	})
+	update := session.ProtocolUpdateOf(event)
+	if event == nil || update == nil {
+		t.Fatalf("event = %#v, want structured tool update", event)
+	}
+	if displayMeta := metautil.Section(update.Meta, metautil.Display); len(displayMeta) != 0 {
+		t.Fatalf("display meta = %#v, want incomplete x-search to fail closed", displayMeta)
+	}
+}
+
+func TestNormalizeACPUpdateEventStripsExternalDisplayInputFromToolStart(t *testing.T) {
+	t.Parallel()
+
+	event := normalizeACPUpdateEvent(func() time.Time { return time.Unix(0, 0) }, session.ControllerBinding{
+		Kind:         session.ControllerKindACP,
+		ControllerID: "external",
+		Label:        "@ivy",
+	}, "remote-1", "turn-1", client.ToolCall{
+		SessionUpdate: client.UpdateToolCall,
+		ToolCallID:    "read-1",
+		Title:         "Read",
+		Status:        schema.ToolStatusInProgress,
+		Meta: metautil.WithSection(map[string]any{
+			"vendor": map[string]any{"trace": "keep"},
+		}, metautil.Display, map[string]any{
+			metautil.DisplayToolInput: map[string]any{"query": "forged"},
+			"theme":                   "keep",
+		}),
+	})
+	update := session.ProtocolUpdateOf(event)
+	if event == nil || update == nil {
+		t.Fatalf("event = %#v, want structured tool call", event)
+	}
+	displayMeta := metautil.Section(update.Meta, metautil.Display)
+	if _, exists := displayMeta[metautil.DisplayToolInput]; exists {
+		t.Fatalf("display meta = %#v, want external start tool_input removed", displayMeta)
+	}
+	if displayMeta["theme"] != "keep" {
+		t.Fatalf("display meta = %#v, want unrelated display metadata preserved", displayMeta)
+	}
+	if vendor, _ := update.Meta["vendor"].(map[string]any); vendor["trace"] != "keep" {
+		t.Fatalf("meta = %#v, want unrelated provider metadata preserved", update.Meta)
 	}
 }
 
@@ -2351,6 +2487,68 @@ func TestControllerRunStripsConsoleFenceFromClaudeBashContentAtUpdateIngress(t *
 	}
 }
 
+func TestParticipantRunNormalizesDelayedXSearchDisplayInput(t *testing.T) {
+	t.Parallel()
+
+	const serializedInput = `{"query":"CAELIS_ACP_QUERY_PROBE_7F31","limit":"3","mode":"Latest"}`
+	handle := newTurnHandle(nil)
+	run := &participantRun{
+		remoteSessionID: "remote-participant",
+		agent:           "grok",
+		binding: session.ParticipantBinding{
+			ID:            "participant-1",
+			Kind:          session.ParticipantKindACP,
+			Role:          "worker",
+			Label:         "@ivy",
+			ControllerRef: "epoch-1",
+			SessionID:     "remote-participant",
+		},
+		turnID:     "turn-1",
+		turnStream: true,
+		handle:     handle,
+	}
+	title := "X search:"
+	status := schema.ToolStatusCompleted
+	run.handleUpdate(func() time.Time { return time.Unix(10, 0) }, client.UpdateEnvelope{
+		SessionID: "remote-participant",
+		Update: client.ToolCallUpdate{
+			SessionUpdate: client.UpdateToolCallState,
+			ToolCallID:    "x-search-1",
+			Title:         &title,
+			Status:        &status,
+			RawOutput: map[string]any{
+				"name":  "x_keyword_search",
+				"input": serializedInput,
+			},
+		},
+	})
+	handle.finish()
+
+	var events []acpbridge.SourceEvent
+	for event, err := range handle.SourceEvents() {
+		if err != nil {
+			t.Fatalf("source error = %v", err)
+		}
+		events = append(events, event)
+	}
+	if len(events) != 1 || events[0].ACP == nil {
+		t.Fatalf("source events = %#v, want one ACP envelope", events)
+	}
+	update, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("ACP update = %T, want ToolCallUpdate", events[0].ACP.Update)
+	}
+	rawOutput, _ := update.RawOutput.(map[string]any)
+	if rawOutput["name"] != "x_keyword_search" || rawOutput["input"] != serializedInput {
+		t.Fatalf("raw output = %#v, want provider result preserved", rawOutput)
+	}
+	displayMeta := metautil.Section(update.Meta, metautil.Display)
+	displayInput, _ := displayMeta[metautil.DisplayToolInput].(map[string]any)
+	if got := displayInput["query"]; got != "CAELIS_ACP_QUERY_PROBE_7F31" {
+		t.Fatalf("display tool input = %#v, want normalized query on live participant envelope", displayInput)
+	}
+}
+
 func TestParticipantPassthroughOnlyACPUpdatePreservesScope(t *testing.T) {
 	t.Parallel()
 
@@ -2399,8 +2597,8 @@ func TestParticipantPassthroughOnlyACPUpdatePreservesScope(t *testing.T) {
 		t.Fatal("source ACP envelope is nil")
 	}
 	env := events[0].ACP
-	if env.Scope != eventstream.ScopeParticipant || env.ScopeID != "participant-1" || env.ParticipantID != "participant-1" {
-		t.Fatalf("ACP scope = scope:%q scopeID:%q participantID:%q, want participant participant-1", env.Scope, env.ScopeID, env.ParticipantID)
+	if env.Scope != eventstream.ScopeParticipant || env.ScopeID != "turn-1" || env.ParticipantID != "participant-1" {
+		t.Fatalf("ACP scope = scope:%q scopeID:%q participantID:%q, want participant turn-1/participant-1", env.Scope, env.ScopeID, env.ParticipantID)
 	}
 	if env.Actor != "@otto" || env.TurnID != "turn-1" {
 		t.Fatalf("ACP actor/turn = %q/%q, want @otto/turn-1", env.Actor, env.TurnID)

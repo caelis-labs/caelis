@@ -18,6 +18,8 @@ const (
 	Runtime          = "runtime"
 	Message          = "message"
 	MessageCitations = "citations"
+	Display          = "display"
+	DisplayToolInput = "tool_input"
 
 	RuntimeTool             = "tool"
 	RuntimeToolName         = "name"
@@ -71,6 +73,35 @@ func WithSection(meta map[string]any, section string, values map[string]any) map
 	}
 	for key, value := range values {
 		sectionMap[key] = CloneAny(value)
+	}
+	caelis[section] = sectionMap
+	out[Root] = caelis
+	return out
+}
+
+// Section returns a copy of one direct _meta.caelis section.
+func Section(meta map[string]any, section string) map[string]any {
+	if section == "" {
+		return nil
+	}
+	return CloneMap(mapAt(mapAt(meta, Root), section))
+}
+
+// WithoutSectionKeys returns a copy of meta without selected keys from one
+// direct _meta.caelis section. Empty parent maps are retained so unrelated
+// provider and Caelis metadata keep their original shape.
+func WithoutSectionKeys(meta map[string]any, section string, keys ...string) map[string]any {
+	out := CloneMap(meta)
+	if len(out) == 0 || section == "" || len(keys) == 0 {
+		return out
+	}
+	caelis := CloneMap(mapAt(out, Root))
+	sectionMap := CloneMap(mapAt(caelis, section))
+	if len(sectionMap) == 0 {
+		return out
+	}
+	for _, key := range keys {
+		delete(sectionMap, key)
 	}
 	caelis[section] = sectionMap
 	out[Root] = caelis

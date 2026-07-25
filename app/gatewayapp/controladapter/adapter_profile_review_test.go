@@ -79,6 +79,9 @@ func TestAdapterStartReviewUsesHiddenReviewerProfile(t *testing.T) {
 	if got := gw.promptReqs[0].DisplayInput; got != "inspect the [image #1] image" {
 		t.Fatalf("review DisplayInput = %q, want image marker", got)
 	}
+	if got := gw.promptReqs[0].DisplayAddress; got != "/review" {
+		t.Fatalf("review DisplayAddress = %q, want /review", got)
+	}
 	for _, want := range []string{"Strictly review the current workspace changes", "staged, unstaged, and untracked", "$review skill", "Additional review instructions", "inspect the image"} {
 		if !strings.Contains(gw.promptReqs[0].Input, want) {
 			t.Fatalf("review prompt = %q, want %q", gw.promptReqs[0].Input, want)
@@ -176,14 +179,15 @@ func (g *reviewProfileGatewayService) StartParticipant(ctx context.Context, req 
 		return kernel.BeginTurnResult{}, err
 	}
 	result, err := g.PromptParticipant(ctx, kernel.PromptParticipantRequest{
-		SessionRef:    updated.SessionRef,
-		BindingKey:    req.BindingKey,
-		ParticipantID: "side-reviewer",
-		Input:         req.Input,
-		DisplayInput:  req.DisplayInput,
-		DisplayTitle:  req.DisplayTitle,
-		ContentParts:  req.ContentParts,
-		Source:        req.Source,
+		SessionRef:     updated.SessionRef,
+		BindingKey:     req.BindingKey,
+		ParticipantID:  "side-reviewer",
+		Input:          req.Input,
+		DisplayInput:   req.DisplayInput,
+		DisplayAddress: req.DisplayAddress,
+		DisplayTitle:   req.DisplayTitle,
+		ContentParts:   req.ContentParts,
+		Source:         req.Source,
 	})
 	if err != nil {
 		_, _ = g.DetachParticipant(ctx, kernel.DetachParticipantRequest{

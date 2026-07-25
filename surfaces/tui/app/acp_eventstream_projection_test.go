@@ -130,6 +130,105 @@ func TestProjectACPEventToTranscriptEventsDisplaysSkillContentReadAsSkill(t *tes
 	}
 }
 
+func TestProjectACPEventToTranscriptEventsRecoversSerializedCompletedToolInput(t *testing.T) {
+	t.Parallel()
+
+	const query = "CAELIS_ACP_QUERY_PROBE_7F31"
+	start := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind:  eventstream.KindSessionUpdate,
+		Scope: eventstream.ScopeParticipant,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "x-search-1",
+			Title:         "X search:",
+			Kind:          schema.ToolKindSearch,
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"variant": "XSearch", "backend": true},
+		},
+	})
+	if len(start) != 1 || start[0].ToolArgs != "" {
+		t.Fatalf("start events = %#v, want label-only title without duplicate arguments", start)
+	}
+
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind:  eventstream.KindSessionUpdate,
+		Scope: eventstream.ScopeParticipant,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "x-search-1",
+			Title:         stringPtr("X search:"),
+			Status:        stringPtr(schema.ToolStatusCompleted),
+			RawOutput: map[string]any{
+				"name":  "x_keyword_search",
+				"input": `{"query":"` + query + `","limit":"3","mode":"Latest"}`,
+			},
+			Meta: metautil.WithSection(nil, metautil.Display, map[string]any{
+				metautil.DisplayToolInput: map[string]any{"query": query},
+			}),
+		},
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one completed tool event", events)
+	}
+	event := events[0]
+	if event.Kind != TranscriptEventTool || event.ToolCallID != "x-search-1" || !event.Final {
+		t.Fatalf("event = %#v, want completed x-search tool event", event)
+	}
+	if event.ToolArgs != `"`+query+`"` {
+		t.Fatalf("ToolArgs = %q, want recovered query %q", event.ToolArgs, query)
+	}
+}
+
+func TestProjectACPEventToTranscriptEventsRequiresExplicitRecoveredToolInput(t *testing.T) {
+	t.Parallel()
+
+	const resultText = "returned-result-or-sensitive-text"
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "read-1",
+			Title:         stringPtr("Read"),
+			Status:        stringPtr(schema.ToolStatusCompleted),
+			RawOutput: map[string]any{
+				"name":  "read",
+				"input": `{"query":"` + resultText + `"}`,
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool result", events)
+	}
+	if strings.Contains(events[0].ToolArgs, resultText) {
+		t.Fatalf("ToolArgs = %q, want arbitrary rawOutput.input to remain result-only", events[0].ToolArgs)
+	}
+}
+
+func TestProjectACPEventToTranscriptEventsKeepsRawInputAuthoritative(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "search-1",
+			Title:         stringPtr("Search"),
+			Status:        stringPtr(schema.ToolStatusCompleted),
+			RawInput:      map[string]any{"query": "authoritative"},
+			Meta: metautil.WithSection(nil, metautil.Display, map[string]any{
+				metautil.DisplayToolInput: map[string]any{"query": "recovered"},
+			}),
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool result", events)
+	}
+	if events[0].ToolArgs != `"authoritative"` {
+		t.Fatalf("ToolArgs = %q, want rawInput to win over recovered display input", events[0].ToolArgs)
+	}
+}
+
 func TestProjectACPEventToTranscriptEventsDisplaysStandardRawTerminalOutput(t *testing.T) {
 	t.Parallel()
 

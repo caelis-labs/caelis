@@ -1380,6 +1380,7 @@ func TestRuntimePromptParticipantRehydratesPersistedBinding(t *testing.T) {
 	result, err := runtime.PromptParticipant(context.Background(), agent.PromptParticipantRequest{
 		SessionRef:    activeSession.SessionRef,
 		ParticipantID: "codex-3",
+		TurnID:        "participant-turn-control-owned",
 		Input:         "please inspect the local diff",
 		Source:        "tui_agent_ask",
 	})
@@ -1398,6 +1399,9 @@ func TestRuntimePromptParticipantRehydratesPersistedBinding(t *testing.T) {
 	case req := <-promptReqCh:
 		if req.ParticipantID != "codex-3" {
 			t.Fatalf("ParticipantID = %q, want codex-3", req.ParticipantID)
+		}
+		if req.TurnID != "participant-turn-control-owned" {
+			t.Fatalf("TurnID = %q, want participant-turn-control-owned", req.TurnID)
 		}
 		if got := req.Session.Participants[0].SessionID; got != "remote-new" {
 			t.Fatalf("prompt session participant remote = %q, want remote-new", got)
@@ -1419,6 +1423,23 @@ func TestRuntimePromptParticipantRehydratesPersistedBinding(t *testing.T) {
 	}
 	if binding.SessionID != "remote-new" {
 		t.Fatalf("persisted participant remote = %q, want remote-new", binding.SessionID)
+	}
+	events, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	var foundUser bool
+	for _, event := range events {
+		if session.EventTypeOf(event) != session.EventTypeUser || strings.TrimSpace(session.EventText(event)) != "please inspect the local diff" {
+			continue
+		}
+		foundUser = true
+		if event.Scope == nil || event.Scope.TurnID != "participant-turn-control-owned" {
+			t.Fatalf("durable participant user Scope = %#v, want Control-owned TurnID", event.Scope)
+		}
+	}
+	if !foundUser {
+		t.Fatal("durable participant user event missing")
 	}
 }
 
