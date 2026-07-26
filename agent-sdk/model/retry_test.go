@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"iter"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -146,7 +147,7 @@ func TestWithRetryRetriesSameLLMRequestBeforeEmission(t *testing.T) {
 	}
 }
 
-func TestWithRetryRetriesSearchWebTransientFailure(t *testing.T) {
+func TestWithRetryDoesNotRetrySearchWebFailure(t *testing.T) {
 	t.Parallel()
 
 	inner := &retrySearchLLM{
@@ -169,14 +170,14 @@ func TestWithRetryRetriesSearchWebTransientFailure(t *testing.T) {
 		t.Fatal("WithRetry() did not preserve WebSearcher capability")
 	}
 	resp, err := searcher.SearchWeb(context.Background(), WebSearchRequest{Query: "latest"})
-	if err != nil {
-		t.Fatalf("SearchWeb() error = %v", err)
+	if err == nil {
+		t.Fatal("SearchWeb() error = nil, want first provider failure returned")
 	}
-	if got, want := inner.searchCalls, 2; got != want {
+	if got, want := inner.searchCalls, 1; got != want {
 		t.Fatalf("search calls = %d, want %d", got, want)
 	}
-	if resp.Answer != "ok" {
-		t.Fatalf("answer = %q, want ok", resp.Answer)
+	if !reflect.DeepEqual(resp, WebSearchResponse{}) {
+		t.Fatalf("response = %#v, want zero response after failure", resp)
 	}
 }
 

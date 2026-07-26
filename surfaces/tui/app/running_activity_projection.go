@@ -71,6 +71,8 @@ func (m *Model) applyToolRunningActivity(event TranscriptEvent) {
 	semanticName := names.CanonicalOrSelf(toolSemanticName(event.ToolName, event.ToolKind))
 	key := m.runningActivityTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt)
 	switch semanticName {
+	case names.WebSearch:
+		m.updateToolRunningActivity(event.Final, runningPhaseSearch, "", key, event.ToolCallID)
 	case names.RunCommand:
 		m.updateToolRunningActivity(event.Final, runningPhaseWait, runningTargetShell, key, event.ToolCallID)
 	case names.Spawn:

@@ -46,6 +46,14 @@ func (u unavailableReasonLLM) WebSearchUnavailableReason() string {
 	return u.reason
 }
 
+func TestSearchToolIsParallelSafe(t *testing.T) {
+	t.Parallel()
+
+	if !NewSearch().Definition().Capabilities.ParallelSafe {
+		t.Fatal("WebSearch ParallelSafe = false, want concurrent same-step searches")
+	}
+}
+
 func TestSearchToolReturnsUnavailableFallbackForUnsupportedProvider(t *testing.T) {
 	t.Parallel()
 

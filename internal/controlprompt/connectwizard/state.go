@@ -5,9 +5,11 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/caelis-labs/caelis/control/modelconfig"
 )
 
-const DefaultConnectTimeoutSeconds = 60
+const DefaultConnectTimeoutSeconds = modelconfig.DefaultProviderRequestTimeoutSeconds
 
 // ConnectWizardState is the structured state carried between connect wizard
 // steps and driver completions.

@@ -11,6 +11,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
+	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
@@ -129,6 +130,32 @@ func (s ModelService) Authenticate(ctx context.Context, req modelconfig.Authenti
 			// Match the official client manager's remote-first/fallback behavior:
 			// authentication remains successful and Control uses its maintained
 			// catalog when the account catalog is temporarily unavailable.
+			return modelconfig.AuthenticateResult{}, nil
+		}
+		return modelconfig.AuthenticateResult{
+			SelectableModels:          models,
+			ModelCatalogAuthoritative: true,
+		}, nil
+	}
+	if ok && template.AuthFlow == modelconfig.AuthFlowGrokOAuth {
+		if s.stack.grokAuth == nil {
+			return modelconfig.AuthenticateResult{}, fmt.Errorf("gatewayapp: grok authentication is unavailable")
+		}
+		if err := s.stack.grokAuth.EnsureAuthenticated(ctx, grokauth.LoginOptions{
+			HTTPClient:      req.HTTPClient,
+			OpenBrowser:     req.OpenBrowser,
+			CallbackTimeout: req.CallbackTimeout,
+		}); err != nil {
+			return modelconfig.AuthenticateResult{}, err
+		}
+		if req.Purpose != modelconfig.AuthPurposeModelSelection {
+			return modelconfig.AuthenticateResult{}, nil
+		}
+		models, err := s.stack.grokAuth.ListModels(ctx, req.HTTPClient)
+		if err != nil {
+			if ctx != nil && ctx.Err() != nil {
+				return modelconfig.AuthenticateResult{}, ctx.Err()
+			}
 			return modelconfig.AuthenticateResult{}, nil
 		}
 		return modelconfig.AuthenticateResult{

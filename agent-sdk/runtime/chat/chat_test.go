@@ -18,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
 )
 
 func TestChatAgentUsesSessionMessages(t *testing.T) {
@@ -659,6 +660,60 @@ func TestChatAgentExecutesSameStepToolCallsConcurrently(t *testing.T) {
 	}
 	if got := results[1].ToolResults()[0].ToolUseID; got != "call-beta" {
 		t.Fatalf("second tool result id = %q, want call-beta", got)
+	}
+}
+
+func TestChatAgentExecutesSameStepWebSearchCallsConcurrently(t *testing.T) {
+	t.Parallel()
+
+	searchModel := &concurrentWebSearchModel{}
+	chatAgent, err := NewWithTools("chat", searchModel, []tool.Tool{web.NewSearch()}, "Use tools when needed.")
+	if err != nil {
+		t.Fatalf("NewWithTools() error = %v", err)
+	}
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-web-search"}},
+		Events: []*session.Event{{
+			Type:    session.EventTypeUser,
+			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "search both")),
+			Text:    "search both",
+		}},
+	})
+
+	for _, runErr := range chatAgent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+	}
+	if !searchModel.overlapped.Load() {
+		t.Fatal("same-step WebSearch calls did not overlap; want concurrent execution")
+	}
+	if got := searchModel.searchCalls.Load(); got != 2 {
+		t.Fatalf("SearchWeb calls = %d, want 2", got)
+	}
+	if got := len(searchModel.lastRequest.Messages); got < 2 {
+		t.Fatalf("last request messages = %d, want at least 2 tool results", got)
+	}
+	results := searchModel.lastRequest.Messages[len(searchModel.lastRequest.Messages)-2:]
+	for index, want := range []struct {
+		callID string
+		query  string
+	}{
+		{callID: "search-alpha", query: "alpha"},
+		{callID: "search-beta", query: "beta"},
+	} {
+		toolResults := results[index].ToolResults()
+		if len(toolResults) != 1 || toolResults[0].ToolUseID != want.callID {
+			t.Fatalf("tool results[%d] = %#v, want call %q", index, toolResults, want.callID)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(toolResults[0].Content[0].JSON.Value, &payload); err != nil {
+			t.Fatalf("decode tool result[%d]: %v", index, err)
+		}
+		if got := payload["query"]; got != want.query {
+			t.Fatalf("tool result[%d] query = %#v, want %q", index, got, want.query)
+		}
 	}
 }
 
@@ -3075,6 +3130,73 @@ func (m *invalidThenValidToolModel) Generate(_ context.Context, req *model.Reque
 type contextStabilityModel struct {
 	requests  []model.Request
 	toolNames []string
+}
+
+type concurrentWebSearchModel struct {
+	generateCalls int
+	active        atomic.Int32
+	searchCalls   atomic.Int32
+	overlapped    atomic.Bool
+	lastRequest   model.Request
+}
+
+func (m *concurrentWebSearchModel) Name() string { return "concurrent-web-search" }
+
+func (m *concurrentWebSearchModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	m.generateCalls++
+	generateCall := m.generateCalls
+	if req != nil {
+		m.lastRequest = *req
+		m.lastRequest.Messages = model.CloneMessages(req.Messages)
+	}
+	return func(yield func(*model.StreamEvent, error) bool) {
+		if generateCall == 1 {
+			yield(model.StreamEventFromResponse(&model.Response{
+				Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+					ID:   "search-alpha",
+					Name: web.SearchToolName,
+					Args: `{"query":"alpha"}`,
+				}, {
+					ID:   "search-beta",
+					Name: web.SearchToolName,
+					Args: `{"query":"beta"}`,
+				}}, ""),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       model.ResponseStatusCompleted,
+				FinishReason: model.FinishReasonToolCalls,
+			}), nil)
+			return
+		}
+		yield(model.StreamEventFromResponse(&model.Response{
+			Message:      model.NewTextMessage(model.RoleAssistant, "done"),
+			TurnComplete: true,
+			StepComplete: true,
+			Status:       model.ResponseStatusCompleted,
+			FinishReason: model.FinishReasonStop,
+		}), nil)
+	}
+}
+
+func (m *concurrentWebSearchModel) SearchWeb(ctx context.Context, req model.WebSearchRequest) (model.WebSearchResponse, error) {
+	m.searchCalls.Add(1)
+	if m.active.Add(1) > 1 {
+		m.overlapped.Store(true)
+	}
+	defer m.active.Add(-1)
+	select {
+	case <-time.After(50 * time.Millisecond):
+	case <-ctx.Done():
+		return model.WebSearchResponse{}, ctx.Err()
+	}
+	return model.WebSearchResponse{
+		Query:    req.Query,
+		Provider: "test",
+		Results: []model.WebSearchResult{{
+			Title: req.Query,
+			URL:   "https://example.com/" + req.Query,
+		}},
+	}, nil
 }
 
 func (m *contextStabilityModel) Name() string { return "context-stability" }

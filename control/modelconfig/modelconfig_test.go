@@ -72,6 +72,9 @@ func TestAssembleConnectBuildsCompleteKnownModelConfig(t *testing.T) {
 	if cfg.ContextWindowTokens != 1048576 || cfg.MaxOutputTok != 32768 {
 		t.Fatalf("assembled limits = context:%d max:%d", cfg.ContextWindowTokens, cfg.MaxOutputTok)
 	}
+	if cfg.Timeout != DefaultProviderRequestTimeoutSeconds*time.Second {
+		t.Fatalf("assembled timeout = %s, want %ds", cfg.Timeout, DefaultProviderRequestTimeoutSeconds)
+	}
 	if cfg.ReasoningMode != modelcatalog.ReasoningModeToggle || cfg.ReasoningEffort != "high" || cfg.DefaultReasoningEffort != "high" {
 		t.Fatalf("assembled reasoning = mode:%q effort:%q default:%q", cfg.ReasoningMode, cfg.ReasoningEffort, cfg.DefaultReasoningEffort)
 	}

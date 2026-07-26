@@ -22,8 +22,9 @@ type openAICodexRequest struct {
 	Tools        []openAICodexTool     `json:"tools,omitempty"`
 	ToolChoice   string                `json:"tool_choice,omitempty"`
 	PromptCache  string                `json:"prompt_cache_key,omitempty"`
+	MaxOutputTok int                   `json:"max_output_tokens,omitempty"`
 	Store        bool                  `json:"store"`
-	Include      []string              `json:"include"`
+	Include      []string              `json:"include,omitempty"`
 	Reasoning    *openAICodexReasoning `json:"reasoning,omitempty"`
 	Stream       bool                  `json:"stream"`
 }
@@ -145,6 +146,10 @@ func openAICodexTools(specs []model.ToolSpec) []openAICodexTool {
 }
 
 func openAICodexInputs(instructionParts []model.Part, messages []model.Message) (string, []any, error) {
+	return openAIResponsesInputs(instructionParts, messages, openAICodexReplayProvider)
+}
+
+func openAIResponsesInputs(instructionParts []model.Part, messages []model.Message, replayProvider string) (string, []any, error) {
 	out := make([]any, 0, len(messages))
 	instructions := make([]string, 0, 1)
 	seenToolCalls := map[string]struct{}{}
@@ -178,7 +183,7 @@ func openAICodexInputs(instructionParts []model.Part, messages []model.Message) 
 			out = append(out, openAICodexUserInput{Role: string(model.RoleUser), Content: content})
 		case model.RoleAssistant:
 			var err error
-			out, err = openAICodexAssistantContent(out, message.Parts, seenToolCalls)
+			out, err = openAIResponsesAssistantContent(out, message.Parts, seenToolCalls, replayProvider)
 			if err != nil {
 				return "", nil, err
 			}
@@ -254,6 +259,10 @@ func openAICodexImage(part model.Part) (openAICodexInputImage, error) {
 }
 
 func openAICodexAssistantContent(out []any, parts []model.Part, seenToolCalls map[string]struct{}) ([]any, error) {
+	return openAIResponsesAssistantContent(out, parts, seenToolCalls, openAICodexReplayProvider)
+}
+
+func openAIResponsesAssistantContent(out []any, parts []model.Part, seenToolCalls map[string]struct{}, replayProvider string) ([]any, error) {
 	text := make([]openAICodexOutputText, 0, 1)
 	flushText := func() {
 		if len(text) == 0 {
@@ -270,7 +279,7 @@ func openAICodexAssistantContent(out []any, parts []model.Part, seenToolCalls ma
 			}
 		case model.PartKindReasoning:
 			flushText()
-			if replay, ok := openAICodexReasoningReplay(part); ok {
+			if replay, ok := openAIResponsesReasoningReplay(part, replayProvider); ok {
 				out = append(out, replay)
 			}
 		case model.PartKindToolUse:
@@ -290,13 +299,26 @@ func openAICodexAssistantContent(out []any, parts []model.Part, seenToolCalls ma
 }
 
 func openAICodexReasoningReplay(part model.Part) (openAICodexReasoningInput, bool) {
+	return openAIResponsesReasoningReplay(part, openAICodexReplayProvider)
+}
+
+func openAIResponsesReasoningReplay(part model.Part, replayProvider string) (openAICodexReasoningInput, bool) {
 	if part.Reasoning == nil || part.Reasoning.Replay == nil {
 		return openAICodexReasoningInput{}, false
 	}
 	replay := part.Reasoning.Replay
 	provider := strings.ToLower(strings.TrimSpace(replay.Provider))
-	if provider != "" && provider != openAICodexReplayProvider && provider != "openai-codex" {
-		return openAICodexReasoningInput{}, false
+	if provider != "" {
+		switch strings.ToLower(strings.TrimSpace(replayProvider)) {
+		case openAICodexReplayProvider:
+			if provider != openAICodexReplayProvider && provider != "openai-codex" {
+				return openAICodexReasoningInput{}, false
+			}
+		default:
+			if provider != strings.ToLower(strings.TrimSpace(replayProvider)) {
+				return openAICodexReasoningInput{}, false
+			}
+		}
 	}
 	kind := strings.TrimSpace(replay.Kind)
 	if kind != "" && kind != openAICodexReplayKind {
@@ -440,6 +462,7 @@ type openAICodexResponseWire struct {
 	Model             string                        `json:"model"`
 	Status            string                        `json:"status"`
 	Output            []openAICodexOutputItem       `json:"output"`
+	Citations         []string                      `json:"citations,omitempty"`
 	IncompleteDetails *openAICodexIncompleteDetails `json:"incomplete_details"`
 	Usage             *openAICodexUsage             `json:"usage"`
 	Error             *openAICodexErrorPayload      `json:"error"`
@@ -473,13 +496,22 @@ type openAICodexOutputSlot struct {
 }
 
 type openAICodexAccumulator struct {
-	slots       map[int]*openAICodexOutputSlot
-	itemIndexes map[string]int
-	hasToolCall bool
+	slots          map[int]*openAICodexOutputSlot
+	itemIndexes    map[string]int
+	hasToolCall    bool
+	replayProvider string
 }
 
 func newOpenAICodexAccumulator() *openAICodexAccumulator {
-	return &openAICodexAccumulator{slots: map[int]*openAICodexOutputSlot{}, itemIndexes: map[string]int{}}
+	return newOpenAIResponsesAccumulator(openAICodexReplayProvider)
+}
+
+func newOpenAIResponsesAccumulator(replayProvider string) *openAICodexAccumulator {
+	return &openAICodexAccumulator{
+		slots:          map[int]*openAICodexOutputSlot{},
+		itemIndexes:    map[string]int{},
+		replayProvider: strings.ToLower(strings.TrimSpace(replayProvider)),
+	}
 }
 
 func (a *openAICodexAccumulator) slot(index int, itemID string, kind string) *openAICodexOutputSlot {
@@ -626,7 +658,7 @@ func (a *openAICodexAccumulator) message() (model.Message, error) {
 			}
 			part := model.NewReasoningPart(visible, visibility)
 			if token != "" && part.Reasoning != nil {
-				part.Reasoning.Replay = &model.ReplayMeta{Provider: openAICodexReplayProvider, Kind: openAICodexReplayKind, Token: token}
+				part.Reasoning.Replay = &model.ReplayMeta{Provider: a.replayProvider, Kind: openAICodexReplayKind, Token: token}
 			}
 			parts = append(parts, part)
 		case "message":

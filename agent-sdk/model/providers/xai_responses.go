@@ -3,7 +3,6 @@ package providers
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"iter"
@@ -15,12 +14,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
-const (
-	defaultOpenAICodexBaseURL           = "https://chatgpt.com/backend-api/codex"
-	openAICodexRequestAffinityMaxLength = 64
-)
+const defaultXAIResponsesBaseURL = "https://cli-chat-proxy.grok.com/v1"
 
-type openAICodexLLM struct {
+// xAIResponsesLLM implements xAI's Responses dialect without inheriting the
+// ChatGPT-only headers, endpoint, or request-affinity semantics of Codex.
+type xAIResponsesLLM struct {
 	name                string
 	provider            string
 	baseURL             string
@@ -28,15 +26,16 @@ type openAICodexLLM struct {
 	client              *http.Client
 	requestTimeout      time.Duration
 	firstEventTimeout   time.Duration
+	maxOutputTok        int
 	contextWindowTokens int
 }
 
-func newOpenAICodex(cfg Config) *openAICodexLLM {
+func newXAIResponses(cfg Config) *xAIResponsesLLM {
 	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	if baseURL == "" {
-		baseURL = defaultOpenAICodexBaseURL
+		baseURL = defaultXAIResponsesBaseURL
 	}
-	return &openAICodexLLM{
+	return &xAIResponsesLLM{
 		name:                strings.TrimSpace(cfg.Model),
 		provider:            strings.TrimSpace(cfg.Provider),
 		baseURL:             baseURL,
@@ -44,46 +43,42 @@ func newOpenAICodex(cfg Config) *openAICodexLLM {
 		client:              coalesceHTTPClient(cfg.HTTPClient),
 		requestTimeout:      cfg.Timeout,
 		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
+		maxOutputTok:        cfg.MaxOutputTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
 	}
 }
 
-func (l *openAICodexLLM) Name() string {
+func (l *xAIResponsesLLM) Name() string {
 	if l == nil {
 		return ""
 	}
 	return l.name
 }
 
-func (l *openAICodexLLM) ProviderName() string {
+func (l *xAIResponsesLLM) ProviderName() string {
 	if l == nil {
 		return ""
 	}
 	return l.provider
 }
 
-func (l *openAICodexLLM) ContextWindowTokens() int {
+func (l *xAIResponsesLLM) ContextWindowTokens() int {
 	if l == nil {
 		return 0
 	}
 	return l.contextWindowTokens
 }
 
-func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+func (l *xAIResponsesLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {
 		if l == nil {
-			yield(nil, fmt.Errorf("openai codex: model is nil"))
+			yield(nil, fmt.Errorf("xai responses: model is nil"))
 			return
 		}
-		payload, err := openAICodexRequestFromModel(req, l.name)
+		payload, err := xAIResponsesRequestFromModel(req, l.name, l.maxOutputTok)
 		if err != nil {
 			yield(nil, err)
 			return
-		}
-		requestAffinity := ""
-		if metadata, ok := model.ProviderRequestMetadataFromContext(ctx); ok {
-			requestAffinity = openAICodexRequestAffinity(metadata.SessionAffinity)
-			payload.PromptCache = requestAffinity
 		}
 		raw, err := json.Marshal(payload)
 		if err != nil {
@@ -97,11 +92,8 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "text/event-stream")
-		setHeaderDefault(httpReq.Header, "originator", "caelis")
-		if requestAffinity != "" {
-			setHeaderDefault(httpReq.Header, "session-id", requestAffinity)
-		}
-		applyDefaultAttributionHeaders(httpReq, APIOpenAICodex)
+		httpReq.Header.Set("x-grok-model-override", l.name)
+		applyDefaultAttributionHeaders(httpReq, APIXAIResponses)
 		applyConfiguredHeaders(httpReq, l.headers)
 
 		resp, err := l.client.Do(httpReq)
@@ -113,19 +105,19 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 		if resp.StatusCode >= http.StatusMultipleChoices {
 			err := statusError(resp)
 			if errorcode.Is(err, errorcode.Unauthenticated) || errorcode.Is(err, errorcode.PermissionDenied) {
-				err = &openAICodexTerminalError{cause: err}
+				err = &xAIResponsesTerminalError{cause: err}
 			}
 			yield(nil, err)
 			return
 		}
 
-		accumulator := newOpenAICodexAccumulator()
+		accumulator := newOpenAIResponsesAccumulator("xai")
 		terminalSeen := false
 		stopped := false
 		err = readSSEWithFirstEventTimeout(resp.Body, l.firstEventTimeout, func(data []byte) error {
 			var event openAICodexStreamWire
 			if err := json.Unmarshal(data, &event); err != nil {
-				return fmt.Errorf("openai codex: decode stream event: %w", err)
+				return fmt.Errorf("xai responses: decode stream event: %w", err)
 			}
 			switch event.Type {
 			case "response.output_item.added", "response.output_item.done":
@@ -170,7 +162,7 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 				}
 			case "response.completed", "response.incomplete":
 				if event.Response == nil {
-					return errorcode.New(errorcode.Internal, "openai codex: terminal response is empty")
+					return errorcode.New(errorcode.Internal, "xai responses: terminal response is empty")
 				}
 				for index, item := range event.Response.Output {
 					accumulator.applyItem(item, index)
@@ -208,7 +200,7 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 				}
 				return errStopSSE
 			case "response.failed", "error":
-				return openAICodexStreamError(event)
+				return xAIResponsesStreamError(event)
 			}
 			return nil
 		})
@@ -220,119 +212,84 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 			return
 		}
 		if !terminalSeen {
-			yield(nil, fmt.Errorf("openai codex: stream ended before a terminal response"))
+			yield(nil, fmt.Errorf("xai responses: stream ended before a terminal response"))
 		}
 	}
 }
 
-func openAICodexRequestAffinity(sessionAffinity string) string {
-	key := strings.TrimSpace(sessionAffinity)
-	if len(key) <= openAICodexRequestAffinityMaxLength {
-		return key
+func xAIResponsesRequestFromModel(req *model.Request, modelName string, maxOutputTok int) (openAICodexRequest, error) {
+	if req == nil {
+		return openAICodexRequest{}, fmt.Errorf("model: request is nil")
 	}
-	// The Codex backend uses session-id as request affinity and may project it
-	// into the downstream prompt_cache_key. Keep the header and body on the
-	// same stable value within the Responses API's 64-character limit.
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
+	if req.Reasoning.BudgetTokens > 0 {
+		return openAICodexRequest{}, errorcode.New(errorcode.Unsupported, "xai responses: reasoning token budgets are unsupported")
+	}
+	if req.Output != nil && req.Output.Mode != "" && req.Output.Mode != model.OutputModeText {
+		return openAICodexRequest{}, &model.OutputSpecError{
+			Mode:   req.Output.Mode,
+			Detail: "xAI Responses structured output is not implemented",
+		}
+	}
+	if req.Output != nil && req.Output.MaxOutputTokens > 0 {
+		maxOutputTok = req.Output.MaxOutputTokens
+	}
+	instructions, input, err := openAIResponsesInputs(req.Instructions, req.Messages, "xai")
+	if err != nil {
+		return openAICodexRequest{}, err
+	}
+	tools := openAICodexTools(req.Tools)
+	toolChoice := ""
+	if len(tools) > 0 {
+		toolChoice = "auto"
+	}
+	effort := strings.TrimSpace(req.Reasoning.Effort)
+	var include []string
+	var reasoning *openAICodexReasoning
+	if effort != "" {
+		include = []string{"reasoning.encrypted_content"}
+		reasoning = &openAICodexReasoning{Effort: effort, Summary: "concise"}
+	}
+	return openAICodexRequest{
+		Model:        strings.TrimSpace(modelName),
+		Input:        input,
+		Instructions: instructions,
+		Tools:        tools,
+		ToolChoice:   toolChoice,
+		MaxOutputTok: maxOutputTok,
+		Store:        false,
+		Include:      include,
+		Reasoning:    reasoning,
+		Stream:       true,
+	}, nil
 }
 
-type openAICodexTerminalError struct {
+type xAIResponsesTerminalError struct {
 	cause error
 }
 
-func (e *openAICodexTerminalError) Error() string {
+func (e *xAIResponsesTerminalError) Error() string {
 	if e == nil || e.cause == nil {
-		return "openai codex: terminal authentication error"
+		return "xai responses: terminal authentication error"
 	}
 	return e.cause.Error()
 }
 
-func (e *openAICodexTerminalError) Unwrap() error {
+func (e *xAIResponsesTerminalError) Unwrap() error {
 	if e == nil {
 		return nil
 	}
 	return e.cause
 }
 
-func (e *openAICodexTerminalError) Retryable() bool { return false }
+func (e *xAIResponsesTerminalError) Retryable() bool { return false }
 
-func (e *openAICodexTerminalError) ErrorCode() errorcode.Code {
+func (e *xAIResponsesTerminalError) ErrorCode() errorcode.Code {
 	if e == nil {
 		return errorcode.Unknown
 	}
 	return errorcode.CodeOf(e.cause)
 }
 
-type openAICodexProviderError struct {
-	code         string
-	message      string
-	errorCode    errorcode.Code
-	retryable    bool
-	backpressure bool
-}
-
-func (e *openAICodexProviderError) Error() string {
-	if e == nil {
-		return "openai codex: provider error"
-	}
-	if e.code != "" && e.message != "" {
-		return "openai codex: " + e.code + ": " + e.message
-	}
-	if e.message != "" {
-		return "openai codex: " + e.message
-	}
-	if e.code != "" {
-		return "openai codex: " + e.code
-	}
-	return "openai codex: provider error"
-}
-
-func (e *openAICodexProviderError) Retryable() bool {
-	return e != nil && e.retryable
-}
-
-func (e *openAICodexProviderError) Backpressure() bool {
-	return e != nil && e.backpressure
-}
-
-func (e *openAICodexProviderError) ErrorCode() errorcode.Code {
-	if e == nil {
-		return errorcode.Unknown
-	}
-	return e.errorCode
-}
-
-func openAICodexStreamError(event openAICodexStreamWire) error {
-	code := strings.TrimSpace(event.Code)
-	message := strings.TrimSpace(event.Message)
-	if event.Response != nil && event.Response.Error != nil {
-		if code == "" {
-			code = strings.TrimSpace(event.Response.Error.Code)
-		}
-		if message == "" {
-			message = strings.TrimSpace(event.Response.Error.Message)
-		}
-	}
-	lowerCode := strings.ToLower(code)
-	providerErr := &openAICodexProviderError{code: code, message: message, errorCode: errorcode.InvalidArgument}
-	switch {
-	case lowerCode == "context_length_exceeded" || looksLikeContextOverflow(message, http.StatusBadRequest):
-		return &model.ContextOverflowError{Cause: providerErr}
-	case strings.Contains(lowerCode, "rate_limit"):
-		providerErr.errorCode = errorcode.RateLimited
-		providerErr.retryable = true
-		providerErr.backpressure = true
-	case strings.Contains(lowerCode, "overload"):
-		providerErr.errorCode = errorcode.Overloaded
-		providerErr.retryable = true
-		providerErr.backpressure = true
-	case strings.Contains(lowerCode, "server_error") || strings.Contains(lowerCode, "unavailable"):
-		providerErr.errorCode = errorcode.Unavailable
-		providerErr.retryable = true
-	case strings.Contains(lowerCode, "auth"):
-		providerErr.errorCode = errorcode.Unauthenticated
-	case strings.Contains(lowerCode, "permission"):
-		providerErr.errorCode = errorcode.PermissionDenied
-	}
-	return providerErr
+func xAIResponsesStreamError(event openAICodexStreamWire) error {
+	return fmt.Errorf("xai responses: %w", openAICodexStreamError(event))
 }

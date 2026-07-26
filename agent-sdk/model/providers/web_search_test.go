@@ -24,7 +24,10 @@ func TestGeminiSearchWebUsesGroundingToolAndReturnsSources(t *testing.T) {
 		  "candidates":[{
 		    "content":{"role":"model","parts":[{"text":"grounded answer"}]},
 		    "groundingMetadata":{
-		      "groundingChunks":[{"web":{"uri":"https://example.com/a","title":"A","domain":"example.com"}}],
+		      "groundingChunks":[
+		        {"web":{"uri":"https://example.com/a","title":"A","domain":"example.com"}},
+		        {"web":{"uri":"https://example.org/b","title":"B","domain":"example.org"}}
+		      ],
 		      "groundingSupports":[{"segment":{"partIndex":0,"startIndex":0,"endIndex":8,"text":"grounded"},"groundingChunkIndices":[0]}]
 		    }
 		  }],
@@ -40,7 +43,7 @@ func TestGeminiSearchWebUsesGroundingToolAndReturnsSources(t *testing.T) {
 		HTTPClient: server.Client(),
 		Timeout:    2 * time.Second,
 	}, "token").(*geminiLLM)
-	resp, err := llm.SearchWeb(context.Background(), model.WebSearchRequest{Query: "latest", MaxResults: 3})
+	resp, err := llm.SearchWeb(context.Background(), model.WebSearchRequest{Query: "latest", MaxResults: 1})
 	if err != nil {
 		t.Fatalf("SearchWeb() error = %v", err)
 	}
@@ -53,8 +56,8 @@ func TestGeminiSearchWebUsesGroundingToolAndReturnsSources(t *testing.T) {
 	if resp.Answer != "grounded answer" {
 		t.Fatalf("answer = %q, want grounded answer", resp.Answer)
 	}
-	if len(resp.Results) != 1 || resp.Results[0].URL != "https://example.com/a" {
-		t.Fatalf("results = %#v, want grounding source", resp.Results)
+	if len(resp.Results) != 2 || resp.Results[0].URL != "https://example.com/a" || resp.Results[1].URL != "https://example.org/b" {
+		t.Fatalf("results = %#v, want complete grounding source set", resp.Results)
 	}
 	if resp.Results[0].RefID != "grounding-0" || len(resp.Citations) != 1 || resp.Citations[0].EndIndex != 8 {
 		t.Fatalf("grounding citation = results %#v citations %#v", resp.Results, resp.Citations)
@@ -79,7 +82,11 @@ func TestMimoSearchWebUsesWebSearchToolAndReturnsAnnotations(t *testing.T) {
 		    "message":{
 		      "role":"assistant",
 		      "content":"search answer",
-		      "annotations":[{"url":"https://example.com/a","title":"A","summary":"summary","site_name":"Example","publish_time":"2026-06-23"}]
+		      "annotations":[
+		        {"url":"https://example.com/a","title":"A1","summary":"summary 1","site_name":"Example","publish_time":"2026-06-23"},
+		        {"url":"https://example.org/b","title":"B","summary":"summary 2","site_name":"Example B","publish_time":"2026-06-24"},
+		        {"url":"https://example.com/a","title":"A2","summary":"summary 3","site_name":"Example","publish_time":"2026-06-25"}
+		      ]
 		    },
 		    "finish_reason":"stop"
 		  }],
@@ -95,7 +102,7 @@ func TestMimoSearchWebUsesWebSearchToolAndReturnsAnnotations(t *testing.T) {
 		HTTPClient: server.Client(),
 		Timeout:    2 * time.Second,
 	}, "token").(*mimoLLM)
-	resp, err := llm.SearchWeb(context.Background(), model.WebSearchRequest{Query: "latest", MaxResults: 2})
+	resp, err := llm.SearchWeb(context.Background(), model.WebSearchRequest{Query: "latest", MaxResults: 1})
 	if err != nil {
 		t.Fatalf("SearchWeb() error = %v", err)
 	}
@@ -116,13 +123,18 @@ func TestMimoSearchWebUsesWebSearchToolAndReturnsAnnotations(t *testing.T) {
 	if _, ok := webSearch["webSearchEnabled"]; ok {
 		t.Fatalf("web_search tool payload includes undocumented webSearchEnabled flag: %#v", webSearch)
 	}
+	if _, ok := webSearch["limit"]; ok {
+		t.Fatalf("web_search tool payload applies caller MaxResults to server search: %#v", webSearch)
+	}
 	if resp.Answer != "search answer" {
 		t.Fatalf("answer = %q, want search answer", resp.Answer)
 	}
-	if len(resp.Results) != 1 || resp.Results[0].Snippet != "summary" {
-		t.Fatalf("results = %#v, want annotation result", resp.Results)
+	if len(resp.Results) != 3 || resp.Results[0].Snippet != "summary 1" || resp.Results[2].Title != "A2" {
+		t.Fatalf("results = %#v, want complete annotation result set", resp.Results)
 	}
-	if resp.Results[0].RefID != "annotation-0" || len(resp.Citations) != 1 || resp.Citations[0].StartIndex != len(resp.Answer) {
+	if resp.Results[0].RefID != "annotation-0" || resp.Results[2].RefID != "annotation-2" ||
+		len(resp.Citations) != 1 || resp.Citations[0].StartIndex != len(resp.Answer) ||
+		len(resp.Citations[0].Sources) != 2 || resp.Citations[0].Sources[0].Title != "A1" {
 		t.Fatalf("annotation citation = results %#v citations %#v", resp.Results, resp.Citations)
 	}
 }
@@ -171,7 +183,11 @@ func TestDeepSeekSearchWebUsesAnthropicServerToolAndReturnsSources(t *testing.T)
 		  "stop_reason":"end_turn",
 		  "content":[
 		    {"type":"server_tool_use","id":"srv_1","name":"web_search","input":{"query":"DeepSeek docs"}},
-		    {"type":"web_search_tool_result","tool_use_id":"srv_1","content":[{"type":"web_search_result","title":"DeepSeek API Docs","url":"https://api-docs.deepseek.com/","encrypted_content":"encrypted","page_age":"2026-06-23"}]},
+		    {"type":"web_search_tool_result","tool_use_id":"srv_1","content":[
+		      {"type":"web_search_result","title":"DeepSeek API Docs","url":"https://api-docs.deepseek.com/","encrypted_content":"encrypted","page_age":"2026-06-23"},
+		      {"type":"web_search_result","title":"DeepSeek News","url":"https://news.deepseek.com/","encrypted_content":"encrypted-2","page_age":"2026-06-24"},
+		      {"type":"web_search_result","title":"DeepSeek API Docs Duplicate","url":"https://api-docs.deepseek.com/","encrypted_content":"encrypted-3","page_age":"2026-06-25"}
+		    ]},
 		    {"type":"text","text":"DeepSeek docs are at https://api-docs.deepseek.com/."}
 		  ],
 		  "usage":{"input_tokens":10,"output_tokens":5}
@@ -194,7 +210,7 @@ func TestDeepSeekSearchWebUsesAnthropicServerToolAndReturnsSources(t *testing.T)
 	if !ok {
 		t.Fatalf("newDeepSeek() = %T, want WebSearcher", llm)
 	}
-	resp, err := searcher.SearchWeb(context.Background(), model.WebSearchRequest{Query: "DeepSeek docs", MaxResults: 2})
+	resp, err := searcher.SearchWeb(context.Background(), model.WebSearchRequest{Query: "DeepSeek docs", MaxResults: 1})
 	if err != nil {
 		t.Fatalf("SearchWeb() error = %v", err)
 	}
@@ -206,8 +222,8 @@ func TestDeepSeekSearchWebUsesAnthropicServerToolAndReturnsSources(t *testing.T)
 	if webSearch["type"] != anthropicWebSearchTool20260209 || webSearch["name"] != anthropicWebSearchToolName {
 		t.Fatalf("web_search tool = %#v, want Anthropic web_search tool", webSearch)
 	}
-	if got := webSearch["max_uses"]; got != float64(2) {
-		t.Fatalf("max_uses = %#v, want 2", got)
+	if _, ok := webSearch["max_uses"]; ok {
+		t.Fatalf("web_search tool applies caller MaxResults as max_uses: %#v", webSearch)
 	}
 	if got := payload["max_tokens"]; got != float64(512) {
 		t.Fatalf("max_tokens = %#v, want 512 for explicit web_search tool call", got)
@@ -218,10 +234,13 @@ func TestDeepSeekSearchWebUsesAnthropicServerToolAndReturnsSources(t *testing.T)
 	if !strings.Contains(resp.Answer, "api-docs.deepseek.com") {
 		t.Fatalf("answer = %q, want DeepSeek docs URL", resp.Answer)
 	}
-	if len(resp.Results) != 1 || resp.Results[0].URL != "https://api-docs.deepseek.com/" || resp.Results[0].Source != "api-docs.deepseek.com" {
-		t.Fatalf("results = %#v, want DeepSeek docs source", resp.Results)
+	if len(resp.Results) != 3 || resp.Results[0].URL != "https://api-docs.deepseek.com/" ||
+		resp.Results[1].URL != "https://news.deepseek.com/" || resp.Results[2].Title != "DeepSeek API Docs Duplicate" {
+		t.Fatalf("results = %#v, want complete DeepSeek source set", resp.Results)
 	}
-	if resp.Results[0].RefID != "search-0" || len(resp.Citations) != 1 || resp.Citations[0].StartIndex != len(resp.Answer) {
+	if resp.Results[0].RefID != "search-0" || resp.Results[2].RefID != "search-2" ||
+		len(resp.Citations) != 1 || resp.Citations[0].StartIndex != len(resp.Answer) ||
+		len(resp.Citations[0].Sources) != 2 {
 		t.Fatalf("DeepSeek answer-level citation = results %#v citations %#v", resp.Results, resp.Citations)
 	}
 }

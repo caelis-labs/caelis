@@ -27,7 +27,9 @@ const (
 	APIMimo                APIType = "mimo"
 	APIVolcengine          APIType = "volcengine"
 	APIVolcengineCoding    APIType = "volcengine_coding_plan"
-	APIOllama              APIType = "ollama"
+	// APIXAIResponses selects xAI's OpenAI-compatible Responses API dialect.
+	APIXAIResponses APIType = "xai_responses"
+	APIOllama       APIType = "ollama"
 )
 
 // APIOpenAICodex selects the ChatGPT Codex Responses wire adapter.

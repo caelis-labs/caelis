@@ -292,6 +292,7 @@ func (m *Model) clearWizard() {
 	m.slashArgLoadBytes = 0
 	m.slashArgLoadAuthURL = ""
 	m.slashArgLoadAuthCode = ""
+	m.slashArgLoadAuthPrompt = nil
 	m.slashArgLoaded = false
 	m.slashArgLoadedCommand = ""
 	m.slashArgLoadedCandidates = nil

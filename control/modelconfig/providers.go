@@ -13,6 +13,11 @@ const (
 	CodexOAuthBaseURL = "https://chatgpt.com/backend-api/codex"
 	// CodexOAuthCredentialRef selects the one Control-owned Codex OAuth account.
 	CodexOAuthCredentialRef = "codex:default"
+	// GrokOAuthBaseURL is the fixed Grok Build Responses API root used by the
+	// subscription-backed Grok OAuth provider.
+	GrokOAuthBaseURL = "https://cli-chat-proxy.grok.com/v1"
+	// GrokOAuthCredentialRef selects the one Control-owned xAI OAuth account.
+	GrokOAuthCredentialRef = "xai:default"
 	// XiaomiAPIBaseURL is the standard Xiaomi MiMo endpoint.
 	XiaomiAPIBaseURL = "https://api.xiaomimimo.com/v1"
 	// XiaomiTokenPlanCNBaseURL is the Xiaomi coding-plan endpoint in China.
@@ -31,6 +36,9 @@ const (
 	// AuthFlowCodexOAuth uses the public Codex CLI OAuth client with browser and
 	// device-code login modes.
 	AuthFlowCodexOAuth AuthFlow = "codex_oauth"
+	// AuthFlowGrokOAuth uses xAI's public Grok Build OAuth client with browser
+	// PKCE and device-code login modes.
+	AuthFlowGrokOAuth AuthFlow = "grok_oauth"
 )
 
 // EndpointTemplate describes one maintained endpoint variant for a provider.
@@ -72,6 +80,7 @@ type ProviderTemplate struct {
 
 var providerTemplates = []ProviderTemplate{
 	{Label: "codex", API: model.APIOpenAICodex, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowCodexOAuth, AuthDisplay: "browser/device oauth", PreserveModelOrder: true, Provider: "openai-codex", Description: "ChatGPT subscription models through Codex", DefaultBaseURL: CodexOAuthBaseURL, DefaultContextWindowTokens: 272000, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"low", "medium", "high", "xhigh"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium"},
+	{Label: "grok", API: model.APIXAIResponses, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowGrokOAuth, AuthDisplay: "browser/device oauth", PreserveModelOrder: true, Provider: "xai", Description: "Grok models through an eligible xAI subscription", DefaultBaseURL: GrokOAuthBaseURL, DefaultContextWindowTokens: 500000, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"low", "medium", "high"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "high"},
 	{Label: "openai", API: model.APIOpenAI, AuthType: model.AuthAPIKey, Provider: "openai", Description: "OpenAI-hosted models", DefaultTokenEnv: "OPENAI_API_KEY", DefaultBaseURL: "https://api.openai.com/v1", DefaultContextWindowTokens: 128000},
 	{Label: "openai-compatible", API: model.APIOpenAICompatible, AuthType: model.AuthAPIKey, Provider: "openai-compatible", Description: "OpenAI-compatible proxy or self-hosted endpoint", DefaultTokenEnv: "OPENAI_COMPATIBLE_API_KEY", DefaultBaseURL: "https://api.openai.com/v1", DefaultContextWindowTokens: 262144, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium", PromptForBaseURL: true},
 	{Label: "codefree", API: model.APICodeFree, AuthType: model.AuthNone, AuthFlow: AuthFlowCodeFreeOAuth, AuthDisplay: "browser oauth", Provider: "codefree", Description: "China Telecom SRD CodeFree models", DefaultBaseURL: "https://www.srdcloud.cn", DefaultContextWindowTokens: 128000, DefaultMaxOutputTokens: 8000, NoAuthRequired: true},

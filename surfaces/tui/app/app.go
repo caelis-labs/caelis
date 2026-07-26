@@ -359,6 +359,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modelAuthProgressMsg:
 		m.handleModelAuthProgress(typed)
 		return m, nil
+	case modelAuthInputRequestMsg:
+		m.handleModelAuthInputRequest(typed)
+		return m, nil
+	case modelAuthInputCancelMsg:
+		m.handleModelAuthInputCancel(typed)
+		return m, nil
 
 	case spinner.TickMsg:
 		m.spinnerTickScheduled = false

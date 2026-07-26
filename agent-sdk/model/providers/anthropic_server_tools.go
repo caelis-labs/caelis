@@ -239,12 +239,8 @@ func anthropicRawJSON(value any) (json.RawMessage, error) {
 	return raw, nil
 }
 
-func anthropicWebSearchResultsFromMessage(msg model.Message, maxResults int) []model.WebSearchResult {
-	if maxResults <= 0 {
-		maxResults = 5
-	}
-	results := make([]model.WebSearchResult, 0, maxResults)
-	seen := map[string]struct{}{}
+func anthropicWebSearchResultsFromMessage(msg model.Message) []model.WebSearchResult {
+	var results []model.WebSearchResult
 	for _, part := range msg.ReasoningParts() {
 		if part.Replay == nil || strings.TrimSpace(part.Replay.Kind) != anthropicReplayKindWebSearch {
 			continue
@@ -253,17 +249,10 @@ func anthropicWebSearchResultsFromMessage(msg model.Message, maxResults int) []m
 			if result.URL == "" {
 				continue
 			}
-			if _, ok := seen[result.URL]; ok {
-				continue
-			}
-			seen[result.URL] = struct{}{}
 			if strings.TrimSpace(result.RefID) == "" {
 				result.RefID = "search-" + strconv.Itoa(len(results))
 			}
 			results = append(results, result)
-			if len(results) >= maxResults {
-				return results
-			}
 		}
 	}
 	return results

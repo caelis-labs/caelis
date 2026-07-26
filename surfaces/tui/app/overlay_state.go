@@ -63,6 +63,7 @@ type OverlayState struct {
 	slashArgLoadBytes        int64
 	slashArgLoadAuthURL      string
 	slashArgLoadAuthCode     string
+	slashArgLoadAuthPrompt   chan PromptResponse
 	slashArgLoadCancel       context.CancelFunc
 	slashArgLoaded           bool
 	slashArgLoadedCommand    string

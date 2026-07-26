@@ -14,7 +14,7 @@ const (
 	// authorization flow.
 	AuthProgressOpeningBrowser AuthProgressPhase = "opening_browser"
 	// AuthProgressWaitingForBrowser indicates that the browser flow is waiting
-	// for the localhost OAuth callback.
+	// for its OAuth callback or a documented manual response.
 	AuthProgressWaitingForBrowser AuthProgressPhase = "waiting_for_browser"
 	// AuthProgressRequestingDeviceCode indicates that Control is requesting a
 	// one-time code suitable for a remote or headless environment.

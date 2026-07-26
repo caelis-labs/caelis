@@ -67,7 +67,7 @@ func (l *openAICodexLLM) SearchWeb(ctx context.Context, req model.WebSearchReque
 		return model.WebSearchResponse{}, fmt.Errorf("model: openai codex llm is nil")
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, defaultWebSearchTimeout)
+	runCtx, cancel := webSearchRequestContext(ctx, l.requestTimeout)
 	defer cancel()
 	requestAffinity := ""
 	if metadata, ok := model.ProviderRequestMetadataFromContext(ctx); ok {
@@ -121,7 +121,7 @@ func (l *openAICodexLLM) SearchWeb(ctx context.Context, req model.WebSearchReque
 	if strings.TrimSpace(out.Output) == "" && len(out.Results) == 0 {
 		return model.WebSearchResponse{}, fmt.Errorf("openai codex: empty web search response")
 	}
-	results := openAICodexSearchResults(out.Results, req.MaxResults)
+	results := openAICodexSearchResults(out.Results)
 	answer, citations := model.ParseCitationMarkers(strings.TrimSpace(out.Output), func(refs []string) []model.CitationSource {
 		return openAICodexSearchCitationSources(results, refs)
 	})
@@ -143,12 +143,8 @@ func openAICodexSearchID(requestAffinity string, query string) string {
 	return fmt.Sprintf("caelis-search-%x", sum[:12])
 }
 
-func openAICodexSearchResults(items []json.RawMessage, maxResults int) []model.WebSearchResult {
-	if maxResults <= 0 {
-		maxResults = model.NormalizeWebSearchRequest(model.WebSearchRequest{}).MaxResults
-	}
-	results := make([]model.WebSearchResult, 0, min(maxResults, len(items)))
-	seen := map[string]struct{}{}
+func openAICodexSearchResults(items []json.RawMessage) []model.WebSearchResult {
+	results := make([]model.WebSearchResult, 0, len(items))
 	for _, raw := range items {
 		var item openAICodexSearchResult
 		if err := json.Unmarshal(raw, &item); err != nil {
@@ -158,14 +154,6 @@ func openAICodexSearchResults(items []json.RawMessage, maxResults int) []model.W
 		if resultURL == "" {
 			continue
 		}
-		seenKey := strings.TrimSpace(item.RefID)
-		if seenKey == "" {
-			seenKey = resultURL
-		}
-		if _, ok := seen[seenKey]; ok {
-			continue
-		}
-		seen[seenKey] = struct{}{}
 		results = append(results, model.WebSearchResult{
 			RefID:       strings.TrimSpace(item.RefID),
 			Title:       firstNonEmptyString(item.Title, item.Name),
@@ -174,9 +162,6 @@ func openAICodexSearchResults(items []json.RawMessage, maxResults int) []model.W
 			Source:      firstNonEmptyString(item.Source, item.SiteName, openAICodexSearchHostname(resultURL)),
 			PublishedAt: firstNonEmptyString(item.PublishedAt, item.PublishTime),
 		})
-		if len(results) >= maxResults {
-			break
-		}
 	}
 	return results
 }

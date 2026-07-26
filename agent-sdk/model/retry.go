@@ -284,13 +284,12 @@ func (l *retryingSearchLLM) SearchWeb(ctx context.Context, req WebSearchRequest)
 	if !ok {
 		return WebSearchResponse{}, errors.New("model: web search is unavailable for this provider")
 	}
-	var resp WebSearchResponse
-	err := l.retryUntilOK(ctx, func(int) error {
-		var err error
-		resp, err = searcher.SearchWeb(ctx, req)
-		return err
-	}, nil, nil)
-	return resp, err
+	// SearchWeb is an explicit, model-visible tool action. It respects the
+	// caller context and any explicitly configured provider request timeout.
+	// Return one failed attempt to the model so it can decide whether a revised
+	// or repeated query is useful; the Generate retry policy must not multiply
+	// the latency of each search call.
+	return searcher.SearchWeb(ctx, req)
 }
 
 func (l *retryingLLM) retryUntilOK(

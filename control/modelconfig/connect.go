@@ -58,8 +58,8 @@ func AuthenticateProvider(ctx context.Context, req AuthenticateRequest) (Authent
 	if template.AuthFlow == "" {
 		return AuthenticateResult{}, nil
 	}
-	if template.AuthFlow == AuthFlowCodexOAuth {
-		return AuthenticateResult{}, fmt.Errorf("modelconfig: codex authentication must be provided by the Control host")
+	if template.AuthFlow == AuthFlowCodexOAuth || template.AuthFlow == AuthFlowGrokOAuth {
+		return AuthenticateResult{}, fmt.Errorf("modelconfig: %s authentication must be provided by the Control host", template.Provider)
 	}
 	if template.AuthFlow != AuthFlowCodeFreeOAuth {
 		return AuthenticateResult{}, fmt.Errorf("modelconfig: provider %q has unsupported authentication flow %q", template.Provider, template.AuthFlow)
@@ -105,6 +105,12 @@ type ConnectRequest struct {
 	AuthType                       string
 }
 
+// DefaultProviderRequestTimeoutSeconds is the default whole-request budget for
+// non-streaming provider calls and explicit provider-native tool requests.
+// Streaming generation uses caller cancellation and its separate first-event
+// timeout instead.
+const DefaultProviderRequestTimeoutSeconds = 300
+
 // ConnectOptions supplies runtime facts needed while assembling a connection.
 type ConnectOptions struct {
 	HasReusableAuth func(context.Context, string, string) bool
@@ -138,6 +144,11 @@ func ResolveModelDefaults(provider string, modelName string) (ModelDefaults, err
 	}
 	if template.AuthFlow == AuthFlowCodexOAuth {
 		if defaults, known := codexOAuthModelDefaults(modelName); known {
+			return defaults, nil
+		}
+	}
+	if template.AuthFlow == AuthFlowGrokOAuth {
+		if defaults, known := grokOAuthModelDefaults(modelName); known {
 			return defaults, nil
 		}
 	}
@@ -252,7 +263,7 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 	}
 	timeout := time.Duration(req.TimeoutSeconds) * time.Second
 	if req.TimeoutSeconds <= 0 {
-		timeout = 60 * time.Second
+		timeout = DefaultProviderRequestTimeoutSeconds * time.Second
 	}
 	out := make([]Config, 0, len(req.Models))
 	for _, selection := range req.Models {
@@ -352,6 +363,12 @@ func SelectableModels(ctx context.Context, provider string, baseURL string, auth
 		} else {
 			maintained = codexOAuthSelectableModels()
 		}
+	} else if template.AuthFlow == AuthFlowGrokOAuth {
+		if authResult.ModelCatalogAuthoritative {
+			maintained = filterGrokOAuthSelectableModels(authResult.SelectableModels)
+		} else {
+			maintained = grokOAuthSelectableModels()
+		}
 	} else if template.UseModelDirectory {
 		maintained = modelcatalog.ListModelDirectoryModels(template.Provider)
 	} else {
@@ -360,17 +377,16 @@ func SelectableModels(ctx context.Context, provider string, baseURL string, auth
 	models := make([]SelectableModel, 0, len(maintained))
 	for _, name := range maintained {
 		metadataComplete := hasCompleteModelMetadata(template.Provider, name)
-		if template.AuthFlow == AuthFlowCodexOAuth {
-			// The fixed Codex profile supplies conservative context, output, and
-			// reasoning defaults for every explicitly allowed catalog entry.
+		if template.AuthFlow == AuthFlowCodexOAuth || template.AuthFlow == AuthFlowGrokOAuth {
+			// Fixed managed OAuth profiles supply conservative context, output,
+			// and reasoning defaults for every accepted account-catalog entry.
 			metadataComplete = true
 		}
 		models = append(models, SelectableModel{Name: name, MetadataComplete: metadataComplete})
 	}
-	if template.AuthFlow == AuthFlowCodexOAuth {
-		// The account catalog and bundled Codex snapshot are maintained in
-		// product priority order. Keep that order aligned with the official
-		// client instead of alphabetizing version-like model IDs.
+	if template.PreserveModelOrder {
+		// Managed account catalogs and their fallbacks may be maintained in
+		// product priority order. Do not re-sort version-like model IDs here.
 		return uniqueSelectableModels(models), nil
 	}
 	return sortedUniqueSelectableModels(models), nil
@@ -425,6 +441,9 @@ func validateConnectRequest(template ProviderTemplate, req ConnectRequest, reusa
 	if template.AuthFlow == AuthFlowCodexOAuth && NormalizeBaseURL(req.BaseURL) != NormalizeBaseURL(template.DefaultBaseURL) {
 		return fmt.Errorf("modelconfig: codex OAuth requires the maintained endpoint %s", template.DefaultBaseURL)
 	}
+	if template.AuthFlow == AuthFlowGrokOAuth && NormalizeBaseURL(req.BaseURL) != NormalizeBaseURL(template.DefaultBaseURL) {
+		return fmt.Errorf("modelconfig: grok OAuth requires the maintained endpoint %s", template.DefaultBaseURL)
+	}
 	if template.NoAuthRequired || template.AuthFlow != "" || reusableAuth || req.APIKey != "" || req.TokenEnv != "" {
 		return nil
 	}
@@ -438,6 +457,9 @@ func validateConnectRequest(template ProviderTemplate, req ConnectRequest, reusa
 func credentialRefForTemplate(template ProviderTemplate) string {
 	if template.AuthFlow == AuthFlowCodexOAuth {
 		return CodexOAuthCredentialRef
+	}
+	if template.AuthFlow == AuthFlowGrokOAuth {
+		return GrokOAuthCredentialRef
 	}
 	return ""
 }

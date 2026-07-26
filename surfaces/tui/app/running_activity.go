@@ -12,6 +12,8 @@ func (phase runningActivityPhase) label() string {
 		return "Thinking"
 	case runningPhaseResponding:
 		return "Responding"
+	case runningPhaseSearch:
+		return "Searching web"
 	case runningPhaseWait:
 		return "Wait"
 	case runningPhaseRead:
@@ -50,7 +52,7 @@ func (state runningActivityState) label() string {
 
 func (phase runningActivityPhase) showsElapsed() bool {
 	switch phase {
-	case runningPhaseWait, runningPhaseRead, runningPhaseCancel, runningPhaseReview, runningPhaseInterrupt:
+	case runningPhaseSearch, runningPhaseWait, runningPhaseRead, runningPhaseCancel, runningPhaseReview, runningPhaseInterrupt:
 		return true
 	default:
 		return false

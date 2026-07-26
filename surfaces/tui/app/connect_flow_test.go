@@ -2,6 +2,8 @@ package tuiapp
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -402,6 +404,144 @@ func TestConnectWizardShowsCodexDeviceCodeGuidance(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("renderModelAuthDrawer() = %q, want %q", got, want)
 		}
+	}
+}
+
+func TestConnectWizardAcceptsProtectedGrokAuthorizationCodePaste(t *testing.T) {
+	m := NewModel(Config{})
+	m.width = 120
+	m.slashArgActive = true
+	m.slashArgLoadPending = true
+	m.slashArgLoadSeq = 9
+	m.handleModelAuthProgress(modelAuthProgressMsg{seq: 9, progress: modelconfig.AuthProgress{
+		Provider:        "xai",
+		Phase:           modelconfig.AuthProgressWaitingForBrowser,
+		VerificationURL: "https://auth.x.ai/oauth2/authorize?test=1",
+	}})
+	responses := make(chan PromptResponse, 1)
+	m.handleModelAuthInputRequest(modelAuthInputRequestMsg{
+		seq: 9,
+		request: modelconfig.AuthInputRequest{
+			Provider: "xai",
+			Prompt:   "Grok authorization code or callback URL",
+			Secret:   true,
+		},
+		response: responses,
+	})
+	if m.activePrompt == nil || !m.activePrompt.secret || m.slashArgLoadAuthPrompt != responses {
+		t.Fatalf("Grok auth prompt = %#v", m.activePrompt)
+	}
+	drawer := ansi.Strip(m.renderModelAuthDrawer())
+	for _, want := range []string{"Automatic callback is active", "Paste the browser code or callback URL below", "Esc cancels"} {
+		if !strings.Contains(drawer, want) {
+			t.Fatalf("renderModelAuthDrawer() = %q, want %q", drawer, want)
+		}
+	}
+	if hint := ansi.Strip(m.buildHintText()); !strings.Contains(hint, "Grok authorization code or callback URL") {
+		t.Fatalf("buildHintText() = %q", hint)
+	}
+
+	const authorizationCode = "authorization-code-must-not-render"
+	m.Update(tea.PasteMsg{Content: authorizationCode})
+	input := ansi.Strip(m.renderInputBar())
+	if strings.Contains(input, authorizationCode) || !strings.Contains(input, strings.Repeat("*", len(authorizationCode))) {
+		t.Fatalf("protected auth input = %q", input)
+	}
+	m.handleKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	select {
+	case response := <-responses:
+		if response.Err != nil || response.Line != authorizationCode {
+			t.Fatalf("auth response = %#v", response)
+		}
+	default:
+		t.Fatal("Enter did not submit the Grok authorization code")
+	}
+	if m.activePrompt != nil || m.slashArgLoadAuthPrompt != nil {
+		t.Fatalf("auth prompt remained active: prompt=%#v response=%v", m.activePrompt, m.slashArgLoadAuthPrompt)
+	}
+	if hint := ansi.Strip(m.buildHintText()); !strings.Contains(hint, "Finish signing in to Grok in your browser") {
+		t.Fatalf("Grok status hint = %q", hint)
+	}
+}
+
+func TestAsyncSlashArgLoadBridgesGrokAuthorizationInput(t *testing.T) {
+	messages := make(chan tea.Msg, 4)
+	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
+	m := NewModel(Config{
+		Context:       context.Background(),
+		ProgramSender: sender,
+		SlashArgComplete: func(ctx context.Context, _ string, _ string, _ int) ([]SlashArgCandidate, error) {
+			code, err := modelconfig.RequestAuthInput(ctx, modelconfig.AuthInputRequest{
+				Provider: "xai",
+				Prompt:   "Grok authorization code or callback URL",
+				Secret:   true,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if code != "bridge-code" {
+				return nil, fmt.Errorf("authorization code = %q", code)
+			}
+			return []SlashArgCandidate{{Value: "grok-4.5"}}, nil
+		},
+	})
+	m.slashArgActive = true
+	m.slashArgCommand = "connect-model:" + (connectwizard.ConnectWizardState{Provider: "grok"}).EncodeCompletionState()
+	cmd := m.beginSlashArgLoad()
+	if cmd == nil {
+		t.Fatal("beginSlashArgLoad() command = nil")
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok || len(batch) == 0 {
+		t.Fatalf("beginSlashArgLoad() message = %T, want tea.BatchMsg", msg)
+	}
+	result := make(chan tea.Msg, 1)
+	go func() { result <- batch[0]() }()
+	select {
+	case request := <-messages:
+		m.Update(request)
+	case <-time.After(time.Second):
+		t.Fatal("auth input request was not forwarded to the TUI")
+	}
+	if m.activePrompt == nil || !m.activePrompt.secret {
+		t.Fatalf("active auth prompt = %#v", m.activePrompt)
+	}
+	m.Update(tea.PasteMsg{Content: "bridge-code"})
+	m.handleKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	select {
+	case loaded := <-result:
+		m.Update(loaded)
+	case <-time.After(time.Second):
+		t.Fatal("slash argument load did not receive the pasted authorization code")
+	}
+	if m.slashArgLoadPending || len(m.slashArgCandidates) != 1 || m.slashArgCandidates[0].Value != "grok-4.5" {
+		t.Fatalf("completed auth bridge = pending:%v candidates:%#v", m.slashArgLoadPending, m.slashArgCandidates)
+	}
+}
+
+func TestConnectWizardCancelsGrokAuthorizationInputWhenLoopbackWins(t *testing.T) {
+	m := NewModel(Config{})
+	m.slashArgLoadPending = true
+	m.slashArgLoadSeq = 10
+	responses := make(chan PromptResponse, 1)
+	request := modelAuthInputRequestMsg{
+		seq:      10,
+		request:  modelconfig.AuthInputRequest{Provider: "xai", Prompt: "code", Secret: true},
+		response: responses,
+	}
+	m.handleModelAuthInputRequest(request)
+	m.handleModelAuthInputCancel(modelAuthInputCancelMsg{seq: 10, response: responses})
+	select {
+	case response := <-responses:
+		if !errors.Is(response.Err, context.Canceled) {
+			t.Fatalf("auth prompt cancellation = %v", response.Err)
+		}
+	default:
+		t.Fatal("loopback cancellation did not release the auth prompt")
+	}
+	if m.activePrompt != nil || m.slashArgLoadAuthPrompt != nil {
+		t.Fatalf("canceled auth prompt remained active: prompt=%#v response=%v", m.activePrompt, m.slashArgLoadAuthPrompt)
 	}
 }
 
@@ -962,7 +1102,11 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 	if !findAndRunTaskResult(msg, m) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
-	want := "/connect xiaomi mimo-v2.5-pro " + tokenPlanBaseURL + " 60 env:MIMO_TOKEN_PLAN_API_KEY - - auto"
+	want := fmt.Sprintf(
+		"/connect xiaomi mimo-v2.5-pro %s %d env:MIMO_TOKEN_PLAN_API_KEY - - auto",
+		tokenPlanBaseURL,
+		connectwizard.DefaultConnectTimeoutSeconds,
+	)
 	if called != want {
 		t.Fatalf("called = %q, want %q", called, want)
 	}
@@ -1120,8 +1264,12 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 	if !findAndRunTaskResult(msg, m) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
-	if called != "/connect minimax MiniMax-M2.7-highspeed - 60 sk-test - - auto" {
-		t.Fatalf("called = %q", called)
+	want := fmt.Sprintf(
+		"/connect minimax MiniMax-M2.7-highspeed - %d sk-test - - auto",
+		connectwizard.DefaultConnectTimeoutSeconds,
+	)
+	if called != want {
+		t.Fatalf("called = %q, want %q", called, want)
 	}
 }
 
@@ -1181,8 +1329,12 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 	if !findAndRunTaskResult(cmd(), m) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
-	if called != "/connect minimax MiniMax-M2.7,MiniMax-M2.7-highspeed - 60 sk-test - - auto" {
-		t.Fatalf("called = %q", called)
+	want := fmt.Sprintf(
+		"/connect minimax MiniMax-M2.7,MiniMax-M2.7-highspeed - %d sk-test - - auto",
+		connectwizard.DefaultConnectTimeoutSeconds,
+	)
+	if called != want {
+		t.Fatalf("called = %q, want %q", called, want)
 	}
 }
 
@@ -1293,8 +1445,12 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 	if !findAndRunTaskResult(msg, m) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
-	if called != "/connect minimax MiniMax-M2.7-highspeed - 60 sk-test - - auto" {
-		t.Fatalf("called = %q", called)
+	want := fmt.Sprintf(
+		"/connect minimax MiniMax-M2.7-highspeed - %d sk-test - - auto",
+		connectwizard.DefaultConnectTimeoutSeconds,
+	)
+	if called != want {
+		t.Fatalf("called = %q, want %q", called, want)
 	}
 }
 

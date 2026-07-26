@@ -7,8 +7,11 @@ import (
 
 // WebSearchRequest is one explicit, user-visible web discovery request.
 type WebSearchRequest struct {
-	Query      string `json:"query,omitempty"`
-	MaxResults int    `json:"max_results,omitempty"`
+	Query string `json:"query,omitempty"`
+	// MaxResults is a best-effort hint for search backends that support
+	// caller-side result limits. Provider-native server search adapters return
+	// every valid result supplied by the provider in its original order.
+	MaxResults int `json:"max_results,omitempty"`
 }
 
 // WebSearchResult is one cited search source returned by a provider-native
@@ -37,7 +40,11 @@ type WebSearchResponse struct {
 
 // WebSearcher is an optional model capability for provider-native web search.
 // It must only be used from an explicit local tool call, never as an implicit
-// default on ordinary model turns.
+// default on ordinary model turns. SearchWeb may be called concurrently when
+// one model step emits multiple searches; implementations must synchronize any
+// shared mutable state. Implementations must preserve the caller context and
+// must not impose a provider-independent whole-request deadline. An explicitly
+// configured provider request timeout may still bound the call.
 type WebSearcher interface {
 	SearchWeb(context.Context, WebSearchRequest) (WebSearchResponse, error)
 }

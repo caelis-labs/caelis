@@ -35,7 +35,7 @@ func (l *mimoLLM) searchMimoWeb(ctx context.Context, req model.WebSearchRequest)
 	payload := map[string]any{
 		"model":                 searchModel,
 		"messages":              []map[string]any{{"role": "user", "content": req.Query}},
-		"tools":                 []openAICompatTool{mimoProviderWebSearchTool(mimoProviderWebSearchDefaultExtra(req.MaxResults))},
+		"tools":                 []openAICompatTool{mimoProviderWebSearchTool(mimoProviderWebSearchDefaultExtra())},
 		"max_completion_tokens": 256,
 		"temperature":           1.0,
 		"top_p":                 0.95,
@@ -46,7 +46,7 @@ func (l *mimoLLM) searchMimoWeb(ctx context.Context, req model.WebSearchRequest)
 	if err != nil {
 		return model.WebSearchResponse{}, err
 	}
-	runCtx, cancel := context.WithTimeout(ctx, firstPositiveDuration(l.requestTimeout, defaultWebSearchTimeout))
+	runCtx, cancel := webSearchRequestContext(ctx, l.requestTimeout)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(runCtx, http.MethodPost, mimoChatCompletionsURL(l.baseURL), bytes.NewReader(raw))
 	if err != nil {
@@ -78,7 +78,7 @@ func (l *mimoLLM) searchMimoWeb(ctx context.Context, req model.WebSearchRequest)
 	}
 	choice := out.Choices[0]
 	rawAnswer := contentText(choice.Message.Content)
-	results := mimoAnnotationResults(choice.Message.Annotations, req.MaxResults)
+	results := mimoAnnotationResults(choice.Message.Annotations)
 	answer, citations := trimCitedText(rawAnswer, mimoAnnotationCitations(rawAnswer, choice.Message.Annotations, results))
 	return model.WebSearchResponse{
 		Query:     req.Query,
@@ -122,8 +122,8 @@ type mimoWebAnnotation struct {
 	EndIndex    *int   `json:"end_index,omitempty"`
 }
 
-func mimoAnnotationResults(annotations []mimoWebAnnotation, maxResults int) []model.WebSearchResult {
-	results := make([]model.WebSearchResult, 0, min(maxResults, len(annotations)))
+func mimoAnnotationResults(annotations []mimoWebAnnotation) []model.WebSearchResult {
+	results := make([]model.WebSearchResult, 0, len(annotations))
 	for index, annotation := range annotations {
 		url := strings.TrimSpace(annotation.URL)
 		if url == "" {
@@ -137,9 +137,6 @@ func mimoAnnotationResults(annotations []mimoWebAnnotation, maxResults int) []mo
 			Source:      strings.TrimSpace(annotation.SiteName),
 			PublishedAt: strings.TrimSpace(annotation.PublishTime),
 		})
-		if len(results) >= maxResults {
-			break
-		}
 	}
 	return results
 }
@@ -148,14 +145,14 @@ func mimoAnnotationCitations(answer string, annotations []mimoWebAnnotation, res
 	if len(results) == 0 {
 		return nil
 	}
-	byURL := make(map[string]model.WebSearchResult, len(results))
+	byRef := make(map[string]model.WebSearchResult, len(results))
 	for _, result := range results {
-		byURL[result.URL] = result
+		byRef[result.RefID] = result
 	}
 	citations := make([]model.Citation, 0, len(annotations))
 	unpositioned := make([]model.CitationSource, 0, len(annotations))
-	for _, annotation := range annotations {
-		result, ok := byURL[strings.TrimSpace(annotation.URL)]
+	for index, annotation := range annotations {
+		result, ok := byRef[fmt.Sprintf("annotation-%d", index)]
 		if !ok {
 			continue
 		}

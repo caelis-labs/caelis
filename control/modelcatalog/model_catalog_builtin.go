@@ -12,6 +12,23 @@ type catalogEntry struct {
 // builtinCatalog is the static registry of known model capabilities.
 // Add new SOTA models here as they become available.
 var builtinCatalog = []catalogEntry{
+	// ── xAI ───────────────────────────────────────────────────────────────
+	{
+		provider: "xai",
+		pattern:  "grok-4.5",
+		caps: ModelCapabilities{
+			ContextWindowTokens:    500000,
+			MaxOutputTokens:        32768,
+			DefaultMaxOutputTokens: 32768,
+			SupportsImages:         true,
+			SupportsToolCalls:      true,
+			SupportsReasoning:      true,
+			ReasoningMode:          ReasoningModeEffort,
+			ReasoningEfforts:       []string{"low", "medium", "high"},
+			DefaultReasoningEffort: "high",
+			SupportsJSONOutput:     false,
+		},
+	},
 	// ── DeepSeek ──────────────────────────────────────────────────────────
 	{
 		provider: "deepseek",

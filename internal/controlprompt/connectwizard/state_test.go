@@ -60,6 +60,9 @@ func TestConnectWizardStateFromMapParsesOptionalFields(t *testing.T) {
 	if got.Provider != "minimax" || got.AuthMode != "token" || got.ContextWindowTokens != 2048 || got.MaxOutputTokens != 512 {
 		t.Fatalf("ConnectWizardStateFromMap() = %#v, want parsed fields", got)
 	}
+	if got.TimeoutSeconds != DefaultConnectTimeoutSeconds {
+		t.Fatalf("TimeoutSeconds = %d, want default %d", got.TimeoutSeconds, DefaultConnectTimeoutSeconds)
+	}
 	if len(got.ReasoningLevels) != 2 || got.ReasoningLevels[0] != "low" || got.ReasoningLevels[1] != "high" {
 		t.Fatalf("ReasoningLevels = %#v, want low/high", got.ReasoningLevels)
 	}

@@ -23,6 +23,7 @@ const (
 	APIVolcengine          = model.APIVolcengine
 	APIMimo                = model.APIMimo
 	APIVolcengineCoding    = model.APIVolcengineCoding
+	APIXAIResponses        = model.APIXAIResponses
 	APIOllama              = model.APIOllama
 )
 

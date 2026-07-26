@@ -11,6 +11,7 @@ type runningActivityPhase string
 const (
 	runningPhaseThinking   runningActivityPhase = "thinking"
 	runningPhaseResponding runningActivityPhase = "responding"
+	runningPhaseSearch     runningActivityPhase = "search"
 	runningPhaseWait       runningActivityPhase = "wait"
 	runningPhaseRead       runningActivityPhase = "read"
 	runningPhaseCancel     runningActivityPhase = "cancel"

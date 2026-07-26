@@ -35,13 +35,14 @@ func (t *SearchTool) Definition() tool.Definition {
 					"type":        "integer",
 					"minimum":     1,
 					"maximum":     10,
-					"description": "Maximum number of search results or citations to request. Providers may return fewer. Defaults to 5.",
+					"description": "Best-effort result limit for search backends that support it. Provider-native server search returns the complete provider result set. Defaults to 5.",
 				},
 			},
 			"required":             []string{"query"},
 			"additionalProperties": false,
 		},
-		Metadata: toolutil.AnnotationMetadata(true, false, false, true),
+		Metadata:     toolutil.AnnotationMetadata(true, false, false, true),
+		Capabilities: tool.Capabilities{ParallelSafe: true},
 	}
 }
 

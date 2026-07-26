@@ -61,7 +61,7 @@ func TestOpenAICodexSearchWebUsesStandaloneSearchEndpoint(t *testing.T) {
 		t.Fatal("WithRetry(openAICodexLLM) did not preserve WebSearcher")
 	}
 	ctx := model.WithProviderRequestMetadata(context.Background(), model.ProviderRequestMetadata{SessionAffinity: "search-session"})
-	got, err := searcher.SearchWeb(ctx, model.WebSearchRequest{Query: "latest Caelis news", MaxResults: 2})
+	got, err := searcher.SearchWeb(ctx, model.WebSearchRequest{Query: "latest Caelis news", MaxResults: 1})
 	if err != nil {
 		t.Fatalf("SearchWeb() error = %v", err)
 	}
@@ -81,6 +81,7 @@ func TestOpenAICodexSearchWebUsesStandaloneSearchEndpoint(t *testing.T) {
 	wantResults := []model.WebSearchResult{
 		{RefID: "turn0search0", Title: "First", URL: "https://www.example.com/first", Snippet: "First snippet", Source: "example.com"},
 		{RefID: "turn0search1", Title: "Second", URL: "https://docs.example.org/second", Source: "Example Docs"},
+		{RefID: "turn0search2", Title: "Duplicate", URL: "https://www.example.com/first", Source: "example.com"},
 	}
 	if !reflect.DeepEqual(got.Results, wantResults) {
 		t.Fatalf("results = %#v, want %#v", got.Results, wantResults)

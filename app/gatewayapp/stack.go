@@ -27,6 +27,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
+	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
@@ -100,6 +101,7 @@ type Stack struct {
 	gateway                  *kernelimpl.Gateway
 	mcpMgr                   *mcp.Manager
 	codexAuth                *codexauth.Manager
+	grokAuth                 *grokauth.Manager
 	apiKeyCredentials        *credentialstore.Store
 	providerUsage            *providerusage.Registry
 
@@ -320,6 +322,12 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
+	grokAuth, err := grokauth.NewManager(grokauth.Options{
+		CredentialPath: grokauth.DefaultCredentialPath(storeDir),
+	})
+	if err != nil {
+		return nil, err
+	}
 	providerUsage := providerusage.NewRegistry(map[string]providerusage.Reader{
 		"openai-codex": codexAuth,
 	})
@@ -355,13 +363,20 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if !strings.EqualFold(modelCfg.Provider, "openai-codex") || modelCfg.CredentialRef != modelconfig.CodexOAuthCredentialRef {
+		switch {
+		case strings.EqualFold(modelCfg.Provider, "openai-codex") && modelCfg.CredentialRef == modelconfig.CodexOAuthCredentialRef:
+			if modelconfig.NormalizeBaseURL(modelCfg.BaseURL) != modelconfig.NormalizeBaseURL(modelconfig.CodexOAuthBaseURL) {
+				return nil, fmt.Errorf("gatewayapp: codex OAuth requires the maintained endpoint %s", modelconfig.CodexOAuthBaseURL)
+			}
+			return codexAuth.AuthenticatedClient(modelCfg.HTTPClient)
+		case strings.EqualFold(modelCfg.Provider, "xai") && modelCfg.CredentialRef == modelconfig.GrokOAuthCredentialRef:
+			if modelconfig.NormalizeBaseURL(modelCfg.BaseURL) != modelconfig.NormalizeBaseURL(modelconfig.GrokOAuthBaseURL) {
+				return nil, fmt.Errorf("gatewayapp: grok OAuth requires the maintained endpoint %s", modelconfig.GrokOAuthBaseURL)
+			}
+			return grokAuth.AuthenticatedClient(modelCfg.HTTPClient)
+		default:
 			return nil, fmt.Errorf("gatewayapp: unsupported managed model credential %q for provider %q", modelCfg.CredentialRef, modelCfg.Provider)
 		}
-		if modelconfig.NormalizeBaseURL(modelCfg.BaseURL) != modelconfig.NormalizeBaseURL(modelconfig.CodexOAuthBaseURL) {
-			return nil, fmt.Errorf("gatewayapp: codex OAuth requires the maintained endpoint %s", modelconfig.CodexOAuthBaseURL)
-		}
-		return codexAuth.AuthenticatedClient(modelCfg.HTTPClient)
 	}
 	lookup.resolveAPIKey = apiKeyCredentials.Get
 	sandboxCfg := mergeSandboxConfig(doc.Sandbox, cfg.Sandbox)
@@ -385,6 +400,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		controlFeeds:      controlFeeds,
 		approvalRecovery:  approvalRecovery,
 		codexAuth:         codexAuth,
+		grokAuth:          grokAuth,
 		apiKeyCredentials: apiKeyCredentials,
 		providerUsage:     providerUsage,
 		runtime: stackRuntimeConfig{

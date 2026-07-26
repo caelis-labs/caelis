@@ -234,6 +234,7 @@ func (m *Model) beginSlashArgLoad() tea.Cmd {
 	m.slashArgLoadBytes = 0
 	m.slashArgLoadAuthURL = ""
 	m.slashArgLoadAuthCode = ""
+	m.slashArgLoadAuthPrompt = nil
 	m.slashArgCandidates = nil
 	m.slashArgLoaded = false
 	m.slashArgLoadedCommand = ""
@@ -248,6 +249,17 @@ func (m *Model) beginSlashArgLoad() tea.Cmd {
 		})
 		requestCtx = modelconfig.WithAuthProgress(requestCtx, func(progress modelconfig.AuthProgress) {
 			sender.SendMsg(modelAuthProgressMsg{seq: seq, progress: progress})
+		})
+		requestCtx = modelconfig.WithAuthInput(requestCtx, func(inputCtx context.Context, request modelconfig.AuthInputRequest) (string, error) {
+			responses := make(chan PromptResponse, 1)
+			sender.SendMsg(modelAuthInputRequestMsg{seq: seq, request: request, response: responses})
+			select {
+			case response := <-responses:
+				return response.Line, response.Err
+			case <-inputCtx.Done():
+				sender.SendMsg(modelAuthInputCancelMsg{seq: seq, response: responses})
+				return "", inputCtx.Err()
+			}
 		})
 	}
 	m.slashArgLoadCancel = cancel
@@ -271,6 +283,7 @@ func (m *Model) handleSlashArgLoadResult(msg slashArgLoadResultMsg) tea.Cmd {
 	m.slashArgLoadBytes = 0
 	m.slashArgLoadAuthURL = ""
 	m.slashArgLoadAuthCode = ""
+	m.slashArgLoadAuthPrompt = nil
 	if !m.turnRunning() {
 		m.stopRunningAnimation()
 	}

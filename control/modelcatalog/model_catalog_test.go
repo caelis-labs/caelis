@@ -336,6 +336,24 @@ func TestCodeFreeStaticModelsDoNotExposeReasoning(t *testing.T) {
 	}
 }
 
+func TestGrok45StaticCapabilitiesIncludeImageInput(t *testing.T) {
+	caps, ok := LookupModelCapabilities("xai", "grok-4.5")
+	if !ok {
+		t.Fatal("LookupModelCapabilities(xai, grok-4.5) = false, want true")
+	}
+	if caps.ContextWindowTokens != 500000 || caps.MaxOutputTokens != 32768 || caps.DefaultMaxOutputTokens != 32768 {
+		t.Fatalf("LookupModelCapabilities(xai, grok-4.5) limits = %#v", caps)
+	}
+	if !caps.SupportsImages || !caps.SupportsToolCalls || !caps.SupportsReasoning {
+		t.Fatalf("LookupModelCapabilities(xai, grok-4.5) capabilities = %#v", caps)
+	}
+	if caps.SupportsJSONOutput || caps.ReasoningMode != ReasoningModeEffort ||
+		!sameStrings(caps.ReasoningEfforts, []string{"low", "medium", "high"}) ||
+		caps.DefaultReasoningEffort != "high" {
+		t.Fatalf("LookupModelCapabilities(xai, grok-4.5) reasoning/output = %#v", caps)
+	}
+}
+
 func TestDeepSeekStaticModelsExposeThinkingEfforts(t *testing.T) {
 	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-pro"} {
 		caps, ok := LookupModelCapabilities("deepseek", model)

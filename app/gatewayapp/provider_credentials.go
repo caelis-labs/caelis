@@ -52,6 +52,9 @@ func (s *Stack) prepareProviderCredentials(configs []ModelConfig) ([]ModelConfig
 		if ref == modelconfig.CodexOAuthCredentialRef {
 			return nil, txn, fmt.Errorf("gatewayapp: Codex OAuth model must not carry an API key")
 		}
+		if ref == modelconfig.GrokOAuthCredentialRef {
+			return nil, txn, fmt.Errorf("gatewayapp: Grok OAuth model must not carry an API key")
+		}
 		if ref == "" {
 			ref = credentialstore.BuildReference(configured.Provider, configured.ProviderEndpointID)
 		}

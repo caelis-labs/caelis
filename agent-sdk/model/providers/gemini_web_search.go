@@ -17,7 +17,7 @@ func (l *geminiLLM) SearchWeb(ctx context.Context, req model.WebSearchRequest) (
 	if l == nil {
 		return model.WebSearchResponse{}, fmt.Errorf("model: gemini llm is nil")
 	}
-	runCtx, cancel := context.WithTimeout(ctx, firstPositiveDuration(l.requestTimeout, defaultWebSearchTimeout))
+	runCtx, cancel := webSearchRequestContext(ctx, l.requestTimeout)
 	defer cancel()
 	client, err := l.newClient(runCtx)
 	if err != nil {
@@ -43,7 +43,7 @@ func (l *geminiLLM) SearchWeb(ctx context.Context, req model.WebSearchRequest) (
 		return model.WebSearchResponse{}, err
 	}
 	rawAnswer := msg.TextContent()
-	results := geminiGroundingResults(out, req.MaxResults)
+	results := geminiGroundingResults(out)
 	citations := msg.TextContentCitations()
 	if len(citations) == 0 && len(results) > 0 {
 		citations = []model.Citation{{
@@ -64,12 +64,12 @@ func (l *geminiLLM) SearchWeb(ctx context.Context, req model.WebSearchRequest) (
 	}, nil
 }
 
-func geminiGroundingResults(out *genai.GenerateContentResponse, maxResults int) []model.WebSearchResult {
+func geminiGroundingResults(out *genai.GenerateContentResponse) []model.WebSearchResult {
 	if out == nil || len(out.Candidates) == 0 || out.Candidates[0] == nil || out.Candidates[0].GroundingMetadata == nil {
 		return nil
 	}
 	chunks := out.Candidates[0].GroundingMetadata.GroundingChunks
-	results := make([]model.WebSearchResult, 0, min(maxResults, len(chunks)))
+	results := make([]model.WebSearchResult, 0, len(chunks))
 	for index, chunk := range chunks {
 		if chunk == nil || chunk.Web == nil {
 			continue
@@ -84,9 +84,6 @@ func geminiGroundingResults(out *genai.GenerateContentResponse, maxResults int) 
 			URL:    url,
 			Source: strings.TrimSpace(chunk.Web.Domain),
 		})
-		if len(results) >= maxResults {
-			break
-		}
 	}
 	return results
 }

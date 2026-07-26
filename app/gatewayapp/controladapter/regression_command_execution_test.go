@@ -580,6 +580,9 @@ func TestRegressionCommandExecConnectFullConfig(t *testing.T) {
 	if !ok {
 		t.Fatal("ModelConfig(ollama/custom-model) not found")
 	}
+	if got := cfg.Timeout.Seconds(); got != 120 {
+		t.Fatalf("Timeout = %.0fs, want 120s", got)
+	}
 	if got := cfg.StreamFirstEventTimeout.Seconds(); got != 300 {
 		t.Fatalf("StreamFirstEventTimeout = %.0fs, want 300s", got)
 	}

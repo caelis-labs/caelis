@@ -27,6 +27,9 @@ func (m *Model) finishPrompt(line string, err error) {
 		return
 	}
 	resp := m.activePrompt.response
+	if resp != nil && resp == m.slashArgLoadAuthPrompt {
+		m.slashArgLoadAuthPrompt = nil
+	}
 	if resp != nil {
 		resp <- PromptResponse{Line: line, Err: err}
 	}

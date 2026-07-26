@@ -49,11 +49,10 @@ func mimoProviderWebSearchTool(extra map[string]json.RawMessage) openAICompatToo
 	}
 }
 
-func mimoProviderWebSearchDefaultExtra(maxResults int) map[string]json.RawMessage {
+func mimoProviderWebSearchDefaultExtra() map[string]json.RawMessage {
 	return map[string]json.RawMessage{
 		"max_keyword":  mustRawJSON(3),
 		"force_search": mustRawJSON(true),
-		"limit":        mustRawJSON(maxResults),
 	}
 }
 

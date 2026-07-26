@@ -248,6 +248,72 @@ func TestParallelToolCompletionRestoresRemainingActivity(t *testing.T) {
 	}
 }
 
+func TestParallelWebSearchShowsElapsedAndRestoresRemainingSearch(t *testing.T) {
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.liveTurn.Active = true
+	firstStartedAt := time.Unix(100, 0)
+	secondStartedAt := time.Unix(103, 0)
+
+	m.applyTranscriptRunningActivity(TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		Scope:      ACPProjectionMain,
+		TurnID:     "turn-search",
+		OccurredAt: firstStartedAt,
+		ToolCallID: "search-1",
+		ToolName:   "WebSearch",
+	})
+	// Production timestamps each independently keyed activity on receipt.
+	// Pin both clocks here so the rendered elapsed values are deterministic.
+	firstKey := "tool:turn-search:search-1"
+	first := m.runningActivityTracker.active[firstKey]
+	first.StartedAt = firstStartedAt
+	m.runningActivityTracker.active[firstKey] = first
+
+	m.applyTranscriptRunningActivity(TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		Scope:      ACPProjectionMain,
+		TurnID:     "turn-search",
+		OccurredAt: secondStartedAt,
+		ToolCallID: "search-2",
+		ToolName:   "WebSearch",
+	})
+	secondKey := "tool:turn-search:search-2"
+	second := m.runningActivityTracker.active[secondKey]
+	second.StartedAt = secondStartedAt
+	m.runningActivityTracker.active[secondKey] = second
+	m.refreshRunningActivity()
+
+	if got := ansi.Strip(m.buildRunningHintTextAt(time.Unix(112, 0))); got != "• Searching web · 9s" {
+		t.Fatalf("running hint = %q, want latest search with its own elapsed time", got)
+	}
+
+	m.applyTranscriptRunningActivity(TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		Scope:      ACPProjectionMain,
+		TurnID:     "turn-search",
+		OccurredAt: time.Unix(113, 0),
+		ToolCallID: "search-2",
+		ToolName:   "WebSearch",
+		Final:      true,
+	})
+	if got := ansi.Strip(m.buildRunningHintTextAt(time.Unix(114, 0))); got != "• Searching web · 14s" {
+		t.Fatalf("running hint = %q, want first search restored after parallel completion", got)
+	}
+
+	m.applyTranscriptRunningActivity(TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		Scope:      ACPProjectionMain,
+		TurnID:     "turn-search",
+		OccurredAt: time.Unix(115, 0),
+		ToolCallID: "search-1",
+		ToolName:   "WebSearch",
+		Final:      true,
+	})
+	if m.runningActivity.Phase != runningPhaseThinking || m.runningActivity.Key != "" {
+		t.Fatalf("runningActivity = %#v, want thinking after all searches complete", m.runningActivity)
+	}
+}
+
 func TestNarrativeForegroundOverridesRunningBackgroundTool(t *testing.T) {
 	t.Parallel()
 
