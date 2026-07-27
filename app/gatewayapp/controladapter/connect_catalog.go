@@ -9,7 +9,6 @@ import (
 
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
@@ -290,6 +289,7 @@ func connectEndpointCandidates(template modelconfig.ProviderTemplate) []controlp
 			Value:   endpoint.BaseURL,
 			Display: endpoint.Display,
 			Detail:  detail,
+			NoAuth:  endpoint.NoAuthRequired,
 		})
 	}
 	return out
@@ -340,7 +340,7 @@ func completeConnectModels(ctx context.Context, driver *Adapter, payload connect
 func completeConnectContext(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	_ = ctx
 	_ = driver
-	defaults, err := modelconfig.ResolveModelDefaults(payload.Provider, payload.Model)
+	defaults, err := modelconfig.ResolveModelDefaultsForEndpoint(payload.Provider, payload.BaseURL, payload.Model)
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +350,7 @@ func completeConnectContext(ctx context.Context, driver *Adapter, payload connec
 func completeConnectMaxOutput(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	_ = ctx
 	_ = driver
-	defaults, err := modelconfig.ResolveModelDefaults(payload.Provider, payload.Model)
+	defaults, err := modelconfig.ResolveModelDefaultsForEndpoint(payload.Provider, payload.BaseURL, payload.Model)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +360,7 @@ func completeConnectMaxOutput(ctx context.Context, driver *Adapter, payload conn
 func completeConnectReasoningLevels(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	_ = ctx
 	_ = driver
-	defaults, err := modelconfig.ResolveModelDefaults(payload.Provider, payload.Model)
+	defaults, err := modelconfig.ResolveModelDefaultsForEndpoint(payload.Provider, payload.BaseURL, payload.Model)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +407,7 @@ func hasConnectCandidatePrefix(query string, values ...string) bool {
 func buildConnectModelChoices(provider string, fallbackModels []modelconfig.SelectableModel) []connectModelChoice {
 	seen := map[string]struct{}{}
 	out := make([]connectModelChoice, 0, len(fallbackModels))
-	add := func(modelChoice modelconfig.SelectableModel, detail string) {
+	add := func(modelChoice modelconfig.SelectableModel) {
 		name := modelChoice.Name
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -418,8 +418,9 @@ func buildConnectModelChoices(provider string, fallbackModels []modelconfig.Sele
 			return
 		}
 		seen[key] = struct{}{}
-		if strings.TrimSpace(detail) == "" {
-			detail = describeConnectModel(provider, name)
+		detail := strings.TrimSpace(modelChoice.Detail)
+		if detail == "" {
+			detail = "suggested model"
 		}
 		out = append(out, connectModelChoice{
 			Name:             name,
@@ -429,7 +430,7 @@ func buildConnectModelChoices(provider string, fallbackModels []modelconfig.Sele
 		})
 	}
 	for _, item := range fallbackModels {
-		add(item, "")
+		add(item)
 	}
 	template, maintainedProvider := modelconfig.LookupProvider(provider)
 	if !maintainedProvider || !template.PreserveModelOrder {
@@ -453,24 +454,6 @@ func connectDisplayModelRef(provider, modelName string) string {
 		return modelName
 	}
 	return provider + "/" + modelName
-}
-
-func describeConnectModel(provider string, modelName string) string {
-	caps, ok := modelcatalog.LookupModelCapabilities(provider, modelName)
-	if !ok {
-		return "suggested model"
-	}
-	parts := []string{"catalog preset"}
-	if template, found := modelconfig.LookupProvider(provider); found && template.UseModelDirectory {
-		parts[0] = "model directory"
-	}
-	if caps.SupportsReasoning {
-		parts = append(parts, "reasoning")
-	}
-	if caps.SupportsToolCalls {
-		parts = append(parts, "tools")
-	}
-	return strings.Join(parts, " · ")
 }
 
 func compactNonEmpty(values []string) []string {

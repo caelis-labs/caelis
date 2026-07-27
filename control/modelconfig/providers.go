@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/control/modelcatalog"
 )
 
 const (
@@ -43,12 +44,17 @@ const (
 
 // EndpointTemplate describes one maintained endpoint variant for a provider.
 type EndpointTemplate struct {
-	ID       string
-	BaseURL  string
-	Display  string
-	Detail   string
-	API      model.APIType
-	TokenEnv string
+	ID             string
+	BaseURL        string
+	Display        string
+	Detail         string
+	API            model.APIType
+	AuthType       model.AuthType
+	TokenEnv       string
+	NoAuthRequired bool
+	// CatalogProvider selects the capability-catalog namespace for this
+	// endpoint. Empty inherits ProviderTemplate.Provider.
+	CatalogProvider string
 }
 
 // ProviderTemplate is Control's maintained onboarding policy for one provider.
@@ -98,7 +104,10 @@ var providerTemplates = []ProviderTemplate{
 		{ID: "standard", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", Display: "standard api", Detail: "regular Ark endpoint", API: model.APIVolcengine, TokenEnv: "VOLCENGINE_API_KEY"},
 		{ID: "coding-plan", BaseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", Display: "coding plan", Detail: "Ark coding-plan endpoint", API: model.APIVolcengineCoding, TokenEnv: "VOLCENGINE_API_KEY"},
 	}},
-	{Label: "ollama", API: model.APIOllama, AuthType: model.AuthNone, Provider: "ollama", Description: "Local Ollama runtime", DefaultBaseURL: "http://localhost:11434", DefaultContextWindowTokens: 128000, NoAuthRequired: true},
+	{Label: "ollama", API: model.APIOllama, AuthType: model.AuthNone, Provider: "ollama", Description: "Local Ollama runtime or direct Ollama Cloud API", PreserveModelOrder: true, DefaultEndpointID: "local", DefaultBaseURL: "http://localhost:11434", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
+		{ID: "local", BaseURL: "http://localhost:11434", Display: "local", Detail: "Installed models through the local Ollama service", API: model.APIOllama, AuthType: model.AuthNone, NoAuthRequired: true},
+		{ID: "cloud", BaseURL: "https://ollama.com", Display: "cloud api", Detail: "Frontier models directly through Ollama Cloud", API: model.APIOllama, AuthType: model.AuthAPIKey, TokenEnv: "OLLAMA_API_KEY", CatalogProvider: modelcatalog.OllamaCloudProvider},
+	}},
 }
 
 // ProviderTemplates returns an isolated copy of the maintained provider list.
@@ -150,11 +159,25 @@ func EndpointForBaseURL(template ProviderTemplate, baseURL string) (EndpointTemp
 		defaultEndpointID = "default"
 	}
 	if normalized == "" || normalized == NormalizeBaseURL(template.DefaultBaseURL) {
-		return EndpointTemplate{ID: defaultEndpointID, BaseURL: firstNonEmpty(baseURL, template.DefaultBaseURL), API: template.API}, true
+		return EndpointTemplate{
+			ID:             defaultEndpointID,
+			BaseURL:        firstNonEmpty(baseURL, template.DefaultBaseURL),
+			API:            template.API,
+			AuthType:       template.AuthType,
+			TokenEnv:       template.DefaultTokenEnv,
+			NoAuthRequired: template.NoAuthRequired,
+		}, true
 	}
 	for _, alias := range template.DefaultBaseURLAliases {
 		if normalized == NormalizeBaseURL(alias) {
-			return EndpointTemplate{ID: defaultEndpointID, BaseURL: strings.TrimSpace(baseURL), API: template.API}, true
+			return EndpointTemplate{
+				ID:             defaultEndpointID,
+				BaseURL:        strings.TrimSpace(baseURL),
+				API:            template.API,
+				AuthType:       template.AuthType,
+				TokenEnv:       template.DefaultTokenEnv,
+				NoAuthRequired: template.NoAuthRequired,
+			}, true
 		}
 	}
 	return EndpointTemplate{}, false
@@ -172,8 +195,13 @@ func DefaultTokenEnv(provider string, baseURL string) string {
 	if !ok {
 		return ""
 	}
-	if endpoint, ok := EndpointForBaseURL(template, baseURL); ok && strings.TrimSpace(endpoint.TokenEnv) != "" {
-		return strings.TrimSpace(endpoint.TokenEnv)
+	if endpoint, ok := EndpointForBaseURL(template, baseURL); ok {
+		if endpoint.NoAuthRequired {
+			return ""
+		}
+		if strings.TrimSpace(endpoint.TokenEnv) != "" {
+			return strings.TrimSpace(endpoint.TokenEnv)
+		}
 	}
 	if host := endpointHost(baseURL); host != "" {
 		for _, endpoint := range template.Endpoints {

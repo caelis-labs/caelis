@@ -848,55 +848,10 @@ var builtinCatalog = []catalogEntry{
 			SupportsJSONOutput:     true,
 		},
 	},
-	// ── Ollama local defaults ─────────────────────────────────────────────
-	{
-		provider: "ollama",
-		pattern:  "qwen2.5:7b",
-		caps: ModelCapabilities{
-			ContextWindowTokens:    128000,
-			MaxOutputTokens:        32768,
-			DefaultMaxOutputTokens: 8192,
-			SupportsToolCalls:      true,
-			SupportsJSONOutput:     true,
-		},
-	},
-	{
-		provider: "ollama",
-		pattern:  "llama3.1:8b",
-		caps: ModelCapabilities{
-			ContextWindowTokens:    128000,
-			MaxOutputTokens:        32768,
-			DefaultMaxOutputTokens: 8192,
-			SupportsToolCalls:      true,
-			SupportsJSONOutput:     true,
-		},
-	},
-	{
-		provider: "ollama",
-		pattern:  "deepseek-r1:7b",
-		caps: ModelCapabilities{
-			ContextWindowTokens:    128000,
-			MaxOutputTokens:        32768,
-			DefaultMaxOutputTokens: 8192,
-			SupportsReasoning:      true,
-			ReasoningMode:          ReasoningModeToggle,
-			SupportsJSONOutput:     true,
-		},
-	},
-	{
-		provider: "ollama",
-		pattern:  "gemma3:4b",
-		caps: ModelCapabilities{
-			ContextWindowTokens:    128000,
-			MaxOutputTokens:        32768,
-			DefaultMaxOutputTokens: 8192,
-			SupportsImages:         true,
-			SupportsJSONOutput:     true,
-		},
-	},
 }
 
 func init() {
+	builtinCatalog = append(builtinCatalog, ollamaCloudCatalogEntries()...)
 	builtinCatalog = append(builtinCatalog, codeFreeCatalogEntries()...)
 }
 

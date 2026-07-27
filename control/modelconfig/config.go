@@ -101,13 +101,16 @@ func NormalizeConfig(cfg Config) Config {
 		cfg.API = DefaultAPIForProvider(cfg.Provider)
 	}
 	if cfg.AuthType == "" {
-		cfg.AuthType = DefaultAuthTypeForProvider(cfg.Provider)
+		cfg.AuthType = DefaultAuthTypeForEndpoint(cfg.Provider, cfg.BaseURL)
 	}
 	if cfg.DefaultReasoningEffort == "" && cfg.ReasoningEffort != "" {
 		cfg.DefaultReasoningEffort = cfg.ReasoningEffort
 	}
 	if cfg.ReasoningMode == "" && cfg.Provider != "" && cfg.Model != "" {
-		cfg.ReasoningMode = modelcatalog.ReasoningModeForModel(cfg.Provider, cfg.Model)
+		cfg.ReasoningMode = modelcatalog.ReasoningModeForModel(
+			CatalogProviderFor(cfg.Provider, cfg.BaseURL),
+			cfg.Model,
+		)
 	}
 	if cfg.MaxOutputTok <= 0 {
 		cfg.MaxOutputTok = 4096
@@ -135,7 +138,7 @@ func NormalizeProviderEndpoint(endpoint ProviderEndpointConfig) ProviderEndpoint
 		endpoint.API = DefaultAPIForProvider(endpoint.Provider)
 	}
 	if endpoint.AuthType == "" {
-		endpoint.AuthType = DefaultAuthTypeForProvider(endpoint.Provider)
+		endpoint.AuthType = DefaultAuthTypeForEndpoint(endpoint.Provider, endpoint.BaseURL)
 	}
 	if endpoint.Token == "" && strings.TrimSpace(endpoint.TokenEnv) != "" {
 		endpoint.Token = strings.TrimSpace(os.Getenv(strings.TrimSpace(endpoint.TokenEnv)))
@@ -310,7 +313,10 @@ func DefaultAPIForProvider(provider string) providers.APIType {
 // SanitizePersistedConfig removes profile-owned and derivable runtime fields.
 func SanitizePersistedConfig(cfg Config) Config {
 	cfg = NormalizeConfig(cfg)
-	if cfg.ReasoningMode == modelcatalog.ReasoningModeForModel(cfg.Provider, cfg.Model) {
+	if cfg.ReasoningMode == modelcatalog.ReasoningModeForModel(
+		CatalogProviderFor(cfg.Provider, cfg.BaseURL),
+		cfg.Model,
+	) {
 		cfg.ReasoningMode = ""
 	}
 	if cfg.ProviderEndpointID != "" {
@@ -334,7 +340,7 @@ func SanitizePersistedConfig(cfg Config) Config {
 	if cfg.API == DefaultAPIForProvider(cfg.Provider) {
 		cfg.API = ""
 	}
-	if cfg.AuthType == DefaultAuthTypeForProvider(cfg.Provider) {
+	if cfg.AuthType == DefaultAuthTypeForEndpoint(cfg.Provider, cfg.BaseURL) {
 		cfg.AuthType = ""
 	}
 	if cfg.DefaultReasoningEffort == cfg.ReasoningEffort {
@@ -362,7 +368,7 @@ func SanitizePersistedProviderEndpoint(endpoint ProviderEndpointConfig) Provider
 	if endpoint.API == DefaultAPIForProvider(endpoint.Provider) {
 		endpoint.API = ""
 	}
-	if endpoint.AuthType == DefaultAuthTypeForProvider(endpoint.Provider) {
+	if endpoint.AuthType == DefaultAuthTypeForEndpoint(endpoint.Provider, endpoint.BaseURL) {
 		endpoint.AuthType = ""
 	}
 	endpoint.PersistToken = false
@@ -381,6 +387,30 @@ func DefaultAuthTypeForProvider(provider string) providers.AuthType {
 		return providers.AuthAPIKey
 	}
 	return template.AuthType
+}
+
+// DefaultAuthTypeForEndpoint returns endpoint-specific authentication while
+// preserving the provider default for custom or legacy endpoints.
+func DefaultAuthTypeForEndpoint(provider string, baseURL string) providers.AuthType {
+	template, ok := LookupProvider(provider)
+	if !ok {
+		return DefaultAuthTypeForProvider(provider)
+	}
+	if endpoint, found := EndpointForBaseURL(template, baseURL); found {
+		if endpoint.NoAuthRequired {
+			return providers.AuthNone
+		}
+		if endpoint.AuthType != "" {
+			return endpoint.AuthType
+		}
+	}
+	return DefaultAuthTypeForProvider(provider)
+}
+
+// EndpointUsesNoAuth reports whether the maintained or provider-default policy
+// for an endpoint uses no authentication.
+func EndpointUsesNoAuth(provider string, baseURL string) bool {
+	return DefaultAuthTypeForEndpoint(provider, baseURL) == providers.AuthNone
 }
 
 // BuildAlias returns the visible provider/model alias.

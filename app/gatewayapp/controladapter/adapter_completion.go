@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -274,7 +273,7 @@ func (d *Adapter) modelAliasSupportsReasoningLevel(alias string, level string) b
 
 func (d *Adapter) configuredModelReasoningLevels(cfg ModelConfig) []string {
 	levels := modelconfig.NormalizeReasoningLevels(cfg.ReasoningLevels)
-	for _, level := range modelconfig.NormalizeReasoningLevels(modelcatalog.ReasoningLevelsForModel(cfg.Provider, cfg.Model)) {
+	for _, level := range modelconfig.ReasoningLevelsForConfig(cfg) {
 		seen := false
 		for _, existing := range levels {
 			if strings.EqualFold(existing, level) {

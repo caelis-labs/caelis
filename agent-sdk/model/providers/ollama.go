@@ -25,10 +25,14 @@ type ollamaLLM struct {
 	provider            string
 	baseURL             string
 	client              *http.Client
+	auth                AuthConfig
+	token               string
+	headers             map[string]string
 	requestTimeout      time.Duration
 	firstEventTimeout   time.Duration
 	maxOutputTok        int
 	contextWindowTokens int
+	reasoningMode       string
 }
 
 type ollamaChatRequest struct {
@@ -37,8 +41,23 @@ type ollamaChatRequest struct {
 	Tools    []openAICompatTool   `json:"tools,omitempty"`
 	Stream   bool                 `json:"stream"`
 	Format   any                  `json:"format,omitempty"`
-	Think    *bool                `json:"think,omitempty"`
+	Think    *ollamaThinkParam    `json:"think,omitempty"`
 	Options  *ollamaRequestOption `json:"options,omitempty"`
+}
+
+type ollamaThinkParam struct {
+	enabled *bool
+	level   string
+}
+
+func (p ollamaThinkParam) MarshalJSON() ([]byte, error) {
+	if p.enabled != nil {
+		return json.Marshal(*p.enabled)
+	}
+	if p.level != "" {
+		return json.Marshal(p.level)
+	}
+	return []byte("null"), nil
 }
 
 type ollamaRequestOption struct {
@@ -72,7 +91,7 @@ type ollamaChatResponse struct {
 }
 
 // newOllama returns a native Ollama /api/chat client.
-func newOllama(cfg Config, _ string) model.LLM {
+func newOllama(cfg Config, token string) model.LLM {
 	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	if strings.HasSuffix(strings.ToLower(baseURL), "/v1") {
 		baseURL = baseURL[:len(baseURL)-len("/v1")]
@@ -82,10 +101,14 @@ func newOllama(cfg Config, _ string) model.LLM {
 		provider:            cfg.Provider,
 		baseURL:             baseURL,
 		client:              coalesceHTTPClient(cfg.HTTPClient),
+		auth:                cfg.Auth,
+		token:               token,
+		headers:             cloneHeaders(cfg.Headers),
 		requestTimeout:      cfg.Timeout,
 		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
 		maxOutputTok:        cfg.MaxOutputTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
+		reasoningMode:       cfg.ReasoningMode,
 	}
 }
 
@@ -114,7 +137,7 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			Tools:    fromKernelTools(model.FunctionToolDefinitions(req.Tools), false),
 			Stream:   req.Stream,
 		}
-		if think := ollamaThinkValue(req.Reasoning); think != nil {
+		if think := ollamaThinkValue(req.Reasoning, l.reasoningMode); think != nil {
 			payload.Think = think
 		}
 		if l.maxOutputTok > 0 {
@@ -141,6 +164,10 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		applyDefaultAttributionHeaders(httpReq, APIOllama)
+		if l.auth.Type != "" && l.auth.Type != AuthNone {
+			applyDefaultAuthHeader(httpReq, Config{API: APIOllama, Auth: l.auth}, l.token, false)
+		}
+		applyConfiguredHeaders(httpReq, l.headers)
 
 		resp, err := l.client.Do(httpReq)
 		if err != nil {
@@ -365,13 +392,20 @@ func (l *ollamaLLM) fromKernelMessage(msg model.Message) ollamaChatMessage {
 	return chat
 }
 
-func ollamaThinkValue(cfg model.ReasoningConfig) *bool {
+func ollamaThinkValue(cfg model.ReasoningConfig, reasoningMode string) *ollamaThinkParam {
 	effort := strings.ToLower(strings.TrimSpace(cfg.Effort))
 	if effort == "" {
 		return nil
 	}
-	value := effort != "none"
-	return &value
+	if effort == "none" {
+		enabled := false
+		return &ollamaThinkParam{enabled: &enabled}
+	}
+	if strings.EqualFold(strings.TrimSpace(reasoningMode), "effort") {
+		return &ollamaThinkParam{level: effort}
+	}
+	enabled := true
+	return &ollamaThinkParam{enabled: &enabled}
 }
 
 func applyOllamaOutput(payload *ollamaChatRequest, output *model.OutputSpec) {
@@ -395,8 +429,8 @@ func applyOllamaOutput(payload *ollamaChatRequest, output *model.OutputSpec) {
 		}
 	}
 	if payload.Format != nil && payload.Think == nil {
-		think := false
-		payload.Think = &think
+		enabled := false
+		payload.Think = &ollamaThinkParam{enabled: &enabled}
 	}
 }
 

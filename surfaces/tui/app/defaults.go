@@ -363,13 +363,15 @@ func confirmConnectModelStep(stepKey string, value string, candidate *SlashArgCa
 		}
 	case "endpoint":
 		state["baseurl"] = strings.TrimSpace(value)
-		if candidate != nil && candidate.NoAuth {
+		if candidate != nil && candidate.NoAuth ||
+			modelconfig.EndpointUsesNoAuth(state["provider"], value) {
 			state["_reuseauth"] = "true"
 		} else {
 			delete(state, "_reuseauth")
 		}
 	case "baseurl":
-		if candidate != nil && candidate.NoAuth {
+		if candidate != nil && candidate.NoAuth ||
+			modelconfig.EndpointUsesNoAuth(state["provider"], value) {
 			state["_reuseauth"] = "true"
 		} else {
 			delete(state, "_reuseauth")

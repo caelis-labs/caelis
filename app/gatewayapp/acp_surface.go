@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
@@ -404,7 +405,7 @@ func (p gatewayACPSurface) currentReasoningEffort(ctx context.Context, session s
 	for _, value := range []string{
 		cfg.ReasoningEffort,
 		cfg.DefaultReasoningEffort,
-		modelcatalog.DefaultReasoningEffortForModel(cfg.Provider, cfg.Model),
+		modelconfig.DefaultReasoningEffortForConfig(cfg),
 	} {
 		if normalized := modelcatalog.NormalizeReasoningEffort(value); normalized != "" {
 			return normalized
@@ -526,20 +527,13 @@ func configByRef(configs []ModelConfig, ref string) (ModelConfig, bool) {
 
 func reasoningLevelsForACPModel(cfg ModelConfig) []string {
 	levels := append([]string(nil), cfg.ReasoningLevels...)
-	levels = append(levels, modelcatalog.ReasoningLevelsForModel(cfg.Provider, cfg.Model)...)
+	levels = append(levels, modelconfig.ReasoningLevelsForConfig(cfg)...)
 	levels = append(levels, cfg.DefaultReasoningEffort, cfg.ReasoningEffort)
-	for i, level := range levels {
-		levels[i] = modelcatalog.NormalizeReasoningEffort(level)
-	}
-	return dedupeNonEmptyStrings(levels)
+	return modelconfig.NormalizeReasoningLevels(levels)
 }
 
 func modelConfigSupportsImages(cfg ModelConfig) bool {
-	caps, ok := modelcatalog.LookupModelCapabilities(cfg.Provider, cfg.Model)
-	if !ok {
-		caps, ok = modelcatalog.LookupSuggestedModelCapabilities(cfg.Provider, cfg.Model)
-	}
-	return ok && caps.SupportsImages
+	return modelconfig.ModelSupportsImages(cfg)
 }
 
 func modelDescription(cfg ModelConfig) string {

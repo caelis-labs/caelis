@@ -1023,6 +1023,46 @@ func TestAdapterCompleteSlashArgConnectSeparatesSourcesAndProviders(t *testing.T
 		t.Fatalf("xiaomi endpoint candidates = %#v, missing token-plan CN OpenAI detail", xiaomiEndpoints)
 	}
 
+	var ollamaProvider controlprompt.SlashArgCandidate
+	for _, candidate := range providers {
+		if candidate.Value == "ollama" {
+			ollamaProvider = candidate
+			break
+		}
+	}
+	if ollamaProvider.Value == "" || ollamaProvider.NoAuth {
+		t.Fatalf("ollama provider candidate = %#v, want endpoint choice before auth policy", ollamaProvider)
+	}
+	ollamaEndpoints, err := driver.CompleteSlashArg(ctx, "connect-baseurl:ollama", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(connect-baseurl:ollama) error = %v", err)
+	}
+	if len(ollamaEndpoints) != 2 ||
+		ollamaEndpoints[0].Value != "http://localhost:11434" || !ollamaEndpoints[0].NoAuth ||
+		ollamaEndpoints[1].Value != "https://ollama.com" || ollamaEndpoints[1].NoAuth ||
+		!strings.Contains(ollamaEndpoints[1].Detail, "OLLAMA_API_KEY") {
+		t.Fatalf("ollama endpoint candidates = %#v, want local no-auth and Cloud API-key choices", ollamaEndpoints)
+	}
+	ollamaCloudModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(connectwizard.ConnectWizardState{
+		Provider:       "ollama",
+		BaseURL:        "https://ollama.com",
+		TokenRef:       "env:OLLAMA_API_KEY",
+		TimeoutSeconds: connectwizard.DefaultConnectTimeoutSeconds,
+	}), "", 20)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(connect-model Ollama Cloud) error = %v", err)
+	}
+	wantOllamaCloudModels := []string{"glm-5.2", "kimi-k2.7-code", "minimax-m3", "nemotron-3-super"}
+	if len(ollamaCloudModels) != len(wantOllamaCloudModels) {
+		t.Fatalf("Ollama Cloud models = %#v, want four curated models", ollamaCloudModels)
+	}
+	for i, want := range wantOllamaCloudModels {
+		candidate := ollamaCloudModels[i]
+		if candidate.Value != want || !candidate.ModelMetadataComplete || !strings.Contains(candidate.Detail, "cloud api") {
+			t.Fatalf("Ollama Cloud model[%d] = %#v, want complete %q catalog entry", i, candidate, want)
+		}
+	}
+
 	models, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(connectwizard.ConnectWizardState{
 		Provider:       "minimax",
 		BaseURL:        "https://api.minimaxi.com/anthropic",
@@ -1221,6 +1261,20 @@ func TestAdapterCompleteSlashArgACPModelUsesConfigEfforts(t *testing.T) {
 	efforts, handled = driver.completeACPControllerSlashArg(status, "model use gpt-5.4", "", 10)
 	if !handled || len(efforts) != 2 || efforts[0].Value != "low" || efforts[1].Value != "high" {
 		t.Fatalf("ACP gpt-5.4 efforts = %#v handled=%v, want config low/high", efforts, handled)
+	}
+}
+
+func TestConfiguredModelReasoningLevelsUsesEndpointCatalog(t *testing.T) {
+	t.Parallel()
+
+	driver := &Adapter{}
+	levels := driver.configuredModelReasoningLevels(ModelConfig{
+		Provider: "ollama",
+		Model:    "glm-5.2",
+		BaseURL:  "https://ollama.com",
+	})
+	if got := strings.Join(levels, ","); got != "high,max" {
+		t.Fatalf("configuredModelReasoningLevels(Ollama Cloud) = %q, want high,max", got)
 	}
 }
 

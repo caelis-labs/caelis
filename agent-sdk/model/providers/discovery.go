@@ -317,8 +317,9 @@ func discoverCodeFreeModels(ctx context.Context, client *http.Client, cfg Config
 	return normalizeRemoteModels(models), nil
 }
 
-// discoverOllamaModels queries the Ollama /api/tags endpoint to list locally
-// available models. Ollama runs locally and typically requires no authentication.
+// discoverOllamaModels queries /api/tags on a configured Ollama service.
+// Control uses this for locally installed models; direct Cloud selection uses
+// its maintained capability catalog instead.
 func discoverOllamaModels(ctx context.Context, client *http.Client, cfg Config) ([]RemoteModel, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	if strings.HasSuffix(strings.ToLower(baseURL), "/v1") {

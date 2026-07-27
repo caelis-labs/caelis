@@ -132,12 +132,20 @@ type ModelDefaults struct {
 // asking the user for advanced configuration.
 type SelectableModel struct {
 	Name             string
+	Detail           string
 	MetadataComplete bool
 }
 
 // ResolveModelDefaults resolves maintained metadata for a model and falls back
 // to the provider template only when the concrete model is unknown.
 func ResolveModelDefaults(provider string, modelName string) (ModelDefaults, error) {
+	return ResolveModelDefaultsForEndpoint(provider, "", modelName)
+}
+
+// ResolveModelDefaultsForEndpoint resolves maintained metadata with the
+// endpoint's catalog identity. This keeps endpoint-specific model semantics out
+// of callers and presentation adapters.
+func ResolveModelDefaultsForEndpoint(provider string, baseURL string, modelName string) (ModelDefaults, error) {
 	template, ok := LookupProvider(provider)
 	if !ok {
 		return ModelDefaults{}, fmt.Errorf("modelconfig: provider %q is not supported", strings.TrimSpace(provider))
@@ -152,7 +160,8 @@ func ResolveModelDefaults(provider string, modelName string) (ModelDefaults, err
 			return defaults, nil
 		}
 	}
-	caps, known := modelcatalog.LookupModelCapabilities(template.Provider, modelName)
+	catalogProvider := CatalogProviderFor(template.Provider, baseURL)
+	caps, known := modelcatalog.LookupModelCapabilities(catalogProvider, modelName)
 	if !known {
 		caps = modelcatalog.DefaultModelCapabilities()
 		if template.DefaultContextWindowTokens > 0 {
@@ -190,13 +199,13 @@ func ResolveModelDefaults(provider string, modelName string) (ModelDefaults, err
 	if maxOutput <= 0 {
 		maxOutput = modelcatalog.DefaultModelCapabilities().DefaultMaxOutputTokens
 	}
-	reasoningLevels := NormalizeReasoningLevels(modelcatalog.ReasoningLevelsForModel(template.Provider, modelName))
+	reasoningLevels := NormalizeReasoningLevels(modelcatalog.ReasoningLevelsForModel(catalogProvider, modelName))
 	if len(reasoningLevels) == 0 {
 		reasoningLevels = NormalizeReasoningLevels(caps.ReasoningEfforts)
 	}
 	reasoningMode := modelcatalog.NormalizeReasoningMode(caps.ReasoningMode)
 	if reasoningMode == "" {
-		reasoningMode = modelcatalog.ReasoningModeForModel(template.Provider, modelName)
+		reasoningMode = modelcatalog.ReasoningModeForModel(catalogProvider, modelName)
 	}
 	return ModelDefaults{
 		ContextWindowTokens:    contextWindow,
@@ -254,20 +263,14 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 	if hasEndpoint && endpoint.API != "" {
 		api = endpoint.API
 	}
-	authType := DefaultAuthTypeForProvider(template.Provider)
-	if strings.TrimSpace(req.AuthType) != "" {
-		authType = parseAuthType(req.AuthType)
-	}
-	if template.NoAuthRequired {
-		authType = model.AuthNone
-	}
+	authType := connectAuthType(template, endpoint, hasEndpoint, req.AuthType)
 	timeout := time.Duration(req.TimeoutSeconds) * time.Second
 	if req.TimeoutSeconds <= 0 {
 		timeout = DefaultProviderRequestTimeoutSeconds * time.Second
 	}
 	out := make([]Config, 0, len(req.Models))
 	for _, selection := range req.Models {
-		defaults, err := ResolveModelDefaults(template.Provider, selection.Name)
+		defaults, err := ResolveModelDefaultsForEndpoint(template.Provider, req.BaseURL, selection.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -369,6 +372,8 @@ func SelectableModels(ctx context.Context, provider string, baseURL string, auth
 		} else {
 			maintained = grokOAuthSelectableModels()
 		}
+	} else if template.API == model.APIOllama {
+		return selectableOllamaModels(ctx, firstNonEmpty(baseURL, template.DefaultBaseURL), nil)
 	} else if template.UseModelDirectory {
 		maintained = modelcatalog.ListModelDirectoryModels(template.Provider)
 	} else {
@@ -376,13 +381,17 @@ func SelectableModels(ctx context.Context, provider string, baseURL string, auth
 	}
 	models := make([]SelectableModel, 0, len(maintained))
 	for _, name := range maintained {
-		metadataComplete := hasCompleteModelMetadata(template.Provider, name)
+		metadataComplete := hasCompleteModelMetadataForEndpoint(template.Provider, baseURL, name)
 		if template.AuthFlow == AuthFlowCodexOAuth || template.AuthFlow == AuthFlowGrokOAuth {
 			// Fixed managed OAuth profiles supply conservative context, output,
 			// and reasoning defaults for every accepted account-catalog entry.
 			metadataComplete = true
 		}
-		models = append(models, SelectableModel{Name: name, MetadataComplete: metadataComplete})
+		models = append(models, SelectableModel{
+			Name:             name,
+			Detail:           selectableModelDetail(template.Provider, baseURL, name),
+			MetadataComplete: metadataComplete,
+		})
 	}
 	if template.PreserveModelOrder {
 		// Managed account catalogs and their fallbacks may be maintained in
@@ -444,7 +453,9 @@ func validateConnectRequest(template ProviderTemplate, req ConnectRequest, reusa
 	if template.AuthFlow == AuthFlowGrokOAuth && NormalizeBaseURL(req.BaseURL) != NormalizeBaseURL(template.DefaultBaseURL) {
 		return fmt.Errorf("modelconfig: grok OAuth requires the maintained endpoint %s", template.DefaultBaseURL)
 	}
-	if template.NoAuthRequired || template.AuthFlow != "" || reusableAuth || req.APIKey != "" || req.TokenEnv != "" {
+	endpoint, hasEndpoint := EndpointForBaseURL(template, req.BaseURL)
+	noAuthRequired := connectAuthType(template, endpoint, hasEndpoint, req.AuthType) == model.AuthNone
+	if noAuthRequired || template.AuthFlow != "" || reusableAuth || req.APIKey != "" || req.TokenEnv != "" {
 		return nil
 	}
 	envHint := DefaultTokenEnv(template.Provider, req.BaseURL)
@@ -452,6 +463,20 @@ func validateConnectRequest(template ProviderTemplate, req ConnectRequest, reusa
 		envHint = "YOUR_API_KEY"
 	}
 	return fmt.Errorf("API key is missing; paste a key or enter env:%s in /connect", envHint)
+}
+
+func connectAuthType(template ProviderTemplate, endpoint EndpointTemplate, hasEndpoint bool, requested string) model.AuthType {
+	authType := DefaultAuthTypeForProvider(template.Provider)
+	if hasEndpoint && endpoint.AuthType != "" {
+		authType = endpoint.AuthType
+	}
+	if strings.TrimSpace(requested) != "" {
+		authType = parseAuthType(requested)
+	}
+	if template.NoAuthRequired || (hasEndpoint && endpoint.NoAuthRequired) {
+		return model.AuthNone
+	}
+	return authType
 }
 
 func credentialRefForTemplate(template ProviderTemplate) string {
@@ -485,8 +510,9 @@ func normalizeModelSelections(selections []ModelSelection) []ModelSelection {
 	return out
 }
 
-func hasCompleteModelMetadata(provider string, modelName string) bool {
-	caps, ok := modelcatalog.LookupModelCapabilities(provider, modelName)
+func hasCompleteModelMetadataForEndpoint(provider string, baseURL string, modelName string) bool {
+	catalogProvider := CatalogProviderFor(provider, baseURL)
+	caps, ok := modelcatalog.LookupModelCapabilities(catalogProvider, modelName)
 	if !ok || caps.ContextWindowTokens <= 0 {
 		return false
 	}
@@ -513,9 +539,13 @@ func uniqueSelectableModels(values []SelectableModel) []SelectableModel {
 		key := strings.ToLower(value.Name)
 		if existing, ok := seen[key]; ok {
 			existing.MetadataComplete = existing.MetadataComplete || value.MetadataComplete
+			if strings.TrimSpace(existing.Detail) == "" {
+				existing.Detail = strings.TrimSpace(value.Detail)
+			}
 			seen[key] = existing
 			continue
 		}
+		value.Detail = strings.TrimSpace(value.Detail)
 		seen[key] = value
 		keys = append(keys, key)
 	}

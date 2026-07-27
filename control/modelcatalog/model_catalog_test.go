@@ -271,21 +271,53 @@ func TestCurrentMiniMaxAndVolcengineStaticModels(t *testing.T) {
 	}
 }
 
-func TestOllamaStaticDefaultsComeFromCatalog(t *testing.T) {
+func TestOllamaCatalogMaintainsCloudModelsOnly(t *testing.T) {
 	disableDynamicCatalogForTest(t)
 
-	models := ListCatalogModels("ollama")
-	for _, model := range []string{"qwen2.5:7b", "llama3.1:8b", "deepseek-r1:7b", "gemma3:4b"} {
-		if !containsString(models, model) {
-			t.Fatalf("ListCatalogModels(ollama) = %#v, missing %q", models, model)
-		}
-		caps, ok := LookupModelCapabilities("ollama", model)
+	if models := ListCatalogModels("ollama"); len(models) != 0 {
+		t.Fatalf("ListCatalogModels(ollama) = %#v, want no maintained local models", models)
+	}
+
+	wantModels := []string{"glm-5.2", "kimi-k2.7-code", "minimax-m3", "nemotron-3-super"}
+	models := ListCatalogModels(OllamaCloudProvider)
+	if !sameStrings(models, wantModels) {
+		t.Fatalf("ListCatalogModels(%s) = %#v, want %#v", OllamaCloudProvider, models, wantModels)
+	}
+	wantContexts := map[string]int{
+		"glm-5.2":          1000000,
+		"kimi-k2.7-code":   262144,
+		"minimax-m3":       524288,
+		"nemotron-3-super": 262144,
+	}
+	for _, model := range wantModels {
+		caps, ok := LookupModelCapabilities(OllamaCloudProvider, model)
 		if !ok {
-			t.Fatalf("LookupModelCapabilities(ollama, %q) = false, want true", model)
+			t.Fatalf("LookupModelCapabilities(%s, %q) = false, want true", OllamaCloudProvider, model)
 		}
-		if caps.ContextWindowTokens != 128000 || caps.MaxOutputTokens != 32768 {
-			t.Fatalf("LookupModelCapabilities(ollama, %q) limits = %d/%d, want 128000/32768",
-				model, caps.ContextWindowTokens, caps.MaxOutputTokens)
+		if caps.ContextWindowTokens != wantContexts[model] ||
+			caps.MaxOutputTokens != 0 ||
+			caps.DefaultMaxOutputTokens != 32768 {
+			t.Fatalf("LookupModelCapabilities(%s, %q) limits = %d/%d default %d",
+				OllamaCloudProvider, model, caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens)
+		}
+		if !caps.SupportsReasoning || !caps.SupportsToolCalls || !caps.SupportsJSONOutput {
+			t.Fatalf("LookupModelCapabilities(%s, %q) caps = %#v, want reasoning/tools/json", OllamaCloudProvider, model, caps)
+		}
+	}
+
+	if levels := ReasoningLevelsForModel(OllamaCloudProvider, "glm-5.2"); !sameStrings(levels, []string{"high", "max"}) {
+		t.Fatalf("ReasoningLevelsForModel(%s, glm-5.2) = %#v, want high/max", OllamaCloudProvider, levels)
+	}
+	if got := DefaultReasoningEffortForModel(OllamaCloudProvider, "glm-5.2"); got != "high" {
+		t.Fatalf("DefaultReasoningEffortForModel(%s, glm-5.2) = %q, want high", OllamaCloudProvider, got)
+	}
+	for _, model := range wantModels[1:] {
+		caps, _ := LookupModelCapabilities(OllamaCloudProvider, model)
+		if caps.ReasoningMode != ReasoningModeToggle {
+			t.Fatalf("LookupModelCapabilities(%s, %q).ReasoningMode = %q, want toggle", OllamaCloudProvider, model, caps.ReasoningMode)
+		}
+		if levels := ReasoningLevelsForModel(OllamaCloudProvider, model); !sameStrings(levels, []string{"none", "high"}) {
+			t.Fatalf("ReasoningLevelsForModel(%s, %q) = %#v, want none/high", OllamaCloudProvider, model, levels)
 		}
 	}
 }

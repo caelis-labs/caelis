@@ -232,6 +232,69 @@ func TestOllamaBaseURLDoesNotDoubleV1(t *testing.T) {
 	}
 }
 
+func TestOllamaCloudModelUsesConfiguredLocalChatAPI(t *testing.T) {
+	var gotPath, gotModel string
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		var payload ollamaChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		gotModel = payload.Model
+		_, _ = fmt.Fprint(w, `{"model":"glm-5.2:cloud","message":{"role":"assistant","content":"ok"},"done":true}`)
+	}))
+	defer server.Close()
+
+	llm := newOllama(Config{
+		Provider:   "ollama",
+		Model:      "glm-5.2:cloud",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	}, "")
+	for _, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
+	}) {
+		if err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+	}
+	if gotPath != "/api/chat" || gotModel != "glm-5.2:cloud" {
+		t.Fatalf("cloud request path/model = %q/%q, want /api/chat and glm-5.2:cloud", gotPath, gotModel)
+	}
+}
+
+func TestOllamaDirectCloudUsesBearerAndRawModelName(t *testing.T) {
+	var gotAuthorization, gotModel string
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthorization = r.Header.Get("Authorization")
+		var payload ollamaChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		gotModel = payload.Model
+		_, _ = fmt.Fprint(w, `{"model":"glm-5.2","message":{"role":"assistant","content":"ok"},"done":true}`)
+	}))
+	defer server.Close()
+
+	llm := newOllama(Config{
+		Provider:   "ollama",
+		Model:      "glm-5.2",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Auth:       AuthConfig{Type: AuthAPIKey},
+	}, "cloud-secret")
+	for _, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
+	}) {
+		if err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+	}
+	if gotAuthorization != "Bearer cloud-secret" || gotModel != "glm-5.2" {
+		t.Fatalf("direct Cloud authorization/model = %q/%q, want bearer token and raw model name", gotAuthorization, gotModel)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Discovery: Ollama /api/tags
 // ---------------------------------------------------------------------------
@@ -450,6 +513,40 @@ func TestOllamaReasoningEnabledUsesThinkAndReturnsReasoning(t *testing.T) {
 	}
 	if gotResp.Usage.PromptTokens != 11 || gotResp.Usage.CompletionTokens != 6 || gotResp.Usage.TotalTokens != 17 {
 		t.Fatalf("unexpected usage: %+v", gotResp.Usage)
+	}
+}
+
+func TestOllamaEffortReasoningSendsNamedThinkLevel(t *testing.T) {
+	var gotThink any
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Think any `json:"think"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		gotThink = payload.Think
+		_, _ = fmt.Fprint(w, `{"model":"glm-5.2","message":{"role":"assistant","content":"done"},"done":true}`)
+	}))
+	defer server.Close()
+
+	llm := newOllama(Config{
+		Provider:      "ollama",
+		Model:         "glm-5.2",
+		BaseURL:       server.URL,
+		HTTPClient:    server.Client(),
+		ReasoningMode: "effort",
+	}, "")
+	for _, err := range llm.Generate(context.Background(), &model.Request{
+		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
+		Reasoning: model.ReasoningConfig{Effort: "max"},
+	}) {
+		if err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+	}
+	if gotThink != "max" {
+		t.Fatalf("think = %#v, want %q", gotThink, "max")
 	}
 }
 

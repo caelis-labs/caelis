@@ -731,7 +731,8 @@ func TestConnectWizardSkipsDirectlyToAPIKeyForMiniMax(t *testing.T) {
 	}
 }
 
-func TestConnectWizardSkipsAPIKeyForNoAuthProvider(t *testing.T) {
+func TestConnectWizardOllamaLocalEndpointSkipsAPIKey(t *testing.T) {
+	const localBaseURL = "http://localhost:11434"
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
@@ -739,11 +740,16 @@ func TestConnectWizardSkipsAPIKeyForNoAuthProvider(t *testing.T) {
 			case "connect":
 				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
 			case "connect-provider":
-				return []SlashArgCandidate{{Value: "ollama", Display: "ollama", NoAuth: true}}, nil
+				return []SlashArgCandidate{{Value: "ollama", Display: "ollama"}}, nil
+			case "connect-baseurl:ollama":
+				return []SlashArgCandidate{
+					{Value: localBaseURL, Display: "local", NoAuth: true},
+					{Value: "https://ollama.com", Display: "cloud api"},
+				}, nil
 			default:
 				state, ok := connectModelCommandState(command)
-				if ok && state.Provider == "ollama" {
-					return []SlashArgCandidate{{Value: "qwen2.5:7b", Display: "ollama/qwen2.5:7b"}}, nil
+				if ok && state.Provider == "ollama" && state.BaseURL == localBaseURL {
+					return []SlashArgCandidate{{Value: "qwen2.5:7b", Display: "ollama/qwen2.5:7b", ModelMetadataComplete: false}}, nil
 				}
 				return nil, nil
 			}
@@ -760,12 +766,128 @@ func TestConnectWizardSkipsAPIKeyForNoAuthProvider(t *testing.T) {
 	if cmd != nil {
 		cmd()
 	}
+	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-baseurl:ollama" {
+		t.Fatalf("slashArgCommand after Ollama provider = %q, want endpoint choice", got)
+	}
+	handled, cmd = m.handleWizardEnter()
+	if !handled {
+		t.Fatal("local endpoint selection was not handled")
+	}
+	if cmd != nil {
+		cmd()
+	}
 	state := requireConnectModelCommandState(t, m.slashArgCommand)
-	if state.Provider != "ollama" || state.TimeoutSeconds != connectwizard.DefaultConnectTimeoutSeconds || state.TokenRef != "" {
-		t.Fatalf("connect model state after ollama provider = %#v, want provider without auth", state)
+	if state.Provider != "ollama" || state.BaseURL != localBaseURL ||
+		state.TimeoutSeconds != connectwizard.DefaultConnectTimeoutSeconds || state.TokenRef != "" {
+		t.Fatalf("connect model state after local Ollama endpoint = %#v, want local endpoint without auth", state)
 	}
 	if got := m.textarea.Value(); got != "" {
-		t.Fatalf("textarea after no-auth provider = %q, want empty wizard input", got)
+		t.Fatalf("textarea after local endpoint = %q, want empty wizard input", got)
+	}
+}
+
+func TestConnectWizardOllamaCustomEndpointSkipsAPIKey(t *testing.T) {
+	const customBaseURL = "http://ollama.lan:11434"
+	m := NewModel(Config{
+		Wizards: DefaultWizards(),
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
+				return []SlashArgCandidate{{Value: "ollama", Display: "ollama"}}, nil
+			case "connect-baseurl:ollama":
+				return []SlashArgCandidate{
+					{Value: "http://localhost:11434", Display: "local", NoAuth: true},
+					{Value: "https://ollama.com", Display: "cloud api"},
+				}, nil
+			default:
+				state, ok := connectModelCommandState(command)
+				if ok && state.Provider == "ollama" && state.BaseURL == customBaseURL {
+					return []SlashArgCandidate{{Value: "custom-local", Display: "ollama/custom-local"}}, nil
+				}
+				return nil, nil
+			}
+		},
+	})
+	openModelConnectWizard(t, m)
+	if handled, cmd := m.handleWizardEnter(); !handled {
+		t.Fatal("provider selection was not handled")
+	} else if cmd != nil {
+		cmd()
+	}
+	m.slashArgQuery = customBaseURL
+	handled, cmd := m.handleWizardEnter()
+	if !handled {
+		t.Fatal("custom endpoint entry was not handled")
+	}
+	if cmd != nil {
+		cmd()
+	}
+	state := requireConnectModelCommandState(t, m.slashArgCommand)
+	if state.Provider != "ollama" || state.BaseURL != customBaseURL || state.TokenRef != "" {
+		t.Fatalf("connect model state after custom Ollama endpoint = %#v, want no API-key step", state)
+	}
+}
+
+func TestConnectWizardOllamaCloudEndpointRequiresAPIKey(t *testing.T) {
+	const cloudBaseURL = "https://ollama.com"
+	m := NewModel(Config{
+		Wizards: DefaultWizards(),
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
+				return []SlashArgCandidate{{Value: "ollama", Display: "ollama"}}, nil
+			case "connect-baseurl:ollama":
+				return []SlashArgCandidate{
+					{Value: "http://localhost:11434", Display: "local", NoAuth: true},
+					{Value: cloudBaseURL, Display: "cloud api"},
+				}, nil
+			case "connect-apikey:ollama":
+				return nil, nil
+			default:
+				state, ok := connectModelCommandState(command)
+				if ok && state.Provider == "ollama" && state.BaseURL == cloudBaseURL && state.TokenRef == "env:OLLAMA_API_KEY" {
+					return []SlashArgCandidate{{Value: "glm-5.2", Display: "ollama/glm-5.2", ModelMetadataComplete: true}}, nil
+				}
+				return nil, nil
+			}
+		},
+	})
+	openModelConnectWizard(t, m)
+	if handled, cmd := m.handleWizardEnter(); !handled {
+		t.Fatal("provider selection was not handled")
+	} else if cmd != nil {
+		cmd()
+	}
+	m.slashArgIndex = 1
+	handled, cmd := m.handleWizardEnter()
+	if !handled {
+		t.Fatal("Cloud endpoint selection was not handled")
+	}
+	if cmd != nil {
+		cmd()
+	}
+	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-apikey:ollama" {
+		t.Fatalf("slashArgCommand after Ollama Cloud endpoint = %q, want API key step", got)
+	}
+	if hint := m.wizardHintText(); !strings.Contains(hint, "env:OLLAMA_API_KEY") {
+		t.Fatalf("wizard hint = %q, want OLLAMA_API_KEY env hint", hint)
+	}
+
+	m.slashArgQuery = "env:OLLAMA_API_KEY"
+	handled, cmd = m.handleWizardEnter()
+	if !handled {
+		t.Fatal("Cloud API key entry was not handled")
+	}
+	if cmd != nil {
+		cmd()
+	}
+	state := requireConnectModelCommandState(t, m.slashArgCommand)
+	if state.Provider != "ollama" || state.BaseURL != cloudBaseURL || state.TokenRef != "env:OLLAMA_API_KEY" {
+		t.Fatalf("connect model state after Ollama Cloud API key = %#v", state)
 	}
 }
 

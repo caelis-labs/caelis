@@ -2,6 +2,8 @@ package modelconfig
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -45,6 +47,39 @@ func TestProviderTemplateOwnsModelSelectionPolicy(t *testing.T) {
 		if !ok || template.UseModelDirectory || !template.PromptForBaseURL || len(template.DefaultReasoningLevels) == 0 {
 			t.Fatalf("%s template = %#v, want custom endpoint setup with maintained advanced defaults", provider, template)
 		}
+	}
+}
+
+func TestOllamaProviderOwnsLocalAndCloudEndpointPolicy(t *testing.T) {
+	t.Parallel()
+
+	template, ok := LookupProvider("ollama")
+	if !ok {
+		t.Fatal("LookupProvider(ollama) = false")
+	}
+	if template.DefaultEndpointID != "local" || template.NoAuthRequired || len(template.Endpoints) != 2 {
+		t.Fatalf("ollama template = %#v, want endpoint-specific auth policy", template)
+	}
+	local, ok := EndpointForBaseURL(template, "http://localhost:11434/")
+	if !ok || local.ID != "local" || !local.NoAuthRequired || local.AuthType != model.AuthNone {
+		t.Fatalf("local endpoint = %#v, %v", local, ok)
+	}
+	cloud, ok := EndpointForBaseURL(template, "https://ollama.com/")
+	if !ok || cloud.ID != "cloud" || cloud.NoAuthRequired || cloud.AuthType != model.AuthAPIKey ||
+		cloud.CatalogProvider != modelcatalog.OllamaCloudProvider {
+		t.Fatalf("cloud endpoint = %#v, %v", cloud, ok)
+	}
+	if got := CatalogProviderFor("ollama", local.BaseURL); got != "ollama" {
+		t.Fatalf("CatalogProviderFor(ollama local) = %q, want ollama", got)
+	}
+	if got := CatalogProviderFor("ollama", cloud.BaseURL); got != modelcatalog.OllamaCloudProvider {
+		t.Fatalf("CatalogProviderFor(ollama cloud) = %q, want %s", got, modelcatalog.OllamaCloudProvider)
+	}
+	if got := DefaultTokenEnv("ollama", local.BaseURL); got != "" {
+		t.Fatalf("DefaultTokenEnv(ollama local) = %q, want empty", got)
+	}
+	if got := DefaultTokenEnv("ollama", cloud.BaseURL); got != "OLLAMA_API_KEY" {
+		t.Fatalf("DefaultTokenEnv(ollama cloud) = %q, want OLLAMA_API_KEY", got)
 	}
 }
 
@@ -105,6 +140,156 @@ func TestSelectableModelsOnlyReturnsMaintainedMetadataBackedModels(t *testing.T)
 		if !item.MetadataComplete {
 			t.Fatalf("maintained model = %#v, want complete metadata", item)
 		}
+	}
+}
+
+func TestSelectableOllamaModelsUsesLocalInstalledModelsOnly(t *testing.T) {
+	t.Parallel()
+
+	requests := 0
+	client := &http.Client{Transport: modelconfigRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		if r.URL.Path != "/api/tags" {
+			return modelconfigHTTPResponse(r, http.StatusNotFound, ""), nil
+		}
+		if r.URL.Host != "local.test" {
+			return modelconfigHTTPResponse(r, http.StatusNotFound, ""), nil
+		}
+		return modelconfigHTTPResponse(r, http.StatusOK, `{"models":[{"name":"gemma4:12b-mlx"},{"name":"glm-5.2:cloud"}]}`), nil
+	})}
+
+	models, err := selectableOllamaModels(context.Background(), "http://local.test", client)
+	if err != nil {
+		t.Fatalf("selectableOllamaModels() error = %v", err)
+	}
+	if requests != 1 || len(models) != 2 {
+		t.Fatalf("selectableOllamaModels() requests/models = %d/%#v, want one local request and two models", requests, models)
+	}
+	assertSelectableModel(t, models, "gemma4:12b-mlx", false)
+	assertSelectableModel(t, models, "glm-5.2:cloud", false)
+}
+
+func TestSelectableOllamaModelsUsesStaticCloudCatalogWithoutRemoteDiscovery(t *testing.T) {
+	t.Parallel()
+
+	requests := 0
+	client := &http.Client{Transport: modelconfigRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		return modelconfigHTTPResponse(r, http.StatusInternalServerError, "must not call remote catalog"), nil
+	})}
+
+	models, err := selectableOllamaModels(context.Background(), "https://ollama.com/", client)
+	if err != nil {
+		t.Fatalf("selectableOllamaModels() error = %v", err)
+	}
+	want := []string{"glm-5.2", "kimi-k2.7-code", "minimax-m3", "nemotron-3-super"}
+	if requests != 0 || !slices.Equal(selectableModelNames(models), want) {
+		t.Fatalf("selectableOllamaModels() requests/models = %d/%#v, want static %#v", requests, models, want)
+	}
+	for _, item := range models {
+		if !item.MetadataComplete {
+			t.Fatalf("cloud model = %#v, want complete maintained metadata", item)
+		}
+		if !strings.Contains(item.Detail, "cloud api") {
+			t.Fatalf("cloud model = %#v, want endpoint-owned detail", item)
+		}
+	}
+}
+
+func TestAssembleConnectSupportsOllamaLocalAndCloudEndpoints(t *testing.T) {
+	t.Setenv("OLLAMA_API_KEY", "")
+
+	localConfigs, err := AssembleConnect(context.Background(), ConnectRequest{
+		Provider: "ollama",
+		BaseURL:  "http://localhost:11434",
+		Models:   []ModelSelection{{Name: "custom-local"}},
+	}, ConnectOptions{})
+	if err != nil {
+		t.Fatalf("AssembleConnect(local) error = %v", err)
+	}
+	if len(localConfigs) != 1 {
+		t.Fatalf("AssembleConnect(local) = %#v, want one config", localConfigs)
+	}
+	local := localConfigs[0]
+	if local.EndpointID != "local" || local.AuthType != model.AuthNone || local.Token != "" || local.TokenEnv != "" {
+		t.Fatalf("local Ollama config = %#v, want local no-auth endpoint", local)
+	}
+
+	customConfigs, err := AssembleConnect(context.Background(), ConnectRequest{
+		Provider: "ollama",
+		BaseURL:  "http://ollama.lan:11434",
+		Models:   []ModelSelection{{Name: "custom-local"}},
+	}, ConnectOptions{})
+	if err != nil {
+		t.Fatalf("AssembleConnect(custom local) error = %v", err)
+	}
+	if len(customConfigs) != 1 || customConfigs[0].AuthType != model.AuthNone ||
+		!strings.HasPrefix(customConfigs[0].EndpointID, "custom-") {
+		t.Fatalf("custom local Ollama config = %#v, want custom no-auth endpoint", customConfigs)
+	}
+
+	_, err = AssembleConnect(context.Background(), ConnectRequest{
+		Provider: "ollama",
+		BaseURL:  "https://ollama.com",
+		Models:   []ModelSelection{{Name: "glm-5.2"}},
+	}, ConnectOptions{})
+	if err == nil || !strings.Contains(err.Error(), "OLLAMA_API_KEY") {
+		t.Fatalf("AssembleConnect(cloud without key) error = %v, want API-key hint", err)
+	}
+
+	cloudConfigs, err := AssembleConnect(context.Background(), ConnectRequest{
+		Provider: "ollama",
+		BaseURL:  "https://ollama.com",
+		APIKey:   "env:OLLAMA_API_KEY",
+		Models:   []ModelSelection{{Name: "glm-5.2"}},
+	}, ConnectOptions{})
+	if err != nil {
+		t.Fatalf("AssembleConnect(cloud) error = %v", err)
+	}
+	if len(cloudConfigs) != 1 {
+		t.Fatalf("AssembleConnect(cloud) = %#v, want one config", cloudConfigs)
+	}
+	cloud := cloudConfigs[0]
+	if cloud.EndpointID != "cloud" || cloud.AuthType != model.AuthAPIKey || cloud.TokenEnv != "OLLAMA_API_KEY" || cloud.Token != "" {
+		t.Fatalf("cloud Ollama endpoint/auth = %#v", cloud)
+	}
+	if cloud.Model != "glm-5.2" || cloud.ContextWindowTokens != 1000000 || cloud.MaxOutputTok != 32768 {
+		t.Fatalf("cloud Ollama model limits = %#v", cloud)
+	}
+	if cloud.ReasoningMode != modelcatalog.ReasoningModeEffort ||
+		!slices.Equal(cloud.ReasoningLevels, []string{"high", "max"}) ||
+		cloud.ReasoningEffort != "high" {
+		t.Fatalf("cloud Ollama reasoning = %#v", cloud)
+	}
+}
+
+func TestOllamaCloudCatalogSurvivesConfigPersistenceRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	configured := NormalizeConfig(Config{
+		Provider:            "ollama",
+		Model:               "glm-5.2",
+		BaseURL:             "https://ollama.com",
+		TokenEnv:            "OLLAMA_API_KEY",
+		ContextWindowTokens: 1000000,
+		MaxOutputTok:        32768,
+	})
+	if configured.ReasoningMode != modelcatalog.ReasoningModeEffort {
+		t.Fatalf("NormalizeConfig(cloud).ReasoningMode = %q, want effort", configured.ReasoningMode)
+	}
+	if levels := ReasoningLevelsForConfig(configured); !slices.Equal(levels, []string{"high", "max"}) {
+		t.Fatalf("ReasoningLevelsForConfig(cloud) = %#v, want high/max", levels)
+	}
+
+	endpoint := SanitizePersistedProviderEndpoint(ProviderEndpointFromConfig(configured))
+	modelRecord := SanitizePersistedConfig(configured)
+	if modelRecord.ReasoningMode != "" {
+		t.Fatalf("SanitizePersistedConfig(cloud).ReasoningMode = %q, want derivable field removed", modelRecord.ReasoningMode)
+	}
+	rehydrated := MergeConfigProviderEndpoint(modelRecord, endpoint)
+	if rehydrated.Provider != "ollama" || rehydrated.BaseURL != "https://ollama.com" ||
+		rehydrated.ReasoningMode != modelcatalog.ReasoningModeEffort {
+		t.Fatalf("MergeConfigProviderEndpoint(cloud) = %#v, want endpoint-scoped reasoning restored", rehydrated)
 	}
 }
 
@@ -475,6 +660,35 @@ func selectableModelNames(models []SelectableModel) []string {
 		names = append(names, item.Name)
 	}
 	return names
+}
+
+func assertSelectableModel(t *testing.T, models []SelectableModel, name string, metadataComplete bool) {
+	t.Helper()
+	for _, model := range models {
+		if model.Name == name {
+			if model.MetadataComplete != metadataComplete {
+				t.Fatalf("selectable model %q metadata complete = %v, want %v", name, model.MetadataComplete, metadataComplete)
+			}
+			return
+		}
+	}
+	t.Fatalf("selectable models = %#v, missing %q", models, name)
+}
+
+type modelconfigRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f modelconfigRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func modelconfigHTTPResponse(req *http.Request, status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Status:     http.StatusText(status),
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}
 }
 
 func TestBuildModelConstructsSDKModelFromControlConfig(t *testing.T) {
