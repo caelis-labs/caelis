@@ -7,11 +7,13 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-func (d *Adapter) Connect(ctx context.Context, cfg ConnectConfig) (StatusSnapshot, error) {
+func (d *Adapter) Connect(ctx context.Context, cfg controlprompt.ConnectConfig) (controlstatus.StatusSnapshot, error) {
 	if d == nil || d.stack == nil {
-		return StatusSnapshot{}, missingRuntimeDependency("stack")
+		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("stack")
 	}
 	previousDefault := ""
 	if d.stack.Model.DefaultAliasFn != nil {
@@ -38,31 +40,31 @@ func (d *Adapter) Connect(ctx context.Context, cfg ConnectConfig) (StatusSnapsho
 		Authenticate:    d.stack.Model.AuthenticateFn,
 	})
 	if err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	if d.stack.Model.ConnectModelsFn == nil {
-		return StatusSnapshot{}, missingRuntimeDependency("connect")
+		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("connect")
 	}
 	profiles, err := d.stack.Model.ConnectModelsFn(assembled)
 	if err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	if len(profiles) == 0 {
-		return StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: connect returned no model profiles")
+		return controlstatus.StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: connect returned no model profiles")
 	}
 	alias := ""
 	if profiles[0].Backend.Provider != nil {
 		alias = profiles[0].Backend.Provider.ModelConfigID
 	}
 	if alias == "" {
-		return StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: provider connect returned a non-provider profile")
+		return controlstatus.StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: provider connect returned a non-provider profile")
 	}
 	if activeSession, ok := d.currentSession(); ok && alias != "" && !hadConfiguredModel {
 		if d.stack.Model.UseFn == nil {
-			return StatusSnapshot{}, missingRuntimeDependency("use model")
+			return controlstatus.StatusSnapshot{}, missingRuntimeDependency("use model")
 		}
 		if err := d.stack.Model.UseFn(ctx, activeSession.SessionRef, alias); err != nil {
-			return StatusSnapshot{}, err
+			return controlstatus.StatusSnapshot{}, err
 		}
 	}
 	d.mu.Lock()
@@ -76,7 +78,7 @@ func (d *Adapter) Connect(ctx context.Context, cfg ConnectConfig) (StatusSnapsho
 	return d.Status(ctx)
 }
 
-func connectModelSelections(cfg ConnectConfig) []modelconfig.ModelSelection {
+func connectModelSelections(cfg controlprompt.ConnectConfig) []modelconfig.ModelSelection {
 	names := strings.Split(cfg.Model, ",")
 	selections := make([]modelconfig.ModelSelection, 0, len(names))
 	seen := map[string]struct{}{}
@@ -132,24 +134,24 @@ func (d *Adapter) hasReusableConnectAuth(ctx context.Context, provider string, b
 	return false
 }
 
-func (d *Adapter) UseModel(ctx context.Context, model string, reasoningEffort ...string) (StatusSnapshot, error) {
+func (d *Adapter) UseModel(ctx context.Context, model string, reasoningEffort ...string) (controlstatus.StatusSnapshot, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	if _, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	} else if activeACP {
 		reasoning := ""
 		if len(reasoningEffort) > 0 {
 			reasoning = strings.TrimSpace(reasoningEffort[0])
 		}
 		if d.stack.Agent.SetControllerModelFn == nil {
-			return StatusSnapshot{}, missingRuntimeDependency("ACP controller model")
+			return controlstatus.StatusSnapshot{}, missingRuntimeDependency("ACP controller model")
 		}
 		status, err := d.stack.Agent.SetControllerModelFn(ctx, activeSession.SessionRef, strings.TrimSpace(model), reasoning)
 		if err != nil {
-			return StatusSnapshot{}, err
+			return controlstatus.StatusSnapshot{}, err
 		}
 		d.mu.Lock()
 		d.modelText = strings.TrimSpace(firstNonEmpty(status.Model, model))
@@ -158,23 +160,23 @@ func (d *Adapter) UseModel(ctx context.Context, model string, reasoningEffort ..
 	}
 	alias, err := d.resolveStoredModelAlias(ctx, strings.TrimSpace(model))
 	if err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	if alias == "" {
-		return StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: model alias is required")
+		return controlstatus.StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: model alias is required")
 	}
 	reasoning := ""
 	if len(reasoningEffort) > 0 {
 		reasoning = strings.TrimSpace(reasoningEffort[0])
 		if reasoning != "" && !d.modelAliasSupportsReasoningLevel(alias, reasoning) {
-			return StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: model %q does not support reasoning level %q", alias, reasoning)
+			return controlstatus.StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: model %q does not support reasoning level %q", alias, reasoning)
 		}
 	}
 	if d.stack.Model.UseFn == nil {
-		return StatusSnapshot{}, missingRuntimeDependency("use model")
+		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("use model")
 	}
 	if err := d.stack.Model.UseFn(ctx, activeSession.SessionRef, alias, reasoning); err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	d.mu.Lock()
 	d.modelText = alias
@@ -208,32 +210,32 @@ func (d *Adapter) DeleteModel(ctx context.Context, alias string) error {
 	return nil
 }
 
-func (d *Adapter) CycleSessionMode(ctx context.Context) (StatusSnapshot, error) {
+func (d *Adapter) CycleSessionMode(ctx context.Context) (controlstatus.StatusSnapshot, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	if controllerStatus, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	} else if activeACP {
 		next, err := nextACPControllerMode(controllerStatus)
 		if err != nil {
-			return StatusSnapshot{}, err
+			return controlstatus.StatusSnapshot{}, err
 		}
 		if d.stack.Agent.SetControllerModeFn == nil {
-			return StatusSnapshot{}, missingRuntimeDependency("ACP controller mode")
+			return controlstatus.StatusSnapshot{}, missingRuntimeDependency("ACP controller mode")
 		}
 		if _, err := d.stack.Agent.SetControllerModeFn(ctx, activeSession.SessionRef, next.ID); err != nil {
-			return StatusSnapshot{}, err
+			return controlstatus.StatusSnapshot{}, err
 		}
 		return d.Status(ctx)
 	}
 	if d.stack.Status.CycleModeFn == nil {
-		return StatusSnapshot{}, missingRuntimeDependency("cycle mode")
+		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("cycle mode")
 	}
 	normalized, err := d.stack.Status.CycleModeFn(ctx, activeSession.SessionRef)
 	if err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	d.mu.Lock()
 	d.sessionMode = normalized
@@ -241,13 +243,13 @@ func (d *Adapter) CycleSessionMode(ctx context.Context) (StatusSnapshot, error) 
 	return d.Status(ctx)
 }
 
-func (d *Adapter) SetSandboxBackend(ctx context.Context, backend string) (StatusSnapshot, error) {
+func (d *Adapter) SetSandboxBackend(ctx context.Context, backend string) (controlstatus.StatusSnapshot, error) {
 	if d.stack.Sandbox.SetBackendFn == nil {
-		return StatusSnapshot{}, missingRuntimeDependency("sandbox backend")
+		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("sandbox backend")
 	}
 	status, err := d.stack.Sandbox.SetBackendFn(ctx, backend)
 	if err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	d.mu.Lock()
 	d.sandboxType = firstNonEmpty(status.ResolvedBackend, status.RequestedBackend, d.sandboxType)
@@ -255,13 +257,13 @@ func (d *Adapter) SetSandboxBackend(ctx context.Context, backend string) (Status
 	return d.Status(ctx)
 }
 
-func (d *Adapter) PrepareSandbox(ctx context.Context) (StatusSnapshot, error) {
+func (d *Adapter) PrepareSandbox(ctx context.Context) (controlstatus.StatusSnapshot, error) {
 	if d.stack.Sandbox.PrepareFn == nil {
-		return StatusSnapshot{}, missingRuntimeDependency("sandbox prepare")
+		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("sandbox prepare")
 	}
 	status, err := d.stack.Sandbox.PrepareFn(ctx)
 	if err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	d.mu.Lock()
 	d.sandboxType = firstNonEmpty(status.ResolvedBackend, status.RequestedBackend, d.sandboxType)
@@ -269,13 +271,13 @@ func (d *Adapter) PrepareSandbox(ctx context.Context) (StatusSnapshot, error) {
 	return d.Status(ctx)
 }
 
-func (d *Adapter) RepairSandbox(ctx context.Context) (StatusSnapshot, error) {
+func (d *Adapter) RepairSandbox(ctx context.Context) (controlstatus.StatusSnapshot, error) {
 	if d.stack.Sandbox.RepairFn == nil {
-		return StatusSnapshot{}, missingRuntimeDependency("sandbox repair")
+		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("sandbox repair")
 	}
 	status, err := d.stack.Sandbox.RepairFn(ctx)
 	if err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	d.mu.Lock()
 	d.sandboxType = firstNonEmpty(status.ResolvedBackend, status.RequestedBackend, d.sandboxType)
@@ -283,13 +285,13 @@ func (d *Adapter) RepairSandbox(ctx context.Context) (StatusSnapshot, error) {
 	return d.Status(ctx)
 }
 
-func (d *Adapter) ResetSandbox(ctx context.Context) (StatusSnapshot, error) {
+func (d *Adapter) ResetSandbox(ctx context.Context) (controlstatus.StatusSnapshot, error) {
 	if d.stack.Sandbox.ResetFn == nil {
-		return StatusSnapshot{}, missingRuntimeDependency("sandbox reset")
+		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("sandbox reset")
 	}
 	status, err := d.stack.Sandbox.ResetFn(ctx)
 	if err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	d.mu.Lock()
 	d.sandboxType = firstNonEmpty(status.ResolvedBackend, status.RequestedBackend, d.sandboxType)
@@ -297,24 +299,24 @@ func (d *Adapter) ResetSandbox(ctx context.Context) (StatusSnapshot, error) {
 	return d.Status(ctx)
 }
 
-func (d *Adapter) SetSessionMode(ctx context.Context, mode string) (StatusSnapshot, error) {
+func (d *Adapter) SetSessionMode(ctx context.Context, mode string) (controlstatus.StatusSnapshot, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	if d.stack.Status.SetSessionModeFn == nil {
-		return StatusSnapshot{}, missingRuntimeDependency("session mode")
+		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("session mode")
 	}
 	normalized, err := d.stack.Status.SetSessionModeFn(ctx, activeSession.SessionRef, mode)
 	if err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	d.mu.Lock()
 	d.sessionMode = normalized
 	d.mu.Unlock()
 	status, err := d.Status(ctx)
 	if err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	status.Session.SessionMode = normalized
 	status.Session.ModeLabel = normalized

@@ -7,10 +7,11 @@ import (
 	"testing"
 
 	controlclient "github.com/caelis-labs/caelis/control/client"
+	"github.com/caelis-labs/caelis/surfaces/appserver"
 )
 
 func TestResolveNetworkConfigRequiresTLSOffLoopback(t *testing.T) {
-	authenticator, err := BearerTokenAuthenticator(
+	authenticator, err := appserver.BearerTokenAuthenticator(
 		"0123456789abcdef0123456789abcdef0123456789abcdef",
 		controlclient.Principal{ID: "owner"},
 	)
@@ -24,7 +25,7 @@ func TestResolveNetworkConfigRequiresTLSOffLoopback(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "requires TLS") {
 		t.Fatalf("resolveNetworkConfig() error = %v, want TLS requirement", err)
 	}
-	err = ListenAndServe(context.Background(), nil, Config{
+	err = ListenAndServe(context.Background(), Dependencies{}, Config{
 		Address: "0.0.0.0:7777", Authenticator: authenticator,
 		AllowedHosts: []string{"control.example.test"},
 	})
@@ -52,7 +53,7 @@ func TestResolveNetworkConfigRequiresTLSOffLoopback(t *testing.T) {
 }
 
 func TestResolveNetworkConfigRejectsAmbiguousOrIncompleteTrust(t *testing.T) {
-	authenticator, err := BearerTokenAuthenticator(
+	authenticator, err := appserver.BearerTokenAuthenticator(
 		"0123456789abcdef0123456789abcdef0123456789abcdef",
 		controlclient.Principal{ID: "owner"},
 	)
@@ -104,9 +105,9 @@ func TestResolveNetworkConfigBuildsLoopbackAuthenticatorFromTokenFile(t *testing
 	}
 }
 
-func TestBearerTokenAuthenticatorRejectsAmbiguousAuthorization(t *testing.T) {
+func TestResolvedBearerAuthenticatorRejectsAmbiguousAuthorization(t *testing.T) {
 	const token = "0123456789abcdef0123456789abcdef0123456789abcdef"
-	authenticator, err := BearerTokenAuthenticator(token, controlclient.Principal{ID: "owner"})
+	authenticator, err := appserver.BearerTokenAuthenticator(token, controlclient.Principal{ID: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}

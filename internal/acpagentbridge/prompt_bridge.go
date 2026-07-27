@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
@@ -27,7 +26,7 @@ func (a *RuntimeAgent) runPromptRouter(runCtx context.Context, bridgeCtx context
 	if router == nil {
 		return false, nil
 	}
-	result, err := router.Route(runCtx, controlprompt.Request{Submission: control.Submission{
+	result, err := router.Route(runCtx, controlprompt.Request{Submission: controlprompt.Submission{
 		Text:        strings.TrimSpace(input),
 		Attachments: promptRouterAttachmentsFromContentParts(input, contentParts),
 	}})
@@ -37,14 +36,14 @@ func (a *RuntimeAgent) runPromptRouter(runCtx context.Context, bridgeCtx context
 	return true, a.emitPromptRouterResult(runCtx, activeSession, result, cb, true)
 }
 
-func promptRouterAttachmentsFromContentParts(input string, parts []model.ContentPart) []control.Attachment {
+func promptRouterAttachmentsFromContentParts(input string, parts []model.ContentPart) []controlprompt.Attachment {
 	if len(parts) == 0 {
 		return nil
 	}
 	inputLen := len([]rune(strings.TrimSpace(input)))
 	offset := 0
 	textParts := 0
-	out := make([]control.Attachment, 0, len(parts))
+	out := make([]controlprompt.Attachment, 0, len(parts))
 	for _, part := range parts {
 		switch part.Type {
 		case model.ContentPartText:
@@ -69,7 +68,7 @@ func promptRouterAttachmentsFromContentParts(input string, parts []model.Content
 			if attachmentOffset > inputLen {
 				attachmentOffset = inputLen
 			}
-			out = append(out, control.Attachment{
+			out = append(out, controlprompt.Attachment{
 				Name:     strings.TrimSpace(part.FileName),
 				Offset:   attachmentOffset,
 				MimeType: strings.TrimSpace(part.MimeType),
@@ -89,8 +88,13 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 	taskMux := a.startACPTaskStreamMux(ctx, sessionID)
 	taskEvents := taskMux.Events()
 	defer a.detachACPTaskStreamMux(ctx, taskMux, cb, sessionID, outboundFilter)
+	for _, env := range result.Events {
+		if err := a.emitTaskAwareControlEnvelope(ctx, cb, sessionID, nil, taskMux, &taskEvents, env, outboundFilter); err != nil {
+			return err
+		}
+	}
 	if result.SlashResult != nil {
-		text := strings.TrimSpace(control.FormatSlashResult(*result.SlashResult))
+		text := strings.TrimSpace(a.slashResultFormatter(*result.SlashResult))
 		if text != "" {
 			if err := a.emitControlEnvelope(ctx, cb, sessionID, nil, eventstream.Envelope{
 				Kind:   eventstream.KindNotice,
@@ -98,11 +102,6 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 			}, outboundFilter); err != nil {
 				return err
 			}
-		}
-	}
-	for _, env := range result.Events {
-		if err := a.emitTaskAwareControlEnvelope(ctx, cb, sessionID, nil, taskMux, &taskEvents, env, outboundFilter); err != nil {
-			return err
 		}
 	}
 	if result.Reconnect != nil {
@@ -208,7 +207,7 @@ func (a *RuntimeAgent) emitTaskAwareControlEnvelope(
 	ctx context.Context,
 	cb acp.PromptCallbacks,
 	sessionID string,
-	turn control.Turn,
+	turn controlprompt.Turn,
 	taskMux *acpTaskStreamMux,
 	taskEvents *<-chan eventstream.Envelope,
 	env eventstream.Envelope,
@@ -428,7 +427,7 @@ func (a *RuntimeAgent) emitAvailableCommandsUpdate(ctx context.Context, cb acp.P
 	})
 }
 
-func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCallbacks, fallbackSessionID string, turn control.Turn, env eventstream.Envelope, outboundFilter *acpNarrativeFilter) error {
+func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCallbacks, fallbackSessionID string, turn controlprompt.Turn, env eventstream.Envelope, outboundFilter *acpNarrativeFilter) error {
 	if cb == nil {
 		return nil
 	}
@@ -571,7 +570,7 @@ func emitFilteredSessionUpdate(ctx context.Context, cb acp.PromptCallbacks, noti
 	return cb.SessionUpdate(ctx, notification)
 }
 
-func approvalDecisionFromACPResponse(requestID eventstream.ApprovalRequestID, options []acp.PermissionOption, resp acp.RequestPermissionResponse) control.ApprovalDecision {
+func approvalDecisionFromACPResponse(requestID eventstream.ApprovalRequestID, options []acp.PermissionOption, resp acp.RequestPermissionResponse) controlprompt.ApprovalDecision {
 	approval := &session.ProtocolApproval{Options: make([]session.ProtocolApprovalOption, 0, len(options))}
 	for _, option := range options {
 		approval.Options = append(approval.Options, session.ProtocolApprovalOption{
@@ -579,7 +578,7 @@ func approvalDecisionFromACPResponse(requestID eventstream.ApprovalRequestID, op
 		})
 	}
 	decision := semantic.DecodePermissionResponse(resp, approval)
-	return control.ApprovalDecision{
+	return controlprompt.ApprovalDecision{
 		RequestID: requestID,
 		Outcome:   decision.Outcome, OptionID: decision.OptionID, Approved: decision.Approved,
 	}

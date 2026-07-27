@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/surfaces/headless"
@@ -17,7 +17,7 @@ func runHeadlessOnceForGatewayAppTest(ctx context.Context, stack *Stack, activeS
 		turns:      stack.KernelTurns(),
 		sessionRef: activeSession.SessionRef,
 		surface:    surface,
-	}, control.Submission{Text: input}, opts)
+	}, controlprompt.Submission{Text: input}, opts)
 }
 
 type gatewayHeadlessStarter struct {
@@ -26,7 +26,7 @@ type gatewayHeadlessStarter struct {
 	surface    string
 }
 
-func (s gatewayHeadlessStarter) Submit(ctx context.Context, submission control.Submission) (control.Turn, error) {
+func (s gatewayHeadlessStarter) Submit(ctx context.Context, submission controlprompt.Submission) (controlprompt.Turn, error) {
 	result, err := s.turns.BeginTurn(ctx, kernel.BeginTurnRequest{
 		SessionRef:   s.sessionRef,
 		Input:        strings.TrimSpace(submission.Text),
@@ -55,7 +55,7 @@ func (t gatewayHeadlessTurn) TurnID() string   { return t.handle.TurnID() }
 func (t gatewayHeadlessTurn) Events() <-chan eventstream.Envelope {
 	return acpprojector.ACPEventsFromGatewayHandle(t.handle)
 }
-func (t gatewayHeadlessTurn) SubmitApproval(ctx context.Context, decision control.ApprovalDecision) error {
+func (t gatewayHeadlessTurn) SubmitApproval(ctx context.Context, decision controlprompt.ApprovalDecision) error {
 	return t.handle.Submit(ctx, kernel.SubmitRequest{
 		Kind: kernel.SubmissionKindApproval,
 		Approval: &kernel.ApprovalDecision{

@@ -7,6 +7,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 type Adapter = controladapter.Adapter
@@ -166,17 +167,17 @@ func toRuntimeACPAgents(agents []gatewayapp.ACPAgentInfo) []ACPAgentInfo {
 	return out
 }
 
-func toRuntimePluginSnapshot(info gatewayapp.PluginInfo) controladapter.PluginSnapshot {
-	mcpSnapshots := make([]controladapter.MCPServerSnapshot, 0, len(info.MCPServers))
+func toRuntimePluginSnapshot(info gatewayapp.PluginInfo) controlprompt.PluginSnapshot {
+	mcpSnapshots := make([]controlprompt.MCPServerSnapshot, 0, len(info.MCPServers))
 	for _, mcpInfo := range info.MCPServers {
-		mcpSnapshots = append(mcpSnapshots, controladapter.MCPServerSnapshot{
+		mcpSnapshots = append(mcpSnapshots, controlprompt.MCPServerSnapshot{
 			Name:    mcpInfo.Name,
 			Status:  mcpInfo.Status,
 			Tools:   append([]string(nil), mcpInfo.Tools...),
 			Warning: mcpInfo.Warning,
 		})
 	}
-	return controladapter.PluginSnapshot{
+	return controlprompt.PluginSnapshot{
 		ID:          info.ID,
 		Name:        info.Name,
 		Version:     info.Version,
@@ -192,26 +193,26 @@ func toRuntimePluginSnapshot(info gatewayapp.PluginInfo) controladapter.PluginSn
 	}
 }
 
-func toRuntimePluginSnapshots(list []gatewayapp.PluginInfo, err error) ([]controladapter.PluginSnapshot, error) {
+func toRuntimePluginSnapshots(list []gatewayapp.PluginInfo, err error) ([]controlprompt.PluginSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]controladapter.PluginSnapshot, 0, len(list))
+	out := make([]controlprompt.PluginSnapshot, 0, len(list))
 	for _, info := range list {
 		out = append(out, toRuntimePluginSnapshot(info))
 	}
 	return out, nil
 }
 
-func toRuntimePluginSnapshotWithError(info gatewayapp.PluginInfo, err error) (controladapter.PluginSnapshot, error) {
+func toRuntimePluginSnapshotWithError(info gatewayapp.PluginInfo, err error) (controlprompt.PluginSnapshot, error) {
 	if err != nil {
-		return controladapter.PluginSnapshot{}, err
+		return controlprompt.PluginSnapshot{}, err
 	}
 	return toRuntimePluginSnapshot(info), nil
 }
 
-func toRuntimeMarketplaceSnapshot(info gatewayapp.MarketplaceInfo) controladapter.MarketplaceSnapshot {
-	return controladapter.MarketplaceSnapshot{
+func toRuntimeMarketplaceSnapshot(info gatewayapp.MarketplaceInfo) controlprompt.MarketplaceSnapshot {
+	return controlprompt.MarketplaceSnapshot{
 		Name:                              info.Name,
 		Description:                       info.Description,
 		Owner:                             info.Owner,
@@ -224,20 +225,20 @@ func toRuntimeMarketplaceSnapshot(info gatewayapp.MarketplaceInfo) controladapte
 	}
 }
 
-func toRuntimeMarketplaceSnapshots(list []gatewayapp.MarketplaceInfo, err error) ([]controladapter.MarketplaceSnapshot, error) {
+func toRuntimeMarketplaceSnapshots(list []gatewayapp.MarketplaceInfo, err error) ([]controlprompt.MarketplaceSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]controladapter.MarketplaceSnapshot, 0, len(list))
+	out := make([]controlprompt.MarketplaceSnapshot, 0, len(list))
 	for _, info := range list {
 		out = append(out, toRuntimeMarketplaceSnapshot(info))
 	}
 	return out, nil
 }
 
-func toRuntimeMarketplaceSnapshotWithError(info gatewayapp.MarketplaceInfo, err error) (controladapter.MarketplaceSnapshot, error) {
+func toRuntimeMarketplaceSnapshotWithError(info gatewayapp.MarketplaceInfo, err error) (controlprompt.MarketplaceSnapshot, error) {
 	if err != nil {
-		return controladapter.MarketplaceSnapshot{}, err
+		return controlprompt.MarketplaceSnapshot{}, err
 	}
 	return toRuntimeMarketplaceSnapshot(info), nil
 }

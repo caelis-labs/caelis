@@ -1,43 +1,24 @@
-package control
+// Package promptview projects Control prompt results into shared presentation
+// models and plain-text output.
+package promptview
 
-import "strings"
+import (
+	"strings"
 
-// NewHelpSlashResult builds a structured /help result.
-func NewHelpSlashResult(help CommandHelpSnapshot) SlashCommandResult {
-	return SlashCommandResult{
-		Command: "help",
-		Kind:    SlashCommandResultHelp,
-		Help:    help,
-	}
-}
-
-// NewStatusSlashResult builds a structured /status result.
-func NewStatusSlashResult(status StatusSnapshot) SlashCommandResult {
-	return SlashCommandResult{
-		Command: "status",
-		Kind:    SlashCommandResultStatus,
-		Status:  status,
-	}
-}
-
-// NewTableSlashResult builds structured tabular output for a slash command.
-func NewTableSlashResult(command string, table SlashTableSnapshot) SlashCommandResult {
-	return SlashCommandResult{
-		Command: strings.ToLower(strings.TrimSpace(command)),
-		Kind:    SlashCommandResultTable,
-		Table:   table,
-	}
-}
+	"github.com/caelis-labs/caelis/internal/controlprompt"
+)
 
 // FormatSlashResult renders a structured slash result for plain-text surfaces.
 // Rich surfaces should consume the structured payload directly.
-func FormatSlashResult(result SlashCommandResult) string {
+func FormatSlashResult(result controlprompt.SlashCommandResult) string {
 	switch result.Kind {
-	case SlashCommandResultHelp:
+	case controlprompt.SlashCommandResultHelp:
 		return FormatCommandHelp(result.Help)
-	case SlashCommandResultStatus:
+	case controlprompt.SlashCommandResultStatus:
 		return FormatStatusSnapshot(result.Status)
-	case SlashCommandResultTable:
+	case controlprompt.SlashCommandResultDoctor:
+		return FormatDoctorSnapshot(result.Status)
+	case controlprompt.SlashCommandResultTable:
 		return FormatSlashTable(result.Table)
 	default:
 		command := strings.TrimSpace(result.Command)
@@ -49,7 +30,7 @@ func FormatSlashResult(result SlashCommandResult) string {
 }
 
 // FormatSlashTable renders a table snapshot for plain-text surfaces.
-func FormatSlashTable(table SlashTableSnapshot) string {
+func FormatSlashTable(table controlprompt.SlashTableSnapshot) string {
 	lines := make([]string, 0)
 	if title := strings.TrimSpace(table.Title); title != "" {
 		lines = append(lines, title)
@@ -113,7 +94,7 @@ func formatSlashTableRows(columns []string, rows [][]string) []string {
 }
 
 // FormatCommandHelp renders a help snapshot for plain-text surfaces.
-func FormatCommandHelp(help CommandHelpSnapshot) string {
+func FormatCommandHelp(help controlprompt.CommandHelpSnapshot) string {
 	type row struct {
 		usage       string
 		description string

@@ -9,7 +9,6 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 type subagentConfigurationService interface {
@@ -199,7 +198,7 @@ func slashSubagentWithContext(ctx context.Context, service subagentConfiguration
 			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("list subagent bindings", err)}
 		}
 		if send != nil {
-			send(SlashCommandResultMsg{Result: control.NewTableSlashResult("subagent", subagentStatusTable(status))})
+			send(SlashCommandResultMsg{Result: controlprompt.NewTableSlashResult("subagent", subagentStatusTable(status))})
 		}
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "bind":
@@ -238,7 +237,7 @@ func slashSubagentWithContext(ctx context.Context, service subagentConfiguration
 			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("update subagent binding", err)}
 		}
 		sendNotice(send, formatAgentBindingNotice(status, handle))
-		if controlService, ok := any(service).(control.Service); ok && !system {
+		if controlService, ok := any(service).(controlprompt.Service); ok && !system {
 			refreshAgentSlashCommandsViaSendWithContext(ctx, controlService, send)
 		}
 		return TaskResultMsg{SuppressTurnDivider: true}
@@ -252,7 +251,7 @@ func subagentUsageText() string {
 	return "usage: /subagent list | /subagent bind <breeze|orbit|zenith> <self|profile-id> <effort> | /subagent bind <guardian|reviewer> <default|provider-profile-id> <effort>\nrun /subagent to choose list or bind"
 }
 
-func subagentStatusTable(status agentbinding.Status) control.SlashTableSnapshot {
+func subagentStatusTable(status agentbinding.Status) controlprompt.SlashTableSnapshot {
 	delegationRows := make([][]string, 0, 4)
 	systemRows := make([][]string, 0, 2)
 	for _, handle := range status.Handles {
@@ -263,9 +262,9 @@ func subagentStatusTable(status agentbinding.Status) control.SlashTableSnapshot 
 			delegationRows = append(delegationRows, row)
 		}
 	}
-	return control.SlashTableSnapshot{
+	return controlprompt.SlashTableSnapshot{
 		Title: "Subagents",
-		Sections: []control.SlashTableSection{
+		Sections: []controlprompt.SlashTableSection{
 			{Title: "Delegation Profiles", Columns: []string{"Profile", "Name", "Binding"}, Rows: delegationRows},
 			{Title: "System Agents", Columns: []string{"Agent", "Name", "Binding"}, Rows: systemRows},
 		},

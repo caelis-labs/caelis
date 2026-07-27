@@ -1,10 +1,9 @@
-package control
+package controlprompt
 
 import (
-	"maps"
-	"strings"
 	"time"
 
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -39,195 +38,9 @@ type Submission struct {
 	Attachments []Attachment
 }
 
-type UsageSnapshot struct {
-	PromptTokens      int
-	CachedInputTokens int
-	CompletionTokens  int
-	ReasoningTokens   int
-	TotalTokens       int
-}
-
-type ModelUsageSnapshot struct {
-	Provider string
-	Model    string
-	Usage    UsageSnapshot
-}
-
-type StatusSession struct {
-	ID          string
-	Workspace   string
-	StoreDir    string
-	ModeLabel   string
-	SessionMode string
-	Surface     string
-}
-
-type StatusModel struct {
-	Display         string
-	Provider        string
-	Name            string
-	ReasoningEffort string
-	MissingAPIKey   bool
-}
-
-type StatusSandbox struct {
-	Type                     string
-	RequestedBackend         string
-	ResolvedBackend          string
-	Route                    string
-	FallbackReason           string
-	InstallHint              string
-	Setup                    SandboxSetupStatus
-	SetupRequired            bool
-	SetupError               string
-	SetupMarkerCurrent       bool
-	SetupMarkerReason        string
-	GlobalSetupCurrent       bool
-	GlobalSetupRequired      bool
-	GlobalSetupReason        string
-	WorkspaceSetupCurrent    bool
-	WorkspaceSetupRequired   bool
-	WorkspaceSetupReason     string
-	WorkspaceSetupRoot       string
-	WorkspaceSetupWriteRoots int
-	WorkspaceSetupPolicyHash string
-	WorkspaceSetupUpdatedAt  time.Time
-	SecuritySummary          string
-	HostExecution            bool
-	FullAccessMode           bool
-}
-
-type StatusUsage struct {
-	PromptTokens             int
-	CompletionTokens         int
-	TotalTokens              int
-	ContextWindowTokens      int
-	SessionUsageTotal        UsageSnapshot
-	SessionUsageMain         UsageSnapshot
-	SessionUsageSubagents    UsageSnapshot
-	SessionUsageAutoReview   UsageSnapshot
-	SessionUsageByModel      []ModelUsageSnapshot
-	SessionInputTokens       int
-	SessionCachedInputTokens int
-	SessionOutputTokens      int
-	SessionReasoningTokens   int
-	SessionTotalTokens       int
-}
-
-type StatusRuntime struct {
-	ActiveJobs     int
-	ActiveTurnKind string
-	Running        bool
-}
-
-// StatusRateLimits is the provider-neutral account usage projection exposed
-// to TUI, headless, app-server, and future GUI status surfaces.
-type StatusRateLimits struct {
-	Provider   string
-	Plan       string
-	CapturedAt time.Time
-	Limits     []StatusRateLimit
-}
-
-type StatusRateLimit struct {
-	ID      string
-	Name    string
-	Windows []StatusRateLimitWindow
-}
-
-type StatusRateLimitWindow struct {
-	Kind            string
-	Label           string
-	UsedPercent     float64
-	DurationMinutes int64
-	ResetsAt        time.Time
-}
-
 type SessionSnapshot struct {
 	SessionID string
 	Reconnect SessionReconnect
-}
-
-type SandboxSetupStatus struct {
-	Required bool
-	Error    string
-	Details  map[string]string
-	Counts   map[string]int
-	Checks   []SandboxSetupCheck
-}
-
-type SandboxSetupCheck struct {
-	Name      string
-	Scope     string
-	Current   bool
-	Required  bool
-	Reason    string
-	Error     string
-	Version   int
-	Root      string
-	UpdatedAt time.Time
-	Details   map[string]string
-	Counts    map[string]int
-}
-
-func CloneSandboxSetupStatus(in SandboxSetupStatus) SandboxSetupStatus {
-	out := in
-	out.Error = strings.TrimSpace(in.Error)
-	out.Details = cloneTrimmedStringMap(in.Details)
-	out.Counts = maps.Clone(in.Counts)
-	if len(in.Checks) > 0 {
-		out.Checks = make([]SandboxSetupCheck, len(in.Checks))
-		for i, check := range in.Checks {
-			out.Checks[i] = CloneSandboxSetupCheck(check)
-		}
-	}
-	return out
-}
-
-func CloneSandboxSetupCheck(in SandboxSetupCheck) SandboxSetupCheck {
-	out := in
-	out.Name = strings.TrimSpace(in.Name)
-	out.Scope = strings.TrimSpace(in.Scope)
-	out.Reason = strings.TrimSpace(in.Reason)
-	out.Error = strings.TrimSpace(in.Error)
-	out.Root = strings.TrimSpace(in.Root)
-	out.Details = cloneTrimmedStringMap(in.Details)
-	out.Counts = maps.Clone(in.Counts)
-	return out
-}
-
-func (s SandboxSetupStatus) Check(name string) (SandboxSetupCheck, bool) {
-	name = strings.TrimSpace(name)
-	for _, check := range s.Checks {
-		if strings.TrimSpace(check.Name) == name {
-			return CloneSandboxSetupCheck(check), true
-		}
-	}
-	return SandboxSetupCheck{}, false
-}
-
-func cloneTrimmedStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out[key] = strings.TrimSpace(value)
-	}
-	return out
-}
-
-type StatusSnapshot struct {
-	Session       StatusSession
-	ModelStatus   StatusModel
-	SandboxStatus StatusSandbox
-	Usage         StatusUsage
-	RateLimits    StatusRateLimits
-	Runtime       StatusRuntime
 }
 
 type ResumeCandidate struct {
@@ -263,17 +76,18 @@ type SlashCommandResultKind string
 const (
 	SlashCommandResultHelp   SlashCommandResultKind = "help"
 	SlashCommandResultStatus SlashCommandResultKind = "status"
+	SlashCommandResultDoctor SlashCommandResultKind = "doctor"
 	SlashCommandResultTable  SlashCommandResultKind = "table"
 )
 
 // SlashCommandResult carries structured slash-command data without prescribing
 // surface-specific styling or terminal layout.
 type SlashCommandResult struct {
-	Command string                 `json:"command,omitempty"`
-	Kind    SlashCommandResultKind `json:"kind,omitempty"`
-	Status  StatusSnapshot         `json:"status,omitempty"`
-	Help    CommandHelpSnapshot    `json:"help,omitempty"`
-	Table   SlashTableSnapshot     `json:"table,omitempty"`
+	Command string                       `json:"command,omitempty"`
+	Kind    SlashCommandResultKind       `json:"kind,omitempty"`
+	Status  controlstatus.StatusSnapshot `json:"status,omitempty"`
+	Help    CommandHelpSnapshot          `json:"help,omitempty"`
+	Table   SlashTableSnapshot           `json:"table,omitempty"`
 }
 
 // SlashTableSnapshot is structured tabular output for a slash command. Rich

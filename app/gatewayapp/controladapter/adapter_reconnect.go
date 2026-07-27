@@ -8,8 +8,8 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
@@ -20,9 +20,9 @@ type gatewaySessionBinder interface {
 
 // ResumeSession stages target resolution and Control bootstrap before changing
 // either the gateway binding or the Adapter's current Session.
-func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionSnapshot, error) {
+func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (controlprompt.SessionSnapshot, error) {
 	if d == nil || d.stack == nil {
-		return SessionSnapshot{}, errors.New("app/gatewayapp/controladapter: stack is required")
+		return controlprompt.SessionSnapshot{}, errors.New("app/gatewayapp/controladapter: stack is required")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -31,7 +31,7 @@ func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionS
 	defer d.sessionChangeMu.Unlock()
 	gw, err := d.gatewaySessions()
 	if err != nil {
-		return SessionSnapshot{}, err
+		return controlprompt.SessionSnapshot{}, err
 	}
 	target, err := gw.ResumeSession(ctx, kernel.ResumeSessionRequest{
 		AppName: d.stack.Session.AppName, UserID: d.stack.Session.UserID,
@@ -41,19 +41,19 @@ func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionS
 		BindingKey: "",
 	})
 	if err != nil {
-		return SessionSnapshot{}, err
+		return controlprompt.SessionSnapshot{}, err
 	}
 	if d.stack.ControlReconnect == nil {
-		return SessionSnapshot{}, missingRuntimeDependency("control client reconnect")
+		return controlprompt.SessionSnapshot{}, missingRuntimeDependency("control client reconnect")
 	}
 	bootstrapped, err := d.stack.ControlReconnect.Reconnect(ctx, controlclient.ReconnectRequest{
 		SessionID: target.Session.SessionID,
 	})
 	if err != nil {
-		return SessionSnapshot{}, err
+		return controlprompt.SessionSnapshot{}, err
 	}
 	if bootstrapped.Subscription == nil {
-		return SessionSnapshot{}, errors.New("app/gatewayapp/controladapter: reconnect returned no continuation")
+		return controlprompt.SessionSnapshot{}, errors.New("app/gatewayapp/controladapter: reconnect returned no continuation")
 	}
 	reconnect := &sessionReconnect{
 		state: bootstrapped.State, subscription: bootstrapped.Subscription,
@@ -61,7 +61,7 @@ func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionS
 	}
 	if err := reconnect.prepareBootstrapEvents(); err != nil {
 		_ = reconnect.Close()
-		return SessionSnapshot{}, err
+		return controlprompt.SessionSnapshot{}, err
 	}
 	abort := true
 	defer func() {
@@ -70,18 +70,18 @@ func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionS
 		}
 	}()
 	if strings.TrimSpace(bootstrapped.State.SessionID) != strings.TrimSpace(target.Session.SessionID) {
-		return SessionSnapshot{}, errors.New("app/gatewayapp/controladapter: reconnect state belongs to another session")
+		return controlprompt.SessionSnapshot{}, errors.New("app/gatewayapp/controladapter: reconnect state belongs to another session")
 	}
 	binder, ok := gw.(gatewaySessionBinder)
 	if !ok {
-		return SessionSnapshot{}, missingRuntimeDependency("gateway session binding")
+		return controlprompt.SessionSnapshot{}, missingRuntimeDependency("gateway session binding")
 	}
 	if err := binder.BindSession(ctx, kernel.BindSessionRequest{
 		SessionRef: target.Session.SessionRef,
 		BindingKey: d.bindingKey,
 		Binding:    kernel.BindingDescriptor{Surface: d.bindingKey, Owner: d.stack.Session.AppName},
 	}); err != nil {
-		return SessionSnapshot{}, err
+		return controlprompt.SessionSnapshot{}, err
 	}
 	d.mu.Lock()
 	d.session = session.CloneSession(target.Session)
@@ -89,7 +89,7 @@ func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionS
 	d.mu.Unlock()
 	d.refreshSessionDisplay(ctx, target.Session)
 	abort = false
-	return SessionSnapshot{SessionID: target.Session.SessionID, Reconnect: reconnect}, nil
+	return controlprompt.SessionSnapshot{SessionID: target.Session.SessionID, Reconnect: reconnect}, nil
 }
 
 type sessionReconnect struct {
@@ -102,7 +102,7 @@ type sessionReconnect struct {
 	closeOnce    sync.Once
 }
 
-var _ control.SessionReconnect = (*sessionReconnect)(nil)
+var _ controlprompt.SessionReconnect = (*sessionReconnect)(nil)
 
 func (r *sessionReconnect) State() controlclient.SessionState {
 	if r == nil {
@@ -198,7 +198,7 @@ func (r *sessionReconnect) prepareBootstrapEvents() error {
 	return nil
 }
 
-func (r *sessionReconnect) SubmitApproval(ctx context.Context, decision ApprovalDecision) error {
+func (r *sessionReconnect) SubmitApproval(ctx context.Context, decision controlprompt.ApprovalDecision) error {
 	turns, err := r.gatewayTurns()
 	if err != nil {
 		return err

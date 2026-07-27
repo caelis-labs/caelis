@@ -488,6 +488,16 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if target == "internal/controlpromptrouter" || strings.HasPrefix(target, "internal/controlpromptrouter/") {
 		return "production code must not depend on internal/controlpromptrouter; use internal/controlprompt"
 	}
+	if target == "protocol/acp/control" || strings.HasPrefix(target, "protocol/acp/control/") {
+		return "production code must not depend on retired protocol/acp/control; use internal/controlprompt, control/status, or surfaces/promptview"
+	}
+	if strings.HasPrefix(rel, "app/controlserver/") &&
+		(target == "app/gatewayapp" || strings.HasPrefix(target, "app/gatewayapp/")) {
+		return "app/controlserver must depend on explicit Control contracts, not gatewayapp assembly"
+	}
+	if strings.HasPrefix(rel, "internal/acpagentbridge/") && strings.HasPrefix(target, "surfaces/") {
+		return "internal/acpagentbridge must receive presentation projection through assembly, not import surfaces"
+	}
 	if temporaryArchitectureException(rel, target) {
 		return ""
 	}
@@ -704,6 +714,8 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "must not recreate ports/controlcommand; use internal/controlprompt", pkg, 1
 	case pkg == "internal/controlpromptrouter" || strings.HasPrefix(pkg, "internal/controlpromptrouter/"):
 		return "must not recreate internal/controlpromptrouter; prompt contracts and routing belong to internal/controlprompt", pkg, 1
+	case pkg == "protocol/acp/control" || strings.HasPrefix(pkg, "protocol/acp/control/"):
+		return "must not recreate protocol/acp/control; prompt contracts belong to internal/controlprompt, status data to control/status, and rendering to surfaces/promptview", pkg, 1
 	case pkg == "impl/model/catalog" || strings.HasPrefix(pkg, "impl/model/catalog/"):
 		return "must not recreate impl/model/catalog; concrete model catalogs belong to Control", pkg, 1
 	case pkg == "impl/model/internal/codefreecaps" || strings.HasPrefix(pkg, "impl/model/internal/codefreecaps/"):

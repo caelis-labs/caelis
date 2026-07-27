@@ -32,6 +32,11 @@ type ApprovalModelResolver = approval.ModelResolver
 
 type PromptRouterFactory func(context.Context, session.Session) (controlprompt.Router, error)
 
+// SlashResultFormatter projects a structured prompt result into the plain-text
+// notice required by the ACP surface. Product assembly supplies the formatter
+// so this integration package does not depend on presentation packages.
+type SlashResultFormatter func(controlprompt.SlashCommandResult) string
+
 // Config configures one runtime-backed ACP agent adapter.
 type Config struct {
 	Runtime        agent.Runtime
@@ -43,11 +48,13 @@ type Config struct {
 	// ApprovalModes is the dedicated approval-routing mode source. Do not point
 	// this at app-owned assembly modes; those are client-visible session modes,
 	// while approval routing is restricted to manual/auto-review.
-	ApprovalModes         acp.ModeProvider
-	Config                acp.ConfigProvider
-	Models                acp.ModelProvider
-	Commands              acp.CommandProvider
-	PromptRouterFactory   PromptRouterFactory
+	ApprovalModes       acp.ModeProvider
+	Config              acp.ConfigProvider
+	Models              acp.ModelProvider
+	Commands            acp.CommandProvider
+	PromptRouterFactory PromptRouterFactory
+	// SlashResultFormatter is required when PromptRouterFactory is configured.
+	SlashResultFormatter  SlashResultFormatter
 	PromptCaps            acp.PromptCapabilitiesProvider
 	TaskStreams           taskstream.Service
 	TaskStreamPrincipal   taskstream.Principal
@@ -73,6 +80,7 @@ type RuntimeAgent struct {
 	models                acp.ModelProvider
 	commands              acp.CommandProvider
 	promptRouterFactory   PromptRouterFactory
+	slashResultFormatter  SlashResultFormatter
 	promptCaps            acp.PromptCapabilitiesProvider
 	taskStreams           taskstream.Service
 	taskStreamPrincipal   taskstream.Principal
@@ -99,6 +107,9 @@ func New(cfg Config) (*RuntimeAgent, error) {
 	}
 	if cfg.BuildAgentSpec == nil {
 		return nil, errors.New("internal/acpagentbridge: agent spec builder is required")
+	}
+	if cfg.PromptRouterFactory != nil && cfg.SlashResultFormatter == nil {
+		return nil, errors.New("internal/acpagentbridge: slash result formatter is required with prompt router factory")
 	}
 	eventProjector := cfg.Projector
 	if eventProjector == nil {
@@ -140,6 +151,7 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		models:                cfg.Models,
 		commands:              cfg.Commands,
 		promptRouterFactory:   cfg.PromptRouterFactory,
+		slashResultFormatter:  cfg.SlashResultFormatter,
 		promptCaps:            cfg.PromptCaps,
 		taskStreams:           cfg.TaskStreams,
 		taskStreamPrincipal:   cfg.TaskStreamPrincipal,

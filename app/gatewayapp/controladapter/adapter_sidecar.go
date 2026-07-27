@@ -11,10 +11,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func (d *Adapter) StartAgentRun(ctx context.Context, target string, prompt string, attachments []Attachment) (Turn, error) {
+func (d *Adapter) StartAgentRun(ctx context.Context, target string, prompt string, attachments []controlprompt.Attachment) (controlprompt.Turn, error) {
 	handle := agentbinding.NormalizeHandle(agentbinding.Handle(target))
 	if !agentbinding.IsDirectRun(handle) {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: %q is not a direct delegation profile", strings.TrimSpace(target))
@@ -53,12 +54,12 @@ type startSidecarTurnRequest struct {
 	DisplayInput   string
 	DisplayAddress string
 	DisplayTitle   string
-	Attachments    []Attachment
+	Attachments    []controlprompt.Attachment
 	Source         string
 	Transient      bool
 }
 
-func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequest) (Turn, error) {
+func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequest) (controlprompt.Turn, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
 		return nil, err
@@ -148,7 +149,7 @@ func (d *Adapter) allocateSideAgentLabel(ctx context.Context, ref session.Sessio
 	return "@" + agenthandle.Allocate(used, agent)
 }
 
-func (d *Adapter) ContinueAgentRun(ctx context.Context, handle string, prompt string, attachments []Attachment) (Turn, error) {
+func (d *Adapter) ContinueAgentRun(ctx context.Context, handle string, prompt string, attachments []controlprompt.Attachment) (controlprompt.Turn, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
 		return nil, err

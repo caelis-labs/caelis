@@ -7,7 +7,7 @@ import (
 	"time"
 
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
@@ -27,7 +27,7 @@ type LogChunkMsg struct {
 }
 
 type SlashCommandResultMsg struct {
-	Result control.SlashCommandResult
+	Result controlprompt.SlashCommandResult
 }
 
 // SlashNoticeMsg carries non-tabular Slash command output through the same

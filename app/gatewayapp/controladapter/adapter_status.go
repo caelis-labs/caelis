@@ -4,23 +4,23 @@ import (
 	"context"
 	"strings"
 
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
-func (d *Adapter) LightweightStatus(ctx context.Context) (StatusSnapshot, error) {
+func (d *Adapter) LightweightStatus(ctx context.Context) (controlstatus.StatusSnapshot, error) {
 	return d.status(ctx, false)
 }
 
-func (d *Adapter) Status(ctx context.Context) (StatusSnapshot, error) {
+func (d *Adapter) Status(ctx context.Context) (controlstatus.StatusSnapshot, error) {
 	return d.status(ctx, true)
 }
 
-func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSnapshot, error) {
+func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (controlstatus.StatusSnapshot, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	modelText, sessionMode, sandboxType := d.defaultDisplays()
 	reasoningEffort := ""
@@ -46,12 +46,12 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 				sessionMode = strings.TrimSpace(state.SessionMode)
 			}
 		} else if ctx.Err() != nil {
-			return StatusSnapshot{}, ctx.Err()
+			return controlstatus.StatusSnapshot{}, ctx.Err()
 		}
 	}
 	acpStatus, activeACP, acpStatusErr := d.activeACPControllerStatus(ctx)
 	if acpStatusErr != nil {
-		return StatusSnapshot{}, acpStatusErr
+		return controlstatus.StatusSnapshot{}, acpStatusErr
 	}
 	acpModeID := ""
 	acpModeLabel := ""
@@ -85,42 +85,28 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 		workspaceCWD = strings.TrimSpace(d.stack.Session.Workspace.CWD)
 	}
 
-	status := StatusSnapshot{
-		Session: control.StatusSession{
+	status := controlstatus.StatusSnapshot{
+		Session: controlstatus.StatusSession{
 			ID:          sessionID,
 			Workspace:   workspaceStatusDisplay(ctx, workspaceCWD),
 			ModeLabel:   firstNonEmpty(sessionMode, liveSessionMode),
 			SessionMode: firstNonEmpty(sessionMode, liveSessionMode),
 			Surface:     bindingKey,
 		},
-		ModelStatus: control.StatusModel{
+		ModelStatus: controlstatus.StatusModel{
 			Display:         formatReasoningModelDisplay(rawModelText, reasoningEffort),
 			ReasoningEffort: reasoningEffort,
 		},
-		SandboxStatus: control.StatusSandbox{
-			Type:                     firstNonEmpty(sandboxType, liveSandboxType),
-			RequestedBackend:         firstNonEmpty(sandboxStatus.RequestedBackend, "auto"),
-			ResolvedBackend:          firstNonEmpty(sandboxStatus.ResolvedBackend, sandboxStatus.RequestedBackend, liveSandboxType),
-			Route:                    route,
-			FallbackReason:           sandboxStatus.FallbackReason,
-			InstallHint:              sandboxStatus.InstallHint,
-			Setup:                    sandboxSetupStatusFromPort(sandboxStatus.Setup),
-			SetupRequired:            sandboxStatus.SetupRequired,
-			SetupError:               sandboxStatus.SetupError,
-			SetupMarkerCurrent:       sandboxStatus.SetupMarkerCurrent,
-			SetupMarkerReason:        sandboxStatus.SetupMarkerReason,
-			GlobalSetupCurrent:       sandboxStatus.GlobalSetupCurrent,
-			GlobalSetupRequired:      sandboxStatus.GlobalSetupRequired,
-			GlobalSetupReason:        sandboxStatus.GlobalSetupReason,
-			WorkspaceSetupCurrent:    sandboxStatus.WorkspaceSetupCurrent,
-			WorkspaceSetupRequired:   sandboxStatus.WorkspaceSetupRequired,
-			WorkspaceSetupReason:     sandboxStatus.WorkspaceSetupReason,
-			WorkspaceSetupRoot:       sandboxStatus.WorkspaceSetupRoot,
-			WorkspaceSetupWriteRoots: sandboxStatus.WorkspaceSetupWriteRoots,
-			WorkspaceSetupPolicyHash: sandboxStatus.WorkspaceSetupPolicyHash,
-			WorkspaceSetupUpdatedAt:  sandboxStatus.WorkspaceSetupUpdatedAt,
-			SecuritySummary:          securitySummary,
-			HostExecution:            strings.EqualFold(strings.TrimSpace(route), "host"),
+		SandboxStatus: controlstatus.StatusSandbox{
+			Type:             firstNonEmpty(sandboxType, liveSandboxType),
+			RequestedBackend: firstNonEmpty(sandboxStatus.RequestedBackend, "auto"),
+			ResolvedBackend:  firstNonEmpty(sandboxStatus.ResolvedBackend, sandboxStatus.RequestedBackend, liveSandboxType),
+			Route:            route,
+			FallbackReason:   sandboxStatus.FallbackReason,
+			InstallHint:      sandboxStatus.InstallHint,
+			Setup:            sandboxSetupStatusFromPort(sandboxStatus.Setup),
+			SecuritySummary:  securitySummary,
+			HostExecution:    strings.EqualFold(strings.TrimSpace(route), "host"),
 		},
 	}
 	if d.stack != nil {
@@ -136,7 +122,7 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 					status.ModelStatus.Display = formatReasoningModelDisplay(alias, status.ModelStatus.ReasoningEffort)
 				}
 			} else if ctx.Err() != nil {
-				return StatusSnapshot{}, ctx.Err()
+				return controlstatus.StatusSnapshot{}, ctx.Err()
 			}
 		}
 		if status.ModelStatus.ReasoningEffort == "" {
@@ -155,30 +141,22 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 				status.Usage.TotalTokens = usage.TotalTokens
 				status.Usage.ContextWindowTokens = usage.ContextWindowTokens
 			} else if ctx.Err() != nil {
-				return StatusSnapshot{}, ctx.Err()
+				return controlstatus.StatusSnapshot{}, ctx.Err()
 			}
 		}
 		if includeDiagnostics && ok {
 			if usage, err := d.sessionTokenUsageBreakdown(ctx, activeSession.SessionRef); err == nil {
 				status.Usage.SessionUsageTotal = usageSnapshotFromKernel(usage.Total)
-				status.Usage.SessionUsageMain = usageSnapshotFromKernel(usage.Main)
-				status.Usage.SessionUsageSubagents = usageSnapshotFromKernel(usage.Subagents)
-				status.Usage.SessionUsageAutoReview = usageSnapshotFromKernel(usage.AutoReview)
 				status.Usage.SessionUsageByModel = modelUsageSnapshotsFromBreakdown(usage)
-				status.Usage.SessionInputTokens = usage.Total.PromptTokens
-				status.Usage.SessionCachedInputTokens = usage.Total.CachedInputTokens
-				status.Usage.SessionOutputTokens = usage.Total.CompletionTokens
-				status.Usage.SessionReasoningTokens = usage.Total.ReasoningTokens
-				status.Usage.SessionTotalTokens = usage.Total.TotalTokens
 			} else if ctx.Err() != nil {
-				return StatusSnapshot{}, ctx.Err()
+				return controlstatus.StatusSnapshot{}, ctx.Err()
 			}
 		}
 		if includeDiagnostics && !activeACP && d.stack.Model.ProviderUsageFn != nil {
 			if usage, found, err := d.stack.Model.ProviderUsageFn(ctx, rawModelText); err == nil && found {
 				status.RateLimits = statusRateLimitsFromProviderUsage(usage)
 			} else if ctx.Err() != nil {
-				return StatusSnapshot{}, ctx.Err()
+				return controlstatus.StatusSnapshot{}, ctx.Err()
 			}
 		}
 	}
@@ -220,12 +198,12 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return StatusSnapshot{}, err
+		return controlstatus.StatusSnapshot{}, err
 	}
 	return status, nil
 }
 
-func applyDoctorStatus(status *StatusSnapshot, report DoctorReport) {
+func applyDoctorStatus(status *controlstatus.StatusSnapshot, report DoctorReport) {
 	if status == nil {
 		return
 	}
@@ -242,24 +220,6 @@ func applyDoctorStatus(status *StatusSnapshot, report DoctorReport) {
 	status.SandboxStatus.InstallHint = firstNonEmpty(strings.TrimSpace(report.SandboxInstallHint), status.SandboxStatus.InstallHint)
 	if report.SandboxSetup != nil {
 		status.SandboxStatus.Setup = sandboxSetupStatusFromPort(*report.SandboxSetup)
-	}
-	status.SandboxStatus.SetupRequired = report.SandboxSetupRequired || status.SandboxStatus.SetupRequired
-	status.SandboxStatus.SetupError = firstNonEmpty(strings.TrimSpace(report.SandboxSetupError), status.SandboxStatus.SetupError)
-	status.SandboxStatus.SetupMarkerCurrent = report.SandboxSetupMarkerCurrent || status.SandboxStatus.SetupMarkerCurrent
-	status.SandboxStatus.SetupMarkerReason = firstNonEmpty(strings.TrimSpace(report.SandboxSetupMarkerReason), status.SandboxStatus.SetupMarkerReason)
-	status.SandboxStatus.GlobalSetupCurrent = report.SandboxGlobalSetupCurrent || status.SandboxStatus.GlobalSetupCurrent
-	status.SandboxStatus.GlobalSetupRequired = report.SandboxGlobalSetupRequired || status.SandboxStatus.GlobalSetupRequired
-	status.SandboxStatus.GlobalSetupReason = firstNonEmpty(strings.TrimSpace(report.SandboxGlobalSetupReason), status.SandboxStatus.GlobalSetupReason)
-	status.SandboxStatus.WorkspaceSetupCurrent = report.SandboxWorkspaceSetupCurrent || status.SandboxStatus.WorkspaceSetupCurrent
-	status.SandboxStatus.WorkspaceSetupRequired = report.SandboxWorkspaceSetupRequired || status.SandboxStatus.WorkspaceSetupRequired
-	status.SandboxStatus.WorkspaceSetupReason = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupReason), status.SandboxStatus.WorkspaceSetupReason)
-	status.SandboxStatus.WorkspaceSetupRoot = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupRoot), status.SandboxStatus.WorkspaceSetupRoot)
-	if report.SandboxWorkspaceSetupWriteRoots > 0 {
-		status.SandboxStatus.WorkspaceSetupWriteRoots = report.SandboxWorkspaceSetupWriteRoots
-	}
-	status.SandboxStatus.WorkspaceSetupPolicyHash = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupPolicyHash), status.SandboxStatus.WorkspaceSetupPolicyHash)
-	if !report.SandboxWorkspaceSetupUpdatedAt.IsZero() {
-		status.SandboxStatus.WorkspaceSetupUpdatedAt = report.SandboxWorkspaceSetupUpdatedAt
 	}
 	status.SandboxStatus.SecuritySummary = firstNonEmpty(strings.TrimSpace(report.SandboxSecuritySummary), status.SandboxStatus.SecuritySummary)
 	if mode := strings.TrimSpace(report.SessionMode); mode != "" {

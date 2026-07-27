@@ -7,9 +7,10 @@ import (
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-func (d *Adapter) StartReview(ctx context.Context, instructions string, attachments []Attachment) (Turn, error) {
+func (d *Adapter) StartReview(ctx context.Context, instructions string, attachments []controlprompt.Attachment) (controlprompt.Turn, error) {
 	if d == nil || d.stack == nil || d.stack.AgentBinding.ResolveFn == nil {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: system Agent placement is unavailable")
 	}
@@ -39,18 +40,18 @@ func reviewDisplayTitle(instructions string) string {
 	return "Code review requested"
 }
 
-func shiftControlAttachments(items []Attachment, offset int) []Attachment {
+func shiftControlAttachments(items []controlprompt.Attachment, offset int) []controlprompt.Attachment {
 	if len(items) == 0 || offset == 0 {
-		return append([]Attachment(nil), items...)
+		return append([]controlprompt.Attachment(nil), items...)
 	}
-	out := make([]Attachment, 0, len(items))
+	out := make([]controlprompt.Attachment, 0, len(items))
 	for _, item := range items {
 		name := strings.TrimSpace(item.Name)
 		data := strings.TrimSpace(item.Data)
 		if name == "" && data == "" {
 			continue
 		}
-		out = append(out, Attachment{
+		out = append(out, controlprompt.Attachment{
 			Name:     name,
 			Offset:   max(item.Offset, 0) + offset,
 			MimeType: strings.TrimSpace(item.MimeType),

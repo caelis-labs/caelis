@@ -19,11 +19,11 @@ import (
 
 const resumeCompletionPageLimit = 200
 
-func (d *Adapter) CompleteFile(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
+func (d *Adapter) CompleteFile(ctx context.Context, query string, limit int) ([]controlprompt.CompletionCandidate, error) {
 	return completeWorkspaceFiles(ctx, d.WorkspaceDir(), query, limit)
 }
 
-func (d *Adapter) CompleteSkill(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
+func (d *Adapter) CompleteSkill(ctx context.Context, query string, limit int) ([]controlprompt.CompletionCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 
 	skills, err := d.skillCompletionMetas(ctx)
@@ -96,7 +96,7 @@ func resolveSkillCatalog(catalog skill.Catalog, name string) controlprompt.Skill
 	}
 }
 
-func (d *Adapter) CompleteResume(ctx context.Context, query string, limit int) ([]ResumeCandidate, error) {
+func (d *Adapter) CompleteResume(ctx context.Context, query string, limit int) ([]controlprompt.ResumeCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 	query = strings.TrimSpace(strings.ToLower(query))
 	if query == "" {
@@ -108,7 +108,7 @@ func (d *Adapter) CompleteResume(ctx context.Context, query string, limit int) (
 	if err != nil {
 		return nil, err
 	}
-	matched := make([]ResumeCandidate, 0, limit)
+	matched := make([]controlprompt.ResumeCandidate, 0, limit)
 	cursor := ""
 	for {
 		result, err := gw.ListSessions(ctx, kernel.ListSessionsRequest{
@@ -141,7 +141,7 @@ func (d *Adapter) CompleteResume(ctx context.Context, query string, limit int) (
 	return matched, nil
 }
 
-func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
+func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	if limit <= 0 {
 		limit = 8
 	}
@@ -174,7 +174,7 @@ func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query st
 		return d.completeModelReasoningLevels(ctx, alias, query, limit)
 	}
 	candidates := controlprompt.RootArgCandidates(command)
-	out := make([]SlashArgCandidate, 0, min(limit, len(candidates)))
+	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(candidates)))
 	for _, candidate := range candidates {
 		if query != "" && !hasSlashArgPrefix(query, candidate.Value, candidate.Display, candidate.Detail) {
 			continue
@@ -187,8 +187,8 @@ func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query st
 	return out, nil
 }
 
-func filterSlashCandidates(candidates []SlashArgCandidate, query string, limit int) []SlashArgCandidate {
-	out := make([]SlashArgCandidate, 0, min(limit, len(candidates)))
+func filterSlashCandidates(candidates []controlprompt.SlashArgCandidate, query string, limit int) []controlprompt.SlashArgCandidate {
+	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(candidates)))
 	for _, candidate := range candidates {
 		if query != "" && !hasSlashArgPrefix(query, candidate.Value, candidate.Display, candidate.Detail) {
 			continue
@@ -201,11 +201,11 @@ func filterSlashCandidates(candidates []SlashArgCandidate, query string, limit i
 	return out
 }
 
-func (d *Adapter) completeACPControllerSlashArg(status controller.ControllerStatus, command string, query string, limit int) ([]SlashArgCandidate, bool) {
+func (d *Adapter) completeACPControllerSlashArg(status controller.ControllerStatus, command string, query string, limit int) ([]controlprompt.SlashArgCandidate, bool) {
 	normalized := strings.TrimSpace(strings.ToLower(command))
 	switch normalized {
 	case "model":
-		candidate := SlashArgCandidate{
+		candidate := controlprompt.SlashArgCandidate{
 			Value:   "use",
 			Display: "use",
 			Detail:  "switch remote ACP model",
@@ -213,7 +213,7 @@ func (d *Adapter) completeACPControllerSlashArg(status controller.ControllerStat
 		if query != "" && !hasSlashArgPrefix(query, candidate.Value, candidate.Display, candidate.Detail) {
 			return nil, true
 		}
-		return []SlashArgCandidate{candidate}, true
+		return []controlprompt.SlashArgCandidate{candidate}, true
 	case "model use":
 		return controllerChoicesToSlashCandidates(status.ModelOptions, "remote ACP model", query, limit), true
 	case "model del", "model delete", "model rm":
@@ -226,7 +226,7 @@ func (d *Adapter) completeACPControllerSlashArg(status controller.ControllerStat
 	return nil, false
 }
 
-func (d *Adapter) completeModelReasoningLevels(ctx context.Context, aliasQuery string, query string, limit int) ([]SlashArgCandidate, error) {
+func (d *Adapter) completeModelReasoningLevels(ctx context.Context, aliasQuery string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	alias, err := d.resolveStoredModelAlias(ctx, aliasQuery)
 	if err != nil {
 		return nil, nil
@@ -239,12 +239,12 @@ func (d *Adapter) completeModelReasoningLevels(ctx context.Context, aliasQuery s
 		return nil, nil
 	}
 	levels := d.configuredModelReasoningLevels(cfg)
-	out := make([]SlashArgCandidate, 0, min(limit, len(levels)))
+	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(levels)))
 	for _, level := range levels {
 		if query != "" && !hasSlashArgPrefix(query, level) {
 			continue
 		}
-		out = append(out, SlashArgCandidate{
+		out = append(out, controlprompt.SlashArgCandidate{
 			Value:   level,
 			Display: level,
 			Detail:  modelReasoningLevelDetail(level),
@@ -419,14 +419,14 @@ func acpControllerEffortsForModel(status controller.ControllerStatus, model stri
 	return status.EffortOptions
 }
 
-func controllerChoicesToSlashCandidates(choices []controller.ControllerConfigChoice, detail string, query string, limit int) []SlashArgCandidate {
+func controllerChoicesToSlashCandidates(choices []controller.ControllerConfigChoice, detail string, query string, limit int) []controlprompt.SlashArgCandidate {
 	if len(choices) == 0 {
 		return nil
 	}
 	if limit <= 0 {
 		limit = len(choices)
 	}
-	out := make([]SlashArgCandidate, 0, min(limit, len(choices)))
+	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(choices)))
 	for _, choice := range choices {
 		value := strings.TrimSpace(choice.Value)
 		if value == "" {
@@ -437,7 +437,7 @@ func controllerChoicesToSlashCandidates(choices []controller.ControllerConfigCho
 		if query != "" && !hasSlashArgPrefix(query, value, display, candidateDetail) {
 			continue
 		}
-		out = append(out, SlashArgCandidate{
+		out = append(out, controlprompt.SlashArgCandidate{
 			Value:   value,
 			Display: display,
 			Detail:  candidateDetail,
@@ -449,7 +449,7 @@ func controllerChoicesToSlashCandidates(choices []controller.ControllerConfigCho
 	return out
 }
 
-func (d *Adapter) completeModelAliases(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
+func (d *Adapter) completeModelAliases(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	ref := session.SessionRef{}
 	if activeSession, ok := d.currentSession(); ok {
 		ref = activeSession.SessionRef
@@ -458,7 +458,7 @@ func (d *Adapter) completeModelAliases(ctx context.Context, query string, limit 
 	if err != nil {
 		return nil, err
 	}
-	out := make([]SlashArgCandidate, 0, min(limit, len(choices)))
+	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(choices)))
 	for _, choice := range choices {
 		value := strings.TrimSpace(firstNonEmpty(choice.ID, choice.Alias))
 		display := strings.TrimSpace(firstNonEmpty(choice.Alias, choice.ID))
@@ -468,7 +468,7 @@ func (d *Adapter) completeModelAliases(ctx context.Context, query string, limit 
 		if query != "" && !hasSlashArgPrefix(query, display) && !hasSlashArgPrefix(query, value) {
 			continue
 		}
-		out = append(out, SlashArgCandidate{
+		out = append(out, controlprompt.SlashArgCandidate{
 			Value:   value,
 			Display: display,
 			Detail:  firstNonEmpty(strings.TrimSpace(choice.Detail), "configured model alias"),
@@ -480,17 +480,17 @@ func (d *Adapter) completeModelAliases(ctx context.Context, query string, limit 
 	return out, nil
 }
 
-func (d *Adapter) completeAgentCatalog(query string, limit int) []SlashArgCandidate {
+func (d *Adapter) completeAgentCatalog(query string, limit int) []controlprompt.SlashArgCandidate {
 	agents := d.agentCatalog(limit)
 	if len(agents) == 0 {
 		return nil
 	}
-	out := make([]SlashArgCandidate, 0, min(limit, len(agents)))
+	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(agents)))
 	for _, agent := range agents {
 		if query != "" && !hasSlashArgPrefix(query, agent.Name, agent.Description) {
 			continue
 		}
-		out = append(out, SlashArgCandidate{
+		out = append(out, controlprompt.SlashArgCandidate{
 			Value:   agent.Name,
 			Display: agent.Name,
 			Detail:  firstNonEmpty(agent.Description, "configured ACP agent"),
@@ -502,7 +502,7 @@ func (d *Adapter) completeAgentCatalog(query string, limit int) []SlashArgCandid
 	return out
 }
 
-func (d *Adapter) completeAgentParticipants(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
+func (d *Adapter) completeAgentParticipants(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	activeSession, ok := d.currentSession()
 	if !ok {
 		return nil, nil
@@ -517,7 +517,7 @@ func (d *Adapter) completeAgentParticipants(ctx context.Context, query string, l
 	if err != nil {
 		return nil, err
 	}
-	out := make([]SlashArgCandidate, 0, min(limit, len(state.Participants)))
+	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(state.Participants)))
 	for _, participant := range state.Participants {
 		id := strings.TrimSpace(participant.ID)
 		label := strings.TrimSpace(firstNonEmpty(participant.Label, participant.ID))
@@ -527,7 +527,7 @@ func (d *Adapter) completeAgentParticipants(ctx context.Context, query string, l
 		if query != "" && !hasSlashArgPrefix(query, id, label, participant.SessionID, string(participant.Role)) {
 			continue
 		}
-		out = append(out, SlashArgCandidate{
+		out = append(out, controlprompt.SlashArgCandidate{
 			Value:   id,
 			Display: label,
 			Detail:  strings.Join(compactNonEmpty([]string{string(participant.Role), strings.TrimSpace(participant.SessionID)}), " · "),
@@ -539,7 +539,7 @@ func (d *Adapter) completeAgentParticipants(ctx context.Context, query string, l
 	return out, nil
 }
 
-func (d *Adapter) agentCatalog(limit int) []AgentCandidate {
+func (d *Adapter) agentCatalog(limit int) []controlprompt.AgentCandidate {
 	if d.stack.Agent.ListFn == nil {
 		return nil
 	}
@@ -550,9 +550,9 @@ func (d *Adapter) agentCatalog(limit int) []AgentCandidate {
 	if limit <= 0 {
 		limit = len(available)
 	}
-	out := make([]AgentCandidate, 0, min(limit, len(available)))
+	out := make([]controlprompt.AgentCandidate, 0, min(limit, len(available)))
 	for _, agent := range available {
-		out = append(out, AgentCandidate{
+		out = append(out, controlprompt.AgentCandidate{
 			Name:        strings.TrimSpace(agent.Name),
 			Description: strings.TrimSpace(agent.Description),
 		})
@@ -727,7 +727,7 @@ func hasSlashArgPrefix(query string, values ...string) bool {
 	return false
 }
 
-func (d *Adapter) completePluginIDs(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
+func (d *Adapter) completePluginIDs(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	if d.stack.Plugin.ListPluginsFn == nil {
 		return nil, missingRuntimeDependency("list plugins")
 	}
@@ -735,12 +735,12 @@ func (d *Adapter) completePluginIDs(ctx context.Context, query string, limit int
 	if err != nil {
 		return nil, err
 	}
-	out := make([]SlashArgCandidate, 0, min(limit, len(plugins)))
+	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(plugins)))
 	for _, p := range plugins {
 		if query != "" && !hasSlashArgPrefix(query, p.ID, p.Name, p.Description) {
 			continue
 		}
-		out = append(out, SlashArgCandidate{
+		out = append(out, controlprompt.SlashArgCandidate{
 			Value:   p.ID,
 			Display: p.ID,
 			Detail:  p.Name,
@@ -752,8 +752,8 @@ func (d *Adapter) completePluginIDs(ctx context.Context, query string, limit int
 	return out, nil
 }
 
-func pluginMarketplaceActionCandidates() []SlashArgCandidate {
-	return []SlashArgCandidate{
+func pluginMarketplaceActionCandidates() []controlprompt.SlashArgCandidate {
+	return []controlprompt.SlashArgCandidate{
 		{Value: "add", Display: "add", Detail: "Add a plugin marketplace"},
 		{Value: "list", Display: "list", Detail: "List plugin marketplaces"},
 		{Value: "update", Display: "update", Detail: "Refresh a plugin marketplace"},
@@ -761,7 +761,7 @@ func pluginMarketplaceActionCandidates() []SlashArgCandidate {
 	}
 }
 
-func (d *Adapter) completeMarketplaceNames(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
+func (d *Adapter) completeMarketplaceNames(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	if d.stack.Plugin.ListMarketplacesFn == nil {
 		return nil, missingRuntimeDependency("list marketplaces")
 	}
@@ -769,7 +769,7 @@ func (d *Adapter) completeMarketplaceNames(ctx context.Context, query string, li
 	if err != nil {
 		return nil, err
 	}
-	out := make([]SlashArgCandidate, 0, min(limit, len(marketplaces)))
+	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(marketplaces)))
 	for _, marketplace := range marketplaces {
 		name := strings.TrimSpace(marketplace.Name)
 		if name == "" {
@@ -778,7 +778,7 @@ func (d *Adapter) completeMarketplaceNames(ctx context.Context, query string, li
 		if query != "" && !hasSlashArgPrefix(query, name, marketplace.Description, marketplace.Source) {
 			continue
 		}
-		out = append(out, SlashArgCandidate{
+		out = append(out, controlprompt.SlashArgCandidate{
 			Value:   name,
 			Display: name,
 			Detail:  marketplaceCompletionDetail(marketplace),
@@ -790,7 +790,7 @@ func (d *Adapter) completeMarketplaceNames(ctx context.Context, query string, li
 	return out, nil
 }
 
-func marketplaceCompletionDetail(marketplace MarketplaceSnapshot) string {
+func marketplaceCompletionDetail(marketplace controlprompt.MarketplaceSnapshot) string {
 	parts := compactNonEmpty([]string{
 		strings.TrimSpace(marketplace.Description),
 		marketplacePluginCountDetail(marketplace.PluginCount),

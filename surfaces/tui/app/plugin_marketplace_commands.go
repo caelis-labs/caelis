@@ -8,10 +8,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
-func slashPluginMarketplaceWithContext(ctx context.Context, service control.PluginService, send func(tea.Msg), args string) TaskResultMsg {
+func slashPluginMarketplaceWithContext(ctx context.Context, service controlprompt.PluginService, send func(tea.Msg), args string) TaskResultMsg {
 	action, rest, _ := controlprompt.ParseFirst(strings.TrimSpace(args))
 	switch action {
 	case "add":
@@ -70,7 +69,7 @@ func slashPluginMarketplaceWithContext(ctx context.Context, service control.Plug
 	}
 }
 
-func formatMarketplaceSummary(m control.MarketplaceSnapshot) string {
+func formatMarketplaceSummary(m controlprompt.MarketplaceSnapshot) string {
 	count := "0 plugins"
 	if m.PluginCount == 1 {
 		count = "1 plugin"
@@ -83,7 +82,7 @@ func formatMarketplaceSummary(m control.MarketplaceSnapshot) string {
 	return fmt.Sprintf("%s (%s)", m.Name, count)
 }
 
-func formatMarketplaceDetail(m control.MarketplaceSnapshot) string {
+func formatMarketplaceDetail(m controlprompt.MarketplaceSnapshot) string {
 	lines := []string{fmt.Sprintf("marketplace info: %s", m.Name)}
 	lines = append(lines, fmt.Sprintf("  Source:      %s", m.Source))
 	lines = append(lines, fmt.Sprintf("  Root Path:   %s", m.Root))

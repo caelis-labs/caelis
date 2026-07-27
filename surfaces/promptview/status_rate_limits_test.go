@@ -1,25 +1,27 @@
-package control
+package promptview
 
 import (
 	"strings"
 	"testing"
 	"time"
+
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
 func TestStatusDisplayShowsOnlyReturnedSubscriptionWindows(t *testing.T) {
 	reset := time.Date(2026, time.July, 25, 11, 31, 0, 0, time.Local)
-	status := StatusSnapshot{RateLimits: StatusRateLimits{
+	status := controlstatus.StatusSnapshot{RateLimits: controlstatus.StatusRateLimits{
 		Provider: "openai-codex",
 		Plan:     "pro",
-		Limits: []StatusRateLimit{{
+		Limits: []controlstatus.StatusRateLimit{{
 			ID: "codex",
-			Windows: []StatusRateLimitWindow{{
+			Windows: []controlstatus.StatusRateLimitWindow{{
 				Kind: "primary", UsedPercent: 5, DurationMinutes: int64((7 * 24 * time.Hour) / time.Minute), ResetsAt: reset,
 			}},
 		}, {
 			ID:   "codex_bengalfox",
 			Name: "GPT-5.3-Codex-Spark",
-			Windows: []StatusRateLimitWindow{{
+			Windows: []controlstatus.StatusRateLimitWindow{{
 				Kind: "primary", UsedPercent: 0, DurationMinutes: int64((7 * 24 * time.Hour) / time.Minute),
 			}},
 		}},

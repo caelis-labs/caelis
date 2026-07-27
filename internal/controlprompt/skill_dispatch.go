@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 // SkillResolver resolves slash-entered skill identities for prompt routing.
@@ -21,7 +19,7 @@ type SkillResolveResult struct {
 	Matches   []string
 }
 
-func (r router) dispatchDirectSkill(ctx context.Context, command string, args string, argsStart int, submission control.Submission) (Result, bool, error) {
+func (r router) dispatchDirectSkill(ctx context.Context, command string, args string, argsStart int, submission Submission) (Result, bool, error) {
 	if r.skillResolver == nil {
 		return Result{}, false, nil
 	}
@@ -58,7 +56,7 @@ func (r router) skillResolutionNotice(name string, matches []string) Result {
 	return r.noticeResult(strings.Join(lines, "\n"))
 }
 
-func (r router) submitResolvedSkill(ctx context.Context, submission control.Submission, canonical string, prompt string, promptStart int) (Result, error) {
+func (r router) submitResolvedSkill(ctx context.Context, submission Submission, canonical string, prompt string, promptStart int) (Result, error) {
 	canonical = strings.TrimSpace(canonical)
 	prompt = strings.TrimSpace(prompt)
 	if strings.TrimSpace(submission.DisplayText) == "" {
@@ -83,14 +81,14 @@ func (r router) submitResolvedSkill(ctx context.Context, submission control.Subm
 	return Result{Handled: true, Turn: turn}, nil
 }
 
-func shiftSkillAttachments(attachments []control.Attachment, originalPromptStart int, internalPromptStart int) []control.Attachment {
+func shiftSkillAttachments(attachments []Attachment, originalPromptStart int, internalPromptStart int) []Attachment {
 	if len(attachments) == 0 {
 		return nil
 	}
 	if originalPromptStart < 0 {
 		originalPromptStart = 0
 	}
-	out := make([]control.Attachment, len(attachments))
+	out := make([]Attachment, len(attachments))
 	for i, attachment := range attachments {
 		out[i] = attachment
 		offset := attachment.Offset

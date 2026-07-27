@@ -1,6 +1,6 @@
 package tuiapp
 
-// control_service_bridge.go bridges the standard control.Service contract into
+// control_service_bridge.go bridges the standard controlprompt.Service contract into
 // Config callback fields. This is the key migration adapter.
 
 import (
@@ -16,11 +16,10 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/surfaces/statusbar"
+	"github.com/caelis-labs/caelis/surfaces/promptview"
 )
 
 // ProgramSender is set after the tea.Program is created so that the
@@ -213,7 +212,7 @@ func (s *ProgramSender) waitForwarders(timeout time.Duration) bool {
 // ControlServices is the explicit set of Control facets required by the TUI.
 // ACP onboarding remains separate from the transitional aggregate service.
 type ControlServices interface {
-	control.Service
+	controlprompt.Service
 	controlagents.Connector
 	controlagents.Disconnector
 	agentbinding.Service
@@ -282,7 +281,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 			cachedModeLabel = strings.TrimSpace(status.Session.ModeLabel)
 			cachedStatusView = statusViewModelFromSnapshot(status)
 			statusCacheMu.Unlock()
-			return statusModelDisplay(status.ModelStatus.Display), statusbar.FormatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens)
+			return statusModelDisplay(status.ModelStatus.Display), promptview.FormatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens)
 		}
 	}
 	if base.RefreshStatusView == nil {
@@ -424,8 +423,8 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 	return base
 }
 
-func refreshStatusSnapshot(ctx context.Context, service control.Service) (control.StatusSnapshot, error) {
-	if lightweight, ok := service.(control.LightweightStatusProvider); ok {
+func refreshStatusSnapshot(ctx context.Context, service controlprompt.Service) (controlstatus.StatusSnapshot, error) {
+	if lightweight, ok := service.(controlprompt.LightweightStatusProvider); ok {
 		return lightweight.LightweightStatus(ctx)
 	}
 	return service.Status(ctx)
@@ -458,7 +457,7 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 
 	router := routerFactory(controlprompt.RouterConfig{
 		Service: service,
-		CommandNames: func(ctx context.Context, service control.Service) []string {
+		CommandNames: func(ctx context.Context, service controlprompt.Service) []string {
 			return appendAgentSlashCommandsWithContext(ctx, service, DefaultCommands())
 		},
 		PrivateSlashHandler: func(ctx context.Context, req controlprompt.PrivateSlashRequest) (controlprompt.Result, bool, error) {
@@ -477,7 +476,7 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 		return executeLineResult{completion: TaskResultMsg{Err: fmt.Errorf("control prompt router factory returned nil")}}
 	}
 	displayText := strings.TrimSpace(firstNonEmpty(sub.DisplayText, sub.Text))
-	promptResult, err := router.Route(ctx, controlprompt.Request{Submission: control.Submission{
+	promptResult, err := router.Route(ctx, controlprompt.Request{Submission: controlprompt.Submission{
 		Text:        sub.Text,
 		DisplayText: displayText,
 		Mode:        sub.Mode,
@@ -495,7 +494,7 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 
 	// Router-declined slash input falls back to a normal prompt submission.
 	submitText := strings.TrimSpace(sub.Text)
-	turn, err := service.Submit(ctx, control.Submission{
+	turn, err := service.Submit(ctx, controlprompt.Submission{
 		Text:        submitText,
 		DisplayText: displayText,
 		Mode:        sub.Mode,
@@ -520,7 +519,7 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 	return executeLineResult{completion: TaskResultMsg{}}
 }
 
-func executeControlPromptResult(ctx context.Context, service control.Service, sender *ProgramSender, result controlprompt.Result) executeLineResult {
+func executeControlPromptResult(ctx context.Context, service controlprompt.Service, sender *ProgramSender, result controlprompt.Result) executeLineResult {
 	send := sender.sendFunc()
 	if result.Reconnect != nil {
 		defer result.Reconnect.Close()
@@ -533,9 +532,6 @@ func executeControlPromptResult(ctx context.Context, service control.Service, se
 	} else if result.ClearHistory && send != nil {
 		send(ClearHistoryMsg{})
 	}
-	if result.SlashResult != nil && send != nil {
-		send(SlashCommandResultMsg{Result: *result.SlashResult})
-	}
 	for _, event := range result.Events {
 		if send == nil {
 			continue
@@ -545,6 +541,9 @@ func executeControlPromptResult(ctx context.Context, service control.Service, se
 			continue
 		}
 		send(event)
+	}
+	if result.SlashResult != nil && send != nil {
+		send(SlashCommandResultMsg{Result: *result.SlashResult})
 	}
 	if result.StatusUpdate != nil {
 		sendStatusUpdate(send, *result.StatusUpdate)
@@ -590,11 +589,11 @@ func sendNotice(send func(tea.Msg), text string) {
 	}
 }
 
-func appendAgentSlashCommands(service control.Service, commands []string) []string {
+func appendAgentSlashCommands(service controlprompt.Service, commands []string) []string {
 	return appendAgentSlashCommandsWithContext(context.Background(), service, commands)
 }
 
-func appendAgentSlashCommandsWithContext(ctx context.Context, service control.Service, commands []string) []string {
+func appendAgentSlashCommandsWithContext(ctx context.Context, service controlprompt.Service, commands []string) []string {
 	ctx = contextOrBackground(ctx)
 	if len(commands) == 0 {
 		commands = DefaultCommands()
@@ -624,7 +623,7 @@ func localACPCommands() []string {
 	return out
 }
 
-func acpSlashCommands(base []string, status control.AgentStatusSnapshot) []string {
+func acpSlashCommands(base []string, status controlprompt.AgentStatusSnapshot) []string {
 	out := append([]string(nil), base...)
 	seen := map[string]struct{}{}
 	for _, command := range out {
@@ -660,7 +659,7 @@ func acpSlashCommands(base []string, status control.AgentStatusSnapshot) []strin
 	return out
 }
 
-func tuiDirectAgentRuns(status control.AgentStatusSnapshot) []controlagents.Run {
+func tuiDirectAgentRuns(status controlprompt.AgentStatusSnapshot) []controlagents.Run {
 	runs := make([]controlagents.Run, 0, len(status.Participants))
 	for _, participant := range status.Participants {
 		runs = append(runs, controlagents.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))
@@ -677,7 +676,7 @@ func tuiRemoteControllerCommandNameAllowed(name string) bool {
 	return !controlprompt.IsKnown(name) && !strings.EqualFold(name, "sandbox") && !strings.EqualFold(name, "lead")
 }
 
-func boundDirectProfileNames(ctx context.Context, service control.Service) map[string]struct{} {
+func boundDirectProfileNames(ctx context.Context, service controlprompt.Service) map[string]struct{} {
 	out := map[string]struct{}{}
 	bindings, ok := service.(agentbinding.Service)
 	if !ok {
@@ -726,11 +725,11 @@ func projectBoundDirectProfileCommands(commands []string, bound map[string]struc
 	return out
 }
 
-func refreshAgentSlashCommandsViaSend(service control.Service, send func(tea.Msg)) {
+func refreshAgentSlashCommandsViaSend(service controlprompt.Service, send func(tea.Msg)) {
 	refreshAgentSlashCommandsViaSendWithContext(context.Background(), service, send)
 }
 
-func refreshAgentSlashCommandsViaSendWithContext(ctx context.Context, service control.Service, send func(tea.Msg)) {
+func refreshAgentSlashCommandsViaSendWithContext(ctx context.Context, service controlprompt.Service, send func(tea.Msg)) {
 	if send == nil {
 		return
 	}
@@ -740,7 +739,7 @@ func refreshAgentSlashCommandsViaSendWithContext(ctx context.Context, service co
 	})
 }
 
-func profileCommandDetailsWithContext(ctx context.Context, service control.Service) map[string]string {
+func profileCommandDetailsWithContext(ctx context.Context, service controlprompt.Service) map[string]string {
 	if service == nil {
 		return nil
 	}
@@ -774,12 +773,12 @@ func profileCommandDetailsWithContext(ctx context.Context, service control.Servi
 	return details
 }
 
-func sendStatusUpdate(send func(tea.Msg), status control.StatusSnapshot) {
+func sendStatusUpdate(send func(tea.Msg), status controlstatus.StatusSnapshot) {
 	if send != nil {
 		send(SetStatusMsg{
 			Workspace: status.Session.Workspace,
 			Model:     statusModelDisplay(status.ModelStatus.Display),
-			Context:   statusbar.FormatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens),
+			Context:   promptview.FormatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens),
 			ModeLabel: strings.TrimSpace(status.Session.ModeLabel),
 			Status:    statusViewModelFromSnapshot(status),
 		})
@@ -790,11 +789,11 @@ func statusModelDisplay(model string) string {
 	return normalizeStatusModel(model)
 }
 
-func refreshStatusViaSend(service control.Service, send func(tea.Msg)) {
+func refreshStatusViaSend(service controlprompt.Service, send func(tea.Msg)) {
 	refreshStatusViaSendWithContext(context.Background(), service, send)
 }
 
-func refreshStatusViaSendWithContext(ctx context.Context, service control.Service, send func(tea.Msg)) {
+func refreshStatusViaSendWithContext(ctx context.Context, service controlprompt.Service, send func(tea.Msg)) {
 	ctx = contextOrBackground(ctx)
 	status, err := service.Status(ctx)
 	if err != nil {
@@ -829,7 +828,7 @@ func approvalRawInputFromJSON(raw string) map[string]any {
 	return decoded
 }
 
-func sendApprovalPrompt(ctx context.Context, turn control.Turn, req *approvalPayload, send func(tea.Msg)) {
+func sendApprovalPrompt(ctx context.Context, turn controlprompt.Turn, req *approvalPayload, send func(tea.Msg)) {
 	if turn == nil || req == nil || send == nil {
 		return
 	}
@@ -862,7 +861,7 @@ func automaticApprovalReviewDisplayText(req *approvalPayload) string {
 	}
 }
 
-func awaitApprovalPrompt(ctx context.Context, turn control.Turn, req *approvalPayload, responses <-chan PromptResponse, send func(tea.Msg)) {
+func awaitApprovalPrompt(ctx context.Context, turn controlprompt.Turn, req *approvalPayload, responses <-chan PromptResponse, send func(tea.Msg)) {
 	ctx = contextOrBackground(ctx)
 	var response PromptResponse
 	select {
@@ -882,7 +881,7 @@ func awaitApprovalPrompt(ctx context.Context, turn control.Turn, req *approvalPa
 	}
 }
 
-func approvalDecisionFromPrompt(req *approvalPayload, response PromptResponse) control.ApprovalDecision {
+func approvalDecisionFromPrompt(req *approvalPayload, response PromptResponse) controlprompt.ApprovalDecision {
 	requestID := eventstream.ApprovalRequestID("")
 	if req != nil {
 		requestID = req.RequestID
@@ -896,7 +895,7 @@ func approvalDecisionFromPrompt(req *approvalPayload, response PromptResponse) c
 			if strings.TrimSpace(opt.ID) != selected {
 				continue
 			}
-			return control.ApprovalDecision{
+			return controlprompt.ApprovalDecision{
 				RequestID: req.RequestID,
 				Outcome:   approvalStatusSelected,
 				OptionID:  selected,
@@ -906,19 +905,19 @@ func approvalDecisionFromPrompt(req *approvalPayload, response PromptResponse) c
 	}
 	switch strings.ToLower(selected) {
 	case "approve", "allow", "yes", "y":
-		return control.ApprovalDecision{RequestID: requestID, Outcome: approvalStatusApproved, Approved: true}
+		return controlprompt.ApprovalDecision{RequestID: requestID, Outcome: approvalStatusApproved, Approved: true}
 	default:
 		return rejectionApprovalDecision(req)
 	}
 }
 
-func rejectionApprovalDecision(req *approvalPayload) control.ApprovalDecision {
+func rejectionApprovalDecision(req *approvalPayload) controlprompt.ApprovalDecision {
 	if req != nil {
 		for _, opt := range req.Options {
 			if approvalOptionAllows(opt.Kind, opt.Name, opt.ID) {
 				continue
 			}
-			return control.ApprovalDecision{
+			return controlprompt.ApprovalDecision{
 				RequestID: req.RequestID,
 				Outcome:   approvalStatusSelected,
 				OptionID:  strings.TrimSpace(opt.ID),
@@ -930,7 +929,7 @@ func rejectionApprovalDecision(req *approvalPayload) control.ApprovalDecision {
 	if req != nil {
 		requestID = req.RequestID
 	}
-	return control.ApprovalDecision{RequestID: requestID, Outcome: approvalStatusRejected, Approved: false}
+	return controlprompt.ApprovalDecision{RequestID: requestID, Outcome: approvalStatusRejected, Approved: false}
 }
 
 func approvalOptionAllows(kind string, name string, id string) bool {

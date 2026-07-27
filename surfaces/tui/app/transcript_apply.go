@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/surfaces/statusbar"
+	"github.com/caelis-labs/caelis/surfaces/promptview"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -65,7 +65,7 @@ func (m *Model) applyTranscriptUsage(event TranscriptEvent) tea.Model {
 	if m == nil || event.Scope != ACPProjectionMain || event.Usage == nil {
 		return m
 	}
-	contextUsage := statusbar.FormatContextUsage(event.Usage.TotalTokens, event.Usage.ContextWindowTokens)
+	contextUsage := promptview.FormatContextUsage(event.Usage.TotalTokens, event.Usage.ContextWindowTokens)
 	if strings.TrimSpace(contextUsage) != "" {
 		m.statusContext = contextUsage
 		m.statusView.Tokens = contextUsage

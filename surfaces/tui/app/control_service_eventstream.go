@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
@@ -29,11 +29,11 @@ type eventStreamNarrativeBatcher struct {
 	pendingSince time.Time
 }
 
-func forwardTurnEventStream(ctx context.Context, turn control.Turn, sender *ProgramSender) executeLineResult {
+func forwardTurnEventStream(ctx context.Context, turn controlprompt.Turn, sender *ProgramSender) executeLineResult {
 	return forwardControlEventStream(ctx, turn, nil, sender)
 }
 
-func forwardSessionReconnectEventStream(ctx context.Context, reconnect control.SessionReconnect, sender *ProgramSender) executeLineResult {
+func forwardSessionReconnectEventStream(ctx context.Context, reconnect controlprompt.SessionReconnect, sender *ProgramSender) executeLineResult {
 	if reconnect == nil {
 		return executeLineResult{completion: TaskResultMsg{}}
 	}
@@ -42,7 +42,7 @@ func forwardSessionReconnectEventStream(ctx context.Context, reconnect control.S
 
 func forwardControlEventStream(
 	ctx context.Context,
-	turn control.Turn,
+	turn controlprompt.Turn,
 	closureError func() error,
 	sender *ProgramSender,
 ) executeLineResult {

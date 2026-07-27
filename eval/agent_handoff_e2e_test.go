@@ -22,8 +22,6 @@ import (
 	controlassembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
-
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/headless"
@@ -152,7 +150,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	routed := routedHandoffStarter{router: controlprompt.New(controlprompt.RouterConfig{Service: driver})}
 
 	directCommand := "/orbit"
-	directOutput, err := runScopedAgentOnce(ctx, routed, control.Submission{Text: directCommand + " inspect side"})
+	directOutput, err := runScopedAgentOnce(ctx, routed, controlprompt.Submission{Text: directCommand + " inspect side"})
 	if err != nil {
 		t.Fatalf("%s direct run error = %v", directCommand, err)
 	}
@@ -173,7 +171,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	if continuedCommand == "" {
 		t.Fatalf("participants after profile run = %#v, want Orbit sidecar", state.Participants)
 	}
-	continuedOutput, err := runScopedAgentOnce(ctx, routed, control.Submission{Text: continuedCommand + " continue side"})
+	continuedOutput, err := runScopedAgentOnce(ctx, routed, controlprompt.Submission{Text: continuedCommand + " continue side"})
 	if err != nil {
 		t.Fatalf("%s continuation error = %v", continuedCommand, err)
 	}
@@ -210,7 +208,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	controllerSessionID := assertOneNewChildSession(t, ctx, childRoot, workdir, afterDirectSessions, nil, nil)
 	afterHandoffSessions := childSessionIDs(t, ctx, childRoot, workdir)
 
-	result, err := headless.RunOnce(ctx, routed, control.Submission{Text: "who owns this turn?"}, headless.Options{})
+	result, err := headless.RunOnce(ctx, routed, controlprompt.Submission{Text: "who owns this turn?"}, headless.Options{})
 	if err != nil {
 		t.Fatalf("prompt after HandoffAgent(%s) error = %v", agentID, err)
 	}
@@ -259,7 +257,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	}
 }
 
-func runScopedAgentOnce(ctx context.Context, starter headless.Starter, submission control.Submission) (string, error) {
+func runScopedAgentOnce(ctx context.Context, starter headless.Starter, submission controlprompt.Submission) (string, error) {
 	turn, err := starter.Submit(ctx, submission)
 	if err != nil {
 		return "", err
@@ -477,7 +475,7 @@ type routedHandoffStarter struct {
 	router controlprompt.Router
 }
 
-func (s routedHandoffStarter) Submit(ctx context.Context, submission control.Submission) (control.Turn, error) {
+func (s routedHandoffStarter) Submit(ctx context.Context, submission controlprompt.Submission) (controlprompt.Turn, error) {
 	result, err := s.router.Route(ctx, controlprompt.Request{Submission: submission})
 	if err != nil {
 		return nil, err

@@ -10,6 +10,7 @@ import (
 
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlclient/turningress"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -377,7 +378,7 @@ func (t *gatewayTurn) isMainTerminal(envelope eventstream.Envelope) bool {
 	}
 }
 
-func (t *gatewayTurn) SubmitApproval(ctx context.Context, decision ApprovalDecision) error {
+func (t *gatewayTurn) SubmitApproval(ctx context.Context, decision controlprompt.ApprovalDecision) error {
 	return t.handle.Submit(ctx, kernel.SubmitRequest{
 		Kind: kernel.SubmissionKindApproval,
 		Approval: &kernel.ApprovalDecision{

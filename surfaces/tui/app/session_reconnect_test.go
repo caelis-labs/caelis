@@ -12,7 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -65,7 +64,7 @@ func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing
 	deadline := time.Now().Add(time.Second)
 	for {
 		reconnect.mu.Lock()
-		decisions := append([]control.ApprovalDecision(nil), reconnect.decisions...)
+		decisions := append([]controlprompt.ApprovalDecision(nil), reconnect.decisions...)
 		reconnect.mu.Unlock()
 		if len(decisions) > 0 {
 			if decisions[0].RequestID != "approval-original" || decisions[0].OptionID != "allow_once" {
@@ -273,7 +272,7 @@ type tuiReconnect struct {
 	backfill  <-chan eventstream.Envelope
 	live      <-chan eventstream.Envelope
 	bootstrap []eventstream.Envelope
-	decisions []control.ApprovalDecision
+	decisions []controlprompt.ApprovalDecision
 	err       error
 }
 
@@ -293,7 +292,7 @@ func (r *tuiReconnect) BackfillDone() <-chan struct{} {
 func (r *tuiReconnect) BootstrapEvents() []eventstream.Envelope {
 	return eventstream.CloneEnvelopes(r.bootstrap)
 }
-func (r *tuiReconnect) SubmitApproval(_ context.Context, decision control.ApprovalDecision) error {
+func (r *tuiReconnect) SubmitApproval(_ context.Context, decision controlprompt.ApprovalDecision) error {
 	r.mu.Lock()
 	r.decisions = append(r.decisions, decision)
 	r.mu.Unlock()

@@ -5,20 +5,21 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
-func sandboxSetupStatusFromPort(in sandbox.SetupStatus) SandboxSetupStatus {
+func sandboxSetupStatusFromPort(in sandbox.SetupStatus) controlstatus.SandboxSetupStatus {
 	normalized := sandbox.CloneSetupStatus(in)
-	out := SandboxSetupStatus{
+	out := controlstatus.SandboxSetupStatus{
 		Required: normalized.Required,
 		Error:    strings.TrimSpace(normalized.Error),
 		Details:  cloneStringMap(normalized.Details),
 		Counts:   maps.Clone(normalized.Counts),
 	}
 	if len(normalized.Checks) > 0 {
-		out.Checks = make([]SandboxSetupCheck, 0, len(normalized.Checks))
+		out.Checks = make([]controlstatus.SandboxSetupCheck, 0, len(normalized.Checks))
 		for _, check := range normalized.Checks {
-			out.Checks = append(out.Checks, SandboxSetupCheck{
+			out.Checks = append(out.Checks, controlstatus.SandboxSetupCheck{
 				Name:      strings.TrimSpace(check.Name),
 				Scope:     strings.TrimSpace(string(check.Scope)),
 				Current:   check.Current,

@@ -9,6 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -228,7 +229,7 @@ func (d *Adapter) activeACPControllerStatus(ctx context.Context) (controller.Con
 	return status, true, nil
 }
 
-func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, error) {
+func (d *Adapter) Submit(ctx context.Context, submission controlprompt.Submission) (controlprompt.Turn, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
 		return nil, err
@@ -246,7 +247,7 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 	if err != nil {
 		return nil, err
 	}
-	if submission.Mode == SubmissionModeActiveTurn {
+	if submission.Mode == controlprompt.SubmissionModeActiveTurn {
 		if !isBuiltInControllerSession(activeSession) || !activeKernelTurnForSession(gw.ActiveTurns(), activeSession.SessionRef) {
 			return nil, noActiveTurnSubmissionError()
 		}
@@ -398,13 +399,13 @@ func (d *Adapter) activeCommandInterrupt() context.CancelFunc {
 	return d.activeCommandCancel
 }
 
-func (d *Adapter) NewSession(ctx context.Context) (SessionSnapshot, error) {
+func (d *Adapter) NewSession(ctx context.Context) (controlprompt.SessionSnapshot, error) {
 	if d.stack.Session.StartFn == nil {
-		return SessionSnapshot{}, missingRuntimeDependency("start session")
+		return controlprompt.SessionSnapshot{}, missingRuntimeDependency("start session")
 	}
 	activeSession, err := d.stack.Session.StartFn(ctx, "", d.bindingKey)
 	if err != nil {
-		return SessionSnapshot{}, err
+		return controlprompt.SessionSnapshot{}, err
 	}
 	d.mu.Lock()
 	d.session = activeSession
@@ -414,11 +415,11 @@ func (d *Adapter) NewSession(ctx context.Context) (SessionSnapshot, error) {
 	return sessionSnapshotFromSession(activeSession), nil
 }
 
-func sessionSnapshotFromSession(activeSession session.Session) SessionSnapshot {
-	return SessionSnapshot{SessionID: strings.TrimSpace(activeSession.SessionID)}
+func sessionSnapshotFromSession(activeSession session.Session) controlprompt.SessionSnapshot {
+	return controlprompt.SessionSnapshot{SessionID: strings.TrimSpace(activeSession.SessionID)}
 }
 
-func (d *Adapter) ListSessions(ctx context.Context, limit int) ([]ResumeCandidate, error) {
+func (d *Adapter) ListSessions(ctx context.Context, limit int) ([]controlprompt.ResumeCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 	ctx, cancel := completionContext(ctx, resumeCompletionTimeout)
 	defer cancel()
@@ -435,7 +436,7 @@ func (d *Adapter) ListSessions(ctx context.Context, limit int) ([]ResumeCandidat
 	if err != nil {
 		return nil, err
 	}
-	out := make([]ResumeCandidate, 0, len(result.Sessions))
+	out := make([]controlprompt.ResumeCandidate, 0, len(result.Sessions))
 	for _, session := range result.Sessions {
 		candidate := enrichResumeCandidate(ctx, d.stack.Session.Store, session)
 		if strings.TrimSpace(candidate.Prompt) == "" && strings.TrimSpace(candidate.Title) == "" {
@@ -457,13 +458,13 @@ func (d *Adapter) Compact(ctx context.Context) error {
 	return d.stack.Session.CompactFn(ctx, activeSession.SessionRef)
 }
 
-func (d *Adapter) ListAgents(ctx context.Context, limit int) ([]AgentCandidate, error) {
+func (d *Adapter) ListAgents(ctx context.Context, limit int) ([]controlprompt.AgentCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 	return d.agentCatalog(limit), nil
 }
 
-func (d *Adapter) AgentStatus(ctx context.Context) (AgentStatusSnapshot, error) {
-	status := AgentStatusSnapshot{
+func (d *Adapter) AgentStatus(ctx context.Context) (controlprompt.AgentStatusSnapshot, error) {
+	status := controlprompt.AgentStatusSnapshot{
 		AvailableAgents: d.agentCatalog(0),
 	}
 	activeSession, ok := d.currentSession()
@@ -472,13 +473,13 @@ func (d *Adapter) AgentStatus(ctx context.Context) (AgentStatusSnapshot, error) 
 	}
 	gw, err := d.gatewayControlPlane()
 	if err != nil {
-		return AgentStatusSnapshot{}, err
+		return controlprompt.AgentStatusSnapshot{}, err
 	}
 	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{
 		SessionRef: activeSession.SessionRef,
 	})
 	if err != nil {
-		return AgentStatusSnapshot{}, err
+		return controlprompt.AgentStatusSnapshot{}, err
 	}
 	status.SessionID = activeSession.SessionID
 	status.ControllerKind = string(state.Controller.Kind)
@@ -493,7 +494,7 @@ func (d *Adapter) AgentStatus(ctx context.Context) (AgentStatusSnapshot, error) 
 	}
 	if state.Controller.Kind == session.ControllerKindACP {
 		if controllerStatus, ok, err := d.activeACPControllerStatus(ctx); err != nil {
-			return AgentStatusSnapshot{}, err
+			return controlprompt.AgentStatusSnapshot{}, err
 		} else if ok {
 			status.ControllerModel = strings.TrimSpace(controllerStatus.Model)
 			status.ControllerReasoningEffort = strings.TrimSpace(controllerStatus.ReasoningEffort)
@@ -502,8 +503,8 @@ func (d *Adapter) AgentStatus(ctx context.Context) (AgentStatusSnapshot, error) 
 			status.ControllerEfforts = controllerChoicesToSlashCandidates(controllerStatus.EffortOptions, "remote ACP reasoning effort", "", 0)
 		}
 	}
-	status.Participants = make([]AgentParticipantSnapshot, 0, len(state.Participants))
-	status.DelegatedParticipants = make([]AgentParticipantSnapshot, 0)
+	status.Participants = make([]controlprompt.AgentParticipantSnapshot, 0, len(state.Participants))
+	status.DelegatedParticipants = make([]controlprompt.AgentParticipantSnapshot, 0)
 	for _, participant := range state.Participants {
 		snapshot := agentParticipantSnapshot(participant)
 		if participant.Kind == session.ParticipantKindSubagent && participant.Role == session.ParticipantRoleDelegated {
@@ -515,8 +516,8 @@ func (d *Adapter) AgentStatus(ctx context.Context) (AgentStatusSnapshot, error) 
 	return status, nil
 }
 
-func agentParticipantSnapshot(participant kernel.ParticipantState) AgentParticipantSnapshot {
-	return AgentParticipantSnapshot{
+func agentParticipantSnapshot(participant kernel.ParticipantState) controlprompt.AgentParticipantSnapshot {
+	return controlprompt.AgentParticipantSnapshot{
 		ID:        strings.TrimSpace(participant.ID),
 		Label:     strings.TrimSpace(firstNonEmpty(participant.Label, participant.ID)),
 		AgentName: strings.TrimSpace(firstNonEmpty(participant.AgentName, participant.Label, participant.ID)),
@@ -527,10 +528,10 @@ func agentParticipantSnapshot(participant kernel.ParticipantState) AgentParticip
 	}
 }
 
-func (d *Adapter) HandoffAgent(ctx context.Context, target string) (AgentStatusSnapshot, error) {
+func (d *Adapter) HandoffAgent(ctx context.Context, target string) (controlprompt.AgentStatusSnapshot, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
-		return AgentStatusSnapshot{}, err
+		return controlprompt.AgentStatusSnapshot{}, err
 	}
 	target = strings.TrimSpace(target)
 	req := kernel.HandoffControllerRequest{
@@ -545,7 +546,7 @@ func (d *Adapter) HandoffAgent(ctx context.Context, target string) (AgentStatusS
 	default:
 		agent, resolveErr := d.resolveAgentName(target)
 		if resolveErr != nil {
-			return AgentStatusSnapshot{}, resolveErr
+			return controlprompt.AgentStatusSnapshot{}, resolveErr
 		}
 		req.Kind = session.ControllerKindACP
 		req.Agent = agent
@@ -553,11 +554,11 @@ func (d *Adapter) HandoffAgent(ctx context.Context, target string) (AgentStatusS
 	}
 	gw, err := d.gatewayControlPlane()
 	if err != nil {
-		return AgentStatusSnapshot{}, err
+		return controlprompt.AgentStatusSnapshot{}, err
 	}
 	updated, err := gw.HandoffController(ctx, req)
 	if err != nil {
-		return AgentStatusSnapshot{}, err
+		return controlprompt.AgentStatusSnapshot{}, err
 	}
 	d.mu.Lock()
 	d.session = updated

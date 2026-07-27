@@ -1,14 +1,14 @@
 package tuiapp
 
-import "github.com/caelis-labs/caelis/protocol/acp/control"
+import "github.com/caelis-labs/caelis/internal/controlprompt"
 
-func convertAttachments(items []Attachment) []control.Attachment {
+func convertAttachments(items []Attachment) []controlprompt.Attachment {
 	if len(items) == 0 {
 		return nil
 	}
-	out := make([]control.Attachment, len(items))
+	out := make([]controlprompt.Attachment, len(items))
 	for i, item := range items {
-		out[i] = control.Attachment{
+		out[i] = controlprompt.Attachment{
 			Name:   item.Name,
 			Offset: item.Offset,
 		}

@@ -42,9 +42,9 @@ Presentation surfaces -> Control layer -> Agent Runtime / SDK
 - `control/client` owns the product-client contract and implementation,
   including commands, Session list/bootstrap/reconnect, feed/replay, and
   approval recovery. `internal/controlclient/turningress` remains private
-  main-Turn ingress glue, and HTTP/SSE remains a thin Surface adapter.
-  Transitional `protocol/acp/control.Service` must not grow into a second
-  product API.
+  main-Turn ingress glue, and HTTP/SSE remains a thin Surface adapter. The
+  private `internal/controlprompt.Service` prompt facade must not grow into a
+  second product API.
 - Canonical durable facts, not transcript caches or undocumented `_meta`, are
   replay truth. Typed Envelope fields own scope, relation, delivery, position,
   approval identity, and resume semantics.

@@ -12,6 +12,7 @@ import (
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -58,7 +59,7 @@ func TestAdapterStartReviewUsesHiddenReviewerProfile(t *testing.T) {
 		t.Fatalf("NewAdapter() error = %v", err)
 	}
 	imageData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-	turn, err := driver.StartReview(ctx, "  inspect the image  ", []Attachment{{
+	turn, err := driver.StartReview(ctx, "  inspect the image  ", []controlprompt.Attachment{{
 		Name:     "review.png",
 		Offset:   len([]rune("inspect the ")),
 		MimeType: "image/png",
@@ -233,7 +234,7 @@ func (g *reviewProfileGatewayService) DetachParticipant(_ context.Context, req k
 	return session.CloneSession(g.session), nil
 }
 
-func drainReviewProfileTurnEvents(t *testing.T, turn Turn) []eventstream.Envelope {
+func drainReviewProfileTurnEvents(t *testing.T, turn controlprompt.Turn) []eventstream.Envelope {
 	t.Helper()
 	var out []eventstream.Envelope
 	for env := range turn.Events() {

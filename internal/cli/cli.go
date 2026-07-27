@@ -21,9 +21,9 @@ import (
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/version"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -48,7 +48,7 @@ type runResult struct {
 type doctorResult = gatewayapp.DoctorReport
 type sandboxStatusResult = gatewayapp.SandboxStatus
 type sandboxCommandFunc func(context.Context, gatewayapp.Config, outputFormat, io.Writer) error
-type controlServerFunc func(context.Context, *gatewayapp.Stack, controlserver.Config) error
+type controlServerFunc func(context.Context, controlserver.Dependencies, controlserver.Config) error
 
 var (
 	runSandboxSetupCommand  sandboxCommandFunc = runSandboxSetupFromConfig
@@ -237,14 +237,16 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			if tokenFile != "" {
 				return errors.New("configure either CAELIS_CONTROL_TOKEN or a Control token file, not both")
 			}
-			authenticator, err = controlserver.BearerTokenAuthenticator(token, principal)
+			authenticator, err = appserver.BearerTokenAuthenticator(token, principal)
 			if err != nil {
 				return err
 			}
 		} else if tokenFile == "" {
 			tokenFile = controlserver.DefaultTokenFile(cfg.StoreDir)
 		}
-		return runControlServerCommand(ctx, stack, controlserver.Config{
+		return runControlServerCommand(ctx, controlserver.Dependencies{
+			Service: stack.ControlClient(), TaskStreams: stack.TaskStreams(),
+		}, controlserver.Config{
 			Address: strings.TrimSpace(*controlListen), Authenticator: authenticator, Principal: principal,
 			TokenFile: tokenFile, AllowedHosts: splitCommaSeparated(*controlHosts),
 			TLSCertFile: strings.TrimSpace(*controlTLSCert), TLSKeyFile: strings.TrimSpace(*controlTLSKey),
@@ -322,7 +324,7 @@ func runHeadless(ctx context.Context, stack *gatewayapp.Stack, sessionID string,
 	if err != nil {
 		return err
 	}
-	result, err := headless.RunOnce(ctx, driver, control.Submission{Text: input}, headless.Options{})
+	result, err := headless.RunOnce(ctx, driver, controlprompt.Submission{Text: input}, headless.Options{})
 	if err != nil {
 		return err
 	}

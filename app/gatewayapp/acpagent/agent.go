@@ -11,9 +11,8 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
+	"github.com/caelis-labs/caelis/surfaces/promptview"
 )
 
 func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
@@ -22,16 +21,17 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 		return nil, err
 	}
 	return runtimeacp.NewGatewayAgent(runtimeacp.GatewayAgentConfig{
-		Runtime:             deps.Runtime,
-		Sessions:            deps.Sessions,
-		Resolver:            deps.Resolver,
-		ApprovalReviewer:    deps.ApprovalReviewer,
-		Assembly:            deps.Assembly,
-		AppName:             deps.AppName,
-		UserID:              deps.UserID,
-		WorkspaceKey:        strings.TrimSpace(stack.Workspace.Key),
-		TaskStreams:         deps.TaskStreams,
-		TaskStreamPrincipal: taskstream.Principal{ID: deps.UserID},
+		Runtime:              deps.Runtime,
+		Sessions:             deps.Sessions,
+		Resolver:             deps.Resolver,
+		ApprovalReviewer:     deps.ApprovalReviewer,
+		Assembly:             deps.Assembly,
+		AppName:              deps.AppName,
+		UserID:               deps.UserID,
+		WorkspaceKey:         strings.TrimSpace(stack.Workspace.Key),
+		TaskStreams:          deps.TaskStreams,
+		TaskStreamPrincipal:  taskstream.Principal{ID: deps.UserID},
+		SlashResultFormatter: promptview.FormatSlashResult,
 		SurfaceBuilder: func(req runtimeacp.SurfaceRequest) runtimeacp.Surface {
 			return stack.ACPSurface(req.Modes, req.UseFallbackModes, req.Config)
 		},
@@ -42,7 +42,7 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 			}
 			router := controlprompt.New(controlprompt.RouterConfig{
 				Service: driver,
-				CommandNames: func(ctx context.Context, service control.Service) []string {
+				CommandNames: func(ctx context.Context, service controlprompt.Service) []string {
 					var bindingStatus agentbinding.Status
 					if bindingService, ok := service.(agentbinding.Service); ok {
 						bindingStatus, _ = bindingService.AgentBindingStatus(ctx)
@@ -90,7 +90,7 @@ func acpAgentCommandAllowed(command string) bool {
 	return directRunName(command)
 }
 
-func acpDirectAgentRuns(status control.AgentStatusSnapshot) []controlagents.Run {
+func acpDirectAgentRuns(status controlprompt.AgentStatusSnapshot) []controlagents.Run {
 	runs := make([]controlagents.Run, 0, len(status.Participants))
 	for _, participant := range status.Participants {
 		runs = append(runs, controlagents.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))

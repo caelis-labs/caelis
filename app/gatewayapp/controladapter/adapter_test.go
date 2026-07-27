@@ -30,7 +30,9 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
@@ -109,7 +111,7 @@ func modelUsageMetaForRuntimeTest(prompt int, cached int, completion int, total 
 	}
 }
 
-func closeAdapterTestTurn(t *testing.T, turn Turn) {
+func closeAdapterTestTurn(t *testing.T, turn controlprompt.Turn) {
 	t.Helper()
 	if turn == nil {
 		return
@@ -239,7 +241,7 @@ func TestAdapterDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 		t.Fatalf("ListSessions(before) = %d sessions, want none", len(before.Sessions))
 	}
 
-	turn, err := driver.Submit(ctx, Submission{Text: "hello"})
+	turn, err := driver.Submit(ctx, controlprompt.Submission{Text: "hello"})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -293,7 +295,7 @@ func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 		t.Fatalf("NewAdapter() error = %v", err)
 	}
 
-	turn, err := driver.Submit(ctx, Submission{Text: "  steer next step  ", DisplayText: "$cmpctl steer next step", Mode: SubmissionModeActiveTurn})
+	turn, err := driver.Submit(ctx, controlprompt.Submission{Text: "  steer next step  ", DisplayText: "$cmpctl steer next step", Mode: controlprompt.SubmissionModeActiveTurn})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -368,13 +370,13 @@ func TestAdapterResumeCommitsAtomicReconnectAndSteersActiveTurn(t *testing.T) {
 	if len(bootstrap) != 1 || bootstrap[0].ApprovalRequestID != "approval-1" {
 		t.Fatalf("approval bootstrap = %#v, want original request ID", bootstrap)
 	}
-	if _, err := driver.Submit(ctx, Submission{Text: "steer after resume", Mode: SubmissionModeActiveTurn}); err != nil {
+	if _, err := driver.Submit(ctx, controlprompt.Submission{Text: "steer after resume", Mode: controlprompt.SubmissionModeActiveTurn}); err != nil {
 		t.Fatalf("Submit(active) error = %v", err)
 	}
 	if gw.beginCalls != 0 || len(gw.activeSubmits) != 1 || gw.activeSubmits[0].Kind != kernel.SubmissionKindConversation {
 		t.Fatalf("turn routing begin=%d active=%#v", gw.beginCalls, gw.activeSubmits)
 	}
-	if err := snapshot.Reconnect.SubmitApproval(ctx, ApprovalDecision{RequestID: "approval-1", OptionID: "allow_once", Approved: true}); err != nil {
+	if err := snapshot.Reconnect.SubmitApproval(ctx, controlprompt.ApprovalDecision{RequestID: "approval-1", OptionID: "allow_once", Approved: true}); err != nil {
 		t.Fatalf("SubmitApproval() error = %v", err)
 	}
 	if len(gw.activeSubmits) != 2 || gw.activeSubmits[1].Approval == nil || gw.activeSubmits[1].Approval.RequestID != "approval-1" {
@@ -439,7 +441,7 @@ func TestAdapterSubmitDefaultModeStartsNewTurnDespiteActiveKernelTurn(t *testing
 		t.Fatalf("NewAdapter() error = %v", err)
 	}
 
-	_, err = driver.Submit(ctx, Submission{Text: "  fresh prompt after resume  "})
+	_, err = driver.Submit(ctx, controlprompt.Submission{Text: "  fresh prompt after resume  "})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -501,7 +503,7 @@ func TestAdapterSubmitActiveTurnRequiresActiveKernelTurn(t *testing.T) {
 				t.Fatalf("NewAdapter() error = %v", err)
 			}
 
-			turn, err := driver.Submit(ctx, Submission{Text: "steer running turn", Mode: SubmissionModeActiveTurn})
+			turn, err := driver.Submit(ctx, controlprompt.Submission{Text: "steer running turn", Mode: controlprompt.SubmissionModeActiveTurn})
 			assertNoActiveRunError(t, err)
 			if turn != nil {
 				t.Fatalf("Submit() turn = %#v, want nil", turn)
@@ -557,7 +559,7 @@ func TestAdapterSubmitActiveTurnNoActiveRunErrorDoesNotBeginTurn(t *testing.T) {
 		t.Fatalf("NewAdapter() error = %v", err)
 	}
 
-	turn, err := driver.Submit(ctx, Submission{Text: "steer running turn", Mode: SubmissionModeActiveTurn})
+	turn, err := driver.Submit(ctx, controlprompt.Submission{Text: "steer running turn", Mode: controlprompt.SubmissionModeActiveTurn})
 	assertNoActiveRunError(t, err)
 	if turn != nil {
 		t.Fatalf("Submit() turn = %#v, want nil", turn)
@@ -613,7 +615,7 @@ func TestAdapterSubmitForwardsReferencesToGateway(t *testing.T) {
 	}
 
 	raw := "$CMPCTL inspect @dict.go"
-	turn, err := driver.Submit(ctx, Submission{Text: raw, DisplayText: raw})
+	turn, err := driver.Submit(ctx, controlprompt.Submission{Text: raw, DisplayText: raw})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -867,7 +869,7 @@ func TestAdapterSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t *test
 		t.Fatalf("NewAdapter() error = %v", err)
 	}
 
-	_, err = driver.Submit(ctx, Submission{Text: "  main prompt after side run  "})
+	_, err = driver.Submit(ctx, controlprompt.Submission{Text: "  main prompt after side run  "})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -988,7 +990,7 @@ func TestAdapterCompleteSlashArgConnectSeparatesSourcesAndProviders(t *testing.T
 	if len(providers) == 0 || providers[0].Value == "" {
 		t.Fatalf("provider candidates = %#v, want non-empty", providers)
 	}
-	var codexCandidate SlashArgCandidate
+	var codexCandidate controlprompt.SlashArgCandidate
 	for _, candidate := range providers {
 		if candidate.Value == "codex" {
 			codexCandidate = candidate
@@ -1132,7 +1134,7 @@ func TestAdapterCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
 
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "alt-model",
 	}); err != nil {
@@ -1333,7 +1335,7 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
 
-	status, err := driver.Connect(ctx, ConnectConfig{
+	status, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "deepseek",
 		Model:    "deepseek-v4-flash",
 		APIKey:   "secret",
@@ -1480,7 +1482,7 @@ func TestAdapterConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "deepseek",
 		Model:    "deepseek-v4-flash",
 		APIKey:   "env:DEEPSEEK_API_KEY",
@@ -1596,7 +1598,7 @@ func TestAdapterConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
 
-	status, err := driver.Connect(ctx, ConnectConfig{
+	status, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "codefree",
 		Model:    "GLM-4.7",
 	})
@@ -1687,11 +1689,15 @@ func TestAdapterStatusIncludesContextUsageSnapshot(t *testing.T) {
 	if status.Usage.ContextWindowTokens != 88000 {
 		t.Fatalf("status.Usage.ContextWindowTokens = %d, want 88000", status.Usage.ContextWindowTokens)
 	}
-	if status.Usage.SessionInputTokens != 12600 || status.Usage.SessionCachedInputTokens != 9000 || status.Usage.SessionOutputTokens != 200 || status.Usage.SessionReasoningTokens != 50 || status.Usage.SessionTotalTokens != 12800 {
-		t.Fatalf("session token usage = input %d cached %d output %d reasoning %d total %d", status.Usage.SessionInputTokens, status.Usage.SessionCachedInputTokens, status.Usage.SessionOutputTokens, status.Usage.SessionReasoningTokens, status.Usage.SessionTotalTokens)
+	wantUsage := controlstatus.UsageSnapshot{
+		PromptTokens:      12600,
+		CachedInputTokens: 9000,
+		CompletionTokens:  200,
+		ReasoningTokens:   50,
+		TotalTokens:       12800,
 	}
-	if status.Usage.SessionUsageMain.PromptTokens != 12600 || status.Usage.SessionUsageMain.ReasoningTokens != 50 {
-		t.Fatalf("main usage = %+v, want assistant usage", status.Usage.SessionUsageMain)
+	if status.Usage.SessionUsageTotal != wantUsage {
+		t.Fatalf("session total usage = %+v, want %+v", status.Usage.SessionUsageTotal, wantUsage)
 	}
 	if len(status.Usage.SessionUsageByModel) != 1 {
 		t.Fatalf("SessionUsageByModel = %#v, want one model row", status.Usage.SessionUsageByModel)
@@ -2079,7 +2085,7 @@ func TestAdapterDeleteModelRemovesConfiguredAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "alt-model",
 	}); err != nil {
@@ -2126,7 +2132,7 @@ func TestAdapterDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "llama3",
 	}); err != nil {
@@ -2176,7 +2182,7 @@ func TestAdapterUseModelResolvesCaseInsensitiveAliasWithAssembledEffort(t *testi
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "minimax",
 		Model:    "MiniMax-M2.7-highspeed",
 		APIKey:   "secret",
@@ -2346,7 +2352,7 @@ func TestAdapterStartAgentRunRollsBackAttachmentOnPromptConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = driver.StartAgentRun(ctx, "orbit", "  second prompt  ", []Attachment{{Name: "side.png", Offset: len([]rune("second "))}})
+	_, err = driver.StartAgentRun(ctx, "orbit", "  second prompt  ", []controlprompt.Attachment{{Name: "side.png", Offset: len([]rune("second "))}})
 	if err == nil {
 		t.Fatal("StartAgentRun() error = nil, want active run conflict")
 	}
@@ -3154,7 +3160,7 @@ func TestAdapterCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 		t.Fatalf("model action candidates = %#v, want only del", modelActions)
 	}
 
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "deepseek",
 		Model:    "deepseek-v4-pro",
 		TokenEnv: "DEEPSEEK_API_KEY",
@@ -3223,8 +3229,8 @@ func TestAdapterCompleteSlashArgPluginMarketplace(t *testing.T) {
 	ctx := context.Background()
 	driver, err := NewAdapter(ctx, &RuntimeStack{
 		Plugin: PluginRuntimeDeps{
-			ListMarketplacesFn: func(context.Context) ([]MarketplaceSnapshot, error) {
-				return []MarketplaceSnapshot{
+			ListMarketplacesFn: func(context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
+				return []controlprompt.MarketplaceSnapshot{
 					{Name: "demo-market", Description: "Demo marketplace", Source: "acme/plugins", PluginCount: 2},
 					{Name: "internal", Description: "Internal plugins", Source: "/tmp/internal", PluginCount: 1},
 				}, nil
@@ -3293,14 +3299,14 @@ func TestAdapterConnectPersistsMultipleProviders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "minimax",
 		Model:    "MiniMax-M2.7-highspeed",
 		APIKey:   "minimax-secret",
 	}); err != nil {
 		t.Fatalf("Connect(minimax) error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "deepseek",
 		Model:    "deepseek-v4-pro",
 		APIKey:   "deepseek-secret",
@@ -3406,7 +3412,7 @@ func TestAdapterConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "xiaomi",
 		Model:    "mimo-v2.5-pro",
 		BaseURL:  modelconfig.XiaomiTokenPlanCNBaseURL,
@@ -3480,7 +3486,7 @@ func TestAdapterConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	for _, cfg := range []ConnectConfig{
+	for _, cfg := range []controlprompt.ConnectConfig{
 		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: modelconfig.XiaomiAPIBaseURL, APIKey: "env:XIAOMI_API_KEY"},
 		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: modelconfig.XiaomiTokenPlanCNBaseURL, APIKey: "env:MIMO_TOKEN_PLAN_API_KEY"},
 	} {
@@ -3510,7 +3516,7 @@ func TestAdapterConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(model use) error = %v", err)
 	}
-	var apiCandidate, tokenPlanCandidate SlashArgCandidate
+	var apiCandidate, tokenPlanCandidate controlprompt.SlashArgCandidate
 	for _, candidate := range candidates {
 		if candidate.Display != "xiaomi/mimo-v2.5-pro" {
 			continue
@@ -3560,7 +3566,7 @@ func TestAdapterConnectReusesExistingEndpointAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "xiaomi",
 		Model:    "mimo-v2.5-pro",
 		BaseURL:  modelconfig.XiaomiAPIBaseURL,
@@ -3582,7 +3588,7 @@ func TestAdapterConnectReusesExistingEndpointAuth(t *testing.T) {
 	if !foundReusable {
 		t.Fatalf("endpoint candidates = %#v, want reusable auth marker for api cn", endpoints)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "xiaomi",
 		Model:    "mimo-v2-pro",
 		BaseURL:  modelconfig.XiaomiAPIBaseURL,
@@ -3863,7 +3869,7 @@ func writeAdapterTestPluginSkill(t *testing.T, root string, name string, descrip
 	}
 }
 
-func completionCandidatesContainValue(candidates []CompletionCandidate, value string) bool {
+func completionCandidatesContainValue(candidates []controlprompt.CompletionCandidate, value string) bool {
 	value = strings.TrimSpace(value)
 	for _, candidate := range candidates {
 		if strings.TrimSpace(candidate.Value) == value {
@@ -4162,7 +4168,7 @@ func TestAdapterConnectModelCandidatesIncludeConfiguredProviderModels(t *testing
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "minimax",
 		Model:    "MiniMax-M2.7-highspeed",
 		APIKey:   "secret",
@@ -4190,7 +4196,7 @@ func TestAdapterConnectModelCandidatesIncludeConfiguredProviderModels(t *testing
 		t.Fatalf("connect model candidates = %#v, want maintained minimax model", models)
 	}
 	const privateCatalogPrefixModel = "MiniMax-M2.7-highspeed-private"
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "minimax",
 		Model:    privateCatalogPrefixModel,
 		APIKey:   "secret",
@@ -4211,7 +4217,7 @@ func TestAdapterConnectModelCandidatesIncludeConfiguredProviderModels(t *testing
 	}
 
 	const customCompatibleModel = "acme-reasoning-model"
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider:            "openai-compatible",
 		Model:               customCompatibleModel,
 		BaseURL:             "https://models.acme.example/v1",
@@ -4268,7 +4274,7 @@ func TestAdapterConnectRejectsMissingAPIKeyWithActionableError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "openai",
 		Model:    "gpt-4o",
 	}); err == nil || !strings.Contains(err.Error(), "env:OPENAI_API_KEY") {
@@ -4296,7 +4302,7 @@ func TestAdapterConnectRejectsInvalidBaseURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "openai-compatible",
 		Model:    "gpt-4o",
 		BaseURL:  "not-a-url",
@@ -4328,7 +4334,7 @@ func TestAdapterStatusIncludesDoctorDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "minimax",
 		Model:    "MiniMax-M2.7-highspeed",
 		TokenEnv: "MINIMAX_API_KEY",
@@ -4593,7 +4599,7 @@ func readAdapterConfigForTest(t *testing.T, root string) string {
 	return string(data)
 }
 
-func agentCandidatesHaveName(candidates []AgentCandidate, name string) bool {
+func agentCandidatesHaveName(candidates []controlprompt.AgentCandidate, name string) bool {
 	for _, candidate := range candidates {
 		if strings.EqualFold(strings.TrimSpace(candidate.Name), strings.TrimSpace(name)) {
 			return true
@@ -4602,7 +4608,7 @@ func agentCandidatesHaveName(candidates []AgentCandidate, name string) bool {
 	return false
 }
 
-func slashCandidatesHaveValue(candidates []SlashArgCandidate, value string) bool {
+func slashCandidatesHaveValue(candidates []controlprompt.SlashArgCandidate, value string) bool {
 	for _, candidate := range candidates {
 		if strings.EqualFold(strings.TrimSpace(candidate.Value), strings.TrimSpace(value)) {
 			return true
@@ -4611,7 +4617,7 @@ func slashCandidatesHaveValue(candidates []SlashArgCandidate, value string) bool
 	return false
 }
 
-func modelCandidateHasDisplay(candidates []SlashArgCandidate, display string) bool {
+func modelCandidateHasDisplay(candidates []controlprompt.SlashArgCandidate, display string) bool {
 	for _, candidate := range candidates {
 		if strings.EqualFold(strings.TrimSpace(candidate.Display), strings.TrimSpace(display)) {
 			return true
@@ -4624,7 +4630,7 @@ func connectModelCompletionCommand(state connectwizard.ConnectWizardState) strin
 	return "connect-model:" + state.EncodeCompletionState()
 }
 
-func candidateValues(candidates []SlashArgCandidate) []string {
+func candidateValues(candidates []controlprompt.SlashArgCandidate) []string {
 	out := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
 		out = append(out, strings.TrimSpace(candidate.Value))

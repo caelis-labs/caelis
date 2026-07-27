@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
+	"github.com/caelis-labs/caelis/internal/controlprompt/promptrefs"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/protocol/acp/control/promptrefs"
 )
 
 func (s *Stack) submissionReferenceProjector() kernelimpl.SubmissionReferenceProjector {

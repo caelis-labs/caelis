@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 func newCommandExecDriver(t *testing.T, modelCfg gatewayapp.ModelConfig) (*Adapter, *gatewayapp.Stack) {
@@ -75,7 +76,7 @@ func TestRegressionCommandExecModelUse(t *testing.T) {
 	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
 	ctx := context.Background()
 
-	connected, err := driver.Connect(ctx, ConnectConfig{
+	connected, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "alt-model",
 	})
@@ -151,7 +152,7 @@ func TestRegressionCommandExecModelUseCaseInsensitive(t *testing.T) {
 	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
 	ctx := context.Background()
 
-	_, err := driver.Connect(ctx, ConnectConfig{
+	_, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "TestModel",
 	})
@@ -175,7 +176,7 @@ func TestRegressionCommandExecModelDelete(t *testing.T) {
 	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
 	ctx := context.Background()
 
-	_, err := driver.Connect(ctx, ConnectConfig{
+	_, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "alt-model",
 	})
@@ -218,7 +219,7 @@ func TestRegressionCommandExecDeleteCurrentModelClearsStatus(t *testing.T) {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
 
-	_, err = driver.Connect(ctx, ConnectConfig{
+	_, err = driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "llama3",
 	})
@@ -295,7 +296,7 @@ func TestRegressionCommandExecConnectNewProvider(t *testing.T) {
 	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
 	ctx := context.Background()
 
-	status, err := driver.Connect(ctx, ConnectConfig{
+	status, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "gpt-4",
 	})
@@ -327,7 +328,7 @@ func TestRegressionCommandExecConnectUpdatesStatus(t *testing.T) {
 	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
 	ctx := context.Background()
 
-	status, err := driver.Connect(ctx, ConnectConfig{
+	status, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "new-model",
 	})
@@ -344,7 +345,7 @@ func TestRegressionCommandExecConnectInvalidArgs(t *testing.T) {
 	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
 	ctx := context.Background()
 
-	_, err := driver.Connect(ctx, ConnectConfig{
+	_, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "",
 		Model:    "",
 	})
@@ -358,7 +359,7 @@ func TestRegressionCommandExecConnectMultipleModels(t *testing.T) {
 	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
 	ctx := context.Background()
 
-	_, err := driver.Connect(ctx, ConnectConfig{
+	_, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "model-a",
 	})
@@ -366,7 +367,7 @@ func TestRegressionCommandExecConnectMultipleModels(t *testing.T) {
 		t.Fatalf("Connect(model-a) error = %v", err)
 	}
 
-	_, err = driver.Connect(ctx, ConnectConfig{
+	_, err = driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "model-b",
 	})
@@ -404,7 +405,7 @@ func TestRegressionCommandExecNewSession(t *testing.T) {
 		t.Fatalf("Status() error = %v", err)
 	}
 	for _, model := range []string{"codex-sim", "claude-sim"} {
-		if _, err := driver.Connect(ctx, ConnectConfig{Provider: "ollama", Model: model}); err != nil {
+		if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{Provider: "ollama", Model: model}); err != nil {
 			t.Fatalf("Connect(%s) error = %v", model, err)
 		}
 	}
@@ -514,7 +515,7 @@ func TestRegressionCommandExecModelAliasLifecycle(t *testing.T) {
 	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
 	ctx := context.Background()
 
-	_, err := driver.Connect(ctx, ConnectConfig{
+	_, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "model-alpha",
 	})
@@ -522,7 +523,7 @@ func TestRegressionCommandExecModelAliasLifecycle(t *testing.T) {
 		t.Fatalf("Connect(alpha) error = %v", err)
 	}
 
-	_, err = driver.Connect(ctx, ConnectConfig{
+	_, err = driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "model-beta",
 	})
@@ -560,7 +561,7 @@ func TestRegressionCommandExecConnectFullConfig(t *testing.T) {
 	driver, stack := newCommandExecDriver(t, defaultOllamaModelCfg())
 	ctx := context.Background()
 
-	status, err := driver.Connect(ctx, ConnectConfig{
+	status, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider:                       "ollama",
 		Model:                          "custom-model",
 		TimeoutSeconds:                 120,
@@ -595,7 +596,7 @@ func TestRegressionCommandExecConnectUseDeleteCycle(t *testing.T) {
 	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
 	ctx := context.Background()
 
-	_, err := driver.Connect(ctx, ConnectConfig{
+	_, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
 		Model:    "cycle-model",
 	})

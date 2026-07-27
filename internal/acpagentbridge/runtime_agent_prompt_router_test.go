@@ -11,21 +11,38 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
+func TestRuntimeAgentNewRequiresSlashResultFormatterWithPromptRouter(t *testing.T) {
+	sessions := inmemory.NewStore(inmemory.Config{})
+	_, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:  &promptRouterRuntime{sessions: sessions},
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{}, nil
+		},
+		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
+			return nil, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "slash result formatter is required") {
+		t.Fatalf("runtimeacp.New() error = %v, want missing slash result formatter", err)
+	}
+}
+
 func TestRuntimeAgentPromptSlashCommandUsesPromptRouterBeforeMainRuntime(t *testing.T) {
 	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
-	statusSlash := control.NewStatusSlashResult(control.StatusSnapshot{
-		Session:     control.StatusSession{ID: "session-1"},
-		ModelStatus: control.StatusModel{Display: "ollama/llama3"},
+	statusSlash := controlprompt.NewStatusSlashResult(controlstatus.StatusSnapshot{
+		Session:     controlstatus.StatusSession{ID: "session-1"},
+		ModelStatus: controlstatus.StatusModel{Display: "ollama/llama3"},
 	})
 	router := &testPromptRouter{
 		result: controlprompt.Result{
@@ -34,6 +51,7 @@ func TestRuntimeAgentPromptSlashCommandUsesPromptRouterBeforeMainRuntime(t *test
 			SuppressTurnDivider: true,
 		},
 	}
+	formatterCalled := false
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
@@ -42,6 +60,10 @@ func TestRuntimeAgentPromptSlashCommandUsesPromptRouterBeforeMainRuntime(t *test
 		},
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
+		},
+		SlashResultFormatter: func(result controlprompt.SlashCommandResult) string {
+			formatterCalled = true
+			return result.Status.ModelStatus.Display
 		},
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -68,6 +90,9 @@ func TestRuntimeAgentPromptSlashCommandUsesPromptRouterBeforeMainRuntime(t *test
 	}
 	if runtime.runCalled {
 		t.Fatal("main runtime Run was called for handled slash command")
+	}
+	if !formatterCalled {
+		t.Fatal("assembly-provided slash result formatter was not called")
 	}
 	if strings.TrimSpace(router.request.Submission.Text) != "/status" {
 		t.Fatalf("prompt router request = %#v, want /status", router.request)
@@ -108,8 +133,9 @@ func TestRuntimeAgentPromptRouterSuppressesLiveUserMessageEcho(t *testing.T) {
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
-		AppName: "caelis",
-		UserID:  "user-1",
+		SlashResultFormatter: testSlashResultFormatter,
+		AppName:              "caelis",
+		UserID:               "user-1",
 	})
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
@@ -164,8 +190,9 @@ func TestRuntimeAgentPromptRouterHandlesSharedSlashWithImagePart(t *testing.T) {
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
-		AppName: "caelis",
-		UserID:  "user-1",
+		SlashResultFormatter: testSlashResultFormatter,
+		AppName:              "caelis",
+		UserID:               "user-1",
 	})
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
@@ -232,9 +259,10 @@ func TestRuntimeAgentPromptRouterHandlesDynamicSlashWithImagePart(t *testing.T) 
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
-		Commands: availableCommandProvider{{Name: "helper", Description: "bounded helper"}},
-		AppName:  "caelis",
-		UserID:   "user-1",
+		SlashResultFormatter: testSlashResultFormatter,
+		Commands:             availableCommandProvider{{Name: "helper", Description: "bounded helper"}},
+		AppName:              "caelis",
+		UserID:               "user-1",
 	})
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
@@ -295,8 +323,9 @@ func TestRuntimeAgentPromptRouterHandlesNormalPromptWithImagePart(t *testing.T) 
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
-		AppName: "caelis",
-		UserID:  "user-1",
+		SlashResultFormatter: testSlashResultFormatter,
+		AppName:              "caelis",
+		UserID:               "user-1",
 	})
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
@@ -375,8 +404,9 @@ func TestRuntimeAgentPromptResolvesSessionByGlobalID(t *testing.T) {
 			}
 			return router, nil
 		},
-		AppName: "caelis",
-		UserID:  "user-1",
+		SlashResultFormatter: testSlashResultFormatter,
+		AppName:              "caelis",
+		UserID:               "user-1",
 	})
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
@@ -404,8 +434,8 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 			Handled:         true,
 			ClearHistory:    true,
 			RefreshCommands: true,
-			StatusUpdate: &control.StatusSnapshot{
-				Session: control.StatusSession{ID: "session-1"},
+			StatusUpdate: &controlstatus.StatusSnapshot{
+				Session: controlstatus.StatusSession{ID: "session-1"},
 			},
 			SuppressTurnDivider: true,
 		},
@@ -419,11 +449,12 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
-		Modes:    testModeProvider{},
-		Config:   testConfigProvider{},
-		Commands: commands,
-		AppName:  "caelis",
-		UserID:   "user-1",
+		SlashResultFormatter: testSlashResultFormatter,
+		Modes:                testModeProvider{},
+		Config:               testConfigProvider{},
+		Commands:             commands,
+		AppName:              "caelis",
+		UserID:               "user-1",
 	})
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
@@ -503,8 +534,9 @@ func TestRuntimeAgentPromptRouterTurnFeedReturnsEmitErrors(t *testing.T) {
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
-		AppName: "caelis",
-		UserID:  "user-1",
+		SlashResultFormatter: testSlashResultFormatter,
+		AppName:              "caelis",
+		UserID:               "user-1",
 	})
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
@@ -588,8 +620,9 @@ func TestRuntimeAgentPromptRouterTurnFeedEmitsTerminalMetaForACPStdio(t *testing
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
-		AppName: "caelis",
-		UserID:  "user-1",
+		SlashResultFormatter: testSlashResultFormatter,
+		AppName:              "caelis",
+		UserID:               "user-1",
 	})
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
@@ -675,8 +708,9 @@ func TestRuntimeAgentPromptRouterDeduplicatesFinalNarrativeReplay(t *testing.T) 
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
-		AppName: "caelis",
-		UserID:  "user-1",
+		SlashResultFormatter: testSlashResultFormatter,
+		AppName:              "caelis",
+		UserID:               "user-1",
 	})
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
@@ -858,8 +892,9 @@ func TestRuntimeAgentPromptRouterProjectsChildSemanticsIntoParentSpawnTerminal(t
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
-		AppName: "caelis",
-		UserID:  "user-1",
+		SlashResultFormatter: testSlashResultFormatter,
+		AppName:              "caelis",
+		UserID:               "user-1",
 	})
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)
@@ -958,6 +993,10 @@ func countTerminalExitsForTool(notifications []acp.SessionNotification, toolCall
 		}
 	}
 	return count
+}
+
+func testSlashResultFormatter(controlprompt.SlashCommandResult) string {
+	return ""
 }
 
 type testPromptRouter struct {

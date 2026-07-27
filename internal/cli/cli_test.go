@@ -28,8 +28,8 @@ func TestRunServeStartsProductControlServer(t *testing.T) {
 	previous := runControlServerCommand
 	t.Cleanup(func() { runControlServerCommand = previous })
 	var captured controlserver.Config
-	runControlServerCommand = func(_ context.Context, stack *gatewayapp.Stack, config controlserver.Config) error {
-		if stack == nil || stack.ControlClient() == nil {
+	runControlServerCommand = func(_ context.Context, deps controlserver.Dependencies, config controlserver.Config) error {
+		if deps.Service == nil || deps.TaskStreams == nil {
 			t.Fatal("serve did not assemble the product Control client")
 		}
 		captured = config
@@ -61,7 +61,7 @@ func TestRunServeDefaultsToPersistentTokenFile(t *testing.T) {
 	previous := runControlServerCommand
 	t.Cleanup(func() { runControlServerCommand = previous })
 	var captured controlserver.Config
-	runControlServerCommand = func(_ context.Context, _ *gatewayapp.Stack, config controlserver.Config) error {
+	runControlServerCommand = func(_ context.Context, _ controlserver.Dependencies, config controlserver.Config) error {
 		captured = config
 		return nil
 	}

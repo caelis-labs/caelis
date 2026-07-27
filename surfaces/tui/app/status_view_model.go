@@ -1,12 +1,12 @@
 package tuiapp
 
 import (
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/surfaces/statusbar"
 )
 
 type StatusViewModel = statusbar.ViewModel
 
-func statusViewModelFromSnapshot(status control.StatusSnapshot) StatusViewModel {
+func statusViewModelFromSnapshot(status controlstatus.StatusSnapshot) StatusViewModel {
 	return statusbar.FromSnapshot(status)
 }

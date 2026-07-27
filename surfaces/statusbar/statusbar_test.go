@@ -4,16 +4,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
 func TestFromSnapshotFooterOmitsActiveJobs(t *testing.T) {
-	vm := FromSnapshot(control.StatusSnapshot{
-		Usage: control.StatusUsage{
+	vm := FromSnapshot(controlstatus.StatusSnapshot{
+		Usage: controlstatus.StatusUsage{
 			TotalTokens:         42000,
 			ContextWindowTokens: 128000,
 		},
-		Runtime: control.StatusRuntime{
+		Runtime: controlstatus.StatusRuntime{
 			ActiveJobs: 3,
 			Running:    true,
 		},
@@ -31,22 +31,10 @@ func TestFromSnapshotFooterOmitsActiveJobs(t *testing.T) {
 	}
 }
 
-func TestFormatContextUsage(t *testing.T) {
-	if got := FormatContextUsage(12600, 88000); got != "13k / 88k · 14%" {
-		t.Fatalf("FormatContextUsage() = %q, want %q", got, "13k / 88k · 14%")
-	}
-	if got := FormatContextUsage(42000, 128000); got != "42k / 128k · 32%" {
-		t.Fatalf("FormatContextUsage() = %q, want %q", got, "42k / 128k · 32%")
-	}
-	if got := FormatContextUsage(1234, 0); got != "1.2k" {
-		t.Fatalf("FormatContextUsage() no window = %q, want token count", got)
-	}
-}
-
 func TestFromSnapshotFooterModeOmitsSandboxRuntimeDetails(t *testing.T) {
-	vm := FromSnapshot(control.StatusSnapshot{
-		Session: control.StatusSession{ModeLabel: "auto-review"},
-		SandboxStatus: control.StatusSandbox{
+	vm := FromSnapshot(controlstatus.StatusSnapshot{
+		Session: controlstatus.StatusSession{ModeLabel: "auto-review"},
+		SandboxStatus: controlstatus.StatusSandbox{
 			ResolvedBackend: "bwrap",
 			Route:           "sandbox",
 			SecuritySummary: "bwrap",
@@ -65,8 +53,8 @@ func TestFromSnapshotFooterModeOmitsSandboxRuntimeDetails(t *testing.T) {
 }
 
 func TestHeaderModelTextDoesNotPrefixACPControllerProvider(t *testing.T) {
-	vm := FromSnapshot(control.StatusSnapshot{
-		ModelStatus: control.StatusModel{
+	vm := FromSnapshot(controlstatus.StatusSnapshot{
+		ModelStatus: controlstatus.StatusModel{
 			Display:         "opencode/deepseek-v4-flash-free [low]",
 			Provider:        "acp",
 			ReasoningEffort: "low",
@@ -80,21 +68,21 @@ func TestHeaderModelTextDoesNotPrefixACPControllerProvider(t *testing.T) {
 }
 
 func TestFromSnapshotUsesGroupedStatus(t *testing.T) {
-	vm := FromSnapshot(control.StatusSnapshot{
-		ModelStatus: control.StatusModel{
+	vm := FromSnapshot(controlstatus.StatusSnapshot{
+		ModelStatus: controlstatus.StatusModel{
 			Display:         "grouped/model",
 			Provider:        "grouped-provider",
 			ReasoningEffort: "high",
 		},
-		Session: control.StatusSession{
+		Session: controlstatus.StatusSession{
 			ModeLabel: "manual",
 		},
-		SandboxStatus: control.StatusSandbox{
+		SandboxStatus: controlstatus.StatusSandbox{
 			ResolvedBackend: "windows",
 			Route:           "sandbox",
 			SecuritySummary: "windows",
 		},
-		Usage: control.StatusUsage{
+		Usage: controlstatus.StatusUsage{
 			TotalTokens:         64000,
 			ContextWindowTokens: 128000,
 		},

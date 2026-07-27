@@ -8,10 +8,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
-func slashPluginWithContext(ctx context.Context, service control.PluginService, send func(tea.Msg), args string) TaskResultMsg {
+func slashPluginWithContext(ctx context.Context, service controlprompt.PluginService, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	sub, rest, _ := controlprompt.ParseFirst(strings.TrimSpace(args))
 	switch sub {
@@ -61,7 +60,7 @@ func slashPluginWithContext(ctx context.Context, service control.PluginService, 
 	}
 }
 
-func sendPluginManagerPrompt(ctx context.Context, service control.PluginService, send func(tea.Msg), plugins []control.PluginSnapshot) {
+func sendPluginManagerPrompt(ctx context.Context, service controlprompt.PluginService, send func(tea.Msg), plugins []controlprompt.PluginSnapshot) {
 	if send == nil || service == nil || len(plugins) == 0 {
 		return
 	}
@@ -107,7 +106,7 @@ func sendPluginManagerPrompt(ctx context.Context, service control.PluginService,
 	go awaitPluginManagerSelection(context.WithoutCancel(ctx), service, send, plugins, responses)
 }
 
-func awaitPluginManagerSelection(ctx context.Context, service control.PluginService, send func(tea.Msg), plugins []control.PluginSnapshot, responses <-chan PromptResponse) {
+func awaitPluginManagerSelection(ctx context.Context, service controlprompt.PluginService, send func(tea.Msg), plugins []controlprompt.PluginSnapshot, responses <-chan PromptResponse) {
 	ctx = contextOrBackground(ctx)
 	var response PromptResponse
 	select {
@@ -169,7 +168,7 @@ func pluginUsageText() string {
 	return "usage: /plugin install <plugin@marketplace|path> | marketplace add|list|update|rm | manage | rm <id>"
 }
 
-func formatPluginDetail(p control.PluginSnapshot) string {
+func formatPluginDetail(p controlprompt.PluginSnapshot) string {
 	lines := []string{fmt.Sprintf("plugin info: %s", p.ID)}
 	statusStr := p.Status
 	if !p.Enabled {

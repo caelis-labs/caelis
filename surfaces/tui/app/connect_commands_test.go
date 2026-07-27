@@ -11,35 +11,36 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelprofile"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 type acpConnectControlStub struct {
-	control.Service
+	controlprompt.Service
 	req          controlagents.ConnectRequest
 	disconnected string
 }
 
 type modelConnectControlStub struct {
-	control.Service
-	agents        []control.AgentCandidate
-	status        control.AgentStatusSnapshot
+	controlprompt.Service
+	agents        []controlprompt.AgentCandidate
+	status        controlprompt.AgentStatusSnapshot
 	bindingStatus agentbinding.Status
 }
 
-func (*modelConnectControlStub) Connect(context.Context, control.ConnectConfig) (control.StatusSnapshot, error) {
-	return control.StatusSnapshot{ModelStatus: control.StatusModel{Display: "openai/gpt-5.6"}}, nil
+func (*modelConnectControlStub) Connect(context.Context, controlprompt.ConnectConfig) (controlstatus.StatusSnapshot, error) {
+	return controlstatus.StatusSnapshot{ModelStatus: controlstatus.StatusModel{Display: "openai/gpt-5.6"}}, nil
 }
 
-func (s *modelConnectControlStub) AgentStatus(context.Context) (control.AgentStatusSnapshot, error) {
+func (s *modelConnectControlStub) AgentStatus(context.Context) (controlprompt.AgentStatusSnapshot, error) {
 	return s.status, nil
 }
 
-func (s *modelConnectControlStub) ListAgents(context.Context, int) ([]control.AgentCandidate, error) {
+func (s *modelConnectControlStub) ListAgents(context.Context, int) ([]controlprompt.AgentCandidate, error) {
 	if len(s.agents) > 0 {
 		return slices.Clone(s.agents), nil
 	}
-	return []control.AgentCandidate{{Name: "sol", Description: "GPT 5.6 Sol"}}, nil
+	return []controlprompt.AgentCandidate{{Name: "sol", Description: "GPT 5.6 Sol"}}, nil
 }
 
 func (s *modelConnectControlStub) AgentBindingStatus(context.Context) (agentbinding.Status, error) {
@@ -156,11 +157,11 @@ func TestAgentSlashCommandsHideRosterAndKeepProfileRunsSessionScoped(t *testing.
 	t.Parallel()
 
 	service := &modelConnectControlStub{
-		agents: []control.AgentCandidate{
+		agents: []controlprompt.AgentCandidate{
 			{Name: "codex", Description: "Codex ACP Agent"},
 			{Name: "claude", Description: "Claude ACP Agent"},
 		},
-		status: control.AgentStatusSnapshot{Participants: []control.AgentParticipantSnapshot{{
+		status: controlprompt.AgentStatusSnapshot{Participants: []controlprompt.AgentParticipantSnapshot{{
 			ID: "participant-1", Label: "@lina", AgentName: "codex", Kind: "acp", Role: "sidecar", Source: "slash_profile_breeze",
 		}}},
 		bindingStatus: subagentTestStatus(),

@@ -16,8 +16,8 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
@@ -116,7 +116,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalAdapterForSession(first) error = %v", err)
 	}
-	result, err := headless.RunOnce(ctx, driver, control.Submission{Text: prompt}, headless.Options{})
+	result, err := headless.RunOnce(ctx, driver, controlprompt.Submission{Text: prompt}, headless.Options{})
 	if err != nil {
 		t.Fatalf("RunOnce(claude) error = %v", err)
 	}
@@ -147,7 +147,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalAdapterForSession(second) error = %v", err)
 	}
-	result, err = headless.RunOnce(ctx, driver, control.Submission{Text: "Reply with exactly this text and no markdown: " + wantSecond}, headless.Options{})
+	result, err = headless.RunOnce(ctx, driver, controlprompt.Submission{Text: "Reply with exactly this text and no markdown: " + wantSecond}, headless.Options{})
 	if err != nil {
 		t.Fatalf("RunOnce(second Claude turn) error = %v", err)
 	}

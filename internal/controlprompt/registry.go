@@ -3,8 +3,6 @@ package controlprompt
 import (
 	"runtime"
 	"strings"
-
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 // CommandSpec describes one slash command in the shared Control prompt catalog.
@@ -16,7 +14,7 @@ type CommandSpec struct {
 	Hidden           bool
 	LocalDuringACP   bool
 	Platforms        []string
-	ArgCandidates    []control.SlashArgCandidate
+	ArgCandidates    []SlashArgCandidate
 	DynamicCompleter bool
 }
 
@@ -271,19 +269,13 @@ func IsLocalDuringACPForPlatform(name string, goos string) bool {
 	return ok && spec.LocalDuringACP
 }
 
-// HelpText renders help text from the canonical specs. Unknown command names
-// are retained so dynamic ACP child commands can appear in the same list.
-func HelpText(names []string) string {
-	return control.FormatCommandHelp(HelpSnapshot(names))
-}
-
 // HelpSnapshot returns the current slash command catalog as domain data. It
 // intentionally does not describe columns, grouping, or visual layout.
-func HelpSnapshot(names []string) control.CommandHelpSnapshot {
+func HelpSnapshot(names []string) CommandHelpSnapshot {
 	if len(names) == 0 {
 		names = DefaultNames()
 	}
-	out := control.CommandHelpSnapshot{Items: make([]control.CommandHelpItem, 0, len(names))}
+	out := CommandHelpSnapshot{Items: make([]CommandHelpItem, 0, len(names))}
 	seen := map[string]struct{}{}
 	for _, command := range names {
 		name := normalizeName(command)
@@ -296,7 +288,7 @@ func HelpSnapshot(names []string) control.CommandHelpSnapshot {
 		seen[name] = struct{}{}
 		spec, known := Lookup(name)
 		if !known {
-			out.Items = append(out.Items, control.CommandHelpItem{
+			out.Items = append(out.Items, CommandHelpItem{
 				Name:        name,
 				Usage:       "/" + name + " <prompt>",
 				Description: "Send a prompt to the registered ACP agent",
@@ -309,7 +301,7 @@ func HelpSnapshot(names []string) control.CommandHelpSnapshot {
 		if usage == "" {
 			usage = "/" + spec.Name
 		}
-		out.Items = append(out.Items, control.CommandHelpItem{
+		out.Items = append(out.Items, CommandHelpItem{
 			Name:           spec.Name,
 			Usage:          usage,
 			Description:    strings.TrimSpace(spec.Description),
@@ -337,29 +329,29 @@ func cleanHelpDetails(details []string) []string {
 // RootArgCandidates returns static first-level argument candidates for command.
 // Dynamic completions such as model aliases, agent catalogs, and connect wizard
 // values remain owned by the driver.
-func RootArgCandidates(command string) []control.SlashArgCandidate {
+func RootArgCandidates(command string) []SlashArgCandidate {
 	return RootArgCandidatesForPlatform(command, runtime.GOOS)
 }
 
-func RootArgCandidatesForPlatform(command string, goos string) []control.SlashArgCandidate {
+func RootArgCandidatesForPlatform(command string, goos string) []SlashArgCandidate {
 	spec, ok := LookupForPlatform(command, goos)
 	if !ok || len(spec.ArgCandidates) == 0 {
 		return nil
 	}
-	out := make([]control.SlashArgCandidate, len(spec.ArgCandidates))
+	out := make([]SlashArgCandidate, len(spec.ArgCandidates))
 	copy(out, spec.ArgCandidates)
 	return out
 }
 
-func modelRootCandidates() []control.SlashArgCandidate {
-	return []control.SlashArgCandidate{
+func modelRootCandidates() []SlashArgCandidate {
+	return []SlashArgCandidate{
 		{Value: "use", Display: "use", Detail: "Switch current model alias"},
 		{Value: "del", Display: "del", Detail: "Delete stored model alias"},
 	}
 }
 
-func pluginRootCandidates() []control.SlashArgCandidate {
-	return []control.SlashArgCandidate{
+func pluginRootCandidates() []SlashArgCandidate {
+	return []SlashArgCandidate{
 		{Value: "install", Display: "install", Detail: "Install a Claude-compatible or native Caelis plugin"},
 		{Value: "marketplace", Display: "marketplace", Detail: "Manage plugin marketplaces"},
 		{Value: "manage", Display: "manage", Detail: "List, enable, or disable installed plugins"},

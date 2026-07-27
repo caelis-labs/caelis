@@ -6,24 +6,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 func TestRenderSlashStatusShowsSubscriptionLimits(t *testing.T) {
 	reset := time.Date(2026, time.July, 29, 7, 12, 0, 0, time.Local)
-	lines := renderSlashStatusLines(control.StatusSnapshot{RateLimits: control.StatusRateLimits{
+	lines := renderSlashStatusLines(controlstatus.StatusSnapshot{RateLimits: controlstatus.StatusRateLimits{
 		Provider: "openai-codex",
 		Plan:     "pro",
-		Limits: []control.StatusRateLimit{{
+		Limits: []controlstatus.StatusRateLimit{{
 			ID: "codex",
-			Windows: []control.StatusRateLimitWindow{{
+			Windows: []controlstatus.StatusRateLimitWindow{{
 				UsedPercent: 22, DurationMinutes: int64((7 * 24 * time.Hour) / time.Minute), ResetsAt: reset,
 			}},
 		}, {
 			ID:   "codex_spark",
 			Name: "GPT-5.3-Codex-Spark",
-			Windows: []control.StatusRateLimitWindow{{
+			Windows: []controlstatus.StatusRateLimitWindow{{
 				UsedPercent: 0, DurationMinutes: int64((7 * 24 * time.Hour) / time.Minute),
 			}},
 		}},

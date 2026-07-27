@@ -8,15 +8,15 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
-func (r router) dispatchSlash(ctx context.Context, cmd string, args string, argsStart int, fullText string, attachments []control.Attachment) (Result, error) {
+func (r router) dispatchSlash(ctx context.Context, cmd string, args string, argsStart int, fullText string, attachments []Attachment) (Result, error) {
 	switch strings.ToLower(strings.TrimSpace(cmd)) {
 	case "help":
 		names := r.helpCommandNames(ctx)
 		help := HelpSnapshot(names)
-		return r.slashResult(control.NewHelpSlashResult(help)), nil
+		return r.slashResult(NewHelpSlashResult(help)), nil
 	case "review":
 		return r.dispatchReview(ctx, args, argsStart, fullText, attachments)
 	case "new":
@@ -35,7 +35,7 @@ func (r router) dispatchSlash(ctx context.Context, cmd string, args string, args
 	return r.dispatchAgentRun(ctx, cmd, args, AttachmentsForPromptRange(attachments, argsStart, len([]rune(strings.TrimSpace(fullText)))))
 }
 
-func (r router) dispatchReview(ctx context.Context, args string, argsStart int, fullText string, attachments []control.Attachment) (Result, error) {
+func (r router) dispatchReview(ctx context.Context, args string, argsStart int, fullText string, attachments []Attachment) (Result, error) {
 	promptAttachments := AttachmentsForPromptRange(attachments, argsStart, len([]rune(strings.TrimSpace(fullText))))
 	turn, err := r.service.StartReview(ctx, strings.TrimSpace(args), promptAttachments)
 	if err != nil {
@@ -109,7 +109,7 @@ func (r router) dispatchStatus(ctx context.Context, args string) (Result, error)
 	if err != nil {
 		return Result{}, FriendlyCommandError("status", err)
 	}
-	result := r.slashResult(control.NewStatusSlashResult(status))
+	result := r.slashResult(NewStatusSlashResult(status))
 	result.StatusUpdate = &status
 	return result, nil
 }
@@ -123,7 +123,7 @@ func (r router) dispatchDoctor(ctx context.Context, args string) (Result, error)
 		return Result{}, FriendlyCommandError("doctor", err)
 	}
 	result := Result{Handled: true, SuppressTurnDivider: true}
-	setup := control.SandboxSetupViewFromStatus(status)
+	setup := controlstatus.SandboxSetupViewFromStatus(status)
 	if setup.RepairRequired {
 		result.Events = append(result.Events, notice("Windows sandbox repair started. Approve the UAC prompt if shown."))
 		repairedStatus, err := r.service.RepairSandbox(ctx)
@@ -131,20 +131,21 @@ func (r router) dispatchDoctor(ctx context.Context, args string) (Result, error)
 			return Result{}, FriendlyCommandError("doctor", err)
 		}
 		status = repairedStatus
-		setup = control.SandboxSetupViewFromStatus(status)
+		setup = controlstatus.SandboxSetupViewFromStatus(status)
 		if setup.AnyRequired {
 			result.Events = append(result.Events, notice("Windows sandbox repair still needs attention. Run /doctor for details."))
 		} else {
 			result.Events = append(result.Events, notice("Windows sandbox repair complete."))
 		}
 	}
-	result.Events = append(result.Events, notice(control.FormatDoctorSnapshot(status)))
+	doctor := NewDoctorSlashResult(status)
+	result.SlashResult = &doctor
 	return result, nil
 }
 
 func (r router) dispatchModel(ctx context.Context, args string) (Result, error) {
 	sub, rest, _ := ParseFirst(strings.TrimSpace(args))
-	_, activeACP := control.ActiveACPStatus(ctx, r.service)
+	_, activeACP := ActiveACPStatus(ctx, r.service)
 	switch strings.ToLower(strings.TrimSpace(sub)) {
 	case "use":
 		alias, reasoning := parseModelUseArgs(rest)
@@ -204,7 +205,7 @@ func (r router) dispatchCompact(ctx context.Context, args string) (Result, error
 	return result, nil
 }
 
-func (r router) dispatchAgentRun(ctx context.Context, command string, promptText string, attachments []control.Attachment) (Result, error) {
+func (r router) dispatchAgentRun(ctx context.Context, command string, promptText string, attachments []Attachment) (Result, error) {
 	command = strings.ToLower(strings.TrimSpace(command))
 	promptText = strings.TrimSpace(promptText)
 	if promptText == "" && len(attachments) == 0 {

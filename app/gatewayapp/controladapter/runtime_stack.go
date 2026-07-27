@@ -17,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -151,17 +152,17 @@ type ACPAgentInfo struct {
 // PluginRuntimeDeps carries plugin and marketplace commands. Each hook fails
 // when its command is invoked but absent.
 type PluginRuntimeDeps struct {
-	ListPluginsFn       func(context.Context) ([]PluginSnapshot, error)
-	AddMarketplaceFn    func(context.Context, string) (MarketplaceSnapshot, error)
-	ListMarketplacesFn  func(context.Context) ([]MarketplaceSnapshot, error)
-	UpdateMarketplaceFn func(context.Context, string) (MarketplaceSnapshot, error)
+	ListPluginsFn       func(context.Context) ([]controlprompt.PluginSnapshot, error)
+	AddMarketplaceFn    func(context.Context, string) (controlprompt.MarketplaceSnapshot, error)
+	ListMarketplacesFn  func(context.Context) ([]controlprompt.MarketplaceSnapshot, error)
+	UpdateMarketplaceFn func(context.Context, string) (controlprompt.MarketplaceSnapshot, error)
 	RemoveMarketplaceFn func(context.Context, string) error
-	AddPluginPathFn     func(context.Context, string) (PluginSnapshot, error)
-	InstallPluginFn     func(context.Context, string) (PluginSnapshot, error)
-	EnablePluginFn      func(context.Context, string) (PluginSnapshot, error)
-	DisablePluginFn     func(context.Context, string) (PluginSnapshot, error)
+	AddPluginPathFn     func(context.Context, string) (controlprompt.PluginSnapshot, error)
+	InstallPluginFn     func(context.Context, string) (controlprompt.PluginSnapshot, error)
+	EnablePluginFn      func(context.Context, string) (controlprompt.PluginSnapshot, error)
+	DisablePluginFn     func(context.Context, string) (controlprompt.PluginSnapshot, error)
 	RemovePluginFn      func(context.Context, string) error
-	InspectPluginFn     func(context.Context, string) (PluginSnapshot, error)
+	InspectPluginFn     func(context.Context, string) (controlprompt.PluginSnapshot, error)
 }
 
 // GatewayRuntimeDeps is required for turn/session stream operations.

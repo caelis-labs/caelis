@@ -12,11 +12,12 @@ import (
 	"unicode"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 const maxAttachmentImageBytes = 20_000_000
 
-func contentPartsFromSubmission(input string, items []Attachment, workspace string) ([]model.ContentPart, error) {
+func contentPartsFromSubmission(input string, items []controlprompt.Attachment, workspace string) ([]model.ContentPart, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}
@@ -24,7 +25,7 @@ func contentPartsFromSubmission(input string, items []Attachment, workspace stri
 	err := walkSubmissionAttachments(input, items, func(text string) error {
 		out = append(out, model.ContentPart{Type: model.ContentPartText, Text: text})
 		return nil
-	}, func(_ int, item Attachment) error {
+	}, func(_ int, item controlprompt.Attachment) error {
 		part, err := imageContentPartFromAttachment(item, workspace)
 		if err != nil {
 			return err
@@ -41,7 +42,7 @@ func contentPartsFromSubmission(input string, items []Attachment, workspace stri
 	return out, nil
 }
 
-func displayInputWithAttachments(input string, items []Attachment) string {
+func displayInputWithAttachments(input string, items []controlprompt.Attachment) string {
 	input = strings.TrimSpace(input)
 	if len(items) == 0 {
 		return input
@@ -50,14 +51,14 @@ func displayInputWithAttachments(input string, items []Attachment) string {
 	_ = walkSubmissionAttachments(input, items, func(text string) error {
 		out.append(text)
 		return nil
-	}, func(index int, _ Attachment) error {
+	}, func(index int, _ controlprompt.Attachment) error {
 		out.append(fmt.Sprintf("[image #%d]", index))
 		return nil
 	})
 	return out.String()
 }
 
-func walkSubmissionAttachments(input string, items []Attachment, text func(string) error, attachment func(int, Attachment) error) error {
+func walkSubmissionAttachments(input string, items []controlprompt.Attachment, text func(string) error, attachment func(int, controlprompt.Attachment) error) error {
 	input = strings.TrimSpace(input)
 	inputRunes := []rune(input)
 	items = cloneAndSortAttachments(items, len(inputRunes))
@@ -145,7 +146,7 @@ func lastDisplayInputRune(s string) (rune, bool) {
 	return out, ok
 }
 
-func imageContentPartFromAttachment(item Attachment, workspace string) (model.ContentPart, error) {
+func imageContentPartFromAttachment(item controlprompt.Attachment, workspace string) (model.ContentPart, error) {
 	if part, ok, err := imageContentPartFromInlineAttachment(item); ok || err != nil {
 		return part, err
 	}
@@ -183,7 +184,7 @@ func imageContentPartFromAttachment(item Attachment, workspace string) (model.Co
 	}, nil
 }
 
-func imageContentPartFromInlineAttachment(item Attachment) (model.ContentPart, bool, error) {
+func imageContentPartFromInlineAttachment(item controlprompt.Attachment) (model.ContentPart, bool, error) {
 	data := strings.TrimSpace(item.Data)
 	if data == "" {
 		return model.ContentPart{}, false, nil
@@ -210,11 +211,11 @@ func imageContentPartFromInlineAttachment(item Attachment) (model.ContentPart, b
 	}, true, nil
 }
 
-func cloneAndSortAttachments(items []Attachment, textLen int) []Attachment {
+func cloneAndSortAttachments(items []controlprompt.Attachment, textLen int) []controlprompt.Attachment {
 	if len(items) == 0 {
 		return nil
 	}
-	out := make([]Attachment, 0, len(items))
+	out := make([]controlprompt.Attachment, 0, len(items))
 	for _, item := range items {
 		name := strings.TrimSpace(item.Name)
 		data := strings.TrimSpace(item.Data)
@@ -228,7 +229,7 @@ func cloneAndSortAttachments(items []Attachment, textLen int) []Attachment {
 		if offset > textLen {
 			offset = textLen
 		}
-		out = append(out, Attachment{
+		out = append(out, controlprompt.Attachment{
 			Name:     name,
 			Offset:   offset,
 			MimeType: strings.TrimSpace(item.MimeType),
@@ -238,7 +239,7 @@ func cloneAndSortAttachments(items []Attachment, textLen int) []Attachment {
 	if len(out) <= 1 {
 		return out
 	}
-	slices.SortStableFunc(out, func(left Attachment, right Attachment) int {
+	slices.SortStableFunc(out, func(left controlprompt.Attachment, right controlprompt.Attachment) int {
 		switch {
 		case left.Offset < right.Offset:
 			return -1
@@ -251,7 +252,7 @@ func cloneAndSortAttachments(items []Attachment, textLen int) []Attachment {
 	return out
 }
 
-func contentPartsFromAttachments(items []Attachment, workspace string) ([]model.ContentPart, error) {
+func contentPartsFromAttachments(items []controlprompt.Attachment, workspace string) ([]model.ContentPart, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}

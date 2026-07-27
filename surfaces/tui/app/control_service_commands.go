@@ -10,8 +10,6 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
@@ -68,7 +66,7 @@ func executeTUIPrivateSlashCommandWithContext(ctx context.Context, service Contr
 	if controlprompt.IsSharedKnown(cmd) || !controlprompt.IsKnown(cmd) {
 		return executeLineResult{}, false
 	}
-	if _, activeACP := control.ActiveACPStatus(ctx, service); activeACP {
+	if _, activeACP := controlprompt.ActiveACPStatus(ctx, service); activeACP {
 		if !controlprompt.IsLocalDuringACP(cmd) {
 			return executeLineResult{}, false
 		}
@@ -76,7 +74,7 @@ func executeTUIPrivateSlashCommandWithContext(ctx context.Context, service Contr
 	return dispatchTUIPrivateSlashCommandWithContext(ctx, service, sender, cmd, args), true
 }
 
-func controlServiceCanSubmitRunningPrompt(ctx context.Context, service control.Service) bool {
+func controlServiceCanSubmitRunningPrompt(ctx context.Context, service controlprompt.Service) bool {
 	if service == nil {
 		return true
 	}
@@ -93,7 +91,7 @@ func controlServiceCanSubmitRunningPrompt(ctx context.Context, service control.S
 	return strings.EqualFold(strings.TrimSpace(status.ActiveTurnKind), "kernel")
 }
 
-func runSubagentTurn(ctx context.Context, sender *ProgramSender, turn control.Turn) executeLineResult {
+func runSubagentTurn(ctx context.Context, sender *ProgramSender, turn controlprompt.Turn) executeLineResult {
 	if turn == nil {
 		return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: true}}
 	}
@@ -110,11 +108,11 @@ func projectResumeReplayEvents(events []eventstream.Envelope) []TranscriptEvent 
 	return transcript.ProjectReplayEvents(events, tuiTranscriptProjector{})
 }
 
-func slashConnect(service control.Service, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {
+func slashConnect(service controlprompt.Service, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {
 	return slashConnectWithContext(context.Background(), service, agents, send, args)
 }
 
-func slashConnectWithContext(ctx context.Context, service control.Service, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {
+func slashConnectWithContext(ctx context.Context, service controlprompt.Service, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	kind, payloadText, _ := controlprompt.ParseFirst(strings.TrimSpace(args))
 	if strings.EqualFold(strings.TrimSpace(kind), "disconnect") {
@@ -191,7 +189,7 @@ func slashConnectWithContext(ctx context.Context, service control.Service, agent
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
-func connectedModelAliases(cfg control.ConnectConfig) []string {
+func connectedModelAliases(cfg controlprompt.ConnectConfig) []string {
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
 	if template, ok := modelconfig.LookupProvider(provider); ok {
 		provider = template.Provider

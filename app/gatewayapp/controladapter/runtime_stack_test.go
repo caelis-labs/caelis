@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 func TestRuntimeStackPluginDepsUseGroupedField(t *testing.T) {
@@ -12,8 +13,8 @@ func TestRuntimeStackPluginDepsUseGroupedField(t *testing.T) {
 
 	stack := &RuntimeStack{
 		Plugin: PluginRuntimeDeps{
-			ListPluginsFn: func(context.Context) ([]PluginSnapshot, error) {
-				return []PluginSnapshot{{ID: "grouped"}}, nil
+			ListPluginsFn: func(context.Context) ([]controlprompt.PluginSnapshot, error) {
+				return []controlprompt.PluginSnapshot{{ID: "grouped"}}, nil
 			},
 		},
 	}

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
@@ -131,7 +131,7 @@ func (t *eventstreamIntegrationTurn) Events() <-chan eventstream.Envelope {
 	return t.events
 }
 
-func (t *eventstreamIntegrationTurn) SubmitApproval(context.Context, control.ApprovalDecision) error {
+func (t *eventstreamIntegrationTurn) SubmitApproval(context.Context, controlprompt.ApprovalDecision) error {
 	return nil
 }
 

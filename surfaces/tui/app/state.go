@@ -12,7 +12,6 @@ import (
 	"github.com/charmbracelet/colorprofile"
 
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -123,7 +122,7 @@ type Config struct {
 	Commands               []string
 	CommandDetails         map[string]string
 	Wizards                []WizardDef
-	ControlService         control.Service
+	ControlService         controlprompt.Service
 	TaskStreams            taskstream.Service
 	TaskStreamPrincipal    taskstream.Principal
 	ProgramSender          *ProgramSender

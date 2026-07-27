@@ -7,15 +7,14 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
-// router dispatches surface-neutral prompt input through control.Service.
+// router dispatches surface-neutral prompt input through Service.
 type router struct {
-	service               control.Service
+	service               Service
 	skillResolver         SkillResolver
-	commandNames          func(context.Context, control.Service) []string
+	commandNames          func(context.Context, Service) []string
 	coreCommandAllowed    func(context.Context, string) bool
 	dynamicCommandAllowed func(context.Context, string) bool
 	privateSlashHandler   PrivateSlashHandler
@@ -92,7 +91,7 @@ func (r router) shouldDispatchSlash(ctx context.Context, cmd string) bool {
 			// so they intentionally bypass the TUI active-controller gate.
 			return true
 		}
-		if control.ACPControllerActive(ctx, r.service) {
+		if ACPControllerActive(ctx, r.service) {
 			return IsLocalDuringACP(cmd)
 		}
 		return true
@@ -151,7 +150,7 @@ func (r router) noticeResult(text string) Result {
 	}
 }
 
-func (r router) slashResult(result control.SlashCommandResult) Result {
+func (r router) slashResult(result SlashCommandResult) Result {
 	return Result{
 		Handled:             true,
 		SlashResult:         &result,
@@ -194,7 +193,7 @@ func (r router) isRemoteControllerCommand(ctx context.Context, name string) bool
 	return false
 }
 
-func directAgentRuns(status control.AgentStatusSnapshot) []controlagents.Run {
+func directAgentRuns(status AgentStatusSnapshot) []controlagents.Run {
 	runs := make([]controlagents.Run, 0, len(status.Participants))
 	for _, participant := range status.Participants {
 		runs = append(runs, controlagents.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))

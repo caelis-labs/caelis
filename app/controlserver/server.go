@@ -3,8 +3,6 @@ package controlserver
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -13,11 +11,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controlclient "github.com/caelis-labs/caelis/control/client"
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 	"github.com/caelis-labs/caelis/surfaces/appserver"
 )
+
+// Dependencies contains only the Control contracts exposed over HTTP.
+// Product assembly remains outside the listener package.
+type Dependencies struct {
+	Service     controlclient.Service
+	TaskStreams taskstream.Service
+}
 
 type Config struct {
 	Address       string
@@ -30,42 +34,15 @@ type Config struct {
 	Heartbeat     time.Duration
 }
 
-// BearerTokenAuthenticator constructs the production static-token boundary
-// for Control servers. The principal is trusted configuration,
-// never client-supplied request data.
-func BearerTokenAuthenticator(token string, principal controlclient.Principal) (appserver.Authenticator, error) {
-	token = strings.TrimSpace(token)
-	principal.ID = strings.TrimSpace(principal.ID)
-	if len(token) < sha256.Size || principal.ID == "" || strings.ContainsAny(token, " \t\r\n") {
-		return nil, errors.New("controlserver: bearer token and principal are required")
-	}
-	expected := sha256.Sum256([]byte(token))
-	return appserver.AuthenticatorFunc(func(request *http.Request) (controlclient.Principal, error) {
-		values := request.Header.Values("Authorization")
-		if len(values) != 1 || strings.Contains(values[0], ",") {
-			return controlclient.Principal{}, errorcode.New(errorcode.Unauthenticated, "controlserver: bearer authentication failed")
-		}
-		parts := strings.Fields(values[0])
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-			return controlclient.Principal{}, errorcode.New(errorcode.Unauthenticated, "controlserver: bearer authentication failed")
-		}
-		provided := sha256.Sum256([]byte(parts[1]))
-		if subtle.ConstantTimeCompare(provided[:], expected[:]) != 1 {
-			return controlclient.Principal{}, errorcode.New(errorcode.Unauthenticated, "controlserver: bearer authentication failed")
-		}
-		return principal, nil
-	}), nil
-}
-
-func Handler(stack *gatewayapp.Stack, config Config) (http.Handler, error) {
-	if stack == nil {
-		return nil, errors.New("controlserver: gateway stack is required")
+func Handler(deps Dependencies, config Config) (http.Handler, error) {
+	if deps.Service == nil {
+		return nil, errors.New("controlserver: Control client service is required")
 	}
 	if config.Authenticator == nil {
 		return nil, errors.New("controlserver: authenticator is required for an HTTP handler")
 	}
 	server, err := appserver.New(appserver.Config{
-		Service: stack.ControlClient(), TaskStreams: stack.TaskStreams(), Authenticator: config.Authenticator,
+		Service: deps.Service, TaskStreams: deps.TaskStreams, Authenticator: config.Authenticator,
 		AllowedHosts: append([]string(nil), config.AllowedHosts...), Heartbeat: config.Heartbeat,
 	})
 	if err != nil {
@@ -74,7 +51,7 @@ func Handler(stack *gatewayapp.Stack, config Config) (http.Handler, error) {
 	return server.Handler(), nil
 }
 
-func ListenAndServe(ctx context.Context, stack *gatewayapp.Stack, config Config) error {
+func ListenAndServe(ctx context.Context, deps Dependencies, config Config) error {
 	resolved, useTLS, err := resolveNetworkConfig(config)
 	if err != nil {
 		return err
@@ -86,7 +63,7 @@ func ListenAndServe(ctx context.Context, stack *gatewayapp.Stack, config Config)
 			return fmt.Errorf("controlserver: load TLS certificate: %w", err)
 		}
 	}
-	handler, err := Handler(stack, resolved)
+	handler, err := Handler(deps, resolved)
 	if err != nil {
 		return err
 	}
@@ -162,7 +139,7 @@ func resolveNetworkConfig(config Config) (Config, bool, error) {
 		if loadErr != nil {
 			return Config{}, false, loadErr
 		}
-		config.Authenticator, loadErr = BearerTokenAuthenticator(token, config.Principal)
+		config.Authenticator, loadErr = appserver.BearerTokenAuthenticator(token, config.Principal)
 		if loadErr != nil {
 			return Config{}, false, loadErr
 		}

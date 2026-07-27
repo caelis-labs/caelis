@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/surfaces/statusbar"
+	"github.com/caelis-labs/caelis/surfaces/promptview"
 )
 
 func TestNewModelDoesNotRunStatusCallbacksBeforeFirstFrame(t *testing.T) {
@@ -101,7 +101,7 @@ func TestMainACPUsageUpdatesStatusContextForLiveAndReplay(t *testing.T) {
 			ContextWindowTokens: 100000,
 		}, nil),
 	}
-	want := statusbar.FormatContextUsage(1600, 100000)
+	want := promptview.FormatContextUsage(1600, 100000)
 
 	updated, _ := model.Update(usage)
 	model = updated.(*Model)

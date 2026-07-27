@@ -6,14 +6,14 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type Starter interface {
-	Submit(context.Context, control.Submission) (control.Turn, error)
+	Submit(context.Context, controlprompt.Submission) (controlprompt.Turn, error)
 }
 
 type ApprovalPolicy string
@@ -42,7 +42,7 @@ type Result struct {
 	PromptTokens int
 }
 
-func RunOnce(ctx context.Context, starter Starter, submission control.Submission, opts Options) (Result, error) {
+func RunOnce(ctx context.Context, starter Starter, submission controlprompt.Submission, opts Options) (Result, error) {
 	turn, err := starter.Submit(ctx, submission)
 	if err != nil {
 		return Result{}, err
@@ -152,9 +152,9 @@ func resolveApproval(ctx context.Context, opts Options, req ApprovalRequest) (ap
 	return approval.Decision{Approved: false, Outcome: string(approval.StatusRejected)}, nil
 }
 
-func controlApprovalDecision(req ApprovalRequest, decision approval.Decision) control.ApprovalDecision {
+func controlApprovalDecision(req ApprovalRequest, decision approval.Decision) controlprompt.ApprovalDecision {
 	response := approval.RuntimeResponseFromFinalReview(approval.FinalizeReviewResult(req.Payload, decision))
-	return control.ApprovalDecision{
+	return controlprompt.ApprovalDecision{
 		RequestID:  req.RequestID,
 		Outcome:    response.Outcome,
 		OptionID:   response.OptionID,

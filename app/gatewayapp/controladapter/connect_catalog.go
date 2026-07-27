@@ -11,6 +11,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 )
 
@@ -23,7 +24,7 @@ type connectModelChoice struct {
 
 type connectWizardPayload = connectwizard.ConnectWizardState
 
-func completeConnectArgs(ctx context.Context, driver *Adapter, command string, query string, limit int) ([]SlashArgCandidate, error) {
+func completeConnectArgs(ctx context.Context, driver *Adapter, command string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	switch {
 	case command == "connect":
 		return completeConnectSources(ctx, driver, query, limit), nil
@@ -60,14 +61,14 @@ func completeConnectArgs(ctx context.Context, driver *Adapter, command string, q
 	}
 }
 
-func completeConnectSources(ctx context.Context, driver *Adapter, query string, limit int) []SlashArgCandidate {
-	candidates := []SlashArgCandidate{
+func completeConnectSources(ctx context.Context, driver *Adapter, query string, limit int) []controlprompt.SlashArgCandidate {
+	candidates := []controlprompt.SlashArgCandidate{
 		{Value: "model", Display: "Model provider", Detail: "Connect an API or local model provider"},
 		{Value: "acp", Display: "Local ACP Agent", Detail: "Connect Codex, Claude, or another local ACP command"},
 	}
 	if driver != nil {
 		if connected, err := driver.DisconnectCandidates(ctx); err == nil && len(connected) > 0 {
-			candidates = append(candidates, SlashArgCandidate{
+			candidates = append(candidates, controlprompt.SlashArgCandidate{
 				Value: "disconnect", Display: "Disconnect local ACP Agent", Detail: "Remove one connected Agent from the Caelis roster",
 			})
 		}
@@ -75,7 +76,7 @@ func completeConnectSources(ctx context.Context, driver *Adapter, query string, 
 	return filterSlashArgCandidates(candidates, query, limit)
 }
 
-func completeConnectDisconnectAgents(ctx context.Context, driver *Adapter, query string, limit int) ([]SlashArgCandidate, error) {
+func completeConnectDisconnectAgents(ctx context.Context, driver *Adapter, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	if driver == nil {
 		return nil, missingRuntimeDependency("ACP Agent disconnect")
 	}
@@ -83,7 +84,7 @@ func completeConnectDisconnectAgents(ctx context.Context, driver *Adapter, query
 	if err != nil {
 		return nil, err
 	}
-	candidates := make([]SlashArgCandidate, 0, len(connected))
+	candidates := make([]controlprompt.SlashArgCandidate, 0, len(connected))
 	for _, candidate := range connected {
 		detail := firstNonEmpty(candidate.Name, candidate.ConnectionID, "local ACP Agent")
 		if candidate.LastOnConnection {
@@ -91,14 +92,14 @@ func completeConnectDisconnectAgents(ctx context.Context, driver *Adapter, query
 		} else {
 			detail += fmt.Sprintf(" · %d other %s will remain", candidate.SiblingCount, pluralAgent(candidate.SiblingCount))
 		}
-		candidates = append(candidates, SlashArgCandidate{
+		candidates = append(candidates, controlprompt.SlashArgCandidate{
 			Value: candidate.AgentID, Display: "/" + candidate.AgentID, Detail: detail,
 		})
 	}
 	return filterSlashArgCandidates(candidates, query, limit), nil
 }
 
-func completeConnectDisconnectConfirmation(ctx context.Context, driver *Adapter, agentID string, query string, limit int) ([]SlashArgCandidate, error) {
+func completeConnectDisconnectConfirmation(ctx context.Context, driver *Adapter, agentID string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	if driver == nil {
 		return nil, missingRuntimeDependency("ACP Agent disconnect")
 	}
@@ -115,7 +116,7 @@ func completeConnectDisconnectConfirmation(ctx context.Context, driver *Adapter,
 		if candidate.LastOnConnection {
 			detail = "Remove the Caelis connection settings and keep the installed adapter"
 		}
-		return filterSlashArgCandidates([]SlashArgCandidate{{
+		return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{{
 			Value: "confirm", Display: "Disconnect /" + candidate.AgentID, Detail: detail,
 		}}, query, limit), nil
 	}
@@ -129,22 +130,22 @@ func pluralAgent(count int) string {
 	return "Agents"
 }
 
-func completeConnectACPAgents(query string, limit int) []SlashArgCandidate {
+func completeConnectACPAgents(query string, limit int) []controlprompt.SlashArgCandidate {
 	agents := agentregistry.ConnectableBuiltInAgents()
-	candidates := make([]SlashArgCandidate, 0, len(agents)+1)
+	candidates := make([]controlprompt.SlashArgCandidate, 0, len(agents)+1)
 	for _, agent := range agents {
-		candidates = append(candidates, SlashArgCandidate{
+		candidates = append(candidates, controlprompt.SlashArgCandidate{
 			Value: agent.Name, Display: acpAgentDisplayName(agent.Name), Detail: agent.Description,
 		})
 	}
-	candidates = append(candidates, SlashArgCandidate{Value: "custom", Display: "Custom command", Detail: "Run another local ACP stdio command"})
+	candidates = append(candidates, controlprompt.SlashArgCandidate{Value: "custom", Display: "Custom command", Detail: "Run another local ACP stdio command"})
 	return filterSlashArgCandidates(candidates, query, limit)
 }
 
-func completeConnectACPLaunchers(agent string, query string, limit int) []SlashArgCandidate {
+func completeConnectACPLaunchers(agent string, query string, limit int) []controlprompt.SlashArgCandidate {
 	agent = strings.ToLower(strings.TrimSpace(agent))
 	if agent == "custom" {
-		return filterSlashArgCandidates([]SlashArgCandidate{{
+		return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{{
 			Value: "command", Display: "Custom command", Detail: "Use an executable and arguments you provide",
 		}}, query, limit)
 	}
@@ -152,11 +153,11 @@ func completeConnectACPLaunchers(agent string, query string, limit int) []SlashA
 		return nil
 	}
 	if _, managed := agentregistry.BuiltinAdapterPackageFor(agent); !managed {
-		return filterSlashArgCandidates([]SlashArgCandidate{{
+		return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{{
 			Value: "installed", Display: "Installed command", Detail: "Use the ACP Agent executable already installed on PATH",
 		}}, query, limit)
 	}
-	return filterSlashArgCandidates([]SlashArgCandidate{
+	return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{
 		{Value: "managed", Display: "Managed by Caelis · Recommended", Detail: "Isolated, verified install; safe to cancel or retry. The first runtime download can be several hundred MB"},
 		{Value: "npx", Display: "npx cache", Detail: "Let npx download and cache the curated adapter on first use"},
 		{Value: "global", Display: "Global npm install", Detail: "Use or modify the adapter in your global npm environment"},
@@ -180,7 +181,7 @@ func acpAgentDisplayName(name string) string {
 	}
 }
 
-func completeConnectACPModels(ctx context.Context, driver *Adapter, raw string, query string, limit int) ([]SlashArgCandidate, error) {
+func completeConnectACPModels(ctx context.Context, driver *Adapter, raw string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	payload, snapshot, err := discoverConnectACPState(ctx, driver, raw)
 	if err != nil {
 		return nil, err
@@ -188,9 +189,9 @@ func completeConnectACPModels(ctx context.Context, driver *Adapter, raw string, 
 	if len(snapshot.Models) == 0 {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: ACP agent %q did not advertise any models", strings.TrimSpace(payload.Agent))
 	}
-	candidates := make([]SlashArgCandidate, 0, len(snapshot.Models))
+	candidates := make([]controlprompt.SlashArgCandidate, 0, len(snapshot.Models))
 	for _, model := range snapshot.Models {
-		candidates = append(candidates, SlashArgCandidate{
+		candidates = append(candidates, controlprompt.SlashArgCandidate{
 			Value: model.ID, Display: firstNonEmpty(model.Name, model.ID),
 			Detail: firstNonEmpty(model.Description, "remote ACP model"), ModelMetadataComplete: true,
 		})
@@ -198,7 +199,7 @@ func completeConnectACPModels(ctx context.Context, driver *Adapter, raw string, 
 	return filterSlashArgCandidates(candidates, query, limit), nil
 }
 
-func completeConnectACPConfig(ctx context.Context, driver *Adapter, raw string, query string, limit int) ([]SlashArgCandidate, error) {
+func completeConnectACPConfig(ctx context.Context, driver *Adapter, raw string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	payload, snapshot, err := discoverConnectACPState(ctx, driver, raw)
 	if err != nil {
 		return nil, err
@@ -206,7 +207,7 @@ func completeConnectACPConfig(ctx context.Context, driver *Adapter, raw string, 
 	if strings.TrimSpace(payload.Model) == "" {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: ACP model is required before selecting defaults")
 	}
-	candidates := []SlashArgCandidate{{Value: "default", Display: "Agent default", Detail: "Keep the ACP Agent's default session options"}}
+	candidates := []controlprompt.SlashArgCandidate{{Value: "default", Display: "Agent default", Detail: "Keep the ACP Agent's default session options"}}
 	for _, option := range snapshot.ConfigOptions {
 		if strings.EqualFold(strings.TrimSpace(option.ID), strings.TrimSpace(snapshot.ModelControl.ConfigID)) || option.Purpose != controlagents.ConfigOptionPurposeReasoningEffort {
 			continue
@@ -215,7 +216,7 @@ func completeConnectACPConfig(ctx context.Context, driver *Adapter, raw string, 
 			if strings.TrimSpace(choice.Value) == "" {
 				continue
 			}
-			candidates = append(candidates, SlashArgCandidate{
+			candidates = append(candidates, controlprompt.SlashArgCandidate{
 				Value:   option.ID + "=" + choice.Value,
 				Display: firstNonEmpty(option.Name, option.ID) + ": " + firstNonEmpty(choice.Name, choice.Value),
 				Detail:  firstNonEmpty(choice.Description, option.Description, "remote ACP session default"),
@@ -237,14 +238,14 @@ func discoverConnectACPState(ctx context.Context, driver *Adapter, raw string) (
 	return payload, snapshot, err
 }
 
-func completeConnectProviders(query string, limit int) []SlashArgCandidate {
+func completeConnectProviders(query string, limit int) []controlprompt.SlashArgCandidate {
 	templates := modelconfig.ProviderTemplates()
-	out := make([]SlashArgCandidate, 0, len(templates))
+	out := make([]controlprompt.SlashArgCandidate, 0, len(templates))
 	for _, template := range templates {
 		if query != "" && !strings.Contains(strings.ToLower(template.Label+" "+template.Description), strings.ToLower(strings.TrimSpace(query))) {
 			continue
 		}
-		out = append(out, SlashArgCandidate{
+		out = append(out, controlprompt.SlashArgCandidate{
 			Value:   template.Label,
 			Display: template.Label,
 			Detail:  strings.TrimSpace(template.Description),
@@ -257,14 +258,14 @@ func completeConnectProviders(query string, limit int) []SlashArgCandidate {
 	return out
 }
 
-func completeConnectBaseURL(ctx context.Context, driver *Adapter, provider string, query string, limit int) []SlashArgCandidate {
+func completeConnectBaseURL(ctx context.Context, driver *Adapter, provider string, query string, limit int) []controlprompt.SlashArgCandidate {
 	template, ok := modelconfig.LookupProvider(provider)
 	if !ok {
 		return nil
 	}
 	candidates := connectEndpointCandidates(template)
 	if len(candidates) == 0 {
-		candidates = append(candidates, SlashArgCandidate{Value: template.DefaultBaseURL, Display: template.DefaultBaseURL, Detail: "default base URL"})
+		candidates = append(candidates, controlprompt.SlashArgCandidate{Value: template.DefaultBaseURL, Display: template.DefaultBaseURL, Detail: "default base URL"})
 	}
 	for i := range candidates {
 		if driver != nil && driver.hasReusableConnectAuth(ctx, template.Provider, candidates[i].Value) {
@@ -275,17 +276,17 @@ func completeConnectBaseURL(ctx context.Context, driver *Adapter, provider strin
 	return filterSlashArgCandidates(candidates, query, limit)
 }
 
-func connectEndpointCandidates(template modelconfig.ProviderTemplate) []SlashArgCandidate {
+func connectEndpointCandidates(template modelconfig.ProviderTemplate) []controlprompt.SlashArgCandidate {
 	if len(template.Endpoints) == 0 {
 		return nil
 	}
-	out := make([]SlashArgCandidate, 0, len(template.Endpoints))
+	out := make([]controlprompt.SlashArgCandidate, 0, len(template.Endpoints))
 	for _, endpoint := range template.Endpoints {
 		detail := strings.TrimSpace(endpoint.Detail)
 		if endpoint.TokenEnv != "" {
 			detail = strings.Join(compactNonEmpty([]string{detail, "env:" + endpoint.TokenEnv}), " · ")
 		}
-		out = append(out, SlashArgCandidate{
+		out = append(out, controlprompt.SlashArgCandidate{
 			Value:   endpoint.BaseURL,
 			Display: endpoint.Display,
 			Detail:  detail,
@@ -294,17 +295,17 @@ func connectEndpointCandidates(template modelconfig.ProviderTemplate) []SlashArg
 	return out
 }
 
-func completeConnectTimeout(provider string, query string, limit int) []SlashArgCandidate {
+func completeConnectTimeout(provider string, query string, limit int) []controlprompt.SlashArgCandidate {
 	values := []string{"60", "120", "180"}
-	out := make([]SlashArgCandidate, 0, len(values))
+	out := make([]controlprompt.SlashArgCandidate, 0, len(values))
 	for _, value := range values {
-		out = append(out, SlashArgCandidate{Value: value, Display: value, Detail: fmt.Sprintf("%ss", value)})
+		out = append(out, controlprompt.SlashArgCandidate{Value: value, Display: value, Detail: fmt.Sprintf("%ss", value)})
 	}
 	_ = provider
 	return filterSlashArgCandidates(out, query, limit)
 }
 
-func completeConnectModels(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]SlashArgCandidate, error) {
+func completeConnectModels(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	template, ok := modelconfig.LookupProvider(payload.Provider)
 	if !ok {
 		return nil, nil
@@ -318,12 +319,12 @@ func completeConnectModels(ctx context.Context, driver *Adapter, payload connect
 		return nil, err
 	}
 	choices := buildConnectModelChoices(template.Provider, models)
-	out := make([]SlashArgCandidate, 0, len(choices))
+	out := make([]controlprompt.SlashArgCandidate, 0, len(choices))
 	for _, choice := range choices {
 		if query != "" && !strings.Contains(strings.ToLower(choice.Name+" "+choice.Display+" "+choice.Detail), strings.ToLower(strings.TrimSpace(query))) {
 			continue
 		}
-		out = append(out, SlashArgCandidate{
+		out = append(out, controlprompt.SlashArgCandidate{
 			Value:                 choice.Name,
 			Display:               choice.Display,
 			Detail:                choice.Detail,
@@ -336,27 +337,27 @@ func completeConnectModels(ctx context.Context, driver *Adapter, payload connect
 	return out, nil
 }
 
-func completeConnectContext(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]SlashArgCandidate, error) {
+func completeConnectContext(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	_ = ctx
 	_ = driver
 	defaults, err := modelconfig.ResolveModelDefaults(payload.Provider, payload.Model)
 	if err != nil {
 		return nil, err
 	}
-	return filterSlashArgCandidates([]SlashArgCandidate{{Value: strconv.Itoa(defaults.ContextWindowTokens), Display: strconv.Itoa(defaults.ContextWindowTokens), Detail: "context window tokens"}}, query, limit), nil
+	return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{{Value: strconv.Itoa(defaults.ContextWindowTokens), Display: strconv.Itoa(defaults.ContextWindowTokens), Detail: "context window tokens"}}, query, limit), nil
 }
 
-func completeConnectMaxOutput(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]SlashArgCandidate, error) {
+func completeConnectMaxOutput(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	_ = ctx
 	_ = driver
 	defaults, err := modelconfig.ResolveModelDefaults(payload.Provider, payload.Model)
 	if err != nil {
 		return nil, err
 	}
-	return filterSlashArgCandidates([]SlashArgCandidate{{Value: strconv.Itoa(defaults.MaxOutputTokens), Display: strconv.Itoa(defaults.MaxOutputTokens), Detail: "max output tokens"}}, query, limit), nil
+	return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{{Value: strconv.Itoa(defaults.MaxOutputTokens), Display: strconv.Itoa(defaults.MaxOutputTokens), Detail: "max output tokens"}}, query, limit), nil
 }
 
-func completeConnectReasoningLevels(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]SlashArgCandidate, error) {
+func completeConnectReasoningLevels(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	_ = ctx
 	_ = driver
 	defaults, err := modelconfig.ResolveModelDefaults(payload.Provider, payload.Model)
@@ -369,12 +370,12 @@ func completeConnectReasoningLevels(ctx context.Context, driver *Adapter, payloa
 		value = strings.Join(defaults.ReasoningLevels, ",")
 		detail = "suggested reasoning levels"
 	}
-	return filterSlashArgCandidates([]SlashArgCandidate{{Value: value, Display: value, Detail: detail}}, query, limit), nil
+	return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{{Value: value, Display: value, Detail: detail}}, query, limit), nil
 }
 
-func filterSlashArgCandidates(candidates []SlashArgCandidate, query string, limit int) []SlashArgCandidate {
+func filterSlashArgCandidates(candidates []controlprompt.SlashArgCandidate, query string, limit int) []controlprompt.SlashArgCandidate {
 	query = strings.ToLower(strings.TrimSpace(query))
-	out := make([]SlashArgCandidate, 0, len(candidates))
+	out := make([]controlprompt.SlashArgCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
 		if query != "" && !hasConnectCandidatePrefix(query, candidate.Value, candidate.Display, candidate.Detail) {
 			continue

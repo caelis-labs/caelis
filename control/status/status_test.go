@@ -1,4 +1,4 @@
-package control
+package status
 
 import (
 	"testing"
@@ -26,18 +26,21 @@ func TestStatusSnapshotCarriesGroupedViews(t *testing.T) {
 			MissingAPIKey:   true,
 		},
 		SandboxStatus: StatusSandbox{
-			Type:                     "windows",
-			RequestedBackend:         "windows",
-			ResolvedBackend:          "windows",
-			Route:                    "sandbox",
-			FallbackReason:           "fallback",
-			InstallHint:              "install",
-			Setup:                    SandboxSetupStatus{Required: true},
-			SetupRequired:            true,
-			WorkspaceSetupWriteRoots: 2,
-			WorkspaceSetupUpdatedAt:  updated,
-			SecuritySummary:          "windows",
-			HostExecution:            true,
+			Type:             "windows",
+			RequestedBackend: "windows",
+			ResolvedBackend:  "windows",
+			Route:            "sandbox",
+			FallbackReason:   "fallback",
+			InstallHint:      "install",
+			Setup: SandboxSetupStatus{
+				Required: true,
+				Checks: []SandboxSetupCheck{{
+					Name: "workspace", Required: true, UpdatedAt: updated,
+					Counts: map[string]int{"write_roots": 2},
+				}},
+			},
+			SecuritySummary: "windows",
+			HostExecution:   true,
 		},
 		Usage: StatusUsage{
 			TotalTokens:         42,
@@ -57,7 +60,8 @@ func TestStatusSnapshotCarriesGroupedViews(t *testing.T) {
 	if status.ModelStatus.Display != "openai/gpt-4o [high]" || status.ModelStatus.Provider != "openai" || status.ModelStatus.Name != "gpt-4o" || !status.ModelStatus.MissingAPIKey {
 		t.Fatalf("model group = %#v", status.ModelStatus)
 	}
-	if status.SandboxStatus.Type != "windows" || !status.SandboxStatus.SetupRequired || status.SandboxStatus.WorkspaceSetupWriteRoots != 2 || !status.SandboxStatus.WorkspaceSetupUpdatedAt.Equal(updated) {
+	workspace, ok := status.SandboxStatus.Setup.Check("workspace")
+	if status.SandboxStatus.Type != "windows" || !status.SandboxStatus.Setup.Required || !ok || workspace.Counts["write_roots"] != 2 || !workspace.UpdatedAt.Equal(updated) {
 		t.Fatalf("sandbox group = %#v", status.SandboxStatus)
 	}
 	if status.Usage.TotalTokens != 42 || status.Usage.ContextWindowTokens != 128 || len(status.Usage.SessionUsageByModel) != 1 {
@@ -65,5 +69,26 @@ func TestStatusSnapshotCarriesGroupedViews(t *testing.T) {
 	}
 	if status.Runtime.ActiveJobs != 1 || status.Runtime.ActiveTurnKind != "main" || !status.Runtime.Running {
 		t.Fatalf("runtime group = %#v", status.Runtime)
+	}
+}
+
+func TestSandboxSetupViewUsesNestedSetupAsSoleSource(t *testing.T) {
+	t.Parallel()
+
+	view := SandboxSetupViewFromStatus(StatusSnapshot{SandboxStatus: StatusSandbox{
+		Type: "windows",
+		Setup: SandboxSetupStatus{
+			Checks: []SandboxSetupCheck{{
+				Name:     "global",
+				Required: true,
+				Reason:   "runner policy is stale",
+			}},
+		},
+	}})
+	if !view.GlobalRequired || !view.AnyRequired || !view.RepairRequired {
+		t.Fatalf("SandboxSetupViewFromStatus() = %#v, want required Windows repair", view)
+	}
+	if view.GlobalDetail != "runner policy is stale" {
+		t.Fatalf("GlobalDetail = %q", view.GlobalDetail)
 	}
 }

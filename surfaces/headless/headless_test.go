@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -32,7 +32,7 @@ func TestRunOnceDrainsAssistantOutput(t *testing.T) {
 		turn: handle,
 	}
 
-	result, err := RunOnce(context.Background(), gw, control.Submission{Text: "hello"}, Options{})
+	result, err := RunOnce(context.Background(), gw, controlprompt.Submission{Text: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -65,7 +65,7 @@ func TestRunOnceAppendsPrefixGrowingACPMessageDeltasExactly(t *testing.T) {
 			},
 		},
 	})
-	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, control.Submission{Text: "hello"}, Options{})
+	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, controlprompt.Submission{Text: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -100,7 +100,7 @@ func TestRunOnceReplacesTransientAssistantWithCanonicalFinal(t *testing.T) {
 			},
 		},
 	})
-	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, control.Submission{Text: "hello"}, Options{})
+	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, controlprompt.Submission{Text: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -130,7 +130,7 @@ func TestRunOncePreservesIdenticalAssistantDeltas(t *testing.T) {
 			},
 		},
 	})
-	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, control.Submission{Text: "hello"}, Options{})
+	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, controlprompt.Submission{Text: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -151,7 +151,7 @@ func TestRunOnceKeepsSDKOnlyAssistantWithoutDurableIdentity(t *testing.T) {
 			Content:       schema.TextContent{Type: "text", Text: "sdk-only"},
 		},
 	}})
-	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, control.Submission{Text: "hello"}, Options{})
+	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, controlprompt.Submission{Text: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -200,7 +200,7 @@ func TestRunOnceIgnoresScopedTraceOutput(t *testing.T) {
 		turn: handle,
 	}
 
-	result, err := RunOnce(context.Background(), gw, control.Submission{Text: "hello"}, Options{})
+	result, err := RunOnce(context.Background(), gw, controlprompt.Submission{Text: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -235,7 +235,7 @@ func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 		turn: handle,
 	}
 
-	if _, err := RunOnce(context.Background(), gw, control.Submission{Text: "hello"}, Options{}); err != nil {
+	if _, err := RunOnce(context.Background(), gw, controlprompt.Submission{Text: "hello"}, Options{}); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 	if len(handle.submissions) != 1 {
@@ -280,7 +280,7 @@ func TestRunOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 		turn: handle,
 	}
 	called := false
-	_, err := RunOnce(context.Background(), gw, control.Submission{Text: "hello"}, Options{
+	_, err := RunOnce(context.Background(), gw, controlprompt.Submission{Text: "hello"}, Options{
 		ResolveApproval: func(_ context.Context, req ApprovalRequest) (approval.Decision, error) {
 			called = true
 			if req.Payload == nil {
@@ -334,7 +334,7 @@ func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 		turn: handle,
 	}
 
-	result, err := RunOnce(context.Background(), gw, control.Submission{Text: "hello"}, Options{})
+	result, err := RunOnce(context.Background(), gw, controlprompt.Submission{Text: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -347,17 +347,17 @@ func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 }
 
 type fakeStarter struct {
-	turn control.Turn
+	turn controlprompt.Turn
 	err  error
 }
 
-func (f fakeStarter) Submit(context.Context, control.Submission) (control.Turn, error) {
+func (f fakeStarter) Submit(context.Context, controlprompt.Submission) (controlprompt.Turn, error) {
 	return f.turn, f.err
 }
 
 type fakeTurnHandle struct {
 	acpEvents   <-chan eventstream.Envelope
-	submissions []control.ApprovalDecision
+	submissions []controlprompt.ApprovalDecision
 }
 
 func newFakeACPHandle(events []eventstream.Envelope) *fakeTurnHandle {
@@ -374,7 +374,7 @@ func (h *fakeTurnHandle) RunID() string                          { return "run-1
 func (h *fakeTurnHandle) TurnID() string                         { return "turn-1" }
 func (h *fakeTurnHandle) ACPEvents() <-chan eventstream.Envelope { return h.acpEvents }
 func (h *fakeTurnHandle) Events() <-chan eventstream.Envelope    { return h.acpEvents }
-func (h *fakeTurnHandle) SubmitApproval(_ context.Context, decision control.ApprovalDecision) error {
+func (h *fakeTurnHandle) SubmitApproval(_ context.Context, decision controlprompt.ApprovalDecision) error {
 	h.submissions = append(h.submissions, decision)
 	return nil
 }

@@ -17,7 +17,6 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlassembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	tuiapp "github.com/caelis-labs/caelis/surfaces/tui/app"
@@ -88,7 +87,7 @@ func TestSideACPAgentDirectRunEnvelopeE2E(t *testing.T) {
 	})
 	router := controlprompt.New(controlprompt.RouterConfig{Service: driver})
 	result, err := router.Route(ctx, controlprompt.Request{
-		Submission: control.Submission{Text: "/zenith introduce yourself"},
+		Submission: controlprompt.Submission{Text: "/zenith introduce yourself"},
 	})
 	if err != nil {
 		t.Fatalf("Route(/zenith) error = %v", err)

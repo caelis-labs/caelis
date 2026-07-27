@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -19,10 +19,10 @@ type RouterFactory func(RouterConfig) Router
 
 // RouterConfig configures a prompt router implementation.
 type RouterConfig struct {
-	Service control.Service
+	Service Service
 	// CommandNames controls /help rendering. When nil, shared command names and
 	// registered ACP agent commands are used.
-	CommandNames func(context.Context, control.Service) []string
+	CommandNames func(context.Context, Service) []string
 	// CoreCommandAllowed optionally narrows which shared core slash commands this
 	// router may execute. Dynamic ACP agent slashes are checked separately.
 	CoreCommandAllowed func(context.Context, string) bool
@@ -38,7 +38,7 @@ type RouterConfig struct {
 
 // Request carries one prompt submission into a control prompt router.
 type Request struct {
-	Submission control.Submission
+	Submission Submission
 }
 
 // PrivateSlashRequest carries a surface-owned slash command after shared
@@ -48,7 +48,7 @@ type PrivateSlashRequest struct {
 	Args        string
 	ArgsStart   int
 	FullText    string
-	Attachments []control.Attachment
+	Attachments []Attachment
 }
 
 // PrivateSlashHandler handles slash commands owned by one presentation
@@ -67,23 +67,24 @@ type PrivateSlashHandler func(context.Context, PrivateSlashRequest) (Result, boo
 // ActiveSessionID identifies a session selected by a lifecycle command without
 // forcing the router to build a full status snapshot. RefreshStatus asks the
 // receiving surface to refresh status after it has applied preceding replay.
-// SlashResult carries structured command data; surfaces decide how to render it
-// or serialize it with control.FormatSlashResult for plain text. Events remain
-// available for additional non-redundant notices. Do not add wizard/modal
-// rendering state here; interactive workflows stay owned by their surface.
+// SlashResult carries the final structured command data; surfaces decide how
+// to render it or serialize it with a Surface-owned formatter for plain text.
+// Events are ordered progress or supplemental notices and must be emitted
+// before SlashResult. Do not add wizard/modal rendering state here; interactive
+// workflows stay owned by their surface.
 // PrivateResult is only populated by a PrivateSlashHandler and must be
 // interpreted by the surface that installed that handler.
 type Result struct {
 	Handled             bool
-	Turn                control.Turn
-	Reconnect           control.SessionReconnect
+	Turn                Turn
+	Reconnect           SessionReconnect
 	Events              []eventstream.Envelope
-	SlashResult         *control.SlashCommandResult
+	SlashResult         *SlashCommandResult
 	ClearHistory        bool
 	RefreshCommands     bool
 	ActiveSessionID     string
 	RefreshStatus       bool
-	StatusUpdate        *control.StatusSnapshot
+	StatusUpdate        *controlstatus.StatusSnapshot
 	SuppressTurnDivider bool
 	ContinueRunning     bool
 	PrivateResult       any
@@ -128,7 +129,7 @@ func ParseFirst(text string) (first, rest string, restStart int) {
 
 // AttachmentsForPromptRange selects attachments whose offsets fall inside one
 // prompt segment and rewrites their offsets relative to that segment.
-func AttachmentsForPromptRange(items []control.Attachment, start int, end int) []control.Attachment {
+func AttachmentsForPromptRange(items []Attachment, start int, end int) []Attachment {
 	if len(items) == 0 {
 		return nil
 	}
@@ -138,12 +139,12 @@ func AttachmentsForPromptRange(items []control.Attachment, start int, end int) [
 	if end < start {
 		end = start
 	}
-	out := make([]control.Attachment, 0, len(items))
+	out := make([]Attachment, 0, len(items))
 	for _, item := range items {
 		if item.Offset < start || item.Offset > end {
 			continue
 		}
-		out = append(out, control.Attachment{
+		out = append(out, Attachment{
 			Name:     item.Name,
 			Offset:   item.Offset - start,
 			MimeType: item.MimeType,

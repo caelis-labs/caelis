@@ -8,8 +8,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -17,36 +17,36 @@ import (
 func TestSlashStatusOutputRendersStructuredSnapshot(t *testing.T) {
 	t.Parallel()
 
-	result := control.SlashCommandResult{
-		Kind: control.SlashCommandResultStatus,
-		Status: control.StatusSnapshot{
-			Session: control.StatusSession{
+	result := controlprompt.SlashCommandResult{
+		Kind: controlprompt.SlashCommandResultStatus,
+		Status: controlstatus.StatusSnapshot{
+			Session: controlstatus.StatusSession{
 				ID:        "s-123",
 				Workspace: "~/WorkDir/code/caelis",
 				ModeLabel: "auto-review",
 			},
-			ModelStatus: control.StatusModel{
+			ModelStatus: controlstatus.StatusModel{
 				Display:         "deepseek/deepseek-v4-flash",
 				ReasoningEffort: "high",
 			},
-			SandboxStatus: control.StatusSandbox{
+			SandboxStatus: controlstatus.StatusSandbox{
 				ResolvedBackend: "bwrap",
 				Route:           "sandbox",
 			},
-			Usage: control.StatusUsage{
+			Usage: controlstatus.StatusUsage{
 				TotalTokens:         16000,
 				ContextWindowTokens: 1000000,
-				SessionUsageTotal: control.UsageSnapshot{
+				SessionUsageTotal: controlstatus.UsageSnapshot{
 					PromptTokens:      100,
 					CachedInputTokens: 25,
 					CompletionTokens:  40,
 					ReasoningTokens:   5,
 					TotalTokens:       140,
 				},
-				SessionUsageByModel: []control.ModelUsageSnapshot{{
+				SessionUsageByModel: []controlstatus.ModelUsageSnapshot{{
 					Provider: "deepseek",
 					Model:    "deepseek-v4-flash",
-					Usage: control.UsageSnapshot{
+					Usage: controlstatus.UsageSnapshot{
 						PromptTokens:     100,
 						CompletionTokens: 40,
 						TotalTokens:      140,
@@ -90,9 +90,9 @@ func TestSlashStatusOutputRendersStructuredSnapshot(t *testing.T) {
 func TestSlashHelpOutputUsesTUIGrouping(t *testing.T) {
 	t.Parallel()
 
-	lines := renderSlashCommandResultLines(control.SlashCommandResult{
-		Kind: control.SlashCommandResultHelp,
-		Help: control.CommandHelpSnapshot{Items: []control.CommandHelpItem{
+	lines := renderSlashCommandResultLines(controlprompt.SlashCommandResult{
+		Kind: controlprompt.SlashCommandResultHelp,
+		Help: controlprompt.CommandHelpSnapshot{Items: []controlprompt.CommandHelpItem{
 			{Name: "help", Usage: "/help", Description: "Show commands and shortcuts", Known: true},
 			{Name: "model", Usage: "/model <action>", Description: "Switch model", Details: []string{"actions: use <alias> [effort], del <alias>"}, Known: true},
 			{Name: "helper", Usage: "/helper <prompt>", Description: "Send a prompt to the registered ACP agent", Dynamic: true},
@@ -119,9 +119,9 @@ func TestSlashHelpOutputUsesTUIGrouping(t *testing.T) {
 func TestSlashTableOutputUsesSectionAndTableStyles(t *testing.T) {
 	t.Parallel()
 
-	lines := renderSlashCommandResultLines(control.NewTableSlashResult("subagent", control.SlashTableSnapshot{
+	lines := renderSlashCommandResultLines(controlprompt.NewTableSlashResult("subagent", controlprompt.SlashTableSnapshot{
 		Title: "Subagents",
-		Sections: []control.SlashTableSection{{
+		Sections: []controlprompt.SlashTableSection{{
 			Title:   "Delegation Profiles",
 			Columns: []string{"Profile", "Binding"},
 			Rows:    [][]string{{"breeze", "Unbound"}, {"orbit", "openai-codex/gpt-5.6-sol [high]"}},
@@ -149,9 +149,9 @@ func TestSlashOutputKeepsBlankLinesBeforeAndAfter(t *testing.T) {
 	model := NewModel(Config{})
 	model.handleUserMessageMsg(UserMessageMsg{Text: "/help"})
 	next, _ := model.handleSlashCommandResultMsg(SlashCommandResultMsg{
-		Result: control.SlashCommandResult{
-			Kind: control.SlashCommandResultHelp,
-			Help: control.CommandHelpSnapshot{Items: []control.CommandHelpItem{
+		Result: controlprompt.SlashCommandResult{
+			Kind: controlprompt.SlashCommandResultHelp,
+			Help: controlprompt.CommandHelpSnapshot{Items: []controlprompt.CommandHelpItem{
 				{Name: "help", Usage: "/help", Description: "Show commands and shortcuts", Known: true},
 			}},
 		},
@@ -212,8 +212,8 @@ func TestSlashNoticeOutputUsesAlignedPlainText(t *testing.T) {
 func TestExecuteControlPromptResultForwardsSlashResultAndEvents(t *testing.T) {
 	t.Parallel()
 
-	status := control.NewStatusSlashResult(control.StatusSnapshot{
-		ModelStatus: control.StatusModel{Display: "ollama/llama3"},
+	status := controlprompt.NewStatusSlashResult(controlstatus.StatusSnapshot{
+		ModelStatus: controlstatus.StatusModel{Display: "ollama/llama3"},
 	})
 	var got []tea.Msg
 	sender := &ProgramSender{Send: func(msg tea.Msg) {
@@ -232,20 +232,20 @@ func TestExecuteControlPromptResultForwardsSlashResultAndEvents(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("sent messages = %#v, want slash result and extra event", got)
 	}
-	if msg, ok := got[0].(SlashCommandResultMsg); !ok || msg.Result.Kind != control.SlashCommandResultStatus {
-		t.Fatalf("first message = %#v, want SlashCommandResultMsg", got[0])
+	if notice, ok := got[0].(SlashNoticeMsg); !ok || notice.Text != "extra notice" {
+		t.Fatalf("first message = %#v, want ordered progress notice", got[0])
 	}
-	if notice, ok := got[1].(SlashNoticeMsg); !ok || notice.Text != "extra notice" {
-		t.Fatalf("second message = %#v, want structured extra notice", got[1])
+	if msg, ok := got[1].(SlashCommandResultMsg); !ok || msg.Result.Kind != controlprompt.SlashCommandResultStatus {
+		t.Fatalf("second message = %#v, want final SlashCommandResultMsg", got[1])
 	}
 }
 
 func TestExecuteControlPromptResultAppliesPostCompactContextStatus(t *testing.T) {
 	t.Parallel()
 
-	status := control.StatusSnapshot{
-		ModelStatus: control.StatusModel{Display: "xiaomi/mimo-v2.5"},
-		Usage: control.StatusUsage{
+	status := controlstatus.StatusSnapshot{
+		ModelStatus: controlstatus.StatusModel{Display: "xiaomi/mimo-v2.5"},
+		Usage: controlstatus.StatusUsage{
 			TotalTokens:         5100,
 			ContextWindowTokens: 1000000,
 		},

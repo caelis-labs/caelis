@@ -5,17 +5,17 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
-func statusRateLimitsFromProviderUsage(snapshot providerusage.Snapshot) control.StatusRateLimits {
-	out := control.StatusRateLimits{
+func statusRateLimitsFromProviderUsage(snapshot providerusage.Snapshot) controlstatus.StatusRateLimits {
+	out := controlstatus.StatusRateLimits{
 		Provider:   strings.TrimSpace(snapshot.Provider),
 		Plan:       strings.TrimSpace(snapshot.Plan),
 		CapturedAt: snapshot.CapturedAt,
 	}
 	for _, limit := range snapshot.Limits {
-		normalized := control.StatusRateLimit{
+		normalized := controlstatus.StatusRateLimit{
 			ID:   strings.TrimSpace(limit.ID),
 			Name: strings.TrimSpace(limit.Name),
 		}
@@ -29,7 +29,7 @@ func statusRateLimitsFromProviderUsage(snapshot providerusage.Snapshot) control.
 			} else if used > 100 {
 				used = 100
 			}
-			normalized.Windows = append(normalized.Windows, control.StatusRateLimitWindow{
+			normalized.Windows = append(normalized.Windows, controlstatus.StatusRateLimitWindow{
 				Kind:            strings.TrimSpace(window.Kind),
 				Label:           strings.TrimSpace(window.Label),
 				UsedPercent:     used,

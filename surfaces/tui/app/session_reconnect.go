@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 )
@@ -41,7 +41,7 @@ func (m *Model) applySessionReconnectState(state controlclient.SessionState) tea
 
 func streamReconnectBackfill(
 	ctx context.Context,
-	reconnect control.SessionReconnect,
+	reconnect controlprompt.SessionReconnect,
 	send func(tea.Msg),
 ) error {
 	if reconnect == nil {

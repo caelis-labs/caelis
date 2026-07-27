@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -33,8 +34,8 @@ type modelUsageSnapshot struct {
 	Usage    kernel.UsageSnapshot
 }
 
-func usageSnapshotFromKernel(usage kernel.UsageSnapshot) UsageSnapshot {
-	return UsageSnapshot{
+func usageSnapshotFromKernel(usage kernel.UsageSnapshot) controlstatus.UsageSnapshot {
+	return controlstatus.UsageSnapshot{
 		PromptTokens:      usage.PromptTokens,
 		CachedInputTokens: usage.CachedInputTokens,
 		CompletionTokens:  usage.CompletionTokens,
@@ -385,13 +386,13 @@ func usageSnapshotDedupeKey(usage kernel.UsageSnapshot) string {
 	return fmt.Sprintf("%d/%d/%d/%d/%d", usage.PromptTokens, usage.CachedInputTokens, usage.CompletionTokens, usage.ReasoningTokens, usage.TotalTokens)
 }
 
-func modelUsageSnapshotsFromBreakdown(breakdown sessionTokenUsageBreakdown) []ModelUsageSnapshot {
+func modelUsageSnapshotsFromBreakdown(breakdown sessionTokenUsageBreakdown) []controlstatus.ModelUsageSnapshot {
 	if len(breakdown.ByModel) == 0 {
 		return nil
 	}
-	out := make([]ModelUsageSnapshot, 0, len(breakdown.ByModel))
+	out := make([]controlstatus.ModelUsageSnapshot, 0, len(breakdown.ByModel))
 	for _, item := range breakdown.ByModel {
-		out = append(out, ModelUsageSnapshot{
+		out = append(out, controlstatus.ModelUsageSnapshot{
 			Provider: item.Provider,
 			Model:    item.Model,
 			Usage:    usageSnapshotFromKernel(item.Usage),

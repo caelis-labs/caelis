@@ -5,11 +5,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
 type bootstrapMsg struct {
-	status control.StatusSnapshot
+	status controlstatus.StatusSnapshot
 	err    error
 }
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 type RuntimeStackGatewayAppAdapters struct {
@@ -14,10 +15,10 @@ type RuntimeStackGatewayAppAdapters struct {
 	DoctorRequest        func(DoctorRequest) gatewayapp.DoctorRequest
 	DoctorReport         func(gatewayapp.DoctorReport, error) (DoctorReport, error)
 	ACPAgents            func([]gatewayapp.ACPAgentInfo) []ACPAgentInfo
-	PluginSnapshots      func([]gatewayapp.PluginInfo, error) ([]PluginSnapshot, error)
-	PluginSnapshot       func(gatewayapp.PluginInfo, error) (PluginSnapshot, error)
-	MarketplaceSnapshots func([]gatewayapp.MarketplaceInfo, error) ([]MarketplaceSnapshot, error)
-	MarketplaceSnapshot  func(gatewayapp.MarketplaceInfo, error) (MarketplaceSnapshot, error)
+	PluginSnapshots      func([]gatewayapp.PluginInfo, error) ([]controlprompt.PluginSnapshot, error)
+	PluginSnapshot       func(gatewayapp.PluginInfo, error) (controlprompt.PluginSnapshot, error)
+	MarketplaceSnapshots func([]gatewayapp.MarketplaceInfo, error) ([]controlprompt.MarketplaceSnapshot, error)
+	MarketplaceSnapshot  func(gatewayapp.MarketplaceInfo, error) (controlprompt.MarketplaceSnapshot, error)
 }
 
 func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStackGatewayAppAdapters) *RuntimeStack {
@@ -111,37 +112,37 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 			},
 		},
 		Plugin: PluginRuntimeDeps{
-			ListPluginsFn: func(ctx context.Context) ([]PluginSnapshot, error) {
+			ListPluginsFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
 				return adapters.PluginSnapshots(plugins.List(ctx))
 			},
-			AddMarketplaceFn: func(ctx context.Context, source string) (MarketplaceSnapshot, error) {
+			AddMarketplaceFn: func(ctx context.Context, source string) (controlprompt.MarketplaceSnapshot, error) {
 				return adapters.MarketplaceSnapshot(plugins.AddMarketplace(ctx, source))
 			},
-			ListMarketplacesFn: func(ctx context.Context) ([]MarketplaceSnapshot, error) {
+			ListMarketplacesFn: func(ctx context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
 				return adapters.MarketplaceSnapshots(plugins.ListMarketplaces(ctx))
 			},
-			UpdateMarketplaceFn: func(ctx context.Context, name string) (MarketplaceSnapshot, error) {
+			UpdateMarketplaceFn: func(ctx context.Context, name string) (controlprompt.MarketplaceSnapshot, error) {
 				return adapters.MarketplaceSnapshot(plugins.UpdateMarketplace(ctx, name))
 			},
 			RemoveMarketplaceFn: func(ctx context.Context, name string) error {
 				return plugins.RemoveMarketplace(ctx, name)
 			},
-			AddPluginPathFn: func(ctx context.Context, path string) (PluginSnapshot, error) {
+			AddPluginPathFn: func(ctx context.Context, path string) (controlprompt.PluginSnapshot, error) {
 				return adapters.PluginSnapshot(plugins.AddPath(ctx, path))
 			},
-			InstallPluginFn: func(ctx context.Context, source string) (PluginSnapshot, error) {
+			InstallPluginFn: func(ctx context.Context, source string) (controlprompt.PluginSnapshot, error) {
 				return adapters.PluginSnapshot(plugins.Install(ctx, source))
 			},
-			EnablePluginFn: func(ctx context.Context, id string) (PluginSnapshot, error) {
+			EnablePluginFn: func(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
 				return adapters.PluginSnapshot(plugins.Enable(ctx, id))
 			},
-			DisablePluginFn: func(ctx context.Context, id string) (PluginSnapshot, error) {
+			DisablePluginFn: func(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
 				return adapters.PluginSnapshot(plugins.Disable(ctx, id))
 			},
 			RemovePluginFn: func(ctx context.Context, id string) error {
 				return plugins.Remove(ctx, id)
 			},
-			InspectPluginFn: func(ctx context.Context, id string) (PluginSnapshot, error) {
+			InspectPluginFn: func(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
 				return adapters.PluginSnapshot(plugins.Inspect(ctx, id))
 			},
 		},

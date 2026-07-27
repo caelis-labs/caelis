@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 )
 
@@ -69,7 +70,7 @@ func TestCodexConnectCompletionUsesAccountCatalogAndEffective56Context(t *testin
 	}
 }
 
-func slashCandidateValues(candidates []SlashArgCandidate) []string {
+func slashCandidateValues(candidates []controlprompt.SlashArgCandidate) []string {
 	values := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
 		values = append(values, candidate.Value)

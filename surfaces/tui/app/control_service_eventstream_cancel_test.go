@@ -9,7 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -107,7 +107,7 @@ func (*cancelBarrierTurn) TurnID() string   { return "turn-cancel" }
 
 func (t *cancelBarrierTurn) Events() <-chan eventstream.Envelope { return t.events }
 
-func (*cancelBarrierTurn) SubmitApproval(context.Context, control.ApprovalDecision) error {
+func (*cancelBarrierTurn) SubmitApproval(context.Context, controlprompt.ApprovalDecision) error {
 	return nil
 }
 

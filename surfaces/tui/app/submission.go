@@ -3,15 +3,15 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-type SubmissionMode = control.SubmissionMode
+type SubmissionMode = controlprompt.SubmissionMode
 
 const (
-	SubmissionModeDefault    = control.SubmissionModeDefault
-	SubmissionModeOverlay    = control.SubmissionModeOverlay
-	SubmissionModeActiveTurn = control.SubmissionModeActiveTurn
+	SubmissionModeDefault    = controlprompt.SubmissionModeDefault
+	SubmissionModeOverlay    = controlprompt.SubmissionModeOverlay
+	SubmissionModeActiveTurn = controlprompt.SubmissionModeActiveTurn
 )
 
 // Attachment describes one inline attachment token in the composer.

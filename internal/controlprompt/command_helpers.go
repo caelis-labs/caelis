@@ -5,13 +5,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
 // ParseConnectArgs parses the non-interactive model-provider connect form.
-func ParseConnectArgs(args string) control.ConnectConfig {
+func ParseConnectArgs(args string) ConnectConfig {
 	parts := strings.Fields(args)
-	cfg := control.ConnectConfig{}
+	cfg := ConnectConfig{}
 	if len(parts) >= 1 {
 		cfg.Provider = parts[0]
 	}
@@ -61,7 +61,7 @@ func ParseConnectArgs(args string) control.ConnectConfig {
 }
 
 // ModeToggleHint formats the result of cycling the session mode.
-func ModeToggleHint(status control.StatusSnapshot) string {
+func ModeToggleHint(status controlstatus.StatusSnapshot) string {
 	label := firstNonEmpty(strings.TrimSpace(status.Session.ModeLabel), strings.TrimSpace(status.Session.SessionMode), "auto-review")
 	switch strings.ToLower(strings.TrimSpace(status.Session.SessionMode)) {
 	case "manual":

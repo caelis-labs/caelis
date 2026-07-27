@@ -387,7 +387,8 @@ func newSpawnGoldenAgent(t *testing.T, turn *testControlTurn, streams taskstream
 		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
-		AppName: "caelis", UserID: "user-1",
+		SlashResultFormatter: testSlashResultFormatter,
+		AppName:              "caelis", UserID: "user-1",
 	})
 	if err != nil {
 		t.Fatalf("runtimeacp.New() error = %v", err)

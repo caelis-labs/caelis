@@ -10,7 +10,7 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/modelprofile"
-	acpcontrol "github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 type subagentDelegationStub struct {
@@ -143,7 +143,7 @@ func TestSubagentWizardStartsWithListOrBindThenUsesExplicitDefaultEffortChoice(t
 func TestSlashSubagentListsAndBindsProfilesAndSystemAgents(t *testing.T) {
 	service := &subagentDelegationStub{status: subagentTestStatus()}
 	var notices []string
-	var tables []acpcontrol.SlashCommandResult
+	var tables []controlprompt.SlashCommandResult
 	send := func(msg tea.Msg) {
 		switch value := msg.(type) {
 		case SlashNoticeMsg:
@@ -157,12 +157,12 @@ func TestSlashSubagentListsAndBindsProfilesAndSystemAgents(t *testing.T) {
 	if result.Err != nil || !result.SuppressTurnDivider || len(notices) != 0 || len(tables) != 1 {
 		t.Fatalf("list result = %#v notices=%#v tables=%#v", result, notices, tables)
 	}
-	if tables[0].Kind != acpcontrol.SlashCommandResultTable || tables[0].Command != "subagent" {
+	if tables[0].Kind != controlprompt.SlashCommandResultTable || tables[0].Command != "subagent" {
 		t.Fatalf("list table result = %#v", tables[0])
 	}
-	wantTable := acpcontrol.SlashTableSnapshot{
+	wantTable := controlprompt.SlashTableSnapshot{
 		Title: "Subagents",
-		Sections: []acpcontrol.SlashTableSection{
+		Sections: []controlprompt.SlashTableSection{
 			{
 				Title:   "Delegation Profiles",
 				Columns: []string{"Profile", "Name", "Binding"},

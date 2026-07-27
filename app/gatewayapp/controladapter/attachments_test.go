@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 func TestContentPartsFromAttachmentsReadsImageFiles(t *testing.T) {
@@ -22,7 +23,7 @@ func TestContentPartsFromAttachmentsReadsImageFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parts, err := contentPartsFromAttachments([]Attachment{{Name: "shot.png"}}, workspace)
+	parts, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "shot.png"}}, workspace)
 	if err != nil {
 		t.Fatalf("contentPartsFromAttachments() error = %v", err)
 	}
@@ -48,7 +49,7 @@ func TestContentPartsFromAttachmentsReadsInlineImageData(t *testing.T) {
 	t.Parallel()
 
 	imageData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-	parts, err := contentPartsFromAttachments([]Attachment{{
+	parts, err := contentPartsFromAttachments([]controlprompt.Attachment{{
 		Name:     "inline.png",
 		MimeType: "image/png",
 		Data:     imageData,
@@ -78,7 +79,7 @@ func TestContentPartsFromSubmissionInterleavesTextAndImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parts, err := contentPartsFromSubmission("first second", []Attachment{{Name: "shot.png", Offset: len([]rune("first "))}}, workspace)
+	parts, err := contentPartsFromSubmission("first second", []controlprompt.Attachment{{Name: "shot.png", Offset: len([]rune("first "))}}, workspace)
 	if err != nil {
 		t.Fatalf("contentPartsFromSubmission() error = %v", err)
 	}
@@ -99,7 +100,7 @@ func TestContentPartsFromSubmissionInterleavesTextAndImages(t *testing.T) {
 func TestDisplayInputWithAttachmentsUsesOrdinalMarkers(t *testing.T) {
 	t.Parallel()
 
-	got := displayInputWithAttachments("look here", []Attachment{
+	got := displayInputWithAttachments("look here", []controlprompt.Attachment{
 		{Name: "first.png", Offset: 0},
 		{Name: "second.png", Offset: len([]rune("look "))},
 	})
@@ -116,7 +117,7 @@ func TestContentPartsFromAttachmentsRejectsNonImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := contentPartsFromAttachments([]Attachment{{Name: "note.txt"}}, workspace); err == nil {
+	if _, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "note.txt"}}, workspace); err == nil {
 		t.Fatal("contentPartsFromAttachments() error = nil, want non-image rejection")
 	}
 }
@@ -129,7 +130,7 @@ func TestContentPartsFromAttachmentsRejectsRenamedNonImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := contentPartsFromAttachments([]Attachment{{Name: "not-really.png"}}, workspace); err == nil {
+	if _, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "not-really.png"}}, workspace); err == nil {
 		t.Fatal("contentPartsFromAttachments() error = nil, want content-based non-image rejection")
 	}
 }
@@ -151,7 +152,7 @@ func TestContentPartsFromAttachmentsRejectsOversizedImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := contentPartsFromAttachments([]Attachment{{Name: "huge.png"}}, workspace); err == nil {
+	if _, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "huge.png"}}, workspace); err == nil {
 		t.Fatal("contentPartsFromAttachments() error = nil, want image size rejection")
 	}
 }

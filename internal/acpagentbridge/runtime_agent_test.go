@@ -23,8 +23,8 @@ import (
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
@@ -804,14 +804,15 @@ func newRuntimeAgentWithSessionsAndConfig(t *testing.T, sessions session.Service
 			Name:    "caelis-sdk",
 			Version: "0.1.0",
 		},
-		Loader:              override.Loader,
-		Modes:               override.Modes,
-		ApprovalModes:       override.ApprovalModes,
-		Config:              override.Config,
-		Models:              override.Models,
-		Commands:            override.Commands,
-		PromptRouterFactory: override.PromptRouterFactory,
-		PromptCaps:          override.PromptCaps,
+		Loader:               override.Loader,
+		Modes:                override.Modes,
+		ApprovalModes:        override.ApprovalModes,
+		Config:               override.Config,
+		Models:               override.Models,
+		Commands:             override.Commands,
+		PromptRouterFactory:  override.PromptRouterFactory,
+		SlashResultFormatter: override.SlashResultFormatter,
+		PromptCaps:           override.PromptCaps,
 	}
 	if override.AgentInfo != nil {
 		cfg.AgentInfo = override.AgentInfo
@@ -939,7 +940,7 @@ func (t *testControlTurn) Events() <-chan eventstream.Envelope {
 	return t.events
 }
 
-func (t *testControlTurn) SubmitApproval(context.Context, control.ApprovalDecision) error {
+func (t *testControlTurn) SubmitApproval(context.Context, controlprompt.ApprovalDecision) error {
 	return nil
 }
 

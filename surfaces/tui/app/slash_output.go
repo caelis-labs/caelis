@@ -5,7 +5,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
+	"github.com/caelis-labs/caelis/surfaces/promptview"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -126,20 +128,22 @@ func lastSlashOutputStyle(lines []slashOutputLine) tuikit.LineStyle {
 	return tuikit.LineStyleDefault
 }
 
-func renderSlashCommandResultLines(result control.SlashCommandResult) []slashOutputLine {
+func renderSlashCommandResultLines(result controlprompt.SlashCommandResult) []slashOutputLine {
 	switch result.Kind {
-	case control.SlashCommandResultStatus:
+	case controlprompt.SlashCommandResultStatus:
 		return renderSlashStatusLines(result.Status)
-	case control.SlashCommandResultHelp:
+	case controlprompt.SlashCommandResultHelp:
 		return renderSlashHelpLines(result.Help)
-	case control.SlashCommandResultTable:
+	case controlprompt.SlashCommandResultTable:
 		return renderSlashTableLines(result.Table)
+	case controlprompt.SlashCommandResultDoctor:
+		return renderSlashNoticeLines(SlashNoticeMsg{Text: promptview.FormatDoctorSnapshot(result.Status)})
 	default:
-		return []slashOutputLine{slashField("Slash", control.FormatSlashResult(result))}
+		return []slashOutputLine{slashField("Slash", promptview.FormatSlashResult(result))}
 	}
 }
 
-func renderSlashTableLines(table control.SlashTableSnapshot) []slashOutputLine {
+func renderSlashTableLines(table controlprompt.SlashTableSnapshot) []slashOutputLine {
 	lines := make([]slashOutputLine, 0)
 	if title := strings.TrimSpace(table.Title); title != "" {
 		lines = append(lines, slashSection(title))
@@ -168,8 +172,8 @@ func renderSlashTableLines(table control.SlashTableSnapshot) []slashOutputLine {
 	return lines
 }
 
-func renderSlashStatusLines(status control.StatusSnapshot) []slashOutputLine {
-	view := control.StatusDisplayFromSnapshot(status)
+func renderSlashStatusLines(status controlstatus.StatusSnapshot) []slashOutputLine {
+	view := promptview.StatusDisplayFromSnapshot(status)
 	lines := []slashOutputLine{slashSection("Status")}
 	lines = append(lines, renderSlashFields(view.Fields)...)
 	if len(view.Warnings) > 0 {
@@ -180,13 +184,11 @@ func renderSlashStatusLines(status control.StatusSnapshot) []slashOutputLine {
 	}
 	if !view.RateLimits.Empty() {
 		lines = append(lines, slashBlank(), slashSection("Limits"))
-		fields := make([]control.DisplayField, 0, len(view.RateLimits.Rows)+1)
+		fields := make([]promptview.DisplayField, 0, len(view.RateLimits.Rows)+1)
 		if view.RateLimits.Plan != "" {
-			fields = append(fields, control.DisplayField{Label: "Plan", Value: view.RateLimits.Plan})
+			fields = append(fields, promptview.DisplayField{Label: "Plan", Value: view.RateLimits.Plan})
 		}
-		for _, row := range view.RateLimits.Rows {
-			fields = append(fields, control.DisplayField(row))
-		}
+		fields = append(fields, view.RateLimits.Rows...)
 		lines = append(lines, renderSlashFields(fields)...)
 	}
 	if !view.Usage.Empty() {
@@ -196,7 +198,7 @@ func renderSlashStatusLines(status control.StatusSnapshot) []slashOutputLine {
 	return lines
 }
 
-func renderSlashHelpLines(help control.CommandHelpSnapshot) []slashOutputLine {
+func renderSlashHelpLines(help controlprompt.CommandHelpSnapshot) []slashOutputLine {
 	lines := []slashOutputLine{slashSection("Commands")}
 	groups := slashHelpGroups(help.Items)
 	writtenGroups := 0
@@ -225,12 +227,12 @@ func renderSlashHelpLines(help control.CommandHelpSnapshot) []slashOutputLine {
 
 type slashHelpGroup struct {
 	title string
-	items []control.CommandHelpItem
+	items []controlprompt.CommandHelpItem
 }
 
-func slashHelpGroups(items []control.CommandHelpItem) []slashHelpGroup {
+func slashHelpGroups(items []controlprompt.CommandHelpItem) []slashHelpGroup {
 	groupOrder := []string{"Core", "Model & Session", "Agents", "Plugins & Tools", "Lifecycle"}
-	groups := make(map[string][]control.CommandHelpItem, len(groupOrder))
+	groups := make(map[string][]controlprompt.CommandHelpItem, len(groupOrder))
 	for _, item := range items {
 		if strings.TrimSpace(item.Usage) == "" {
 			continue
@@ -245,7 +247,7 @@ func slashHelpGroups(items []control.CommandHelpItem) []slashHelpGroup {
 	return out
 }
 
-func slashHelpGroupTitle(item control.CommandHelpItem) string {
+func slashHelpGroupTitle(item controlprompt.CommandHelpItem) string {
 	if item.Dynamic {
 		return "Agents"
 	}
@@ -265,7 +267,7 @@ func slashHelpGroupTitle(item control.CommandHelpItem) string {
 	}
 }
 
-func renderSlashTokenUsage(usage control.TokenUsageView) []slashOutputLine {
+func renderSlashTokenUsage(usage promptview.TokenUsageView) []slashOutputLine {
 	table := [][]string{{"Scope", "Total", "Input", "Cached", "Output"}}
 	if usage.ShowReasoning {
 		table[0] = append(table[0], "Reasoning")
@@ -332,7 +334,7 @@ func renderSlashPaddedRowsWithOptions(table [][]string, hasHeader bool) []slashO
 	return lines
 }
 
-func renderSlashFields(fields []control.DisplayField) []slashOutputLine {
+func renderSlashFields(fields []promptview.DisplayField) []slashOutputLine {
 	width := 10
 	for _, field := range fields {
 		width = max(width, len([]rune(strings.TrimSpace(field.Label)+":")))

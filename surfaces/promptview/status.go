@@ -1,4 +1,4 @@
-package control
+package promptview
 
 import (
 	"fmt"
@@ -6,11 +6,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
 // FormatStatusSnapshot renders the shared text status view used by prompt
 // surfaces.
-func FormatStatusSnapshot(status StatusSnapshot) string {
+func FormatStatusSnapshot(status controlstatus.StatusSnapshot) string {
 	view := StatusDisplayFromSnapshot(status)
 	lines := make([]string, 0, len(view.Fields)+len(view.Warnings)+len(view.RateLimits.Rows)+len(view.Usage.Rows)+6)
 	for _, field := range view.Fields {
@@ -62,21 +64,51 @@ type StatusDisplay struct {
 	Usage      TokenUsageView     `json:"usage,omitempty"`
 }
 
+// ModelDisplay is the shared presentation projection for model identity.
+type ModelDisplay struct {
+	Model           string
+	Provider        string
+	ReasoningEffort string
+	MissingAPIKey   bool
+}
+
+// ModelDisplayFromStatus derives presentation-ready model identity from a
+// Control status model.
+func ModelDisplayFromStatus(status controlstatus.StatusModel) ModelDisplay {
+	return ModelDisplay{
+		Model:           firstNonEmpty(strings.TrimSpace(status.Display), strings.TrimSpace(status.Name), "not configured"),
+		Provider:        firstNonEmpty(strings.TrimSpace(status.Provider), deriveProviderFromAlias(status.Display), "not configured"),
+		ReasoningEffort: strings.TrimSpace(status.ReasoningEffort),
+		MissingAPIKey:   status.MissingAPIKey,
+	}
+}
+
+// Text renders the canonical compact model label used by status surfaces.
+func (d ModelDisplay) Text(fallback string) string {
+	model := firstNonEmpty(strings.TrimSpace(d.Model), strings.TrimSpace(fallback), "not configured")
+	provider := strings.TrimSpace(d.Provider)
+	if provider != "" && provider != "not configured" && !strings.EqualFold(provider, "acp") && !strings.Contains(strings.ToLower(model), strings.ToLower(provider)+"/") {
+		model = provider + "/" + model
+	}
+	if effort := strings.TrimSpace(d.ReasoningEffort); effort != "" && !strings.Contains(model, "["+effort+"]") {
+		model += " [" + effort + "]"
+	}
+	if d.MissingAPIKey {
+		model += " · key missing"
+	}
+	return strings.TrimSpace(model)
+}
+
 // RateLimitUsageView is the canonical display model for provider subscription
 // windows. The structured StatusSnapshot remains available to richer GUI
 // clients that need progress bars or localized reset timestamps.
 type RateLimitUsageView struct {
-	Provider string                  `json:"provider,omitempty"`
-	Plan     string                  `json:"plan,omitempty"`
-	Rows     []RateLimitUsageViewRow `json:"rows,omitempty"`
+	Provider string         `json:"provider,omitempty"`
+	Plan     string         `json:"plan,omitempty"`
+	Rows     []DisplayField `json:"rows,omitempty"`
 }
 
 func (v RateLimitUsageView) Empty() bool { return len(v.Rows) == 0 }
-
-type RateLimitUsageViewRow struct {
-	Label string `json:"label,omitempty"`
-	Value string `json:"value,omitempty"`
-}
 
 // TokenUsageView is the canonical display model for session token usage.
 type TokenUsageView struct {
@@ -100,7 +132,7 @@ type TokenUsageViewRow struct {
 }
 
 // StatusDisplayFromSnapshot derives the canonical display model for /status.
-func StatusDisplayFromSnapshot(status StatusSnapshot) StatusDisplay {
+func StatusDisplayFromSnapshot(status controlstatus.StatusSnapshot) StatusDisplay {
 	fields := make([]DisplayField, 0, 10)
 	appendDisplayField := func(label, value string) {
 		value = strings.TrimSpace(value)
@@ -109,19 +141,19 @@ func StatusDisplayFromSnapshot(status StatusSnapshot) StatusDisplay {
 		}
 		fields = append(fields, DisplayField{Label: strings.TrimSpace(label), Value: value})
 	}
-	appendDisplayField("Model", statusHeaderModelText(status))
+	appendDisplayField("Model", ModelDisplayFromStatus(status.ModelStatus).Text(""))
 	appendDisplayField("Mode", firstNonEmpty(strings.TrimSpace(status.Session.ModeLabel), strings.TrimSpace(status.Session.SessionMode), "auto-review"))
 	appendDisplayField("Sandbox", formatStatusSandbox(status))
 	appendDisplayField("Workspace", firstNonEmpty(strings.TrimSpace(status.Session.Workspace), "-"))
 	appendDisplayField("Session", strings.TrimSpace(status.Session.ID))
-	appendDisplayField("Context", formatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens))
+	appendDisplayField("Context", FormatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens))
 	if status.SandboxStatus.FallbackReason != "" {
 		appendDisplayField("Fallback", strings.TrimSpace(status.SandboxStatus.FallbackReason))
 	}
 	if status.SandboxStatus.InstallHint != "" {
 		appendDisplayField("Install", strings.TrimSpace(status.SandboxStatus.InstallHint))
 	}
-	setup := SandboxSetupViewFromStatus(status)
+	setup := controlstatus.SandboxSetupViewFromStatus(status)
 	if setup.GlobalRequired {
 		if setup.SetupError != "" {
 			appendDisplayField("Setup", "Windows sandbox infrastructure repair failed")
@@ -165,7 +197,7 @@ func StatusDisplayFromSnapshot(status StatusSnapshot) StatusDisplay {
 	}
 }
 
-func rateLimitUsageView(status StatusRateLimits) RateLimitUsageView {
+func rateLimitUsageView(status controlstatus.StatusRateLimits) RateLimitUsageView {
 	view := RateLimitUsageView{
 		Provider: strings.TrimSpace(status.Provider),
 		Plan:     strings.TrimSpace(status.Plan),
@@ -182,13 +214,13 @@ func rateLimitUsageView(status StatusRateLimits) RateLimitUsageView {
 			if !window.ResetsAt.IsZero() {
 				value += " · resets " + window.ResetsAt.Local().Format("2006-01-02 15:04 MST")
 			}
-			view.Rows = append(view.Rows, RateLimitUsageViewRow{Label: label, Value: value})
+			view.Rows = append(view.Rows, DisplayField{Label: label, Value: value})
 		}
 	}
 	return view
 }
 
-func rateLimitWindowLabel(window StatusRateLimitWindow) string {
+func rateLimitWindowLabel(window controlstatus.StatusRateLimitWindow) string {
 	if label := strings.TrimSpace(window.Label); label != "" {
 		return label
 	}
@@ -220,7 +252,7 @@ func rateLimitWindowLabel(window StatusRateLimitWindow) string {
 
 // FormatDoctorSnapshot renders the shared doctor output used by prompt
 // surfaces.
-func FormatDoctorSnapshot(status StatusSnapshot) string {
+func FormatDoctorSnapshot(status controlstatus.StatusSnapshot) string {
 	lines := []string{"doctor:"}
 	provider := strings.TrimSpace(firstNonEmpty(status.ModelStatus.Provider, status.ModelStatus.Display))
 	modelName := strings.TrimSpace(firstNonEmpty(status.ModelStatus.Name, status.ModelStatus.Display))
@@ -241,7 +273,7 @@ func FormatDoctorSnapshot(status StatusSnapshot) string {
 		lines = append(lines, "  ok session: "+sessionID)
 	}
 	sandbox := strings.TrimSpace(firstNonEmpty(status.SandboxStatus.ResolvedBackend, status.SandboxStatus.RequestedBackend, status.SandboxStatus.Type))
-	setup := SandboxSetupViewFromStatus(status)
+	setup := controlstatus.SandboxSetupViewFromStatus(status)
 	switch {
 	case status.SandboxStatus.HostExecution || status.SandboxStatus.FullAccessMode:
 		detail := strings.TrimSpace(firstNonEmpty(status.SandboxStatus.SecuritySummary, sandbox, "host execution"))
@@ -270,48 +302,7 @@ func FormatDoctorSnapshot(status StatusSnapshot) string {
 	return strings.Join(lines, "\n")
 }
 
-// SandboxSetupView describes whether the current sandbox needs setup or repair.
-type SandboxSetupView struct {
-	GlobalRequired    bool
-	WorkspaceRequired bool
-	AnyRequired       bool
-	RepairRequired    bool
-	IsWindows         bool
-	SetupError        string
-	GlobalDetail      string
-	WorkspaceDetail   string
-}
-
-// SandboxSetupViewFromStatus derives setup/repair state from a status snapshot.
-func SandboxSetupViewFromStatus(status StatusSnapshot) SandboxSetupView {
-	global, hasGlobal := status.SandboxStatus.Setup.Check("global")
-	workspace, hasWorkspace := status.SandboxStatus.Setup.Check("workspace")
-	view := SandboxSetupView{
-		GlobalRequired:    status.SandboxStatus.GlobalSetupRequired || (hasGlobal && global.Required),
-		WorkspaceRequired: status.SandboxStatus.WorkspaceSetupRequired || (hasWorkspace && workspace.Required),
-		IsWindows:         sandboxStatusIsWindows(status.SandboxStatus),
-		SetupError:        firstNonEmpty(status.SandboxStatus.Setup.Error, global.Error, workspace.Error, status.SandboxStatus.SetupError),
-		GlobalDetail:      firstNonEmpty(status.SandboxStatus.SetupError, global.Error, global.Reason, status.SandboxStatus.GlobalSetupReason, status.SandboxStatus.SetupMarkerReason, "global setup required"),
-		WorkspaceDetail:   firstNonEmpty(status.SandboxStatus.SetupError, workspace.Error, workspace.Reason, status.SandboxStatus.WorkspaceSetupReason, "workspace ACL setup required"),
-	}
-	view.AnyRequired = status.SandboxStatus.SetupRequired ||
-		status.SandboxStatus.Setup.Required ||
-		view.GlobalRequired ||
-		view.WorkspaceRequired
-	view.RepairRequired = view.IsWindows && view.AnyRequired
-	return view
-}
-
-func sandboxStatusIsWindows(status StatusSandbox) bool {
-	for _, value := range []string{status.ResolvedBackend, status.RequestedBackend, status.Type} {
-		if strings.EqualFold(strings.TrimSpace(value), "windows") {
-			return true
-		}
-	}
-	return false
-}
-
-func sandboxSetupWarning(view SandboxSetupView, target string) string {
+func sandboxSetupWarning(view controlstatus.SandboxSetupView, target string) string {
 	if !view.IsWindows {
 		return target + " repair is pending"
 	}
@@ -344,7 +335,7 @@ func appendStatusField(lines *[]string, label string, value string) {
 	*lines = append(*lines, fmt.Sprintf("  %-10s %s", label+":", value))
 }
 
-func formatStatusSandbox(status StatusSnapshot) string {
+func formatStatusSandbox(status controlstatus.StatusSnapshot) string {
 	sandbox := firstNonEmpty(strings.TrimSpace(status.SandboxStatus.ResolvedBackend), strings.TrimSpace(status.SandboxStatus.Type), strings.TrimSpace(status.SandboxStatus.RequestedBackend), "auto")
 	security := strings.TrimSpace(status.SandboxStatus.SecuritySummary)
 	switch {
@@ -369,17 +360,8 @@ func formatStatusSandbox(status StatusSnapshot) string {
 	}
 }
 
-func sessionTokenUsageView(status StatusSnapshot) TokenUsageView {
+func sessionTokenUsageView(status controlstatus.StatusSnapshot) TokenUsageView {
 	total := normalizedUsageSnapshot(status.Usage.SessionUsageTotal)
-	if usageSnapshotZero(total) {
-		total = normalizedUsageSnapshot(UsageSnapshot{
-			PromptTokens:      status.Usage.SessionInputTokens,
-			CachedInputTokens: status.Usage.SessionCachedInputTokens,
-			CompletionTokens:  status.Usage.SessionOutputTokens,
-			ReasoningTokens:   status.Usage.SessionReasoningTokens,
-			TotalTokens:       status.Usage.SessionTotalTokens,
-		})
-	}
 	if usageSnapshotZero(total) {
 		return TokenUsageView{}
 	}
@@ -394,7 +376,7 @@ func sessionTokenUsageView(status StatusSnapshot) TokenUsageView {
 	return tokenUsageView(rows)
 }
 
-func modelUsageStatusLabel(item ModelUsageSnapshot) string {
+func modelUsageStatusLabel(item controlstatus.ModelUsageSnapshot) string {
 	provider := strings.TrimSpace(item.Provider)
 	model := strings.TrimSpace(item.Model)
 	switch {
@@ -411,7 +393,7 @@ func modelUsageStatusLabel(item ModelUsageSnapshot) string {
 
 type tokenUsageStatusRow struct {
 	scope string
-	usage UsageSnapshot
+	usage controlstatus.UsageSnapshot
 }
 
 func tokenUsageView(rows []tokenUsageStatusRow) TokenUsageView {
@@ -496,14 +478,14 @@ func paddedRowWidths(rows [][]string) []int {
 	return widths
 }
 
-func normalizedUsageSnapshot(usage UsageSnapshot) UsageSnapshot {
+func normalizedUsageSnapshot(usage controlstatus.UsageSnapshot) controlstatus.UsageSnapshot {
 	if usage.TotalTokens == 0 {
 		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	}
 	return usage
 }
 
-func usageSnapshotZero(usage UsageSnapshot) bool {
+func usageSnapshotZero(usage controlstatus.UsageSnapshot) bool {
 	return usage.PromptTokens == 0 &&
 		usage.CachedInputTokens == 0 &&
 		usage.CompletionTokens == 0 &&
@@ -518,21 +500,6 @@ func formatTokenUsageNumber(value int) string {
 	return strconv.Itoa(value)
 }
 
-func statusHeaderModelText(status StatusSnapshot) string {
-	model := firstNonEmpty(strings.TrimSpace(status.ModelStatus.Display), strings.TrimSpace(status.ModelStatus.Name), "not configured")
-	provider := firstNonEmpty(strings.TrimSpace(status.ModelStatus.Provider), deriveProviderFromAlias(status.ModelStatus.Display), "not configured")
-	if provider != "" && provider != "not configured" && !strings.EqualFold(provider, "acp") && !strings.Contains(strings.ToLower(model), strings.ToLower(provider)+"/") {
-		model = provider + "/" + model
-	}
-	if effort := strings.TrimSpace(status.ModelStatus.ReasoningEffort); effort != "" && !strings.Contains(model, "["+effort+"]") {
-		model += " [" + effort + "]"
-	}
-	if status.ModelStatus.MissingAPIKey {
-		model += " · key missing"
-	}
-	return strings.TrimSpace(model)
-}
-
 func deriveProviderFromAlias(model string) string {
 	model = strings.TrimSpace(model)
 	if before, _, ok := strings.Cut(model, "/"); ok {
@@ -541,7 +508,8 @@ func deriveProviderFromAlias(model string) string {
 	return ""
 }
 
-func formatContextUsage(totalTokens, contextWindowTokens int) string {
+// FormatContextUsage renders the shared compact context-window label.
+func FormatContextUsage(totalTokens, contextWindowTokens int) string {
 	if contextWindowTokens <= 0 {
 		if totalTokens <= 0 {
 			return ""

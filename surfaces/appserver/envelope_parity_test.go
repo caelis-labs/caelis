@@ -1,4 +1,4 @@
-package controlserver
+package appserver
 
 import (
 	"bufio"
@@ -16,7 +16,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/surfaces/appserver"
 )
 
 func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
@@ -48,9 +47,9 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	want := receiveParityEnvelope(t, inProcess.Subscription.Backfill())
 	_ = inProcess.Subscription.Close()
 
-	server, err := appserver.New(appserver.Config{
+	server, err := New(Config{
 		Service: parityService{feed: feed},
-		Authenticator: appserver.AuthenticatorFunc(func(*http.Request) (controlclient.Principal, error) {
+		Authenticator: AuthenticatorFunc(func(*http.Request) (controlclient.Principal, error) {
 			return controlclient.Principal{ID: "owner"}, nil
 		}),
 		AllowedHosts: []string{"127.0.0.1"}, Heartbeat: time.Hour,

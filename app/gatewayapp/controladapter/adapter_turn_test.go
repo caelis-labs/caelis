@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -267,7 +268,7 @@ func TestGatewayTurnSubmitApprovalForwardsRequestID(t *testing.T) {
 	handle := &testGatewayTurnHandle{}
 	turn := newGatewayTurn(handle)
 
-	err := turn.SubmitApproval(context.Background(), ApprovalDecision{
+	err := turn.SubmitApproval(context.Background(), controlprompt.ApprovalDecision{
 		RequestID:  "approval-child-1",
 		Outcome:    "selected",
 		OptionID:   "allow_once",

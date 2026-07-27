@@ -15,18 +15,19 @@ import (
 )
 
 type GatewayAgentConfig struct {
-	Runtime             agent.Runtime
-	Sessions            session.Service
-	Resolver            kernel.RuntimeResolver
-	ApprovalReviewer    kernel.ApprovalReviewer
-	Assembly            assemblyapi.ResolvedAssembly
-	AppName             string
-	UserID              string
-	WorkspaceKey        string
-	SurfaceBuilder      SurfaceBuilder
-	PromptRouterFactory PromptRouterFactory
-	TaskStreams         taskstream.Service
-	TaskStreamPrincipal taskstream.Principal
+	Runtime              agent.Runtime
+	Sessions             session.Service
+	Resolver             kernel.RuntimeResolver
+	ApprovalReviewer     kernel.ApprovalReviewer
+	Assembly             assemblyapi.ResolvedAssembly
+	AppName              string
+	UserID               string
+	WorkspaceKey         string
+	SurfaceBuilder       SurfaceBuilder
+	PromptRouterFactory  PromptRouterFactory
+	SlashResultFormatter SlashResultFormatter
+	TaskStreams          taskstream.Service
+	TaskStreamPrincipal  taskstream.Principal
 }
 
 type SurfaceRequest struct {
@@ -90,6 +91,7 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		Models:                surface,
 		Commands:              surface,
 		PromptRouterFactory:   cfg.PromptRouterFactory,
+		SlashResultFormatter:  cfg.SlashResultFormatter,
 		PromptCaps:            surface,
 		TaskStreams:           cfg.TaskStreams,
 		TaskStreamPrincipal:   cfg.TaskStreamPrincipal,

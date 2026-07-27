@@ -177,7 +177,8 @@ or cancels an asynchronous Spawn.
 ## Task Stream Service
 
 `control/taskstream` is a coherent capability and does not extend
-`control/client.Service` or `protocol/acp/control.Service`. It exposes
+`control/client.Service` or the private `internal/controlprompt.Service`
+prompt facade. It exposes
 Task directory, finite records, and one-Task subscription operations;
 `protocol/acp/taskstream` projects those records into the ACP Envelopes consumed
 by Surfaces. Each directory descriptor includes the public Session-unique
@@ -727,8 +728,9 @@ M2 is a pre-v1 contract cleanup:
 - keep the Zed empty terminal anchor and `_meta.terminal_output` compatibility
   route while declaring the Caelis client terminal capability separately;
 - remove ambient current-session/CWD fallback from the client-protocol adapter;
-- keep `protocol/acp/control.Service` for current ACP/TUI transitional commands
-  without adding M2 request-scoped business operations to it.
+- keep current ACP/TUI transitional commands behind the private
+  `internal/controlprompt.Service` prompt facade without adding M2
+  request-scoped business operations to it.
 
 No compatibility waiver may hide an unintended SDK dependency or a second
 resume-token contract.

@@ -11,50 +11,50 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 // pluginStubService implements only the plugin capability needed by /plugin
 // commands.
 type pluginStubService struct {
-	listFn              func(context.Context) ([]control.PluginSnapshot, error)
-	addMarketplaceFn    func(context.Context, string) (control.MarketplaceSnapshot, error)
-	listMarketplacesFn  func(context.Context) ([]control.MarketplaceSnapshot, error)
-	updateMarketplaceFn func(context.Context, string) (control.MarketplaceSnapshot, error)
+	listFn              func(context.Context) ([]controlprompt.PluginSnapshot, error)
+	addMarketplaceFn    func(context.Context, string) (controlprompt.MarketplaceSnapshot, error)
+	listMarketplacesFn  func(context.Context) ([]controlprompt.MarketplaceSnapshot, error)
+	updateMarketplaceFn func(context.Context, string) (controlprompt.MarketplaceSnapshot, error)
 	removeMarketplaceFn func(context.Context, string) error
-	addPathFn           func(context.Context, string) (control.PluginSnapshot, error)
-	installFn           func(context.Context, string) (control.PluginSnapshot, error)
-	enableFn            func(context.Context, string) (control.PluginSnapshot, error)
-	disableFn           func(context.Context, string) (control.PluginSnapshot, error)
+	addPathFn           func(context.Context, string) (controlprompt.PluginSnapshot, error)
+	installFn           func(context.Context, string) (controlprompt.PluginSnapshot, error)
+	enableFn            func(context.Context, string) (controlprompt.PluginSnapshot, error)
+	disableFn           func(context.Context, string) (controlprompt.PluginSnapshot, error)
 	removeFn            func(context.Context, string) error
-	inspectFn           func(context.Context, string) (control.PluginSnapshot, error)
+	inspectFn           func(context.Context, string) (controlprompt.PluginSnapshot, error)
 }
 
-var _ control.PluginService = (*pluginStubService)(nil)
+var _ controlprompt.PluginService = (*pluginStubService)(nil)
 
-func (s *pluginStubService) ListPlugins(ctx context.Context) ([]control.PluginSnapshot, error) {
+func (s *pluginStubService) ListPlugins(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
 	if s.listFn != nil {
 		return s.listFn(ctx)
 	}
 	return nil, nil
 }
-func (s *pluginStubService) AddMarketplace(ctx context.Context, source string) (control.MarketplaceSnapshot, error) {
+func (s *pluginStubService) AddMarketplace(ctx context.Context, source string) (controlprompt.MarketplaceSnapshot, error) {
 	if s.addMarketplaceFn != nil {
 		return s.addMarketplaceFn(ctx, source)
 	}
-	return control.MarketplaceSnapshot{}, nil
+	return controlprompt.MarketplaceSnapshot{}, nil
 }
-func (s *pluginStubService) ListMarketplaces(ctx context.Context) ([]control.MarketplaceSnapshot, error) {
+func (s *pluginStubService) ListMarketplaces(ctx context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
 	if s.listMarketplacesFn != nil {
 		return s.listMarketplacesFn(ctx)
 	}
 	return nil, nil
 }
-func (s *pluginStubService) UpdateMarketplace(ctx context.Context, name string) (control.MarketplaceSnapshot, error) {
+func (s *pluginStubService) UpdateMarketplace(ctx context.Context, name string) (controlprompt.MarketplaceSnapshot, error) {
 	if s.updateMarketplaceFn != nil {
 		return s.updateMarketplaceFn(ctx, name)
 	}
-	return control.MarketplaceSnapshot{}, nil
+	return controlprompt.MarketplaceSnapshot{}, nil
 }
 func (s *pluginStubService) RemoveMarketplace(ctx context.Context, name string) error {
 	if s.removeMarketplaceFn != nil {
@@ -62,29 +62,29 @@ func (s *pluginStubService) RemoveMarketplace(ctx context.Context, name string) 
 	}
 	return nil
 }
-func (s *pluginStubService) AddPluginPath(ctx context.Context, path string) (control.PluginSnapshot, error) {
+func (s *pluginStubService) AddPluginPath(ctx context.Context, path string) (controlprompt.PluginSnapshot, error) {
 	if s.addPathFn != nil {
 		return s.addPathFn(ctx, path)
 	}
-	return control.PluginSnapshot{}, nil
+	return controlprompt.PluginSnapshot{}, nil
 }
-func (s *pluginStubService) InstallPlugin(ctx context.Context, source string) (control.PluginSnapshot, error) {
+func (s *pluginStubService) InstallPlugin(ctx context.Context, source string) (controlprompt.PluginSnapshot, error) {
 	if s.installFn != nil {
 		return s.installFn(ctx, source)
 	}
-	return control.PluginSnapshot{}, nil
+	return controlprompt.PluginSnapshot{}, nil
 }
-func (s *pluginStubService) EnablePlugin(ctx context.Context, id string) (control.PluginSnapshot, error) {
+func (s *pluginStubService) EnablePlugin(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
 	if s.enableFn != nil {
 		return s.enableFn(ctx, id)
 	}
-	return control.PluginSnapshot{}, nil
+	return controlprompt.PluginSnapshot{}, nil
 }
-func (s *pluginStubService) DisablePlugin(ctx context.Context, id string) (control.PluginSnapshot, error) {
+func (s *pluginStubService) DisablePlugin(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
 	if s.disableFn != nil {
 		return s.disableFn(ctx, id)
 	}
-	return control.PluginSnapshot{}, nil
+	return controlprompt.PluginSnapshot{}, nil
 }
 func (s *pluginStubService) RemovePlugin(ctx context.Context, id string) error {
 	if s.removeFn != nil {
@@ -92,16 +92,16 @@ func (s *pluginStubService) RemovePlugin(ctx context.Context, id string) error {
 	}
 	return nil
 }
-func (s *pluginStubService) InspectPlugin(ctx context.Context, id string) (control.PluginSnapshot, error) {
+func (s *pluginStubService) InspectPlugin(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
 	if s.inspectFn != nil {
 		return s.inspectFn(ctx, id)
 	}
-	return control.PluginSnapshot{}, nil
+	return controlprompt.PluginSnapshot{}, nil
 }
 
 // runPluginCmd invokes slashPluginWithContext with a no-op sender and returns
 // the TaskResultMsg and the notice text collected.
-func runPluginCmd(svc control.PluginService, args string) (TaskResultMsg, []string) {
+func runPluginCmd(svc controlprompt.PluginService, args string) (TaskResultMsg, []string) {
 	var notices []string
 	send := func(msg tea.Msg) {
 		if n, ok := msg.(SlashNoticeMsg); ok {
@@ -119,7 +119,7 @@ func runPluginCmd(svc control.PluginService, args string) (TaskResultMsg, []stri
 func TestSlashPluginListShowsUsage(t *testing.T) {
 	called := false
 	svc := &pluginStubService{
-		listFn: func(ctx context.Context) ([]control.PluginSnapshot, error) {
+		listFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
 			called = true
 			return nil, nil
 		},
@@ -140,7 +140,7 @@ func TestSlashPluginListShowsUsage(t *testing.T) {
 
 func TestSlashPluginManageEmpty(t *testing.T) {
 	svc := &pluginStubService{
-		listFn: func(ctx context.Context) ([]control.PluginSnapshot, error) {
+		listFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
 			return nil, nil
 		},
 	}
@@ -163,8 +163,8 @@ func TestSlashPluginManageEmpty(t *testing.T) {
 
 func TestSlashPluginManageOpensMultiSelectManager(t *testing.T) {
 	svc := &pluginStubService{
-		listFn: func(ctx context.Context) ([]control.PluginSnapshot, error) {
-			return []control.PluginSnapshot{
+		listFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
+			return []controlprompt.PluginSnapshot{
 				{ID: "enabled-plug", Name: "Enabled", Enabled: true, Status: "active"},
 				{ID: "disabled-plug", Name: "Disabled", Enabled: false, Status: "inactive"},
 			}, nil
@@ -286,20 +286,20 @@ func TestPluginManagerSelectionUpdatesEnabledPlugins(t *testing.T) {
 	var enabled []string
 	var disabled []string
 	svc := &pluginStubService{
-		enableFn: func(ctx context.Context, id string) (control.PluginSnapshot, error) {
+		enableFn: func(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
 			enabled = append(enabled, id)
-			return control.PluginSnapshot{ID: id, Enabled: true}, nil
+			return controlprompt.PluginSnapshot{ID: id, Enabled: true}, nil
 		},
-		disableFn: func(ctx context.Context, id string) (control.PluginSnapshot, error) {
+		disableFn: func(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
 			disabled = append(disabled, id)
-			return control.PluginSnapshot{ID: id, Enabled: false}, nil
+			return controlprompt.PluginSnapshot{ID: id, Enabled: false}, nil
 		},
 	}
 	responses := make(chan PromptResponse, 1)
 	responses <- PromptResponse{Line: "disabled-plug"}
 	close(responses)
 
-	awaitPluginManagerSelection(context.Background(), svc, nil, []control.PluginSnapshot{
+	awaitPluginManagerSelection(context.Background(), svc, nil, []controlprompt.PluginSnapshot{
 		{ID: "enabled-plug", Enabled: true},
 		{ID: "disabled-plug", Enabled: false},
 	}, responses)
@@ -315,9 +315,9 @@ func TestPluginManagerSelectionUpdatesEnabledPlugins(t *testing.T) {
 func TestPluginManagerSelectionSurvivesCommandContextCancellation(t *testing.T) {
 	disabled := make(chan string, 1)
 	svc := &pluginStubService{
-		disableFn: func(ctx context.Context, id string) (control.PluginSnapshot, error) {
+		disableFn: func(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
 			disabled <- id
-			return control.PluginSnapshot{ID: id, Enabled: false}, nil
+			return controlprompt.PluginSnapshot{ID: id, Enabled: false}, nil
 		},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -327,7 +327,7 @@ func TestPluginManagerSelectionSurvivesCommandContextCancellation(t *testing.T) 
 			prompt = next
 		}
 	}
-	sendPluginManagerPrompt(ctx, svc, send, []control.PluginSnapshot{
+	sendPluginManagerPrompt(ctx, svc, send, []controlprompt.PluginSnapshot{
 		{ID: "superpowers", Enabled: true, Status: "active"},
 	})
 	if prompt.Response == nil {
@@ -350,7 +350,7 @@ func TestPluginManagerSelectionSurvivesCommandContextCancellation(t *testing.T) 
 func TestSlashPluginBareCommandOnlyShowsUsage(t *testing.T) {
 	called := false
 	svc := &pluginStubService{
-		listFn: func(ctx context.Context) ([]control.PluginSnapshot, error) {
+		listFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
 			called = true
 			return nil, nil
 		},
@@ -370,7 +370,7 @@ func TestSlashPluginBareCommandOnlyShowsUsage(t *testing.T) {
 
 func TestSlashPluginManageError(t *testing.T) {
 	svc := &pluginStubService{
-		listFn: func(ctx context.Context) ([]control.PluginSnapshot, error) {
+		listFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
 			return nil, errors.New("store unavailable")
 		},
 	}
@@ -387,9 +387,9 @@ func TestSlashPluginManageError(t *testing.T) {
 func TestSlashPluginInstallSuccess(t *testing.T) {
 	var gotSource string
 	svc := &pluginStubService{
-		installFn: func(ctx context.Context, source string) (control.PluginSnapshot, error) {
+		installFn: func(ctx context.Context, source string) (controlprompt.PluginSnapshot, error) {
 			gotSource = source
-			return control.PluginSnapshot{
+			return controlprompt.PluginSnapshot{
 				ID:      "mcp-server-dev",
 				Name:    "MCP Server Dev",
 				Enabled: true,
@@ -429,9 +429,9 @@ func TestSlashPluginInstallMissingSource(t *testing.T) {
 func TestSlashPluginMarketplaceAddSuccess(t *testing.T) {
 	var gotSource string
 	svc := &pluginStubService{
-		addMarketplaceFn: func(ctx context.Context, source string) (control.MarketplaceSnapshot, error) {
+		addMarketplaceFn: func(ctx context.Context, source string) (controlprompt.MarketplaceSnapshot, error) {
 			gotSource = source
-			return control.MarketplaceSnapshot{Name: "demo-market", Source: source, PluginCount: 2}, nil
+			return controlprompt.MarketplaceSnapshot{Name: "demo-market", Source: source, PluginCount: 2}, nil
 		},
 	}
 	result, notices := runPluginCmd(svc, "marketplace add acme/plugins")
@@ -449,8 +449,8 @@ func TestSlashPluginMarketplaceAddSuccess(t *testing.T) {
 
 func TestSlashPluginMarketplaceList(t *testing.T) {
 	svc := &pluginStubService{
-		listMarketplacesFn: func(ctx context.Context) ([]control.MarketplaceSnapshot, error) {
-			return []control.MarketplaceSnapshot{{Name: "demo-market", Description: "Demo", PluginCount: 1}}, nil
+		listMarketplacesFn: func(ctx context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
+			return []controlprompt.MarketplaceSnapshot{{Name: "demo-market", Description: "Demo", PluginCount: 1}}, nil
 		},
 	}
 	result, notices := runPluginCmd(svc, "marketplace list")
@@ -466,9 +466,9 @@ func TestSlashPluginMarketplaceList(t *testing.T) {
 func TestSlashPluginMarketplaceUpdateSuccess(t *testing.T) {
 	var gotName string
 	svc := &pluginStubService{
-		updateMarketplaceFn: func(ctx context.Context, name string) (control.MarketplaceSnapshot, error) {
+		updateMarketplaceFn: func(ctx context.Context, name string) (controlprompt.MarketplaceSnapshot, error) {
 			gotName = name
-			return control.MarketplaceSnapshot{Name: name, PluginCount: 3}, nil
+			return controlprompt.MarketplaceSnapshot{Name: name, PluginCount: 3}, nil
 		},
 	}
 	result, notices := runPluginCmd(svc, "marketplace update demo-market")
@@ -578,7 +578,7 @@ func TestSlashPluginUnknownSubcommand(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFormatPluginDetailFields(t *testing.T) {
-	p := control.PluginSnapshot{
+	p := controlprompt.PluginSnapshot{
 		ID:          "myplugin",
 		Name:        "My Plugin",
 		Version:     "1.2.3",
@@ -599,7 +599,7 @@ func TestFormatPluginDetailFields(t *testing.T) {
 }
 
 func TestFormatPluginDetailWithWarning(t *testing.T) {
-	p := control.PluginSnapshot{
+	p := controlprompt.PluginSnapshot{
 		ID:      "broken",
 		Status:  "error",
 		Enabled: true,
@@ -612,7 +612,7 @@ func TestFormatPluginDetailWithWarning(t *testing.T) {
 }
 
 func TestFormatPluginDetailDisabledStatus(t *testing.T) {
-	p := control.PluginSnapshot{
+	p := controlprompt.PluginSnapshot{
 		ID:      "myplugin",
 		Enabled: false,
 		Status:  "inactive",

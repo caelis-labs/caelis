@@ -14,8 +14,8 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -113,7 +113,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalAdapterForSession() error = %v", err)
 	}
-	result, err := headless.RunOnce(ctx, driver, control.Submission{Text: "run through acp controller"}, headless.Options{})
+	result, err := headless.RunOnce(ctx, driver, controlprompt.Submission{Text: "run through acp controller"}, headless.Options{})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}

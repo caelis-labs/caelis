@@ -129,7 +129,19 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			name:       "control client rejects unrelated ACP adapters",
 			rel:        "control/client/client.go",
 			importPath: modulePath + "/protocol/acp/control",
-			want:       "control must depend only on Control peers and reusable SDK packages",
+			want:       "production code must not depend on retired protocol/acp/control; use internal/controlprompt, control/status, or surfaces/promptview",
+		},
+		{
+			name:       "control server rejects gateway stack assembly",
+			rel:        "app/controlserver/server.go",
+			importPath: modulePath + "/app/gatewayapp",
+			want:       "app/controlserver must depend on explicit Control contracts, not gatewayapp assembly",
+		},
+		{
+			name:       "ACP bridge rejects presentation package dependency",
+			rel:        "internal/acpagentbridge/prompt_bridge.go",
+			importPath: modulePath + "/surfaces/promptview",
+			want:       "internal/acpagentbridge must receive presentation projection through assembly, not import surfaces",
 		},
 		{
 			name:       "control rejects app implementation packages",
@@ -467,6 +479,12 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			rel:     "internal/controlpromptrouter/router.go",
 			want:    "must not recreate internal/controlpromptrouter; prompt contracts and routing belong to internal/controlprompt",
 			wantSub: "internal/controlpromptrouter",
+		},
+		{
+			name:    "deleted protocol control path fails",
+			rel:     "protocol/acp/control/service.go",
+			want:    "must not recreate protocol/acp/control; prompt contracts belong to internal/controlprompt, status data to control/status, and rendering to surfaces/promptview",
+			wantSub: "protocol/acp/control",
 		},
 		{
 			name:    "deleted ports agentprofile path fails",

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
@@ -42,8 +41,8 @@ func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
 }
 
 func TestACPSlashCommandsFilterLocalAndReservedRemoteCommands(t *testing.T) {
-	got := acpSlashCommands([]string{"help"}, control.AgentStatusSnapshot{
-		AvailableAgents: []control.AgentCandidate{{Name: "codex"}},
+	got := acpSlashCommands([]string{"help"}, controlprompt.AgentStatusSnapshot{
+		AvailableAgents: []controlprompt.AgentCandidate{{Name: "codex"}},
 		ControllerCommands: []string{
 			"/remote", "/compact", "/new now", "/status", "/sandbox", "/lead", "/codex", "/codex(lina)",
 		},

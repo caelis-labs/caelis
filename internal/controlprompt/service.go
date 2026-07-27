@@ -1,9 +1,10 @@
-package control
+package controlprompt
 
 import (
 	"context"
 
 	controlclient "github.com/caelis-labs/caelis/control/client"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -34,7 +35,7 @@ type SessionReconnect interface {
 }
 
 type StatusService interface {
-	Status(context.Context) (StatusSnapshot, error)
+	Status(context.Context) (controlstatus.StatusSnapshot, error)
 	WorkspaceDir() string
 }
 
@@ -51,20 +52,20 @@ type SessionService interface {
 }
 
 type SessionModeService interface {
-	CycleSessionMode(context.Context) (StatusSnapshot, error)
-	SetSessionMode(context.Context, string) (StatusSnapshot, error)
+	CycleSessionMode(context.Context) (controlstatus.StatusSnapshot, error)
+	SetSessionMode(context.Context, string) (controlstatus.StatusSnapshot, error)
 }
 
 type ModelService interface {
-	Connect(context.Context, ConnectConfig) (StatusSnapshot, error)
-	UseModel(context.Context, string, ...string) (StatusSnapshot, error)
+	Connect(context.Context, ConnectConfig) (controlstatus.StatusSnapshot, error)
+	UseModel(context.Context, string, ...string) (controlstatus.StatusSnapshot, error)
 	DeleteModel(context.Context, string) error
 }
 
 type SandboxService interface {
-	SetSandboxBackend(context.Context, string) (StatusSnapshot, error)
-	PrepareSandbox(context.Context) (StatusSnapshot, error)
-	RepairSandbox(context.Context) (StatusSnapshot, error)
+	SetSandboxBackend(context.Context, string) (controlstatus.StatusSnapshot, error)
+	PrepareSandbox(context.Context) (controlstatus.StatusSnapshot, error)
+	RepairSandbox(context.Context) (controlstatus.StatusSnapshot, error)
 }
 
 type AgentService interface {
@@ -114,5 +115,5 @@ type Service interface {
 }
 
 type LightweightStatusProvider interface {
-	LightweightStatus(context.Context) (StatusSnapshot, error)
+	LightweightStatus(context.Context) (controlstatus.StatusSnapshot, error)
 }

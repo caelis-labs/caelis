@@ -19,7 +19,6 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlassembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -88,7 +87,7 @@ func TestSideACPDistinctXSearchBypassesOrchestrationWatchdogE2E(t *testing.T) {
 		t.Fatalf("NewLocalAdapterForSession() error = %v", err)
 	}
 	result, err := controlprompt.New(controlprompt.RouterConfig{Service: driver}).Route(ctx, controlprompt.Request{
-		Submission: control.Submission{Text: "/zenith run six distinct X searches"},
+		Submission: controlprompt.Submission{Text: "/zenith run six distinct X searches"},
 	})
 	if err != nil {
 		t.Fatalf("Route(/zenith) error = %v", err)

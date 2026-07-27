@@ -121,13 +121,23 @@ Document responsibilities are intentionally separate:
 - `internal/controlclient/turningress`: private main-Turn ingress glue between
   `internal/kernel` handles and the Control-owned Session feed. Task output
   never fans into this ingress and cannot delay its terminal.
-- `surfaces/appserver`: thin HTTP JSON/SSE and authentication mapping over
-  `control/client` and `protocol/acp/taskstream`;
-  `app/controlserver` owns production listener assembly and fail-closed
-  network configuration.
+- `control/status`: Control-owned product status read model shared by client
+  and prompt surfaces without presentation formatting. Its nested sandbox
+  `Setup` and named checks are the sole setup-state source; adapters normalize
+  any transitional host fields before constructing this read model. Structured
+  `SessionUsageTotal` and `SessionUsageByModel` values are likewise the sole
+  cumulative Session-usage sources; the public model carries no flat mirrors.
+- `surfaces/appserver`: thin HTTP JSON/SSE, request-policy, and authentication
+  mapping over `control/client` and `protocol/acp/taskstream`.
+- `app/controlserver`: production listener, TLS, token-file, and fail-closed
+  network configuration. It accepts the exact Control client and Task stream
+  contracts and does not depend on the product `gatewayapp.Stack`.
 - `internal/controlprompt`: current Control-owned surface-neutral prompt input
-  contract, command catalog, parsing helpers, connect-wizard state, and shared
-  slash orchestration over transitional `protocol/acp/control.Service`.
+  contract, private prompt facade, command catalog, parsing helpers,
+  connect-wizard state, and shared slash orchestration. It is not a product
+  client API and must not accumulate transport or presentation semantics.
+- `surfaces/promptview`: shared text/display projection of structured prompt
+  results and Control status snapshots.
 - `internal/controlassembly`: product Agent assembly resolution.
 - `internal/controlplane`: shared-ledger routing, endpoint lifecycle/recovery,
   and handoff coordination.
@@ -138,13 +148,15 @@ Document responsibilities are intentionally separate:
 - other `internal/control*` packages: current Control integration
   implementations that may converge with adjacent `app/*` and `control/*`
   ownership before any later package split.
-- `protocol/acp/control.Service` and `app/gatewayapp/controladapter`:
-  transitional in-process ACP/TUI command adapters. Do not add product-client
-  operations to these aggregate interfaces or recreate `ports/*`; new
-  capabilities belong in coherent `control/*` packages.
+- `app/gatewayapp/controladapter`: transitional in-process implementation of
+  the private `internal/controlprompt.Service` prompt facade. Do not add
+  product-client operations to this aggregate interface or recreate `ports/*`;
+  new capabilities belong in coherent `control/*` packages.
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
   product integration adapters that make external endpoints implement the same
-  SDK controller/participant contracts used by built-in Agents.
+  SDK controller/participant contracts used by built-in Agents. Product
+  assembly supplies any plain-text prompt-result projector; the bridge does not
+  import presentation packages.
 - `platform/*`: product support code for platform-specific host behavior.
 
 ## SDK Boundary

@@ -1,4 +1,4 @@
-package controlserver
+package appserver
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/surfaces/appserver"
 )
 
 func TestBearerTokenAuthenticatorUsesTrustedPrincipal(t *testing.T) {
@@ -37,7 +36,7 @@ func TestAllowedHostAndProductionBearerReachService(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := &authBoundaryService{}
-	server, err := appserver.New(appserver.Config{
+	server, err := New(Config{
 		Service: service, Authenticator: authenticator, AllowedHosts: []string{"control.example.test"},
 	})
 	if err != nil {

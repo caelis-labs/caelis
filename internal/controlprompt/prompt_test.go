@@ -2,8 +2,6 @@ package controlprompt
 
 import (
 	"testing"
-
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 func TestParseSlashAndAttachmentRange(t *testing.T) {
@@ -11,7 +9,7 @@ func TestParseSlashAndAttachmentRange(t *testing.T) {
 	if !ok || cmd != "review" || args != "check this" || start != len([]rune("/review ")) {
 		t.Fatalf("ParseSlash() = %q %q %d %v", cmd, args, start, ok)
 	}
-	attachments := AttachmentsForPromptRange([]control.Attachment{
+	attachments := AttachmentsForPromptRange([]Attachment{
 		{Name: "before", Offset: 1},
 		{Name: "inside", Offset: start + 2},
 	}, start, len([]rune("/review check this")))

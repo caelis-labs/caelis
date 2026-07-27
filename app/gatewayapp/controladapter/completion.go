@@ -12,6 +12,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 const (
@@ -43,7 +44,7 @@ var ignoredCompletionDirs = map[string]struct{}{
 }
 
 type scoredCompletion struct {
-	candidate CompletionCandidate
+	candidate controlprompt.CompletionCandidate
 	score     int
 }
 
@@ -225,7 +226,7 @@ func fuzzySubsequenceGap(value string, query string) (int, bool) {
 	return gap, true
 }
 
-func sortAndTrimCandidates(items []scoredCompletion, limit int) []CompletionCandidate {
+func sortAndTrimCandidates(items []scoredCompletion, limit int) []controlprompt.CompletionCandidate {
 	sort.SliceStable(items, func(i, j int) bool {
 		left := items[i]
 		right := items[j]
@@ -241,15 +242,15 @@ func sortAndTrimCandidates(items []scoredCompletion, limit int) []CompletionCand
 	if len(items) > limit {
 		items = items[:limit]
 	}
-	out := make([]CompletionCandidate, 0, len(items))
+	out := make([]controlprompt.CompletionCandidate, 0, len(items))
 	for _, item := range items {
 		out = append(out, item.candidate)
 	}
 	return out
 }
 
-func enrichResumeCandidate(_ context.Context, _ resumeSessionLoader, summary session.SessionSummary) ResumeCandidate {
-	return ResumeCandidate{
+func enrichResumeCandidate(_ context.Context, _ resumeSessionLoader, summary session.SessionSummary) controlprompt.ResumeCandidate {
+	return controlprompt.ResumeCandidate{
 		SessionID: summary.SessionID,
 		Title:     strings.TrimSpace(summary.Title),
 		Prompt:    strings.TrimSpace(summary.Title),
@@ -259,7 +260,7 @@ func enrichResumeCandidate(_ context.Context, _ resumeSessionLoader, summary ses
 	}
 }
 
-func scoreResumeCandidate(query string, candidate ResumeCandidate) (int, bool) {
+func scoreResumeCandidate(query string, candidate controlprompt.ResumeCandidate) (int, bool) {
 	return fuzzyMatchScore(query,
 		candidate.SessionID,
 		candidate.Title,
@@ -280,8 +281,8 @@ func scoreSkillMeta(query string, meta skill.Meta, workspace string) (int, bool)
 	)
 }
 
-func skillCompletionCandidate(meta skill.Meta) CompletionCandidate {
-	return CompletionCandidate{
+func skillCompletionCandidate(meta skill.Meta) controlprompt.CompletionCandidate {
+	return controlprompt.CompletionCandidate{
 		Value:   strings.TrimSpace(meta.Name),
 		Display: skill.DisplayName(meta),
 		Kind:    skill.DisplayKind(meta),
@@ -290,10 +291,10 @@ func skillCompletionCandidate(meta skill.Meta) CompletionCandidate {
 	}
 }
 
-func completeWorkspaceFiles(ctx context.Context, root string, query string, limit int) ([]CompletionCandidate, error) {
+func completeWorkspaceFiles(ctx context.Context, root string, query string, limit int) ([]controlprompt.CompletionCandidate, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
-		return []CompletionCandidate{}, nil
+		return []controlprompt.CompletionCandidate{}, nil
 	}
 	limit = normalizeCompletionLimit(limit)
 	ctx, cancel := completionContext(ctx, fileCompletionTimeout)
@@ -301,7 +302,7 @@ func completeWorkspaceFiles(ctx context.Context, root string, query string, limi
 
 	base, needle, ok := walkRootForQuery(root, query)
 	if !ok {
-		return []CompletionCandidate{}, nil
+		return []controlprompt.CompletionCandidate{}, nil
 	}
 	entries := make([]scoredCompletion, 0, limit*2)
 	seen := map[string]struct{}{}
@@ -353,7 +354,7 @@ func completeWorkspaceFiles(ctx context.Context, root string, query string, limi
 			detail = "directory"
 		}
 		entries = append(entries, scoredCompletion{
-			candidate: CompletionCandidate{
+			candidate: controlprompt.CompletionCandidate{
 				Value:   value,
 				Display: value,
 				Detail:  detail,

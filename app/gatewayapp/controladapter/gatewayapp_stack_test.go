@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 func newAdapterFromGatewayAppStack(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*Adapter, error) {
@@ -80,17 +81,17 @@ func TestGatewayAppStackForRuntimeTestWiresFullRuntimeSurface(t *testing.T) {
 	}
 }
 
-func testRuntimePluginSnapshot(info gatewayapp.PluginInfo) PluginSnapshot {
-	mcpSnapshots := make([]MCPServerSnapshot, 0, len(info.MCPServers))
+func testRuntimePluginSnapshot(info gatewayapp.PluginInfo) controlprompt.PluginSnapshot {
+	mcpSnapshots := make([]controlprompt.MCPServerSnapshot, 0, len(info.MCPServers))
 	for _, mcpInfo := range info.MCPServers {
-		mcpSnapshots = append(mcpSnapshots, MCPServerSnapshot{
+		mcpSnapshots = append(mcpSnapshots, controlprompt.MCPServerSnapshot{
 			Name:    mcpInfo.Name,
 			Status:  mcpInfo.Status,
 			Tools:   append([]string(nil), mcpInfo.Tools...),
 			Warning: mcpInfo.Warning,
 		})
 	}
-	return PluginSnapshot{
+	return controlprompt.PluginSnapshot{
 		ID:          info.ID,
 		Name:        info.Name,
 		Version:     info.Version,
@@ -106,26 +107,26 @@ func testRuntimePluginSnapshot(info gatewayapp.PluginInfo) PluginSnapshot {
 	}
 }
 
-func testRuntimePluginSnapshots(list []gatewayapp.PluginInfo, err error) ([]PluginSnapshot, error) {
+func testRuntimePluginSnapshots(list []gatewayapp.PluginInfo, err error) ([]controlprompt.PluginSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]PluginSnapshot, 0, len(list))
+	out := make([]controlprompt.PluginSnapshot, 0, len(list))
 	for _, info := range list {
 		out = append(out, testRuntimePluginSnapshot(info))
 	}
 	return out, nil
 }
 
-func testRuntimePluginSnapshotWithError(info gatewayapp.PluginInfo, err error) (PluginSnapshot, error) {
+func testRuntimePluginSnapshotWithError(info gatewayapp.PluginInfo, err error) (controlprompt.PluginSnapshot, error) {
 	if err != nil {
-		return PluginSnapshot{}, err
+		return controlprompt.PluginSnapshot{}, err
 	}
 	return testRuntimePluginSnapshot(info), nil
 }
 
-func testRuntimeMarketplaceSnapshot(info gatewayapp.MarketplaceInfo) MarketplaceSnapshot {
-	return MarketplaceSnapshot{
+func testRuntimeMarketplaceSnapshot(info gatewayapp.MarketplaceInfo) controlprompt.MarketplaceSnapshot {
+	return controlprompt.MarketplaceSnapshot{
 		Name:                              info.Name,
 		Description:                       info.Description,
 		Owner:                             info.Owner,
@@ -138,20 +139,20 @@ func testRuntimeMarketplaceSnapshot(info gatewayapp.MarketplaceInfo) Marketplace
 	}
 }
 
-func testRuntimeMarketplaceSnapshots(list []gatewayapp.MarketplaceInfo, err error) ([]MarketplaceSnapshot, error) {
+func testRuntimeMarketplaceSnapshots(list []gatewayapp.MarketplaceInfo, err error) ([]controlprompt.MarketplaceSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]MarketplaceSnapshot, 0, len(list))
+	out := make([]controlprompt.MarketplaceSnapshot, 0, len(list))
 	for _, info := range list {
 		out = append(out, testRuntimeMarketplaceSnapshot(info))
 	}
 	return out, nil
 }
 
-func testRuntimeMarketplaceSnapshotWithError(info gatewayapp.MarketplaceInfo, err error) (MarketplaceSnapshot, error) {
+func testRuntimeMarketplaceSnapshotWithError(info gatewayapp.MarketplaceInfo, err error) (controlprompt.MarketplaceSnapshot, error) {
 	if err != nil {
-		return MarketplaceSnapshot{}, err
+		return controlprompt.MarketplaceSnapshot{}, err
 	}
 	return testRuntimeMarketplaceSnapshot(info), nil
 }

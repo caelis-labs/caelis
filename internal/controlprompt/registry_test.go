@@ -73,11 +73,14 @@ func TestDefaultACPNamesExposeACPPromptCommandsOnly(t *testing.T) {
 	}
 }
 
-func TestHelpTextUsesRegistrySpecs(t *testing.T) {
-	got := HelpText([]string{"help", "breeze", "review", "custom"})
-	for _, want := range []string{"/help", "Show commands and shortcuts", "/breeze <prompt>", "/review [instructions]", "/custom <prompt>"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("HelpText() = %q, want %q", got, want)
+func TestHelpSnapshotUsesRegistrySpecs(t *testing.T) {
+	got := HelpSnapshot([]string{"help", "breeze", "review", "custom"})
+	if len(got.Items) != 4 {
+		t.Fatalf("HelpSnapshot() items = %#v, want four entries", got.Items)
+	}
+	for index, want := range []string{"/help", "/breeze <prompt>", "/review [instructions]", "/custom <prompt>"} {
+		if !strings.Contains(got.Items[index].Usage, want) {
+			t.Fatalf("HelpSnapshot().Items[%d] = %#v, want usage %q", index, got.Items[index], want)
 		}
 	}
 }

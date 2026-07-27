@@ -10,7 +10,8 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/caelis-labs/caelis/protocol/acp/control"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -587,10 +588,10 @@ func TestSlashTranscriptOutputDismissesWelcomeAndKeepsInitialLogs(t *testing.T) 
 	}
 
 	updated, _ := model.handleSlashCommandResultMsg(SlashCommandResultMsg{
-		Result: control.SlashCommandResult{
-			Kind: control.SlashCommandResultStatus,
-			Status: control.StatusSnapshot{
-				Session: control.StatusSession{ID: "s-welcome"},
+		Result: controlprompt.SlashCommandResult{
+			Kind: controlprompt.SlashCommandResultStatus,
+			Status: controlstatus.StatusSnapshot{
+				Session: controlstatus.StatusSession{ID: "s-welcome"},
 			},
 		},
 	})
