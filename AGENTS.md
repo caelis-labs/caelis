@@ -5,32 +5,25 @@
 - Avoid import aliases unless they disambiguate or match local convention.
 - Read nearby docs, package comments, and tests before editing unfamiliar code. For session, gateway, ACP, replay, runtime, control, or surface work, read `docs/architecture.md` first, then the linked normative document for that boundary.
 
-## Coding Preferences
+## Architecture and Placement
+- Target direction: presentation surfaces -> Control -> Agent Runtime / SDK. Assign ownership by semantics; physical package movement is not an architecture goal.
+- Surfaces render ACP-shaped `eventstream.Envelope` values and collect input. They must not own model, tool, sandbox, policy, persistence, replay, or runtime semantics.
+- Control owns product orchestration: Agent assembly, lifecycle, permissions, system Agents, endpoint selection, and handoff authorization. Agents may suggest a transition but must not commit one.
+- `agent-sdk/*` owns reusable Runtime contracts and implementations. It must not depend on `control/*`, `app/*`, `surfaces/*`, `protocol/acp/*`, product-host `ports/*`, or repository `internal/*` outside the SDK tree.
+- Root `protocol/acp/*` owns product wire transport, compatibility, and projection. Reusable normalized ACP semantics may live in the SDK; product wire types must not flow inward.
+- Put stable product capabilities in coherent `control/*` packages, reusable contracts in `agent-sdk/*`, and private composition glue in `internal/*`. Do not recreate the retired `ports/*` tree or turn a private facade or Surface API into a second product API.
+- `control/client` owns the product client contract, Session feed/replay, approval recovery, and lifecycle write gate. Main-Turn ingress remains private in `internal/controlclient/turningress`; Task output belongs to `control/taskstream`. Surfaces own neither stream discovery nor replay.
+- Keep one semantic owner, one authoritative data path, and one durable source of truth. Typed Envelope fields own identity, relation, position, approval, and resume semantics; `_meta` is display/debug unless a maintained contract says otherwise.
+- Fence semantic Session writes for the complete producer lifetime. Never retry `ErrLeaseConflict` through an unfenced path; durable State repair requires an explicit revision-checked guarded mutation.
+- Dynamic orchestration belongs to Control. Do not add a deterministic workflow graph/node engine or let an Agent authorize its own handoff.
+
+## Code Quality
 - Follow existing boundaries, helpers, and tests; scope edits to changed behavior.
 - Add abstractions only when they remove real complexity or match an established pattern.
-- Target architecture: presentation surfaces -> control layer -> Agent Runtime / SDK. Current package names are transitional.
-- Surfaces consume ACP-shaped `eventstream.Envelope` payloads plus documented `_meta` extensions; they must not own model, tool, sandbox, policy, persistence, or runtime semantics.
-- ACP is the native interoperability language for built-in and external Agents as well as the surface protocol. Reusable normalized ACP semantics may live in `agent-sdk`; root `protocol/acp/*` owns product wire transport, compatibility, and projection.
-- The control layer owns orchestration: lifecycle, Agent assembly, permissions, Guardian/Reviewer/system agents, future Agent Manage Loop coordination, endpoint selection, and handoff authorization. Agents must not autonomously commit handoff.
-- Agent Runtime / SDK packages should be reusable below the application and must not depend on presentation, product assembly, or one transport implementation.
-- Do not build a deterministic workflow graph/node engine. Dynamic orchestration belongs to the control-layer Agent Manage Loop.
-- Prefer reusable public contracts in `agent-sdk/*` and coherent product-control packages in `control/*`; the retired `ports/*` tree must not be recreated. Keep private glue in `internal/*`, and avoid mixing app-control contracts with reusable runtime contracts.
-- `agent-sdk/*` is a package tree in the root Go module, not a nested module. SDK packages must not depend on `control/*`, `app/*`, `surfaces/*`, `protocol/acp/*`, product-host `ports/*`, or repository `internal/*` packages outside the `agent-sdk` package tree.
-- `control/client` owns the product client contract and implementation: commands, Session list/bootstrap/reconnect, feed/replay, approval recovery, and the aggregate Service. New Control capabilities belong in coherent `control/*` packages; do not recreate `ports/*`, grow the private `internal/controlprompt.Service` prompt facade into a second product API, or add product operations to Surface-private APIs. `surfaces/appserver` only maps HTTP/SSE and authentication.
-- All current clients consume the Control-owned Session feed. Keep Turn/task ingress in `internal/controlclient/turningress`; do not let a Surface discover `StreamSubscriber`, rebuild replay, or publish a second permission path.
-- `Envelope.Cursor` is the only public resume token. Delivery, parent relation, scope, position, and approval identity use typed Envelope fields; `_meta` must not become a correlation, ordering, durability, or authorization source.
-- Session semantic writes are fenced. Runtime writes carry the current execution lease guard for the complete asynchronous producer lifetime; overlapping Control writes use an explicit allowed purpose and matching fence when required. Never catch `ErrLeaseConflict` and retry unfenced. `SnapshotState` is a pure read; durable State repair uses a revision-checked guarded mutation.
-- Client-hosted ACP terminal execution is currently unsupported unless a complete handler is installed. Preserve the declared capability and the documented Zed compatibility anchor until a focused compatibility decision changes both behavior and tests.
 - Avoid growing central orchestration files. For coherent features in large/high-touch files, prefer a nearby module with docs and tests.
+- When replacing a path, remove superseded code, mirrors, wrappers, tests, and docs. A required compatibility path must have a documented owner, scope, and removal condition.
 - Document new exported types, interfaces, and non-obvious contracts.
-- Persist semantic model state, not UI transcript cache. `_meta` is display/debug unless documented as replay metadata.
 - Normalize external ACP input before storage; keep transient UI/subagent traces out of durable parent context unless carried by canonical payloads.
-- Before `v1.0.0`, prefer clean schema and boundary fixes over compatibility fallbacks.
-
-## Architecture Review
-- Use `.agents/skills/caelis-deep-review` for recurring Caelis architecture review, long-term technical debt inventory, boundary drift checks, and large code-quality scans.
-- Deep review findings should rank concrete risk over theoretical purity: P0 for correctness/security/replay corruption, P1 for boundary drift that blocks near-term extension, P2 for useful cleanup.
-- For architecture cleanup, choose one bounded high-ROI slice and validate it before widening scope.
 
 ## Validation
 - Run `gofmt` on touched Go files, focused `go test` packages for changed behavior, and `git diff --check`.

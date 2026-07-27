@@ -80,13 +80,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Set package version from git tag
-        if: startsWith(github.ref, 'refs/tags/v')
         run: node ./npm/scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
       - name: Stage platform packages
-        if: startsWith(github.ref, 'refs/tags/v')
         run: node ./npm/scripts/stage-release.mjs "${GITHUB_REF_NAME#v}" ./dist
       - name: Publish platform packages
-        if: startsWith(github.ref, 'refs/tags/v')
         run: >
           node ./npm/scripts/publish-release.mjs
           ./npm/packages/caelis-darwin-arm64
@@ -96,5 +93,4 @@ jobs:
           ./npm/packages/caelis-windows-arm64
           ./npm/packages/caelis-windows-x64
       - name: Publish main package
-        if: startsWith(github.ref, 'refs/tags/v')
         run: node ./npm/scripts/publish-release.mjs ./npm

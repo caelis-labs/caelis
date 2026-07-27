@@ -50,6 +50,20 @@ are available. Historical names are accepted only at the built-in execution
 and replay boundary. Removed `List` remains a historical display identity but
 cannot be registered for execution; external MCP tool names are unchanged.
 
+## Quickstart
+
+Use a Caelis module tag and import only the SDK capabilities the host needs:
+
+```bash
+go get github.com/caelis-labs/caelis@<version>
+```
+
+The executable
+[`quickstart_external_test.go`](runtime/quickstart_external_test.go) shows a
+minimal host-local Agent using only supported imports. The external-consumer
+gate compiles that example and every path in
+[`supported-packages.txt`](supported-packages.txt) outside the repository.
+
 ## Dependency Boundary
 
 SDK packages must not depend on Caelis product-host or presentation code,
@@ -74,9 +88,9 @@ The accepted package boundary, ACP-native orchestration model, and durability
 invariants are documented in
 [Agent SDK Boundary](../docs/agent-sdk-boundary.md).
 
-The bundled quickstart, consumer contracts, and current concurrency,
-cancellation, persistence, and recovery limitations are in
-[Agent SDK Usage and Compatibility](../docs/agent-sdk-usage.md).
+Exported package comments and typed errors are the consumer contract. Prefer
+the narrowest interface a host needs and treat diagnostic `Error()` text as
+unstable.
 
 Module or repository extraction is not a current goal. Package independence is
 enforced by dependency closure, architecture lint, explicit public contracts,

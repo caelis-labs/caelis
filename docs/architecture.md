@@ -50,13 +50,11 @@ Document responsibilities are intentionally separate:
 - this file owns the layer and repository map;
 - [Agent SDK Boundary](agent-sdk-boundary.md) owns normative SDK/Control/ACP
   decisions;
-- [Agent SDK Usage and Compatibility](agent-sdk-usage.md) owns consumer-facing
-  contracts and current limitations;
-- [ACP Projection Architecture](acp-projection-architecture.md) owns semantic,
+- [ACP Projection Contract](acp-projection-architecture.md) owns semantic,
   wire, and surface projection boundaries;
-- [Control Client Protocol v1 — M2 Design](control-client-m2-design.md) owns the
-  accepted product-client command, feed, replay, HTTP/SSE, and release boundary;
-- [Release](release.md) owns release and post-publish verification mechanics.
+- [Control Convergence](control-convergence.md) owns the desired Control
+  direction and end-state constraints;
+- [Release](release.md) owns release mechanics.
 
 ## Current Map
 
@@ -182,76 +180,14 @@ The ban on importing the root `protocol/acp/*` implementation does not ban ACP
 semantics from the SDK. Dependency direction is from the product wire and
 projection implementation toward reusable SDK contracts, never the reverse.
 
-Current SDK package ownership:
+Package-level ownership and the supported public import set are defined by
+[Agent SDK Boundary](agent-sdk-boundary.md),
+[`agent-sdk/supported-packages.txt`](../agent-sdk/supported-packages.txt), and
+the enforced architecture gates.
 
-- `agent-sdk`: cross-domain public contracts for agent specs, turn requests,
-  runtime events, capabilities, approvals, neutral handoff/transfer values,
-  usage, and stable errors. Handoff policy and target selection remain
-  app-owned.
-- `agent-sdk/approval`: approval review contracts.
-- `agent-sdk/display`: display helpers for runtime and tools.
-- `agent-sdk/model`: model contracts and reusable provider protocol
-  implementations. It does not own concrete model directories, recommended
-  model lists, provider overlays, or models.dev snapshots.
-- `agent-sdk/policy`: policy presets and permission helpers.
-- `agent-sdk/runtime`: local agent runtime, reusable ACP-compatible endpoint and
-  controller contracts, turn mechanics, and low-level control-plane mechanisms.
-  Product assembly, Agent selection, Manage Loop policy, and ownership-transfer
-  coordination stay outside the SDK.
-- `agent-sdk/sandbox`: sandbox contracts and local implementations.
-- `agent-sdk/session`: session contracts and stores.
-- `agent-sdk/skill`: skill discovery and builtin skill tooling.
-- `agent-sdk/task`: task and subagent contracts.
-- `agent-sdk/tool`: tool registry contracts and builtin tools.
-
-The current migration has moved reusable runtime, model, tool, session,
-sandbox, task, policy, skill, and display contracts and implementations into
-`agent-sdk/*`. SDK-owned `ports/*`, the product `ports/controlclient`, and
-global `impl/*` compatibility paths have been removed. Product commands,
-Session client state/feed, approval recovery, and the operation ledger live in
-`control/client`; concrete model catalog data lives under
-`control/modelcatalog`, provider/model configuration and construction live
-under `control/modelconfig`, and Caelis ACP agent bridge code now lives under
-`internal/acpagentbridge`.
-
-Repeatable SDK boundary gates:
-
-- `make arch-lint`: reject direct SDK dependencies on non-SDK Caelis packages.
-- `make sdk-boundary-check`: reject nested module metadata, check production and
-  test dependency closure, and compile public SDK imports from an external
-  consumer of the root module.
-- `make test`: test the root module, including all SDK packages, once.
-- `make commit-check`: run formatting, lint, architecture and package-boundary
-  checks, vet, tests, and builds.
-
-The implementation centralizes update and coordination semantics, keeps
-product assembly and handoff policy in Control, uses neutral task principals
-and roles, and routes system Agents through the common Runtime pipeline.
-Durable continuation is explicitly process-local live attach, while the
-production Control host owns fenced cross-Runtime Session execution leases.
-The lease serializes one canonical Turn rather than one Agent identity: local
-and ACP controllers plus direct AgentRun or Reviewer participant prompts use
-the same fenced envelope. Participant lifecycle is explicit Control metadata with
-revision/delegation/generation CAS; handoff acquires the exclusive lease before
-endpoint activation and binding commit. ACP event forwarding preserves the
-owning Turn fence instead of becoming an unscoped writer. The leased Runtime
-starts renewal with the acquired fence, keeps that lease through asynchronous
-producer completion, cancels execution on heartbeat loss, and releases only
-after the producer boundary closes. A lease conflict on an ordinary supported
-user path is therefore a correctness failure, not a retry hint.
-
-Execution capability wiring is Control-owned. Generation-loop safety is owned
-inside each Agent implementation instead of by Control orchestration. The
-built-in chat Agent probes its raw provider-neutral model stream and completed
-model step before projecting Session events or executing the next tool. It
-stops only on high-confidence repeated pure-text cycles or identical
-content-plus-complete-tool-argument steps. External ACP controllers,
-participants, and spawned third-party Agents are never inspected or interrupted
-by a Caelis parent watchdog; each endpoint owns its own Agent Loop safety.
-Caelis self/model children get the same built-in protection inside their child
-process. This does not restore a fixed SDK step or wall-clock budget. Product
-source policy no longer lives in SDK task code. Module or repository extraction
-is not a goal.
+Control fences each canonical Session Turn across its complete asynchronous
+producer lifetime. Agent-loop safety remains inside the Agent implementation;
+one Agent must not inspect or cancel an unrelated external endpoint.
 
 ## Durable State
 

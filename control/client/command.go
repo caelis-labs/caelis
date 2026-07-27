@@ -180,7 +180,7 @@ type CommandBackend interface {
 	ExecuteControlCommand(context.Context, Principal, Action, any) (CommandResult, error)
 }
 
-// CommandClient is the complete transport-neutral M2 write contract.
+// CommandClient is the complete transport-neutral Control write contract.
 type CommandClient interface {
 	CreateSession(context.Context, Principal, CreateSessionRequest) (CommandResult, error)
 	CloseSession(context.Context, Principal, CloseSessionRequest) (CommandResult, error)

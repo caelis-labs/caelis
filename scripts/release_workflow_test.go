@@ -53,6 +53,9 @@ func TestReleaseWaitsForExactSHAMainQualityBeforeArtifacts(t *testing.T) {
 		"make ",
 		"sdk-proxy-smoke",
 		"workflow_dispatch:",
+		"actions/download-artifact",
+		"gh release download",
+		"GITHUB_STEP_SUMMARY",
 	} {
 		if strings.Contains(release, forbidden) {
 			t.Errorf("release workflow still contains non-artifact work %q", forbidden)

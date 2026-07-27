@@ -135,12 +135,12 @@ is provided.
 
 See [docs/architecture.md](docs/architecture.md) for the layer map and
 [docs/agent-sdk-boundary.md](docs/agent-sdk-boundary.md) for the reusable Agent
-SDK package boundary and ACP-native orchestration model. See
-[docs/agent-sdk-usage.md](docs/agent-sdk-usage.md) for the SDK quickstart and
-consumer contracts, [docs/acp-projection-architecture.md](docs/acp-projection-architecture.md)
-for ACP-to-Surface projection, and
-[docs/control-client-m2-design.md](docs/control-client-m2-design.md) for the
-accepted Control client command/feed contract. Release mechanics live in
+SDK package boundary and ACP-native orchestration model. The
+[Agent SDK README](agent-sdk/README.md) is the consumer entry point. See
+[docs/acp-projection-architecture.md](docs/acp-projection-architecture.md) for
+ACP-to-Surface projection and
+[docs/control-convergence.md](docs/control-convergence.md) for the desired
+Control end state. Release mechanics live in
 [docs/release.md](docs/release.md).
 
 ## Development
