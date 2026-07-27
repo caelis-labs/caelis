@@ -260,10 +260,10 @@ func TestViewportSelectionUsesInputSelectionStyle(t *testing.T) {
 	}
 }
 
-func TestInputSelectionUsesInputSelectionStyleWithUserBg(t *testing.T) {
+func TestInputSelectionUsesInputSelectionStyleWithComposerBg(t *testing.T) {
 	model := NewModel(Config{})
 	model.width = 80
-	model.theme.UserBg = lipgloss.Color("#141414")
+	model.theme.ComposerBg = lipgloss.Color("#141414")
 	model.theme.AppBg = lipgloss.Color("#000000")
 	model.theme.Focus = lipgloss.Color("#00ff00")
 	model.theme.SelectionFg = lipgloss.Color("#abcdef")
@@ -450,7 +450,7 @@ func TestFixedFooterHitboxAccountsForComposerChromeRows(t *testing.T) {
 	model := NewModel(Config{Workspace: "/tmp/workspace"})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m := updated.(*Model)
-	m.theme.UserBg = lipgloss.Color("#141414")
+	m.theme.ComposerBg = lipgloss.Color("#141414")
 	m.theme.NoColor = false
 	m.syncTextareaChrome()
 	m.ensureViewportLayout()

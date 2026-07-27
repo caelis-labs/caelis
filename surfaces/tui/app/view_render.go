@@ -264,19 +264,16 @@ func (m *Model) renderBTWDrawer() string {
 }
 
 func renderPlanLine(m *Model, item planEntryState) string {
-	icon := "□"
-	iconStyle := m.theme.HelpHintTextStyle()
+	presentation := planPresentationForStatus(item.Status)
+	iconStyle := planIconStyle(m.theme, presentation.Tone)
 	textStyle := m.theme.HelpHintTextStyle()
-	switch strings.TrimSpace(item.Status) {
-	case "completed":
-		icon = "✔"
-		iconStyle = m.theme.NoteStyle()
+	switch presentation.Tone {
+	case planCompleted:
 		textStyle = m.theme.NoteStyle().Strikethrough(true)
-	case "in_progress":
-		iconStyle = lipgloss.NewStyle().Foreground(m.theme.Focus).Bold(true)
-		textStyle = lipgloss.NewStyle().Foreground(m.theme.Focus).Bold(true)
+	case planActive:
+		textStyle = m.theme.Tokens().Focus.Bold(true)
 	}
-	return iconStyle.Render(icon) + " " + textStyle.Render(item.Content)
+	return iconStyle.Render(presentation.Icon) + " " + textStyle.Render(item.Content)
 }
 
 func (m *Model) planVisibleBudget() int {

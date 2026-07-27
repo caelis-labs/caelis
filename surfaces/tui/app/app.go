@@ -284,6 +284,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.colorProfile = typed.Profile
 		nextTheme := tuikit.ResolveThemeWithState(m.theme.IsDark, m.noColor, m.colorProfile)
+		if m.themeAuto && m.theme.TerminalBg != nil {
+			nextTheme = tuikit.ResolveThemeWithBackgroundColor(m.theme.TerminalBg, m.noColor, m.colorProfile)
+		}
 		m.applyTheme(nextTheme)
 		return m, nil
 

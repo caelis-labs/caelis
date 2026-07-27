@@ -8,6 +8,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
@@ -631,11 +633,11 @@ func TestNarrativeChromaClearsDefaultErrorBackground(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			style := narrativeStyleConfig(tt.theme, tt.role)
-			if style.CodeBlock.Theme != catppuccinCodeBlockTheme(tt.theme) {
-				t.Fatalf("code block theme = %q, want %q", style.CodeBlock.Theme, catppuccinCodeBlockTheme(tt.theme))
+			if style.CodeBlock.Theme != syntaxCodeBlockTheme(tt.theme) {
+				t.Fatalf("code block theme = %q, want %q", style.CodeBlock.Theme, syntaxCodeBlockTheme(tt.theme))
 			}
 			if style.CodeBlock.Chroma != nil {
-				t.Fatalf("expected direct Catppuccin Chroma theme, got custom Chroma config")
+				t.Fatalf("expected direct named Chroma theme, got custom Chroma config")
 			}
 			rendered := glamourRenderNarrative("```diff\n-old\n+new\n```", 80, tt.theme, tt.role)
 			if containsForbiddenRedBackground(rendered) {
@@ -645,21 +647,21 @@ func TestNarrativeChromaClearsDefaultErrorBackground(t *testing.T) {
 	}
 }
 
-func TestNarrativeCodeBlockUsesCatppuccinThemeForTerminalBackground(t *testing.T) {
+func TestNarrativeCodeBlockUsesCaelisThemeForTerminalBackground(t *testing.T) {
 	tests := []struct {
 		name  string
 		theme tuikit.Theme
 		want  string
 	}{
 		{
-			name:  "dark uses mocha",
+			name:  "dark uses caelis dusk",
 			theme: tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor),
-			want:  "catppuccin-mocha",
+			want:  "caelis-dusk",
 		},
 		{
-			name:  "light uses latte",
+			name:  "light uses caelis dawn",
 			theme: tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor),
-			want:  "catppuccin-latte",
+			want:  "caelis-dawn",
 		},
 	}
 
@@ -675,6 +677,76 @@ func TestNarrativeCodeBlockUsesCatppuccinThemeForTerminalBackground(t *testing.T
 				}
 			})
 		}
+	}
+}
+
+func TestCaelisChromaStylesUseSemanticSyntaxPalettes(t *testing.T) {
+	themes := []tuikit.Theme{
+		tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor),
+		tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor),
+	}
+	for _, theme := range themes {
+		t.Run(theme.Name, func(t *testing.T) {
+			palette := tuikit.SyntaxPaletteForTheme(theme)
+			registered := styles.Get(palette.ChromaTheme)
+			if registered.Name != palette.ChromaTheme {
+				t.Fatalf("registered Chroma style = %q, want %q", registered.Name, palette.ChromaTheme)
+			}
+			for _, check := range []struct {
+				name  string
+				token chroma.TokenType
+				want  color.Color
+			}{
+				{name: "keyword", token: chroma.Keyword, want: palette.Keyword},
+				{name: "function", token: chroma.NameFunction, want: palette.Function},
+				{name: "string", token: chroma.LiteralString, want: palette.String},
+				{name: "number", token: chroma.LiteralNumber, want: palette.Number},
+				{name: "operator", token: chroma.Operator, want: palette.Operator},
+				{name: "deleted", token: chroma.GenericDeleted, want: palette.Deleted},
+				{name: "inserted", token: chroma.GenericInserted, want: palette.Inserted},
+			} {
+				t.Run(check.name, func(t *testing.T) {
+					want := colorToAnsiPtr(check.want)
+					if want == nil {
+						t.Fatalf("palette %s color is nil", check.name)
+					}
+					if got := registered.Get(check.token).Colour.String(); got != *want {
+						t.Fatalf("%s color = %q, want %q", check.name, got, *want)
+					}
+				})
+			}
+			if got := registered.Get(chroma.Background).Background; got.IsSet() {
+				t.Fatalf("Chroma background = %q, want parent code-block surface", got)
+			}
+		})
+	}
+}
+
+func TestNarrativeCodeBlockRendersCaelisKeywordColors(t *testing.T) {
+	tests := []struct {
+		name       string
+		theme      tuikit.Theme
+		foreground string
+	}{
+		{
+			name:       "dusk",
+			theme:      tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor),
+			foreground: "38;5;146",
+		},
+		{
+			name:       "dawn",
+			theme:      tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor),
+			foreground: "38;5;61",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rendered := glamourRenderNarrative("```go\npackage main\n```", 80, tt.theme, tuikit.LineStyleAssistant)
+			keywordText := normalizeInlineStyleText(textWithSGRForeground(rendered, tt.foreground))
+			if !strings.Contains(keywordText, "package") {
+				t.Fatalf("keyword foreground text = %q, want package\nrendered=%q", keywordText, rendered)
+			}
+		})
 	}
 }
 

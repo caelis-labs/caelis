@@ -6,6 +6,16 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+// ToolActionRole identifies the semantic tone of a tool action label.
+type ToolActionRole uint8
+
+const (
+	ToolActionNeutral ToolActionRole = iota
+	ToolActionPlan
+	ToolActionSuccess
+	ToolActionFailure
+)
+
 // ---------------------------------------------------------------------------
 // Semantic Token System
 //
@@ -84,8 +94,11 @@ type Tokens struct {
 	ToolName   lipgloss.Style
 	ToolArgs   lipgloss.Style
 	ToolResult lipgloss.Style
-	ToolError  lipgloss.Style
-	ToolOutput lipgloss.Style
+	// ToolErrorMark is reserved for failure icons and status words. ToolError
+	// keeps diagnostic body text readable without painting whole logs red.
+	ToolErrorMark lipgloss.Style
+	ToolError     lipgloss.Style
+	ToolOutput    lipgloss.Style
 
 	// ── Markdown / prose ───────────────────────────────────────────
 	MarkdownHeading    lipgloss.Style
@@ -96,6 +109,21 @@ type Tokens struct {
 	MarkdownTableHead  lipgloss.Style
 	MarkdownTableEdge  lipgloss.Style
 	MarkdownRule       lipgloss.Style
+}
+
+// ToolActionStyle resolves a tool action role through semantic tokens.
+func (t *Theme) ToolActionStyle(role ToolActionRole) lipgloss.Style {
+	tokens := t.Tokens()
+	switch role {
+	case ToolActionPlan:
+		return tokens.Accent.Bold(true)
+	case ToolActionSuccess:
+		return tokens.Success.Bold(true)
+	case ToolActionFailure:
+		return tokens.ToolErrorMark
+	default:
+		return tokens.ToolName
+	}
 }
 
 // resolveTokens derives Tokens from a fully populated Theme.
@@ -158,12 +186,13 @@ func resolveTokens(t Theme) Tokens {
 		Separator: fgStyle(t.PanelBorder),
 
 		// Tool transcript
-		ToolIcon:   fgStyle(t.ToolFg),
-		ToolName:   fgStyle(t.Focus).Bold(true),
-		ToolArgs:   quietStyle(t, t.ReasoningFg),
-		ToolResult: quietStyle(t, t.SecondaryText),
-		ToolError:  fgStyle(firstColor(t.MutedText, t.TextSecondary, t.Warning, t.Error)),
-		ToolOutput: quietStyle(t, t.TextSecondary),
+		ToolIcon:      fgStyle(t.ToolFg),
+		ToolName:      fgStyle(t.TextPrimary).Bold(true),
+		ToolArgs:      quietStyle(t, t.ReasoningFg),
+		ToolResult:    quietStyle(t, t.SecondaryText),
+		ToolErrorMark: fgStyle(t.Error).Bold(true),
+		ToolError:     quietStyle(t, firstColor(t.TextSecondary, t.SecondaryText, t.MutedText)),
+		ToolOutput:    quietStyle(t, t.TextSecondary),
 
 		// Markdown / prose
 		MarkdownHeading:    fgStyle(t.TextPrimary).Bold(true),

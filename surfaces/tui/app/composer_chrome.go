@@ -7,19 +7,19 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// containerHorizontalPadding is the inner left/right padding inside the UserBg
-// composer chrome. A positive value is intentional: the gray bar is slightly
+// containerHorizontalPadding is the inner left/right padding inside the
+// composer chrome. A positive value is intentional: the neutral bar is slightly
 // wider than the ">" prompt. Combined with composerOuterInset it keeps the
 // prompt column on InputInset (GutterNarrative+1) instead of stacking past it.
 const containerHorizontalPadding = 1
 
-// composerChrome captures UserBg container padding applied around the composer.
+// composerChrome captures ComposerBg container padding applied around the composer.
 type composerChrome struct {
 	active bool
 }
 
 func (m *Model) composerChrome() composerChrome {
-	if m == nil || m.theme.UserBg == nil || m.theme.NoColor {
+	if m == nil || m.theme.ComposerBg == nil || m.theme.NoColor {
 		return composerChrome{}
 	}
 	return composerChrome{active: true}
@@ -29,7 +29,7 @@ func (m *Model) composerBgStyle() lipgloss.Style {
 	if !m.composerChrome().active {
 		return lipgloss.NewStyle()
 	}
-	return lipgloss.NewStyle().Background(m.theme.UserBg)
+	return lipgloss.NewStyle().Background(m.theme.ComposerBg)
 }
 
 func (c composerChrome) horizontalInset() int {
@@ -53,7 +53,7 @@ func (c composerChrome) topRows() int {
 	return 0
 }
 
-// composerOuterInset is the left/right margin outside the UserBg container (or
+// composerOuterInset is the left/right margin outside the ComposerBg container (or
 // around the plain input when chrome is inactive). outer + chrome pad always
 // equals InputInset so the prompt sits one column right of the transcript
 // gutter while the gray bar stays slightly wider than the ">".

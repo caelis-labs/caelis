@@ -308,7 +308,7 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	style.CodeBlock.Indent = &cbIndent
 	style.CodeBlock.Color = styleForegroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
 	style.CodeBlock.BackgroundColor = styleBackgroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
-	style.CodeBlock.Theme = catppuccinCodeBlockTheme(theme)
+	style.CodeBlock.Theme = syntaxCodeBlockTheme(theme)
 	style.CodeBlock.Chroma = nil
 
 	// ---------------------------------------------------------------
@@ -382,7 +382,7 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	return style
 }
 
-func catppuccinCodeBlockTheme(theme tuikit.Theme) string {
+func syntaxCodeBlockTheme(theme tuikit.Theme) string {
 	if theme.NoColor {
 		return ""
 	}
@@ -427,6 +427,7 @@ func themeRenderCacheKey(theme tuikit.Theme) string {
 		themeColorCacheKey(theme.AssistantFg),
 		themeColorCacheKey(theme.ReasoningFg),
 		themeColorCacheKey(theme.UserFg),
+		themeColorCacheKey(theme.UserBg),
 		themeColorCacheKey(theme.UserPrefixFg),
 		themeColorCacheKey(theme.ToolFg),
 		themeColorCacheKey(theme.Accent),

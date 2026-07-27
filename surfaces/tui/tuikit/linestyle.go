@@ -273,8 +273,8 @@ func colorizeToolLine(line string, theme Theme) string {
 		case "✓":
 			prefixStyle = theme.AssistantStyle()
 		case "✗":
-			prefixStyle = theme.ToolErrorStyle()
-			nameStyle = theme.ToolErrorStyle()
+			prefixStyle = theme.ToolErrorMarkStyle()
+			nameStyle = theme.ToolErrorMarkStyle()
 		}
 		return prefixStyle.Render(prefix+" ") + nameStyle.Render(toolName) + suffix
 	}

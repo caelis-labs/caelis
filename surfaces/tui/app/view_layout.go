@@ -34,7 +34,7 @@ func (m *Model) bottomSectionHeight() int {
 	// Composer top padding before input.
 	lines += tuikit.ComposerPadTop
 
-	// Input bar (with minimum height) plus optional UserBg container padding.
+	// Input bar (with minimum height) plus optional ComposerBg container padding.
 	inputH := maxInt(tuikit.ComposerMinHeight, m.textarea.Height())
 	lines += inputH
 	lines += m.composerChrome().verticalRows()

@@ -279,26 +279,9 @@ func renderACPPlanRows(blockID string, ev SubagentEvent, width int, ctx BlockRen
 	header := "• Updated Plan"
 	rows = append(rows, renderACPTranscriptHeaderRow(blockID, header, width, ctx, ""))
 	for i, pe := range ev.PlanEntries {
-		icon := "□"
-		iconStyle := ctx.Theme.TranscriptMetaStyle()
-		textStyle := ctx.Theme.TextStyle()
-		switch strings.ToLower(pe.Status) {
-		case "done", "completed":
-			icon = "✔"
-			iconStyle = ctx.Theme.NoteStyle()
-			textStyle = ctx.Theme.NoteStyle()
-		case "in_progress", "running":
-			iconStyle = lipgloss.NewStyle().Foreground(ctx.Theme.Focus).Bold(true)
-			textStyle = lipgloss.NewStyle().Foreground(ctx.Theme.Focus).Bold(true)
-		case "failed":
-			icon = "✗"
-			iconStyle = ctx.Theme.ErrorStyle()
-			textStyle = ctx.Theme.ErrorStyle()
-		case "blocked":
-			icon = "⊘"
-			iconStyle = ctx.Theme.WarnStyle()
-			textStyle = ctx.Theme.WarnStyle()
-		}
+		presentation := planPresentationForStatus(pe.Status)
+		iconStyle := planIconStyle(ctx.Theme, presentation.Tone)
+		textStyle := transcriptPlanTextStyle(ctx.Theme, presentation.Tone)
 		prefix := "  "
 		if i == 0 {
 			prefix += "└ "
@@ -306,8 +289,8 @@ func renderACPPlanRows(blockID string, ev SubagentEvent, width int, ctx BlockRen
 			prefix += "  "
 		}
 		content := strings.TrimSpace(pe.Content)
-		plain := prefix + icon + " " + content
-		styled := ctx.Theme.TranscriptMetaStyle().Render(prefix) + iconStyle.Render(icon) + " " + textStyle.Render(content)
+		plain := prefix + presentation.Icon + " " + content
+		styled := ctx.Theme.TranscriptMetaStyle().Render(prefix) + iconStyle.Render(presentation.Icon) + " " + textStyle.Render(content)
 		rows = append(rows, StyledPlainRow(blockID, plain, styled))
 	}
 	rows = append(rows, PlainRow(blockID, ""))
@@ -511,18 +494,70 @@ func styleSpawnedHeaderTarget(ctx BlockRenderContext, target string) string {
 	return styled
 }
 
+var toolActionRoles = map[string]tuikit.ToolActionRole{
+	"updated":     tuikit.ToolActionPlan,
+	"wrote":       tuikit.ToolActionSuccess,
+	"patched":     tuikit.ToolActionSuccess,
+	"failed":      tuikit.ToolActionFailure,
+	"interrupted": tuikit.ToolActionFailure,
+}
+
 func toolActionStyle(ctx BlockRenderContext, action string) lipgloss.Style {
-	style := lipgloss.NewStyle().Bold(true)
-	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "ran", "spawned", "task", "tasks", "wait", "write", "cancel", "explored", "read", "list", "glob", "search", "skill":
-		return style.Foreground(ctx.Theme.Focus)
-	case "wrote", "patched", "updated":
-		return style.Foreground(ctx.Theme.Success)
-	case "failed", "interrupted":
-		return style.Foreground(ctx.Theme.Error)
-	default:
-		return ctx.Theme.ToolNameStyle()
+	role := toolActionRoles[strings.ToLower(strings.TrimSpace(action))]
+	return ctx.Theme.ToolActionStyle(role)
+}
+
+type planStatusTone uint8
+
+const (
+	planPending planStatusTone = iota
+	planCompleted
+	planActive
+	planFailed
+	planBlocked
+)
+
+type planStatusPresentation struct {
+	Icon string
+	Tone planStatusTone
+}
+
+func planPresentationForStatus(status string) planStatusPresentation {
+	presentation := planStatusPresentation{Icon: "□", Tone: planPending}
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "done", "completed":
+		presentation = planStatusPresentation{Icon: "✔", Tone: planCompleted}
+	case "in_progress", "running":
+		presentation = planStatusPresentation{Icon: "◉", Tone: planActive}
+	case "failed":
+		presentation = planStatusPresentation{Icon: "✗", Tone: planFailed}
+	case "blocked":
+		presentation = planStatusPresentation{Icon: "⊘", Tone: planBlocked}
 	}
+	return presentation
+}
+
+func planIconStyle(theme tuikit.Theme, tone planStatusTone) lipgloss.Style {
+	tokens := theme.Tokens()
+	switch tone {
+	case planCompleted:
+		return tokens.Success.Bold(true)
+	case planActive:
+		return tokens.Focus.Bold(true)
+	case planFailed:
+		return theme.ToolErrorMarkStyle()
+	case planBlocked:
+		return theme.WarnStyle().Bold(true)
+	default:
+		return tokens.TextMuted
+	}
+}
+
+func transcriptPlanTextStyle(theme tuikit.Theme, tone planStatusTone) lipgloss.Style {
+	if tone == planActive {
+		return theme.TextStyle().Bold(true)
+	}
+	return theme.SecondaryTextStyle()
 }
 
 func renderACPTerminalPanelRows(blockID string, callID string, text string, width int, ctx BlockRenderContext, err bool, token string) []RenderedRow {

@@ -192,7 +192,7 @@ func TestRenderInputBarKeepsComposerBackgroundForConnectWizardInput(t *testing.T
 		Wizards:  DefaultWizards(),
 	})
 	model.width = 80
-	model.theme.UserBg = lipgloss.Color("#141414")
+	model.theme.ComposerBg = lipgloss.Color("#141414")
 	model.theme.NoColor = false
 	def := connectModelWizard()
 	model.wizard = &wizardRuntime{
@@ -205,8 +205,8 @@ func TestRenderInputBarKeepsComposerBackgroundForConnectWizardInput(t *testing.T
 	model.syncTextareaFromInput()
 
 	rendered := model.renderInputBar()
-	wantPrompt := model.theme.PromptStyle().Background(model.theme.UserBg).Render("> ")
-	wantInput := model.theme.TextStyle().Background(model.theme.UserBg).Render("acp")
+	wantPrompt := model.theme.PromptStyle().Background(model.theme.ComposerBg).Render("> ")
+	wantInput := model.theme.TextStyle().Background(model.theme.ComposerBg).Render("acp")
 	if !strings.Contains(rendered, wantPrompt) {
 		t.Fatalf("rendered connect input missing composer background on prompt %q: %q", wantPrompt, rendered)
 	}

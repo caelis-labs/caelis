@@ -91,7 +91,7 @@ func (m *Model) composeInputRenderFrom(snapshot composerInputLayout) composerRen
 	helpStyle := m.theme.HelpHintTextStyle()
 	textStyle := m.theme.TextStyle()
 	if chrome.active {
-		bg := m.theme.UserBg
+		bg := m.theme.ComposerBg
 		promptStyle = promptStyle.Background(bg)
 		helpStyle = helpStyle.Background(bg)
 		textStyle = textStyle.Background(bg)
@@ -293,7 +293,7 @@ func (layout composerInputLayout) textareaIndexFromPoint(point textSelectionPoin
 
 func (m *Model) composerContentWidth() int {
 	// Prompt text starts at composerInputColumnOffset on both sides of the
-	// main column (symmetric outer margin + optional UserBg chrome pad).
+	// main column (symmetric outer margin + optional ComposerBg chrome pad).
 	if width := m.fixedRowWidth() - (m.composerInputColumnOffset() * 2); width > 0 {
 		return maxInt(20, width)
 	}

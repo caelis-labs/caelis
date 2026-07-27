@@ -58,23 +58,23 @@ func TestRanHeaderShellCommandUsesDistinctTokenStyles(t *testing.T) {
 	}
 }
 
-func TestShellCommandStylesUseCatppuccinSyntaxPalette(t *testing.T) {
+func TestShellCommandStylesUseCaelisSyntaxPalette(t *testing.T) {
 	tests := []struct {
 		name    string
 		isDark  bool
 		command string
 		want    string
 	}{
-		{name: "dark command", isDark: true, command: "git", want: "38;2;137;180;250"},
-		{name: "dark keyword", isDark: true, command: "if", want: "38;2;203;166;247"},
-		{name: "dark flag", isDark: true, command: "-la", want: "38;2;250;179;135"},
-		{name: "dark path", isDark: true, command: "/tmp/demo", want: "38;2;137;180;250"},
-		{name: "dark quoted", isDark: true, command: `"hello"`, want: "38;2;166;227;161"},
-		{name: "light command", isDark: false, command: "git", want: "38;2;30;102;245"},
-		{name: "light keyword", isDark: false, command: "if", want: "38;2;136;57;239"},
-		{name: "light flag", isDark: false, command: "-la", want: "38;2;254;100;11"},
-		{name: "light path", isDark: false, command: "/tmp/demo", want: "38;2;30;102;245"},
-		{name: "light quoted", isDark: false, command: `"hello"`, want: "38;2;64;160;43"},
+		{name: "dark command", isDark: true, command: "git", want: "38;2;154;173;224"},
+		{name: "dark keyword", isDark: true, command: "if", want: "38;2;165;180;212"},
+		{name: "dark flag", isDark: true, command: "-la", want: "38;2;198;164;119"},
+		{name: "dark path", isDark: true, command: "/tmp/demo", want: "38;2;154;173;224"},
+		{name: "dark quoted", isDark: true, command: `"hello"`, want: "38;2;146;183;154"},
+		{name: "light command", isDark: false, command: "git", want: "38;2;73;106;167"},
+		{name: "light keyword", isDark: false, command: "if", want: "38;2;89;109;157"},
+		{name: "light flag", isDark: false, command: "-la", want: "38;2;139;103;52"},
+		{name: "light path", isDark: false, command: "/tmp/demo", want: "38;2;73;106;167"},
+		{name: "light quoted", isDark: false, command: `"hello"`, want: "38;2;79;118;90"},
 	}
 
 	for _, tt := range tests {
@@ -96,7 +96,7 @@ func TestShellCommandStylesUseCatppuccinSyntaxPalette(t *testing.T) {
 			}
 			rendered := shellTokenStyle(ctx, class).Render(tt.command)
 			if !strings.Contains(rendered, tt.want) {
-				t.Fatalf("rendered %q missing Catppuccin SGR %q", fmt.Sprintf("%q", rendered), tt.want)
+				t.Fatalf("rendered %q missing Caelis SGR %q", fmt.Sprintf("%q", rendered), tt.want)
 			}
 		})
 	}

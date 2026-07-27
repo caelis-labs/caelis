@@ -113,6 +113,10 @@ func (t Theme) ToolResultStyle() lipgloss.Style {
 	return t.Tokens().ToolResult
 }
 
+func (t Theme) ToolErrorMarkStyle() lipgloss.Style {
+	return t.Tokens().ToolErrorMark
+}
+
 func (t Theme) ToolErrorStyle() lipgloss.Style {
 	return t.Tokens().ToolError
 }

@@ -320,7 +320,7 @@ func (m *Model) renderInputOverlay() string {
 }
 
 func (m *Model) renderPromptInputBar() string {
-	bg := m.theme.UserBg
+	bg := m.theme.ComposerBg
 	promptStyle := m.theme.PromptStyle()
 	if bg != nil && !m.theme.NoColor {
 		promptStyle = promptStyle.Background(bg)

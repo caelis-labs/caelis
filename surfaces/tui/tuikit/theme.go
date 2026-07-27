@@ -13,12 +13,17 @@ import (
 	"github.com/charmbracelet/colorprofile"
 )
 
+// Theme is the resolved set of colors consumed by TUI components. Theme
+// variants are built from compact semantic palettes in theme_builder.go.
 type Theme struct {
 	Name    string
 	IsDark  bool
 	NoColor bool
 	Profile colorprofile.Profile
 
+	// TerminalBg retains the sampled terminal background for adaptive surfaces
+	// and contrast validation. AppBg is the color actually painted by the TUI.
+	TerminalBg       color.Color
 	AppBg            color.Color
 	PanelBorder      color.Color
 	PanelTitle       color.Color
@@ -67,20 +72,20 @@ type Theme struct {
 	KeyLabelFg         color.Color
 	NoteFg             color.Color
 
-	// Input area
+	// Input area.
 	PromptFg     color.Color
 	CursorFg     color.Color
 	ScrollHintFg color.Color
 
-	// Inline layout
-	InputBarBg          color.Color
+	// Inline layout.
 	InputBarFg          color.Color
+	ComposerBg          color.Color
 	ToolOutputBg        color.Color
 	HelpHintFg          color.Color
 	SpinnerFg           color.Color
 	SeparatorFg         color.Color
-	RoleBorderFg        color.Color // left border for role sections
-	NewMsgBg            color.Color // "new messages" indicator
+	RoleBorderFg        color.Color
+	NewMsgBg            color.Color
 	ComposerBorder      color.Color
 	ComposerBorderFocus color.Color
 	ScrollbarTrack      color.Color
@@ -97,7 +102,6 @@ type Theme struct {
 	TableHeaderBg       color.Color
 	TableBorder         color.Color
 
-	// Resolved semantic tokens — lazily populated via Tokens().
 	tokens *Tokens
 }
 
@@ -110,6 +114,18 @@ func ValidateTheme(theme Theme) []ThemeIssue {
 	if theme.NoColor {
 		return nil
 	}
+	var issues []ThemeIssue
+	if theme.Profile != colorprofile.ANSI && theme.Profile != colorprofile.NoTTY {
+		switch {
+		case theme.UserBg == nil:
+			issues = append(issues, ThemeIssue{Field: "UserBg", Message: "surface is required"})
+		case theme.ComposerBg == nil:
+			issues = append(issues, ThemeIssue{Field: "ComposerBg", Message: "surface is required"})
+		case colorsEqual(theme.UserBg, theme.ComposerBg):
+			issues = append(issues, ThemeIssue{Field: "ComposerBg", Message: "must differ from UserBg"})
+		}
+	}
+
 	bg := validationBackground(theme)
 	checks := []struct {
 		field     string
@@ -118,8 +134,17 @@ func ValidateTheme(theme Theme) []ThemeIssue {
 		threshold float64
 	}{
 		{field: "TextPrimary", fg: theme.TextPrimary, bg: bg, threshold: 4.5},
-		{field: "TextSecondary", fg: firstColor(theme.TextSecondary, theme.SecondaryText), bg: bg, threshold: 3.0},
-		{field: "MutedText", fg: theme.MutedText, bg: bg, threshold: 3.0},
+		{field: "TextSecondary", fg: firstColor(theme.TextSecondary, theme.SecondaryText), bg: bg, threshold: 4.5},
+		{field: "MutedText", fg: theme.MutedText, bg: bg, threshold: 4.5},
+		{field: "MutedText/ModalBg", fg: theme.MutedText, bg: firstColor(theme.ModalBg, bg), threshold: 4.5},
+		{field: "ReasoningFg", fg: theme.ReasoningFg, bg: bg, threshold: 4.5},
+		{field: "HelpHintFg", fg: theme.HelpHintFg, bg: firstColor(theme.ComposerBg, bg), threshold: 4.5},
+		{field: "LinkFg", fg: theme.LinkFg, bg: bg, threshold: 4.5},
+		{field: "Accent", fg: theme.Accent, bg: bg, threshold: 4.5},
+		{field: "ToolFg", fg: theme.ToolFg, bg: bg, threshold: 3.0},
+		{field: "UserPrefixFg", fg: theme.UserPrefixFg, bg: firstColor(theme.UserBg, bg), threshold: 3.0},
+		{field: "Focus", fg: theme.Focus, bg: bg, threshold: 3.0},
+		{field: "ComposerBorderFocus", fg: theme.ComposerBorderFocus, bg: firstColor(theme.ComposerBg, bg), threshold: 3.0},
 		{field: "Warning", fg: theme.Warning, bg: bg, threshold: 3.0},
 		{field: "Error", fg: theme.Error, bg: bg, threshold: 3.0},
 		{field: "Success", fg: theme.Success, bg: bg, threshold: 3.0},
@@ -128,23 +153,18 @@ func ValidateTheme(theme Theme) []ThemeIssue {
 		{field: "SelectionFg", fg: theme.SelectionFg, bg: theme.SelectionBg, threshold: 4.5},
 		{field: "InputSelectionFg", fg: theme.InputSelectionFg, bg: theme.InputSelectionBg, threshold: 4.5},
 	}
-	var issues []ThemeIssue
 	for _, check := range checks {
 		if check.fg == nil || check.bg == nil {
 			continue
 		}
-		if ratio := contrastRatio(check.fg, check.bg); ratio < check.threshold {
-			issues = append(issues, ThemeIssue{
-				Field:   check.field,
-				Message: "contrast below threshold",
-			})
+		if contrastRatio(check.fg, check.bg) < check.threshold {
+			issues = append(issues, ThemeIssue{Field: check.field, Message: "contrast below threshold"})
 		}
 	}
 	return issues
 }
 
 // Tokens returns the resolved semantic design tokens for this theme.
-// The result is cached after the first call.
 func (t *Theme) Tokens() Tokens {
 	if t.tokens != nil {
 		return *t.tokens
@@ -154,9 +174,7 @@ func (t *Theme) Tokens() Tokens {
 	return tok
 }
 
-// InvalidateTokens clears the cached tokens, forcing a re-resolve on the
-// next Tokens() call. Call this after mutating theme colors (e.g. accent
-// override, theme switch).
+// InvalidateTokens clears the cached tokens after a theme mutation.
 func (t *Theme) InvalidateTokens() {
 	t.tokens = nil
 }
@@ -209,7 +227,7 @@ func ResolveThemeWithBackgroundColor(background color.Color, noColor bool, profi
 
 func ThemeUsesAutoBackground() bool {
 	name := strings.ToLower(strings.TrimSpace(os.Getenv("CAELIS_THEME")))
-	return name == "" || name == "auto" || name == "default"
+	return name == "" || name == "auto" || name == "default" || name == "catppuccin" || name == "catppuccin-auto"
 }
 
 type themeResolveOptions struct {
@@ -227,18 +245,30 @@ func resolveTheme(opts themeResolveOptions) Theme {
 	name := strings.ToLower(strings.TrimSpace(os.Getenv("CAELIS_THEME")))
 	theme := namedTheme(name, profile, resolvedDarkBackground(opts), resolvedBackgroundColor(opts))
 	theme.Profile = profile
+	theme.TerminalBg = resolvedBackgroundColor(opts)
 	theme.NoColor = opts.noColor
+	theme = ensureThemeTextContrast(theme)
 	if accent := strings.TrimSpace(os.Getenv("CAELIS_ACCENT")); accent != "" {
-		theme.Accent = lipgloss.Color(accent)
-		theme.Focus = lipgloss.Color(accent)
-		theme.ComposerBorderFocus = lipgloss.Color(accent)
-		theme.LinkFg = lipgloss.Color(accent)
+		applyAccentOverride(&theme, lipgloss.Color(accent))
 	}
-	applyCatppuccinCodeColors(&theme)
+	applySyntaxColors(&theme)
 	if opts.noColor {
-		theme = stripThemeColors(theme)
+		return stripThemeColors(theme)
 	}
 	return theme
+}
+
+func applyAccentOverride(theme *Theme, accent color.Color) {
+	if theme == nil || accent == nil {
+		return
+	}
+	theme.Accent = accent
+	theme.Focus = accent
+	theme.PromptFg = accent
+	theme.SpinnerFg = accent
+	theme.ComposerBorderFocus = accent
+	theme.LinkFg = accent
+	theme.InputSelectionBg = accent
 }
 
 func noColorRequested() bool {
@@ -325,22 +355,10 @@ func terminalColorIndexRGB(index int) (uint8, uint8, uint8, bool) {
 	}
 	if index < 16 {
 		colors := [16][3]uint8{
-			{0x00, 0x00, 0x00},
-			{0x80, 0x00, 0x00},
-			{0x00, 0x80, 0x00},
-			{0x80, 0x80, 0x00},
-			{0x00, 0x00, 0x80},
-			{0x80, 0x00, 0x80},
-			{0x00, 0x80, 0x80},
-			{0xc0, 0xc0, 0xc0},
-			{0x80, 0x80, 0x80},
-			{0xff, 0x00, 0x00},
-			{0x00, 0xff, 0x00},
-			{0xff, 0xff, 0x00},
-			{0x00, 0x00, 0xff},
-			{0xff, 0x00, 0xff},
-			{0x00, 0xff, 0xff},
-			{0xff, 0xff, 0xff},
+			{0x00, 0x00, 0x00}, {0x80, 0x00, 0x00}, {0x00, 0x80, 0x00}, {0x80, 0x80, 0x00},
+			{0x00, 0x00, 0x80}, {0x80, 0x00, 0x80}, {0x00, 0x80, 0x80}, {0xc0, 0xc0, 0xc0},
+			{0x80, 0x80, 0x80}, {0xff, 0x00, 0x00}, {0x00, 0xff, 0x00}, {0xff, 0xff, 0x00},
+			{0x00, 0x00, 0xff}, {0xff, 0x00, 0xff}, {0x00, 0xff, 0xff}, {0xff, 0xff, 0xff},
 		}
 		rgb := colors[index]
 		return rgb[0], rgb[1], rgb[2], true
@@ -372,89 +390,19 @@ func runningUnderGoTest() bool {
 }
 
 func supportsANSI256() bool {
-	term := strings.ToLower(strings.TrimSpace(os.Getenv("TERM")))
-	return strings.Contains(term, "256color")
+	return strings.Contains(strings.ToLower(strings.TrimSpace(os.Getenv("TERM"))), "256color")
 }
 
 func stripThemeColors(theme Theme) Theme {
-	theme.NoColor = true
-	theme.Profile = colorprofile.NoTTY
-	theme.AppBg = nil
-	theme.PanelBorder = nil
-	theme.PanelTitle = nil
-	theme.TextPrimary = nil
-	theme.TextSecondary = nil
-	theme.SecondaryText = nil
-	theme.MutedText = nil
-	theme.Info = nil
-	theme.Success = nil
-	theme.Warning = nil
-	theme.Error = nil
-	theme.Accent = nil
-	theme.Focus = nil
-	theme.ModalBg = nil
-	theme.StatusBg = nil
-	theme.StatusText = nil
-	theme.CommandBg = nil
-	theme.CommandActive = nil
-	theme.CommandText = nil
-	theme.CommandSubText = nil
-	theme.SelectionFg = nil
-	theme.SelectionBg = nil
-	theme.InputSelectionFg = nil
-	theme.InputSelectionBg = nil
-	theme.AssistantFg = nil
-	theme.ReasoningFg = nil
-	theme.UserFg = nil
-	theme.UserBg = nil
-	theme.UserPrefixFg = nil
-	theme.UserMentionFg = nil
-	theme.ToolFg = nil
-	theme.DiffAddFg = nil
-	theme.DiffRemoveFg = nil
-	theme.DiffHeaderFg = nil
-	theme.DiffHunkFg = nil
-	theme.DiffAddBg = nil
-	theme.DiffAddStrongBg = nil
-	theme.DiffRemoveBg = nil
-	theme.DiffRemoveStrongBg = nil
-	theme.DiffLineNoFg = nil
-	theme.DiffGutterFg = nil
-	theme.DiffPanelBorder = nil
-	theme.SectionFg = nil
-	theme.KeyLabelFg = nil
-	theme.NoteFg = nil
-	theme.PromptFg = nil
-	theme.CursorFg = nil
-	theme.ScrollHintFg = nil
-	theme.InputBarBg = nil
-	theme.InputBarFg = nil
-	theme.ToolOutputBg = nil
-	theme.HelpHintFg = nil
-	theme.SpinnerFg = nil
-	theme.SeparatorFg = nil
-	theme.RoleBorderFg = nil
-	theme.NewMsgBg = nil
-	theme.ComposerBorder = nil
-	theme.ComposerBorderFocus = nil
-	theme.ScrollbarTrack = nil
-	theme.ScrollbarThumb = nil
-	theme.LinkFg = nil
-	theme.CodeFg = nil
-	theme.CodeBg = nil
-	theme.CodeBlockFg = nil
-	theme.CodeBlockBg = nil
-	theme.TranscriptRail = nil
-	theme.TranscriptShell = nil
-	theme.TranscriptPillBg = nil
-	theme.CodeSurface = nil
-	theme.TableHeaderBg = nil
-	theme.TableBorder = nil
-	return theme
+	return Theme{
+		Name:    theme.Name,
+		IsDark:  theme.IsDark,
+		NoColor: true,
+		Profile: colorprofile.NoTTY,
+	}
 }
 
 func namedTheme(name string, profile colorprofile.Profile, darkBackground bool, background color.Color) Theme {
-	trueColor := profile == colorprofile.TrueColor
 	switch name {
 	case "", "auto", "default":
 		return defaultAdaptiveThemeVariant(profile, darkBackground, background)
@@ -462,50 +410,45 @@ func namedTheme(name string, profile colorprofile.Profile, darkBackground bool, 
 		return defaultAdaptiveThemeVariant(profile, true, background)
 	case "light":
 		return defaultAdaptiveThemeVariant(profile, false, background)
+	case "catppuccin", "catppuccin-auto":
+		return catppuccinAdaptiveThemeVariant(profile, darkBackground, background)
+	case "catppuccin-dark", "catppuccin-mocha":
+		return catppuccinAdaptiveThemeVariant(profile, true, background)
+	case "catppuccin-light", "catppuccin-latte":
+		return catppuccinAdaptiveThemeVariant(profile, false, background)
 	case "nord":
-		return stripThemeBackgroundsForANSI(nordTheme(trueColor), profile)
+		return stripThemeBackgroundsForANSI(nordTheme(profile), profile)
 	case "solarized":
-		return stripThemeBackgroundsForANSI(solarizedTheme(trueColor), profile)
+		return stripThemeBackgroundsForANSI(solarizedTheme(profile), profile)
 	case "dracula":
-		return stripThemeBackgroundsForANSI(draculaTheme(trueColor), profile)
+		return stripThemeBackgroundsForANSI(draculaTheme(profile), profile)
 	default:
 		return defaultAdaptiveThemeVariant(profile, darkBackground, background)
 	}
 }
 
-func themeColor(trueColor bool, rich string, fallback string) color.Color {
-	if trueColor || fallback == "" {
-		return lipgloss.Color(rich)
-	}
-	return lipgloss.Color(fallback)
-}
-
-func profileColor(profile colorprofile.Profile, rich string, ansi256 string, ansi16 string) color.Color {
+func profileColor(profile colorprofile.Profile, rich, ansi256, ansi16 string) color.Color {
 	switch profile {
 	case colorprofile.TrueColor:
-		if rich == "" {
-			return nil
+		if rich != "" {
+			return lipgloss.Color(rich)
 		}
-		return lipgloss.Color(rich)
 	case colorprofile.ANSI256:
-		if ansi256 == "" {
-			return nil
+		if ansi256 != "" {
+			return lipgloss.Color(ansi256)
 		}
-		return lipgloss.Color(ansi256)
 	case colorprofile.ANSI:
-		if ansi16 == "" {
-			return nil
+		if ansi16 != "" {
+			return lipgloss.Color(ansi16)
 		}
-		return lipgloss.Color(ansi16)
-	default:
-		return nil
 	}
+	return nil
 }
 
 func adaptiveBackgroundColor(profile colorprofile.Profile, terminal color.Color, dark bool, darkAlpha, lightAlpha float64, darkFallback, lightFallback, dark256, light256 string) color.Color {
 	if profile == colorprofile.TrueColor {
 		if r, g, b, ok := rgb8(terminal); ok {
-			top := [3]uint8{0, 0, 0}
+			top := [3]uint8{}
 			alpha := lightAlpha
 			if dark {
 				top = [3]uint8{255, 255, 255}
@@ -514,42 +457,34 @@ func adaptiveBackgroundColor(profile colorprofile.Profile, terminal color.Color,
 			return lipgloss.Color(hexColor(blendRGB([3]uint8{r, g, b}, top, alpha)))
 		}
 		if dark {
-			return lipgloss.Color(darkFallback)
+			return profileColor(profile, darkFallback, "", "")
 		}
-		return lipgloss.Color(lightFallback)
+		return profileColor(profile, lightFallback, "", "")
 	}
-	if profile == colorprofile.ANSI256 {
-		if dark {
-			return lipgloss.Color(dark256)
-		}
-		return lipgloss.Color(light256)
+	if dark {
+		return profileColor(profile, "", dark256, "")
 	}
-	return nil
+	return profileColor(profile, "", light256, "")
 }
 
 func adaptiveTintColor(profile colorprofile.Profile, terminal color.Color, dark bool, darkTop, lightTop [3]uint8, darkAlpha, lightAlpha float64, darkFallback, lightFallback, dark256, light256 string) color.Color {
 	if profile == colorprofile.TrueColor {
 		if r, g, b, ok := rgb8(terminal); ok {
-			top := lightTop
-			alpha := lightAlpha
+			top, alpha := lightTop, lightAlpha
 			if dark {
-				top = darkTop
-				alpha = darkAlpha
+				top, alpha = darkTop, darkAlpha
 			}
 			return lipgloss.Color(hexColor(blendRGB([3]uint8{r, g, b}, top, alpha)))
 		}
 		if dark {
-			return lipgloss.Color(darkFallback)
+			return profileColor(profile, darkFallback, "", "")
 		}
-		return lipgloss.Color(lightFallback)
+		return profileColor(profile, lightFallback, "", "")
 	}
-	if profile == colorprofile.ANSI256 {
-		if dark {
-			return lipgloss.Color(dark256)
-		}
-		return lipgloss.Color(light256)
+	if dark {
+		return profileColor(profile, "", dark256, "")
 	}
-	return nil
+	return profileColor(profile, "", light256, "")
 }
 
 func blendRGB(base [3]uint8, top [3]uint8, alpha float64) [3]uint8 {
@@ -560,9 +495,8 @@ func blendRGB(base [3]uint8, top [3]uint8, alpha float64) [3]uint8 {
 	}
 }
 
-func blendChannel(base uint8, top uint8, alpha float64) uint8 {
-	value := (float64(top) * alpha) + (float64(base) * (1 - alpha))
-	return uint8(math.Round(value))
+func blendChannel(base, top uint8, alpha float64) uint8 {
+	return uint8(math.Round((float64(top) * alpha) + (float64(base) * (1 - alpha))))
 }
 
 func hexColor(rgb [3]uint8) string {
@@ -583,9 +517,18 @@ func rgb8(c color.Color) (uint8, uint8, uint8, bool) {
 	return uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), true
 }
 
+func colorsEqual(a, b color.Color) bool {
+	ar, ag, ab, aok := rgb8(a)
+	br, bg, bb, bok := rgb8(b)
+	return aok && bok && ar == br && ag == bg && ab == bb
+}
+
 func validationBackground(theme Theme) color.Color {
 	if theme.AppBg != nil {
 		return theme.AppBg
+	}
+	if theme.TerminalBg != nil {
+		return theme.TerminalBg
 	}
 	if theme.IsDark {
 		return color.RGBA{A: 255}
@@ -602,12 +545,9 @@ func firstColor(values ...color.Color) color.Color {
 	return nil
 }
 
-func contrastRatio(fg color.Color, bg color.Color) float64 {
-	fgLum := relativeLuminance(fg)
-	bgLum := relativeLuminance(bg)
-	light := math.Max(fgLum, bgLum)
-	dark := math.Min(fgLum, bgLum)
-	return (light + 0.05) / (dark + 0.05)
+func contrastRatio(fg, bg color.Color) float64 {
+	fgLum, bgLum := relativeLuminance(fg), relativeLuminance(bg)
+	return (math.Max(fgLum, bgLum) + 0.05) / (math.Min(fgLum, bgLum) + 0.05)
 }
 
 func relativeLuminance(c color.Color) float64 {
@@ -632,8 +572,7 @@ func colorIsDark(c color.Color) bool {
 	if !ok {
 		return true
 	}
-	luma := (0.2126 * float64(r)) + (0.7152 * float64(g)) + (0.0722 * float64(b))
-	return luma < 140
+	return (0.2126*float64(r))+(0.7152*float64(g))+(0.0722*float64(b)) < 140
 }
 
 func stripThemeBackgroundsForANSI(theme Theme, profile colorprofile.Profile) Theme {
@@ -648,11 +587,11 @@ func stripThemeBackgroundsForANSI(theme Theme, profile colorprofile.Profile) The
 	theme.SelectionBg = nil
 	theme.InputSelectionBg = nil
 	theme.UserBg = nil
+	theme.ComposerBg = nil
 	theme.DiffAddBg = nil
 	theme.DiffAddStrongBg = nil
 	theme.DiffRemoveBg = nil
 	theme.DiffRemoveStrongBg = nil
-	theme.InputBarBg = nil
 	theme.ToolOutputBg = nil
 	theme.NewMsgBg = nil
 	theme.CodeBg = nil
@@ -660,298 +599,5 @@ func stripThemeBackgroundsForANSI(theme Theme, profile colorprofile.Profile) The
 	theme.TranscriptPillBg = nil
 	theme.CodeSurface = nil
 	theme.TableHeaderBg = nil
-	return theme
-}
-
-func defaultThemeVariant(trueColor bool) Theme {
-	return Theme{
-		Name:             "dark",
-		IsDark:           true,
-		AppBg:            themeColor(trueColor, "#0f1117", "233"),
-		PanelBorder:      themeColor(trueColor, "#333b49", "240"),
-		PanelTitle:       themeColor(trueColor, "#f4f7fb", "255"),
-		TextPrimary:      themeColor(trueColor, "#e8edf4", "255"),
-		TextSecondary:    themeColor(trueColor, "#a8b3c5", "248"),
-		SecondaryText:    themeColor(trueColor, "#c6d0df", "250"),
-		MutedText:        themeColor(trueColor, "#7a8599", "245"),
-		Info:             themeColor(trueColor, "#7dd3fc", "117"),
-		Success:          themeColor(trueColor, "#a6e3a1", "114"),
-		Warning:          themeColor(trueColor, "#f4bf4f", "221"),
-		Error:            themeColor(trueColor, "#ff6b6b", "203"),
-		Accent:           themeColor(trueColor, "#7aa2f7", "111"),
-		Focus:            themeColor(trueColor, "#8bd5ff", "117"),
-		ModalBg:          themeColor(trueColor, "#151922", "234"),
-		StatusBg:         themeColor(trueColor, "#11141b", "233"),
-		StatusText:       themeColor(trueColor, "#d7deea", "252"),
-		CommandBg:        themeColor(trueColor, "#11141b", "233"),
-		CommandActive:    themeColor(trueColor, "#20283a", "236"),
-		CommandText:      themeColor(trueColor, "#f4f7fb", "255"),
-		CommandSubText:   themeColor(trueColor, "#9aa6ba", "247"),
-		SelectionFg:      themeColor(trueColor, "#f8fafc", "255"),
-		SelectionBg:      themeColor(trueColor, "#334155", "240"),
-		InputSelectionFg: themeColor(trueColor, "#0f1117", "233"),
-		InputSelectionBg: themeColor(trueColor, "#8bd5ff", "117"),
-
-		AssistantFg:        themeColor(trueColor, "#9ece6a", "114"),
-		ReasoningFg:        themeColor(trueColor, "#7f8ba3", "245"),
-		UserFg:             themeColor(trueColor, "#f4f7fb", "255"),
-		UserBg:             themeColor(trueColor, "#1a202b", "236"),
-		UserPrefixFg:       themeColor(trueColor, "#ffffff", "255"),
-		UserMentionFg:      themeColor(trueColor, "#8bd5ff", "117"),
-		ToolFg:             themeColor(trueColor, "#8bd5ff", "117"),
-		DiffAddFg:          themeColor(trueColor, "#a6e3a1", "114"),
-		DiffRemoveFg:       themeColor(trueColor, "#f38ba8", "211"),
-		DiffHeaderFg:       themeColor(trueColor, "#a8b3c5", "248"),
-		DiffHunkFg:         themeColor(trueColor, "#c6d0df", "250"),
-		DiffAddBg:          themeColor(trueColor, "#173423", "22"),
-		DiffAddStrongBg:    themeColor(trueColor, "#225f37", "29"),
-		DiffRemoveBg:       themeColor(trueColor, "#3a2028", "52"),
-		DiffRemoveStrongBg: themeColor(trueColor, "#762d39", "88"),
-		DiffLineNoFg:       themeColor(trueColor, "#748097", "245"),
-		DiffGutterFg:       themeColor(trueColor, "#9aa6ba", "247"),
-		DiffPanelBorder:    themeColor(trueColor, "#394352", "240"),
-		SectionFg:          themeColor(trueColor, "#f4f7fb", "255"),
-		KeyLabelFg:         themeColor(trueColor, "#c6d0df", "250"),
-		NoteFg:             themeColor(trueColor, "#8f9aad", "246"),
-		PromptFg:           themeColor(trueColor, "#8bd5ff", "117"),
-		CursorFg:           themeColor(trueColor, "#ffffff", "255"),
-		ScrollHintFg:       themeColor(trueColor, "#f4bf4f", "221"),
-
-		InputBarBg:          themeColor(trueColor, "#0f1117", "233"),
-		InputBarFg:          themeColor(trueColor, "#e8edf4", "255"),
-		ToolOutputBg:        themeColor(trueColor, "#151922", "234"),
-		HelpHintFg:          themeColor(trueColor, "#8f9aad", "246"),
-		SpinnerFg:           themeColor(trueColor, "#8bd5ff", "117"),
-		SeparatorFg:         themeColor(trueColor, "#293241", "238"),
-		RoleBorderFg:        themeColor(trueColor, "#333b49", "240"),
-		NewMsgBg:            themeColor(trueColor, "#1d2737", "236"),
-		ComposerBorder:      themeColor(trueColor, "#333b49", "240"),
-		ComposerBorderFocus: themeColor(trueColor, "#8bd5ff", "117"),
-		ScrollbarTrack:      themeColor(trueColor, "#1a202b", "234"),
-		ScrollbarThumb:      themeColor(trueColor, "#7a8599", "245"),
-		LinkFg:              themeColor(trueColor, "#8bd5ff", "117"),
-		CodeFg:              themeColor(trueColor, "#f4bf4f", "221"),
-		CodeBg:              themeColor(trueColor, "#20283a", "236"),
-		CodeBlockFg:         themeColor(trueColor, "#d7deea", "252"),
-		CodeBlockBg:         themeColor(trueColor, "#171c26", "234"),
-		TranscriptRail:      themeColor(trueColor, "#465268", "240"),
-		TranscriptShell:     themeColor(trueColor, "#293241", "238"),
-		TranscriptPillBg:    themeColor(trueColor, "#20283a", "236"),
-		CodeSurface:         themeColor(trueColor, "#171c26", "234"),
-		TableHeaderBg:       themeColor(trueColor, "#20283a", "236"),
-		TableBorder:         themeColor(trueColor, "#59657a", "242"),
-	}
-}
-
-func defaultLightThemeVariant(trueColor bool) Theme {
-	return Theme{
-		Name:             "light",
-		IsDark:           false,
-		AppBg:            themeColor(trueColor, "#fbfcfe", "255"),
-		PanelBorder:      themeColor(trueColor, "#c8d2df", "252"),
-		PanelTitle:       themeColor(trueColor, "#111827", "235"),
-		TextPrimary:      themeColor(trueColor, "#1f2937", "236"),
-		TextSecondary:    themeColor(trueColor, "#526071", "240"),
-		SecondaryText:    themeColor(trueColor, "#364152", "239"),
-		MutedText:        themeColor(trueColor, "#748094", "243"),
-		Info:             themeColor(trueColor, "#2563eb", "25"),
-		Success:          themeColor(trueColor, "#188a42", "28"),
-		Warning:          themeColor(trueColor, "#bc7200", "172"),
-		Error:            themeColor(trueColor, "#d20f39", "160"),
-		Accent:           themeColor(trueColor, "#7287fd", "93"),
-		Focus:            themeColor(trueColor, "#1e66f5", "63"),
-		ModalBg:          themeColor(trueColor, "#ffffff", "231"),
-		StatusBg:         themeColor(trueColor, "#f3f6fb", "255"),
-		StatusText:       themeColor(trueColor, "#1f2937", "236"),
-		CommandBg:        themeColor(trueColor, "#ffffff", "231"),
-		CommandActive:    themeColor(trueColor, "#e7f0ff", "195"),
-		CommandText:      themeColor(trueColor, "#111827", "235"),
-		CommandSubText:   themeColor(trueColor, "#526071", "240"),
-		SelectionFg:      themeColor(trueColor, "#0f172a", "235"),
-		SelectionBg:      themeColor(trueColor, "#dbeafe", "153"),
-		InputSelectionFg: themeColor(trueColor, "#ffffff", "255"),
-		InputSelectionBg: themeColor(trueColor, "#1e66f5", "63"),
-
-		AssistantFg:        themeColor(trueColor, "#188a42", "28"),
-		ReasoningFg:        themeColor(trueColor, "#6b7280", "242"),
-		UserFg:             themeColor(trueColor, "#111827", "235"),
-		UserBg:             themeColor(trueColor, "#f1f7ff", "195"),
-		UserPrefixFg:       themeColor(trueColor, "#ea76cb", "160"),
-		UserMentionFg:      themeColor(trueColor, "#ea76cb", "160"),
-		ToolFg:             themeColor(trueColor, "#0f766e", "30"),
-		DiffAddFg:          themeColor(trueColor, "#188a42", "28"),
-		DiffRemoveFg:       themeColor(trueColor, "#d20f39", "160"),
-		DiffHeaderFg:       themeColor(trueColor, "#526071", "240"),
-		DiffHunkFg:         themeColor(trueColor, "#1f2937", "236"),
-		DiffAddBg:          themeColor(trueColor, "#e8f7ed", "194"),
-		DiffAddStrongBg:    themeColor(trueColor, "#c7ead2", "151"),
-		DiffRemoveBg:       themeColor(trueColor, "#fff1ed", "224"),
-		DiffRemoveStrongBg: themeColor(trueColor, "#ffd8cc", "216"),
-		DiffLineNoFg:       themeColor(trueColor, "#748094", "243"),
-		DiffGutterFg:       themeColor(trueColor, "#64748b", "243"),
-		DiffPanelBorder:    themeColor(trueColor, "#c8d2df", "252"),
-		SectionFg:          themeColor(trueColor, "#111827", "235"),
-		KeyLabelFg:         themeColor(trueColor, "#364152", "239"),
-		NoteFg:             themeColor(trueColor, "#6b7280", "242"),
-		PromptFg:           themeColor(trueColor, "#1e66f5", "63"),
-		CursorFg:           themeColor(trueColor, "#111827", "235"),
-		ScrollHintFg:       themeColor(trueColor, "#bc7200", "172"),
-
-		InputBarBg:          themeColor(trueColor, "#ffffff", "231"),
-		InputBarFg:          themeColor(trueColor, "#1f2937", "236"),
-		ToolOutputBg:        themeColor(trueColor, "#f8fafc", "255"),
-		HelpHintFg:          themeColor(trueColor, "#748094", "243"),
-		SpinnerFg:           themeColor(trueColor, "#1e66f5", "63"),
-		SeparatorFg:         themeColor(trueColor, "#d7dee8", "252"),
-		RoleBorderFg:        themeColor(trueColor, "#c8d2df", "252"),
-		NewMsgBg:            themeColor(trueColor, "#e7f0ff", "195"),
-		ComposerBorder:      themeColor(trueColor, "#c8d2df", "252"),
-		ComposerBorderFocus: themeColor(trueColor, "#1e66f5", "63"),
-		ScrollbarTrack:      themeColor(trueColor, "#e2e8f0", "254"),
-		ScrollbarThumb:      themeColor(trueColor, "#8a98ab", "245"),
-		LinkFg:              themeColor(trueColor, "#2563eb", "25"),
-		CodeFg:              themeColor(trueColor, "#9a3412", "130"),
-		CodeBg:              themeColor(trueColor, "#fff7ed", "230"),
-		CodeBlockFg:         themeColor(trueColor, "#263241", "236"),
-		CodeBlockBg:         themeColor(trueColor, "#f3f6fb", "255"),
-		TranscriptRail:      themeColor(trueColor, "#b7c3d2", "250"),
-		TranscriptShell:     themeColor(trueColor, "#c8d2df", "252"),
-		TranscriptPillBg:    themeColor(trueColor, "#e7eef7", "254"),
-		CodeSurface:         themeColor(trueColor, "#f3f6fb", "255"),
-		TableHeaderBg:       themeColor(trueColor, "#eef4fb", "254"),
-		TableBorder:         themeColor(trueColor, "#a7b3c4", "249"),
-	}
-}
-
-func nordTheme(trueColor bool) Theme {
-	theme := defaultThemeVariant(trueColor)
-	theme.Name = "nord"
-	theme.AppBg = themeColor(trueColor, "#2e3440", "236")
-	theme.PanelBorder = themeColor(trueColor, "#4c566a", "240")
-	theme.PanelTitle = themeColor(trueColor, "#eceff4", "255")
-	theme.TextPrimary = themeColor(trueColor, "#eceff4", "255")
-	theme.TextSecondary = themeColor(trueColor, "#d8dee9", "252")
-	theme.SecondaryText = themeColor(trueColor, "#d8dee9", "252")
-	theme.MutedText = themeColor(trueColor, "#a7b0c0", "248")
-	theme.Info = themeColor(trueColor, "#d8dee9", "252")
-	theme.Success = themeColor(trueColor, "#a3be8c", "108")
-	theme.Warning = themeColor(trueColor, "#ebcb8b", "223")
-	theme.Error = themeColor(trueColor, "#bf616a", "131")
-	theme.Accent = themeColor(trueColor, "#88c0d0", "110")
-	theme.Focus = themeColor(trueColor, "#81a1c1", "110")
-	theme.ModalBg = themeColor(trueColor, "#3b4252", "237")
-	theme.StatusBg = themeColor(trueColor, "#2e3440", "236")
-	theme.StatusText = themeColor(trueColor, "#d8dee9", "252")
-	theme.AssistantFg = themeColor(trueColor, "#a3be8c", "108")
-	theme.ReasoningFg = theme.MutedText
-	theme.ToolFg = themeColor(trueColor, "#88c0d0", "110")
-	theme.DiffAddFg = themeColor(trueColor, "#a3be8c", "108")
-	theme.DiffRemoveFg = themeColor(trueColor, "#d08770", "131")
-	theme.DiffAddBg = themeColor(trueColor, "#314236", "23")
-	theme.DiffAddStrongBg = themeColor(trueColor, "#45604e", "59")
-	theme.DiffRemoveBg = themeColor(trueColor, "#4a3037", "52")
-	theme.DiffRemoveStrongBg = themeColor(trueColor, "#6a3f4a", "95")
-	theme.ComposerBorder = themeColor(trueColor, "#4c566a", "240")
-	theme.ComposerBorderFocus = themeColor(trueColor, "#81a1c1", "110")
-	theme.ScrollbarTrack = themeColor(trueColor, "#3b4252", "237")
-	theme.ScrollbarThumb = themeColor(trueColor, "#81a1c1", "110")
-	theme.LinkFg = themeColor(trueColor, "#88c0d0", "110")
-	theme.CodeBg = themeColor(trueColor, "#3b4252", "237")
-	theme.CodeBlockBg = themeColor(trueColor, "#2b303b", "236")
-	theme.TranscriptRail = themeColor(trueColor, "#81a1c1", "110")
-	theme.TranscriptShell = themeColor(trueColor, "#434c5e", "239")
-	theme.TranscriptPillBg = themeColor(trueColor, "#3b4252", "237")
-	theme.CodeSurface = themeColor(trueColor, "#343b48", "237")
-	theme.TableHeaderBg = themeColor(trueColor, "#3b4252", "237")
-	theme.TableBorder = themeColor(trueColor, "#81a1c1", "110")
-	return theme
-}
-
-func solarizedTheme(trueColor bool) Theme {
-	theme := defaultThemeVariant(trueColor)
-	theme.Name = "solarized"
-	theme.AppBg = themeColor(trueColor, "#002b36", "235")
-	theme.PanelBorder = themeColor(trueColor, "#586e75", "242")
-	theme.PanelTitle = themeColor(trueColor, "#fdf6e3", "230")
-	theme.TextPrimary = themeColor(trueColor, "#eee8d5", "254")
-	theme.TextSecondary = themeColor(trueColor, "#93a1a1", "245")
-	theme.SecondaryText = themeColor(trueColor, "#b7c0bc", "250")
-	theme.MutedText = themeColor(trueColor, "#839496", "244")
-	theme.Info = themeColor(trueColor, "#93a1a1", "245")
-	theme.Success = themeColor(trueColor, "#859900", "100")
-	theme.Warning = themeColor(trueColor, "#b58900", "136")
-	theme.Error = themeColor(trueColor, "#dc322f", "160")
-	theme.Accent = themeColor(trueColor, "#2aa198", "36")
-	theme.Focus = themeColor(trueColor, "#268bd2", "32")
-	theme.ModalBg = themeColor(trueColor, "#073642", "236")
-	theme.StatusBg = themeColor(trueColor, "#002b36", "235")
-	theme.StatusText = themeColor(trueColor, "#93a1a1", "245")
-	theme.AssistantFg = themeColor(trueColor, "#859900", "100")
-	theme.ReasoningFg = theme.MutedText
-	theme.ToolFg = themeColor(trueColor, "#2aa198", "36")
-	theme.DiffAddFg = themeColor(trueColor, "#859900", "100")
-	theme.DiffRemoveFg = themeColor(trueColor, "#dc322f", "160")
-	theme.DiffAddBg = themeColor(trueColor, "#173d1c", "22")
-	theme.DiffAddStrongBg = themeColor(trueColor, "#2f5f2f", "29")
-	theme.DiffRemoveBg = themeColor(trueColor, "#4a1f1c", "52")
-	theme.DiffRemoveStrongBg = themeColor(trueColor, "#7a2d24", "88")
-	theme.ComposerBorder = themeColor(trueColor, "#586e75", "242")
-	theme.ComposerBorderFocus = themeColor(trueColor, "#268bd2", "32")
-	theme.ScrollbarTrack = themeColor(trueColor, "#073642", "236")
-	theme.ScrollbarThumb = themeColor(trueColor, "#586e75", "242")
-	theme.LinkFg = themeColor(trueColor, "#268bd2", "32")
-	theme.CodeFg = themeColor(trueColor, "#cb4b16", "166")
-	theme.CodeBg = themeColor(trueColor, "#073642", "236")
-	theme.CodeBlockBg = themeColor(trueColor, "#062f3a", "236")
-	theme.TranscriptRail = themeColor(trueColor, "#2aa198", "36")
-	theme.TranscriptShell = themeColor(trueColor, "#31545e", "238")
-	theme.TranscriptPillBg = themeColor(trueColor, "#073642", "236")
-	theme.CodeSurface = themeColor(trueColor, "#073642", "236")
-	theme.TableHeaderBg = themeColor(trueColor, "#073642", "236")
-	theme.TableBorder = themeColor(trueColor, "#2aa198", "36")
-	return theme
-}
-
-func draculaTheme(trueColor bool) Theme {
-	theme := defaultThemeVariant(trueColor)
-	theme.Name = "dracula"
-	theme.AppBg = themeColor(trueColor, "#282a36", "236")
-	theme.PanelBorder = themeColor(trueColor, "#6272a4", "61")
-	theme.PanelTitle = themeColor(trueColor, "#f8f8f2", "255")
-	theme.TextPrimary = themeColor(trueColor, "#f8f8f2", "255")
-	theme.TextSecondary = themeColor(trueColor, "#bd93f9", "141")
-	theme.SecondaryText = themeColor(trueColor, "#d7c2ff", "183")
-	theme.MutedText = themeColor(trueColor, "#9580c2", "104")
-	theme.Info = themeColor(trueColor, "#8be9fd", "123")
-	theme.Success = themeColor(trueColor, "#50fa7b", "84")
-	theme.Warning = themeColor(trueColor, "#ffb86c", "215")
-	theme.Error = themeColor(trueColor, "#ff5555", "203")
-	theme.Accent = themeColor(trueColor, "#ff79c6", "212")
-	theme.Focus = themeColor(trueColor, "#8be9fd", "123")
-	theme.ModalBg = themeColor(trueColor, "#1f2130", "235")
-	theme.StatusBg = themeColor(trueColor, "#282a36", "236")
-	theme.StatusText = themeColor(trueColor, "#f8f8f2", "255")
-	theme.AssistantFg = themeColor(trueColor, "#50fa7b", "84")
-	theme.ReasoningFg = theme.MutedText
-	theme.ToolFg = themeColor(trueColor, "#8be9fd", "123")
-	theme.DiffAddFg = themeColor(trueColor, "#50fa7b", "84")
-	theme.DiffRemoveFg = themeColor(trueColor, "#ff5555", "203")
-	theme.DiffAddBg = themeColor(trueColor, "#21392a", "22")
-	theme.DiffAddStrongBg = themeColor(trueColor, "#2f5f43", "29")
-	theme.DiffRemoveBg = themeColor(trueColor, "#4a232d", "52")
-	theme.DiffRemoveStrongBg = themeColor(trueColor, "#7d3243", "89")
-	theme.ComposerBorder = themeColor(trueColor, "#6272a4", "61")
-	theme.ComposerBorderFocus = themeColor(trueColor, "#ff79c6", "212")
-	theme.ScrollbarTrack = themeColor(trueColor, "#1f2130", "235")
-	theme.ScrollbarThumb = themeColor(trueColor, "#6272a4", "61")
-	theme.LinkFg = themeColor(trueColor, "#8be9fd", "123")
-	theme.CodeBg = themeColor(trueColor, "#343746", "237")
-	theme.CodeBlockBg = themeColor(trueColor, "#21222c", "235")
-	theme.TranscriptRail = themeColor(trueColor, "#8be9fd", "123")
-	theme.TranscriptShell = themeColor(trueColor, "#44475a", "239")
-	theme.TranscriptPillBg = themeColor(trueColor, "#343746", "237")
-	theme.CodeSurface = themeColor(trueColor, "#2b2d39", "236")
-	theme.TableHeaderBg = themeColor(trueColor, "#343746", "237")
-	theme.TableBorder = themeColor(trueColor, "#6272a4", "61")
 	return theme
 }

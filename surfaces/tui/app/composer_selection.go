@@ -23,7 +23,7 @@ func (m *Model) promptAwareSelectionStyles() promptAwareSelectionStyles {
 	}
 	if chrome := m.composerChrome(); chrome.active {
 		styles.hasBg = true
-		bg := m.theme.UserBg
+		bg := m.theme.ComposerBg
 		styles.prompt = styles.prompt.Background(bg)
 		styles.text = styles.text.Background(bg)
 		styles.continuation = lipgloss.NewStyle().Background(bg)

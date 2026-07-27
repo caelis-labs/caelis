@@ -9,6 +9,11 @@ import (
 const (
 	CatppuccinMochaChromaTheme = "catppuccin-mocha"
 	CatppuccinLatteChromaTheme = "catppuccin-latte"
+
+	// The Glamour adapter registers these named Chroma styles from the same
+	// semantic palettes used by shell and inline-code rendering.
+	caelisDuskChromaTheme = "caelis-dusk"
+	caelisDawnChromaTheme = "caelis-dawn"
 )
 
 type SyntaxPalette struct {
@@ -29,24 +34,101 @@ type SyntaxPalette struct {
 }
 
 func SyntaxPaletteForTheme(theme Theme) SyntaxPalette {
-	return catppuccinSyntaxPalette(theme.IsDark, theme.Profile)
+	switch theme.Name {
+	case "caelis-dusk", "caelis-dawn":
+		return caelisSyntaxPalette(theme)
+	case "catppuccin-mocha", "catppuccin-latte":
+		return catppuccinSyntaxPalette(theme.IsDark, theme.Profile)
+	default:
+		return semanticSyntaxPalette(theme)
+	}
 }
 
-// applyCatppuccinCodeColors is the single source of truth for adaptive-theme inline code color.
-func applyCatppuccinCodeColors(theme *Theme) {
+// applySyntaxColors keeps inline and block code colors aligned with the
+// selected theme instead of leaking the default palette into named themes.
+func applySyntaxColors(theme *Theme) {
 	if theme == nil || theme.NoColor {
 		return
 	}
 	palette := SyntaxPaletteForTheme(*theme)
-	if theme.IsDark {
-		theme.CodeFg = syntaxColor(theme.Profile, "#b4befe", "147", "5")
-	} else {
-		theme.CodeFg = syntaxColor(theme.Profile, "#7287fd", "63", "5")
-	}
+	theme.CodeFg = palette.Keyword
 	theme.CodeBg = palette.InlineBackground
 	theme.CodeBlockFg = palette.Text
 	theme.CodeBlockBg = palette.Background
 	theme.CodeSurface = palette.Background
+}
+
+func caelisSyntaxPalette(theme Theme) SyntaxPalette {
+	profile := theme.Profile
+	if profile == colorprofile.Unknown {
+		profile = colorprofile.TrueColor
+	}
+	if theme.IsDark {
+		return SyntaxPalette{
+			ChromaTheme:      caelisDuskChromaTheme,
+			Text:             syntaxColor(profile, "#d8dce5", "253", "7"),
+			Background:       firstColor(theme.ModalBg, syntaxColor(profile, "#171a21", "234", "")),
+			InlineBackground: firstColor(theme.TranscriptPillBg, syntaxColor(profile, "#1d222c", "235", "")),
+			Comment:          syntaxColor(profile, "#7f8899", "244", "8"),
+			Keyword:          syntaxColor(profile, "#a5b4d4", "146", "4"),
+			Function:         syntaxColor(profile, "#9aade0", "111", "4"),
+			String:           syntaxColor(profile, "#92b79a", "108", "2"),
+			Number:           syntaxColor(profile, "#c6a477", "179", "3"),
+			Operator:         syntaxColor(profile, "#8baeaa", "109", "6"),
+			Path:             syntaxColor(profile, "#9aade0", "111", "4"),
+			Variable:         syntaxColor(profile, "#b5a1a5", "145", "5"),
+			Deleted:          syntaxColor(profile, "#e1848c", "174", "1"),
+			Inserted:         syntaxColor(profile, "#7fb58a", "108", "2"),
+		}
+	}
+	return SyntaxPalette{
+		ChromaTheme:      caelisDawnChromaTheme,
+		Text:             syntaxColor(profile, "#2d3440", "236", "0"),
+		Background:       firstColor(theme.ModalBg, syntaxColor(profile, "#f5f6f7", "255", "")),
+		InlineBackground: firstColor(theme.TranscriptPillBg, syntaxColor(profile, "#eff1f3", "254", "")),
+		Comment:          syntaxColor(profile, "#707888", "243", "8"),
+		Keyword:          syntaxColor(profile, "#596d9d", "61", "4"),
+		Function:         syntaxColor(profile, "#496aa7", "25", "4"),
+		String:           syntaxColor(profile, "#4f765a", "29", "2"),
+		Number:           syntaxColor(profile, "#8b6734", "130", "3"),
+		Operator:         syntaxColor(profile, "#476f6b", "30", "6"),
+		Path:             syntaxColor(profile, "#496aa7", "25", "4"),
+		Variable:         syntaxColor(profile, "#805e66", "95", "1"),
+		Deleted:          syntaxColor(profile, "#b73a4a", "160", "1"),
+		Inserted:         syntaxColor(profile, "#2f7d48", "28", "2"),
+	}
+}
+
+func semanticSyntaxPalette(theme Theme) SyntaxPalette {
+	chromaTheme := CatppuccinMochaChromaTheme
+	switch theme.Name {
+	case "nord":
+		chromaTheme = "nord"
+	case "solarized":
+		chromaTheme = "solarized-dark"
+	case "dracula":
+		chromaTheme = "dracula"
+	default:
+		if !theme.IsDark {
+			chromaTheme = CatppuccinLatteChromaTheme
+		}
+	}
+	return SyntaxPalette{
+		ChromaTheme:      chromaTheme,
+		Text:             theme.TextPrimary,
+		Background:       theme.ModalBg,
+		InlineBackground: firstColor(theme.TranscriptPillBg, theme.ModalBg),
+		Comment:          firstColor(theme.MutedText, theme.TextSecondary),
+		Keyword:          firstColor(theme.Accent, theme.TextPrimary),
+		Function:         firstColor(theme.Focus, theme.TextPrimary),
+		String:           firstColor(theme.Success, theme.TextPrimary),
+		Number:           firstColor(theme.Warning, theme.TextPrimary),
+		Operator:         firstColor(theme.ToolFg, theme.TextSecondary),
+		Path:             firstColor(theme.LinkFg, theme.TextPrimary),
+		Variable:         firstColor(theme.SecondaryText, theme.TextPrimary),
+		Deleted:          firstColor(theme.DiffRemoveFg, theme.Error),
+		Inserted:         firstColor(theme.DiffAddFg, theme.Success),
+	}
 }
 
 func catppuccinSyntaxPalette(dark bool, profile colorprofile.Profile) SyntaxPalette {
