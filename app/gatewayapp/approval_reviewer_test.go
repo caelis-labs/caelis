@@ -447,9 +447,17 @@ func TestGuardianPolicyPromptUsesGeneralRecoveryBoundary(t *testing.T) {
 	prompt := guardianPolicyPrompt()
 	for _, want := range []string{
 		"on behalf of the user",
-		"concrete sandbox or policy failure",
-		"runtime evidence that this request already routes to Host",
-		"does not require a redundant failed sandbox attempt",
+		"# Sandbox Capability Model",
+		"restricted workspace-write",
+		"repository .git directory is a protected read-only subpath by default",
+		"Network access alone does not require Host",
+		"Successful tool-result bodies may be omitted",
+		"later subcommand makes the outer tool call exit successfully",
+		"specific assistant statement that quotes a concrete prior sandbox error",
+		"The same error need not also appear in a failed tool result",
+		"Predictable capability boundaries",
+		"policy or runtime Host routes",
+		"without a redundant failed sandbox attempt",
 		"RUN_COMMAND approval is only for Host execution",
 		"use_default when the runtime already defaults or falls back to Host",
 		"do not fault those requests for lacking explicit escalation or justification",
@@ -457,22 +465,33 @@ func TestGuardianPolicyPromptUsesGeneralRecoveryBoundary(t *testing.T) {
 		"Broad cleanup, reset, recursive delete, or state-discarding actions are high or critical",
 		"Permission or lock recovery does not authorize broader cleanup, reset, delete, ACL, or mode changes",
 		"# Decision Process",
+		"Match operations by material effects and scope, not byte-for-byte shell text",
+		"bounded read-only diagnostics do not by themselves break a material match",
+		"Repeated Host requests after a denial remain denied unless",
+		"outer tool call completed after an earlier inner failure",
 		"The selected option is authoritative",
 		"option_id, outcome, and rationale agree",
 		"always include option_id, risk_level, user_authorization, outcome, and rationale",
 		"Never allow while saying Host is unnecessary",
 		"# Host Discipline",
 		"Host is an exception",
-		"For explicit escalation, deny missing, empty, generic, boilerplate, or unrelated justifications",
-		"If Host necessity is unproven, deny",
+		"it does not need to cite a failed tool result",
+		"Deny missing, empty, generic, boilerplate, or unrelated justifications",
 		"prior Host allow",
-		"Read-only inspection",
+		"One reported failure supports only a materially matching retry",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("guardian policy prompt missing %q:\n%s", want, prompt)
 		}
 	}
-	for _, forbidden := range []string{"git clean", "git reset", "git checkout", "When the justification makes host need plausible", "# Host Elevation Bar"} {
+	for _, forbidden := range []string{
+		"git clean",
+		"git reset",
+		"git checkout",
+		"When the justification makes host need plausible",
+		"# Host Elevation Bar",
+		"If Host necessity is unproven, deny and tell the agent to stay sandboxed, provide concrete evidence",
+	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("guardian policy prompt includes unwanted text %q:\n%s", forbidden, prompt)
 		}
@@ -485,8 +504,8 @@ func TestGuardianPolicyPromptAcceptsHostDefaultUseDefaultRequests(t *testing.T) 
 	prompt := guardianPolicyPrompt()
 	for _, want := range []string{
 		"use_default when the runtime already defaults or falls back to Host",
-		"host-default or fallback use_default requests may legitimately have no justification",
-		"runtime Host-default/fallback route",
+		"Host-default or fallback use_default requests may legitimately have no justification",
+		"policy/runtime Host-default or fallback route",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("guardian policy prompt missing host-default rule %q:\n%s", want, prompt)
