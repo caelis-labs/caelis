@@ -19,9 +19,13 @@ func TestAdapterACPConnectDiscoveryIsReusedForModelsConfigAndPersist(t *testing.
 		Agent: AgentRuntimeDeps{
 			DiscoverConnectionFn: func(_ context.Context, req controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
 				discoveryCalls++
+				if discoveryCalls == 2 && req.Authentication != (controlagents.Authentication{MethodID: "login", Type: controlagents.AuthenticationAgent}) {
+					t.Fatalf("second discovery authentication = %#v, want endpoint selection reused", req.Authentication)
+				}
 				return controlagents.DiscoverySnapshot{
 					ConnectionID: "claude", LaunchFingerprint: "fingerprint", CWD: req.CWD,
 					SelectedModelID: req.ModelID,
+					Authentication:  controlagents.Authentication{MethodID: "login", Type: controlagents.AuthenticationAgent},
 					Models:          []controlagents.RemoteModel{{ID: "opus", Name: "Opus"}},
 					ConfigOptions: []controlagents.ConfigOption{
 						{
@@ -50,7 +54,8 @@ func TestAdapterACPConnectDiscoveryIsReusedForModelsConfigAndPersist(t *testing.
 			},
 			ConnectFn: func(_ context.Context, req controlagents.ConnectRequest) (controlagents.ConnectResult, error) {
 				connectCalls++
-				if req.Discovery == nil || req.Discovery.SelectedModelID != "opus" || len(req.Discovery.Models) != 1 {
+				if req.Discovery == nil || req.Discovery.SelectedModelID != "opus" || len(req.Discovery.Models) != 1 ||
+					req.Discovery.Authentication.MethodID != "login" {
 					t.Fatalf("ConnectACP discovery = %#v, want cached snapshot", req.Discovery)
 				}
 				return controlagents.ConnectResult{Profiles: []modelprofile.ModelProfile{{ID: "acp:claude:opus"}}, Discovery: *req.Discovery}, nil
@@ -87,6 +92,9 @@ func TestAdapterACPConnectDiscoveryIsReusedForModelsConfigAndPersist(t *testing.
 	if discoveryCalls != 2 {
 		t.Fatalf("discovery calls = %d, want catalog and selected-model temporary Sessions", discoveryCalls)
 	}
+	if len(driver.acpEndpointAuth) != 1 {
+		t.Fatalf("endpoint auth cache = %#v, want one explicit endpoint-scoped selection", driver.acpEndpointAuth)
+	}
 	if _, err := driver.ConnectACP(context.Background(), controlagents.ConnectRequest{
 		AdapterID: "claude", Launcher: controlagents.LauncherChoiceNPX, ModelID: "opus",
 	}); err != nil {
@@ -97,6 +105,33 @@ func TestAdapterACPConnectDiscoveryIsReusedForModelsConfigAndPersist(t *testing.
 	}
 	if len(driver.acpDiscoveries) != 0 {
 		t.Fatalf("discovery cache after connect = %#v, want endpoint entries cleared", driver.acpDiscoveries)
+	}
+	if len(driver.acpEndpointAuth) != 0 {
+		t.Fatalf("endpoint auth cache after connect = %#v, want endpoint selection cleared", driver.acpEndpointAuth)
+	}
+}
+
+func TestCompleteConnectACPModelsOffersAgentDefaultWithoutCatalog(t *testing.T) {
+	t.Parallel()
+
+	driver := &Adapter{stack: &RuntimeStack{
+		Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: t.TempDir()}},
+		Agent: AgentRuntimeDeps{DiscoverConnectionFn: func(_ context.Context, req controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
+			return controlagents.DiscoverySnapshot{
+				ConnectionID: "fixed", CWD: req.CWD, SelectedModelID: req.ModelID,
+			}, nil
+		}},
+	}}
+	payload := controlagents.EncodeConnectState(controlagents.ConnectState{
+		Agent: "fixed", Launcher: controlagents.LauncherChoiceCommand, CommandLine: "fixed-acp",
+	})
+	models, err := driver.CompleteSlashArg(context.Background(), "connect-acp-model:"+payload, "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg() error = %v", err)
+	}
+	if len(models) != 1 || models[0].Value != controlagents.DefaultRemoteModelID ||
+		models[0].Display != "Agent default" {
+		t.Fatalf("model candidates = %#v, want Agent default", models)
 	}
 }
 
@@ -124,6 +159,43 @@ func TestAdapterACPDiscoveryCacheExpires(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("discovery calls = %d, want expired cache rediscovered", calls)
+	}
+}
+
+func TestAdapterACPEndpointAuthenticationExpiresExplicitly(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	driver := &Adapter{stack: &RuntimeStack{
+		Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: t.TempDir()}},
+		Agent: AgentRuntimeDeps{DiscoverConnectionFn: func(_ context.Context, req controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
+			calls++
+			if calls == 2 && req.Authentication.MethodID != "" {
+				t.Fatalf("expired endpoint authentication = %#v, want no reused selection", req.Authentication)
+			}
+			return controlagents.DiscoverySnapshot{
+				ConnectionID: "claude", CWD: req.CWD, SelectedModelID: req.ModelID,
+				Authentication: controlagents.Authentication{MethodID: "login"},
+				Models:         []controlagents.RemoteModel{{ID: "opus"}},
+			}, nil
+		}},
+	}}
+	base := controlagents.ConnectRequest{AdapterID: "claude", Launcher: controlagents.LauncherChoiceNPX}
+	if _, err := driver.DiscoverACPConnection(context.Background(), base); err != nil {
+		t.Fatalf("DiscoverACPConnection(first) error = %v", err)
+	}
+	endpointKey := acpDiscoveryEndpointKey(controlagents.ConnectRequest{
+		AdapterID: "claude", Launcher: controlagents.LauncherChoiceNPX, CWD: driver.WorkspaceDir(),
+	})
+	entry := driver.acpEndpointAuth[endpointKey]
+	entry.cachedAt = time.Now().Add(-acpDiscoveryCacheTTL - time.Second)
+	driver.acpEndpointAuth[endpointKey] = entry
+	base.ModelID = "opus"
+	if _, err := driver.DiscoverACPConnection(context.Background(), base); err != nil {
+		t.Fatalf("DiscoverACPConnection(after auth expiry) error = %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("discovery calls = %d, want model-scoped rediscovery", calls)
 	}
 }
 
@@ -177,18 +249,30 @@ func TestCompleteConnectACPLaunchersDistinguishesGlobalAndManaged(t *testing.T) 
 	}
 }
 
-func TestCompleteConnectACPRestoresNativeAgentCatalog(t *testing.T) {
+func TestCompleteConnectACPIncludesRegistryAndNativeAgentCatalog(t *testing.T) {
 	candidates := completeConnectACPAgents("", 20)
-	for _, want := range []string{"codex", "claude", "grok", "codefree-o", "opencode", "custom"} {
+	for _, want := range []string{"codex", "claude", "copilot", "gemini", "grok", "codefree-o", "opencode", "factory-droid", "custom"} {
 		if !slashCandidatesHaveValue(candidates, want) {
 			t.Fatalf("ACP Agent candidates = %#v, want %q", candidates, want)
 		}
 	}
-	for _, agent := range []string{"grok", "codefree-o", "opencode"} {
+	qwen := completeConnectACPAgents("qwen", 10)
+	if len(qwen) != 1 || qwen[0].Value != "qwen-code" || !strings.Contains(qwen[0].Detail, "ACP Registry v0.21.0") {
+		t.Fatalf("qwen registry candidate = %#v, want searchable Registry metadata", qwen)
+	}
+	for _, agent := range []string{"codefree-o", "opencode"} {
 		launchers := completeConnectACPLaunchers(agent, "", 10)
 		if len(launchers) != 1 || launchers[0].Value != "installed" {
 			t.Fatalf("%s launchers = %#v, want installed only", agent, launchers)
 		}
+	}
+	grok := completeConnectACPLaunchers("grok", "", 10)
+	if len(grok) != 2 || grok[0].Value != "npx" || grok[1].Value != "installed" {
+		t.Fatalf("grok launchers = %#v, want Registry npx and installed command", grok)
+	}
+	factory := completeConnectACPLaunchers("factory-droid", "", 10)
+	if len(factory) != 1 || factory[0].Value != "npx" || !strings.Contains(factory[0].Display, "Recommended") {
+		t.Fatalf("factory-droid launchers = %#v, want Registry npx", factory)
 	}
 }
 
@@ -230,6 +314,10 @@ func TestAdapterDisconnectACPUsesControlOwnedRosterCapability(t *testing.T) {
 		"codex":  {snapshot: controlagents.DiscoverySnapshot{ConnectionID: "codex"}, cachedAt: time.Now()},
 		"claude": {snapshot: controlagents.DiscoverySnapshot{ConnectionID: "claude"}, cachedAt: time.Now()},
 	}
+	driver.acpEndpointAuth = map[string]acpEndpointAuthCacheEntry{
+		"codex":  {connectionID: "codex", authentication: controlagents.Authentication{MethodID: "login"}, cachedAt: time.Now()},
+		"claude": {connectionID: "claude", authentication: controlagents.Authentication{MethodID: "login"}, cachedAt: time.Now()},
+	}
 
 	candidates, err := driver.DisconnectCandidates(context.Background())
 	if err != nil {
@@ -262,6 +350,12 @@ func TestAdapterDisconnectACPUsesControlOwnedRosterCapability(t *testing.T) {
 	}
 	if _, ok := driver.acpDiscoveries["claude"]; !ok {
 		t.Fatal("DisconnectACP() removed unrelated discovery cache")
+	}
+	if _, ok := driver.acpEndpointAuth["codex"]; ok {
+		t.Fatal("DisconnectACP() retained endpoint auth for released Connection")
+	}
+	if _, ok := driver.acpEndpointAuth["claude"]; !ok {
+		t.Fatal("DisconnectACP() removed unrelated endpoint auth")
 	}
 }
 

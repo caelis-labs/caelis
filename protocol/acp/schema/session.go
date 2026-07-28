@@ -20,6 +20,8 @@ const (
 
 	StopReasonEndTurn   = "end_turn"
 	StopReasonCancelled = "cancelled"
+
+	ErrorCodeAuthRequired = -32000
 )
 
 type Implementation struct {
@@ -65,6 +67,18 @@ type AuthenticateRequest struct {
 }
 
 type AuthenticateResponse struct{}
+
+// AuthMethod is the normalized v1 authentication descriptor advertised during
+// initialize. A missing type is the stable agent-managed authenticate flow.
+// Terminal is the ACP Preview out-of-band flow.
+type AuthMethod struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	Type        string            `json:"type,omitempty"`
+	Args        []string          `json:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+}
 
 type NewSessionRequest struct {
 	CWD        string            `json:"cwd"`

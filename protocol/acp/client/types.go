@@ -9,6 +9,8 @@ import (
 const (
 	JSONRPCVersion = schema.JSONRPCVersion
 
+	ErrorCodeAuthRequired = schema.ErrorCodeAuthRequired
+
 	MethodInitialize           = schema.MethodInitialize
 	MethodAuthenticate         = schema.MethodAuthenticate
 	MethodSessionNew           = schema.MethodSessionNew
@@ -51,6 +53,7 @@ type InitializeRequest = schema.InitializeRequest
 type InitializeResponse = schema.InitializeResponse
 type AuthenticateRequest = schema.AuthenticateRequest
 type AuthenticateResponse = schema.AuthenticateResponse
+type AuthMethod = schema.AuthMethod
 type NewSessionRequest = schema.NewSessionRequest
 type NewSessionResponse = schema.NewSessionResponse
 type SessionListRequest = schema.SessionListRequest

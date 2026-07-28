@@ -377,6 +377,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modelAuthInputCancelMsg:
 		m.handleModelAuthInputCancel(typed)
 		return m, nil
+	case acpAuthSelectionRequestMsg:
+		m.handleACPAuthSelectionRequest(typed)
+		return m, nil
+	case acpAuthSelectionCancelMsg:
+		m.handleACPAuthSelectionCancel(typed)
+		return m, nil
+	case acpTerminalAuthRequestMsg:
+		return m, m.handleACPTerminalAuthRequest(typed)
+	case acpTerminalAuthFinishedMsg:
+		m.handleACPTerminalAuthFinished(typed)
+		return m, nil
 
 	case spinner.TickMsg:
 		m.spinnerTickScheduled = false

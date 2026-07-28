@@ -36,6 +36,7 @@ func (s *Stack) DiscoverACPConnection(ctx context.Context, req controlagents.Con
 	if err != nil {
 		return controlagents.DiscoverySnapshot{}, err
 	}
+	connection.Authentication = controlagents.NormalizeAuthentication(req.Authentication)
 	controlagents.ReportSetupProgress(ctx, controlagents.SetupProgress{
 		AdapterID: req.AdapterID,
 		Phase:     controlagents.SetupPhaseDiscovering,
@@ -63,6 +64,11 @@ func (s *Stack) ConnectACP(ctx context.Context, req controlagents.ConnectRequest
 	connection, err := s.resolveACPConnectionLauncher(ctx, req)
 	if err != nil {
 		return controlagents.ConnectResult{}, err
+	}
+	if req.Discovery != nil {
+		connection.Authentication = controlagents.NormalizeAuthentication(req.Discovery.Authentication)
+	} else {
+		connection.Authentication = controlagents.NormalizeAuthentication(req.Authentication)
 	}
 	cwd := firstNonEmpty(req.CWD, s.Workspace.CWD)
 	var snapshot controlagents.DiscoverySnapshot

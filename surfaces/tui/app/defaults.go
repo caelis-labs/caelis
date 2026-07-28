@@ -286,7 +286,7 @@ func connectACPWizard() WizardDef {
 		Steps: []WizardStepDef{
 			{
 				Key: "acp_agent", HintLabel: "/connect ACP agent",
-				FreeformHint:      "/connect ACP agent: choose Codex, Claude, or a custom local ACP command",
+				FreeformHint:      "/connect ACP agent: choose an ACP Registry Agent or a custom local ACP command",
 				RequireCandidate:  true,
 				CompletionCommand: func(map[string]string) string { return "connect-acp-agent" },
 			},

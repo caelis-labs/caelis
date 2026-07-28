@@ -19,6 +19,12 @@ type acpDiscoveryCacheEntry struct {
 	cachedAt time.Time
 }
 
+type acpEndpointAuthCacheEntry struct {
+	authentication controlagents.Authentication
+	connectionID   string
+	cachedAt       time.Time
+}
+
 // DiscoverACPConnection probes one temporary empty session for the guided
 // /connect flow without adding the endpoint to the user roster.
 func (d *Adapter) DiscoverACPConnection(ctx context.Context, req controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
@@ -29,16 +35,16 @@ func (d *Adapter) DiscoverACPConnection(ctx context.Context, req controlagents.C
 		req.CWD = d.WorkspaceDir()
 	}
 	key := acpDiscoveryRequestKey(req)
+	endpointKey := acpDiscoveryEndpointKey(req)
 	now := time.Now()
 	d.mu.Lock()
-	for cachedKey, entry := range d.acpDiscoveries {
-		if acpDiscoveryCacheExpired(entry, now) {
-			delete(d.acpDiscoveries, cachedKey)
-		}
-	}
+	d.expireACPDiscoveryStateLocked(now)
 	if cached, ok := d.acpDiscoveries[key]; ok {
 		d.mu.Unlock()
 		return controlagents.NormalizeDiscoverySnapshot(cached.snapshot), nil
+	}
+	if endpointAuth, ok := d.acpEndpointAuth[endpointKey]; ok {
+		req.Authentication = controlagents.NormalizeAuthentication(endpointAuth.authentication)
 	}
 	d.mu.Unlock()
 	snapshot, err := d.stack.Agent.DiscoverConnectionFn(ctx, req)
@@ -52,6 +58,16 @@ func (d *Adapter) DiscoverACPConnection(ctx context.Context, req controlagents.C
 	}
 	d.acpDiscoveries[key] = acpDiscoveryCacheEntry{
 		request: controlagents.NormalizeConnectRequest(req), snapshot: snapshot, cachedAt: time.Now(),
+	}
+	if authentication := controlagents.NormalizeAuthentication(snapshot.Authentication); authentication.MethodID != "" {
+		if d.acpEndpointAuth == nil {
+			d.acpEndpointAuth = map[string]acpEndpointAuthCacheEntry{}
+		}
+		d.acpEndpointAuth[endpointKey] = acpEndpointAuthCacheEntry{
+			authentication: authentication,
+			connectionID:   strings.TrimSpace(snapshot.ConnectionID),
+			cachedAt:       time.Now(),
+		}
 	}
 	d.mu.Unlock()
 	return snapshot, nil
@@ -67,15 +83,16 @@ func (d *Adapter) ConnectACP(ctx context.Context, req controlagents.ConnectReque
 		req.CWD = d.WorkspaceDir()
 	}
 	key := acpDiscoveryRequestKey(req)
+	endpointKey := acpDiscoveryEndpointKey(req)
 	now := time.Now()
 	d.mu.Lock()
+	d.expireACPDiscoveryStateLocked(now)
+	if endpointAuth, ok := d.acpEndpointAuth[endpointKey]; ok {
+		req.Authentication = controlagents.NormalizeAuthentication(endpointAuth.authentication)
+	}
 	if cached, ok := d.acpDiscoveries[key]; ok {
-		if acpDiscoveryCacheExpired(cached, now) {
-			delete(d.acpDiscoveries, key)
-		} else {
-			snapshot := controlagents.NormalizeDiscoverySnapshot(cached.snapshot)
-			req.Discovery = &snapshot
-		}
+		snapshot := controlagents.NormalizeDiscoverySnapshot(cached.snapshot)
+		req.Discovery = &snapshot
 	}
 	d.mu.Unlock()
 	result, err := d.stack.Agent.ConnectFn(ctx, req)
@@ -86,12 +103,12 @@ func (d *Adapter) ConnectACP(ctx context.Context, req controlagents.ConnectReque
 		return controlagents.ConnectResult{}, fmt.Errorf("app/gatewayapp/controladapter: ACP connect returned no ModelProfiles")
 	}
 	d.mu.Lock()
-	endpointKey := acpDiscoveryEndpointKey(req)
 	for cachedKey, entry := range d.acpDiscoveries {
 		if acpDiscoveryEndpointKey(entry.request) == endpointKey {
 			delete(d.acpDiscoveries, cachedKey)
 		}
 	}
+	delete(d.acpEndpointAuth, endpointKey)
 	d.mu.Unlock()
 	return result, nil
 }
@@ -130,6 +147,11 @@ func (d *Adapter) DisconnectACP(ctx context.Context, agentID string) (controlage
 				delete(d.acpDiscoveries, key)
 			}
 		}
+		for key, entry := range d.acpEndpointAuth {
+			if strings.EqualFold(strings.TrimSpace(entry.connectionID), strings.TrimSpace(result.ConnectionID)) {
+				delete(d.acpEndpointAuth, key)
+			}
+		}
 		d.mu.Unlock()
 	}
 	return result, nil
@@ -140,6 +162,19 @@ func acpDiscoveryEndpointKey(req controlagents.ConnectRequest) string {
 	return acpDiscoveryRequestKey(req)
 }
 
+func (d *Adapter) expireACPDiscoveryStateLocked(now time.Time) {
+	for cachedKey, entry := range d.acpDiscoveries {
+		if acpDiscoveryCacheExpired(entry, now) {
+			delete(d.acpDiscoveries, cachedKey)
+		}
+	}
+	for endpointKey, entry := range d.acpEndpointAuth {
+		if entry.cachedAt.IsZero() || now.Sub(entry.cachedAt) > acpDiscoveryCacheTTL {
+			delete(d.acpEndpointAuth, endpointKey)
+		}
+	}
+}
+
 func acpDiscoveryCacheExpired(entry acpDiscoveryCacheEntry, now time.Time) bool {
 	return entry.cachedAt.IsZero() || now.Sub(entry.cachedAt) > acpDiscoveryCacheTTL
 }
@@ -148,6 +183,7 @@ func acpDiscoveryRequestKey(req controlagents.ConnectRequest) string {
 	req = controlagents.NormalizeConnectRequest(req)
 	req.ConfigValues = nil
 	req.Discovery = nil
+	req.Authentication = controlagents.Authentication{}
 	payload, _ := json.Marshal(req)
 	return string(payload)
 }

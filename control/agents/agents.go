@@ -25,6 +25,10 @@ const (
 	LaunchKindManaged LaunchKind = "managed"
 )
 
+// DefaultRemoteModelID is the product-level identity used when an ACP Agent
+// does not advertise a model catalog. It is never sent to the Agent.
+const DefaultRemoteModelID = "caelis:agent-default"
+
 // Launcher is the complete process declaration for one external ACP endpoint.
 // Model selection deliberately does not belong in this type; standard
 // ModelProfiles own remote model and default selection.
@@ -38,9 +42,10 @@ type Launcher struct {
 
 // Connection is one reusable external ACP endpoint.
 type Connection struct {
-	ID       string   `json:"id,omitempty"`
-	Name     string   `json:"name,omitempty"`
-	Launcher Launcher `json:"launcher,omitempty"`
+	ID             string         `json:"id,omitempty"`
+	Name           string         `json:"name,omitempty"`
+	Launcher       Launcher       `json:"launcher,omitempty"`
+	Authentication Authentication `json:"authentication,omitzero"`
 }
 
 // SessionOptions are concrete values applied after ACP session creation or
@@ -124,6 +129,7 @@ type DiscoverySnapshot struct {
 	Models            []RemoteModel  `json:"models,omitempty"`
 	ConfigOptions     []ConfigOption `json:"config_options,omitempty"`
 	ModelControl      ModelControl   `json:"model_control,omitempty"`
+	Authentication    Authentication `json:"authentication,omitzero"`
 	DiscoveredAt      time.Time      `json:"discovered_at,omitempty"`
 }
 
@@ -206,6 +212,9 @@ func ValidateConnection(in Connection) error {
 	if connection.Launcher.Command == "" {
 		return fmt.Errorf("control/agents: connection %q command is required", connection.ID)
 	}
+	if err := ValidateAuthentication(connection.Authentication); err != nil {
+		return fmt.Errorf("control/agents: connection %q: %w", connection.ID, err)
+	}
 	switch connection.Launcher.Kind {
 	case LaunchKindExecutable, LaunchKindPackageExec, LaunchKindManaged:
 		return nil
@@ -217,9 +226,10 @@ func ValidateConnection(in Connection) error {
 // NormalizeConnection returns a detached canonical connection.
 func NormalizeConnection(in Connection) Connection {
 	out := Connection{
-		ID:       normalizeID(in.ID),
-		Name:     strings.TrimSpace(in.Name),
-		Launcher: NormalizeLauncher(in.Launcher),
+		ID:             normalizeID(in.ID),
+		Name:           strings.TrimSpace(in.Name),
+		Launcher:       NormalizeLauncher(in.Launcher),
+		Authentication: NormalizeAuthentication(in.Authentication),
 	}
 	if out.Name == "" {
 		out.Name = out.ID
@@ -229,8 +239,12 @@ func NormalizeConnection(in Connection) Connection {
 
 // NormalizeSessionOptions returns detached desired session defaults.
 func NormalizeSessionOptions(in SessionOptions) SessionOptions {
+	modelID := strings.TrimSpace(in.ModelID)
+	if IsDefaultRemoteModelID(modelID) {
+		modelID = ""
+	}
 	out := SessionOptions{
-		ModelID:                 strings.TrimSpace(in.ModelID),
+		ModelID:                 modelID,
 		ReasoningEffortConfigID: strings.TrimSpace(in.ReasoningEffortConfigID),
 	}
 	for key, value := range in.ConfigValues {
@@ -381,7 +395,8 @@ func NormalizeDiscoverySnapshot(in DiscoverySnapshot) DiscoverySnapshot {
 			Kind:     ModelControlKind(strings.ToLower(strings.TrimSpace(string(in.ModelControl.Kind)))),
 			ConfigID: strings.TrimSpace(in.ModelControl.ConfigID),
 		},
-		DiscoveredAt: in.DiscoveredAt,
+		Authentication: NormalizeAuthentication(in.Authentication),
+		DiscoveredAt:   in.DiscoveredAt,
 	}
 	seenModels := map[string]struct{}{}
 	for _, model := range in.Models {
@@ -413,6 +428,12 @@ func NormalizeDiscoverySnapshot(in DiscoverySnapshot) DiscoverySnapshot {
 		out.ConfigOptions = append(out.ConfigOptions, option)
 	}
 	return out
+}
+
+// IsDefaultRemoteModelID reports whether id is the product-only Agent-default
+// profile identity rather than an ACP wire model ID.
+func IsDefaultRemoteModelID(id string) bool {
+	return strings.EqualFold(strings.TrimSpace(id), DefaultRemoteModelID)
 }
 
 func classifyConfigOptionPurpose(option ConfigOption) ConfigOptionPurpose {

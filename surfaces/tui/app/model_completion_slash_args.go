@@ -261,6 +261,35 @@ func (m *Model) beginSlashArgLoad() tea.Cmd {
 				return "", inputCtx.Err()
 			}
 		})
+		requestCtx = controlagents.WithAuthenticationSelection(requestCtx, func(
+			inputCtx context.Context,
+			request controlagents.AuthenticationSelectionRequest,
+		) (string, error) {
+			responses := make(chan PromptResponse, 1)
+			sender.SendMsg(acpAuthSelectionRequestMsg{seq: seq, request: request, response: responses})
+			select {
+			case response := <-responses:
+				return response.Line, response.Err
+			case <-inputCtx.Done():
+				sender.SendMsg(acpAuthSelectionCancelMsg{seq: seq, response: responses})
+				return "", inputCtx.Err()
+			}
+		})
+		requestCtx = controlagents.WithTerminalAuthentication(requestCtx, func(
+			authCtx context.Context,
+			request controlagents.TerminalAuthenticationRequest,
+		) error {
+			responses := make(chan error, 1)
+			sender.SendMsg(acpTerminalAuthRequestMsg{
+				seq: seq, ctx: authCtx, request: request, response: responses,
+			})
+			select {
+			case err := <-responses:
+				return err
+			case <-authCtx.Done():
+				return authCtx.Err()
+			}
+		})
 	}
 	m.slashArgLoadCancel = cancel
 	complete := m.cfg.SlashArgComplete

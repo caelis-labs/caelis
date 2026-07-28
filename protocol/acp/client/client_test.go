@@ -200,8 +200,9 @@ func TestInitializeAdvertisesClientCapabilitiesFromHandlers(t *testing.T) {
 	}()
 
 	client := &Client{conn: jsonrpc.New(agentToClientReader, clientToAgentWriter), cfg: Config{
-		Terminal:   recordingTerminalHandler{},
-		FileSystem: recordingFileSystemHandler{},
+		Terminal:     recordingTerminalHandler{},
+		TerminalAuth: true,
+		FileSystem:   recordingFileSystemHandler{},
 	}}
 	go func() {
 		_ = client.conn.Serve(ctx, client.handleRequest, client.handleNotification)
@@ -214,8 +215,9 @@ func TestInitializeAdvertisesClientCapabilitiesFromHandlers(t *testing.T) {
 		if terminal, ok := req.ClientCapabilities["terminal"].(bool); !ok || !terminal {
 			t.Fatalf("terminal capability = %#v, want true", req.ClientCapabilities["terminal"])
 		}
-		if _, ok := req.ClientCapabilities["auth"]; ok {
-			t.Fatalf("client capabilities included non-standard auth key: %#v", req.ClientCapabilities["auth"])
+		auth, ok := req.ClientCapabilities["auth"].(map[string]any)
+		if !ok || auth["terminal"] != true {
+			t.Fatalf("auth capability = %#v, want terminal true", req.ClientCapabilities["auth"])
 		}
 		fs, ok := req.ClientCapabilities["fs"].(map[string]any)
 		if !ok || fs["readTextFile"] != true || fs["writeTextFile"] != true {
@@ -223,6 +225,43 @@ func TestInitializeAdvertisesClientCapabilitiesFromHandlers(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for initialize request")
+	}
+}
+
+func TestAuthenticateSendsDeclaredMethodID(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	clientToAgentReader, clientToAgentWriter := io.Pipe()
+	agentToClientReader, agentToClientWriter := io.Pipe()
+	defer clientToAgentReader.Close()
+	defer clientToAgentWriter.Close()
+	defer agentToClientReader.Close()
+	defer agentToClientWriter.Close()
+
+	agentConn := jsonrpc.New(clientToAgentReader, agentToClientWriter)
+	go func() {
+		_ = agentConn.Serve(ctx, func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
+			if msg.Method != MethodAuthenticate {
+				return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+			}
+			var req AuthenticateRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if req.MethodID != "agent-login" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected method id"}
+			}
+			return AuthenticateResponse{}, nil
+		}, nil)
+	}()
+
+	acpClient := &Client{conn: jsonrpc.New(agentToClientReader, clientToAgentWriter)}
+	go func() {
+		_ = acpClient.conn.Serve(ctx, acpClient.handleRequest, acpClient.handleNotification)
+	}()
+	if err := acpClient.Authenticate(ctx, " agent-login "); err != nil {
+		t.Fatalf("Authenticate() error = %v", err)
 	}
 }
 

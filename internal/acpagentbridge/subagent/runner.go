@@ -14,6 +14,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
@@ -64,13 +66,15 @@ type Runner struct {
 }
 
 type childRun struct {
-	anchor    delegation.Anchor
-	agentName string
-	client    *client.Client
-	taskID    string
-	sink      stream.Sink
-	ctx       context.Context
-	cancel    context.CancelFunc
+	anchor                delegation.Anchor
+	agentName             string
+	client                *client.Client
+	configuredAuth        controlagents.Authentication
+	authenticationMethods []controlagents.AuthenticationMethod
+	taskID                string
+	sink                  stream.Sink
+	ctx                   context.Context
+	cancel                context.CancelFunc
 
 	mu             sync.RWMutex
 	state          delegation.State
@@ -118,13 +122,14 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
 	run := &childRun{
-		state:     delegation.StateRunning,
-		running:   true,
-		taskID:    strings.TrimSpace(spawn.TaskID),
-		sink:      spawn.Streams,
-		updatedAt: r.clock(),
-		done:      make(chan struct{}),
-		agentName: strings.TrimSpace(cfg.Name),
+		state:          delegation.StateRunning,
+		running:        true,
+		taskID:         strings.TrimSpace(spawn.TaskID),
+		sink:           spawn.Streams,
+		updatedAt:      r.clock(),
+		done:           make(chan struct{}),
+		agentName:      strings.TrimSpace(cfg.Name),
+		configuredAuth: controlagents.NormalizeAuthentication(cfg.Authentication),
 	}
 	detachedCtx := detachedChildContext(ctx)
 	childCtx, childCancel := context.WithCancel(detachedCtx)
@@ -139,7 +144,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		launchEnv["SDK_ACP_ENABLE_SPAWN"] = "0"
 		launchEnv["SDK_ACP_CHILD_NO_SPAWN"] = "1"
 	}
-	client, err := client.Start(childCtx, client.Config{
+	acpClient, err := client.Start(childCtx, client.Config{
 		Command:    cfg.Command,
 		Args:       append([]string(nil), cfg.Args...),
 		Env:        launchEnv,
@@ -154,27 +159,36 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		childCancel()
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
-	initialize, err := client.Initialize(ctx)
+	initialize, err := acpClient.Initialize(ctx)
 	if err != nil {
 		childCancel()
-		_ = client.Close(ctx)
+		_ = acpClient.Close(ctx)
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
-	sessionResp, err := client.NewSession(ctx, strings.TrimSpace(spawn.CWD), nil)
+	authenticationMethods := authentication.Methods(initialize)
+	recovered, err := authentication.OpenNewSession(ctx, authentication.RecoveryConfig{
+		Mode:           authentication.RecoveryConfigured,
+		Client:         acpClient,
+		Initialize:     initialize,
+		Methods:        authenticationMethods,
+		AgentID:        cfg.Name,
+		Authentication: cfg.Authentication,
+	}, spawn.CWD)
 	if err != nil {
 		childCancel()
-		_ = client.Close(ctx)
+		_ = acpClient.Close(ctx)
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
-	if _, err := sessionconfig.Apply(ctx, client, strings.TrimSpace(sessionResp.SessionID), sessionconfig.State{
+	sessionResp := recovered.Value
+	if _, err := sessionconfig.Apply(ctx, acpClient, strings.TrimSpace(sessionResp.SessionID), sessionconfig.State{
 		ConfigOptions: sessionResp.ConfigOptions,
 		Models:        sessionResp.Models,
 	}, cfg.SessionOptions); err != nil {
 		childCancel()
 		if hasACPSessionCapability(initialize, "close") {
-			_ = acpcleanup.CloseSession(ctx, client, strings.TrimSpace(sessionResp.SessionID))
+			_ = acpcleanup.CloseSession(ctx, acpClient, strings.TrimSpace(sessionResp.SessionID))
 		}
-		_ = acpcleanup.CloseClient(ctx, client)
+		_ = acpcleanup.CloseClient(ctx, acpClient)
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
 	// Do not call session/set_mode for spawned ACP children here. External ACP
@@ -188,18 +202,19 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		AgentID:   agentID,
 	}
 	run.anchor = anchor
-	run.client = client
+	run.client = acpClient
+	run.authenticationMethods = controlagents.CloneAuthenticationMethods(authenticationMethods)
 	runKey, err := childRunKey(anchor)
 	if err != nil {
 		childCancel()
-		_ = client.Close(ctx)
+		_ = acpClient.Close(ctx)
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
 	r.mu.Lock()
 	if existing := r.runs[runKey]; existing != nil {
 		r.mu.Unlock()
 		childCancel()
-		_ = client.Close(ctx)
+		_ = acpClient.Close(ctx)
 		return delegation.Anchor{}, delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child run %q already registered", runKey)
 	}
 	r.runs[runKey] = run
@@ -332,7 +347,16 @@ func (r *Runner) Cancel(ctx context.Context, anchor delegation.Anchor) error {
 }
 
 func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) {
-	resp, err := run.client.Prompt(ctx, run.anchor.SessionID, prompt, nil)
+	resp, err := authentication.RecoverConfiguredCall(
+		ctx,
+		run.client,
+		controlagents.CloneAuthenticationMethods(run.authenticationMethods),
+		run.agentName,
+		run.configuredAuth,
+		func(callCtx context.Context, activeClient *client.Client) (client.PromptResponse, error) {
+			return activeClient.Prompt(callCtx, run.anchor.SessionID, prompt, nil)
+		},
+	)
 	run.mu.Lock()
 	defer run.mu.Unlock()
 	defer close(run.done)

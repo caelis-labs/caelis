@@ -3,10 +3,12 @@ package discovery
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -81,13 +83,107 @@ func TestDiscoverContinuesWhenAuthenticationMethodsAreAdvertised(t *testing.T) {
 	}
 }
 
-func TestDiscoverPreservesSessionNewAuthenticationFailure(t *testing.T) {
+func TestDiscoverAuthenticatesDeclaredAgentMethodAndRetriesSessionNew(t *testing.T) {
 	markerDir := t.TempDir()
-	_, err := (Service{}).Discover(context.Background(), helperConnection(markerDir, "auth-failure"), markerDir, "")
-	if err == nil {
-		t.Fatal("Discover() error = nil, want session/new authentication failure")
+	snapshot, err := (Service{}).Discover(context.Background(), helperConnection(markerDir, "agent-auth-required"), markerDir, "")
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
 	}
-	for _, want := range []string{"create discovery session", "authentication required by helper"} {
+	if snapshot.Authentication != (controlagents.Authentication{MethodID: "agent-login", Type: controlagents.AuthenticationAgent}) {
+		t.Fatalf("authentication = %#v", snapshot.Authentication)
+	}
+	for _, marker := range []string{"authenticate", "session-close", "process-exit"} {
+		if _, statErr := os.Stat(filepath.Join(markerDir, marker)); statErr != nil {
+			t.Fatalf("missing marker %q: %v", marker, statErr)
+		}
+	}
+}
+
+func TestDiscoverReturnsRepeatedAuthRequiredWithoutLooping(t *testing.T) {
+	t.Parallel()
+
+	markerDir := t.TempDir()
+	_, err := (Service{}).Discover(
+		context.Background(),
+		helperConnection(markerDir, "agent-auth-required-twice"),
+		markerDir,
+		"",
+	)
+	if err == nil {
+		t.Fatal("Discover() error = nil for repeated auth_required")
+	}
+	for _, want := range []string{"retry authenticated operation", "Authentication required"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Discover() error = %q, want %q", err, want)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(markerDir, "authenticate")); statErr != nil {
+		t.Fatalf("declared method was not attempted once: %v", statErr)
+	}
+}
+
+func TestDiscoverRunsDeclaredTerminalMethodThenReconnects(t *testing.T) {
+	markerDir := t.TempDir()
+	connection := helperConnection(markerDir, "terminal-auth-required")
+	ctx := controlagents.WithTerminalAuthentication(context.Background(), func(
+		_ context.Context,
+		request controlagents.TerminalAuthenticationRequest,
+	) error {
+		if request.Command != connection.Launcher.Command {
+			t.Fatalf("terminal command = %q, want configured command %q", request.Command, connection.Launcher.Command)
+		}
+		wantArgs := append(append([]string(nil), connection.Launcher.Args...), "--login")
+		if !reflect.DeepEqual(request.Args, wantArgs) {
+			t.Fatalf("terminal args = %#v, want %#v", request.Args, wantArgs)
+		}
+		if request.Env["CAELIS_DISCOVERY_HELPER"] != "terminal-auth-required" || request.Env["ACP_INTERACTIVE_LOGIN"] != "1" {
+			t.Fatalf("terminal env = %#v", request.Env)
+		}
+		return writeDiscoveryMarker(markerDir, "terminal-authenticated", "yes")
+	})
+	snapshot, err := (Service{}).Discover(ctx, connection, markerDir, "")
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if snapshot.Authentication != (controlagents.Authentication{MethodID: "terminal-login", Type: controlagents.AuthenticationTerminal}) {
+		t.Fatalf("authentication = %#v", snapshot.Authentication)
+	}
+	for _, marker := range []string{"terminal-capability", "terminal-authenticated", "session-close", "process-exit"} {
+		if _, statErr := os.Stat(filepath.Join(markerDir, marker)); statErr != nil {
+			t.Fatalf("missing marker %q: %v", marker, statErr)
+		}
+	}
+}
+
+func TestDiscoverTerminalAuthenticationCancellationClosesClientOnce(t *testing.T) {
+	markerDir := t.TempDir()
+	connection := helperConnection(markerDir, "terminal-auth-required")
+	ctx := controlagents.WithTerminalAuthentication(context.Background(), func(
+		context.Context,
+		controlagents.TerminalAuthenticationRequest,
+	) error {
+		return errors.New("terminal login cancelled")
+	})
+
+	_, err := (Service{}).Discover(ctx, connection, markerDir, "")
+	if err == nil {
+		t.Fatal("Discover() error = nil after terminal authentication cancellation")
+	}
+	if !strings.Contains(err.Error(), "terminal login cancelled") {
+		t.Fatalf("Discover() error = %q, want terminal cancellation", err)
+	}
+	if strings.Contains(err.Error(), "Wait was already called") {
+		t.Fatalf("Discover() closed the same ACP process twice: %v", err)
+	}
+}
+
+func TestDiscoverPreservesNonAuthenticationSessionFailure(t *testing.T) {
+	markerDir := t.TempDir()
+	_, err := (Service{}).Discover(context.Background(), helperConnection(markerDir, "session-failure"), markerDir, "")
+	if err == nil {
+		t.Fatal("Discover() error = nil, want session/new failure")
+	}
+	for _, want := range []string{"create discovery session", "helper session failure"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("Discover() error = %q, want original session/new failure containing %q", err, want)
 		}
@@ -229,14 +325,51 @@ func TestDiscoveryHelperProcess(t *testing.T) {
 				select {}
 			}
 			response := client.InitializeResponse{ProtocolVersion: 1, AgentCapabilities: schema.AgentCapabilities{SessionCapabilities: map[string]json.RawMessage{"close": json.RawMessage(`{}`)}}}
-			if mode == "auth" || mode == "auth-failure" {
-				response.AuthMethods = []json.RawMessage{json.RawMessage(`{"id":"login"}`)}
+			if mode == "auth" {
+				response.AuthMethods = []json.RawMessage{json.RawMessage(`{"id":"login","name":"Login"}`)}
+			}
+			if mode == "agent-auth-required" || mode == "agent-auth-required-twice" {
+				response.AuthMethods = []json.RawMessage{json.RawMessage(`{"id":"agent-login","name":"Agent login"}`)}
+			}
+			if mode == "terminal-auth-required" {
+				var request client.InitializeRequest
+				if err := json.Unmarshal(msg.Params, &request); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+				}
+				auth, _ := request.ClientCapabilities["auth"].(map[string]any)
+				if auth["terminal"] != true {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: "terminal auth capability missing"}
+				}
+				writeMarker("terminal-capability", "yes")
+				response.AuthMethods = []json.RawMessage{json.RawMessage(
+					`{"id":"terminal-login","name":"Terminal login","type":"terminal","args":["--login"],"env":{"ACP_INTERACTIVE_LOGIN":"1"}}`,
+				)}
 			}
 			return response, nil
+		case client.MethodAuthenticate:
+			var request client.AuthenticateRequest
+			if err := json.Unmarshal(msg.Params, &request); err != nil || request.MethodID != "agent-login" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected authenticate request"}
+			}
+			writeMarker("authenticate", request.MethodID)
+			return client.AuthenticateResponse{}, nil
 		case client.MethodSessionNew:
 			writeMarker("session-new", "yes")
-			if mode == "auth-failure" {
-				return nil, &jsonrpc.RPCError{Code: -32001, Message: "authentication required by helper"}
+			if mode == "agent-auth-required" {
+				if _, err := os.Stat(filepath.Join(markerDir, "authenticate")); err != nil {
+					return nil, &jsonrpc.RPCError{Code: client.ErrorCodeAuthRequired, Message: "Authentication required"}
+				}
+			}
+			if mode == "agent-auth-required-twice" {
+				return nil, &jsonrpc.RPCError{Code: client.ErrorCodeAuthRequired, Message: "Authentication required"}
+			}
+			if mode == "terminal-auth-required" {
+				if _, err := os.Stat(filepath.Join(markerDir, "terminal-authenticated")); err != nil {
+					return nil, &jsonrpc.RPCError{Code: client.ErrorCodeAuthRequired, Message: "Authentication required"}
+				}
+			}
+			if mode == "session-failure" {
+				return nil, &jsonrpc.RPCError{Code: -32001, Message: "helper session failure"}
 			}
 			return client.NewSessionResponse{
 				SessionID: "discovery-session",

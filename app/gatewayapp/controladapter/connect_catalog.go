@@ -63,7 +63,7 @@ func completeConnectArgs(ctx context.Context, driver *Adapter, command string, q
 func completeConnectSources(ctx context.Context, driver *Adapter, query string, limit int) []controlprompt.SlashArgCandidate {
 	candidates := []controlprompt.SlashArgCandidate{
 		{Value: "model", Display: "Model provider", Detail: "Connect an API or local model provider"},
-		{Value: "acp", Display: "Local ACP Agent", Detail: "Connect Codex, Claude, or another local ACP command"},
+		{Value: "acp", Display: "Local ACP Agent", Detail: "Connect an ACP Registry Agent or another local ACP command"},
 	}
 	if driver != nil {
 		if connected, err := driver.DisconnectCandidates(ctx); err == nil && len(connected) > 0 {
@@ -130,63 +130,100 @@ func pluralAgent(count int) string {
 }
 
 func completeConnectACPAgents(query string, limit int) []controlprompt.SlashArgCandidate {
-	agents := agentregistry.ConnectableBuiltInAgents()
-	candidates := make([]controlprompt.SlashArgCandidate, 0, len(agents)+1)
+	agents := agentregistry.ConnectableAgents()
+	candidates := make([]controlprompt.SlashArgCandidate, 0, len(agents))
 	for _, agent := range agents {
 		candidates = append(candidates, controlprompt.SlashArgCandidate{
-			Value: agent.Name, Display: acpAgentDisplayName(agent.Name), Detail: agent.Description,
+			Value: agent.ID, Display: agent.DisplayName, Detail: connectableACPAgentDetail(agent),
 		})
 	}
-	candidates = append(candidates, controlprompt.SlashArgCandidate{Value: "custom", Display: "Custom command", Detail: "Run another local ACP stdio command"})
 	return filterSlashArgCandidates(candidates, query, limit)
 }
 
 func completeConnectACPLaunchers(agent string, query string, limit int) []controlprompt.SlashArgCandidate {
-	agent = strings.ToLower(strings.TrimSpace(agent))
-	if agent == "custom" {
-		return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{{
-			Value: "command", Display: "Custom command", Detail: "Use an executable and arguments you provide",
-		}}, query, limit)
-	}
-	if _, ok := agentregistry.LookupBuiltInAgent(agent); !ok {
+	entry, ok := agentregistry.LookupConnectableAgent(agent)
+	if !ok {
 		return nil
 	}
-	if _, managed := agentregistry.BuiltinAdapterPackageFor(agent); !managed {
-		return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{{
-			Value: "installed", Display: "Installed command", Detail: "Use the ACP Agent executable already installed on PATH",
-		}}, query, limit)
+	candidates := make([]controlprompt.SlashArgCandidate, 0, len(entry.Launchers))
+	for _, launcher := range entry.Launchers {
+		candidate, ok := connectACPLauncherCandidate(entry, launcher)
+		if ok {
+			candidates = append(candidates, candidate)
+		}
 	}
-	return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{
-		{Value: "managed", Display: "Managed by Caelis · Recommended", Detail: "Isolated, verified install; safe to cancel or retry. The first runtime download can be several hundred MB"},
-		{Value: "npx", Display: "npx cache", Detail: "Let npx download and cache the curated adapter on first use"},
-		{Value: "global", Display: "Global npm install", Detail: "Use or modify the adapter in your global npm environment"},
-	}, query, limit)
+	return filterSlashArgCandidates(candidates, query, limit)
 }
 
-func acpAgentDisplayName(name string) string {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "codex":
-		return "Codex"
-	case "claude":
-		return "Claude Code"
-	case "opencode":
-		return "OpenCode"
-	case "codefree-o":
-		return "CodeFree-O"
-	case "grok":
-		return "Grok"
-	default:
-		return strings.TrimSpace(name)
+func connectACPLauncherCandidate(
+	agent agentregistry.ConnectableAgent,
+	launcher controlagents.LauncherChoice,
+) (controlprompt.SlashArgCandidate, bool) {
+	recommended := launcher == agent.Preferred
+	display := func(label string) string {
+		if recommended {
+			return label + " · Recommended"
+		}
+		return label
 	}
+	switch launcher {
+	case controlagents.LauncherChoiceManaged:
+		return controlprompt.SlashArgCandidate{
+			Value: string(launcher), Display: display("Managed by Caelis"),
+			Detail: "Isolated, verified install; safe to cancel or retry. The first runtime download can be several hundred MB",
+		}, true
+	case controlagents.LauncherChoiceNPX:
+		return controlprompt.SlashArgCandidate{
+			Value: string(launcher), Display: display("npx cache"),
+			Detail: "Run the pinned ACP Registry package through npx",
+		}, true
+	case controlagents.LauncherChoiceGlobal:
+		return controlprompt.SlashArgCandidate{
+			Value: string(launcher), Display: display("Global npm install"),
+			Detail: "Use or modify the adapter in your global npm environment",
+		}, true
+	case controlagents.LauncherChoiceInstalled:
+		installed, ok := agentregistry.LookupInstalledAgent(agent.ID)
+		if !ok {
+			return controlprompt.SlashArgCandidate{}, false
+		}
+		return controlprompt.SlashArgCandidate{
+			Value: string(launcher), Display: display("Installed command"),
+			Detail: fmt.Sprintf("Use %q from PATH", installed.Command),
+		}, true
+	case controlagents.LauncherChoiceCommand:
+		return controlprompt.SlashArgCandidate{
+			Value: string(launcher), Display: display("Custom command"),
+			Detail: "Use an executable and arguments you provide",
+		}, true
+	default:
+		return controlprompt.SlashArgCandidate{}, false
+	}
+}
+
+func connectableACPAgentDetail(agent agentregistry.ConnectableAgent) string {
+	detail := strings.TrimSpace(agent.Description)
+	if agent.RegistryID == "" {
+		return detail
+	}
+	source := "ACP Registry"
+	if version := strings.TrimSpace(agent.Version); version != "" {
+		source += " v" + version
+	}
+	return firstNonEmpty(detail+" · "+source, source)
 }
 
 func completeConnectACPModels(ctx context.Context, driver *Adapter, raw string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
-	payload, snapshot, err := discoverConnectACPState(ctx, driver, raw)
+	_, snapshot, err := discoverConnectACPState(ctx, driver, raw)
 	if err != nil {
 		return nil, err
 	}
 	if len(snapshot.Models) == 0 {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: ACP agent %q did not advertise any models", strings.TrimSpace(payload.Agent))
+		return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{{
+			Value: controlagents.DefaultRemoteModelID, Display: "Agent default",
+			Detail:                "Use the ACP Agent's default model without sending a model selection",
+			ModelMetadataComplete: true,
+		}}, query, limit), nil
 	}
 	candidates := make([]controlprompt.SlashArgCandidate, 0, len(snapshot.Models))
 	for _, model := range snapshot.Models {

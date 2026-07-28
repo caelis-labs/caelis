@@ -25,23 +25,25 @@ const (
 // request creates or updates exactly one Agent so model-dependent session
 // options cannot be shared accidentally across several Agent identities.
 type ConnectRequest struct {
-	AdapterID    string             `json:"adapter_id,omitempty"`
-	Launcher     LauncherChoice     `json:"launcher,omitempty"`
-	CommandLine  string             `json:"command_line,omitempty"`
-	ModelID      string             `json:"model_id,omitempty"`
-	ConfigValues map[string]string  `json:"config_values,omitempty"`
-	CWD          string             `json:"cwd,omitempty"`
-	Discovery    *DiscoverySnapshot `json:"-"`
+	AdapterID      string             `json:"adapter_id,omitempty"`
+	Launcher       LauncherChoice     `json:"launcher,omitempty"`
+	CommandLine    string             `json:"command_line,omitempty"`
+	ModelID        string             `json:"model_id,omitempty"`
+	ConfigValues   map[string]string  `json:"config_values,omitempty"`
+	CWD            string             `json:"cwd,omitempty"`
+	Discovery      *DiscoverySnapshot `json:"-"`
+	Authentication Authentication     `json:"-"`
 }
 
 // NormalizeConnectRequest returns a detached canonical onboarding request.
 func NormalizeConnectRequest(in ConnectRequest) ConnectRequest {
 	out := ConnectRequest{
-		AdapterID:   normalizeID(in.AdapterID),
-		Launcher:    LauncherChoice(strings.ToLower(strings.TrimSpace(string(in.Launcher)))),
-		CommandLine: strings.TrimSpace(in.CommandLine),
-		ModelID:     strings.TrimSpace(in.ModelID),
-		CWD:         strings.TrimSpace(in.CWD),
+		AdapterID:      normalizeID(in.AdapterID),
+		Launcher:       LauncherChoice(strings.ToLower(strings.TrimSpace(string(in.Launcher)))),
+		CommandLine:    strings.TrimSpace(in.CommandLine),
+		ModelID:        strings.TrimSpace(in.ModelID),
+		CWD:            strings.TrimSpace(in.CWD),
+		Authentication: NormalizeAuthentication(in.Authentication),
 	}
 	out.ConfigValues = NormalizeSessionOptions(SessionOptions{ConfigValues: in.ConfigValues}).ConfigValues
 	if in.Discovery != nil {
@@ -71,10 +73,18 @@ func ResolveDiscoverySelection(snapshot DiscoverySnapshot, modelID string, confi
 		return RemoteModel{}, SessionOptions{}, fmt.Errorf("control/agents: discovery snapshot is for model %q, not %q", snapshot.SelectedModelID, modelID)
 	}
 	var selected RemoteModel
-	for _, model := range snapshot.Models {
-		if model.ID == modelID {
-			selected = model
-			break
+	switch {
+	case IsDefaultRemoteModelID(modelID):
+		if len(snapshot.Models) != 0 {
+			return RemoteModel{}, SessionOptions{}, fmt.Errorf("control/agents: Agent default is valid only when no ACP models are advertised")
+		}
+		selected = RemoteModel{ID: DefaultRemoteModelID, Name: "Agent default"}
+	default:
+		for _, model := range snapshot.Models {
+			if model.ID == modelID {
+				selected = model
+				break
+			}
 		}
 	}
 	if selected.ID == "" {
@@ -104,7 +114,11 @@ func ResolveDiscoverySelection(snapshot DiscoverySnapshot, modelID string, confi
 			return RemoteModel{}, SessionOptions{}, fmt.Errorf("control/agents: ACP config value %q for %q is no longer advertised", value, configID)
 		}
 	}
-	return selected, SessionOptions{ModelID: selected.ID, ConfigValues: values}, nil
+	sessionModelID := selected.ID
+	if IsDefaultRemoteModelID(sessionModelID) {
+		sessionModelID = ""
+	}
+	return selected, SessionOptions{ModelID: sessionModelID, ConfigValues: values}, nil
 }
 
 // ConnectResult is the completed persisted roster selection.

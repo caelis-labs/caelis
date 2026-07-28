@@ -11,6 +11,7 @@ import (
 	"time"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
@@ -45,28 +46,35 @@ func (s Service) Discover(ctx context.Context, connection controlagents.Connecti
 	if workDir == "" {
 		workDir = cwd
 	}
-	acpClient, err := client.Start(ctx, client.Config{
-		Command:    connection.Launcher.Command,
-		Args:       append([]string(nil), connection.Launcher.Args...),
-		Env:        maps.Clone(connection.Launcher.Env),
-		WorkDir:    workDir,
-		ClientInfo: s.ClientInfo,
-	})
+	acpClient, initialize, err := s.startInitializedClient(ctx, connection, workDir)
 	if err != nil {
-		return controlagents.DiscoverySnapshot{}, fmt.Errorf("internal/acpagentbridge/discovery: start connection %q: %w", connection.ID, err)
+		return controlagents.DiscoverySnapshot{}, err
 	}
 	defer func() {
 		err = errors.Join(err, acpcleanup.CloseClientWithin(ctx, acpClient, s.cleanupTimeout()))
 	}()
 
-	initialize, err := acpClient.Initialize(ctx)
-	if err != nil {
-		return controlagents.DiscoverySnapshot{}, fmt.Errorf("internal/acpagentbridge/discovery: initialize connection %q: %w", connection.ID, err)
+	authConnection := connection
+	authConnection.Launcher.WorkDir = workDir
+	recovered, recoveryErr := authentication.OpenNewSession(ctx, authentication.RecoveryConfig{
+		Mode:           authentication.RecoveryInteractive,
+		Client:         acpClient,
+		Initialize:     initialize,
+		Methods:        authentication.Methods(initialize),
+		AgentID:        connection.ID,
+		Connection:     authConnection,
+		Authentication: connection.Authentication,
+		Restart: func(restartCtx context.Context) (*client.Client, client.InitializeResponse, error) {
+			return s.startInitializedClient(restartCtx, connection, workDir)
+		},
+		CleanupTimeout: s.cleanupTimeout(),
+	}, cwd)
+	acpClient = recovered.Client
+	if recoveryErr != nil {
+		return controlagents.DiscoverySnapshot{}, fmt.Errorf("internal/acpagentbridge/discovery: create discovery session for %q: %w", connection.ID, recoveryErr)
 	}
-	created, err := acpClient.NewSession(ctx, cwd, nil)
-	if err != nil {
-		return controlagents.DiscoverySnapshot{}, fmt.Errorf("internal/acpagentbridge/discovery: create discovery session for %q: %w", connection.ID, err)
-	}
+	initialize = recovered.Initialize
+	created := recovered.Value
 	sessionID := strings.TrimSpace(created.SessionID)
 	if sessionID == "" {
 		return controlagents.DiscoverySnapshot{}, fmt.Errorf("internal/acpagentbridge/discovery: connection %q returned an empty discovery session id", connection.ID)
@@ -77,14 +85,19 @@ func (s Service) Discover(ctx context.Context, connection controlagents.Connecti
 		Models:        created.Models,
 	}
 	selectedModelID = strings.TrimSpace(selectedModelID)
-	if selectedModelID != "" {
-		state, err = sessionconfig.Apply(ctx, acpClient, sessionID, state, controlagents.SessionOptions{ModelID: selectedModelID})
+	wireModelID := selectedModelID
+	if controlagents.IsDefaultRemoteModelID(wireModelID) {
+		wireModelID = ""
+	}
+	if wireModelID != "" {
+		state, err = sessionconfig.Apply(ctx, acpClient, sessionID, state, controlagents.SessionOptions{ModelID: wireModelID})
 		if err != nil {
 			return controlagents.DiscoverySnapshot{}, fmt.Errorf("internal/acpagentbridge/discovery: select model %q for discovery connection %q: %w", selectedModelID, connection.ID, err)
 		}
 	}
 	snapshot = sessionconfig.Snapshot(connection, cwd, initialize.ProtocolVersion, state)
 	snapshot.SelectedModelID = selectedModelID
+	snapshot.Authentication = controlagents.NormalizeAuthentication(recovered.Authentication)
 	clock := s.Clock
 	if clock == nil {
 		clock = time.Now
@@ -96,6 +109,38 @@ func (s Service) Discover(ctx context.Context, connection controlagents.Connecti
 		}
 	}
 	return snapshot, nil
+}
+
+func (s Service) startInitializedClient(
+	ctx context.Context,
+	connection controlagents.Connection,
+	workDir string,
+) (*client.Client, client.InitializeResponse, error) {
+	acpClient, err := client.Start(ctx, client.Config{
+		Command:      connection.Launcher.Command,
+		Args:         append([]string(nil), connection.Launcher.Args...),
+		Env:          maps.Clone(connection.Launcher.Env),
+		WorkDir:      workDir,
+		ClientInfo:   s.ClientInfo,
+		TerminalAuth: controlagents.TerminalAuthenticationAvailable(ctx),
+	})
+	if err != nil {
+		return nil, client.InitializeResponse{}, fmt.Errorf(
+			"internal/acpagentbridge/discovery: start connection %q: %w",
+			connection.ID,
+			err,
+		)
+	}
+	initialize, err := acpClient.Initialize(ctx)
+	if err != nil {
+		_ = acpcleanup.CloseClientWithin(ctx, acpClient, s.cleanupTimeout())
+		return nil, client.InitializeResponse{}, fmt.Errorf(
+			"internal/acpagentbridge/discovery: initialize connection %q: %w",
+			connection.ID,
+			err,
+		)
+	}
+	return acpClient, initialize, nil
 }
 
 func (s Service) cleanupTimeout() time.Duration {

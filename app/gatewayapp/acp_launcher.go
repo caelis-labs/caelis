@@ -31,11 +31,18 @@ func (s *Stack) resolveACPConnectionLauncher(ctx context.Context, req controlage
 		return controlagents.Connection{}, fmt.Errorf("gatewayapp: ACP adapter is required")
 	}
 	connection := controlagents.Connection{ID: req.AdapterID, Name: req.AdapterID}
-
-	if req.AdapterID == "custom" {
-		if req.Launcher != controlagents.LauncherChoiceCommand {
-			return controlagents.Connection{}, fmt.Errorf("gatewayapp: custom ACP agents require a command launcher")
-		}
+	if _, ok := agentregistry.LookupConnectableAgent(req.AdapterID); !ok {
+		return controlagents.Connection{}, fmt.Errorf("gatewayapp: unknown ACP adapter %q", req.AdapterID)
+	}
+	if !agentregistry.SupportsLauncher(req.AdapterID, req.Launcher) {
+		return controlagents.Connection{}, fmt.Errorf(
+			"gatewayapp: ACP adapter %q does not support launcher %q",
+			req.AdapterID,
+			req.Launcher,
+		)
+	}
+	switch req.Launcher {
+	case controlagents.LauncherChoiceCommand:
 		command, args, err := splitACPCommandLine(req.CommandLine)
 		if err != nil {
 			return controlagents.Connection{}, err
@@ -43,21 +50,18 @@ func (s *Stack) resolveACPConnectionLauncher(ctx context.Context, req controlage
 		connection.Name = filepath.Base(command)
 		connection.Launcher = controlagents.Launcher{Kind: controlagents.LaunchKindExecutable, Command: command, Args: args}
 		connection.ID = controlagents.CustomConnectionID(command, connection.Launcher)
-		return connection, controlagents.ValidateConnection(connection)
-	}
-
-	preset, ok := lookupBuiltInACPAgent(req.AdapterID)
-	if !ok || !connectableBuiltInACPAgent(req.AdapterID) {
-		return controlagents.Connection{}, fmt.Errorf("gatewayapp: unknown curated ACP adapter %q", req.AdapterID)
-	}
-	switch req.Launcher {
 	case controlagents.LauncherChoiceNPX:
+		preset, ok := agentregistry.LookupNPXAgent(req.AdapterID)
+		if !ok {
+			return controlagents.Connection{}, catalogLauncherInconsistency(req.AdapterID, req.Launcher, "npx preset")
+		}
 		resolved, err := exec.LookPath("npx")
 		if err != nil || strings.TrimSpace(resolved) == "" {
 			return controlagents.Connection{}, fmt.Errorf("gatewayapp: npx is required for ACP adapter %q", req.AdapterID)
 		}
 		connection.Launcher = controlagents.Launcher{
 			Kind: controlagents.LaunchKindPackageExec, Command: resolved, Args: append([]string(nil), preset.Args...),
+			Env: preset.Env,
 		}
 	case controlagents.LauncherChoiceGlobal:
 		command, err := ensureGlobalACPAgent(ctx, req.AdapterID)
@@ -68,7 +72,11 @@ func (s *Stack) resolveACPConnectionLauncher(ctx context.Context, req controlage
 	case controlagents.LauncherChoiceManaged:
 		pkg, ok := builtinACPAdapterPackageFor(req.AdapterID)
 		if !ok {
-			return controlagents.Connection{}, fmt.Errorf("gatewayapp: ACP adapter %q cannot be managed", req.AdapterID)
+			return controlagents.Connection{}, catalogLauncherInconsistency(req.AdapterID, req.Launcher, "managed package")
+		}
+		preset, ok := agentregistry.LookupNPXAgent(req.AdapterID)
+		if !ok {
+			return controlagents.Connection{}, catalogLauncherInconsistency(req.AdapterID, req.Launcher, "npx preset")
 		}
 		root := managedACPAdapterRoot(s.managedACPAgentRoot(), pkg)
 		bin := managedACPAgentBinPath(root, pkg.Bin)
@@ -82,10 +90,11 @@ func (s *Stack) resolveACPConnectionLauncher(ctx context.Context, req controlage
 				return controlagents.Connection{}, fmt.Errorf("gatewayapp: managed install of ACP adapter %q did not provide %s", req.AdapterID, builtinACPAdapterInstallSpec(pkg))
 			}
 		}
-		connection.Launcher = controlagents.Launcher{Kind: controlagents.LaunchKindManaged, Command: bin}
+		connection.Launcher = controlagents.Launcher{Kind: controlagents.LaunchKindManaged, Command: bin, Env: preset.Env}
 	case controlagents.LauncherChoiceInstalled:
-		if _, packaged := builtinACPAdapterPackageFor(req.AdapterID); packaged {
-			return controlagents.Connection{}, fmt.Errorf("gatewayapp: ACP adapter %q does not use the installed-command launcher", req.AdapterID)
+		preset, ok := agentregistry.LookupInstalledAgent(req.AdapterID)
+		if !ok {
+			return controlagents.Connection{}, catalogLauncherInconsistency(req.AdapterID, req.Launcher, "installed-command preset")
 		}
 		command, err := exec.LookPath(preset.Command)
 		if err != nil || strings.TrimSpace(command) == "" {
@@ -97,6 +106,7 @@ func (s *Stack) resolveACPConnectionLauncher(ctx context.Context, req controlage
 		}
 		connection.Launcher = controlagents.Launcher{
 			Kind: controlagents.LaunchKindExecutable, Command: command, Args: append([]string(nil), preset.Args...),
+			Env: preset.Env,
 		}
 	default:
 		return controlagents.Connection{}, fmt.Errorf("gatewayapp: unsupported launcher %q for ACP adapter %q", req.Launcher, req.AdapterID)
@@ -104,14 +114,17 @@ func (s *Stack) resolveACPConnectionLauncher(ctx context.Context, req controlage
 	return connection, controlagents.ValidateConnection(connection)
 }
 
-func connectableBuiltInACPAgent(name string) bool {
-	name = strings.ToLower(strings.TrimSpace(name))
-	for _, agent := range agentregistry.ConnectableBuiltInAgents() {
-		if strings.EqualFold(strings.TrimSpace(agent.Name), name) {
-			return true
-		}
-	}
-	return false
+func catalogLauncherInconsistency(
+	adapterID string,
+	launcher controlagents.LauncherChoice,
+	missing string,
+) error {
+	return fmt.Errorf(
+		"gatewayapp: ACP adapter %q catalog declares launcher %q but has no %s",
+		strings.TrimSpace(adapterID),
+		launcher,
+		strings.TrimSpace(missing),
+	)
 }
 
 func ensureGlobalACPAgent(ctx context.Context, adapterID string) (string, error) {

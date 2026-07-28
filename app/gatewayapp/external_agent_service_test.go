@@ -72,11 +72,38 @@ func TestResolveACPConnectionLauncherInstallsMissingGlobalAdapter(t *testing.T) 
 	if err != nil {
 		t.Fatalf("resolveACPConnectionLauncher() error = %v", err)
 	}
-	if gotSpec != "@agentclientprotocol/codex-acp@1.1.2" {
+	if gotSpec != "@agentclientprotocol/codex-acp@1.1.7" {
 		t.Fatalf("global install spec = %q, want curated codex adapter", gotSpec)
 	}
 	if connection.Launcher.Command != installedBin {
 		t.Fatalf("connection launcher = %#v, want installed %q", connection.Launcher, installedBin)
+	}
+}
+
+func TestResolveACPConnectionLauncherUsesRegistryNPXMetadata(t *testing.T) {
+	binDir := t.TempDir()
+	npx := writeExternalAgentExecutable(t, binDir, "npx")
+	t.Setenv("PATH", binDir)
+
+	connection, err := (&Stack{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
+		AdapterID: "factory-droid", Launcher: controlagents.LauncherChoiceNPX,
+	})
+	if err != nil {
+		t.Fatalf("resolveACPConnectionLauncher() error = %v", err)
+	}
+	if connection.ID != "factory-droid" || connection.Launcher.Command != npx || connection.Launcher.Kind != controlagents.LaunchKindPackageExec {
+		t.Fatalf("connection = %#v, want Registry npx launcher", connection)
+	}
+	wantArgs := []string{"-y", "droid@0.181.0", "exec", "--output-format", "acp-daemon"}
+	if !reflect.DeepEqual(connection.Launcher.Args, wantArgs) {
+		t.Fatalf("launcher args = %#v, want %#v", connection.Launcher.Args, wantArgs)
+	}
+	wantEnv := map[string]string{
+		"DROID_DISABLE_AUTO_UPDATE":         "true",
+		"FACTORY_DROID_AUTO_UPDATE_ENABLED": "false",
+	}
+	if !reflect.DeepEqual(connection.Launcher.Env, wantEnv) {
+		t.Fatalf("launcher env = %#v, want %#v", connection.Launcher.Env, wantEnv)
 	}
 }
 
@@ -205,7 +232,8 @@ func TestConnectACPPersistsRosterWithoutLegacyAgentDualWrite(t *testing.T) {
 	}
 	snapshot := controlagents.DiscoverySnapshot{
 		ConnectionID: connection.ID, LaunchFingerprint: controlagents.LaunchFingerprint(connection.Launcher), CWD: stack.Workspace.CWD, SelectedModelID: "opus",
-		Models: []controlagents.RemoteModel{{ID: "opus", Name: "Opus"}},
+		Authentication: controlagents.Authentication{MethodID: "browser", Type: controlagents.AuthenticationAgent},
+		Models:         []controlagents.RemoteModel{{ID: "opus", Name: "Opus"}},
 		ConfigOptions: []controlagents.ConfigOption{{
 			ID: "thought_level", Category: "reasoning", CurrentValue: "very-high",
 			Options: []controlagents.ConfigChoice{{Value: "high", Name: "High"}, {Value: "very-high", Name: "Very High"}},
@@ -232,11 +260,61 @@ func TestConnectACPPersistsRosterWithoutLegacyAgentDualWrite(t *testing.T) {
 	if agent.ConnectionID != result.Connection.ID || profile.Effort.ACPConfigID != "thought_level" || profile.Effort.DefaultEffort != "xhigh" {
 		t.Fatalf("persisted Agent/profile = %#v %#v", agent, profile)
 	}
+	if result.Connection.Authentication != snapshot.Authentication {
+		t.Fatalf("connection authentication = %#v, want %#v", result.Connection.Authentication, snapshot.Authentication)
+	}
 	if wire, ok := profile.WireEffort("xhigh"); !ok || wire != "very-high" {
 		t.Fatalf("WireEffort(xhigh) = %q, %v", wire, ok)
 	}
 	if _, ok := storedACPAgentInfo(stack.ListACPAgents(), agentID); !ok {
 		t.Fatalf("ListACPAgents() = %#v, want materialized %s", stack.ListACPAgents(), agentID)
+	}
+}
+
+func TestConnectACPPersistsAgentDefaultWithoutWireModelSelection(t *testing.T) {
+	t.Parallel()
+
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+	command := writeExternalAgentExecutable(t, t.TempDir(), "fixed-model-acp")
+	req := controlagents.ConnectRequest{
+		AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand, CommandLine: command,
+		ModelID: controlagents.DefaultRemoteModelID, CWD: stack.Workspace.CWD,
+	}
+	connection, err := stack.resolveACPConnectionLauncher(context.Background(), req)
+	if err != nil {
+		t.Fatalf("resolveACPConnectionLauncher() error = %v", err)
+	}
+	req.Discovery = &controlagents.DiscoverySnapshot{
+		ConnectionID: connection.ID, LaunchFingerprint: controlagents.LaunchFingerprint(connection.Launcher),
+		CWD: stack.Workspace.CWD, SelectedModelID: controlagents.DefaultRemoteModelID,
+	}
+	result, err := stack.ConnectACP(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ConnectACP() error = %v", err)
+	}
+	if len(result.Profiles) != 1 || result.Profiles[0].Backend.ACP == nil {
+		t.Fatalf("profiles = %#v", result.Profiles)
+	}
+	profile := result.Profiles[0]
+	if profile.Backend.ACP.RemoteModelID != controlagents.DefaultRemoteModelID ||
+		!strings.Contains(profile.DisplayName, "Agent default") {
+		t.Fatalf("default profile = %#v", profile)
+	}
+	if _, ok := storedACPAgentInfo(stack.ListACPAgents(), profile.Backend.ACP.AgentID); !ok {
+		t.Fatalf("ListACPAgents() = %#v, want %q", stack.ListACPAgents(), profile.Backend.ACP.AgentID)
+	}
+	stack.mu.RLock()
+	resolved := assembly.CloneResolvedAssembly(stack.runtime.Assembly)
+	stack.mu.RUnlock()
+	var sessionOptions controlagents.SessionOptions
+	for _, agent := range resolved.Agents {
+		if agent.Name == profile.Backend.ACP.AgentID {
+			sessionOptions = agent.SessionOptions
+			break
+		}
+	}
+	if sessionOptions.ModelID != "" {
+		t.Fatalf("materialized session model = %q, must keep Agent default", sessionOptions.ModelID)
 	}
 }
 

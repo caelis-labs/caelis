@@ -29,6 +29,7 @@ type Adapter struct {
 	activeCommandID     uint64
 	activeCommandCancel context.CancelFunc
 	acpDiscoveries      map[string]acpDiscoveryCacheEntry
+	acpEndpointAuth     map[string]acpEndpointAuthCacheEntry
 }
 
 func NewAdapter(ctx context.Context, stack *RuntimeStack, preferredSessionID string, bindingKey string, modelText string) (*Adapter, error) {

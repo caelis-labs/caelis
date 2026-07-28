@@ -1,6 +1,10 @@
 package agents
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestNormalizeDiscoverySnapshotClassifiesReasoningEffortOnce(t *testing.T) {
 	snapshot := NormalizeDiscoverySnapshot(DiscoverySnapshot{ConfigOptions: []ConfigOption{
@@ -82,5 +86,45 @@ func TestResolveDiscoverySelectionRequiresModelScopedSnapshot(t *testing.T) {
 	}
 	if _, _, err := ResolveDiscoverySelection(snapshot, "opus", map[string]string{"model": "sonnet"}); err == nil {
 		t.Fatal("ResolveDiscoverySelection(model default) error = nil for duplicated model selection")
+	}
+}
+
+func TestResolveDiscoverySelectionKeepsAgentDefaultModelOutOfSessionOptions(t *testing.T) {
+	t.Parallel()
+
+	snapshot := DiscoverySnapshot{
+		ConnectionID:    "fixed",
+		SelectedModelID: DefaultRemoteModelID,
+		ConfigOptions: []ConfigOption{{
+			ID: "mode", CurrentValue: "code",
+			Options: []ConfigChoice{{Value: "code"}, {Value: "review"}},
+		}},
+	}
+	model, defaults, err := ResolveDiscoverySelection(snapshot, DefaultRemoteModelID, map[string]string{"mode": "review"})
+	if err != nil {
+		t.Fatalf("ResolveDiscoverySelection() error = %v", err)
+	}
+	if model.ID != DefaultRemoteModelID || model.Name != "Agent default" {
+		t.Fatalf("model = %#v, want product default identity", model)
+	}
+	if defaults.ModelID != "" || defaults.ConfigValues["mode"] != "review" {
+		t.Fatalf("defaults = %#v, must not send a synthetic model ID", defaults)
+	}
+}
+
+func TestAuthenticationJSONOmitsUnselectedZeroValue(t *testing.T) {
+	t.Parallel()
+
+	raw, err := json.Marshal(Configuration{
+		Connections: []Connection{{
+			ID: "fixed", Launcher: Launcher{Command: "fixed-acp"},
+		}},
+		Discoveries: []DiscoverySnapshot{{ConnectionID: "fixed"}},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if strings.Contains(string(raw), `"authentication"`) {
+		t.Fatalf("zero authentication must not alter persisted configuration: %s", raw)
 	}
 }

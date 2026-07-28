@@ -101,7 +101,9 @@ Document responsibilities are intentionally separate:
   Agent represents one connection; sibling remote models are separate
   `ModelProfile` entries and never become synthetic Agents or Agent-owned
   defaults. Live ACP Session IDs remain execution state and are never persisted
-  as discovery configuration.
+  as discovery configuration. Authentication recovery, Agent-default behavior,
+  and Registry snapshot maintenance are defined in
+  [External ACP Agents](external-acp-agents.md).
 - `control/plugin`: Control-owned plugin configuration, manifest discovery,
   identity, marketplace/install resolution, lifecycle mutation, and normalized
   hook, skill, MCP server, and external Agent contributions. Its `Info` view is

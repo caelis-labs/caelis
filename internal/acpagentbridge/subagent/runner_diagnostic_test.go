@@ -2,6 +2,7 @@ package subagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,8 +12,10 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRunnerPromptFailureBeforeFirstUpdateDoesNotPersistRawDiagnostics(t *testing.T) {
@@ -78,18 +81,79 @@ func TestRunnerPromptFailureBeforeFirstUpdateDoesNotPersistRawDiagnostics(t *tes
 	}
 }
 
+func TestRunnerPromptRecoversConfiguredAuthentication(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	registry, err := NewRegistry([]AgentConfig{{
+		Name:    "protected-helper",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestRunnerPromptFailureHelperProcess", "--"},
+		Env: map[string]string{
+			"CAELIS_ACP_SUBAGENT_HELPER": "prompt-authentication",
+		},
+		Authentication: controlagents.Authentication{
+			MethodID: "agent-login",
+			Type:     controlagents.AuthenticationAgent,
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	runner, err := NewRunner(RunnerConfig{Registry: registry})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	anchor, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
+		TaskID: "task-prompt-authentication",
+		CWD:    t.TempDir(),
+	}, delegation.Request{Agent: "protected-helper", Prompt: "review"})
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+	got, err := runner.Wait(ctx, anchor, 2_000)
+	if err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if got.State != delegation.StateCompleted || got.Running {
+		t.Fatalf("Result = state %q running %v, want completed", got.State, got.Running)
+	}
+}
+
 func TestRunnerPromptFailureHelperProcess(t *testing.T) {
-	if os.Getenv("CAELIS_ACP_SUBAGENT_HELPER") != "prompt-failure" {
+	mode := os.Getenv("CAELIS_ACP_SUBAGENT_HELPER")
+	switch mode {
+	case "prompt-failure", "prompt-authentication":
+	default:
 		return
 	}
+	authenticated := false
 	conn := jsonrpc.New(os.Stdin, os.Stdout)
 	err := conn.Serve(context.Background(), func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
 		switch msg.Method {
 		case client.MethodInitialize:
-			return client.InitializeResponse{ProtocolVersion: 1}, nil
+			response := client.InitializeResponse{ProtocolVersion: 1}
+			if mode == "prompt-authentication" {
+				response.AuthMethods = []json.RawMessage{
+					json.RawMessage(`{"id":"agent-login","name":"Agent login"}`),
+				}
+			}
+			return response, nil
 		case client.MethodSessionNew:
 			return client.NewSessionResponse{SessionID: "child-prompt-failure"}, nil
+		case client.MethodAuthenticate:
+			var req client.AuthenticateRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil || req.MethodID != "agent-login" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected authenticate request"}
+			}
+			authenticated = true
+			return client.AuthenticateResponse{}, nil
 		case client.MethodSessionPrompt:
+			if mode == "prompt-authentication" {
+				if !authenticated {
+					return nil, &jsonrpc.RPCError{Code: client.ErrorCodeAuthRequired, Message: "Authentication required"}
+				}
+				return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+			}
 			fmt.Fprintln(os.Stderr, "OPENAI_API_KEY=sk-stderr-super-secret cwd=/Users/private/workspace")
 			return nil, &jsonrpc.RPCError{
 				Code:    -32000,

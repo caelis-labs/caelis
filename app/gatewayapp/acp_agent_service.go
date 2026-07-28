@@ -311,12 +311,13 @@ func (s *Stack) materializeExternalAgent(agent controlagents.Agent, connection c
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: external Agent %q has no matching ACP connection", agent.ID)
 	}
 	return assembly.AgentConfig{
-		Name:        agent.ID,
-		Description: agent.Name,
-		Command:     connection.Launcher.Command,
-		Args:        append([]string(nil), connection.Launcher.Args...),
-		Env:         maps.Clone(connection.Launcher.Env),
-		WorkDir:     connection.Launcher.WorkDir,
+		Name:           agent.ID,
+		Description:    agent.Name,
+		Command:        connection.Launcher.Command,
+		Args:           append([]string(nil), connection.Launcher.Args...),
+		Env:            maps.Clone(connection.Launcher.Env),
+		WorkDir:        connection.Launcher.WorkDir,
+		Authentication: connection.Authentication,
 	}, nil
 }
 
@@ -400,10 +401,6 @@ func npmInstallSpecForExec(npmPath string, spec string) string {
 	default:
 		return spec
 	}
-}
-
-func lookupBuiltInACPAgent(name string) (assembly.AgentConfig, bool) {
-	return agentregistry.LookupBuiltInAgent(name)
 }
 
 func reservedSlashCommandName(name string) bool {

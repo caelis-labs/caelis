@@ -21,6 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpcleanup"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
@@ -64,17 +65,18 @@ type clientStarter func(
 ) (*client.Client, string, controllerClientState, error)
 
 type controllerRun struct {
-	parentSessionID    string
-	agent              string
-	cfg                subagent.AgentConfig
-	cwd                string
-	client             *client.Client
-	remoteSessionID    string
-	supportsClose      bool
-	promptCapabilities schema.PromptCapabilities
-	binding            session.ControllerBinding
-	context            agent.ContextTransfer
-	contextPending     bool
+	parentSessionID       string
+	agent                 string
+	cfg                   subagent.AgentConfig
+	cwd                   string
+	client                *client.Client
+	remoteSessionID       string
+	supportsClose         bool
+	authenticationMethods []controlagents.AuthenticationMethod
+	promptCapabilities    schema.PromptCapabilities
+	binding               session.ControllerBinding
+	context               agent.ContextTransfer
+	contextPending        bool
 
 	mu                sync.Mutex
 	commands          []ControllerCommand
@@ -97,24 +99,27 @@ type controllerRun struct {
 }
 
 type controllerClientState struct {
-	commands           []ControllerCommand
-	configOptions      []ControllerConfigOption
-	models             *client.SessionModelState
-	mode               string
-	modeOptions        []ControllerMode
-	agentLabel         string
-	supportsClose      bool
-	promptCapabilities schema.PromptCapabilities
+	commands              []ControllerCommand
+	configOptions         []ControllerConfigOption
+	models                *client.SessionModelState
+	mode                  string
+	modeOptions           []ControllerMode
+	agentLabel            string
+	supportsClose         bool
+	authenticationMethods []controlagents.AuthenticationMethod
+	promptCapabilities    schema.PromptCapabilities
 }
 
 type participantRun struct {
-	id                 string
-	parentSessionID    string
-	agent              string
-	client             *client.Client
-	remoteSessionID    string
-	binding            session.ParticipantBinding
-	promptCapabilities schema.PromptCapabilities
+	id                    string
+	parentSessionID       string
+	agent                 string
+	client                *client.Client
+	remoteSessionID       string
+	binding               session.ParticipantBinding
+	authentication        controlagents.Authentication
+	authenticationMethods []controlagents.AuthenticationMethod
+	promptCapabilities    schema.PromptCapabilities
 
 	mu                sync.Mutex
 	turnID            string
@@ -206,6 +211,7 @@ func (r *controllerRun) applyStartupStateLocked(client *client.Client, remoteSes
 	r.client = client
 	r.remoteSessionID = strings.TrimSpace(remoteSessionID)
 	r.supportsClose = state.supportsClose
+	r.authenticationMethods = controlagents.CloneAuthenticationMethods(state.authenticationMethods)
 	r.commands = mergeControllerCommands(r.commands, state.commands)
 	r.configOptions = fillControllerConfigOptions(r.configOptions, state.configOptions)
 	r.models = cloneACPSessionModelState(state.models)
@@ -552,6 +558,9 @@ func (r *controllerRun) promptParts(ctx context.Context, prompt []json.RawMessag
 	r.mu.Lock()
 	acpClient := r.client
 	remoteSessionID := strings.TrimSpace(r.remoteSessionID)
+	agentID := firstNonEmpty(r.agent, r.cfg.Name)
+	configured := controlagents.NormalizeAuthentication(r.cfg.Authentication)
+	methods := controlagents.CloneAuthenticationMethods(r.authenticationMethods)
 	r.mu.Unlock()
 	if acpClient == nil {
 		return client.PromptResponse{}, fmt.Errorf("internal/acpagentbridge/controller: controller client is unavailable")
@@ -559,7 +568,45 @@ func (r *controllerRun) promptParts(ctx context.Context, prompt []json.RawMessag
 	if remoteSessionID == "" {
 		return client.PromptResponse{}, fmt.Errorf("internal/acpagentbridge/controller: remote session id is unavailable")
 	}
-	return acpClient.PromptParts(ctx, remoteSessionID, prompt, nil)
+	return authentication.RecoverConfiguredCall(
+		ctx,
+		acpClient,
+		methods,
+		agentID,
+		configured,
+		func(callCtx context.Context, activeClient *client.Client) (client.PromptResponse, error) {
+			return activeClient.PromptParts(callCtx, remoteSessionID, prompt, nil)
+		},
+	)
+}
+
+func (r *participantRun) promptParts(ctx context.Context, prompt []json.RawMessage) (client.PromptResponse, error) {
+	if r == nil {
+		return client.PromptResponse{}, fmt.Errorf("internal/acpagentbridge/controller: participant run is unavailable")
+	}
+	r.mu.Lock()
+	acpClient := r.client
+	remoteSessionID := strings.TrimSpace(r.remoteSessionID)
+	agentID := strings.TrimSpace(r.agent)
+	configured := controlagents.NormalizeAuthentication(r.authentication)
+	methods := controlagents.CloneAuthenticationMethods(r.authenticationMethods)
+	r.mu.Unlock()
+	if acpClient == nil {
+		return client.PromptResponse{}, fmt.Errorf("internal/acpagentbridge/controller: participant client is unavailable")
+	}
+	if remoteSessionID == "" {
+		return client.PromptResponse{}, fmt.Errorf("internal/acpagentbridge/controller: participant remote session id is unavailable")
+	}
+	return authentication.RecoverConfiguredCall(
+		ctx,
+		acpClient,
+		methods,
+		agentID,
+		configured,
+		func(callCtx context.Context, activeClient *client.Client) (client.PromptResponse, error) {
+			return activeClient.PromptParts(callCtx, remoteSessionID, prompt, nil)
+		},
+	)
 }
 
 func isACPClientConnectionError(err error) bool {
@@ -645,7 +692,7 @@ func (m *Manager) PromptParticipant(ctx context.Context, req controller.Particip
 	}
 	go func() {
 		defer handle.finish()
-		if _, err := run.client.PromptParts(turnCtx, run.remoteSessionID, prompt, nil); err != nil {
+		if _, err := run.promptParts(turnCtx, prompt); err != nil {
 			_, _ = run.finishPrompt()
 			handle.publishError(err)
 			return
@@ -770,12 +817,14 @@ func (m *Manager) startParticipant(
 		return nil, err
 	}
 	run = &participantRun{
-		id:                 id,
-		parentSessionID:    strings.TrimSpace(parentSession.SessionID),
-		agent:              agentName,
-		client:             client,
-		remoteSessionID:    remoteSessionID,
-		promptCapabilities: state.promptCapabilities,
+		id:                    id,
+		parentSessionID:       strings.TrimSpace(parentSession.SessionID),
+		agent:                 agentName,
+		client:                client,
+		remoteSessionID:       remoteSessionID,
+		authentication:        controlagents.NormalizeAuthentication(cfg.Authentication),
+		authenticationMethods: controlagents.CloneAuthenticationMethods(state.authenticationMethods),
+		promptCapabilities:    state.promptCapabilities,
 		binding: session.ParticipantBinding{
 			ID:                   id,
 			Kind:                 session.ParticipantKindACP,
@@ -823,7 +872,7 @@ func (m *Manager) startACPClient(
 	if err := ctx.Err(); err != nil {
 		return nil, "", controllerClientState{}, err
 	}
-	client, err := client.Start(context.WithoutCancel(ctx), client.Config{
+	acpClient, err := client.Start(context.WithoutCancel(ctx), client.Config{
 		Command:    cfg.Command,
 		Args:       append([]string(nil), cfg.Args...),
 		Env:        maps.Clone(cfg.Env),
@@ -837,69 +886,85 @@ func (m *Manager) startACPClient(
 	if err != nil {
 		return nil, "", controllerClientState{}, err
 	}
-	initResp, err := client.Initialize(ctx)
+	initResp, err := acpClient.Initialize(ctx)
 	if err != nil {
-		_ = client.Close(ctx)
+		_ = acpClient.Close(ctx)
 		return nil, "", controllerClientState{}, err
+	}
+	authenticationMethods := authentication.Methods(initResp)
+	recovery := authentication.RecoveryConfig{
+		Mode:           authentication.RecoveryConfigured,
+		Client:         acpClient,
+		Initialize:     initResp,
+		Methods:        authenticationMethods,
+		AgentID:        cfg.Name,
+		Authentication: cfg.Authentication,
 	}
 	remoteSessionID := strings.TrimSpace(resumeRemoteSessionID)
 	if remoteSessionID != "" && acpSessionCapability(initResp, "resume") {
-		resp, err := client.ResumeSession(ctx, remoteSessionID, strings.TrimSpace(cwd), nil)
+		recovered, err := authentication.ResumeSession(ctx, recovery, remoteSessionID, cwd)
 		if err == nil {
-			configured, configureErr := sessionconfig.Apply(ctx, client, remoteSessionID, sessionconfig.State{
-				ConfigOptions: resp.ConfigOptions,
-				Models:        resp.Models,
+			configured, configureErr := sessionconfig.Apply(ctx, recovered.Client, remoteSessionID, sessionconfig.State{
+				ConfigOptions: recovered.Value.ConfigOptions,
+				Models:        recovered.Value.Models,
 			}, cfg.SessionOptions)
 			if configureErr != nil {
-				_ = client.Close(context.WithoutCancel(ctx))
+				_ = acpClient.Close(context.WithoutCancel(ctx))
 				return nil, "", controllerClientState{}, configureErr
 			}
 			state := controllerClientState{
-				configOptions:      controllerConfigOptionsFromACP(configured.ConfigOptions),
-				models:             cloneACPSessionModelState(configured.Models),
-				mode:               currentModeID(resp.Modes),
-				modeOptions:        controllerModesFromACP(resp.Modes),
-				supportsClose:      acpSessionCapability(initResp, "close"),
-				promptCapabilities: initResp.AgentCapabilities.PromptCapabilities,
+				configOptions:         controllerConfigOptionsFromACP(configured.ConfigOptions),
+				models:                cloneACPSessionModelState(configured.Models),
+				mode:                  currentModeID(recovered.Value.Modes),
+				modeOptions:           controllerModesFromACP(recovered.Value.Modes),
+				supportsClose:         acpSessionCapability(initResp, "close"),
+				authenticationMethods: controlagents.CloneAuthenticationMethods(authenticationMethods),
+				promptCapabilities:    initResp.AgentCapabilities.PromptCapabilities,
 			}
 			if initResp.AgentInfo != nil {
 				state.agentLabel = strings.TrimSpace(firstNonEmpty(initResp.AgentInfo.Title, initResp.AgentInfo.Name, initResp.AgentInfo.Version))
 			}
-			return client, remoteSessionID, state, nil
+			return acpClient, remoteSessionID, state, nil
+		}
+		if authentication.IsRecoveryError(err) {
+			_ = acpClient.Close(context.WithoutCancel(ctx))
+			return nil, "", controllerClientState{}, err
 		}
 		if ctx.Err() != nil {
-			_ = client.Close(ctx)
+			_ = acpClient.Close(ctx)
 			return nil, "", controllerClientState{}, err
 		}
 	}
-	resp, err := client.NewSession(ctx, strings.TrimSpace(cwd), nil)
+	recovered, err := authentication.OpenNewSession(ctx, recovery, cwd)
 	if err != nil {
-		_ = client.Close(ctx)
+		_ = acpClient.Close(ctx)
 		return nil, "", controllerClientState{}, err
 	}
-	configured, err := sessionconfig.Apply(ctx, client, strings.TrimSpace(resp.SessionID), sessionconfig.State{
+	resp := recovered.Value
+	configured, err := sessionconfig.Apply(ctx, acpClient, strings.TrimSpace(resp.SessionID), sessionconfig.State{
 		ConfigOptions: resp.ConfigOptions,
 		Models:        resp.Models,
 	}, cfg.SessionOptions)
 	if err != nil {
 		if acpSessionCapability(initResp, "close") {
-			_ = acpcleanup.CloseSession(ctx, client, strings.TrimSpace(resp.SessionID))
+			_ = acpcleanup.CloseSession(ctx, acpClient, strings.TrimSpace(resp.SessionID))
 		}
-		_ = acpcleanup.CloseClient(ctx, client)
+		_ = acpcleanup.CloseClient(ctx, acpClient)
 		return nil, "", controllerClientState{}, err
 	}
 	state := controllerClientState{
-		configOptions:      controllerConfigOptionsFromACP(configured.ConfigOptions),
-		models:             cloneACPSessionModelState(configured.Models),
-		mode:               currentModeID(resp.Modes),
-		modeOptions:        controllerModesFromACP(resp.Modes),
-		supportsClose:      acpSessionCapability(initResp, "close"),
-		promptCapabilities: initResp.AgentCapabilities.PromptCapabilities,
+		configOptions:         controllerConfigOptionsFromACP(configured.ConfigOptions),
+		models:                cloneACPSessionModelState(configured.Models),
+		mode:                  currentModeID(resp.Modes),
+		modeOptions:           controllerModesFromACP(resp.Modes),
+		supportsClose:         acpSessionCapability(initResp, "close"),
+		authenticationMethods: controlagents.CloneAuthenticationMethods(authenticationMethods),
+		promptCapabilities:    initResp.AgentCapabilities.PromptCapabilities,
 	}
 	if initResp.AgentInfo != nil {
 		state.agentLabel = strings.TrimSpace(firstNonEmpty(initResp.AgentInfo.Title, initResp.AgentInfo.Name, initResp.AgentInfo.Version))
 	}
-	return client, strings.TrimSpace(resp.SessionID), state, nil
+	return acpClient, strings.TrimSpace(resp.SessionID), state, nil
 }
 
 func reusableControllerRemoteSessionID(sess session.Session, agentName string) string {

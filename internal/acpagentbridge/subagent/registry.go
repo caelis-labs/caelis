@@ -113,6 +113,7 @@ func normalizeAgentConfig(in AgentConfig) AgentConfig {
 		out.Args = append([]string(nil), in.Args...)
 	}
 	out.Env = maps.Clone(in.Env)
+	out.Authentication = controlagents.NormalizeAuthentication(in.Authentication)
 	out.SessionOptions = controlagents.NormalizeSessionOptions(in.SessionOptions)
 	return out
 }

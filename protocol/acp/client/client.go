@@ -39,6 +39,7 @@ type Config struct {
 	OnUpdate            func(UpdateEnvelope)
 	OnPermissionRequest PermissionHandler
 	Terminal            TerminalHandler
+	TerminalAuth        bool
 	FileSystem          FileSystemHandler
 	OnRequest           RequestHandler
 	OnNotification      NotificationHandler
@@ -101,6 +102,9 @@ func (c *Client) Initialize(ctx context.Context) (InitializeResponse, error) {
 	clientCapabilities := map[string]any{
 		"terminal": c.cfg.Terminal != nil,
 	}
+	if c.cfg.TerminalAuth {
+		clientCapabilities["auth"] = map[string]any{"terminal": true}
+	}
 	if c.cfg.FileSystem != nil {
 		clientCapabilities["fs"] = map[string]any{"readTextFile": true, "writeTextFile": true}
 	}
@@ -110,6 +114,14 @@ func (c *Client) Initialize(ctx context.Context) (InitializeResponse, error) {
 		ClientInfo:         c.cfg.ClientInfo,
 	}, &resp)
 	return resp, err
+}
+
+// Authenticate invokes the stable ACP v1 agent-managed authentication flow.
+// Terminal authentication is out of band and must never call this method.
+func (c *Client) Authenticate(ctx context.Context, methodID string) error {
+	return c.conn.Call(ctx, MethodAuthenticate, AuthenticateRequest{
+		MethodID: strings.TrimSpace(methodID),
+	}, &AuthenticateResponse{})
 }
 
 func (c *Client) NewSession(ctx context.Context, cwd string, meta map[string]any) (NewSessionResponse, error) {

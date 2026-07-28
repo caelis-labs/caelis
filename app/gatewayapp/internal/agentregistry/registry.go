@@ -41,11 +41,6 @@ type BuiltinAdapterPackage struct {
 	Bin     string
 }
 
-const (
-	codexACPAdapterVersion  = "1.1.2"
-	claudeACPAdapterVersion = "0.59.0"
-)
-
 // WithSelfAgent adds the private Caelis child endpoint when the host did not
 // already provide one.
 func WithSelfAgent(resolved assembly.ResolvedAssembly, self assembly.AgentConfig) assembly.ResolvedAssembly {
@@ -157,78 +152,21 @@ func SelfRuntimeInvocation(cfg RuntimeConfig) ([]string, map[string]string) {
 	return args, env
 }
 
-func BuiltInAgents() []assembly.AgentConfig {
-	return []assembly.AgentConfig{
-		npxAgentConfig("codex", "OpenAI Codex ACP agent", "@agentclientprotocol/codex-acp@"+codexACPAdapterVersion),
-		npxAgentConfig("claude", "Claude Code ACP agent", "@agentclientprotocol/claude-agent-acp@"+claudeACPAdapterVersion),
-		nativeACPAgentConfig("opencode", "OpenCode ACP agent", "opencode", "acp"),
-		nativeACPAgentConfig("codefree-o", "CodeFree-O ACP agent", "codefree-o", "acp"),
-		{
-			Name:        "copilot",
-			Description: "GitHub Copilot ACP agent",
-			Command:     "copilot",
-			Args:        []string{"--acp", "--stdio"},
-		},
-		{
-			Name:        "grok",
-			Description: "Grok Build ACP agent",
-			Command:     "grok",
-			Args:        []string{"agent", "stdio"},
-		},
-	}
-}
-
-// ConnectableBuiltInAgents returns the curated ACP endpoints exposed by the
-// guided /connect flow. Copilot remains available to existing assembly users
-// but is not part of this onboarding catalog.
-func ConnectableBuiltInAgents() []assembly.AgentConfig {
-	names := []string{"codex", "claude", "opencode", "codefree-o", "grok"}
-	out := make([]assembly.AgentConfig, 0, len(names))
-	for _, name := range names {
-		if agent, ok := LookupBuiltInAgent(name); ok {
-			out = append(out, agent)
-		}
-	}
-	return out
-}
-
-func nativeACPAgentConfig(name string, description string, command string, args ...string) assembly.AgentConfig {
-	return assembly.AgentConfig{
-		Name:        strings.TrimSpace(name),
-		Description: strings.TrimSpace(description),
-		Command:     strings.TrimSpace(command),
-		Args:        append([]string(nil), args...),
-	}
-}
-
-func npxAgentConfig(name string, description string, pkg string) assembly.AgentConfig {
-	return assembly.AgentConfig{
-		Name:        strings.TrimSpace(name),
-		Description: strings.TrimSpace(description),
-		Command:     "npx",
-		Args:        []string{"-y", strings.TrimSpace(pkg)},
-	}
-}
-
 func BuiltinAdapterPackageFor(name string) (BuiltinAdapterPackage, bool) {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "codex":
-		return BuiltinAdapterPackage{Package: "@agentclientprotocol/codex-acp", Version: codexACPAdapterVersion, Bin: "codex-acp"}, true
-	case "claude":
-		return BuiltinAdapterPackage{Package: "@agentclientprotocol/claude-agent-acp", Version: claudeACPAdapterVersion, Bin: "claude-agent-acp"}, true
-	default:
+	registered, ok := lookupRegistryNPXAgent(name)
+	managedBin := managedBinFor(name)
+	if !ok || managedBin == "" {
 		return BuiltinAdapterPackage{}, false
 	}
-}
-
-func LookupBuiltInAgent(name string) (assembly.AgentConfig, bool) {
-	name = strings.ToLower(strings.TrimSpace(name))
-	for _, agent := range BuiltInAgents() {
-		if strings.EqualFold(strings.TrimSpace(agent.Name), name) {
-			return agent, true
-		}
+	versionSuffix := "@" + strings.TrimSpace(registered.Agent.Version)
+	if !strings.HasSuffix(registered.Package, versionSuffix) {
+		return BuiltinAdapterPackage{}, false
 	}
-	return assembly.AgentConfig{}, false
+	return BuiltinAdapterPackage{
+		Package: strings.TrimSuffix(registered.Package, versionSuffix),
+		Version: registered.Agent.Version,
+		Bin:     managedBin,
+	}, true
 }
 
 func ReservedSlashCommandName(name string) bool {

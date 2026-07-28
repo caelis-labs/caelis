@@ -28,6 +28,32 @@ type RPCError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
+// CallError preserves the structured JSON-RPC error returned by a peer.
+// Callers that need protocol-specific recovery must inspect Code instead of
+// parsing the formatted error string.
+type CallError struct {
+	Code    int
+	Message string
+	Data    any
+}
+
+func (e *CallError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return formatRPCError(e.Code, e.Message, e.Data)
+}
+
+// ErrorCode returns the peer-supplied JSON-RPC error code when err originated
+// from a completed RPC call.
+func ErrorCode(err error) (int, bool) {
+	var callErr *CallError
+	if !errors.As(err, &callErr) || callErr == nil {
+		return 0, false
+	}
+	return callErr.Code, true
+}
+
 type RequestHandler func(context.Context, Message) (any, *RPCError)
 type NotificationHandler func(context.Context, Message)
 
@@ -41,7 +67,12 @@ type Conn struct {
 }
 
 type pendingCall struct {
-	ch chan Message
+	ch chan pendingCallResult
+}
+
+type pendingCallResult struct {
+	message Message
+	err     error
 }
 
 type PostWriteResult struct {
@@ -172,7 +203,7 @@ func (c *Conn) Call(ctx context.Context, method string, params any, out any) err
 		return fmt.Errorf("acp/jsonrpc: conn is nil")
 	}
 	id := c.nextID.Add(1)
-	pending := pendingCall{ch: make(chan Message, 1)}
+	pending := pendingCall{ch: make(chan pendingCallResult, 1)}
 	c.pending.Store(id, pending)
 	defer c.pending.Delete(id)
 	if err := c.writeMessage(Message{
@@ -186,7 +217,11 @@ func (c *Conn) Call(ctx context.Context, method string, params any, out any) err
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case resp := <-pending.ch:
+	case completed := <-pending.ch:
+		if completed.err != nil {
+			return completed.err
+		}
+		resp := completed.message
 		if resp.Error != nil {
 			return FormatRPCError(resp.Error)
 		}
@@ -205,13 +240,19 @@ func FormatRPCError(rpcErr *RPCError) error {
 	if rpcErr == nil {
 		return nil
 	}
-	msg := fmt.Sprintf("acp rpc error %d: %s", rpcErr.Code, rpcErr.Message)
-	if rpcErr.Data != nil {
-		if data := formatRPCErrorData(rpcErr.Data); data != "" && data != "null" {
-			msg += " (data: " + data + ")"
-		}
+	return &CallError{
+		Code:    rpcErr.Code,
+		Message: rpcErr.Message,
+		Data:    rpcErr.Data,
 	}
-	return errors.New(msg)
+}
+
+func formatRPCError(code int, message string, data any) string {
+	msg := fmt.Sprintf("acp rpc error %d: %s", code, message)
+	if formatted := formatRPCErrorData(data); formatted != "" && formatted != "null" {
+		msg += " (data: " + formatted + ")"
+	}
+	return msg
 }
 
 func formatRPCErrorData(data any) string {
@@ -232,20 +273,20 @@ func (c *Conn) resolvePending(msg Message) {
 	switch id := msg.ID.(type) {
 	case float64:
 		if pending, ok := c.pending.Load(int64(id)); ok {
-			pending.(pendingCall).ch <- msg
+			pending.(pendingCall).ch <- pendingCallResult{message: msg}
 		}
 	case int64:
 		if pending, ok := c.pending.Load(id); ok {
-			pending.(pendingCall).ch <- msg
+			pending.(pendingCall).ch <- pendingCallResult{message: msg}
 		}
 	case int:
 		if pending, ok := c.pending.Load(int64(id)); ok {
-			pending.(pendingCall).ch <- msg
+			pending.(pendingCall).ch <- pendingCallResult{message: msg}
 		}
 	case json.Number:
 		if n, err := id.Int64(); err == nil {
 			if pending, ok := c.pending.Load(n); ok {
-				pending.(pendingCall).ch <- msg
+				pending.(pendingCall).ch <- pendingCallResult{message: msg}
 			}
 		}
 	}
@@ -255,20 +296,15 @@ func (c *Conn) failPending(cause error) {
 	if c == nil {
 		return
 	}
-	rpcErr := pendingRPCError(cause)
+	callErr := pendingCallError(cause)
 	c.pending.Range(func(key, value any) bool {
 		call, ok := value.(pendingCall)
 		if !ok {
 			c.pending.Delete(key)
 			return true
 		}
-		msg := Message{
-			JSONRPC: JSONRPCVersion,
-			ID:      key,
-			Error:   rpcErr,
-		}
 		select {
-		case call.ch <- msg:
+		case call.ch <- pendingCallResult{err: callErr}:
 		default:
 		}
 		c.pending.Delete(key)
@@ -276,15 +312,11 @@ func (c *Conn) failPending(cause error) {
 	})
 }
 
-func pendingRPCError(cause error) *RPCError {
-	switch {
-	case cause == nil:
-		return nil
-	case errors.Is(cause, io.EOF):
-		return &RPCError{Code: -32000, Message: "connection closed before response"}
-	default:
-		return &RPCError{Code: -32000, Message: cause.Error()}
+func pendingCallError(cause error) error {
+	if cause == nil {
+		cause = io.EOF
 	}
+	return fmt.Errorf("acp/jsonrpc: connection closed before response: %w", cause)
 }
 
 func (c *Conn) writeMessage(msg Message) error {
