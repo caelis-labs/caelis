@@ -289,7 +289,3 @@ func (e *xAIResponsesTerminalError) ErrorCode() errorcode.Code {
 	}
 	return errorcode.CodeOf(e.cause)
 }
-
-func xAIResponsesStreamError(event openAICodexStreamWire) error {
-	return fmt.Errorf("xai responses: %w", openAICodexStreamError(event))
-}

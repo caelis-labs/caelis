@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -264,6 +265,192 @@ func TestOpenAICodexErrorsAreClassified(t *testing.T) {
 			t.Fatalf("error = %v, want context overflow", err)
 		}
 	})
+}
+
+func TestOpenAICodexFactoryRetriesTransientStreamFailures(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		firstReply func(*testing.T, http.ResponseWriter)
+	}{
+		{
+			name: "provider failed without standard detail",
+			firstReply: func(t *testing.T, w http.ResponseWriter) {
+				writeOpenAICodexSSE(t, w, map[string]any{
+					"type":     "response.failed",
+					"response": map[string]any{"status": "failed", "error": nil},
+					"error":    map[string]any{"type": "server_error", "message": "Upstream provider error"},
+				})
+			},
+		},
+		{
+			name: "transient code overrides terminal type",
+			firstReply: func(t *testing.T, w http.ResponseWriter) {
+				writeOpenAICodexSSE(t, w, map[string]any{
+					"type": "error",
+					"error": map[string]any{
+						"type":    "authentication_error",
+						"code":    "auth_service_unavailable",
+						"message": "Authentication service is unavailable",
+					},
+				})
+			},
+		},
+		{
+			name:       "stream closed before terminal",
+			firstReply: func(*testing.T, http.ResponseWriter) {},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				if requests.Add(1) == 1 {
+					tt.firstReply(t, w)
+					return
+				}
+				writeOpenAICodexSSE(t, w, map[string]any{
+					"type": "response.completed",
+					"response": map[string]any{
+						"model":  "gpt-test",
+						"status": "completed",
+						"output": []any{map[string]any{
+							"id":   "msg-recovered",
+							"type": "message",
+							"content": []any{map[string]any{
+								"type": "output_text",
+								"text": "recovered",
+							}},
+						}},
+						"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+					},
+				})
+			}))
+			defer server.Close()
+
+			factory := NewFactory()
+			if err := factory.Register(Config{
+				Alias:      "codex/retry-test",
+				Provider:   "openai-codex",
+				API:        APIOpenAICodex,
+				Model:      "gpt-test",
+				BaseURL:    server.URL,
+				HTTPClient: server.Client(),
+				Retry: model.RetryConfig{
+					MaxRetries:          1,
+					BaseDelay:           time.Nanosecond,
+					MaxDelay:            time.Nanosecond,
+					RateLimitMaxRetries: 1,
+					RateLimitBaseDelay:  time.Nanosecond,
+					RateLimitMaxDelay:   time.Nanosecond,
+				},
+			}); err != nil {
+				t.Fatalf("Register() error = %v", err)
+			}
+			llm, err := factory.NewByAlias("codex/retry-test")
+			if err != nil {
+				t.Fatalf("NewByAlias() error = %v", err)
+			}
+
+			response, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
+				Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+				Stream:   true,
+			})
+			if err != nil {
+				t.Fatalf("Generate() error = %v, want retry to recover", err)
+			}
+			if got := response.Message.TextContent(); got != "recovered" {
+				t.Errorf("response text = %q, want recovered", got)
+			}
+			if got := requests.Load(); got != 2 {
+				t.Errorf("requests = %d, want failed attempt plus retry", got)
+			}
+		})
+	}
+}
+
+func TestOpenAICodexFactoryDoesNotRetryPermanentStreamFailure(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		event    map[string]any
+		wantCode errorcode.Code
+	}{
+		{
+			name: "invalid request",
+			event: map[string]any{
+				"type": "response.failed",
+				"response": map[string]any{"error": map[string]any{
+					"type":    "invalid_request_error",
+					"code":    "invalid_value",
+					"message": "Invalid field",
+				}},
+			},
+			wantCode: errorcode.InvalidArgument,
+		},
+		{
+			name: "usage limit reached",
+			event: map[string]any{
+				"type": "error",
+				"error": map[string]any{
+					"type":    "usage_limit_reached",
+					"message": "The usage limit has been reached",
+				},
+			},
+			wantCode: errorcode.ResourceExhausted,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests.Add(1)
+				w.Header().Set("Content-Type", "text/event-stream")
+				writeOpenAICodexSSE(t, w, tt.event)
+			}))
+			defer server.Close()
+
+			factory := NewFactory()
+			if err := factory.Register(Config{
+				Alias:      "codex/permanent-error",
+				Provider:   "openai-codex",
+				API:        APIOpenAICodex,
+				Model:      "gpt-test",
+				BaseURL:    server.URL,
+				HTTPClient: server.Client(),
+				Retry: model.RetryConfig{
+					MaxRetries:          2,
+					BaseDelay:           time.Nanosecond,
+					MaxDelay:            time.Nanosecond,
+					RateLimitMaxRetries: 2,
+					RateLimitBaseDelay:  time.Nanosecond,
+					RateLimitMaxDelay:   time.Nanosecond,
+				},
+			}); err != nil {
+				t.Fatalf("Register() error = %v", err)
+			}
+			llm, err := factory.NewByAlias("codex/permanent-error")
+			if err != nil {
+				t.Fatalf("NewByAlias() error = %v", err)
+			}
+
+			_, _, _, err = collectOpenAICodexTestResponse(llm, &model.Request{
+				Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+				Stream:   true,
+			})
+			if !errorcode.Is(err, tt.wantCode) {
+				t.Fatalf("Generate() error = %v, want code %q", err, tt.wantCode)
+			}
+			if got := requests.Load(); got != 1 {
+				t.Fatalf("requests = %d, want permanent failure without retry", got)
+			}
+		})
+	}
 }
 
 func TestOpenAICodexFactoryRequiresInjectedOAuthClient(t *testing.T) {

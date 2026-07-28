@@ -423,6 +423,7 @@ func (u openAICodexUsage) toKernelUsage() model.Usage {
 }
 
 type openAICodexErrorPayload struct {
+	Type    string `json:"type"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Param   string `json:"param"`
@@ -476,6 +477,7 @@ type openAICodexStreamWire struct {
 	SummaryIndex *int                     `json:"summary_index"`
 	Item         *openAICodexOutputItem   `json:"item"`
 	Response     *openAICodexResponseWire `json:"response"`
+	Error        *openAICodexErrorPayload `json:"error"`
 	Code         string                   `json:"code"`
 	Message      string                   `json:"message"`
 	Param        string                   `json:"param"`
