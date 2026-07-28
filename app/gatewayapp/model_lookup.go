@@ -513,7 +513,13 @@ func (l *modelLookup) hydrateModelConfigLocked(cfg ModelConfig) ModelConfig {
 	if !ok {
 		return cfg
 	}
-	return mergeModelConfigProviderEndpoint(cfg, endpoint)
+	cfg = mergeModelConfigProviderEndpoint(cfg, endpoint)
+	if cfg.ContextWindowTokens <= 0 {
+		if defaults, err := modelconfig.ResolveModelDefaultsForEndpoint(cfg.Provider, cfg.BaseURL, cfg.Model); err == nil {
+			cfg.ContextWindowTokens = defaults.ContextWindowTokens
+		}
+	}
+	return cfg
 }
 
 func modelChoiceDetail(cfg ModelConfig) string {

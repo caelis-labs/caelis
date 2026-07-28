@@ -20,6 +20,7 @@ import (
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
@@ -304,6 +305,137 @@ func TestModelLookupRequiresControlResolverForManagedCodexCredential(t *testing.
 	}
 	if resolverCalls != 1 {
 		t.Fatalf("resolver calls = %d, want 1", resolverCalls)
+	}
+}
+
+func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workspace := t.TempDir()
+	const (
+		appName = "caelis"
+		userID  = "grok-context-resume-test"
+	)
+
+	first, err := newGatewayAppTestStack(t, Config{
+		AppName:      appName,
+		UserID:       userID,
+		StoreDir:     root,
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
+		Model: ModelConfig{
+			Provider:            "xai",
+			API:                 providers.APIXAIResponses,
+			Model:               "grok-4.5",
+			BaseURL:             modelconfig.GrokOAuthBaseURL,
+			ContextWindowTokens: 500000,
+			MaxOutputTok:        32768,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack(first) error = %v", err)
+	}
+	grokID := first.DefaultModelID()
+	active, err := first.StartSession(ctx, "grok context resume", "surface")
+	if err != nil {
+		_ = first.Close()
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	if err := first.UseModel(ctx, active.SessionRef, grokID); err != nil {
+		_ = first.Close()
+		t.Fatalf("UseModel(grok) error = %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close(first) error = %v", err)
+	}
+
+	store := newAppConfigStore(root)
+	doc, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load(config) error = %v", err)
+	}
+	foundGrok := false
+	for i := range doc.Models.Configs {
+		if strings.EqualFold(doc.Models.Configs[i].ID, grokID) {
+			doc.Models.Configs[i].ContextWindowTokens = 0
+			foundGrok = true
+		}
+	}
+	if !foundGrok {
+		t.Fatalf("persisted configs = %#v, missing Grok model %q", doc.Models.Configs, grokID)
+	}
+	for i := range doc.Models.ProviderEndpoints {
+		if strings.EqualFold(doc.Models.ProviderEndpoints[i].ID, "xai@default") {
+			doc.Models.ProviderEndpoints[i].CredentialRef = modelconfig.GrokOAuthCredentialRef
+		}
+	}
+	deepSeek := modelconfig.NormalizeConfig(ModelConfig{
+		Provider:            "deepseek",
+		API:                 providers.APIDeepSeek,
+		Model:               "deepseek-v4-pro",
+		BaseURL:             "https://api.deepseek.com/anthropic",
+		ContextWindowTokens: 1048576,
+		MaxOutputTok:        32768,
+	})
+	doc.Models.ProviderEndpoints = append(doc.Models.ProviderEndpoints, modelconfig.ProviderEndpointFromConfig(deepSeek))
+	doc.Models.Configs = append(doc.Models.Configs, deepSeek)
+	if err := store.Save(doc); err != nil {
+		t.Fatalf("Save(config without Grok context) error = %v", err)
+	}
+
+	reloaded, err := newGatewayAppTestStack(t, Config{
+		AppName:      appName,
+		UserID:       userID,
+		StoreDir:     root,
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
+	}
+	defer reloaded.Close()
+	reloaded.lookup.resolveHTTPClient = func(context.Context, ModelConfig) (*http.Client, error) {
+		return http.DefaultClient, nil
+	}
+
+	resumed, err := reloaded.KernelSessions().ResumeSession(ctx, kernel.ResumeSessionRequest{
+		AppName: appName, UserID: userID, Workspace: reloaded.Workspace,
+		SessionID: active.SessionID, MetadataOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("ResumeSession() error = %v", err)
+	}
+	state, err := reloaded.SessionRuntimeState(ctx, resumed.Session.SessionRef)
+	if err != nil {
+		t.Fatalf("SessionRuntimeState() error = %v", err)
+	}
+	if state.ModelAlias != "xai/grok-4.5" {
+		t.Fatalf("resumed ModelAlias = %q, want xai/grok-4.5", state.ModelAlias)
+	}
+	usage, err := reloaded.SessionUsageSnapshot(ctx, resumed.Session.SessionRef, state.ModelAlias)
+	if err != nil {
+		t.Fatalf("SessionUsageSnapshot() error = %v", err)
+	}
+	if usage.ContextWindowTokens != 500000 {
+		t.Fatalf("resumed usage context window = %d, want 500000", usage.ContextWindowTokens)
+	}
+
+	resolved, err := reloaded.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{
+		SessionRef: resumed.Session.SessionRef,
+	})
+	if err != nil {
+		t.Fatalf("ResolveTurn(resumed) error = %v", err)
+	}
+	withContext, ok := resolved.RunRequest.AgentSpec.Model.(interface{ ContextWindowTokens() int })
+	if !ok {
+		t.Fatalf("resolved Grok model %T has no context-window contract", resolved.RunRequest.AgentSpec.Model)
+	}
+	if got := withContext.ContextWindowTokens(); got != 500000 {
+		t.Fatalf("resumed model context window = %d, want 500000", got)
 	}
 }
 
