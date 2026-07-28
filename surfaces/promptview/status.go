@@ -206,7 +206,7 @@ func rateLimitUsageView(status controlstatus.StatusRateLimits) RateLimitUsageVie
 		bucket := strings.TrimSpace(firstNonEmpty(limit.Name, limit.ID))
 		for _, window := range limit.Windows {
 			label := rateLimitWindowLabel(window)
-			if bucket != "" && !strings.EqualFold(bucket, "codex") {
+			if bucket != "" && !defaultRateLimitBucket(status.Provider, bucket) {
 				label = bucket + " " + label
 			}
 			remaining := 100 - math.Max(0, math.Min(100, window.UsedPercent))
@@ -218,6 +218,15 @@ func rateLimitUsageView(status controlstatus.StatusRateLimits) RateLimitUsageVie
 		}
 	}
 	return view
+}
+
+func defaultRateLimitBucket(provider string, bucket string) bool {
+	provider = strings.TrimSpace(provider)
+	bucket = strings.TrimSpace(bucket)
+	if provider != "" && strings.EqualFold(provider, bucket) {
+		return true
+	}
+	return strings.EqualFold(bucket, "codex") && strings.Contains(strings.ToLower(provider), "codex")
 }
 
 func rateLimitWindowLabel(window controlstatus.StatusRateLimitWindow) string {

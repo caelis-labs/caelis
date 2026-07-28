@@ -59,3 +59,26 @@ func TestAdapterFullStatusQueriesProviderUsageAndFailsSoft(t *testing.T) {
 		t.Fatalf("failed provider usage should be omitted: calls=%d rate limits=%#v", calls, status.RateLimits)
 	}
 }
+
+func TestStatusRateLimitsPreservesLabeledWindowWithoutKnownDuration(t *testing.T) {
+	t.Parallel()
+
+	status := statusRateLimitsFromProviderUsage(providerusage.Snapshot{
+		Provider: "xai",
+		Limits: []providerusage.Limit{{
+			ID: "xai",
+			Windows: []providerusage.Window{{
+				Kind:        "credits",
+				Label:       "Credit limit",
+				UsedPercent: 37.5,
+			}},
+		}},
+	})
+	if len(status.Limits) != 1 || len(status.Limits[0].Windows) != 1 {
+		t.Fatalf("rate limits = %#v", status)
+	}
+	window := status.Limits[0].Windows[0]
+	if window.Label != "Credit limit" || window.DurationMinutes != 0 || window.UsedPercent != 37.5 {
+		t.Fatalf("window = %#v", window)
+	}
+}

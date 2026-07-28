@@ -41,3 +41,24 @@ func TestStatusDisplayShowsOnlyReturnedSubscriptionWindows(t *testing.T) {
 		t.Fatalf("rendered absent five-hour window: %q", rendered)
 	}
 }
+
+func TestStatusDisplayShowsGrokDefaultCreditsWithoutProviderPrefix(t *testing.T) {
+	t.Parallel()
+
+	status := controlstatus.StatusSnapshot{RateLimits: controlstatus.StatusRateLimits{
+		Provider: "xai",
+		Limits: []controlstatus.StatusRateLimit{{
+			ID: "xai",
+			Windows: []controlstatus.StatusRateLimitWindow{{
+				Label: "Weekly limit", UsedPercent: 42.5, DurationMinutes: int64((7 * 24 * time.Hour) / time.Minute),
+			}},
+		}},
+	}}
+	view := StatusDisplayFromSnapshot(status)
+	if len(view.RateLimits.Rows) != 1 {
+		t.Fatalf("rate limit view = %#v", view.RateLimits)
+	}
+	if row := view.RateLimits.Rows[0]; row.Label != "Weekly limit" || row.Value != "58% left" {
+		t.Fatalf("weekly row = %#v", row)
+	}
+}

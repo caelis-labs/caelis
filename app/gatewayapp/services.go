@@ -178,7 +178,12 @@ func (s ModelService) ProviderUsage(ctx context.Context, modelAlias string) (pro
 		return providerusage.Snapshot{}, false, nil
 	}
 	config, ok := s.stack.ModelConfig(modelAlias)
-	if !ok || config.CredentialRef != modelconfig.CodexOAuthCredentialRef {
+	if !ok {
+		return providerusage.Snapshot{}, false, nil
+	}
+	switch config.CredentialRef {
+	case modelconfig.CodexOAuthCredentialRef, modelconfig.GrokOAuthCredentialRef:
+	default:
 		return providerusage.Snapshot{}, false, nil
 	}
 	return s.stack.providerUsage.Query(ctx, config.Provider)

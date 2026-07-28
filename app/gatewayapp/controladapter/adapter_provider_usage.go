@@ -20,8 +20,13 @@ func statusRateLimitsFromProviderUsage(snapshot providerusage.Snapshot) controls
 			Name: strings.TrimSpace(limit.Name),
 		}
 		for _, window := range limit.Windows {
-			if window.Duration <= 0 {
+			label := strings.TrimSpace(window.Label)
+			if window.Duration <= 0 && label == "" {
 				continue
+			}
+			duration := window.Duration
+			if duration < 0 {
+				duration = 0
 			}
 			used := window.UsedPercent
 			if used < 0 {
@@ -31,9 +36,9 @@ func statusRateLimitsFromProviderUsage(snapshot providerusage.Snapshot) controls
 			}
 			normalized.Windows = append(normalized.Windows, controlstatus.StatusRateLimitWindow{
 				Kind:            strings.TrimSpace(window.Kind),
-				Label:           strings.TrimSpace(window.Label),
+				Label:           label,
 				UsedPercent:     used,
-				DurationMinutes: int64(window.Duration / time.Minute),
+				DurationMinutes: int64(duration / time.Minute),
 				ResetsAt:        window.ResetsAt,
 			})
 		}

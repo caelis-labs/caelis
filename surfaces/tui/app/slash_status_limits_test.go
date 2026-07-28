@@ -54,3 +54,31 @@ func TestRenderSlashStatusShowsSubscriptionLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderSlashStatusShowsGrokCreditsUsage(t *testing.T) {
+	t.Parallel()
+
+	lines := renderSlashStatusLines(controlstatus.StatusSnapshot{RateLimits: controlstatus.StatusRateLimits{
+		Provider: "xai",
+		Limits: []controlstatus.StatusRateLimit{{
+			ID: "xai",
+			Windows: []controlstatus.StatusRateLimitWindow{{
+				Label: "Weekly limit", UsedPercent: 42.5, DurationMinutes: int64((7 * 24 * time.Hour) / time.Minute),
+			}},
+		}},
+	}})
+	limitsStart := slices.IndexFunc(lines, func(line slashOutputLine) bool {
+		return strings.TrimSpace(line.Text) == "Limits"
+	})
+	if limitsStart < 0 {
+		t.Fatalf("rendered status has no Limits section: %#v", lines)
+	}
+	rendered := slashOutputPlainForTest(lines[limitsStart:])
+	want := strings.Join([]string{
+		"Limits",
+		"  Weekly limit: 58% left",
+	}, "\n")
+	if rendered != want {
+		t.Fatalf("rendered Grok limits mismatch:\n--- got ---\n%s\n--- want ---\n%s", rendered, want)
+	}
+}

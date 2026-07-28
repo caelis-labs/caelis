@@ -26,7 +26,10 @@ type tokenEndpointError struct {
 }
 
 type jwtClaims struct {
-	ExpiresAt int64 `json:"exp"`
+	ExpiresAt     int64  `json:"exp"`
+	Subject       string `json:"sub"`
+	PrincipalType string `json:"principal_type"`
+	PrincipalID   string `json:"principal_id"`
 }
 
 func (m *Manager) refreshLocked(ctx context.Context, client *http.Client) error {

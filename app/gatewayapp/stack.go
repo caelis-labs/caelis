@@ -330,6 +330,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	}
 	providerUsage := providerusage.NewRegistry(map[string]providerusage.Reader{
 		"openai-codex": codexAuth,
+		"xai":          grokAuth,
 	})
 	lookup, err := newModelLookup(configStore, cfg.Model, cfg.ContextWindow)
 	if err != nil {
