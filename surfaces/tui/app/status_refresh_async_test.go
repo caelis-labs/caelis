@@ -51,6 +51,7 @@ func TestModelInitSchedulesStatusRefreshCommand(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
+	resultReceived := make(chan struct{}, 1)
 	model := NewModel(Config{
 		RefreshStatus: func() (string, string) {
 			calls.Add(1)
@@ -61,31 +62,71 @@ func TestModelInitSchedulesStatusRefreshCommand(t *testing.T) {
 		t.Fatalf("status calls after NewModel = %d, want 0", calls.Load())
 	}
 
-	cmd := model.Init()
-	if cmd == nil || !model.statusRefreshInFlight {
-		t.Fatal("Init did not schedule the initial status refresh")
-	}
-	batch, ok := cmd().(tea.BatchMsg)
-	if !ok {
-		t.Fatalf("Init command result has type %T, want tea.BatchMsg", cmd())
-	}
-	results := make(chan tea.Msg, len(batch))
-	for _, one := range batch {
-		go func(run tea.Cmd) { results <- run() }(one)
-	}
-	deadline := time.After(500 * time.Millisecond)
-	for {
-		select {
-		case msg := <-results:
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(nil),
+		tea.WithoutRenderer(),
+		tea.WithoutSignalHandler(),
+		tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
 			if _, ok := msg.(StatusRefreshResultMsg); ok {
-				if calls.Load() != 1 {
-					t.Fatalf("status calls = %d, want 1", calls.Load())
+				select {
+				case resultReceived <- struct{}{}:
+				default:
 				}
-				return
 			}
-		case <-deadline:
-			t.Fatalf("Init batch did not produce StatusRefreshResultMsg; status calls = %d", calls.Load())
+			return msg
+		}),
+	)
+	var (
+		finalModel tea.Model
+		runErr     error
+	)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		finalModel, runErr = program.Run()
+	}()
+	t.Cleanup(func() {
+		program.Quit()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			program.Kill()
 		}
+	})
+
+	select {
+	case <-resultReceived:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("Init did not deliver the status refresh result; status calls = %d", calls.Load())
+	}
+	// The filter runs before Model.Update. Quit is sent through the same
+	// unbuffered event loop, so it cannot be received until that update ends.
+	program.Quit()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		program.Kill()
+		t.Fatal("status-refresh test program did not stop")
+	}
+	if runErr != nil {
+		t.Fatalf("run status-refresh test program: %v", runErr)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("status calls = %d, want 1", calls.Load())
+	}
+	final, ok := finalModel.(*Model)
+	if !ok {
+		t.Fatalf("final model = %T, want *Model", finalModel)
+	}
+	if final.statusModel != "refreshed-model" {
+		t.Fatalf("final status model = %q, want refreshed-model", final.statusModel)
+	}
+	if final.statusContext != "1k / 100k" {
+		t.Fatalf("final status context = %q, want 1k / 100k", final.statusContext)
+	}
+	if final.statusRefreshInFlight {
+		t.Fatal("status refresh remained in flight after its result was applied")
 	}
 }
 

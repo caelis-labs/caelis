@@ -207,7 +207,16 @@ func (m *Model) Init() tea.Cmd {
 	if cmd := m.requestBackgroundColorIfAutoCmd(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	return tea.Batch(cmds...)
+	// Sequence makes Bubble Tea receive the synthetic width report before
+	// starting the init batch. It is not a command-completion or initial-render
+	// barrier: the commands themselves may start while that report is handled.
+	// Bubble Tea's unbuffered message channel still prevents their subsequent
+	// Program.Send messages from being received until the report handler has
+	// selected the renderer's width method.
+	return tea.Sequence(
+		forceRendererGraphemeWidthCmd(),
+		tea.Batch(cmds...),
+	)
 }
 
 func (m *Model) appendWelcomeCard() {

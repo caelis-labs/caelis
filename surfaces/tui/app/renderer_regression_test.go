@@ -4,12 +4,132 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/vt"
 )
+
+func TestForceRendererGraphemeWidthCmdPinsUnicodeCoreReport(t *testing.T) {
+	msg := forceRendererGraphemeWidthCmd()()
+	report, ok := msg.(tea.ModeReportMsg)
+	if !ok {
+		t.Fatalf("force renderer width message = %T, want tea.ModeReportMsg", msg)
+	}
+	if report.Mode != ansi.ModeUnicodeCore {
+		t.Fatalf("renderer width mode = %d, want Unicode core mode %d", report.Mode, ansi.ModeUnicodeCore)
+	}
+	if report.Value != ansi.ModeReset {
+		t.Fatalf("renderer width setting = %d, want settable reset state %d", report.Value, ansi.ModeReset)
+	}
+}
+
+func TestStreamAppendPhysicalScreenPreservesTextAfterComplexGrapheme(t *testing.T) {
+	const (
+		width  = 48
+		height = 14
+	)
+	started := make(chan struct{}, 1)
+	model := NewModel(Config{
+		NoColor:            true,
+		NoAnimation:        true,
+		StreamTickInterval: 16 * time.Millisecond,
+		OnStart: func() {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+		},
+	})
+	terminal := vt.NewSafeEmulator(width, height)
+	t.Cleanup(func() { _ = terminal.Close() })
+	// Match multiplexers that render extended graphemes as two cells but do
+	// not answer Bubble Tea's DEC mode queries.
+	terminal.RegisterCsiHandler(ansi.Command('?', '$', 'p'), func(ansi.Params) bool {
+		return true
+	})
+	// Avoid opening an input pipe solely for auto-theme color-query replies.
+	terminal.RegisterOscHandler(10, func([]byte) bool { return true })
+	terminal.RegisterOscHandler(11, func([]byte) bool { return true })
+	terminal.RegisterOscHandler(12, func([]byte) bool { return true })
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(nil),
+		tea.WithOutput(terminal),
+		tea.WithWindowSize(width, height),
+		tea.WithFPS(120),
+		tea.WithoutSignalHandler(),
+	)
+
+	var (
+		finalModel tea.Model
+		runErr     error
+	)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		finalModel, runErr = program.Run()
+	}()
+	t.Cleanup(func() {
+		program.Quit()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			program.Kill()
+		}
+	})
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("TUI program did not run OnStart")
+	}
+
+	program.Send(schedulerACPAssistantEnvelope("A🏳️‍🌈B"))
+	waitForPhysicalStreamLine(t, terminal, "A🏳️‍🌈B")
+	program.Send(schedulerACPAssistantEnvelope("C"))
+	waitForPhysicalStreamLine(t, terminal, "A🏳️‍🌈BC")
+
+	program.Quit()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		program.Kill()
+		t.Fatal("TUI program did not stop")
+	}
+	if runErr != nil {
+		t.Fatalf("run TUI program: %v", runErr)
+	}
+	model, ok := finalModel.(*Model)
+	if !ok {
+		t.Fatalf("final model = %T, want *Model", finalModel)
+	}
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 || block.Events[0].Text != "A🏳️‍🌈BC" {
+		t.Fatalf("final assistant events = %#v, want complete stream text", block.Events)
+	}
+	if plain := ansi.Strip(model.View().Content); !strings.Contains(plain, "A🏳️‍🌈BC") {
+		t.Fatalf("final model view lost stream text: %q", plain)
+	}
+}
+
+func waitForPhysicalStreamLine(t *testing.T, terminal *vt.SafeEmulator, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		screen := ansi.Strip(terminal.Render())
+		for _, line := range strings.Split(screen, "\n") {
+			if strings.Contains(line, want) {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("physical terminal never rendered complete stream text %q; screen=%q", want, ansi.Strip(terminal.Render()))
+}
 
 func TestComposerMixedWidthDeleteAvoidsRendererDCHInsideWideGlyph(t *testing.T) {
 	model := NewModel(Config{})
