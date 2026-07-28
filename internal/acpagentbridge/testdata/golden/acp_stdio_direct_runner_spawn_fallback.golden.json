@@ -18,6 +18,14 @@
         }
       ],
       "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        },
         "terminal_info": {
           "terminal_id": "spawn-call-1"
         }
@@ -46,6 +54,14 @@
         }
       ],
       "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        },
         "terminal_info": {
           "terminal_id": "spawn-call-1"
         }
@@ -94,6 +110,16 @@
       "rawInput": {
         "action": "wait",
         "handle": "yara"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Task"
+            }
+          },
+          "version": 1
+        }
       }
     }
   },
@@ -121,6 +147,16 @@
             "target_kind": "subagent"
           }
         ]
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Task"
+            }
+          },
+          "version": 1
+        }
       }
     }
   },

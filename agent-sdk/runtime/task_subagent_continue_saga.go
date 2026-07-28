@@ -34,6 +34,8 @@ const (
 	continuePhaseUnknownOutcome continuePhase = "continue_unknown_outcome"
 )
 
+const subagentContinueUnknownDiagnostic = "subagent continuation outcome could not be confirmed"
+
 func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
 	if task == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
@@ -278,17 +280,15 @@ func (tm *taskRuntime) persistSubagentContinuePhase(
 		desired.seedStreamFromResult(*result)
 		entry = desired.entrySnapshot(tm.runtime.now())
 	}
+	if phase == continuePhaseUnknownOutcome {
+		reason = subagentContinueUnknownDiagnostic
+	}
 	applyContinuePhaseToEntry(entry, phase, prompt, contextTransfer, digest, turnSeq, reason)
 	if phase == continuePhaseUnknownOutcome {
-		reason = firstNonEmpty(strings.TrimSpace(reason), "remote continuation outcome is unknown")
 		entry.Running = false
 		entry.State = taskapi.StateUnknownOutcome
 		entry.SupportsInput = false
-		if entry.Result == nil {
-			entry.Result = map[string]any{}
-		}
-		entry.Result["state"] = string(taskapi.StateUnknownOutcome)
-		entry.Result["error"] = reason
+		normalizeSubagentEntryResult(entry, reason)
 		if entry.Spec == nil {
 			entry.Spec = map[string]any{}
 		}
@@ -307,11 +307,7 @@ func (tm *taskRuntime) persistSubagentContinuePhase(
 	if phase == continuePhaseUnknownOutcome {
 		task.running = false
 		task.state = taskapi.StateUnknownOutcome
-		if task.result == nil {
-			task.result = map[string]any{}
-		}
-		task.result["state"] = string(taskapi.StateUnknownOutcome)
-		task.result["error"] = reason
+		normalizeSubagentResultForState(&task.result, taskapi.StateUnknownOutcome, reason)
 	}
 	task.revision = entry.Revision
 	task.lease = taskapi.CloneLease(entry.Lease)

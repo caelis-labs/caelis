@@ -10,7 +10,7 @@ import (
 const (
 	documentKind                      = "caelis.sdk.session"
 	documentVersion                   = 2
-	indexVersion                      = 3
+	indexVersion                      = 4
 	indexFilename                     = ".sessions.index.sqlite"
 	lockFilename                      = ".sessions.lock"
 	transactionRecoveryMarkerFilename = ".sessions.transactions.pending"

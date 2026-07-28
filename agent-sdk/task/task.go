@@ -132,25 +132,30 @@ type Entry struct {
 	TaskID string `json:"task_id,omitempty"`
 	// Handle is unique within the owning Session and is never reused there.
 	// It is stored with the existing Task record rather than in a second index.
-	Handle         string              `json:"handle,omitempty"`
-	Revision       uint64              `json:"revision,omitempty"`
-	Kind           Kind                `json:"kind,omitempty"`
-	Session        session.SessionRef  `json:"session,omitempty"`
-	Title          string              `json:"title,omitempty"`
-	State          State               `json:"state,omitempty"`
-	Running        bool                `json:"running,omitempty"`
-	SupportsInput  bool                `json:"supports_input,omitempty"`
-	SupportsCancel bool                `json:"supports_cancel,omitempty"`
-	CreatedAt      time.Time           `json:"created_at,omitempty"`
-	UpdatedAt      time.Time           `json:"updated_at,omitempty"`
-	Lease          Lease               `json:"lease,omitempty"`
-	StdoutCursor   int64               `json:"stdout_cursor,omitempty"`
-	StderrCursor   int64               `json:"stderr_cursor,omitempty"`
-	EventCursor    int64               `json:"event_cursor,omitempty"`
-	Spec           map[string]any      `json:"spec,omitempty"`
-	Result         map[string]any      `json:"result,omitempty"`
-	Metadata       map[string]any      `json:"metadata,omitempty"`
-	Terminal       sandbox.TerminalRef `json:"terminal,omitempty"`
+	Handle         string             `json:"handle,omitempty"`
+	Revision       uint64             `json:"revision,omitempty"`
+	Kind           Kind               `json:"kind,omitempty"`
+	Session        session.SessionRef `json:"session,omitempty"`
+	Title          string             `json:"title,omitempty"`
+	State          State              `json:"state,omitempty"`
+	Running        bool               `json:"running,omitempty"`
+	SupportsInput  bool               `json:"supports_input,omitempty"`
+	SupportsCancel bool               `json:"supports_cancel,omitempty"`
+	CreatedAt      time.Time          `json:"created_at,omitempty"`
+	UpdatedAt      time.Time          `json:"updated_at,omitempty"`
+	Lease          Lease              `json:"lease,omitempty"`
+	StdoutCursor   int64              `json:"stdout_cursor,omitempty"`
+	StderrCursor   int64              `json:"stderr_cursor,omitempty"`
+	EventCursor    int64              `json:"event_cursor,omitempty"`
+	Spec           map[string]any     `json:"spec,omitempty"`
+	// FailureDiagnostic is the bounded, non-sensitive terminal failure summary
+	// written by Runtime for subagent Tasks. Result remains the model-visible
+	// projection; this typed field is the durable trust boundary used when
+	// rebuilding that projection from older or externally supplied records.
+	FailureDiagnostic string              `json:"failure_diagnostic,omitempty"`
+	Result            map[string]any      `json:"result,omitempty"`
+	Metadata          map[string]any      `json:"metadata,omitempty"`
+	Terminal          sandbox.TerminalRef `json:"terminal,omitempty"`
 }
 
 // Store persists task records for one owning session. Durable subagent spawn
@@ -377,6 +382,7 @@ func CloneEntry(in *Entry) *Entry {
 	out.Session = session.NormalizeSessionRef(in.Session)
 	out.Title = strings.TrimSpace(in.Title)
 	out.State = State(strings.TrimSpace(string(in.State)))
+	out.FailureDiagnostic = strings.TrimSpace(in.FailureDiagnostic)
 	out.Lease = CloneLease(in.Lease)
 	out.Spec = jsonvalue.CloneMap(in.Spec)
 	out.Result = jsonvalue.CloneMap(in.Result)

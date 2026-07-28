@@ -141,7 +141,11 @@ func (tm *taskRuntime) syncCanonicalTaskEntry(ctx context.Context, ref session.S
 	if event != nil {
 		updatedAt = event.Time
 	}
-	applyCanonicalTaskEntry(entry, output, status, updatedAt)
+	canonicalOutput := output
+	if kind == taskapi.KindSubagent {
+		canonicalOutput = canonicalSubagentTaskOutput(output, status, entry.State, entry.FailureDiagnostic)
+	}
+	applyCanonicalTaskEntry(entry, canonicalOutput, status, updatedAt)
 	if err := tm.persistTaskEntry(ctx, entry); err != nil {
 		return false, err
 	}
@@ -166,6 +170,7 @@ func applyCanonicalTaskEntry(entry *taskapi.Entry, output map[string]any, status
 	if entry == nil {
 		return
 	}
+	diagnostic := entry.FailureDiagnostic
 	entry.Result = session.CloneState(output)
 	if entry.Kind == taskapi.KindCommand {
 		syncCanonicalCommandTaskMetadata(entry, output)
@@ -174,9 +179,26 @@ func applyCanonicalTaskEntry(entry *taskapi.Entry, output map[string]any, status
 		entry.State = state
 		entry.Running = taskStateRunning(state)
 	}
+	if entry.Kind == taskapi.KindSubagent {
+		normalizeSubagentEntryResult(entry, diagnostic)
+	}
 	if !updatedAt.IsZero() {
 		entry.UpdatedAt = updatedAt
 	}
+}
+
+func canonicalSubagentTaskOutput(
+	output map[string]any,
+	status string,
+	fallback taskapi.State,
+	failureDiagnostic string,
+) map[string]any {
+	out := session.CloneState(output)
+	state := taskStateFromCanonicalOutput(out, status, fallback)
+	// Canonical output is model-visible compatibility data, not a trust source.
+	// Only the typed diagnostic already owned by Runtime may survive a rebuild.
+	normalizeSubagentResultForState(&out, state, failureDiagnostic)
+	return out
 }
 
 type canonicalTaskHistoryOutput struct {
@@ -219,7 +241,16 @@ func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref sessi
 	if !entry.UpdatedAt.IsZero() && (latest.UpdatedAt.IsZero() || !latest.UpdatedAt.After(entry.UpdatedAt)) {
 		return entry, nil
 	}
-	applyCanonicalTaskEntry(entry, latest.Output, latest.Status, latest.UpdatedAt)
+	canonicalOutput := latest.Output
+	if entry.Kind == taskapi.KindSubagent {
+		canonicalOutput = canonicalSubagentTaskOutput(
+			latest.Output,
+			latest.Status,
+			entry.State,
+			entry.FailureDiagnostic,
+		)
+	}
+	applyCanonicalTaskEntry(entry, canonicalOutput, latest.Status, latest.UpdatedAt)
 	if err := tm.persistTaskEntry(ctx, entry); err != nil {
 		var conflict *taskapi.RevisionConflictError
 		if !errors.As(err, &conflict) {

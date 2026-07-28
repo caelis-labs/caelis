@@ -75,6 +75,7 @@ type childRun struct {
 	mu             sync.RWMutex
 	state          delegation.State
 	outputPreview  string
+	failureDetail  string
 	result         string
 	agentText      string
 	finalAssistant acpschema.FinalAssistantAccumulator
@@ -279,6 +280,7 @@ func (r *Runner) Continue(ctx context.Context, anchor delegation.Anchor, req del
 	run.state = delegation.StateRunning
 	run.running = true
 	run.outputPreview = ""
+	run.failureDetail = ""
 	run.result = ""
 	run.agentText = ""
 	run.finalAssistant.Reset()
@@ -318,9 +320,11 @@ func (r *Runner) Cancel(ctx context.Context, anchor delegation.Anchor) error {
 	if remoteErr != nil {
 		run.state = delegation.StateInterrupted
 		run.outputPreview = "cancellation outcome unknown"
+		run.failureDetail = "subagent cancellation failed"
 	} else {
 		run.state = delegation.StateCancelled
 		run.outputPreview = "cancelled"
+		run.failureDetail = ""
 	}
 	run.updatedAt = r.clock()
 	run.mu.Unlock()
@@ -339,17 +343,15 @@ func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) 
 			if run.state != delegation.StateCancelled {
 				run.state = delegation.StateInterrupted
 				run.outputPreview = "interrupted"
+				run.failureDetail = "interrupted"
 			}
 			run.result = ""
 			_ = run.client.Close(context.WithoutCancel(ctx))
 			return
 		}
-		errText := err.Error()
-		if stderr := run.client.StderrTail(4096); strings.TrimSpace(stderr) != "" {
-			errText += "\nstderr:\n" + stderr
-		}
 		run.state = delegation.StateFailed
-		run.outputPreview = compactPreview(errText)
+		run.failureDetail = subagentPromptFailureDetail(err)
+		run.outputPreview = run.failureDetail
 		run.result = ""
 		_ = run.client.Close(context.WithoutCancel(ctx))
 		return
@@ -357,12 +359,14 @@ func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) 
 	if strings.EqualFold(strings.TrimSpace(resp.StopReason), "cancelled") {
 		run.state = delegation.StateCancelled
 		run.outputPreview = "cancelled"
+		run.failureDetail = ""
 		run.result = ""
 		_ = run.client.Close(context.WithoutCancel(ctx))
 		return
 	}
 	run.state = delegation.StateCompleted
 	run.outputPreview = compactPreview(run.outputPreview)
+	run.failureDetail = ""
 }
 
 func (r *Runner) waitRun(ctx context.Context, run *childRun, yieldTimeMS int) delegation.Result {
@@ -387,6 +391,7 @@ func (r *Runner) waitRun(ctx context.Context, run *childRun, yieldTimeMS int) de
 		Running:       run.running,
 		Yielded:       run.running,
 		OutputPreview: strings.TrimSpace(run.outputPreview),
+		Error:         strings.TrimSpace(run.failureDetail),
 		Result:        "",
 		UpdatedAt:     run.updatedAt,
 	}
@@ -557,6 +562,13 @@ func compactPreview(text string) string {
 		return last
 	}
 	return strings.TrimSpace(last[:80]) + " ...[truncated]... " + strings.TrimSpace(last[len(last)-48:])
+}
+
+func subagentPromptFailureDetail(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "subagent prompt timed out"
+	}
+	return "subagent prompt failed"
 }
 
 func pickWorkDir(preferred string, fallback string) string {

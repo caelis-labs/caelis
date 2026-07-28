@@ -271,7 +271,7 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 	result, err := task.runner.Wait(ctx, delegation.CloneAnchor(task.anchor), int(yield/time.Millisecond))
 	if err != nil {
 		if task.isRunning() {
-			return tm.interruptSubagentTask(ctx, task, "subagent session interrupted during recovery: "+strings.TrimSpace(err.Error()))
+			return tm.interruptSubagentTask(ctx, task, "subagent session interrupted during recovery")
 		}
 		return taskapi.Snapshot{}, err
 	}
@@ -500,12 +500,7 @@ func interruptedSubagentEntry(entry *taskapi.Entry, reason string) *taskapi.Entr
 	}
 	next.Running = false
 	next.State = taskapi.StateInterrupted
-	if next.Result == nil {
-		next.Result = map[string]any{}
-	}
-	next.Result["state"] = string(taskapi.StateInterrupted)
-	next.Result["error"] = reason
-	next.Result["result"] = reason
+	normalizeSubagentEntryResult(next, reason)
 	if next.Metadata == nil {
 		next.Metadata = map[string]any{}
 	}
@@ -552,6 +547,10 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 			result = session.CloneState(stored)
 		}
 	}
+	// Durable Task records may predate FailureDiagnostic. Rehydrate lifecycle
+	// state but never trust a legacy free-form Result["error"] as a
+	// Runtime-produced diagnostic.
+	normalizeSubagentResultForState(&result, entry.State, entry.FailureDiagnostic)
 	task := &subagentTask{
 		ref: taskapi.Ref{
 			TaskID:     strings.TrimSpace(entry.TaskID),
@@ -604,6 +603,7 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 	if t == nil {
 		return
 	}
+	result = delegation.CloneResult(result)
 	t.state = taskStateFromDelegation(result.State)
 	t.running = result.State == delegation.StateRunning
 	if t.result == nil {
@@ -643,6 +643,7 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 	t.result["mention"] = "@" + strings.TrimPrefix(t.handle, "@")
 	t.result["agent"] = t.agent
 	t.result["state"] = string(t.state)
+	normalizeSubagentResultForState(&t.result, t.state, result.Error)
 	t.notifyStreamChangeLocked()
 }
 
@@ -665,16 +666,10 @@ func (t *subagentTask) applyInterruptedLocked(reason string) {
 	}
 	t.running = false
 	t.state = taskapi.StateInterrupted
-	if t.result == nil {
-		t.result = map[string]any{}
-	}
+	normalizeSubagentResultForState(&t.result, taskapi.StateInterrupted, reason)
 	if t.metadata == nil {
 		t.metadata = map[string]any{}
 	}
-	t.result["state"] = string(taskapi.StateInterrupted)
-	t.result["error"] = reason
-	t.result["result"] = reason
-	t.result["output_preview"] = reason
 	t.result["handle"] = t.handle
 	t.result["mention"] = "@" + strings.TrimPrefix(t.handle, "@")
 	t.result["agent"] = t.agent
@@ -690,6 +685,65 @@ func (t *subagentTask) applyInterruptedLocked(reason string) {
 	t.metadata["session_id"] = t.anchor.SessionID
 	t.metadata["terminal_id"] = t.ref.TerminalID
 	t.notifyStreamChangeLocked()
+}
+
+// normalizeSubagentResultForState is the sole writer for mutually exclusive
+// subagent result and failure fields. diagnostic is trusted only when supplied
+// directly by a typed Runtime producer; callers rehydrating legacy map data
+// pass an empty diagnostic and receive the fixed state fallback.
+func normalizeSubagentResultForState(result *map[string]any, state taskapi.State, diagnostic string) {
+	if result == nil {
+		return
+	}
+	if *result == nil {
+		*result = map[string]any{}
+	}
+	(*result)["state"] = string(state)
+	if diagnostic, failureState := subagentFailureDiagnostic(state, diagnostic); failureState {
+		delete(*result, "result")
+		delete(*result, "final_message")
+		delete(*result, "output_preview")
+		(*result)["error"] = diagnostic
+		return
+	}
+	delete(*result, "error")
+	switch state {
+	case taskapi.StateCancelled, taskapi.StateTerminated:
+		delete(*result, "result")
+		delete(*result, "final_message")
+		delete(*result, "output_preview")
+	}
+}
+
+// normalizeSubagentEntryResult is the durable counterpart to
+// normalizeSubagentResultForState. FailureDiagnostic is the typed trust
+// boundary; callers pass only diagnostics received directly from a typed
+// Runtime producer.
+func normalizeSubagentEntryResult(entry *taskapi.Entry, diagnostic string) {
+	if entry == nil {
+		return
+	}
+	diagnostic, failureState := subagentFailureDiagnostic(entry.State, diagnostic)
+	if failureState {
+		entry.FailureDiagnostic = diagnostic
+	} else {
+		entry.FailureDiagnostic = ""
+	}
+	normalizeSubagentResultForState(&entry.Result, entry.State, diagnostic)
+}
+
+func subagentFailureDiagnostic(state taskapi.State, diagnostic string) (string, bool) {
+	diagnostic = strings.TrimSpace(diagnostic)
+	switch state {
+	case taskapi.StateFailed:
+		return firstNonEmpty(diagnostic, "subagent failed"), true
+	case taskapi.StateInterrupted:
+		return firstNonEmpty(diagnostic, "subagent interrupted"), true
+	case taskapi.StateUnknownOutcome:
+		return firstNonEmpty(diagnostic, "subagent outcome could not be confirmed"), true
+	default:
+		return "", false
+	}
 }
 
 func (t *subagentTask) snapshot() taskapi.Snapshot {
@@ -743,7 +797,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 	if t == nil {
 		return nil
 	}
-	return &taskapi.Entry{
+	entry := &taskapi.Entry{
 		TaskID:         t.ref.TaskID,
 		Handle:         t.handle,
 		Revision:       t.revision,
@@ -779,6 +833,8 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		Result:   subagentTaskEntryResult(t.result, t.running),
 		Metadata: session.CloneState(t.metadata),
 	}
+	normalizeSubagentEntryResult(entry, taskRawStringValue(t.result["error"]))
+	return entry
 }
 
 func subagentTaskEntryResult(result map[string]any, running bool) map[string]any {

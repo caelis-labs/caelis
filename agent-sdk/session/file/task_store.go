@@ -290,11 +290,11 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 	_, err = tx.Exec(
 		`INSERT INTO tasks (
 			task_id, revision, kind, app_name, user_id, session_id, workspace_key, title, state,
-			running, supports_input, supports_cancel,
+			failure_diagnostic, running, supports_input, supports_cancel,
 			created_at_ns, updated_at_ns, heartbeat_at_ns, lease_id, lease_owner_id, lease_revision, lease_acquired_at_ns, lease_expires_at_ns,
 			stdout_cursor, stderr_cursor, event_cursor,
 			handle, spec_json, result_json, metadata_json, terminal_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id) DO UPDATE SET
 			revision = excluded.revision,
 			kind = excluded.kind,
@@ -304,6 +304,7 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 			workspace_key = excluded.workspace_key,
 			title = excluded.title,
 			state = excluded.state,
+			failure_diagnostic = excluded.failure_diagnostic,
 			running = excluded.running,
 			supports_input = excluded.supports_input,
 			supports_cancel = excluded.supports_cancel,
@@ -332,6 +333,7 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 		row.workspaceKey,
 		row.title,
 		row.state,
+		row.failureDiagnostic,
 		boolToSQLite(row.running),
 		boolToSQLite(row.supportsInput),
 		boolToSQLite(row.supportsCancel),
@@ -453,7 +455,7 @@ func (s *Store) getSessionTaskIndexByHandle(ref session.SessionRef, handle strin
 func taskIndexSelectSQL() string {
 	return `SELECT
 		task_id, revision, kind, app_name, user_id, session_id, workspace_key, title, state,
-		running, supports_input, supports_cancel,
+		failure_diagnostic, running, supports_input, supports_cancel,
 		created_at_ns, updated_at_ns, heartbeat_at_ns, lease_id, lease_owner_id, lease_revision, lease_acquired_at_ns, lease_expires_at_ns,
 		stdout_cursor, stderr_cursor, event_cursor, handle,
 		spec_json, result_json, metadata_json, terminal_json
@@ -461,34 +463,35 @@ func taskIndexSelectSQL() string {
 }
 
 type taskIndexRow struct {
-	taskID          string
-	revision        uint64
-	kind            string
-	appName         string
-	userID          string
-	sessionID       string
-	workspaceKey    string
-	title           string
-	state           string
-	running         bool
-	supportsInput   bool
-	supportsCancel  bool
-	createdAt       time.Time
-	updatedAt       time.Time
-	heartbeatAt     time.Time
-	leaseID         string
-	leaseOwnerID    string
-	leaseRevision   uint64
-	leaseAcquiredAt time.Time
-	leaseExpiresAt  time.Time
-	stdoutCursor    int64
-	stderrCursor    int64
-	eventCursor     int64
-	handle          string
-	specJSON        string
-	resultJSON      string
-	metadataJSON    string
-	terminalJSON    string
+	taskID            string
+	revision          uint64
+	kind              string
+	appName           string
+	userID            string
+	sessionID         string
+	workspaceKey      string
+	title             string
+	state             string
+	failureDiagnostic string
+	running           bool
+	supportsInput     bool
+	supportsCancel    bool
+	createdAt         time.Time
+	updatedAt         time.Time
+	heartbeatAt       time.Time
+	leaseID           string
+	leaseOwnerID      string
+	leaseRevision     uint64
+	leaseAcquiredAt   time.Time
+	leaseExpiresAt    time.Time
+	stdoutCursor      int64
+	stderrCursor      int64
+	eventCursor       int64
+	handle            string
+	specJSON          string
+	resultJSON        string
+	metadataJSON      string
+	terminalJSON      string
 }
 
 func taskIndexRowFromEntry(entry *taskapi.Entry) (taskIndexRow, error) {
@@ -512,34 +515,35 @@ func taskIndexRowFromEntry(entry *taskapi.Entry) (taskIndexRow, error) {
 		return taskIndexRow{}, fmt.Errorf("agent-sdk/session/file: encode task terminal: %w", err)
 	}
 	return taskIndexRow{
-		taskID:          strings.TrimSpace(entry.TaskID),
-		revision:        entry.Revision,
-		kind:            strings.TrimSpace(string(entry.Kind)),
-		appName:         strings.TrimSpace(entry.Session.AppName),
-		userID:          strings.TrimSpace(entry.Session.UserID),
-		sessionID:       strings.TrimSpace(entry.Session.SessionID),
-		workspaceKey:    strings.TrimSpace(entry.Session.WorkspaceKey),
-		title:           strings.TrimSpace(entry.Title),
-		state:           strings.TrimSpace(string(entry.State)),
-		running:         entry.Running,
-		supportsInput:   entry.SupportsInput,
-		supportsCancel:  entry.SupportsCancel,
-		createdAt:       entry.CreatedAt,
-		updatedAt:       entry.UpdatedAt,
-		heartbeatAt:     entry.Lease.HeartbeatAt,
-		leaseID:         strings.TrimSpace(entry.Lease.ID),
-		leaseOwnerID:    strings.TrimSpace(entry.Lease.OwnerID),
-		leaseRevision:   entry.Lease.Revision,
-		leaseAcquiredAt: entry.Lease.AcquiredAt,
-		leaseExpiresAt:  entry.Lease.ExpiresAt,
-		stdoutCursor:    entry.StdoutCursor,
-		stderrCursor:    entry.StderrCursor,
-		eventCursor:     entry.EventCursor,
-		handle:          taskapi.NormalizeHandle(firstNonEmpty(entry.Handle, taskIndexString(entry.Result, "handle"), taskIndexString(entry.Metadata, "handle"), taskIndexString(entry.Spec, "handle"))),
-		specJSON:        specJSON,
-		resultJSON:      resultJSON,
-		metadataJSON:    metadataJSON,
-		terminalJSON:    terminalJSON,
+		taskID:            strings.TrimSpace(entry.TaskID),
+		revision:          entry.Revision,
+		kind:              strings.TrimSpace(string(entry.Kind)),
+		appName:           strings.TrimSpace(entry.Session.AppName),
+		userID:            strings.TrimSpace(entry.Session.UserID),
+		sessionID:         strings.TrimSpace(entry.Session.SessionID),
+		workspaceKey:      strings.TrimSpace(entry.Session.WorkspaceKey),
+		title:             strings.TrimSpace(entry.Title),
+		state:             strings.TrimSpace(string(entry.State)),
+		failureDiagnostic: strings.TrimSpace(entry.FailureDiagnostic),
+		running:           entry.Running,
+		supportsInput:     entry.SupportsInput,
+		supportsCancel:    entry.SupportsCancel,
+		createdAt:         entry.CreatedAt,
+		updatedAt:         entry.UpdatedAt,
+		heartbeatAt:       entry.Lease.HeartbeatAt,
+		leaseID:           strings.TrimSpace(entry.Lease.ID),
+		leaseOwnerID:      strings.TrimSpace(entry.Lease.OwnerID),
+		leaseRevision:     entry.Lease.Revision,
+		leaseAcquiredAt:   entry.Lease.AcquiredAt,
+		leaseExpiresAt:    entry.Lease.ExpiresAt,
+		stdoutCursor:      entry.StdoutCursor,
+		stderrCursor:      entry.StderrCursor,
+		eventCursor:       entry.EventCursor,
+		handle:            taskapi.NormalizeHandle(firstNonEmpty(entry.Handle, taskIndexString(entry.Result, "handle"), taskIndexString(entry.Metadata, "handle"), taskIndexString(entry.Spec, "handle"))),
+		specJSON:          specJSON,
+		resultJSON:        resultJSON,
+		metadataJSON:      metadataJSON,
+		terminalJSON:      terminalJSON,
 	}, nil
 }
 
@@ -554,6 +558,7 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		workspaceKey      string
 		title             string
 		state             string
+		failureDiagnostic string
 		running           int64
 		supportsInput     int64
 		supportsCancel    int64
@@ -584,6 +589,7 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		&workspaceKey,
 		&title,
 		&state,
+		&failureDiagnostic,
 		&running,
 		&supportsInput,
 		&supportsCancel,
@@ -638,13 +644,14 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 			SessionID:    sessionID,
 			WorkspaceKey: workspaceKey,
 		}),
-		Title:          strings.TrimSpace(title),
-		State:          taskapi.State(strings.TrimSpace(state)),
-		Running:        sqliteBool(running),
-		SupportsInput:  sqliteBool(supportsInput),
-		SupportsCancel: sqliteBool(supportsCancel),
-		CreatedAt:      unixNanoToTime(createdAtNS),
-		UpdatedAt:      unixNanoToTime(updatedAtNS),
+		Title:             strings.TrimSpace(title),
+		State:             taskapi.State(strings.TrimSpace(state)),
+		FailureDiagnostic: strings.TrimSpace(failureDiagnostic),
+		Running:           sqliteBool(running),
+		SupportsInput:     sqliteBool(supportsInput),
+		SupportsCancel:    sqliteBool(supportsCancel),
+		CreatedAt:         unixNanoToTime(createdAtNS),
+		UpdatedAt:         unixNanoToTime(updatedAtNS),
 		Lease: taskapi.Lease{
 			ID: strings.TrimSpace(leaseID), OwnerID: strings.TrimSpace(leaseOwnerID), Revision: leaseRevision,
 			AcquiredAt: unixNanoToTime(leaseAcquiredAtNS), HeartbeatAt: unixNanoToTime(heartbeatAtNS), ExpiresAt: unixNanoToTime(leaseExpiresAtNS),

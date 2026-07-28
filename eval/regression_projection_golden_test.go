@@ -241,6 +241,14 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
         }
       ],
       "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "RunCommand"
+            }
+          },
+          "version": 1
+        },
         "terminal_info": {
           "terminal_id": "call-1"
         }
@@ -275,6 +283,14 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
         }
       ],
       "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "RunCommand"
+            }
+          },
+          "version": 1
+        },
         "terminal_exit": {
           "exit_code": 0,
           "signal": null,

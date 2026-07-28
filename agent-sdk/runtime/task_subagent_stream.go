@@ -147,8 +147,11 @@ func (t *subagentTask) applyStreamFramesLocked(frames []stream.Frame) {
 		}
 		if text == "" {
 			if frame.State != "" {
-				t.state = taskStateFromDelegation(delegation.State(frame.State))
+				t.state = taskStateFromSubagentStream(frame.State)
 				t.running = frame.Running
+				if !t.running {
+					normalizeSubagentResultForState(&t.result, t.state, "")
+				}
 			} else if frame.Running {
 				t.running = true
 			}
@@ -159,10 +162,20 @@ func (t *subagentTask) applyStreamFramesLocked(frames []stream.Frame) {
 		}
 		t.result["output_preview"] = compactFinalOutput(t.stdout, t.stderr)
 		if frame.State != "" {
-			t.state = taskStateFromDelegation(delegation.State(frame.State))
+			t.state = taskStateFromSubagentStream(frame.State)
 		}
 		t.running = frame.Running
+		if !t.running {
+			normalizeSubagentResultForState(&t.result, t.state, "")
+		}
 	}
+}
+
+func taskStateFromSubagentStream(state string) task.State {
+	if normalized := task.State(strings.TrimSpace(state)); normalized == task.StateUnknownOutcome {
+		return normalized
+	}
+	return taskStateFromDelegation(delegation.State(state))
 }
 
 func subagentFrameAssistantText(frame stream.Frame) string {

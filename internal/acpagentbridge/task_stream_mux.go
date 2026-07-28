@@ -6,13 +6,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
@@ -29,14 +27,16 @@ type acpTaskStreamMux struct {
 	sessionID string
 	events    chan eventstream.Envelope
 
-	mu         sync.Mutex
-	resolving  map[string]struct{}
-	started    map[string]struct{}
-	boundaries map[string]chan struct{}
-	active     int
-	sealed     bool
-	eventsOnce sync.Once
-	wg         sync.WaitGroup
+	mu           sync.Mutex
+	observations map[string]*acpTaskStreamObservation
+	active       int
+	sealed       bool
+	eventsOnce   sync.Once
+	wg           sync.WaitGroup
+
+	// beforeBoundarySignal is a deterministic test hook. Production leaves it
+	// nil; each observation generation still owns the boundary passed to it.
+	beforeBoundarySignal func(string, chan struct{})
 }
 
 func newACPTaskStreamMux(parent context.Context, service taskstream.Service, principal taskstream.Principal, sessionID string) *acpTaskStreamMux {
@@ -47,7 +47,7 @@ func newACPTaskStreamMux(parent context.Context, service taskstream.Service, pri
 	return &acpTaskStreamMux{
 		ctx: ctx, cancel: cancel, service: service, principal: principal,
 		sessionID: strings.TrimSpace(sessionID), events: make(chan eventstream.Envelope, 128),
-		resolving: map[string]struct{}{}, started: map[string]struct{}{}, boundaries: map[string]chan struct{}{},
+		observations: map[string]*acpTaskStreamObservation{},
 	}
 }
 
@@ -137,36 +137,162 @@ func (m *acpTaskStreamMux) Observe(envelope eventstream.Envelope) {
 	if !ok {
 		return
 	}
-	m.mu.Lock()
-	_, resolving := m.resolving[anchor.callID]
-	_, started := m.started[anchor.callID]
-	if m.sealed || resolving || started {
-		m.mu.Unlock()
+	if anchor.parentTerminal {
+		generation := m.closeParentObservation(anchor.callID)
+		if generation != nil {
+			generation.cancel()
+			m.signalGenerationBoundary(anchor.callID, generation.boundary)
+		}
 		return
 	}
-	m.resolving[anchor.callID] = struct{}{}
-	if m.boundaries[anchor.callID] == nil {
-		m.boundaries[anchor.callID] = make(chan struct{}, 1)
+	generation := m.claimObservation(anchor.callID)
+	if generation == nil {
+		return
 	}
-	m.active++
-	m.wg.Add(1)
-	m.mu.Unlock()
-	go m.resolveAndForward(anchor)
+	// Every resolve generation owns its boundary. In particular, a retryable
+	// attach miss may expose Idle before its goroutine runs deferred cleanup;
+	// that older generation must never signal a later successful attachment.
+	go m.resolveAndForward(anchor, generation)
 }
 
 type acpTaskStreamAnchor struct {
-	callID string
-	handle string
-	kind   task.Kind
+	callID         string
+	handle         string
+	kind           task.Kind
+	parentTerminal bool
 }
 
-func (m *acpTaskStreamMux) resolveAndForward(anchor acpTaskStreamAnchor) {
+func (m *acpTaskStreamMux) resolveAndForward(
+	anchor acpTaskStreamAnchor,
+	generation *acpTaskStreamObservationGeneration,
+) {
 	defer m.wg.Done()
 	defer m.finishOperation()
-	directory, err := m.service.List(m.ctx, m.principal, taskstream.ListRequest{SessionID: m.sessionID})
+	defer m.signalGenerationBoundary(anchor.callID, generation.boundary)
+	defer generation.cancel()
+
+	attachment, attempts, err := m.resolveSubscriptionWithGrace(anchor, generation)
 	if err != nil {
-		m.reportResolveFailure(anchor, err)
+		m.finishResolveFailure(anchor, generation, err, attempts)
 		return
+	}
+	if !m.attachObservation(anchor.callID, generation) {
+		_ = attachment.result.Subscription.Close()
+		m.closeObservation(anchor.callID, generation)
+		return
+	}
+
+	taskID := attachment.taskID
+	subscription := attachment.result.Subscription
+	resumeCursor := ""
+	for {
+		lastCursor, streamErr, sawBoundary := m.forwardUntilClose(anchor, subscription, generation.ctx)
+		_ = subscription.Close()
+		if lastCursor != "" {
+			resumeCursor = lastCursor
+		}
+		if sawBoundary || streamErr == nil || generation.ctx.Err() != nil {
+			m.closeObservation(anchor.callID, generation)
+			return
+		}
+		if !acpTaskStreamResolveRetryable(streamErr) || resumeCursor == "" {
+			m.finishActiveFailure(anchor, generation, streamErr, resumeCursor != "", false)
+			return
+		}
+		if !m.beginObservationResume(anchor.callID, generation) {
+			m.closeObservation(anchor.callID, generation)
+			return
+		}
+
+		next, used, resumeErr := m.resumeSubscriptionWithGrace(
+			anchor.callID,
+			generation,
+			taskID,
+			resumeCursor,
+			acpTaskStreamResumeMaxAttempts,
+		)
+		if resumeErr != nil {
+			if m.observationRetryStopped(anchor.callID, generation) {
+				m.closeObservation(anchor.callID, generation)
+				return
+			}
+			m.finishActiveFailure(anchor, generation, resumeErr, true, acpTaskStreamResolveRetryable(resumeErr) &&
+				used >= acpTaskStreamResumeMaxAttempts)
+			return
+		}
+		if !m.finishObservationResume(anchor.callID, generation) {
+			_ = next.result.Subscription.Close()
+			m.closeObservation(anchor.callID, generation)
+			return
+		}
+		subscription = next.result.Subscription
+	}
+}
+
+type acpTaskStreamAttachment struct {
+	taskID string
+	result taskstream.SubscribeResult
+}
+
+func (m *acpTaskStreamMux) forwardUntilClose(
+	anchor acpTaskStreamAnchor,
+	subscription taskstream.Subscription,
+	deliveryCtx context.Context,
+) (string, error, bool) {
+	for {
+		select {
+		case <-deliveryCtx.Done():
+			return strings.TrimSpace(subscription.LastCursor()), deliveryCtx.Err(), false
+		case envelope, ok := <-subscription.Events():
+			if !ok {
+				return strings.TrimSpace(subscription.LastCursor()), subscription.Err(), false
+			}
+			if taskstream.IsTransientGapEnvelope(envelope) {
+				continue
+			}
+			if anchor.kind == task.KindSubagent && envelope.Kind == eventstream.KindLifecycle && envelope.Final {
+				if acpSubagentTaskLifecycleAllowed(anchor, envelope) {
+					select {
+					case <-deliveryCtx.Done():
+						return strings.TrimSpace(subscription.LastCursor()), deliveryCtx.Err(), false
+					case m.events <- envelope:
+					}
+				}
+				return strings.TrimSpace(subscription.LastCursor()), nil, true
+			}
+			if !acpTaskStreamEnvelopeAllowed(anchor, envelope) {
+				continue
+			}
+			select {
+			case <-deliveryCtx.Done():
+				return strings.TrimSpace(subscription.LastCursor()), deliveryCtx.Err(), false
+			case m.events <- envelope:
+			}
+		}
+	}
+}
+
+func (m *acpTaskStreamMux) resolveSubscriptionWithGrace(
+	anchor acpTaskStreamAnchor,
+	generation *acpTaskStreamObservationGeneration,
+) (acpTaskStreamAttachment, int, error) {
+	return retryACPTaskStream(
+		generation.ctx,
+		acpTaskStreamResolveMaxAttempts,
+		func() bool { return !m.observationRetryStopped(anchor.callID, generation) },
+		func() (acpTaskStreamAttachment, error) {
+			return m.resolveSubscription(anchor, generation)
+		},
+	)
+}
+
+func (m *acpTaskStreamMux) resolveSubscription(
+	anchor acpTaskStreamAnchor,
+	generation *acpTaskStreamObservationGeneration,
+) (acpTaskStreamAttachment, error) {
+	directory, err := m.service.List(generation.ctx, m.principal, taskstream.ListRequest{SessionID: m.sessionID})
+	if err != nil {
+		return acpTaskStreamAttachment{}, err
 	}
 	var taskID string
 	for _, descriptor := range directory.Tasks {
@@ -178,111 +304,113 @@ func (m *acpTaskStreamMux) resolveAndForward(anchor acpTaskStreamAnchor) {
 			continue
 		}
 		if taskID != "" && taskID != strings.TrimSpace(descriptor.TaskID) {
-			m.reportResolveFailure(anchor, fmt.Errorf("multiple %s Tasks match tool call %q", anchor.kind, anchor.callID))
-			return
+			return acpTaskStreamAttachment{}, errorcode.New(
+				errorcode.Conflict,
+				fmt.Sprintf("multiple %s Tasks match the parent tool call", anchor.kind),
+			)
 		}
 		taskID = strings.TrimSpace(descriptor.TaskID)
 	}
 	if taskID == "" {
-		m.reportResolveFailure(anchor, fmt.Errorf("task is not discoverable yet"))
-		return
+		return acpTaskStreamAttachment{}, errorcode.New(errorcode.NotFound, "task is not discoverable yet")
 	}
-	result, err := m.service.Subscribe(m.ctx, m.principal, taskstream.SubscribeRequest{
-		SessionID: m.sessionID,
-		TaskID:    taskID,
-	})
+	result, err := m.subscribeTaskStream(generation.ctx, taskID, "")
 	if err != nil {
-		m.reportResolveFailure(anchor, err)
-		return
+		return acpTaskStreamAttachment{}, err
 	}
-	if result.Subscription == nil {
-		m.reportResolveFailure(anchor, fmt.Errorf("subscription was not created"))
-		return
-	}
-	m.mu.Lock()
-	delete(m.resolving, anchor.callID)
-	m.started[anchor.callID] = struct{}{}
-	m.mu.Unlock()
-	defer result.Subscription.Close()
-	sawBoundary := false
-	defer func() {
-		if !sawBoundary {
-			m.signalBoundary(anchor.callID)
-		}
-	}()
-	for events := result.Subscription.Events(); ; {
-		var envelope eventstream.Envelope
-		select {
-		case <-m.ctx.Done():
-			return
-		case received, ok := <-events:
-			if !ok {
-				if streamErr := result.Subscription.Err(); streamErr != nil {
-					m.reportResolveFailure(anchor, streamErr)
-				}
-				return
-			}
-			envelope = received
-		}
-		if taskstream.IsTransientGapEnvelope(envelope) {
-			continue
-		}
-		if anchor.kind == task.KindSubagent && envelope.Kind == eventstream.KindLifecycle && envelope.Final {
-			if acpSubagentTaskLifecycleAllowed(anchor, envelope) {
-				select {
-				case <-m.ctx.Done():
-					return
-				case m.events <- envelope:
-				}
-			}
-			sawBoundary = true
-			m.signalBoundary(anchor.callID)
-			return
-		}
-		if !acpTaskStreamEnvelopeAllowed(anchor, envelope) {
-			continue
-		}
-		select {
-		case <-m.ctx.Done():
-			return
-		case m.events <- envelope:
-		}
-	}
+	return acpTaskStreamAttachment{taskID: taskID, result: result}, nil
 }
 
-func (m *acpTaskStreamMux) reportResolveFailure(anchor acpTaskStreamAnchor, err error) {
+func (m *acpTaskStreamMux) resumeSubscriptionWithGrace(
+	callID string,
+	generation *acpTaskStreamObservationGeneration,
+	taskID string,
+	cursor string,
+	maxAttempts int,
+) (acpTaskStreamAttachment, int, error) {
+	return retryACPTaskStream(
+		generation.ctx,
+		maxAttempts,
+		func() bool { return !m.observationRetryStopped(callID, generation) },
+		func() (acpTaskStreamAttachment, error) {
+			result, err := m.subscribeTaskStream(generation.ctx, taskID, cursor)
+			if err != nil {
+				return acpTaskStreamAttachment{}, err
+			}
+			return acpTaskStreamAttachment{taskID: taskID, result: result}, nil
+		},
+	)
+}
+
+func (m *acpTaskStreamMux) subscribeTaskStream(ctx context.Context, taskID string, cursor string) (taskstream.SubscribeResult, error) {
+	result, err := m.service.Subscribe(ctx, m.principal, taskstream.SubscribeRequest{
+		SessionID: m.sessionID,
+		TaskID:    taskID,
+		Cursor:    cursor,
+	})
+	if err != nil {
+		return taskstream.SubscribeResult{}, err
+	}
+	if result.Subscription == nil {
+		return taskstream.SubscribeResult{}, errorcode.New(errorcode.Unavailable, "task stream subscription was not created")
+	}
+	return result, nil
+}
+
+func (m *acpTaskStreamMux) finishResolveFailure(
+	anchor acpTaskStreamAnchor,
+	generation *acpTaskStreamObservationGeneration,
+	err error,
+	attempts int,
+) {
 	if m == nil {
 		return
 	}
-	m.mu.Lock()
-	delete(m.resolving, anchor.callID)
-	delete(m.started, anchor.callID)
-	m.mu.Unlock()
-	m.reportUnavailable(anchor, err)
-	m.signalBoundary(anchor.callID)
-}
-
-func (m *acpTaskStreamMux) reportUnavailable(anchor acpTaskStreamAnchor, err error) {
-	if m == nil || err == nil || m.ctx.Err() != nil {
+	retryable := acpTaskStreamResolveRetryable(err)
+	if !m.prepareResolveFailure(anchor.callID, generation) {
 		return
 	}
-	toolName := identity.RunCommand
-	if anchor.kind == task.KindSubagent {
-		toolName = identity.Spawn
+	m.reportNoticeOnce(generation, acpTaskStreamNoticeFacts{
+		kind:           acpTaskStreamNoticeAttachFailed,
+		anchor:         anchor,
+		err:            err,
+		retryExhausted: retryable && attempts >= acpTaskStreamResolveMaxAttempts,
+	})
+	m.completeResolveFailure(anchor.callID, generation, retryable)
+}
+
+func (m *acpTaskStreamMux) finishActiveFailure(
+	anchor acpTaskStreamAnchor,
+	generation *acpTaskStreamObservationGeneration,
+	err error,
+	hasCursor bool,
+	resumeExhausted bool,
+) {
+	if !m.failActiveObservation(anchor.callID, generation) {
+		return
 	}
-	notice := eventstream.Envelope{
-		Kind:      eventstream.KindNotice,
-		SessionID: m.sessionID,
-		Scope:     eventstream.ScopeMain,
-		ScopeID:   m.sessionID,
-		Notice:    fmt.Sprintf("%s live output is unavailable for Task %s: %v", toolName, anchor.handle, err),
-		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		Meta: map[string]any{"task_stream": map[string]any{
-			"target_handle": anchor.handle, "unavailable": true,
-		}},
+	m.reportNoticeOnce(generation, acpTaskStreamNoticeFacts{
+		kind:            acpTaskStreamNoticeInterrupted,
+		anchor:          anchor,
+		err:             err,
+		hasCursor:       hasCursor,
+		resumeExhausted: resumeExhausted,
+	})
+}
+
+func (m *acpTaskStreamMux) reportNoticeOnce(
+	generation *acpTaskStreamObservationGeneration,
+	facts acpTaskStreamNoticeFacts,
+) {
+	if m == nil || generation == nil || facts.err == nil || generation.ctx.Err() != nil {
+		return
 	}
+	if !m.claimObservationNotice(facts.anchor.callID, generation, facts.kind) {
+		return
+	}
+	notice := buildACPTaskStreamNotice(m.sessionID, facts)
 	select {
-	case <-m.ctx.Done():
+	case <-generation.ctx.Done():
 	case m.events <- notice:
 	}
 }
@@ -291,11 +419,19 @@ func (m *acpTaskStreamMux) signalBoundary(callID string) {
 	if m == nil {
 		return
 	}
-	m.mu.Lock()
-	boundary := m.boundaries[strings.TrimSpace(callID)]
-	m.mu.Unlock()
+	boundary := m.observationBoundary(callID)
 	if boundary == nil {
 		return
+	}
+	m.signalGenerationBoundary(callID, boundary)
+}
+
+func (m *acpTaskStreamMux) signalGenerationBoundary(callID string, boundary chan struct{}) {
+	if m == nil || boundary == nil {
+		return
+	}
+	if m.beforeBoundarySignal != nil {
+		m.beforeBoundarySignal(callID, boundary)
 	}
 	select {
 	case boundary <- struct{}{}:
@@ -307,9 +443,7 @@ func (m *acpTaskStreamMux) parentBoundary(callID string) <-chan struct{} {
 	if m == nil {
 		return nil
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.boundaries[strings.TrimSpace(callID)]
+	return m.observationBoundary(callID)
 }
 
 func (m *acpTaskStreamMux) Close() {
@@ -328,10 +462,13 @@ func (m *acpTaskStreamMux) Seal() {
 	if m == nil {
 		return
 	}
+	generations := m.cancelResolvingObservations()
 	m.mu.Lock()
-	m.sealed = true
 	closeEvents := m.active == 0
 	m.mu.Unlock()
+	for _, generation := range generations {
+		generation.cancel()
+	}
 	if closeEvents {
 		m.closeEvents()
 	}
@@ -357,118 +494,4 @@ func (m *acpTaskStreamMux) closeEvents() {
 		return
 	}
 	m.eventsOnce.Do(func() { close(m.events) })
-}
-
-func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStreamAnchor, bool) {
-	if envelope.Kind != eventstream.KindSessionUpdate || (envelope.Scope != "" && envelope.Scope != eventstream.ScopeMain) {
-		return acpTaskStreamAnchor{}, false
-	}
-	meta := eventstream.UpdateMeta(envelope.Update)
-	toolName := metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName)
-	var input, output map[string]any
-	switch update := envelope.Update.(type) {
-	case schema.ToolCall:
-		input, _ = update.RawInput.(map[string]any)
-		output, _ = update.RawOutput.(map[string]any)
-	case schema.ToolCallUpdate:
-		input, _ = update.RawInput.(map[string]any)
-		output, _ = update.RawOutput.(map[string]any)
-	default:
-		return acpTaskStreamAnchor{}, false
-	}
-	callID := strings.TrimSpace(taskStreamToolCallID(envelope.Update))
-	kind := task.Kind("")
-	switch identity.CanonicalOrSelf(toolName) {
-	case identity.RunCommand:
-		kind = task.KindCommand
-	case identity.Spawn:
-		kind = task.KindSubagent
-	default:
-		targetKind := strings.ToLower(strings.TrimSpace(display.ToolTaskTargetKind(input, output, meta)))
-		terminalInfo, hasTerminalInfo := metautil.TerminalInfo(meta)
-		switch {
-		case targetKind == string(task.KindCommand) &&
-			hasTerminalInfo &&
-			strings.TrimSpace(terminalInfo.TerminalID) == callID:
-			// Standard ACP strips Caelis' private runtime tool-name metadata,
-			// but the typed RunCommand terminal anchor and target kind remain.
-			// The Task directory match below still validates the canonical
-			// parent call before any stream is attached.
-			kind = task.KindCommand
-		case identity.CanonicalOrSelf(display.MapString(output, "parent_tool")) == identity.Spawn &&
-			strings.EqualFold(display.ToolTaskTargetKind(input, output, meta), "subagent"):
-			kind = task.KindSubagent
-		}
-	}
-	if kind == "" {
-		return acpTaskStreamAnchor{}, false
-	}
-	handle := display.ToolTaskHandle(input, output, meta)
-	handle = strings.TrimSpace(handle)
-	if kind == task.KindSubagent {
-		if parentCall := strings.TrimSpace(display.MapString(output, "parent_call")); parentCall != "" && parentCall != callID {
-			return acpTaskStreamAnchor{}, false
-		}
-	}
-	anchor := acpTaskStreamAnchor{callID: callID, handle: handle, kind: kind}
-	return anchor, callID != "" && handle != ""
-}
-
-func acpTaskStreamEnvelopeAllowed(anchor acpTaskStreamAnchor, envelope eventstream.Envelope) bool {
-	switch anchor.kind {
-	case task.KindCommand:
-		return envelope.Scope == eventstream.ScopeMain && envelope.Kind == eventstream.KindSessionUpdate && envelopeHasTerminalDelivery(envelope)
-	case task.KindSubagent:
-		if envelope.Scope != eventstream.ScopeSubagent || envelope.ParentTool == nil ||
-			strings.TrimSpace(envelope.ParentTool.ToolCallID) != anchor.callID ||
-			identity.CanonicalOrSelf(envelope.ParentTool.ToolName) != identity.Spawn {
-			return false
-		}
-		switch envelope.Kind {
-		case eventstream.KindSessionUpdate:
-			return envelope.Update != nil
-		case eventstream.KindNotice:
-			return strings.TrimSpace(envelope.Notice) != ""
-		}
-	}
-	return false
-}
-
-func acpSubagentTaskLifecycleAllowed(anchor acpTaskStreamAnchor, envelope eventstream.Envelope) bool {
-	return anchor.kind == task.KindSubagent && envelope.Scope == eventstream.ScopeSubagent &&
-		envelope.ParentTool != nil && strings.TrimSpace(envelope.ParentTool.ToolCallID) == anchor.callID &&
-		identity.CanonicalOrSelf(envelope.ParentTool.ToolName) == identity.Spawn &&
-		envelope.Lifecycle != nil && eventstream.IsTerminalLifecycleState(envelope.Lifecycle.State)
-}
-
-func taskStreamParentToolName(kind task.Kind) string {
-	switch kind {
-	case task.KindSubagent:
-		return identity.Spawn
-	case task.KindCommand:
-		return identity.RunCommand
-	default:
-		return ""
-	}
-}
-
-func taskStreamToolCallID(update schema.Update) string {
-	switch typed := update.(type) {
-	case schema.ToolCall:
-		return typed.ToolCallID
-	case schema.ToolCallUpdate:
-		return typed.ToolCallID
-	default:
-		return ""
-	}
-}
-
-func envelopeHasTerminalDelivery(envelope eventstream.Envelope) bool {
-	meta := eventstream.UpdateMeta(envelope.Update)
-	output, ok := metautil.TerminalOutput(meta)
-	if ok && output.Data != "" {
-		return true
-	}
-	_, ok = metautil.TerminalExit(meta)
-	return ok
 }

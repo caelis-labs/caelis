@@ -477,6 +477,13 @@ func TestSubagentReadDoesNotAdvanceCancellationReconciliation(t *testing.T) {
 	if phase := subagentCancelPhase(taskStringValue(snapshot.Metadata["cancel_phase"])); phase != subagentCancelPhaseApplied {
 		t.Fatalf("Read() cancel phase = %q, want %q", phase, subagentCancelPhaseApplied)
 	}
+	if got := taskStringValue(snapshot.Result["error"]); got != "remote cancellation is pending terminal confirmation" {
+		t.Fatalf("Read() error = %q, want cancellation uncertainty diagnostic", got)
+	}
+	payload := taskToolPayload(snapshot)
+	if _, exists := payload["final_message"]; exists {
+		t.Fatalf("unknown cancellation manufactured final message: %#v", payload)
+	}
 }
 
 func TestSubagentRejectsUnknownNeutralRoleBeforeSpawn(t *testing.T) {
@@ -586,6 +593,7 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsSubagentResult(t *testing.T) 
 	canonicalText := "canonical truncated child answer\n"
 	err = runtime.tasks.syncCanonicalToolResult(ctx, activeSession.SessionRef, &session.Event{
 		Type: session.EventTypeToolResult,
+		Meta: taskToolMeta(snapshot),
 		Tool: &session.EventTool{
 			Name:   "SPAWN",
 			Status: "completed",
@@ -1370,8 +1378,8 @@ func TestSubagentStreamReadInterruptsStaleRunningChild(t *testing.T) {
 	if snap.ExitCode != nil {
 		t.Fatalf("stream snapshot ExitCode = %#v, want nil for interrupted subagent", snap.ExitCode)
 	}
-	if got := snap.FinalText; !strings.Contains(got, "child session") {
-		t.Fatalf("stream snapshot final text = %q, want child session detail", got)
+	if got := snap.FinalText; strings.Contains(got, "child-1") {
+		t.Fatalf("stream snapshot final text leaked child identity: %q", got)
 	}
 
 	waited, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{TaskID: started.Ref.TaskID, Principal: session.ActorKindController})
@@ -1380,6 +1388,11 @@ func TestSubagentStreamReadInterruptsStaleRunningChild(t *testing.T) {
 	}
 	if waited.Running || waited.State != task.StateInterrupted {
 		t.Fatalf("Wait() = running %v state %q, want interrupted", waited.Running, waited.State)
+	}
+	if got := taskStringValue(waited.Result["error"]); got != "subagent session interrupted during recovery" {
+		t.Fatalf("Wait() error diagnostic = %q, want bounded recovery diagnostic", got)
+	} else if strings.Contains(got, "child-1") {
+		t.Fatalf("Wait() error diagnostic leaked child identity: %q", got)
 	}
 }
 

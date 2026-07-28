@@ -308,6 +308,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 	workspace_key TEXT NOT NULL,
 	title TEXT NOT NULL,
 	state TEXT NOT NULL,
+	failure_diagnostic TEXT NOT NULL,
 	running INTEGER NOT NULL,
 	supports_input INTEGER NOT NULL,
 	supports_cancel INTEGER NOT NULL,
@@ -334,7 +335,7 @@ CREATE INDEX IF NOT EXISTS tasks_session_kind_handle_idx ON tasks(session_id, ki
 	if err != nil {
 		return fmt.Errorf("agent-sdk/session/file: initialize session index: %w", err)
 	}
-	if err := ensureTaskIndexV3Columns(db); err != nil {
+	if err := ensureTaskIndexV4Columns(db); err != nil {
 		return err
 	}
 	if version != indexVersion {
@@ -345,9 +346,10 @@ CREATE INDEX IF NOT EXISTS tasks_session_kind_handle_idx ON tasks(session_id, ki
 	return nil
 }
 
-func ensureTaskIndexV3Columns(db *sql.DB) error {
+func ensureTaskIndexV4Columns(db *sql.DB) error {
 	columns := map[string]string{
 		"revision":             "INTEGER NOT NULL DEFAULT 0",
+		"failure_diagnostic":   "TEXT NOT NULL DEFAULT ''",
 		"lease_id":             "TEXT NOT NULL DEFAULT ''",
 		"lease_owner_id":       "TEXT NOT NULL DEFAULT ''",
 		"lease_revision":       "INTEGER NOT NULL DEFAULT 0",

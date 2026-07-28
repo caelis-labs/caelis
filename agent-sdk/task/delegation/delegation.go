@@ -94,13 +94,18 @@ type ContinueRequest struct {
 // Result captures one delegated child summary visible to runtime and the
 // calling agent. The child transcript remains in its own session.
 type Result struct {
-	TaskID        string    `json:"task_id,omitempty"`
-	State         State     `json:"state,omitempty"`
-	Running       bool      `json:"running,omitempty"`
-	Yielded       bool      `json:"yielded,omitempty"`
-	OutputPreview string    `json:"output_preview,omitempty"`
-	Result        string    `json:"result,omitempty"`
-	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+	TaskID        string `json:"task_id,omitempty"`
+	State         State  `json:"state,omitempty"`
+	Running       bool   `json:"running,omitempty"`
+	Yielded       bool   `json:"yielded,omitempty"`
+	OutputPreview string `json:"output_preview,omitempty"`
+	// Error is one bounded, non-sensitive operation summary for a terminal
+	// delegated child. Producers must not include raw provider errors, stderr,
+	// credentials, or local paths. It remains distinct from Result, which is
+	// reserved for canonical assistant output.
+	Error     string    `json:"error,omitempty"`
+	Result    string    `json:"result,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
 func NormalizeAgent(in Agent) Agent {
@@ -162,7 +167,11 @@ func CloneResult(in Result) Result {
 	out.State = State(strings.TrimSpace(string(in.State)))
 	out.TaskID = strings.TrimSpace(in.TaskID)
 	out.OutputPreview = strings.TrimSpace(in.OutputPreview)
+	out.Error = strings.TrimSpace(in.Error)
 	out.Result = strings.TrimSpace(in.Result)
+	if out.State != StateFailed && out.State != StateInterrupted {
+		out.Error = ""
+	}
 	return out
 }
 

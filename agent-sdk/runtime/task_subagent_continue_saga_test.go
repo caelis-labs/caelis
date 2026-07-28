@@ -181,6 +181,21 @@ func TestSubagentContinueSagaRefusesBlindReissueAfterExternalClaim(t *testing.T)
 	if entry.State != taskapi.StateUnknownOutcome || entry.Running || entry.SupportsInput {
 		t.Fatalf("durable continue state = %#v, want terminal unknown without input", entry)
 	}
+	if got := taskStringValue(entry.Result["error"]); got != subagentContinueUnknownDiagnostic {
+		t.Fatalf("durable continue error = %q, want fixed diagnostic", got)
+	}
+	for _, key := range []string{"result", "final_message", "output_preview"} {
+		if _, exists := entry.Result[key]; exists {
+			t.Fatalf("unknown continue retained %q: %#v", key, entry.Result)
+		}
+	}
+	if persisted := strings.Join([]string{taskStringValue(entry.Result["error"]), taskStringValue(entry.Metadata["continue_reason"])}, "\n"); strings.Contains(persisted, "forced remote continue failure") {
+		t.Fatalf("unknown continue persisted raw runner error: %q", persisted)
+	}
+	payload := taskToolPayload(snapshotFromTaskEntry(entry))
+	if _, exists := payload["final_message"]; exists {
+		t.Fatalf("unknown continue manufactured final message: %#v", payload)
+	}
 
 	runner.continueErr = nil
 	_, err = runtime.tasks.Write(context.Background(), active.SessionRef, taskapi.ControlRequest{
@@ -452,6 +467,12 @@ func TestRecoverRuntimeStatePromotesPendingContinueToDurableUnknown(t *testing.T
 		State: taskapi.StateCompleted, Running: false, SupportsInput: true,
 		Spec:     map[string]any{"continue_phase": string(continuePhasePending)},
 		Metadata: map[string]any{"continue_phase": string(continuePhasePending)},
+		Result: map[string]any{
+			"state":          string(taskapi.StateCompleted),
+			"result":         "previous completed turn",
+			"final_message":  "previous completed turn",
+			"output_preview": "stale activity",
+		},
 	}
 	if _, err := store.Put(context.Background(), taskapi.PutRequest{Entry: entry}); err != nil {
 		t.Fatal(err)
@@ -470,6 +491,22 @@ func TestRecoverRuntimeStatePromotesPendingContinueToDurableUnknown(t *testing.T
 	if got.State != taskapi.StateUnknownOutcome || got.Running || got.SupportsInput ||
 		taskStringValue(got.Metadata["continue_phase"]) != string(continuePhaseUnknownOutcome) {
 		t.Fatalf("recovered task = %#v, want durable unknown outcome", got)
+	}
+	if gotDiagnostic := taskStringValue(got.Result["error"]); gotDiagnostic != subagentContinueUnknownDiagnostic {
+		t.Fatalf("recovered error = %q, want fixed diagnostic", gotDiagnostic)
+	}
+	for _, key := range []string{"result", "final_message", "output_preview"} {
+		if _, exists := got.Result[key]; exists {
+			t.Fatalf("recovered unknown outcome retained %q: %#v", key, got.Result)
+		}
+	}
+	rehydrated := runtime.tasks.rehydrateSubagentTask(got).snapshot()
+	payload := taskToolPayload(rehydrated)
+	if taskStringValue(payload["error"]) != subagentContinueUnknownDiagnostic {
+		t.Fatalf("rehydrated Task payload = %#v, want fixed diagnostic", payload)
+	}
+	if _, exists := payload["final_message"]; exists {
+		t.Fatalf("rehydrated unknown outcome manufactured final message: %#v", payload)
 	}
 }
 

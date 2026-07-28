@@ -43,23 +43,35 @@ func (s *streamService) resolveReader(ctx context.Context, ref stream.Ref) (reso
 	if err := stream.ValidateRef(ref); err != nil {
 		return nil, nil, err
 	}
-	task, err := s.resolveTask(ctx, ref)
-	if err == nil {
+	if s == nil {
+		return nil, nil, fmt.Errorf("agent-sdk/runtime: task stream service is unavailable")
+	}
+	resolved, err := s.tasks.resolveStreamTask(
+		ctx,
+		session.SessionRef{SessionID: ref.SessionID},
+		ref.TaskID,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch resolved.kind {
+	case task.KindCommand:
+		command := resolved.command
 		return func(readCtx context.Context, cursor stream.Cursor) (stream.Snapshot, error) {
-				return s.readCommand(readCtx, task, cursor)
+				return s.readCommand(readCtx, command, cursor)
 			}, func(awaitCtx context.Context, cursor stream.Cursor, followContinue bool) (stream.Snapshot, error) {
-				return s.awaitCommand(awaitCtx, task, cursor, followContinue)
+				return s.awaitCommand(awaitCtx, command, cursor, followContinue)
 			}, nil
+	case task.KindSubagent:
+		subagent := resolved.subagent
+		return func(readCtx context.Context, cursor stream.Cursor) (stream.Snapshot, error) {
+				return s.readSubagent(readCtx, subagent, cursor)
+			}, func(awaitCtx context.Context, cursor stream.Cursor, followContinue bool) (stream.Snapshot, error) {
+				return s.awaitSubagent(awaitCtx, subagent, cursor, followContinue)
+			}, nil
+	default:
+		return nil, nil, fmt.Errorf("agent-sdk/runtime: unsupported resolved task kind %q", resolved.kind)
 	}
-	subagent, subagentErr := s.resolveSubagent(ctx, ref)
-	if subagentErr != nil {
-		return nil, nil, subagentErr
-	}
-	return func(readCtx context.Context, cursor stream.Cursor) (stream.Snapshot, error) {
-			return s.readSubagent(readCtx, subagent, cursor)
-		}, func(awaitCtx context.Context, cursor stream.Cursor, followContinue bool) (stream.Snapshot, error) {
-			return s.awaitSubagent(awaitCtx, subagent, cursor, followContinue)
-		}, nil
 }
 
 func (s *streamService) readCommand(ctx context.Context, task *commandTask, cursor stream.Cursor) (stream.Snapshot, error) {
@@ -366,7 +378,7 @@ func (s *streamService) readSubagent(ctx context.Context, sub *subagentTask, cur
 		} else if ctx.Err() != nil {
 			return stream.Snapshot{}, ctx.Err()
 		} else if sub.isRunning() && s != nil && s.tasks != nil {
-			if _, interruptErr := s.tasks.interruptSubagentTask(ctx, sub, "subagent session interrupted during recovery: "+strings.TrimSpace(err.Error())); interruptErr != nil {
+			if _, interruptErr := s.tasks.interruptSubagentTask(ctx, sub, "subagent session interrupted during recovery"); interruptErr != nil {
 				return stream.Snapshot{}, interruptErr
 			}
 		}
@@ -411,13 +423,16 @@ func (s *streamService) readSubagent(ctx context.Context, sub *subagentTask, cur
 		UpdatedAt:             time.Now(),
 	}
 	if !sub.running {
-		snap.FinalText = firstNonBlankTaskOutput(
-			taskRawStringValue(sub.result["final_message"]),
-			taskRawStringValue(sub.result["result"]),
-			output,
-			taskRawStringValue(sub.result["error"]),
-			"(no output)",
-		)
+		if diagnostic, failureState := subagentFailureDiagnostic(state, taskRawStringValue(sub.result["error"])); failureState {
+			snap.FinalText = firstNonBlankTaskOutput(output, diagnostic, "(no output)")
+		} else {
+			snap.FinalText = firstNonBlankTaskOutput(
+				taskRawStringValue(sub.result["final_message"]),
+				taskRawStringValue(sub.result["result"]),
+				output,
+				"(no output)",
+			)
+		}
 	}
 	if start := cursor.Events; start < nextEvents {
 		if start < sub.streamEventBase {
@@ -522,7 +537,7 @@ func (s *streamService) Wait(ctx context.Context, ref stream.Ref) (stream.Snapsh
 }
 
 func (s *streamService) Kill(ctx context.Context, ref stream.Ref) error {
-	task, err := s.resolveTask(ctx, stream.NormalizeRef(ref))
+	task, err := s.resolveTerminalCommand(ctx, stream.NormalizeRef(ref))
 	if err != nil {
 		return err
 	}
@@ -530,7 +545,7 @@ func (s *streamService) Kill(ctx context.Context, ref stream.Ref) error {
 }
 
 func (s *streamService) Release(ctx context.Context, ref stream.Ref) error {
-	task, err := s.resolveTask(ctx, stream.NormalizeRef(ref))
+	task, err := s.resolveTerminalCommand(ctx, stream.NormalizeRef(ref))
 	if err != nil {
 		return err
 	}
@@ -544,7 +559,10 @@ func (s *streamService) Release(ctx context.Context, ref stream.Ref) error {
 	return nil
 }
 
-func (s *streamService) resolveTask(ctx context.Context, ref stream.Ref) (*commandTask, error) {
+// resolveTerminalCommand deliberately resolves command tasks only. Kill and
+// Release are terminal process operations; subagent lifecycle remains on the
+// TASK control plane and must never be routed through this resolver.
+func (s *streamService) resolveTerminalCommand(ctx context.Context, ref stream.Ref) (*commandTask, error) {
 	if s == nil || s.tasks == nil {
 		return nil, fmt.Errorf("agent-sdk/runtime: terminal service is unavailable")
 	}
@@ -553,17 +571,6 @@ func (s *streamService) resolveTask(ctx context.Context, ref stream.Ref) (*comma
 	}
 	sessionRef := session.SessionRef{SessionID: ref.SessionID}
 	return s.tasks.lookupCommand(ctx, sessionRef, ref.TaskID)
-}
-
-func (s *streamService) resolveSubagent(ctx context.Context, ref stream.Ref) (*subagentTask, error) {
-	if s == nil || s.tasks == nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: terminal service is unavailable")
-	}
-	if err := stream.ValidateRef(ref); err != nil {
-		return nil, err
-	}
-	sessionRef := session.SessionRef{SessionID: ref.SessionID}
-	return s.tasks.lookupSubagent(ctx, sessionRef, ref.TaskID)
 }
 
 func sliceStringFromByteCursor(text string, cursor int64) string {

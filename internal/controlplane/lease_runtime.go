@@ -43,9 +43,14 @@ type LeasedRuntime struct {
 	ownerID           string
 	ttl               time.Duration
 	heartbeatInterval time.Duration
+	heartbeatDriver   sessionLeaseHeartbeatDriver
 }
 
 func NewLeasedRuntime(config LeasedRuntimeConfig) (*LeasedRuntime, error) {
+	return newLeasedRuntime(config, defaultSessionLeaseHeartbeatDriver())
+}
+
+func newLeasedRuntime(config LeasedRuntimeConfig, heartbeatDriver sessionLeaseHeartbeatDriver) (*LeasedRuntime, error) {
 	if config.Runtime == nil {
 		return nil, fmt.Errorf("controlplane: leased runtime requires an execution runtime")
 	}
@@ -73,6 +78,7 @@ func NewLeasedRuntime(config LeasedRuntimeConfig) (*LeasedRuntime, error) {
 		ownerID:           ownerID,
 		ttl:               ttl,
 		heartbeatInterval: interval,
+		heartbeatDriver:   heartbeatDriver.normalized(),
 	}, nil
 }
 
@@ -80,7 +86,7 @@ func NewLeasedRuntime(config LeasedRuntimeConfig) (*LeasedRuntime, error) {
 // callback. Lease loss cancels the callback context so work cannot continue
 // under a stolen fence.
 func (r *LeasedRuntime) ExecutePlaced(ctx context.Context, ref session.SessionRef, execute func(context.Context) error) error {
-	return executeWithSessionLease(ctx, r.leases, r.ownerID, r.ttl, r.heartbeatInterval, ref, execute)
+	return executeWithSessionLeaseDriver(ctx, r.leases, r.ownerID, r.ttl, r.heartbeatInterval, ref, execute, r.heartbeatDriver)
 }
 
 func (r *LeasedRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
@@ -99,7 +105,7 @@ func (r *LeasedRuntime) runWithLease(ctx context.Context, ref session.SessionRef
 		return agent.RunResult{}, err
 	}
 	runCtx, cancel := context.WithCancel(session.ContextWithRuntimeLease(ctx, lease))
-	guard := startSessionLeaseGuard(r.leases, lease, r.ttl, r.heartbeatInterval, cancel)
+	guard := startSessionLeaseGuardWithDriver(r.leases, lease, r.ttl, r.heartbeatInterval, cancel, r.heartbeatDriver)
 	result, err := execute(runCtx)
 	if err != nil {
 		cancel()
@@ -127,6 +133,28 @@ func executeWithSessionLease(
 	ref session.SessionRef,
 	execute func(context.Context) error,
 ) error {
+	return executeWithSessionLeaseDriver(
+		ctx,
+		leases,
+		ownerID,
+		ttl,
+		heartbeatInterval,
+		ref,
+		execute,
+		defaultSessionLeaseHeartbeatDriver(),
+	)
+}
+
+func executeWithSessionLeaseDriver(
+	ctx context.Context,
+	leases session.SessionLeaseService,
+	ownerID string,
+	ttl time.Duration,
+	heartbeatInterval time.Duration,
+	ref session.SessionRef,
+	execute func(context.Context) error,
+	heartbeatDriver sessionLeaseHeartbeatDriver,
+) error {
 	if execute == nil {
 		return fmt.Errorf("controlplane: placed operation is required")
 	}
@@ -140,7 +168,7 @@ func executeWithSessionLease(
 	}
 	runCtx, cancel := context.WithCancel(session.ContextWithRuntimeLease(ctx, lease))
 	defer cancel()
-	guard := startSessionLeaseGuard(leases, lease, ttl, heartbeatInterval, cancel)
+	guard := startSessionLeaseGuardWithDriver(leases, lease, ttl, heartbeatInterval, cancel, heartbeatDriver)
 	execErr := execute(runCtx)
 	return errors.Join(execErr, guard.finishAndErr())
 }
@@ -206,6 +234,7 @@ type sessionLeaseGuard struct {
 	leases          session.SessionLeaseService
 	ttl             time.Duration
 	interval        time.Duration
+	driver          sessionLeaseHeartbeatDriver
 	onLoss          func()
 	heartbeatCtx    context.Context
 	heartbeatCancel context.CancelFunc
@@ -223,15 +252,53 @@ type sessionLeaseGuard struct {
 
 var errSessionLeaseRenewalDeadline = errors.New("controlplane: session lease renewal did not complete before the expiry safety deadline")
 
-func startSessionLeaseGuard(
+type sessionLeaseHeartbeatTicker struct {
+	ticks <-chan time.Time
+	stop  func()
+}
+
+type sessionLeaseHeartbeatDriver struct {
+	now          func() time.Time
+	newTicker    func(time.Duration) sessionLeaseHeartbeatTicker
+	withDeadline func(context.Context, time.Time) (context.Context, context.CancelFunc)
+}
+
+func defaultSessionLeaseHeartbeatDriver() sessionLeaseHeartbeatDriver {
+	return sessionLeaseHeartbeatDriver{
+		now: time.Now,
+		newTicker: func(interval time.Duration) sessionLeaseHeartbeatTicker {
+			ticker := time.NewTicker(interval)
+			return sessionLeaseHeartbeatTicker{ticks: ticker.C, stop: ticker.Stop}
+		},
+		withDeadline: context.WithDeadline,
+	}
+}
+
+func (d sessionLeaseHeartbeatDriver) normalized() sessionLeaseHeartbeatDriver {
+	defaults := defaultSessionLeaseHeartbeatDriver()
+	if d.now == nil {
+		d.now = defaults.now
+	}
+	if d.newTicker == nil {
+		d.newTicker = defaults.newTicker
+	}
+	if d.withDeadline == nil {
+		d.withDeadline = defaults.withDeadline
+	}
+	return d
+}
+
+func startSessionLeaseGuardWithDriver(
 	leases session.SessionLeaseService,
 	lease session.SessionLease,
 	ttl, interval time.Duration,
 	onLoss func(),
+	driver sessionLeaseHeartbeatDriver,
 ) *sessionLeaseGuard {
 	heartbeatCtx, heartbeatCancel := context.WithCancel(context.Background())
 	guard := &sessionLeaseGuard{
 		leases: leases, lease: lease, ttl: ttl, interval: interval, onLoss: onLoss,
+		driver:       driver.normalized(),
 		heartbeatCtx: heartbeatCtx, heartbeatCancel: heartbeatCancel, stop: make(chan struct{}),
 	}
 	guard.wg.Add(1)
@@ -241,13 +308,15 @@ func startSessionLeaseGuard(
 
 func (g *sessionLeaseGuard) heartbeat() {
 	defer g.wg.Done()
-	ticker := time.NewTicker(g.interval)
-	defer ticker.Stop()
+	ticker := g.driver.newTicker(g.interval)
+	if ticker.stop != nil {
+		defer ticker.stop()
+	}
 	for {
 		select {
 		case <-g.stop:
 			return
-		case <-ticker.C:
+		case <-ticker.ticks:
 			if err := g.heartbeatOnce(); err != nil {
 				g.mu.Lock()
 				if g.stopping && errors.Is(err, context.Canceled) {
@@ -291,11 +360,11 @@ func (g *sessionLeaseGuard) heartbeatOnce() error {
 	if heartbeatCtx == nil {
 		heartbeatCtx = context.Background()
 	}
-	deadline, err := sessionLeaseRenewalDeadline(lease, g.interval, time.Now())
+	deadline, err := sessionLeaseRenewalDeadline(lease, g.interval, g.driver.now())
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithDeadline(heartbeatCtx, deadline)
+	ctx, cancel := g.driver.withDeadline(heartbeatCtx, deadline)
 	next, err := g.leases.HeartbeatSessionLease(ctx, session.HeartbeatSessionLeaseRequest{
 		SessionRef: lease.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID,
 		ExpectedLeaseRevision: lease.Revision, TTL: g.ttl,
@@ -305,7 +374,7 @@ func (g *sessionLeaseGuard) heartbeatOnce() error {
 		if next.LeaseID == lease.LeaseID && next.Revision > lease.Revision {
 			err = nil
 		} else if reader, ok := g.leases.(session.SessionLeaseReader); ok {
-			ctx, cancel = context.WithDeadline(heartbeatCtx, deadline)
+			ctx, cancel = g.driver.withDeadline(heartbeatCtx, deadline)
 			next, err = reader.SessionLease(ctx, lease.SessionRef)
 			cancel()
 		}
@@ -325,7 +394,7 @@ func (g *sessionLeaseGuard) heartbeatOnce() error {
 	if next.Revision <= lease.Revision {
 		return fmt.Errorf("controlplane: session lease revision did not advance during heartbeat")
 	}
-	if !next.ExpiresAt.After(time.Now()) {
+	if !next.ExpiresAt.After(g.driver.now()) {
 		return errSessionLeaseRenewalDeadline
 	}
 	g.mu.Lock()

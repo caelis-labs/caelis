@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	sdkstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
@@ -264,7 +265,11 @@ func TestEmitTaskAwareControlEnvelopeDrainsChildBeforeRepeatedParentFallbackClos
 	var taskEventStream <-chan eventstream.Envelope = taskEvents
 	boundary := make(chan struct{}, 1)
 	mux := &acpTaskStreamMux{
-		boundaries: map[string]chan struct{}{"spawn-1": boundary},
+		observations: map[string]*acpTaskStreamObservation{
+			"spawn-1": {
+				generation: &acpTaskStreamObservationGeneration{boundary: boundary},
+			},
+		},
 	}
 	mux.signalBoundary("spawn-1")
 
@@ -428,8 +433,10 @@ func TestACPTaskStreamMuxMakesSubscribeFailureVisible(t *testing.T) {
 	select {
 	case envelope := <-mux.Events():
 		if envelope.Kind != eventstream.KindNotice || envelope.Delivery == nil || envelope.Delivery.Mode != eventstream.DeliveryTransient ||
-			!strings.Contains(envelope.Notice, "stream backend unavailable") || !strings.Contains(envelope.Notice, "command") {
-			t.Fatalf("subscribe failure envelope = %#v, want transient visible notice", envelope)
+			strings.Contains(envelope.Notice, "stream backend unavailable") ||
+			!strings.Contains(envelope.Notice, "Task command") ||
+			!strings.Contains(envelope.Notice, "final Task result remains available") {
+			t.Fatalf("subscribe failure envelope = %#v, want sanitized transient notice", envelope)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Task stream subscribe failure was silent")
@@ -464,142 +471,447 @@ func TestACPTaskStreamMuxRetriesAnchorAfterEarlyDirectoryMiss(t *testing.T) {
 
 	mux.Observe(anchor)
 	select {
-	case envelope := <-mux.Events():
-		if envelope.Kind != eventstream.KindNotice || !strings.Contains(envelope.Notice, "not discoverable yet") {
-			t.Fatalf("early directory miss = %#v, want visible transient notice", envelope)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("early directory miss was not reported")
-	}
-
-	// A later canonical update for the same tool call must be allowed to retry.
-	mux.Observe(anchor)
-	select {
 	case request := <-service.requests:
 		if request.TaskID != "task-1" {
 			t.Fatalf("retry Subscribe request = %#v", request)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("later anchor was permanently suppressed after directory miss")
+		t.Fatal("early directory miss was not recovered within the grace window")
+	}
+	select {
+	case envelope := <-mux.Events():
+		t.Fatalf("recovered directory miss emitted a notice: %#v", envelope)
+	case <-time.After(2 * acpTaskStreamResolveRetryDelay):
+	}
+	service.mu.Lock()
+	listCalls := service.listCalls
+	service.mu.Unlock()
+	if listCalls != 2 {
+		t.Fatalf("List calls = %d, want one miss followed by one successful retry", listCalls)
 	}
 }
 
-type acpMuxTestService struct {
-	requests chan taskstream.SubscribeRequest
-	sub      *acpMuxTestSubscription
-	list     taskstream.ListResult
-	err      error
-}
+func TestACPTaskStreamMuxExhaustsRetryWithOneSanitizedNotice(t *testing.T) {
+	t.Parallel()
 
-type acpMuxRetryService struct {
-	mu         sync.Mutex
-	listCalls  int
-	requests   chan taskstream.SubscribeRequest
-	sub        *acpMuxTestSubscription
-	descriptor taskstream.TaskDescriptor
-}
-
-type acpMuxPromptCallbacks struct {
-	updates chan acp.SessionNotification
-}
-
-func (c *acpMuxPromptCallbacks) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {
-	c.updates <- notification
-	return nil
-}
-
-func (*acpMuxPromptCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	return acp.RequestPermissionResponse{}, nil
-}
-
-func (s *acpMuxRetryService) List(context.Context, taskstream.Principal, taskstream.ListRequest) (taskstream.ListResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.listCalls++
-	if s.listCalls == 1 {
-		return taskstream.ListResult{}, nil
+	const internalTaskID = "95537455f400"
+	service := &acpMuxTestService{
+		err: errorcode.New(errorcode.NotFound, `agent-sdk/runtime: task "`+internalTaskID+`" not found`),
+		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
+			SessionID: "session-1", TaskID: internalTaskID, Handle: "command-43", Kind: task.KindCommand,
+			State: task.StateCompleted, Running: false,
+			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+		}}},
 	}
-	return taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{s.descriptor}}, nil
-}
-
-func (*acpMuxRetryService) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.Batch, error) {
-	return taskstream.Batch{}, nil
-}
-
-func (s *acpMuxRetryService) Subscribe(_ context.Context, _ taskstream.Principal, request taskstream.SubscribeRequest) (taskstream.SubscribeResult, error) {
-	s.requests <- request
-	return taskstream.SubscribeResult{Subscription: s.sub, ResumeMode: taskstream.ResumeModeExact}, nil
-}
-
-func (s *acpMuxTestService) List(context.Context, taskstream.Principal, taskstream.ListRequest) (taskstream.ListResult, error) {
-	return s.list, nil
-}
-
-func (s *acpMuxTestService) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.Batch, error) {
-	return taskstream.Batch{}, nil
-}
-
-func (s *acpMuxTestService) Subscribe(_ context.Context, _ taskstream.Principal, request taskstream.SubscribeRequest) (taskstream.SubscribeResult, error) {
-	if s.requests != nil {
-		s.requests <- request
-	}
-	if s.err != nil {
-		return taskstream.SubscribeResult{}, s.err
-	}
-	return taskstream.SubscribeResult{Subscription: s.sub, ResumeMode: taskstream.ResumeModeExact}, nil
-}
-
-type acpMuxTestSubscription struct {
-	events chan eventstream.Envelope
-	once   sync.Once
-	mu     sync.Mutex
-	done   bool
-}
-
-type acpMuxControlService struct {
-	requests chan controltaskstream.SubscribeRequest
-	sub      *acpMuxControlSubscription
-	list     controltaskstream.ListResult
-}
-
-func (s *acpMuxControlService) List(context.Context, controltaskstream.Principal, controltaskstream.ListRequest) (controltaskstream.ListResult, error) {
-	return s.list, nil
-}
-func (*acpMuxControlService) Events(context.Context, controltaskstream.Principal, controltaskstream.ReadRequest) (controltaskstream.Batch, error) {
-	return controltaskstream.Batch{}, nil
-}
-func (s *acpMuxControlService) Subscribe(_ context.Context, _ controltaskstream.Principal, request controltaskstream.SubscribeRequest) (controltaskstream.SubscribeResult, error) {
-	s.requests <- request
-	return controltaskstream.SubscribeResult{Subscription: s.sub, ResumeMode: controltaskstream.ResumeModeExact}, nil
-}
-
-type acpMuxControlSubscription struct {
-	records chan controltaskstream.Record
-	once    sync.Once
-}
-
-func (s *acpMuxControlSubscription) Records() <-chan controltaskstream.Record { return s.records }
-func (*acpMuxControlSubscription) Err() error                                 { return nil }
-func (*acpMuxControlSubscription) LastCursor() string                         { return "" }
-func (s *acpMuxControlSubscription) Close() error {
-	s.once.Do(func() { close(s.records) })
-	return nil
-}
-
-func (s *acpMuxTestSubscription) Events() <-chan eventstream.Envelope { return s.events }
-func (s *acpMuxTestSubscription) Err() error                          { return nil }
-func (s *acpMuxTestSubscription) LastCursor() string                  { return "" }
-func (s *acpMuxTestSubscription) Close() error {
-	s.once.Do(func() {
-		s.mu.Lock()
-		s.done = true
-		s.mu.Unlock()
-		close(s.events)
+	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
+	defer mux.Close()
+	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "RUN_COMMAND",
 	})
-	return nil
+	anchor := eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
+			RawOutput: map[string]any{"handle": "command-43", "state": "running"}, Meta: meta,
+		},
+	}
+
+	mux.Observe(anchor)
+	select {
+	case envelope := <-mux.Events():
+		if envelope.Kind != eventstream.KindNotice ||
+			strings.Contains(envelope.Notice, internalTaskID) ||
+			strings.Contains(envelope.Notice, "not found") ||
+			!strings.Contains(envelope.Notice, "recovery window") ||
+			!strings.Contains(envelope.Notice, "final Task result remains available") {
+			t.Fatalf("exhausted retry notice = %#v, want one sanitized availability notice", envelope)
+		}
+		meta, _ := envelope.Meta["task_stream"].(map[string]any)
+		if meta["error_code"] != string(errorcode.NotFound) || meta["retry_exhausted"] != true {
+			t.Fatalf("exhausted retry metadata = %#v", meta)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("exhausted Task stream retry emitted no notice")
+	}
+	if calls := service.subscribeCallCount(); calls != acpTaskStreamResolveMaxAttempts {
+		t.Fatalf("Subscribe calls = %d, want bounded attempts %d", calls, acpTaskStreamResolveMaxAttempts)
+	}
+
+	mux.Observe(anchor)
+	deadline := time.Now().Add(time.Second)
+	for service.subscribeCallCount() != 2*acpTaskStreamResolveMaxAttempts && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if calls := service.subscribeCallCount(); calls != 2*acpTaskStreamResolveMaxAttempts {
+		t.Fatalf("Subscribe calls after repeated anchor = %d, want a fresh bounded resolve", calls)
+	}
+	select {
+	case envelope := <-mux.Events():
+		t.Fatalf("repeated retryable miss emitted a duplicate notice: %#v", envelope)
+	case <-time.After(2 * acpTaskStreamResolveRetryDelay):
+	}
 }
-func (s *acpMuxTestSubscription) closed() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.done
+
+func TestACPTaskStreamMuxLaterAnchorAttachesAfterRecoveryWindow(t *testing.T) {
+	t.Parallel()
+
+	service := &acpMuxTestService{
+		err: errorcode.New(errorcode.NotFound, "Task registration is still pending"),
+		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
+			SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
+			State: task.StateRunning, Running: true,
+			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+		}}},
+	}
+	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
+	defer mux.Close()
+	anchor := acpMuxCommandAnchor("command")
+
+	mux.Observe(anchor)
+	select {
+	case <-mux.Events():
+	case <-time.After(time.Second):
+		t.Fatal("initial bounded attach miss emitted no availability notice")
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	sub := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 1)}
+	service.setSubscriptionResult(nil, sub)
+	mux.Observe(anchor)
+	deadline := time.Now().Add(time.Second)
+	for service.subscribeCallCount() != acpTaskStreamResolveMaxAttempts+1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if calls := service.subscribeCallCount(); calls != acpTaskStreamResolveMaxAttempts+1 {
+		t.Fatalf("Subscribe calls = %d, want later anchor to attach after the expired recovery window", calls)
+	}
+	select {
+	case <-mux.parentBoundary("command-1"):
+		t.Fatal("later successful attach inherited the prior miss boundary")
+	default:
+	}
+
+	sub.events <- acpMuxCommandOutputEnvelope("cursor-late", "late attach\n")
+	select {
+	case envelope := <-mux.Events():
+		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		if !ok || output.Data != "late attach\n" {
+			t.Fatalf("later anchor output = %#v", envelope)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("later anchor attached no live Task output")
+	}
+	sub.finish(nil, "cursor-late")
+	select {
+	case <-mux.parentBoundary("command-1"):
+	case <-time.After(time.Second):
+		t.Fatal("completed later attachment did not signal its own boundary")
+	}
+}
+
+func TestACPTaskStreamMuxRetryGenerationCannotSignalLaterAttachmentBoundary(t *testing.T) {
+	t.Parallel()
+
+	service := &acpMuxTestService{
+		err: errorcode.New(errorcode.NotFound, "Task registration is still pending"),
+		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
+			SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
+			State: task.StateRunning, Running: true,
+			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+		}}},
+	}
+	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
+	defer mux.Close()
+
+	oldSignalReady := make(chan chan struct{}, 1)
+	releaseOldSignal := make(chan struct{})
+	oldSignalReleased := false
+	defer func() {
+		if !oldSignalReleased {
+			close(releaseOldSignal)
+		}
+	}()
+	var signalCount atomic.Int32
+	mux.beforeBoundarySignal = func(_ string, boundary chan struct{}) {
+		if signalCount.Add(1) != 1 {
+			return
+		}
+		oldSignalReady <- boundary
+		<-releaseOldSignal
+	}
+
+	anchor := acpMuxCommandAnchor("command")
+	mux.Observe(anchor)
+	var oldBoundary chan struct{}
+	select {
+	case oldBoundary = <-oldSignalReady:
+	case <-time.After(time.Second):
+		t.Fatal("retryable miss did not reach deferred generation cleanup")
+	}
+	select {
+	case <-mux.Events():
+	case <-time.After(time.Second):
+		t.Fatal("retryable miss emitted no availability notice")
+	}
+
+	sub := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 1)}
+	service.setSubscriptionResult(nil, sub)
+	mux.Observe(anchor)
+	newBoundary := mux.parentBoundary("command-1")
+	if newBoundary == nil || oldBoundary == newBoundary {
+		t.Fatal("later attachment did not receive a distinct observation boundary")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		mux.mu.Lock()
+		phase := mux.observations["command-1"].phase
+		mux.mu.Unlock()
+		if phase == acpTaskStreamObservationAttached {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("later anchor phase = %v, want attached", phase)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	close(releaseOldSignal)
+	oldSignalReleased = true
+	select {
+	case <-oldBoundary:
+	case <-time.After(time.Second):
+		t.Fatal("older retry generation did not finish its own boundary")
+	}
+	select {
+	case <-newBoundary:
+		t.Fatal("older retry generation released the later attachment boundary")
+	default:
+	}
+
+	sub.events <- acpMuxCommandOutputEnvelope("cursor-later", "later generation\n")
+	select {
+	case envelope := <-mux.Events():
+		output, ok := metautil.TerminalOutput(eventstream.UpdateMeta(envelope.Update))
+		if !ok || output.Data != "later generation\n" {
+			t.Fatalf("later generation output = %#v", envelope)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("later generation did not forward Task output")
+	}
+	sub.finish(nil, "cursor-later")
+	select {
+	case <-newBoundary:
+	case <-time.After(time.Second):
+		t.Fatal("later attachment did not release its own boundary")
+	}
+}
+
+func TestACPTaskStreamMuxDoesNotRetryAfterParentTerminalOrSeal(t *testing.T) {
+	t.Parallel()
+
+	newUnavailableService := func() *acpMuxTestService {
+		return &acpMuxTestService{
+			err: errorcode.New(errorcode.NotFound, "Task registration is still pending"),
+			list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
+				SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
+				State: task.StateRunning, Running: true,
+				ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+			}}},
+		}
+	}
+	t.Run("parent terminal", func(t *testing.T) {
+		service := newUnavailableService()
+		mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
+		defer mux.Close()
+		anchor := acpMuxCommandAnchor("command")
+		mux.Observe(anchor)
+		select {
+		case <-mux.Events():
+		case <-time.After(time.Second):
+			t.Fatal("initial bounded attach miss emitted no availability notice")
+		}
+		calls := service.subscribeCallCount()
+		completed := schema.ToolStatusCompleted
+		terminal := anchor
+		update := terminal.Update.(schema.ToolCallUpdate)
+		update.Status = &completed
+		update.RawOutput = map[string]any{"handle": "command", "state": "completed"}
+		terminal.Update = update
+		mux.Observe(terminal)
+		mux.Observe(anchor)
+		time.Sleep(2 * acpTaskStreamResolveRetryDelay)
+		if got := service.subscribeCallCount(); got != calls {
+			t.Fatalf("Subscribe calls after parent terminal = %d, want %d", got, calls)
+		}
+	})
+	t.Run("sealed", func(t *testing.T) {
+		service := newUnavailableService()
+		mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
+		defer mux.Close()
+		anchor := acpMuxCommandAnchor("command")
+		mux.Observe(anchor)
+		select {
+		case <-mux.Events():
+		case <-time.After(time.Second):
+			t.Fatal("initial bounded attach miss emitted no availability notice")
+		}
+		calls := service.subscribeCallCount()
+		mux.Seal()
+		mux.Observe(anchor)
+		time.Sleep(2 * acpTaskStreamResolveRetryDelay)
+		if got := service.subscribeCallCount(); got != calls {
+			t.Fatalf("Subscribe calls after Seal = %d, want %d", got, calls)
+		}
+	})
+}
+
+func TestACPTaskStreamAnchorUsesTypedToolStatusForParentTerminal(t *testing.T) {
+	t.Parallel()
+
+	rawTerminal := acpMuxCommandAnchor("command")
+	rawUpdate := rawTerminal.Update.(schema.ToolCallUpdate)
+	rawUpdate.RawOutput = map[string]any{"handle": "command", "state": "completed"}
+	rawTerminal.Update = rawUpdate
+	anchor, ok := acpTaskStreamAnchorFromEnvelope(rawTerminal)
+	if !ok {
+		t.Fatal("raw-output anchor was not recognized")
+	}
+	if anchor.parentTerminal {
+		t.Fatal("free-form output state permanently closed Task stream discovery")
+	}
+
+	typedTerminal := rawTerminal
+	completed := schema.ToolStatusCompleted
+	typedUpdate := typedTerminal.Update.(schema.ToolCallUpdate)
+	typedUpdate.Status = &completed
+	typedTerminal.Update = typedUpdate
+	anchor, ok = acpTaskStreamAnchorFromEnvelope(typedTerminal)
+	if !ok {
+		t.Fatal("typed terminal anchor was not recognized")
+	}
+	if !anchor.parentTerminal {
+		t.Fatal("typed ACP tool status did not close Task stream discovery")
+	}
+}
+
+func TestACPTaskStreamMuxStopsInFlightAttachRetryAtObservationBoundary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		stop func(*acpTaskStreamMux, eventstream.Envelope)
+	}{
+		{
+			name: "parent terminal",
+			stop: func(mux *acpTaskStreamMux, anchor eventstream.Envelope) {
+				completed := schema.ToolStatusCompleted
+				update := anchor.Update.(schema.ToolCallUpdate)
+				update.Status = &completed
+				update.RawOutput = map[string]any{"handle": "command", "state": "completed"}
+				anchor.Update = update
+				mux.Observe(anchor)
+			},
+		},
+		{
+			name: "sealed",
+			stop: func(mux *acpTaskStreamMux, _ eventstream.Envelope) {
+				mux.Seal()
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			started := make(chan struct{}, acpTaskStreamResolveMaxAttempts)
+			gate := make(chan struct{})
+			service := &acpMuxTestService{
+				err:            errorcode.New(errorcode.NotFound, "Task registration is still pending"),
+				subscribeStart: started,
+				subscribeGate:  gate,
+				list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
+					SessionID: "session-1", TaskID: "task-1", Handle: "command", Kind: task.KindCommand,
+					State: task.StateRunning, Running: true,
+					ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+				}}},
+			}
+			mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
+			defer mux.Close()
+			anchor := acpMuxCommandAnchor("command")
+			mux.Observe(anchor)
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("initial attach attempt did not start")
+			}
+			test.stop(mux, anchor)
+			close(gate)
+			time.Sleep(2 * acpTaskStreamResolveRetryDelay)
+			if calls := service.subscribeCallCount(); calls != 1 {
+				t.Fatalf("Subscribe calls after observation boundary = %d, want no retry", calls)
+			}
+		})
+	}
+}
+
+func TestACPTaskStreamMuxKeepsHardResolutionReasonsExplicit(t *testing.T) {
+	t.Parallel()
+
+	descriptor := func(taskID string) taskstream.TaskDescriptor {
+		return taskstream.TaskDescriptor{
+			SessionID: "session-1", TaskID: taskID, Handle: "command", Kind: task.KindCommand,
+			State: task.StateRunning, Running: true,
+			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
+		}
+	}
+	tests := []struct {
+		name    string
+		service *acpMuxTestService
+		reason  string
+	}{
+		{
+			name: "permission denied",
+			service: &acpMuxTestService{
+				listErr: errorcode.New(errorcode.PermissionDenied, "opaque authorization detail"),
+			},
+			reason: "access to the Task live output was denied",
+		},
+		{
+			name: "ambiguous directory",
+			service: &acpMuxTestService{
+				list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{
+					descriptor("task-1"),
+					descriptor("task-2"),
+				}},
+			},
+			reason: "Task stream identity was ambiguous or conflicted",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mux := newACPTaskStreamMux(context.Background(), test.service, taskstream.Principal{ID: "user-1"}, "session-1")
+			defer mux.Close()
+			mux.Observe(eventstream.Envelope{
+				Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+				Update: schema.ToolCallUpdate{
+					SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1",
+					RawOutput: map[string]any{"handle": "command", "state": "running"},
+					Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+						metautil.RuntimeToolName: "RUN_COMMAND",
+					}),
+				},
+			})
+
+			select {
+			case envelope := <-mux.Events():
+				if !strings.Contains(envelope.Notice, test.reason) ||
+					strings.Contains(envelope.Notice, "opaque authorization detail") {
+					t.Fatalf("hard resolution notice = %#v, want explicit sanitized reason", envelope)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("hard Task stream failure emitted no notice")
+			}
+			if calls := test.service.subscribeCallCount(); calls != 0 {
+				t.Fatalf("Subscribe calls = %d, want no retry past hard resolution failure", calls)
+			}
+		})
+	}
 }

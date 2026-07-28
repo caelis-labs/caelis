@@ -18,6 +18,14 @@
         }
       ],
       "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        },
         "terminal_info": {
           "terminal_id": "spawn-alpha"
         }
@@ -43,6 +51,14 @@
         }
       ],
       "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        },
         "terminal_info": {
           "terminal_id": "spawn-beta"
         }
@@ -71,6 +87,14 @@
         }
       ],
       "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        },
         "terminal_info": {
           "terminal_id": "spawn-alpha"
         }
@@ -99,6 +123,14 @@
         }
       ],
       "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        },
         "terminal_info": {
           "terminal_id": "spawn-beta"
         }
@@ -136,6 +168,16 @@
       "rawInput": {
         "action": "wait",
         "handle": "alpha,beta"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Task"
+            }
+          },
+          "version": 1
+        }
       }
     }
   },
@@ -177,6 +219,16 @@
             "target_kind": "command"
           }
         ]
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Task"
+            }
+          },
+          "version": 1
+        }
       }
     }
   },
@@ -246,6 +298,16 @@
       "rawInput": {
         "action": "wait",
         "handle": "beta"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Task"
+            }
+          },
+          "version": 1
+        }
       }
     }
   },
@@ -281,6 +343,16 @@
             "target_kind": "subagent"
           }
         ]
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Task"
+            }
+          },
+          "version": 1
+        }
       }
     }
   },
@@ -349,6 +421,16 @@
       "status": "pending",
       "rawInput": {
         "path": "report.md"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Read"
+            }
+          },
+          "version": 1
+        }
       }
     }
   },
@@ -365,6 +447,16 @@
       },
       "rawOutput": {
         "result": "verified"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Read"
+            }
+          },
+          "version": 1
+        }
       }
     }
   }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -135,10 +134,7 @@ func (tm *taskRuntime) persistSubagentCancelPhase(
 		entry.SupportsInput = false
 		entry.Metadata["state"] = string(taskapi.StateCancelled)
 		entry.Metadata["running"] = false
-		if entry.Result == nil {
-			entry.Result = map[string]any{}
-		}
-		entry.Result["state"] = string(taskapi.StateCancelled)
+		normalizeSubagentEntryResult(entry, "")
 		if spawned, ok := entry.Spec["spawn_result"].(map[string]any); ok {
 			spawned["state"] = string(taskapi.StateCancelled)
 			entry.Spec["spawn_result"] = spawned
@@ -149,13 +145,7 @@ func (tm *taskRuntime) persistSubagentCancelPhase(
 		entry.SupportsInput = false
 		entry.Metadata["state"] = string(taskapi.StateUnknownOutcome)
 		entry.Metadata["running"] = true
-		if entry.Result == nil {
-			entry.Result = map[string]any{}
-		}
-		entry.Result["state"] = string(taskapi.StateUnknownOutcome)
-		if strings.TrimSpace(reason) != "" {
-			entry.Result["error"] = strings.TrimSpace(reason)
-		}
+		normalizeSubagentEntryResult(entry, reason)
 	}
 	if err := tm.persistSpawnEntry(ctx, entry); err != nil {
 		return err
@@ -174,18 +164,15 @@ func (tm *taskRuntime) persistSubagentCancelPhase(
 	if terminal {
 		task.state = taskapi.StateCancelled
 		task.running = false
-		task.result["state"] = string(taskapi.StateCancelled)
+		normalizeSubagentResultForState(&task.result, taskapi.StateCancelled, "")
 		task.metadata["state"] = string(taskapi.StateCancelled)
 		task.metadata["running"] = false
 	} else {
 		task.state = taskapi.StateUnknownOutcome
 		task.running = true
-		task.result["state"] = string(taskapi.StateUnknownOutcome)
+		normalizeSubagentResultForState(&task.result, taskapi.StateUnknownOutcome, reason)
 		task.metadata["state"] = string(taskapi.StateUnknownOutcome)
 		task.metadata["running"] = true
-		if strings.TrimSpace(reason) != "" {
-			task.result["error"] = strings.TrimSpace(reason)
-		}
 	}
 	task.metadata["cancel_phase"] = string(phase)
 	task.notifyStreamChangeLocked()

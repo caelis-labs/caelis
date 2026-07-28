@@ -52,6 +52,7 @@ func terminalTextContent(content any) string {
 }
 
 func withDisplayTerminal(call ToolCall, name string, args map[string]any) ToolCall {
+	call.Meta = acpMetaWithToolName(call.Meta, name)
 	terminalID, ok := display.DisplayTerminalID(call.ToolCallID, name)
 	if !ok {
 		return call
@@ -62,6 +63,7 @@ func withDisplayTerminal(call ToolCall, name string, args map[string]any) ToolCa
 }
 
 func withDisplayTerminalUpdate(update ToolCallUpdate, toolCallID string, name string) ToolCallUpdate {
+	update.Meta = acpMetaWithToolName(update.Meta, name)
 	terminalID, ok := display.DisplayTerminalID(toolCallID, name)
 	if !ok || strings.TrimSpace(terminalID) == "" {
 		return update
@@ -147,21 +149,92 @@ func terminalExitCode(raw any) *int {
 }
 
 func protocolToolNameForUpdate(event *session.Event, update *session.ProtocolUpdate) string {
+	var updateMeta map[string]any
+	var eventMeta map[string]any
+	var rawInput map[string]any
+	var title string
+	var kind string
+	if event != nil {
+		eventMeta = event.Meta
+	}
 	if update != nil {
-		if name := protocolToolNameFromRawInput(update.RawInput); name != "" {
-			return name
-		}
-		if name := protocolToolNameFromKind(update.Kind); name != "" {
-			return name
-		}
-		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
-			if name := protocolToolNameFromKind(title[0]); name != "" {
-				return name
-			}
-			return title[0]
+		updateMeta = update.Meta
+		rawInput = update.RawInput
+		title = protocolToolNameFromTitle(update.Title)
+		kind = update.Kind
+	}
+	candidates := []string{
+		protocolToolNameFromKind(protocolCanonicalEventToolName(event, update)),
+		protocolToolNameFromMeta(updateMeta),
+		protocolToolNameFromMeta(eventMeta),
+		protocolToolNameFromRawInput(rawInput),
+		protocolKnownToolName(title),
+		protocolToolNameFromKind(kind),
+		title,
+	}
+	for _, candidate := range candidates {
+		if candidate = strings.TrimSpace(candidate); candidate != "" {
+			return candidate
 		}
 	}
 	return ""
+}
+
+// protocolCanonicalEventToolName reads only the canonical durable tool
+// payload. It deliberately does not use session.CanonicalToolName here because
+// that helper also falls back to protocol title/kind and display metadata;
+// those candidates have their own explicit positions in the projection ladder
+// below.
+func protocolCanonicalEventToolName(event *session.Event, update *session.ProtocolUpdate) string {
+	if event == nil {
+		return ""
+	}
+	if event.Tool != nil {
+		if name := strings.TrimSpace(event.Tool.Name); name != "" {
+			return name
+		}
+	}
+	if event.Message == nil {
+		return ""
+	}
+	callID := ""
+	if update != nil {
+		callID = strings.TrimSpace(update.ToolCallID)
+	}
+	if callID == "" && event.Tool != nil {
+		callID = strings.TrimSpace(event.Tool.ID)
+	}
+	calls := event.Message.ToolCalls()
+	if callID != "" {
+		for _, call := range calls {
+			if strings.TrimSpace(call.ID) == callID {
+				return strings.TrimSpace(call.Name)
+			}
+		}
+		return ""
+	}
+	if len(calls) == 1 {
+		return strings.TrimSpace(calls[0].Name)
+	}
+	return ""
+}
+
+func protocolToolNameFromTitle(title string) string {
+	fields := strings.Fields(strings.TrimSpace(title))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+func protocolToolNameFromMeta(meta map[string]any) string {
+	return protocolToolNameFromKind(metautil.String(
+		meta,
+		metautil.Root,
+		metautil.Runtime,
+		metautil.RuntimeTool,
+		metautil.RuntimeToolName,
+	))
 }
 
 func protocolToolNameFromRawInput(rawInput map[string]any) string {
@@ -188,11 +261,26 @@ func protocolToolNameFromKind(kind string) string {
 	if canonical, ok := names.Resolve(kind); ok {
 		return canonical
 	}
-	switch strings.ToLower(kind) {
+	if compatibility := protocolCompatibilityToolName(kind); compatibility != "" {
+		return compatibility
+	}
+	return kind
+}
+
+func protocolKnownToolName(name string) string {
+	if canonical, ok := names.Resolve(name); ok {
+		return canonical
+	}
+	return protocolCompatibilityToolName(name)
+}
+
+func protocolCompatibilityToolName(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "rg":
 		return "RG"
 	case "find":
 		return "FIND"
+	default:
+		return ""
 	}
-	return kind
 }

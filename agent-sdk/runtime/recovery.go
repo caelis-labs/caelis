@@ -75,15 +75,11 @@ func (r *Runtime) recoverSubagentEntry(ctx context.Context, entry *task.Entry) e
 		next.Running = false
 		next.State = task.StateUnknownOutcome
 		next.SupportsInput = false
-		if next.Result == nil {
-			next.Result = map[string]any{}
-		}
 		if next.Metadata == nil {
 			next.Metadata = map[string]any{}
 		}
-		reason := "runtime restarted after the remote continuation claim; outcome is unknown"
-		next.Result["state"] = string(task.StateUnknownOutcome)
-		next.Result["error"] = reason
+		reason := subagentContinueUnknownDiagnostic
+		normalizeSubagentEntryResult(next, reason)
 		next.Metadata["continue_phase"] = string(continuePhaseUnknownOutcome)
 		next.Metadata["continue_reason"] = reason
 		if next.Spec == nil {

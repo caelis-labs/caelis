@@ -266,6 +266,10 @@ func subagentTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 		"handle": taskPublicHandle(snapshot),
 		"state":  string(snapshot.State),
 	}
+	if diagnostic, ok := subagentFailureDiagnostic(snapshot.State, taskRawStringValue(snapshot.Result["error"])); ok {
+		payload["error"] = diagnostic
+		return payload
+	}
 	if snapshot.Running {
 		if preview := taskRawStringValue(snapshot.Result["output_preview"]); taskOutputHasNonBlankLine(preview) {
 			payload["output_preview"] = preview
@@ -275,9 +279,6 @@ func subagentTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	finalMessage := firstNonBlankTaskOutput(taskRawStringValue(snapshot.Result["final_message"]), taskRawStringValue(snapshot.Result["result"]))
 	if taskOutputHasNonBlankLine(finalMessage) {
 		payload["final_message"] = finalMessage
-	}
-	if errText := taskRawStringValue(snapshot.Result["error"]); taskOutputHasNonBlankLine(errText) {
-		payload["error"] = errText
 	}
 	return payload
 }
@@ -289,6 +290,9 @@ func taskPublicHandle(snapshot taskapi.Snapshot) string {
 func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entry) error {
 	if tm == nil || tm.store == nil || entry == nil {
 		return nil
+	}
+	if entry.Kind == taskapi.KindSubagent {
+		normalizeSubagentEntryResult(entry, entry.FailureDiagnostic)
 	}
 	if store, ok := tm.store.(taskapi.CASStore); ok {
 		expected := entry.Revision
@@ -342,6 +346,9 @@ func sameCommittedTaskEntry(persisted, requested *taskapi.Entry, expected uint64
 func (tm *taskRuntime) persistSpawnEntry(ctx context.Context, entry *taskapi.Entry) error {
 	if tm == nil || tm.store == nil || entry == nil {
 		return errors.New("agent-sdk/runtime: durable CAS task store is required before subagent spawn")
+	}
+	if entry.Kind == taskapi.KindSubagent {
+		normalizeSubagentEntryResult(entry, entry.FailureDiagnostic)
 	}
 	store, ok := tm.store.(taskapi.CASStore)
 	if !ok {

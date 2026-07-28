@@ -260,6 +260,26 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 				if getErr != nil || taskStringValue(entry.Metadata["spawn_status"]) != test.wantStatus {
 					t.Fatalf("durable spawn status = entry %#v error %v, want %q", entry, getErr, test.wantStatus)
 				}
+				if test.wantStatus == spawnStatusUnknownOutcome {
+					if got := taskStringValue(entry.Result["error"]); got != subagentSpawnCompensationUnknownDiagnostic {
+						t.Fatalf("unknown compensation error = %q, want fixed diagnostic", got)
+					}
+					for _, key := range []string{"result", "final_message", "output_preview"} {
+						if _, exists := entry.Result[key]; exists {
+							t.Fatalf("unknown compensation retained %q: %#v", key, entry.Result)
+						}
+					}
+					if persisted := fmt.Sprint(entry.Result, entry.Metadata); strings.Contains(persisted, "forced cancellation failure") {
+						t.Fatalf("unknown compensation persisted raw runner error: %s", persisted)
+					}
+					payload := taskToolPayload(snapshotFromTaskEntry(entry))
+					if got := taskStringValue(payload["error"]); got != subagentSpawnCompensationUnknownDiagnostic {
+						t.Fatalf("unknown compensation Task payload error = %q", got)
+					}
+					if _, exists := payload["final_message"]; exists {
+						t.Fatalf("unknown compensation manufactured final message: %#v", payload)
+					}
+				}
 			}
 			if test.rollForward {
 				sessions.failCanonical = false
@@ -397,6 +417,12 @@ func TestSubagentSpawnSagaRetryAndRestartNeverBlindlyRespawn(t *testing.T) {
 	unknownEntry, getErr := unknownStore.Get(context.Background(), taskID)
 	if getErr != nil || taskStringValue(unknownEntry.Metadata["spawn_status"]) != spawnStatusUnknownOutcome || unknownEntry.State != taskapi.StateUnknownOutcome {
 		t.Fatalf("spawning recovery entry = %#v, %v; want durable unknown outcome", unknownEntry, getErr)
+	}
+	if got := taskStringValue(unknownEntry.Result["error"]); got != subagentSpawnUnknownDiagnostic {
+		t.Fatalf("spawning recovery error = %q, want fixed diagnostic", got)
+	}
+	if _, exists := taskToolPayload(snapshotFromTaskEntry(unknownEntry))["final_message"]; exists {
+		t.Fatalf("spawning recovery manufactured final message: %#v", unknownEntry.Result)
 	}
 
 	spawnedStore := newSagaTaskStore()

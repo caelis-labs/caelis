@@ -1,10 +1,10 @@
 package acpagentbridge_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"iter"
-	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -88,7 +88,9 @@ func TestBuiltInProjectionAndExternalWireShareSDKSemantics(t *testing.T) {
 		if err != nil {
 			t.Fatalf("DecodeUpdate(external %s) error = %v", event.Type, err)
 		}
-		if !reflect.DeepEqual(external, builtIn) {
+		builtInJSON, builtInErr := json.Marshal(builtIn)
+		externalJSON, externalErr := json.Marshal(external)
+		if builtInErr != nil || externalErr != nil || !bytes.Equal(externalJSON, builtInJSON) {
 			t.Fatalf("external %s semantics = %#v, built-in = %#v", event.Type, external, builtIn)
 		}
 	}

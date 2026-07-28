@@ -18,8 +18,9 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 			UserID:    " user ",
 			SessionID: " sess-1 ",
 		},
-		Title: " ls -la ",
-		State: " running ",
+		Title:             " ls -la ",
+		State:             " running ",
+		FailureDiagnostic: " bounded failure ",
 		Spec: map[string]any{
 			"command": "ls -la",
 			"options": map[string]any{"env": []any{"A=1"}},
@@ -58,6 +59,9 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 	}
 	if got := cloned.Terminal.TerminalID; got != "term-1" {
 		t.Fatalf("TerminalID = %q, want %q", got, "term-1")
+	}
+	if got := cloned.FailureDiagnostic; got != "bounded failure" {
+		t.Fatalf("FailureDiagnostic = %q, want bounded failure", got)
 	}
 	if got := entry.Spec["command"]; got != "ls -la" {
 		t.Fatalf("original spec mutated: %v", got)
