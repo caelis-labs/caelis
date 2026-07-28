@@ -46,6 +46,7 @@ type turnHandle struct {
 	eventsCh                chan eventstream.Envelope
 	eventsCond              *sync.Cond
 	liveQueue               []eventstream.Envelope
+	liveQueueHead           int
 	eventsStarted           bool
 	eventsClosed            bool
 	closed                  bool
@@ -562,10 +563,10 @@ func (h *turnHandle) closeEventsLocked() {
 func (h *turnHandle) dispatchEvents() {
 	for {
 		h.mu.Lock()
-		for len(h.liveQueue) == 0 && !h.finished {
+		for h.liveQueueHead == len(h.liveQueue) && !h.finished {
 			h.eventsCond.Wait()
 		}
-		if len(h.liveQueue) == 0 && h.finished {
+		if h.liveQueueHead == len(h.liveQueue) && h.finished {
 			if !h.eventsClosed {
 				h.eventsClosed = true
 				close(h.eventsCh)
@@ -573,12 +574,30 @@ func (h *turnHandle) dispatchEvents() {
 			h.mu.Unlock()
 			return
 		}
-		env := h.liveQueue[0]
-		copy(h.liveQueue, h.liveQueue[1:])
-		h.liveQueue = h.liveQueue[:len(h.liveQueue)-1]
+		env := h.liveQueue[h.liveQueueHead]
+		h.liveQueue[h.liveQueueHead] = eventstream.Envelope{}
+		h.liveQueueHead++
+		h.compactLiveQueueLocked()
 		h.mu.Unlock()
 		h.eventsCh <- env
 	}
+}
+
+const liveQueueCompactThreshold = 1024
+
+func (h *turnHandle) compactLiveQueueLocked() {
+	if h.liveQueueHead == len(h.liveQueue) {
+		h.liveQueue = h.liveQueue[:0]
+		h.liveQueueHead = 0
+		return
+	}
+	if h.liveQueueHead < liveQueueCompactThreshold || h.liveQueueHead < len(h.liveQueue)-h.liveQueueHead {
+		return
+	}
+	remaining := copy(h.liveQueue, h.liveQueue[h.liveQueueHead:])
+	clear(h.liveQueue[remaining:])
+	h.liveQueue = h.liveQueue[:remaining]
+	h.liveQueueHead = 0
 }
 
 func (h *turnHandle) enrichEnvelopeLocked(env eventstream.Envelope, bridgeSource string) eventstream.Envelope {

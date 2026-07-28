@@ -1,6 +1,7 @@
 package eventqueue
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -65,5 +66,65 @@ func TestQueueClearDropsBufferedItems(t *testing.T) {
 	q.Close()
 	if _, ok := q.Pop(); ok {
 		t.Fatal("Pop() ok = true after Clear and Close, want false")
+	}
+}
+
+func TestQueuePopReleasesHeadWithoutShiftingBufferedTail(t *testing.T) {
+	t.Parallel()
+
+	const backlog = 4096
+	values := make([]int, backlog)
+	q := New[*int]()
+	for i := range values {
+		values[i] = i
+		q.Push(&values[i])
+	}
+
+	q.mu.Lock()
+	backing := q.items[:len(q.items):len(q.items)]
+	first := backing[0]
+	second := backing[1]
+	q.mu.Unlock()
+
+	got, ok := q.Pop()
+	if !ok || got != first {
+		t.Fatalf("Pop() = %p, %v; want first buffered item %p, true", got, ok, first)
+	}
+	if backing[0] == second {
+		t.Fatal("Pop() shifted the buffered tail over the head; repeated backlog drains are quadratic")
+	}
+	if backing[0] != nil {
+		t.Fatal("Pop() retained the consumed head; want the released slot cleared")
+	}
+	for want := 1; want < backlog; want++ {
+		got, ok := q.Pop()
+		if !ok || got != &values[want] {
+			t.Fatalf("Pop(%d) = %p, %v; want %p, true", want, got, ok, &values[want])
+		}
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.head != 0 || len(q.items) != 0 {
+		t.Fatalf("drained queue head/len = %d/%d, want 0/0", q.head, len(q.items))
+	}
+}
+
+func BenchmarkQueueDrain(b *testing.B) {
+	for _, size := range []int{1024, 4096, 16384} {
+		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				q := New[int]()
+				for i := range size {
+					q.Push(i)
+				}
+				q.Close()
+				for range size {
+					if _, ok := q.Pop(); !ok {
+						b.Fatalf("Pop() closed before draining %d items", size)
+					}
+				}
+			}
+		})
 	}
 }

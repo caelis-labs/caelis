@@ -401,6 +401,88 @@ func TestTurnHandleLiveStreamDoesNotDropApprovalWhenConsumerIsSlow(t *testing.T)
 	}
 }
 
+func TestTurnHandleLiveDispatchReleasesHeadWithoutShiftingBufferedTail(t *testing.T) {
+	t.Parallel()
+
+	const backlog = 1024
+	handle := newTestTurnHandle()
+	handle.eventsCh = make(chan eventstream.Envelope)
+	handle.mu.Lock()
+	for i := range backlog {
+		handle.liveQueue = append(handle.liveQueue, eventstream.Envelope{
+			Kind:   eventstream.KindNotice,
+			Notice: fmt.Sprintf("event-%d", i),
+		})
+	}
+	backing := handle.liveQueue[:len(handle.liveQueue):len(handle.liveQueue)]
+	handle.mu.Unlock()
+
+	events := handle.ACPEvents()
+	deadline := time.Now().Add(time.Second)
+	var releasedHead string
+	for {
+		handle.mu.Lock()
+		if backing[0].Notice != "event-0" {
+			releasedHead = backing[0].Notice
+			handle.liveQueue = nil
+			handle.liveQueueHead = 0
+			handle.finished = true
+			handle.eventsCond.Broadcast()
+			handle.mu.Unlock()
+			break
+		}
+		handle.mu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for live dispatcher to dequeue the first event")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	first, ok := <-events
+	if !ok || first.Notice != "event-0" {
+		t.Fatalf("first live event = %#v, %v; want event-0, true", first, ok)
+	}
+	for range events {
+	}
+	if releasedHead == "event-1" {
+		t.Fatal("live dispatcher shifted the buffered tail over the head; repeated backlog drains are quadratic")
+	}
+	if releasedHead != "" {
+		t.Fatalf("live dispatcher retained consumed head %q; want the released slot cleared", releasedHead)
+	}
+}
+
+func TestTurnHandleLiveDispatchPreservesLargeBacklogOrder(t *testing.T) {
+	t.Parallel()
+
+	const backlog = 4096
+	handle := newTestTurnHandle()
+	for i := range backlog {
+		handle.publishACP(eventstream.Envelope{
+			Kind:   eventstream.KindNotice,
+			Notice: fmt.Sprintf("event-%d", i),
+		}, "")
+	}
+	handle.finish()
+
+	count := 0
+	for env := range handle.ACPEvents() {
+		want := fmt.Sprintf("event-%d", count)
+		if env.Notice != want {
+			t.Fatalf("live event %d Notice = %q, want %q", count, env.Notice, want)
+		}
+		count++
+	}
+	if count != backlog {
+		t.Fatalf("ACPEvents() produced %d events, want %d", count, backlog)
+	}
+	handle.mu.Lock()
+	defer handle.mu.Unlock()
+	if handle.liveQueueHead != 0 || len(handle.liveQueue) != 0 {
+		t.Fatalf("drained live queue head/len = %d/%d, want 0/0", handle.liveQueueHead, len(handle.liveQueue))
+	}
+}
+
 func TestTurnHandleSubmitRejectsUnsupportedWithoutRunner(t *testing.T) {
 	t.Parallel()
 
@@ -945,6 +1027,36 @@ func newTestTurnHandle() *turnHandle {
 		},
 		createdAt: time.Unix(100, 0),
 	})
+}
+
+func BenchmarkTurnHandleLiveQueueDrain(b *testing.B) {
+	for _, size := range []int{1024, 4096, 16384} {
+		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
+			sample := make([]eventstream.Envelope, size)
+			for i := range sample {
+				sample[i] = eventstream.Envelope{
+					Kind:   eventstream.KindNotice,
+					Notice: "event",
+				}
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				handle := newTestTurnHandle()
+				handle.mu.Lock()
+				handle.liveQueue = append(handle.liveQueue, sample...)
+				handle.finished = true
+				handle.mu.Unlock()
+
+				count := 0
+				for range handle.ACPEvents() {
+					count++
+				}
+				if count != size {
+					b.Fatalf("ACPEvents() produced %d events, want %d", count, size)
+				}
+			}
+		})
+	}
 }
 
 func testChildApprovalRequest(taskID string, path string) *agent.ApprovalRequest {

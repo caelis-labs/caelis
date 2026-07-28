@@ -6,8 +6,11 @@ type Queue[T any] struct {
 	mu     sync.Mutex
 	cond   *sync.Cond
 	items  []T
+	head   int
 	closed bool
 }
+
+const compactThreshold = 1024
 
 func New[T any]() *Queue[T] {
 	q := &Queue[T]{}
@@ -35,16 +38,32 @@ func (q *Queue[T]) Pop() (T, bool) {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for len(q.items) == 0 && !q.closed {
+	for q.head == len(q.items) && !q.closed {
 		q.cond.Wait()
 	}
-	if len(q.items) == 0 {
+	if q.head == len(q.items) {
 		return zero, false
 	}
-	item := q.items[0]
-	copy(q.items, q.items[1:])
-	q.items = q.items[:len(q.items)-1]
+	item := q.items[q.head]
+	q.items[q.head] = zero
+	q.head++
+	q.compactLocked()
 	return item, true
+}
+
+func (q *Queue[T]) compactLocked() {
+	if q.head == len(q.items) {
+		q.items = q.items[:0]
+		q.head = 0
+		return
+	}
+	if q.head < compactThreshold || q.head < len(q.items)-q.head {
+		return
+	}
+	remaining := copy(q.items, q.items[q.head:])
+	clear(q.items[remaining:])
+	q.items = q.items[:remaining]
+	q.head = 0
 }
 
 func (q *Queue[T]) Clear() {
@@ -55,6 +74,7 @@ func (q *Queue[T]) Clear() {
 	defer q.mu.Unlock()
 	clear(q.items)
 	q.items = nil
+	q.head = 0
 }
 
 func (q *Queue[T]) Close() {
