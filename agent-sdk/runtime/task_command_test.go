@@ -25,6 +25,43 @@ type failFromPutTaskStore struct {
 	err      error
 }
 
+type leaseContendedBackfillTaskStore struct {
+	taskapi.Store
+	mu            sync.Mutex
+	authoritative *taskapi.Entry
+	contended     bool
+	putCalls      int
+}
+
+func (s *leaseContendedBackfillTaskStore) Get(ctx context.Context, taskID string) (*taskapi.Entry, error) {
+	s.mu.Lock()
+	if s.contended {
+		entry := taskapi.CloneEntry(s.authoritative)
+		s.mu.Unlock()
+		return entry, nil
+	}
+	s.mu.Unlock()
+	return s.Store.Get(ctx, taskID)
+}
+
+func (s *leaseContendedBackfillTaskStore) Put(context.Context, taskapi.PutRequest) (*taskapi.Entry, error) {
+	s.mu.Lock()
+	s.contended = true
+	s.putCalls++
+	sessionID := s.authoritative.Session.SessionID
+	s.mu.Unlock()
+	return nil, &session.LeaseConflictError{
+		SessionID: sessionID,
+		Detail:    "another live owner holds the lease",
+	}
+}
+
+func (s *leaseContendedBackfillTaskStore) calls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.putCalls
+}
+
 type commandStartProbeRuntime struct {
 	*yieldProbeSandboxRuntime
 	mu       sync.Mutex
@@ -82,6 +119,25 @@ func (s *commandTerminateProbeSession) terminateCalls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.calls
+}
+
+type commandWriteProbeSession struct {
+	*yieldProbeSandboxSession
+	mu     sync.Mutex
+	writes int
+}
+
+func (s *commandWriteProbeSession) WriteInput(context.Context, []byte) error {
+	s.mu.Lock()
+	s.writes++
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *commandWriteProbeSession) writeCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writes
 }
 
 type commandBlockingWaitSession struct {
@@ -971,6 +1027,153 @@ func TestLookupCommandBackfillsCanonicalResultFromSessionHistory(t *testing.T) {
 	}
 	if got, _ := stored.Result["result"].(string); got != "canonical from history\n" {
 		t.Fatalf("stored result after backfill = %q, want canonical history result", got)
+	}
+}
+
+func TestTaskStreamBackfillDefersToActiveSessionLeaseOwner(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	baseStore := newFileTaskStoreForTest(t)
+	eventTime := time.Now().UTC()
+	stale := &taskapi.Entry{
+		TaskID:    "task-lease-contended-backfill",
+		Handle:    "command-7",
+		Kind:      taskapi.KindCommand,
+		Session:   activeSession.SessionRef,
+		State:     taskapi.StateCompleted,
+		CreatedAt: eventTime.Add(-2 * time.Minute),
+		UpdatedAt: eventTime.Add(-time.Minute),
+		Result: map[string]any{
+			"state":     string(taskapi.StateCompleted),
+			"result":    "stale result\n",
+			"exit_code": 0,
+		},
+	}
+	if err := baseStore.Upsert(context.Background(), stale); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+	stored, err := baseStore.Get(context.Background(), stale.TaskID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	authoritative := taskapi.CloneEntry(stored)
+	authoritative.Revision++
+	authoritative.UpdatedAt = eventTime.Add(time.Minute)
+	authoritative.Result = map[string]any{
+		"state":     string(taskapi.StateCompleted),
+		"result":    "producer-owned result\n",
+		"exit_code": 0,
+	}
+	store := &leaseContendedBackfillTaskStore{
+		Store:         baseStore,
+		authoritative: authoritative,
+	}
+	runtime.tasks.store = store
+	if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: activeSession.SessionRef,
+		Event: &session.Event{
+			Type: session.EventTypeToolResult,
+			Time: eventTime,
+			Tool: &session.EventTool{
+				Name:   "RUN_COMMAND",
+				Status: "completed",
+				Output: map[string]any{
+					"handle":    stale.Handle,
+					"state":     string(taskapi.StateCompleted),
+					"result":    "history result\n",
+					"exit_code": 0,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent(tool result) error = %v", err)
+	}
+
+	snapshot, err := newStreamService(runtime.tasks).Read(context.Background(), stream.ReadRequest{
+		Ref: stream.Ref{
+			SessionID: activeSession.SessionID,
+			TaskID:    stale.TaskID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Task stream Read() error = %v, want authoritative reload", err)
+	}
+	if snapshot.FinalText != "producer-owned result\n" {
+		t.Fatalf("Task stream FinalText = %q, want producer-owned result", snapshot.FinalText)
+	}
+	if calls := store.calls(); calls != 1 {
+		t.Fatalf("backfill Put calls = %d, want one fenced attempt without retry", calls)
+	}
+}
+
+func TestTaskControlWriteFailsClosedWhenBackfillLosesSessionLease(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	baseStore := newFileTaskStoreForTest(t)
+	eventTime := time.Now().UTC()
+	entry := &taskapi.Entry{
+		TaskID:    "task-stale-session-fence",
+		Handle:    "command-7",
+		Kind:      taskapi.KindCommand,
+		Session:   activeSession.SessionRef,
+		State:     taskapi.StateRunning,
+		Running:   true,
+		CreatedAt: eventTime.Add(-2 * time.Minute),
+		UpdatedAt: eventTime.Add(-time.Minute),
+		Result:    map[string]any{"state": string(taskapi.StateRunning)},
+		Metadata:  map[string]any{"command_phase": commandPhaseRunning},
+		Terminal: sandbox.TerminalRef{
+			Backend:    sandbox.BackendHost,
+			SessionID:  "stale-fence-session",
+			TerminalID: "stale-fence-terminal",
+		},
+	}
+	if err := baseStore.Upsert(context.Background(), entry); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+	stored, err := baseStore.Get(context.Background(), entry.TaskID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	runtime.tasks.store = &leaseContendedBackfillTaskStore{
+		Store:         baseStore,
+		authoritative: stored,
+	}
+	running := true
+	sessionProbe := &commandWriteProbeSession{
+		yieldProbeSandboxSession: &yieldProbeSandboxSession{statusRunning: &running},
+	}
+	runtime.tasks.backends[sandbox.BackendHost] = newCommandStartProbe(sessionProbe, nil)
+	if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: activeSession.SessionRef,
+		Event: &session.Event{
+			Type: session.EventTypeToolResult,
+			Time: eventTime,
+			Tool: &session.EventTool{
+				Name:   "RUN_COMMAND",
+				Status: "running",
+				Output: map[string]any{
+					"handle": entry.Handle,
+					"state":  string(taskapi.StateRunning),
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent(tool result) error = %v", err)
+	}
+
+	_, err = runtime.tasks.Write(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+		TaskID:    entry.TaskID,
+		Input:     "unsafe input",
+		Principal: session.ActorKindTool,
+	})
+	if !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("Task Write() error = %v, want Session lease conflict", err)
+	}
+	if calls := sessionProbe.writeCalls(); calls != 0 {
+		t.Fatalf("sandbox WriteInput calls = %d, want none after Session lease loss", calls)
 	}
 }
 

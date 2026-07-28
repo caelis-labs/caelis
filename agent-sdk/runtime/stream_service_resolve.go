@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -60,7 +61,30 @@ func (tm *taskRuntime) resolveStreamTask(ctx context.Context, ref session.Sessio
 		)
 	}
 
-	entry, err = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
+	backfilled, err := tm.backfillCanonicalTaskEntry(ctx, ref, entry)
+	if err != nil {
+		var sessionLease *session.LeaseConflictError
+		if errors.As(err, &sessionLease) {
+			// Stream resolution is observation-only. If the producing Runtime
+			// owns the Session fence, abandon this observer's repair write and
+			// use the current durable Task without retrying unfenced.
+			reloaded, loadErr := tm.store.Get(context.WithoutCancel(ctx), taskID)
+			if loadErr == nil &&
+				storedTaskEntryMatches(reloaded, ref, entry.Kind) &&
+				strings.TrimSpace(reloaded.TaskID) == taskID {
+				entry = reloaded
+				err = nil
+			} else {
+				err = errorcode.Wrap(
+					errorcode.Unavailable,
+					fmt.Sprintf("agent-sdk/runtime: reload lease-contended task stream metadata for %q", taskID),
+					errors.Join(err, loadErr),
+				)
+			}
+		}
+	} else {
+		entry = backfilled
+	}
 	if err != nil {
 		return resolvedStreamTask{}, wrapStreamTaskResolutionError(
 			errorcode.Unavailable,

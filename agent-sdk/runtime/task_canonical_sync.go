@@ -305,6 +305,7 @@ func canonicalTaskOutputMatchesEntry(entry *taskapi.Entry, output map[string]any
 	keys := map[string]bool{}
 	for _, value := range []string{
 		entry.TaskID,
+		entry.Handle,
 		taskStringValue(entry.Result["task_id"]),
 		taskStringValue(entry.Result["handle"]),
 		taskStringValue(entry.Result["internal_task_id"]),
