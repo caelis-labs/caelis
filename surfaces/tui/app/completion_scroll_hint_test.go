@@ -33,7 +33,8 @@ func TestCompletionOverlayFooterShowsBelowList(t *testing.T) {
 	}
 
 	rendered := ansi.Strip(model.renderSlashCommandList())
-	if !strings.Contains(rendered, "select") || !strings.Contains(rendered, "enter") {
+	if !strings.Contains(rendered, "hover select") ||
+		!strings.Contains(rendered, "click/enter apply") {
 		t.Fatalf("renderSlashCommandList() = %q, want unified overlay footer", rendered)
 	}
 	if hint := strings.TrimSpace(model.hintRowText()); hint != "" {
@@ -58,9 +59,10 @@ func TestSlashCommandScrollAffordanceAtTopAndBottom(t *testing.T) {
 	model.setInputText("/")
 	model.refreshSlashCommands()
 
-	aff, ok := model.activeCompletionScroll()
+	_, geometry, ok := model.activeCompletionGeometry()
+	aff := geometry.scroll
 	if !ok || !aff.Show {
-		t.Fatalf("activeCompletionScroll() = %+v, ok=%v, want scrollable overlay", aff, ok)
+		t.Fatalf("activeCompletionGeometry().scroll = %+v, ok=%v, want scrollable overlay", aff, ok)
 	}
 	if aff.CanUp {
 		t.Fatalf("CanUp = true at top, want false")
@@ -72,9 +74,10 @@ func TestSlashCommandScrollAffordanceAtTopAndBottom(t *testing.T) {
 	for i := 0; i < 11; i++ {
 		_, _ = model.handleSlashCommandKey(keyPress("down"))
 	}
-	aff, ok = model.activeCompletionScroll()
+	_, geometry, ok = model.activeCompletionGeometry()
+	aff = geometry.scroll
 	if !ok || !aff.Show {
-		t.Fatalf("activeCompletionScroll() after scroll = %+v, ok=%v, want scrollable overlay", aff, ok)
+		t.Fatalf("activeCompletionGeometry().scroll after scroll = %+v, ok=%v, want scrollable overlay", aff, ok)
 	}
 	if !aff.CanUp {
 		t.Fatalf("CanUp = false near bottom, want true")

@@ -748,12 +748,12 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, nil
 	case key.Matches(msg, m.keys.ChoosePrev):
 		if len(m.slashArgCandidates) > 0 {
-			m.slashArgIndex = wrapSelectionIndex(m.slashArgIndex, len(m.slashArgCandidates), -1)
+			m.moveActiveCompletionSelection(-1, true)
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.ChooseNext):
 		if len(m.slashArgCandidates) > 0 {
-			m.slashArgIndex = wrapSelectionIndex(m.slashArgIndex, len(m.slashArgCandidates), 1)
+			m.moveActiveCompletionSelection(1, true)
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.Complete):
@@ -822,45 +822,20 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 }
 
 func (m *Model) renderSlashArgList() string {
-	candidates := m.visibleSlashArgCandidates()
-	if len(candidates) == 0 {
-		return ""
-	}
-	index := m.currentSlashArgIndex(candidates)
-	maxItems := minInt(8, len(candidates))
-	start := 0
-	if index >= maxItems {
-		start = index - maxItems + 1
-	}
-	maxStart := maxInt(0, len(candidates)-maxItems)
-	if start > maxStart {
-		start = maxStart
-	}
-	end := minInt(len(candidates), start+maxItems)
-	lines := make([]string, 0, end-start)
-	for i := start; i < end; i++ {
+	return m.renderCompletionKind(completionSlashArg)
+}
+
+func (m *Model) renderSlashArgListGeometry(geometry completionOverlayGeometry, candidates []SlashArgCandidate) string {
+	lines := make([]string, 0, geometry.candidateCount)
+	for i := geometry.windowStart; i < geometry.windowEnd; i++ {
 		display := strings.TrimSpace(candidates[i].Display)
 		if display == "" {
 			display = strings.TrimSpace(candidates[i].Value)
 		}
 		detail := strings.TrimSpace(candidates[i].Detail)
-		lines = append(lines, m.renderCompletionValueLine(display, detail, i == index))
+		lines = append(lines, m.renderCompletionValueLine(display, detail, i == geometry.selected))
 	}
-	title := "Options"
-	if m.isWizardActive() && m.wizard != nil {
-		if step := m.wizard.currentStep(); step != nil {
-			title = strings.TrimSpace(step.HintLabel)
-		}
-		if title == "" {
-			title = "/" + strings.TrimSpace(m.wizard.def.Command)
-		}
-	} else {
-		title = "/" + strings.TrimSpace(m.slashArgCommand)
-		if title == "/" {
-			title = "Options"
-		}
-	}
-	return m.renderCompletionOverlay(title, lines)
+	return m.renderCompletionOverlay(geometry, lines)
 }
 
 func (m *Model) currentSlashArgCandidate() (SlashArgCandidate, bool) {

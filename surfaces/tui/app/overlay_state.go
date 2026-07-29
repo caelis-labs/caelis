@@ -69,6 +69,9 @@ type OverlayState struct {
 	slashArgLoadedCommand    string
 	slashArgLoadedCandidates []SlashArgCandidate
 
+	completionWindow completionWindowState
+	completionMouse  completionMouseState
+
 	completionRefreshSeq uint64
 }
 

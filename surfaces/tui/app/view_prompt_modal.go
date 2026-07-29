@@ -240,12 +240,12 @@ func sanitizePromptModalText(value string) string {
 	return value
 }
 
-func (m *Model) renderCompletionOverlay(_ string, lines []string) string {
+func (m *Model) renderCompletionOverlay(geometry completionOverlayGeometry, lines []string) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	innerWidth := m.completionOverlayInnerWidth()
-	hasBorder := m.overlayUsesBorder()
+	innerWidth := geometry.innerWidth
+	hasBorder := geometry.chrome.useBorder
 	contentLimit := innerWidth
 	if hasBorder {
 		contentLimit = innerWidth - 4
@@ -254,8 +254,8 @@ func (m *Model) renderCompletionOverlay(_ string, lines []string) string {
 		}
 	}
 
-	filtered := make([]string, 0, len(lines)+2)
-	if hasBorder {
+	filtered := make([]string, 0, len(lines)+geometry.chrome.topInsetRows+geometry.chrome.bottomInsetRows)
+	for range geometry.chrome.topInsetRows {
 		blank := strings.Repeat(" ", contentLimit)
 		filtered = append(filtered, blank)
 	}
@@ -272,20 +272,16 @@ func (m *Model) renderCompletionOverlay(_ string, lines []string) string {
 		}
 		filtered = append(filtered, line)
 	}
-	if hasBorder {
+	for range geometry.chrome.bottomInsetRows {
 		blank := strings.Repeat(" ", contentLimit)
 		filtered = append(filtered, blank)
-	}
-	filtered = clampPromptModalLines(filtered, m.promptModalLineBudget(), m.theme)
-	if len(filtered) == 0 {
-		filtered = []string{""}
 	}
 	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
 		Body:      filtered,
 		Width:     innerWidth,
 		UseBorder: hasBorder,
 	})
-	return m.attachCompletionOverlayFooter(frame)
+	return m.attachCompletionOverlayFooter(frame, geometry)
 }
 
 func (m *Model) completionOverlayInnerWidth() int {
@@ -302,21 +298,6 @@ func (m *Model) completionOverlayWidth() int {
 		width = 72
 	}
 	return width
-}
-
-func (m *Model) renderInputOverlay() string {
-	switch {
-	case len(m.mentionCandidates) > 0:
-		return m.renderMentionList()
-	case len(m.resumeCandidates) > 0:
-		return m.renderResumeList()
-	case len(m.slashArgCandidates) > 0:
-		return m.renderSlashArgList()
-	case len(m.slashCandidates) > 0:
-		return m.renderSlashCommandList()
-	default:
-		return ""
-	}
 }
 
 func (m *Model) renderPromptInputBar() string {

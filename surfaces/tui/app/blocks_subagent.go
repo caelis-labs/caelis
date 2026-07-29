@@ -4,9 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
-	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 // SubagentEventKind identifies the type of a child session event.
@@ -358,30 +356,6 @@ func canScrollPanelState(offset int, followTail bool, total, visible, delta int)
 	next = max(next, 0)
 	next = min(next, maxOffset)
 	return next != current
-}
-
-func addScrollbar(lines []string, contentWidth, visible, offset, total int, theme tuikit.Theme, visibleNow bool) []string {
-	if len(lines) == 0 || total <= visible || !visibleNow {
-		return lines
-	}
-	thumbHeight := maxInt(1, visible*visible/maxInt(visible, total))
-	maxStart := maxInt(0, visible-thumbHeight)
-	thumbStart := 0
-	if total > visible && maxStart > 0 {
-		thumbStart = (offset * maxStart) / maxInt(1, total-visible)
-	}
-	withScrollbar := make([]string, len(lines))
-	for i, line := range lines {
-		glyph := theme.ScrollbarTrackStyle().Render("▏")
-		if i >= thumbStart && i < thumbStart+thumbHeight {
-			glyph = theme.ScrollbarThumbStyle().Render("▎")
-		}
-		if pad := contentWidth - lipgloss.Width(line); pad > 0 {
-			line += strings.Repeat(" ", pad)
-		}
-		withScrollbar[i] = line + glyph
-	}
-	return withScrollbar
 }
 
 func scrollPanelState(offset *int, followTail *bool, total, visible, delta int) bool {

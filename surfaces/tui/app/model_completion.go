@@ -222,12 +222,12 @@ func (m *Model) handleMentionKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, nil
 	case key.Matches(msg, m.keys.ChoosePrev):
 		if len(m.mentionCandidates) > 0 {
-			m.mentionIndex = wrapSelectionIndex(m.mentionIndex, len(m.mentionCandidates), -1)
+			m.moveActiveCompletionSelection(-1, true)
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.ChooseNext):
 		if len(m.mentionCandidates) > 0 {
-			m.advanceMentionSelection()
+			m.moveActiveCompletionSelection(1, true)
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.Accept), key.Matches(msg, m.keys.Complete):
@@ -237,22 +237,6 @@ func (m *Model) handleMentionKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	default:
 		return false, nil
 	}
-}
-
-func (m *Model) advanceMentionSelection() {
-	if len(m.mentionCandidates) == 0 {
-		return
-	}
-	if m.mentionIndex < len(m.mentionCandidates)-1 {
-		m.mentionIndex++
-		return
-	}
-	oldLen := len(m.mentionCandidates)
-	if m.loadMoreMentionCandidates() && len(m.mentionCandidates) > oldLen {
-		m.mentionIndex = oldLen
-		return
-	}
-	m.mentionIndex = 0
 }
 
 func (m *Model) loadMoreMentionCandidates() bool {
@@ -441,12 +425,12 @@ func (m *Model) handleResumeKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, nil
 	case key.Matches(msg, m.keys.ChoosePrev):
 		if len(m.resumeCandidates) > 0 {
-			m.resumeIndex = wrapSelectionIndex(m.resumeIndex, len(m.resumeCandidates), -1)
+			m.moveActiveCompletionSelection(-1, true)
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.ChooseNext):
 		if len(m.resumeCandidates) > 0 {
-			m.resumeIndex = wrapSelectionIndex(m.resumeIndex, len(m.resumeCandidates), 1)
+			m.moveActiveCompletionSelection(1, true)
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.Complete):

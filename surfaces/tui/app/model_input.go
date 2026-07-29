@@ -24,6 +24,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		if handled, cmd := m.handleCompletionMouseWheel(typed.Mouse()); handled {
+			return m, cmd
+		}
 		if m.selecting {
 			return m, m.handleViewportSelectionWheel(typed.Mouse())
 		}
@@ -62,6 +65,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, m.touchViewportScrollbar(), resumeCmd)
 	case tea.MouseClickMsg:
 		mouse := typed.Mouse()
+		if handled, cmd := m.handleCompletionMousePress(mouse); handled {
+			return m, cmd
+		}
 		if mouse.Button == tea.MouseLeft {
 			if handled, cmd := m.beginScrollbarDrag(mouse); handled {
 				return m, cmd
@@ -79,6 +85,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if m.scrollbarDrag.active {
 			return m, m.updateScrollbarDrag(mouse)
 		}
+		if handled, cmd := m.handleCompletionMouseMotion(mouse); handled {
+			return m, cmd
+		}
 		if cmd := m.hoverScrollbarAtMouse(mouse); cmd != nil {
 			return m, cmd
 		}
@@ -94,6 +103,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if m.scrollbarDrag.active {
 			cmd := m.updateScrollbarDrag(mouse)
 			m.endScrollbarDrag()
+			return m, cmd
+		}
+		if handled, cmd := m.handleCompletionMouseRelease(mouse); handled {
 			return m, cmd
 		}
 		if handled, cmd := m.handleInputAreaMouse(mouse, mousePhaseRelease); handled {
@@ -507,6 +519,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(tea.KeyReleaseMsg); ok {
 		return m, nil
 	}
+	if m.activeCompletionKind() != completionNone {
+		m.clearCompletionMouseState()
+	}
 	if handled, cmd := m.handleTerminalResponseGuardKey(msg); handled {
 		return m, cmd
 	}
@@ -528,30 +543,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.handlePaletteKey(msg)
 	}
 	m.refreshCompletionOverlaysBeforeAccept(msg)
-	// @mention overlay — intercept navigation keys so they don't
-	// fall through to history browsing.
-	if len(m.mentionCandidates) > 0 {
-		if handled, cmd := m.handleMentionKey(msg); handled {
-			return m, cmd
-		}
-	}
-	// /resume overlay.
-	if m.resumeActive {
-		if handled, cmd := m.handleResumeKey(msg); handled {
-			return m, cmd
-		}
-	}
-	// Generic slash-arg overlay (e.g. /model, /connect).
-	if m.slashArgActive {
-		if handled, cmd := m.handleSlashArgKey(msg); handled {
-			return m, cmd
-		}
-	}
-	// Slash command overlay (e.g. /resume, /status).
-	if len(m.slashCandidates) > 0 {
-		if handled, cmd := m.handleSlashCommandKey(msg); handled {
-			return m, cmd
-		}
+	if handled, cmd := m.handleActiveCompletionKey(msg); handled {
+		return m, cmd
 	}
 	m.clearInputSelection()
 	if !key.Matches(msg, m.keys.Quit) {

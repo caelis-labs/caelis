@@ -19,6 +19,10 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
+// viewportMouseWheelLines is an intentional global transcript policy: one
+// Bubble Tea wheel message moves one logical row, including selection wheels.
+const viewportMouseWheelLines = 1
+
 func requestBackgroundColorCmd() tea.Cmd {
 	return tea.RequestBackgroundColor
 }
@@ -78,7 +82,7 @@ func NewModel(cfg Config) *Model {
 
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.MouseWheelEnabled = true
-	vp.MouseWheelDelta = 5
+	vp.MouseWheelDelta = viewportMouseWheelLines
 	vp.SetHorizontalStep(0)
 	vp.KeyMap.Up.SetEnabled(false)
 	vp.KeyMap.Down.SetEnabled(false)
@@ -251,6 +255,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleTaskStreamSubscribeRetry(typed)
 
 	case tea.WindowSizeMsg:
+		m.clearCompletionMouseState()
 		m.width = typed.Width
 		m.height = typed.Height
 		m.syncTextareaChrome()
@@ -308,6 +313,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.BlurMsg:
 		m.focused = false
+		m.clearCompletionMouseState()
 		return m, nil
 
 	case completionRefreshMsg:

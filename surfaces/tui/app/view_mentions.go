@@ -2,15 +2,14 @@ package tuiapp
 
 // renderMentionList renders @file candidates as an overlay list.
 func (m *Model) renderMentionList() string {
-	if len(m.mentionCandidates) == 0 {
-		return ""
+	return m.renderCompletionKind(completionMention)
+}
+
+func (m *Model) renderMentionListGeometry(geometry completionOverlayGeometry, candidates []CompletionCandidate) string {
+	lines := make([]string, 0, geometry.candidateCount)
+	for i := geometry.windowStart; i < geometry.windowEnd; i++ {
+		display := completionCandidateDisplay(candidates[i])
+		lines = append(lines, m.renderCompletionTextLine(display, "", i == geometry.selected))
 	}
-	maxItems := minInt(completionOverlayVisibleItems, len(m.mentionCandidates))
-	start, end := completionWindowRange(m.mentionIndex, len(m.mentionCandidates), maxItems)
-	lines := make([]string, 0, end-start)
-	for i := start; i < end; i++ {
-		display := completionCandidateDisplay(m.mentionCandidates[i])
-		lines = append(lines, m.renderCompletionTextLine(display, "", i == m.mentionIndex))
-	}
-	return m.renderCompletionOverlay("Files", lines)
+	return m.renderCompletionOverlay(geometry, lines)
 }

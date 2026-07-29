@@ -236,6 +236,38 @@ func TestViewportSelectionMouseWheelExtendsSelectionAfterScroll(t *testing.T) {
 	}
 }
 
+func TestViewportMouseWheelMovesOneLogicalLine(t *testing.T) {
+	model := NewModel(Config{})
+	model.width = 80
+	model.viewport.SetWidth(40)
+	model.viewport.SetHeight(3)
+	lines := []string{
+		"line 0",
+		"line 1",
+		"line 2",
+		"line 3",
+		"line 4",
+		"line 5",
+	}
+	model.viewport.SetContentLines(lines)
+	if got := model.viewport.MouseWheelDelta; got != 1 {
+		t.Fatalf("viewport mouse wheel delta = %d, want 1", got)
+	}
+
+	updated, _ := model.handleMouse(tea.MouseWheelMsg(tea.Mouse{
+		Button: tea.MouseWheelDown,
+		X:      model.mainColumnX() + tuikit.GutterNarrative + 2,
+		Y:      1,
+	}))
+	model = updated.(*Model)
+	if got := model.viewport.YOffset(); got != 1 {
+		t.Fatalf("viewport offset after one wheel message = %d, want 1", got)
+	}
+	if got := model.viewportFollowState; got != viewportPinnedHistory {
+		t.Fatalf("viewport follow state = %v, want pinned history", got)
+	}
+}
+
 func TestViewportSelectionUsesInputSelectionStyle(t *testing.T) {
 	model := NewModel(Config{})
 	model.theme.SelectionFg = lipgloss.Color("#abcdef")

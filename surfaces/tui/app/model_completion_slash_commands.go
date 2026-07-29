@@ -163,12 +163,12 @@ func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, nil
 	case key.Matches(msg, m.keys.ChoosePrev):
 		if len(m.slashCandidates) > 0 {
-			m.slashIndex = wrapSelectionIndex(m.slashIndex, len(m.slashCandidates), -1)
+			m.moveActiveCompletionSelection(-1, true)
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.ChooseNext):
 		if len(m.slashCandidates) > 0 {
-			m.slashIndex = wrapSelectionIndex(m.slashIndex, len(m.slashCandidates), 1)
+			m.moveActiveCompletionSelection(1, true)
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.Complete):
@@ -194,17 +194,20 @@ func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 }
 
 func (m *Model) renderSlashCommandList() string {
-	if len(m.slashCandidates) == 0 {
-		return ""
+	return m.renderCompletionKind(completionSlashCommand)
+}
+
+func (m *Model) renderSlashCommandListGeometry(geometry completionOverlayGeometry, candidates []string) string {
+	lines := make([]string, 0, geometry.candidateCount)
+	for i := geometry.windowStart; i < geometry.windowEnd; i++ {
+		command := candidates[i]
+		lines = append(lines, m.renderCompletionTextLine(
+			m.slashCommandDisplay(command),
+			m.commandCompletionDetail(command),
+			i == geometry.selected,
+		))
 	}
-	maxItems := minInt(completionOverlayVisibleItems, len(m.slashCandidates))
-	start, end := completionWindowRange(m.slashIndex, len(m.slashCandidates), maxItems)
-	lines := make([]string, 0, end-start)
-	for i := start; i < end; i++ {
-		command := m.slashCandidates[i]
-		lines = append(lines, m.renderCompletionTextLine(m.slashCommandDisplay(command), m.commandCompletionDetail(command), i == m.slashIndex))
-	}
-	return m.renderCompletionOverlay("Commands", lines)
+	return m.renderCompletionOverlay(geometry, lines)
 }
 
 func (m *Model) slashCommandDisplay(command string) string {

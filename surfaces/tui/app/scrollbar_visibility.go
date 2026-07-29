@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"math"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -21,8 +20,9 @@ type scrollbarHitTarget struct {
 }
 
 type scrollbarDragState struct {
-	active bool
-	target scrollbarHitTarget
+	active     bool
+	target     scrollbarHitTarget
+	grabOffset int
 }
 
 func (m *Model) touchViewportScrollbar() tea.Cmd {
@@ -91,7 +91,14 @@ func (m *Model) beginScrollbarDrag(mouse tea.Mouse) (bool, tea.Cmd) {
 	if !ok {
 		return false, nil
 	}
-	m.scrollbarDrag = scrollbarDragState{active: true, target: target}
+	m.materializeViewportContentIfStale()
+	geometry := m.viewportScrollbarGeometry()
+	position := m.screenYToFrameY(mouse.Y)
+	m.scrollbarDrag = scrollbarDragState{
+		active:     true,
+		target:     target,
+		grabOffset: geometry.grabOffsetAt(position),
+	}
 	cmd := m.touchScrollbarTarget(target)
 	wasFollowTail := m.isViewportFollowTail()
 	changed := m.applyScrollbarDrag(mouse)
@@ -137,20 +144,12 @@ func (m *Model) applyScrollbarDrag(mouse tea.Mouse) bool {
 
 func (m *Model) dragViewportScrollbarTo(y int) bool {
 	m.materializeViewportContentIfStale()
-	total := m.viewport.TotalLineCount()
-	visible := maxInt(1, m.viewport.Height())
-	maxOffset := maxInt(0, total-visible)
-	if maxOffset == 0 {
+	geometry := m.viewportScrollbarGeometry()
+	if !geometry.scrollable() {
 		return false
 	}
-	vy := m.screenYToFrameY(y)
-	if vy < 0 {
-		vy = 0
-	}
-	if vy >= visible {
-		vy = visible - 1
-	}
-	next := scrollbarOffsetForPosition(vy, visible, maxOffset)
+	position := m.screenYToFrameY(y)
+	next := geometry.offsetForPointer(position, m.scrollbarDrag.grabOffset)
 	if next == m.viewport.YOffset() {
 		return false
 	}
@@ -159,12 +158,12 @@ func (m *Model) dragViewportScrollbarTo(y int) bool {
 	return true
 }
 
-func scrollbarOffsetForPosition(pos, visible, maxOffset int) int {
-	if maxOffset <= 0 || visible <= 1 {
-		return maxOffset
-	}
-	p := float64(pos) / float64(maxInt(1, visible-1))
-	return int(math.Round(p * float64(maxOffset)))
+func (m *Model) viewportScrollbarGeometry() scrollbarGeometry {
+	return newScrollbarGeometry(
+		m.viewportLineCount(),
+		maxInt(1, m.viewport.Height()),
+		m.viewport.YOffset(),
+	)
 }
 
 func (m *Model) scrollbarTargetAtMouse(x, y int) (scrollbarHitTarget, bool) {
@@ -179,10 +178,9 @@ func (m *Model) viewportScrollbarTargetAtMouse(x, y int) (scrollbarHitTarget, bo
 	if m.viewportScrollbarWidth() == 0 {
 		return scrollbarHitTarget{}, false
 	}
-	total := m.viewportLineCount()
-	visible := maxInt(1, m.viewport.Height())
+	geometry := m.viewportScrollbarGeometry()
 	y = m.screenYToFrameY(y)
-	if total <= visible || y < 0 || y >= visible {
+	if !geometry.scrollable() || y < 0 || y >= geometry.trackLength {
 		return scrollbarHitTarget{}, false
 	}
 	scrollbarX := m.mainColumnX() + tuikit.GutterNarrative + m.viewport.Width()

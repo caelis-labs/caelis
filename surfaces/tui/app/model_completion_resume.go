@@ -7,47 +7,44 @@ import (
 )
 
 func (m *Model) renderResumeList() string {
-	if len(m.resumeCandidates) == 0 {
-		return ""
-	}
-	maxItems := minInt(8, len(m.resumeCandidates))
-	start := 0
-	if m.resumeIndex >= maxItems {
-		start = m.resumeIndex - maxItems + 1
-	}
-	maxStart := maxInt(0, len(m.resumeCandidates)-maxItems)
-	if start > maxStart {
-		start = maxStart
-	}
-	end := minInt(len(m.resumeCandidates), start+maxItems)
-	lines := make([]string, 0, end-start)
-	count := end - start
+	return m.renderCompletionKind(completionResume)
+}
+
+func (m *Model) renderResumeListGeometry(geometry completionOverlayGeometry, candidates []ResumeCandidate) string {
+	lines := make([]string, 0, geometry.candidateCount)
+	count := geometry.candidateCount
 	titles := make([]string, count)
 	ages := make([]string, count)
 	titleColumnWidth := 0
 	ageColumnWidth := 0
-	for i := start; i < end; i++ {
-		item := m.resumeCandidates[i]
+	for i := geometry.windowStart; i < geometry.windowEnd; i++ {
+		item := candidates[i]
 		title := firstNonEmpty(strings.TrimSpace(item.Title), strings.TrimSpace(item.Prompt), strings.TrimSpace(item.SessionID))
 		title = strings.Join(strings.Fields(strings.TrimSpace(title)), " ")
-		titles[i-start] = title
+		titles[i-geometry.windowStart] = title
 		titleStyle := m.theme.CommandStyle()
-		if i == m.resumeIndex {
+		if i == geometry.selected {
 			titleStyle = m.theme.CommandActiveStyle()
 		}
 		titleColumnWidth = maxInt(titleColumnWidth, displayColumns(titleStyle.Render(title)))
 
-		age := resumeDisplayAge(m.resumeCandidates[i])
-		ages[i-start] = age
+		age := resumeDisplayAge(candidates[i])
+		ages[i-geometry.windowStart] = age
 		ageColumnWidth = maxInt(ageColumnWidth, displayColumns(age))
 	}
 	if ageColumnWidth > 0 {
 		ageColumnWidth = maxInt(ageColumnWidth, displayColumns("1d ago"))
 	}
-	for i := start; i < end; i++ {
-		lines = append(lines, m.renderResumeCandidateLine(titles[i-start], ages[i-start], titleColumnWidth, ageColumnWidth, i == m.resumeIndex))
+	for i := geometry.windowStart; i < geometry.windowEnd; i++ {
+		lines = append(lines, m.renderResumeCandidateLine(
+			titles[i-geometry.windowStart],
+			ages[i-geometry.windowStart],
+			titleColumnWidth,
+			ageColumnWidth,
+			i == geometry.selected,
+		))
 	}
-	return m.renderCompletionOverlay("Recent", lines)
+	return m.renderCompletionOverlay(geometry, lines)
 }
 
 func (m *Model) renderResumeCandidateLine(title string, age string, titleColumnWidth int, ageColumnWidth int, selected bool) string {
