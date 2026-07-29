@@ -16,6 +16,11 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+const (
+	mcpProtocolVersion20260728 = "2026-07-28"
+	mcpLegacyProtocolVersion   = "2025-11-25"
+)
+
 func TestMCPServerHelperProcess(t *testing.T) {
 	if os.Getenv("CAELIS_MCP_HELPER") != "1" {
 		return
@@ -104,6 +109,7 @@ func TestMCPManagerAndTool(t *testing.T) {
 		t.Fatalf("failed to start MCP manager: %v", err)
 	}
 	defer mgr.Close()
+	requireNegotiatedProtocolVersion(t, mgr, spec.PluginID, spec.Name, mcpProtocolVersion20260728)
 
 	tools := mgr.Tools()
 	if len(tools) != 1 {
@@ -151,7 +157,7 @@ func TestMCPManagerAndTool(t *testing.T) {
 	}
 }
 
-func TestMCPManagerStreamableHTTP(t *testing.T) {
+func TestMCPManagerStreamableHTTP20260728(t *testing.T) {
 	var sawHeader atomic.Bool
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "http-test-server", Version: "1.0.0"}, nil)
 	mcpsdk.AddTool[any, any](server, &mcpsdk.Tool{
@@ -167,7 +173,7 @@ func TestMCPManagerStreamableHTTP(t *testing.T) {
 			sawHeader.Store(true)
 		}
 		return server
-	}, nil)
+	}, &mcpsdk.StreamableHTTPOptions{Stateless: true})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -183,6 +189,7 @@ func TestMCPManagerStreamableHTTP(t *testing.T) {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 	defer mgr.Close()
+	requireNegotiatedProtocolVersion(t, mgr, "myplugin", "httpserver", mcpProtocolVersion20260728)
 
 	tools := mgr.Tools()
 	if len(tools) != 1 {
@@ -200,6 +207,53 @@ func TestMCPManagerStreamableHTTP(t *testing.T) {
 	}
 	if !sawHeader.Load() {
 		t.Fatal("streamable HTTP MCP server did not receive configured header")
+	}
+}
+
+func TestMCPManagerStreamableHTTPFallsBackToLegacy(t *testing.T) {
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "legacy-http-test-server", Version: "1.0.0"}, nil)
+	mcpsdk.AddTool[any, any](server, &mcpsdk.Tool{
+		Name:        "ping",
+		Description: "Pings over legacy HTTP",
+	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, _ any) (*mcpsdk.CallToolResult, any, error) {
+		return &mcpsdk.CallToolResult{
+			Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "legacy-pong"}},
+		}, nil, nil
+	})
+	// A stateful v1.7 Streamable HTTP handler cannot serve the stateless
+	// 2026-07-28 protocol, so the client must fall back to legacy initialize.
+	handler := mcpsdk.NewStreamableHTTPHandler(func(_ *http.Request) *mcpsdk.Server {
+		return server
+	}, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mgr, err := newMCPManagerWithHTTPHandler(ctx, handler, []ServerSpec{{
+		PluginID:  "myplugin",
+		Name:      "legacyhttpserver",
+		Transport: TransportStreamableHTTP,
+		URL:       "http://mcp.test",
+	}})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	defer mgr.Close()
+	requireNegotiatedProtocolVersion(t, mgr, "myplugin", "legacyhttpserver", mcpLegacyProtocolVersion)
+
+	tools := mgr.Tools()
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+	res, err := tools[0].Call(ctx, tool.Call{
+		Name:  tools[0].Definition().Name,
+		Input: []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("tool call failed: %v", err)
+	}
+	if res.IsError || len(res.Content) != 1 || res.Content[0].Text == nil || res.Content[0].Text.Text != "legacy-pong" {
+		t.Fatalf("unexpected legacy HTTP MCP tool result: %+v", res)
 	}
 }
 
@@ -235,6 +289,7 @@ func TestMCPManagerSSE(t *testing.T) {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 	defer mgr.Close()
+	requireNegotiatedProtocolVersion(t, mgr, "myplugin", "sseserver", mcpProtocolVersion20260728)
 
 	tools := mgr.Tools()
 	if len(tools) != 1 {
@@ -252,6 +307,21 @@ func TestMCPManagerSSE(t *testing.T) {
 	}
 	if !sawHeader.Load() {
 		t.Fatal("SSE MCP server did not receive configured header")
+	}
+}
+
+func requireNegotiatedProtocolVersion(t *testing.T, mgr *Manager, pluginID, serverName, want string) {
+	t.Helper()
+	client := mgr.clients[pluginID+"/"+serverName]
+	if client == nil || client.session == nil {
+		t.Fatalf("MCP client %s/%s has no active session", pluginID, serverName)
+	}
+	result := client.session.InitializeResult()
+	if result == nil {
+		t.Fatalf("MCP client %s/%s has no negotiation result", pluginID, serverName)
+	}
+	if got := result.ProtocolVersion; got != want {
+		t.Fatalf("MCP client %s/%s protocol version = %q, want %q", pluginID, serverName, got, want)
 	}
 }
 
