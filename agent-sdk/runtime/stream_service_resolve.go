@@ -31,7 +31,18 @@ func (tm *taskRuntime) resolveStreamTask(ctx context.Context, ref session.Sessio
 		return resolvedStreamTask{}, errorcode.New(errorcode.InvalidArgument, "agent-sdk/runtime: task id is required")
 	}
 	if resolved, found, err := tm.resolveLiveStreamTask(ref, taskID); found || err != nil {
-		return resolved, err
+		if err != nil || !found || resolved.kind != taskapi.KindSubagent {
+			return resolved, err
+		}
+		observed, observeErr := tm.lookupSubagentObserved(ctx, ref, taskID)
+		if observeErr != nil {
+			return resolvedStreamTask{}, wrapStreamTaskResolutionError(
+				errorcode.Unavailable,
+				fmt.Sprintf("agent-sdk/runtime: refresh subagent task stream metadata for %q", taskID),
+				observeErr,
+			)
+		}
+		return resolvedStreamTask{kind: taskapi.KindSubagent, subagent: observed}, nil
 	}
 	if tm.store == nil {
 		return resolvedStreamTask{}, streamTaskNotFound(taskID)
@@ -61,39 +72,38 @@ func (tm *taskRuntime) resolveStreamTask(ctx context.Context, ref session.Sessio
 		)
 	}
 
-	backfilled, err := tm.backfillCanonicalTaskEntry(ctx, ref, entry)
-	if err != nil {
-		var sessionLease *session.LeaseConflictError
-		if errors.As(err, &sessionLease) {
-			// Stream resolution is observation-only. If the producing Runtime
-			// owns the Session fence, abandon this observer's repair write and
-			// use the current durable Task without retrying unfenced.
-			reloaded, loadErr := tm.store.Get(context.WithoutCancel(ctx), taskID)
-			if loadErr == nil &&
-				storedTaskEntryMatches(reloaded, ref, entry.Kind) &&
-				strings.TrimSpace(reloaded.TaskID) == taskID {
-				entry = reloaded
-				err = nil
-			} else {
-				err = errorcode.Wrap(
-					errorcode.Unavailable,
-					fmt.Sprintf("agent-sdk/runtime: reload lease-contended task stream metadata for %q", taskID),
-					errors.Join(err, loadErr),
-				)
-			}
-		}
-	} else {
-		entry = backfilled
-	}
-	if err != nil {
-		return resolvedStreamTask{}, wrapStreamTaskResolutionError(
-			errorcode.Unavailable,
-			fmt.Sprintf("agent-sdk/runtime: recover canonical task stream metadata for %q", taskID),
-			err,
-		)
-	}
 	switch entry.Kind {
 	case taskapi.KindCommand:
+		backfilled, err := tm.backfillCanonicalTaskEntry(ctx, ref, entry)
+		if err != nil {
+			var sessionLease *session.LeaseConflictError
+			if errors.As(err, &sessionLease) {
+				// Command stream recovery keeps its existing canonical repair
+				// compatibility path, but never retries around an active fence.
+				reloaded, loadErr := tm.store.Get(context.WithoutCancel(ctx), taskID)
+				if loadErr == nil &&
+					storedTaskEntryMatches(reloaded, ref, entry.Kind) &&
+					strings.TrimSpace(reloaded.TaskID) == taskID {
+					entry = reloaded
+					err = nil
+				} else {
+					err = errorcode.Wrap(
+						errorcode.Unavailable,
+						fmt.Sprintf("agent-sdk/runtime: reload lease-contended task stream metadata for %q", taskID),
+						errors.Join(err, loadErr),
+					)
+				}
+			}
+		} else {
+			entry = backfilled
+		}
+		if err != nil {
+			return resolvedStreamTask{}, wrapStreamTaskResolutionError(
+				errorcode.Unavailable,
+				fmt.Sprintf("agent-sdk/runtime: recover canonical task stream metadata for %q", taskID),
+				err,
+			)
+		}
 		command, err := tm.rehydrateCommandTask(entry)
 		if err != nil {
 			return resolvedStreamTask{}, wrapStreamTaskResolutionError(

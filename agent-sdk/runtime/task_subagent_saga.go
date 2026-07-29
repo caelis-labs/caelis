@@ -155,7 +155,7 @@ func (tm *taskRuntime) startSubagentTarget(
 		spawnContext := subagent.SpawnContext{
 			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession), CWD: strings.TrimSpace(activeSession.CWD),
 			TaskID: taskID, ParentCallID: strings.TrimSpace(req.ParentCall), Mode: mode, ApprovalMode: strings.TrimSpace(req.ApprovalMode),
-			ApprovalRequester: req.Approval, Streams: tm,
+			ApprovalRequester: req.Approval, Streams: tm, Completion: newSubagentCompletionSink(ctx, tm, taskID, 1),
 		}
 		anchor, result, err := spawnSubagentTarget(ctx, runner, spawnContext, target, childPrompt)
 		if err != nil {
@@ -190,6 +190,7 @@ func (tm *taskRuntime) startSubagentTarget(
 	} else {
 		task = tm.rehydrateSubagentTask(outcome.Entry)
 		task.runner = runner
+		task.lifecycleReady = false
 	}
 	// Hold the task's stream-order lock while making it discoverable and
 	// applying earlier pending frames. A concurrent publisher that resolves the
@@ -203,7 +204,11 @@ func (tm *taskRuntime) startSubagentTarget(
 	tm.mu.Unlock()
 	task.applyStreamFramesLocked(pending)
 	task.streamMu.Unlock()
-	return tm.advanceSubagentSpawn(ctx, activeSession, task, strings.TrimSpace(req.ParentCall), strings.TrimSpace(req.Prompt))
+	snapshot, err := tm.advanceSubagentSpawn(ctx, activeSession, task, strings.TrimSpace(req.ParentCall), strings.TrimSpace(req.Prompt))
+	if err == nil {
+		tm.markSubagentLifecycleReady(task)
+	}
+	return snapshot, err
 }
 
 func (tm *taskRuntime) beginSubagentSpawn(

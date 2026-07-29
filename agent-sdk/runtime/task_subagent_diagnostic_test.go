@@ -2,16 +2,91 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
+
+type completionTestTaskStore interface {
+	task.Store
+	task.CASStore
+}
+
+type blockingSubagentFinalSessions struct {
+	*sagaSessionService
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+type blockingCompletionIntentTaskStore struct {
+	completionTestTaskStore
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+type failingCompletionIntentTaskStore struct {
+	completionTestTaskStore
+	mu        sync.Mutex
+	remaining int
+}
+
+func (s *failingCompletionIntentTaskStore) Put(ctx context.Context, req task.PutRequest) (*task.Entry, error) {
+	if req.Entry != nil &&
+		taskStringValue(req.Entry.Spec[subagentCompletionPhaseKey]) == subagentCompletionPhasePending {
+		s.mu.Lock()
+		if s.remaining > 0 {
+			s.remaining--
+			s.mu.Unlock()
+			return nil, errors.New("forced transient completion intent failure")
+		}
+		s.mu.Unlock()
+	}
+	return s.completionTestTaskStore.Put(ctx, req)
+}
+
+func (s *blockingCompletionIntentTaskStore) Put(ctx context.Context, req task.PutRequest) (*task.Entry, error) {
+	entry, err := s.completionTestTaskStore.Put(ctx, req)
+	if err != nil || req.Entry == nil ||
+		taskStringValue(req.Entry.Spec[subagentCompletionPhaseKey]) != subagentCompletionPhasePending {
+		return entry, err
+	}
+	s.once.Do(func() {
+		close(s.started)
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+		}
+	})
+	return entry, err
+}
+
+func (s *blockingSubagentFinalSessions) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+	if req.Event != nil &&
+		session.EventTypeOf(req.Event) == session.EventTypeAssistant &&
+		req.Event.Scope != nil &&
+		req.Event.Scope.Participant.Role == session.ParticipantRoleSidecar {
+		s.once.Do(func() { close(s.started) })
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return s.sagaSessionService.AppendEvent(ctx, req)
+}
 
 func TestSubagentApplyResultKeepsFailureDiagnosticTerminalOnly(t *testing.T) {
 	task := &subagentTask{result: map[string]any{"error": "previous failure"}}
@@ -90,7 +165,7 @@ func TestNormalizeSubagentCancelledClearsStaleFailureAndOutputFields(t *testing.
 	}
 }
 
-func TestSubagentTerminalStreamStateUsesFailureDiagnosticContract(t *testing.T) {
+func TestSubagentTerminalStreamFrameDoesNotOwnLifecycle(t *testing.T) {
 	tests := []struct {
 		name       string
 		state      task.State
@@ -118,16 +193,14 @@ func TestSubagentTerminalStreamStateUsesFailureDiagnosticContract(t *testing.T) 
 				Closed:  true,
 			}})
 			snapshot := subtask.snapshot()
-			if snapshot.State != test.state || snapshot.Running {
-				t.Fatalf("snapshot = state %q running %v, want %q false", snapshot.State, snapshot.Running, test.state)
+			if snapshot.State != task.StateRunning || !snapshot.Running {
+				t.Fatalf("snapshot = state %q running %v, want unchanged running lifecycle", snapshot.State, snapshot.Running)
 			}
-			if got := taskStringValue(snapshot.Result["error"]); got != test.diagnostic {
-				t.Fatalf("snapshot error = %q, want %q", got, test.diagnostic)
+			if got := taskStringValue(snapshot.Result["error"]); got != "" {
+				t.Fatalf("snapshot error = %q, want no stream-derived failure", got)
 			}
-			for _, key := range []string{"result", "final_message", "output_preview"} {
-				if _, exists := snapshot.Result[key]; exists {
-					t.Fatalf("terminal stream state retained %q: %#v", key, snapshot.Result)
-				}
+			if len(subtask.streamFrames) != 0 {
+				t.Fatalf("stream frames = %#v, want no observer-owned terminal frame", subtask.streamFrames)
 			}
 		})
 	}
@@ -157,15 +230,19 @@ func TestFailedSubagentDiagnosticSurvivesCanonicalTaskSyncAndRehydrate(t *testin
 	if err != nil {
 		t.Fatalf("StartSubagent() error = %v", err)
 	}
-	snapshot, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID:    started.Ref.TaskID,
-		Principal: session.ActorKindTool,
-	})
+	entry, err := runtime.tasks.store.Get(ctx, started.Ref.TaskID)
 	if err != nil {
-		t.Fatalf("Wait() error = %v", err)
+		t.Fatalf("task store Get(after producer completion) error = %v", err)
 	}
+	snapshot := snapshotFromTaskEntry(entry)
 	if snapshot.State != task.StateFailed || snapshot.Running {
 		t.Fatalf("snapshot = state %q running %v, want terminal failed", snapshot.State, snapshot.Running)
+	}
+	if runner.waitCalls != 0 {
+		t.Fatalf("runner Wait calls = %d, want producer-driven completion", runner.waitCalls)
+	}
+	if entry.FailureDiagnostic != failure || taskStringValue(entry.Result["error"]) != failure {
+		t.Fatalf("durable failure = diagnostic %q result %#v, want typed %q", entry.FailureDiagnostic, entry.Result, failure)
 	}
 	payload := taskToolPayload(snapshot)
 	if got := taskStringValue(payload["error"]); got != failure {
@@ -186,7 +263,7 @@ func TestFailedSubagentDiagnosticSurvivesCanonicalTaskSyncAndRehydrate(t *testin
 	if err != nil {
 		t.Fatalf("syncCanonicalToolResult() error = %v", err)
 	}
-	entry, err := runtime.tasks.store.Get(ctx, snapshot.Ref.TaskID)
+	entry, err = runtime.tasks.store.Get(ctx, snapshot.Ref.TaskID)
 	if err != nil {
 		t.Fatalf("task store Get(after sync) error = %v", err)
 	}
@@ -221,6 +298,617 @@ func TestFailedSubagentDiagnosticSurvivesCanonicalTaskSyncAndRehydrate(t *testin
 	}
 	if compatibility.FailureDiagnostic != "subagent failed" {
 		t.Fatalf("canonical typed diagnostic = %q, want subagent failed", compatibility.FailureDiagnostic)
+	}
+}
+
+func TestSubagentProducerFailureSurvivesFileStoreReopenWithoutTaskObservation(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	tasks := sessionfile.NewTaskStore(sessions)
+	activeSession, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "completion-reopen", PreferredSessionID: "completion-reopen",
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	const failure = "subagent connection closed"
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		waitResult:  delegation.Result{State: delegation.StateFailed, Error: failure},
+	}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: tasks,
+	}))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "review",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	if runner.waitCalls != 0 {
+		t.Fatalf("runner Wait calls = %d, want producer-driven completion", runner.waitCalls)
+	}
+
+	reopenedStore := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopenedTasks := sessionfile.NewTaskStore(reopenedStore)
+	reopened, err := reopenedTasks.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("reopened Task Get() error = %v", err)
+	}
+	if reopened.State != task.StateFailed || reopened.Running ||
+		reopened.FailureDiagnostic != failure || taskStringValue(reopened.Result["error"]) != failure {
+		t.Fatalf("reopened failure = %#v, want typed bounded terminal diagnostic", reopened)
+	}
+}
+
+func TestSubagentCompletionIntentNeverPersistsRawProducerDiagnostic(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	activeSession, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "completion-secret", PreferredSessionID: "completion-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &blockingCompletionIntentTaskStore{
+		completionTestTaskStore: sessionfile.NewTaskStore(sessions),
+		started:                 make(chan struct{}),
+		release:                 make(chan struct{}),
+	}
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "review",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const rawDiagnostic = "Authorization: Bearer top-secret api_key=private-key at /Users/alice/private"
+	completed := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID,
+			State:  delegation.StateFailed,
+			Error:  rawDiagnostic,
+			Result: rawDiagnostic,
+		})
+		close(completed)
+	}()
+	select {
+	case <-store.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("completion did not persist its crash intent")
+	}
+
+	reopened := sessionfile.NewTaskStore(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	intent, err := reopened.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted := fmt.Sprint(intent.Spec[subagentCompletionResultKey], intent.Result, intent.FailureDiagnostic)
+	for _, secret := range []string{"top-secret", "private-key", "/Users/alice/private"} {
+		if strings.Contains(persisted, secret) {
+			t.Fatalf("completion intent persisted raw producer secret %q: %s", secret, persisted)
+		}
+	}
+	rawIntent, ok := intent.Spec[subagentCompletionResultKey].(map[string]any)
+	if !ok || taskStringValue(rawIntent["error"]) != "subagent failed" {
+		t.Fatalf("completion intent diagnostic = %#v, want fixed fallback", rawIntent)
+	}
+
+	close(store.release)
+	select {
+	case <-completed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("completion did not finish after intent inspection")
+	}
+	terminal, err := reopened.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal.State != task.StateFailed || terminal.Running ||
+		terminal.FailureDiagnostic != "subagent failed" ||
+		taskStringValue(terminal.Result["error"]) != "subagent failed" {
+		t.Fatalf("terminal diagnostic = %#v, want fixed failed fallback", terminal)
+	}
+}
+
+func TestSubagentCompletionRetryUsesOneRuntimeCoordinatorForMultipleTasks(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	first, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstSink := runner.spawnContext.Completion
+	second, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "second",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondSink := runner.spawnContext.Completion
+	baseStore := runtime.tasks.store
+	runtime.tasks.store = &failingCompletionIntentTaskStore{
+		completionTestTaskStore: baseStore.(completionTestTaskStore),
+		remaining:               8,
+	}
+
+	firstSink.PublishSubagentCompletion(delegation.Result{
+		TaskID: first.Ref.TaskID, State: delegation.StateCompleted, Result: "first done",
+	})
+	secondSink.PublishSubagentCompletion(delegation.Result{
+		TaskID: second.Ref.TaskID, State: delegation.StateCompleted, Result: "second done",
+	})
+	runtime.tasks.mu.RLock()
+	workerStarted := runtime.tasks.completionWorker
+	pendingStarted := len(runtime.tasks.completions)
+	runtime.tasks.mu.RUnlock()
+	if !workerStarted || pendingStarted != 2 {
+		t.Fatalf("completion coordinator = worker %v pending %d, want one active coordinator owning two pending tasks", workerStarted, pendingStarted)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		firstEntry, firstErr := baseStore.Get(ctx, first.Ref.TaskID)
+		secondEntry, secondErr := baseStore.Get(ctx, second.Ref.TaskID)
+		runtime.tasks.mu.RLock()
+		pending := len(runtime.tasks.completions)
+		worker := runtime.tasks.completionWorker
+		runtime.tasks.mu.RUnlock()
+		if firstErr == nil && secondErr == nil &&
+			firstEntry.State == task.StateCompleted && !firstEntry.Running &&
+			secondEntry.State == task.StateCompleted && !secondEntry.Running &&
+			pending == 0 && !worker {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("completion coordinator did not drain: first=%#v err=%v second=%#v err=%v pending=%d worker=%v",
+				firstEntry, firstErr, secondEntry, secondErr, pending, worker)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestSubagentProducerCompletionOutlivesParentRuntimeLease(t *testing.T) {
+	tests := []struct {
+		name             string
+		acquireNextLease bool
+	}{
+		{name: "released parent lease"},
+		{name: "new parent lease active", acquireNextLease: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			sessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+				AppName: "caelis", UserID: "completion-lease", PreferredSessionID: "completion-lease",
+			})
+			if err != nil {
+				t.Fatalf("StartSession() error = %v", err)
+			}
+			runner := &recordingSubagentRunner{
+				spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+			}
+			runtime, err := New(testConfigWithACPForwarder(Config{
+				Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner,
+				TaskStore: sessionfile.NewTaskStore(sessions),
+			}))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			leases, ok := runtime.sessions.(session.SessionLeaseService)
+			if !ok {
+				t.Fatal("Session service does not support execution leases")
+			}
+			parentLease, err := leases.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+				SessionRef: activeSession.SessionRef,
+				OwnerID:    "parent-turn",
+				TTL:        time.Minute,
+			})
+			if err != nil {
+				t.Fatalf("AcquireSessionLease(parent) error = %v", err)
+			}
+			parentCtx := session.ContextWithRuntimeLease(context.Background(), parentLease)
+			started, err := runtime.tasks.StartSubagent(
+				parentCtx,
+				activeSession,
+				activeSession.SessionRef,
+				runner,
+				task.SubagentStartRequest{
+					Agent: "helper", Prompt: "review", Source: "slash_agent", Role: session.ParticipantRoleSidecar,
+				},
+			)
+			if err != nil {
+				t.Fatalf("StartSubagent() error = %v", err)
+			}
+			sink, ok := runner.spawnContext.Completion.(subagentCompletionSink)
+			if !ok {
+				t.Fatalf("completion sink = %T, want Runtime-owned sink", runner.spawnContext.Completion)
+			}
+			guard := session.RuntimeMutationGuard(sink.ctx)
+			if guard.Authority != session.MutationAuthorityControl ||
+				guard.Purpose != session.ControlMutationPurposeSubagentCompletion ||
+				guard.LeaseID != "" || guard.FencingToken != 0 {
+				t.Fatalf("completion guard = %#v, want unfenced explicit subagent_completion authority", guard)
+			}
+			if err := leases.ReleaseSessionLease(context.Background(), session.ReleaseSessionLeaseRequest{
+				SessionRef:            activeSession.SessionRef,
+				LeaseID:               parentLease.LeaseID,
+				OwnerID:               parentLease.OwnerID,
+				ExpectedLeaseRevision: parentLease.Revision,
+			}); err != nil {
+				t.Fatalf("ReleaseSessionLease(parent) error = %v", err)
+			}
+			if test.acquireNextLease {
+				nextLease, acquireErr := leases.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+					SessionRef: activeSession.SessionRef,
+					OwnerID:    "next-turn",
+					TTL:        time.Minute,
+				})
+				if acquireErr != nil {
+					t.Fatalf("AcquireSessionLease(next) error = %v", acquireErr)
+				}
+				t.Cleanup(func() {
+					_ = leases.ReleaseSessionLease(context.Background(), session.ReleaseSessionLeaseRequest{
+						SessionRef:            activeSession.SessionRef,
+						LeaseID:               nextLease.LeaseID,
+						OwnerID:               nextLease.OwnerID,
+						ExpectedLeaseRevision: nextLease.Revision,
+					})
+				})
+			}
+
+			runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+				TaskID: started.Ref.TaskID,
+				State:  delegation.StateCompleted,
+				Result: "done after parent turn",
+			})
+			reopenedSessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			entry, err := sessionfile.NewTaskStore(reopenedSessions).Get(context.Background(), started.Ref.TaskID)
+			if err != nil {
+				t.Fatalf("reopened TaskStore.Get() error = %v", err)
+			}
+			rehydrated := runtime.tasks.rehydrateSubagentTask(entry).snapshot()
+			if entry.Running || entry.State != task.StateCompleted ||
+				taskStringValue(rehydrated.Result["final_message"]) != "done after parent turn" {
+				t.Fatalf("durable completion = %#v, want terminal result after parent lease changed", entry)
+			}
+			loaded, err := reopenedSessions.LoadSession(context.Background(), session.LoadSessionRequest{
+				SessionRef: activeSession.SessionRef,
+			})
+			if err != nil {
+				t.Fatalf("reopened LoadSession() error = %v", err)
+			}
+			foundFinal := false
+			for _, event := range loaded.Events {
+				if event != nil &&
+					session.EventTypeOf(event) == session.EventTypeAssistant &&
+					session.EventText(event) == "done after parent turn" {
+					foundFinal = true
+					break
+				}
+			}
+			if !foundFinal {
+				t.Fatal("completion did not persist Side final after parent lease changed")
+			}
+		})
+	}
+}
+
+func TestSubagentCompletionRemainsRunningUntilSideFinalCommit(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	base := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	activeSession, err := base.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "completion-visibility", PreferredSessionID: "completion-visibility",
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	sessions := &blockingSubagentFinalSessions{
+		sagaSessionService: &sagaSessionService{Service: base},
+		started:            make(chan struct{}),
+		release:            make(chan struct{}),
+	}
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner,
+		TaskStore: sessionfile.NewTaskStore(base),
+	}))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "review", Source: "slash_agent", Role: session.ParticipantRoleSidecar,
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	baseline, err := runtime.tasks.Read(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindUser,
+	})
+	if err != nil {
+		t.Fatalf("Read(baseline) error = %v", err)
+	}
+
+	completed := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID, State: delegation.StateCompleted, Result: "committed side final",
+		})
+		close(completed)
+	}()
+	select {
+	case <-sessions.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("completion did not reach blocked Side final append")
+	}
+	select {
+	case <-completed:
+		t.Fatal("completion returned before Side final append was released")
+	default:
+	}
+
+	observed, err := runtime.tasks.Read(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindUser,
+	})
+	if err != nil {
+		t.Fatalf("Read(blocked completion) error = %v", err)
+	}
+	if !observed.Running || observed.State != task.StateRunning {
+		t.Fatalf("Read(blocked completion) = %#v, want live running lifecycle", observed)
+	}
+	if observed.Revision != baseline.Revision || !reflect.DeepEqual(observed.Lease, baseline.Lease) {
+		t.Fatalf("Read(blocked completion) revision/lease = %d/%#v, want baseline %d/%#v", observed.Revision, observed.Lease, baseline.Revision, baseline.Lease)
+	}
+	durableWhileBlocked, err := runtime.tasks.store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("TaskStore.Get(blocked completion) error = %v", err)
+	}
+	if durableWhileBlocked.Revision <= baseline.Revision ||
+		durableWhileBlocked.State != task.StateRunning ||
+		!durableWhileBlocked.Running ||
+		taskStringValue(durableWhileBlocked.Metadata[subagentCompletionPhaseKey]) != subagentCompletionPhasePending {
+		t.Fatalf("durable blocked completion = %#v, want recoverable Running completion intent", durableWhileBlocked)
+	}
+	waited, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindUser, Yield: 25 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Wait(blocked completion) error = %v", err)
+	}
+	if !waited.Running || waited.State != task.StateRunning {
+		t.Fatalf("Wait(blocked completion) = %#v, want live running lifecycle", waited)
+	}
+	streamed, err := runtime.Streams().Read(ctx, stream.ReadRequest{
+		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
+	})
+	if err != nil {
+		t.Fatalf("Streams.Read(blocked completion) error = %v", err)
+	}
+	if !streamed.Running || streamed.State != string(task.StateRunning) {
+		t.Fatalf("Streams.Read(blocked completion) = %#v, want live running lifecycle", streamed)
+	}
+
+	// Simulate a process restart at the exact crash window: the original
+	// producer is blocked after writing the Running completion intent but
+	// before Side final. Recovery must idempotently roll the intent through
+	// Side final/checkpoint and the final terminal CAS.
+	reopenedSessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	restarted, err := New(testConfigWithACPForwarder(Config{
+		Sessions: reopenedSessions, AgentFactory: chat.Factory{},
+		Subagents: &recordingSubagentRunner{}, TaskStore: sessionfile.NewTaskStore(reopenedSessions),
+	}))
+	if err != nil {
+		t.Fatalf("New(restarted) error = %v", err)
+	}
+	if err := restarted.recoverRuntimeState(ctx, activeSession.SessionRef); err != nil {
+		t.Fatalf("recoverRuntimeState() error = %v", err)
+	}
+	recovered, err := restarted.tasks.store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("TaskStore.Get(recovered) error = %v", err)
+	}
+	if recovered.Running || recovered.State != task.StateCompleted ||
+		taskStringValue(recovered.Metadata[subagentCompletionPhaseKey]) != "" {
+		t.Fatalf("recovered completion = %#v, want terminal with cleared intent", recovered)
+	}
+
+	close(sessions.release)
+	select {
+	case <-completed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("completion did not finish after Side final append release")
+	}
+	terminal, err := runtime.tasks.Read(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindUser,
+	})
+	if err != nil {
+		t.Fatalf("Read(terminal) error = %v", err)
+	}
+	durable, err := runtime.tasks.store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("TaskStore.Get(terminal) error = %v", err)
+	}
+	if terminal.Running || terminal.State != task.StateCompleted ||
+		terminal.Revision != durable.Revision || durable.State != task.StateCompleted {
+		t.Fatalf("published/durable terminal = %#v / %#v, want same committed revision", terminal, durable)
+	}
+	loaded, err := reopenedSessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	foundFinal := false
+	for _, event := range loaded.Events {
+		if event != nil &&
+			session.EventTypeOf(event) == session.EventTypeAssistant &&
+			session.EventText(event) == "committed side final" {
+			foundFinal = true
+			break
+		}
+	}
+	if !foundFinal {
+		t.Fatal("completion published terminal without durable Side final")
+	}
+}
+
+func TestSubagentProducerCompletionIsMonotonicAndTerminalFramedOnce(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "review",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+
+	runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+		TaskID: started.Ref.TaskID,
+		State:  delegation.StateCompleted,
+		Result: "exact final",
+	})
+	first, err := runtime.tasks.store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("Get(first completion) error = %v", err)
+	}
+	runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+		TaskID: started.Ref.TaskID,
+		State:  delegation.StateFailed,
+		Error:  "subagent prompt failed",
+	})
+	second, err := runtime.tasks.store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("Get(duplicate completion) error = %v", err)
+	}
+	if second.Revision != first.Revision || second.State != task.StateCompleted {
+		t.Fatalf("duplicate completion changed durable terminal: first=%#v second=%#v", first, second)
+	}
+	if got := taskStringValue(runtime.tasks.rehydrateSubagentTask(second).snapshot().Result["final_message"]); got != "exact final" {
+		t.Fatalf("rehydrated final_message = %q, want first terminal result", got)
+	}
+
+	streamSnapshot, err := runtime.Streams().Read(ctx, stream.ReadRequest{
+		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
+	})
+	if err != nil {
+		t.Fatalf("Streams().Read() error = %v", err)
+	}
+	closed := 0
+	for _, frame := range streamSnapshot.Frames {
+		if frame.Closed {
+			closed++
+		}
+	}
+	if closed != 1 || streamSnapshot.State != string(task.StateCompleted) || streamSnapshot.FinalText != "exact final" {
+		t.Fatalf("terminal stream = %#v, want one completed close with exact final", streamSnapshot)
+	}
+}
+
+func TestSubagentWaitWakesFromProducerCompletionWithoutPollingRunner(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "review",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+
+	type waitOutcome struct {
+		snapshot task.Snapshot
+		err      error
+	}
+	waited := make(chan waitOutcome, 1)
+	go func() {
+		snapshot, waitErr := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
+			TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Yield: time.Second,
+		})
+		waited <- waitOutcome{snapshot: snapshot, err: waitErr}
+	}()
+	runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+		TaskID: started.Ref.TaskID,
+		State:  delegation.StateCompleted,
+		Result: "done",
+	})
+
+	select {
+	case outcome := <-waited:
+		if outcome.err != nil || outcome.snapshot.State != task.StateCompleted || outcome.snapshot.Running {
+			t.Fatalf("Wait() = %#v, %v, want producer-completed snapshot", outcome.snapshot, outcome.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Wait() did not wake from producer completion")
+	}
+	if runner.waitCalls != 0 {
+		t.Fatalf("runner Wait calls = %d, want zero", runner.waitCalls)
+	}
+}
+
+func TestSubagentStaleTurnCompletionCannotTerminateContinuation(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult:    delegation.Result{State: delegation.StateRunning, Running: true},
+		continueResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "first",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	oldTurn := runner.spawnContext.Completion
+	oldTurn.PublishSubagentCompletion(delegation.Result{
+		TaskID: started.Ref.TaskID, State: delegation.StateCompleted, Result: "first done",
+	})
+	if _, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Input: "continue",
+	}); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	oldTurn.PublishSubagentCompletion(delegation.Result{
+		TaskID: started.Ref.TaskID, State: delegation.StateFailed, Error: "subagent prompt failed",
+	})
+	running := runtime.tasks.subagents[started.Ref.TaskID].snapshot()
+	if !running.Running || running.State != task.StateRunning || taskTurnSeqFromSpec(running.Metadata) != 2 {
+		t.Fatalf("stale completion changed continuation = %#v", running)
+	}
+
+	runner.continueCompletion.PublishSubagentCompletion(delegation.Result{
+		TaskID: started.Ref.TaskID, State: delegation.StateCompleted, Result: "second done",
+	})
+	completed := runtime.tasks.subagents[started.Ref.TaskID].snapshot()
+	if completed.Running || completed.State != task.StateCompleted ||
+		taskStringValue(completed.Result["final_message"]) != "second done" {
+		t.Fatalf("current completion = %#v, want second turn terminal", completed)
 	}
 }
 

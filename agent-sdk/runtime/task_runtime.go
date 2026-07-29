@@ -40,25 +40,25 @@ func (o taskToolObserver) ObserveTaskSnapshot(snapshot taskapi.Snapshot) {
 }
 
 func (tm *taskRuntime) Wait(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return tm.control(ctx, ref, req, taskControlObserve, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
 		return target.Wait(ctx, normalized)
 	})
 }
 
 func (tm *taskRuntime) Read(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return tm.control(ctx, ref, req, taskControlObserve, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
 		return target.Read(ctx, normalized)
 	})
 }
 
 func (tm *taskRuntime) Write(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return tm.control(ctx, ref, req, taskControlMutate, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
 		return target.Write(ctx, normalized)
 	})
 }
 
 func (tm *taskRuntime) Cancel(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return tm.control(ctx, ref, req, taskControlMutate, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
 		return target.Cancel(ctx, normalized)
 	})
 }
@@ -287,10 +287,32 @@ func taskPublicHandle(snapshot taskapi.Snapshot) string {
 	return normalizeTaskHandle(firstNonEmpty(snapshot.Handle, taskStringValue(snapshot.Result["handle"]), taskStringValue(snapshot.Metadata["handle"]), strings.TrimSpace(snapshot.Ref.TaskID)))
 }
 
+type taskEntryPersistMode uint8
+
+const (
+	taskEntryPersistPublished taskEntryPersistMode = iota
+	taskEntryPersistStaged
+)
+
 func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entry) error {
+	return tm.persistTaskEntryMode(ctx, entry, taskEntryPersistPublished)
+}
+
+// persistStagedTaskEntry commits a shadow lifecycle entry without publishing
+// its revision/lease into the live registry. The caller publishes the complete
+// whole-object state only after every required durable side effect succeeds.
+func (tm *taskRuntime) persistStagedTaskEntry(ctx context.Context, entry *taskapi.Entry) error {
+	return tm.persistTaskEntryMode(ctx, entry, taskEntryPersistStaged)
+}
+
+func (tm *taskRuntime) persistTaskEntryMode(ctx context.Context, entry *taskapi.Entry, mode taskEntryPersistMode) error {
 	if tm == nil || tm.store == nil || entry == nil {
 		return nil
 	}
+	if mode != taskEntryPersistPublished && mode != taskEntryPersistStaged {
+		return fmt.Errorf("agent-sdk/runtime: unsupported task entry persist mode %d", mode)
+	}
+	publish := mode == taskEntryPersistPublished
 	if entry.Kind == taskapi.KindSubagent {
 		normalizeSubagentEntryResult(entry, entry.FailureDiagnostic)
 	}
@@ -308,7 +330,7 @@ func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entr
 		persisted, err := store.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: expected})
 		if err != nil {
 			if !session.IsCommitted(err) {
-				if entry.Kind == taskapi.KindSubagent {
+				if publish && entry.Kind == taskapi.KindSubagent {
 					tm.invalidateSubagentTask(entry.Session, entry.TaskID, expected)
 				}
 				return err
@@ -324,7 +346,9 @@ func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entr
 		}
 		if persisted != nil {
 			*entry = *taskapi.CloneEntry(persisted)
-			tm.updateTaskPersistence(entry)
+			if publish {
+				tm.updateTaskPersistence(entry)
+			}
 		}
 		return nil
 	}

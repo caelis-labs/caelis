@@ -5094,7 +5094,7 @@ func TestRuntimeTaskToolResolvesSubagentHandle(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskReadObservesSubagentImmediately(t *testing.T) {
+func TestRuntimeTaskReadUsesRuntimeOwnedSubagentState(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -5114,6 +5114,7 @@ func TestRuntimeTaskReadObservesSubagentImmediately(t *testing.T) {
 		handle:     "ella",
 		state:      taskapi.StateRunning,
 		running:    true,
+		result:     map[string]any{"output_preview": "Inspecting the latest files"},
 		metadata:   map[string]any{"handle": "ella"},
 	}
 	runtime.tasks.mu.Unlock()
@@ -5141,18 +5142,17 @@ func TestRuntimeTaskReadObservesSubagentImmediately(t *testing.T) {
 		t.Fatalf("TASK read yield = %dms, want immediate zero-wait observation", runner.waitYieldMS)
 	}
 
-	runner.waitResult = delegation.Result{
-		State:  delegation.StateCompleted,
-		Result: "## Complete\n\n- exact child result",
-	}
 	result, err = taskTool.Call(context.Background(), tool.Call{ID: "task-read-final", Name: tasktool.ToolName, Input: raw})
 	if err != nil {
 		t.Fatalf("TASK read terminal Spawn error = %v", err)
 	}
 	payload = testToolResultPayload(t, result)
-	if payload["state"] != "completed" || payload["target_kind"] != "subagent" ||
-		payload["final_message"] != "## Complete\n\n- exact child result" {
-		t.Fatalf("TASK read terminal payload = %#v", payload)
+	if payload["state"] != "running" || payload["target_kind"] != "subagent" ||
+		payload["output_preview"] != "Inspecting the latest files" {
+		t.Fatalf("TASK read second observation payload = %#v", payload)
+	}
+	if runner.waitCalls != 0 {
+		t.Fatalf("runner Wait calls = %d, want read-only Runtime observation", runner.waitCalls)
 	}
 }
 

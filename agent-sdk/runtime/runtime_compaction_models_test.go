@@ -20,6 +20,9 @@ type stepWatermarkModel struct {
 }
 
 func (m *stepWatermarkModel) Name() string { return "step-watermark" }
+func (m *stepWatermarkModel) ProviderName() string {
+	return "test-provider"
+}
 
 func (m *stepWatermarkModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	if strings.Contains(requestInstructionsText(req), "CONTEXT CHECKPOINT COMPACTION") {
@@ -63,6 +66,8 @@ func (m *stepWatermarkModel) Generate(_ context.Context, req *model.Request) ite
 				StepComplete: true,
 				Status:       model.ResponseStatusCompleted,
 				FinishReason: model.FinishReasonToolCalls,
+				Provider:     "test-provider",
+				Model:        "step-watermark",
 				Usage: model.Usage{
 					PromptTokens:     190,
 					CompletionTokens: 6,
@@ -81,6 +86,8 @@ func (m *stepWatermarkModel) Generate(_ context.Context, req *model.Request) ite
 				StepComplete: true,
 				Status:       model.ResponseStatusCompleted,
 				FinishReason: model.FinishReasonStop,
+				Provider:     "test-provider",
+				Model:        "step-watermark",
 				Usage: model.Usage{
 					PromptTokens:     80,
 					CompletionTokens: 6,
@@ -92,6 +99,94 @@ func (m *stepWatermarkModel) Generate(_ context.Context, req *model.Request) ite
 		}
 	}
 }
+
+type attachmentUsageModel struct {
+	t               *testing.T
+	normalCalls     int
+	compactionCalls int
+}
+
+func (m *attachmentUsageModel) Name() string             { return "gpt-5.6-sol" }
+func (m *attachmentUsageModel) ProviderName() string     { return "openai-codex" }
+func (m *attachmentUsageModel) ContextWindowTokens() int { return 258400 }
+func (m *attachmentUsageModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
+
+func (m *attachmentUsageModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	if strings.Contains(requestInstructionsText(req), "CONTEXT CHECKPOINT COMPACTION") {
+		m.compactionCalls++
+		return func(yield func(*model.StreamEvent, error) bool) {
+			yield(model.StreamEventFromResponse(&model.Response{
+				Message: model.NewTextMessage(model.RoleAssistant, `CONTEXT CHECKPOINT
+
+## Current Objective
+- Finish the attachment-assisted tool turn.
+
+## Next Actions
+1. Continue the turn from the compacted context.`),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       model.ResponseStatusCompleted,
+			}), nil)
+		}
+	}
+
+	m.normalCalls++
+	callIndex := m.normalCalls
+	return func(yield func(*model.StreamEvent, error) bool) {
+		switch callIndex {
+		case 1:
+			yield(model.StreamEventFromResponse(&model.Response{
+				Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+					ID:   "call-attachment-usage",
+					Name: "ECHO",
+					Args: `{"value":"pong"}`,
+				}}, ""),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       model.ResponseStatusCompleted,
+				FinishReason: model.FinishReasonToolCalls,
+				Provider:     "openai-codex",
+				Model:        "gpt-5.6-sol",
+				Usage: model.Usage{
+					PromptTokens:     92576,
+					CompletionTokens: 6,
+					TotalTokens:      92582,
+				},
+			}), nil)
+		case 2:
+			if !requestHasToolResult(req, "ECHO") {
+				m.t.Fatalf("post-tool request missing ECHO result: %+v", req.Messages)
+			}
+			yield(model.StreamEventFromResponse(&model.Response{
+				Message:      model.NewTextMessage(model.RoleAssistant, "completed without false compact"),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       model.ResponseStatusCompleted,
+				FinishReason: model.FinishReasonStop,
+				Provider:     "openai-codex",
+				Model:        "gpt-5.6-sol",
+				Usage: model.Usage{
+					PromptTokens:     92620,
+					CompletionTokens: 5,
+					TotalTokens:      92625,
+				},
+			}), nil)
+		default:
+			m.t.Fatalf("unexpected normal model call %d", callIndex)
+		}
+	}
+}
+
+type identifiedCompactionModel struct {
+	staticModel
+	providerName string
+	modelName    string
+}
+
+func (m identifiedCompactionModel) Name() string         { return m.modelName }
+func (m identifiedCompactionModel) ProviderName() string { return m.providerName }
 
 type retryExhaustedHighWaterModel struct {
 	t                       *testing.T
@@ -110,6 +205,9 @@ type repeatedWatermarkModel struct {
 }
 
 func (m *repeatedWatermarkModel) Name() string { return "repeated-watermark" }
+func (m *repeatedWatermarkModel) ProviderName() string {
+	return "test-provider"
+}
 
 func (m *repeatedWatermarkModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	if strings.Contains(requestInstructionsText(req), "CONTEXT CHECKPOINT COMPACTION") {
@@ -154,6 +252,8 @@ func (m *repeatedWatermarkModel) Generate(_ context.Context, req *model.Request)
 				StepComplete: true,
 				Status:       model.ResponseStatusCompleted,
 				FinishReason: model.FinishReasonToolCalls,
+				Provider:     "test-provider",
+				Model:        "repeated-watermark",
 				Usage: model.Usage{
 					PromptTokens:     190,
 					CompletionTokens: 5,
@@ -168,6 +268,8 @@ func (m *repeatedWatermarkModel) Generate(_ context.Context, req *model.Request)
 			StepComplete: true,
 			Status:       model.ResponseStatusCompleted,
 			FinishReason: model.FinishReasonStop,
+			Provider:     "test-provider",
+			Model:        "repeated-watermark",
 			Usage: model.Usage{
 				PromptTokens:     80,
 				CompletionTokens: 5,
@@ -178,6 +280,9 @@ func (m *repeatedWatermarkModel) Generate(_ context.Context, req *model.Request)
 }
 
 func (m *retryExhaustedHighWaterModel) Name() string { return "retry-exhausted-high-water" }
+func (m *retryExhaustedHighWaterModel) ProviderName() string {
+	return "test-provider"
+}
 
 func (m *retryExhaustedHighWaterModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	if strings.Contains(requestInstructionsText(req), "CONTEXT CHECKPOINT COMPACTION") {
@@ -216,6 +321,8 @@ func (m *retryExhaustedHighWaterModel) Generate(_ context.Context, req *model.Re
 				StepComplete: true,
 				Status:       model.ResponseStatusCompleted,
 				FinishReason: model.FinishReasonToolCalls,
+				Provider:     "test-provider",
+				Model:        "retry-exhausted-high-water",
 				Usage: model.Usage{
 					PromptTokens:     245,
 					CompletionTokens: 1,

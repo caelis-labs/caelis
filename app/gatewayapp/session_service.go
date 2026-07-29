@@ -174,7 +174,15 @@ func (s *Stack) SessionUsageSnapshot(ctx context.Context, ref session.SessionRef
 	contextWindow := s.currentContextWindowTokensForAlias(alias)
 	cfg := defaultCompactionConfig(contextWindow)
 	cfg.EstimatedPromptPrefixTokens = s.estimatedPromptPrefixTokens(ctx, ref)
-	return sdkruntime.ComputeUsageSnapshot(events, nil, contextWindow, cfg), nil
+	modelCfg, _ := s.modelConfigForAlias(alias)
+	return sdkruntime.ComputeUsageSnapshotForModel(
+		events,
+		nil,
+		contextWindow,
+		cfg,
+		modelCfg.Provider,
+		modelCfg.Model,
+	), nil
 }
 
 func (s *Stack) estimatedPromptPrefixTokens(ctx context.Context, ref session.SessionRef) int {

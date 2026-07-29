@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +23,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
@@ -73,19 +76,23 @@ type childRun struct {
 	authenticationMethods []controlagents.AuthenticationMethod
 	taskID                string
 	sink                  stream.Sink
+	completion            subagent.CompletionSink
 	ctx                   context.Context
 	cancel                context.CancelFunc
 
-	mu             sync.RWMutex
-	state          delegation.State
-	outputPreview  string
-	failureDetail  string
-	result         string
-	agentText      string
-	finalAssistant acpschema.FinalAssistantAccumulator
-	updatedAt      time.Time
-	running        bool
-	done           chan struct{}
+	mu              sync.RWMutex
+	state           delegation.State
+	outputPreview   string
+	failureDetail   string
+	result          string
+	agentText       string
+	finalAssistant  acpschema.FinalAssistantAccumulator
+	updatedAt       time.Time
+	running         bool
+	finishing       bool
+	cancelRequested bool
+	cancelFailed    bool
+	done            chan struct{}
 }
 
 func NewRunner(cfg RunnerConfig) (*Runner, error) {
@@ -126,6 +133,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		running:        true,
 		taskID:         strings.TrimSpace(spawn.TaskID),
 		sink:           spawn.Streams,
+		completion:     spawn.Completion,
 		updatedAt:      r.clock(),
 		done:           make(chan struct{}),
 		agentName:      strings.TrimSpace(cfg.Name),
@@ -288,7 +296,7 @@ func (r *Runner) Continue(ctx context.Context, anchor delegation.Anchor, req del
 		return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: continuation prompt is required")
 	}
 	run.mu.Lock()
-	if run.running {
+	if run.running || run.finishing {
 		run.mu.Unlock()
 		return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child session %q is still running; use TASK wait before write", run.anchor.SessionID)
 	}
@@ -300,7 +308,14 @@ func (r *Runner) Continue(ctx context.Context, anchor delegation.Anchor, req del
 	run.agentText = ""
 	run.finalAssistant.Reset()
 	run.updatedAt = r.clock()
+	run.finishing = false
+	run.cancelRequested = false
+	run.cancelFailed = false
 	run.done = make(chan struct{})
+	// Completion is turn-scoped. Direct Wait-only callers may omit it, but a
+	// nil continuation must never reuse the prior turn's sink and publish a
+	// second terminal result through stale Runtime authority.
+	run.completion = req.Completion
 	runCtx := run.ctx
 	if runCtx == nil {
 		runCtx = detachedChildContext(ctx)
@@ -319,30 +334,39 @@ func (r *Runner) Cancel(ctx context.Context, anchor delegation.Anchor) error {
 	if err != nil {
 		return err
 	}
-	run.mu.RLock()
+	run.mu.Lock()
+	if !run.running || run.finishing {
+		run.mu.Unlock()
+		return nil
+	}
+	// Reserve this turn's terminal transition before releasing the lock for the
+	// remote effect. drivePrompt may prove a terminal result concurrently, but
+	// Continue cannot start a new generation until its callback completes.
+	run.finishing = true
 	client := run.client
 	sessionID := run.anchor.SessionID
-	run.mu.RUnlock()
+	turnDone := run.done
+	run.mu.Unlock()
 	var remoteErr error
 	if client != nil {
 		remoteErr = client.Cancel(ctx, sessionID)
 	}
+	run.mu.Lock()
+	if run.done != turnDone || !run.running {
+		// Prompt completion won the terminal race. Its captured callback result
+		// remains authoritative and drivePrompt owns clearing finishing. A new
+		// done channel proves Continue already started another turn, which this
+		// old remote Cancel must not overwrite.
+		run.mu.Unlock()
+		return nil
+	}
+	run.cancelRequested = true
+	run.cancelFailed = remoteErr != nil
+	run.updatedAt = r.clock()
+	run.mu.Unlock()
 	if run.cancel != nil {
 		run.cancel()
 	}
-	run.mu.Lock()
-	run.running = false
-	if remoteErr != nil {
-		run.state = delegation.StateInterrupted
-		run.outputPreview = "cancellation outcome unknown"
-		run.failureDetail = "subagent cancellation failed"
-	} else {
-		run.state = delegation.StateCancelled
-		run.outputPreview = "cancelled"
-		run.failureDetail = ""
-	}
-	run.updatedAt = r.clock()
-	run.mu.Unlock()
 	return remoteErr
 }
 
@@ -358,39 +382,62 @@ func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) 
 		},
 	)
 	run.mu.Lock()
-	defer run.mu.Unlock()
-	defer close(run.done)
 	run.running = false
+	run.finishing = true
 	run.updatedAt = r.clock()
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			if run.state != delegation.StateCancelled {
-				run.state = delegation.StateInterrupted
-				run.outputPreview = "interrupted"
-				run.failureDetail = "interrupted"
-			}
-			run.result = ""
-			_ = run.client.Close(context.WithoutCancel(ctx))
-			return
+	closeClient := false
+	if run.cancelRequested {
+		if run.cancelFailed {
+			run.state = delegation.StateInterrupted
+			run.outputPreview = "cancellation outcome unknown"
+			run.failureDetail = "subagent cancellation failed"
+		} else {
+			run.state = delegation.StateCancelled
+			run.outputPreview = "cancelled"
+			run.failureDetail = ""
 		}
-		run.state = delegation.StateFailed
-		run.failureDetail = subagentPromptFailureDetail(err)
-		run.outputPreview = run.failureDetail
 		run.result = ""
-		_ = run.client.Close(context.WithoutCancel(ctx))
-		return
-	}
-	if strings.EqualFold(strings.TrimSpace(resp.StopReason), "cancelled") {
+		closeClient = true
+	} else if err != nil {
+		if errors.Is(err, context.Canceled) {
+			run.state = delegation.StateInterrupted
+			run.outputPreview = "interrupted"
+			run.failureDetail = "interrupted"
+			run.result = ""
+			closeClient = true
+		} else {
+			run.state = delegation.StateFailed
+			run.failureDetail = subagentPromptFailureDetail(err)
+			run.outputPreview = run.failureDetail
+			run.result = ""
+			closeClient = true
+		}
+	} else if strings.EqualFold(strings.TrimSpace(resp.StopReason), "cancelled") {
 		run.state = delegation.StateCancelled
 		run.outputPreview = "cancelled"
 		run.failureDetail = ""
 		run.result = ""
-		_ = run.client.Close(context.WithoutCancel(ctx))
-		return
+		closeClient = true
+	} else {
+		run.state = delegation.StateCompleted
+		run.outputPreview = compactPreview(run.outputPreview)
+		run.failureDetail = ""
 	}
-	run.state = delegation.StateCompleted
-	run.outputPreview = compactPreview(run.outputPreview)
-	run.failureDetail = ""
+	result := childResultLocked(run)
+	completion := run.completion
+	done := run.done
+	run.mu.Unlock()
+
+	if completion != nil {
+		completion.PublishSubagentCompletion(result)
+	}
+	if closeClient {
+		_ = acpcleanup.CloseClient(ctx, run.client)
+	}
+	run.mu.Lock()
+	run.finishing = false
+	run.mu.Unlock()
+	close(done)
 }
 
 func (r *Runner) waitRun(ctx context.Context, run *childRun, yieldTimeMS int) delegation.Result {
@@ -402,15 +449,26 @@ func (r *Runner) waitRun(ctx context.Context, run *childRun, yieldTimeMS int) de
 		wait = 0
 	}
 	if wait > 0 {
+		run.mu.RLock()
+		done := run.done
+		run.mu.RUnlock()
 		select {
 		case <-ctx.Done():
-		case <-run.done:
+		case <-done:
 		case <-time.After(wait):
 		}
 	}
 	run.mu.RLock()
 	defer run.mu.RUnlock()
+	return childResultLocked(run)
+}
+
+func childResultLocked(run *childRun) delegation.Result {
+	if run == nil {
+		return delegation.Result{}
+	}
 	out := delegation.Result{
+		TaskID:        strings.TrimSpace(run.taskID),
 		State:         run.state,
 		Running:       run.running,
 		Yielded:       run.running,
@@ -589,8 +647,23 @@ func compactPreview(text string) string {
 }
 
 func subagentPromptFailureDetail(err error) string {
-	if errors.Is(err, context.DeadlineExceeded) {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
 		return "subagent prompt timed out"
+	case authentication.IsRecoveryError(err), authentication.IsRequired(err):
+		return "subagent authentication required"
+	case errors.Is(err, io.EOF), errors.Is(err, net.ErrClosed):
+		return "subagent connection closed"
+	}
+	var rpcErr *jsonrpc.CallError
+	if errors.As(err, &rpcErr) {
+		switch rpcErr.Code {
+		case -32601:
+			return "subagent prompt is unsupported"
+		case -32602:
+			return "subagent prompt was invalid"
+		}
+		return "subagent prompt was rejected"
 	}
 	return "subagent prompt failed"
 }

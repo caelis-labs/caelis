@@ -11,6 +11,15 @@ import (
 )
 
 func snapshotUsageWithResolvedWindow(promptEvents []*session.Event, window int, cfg CompactionConfig) compact.UsageSnapshot {
+	return snapshotUsageWithResolvedWindowUsing(promptEvents, window, cfg, nil)
+}
+
+func snapshotUsageWithResolvedWindowUsing(
+	promptEvents []*session.Event,
+	window int,
+	cfg CompactionConfig,
+	useProviderSnapshot func(providerTokenSnapshot) bool,
+) compact.UsageSnapshot {
 	cfg = normalizeCompactionConfig(cfg)
 	if window <= 0 {
 		window = cfg.DefaultContextWindowTokens
@@ -24,7 +33,7 @@ func snapshotUsageWithResolvedWindow(promptEvents []*session.Event, window int, 
 	prefix := 0
 	asOfEventID := ""
 	source := compact.UsageSourceEstimated
-	if snapshot, ok := latestProviderTokenSnapshot(promptEvents); ok {
+	if snapshot, ok := latestProviderTokenSnapshotUsing(promptEvents, useProviderSnapshot); ok {
 		total = snapshot.BaselineTokens
 		delta = estimateTokensFromIndex(promptEvents, snapshot.DeltaStartIndex)
 		total += delta
@@ -75,9 +84,18 @@ type providerTokenSnapshot struct {
 	BaselineTokens  int
 	DeltaStartIndex int
 	EventID         string
+	Provider        string
+	Model           string
 }
 
 func latestProviderTokenSnapshot(events []*session.Event) (providerTokenSnapshot, bool) {
+	return latestProviderTokenSnapshotUsing(events, nil)
+}
+
+func latestProviderTokenSnapshotUsing(
+	events []*session.Event,
+	useProviderSnapshot func(providerTokenSnapshot) bool,
+) (providerTokenSnapshot, bool) {
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
 		meta := eventUsageMetadata(event)
@@ -93,22 +111,72 @@ func latestProviderTokenSnapshot(events []*session.Event) (providerTokenSnapshot
 		if !includeSnapshotGroup {
 			deltaStart = i + 1
 		}
+		provider, modelName := providerSnapshotIdentity(event, meta)
+		snapshot := providerTokenSnapshot{
+			BaselineTokens:  baseline,
+			DeltaStartIndex: deltaStart,
+			Provider:        provider,
+			Model:           modelName,
+		}
 		if id := strings.TrimSpace(events[start].ID); id != "" {
-			return providerTokenSnapshot{
-				BaselineTokens:  baseline,
-				DeltaStartIndex: deltaStart,
-				EventID:         id,
-			}, true
+			snapshot.EventID = id
+		} else if id := strings.TrimSpace(event.ID); id != "" {
+			snapshot.EventID = id
+		} else {
+			continue
 		}
-		if id := strings.TrimSpace(event.ID); id != "" {
-			return providerTokenSnapshot{
-				BaselineTokens:  baseline,
-				DeltaStartIndex: deltaStart,
-				EventID:         id,
-			}, true
+		if useProviderSnapshot != nil && !useProviderSnapshot(snapshot) {
+			continue
 		}
+		return snapshot, true
 	}
 	return providerTokenSnapshot{}, false
+}
+
+func providerSnapshotCompatibleWithLLM(snapshot providerTokenSnapshot, llm model.LLM) bool {
+	// Model-request gating only trusts a provider baseline when both sides have
+	// complete, matching identities. Legacy or otherwise unidentified snapshots
+	// fall back to the bounded local estimate, as do snapshots from a provider
+	// or model used earlier in the same Session.
+	if llm == nil ||
+		strings.TrimSpace(snapshot.Provider) == "" ||
+		strings.TrimSpace(snapshot.Model) == "" {
+		return false
+	}
+	currentProvider := ""
+	if provider, ok := llm.(interface{ ProviderName() string }); ok {
+		currentProvider = strings.TrimSpace(provider.ProviderName())
+	}
+	currentModel := strings.TrimSpace(llm.Name())
+	return providerSnapshotCompatibleWithIdentity(snapshot, currentProvider, currentModel)
+}
+
+func providerSnapshotCompatibleWithIdentity(snapshot providerTokenSnapshot, provider string, modelName string) bool {
+	provider = strings.TrimSpace(provider)
+	modelName = strings.TrimSpace(modelName)
+	if provider == "" || modelName == "" ||
+		strings.TrimSpace(snapshot.Provider) == "" ||
+		strings.TrimSpace(snapshot.Model) == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(snapshot.Provider), provider) &&
+		strings.EqualFold(strings.TrimSpace(snapshot.Model), modelName)
+}
+
+func providerSnapshotIdentity(event *session.Event, meta map[string]any) (string, string) {
+	provider := ""
+	modelName := ""
+	if event != nil && event.Invocation != nil {
+		provider = strings.TrimSpace(event.Invocation.Provider)
+		modelName = strings.TrimSpace(event.Invocation.Model)
+	}
+	provider = firstNonEmpty(provider, strings.TrimSpace(stringifyAny(meta["provider"])))
+	modelName = firstNonEmpty(modelName, strings.TrimSpace(stringifyAny(meta["model"])))
+	if sdkMeta := nestedMap(meta, "caelis", "sdk"); len(sdkMeta) > 0 {
+		provider = firstNonEmpty(provider, strings.TrimSpace(stringifyAny(sdkMeta["provider"])))
+		modelName = firstNonEmpty(modelName, strings.TrimSpace(stringifyAny(sdkMeta["model"])))
+	}
+	return provider, modelName
 }
 
 func providerPromptBaselineTokens(meta map[string]any) (int, bool, bool) {
@@ -200,11 +268,8 @@ func providerSnapshotSignature(event *session.Event) string {
 	cached, _ := intFromAny(meta["cached_input_tokens"])
 	completion, _ := intFromAny(meta["completion_tokens"])
 	total, _ := intFromAny(meta["total_tokens"])
-	provider := strings.TrimSpace(stringifyAny(meta["provider"]))
-	model := strings.TrimSpace(stringifyAny(meta["model"]))
+	provider, model := providerSnapshotIdentity(event, meta)
 	if sdkMeta := nestedMap(meta, "caelis", "sdk"); len(sdkMeta) > 0 {
-		provider = firstNonEmpty(provider, strings.TrimSpace(stringifyAny(sdkMeta["provider"])))
-		model = firstNonEmpty(model, strings.TrimSpace(stringifyAny(sdkMeta["model"])))
 		if usage := nestedMap(meta, "caelis", "sdk", "usage"); len(usage) > 0 {
 			if value, ok := intFromAny(usage["prompt_tokens"]); ok {
 				prompt = value
@@ -490,12 +555,22 @@ func usageRatio(usage compact.UsageSnapshot) float64 {
 func usageForModelRequest(events []*session.Event, llm model.LLM, req *model.Request, cfg CompactionConfig) (compact.UsageSnapshot, int) {
 	window := resolveContextWindowTokens(llm, cfg.DefaultContextWindowTokens)
 	promptEvents := compact.PromptEventsFromLatestCompact(events)
-	usage := snapshotUsageWithResolvedWindow(promptEvents, window, cfg)
+	usage := snapshotUsageWithResolvedWindowUsing(promptEvents, window, cfg, func(snapshot providerTokenSnapshot) bool {
+		return providerSnapshotCompatibleWithLLM(snapshot, llm)
+	})
 	return usageWithModelRequestEstimate(usage, req)
 }
 
 func usageWithModelRequestEstimate(usage compact.UsageSnapshot, req *model.Request) (compact.UsageSnapshot, int) {
 	requestTokens := estimateModelRequestTokens(req)
+	// Provider prompt usage is the authoritative measurement of the request
+	// shape already accepted by that provider. Re-estimating the whole request
+	// can wildly inflate opaque media payloads and must not replace that
+	// baseline. The snapshot already adds prompt-visible events committed after
+	// the provider measurement.
+	if usage.Source == compact.UsageSourceProvider {
+		return usage, requestTokens
+	}
 	if requestTokens > usage.TotalTokens {
 		usage.TotalTokens = requestTokens
 		if usage.Source == "" {
@@ -544,13 +619,7 @@ func estimatePartTokens(part model.Part) int {
 		}
 	}
 	if part.Media != nil {
-		total += estimateTextTokens(string(part.Media.Modality))
-		total += estimateTextTokens(part.Media.MimeType)
-		total += estimateTextTokens(part.Media.Name)
-		total += estimateTextTokens(part.Media.Source.URI)
-		total += estimateTextTokens(part.Media.Source.FileID)
-		total += estimateTextTokens(part.Media.Source.LocalRef)
-		total += estimateTextTokens(part.Media.Source.Data)
+		total += estimateMediaPartTokens(part.Media)
 	}
 	if part.JSON != nil {
 		total += estimateTextTokens(string(part.JSON.Value))
@@ -570,6 +639,33 @@ func estimatePartTokens(part model.Part) int {
 		return 0
 	}
 	return estimateTextTokens(string(raw))
+}
+
+const (
+	// Inline media payloads are opaque provider inputs, not prompt text. Charge a
+	// bounded, conservative amount per item so attachment count still creates
+	// pressure without treating base64 bytes as one token per four characters.
+	estimatedImageMediaTokens = 4096
+	estimatedOtherMediaTokens = 8192
+)
+
+func estimateMediaPartTokens(media *model.MediaPart) int {
+	if media == nil {
+		return 0
+	}
+	total := estimateTextTokens(string(media.Modality)) +
+		estimateTextTokens(media.MimeType) +
+		estimateTextTokens(media.Name) +
+		estimateTextTokens(media.Source.URI) +
+		estimateTextTokens(media.Source.FileID) +
+		estimateTextTokens(media.Source.LocalRef)
+	switch media.Modality {
+	case model.MediaModalityImage:
+		total += estimatedImageMediaTokens
+	default:
+		total += estimatedOtherMediaTokens
+	}
+	return total
 }
 
 func estimateToolSpecTokens(spec model.ToolSpec) int {

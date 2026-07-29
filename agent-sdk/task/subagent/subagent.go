@@ -33,6 +33,9 @@ type ApprovalResponse = agent.ApprovalResponse
 // runtime's approval surface.
 type ApprovalRequester = agent.SubagentApprovalRequester
 
+// CompletionSink is the Runtime-owned terminal child lifecycle receiver.
+type CompletionSink = delegation.CompletionSink
+
 // SpawnContext is the system-controlled parent session context inherited by one
 // child ACP agent. None of these fields are exposed on the LLM-facing SPAWN
 // tool surface. ApprovalMode is the parent session mode for runners that derive
@@ -41,7 +44,11 @@ type ApprovalRequester = agent.SubagentApprovalRequester
 type SpawnContext = agent.SubagentSpawnContext
 
 // Runner drives one spawned ACP child instance. The child itself is expected to
-// run in its own session and persist its own transcript independently.
+// run in its own session and persist its own transcript independently. For
+// every Runtime-managed Spawn and Continue turn, implementations must publish
+// exactly one terminal Result to the non-nil Completion sink supplied with that
+// turn; Wait is observation/recovery compatibility and is not polled by normal
+// Runtime Task read/wait paths.
 type Runner interface {
 	Spawn(context.Context, SpawnContext, delegation.Request) (delegation.Anchor, delegation.Result, error)
 	Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error)

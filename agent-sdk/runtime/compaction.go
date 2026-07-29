@@ -181,12 +181,41 @@ func lastEventSeq(events []*session.Event) uint64 {
 
 func (c *codexStyleCompactor) snapshotUsage(req compact.Request, promptEvents []*session.Event) compact.UsageSnapshot {
 	window := resolveContextWindowTokens(req.Model, c.cfg.DefaultContextWindowTokens)
-	return snapshotUsageWithResolvedWindow(promptEvents, window, c.cfg)
+	if req.Model == nil {
+		return snapshotUsageWithResolvedWindow(promptEvents, window, c.cfg)
+	}
+	return snapshotUsageWithResolvedWindowUsing(promptEvents, window, c.cfg, func(snapshot providerTokenSnapshot) bool {
+		return providerSnapshotCompatibleWithLLM(snapshot, req.Model)
+	})
 }
 
-// ComputeUsageSnapshot applies the same provider-aware usage snapshot logic
-// used by compaction, but without mutating session history.
+// ComputeUsageSnapshot projects the latest provider-aware usage for reporting
+// without mutating Session history. Callers that know the active model identity
+// should use ComputeUsageSnapshotForModel so another model cannot seed the
+// active context meter.
 func ComputeUsageSnapshot(events []*session.Event, pendingEvents []*session.Event, contextWindow int, cfg CompactionConfig) compact.UsageSnapshot {
 	promptEvents := compact.PromptEventsFromLatestCompact(events)
 	return snapshotUsageWithResolvedWindow(promptEventsWithPending(promptEvents, pendingEvents), contextWindow, cfg)
+}
+
+// ComputeUsageSnapshotForModel projects reporting usage using only a provider
+// baseline produced by the named model. Incomplete or mismatched identities
+// fail closed to the local prompt estimate.
+func ComputeUsageSnapshotForModel(
+	events []*session.Event,
+	pendingEvents []*session.Event,
+	contextWindow int,
+	cfg CompactionConfig,
+	provider string,
+	modelName string,
+) compact.UsageSnapshot {
+	promptEvents := compact.PromptEventsFromLatestCompact(events)
+	return snapshotUsageWithResolvedWindowUsing(
+		promptEventsWithPending(promptEvents, pendingEvents),
+		contextWindow,
+		cfg,
+		func(snapshot providerTokenSnapshot) bool {
+			return providerSnapshotCompatibleWithIdentity(snapshot, provider, modelName)
+		},
+	)
 }

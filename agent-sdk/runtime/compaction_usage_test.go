@@ -120,6 +120,47 @@ func TestComputeUsageSnapshotIncludesAnthropicCachedInputBaseline(t *testing.T) 
 	}
 }
 
+func TestComputeUsageSnapshotForModelIgnoresNewerDifferentModelBaseline(t *testing.T) {
+	t.Parallel()
+
+	assistantEvent := func(id string, provider string, modelName string, promptTokens int) *session.Event {
+		message := model.NewTextMessage(model.RoleAssistant, "answer")
+		return &session.Event{
+			ID:         id,
+			Type:       session.EventTypeAssistant,
+			Visibility: session.VisibilityCanonical,
+			Message:    &message,
+			Text:       message.TextContent(),
+			Invocation: &session.EventInvocation{Provider: provider, Model: modelName},
+			Meta: map[string]any{
+				"prompt_tokens":     promptTokens,
+				"completion_tokens": 5,
+				"total_tokens":      promptTokens + 5,
+			},
+		}
+	}
+	events := []*session.Event{
+		assistantEvent("main-usage", "openai-codex", "gpt-main", 80_000),
+		assistantEvent("guardian-usage", "deepseek", "guardian", 25_941),
+	}
+
+	got := ComputeUsageSnapshotForModel(
+		events,
+		nil,
+		258_400,
+		CompactionConfig{},
+		"openai-codex",
+		"gpt-main",
+	)
+
+	if got.Source != compact.UsageSourceProvider || got.AsOfEventID != "main-usage" {
+		t.Fatalf("usage = %+v, want main model provider baseline", got)
+	}
+	if got.TotalTokens < 80_000 || got.ContextWindowTokens != 258_400 {
+		t.Fatalf("usage = %+v, want main model tokens and context window", got)
+	}
+}
+
 func TestDynamicCompactionDefaultsByContextWindow(t *testing.T) {
 	t.Parallel()
 
@@ -281,11 +322,15 @@ func TestEvaluateWatermarkUsesSharedThresholds(t *testing.T) {
 	}
 }
 
-func TestUsageForModelRequestInflatesProviderUsageWithRequestEstimate(t *testing.T) {
+func TestUsageForModelRequestKeepsProviderUsageAuthoritative(t *testing.T) {
 	t.Parallel()
 
 	assistant := assistantEvent("provider baseline")
 	assistant.ID = "a1"
+	assistant.Invocation = &session.EventInvocation{
+		Provider: "openai-codex",
+		Model:    "gpt-5.6-sol",
+	}
 	assistant.Meta = map[string]any{
 		"prompt_tokens":     10,
 		"completion_tokens": 1,
@@ -293,24 +338,33 @@ func TestUsageForModelRequestInflatesProviderUsageWithRequestEstimate(t *testing
 	}
 	req := &model.Request{
 		Messages: []model.Message{
-			model.NewTextMessage(model.RoleUser, "request text that is deliberately much larger than the provider baseline"),
+			model.NewTextMessage(model.RoleUser, strings.Repeat("request text ", 64)),
 		},
 	}
 
 	user := userTextEvent("hello")
 	user.ID = "u1"
-	usage, requestTokens := usageForModelRequest([]*session.Event{user, assistant}, staticModel{text: "ok"}, req, CompactionConfig{
+	fresh := userTextEvent("fresh post-snapshot event")
+	fresh.ID = "u2"
+	usage, requestTokens := usageForModelRequest([]*session.Event{user, assistant, fresh}, identifiedCompactionModel{
+		staticModel:  staticModel{text: "ok"},
+		providerName: "openai-codex",
+		modelName:    "gpt-5.6-sol",
+	}, req, CompactionConfig{
 		DefaultContextWindowTokens: 1000,
 	})
 
 	if requestTokens <= 11 {
 		t.Fatalf("request tokens = %d, want larger than provider baseline", requestTokens)
 	}
-	if usage.TotalTokens != requestTokens {
-		t.Fatalf("usage total = %d, want request estimate %d", usage.TotalTokens, requestTokens)
+	if usage.TotalTokens >= requestTokens {
+		t.Fatalf("usage total = %d, want provider baseline below local request estimate %d", usage.TotalTokens, requestTokens)
 	}
 	if usage.Source != compact.UsageSourceProvider {
 		t.Fatalf("usage source = %q, want provider baseline source preserved", usage.Source)
+	}
+	if usage.EstimatedDeltaTokens == 0 || usage.TotalTokens <= 10 {
+		t.Fatalf("usage = %+v, want provider baseline plus estimated post-snapshot delta", usage)
 	}
 }
 
@@ -352,7 +406,7 @@ func TestEstimateModelRequestTokensIncludesStructuredRequestParts(t *testing.T) 
 
 	got := estimateModelRequestTokens(req)
 	wantAtLeast := estimateTextTokens("follow the tool result") +
-		estimateTextTokens("inline-image-data") +
+		estimateMediaPartTokens(req.Instructions[1].Media) +
 		estimateTextTokens("search first") +
 		estimateTextTokens("SEARCH") +
 		estimateTextTokens(string(toolInput)) +
@@ -362,35 +416,68 @@ func TestEstimateModelRequestTokensIncludesStructuredRequestParts(t *testing.T) 
 	}
 }
 
-func TestEstimateModelRequestTokensIncludesStructuredMessageParts(t *testing.T) {
+func TestEstimateModelRequestTokensBoundsInlineMediaPayload(t *testing.T) {
 	t.Parallel()
 
-	inlineData := strings.Repeat("inline-image-data-", 24)
 	visibleReasoning := strings.Repeat("visible reasoning ", 16)
 	jsonPayload := json.RawMessage(`{"payload":"large structured message body","items":["alpha","beta","gamma"]}`)
-	req := &model.Request{
-		Messages: []model.Message{
-			model.NewMessage(model.RoleUser,
-				model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
-					Kind: model.MediaSourceInline,
-					Data: inlineData,
-				}, "image/png", "screenshot.png"),
-				model.NewJSONPart(jsonPayload),
-				model.NewFileRefPart("report.pdf", "application/pdf", "https://example.com/report.pdf", "file-123", "local-report-ref"),
-				model.NewReasoningPart(visibleReasoning, model.ReasoningVisibilityVisible),
-			),
-		},
+	requestWithMedia := func(data string) *model.Request {
+		return &model.Request{
+			Messages: []model.Message{
+				model.NewMessage(model.RoleUser,
+					model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
+						Kind: model.MediaSourceInline,
+						Data: data,
+					}, "image/png", "screenshot.png"),
+					model.NewJSONPart(jsonPayload),
+					model.NewFileRefPart("report.pdf", "application/pdf", "https://example.com/report.pdf", "file-123", "local-report-ref"),
+					model.NewReasoningPart(visibleReasoning, model.ReasoningVisibilityVisible),
+				),
+			},
+		}
 	}
 
-	got := estimateModelRequestTokens(req)
-	wantAtLeast := estimateTextTokens(inlineData) +
+	small := estimateModelRequestTokens(requestWithMedia("aW1n"))
+	large := estimateModelRequestTokens(requestWithMedia(strings.Repeat("A", 1<<20)))
+	if large != small {
+		t.Fatalf("large inline media estimate = %d, want bounded estimate %d independent of base64 length", large, small)
+	}
+	wantAtLeast := estimatedImageMediaTokens +
 		estimateTextTokens(string(jsonPayload)) +
 		estimateTextTokens("report.pdf") +
 		estimateTextTokens("https://example.com/report.pdf") +
 		estimateTextTokens("file-123") +
 		estimateTextTokens("local-report-ref") +
 		estimateTextTokens(visibleReasoning)
-	if got < wantAtLeast {
-		t.Fatalf("estimateModelRequestTokens() = %d, want at least %d", got, wantAtLeast)
+	if large < wantAtLeast {
+		t.Fatalf("estimateModelRequestTokens() = %d, want at least %d", large, wantAtLeast)
+	}
+}
+
+func TestEstimateModelRequestTokensChargesEachInlineImage(t *testing.T) {
+	t.Parallel()
+
+	one := estimateModelRequestTokens(&model.Request{Messages: []model.Message{
+		model.NewMessage(model.RoleUser, model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
+			Kind: model.MediaSourceInline,
+			Data: strings.Repeat("A", 1<<20),
+		}, "image/png", "one.png")),
+	}})
+	three := estimateModelRequestTokens(&model.Request{Messages: []model.Message{
+		model.NewMessage(model.RoleUser,
+			model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: strings.Repeat("A", 403992)}, "image/png", "one.png"),
+			model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: strings.Repeat("B", 175800)}, "image/png", "two.png"),
+			model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: strings.Repeat("C", 388608)}, "image/png", "three.png"),
+		),
+	}})
+
+	if one < estimatedImageMediaTokens {
+		t.Fatalf("one image estimate = %d, want at least %d", one, estimatedImageMediaTokens)
+	}
+	if three < estimatedImageMediaTokens*3 {
+		t.Fatalf("three image estimate = %d, want at least %d", three, estimatedImageMediaTokens*3)
+	}
+	if three >= 50000 {
+		t.Fatalf("three image estimate = %d, want bounded attachment estimate below 50000", three)
 	}
 }
