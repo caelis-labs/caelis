@@ -116,6 +116,161 @@ func TestStreamAppendPhysicalScreenPreservesTextAfterComplexGrapheme(t *testing.
 	}
 }
 
+func TestWideTranscriptLineMoveRepaintsInsteadOfHardScroll(t *testing.T) {
+	const (
+		width  = 96
+		height = 12
+	)
+	before, after := normalizedTranscriptScrollFramesForTest(
+		width,
+		height,
+		"  › 复现一下当时 Grep 返回 0 的调用方式，确认是工具问题还是参数用法问题。",
+	)
+	updates := renderFullscreenFramesForTest(t, width, height, before, after)
+	second := updates[1]
+	if !strings.Contains(second, "复现一下当时 Grep") {
+		t.Fatalf("wide transcript line was moved without repainting its text: %q", second)
+	}
+	if strings.Contains(second, ansi.SetTopBottomMargins(1, 9)) {
+		t.Fatalf("wide transcript line was moved through a hard-scroll region: %q", second)
+	}
+}
+
+func TestWideTranscriptTwoLineMoveRepaintsInsteadOfHardScroll(t *testing.T) {
+	const (
+		width  = 96
+		height = 12
+	)
+	before, after := normalizedTranscriptScrollFramesWithToolsForTest(
+		width,
+		height,
+		"  › 复现一下当时 Grep 返回 0 的调用方式，确认是工具问题还是参数用法问题。",
+		"  • Read overview.md",
+		`  • Search "service_tag|resource_type|MonitorCloudInstance" in overview`,
+	)
+	updates := renderFullscreenFramesForTest(t, width, height, before, after)
+	second := updates[1]
+	if !strings.Contains(second, "复现一下当时 Grep") {
+		t.Fatalf("wide transcript moved by two rows without repainting its text: %q", second)
+	}
+	if strings.Contains(second, ansi.SetTopBottomMargins(1, 9)) {
+		t.Fatalf("wide transcript moved by two rows through a hard-scroll region: %q", second)
+	}
+}
+
+func TestLiveExplorationScrollbarRepaintsWideReasoning(t *testing.T) {
+	const (
+		width     = 96
+		height    = 20
+		reasoning = "复现一下当时 Grep 返回 0 的调用方式，确认是工具问题还是参数用法问题。"
+		search    = `"service_tag|resource_type|MonitorCloudInstance" in overview, "service"`
+	)
+	model := NewModel(Config{NoColor: false, NoAnimation: true})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	model = updated.(*Model)
+	for range 60 {
+		model.doc.Append(NewUserNarrativeBlock("historical line that keeps the viewport pinned at the tail"))
+	}
+
+	block := NewMainACPTurnBlock("turn-renderer-repro")
+	block.AppendStreamEvent(
+		SEReasoning,
+		"先读取相关文件并定位 Grep 的实现。",
+		newNarrativeSourceIdentity("reasoning-old", "event-old", "projection-old"),
+	)
+	block.UpdateToolWithMeta("read-1", "Read", "overview.md", "", true, false, ToolUpdateMeta{ToolKind: "read"})
+	block.UpdateToolWithMeta("list-1", "List", "overview", "", true, false, ToolUpdateMeta{ToolKind: "search"})
+	block.AppendStreamEvent(
+		SEReasoning,
+		reasoning,
+		newNarrativeSourceIdentity("reasoning-current", "event-current", "projection-current"),
+	)
+	model.doc.Append(block)
+	model.syncViewportContent()
+	model.viewportScrollbarVisibleUntil = time.Now().Add(time.Hour)
+	scrollRegionBottom := model.viewport.Height()
+	before := model.View().Content
+	if plain := ansi.Strip(before); !strings.Contains(plain, "Explored") ||
+		!strings.Contains(plain, reasoning) ||
+		(!strings.Contains(plain, "▏") && !strings.Contains(plain, "▎")) {
+		t.Fatalf("setup frame missing stable exploration or reasoning: %q", plain)
+	}
+
+	block.UpdateToolWithMeta("grep-1", "Grep", search, "", false, false, ToolUpdateMeta{ToolKind: "search"})
+	model.markViewportBlockDirty(block.BlockID())
+	model.syncViewportContent()
+	model.viewportScrollbarVisibleUntil = time.Now().Add(time.Hour)
+	after := model.View().Content
+	plain := ansi.Strip(after)
+	if !strings.Contains(plain, reasoning) || !strings.Contains(plain, "Search "+search) {
+		t.Fatalf("live exploration frame missing expected rows: %q", plain)
+	}
+
+	updates := renderFullscreenFramesForTest(t, width, height, before, after)
+	second := updates[1]
+	if !strings.Contains(second, reasoning) {
+		t.Fatalf("live exploration moved wide reasoning without repainting it: %q", second)
+	}
+	if strings.Contains(second, ansi.SetTopBottomMargins(1, scrollRegionBottom)) {
+		t.Fatalf("live exploration moved wide reasoning through a hard-scroll region: %q", second)
+	}
+}
+
+func TestASCIITranscriptLineMoveKeepsHardScrollOptimization(t *testing.T) {
+	const (
+		width  = 96
+		height = 12
+	)
+	before, after := normalizedTranscriptScrollFramesForTest(
+		width,
+		height,
+		"  > reproduce the Grep call that returned zero",
+	)
+	updates := renderFullscreenFramesForTest(t, width, height, before, after)
+	if second := updates[1]; !strings.Contains(second, ansi.SetTopBottomMargins(1, 9)) {
+		t.Fatalf("ASCII-only frame lost hard-scroll optimization: %q", second)
+	}
+}
+
+func normalizedTranscriptScrollFramesForTest(width int, height int, reasoning string) (string, string) {
+	return normalizedTranscriptScrollFramesWithToolsForTest(
+		width,
+		height,
+		reasoning,
+		`  • Search "service_tag|resource_type|MonitorCloudInstance" in overview`,
+	)
+}
+
+func normalizedTranscriptScrollFramesWithToolsForTest(
+	width int,
+	height int,
+	reasoning string,
+	toolLines ...string,
+) (string, string) {
+	beforeLines := []string{
+		"history 0",
+		"history 1",
+		"history 2",
+		"history 3",
+		"history 4",
+		"• Explored",
+		reasoning,
+		"",
+		"",
+		"> ",
+		"",
+		"status",
+	}
+	if len(toolLines) > 5 {
+		panic("test helper only supports up to five inserted tool lines")
+	}
+	afterLines := append([]string(nil), beforeLines[len(toolLines):7]...)
+	afterLines = append(afterLines, toolLines...)
+	afterLines = append(afterLines, beforeLines[7:]...)
+	return normalizeFullscreenFrame(strings.Join(beforeLines, "\n"), width, height),
+		normalizeFullscreenFrame(strings.Join(afterLines, "\n"), width, height)
+}
+
 func waitForPhysicalStreamLine(t *testing.T, terminal *vt.SafeEmulator, want string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -169,6 +324,54 @@ func TestWideCellRepaintSentinelDoesNotEmitHyperlink(t *testing.T) {
 	}
 	if stripped := ansi.Strip(got); displayColumns(stripped) != 4 {
 		t.Fatalf("stripped width = %d, want 4; stripped=%q raw=%q", displayColumns(stripped), stripped, got)
+	}
+}
+
+func TestWideFrameHardScrollGuardBindsHeightPaddingRows(t *testing.T) {
+	const (
+		width  = 6
+		height = 3
+	)
+	lines := strings.Split(normalizeFullscreenFrame("甲", width, height), "\n")
+	if len(lines) != height {
+		t.Fatalf("normalized lines = %d, want %d: %#v", len(lines), height, lines)
+	}
+	for row, line := range lines {
+		if got := displayColumns(ansi.Strip(line)); got != width {
+			t.Fatalf("row %d width = %d, want %d: %q", row, got, width, line)
+		}
+		if !strings.Contains(line, hardScrollRowSentinel(row)) {
+			t.Fatalf("row %d missing its distinct physical-row identity: %q", row, line)
+		}
+		for other := range lines {
+			if other != row && strings.Contains(line, hardScrollRowSentinel(other)) {
+				t.Fatalf("row %d reused row %d identity: %q", row, other, line)
+			}
+		}
+	}
+}
+
+func TestHardScrollIdentityColumnUsesFramePadding(t *testing.T) {
+	tests := []struct {
+		name       string
+		line       string
+		width      int
+		wantColumn int
+		wantOK     bool
+	}{
+		{name: "trailing padding", line: "abcd  ", width: 6, wantColumn: 5, wantOK: true},
+		{name: "scrollbar gutter", line: "abcd ▏", width: 6, wantColumn: 4, wantOK: true},
+		{name: "scrollbar thumb gutter", line: "abcd ▎", width: 6, wantColumn: 4, wantOK: true},
+		{name: "semantic penultimate space", line: "abcd X", width: 6},
+		{name: "full content", line: "abcdef", width: 6},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			column, ok := hardScrollIdentityColumn(tt.line, tt.width)
+			if column != tt.wantColumn || ok != tt.wantOK {
+				t.Fatalf("identity column = (%d, %v), want (%d, %v)", column, ok, tt.wantColumn, tt.wantOK)
+			}
+		})
 	}
 }
 
@@ -253,6 +456,29 @@ func renderComposerFramesForTest(t *testing.T, width int, frames ...string) []st
 		renderer.Render(screen.RenderBuffer)
 		if err := renderer.Flush(); err != nil {
 			t.Fatalf("flush frame %d: %v", idx, err)
+		}
+		outputs = append(outputs, buf.String())
+		buf.Reset()
+	}
+	return outputs
+}
+
+func renderFullscreenFramesForTest(t *testing.T, width int, height int, frames ...string) []string {
+	t.Helper()
+	var buf bytes.Buffer
+	renderer := uv.NewTerminalRenderer(&buf, []string{"TERM=xterm-256color", "TTY_FORCE=1"})
+	renderer.SetFullscreen(true)
+	renderer.SetScrollOptim(true)
+
+	screen := uv.NewScreenBuffer(width, height)
+	screen.Method = ansi.GraphemeWidth
+	outputs := make([]string, 0, len(frames))
+	for idx, frame := range frames {
+		screen.Clear()
+		uv.NewStyledString(frame).Draw(screen, screen.Bounds())
+		renderer.Render(screen.RenderBuffer)
+		if err := renderer.Flush(); err != nil {
+			t.Fatalf("flush fullscreen frame %d: %v", idx, err)
 		}
 		outputs = append(outputs, buf.String())
 		buf.Reset()
