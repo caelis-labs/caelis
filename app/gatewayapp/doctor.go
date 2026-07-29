@@ -136,7 +136,7 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 		report.MissingAPIKey, report.TokenSource = s.modelCredentialStatus(cfg)
 		report.PersistedPlaintextToken = cfg.PersistToken && strings.TrimSpace(cfg.Token) != ""
 		if report.PersistedPlaintextToken {
-			report.Warnings = append(report.Warnings, "plaintext token persistence is enabled; prefer token_env")
+			report.Warnings = append(report.Warnings, "plaintext token persistence is enabled; reconnect with /connect")
 		}
 	}
 
@@ -301,9 +301,6 @@ func (s *Stack) modelCredentialStatus(cfg ModelConfig) (bool, string) {
 	if err != nil {
 		return true, "credential:" + ref
 	}
-	if source.Environment != "" {
-		return strings.TrimSpace(os.Getenv(source.Environment)) == "", "credential-env:" + source.Environment
-	}
 	return strings.TrimSpace(source.APIKey) == "", "credential:" + ref
 }
 
@@ -454,9 +451,6 @@ func modelConfigMissingAPIKey(cfg ModelConfig) bool {
 	if strings.TrimSpace(cfg.CredentialRef) != "" {
 		return false
 	}
-	if env := strings.TrimSpace(cfg.TokenEnv); env != "" {
-		return strings.TrimSpace(os.Getenv(env)) == ""
-	}
 	return true
 }
 
@@ -464,8 +458,6 @@ func modelConfigTokenSource(cfg ModelConfig) string {
 	switch {
 	case strings.TrimSpace(cfg.CredentialRef) != "":
 		return "credential:" + strings.TrimSpace(cfg.CredentialRef)
-	case strings.TrimSpace(cfg.TokenEnv) != "":
-		return "env:" + strings.TrimSpace(cfg.TokenEnv)
 	case strings.TrimSpace(cfg.Token) != "":
 		if cfg.PersistToken {
 			return "plaintext_config"

@@ -23,17 +23,17 @@ type Store struct {
 }
 
 type record struct {
-	Version     int    `json:"version"`
-	Ref         string `json:"ref"`
-	APIKey      string `json:"api_key,omitempty"`
-	Environment string `json:"environment,omitempty"`
+	Version int    `json:"version"`
+	Ref     string `json:"ref"`
+	APIKey  string `json:"api_key,omitempty"`
+	// LegacyEnvironment is decoded only so the removed environment-backed
+	// credential format can fail closed with an actionable reconnect error.
+	LegacyEnvironment string `json:"environment,omitempty"`
 }
 
 // Source is the Control-owned source behind one opaque credential reference.
-// Exactly one of APIKey or Environment is populated.
 type Source struct {
-	APIKey      string
-	Environment string
+	APIKey string
 }
 
 // BuildReference returns a stable opaque reference for one provider endpoint.
@@ -77,30 +77,6 @@ func (s *Store) Put(ctx context.Context, ref, apiKey string) error {
 	return s.putRecord(record{Version: schemaVersion, Ref: ref, APIKey: apiKey})
 }
 
-// PutEnvironment stores an environment-variable credential source behind an
-// opaque reference without copying its current secret value into Control
-// configuration or the credential record.
-func (s *Store) PutEnvironment(ctx context.Context, ref, environment string) error {
-	if s == nil {
-		return fmt.Errorf("control/modelconfig/credentialstore: store is unavailable")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	ref = strings.ToLower(strings.TrimSpace(ref))
-	environment = strings.TrimSpace(environment)
-	if ref == "" || !strings.HasPrefix(ref, "apikey:") {
-		return fmt.Errorf("control/modelconfig/credentialstore: valid API-key reference is required")
-	}
-	if environment == "" {
-		return fmt.Errorf("control/modelconfig/credentialstore: environment variable is required")
-	}
-	return s.putRecord(record{Version: schemaVersion, Ref: ref, Environment: environment})
-}
-
 func (s *Store) putRecord(stored record) error {
 	data, err := json.MarshalIndent(stored, "", "  ")
 	if err != nil {
@@ -121,14 +97,7 @@ func (s *Store) Get(ctx context.Context, ref string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if source.APIKey != "" {
-		return source.APIKey, nil
-	}
-	value := strings.TrimSpace(os.Getenv(source.Environment))
-	if value == "" {
-		return "", fmt.Errorf("control/modelconfig/credentialstore: environment variable %s is empty: %w", source.Environment, os.ErrNotExist)
-	}
-	return value, nil
+	return source.APIKey, nil
 }
 
 // LookupSource returns the source behind an opaque reference without resolving
@@ -167,11 +136,14 @@ func (s *Store) LookupSource(ctx context.Context, ref string) (Source, error) {
 	}
 	stored.Ref = strings.ToLower(strings.TrimSpace(stored.Ref))
 	stored.APIKey = strings.TrimSpace(stored.APIKey)
-	stored.Environment = strings.TrimSpace(stored.Environment)
-	if stored.Version != schemaVersion || stored.Ref != ref || (stored.APIKey == "") == (stored.Environment == "") {
+	stored.LegacyEnvironment = strings.TrimSpace(stored.LegacyEnvironment)
+	if stored.LegacyEnvironment != "" {
+		return Source{}, fmt.Errorf("control/modelconfig/credentialstore: environment-backed credentials are unsupported; reconnect with /connect")
+	}
+	if stored.Version != schemaVersion || stored.Ref != ref || stored.APIKey == "" {
 		return Source{}, fmt.Errorf("control/modelconfig/credentialstore: credential is incomplete or mismatched")
 	}
-	return Source{APIKey: stored.APIKey, Environment: stored.Environment}, nil
+	return Source{APIKey: stored.APIKey}, nil
 }
 
 // Delete removes one stored credential. A missing credential is already in

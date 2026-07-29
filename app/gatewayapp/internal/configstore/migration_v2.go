@@ -340,7 +340,6 @@ func convertLegacyProviderEndpoint(raw legacyProviderEndpoint) (
 		endpoint.ID,
 		raw.CredentialRef,
 		raw.Token,
-		raw.TokenEnv,
 	)
 	if err != nil {
 		return modelconfig.ProviderEndpointConfig{}, credentialstore.Source{}, false, false, err
@@ -393,7 +392,6 @@ func convertLegacyProviderModel(raw legacyModelConfig) (
 		configured.ProviderEndpointID,
 		raw.CredentialRef,
 		raw.Token,
-		raw.TokenEnv,
 	)
 	if err != nil {
 		return modelconfig.Config{}, modelconfig.ProviderEndpointConfig{}, credentialstore.Source{}, false, false, err
@@ -679,7 +677,7 @@ func migrateLegacyBindings(
 	return agentbinding.NormalizeConfiguration(out)
 }
 
-func prepareLegacyCredential(provider, endpointID, existingRef, token, environment string) (
+func prepareLegacyCredential(provider, endpointID, existingRef, token string) (
 	string,
 	credentialstore.Source,
 	bool,
@@ -687,11 +685,7 @@ func prepareLegacyCredential(provider, endpointID, existingRef, token, environme
 ) {
 	existingRef = strings.ToLower(strings.TrimSpace(existingRef))
 	token = strings.TrimSpace(token)
-	environment = strings.TrimSpace(environment)
-	if token != "" && environment != "" {
-		return "", credentialstore.Source{}, false, fmt.Errorf("gatewayapp: migrate provider credential has conflicting inline and environment sources")
-	}
-	if token == "" && environment == "" {
+	if token == "" {
 		return existingRef, credentialstore.Source{}, false, nil
 	}
 	if existingRef != "" && !strings.HasPrefix(existingRef, "apikey:") {
@@ -704,10 +698,7 @@ func prepareLegacyCredential(provider, endpointID, existingRef, token, environme
 	if ref == "" {
 		return "", credentialstore.Source{}, false, fmt.Errorf("gatewayapp: cannot derive an opaque credential reference")
 	}
-	if token != "" {
-		return ref, credentialstore.Source{APIKey: token}, true, nil
-	}
-	return ref, credentialstore.Source{Environment: environment}, true, nil
+	return ref, credentialstore.Source{APIKey: token}, true, nil
 }
 
 func mergeLegacyCredentialSource(byRef map[string]credentialstore.Source, ref string, source credentialstore.Source) error {
@@ -720,12 +711,12 @@ func mergeLegacyCredentialSource(byRef map[string]credentialstore.Source, ref st
 
 func rejectPersistedProviderCredentials(models PersistedModelConfig) error {
 	for _, endpoint := range models.ProviderEndpoints {
-		if strings.TrimSpace(endpoint.Token) != "" || strings.TrimSpace(endpoint.TokenEnv) != "" || endpoint.PersistToken {
+		if strings.TrimSpace(endpoint.Token) != "" || endpoint.PersistToken {
 			return fmt.Errorf("gatewayapp: provider endpoint %q must keep credentials only in the Control credential store", strings.TrimSpace(endpoint.ID))
 		}
 	}
 	for _, configured := range models.Configs {
-		if strings.TrimSpace(configured.Token) != "" || strings.TrimSpace(configured.TokenEnv) != "" || configured.PersistToken {
+		if strings.TrimSpace(configured.Token) != "" || configured.PersistToken {
 			return fmt.Errorf("gatewayapp: provider model %q must keep credentials only in the Control credential store", strings.TrimSpace(configured.ID))
 		}
 	}

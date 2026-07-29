@@ -146,7 +146,7 @@ func ResolveHandle(snapshot Snapshot, req HandleRequest) (sdkplacement.Placement
 			if err != nil {
 				return sdkplacement.Placement{}, err
 			}
-			profileID, effort = profile.ID, profile.Effort.DefaultEffort
+			profileID, effort = profile.ID, modelprofile.NormalizeConfiguration(snapshot.Profiles).DefaultEffort
 		} else {
 			return sdkplacement.Placement{}, fmt.Errorf("control/placement: handle %q is not bound", handle)
 		}

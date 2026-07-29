@@ -10,7 +10,7 @@ func TestConnectWizardStateEncodesStructuredCompletionState(t *testing.T) {
 		Provider:       "xiaomi",
 		BaseURL:        "https://token-plan-cn.xiaomimimo.com/v1",
 		TimeoutSeconds: 60,
-		TokenRef:       "env:MIMO_TOKEN_PLAN_API_KEY",
+		TokenRef:       "xiaomi-secret",
 		Model:          "mimo-v2.5-pro",
 	}
 
@@ -22,24 +22,24 @@ func TestConnectWizardStateEncodesStructuredCompletionState(t *testing.T) {
 	if decoded.Provider != state.Provider || decoded.BaseURL != state.BaseURL || decoded.TimeoutSeconds != state.TimeoutSeconds || decoded.TokenRef != state.TokenRef || decoded.Model != state.Model {
 		t.Fatalf("round-tripped state = %#v, want %#v", decoded, state)
 	}
-	if decoded.AuthMode != "env" {
-		t.Fatalf("AuthMode = %q, want env", decoded.AuthMode)
+	if decoded.AuthMode != "token" {
+		t.Fatalf("AuthMode = %q, want token", decoded.AuthMode)
 	}
 }
 
 func TestParseConnectWizardStatePayloadDecodesStructuredState(t *testing.T) {
-	got := ParseConnectWizardStatePayload("%7B%22provider%22%3A%22xiaomi%22%2C%22base_url%22%3A%22https%3A%2F%2Ftoken-plan-cn.xiaomimimo.com%2Fv1%22%2C%22timeout_seconds%22%3A60%2C%22token_ref%22%3A%22env%3AMIMO_TOKEN_PLAN_API_KEY%22%2C%22model%22%3A%22mimo-v2.5-pro%22%7D")
+	got := ParseConnectWizardStatePayload("%7B%22provider%22%3A%22xiaomi%22%2C%22base_url%22%3A%22https%3A%2F%2Ftoken-plan-cn.xiaomimimo.com%2Fv1%22%2C%22timeout_seconds%22%3A60%2C%22token_ref%22%3A%22xiaomi-secret%22%2C%22model%22%3A%22mimo-v2.5-pro%22%7D")
 
-	if got.Provider != "xiaomi" || got.BaseURL != "https://token-plan-cn.xiaomimimo.com/v1" || got.TimeoutSeconds != 60 || got.TokenRef != "env:MIMO_TOKEN_PLAN_API_KEY" || got.Model != "mimo-v2.5-pro" {
+	if got.Provider != "xiaomi" || got.BaseURL != "https://token-plan-cn.xiaomimimo.com/v1" || got.TimeoutSeconds != 60 || got.TokenRef != "xiaomi-secret" || got.Model != "mimo-v2.5-pro" {
 		t.Fatalf("ParseConnectWizardStatePayload() = %#v, want decoded state", got)
 	}
-	if got.AuthMode != "env" {
-		t.Fatalf("AuthMode = %q, want env", got.AuthMode)
+	if got.AuthMode != "token" {
+		t.Fatalf("AuthMode = %q, want token", got.AuthMode)
 	}
 }
 
 func TestParseConnectWizardStatePayloadRejectsLegacyPipePayload(t *testing.T) {
-	got := ParseConnectWizardStatePayload("xiaomi|https%3A%2F%2Ftoken-plan-cn.xiaomimimo.com%2Fv1|60|env%3AMIMO_TOKEN_PLAN_API_KEY|mimo-v2.5-pro")
+	got := ParseConnectWizardStatePayload("xiaomi|https%3A%2F%2Ftoken-plan-cn.xiaomimimo.com%2Fv1|60|xiaomi-secret|mimo-v2.5-pro")
 	if got.Provider != "" || got.BaseURL != "" || got.TokenRef != "" || got.Model != "" {
 		t.Fatalf("ParseConnectWizardStatePayload() = %#v, want empty state for legacy pipe payload", got)
 	}

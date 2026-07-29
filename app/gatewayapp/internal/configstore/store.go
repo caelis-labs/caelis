@@ -32,8 +32,12 @@ type RuntimeConfig struct {
 // PersistedModelConfig is the current provider infrastructure shape. Provider
 // endpoints are deliberately named separately from product ModelProfiles.
 type PersistedModelConfig struct {
+	// DefaultAlias and DefaultID are decoded only to promote older v2 records
+	// into ModelProfiles' single default selection. Normalize clears them
+	// before current documents are persisted.
 	DefaultAlias      string                               `json:"default_alias,omitempty"`
 	DefaultID         string                               `json:"default_model_id,omitempty"`
+	DefaultEffort     string                               `json:"-"`
 	ProviderEndpoints []modelconfig.ProviderEndpointConfig `json:"provider_endpoints,omitempty"`
 	Configs           []modelconfig.Config                 `json:"configs,omitempty"`
 }

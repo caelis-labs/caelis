@@ -92,8 +92,8 @@ func TestSelfDelegationPlacementTracksEffectiveSessionModelAndEffort(t *testing.
 	if secondSelf.Placement.Model != secondID || secondSelf.Placement.ProfileID != secondProfile.ID || secondSelf.Placement.ReasoningEffort != "low" {
 		t.Fatalf("second Session placement = %#v", secondSelf)
 	}
-	assertDelegationPlacementArgs(t, stack, firstSelf, "session-model-a", "high", "111111")
-	assertDelegationPlacementArgs(t, stack, secondSelf, "session-model-b", "low", "222222")
+	assertDelegationPlacementArgs(t, stack, firstSelf, firstProfile.ID, "high", "111111")
+	assertDelegationPlacementArgs(t, stack, secondSelf, secondProfile.ID, "low", "222222")
 	for _, profile := range []string{"breeze", "orbit", "zenith"} {
 		if _, ok := first[profile]; ok {
 			t.Fatalf("unbound %s unexpectedly has a Spawn target: %#v", profile, first[profile])
@@ -157,14 +157,14 @@ func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 	}
 }
 
-func assertDelegationPlacementArgs(t *testing.T, stack *Stack, target sdkdelegation.Target, model string, effort string, contextWindow string) {
+func assertDelegationPlacementArgs(t *testing.T, stack *Stack, target sdkdelegation.Target, profileID string, effort string, contextWindow string) {
 	t.Helper()
 	agent, err := stack.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: target}, stack.runtime)
 	if err != nil {
 		t.Fatalf("resolveDelegationPlacement() error = %v", err)
 	}
-	if got, _ := argValue(agent.Args, "-model"); got != model {
-		t.Fatalf("placement model = %q, want %q", got, model)
+	if got, _ := argValue(agent.Args, "-model-profile"); got != profileID {
+		t.Fatalf("placement profile = %q, want %q", got, profileID)
 	}
 	if got, _ := argValue(agent.Args, "-reasoning-effort"); got != effort {
 		t.Fatalf("placement effort = %q, want %q", got, effort)

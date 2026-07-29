@@ -26,9 +26,6 @@ func TestLookupProviderOwnsEndpointAndAuthenticationPolicy(t *testing.T) {
 	if template.DefaultBaseURL != XiaomiTokenPlanCNBaseURL || template.DefaultEndpointID != "token-plan-cn" {
 		t.Fatalf("token-plan template = %#v", template)
 	}
-	if got := DefaultTokenEnv(template.Provider, template.DefaultBaseURL); got != "MIMO_TOKEN_PLAN_API_KEY" {
-		t.Fatalf("DefaultTokenEnv() = %q, want MIMO_TOKEN_PLAN_API_KEY", got)
-	}
 	endpoint, ok := EndpointForBaseURL(template, template.DefaultBaseURL)
 	if !ok || endpoint.ID != "token-plan-cn" || endpoint.API != model.APIMimo {
 		t.Fatalf("EndpointForBaseURL() = %#v, %v", endpoint, ok)
@@ -74,12 +71,6 @@ func TestOllamaProviderOwnsLocalAndCloudEndpointPolicy(t *testing.T) {
 	}
 	if got := CatalogProviderFor("ollama", cloud.BaseURL); got != modelcatalog.OllamaCloudProvider {
 		t.Fatalf("CatalogProviderFor(ollama cloud) = %q, want %s", got, modelcatalog.OllamaCloudProvider)
-	}
-	if got := DefaultTokenEnv("ollama", local.BaseURL); got != "" {
-		t.Fatalf("DefaultTokenEnv(ollama local) = %q, want empty", got)
-	}
-	if got := DefaultTokenEnv("ollama", cloud.BaseURL); got != "OLLAMA_API_KEY" {
-		t.Fatalf("DefaultTokenEnv(ollama cloud) = %q, want OLLAMA_API_KEY", got)
 	}
 }
 
@@ -197,8 +188,6 @@ func TestSelectableOllamaModelsUsesStaticCloudCatalogWithoutRemoteDiscovery(t *t
 }
 
 func TestAssembleConnectSupportsOllamaLocalAndCloudEndpoints(t *testing.T) {
-	t.Setenv("OLLAMA_API_KEY", "")
-
 	localConfigs, err := AssembleConnect(context.Background(), ConnectRequest{
 		Provider: "ollama",
 		BaseURL:  "http://localhost:11434",
@@ -211,7 +200,7 @@ func TestAssembleConnectSupportsOllamaLocalAndCloudEndpoints(t *testing.T) {
 		t.Fatalf("AssembleConnect(local) = %#v, want one config", localConfigs)
 	}
 	local := localConfigs[0]
-	if local.EndpointID != "local" || local.AuthType != model.AuthNone || local.Token != "" || local.TokenEnv != "" {
+	if local.EndpointID != "local" || local.AuthType != model.AuthNone || local.Token != "" {
 		t.Fatalf("local Ollama config = %#v, want local no-auth endpoint", local)
 	}
 
@@ -233,14 +222,14 @@ func TestAssembleConnectSupportsOllamaLocalAndCloudEndpoints(t *testing.T) {
 		BaseURL:  "https://ollama.com",
 		Models:   []ModelSelection{{Name: "glm-5.2"}},
 	}, ConnectOptions{})
-	if err == nil || !strings.Contains(err.Error(), "OLLAMA_API_KEY") {
-		t.Fatalf("AssembleConnect(cloud without key) error = %v, want API-key hint", err)
+	if err == nil || !strings.Contains(err.Error(), "API key is missing") {
+		t.Fatalf("AssembleConnect(cloud without key) error = %v, want API-key diagnostic", err)
 	}
 
 	cloudConfigs, err := AssembleConnect(context.Background(), ConnectRequest{
 		Provider: "ollama",
 		BaseURL:  "https://ollama.com",
-		APIKey:   "env:OLLAMA_API_KEY",
+		APIKey:   "cloud-secret",
 		Models:   []ModelSelection{{Name: "glm-5.2"}},
 	}, ConnectOptions{})
 	if err != nil {
@@ -250,7 +239,7 @@ func TestAssembleConnectSupportsOllamaLocalAndCloudEndpoints(t *testing.T) {
 		t.Fatalf("AssembleConnect(cloud) = %#v, want one config", cloudConfigs)
 	}
 	cloud := cloudConfigs[0]
-	if cloud.EndpointID != "cloud" || cloud.AuthType != model.AuthAPIKey || cloud.TokenEnv != "OLLAMA_API_KEY" || cloud.Token != "" {
+	if cloud.EndpointID != "cloud" || cloud.AuthType != model.AuthAPIKey || cloud.Token != "cloud-secret" || !cloud.PersistToken {
 		t.Fatalf("cloud Ollama endpoint/auth = %#v", cloud)
 	}
 	if cloud.Model != "glm-5.2" || cloud.ContextWindowTokens != 1000000 || cloud.MaxOutputTok != 32768 {
@@ -270,7 +259,6 @@ func TestOllamaCloudCatalogSurvivesConfigPersistenceRoundTrip(t *testing.T) {
 		Provider:            "ollama",
 		Model:               "glm-5.2",
 		BaseURL:             "https://ollama.com",
-		TokenEnv:            "OLLAMA_API_KEY",
 		ContextWindowTokens: 1000000,
 		MaxOutputTok:        32768,
 	})
@@ -508,7 +496,7 @@ func TestAssembleConnectBuildsManagedCodexOAuthProfile(t *testing.T) {
 	if cfg.Provider != "openai-codex" || cfg.API != model.APIOpenAICodex || cfg.AuthType != model.AuthOAuthToken {
 		t.Fatalf("codex provider config = %#v", cfg)
 	}
-	if cfg.CredentialRef != CodexOAuthCredentialRef || cfg.Token != "" || cfg.TokenEnv != "" || cfg.PersistToken {
+	if cfg.CredentialRef != CodexOAuthCredentialRef || cfg.Token != "" || cfg.PersistToken {
 		t.Fatalf("codex credentials leaked into model config = %#v", cfg)
 	}
 	if cfg.BaseURL != CodexOAuthBaseURL || cfg.ProviderEndpointID != "openai-codex@default" {
@@ -637,10 +625,9 @@ func TestSanitizePersistedCodexProviderEndpointKeepsReferenceOnly(t *testing.T) 
 		BaseURL:       CodexOAuthBaseURL,
 		CredentialRef: CodexOAuthCredentialRef,
 		Token:         "access-secret",
-		TokenEnv:      "SHOULD_NOT_SURVIVE",
 		PersistToken:  true,
 	})
-	if endpoint.CredentialRef != CodexOAuthCredentialRef || endpoint.Token != "" || endpoint.TokenEnv != "" || endpoint.PersistToken {
+	if endpoint.CredentialRef != CodexOAuthCredentialRef || endpoint.Token != "" || endpoint.PersistToken {
 		t.Fatalf("SanitizePersistedProviderEndpoint(codex) = %#v", endpoint)
 	}
 }

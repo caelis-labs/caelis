@@ -108,8 +108,7 @@ func TestFactoryRequiresTokenFromConfig(t *testing.T) {
 		Model:    "gpt-4o-mini",
 		BaseURL:  "https://api.openai.com/v1",
 		Auth: AuthConfig{
-			Type:     AuthAPIKey,
-			TokenEnv: "OPENAI_API_KEY",
+			Type: AuthAPIKey,
 		},
 	}
 	if err := factory.Register(cfg); err != nil {

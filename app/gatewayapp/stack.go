@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -21,7 +20,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/modelconfig"
@@ -30,7 +28,6 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/control/modelprofile"
-	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -54,8 +51,16 @@ type Config struct {
 	SystemPrompt              string
 	Assembly                  assembly.ResolvedAssembly
 	SkillDirs                 []string
-	Model                     ModelConfig
-	Sandbox                   SandboxConfig
+	// ModelProfileID selects one Control-owned ModelProfile for this process.
+	// Runtime startup is read-only: profiles and provider credentials may only
+	// be created or replaced by the /connect owner.
+	ModelProfileID     string
+	ModelProfileEffort string
+	// Model is retained only to reject the former runtime override API with an
+	// actionable error. Callers must configure models through /connect and
+	// select them with ModelProfileID.
+	Model   ModelConfig
+	Sandbox SandboxConfig
 }
 
 type ModelConfig = modelconfig.Config
@@ -267,6 +272,9 @@ type StartSubagentOptions struct {
 }
 
 func NewLocalStack(cfg Config) (*Stack, error) {
+	if modelConfigSupplied(cfg.Model) {
+		return nil, fmt.Errorf("gatewayapp: runtime model overrides are unsupported; configure the model with /connect and select its ModelProfile")
+	}
 	appName := firstNonEmpty(strings.TrimSpace(cfg.AppName), "caelis")
 	userID := firstNonEmpty(strings.TrimSpace(cfg.UserID), "local-user")
 	workspaceCWD := firstNonEmpty(strings.TrimSpace(cfg.WorkspaceCWD), mustGetwd())
@@ -283,15 +291,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	apiKeyCredentials, err := credentialstore.New(storeDir)
 	if err != nil {
 		return nil, err
-	}
-	credentialBootstrap := &providerCredentialTransaction{}
-	if normalized := modelconfig.NormalizeConfig(cfg.Model); normalized.Provider != "" && normalized.Model != "" {
-		prepared, txn, prepareErr := (&Stack{apiKeyCredentials: apiKeyCredentials}).prepareProviderCredentials([]ModelConfig{normalized})
-		credentialBootstrap = txn
-		if prepareErr != nil {
-			return nil, errors.Join(prepareErr, credentialBootstrap.rollback())
-		}
-		cfg.Model = prepared[0]
 	}
 	effectiveApprovalMode := approvalMode(firstNonEmpty(cfg.ApprovalMode, doc.Runtime.ApprovalMode))
 	effectivePolicyProfile := policyProfile(firstNonEmpty(cfg.PolicyProfile, doc.Runtime.PolicyProfile))
@@ -332,34 +331,23 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		"openai-codex": codexAuth,
 		"xai":          grokAuth,
 	})
-	lookup, err := newModelLookup(configStore, cfg.Model, cfg.ContextWindow)
+	lookup, err := newModelLookup(configStore, cfg.ContextWindow)
 	if err != nil {
-		return nil, errors.Join(err, credentialBootstrap.rollback())
+		return nil, err
 	}
-	modelSnapshot := lookup.Snapshot()
-	providerProfiles := make([]modelprofile.ModelProfile, 0, len(modelSnapshot.Configs))
-	for _, configured := range modelSnapshot.Configs {
-		profile, profileErr := modelprofilebuilder.FromProvider(configured)
-		if profileErr != nil {
-			return nil, errors.Join(profileErr, credentialBootstrap.rollback())
-		}
-		providerProfiles = append(providerProfiles, profile)
+	defaultProfiles := modelprofile.NormalizeConfiguration(doc.ModelProfiles)
+	modelProfileID := modelprofile.NormalizeID(cfg.ModelProfileID)
+	if modelProfileID == "" {
+		modelProfileID = defaultProfiles.DefaultProfileID
 	}
-	if len(providerProfiles) > 0 {
-		doc.Models = modelSnapshot
-		doc.ModelProfiles, err = modelprofile.Upsert(doc.ModelProfiles, providerProfiles...)
-		if err != nil {
-			return nil, errors.Join(err, credentialBootstrap.rollback())
-		}
-		doc.ModelProfiles.DefaultProfileID = modelprofile.BuildProviderID(modelSnapshot.DefaultID)
-		if err := configStore.Save(doc); err != nil {
-			if configstore.WriteCommitted(err) {
-				credentialBootstrap.commit()
-			}
-			return nil, errors.Join(err, credentialBootstrap.rollback())
-		}
+	modelProfileEffort := strings.ToLower(strings.TrimSpace(cfg.ModelProfileEffort))
+	if modelProfileEffort == "" && modelProfileID == defaultProfiles.DefaultProfileID {
+		modelProfileEffort = defaultProfiles.DefaultEffort
 	}
-	credentialBootstrap.commit()
+	runtimeModel, err := resolveRuntimeProviderProfile(doc.ModelProfiles, lookup, modelProfileID, modelProfileEffort)
+	if err != nil {
+		return nil, err
+	}
 	lookup.resolveHTTPClient = func(ctx context.Context, modelCfg ModelConfig) (*http.Client, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -405,15 +393,17 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		apiKeyCredentials: apiKeyCredentials,
 		providerUsage:     providerUsage,
 		runtime: stackRuntimeConfig{
-			ApprovalMode:  effectiveApprovalMode,
-			PolicyProfile: effectivePolicyProfile,
-			ContextWindow: cfg.ContextWindow,
-			SystemPrompt:  cfg.SystemPrompt,
-			Model:         cfg.Model,
-			SkillDirs:     cloneStringSlicePreserveNil(cfg.SkillDirs),
-			Plugins:       clonePluginConfigs(doc.Plugins),
-			BaseAssembly:  baseAssembly,
-			Assembly:      assembly.CloneResolvedAssembly(baseAssembly),
+			ApprovalMode:       effectiveApprovalMode,
+			PolicyProfile:      effectivePolicyProfile,
+			ContextWindow:      cfg.ContextWindow,
+			SystemPrompt:       cfg.SystemPrompt,
+			ModelProfileID:     modelProfileID,
+			ModelProfileEffort: modelProfileEffort,
+			Model:              runtimeModel,
+			SkillDirs:          cloneStringSlicePreserveNil(cfg.SkillDirs),
+			Plugins:            clonePluginConfigs(doc.Plugins),
+			BaseAssembly:       baseAssembly,
+			Assembly:           assembly.CloneResolvedAssembly(baseAssembly),
 		},
 		sandbox: sandboxCfg,
 	}
@@ -479,6 +469,31 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	return stack, nil
+}
+
+func modelConfigSupplied(cfg ModelConfig) bool {
+	return strings.TrimSpace(cfg.ID) != "" ||
+		strings.TrimSpace(cfg.Alias) != "" ||
+		strings.TrimSpace(cfg.Provider) != "" ||
+		strings.TrimSpace(cfg.ProviderEndpointID) != "" ||
+		strings.TrimSpace(cfg.EndpointID) != "" ||
+		cfg.API != "" ||
+		strings.TrimSpace(cfg.Model) != "" ||
+		strings.TrimSpace(cfg.BaseURL) != "" ||
+		cfg.HTTPClient != nil ||
+		strings.TrimSpace(cfg.Token) != "" ||
+		strings.TrimSpace(cfg.CredentialRef) != "" ||
+		cfg.PersistToken ||
+		cfg.AuthType != "" ||
+		strings.TrimSpace(cfg.HeaderKey) != "" ||
+		cfg.ContextWindowTokens != 0 ||
+		strings.TrimSpace(cfg.ReasoningEffort) != "" ||
+		strings.TrimSpace(cfg.DefaultReasoningEffort) != "" ||
+		len(cfg.ReasoningLevels) > 0 ||
+		strings.TrimSpace(cfg.ReasoningMode) != "" ||
+		cfg.MaxOutputTok != 0 ||
+		cfg.Timeout != 0 ||
+		cfg.StreamFirstEventTimeout != 0
 }
 
 // StartApprovalRecovery begins the Control-owned abandoned-approval sweep.

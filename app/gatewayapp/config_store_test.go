@@ -18,9 +18,8 @@ func TestAppConfigStoreRejectsCredentialMaterial(t *testing.T) {
 	t.Parallel()
 
 	for name, configured := range map[string]ModelConfig{
-		"token":     {Provider: "deepseek", Model: "reasoner", Token: "secret"},
-		"token env": {Provider: "deepseek", Model: "reasoner", TokenEnv: "DEEPSEEK_API_KEY"},
-		"flag":      {Provider: "deepseek", Model: "reasoner", PersistToken: true},
+		"token": {Provider: "deepseek", Model: "reasoner", Token: "secret"},
+		"flag":  {Provider: "deepseek", Model: "reasoner", PersistToken: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
@@ -35,12 +34,28 @@ func TestAppConfigStoreRejectsCredentialMaterial(t *testing.T) {
 	}
 }
 
-func TestNewLocalStackStoresStartupAPIKeyBehindOpaqueReference(t *testing.T) {
+func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testing.T) {
 	root := t.TempDir()
 	secret := "startup-secret"
+	workspace := t.TempDir()
 	stack, err := NewLocalStack(Config{
-		StoreDir: root, WorkspaceKey: "credential-test", WorkspaceCWD: t.TempDir(),
-		Model: ModelConfig{Provider: "deepseek", API: providers.APIDeepSeek, Model: "reasoner", Token: secret},
+		StoreDir: root, WorkspaceKey: "credential-test", WorkspaceCWD: workspace,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stack.Connect(ModelConfig{
+		Provider: "ollama", API: providers.APIOllama, Model: "default-model",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := stack.Connect(ModelConfig{
+		Provider:               "deepseek",
+		API:                    providers.APIDeepSeek,
+		Model:                  "reasoner",
+		Token:                  secret,
+		ReasoningLevels:        []string{"none", "high"},
+		DefaultReasoningEffort: "none",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -49,12 +64,82 @@ func TestNewLocalStackStoresStartupAPIKeyBehindOpaqueReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Models.ProviderEndpoints) != 1 || !strings.HasPrefix(doc.Models.ProviderEndpoints[0].CredentialRef, "apikey:") {
-		t.Fatalf("persisted provider endpoints = %#v, want opaque credential reference", doc.Models.ProviderEndpoints)
+	var credentialRef string
+	for _, endpoint := range doc.Models.ProviderEndpoints {
+		if endpoint.Provider == "deepseek" {
+			credentialRef = endpoint.CredentialRef
+		}
 	}
-	raw := readConfigFileForTest(t, root)
-	if strings.Contains(raw, secret) || strings.Contains(raw, `"token"`) || strings.Contains(raw, `"token_env"`) {
-		t.Fatalf("config persisted credential material:\n%s", raw)
+	if credentialRef == "" || !strings.HasPrefix(credentialRef, "apikey:") {
+		t.Fatalf("persisted provider endpoints = %#v, want DeepSeek opaque credential reference", doc.Models.ProviderEndpoints)
+	}
+	configBefore := readConfigFileForTest(t, root)
+	credentials, err := credentialstore.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceBefore, err := credentials.LookupSource(context.Background(), credentialRef)
+	if err != nil || sourceBefore.APIKey != secret {
+		t.Fatalf("credential source before restart = %#v, %v", sourceBefore, err)
+	}
+	if err := stack.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	child, err := NewLocalStack(Config{
+		StoreDir: root, WorkspaceKey: "credential-child", WorkspaceCWD: workspace,
+		ModelProfileID: profile.ID, ModelProfileEffort: "high",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer child.Close()
+	if child.runtime.ModelProfileID != profile.ID ||
+		child.runtime.ModelProfileEffort != "high" ||
+		child.runtime.Model.ID != profile.Backend.Provider.ModelConfigID ||
+		child.runtime.Model.CredentialRef != credentialRef {
+		t.Fatalf("child runtime profile/model = %q / %#v, want %q", child.runtime.ModelProfileID, child.runtime.Model, profile.ID)
+	}
+	self, ok := agentConfigForToolTest(child.runtime.Assembly.Agents, "self")
+	if !ok {
+		t.Fatalf("child self agent missing from assembly: %#v", child.runtime.Assembly.Agents)
+	}
+	if got, ok := argValue(self.Args, "-model-profile"); !ok || got != profile.ID {
+		t.Fatalf("child self model profile arg = %q (present %v), want %q in %#v", got, ok, profile.ID, self.Args)
+	}
+	if got, ok := argValue(self.Args, "-reasoning-effort"); !ok || got != "high" {
+		t.Fatalf("child self reasoning effort arg = %q (present %v), want high in %#v", got, ok, self.Args)
+	}
+	if child.lookup.DefaultID() == child.runtime.Model.ID {
+		t.Fatalf("test setup did not preserve a distinct global default: lookup=%q selected=%q", child.lookup.DefaultID(), child.runtime.Model.ID)
+	}
+	if got := runtimeDefaultModelAlias(child.runtime, child.lookup); got != profile.Backend.Provider.ModelConfigID {
+		t.Fatalf("runtimeDefaultModelAlias() = %q, want selected profile model %q", got, profile.Backend.Provider.ModelConfigID)
+	}
+	noneConfig, err := resolveRuntimeProviderProfile(doc.ModelProfiles, child.lookup, profile.ID, "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noneConfig.ReasoningEffort != "none" {
+		t.Fatalf("explicit none profile effort resolved to %q", noneConfig.ReasoningEffort)
+	}
+	noneResolution, err := child.lookup.ResolveModelConfig(context.Background(), noneConfig, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noneResolution.ReasoningEffort != "none" {
+		t.Fatalf("explicit none model resolution effort = %q", noneResolution.ReasoningEffort)
+	}
+	configAfter := readConfigFileForTest(t, root)
+	if configAfter != configBefore {
+		t.Fatalf("runtime startup rewrote config:\nbefore:\n%s\nafter:\n%s", configBefore, configAfter)
+	}
+	sourceAfter, err := credentials.LookupSource(context.Background(), credentialRef)
+	if err != nil || sourceAfter != sourceBefore {
+		t.Fatalf("credential source after restart = %#v, %v; want %#v", sourceAfter, err, sourceBefore)
+	}
+	if strings.Contains(configAfter, secret) || strings.Contains(configAfter, `"token"`) || strings.Contains(configAfter, `"token_env"`) {
+		t.Fatalf("config persisted credential material:\n%s", configAfter)
 	}
 	if runtime.GOOS != "windows" {
 		info, statErr := os.Stat(filepath.Join(root, "config.json"))
@@ -67,7 +152,26 @@ func TestNewLocalStackStoresStartupAPIKeyBehindOpaqueReference(t *testing.T) {
 	}
 }
 
-func TestLegacyMigrationMovesEnvironmentCredentialBehindOpaqueReference(t *testing.T) {
+func TestNewLocalStackRejectsRuntimeModelOverrideBeforeStateMutation(t *testing.T) {
+	root := t.TempDir()
+	_, err := NewLocalStack(Config{
+		StoreDir: root, WorkspaceKey: "rejected-runtime-model", WorkspaceCWD: t.TempDir(),
+		Model: ModelConfig{
+			Provider: "deepseek", API: providers.APIDeepSeek, Model: "deepseek-v4-pro", Token: "must-not-write",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "runtime model overrides are unsupported") {
+		t.Fatalf("NewLocalStack(runtime model) error = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "config.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("rejected runtime model created config state: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "providers", "credentials")); !os.IsNotExist(statErr) {
+		t.Fatalf("rejected runtime model created credential state: %v", statErr)
+	}
+}
+
+func TestLegacyMigrationDoesNotCreateEnvironmentCredential(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatalf("MkdirAll(root) error = %v", err)
@@ -94,20 +198,15 @@ func TestLegacyMigrationMovesEnvironmentCredentialBehindOpaqueReference(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Models.ProviderEndpoints) != 1 || !strings.HasPrefix(doc.Models.ProviderEndpoints[0].CredentialRef, "apikey:") {
-		t.Fatalf("migrated provider endpoints = %#v", doc.Models.ProviderEndpoints)
+	if len(doc.Models.ProviderEndpoints) != 1 || doc.Models.ProviderEndpoints[0].CredentialRef != "" {
+		t.Fatalf("migrated provider endpoints = %#v, want environment auth discarded", doc.Models.ProviderEndpoints)
 	}
 	persisted := readConfigFileForTest(t, root)
 	if strings.Contains(persisted, "DEEPSEEK_API_KEY") || !strings.Contains(persisted, `"schema_version": 2`) {
 		t.Fatalf("migrated AppConfig = %s", persisted)
 	}
-	credentials, err := credentialstore.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	source, err := credentials.LookupSource(context.Background(), doc.Models.ProviderEndpoints[0].CredentialRef)
-	if err != nil || source.Environment != "DEEPSEEK_API_KEY" {
-		t.Fatalf("credential source = %#v, %v", source, err)
+	if _, err := os.Stat(filepath.Join(root, "providers", "credentials")); !os.IsNotExist(err) {
+		t.Fatalf("environment credential directory exists after migration: %v", err)
 	}
 }
 

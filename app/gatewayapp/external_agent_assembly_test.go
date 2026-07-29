@@ -149,8 +149,8 @@ func TestProviderProfileBindingMaterializesFixedDirectHandle(t *testing.T) {
 	if materialized.Command == "" {
 		t.Fatalf("runtime assembly does not contain Breeze profile Agent: %#v", stack.runtime.Assembly.Agents)
 	}
-	if got, _ := argValue(materialized.Args, "-model"); got != "deepseek-v4-pro" {
-		t.Fatalf("materialized -model = %q, want deepseek-v4-pro; args=%#v", got, materialized.Args)
+	if got, _ := argValue(materialized.Args, "-model-profile"); got != profile.ID {
+		t.Fatalf("materialized -model-profile = %q, want %q; args=%#v", got, profile.ID, materialized.Args)
 	}
 	if got, _ := argValue(materialized.Args, "-system-prompt"); got != "shared base prompt" {
 		t.Fatalf("materialized system prompt = %q, want shared base prompt", got)
@@ -158,8 +158,8 @@ func TestProviderProfileBindingMaterializesFixedDirectHandle(t *testing.T) {
 	if got, _ := argValue(materialized.Args, "-reasoning-effort"); got != "xhigh" {
 		t.Fatalf("materialized reasoning effort = %q, want xhigh", got)
 	}
-	if got, _ := argValue(materialized.Args, "-reasoning-levels"); got != "high,xhigh" {
-		t.Fatalf("materialized reasoning levels = %q, want high,xhigh", got)
+	if _, ok := argValue(materialized.Args, "-reasoning-levels"); ok {
+		t.Fatalf("materialized args contain runtime model capability override: %#v", materialized.Args)
 	}
 	if strings.TrimSpace(materialized.Env[systemSceneEnvKey]) != "" {
 		t.Fatalf("model Agent inherited system-scene marker: %#v", materialized.Env)
@@ -197,8 +197,8 @@ func TestSystemAgentBindingsApplySelectedModelAndEffort(t *testing.T) {
 		if agent.Name != ReviewerAgentID {
 			continue
 		}
-		if got, _ := argValue(agent.Args, "-model"); got != "reviewer-specialist" {
-			t.Fatalf("Reviewer -model = %q, want reviewer-specialist; args=%#v", got, agent.Args)
+		if got, _ := argValue(agent.Args, "-model-profile"); got != profile.ID {
+			t.Fatalf("Reviewer -model-profile = %q, want %q; args=%#v", got, profile.ID, agent.Args)
 		}
 		if got, _ := argValue(agent.Args, "-reasoning-effort"); got != "xhigh" {
 			t.Fatalf("Reviewer -reasoning-effort = %q, want xhigh; args=%#v", got, agent.Args)

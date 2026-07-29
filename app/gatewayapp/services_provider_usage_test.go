@@ -21,15 +21,18 @@ func (r *grokProviderUsageReader) SubscriptionUsage(context.Context) (providerus
 func TestModelServiceProviderUsageSupportsGrokOAuthCredential(t *testing.T) {
 	t.Parallel()
 
-	lookup, err := newModelLookup(nil, ModelConfig{
+	lookup, err := newModelLookup(nil, 500000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lookup.Upsert(ModelConfig{
 		Provider:      "xai",
 		API:           model.APIXAIResponses,
 		Model:         "grok-4.5",
 		BaseURL:       modelconfig.GrokOAuthBaseURL,
 		CredentialRef: modelconfig.GrokOAuthCredentialRef,
 		AuthType:      model.AuthOAuthToken,
-	}, 500000)
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	reader := &grokProviderUsageReader{}

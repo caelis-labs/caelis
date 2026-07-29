@@ -242,7 +242,6 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 	tests := []struct {
 		name       string
 		cfg        ModelConfig
-		envValue   string
 		wantSource string
 		wantMiss   bool
 	}{
@@ -255,18 +254,6 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 				CredentialRef: "codex-oauth",
 			},
 			wantSource: "credential:codex-oauth",
-			wantMiss:   false,
-		},
-		{
-			name: "env token",
-			cfg: ModelConfig{
-				Provider: "deepseek",
-				API:      providers.APIDeepSeek,
-				Model:    "deepseek-v4-pro",
-				TokenEnv: "CAELIS_DOCTOR_TOKEN",
-			},
-			envValue:   "env-secret",
-			wantSource: "env:CAELIS_DOCTOR_TOKEN",
 			wantMiss:   false,
 		},
 		{
@@ -286,9 +273,8 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 				Provider: "deepseek",
 				API:      providers.APIDeepSeek,
 				Model:    "deepseek-v4-pro",
-				TokenEnv: "CAELIS_DOCTOR_TOKEN_MISSING",
 			},
-			wantSource: "env:CAELIS_DOCTOR_TOKEN_MISSING",
+			wantSource: "",
 			wantMiss:   true,
 		},
 	}
@@ -296,9 +282,6 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.cfg.TokenEnv != "" {
-				t.Setenv(tt.cfg.TokenEnv, tt.envValue)
-			}
 			if got := modelConfigTokenSource(tt.cfg); got != tt.wantSource {
 				t.Fatalf("modelConfigTokenSource() = %q, want %q", got, tt.wantSource)
 			}
@@ -313,9 +296,6 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 			})
 			if tt.cfg.Token != "" && strings.Contains(out, tt.cfg.Token) {
 				t.Fatalf("FormatDoctorText() leaked token: %q", out)
-			}
-			if tt.envValue != "" && strings.Contains(out, tt.envValue) {
-				t.Fatalf("FormatDoctorText() leaked env value: %q", out)
 			}
 		})
 	}

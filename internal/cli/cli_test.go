@@ -450,17 +450,18 @@ func TestStreamHandleIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 
 func TestRunDoctorJSONDoesNotLeakToken(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
+	storeDir := cliTestStoreDir(t)
+	seedCLIModel(t, storeDir, gatewayapp.ModelConfig{
+		Provider: "minimax", Model: "MiniMax-M1", Token: "super-secret-token",
+	})
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	err := run(context.Background(), []string{
 		"-doctor",
 		"-format", "json",
-		"-store-dir", cliTestStoreDir(t),
+		"-store-dir", storeDir,
 		"-workspace-key", "doctor-ws",
 		"-workspace-cwd", t.TempDir(),
-		"-provider", "minimax",
-		"-model", "MiniMax-M1",
-		"-token", "super-secret-token",
 	}, strings.NewReader(""), &out, &errBuf)
 	if err != nil {
 		t.Fatalf("run(-doctor) error = %v", err)
@@ -479,17 +480,20 @@ func TestRunDoctorJSONDoesNotLeakToken(t *testing.T) {
 
 func TestRunACPSubcommandConstructsStdioServer(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
+	storeDir := cliTestStoreDir(t)
+	profileID := seedCLIModel(t, storeDir, gatewayapp.ModelConfig{
+		Provider: "ollama", Model: "llama3",
+	})
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	err := run(ctx, []string{
 		"acp",
-		"-store-dir", cliTestStoreDir(t),
+		"-store-dir", storeDir,
 		"-workspace-key", "acp-ws",
 		"-workspace-cwd", t.TempDir(),
-		"-provider", "ollama",
-		"-model", "llama3",
+		"-model-profile", profileID,
 	}, strings.NewReader(""), &out, &errBuf)
 	if err != nil {
 		t.Fatalf("run(acp) error = %v; stderr=%q", err, errBuf.String())
@@ -498,17 +502,17 @@ func TestRunACPSubcommandConstructsStdioServer(t *testing.T) {
 
 func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
+	storeDir := cliTestStoreDir(t)
+	seedCLIModel(t, storeDir, gatewayapp.ModelConfig{
+		Provider: "deepseek", Model: "deepseek-v4-pro", Token: "deepseek-secret",
+	})
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	err := run(context.Background(), []string{
 		"doctor",
-		"-store-dir", cliTestStoreDir(t),
+		"-store-dir", storeDir,
 		"-workspace-key", "doctor-ws",
 		"-workspace-cwd", t.TempDir(),
-		"-provider", "deepseek",
-		"-api", "deepseek",
-		"-model", "deepseek-v4-pro",
-		"-token-env", "CAELIS_TEST_DOCTOR_TOKEN",
 	}, strings.NewReader(""), &out, &errBuf)
 	if err != nil {
 		t.Fatalf("run(doctor) error = %v", err)
@@ -520,6 +524,25 @@ func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 	if strings.Contains(text, "super-secret") {
 		t.Fatalf("doctor text leaked secret: %q", text)
 	}
+}
+
+func seedCLIModel(t *testing.T, storeDir string, model gatewayapp.ModelConfig) string {
+	t.Helper()
+	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+		StoreDir: storeDir, WorkspaceKey: "cli-seed", WorkspaceCWD: t.TempDir(),
+		Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := stack.Connect(model)
+	if closeErr := stack.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return profile.ID
 }
 
 func TestRunSandboxSetupSubcommandTextOutput(t *testing.T) {

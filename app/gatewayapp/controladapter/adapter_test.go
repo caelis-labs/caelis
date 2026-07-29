@@ -1015,7 +1015,7 @@ func TestAdapterCompleteSlashArgConnectSeparatesSourcesAndProviders(t *testing.T
 	var foundTokenPlan bool
 	for _, item := range xiaomiEndpoints {
 		if strings.EqualFold(strings.TrimSpace(item.Value), modelconfig.XiaomiTokenPlanCNBaseURL) &&
-			strings.Contains(item.Detail, "MIMO_TOKEN_PLAN_API_KEY") {
+			strings.Contains(item.Detail, "Token Plan CN") {
 			foundTokenPlan = true
 		}
 	}
@@ -1040,13 +1040,13 @@ func TestAdapterCompleteSlashArgConnectSeparatesSourcesAndProviders(t *testing.T
 	if len(ollamaEndpoints) != 2 ||
 		ollamaEndpoints[0].Value != "http://localhost:11434" || !ollamaEndpoints[0].NoAuth ||
 		ollamaEndpoints[1].Value != "https://ollama.com" || ollamaEndpoints[1].NoAuth ||
-		!strings.Contains(ollamaEndpoints[1].Detail, "OLLAMA_API_KEY") {
+		!strings.Contains(ollamaEndpoints[1].Detail, "Ollama Cloud") {
 		t.Fatalf("ollama endpoint candidates = %#v, want local no-auth and Cloud API-key choices", ollamaEndpoints)
 	}
 	ollamaCloudModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(connectwizard.ConnectWizardState{
 		Provider:       "ollama",
 		BaseURL:        "https://ollama.com",
-		TokenRef:       "env:OLLAMA_API_KEY",
+		TokenRef:       "ollama-secret",
 		TimeoutSeconds: connectwizard.DefaultConnectTimeoutSeconds,
 	}), "", 20)
 	if err != nil {
@@ -1304,7 +1304,7 @@ func TestAdapterCompleteSlashArgACPModelUsesModelSpecificEfforts(t *testing.T) {
 	}
 }
 
-func TestAdapterCompletesAndPersistsModelReasoningLevel(t *testing.T) {
+func TestAdapterCompletesAndPersistsSessionModelReasoningLevel(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1317,9 +1317,11 @@ func TestAdapterCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 		ApprovalMode: "default",
 		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
-			Provider: "deepseek",
-			API:      providers.APIDeepSeek,
-			Model:    "deepseek-v4-pro",
+			Provider:               "deepseek",
+			API:                    providers.APIDeepSeek,
+			Model:                  "deepseek-v4-pro",
+			ReasoningLevels:        []string{"none", "high", "max"},
+			DefaultReasoningEffort: "none",
 		},
 	})
 	if err != nil {
@@ -1336,6 +1338,10 @@ func TestAdapterCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	}
 	if got := candidateValues(levels); !equalStrings(got, []string{"none", "high", "max"}) {
 		t.Fatalf("reasoning candidates = %#v, want none/high/max", levels)
+	}
+	configBefore, ok := stack.ModelConfig("deepseek/deepseek-v4-pro")
+	if !ok {
+		t.Fatal("expected deepseek model config before UseModel")
 	}
 	if _, err := driver.UseModel(ctx, "deepseek/deepseek-v4-pro", "high"); err != nil {
 		t.Fatalf("UseModel(reasoning) error = %v", err)
@@ -1362,8 +1368,8 @@ func TestAdapterCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	if !ok {
 		t.Fatal("expected deepseek model config")
 	}
-	if got := strings.TrimSpace(cfg.ReasoningEffort); got != "high" {
-		t.Fatalf("config reasoning effort = %q, want high", got)
+	if !reflect.DeepEqual(cfg, configBefore) {
+		t.Fatalf("UseModel mutated provider config:\nbefore: %#v\nafter:  %#v", configBefore, cfg)
 	}
 }
 
@@ -1424,7 +1430,7 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	if cfg.ProviderEndpointID != "deepseek@default" {
 		t.Fatalf("persisted provider endpoint id = %q, want deepseek@default", cfg.ProviderEndpointID)
 	}
-	if cfg.Provider != "" || cfg.BaseURL != "" || cfg.Token != "" || cfg.TokenEnv != "" {
+	if cfg.Provider != "" || cfg.BaseURL != "" || cfg.Token != "" {
 		t.Fatalf("persisted model leaked profile fields: %#v", cfg)
 	}
 	var conn gatewayapp.ProviderEndpointConfig
@@ -1442,9 +1448,6 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	}
 	if conn.Token != "" || conn.PersistToken || !strings.HasPrefix(conn.CredentialRef, "apikey:") {
 		t.Fatalf("persisted profile credential = token:%q persist:%v ref:%q, want opaque API-key reference", conn.Token, conn.PersistToken, conn.CredentialRef)
-	}
-	if conn.TokenEnv != "" {
-		t.Fatalf("persisted profile token_env = %q, want empty for pasted API key", conn.TokenEnv)
 	}
 	if cfg.ContextWindowTokens != 1048576 {
 		t.Fatalf("persisted context window = %d, want 1048576", cfg.ContextWindowTokens)
@@ -1515,7 +1518,7 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	}
 }
 
-func TestAdapterConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) {
+func TestAdapterConnectRejectsEnvironmentCredentialReference(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1540,42 +1543,15 @@ func TestAdapterConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) {
 		Provider: "deepseek",
 		Model:    "deepseek-v4-flash",
 		APIKey:   "env:DEEPSEEK_API_KEY",
-	}); err != nil {
-		t.Fatalf("Connect() error = %v", err)
+	}); err == nil || !strings.Contains(err.Error(), "environment credential references are unsupported") {
+		t.Fatalf("Connect() error = %v, want unsupported environment reference", err)
 	}
-
 	doc, err := gatewayapp.LoadAppConfig(root)
 	if err != nil {
-		t.Fatalf("LoadAppConfig() error = %v", err)
+		t.Fatal(err)
 	}
-	var cfg gatewayapp.ModelConfig
-	for _, item := range doc.Models.Configs {
-		if strings.EqualFold(item.Alias, "deepseek/deepseek-v4-flash") {
-			cfg = item
-			break
-		}
-	}
-	if cfg.Alias == "" {
-		t.Fatalf("persisted configs = %#v, want deepseek/deepseek-v4-flash", doc.Models.Configs)
-	}
-	var conn gatewayapp.ProviderEndpointConfig
-	for _, item := range doc.Models.ProviderEndpoints {
-		if strings.EqualFold(item.ID, cfg.ProviderEndpointID) {
-			conn = item
-			break
-		}
-	}
-	if conn.ID == "" {
-		t.Fatalf("persisted provider endpoints = %#v, missing %q", doc.Models.ProviderEndpoints, cfg.ProviderEndpointID)
-	}
-	if conn.Token != "" || conn.PersistToken {
-		t.Fatalf("persisted profile token/persist = %q/%v, want no plaintext token for env auth", conn.Token, conn.PersistToken)
-	}
-	if conn.TokenEnv != "" || !strings.HasPrefix(conn.CredentialRef, "apikey:") {
-		t.Fatalf("persisted profile credential = env:%q ref:%q, want opaque reference", conn.TokenEnv, conn.CredentialRef)
-	}
-	if raw := readAdapterConfigForTest(t, root); strings.Contains(raw, "DEEPSEEK_API_KEY") {
-		t.Fatalf("AppConfig leaked credential source: %s", raw)
+	if len(doc.Models.Configs) != 0 || len(doc.ModelProfiles.Profiles) != 0 {
+		t.Fatalf("rejected environment reference mutated config: %#v", doc)
 	}
 }
 
@@ -3220,7 +3196,7 @@ func TestAdapterCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "deepseek",
 		Model:    "deepseek-v4-pro",
-		TokenEnv: "DEEPSEEK_API_KEY",
+		APIKey:   "deepseek-secret",
 	}); err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
@@ -3435,7 +3411,7 @@ func TestFindProviderTemplateRejectsMimoProviderAliases(t *testing.T) {
 	}
 }
 
-func TestValidateConnectConfigXiaomiTokenPlanCNUsesTokenPlanEnvHint(t *testing.T) {
+func TestValidateConnectConfigXiaomiTokenPlanCNRequiresPastedAPIKey(t *testing.T) {
 	t.Parallel()
 
 	_, err := modelconfig.AssembleConnect(context.Background(), modelconfig.ConnectRequest{
@@ -3443,8 +3419,8 @@ func TestValidateConnectConfigXiaomiTokenPlanCNUsesTokenPlanEnvHint(t *testing.T
 		Models:   []modelconfig.ModelSelection{{Name: "mimo-v2.5-pro"}},
 		BaseURL:  modelconfig.XiaomiTokenPlanCNBaseURL,
 	}, modelconfig.ConnectOptions{})
-	if err == nil || !strings.Contains(err.Error(), "env:MIMO_TOKEN_PLAN_API_KEY") {
-		t.Fatalf("AssembleConnect() error = %v, want MIMO_TOKEN_PLAN_API_KEY hint", err)
+	if err == nil || !strings.Contains(err.Error(), "API key is missing") || strings.Contains(err.Error(), "env:") {
+		t.Fatalf("AssembleConnect() error = %v, want pasted API-key guidance", err)
 	}
 }
 
@@ -3473,7 +3449,7 @@ func TestAdapterConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
 		Provider: "xiaomi",
 		Model:    "mimo-v2.5-pro",
 		BaseURL:  modelconfig.XiaomiTokenPlanCNBaseURL,
-		APIKey:   "env:MIMO_TOKEN_PLAN_API_KEY",
+		APIKey:   "xiaomi-token-plan-secret",
 	}); err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
@@ -3498,7 +3474,7 @@ func TestAdapterConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
 	if cfg.ProviderEndpointID != "xiaomi@token-plan-cn" {
 		t.Fatalf("persisted provider endpoint id = %q, want xiaomi@token-plan-cn", cfg.ProviderEndpointID)
 	}
-	if cfg.Provider != "" || cfg.BaseURL != "" || cfg.Token != "" || cfg.TokenEnv != "" {
+	if cfg.Provider != "" || cfg.BaseURL != "" || cfg.Token != "" {
 		t.Fatalf("persisted model leaked profile fields: %#v", cfg)
 	}
 	var profile gatewayapp.ProviderEndpointConfig
@@ -3517,8 +3493,8 @@ func TestAdapterConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
 	if profile.BaseURL != modelconfig.XiaomiTokenPlanCNBaseURL {
 		t.Fatalf("profile base_url = %q, want %q", profile.BaseURL, modelconfig.XiaomiTokenPlanCNBaseURL)
 	}
-	if profile.TokenEnv != "" || !strings.HasPrefix(profile.CredentialRef, "apikey:") {
-		t.Fatalf("profile credential = env:%q ref:%q, want opaque reference", profile.TokenEnv, profile.CredentialRef)
+	if !strings.HasPrefix(profile.CredentialRef, "apikey:") {
+		t.Fatalf("profile credential ref = %q, want opaque reference", profile.CredentialRef)
 	}
 }
 
@@ -3544,8 +3520,8 @@ func TestAdapterConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.T) {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
 	for _, cfg := range []controlprompt.ConnectConfig{
-		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: modelconfig.XiaomiAPIBaseURL, APIKey: "env:XIAOMI_API_KEY"},
-		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: modelconfig.XiaomiTokenPlanCNBaseURL, APIKey: "env:MIMO_TOKEN_PLAN_API_KEY"},
+		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: modelconfig.XiaomiAPIBaseURL, APIKey: "xiaomi-api-secret"},
+		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: modelconfig.XiaomiTokenPlanCNBaseURL, APIKey: "xiaomi-token-plan-secret"},
 	} {
 		if _, err := driver.Connect(ctx, cfg); err != nil {
 			t.Fatalf("Connect(%s) error = %v", cfg.BaseURL, err)
@@ -3627,7 +3603,7 @@ func TestAdapterConnectReusesExistingEndpointAuth(t *testing.T) {
 		Provider: "xiaomi",
 		Model:    "mimo-v2.5-pro",
 		BaseURL:  modelconfig.XiaomiAPIBaseURL,
-		APIKey:   "env:XIAOMI_API_KEY",
+		APIKey:   "xiaomi-api-secret",
 	}); err != nil {
 		t.Fatalf("Connect(first model) error = %v", err)
 	}
@@ -3659,7 +3635,7 @@ func TestAdapterConnectReusesExistingEndpointAuth(t *testing.T) {
 	if len(doc.Models.ProviderEndpoints) != 1 {
 		t.Fatalf("persisted provider endpoints = %#v, want one shared endpoint", doc.Models.ProviderEndpoints)
 	}
-	if got := doc.Models.ProviderEndpoints[0]; got.TokenEnv != "" || !strings.HasPrefix(got.CredentialRef, "apikey:") {
+	if got := doc.Models.ProviderEndpoints[0]; !strings.HasPrefix(got.CredentialRef, "apikey:") {
 		t.Fatalf("shared profile credential = %#v, want opaque reference", got)
 	}
 }
@@ -4334,8 +4310,8 @@ func TestAdapterConnectRejectsMissingAPIKeyWithActionableError(t *testing.T) {
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "openai",
 		Model:    "gpt-4o",
-	}); err == nil || !strings.Contains(err.Error(), "env:OPENAI_API_KEY") {
-		t.Fatalf("Connect() error = %v, want actionable env hint", err)
+	}); err == nil || !strings.Contains(err.Error(), "paste a key") || strings.Contains(err.Error(), "env:") {
+		t.Fatalf("Connect() error = %v, want pasted API-key guidance", err)
 	}
 }
 
@@ -4394,7 +4370,7 @@ func TestAdapterStatusIncludesDoctorDiagnostics(t *testing.T) {
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "minimax",
 		Model:    "MiniMax-M2.7-highspeed",
-		TokenEnv: "MINIMAX_API_KEY",
+		APIKey:   "minimax-secret",
 	}); err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
@@ -4411,8 +4387,8 @@ func TestAdapterStatusIncludesDoctorDiagnostics(t *testing.T) {
 	if status.ModelStatus.Provider != "minimax" || status.ModelStatus.Name != "MiniMax-M2.7-highspeed" {
 		t.Fatalf("status provider/model = %q/%q, want minimax/MiniMax-M2.7-highspeed", status.ModelStatus.Provider, status.ModelStatus.Name)
 	}
-	if !status.ModelStatus.MissingAPIKey {
-		t.Fatal("status.ModelStatus.MissingAPIKey = false, want true when token env is unset")
+	if status.ModelStatus.MissingAPIKey {
+		t.Fatal("status.ModelStatus.MissingAPIKey = true, want stored /connect credential")
 	}
 	if !status.SandboxStatus.HostExecution || status.SandboxStatus.FullAccessMode {
 		t.Fatalf("status host/full_access = %v/%v, want true/false", status.SandboxStatus.HostExecution, status.SandboxStatus.FullAccessMode)

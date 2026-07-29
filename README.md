@@ -96,10 +96,13 @@ Common flags:
 - `-store-dir`: override the default store directory.
 - `-workspace-cwd`: set the workspace directory.
 - `-approval-mode`: `auto-review` or `manual`.
-- `-provider`, `-model`, `-api`, `-base-url`, `-token`, `-token-env`: model
-  provider configuration.
+- `-model-profile`: select an existing Control-owned `ModelProfile`.
+- `-reasoning-effort`: select an effort supported by that profile.
 
-If no model is configured yet, start the TUI and run `/connect`.
+Provider setup and API-key replacement are available only through `/connect`.
+Runtime startup never creates or overwrites model profiles or credentials.
+`/model use` changes the global default by storing one existing ModelProfile ID
+and one supported reasoning effort; it does not rewrite the profile definition.
 
 Use `/subagent` to configure the fixed Caelis delegation profiles: Breeze for
 fast bounded work, Orbit for general implementation and review, and Zenith for

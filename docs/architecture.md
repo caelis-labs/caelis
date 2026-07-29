@@ -80,7 +80,10 @@ Document responsibilities are intentionally separate:
 - `control/modelprofile`: the single product-level selectable model catalog.
   Every entry references either one configured provider model or one external
   ACP Agent plus one exact remote model, defaults, and canonical-to-wire effort
-  mapping. `/connect` produces these profiles for both backend kinds.
+  mapping. Its global default is exactly one `ModelProfile` ID plus one
+  canonical effort; provider model IDs and display aliases are derived and are
+  not parallel persisted defaults. `/connect` produces these profiles for both
+  backend kinds.
 - `control/agentbinding`: fixed handle bindings. Breeze, Orbit, Zenith,
   Guardian, and Reviewer bind to exactly one `ModelProfile` and one explicit
   canonical effort.

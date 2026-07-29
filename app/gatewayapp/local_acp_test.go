@@ -138,7 +138,6 @@ func TestLocalStackFailsOnInvalidSelfAgentEnv(t *testing.T) {
 		AppName: "caelis", UserID: "invalid-self-agent-env-test", StoreDir: t.TempDir(),
 		WorkspaceKey: workdir, WorkspaceCWD: workdir, SkillDirs: []string{t.TempDir()},
 		Sandbox: SandboxConfig{RequestedType: "host"},
-		Model:   ModelConfig{Provider: "ollama", Model: "llama3"},
 	})
 	if err == nil || !strings.Contains(err.Error(), acpagentenv.EnvArgsJSON) {
 		t.Fatalf("NewLocalStack() error = %v, want self-Agent env parse error", err)
@@ -174,7 +173,7 @@ func newStackForToolTestWithoutProfiles(t *testing.T, resolved assembly.Resolved
 func newStackForToolTest(t *testing.T, resolved assembly.ResolvedAssembly) *Stack {
 	t.Helper()
 	workdir := t.TempDir()
-	stack, err := NewLocalStack(Config{
+	stack, err := newGatewayAppTestStack(t, Config{
 		AppName: "caelis", UserID: "tool-test", StoreDir: t.TempDir(),
 		WorkspaceKey: workdir, WorkspaceCWD: workdir, ApprovalMode: "auto-review",
 		Assembly: resolved, SkillDirs: []string{t.TempDir()},

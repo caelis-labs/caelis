@@ -123,23 +123,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		systemPrompt     = fs.String("system-prompt", envOr("CAELIS_SYSTEM_PROMPT", ""), "Session override text to append into the assembled system prompt")
 		approvalMode     = fs.String("approval-mode", envOr("CAELIS_APPROVAL_MODE", ""), "Approval mode: auto-review|manual")
 		policyProfile    = fs.String("policy-profile", envOr("CAELIS_POLICY_PROFILE", ""), "Policy profile: workspace-write")
-		modelAlias       = fs.String("model-alias", envOr("CAELIS_MODEL_ALIAS", ""), "Model alias")
-		modelProvider    = fs.String("provider", envOr("CAELIS_MODEL_PROVIDER", ""), "Model provider name")
-		modelAPI         = fs.String("api", envOr("CAELIS_MODEL_API", ""), "Model API type")
-		modelName        = fs.String("model", envOr("CAELIS_MODEL_NAME", ""), "Model name")
-		baseURL          = fs.String("base-url", envOr("CAELIS_BASE_URL", ""), "Provider base URL")
-		token            = fs.String("token", envOr("CAELIS_API_TOKEN", ""), "Provider token")
-		tokenEnv         = fs.String("token-env", envOr("CAELIS_TOKEN_ENV", ""), "Environment variable for provider token")
-		authType         = fs.String("auth-type", envOr("CAELIS_AUTH_TYPE", ""), "Auth type")
-		headerKey        = fs.String("header-key", envOr("CAELIS_HEADER_KEY", ""), "Optional auth header key")
-		reasoningEffort  = fs.String("reasoning-effort", envOr("CAELIS_REASONING_EFFORT", ""), "Selected reasoning effort")
-		defaultReasoning = fs.String("default-reasoning-effort", envOr("CAELIS_DEFAULT_REASONING_EFFORT", ""), "Default reasoning effort")
-		reasoningLevels  = fs.String("reasoning-levels", envOr("CAELIS_REASONING_LEVELS", ""), "Comma-separated supported reasoning efforts")
-		reasoningMode    = fs.String("reasoning-mode", envOr("CAELIS_REASONING_MODE", ""), "Provider reasoning mode")
+		modelProfile     = fs.String("model-profile", envOr("CAELIS_MODEL_PROFILE", ""), "Control-owned ModelProfile ID")
+		reasoningEffort  = fs.String("reasoning-effort", envOr("CAELIS_REASONING_EFFORT", ""), "Selected ModelProfile reasoning effort")
 		sandboxBackend   = fs.String("sandbox-backend", envOr("CAELIS_SANDBOX_BACKEND", ""), "Sandbox backend: auto|host|bwrap|landlock|seatbelt|windows")
 		sandboxHelper    = fs.String("sandbox-helper-path", envOr("CAELIS_SANDBOX_HELPER_PATH", ""), "Sandbox helper executable path")
 		contextWindow    = fs.Int("context-window", envInt("CAELIS_CONTEXT_WINDOW", 0), "Context window override")
-		maxOutputTokens  = fs.Int("max-output-tokens", envInt("CAELIS_MAX_OUTPUT_TOKENS", 4096), "Max output tokens")
 		forceInteractive = fs.Bool("interactive", false, "Force interactive local main path")
 		noAnimation      = fs.Bool("no-animation", envBool("CAELIS_TUI_NO_ANIMATION", false), "Reduce TUI motion")
 		doctor           = fs.Bool("doctor", false, "Print runtime/session/sandbox diagnostics and exit")
@@ -174,22 +162,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		PolicyProfile:             *policyProfile,
 		ContextWindow:             *contextWindow,
 		SystemPrompt:              *systemPrompt,
-		Model: gatewayapp.ModelConfig{
-			Alias:                  *modelAlias,
-			Provider:               *modelProvider,
-			API:                    providers.APIType(strings.TrimSpace(*modelAPI)),
-			Model:                  *modelName,
-			BaseURL:                *baseURL,
-			Token:                  *token,
-			TokenEnv:               *tokenEnv,
-			AuthType:               providers.AuthType(strings.TrimSpace(*authType)),
-			HeaderKey:              *headerKey,
-			ReasoningEffort:        *reasoningEffort,
-			DefaultReasoningEffort: *defaultReasoning,
-			ReasoningLevels:        splitNonEmptyCSV(*reasoningLevels),
-			ReasoningMode:          *reasoningMode,
-			MaxOutputTok:           *maxOutputTokens,
-		},
+		ModelProfileID:            *modelProfile,
+		ModelProfileEffort:        *reasoningEffort,
 		Sandbox: gatewayapp.SandboxConfig{
 			RequestedType: strings.TrimSpace(*sandboxBackend),
 			HelperPath:    strings.TrimSpace(*sandboxHelper),
@@ -398,18 +372,11 @@ func runInteractive(ctx context.Context, stack *gatewayapp.Stack, sessionID stri
 }
 
 func renderModelText(cfg gatewayapp.Config) string {
-	provider := strings.TrimSpace(cfg.Model.Provider)
-	model := strings.TrimSpace(cfg.Model.Model)
-	switch {
-	case provider == "" && model == "":
+	profileID := strings.TrimSpace(cfg.ModelProfileID)
+	if profileID == "" {
 		return "not configured"
-	case provider == "":
-		return model
-	case model == "":
-		return provider
-	default:
-		return provider + "/" + model
 	}
+	return profileID
 }
 
 func renderConfiguredModelText(alias string, provider string, model string) string {
@@ -672,72 +639,7 @@ func parseControlOperationRetention(value string) (time.Duration, error) {
 }
 
 func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
-	provider := strings.ToLower(strings.TrimSpace(cfg.Model.Provider))
-	switch provider {
-	case "", "minimax":
-		cfg.Model.Provider = "minimax"
-		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIMiniMax
-		}
-		if cfg.Model.AuthType == "" {
-			cfg.Model.AuthType = providers.AuthBearerToken
-		}
-		if cfg.Model.TokenEnv == "" {
-			cfg.Model.TokenEnv = "MINIMAX_API_KEY"
-		}
-	case "deepseek":
-		cfg.Model.Provider = "deepseek"
-		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIDeepSeek
-		}
-		if cfg.Model.TokenEnv == "" {
-			cfg.Model.TokenEnv = "DEEPSEEK_API_KEY"
-		}
-	case "openai":
-		cfg.Model.Provider = "openai"
-		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIOpenAI
-		}
-		if cfg.Model.TokenEnv == "" {
-			cfg.Model.TokenEnv = "OPENAI_API_KEY"
-		}
-	case "anthropic":
-		cfg.Model.Provider = "anthropic"
-		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIAnthropic
-		}
-		if cfg.Model.TokenEnv == "" {
-			cfg.Model.TokenEnv = "ANTHROPIC_API_KEY"
-		}
-	case "ollama":
-		cfg.Model.Provider = "ollama"
-		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIOllama
-		}
-		cfg.Model.AuthType = providers.AuthNone
-	case "codefree":
-		cfg.Model.Provider = "codefree"
-		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APICodeFree
-		}
-		if strings.TrimSpace(cfg.Model.BaseURL) == "" {
-			cfg.Model.BaseURL = "https://www.srdcloud.cn"
-		}
-		cfg.Model.AuthType = providers.AuthNone
-	default:
-		if cfg.Model.API == "" {
-			return gatewayapp.Config{}, fmt.Errorf("provider %q requires --api", cfg.Model.Provider)
-		}
-	}
-	if strings.TrimSpace(cfg.Model.Model) == "" {
-		// Allow empty model for interactive TUI — user can configure via /connect wizard.
-		cfg.Model.Provider = ""
-		cfg.Model.API = ""
-		cfg.Model.BaseURL = ""
-		cfg.Model.Token = ""
-		cfg.Model.TokenEnv = ""
-		cfg.Model.AuthType = ""
-		cfg.Model.HeaderKey = ""
-	}
+	cfg.ModelProfileID = strings.ToLower(strings.TrimSpace(cfg.ModelProfileID))
+	cfg.ModelProfileEffort = strings.ToLower(strings.TrimSpace(cfg.ModelProfileEffort))
 	return cfg, nil
 }

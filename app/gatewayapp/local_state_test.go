@@ -234,15 +234,18 @@ func TestModelLookupResolvesMiniMaxThroughProviderFactory(t *testing.T) {
 	}))
 	defer server.Close()
 
-	lookup, err := newModelLookup(nil, ModelConfig{
+	lookup, err := newModelLookup(nil, 204800)
+	if err != nil {
+		t.Fatalf("newModelLookup() error = %v", err)
+	}
+	if _, err := lookup.Upsert(ModelConfig{
 		Provider:   "minimax",
 		Model:      "MiniMax-M2",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Token:      "minimax-secret",
-	}, 204800)
-	if err != nil {
-		t.Fatalf("newModelLookup() error = %v", err)
+	}); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
 	}
 	cfg, ok := lookup.Config("minimax/minimax-m2")
 	if !ok {
@@ -278,16 +281,19 @@ func TestModelLookupResolvesMiniMaxThroughProviderFactory(t *testing.T) {
 func TestModelLookupRequiresControlResolverForManagedCodexCredential(t *testing.T) {
 	t.Parallel()
 
-	lookup, err := newModelLookup(nil, ModelConfig{
+	lookup, err := newModelLookup(nil, 400000)
+	if err != nil {
+		t.Fatalf("newModelLookup() error = %v", err)
+	}
+	if _, err := lookup.Upsert(ModelConfig{
 		Provider:      "openai-codex",
 		API:           providers.APIOpenAICodex,
 		Model:         "gpt-5.4",
 		BaseURL:       modelconfig.CodexOAuthBaseURL,
 		CredentialRef: modelconfig.CodexOAuthCredentialRef,
 		AuthType:      providers.AuthOAuthToken,
-	}, 400000)
-	if err != nil {
-		t.Fatalf("newModelLookup() error = %v", err)
+	}); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
 	}
 	if _, err := lookup.ResolveModel(context.Background(), "openai-codex/gpt-5.4", 0); err == nil || !strings.Contains(err.Error(), "managed model credential") {
 		t.Fatalf("ResolveModel() error = %v, want unavailable managed credential", err)
@@ -823,11 +829,17 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAppConfig() error = %v", err)
 	}
-	if got := doc.Models.DefaultAlias; got != "minimax/minimax-m2.7-highspeed" {
-		t.Fatalf("config default alias = %q, want minimax/minimax-m2.7-highspeed", got)
+	if got := doc.Models.DefaultAlias; got != "" {
+		t.Fatalf("config persisted redundant default alias %q", got)
 	}
-	if got := doc.Models.DefaultID; got != minimaxAlias {
-		t.Fatalf("config default model id = %q, want %q", got, minimaxAlias)
+	if got := doc.Models.DefaultID; got != "" {
+		t.Fatalf("config persisted redundant default model id %q", got)
+	}
+	if got := doc.ModelProfiles.DefaultProfileID; got != minimaxProfile.ID {
+		t.Fatalf("config default profile id = %q, want %q", got, minimaxProfile.ID)
+	}
+	if got := doc.ModelProfiles.DefaultEffort; got != minimaxProfile.Effort.DefaultEffort {
+		t.Fatalf("config default effort = %q, want %q", got, minimaxProfile.Effort.DefaultEffort)
 	}
 	if len(doc.Models.Configs) < 2 {
 		t.Fatalf("config models = %#v, want both minimax and deepseek configs", doc.Models.Configs)

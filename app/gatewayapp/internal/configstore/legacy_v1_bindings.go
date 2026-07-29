@@ -56,7 +56,6 @@ type legacyProviderEndpoint struct {
 	API                     providers.APIType  `json:"api,omitempty"`
 	BaseURL                 string             `json:"base_url,omitempty"`
 	Token                   string             `json:"token,omitempty"`
-	TokenEnv                string             `json:"token_env,omitempty"`
 	CredentialRef           string             `json:"credential_ref,omitempty"`
 	PersistToken            bool               `json:"persist_token,omitempty"`
 	AuthType                providers.AuthType `json:"auth_type,omitempty"`
@@ -75,7 +74,6 @@ type legacyModelConfig struct {
 	Model                   string             `json:"model,omitempty"`
 	BaseURL                 string             `json:"base_url,omitempty"`
 	Token                   string             `json:"token,omitempty"`
-	TokenEnv                string             `json:"token_env,omitempty"`
 	CredentialRef           string             `json:"credential_ref,omitempty"`
 	PersistToken            bool               `json:"persist_token,omitempty"`
 	AuthType                providers.AuthType `json:"auth_type,omitempty"`

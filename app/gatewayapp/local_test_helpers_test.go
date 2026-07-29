@@ -16,5 +16,15 @@ func newGatewayAppTestStack(t *testing.T, cfg Config) (*Stack, error) {
 	if cfg.SkillDirs == nil {
 		cfg.SkillDirs = []string{t.TempDir()}
 	}
-	return NewLocalStack(cfg)
+	model := cfg.Model
+	cfg.Model = ModelConfig{}
+	stack, err := NewLocalStack(cfg)
+	if err != nil || !modelConfigSupplied(model) {
+		return stack, err
+	}
+	if _, err := stack.Connect(model); err != nil {
+		_ = stack.Close()
+		return nil, err
+	}
+	return stack, nil
 }

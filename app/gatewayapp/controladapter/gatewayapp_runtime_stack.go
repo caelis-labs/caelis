@@ -68,7 +68,8 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 			ResolveFn:     stack.ResolveHandlePlacement,
 		},
 		Model: ModelRuntimeDeps{
-			DefaultAliasFn: models.DefaultAlias,
+			DefaultAliasFn:  models.DefaultAlias,
+			DefaultEffortFn: models.DefaultEffort,
 			ConfigFn: func(alias string) (ModelConfig, bool) {
 				return models.Config(alias)
 			},

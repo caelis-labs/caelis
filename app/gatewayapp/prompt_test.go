@@ -386,7 +386,7 @@ func TestNewLocalStackLoadsPluginSkills(t *testing.T) {
 		Sandbox:      SandboxConfig{RequestedType: "host"},
 	}
 
-	stack, err := NewLocalStack(cfg)
+	stack, err := newGatewayAppTestStack(t, cfg)
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
@@ -535,7 +535,7 @@ func TestNewLocalStackRunsSessionStartHook(t *testing.T) {
 		},
 	}
 
-	stack, err := NewLocalStack(cfg)
+	stack, err := newGatewayAppTestStack(t, cfg)
 	if err != nil {
 		t.Fatalf("NewLocalStack() failed: %v", err)
 	}

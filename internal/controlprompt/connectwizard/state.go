@@ -83,14 +83,10 @@ func parsePositiveInt(raw string, fallback int) int {
 
 func authModeForTokenRef(tokenRef string) string {
 	tokenRef = strings.TrimSpace(tokenRef)
-	switch {
-	case tokenRef == "":
+	if tokenRef == "" {
 		return ""
-	case strings.HasPrefix(strings.ToLower(tokenRef), "env:"):
-		return "env"
-	default:
-		return "token"
 	}
+	return "token"
 }
 
 func parseReasoningLevels(raw string) []string {

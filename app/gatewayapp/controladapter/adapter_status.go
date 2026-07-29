@@ -24,10 +24,15 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (controls
 	}
 	modelText, sessionMode, sandboxType := d.defaultDisplays()
 	reasoningEffort := ""
+	defaultModelText := ""
 	if d.stack != nil && d.stack.Model.DefaultAliasFn != nil {
 		if alias := strings.TrimSpace(d.stack.Model.DefaultAliasFn()); alias != "" {
 			modelText = alias
+			defaultModelText = alias
 		}
+	}
+	if d.stack != nil && d.stack.Model.DefaultEffortFn != nil {
+		reasoningEffort = strings.TrimSpace(d.stack.Model.DefaultEffortFn())
 	}
 	sandboxStatus := SandboxStatus{}
 	if includeDiagnostics && d.stack != nil && d.stack.Sandbox.StatusFn != nil {
@@ -38,6 +43,9 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (controls
 		if state, err := d.stack.Status.RuntimeStateFn(ctx, activeSession.SessionRef); err == nil {
 			if strings.TrimSpace(state.ModelAlias) != "" {
 				modelText = strings.TrimSpace(state.ModelAlias)
+				if defaultModelText != "" && !strings.EqualFold(modelText, defaultModelText) {
+					reasoningEffort = ""
+				}
 			}
 			if strings.TrimSpace(state.ReasoningEffort) != "" {
 				reasoningEffort = strings.TrimSpace(state.ReasoningEffort)

@@ -15,5 +15,15 @@ func newAdapterTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack
 	if cfg.SkillDirs == nil {
 		cfg.SkillDirs = []string{t.TempDir()}
 	}
-	return gatewayapp.NewLocalStack(cfg)
+	model := cfg.Model
+	cfg.Model = gatewayapp.ModelConfig{}
+	stack, err := gatewayapp.NewLocalStack(cfg)
+	if err != nil || strings.TrimSpace(model.Provider) == "" || strings.TrimSpace(model.Model) == "" {
+		return stack, err
+	}
+	if _, err := stack.Connect(model); err != nil {
+		_ = stack.Close()
+		return nil, err
+	}
+	return stack, nil
 }

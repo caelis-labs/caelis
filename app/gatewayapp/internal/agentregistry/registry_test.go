@@ -2,10 +2,43 @@ package agentregistry
 
 import (
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
+
+func TestSelfRuntimeInvocationCarriesOnlyModelProfile(t *testing.T) {
+	t.Parallel()
+
+	args, env := SelfRuntimeInvocation(RuntimeConfig{
+		ModelProfileID:     "provider:deepseek@default/deepseek/deepseek-v4-pro",
+		ModelProfileEffort: "high",
+		SystemPrompt:       "child prompt",
+		ContextWindow:      1048576,
+	})
+	if env != nil {
+		t.Fatalf("SelfRuntimeInvocation() env = %#v, want no model credentials", env)
+	}
+	for _, want := range []string{
+		"-model-profile", "provider:deepseek@default/deepseek/deepseek-v4-pro",
+		"-reasoning-effort", "high",
+	} {
+		if !slices.Contains(args, want) {
+			t.Fatalf("SelfRuntimeInvocation() args = %#v, missing %q", args, want)
+		}
+	}
+	joined := strings.Join(args, " ")
+	for _, forbidden := range []string{
+		"-provider", "-model ", "-api ", "-base-url", "-token", "-token-env",
+		"-auth-type", "-header-key", "-default-reasoning-effort", "-reasoning-levels",
+	} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("SelfRuntimeInvocation() args = %#v, contain legacy model override %q", args, forbidden)
+		}
+	}
+}
 
 func TestManagedACPAdaptersMatchRegistrySnapshot(t *testing.T) {
 	t.Parallel()

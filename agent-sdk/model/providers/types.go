@@ -43,7 +43,6 @@ const (
 // AuthConfig is provider-agnostic auth configuration.
 type AuthConfig struct {
 	Type          AuthType
-	TokenEnv      string
 	Token         string
 	CredentialRef string
 	HeaderKey     string

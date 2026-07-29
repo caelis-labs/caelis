@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/plugin"
@@ -90,10 +91,8 @@ func Validate(doc AppConfig) error {
 			)
 		}
 	}
-	if defaultID := strings.ToLower(strings.TrimSpace(doc.Models.DefaultID)); defaultID != "" {
-		if _, ok := modelIDs[defaultID]; !ok {
-			return fmt.Errorf("gatewayapp: default model references unknown model %q", defaultID)
-		}
+	if strings.TrimSpace(doc.Models.DefaultID) != "" || strings.TrimSpace(doc.Models.DefaultAlias) != "" {
+		return fmt.Errorf("gatewayapp: model default must use ModelProfiles.default_profile_id")
 	}
 	for _, profile := range modelprofile.NormalizeConfiguration(doc.ModelProfiles).Profiles {
 		switch profile.Kind() {
@@ -114,6 +113,7 @@ func Validate(doc AppConfig) error {
 // current-schema record identities have been checked for conflicts.
 func Normalize(doc AppConfig) AppConfig {
 	doc.SchemaVersion = SchemaVersionV2
+	doc = promoteLegacyModelDefault(doc)
 	doc.Models = normalizePersistedModelsForSave(doc.Models)
 	doc.Models.Configs = dedupeModelConfigsForSave(doc.Models.Configs)
 	doc.Models.ProviderEndpoints = dedupeProviderEndpointsForSave(doc.Models.ProviderEndpoints)
@@ -124,6 +124,58 @@ func Normalize(doc AppConfig) AppConfig {
 	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 	doc.Plugins = plugin.DedupeConfigs(doc.Plugins)
 	doc.PluginMarketplaces = plugin.DedupeMarketplaceConfigs(doc.PluginMarketplaces)
+	return doc
+}
+
+func promoteLegacyModelDefault(doc AppConfig) AppConfig {
+	profileID := modelprofile.NormalizeID(doc.ModelProfiles.DefaultProfileID)
+	if profileID != "" && modelcatalog.NormalizeReasoningEffort(doc.ModelProfiles.DefaultEffort) != "" {
+		doc.Models.DefaultAlias = ""
+		doc.Models.DefaultID = ""
+		return doc
+	}
+
+	defaultRef := strings.ToLower(strings.TrimSpace(doc.Models.DefaultID))
+	if defaultRef == "" {
+		defaultRef = strings.ToLower(strings.TrimSpace(doc.Models.DefaultAlias))
+	}
+	if defaultRef == "" {
+		return doc
+	}
+	if profileID == "" {
+		for _, raw := range doc.Models.Configs {
+			configured := modelconfig.NormalizeConfig(raw)
+			if defaultRef == configured.ID || defaultRef == configured.Alias {
+				profileID = modelprofile.BuildProviderID(configured.ID)
+				break
+			}
+		}
+	}
+	profile, ok := modelprofile.Lookup(doc.ModelProfiles, profileID)
+	if !ok {
+		return doc
+	}
+	effort := ""
+	if profile.Backend.Provider != nil {
+		for _, raw := range doc.Models.Configs {
+			configured := modelconfig.NormalizeConfig(raw)
+			if configured.ID != profile.Backend.Provider.ModelConfigID {
+				continue
+			}
+			candidate := modelcatalog.NormalizeReasoningEffort(configured.ReasoningEffort)
+			if candidate != "" && profile.SupportsEffort(candidate) {
+				effort = candidate
+			}
+			break
+		}
+	}
+	next, err := modelprofile.SelectDefault(doc.ModelProfiles, profileID, effort)
+	if err != nil {
+		return doc
+	}
+	doc.ModelProfiles = next
+	doc.Models.DefaultAlias = ""
+	doc.Models.DefaultID = ""
 	return doc
 }
 

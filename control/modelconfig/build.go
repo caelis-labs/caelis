@@ -43,7 +43,6 @@ func BuildModel(cfg Config, fallbackContextWindow int, overrideContextWindow int
 		Auth: providers.AuthConfig{
 			Type:          cfg.AuthType,
 			Token:         cfg.Token,
-			TokenEnv:      cfg.TokenEnv,
 			CredentialRef: cfg.CredentialRef,
 			HeaderKey:     cfg.HeaderKey,
 		},

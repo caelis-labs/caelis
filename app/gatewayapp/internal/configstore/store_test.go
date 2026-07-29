@@ -127,6 +127,12 @@ func TestStorePersistsManagedCredentialReferenceWithoutCredentialMaterial(t *tes
 	if !strings.Contains(string(raw), `"credential_ref": "codex:default"`) || !strings.Contains(string(raw), `"provider_endpoints"`) {
 		t.Fatalf("persisted config = %s", raw)
 	}
+	if strings.Contains(string(raw), `"default_model_id"`) || strings.Contains(string(raw), `"default_alias"`) {
+		t.Fatalf("persisted config contains redundant model default identities: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"default_profile_id"`) || !strings.Contains(string(raw), `"default_effort": "none"`) {
+		t.Fatalf("persisted config is missing the canonical default profile selection: %s", raw)
+	}
 	loaded, err := store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -136,12 +142,128 @@ func TestStorePersistsManagedCredentialReferenceWithoutCredentialMaterial(t *tes
 	}
 }
 
+func TestStorePromotesLegacyV2ModelDefaultToProfileSelection(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := New(root)
+	model := modelconfig.NormalizeConfig(modelconfig.Config{
+		Provider: "ollama",
+		API:      modelconfig.DefaultAPIForProvider("ollama"),
+		Model:    "legacy-default",
+	})
+	profile := testProviderProfile(model, "none")
+	if err := store.Save(AppConfig{
+		Models: PersistedModelConfig{
+			DefaultAlias:      model.Alias,
+			DefaultID:         model.ID,
+			ProviderEndpoints: []modelconfig.ProviderEndpointConfig{modelconfig.ProviderEndpointFromConfig(model)},
+			Configs:           []modelconfig.Config{model},
+		},
+		ModelProfiles: modelprofile.Configuration{Profiles: []modelprofile.ModelProfile{profile}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ModelProfiles.DefaultProfileID != profile.ID || loaded.ModelProfiles.DefaultEffort != "none" {
+		t.Fatalf("promoted default = %#v, want %q/none", loaded.ModelProfiles, profile.ID)
+	}
+	if loaded.Models.DefaultID != "" || loaded.Models.DefaultAlias != "" {
+		t.Fatalf("legacy defaults survived promotion: %#v", loaded.Models)
+	}
+}
+
+func TestStorePromotesLegacyV2SelectedEffort(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := New(root)
+	model := modelconfig.NormalizeConfig(modelconfig.Config{
+		Provider:               "ollama",
+		API:                    modelconfig.DefaultAPIForProvider("ollama"),
+		Model:                  "legacy-effort",
+		ReasoningEffort:        "high",
+		DefaultReasoningEffort: "none",
+		ReasoningLevels:        []string{"none", "high"},
+	})
+	profile := testProviderProfile(model, "none")
+	profile.Effort.Choices = append(profile.Effort.Choices, modelprofile.EffortChoice{
+		Canonical: "high",
+		WireValue: "high",
+	})
+	if err := store.Save(AppConfig{
+		Models: PersistedModelConfig{
+			DefaultAlias:      model.Alias,
+			DefaultID:         model.ID,
+			ProviderEndpoints: []modelconfig.ProviderEndpointConfig{modelconfig.ProviderEndpointFromConfig(model)},
+			Configs:           []modelconfig.Config{model},
+		},
+		ModelProfiles: modelprofile.Configuration{
+			DefaultProfileID: profile.ID,
+			Profiles:         []modelprofile.ModelProfile{profile},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ModelProfiles.DefaultProfileID != profile.ID || loaded.ModelProfiles.DefaultEffort != "high" {
+		t.Fatalf("promoted default = %#v, want %q/high", loaded.ModelProfiles, profile.ID)
+	}
+	if loaded.Models.DefaultID != "" || loaded.Models.DefaultAlias != "" {
+		t.Fatalf("legacy defaults survived promotion: %#v", loaded.Models)
+	}
+}
+
+func TestStoreCurrentProfileDefaultDoesNotReadModelConfigEffort(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := New(root)
+	model := modelconfig.NormalizeConfig(modelconfig.Config{
+		Provider:               "ollama",
+		API:                    modelconfig.DefaultAPIForProvider("ollama"),
+		Model:                  "current-effort",
+		ReasoningEffort:        "high",
+		DefaultReasoningEffort: "none",
+		ReasoningLevels:        []string{"none", "high"},
+	})
+	profile := testProviderProfile(model, "none")
+	profile.Effort.Choices = append(profile.Effort.Choices, modelprofile.EffortChoice{
+		Canonical: "high",
+		WireValue: "high",
+	})
+	if err := store.Save(AppConfig{
+		Models: PersistedModelConfig{
+			ProviderEndpoints: []modelconfig.ProviderEndpointConfig{modelconfig.ProviderEndpointFromConfig(model)},
+			Configs:           []modelconfig.Config{model},
+		},
+		ModelProfiles: modelprofile.Configuration{
+			DefaultProfileID: profile.ID,
+			Profiles:         []modelprofile.ModelProfile{profile},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ModelProfiles.DefaultProfileID != profile.ID || loaded.ModelProfiles.DefaultEffort != "none" {
+		t.Fatalf("current default = %#v, want %q/none", loaded.ModelProfiles, profile.ID)
+	}
+}
+
 func TestStoreRejectsCredentialMaterialEvenAlongsideOpaqueReference(t *testing.T) {
 	t.Parallel()
 
 	for name, mutate := range map[string]func(*modelconfig.Config){
 		"token":        func(configured *modelconfig.Config) { configured.Token = "must-not-persist" },
-		"environment":  func(configured *modelconfig.Config) { configured.TokenEnv = "SECRET_ENV" },
 		"persist flag": func(configured *modelconfig.Config) { configured.PersistToken = true },
 	} {
 		t.Run(name, func(t *testing.T) {

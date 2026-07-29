@@ -89,6 +89,10 @@ func (s ModelService) DefaultID() string {
 	return s.stack.DefaultModelID()
 }
 
+func (s ModelService) DefaultEffort() string {
+	return s.stack.DefaultModelEffort()
+}
+
 func (s ModelService) Config(alias string) (ModelConfig, bool) {
 	return s.stack.ModelConfig(alias)
 }

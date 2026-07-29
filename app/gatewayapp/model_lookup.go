@@ -22,11 +22,12 @@ type modelLookup struct {
 	providerEndpoints map[string]ProviderEndpointConfig
 	contextWindow     int
 	defaultID         string
+	defaultEffort     string
 	resolveHTTPClient func(context.Context, ModelConfig) (*http.Client, error)
 	resolveAPIKey     func(context.Context, string) (string, error)
 }
 
-func newModelLookup(store *appConfigStore, cfg ModelConfig, contextWindow int) (*modelLookup, error) {
+func newModelLookup(store *appConfigStore, contextWindow int) (*modelLookup, error) {
 	lookup := &modelLookup{
 		configs:           map[string]ModelConfig{},
 		providerEndpoints: map[string]ProviderEndpointConfig{},
@@ -42,28 +43,14 @@ func newModelLookup(store *appConfigStore, cfg ModelConfig, contextWindow int) (
 				return nil, err
 			}
 		}
-		defaultFallback := ""
 		for _, item := range doc.Models.Configs {
-			id, err := lookup.upsert(item, false)
-			if err != nil {
+			if _, err := lookup.upsert(item, false); err != nil {
 				return nil, err
 			}
-			if defaultFallback == "" {
-				defaultFallback = id
-			}
 		}
-		if strings.TrimSpace(doc.Models.DefaultID) != "" {
-			lookup.SetDefault(doc.Models.DefaultID)
-		} else if strings.TrimSpace(doc.Models.DefaultAlias) != "" {
-			lookup.SetDefault(doc.Models.DefaultAlias)
-		} else if defaultFallback != "" {
-			lookup.SetDefault(defaultFallback)
-		}
-	}
-	cfg = normalizeModelConfig(cfg)
-	if cfg.Provider != "" && cfg.Model != "" {
-		if _, err := lookup.Upsert(cfg); err != nil {
-			return nil, err
+		defaults := modelprofile.NormalizeConfiguration(doc.ModelProfiles)
+		if profile, ok := modelprofile.Lookup(defaults, defaults.DefaultProfileID); ok && profile.Backend.Provider != nil {
+			lookup.SetDefault(profile.Backend.Provider.ModelConfigID, defaults.DefaultEffort)
 		}
 	}
 	return lookup, nil
@@ -89,6 +76,15 @@ func (l *modelLookup) DefaultID() string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.defaultID
+}
+
+func (l *modelLookup) DefaultEffort() string {
+	if l == nil {
+		return ""
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.defaultEffort
 }
 
 func (l *modelLookup) ListModelAliases() []string {
@@ -176,12 +172,17 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 	}
 	cfg, ok, resolveErr := l.resolveConfigLocked(ref)
 	fallbackContextWindow := l.contextWindow
+	defaultID := l.defaultID
+	defaultEffort := l.defaultEffort
 	l.mu.RUnlock()
 	if resolveErr != nil {
 		return kernelimpl.ModelResolution{}, resolveErr
 	}
 	if !ok {
 		return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: unknown model alias %q", alias)
+	}
+	if strings.EqualFold(cfg.ID, defaultID) && defaultEffort != "" {
+		cfg.ReasoningEffort = defaultEffort
 	}
 	return resolveModelFromConfig(ctx, cfg, fallbackContextWindow, contextWindow, l.resolveHTTPClient, l.resolveAPIKey)
 }
@@ -214,7 +215,6 @@ func resolveModelFromConfig(
 				return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: resolve model credential %q: %w", cfg.CredentialRef, err)
 			}
 			cfg.Token = token
-			cfg.TokenEnv = ""
 			cfg.PersistToken = false
 		} else {
 			if resolveHTTPClient == nil {
@@ -308,6 +308,7 @@ func (l *modelLookup) upsert(cfg ModelConfig, setDefault bool) (string, error) {
 	l.configs[strings.ToLower(cfg.ID)] = cfg
 	if setDefault {
 		l.defaultID = cfg.ID
+		l.defaultEffort = firstNonEmpty(cfg.ReasoningEffort, cfg.DefaultReasoningEffort, "none")
 	}
 	if cfg.ContextWindowTokens > 0 {
 		l.contextWindow = cfg.ContextWindowTokens
@@ -338,6 +339,7 @@ func (l *modelLookup) Delete(alias string) error {
 	}
 	if strings.EqualFold(l.defaultID, cfg.ID) {
 		l.defaultID = ""
+		l.defaultEffort = ""
 		ids := make([]string, 0, len(l.configs))
 		for id := range l.configs {
 			ids = append(ids, id)
@@ -350,7 +352,7 @@ func (l *modelLookup) Delete(alias string) error {
 	return nil
 }
 
-func (l *modelLookup) SetDefault(alias string) {
+func (l *modelLookup) SetDefault(alias string, effort ...string) {
 	if l == nil {
 		return
 	}
@@ -362,6 +364,13 @@ func (l *modelLookup) SetDefault(alias string) {
 	defer l.mu.Unlock()
 	if cfg, ok, err := l.resolveConfigLocked(alias); err == nil && ok {
 		l.defaultID = cfg.ID
+		l.defaultEffort = ""
+		if len(effort) > 0 {
+			l.defaultEffort = strings.ToLower(strings.TrimSpace(effort[0]))
+		}
+		if l.defaultEffort == "" {
+			l.defaultEffort = firstNonEmpty(cfg.ReasoningEffort, cfg.DefaultReasoningEffort, "none")
+		}
 		if cfg.ContextWindowTokens > 0 {
 			l.contextWindow = cfg.ContextWindowTokens
 		}
@@ -395,6 +404,7 @@ func (l *modelLookup) Snapshot() persistedModelConfig {
 	return persistedModelConfig{
 		DefaultAlias:      defaultAlias,
 		DefaultID:         l.defaultID,
+		DefaultEffort:     l.defaultEffort,
 		ProviderEndpoints: endpoints,
 		Configs:           configs,
 	}
@@ -421,10 +431,16 @@ func (l *modelLookup) Restore(snapshot persistedModelConfig, contextWindow int) 
 		}
 	}
 	l.defaultID = strings.TrimSpace(snapshot.DefaultID)
+	l.defaultEffort = strings.ToLower(strings.TrimSpace(snapshot.DefaultEffort))
 	l.contextWindow = contextWindow
 	if l.defaultID == "" && strings.TrimSpace(snapshot.DefaultAlias) != "" {
 		if cfg, ok, err := l.resolveConfigLocked(snapshot.DefaultAlias); err == nil && ok {
 			l.defaultID = cfg.ID
+		}
+	}
+	if l.defaultID != "" && l.defaultEffort == "" {
+		if cfg, ok := l.configs[strings.ToLower(strings.TrimSpace(l.defaultID))]; ok {
+			l.defaultEffort = firstNonEmpty(cfg.ReasoningEffort, cfg.DefaultReasoningEffort, "none")
 		}
 	}
 }

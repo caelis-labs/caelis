@@ -86,7 +86,8 @@ func agentRuntimeConfig(cfg Config) agentregistry.RuntimeConfig {
 		ControlOperationRetention: cfg.ControlOperationRetention,
 		ContextWindow:             cfg.ContextWindow,
 		SystemPrompt:              cfg.SystemPrompt,
-		Model:                     cfg.Model,
+		ModelProfileID:            cfg.ModelProfileID,
+		ModelProfileEffort:        cfg.ModelProfileEffort,
 	}
 }
 
@@ -145,7 +146,8 @@ func (s *Stack) configuredAssemblyWithPluginAgents(base assembly.ResolvedAssembl
 			PolicyProfile:             runtimeCfg.PolicyProfile,
 			ContextWindow:             runtimeCfg.ContextWindow,
 			SystemPrompt:              runtimeCfg.SystemPrompt,
-			Model:                     runtimeCfg.Model,
+			ModelProfileID:            runtimeCfg.ModelProfileID,
+			ModelProfileEffort:        runtimeCfg.ModelProfileEffort,
 		},
 		AppName:      s.AppName,
 		UserID:       s.UserID,
@@ -204,12 +206,7 @@ func (s *Stack) withDirectProfileAgents(resolved assembly.ResolvedAssembly, runt
 		if _, exists := seen[name]; exists {
 			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: direct Agent handle %q conflicts with an existing Agent", handle)
 		}
-		configured, err := s.lookup.ResolveConfig(placement.Model)
-		if err != nil {
-			return assembly.ResolvedAssembly{}, err
-		}
-		configured.ReasoningEffort = placement.ReasoningEffort
-		materialized, err := s.materializeDelegatedModel(string(handle), configured, runtimeCfg)
+		materialized, err := s.materializeDelegatedModel(string(handle), placement.ProfileID, placement.ReasoningEffort, runtimeCfg)
 		if err != nil {
 			return assembly.ResolvedAssembly{}, err
 		}
@@ -242,13 +239,6 @@ func (s *Stack) withReviewerAgent(resolved assembly.ResolvedAssembly, runtimeCfg
 	if s.lookup == nil {
 		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer model: model lookup unavailable")
 	}
-	reviewerModel, resolveErr := s.lookup.ResolveConfig(placement.Model)
-	if resolveErr != nil {
-		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer placement %q: %w", placement.ProfileID, resolveErr)
-	}
-	if placement.ReasoningEffort != "" {
-		reviewerModel.ReasoningEffort = placement.ReasoningEffort
-	}
 	reviewer, err := configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		Config: Config{
 			AppName:                   s.AppName,
@@ -260,7 +250,8 @@ func (s *Stack) withReviewerAgent(resolved assembly.ResolvedAssembly, runtimeCfg
 			PolicyProfile:             runtimeCfg.PolicyProfile,
 			ContextWindow:             runtimeCfg.ContextWindow,
 			SystemPrompt:              fixedReviewerSystemPrompt(runtimeCfg.SystemPrompt),
-			Model:                     reviewerModel,
+			ModelProfileID:            placement.ProfileID,
+			ModelProfileEffort:        placement.ReasoningEffort,
 		},
 		AppName:      s.AppName,
 		UserID:       s.UserID,

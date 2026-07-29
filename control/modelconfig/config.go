@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -28,7 +27,6 @@ type Config struct {
 	BaseURL            string            `json:"base_url,omitempty"`
 	HTTPClient         *http.Client      `json:"-"`
 	Token              string            `json:"token,omitempty"`
-	TokenEnv           string            `json:"token_env,omitempty"`
 	// CredentialRef identifies a Control-owned credential without persisting
 	// the credential material in the model profile.
 	CredentialRef string `json:"credential_ref,omitempty"`
@@ -57,7 +55,6 @@ type ProviderEndpointConfig struct {
 	BaseURL                 string             `json:"base_url,omitempty"`
 	HTTPClient              *http.Client       `json:"-"`
 	Token                   string             `json:"token,omitempty"`
-	TokenEnv                string             `json:"token_env,omitempty"`
 	CredentialRef           string             `json:"credential_ref,omitempty"`
 	PersistToken            bool               `json:"persist_token,omitempty"`
 	AuthType                providers.AuthType `json:"auth_type,omitempty"`
@@ -119,9 +116,6 @@ func NormalizeConfig(cfg Config) Config {
 		cfg.ContextWindowTokens = 0
 	}
 	cfg.ReasoningLevels = DedupeNonEmptyStrings(cfg.ReasoningLevels)
-	if cfg.Token == "" && strings.TrimSpace(cfg.TokenEnv) != "" {
-		cfg.Token = strings.TrimSpace(os.Getenv(strings.TrimSpace(cfg.TokenEnv)))
-	}
 	return cfg
 }
 
@@ -140,9 +134,6 @@ func NormalizeProviderEndpoint(endpoint ProviderEndpointConfig) ProviderEndpoint
 	if endpoint.AuthType == "" {
 		endpoint.AuthType = DefaultAuthTypeForEndpoint(endpoint.Provider, endpoint.BaseURL)
 	}
-	if endpoint.Token == "" && strings.TrimSpace(endpoint.TokenEnv) != "" {
-		endpoint.Token = strings.TrimSpace(os.Getenv(strings.TrimSpace(endpoint.TokenEnv)))
-	}
 	return endpoint
 }
 
@@ -157,7 +148,6 @@ func ProviderEndpointFromConfig(cfg Config) ProviderEndpointConfig {
 		BaseURL:                 cfg.BaseURL,
 		HTTPClient:              cfg.HTTPClient,
 		Token:                   cfg.Token,
-		TokenEnv:                cfg.TokenEnv,
 		CredentialRef:           cfg.CredentialRef,
 		PersistToken:            cfg.PersistToken,
 		AuthType:                cfg.AuthType,
@@ -195,16 +185,10 @@ func ApplyConfigProviderEndpointFields(current ProviderEndpointConfig, cfg Confi
 	}
 	if strings.TrimSpace(raw.Token) != "" {
 		current.Token = candidate.Token
-		current.TokenEnv = ""
-	}
-	if strings.TrimSpace(raw.TokenEnv) != "" {
-		current.Token = candidate.Token
-		current.TokenEnv = candidate.TokenEnv
 	}
 	if strings.TrimSpace(raw.CredentialRef) != "" {
 		current.CredentialRef = candidate.CredentialRef
 		current.Token = ""
-		current.TokenEnv = ""
 		current.PersistToken = false
 	}
 	if raw.PersistToken {
@@ -232,7 +216,6 @@ func ConfigCarriesProviderEndpointFields(cfg Config) bool {
 		strings.TrimSpace(cfg.EndpointID) != "" ||
 		strings.TrimSpace(cfg.BaseURL) != "" ||
 		strings.TrimSpace(cfg.Token) != "" ||
-		strings.TrimSpace(cfg.TokenEnv) != "" ||
 		strings.TrimSpace(cfg.CredentialRef) != "" ||
 		strings.TrimSpace(cfg.HeaderKey) != "" ||
 		cfg.HTTPClient != nil ||
@@ -246,7 +229,6 @@ func ConfigCarriesProviderEndpointFields(cfg Config) bool {
 // provider endpoint credentials.
 func ConfigCarriesProviderEndpointAuth(cfg Config) bool {
 	return strings.TrimSpace(cfg.Token) != "" ||
-		strings.TrimSpace(cfg.TokenEnv) != "" ||
 		strings.TrimSpace(cfg.CredentialRef) != "" ||
 		strings.TrimSpace(cfg.HeaderKey) != "" ||
 		cfg.PersistToken ||
@@ -264,7 +246,6 @@ func MergeConfigProviderEndpoint(cfg Config, endpoint ProviderEndpointConfig) Co
 	cfg.BaseURL = firstNonEmpty(endpoint.BaseURL, cfg.BaseURL)
 	cfg.HTTPClient = FirstNonNilHTTPClient(endpoint.HTTPClient, cfg.HTTPClient)
 	cfg.Token = firstNonEmpty(endpoint.Token, cfg.Token)
-	cfg.TokenEnv = firstNonEmpty(endpoint.TokenEnv, cfg.TokenEnv)
 	cfg.CredentialRef = firstNonEmpty(endpoint.CredentialRef, cfg.CredentialRef)
 	cfg.PersistToken = endpoint.PersistToken || cfg.PersistToken
 	cfg.AuthType = FirstNonEmptyAuthType(endpoint.AuthType, cfg.AuthType)
@@ -326,7 +307,6 @@ func SanitizePersistedConfig(cfg Config) Config {
 		cfg.BaseURL = ""
 		cfg.HTTPClient = nil
 		cfg.Token = ""
-		cfg.TokenEnv = ""
 		cfg.CredentialRef = ""
 		cfg.PersistToken = false
 		cfg.AuthType = ""
@@ -360,7 +340,6 @@ func SanitizePersistedProviderEndpoint(endpoint ProviderEndpointConfig) Provider
 	endpoint = NormalizeProviderEndpoint(endpoint)
 	if endpoint.CredentialRef != "" {
 		endpoint.Token = ""
-		endpoint.TokenEnv = ""
 		endpoint.PersistToken = false
 	} else if !endpoint.PersistToken {
 		endpoint.Token = ""
@@ -485,9 +464,6 @@ func ChoiceDetail(cfg Config) string {
 	}
 	if baseURL := strings.TrimSpace(cfg.BaseURL); baseURL != "" {
 		parts = append(parts, baseURL)
-	}
-	if tokenEnv := strings.TrimSpace(cfg.TokenEnv); tokenEnv != "" {
-		parts = append(parts, "env:"+tokenEnv)
 	}
 	if credentialRef := strings.TrimSpace(cfg.CredentialRef); credentialRef != "" {
 		parts = append(parts, "managed auth")

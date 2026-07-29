@@ -17,7 +17,7 @@ import (
 
 func TestNewFromStackRoutesStatusSlashThroughSharedPromptRouter(t *testing.T) {
 	workdir := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newACPAgentTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
 		UserID:       "acpagent-test",
 		StoreDir:     t.TempDir(),
@@ -66,7 +66,7 @@ func TestNewFromStackStatusSlashUsesClientWorkspaceSession(t *testing.T) {
 	ctx := context.Background()
 	stackWorkspace := t.TempDir()
 	clientWorkspace := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newACPAgentTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
 		UserID:       "acpagent-test",
 		StoreDir:     t.TempDir(),
@@ -121,7 +121,7 @@ func TestNewFromStackSetConfigOptionUsesNewSessionCWDWorkspace(t *testing.T) {
 	ctx := context.Background()
 	stackWorkspace := t.TempDir()
 	clientWorkspace := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newACPAgentTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
 		UserID:       "acpagent-test",
 		StoreDir:     t.TempDir(),
@@ -207,7 +207,7 @@ func configOptionString(options []acp.SessionConfigOption, id string) (string, b
 
 func TestACPPromptCommandNamesExposeOnlyBoundProfilesAndHideAgentCatalog(t *testing.T) {
 	workdir := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newACPAgentTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
 		UserID:       "acpagent-test",
 		StoreDir:     t.TempDir(),
@@ -290,6 +290,24 @@ func TestACPPromptCommandNamesExposeOnlyBoundProfilesAndHideAgentCatalog(t *test
 	if countCommand(commands, "status") != 1 {
 		t.Fatalf("acpPromptCommandNames() = %#v, want one core status command", commands)
 	}
+}
+
+func newACPAgentTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack, error) {
+	t.Helper()
+	model := cfg.Model
+	cfg.Model = gatewayapp.ModelConfig{}
+	stack, err := gatewayapp.NewLocalStack(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(model.Provider) == "" || strings.TrimSpace(model.Model) == "" {
+		return stack, nil
+	}
+	if _, err := stack.Connect(model); err != nil {
+		_ = stack.Close()
+		return nil, err
+	}
+	return stack, nil
 }
 
 type recordingCallbacks struct {

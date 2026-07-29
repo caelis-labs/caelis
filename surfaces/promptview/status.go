@@ -175,7 +175,7 @@ func StatusDisplayFromSnapshot(status controlstatus.StatusSnapshot) StatusDispla
 		warnings = append(warnings, "Run /connect to configure a provider and model")
 	}
 	if status.ModelStatus.MissingAPIKey {
-		warnings = append(warnings, "API key is missing; reconnect with a key or use env:YOUR_API_KEY")
+		warnings = append(warnings, "API key is missing; reconnect with a key")
 	}
 	if status.SandboxStatus.HostExecution || status.SandboxStatus.FullAccessMode {
 		warnings = append(warnings, "Commands may run on the host with reduced sandbox isolation")

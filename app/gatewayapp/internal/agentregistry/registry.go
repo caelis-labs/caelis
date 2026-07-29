@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -23,7 +22,8 @@ type RuntimeConfig struct {
 	ControlOperationRetention time.Duration
 	ContextWindow             int
 	SystemPrompt              string
-	Model                     modelconfig.Config
+	ModelProfileID            string
+	ModelProfileEffort        string
 }
 
 type DefaultSelfConfig struct {
@@ -73,8 +73,9 @@ func DefaultSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
 }
 
 // ConfiguredModelSelfAgent builds the generic Caelis ACP runtime for one
-// configured model. Environment self-agent replacement is intentionally not
-// used because it cannot guarantee the selected ModelConfig reaches the child.
+// Control-owned ModelProfile. Environment self-agent replacement is
+// intentionally not used because it cannot guarantee the selected profile
+// reaches the child.
 func ConfiguredModelSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
 	return configuredSelfAgent(cfg)
 }
@@ -116,35 +117,14 @@ func SelfRuntimeInvocation(cfg RuntimeConfig) ([]string, map[string]string) {
 			args = append(args, name, strings.TrimSpace(value))
 		}
 	}
-	model := cfg.Model
-	appendFlag("-model-alias", model.Alias)
-	appendFlag("-provider", model.Provider)
-	appendFlag("-api", string(model.API))
-	appendFlag("-model", model.Model)
-	appendFlag("-base-url", model.BaseURL)
-	if strings.TrimSpace(model.Token) != "" {
-		env["CAELIS_SELF_MODEL_TOKEN"] = model.Token
-		appendFlag("-token-env", "CAELIS_SELF_MODEL_TOKEN")
-	} else {
-		appendFlag("-token-env", model.TokenEnv)
-	}
-	appendFlag("-auth-type", string(model.AuthType))
-	appendFlag("-header-key", model.HeaderKey)
-	appendFlag("-reasoning-effort", model.ReasoningEffort)
-	appendFlag("-default-reasoning-effort", model.DefaultReasoningEffort)
-	appendFlag("-reasoning-mode", model.ReasoningMode)
-	if len(model.ReasoningLevels) > 0 {
-		appendFlag("-reasoning-levels", strings.Join(model.ReasoningLevels, ","))
-	}
+	appendFlag("-model-profile", cfg.ModelProfileID)
+	appendFlag("-reasoning-effort", cfg.ModelProfileEffort)
 	appendFlag("-system-prompt", cfg.SystemPrompt)
 	if cfg.ControlOperationRetention > 0 {
 		args = append(args, "-control-operation-retention", cfg.ControlOperationRetention.String())
 	}
 	if cfg.ContextWindow > 0 {
 		args = append(args, "-context-window", fmt.Sprintf("%d", cfg.ContextWindow))
-	}
-	if model.MaxOutputTok > 0 {
-		args = append(args, "-max-output-tokens", fmt.Sprintf("%d", model.MaxOutputTok))
 	}
 	if len(env) == 0 {
 		env = nil

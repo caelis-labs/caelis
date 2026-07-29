@@ -55,7 +55,7 @@ func TestAssembleConnectBuildsManagedGrokOAuthProfiles(t *testing.T) {
 		if cfg.BaseURL != GrokOAuthBaseURL || cfg.CredentialRef != GrokOAuthCredentialRef {
 			t.Fatalf("managed endpoint = %#v", cfg)
 		}
-		if cfg.Token != "" || cfg.TokenEnv != "" || cfg.PersistToken {
+		if cfg.Token != "" || cfg.PersistToken {
 			t.Fatalf("credential material leaked into config = %#v", cfg)
 		}
 	}

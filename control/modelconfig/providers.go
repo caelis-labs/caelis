@@ -1,7 +1,6 @@
 package modelconfig
 
 import (
-	"net/url"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -50,7 +49,6 @@ type EndpointTemplate struct {
 	Detail         string
 	API            model.APIType
 	AuthType       model.AuthType
-	TokenEnv       string
 	NoAuthRequired bool
 	// CatalogProvider selects the capability-catalog namespace for this
 	// endpoint. Empty inherits ProviderTemplate.Provider.
@@ -69,7 +67,6 @@ type ProviderTemplate struct {
 	AuthFlow                   AuthFlow
 	AuthDisplay                string
 	PreserveModelOrder         bool
-	DefaultTokenEnv            string
 	DefaultEndpointID          string
 	DefaultBaseURL             string
 	DefaultBaseURLAliases      []string
@@ -87,26 +84,26 @@ type ProviderTemplate struct {
 var providerTemplates = []ProviderTemplate{
 	{Label: "codex", API: model.APIOpenAICodex, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowCodexOAuth, AuthDisplay: "browser/device oauth", PreserveModelOrder: true, Provider: "openai-codex", Description: "ChatGPT subscription models through Codex", DefaultBaseURL: CodexOAuthBaseURL, DefaultContextWindowTokens: 272000, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"low", "medium", "high", "xhigh"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium"},
 	{Label: "grok", API: model.APIXAIResponses, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowGrokOAuth, AuthDisplay: "browser/device oauth", PreserveModelOrder: true, Provider: "xai", Description: "Grok models through an eligible xAI subscription", DefaultBaseURL: GrokOAuthBaseURL, DefaultContextWindowTokens: 500000, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"low", "medium", "high"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "high"},
-	{Label: "openai", API: model.APIOpenAI, AuthType: model.AuthAPIKey, Provider: "openai", Description: "OpenAI-hosted models", DefaultTokenEnv: "OPENAI_API_KEY", DefaultBaseURL: "https://api.openai.com/v1", DefaultContextWindowTokens: 128000},
-	{Label: "openai-compatible", API: model.APIOpenAICompatible, AuthType: model.AuthAPIKey, Provider: "openai-compatible", Description: "OpenAI-compatible proxy or self-hosted endpoint", DefaultTokenEnv: "OPENAI_COMPATIBLE_API_KEY", DefaultBaseURL: "https://api.openai.com/v1", DefaultContextWindowTokens: 262144, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium", PromptForBaseURL: true},
+	{Label: "openai", API: model.APIOpenAI, AuthType: model.AuthAPIKey, Provider: "openai", Description: "OpenAI-hosted models", DefaultBaseURL: "https://api.openai.com/v1", DefaultContextWindowTokens: 128000},
+	{Label: "openai-compatible", API: model.APIOpenAICompatible, AuthType: model.AuthAPIKey, Provider: "openai-compatible", Description: "OpenAI-compatible proxy or self-hosted endpoint", DefaultBaseURL: "https://api.openai.com/v1", DefaultContextWindowTokens: 262144, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium", PromptForBaseURL: true},
 	{Label: "codefree", API: model.APICodeFree, AuthType: model.AuthNone, AuthFlow: AuthFlowCodeFreeOAuth, AuthDisplay: "browser oauth", Provider: "codefree", Description: "China Telecom SRD CodeFree models", DefaultBaseURL: "https://www.srdcloud.cn", DefaultContextWindowTokens: 128000, DefaultMaxOutputTokens: 8000, NoAuthRequired: true},
-	{Label: "openrouter", API: model.APIOpenRouter, AuthType: model.AuthAPIKey, Provider: "openrouter", Description: "OpenRouter multi-provider routing", DefaultTokenEnv: "OPENROUTER_API_KEY", DefaultBaseURL: "https://openrouter.ai/api/v1", DefaultContextWindowTokens: 262144, UseModelDirectory: true},
-	{Label: "gemini", API: model.APIGemini, AuthType: model.AuthAPIKey, Provider: "gemini", Description: "Google Gemini API", DefaultTokenEnv: "GEMINI_API_KEY", DefaultBaseURL: "https://generativelanguage.googleapis.com/v1beta", DefaultContextWindowTokens: 128000},
-	{Label: "anthropic", API: model.APIAnthropic, AuthType: model.AuthAPIKey, Provider: "anthropic", Description: "Anthropic Claude API", DefaultTokenEnv: "ANTHROPIC_API_KEY", DefaultBaseURL: "https://api.anthropic.com", DefaultContextWindowTokens: 200000, DefaultMaxOutputTokens: 1024},
-	{Label: "anthropic-compatible", API: model.APIAnthropicCompatible, AuthType: model.AuthAPIKey, Provider: "anthropic-compatible", Description: "Anthropic-compatible proxy or self-hosted endpoint", DefaultTokenEnv: "ANTHROPIC_COMPATIBLE_API_KEY", DefaultBaseURL: "https://api.anthropic.com", DefaultContextWindowTokens: 200000, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"none", "minimal", "low", "medium", "high", "max"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium", PromptForBaseURL: true},
-	{Label: "deepseek", API: model.APIDeepSeek, AuthType: model.AuthAPIKey, Provider: "deepseek", Description: "DeepSeek V4 models", DefaultTokenEnv: "DEEPSEEK_API_KEY", DefaultBaseURL: "https://api.deepseek.com/anthropic", DefaultBaseURLAliases: []string{"https://api.deepseek.com/v1"}, DefaultContextWindowTokens: 1048576},
-	{Label: "xiaomi", API: model.APIMimo, AuthType: model.AuthAPIKey, Provider: "xiaomi", Description: "Xiaomi Mimo models", DefaultTokenEnv: "XIAOMI_API_KEY", DefaultEndpointID: "api-cn", DefaultBaseURL: XiaomiAPIBaseURL, DefaultContextWindowTokens: 262144, Endpoints: []EndpointTemplate{
-		{ID: "api-cn", BaseURL: XiaomiAPIBaseURL, Display: "api cn", Detail: "Xiaomi MiMo API CN · OpenAI-compatible", API: model.APIMimo, TokenEnv: "XIAOMI_API_KEY"},
-		{ID: "token-plan-cn", BaseURL: XiaomiTokenPlanCNBaseURL, Display: "token plan cn", Detail: "Xiaomi MiMo Token Plan CN · OpenAI-compatible", API: model.APIMimo, TokenEnv: "MIMO_TOKEN_PLAN_API_KEY"},
+	{Label: "openrouter", API: model.APIOpenRouter, AuthType: model.AuthAPIKey, Provider: "openrouter", Description: "OpenRouter multi-provider routing", DefaultBaseURL: "https://openrouter.ai/api/v1", DefaultContextWindowTokens: 262144, UseModelDirectory: true},
+	{Label: "gemini", API: model.APIGemini, AuthType: model.AuthAPIKey, Provider: "gemini", Description: "Google Gemini API", DefaultBaseURL: "https://generativelanguage.googleapis.com/v1beta", DefaultContextWindowTokens: 128000},
+	{Label: "anthropic", API: model.APIAnthropic, AuthType: model.AuthAPIKey, Provider: "anthropic", Description: "Anthropic Claude API", DefaultBaseURL: "https://api.anthropic.com", DefaultContextWindowTokens: 200000, DefaultMaxOutputTokens: 1024},
+	{Label: "anthropic-compatible", API: model.APIAnthropicCompatible, AuthType: model.AuthAPIKey, Provider: "anthropic-compatible", Description: "Anthropic-compatible proxy or self-hosted endpoint", DefaultBaseURL: "https://api.anthropic.com", DefaultContextWindowTokens: 200000, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"none", "minimal", "low", "medium", "high", "max"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium", PromptForBaseURL: true},
+	{Label: "deepseek", API: model.APIDeepSeek, AuthType: model.AuthAPIKey, Provider: "deepseek", Description: "DeepSeek V4 models", DefaultBaseURL: "https://api.deepseek.com/anthropic", DefaultBaseURLAliases: []string{"https://api.deepseek.com/v1"}, DefaultContextWindowTokens: 1048576},
+	{Label: "xiaomi", API: model.APIMimo, AuthType: model.AuthAPIKey, Provider: "xiaomi", Description: "Xiaomi Mimo models", DefaultEndpointID: "api-cn", DefaultBaseURL: XiaomiAPIBaseURL, DefaultContextWindowTokens: 262144, Endpoints: []EndpointTemplate{
+		{ID: "api-cn", BaseURL: XiaomiAPIBaseURL, Display: "api cn", Detail: "Xiaomi MiMo API CN · OpenAI-compatible", API: model.APIMimo},
+		{ID: "token-plan-cn", BaseURL: XiaomiTokenPlanCNBaseURL, Display: "token plan cn", Detail: "Xiaomi MiMo Token Plan CN · OpenAI-compatible", API: model.APIMimo},
 	}},
-	{Label: "minimax", API: model.APIMiniMax, AuthType: model.AuthBearerToken, Provider: "minimax", Description: "MiniMax models over an Anthropic-compatible API", DefaultTokenEnv: "MINIMAX_API_KEY", DefaultBaseURL: "https://api.minimaxi.com/anthropic", DefaultContextWindowTokens: 204800, DefaultMaxOutputTokens: 8192},
-	{Label: "volcengine", API: model.APIVolcengine, AuthType: model.AuthAPIKey, Provider: "volcengine", Description: "Volcengine Ark models", DefaultTokenEnv: "VOLCENGINE_API_KEY", DefaultEndpointID: "standard", DefaultBaseURL: "https://ark.cn-beijing.volces.com/api/v3", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
-		{ID: "standard", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", Display: "standard api", Detail: "regular Ark endpoint", API: model.APIVolcengine, TokenEnv: "VOLCENGINE_API_KEY"},
-		{ID: "coding-plan", BaseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", Display: "coding plan", Detail: "Ark coding-plan endpoint", API: model.APIVolcengineCoding, TokenEnv: "VOLCENGINE_API_KEY"},
+	{Label: "minimax", API: model.APIMiniMax, AuthType: model.AuthBearerToken, Provider: "minimax", Description: "MiniMax models over an Anthropic-compatible API", DefaultBaseURL: "https://api.minimaxi.com/anthropic", DefaultContextWindowTokens: 204800, DefaultMaxOutputTokens: 8192},
+	{Label: "volcengine", API: model.APIVolcengine, AuthType: model.AuthAPIKey, Provider: "volcengine", Description: "Volcengine Ark models", DefaultEndpointID: "standard", DefaultBaseURL: "https://ark.cn-beijing.volces.com/api/v3", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
+		{ID: "standard", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", Display: "standard api", Detail: "regular Ark endpoint", API: model.APIVolcengine},
+		{ID: "coding-plan", BaseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", Display: "coding plan", Detail: "Ark coding-plan endpoint", API: model.APIVolcengineCoding},
 	}},
 	{Label: "ollama", API: model.APIOllama, AuthType: model.AuthNone, Provider: "ollama", Description: "Local Ollama runtime or direct Ollama Cloud API", PreserveModelOrder: true, DefaultEndpointID: "local", DefaultBaseURL: "http://localhost:11434", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
 		{ID: "local", BaseURL: "http://localhost:11434", Display: "local", Detail: "Installed models through the local Ollama service", API: model.APIOllama, AuthType: model.AuthNone, NoAuthRequired: true},
-		{ID: "cloud", BaseURL: "https://ollama.com", Display: "cloud api", Detail: "Frontier models directly through Ollama Cloud", API: model.APIOllama, AuthType: model.AuthAPIKey, TokenEnv: "OLLAMA_API_KEY", CatalogProvider: modelcatalog.OllamaCloudProvider},
+		{ID: "cloud", BaseURL: "https://ollama.com", Display: "cloud api", Detail: "Frontier models directly through Ollama Cloud", API: model.APIOllama, AuthType: model.AuthAPIKey, CatalogProvider: modelcatalog.OllamaCloudProvider},
 	}},
 }
 
@@ -164,7 +161,6 @@ func EndpointForBaseURL(template ProviderTemplate, baseURL string) (EndpointTemp
 			BaseURL:        firstNonEmpty(baseURL, template.DefaultBaseURL),
 			API:            template.API,
 			AuthType:       template.AuthType,
-			TokenEnv:       template.DefaultTokenEnv,
 			NoAuthRequired: template.NoAuthRequired,
 		}, true
 	}
@@ -175,7 +171,6 @@ func EndpointForBaseURL(template ProviderTemplate, baseURL string) (EndpointTemp
 				BaseURL:        strings.TrimSpace(baseURL),
 				API:            template.API,
 				AuthType:       template.AuthType,
-				TokenEnv:       template.DefaultTokenEnv,
 				NoAuthRequired: template.NoAuthRequired,
 			}, true
 		}
@@ -188,42 +183,9 @@ func NormalizeBaseURL(baseURL string) string {
 	return strings.ToLower(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
 }
 
-// DefaultTokenEnv returns the maintained environment variable hint for a
-// provider and endpoint.
-func DefaultTokenEnv(provider string, baseURL string) string {
-	template, ok := LookupProvider(provider)
-	if !ok {
-		return ""
-	}
-	if endpoint, ok := EndpointForBaseURL(template, baseURL); ok {
-		if endpoint.NoAuthRequired {
-			return ""
-		}
-		if strings.TrimSpace(endpoint.TokenEnv) != "" {
-			return strings.TrimSpace(endpoint.TokenEnv)
-		}
-	}
-	if host := endpointHost(baseURL); host != "" {
-		for _, endpoint := range template.Endpoints {
-			if host == endpointHost(endpoint.BaseURL) && strings.TrimSpace(endpoint.TokenEnv) != "" {
-				return strings.TrimSpace(endpoint.TokenEnv)
-			}
-		}
-	}
-	return strings.TrimSpace(template.DefaultTokenEnv)
-}
-
 func cloneProviderTemplate(template ProviderTemplate) ProviderTemplate {
 	template.Endpoints = append([]EndpointTemplate(nil), template.Endpoints...)
 	template.DefaultBaseURLAliases = append([]string(nil), template.DefaultBaseURLAliases...)
 	template.DefaultReasoningLevels = append([]string(nil), template.DefaultReasoningLevels...)
 	return template
-}
-
-func endpointHost(baseURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil {
-		return ""
-	}
-	return strings.ToLower(strings.TrimSpace(parsed.Host))
 }

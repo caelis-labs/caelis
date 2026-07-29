@@ -20,6 +20,8 @@ type stackRuntimeConfig struct {
 	PolicyProfile               string
 	ContextWindow               int
 	SystemPrompt                string
+	ModelProfileID              string
+	ModelProfileEffort          string
 	Model                       ModelConfig
 	SkillDirs                   []string
 	PluginSkills                []skill.PluginBundle

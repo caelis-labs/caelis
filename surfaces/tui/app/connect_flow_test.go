@@ -849,7 +849,7 @@ func TestConnectWizardOllamaCloudEndpointRequiresAPIKey(t *testing.T) {
 				return nil, nil
 			default:
 				state, ok := connectModelCommandState(command)
-				if ok && state.Provider == "ollama" && state.BaseURL == cloudBaseURL && state.TokenRef == "env:OLLAMA_API_KEY" {
+				if ok && state.Provider == "ollama" && state.BaseURL == cloudBaseURL && state.TokenRef == "ollama-secret" {
 					return []SlashArgCandidate{{Value: "glm-5.2", Display: "ollama/glm-5.2", ModelMetadataComplete: true}}, nil
 				}
 				return nil, nil
@@ -873,11 +873,11 @@ func TestConnectWizardOllamaCloudEndpointRequiresAPIKey(t *testing.T) {
 	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-apikey:ollama" {
 		t.Fatalf("slashArgCommand after Ollama Cloud endpoint = %q, want API key step", got)
 	}
-	if hint := m.wizardHintText(); !strings.Contains(hint, "env:OLLAMA_API_KEY") {
-		t.Fatalf("wizard hint = %q, want OLLAMA_API_KEY env hint", hint)
+	if hint := m.wizardHintText(); hint != "/connect api_key: paste a key" {
+		t.Fatalf("wizard hint = %q, want pasted API-key guidance", hint)
 	}
 
-	m.slashArgQuery = "env:OLLAMA_API_KEY"
+	m.slashArgQuery = "ollama-secret"
 	handled, cmd = m.handleWizardEnter()
 	if !handled {
 		t.Fatal("Cloud API key entry was not handled")
@@ -886,7 +886,7 @@ func TestConnectWizardOllamaCloudEndpointRequiresAPIKey(t *testing.T) {
 		cmd()
 	}
 	state := requireConnectModelCommandState(t, m.slashArgCommand)
-	if state.Provider != "ollama" || state.BaseURL != cloudBaseURL || state.TokenRef != "env:OLLAMA_API_KEY" {
+	if state.Provider != "ollama" || state.BaseURL != cloudBaseURL || state.TokenRef != "ollama-secret" {
 		t.Fatalf("connect model state after Ollama Cloud API key = %#v", state)
 	}
 }
@@ -1166,7 +1166,7 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 				return nil, nil
 			default:
 				state, ok := connectModelCommandState(command)
-				if ok && state.Provider == "xiaomi" && state.BaseURL == tokenPlanBaseURL && state.TokenRef == "env:MIMO_TOKEN_PLAN_API_KEY" {
+				if ok && state.Provider == "xiaomi" && state.BaseURL == tokenPlanBaseURL && state.TokenRef == "xiaomi-secret" {
 					return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro", ModelMetadataComplete: true}}, nil
 				}
 				return nil, nil
@@ -1200,7 +1200,7 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 		t.Fatalf("slashArgCommand after xiaomi endpoint = %q, want connect-apikey:xiaomi", got)
 	}
 
-	m.slashArgQuery = "env:MIMO_TOKEN_PLAN_API_KEY"
+	m.slashArgQuery = "xiaomi-secret"
 	handled, cmd = m.handleWizardEnter() // api key -> model
 	if !handled {
 		t.Fatal("apikey step was not handled")
@@ -1209,8 +1209,8 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 		cmd()
 	}
 	state := requireConnectModelCommandState(t, m.slashArgCommand)
-	if state.Provider != "xiaomi" || state.BaseURL != tokenPlanBaseURL || state.TokenRef != "env:MIMO_TOKEN_PLAN_API_KEY" {
-		t.Fatalf("connect model state after token-plan api key = %#v, want token-plan endpoint and env token", state)
+	if state.Provider != "xiaomi" || state.BaseURL != tokenPlanBaseURL || state.TokenRef != "xiaomi-secret" {
+		t.Fatalf("connect model state after token-plan api key = %#v, want token-plan endpoint and pasted key", state)
 	}
 
 	handled, cmd = m.handleWizardEnter() // model -> submit
@@ -1225,7 +1225,7 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
 	want := fmt.Sprintf(
-		"/connect xiaomi mimo-v2.5-pro %s %d env:MIMO_TOKEN_PLAN_API_KEY - - auto",
+		"/connect xiaomi mimo-v2.5-pro %s %d xiaomi-secret - - auto",
 		tokenPlanBaseURL,
 		connectwizard.DefaultConnectTimeoutSeconds,
 	)
@@ -1276,14 +1276,13 @@ func TestConnectWizardSkipsAPIKeyForReusableEndpointAuth(t *testing.T) {
 	}
 }
 
-func TestConnectWizardAPIKeyHintUsesSelectedXiaomiEndpoint(t *testing.T) {
+func TestConnectWizardAPIKeyHintRequiresPastedKeyForEveryXiaomiEndpoint(t *testing.T) {
 	tests := []struct {
 		name    string
 		baseURL string
-		wantEnv string
 	}{
-		{name: "api cn", baseURL: "https://api.xiaomimimo.com/v1", wantEnv: "XIAOMI_API_KEY"},
-		{name: "token plan cn", baseURL: "https://token-plan-cn.xiaomimimo.com/v1", wantEnv: "MIMO_TOKEN_PLAN_API_KEY"},
+		{name: "api cn", baseURL: "https://api.xiaomimimo.com/v1"},
+		{name: "token plan cn", baseURL: "https://token-plan-cn.xiaomimimo.com/v1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1300,17 +1299,14 @@ func TestConnectWizardAPIKeyHintUsesSelectedXiaomiEndpoint(t *testing.T) {
 				},
 			}
 			got := m.wizardHintText()
-			if !strings.Contains(got, "env:"+tt.wantEnv) {
-				t.Fatalf("wizard hint = %q, want %s", got, tt.wantEnv)
-			}
-			if strings.Contains(got, "OPENAI_API_KEY") {
-				t.Fatalf("wizard hint = %q, should not mention OPENAI_API_KEY", got)
+			if got != "/connect api_key: paste a key" {
+				t.Fatalf("wizard hint = %q, want pasted API-key guidance", got)
 			}
 		})
 	}
 }
 
-func TestConnectWizardAPIKeyHintRecognizesCustomXiaomiTokenPlanHost(t *testing.T) {
+func TestConnectWizardAPIKeyHintDoesNotInferEnvironmentFromCustomHost(t *testing.T) {
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
 	})
@@ -1324,11 +1320,8 @@ func TestConnectWizardAPIKeyHintRecognizesCustomXiaomiTokenPlanHost(t *testing.T
 		},
 	}
 	got := m.wizardHintText()
-	if !strings.Contains(got, "env:MIMO_TOKEN_PLAN_API_KEY") {
-		t.Fatalf("wizard hint = %q, want token-plan env hint", got)
-	}
-	if strings.Contains(got, "env:XIAOMI_API_KEY") {
-		t.Fatalf("wizard hint = %q, should not prefer generic Xiaomi env", got)
+	if got != "/connect api_key: paste a key" {
+		t.Fatalf("wizard hint = %q, want pasted API-key guidance", got)
 	}
 }
 

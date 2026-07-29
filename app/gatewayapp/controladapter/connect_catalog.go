@@ -318,14 +318,10 @@ func connectEndpointCandidates(template modelconfig.ProviderTemplate) []controlp
 	}
 	out := make([]controlprompt.SlashArgCandidate, 0, len(template.Endpoints))
 	for _, endpoint := range template.Endpoints {
-		detail := strings.TrimSpace(endpoint.Detail)
-		if endpoint.TokenEnv != "" {
-			detail = strings.Join(compactNonEmpty([]string{detail, "env:" + endpoint.TokenEnv}), " · ")
-		}
 		out = append(out, controlprompt.SlashArgCandidate{
 			Value:   endpoint.BaseURL,
 			Display: endpoint.Display,
-			Detail:  detail,
+			Detail:  strings.TrimSpace(endpoint.Detail),
 			NoAuth:  endpoint.NoAuthRequired,
 		})
 	}

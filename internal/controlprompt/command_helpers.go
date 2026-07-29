@@ -27,14 +27,7 @@ func ParseConnectArgs(args string) ConnectConfig {
 		}
 	}
 	if len(parts) >= 5 {
-		secret := dashAsEmpty(parts[4])
-		if strings.HasPrefix(strings.ToLower(secret), "env:") {
-			cfg.TokenEnv = strings.TrimSpace(secret[len("env:"):])
-		} else if strings.HasPrefix(secret, "$") {
-			cfg.TokenEnv = strings.TrimSpace(strings.TrimPrefix(secret, "$"))
-		} else {
-			cfg.APIKey = secret
-		}
+		cfg.APIKey = dashAsEmpty(parts[4])
 	}
 	if len(parts) >= 6 {
 		if contextWindow, err := strconv.Atoi(dashAsEmpty(parts[5])); err == nil {
@@ -53,9 +46,6 @@ func ParseConnectArgs(args string) ConnectConfig {
 		if timeout, err := strconv.Atoi(dashAsEmpty(parts[8])); err == nil {
 			cfg.StreamFirstEventTimeoutSeconds = timeout
 		}
-	}
-	if len(parts) == 4 && cfg.TimeoutSeconds == 0 && cfg.APIKey == "" && cfg.TokenEnv == "" {
-		cfg.TokenEnv = dashAsEmpty(parts[3])
 	}
 	return cfg
 }
@@ -82,7 +72,7 @@ func FriendlyCommandError(action string, err error) error {
 	lower := strings.ToLower(raw)
 	switch {
 	case strings.Contains(lower, "api key is missing"):
-		return fmt.Errorf("%s: API key is missing. Use /connect and paste a key, or enter env:YOUR_API_KEY", action)
+		return fmt.Errorf("%s: API key is missing. Use /connect and paste a key", action)
 	case strings.Contains(lower, "base url is invalid"):
 		return fmt.Errorf("%s: base URL is invalid. Use a full URL such as https://api.openai.com/v1", action)
 	case strings.Contains(lower, "provider is not supported"), strings.Contains(lower, "unknown provider"):

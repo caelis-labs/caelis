@@ -2,7 +2,6 @@ package credentialstore
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -46,25 +45,22 @@ func TestStoreRoundTripUsesOpaqueReferenceAndSecureFile(t *testing.T) {
 	}
 }
 
-func TestStoreEnvironmentSourceResolvesLazily(t *testing.T) {
-	store, err := New(t.TempDir())
+func TestStoreRejectsLegacyEnvironmentCredential(t *testing.T) {
+	root := t.TempDir()
+	store, err := New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ref := BuildReference("deepseek", "deepseek@default")
-	if err := store.PutEnvironment(context.Background(), ref, "CAELIS_TEST_DEEPSEEK_KEY"); err != nil {
+	if err := ensureDir(store.root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Get(context.Background(), ref); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("Get(unset environment) error = %v, want not exist", err)
+	raw := []byte(`{"version":1,"ref":"` + ref + `","environment":"DEEPSEEK_API_KEY"}`)
+	if err := os.WriteFile(store.path(ref), raw, 0o600); err != nil {
+		t.Fatal(err)
 	}
-	t.Setenv("CAELIS_TEST_DEEPSEEK_KEY", "env-secret")
-	if got, err := store.Get(context.Background(), ref); err != nil || got != "env-secret" {
-		t.Fatalf("Get() = %q, %v", got, err)
-	}
-	source, err := store.LookupSource(context.Background(), ref)
-	if err != nil || source.Environment != "CAELIS_TEST_DEEPSEEK_KEY" || source.APIKey != "" {
-		t.Fatalf("LookupSource() = %#v, %v", source, err)
+	if _, err := store.Get(context.Background(), ref); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("Get(legacy environment credential) error = %v, want reconnect diagnostic", err)
 	}
 }
 

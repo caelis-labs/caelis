@@ -164,17 +164,6 @@ func TestDecodeLegacyAppConfigIgnoresUnknownFieldsWithoutDrop(t *testing.T) {
 	}
 }
 
-func TestMigrateV1ToV2RejectsCredentialSourcesWithinRecord(t *testing.T) {
-	legacy := migrationFixture()
-	legacy.Models.Configs[0].CredentialRef = ""
-	legacy.Models.Configs[0].Token = "inline-secret"
-	legacy.Models.Configs[0].TokenEnv = "OPENAI_API_KEY"
-
-	if _, err := migrateV1ToV2(legacy); err == nil || !strings.Contains(err.Error(), "conflicting inline and environment sources") {
-		t.Fatalf("migrateV1ToV2() error = %v, want credential source conflict", err)
-	}
-}
-
 func TestMigrateV1ToV2RejectsCredentialSourcesAcrossRecords(t *testing.T) {
 	legacy := migrationFixture()
 	legacy.Models.Configs[0].CredentialRef = "apikey:test:shared"

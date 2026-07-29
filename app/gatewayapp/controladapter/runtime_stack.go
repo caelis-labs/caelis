@@ -212,6 +212,7 @@ type AgentRuntimeDeps struct {
 // when invoked without their backing hooks.
 type ModelRuntimeDeps struct {
 	DefaultAliasFn         func() string
+	DefaultEffortFn        func() string
 	ConfigFn               func(string) (ModelConfig, bool)
 	SessionUsageSnapshotFn func(context.Context, session.SessionRef, string) (compact.UsageSnapshot, error)
 	ProviderUsageFn        func(context.Context, string) (providerusage.Snapshot, bool, error)

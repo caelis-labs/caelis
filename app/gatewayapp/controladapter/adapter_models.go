@@ -33,7 +33,6 @@ func (d *Adapter) Connect(ctx context.Context, cfg controlprompt.ConnectConfig) 
 		TimeoutSeconds:                 cfg.TimeoutSeconds,
 		StreamFirstEventTimeoutSeconds: cfg.StreamFirstEventTimeoutSeconds,
 		APIKey:                         cfg.APIKey,
-		TokenEnv:                       cfg.TokenEnv,
 		AuthType:                       cfg.AuthType,
 	}, modelconfig.ConnectOptions{
 		HasReusableAuth: d.hasReusableConnectAuth,

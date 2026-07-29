@@ -161,7 +161,6 @@ type ConnectConfig struct {
 	TimeoutSeconds                 int
 	StreamFirstEventTimeoutSeconds int
 	APIKey                         string
-	TokenEnv                       string
 	AuthType                       string
 	ContextWindowTokens            int
 	MaxOutputTokens                int

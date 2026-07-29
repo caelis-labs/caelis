@@ -236,9 +236,7 @@ func connectModelWizard() WizardDef {
 			},
 			{
 				Key: "apikey", HintLabel: "/connect api_key", HideInput: true,
-				FreeformHintFunc: func(state map[string]string) string {
-					return "/connect api_key: paste a key, or type env:" + connectWizardTokenEnvHint(state) + " to use an environment variable"
-				},
+				FreeformHint:      "/connect api_key: paste a key",
 				CompletionCommand: func(state map[string]string) string { return "connect-apikey:" + state["provider"] },
 				ShouldSkip:        func(state map[string]string) bool { return state["_noauth"] == "true" || state["_reuseauth"] == "true" },
 			},
@@ -482,13 +480,6 @@ func connectWizardSelectedModelCount(state map[string]string) int {
 		count++
 	}
 	return count
-}
-
-func connectWizardTokenEnvHint(state map[string]string) string {
-	if env := modelconfig.DefaultTokenEnv(state["provider"], state["baseurl"]); env != "" {
-		return env
-	}
-	return "YOUR_API_KEY"
 }
 
 func connectWizardProviderHasEndpointStep(provider string) bool {

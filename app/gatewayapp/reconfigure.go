@@ -39,7 +39,14 @@ func (s *Stack) saveModelConfigs() error {
 		return err
 	}
 	doc.Models = s.lookup.Snapshot()
-	doc.ModelProfiles.DefaultProfileID = modelprofile.BuildProviderID(s.lookup.DefaultID())
+	doc.ModelProfiles, err = modelprofile.SelectDefault(
+		doc.ModelProfiles,
+		modelprofile.BuildProviderID(s.lookup.DefaultID()),
+		s.lookup.DefaultEffort(),
+	)
+	if err != nil {
+		return err
+	}
 	return s.store.Save(doc)
 }
 
@@ -325,7 +332,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 	resolver, err := kernelimpl.NewAssemblyResolver(kernelimpl.AssemblyResolverConfig{
 		Sessions:          s.Sessions,
 		Assembly:          runtimeCfg.Assembly,
-		DefaultModelAlias: s.lookup.DefaultID(),
+		DefaultModelAlias: runtimeDefaultModelAlias(runtimeCfg, s.lookup),
 		ContextWindow:     runtimeCfg.ContextWindow,
 		ModelLookup:       s.lookup,
 		Tools:             tools,
@@ -380,6 +387,16 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 	bundle.RuntimeConfig = runtimeCfg
 	bundle.EstimatedPromptPrefixTokens = estimatedPrefixTokens
 	return bundle, nil
+}
+
+func runtimeDefaultModelAlias(runtimeCfg stackRuntimeConfig, lookup *modelLookup) string {
+	if modelID := strings.TrimSpace(runtimeCfg.Model.ID); modelID != "" {
+		return modelID
+	}
+	if lookup == nil {
+		return ""
+	}
+	return lookup.DefaultID()
 }
 
 func (s *Stack) installGatewayRuntimeBundle(oldGateway *kernelimpl.Gateway, bundle *gatewayRuntimeBundle) error {

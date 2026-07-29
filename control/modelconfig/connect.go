@@ -101,7 +101,6 @@ type ConnectRequest struct {
 	TimeoutSeconds                 int
 	StreamFirstEventTimeoutSeconds int
 	APIKey                         string
-	TokenEnv                       string
 	AuthType                       string
 }
 
@@ -228,10 +227,8 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 	req.Models = normalizeModelSelections(req.Models)
 	req.BaseURL = strings.TrimSpace(req.BaseURL)
 	req.APIKey = strings.TrimSpace(req.APIKey)
-	req.TokenEnv = strings.TrimSpace(req.TokenEnv)
-	if env, ok := ParseTokenEnvSpec(req.APIKey); ok {
-		req.TokenEnv = env
-		req.APIKey = ""
+	if strings.HasPrefix(strings.ToLower(req.APIKey), "env:") || strings.HasPrefix(req.APIKey, "$") {
+		return nil, fmt.Errorf("modelconfig: environment credential references are unsupported; paste the API key in /connect")
 	}
 	if req.BaseURL == "" {
 		req.BaseURL = template.DefaultBaseURL
@@ -316,9 +313,8 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 			BaseURL:                 req.BaseURL,
 			HTTPClient:              req.HTTPClient,
 			Token:                   req.APIKey,
-			TokenEnv:                req.TokenEnv,
 			CredentialRef:           credentialRefForTemplate(template),
-			PersistToken:            req.APIKey != "" && req.TokenEnv == "",
+			PersistToken:            req.APIKey != "",
 			AuthType:                authType,
 			ContextWindowTokens:     contextWindow,
 			DefaultReasoningEffort:  reasoningEffort,
@@ -401,21 +397,6 @@ func SelectableModels(ctx context.Context, provider string, baseURL string, auth
 	return sortedUniqueSelectableModels(models), nil
 }
 
-// ParseTokenEnvSpec recognizes env:NAME and $NAME credential references.
-func ParseTokenEnvSpec(value string) (string, bool) {
-	trimmed := strings.TrimSpace(value)
-	switch {
-	case strings.HasPrefix(strings.ToLower(trimmed), "env:"):
-		env := strings.TrimSpace(trimmed[len("env:"):])
-		return env, env != ""
-	case strings.HasPrefix(trimmed, "$"):
-		env := strings.TrimSpace(strings.TrimPrefix(trimmed, "$"))
-		return env, env != ""
-	default:
-		return "", false
-	}
-}
-
 // NormalizeReasoningLevels normalizes a user- or catalog-provided effort list.
 func NormalizeReasoningLevels(levels []string) []string {
 	if len(levels) == 0 {
@@ -455,14 +436,10 @@ func validateConnectRequest(template ProviderTemplate, req ConnectRequest, reusa
 	}
 	endpoint, hasEndpoint := EndpointForBaseURL(template, req.BaseURL)
 	noAuthRequired := connectAuthType(template, endpoint, hasEndpoint, req.AuthType) == model.AuthNone
-	if noAuthRequired || template.AuthFlow != "" || reusableAuth || req.APIKey != "" || req.TokenEnv != "" {
+	if noAuthRequired || template.AuthFlow != "" || reusableAuth || req.APIKey != "" {
 		return nil
 	}
-	envHint := DefaultTokenEnv(template.Provider, req.BaseURL)
-	if envHint == "" {
-		envHint = "YOUR_API_KEY"
-	}
-	return fmt.Errorf("API key is missing; paste a key or enter env:%s in /connect", envHint)
+	return fmt.Errorf("API key is missing; paste a key in /connect")
 }
 
 func connectAuthType(template ProviderTemplate, endpoint EndpointTemplate, hasEndpoint bool, requested string) model.AuthType {

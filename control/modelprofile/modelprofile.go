@@ -67,6 +67,7 @@ type ModelProfile struct {
 // Configuration is the single Control-owned profile catalog.
 type Configuration struct {
 	DefaultProfileID string         `json:"default_profile_id,omitempty"`
+	DefaultEffort    string         `json:"default_effort,omitempty"`
 	Profiles         []ModelProfile `json:"profiles,omitempty"`
 }
 
@@ -183,7 +184,10 @@ func Validate(raw ModelProfile) error {
 
 // NormalizeConfiguration returns a detached deterministic profile catalog.
 func NormalizeConfiguration(in Configuration) Configuration {
-	out := Configuration{DefaultProfileID: NormalizeID(in.DefaultProfileID)}
+	out := Configuration{
+		DefaultProfileID: NormalizeID(in.DefaultProfileID),
+		DefaultEffort:    modelcatalog.NormalizeReasoningEffort(in.DefaultEffort),
+	}
 	seen := make(map[string]struct{}, len(in.Profiles))
 	for _, raw := range in.Profiles {
 		profile := Normalize(raw)
@@ -197,6 +201,16 @@ func NormalizeConfiguration(in Configuration) Configuration {
 		out.Profiles = append(out.Profiles, profile)
 	}
 	sort.Slice(out.Profiles, func(i, j int) bool { return out.Profiles[i].ID < out.Profiles[j].ID })
+	if out.DefaultProfileID == "" {
+		out.DefaultEffort = ""
+	} else if out.DefaultEffort == "" {
+		for _, profile := range out.Profiles {
+			if profile.ID == out.DefaultProfileID {
+				out.DefaultEffort = profile.Effort.DefaultEffort
+				break
+			}
+		}
+	}
 	return out
 }
 
@@ -218,6 +232,16 @@ func ValidateConfiguration(in Configuration) error {
 		if _, ok := seen[defaultID]; !ok {
 			return fmt.Errorf("control/modelprofile: default references unknown profile %q", defaultID)
 		}
+		profile, _ := Lookup(in, defaultID)
+		effort := modelcatalog.NormalizeReasoningEffort(in.DefaultEffort)
+		if effort == "" {
+			effort = profile.Effort.DefaultEffort
+		}
+		if !profile.SupportsEffort(effort) {
+			return fmt.Errorf("control/modelprofile: default effort %q is not supported by profile %q", effort, defaultID)
+		}
+	} else if modelcatalog.NormalizeReasoningEffort(in.DefaultEffort) != "" {
+		return fmt.Errorf("control/modelprofile: default effort requires a default profile")
 	}
 	return nil
 }
@@ -259,8 +283,34 @@ func Upsert(current Configuration, profiles ...ModelProfile) (Configuration, err
 	return next, nil
 }
 
+// SelectDefault returns a catalog whose global default is one profile and one
+// supported effort. An empty profile clears the selection.
+func SelectDefault(current Configuration, profileID, effort string) (Configuration, error) {
+	next := NormalizeConfiguration(current)
+	profileID = NormalizeID(profileID)
+	if profileID == "" {
+		next.DefaultProfileID = ""
+		next.DefaultEffort = ""
+		return next, nil
+	}
+	profile, ok := Lookup(next, profileID)
+	if !ok {
+		return Configuration{}, fmt.Errorf("control/modelprofile: default references unknown profile %q", profileID)
+	}
+	effort = modelcatalog.NormalizeReasoningEffort(effort)
+	if effort == "" {
+		effort = profile.Effort.DefaultEffort
+	}
+	if !profile.SupportsEffort(effort) {
+		return Configuration{}, fmt.Errorf("control/modelprofile: default effort %q is not supported by profile %q", effort, profileID)
+	}
+	next.DefaultProfileID = profileID
+	next.DefaultEffort = effort
+	return next, nil
+}
+
 // Remove returns a catalog without profileID. Removing the default also clears
-// DefaultProfileID; binding policy is owned separately by agentbinding.
+// its effort; binding policy is owned separately by agentbinding.
 func Remove(current Configuration, profileID string) Configuration {
 	profileID = NormalizeID(profileID)
 	next := NormalizeConfiguration(current)
@@ -273,6 +323,7 @@ func Remove(current Configuration, profileID string) Configuration {
 	next.Profiles = filtered
 	if next.DefaultProfileID == profileID {
 		next.DefaultProfileID = ""
+		next.DefaultEffort = ""
 	}
 	return next
 }

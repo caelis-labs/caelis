@@ -47,7 +47,7 @@ func TestConnectStoresProviderAPIKeyBehindOpaqueReference(t *testing.T) {
 			break
 		}
 	}
-	if endpointProfile.CredentialRef == "" || !strings.HasPrefix(endpointProfile.CredentialRef, "apikey:") || endpointProfile.Token != "" || endpointProfile.TokenEnv != "" || endpointProfile.PersistToken {
+	if endpointProfile.CredentialRef == "" || !strings.HasPrefix(endpointProfile.CredentialRef, "apikey:") || endpointProfile.Token != "" || endpointProfile.PersistToken {
 		t.Fatalf("persisted provider credential = %#v", endpointProfile)
 	}
 	raw, err := os.ReadFile(stack.store.path)
@@ -134,28 +134,69 @@ func TestConnectRollsForwardCredentialAfterCommittedConfigWriteFault(t *testing.
 	}
 }
 
-func TestUseModelRollsForwardAfterCommittedConfigWriteFault(t *testing.T) {
+func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
-	profile, err := stack.Connect(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "use-committed"})
+	profile, err := stack.Connect(ModelConfig{
+		Provider:               "ollama",
+		API:                    providers.APIOllama,
+		Model:                  "use-committed",
+		ReasoningLevels:        []string{"none", "high"},
+		DefaultReasoningEffort: "none",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	modelID := profile.Backend.Provider.ModelConfigID
+	originalDoc, err := stack.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
 	fault := errors.New("directory fsync after rename failed")
 	writeCount := installCommittedConfigSaveFault(t, stack, "fsync", fault)
 
-	err = stack.UseModel(ctx, activeSession.SessionRef, modelID)
+	err = stack.UseModel(ctx, activeSession.SessionRef, modelID, "high")
 	requireCommittedConfigWriteError(t, err, fault)
 	if writeCount() != 1 {
-		t.Fatalf("config writes = %d, want one committed roll-forward write", writeCount())
+		t.Fatalf("config writes = %d, want one committed default-selection write", writeCount())
 	}
 	doc, loadErr := stack.store.Load()
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	if doc.Models.DefaultID != modelID || stack.lookup.DefaultID() != modelID || stack.runtime.Model.ID != modelID {
-		t.Fatalf("model defaults diverged after committed write: disk=%q lookup=%q runtime=%q", doc.Models.DefaultID, stack.lookup.DefaultID(), stack.runtime.Model.ID)
+	if doc.Models.DefaultID != "" ||
+		doc.Models.DefaultAlias != "" ||
+		doc.ModelProfiles.DefaultProfileID != profile.ID ||
+		doc.ModelProfiles.DefaultEffort != "high" ||
+		stack.lookup.DefaultID() != modelID ||
+		stack.lookup.DefaultEffort() != "high" ||
+		stack.runtime.Model.ID != modelID ||
+		stack.runtime.ModelProfileEffort != "high" {
+		t.Fatalf(
+			"global defaults diverged: legacy=%q profile=%q effort=%q lookup=%q/%q runtime=%q/%q",
+			doc.Models.DefaultID,
+			doc.ModelProfiles.DefaultProfileID,
+			doc.ModelProfiles.DefaultEffort,
+			stack.lookup.DefaultID(),
+			stack.lookup.DefaultEffort(),
+			stack.runtime.Model.ID,
+			stack.runtime.ModelProfileEffort,
+		)
+	}
+	if !reflect.DeepEqual(doc.Models.Configs, originalDoc.Models.Configs) ||
+		!reflect.DeepEqual(doc.Models.ProviderEndpoints, originalDoc.Models.ProviderEndpoints) ||
+		!reflect.DeepEqual(doc.ModelProfiles.Profiles, originalDoc.ModelProfiles.Profiles) {
+		t.Fatalf("UseModel overwrote model/profile definitions:\nbefore: %#v\nafter:  %#v", originalDoc, doc)
+	}
+	rawConfig, readErr := os.ReadFile(stack.store.path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(rawConfig), `"default_model_id"`) || strings.Contains(string(rawConfig), `"default_alias"`) {
+		t.Fatalf("config persisted redundant model default identities:\n%s", rawConfig)
+	}
+	if !strings.Contains(string(rawConfig), `"default_effort": "high"`) {
+		t.Fatalf("config did not persist global default effort:\n%s", rawConfig)
 	}
 	state, stateErr := stack.Sessions.SnapshotState(ctx, activeSession.SessionRef)
 	if stateErr != nil {
@@ -163,6 +204,34 @@ func TestUseModelRollsForwardAfterCommittedConfigWriteFault(t *testing.T) {
 	}
 	if got := kernel.CurrentModelAlias(state); got != modelID {
 		t.Fatalf("Session model alias = %q, want %q", got, modelID)
+	}
+	storeDir := stack.storeDir
+	workspaceKey := stack.Workspace.Key
+	workspaceCWD := stack.Workspace.CWD
+	if closeErr := stack.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	reloaded, reloadErr := NewLocalStack(Config{
+		StoreDir:     storeDir,
+		WorkspaceKey: workspaceKey,
+		WorkspaceCWD: workspaceCWD,
+	})
+	if reloadErr != nil {
+		t.Fatal(reloadErr)
+	}
+	defer reloaded.Close()
+	if reloaded.runtime.ModelProfileID != profile.ID || reloaded.runtime.ModelProfileEffort != "high" {
+		t.Fatalf("reloaded global default = %q/%q, want %q/high", reloaded.runtime.ModelProfileID, reloaded.runtime.ModelProfileEffort, profile.ID)
+	}
+	self, ok := agentConfigForToolTest(reloaded.runtime.Assembly.Agents, "self")
+	if !ok {
+		t.Fatalf("runtime-derived self missing from assembly: %#v", reloaded.runtime.Assembly.Agents)
+	}
+	if got, _ := argValue(self.Args, "-model-profile"); got != profile.ID {
+		t.Fatalf("runtime-derived self profile = %q, want %q", got, profile.ID)
+	}
+	if got, _ := argValue(self.Args, "-reasoning-effort"); got != "high" {
+		t.Fatalf("runtime-derived self effort = %q, want high", got)
 	}
 }
 
@@ -275,6 +344,53 @@ func TestDeleteModelRemovesProviderProfileAndOrdinaryBindings(t *testing.T) {
 	}
 	if _, ok := agentbinding.Lookup(doc.AgentBindings, agentbinding.HandleZenith); ok {
 		t.Fatalf("deleted profile binding remains: %#v", doc.AgentBindings)
+	}
+}
+
+func TestDeleteNonDefaultModelPreservesGlobalEffort(t *testing.T) {
+	ctx := context.Background()
+	stack, activeSession := newLocalStateTestStack(t)
+	selected, err := stack.Connect(ModelConfig{
+		Provider:               "ollama",
+		API:                    providers.APIOllama,
+		Model:                  "selected-before-delete",
+		ReasoningLevels:        []string{"none", "high"},
+		DefaultReasoningEffort: "none",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.UseModel(ctx, activeSession.SessionRef, selected.Backend.Provider.ModelConfigID, "high"); err != nil {
+		t.Fatal(err)
+	}
+	unrelated, err := stack.Connect(ModelConfig{
+		Provider: "ollama",
+		API:      providers.APIOllama,
+		Model:    "unrelated-delete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.DeleteModel(ctx, activeSession.SessionRef, unrelated.Backend.Provider.ModelConfigID); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := stack.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.ModelProfiles.DefaultProfileID != selected.ID ||
+		doc.ModelProfiles.DefaultEffort != "high" ||
+		stack.lookup.DefaultID() != selected.Backend.Provider.ModelConfigID ||
+		stack.lookup.DefaultEffort() != "high" ||
+		stack.runtime.ModelProfileEffort != "high" {
+		t.Fatalf(
+			"default changed after deleting unrelated model: profile=%q effort=%q lookup=%q/%q runtime=%q",
+			doc.ModelProfiles.DefaultProfileID,
+			doc.ModelProfiles.DefaultEffort,
+			stack.lookup.DefaultID(),
+			stack.lookup.DefaultEffort(),
+			stack.runtime.ModelProfileEffort,
+		)
 	}
 }
 

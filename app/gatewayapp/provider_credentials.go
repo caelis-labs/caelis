@@ -30,21 +30,15 @@ func (s *Stack) prepareProviderCredentials(configs []ModelConfig) ([]ModelConfig
 	seenSources := map[string]credentialstore.Source{}
 	seenPrevious := map[string]struct{}{}
 	for _, raw := range configs {
-		explicitSecret := strings.TrimSpace(raw.Token)
-		environment := strings.TrimSpace(raw.TokenEnv)
 		configured := modelconfig.NormalizeConfig(raw)
 		if configured.AuthType == providers.AuthNone {
 			configured.Token = ""
-			configured.TokenEnv = ""
 			configured.PersistToken = false
 			prepared = append(prepared, configured)
 			continue
 		}
 		secret := strings.TrimSpace(configured.Token)
-		if environment != "" && explicitSecret == "" {
-			secret = ""
-		}
-		if secret == "" && environment == "" {
+		if secret == "" {
 			prepared = append(prepared, configured)
 			continue
 		}
@@ -64,10 +58,7 @@ func (s *Stack) prepareProviderCredentials(configs []ModelConfig) ([]ModelConfig
 		if txn.store == nil {
 			return nil, txn, fmt.Errorf("gatewayapp: provider credential store is unavailable")
 		}
-		source := credentialstore.Source{APIKey: secret, Environment: environment}
-		if secret != "" {
-			source.Environment = ""
-		}
+		source := credentialstore.Source{APIKey: secret}
 		if previousSource, ok := seenSources[ref]; ok && previousSource != source {
 			return nil, txn, fmt.Errorf("gatewayapp: provider endpoint %q supplied conflicting API keys", configured.ProviderEndpointID)
 		}
@@ -89,7 +80,6 @@ func (s *Stack) prepareProviderCredentials(configs []ModelConfig) ([]ModelConfig
 		}
 		configured.CredentialRef = ref
 		configured.Token = ""
-		configured.TokenEnv = ""
 		configured.PersistToken = false
 		prepared = append(prepared, configured)
 	}
@@ -119,8 +109,5 @@ func (t *providerCredentialTransaction) rollback() error {
 }
 
 func putProviderCredentialSource(store *credentialstore.Store, ref string, source credentialstore.Source) error {
-	if source.Environment != "" {
-		return store.PutEnvironment(context.Background(), ref, source.Environment)
-	}
 	return store.Put(context.Background(), ref, source.APIKey)
 }

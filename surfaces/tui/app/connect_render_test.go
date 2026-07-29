@@ -61,14 +61,14 @@ func TestRenderSlashArgListDistinguishesCandidateTextFromDetail(t *testing.T) {
 	model.slashArgActive = true
 	model.slashArgCommand = "connect-baseurl:xiaomi"
 	model.slashArgCandidates = []SlashArgCandidate{
-		{Value: "https://api.xiaomimimo.com/v1", Display: "api cn", Detail: "env:XIAOMI_KEY"},
-		{Value: "https://token-plan-cn.xiaomimimo.com/v1", Display: "token plan cn", Detail: "env:MIMO_KEY"},
+		{Value: "https://api.xiaomimimo.com/v1", Display: "api cn", Detail: "standard endpoint"},
+		{Value: "https://token-plan-cn.xiaomimimo.com/v1", Display: "token plan cn", Detail: "coding-plan endpoint"},
 	}
 	model.slashArgIndex = 0
 
 	rendered := model.renderSlashArgList()
 	wantCandidate := model.theme.CommandStyle().Render("token plan cn")
-	wantDetail := model.theme.HelpHintTextStyle().Render("env:MIMO_KEY")
+	wantDetail := model.theme.HelpHintTextStyle().Render("coding-plan endpoint")
 	if !strings.Contains(rendered, wantCandidate) {
 		t.Fatalf("rendered slash arg list = %q, want candidate text styled with CommandStyle %q", rendered, wantCandidate)
 	}

@@ -70,11 +70,6 @@ func (s *Stack) ConnectModels(configs []ModelConfig) (profiles []modelprofile.Mo
 		}
 		modelIDs = append(modelIDs, modelID)
 	}
-	if !hadDefault {
-		s.lookup.SetDefault(modelIDs[0])
-	}
-	s.setRuntimeDefaultModelFromLookup()
-	txn.applyResolver()
 	if s.store == nil {
 		return nil, txn.rollback(fmt.Errorf("gatewayapp: app config store unavailable"))
 	}
@@ -95,12 +90,20 @@ func (s *Stack) ConnectModels(configs []ModelConfig) (profiles []modelprofile.Mo
 		profiles = append(profiles, profile)
 	}
 	txn.captureConfig(doc)
-	doc.Models = s.lookup.Snapshot()
 	doc.ModelProfiles, err = modelprofile.Upsert(doc.ModelProfiles, profiles...)
 	if err != nil {
 		return nil, txn.rollback(fmt.Errorf("gatewayapp: update model profile catalog: %w", err))
 	}
-	doc.ModelProfiles.DefaultProfileID = modelprofile.BuildProviderID(s.lookup.DefaultID())
+	if !hadDefault {
+		doc.ModelProfiles, err = modelprofile.SelectDefault(doc.ModelProfiles, profiles[0].ID, "")
+		if err != nil {
+			return nil, txn.rollback(fmt.Errorf("gatewayapp: select default model profile: %w", err))
+		}
+		s.lookup.SetDefault(modelIDs[0], doc.ModelProfiles.DefaultEffort)
+	}
+	s.setRuntimeDefaultModelFromLookup()
+	txn.applyResolver()
+	doc.Models = s.lookup.Snapshot()
 	if err := s.store.Save(doc); err != nil {
 		if configstore.WriteCommitted(err) {
 			txn.markStoreSaved()
@@ -117,7 +120,8 @@ func (s *Stack) ConnectModels(configs []ModelConfig) (profiles []modelprofile.Mo
 	return profiles, nil
 }
 
-// UseModel persists one per-session model alias override for subsequent turns.
+// UseModel persists the global default profile and effort, then records the
+// same selection for the current Session.
 func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias string, reasoningEffort ...string) error {
 	if s == nil || s.Sessions == nil {
 		return fmt.Errorf("gatewayapp: sessions service unavailable")
@@ -157,15 +161,24 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 	if err != nil {
 		return err
 	}
-	if reasoning != "" {
-		cfg.ReasoningEffort = reasoning
-		if _, err := s.lookup.Upsert(cfg); err != nil {
-			return err
-		}
+	if s.store == nil {
+		return fmt.Errorf("gatewayapp: app config store unavailable")
 	}
-	s.lookup.SetDefault(cfg.ID)
+	doc, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	profileID := modelprofile.BuildProviderID(cfg.ID)
+	nextProfiles, err := modelprofile.SelectDefault(doc.ModelProfiles, profileID, reasoning)
+	if err != nil {
+		return err
+	}
+	s.lookup.SetDefault(cfg.ID, nextProfiles.DefaultEffort)
 	txn.applyResolver()
-	saveErr := s.saveModelConfigs()
+	txn.captureConfig(doc)
+	doc.Models = s.lookup.Snapshot()
+	doc.ModelProfiles = nextProfiles
+	saveErr := s.store.Save(doc)
 	if saveErr != nil && !configstore.WriteCommitted(saveErr) {
 		return txn.rollback(saveErr)
 	}
@@ -247,11 +260,21 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 		return err
 	}
 	hasDefault := strings.TrimSpace(s.lookup.DefaultID()) != ""
+	nextProfiles, err = modelprofile.SelectDefault(
+		nextProfiles,
+		modelprofile.BuildProviderID(s.lookup.DefaultID()),
+		nextProfiles.DefaultEffort,
+	)
+	if err != nil {
+		return err
+	}
+	if hasDefault {
+		s.lookup.SetDefault(s.lookup.DefaultID(), nextProfiles.DefaultEffort)
+	}
 	txn.applyResolver()
 	txn.captureConfig(doc)
 	doc.Models = s.lookup.Snapshot()
 	doc.ModelProfiles = nextProfiles
-	doc.ModelProfiles.DefaultProfileID = modelprofile.BuildProviderID(s.lookup.DefaultID())
 	doc.AgentBindings = nextBindings
 	saveErr := s.store.Save(doc)
 	if saveErr != nil && !configstore.WriteCommitted(saveErr) {
@@ -393,18 +416,23 @@ func (s *Stack) setRuntimeDefaultModelFromLookup() {
 		return
 	}
 	cfg := ModelConfig{}
+	profileID := ""
 	if defaultID := s.lookup.DefaultID(); strings.TrimSpace(defaultID) != "" {
 		cfg, _ = s.lookup.Config(defaultID)
+		profileID = modelprofile.BuildProviderID(defaultID)
+		cfg.ReasoningEffort = s.lookup.DefaultEffort()
 	}
-	s.setRuntimeModel(cfg)
+	s.setRuntimeModel(profileID, cfg)
 }
 
-func (s *Stack) setRuntimeModel(cfg ModelConfig) {
+func (s *Stack) setRuntimeModel(profileID string, cfg ModelConfig) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	runtimeCfg := s.runtime
+	runtimeCfg.ModelProfileID = modelprofile.NormalizeID(profileID)
+	runtimeCfg.ModelProfileEffort = strings.ToLower(strings.TrimSpace(cfg.ReasoningEffort))
 	runtimeCfg.Model = cfg
 	s.runtime = runtimeCfg
 	s.mu.Unlock()
@@ -472,6 +500,13 @@ func (s *Stack) DefaultModelID() string {
 		return ""
 	}
 	return s.lookup.DefaultID()
+}
+
+func (s *Stack) DefaultModelEffort() string {
+	if s == nil || s.lookup == nil {
+		return ""
+	}
+	return s.lookup.DefaultEffort()
 }
 
 func (s *Stack) ModelConfig(alias string) (ModelConfig, bool) {

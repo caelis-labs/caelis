@@ -111,15 +111,10 @@ func (s *Stack) resolveDelegationPlacement(req sdkdelegation.TargetRequest, runt
 
 	switch target.Placement.Kind {
 	case sdkplacement.KindModel:
-		configured, err := s.lookup.ResolveConfig(target.Placement.Model)
-		if err != nil {
-			return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve delegated model %q: %w", target.Placement.Model, err)
-		}
-		configured.ReasoningEffort = target.Placement.ReasoningEffort
 		// The selector is the public AgentHandle. The materialized child keeps
 		// the backend model identity; otherwise a handle such as "zenith" is
 		// accidentally treated as the ACP Agent selected by the Placement.
-		return s.materializeDelegatedModel("", configured, runtimeCfg)
+		return s.materializeDelegatedModel("", target.Placement.ProfileID, target.Placement.ReasoningEffort, runtimeCfg)
 	case sdkplacement.KindAgent:
 		agent, connection, err := controlagents.ResolveAgent(snapshot.placement.Agents, target.Placement.Agent)
 		if err != nil {
@@ -140,7 +135,11 @@ func (s *Stack) resolveDelegationPlacement(req sdkdelegation.TargetRequest, runt
 	}
 }
 
-func (s *Stack) materializeDelegatedModel(name string, configured ModelConfig, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
+func (s *Stack) materializeDelegatedModel(name, profileID, effort string, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
+	configured, err := s.resolveProviderProfileConfig(profileID, effort)
+	if err != nil {
+		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve delegated profile %q: %w", profileID, err)
+	}
 	materialized, err := configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		Config: Config{
 			AppName:                   s.AppName,
@@ -152,7 +151,8 @@ func (s *Stack) materializeDelegatedModel(name string, configured ModelConfig, r
 			PolicyProfile:             runtimeCfg.PolicyProfile,
 			ContextWindow:             effectiveDelegationContextWindow(configured, runtimeCfg.ContextWindow),
 			SystemPrompt:              runtimeCfg.SystemPrompt,
-			Model:                     configured,
+			ModelProfileID:            profileID,
+			ModelProfileEffort:        effort,
 		},
 		AppName:      s.AppName,
 		UserID:       s.UserID,

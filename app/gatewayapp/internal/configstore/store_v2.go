@@ -147,9 +147,6 @@ func (t *legacyCredentialTransaction) rollback() error {
 }
 
 func putLegacyCredentialSource(store *credentialstore.Store, ref string, source credentialstore.Source) error {
-	if source.Environment != "" {
-		return store.PutEnvironment(context.Background(), ref, source.Environment)
-	}
 	return store.Put(context.Background(), ref, source.APIKey)
 }
 

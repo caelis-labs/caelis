@@ -52,7 +52,7 @@ func TestPluginSystemE2E(t *testing.T) {
 	}
 
 	fakeProvider := newPluginSystemE2EProvider(t)
-	stack, err := NewLocalStack(Config{
+	stack, err := newGatewayAppTestStack(t, Config{
 		AppName:      "caelis-e2e",
 		UserID:       "plugin-e2e",
 		StoreDir:     storeDir,
