@@ -116,7 +116,7 @@ func TestStreamAppendPhysicalScreenPreservesTextAfterComplexGrapheme(t *testing.
 	}
 }
 
-func TestWideTranscriptLineMoveRepaintsInsteadOfHardScroll(t *testing.T) {
+func TestWideTranscriptLineMoveUsesHardScrollWithoutLosingText(t *testing.T) {
 	const (
 		width  = 96
 		height = 12
@@ -128,15 +128,13 @@ func TestWideTranscriptLineMoveRepaintsInsteadOfHardScroll(t *testing.T) {
 	)
 	updates := renderFullscreenFramesForTest(t, width, height, before, after)
 	second := updates[1]
-	if !strings.Contains(second, "复现一下当时 Grep") {
-		t.Fatalf("wide transcript line was moved without repainting its text: %q", second)
+	if !strings.Contains(second, ansi.SetTopBottomMargins(1, 9)) {
+		t.Fatalf("wide transcript line did not use hard-scroll optimization: %q", second)
 	}
-	if strings.Contains(second, ansi.SetTopBottomMargins(1, 9)) {
-		t.Fatalf("wide transcript line was moved through a hard-scroll region: %q", second)
-	}
+	assertPhysicalFullscreenFrame(t, width, height, after, updates)
 }
 
-func TestWideTranscriptTwoLineMoveRepaintsInsteadOfHardScroll(t *testing.T) {
+func TestWideTranscriptTwoLineMoveUsesHardScrollWithoutLosingText(t *testing.T) {
 	const (
 		width  = 96
 		height = 12
@@ -150,15 +148,13 @@ func TestWideTranscriptTwoLineMoveRepaintsInsteadOfHardScroll(t *testing.T) {
 	)
 	updates := renderFullscreenFramesForTest(t, width, height, before, after)
 	second := updates[1]
-	if !strings.Contains(second, "复现一下当时 Grep") {
-		t.Fatalf("wide transcript moved by two rows without repainting its text: %q", second)
+	if !strings.Contains(second, ansi.SetTopBottomMargins(1, 9)) {
+		t.Fatalf("wide transcript two-line move did not use hard-scroll optimization: %q", second)
 	}
-	if strings.Contains(second, ansi.SetTopBottomMargins(1, 9)) {
-		t.Fatalf("wide transcript moved by two rows through a hard-scroll region: %q", second)
-	}
+	assertPhysicalFullscreenFrame(t, width, height, after, updates)
 }
 
-func TestLiveExplorationScrollbarRepaintsWideReasoning(t *testing.T) {
+func TestLiveExplorationScrollbarHardScrollPreservesWideReasoning(t *testing.T) {
 	const (
 		width     = 96
 		height    = 20
@@ -188,7 +184,6 @@ func TestLiveExplorationScrollbarRepaintsWideReasoning(t *testing.T) {
 	model.doc.Append(block)
 	model.syncViewportContent()
 	model.viewportScrollbarVisibleUntil = time.Now().Add(time.Hour)
-	scrollRegionBottom := model.viewport.Height()
 	before := model.View().Content
 	if plain := ansi.Strip(before); !strings.Contains(plain, "Explored") ||
 		!strings.Contains(plain, reasoning) ||
@@ -208,12 +203,10 @@ func TestLiveExplorationScrollbarRepaintsWideReasoning(t *testing.T) {
 
 	updates := renderFullscreenFramesForTest(t, width, height, before, after)
 	second := updates[1]
-	if !strings.Contains(second, reasoning) {
-		t.Fatalf("live exploration moved wide reasoning without repainting it: %q", second)
+	if !strings.Contains(second, ansi.SetTopBottomMargins(1, height-2)) {
+		t.Fatalf("live exploration did not use hard-scroll optimization: %q", second)
 	}
-	if strings.Contains(second, ansi.SetTopBottomMargins(1, scrollRegionBottom)) {
-		t.Fatalf("live exploration moved wide reasoning through a hard-scroll region: %q", second)
-	}
+	assertPhysicalFullscreenFrame(t, width, height, after, updates)
 }
 
 func TestASCIITranscriptLineMoveKeepsHardScrollOptimization(t *testing.T) {
@@ -230,6 +223,26 @@ func TestASCIITranscriptLineMoveKeepsHardScrollOptimization(t *testing.T) {
 	if second := updates[1]; !strings.Contains(second, ansi.SetTopBottomMargins(1, 9)) {
 		t.Fatalf("ASCII-only frame lost hard-scroll optimization: %q", second)
 	}
+}
+
+func TestStableWideTranscriptLineMoveKeepsHardScrollOptimization(t *testing.T) {
+	const (
+		width  = 96
+		height = 12
+	)
+	const reasoning = "  › 稳定会话中的中文 Markdown 应当随视口快速滚动。"
+	before, after := normalizedTranscriptScrollFramesForTest(
+		width,
+		height,
+		reasoning,
+	)
+	updates := renderFullscreenFramesForTest(t, width, height, before, after)
+	second := updates[1]
+	if !strings.Contains(second, ansi.SetTopBottomMargins(1, 9)) {
+		t.Fatalf("stable wide transcript lost hard-scroll optimization: %q", second)
+	}
+	t.Logf("stable wide transcript scroll delta = %d bytes", len(second))
+	assertPhysicalFullscreenFrame(t, width, height, after, updates)
 }
 
 func normalizedTranscriptScrollFramesForTest(width int, height int, reasoning string) (string, string) {
@@ -286,7 +299,7 @@ func waitForPhysicalStreamLine(t *testing.T, terminal *vt.SafeEmulator, want str
 	t.Fatalf("physical terminal never rendered complete stream text %q; screen=%q", want, ansi.Strip(terminal.Render()))
 }
 
-func TestComposerMixedWidthDeleteAvoidsRendererDCHInsideWideGlyph(t *testing.T) {
+func TestComposerMixedWidthDeletePreservesPhysicalWideText(t *testing.T) {
 	model := NewModel(Config{})
 	model.width = 24
 	model.textarea.SetValue("甲a乙b丙c丁d")
@@ -302,88 +315,17 @@ func TestComposerMixedWidthDeleteAvoidsRendererDCHInsideWideGlyph(t *testing.T) 
 		t.Fatalf("textarea value = %q, want 甲a乙丙c丁d", got)
 	}
 	outputs := renderComposerFramesForTest(t, model.fixedRowWidth(), before, after)
-	second := outputs[1]
-	if stringsContainDeleteCharacter(second) {
-		t.Fatalf("renderer update = %q, must not delete inside shifted CJK glyph", second)
-	}
-	if !bytes.Contains([]byte(second), []byte("丙c丁d")) {
-		t.Fatalf("renderer update = %q, want shifted CJK tail to be repainted", second)
-	}
-}
-
-func TestWideCellRepaintSentinelDoesNotEmitHyperlink(t *testing.T) {
-	got := protectWideCellRepaintLine("甲", 4)
-	if strings.Contains(got, "\x1b]8;;") {
-		t.Fatalf("wide-cell sentinel emitted OSC 8 hyperlink: %q", got)
-	}
-	if strings.Contains(got, "caelis://") {
-		t.Fatalf("wide-cell sentinel emitted URI: %q", got)
-	}
-	if got == ansi.Strip(got) {
-		t.Fatalf("wide-cell sentinel should keep an ANSI guard, got plain text %q", got)
-	}
-	if stripped := ansi.Strip(got); displayColumns(stripped) != 4 {
-		t.Fatalf("stripped width = %d, want 4; stripped=%q raw=%q", displayColumns(stripped), stripped, got)
-	}
-}
-
-func TestWideFrameHardScrollGuardBindsHeightPaddingRows(t *testing.T) {
-	const (
-		width  = 6
-		height = 3
-	)
-	lines := strings.Split(normalizeFullscreenFrame("甲", width, height), "\n")
-	if len(lines) != height {
-		t.Fatalf("normalized lines = %d, want %d: %#v", len(lines), height, lines)
-	}
-	for row, line := range lines {
-		if got := displayColumns(ansi.Strip(line)); got != width {
-			t.Fatalf("row %d width = %d, want %d: %q", row, got, width, line)
-		}
-		if !strings.Contains(line, hardScrollRowSentinel(row)) {
-			t.Fatalf("row %d missing its distinct physical-row identity: %q", row, line)
-		}
-		for other := range lines {
-			if other != row && strings.Contains(line, hardScrollRowSentinel(other)) {
-				t.Fatalf("row %d reused row %d identity: %q", row, other, line)
-			}
-		}
-	}
-}
-
-func TestHardScrollIdentityColumnUsesFramePadding(t *testing.T) {
-	tests := []struct {
-		name       string
-		line       string
-		width      int
-		wantColumn int
-		wantOK     bool
-	}{
-		{name: "trailing padding", line: "abcd  ", width: 6, wantColumn: 5, wantOK: true},
-		{name: "scrollbar gutter", line: "abcd ▏", width: 6, wantColumn: 4, wantOK: true},
-		{name: "scrollbar thumb gutter", line: "abcd ▎", width: 6, wantColumn: 4, wantOK: true},
-		{name: "semantic penultimate space", line: "abcd X", width: 6},
-		{name: "full content", line: "abcdef", width: 6},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			column, ok := hardScrollIdentityColumn(tt.line, tt.width)
-			if column != tt.wantColumn || ok != tt.wantOK {
-				t.Fatalf("identity column = (%d, %v), want (%d, %v)", column, ok, tt.wantColumn, tt.wantOK)
-			}
-		})
-	}
+	assertPhysicalComposerFrame(t, model.fixedRowWidth(), after, outputs)
 }
 
 func TestNormalizeFullscreenFrameLineFitsDisplayWidth(t *testing.T) {
 	tests := []struct {
-		name             string
-		input            string
-		width            int
-		wantPlain        string
-		wantANSI         bool
-		forbiddenPlain   string
-		wantVisibleGuard bool
+		name           string
+		input          string
+		width          int
+		wantPlain      string
+		wantANSI       bool
+		forbiddenPlain string
 	}{
 		{
 			name:      "narrow_ascii_pads_without_guard",
@@ -392,21 +334,18 @@ func TestNormalizeFullscreenFrameLineFitsDisplayWidth(t *testing.T) {
 			wantPlain: "abc       ",
 		},
 		{
-			name:             "narrow_wide_cell_keeps_repaint_guard",
-			input:            "甲",
-			width:            4,
-			wantPlain:        "甲  ",
-			wantANSI:         true,
-			wantVisibleGuard: true,
+			name:      "narrow_wide_cell_pads_without_guard",
+			input:     "甲",
+			width:     4,
+			wantPlain: "甲  ",
 		},
 		{
-			name:             "overwide_styled_cjk_truncates_before_padding",
-			input:            "\x1b[31m甲乙丙\x1b[0m",
-			width:            5,
-			wantPlain:        "甲乙 ",
-			wantANSI:         true,
-			forbiddenPlain:   "丙",
-			wantVisibleGuard: true,
+			name:           "overwide_styled_cjk_truncates_before_padding",
+			input:          "\x1b[31m甲乙丙\x1b[0m",
+			width:          5,
+			wantPlain:      "甲乙 ",
+			wantANSI:       true,
+			forbiddenPlain: "丙",
 		},
 	}
 
@@ -428,9 +367,6 @@ func TestNormalizeFullscreenFrameLineFitsDisplayWidth(t *testing.T) {
 			}
 			if hasANSI := got != stripped; hasANSI != tt.wantANSI {
 				t.Fatalf("ANSI presence = %v, want %v; stripped=%q raw=%q", hasANSI, tt.wantANSI, stripped, got)
-			}
-			if tt.wantVisibleGuard && !strings.Contains(got, "\x1b[8m \x1b[28m") {
-				t.Fatalf("normalized line missing wide-cell repaint guard: stripped=%q raw=%q", stripped, got)
 			}
 		})
 	}
@@ -486,7 +422,43 @@ func renderFullscreenFramesForTest(t *testing.T, width int, height int, frames .
 	return outputs
 }
 
-func stringsContainDeleteCharacter(text string) bool {
-	return bytes.Contains([]byte(text), []byte(ansi.DeleteCharacter(1))) ||
-		bytes.Contains([]byte(text), []byte("\x1b[1P"))
+func assertPhysicalComposerFrame(t *testing.T, width int, want string, updates []string) {
+	t.Helper()
+	height := strings.Count(want, "\n") + 1
+	terminal := vt.NewSafeEmulator(width, height)
+	t.Cleanup(func() { _ = terminal.Close() })
+	for idx, update := range updates {
+		if _, err := terminal.Write([]byte(update)); err != nil {
+			t.Fatalf("write composer update %d to physical terminal: %v", idx, err)
+		}
+	}
+	got := trimPhysicalFramePadding(ansi.Strip(terminal.Render()))
+	want = trimPhysicalFramePadding(ansi.Strip(want))
+	if got != want {
+		t.Fatalf("physical composer frame mismatch:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func assertPhysicalFullscreenFrame(t *testing.T, width int, height int, want string, updates []string) {
+	t.Helper()
+	terminal := vt.NewSafeEmulator(width, height)
+	t.Cleanup(func() { _ = terminal.Close() })
+	for idx, update := range updates {
+		if _, err := terminal.Write([]byte(update)); err != nil {
+			t.Fatalf("write fullscreen update %d to physical terminal: %v", idx, err)
+		}
+	}
+	got := trimPhysicalFramePadding(ansi.Strip(terminal.Render()))
+	want = trimPhysicalFramePadding(ansi.Strip(want))
+	if got != want {
+		t.Fatalf("physical fullscreen frame mismatch:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func trimPhysicalFramePadding(frame string) string {
+	lines := strings.Split(frame, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+	}
+	return strings.Join(lines, "\n")
 }

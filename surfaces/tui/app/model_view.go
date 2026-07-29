@@ -81,35 +81,49 @@ func (m *Model) View() tea.View {
 
 	view := strings.Join(sections, "\n")
 	topTrim := 0
-	view, topTrim = normalizeFullscreenFrameWithTopTrim(view, m.width, m.height)
+	baseNormalized := false
+	normalizeBaseForOverlay := func() {
+		if baseNormalized {
+			return
+		}
+		var trim int
+		view, trim = m.normalizeFullscreenFrameWithTopTrim(view)
+		topTrim += trim
+		baseNormalized = true
+	}
 
 	if m.activePrompt != nil && m.width > 0 && m.height > 0 {
 		if promptView := m.renderPromptModal(); promptView != "" {
+			normalizeBaseForOverlay()
 			view = overlayAboveBottomAreaLeft(view, promptView, m.width, m.mainColumnX()+inputHorizontalInset, maxInt(0, bottomHeight-m.promptModalReservedHeight()), 0)
 		}
 	} else if overlayView := m.renderInputOverlay(); overlayView != "" && m.width > 0 && m.height > 0 {
+		normalizeBaseForOverlay()
 		view = overlayAboveBottomAreaLeft(view, overlayView, m.width, m.mainColumnX()+inputHorizontalInset, bottomHeight, 0)
 	}
 
 	// Overlay: command palette.
 	if m.shouldRenderPalette() && m.width > 0 && m.height > 0 {
 		if paletteView := m.renderPaletteOverlay(); paletteView != "" {
+			normalizeBaseForOverlay()
 			view = overlayAboveBottomAreaLeft(view, paletteView, m.width, m.mainColumnX()+inputHorizontalInset, bottomHeight, 0)
 		}
 	}
 	if m.width > 0 && m.height > 0 {
 		if progressView := m.renderSandboxProgressOverlay(); progressView != "" {
+			normalizeBaseForOverlay()
 			view = overlayTopRight(view, progressView, m.width, sandboxProgressOverlayTopInset, sandboxProgressOverlayRightInset)
 		}
 	}
 	if m.subagentOverlay != nil && m.width > 0 && m.height > 0 {
 		if overlay := m.renderSubagentOverlay(); overlay != "" {
+			normalizeBaseForOverlay()
 			view = tuikit.OverlayCenter(view, overlay, m.width, m.height)
 		}
 	}
-	secondTrim := 0
-	view, secondTrim = normalizeFullscreenFrameWithTopTrim(view, m.width, m.height)
-	topTrim += secondTrim
+	var finalTrim int
+	view, finalTrim = m.normalizeFullscreenFrameWithTopTrim(view)
+	topTrim += finalTrim
 	m.frameTopTrim = topTrim
 
 	duration := time.Since(start)

@@ -88,6 +88,7 @@ type Diagnostics struct {
 	ViewportSetContentReason    map[string]uint64
 	BlockRenderCallsByKind      map[BlockKind]uint64
 	StreamSmoothingFlushReason  map[string]uint64
+	FullscreenNormalizeCalls    uint64
 	GlamourRenderCalls          uint64
 	InlineMarkdownCalls         uint64
 	ControlStatusCalls          uint64
