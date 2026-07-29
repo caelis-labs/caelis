@@ -82,7 +82,8 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 			ListChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
 				return adapters.ModelChoices(models.ListChoices(ctx, ref))
 			},
-			AuthenticateFn: models.Authenticate,
+			HasReusableAuthFn: models.HasReusableAuth,
+			AuthenticateFn:    models.Authenticate,
 		},
 		Skill: SkillRuntimeDeps{
 			SnapshotFn: skills.Snapshot,

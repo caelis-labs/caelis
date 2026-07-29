@@ -81,6 +81,10 @@ func (s ModelService) ListChoices(ctx context.Context, ref session.SessionRef) (
 	return s.stack.ListModelChoices(ctx, ref)
 }
 
+func (s ModelService) HasReusableAuth(ctx context.Context, provider string, baseURL string) bool {
+	return s.stack.HasReusableProviderAuth(ctx, provider, baseURL)
+}
+
 func (s ModelService) DefaultAlias() string {
 	return s.stack.DefaultModelAlias()
 }

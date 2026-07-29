@@ -2,9 +2,12 @@ package gatewayapp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -70,6 +73,114 @@ func TestConnectStoresProviderAPIKeyBehindOpaqueReference(t *testing.T) {
 	}
 }
 
+func TestConnectReplacesLegacyEnvironmentCredential(t *testing.T) {
+	stack, _ := newLocalStateTestStack(t)
+	configured := modelconfig.NormalizeConfig(ModelConfig{
+		Provider: "deepseek",
+		API:      providers.APIDeepSeek,
+		Model:    "deepseek-v4-pro",
+		Token:    "replacement-secret",
+	})
+	ref := credentialstore.BuildReference(configured.Provider, configured.ProviderEndpointID)
+	writeLegacyEnvironmentCredentialForTest(t, stack.storeDir, ref, "DEEPSEEK_API_KEY")
+
+	profile, err := stack.Connect(configured)
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	if strings.TrimSpace(profile.ID) == "" {
+		t.Fatal("Connect() returned an empty ModelProfile")
+	}
+	doc, err := stack.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundEndpoint := false
+	for _, endpoint := range doc.Models.ProviderEndpoints {
+		foundEndpoint = foundEndpoint || (endpoint.Provider == "deepseek" && endpoint.CredentialRef == ref)
+	}
+	if !foundEndpoint {
+		t.Fatalf("DeepSeek endpoint does not reference replacement credential %q: %#v", ref, doc.Models.ProviderEndpoints)
+	}
+	if got, err := stack.apiKeyCredentials.Get(context.Background(), ref); err != nil || got != "replacement-secret" {
+		t.Fatalf("replacement credential = %q, %v", got, err)
+	}
+}
+
+func TestConnectLegacyEnvironmentCredentialRollbackAllowsRetry(t *testing.T) {
+	stack, _ := newLocalStateTestStack(t)
+	configured := modelconfig.NormalizeConfig(ModelConfig{
+		Provider: "deepseek",
+		API:      providers.APIDeepSeek,
+		Model:    "deepseek-v4-pro",
+		Token:    "replacement-secret",
+	})
+	ref := credentialstore.BuildReference(configured.Provider, configured.ProviderEndpointID)
+	writeLegacyEnvironmentCredentialForTest(t, stack.storeDir, ref, "DEEPSEEK_API_KEY")
+	stack.store.saveHook = func(AppConfig) error { return errors.New("save failed") }
+
+	if _, err := stack.Connect(configured); err == nil || !strings.Contains(err.Error(), "save failed") {
+		t.Fatalf("Connect() error = %v, want save failure", err)
+	}
+	if _, err := stack.apiKeyCredentials.Get(context.Background(), ref); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("credential after rollback error = %v, want removed replacement", err)
+	}
+
+	stack.store.saveHook = nil
+	if _, err := stack.Connect(configured); err != nil {
+		t.Fatalf("Connect() retry error = %v", err)
+	}
+	if got, err := stack.apiKeyCredentials.Get(context.Background(), ref); err != nil || got != "replacement-secret" {
+		t.Fatalf("credential after retry = %q, %v", got, err)
+	}
+}
+
+func TestResolveModelConfigHidesLegacyCredentialStorageDetails(t *testing.T) {
+	stack, _ := newLocalStateTestStack(t)
+	configured := modelconfig.NormalizeConfig(ModelConfig{
+		Provider: "deepseek",
+		API:      providers.APIDeepSeek,
+		Model:    "deepseek-v4-pro",
+	})
+	ref := credentialstore.BuildReference(configured.Provider, configured.ProviderEndpointID)
+	configured.CredentialRef = ref
+	writeLegacyEnvironmentCredentialForTest(t, stack.storeDir, ref, "DEEPSEEK_API_KEY")
+
+	_, err := stack.lookup.ResolveModelConfig(context.Background(), configured, 0)
+	if err == nil || err.Error() != "model credential is invalid; reconnect with /connect" {
+		t.Fatalf("ResolveModelConfig() error = %v, want concise reconnect guidance", err)
+	}
+	for _, internalDetail := range []string{"credentialstore", "environment-backed", ref, "DEEPSEEK_API_KEY"} {
+		if strings.Contains(err.Error(), internalDetail) {
+			t.Fatalf("ResolveModelConfig() error = %q, want no internal detail %q", err, internalDetail)
+		}
+	}
+}
+
+func TestHasReusableProviderAuthRejectsLegacyCredential(t *testing.T) {
+	stack, _ := newLocalStateTestStack(t)
+	baseURL := "https://api.deepseek.com/anthropic"
+	configured := modelconfig.NormalizeConfig(ModelConfig{
+		Provider: "deepseek",
+		API:      providers.APIDeepSeek,
+		Model:    "deepseek-v4-pro",
+		BaseURL:  baseURL,
+		Token:    "current-secret",
+	})
+	ref := credentialstore.BuildReference(configured.Provider, configured.ProviderEndpointID)
+	if _, err := stack.Connect(configured); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	if !stack.HasReusableProviderAuth(context.Background(), "deepseek", baseURL) {
+		t.Fatal("HasReusableProviderAuth() = false for valid stored credential")
+	}
+
+	writeLegacyEnvironmentCredentialForTest(t, stack.storeDir, ref, "DEEPSEEK_API_KEY")
+	if stack.HasReusableProviderAuth(context.Background(), "deepseek", baseURL) {
+		t.Fatal("HasReusableProviderAuth() = true for invalid legacy credential")
+	}
+}
+
 func TestConnectRollsBackNewProviderCredentialWhenConfigSaveFails(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
 	configured := modelconfig.NormalizeConfig(ModelConfig{
@@ -82,6 +193,27 @@ func TestConnectRollsBackNewProviderCredentialWhenConfigSaveFails(t *testing.T) 
 	}
 	if _, err := stack.apiKeyCredentials.Get(context.Background(), ref); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("rolled-back credential Get() error = %v", err)
+	}
+}
+
+func writeLegacyEnvironmentCredentialForTest(t *testing.T, root string, ref string, environment string) {
+	t.Helper()
+	dir := filepath.Join(root, "providers", "credentials")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(ref))))
+	path := filepath.Join(dir, hex.EncodeToString(sum[:])+".json")
+	raw, err := json.Marshal(map[string]any{
+		"version":     1,
+		"ref":         ref,
+		"environment": environment,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

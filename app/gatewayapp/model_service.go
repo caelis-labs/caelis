@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
@@ -486,6 +487,36 @@ func (s *Stack) ListModelChoices(ctx context.Context, ref session.SessionRef) ([
 	}
 	choices = append(choices, s.lookup.ListModelChoices()...)
 	return dedupeModelChoices(choices), nil
+}
+
+// HasReusableProviderAuth reports whether an existing model at the provider
+// endpoint still has usable authentication. Invalid legacy credentials must
+// not make /connect skip API-key collection.
+func (s *Stack) HasReusableProviderAuth(ctx context.Context, provider string, baseURL string) bool {
+	if s == nil || s.lookup == nil {
+		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	provider = strings.TrimSpace(provider)
+	baseURL = modelconfig.NormalizeBaseURL(baseURL)
+	for _, choice := range s.lookup.ListModelChoices() {
+		cfg, ok := s.lookup.Config(choice.ID)
+		if !ok ||
+			!strings.EqualFold(strings.TrimSpace(cfg.Provider), provider) ||
+			modelconfig.NormalizeBaseURL(cfg.BaseURL) != baseURL {
+			continue
+		}
+		missing, _ := s.modelCredentialStatus(cfg)
+		if !missing {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Stack) DefaultModelAlias() string {

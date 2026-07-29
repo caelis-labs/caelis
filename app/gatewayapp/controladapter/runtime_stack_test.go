@@ -52,6 +52,36 @@ func TestRuntimeStackModelDepsUseGroupedField(t *testing.T) {
 	}
 }
 
+func TestHasReusableConnectAuthUsesCredentialValidationHook(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	driver := &Adapter{stack: &RuntimeStack{
+		Model: ModelRuntimeDeps{
+			HasReusableAuthFn: func(_ context.Context, provider string, baseURL string) bool {
+				called = true
+				if provider != "deepseek" || baseURL != "https://api.deepseek.com/anthropic" {
+					t.Fatalf("HasReusableAuthFn(%q, %q)", provider, baseURL)
+				}
+				return false
+			},
+			ListChoicesFn: func(context.Context, session.SessionRef) ([]ModelChoice, error) {
+				return []ModelChoice{{
+					Provider: "deepseek",
+					BaseURL:  "https://api.deepseek.com/anthropic",
+				}}, nil
+			},
+		},
+	}}
+
+	if driver.hasReusableConnectAuth(context.Background(), "deepseek", "https://api.deepseek.com/anthropic") {
+		t.Fatal("hasReusableConnectAuth() = true, want invalid credential hook result")
+	}
+	if !called {
+		t.Fatal("HasReusableAuthFn was not called")
+	}
+}
+
 func TestRuntimeStackModelDepsMissingFieldUsesEmptyDefault(t *testing.T) {
 	t.Parallel()
 

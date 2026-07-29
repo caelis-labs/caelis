@@ -2,6 +2,7 @@ package credentialstore
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -45,7 +46,7 @@ func TestStoreRoundTripUsesOpaqueReferenceAndSecureFile(t *testing.T) {
 	}
 }
 
-func TestStoreRejectsLegacyEnvironmentCredential(t *testing.T) {
+func TestStoreMarksLegacyEnvironmentCredentialInvalidAndReplaceable(t *testing.T) {
 	root := t.TempDir()
 	store, err := New(root)
 	if err != nil {
@@ -59,8 +60,14 @@ func TestStoreRejectsLegacyEnvironmentCredential(t *testing.T) {
 	if err := os.WriteFile(store.path(ref), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Get(context.Background(), ref); err == nil || !strings.Contains(err.Error(), "unsupported") {
-		t.Fatalf("Get(legacy environment credential) error = %v, want reconnect diagnostic", err)
+	if _, err := store.Get(context.Background(), ref); !errors.Is(err, ErrInvalidCredential) {
+		t.Fatalf("Get(legacy environment credential) error = %v, want replaceable invalid credential", err)
+	}
+	if err := store.Put(context.Background(), ref, "replacement-secret"); err != nil {
+		t.Fatalf("Put(replacement credential) error = %v", err)
+	}
+	if got, err := store.Get(context.Background(), ref); err != nil || got != "replacement-secret" {
+		t.Fatalf("Get(replacement credential) = %q, %v", got, err)
 	}
 }
 

@@ -221,6 +221,7 @@ type ModelRuntimeDeps struct {
 	DeleteFn               func(context.Context, session.SessionRef, string) error
 	ListAliasesFn          func(context.Context, session.SessionRef) ([]string, error)
 	ListChoicesFn          func(context.Context, session.SessionRef) ([]ModelChoice, error)
+	HasReusableAuthFn      func(context.Context, string, string) bool
 	AuthenticateFn         modelconfig.AuthenticateFunc
 }
 

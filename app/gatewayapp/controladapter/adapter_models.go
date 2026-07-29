@@ -110,6 +110,9 @@ func (d *Adapter) hasReusableConnectAuth(ctx context.Context, provider string, b
 	if d == nil || d.stack == nil {
 		return false
 	}
+	if d.stack.Model.HasReusableAuthFn != nil {
+		return d.stack.Model.HasReusableAuthFn(ctx, provider, baseURL)
+	}
 	normalizedBaseURL := modelconfig.NormalizeBaseURL(baseURL)
 	if normalizedBaseURL == "" {
 		return false

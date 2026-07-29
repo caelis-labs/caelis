@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
@@ -212,6 +213,9 @@ func resolveModelFromConfig(
 			}
 			token, err := resolveAPIKey(ctx, cfg.CredentialRef)
 			if err != nil {
+				if errors.Is(err, credentialstore.ErrInvalidCredential) {
+					return kernelimpl.ModelResolution{}, errors.New("model credential is invalid; reconnect with /connect")
+				}
 				return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: resolve model credential %q: %w", cfg.CredentialRef, err)
 			}
 			cfg.Token = token

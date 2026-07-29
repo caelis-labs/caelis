@@ -16,6 +16,11 @@ import (
 
 const schemaVersion = 1
 
+// ErrInvalidCredential reports a stored credential that cannot be used.
+// Product callers should direct the user through /connect without exposing
+// the credential record format.
+var ErrInvalidCredential = errors.New("credential is invalid")
+
 // Store owns API-key credentials below one Control state directory.
 type Store struct {
 	mu   sync.Mutex
@@ -26,9 +31,6 @@ type record struct {
 	Version int    `json:"version"`
 	Ref     string `json:"ref"`
 	APIKey  string `json:"api_key,omitempty"`
-	// LegacyEnvironment is decoded only so the removed environment-backed
-	// credential format can fail closed with an actionable reconnect error.
-	LegacyEnvironment string `json:"environment,omitempty"`
 }
 
 // Source is the Control-owned source behind one opaque credential reference.
@@ -132,16 +134,12 @@ func (s *Store) LookupSource(ctx context.Context, ref string) (Source, error) {
 	}
 	var stored record
 	if err := json.Unmarshal(data, &stored); err != nil {
-		return Source{}, fmt.Errorf("control/modelconfig/credentialstore: decode credential: %w", err)
+		return Source{}, fmt.Errorf("%w: decode record", ErrInvalidCredential)
 	}
 	stored.Ref = strings.ToLower(strings.TrimSpace(stored.Ref))
 	stored.APIKey = strings.TrimSpace(stored.APIKey)
-	stored.LegacyEnvironment = strings.TrimSpace(stored.LegacyEnvironment)
-	if stored.LegacyEnvironment != "" {
-		return Source{}, fmt.Errorf("control/modelconfig/credentialstore: environment-backed credentials are unsupported; reconnect with /connect")
-	}
 	if stored.Version != schemaVersion || stored.Ref != ref || stored.APIKey == "" {
-		return Source{}, fmt.Errorf("control/modelconfig/credentialstore: credential is incomplete or mismatched")
+		return Source{}, ErrInvalidCredential
 	}
 	return Source{APIKey: stored.APIKey}, nil
 }

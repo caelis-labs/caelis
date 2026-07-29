@@ -70,6 +70,11 @@ func (s *Stack) prepareProviderCredentials(configs []ModelConfig) ([]ModelConfig
 				txn.previous = append(txn.previous, providerCredentialPrevious{ref: ref, source: previous, existed: true})
 			case errors.Is(err, os.ErrNotExist):
 				txn.previous = append(txn.previous, providerCredentialPrevious{ref: ref})
+			case errors.Is(err, credentialstore.ErrInvalidCredential):
+				// /connect with an explicit API key is the recovery path for
+				// an unusable stored credential. Treat it as absent and
+				// replace it silently.
+				txn.previous = append(txn.previous, providerCredentialPrevious{ref: ref})
 			default:
 				return nil, txn, fmt.Errorf("gatewayapp: read previous provider credential %q: %w", ref, err)
 			}
