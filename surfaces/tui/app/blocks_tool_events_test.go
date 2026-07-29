@@ -40,6 +40,45 @@ func TestApplyToolEventUpdateUsesPatchMergeSemantics(t *testing.T) {
 	}
 }
 
+func TestFinalToolEventPreservesExistingPreviewFullPair(t *testing.T) {
+	t.Parallel()
+
+	index := map[string]int{}
+	events, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
+		CallID: "call-1",
+		Name:   "CUSTOM",
+		Args:   "folded preview",
+		Meta:   ToolUpdateMeta{FullArgs: "complete invocation"},
+	}, index)
+	events, _, _ = applyToolEventUpdate(events, toolEventUpdate{
+		CallID: "call-1",
+		Name:   "CUSTOM",
+		Args:   "lossy final title",
+		Final:  true,
+	}, index)
+	if event := events[0]; event.Args != "folded preview" || event.FullArgs != "complete invocation" {
+		t.Fatalf("final event = %#v, want existing preview/full pair preserved", event)
+	}
+
+	replacementIndex := map[string]int{}
+	replacement, _, _ := applyToolEventUpdate(nil, toolEventUpdate{
+		CallID: "call-2",
+		Name:   "CUSTOM",
+		Args:   "folded preview",
+		Meta:   ToolUpdateMeta{FullArgs: "complete invocation"},
+	}, replacementIndex)
+	replacement, _, _ = applyToolEventUpdate(replacement, toolEventUpdate{
+		CallID: "call-2",
+		Name:   "CUSTOM",
+		Args:   "replacement preview",
+		Final:  true,
+		Meta:   ToolUpdateMeta{FullArgs: "replacement invocation"},
+	}, replacementIndex)
+	if event := replacement[0]; event.Args != "replacement preview" || event.FullArgs != "replacement invocation" {
+		t.Fatalf("replacement final event = %#v, want complete incoming pair to replace existing pair", event)
+	}
+}
+
 func TestApplyToolEventUpdatePreservesRepeatedExactTerminalDeltas(t *testing.T) {
 	t.Parallel()
 

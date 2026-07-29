@@ -26,7 +26,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 	if strings.EqualFold(semanticName, "TASK") {
 		displayInput = taskDisplayInputForResult(rawInput, toolDisplayMetaOutput(semanticName, input.Meta))
 	}
-	toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
+	toolArgs, toolFullArgs := toolDisplayArguments(semanticName, input.ToolKind, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
 	if strings.EqualFold(semanticName, "TASK") {
 		toolArgs = taskDisplayArgsWithHandle(toolArgs, toolTaskHandle)
 	}
@@ -42,7 +42,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolKind:                   strings.TrimSpace(input.ToolKind),
 		ToolTitle:                  strings.TrimSpace(input.ToolTitle),
 		ToolArgs:                   toolArgs,
-		ToolFullArgs:               toolDisplayFullArgs(semanticName, rawInput),
+		ToolFullArgs:               toolFullArgs,
 		ToolStatus:                 status,
 		ToolTerminal:               toolTerminal,
 		ToolOutputCursor:           outputCursor,
@@ -142,7 +142,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		toolOutput = ""
 		toolOutputSynthetic = false
 	}
-	toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
+	toolArgs, toolFullArgs := toolDisplayArguments(semanticName, input.ToolKind, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
 	toolTaskHandle := firstNonEmpty(
 		display.MapString(rawOutput, "handle"),
 		display.MapString(rawInput, "handle"),
@@ -167,7 +167,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	if strings.EqualFold(semanticName, "TASK") {
 		toolArgs = taskDisplayArgsWithHandle(toolArgs, toolTaskHandle)
 	}
-	if !toolErr {
+	if !toolErr && toolFullArgs == "" {
 		if summary := toolDisplayStructuredSummary(semanticName, rawInput, summaryOutput, input.Meta); summary != "" {
 			if transcript.ToolStatusFinal(status, toolErr) {
 				toolArgs = summary
@@ -191,7 +191,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolKind:                   strings.TrimSpace(input.ToolKind),
 		ToolTitle:                  strings.TrimSpace(input.ToolTitle),
 		ToolArgs:                   toolArgs,
-		ToolFullArgs:               toolDisplayFullArgs(semanticName, displayInput),
+		ToolFullArgs:               toolFullArgs,
 		ToolOutput:                 toolOutput,
 		ToolStream:                 transcript.ToolStream(status, toolErr),
 		ToolStatus:                 status,

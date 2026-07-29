@@ -349,6 +349,11 @@ func shouldUseExistingArgsForFinal(finalEvent SubagentEvent, existing SubagentEv
 	if strings.TrimSpace(finalEvent.Args) == "" {
 		return true
 	}
+	if strings.TrimSpace(finalEvent.FullArgs) == "" && toolPanelEventHasHiddenToolArgs(existing) {
+		// Preserve an existing preview/full pair unless the completion supplies
+		// a new full representation for the replacement preview.
+		return true
+	}
 	if !strings.EqualFold(toolSemanticName(finalEvent.Name, finalEvent.ToolKind), "SPAWN") {
 		return false
 	}

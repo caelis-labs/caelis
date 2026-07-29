@@ -14,12 +14,14 @@ import (
 )
 
 func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string {
-	name = names.CanonicalOrSelf(name)
-	if strings.EqualFold(name, display.ToolKindExecute) {
-		if command := terminalCommandDisplay(raw); command != "" {
-			return display.NormalizeDisplayArg(command)
-		}
+	return toolDisplayArgsForKind(name, "", raw, fallback...)
+}
+
+func toolDisplayArgsForKind(name string, kind string, raw map[string]any, fallback ...string) string {
+	if preview, _, ok := commandDisplayArguments(name, kind, raw); ok {
+		return preview
 	}
+	name = names.CanonicalOrSelf(name)
 	switch name {
 	case names.Read:
 		if path := toolPath(raw); path != "" {
@@ -71,7 +73,7 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		if path := toolPath(raw); path != "" {
 			return filepath.Base(path)
 		}
-	case names.RunCommand, names.Spawn, names.Task:
+	case names.Spawn, names.Task:
 		if name == names.Task {
 			if action := taskControlDisplay(raw); action != "" {
 				return action
@@ -224,7 +226,23 @@ func isASCIILetter(ch byte) bool {
 	return ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z'
 }
 
-func toolDisplayFullArgs(name string, raw map[string]any) string {
+// toolDisplayArguments owns the paired compact and full representations used
+// by expandable tool headers.
+func toolDisplayArguments(name string, kind string, raw map[string]any, fallback ...string) (string, string) {
+	if preview, full, ok := commandDisplayArguments(name, kind, raw); ok {
+		return preview, full
+	}
+	args := toolDisplayArgsForKind(name, kind, raw, fallback...)
+	if preview, full, ok := commandTextDisplayArguments(name, kind, args); ok {
+		return preview, full
+	}
+	return args, toolDisplayFullArgs(name, kind, raw)
+}
+
+func toolDisplayFullArgs(name string, kind string, raw map[string]any) string {
+	if _, full, ok := commandDisplayArguments(name, kind, raw); ok {
+		return full
+	}
 	switch names.CanonicalOrSelf(name) {
 	case names.Spawn:
 		return spawnFullDisplayArgs(raw)
@@ -842,7 +860,7 @@ func spawnDisplayArgs(raw map[string]any) string {
 	if full == "" {
 		return ""
 	}
-	return truncateReasoningPreviewMiddle(full, 96)
+	return truncateDisplayPreviewMiddle(full, toolArgsPreviewWidth)
 }
 
 func spawnFullDisplayArgs(raw map[string]any) string {
