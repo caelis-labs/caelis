@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -263,6 +264,78 @@ func TestObservedSpawnResultClosesBlockAndActivityThroughSameOwner(t *testing.T)
 	}
 	if model.runningActivity.Phase != runningPhaseThinking {
 		t.Fatalf("runningActivity = %#v, want the same owner activity completed", model.runningActivity)
+	}
+}
+
+func TestObservedSpawnResultDoesNotSplitActiveAssistantMessage(t *testing.T) {
+	t.Parallel()
+
+	const (
+		messageID = "message-waiting-for-subagents"
+		answer    = "子代理 **self**（handle: `siena`）和 **breeze**（handle: `eira`）已并发启动，正在同时等待两者返回……"
+	)
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	block := NewMainACPTurnBlock("turn-1")
+	block.UpdateToolWithMeta(
+		"spawn-1",
+		"SPAWN",
+		"calculate",
+		"",
+		false,
+		false,
+		ToolUpdateMeta{TaskHandle: "eira"},
+	)
+	appendObservedSpawnOwner(model, block, "spawn-1", "eira")
+
+	block.AppendStreamEvent(
+		SEAssistant,
+		"子代理 **self**（handle: `siena`）和 **breeze**（handle: `eira`",
+		newNarrativeSourceIdentity(messageID, "chunk-1", "projection-1"),
+	)
+	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
+		ParentCallID: "spawn-1",
+		Status:       schema.ToolStatusCompleted,
+		RawOutput: map[string]any{
+			"handle": "eira", "state": "completed", "final_message": "8",
+		},
+	}})
+	block.AppendStreamEvent(
+		SEAssistant,
+		"）已并发启动，正在同时等待两者返回……",
+		newNarrativeSourceIdentity(messageID, "chunk-2", "projection-2"),
+	)
+	block.ReplaceFinalStreamEvent(
+		SEAssistant,
+		answer,
+		newNarrativeSourceIdentity(messageID, "canonical-final", "projection-final"),
+	)
+
+	var assistantEvents []SubagentEvent
+	for _, event := range block.Events {
+		if event.Kind == SEAssistant {
+			assistantEvents = append(assistantEvents, event)
+		}
+	}
+	if len(assistantEvents) != 1 || assistantEvents[0].Text != answer || assistantEvents[0].ActiveBuffer != nil {
+		t.Fatalf("assistant events = %#v, want one finalized message after the observed Spawn completion", assistantEvents)
+	}
+	if event := block.Events[0]; !event.Done || event.Output != "8" {
+		t.Fatalf("Spawn owner = %#v, want observed completion applied in place", event)
+	}
+
+	rows := block.Render(BlockRenderContext{
+		Width: 180, TermWidth: 180,
+		Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
+	})
+	var assistantRows []string
+	for _, row := range renderedPlainRows(rows) {
+		if strings.HasPrefix(strings.TrimSpace(row), "·") {
+			assistantRows = append(assistantRows, strings.TrimSpace(row))
+		}
+	}
+	const rendered = "· 子代理 self（handle: siena）和 breeze（handle: eira）已并发启动，正在同时等待两者返回……"
+	if len(assistantRows) != 1 || assistantRows[0] != rendered {
+		t.Fatalf("assistant rows = %#v, want one visible assistant row", assistantRows)
 	}
 }
 

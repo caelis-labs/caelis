@@ -32,7 +32,6 @@ func (m *Model) applyObservedSpawnResults(results []acpprojector.SpawnTaskResult
 		state := display.MapString(result.RawOutput, "state")
 		output := display.SubagentTaskFinalText(state, result.RawOutput)
 		failed := strings.EqualFold(strings.TrimSpace(result.Status), schema.ToolStatusFailed)
-		owner.block.sealNarrativeSegment()
 		finalEvent := SubagentEvent{
 			Kind:          SEToolCall,
 			CallID:        parentCallID,
