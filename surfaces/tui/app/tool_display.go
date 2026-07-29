@@ -906,56 +906,7 @@ func toolDisplayPanelOutput(name string, output string) string {
 }
 
 func toolDisplaySummaryOutput(name string, output map[string]any, meta map[string]any) map[string]any {
-	out := transcript.CloneAnyMap(output)
-	if out == nil {
-		out = map[string]any{}
-	}
-	toolMeta := transcript.RuntimeToolMeta(meta)
-	if len(toolMeta) == 0 {
-		if len(out) == 0 {
-			return nil
-		}
-		return out
-	}
-	info, known := names.Lookup(name)
-	if !known {
-		if len(out) == 0 {
-			return nil
-		}
-		return out
-	}
-	var keys []string
-	switch info.ResultStyle {
-	case names.ResultRead:
-		keys = []string{"path", "file_path", "start_line", "end_line", "next_offset", "has_more"}
-	case names.ResultList:
-		keys = []string{"path", "count", "total_count"}
-	case names.ResultGlob:
-		keys = []string{"pattern", "count", "total_count"}
-	case names.ResultSearch:
-		keys = []string{"pattern", "query", "count", "file_count"}
-	case names.ResultWebSearch:
-		keys = []string{"query", "provider", "model", "status", "answer", "results", "message"}
-	case names.ResultWebFetch:
-		keys = []string{"url", "final_url", "title", "status", "status_code", "content_type", "format", "message"}
-	default:
-		if len(out) == 0 {
-			return nil
-		}
-		return out
-	}
-	for _, key := range keys {
-		if _, exists := out[key]; exists {
-			continue
-		}
-		if value, ok := toolMeta[key]; ok {
-			out[key] = value
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return display.HydrateToolSummaryOutput(name, output, meta)
 }
 
 func toolDisplayStructuredSummary(name string, input map[string]any, output map[string]any, meta map[string]any) string {

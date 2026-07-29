@@ -14,11 +14,11 @@ import (
 )
 
 func toolResultDisplayOutput(name string, output map[string]any, meta map[string]any) map[string]any {
-	out := session.CloneState(output)
-	if out == nil {
-		out = map[string]any{}
-	}
+	out := display.HydrateToolSummaryOutput(name, session.CloneState(output), meta)
 	if info, ok := names.Lookup(name); ok && info.ResultStyle == names.ResultMutation {
+		if out == nil {
+			out = map[string]any{}
+		}
 		for _, key := range []string{
 			"created",
 			"previous_empty",
@@ -115,17 +115,18 @@ func listResultSummary(input map[string]any, output map[string]any) string {
 		return ""
 	}
 	if count > 0 {
-		return strings.TrimSpace(filepath.Base(path) + " " + pluralize(count, "entry"))
+		return strings.TrimSpace(filepath.Base(path) + " " + display.Pluralize(count, "entry"))
 	}
 	return filepath.Base(path)
 }
 
 func globResultSummary(input map[string]any, output map[string]any, meta map[string]any) string {
-	pattern := firstNonEmpty(toolString(input["pattern"]), toolString(output["pattern"]), toolString(runtimeToolMeta(meta)["pattern"]))
-	count := toolInt(output["count"])
+	toolMeta := runtimeToolMeta(meta)
+	pattern := firstNonEmpty(toolString(input["pattern"]), toolString(output["pattern"]), toolString(toolMeta["pattern"]))
+	count := firstToolInt(output["count"], toolMeta["count"])
 	switch {
 	case pattern != "" && count >= 0:
-		return pattern + " " + pluralize(count, "match")
+		return pattern + " " + display.Pluralize(count, "match")
 	case pattern != "":
 		return pattern
 	default:
@@ -134,9 +135,10 @@ func globResultSummary(input map[string]any, output map[string]any, meta map[str
 }
 
 func searchResultSummary(input map[string]any, output map[string]any, meta map[string]any) string {
-	query := firstNonEmpty(toolString(output["pattern"]), toolString(input["pattern"]), toolString(runtimeToolMeta(meta)["pattern"]), toolString(output["query"]), toolString(input["query"]), toolString(runtimeToolMeta(meta)["query"]))
-	count := toolInt(output["count"])
-	files := toolInt(output["file_count"])
+	toolMeta := runtimeToolMeta(meta)
+	query := firstNonEmpty(toolString(output["pattern"]), toolString(input["pattern"]), toolString(toolMeta["pattern"]), toolString(output["query"]), toolString(input["query"]), toolString(toolMeta["query"]))
+	count := firstToolInt(output["count"], toolMeta["count"])
+	files := firstToolInt(output["file_count"], toolMeta["file_count"])
 	if query == "" && count <= 0 {
 		return ""
 	}
@@ -145,10 +147,10 @@ func searchResultSummary(input map[string]any, output map[string]any, meta map[s
 		summary = strconv.Quote(query)
 	}
 	if count >= 0 {
-		summary = strings.TrimSpace(summary + " " + pluralize(count, "hit"))
+		summary = strings.TrimSpace(summary + " " + display.Pluralize(count, "hit"))
 	}
 	if files > 0 {
-		summary += " in " + pluralize(files, "file")
+		summary += " in " + display.Pluralize(files, "file")
 	}
 	return summary
 }
@@ -397,14 +399,16 @@ func toolInt(value any) int {
 	return -1
 }
 
+func firstToolInt(values ...any) int {
+	for _, value := range values {
+		if parsed := toolInt(value); parsed >= 0 {
+			return parsed
+		}
+	}
+	return -1
+}
+
 func toolBool(value any) bool {
 	typed, _ := value.(bool)
 	return typed
-}
-
-func pluralize(count int, unit string) string {
-	if count == 1 {
-		return "1 " + unit
-	}
-	return strconv.Itoa(count) + " " + unit + "s"
 }

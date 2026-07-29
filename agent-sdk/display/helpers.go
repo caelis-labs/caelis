@@ -2,6 +2,7 @@ package display
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -31,6 +32,22 @@ func MetaString(meta map[string]any, path ...string) string {
 	}
 	text, _ := current.(string)
 	return strings.TrimSpace(text)
+}
+
+// Pluralize formats a count and English unit for compact display summaries.
+func Pluralize(count int, unit string) string {
+	if count == 1 {
+		return "1 " + unit
+	}
+	switch unit {
+	case "entry":
+		return strconv.Itoa(count) + " entries"
+	case "match":
+		return strconv.Itoa(count) + " matches"
+	case "search":
+		return strconv.Itoa(count) + " searches"
+	}
+	return strconv.Itoa(count) + " " + unit + "s"
 }
 
 func firstNonEmpty(values ...string) string {

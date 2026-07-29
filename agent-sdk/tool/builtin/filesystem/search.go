@@ -2,8 +2,11 @@ package filesystem
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"path/filepath"
 	"regexp"
@@ -18,12 +21,24 @@ import (
 
 const SearchToolName = names.Grep
 
-var errSearchLimitReached = errors.New("search: limit reached")
+const (
+	binaryDetectionBytes = 8 * 1024
+	searchResultLimit    = 100
+	maxSearchLineRunes   = 2000
+)
 
-type searchTerm struct {
-	Raw   string
-	Match string
-	Regex *regexp.Regexp
+var errSearchLimitReached = errors.New("search: result limit reached")
+
+type searchStats struct {
+	filesSelected      int
+	filesScanned       int
+	binaryFilesSkipped int
+}
+
+type searchFileResult struct {
+	stop    bool
+	scanned bool
+	binary  bool
 }
 
 type SearchTool struct {
@@ -41,19 +56,15 @@ func NewSearch(runtime sandbox.Runtime) (*SearchTool, error) {
 func (t *SearchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        SearchToolName,
-		Description: "Search file contents for text or regex matches in one file or directory.",
+		Description: "Search file contents with a regular expression. Matching is case-sensitive by default; use (?i) in pattern for case-insensitive search. Results are capped at 100 lines; use Read for surrounding context or RunCommand with rg for advanced search.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":           map[string]any{"type": "string", "minLength": 1, "description": "File or directory to scan."},
-				"pattern":        map[string]any{"type": "string", "minLength": 1, "description": "Text or regex pattern to find inside files."},
-				"limit":          map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "Max results."},
-				"case_sensitive": map[string]any{"type": "boolean", "description": "Case-sensitive match."},
-				"regex":          map[string]any{"type": "boolean", "description": "Treat pattern as regex."},
-				"include":        stringOrStringArraySchema("File glob or globs to include, relative to path."),
-				"exclude":        stringOrStringArraySchema("File glob or globs to exclude, relative to path."),
+				"pattern": map[string]any{"type": "string", "minLength": 1, "description": "Regular expression matched against file contents."},
+				"path":    map[string]any{"type": "string", "minLength": 1, "description": "File or directory to scan. Defaults to cwd."},
+				"include": map[string]any{"type": "string", "minLength": 1, "description": "Optional file glob relative to path, such as \"*.go\" or \"*.{go,sql}\"."},
 			},
-			"required":             []string{"path", "pattern"},
+			"required":             []string{"pattern"},
 			"additionalProperties": false,
 		},
 		Metadata:              toolutil.AnnotationMetadata(true, false, true, false),
@@ -69,52 +80,37 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	if err != nil {
 		return tool.Result{}, err
 	}
-	if err := tool.RejectUnknownArgs(args, "path", "pattern", "limit", "case_sensitive", "regex", "include", "exclude"); err != nil {
-		return tool.Result{}, err
-	}
-	pathArg, err := argparse.String(args, "path", true)
-	if err != nil {
+	if err := tool.RejectUnknownArgs(args, "pattern", "path", "include"); err != nil {
 		return tool.Result{}, err
 	}
 	pattern, err := argparse.String(args, "pattern", true)
 	if err != nil {
 		return tool.Result{}, err
 	}
-	limit, err := argparse.Int(args, "limit", 50)
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		toolErr := tool.WrapError(tool.ErrorCodeInvalidInput, err, "Grep pattern is not a valid regular expression")
+		toolErr.Hint = "Escape literal regular-expression characters, or use RunCommand with rg for advanced search."
+		return tool.Result{}, toolErr
+	}
+	pathArg, err := argparse.String(args, "path", false)
 	if err != nil {
 		return tool.Result{}, err
 	}
-	if limit <= 0 {
-		limit = 50
+	if pathArg == "" {
+		pathArg = "."
 	}
-	if limit > 200 {
-		limit = 200
-	}
-	caseSensitive, err := argparse.Bool(args, "case_sensitive", false)
+	include, err := argparse.String(args, "include", false)
 	if err != nil {
 		return tool.Result{}, err
 	}
-	regexMode, err := argparse.Bool(args, "regex", false)
-	if err != nil {
-		return tool.Result{}, err
+	if include != "" {
+		if err := validatePathGlobPattern(include, "Grep include"); err != nil {
+			return tool.Result{}, err
+		}
 	}
-	terms, err := parseSearchTerms(pattern, caseSensitive, regexMode)
-	if err != nil {
-		return tool.Result{}, err
-	}
-	if len(terms) == 0 {
-		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "Grep pattern must include at least one non-empty keyword")
-	}
-	exclude, err := parseStringSliceArg(args, "exclude")
-	if err != nil {
-		return tool.Result{}, err
-	}
-	include, err := parseStringSliceArg(args, "include")
-	if err != nil {
-		return tool.Result{}, err
-	}
-	fsys := fileSystemFromRuntime(t.runtime, call.Metadata)
 
+	fsys := fileSystemFromRuntime(t.runtime, call.Metadata)
 	target, err := normalizePathWithFS(fsys, pathArg)
 	if err != nil {
 		return tool.Result{}, err
@@ -124,31 +120,26 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 		return tool.Result{}, err
 	}
 
-	hits := make([]map[string]any, 0, limit)
-	filesWithHits := map[string]struct{}{}
-	truncated := false
-	appendMatch := func(path string, lineNum, column int, match string, text string) bool {
-		filesWithHits[path] = struct{}{}
-		result := map[string]any{
-			"path":   path,
-			"line":   lineNum,
-			"column": column,
-			"match":  match,
-			"text":   text,
-		}
-		hits = append(hits, result)
-		if len(hits) >= limit {
-			truncated = true
-		}
-		return len(hits) >= limit
+	hits := make([]map[string]any, 0, searchResultLimit+1)
+	stats := searchStats{}
+	appendMatch := func(path string, lineNum int, text string) bool {
+		hits = append(hits, map[string]any{
+			"path": path,
+			"line": lineNum,
+			"text": text,
+		})
+		return len(hits) >= searchResultLimit+1
 	}
 
 	root := target
 	if !info.IsDir() {
 		root = filepath.Dir(target)
 	}
-	excludeRules := append(workspaceExcludeRules(fsys, root), excludeRulesFromPatterns(exclude)...)
-	includeRules := pathRulesFromPatterns(include)
+	excludeRules := workspaceExcludeRules(fsys, root)
+	var includeRules []pathMatchRule
+	if include != "" {
+		includeRules = pathRulesFromPatterns([]string{include})
+	}
 	if info.IsDir() {
 		walkErr := walkDir(fsys, target, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
@@ -160,14 +151,11 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 				}
 				return nil
 			}
-			if d == nil || d.IsDir() {
+			if d == nil || d.IsDir() || !shouldIncludeFilePath(root, path, includeRules) {
 				return nil
 			}
-			if !shouldIncludeFilePath(root, path, includeRules) {
-				return nil
-			}
-			_, stop := searchInFile(fsys, path, terms, caseSensitive, appendMatch)
-			if stop {
+			fileResult := searchSelectedFile(fsys, path, compiled, &hits, &stats, appendMatch)
+			if fileResult.stop {
 				return errSearchLimitReached
 			}
 			return nil
@@ -177,148 +165,202 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 		}
 	} else {
 		if shouldExcludePath(root, target, false, excludeRules) || !shouldIncludeFilePath(root, target, includeRules) {
-			return toolutil.JSONResult(SearchToolName, map[string]any{
-				"path":       target,
-				"pattern":    pattern,
-				"regex":      regexMode,
-				"count":      0,
-				"file_count": 0,
-				"truncated":  false,
-				"hits":       []map[string]any{},
-			})
+			return newSearchResult(target, pattern, include, hits, stats)
 		}
-		if _, stop := searchInFile(fsys, target, terms, caseSensitive, appendMatch); stop {
-			truncated = true
+		searchSelectedFile(fsys, target, compiled, &hits, &stats, appendMatch)
+	}
+
+	return newSearchResult(target, pattern, include, hits, stats)
+}
+
+func (s *searchStats) observe(result searchFileResult) {
+	if result.scanned {
+		s.filesScanned++
+	}
+	if result.binary {
+		s.binaryFilesSkipped++
+	}
+}
+
+func searchSelectedFile(
+	fsys sandbox.FileSystem,
+	path string,
+	pattern *regexp.Regexp,
+	hits *[]map[string]any,
+	stats *searchStats,
+	appendMatch func(string, int, string) bool,
+) searchFileResult {
+	stats.filesSelected++
+	hitStart := len(*hits)
+	result := searchInFile(fsys, path, pattern, appendMatch)
+	if result.binary {
+		*hits = (*hits)[:hitStart]
+	}
+	stats.observe(result)
+	return result
+}
+
+func newSearchResult(path string, pattern string, include string, hits []map[string]any, stats searchStats) (tool.Result, error) {
+	truncated := len(hits) > searchResultLimit
+	visible := make([]map[string]any, len(hits))
+	copy(visible, hits)
+	if truncated {
+		visible = visible[:searchResultLimit]
+	}
+	filesWithHits := map[string]struct{}{}
+	for _, hit := range visible {
+		if hitPath, ok := hit["path"].(string); ok {
+			filesWithHits[hitPath] = struct{}{}
 		}
 	}
 
-	return toolutil.JSONResult(SearchToolName, map[string]any{
-		"path":       target,
-		"pattern":    pattern,
-		"regex":      regexMode,
-		"count":      len(hits),
-		"file_count": len(filesWithHits),
-		"truncated":  truncated,
-		"hits":       hits,
-	}, map[string]any{
-		"path":    target,
-		"pattern": pattern,
-		"regex":   regexMode,
-		"terms":   searchTermRawValues(terms),
-		"hits":    hits,
-	})
+	payload := map[string]any{
+		"hits":      visible,
+		"truncated": truncated,
+	}
+	if message := emptySearchMessage(len(visible), include, stats); message != "" {
+		payload["message"] = message
+	}
+	meta := map[string]any{
+		"path":                 path,
+		"pattern":              pattern,
+		"count":                len(visible),
+		"file_count":           len(filesWithHits),
+		"truncated":            truncated,
+		"files_selected":       stats.filesSelected,
+		"files_scanned":        stats.filesScanned,
+		"binary_files_skipped": stats.binaryFilesSkipped,
+	}
+	if include != "" {
+		meta["include"] = include
+	}
+	if message, ok := payload["message"]; ok {
+		meta["message"] = message
+	}
+	return toolutil.JSONResult(SearchToolName, payload, meta)
 }
 
-func searchInFile(fsys sandbox.FileSystem, path string, terms []searchTerm, caseSensitive bool, appendMatch func(string, int, int, string, string) bool) (bool, bool) {
+func emptySearchMessage(hitCount int, include string, stats searchStats) string {
+	if hitCount > 0 {
+		return ""
+	}
+	switch {
+	case include != "" && stats.filesSelected == 0:
+		if suggestion := extensionGlobSuggestion(include); suggestion != "" {
+			return fmt.Sprintf("No files matched include glob %q. It is treated literally; use %q to match file extensions.", include, suggestion)
+		}
+		return fmt.Sprintf("No files matched include glob %q.", include)
+	case stats.filesSelected == 0:
+		return "No searchable files found."
+	case stats.filesScanned == 0 && stats.binaryFilesSkipped > 0:
+		return "No searchable text files found; binary files are skipped."
+	case stats.filesScanned == 0:
+		return "No searchable files could be read."
+	default:
+		return "No content matches found in the selected text files."
+	}
+}
+
+func extensionGlobSuggestion(include string) string {
+	switch {
+	case strings.HasPrefix(include, ".{") && strings.HasSuffix(include, "}"):
+		return "*" + include
+	case strings.HasPrefix(include, "{") && strings.HasSuffix(include, "}"):
+		return "*." + include
+	case strings.HasPrefix(include, ".") && !hasPathGlobMeta(include):
+		return "*" + include
+	default:
+		return ""
+	}
+}
+
+func searchInFile(fsys sandbox.FileSystem, path string, pattern *regexp.Regexp, appendMatch func(string, int, string) bool) searchFileResult {
 	file, err := fsys.Open(path)
 	if err != nil {
-		return false, false
+		return searchFileResult{}
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	reader := bufio.NewReaderSize(file, binaryDetectionBytes)
+	sample, err := reader.Peek(binaryDetectionBytes)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
+		return searchFileResult{}
+	}
+	if bytes.IndexByte(sample, 0) >= 0 {
+		return searchFileResult{binary: true}
+	}
+
+	result := searchFileResult{scanned: true}
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	matched := false
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++
 		text := scanner.Text()
-		candidate := text
-		if !caseSensitive && !searchTermsUseRegex(terms) {
-			candidate = strings.ToLower(candidate)
+		if strings.IndexByte(text, 0) >= 0 {
+			return searchFileResult{binary: true}
 		}
-		if match, column, ok := firstSearchMatch(candidate, terms); ok {
-			matched = true
-			if appendMatch(path, lineNum, column, match, text) {
-				return true, true
-			}
-		}
-	}
-	return matched, false
-}
-
-func parseSearchTerms(pattern string, caseSensitive bool, regexMode bool) ([]searchTerm, error) {
-	pattern = strings.TrimSpace(pattern)
-	if regexMode {
-		if pattern == "" {
-			return nil, nil
-		}
-		regexPattern := pattern
-		if !caseSensitive {
-			regexPattern = "(?i:" + pattern + ")"
-		}
-		compiled, err := regexp.Compile(regexPattern)
-		if err != nil {
-			return nil, tool.WrapError(tool.ErrorCodeInvalidInput, err, "Grep pattern is not a valid regular expression")
-		}
-		return []searchTerm{{Raw: pattern, Regex: compiled}}, nil
-	}
-	parts := strings.Split(pattern, "|")
-	out := make([]searchTerm, 0, len(parts))
-	for _, part := range parts {
-		raw := strings.TrimSpace(part)
-		if raw == "" {
+		if result.stop {
 			continue
 		}
-		match := raw
-		if !caseSensitive {
-			match = strings.ToLower(raw)
-		}
-		out = append(out, searchTerm{Raw: raw, Match: match})
-	}
-	return out, nil
-}
-
-func firstSearchMatch(candidate string, terms []searchTerm) (string, int, bool) {
-	bestColumn := 0
-	bestMatch := ""
-	for _, term := range terms {
-		if term.Regex != nil {
-			idx := term.Regex.FindStringIndex(candidate)
-			if idx == nil {
-				continue
-			}
-			column := idx[0] + 1
-			match := candidate[idx[0]:idx[1]]
-			if bestColumn == 0 || column < bestColumn {
-				bestColumn = column
-				bestMatch = match
-			}
+		match := pattern.FindStringIndex(text)
+		if match == nil {
 			continue
 		}
-		if term.Match == "" {
-			continue
-		}
-		idx := strings.Index(candidate, term.Match)
-		if idx < 0 {
-			continue
-		}
-		column := idx + 1
-		if bestColumn == 0 || column < bestColumn {
-			bestColumn = column
-			bestMatch = term.Raw
+		if appendMatch(path, lineNum, searchLineExcerpt(text, match[0], match[1])) {
+			result.stop = true
 		}
 	}
-	return bestMatch, bestColumn, bestColumn > 0
+	return result
 }
 
-func searchTermsUseRegex(terms []searchTerm) bool {
-	for _, term := range terms {
-		if term.Regex != nil {
-			return true
-		}
+func searchLineExcerpt(text string, matchStart, matchEnd int) string {
+	runes := []rune(text)
+	if len(runes) <= maxSearchLineRunes {
+		return string(runes)
 	}
-	return false
+	matchStart = max(0, min(matchStart, len(text)))
+	matchEnd = max(matchStart, min(matchEnd, len(text)))
+	startRune, endRune := searchMatchRuneRange(text, matchStart, matchEnd, len(runes))
+
+	matchRunes := endRune - startRune
+	start := startRune
+	if matchRunes < maxSearchLineRunes {
+		start -= (maxSearchLineRunes - matchRunes) / 2
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxSearchLineRunes
+	if end > len(runes) {
+		end = len(runes)
+		start = end - maxSearchLineRunes
+	}
+	excerpt := string(runes[start:end])
+	if start > 0 {
+		excerpt = "… [line truncated] " + excerpt
+	}
+	if end < len(runes) {
+		excerpt += "… [line truncated]"
+	}
+	return excerpt
 }
 
-func searchTermRawValues(terms []searchTerm) []string {
-	out := make([]string, 0, len(terms))
-	for _, term := range terms {
-		if term.Raw != "" {
-			out = append(out, term.Raw)
+func searchMatchRuneRange(text string, matchStart, matchEnd int, runeCount int) (int, int) {
+	startRune := runeCount
+	endRune := runeCount
+	runeIndex := 0
+	for byteIndex := range text {
+		if startRune == runeCount && byteIndex >= matchStart {
+			startRune = runeIndex
 		}
+		if byteIndex >= matchEnd {
+			endRune = runeIndex
+			break
+		}
+		runeIndex++
 	}
-	return out
+	return startRune, endRune
 }
 
 var _ tool.Tool = (*SearchTool)(nil)

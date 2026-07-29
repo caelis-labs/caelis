@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -971,16 +970,5 @@ func toolSignalDisplayVerb(name string) string {
 }
 
 func pluralizeUnit(n int, unit string) string {
-	if n == 1 {
-		return "1 " + unit
-	}
-	switch unit {
-	case "entry":
-		return strconv.Itoa(n) + " entries"
-	case "match":
-		return strconv.Itoa(n) + " matches"
-	case "search":
-		return strconv.Itoa(n) + " searches"
-	}
-	return strconv.Itoa(n) + " " + unit + "s"
+	return display.Pluralize(n, unit)
 }

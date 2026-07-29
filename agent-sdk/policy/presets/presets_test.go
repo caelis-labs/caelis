@@ -199,7 +199,7 @@ func TestDefaultModeReadToolsDoNotRequireExplicitReadGrantsForOrdinaryReads(t *t
 	cases := []policy.ToolContext{
 		readCtx(configPath),
 		searchCtx(filepath.Dir(configPath), "theme"),
-		globCtx(filepath.Join(filepath.Dir(configPath), "*")),
+		globCtx(filepath.Dir(configPath), "*"),
 	}
 	for _, input := range cases {
 		input.Options.ExtraReadRoots = []string{extraReadRoot}
@@ -241,18 +241,30 @@ func TestDefaultModeCommandConstraintsDoNotProjectPolicyReadGrants(t *testing.T)
 func TestDefaultModeDeniesSensitiveUserConfigReadsByDefault(t *testing.T) {
 	home := t.TempDir()
 	setHomeForPresetsTest(t, home)
+	defaultSearch := searchCtx("", "PRIVATE")
+	defaultSearch.Options.WorkspaceRoot = filepath.Join(home, ".ssh")
 
-	for _, secretPath := range []string{
-		filepath.Join(home, ".ssh", "id_rsa"),
-		filepath.Join(home, ".config", "gh", "hosts.yml"),
+	for _, test := range []struct {
+		name  string
+		input policy.ToolContext
+	}{
+		{name: "read ssh", input: readCtx(filepath.Join(home, ".ssh", "id_rsa"))},
+		{name: "search ssh", input: searchCtx(filepath.Join(home, ".ssh"), "PRIVATE")},
+		{name: "search default ssh workspace", input: defaultSearch},
+		{name: "glob ssh", input: globCtx(filepath.Join(home, ".ssh"), "*")},
+		{name: "glob ssh tilde", input: globCtx("~/.ssh", "*")},
+		{name: "read gh", input: readCtx(filepath.Join(home, ".config", "gh", "hosts.yml"))},
+		{name: "glob gh", input: globCtx(filepath.Join(home, ".config", "gh"), "*")},
 	} {
-		decision, err := AutoReviewMode().DecideTool(context.Background(), readCtx(secretPath))
-		if err != nil {
-			t.Fatalf("READ DecideTool(%q) error = %v", secretPath, err)
-		}
-		if decision.Action != policy.ActionDeny {
-			t.Fatalf("READ action for %q = %q, want deny", secretPath, decision.Action)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			decision, err := AutoReviewMode().DecideTool(context.Background(), test.input)
+			if err != nil {
+				t.Fatalf("DecideTool() error = %v", err)
+			}
+			if decision.Action != policy.ActionDeny {
+				t.Fatalf("action = %q, want deny for %#v", decision.Action, test.input.Call)
+			}
+		})
 	}
 }
 
@@ -261,15 +273,19 @@ func TestDefaultModeAllowsExplicitSensitiveUserConfigReadRoot(t *testing.T) {
 	setHomeForPresetsTest(t, home)
 	ghRoot := filepath.Join(home, ".config", "gh")
 	secretPath := filepath.Join(ghRoot, "hosts.yml")
-	input := readCtx(secretPath)
-	input.Options.ExtraReadRoots = []string{ghRoot}
-
-	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
-	if err != nil {
-		t.Fatalf("READ DecideTool() error = %v", err)
-	}
-	if decision.Action != policy.ActionAllow {
-		t.Fatalf("READ action = %q, want allow with explicit read root (reason=%q)", decision.Action, decision.Reason)
+	for _, input := range []policy.ToolContext{
+		readCtx(secretPath),
+		searchCtx(ghRoot, "oauth_token"),
+		globCtx(ghRoot, "*"),
+	} {
+		input.Options.ExtraReadRoots = []string{ghRoot}
+		decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+		if err != nil {
+			t.Fatalf("%s DecideTool() error = %v", input.Tool.Name, err)
+		}
+		if decision.Action != policy.ActionAllow {
+			t.Fatalf("%s action = %q, want allow with explicit read root (reason=%q)", input.Tool.Name, decision.Action, decision.Reason)
+		}
 	}
 }
 
@@ -851,8 +867,9 @@ func TestDefaultModeAllowsRelativeFilesystemPathsWithinWorkspace(t *testing.T) {
 	cases := []policy.ToolContext{
 		readCtx("README.md"),
 		searchCtx(".", "prompt"),
-		globCtx("*.md"),
-		globCtx("README*"),
+		searchCtx("", "prompt"),
+		globCtx(".", "*.md"),
+		globCtx(".", "README*"),
 	}
 	for _, input := range cases {
 		decision, err := AutoReviewMode().DecideTool(context.Background(), input)
@@ -871,7 +888,7 @@ func TestDefaultModeAllowsRelativeReadPathsOutsideWorkspace(t *testing.T) {
 	cases := []policy.ToolContext{
 		readCtx("../secret.txt"),
 		searchCtx("../outside", "prompt"),
-		globCtx("../*.md"),
+		globCtx("..", "*.md"),
 	}
 	for _, input := range cases {
 		decision, err := AutoReviewMode().DecideTool(context.Background(), input)
@@ -1069,7 +1086,11 @@ func readCtx(path string) policy.ToolContext {
 }
 
 func searchCtx(path string, pattern string) policy.ToolContext {
-	raw, _ := json.Marshal(map[string]any{"path": path, "pattern": pattern})
+	input := map[string]any{"pattern": pattern}
+	if strings.TrimSpace(path) != "" {
+		input["path"] = path
+	}
+	raw, _ := json.Marshal(input)
 	return policy.ToolContext{
 		Tool: tool.Definition{Name: "SEARCH"},
 		Call: tool.Call{Name: "SEARCH", Input: raw},
@@ -1081,8 +1102,8 @@ func searchCtx(path string, pattern string) policy.ToolContext {
 	}
 }
 
-func globCtx(pattern string) policy.ToolContext {
-	raw, _ := json.Marshal(map[string]any{"pattern": pattern})
+func globCtx(path string, pattern string) policy.ToolContext {
+	raw, _ := json.Marshal(map[string]any{"path": path, "pattern": pattern})
 	return policy.ToolContext{
 		Tool: tool.Definition{Name: "GLOB"},
 		Call: tool.Call{Name: "GLOB", Input: raw},

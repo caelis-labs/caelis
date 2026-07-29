@@ -95,61 +95,6 @@ func walkDir(fsys sandbox.FileSystem, root string, fn fs.WalkDirFunc) error {
 	return fsys.WalkDir(root, fn)
 }
 
-func parseStringSliceArg(args map[string]any, key string) ([]string, error) {
-	if len(args) == 0 {
-		return nil, nil
-	}
-	raw, ok := args[key]
-	if !ok || raw == nil {
-		return nil, nil
-	}
-	switch typed := raw.(type) {
-	case string:
-		typed = strings.TrimSpace(typed)
-		if typed == "" {
-			return nil, nil
-		}
-		return []string{typed}, nil
-	case []string:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			item = strings.TrimSpace(item)
-			if item != "" {
-				out = append(out, item)
-			}
-		}
-		return out, nil
-	case []any:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			text, ok := item.(string)
-			if !ok {
-				return nil, fmt.Errorf("tool: arg %q must be a string or array of strings", key)
-			}
-			text = strings.TrimSpace(text)
-			if text != "" {
-				out = append(out, text)
-			}
-		}
-		return out, nil
-	default:
-		return nil, fmt.Errorf("tool: arg %q must be a string or array of strings", key)
-	}
-}
-
-func stringOrStringArraySchema(description string) map[string]any {
-	return map[string]any{
-		"description": strings.TrimSpace(description),
-		"anyOf": []any{
-			map[string]any{"type": "string", "minLength": 1},
-			map[string]any{
-				"type":  "array",
-				"items": map[string]any{"type": "string", "minLength": 1},
-			},
-		},
-	}
-}
-
 type pathMatchRule struct {
 	pattern   string
 	negated   bool
@@ -177,13 +122,10 @@ func pathRulesFromPatterns(patterns []string) []pathMatchRule {
 	return rules
 }
 
-func excludeRulesFromPatterns(patterns []string) []pathExcludeRule {
-	return pathRulesFromPatterns(patterns)
-}
-
 func defaultWorkspaceExcludeRules() []pathExcludeRule {
 	return []pathExcludeRule{
 		{pattern: ".git", recursive: true, dirOnly: true},
+		{pattern: ".crush", recursive: true, dirOnly: true},
 	}
 }
 
@@ -326,6 +268,22 @@ func normalizeRelativeMatchPath(value string) string {
 
 func hasPathGlobMeta(pattern string) bool {
 	return strings.ContainsAny(pattern, "*?[") || hasPathBraceExpansion(pattern)
+}
+
+func validatePathGlobPattern(pattern string, label string) error {
+	for _, expanded := range expandPathBraceAlternates(filepath.ToSlash(pattern)) {
+		for _, segment := range strings.Split(expanded, "/") {
+			if segment == "" || segment == "**" {
+				continue
+			}
+			if _, err := path.Match(segment, ""); err != nil {
+				toolErr := tool.WrapError(tool.ErrorCodeInvalidInput, err, strings.TrimSpace(label)+" is not a valid glob")
+				toolErr.Hint = "Use a file glob such as \"*.go\" or \"**/*.{go,sql}\"."
+				return toolErr
+			}
+		}
+	}
+	return nil
 }
 
 func pathGlobMatch(pattern, rel string) bool {

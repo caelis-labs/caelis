@@ -83,18 +83,18 @@ func TestGitignoreExcludePatternsHonorNegatedRules(t *testing.T) {
 	}
 }
 
-func TestExcludeRulesFromPatternsMatchBarePatternsRecursively(t *testing.T) {
+func TestPathRulesFromPatternsMatchBarePatternsRecursively(t *testing.T) {
 	root := t.TempDir()
-	patterns := excludeRulesFromPatterns([]string{"*_test.go"})
+	patterns := pathRulesFromPatterns([]string{"*_test.go"})
 
-	if !shouldExcludePath(root, filepath.Join(root, "root_test.go"), false, patterns) {
-		t.Fatal("root test file was not excluded")
+	if !shouldIncludeFilePath(root, filepath.Join(root, "root_test.go"), patterns) {
+		t.Fatal("root test file was not included")
 	}
-	if !shouldExcludePath(root, filepath.Join(root, "pkg", "nested_test.go"), false, patterns) {
-		t.Fatal("nested test file was not excluded")
+	if !shouldIncludeFilePath(root, filepath.Join(root, "pkg", "nested_test.go"), patterns) {
+		t.Fatal("nested test file was not included")
 	}
-	if shouldExcludePath(root, filepath.Join(root, "pkg", "nested.go"), false, patterns) {
-		t.Fatal("non-test file was excluded")
+	if shouldIncludeFilePath(root, filepath.Join(root, "pkg", "nested.go"), patterns) {
+		t.Fatal("non-test file was included")
 	}
 }
 

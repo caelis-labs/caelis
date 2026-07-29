@@ -172,9 +172,17 @@ func candidatePaths(input policy.ToolContext) ([]string, error) {
 		return nil, nil
 	}
 	switch info.ResultStyle {
-	case names.ResultRead, names.ResultMutation, names.ResultSearch:
+	case names.ResultRead, names.ResultMutation:
 		return resolvePathsAgainstWorkspace(stringValues(args["path"]), input.Options.WorkspaceRoot), nil
+	case names.ResultSearch:
+		if roots := resolvePathsAgainstWorkspace(stringValues(args["path"]), input.Options.WorkspaceRoot); len(roots) > 0 {
+			return roots, nil
+		}
+		return resolvePathsAgainstWorkspace([]string{"."}, input.Options.WorkspaceRoot), nil
 	case names.ResultGlob:
+		if roots := resolvePathsAgainstWorkspace(stringValues(args["path"]), input.Options.WorkspaceRoot); len(roots) > 0 {
+			return roots, nil
+		}
 		return globRoots(stringValues(args["pattern"]), input.Options.WorkspaceRoot), nil
 	default:
 		return nil, nil
@@ -198,6 +206,11 @@ func resolvePolicyPath(value string, workspaceRoot string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
+	}
+	if strings.HasPrefix(value, "~/") {
+		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+			value = filepath.Join(home, value[2:])
+		}
 	}
 	if filepath.IsAbs(value) {
 		return filepath.Clean(value)
