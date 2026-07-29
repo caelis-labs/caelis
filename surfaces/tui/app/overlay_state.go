@@ -19,6 +19,9 @@ type OverlayState struct {
 	btwOverlay   *btwOverlayState
 	btwDismissed bool
 
+	subagentOverlay    *subagentOverlayState
+	subagentRequestSeq uint64
+
 	activePrompt  *promptState
 	pendingPrompt []PromptRequestMsg
 
@@ -78,6 +81,7 @@ type OverlayState struct {
 // HasActiveOverlay returns true if any overlay is currently visible.
 func (o *OverlayState) HasActiveOverlay() bool {
 	return o.btwOverlay != nil ||
+		o.subagentOverlay != nil ||
 		o.activePrompt != nil ||
 		o.showPalette ||
 		len(o.mentionCandidates) > 0 ||

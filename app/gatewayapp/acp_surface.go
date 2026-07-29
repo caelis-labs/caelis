@@ -209,39 +209,37 @@ func (p gatewayACPSurface) PromptCapabilities(context.Context) (acp.PromptCapabi
 }
 
 func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID string) ([]acp.AvailableCommand, error) {
+	var bindingStatus agentbinding.Status
 	boundProfiles := map[string]agentbinding.HandleStatus{}
 	if p.stack != nil {
 		if status, err := p.stack.AgentBindings().AgentBindingStatus(ctx); err == nil {
-			for _, handle := range status.Handles {
-				if !agentbinding.IsDirectRun(handle.Definition.Handle) || !agentbinding.IsBound(handle) {
-					continue
-				}
+			bindingStatus = status
+			for _, handle := range agentbinding.BoundDirectHandles(status) {
 				boundProfiles[string(handle.Definition.Handle)] = handle
 			}
 		}
 	}
 	commands := make([]acp.AvailableCommand, 0, len(controlprompt.DefaultACPSpecs()))
 	seen := map[string]struct{}{}
-	for _, spec := range controlprompt.DefaultACPSpecs() {
-		if spec.Hidden {
-			continue
-		}
-		profile, isProfile := boundProfiles[strings.ToLower(strings.TrimSpace(spec.Name))]
-		if agentbinding.IsDirectRun(agentbinding.Handle(spec.Name)) && !isProfile {
-			continue
-		}
+	for _, name := range agentbinding.ProjectBoundDirectNames(controlprompt.DefaultACPNames(), bindingStatus) {
+		spec, known := controlprompt.LookupACP(name)
 		cmd := acp.AvailableCommand{
-			Name:        spec.Name,
-			Description: spec.Description,
+			Name: name,
 		}
-		if isProfile {
+		if known {
+			cmd.Description = spec.Description
+			if hint := availableCommandHint(spec.Usage); hint != "" {
+				cmd.Input = commandInput(hint)
+			}
+		}
+		if profile, isProfile := boundProfiles[name]; isProfile {
 			cmd.Description = availableProfileDescription(profile)
-		}
-		if hint := availableCommandHint(spec.Usage); hint != "" {
-			cmd.Input = commandInput(hint)
+			if !known {
+				cmd.Input = commandInput("prompt")
+			}
 		}
 		commands = append(commands, cmd)
-		seen[strings.ToLower(strings.TrimSpace(spec.Name))] = struct{}{}
+		seen[name] = struct{}{}
 	}
 	if p.stack != nil {
 		if strings.TrimSpace(sessionID) != "" {
@@ -258,9 +256,7 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 					participant.Source,
 				))
 			}
-			for _, name := range controlagents.AppendRunNames(nil, runs, func(name string) bool {
-				return agentbinding.IsDirectRun(agentbinding.Handle(name))
-			}) {
+			for _, name := range controlagents.AppendRunNames(nil, runs, nil) {
 				if _, exists := seen[name]; exists {
 					continue
 				}

@@ -91,6 +91,65 @@ func TestAgentBindingServiceRollsForwardAfterCommittedConfigWriteFault(t *testin
 	}
 }
 
+func TestAgentBindingServicePersistsCustomRoleAndSwitchesNamedSnapshot(t *testing.T) {
+	stack, _ := newLocalStateTestStack(t)
+	profile, err := stack.Connect(ModelConfig{Provider: "ollama", Model: "binding-role"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshes := 0
+	stack.refreshConfiguredAgentsHook = func() error {
+		refreshes++
+		return nil
+	}
+	service := stack.AgentBindings()
+	status, err := service.CreateAgentRole(context.Background(), agentbinding.Role{
+		Handle: "research", Description: "Investigate unfamiliar systems.",
+	}, agentbinding.Binding{ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshes != 1 {
+		t.Fatalf("runtime refreshes after create = %d, want 1", refreshes)
+	}
+	assertAgentBindingTarget(t, status, "research", profile.ID)
+
+	if _, err := service.SaveAgentBindingSet(context.Background(), "research-only"); err != nil {
+		t.Fatal(err)
+	}
+	if refreshes != 1 {
+		t.Fatalf("snapshot-only save refreshed runtime %d times, want 1", refreshes)
+	}
+	if _, err := service.BindAgentBinding(context.Background(), agentbinding.Binding{
+		Handle: agentbinding.HandleOrbit, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if refreshes != 2 {
+		t.Fatalf("runtime refreshes after bind = %d, want 2", refreshes)
+	}
+	status, err = service.ApplyAgentBindingSet(context.Background(), "research-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshes != 3 {
+		t.Fatalf("runtime refreshes after apply = %d, want 3", refreshes)
+	}
+	assertAgentBindingTarget(t, status, agentbinding.HandleOrbit, "")
+	assertAgentBindingTarget(t, status, "research", profile.ID)
+
+	loaded, err := stack.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if role, ok := agentbinding.LookupRole(loaded.AgentBindings, "research"); !ok || role.Description == "" {
+		t.Fatalf("persisted role = %#v, %v", role, ok)
+	}
+	if set, ok := agentbinding.LookupBindingSet(loaded.AgentBindings, "research-only"); !ok || len(set.Bindings) != 1 {
+		t.Fatalf("persisted set = %#v, %v", set, ok)
+	}
+}
+
 func assertAgentBindingTarget(t *testing.T, status agentbinding.Status, handle agentbinding.Handle, profileID string) {
 	t.Helper()
 	for _, item := range status.Handles {

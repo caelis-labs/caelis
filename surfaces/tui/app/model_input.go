@@ -7,10 +7,14 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if handled, cmd := m.handleSubagentOverlayMouse(msg); handled {
+		return m, cmd
+	}
 	switch typed := msg.(type) {
 	case tea.MouseWheelMsg:
 		if m.btwOverlay != nil {
@@ -532,6 +536,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.activePrompt != nil {
 		return m, m.handlePromptKey(msg)
 	}
+	if m.subagentOverlay != nil {
+		return m, m.handleSubagentOverlayKey(msg)
+	}
 	if m.btwOverlay != nil {
 		return m.handleBTWOverlayKey(msg)
 	}
@@ -742,11 +749,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 		case len(m.slashCandidates) > 0:
-			m.applySlashCommandCompletion()
+			cmd := m.applySlashCommandCompletion()
 			m.syncTextareaFromInput()
+			if cmd != nil {
+				return m, cmd
+			}
 		case strings.HasPrefix(strings.TrimSpace(val), "/") && !strings.Contains(strings.TrimSpace(val), " "):
-			m.applySlashCommandCompletion()
+			cmd := m.applySlashCommandCompletion()
 			m.syncTextareaFromInput()
+			if cmd != nil {
+				return m, cmd
+			}
 		}
 		return m, nil
 
@@ -1109,6 +1122,9 @@ func (m *Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if m.activePrompt != nil {
 		return m, m.handlePromptPaste(msg)
 	}
+	if m.subagentOverlay != nil {
+		return m, m.handleSubagentOverlayPaste(msg)
+	}
 	if m.btwOverlay != nil {
 		return m, nil
 	}
@@ -1178,7 +1194,8 @@ func (m *Model) submitLine(line string) (tea.Model, tea.Cmd) {
 
 // submitInteractiveLine is the shared keyboard/mouse entry for a complete
 // composer line. It preserves the existing command availability gates and
-// opens slash pickers or wizards before falling through to normal submission.
+// opens slash pickers, wizards, or dedicated overlays before falling through
+// to normal submission.
 func (m *Model) submitInteractiveLine(execLine string, displayLine string, attachments []Attachment) (tea.Model, tea.Cmd) {
 	execLine = strings.TrimSpace(execLine)
 	if execLine == "" && len(attachments) == 0 {
@@ -1205,12 +1222,28 @@ func (m *Model) submitInteractiveLine(execLine string, displayLine string, attac
 		}
 		return m.submitLine("/connect")
 	}
+	if execLine == "/subagent" && m.isCommandAvailable("subagent") {
+		m.resetComposerAfterOverlayOpen()
+		return m, m.openSubagentOverlay()
+	}
 	if m.tryOpenSlashArgPicker(execLine) {
 		return m, m.requestCompletionRefresh()
 	}
 	return m.submitLineWithDisplayAndAttachmentsOptions(execLine, displayLine, attachments, submitLineOptions{
 		recordHistory: true,
 	})
+}
+
+func (m *Model) resetComposerAfterOverlayOpen() {
+	if m == nil {
+		return
+	}
+	m.setInputText("")
+	m.clearInputOverlays()
+	m.syncTextareaFromInput()
+	m.historyIndex = -1
+	m.historyDraft = ""
+	m.historyDraftAttachments = nil
 }
 
 func (m *Model) requestRunningInterrupt() (tea.Model, tea.Cmd) {
@@ -1376,10 +1409,7 @@ func (m *Model) deferLocalUserDisplayLine(line string) bool {
 	if strings.EqualFold(name, "review") && controlprompt.IsLocalDuringACP(name) {
 		return true
 	}
-	if tuiAgentCommandNameAllowed(name) && m.hasConfiguredCommand(name) {
-		return true
-	}
-	return m.isKnownDynamicAgentSlashLine(line)
+	return m.isConfiguredAgentSlashLine(line)
 }
 
 func (m *Model) executeLineCmd(submission Submission) tea.Cmd {
@@ -1402,13 +1432,13 @@ func (m *Model) submitPendingPrompt(prompt pendingPrompt) (tea.Model, tea.Cmd) {
 	return m.submitLineWithDisplayAndAttachmentsOptions(prompt.execLine, prompt.displayLine, prompt.attachments, submitLineOptions{})
 }
 
-func (m *Model) isKnownDynamicAgentSlashLine(line string) bool {
+func (m *Model) isConfiguredAgentSlashLine(line string) bool {
 	name := slashCommandName(line)
 	if name == "" || m == nil {
 		return false
 	}
 	if _, ok := controlprompt.Lookup(name); ok {
-		return false
+		return agentbinding.IsDirectRun(agentbinding.Handle(name)) && m.hasConfiguredCommand(name)
 	}
 	return m.hasConfiguredCommand(name)
 }

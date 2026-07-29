@@ -256,6 +256,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.clearCompletionMouseState()
+		if m.subagentOverlay != nil {
+			m.subagentOverlay.pressedKey = ""
+		}
 		m.width = typed.Width
 		m.height = typed.Height
 		m.syncTextareaChrome()
@@ -370,6 +373,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case slashArgLoadResultMsg:
 		return m, m.handleSlashArgLoadResult(typed)
+
+	case subagentOverlayResultMsg:
+		return m, m.handleSubagentOverlayResult(typed)
 
 	case acpSetupProgressMsg:
 		m.handleACPSetupProgress(typed)

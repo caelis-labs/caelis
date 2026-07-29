@@ -63,12 +63,11 @@ type ModelChoice struct {
 	Detail             string
 }
 
-// AgentBindingRuntimeDeps carries the one Control-owned fixed-handle service.
+// AgentBindingRuntimeDeps carries the one Control-owned Agent configuration
+// service.
 type AgentBindingRuntimeDeps struct {
-	StatusFn  func(context.Context) (agentbinding.Status, error)
-	BindFn    func(context.Context, agentbinding.Binding) (agentbinding.Status, error)
-	ResetFn   func(context.Context, agentbinding.Handle) (agentbinding.Status, error)
-	ResolveFn func(context.Context, agentbinding.Handle) (sdkplacement.Placement, error)
+	Configuration agentbinding.ConfigurationService
+	ResolveFn     func(context.Context, agentbinding.Handle) (sdkplacement.Placement, error)
 }
 
 type SessionRuntimeState struct {

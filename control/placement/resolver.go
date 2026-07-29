@@ -35,7 +35,8 @@ type SessionContext struct {
 	Effort    string `json:"effort,omitempty"`
 }
 
-// HandleRequest asks Control to resolve one fixed handle for one operation.
+// HandleRequest asks Control to resolve one configured handle for one
+// operation.
 // Participant attachment uses ResolveParticipant instead, so a request cannot
 // mix handle-binding and explicit-profile semantics.
 type HandleRequest struct {
@@ -92,13 +93,18 @@ type Snapshot struct {
 	Agents   controlagents.Configuration `json:"agents,omitempty"`
 }
 
-// PurposeForHandle returns the operation used when a host directly invokes a
-// user-addressable or system handle. Self remains Session-derived and callers
-// resolving it for Spawn or Delegate must choose that purpose explicitly.
-func PurposeForHandle(raw agentbinding.Handle) (Purpose, error) {
+// PurposeForFixedHandle returns the operation used when a host directly
+// invokes one fixed handle.
+func PurposeForFixedHandle(raw agentbinding.Handle) (Purpose, error) {
+	return PurposeForHandle(agentbinding.CatalogFor(agentbinding.Configuration{}), raw)
+}
+
+// PurposeForHandle returns the direct invocation purpose for one handle in the
+// supplied immutable catalog.
+func PurposeForHandle(catalog agentbinding.Catalog, raw agentbinding.Handle) (Purpose, error) {
 	handle := agentbinding.NormalizeHandle(raw)
 	switch {
-	case agentbinding.IsDirectRun(handle):
+	case catalog.IsDirectRun(handle):
 		return PurposeDirect, nil
 	case handle == agentbinding.HandleGuardian:
 		return PurposeGuardian, nil
@@ -111,7 +117,7 @@ func PurposeForHandle(raw agentbinding.Handle) (Purpose, error) {
 	}
 }
 
-// ResolveHandle resolves one fixed handle from a caller-owned immutable
+// ResolveHandle resolves one configured handle from a caller-owned immutable
 // snapshot and returns a sealed SDK Placement.
 func ResolveHandle(snapshot Snapshot, req HandleRequest) (sdkplacement.Placement, error) {
 	if err := ValidateSnapshot(snapshot); err != nil {
@@ -119,7 +125,7 @@ func ResolveHandle(snapshot Snapshot, req HandleRequest) (sdkplacement.Placement
 	}
 	purpose := Purpose(strings.ToLower(strings.TrimSpace(string(req.Purpose))))
 	handle := agentbinding.NormalizeHandle(req.Handle)
-	if err := validateHandlePurpose(handle, purpose); err != nil {
+	if err := validateHandlePurpose(snapshot.Bindings, handle, purpose); err != nil {
 		return sdkplacement.Placement{}, err
 	}
 
@@ -352,14 +358,15 @@ func resolveACP(snapshot Snapshot, profile modelprofile.ModelProfile, effort str
 	})
 }
 
-func validateHandlePurpose(handle agentbinding.Handle, purpose Purpose) error {
+func validateHandlePurpose(configuration agentbinding.Configuration, handle agentbinding.Handle, purpose Purpose) error {
+	catalog := agentbinding.CatalogFor(configuration)
 	switch purpose {
 	case PurposeSpawn, PurposeDelegate:
-		if !agentbinding.IsDelegation(handle) {
+		if !catalog.IsDelegation(handle) {
 			return fmt.Errorf("control/placement: handle %q is not valid for %s", handle, purpose)
 		}
 	case PurposeDirect:
-		if !agentbinding.IsDirectRun(handle) {
+		if !catalog.IsDirectRun(handle) {
 			return fmt.Errorf("control/placement: handle %q is not directly runnable", handle)
 		}
 	case PurposeGuardian:

@@ -29,9 +29,30 @@ type Binding struct {
 	Effort    string `json:"effort,omitempty"`
 }
 
-// Configuration is the single persisted handle-binding table.
-type Configuration struct {
+// Role defines one user-created delegation handle. Custom roles deliberately
+// carry only the stable handle and the description presented to Agents and
+// users; their display name is the handle itself.
+type Role struct {
+	Handle      Handle `json:"handle,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// BindingSet stores one named snapshot of explicit handle bindings. Snapshot
+// entries are allowed to become unavailable when a referenced role or
+// ModelProfile is later removed; applying the set validates it atomically
+// against current configuration.
+type BindingSet struct {
+	Name     string    `json:"name,omitempty"`
 	Bindings []Binding `json:"bindings,omitempty"`
+}
+
+// Configuration is the single persisted role, handle-binding, and binding-set
+// document. Roles and Sets are optional additive fields so schema-v2 documents
+// written before their introduction remain valid without migration.
+type Configuration struct {
+	Roles    []Role       `json:"roles,omitempty"`
+	Bindings []Binding    `json:"bindings,omitempty"`
+	Sets     []BindingSet `json:"sets,omitempty"`
 }
 
 // UnsupportedBackendError reports a system handle bound to an execution
@@ -67,7 +88,7 @@ func (e *UnsupportedBackendError) Error() string {
 	return fmt.Sprintf("control/agentbinding: handle %q cannot use %s profile %q", e.Handle, e.Backend, e.ProfileID)
 }
 
-// NormalizeHandle canonicalizes one fixed handle.
+// NormalizeHandle canonicalizes one fixed or custom handle.
 func NormalizeHandle(handle Handle) Handle {
 	return Handle(strings.ToLower(strings.TrimSpace(string(handle))))
 }
@@ -81,9 +102,57 @@ func Normalize(in Binding) Binding {
 	}
 }
 
-// NormalizeConfiguration returns detached bindings in fixed presentation order.
+// NormalizeRole returns one canonical custom role.
+func NormalizeRole(in Role) Role {
+	return Role{
+		Handle:      NormalizeHandle(in.Handle),
+		Description: strings.TrimSpace(in.Description),
+	}
+}
+
+func normalizedRoles(roles []Role) []Role {
+	var out []Role
+	seen := make(map[Handle]struct{}, len(roles))
+	for _, raw := range roles {
+		role := NormalizeRole(raw)
+		if role.Handle == "" || role.Description == "" {
+			continue
+		}
+		if _, ok := seen[role.Handle]; ok {
+			continue
+		}
+		seen[role.Handle] = struct{}{}
+		out = append(out, role)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Handle < out[j].Handle
+	})
+	return out
+}
+
+// NormalizeBindingSet returns one detached canonical binding snapshot.
+func NormalizeBindingSet(in BindingSet) BindingSet {
+	out := BindingSet{Name: NormalizeSetName(in.Name)}
+	seen := make(map[Handle]struct{}, len(in.Bindings))
+	for _, raw := range in.Bindings {
+		binding := Normalize(raw)
+		if binding.Handle == "" || binding.ProfileID == "" || binding.Effort == "" {
+			continue
+		}
+		if _, ok := seen[binding.Handle]; ok {
+			continue
+		}
+		seen[binding.Handle] = struct{}{}
+		out.Bindings = append(out.Bindings, binding)
+	}
+	sortBindings(out.Bindings, Configuration{})
+	return out
+}
+
+// NormalizeConfiguration returns one detached deterministic configuration.
 func NormalizeConfiguration(in Configuration) Configuration {
-	out := Configuration{}
+	out := Configuration{Roles: normalizedRoles(in.Roles)}
+
 	seen := make(map[Handle]struct{}, len(in.Bindings))
 	for _, raw := range in.Bindings {
 		binding := Normalize(raw)
@@ -96,12 +165,23 @@ func NormalizeConfiguration(in Configuration) Configuration {
 		seen[binding.Handle] = struct{}{}
 		out.Bindings = append(out.Bindings, binding)
 	}
-	sort.Slice(out.Bindings, func(i, j int) bool {
-		left, right := order(out.Bindings[i].Handle), order(out.Bindings[j].Handle)
-		if left != right {
-			return left < right
+	sortBindings(out.Bindings, out)
+
+	seenSets := make(map[string]struct{}, len(in.Sets))
+	for _, raw := range in.Sets {
+		set := NormalizeBindingSet(raw)
+		if set.Name == "" {
+			continue
 		}
-		return out.Bindings[i].Handle < out.Bindings[j].Handle
+		if _, ok := seenSets[set.Name]; ok {
+			continue
+		}
+		seenSets[set.Name] = struct{}{}
+		sortBindings(set.Bindings, out)
+		out.Sets = append(out.Sets, set)
+	}
+	sort.Slice(out.Sets, func(i, j int) bool {
+		return out.Sets[i].Name < out.Sets[j].Name
 	})
 	return out
 }
@@ -111,10 +191,13 @@ func ValidateConfiguration(in Configuration, profiles modelprofile.Configuration
 	if err := modelprofile.ValidateConfiguration(profiles); err != nil {
 		return fmt.Errorf("control/agentbinding: invalid model profiles: %w", err)
 	}
+	if err := ValidateRoles(in.Roles); err != nil {
+		return err
+	}
 	seen := make(map[Handle]struct{}, len(in.Bindings))
 	for _, raw := range in.Bindings {
 		binding := Normalize(raw)
-		if !isPersistedHandle(binding.Handle) {
+		if !isPersistedHandleIn(in, binding.Handle) {
 			if binding.Handle == HandleSelf {
 				return fmt.Errorf("control/agentbinding: self is Session-derived and cannot be persisted")
 			}
@@ -138,6 +221,9 @@ func ValidateConfiguration(in Configuration, profiles modelprofile.Configuration
 			return &UnsupportedBackendError{Handle: binding.Handle, ProfileID: profile.ID, Backend: profile.Kind()}
 		}
 	}
+	if err := ValidateBindingSets(in.Sets); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -146,7 +232,7 @@ func ValidateConfiguration(in Configuration, profiles modelprofile.Configuration
 // partially normalized mutation.
 func Bind(current Configuration, raw Binding, profiles modelprofile.Configuration) (Configuration, error) {
 	binding := Normalize(raw)
-	if !isPersistedHandle(binding.Handle) {
+	if !isPersistedHandleIn(current, binding.Handle) {
 		if binding.Handle == HandleSelf {
 			return Configuration{}, fmt.Errorf("control/agentbinding: self is Session-derived and cannot be bound")
 		}
@@ -160,6 +246,8 @@ func Bind(current Configuration, raw Binding, profiles modelprofile.Configuratio
 		}
 	}
 	next.Bindings = append(next.Bindings, binding)
+	next.Roles = append(next.Roles, current.Roles...)
+	next.Sets = append(next.Sets, current.Sets...)
 	if err := ValidateConfiguration(next, profiles); err != nil {
 		return Configuration{}, err
 	}
@@ -169,10 +257,13 @@ func Bind(current Configuration, raw Binding, profiles modelprofile.Configuratio
 // Reset removes one explicit binding.
 func Reset(current Configuration, handle Handle) (Configuration, error) {
 	handle = NormalizeHandle(handle)
-	if !isPersistedHandle(handle) {
+	if !isPersistedHandleIn(current, handle) {
 		return Configuration{}, fmt.Errorf("control/agentbinding: handle %q cannot be reset", handle)
 	}
-	next := Configuration{}
+	next := Configuration{
+		Roles: append([]Role(nil), current.Roles...),
+		Sets:  append([]BindingSet(nil), current.Sets...),
+	}
 	for _, binding := range NormalizeConfiguration(current).Bindings {
 		if binding.Handle != handle {
 			next.Bindings = append(next.Bindings, binding)
@@ -196,7 +287,10 @@ func Lookup(in Configuration, handle Handle) (Binding, bool) {
 // profile is removed and reports the affected handles.
 func RemoveProfileBindings(in Configuration, profileID string) (Configuration, []Handle) {
 	profileID = modelprofile.NormalizeID(profileID)
-	next := Configuration{}
+	next := Configuration{
+		Roles: append([]Role(nil), in.Roles...),
+		Sets:  append([]BindingSet(nil), in.Sets...),
+	}
 	var removed []Handle
 	for _, binding := range NormalizeConfiguration(in).Bindings {
 		if binding.ProfileID == profileID {
@@ -219,4 +313,14 @@ func PrepareProfileRemoval(in Configuration, profileID string) (Configuration, e
 		}
 	}
 	return next, nil
+}
+
+func sortBindings(bindings []Binding, configuration Configuration) {
+	sort.Slice(bindings, func(i, j int) bool {
+		left, right := orderIn(configuration, bindings[i].Handle), orderIn(configuration, bindings[j].Handle)
+		if left != right {
+			return left < right
+		}
+		return bindings[i].Handle < bindings[j].Handle
+	})
 }

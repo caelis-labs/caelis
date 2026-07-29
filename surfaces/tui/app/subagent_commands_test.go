@@ -14,13 +14,20 @@ import (
 )
 
 type subagentDelegationStub struct {
+	controlprompt.Service
 	status      agentbinding.Status
 	bindRequest agentbinding.Binding
 	reset       agentbinding.Handle
+	createdRole agentbinding.Role
+	savedSet    string
 }
 
 func (s *subagentDelegationStub) AgentBindingStatus(context.Context) (agentbinding.Status, error) {
 	return s.status, nil
+}
+
+func (s *subagentDelegationStub) AgentStatus(context.Context) (controlprompt.AgentStatusSnapshot, error) {
+	return controlprompt.AgentStatusSnapshot{}, nil
 }
 
 func (s *subagentDelegationStub) BindAgentBinding(_ context.Context, req agentbinding.Binding) (agentbinding.Status, error) {
@@ -33,110 +40,46 @@ func (s *subagentDelegationStub) ResetAgentBinding(_ context.Context, handle age
 	return s.status, nil
 }
 
-func TestSubagentCompletionUsesFixedProfilesAndRosterTargets(t *testing.T) {
-	service := &subagentDelegationStub{status: agentbinding.Status{Targets: []modelprofile.ModelProfile{
-		testProviderModelProfile(),
-		testACPModelProfile(),
-	}}}
-
-	actions, handled, err := completeSubagentSlashArgs(context.Background(), service, "subagent-action", "", 10)
-	if err != nil || !handled || len(actions) != 2 || !subagentCandidateHasValue(actions, "list") || !subagentCandidateHasValue(actions, "bind") {
-		t.Fatalf("action candidates = %#v, handled=%v err=%v", actions, handled, err)
-	}
-	profiles, handled, err := completeSubagentSlashArgs(context.Background(), service, "subagent-bindable", "", 10)
-	if err != nil || !handled || len(profiles) != 5 {
-		t.Fatalf("bindable candidates = %#v, handled=%v err=%v", profiles, handled, err)
-	}
-	for _, want := range []string{"breeze", "orbit", "zenith", "guardian", "reviewer"} {
-		if !subagentCandidateHasValue(profiles, want) {
-			t.Fatalf("profile candidates = %#v, want %q", profiles, want)
-		}
-	}
-	systemTargets, handled, err := completeSubagentSlashArgs(context.Background(), service, "subagent-target:guardian", "", 10)
-	if err != nil || !handled || len(systemTargets) != 2 || !subagentCandidateHasValue(systemTargets, "default") || !subagentCandidateHasValue(systemTargets, "provider:sol") {
-		t.Fatalf("system target candidates = %#v, handled=%v err=%v", systemTargets, handled, err)
-	}
-
-	targets, handled, err := completeSubagentSlashArgs(context.Background(), service, "subagent-target:orbit", "", 10)
-	if err != nil || !handled || len(targets) != 3 {
-		t.Fatalf("target candidates = %#v, handled=%v err=%v", targets, handled, err)
-	}
-	self, ok := subagentCandidate(targets, "self")
-	if !ok {
-		t.Fatalf("self target = %#v", self)
-	}
-	model, ok := subagentCandidate(targets, "provider:sol")
-	if !ok || !strings.Contains(model.Detail, "low, high, xhigh") {
-		t.Fatalf("model target = %#v, want supported efforts", model)
-	}
-	external, ok := subagentCandidate(targets, "acp:claude:opus")
-	if !ok || !strings.Contains(external.Detail, "efforts: none") {
-		t.Fatalf("external target = %#v, want ACP none effort", external)
-	}
-
-	efforts, handled, err := completeSubagentSlashArgs(context.Background(), service, "subagent-effort:orbit:provider:sol", "", 10)
-	if err != nil || !handled || len(efforts) != 3 || !subagentCandidateHasValue(efforts, "xhigh") {
-		t.Fatalf("effort candidates = %#v, handled=%v err=%v", efforts, handled, err)
-	}
-	externalEfforts, handled, err := completeSubagentSlashArgs(context.Background(), service, "subagent-effort:orbit:acp:claude:opus", "", 10)
-	if err != nil || !handled || len(externalEfforts) != 1 || !subagentCandidateHasValue(externalEfforts, "none") {
-		t.Fatalf("external effort candidates = %#v, handled=%v err=%v, want explicit none", externalEfforts, handled, err)
-	}
-	systemEfforts, handled, err := completeSubagentSlashArgs(context.Background(), service, "subagent-effort:guardian:provider:sol", "", 10)
-	if err != nil || !handled || len(systemEfforts) != 3 || !subagentCandidateHasValue(systemEfforts, "xhigh") {
-		t.Fatalf("system effort candidates = %#v, handled=%v err=%v", systemEfforts, handled, err)
-	}
+func (s *subagentDelegationStub) CreateAgentRole(_ context.Context, role agentbinding.Role, binding agentbinding.Binding) (agentbinding.Status, error) {
+	s.createdRole = role
+	s.bindRequest = binding
+	return s.status, nil
 }
 
-func TestSubagentWizardStartsWithListOrBindThenUsesExplicitDefaultEffortChoice(t *testing.T) {
-	root := subagentWizard()
-	if root.Command != "subagent" || len(root.Steps) != 1 || root.Steps[0].Key != "action" || root.Branch == nil {
-		t.Fatalf("subagent root wizard = %#v", root)
-	}
-	listWizard := root.Branch("action", "list", nil, nil)
-	if listWizard == nil || listWizard.BuildExecLine == nil || listWizard.BuildExecLine(nil) != "/subagent list" {
-		t.Fatalf("subagent list branch = %#v", listWizard)
-	}
-	wizard := root.Branch("action", "bind", nil, nil)
-	if wizard == nil || len(wizard.Steps) != 3 {
-		t.Fatalf("subagent bind wizard = %#v", wizard)
-	}
-	state := map[string]string{"subject": "orbit", "target": "acp:claude:opus", "effort": "none"}
-	if wizard.Steps[2].ShouldSkip != nil {
-		if wizard.Steps[2].ShouldSkip(state) {
-			t.Fatal("delegation effort step unexpectedly skipped")
-		}
-	}
-	if got := wizard.BuildExecLine(state); got != "/subagent bind orbit acp:claude:opus none" {
-		t.Fatalf("external exec line = %q", got)
-	}
+func (s *subagentDelegationStub) DeleteAgentRole(_ context.Context, handle agentbinding.Handle) (agentbinding.Status, error) {
+	s.reset = handle
+	return s.status, nil
+}
 
-	state = map[string]string{"subject": "zenith", "target": "provider:sol", "effort": "xhigh"}
-	if got := wizard.BuildExecLine(state); got != "/subagent bind zenith provider:sol xhigh" {
-		t.Fatalf("model exec line = %q", got)
-	}
-	state["effort"] = "high"
-	if got := wizard.BuildExecLine(state); got != "/subagent bind zenith provider:sol high" {
-		t.Fatalf("explicit default-effort exec line = %q", got)
-	}
-	state = map[string]string{"subject": "guardian", "target": "provider:sol", "effort": "xhigh"}
-	if wizard.Steps[2].ShouldSkip(state) || wizard.BuildExecLine(state) != "/subagent bind guardian provider:sol xhigh" {
-		t.Fatalf("system Agent wizard state = %#v", state)
-	}
-	state = map[string]string{"subject": "reviewer", "target": "default"}
-	if !wizard.Steps[2].ShouldSkip(state) || wizard.BuildExecLine(state) != "/subagent bind reviewer default" {
-		t.Fatalf("system Agent reset wizard state = %#v", state)
-	}
+func (s *subagentDelegationStub) SaveAgentBindingSet(_ context.Context, name string) (agentbinding.Status, error) {
+	s.savedSet = name
+	return s.status, nil
+}
 
+func (s *subagentDelegationStub) ApplyAgentBindingSet(_ context.Context, name string) (agentbinding.Status, error) {
+	s.savedSet = name
+	return s.status, nil
+}
+
+func (s *subagentDelegationStub) DeleteAgentBindingSet(_ context.Context, name string) (agentbinding.Status, error) {
+	s.savedSet = name
+	return s.status, nil
+}
+
+func TestBareSubagentOpensDedicatedOverlay(t *testing.T) {
+	service := &subagentDelegationStub{status: subagentTestStatus()}
 	model := NewModel(Config{
-		Commands: DefaultCommands(),
-		Wizards:  DefaultWizards(),
-		SlashArgComplete: func(context.Context, string, string, int) ([]SlashArgCandidate, error) {
-			return []SlashArgCandidate{{Value: "list", Display: "List bindings"}, {Value: "bind", Display: "Bind Agent"}}, nil
-		},
+		Commands:       DefaultCommands(),
+		Wizards:        DefaultWizards(),
+		ControlService: service,
 	})
-	if !model.tryOpenSlashArgPicker("/subagent") || model.wizard == nil || model.wizard.currentStep() == nil || model.wizard.currentStep().Key != "action" {
-		t.Fatalf("bare /subagent did not open the action wizard: %#v", model.wizard)
+	_, cmd := model.submitInteractiveLine("/subagent", "/subagent", nil)
+	if model.subagentOverlay == nil || !model.subagentOverlay.loading || model.wizard != nil {
+		t.Fatalf("bare /subagent overlay = %#v wizard=%#v", model.subagentOverlay, model.wizard)
+	}
+	msg := cmd()
+	if _, ok := msg.(subagentOverlayResultMsg); !ok {
+		t.Fatalf("open command message = %T, want subagentOverlayResultMsg", msg)
 	}
 }
 
@@ -296,18 +239,4 @@ func testACPModelProfile() modelprofile.ModelProfile {
 		Backend: modelprofile.Backend{ACP: &modelprofile.ACPBackend{AgentID: "claude", RemoteModelID: "opus"}},
 		Effort:  modelprofile.EffortCapability{DefaultEffort: "none", Choices: []modelprofile.EffortChoice{{Canonical: "none"}}},
 	}
-}
-
-func subagentCandidate(candidates []SlashArgCandidate, value string) (SlashArgCandidate, bool) {
-	for _, candidate := range candidates {
-		if candidate.Value == value {
-			return candidate, true
-		}
-	}
-	return SlashArgCandidate{}, false
-}
-
-func subagentCandidateHasValue(candidates []SlashArgCandidate, value string) bool {
-	_, ok := subagentCandidate(candidates, value)
-	return ok
 }

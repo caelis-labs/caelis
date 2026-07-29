@@ -64,10 +64,8 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 			ListFn:                 func() []ACPAgentInfo { return adapters.ACPAgents(agents.List()) },
 		},
 		AgentBinding: AgentBindingRuntimeDeps{
-			StatusFn:  bindings.AgentBindingStatus,
-			BindFn:    bindings.BindAgentBinding,
-			ResetFn:   bindings.ResetAgentBinding,
-			ResolveFn: stack.ResolveHandlePlacement,
+			Configuration: bindings,
+			ResolveFn:     stack.ResolveHandlePlacement,
 		},
 		Model: ModelRuntimeDeps{
 			DefaultAliasFn: models.DefaultAlias,

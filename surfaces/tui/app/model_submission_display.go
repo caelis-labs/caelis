@@ -221,6 +221,9 @@ func centeredDivider(width int, label string) string {
 
 func (m *Model) tryOpenSlashArgPicker(line string) bool {
 	text := strings.TrimSpace(line)
+	if text == "/subagent" {
+		return false
+	}
 	if text == "/resume" {
 		if !m.isCommandAvailable("resume") {
 			return false

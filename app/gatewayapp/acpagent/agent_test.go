@@ -264,6 +264,19 @@ func TestACPPromptCommandNamesExposeOnlyBoundProfilesAndHideAgentCatalog(t *test
 	if !containsCommand(commands, "orbit") {
 		t.Fatalf("acpPromptCommandNames() = %#v, want bound Orbit", commands)
 	}
+	delegationStatus, err = stack.AgentBindings().CreateAgentRole(context.Background(), agentbinding.Role{
+		Handle: "research", Description: "Investigate unfamiliar systems.",
+	}, agentbinding.Binding{
+		ProfileID: delegationStatus.Targets[0].ID,
+		Effort:    delegationStatus.Targets[0].Effort.DefaultEffort,
+	})
+	if err != nil {
+		t.Fatalf("CreateAgentRole(research) error = %v", err)
+	}
+	commands = acpPromptCommandNames(delegationStatus)
+	if !containsCommand(commands, "research") {
+		t.Fatalf("acpPromptCommandNames() = %#v, want custom research role", commands)
+	}
 	for _, profile := range []string{"breeze", "zenith"} {
 		if containsCommand(commands, profile) {
 			t.Fatalf("acpPromptCommandNames() = %#v, should hide unbound %q", commands, profile)
@@ -276,14 +289,6 @@ func TestACPPromptCommandNamesExposeOnlyBoundProfilesAndHideAgentCatalog(t *test
 	}
 	if countCommand(commands, "status") != 1 {
 		t.Fatalf("acpPromptCommandNames() = %#v, want one core status command", commands)
-	}
-	if !acpAgentCommandAllowed("breeze") {
-		t.Fatal("acpAgentCommandAllowed(breeze) = false, want true")
-	}
-	for _, hidden := range []string{"helper", "reviewer", "self", "status", "lead"} {
-		if acpAgentCommandAllowed(hidden) {
-			t.Fatalf("acpAgentCommandAllowed(%q) = true, want false", hidden)
-		}
 	}
 }
 

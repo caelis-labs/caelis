@@ -28,6 +28,25 @@ func TestDirectRunSourceRoundTripUsesAgentBindingHandle(t *testing.T) {
 	}
 }
 
+func TestCustomRoleDirectRunSourceUsesDistinctTypedPrefix(t *testing.T) {
+	source := CustomRoleRunSource("research")
+	if source != "slash_role_research" {
+		t.Fatalf("CustomRoleRunSource(research) = %q", source)
+	}
+	handle, ok := DirectRunHandleFromSource(source)
+	if !ok || handle != "research" {
+		t.Fatalf("DirectRunHandleFromSource(%q) = %q, %v", source, handle, ok)
+	}
+	if _, ok := DirectRunHandleFromSource("slash_profile_research"); ok {
+		t.Fatal("custom role was accepted through the legacy fixed-profile prefix")
+	}
+	for _, reserved := range []agentbinding.Handle{"help", "status", "subagent"} {
+		if source := CustomRoleRunSource(reserved); source != "" {
+			t.Errorf("CustomRoleRunSource(%q) = %q, want reserved-name rejection", reserved, source)
+		}
+	}
+}
+
 func TestDirectRunFromParticipantRequiresACPSidecar(t *testing.T) {
 	t.Parallel()
 

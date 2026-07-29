@@ -52,13 +52,10 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 					if err != nil {
 						return out
 					}
-					return controlagents.AppendRunNames(out, acpDirectAgentRuns(status), directRunName)
+					return controlagents.AppendRunNames(out, acpDirectAgentRuns(status), nil)
 				},
 				CoreCommandAllowed: func(_ context.Context, command string) bool {
 					return controlprompt.IsACPKnown(command)
-				},
-				DynamicCommandAllowed: func(_ context.Context, command string) bool {
-					return acpAgentCommandAllowed(command)
 				},
 			})
 			return router, nil
@@ -67,27 +64,7 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 }
 
 func acpPromptCommandNames(status agentbinding.Status) []string {
-	bound := map[string]struct{}{}
-	for _, handle := range status.Handles {
-		if !agentbinding.IsDirectRun(handle.Definition.Handle) || !agentbinding.IsBound(handle) {
-			continue
-		}
-		bound[string(handle.Definition.Handle)] = struct{}{}
-	}
-	out := make([]string, 0, len(controlprompt.DefaultACPNames()))
-	for _, name := range controlprompt.DefaultACPNames() {
-		if directRunName(name) {
-			if _, ok := bound[name]; !ok {
-				continue
-			}
-		}
-		out = append(out, name)
-	}
-	return out
-}
-
-func acpAgentCommandAllowed(command string) bool {
-	return directRunName(command)
+	return agentbinding.ProjectBoundDirectNames(controlprompt.DefaultACPNames(), status)
 }
 
 func acpDirectAgentRuns(status controlprompt.AgentStatusSnapshot) []controlagents.Run {
@@ -96,8 +73,4 @@ func acpDirectAgentRuns(status controlprompt.AgentStatusSnapshot) []controlagent
 		runs = append(runs, controlagents.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))
 	}
 	return runs
-}
-
-func directRunName(name string) bool {
-	return agentbinding.IsDirectRun(agentbinding.Handle(name))
 }

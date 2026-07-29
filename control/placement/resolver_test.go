@@ -45,14 +45,37 @@ func TestPurposeForHandleMapsDirectAndSystemInvocations(t *testing.T) {
 		{handle: agentbinding.HandleGuardian, want: PurposeGuardian},
 		{handle: agentbinding.HandleReviewer, want: PurposeReviewer},
 	} {
-		got, err := PurposeForHandle(test.handle)
+		got, err := PurposeForFixedHandle(test.handle)
 		if err != nil || got != test.want {
-			t.Errorf("PurposeForHandle(%q) = %q, %v; want %q", test.handle, got, err, test.want)
+			t.Errorf("PurposeForFixedHandle(%q) = %q, %v; want %q", test.handle, got, err, test.want)
 		}
 	}
 	for _, handle := range []agentbinding.Handle{agentbinding.HandleSelf, "unknown"} {
-		if _, err := PurposeForHandle(handle); err == nil {
-			t.Errorf("PurposeForHandle(%q) succeeded, want rejection", handle)
+		if _, err := PurposeForFixedHandle(handle); err == nil {
+			t.Errorf("PurposeForFixedHandle(%q) succeeded, want rejection", handle)
+		}
+	}
+}
+
+func TestCustomRoleResolvesForSpawnAndDirectInvocation(t *testing.T) {
+	snapshot := testSnapshot()
+	snapshot.Bindings.Roles = []agentbinding.Role{{
+		Handle: "research", Description: "Investigate unfamiliar systems.",
+	}}
+	snapshot.Bindings.Bindings = append(snapshot.Bindings.Bindings, agentbinding.Binding{
+		Handle: "research", ProfileID: "acp:claude:opus", Effort: "xhigh",
+	})
+	purpose, err := PurposeForHandle(agentbinding.CatalogFor(snapshot.Bindings), "research")
+	if err != nil || purpose != PurposeDirect {
+		t.Fatalf("PurposeForHandle(research) = %q, %v", purpose, err)
+	}
+	for _, purpose := range []Purpose{PurposeSpawn, PurposeDirect} {
+		got, err := ResolveHandle(snapshot, HandleRequest{Handle: "research", Purpose: purpose})
+		if err != nil {
+			t.Fatalf("ResolveHandle(research, %s) error = %v", purpose, err)
+		}
+		if got.Kind != sdkplacement.KindAgent || got.ProfileID != "acp:claude:opus" {
+			t.Fatalf("ResolveHandle(research, %s) = %#v", purpose, got)
 		}
 	}
 }

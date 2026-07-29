@@ -177,11 +177,17 @@ func (s *Stack) withDirectProfileAgents(resolved assembly.ResolvedAssembly, runt
 	if s == nil || s.store == nil || s.lookup == nil {
 		return out, nil
 	}
+	seen := make(map[string]struct{}, len(out.Agents))
+	for _, existing := range out.Agents {
+		if name := strings.ToLower(strings.TrimSpace(existing.Name)); name != "" {
+			seen[name] = struct{}{}
+		}
+	}
 	snapshot, err := s.placementSnapshot(context.Background())
 	if err != nil {
 		return assembly.ResolvedAssembly{}, err
 	}
-	for _, handle := range agentbinding.DirectRunHandles() {
+	for _, handle := range agentbinding.CatalogFor(snapshot.placement.Bindings).DirectRunHandles() {
 		if _, ok := agentbinding.Lookup(snapshot.placement.Bindings, handle); !ok {
 			continue
 		}
@@ -194,6 +200,10 @@ func (s *Stack) withDirectProfileAgents(resolved assembly.ResolvedAssembly, runt
 		if placement.Kind != sdkplacement.KindModel {
 			continue
 		}
+		name := strings.ToLower(strings.TrimSpace(string(handle)))
+		if _, exists := seen[name]; exists {
+			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: direct Agent handle %q conflicts with an existing Agent", handle)
+		}
 		configured, err := s.lookup.ResolveConfig(placement.Model)
 		if err != nil {
 			return assembly.ResolvedAssembly{}, err
@@ -204,6 +214,7 @@ func (s *Stack) withDirectProfileAgents(resolved assembly.ResolvedAssembly, runt
 			return assembly.ResolvedAssembly{}, err
 		}
 		out.Agents = append(out.Agents, materialized)
+		seen[name] = struct{}{}
 	}
 	return out, nil
 }

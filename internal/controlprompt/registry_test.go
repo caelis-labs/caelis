@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/caelis-labs/caelis/control/agentbinding"
 )
 
 func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
@@ -37,6 +39,21 @@ func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
 	}
 	if !IsKnownForPlatform("doctor", "windows") {
 		t.Fatal("IsKnownForPlatform(doctor, windows) = false, want true")
+	}
+}
+
+func TestProductCommandNamesAreReservedFromCustomRoles(t *testing.T) {
+	for _, goos := range []string{"linux", "windows"} {
+		for _, spec := range DefaultSpecsForPlatform(goos) {
+			if err := agentbinding.ValidateCustomHandle(agentbinding.Handle(spec.Name)); err == nil {
+				t.Errorf("ValidateCustomHandle(%q) succeeded for %s product command", spec.Name, goos)
+			}
+		}
+	}
+	for _, name := range []string{"lead", "sandbox"} {
+		if err := agentbinding.ValidateCustomHandle(agentbinding.Handle(name)); err == nil {
+			t.Errorf("ValidateCustomHandle(%q) succeeded for reserved remote command", name)
+		}
 	}
 }
 

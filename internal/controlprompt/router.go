@@ -102,9 +102,9 @@ func (r router) shouldDispatchSlash(ctx context.Context, cmd string) bool {
 				return r.dynamicSlashAllowed(ctx, agent)
 			}
 		}
-		return r.dynamicSlashAllowed(ctx, cmd)
+		return r.isConfiguredDirectHandle(ctx, cmd) && r.dynamicSlashAllowed(ctx, cmd)
 	}
-	return agentbinding.IsDirectRun(agentbinding.Handle(cmd)) || r.isDirectAgentRun(ctx, cmd)
+	return r.isConfiguredDirectHandle(ctx, cmd) || r.isDirectAgentRun(ctx, cmd)
 }
 
 func (r router) dispatchPrivateSlash(ctx context.Context, req PrivateSlashRequest) (Result, bool, error) {
@@ -163,7 +163,20 @@ func (r router) isDirectAgentRun(ctx context.Context, name string) bool {
 	if err != nil {
 		return false
 	}
-	return controlagents.RunNameAllowed(directAgentRuns(status), name, availableAgentCommandName)
+	return controlagents.RunNameAllowed(directAgentRuns(status), name, nil)
+}
+
+func (r router) isConfiguredDirectHandle(ctx context.Context, name string) bool {
+	handle := agentbinding.NormalizeHandle(agentbinding.Handle(name))
+	bindings, ok := r.service.(agentbinding.Service)
+	if !ok {
+		return agentbinding.IsDirectRun(handle)
+	}
+	status, err := bindings.AgentBindingStatus(contextOrBackground(ctx))
+	if err != nil {
+		return false
+	}
+	return agentbinding.IsBoundDirectHandle(status, handle)
 }
 
 func (r router) isRemoteControllerCommand(ctx context.Context, name string) bool {
@@ -199,10 +212,6 @@ func directAgentRuns(status AgentStatusSnapshot) []controlagents.Run {
 		runs = append(runs, controlagents.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))
 	}
 	return runs
-}
-
-func availableAgentCommandName(name string) bool {
-	return agentbinding.IsDirectRun(agentbinding.Handle(name))
 }
 
 func notice(text string) eventstream.Envelope {

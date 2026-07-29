@@ -50,6 +50,41 @@ func TestStoreRejectsDuplicateCurrentRecordsBeforeNormalization(t *testing.T) {
 			},
 			wantErr: "duplicate Agent binding for handle",
 		},
+		{
+			name: "custom role",
+			mutate: func(doc AppConfig) AppConfig {
+				doc.AgentBindings.Roles = append(doc.AgentBindings.Roles, doc.AgentBindings.Roles[0])
+				return doc
+			},
+			wantErr: "duplicate custom role",
+		},
+		{
+			name: "incomplete custom role",
+			mutate: func(doc AppConfig) AppConfig {
+				doc.AgentBindings.Roles = append(doc.AgentBindings.Roles, agentbinding.Role{Handle: "draft"})
+				return doc
+			},
+			wantErr: "requires a description",
+		},
+		{
+			name: "binding set",
+			mutate: func(doc AppConfig) AppConfig {
+				doc.AgentBindings.Sets = append(doc.AgentBindings.Sets, doc.AgentBindings.Sets[0])
+				return doc
+			},
+			wantErr: "duplicate binding set",
+		},
+		{
+			name: "incomplete binding set",
+			mutate: func(doc AppConfig) AppConfig {
+				doc.AgentBindings.Sets[0].Bindings = append(
+					doc.AgentBindings.Sets[0].Bindings,
+					agentbinding.Binding{Handle: "research", ProfileID: doc.ModelProfiles.DefaultProfileID},
+				)
+				return doc
+			},
+			wantErr: "contains an incomplete binding",
+		},
 	}
 
 	for _, test := range tests {
@@ -111,10 +146,23 @@ func currentValidationFixture() AppConfig {
 			DefaultProfileID: profile.ID,
 			Profiles:         []modelprofile.ModelProfile{profile},
 		},
-		AgentBindings: agentbinding.Configuration{Bindings: []agentbinding.Binding{{
-			Handle:    agentbinding.HandleOrbit,
-			ProfileID: profile.ID,
-			Effort:    "high",
-		}}},
+		AgentBindings: agentbinding.Configuration{
+			Roles: []agentbinding.Role{{
+				Handle: "research", Description: "Investigate unfamiliar systems.",
+			}},
+			Bindings: []agentbinding.Binding{{
+				Handle:    agentbinding.HandleOrbit,
+				ProfileID: profile.ID,
+				Effort:    "high",
+			}},
+			Sets: []agentbinding.BindingSet{{
+				Name: "baseline",
+				Bindings: []agentbinding.Binding{{
+					Handle:    agentbinding.HandleOrbit,
+					ProfileID: profile.ID,
+					Effort:    "high",
+				}},
+			}},
+		},
 	}
 }

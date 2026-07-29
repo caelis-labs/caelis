@@ -369,9 +369,6 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 
 	if base.SlashArgComplete == nil {
 		base.SlashArgComplete = func(requestCtx context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
-			if candidates, handled, err := completeSubagentSlashArgs(contextOrBackground(requestCtx), service, command, query, limit); handled {
-				return candidates, err
-			}
 			candidates, err := service.CompleteSlashArg(contextOrBackground(requestCtx), command, query, limit)
 			if err != nil {
 				return nil, err
@@ -598,14 +595,17 @@ func appendAgentSlashCommandsWithContext(ctx context.Context, service controlpro
 	if len(commands) == 0 {
 		commands = DefaultCommands()
 	}
-	boundProfiles := boundDirectProfileNames(ctx, service)
-	commands = projectBoundDirectProfileCommands(commands, boundProfiles)
+	var bindingStatus agentbinding.Status
+	if bindings, ok := service.(agentbinding.Service); ok {
+		bindingStatus, _ = bindings.AgentBindingStatus(ctx)
+	}
+	commands = agentbinding.ProjectBoundDirectNames(commands, bindingStatus)
 	status, err := service.AgentStatus(ctx)
 	if err == nil && strings.EqualFold(strings.TrimSpace(status.ControllerKind), "acp") {
-		commands = projectBoundDirectProfileCommands(localACPCommands(), boundProfiles)
+		commands = agentbinding.ProjectBoundDirectNames(localACPCommands(), bindingStatus)
 	}
 	if err == nil {
-		commands = controlagents.AppendRunNames(commands, tuiDirectAgentRuns(status), tuiAgentCommandNameAllowed)
+		commands = controlagents.AppendRunNames(commands, tuiDirectAgentRuns(status), nil)
 	}
 	if err == nil && strings.EqualFold(strings.TrimSpace(status.ControllerKind), "acp") {
 		return acpSlashCommands(commands, status)
@@ -667,62 +667,9 @@ func tuiDirectAgentRuns(status controlprompt.AgentStatusSnapshot) []controlagent
 	return runs
 }
 
-func tuiAgentCommandNameAllowed(name string) bool {
-	return agentbinding.IsDirectRun(agentbinding.Handle(name))
-}
-
 func tuiRemoteControllerCommandNameAllowed(name string) bool {
 	name = strings.TrimSpace(name)
 	return !controlprompt.IsKnown(name) && !strings.EqualFold(name, "sandbox") && !strings.EqualFold(name, "lead")
-}
-
-func boundDirectProfileNames(ctx context.Context, service controlprompt.Service) map[string]struct{} {
-	out := map[string]struct{}{}
-	bindings, ok := service.(agentbinding.Service)
-	if !ok {
-		return out
-	}
-	status, err := bindings.AgentBindingStatus(contextOrBackground(ctx))
-	if err != nil {
-		return out
-	}
-	for _, handle := range status.Handles {
-		if !agentbinding.IsDirectRun(handle.Definition.Handle) || !agentbinding.IsBound(handle) {
-			continue
-		}
-		out[string(handle.Definition.Handle)] = struct{}{}
-	}
-	return out
-}
-
-func projectBoundDirectProfileCommands(commands []string, bound map[string]struct{}) []string {
-	out := make([]string, 0, len(commands)+len(bound))
-	seen := make(map[string]struct{}, len(commands)+len(bound))
-	for _, command := range commands {
-		name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command, "/")))
-		if agentbinding.IsDirectRun(agentbinding.Handle(name)) {
-			if _, ok := bound[name]; !ok {
-				continue
-			}
-		}
-		if name == "" {
-			continue
-		}
-		out = append(out, command)
-		seen[name] = struct{}{}
-	}
-	for _, handle := range agentbinding.DirectRunHandles() {
-		name := string(handle)
-		if _, ok := bound[name]; !ok {
-			continue
-		}
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		out = append(out, name)
-		seen[name] = struct{}{}
-	}
-	return out
 }
 
 func refreshAgentSlashCommandsViaSend(service controlprompt.Service, send func(tea.Msg)) {
@@ -748,7 +695,7 @@ func profileCommandDetailsWithContext(ctx context.Context, service controlprompt
 	if bindings, ok := service.(agentbinding.Service); ok {
 		if status, err := bindings.AgentBindingStatus(ctx); err == nil {
 			for _, handle := range status.Handles {
-				if !agentbinding.IsDirectRun(handle.Definition.Handle) || !agentbinding.IsBound(handle) {
+				if !agentbinding.IsDirectRunDefinition(handle.Definition) || !agentbinding.IsBound(handle) {
 					continue
 				}
 				details[string(handle.Definition.Handle)] = subagentProfileCommandDetail(handle)
@@ -761,7 +708,7 @@ func profileCommandDetailsWithContext(ctx context.Context, service controlprompt
 				continue
 			}
 			agent, handle, ok := controlagents.ParseRunName(run.Name)
-			if !ok || !tuiAgentCommandNameAllowed(agent) {
+			if !ok {
 				continue
 			}
 			details[run.Name] = fmt.Sprintf("Continue /%s as %s", agent, handle)

@@ -135,21 +135,27 @@ func formatSlashSkillDetail(kind string, detail string) string {
 	}
 }
 
-func (m *Model) applySlashCommandCompletion() {
+func (m *Model) applySlashCommandCompletion() tea.Cmd {
 	if len(m.slashCandidates) == 0 {
 		m.refreshSlashCommands()
 		if len(m.slashCandidates) == 0 {
-			return
+			return nil
 		}
 	}
 	selected := strings.TrimSpace(m.slashCandidates[m.slashIndex])
 	if selected == "" {
-		return
+		return nil
+	}
+	if strings.EqualFold(strings.TrimPrefix(selected, "/"), "subagent") {
+		m.clearSlashCompletion()
+		m.resetComposerAfterOverlayOpen()
+		return m.openSubagentOverlay()
 	}
 	line := selected + " "
 	m.setInputText(line)
 	m.clearSlashCompletion()
 	m.tryOpenSlashArgPicker(line)
+	return nil
 }
 
 func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
@@ -172,8 +178,11 @@ func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.Complete):
-		m.applySlashCommandCompletion()
+		cmd := m.applySlashCommandCompletion()
 		m.syncTextareaFromInput()
+		if cmd != nil {
+			return true, cmd
+		}
 		if m.resumeActive {
 			return true, m.requestCompletionRefresh()
 		}
@@ -182,8 +191,11 @@ func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		if m.turnRunning() || len(m.slashCandidates) == 0 {
 			return true, nil
 		}
-		m.applySlashCommandCompletion()
+		cmd := m.applySlashCommandCompletion()
 		m.syncTextareaFromInput()
+		if cmd != nil {
+			return true, cmd
+		}
 		if m.resumeActive {
 			return true, m.requestCompletionRefresh()
 		}

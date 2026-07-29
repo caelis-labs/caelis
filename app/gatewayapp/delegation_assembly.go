@@ -17,17 +17,18 @@ import (
 )
 
 func delegationAgentsForBindings(bindings agentbinding.Configuration, includeSelf bool) []sdkdelegation.Agent {
+	catalog := agentbinding.CatalogFor(bindings)
 	visible := map[agentbinding.Handle]struct{}{}
 	if includeSelf {
 		visible[agentbinding.HandleSelf] = struct{}{}
 	}
 	for _, binding := range agentbinding.NormalizeConfiguration(bindings).Bindings {
-		if agentbinding.IsDelegation(binding.Handle) {
+		if catalog.IsDelegation(binding.Handle) {
 			visible[binding.Handle] = struct{}{}
 		}
 	}
 	out := make([]sdkdelegation.Agent, 0, len(visible))
-	for _, definition := range agentbinding.DelegationDefinitions() {
+	for _, definition := range catalog.DelegationDefinitions() {
 		handle := definition.Handle
 		if _, ok := visible[handle]; !ok {
 			continue
@@ -69,7 +70,7 @@ func (s *Stack) delegationSpawnConfiguration(session controlplacement.SessionCon
 		targets[string(agentbinding.HandleSelf)] = spawn.Target{Selector: string(agentbinding.HandleSelf), Placement: self}
 	}
 
-	for _, definition := range agentbinding.DelegationDefinitions() {
+	for _, definition := range agentbinding.CatalogFor(snapshot.placement.Bindings).DelegationDefinitions() {
 		handle := definition.Handle
 		if handle == agentbinding.HandleSelf {
 			continue

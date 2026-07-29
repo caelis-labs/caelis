@@ -112,6 +112,20 @@ func TestDelegationSpawnConfigurationOmitsSelfWithoutLocalSessionSelection(t *te
 	}
 }
 
+func TestDelegationAgentsIncludeBoundCustomRoleDescription(t *testing.T) {
+	agents := delegationAgentsForBindings(agentbinding.Configuration{
+		Roles: []agentbinding.Role{{
+			Handle: "research", Description: "Investigate unfamiliar systems.",
+		}},
+		Bindings: []agentbinding.Binding{{
+			Handle: "research", ProfileID: "provider:sol", Effort: "high",
+		}},
+	}, false)
+	if len(agents) != 1 || agents[0].Name != "research" || agents[0].Description != "Investigate unfamiliar systems." {
+		t.Fatalf("delegationAgentsForBindings(custom) = %#v", agents)
+	}
+}
+
 func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	profile, err := stack.Connect(ModelConfig{

@@ -210,6 +210,12 @@ func validateCurrentRecordIdentities(doc AppConfig) error {
 			return fmt.Errorf("gatewayapp: duplicate Agent binding for handle %q", handle)
 		}
 	}
+	if err := agentbinding.ValidateRoles(doc.AgentBindings.Roles); err != nil {
+		return fmt.Errorf("gatewayapp: invalid Agent bindings: %w", err)
+	}
+	if err := agentbinding.ValidateBindingSets(doc.AgentBindings.Sets); err != nil {
+		return fmt.Errorf("gatewayapp: invalid Agent bindings: %w", err)
+	}
 
 	pluginIDs := make(map[string]struct{}, len(doc.Plugins))
 	for _, raw := range doc.Plugins {

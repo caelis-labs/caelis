@@ -108,11 +108,18 @@ func (s *Stack) resolveParticipantPlacement(ctx context.Context, profileID, effo
 // in-process control adapter.
 func (s *Stack) ResolveHandlePlacement(ctx context.Context, handle agentbinding.Handle) (sdkplacement.Placement, error) {
 	handle = agentbinding.NormalizeHandle(handle)
-	purpose, err := controlplacement.PurposeForHandle(handle)
+	snapshot, err := s.placementSnapshot(ctx)
 	if err != nil {
 		return sdkplacement.Placement{}, err
 	}
-	return s.resolveHandlePlacement(ctx, controlplacement.HandleRequest{Handle: handle, Purpose: purpose})
+	purpose, err := controlplacement.PurposeForHandle(
+		agentbinding.CatalogFor(snapshot.placement.Bindings),
+		handle,
+	)
+	if err != nil {
+		return sdkplacement.Placement{}, err
+	}
+	return controlplacement.ResolveHandle(snapshot.placement, controlplacement.HandleRequest{Handle: handle, Purpose: purpose})
 }
 
 func (s *Stack) resolveSystemAgentModel(
@@ -126,7 +133,7 @@ func (s *Stack) resolveSystemAgentModel(
 	if s.lookup == nil {
 		return kernelimpl.ModelResolution{}, false, fmt.Errorf("gatewayapp: resolve system Agent model: model lookup unavailable")
 	}
-	purpose, err := controlplacement.PurposeForHandle(handle)
+	purpose, err := controlplacement.PurposeForFixedHandle(handle)
 	if err != nil {
 		return kernelimpl.ModelResolution{}, false, err
 	}

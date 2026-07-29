@@ -2448,14 +2448,17 @@ func TestAdapterStartAgentRunFailsClosedWhenProfileIsUnbound(t *testing.T) {
 	t.Parallel()
 
 	driver, err := NewAdapter(context.Background(), &RuntimeStack{
-		AgentBinding: AgentBindingRuntimeDeps{StatusFn: func(context.Context) (agentbinding.Status, error) {
-			return agentbinding.Status{Handles: []agentbinding.HandleStatus{{
-				Definition: agentbinding.Definition{Handle: agentbinding.HandleBreeze, Configurable: true},
-				Binding:    agentbinding.Binding{Handle: agentbinding.HandleBreeze},
-			}}}, nil
-		}, ResolveFn: func(context.Context, agentbinding.Handle) (sdkplacement.Placement, error) {
-			return sdkplacement.Placement{}, errors.New("/breeze is not bound")
-		}},
+		AgentBinding: AgentBindingRuntimeDeps{
+			Configuration: staticAgentBindingConfiguration{status: agentbinding.Status{Handles: []agentbinding.HandleStatus{{
+				Definition: agentbinding.Definition{
+					Handle: agentbinding.HandleBreeze, Class: agentbinding.HandleClassDelegation, Configurable: true,
+				},
+				Binding: agentbinding.Binding{Handle: agentbinding.HandleBreeze},
+			}}}},
+			ResolveFn: func(context.Context, agentbinding.Handle) (sdkplacement.Placement, error) {
+				return sdkplacement.Placement{}, errors.New("/breeze is not bound")
+			},
+		},
 	}, "", "surface", "ollama/llama3")
 	if err != nil {
 		t.Fatalf("NewAdapter() error = %v", err)
@@ -4554,14 +4557,54 @@ func boundAgentBindingRuntimeForTest(handle agentbinding.Handle, agentID, reason
 	if err != nil {
 		panic(err)
 	}
-	return AgentBindingRuntimeDeps{StatusFn: func(context.Context) (agentbinding.Status, error) {
-		return agentbinding.Status{Handles: []agentbinding.HandleStatus{{
-			Definition: agentbinding.Definition{Handle: handle, Configurable: true},
-			Binding:    agentbinding.Binding{Handle: handle, ProfileID: resolved.ProfileID, Effort: reasoningEffort},
-		}}}, nil
-	}, ResolveFn: func(context.Context, agentbinding.Handle) (sdkplacement.Placement, error) {
-		return resolved, nil
-	}}
+	status := agentbinding.Status{Handles: []agentbinding.HandleStatus{{
+		Definition: agentbinding.Definition{
+			Handle: handle, Class: agentbinding.HandleClassDelegation, Configurable: true,
+		},
+		Binding: agentbinding.Binding{Handle: handle, ProfileID: resolved.ProfileID, Effort: reasoningEffort},
+	}}}
+	return AgentBindingRuntimeDeps{
+		Configuration: staticAgentBindingConfiguration{status: status},
+		ResolveFn: func(context.Context, agentbinding.Handle) (sdkplacement.Placement, error) {
+			return resolved, nil
+		},
+	}
+}
+
+type staticAgentBindingConfiguration struct {
+	status agentbinding.Status
+}
+
+func (s staticAgentBindingConfiguration) AgentBindingStatus(context.Context) (agentbinding.Status, error) {
+	return s.status, nil
+}
+
+func (s staticAgentBindingConfiguration) BindAgentBinding(context.Context, agentbinding.Binding) (agentbinding.Status, error) {
+	return s.status, nil
+}
+
+func (s staticAgentBindingConfiguration) ResetAgentBinding(context.Context, agentbinding.Handle) (agentbinding.Status, error) {
+	return s.status, nil
+}
+
+func (s staticAgentBindingConfiguration) CreateAgentRole(context.Context, agentbinding.Role, agentbinding.Binding) (agentbinding.Status, error) {
+	return s.status, nil
+}
+
+func (s staticAgentBindingConfiguration) DeleteAgentRole(context.Context, agentbinding.Handle) (agentbinding.Status, error) {
+	return s.status, nil
+}
+
+func (s staticAgentBindingConfiguration) SaveAgentBindingSet(context.Context, string) (agentbinding.Status, error) {
+	return s.status, nil
+}
+
+func (s staticAgentBindingConfiguration) ApplyAgentBindingSet(context.Context, string) (agentbinding.Status, error) {
+	return s.status, nil
+}
+
+func (s staticAgentBindingConfiguration) DeleteAgentBindingSet(context.Context, string) (agentbinding.Status, error) {
+	return s.status, nil
 }
 
 type activeSubmitGatewayService struct {

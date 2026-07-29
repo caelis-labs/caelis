@@ -199,7 +199,7 @@ func TestStorePersistsExternalAgentAndACPModelProfile(t *testing.T) {
 	}
 }
 
-func TestStorePersistsUnifiedBindingAndRejectsStaleProfileReference(t *testing.T) {
+func TestStorePersistsAdditiveAgentRolesAndSetsWithoutSchemaMigration(t *testing.T) {
 	t.Parallel()
 
 	store := New(t.TempDir())
@@ -216,6 +216,16 @@ func TestStorePersistsUnifiedBindingAndRejectsStaleProfileReference(t *testing.T
 	if err != nil {
 		t.Fatalf("BindAgent() error = %v", err)
 	}
+	bindings, err = agentbinding.CreateRole(bindings, agentbinding.Role{
+		Handle: "research", Description: "Investigate unfamiliar systems.",
+	}, agentbinding.Binding{ProfileID: profile.ID, Effort: "high"}, modelprofile.Configuration{Profiles: []modelprofile.ModelProfile{profile}})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	bindings, err = agentbinding.SaveBindingSet(bindings, "deep-work")
+	if err != nil {
+		t.Fatalf("SaveBindingSet() error = %v", err)
+	}
 	doc := AppConfig{
 		Models:        PersistedModelConfig{DefaultID: model.ID, Configs: []modelconfig.Config{model}},
 		ModelProfiles: modelprofile.Configuration{DefaultProfileID: profile.ID, Profiles: []modelprofile.ModelProfile{profile}},
@@ -231,6 +241,15 @@ func TestStorePersistsUnifiedBindingAndRejectsStaleProfileReference(t *testing.T
 	resolved, ok := agentbinding.Lookup(loaded.AgentBindings, agentbinding.HandleOrbit)
 	if !ok || resolved.ProfileID != profile.ID || resolved.Effort != "high" {
 		t.Fatalf("loaded binding = %#v, %v", resolved, ok)
+	}
+	if loaded.SchemaVersion != SchemaVersionV2 {
+		t.Fatalf("SchemaVersion = %d, want unchanged v2", loaded.SchemaVersion)
+	}
+	if role, ok := agentbinding.LookupRole(loaded.AgentBindings, "research"); !ok || role.Description == "" {
+		t.Fatalf("loaded custom role = %#v, %v", role, ok)
+	}
+	if set, ok := agentbinding.LookupBindingSet(loaded.AgentBindings, "deep-work"); !ok || len(set.Bindings) != 2 {
+		t.Fatalf("loaded binding set = %#v, %v", set, ok)
 	}
 
 	doc.ModelProfiles = modelprofile.Configuration{}

@@ -102,6 +102,11 @@ func (m *Model) View() tea.View {
 			view = overlayTopRight(view, progressView, m.width, sandboxProgressOverlayTopInset, sandboxProgressOverlayRightInset)
 		}
 	}
+	if m.subagentOverlay != nil && m.width > 0 && m.height > 0 {
+		if overlay := m.renderSubagentOverlay(); overlay != "" {
+			view = tuikit.OverlayCenter(view, overlay, m.width, m.height)
+		}
+	}
 	secondTrim := 0
 	view, secondTrim = normalizeFullscreenFrameWithTopTrim(view, m.width, m.height)
 	topTrim += secondTrim
@@ -114,18 +119,20 @@ func (m *Model) View() tea.View {
 	frame.MouseMode = m.desiredMouseMode()
 	frame.ReportFocus = true
 	frame.WindowTitle = m.windowTitle()
-	if cursor := m.regularInputCursor(); cursor != nil {
-		cursor.X += m.mainColumnX()
-		cursor.Y += m.viewport.Height() + m.preComposerFixedHeight() + tuikit.ComposerPadTop
-		cursor.Y += m.composerChrome().topRows()
-		cursor.Y -= topTrim
-		if cursor.Y < 0 {
-			cursor.Y = 0
+	if m.subagentOverlay == nil {
+		if cursor := m.regularInputCursor(); cursor != nil {
+			cursor.X += m.mainColumnX()
+			cursor.Y += m.viewport.Height() + m.preComposerFixedHeight() + tuikit.ComposerPadTop
+			cursor.Y += m.composerChrome().topRows()
+			cursor.Y -= topTrim
+			if cursor.Y < 0 {
+				cursor.Y = 0
+			}
+			if m.height > 0 && cursor.Y >= m.height {
+				cursor.Y = m.height - 1
+			}
+			frame.Cursor = cursor
 		}
-		if m.height > 0 && cursor.Y >= m.height {
-			cursor.Y = m.height - 1
-		}
-		frame.Cursor = cursor
 	}
 	return frame
 }

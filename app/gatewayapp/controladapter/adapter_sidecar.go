@@ -17,8 +17,15 @@ import (
 
 func (d *Adapter) StartAgentRun(ctx context.Context, target string, prompt string, attachments []controlprompt.Attachment) (controlprompt.Turn, error) {
 	handle := agentbinding.NormalizeHandle(agentbinding.Handle(target))
-	if !agentbinding.IsDirectRun(handle) {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: %q is not a direct delegation profile", strings.TrimSpace(target))
+	if d == nil || d.stack == nil || d.stack.AgentBinding.Configuration == nil {
+		return nil, missingRuntimeDependency("Agent binding status")
+	}
+	status, err := d.stack.AgentBinding.Configuration.AgentBindingStatus(bindingContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	if !agentbinding.IsBoundDirectHandle(status, handle) {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: /%s is not bound", handle)
 	}
 	if d == nil || d.stack == nil || d.stack.AgentBinding.ResolveFn == nil {
 		return nil, missingRuntimeDependency("delegation placement")
@@ -34,6 +41,10 @@ func (d *Adapter) StartAgentRun(ctx context.Context, target string, prompt strin
 	if agent == "" {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: delegation handle %q has no executable endpoint", handle)
 	}
+	source := controlagents.DirectRunSource(handle)
+	if source == "" {
+		source = controlagents.CustomRoleRunSource(handle)
+	}
 	return d.startSidecarTurn(ctx, startSidecarTurnRequest{
 		Agent:          agent,
 		Placement:      placement,
@@ -42,7 +53,7 @@ func (d *Adapter) StartAgentRun(ctx context.Context, target string, prompt strin
 		DisplayInput:   displayInputWithAttachments(prompt, attachments),
 		DisplayAddress: "/" + string(handle),
 		Attachments:    attachments,
-		Source:         controlagents.DirectRunSource(handle),
+		Source:         source,
 	})
 }
 

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
@@ -209,7 +208,7 @@ func (r router) dispatchAgentRun(ctx context.Context, command string, promptText
 	command = strings.ToLower(strings.TrimSpace(command))
 	promptText = strings.TrimSpace(promptText)
 	if promptText == "" && len(attachments) == 0 {
-		if agentbinding.IsDirectRun(agentbinding.Handle(command)) || r.isDirectAgentRun(ctx, command) {
+		if r.isConfiguredDirectHandle(ctx, command) || r.isDirectAgentRun(ctx, command) {
 			return r.noticeResult(fmt.Sprintf("usage: /%s <prompt>", command)), nil
 		}
 		return r.noticeResult(fmt.Sprintf("unknown command: /%s\nrun /help to list available commands", command)), nil

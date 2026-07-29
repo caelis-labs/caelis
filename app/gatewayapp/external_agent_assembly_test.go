@@ -69,6 +69,32 @@ func TestPluginAgentCollisionFailsClosed(t *testing.T) {
 	}
 }
 
+func TestCustomDirectRoleCollisionFailsClosedAndRollsBack(t *testing.T) {
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{Agents: []assembly.AgentConfig{{
+		Name: "research", Command: "existing-research",
+	}}})
+	profile, err := stack.Connect(ModelConfig{
+		Provider: "ollama", API: providers.APIOllama, Model: "research-model",
+	})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	_, err = stack.AgentBindings().CreateAgentRole(context.Background(), agentbinding.Role{
+		Handle: "research", Description: "Investigate unfamiliar systems.",
+	}, agentbinding.Binding{ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort})
+	if err == nil || !strings.Contains(err.Error(), `direct Agent handle "research" conflicts with an existing Agent`) {
+		t.Fatalf("CreateAgentRole() error = %v, want explicit assembly collision", err)
+	}
+	doc, loadErr := stack.store.Load()
+	if loadErr != nil {
+		t.Fatalf("Load() error = %v", loadErr)
+	}
+	if _, ok := agentbinding.LookupRole(doc.AgentBindings, "research"); ok {
+		t.Fatalf("failed custom role mutation was persisted: %#v", doc.AgentBindings.Roles)
+	}
+}
+
 func TestExternalAgentAssemblyRejectsProductAndSystemNames(t *testing.T) {
 	t.Parallel()
 

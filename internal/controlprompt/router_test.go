@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/control/agentbinding"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -498,6 +500,41 @@ func TestRouterDynamicCommandAllowedOnlyPermitsFixedProfiles(t *testing.T) {
 	}
 }
 
+func TestRouterDispatchesConfiguredCustomRoleButRejectsUnknownHandle(t *testing.T) {
+	base := &fakeService{turn: &fakeTurn{id: "turn-1"}}
+	svc := &bindingRouterService{
+		fakeService: base,
+		bindingStatus: agentbinding.Status{Handles: []agentbinding.HandleStatus{{
+			Definition: agentbinding.Definition{
+				Handle: "research", Class: agentbinding.HandleClassDelegation,
+				Description: "Investigate unfamiliar systems.", Configurable: true, Custom: true,
+			},
+			Binding: agentbinding.Binding{Handle: "research", ProfileID: "provider:sol", Effort: "high"},
+		}}},
+	}
+	router := New(RouterConfig{
+		Service: svc,
+		DynamicCommandAllowed: func(_ context.Context, command string) bool {
+			return controlagents.IsRecoverableSourceHandle(agentbinding.Handle(command))
+		},
+	})
+	result, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/research inspect"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Turn == nil || base.startedAgent != "research" || base.startedPrompt != "inspect" {
+		t.Fatalf("Route(/research) = %#v agent=%q prompt=%q", result, base.startedAgent, base.startedPrompt)
+	}
+	base.startedAgent = ""
+	unknown, err := router.Route(context.Background(), Request{Submission: Submission{Text: "/unknown inspect"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(firstNotice(unknown), "unknown command") || base.startedAgent != "" {
+		t.Fatalf("Route(/unknown) = %#v agent=%q", unknown, base.startedAgent)
+	}
+}
+
 func TestRouterReviewForwardsAttachmentsForPromptRange(t *testing.T) {
 	svc := &fakeService{turn: &fakeTurn{id: "turn-1"}}
 	router := New(RouterConfig{Service: svc})
@@ -622,6 +659,23 @@ type fakeService struct {
 	resumeErr          error
 	skillResolutions   map[string]SkillResolveResult
 	skillResolveErr    error
+}
+
+type bindingRouterService struct {
+	*fakeService
+	bindingStatus agentbinding.Status
+}
+
+func (s *bindingRouterService) AgentBindingStatus(context.Context) (agentbinding.Status, error) {
+	return s.bindingStatus, nil
+}
+
+func (s *bindingRouterService) BindAgentBinding(context.Context, agentbinding.Binding) (agentbinding.Status, error) {
+	return s.bindingStatus, nil
+}
+
+func (s *bindingRouterService) ResetAgentBinding(context.Context, agentbinding.Handle) (agentbinding.Status, error) {
+	return s.bindingStatus, nil
 }
 
 func (s *fakeService) Status(context.Context) (controlstatus.StatusSnapshot, error) {
