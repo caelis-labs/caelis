@@ -304,10 +304,10 @@ func (tm *taskRuntime) observeSubagent(ctx context.Context, task *subagentTask) 
 	return tm.applyObservedSubagentResult(ctx, task, result, false)
 }
 
-// applyObservedSubagentResult records a successful remote observation. This is
-// the explicit point where either read or wait may durably promote terminal
-// Task state and a completed sidecar's canonical final message. A read-only
-// running sample is returned without mutating or persisting the Task.
+// applyObservedSubagentResult records a canonical producer result or a
+// successful explicit Task observation. Either path may durably promote
+// terminal Task state and a completed sidecar's canonical final message. A
+// read-only running sample is returned without mutating or persisting the Task.
 func (tm *taskRuntime) applyObservedSubagentResult(
 	ctx context.Context,
 	task *subagentTask,
@@ -328,6 +328,7 @@ func (tm *taskRuntime) applyObservedSubagentResult(
 	// runner sample was in flight. Terminal state is monotonic: persist the
 	// current result instead of reopening it with an older running snapshot.
 	if task.running {
+		task.seedStreamFromResult(result)
 		task.applyResult(result)
 	}
 	snapshot := task.snapshotLocked()
@@ -563,20 +564,21 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 			SessionID: taskSpecString(entry.Spec, "session_id"),
 			AgentID:   taskSpecString(entry.Spec, "agent_id"),
 		},
-		runner:    tm.runtime.subagents,
-		agent:     target.Selector,
-		target:    target,
-		handle:    firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"])),
-		title:     strings.TrimSpace(entry.Title),
-		prompt:    taskSpecString(entry.Spec, "prompt"),
-		createdAt: entry.CreatedAt,
-		revision:  entry.Revision,
-		lease:     taskapi.CloneLease(entry.Lease),
-		state:     entry.State,
-		running:   entry.Running,
-		turnSeq:   taskTurnSeqFromSpec(entry.Spec),
-		result:    result,
-		metadata:  session.CloneState(entry.Metadata),
+		runner:          tm.runtime.subagents,
+		agent:           target.Selector,
+		target:          target,
+		handle:          firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"])),
+		title:           strings.TrimSpace(entry.Title),
+		prompt:          taskSpecString(entry.Spec, "prompt"),
+		createdAt:       entry.CreatedAt,
+		revision:        entry.Revision,
+		lease:           taskapi.CloneLease(entry.Lease),
+		state:           entry.State,
+		running:         entry.Running,
+		turnSeq:         taskTurnSeqFromSpec(entry.Spec),
+		result:          result,
+		metadata:        session.CloneState(entry.Metadata),
+		completionReady: true,
 	}
 	if task.metadata == nil {
 		task.metadata = map[string]any{}

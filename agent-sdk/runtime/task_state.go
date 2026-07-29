@@ -39,6 +39,9 @@ type taskRuntime struct {
 	backends   map[sandbox.Backend]sandbox.Runtime
 	handles    map[string]map[string]struct{}
 	operations map[string]struct{}
+
+	completions        map[string]*subagentCompletion
+	completionApplying map[string]struct{}
 }
 
 type sandboxRuntimeBackends interface {
@@ -204,6 +207,7 @@ type subagentTask struct {
 	streamBytes          int
 	streamTerminalFramed bool
 	streamChanged        chan struct{}
+	completionReady      bool
 }
 
 type subagentContinuationCheckpoint struct {
@@ -261,15 +265,17 @@ func (task *subagentTask) restoreContinuationTurn(checkpoint subagentContinuatio
 
 func newTaskRuntime(runtime *Runtime, store taskapi.Store) *taskRuntime {
 	return &taskRuntime{
-		runtime:    runtime,
-		store:      store,
-		tasks:      map[string]*commandTask{},
-		subagents:  map[string]*subagentTask{},
-		pending:    map[string][]stream.Frame{},
-		order:      map[string][]string{},
-		backends:   map[sandbox.Backend]sandbox.Runtime{},
-		handles:    map[string]map[string]struct{}{},
-		operations: map[string]struct{}{},
+		runtime:            runtime,
+		store:              store,
+		tasks:              map[string]*commandTask{},
+		subagents:          map[string]*subagentTask{},
+		pending:            map[string][]stream.Frame{},
+		order:              map[string][]string{},
+		backends:           map[sandbox.Backend]sandbox.Runtime{},
+		handles:            map[string]map[string]struct{}{},
+		operations:         map[string]struct{}{},
+		completions:        map[string]*subagentCompletion{},
+		completionApplying: map[string]struct{}{},
 	}
 }
 
@@ -291,7 +297,11 @@ func (tm *taskRuntime) tryClaimSubagentOperation(ref session.SessionRef, taskID 
 	return func() {
 		tm.mu.Lock()
 		delete(tm.operations, operationKey)
+		_, hasCompletion := tm.completions[strings.TrimSpace(taskID)]
 		tm.mu.Unlock()
+		if hasCompletion {
+			tm.kickSubagentCompletion(strings.TrimSpace(taskID))
+		}
 	}, true
 }
 

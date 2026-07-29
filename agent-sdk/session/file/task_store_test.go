@@ -91,6 +91,89 @@ func TestTaskStoreRevisionAndLeaseCAS(t *testing.T) {
 	}
 }
 
+func TestTaskStoreAllowsOnlySubagentCompletionWithoutLocalSessionDocument(t *testing.T) {
+	t.Parallel()
+
+	store := NewTaskStore(NewStore(Config{RootDir: t.TempDir()}))
+	completionCtx := session.ContextWithControlMutation(
+		context.Background(),
+		session.ControlMutationPurposeSubagentCompletion,
+	)
+	for _, test := range []struct {
+		name     string
+		entry    *task.Entry
+		existing bool
+	}{
+		{
+			name: "create",
+			entry: &task.Entry{
+				TaskID: "detached-create", Kind: task.KindSubagent,
+				Session: taskSessionRef("session-owned-by-another-store"),
+				State:   task.StateCompleted,
+			},
+		},
+		{
+			name:     "command",
+			existing: true,
+			entry: &task.Entry{
+				TaskID: "detached-command", Kind: task.KindCommand,
+				Session: taskSessionRef("session-owned-by-another-store"),
+				State:   task.StateCompleted,
+			},
+		},
+		{
+			name:     "running",
+			existing: true,
+			entry: &task.Entry{
+				TaskID: "detached-running", Kind: task.KindSubagent,
+				Session: taskSessionRef("session-owned-by-another-store"),
+				State:   task.StateRunning, Running: true,
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			expected := uint64(0)
+			if test.existing {
+				created, err := store.Put(context.Background(), task.PutRequest{Entry: test.entry})
+				if err != nil {
+					t.Fatalf("Put(%s seed) error = %v", test.name, err)
+				}
+				expected = created.Revision
+			}
+			if _, err := store.Put(completionCtx, task.PutRequest{
+				Entry: test.entry, ExpectedRevision: expected,
+			}); err == nil {
+				t.Fatalf("Put(%s completion mutation) error = nil, want detached completion rejection", test.name)
+			}
+		})
+	}
+
+	entry, err := store.Put(context.Background(), task.PutRequest{
+		Entry: &task.Entry{
+			TaskID: "detached-completion", Kind: task.KindSubagent,
+			Session: taskSessionRef("session-owned-by-another-store"),
+			State:   task.StateRunning, Running: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Put(create) error = %v", err)
+	}
+	entry.State = task.StateCompleted
+	entry.Running = false
+	if _, err := store.Put(completionCtx, task.PutRequest{Entry: entry, ExpectedRevision: entry.Revision}); err != nil {
+		t.Fatalf("Put(subagent completion) error = %v", err)
+	}
+
+	entry.Revision++
+	otherControlCtx := session.ContextWithControlMutation(
+		context.Background(),
+		session.ControlMutationPurposeApproval,
+	)
+	if _, err := store.Put(otherControlCtx, task.PutRequest{Entry: entry, ExpectedRevision: entry.Revision}); !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("Put(other detached Control purpose) error = %v, want session not found", err)
+	}
+}
+
 func TestTaskStorePersistsTypedFailureDiagnostic(t *testing.T) {
 	t.Parallel()
 

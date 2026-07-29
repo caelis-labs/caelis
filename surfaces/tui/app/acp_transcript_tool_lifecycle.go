@@ -451,6 +451,9 @@ func isAttentionLoopTool(name string) bool {
 func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, expanded bool, final bool, fullOutput bool, opts acpTranscriptRenderOptions) []RenderedRow {
 	headerEvent := ev
 	spawn := names.CanonicalOrSelf(toolSemanticName(ev.Name, ev.ToolKind)) == names.Spawn
+	if spawn && !final && !renderableTextHasContent(text) {
+		text = ev.Activity
+	}
 	if fullOutput {
 		if fullArgs := strings.TrimSpace(ev.FullArgs); fullArgs != "" {
 			headerEvent.Args = fullArgs

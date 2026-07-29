@@ -124,6 +124,14 @@ func (t *subagentTask) applyStreamFramesLocked(frames []stream.Frame) {
 		if t.streamTerminalFramed {
 			continue
 		}
+		// Task stream frames are bounded observation. Only the child producer's
+		// completion sink or an explicit Task control observation may advance
+		// durable lifecycle.
+		frame.Closed = false
+		if stream.IsTerminalState(frame.State) {
+			frame.State = ""
+		}
+		frame.Running = t.running
 		text := subagentFrameAssistantText(frame)
 		if text == "" {
 			text = frame.Text
@@ -146,36 +154,13 @@ func (t *subagentTask) applyStreamFramesLocked(frames []stream.Frame) {
 			t.streamTerminalFramed = t.streamTerminalFramed || cloned.Closed
 		}
 		if text == "" {
-			if frame.State != "" {
-				t.state = taskStateFromSubagentStream(frame.State)
-				t.running = frame.Running
-				if !t.running {
-					normalizeSubagentResultForState(&t.result, t.state, "")
-				}
-			} else if frame.Running {
-				t.running = true
-			}
 			continue
 		}
 		if t.result == nil {
 			t.result = map[string]any{}
 		}
 		t.result["output_preview"] = compactFinalOutput(t.stdout, t.stderr)
-		if frame.State != "" {
-			t.state = taskStateFromSubagentStream(frame.State)
-		}
-		t.running = frame.Running
-		if !t.running {
-			normalizeSubagentResultForState(&t.result, t.state, "")
-		}
 	}
-}
-
-func taskStateFromSubagentStream(state string) task.State {
-	if normalized := task.State(strings.TrimSpace(state)); normalized == task.StateUnknownOutcome {
-		return normalized
-	}
-	return taskStateFromDelegation(delegation.State(state))
 }
 
 func subagentFrameAssistantText(frame stream.Frame) string {

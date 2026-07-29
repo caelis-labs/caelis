@@ -73,19 +73,24 @@ type childRun struct {
 	authenticationMethods []controlagents.AuthenticationMethod
 	taskID                string
 	sink                  stream.Sink
+	completion            delegation.CompletionSink
 	ctx                   context.Context
 	cancel                context.CancelFunc
 
-	mu             sync.RWMutex
-	state          delegation.State
-	outputPreview  string
-	failureDetail  string
-	result         string
-	agentText      string
-	finalAssistant acpschema.FinalAssistantAccumulator
-	updatedAt      time.Time
-	running        bool
-	done           chan struct{}
+	mu              sync.RWMutex
+	state           delegation.State
+	outputPreview   string
+	failureDetail   string
+	result          string
+	agentText       string
+	finalAssistant  acpschema.FinalAssistantAccumulator
+	updatedAt       time.Time
+	running         bool
+	finishing       bool
+	cancelRequested bool
+	cancelFailed    bool
+	cancelResolved  chan struct{}
+	done            chan struct{}
 }
 
 func NewRunner(cfg RunnerConfig) (*Runner, error) {
@@ -126,6 +131,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		running:        true,
 		taskID:         strings.TrimSpace(spawn.TaskID),
 		sink:           spawn.Streams,
+		completion:     spawn.Completion,
 		updatedAt:      r.clock(),
 		done:           make(chan struct{}),
 		agentName:      strings.TrimSpace(cfg.Name),
@@ -288,7 +294,7 @@ func (r *Runner) Continue(ctx context.Context, anchor delegation.Anchor, req del
 		return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: continuation prompt is required")
 	}
 	run.mu.Lock()
-	if run.running {
+	if run.running || run.finishing {
 		run.mu.Unlock()
 		return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child session %q is still running; use TASK wait before write", run.anchor.SessionID)
 	}
@@ -300,7 +306,12 @@ func (r *Runner) Continue(ctx context.Context, anchor delegation.Anchor, req del
 	run.agentText = ""
 	run.finalAssistant.Reset()
 	run.updatedAt = r.clock()
+	run.finishing = false
+	run.cancelRequested = false
+	run.cancelFailed = false
+	run.cancelResolved = nil
 	run.done = make(chan struct{})
+	run.completion = req.Completion
 	runCtx := run.ctx
 	if runCtx == nil {
 		runCtx = detachedChildContext(ctx)
@@ -319,30 +330,36 @@ func (r *Runner) Cancel(ctx context.Context, anchor delegation.Anchor) error {
 	if err != nil {
 		return err
 	}
-	run.mu.RLock()
+	run.mu.Lock()
+	if !run.running || run.finishing {
+		run.mu.Unlock()
+		return nil
+	}
+	run.finishing = true
+	run.cancelRequested = true
+	run.cancelResolved = make(chan struct{})
 	client := run.client
 	sessionID := run.anchor.SessionID
-	run.mu.RUnlock()
+	turnDone := run.done
+	cancelResolved := run.cancelResolved
+	run.mu.Unlock()
 	var remoteErr error
 	if client != nil {
 		remoteErr = client.Cancel(ctx, sessionID)
 	}
+	run.mu.Lock()
+	if run.done != turnDone {
+		close(cancelResolved)
+		run.mu.Unlock()
+		return remoteErr
+	}
+	run.cancelFailed = remoteErr != nil
+	run.updatedAt = r.clock()
+	close(cancelResolved)
+	run.mu.Unlock()
 	if run.cancel != nil {
 		run.cancel()
 	}
-	run.mu.Lock()
-	run.running = false
-	if remoteErr != nil {
-		run.state = delegation.StateInterrupted
-		run.outputPreview = "cancellation outcome unknown"
-		run.failureDetail = "subagent cancellation failed"
-	} else {
-		run.state = delegation.StateCancelled
-		run.outputPreview = "cancelled"
-		run.failureDetail = ""
-	}
-	run.updatedAt = r.clock()
-	run.mu.Unlock()
 	return remoteErr
 }
 
@@ -358,11 +375,29 @@ func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) 
 		},
 	)
 	run.mu.Lock()
-	defer run.mu.Unlock()
-	defer close(run.done)
+	if run.cancelRequested && run.cancelResolved != nil {
+		cancelResolved := run.cancelResolved
+		run.mu.Unlock()
+		<-cancelResolved
+		run.mu.Lock()
+	}
 	run.running = false
+	run.finishing = true
 	run.updatedAt = r.clock()
-	if err != nil {
+	closeClient := false
+	if run.cancelRequested {
+		if run.cancelFailed {
+			run.state = delegation.StateInterrupted
+			run.outputPreview = "cancellation outcome unknown"
+			run.failureDetail = "subagent cancellation failed"
+		} else {
+			run.state = delegation.StateCancelled
+			run.outputPreview = "cancelled"
+			run.failureDetail = ""
+		}
+		run.result = ""
+		closeClient = true
+	} else if err != nil {
 		if errors.Is(err, context.Canceled) {
 			if run.state != delegation.StateCancelled {
 				run.state = delegation.StateInterrupted
@@ -370,27 +405,40 @@ func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) 
 				run.failureDetail = "interrupted"
 			}
 			run.result = ""
-			_ = run.client.Close(context.WithoutCancel(ctx))
-			return
+			closeClient = true
+		} else {
+			run.state = delegation.StateFailed
+			run.failureDetail = subagentPromptFailureDetail(err)
+			run.outputPreview = run.failureDetail
+			run.result = ""
+			closeClient = true
 		}
-		run.state = delegation.StateFailed
-		run.failureDetail = subagentPromptFailureDetail(err)
-		run.outputPreview = run.failureDetail
-		run.result = ""
-		_ = run.client.Close(context.WithoutCancel(ctx))
-		return
-	}
-	if strings.EqualFold(strings.TrimSpace(resp.StopReason), "cancelled") {
+	} else if strings.EqualFold(strings.TrimSpace(resp.StopReason), "cancelled") {
 		run.state = delegation.StateCancelled
 		run.outputPreview = "cancelled"
 		run.failureDetail = ""
 		run.result = ""
-		_ = run.client.Close(context.WithoutCancel(ctx))
-		return
+		closeClient = true
+	} else {
+		run.state = delegation.StateCompleted
+		run.outputPreview = compactPreview(run.outputPreview)
+		run.failureDetail = ""
 	}
-	run.state = delegation.StateCompleted
-	run.outputPreview = compactPreview(run.outputPreview)
-	run.failureDetail = ""
+	result := childResultLocked(run)
+	completion := run.completion
+	done := run.done
+	run.mu.Unlock()
+
+	if closeClient {
+		_ = run.client.Close(context.WithoutCancel(ctx))
+	}
+	run.mu.Lock()
+	run.finishing = false
+	run.mu.Unlock()
+	close(done)
+	if completion != nil {
+		completion.PublishSubagentCompletion(result)
+	}
 }
 
 func (r *Runner) waitRun(ctx context.Context, run *childRun, yieldTimeMS int) delegation.Result {
@@ -402,15 +450,26 @@ func (r *Runner) waitRun(ctx context.Context, run *childRun, yieldTimeMS int) de
 		wait = 0
 	}
 	if wait > 0 {
+		run.mu.RLock()
+		done := run.done
+		run.mu.RUnlock()
 		select {
 		case <-ctx.Done():
-		case <-run.done:
+		case <-done:
 		case <-time.After(wait):
 		}
 	}
 	run.mu.RLock()
 	defer run.mu.RUnlock()
+	return childResultLocked(run)
+}
+
+func childResultLocked(run *childRun) delegation.Result {
+	if run == nil {
+		return delegation.Result{}
+	}
 	out := delegation.Result{
+		TaskID:        strings.TrimSpace(run.taskID),
 		State:         run.state,
 		Running:       run.running,
 		Yielded:       run.running,

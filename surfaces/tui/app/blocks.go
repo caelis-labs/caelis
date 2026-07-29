@@ -297,6 +297,34 @@ func (b *MainACPTurnBlock) markSubagentNarrativeBoundary(callID string, taskID s
 	return false
 }
 
+func (b *MainACPTurnBlock) setSubagentActivity(callID string, taskID string, activity string) bool {
+	if b == nil {
+		return false
+	}
+	callID = strings.TrimSpace(callID)
+	taskID = strings.TrimSpace(taskID)
+	activity = strings.TrimSpace(activity)
+	if activity == "" {
+		return false
+	}
+	for index := len(b.Events) - 1; index >= 0; index-- {
+		event := &b.Events[index]
+		if event.Kind != SEToolCall || event.Done {
+			continue
+		}
+		direct := callID != "" && strings.TrimSpace(event.CallID) == callID
+		linked := taskID != "" && strings.TrimSpace(event.TaskHandle) == taskID &&
+			(strings.EqualFold(toolSemanticName(event.Name, event.ToolKind), "SPAWN") ||
+				(strings.EqualFold(toolSemanticName(event.Name, event.ToolKind), "TASK") && taskEventAction(*event) == "write"))
+		if !direct && !linked {
+			continue
+		}
+		event.Activity = activity
+		return true
+	}
+	return false
+}
+
 func shouldReplaceSpawnDisplayArgs(existing string, incoming string) bool {
 	existing = sanitizeSpawnHeaderArgs(strings.TrimSpace(existing))
 	incoming = sanitizeSpawnHeaderArgs(strings.TrimSpace(incoming))

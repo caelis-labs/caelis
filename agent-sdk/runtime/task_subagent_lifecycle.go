@@ -245,8 +245,23 @@ func (tm *taskRuntime) appendSideSubagentFinalEvent(ctx context.Context, task *s
 	if task.metadata == nil {
 		task.metadata = map[string]any{}
 	}
+	previous, hadPrevious := task.metadata["final_event_persisted"]
 	task.metadata["final_event_persisted"] = "true"
 	entry := task.entrySnapshot(tm.runtime.now())
+	if hadPrevious {
+		task.metadata["final_event_persisted"] = previous
+	} else {
+		delete(task.metadata, "final_event_persisted")
+	}
 	task.mu.Unlock()
-	return tm.persistTaskEntry(ctx, entry)
+	if err := tm.persistTaskEntry(ctx, entry); err != nil {
+		return err
+	}
+	task.mu.Lock()
+	if task.metadata == nil {
+		task.metadata = map[string]any{}
+	}
+	task.metadata["final_event_persisted"] = "true"
+	task.mu.Unlock()
+	return nil
 }

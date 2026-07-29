@@ -75,9 +75,53 @@ func (m *Model) applyTranscriptToolToParticipant(event TranscriptEvent, mutation
 func (m *Model) applyTranscriptToolToSubagent(event TranscriptEvent, mutation transcriptToolMutation) (tea.Model, tea.Cmd) {
 	if eventTargetsParentToolPanel(event) {
 		m.markAnchoredSubagentNarrativeBoundary(event)
+		if block := m.updateAnchoredSubagentActivity(event, mutation); block != nil {
+			m.markViewportBlockDirty(block.BlockID())
+			return m, m.requestStreamViewportSync()
+		}
 		return m, nil
 	}
 	return m.applyTranscriptToolToParticipant(event, mutation)
+}
+
+func (m *Model) updateAnchoredSubagentActivity(event TranscriptEvent, mutation transcriptToolMutation) *MainACPTurnBlock {
+	if m == nil || m.doc == nil {
+		return nil
+	}
+	activity := anchoredSubagentActivityText(event, mutation)
+	if activity == "" {
+		return nil
+	}
+	callID := strings.TrimSpace(event.AnchorToolCallID)
+	taskID := strings.TrimSpace(event.ScopeID)
+	if block := m.activeMainTaskWriteBlock(taskID); block != nil {
+		if block.setSubagentActivity(callID, taskID, activity) {
+			return block
+		}
+	}
+	for _, docBlock := range m.doc.Blocks() {
+		block, ok := docBlock.(*MainACPTurnBlock)
+		if !ok || !mainACPBlockHasToolCall(block, callID) {
+			continue
+		}
+		if block.setSubagentActivity(callID, taskID, activity) {
+			return block
+		}
+	}
+	return nil
+}
+
+func anchoredSubagentActivityText(event TranscriptEvent, mutation transcriptToolMutation) string {
+	name := firstTrimmed(mutation.name, event.ToolTitle, event.ToolKind, "tool")
+	args := strings.TrimSpace(mutation.args)
+	activity := name
+	if args != "" && !strings.EqualFold(args, name) {
+		activity += " " + args
+	}
+	if output := strings.TrimSpace(sanitizeRenderableText(mutation.output)); output != "" {
+		activity += "\n" + output
+	}
+	return summarizeACPToolPanelText(activity, false)
 }
 
 func (m *Model) markAnchoredSubagentNarrativeBoundary(event TranscriptEvent) {

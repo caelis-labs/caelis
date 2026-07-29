@@ -32,6 +32,9 @@ const (
 	ControlMutationPurposeConfiguration ControlMutationPurpose = "session_configuration"
 	ControlMutationPurposeTest          ControlMutationPurpose = "test"
 	ControlMutationPurposeSystemCommit  ControlMutationPurpose = "system_commit"
+	// ControlMutationPurposeSubagentCompletion owns the asynchronous terminal
+	// Task and side-participant commit after the spawning Turn may have ended.
+	ControlMutationPurposeSubagentCompletion ControlMutationPurpose = "subagent_completion"
 )
 
 // MutationGuard carries the authority and durable fence for one mutation.
@@ -53,6 +56,15 @@ func ContextWithRuntimeLease(ctx context.Context, lease SessionLease) context.Co
 	return context.WithValue(ctx, mutationGuardContextKey{}, MutationGuard{
 		Authority: MutationAuthorityRuntime, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID, FencingToken: lease.FencingToken,
 	})
+}
+
+// ContextWithControlMutation replaces any inherited Runtime fence with one
+// inventoryable asynchronous Control mutation purpose.
+func ContextWithControlMutation(ctx context.Context, purpose ControlMutationPurpose) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, mutationGuardContextKey{}, ControlMutationGuard(purpose))
 }
 
 // ContextWithoutRuntimeLease starts a distinct Runtime placement scope while
@@ -177,6 +189,7 @@ func ControlMutationMayOverlapRuntimeLease(purpose ControlMutationPurpose) bool 
 	case ControlMutationPurposeApproval,
 		ControlMutationPurposeParticipant,
 		ControlMutationPurposeSystemCommit,
+		ControlMutationPurposeSubagentCompletion,
 		ControlMutationPurposeTest:
 		return true
 	default:
@@ -193,7 +206,8 @@ func knownControlMutationPurpose(purpose ControlMutationPurpose) bool {
 		ControlMutationPurposeLifecycle,
 		ControlMutationPurposeConfiguration,
 		ControlMutationPurposeTest,
-		ControlMutationPurposeSystemCommit:
+		ControlMutationPurposeSystemCommit,
+		ControlMutationPurposeSubagentCompletion:
 		return true
 	default:
 		return false

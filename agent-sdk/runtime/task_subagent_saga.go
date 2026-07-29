@@ -156,6 +156,7 @@ func (tm *taskRuntime) startSubagentTarget(
 			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession), CWD: strings.TrimSpace(activeSession.CWD),
 			TaskID: taskID, ParentCallID: strings.TrimSpace(req.ParentCall), Mode: mode, ApprovalMode: strings.TrimSpace(req.ApprovalMode),
 			ApprovalRequester: req.Approval, Streams: tm,
+			Completion: newSubagentCompletionSink(ctx, tm, taskID, 1),
 		}
 		anchor, result, err := spawnSubagentTarget(ctx, runner, spawnContext, target, childPrompt)
 		if err != nil {
@@ -203,7 +204,15 @@ func (tm *taskRuntime) startSubagentTarget(
 	tm.mu.Unlock()
 	task.applyStreamFramesLocked(pending)
 	task.streamMu.Unlock()
-	return tm.advanceSubagentSpawn(ctx, activeSession, task, strings.TrimSpace(req.ParentCall), strings.TrimSpace(req.Prompt))
+	snapshot, err := tm.advanceSubagentSpawn(ctx, activeSession, task, strings.TrimSpace(req.ParentCall), strings.TrimSpace(req.Prompt))
+	if err != nil {
+		return snapshot, err
+	}
+	task.mu.Lock()
+	task.completionReady = true
+	task.mu.Unlock()
+	tm.kickSubagentCompletion(taskID)
+	return snapshot, nil
 }
 
 func (tm *taskRuntime) beginSubagentSpawn(

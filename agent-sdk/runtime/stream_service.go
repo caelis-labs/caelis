@@ -364,24 +364,9 @@ func commandStatusWithoutSession(task *commandTask) (sandbox.SessionStatus, erro
 	}, nil
 }
 
-func (s *streamService) readSubagent(ctx context.Context, sub *subagentTask, cursor stream.Cursor) (stream.Snapshot, error) {
+func (s *streamService) readSubagent(_ context.Context, sub *subagentTask, cursor stream.Cursor) (stream.Snapshot, error) {
 	if sub == nil {
 		return stream.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent task is required")
-	}
-	if sub.runner != nil {
-		result, err := sub.runner.Wait(ctx, sub.anchor, 0)
-		if err == nil {
-			sub.mu.Lock()
-			sub.applyResult(result)
-			sub.seedStreamFromResult(result)
-			sub.mu.Unlock()
-		} else if ctx.Err() != nil {
-			return stream.Snapshot{}, ctx.Err()
-		} else if sub.isRunning() && s != nil && s.tasks != nil {
-			if _, interruptErr := s.tasks.interruptSubagentTask(ctx, sub, "subagent session interrupted during recovery"); interruptErr != nil {
-				return stream.Snapshot{}, interruptErr
-			}
-		}
 	}
 	sub.mu.Lock()
 	defer sub.mu.Unlock()

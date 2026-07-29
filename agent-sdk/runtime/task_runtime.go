@@ -308,7 +308,8 @@ func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entr
 		persisted, err := store.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: expected})
 		if err != nil {
 			if !session.IsCommitted(err) {
-				if entry.Kind == taskapi.KindSubagent {
+				var conflict *taskapi.RevisionConflictError
+				if entry.Kind == taskapi.KindSubagent && errors.As(err, &conflict) {
 					tm.invalidateSubagentTask(entry.Session, entry.TaskID, expected)
 				}
 				return err

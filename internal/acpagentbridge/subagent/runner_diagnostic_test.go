@@ -37,17 +37,21 @@ func TestRunnerPromptFailureBeforeFirstUpdateDoesNotPersistRawDiagnostics(t *tes
 		t.Fatalf("NewRunner() error = %v", err)
 	}
 	streams := &recordingStreams{}
-	anchor, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
-		TaskID:  "task-prompt-failure",
-		CWD:     t.TempDir(),
-		Streams: streams,
+	completions := make(chan delegation.Result, 1)
+	_, _, err = runner.Spawn(ctx, tasksubagent.SpawnContext{
+		TaskID:     "task-prompt-failure",
+		CWD:        t.TempDir(),
+		Streams:    streams,
+		Completion: completionSinkFunc(func(result delegation.Result) { completions <- result }),
 	}, delegation.Request{Agent: "helper", Prompt: "review"})
 	if err != nil {
 		t.Fatalf("Spawn() error = %v", err)
 	}
-	got, err := runner.Wait(ctx, anchor, 2_000)
-	if err != nil {
-		t.Fatalf("Wait() error = %v", err)
+	var got delegation.Result
+	select {
+	case got = <-completions:
+	case <-ctx.Done():
+		t.Fatalf("producer completion was not published: %v", ctx.Err())
 	}
 	if got.State != delegation.StateFailed || got.Running {
 		t.Fatalf("Result = state %q running %v, want terminal failed", got.State, got.Running)
@@ -103,16 +107,20 @@ func TestRunnerPromptRecoversConfiguredAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRunner() error = %v", err)
 	}
-	anchor, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
-		TaskID: "task-prompt-authentication",
-		CWD:    t.TempDir(),
+	completions := make(chan delegation.Result, 1)
+	_, _, err = runner.Spawn(ctx, tasksubagent.SpawnContext{
+		TaskID:     "task-prompt-authentication",
+		CWD:        t.TempDir(),
+		Completion: completionSinkFunc(func(result delegation.Result) { completions <- result }),
 	}, delegation.Request{Agent: "protected-helper", Prompt: "review"})
 	if err != nil {
 		t.Fatalf("Spawn() error = %v", err)
 	}
-	got, err := runner.Wait(ctx, anchor, 2_000)
-	if err != nil {
-		t.Fatalf("Wait() error = %v", err)
+	var got delegation.Result
+	select {
+	case got = <-completions:
+	case <-ctx.Done():
+		t.Fatalf("producer completion was not published: %v", ctx.Err())
 	}
 	if got.State != delegation.StateCompleted || got.Running {
 		t.Fatalf("Result = state %q running %v, want completed", got.State, got.Running)
@@ -168,6 +176,12 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+type completionSinkFunc func(delegation.Result)
+
+func (sink completionSinkFunc) PublishSubagentCompletion(result delegation.Result) {
+	sink(result)
 }
 
 func TestSubagentPromptFailureDetailIsStable(t *testing.T) {

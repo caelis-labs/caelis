@@ -122,6 +122,7 @@ func (tm *taskRuntime) executeClaimedSubagentContinue(ctx context.Context, task 
 	result, err := task.runner.Continue(ctx, delegation.CloneAnchor(task.anchor), delegation.ContinueRequest{
 		Prompt:      contextprompt.ComposeTextPrompt(contextTransfer, prompt),
 		YieldTimeMS: yieldMS,
+		Completion:  newSubagentCompletionSink(ctx, tm, task.ref.TaskID, turnSeq),
 	})
 	if err != nil {
 		persistErr := tm.markSubagentContinueUnknown(context.WithoutCancel(ctx), task, err.Error())

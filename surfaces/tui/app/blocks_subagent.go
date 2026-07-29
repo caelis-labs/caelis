@@ -48,6 +48,9 @@ type SubagentEvent struct {
 	Output          string
 	OutputMessageID string
 	OutputMessage   string
+	// Activity is the latest deterministic child tool signal shown only while
+	// a Spawn/Task-write panel has no assistant narrative yet.
+	Activity string
 	// OutputNarrative marks text supplied by child ACP narrative chunks so a
 	// repeated parent result cannot truncate already rendered child output.
 	OutputNarrative bool

@@ -19,6 +19,7 @@ import (
 	memory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	taskstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 )
 
@@ -30,6 +31,48 @@ type sagaTaskStore struct {
 	commitOnPut int
 	failStatus  string
 	failedState bool
+}
+
+type completionGateTaskStore struct {
+	base    *sagaTaskStore
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *completionGateTaskStore) Upsert(ctx context.Context, entry *taskapi.Entry) error {
+	current, _ := s.Get(ctx, entry.TaskID)
+	expected := uint64(0)
+	if current != nil {
+		expected = current.Revision
+	}
+	_, err := s.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: expected})
+	return err
+}
+
+func (s *completionGateTaskStore) Put(ctx context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {
+	if req.Entry != nil && req.Entry.Kind == taskapi.KindSubagent && !req.Entry.Running &&
+		taskstream.IsTerminalState(string(req.Entry.State)) {
+		s.once.Do(func() { close(s.started) })
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-s.release:
+		}
+	}
+	return s.base.Put(ctx, req)
+}
+
+func (s *completionGateTaskStore) Get(ctx context.Context, taskID string) (*taskapi.Entry, error) {
+	return s.base.Get(ctx, taskID)
+}
+
+func (s *completionGateTaskStore) ListSession(ctx context.Context, ref session.SessionRef) ([]*taskapi.Entry, error) {
+	return s.base.ListSession(ctx, ref)
+}
+
+func (s *completionGateTaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.SessionRef, handle string) (*taskapi.Entry, error) {
+	return s.base.GetSessionTaskByHandle(ctx, ref, handle)
 }
 
 type getFailingSagaTaskStore struct {
@@ -185,6 +228,205 @@ func (s *sagaSessionService) AppendEvent(ctx context.Context, req session.Append
 		return persisted, &session.CommittedError{Err: errors.New("forced committed canonical error")}
 	}
 	return persisted, err
+}
+
+func TestSubagentProducerCompletionAcknowledgesDurableCommit(t *testing.T) {
+	baseStore := newSagaTaskStore()
+	store := &completionGateTaskStore{
+		base:    baseStore,
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, active := newSubagentCompletionSagaRuntime(t, store, nil, runner)
+	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "completion-ack", Agent: "helper", Prompt: "inspect", Role: session.ParticipantRoleDelegated,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	published := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID,
+			State:  delegation.StateCompleted,
+			Result: "done",
+		})
+		close(published)
+	}()
+
+	select {
+	case <-store.started:
+	case <-time.After(time.Second):
+		t.Fatal("terminal Task persistence did not start")
+	}
+	select {
+	case <-published:
+		t.Fatal("PublishSubagentCompletion returned before durable terminal commit")
+	default:
+	}
+	close(store.release)
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("PublishSubagentCompletion did not acknowledge durable terminal commit")
+	}
+	entry, err := store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil || entry.Running || entry.State != taskapi.StateCompleted {
+		t.Fatalf("durable completion = %#v, %v; want completed", entry, err)
+	}
+}
+
+func TestSubagentProducerCompletionRetriesWithoutTaskObservation(t *testing.T) {
+	store := newSagaTaskStore()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, active := newSubagentCompletionSagaRuntime(t, store, nil, runner)
+	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "completion-retry", Agent: "helper", Prompt: "inspect", Role: session.ParticipantRoleDelegated,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	store.failOnPut = store.puts + 1
+	store.mu.Unlock()
+
+	published := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID,
+			State:  delegation.StateCompleted,
+			Result: "done after retry",
+		})
+		close(published)
+	}()
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("producer completion did not retry independently")
+	}
+	entry, err := store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil || entry.Running || entry.State != taskapi.StateCompleted {
+		t.Fatalf("durable completion after retry = %#v, %v; want completed without Task read/wait", entry, err)
+	}
+}
+
+func TestSubagentProducerCompletionRefreshesAfterCASConflict(t *testing.T) {
+	store := newSagaTaskStore()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, active := newSubagentCompletionSagaRuntime(t, store, nil, runner)
+	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "completion-cas", Agent: "helper", Prompt: "inspect", Role: session.ParticipantRoleDelegated,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrent, err := store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrent.Metadata["concurrent_observer"] = "committed"
+	if _, err := store.Put(context.Background(), taskapi.PutRequest{
+		Entry: concurrent, ExpectedRevision: concurrent.Revision,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	published := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID,
+			State:  delegation.StateCompleted,
+			Result: "done after CAS refresh",
+		})
+		close(published)
+	}()
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("producer completion did not refresh and retry after CAS conflict")
+	}
+	entry, err := store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil || entry.Running || entry.State != taskapi.StateCompleted {
+		t.Fatalf("durable completion after CAS refresh = %#v, %v; want completed", entry, err)
+	}
+}
+
+func TestSubagentProducerCompletionRetriesSideFinalWithoutTaskObservation(t *testing.T) {
+	baseSessions := memory.NewStore(memory.Config{})
+	sessions := &sagaSessionService{Service: baseSessions, failCanonicalAt: 2}
+	store := newSagaTaskStore()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, active := newSubagentCompletionSagaRuntime(t, store, sessions, runner)
+	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "completion-side-final", Agent: "helper", Prompt: "inspect", Role: session.ParticipantRoleSidecar,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	published := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID,
+			State:  delegation.StateCompleted,
+			Result: "side final after retry",
+		})
+		close(published)
+	}()
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("producer completion did not retry the side final")
+	}
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var final string
+	for _, event := range loaded.Events {
+		if event != nil && event.Type == session.EventTypeAssistant &&
+			event.Scope != nil && event.Scope.Participant.DelegationID == started.Ref.TaskID {
+			final = strings.TrimSpace(event.Text)
+		}
+	}
+	if final != "side final after retry" {
+		t.Fatalf("side final = %q, want retried canonical assistant event", final)
+	}
+}
+
+func newSubagentCompletionSagaRuntime(
+	t *testing.T,
+	store taskapi.Store,
+	sessions session.Service,
+	runner subagent.Runner,
+) (*Runtime, session.Session) {
+	t.Helper()
+	if sessions == nil {
+		sessions = memory.NewStore(memory.Config{})
+	}
+	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "completion-saga",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runtime, active
 }
 
 func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {

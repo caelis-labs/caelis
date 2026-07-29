@@ -1095,6 +1095,76 @@ func TestHandleACPEventEnvelopePreservesHiddenChildToolAsBlankMessageBoundary(t 
 	}
 }
 
+func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(248, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-call-1",
+			Title: "SPAWN explorer: inspect", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"agent": "explorer", "prompt": "inspect"}, Meta: acpToolNameMeta("SPAWN"),
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "child-turn-1",
+		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Actor: "explorer",
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "SPAWN"},
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "child-tool-1",
+			Title: "Read /workspace/config.go", Kind: schema.ToolKindRead, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"path": "/workspace/config.go"},
+		},
+	})
+
+	model.syncViewportContent()
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if strings.Contains(plain, "(wait subagent output)") {
+		t.Fatalf("running Spawn still renders the empty-output placeholder:\n%s", plain)
+	}
+	if !strings.Contains(strings.ToLower(plain), "read") || !strings.Contains(plain, "config.go") {
+		t.Fatalf("running Spawn does not expose child tool activity:\n%s", plain)
+	}
+
+	completed := schema.ToolStatusCompleted
+	readKind := schema.ToolKindRead
+	readTitle := "Read /workspace/config.go"
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "child-turn-1",
+		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Actor: "explorer",
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "SPAWN"},
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "child-tool-1",
+			Title: &readTitle, Kind: &readKind, Status: &completed,
+			Content: []schema.ToolCallContent{{
+				Type: "content", Content: schema.TextContent{Type: "text", Text: "loaded child settings"},
+			}},
+		},
+	})
+	model.syncViewportContent()
+	plain = strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(plain, "loaded child settings") {
+		t.Fatalf("running Spawn does not expose latest child tool output:\n%s", plain)
+	}
+
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "child-turn-1",
+		Scope: eventstream.ScopeSubagent, ScopeID: "task-1", Actor: "explorer",
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "SPAWN"},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "found the configuration issue"},
+		},
+	})
+	model.syncViewportContent()
+	plain = strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(plain, "found the configuration issue") || strings.Contains(plain, "loaded child settings") {
+		t.Fatalf("assistant narrative did not replace the transient child activity:\n%s", plain)
+	}
+}
+
 func TestHandleACPEventEnvelopeRoutesCrossTurnChildContinuationToActiveTaskWrite(t *testing.T) {
 	t.Parallel()
 

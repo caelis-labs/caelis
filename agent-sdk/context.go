@@ -168,6 +168,9 @@ type SubagentSpawnContext struct {
 	ApprovalMode      string                    `json:"approval_mode,omitempty"`
 	ApprovalRequester SubagentApprovalRequester `json:"-"`
 	Streams           stream.Sink               `json:"-"`
+	// Completion is the Runtime-owned terminal lifecycle path for this child
+	// turn. Stream consumers and Task control calls remain observers.
+	Completion delegation.CompletionSink `json:"-"`
 }
 
 // Context exposes immutable invocation state derived from persisted events and

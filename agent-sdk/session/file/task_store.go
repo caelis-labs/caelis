@@ -63,13 +63,75 @@ func (s *TaskStore) put(ctx context.Context, entry *taskapi.Entry, expected *uin
 			if err := validateFileMutationGuard(activeDocumentLease(doc), guard, s.store.now()); err != nil {
 				return err
 			}
-		} else if !errors.Is(err, session.ErrSessionNotFound) || guard.Authority != "" {
-			return err
+		} else {
+			if !errors.Is(err, session.ErrSessionNotFound) || !taskMutationMayUseDetachedControlStore(guard) {
+				return err
+			}
+			if taskMutationIsDetachedSubagentCompletion(guard) {
+				if err := s.validateDetachedSubagentCompletion(entry, expected); err != nil {
+					return err
+				}
+			}
 		}
 		out, err = s.store.upsertTaskIndex(entry, expected)
 		return err
 	})
 	return out, err
+}
+
+// A TaskStore may be configured independently from the Session store. Ordinary
+// unguarded writes retain that topology; the only detached Control mutation is
+// a validated asynchronous subagent completion.
+func taskMutationMayUseDetachedControlStore(guard session.MutationGuard) bool {
+	if guard.Authority == "" {
+		return true
+	}
+	return taskMutationIsDetachedSubagentCompletion(guard)
+}
+
+func taskMutationIsDetachedSubagentCompletion(guard session.MutationGuard) bool {
+	return guard.Authority == session.MutationAuthorityControl &&
+		guard.Purpose == session.ControlMutationPurposeSubagentCompletion &&
+		session.ValidateControlMutationGuard(guard) == nil
+}
+
+func (s *TaskStore) validateDetachedSubagentCompletion(entry *taskapi.Entry, expected *uint64) error {
+	if entry == nil || expected == nil || *expected == 0 {
+		return fmt.Errorf("agent-sdk/session/file: detached subagent completion requires an existing Task CAS revision")
+	}
+	current, err := s.store.getTaskIndex(strings.TrimSpace(entry.TaskID))
+	if err != nil {
+		return fmt.Errorf("agent-sdk/session/file: detached subagent completion requires an existing Task: %w", err)
+	}
+	if current.Kind != taskapi.KindSubagent || entry.Kind != taskapi.KindSubagent {
+		return fmt.Errorf("agent-sdk/session/file: detached subagent completion requires a subagent Task")
+	}
+	if session.NormalizeSessionRef(current.Session) != session.NormalizeSessionRef(entry.Session) {
+		return fmt.Errorf("agent-sdk/session/file: detached subagent completion cannot change the owning Session")
+	}
+	if entry.Running || !detachedSubagentCompletionState(entry.State) {
+		return fmt.Errorf("agent-sdk/session/file: detached subagent completion requires a terminal Task state")
+	}
+	if current.Revision != *expected {
+		return &taskapi.RevisionConflictError{
+			TaskID: entry.TaskID, Expected: *expected, Actual: current.Revision,
+		}
+	}
+	return nil
+}
+
+func detachedSubagentCompletionState(state taskapi.State) bool {
+	switch state {
+	case taskapi.StateCompleted,
+		taskapi.StateFailed,
+		taskapi.StateCancelled,
+		taskapi.StateInterrupted,
+		taskapi.StateTerminated,
+		taskapi.StateUnknownOutcome:
+		return true
+	default:
+		return false
+	}
 }
 
 // AcquireLease conditionally assigns one live worker lease.

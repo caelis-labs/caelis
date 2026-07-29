@@ -90,15 +90,14 @@ func TestNormalizeSubagentCancelledClearsStaleFailureAndOutputFields(t *testing.
 	}
 }
 
-func TestSubagentTerminalStreamStateUsesFailureDiagnosticContract(t *testing.T) {
+func TestSubagentTerminalStreamObservationDoesNotOwnFailureLifecycle(t *testing.T) {
 	tests := []struct {
-		name       string
-		state      task.State
-		diagnostic string
+		name  string
+		state task.State
 	}{
-		{name: "failed", state: task.StateFailed, diagnostic: "subagent failed"},
-		{name: "interrupted", state: task.StateInterrupted, diagnostic: "subagent interrupted"},
-		{name: "unknown outcome", state: task.StateUnknownOutcome, diagnostic: "subagent outcome could not be confirmed"},
+		{name: "failed", state: task.StateFailed},
+		{name: "interrupted", state: task.StateInterrupted},
+		{name: "unknown outcome", state: task.StateUnknownOutcome},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -118,15 +117,15 @@ func TestSubagentTerminalStreamStateUsesFailureDiagnosticContract(t *testing.T) 
 				Closed:  true,
 			}})
 			snapshot := subtask.snapshot()
-			if snapshot.State != test.state || snapshot.Running {
-				t.Fatalf("snapshot = state %q running %v, want %q false", snapshot.State, snapshot.Running, test.state)
+			if snapshot.State != task.StateRunning || !snapshot.Running {
+				t.Fatalf("snapshot = state %q running %v, want running true", snapshot.State, snapshot.Running)
 			}
-			if got := taskStringValue(snapshot.Result["error"]); got != test.diagnostic {
-				t.Fatalf("snapshot error = %q, want %q", got, test.diagnostic)
+			if got := taskStringValue(snapshot.Result["error"]); got != "" {
+				t.Fatalf("snapshot error = %q, want empty observation-only stream diagnostic", got)
 			}
 			for _, key := range []string{"result", "final_message", "output_preview"} {
-				if _, exists := snapshot.Result[key]; exists {
-					t.Fatalf("terminal stream state retained %q: %#v", key, snapshot.Result)
+				if _, exists := snapshot.Result[key]; !exists {
+					t.Fatalf("terminal stream observation removed %q: %#v", key, snapshot.Result)
 				}
 			}
 		})
