@@ -12,6 +12,7 @@ const {
   executeHandoffPlan,
   handoffOwnershipName,
   handoffPlanName,
+  npmInstallInvocation,
   normalizeVersion,
   removeOwnedLock,
   reserveHandoffDirectory,
@@ -104,6 +105,31 @@ test('executeHandoffPlan reports npm failure', async () => {
     ['fail', 'npm install failed'],
     ['stop'],
   ]);
+});
+
+test('Windows npm handoff passes the prepared cmd command line verbatim', () => {
+  const plan = {
+    ...testPlan(),
+    command: [
+      'D:\\Program Files\\nodejs\\npm.cmd',
+      'install',
+      '-g',
+      '@caelis/caelis@1.2.0',
+    ],
+    command_line:
+      'call "D:\\Program Files\\nodejs\\npm.cmd" "install" "-g" ' +
+      '"@caelis/caelis@1.2.0"',
+  };
+  const env = { ComSpec: 'C:\\Windows\\System32\\cmd.exe' };
+
+  assert.deepEqual(npmInstallInvocation(plan, 'win32', env), {
+    command: env.ComSpec,
+    args: ['/d', '/s', '/c', plan.command_line],
+    options: {
+      env,
+      windowsVerbatimArguments: true,
+    },
+  });
 });
 
 test('handoff plan validation rejects incomplete input', () => {

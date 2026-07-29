@@ -144,22 +144,45 @@ function normalizeVersion(value) {
   return String(value || '').trim().replace(/^v/i, '');
 }
 
-async function defaultRunInstall(plan, signalCoordinator) {
+function npmInstallInvocation(
+  plan,
+  platform = process.platform,
+  env = process.env,
+) {
   const executable = plan.command[0];
   const args = plan.command.slice(1);
-  if (process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(executable)) {
+  if (platform === 'win32' && /\.(?:cmd|bat)$/i.test(executable)) {
     const commandLine = String(plan.command_line || '').trim();
     if (!commandLine) {
       throw new Error('missing Windows npm command line');
     }
-    return runCapturedProcess(
-      process.env.ComSpec || 'cmd.exe',
-      ['/d', '/s', '/c', commandLine],
-      { env: process.env },
-      signalCoordinator,
-    );
+    return {
+      command: env.ComSpec || 'cmd.exe',
+      args: ['/d', '/s', '/c', commandLine],
+      options: {
+        env,
+        // Go has already encoded this as one cmd.exe command line. Node's
+        // normal Windows argv quoting would add backslashes before its
+        // embedded quotes, making cmd.exe look for a literal \"npm.cmd\".
+        windowsVerbatimArguments: true,
+      },
+    };
   }
-  return runCapturedProcess(executable, args, { env: process.env }, signalCoordinator);
+  return {
+    command: executable,
+    args,
+    options: { env },
+  };
+}
+
+async function defaultRunInstall(plan, signalCoordinator) {
+  const invocation = npmInstallInvocation(plan);
+  return runCapturedProcess(
+    invocation.command,
+    invocation.args,
+    invocation.options,
+    signalCoordinator,
+  );
 }
 
 async function defaultVerifyVersion(executable, signalCoordinator) {
@@ -343,6 +366,7 @@ module.exports = {
   handoffEnvironment,
   handoffOwnershipName,
   handoffPlanName,
+  npmInstallInvocation,
   normalizeVersion,
   removeOwnedLock,
   reserveHandoffDirectory,
