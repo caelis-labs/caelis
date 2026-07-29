@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"iter"
 	"slices"
 	"strings"
@@ -108,18 +109,29 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 	}
 	sawCompact := false
 	var compactText string
+	var compactTurnID string
+	var inputTurnID string
 	for _, event := range loaded.Events {
+		if event != nil && event.Type == session.EventTypeUser &&
+			strings.Contains(session.EventText(event), "continue") && event.Scope != nil {
+			inputTurnID = strings.TrimSpace(event.Scope.TurnID)
+		}
 		if event != nil && event.Type == session.EventTypeCompact {
 			if strings.TrimSpace(event.IdempotencyKey) == "" {
 				t.Fatalf("compact event has no stable retry identity: %+v", event)
 			}
 			sawCompact = true
 			compactText = strings.TrimSpace(session.EventText(event))
-			break
+			if event.Scope != nil {
+				compactTurnID = strings.TrimSpace(event.Scope.TurnID)
+			}
 		}
 	}
 	if !sawCompact {
 		t.Fatal("expected durable compact event in session history")
+	}
+	if inputTurnID == "" || compactTurnID != inputTurnID {
+		t.Fatalf("compact TurnID = %q, input TurnID = %q; want the causative Turn identity", compactTurnID, inputTurnID)
 	}
 	if !strings.Contains(compactText, "build compact runtime") {
 		t.Fatalf("compact event text = %q, want compact objective", compactText)
@@ -726,6 +738,96 @@ func TestSnapshotUsageUsesPromptBaselinePlusReplayDelta(t *testing.T) {
 	}
 }
 
+func TestSnapshotUsageFiltersProviderBaselineByRequestModelIdentity(t *testing.T) {
+	t.Parallel()
+
+	compactor := &codexStyleCompactor{cfg: normalizeCompactionConfig(CompactionConfig{
+		Enabled:                    true,
+		DefaultContextWindowTokens: 258400,
+	})}
+	providerEvent := providerUsageGateEvent(92576)
+	providerEvent.ID = "provider-usage-1"
+	events := []*session.Event{providerEvent, userTextEvent("post-snapshot delta")}
+
+	matched := compactor.snapshotUsage(compact.Request{Model: matchingProviderGateModel()}, events)
+	if matched.Source != compact.UsageSourceProvider || matched.TotalTokens < 92576 {
+		t.Fatalf("matched usage = %+v, want provider baseline", matched)
+	}
+
+	mismatched := compactor.snapshotUsage(compact.Request{Model: identifiedCompactionModel{
+		staticModel:  staticModel{text: "ok"},
+		providerName: "anthropic",
+		modelName:    "claude-sonnet-4-5",
+	}}, events)
+	if mismatched.Source != compact.UsageSourceEstimated {
+		t.Fatalf("mismatched usage = %+v, want local estimated fallback", mismatched)
+	}
+	if mismatched.AsOfEventID != "" || mismatched.TotalTokens >= 92576 {
+		t.Fatalf("mismatched usage = %+v, want provider baseline discarded", mismatched)
+	}
+}
+
+func TestSnapshotUsageUsesLatestCompatibleProviderBaseline(t *testing.T) {
+	t.Parallel()
+
+	compactor := &codexStyleCompactor{cfg: normalizeCompactionConfig(CompactionConfig{
+		Enabled:                    true,
+		DefaultContextWindowTokens: 258400,
+	})}
+	matching := providerUsageGateEvent(92576)
+	matching.ID = "matching-provider-usage"
+	mismatching := providerUsageGateEvent(12000)
+	mismatching.ID = "newer-mismatching-provider-usage"
+	mismatching.Invocation.Provider = "anthropic"
+	mismatching.Invocation.Model = "claude-sonnet-4-5"
+	sdkMeta := nestedMap(mismatching.Meta, "caelis", "sdk")
+	sdkMeta["provider"] = "anthropic"
+	sdkMeta["model"] = "claude-sonnet-4-5"
+
+	usage := compactor.snapshotUsage(
+		compact.Request{Model: matchingProviderGateModel()},
+		[]*session.Event{matching, mismatching, userTextEvent("latest visible delta")},
+	)
+	if usage.Source != compact.UsageSourceProvider {
+		t.Fatalf("usage = %+v, want provider source from older compatible snapshot", usage)
+	}
+	if usage.AsOfEventID != matching.ID {
+		t.Fatalf("usage.AsOfEventID = %q, want older compatible %q", usage.AsOfEventID, matching.ID)
+	}
+	if usage.TotalTokens <= 92576 || usage.EstimatedDeltaTokens == 0 {
+		t.Fatalf("usage = %+v, want compatible baseline plus all later prompt-visible delta", usage)
+	}
+}
+
+func TestPrepareIgnoresHighProviderBaselineFromDifferentModel(t *testing.T) {
+	t.Parallel()
+
+	compactor := &codexStyleCompactor{cfg: normalizeCompactionConfig(CompactionConfig{
+		Enabled:                    true,
+		DefaultContextWindowTokens: 258400,
+	})}
+	providerEvent := providerUsageGateEvent(244000)
+	providerEvent.ID = "provider-usage-high"
+
+	result, err := compactor.Prepare(context.Background(), compact.Request{
+		Events: []*session.Event{providerEvent},
+		Model: identifiedCompactionModel{
+			staticModel:  staticModel{text: "must not run"},
+			providerName: "anthropic",
+			modelName:    "claude-sonnet-4-5",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	if result.Compacted {
+		t.Fatal("Prepare() compacted on a high-water snapshot from a different model")
+	}
+	if result.Usage.Source != compact.UsageSourceEstimated {
+		t.Fatalf("Prepare() usage = %+v, want local estimated fallback", result.Usage)
+	}
+}
+
 func TestSnapshotUsageTotalOnlyFallbackDoesNotDoubleCountSnapshotGroup(t *testing.T) {
 	t.Parallel()
 
@@ -1150,6 +1252,21 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 	if !ok {
 		t.Fatal("expected latest compact event")
 	}
+	inputTurnID := ""
+	for _, event := range loaded.Events {
+		if event != nil && event.Type == session.EventTypeUser &&
+			strings.Contains(session.EventText(event), "Use ECHO and then finish.") && event.Scope != nil {
+			inputTurnID = strings.TrimSpace(event.Scope.TurnID)
+			break
+		}
+	}
+	compactTurnID := ""
+	if compactEvent.Scope != nil {
+		compactTurnID = strings.TrimSpace(compactEvent.Scope.TurnID)
+	}
+	if inputTurnID == "" || compactTurnID != inputTurnID {
+		t.Fatalf("overflow compact TurnID = %q, input TurnID = %q; want the causative Turn identity", compactTurnID, inputTurnID)
+	}
 	data, ok := compact.CompactEventDataFromEvent(compactEvent)
 	if !ok {
 		t.Fatalf("compact metadata missing compact payload: %+v", compactEvent.Meta)
@@ -1265,6 +1382,115 @@ func TestRuntimeAutoCompactsBeforePostToolModelRequest(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(session.EventText(compactEvent)), "tool result") {
 		t.Fatalf("compact event text = %q, want tool result continuity", session.EventText(compactEvent))
+	}
+}
+
+func TestRuntimeDoesNotCompactProductionSizedInlineImagesBelowProviderWatermark(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-compact-inline-image-provider-usage")
+	for i, size := range []int{403992, 175800, 388608} {
+		message := model.NewMessage(
+			model.RoleUser,
+			model.NewTextPart("Screenshot attached for diagnosis."),
+			model.NewMediaPart(
+				model.MediaModalityImage,
+				model.MediaSource{
+					Kind: model.MediaSourceInline,
+					Data: strings.Repeat(string(rune('A'+i)), size),
+				},
+				"image/png",
+				fmt.Sprintf("screenshot-%d.png", i+1),
+			),
+		)
+		appendTestEvent(t, sessions, activeSession.SessionRef, &session.Event{
+			Type:       session.EventTypeUser,
+			Visibility: session.VisibilityCanonical,
+			Message:    &message,
+			Text:       message.TextContent(),
+		})
+		appendTestEvent(t, sessions, activeSession.SessionRef, assistantEvent("Screenshot received."))
+	}
+
+	testModel := &attachmentUsageModel{t: t}
+	targetTool := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        "ECHO",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{
+				ID:      call.ID,
+				Name:    call.Name,
+				Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))},
+			}, nil
+		},
+	}
+
+	runtime, err := New(Config{
+		Sessions: sessions,
+		AgentFactory: chat.Factory{
+			SystemPrompt: "Use tools when necessary.",
+		},
+		Compaction: CompactionConfig{
+			Enabled:                    true,
+			DefaultContextWindowTokens: 258400,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "Use ECHO and then finish.",
+		AgentSpec: agent.AgentSpec{
+			Name:  "chat",
+			Model: testModel,
+			Tools: []tool.Tool{targetTool},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var finalText string
+	sawCompactNotice := false
+	for event, seqErr := range result.Handle.Events() {
+		if seqErr != nil {
+			t.Fatalf("runner error = %v", seqErr)
+		}
+		if event != nil && event.Type == session.EventTypeAssistant {
+			finalText = strings.TrimSpace(session.EventText(event))
+		}
+		if notice, ok := session.NoticeOf(event); ok && notice.Text == compact.CompactNoticeLabel {
+			sawCompactNotice = true
+		}
+	}
+	if finalText != "completed without false compact" {
+		t.Fatalf("finalText = %q, want completed response", finalText)
+	}
+	if sawCompactNotice {
+		t.Fatal("unexpected live compact notice for provider usage below watermark")
+	}
+	if testModel.compactionCalls != 0 {
+		t.Fatalf("compactionCalls = %d, want 0", testModel.compactionCalls)
+	}
+	if testModel.normalCalls != 2 {
+		t.Fatalf("normalCalls = %d, want 2", testModel.normalCalls)
+	}
+
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{
+		SessionRef: activeSession.SessionRef,
+	})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	for _, event := range loaded.Events {
+		if event != nil && event.Type == session.EventTypeCompact {
+			t.Fatalf("unexpected durable compact event: %+v", event)
+		}
 	}
 }
 

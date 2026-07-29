@@ -142,7 +142,7 @@ func (r *Runtime) runAttempt(
 	toolFactOrdinal *uint64,
 	toolStepSequence *atomic.Uint64,
 ) ([]*session.Event, bool, bool, error) {
-	invocation, err := r.prepareInvocationContext(ctx, activeSession, ref, req, pendingInput)
+	invocation, err := r.prepareInvocationContext(ctx, activeSession, ref, turnID, req, pendingInput)
 	if err != nil {
 		var compactErr *compactionFailureError
 		if errors.As(err, &compactErr) {

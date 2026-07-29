@@ -98,6 +98,85 @@ func TestAutoCompactDecisionBeforeModelRequestUsesRequestEstimate(t *testing.T) 
 	}
 }
 
+func TestAutoCompactDecisionBeforeModelRequestKeepsProviderUsageAuthoritativeForInlineImages(t *testing.T) {
+	t.Parallel()
+
+	runtime, activeSession := newGateDecisionRuntimeForTest(t, CompactionConfig{
+		Enabled:                    true,
+		DefaultContextWindowTokens: 258400,
+	})
+	appendTestEvent(t, runtime.sessions, activeSession.SessionRef, providerUsageGateEvent(92576))
+
+	req := &model.Request{Messages: []model.Message{
+		model.NewMessage(model.RoleUser,
+			model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
+				Kind: model.MediaSourceInline,
+				Data: strings.Repeat("A", 403992),
+			}, "image/png", "first.png"),
+			model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
+				Kind: model.MediaSourceInline,
+				Data: strings.Repeat("B", 175800),
+			}, "image/png", "second.png"),
+			model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
+				Kind: model.MediaSourceInline,
+				Data: strings.Repeat("C", 388608),
+			}, "image/png", "third.png"),
+		),
+	}}
+	currentModel := matchingProviderGateModel()
+
+	decision, err := runtime.autoCompactDecisionBeforeModelRequest(context.Background(), activeSession.SessionRef, currentModel, req)
+	if err != nil {
+		t.Fatalf("autoCompactDecisionBeforeModelRequest() error = %v", err)
+	}
+	if decision.Reason != "" {
+		t.Fatalf("decision = %+v, want provider prompt usage below watermark to remain authoritative", decision)
+	}
+
+	view, ok, err := runtime.autoCompactModelRequestView(context.Background(), activeSession.SessionRef, currentModel, req)
+	if err != nil {
+		t.Fatalf("autoCompactModelRequestView() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("autoCompactModelRequestView() ok = false, want eligible post-progress request")
+	}
+	if view.usage.Source != compact.UsageSourceProvider {
+		t.Fatalf("usage source = %q, want provider", view.usage.Source)
+	}
+	if view.usage.TotalTokens >= 100000 {
+		t.Fatalf("provider usage total = %d, want production-shaped baseline below 100k", view.usage.TotalTokens)
+	}
+	if view.requestTokens >= 50000 {
+		t.Fatalf("bounded three-image request estimate = %d, want below 50k", view.requestTokens)
+	}
+}
+
+func TestAutoCompactDecisionBeforeModelRequestStillUsesProviderHighWater(t *testing.T) {
+	t.Parallel()
+
+	runtime, activeSession := newGateDecisionRuntimeForTest(t, CompactionConfig{
+		Enabled:                    true,
+		DefaultContextWindowTokens: 258400,
+	})
+	appendTestEvent(t, runtime.sessions, activeSession.SessionRef, providerUsageGateEvent(244000))
+
+	decision, err := runtime.autoCompactDecisionBeforeModelRequest(
+		context.Background(),
+		activeSession.SessionRef,
+		matchingProviderGateModel(),
+		&model.Request{Messages: []model.Message{model.NewTextMessage(model.RoleUser, "small delta")}},
+	)
+	if err != nil {
+		t.Fatalf("autoCompactDecisionBeforeModelRequest() error = %v", err)
+	}
+	if decision.Reason != "model_request_context_limit" {
+		t.Fatalf("reason = %q, want model_request_context_limit for provider high water", decision.Reason)
+	}
+	if decision.Usage.Source != compact.UsageSourceProvider || decision.Usage.TotalTokens < 244000 {
+		t.Fatalf("usage = %+v, want provider high-water baseline", decision.Usage)
+	}
+}
+
 func TestAutoCompactDecisionBeforeModelRequestSkipsFreshUserWithoutCurrentTurnProgress(t *testing.T) {
 	t.Parallel()
 
@@ -168,6 +247,10 @@ func TestAutoCompactDecisionAfterRetryExhaustedUsesEmergencyWatermark(t *testing
 		SafetyMarginTokens:         4,
 	})
 	assistant := assistantEvent("provider high-water baseline")
+	assistant.Invocation = &session.EventInvocation{
+		Provider: "test-provider",
+		Model:    "stub",
+	}
 	assistant.Meta = map[string]any{
 		"prompt_tokens":     245,
 		"completion_tokens": 1,
@@ -179,7 +262,11 @@ func TestAutoCompactDecisionAfterRetryExhaustedUsesEmergencyWatermark(t *testing
 	decision, compact, err := runtime.autoCompactDecisionAfterModelRequestFailure(
 		context.Background(),
 		activeSession.SessionRef,
-		staticModel{text: "ok"},
+		identifiedCompactionModel{
+			staticModel:  staticModel{text: "ok"},
+			providerName: "test-provider",
+			modelName:    "stub",
+		},
 		&model.Request{},
 		&model.RetryExhaustedError{MaxRetries: 5},
 	)
@@ -262,4 +349,38 @@ func newGateDecisionRuntimeForTest(t *testing.T, cfg CompactionConfig) (*Runtime
 		sessions:   sessions,
 		compaction: normalizeCompactionConfig(cfg),
 	}, activeSession
+}
+
+func providerUsageGateEvent(promptTokens int) *session.Event {
+	event := assistantEvent("provider-measured progress")
+	event.Invocation = &session.EventInvocation{
+		Provider:            "openai-codex",
+		Model:               "gpt-5.6-sol",
+		ContextWindowTokens: 258400,
+	}
+	event.Meta = map[string]any{
+		"caelis": map[string]any{
+			"sdk": map[string]any{
+				"provider":              "openai-codex",
+				"model":                 "gpt-5.6-sol",
+				"context_window_tokens": 258400,
+				"usage": map[string]any{
+					"provider":            "openai-codex",
+					"prompt_tokens":       promptTokens,
+					"cached_input_tokens": 0,
+					"completion_tokens":   100,
+					"total_tokens":        promptTokens + 100,
+				},
+			},
+		},
+	}
+	return event
+}
+
+func matchingProviderGateModel() identifiedCompactionModel {
+	return identifiedCompactionModel{
+		staticModel:  staticModel{text: "ok"},
+		providerName: "openai-codex",
+		modelName:    "gpt-5.6-sol",
+	}
 }

@@ -1713,7 +1713,7 @@ func TestBeginTurnPublishesChildApprovalThroughControlQueue(t *testing.T) {
 	_ = collectHandleEvents(t, result.Handle)
 }
 
-func TestBeginTurnPublishesChildAutoReviewAsTransient(t *testing.T) {
+func TestBeginTurnPublishesChildAutoReviewWithoutContextUsage(t *testing.T) {
 	t.Parallel()
 
 	activeSession := session.Session{SessionRef: session.SessionRef{
@@ -1772,8 +1772,8 @@ func TestBeginTurnPublishesChildAutoReviewAsTransient(t *testing.T) {
 			t.Fatalf("child auto-review position = %#v, want broker-assigned transient position later", envelope.Position)
 		}
 	}
-	if reviewCount != 2 || usageCount != 1 {
-		t.Fatalf("child auto-review events = %#v, want two reviews and one usage", events)
+	if reviewCount != 2 || usageCount != 0 {
+		t.Fatalf("child auto-review events = %#v, want two reviews and no context usage", events)
 	}
 	select {
 	case response := <-runtime.responses:
@@ -2126,8 +2126,8 @@ func TestBeginTurnAutoReviewDenialDoesNotInterruptTurn(t *testing.T) {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
 	events := collectHandleEvents(t, result.Handle)
-	if len(events) < 3 {
-		t.Fatalf("events len = %d, want in-progress, denied, and runtime completion", len(events))
+	if len(events) < 2 {
+		t.Fatalf("events len = %d, want in-progress and denied review", len(events))
 	}
 	if events[0].Kind != eventstream.KindApprovalReview || events[0].ApprovalReview == nil {
 		t.Fatalf("first event = %#v, want approval_review", events[0])
@@ -2144,9 +2144,8 @@ func TestBeginTurnAutoReviewDenialDoesNotInterruptTurn(t *testing.T) {
 	if text := events[1].ApprovalReview.Text; !strings.Contains(text, "not narrow enough") {
 		t.Fatalf("review text = %q, want reviewer rationale", text)
 	}
-	usage := firstUsageSnapshot(events)
-	if usage == nil || usage.PromptTokens != 7 || usage.CachedInputTokens != 3 || usage.CompletionTokens != 2 || usage.ReasoningTokens != 1 || usage.TotalTokens != 9 {
-		t.Fatalf("terminal review session accounting = %+v, want reviewer session accounting", usage)
+	if usage := firstUsageSnapshot(events); usage != nil {
+		t.Fatalf("terminal review usage update = %+v, want accounting-only usage", usage)
 	}
 	if events[len(events)-1].Kind == eventstream.KindError {
 		t.Fatalf("last event error = %v, want normal turn continuation", events[len(events)-1].Err)

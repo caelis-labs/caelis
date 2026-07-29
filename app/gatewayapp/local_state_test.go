@@ -1180,6 +1180,62 @@ func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) 
 	}
 }
 
+func TestSessionUsageSnapshotUsesActiveMainModelBaseline(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "usage-active-model-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "auto-review",
+		Model: ModelConfig{
+			Provider:            "openai-codex",
+			Model:               "gpt-main",
+			ContextWindowTokens: 258_400,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	defer stack.Close()
+	activeSession, err := stack.StartSession(ctx, "usage active model session", "surface-usage-active-model")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	appendUsage := func(id string, provider string, modelName string, promptTokens int) {
+		message := model.NewTextMessage(model.RoleAssistant, "answer")
+		appendGatewayAppEvent(t, stack, activeSession.SessionRef, &session.Event{
+			ID:         id,
+			Type:       session.EventTypeAssistant,
+			Visibility: session.VisibilityCanonical,
+			Message:    &message,
+			Text:       message.TextContent(),
+			Invocation: &session.EventInvocation{Provider: provider, Model: modelName},
+			Meta: map[string]any{
+				"prompt_tokens":     promptTokens,
+				"completion_tokens": 5,
+				"total_tokens":      promptTokens + 5,
+			},
+		})
+	}
+	appendUsage("main-usage", "openai-codex", "gpt-main", 80_000)
+	appendUsage("guardian-usage", "deepseek", "guardian", 25_941)
+
+	usage, err := stack.SessionUsageSnapshot(ctx, activeSession.SessionRef, "openai-codex/gpt-main")
+	if err != nil {
+		t.Fatalf("SessionUsageSnapshot() error = %v", err)
+	}
+	if usage.Source != compact.UsageSourceProvider || usage.AsOfEventID != "main-usage" {
+		t.Fatalf("usage = %+v, want active main model baseline", usage)
+	}
+	if usage.TotalTokens < 80_000 || usage.ContextWindowTokens != 258_400 {
+		t.Fatalf("usage = %+v, want main model tokens and context window", usage)
+	}
+}
+
 func TestNewLocalStackInfersCodeFreeAPIFromProvider(t *testing.T) {
 	stack, err := newGatewayAppTestStack(t, Config{
 		AppName:      "caelis",
