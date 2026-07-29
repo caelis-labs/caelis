@@ -529,7 +529,7 @@ func TestSearchToolSkipsBinaryFilesAndLocalCrushCache(t *testing.T) {
 	}
 }
 
-func TestSearchToolCompletesBinaryDetectionAfterResultLimit(t *testing.T) {
+func TestSearchToolStopsReadingAfterResultLimit(t *testing.T) {
 	dir := t.TempDir()
 	binaryLines := make([]string, searchResultLimit+1)
 	for i := range binaryLines {
@@ -559,19 +559,22 @@ func TestSearchToolCompletesBinaryDetectionAfterResultLimit(t *testing.T) {
 	}
 	payload := filesystemToolPayload(t, result)
 	hits, _ := payload["hits"].([]any)
-	if len(hits) != 1 {
-		t.Fatalf("hits = %#v, want only the text-file hit", payload["hits"])
+	if len(hits) != searchResultLimit {
+		t.Fatalf("len(hits) = %d, want capped result count %d", len(hits), searchResultLimit)
 	}
 	hit, _ := hits[0].(map[string]any)
-	if got, _ := hit["path"].(string); filepath.Base(got) != "z-source.go" {
-		t.Fatalf("hit path = %q, want z-source.go", got)
+	if got, _ := hit["path"].(string); filepath.Base(got) != "a-artifact.bin" {
+		t.Fatalf("hit path = %q, want first sampled file", got)
 	}
-	if truncated, _ := payload["truncated"].(bool); truncated {
-		t.Fatalf("truncated = true, want binary hits rolled back before result limiting")
+	if truncated, _ := payload["truncated"].(bool); !truncated {
+		t.Fatalf("truncated = false, want result-limit truncation")
 	}
 	meta := filesystemToolMeta(t, result)
-	if got := numericMetaValue(meta["binary_files_skipped"]); got != 1 {
-		t.Fatalf("binary_files_skipped = %v, want 1", meta["binary_files_skipped"])
+	if got := numericMetaValue(meta["files_selected"]); got != 1 {
+		t.Fatalf("files_selected = %v, want traversal to stop after capped file", meta["files_selected"])
+	}
+	if got := numericMetaValue(meta["binary_files_skipped"]); got != 0 {
+		t.Fatalf("binary_files_skipped = %v, want no suffix scan after limit", meta["binary_files_skipped"])
 	}
 }
 

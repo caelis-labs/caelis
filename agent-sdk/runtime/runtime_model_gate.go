@@ -240,10 +240,13 @@ func (r *Runtime) autoCompactModelRequestView(
 	events := loaded.Events
 	events = mainInvocationEvents(events)
 	delta := compactableEvents(events)
-	if len(delta) == 0 || !autoCompactGateHasModelProgress(delta) {
+	if len(delta) == 0 {
 		return autoCompactModelRequestView{}, false, nil
 	}
-	usage, requestTokens := usageForModelRequest(events, llm, req, r.compaction)
+	usage, requestTokens, prefixChanged := usageForModelRequestDetails(events, llm, req, r.compaction)
+	if !prefixChanged && !autoCompactGateHasModelProgress(delta) {
+		return autoCompactModelRequestView{}, false, nil
+	}
 	if usage.EffectiveInputBudget <= 0 {
 		return autoCompactModelRequestView{}, false, nil
 	}

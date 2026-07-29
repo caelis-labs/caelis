@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -325,21 +326,24 @@ func TestEvaluateWatermarkUsesSharedThresholds(t *testing.T) {
 func TestUsageForModelRequestKeepsProviderUsageAuthoritative(t *testing.T) {
 	t.Parallel()
 
+	req := &model.Request{
+		Messages: []model.Message{
+			model.NewTextMessage(model.RoleUser, strings.Repeat("request text ", 64)),
+		},
+	}
+	prefix := prefixusage.ForRequest(req)
 	assistant := assistantEvent("provider baseline")
 	assistant.ID = "a1"
 	assistant.Invocation = &session.EventInvocation{
-		Provider: "openai-codex",
-		Model:    "gpt-5.6-sol",
+		Provider:                "openai-codex",
+		Model:                   "gpt-5.6-sol",
+		PromptPrefixFingerprint: prefix.Fingerprint,
+		PromptPrefixTokens:      prefix.Tokens,
 	}
 	assistant.Meta = map[string]any{
 		"prompt_tokens":     10,
 		"completion_tokens": 1,
 		"total_tokens":      11,
-	}
-	req := &model.Request{
-		Messages: []model.Message{
-			model.NewTextMessage(model.RoleUser, strings.Repeat("request text ", 64)),
-		},
 	}
 
 	user := userTextEvent("hello")
@@ -365,6 +369,71 @@ func TestUsageForModelRequestKeepsProviderUsageAuthoritative(t *testing.T) {
 	}
 	if usage.EstimatedDeltaTokens == 0 || usage.TotalTokens <= 10 {
 		t.Fatalf("usage = %+v, want provider baseline plus estimated post-snapshot delta", usage)
+	}
+}
+
+func TestUsageForModelRequestAdjustsOnlyChangedPrefix(t *testing.T) {
+	t.Parallel()
+
+	previousRequest := &model.Request{
+		Instructions: []model.Part{model.NewTextPart("short system prompt")},
+	}
+	previousPrefix := prefixusage.ForRequest(previousRequest)
+	assistant := assistantEvent("provider baseline")
+	assistant.ID = "a1"
+	assistant.Invocation = &session.EventInvocation{
+		Provider:                "openai-codex",
+		Model:                   "gpt-5.6-sol",
+		PromptPrefixFingerprint: previousPrefix.Fingerprint,
+		PromptPrefixTokens:      previousPrefix.Tokens,
+	}
+	assistant.Meta = map[string]any{
+		"prompt_tokens":     100000,
+		"completion_tokens": 1,
+		"total_tokens":      100001,
+	}
+	currentRequest := &model.Request{
+		Instructions: []model.Part{model.NewTextPart(strings.Repeat("expanded system prompt ", 4000))},
+		Messages: []model.Message{
+			model.NewMessage(model.RoleUser,
+				model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
+					Kind: model.MediaSourceInline,
+					Data: strings.Repeat("A", 1<<20),
+				}, "image/png", "attachment.png"),
+			),
+		},
+	}
+	currentPrefix := prefixusage.ForRequest(currentRequest)
+	modelIdentity := identifiedCompactionModel{
+		staticModel:  staticModel{text: "ok"},
+		providerName: "openai-codex",
+		modelName:    "gpt-5.6-sol",
+	}
+	baseUsage := snapshotUsageWithResolvedWindowUsing(
+		[]*session.Event{assistant},
+		258400,
+		CompactionConfig{},
+		func(snapshot providerTokenSnapshot) bool {
+			return providerSnapshotCompatibleWithLLM(snapshot, modelIdentity)
+		},
+	)
+
+	usage, requestTokens, prefixChanged := usageForModelRequestDetails(
+		[]*session.Event{assistant},
+		modelIdentity,
+		currentRequest,
+		CompactionConfig{DefaultContextWindowTokens: 258400},
+	)
+
+	if !prefixChanged {
+		t.Fatal("prefixChanged = false, want changed request prefix detected")
+	}
+	want := baseUsage.TotalTokens + currentPrefix.Tokens - previousPrefix.Tokens
+	if usage.TotalTokens != want {
+		t.Fatalf("usage total = %d, want provider total plus prefix delta %d", usage.TotalTokens, want)
+	}
+	if requestTokens < estimatedImageMediaTokens {
+		t.Fatalf("request estimate = %d, want bounded attachment budget retained for estimated-only paths", requestTokens)
 	}
 }
 

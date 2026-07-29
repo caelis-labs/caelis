@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
@@ -217,19 +218,25 @@ func responseUsageAccountingProvider(resp *model.Response) string {
 	return provider
 }
 
-func responseInvocation(resp *model.Response) *session.EventInvocation {
+func responseInvocation(resp *model.Response, requestPrefix ...prefixusage.Snapshot) *session.EventInvocation {
 	if resp == nil {
 		return nil
 	}
 	provider := strings.TrimSpace(resp.Provider)
 	modelName := strings.TrimSpace(resp.Model)
-	if provider == "" && modelName == "" && resp.ContextWindowTokens <= 0 {
+	prefix := prefixusage.Snapshot{}
+	if len(requestPrefix) > 0 {
+		prefix = requestPrefix[0]
+	}
+	if provider == "" && modelName == "" && resp.ContextWindowTokens <= 0 && prefix.Fingerprint == "" {
 		return nil
 	}
 	return &session.EventInvocation{
-		Provider:            provider,
-		Model:               modelName,
-		ContextWindowTokens: resp.ContextWindowTokens,
+		Provider:                provider,
+		Model:                   modelName,
+		ContextWindowTokens:     resp.ContextWindowTokens,
+		PromptPrefixFingerprint: strings.TrimSpace(prefix.Fingerprint),
+		PromptPrefixTokens:      max(prefix.Tokens, 0),
 	}
 }
 

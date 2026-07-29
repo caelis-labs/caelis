@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -198,7 +199,7 @@ func modelAttemptResetEvent(reset model.AttemptReset) *session.Event {
 	})
 }
 
-func modelResponseEvent(message model.Message, resp *model.Response, messageID string) *session.Event {
+func modelResponseEvent(message model.Message, resp *model.Response, messageID string, requestPrefix ...prefixusage.Snapshot) *session.Event {
 	out := &session.Event{
 		Type:       session.EventTypeOf(&session.Event{Message: &message}),
 		Visibility: session.VisibilityCanonical,
@@ -208,12 +209,12 @@ func modelResponseEvent(message model.Message, resp *model.Response, messageID s
 	}
 	if resp != nil {
 		out.Meta = responseMeta(resp)
-		out.Invocation = responseInvocation(resp)
+		out.Invocation = responseInvocation(resp, requestPrefix...)
 	}
 	return out
 }
 
-func modelToolCallEvents(message model.Message, resp *model.Response, messageID string) []*session.Event {
+func modelToolCallEvents(message model.Message, resp *model.Response, messageID string, requestPrefix ...prefixusage.Snapshot) []*session.Event {
 	calls := message.ToolCalls()
 	if len(calls) == 0 {
 		return nil
@@ -240,7 +241,7 @@ func modelToolCallEvents(message model.Message, resp *model.Response, messageID 
 			event.Message = &message
 			event.Text = message.TextContent()
 			if resp != nil {
-				event.Invocation = responseInvocation(resp)
+				event.Invocation = responseInvocation(resp, requestPrefix...)
 			}
 		}
 		out = append(out, event)

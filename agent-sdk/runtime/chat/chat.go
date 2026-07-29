@@ -9,6 +9,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -95,7 +96,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			}
 		}
 		for {
-			assistantMessage, calls, final, messageID, ok, err := a.collectCanonicalModelStep(ctx, messages, stream, watchdog, &visibility, func(event *session.Event) bool {
+			assistantMessage, calls, final, messageID, requestPrefix, ok, err := a.collectCanonicalModelStep(ctx, messages, stream, watchdog, &visibility, func(event *session.Event) bool {
 				return yield(event, nil)
 			})
 			if !ok {
@@ -112,7 +113,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				return
 			}
 			if len(calls) == 0 {
-				assistantEvent := modelResponseEvent(assistantMessage, final, messageID)
+				assistantEvent := modelResponseEvent(assistantMessage, final, messageID, requestPrefix)
 				if !yield(assistantEvent, nil) {
 					return
 				}
@@ -125,7 +126,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				}
 				return
 			}
-			toolCallEvents := modelToolCallEvents(assistantMessage, final, messageID)
+			toolCallEvents := modelToolCallEvents(assistantMessage, final, messageID, requestPrefix)
 			for _, event := range toolCallEvents {
 				if !yield(event, nil) {
 					return
@@ -167,7 +168,7 @@ func (a *Agent) collectCanonicalModelStep(
 	watchdog *generationWatchdog,
 	visibility *tool.ToolVisibility,
 	yield func(*session.Event) bool,
-) (model.Message, []model.ToolCall, *model.Response, string, bool, error) {
+) (model.Message, []model.ToolCall, *model.Response, string, prefixusage.Snapshot, bool, error) {
 	for attempt := 0; ; attempt++ {
 		messageID := uuid.NewString()
 		request := &model.Request{
@@ -184,25 +185,25 @@ func (a *Agent) collectCanonicalModelStep(
 		})
 		final, err := collectFinalResponse(modelCtx, a.model, request, messageID, watchdog, yield)
 		if err != nil {
-			return model.Message{}, nil, nil, "", true, err
+			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
 		final.Message = normalizeAssistantCitations(final.Message, messages)
 
 		assistantMessage, calls, err := canonicalizeAssistantToolCalls(final.Message, a.tools...)
 		if err == nil {
-			return assistantMessage, calls, final, messageID, true, nil
+			return assistantMessage, calls, final, messageID, prefixusage.ForRequest(request), true, nil
 		}
 		if attempt >= maxInvalidToolCallRepairAttempts {
-			return model.Message{}, nil, nil, "", true, err
+			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
 		if reset := invalidToolCallAttemptResetEvent(attempt + 1); reset != nil {
 			if yield != nil && !yield(reset) {
-				return model.Message{}, nil, nil, "", false, nil
+				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, false, nil
 			}
 		}
 		for _, event := range invalidToolCallWarningEvents(final.Message, err, !stream) {
 			if yield != nil && !yield(event) {
-				return model.Message{}, nil, nil, "", false, nil
+				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, false, nil
 			}
 		}
 	}

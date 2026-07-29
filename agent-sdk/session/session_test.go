@@ -766,8 +766,10 @@ func TestCloneEventPreservesCompactEnvelope(t *testing.T) {
 			Text:  "retrying",
 		},
 		Invocation: &EventInvocation{
-			Provider: "deepseek",
-			Model:    "deepseek-v4-flash",
+			Provider:                "deepseek",
+			Model:                   "deepseek-v4-flash",
+			PromptPrefixFingerprint: " prefix-fingerprint ",
+			PromptPrefixTokens:      1234,
 		},
 		Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "hello")),
 		Meta:    map[string]any{"raw": "ok"},
@@ -793,6 +795,9 @@ func TestCloneEventPreservesCompactEnvelope(t *testing.T) {
 	}
 	if event.Invocation.Model != "deepseek-v4-flash" {
 		t.Fatalf("source invocation model = %q, want deepseek-v4-flash", event.Invocation.Model)
+	}
+	if cloned.Invocation.PromptPrefixFingerprint != "prefix-fingerprint" || cloned.Invocation.PromptPrefixTokens != 1234 {
+		t.Fatalf("cloned invocation prefix = %#v, want normalized persisted prefix usage", cloned.Invocation)
 	}
 	if got := event.Meta["raw"]; got != "ok" {
 		t.Fatalf("source meta raw = %v, want %q", got, "ok")

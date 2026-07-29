@@ -69,6 +69,11 @@ func TestChatAgentUsesSessionMessages(t *testing.T) {
 	if final == nil || final.Text != "world" {
 		t.Fatalf("final event = %+v, want assistant world", final)
 	}
+	if final.Invocation == nil ||
+		final.Invocation.PromptPrefixFingerprint == "" ||
+		final.Invocation.PromptPrefixTokens <= 0 {
+		t.Fatalf("final invocation = %#v, want persisted request-prefix usage", final.Invocation)
+	}
 }
 
 func TestToolCallTitleIncludesSpawnPrompt(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -20,6 +21,16 @@ func snapshotUsageWithResolvedWindowUsing(
 	cfg CompactionConfig,
 	useProviderSnapshot func(providerTokenSnapshot) bool,
 ) compact.UsageSnapshot {
+	usage, _, _ := snapshotUsageWithResolvedWindowDetails(promptEvents, window, cfg, useProviderSnapshot)
+	return usage
+}
+
+func snapshotUsageWithResolvedWindowDetails(
+	promptEvents []*session.Event,
+	window int,
+	cfg CompactionConfig,
+	useProviderSnapshot func(providerTokenSnapshot) bool,
+) (compact.UsageSnapshot, providerTokenSnapshot, bool) {
 	cfg = normalizeCompactionConfig(cfg)
 	if window <= 0 {
 		window = cfg.DefaultContextWindowTokens
@@ -33,11 +44,12 @@ func snapshotUsageWithResolvedWindowUsing(
 	prefix := 0
 	asOfEventID := ""
 	source := compact.UsageSourceEstimated
-	if snapshot, ok := latestProviderTokenSnapshotUsing(promptEvents, useProviderSnapshot); ok {
-		total = snapshot.BaselineTokens
-		delta = estimateTokensFromIndex(promptEvents, snapshot.DeltaStartIndex)
+	providerSnapshot, hasProviderSnapshot := latestProviderTokenSnapshotUsing(promptEvents, useProviderSnapshot)
+	if hasProviderSnapshot {
+		total = providerSnapshot.BaselineTokens
+		delta = estimateTokensFromIndex(promptEvents, providerSnapshot.DeltaStartIndex)
 		total += delta
-		asOfEventID = snapshot.EventID
+		asOfEventID = providerSnapshot.EventID
 		source = compact.UsageSourceProvider
 	} else {
 		prefix = cfg.EstimatedPromptPrefixTokens
@@ -51,7 +63,7 @@ func snapshotUsageWithResolvedWindowUsing(
 		EstimatedPrefixTokens: prefix,
 		Source:                source,
 		AsOfEventID:           asOfEventID,
-	}
+	}, providerSnapshot, hasProviderSnapshot
 }
 
 func splitEventsByTokenBudget(events []*session.Event, budget int) [][]*session.Event {
@@ -81,11 +93,13 @@ func splitEventsByTokenBudget(events []*session.Event, budget int) [][]*session.
 }
 
 type providerTokenSnapshot struct {
-	BaselineTokens  int
-	DeltaStartIndex int
-	EventID         string
-	Provider        string
-	Model           string
+	BaselineTokens          int
+	DeltaStartIndex         int
+	EventID                 string
+	Provider                string
+	Model                   string
+	PromptPrefixFingerprint string
+	PromptPrefixTokens      int
 }
 
 func latestProviderTokenSnapshot(events []*session.Event) (providerTokenSnapshot, bool) {
@@ -113,10 +127,12 @@ func latestProviderTokenSnapshotUsing(
 		}
 		provider, modelName := providerSnapshotIdentity(event, meta)
 		snapshot := providerTokenSnapshot{
-			BaselineTokens:  baseline,
-			DeltaStartIndex: deltaStart,
-			Provider:        provider,
-			Model:           modelName,
+			BaselineTokens:          baseline,
+			DeltaStartIndex:         deltaStart,
+			Provider:                provider,
+			Model:                   modelName,
+			PromptPrefixFingerprint: providerPromptPrefixFingerprint(event),
+			PromptPrefixTokens:      providerPromptPrefixTokens(event),
 		}
 		if id := strings.TrimSpace(events[start].ID); id != "" {
 			snapshot.EventID = id
@@ -131,6 +147,20 @@ func latestProviderTokenSnapshotUsing(
 		return snapshot, true
 	}
 	return providerTokenSnapshot{}, false
+}
+
+func providerPromptPrefixFingerprint(event *session.Event) string {
+	if event == nil || event.Invocation == nil {
+		return ""
+	}
+	return strings.TrimSpace(event.Invocation.PromptPrefixFingerprint)
+}
+
+func providerPromptPrefixTokens(event *session.Event) int {
+	if event == nil || event.Invocation == nil {
+		return 0
+	}
+	return max(event.Invocation.PromptPrefixTokens, 0)
 }
 
 func providerSnapshotCompatibleWithLLM(snapshot providerTokenSnapshot, llm model.LLM) bool {
@@ -548,21 +578,54 @@ func usageRatio(usage compact.UsageSnapshot) float64 {
 }
 
 func usageForModelRequest(events []*session.Event, llm model.LLM, req *model.Request, cfg CompactionConfig) (compact.UsageSnapshot, int) {
+	usage, requestTokens, _ := usageForModelRequestDetails(events, llm, req, cfg)
+	return usage, requestTokens
+}
+
+func usageForModelRequestDetails(
+	events []*session.Event,
+	llm model.LLM,
+	req *model.Request,
+	cfg CompactionConfig,
+) (compact.UsageSnapshot, int, bool) {
 	window := resolveContextWindowTokens(llm, cfg.DefaultContextWindowTokens)
 	promptEvents := compact.PromptEventsFromLatestCompact(events)
-	usage := snapshotUsageWithResolvedWindowUsing(promptEvents, window, cfg, func(snapshot providerTokenSnapshot) bool {
+	usage, providerSnapshot, hasProviderSnapshot := snapshotUsageWithResolvedWindowDetails(promptEvents, window, cfg, func(snapshot providerTokenSnapshot) bool {
 		return providerSnapshotCompatibleWithLLM(snapshot, llm)
 	})
-	return usageWithModelRequestEstimate(usage, req)
+	return usageWithModelRequestEstimateDetails(usage, providerSnapshot, hasProviderSnapshot, req)
 }
 
 func usageWithModelRequestEstimate(usage compact.UsageSnapshot, req *model.Request) (compact.UsageSnapshot, int) {
+	usage, requestTokens, _ := usageWithModelRequestEstimateDetails(usage, providerTokenSnapshot{}, false, req)
+	return usage, requestTokens
+}
+
+func usageWithModelRequestEstimateDetails(
+	usage compact.UsageSnapshot,
+	providerSnapshot providerTokenSnapshot,
+	hasProviderSnapshot bool,
+	req *model.Request,
+) (compact.UsageSnapshot, int, bool) {
 	requestTokens := estimateModelRequestTokens(req)
 	// Provider prompt usage is authoritative for the request shape already
-	// accepted by that provider. The snapshot already estimates prompt-visible
-	// events committed after that measurement.
+	// accepted by that provider. When runtime-controlled prefix assembly changes,
+	// reconcile only that local delta; messages and attachments remain covered
+	// by provider usage plus post-snapshot event estimates.
 	if usage.Source == compact.UsageSourceProvider {
-		return usage, requestTokens
+		currentPrefix := prefixusage.ForRequest(req)
+		previousFingerprint := strings.TrimSpace(providerSnapshot.PromptPrefixFingerprint)
+		prefixChanged := hasProviderSnapshot &&
+			previousFingerprint != "" &&
+			currentPrefix.Fingerprint != "" &&
+			previousFingerprint != currentPrefix.Fingerprint
+		if prefixChanged {
+			usage.TotalTokens = max(
+				usage.TotalTokens+currentPrefix.Tokens-providerSnapshot.PromptPrefixTokens,
+				0,
+			)
+		}
+		return usage, requestTokens, prefixChanged
 	}
 	if requestTokens > usage.TotalTokens {
 		usage.TotalTokens = requestTokens
@@ -570,7 +633,7 @@ func usageWithModelRequestEstimate(usage compact.UsageSnapshot, req *model.Reque
 			usage.Source = compact.UsageSourceEstimated
 		}
 	}
-	return usage, requestTokens
+	return usage, requestTokens, false
 }
 
 func estimateModelRequestTokens(req *model.Request) int {
@@ -635,11 +698,8 @@ func estimatePartTokens(part model.Part) int {
 }
 
 const (
-	// Inline media payloads are opaque provider inputs, not prompt text. Charge
-	// a bounded amount per item so attachment count still creates pressure
-	// without treating base64 bytes as model-visible text.
-	estimatedImageMediaTokens = 4096
-	estimatedOtherMediaTokens = 8192
+	estimatedImageMediaTokens = prefixusage.EstimatedImageMediaTokens
+	estimatedOtherMediaTokens = prefixusage.EstimatedOtherMediaTokens
 )
 
 func estimateMediaPartTokens(media *model.MediaPart) int {

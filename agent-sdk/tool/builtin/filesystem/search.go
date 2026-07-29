@@ -300,15 +300,13 @@ func searchInFile(fsys sandbox.FileSystem, path string, pattern *regexp.Regexp, 
 		if strings.IndexByte(text, 0) >= 0 {
 			return searchFileResult{binary: true}
 		}
-		if result.stop {
-			continue
-		}
 		match := pattern.FindStringIndex(text)
 		if match == nil {
 			continue
 		}
 		if appendMatch(path, lineNum, searchLineExcerpt(text, match[0], match[1])) {
 			result.stop = true
+			return result
 		}
 	}
 	return result

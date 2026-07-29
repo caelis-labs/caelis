@@ -624,6 +624,12 @@ type EventInvocation struct {
 	Provider            string `json:"provider,omitempty"`
 	Model               string `json:"model,omitempty"`
 	ContextWindowTokens int    `json:"context_window_tokens,omitempty"`
+	// PromptPrefixFingerprint identifies the runtime-controlled instructions,
+	// tools, and output shape used for this provider measurement.
+	PromptPrefixFingerprint string `json:"prompt_prefix_fingerprint,omitempty"`
+	// PromptPrefixTokens is the matching bounded local estimate. It supports
+	// reconciling prefix changes without re-estimating provider-measured history.
+	PromptPrefixTokens int `json:"prompt_prefix_tokens,omitempty"`
 }
 
 // EventScope is the compact session/controller/participant origin view for one

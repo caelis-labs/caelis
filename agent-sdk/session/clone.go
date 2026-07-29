@@ -189,9 +189,11 @@ func CloneActorRef(in ActorRef) ActorRef {
 // CloneEventInvocation returns one normalized invocation context copy.
 func CloneEventInvocation(in EventInvocation) EventInvocation {
 	return EventInvocation{
-		Provider:            strings.TrimSpace(in.Provider),
-		Model:               strings.TrimSpace(in.Model),
-		ContextWindowTokens: in.ContextWindowTokens,
+		Provider:                strings.TrimSpace(in.Provider),
+		Model:                   strings.TrimSpace(in.Model),
+		ContextWindowTokens:     in.ContextWindowTokens,
+		PromptPrefixFingerprint: strings.TrimSpace(in.PromptPrefixFingerprint),
+		PromptPrefixTokens:      in.PromptPrefixTokens,
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
@@ -105,7 +106,6 @@ func TestAutoCompactDecisionBeforeModelRequestKeepsProviderUsageAuthoritativeFor
 		Enabled:                    true,
 		DefaultContextWindowTokens: 258400,
 	})
-	appendTestEvent(t, runtime.sessions, activeSession.SessionRef, providerUsageGateEvent(92576))
 
 	req := &model.Request{Messages: []model.Message{
 		model.NewMessage(model.RoleUser,
@@ -123,6 +123,9 @@ func TestAutoCompactDecisionBeforeModelRequestKeepsProviderUsageAuthoritativeFor
 			}, "image/png", "third.png"),
 		),
 	}}
+	providerEvent := providerUsageGateEvent(92576)
+	setProviderEventPromptPrefix(providerEvent, req)
+	appendTestEvent(t, runtime.sessions, activeSession.SessionRef, providerEvent)
 	currentModel := matchingProviderGateModel()
 
 	decision, err := runtime.autoCompactDecisionBeforeModelRequest(context.Background(), activeSession.SessionRef, currentModel, req)
@@ -148,6 +151,54 @@ func TestAutoCompactDecisionBeforeModelRequestKeepsProviderUsageAuthoritativeFor
 	}
 	if view.requestTokens >= 50000 {
 		t.Fatalf("bounded three-image request estimate = %d, want below 50k", view.requestTokens)
+	}
+}
+
+func TestAutoCompactDecisionBeforeModelRequestUsesChangedPrefixDelta(t *testing.T) {
+	t.Parallel()
+
+	runtime, activeSession := newGateDecisionRuntimeForTest(t, CompactionConfig{
+		Enabled:                    true,
+		DefaultContextWindowTokens: 258400,
+	})
+	previousRequest := &model.Request{
+		Instructions: []model.Part{model.NewTextPart("short system prompt")},
+	}
+	providerEvent := providerUsageGateEvent(210000)
+	setProviderEventPromptPrefix(providerEvent, previousRequest)
+	appendTestEvent(t, runtime.sessions, activeSession.SessionRef, providerEvent)
+	appendTestEvent(t, runtime.sessions, activeSession.SessionRef, userTextEvent("fresh user prompt"))
+
+	currentRequest := &model.Request{
+		Instructions: []model.Part{
+			model.NewTextPart(strings.Repeat("expanded runtime instruction ", 4000)),
+		},
+		Messages: []model.Message{
+			model.NewMessage(model.RoleUser,
+				model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
+					Kind: model.MediaSourceInline,
+					Data: strings.Repeat("A", 1<<20),
+				}, "image/png", "attachment.png"),
+			),
+		},
+	}
+	decision, err := runtime.autoCompactDecisionBeforeModelRequest(
+		context.Background(),
+		activeSession.SessionRef,
+		matchingProviderGateModel(),
+		currentRequest,
+	)
+	if err != nil {
+		t.Fatalf("autoCompactDecisionBeforeModelRequest() error = %v", err)
+	}
+	if decision.Reason != "model_request_context_watermark" {
+		t.Fatalf("decision = %+v, want changed prefix to trigger before first current-turn model progress", decision)
+	}
+	if decision.Usage.Source != compact.UsageSourceProvider {
+		t.Fatalf("usage source = %q, want provider baseline reconciled with local prefix delta", decision.Usage.Source)
+	}
+	if decision.Usage.TotalTokens >= 250000 {
+		t.Fatalf("usage total = %d, want prefix delta without attachment-size inflation", decision.Usage.TotalTokens)
 	}
 }
 
@@ -375,6 +426,18 @@ func providerUsageGateEvent(promptTokens int) *session.Event {
 		},
 	}
 	return event
+}
+
+func setProviderEventPromptPrefix(event *session.Event, req *model.Request) {
+	if event == nil {
+		return
+	}
+	if event.Invocation == nil {
+		event.Invocation = &session.EventInvocation{}
+	}
+	prefix := prefixusage.ForRequest(req)
+	event.Invocation.PromptPrefixFingerprint = prefix.Fingerprint
+	event.Invocation.PromptPrefixTokens = prefix.Tokens
 }
 
 func matchingProviderGateModel() identifiedCompactionModel {
