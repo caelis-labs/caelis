@@ -324,14 +324,14 @@ func (h *turnHandle) publishSessionEventWithACPProjection(event *session.Event, 
 }
 
 func (h *turnHandle) publishApprovalReviewPayload(req *agent.ApprovalRequest, payload *ApprovalPayload) {
-	h.publishEnvelopes(h.approvalReviewEnvelopes(req, payload, nil), "")
+	h.publishEnvelopes(h.approvalReviewEnvelopes(req, payload, nil, nil), "")
 }
 
-func (h *turnHandle) publishApprovalReviewPayloadWithInvocation(req *agent.ApprovalRequest, payload *ApprovalPayload, invocation *session.EventInvocation) {
-	h.publishEnvelopes(h.approvalReviewEnvelopes(req, payload, invocation), "")
+func (h *turnHandle) publishApprovalReviewPayloadWithUsage(req *agent.ApprovalRequest, payload *ApprovalPayload, usage *UsageSnapshot, invocation *session.EventInvocation) {
+	h.publishEnvelopes(h.approvalReviewEnvelopes(req, payload, usage, invocation), "")
 }
 
-func (h *turnHandle) approvalReviewEnvelopes(req *agent.ApprovalRequest, payload *ApprovalPayload, invocation *session.EventInvocation) []eventstream.Envelope {
+func (h *turnHandle) approvalReviewEnvelopes(req *agent.ApprovalRequest, payload *ApprovalPayload, usage *UsageSnapshot, invocation *session.EventInvocation) []eventstream.Envelope {
 	payload = cloneApprovalPayload(payload)
 	base := eventstream.Envelope{
 		SessionID:  h.sessionRef.SessionID,
@@ -355,18 +355,31 @@ func (h *turnHandle) approvalReviewEnvelopes(req *agent.ApprovalRequest, payload
 		}
 	}
 	// Scope describes who produced an event; it does not make that event
-	// durable. Guardian review progress is a live observation. Its usage belongs
-	// to durable Session accounting instead of the parent's context stream,
+	// durable. Guardian review progress and accounting are live observations,
 	// while reconnectable permission requests are projected from their stored
 	// Session events by the approval coordinator.
 	base.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+	var out []eventstream.Envelope
 	if review := approvalReviewFromPayload(payload); review != nil {
 		next := base
 		next.Kind = eventstream.KindApprovalReview
 		next.ApprovalReview = review
-		return []eventstream.Envelope{next}
+		out = append(out, next)
 	}
-	return nil
+	if usage != nil {
+		next := base
+		next.Kind = eventstream.KindSessionUpdate
+		next.Update = eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
+			PromptTokens:        usage.PromptTokens,
+			CachedInputTokens:   usage.CachedInputTokens,
+			CompletionTokens:    usage.CompletionTokens,
+			ReasoningTokens:     usage.ReasoningTokens,
+			TotalTokens:         usage.TotalTokens,
+			ContextWindowTokens: usage.ContextWindowTokens,
+		}, base.Meta)
+		out = append(out, next)
+	}
+	return out
 }
 
 func approvalEventMeta(req *agent.ApprovalRequest, invocation *session.EventInvocation) map[string]any {

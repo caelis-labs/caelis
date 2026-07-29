@@ -197,21 +197,13 @@ func (r *Runtime) ContinueSubagentByHandle(
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	continued, err := r.tasks.Write(ctx, ref, taskapi.ControlRequest{
+	return r.tasks.Write(ctx, ref, taskapi.ControlRequest{
 		TaskID:    taskID,
 		Input:     strings.TrimSpace(prompt),
+		Yield:     yield,
 		Principal: session.ActorKindUser,
 		Source:    "user",
 		Context:   contextTransfer,
-	})
-	if err != nil || !continued.Running || yield <= 0 {
-		return continued, err
-	}
-	// Continue only issues the new producer turn. Preserve this higher-level
-	// API's optional yield as a separate observation after the mutation claim
-	// is released; Task wait never owns lifecycle progression.
-	return r.tasks.Wait(ctx, ref, taskapi.ControlRequest{
-		TaskID: taskID, Yield: yield, Principal: session.ActorKindUser, Source: "user",
 	})
 }
 
@@ -259,41 +251,101 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
 	}
 	task.mu.Lock()
-	if !task.running || yield <= 0 {
+	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata["cancel_phase"]))
+	task.mu.Unlock()
+	if cancelPhase != subagentCancelPhaseNone && cancelPhase != subagentCancelPhaseCompleted {
+		return tm.advanceSubagentCancel(ctx, task, cancelPhase, int(yield/time.Millisecond))
+	}
+	if task.runner == nil {
+		task.mu.Lock()
 		snapshot := task.snapshotLocked()
 		task.mu.Unlock()
 		return snapshot, nil
 	}
-	if task.streamChanged == nil {
-		task.streamChanged = make(chan struct{})
+	if !task.isRunning() {
+		task.mu.Lock()
+		snapshot := task.snapshotLocked()
+		task.mu.Unlock()
+		return snapshot, nil
 	}
-	wait := task.streamChanged
-	task.mu.Unlock()
-
-	timer := time.NewTimer(yield)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return task.snapshot(), nil
-	case <-wait:
-	case <-timer.C:
-	}
-	observed, err := tm.lookupSubagentObserved(ctx, task.sessionRef, task.ref.TaskID)
+	result, err := task.runner.Wait(ctx, delegation.CloneAnchor(task.anchor), int(yield/time.Millisecond))
 	if err != nil {
+		if task.isRunning() {
+			return tm.interruptSubagentTask(ctx, task, "subagent session interrupted during recovery")
+		}
 		return taskapi.Snapshot{}, err
 	}
-	return observed.snapshot(), nil
+	return tm.applyObservedSubagentResult(ctx, task, result, true)
 }
 
-// observeSubagent returns Runtime-owned Task state without polling the child.
-// Producer completion and independent recovery coordination are the only
-// authorities allowed to advance durable lifecycle.
+// observeSubagent samples the attached child without advancing cancellation or
+// converting a transport observation error into a terminal child state. A
+// successful sample may still promote newly observed canonical result state.
 func (tm *taskRuntime) observeSubagent(ctx context.Context, task *subagentTask) (taskapi.Snapshot, error) {
 	if task == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
 	}
-	_ = ctx
-	return task.snapshot(), nil
+	task.mu.Lock()
+	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata["cancel_phase"]))
+	runner := task.runner
+	running := task.running
+	anchor := delegation.CloneAnchor(task.anchor)
+	task.mu.Unlock()
+	if cancelPhase != subagentCancelPhaseNone && cancelPhase != subagentCancelPhaseCompleted {
+		return task.snapshot(), nil
+	}
+	if runner == nil || !running {
+		return task.snapshot(), nil
+	}
+	result, err := runner.Wait(ctx, anchor, 0)
+	if err != nil {
+		return task.snapshot(), err
+	}
+	return tm.applyObservedSubagentResult(ctx, task, result, false)
+}
+
+// applyObservedSubagentResult records a successful remote observation. This is
+// the explicit point where either read or wait may durably promote terminal
+// Task state and a completed sidecar's canonical final message. A read-only
+// running sample is returned without mutating or persisting the Task.
+func (tm *taskRuntime) applyObservedSubagentResult(
+	ctx context.Context,
+	task *subagentTask,
+	result delegation.Result,
+	persistRunning bool,
+) (taskapi.Snapshot, error) {
+	task.mu.Lock()
+	if task.running && !persistRunning &&
+		(result.Running || result.State == delegation.StateRunning) {
+		snapshot := task.snapshotLocked()
+		if preview := result.OutputPreview; taskOutputHasNonBlankLine(preview) {
+			snapshot.Result["output_preview"] = preview
+		}
+		task.mu.Unlock()
+		return snapshot, nil
+	}
+	// A Task-stream observer may have applied a terminal result while this
+	// runner sample was in flight. Terminal state is monotonic: persist the
+	// current result instead of reopening it with an older running snapshot.
+	if task.running {
+		task.applyResult(result)
+	}
+	snapshot := task.snapshotLocked()
+	entry := task.entrySnapshot(tm.runtime.now())
+	task.mu.Unlock()
+	if err := tm.persistTaskEntry(ctx, entry); err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	if err := tm.appendSideSubagentFinalEvent(ctx, task); err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	if shouldDropInactiveSubagentTask(snapshot) {
+		tm.mu.Lock()
+		delete(tm.subagents, task.ref.TaskID)
+		tm.mu.Unlock()
+		_ = tm.updateSubagentParticipant(ctx, task, "updated")
+	}
+	return snapshot, nil
 }
 
 func (tm *taskRuntime) cancelSubagent(ctx context.Context, task *subagentTask) (taskapi.Snapshot, error) {
@@ -338,61 +390,6 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRe
 	tm.rememberTaskHandleLocked(rehydrated.sessionRef.SessionID, rehydrated.handle)
 	tm.mu.Unlock()
 	return rehydrated, nil
-}
-
-// lookupSubagentObserved resolves one Task for Read/Wait without canonical
-// history repair or any other durable mutation. A newer durable revision is
-// returned as an ephemeral read model and never replaces a live pointer owned
-// by a concurrent completion, Write, or Cancel operation.
-func (tm *taskRuntime) lookupSubagentObserved(ctx context.Context, ref session.SessionRef, taskID string) (*subagentTask, error) {
-	lookupID := strings.TrimSpace(taskID)
-	ref = session.NormalizeSessionRef(ref)
-	tm.mu.RLock()
-	current := tm.subagents[lookupID]
-	_, operationActive := tm.operations[taskOperationKey(ref, lookupID)]
-	tm.mu.RUnlock()
-	if operationActive && current != nil &&
-		strings.TrimSpace(current.sessionRef.SessionID) == strings.TrimSpace(ref.SessionID) {
-		return current, nil
-	}
-	if tm.store == nil {
-		if current != nil && strings.TrimSpace(current.sessionRef.SessionID) == strings.TrimSpace(ref.SessionID) {
-			return current, nil
-		}
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
-	}
-	entry, err := tm.store.Get(ctx, lookupID)
-	if err != nil {
-		return nil, fmt.Errorf("agent-sdk/runtime: load subagent task %q for observation: %w", taskID, err)
-	}
-	if entry == nil ||
-		entry.Kind != taskapi.KindSubagent ||
-		strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) {
-		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
-	}
-	tm.mu.RLock()
-	latest := tm.subagents[lookupID]
-	_, operationActive = tm.operations[taskOperationKey(ref, lookupID)]
-	tm.mu.RUnlock()
-	if operationActive && latest != nil &&
-		strings.TrimSpace(latest.sessionRef.SessionID) == strings.TrimSpace(ref.SessionID) {
-		return latest, nil
-	}
-	if latest != nil {
-		current = latest
-	}
-	if current != nil {
-		if strings.TrimSpace(current.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
-			return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
-		}
-		current.mu.Lock()
-		currentRevision := current.revision
-		current.mu.Unlock()
-		if currentRevision >= entry.Revision {
-			return current, nil
-		}
-	}
-	return tm.rehydrateSubagentTask(entry), nil
 }
 
 // lookupSubagentCanonical reloads and publishes one canonical task while its
@@ -512,6 +509,22 @@ func interruptedSubagentEntry(entry *taskapi.Entry, reason string) *taskapi.Entr
 	return next
 }
 
+func (tm *taskRuntime) interruptSubagentTask(ctx context.Context, task *subagentTask, reason string) (taskapi.Snapshot, error) {
+	if task == nil {
+		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
+	}
+	task.mu.Lock()
+	task.applyInterruptedLocked(reason)
+	snapshot := task.snapshotLocked()
+	entry := task.entrySnapshot(tm.runtime.now())
+	task.mu.Unlock()
+	if err := tm.persistTaskEntry(ctx, entry); err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	_ = tm.updateSubagentParticipant(ctx, task, "updated")
+	return snapshot, nil
+}
+
 func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask {
 	if entry == nil {
 		return nil
@@ -529,15 +542,10 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	}
 	target = delegation.NormalizeTarget(target)
 	result := session.CloneState(entry.Result)
-	if stored, ok := entry.Spec["spawn_result"].(map[string]any); ok {
-		merged := session.CloneState(stored)
-		if merged == nil {
-			merged = map[string]any{}
+	if len(result) == 0 {
+		if stored, ok := entry.Spec["spawn_result"].(map[string]any); ok {
+			result = session.CloneState(stored)
 		}
-		for key, value := range result {
-			merged[key] = value
-		}
-		result = merged
 	}
 	// Durable Task records may predate FailureDiagnostic. Rehydrate lifecycle
 	// state but never trust a legacy free-form Result["error"] as a
@@ -555,21 +563,20 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 			SessionID: taskSpecString(entry.Spec, "session_id"),
 			AgentID:   taskSpecString(entry.Spec, "agent_id"),
 		},
-		runner:         tm.runtime.subagents,
-		agent:          target.Selector,
-		target:         target,
-		handle:         firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"])),
-		title:          strings.TrimSpace(entry.Title),
-		prompt:         taskSpecString(entry.Spec, "prompt"),
-		createdAt:      entry.CreatedAt,
-		revision:       entry.Revision,
-		lease:          taskapi.CloneLease(entry.Lease),
-		state:          entry.State,
-		running:        entry.Running,
-		turnSeq:        taskTurnSeqFromSpec(entry.Spec),
-		result:         result,
-		metadata:       session.CloneState(entry.Metadata),
-		lifecycleReady: true,
+		runner:    tm.runtime.subagents,
+		agent:     target.Selector,
+		target:    target,
+		handle:    firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"])),
+		title:     strings.TrimSpace(entry.Title),
+		prompt:    taskSpecString(entry.Spec, "prompt"),
+		createdAt: entry.CreatedAt,
+		revision:  entry.Revision,
+		lease:     taskapi.CloneLease(entry.Lease),
+		state:     entry.State,
+		running:   entry.Running,
+		turnSeq:   taskTurnSeqFromSpec(entry.Spec),
+		result:    result,
+		metadata:  session.CloneState(entry.Metadata),
 	}
 	if task.metadata == nil {
 		task.metadata = map[string]any{}
@@ -593,10 +600,6 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 }
 
 func (t *subagentTask) applyResult(result delegation.Result) {
-	t.applyResultLocked(result, true)
-}
-
-func (t *subagentTask) applyResultLocked(result delegation.Result, notify bool) {
 	if t == nil {
 		return
 	}
@@ -619,7 +622,6 @@ func (t *subagentTask) applyResultLocked(result delegation.Result, notify bool) 
 	t.metadata["session_id"] = t.anchor.SessionID
 	t.metadata["terminal_id"] = t.ref.TerminalID
 	t.metadata["state"] = string(t.state)
-	t.metadata["running"] = t.running
 	if taskOutputHasNonBlankLine(result.OutputPreview) {
 		t.result["output_preview"] = result.OutputPreview
 	} else if t.result != nil {
@@ -642,9 +644,7 @@ func (t *subagentTask) applyResultLocked(result delegation.Result, notify bool) 
 	t.result["agent"] = t.agent
 	t.result["state"] = string(t.state)
 	normalizeSubagentResultForState(&t.result, t.state, result.Error)
-	if notify {
-		t.notifyStreamChangeLocked()
-	}
+	t.notifyStreamChangeLocked()
 }
 
 func (t *subagentTask) isRunning() bool {

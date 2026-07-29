@@ -23,16 +23,13 @@ import (
 )
 
 type sagaTaskStore struct {
-	mu                    sync.Mutex
-	entries               map[string]*taskapi.Entry
-	puts                  int
-	failOnPut             int
-	commitOnPut           int
-	failStatus            string
-	failContinuePhase     string
-	continuePhaseAttempts int
-	postEffectAttempts    int
-	failedState           bool
+	mu          sync.Mutex
+	entries     map[string]*taskapi.Entry
+	puts        int
+	failOnPut   int
+	commitOnPut int
+	failStatus  string
+	failedState bool
 }
 
 type getFailingSagaTaskStore struct {
@@ -63,16 +60,6 @@ func (s *sagaTaskStore) Put(_ context.Context, req taskapi.PutRequest) (*taskapi
 	if !s.failedState && s.failStatus != "" && taskStringValue(req.Entry.Metadata["spawn_status"]) == s.failStatus {
 		s.failedState = true
 		return nil, fmt.Errorf("forced task status persistence failure at %s", s.failStatus)
-	}
-	if phase := taskStringValue(req.Entry.Metadata["continue_phase"]); phase != "" {
-		s.continuePhaseAttempts++
-		if phase == string(continuePhasePostEffect) {
-			s.postEffectAttempts++
-		}
-		if !s.failedState && s.failContinuePhase == phase {
-			s.failedState = true
-			return nil, fmt.Errorf("forced continue phase persistence failure at %s", phase)
-		}
 	}
 	if s.failOnPut > 0 && s.puts == s.failOnPut {
 		return nil, fmt.Errorf("forced task persistence failure at put %d", s.puts)

@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -23,24 +22,7 @@ type taskControlIdentity struct {
 	kind   taskapi.Kind
 }
 
-type taskControlMode uint8
-
-const (
-	taskControlObserve taskControlMode = iota
-	taskControlMutate
-)
-
-func (tm *taskRuntime) control(
-	ctx context.Context,
-	ref session.SessionRef,
-	req taskapi.ControlRequest,
-	mode taskControlMode,
-	fn func(taskControlTarget, taskapi.ControlRequest) (taskapi.Snapshot, error),
-) (taskapi.Snapshot, error) {
-	if mode != taskControlObserve && mode != taskControlMutate {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: unsupported task control mode %d", mode)
-	}
-	mutateSubagent := mode == taskControlMutate
+func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest, fn func(taskControlTarget, taskapi.ControlRequest) (taskapi.Snapshot, error)) (taskapi.Snapshot, error) {
 	req = normalizeTaskControlRequest(req)
 	if err := validateTaskControlPrincipal(req.Principal); err != nil {
 		return taskapi.Snapshot{}, err
@@ -49,66 +31,21 @@ func (tm *taskRuntime) control(
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	var releaseOperation func()
-	if identity.kind != taskapi.KindSubagent || mutateSubagent {
-		var claimed bool
-		releaseOperation, claimed = tm.tryClaimSubagentOperation(ref, identity.taskID)
-		if !claimed {
-			return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task %q already has an operation in progress", identity.taskID)
-		}
-		defer func() {
-			if releaseOperation != nil {
-				releaseOperation()
-			}
-		}()
+	release, claimed := tm.tryClaimSubagentOperation(ref, identity.taskID)
+	if !claimed {
+		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task %q already has an operation in progress", identity.taskID)
 	}
-	var target taskControlTarget
-	if identity.kind == taskapi.KindSubagent && !mutateSubagent {
-		subagentTask, lookupErr := tm.lookupSubagentObserved(ctx, ref, identity.taskID)
-		if lookupErr != nil {
-			return taskapi.Snapshot{}, lookupErr
-		}
-		target = subagentControlTarget{runtime: tm, task: subagentTask}
-	} else {
-		target, err = tm.lookupControlTargetClaimed(ctx, ref, identity)
-	}
+	defer release()
+	target, err := tm.lookupControlTargetClaimed(ctx, ref, identity)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	if subagent, ok := target.(subagentControlTarget); ok && mutateSubagent {
-		// Producer terminal truth wins over recovery of an earlier remote
-		// effect claim. If completion was already queued behind another
-		// operation, settle that turn and return its boundary snapshot; the
-		// caller may issue a distinct mutation after observing the terminal.
-		drained, drainErr := tm.drainPendingSubagentCompletionClaimed(subagent.task)
-		if drainErr != nil {
-			return taskapi.Snapshot{}, drainErr
-		}
-		if drained != subagentCompletionDrainNone {
-			snapshot, completionErr := tm.finishSubagentControlClaimed(subagent.task)
-			if completionErr == nil {
-				releaseOperation = nil
-			}
-			return snapshot, completionErr
-		}
+	if subagent, ok := target.(subagentControlTarget); ok {
 		if err := tm.recoverPendingSubagentControlClaimed(ctx, subagent.task); err != nil {
 			return taskapi.Snapshot{}, err
 		}
 	}
-	snapshot, controlErr := fn(target, req)
-	if subagent, ok := target.(subagentControlTarget); ok && mutateSubagent {
-		// A producer may publish terminal completion while Write/Cancel holds
-		// this operation claim. Apply that same-turn completion before the
-		// mutating control call returns, then take one snapshot at the atomic
-		// claim-release boundary.
-		var completionErr error
-		snapshot, completionErr = tm.finishSubagentControlClaimed(subagent.task)
-		if completionErr == nil {
-			releaseOperation = nil
-		}
-		controlErr = errors.Join(controlErr, completionErr)
-	}
-	return snapshot, controlErr
+	return fn(target, req)
 }
 
 func (tm *taskRuntime) resolveControlIdentity(ctx context.Context, ref session.SessionRef, lookupID string) (taskControlIdentity, error) {
@@ -131,10 +68,7 @@ func (tm *taskRuntime) resolveControlIdentity(ctx context.Context, ref session.S
 		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task %q not found", lookupID)
 	}
 	entry, err := tm.store.Get(ctx, lookupID)
-	if err != nil {
-		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: load task %q: %w", lookupID, err)
-	}
-	if entry == nil || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) {
+	if err != nil || entry == nil || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) {
 		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task %q not found", lookupID)
 	}
 	return taskControlIdentity{taskID: strings.TrimSpace(entry.TaskID), kind: entry.Kind}, nil
@@ -176,10 +110,7 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task handle %q not found", handle)
 	}
 	entry, err := tm.store.GetSessionTaskByHandle(ctx, ref, handle)
-	if err != nil {
-		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: load task handle %q: %w", handle, err)
-	}
-	if entry == nil || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) || normalizeTaskHandle(entry.Handle) != handle {
+	if err != nil || entry == nil || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) || normalizeTaskHandle(entry.Handle) != handle {
 		return taskControlIdentity{}, fmt.Errorf("agent-sdk/runtime: task handle %q not found", handle)
 	}
 	return taskControlIdentity{taskID: strings.TrimSpace(entry.TaskID), kind: entry.Kind}, nil

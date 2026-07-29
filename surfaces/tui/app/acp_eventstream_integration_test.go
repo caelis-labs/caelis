@@ -9,7 +9,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -2455,23 +2454,36 @@ func TestHandleACPEventEnvelopeAnchorsCompactNoticeInMainTurn(t *testing.T) {
 func TestHandleACPEventEnvelopeCollapsesCanonicalAndTransientCompactSignals(t *testing.T) {
 	t.Parallel()
 
+	canonical := eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		TurnID:    "turn-1",
+		Scope:     eventstream.ScopeMain,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateCompact,
+			Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
+		},
+		Final: true,
+	}
+	transient := eventstream.Envelope{
+		Kind:      eventstream.KindNotice,
+		SessionID: "session-1",
+		TurnID:    "turn-1",
+		Scope:     eventstream.ScopeMain,
+		Notice:    transcript.CompactNoticeLabel,
+	}
+
 	for _, test := range []struct {
-		name           string
-		durableTurnID  string
-		transientFirst bool
+		name   string
+		inputs []eventstream.Envelope
 	}{
-		{name: "current durable first", durableTurnID: "turn-1"},
-		{name: "current transient first", durableTurnID: "turn-1", transientFirst: true},
+		{name: "durable first", inputs: []eventstream.Envelope{canonical, transient}},
+		{name: "transient first", inputs: []eventstream.Envelope{transient, canonical}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			canonical, transient := projectedCompactSignalsForTest(t, test.durableTurnID)
-			inputs := []eventstream.Envelope{canonical, transient}
-			if test.transientFirst {
-				inputs[0], inputs[1] = inputs[1], inputs[0]
-			}
 			model := NewModel(Config{NoColor: true, NoAnimation: true})
 			model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
-			for _, input := range inputs {
+			for _, input := range test.inputs {
 				model = applyACPEnvelopeForTest(t, model, input)
 			}
 			block := requireMainACPTurnBlockForTest(t, model)
@@ -2482,48 +2494,30 @@ func TestHandleACPEventEnvelopeCollapsesCanonicalAndTransientCompactSignals(t *t
 	}
 }
 
-func TestHandleACPEventEnvelopeDoesNotPairCompactSignalsAcrossTurns(t *testing.T) {
-	t.Parallel()
-
-	canonical, transient := projectedCompactSignalsForTest(t, "turn-2")
-	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
-	model = applyACPEnvelopeForTest(t, model, canonical)
-	model = applyACPEnvelopeForTest(t, model, transient)
-
-	compactNotices := 0
-	for _, block := range mainACPTurnBlocksForTest(model) {
-		for _, event := range block.Events {
-			if event.NoticeKind == transcript.NoticeKindCompact {
-				compactNotices++
-			}
-		}
-	}
-	if compactNotices != 2 {
-		t.Fatalf("compact notices = %d, want both distinct Turn signals visible", compactNotices)
-	}
-}
-
-func TestHandleACPEventEnvelopeKeepsLegacyDurableCompactVisibleOutsideLiveTurn(t *testing.T) {
-	t.Parallel()
-
-	canonical, _ := projectedCompactSignalsForTest(t, "")
-	model := applyACPEnvelopeForTest(t, NewModel(Config{NoColor: true, NoAnimation: true}), canonical)
-	block := requireMainACPTurnBlockForTest(t, model)
-	if len(block.Events) != 1 || block.Events[0].NoticeKind != transcript.NoticeKindCompact {
-		t.Fatalf("replayed compact events = %#v, want the unmatched durable checkpoint visible", block.Events)
-	}
-}
-
 func TestHandleACPEventEnvelopeKeepsRepeatedCompactionsVisibleOnceEach(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
 	for compactIndex := 0; compactIndex < 2; compactIndex++ {
-		canonical, transient := projectedCompactSignalsForTest(t, "turn-1")
-		model = applyACPEnvelopeForTest(t, model, canonical)
-		model = applyACPEnvelopeForTest(t, model, transient)
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "session-1",
+			TurnID:    "turn-1",
+			Scope:     eventstream.ScopeMain,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateCompact,
+				Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT"},
+			},
+			Final: true,
+		})
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind:      eventstream.KindNotice,
+			SessionID: "session-1",
+			TurnID:    "turn-1",
+			Scope:     eventstream.ScopeMain,
+			Notice:    transcript.CompactNoticeLabel,
+		})
 	}
 
 	block := requireMainACPTurnBlockForTest(t, model)
@@ -2535,55 +2529,6 @@ func TestHandleACPEventEnvelopeKeepsRepeatedCompactionsVisibleOnceEach(t *testin
 			t.Fatalf("compact event = %#v, want compact notice", event)
 		}
 	}
-}
-
-func projectedCompactSignalsForTest(t *testing.T, durableTurnID string) (eventstream.Envelope, eventstream.Envelope) {
-	t.Helper()
-
-	compactMessage := model.NewTextMessage(model.RoleUser, "CONTEXT CHECKPOINT\nObjective: continue")
-	durable := session.CanonicalizeEvent(&session.Event{
-		ID:         "compact-event",
-		SessionID:  "session-1",
-		Seq:        7,
-		Type:       session.EventTypeCompact,
-		Visibility: session.VisibilityCanonical,
-		Scope:      &session.EventScope{TurnID: durableTurnID},
-		Message:    &compactMessage,
-	})
-	durableEnvelopes := acpprojector.ProjectSessionEventEnvelope(
-		acpprojector.EnvelopeBaseFromSessionEvent(
-			session.SessionRef{SessionID: "session-1"},
-			durable,
-			acpprojector.SessionEventTransport{},
-		),
-		durable,
-	)
-	if len(durableEnvelopes) != 1 {
-		t.Fatalf("durable compact projection = %#v, want one Envelope", durableEnvelopes)
-	}
-	if durableTurnID != "" && durableEnvelopes[0].TurnID != durableTurnID {
-		t.Fatalf("durable compact TurnID = %q, want %q", durableEnvelopes[0].TurnID, durableTurnID)
-	}
-
-	transientEvent := session.MarkNotice(&session.Event{
-		SessionID: "session-1",
-		Scope:     &session.EventScope{TurnID: "turn-1"},
-	}, "notice", transcript.CompactNoticeLabel)
-	transientEnvelopes := acpprojector.ProjectSessionEventEnvelope(
-		acpprojector.EnvelopeBaseFromSessionEvent(
-			session.SessionRef{SessionID: "session-1"},
-			transientEvent,
-			acpprojector.SessionEventTransport{TurnID: "turn-1"},
-		),
-		transientEvent,
-	)
-	if len(transientEnvelopes) != 1 {
-		t.Fatalf("transient compact projection = %#v, want one Envelope", transientEnvelopes)
-	}
-	if transientEnvelopes[0].TurnID != "turn-1" {
-		t.Fatalf("transient compact TurnID = %q, want turn-1", transientEnvelopes[0].TurnID)
-	}
-	return durableEnvelopes[0], transientEnvelopes[0]
 }
 
 func TestRenderEventPolicyForACPEnvelopeRoutesStandardUpdates(t *testing.T) {

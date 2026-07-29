@@ -165,7 +165,7 @@ func TestTurnHandlePublishApprovalRequiresDurablePersister(t *testing.T) {
 	}
 }
 
-func TestTurnHandleChildApprovalReviewIsTransientAndDoesNotPublishUsage(t *testing.T) {
+func TestTurnHandleChildApprovalReviewIsTransient(t *testing.T) {
 	t.Parallel()
 
 	handle := newTestTurnHandle()
@@ -176,10 +176,11 @@ func TestTurnHandleChildApprovalReviewIsTransientAndDoesNotPublishUsage(t *testi
 	events := handle.approvalReviewEnvelopes(
 		request,
 		payload,
+		&UsageSnapshot{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5},
 		nil,
 	)
-	if len(events) != 1 {
-		t.Fatalf("approval review events = %#v, want review only", events)
+	if len(events) != 2 {
+		t.Fatalf("approval review events = %#v, want review plus usage", events)
 	}
 	for _, event := range events {
 		if event.Scope != eventstream.ScopeSubagent || event.ScopeID != "task-review" {

@@ -199,10 +199,7 @@ func (g *Gateway) resolveActiveAutoApproval(
 	terminal.DecisionSource = strings.TrimSpace(result.DecisionSource)
 	terminal.ReviewTrace = approval.CloneReviewTrace(result.Trace)
 	usage, invocation := g.approvalReviewSessionAccounting(context.WithoutCancel(turnCtx), reviewReq, result)
-	// Reviewer usage is durable accounting, not the parent's active model
-	// context. Publishing it as a Session UsageUpdate would temporarily replace
-	// the main-turn context meter with the Guardian model's snapshot.
-	handle.publishApprovalReviewPayloadWithInvocation(req, terminal, invocation)
+	handle.publishApprovalReviewPayloadWithUsage(req, terminal, usage, invocation)
 	_ = g.persistApprovalReviewSessionAccounting(context.WithoutCancel(turnCtx), req, usage, terminal.DecisionSource, invocation)
 
 	// Do not abort the turn after repeated denials: a per-turn circuit breaker

@@ -141,11 +141,6 @@ func (tm *taskRuntime) syncCanonicalTaskEntry(ctx context.Context, ref session.S
 	if event != nil {
 		updatedAt = event.Time
 	}
-	incomingTurnSeq := canonicalSubagentTurnSeq(output, event)
-	if kind == taskapi.KindSubagent &&
-		shouldIgnoreCanonicalSubagentOutput(entry, output, status, incomingTurnSeq) {
-		return true, nil
-	}
 	canonicalOutput := output
 	if kind == taskapi.KindSubagent {
 		canonicalOutput = canonicalSubagentTaskOutput(output, status, entry.State, entry.FailureDiagnostic)
@@ -210,7 +205,6 @@ type canonicalTaskHistoryOutput struct {
 	Output    map[string]any
 	Status    string
 	UpdatedAt time.Time
-	TurnSeq   int64
 }
 
 func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref session.SessionRef, entry *taskapi.Entry) (*taskapi.Entry, error) {
@@ -245,10 +239,6 @@ func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref sessi
 		return entry, nil
 	}
 	if !entry.UpdatedAt.IsZero() && (latest.UpdatedAt.IsZero() || !latest.UpdatedAt.After(entry.UpdatedAt)) {
-		return entry, nil
-	}
-	if entry.Kind == taskapi.KindSubagent &&
-		shouldIgnoreCanonicalSubagentOutput(entry, latest.Output, latest.Status, latest.TurnSeq) {
 		return entry, nil
 	}
 	canonicalOutput := latest.Output
@@ -293,7 +283,6 @@ func canonicalTaskHistoryOutputs(event *session.Event) []canonicalTaskHistoryOut
 				Output:    item,
 				Status:    event.Tool.Status,
 				UpdatedAt: event.Time,
-				TurnSeq:   canonicalSubagentTurnSeq(item, event),
 			})
 		}
 		return out
@@ -306,44 +295,7 @@ func canonicalTaskHistoryOutputs(event *session.Event) []canonicalTaskHistoryOut
 		Output:    output,
 		Status:    event.Tool.Status,
 		UpdatedAt: event.Time,
-		TurnSeq:   canonicalSubagentTurnSeq(output, event),
 	}}
-}
-
-func canonicalSubagentTurnSeq(output map[string]any, event *session.Event) int64 {
-	if turnSeq, ok := taskInt64Value(output["turn_seq"]); ok && turnSeq > 0 {
-		return turnSeq
-	}
-	if event == nil {
-		return 0
-	}
-	taskMeta := taskRuntimeMetaReadSection(event.Meta, "task")
-	turnSeq, _ := taskInt64Value(taskMeta["turn_seq"])
-	return max(turnSeq, 0)
-}
-
-// shouldIgnoreCanonicalSubagentOutput keeps producer-owned Task lifecycle
-// monotonic when a model-visible Task result is persisted after the producer
-// has advanced. Canonical output may enrich the same terminal turn, but it
-// cannot reopen terminal state or overwrite a newer continuation turn.
-func shouldIgnoreCanonicalSubagentOutput(
-	entry *taskapi.Entry,
-	output map[string]any,
-	status string,
-	incomingTurnSeq int64,
-) bool {
-	if entry == nil || entry.Kind != taskapi.KindSubagent {
-		return false
-	}
-	incomingState := taskStateFromCanonicalOutput(output, status, entry.State)
-	if !entry.Running && taskStateRunning(incomingState) {
-		return true
-	}
-	durableTurnSeq := taskTurnSeqFromSpec(entry.Spec)
-	if durableTurnSeq <= 0 {
-		durableTurnSeq = taskTurnSeqFromSpec(entry.Metadata)
-	}
-	return incomingTurnSeq > 0 && durableTurnSeq > 0 && incomingTurnSeq < durableTurnSeq
 }
 
 func canonicalTaskOutputMatchesEntry(entry *taskapi.Entry, output map[string]any) bool {

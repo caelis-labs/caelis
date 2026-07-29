@@ -65,36 +65,6 @@ func (r *Runtime) recoverSubagentEntry(ctx context.Context, entry *task.Entry) e
 	if r == nil || r.tasks == nil || entry == nil {
 		return nil
 	}
-	if result, turnSeq, ok := subagentCompletionIntent(entry); ok {
-		release, claimed := r.tasks.tryClaimSubagentOperation(entry.Session, entry.TaskID)
-		if !claimed {
-			return nil
-		}
-		defer release()
-		rehydrated := r.tasks.rehydrateSubagentTask(entry)
-		if rehydrated == nil {
-			return fmt.Errorf("agent-sdk/runtime: cannot rehydrate subagent completion intent %q", entry.TaskID)
-		}
-		// Completion recovery no longer needs the child process. Rehydrate may
-		// conservatively mark a missing runner interrupted, so restore the
-		// durable Running intent before rolling its recorded terminal forward.
-		rehydrated.state = entry.State
-		rehydrated.running = entry.Running
-		rehydrated.result = session.CloneState(entry.Result)
-		rehydrated.revision = entry.Revision
-		rehydrated.lease = task.CloneLease(entry.Lease)
-		rehydrated.turnSeq = turnSeq
-		rehydrated.lifecycleReady = true
-		r.tasks.mu.Lock()
-		r.tasks.subagents[entry.TaskID] = rehydrated
-		r.tasks.rememberTaskHandleLocked(entry.Session.SessionID, rehydrated.handle)
-		r.tasks.mu.Unlock()
-		completionCtx := session.ContextWithControlMutation(
-			context.WithoutCancel(ctx),
-			session.ControlMutationPurposeSubagentCompletion,
-		)
-		return r.tasks.completeSubagentTask(completionCtx, rehydrated, turnSeq, result)
-	}
 	if entryHasPendingContinue(entry) {
 		release, claimed := r.tasks.tryClaimSubagentOperation(entry.Session, entry.TaskID)
 		if !claimed {
@@ -118,31 +88,6 @@ func (r *Runtime) recoverSubagentEntry(ctx context.Context, entry *task.Entry) e
 		next.Spec["continue_phase"] = string(continuePhaseUnknownOutcome)
 		return r.tasks.persistTaskEntry(ctx, next)
 	}
-	if normalizeSubagentCancelPhase(firstNonEmpty(
-		taskStringValue(entry.Metadata["cancel_phase"]),
-		taskSpecString(entry.Spec, "cancel_phase"),
-	)) != subagentCancelPhaseNone {
-		// The remote effect was claimed before the process disappeared, so
-		// recovery must never re-issue it. The producer disappeared with that
-		// process too: close the orphaned durable lifecycle as unknown without
-		// waiting for a Task observer or inventing a cancelled result.
-		next := task.CloneEntry(entry)
-		next.State = task.StateUnknownOutcome
-		next.Running = false
-		next.SupportsInput = false
-		if next.Spec == nil {
-			next.Spec = map[string]any{}
-		}
-		if next.Metadata == nil {
-			next.Metadata = map[string]any{}
-		}
-		next.Spec["cancel_phase"] = string(subagentCancelPhaseUnknown)
-		next.Metadata["cancel_phase"] = string(subagentCancelPhaseUnknown)
-		next.Metadata["state"] = string(task.StateUnknownOutcome)
-		next.Metadata["running"] = false
-		normalizeSubagentEntryResult(next, subagentCancelRestartDiagnostic)
-		return r.tasks.persistTaskEntry(ctx, next)
-	}
 	if !entry.Running {
 		return nil
 	}
@@ -151,17 +96,6 @@ func (r *Runtime) recoverSubagentEntry(ctx context.Context, entry *task.Entry) e
 	}
 	next := interruptedSubagentEntry(entry, subagentInterruptedSummary(entry))
 	return r.tasks.persistTaskEntry(ctx, next)
-}
-
-func normalizeSubagentCancelPhase(value string) subagentCancelPhase {
-	switch subagentCancelPhase(strings.TrimSpace(value)) {
-	case subagentCancelPhaseClaimed,
-		subagentCancelPhaseUnknown,
-		subagentCancelPhaseApplied:
-		return subagentCancelPhase(strings.TrimSpace(value))
-	default:
-		return subagentCancelPhaseNone
-	}
 }
 
 func (tm *taskRuntime) recoverPendingSubagentControlClaimed(ctx context.Context, subagent *subagentTask) error {
@@ -179,15 +113,10 @@ func entryHasPendingContinue(entry *task.Entry) bool {
 	if entry == nil {
 		return false
 	}
-	switch normalizeContinuePhase(firstNonEmpty(
+	return normalizeContinuePhase(firstNonEmpty(
 		taskStringValue(entry.Metadata["continue_phase"]),
 		taskSpecString(entry.Spec, "continue_phase"),
-	)) {
-	case continuePhasePending, continuePhasePostEffect:
-		return true
-	default:
-		return false
-	}
+	)) == continuePhasePending
 }
 
 func subagentInterruptedSummary(entry *task.Entry) string {

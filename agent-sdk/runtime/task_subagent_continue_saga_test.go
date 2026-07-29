@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -19,8 +18,6 @@ import (
 
 type continueSagaRunner struct {
 	continueCalls   atomic.Int32
-	continueYieldMS atomic.Int32
-	waitCalls       atomic.Int32
 	continueErr     error
 	result          delegation.Result
 	continueStarted chan struct{}
@@ -33,7 +30,6 @@ func (r *continueSagaRunner) Spawn(_ context.Context, spawn subagent.SpawnContex
 }
 func (r *continueSagaRunner) Continue(_ context.Context, _ delegation.Anchor, req delegation.ContinueRequest) (delegation.Result, error) {
 	r.continueCalls.Add(1)
-	r.continueYieldMS.Store(int32(req.YieldTimeMS))
 	if r.continueStarted != nil {
 		select {
 		case r.continueStarted <- struct{}{}:
@@ -50,16 +46,9 @@ func (r *continueSagaRunner) Continue(_ context.Context, _ delegation.Anchor, re
 	if result.State == "" {
 		result = delegation.Result{State: delegation.StateCompleted, Result: "continued:" + strings.TrimSpace(req.Prompt)}
 	}
-	switch result.State {
-	case delegation.StateCompleted, delegation.StateFailed, delegation.StateCancelled, delegation.StateInterrupted:
-		if req.Completion != nil {
-			req.Completion.PublishSubagentCompletion(result)
-		}
-	}
 	return result, nil
 }
-func (r *continueSagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
-	r.waitCalls.Add(1)
+func (*continueSagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
 	return delegation.Result{}, nil
 }
 func (*continueSagaRunner) Cancel(context.Context, delegation.Anchor) error { return nil }
@@ -91,7 +80,7 @@ func (s *continueFailFinalSessions) AppendEvent(ctx context.Context, req session
 	return s.Service.AppendEvent(ctx, req)
 }
 
-func TestSubagentContinueCompletionRetriesFinalWithoutReissuingRemote(t *testing.T) {
+func TestSubagentContinueSagaRollsForwardFinalWithoutReissuingRemote(t *testing.T) {
 	t.Parallel()
 
 	base := memory.NewStore(memory.Config{})
@@ -113,264 +102,49 @@ func TestSubagentContinueCompletionRetriesFinalWithoutReissuingRemote(t *testing
 		t.Fatal(err)
 	}
 
-	snapshot, err := runtime.tasks.Write(context.Background(), active.SessionRef, taskapi.ControlRequest{
+	_, err = runtime.tasks.Write(context.Background(), active.SessionRef, taskapi.ControlRequest{
 		TaskID: started.Ref.TaskID, Input: "follow up", Principal: session.ActorKindUser, Source: "user",
 	})
-	if err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	if snapshot.Running || snapshot.State != taskapi.StateCompleted ||
-		taskStringValue(snapshot.Metadata["continue_phase"]) != "" {
-		t.Fatalf("Write() = %#v, want producer terminal snapshot with cleared continue phase", snapshot)
+	if err == nil {
+		t.Fatal("Write() error = nil, want parent final dual-write failure")
 	}
 	if got := runner.continueCalls.Load(); got != 1 {
 		t.Fatalf("Continue calls after failure = %d, want 1", got)
 	}
 	entry, err := store.Get(context.Background(), started.Ref.TaskID)
-	if err != nil || taskStringValue(entry.Metadata["continue_phase"]) != "" ||
-		entry.State != taskapi.StateCompleted || entry.Running {
-		t.Fatalf("durable completion = %#v, %v; want terminal with atomically cleared continue phase", entry, err)
+	if err != nil || taskStringValue(entry.Metadata["continue_phase"]) != string(continuePhasePostEffect) {
+		t.Fatalf("durable continue phase = %#v, %v; want post_effect", entry, err)
+	}
+
+	// Restart: rehydrate post_effect and finish parent final without remote re-issue.
+	restarted, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reload in-memory task from store via lookup path used by Write.
+	rehydrated, err := restarted.tasks.lookupSubagent(context.Background(), active.SessionRef, started.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rehydrated.runner = runner
+	snapshot, err := restarted.tasks.continueSubagent(context.Background(), rehydrated, taskapi.ControlRequest{
+		TaskID: started.Ref.TaskID, Input: "follow up", Principal: session.ActorKindUser, Source: "user",
+	})
+	if err != nil {
+		t.Fatalf("continue recovery error = %v", err)
 	}
 	if got := runner.continueCalls.Load(); got != 1 {
-		t.Fatalf("Continue calls after completion retry = %d, want 1 (no remote re-issue)", got)
+		t.Fatalf("Continue calls after recovery = %d, want 1 (no blind re-issue)", got)
+	}
+	if taskStringValue(snapshot.Metadata["continue_phase"]) != "" {
+		t.Fatalf("continue_phase after recovery = %q, want cleared", taskStringValue(snapshot.Metadata["continue_phase"]))
+	}
+	entry, err = store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil || taskStringValue(entry.Metadata["continue_phase"]) != "" {
+		t.Fatalf("durable continue phase after recovery = %#v, %v; want cleared", entry, err)
 	}
 	if sessions.finalCalls < 2 {
 		t.Fatalf("final append attempts = %d, want at least 2 (fail then succeed)", sessions.finalCalls)
-	}
-}
-
-func TestSubagentContinueQueuedCompletionSkipsPostEffectWrite(t *testing.T) {
-	t.Parallel()
-
-	base := memory.NewStore(memory.Config{})
-	active, err := base.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "continue-skip-post-effect",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := newSagaTaskStore()
-	runner := &continueSagaRunner{}
-	runtime, err := New(testConfigWithACPForwarder(Config{
-		Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store,
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
-		SpawnID: "continue-skip-post-effect", Agent: "helper", Prompt: "first",
-		Role: session.ParticipantRoleSidecar, Source: "user",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	store.mu.Lock()
-	store.failContinuePhase = string(continuePhasePostEffect)
-	store.mu.Unlock()
-
-	snapshot, err := runtime.tasks.Write(context.Background(), active.SessionRef, taskapi.ControlRequest{
-		TaskID: started.Ref.TaskID, Input: "follow up", Yield: 2 * time.Second,
-		Principal: session.ActorKindUser, Source: "user",
-	})
-	if err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	if snapshot.State != taskapi.StateCompleted || snapshot.Running ||
-		taskStringValue(snapshot.Metadata["continue_phase"]) != "" {
-		t.Fatalf("Write() = %#v, want terminal producer truth", snapshot)
-	}
-	if got := runner.continueCalls.Load(); got != 1 {
-		t.Fatalf("Continue calls = %d, want one", got)
-	}
-	if got := runner.continueYieldMS.Load(); got != 0 {
-		t.Fatalf("Continue yield = %dms, want issue-only zero yield", got)
-	}
-	store.mu.Lock()
-	postEffectAttempts := store.postEffectAttempts
-	failTriggered := store.failedState
-	store.mu.Unlock()
-	if postEffectAttempts != 0 || failTriggered {
-		t.Fatalf("post_effect attempts=%d failure_triggered=%v, want queued completion to skip post_effect CAS", postEffectAttempts, failTriggered)
-	}
-}
-
-func TestSubagentContinueQueuedCompletionWinsBeforePendingRecovery(t *testing.T) {
-	t.Parallel()
-
-	base := memory.NewStore(memory.Config{})
-	active, err := base.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "continue-completion-before-recovery",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := newSagaTaskStore()
-	runner := &continueSagaRunner{result: delegation.Result{
-		State: delegation.StateRunning, Running: true, OutputPreview: "continuing",
-	}}
-	runtime, err := New(testConfigWithACPForwarder(Config{
-		Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store,
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
-		SpawnID: "continue-completion-before-recovery", Agent: "helper", Prompt: "first",
-		Role: session.ParticipantRoleSidecar, Source: "user",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	store.mu.Lock()
-	store.failContinuePhase = string(continuePhasePostEffect)
-	store.mu.Unlock()
-
-	pending, err := runtime.tasks.Write(context.Background(), active.SessionRef, taskapi.ControlRequest{
-		TaskID: started.Ref.TaskID, Input: "follow up",
-		Principal: session.ActorKindUser, Source: "user",
-	})
-	if err != nil {
-		t.Fatalf("Write(first) error = %v", err)
-	}
-	if !pending.Running || pending.State != taskapi.StateRunning ||
-		taskStringValue(pending.Metadata["continue_phase"]) != string(continuePhasePending) {
-		t.Fatalf("Write(first) = %#v, want durable pending recovery fence", pending)
-	}
-
-	runtime.tasks.mu.Lock()
-	runtime.tasks.enqueueSubagentCompletionLocked(started.Ref.TaskID, pendingSubagentCompletion{
-		ctx: context.Background(),
-		result: delegation.Result{
-			TaskID: started.Ref.TaskID, State: delegation.StateCompleted, Result: "producer terminal",
-		},
-		turnSeq: 2,
-	})
-	runtime.tasks.mu.Unlock()
-
-	settled, err := runtime.tasks.Write(context.Background(), active.SessionRef, taskapi.ControlRequest{
-		TaskID: started.Ref.TaskID, Input: "follow up",
-		Principal: session.ActorKindUser, Source: "user",
-	})
-	if err != nil {
-		t.Fatalf("Write(recovery) error = %v", err)
-	}
-	if settled.Running || settled.State != taskapi.StateCompleted ||
-		taskStringValue(settled.Result["final_message"]) != "producer terminal" ||
-		taskStringValue(settled.Metadata["continue_phase"]) != "" {
-		t.Fatalf("Write(recovery) = %#v, want queued producer terminal", settled)
-	}
-	if got := runner.continueCalls.Load(); got != 1 {
-		t.Fatalf("Continue calls = %d, want one without blind re-issue", got)
-	}
-	entry, err := store.Get(context.Background(), started.Ref.TaskID)
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if entry.Running || entry.State != taskapi.StateCompleted ||
-		taskStringValue(runtime.tasks.rehydrateSubagentTask(entry).snapshot().Result["final_message"]) != "producer terminal" {
-		t.Fatalf("durable completion = %#v, want producer terminal instead of unknown outcome", entry)
-	}
-}
-
-func TestSubagentContinueCompletionResolvesRecoveredUnknownOutcome(t *testing.T) {
-	t.Parallel()
-
-	base := memory.NewStore(memory.Config{})
-	active, err := base.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "continue-completion-after-recovery",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := newSagaTaskStore()
-	runner := &continueSagaRunner{result: delegation.Result{
-		State: delegation.StateRunning, Running: true, OutputPreview: "continuing",
-	}}
-	runtime, err := New(testConfigWithACPForwarder(Config{
-		Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store,
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
-		SpawnID: "continue-completion-after-recovery", Agent: "helper", Prompt: "first",
-		Role: session.ParticipantRoleSidecar, Source: "user",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	store.mu.Lock()
-	store.failContinuePhase = string(continuePhasePostEffect)
-	store.mu.Unlock()
-
-	pending, err := runtime.tasks.Write(context.Background(), active.SessionRef, taskapi.ControlRequest{
-		TaskID: started.Ref.TaskID, Input: "follow up",
-		Principal: session.ActorKindUser, Source: "user",
-	})
-	if err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	if !pending.Running || taskStringValue(pending.Metadata["continue_phase"]) != string(continuePhasePending) {
-		t.Fatalf("Write() = %#v, want pending continuation", pending)
-	}
-	release, claimed := runtime.tasks.tryClaimSubagentOperation(active.SessionRef, started.Ref.TaskID)
-	if !claimed {
-		t.Fatal("tryClaimSubagentOperation() = false")
-	}
-	task, err := runtime.tasks.lookupSubagentCanonical(context.Background(), active.SessionRef, started.Ref.TaskID)
-	if err != nil {
-		release()
-		t.Fatalf("lookupSubagentCanonical() error = %v", err)
-	}
-	if err := runtime.tasks.recoverPendingSubagentControlClaimed(context.Background(), task); err != nil {
-		release()
-		t.Fatalf("recoverPendingSubagentControlClaimed() error = %v", err)
-	}
-	release()
-	recovered := task.snapshot()
-	if recovered.Running || recovered.State != taskapi.StateUnknownOutcome ||
-		taskStringValue(recovered.Metadata["continue_phase"]) != string(continuePhaseUnknownOutcome) {
-		t.Fatalf("recovered = %#v, want provisional unknown outcome", recovered)
-	}
-	task.mu.Lock()
-	if task.streamChanged == nil {
-		task.streamChanged = make(chan struct{})
-	}
-	streamChanged := task.streamChanged
-	task.mu.Unlock()
-	store.mu.Lock()
-	store.failOnPut = store.puts + 1
-	store.mu.Unlock()
-
-	newSubagentCompletionSink(
-		context.Background(), runtime.tasks, started.Ref.TaskID, 2,
-	).PublishSubagentCompletion(delegation.Result{
-		TaskID: started.Ref.TaskID, State: delegation.StateCompleted, Result: "late producer terminal",
-	})
-	live := task.snapshot()
-	if live.Running || live.State != taskapi.StateCompleted ||
-		taskStringValue(live.Result["final_message"]) != "late producer terminal" ||
-		taskStringValue(live.Metadata["continue_phase"]) != "" {
-		t.Fatalf("live completion = %#v, want real producer terminal to replace provisional unknown", live)
-	}
-	select {
-	case <-streamChanged:
-	default:
-		t.Fatal("late completion did not notify the live Task stream")
-	}
-	settled, err := runtime.tasks.Read(context.Background(), active.SessionRef, taskapi.ControlRequest{
-		TaskID: started.Ref.TaskID, Principal: session.ActorKindUser, Source: "user",
-	})
-	if err != nil {
-		t.Fatalf("Read() error = %v", err)
-	}
-	if settled.Running || settled.State != taskapi.StateCompleted ||
-		taskStringValue(settled.Result["final_message"]) != "late producer terminal" ||
-		taskStringValue(settled.Metadata["continue_phase"]) != "" {
-		t.Fatalf("late completion = %#v, want real producer terminal to replace provisional unknown", settled)
-	}
-	if got := runner.continueCalls.Load(); got != 1 {
-		t.Fatalf("Continue calls = %d, want one without remote re-issue", got)
 	}
 }
 
@@ -465,10 +239,10 @@ func TestSubagentContinueRejectsConcurrentOperationBeforeSecondRemoteEffect(t *t
 	if err := runtime.recoverRuntimeState(context.Background(), active.SessionRef); err != nil {
 		t.Fatalf("recovery during active Continue error = %v", err)
 	}
-	if observed, waitErr := runtime.tasks.Wait(context.Background(), active.SessionRef, taskapi.ControlRequest{
+	if stale, waitErr := runtime.tasks.Wait(context.Background(), active.SessionRef, taskapi.ControlRequest{
 		TaskID: started.Ref.TaskID, Principal: session.ActorKindUser,
-	}); waitErr != nil || observed.State != taskapi.StateRunning || !observed.Running {
-		t.Fatalf("Wait during Continue = %#v, %v; want non-mutating running observation", observed, waitErr)
+	}); waitErr == nil || !strings.Contains(waitErr.Error(), "operation in progress") {
+		t.Fatalf("Wait during Continue = %#v, %v; want operation conflict", stale, waitErr)
 	}
 	_, secondErr := runtime.tasks.Write(context.Background(), active.SessionRef, taskapi.ControlRequest{
 		TaskID: started.Ref.TaskID, Input: "follow up", Principal: session.ActorKindUser,
@@ -546,7 +320,7 @@ func TestSubagentControlReloadsNewerDurableRevisionBeforeDispatch(t *testing.T) 
 	}
 }
 
-func TestSubagentWaitDoesNotRecoverPendingContinue(t *testing.T) {
+func TestSubagentWaitRecoversPendingContinueBeforeReturningSnapshot(t *testing.T) {
 	t.Parallel()
 	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "continue-wait-recovery"})
@@ -582,27 +356,15 @@ func TestSubagentWaitDoesNotRecoverPendingContinue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, err := store.Get(context.Background(), started.Ref.TaskID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	snapshot, err := restarted.tasks.Wait(context.Background(), active.SessionRef, taskapi.ControlRequest{
 		TaskID: started.Ref.TaskID, Principal: session.ActorKindUser,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.State != taskapi.StateRunning || !snapshot.Running ||
-		snapshot.Revision != before.Revision ||
-		taskStringValue(snapshot.Metadata["continue_phase"]) != string(continuePhasePending) {
-		t.Fatalf("Wait snapshot = %#v, want unchanged durable running/pending revision %d", snapshot, before.Revision)
-	}
-	after, err := store.Get(context.Background(), started.Ref.TaskID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if after.Revision != before.Revision || runner.waitCalls.Load() != 0 {
-		t.Fatalf("Wait mutated revision %d -> %d or polled runner %d times", before.Revision, after.Revision, runner.waitCalls.Load())
+	if snapshot.State != taskapi.StateUnknownOutcome || snapshot.Running || snapshot.SupportsInput ||
+		taskStringValue(snapshot.Metadata["continue_phase"]) != string(continuePhaseUnknownOutcome) {
+		t.Fatalf("Wait snapshot = %#v, want recovered unknown outcome", snapshot)
 	}
 }
 
@@ -680,17 +442,15 @@ func TestSubagentContinueUnknownPersistenceFailureLeavesLocalAndDurablePending(t
 	if got := runner.continueCalls.Load(); got != 1 {
 		t.Fatalf("Continue calls = %d, want one remote attempt", got)
 	}
-	if got := taskStringValue(snapshot.Metadata["continue_phase"]); got != string(continuePhasePending) ||
-		snapshot.State != taskapi.StateRunning || !snapshot.Running {
-		t.Fatalf("local snapshot = %#v, want running/pending retained", snapshot)
+	if got := taskStringValue(snapshot.Metadata["continue_phase"]); got != string(continuePhasePending) || snapshot.State != taskapi.StateCompleted {
+		t.Fatalf("local snapshot = %#v, want completed/pending retained", snapshot)
 	}
 	entry, getErr := store.Get(context.Background(), started.Ref.TaskID)
 	if getErr != nil {
 		t.Fatal(getErr)
 	}
-	if got := taskStringValue(entry.Metadata["continue_phase"]); got != string(continuePhasePending) ||
-		entry.State != taskapi.StateRunning || !entry.Running || entry.SupportsInput {
-		t.Fatalf("durable entry = %#v, want running/pending retained", entry)
+	if got := taskStringValue(entry.Metadata["continue_phase"]); got != string(continuePhasePending) || entry.State != taskapi.StateCompleted || !entry.SupportsInput {
+		t.Fatalf("durable entry = %#v, want completed/pending retained", entry)
 	}
 }
 
@@ -800,16 +560,7 @@ func TestSubagentContinueSagaRecoversPreparedWithoutRemoteUntilClaim(t *testing.
 	if got := runner.continueCalls.Load(); got != 1 {
 		t.Fatalf("Continue calls = %d, want 1", got)
 	}
-	if taskStringValue(snapshot.Metadata["continue_phase"]) != "" ||
-		snapshot.Running || snapshot.State != taskapi.StateCompleted {
-		t.Fatalf("continue snapshot = %#v, want producer terminal with cleared continue phase", snapshot)
-	}
-	entry, err := store.Get(context.Background(), started.Ref.TaskID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if taskStringValue(entry.Metadata["continue_phase"]) != "" ||
-		entry.Running || entry.State != taskapi.StateCompleted {
-		t.Fatalf("durable completion = %#v, want terminal with cleared continue phase", entry)
+	if taskStringValue(snapshot.Metadata["continue_phase"]) != "" {
+		t.Fatalf("continue_phase = %q, want cleared", taskStringValue(snapshot.Metadata["continue_phase"]))
 	}
 }

@@ -181,41 +181,9 @@ func (tm *taskRuntime) appendSideSubagentUserEvent(ctx context.Context, task *su
 	return err
 }
 
-type sideSubagentFinalCommitMode uint8
-
-const (
-	sideSubagentFinalCommitPublished sideSubagentFinalCommitMode = iota
-	sideSubagentFinalCommitStaged
-	sideSubagentFinalCommitDeferredMarker
-)
-
 func (tm *taskRuntime) appendSideSubagentFinalEvent(ctx context.Context, task *subagentTask) error {
-	return tm.appendSideSubagentFinalEventMode(ctx, task, sideSubagentFinalCommitPublished)
-}
-
-func (tm *taskRuntime) appendStagedSideSubagentFinalEvent(ctx context.Context, task *subagentTask) error {
-	return tm.appendSideSubagentFinalEventMode(ctx, task, sideSubagentFinalCommitStaged)
-}
-
-// appendCompletionSideSubagentFinalEvent commits the Session-owned dialogue and
-// checkpoint while leaving the Task completion intent Running. The final Task
-// CAS carries final_event_persisted together with the terminal lifecycle.
-func (tm *taskRuntime) appendCompletionSideSubagentFinalEvent(ctx context.Context, task *subagentTask) error {
-	return tm.appendSideSubagentFinalEventMode(ctx, task, sideSubagentFinalCommitDeferredMarker)
-}
-
-func (tm *taskRuntime) appendSideSubagentFinalEventMode(
-	ctx context.Context,
-	task *subagentTask,
-	mode sideSubagentFinalCommitMode,
-) error {
 	if tm == nil || tm.runtime == nil || tm.runtime.sessions == nil || task == nil || !isSideSubagentTask(task) {
 		return nil
-	}
-	switch mode {
-	case sideSubagentFinalCommitPublished, sideSubagentFinalCommitStaged, sideSubagentFinalCommitDeferredMarker:
-	default:
-		return fmt.Errorf("agent-sdk/runtime: unsupported side subagent final commit mode %d", mode)
 	}
 	task.mu.Lock()
 	if task.running || task.state != taskapi.StateCompleted || strings.EqualFold(taskStringValue(task.metadata["final_event_persisted"]), "true") {
@@ -278,24 +246,7 @@ func (tm *taskRuntime) appendSideSubagentFinalEventMode(
 		task.metadata = map[string]any{}
 	}
 	task.metadata["final_event_persisted"] = "true"
-	if mode == sideSubagentFinalCommitDeferredMarker {
-		task.mu.Unlock()
-		return nil
-	}
 	entry := task.entrySnapshot(tm.runtime.now())
 	task.mu.Unlock()
-	var persistErr error
-	if mode == sideSubagentFinalCommitStaged {
-		persistErr = tm.persistStagedTaskEntry(ctx, entry)
-	} else {
-		persistErr = tm.persistTaskEntry(ctx, entry)
-	}
-	if persistErr != nil {
-		return persistErr
-	}
-	task.mu.Lock()
-	task.revision = entry.Revision
-	task.lease = taskapi.CloneLease(entry.Lease)
-	task.mu.Unlock()
-	return nil
+	return tm.persistTaskEntry(ctx, entry)
 }

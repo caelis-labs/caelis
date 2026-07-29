@@ -31,10 +31,7 @@ const (
 	ControlMutationPurposeLifecycle     ControlMutationPurpose = "session_lifecycle"
 	ControlMutationPurposeConfiguration ControlMutationPurpose = "session_configuration"
 	ControlMutationPurposeTest          ControlMutationPurpose = "test"
-	// ControlMutationPurposeSubagentCompletion owns the asynchronous,
-	// turn-fenced Task terminal + Side dialogue commit after a child producer
-	// outlives its parent Runtime lease.
-	ControlMutationPurposeSubagentCompletion ControlMutationPurpose = "subagent_completion"
+	ControlMutationPurposeSystemCommit  ControlMutationPurpose = "system_commit"
 )
 
 // MutationGuard carries the authority and durable fence for one mutation.
@@ -58,18 +55,6 @@ func ContextWithRuntimeLease(ctx context.Context, lease SessionLease) context.Co
 	})
 }
 
-// ContextWithControlMutation scopes one asynchronous Control-owned mutation to
-// an inventoryable purpose. It replaces any Runtime lease fence inherited from
-// ctx; the store still validates whether that purpose may overlap a live
-// Runtime lease. Callers must use this only for the exact operation named by
-// purpose, never as a general lease-conflict retry.
-func ContextWithControlMutation(ctx context.Context, purpose ControlMutationPurpose) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return context.WithValue(ctx, mutationGuardContextKey{}, ControlMutationGuard(purpose))
-}
-
 // ContextWithoutRuntimeLease starts a distinct Runtime placement scope while
 // preserving cancellation, deadlines, and unrelated context values. Nested
 // runtimes must use it before operating on a different Session; a parent
@@ -83,9 +68,7 @@ func ContextWithoutRuntimeLease(ctx context.Context) context.Context {
 	return context.WithValue(ctx, mutationGuardContextKey{}, MutationGuard{})
 }
 
-// RuntimeMutationGuard returns the mutation guard carried by ctx. Runtime Turn
-// contexts carry a Runtime lease fence; explicitly scoped asynchronous Control
-// contexts carry their inventoryable Control purpose instead.
+// RuntimeMutationGuard returns the Runtime lease fence carried by ctx.
 func RuntimeMutationGuard(ctx context.Context) MutationGuard {
 	if ctx == nil {
 		return MutationGuard{}
@@ -193,7 +176,7 @@ func ControlMutationMayOverlapRuntimeLease(purpose ControlMutationPurpose) bool 
 	switch ControlMutationPurpose(strings.TrimSpace(string(purpose))) {
 	case ControlMutationPurposeApproval,
 		ControlMutationPurposeParticipant,
-		ControlMutationPurposeSubagentCompletion,
+		ControlMutationPurposeSystemCommit,
 		ControlMutationPurposeTest:
 		return true
 	default:
@@ -210,7 +193,7 @@ func knownControlMutationPurpose(purpose ControlMutationPurpose) bool {
 		ControlMutationPurposeLifecycle,
 		ControlMutationPurposeConfiguration,
 		ControlMutationPurposeTest,
-		ControlMutationPurposeSubagentCompletion:
+		ControlMutationPurposeSystemCommit:
 		return true
 	default:
 		return false

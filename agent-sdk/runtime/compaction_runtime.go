@@ -16,7 +16,6 @@ func (r *Runtime) prepareInvocationContext(
 	ctx context.Context,
 	activeSession session.Session,
 	ref session.SessionRef,
-	turnID string,
 	req agent.RunRequest,
 	pendingInput *session.Event,
 ) (invocationContext, error) {
@@ -43,7 +42,7 @@ func (r *Runtime) prepareInvocationContext(
 		return invocationContext{}, wrapCompactionFailure("prepare", err)
 	}
 	if result.Compacted && result.CompactEvent != nil {
-		persisted, appendErr := r.persistCompactionArtifacts(ctx, loaded.Session, ref, turnID, loaded.Session.Revision, result)
+		persisted, appendErr := r.persistCompactionArtifacts(ctx, loaded.Session, ref, loaded.Session.Revision, result)
 		if appendErr != nil {
 			return invocationContext{}, wrapCompactionFailure("persist", appendErr)
 		}
@@ -112,7 +111,7 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 		Usage:     result.Usage,
 	}
 	if result.Compacted && result.CompactEvent != nil {
-		persisted, appendErr := r.persistCompactionArtifacts(ctx, activeSession, ref, "", loaded.Session.Revision, result)
+		persisted, appendErr := r.persistCompactionArtifacts(ctx, activeSession, ref, loaded.Session.Revision, result)
 		if appendErr != nil {
 			return CompactResult{}, appendErr
 		}
@@ -129,14 +128,13 @@ func (r *Runtime) persistCompactionArtifacts(
 	ctx context.Context,
 	activeSession session.Session,
 	ref session.SessionRef,
-	turnID string,
 	sourceRevision uint64,
 	result compact.Result,
 ) (*session.Event, error) {
 	if result.CompactEvent == nil {
 		return nil, errors.New("agent-sdk/runtime: compact event is required")
 	}
-	compactEvent := normalizeEvent(activeSession, turnID, result.CompactEvent)
+	compactEvent := normalizeEvent(activeSession, "", result.CompactEvent)
 	if strings.TrimSpace(compactEvent.IdempotencyKey) == "" {
 		if data, ok := compact.CompactEventDataFromEvent(compactEvent); ok && data.SummarizedThroughSeq > 0 {
 			compactEvent.IdempotencyKey = fmt.Sprintf("compact:%d:%s:%s", data.SummarizedThroughSeq, data.Generator, data.Trigger)
@@ -244,7 +242,7 @@ func (r *Runtime) compactAndNotify(
 	if progress := compactionProgressFromEvent(result.CompactEvent); progress.hasCompactData && !progress.hasSourceProgress() {
 		return compactionProgress{}, true, nil
 	}
-	persisted, err := r.persistCompactionArtifacts(ctx, activeSession, ref, turnID, *sourceRevision, result)
+	persisted, err := r.persistCompactionArtifacts(ctx, activeSession, ref, *sourceRevision, result)
 	if err != nil {
 		r.publishCompactFailureNotice(activeSession, turnID, sink, err)
 		return compactionProgress{}, false, err

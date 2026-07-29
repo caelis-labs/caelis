@@ -89,17 +89,6 @@ type ContinueRequest struct {
 	Agent       string `json:"agent,omitempty"`
 	Prompt      string `json:"prompt,omitempty"`
 	YieldTimeMS int    `json:"yield_time_ms,omitempty"`
-	// Completion replaces the sink installed by Spawn for this continuation
-	// turn. A runner publishes exactly one terminal Result to it.
-	Completion CompletionSink `json:"-"`
-}
-
-// CompletionSink receives one terminal child result from its execution
-// producer. Producers must call it after releasing runner locks. The Runtime
-// lifecycle owner may synchronously establish durable Task terminal state;
-// observation subscribers are never part of this callback.
-type CompletionSink interface {
-	PublishSubagentCompletion(Result)
 }
 
 // Result captures one delegated child summary visible to runtime and the

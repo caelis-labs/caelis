@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
@@ -20,7 +21,7 @@ import (
 //
 //	prepared  — turn identity + prompt recorded; remote Continue not claimed
 //	pending   — claimed for remote Continue; restart refuses blind re-issue
-//	post_effect — remote Continue was accepted; terminal belongs to CompletionSink
+//	post_effect — remote succeeded and result is durable; parent final may remain
 //	(cleared) — parent final + task state committed for this turn
 //	unknown   — remote failed or process restarted after the external claim
 type continuePhase string
@@ -81,7 +82,7 @@ func (tm *taskRuntime) continueSubagentClaimed(ctx context.Context, task *subage
 			return task.snapshot(), fmt.Errorf("agent-sdk/runtime: subagent continue %q has an in-flight turn with a different prompt; recover the pending turn first", task.ref.TaskID)
 		}
 		if phase == continuePhasePrepared {
-			return tm.executeClaimedSubagentContinue(ctx, task)
+			return tm.executeClaimedSubagentContinue(ctx, task, int(req.Yield/time.Millisecond))
 		}
 		return tm.advanceSubagentContinue(ctx, task)
 	}
@@ -105,10 +106,10 @@ func (tm *taskRuntime) continueSubagentClaimed(ctx context.Context, task *subage
 		task.restoreContinuationTurn(checkpoint, true)
 		return taskapi.Snapshot{}, err
 	}
-	return tm.executeClaimedSubagentContinue(ctx, task)
+	return tm.executeClaimedSubagentContinue(ctx, task, int(req.Yield/time.Millisecond))
 }
 
-func (tm *taskRuntime) executeClaimedSubagentContinue(ctx context.Context, task *subagentTask) (taskapi.Snapshot, error) {
+func (tm *taskRuntime) executeClaimedSubagentContinue(ctx context.Context, task *subagentTask, yieldMS int) (taskapi.Snapshot, error) {
 	_, prompt, contextTransfer, digest, turnSeq := continueStateOfTask(task)
 
 	if err := tm.appendSideSubagentUserEvent(ctx, task, prompt); err != nil {
@@ -118,28 +119,16 @@ func (tm *taskRuntime) executeClaimedSubagentContinue(ctx context.Context, task 
 	if err := tm.markSubagentContinuePhase(ctx, task, continuePhasePending, prompt, contextTransfer, digest, turnSeq, ""); err != nil {
 		return task.snapshot(), err
 	}
-	_, err := task.runner.Continue(ctx, delegation.CloneAnchor(task.anchor), delegation.ContinueRequest{
-		Prompt: contextprompt.ComposeTextPrompt(contextTransfer, prompt),
-		// Continue only issues the remote generation. Task lifecycle is driven
-		// by CompletionSink, and callers that want to observe it use Task wait.
-		YieldTimeMS: 0,
-		Completion:  newSubagentCompletionSink(ctx, tm, task.ref.TaskID, turnSeq),
+	result, err := task.runner.Continue(ctx, delegation.CloneAnchor(task.anchor), delegation.ContinueRequest{
+		Prompt:      contextprompt.ComposeTextPrompt(contextTransfer, prompt),
+		YieldTimeMS: yieldMS,
 	})
 	if err != nil {
-		if drained, drainErr := tm.drainPendingSubagentCompletionClaimed(task); drained != subagentCompletionDrainNone {
-			return task.snapshot(), drainErr
-		}
 		persistErr := tm.markSubagentContinueUnknown(context.WithoutCancel(ctx), task, err.Error())
 		return task.snapshot(), errors.Join(err, persistErr)
 	}
-	if drained, drainErr := tm.drainPendingSubagentCompletionClaimed(task); drained != subagentCompletionDrainNone {
-		return task.snapshot(), drainErr
-	}
-	if err := tm.markSubagentContinuePostEffect(ctx, task, prompt, contextTransfer, digest, turnSeq); err != nil {
-		// The remote effect was already accepted after a durable pending claim.
-		// Returning an ordinary retryable error could issue the same turn again;
-		// retain pending and let CompletionSink/recovery establish the outcome.
-		return task.snapshot(), nil
+	if err := tm.markSubagentContinuePostEffect(ctx, task, prompt, contextTransfer, digest, turnSeq, result); err != nil {
+		return task.snapshot(), err
 	}
 	return tm.advanceSubagentContinue(ctx, task)
 }
@@ -151,16 +140,28 @@ func (tm *taskRuntime) advanceSubagentContinue(ctx context.Context, task *subage
 	phase := continuePhaseOfTask(task)
 	switch phase {
 	case continuePhasePrepared:
-		return tm.executeClaimedSubagentContinue(ctx, task)
+		return tm.executeClaimedSubagentContinue(ctx, task, 0)
 	case continuePhasePostEffect:
-		// The external effect crossed its durable boundary. Terminal lifecycle
-		// and Side final dialogue are owned only by the producer CompletionSink.
+		// Parent final dual-write only — never re-issue the remote Continue.
 	case continuePhaseNone:
 		return task.snapshot(), nil
 	default:
 		return task.snapshot(), fmt.Errorf("agent-sdk/runtime: cannot advance subagent continue from phase %q", phase)
 	}
-	return task.snapshot(), nil
+	if err := tm.appendSideSubagentFinalEvent(ctx, task); err != nil {
+		return task.snapshot(), err
+	}
+	if err := tm.clearSubagentContinuePhase(context.WithoutCancel(ctx), task); err != nil {
+		return task.snapshot(), err
+	}
+	snapshot := task.snapshot()
+	if shouldDropInactiveSubagentTask(snapshot) {
+		tm.mu.Lock()
+		delete(tm.subagents, task.ref.TaskID)
+		tm.mu.Unlock()
+	}
+	_ = tm.updateSubagentParticipant(ctx, task, "updated")
+	return snapshot, nil
 }
 
 func continueRequestDigest(prompt string, contextTransfer agent.ContextTransfer, turnSeq int64) (string, error) {
@@ -240,7 +241,7 @@ func (tm *taskRuntime) markSubagentContinuePhase(
 	turnSeq int64,
 	reason string,
 ) error {
-	return tm.persistSubagentContinuePhase(ctx, task, phase, prompt, contextTransfer, digest, turnSeq, reason)
+	return tm.persistSubagentContinuePhase(ctx, task, phase, prompt, contextTransfer, digest, turnSeq, reason, nil)
 }
 
 func (tm *taskRuntime) markSubagentContinuePostEffect(
@@ -250,8 +251,9 @@ func (tm *taskRuntime) markSubagentContinuePostEffect(
 	contextTransfer agent.ContextTransfer,
 	digest string,
 	turnSeq int64,
+	result delegation.Result,
 ) error {
-	return tm.persistSubagentContinuePhase(ctx, task, continuePhasePostEffect, prompt, contextTransfer, digest, turnSeq, "")
+	return tm.persistSubagentContinuePhase(ctx, task, continuePhasePostEffect, prompt, contextTransfer, digest, turnSeq, "", &result)
 }
 
 func (tm *taskRuntime) persistSubagentContinuePhase(
@@ -263,6 +265,7 @@ func (tm *taskRuntime) persistSubagentContinuePhase(
 	digest string,
 	turnSeq int64,
 	reason string,
+	result *delegation.Result,
 ) error {
 	if task == nil {
 		return nil
@@ -270,26 +273,18 @@ func (tm *taskRuntime) persistSubagentContinuePhase(
 	task.mu.Lock()
 	entry := task.entrySnapshot(tm.runtime.now())
 	task.mu.Unlock()
+	if result != nil {
+		desired := tm.rehydrateSubagentTask(entry)
+		desired.prompt = strings.TrimSpace(prompt)
+		desired.applyResult(*result)
+		desired.seedStreamFromResult(*result)
+		entry = desired.entrySnapshot(tm.runtime.now())
+	}
 	if phase == continuePhaseUnknownOutcome {
 		reason = subagentContinueUnknownDiagnostic
 	}
 	applyContinuePhaseToEntry(entry, phase, prompt, contextTransfer, digest, turnSeq, reason)
-	switch phase {
-	case continuePhasePrepared, continuePhasePending, continuePhasePostEffect:
-		entry.State = taskapi.StateRunning
-		entry.Running = true
-		entry.SupportsInput = false
-		entry.Metadata["state"] = string(taskapi.StateRunning)
-		entry.Metadata["running"] = true
-		entry.FailureDiagnostic = ""
-		delete(entry.Result, "error")
-		delete(entry.Result, "result")
-		delete(entry.Result, "final_message")
-		delete(entry.Result, "output_preview")
-		entry.Result["state"] = string(taskapi.StateRunning)
-		entry.Spec["prompt"] = strings.TrimSpace(prompt)
-		entry.Spec["spawn_result"] = taskapi.SanitizeResultForPersistence(entry.Result, taskapi.ResultPersistenceCanonical)
-	case continuePhaseUnknownOutcome:
+	if phase == continuePhaseUnknownOutcome {
 		entry.Running = false
 		entry.State = taskapi.StateUnknownOutcome
 		entry.SupportsInput = false
@@ -303,20 +298,13 @@ func (tm *taskRuntime) persistSubagentContinuePhase(
 		return err
 	}
 	task.mu.Lock()
-	applyContinuePhaseToMetadata(&task.metadata, phase, prompt, contextTransfer, digest, turnSeq, reason)
-	switch phase {
-	case continuePhasePrepared, continuePhasePending, continuePhasePostEffect:
+	if result != nil {
 		task.prompt = strings.TrimSpace(prompt)
-		task.running = true
-		task.state = taskapi.StateRunning
-		delete(task.result, "error")
-		delete(task.result, "result")
-		delete(task.result, "final_message")
-		delete(task.result, "output_preview")
-		task.result["state"] = string(taskapi.StateRunning)
-		task.metadata["state"] = string(taskapi.StateRunning)
-		task.metadata["running"] = true
-	case continuePhaseUnknownOutcome:
+		task.applyResult(*result)
+		task.seedStreamFromResult(*result)
+	}
+	applyContinuePhaseToMetadata(&task.metadata, phase, prompt, contextTransfer, digest, turnSeq, reason)
+	if phase == continuePhaseUnknownOutcome {
 		task.running = false
 		task.state = taskapi.StateUnknownOutcome
 		normalizeSubagentResultForState(&task.result, taskapi.StateUnknownOutcome, reason)
@@ -371,6 +359,10 @@ func applyContinuePhaseToMetadata(metadata *map[string]any, phase continuePhase,
 	} else {
 		values["continue_reason"] = strings.TrimSpace(reason)
 	}
+}
+
+func (tm *taskRuntime) clearSubagentContinuePhase(ctx context.Context, task *subagentTask) error {
+	return tm.markSubagentContinuePhase(ctx, task, continuePhaseNone, "", agent.ContextTransfer{}, "", 0, "")
 }
 
 func (tm *taskRuntime) markSubagentContinueUnknown(ctx context.Context, task *subagentTask, reason string) error {

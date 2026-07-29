@@ -156,10 +156,6 @@ type SubagentApprovalRequester interface {
 	RequestSubagentApproval(context.Context, SubagentApprovalRequest) (ApprovalResponse, error)
 }
 
-// SubagentCompletionSink is the Runtime-owned terminal child lifecycle
-// receiver.
-type SubagentCompletionSink = delegation.CompletionSink
-
 // SubagentSpawnContext is the system-controlled parent context inherited by a
 // child endpoint. None of these fields are model-controlled tool arguments.
 type SubagentSpawnContext struct {
@@ -172,9 +168,6 @@ type SubagentSpawnContext struct {
 	ApprovalMode      string                    `json:"approval_mode,omitempty"`
 	ApprovalRequester SubagentApprovalRequester `json:"-"`
 	Streams           stream.Sink               `json:"-"`
-	// Completion is required for a Runtime-managed Spawn. The runner publishes
-	// exactly one terminal Result for this turn after releasing runner locks.
-	Completion SubagentCompletionSink `json:"-"`
 }
 
 // Context exposes immutable invocation state derived from persisted events and
