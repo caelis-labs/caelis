@@ -474,6 +474,160 @@ func TestSubagentOutputOverlayMouseCloseDoesNotInterruptRunningTurn(t *testing.T
 	}
 }
 
+func TestSubagentOutputOverlayDragSelectionCopiesWideText(t *testing.T) {
+	var copied string
+	model := NewModel(Config{
+		NoAnimation: true,
+		WriteClipboardText: func(text string) error {
+			copied = text
+			return nil
+		},
+	})
+	model.theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	model.themeCacheKey = ""
+	model.width = 100
+	model.height = 28
+	view := model.ensureSubagentOutputView("spawn-1")
+	source := newNarrativeSourceIdentity("message-1", "", "")
+	view.block.AppendStreamEvent(SEAssistant, "前缀 甲乙abc 后缀", source, time.Unix(327, 0))
+	model.subagentOutputOverlay = &subagentOutputOverlayState{
+		callID:      "spawn-1",
+		followTail:  false,
+		selectStart: textSelectionPoint{line: -1, col: -1},
+		selectEnd:   textSelectionPoint{line: -1, col: -1},
+	}
+
+	before := model.renderSubagentOutputOverlay()
+	rowIndex, startCol := subagentOutputMarkerPositionForTest(t, model, "甲乙abc")
+	geometry := model.subagentOutputOverlay.geometry
+	startMouse := tea.Mouse{
+		Button: tea.MouseLeft,
+		X:      geometry.contentX + startCol,
+		Y:      geometry.contentY + rowIndex - model.subagentOutputOverlay.offset,
+	}
+	endMouse := startMouse
+	endMouse.X += displayColumns("甲乙abc")
+
+	next, cmd := model.handleMouse(tea.MouseClickMsg(startMouse))
+	model = next.(*Model)
+	if cmd != nil {
+		t.Fatal("selection press unexpectedly returned a command")
+	}
+	next, cmd = model.handleMouse(tea.MouseMotionMsg(endMouse))
+	model = next.(*Model)
+	if !model.subagentOutputOverlay.selecting {
+		t.Fatal("overlay did not enter selecting state")
+	}
+	if highlighted := model.renderSubagentOutputOverlay(); highlighted == before {
+		t.Fatal("overlay selection did not change the rendered frame")
+	}
+
+	endMouse.Button = tea.MouseNone
+	next, cmd = model.handleMouse(tea.MouseReleaseMsg(endMouse))
+	model = next.(*Model)
+	if cmd == nil {
+		t.Fatal("overlay selection release did not return a clipboard command")
+	}
+	if got, ok := cmd().(clipboardCopyResultMsg); !ok {
+		t.Fatalf("clipboard command returned %T, want clipboardCopyResultMsg", got)
+	} else if got.err != nil {
+		t.Fatalf("clipboard command returned error: %v", got.err)
+	}
+	if copied != "甲乙abc" {
+		t.Fatalf("clipboard text = %q, want %q", copied, "甲乙abc")
+	}
+	if model.subagentOutputOverlay.selecting ||
+		model.subagentOutputOverlay.selectStart.line >= 0 ||
+		model.subagentOutputOverlay.selectEnd.line >= 0 {
+		t.Fatalf("overlay selection was not cleared after copy: %#v", model.subagentOutputOverlay)
+	}
+}
+
+func TestSubagentOutputOverlaySelectionWheelExtendsAcrossRows(t *testing.T) {
+	var copied string
+	model := NewModel(Config{
+		NoColor:     true,
+		NoAnimation: true,
+		WriteClipboardText: func(text string) error {
+			copied = text
+			return nil
+		},
+	})
+	model.width = 72
+	model.height = 18
+	view := model.ensureSubagentOutputView("spawn-1")
+	for index := range 40 {
+		view.observeChildEvent(TranscriptEvent{
+			Kind:       TranscriptEventNotice,
+			Scope:      ACPProjectionSubagent,
+			ScopeID:    "reviewer",
+			Text:       fmt.Sprintf("selectable row %02d", index),
+			NoticeKind: "test",
+		})
+	}
+	model.subagentOutputOverlay = &subagentOutputOverlayState{
+		callID:      "spawn-1",
+		followTail:  false,
+		selectStart: textSelectionPoint{line: -1, col: -1},
+		selectEnd:   textSelectionPoint{line: -1, col: -1},
+	}
+	_ = model.renderSubagentOutputOverlay()
+
+	geometry := model.subagentOutputOverlay.geometry
+	mouse := tea.Mouse{
+		Button: tea.MouseLeft,
+		X:      geometry.contentX,
+		Y:      geometry.contentY,
+	}
+	next, _ := model.handleMouse(tea.MouseClickMsg(mouse))
+	model = next.(*Model)
+	next, _ = model.handleMouse(tea.MouseWheelMsg(tea.Mouse{
+		Button: tea.MouseWheelDown,
+		X:      mouse.X,
+		Y:      mouse.Y,
+	}))
+	model = next.(*Model)
+	if model.subagentOutputOverlay.offset != 1 {
+		t.Fatalf("selection wheel offset = %d, want 1", model.subagentOutputOverlay.offset)
+	}
+	if model.subagentOutputOverlay.selectEnd.line != 1 {
+		t.Fatalf("selection end line = %d, want 1 after scrolling", model.subagentOutputOverlay.selectEnd.line)
+	}
+	if model.subagentOutputOverlay.followTail {
+		t.Fatal("selection wheel unexpectedly resumed tail following")
+	}
+
+	edgeMouse := tea.Mouse{
+		Button: tea.MouseLeft,
+		X:      geometry.contentX,
+		Y:      geometry.contentY + len(geometry.rowTokens) - 1,
+	}
+	next, cmd := model.handleMouse(tea.MouseMotionMsg(edgeMouse))
+	model = next.(*Model)
+	if cmd == nil || !model.selectionAutoScroll.active || !model.selectionAutoScroll.tickScheduled {
+		t.Fatalf("edge drag did not schedule overlay selection auto-scroll: %#v", model.selectionAutoScroll)
+	}
+	token := model.selectionAutoScroll.scheduledToken
+	_ = model.advanceSelectionAutoScroll(token)
+	if model.subagentOutputOverlay.offset != 2 {
+		t.Fatalf("selection auto-scroll offset = %d, want 2", model.subagentOutputOverlay.offset)
+	}
+
+	next, cmd = model.handleMouse(tea.MouseReleaseMsg(edgeMouse))
+	model = next.(*Model)
+	if cmd == nil {
+		t.Fatal("multi-row overlay selection did not return a clipboard command")
+	}
+	if got, ok := cmd().(clipboardCopyResultMsg); !ok {
+		t.Fatalf("clipboard command returned %T, want clipboardCopyResultMsg", got)
+	} else if got.err != nil {
+		t.Fatalf("clipboard command returned error: %v", got.err)
+	}
+	if !strings.Contains(copied, "\n") {
+		t.Fatalf("wheel-extended clipboard text omitted row boundary: %q", copied)
+	}
+}
+
 func TestSubagentOutputOverlayRunCommandUsesParticipantPanelDefaults(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.width = 100
@@ -513,7 +667,15 @@ func TestSubagentOutputOverlayRunCommandUsesParticipantPanelDefaults(t *testing.
 }
 
 func TestSubagentOutputOverlayLongRunCommandMouseTogglesFullAndSummary(t *testing.T) {
-	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	var copied string
+	model := NewModel(Config{
+		NoColor:     true,
+		NoAnimation: true,
+		WriteClipboardText: func(text string) error {
+			copied = text
+			return nil
+		},
+	})
 	model.width = 100
 	model.height = 28
 	view := model.ensureSubagentOutputView("spawn-1")
@@ -545,6 +707,36 @@ func TestSubagentOutputOverlayLongRunCommandMouseTogglesFullAndSummary(t *testin
 		t.Fatalf("long RUN_COMMAND did not default to the bounded participant summary:\n%s", summary)
 	}
 
+	rowIndex, commandCol := subagentOutputMarkerPositionForTest(t, model, "ls -la")
+	geometry := model.subagentOutputOverlay.geometry
+	startMouse := tea.Mouse{
+		Button: tea.MouseLeft,
+		X:      geometry.contentX + commandCol,
+		Y:      geometry.contentY + rowIndex - model.subagentOutputOverlay.offset,
+	}
+	endMouse := startMouse
+	endMouse.X += displayColumns("ls")
+	next, _ := model.handleMouse(tea.MouseClickMsg(startMouse))
+	model = next.(*Model)
+	next, _ = model.handleMouse(tea.MouseMotionMsg(endMouse))
+	model = next.(*Model)
+	next, cmd := model.handleMouse(tea.MouseReleaseMsg(endMouse))
+	model = next.(*Model)
+	if cmd == nil {
+		t.Fatal("dragging a clickable command row did not return a clipboard command")
+	}
+	if got, ok := cmd().(clipboardCopyResultMsg); !ok {
+		t.Fatalf("clipboard command returned %T, want clipboardCopyResultMsg", got)
+	} else if got.err != nil {
+		t.Fatalf("clipboard command returned error: %v", got.err)
+	}
+	if copied != "ls" {
+		t.Fatalf("clickable command row copied %q, want %q", copied, "ls")
+	}
+	if view.block.toolPanelFullOutput("command-ls") {
+		t.Fatal("drag selection over a clickable command row toggled its panel")
+	}
+
 	clickSubagentOutputToolPanelForTest(t, model, "command-ls")
 	full := subagentOutputOverlayPlain(model)
 	if !view.block.toolPanelFullOutput("command-ls") || !strings.Contains(full, middleLine) {
@@ -559,6 +751,24 @@ func TestSubagentOutputOverlayLongRunCommandMouseTogglesFullAndSummary(t *testin
 		strings.Contains(summary, middleLine) {
 		t.Fatalf("second overlay mouse click did not return to the bounded summary:\n%s", summary)
 	}
+}
+
+func subagentOutputMarkerPositionForTest(t *testing.T, model *Model, marker string) (int, int) {
+	t.Helper()
+	if model == nil || model.subagentOutputOverlay == nil {
+		t.Fatal("subagent output overlay is unavailable")
+	}
+	view := model.subagentOutputViews[model.subagentOutputOverlay.callID]
+	if view == nil {
+		t.Fatal("subagent output view is unavailable")
+	}
+	for rowIndex, row := range view.renderCache.rows {
+		if byteIndex := strings.Index(row.Plain, marker); byteIndex >= 0 {
+			return rowIndex, displayColumns(row.Plain[:byteIndex])
+		}
+	}
+	t.Fatalf("visible overlay rows omitted marker %q", marker)
+	return 0, 0
 }
 
 func clickSubagentOutputToolPanelForTest(t *testing.T, model *Model, callID string) {

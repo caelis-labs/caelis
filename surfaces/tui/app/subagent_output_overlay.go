@@ -24,6 +24,7 @@ type subagentOutputOverlayGeometry struct {
 	height       int
 	closeX       int
 	closeY       int
+	contentX     int
 	contentY     int
 	contentWidth int
 	rowTokens    []string
@@ -37,6 +38,9 @@ type subagentOutputOverlayState struct {
 	layout      subagentOutputOverlayLayout
 	geometry    subagentOutputOverlayGeometry
 	pressedItem string
+	selecting   bool
+	selectStart textSelectionPoint
+	selectEnd   textSelectionPoint
 }
 
 type subagentOutputOverlayLayout struct {
@@ -89,8 +93,10 @@ func (m *Model) openSubagentOutputOverlay(blockID, callID string) bool {
 	m.showPalette = false
 	m.subagentOverlay = nil
 	m.subagentOutputOverlay = &subagentOutputOverlayState{
-		callID:     callID,
-		followTail: true,
+		callID:      callID,
+		followTail:  true,
+		selectStart: textSelectionPoint{line: -1, col: -1},
+		selectEnd:   textSelectionPoint{line: -1, col: -1},
 	}
 	view.prepareVisibleRender()
 	return true
@@ -100,6 +106,7 @@ func (m *Model) closeSubagentOutputOverlay() {
 	if m == nil || m.subagentOutputOverlay == nil {
 		return
 	}
+	m.cancelSelectionAutoScroll()
 	m.subagentOutputOverlay = nil
 }
 
@@ -120,6 +127,7 @@ func (m *Model) renderSubagentOutputOverlay() string {
 	}
 	end := minInt(len(rows), state.offset+layout.contentRows)
 	visible := rows[state.offset:end]
+	visibleFixedRows := m.renderSubagentOutputSelection(state, rows, fixedRows, end, layout.innerWidth)
 
 	rowTokens := reuseSubagentOutputGeometryRows(state.geometry.rowTokens, layout.contentRows)
 	var frame strings.Builder
@@ -136,9 +144,8 @@ func (m *Model) renderSubagentOutputOverlay() string {
 		if index < len(visible) {
 			row := visible[index]
 			rowTokens[index] = row.ClickToken
-			fixedIndex := state.offset + index
-			if fixedIndex >= 0 && fixedIndex < len(fixedRows) {
-				line = fixedRows[fixedIndex]
+			if index < len(visibleFixedRows) {
+				line = visibleFixedRows[index]
 			}
 		}
 		appendSubagentOutputContentLine(&frame, layout, line)
@@ -160,12 +167,58 @@ func (m *Model) renderSubagentOutputOverlay() string {
 		height:       layout.frameHeight,
 		closeX:       layout.startX + layout.contentInset + maxInt(0, layout.innerWidth-1),
 		closeY:       layout.startY + layout.borderInset,
+		contentX:     layout.startX + layout.contentInset,
 		contentY:     layout.startY + layout.borderInset + 2,
 		contentWidth: layout.innerWidth,
 		rowTokens:    rowTokens,
 		totalRows:    len(rows),
 	}
 	return frame.String()
+}
+
+func (m *Model) renderSubagentOutputSelection(
+	state *subagentOutputOverlayState,
+	rows []RenderedRow,
+	fixedRows []string,
+	end int,
+	width int,
+) []string {
+	if state == nil || state.offset < 0 || state.offset >= end || end > len(rows) || end > len(fixedRows) {
+		return nil
+	}
+	visibleFixedRows := fixedRows[state.offset:end]
+	if !state.selecting {
+		return visibleFixedRows
+	}
+	start, finish, ok := normalizedSelectionRange(state.selectStart, state.selectEnd, len(rows))
+	if !ok || finish.line < state.offset || start.line >= end {
+		return visibleFixedRows
+	}
+
+	styled := append([]string(nil), visibleFixedRows...)
+	plain := make([]string, len(styled))
+	for index := range plain {
+		plain[index] = rows[state.offset+index].Plain
+	}
+	localStart := textSelectionPoint{line: maxInt(start.line, state.offset) - state.offset, col: start.col}
+	localFinish := textSelectionPoint{line: minInt(finish.line, end-1) - state.offset, col: finish.col}
+	if start.line < state.offset {
+		localStart.col = 0
+	}
+	if finish.line >= end {
+		localFinish.col = displayColumns(plain[len(plain)-1])
+	}
+	styled = renderSelectionOnStyledLines(
+		styled,
+		plain,
+		localStart,
+		localFinish,
+		m.theme.InputSelectionStyle(),
+	)
+	for index := range styled {
+		styled[index] = normalizeFullscreenFrameLine(styled[index], width)
+	}
+	return styled
 }
 
 func (m *Model) subagentOutputLayout(state *subagentOutputOverlayState) subagentOutputOverlayLayout {
