@@ -35,6 +35,7 @@ type anthropicSDKLLM struct {
 	requestTimeout      time.Duration
 	maxOutputTok        int
 	contextWindowTokens int
+	imageInput          bool
 }
 
 func newAnthropic(cfg Config, token string) model.LLM {
@@ -86,6 +87,7 @@ func newAnthropicWithDefaults(cfg Config, token string, defaults anthropicProvid
 		requestTimeout:      cfg.Timeout,
 		maxOutputTok:        maxTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
+		imageInput:          cfg.ImageInput,
 	}
 }
 

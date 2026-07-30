@@ -190,6 +190,7 @@ type SlashArgCandidate struct {
 	Detail                string
 	NoAuth                bool
 	ModelMetadataComplete bool
+	ModelImageInputKnown  bool
 }
 
 type commandItem struct {

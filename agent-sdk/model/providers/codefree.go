@@ -72,6 +72,7 @@ type codeFreeLLM struct {
 	firstEventTimeout   time.Duration
 	maxOutputTok        int
 	contextWindowTokens int
+	imageInput          bool
 	options             openAICompatOptions
 }
 
@@ -90,6 +91,7 @@ func newCodeFree(cfg Config) model.LLM {
 		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
 		maxOutputTok:        cfg.MaxOutputTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
+		imageInput:          cfg.ImageInput,
 		options:             openAICompatOptionsForProfile(codeFreeCompatProfile),
 	}
 }

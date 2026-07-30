@@ -60,6 +60,20 @@ func TestToolDisplayArgsHidesMetadataOnlyListArgs(t *testing.T) {
 	}
 }
 
+func TestViewImageDisplayUsesImagePath(t *testing.T) {
+	t.Parallel()
+
+	if got := toolDisplayArgs("view_image", map[string]any{"path": "/tmp/screens/pixel.png"}); got != "/tmp/screens/pixel.png" {
+		t.Fatalf("toolDisplayArgs(ViewImage) = %q", got)
+	}
+	if got := toolTitleDisplayArgs("ViewImage", "read", "View /tmp/screens/pixel.png"); got != "/tmp/screens/pixel.png" {
+		t.Fatalf("toolTitleDisplayArgs(ViewImage) = %q", got)
+	}
+	if got := approvalToolDisplayLabel("ViewImage"); got != "Viewed" {
+		t.Fatalf("approvalToolDisplayLabel(ViewImage) = %q", got)
+	}
+}
+
 func TestToolDisplayArgsSkillUsesName(t *testing.T) {
 	t.Parallel()
 

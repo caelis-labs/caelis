@@ -30,6 +30,7 @@ type geminiLLM struct {
 	requestTimeout      time.Duration
 	maxOutputTok        int
 	contextWindowTokens int
+	imageInput          bool
 }
 
 func newGemini(cfg Config, token string) model.LLM {
@@ -42,6 +43,7 @@ func newGemini(cfg Config, token string) model.LLM {
 		requestTimeout:      cfg.Timeout,
 		maxOutputTok:        cfg.MaxOutputTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
+		imageInput:          cfg.ImageInput,
 	}
 }
 
@@ -733,8 +735,23 @@ func toGeminiContents(instructions []model.Part, messages []model.Message) (stri
 			if resp == nil {
 				continue
 			}
-			part := genai.NewPartFromFunctionResponse(resp.Name, resp.Result)
-			if strings.TrimSpace(resp.ID) != "" && part != nil && part.FunctionResponse != nil {
+			images := inlineToolResultImages(m)
+			var responseParts []*genai.FunctionResponsePart
+			if len(images) > 0 {
+				responseParts = make([]*genai.FunctionResponsePart, 0, len(images))
+			}
+			for _, image := range images {
+				data, err := decodeBase64Image(image.Source.Data)
+				if err != nil {
+					return "", nil, err
+				}
+				responseParts = append(
+					responseParts,
+					genai.NewFunctionResponsePartFromBytes(data, image.MimeType),
+				)
+			}
+			part := genai.NewPartFromFunctionResponseWithParts(resp.Name, resp.Result, responseParts)
+			if strings.TrimSpace(resp.ID) != "" {
 				part.FunctionResponse.ID = resp.ID
 			}
 			out = append(out, &genai.Content{Role: "user", Parts: []*genai.Part{part}})

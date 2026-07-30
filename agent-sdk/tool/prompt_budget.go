@@ -12,7 +12,8 @@ const (
 )
 
 // EstimateModelPromptTokens returns the approximate model-context cost of the
-// currently visible tool specifications.
+// default visible tool specifications when no concrete model is available.
+// Capability-gated tools are therefore included conservatively in this budget.
 func EstimateModelPromptTokens(tools []Tool) int {
 	specs := ModelSpecs(tools)
 	if len(specs) == 0 {

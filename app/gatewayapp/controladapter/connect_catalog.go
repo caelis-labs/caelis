@@ -19,6 +19,7 @@ type connectModelChoice struct {
 	Display          string
 	Detail           string
 	MetadataComplete bool
+	ImageInputKnown  bool
 }
 
 type connectWizardPayload = connectwizard.ConnectWizardState
@@ -49,6 +50,8 @@ func completeConnectArgs(ctx context.Context, driver *Adapter, command string, q
 		return nil, nil
 	case strings.HasPrefix(command, "connect-model:"):
 		return completeConnectModels(ctx, driver, connectwizard.ParseConnectWizardStatePayload(strings.TrimPrefix(command, "connect-model:")), query, limit)
+	case strings.HasPrefix(command, "connect-image-input:"):
+		return completeConnectImageInput(query, limit), nil
 	case strings.HasPrefix(command, "connect-context:"):
 		return completeConnectContext(ctx, driver, connectwizard.ParseConnectWizardStatePayload(strings.TrimPrefix(command, "connect-context:")), query, limit)
 	case strings.HasPrefix(command, "connect-maxout:"):
@@ -362,12 +365,28 @@ func completeConnectModels(ctx context.Context, driver *Adapter, payload connect
 			Display:               choice.Display,
 			Detail:                choice.Detail,
 			ModelMetadataComplete: choice.MetadataComplete,
+			ModelImageInputKnown:  choice.ImageInputKnown,
 		})
 		if len(out) >= limit {
 			break
 		}
 	}
 	return out, nil
+}
+
+func completeConnectImageInput(query string, limit int) []controlprompt.SlashArgCandidate {
+	return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{
+		{
+			Value:   "false",
+			Display: "Text only",
+			Detail:  "Keep image input disabled · conservative default",
+		},
+		{
+			Value:   "true",
+			Display: "Supports images",
+			Detail:  "Enable image attachments and ViewImage",
+		},
+	}, query, limit)
 }
 
 func completeConnectContext(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
@@ -460,6 +479,7 @@ func buildConnectModelChoices(provider string, fallbackModels []modelconfig.Sele
 			Display:          connectDisplayModelRef(provider, name),
 			Detail:           strings.TrimSpace(detail),
 			MetadataComplete: modelChoice.MetadataComplete,
+			ImageInputKnown:  modelChoice.ImageInputKnown,
 		})
 	}
 	for _, item := range fallbackModels {

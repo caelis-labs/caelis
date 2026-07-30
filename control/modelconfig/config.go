@@ -31,17 +31,20 @@ type Config struct {
 	// the credential material in the model profile.
 	CredentialRef string `json:"credential_ref,omitempty"`
 
-	PersistToken            bool               `json:"persist_token,omitempty"`
-	AuthType                providers.AuthType `json:"auth_type,omitempty"`
-	HeaderKey               string             `json:"header_key,omitempty"`
-	ContextWindowTokens     int                `json:"context_window_tokens,omitempty"`
-	ReasoningEffort         string             `json:"reasoning_effort,omitempty"`
-	DefaultReasoningEffort  string             `json:"default_reasoning_effort,omitempty"`
-	ReasoningLevels         []string           `json:"reasoning_levels,omitempty"`
-	ReasoningMode           string             `json:"reasoning_mode,omitempty"`
-	MaxOutputTok            int                `json:"max_output_tokens,omitempty"`
-	Timeout                 time.Duration      `json:"timeout,omitempty"`
-	StreamFirstEventTimeout time.Duration      `json:"stream_first_event_timeout,omitempty"`
+	PersistToken           bool               `json:"persist_token,omitempty"`
+	AuthType               providers.AuthType `json:"auth_type,omitempty"`
+	HeaderKey              string             `json:"header_key,omitempty"`
+	ContextWindowTokens    int                `json:"context_window_tokens,omitempty"`
+	ReasoningEffort        string             `json:"reasoning_effort,omitempty"`
+	DefaultReasoningEffort string             `json:"default_reasoning_effort,omitempty"`
+	ReasoningLevels        []string           `json:"reasoning_levels,omitempty"`
+	ReasoningMode          string             `json:"reasoning_mode,omitempty"`
+	// ImageInput declares image-input support for a custom or locally hosted
+	// model. Maintained model-directory metadata takes precedence when present.
+	ImageInput              *bool         `json:"image_input,omitempty"`
+	MaxOutputTok            int           `json:"max_output_tokens,omitempty"`
+	Timeout                 time.Duration `json:"timeout,omitempty"`
+	StreamFirstEventTimeout time.Duration `json:"stream_first_event_timeout,omitempty"`
 }
 
 // ProviderEndpointConfig stores endpoint and credential data shared by
@@ -78,6 +81,10 @@ type Choice struct {
 // NormalizeConfig canonicalizes identifiers, endpoint defaults, credentials,
 // and model limits.
 func NormalizeConfig(cfg Config) Config {
+	if cfg.ImageInput != nil {
+		value := *cfg.ImageInput
+		cfg.ImageInput = &value
+	}
 	cfg.ID = strings.ToLower(strings.TrimSpace(cfg.ID))
 	cfg.Provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
 	cfg.Model = strings.TrimSpace(cfg.Model)

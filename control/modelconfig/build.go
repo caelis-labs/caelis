@@ -35,6 +35,7 @@ func BuildModel(cfg Config, fallbackContextWindow int, overrideContextWindow int
 		StreamFirstEventTimeout:   cfg.StreamFirstEventTimeout,
 		MaxOutputTok:              cfg.MaxOutputTok,
 		ContextWindowTokens:       effectiveContextWindow,
+		ImageInput:                ModelSupportsImages(cfg),
 		ReasoningLevels:           append([]string(nil), cfg.ReasoningLevels...),
 		ReasoningMode:             cfg.ReasoningMode,
 		DefaultReasoningEffort:    cfg.DefaultReasoningEffort,

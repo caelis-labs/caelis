@@ -242,7 +242,9 @@ func connectModelWizard() WizardDef {
 			},
 			{
 				Key: "model", HintLabel: "/connect model · tab adds · enter confirms", MultiSelect: true,
-				MultiSelectCandidate: func(candidate SlashArgCandidate) bool { return candidate.ModelMetadataComplete },
+				MultiSelectCandidate: func(candidate SlashArgCandidate) bool {
+					return candidate.ModelMetadataComplete && candidate.ModelImageInputKnown
+				},
 				FreeformHintFunc: func(state map[string]string) string {
 					if selected := connectWizardSelectedModelCount(state); selected > 0 {
 						return "/connect model: press enter to confirm the selected models"
@@ -250,6 +252,15 @@ func connectModelWizard() WizardDef {
 					return "/connect model: choose a suggested model or type one custom model name and press enter"
 				},
 				CompletionCommand: func(state map[string]string) string { return "connect-model:" + buildConnectWizardPayload(state) },
+			},
+			{
+				Key: "image_input", HintLabel: "/connect image input",
+				FreeformHint:     "/connect image input: choose whether this model accepts images",
+				RequireCandidate: true,
+				CompletionCommand: func(state map[string]string) string {
+					return "connect-image-input:" + buildConnectWizardPayload(state)
+				},
+				ShouldSkip: func(state map[string]string) bool { return state["_known_image_input"] == "true" },
 			},
 			{
 				Key: "context_window_tokens", HintLabel: "/connect context_window_tokens", Validate: ValidateInt,
@@ -379,6 +390,11 @@ func confirmConnectModelStep(stepKey string, value string, candidate *SlashArgCa
 		} else {
 			delete(state, "_known_model")
 		}
+		if candidate != nil && candidate.ModelImageInputKnown {
+			state["_known_image_input"] = "true"
+		} else {
+			delete(state, "_known_image_input")
+		}
 	}
 }
 
@@ -394,11 +410,17 @@ func buildConnectModelExecLine(state map[string]string) string {
 			reasoningLevels = "auto"
 		}
 	}
-	return joinNonEmpty([]string{
+	fields := []string{
 		"/connect", state["provider"], state["model"], emptyAsDash(state["baseurl"]),
 		connectWizardTimeout(), apiKey, emptyAsDash(state["context_window_tokens"]),
 		emptyAsDash(state["max_output_tokens"]), reasoningLevels,
-	}, " ")
+	}
+	if imageInput := strings.TrimSpace(state["image_input"]); imageInput != "" {
+		// Keep the existing ninth positional argument reserved for the stream
+		// first-event timeout; image input is the backward-compatible tenth.
+		fields = append(fields, "-", imageInput)
+	}
+	return joinNonEmpty(fields, " ")
 }
 
 func mergeACPConfigSelection(values []string, value string) []string {

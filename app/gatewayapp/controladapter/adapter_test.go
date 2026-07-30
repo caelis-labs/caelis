@@ -1058,7 +1058,7 @@ func TestAdapterCompleteSlashArgConnectSeparatesSourcesAndProviders(t *testing.T
 	}
 	for i, want := range wantOllamaCloudModels {
 		candidate := ollamaCloudModels[i]
-		if candidate.Value != want || !candidate.ModelMetadataComplete || !strings.Contains(candidate.Detail, "cloud api") {
+		if candidate.Value != want || !candidate.ModelMetadataComplete || !candidate.ModelImageInputKnown || !strings.Contains(candidate.Detail, "cloud api") {
 			t.Fatalf("Ollama Cloud model[%d] = %#v, want complete %q catalog entry", i, candidate, want)
 		}
 	}
@@ -1516,6 +1516,69 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 			t.Fatalf("config missing compact key %s", required)
 		}
 	}
+}
+
+func TestAdapterConnectPersistsCompatibleImageInputCapability(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	root := t.TempDir()
+	stack, err := newAdapterTestStack(t, gatewayapp.Config{
+		AppName:      "caelis",
+		UserID:       "connect-image-input-test",
+		StoreDir:     root,
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "connect-image-input-session", "surface", "")
+	if err != nil {
+		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+	}
+
+	enabled := true
+	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
+		Provider:   "openai-compatible",
+		Model:      "acme-vision",
+		BaseURL:    "https://models.acme.example/v1",
+		APIKey:     "secret",
+		ImageInput: &enabled,
+	}); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	cfg, ok := stack.ModelConfig("openai-compatible/acme-vision")
+	if !ok || cfg.ImageInput == nil || !*cfg.ImageInput {
+		t.Fatalf("runtime model config = %#v, %v, want explicit image input", cfg, ok)
+	}
+	cfg.Token = "secret"
+	resolved, err := modelconfig.BuildModel(cfg, 0, 0)
+	if err != nil {
+		t.Fatalf("BuildModel() error = %v", err)
+	}
+	capabilities, declared := model.CapabilitiesOf(resolved.Model)
+	if !declared || !capabilities.ImageInput {
+		t.Fatalf("runtime capabilities = %+v, declared=%v, want image input", capabilities, declared)
+	}
+
+	doc, err := gatewayapp.LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	for _, persisted := range doc.Models.Configs {
+		if persisted.Alias != "openai-compatible/acme-vision" {
+			continue
+		}
+		if persisted.ImageInput == nil || !*persisted.ImageInput {
+			t.Fatalf("persisted config = %#v, want explicit image input", persisted)
+		}
+		return
+	}
+	t.Fatalf("persisted configs = %#v, missing compatible image model", doc.Models.Configs)
 }
 
 func TestAdapterConnectRejectsEnvironmentCredentialReference(t *testing.T) {

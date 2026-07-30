@@ -72,6 +72,7 @@ type Config struct {
 	StreamFirstEventTimeout   time.Duration
 	MaxOutputTok              int
 	ContextWindowTokens       int
+	ImageInput                bool
 	ReasoningLevels           []string
 	ReasoningMode             string
 	SupportedReasoningEfforts []string

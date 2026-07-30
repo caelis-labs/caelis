@@ -366,7 +366,11 @@ func (m *Model) handleWizardEnter() (bool, tea.Cmd) {
 	selectedValues := wizardMultiSelectValues(w, step)
 	if step.MultiSelect && len(selectedValues) > 0 && value == "" {
 		formatted := formatWizardMultiSelect(step, selectedValues)
-		complete := SlashArgCandidate{Value: formatted, ModelMetadataComplete: true}
+		complete := SlashArgCandidate{
+			Value:                 formatted,
+			ModelMetadataComplete: true,
+			ModelImageInputKnown:  true,
+		}
 		return true, m.advanceWizardStep(formatted, &complete)
 	}
 
@@ -398,12 +402,13 @@ func (m *Model) handleWizardEnter() (bool, tea.Cmd) {
 		}
 	}
 	if step.MultiSelect && candidate != nil {
-		if !wizardCandidateSupportsMultiSelect(step, *candidate) {
-			return true, nil
-		}
 		selectedValues = mergeWizardMultiSelectValue(step, selectedValues, value)
 		formatted := formatWizardMultiSelect(step, selectedValues)
-		complete := SlashArgCandidate{Value: formatted, ModelMetadataComplete: true}
+		complete := SlashArgCandidate{
+			Value:                 formatted,
+			ModelMetadataComplete: candidate.ModelMetadataComplete,
+			ModelImageInputKnown:  candidate.ModelImageInputKnown,
+		}
 		return true, m.advanceWizardStep(formatted, &complete)
 	}
 

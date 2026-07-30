@@ -20,6 +20,7 @@ func selectableOllamaModels(ctx context.Context, baseURL string, client *http.Cl
 				Name:             name,
 				Detail:           selectableModelDetail("ollama", baseURL, name),
 				MetadataComplete: hasCompleteModelMetadataForEndpoint("ollama", baseURL, name),
+				ImageInputKnown:  hasKnownImageInputForEndpoint("ollama", baseURL, name),
 			})
 		}
 		return out, nil

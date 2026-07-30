@@ -5,6 +5,7 @@ import "strings"
 
 const (
 	Read       = "Read"
+	ViewImage  = "ViewImage"
 	Write      = "Write"
 	Patch      = "Patch"
 	List       = "List"
@@ -81,6 +82,7 @@ type entry struct {
 
 var entries = []entry{
 	{Info: Info{Name: Read, Kind: KindRead, ExplorationVerb: "Read", TitleStyle: TitlePath, ResultStyle: ResultRead}, aliases: []string{"read"}},
+	{Info: Info{Name: ViewImage, Kind: KindRead, ExplorationVerb: "View", TitleStyle: TitlePath, ResultStyle: ResultRead}, aliases: []string{"viewimage", "view_image"}},
 	{Info: Info{Name: Write, Kind: KindEdit, TitleStyle: TitlePath, ResultStyle: ResultMutation}, aliases: []string{"write"}},
 	{Info: Info{Name: Patch, Kind: KindEdit, TitleStyle: TitlePath, ResultStyle: ResultMutation}, aliases: []string{"patch"}},
 	{Info: Info{Name: List, Kind: KindSearch, ExplorationVerb: "List", TitleStyle: TitlePath, ResultStyle: ResultList, HistoricalOnly: true}, aliases: []string{"list"}},

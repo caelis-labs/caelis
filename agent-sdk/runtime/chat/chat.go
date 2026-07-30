@@ -86,7 +86,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 		messages := messagesFromContext(ctx)
 		stream := a.request.StreamEnabled(false)
 		watchdog := newDefaultGenerationWatchdog()
-		visibility := tool.NewToolVisibility(a.tools)
+		visibility := tool.NewToolVisibilityForModel(a.tools, a.model)
 		for event := range ctx.Events().All() {
 			if event != nil {
 				visibility.ApplyDiscoveredToolNames(tool.DiscoveredToolNamesFromMetadata(event.Meta))

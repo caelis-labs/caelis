@@ -34,6 +34,10 @@ func BuildCoreTools(cfg CoreToolsConfig) ([]tool.Tool, error) {
 	if err != nil {
 		return nil, err
 	}
+	viewImageTool, err := filesystem.NewViewImage(cfg.Runtime)
+	if err != nil {
+		return nil, err
+	}
 	writeTool, err := filesystem.NewWrite(cfg.Runtime)
 	if err != nil {
 		return nil, err
@@ -66,7 +70,7 @@ func BuildCoreTools(cfg CoreToolsConfig) ([]tool.Tool, error) {
 		return nil, err
 	}
 	return []tool.Tool{
-		readTool, writeTool, patchTool, globTool, searchTool, runCommandTool, taskTool, planTool,
+		readTool, viewImageTool, writeTool, patchTool, globTool, searchTool, runCommandTool, taskTool, planTool,
 		skillTool, webSearchTool, webFetchTool,
 	}, nil
 }

@@ -91,7 +91,7 @@ func TestDefaultConnectWizardSeparatesModelAndACPConnectionSteps(t *testing.T) {
 		def  WizardDef
 		want []string
 	}{
-		{name: "model", def: connectModelWizard(), want: []string{"provider", "endpoint", "baseurl", "apikey", "model", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
+		{name: "model", def: connectModelWizard(), want: []string{"provider", "endpoint", "baseurl", "apikey", "model", "image_input", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
 		{name: "acp", def: connectACPWizard(), want: []string{"acp_agent", "acp_launcher", "acp_command", "acp_model", "acp_config"}},
 		{name: "disconnect", def: disconnectACPWizard(), want: []string{"disconnect_agent", "disconnect_confirm"}},
 	}

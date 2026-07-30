@@ -23,6 +23,7 @@ type ConnectWizardState struct {
 	ContextWindowTokens int      `json:"context_window_tokens,omitempty"`
 	MaxOutputTokens     int      `json:"max_output_tokens,omitempty"`
 	ReasoningLevels     []string `json:"reasoning_levels,omitempty"`
+	ImageInput          *bool    `json:"image_input,omitempty"`
 }
 
 // ConnectWizardStateFromMap converts the TUI wizard state map into the
@@ -42,6 +43,7 @@ func ConnectWizardStateFromMap(state map[string]string) ConnectWizardState {
 		ContextWindowTokens: parsePositiveInt(state["context_window_tokens"], 0),
 		MaxOutputTokens:     parsePositiveInt(state["max_output_tokens"], 0),
 		ReasoningLevels:     parseReasoningLevels(state["reasoning_levels"]),
+		ImageInput:          ParseOptionalBool(state["image_input"]),
 	}
 }
 
@@ -104,6 +106,16 @@ func parseReasoningLevels(raw string) []string {
 	return out
 }
 
+// ParseOptionalBool parses an explicitly selected connect capability.
+// Empty, auto, dash, and invalid values preserve the unknown state.
+func ParseOptionalBool(raw string) *bool {
+	value, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return nil
+	}
+	return &value
+}
+
 func (s ConnectWizardState) normalized() ConnectWizardState {
 	s.Provider = strings.TrimSpace(s.Provider)
 	s.BaseURL = strings.TrimSpace(s.BaseURL)
@@ -127,6 +139,10 @@ func (s ConnectWizardState) normalized() ConnectWizardState {
 			}
 		}
 		s.ReasoningLevels = levels
+	}
+	if s.ImageInput != nil {
+		value := *s.ImageInput
+		s.ImageInput = &value
 	}
 	return s
 }

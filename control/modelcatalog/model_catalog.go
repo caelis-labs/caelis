@@ -161,8 +161,9 @@ func lookupBuiltin(provider, modelName string) (ModelCapabilities, bool) {
 		entryProvider := strings.ToLower(entry.provider)
 		entryPattern := strings.ToLower(entry.pattern)
 
-		// Provider must match exactly, or the config provider contains the catalog provider.
-		if entryProvider != provider && !strings.Contains(provider, entryProvider) {
+		// Provider identity is authoritative. Generic compatible endpoints must
+		// not inherit a vendor catalog merely because their names contain it.
+		if entryProvider != provider {
 			continue
 		}
 		// Model name must match exactly or start with the pattern.

@@ -18,6 +18,7 @@ const (
 	CapabilityParallelToolCalls     Capability = "parallel_tool_calls"
 	CapabilityReasoningContinuation Capability = "reasoning_continuation"
 	CapabilityHostedTools           Capability = "hosted_tools"
+	CapabilityImageInput            Capability = "image_input"
 )
 
 // Capabilities is the explicit feature contract of one LLM implementation.
@@ -29,6 +30,7 @@ type Capabilities struct {
 	ParallelToolCalls     bool `json:"parallel_tool_calls,omitempty"`
 	ReasoningContinuation bool `json:"reasoning_continuation,omitempty"`
 	HostedTools           bool `json:"hosted_tools,omitempty"`
+	ImageInput            bool `json:"image_input,omitempty"`
 }
 
 // CapabilityProvider declares model features independently of provider name
@@ -76,6 +78,7 @@ func ValidateCapabilities(modelName string, actual, required Capabilities) error
 		{CapabilityParallelToolCalls, actual.ParallelToolCalls, required.ParallelToolCalls},
 		{CapabilityReasoningContinuation, actual.ReasoningContinuation, required.ReasoningContinuation},
 		{CapabilityHostedTools, actual.HostedTools, required.HostedTools},
+		{CapabilityImageInput, actual.ImageInput, required.ImageInput},
 	}
 	for _, check := range checks {
 		if check.required && !check.actual {
@@ -94,6 +97,7 @@ func MergeCapabilities(left, right Capabilities) Capabilities {
 		ParallelToolCalls:     left.ParallelToolCalls || right.ParallelToolCalls,
 		ReasoningContinuation: left.ReasoningContinuation || right.ReasoningContinuation,
 		HostedTools:           left.HostedTools || right.HostedTools,
+		ImageInput:            left.ImageInput || right.ImageInput,
 	}
 }
 
@@ -112,6 +116,52 @@ func DeriveRequiredCapabilities(declared Capabilities, stream bool, output *Outp
 		required.ToolCalls = true
 	}
 	return required
+}
+
+// DeriveContentRequiredCapabilities expands dynamic content requirements from
+// one complete provider request. Image media is inspected recursively,
+// including media nested inside tool-result content restored from durable
+// history. Static request features such as tools, streaming, and structured
+// output are negotiated separately when the request is assembled.
+func DeriveContentRequiredCapabilities(declared Capabilities, request *Request) Capabilities {
+	if request == nil {
+		return declared
+	}
+	required := declared
+	if partsRequireImageInput(request.Instructions) {
+		required.ImageInput = true
+		return required
+	}
+	for _, message := range request.Messages {
+		if partsRequireImageInput(message.Parts) {
+			required.ImageInput = true
+			return required
+		}
+	}
+	return required
+}
+
+// ValidateRequestCapabilities rejects a complete request before provider
+// encoding when the selected model does not declare every required feature.
+func ValidateRequestCapabilities(llm LLM, request *Request) error {
+	actual, _ := CapabilitiesOf(llm)
+	name := ""
+	if llm != nil {
+		name = llm.Name()
+	}
+	return ValidateCapabilities(name, actual, DeriveContentRequiredCapabilities(Capabilities{}, request))
+}
+
+func partsRequireImageInput(parts []Part) bool {
+	for _, part := range parts {
+		if part.Media != nil && part.Media.Modality == MediaModalityImage {
+			return true
+		}
+		if part.ToolResult != nil && partsRequireImageInput(part.ToolResult.Content) {
+			return true
+		}
+	}
+	return false
 }
 
 // OutputSpecError reports an invalid or unsupported output contract before a

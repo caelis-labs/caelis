@@ -198,6 +198,7 @@ func TestDefaultModeReadToolsDoNotRequireExplicitReadGrantsForOrdinaryReads(t *t
 
 	cases := []policy.ToolContext{
 		readCtx(configPath),
+		viewImageCtx(filepath.Join(filepath.Dir(configPath), "preview.png")),
 		searchCtx(filepath.Dir(configPath), "theme"),
 		globCtx(filepath.Dir(configPath), "*"),
 	}
@@ -249,6 +250,7 @@ func TestDefaultModeDeniesSensitiveUserConfigReadsByDefault(t *testing.T) {
 		input policy.ToolContext
 	}{
 		{name: "read ssh", input: readCtx(filepath.Join(home, ".ssh", "id_rsa"))},
+		{name: "view image ssh", input: viewImageCtx(filepath.Join(home, ".ssh", "qr.png"))},
 		{name: "search ssh", input: searchCtx(filepath.Join(home, ".ssh"), "PRIVATE")},
 		{name: "search default ssh workspace", input: defaultSearch},
 		{name: "glob ssh", input: globCtx(filepath.Join(home, ".ssh"), "*")},
@@ -275,6 +277,7 @@ func TestDefaultModeAllowsExplicitSensitiveUserConfigReadRoot(t *testing.T) {
 	secretPath := filepath.Join(ghRoot, "hosts.yml")
 	for _, input := range []policy.ToolContext{
 		readCtx(secretPath),
+		viewImageCtx(filepath.Join(ghRoot, "qr.png")),
 		searchCtx(ghRoot, "oauth_token"),
 		globCtx(ghRoot, "*"),
 	} {
@@ -1077,6 +1080,19 @@ func readCtx(path string) policy.ToolContext {
 	return policy.ToolContext{
 		Tool: tool.Definition{Name: "READ"},
 		Call: tool.Call{Name: "READ", Input: raw},
+		Options: policy.ModeOptions{
+			WorkspaceRoot: testWorkspaceProjectRoot(),
+			TempRoot:      testTempRoot(),
+		},
+		Sandbox: sandbox.Descriptor{Backend: sandbox.BackendHost},
+	}
+}
+
+func viewImageCtx(path string) policy.ToolContext {
+	raw, _ := json.Marshal(map[string]any{"path": path})
+	return policy.ToolContext{
+		Tool: tool.Definition{Name: "ViewImage"},
+		Call: tool.Call{Name: "ViewImage", Input: raw},
 		Options: policy.ModeOptions{
 			WorkspaceRoot: testWorkspaceProjectRoot(),
 			TempRoot:      testTempRoot(),

@@ -121,7 +121,31 @@ func (l *openAICompatLLM) fromKernelMessages(instructions []model.Part, messages
 	}
 	out := make([]openAICompatReqMsg, 0, len(messages))
 	seenToolCalls := map[string]struct{}{}
+	// Chat Completions tool messages are text-only. Keep every tool response
+	// contiguous, then bridge their images through the next legal user input.
+	// This is provider-dialect translation only; canonical Runtime history must
+	// retain media inside the original tool result.
+	var pendingToolImages []openAIContentPart
+	flushToolImages := func() {
+		if len(pendingToolImages) == 0 {
+			return
+		}
+		parts := make([]openAIContentPart, 0, len(pendingToolImages)+1)
+		parts = append(parts, openAIContentPart{
+			Type: "text",
+			Text: "Images returned by tools.",
+		})
+		parts = append(parts, pendingToolImages...)
+		out = append(out, openAICompatReqMsg{
+			Role:    string(model.RoleUser),
+			Content: parts,
+		})
+		pendingToolImages = nil
+	}
 	for _, m := range messages {
+		if m.Role != model.RoleTool {
+			flushToolImages()
+		}
 		// OpenAI-compatible APIs reject role=tool messages that do not carry
 		// a tool_call_id. Skip malformed history entries.
 		if m.Role == model.RoleTool && m.ToolResponse() == nil {
@@ -147,8 +171,24 @@ func (l *openAICompatLLM) fromKernelMessages(instructions []model.Part, messages
 			}
 		}
 		out = append(out, l.fromKernelMessage(m))
+		if m.ToolResponse() != nil {
+			pendingToolImages = appendOpenAICompatToolImages(pendingToolImages, m)
+		}
 	}
+	flushToolImages()
 	return out
+}
+
+func appendOpenAICompatToolImages(parts []openAIContentPart, message model.Message) []openAIContentPart {
+	for _, image := range inlineToolResultImages(message) {
+		parts = append(parts, openAIContentPart{
+			Type: "image_url",
+			ImageURL: &openAIImageURL{
+				URL: fmt.Sprintf("data:%s;base64,%s", image.MimeType, image.Source.Data),
+			},
+		})
+	}
+	return parts
 }
 
 func (l *openAICompatLLM) fromKernelMessage(m model.Message) openAICompatReqMsg {

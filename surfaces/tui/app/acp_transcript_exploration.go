@@ -692,7 +692,7 @@ func compactExplorationToolDetailWithWorkspace(ev SubagentEvent, detail string, 
 		return detail
 	}
 	switch display.ExplorationVerbForTool(semanticName) {
-	case "Read", "List", "Glob", "Search":
+	case "Read", "View", "List", "Glob", "Search":
 		return compactExplorationPathDetailWithBase(detail, workspace)
 	default:
 		return detail

@@ -21,6 +21,10 @@ type Definition struct {
 	Metadata     map[string]any `json:"metadata,omitempty"`
 	EffectClass  EffectClass    `json:"effect_class,omitempty"`
 	Capabilities Capabilities   `json:"capabilities,omitempty"`
+	// RequiredModelCapabilities controls whether this tool is exposed to one
+	// model. It is intentionally definition data so runtime wrappers preserve
+	// the contract without forwarding optional Go interfaces.
+	RequiredModelCapabilities model.Capabilities `json:"required_model_capabilities,omitempty"`
 	// ExecutionRequirements declares infrastructure capabilities consumed by
 	// this concrete tool implementation. Control validates their union against
 	// the actual configured execution services before starting a run.
@@ -113,6 +117,22 @@ type Tool interface {
 	Call(context.Context, Call) (Result, error)
 }
 
+// AvailableForModel reports whether a tool may be exposed to one model.
+// Required capabilities are declared on Definition so wrappers cannot erase
+// the availability contract.
+func AvailableForModel(target Tool, llm model.LLM) bool {
+	if target == nil {
+		return false
+	}
+	definition := target.Definition()
+	actual, _ := model.CapabilitiesOf(llm)
+	name := ""
+	if llm != nil {
+		name = llm.Name()
+	}
+	return model.ValidateCapabilities(name, actual, definition.RequiredModelCapabilities) == nil
+}
+
 // Observer receives transient tool updates emitted before the model-visible
 // final result is available. Observed results are UI-only and must not be
 // appended to model-visible tool history.
@@ -171,6 +191,7 @@ func Definitions(tools []Tool) []Definition {
 
 // ModelSpecs converts the default model-visible tool set into provider-neutral
 // specs. Deferred tools remain hidden until ToolVisibility reveals them.
+// Model capability requirements are not filtered because no model is supplied.
 func ModelSpecs(tools []Tool) []model.ToolSpec {
 	return NewToolVisibility(tools).ModelSpecs()
 }

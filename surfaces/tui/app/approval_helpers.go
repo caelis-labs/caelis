@@ -141,6 +141,8 @@ func approvalToolDisplayLabel(toolName string) string {
 		return "Task"
 	case names.Read:
 		return "Read"
+	case names.ViewImage:
+		return "Viewed"
 	case names.List:
 		return "List"
 	case names.Glob:

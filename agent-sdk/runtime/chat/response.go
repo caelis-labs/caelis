@@ -34,6 +34,9 @@ func collectFinalResponse(
 	watchdog *generationWatchdog,
 	yieldChunk func(*session.Event) bool,
 ) (*model.Response, error) {
+	if err := model.ValidateRequestCapabilities(llm, req); err != nil {
+		return nil, err
+	}
 	var final *model.Response
 	textFilters := map[int]*citationMarkerStreamFilter{}
 	textFilterOrder := make([]int, 0)

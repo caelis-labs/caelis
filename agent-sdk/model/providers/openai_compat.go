@@ -26,6 +26,7 @@ type openAICompatLLM struct {
 	firstEventTimeout   time.Duration
 	maxOutputTok        int
 	contextWindowTokens int
+	imageInput          bool
 	options             openAICompatOptions
 	openRouter          OpenRouterConfig
 }
@@ -79,6 +80,7 @@ func newOpenAICompat(cfg Config, token string) *openAICompatLLM {
 		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
 		maxOutputTok:        cfg.MaxOutputTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
+		imageInput:          cfg.ImageInput,
 		options:             defaultOpenAICompatOptions(),
 	}
 	applyOpenAICompatCapabilities(&llm.options, cfg)

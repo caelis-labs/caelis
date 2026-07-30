@@ -55,6 +55,7 @@ func TestConnectWizardStateFromMapParsesOptionalFields(t *testing.T) {
 		"context_window_tokens": "2048",
 		"max_output_tokens":     "512",
 		"reasoning_levels":      "low, high",
+		"image_input":           "false",
 	})
 
 	if got.Provider != "minimax" || got.AuthMode != "token" || got.ContextWindowTokens != 2048 || got.MaxOutputTokens != 512 {
@@ -65,5 +66,8 @@ func TestConnectWizardStateFromMapParsesOptionalFields(t *testing.T) {
 	}
 	if len(got.ReasoningLevels) != 2 || got.ReasoningLevels[0] != "low" || got.ReasoningLevels[1] != "high" {
 		t.Fatalf("ReasoningLevels = %#v, want low/high", got.ReasoningLevels)
+	}
+	if got.ImageInput == nil || *got.ImageInput {
+		t.Fatalf("ImageInput = %v, want explicit false", got.ImageInput)
 	}
 }

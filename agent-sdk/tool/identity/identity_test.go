@@ -10,6 +10,7 @@ func TestLookupResolvesCanonicalHistoricalAndDisplayOnlyIdentities(t *testing.T)
 
 	tests := map[string]string{
 		"READ": Read, "SEARCH": Grep, "Grep": Grep,
+		"view_image": ViewImage, "ViewImage": ViewImage,
 		"RUN_COMMAND": RunCommand, "rUn_CoMmAnD": RunCommand, "RunCommand": RunCommand,
 		"web_search": WebSearch, "WebSearch": WebSearch,
 		"tool_search": ToolSearch, "ToolSearch": ToolSearch,
@@ -40,6 +41,10 @@ func TestRegistryOwnsStructuredBehavior(t *testing.T) {
 	if !list.HistoricalOnly || list.ExplorationVerb != "List" || list.ResultStyle != ResultList {
 		t.Fatalf("List info = %#v", list)
 	}
+	viewImage, _ := Lookup(ViewImage)
+	if viewImage.Kind != KindRead || viewImage.TitleStyle != TitlePath || viewImage.ResultStyle != ResultRead {
+		t.Fatalf("ViewImage info = %#v", viewImage)
+	}
 }
 
 func TestRegistryOwnsCompleteCanonicalNameSet(t *testing.T) {
@@ -52,7 +57,7 @@ func TestRegistryOwnsCompleteCanonicalNameSet(t *testing.T) {
 		}
 	}
 	want := []string{
-		Read, Write, Patch, Glob, Grep, RunCommand, Task, Plan, Skill,
+		Read, ViewImage, Write, Patch, Glob, Grep, RunCommand, Task, Plan, Skill,
 		WebSearch, WebFetch, Spawn, ToolSearch,
 	}
 	if !slices.Equal(got, want) {

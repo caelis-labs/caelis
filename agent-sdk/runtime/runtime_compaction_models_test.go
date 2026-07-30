@@ -119,7 +119,9 @@ func (m *attachmentUsageModel) Name() string             { return "gpt-5.6-sol" 
 func (m *attachmentUsageModel) ProviderName() string     { return "openai-codex" }
 func (m *attachmentUsageModel) ContextWindowTokens() int { return 258400 }
 func (m *attachmentUsageModel) Capabilities() model.Capabilities {
-	return runtimeTestModelCapabilities()
+	capabilities := runtimeTestModelCapabilities()
+	capabilities.ImageInput = true
+	return capabilities
 }
 
 func (m *attachmentUsageModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {

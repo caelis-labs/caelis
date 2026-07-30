@@ -850,7 +850,7 @@ func TestConnectWizardOllamaCloudEndpointRequiresAPIKey(t *testing.T) {
 			default:
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "ollama" && state.BaseURL == cloudBaseURL && state.TokenRef == "ollama-secret" {
-					return []SlashArgCandidate{{Value: "glm-5.2", Display: "ollama/glm-5.2", ModelMetadataComplete: true}}, nil
+					return []SlashArgCandidate{{Value: "glm-5.2", Display: "ollama/glm-5.2", ModelMetadataComplete: true, ModelImageInputKnown: true}}, nil
 				}
 				return nil, nil
 			}
@@ -1038,7 +1038,7 @@ func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *tes
 			default:
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "xiaomi" && state.BaseURL == tokenPlanBaseURL && state.TokenRef == "sk-test" {
-					return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro", ModelMetadataComplete: true}}, nil
+					return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro", ModelMetadataComplete: true, ModelImageInputKnown: true}}, nil
 				}
 				return nil, nil
 			}
@@ -1167,7 +1167,7 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 			default:
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "xiaomi" && state.BaseURL == tokenPlanBaseURL && state.TokenRef == "xiaomi-secret" {
-					return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro", ModelMetadataComplete: true}}, nil
+					return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro", ModelMetadataComplete: true, ModelImageInputKnown: true}}, nil
 				}
 				return nil, nil
 			}
@@ -1342,7 +1342,7 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 			default:
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "minimax" && state.TokenRef == "sk-test" {
-					return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed", ModelMetadataComplete: true}}, nil
+					return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed", ModelMetadataComplete: true, ModelImageInputKnown: true}}, nil
 				}
 				return nil, nil
 			}
@@ -1388,6 +1388,77 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 	}
 }
 
+func TestConnectWizardAsksImageCapabilityWhenOtherModelMetadataIsKnown(t *testing.T) {
+	called := ""
+	m := NewModel(Config{
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			called = submission.Text
+			return TaskResultMsg{}
+		},
+		Wizards: DefaultWizards(),
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			switch {
+			case command == "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case command == "connect-provider":
+				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
+			case strings.HasPrefix(command, "connect-image-input:"):
+				return []SlashArgCandidate{{Value: "false"}, {Value: "true"}}, nil
+			default:
+				state, ok := connectModelCommandState(command)
+				if ok && state.Provider == "minimax" && state.TokenRef == "sk-test" {
+					return []SlashArgCandidate{{
+						Value:                 "account-catalog-model",
+						Display:               "minimax/account-catalog-model",
+						ModelMetadataComplete: true,
+						ModelImageInputKnown:  false,
+					}}, nil
+				}
+				return nil, nil
+			}
+		},
+	})
+	openModelConnectWizard(t, m)
+	if handled, cmd := m.handleWizardEnter(); !handled {
+		t.Fatal("provider selection was not handled")
+	} else if cmd != nil {
+		cmd()
+	}
+	m.slashArgQuery = "sk-test"
+	if handled, cmd := m.handleWizardEnter(); !handled {
+		t.Fatal("api key was not handled")
+	} else if cmd != nil {
+		cmd()
+	}
+
+	handled, cmd := m.handleWizardEnter()
+	if !handled || cmd != nil {
+		t.Fatalf("model selection = handled:%v cmd:%v, want image capability step", handled, cmd)
+	}
+	if step := m.wizard.currentStep(); step == nil || step.Key != "image_input" {
+		t.Fatalf("current step = %#v, want image_input", step)
+	}
+	if m.wizard.state["_known_model"] != "true" || m.wizard.state["_known_image_input"] != "" {
+		t.Fatalf("wizard capability state = %#v, want known limits but unknown image input", m.wizard.state)
+	}
+
+	m.slashArgIndex = 1
+	handled, cmd = m.handleWizardEnter()
+	if !handled || cmd == nil {
+		t.Fatalf("image capability selection = handled:%v cmd:%v, want submit", handled, cmd)
+	}
+	if !findAndRunTaskResult(cmd(), m) {
+		t.Fatal("expected TaskResultMsg in batch")
+	}
+	want := fmt.Sprintf(
+		"/connect minimax account-catalog-model - %d sk-test - - auto - true",
+		connectwizard.DefaultConnectTimeoutSeconds,
+	)
+	if called != want {
+		t.Fatalf("called = %q, want %q", called, want)
+	}
+}
+
 func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 	called := ""
 	m := NewModel(Config{
@@ -1406,8 +1477,8 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "minimax" && state.TokenRef == "sk-test" {
 					return []SlashArgCandidate{
-						{Value: "MiniMax-M2.7", Display: "minimax/MiniMax-M2.7", ModelMetadataComplete: true},
-						{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed", ModelMetadataComplete: true},
+						{Value: "MiniMax-M2.7", Display: "minimax/MiniMax-M2.7", ModelMetadataComplete: true, ModelImageInputKnown: true},
+						{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed", ModelMetadataComplete: true, ModelImageInputKnown: true},
 					}, nil
 				}
 				return nil, nil
@@ -1455,7 +1526,12 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 
 func TestConnectWizardKeepsAdvancedStepsForCustomCompatibleModel(t *testing.T) {
 	const baseURL = "https://models.acme.example/v1"
+	called := ""
 	m := NewModel(Config{
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			called = submission.Text
+			return TaskResultMsg{}
+		},
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
@@ -1466,6 +1542,12 @@ func TestConnectWizardKeepsAdvancedStepsForCustomCompatibleModel(t *testing.T) {
 			case "connect-baseurl:openai-compatible":
 				return []SlashArgCandidate{{Value: baseURL, Display: baseURL, NoAuth: true}}, nil
 			default:
+				if strings.HasPrefix(command, "connect-image-input:") {
+					return []SlashArgCandidate{
+						{Value: "false", Display: "Text only"},
+						{Value: "true", Display: "Supports images"},
+					}, nil
+				}
 				return nil, nil
 			}
 		},
@@ -1491,21 +1573,58 @@ func TestConnectWizardKeepsAdvancedStepsForCustomCompatibleModel(t *testing.T) {
 	}
 
 	m.slashArgQuery = "acme-reasoning-model"
-	handled, cmd = m.handleWizardEnter() // custom model -> context window
+	handled, cmd = m.handleWizardEnter() // custom model -> image input
 	if !handled {
 		t.Fatal("custom model step was not handled")
 	}
 	if cmd != nil {
 		t.Fatal("custom model should continue to advanced configuration instead of submitting")
 	}
-	if step := m.wizard.currentStep(); step == nil || step.Key != "context_window_tokens" {
-		t.Fatalf("current wizard step = %#v, want context_window_tokens", step)
+	if step := m.wizard.currentStep(); step == nil || step.Key != "image_input" {
+		t.Fatalf("current wizard step = %#v, want image_input", step)
 	}
 	if got := m.wizard.state["_known_model"]; got != "" {
 		t.Fatalf("_known_model = %q, want unset for custom compatible model", got)
 	}
-	if got := strings.TrimSpace(m.slashArgCommand); !strings.HasPrefix(got, "connect-context:") {
-		t.Fatalf("slashArgCommand after custom model = %q, want connect-context command", got)
+	if got := strings.TrimSpace(m.slashArgCommand); !strings.HasPrefix(got, "connect-image-input:") {
+		t.Fatalf("slashArgCommand after custom model = %q, want connect-image-input command", got)
+	}
+
+	handled, cmd = m.handleWizardEnter() // image input -> context window
+	if !handled || cmd != nil {
+		t.Fatalf("image input selection = handled:%v cmd:%v, want next advanced step", handled, cmd)
+	}
+	if got := m.wizard.state["image_input"]; got != "false" {
+		t.Fatalf("image_input = %q, want conservative false default", got)
+	}
+	if step := m.wizard.currentStep(); step == nil || step.Key != "context_window_tokens" {
+		t.Fatalf("current wizard step = %#v, want context_window_tokens", step)
+	}
+	m.slashArgQuery = "131072"
+	handled, cmd = m.handleWizardEnter() // context window -> max output
+	if !handled || cmd != nil {
+		t.Fatalf("context window selection = handled:%v cmd:%v", handled, cmd)
+	}
+	m.slashArgQuery = "8192"
+	handled, cmd = m.handleWizardEnter() // max output -> reasoning levels
+	if !handled || cmd != nil {
+		t.Fatalf("max output selection = handled:%v cmd:%v", handled, cmd)
+	}
+	m.slashArgQuery = "low,high"
+	handled, cmd = m.handleWizardEnter() // reasoning levels -> submit
+	if !handled || cmd == nil {
+		t.Fatalf("reasoning selection = handled:%v cmd:%v, want submit", handled, cmd)
+	}
+	if !findAndRunTaskResult(cmd(), m) {
+		t.Fatal("expected TaskResultMsg in batch")
+	}
+	want := fmt.Sprintf(
+		"/connect openai-compatible acme-reasoning-model %s %d - 131072 8192 low,high - false",
+		baseURL,
+		connectwizard.DefaultConnectTimeoutSeconds,
+	)
+	if called != want {
+		t.Fatalf("called = %q, want %q", called, want)
 	}
 }
 
@@ -1526,7 +1645,7 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 			default:
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "minimax" && state.TokenRef == "sk-test" {
-					return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed", ModelMetadataComplete: true}}, nil
+					return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed", ModelMetadataComplete: true, ModelImageInputKnown: true}}, nil
 				}
 				return nil, nil
 			}

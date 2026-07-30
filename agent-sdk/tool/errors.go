@@ -25,6 +25,7 @@ const (
 	ErrorCodeCancelled            ErrorCode = "cancelled"
 	ErrorCodeOutputTruncated      ErrorCode = "output_truncated"
 	ErrorCodeInvalidInput         ErrorCode = "invalid_input"
+	ErrorCodeUnsupported          ErrorCode = "unsupported"
 )
 
 const (
@@ -156,6 +157,8 @@ func classifyErrorCode(err error) ErrorCode {
 		return ErrorCodeCancelled
 	case errorcode.Unavailable:
 		return ErrorCodeSandboxUnavailable
+	case errorcode.Unsupported:
+		return ErrorCodeUnsupported
 	}
 	switch {
 	case errors.Is(err, fs.ErrNotExist):

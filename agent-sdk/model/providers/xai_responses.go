@@ -28,6 +28,7 @@ type xAIResponsesLLM struct {
 	firstEventTimeout   time.Duration
 	maxOutputTok        int
 	contextWindowTokens int
+	imageInput          bool
 }
 
 func newXAIResponses(cfg Config) *xAIResponsesLLM {
@@ -45,6 +46,7 @@ func newXAIResponses(cfg Config) *xAIResponsesLLM {
 		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
 		maxOutputTok:        cfg.MaxOutputTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
+		imageInput:          cfg.ImageInput,
 	}
 }
 

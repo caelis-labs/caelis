@@ -1459,6 +1459,59 @@ func TestOpenAICompatMessageTransform_SkipsInvalidToolResponses(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatMessageTransformBridgesToolResultImages(t *testing.T) {
+	t.Parallel()
+
+	llm := newOpenAICompat(Config{
+		Provider: "openai-compatible",
+		Model:    "vision-model",
+		BaseURL:  "https://example.com/v1",
+		Timeout:  time.Second,
+	}, "token")
+	messages := llm.fromKernelMessages(nil, []model.Message{
+		model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{
+			{
+				ID:   "call_image",
+				Name: "ViewImage",
+				Args: `{"path":"pixel.png"}`,
+			},
+			{
+				ID:   "call_echo",
+				Name: "Echo",
+				Args: `{"text":"ok"}`,
+			},
+		}, ""),
+		imageToolResultMessageForTest("call_image", "ViewImage"),
+		model.MessageFromToolResponse(&model.ToolResponse{
+			ID:     "call_echo",
+			Name:   "Echo",
+			Result: map[string]any{"result": "ok"},
+		}),
+	})
+	if len(messages) != 4 {
+		t.Fatalf("transformed messages = %#v, want assistant, both tool results, and image bridge", messages)
+	}
+	if messages[1].Role != string(model.RoleTool) || messages[1].ToolCallID != "call_image" {
+		t.Fatalf("tool message = %#v", messages[1])
+	}
+	if _, ok := messages[1].Content.(string); !ok {
+		t.Fatalf("tool content = %T, want protocol-legal string", messages[1].Content)
+	}
+	if messages[2].Role != string(model.RoleTool) || messages[2].ToolCallID != "call_echo" {
+		t.Fatalf("second tool message = %#v", messages[2])
+	}
+	if messages[3].Role != string(model.RoleUser) {
+		t.Fatalf("image bridge role = %q, want user", messages[3].Role)
+	}
+	parts, ok := messages[3].Content.([]openAIContentPart)
+	if !ok || len(parts) != 2 || parts[1].ImageURL == nil {
+		t.Fatalf("image bridge content = %#v", messages[3].Content)
+	}
+	if got := parts[1].ImageURL.URL; got != "data:image/png;base64,aW1n" {
+		t.Fatalf("image bridge URL = %q", got)
+	}
+}
+
 func TestOpenAICompatMessageTransformPreservesTerminalLikeCommandPayload(t *testing.T) {
 	const deniedPath = "/home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp"
 	llm := newOpenAICompat(Config{
@@ -1515,6 +1568,40 @@ func TestAnthropicMessageTransform(t *testing.T) {
 	}
 	if len(msgs) < 2 {
 		t.Fatalf("expected >= 2 messages, got %d", len(msgs))
+	}
+}
+
+func TestAnthropicMessageTransformCarriesViewImageToolResult(t *testing.T) {
+	t.Parallel()
+
+	messages := toAnthropicMessages([]model.Message{
+		imageToolResultMessageForTest("call_image", "ViewImage"),
+	})
+	if len(messages) != 1 {
+		t.Fatalf("Anthropic messages = %#v, want one tool-result message", messages)
+	}
+	raw, err := json.Marshal(messages[0])
+	if err != nil {
+		t.Fatalf("json.Marshal(message) error = %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(message) error = %v", err)
+	}
+	blocks, _ := payload["content"].([]any)
+	if len(blocks) != 1 {
+		t.Fatalf("Anthropic content = %#v", payload["content"])
+	}
+	toolResult, _ := blocks[0].(map[string]any)
+	resultContent, _ := toolResult["content"].([]any)
+	if len(resultContent) != 2 {
+		t.Fatalf("Anthropic tool result content = %#v", toolResult["content"])
+	}
+	image, _ := resultContent[1].(map[string]any)
+	source, _ := image["source"].(map[string]any)
+	if image["type"] != "image" || source["type"] != "base64" ||
+		source["media_type"] != "image/png" || source["data"] != "aW1n" {
+		t.Fatalf("Anthropic tool result image = %#v", image)
 	}
 }
 
@@ -2067,6 +2154,28 @@ func TestGeminiMessageTransform(t *testing.T) {
 	}
 }
 
+func TestGeminiMessageTransformCarriesToolResultImages(t *testing.T) {
+	t.Parallel()
+
+	_, messages, err := toGeminiContents(nil, []model.Message{
+		imageToolResultMessageForTest("call_image", "ViewImage"),
+	})
+	if err != nil {
+		t.Fatalf("toGeminiContents() error = %v", err)
+	}
+	if len(messages) != 1 || len(messages[0].Parts) != 1 {
+		t.Fatalf("Gemini messages = %#v", messages)
+	}
+	response := messages[0].Parts[0].FunctionResponse
+	if response == nil || response.ID != "call_image" || len(response.Parts) != 1 {
+		t.Fatalf("Gemini function response = %#v", response)
+	}
+	inline := response.Parts[0].InlineData
+	if inline == nil || inline.MIMEType != "image/png" || string(inline.Data) != "img" {
+		t.Fatalf("Gemini inline tool image = %#v", inline)
+	}
+}
+
 func TestGeminiMessageTransform_SkipsToolCallWithoutThoughtSignature(t *testing.T) {
 	_, msgs, err := toGeminiContents(nil, []model.Message{
 		model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
@@ -2087,6 +2196,25 @@ func TestGeminiMessageTransform_SkipsToolCallWithoutThoughtSignature(t *testing.
 	if msgs[0].Parts[0].FunctionCall != nil {
 		t.Fatalf("expected tool call without thought signature to be skipped")
 	}
+}
+
+func imageToolResultMessageForTest(id, name string) model.Message {
+	return model.NewMessage(model.RoleTool, model.Part{
+		Kind: model.PartKindToolResult,
+		ToolResult: &model.ToolResultPart{
+			ToolUseID: id,
+			Name:      name,
+			Content: []model.Part{
+				model.NewTextPart("Viewed image."),
+				model.NewMediaPart(
+					model.MediaModalityImage,
+					model.MediaSource{Kind: model.MediaSourceInline, Data: "aW1n"},
+					"image/png",
+					"pixel.png",
+				),
+			},
+		},
+	})
 }
 
 func TestGeminiResponseToMessage_PreservesThoughtSignature(t *testing.T) {

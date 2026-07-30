@@ -17,7 +17,11 @@ func (streamingTextModel) Capabilities() model.Capabilities { return bridgeTestM
 func (duplicateStreamingTextModel) Capabilities() model.Capabilities {
 	return bridgeTestModelCapabilities()
 }
-func (staticModel) Capabilities() model.Capabilities        { return bridgeTestModelCapabilities() }
+func (m staticModel) Capabilities() model.Capabilities {
+	capabilities := bridgeTestModelCapabilities()
+	capabilities.ImageInput = m.imageInput
+	return capabilities
+}
 func (cancelModel) Capabilities() model.Capabilities        { return bridgeTestModelCapabilities() }
 func (*toolThenTextModel) Capabilities() model.Capabilities { return bridgeTestModelCapabilities() }
 func (*runCommandThenTextModel) Capabilities() model.Capabilities {

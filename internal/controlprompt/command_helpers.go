@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	controlstatus "github.com/caelis-labs/caelis/control/status"
+	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 )
 
 // ParseConnectArgs parses the non-interactive model-provider connect form.
@@ -46,6 +47,9 @@ func ParseConnectArgs(args string) ConnectConfig {
 		if timeout, err := strconv.Atoi(dashAsEmpty(parts[8])); err == nil {
 			cfg.StreamFirstEventTimeoutSeconds = timeout
 		}
+	}
+	if len(parts) >= 10 {
+		cfg.ImageInput = connectwizard.ParseOptionalBool(dashAsEmpty(parts[9]))
 	}
 	return cfg
 }

@@ -36,6 +36,22 @@ func TestIsOllamaProvider(t *testing.T) {
 	}
 }
 
+func TestOllamaMessageTransformCarriesToolResultImages(t *testing.T) {
+	t.Parallel()
+
+	llm := &ollamaLLM{}
+	message := llm.fromKernelMessage(imageToolResultMessageForTest("call_image", "ViewImage"))
+	if message.Role != string(model.RoleTool) || message.ToolName != "ViewImage" {
+		t.Fatalf("Ollama tool message = %#v", message)
+	}
+	if len(message.Images) != 1 || message.Images[0] != "aW1n" {
+		t.Fatalf("Ollama tool images = %#v", message.Images)
+	}
+	if !strings.Contains(message.Content, "Viewed image.") {
+		t.Fatalf("Ollama tool content = %q", message.Content)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Factory: register & create Ollama
 // ---------------------------------------------------------------------------

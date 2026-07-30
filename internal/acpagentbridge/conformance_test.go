@@ -199,7 +199,7 @@ func TestRuntimeAgentConformancePromptOrdering(t *testing.T) {
 }
 
 func TestRuntimeAgentConformancePromptWithImageDoesNotEchoUserMessage(t *testing.T) {
-	agent, _ := newTestRuntimeAgent(t, staticModel{text: "ok"})
+	agent, _ := newTestRuntimeAgent(t, staticModel{text: "ok", imageInput: true})
 	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
 	})
@@ -484,7 +484,10 @@ func (duplicateStreamingTextModel) Generate(context.Context, *model.Request) ite
 	}
 }
 
-type staticModel struct{ text string }
+type staticModel struct {
+	text       string
+	imageInput bool
+}
 
 func (m staticModel) Name() string { return "stub" }
 

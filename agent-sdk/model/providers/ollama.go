@@ -33,6 +33,7 @@ type ollamaLLM struct {
 	maxOutputTok        int
 	contextWindowTokens int
 	reasoningMode       string
+	imageInput          bool
 }
 
 type ollamaChatRequest struct {
@@ -109,6 +110,7 @@ func newOllama(cfg Config, token string) model.LLM {
 		maxOutputTok:        cfg.MaxOutputTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
 		reasoningMode:       cfg.ReasoningMode,
+		imageInput:          cfg.ImageInput,
 	}
 }
 
@@ -351,11 +353,15 @@ func (l *ollamaLLM) fromKernelMessages(instructions []model.Part, messages []mod
 func (l *ollamaLLM) fromKernelMessage(msg model.Message) ollamaChatMessage {
 	if resp := msg.ToolResponse(); resp != nil {
 		raw, _ := json.Marshal(resp.Result)
-		return ollamaChatMessage{
+		chat := ollamaChatMessage{
 			Role:     string(model.RoleTool),
 			Content:  string(raw),
 			ToolName: resp.Name,
 		}
+		for _, image := range inlineToolResultImages(msg) {
+			chat.Images = append(chat.Images, image.Source.Data)
+		}
+		return chat
 	}
 
 	chat := ollamaChatMessage{

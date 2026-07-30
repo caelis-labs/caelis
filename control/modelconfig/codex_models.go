@@ -27,20 +27,21 @@ type codexOAuthModelSpec struct {
 	contextWindowTokens    int
 	defaultReasoningEffort string
 	reasoningLevels        []string
+	imageInput             bool
 	fallbackSelectable     bool
 }
 
 var codexOAuthModelSpecs = []codexOAuthModelSpec{
-	{name: "gpt-5.6-sol", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "low", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, fallbackSelectable: true},
-	{name: "gpt-5.6-terra", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, fallbackSelectable: true},
-	{name: "gpt-5.6-luna", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max"}, fallbackSelectable: true},
-	{name: "gpt-5.5", contextWindowTokens: 272000, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, fallbackSelectable: true},
-	{name: "gpt-5.4", contextWindowTokens: 272000, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, fallbackSelectable: true},
-	{name: "gpt-5.4-mini", contextWindowTokens: 272000, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, fallbackSelectable: true},
-	{name: "gpt-5.3-codex-spark", contextWindowTokens: 128000, defaultReasoningEffort: "high", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, fallbackSelectable: true},
+	{name: "gpt-5.6-sol", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "low", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, imageInput: true, fallbackSelectable: true},
+	{name: "gpt-5.6-terra", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, imageInput: true, fallbackSelectable: true},
+	{name: "gpt-5.6-luna", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max"}, imageInput: true, fallbackSelectable: true},
+	{name: "gpt-5.5", contextWindowTokens: 272000, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, imageInput: true, fallbackSelectable: true},
+	{name: "gpt-5.4", contextWindowTokens: 272000, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, imageInput: true, fallbackSelectable: true},
+	{name: "gpt-5.4-mini", contextWindowTokens: 272000, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, imageInput: true, fallbackSelectable: true},
+	{name: "gpt-5.3-codex-spark", contextWindowTokens: 128000, defaultReasoningEffort: "high", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, imageInput: true, fallbackSelectable: true},
 	// Retain defaults so an existing configuration can still be loaded, but do
 	// not advertise this deprecated ChatGPT-sign-in model in either picker path.
-	{name: "gpt-5.2", contextWindowTokens: 272000, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh"}},
+	{name: "gpt-5.2", contextWindowTokens: 272000, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, imageInput: true},
 }
 
 func codexOAuthSelectableModels() []string {
@@ -78,6 +79,7 @@ func codexOAuthModelDefaults(name string) (ModelDefaults, bool) {
 			ReasoningLevels:        append([]string(nil), spec.reasoningLevels...),
 			ReasoningMode:          modelcatalog.ReasoningModeEffort,
 			DefaultReasoningEffort: spec.defaultReasoningEffort,
+			ImageInput:             boolPointer(spec.imageInput),
 		}, true
 	}
 	return ModelDefaults{}, false

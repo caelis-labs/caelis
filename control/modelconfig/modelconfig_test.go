@@ -45,6 +45,9 @@ func TestProviderTemplateOwnsModelSelectionPolicy(t *testing.T) {
 			t.Fatalf("%s template = %#v, want custom endpoint setup with maintained advanced defaults", provider, template)
 		}
 	}
+	if got := CatalogProviderFor("openai-codex", CodexOAuthBaseURL); got != "openai-codex" {
+		t.Fatalf("CatalogProviderFor(openai-codex) = %q, want dedicated subscription catalog", got)
+	}
 }
 
 func TestOllamaProviderOwnsLocalAndCloudEndpointPolicy(t *testing.T) {
@@ -610,6 +613,9 @@ func TestResolveCodexOAuthModelDefaultsUseCodexCatalogMetadata(t *testing.T) {
 			if defaults.ContextWindowTokens != tt.context || defaults.MaxOutputTokens != codexOAuthDefaultMaxOutputTokens || defaults.DefaultReasoningEffort != tt.defaultEffort || defaults.ReasoningMode != modelcatalog.ReasoningModeEffort || !slices.Equal(defaults.ReasoningLevels, tt.reasoningLevel) {
 				t.Fatalf("ResolveModelDefaults(codex, %q) = %#v", tt.name, defaults)
 			}
+			if defaults.ImageInput == nil || !*defaults.ImageInput {
+				t.Fatalf("ResolveModelDefaults(codex, %q).ImageInput = %v, want maintained true", tt.name, defaults.ImageInput)
+			}
 			if slices.Contains(defaults.ReasoningLevels, "none") {
 				t.Fatalf("ResolveModelDefaults(codex, %q) advertises unsupported none effort", tt.name)
 			}
@@ -700,6 +706,152 @@ func TestBuildModelConstructsSDKModelFromControlConfig(t *testing.T) {
 	withContext, ok := resolved.Model.(contextWindowModel)
 	if !ok || withContext.ContextWindowTokens() != 131072 {
 		t.Fatalf("built context model = %#v, %v", withContext, ok)
+	}
+}
+
+func TestBuildModelPropagatesMaintainedImageInputCapability(t *testing.T) {
+	t.Parallel()
+
+	tests := []Config{
+		{
+			Provider: "xai",
+			API:      model.APIOpenAI,
+			Model:    "grok-4.5",
+			BaseURL:  "https://api.x.ai/v1",
+			Token:    "test-token",
+		},
+		{
+			Provider:   "openai-codex",
+			API:        model.APIOpenAICodex,
+			Model:      "gpt-5.6-sol",
+			BaseURL:    CodexOAuthBaseURL,
+			Token:      "test-token",
+			AuthType:   model.AuthOAuthToken,
+			HTTPClient: &http.Client{},
+		},
+	}
+	for _, cfg := range tests {
+		resolved, err := BuildModel(cfg, 0, 0)
+		if err != nil {
+			t.Fatalf("BuildModel(%s/%s) error = %v", cfg.Provider, cfg.Model, err)
+		}
+		capabilities, declared := model.CapabilitiesOf(resolved.Model)
+		if !declared || !capabilities.ImageInput {
+			t.Fatalf("built %s/%s capabilities = %+v, declared=%v, want image input", cfg.Provider, cfg.Model, capabilities, declared)
+		}
+	}
+}
+
+func TestCompatibleEndpointsDoNotInheritVendorImageCapabilities(t *testing.T) {
+	t.Parallel()
+
+	if ModelSupportsImages(Config{
+		Provider: "openai-compatible",
+		Model:    "gpt-4o-mini",
+		BaseURL:  "https://proxy.example/v1",
+	}) {
+		t.Fatal("generic OpenAI-compatible endpoint inherited OpenAI image capability")
+	}
+	if ModelSupportsImages(Config{
+		Provider: "anthropic-compatible",
+		Model:    "claude-sonnet-4",
+		BaseURL:  "https://proxy.example/anthropic",
+	}) {
+		t.Fatal("generic Anthropic-compatible endpoint inherited Anthropic image capability")
+	}
+}
+
+func TestUnknownModelUsesExplicitImageInputCapability(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	if !ModelSupportsImages(Config{
+		Provider:   "openai-compatible",
+		Model:      "local-vision",
+		BaseURL:    "http://localhost:8080/v1",
+		ImageInput: &enabled,
+	}) {
+		t.Fatal("explicit image-input override was ignored")
+	}
+	disabled := false
+	if ModelSupportsImages(Config{
+		Provider:   "openai-compatible",
+		Model:      "local-text",
+		BaseURL:    "http://localhost:8080/v1",
+		ImageInput: &disabled,
+	}) {
+		t.Fatal("explicit text-only capability was ignored")
+	}
+}
+
+func TestMaintainedImageCapabilityOverridesConfig(t *testing.T) {
+	t.Parallel()
+
+	disabled := false
+	if !ModelSupportsImages(Config{
+		Provider:   "openai",
+		Model:      "gpt-4o",
+		BaseURL:    "https://api.openai.com/v1",
+		ImageInput: &disabled,
+	}) {
+		t.Fatal("explicit custom capability overrode maintained OpenAI metadata")
+	}
+}
+
+func TestResolveModelDefaultsCarriesSuggestedImageCapability(t *testing.T) {
+	t.Parallel()
+
+	defaults, err := ResolveModelDefaults("codefree", "Qwen3.5-122B-A10B")
+	if err != nil {
+		t.Fatalf("ResolveModelDefaults(codefree image model) error = %v", err)
+	}
+	if defaults.ImageInput == nil || !*defaults.ImageInput {
+		t.Fatalf("codefree defaults image input = %v, want maintained true", defaults.ImageInput)
+	}
+}
+
+func TestAssembleConnectPersistsImageInputOnlyForUnknownModels(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	configs, err := AssembleConnect(context.Background(), ConnectRequest{
+		Provider: "openai-compatible",
+		BaseURL:  "https://models.acme.example/v1",
+		APIKey:   "secret",
+		Models: []ModelSelection{{
+			Name:       "acme-vision",
+			ImageInput: &enabled,
+		}},
+	}, ConnectOptions{})
+	if err != nil {
+		t.Fatalf("AssembleConnect(custom image model) error = %v", err)
+	}
+	if len(configs) != 1 || configs[0].ImageInput == nil || !*configs[0].ImageInput {
+		t.Fatalf("custom image config = %#v, want explicit image input", configs)
+	}
+	resolved, err := BuildModel(configs[0], 0, 0)
+	if err != nil {
+		t.Fatalf("BuildModel(custom image model) error = %v", err)
+	}
+	capabilities, declared := model.CapabilitiesOf(resolved.Model)
+	if !declared || !capabilities.ImageInput {
+		t.Fatalf("custom image model capabilities = %+v, declared=%v", capabilities, declared)
+	}
+
+	disabled := false
+	configs, err = AssembleConnect(context.Background(), ConnectRequest{
+		Provider: "openai",
+		APIKey:   "secret",
+		Models: []ModelSelection{{
+			Name:       "gpt-4o",
+			ImageInput: &disabled,
+		}},
+	}, ConnectOptions{})
+	if err != nil {
+		t.Fatalf("AssembleConnect(maintained image model) error = %v", err)
+	}
+	if len(configs) != 1 || configs[0].ImageInput != nil || !ModelSupportsImages(configs[0]) {
+		t.Fatalf("maintained image config = %#v, want directory-owned capability without persisted override", configs)
 	}
 }
 

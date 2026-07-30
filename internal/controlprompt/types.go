@@ -67,6 +67,7 @@ type SlashArgCandidate struct {
 	Detail                string
 	NoAuth                bool
 	ModelMetadataComplete bool
+	ModelImageInputKnown  bool
 }
 
 // SlashCommandResultKind identifies the domain payload produced by a slash
@@ -166,6 +167,7 @@ type ConnectConfig struct {
 	MaxOutputTokens                int
 	ReasoningEffort                string
 	ReasoningLevels                []string
+	ImageInput                     *bool
 }
 
 type ApprovalDecision struct {

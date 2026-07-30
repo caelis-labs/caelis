@@ -21,6 +21,7 @@ func (l *xAIResponsesLLM) Capabilities() model.Capabilities {
 		Streaming:             true,
 		ParallelToolCalls:     true,
 		ReasoningContinuation: true,
+		ImageInput:            l.imageInput,
 	}
 }
 
@@ -33,6 +34,7 @@ func (l *openAICodexLLM) Capabilities() model.Capabilities {
 		Streaming:             true,
 		ParallelToolCalls:     true,
 		ReasoningContinuation: true,
+		ImageInput:            l.imageInput,
 	}
 }
 
@@ -47,6 +49,7 @@ func (l *openAICompatLLM) Capabilities() model.Capabilities {
 		ParallelToolCalls:     true,
 		ReasoningContinuation: l.options.IncludeReasoningContent,
 		HostedTools:           l.options.ProviderTools != nil,
+		ImageInput:            l.imageInput,
 	}
 }
 
@@ -60,10 +63,14 @@ func (l *codeFreeLLM) Capabilities() model.Capabilities {
 		Streaming:         true,
 		ParallelToolCalls: true,
 		HostedTools:       l.options.ProviderTools != nil,
+		ImageInput:        l.imageInput,
 	}
 }
 
 func (l *anthropicSDKLLM) Capabilities() model.Capabilities {
+	if l == nil {
+		return model.Capabilities{}
+	}
 	return model.Capabilities{
 		ToolCalls:             true,
 		StructuredOutput:      true,
@@ -71,10 +78,14 @@ func (l *anthropicSDKLLM) Capabilities() model.Capabilities {
 		ParallelToolCalls:     true,
 		ReasoningContinuation: true,
 		HostedTools:           true,
+		ImageInput:            l.imageInput,
 	}
 }
 
 func (l *geminiLLM) Capabilities() model.Capabilities {
+	if l == nil {
+		return model.Capabilities{}
+	}
 	return model.Capabilities{
 		ToolCalls:             true,
 		StructuredOutput:      true,
@@ -82,15 +93,20 @@ func (l *geminiLLM) Capabilities() model.Capabilities {
 		ParallelToolCalls:     true,
 		ReasoningContinuation: true,
 		HostedTools:           true,
+		ImageInput:            l.imageInput,
 	}
 }
 
 func (l *ollamaLLM) Capabilities() model.Capabilities {
+	if l == nil {
+		return model.Capabilities{}
+	}
 	return model.Capabilities{
 		ToolCalls:             true,
 		StructuredOutput:      true,
 		Streaming:             true,
 		ParallelToolCalls:     true,
 		ReasoningContinuation: true,
+		ImageInput:            l.imageInput,
 	}
 }

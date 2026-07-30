@@ -45,6 +45,22 @@ func TestHydrateToolSummaryOutputHandlesEmptyAndUnknownTools(t *testing.T) {
 	}
 }
 
+func TestHydrateToolSummaryOutputUsesReadTraitsForViewImage(t *testing.T) {
+	meta := runtimeToolMetaForTest(map[string]any{
+		"path":       "/workspace/screens/pixel.png",
+		"file_path":  "/workspace/screens/pixel.png",
+		"diagnostic": "internal",
+	})
+	got := HydrateToolSummaryOutput("ViewImage", nil, meta)
+	want := map[string]any{
+		"path":      "/workspace/screens/pixel.png",
+		"file_path": "/workspace/screens/pixel.png",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("HydrateToolSummaryOutput(ViewImage) = %#v, want %#v", got, want)
+	}
+}
+
 func TestPluralizeHandlesSharedIrregularUnits(t *testing.T) {
 	for _, test := range []struct {
 		count int

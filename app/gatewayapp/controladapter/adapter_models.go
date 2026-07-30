@@ -101,6 +101,7 @@ func connectModelSelections(cfg controlprompt.ConnectConfig) []modelconfig.Model
 			MaxOutputTokens:     cfg.MaxOutputTokens,
 			ReasoningEffort:     cfg.ReasoningEffort,
 			ReasoningLevels:     levels,
+			ImageInput:          cfg.ImageInput,
 		})
 	}
 	return selections

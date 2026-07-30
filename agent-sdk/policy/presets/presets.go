@@ -53,13 +53,18 @@ func WorkspaceWriteMode() policy.Mode {
 		ID: ModeWorkspaceWrite,
 		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 			def := workspaceWriteConstraints(input.Options)
-			switch toolName(input) {
-			case names.Plan, names.Spawn:
-				return allow(def), nil
-			case names.Read, names.Grep, names.Glob:
-				if err := ensureReadPathsOutsideDefaultHiddenRoots(input); err != nil {
-					return policyErrorOrDeny(err)
+			name := toolName(input)
+			if info, ok := names.LookupExecutable(name); ok {
+				switch info.ResultStyle {
+				case names.ResultRead, names.ResultSearch, names.ResultGlob:
+					if err := ensureReadPathsOutsideDefaultHiddenRoots(input); err != nil {
+						return policyErrorOrDeny(err)
+					}
+					return allow(def), nil
 				}
+			}
+			switch name {
+			case names.Plan, names.Spawn:
 				return allow(def), nil
 			case names.Skill:
 				return allow(def), nil

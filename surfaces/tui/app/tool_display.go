@@ -23,7 +23,7 @@ func toolDisplayArgsForKind(name string, kind string, raw map[string]any, fallba
 	}
 	name = names.CanonicalOrSelf(name)
 	switch name {
-	case names.Read:
+	case names.Read, names.ViewImage:
 		if path := toolPath(raw); path != "" {
 			return path
 		}
@@ -295,8 +295,8 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 		return executeTitleDisplayArgs(title)
 	case names.Glob:
 		return globTitleDisplayArgs(title)
-	case names.Read, names.List:
-		return prefixedTitleDetail(title, "Read", "List")
+	case names.Read, names.ViewImage, names.List:
+		return prefixedTitleDetail(title, "Read", "View", "ViewImage", "List")
 	case names.Grep, "RG", "FIND":
 		return searchTitleDisplayArgs(title)
 	case names.Write, names.Patch:

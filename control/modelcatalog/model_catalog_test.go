@@ -32,13 +32,17 @@ func TestLookupModelCapabilitiesFallsBackToBuiltinWhenDynamicCatalogUnavailable(
 	}
 }
 
-func TestLookupSuggestedModelCapabilitiesSupportsOpenAICompatible(t *testing.T) {
-	caps, ok := LookupSuggestedModelCapabilities("openai-compatible", "gpt-4o-mini")
-	if !ok {
-		t.Fatal("LookupSuggestedModelCapabilities(openai-compatible, gpt-4o-mini) = false, want true")
-	}
-	if caps.ContextWindowTokens <= 0 {
-		t.Fatalf("ContextWindowTokens = %d, want > 0", caps.ContextWindowTokens)
+func TestLookupSuggestedModelCapabilitiesDoesNotInheritVendorForCompatibleEndpoints(t *testing.T) {
+	for _, test := range []struct {
+		provider string
+		model    string
+	}{
+		{provider: "openai-compatible", model: "gpt-4o-mini"},
+		{provider: "anthropic-compatible", model: "claude-sonnet-4"},
+	} {
+		if caps, ok := LookupSuggestedModelCapabilities(test.provider, test.model); ok {
+			t.Fatalf("LookupSuggestedModelCapabilities(%q, %q) = %#v, true; want no vendor inheritance", test.provider, test.model, caps)
+		}
 	}
 }
 

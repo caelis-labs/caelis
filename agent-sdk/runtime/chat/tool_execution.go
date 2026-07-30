@@ -120,21 +120,29 @@ func (a *Agent) executeToolCall(ctx context.Context, call model.ToolCall, observ
 		Observer:     observer,
 	})
 	if err != nil {
-		executionJournal := result.Metadata[tool.MetadataExecutionJournal]
-		result = tool.Result{
-			ID:      strings.TrimSpace(call.ID),
-			Name:    strings.TrimSpace(call.Name),
-			IsError: true,
-			Content: []model.Part{model.NewJSONPart(mustJSON(tool.ErrorPayload(err)))},
-		}
-		if executionJournal != nil {
-			result.Metadata = map[string]any{tool.MetadataExecutionJournal: executionJournal}
-		}
+		result = modelVisibleToolErrorResult(call, result, err)
+	}
+	if err := model.ValidateRequestCapabilities(a.model, &model.Request{Instructions: result.Content}); err != nil {
+		result = modelVisibleToolErrorResult(call, result, err)
 	}
 	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 	message := toolResultMessageFromCanonical(call, canonical)
 	event := toolResultEvent(call, canonical, &message, truncationMeta)
 	return message, event, nil
+}
+
+func modelVisibleToolErrorResult(call model.ToolCall, result tool.Result, err error) tool.Result {
+	executionJournal := result.Metadata[tool.MetadataExecutionJournal]
+	result = tool.Result{
+		ID:      strings.TrimSpace(call.ID),
+		Name:    strings.TrimSpace(call.Name),
+		IsError: true,
+		Content: []model.Part{model.NewJSONPart(mustJSON(tool.ErrorPayload(err)))},
+	}
+	if executionJournal != nil {
+		result.Metadata = map[string]any{tool.MetadataExecutionJournal: executionJournal}
+	}
+	return result
 }
 
 func (a *Agent) lookupTool(name string) (tool.Tool, bool) {

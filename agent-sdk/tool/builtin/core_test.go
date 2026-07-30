@@ -44,13 +44,16 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCoreTools() error = %v", err)
 	}
-	if got, want := len(tools), 11; got != want {
+	if got, want := len(tools), 12; got != want {
 		t.Fatalf("len(tools) = %d, want %d", got, want)
 	}
 	if got := tools[0].Definition().Name; got != filesystem.ReadToolName {
 		t.Fatalf("first tool = %q, want %q", got, filesystem.ReadToolName)
 	}
-	if got := tools[5].Definition().Name; got != shell.RunCommandToolName {
+	if got := tools[1].Definition().Name; got != filesystem.ViewImageToolName {
+		t.Fatalf("second tool = %q, want %q", got, filesystem.ViewImageToolName)
+	}
+	if got := tools[6].Definition().Name; got != shell.RunCommandToolName {
 		t.Fatalf("run command tool = %q, want %q", got, shell.RunCommandToolName)
 	}
 	legacyCommandToolName := "BA" + "SH"
@@ -59,19 +62,19 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 			t.Fatalf("core tools exposed legacy %s tool", legacyCommandToolName)
 		}
 	}
-	if got := tools[6].Definition().Name; got != task.ToolName {
+	if got := tools[7].Definition().Name; got != task.ToolName {
 		t.Fatalf("task tool = %q, want %q", got, task.ToolName)
 	}
-	if got := tools[7].Definition().Name; got != plan.ToolName {
+	if got := tools[8].Definition().Name; got != plan.ToolName {
 		t.Fatalf("plan tool = %q, want %q", got, plan.ToolName)
 	}
-	if got := tools[8].Definition().Name; got != skilltool.ToolName {
+	if got := tools[9].Definition().Name; got != skilltool.ToolName {
 		t.Fatalf("skill tool = %q, want %q", got, skilltool.ToolName)
 	}
-	if got := tools[9].Definition().Name; got != web.SearchToolName {
+	if got := tools[10].Definition().Name; got != web.SearchToolName {
 		t.Fatalf("web search tool = %q, want %q", got, web.SearchToolName)
 	}
-	if got := tools[10].Definition().Name; got != web.FetchToolName {
+	if got := tools[11].Definition().Name; got != web.FetchToolName {
 		t.Fatalf("last tool = %q, want %q", got, web.FetchToolName)
 	}
 }
@@ -95,7 +98,7 @@ func TestCoreToolsExposeOnlyCanonicalPascalCaseNames(t *testing.T) {
 		got = append(got, configured.Definition().Name)
 	}
 	want := []string{
-		names.Read, names.Write, names.Patch, names.Glob, names.Grep,
+		names.Read, names.ViewImage, names.Write, names.Patch, names.Glob, names.Grep,
 		names.RunCommand, names.Task, names.Plan, names.Skill, names.WebSearch, names.WebFetch,
 	}
 	if !slices.Equal(got, want) {
@@ -123,7 +126,7 @@ func TestCoreToolsDeclareActualSandboxRequirements(t *testing.T) {
 		definition := configuredTool.Definition()
 		requirements := definition.ExecutionRequirements
 		switch {
-		case index < 5:
+		case index < 6:
 			if requirements == nil || !requirements.Sandbox.FileSystem {
 				t.Fatalf("%s requirements = %+v, want filesystem", definition.Name, requirements)
 			}
@@ -180,6 +183,13 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireIntegerBounds(t, defs[filesystem.ReadToolName], "limit", 1, ptrAny(400))
 	requireDescriptionContains(t, defs[filesystem.ReadToolName], "numbered lines", "small offsets", "has_more", "revision", "if_revision")
 	requireAnnotations(t, defs[filesystem.ReadToolName], true, false, true, false)
+
+	requireStringMinLength(t, defs[filesystem.ViewImageToolName], "path", 1)
+	requireDescriptionContains(t, defs[filesystem.ViewImageToolName], "View one local", "visual inspection", "Read for text")
+	requireAnnotations(t, defs[filesystem.ViewImageToolName], true, false, true, false)
+	if !defs[filesystem.ViewImageToolName].RequiredModelCapabilities.ImageInput {
+		t.Fatal("ViewImage required model capabilities do not declare image input")
+	}
 
 	requireStringMinLength(t, defs[filesystem.GlobToolName], "pattern", 1)
 	requireStringMinLength(t, defs[filesystem.GlobToolName], "path", 1)
@@ -344,6 +354,7 @@ func TestCoreToolsRejectUnknownArgs(t *testing.T) {
 		args map[string]any
 	}{
 		{filesystem.ReadToolName, map[string]any{"path": "notes.txt", "unexpected": true}},
+		{filesystem.ViewImageToolName, map[string]any{"path": "image.png", "unexpected": true}},
 		{filesystem.GlobToolName, map[string]any{"pattern": "*.txt", "unexpected": true}},
 		{filesystem.SearchToolName, map[string]any{"path": ".", "pattern": "hello", "unexpected": true}},
 		{filesystem.WriteToolName, map[string]any{"path": "new.txt", "content": "new\n", "unexpected": true}},

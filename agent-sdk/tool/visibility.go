@@ -11,16 +11,31 @@ import (
 // ToolVisibility owns the current model-visible tool set for one run. It keeps
 // deferred-tool policy and tool_search replay interpretation in one place.
 type ToolVisibility struct {
-	tools   []Tool
-	visible map[string]bool
+	tools     []Tool
+	visible   map[string]bool
+	available map[string]bool
 }
 
 // NewToolVisibility returns the initial model-visible tool set. When the
 // tool_search builtin is present, MCP tools are deferred until discovered.
+// Model capability requirements remain unenforced until a model is supplied.
 func NewToolVisibility(tools []Tool) ToolVisibility {
+	return newToolVisibility(tools, nil)
+}
+
+// NewToolVisibilityForModel returns the initial model-visible tool set after
+// applying each tool's optional model-capability requirement.
+func NewToolVisibilityForModel(tools []Tool, llm model.LLM) ToolVisibility {
+	return newToolVisibility(tools, llm)
+}
+
+func newToolVisibility(tools []Tool, llm model.LLM) ToolVisibility {
 	visibility := ToolVisibility{
 		tools:   append([]Tool(nil), tools...),
 		visible: map[string]bool{},
+	}
+	if llm != nil {
+		visibility.available = map[string]bool{}
 	}
 	deferMCP := hasToolSearchTool(tools)
 	for _, item := range tools {
@@ -29,7 +44,15 @@ func NewToolVisibility(tools []Tool) ToolVisibility {
 		}
 		def := item.Definition()
 		name := CanonicalName(def.Name)
-		if name == "" || (deferMCP && IsMCPDefinition(def)) {
+		if name == "" {
+			continue
+		}
+		available := true
+		if llm != nil {
+			available = AvailableForModel(item, llm)
+			visibility.available[name] = available
+		}
+		if !available || (deferMCP && IsMCPDefinition(def)) {
 			continue
 		}
 		visibility.visible[name] = true
@@ -74,6 +97,9 @@ func (v *ToolVisibility) Reveal(name string) {
 		v.visible = map[string]bool{}
 	}
 	if canonical := CanonicalName(name); canonical != "" {
+		if available, known := v.available[canonical]; known && !available {
+			return
+		}
 		v.visible[canonical] = true
 	}
 }
@@ -90,7 +116,7 @@ func (v ToolVisibility) ModelSpecs() []model.ToolSpec {
 		}
 		def := item.Definition()
 		name := CanonicalName(def.Name)
-		if name == "" || !v.visible[name] {
+		if name == "" || !v.visible[name] || (v.available != nil && !v.available[name]) {
 			continue
 		}
 		definitions = append(definitions, CloneDefinition(def))

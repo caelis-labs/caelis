@@ -29,6 +29,7 @@ type openAICodexLLM struct {
 	requestTimeout      time.Duration
 	firstEventTimeout   time.Duration
 	contextWindowTokens int
+	imageInput          bool
 }
 
 func newOpenAICodex(cfg Config) *openAICodexLLM {
@@ -45,6 +46,7 @@ func newOpenAICodex(cfg Config) *openAICodexLLM {
 		requestTimeout:      cfg.Timeout,
 		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
 		contextWindowTokens: cfg.ContextWindowTokens,
+		imageInput:          cfg.ImageInput,
 	}
 }
 

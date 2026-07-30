@@ -262,7 +262,9 @@ func splitCatalogKey(key string) (provider, model string, ok bool) {
 }
 
 // providerMatches checks if a catalog key's provider matches the query.
-// The catalog may use alternate provider IDs (e.g. "google" for our "gemini").
+// The catalog may use maintained alternate provider IDs (for example,
+// "google" for "gemini"), but generic compatible endpoint names never imply
+// vendor capability provenance.
 func providerMatches(queryProvider, keyProvider string) bool {
 	if queryProvider == keyProvider {
 		return true
@@ -271,8 +273,7 @@ func providerMatches(queryProvider, keyProvider string) bool {
 	if alias, ok := modelsDevProviderAlias[keyProvider]; ok && alias == queryProvider {
 		return true
 	}
-	// Substring fallback for hyphenated variants (e.g. "openai-compatible" contains "openai").
-	return strings.Contains(queryProvider, keyProvider)
+	return false
 }
 
 // entryToCaps converts a capEntry to ModelCapabilities, applying a

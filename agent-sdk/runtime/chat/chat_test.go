@@ -393,6 +393,87 @@ func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
 	}
 }
 
+func TestChatAgentReplacesUnsupportedImageToolResultBeforeNextModelRequest(t *testing.T) {
+	t.Parallel()
+
+	testModel := &toolLoopModel{}
+	imageTool := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        "ECHO",
+			Description: "return an image",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{
+				ID:   call.ID,
+				Name: call.Name,
+				Content: []model.Part{
+					model.NewTextPart("image result"),
+					model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
+						Kind: model.MediaSourceInline,
+						Data: "aW1n",
+					}, "image/png", "result.png"),
+				},
+			}, nil
+		},
+	}
+	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{imageTool}, "Use tools when needed.")
+	if err != nil {
+		t.Fatalf("NewWithTools() error = %v", err)
+	}
+
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-image-result"}},
+		Events: []*session.Event{{
+			Type:    session.EventTypeUser,
+			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "show an image")),
+			Text:    "show an image",
+		}},
+	})
+
+	var events []*session.Event
+	for event, runErr := range chatAgent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+		events = append(events, event)
+	}
+
+	if got, want := len(testModel.requests), 2; got != want {
+		t.Fatalf("len(testModel.requests) = %d, want %d", got, want)
+	}
+	var result model.ToolResultPart
+	for _, message := range testModel.requests[1].Messages {
+		results := message.ToolResults()
+		if len(results) == 1 {
+			result = results[0]
+			break
+		}
+	}
+	if !result.IsError {
+		t.Fatalf("second request tool result = %#v, want model-visible error", result)
+	}
+	if len(result.Content) != 1 || result.Content[0].JSON == nil {
+		t.Fatalf("second request tool result content = %#v, want one JSON error", result.Content)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("Unmarshal(tool result) error = %v", err)
+	}
+	if got := payload["error_code"]; got != string(tool.ErrorCodeUnsupported) {
+		t.Fatalf("error_code = %#v, want %q", got, tool.ErrorCodeUnsupported)
+	}
+	for _, part := range result.Content {
+		if part.Media != nil {
+			t.Fatalf("second request contains unsupported media = %#v", part.Media)
+		}
+	}
+	if len(events) != 3 || events[1].Type != session.EventTypeToolResult || events[1].Tool == nil || events[1].Tool.Status != "failed" {
+		t.Fatalf("events = %#v, want failed tool result followed by final assistant response", events)
+	}
+}
+
 func TestExecuteToolCallCancellationDoesNotWaitForUnresponsiveTool(t *testing.T) {
 	t.Parallel()
 
@@ -1990,6 +2071,90 @@ func TestTaskObservedFailureToolResultModelContextRoundTrip(t *testing.T) {
 	}
 }
 
+func TestImageToolResultModelContextRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	call := model.ToolCall{
+		ID:   "view-image-1",
+		Name: "ViewImage",
+		Args: `{"path":"pixel.png"}`,
+	}
+	result := tool.Result{
+		ID:   call.ID,
+		Name: call.Name,
+		Content: []model.Part{
+			model.NewTextPart("Viewed image."),
+			model.NewMediaPart(
+				model.MediaModalityImage,
+				model.MediaSource{Kind: model.MediaSourceInline, Data: "aW1n"},
+				"image/png",
+				"pixel.png",
+			),
+		},
+	}
+	live := toolResultMessage(call, result)
+	event := toolResultEvent(call, result, &live)
+	replayed, ok := messageFromDurableEvent(event)
+	if !ok {
+		t.Fatal("messageFromDurableEvent() = false, want ViewImage result")
+	}
+	if !reflect.DeepEqual(replayed, live) {
+		t.Fatalf("ViewImage result model context changed across durable replay\nlive: %#v\nreplayed: %#v", live, replayed)
+	}
+	results := replayed.ToolResults()
+	if len(results) != 1 || len(results[0].Content) != 2 || results[0].Content[1].Media == nil {
+		t.Fatalf("replayed ViewImage content = %#v", results)
+	}
+}
+
+func TestCollectFinalResponseRejectsImagesForTextOnlyModel(t *testing.T) {
+	t.Parallel()
+
+	image := model.NewMediaPart(
+		model.MediaModalityImage,
+		model.MediaSource{Kind: model.MediaSourceInline, Data: "aW1n"},
+		"image/png",
+		"pixel.png",
+	)
+	tests := []struct {
+		name    string
+		request *model.Request
+	}{
+		{
+			name: "user image",
+			request: &model.Request{Messages: []model.Message{
+				model.NewMessage(model.RoleUser, image),
+			}},
+		},
+		{
+			name: "replayed ViewImage result after model switch",
+			request: &model.Request{Messages: []model.Message{
+				model.NewMessage(model.RoleTool, model.Part{
+					Kind: model.PartKindToolResult,
+					ToolResult: &model.ToolResultPart{
+						ToolUseID: "call_image",
+						Name:      "ViewImage",
+						Content:   []model.Part{image},
+					},
+				}),
+			}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			probe := &requestCapabilityProbeModel{}
+			_, err := collectFinalResponse(context.Background(), probe, test.request, "", nil, nil)
+			var capabilityErr *model.CapabilityError
+			if !errors.As(err, &capabilityErr) || capabilityErr.Capability != model.CapabilityImageInput {
+				t.Fatalf("collectFinalResponse() error = %#v, want image-input capability error", err)
+			}
+			if probe.calls != 0 {
+				t.Fatalf("Generate() calls = %d, want provider blocked before request", probe.calls)
+			}
+		})
+	}
+}
+
 func TestToolResultEventPreservesSpawnObservedRunningStatus(t *testing.T) {
 	t.Parallel()
 
@@ -2945,6 +3110,26 @@ type recordingModel struct {
 	last                model.Request
 	contextWindowTokens int
 	responseUsage       model.Usage
+}
+
+type requestCapabilityProbeModel struct {
+	calls int
+}
+
+func (*requestCapabilityProbeModel) Name() string { return "text-only" }
+
+func (m *requestCapabilityProbeModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	m.calls++
+	return func(yield func(*model.StreamEvent, error) bool) {
+		yield(model.StreamEventFromResponse(&model.Response{
+			Message:      model.NewTextMessage(model.RoleAssistant, "unexpected"),
+			TurnComplete: true,
+		}), nil)
+	}
+}
+
+func (*requestCapabilityProbeModel) Capabilities() model.Capabilities {
+	return model.Capabilities{}
 }
 
 func (m *recordingModel) Name() string { return "stub" }

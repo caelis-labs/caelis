@@ -40,13 +40,17 @@ func DefaultReasoningEffortForConfig(cfg Config) string {
 }
 
 // ModelSupportsImages reports endpoint-scoped catalog image-input support.
+// Maintained metadata is authoritative; an explicit config value is used only
+// when the directory has no declaration for the selected model.
 func ModelSupportsImages(cfg Config) bool {
-	catalogProvider := CatalogProviderFor(cfg.Provider, cfg.BaseURL)
-	caps, ok := modelcatalog.LookupModelCapabilities(catalogProvider, cfg.Model)
-	if !ok {
-		caps, ok = modelcatalog.LookupSuggestedModelCapabilities(catalogProvider, cfg.Model)
+	if defaults, err := ResolveModelDefaultsForEndpoint(cfg.Provider, cfg.BaseURL, cfg.Model); err == nil &&
+		defaults.ImageInput != nil {
+		return *defaults.ImageInput
 	}
-	return ok && caps.SupportsImages
+	if cfg.ImageInput != nil {
+		return *cfg.ImageInput
+	}
+	return false
 }
 
 func selectableModelDetail(provider string, baseURL string, modelName string) string {

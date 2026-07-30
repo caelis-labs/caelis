@@ -204,6 +204,38 @@ func TestOpenAICodexTokenOnlyReasoningAndPrematureEOF(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesInputsCarryViewImageToolResult(t *testing.T) {
+	t.Parallel()
+
+	assistant := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+		ID:   "call_image",
+		Name: "ViewImage",
+		Args: `{"path":"pixel.png"}`,
+	}}, "")
+	_, inputs, err := openAICodexInputs(nil, []model.Message{
+		assistant,
+		imageToolResultMessageForTest("call_image", "ViewImage"),
+	})
+	if err != nil {
+		t.Fatalf("openAICodexInputs() error = %v", err)
+	}
+	if len(inputs) != 2 {
+		t.Fatalf("Responses inputs = %#v, want function call and output", inputs)
+	}
+	output, ok := inputs[1].(openAICodexFunctionOutputInput)
+	if !ok || output.Type != "function_call_output" || output.CallID != "call_image" {
+		t.Fatalf("Responses function output = %#v", inputs[1])
+	}
+	content, ok := output.Output.([]any)
+	if !ok || len(content) != 2 {
+		t.Fatalf("Responses function output content = %#v", output.Output)
+	}
+	image, ok := content[1].(openAICodexInputImage)
+	if !ok || image.Type != "input_image" || image.ImageURL != "data:image/png;base64,aW1n" {
+		t.Fatalf("Responses function output image = %#v", content[1])
+	}
+}
+
 func TestOpenAICodexOutputTextPreservesURLCitations(t *testing.T) {
 	t.Parallel()
 

@@ -381,6 +381,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 					Detail:                c.Detail,
 					NoAuth:                c.NoAuth,
 					ModelMetadataComplete: c.ModelMetadataComplete,
+					ModelImageInputKnown:  c.ModelImageInputKnown,
 				}
 			}
 			return out, nil

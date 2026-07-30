@@ -18,8 +18,9 @@ var grokOAuthModelSpecs = []struct {
 	name                   string
 	defaultReasoningEffort string
 	reasoningLevels        []string
+	imageInput             bool
 }{
-	{name: "grok-4.5", defaultReasoningEffort: "high", reasoningLevels: []string{"low", "medium", "high"}},
+	{name: "grok-4.5", defaultReasoningEffort: "high", reasoningLevels: []string{"low", "medium", "high"}, imageInput: true},
 }
 
 func grokOAuthSelectableModels() []string {
@@ -57,6 +58,7 @@ func grokOAuthModelDefaults(name string) (ModelDefaults, bool) {
 			ContextWindowTokens: grokOAuthContextWindowTokens,
 			MaxOutputTokens:     grokOAuthMaxOutputTokens,
 			ReasoningMode:       modelcatalog.ReasoningModeNone,
+			ImageInput:          boolPointer(true),
 		}, true
 	}
 	for _, spec := range grokOAuthModelSpecs {
@@ -69,6 +71,7 @@ func grokOAuthModelDefaults(name string) (ModelDefaults, bool) {
 			ReasoningLevels:        append([]string(nil), spec.reasoningLevels...),
 			ReasoningMode:          modelcatalog.ReasoningModeEffort,
 			DefaultReasoningEffort: spec.defaultReasoningEffort,
+			ImageInput:             boolPointer(spec.imageInput),
 		}, true
 	}
 	return ModelDefaults{}, false

@@ -87,6 +87,7 @@ type ModelSelection struct {
 	MaxOutputTokens     int
 	ReasoningEffort     string
 	ReasoningLevels     []string
+	ImageInput          *bool
 }
 
 // ConnectRequest is the transport-neutral input used to authenticate one
@@ -116,23 +117,29 @@ type ConnectOptions struct {
 	Authenticate    AuthenticateFunc
 }
 
-// ModelDefaults contains Control-selected limits and reasoning behavior for a
-// model choice.
+// ModelDefaults contains Control-selected limits, reasoning behavior, and
+// maintained capability metadata for a model choice.
 type ModelDefaults struct {
 	ContextWindowTokens    int
 	MaxOutputTokens        int
 	ReasoningLevels        []string
 	ReasoningMode          string
 	DefaultReasoningEffort string
+	// ImageInput is non-nil only when the maintained model directory declares
+	// image-input support or non-support for this exact provider/model.
+	ImageInput *bool
 }
 
 // SelectableModel is one Control-maintained model choice. MetadataComplete is
 // true only when Control can assemble limits and reasoning behavior without
-// asking the user for advanced configuration.
+// asking the user for advanced configuration. ImageInputKnown separately
+// reports whether the maintained directory declares image-input support or
+// non-support for this exact model.
 type SelectableModel struct {
 	Name             string
 	Detail           string
 	MetadataComplete bool
+	ImageInputKnown  bool
 }
 
 // ResolveModelDefaults resolves maintained metadata for a model and falls back
@@ -161,6 +168,12 @@ func ResolveModelDefaultsForEndpoint(provider string, baseURL string, modelName 
 	}
 	catalogProvider := CatalogProviderFor(template.Provider, baseURL)
 	caps, known := modelcatalog.LookupModelCapabilities(catalogProvider, modelName)
+	var imageInput *bool
+	if known {
+		imageInput = boolPointer(caps.SupportsImages)
+	} else if suggested, suggestedKnown := modelcatalog.LookupSuggestedModelCapabilities(catalogProvider, modelName); suggestedKnown {
+		imageInput = boolPointer(suggested.SupportsImages)
+	}
 	if !known {
 		caps = modelcatalog.DefaultModelCapabilities()
 		if template.DefaultContextWindowTokens > 0 {
@@ -212,6 +225,7 @@ func ResolveModelDefaultsForEndpoint(provider string, baseURL string, modelName 
 		ReasoningLevels:        reasoningLevels,
 		ReasoningMode:          reasoningMode,
 		DefaultReasoningEffort: modelcatalog.NormalizeReasoningEffort(caps.DefaultReasoningEffort),
+		ImageInput:             imageInput,
 	}, nil
 }
 
@@ -305,6 +319,12 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 		if reasoningMode == modelcatalog.ReasoningModeNone {
 			reasoningEffort = ""
 		}
+		imageInput := selection.ImageInput
+		if defaults.ImageInput != nil {
+			// Maintained model metadata is authoritative and remains derivable;
+			// persist overrides only for models unknown to the directory.
+			imageInput = nil
+		}
 		out = append(out, NormalizeConfig(Config{
 			Provider:                template.Provider,
 			EndpointID:              strings.TrimSpace(req.EndpointID),
@@ -321,6 +341,7 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 			ReasoningEffort:         reasoningEffort,
 			ReasoningLevels:         reasoningLevels,
 			ReasoningMode:           reasoningMode,
+			ImageInput:              imageInput,
 			MaxOutputTok:            maxOutput,
 			Timeout:                 timeout,
 			StreamFirstEventTimeout: time.Duration(req.StreamFirstEventTimeoutSeconds) * time.Second,
@@ -387,6 +408,7 @@ func SelectableModels(ctx context.Context, provider string, baseURL string, auth
 			Name:             name,
 			Detail:           selectableModelDetail(template.Provider, baseURL, name),
 			MetadataComplete: metadataComplete,
+			ImageInputKnown:  hasKnownImageInputForEndpoint(template.Provider, baseURL, name),
 		})
 	}
 	if template.PreserveModelOrder {
@@ -482,9 +504,21 @@ func normalizeModelSelections(selections []ModelSelection) []ModelSelection {
 		if selection.ReasoningLevels != nil {
 			selection.ReasoningLevels = append([]string{}, selection.ReasoningLevels...)
 		}
+		selection.ImageInput = cloneBoolPointer(selection.ImageInput)
 		out = append(out, selection)
 	}
 	return out
+}
+
+func boolPointer(value bool) *bool {
+	return &value
+}
+
+func cloneBoolPointer(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	return boolPointer(*value)
 }
 
 func hasCompleteModelMetadataForEndpoint(provider string, baseURL string, modelName string) bool {
@@ -497,6 +531,11 @@ func hasCompleteModelMetadataForEndpoint(provider string, baseURL string, modelN
 		return false
 	}
 	return modelcatalog.NormalizeReasoningMode(caps.ReasoningMode) != ""
+}
+
+func hasKnownImageInputForEndpoint(provider string, baseURL string, modelName string) bool {
+	defaults, err := ResolveModelDefaultsForEndpoint(provider, baseURL, modelName)
+	return err == nil && defaults.ImageInput != nil
 }
 
 func sortedUniqueSelectableModels(values []SelectableModel) []SelectableModel {
@@ -516,6 +555,7 @@ func uniqueSelectableModels(values []SelectableModel) []SelectableModel {
 		key := strings.ToLower(value.Name)
 		if existing, ok := seen[key]; ok {
 			existing.MetadataComplete = existing.MetadataComplete || value.MetadataComplete
+			existing.ImageInputKnown = existing.ImageInputKnown || value.ImageInputKnown
 			if strings.TrimSpace(existing.Detail) == "" {
 				existing.Detail = strings.TrimSpace(value.Detail)
 			}
