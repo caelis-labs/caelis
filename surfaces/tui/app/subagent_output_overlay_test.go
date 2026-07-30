@@ -513,7 +513,7 @@ func TestSubagentOutputOverlayDragSelectionCopiesWideText(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("selection press unexpectedly returned a command")
 	}
-	next, cmd = model.handleMouse(tea.MouseMotionMsg(endMouse))
+	next, _ = model.handleMouse(tea.MouseMotionMsg(endMouse))
 	model = next.(*Model)
 	if !model.subagentOutputOverlay.selecting {
 		t.Fatal("overlay did not enter selecting state")
@@ -613,8 +613,7 @@ func TestSubagentOutputOverlaySelectionWheelExtendsAcrossRows(t *testing.T) {
 		t.Fatalf("selection auto-scroll offset = %d, want 2", model.subagentOutputOverlay.offset)
 	}
 
-	next, cmd = model.handleMouse(tea.MouseReleaseMsg(edgeMouse))
-	model = next.(*Model)
+	_, cmd = model.handleMouse(tea.MouseReleaseMsg(edgeMouse))
 	if cmd == nil {
 		t.Fatal("multi-row overlay selection did not return a clipboard command")
 	}
