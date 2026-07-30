@@ -134,10 +134,10 @@ func (b *Broker) run() {
 					}
 					continue
 				}
-				if env.Err != nil || env.Kind == eventstream.KindError {
-					failureReason = strings.TrimSpace(firstNonEmpty(env.Error, errorText(env.Err)))
-					cancelled = eventstream.IsCancelledReason(failureReason)
-				}
+			}
+			if env.Err != nil || env.Kind == eventstream.KindError {
+				failureReason = strings.TrimSpace(firstNonEmpty(env.Error, errorText(env.Err)))
+				cancelled = eventstream.IsCancelledReason(failureReason)
 			}
 			if !b.emit(env) {
 				return

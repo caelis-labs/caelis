@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -15,14 +16,9 @@ import (
 func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea.Cmd) {
 	m.observeTaskStreamSession(env)
 	if env.Err != nil || env.Kind == eventstream.KindError {
-		errorEnvelope := env
-		if strings.TrimSpace(errorEnvelope.Error) == "" && env.Err != nil {
-			errorEnvelope.Error = env.Err.Error()
+		if text := display.UserVisibleError(env.Err); text != "" {
+			env.Error = text
 		}
-		if m.observeSubagentOutputEvents(m.projectACPEventToTranscriptEvents(errorEnvelope)) {
-			return m, m.requestSubagentOutputRender()
-		}
-		return m, nil
 	}
 	if m.suppressPairedCompactNotice(env) {
 		return m, nil

@@ -2,6 +2,7 @@ package controladapter
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -110,6 +112,101 @@ func TestAdapterStartReviewUsesHiddenReviewerProfile(t *testing.T) {
 	}
 	if len(status.Participants) != 0 {
 		t.Fatalf("AgentStatus().Participants = %#v, want completed review sidecar hidden", status.Participants)
+	}
+}
+
+func TestAdapterStartReviewFailureFlowsThroughControlFeed(t *testing.T) {
+	ctx := context.Background()
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName:      "caelis",
+			UserID:       "review-failure-test",
+			SessionID:    "review-failure-session",
+			WorkspaceKey: "ws",
+		},
+		CWD:        t.TempDir(),
+		Controller: session.ControllerBinding{Kind: session.ControllerKindKernel},
+	}
+	failureHandle, finishProducer := reviewProfileFailureTurnHandle(activeSession.SessionRef)
+	gw := &reviewProfileGatewayService{session: activeSession, handle: failureHandle}
+	reviewerPlacement, err := sdkplacement.Seal(sdkplacement.Placement{
+		Kind: sdkplacement.KindModel, ProfileID: "provider:reviewer", Model: "reviewer-model",
+		ReasoningEffort: "high", ConfigFingerprint: "reviewer-config",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{
+		Secret: []byte("0123456789abcdef0123456789abcdef"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{CursorCodec: codec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := NewAdapter(ctx, &RuntimeStack{
+		Gateway:      gatewayRuntimeDepsForTest(gw),
+		ControlFeeds: feeds,
+		Session: SessionRuntimeDeps{
+			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+			StartFn: func(context.Context, string, string) (session.Session, error) {
+				return session.CloneSession(gw.session), nil
+			},
+		},
+		AgentBinding: AgentBindingRuntimeDeps{ResolveFn: func(context.Context, agentbinding.Handle) (sdkplacement.Placement, error) {
+			return reviewerPlacement, nil
+		}},
+	}, activeSession.SessionID, "surface", "ollama/llama3")
+	if err != nil {
+		t.Fatalf("NewAdapter() error = %v", err)
+	}
+
+	turn, err := driver.StartReview(ctx, "inspect the change", nil)
+	if err != nil {
+		t.Fatalf("StartReview() error = %v", err)
+	}
+	var events []eventstream.Envelope
+	select {
+	case failure, ok := <-turn.Events():
+		if !ok {
+			close(finishProducer)
+			t.Fatal("review stream closed before participant failure")
+		}
+		events = append(events, failure)
+	case <-time.After(time.Second):
+		close(finishProducer)
+		t.Fatal("participant failure did not cross Control feed before producer close")
+	}
+	close(finishProducer)
+	for envelope := range turn.Events() {
+		events = append(events, envelope)
+	}
+	if len(events) != 2 {
+		t.Fatalf("review failure events = %#v, want participant error and main terminal", events)
+	}
+	const displayError = "model request hit provider backpressure after 5 retries"
+	failure := events[0]
+	if failure.Kind != eventstream.KindError ||
+		failure.Scope != eventstream.ScopeParticipant ||
+		failure.ScopeID != turn.TurnID() ||
+		failure.ParticipantID != "side-reviewer" ||
+		failure.Error != displayError {
+		t.Fatalf("review failure envelope = %#v, want participant-scoped display error", failure)
+	}
+	if failure.ParentTool != nil {
+		t.Fatalf("review failure parent = %#v, want Slash participant without Spawn ownership", failure.ParentTool)
+	}
+	if strings.Contains(failure.Error, "provider-secret") {
+		t.Fatalf("review failure leaked provider detail: %q", failure.Error)
+	}
+	terminal := events[1]
+	if terminal.Scope != eventstream.ScopeMain ||
+		terminal.Lifecycle == nil ||
+		terminal.Lifecycle.State != eventstream.LifecycleStateFailed ||
+		terminal.Lifecycle.Reason != displayError {
+		t.Fatalf("review terminal = %#v, want one main failed terminal", terminal)
 	}
 }
 
@@ -269,6 +366,33 @@ func reviewProfileTurnHandle(ref session.SessionRef) *reviewProfileHandle {
 		}
 	}()
 	return handle
+}
+
+func reviewProfileFailureTurnHandle(ref session.SessionRef) (*reviewProfileHandle, chan struct{}) {
+	handle := &reviewProfileHandle{ref: ref, acpEvents: make(chan eventstream.Envelope, 1)}
+	finishProducer := make(chan struct{})
+	go func() {
+		defer close(handle.acpEvents)
+		defer handle.finish()
+		handle.acpEvents <- eventstream.Envelope{
+			Kind:          eventstream.KindError,
+			SessionID:     ref.SessionID,
+			HandleID:      handle.HandleID(),
+			RunID:         handle.RunID(),
+			TurnID:        handle.TurnID(),
+			Scope:         eventstream.ScopeParticipant,
+			ScopeID:       handle.TurnID(),
+			ParticipantID: "side-reviewer",
+			Err: &model.RetryExhaustedError{
+				MaxRetries:   5,
+				Backpressure: true,
+				Cause:        errors.New("model: http status 529 body=provider-secret"),
+			},
+			Error: "model request hit provider backpressure after 5 retries",
+		}
+		<-finishProducer
+	}()
+	return handle, finishProducer
 }
 
 func (h *reviewProfileHandle) HandleID() string { return "review-handle" }

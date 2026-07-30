@@ -65,9 +65,37 @@ func (m *Model) applyTranscriptEvent(event TranscriptEvent) (tea.Model, tea.Cmd)
 		return m.applyTranscriptLifecycle(event)
 	case TranscriptEventUsage:
 		return m.applyTranscriptUsage(event), nil
+	case transcript.EventError:
+		return m.applyTranscriptError(event)
 	default:
 		return m, nil
 	}
+}
+
+func (m *Model) applyTranscriptError(event TranscriptEvent) (tea.Model, tea.Cmd) {
+	if m == nil || event.Scope != ACPProjectionParticipant {
+		return m, nil
+	}
+	event.Text = strings.TrimSpace(tuikit.SanitizeLogText(event.Text))
+	if event.Text == "" {
+		return m, nil
+	}
+	turnKey := transcriptParticipantTurnKey(event)
+	block := m.findParticipantTurnBlock(turnKey)
+	if block == nil {
+		block = m.ensureParticipantTurnBlock(turnKey, participantTurnTranscriptActor(event))
+	}
+	if block == nil {
+		return m, nil
+	}
+	m.activeParticipantTurnSessionID = strings.TrimSpace(block.SessionID)
+	result := applyTranscriptEventToParticipantTurn(block, event, participantTurnTranscriptPolicy{})
+	if !result.changed {
+		return m, nil
+	}
+	m.markViewportBlockDirty(block.BlockID())
+	m.hasCommittedLine = true
+	return m, m.requestStreamViewportSync()
 }
 
 func (m *Model) applyTranscriptUsage(event TranscriptEvent) tea.Model {

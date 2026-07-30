@@ -214,6 +214,51 @@ func TestTurnHandlePublishErrorUsesEventstreamError(t *testing.T) {
 	}
 }
 
+func TestParticipantTurnHandlePublishErrorPreservesScopeAndSanitizesDisplay(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID:      "participant-handle-1",
+		runID:         "participant-run-1",
+		turnID:        "participant-turn-1",
+		activeKind:    ActiveTurnKindParticipant,
+		participantID: "side-reviewer",
+		sessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	})
+	rawCause := errors.New("model: http status 529 body=provider-secret")
+	handle.publishError(&model.RetryExhaustedError{
+		MaxRetries:   5,
+		Backpressure: true,
+		Cause:        rawCause,
+	})
+
+	replayed, _, err := handle.eventsAfter("")
+	if err != nil {
+		t.Fatalf("eventsAfter() error = %v", err)
+	}
+	if len(replayed) != 1 {
+		t.Fatalf("error events = %#v, want one", replayed)
+	}
+	got := replayed[0]
+	if got.Kind != eventstream.KindError ||
+		got.Scope != eventstream.ScopeParticipant ||
+		got.ScopeID != "participant-turn-1" ||
+		got.ParticipantID != "side-reviewer" {
+		t.Fatalf("participant error scope = %#v", got)
+	}
+	if got.Error != "model request hit provider backpressure after 5 retries" {
+		t.Fatalf("participant error display = %q, want sanitized retry summary", got.Error)
+	}
+	if strings.Contains(got.Error, "provider-secret") {
+		t.Fatalf("participant error display leaked provider detail: %q", got.Error)
+	}
+	if !errors.Is(got.Err, rawCause) {
+		t.Fatalf("participant diagnostic error = %v, want wrapped raw cause", got.Err)
+	}
+}
+
 func stringPtrValue(value *string) string {
 	if value == nil {
 		return ""

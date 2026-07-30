@@ -84,6 +84,7 @@ func (m *Model) finishLiveTurn(endedAt time.Time, interrupted bool, err error) t
 		m.finalizeReasoningBlock()
 	}
 	m.finalizeMainTimelineTail(interrupted, err)
+	participantFailureAlreadyRendered := m.activeParticipantTurnHasFailureNotice(err)
 	participantFooterAlreadyRendered := m.finalizeActiveParticipantTurn(interrupted, err)
 	m.captureLiveTurnDuration(endedAt)
 	nextPending, hasNextPending := m.pendingQueue.onTurnEnd(err == nil && !interrupted, err != nil || interrupted)
@@ -101,7 +102,7 @@ func (m *Model) finishLiveTurn(endedAt time.Time, interrupted bool, err error) t
 			errText == "cli: input eof" ||
 			errText == PromptErrInterrupt ||
 			errText == PromptErrEOF
-		if !isPromptCancel {
+		if !isPromptCancel && !participantFailureAlreadyRendered {
 			m.commitLine(terminalErrorLine(err))
 		}
 	}
@@ -117,6 +118,27 @@ func (m *Model) finishLiveTurn(endedAt time.Time, interrupted bool, err error) t
 		return tea.Batch(tea.ClearScreen, cmd, resumeAnimationCmd)
 	}
 	return tea.Batch(tea.ClearScreen, resumeAnimationCmd)
+}
+
+func (m *Model) activeParticipantTurnHasFailureNotice(err error) bool {
+	if m == nil || err == nil {
+		return false
+	}
+	failureText := singleLineErrorText(display.UserVisibleError(err))
+	if failureText == "" {
+		return false
+	}
+	block := m.findParticipantTurnBlock(m.activeParticipantTurnSessionID)
+	if block == nil {
+		return false
+	}
+	for i := len(block.Events) - 1; i >= 0; i-- {
+		event := block.Events[i]
+		if event.Kind == SENotice && singleLineErrorText(event.Text) == failureText {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) captureLiveTurnDuration(endedAt time.Time) {

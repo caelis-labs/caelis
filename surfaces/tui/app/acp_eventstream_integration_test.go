@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	sdkmodel "github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -650,6 +652,104 @@ func TestHandleACPEventEnvelopeAppliesParticipantSequence(t *testing.T) {
 	}
 	if len(block.Events) != 1 || block.Events[0].Kind != SEAssistant || block.Events[0].Text != "participant answer" {
 		t.Fatalf("participant events = %#v, want assistant answer", block.Events)
+	}
+}
+
+func TestHandleACPEventEnvelopeShowsParticipantFailureBeforeTerminal(t *testing.T) {
+	t.Parallel()
+
+	const (
+		turnID       = "participant-turn-1"
+		displayError = "model request hit provider backpressure after 5 retries"
+	)
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(100, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		HandleID:      "handle-1",
+		RunID:         "run-1",
+		TurnID:        turnID,
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       turnID,
+		ParticipantID: "side-reviewer",
+		Actor:         "user",
+		Meta: map[string]any{
+			"agent":           "review",
+			"handle":          "reviewer",
+			"display_address": "/review",
+		},
+		Final: true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateUserMessage,
+			Content:       schema.TextContent{Type: "text", Text: "inspect the change"},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindError,
+		SessionID:     "session-1",
+		HandleID:      "handle-1",
+		RunID:         "run-1",
+		TurnID:        turnID,
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       turnID,
+		ParticipantID: "side-reviewer",
+		Err: &sdkmodel.RetryExhaustedError{
+			MaxRetries:   5,
+			Backpressure: true,
+			Cause:        errors.New("model: http status 529 body=provider-secret"),
+		},
+	})
+
+	block := model.findParticipantTurnBlock(turnID)
+	if block == nil {
+		t.Fatal("participant block missing")
+	}
+	if len(block.Events) != 1 ||
+		block.Events[0].Kind != SENotice ||
+		block.Events[0].Text != displayError {
+		t.Fatalf("participant error events = %#v, want sanitized notice", block.Events)
+	}
+	if strings.Contains(block.Events[0].Text, "provider-secret") {
+		t.Fatalf("participant error leaked provider detail: %q", block.Events[0].Text)
+	}
+	if participantTurnIsTerminal(block.Status) {
+		t.Fatalf("participant status = %q, want error visible before terminal", block.Status)
+	}
+	if !model.turnRunning() {
+		t.Fatal("main turn stopped before terminal lifecycle")
+	}
+	if len(model.subagentOutputViews) != 0 {
+		t.Fatalf("participant error created Spawn output view: %#v", model.subagentOutputViews)
+	}
+	renderedBeforeTerminal := strings.Join(
+		renderedPlainRows(block.Render(model.blockRenderContext(100))),
+		"\n",
+	)
+	if got := strings.Count(renderedBeforeTerminal, displayError); got != 1 {
+		t.Fatalf("rendered participant error count = %d, want one\n%s", got, renderedBeforeTerminal)
+	}
+
+	model = applyACPEnvelopeForTest(t, model, eventstream.TurnFailed(
+		"handle-1",
+		"run-1",
+		turnID,
+		displayError,
+		time.Unix(101, 0),
+	))
+	if model.turnRunning() {
+		t.Fatal("main turn still running after failed terminal")
+	}
+	if got := strings.ToLower(strings.TrimSpace(block.Status)); got != eventstream.LifecycleStateFailed {
+		t.Fatalf("participant status = %q, want failed", block.Status)
+	}
+	if len(block.Events) != 1 {
+		t.Fatalf("participant events after terminal = %#v, want failure reason exactly once", block.Events)
+	}
+	model.syncViewportContent()
+	renderedAfterTerminal := strings.Join(model.viewportPlainLines, "\n")
+	if got := strings.Count(renderedAfterTerminal, displayError); got != 1 {
+		t.Fatalf("rendered terminal failure count = %d, want one\n%s", got, renderedAfterTerminal)
 	}
 }
 

@@ -76,6 +76,41 @@ func TestBrokerHoldsSourceTerminalUntilProducerChannelCloses(t *testing.T) {
 	}
 }
 
+func TestBrokerParticipantErrorProducesMainFailedTerminal(t *testing.T) {
+	handle := newBarrierTestHandle()
+	handle.events <- eventstream.Envelope{
+		Kind:          eventstream.KindError,
+		Error:         "model request hit provider backpressure after 5 retries",
+		SessionID:     handle.ref.SessionID,
+		HandleID:      handle.HandleID(),
+		RunID:         handle.RunID(),
+		TurnID:        handle.TurnID(),
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       handle.TurnID(),
+		ParticipantID: "side-reviewer",
+	}
+	close(handle.events)
+
+	got := collectBrokerBarrierEvents(New(handle).Events())
+	if len(got) != 2 {
+		t.Fatalf("broker events = %#v, want participant error and main terminal", got)
+	}
+	if got[0].Kind != eventstream.KindError ||
+		got[0].Scope != eventstream.ScopeParticipant ||
+		got[0].ScopeID != handle.TurnID() ||
+		got[0].ParticipantID != "side-reviewer" {
+		t.Fatalf("first broker event = %#v, want participant error unchanged", got[0])
+	}
+	terminal := got[1]
+	if terminal.Kind != eventstream.KindLifecycle ||
+		terminal.Scope != eventstream.ScopeMain ||
+		terminal.Lifecycle == nil ||
+		terminal.Lifecycle.State != eventstream.LifecycleStateFailed ||
+		terminal.Lifecycle.Reason != "model request hit provider backpressure after 5 retries" {
+		t.Fatalf("terminal broker event = %#v, want one main failed terminal", terminal)
+	}
+}
+
 func TestBrokerApprovalSettlementDoesNotReplaceTurnTerminal(t *testing.T) {
 	handle := newBarrierTestHandle()
 	handle.events <- eventstream.Envelope{

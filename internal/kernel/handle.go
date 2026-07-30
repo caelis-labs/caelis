@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -446,10 +447,17 @@ func (h *turnHandle) publishError(err error) {
 	h.failed = true
 	h.mu.Unlock()
 	env := eventstream.Error(err)
+	env.Error = display.UserVisibleError(err)
 	env.HandleID = h.handleID
 	env.RunID = h.runID
 	env.TurnID = h.turnID
 	env.SessionID = h.sessionRef.SessionID
+	if h.activeKind == ActiveTurnKindParticipant {
+		env.Scope = eventstream.ScopeParticipant
+		env.ScopeID = firstNonEmpty(h.turnID, h.participantID)
+		env.ParticipantID = h.participantID
+		env.Actor = h.participantID
+	}
 	h.publishEnvelope(env, "")
 }
 
