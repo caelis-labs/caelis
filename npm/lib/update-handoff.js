@@ -156,14 +156,19 @@ function npmInstallInvocation(
     if (!commandLine) {
       throw new Error('missing Windows npm command line');
     }
+    const utf8CommandLine =
+      `chcp 65001 >nul 2>&1 & ${commandLine}`;
     return {
       command: env.ComSpec || 'cmd.exe',
-      args: ['/d', '/s', '/c', commandLine],
+      args: ['/d', '/s', '/c', utf8CommandLine],
       options: {
         env,
         // Go has already encoded this as one cmd.exe command line. Node's
         // normal Windows argv quoting would add backslashes before its
         // embedded quotes, making cmd.exe look for a literal \"npm.cmd\".
+        // Switch cmd.exe to UTF-8 before invoking npm so native diagnostics
+        // use the same encoding as npm's Node process. Use "&" so a system
+        // without code page 65001 still attempts the prepared update command.
         windowsVerbatimArguments: true,
       },
     };

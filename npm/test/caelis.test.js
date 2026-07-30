@@ -107,7 +107,7 @@ test('executeHandoffPlan reports npm failure', async () => {
   ]);
 });
 
-test('Windows npm handoff passes the prepared cmd command line verbatim', () => {
+test('Windows npm handoff preserves the command after enabling UTF-8 output', () => {
   const plan = {
     ...testPlan(),
     command: [
@@ -124,7 +124,12 @@ test('Windows npm handoff passes the prepared cmd command line verbatim', () => 
 
   assert.deepEqual(npmInstallInvocation(plan, 'win32', env), {
     command: env.ComSpec,
-    args: ['/d', '/s', '/c', plan.command_line],
+    args: [
+      '/d',
+      '/s',
+      '/c',
+      `chcp 65001 >nul 2>&1 & ${plan.command_line}`,
+    ],
     options: {
       env,
       windowsVerbatimArguments: true,
