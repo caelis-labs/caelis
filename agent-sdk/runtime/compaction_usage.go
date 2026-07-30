@@ -177,15 +177,13 @@ func providerSnapshotCompatibleWithLLM(snapshot providerTokenSnapshot, llm model
 }
 
 func providerSnapshotCompatibleWithIdentity(snapshot providerTokenSnapshot, provider string, modelName string) bool {
-	provider = strings.TrimSpace(provider)
-	modelName = strings.TrimSpace(modelName)
-	if provider == "" || modelName == "" ||
-		strings.TrimSpace(snapshot.Provider) == "" ||
-		strings.TrimSpace(snapshot.Model) == "" {
+	provider, modelName = session.StableInvocationIdentity(provider, modelName)
+	snapshotProvider, snapshotModel := session.StableInvocationIdentity(snapshot.Provider, snapshot.Model)
+	if provider == "" || modelName == "" || snapshotProvider == "" || snapshotModel == "" {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(snapshot.Provider), provider) &&
-		strings.EqualFold(strings.TrimSpace(snapshot.Model), modelName)
+	return strings.EqualFold(snapshotProvider, provider) &&
+		strings.EqualFold(snapshotModel, modelName)
 }
 
 func providerSnapshotIdentity(event *session.Event, meta map[string]any) (string, string) {

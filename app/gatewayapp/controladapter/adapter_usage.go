@@ -177,8 +177,7 @@ func (u *sessionTokenUsageBreakdown) addModel(provider string, modelName string,
 	if u == nil {
 		return
 	}
-	provider = strings.TrimSpace(provider)
-	modelName = strings.TrimSpace(modelName)
+	provider, modelName = session.StableInvocationIdentity(provider, modelName)
 	if provider == "" && modelName == "" {
 		return
 	}

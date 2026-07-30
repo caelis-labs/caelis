@@ -202,7 +202,13 @@ func modelAttemptResetEvent(reset model.AttemptReset) *session.Event {
 	})
 }
 
-func modelResponseEvent(message model.Message, resp *model.Response, messageID string, requestPrefix ...prefixusage.Snapshot) *session.Event {
+func modelResponseEvent(
+	message model.Message,
+	resp *model.Response,
+	messageID string,
+	invocationModel model.LLM,
+	requestPrefix ...prefixusage.Snapshot,
+) *session.Event {
 	out := &session.Event{
 		Type:       session.EventTypeOf(&session.Event{Message: &message}),
 		Visibility: session.VisibilityCanonical,
@@ -212,12 +218,18 @@ func modelResponseEvent(message model.Message, resp *model.Response, messageID s
 	}
 	if resp != nil {
 		out.Meta = responseMeta(resp)
-		out.Invocation = responseInvocation(resp, requestPrefix...)
+		out.Invocation = responseInvocationForModel(resp, invocationModel, requestPrefix...)
 	}
 	return out
 }
 
-func modelToolCallEvents(message model.Message, resp *model.Response, messageID string, requestPrefix ...prefixusage.Snapshot) []*session.Event {
+func modelToolCallEvents(
+	message model.Message,
+	resp *model.Response,
+	messageID string,
+	invocationModel model.LLM,
+	requestPrefix ...prefixusage.Snapshot,
+) []*session.Event {
 	calls := message.ToolCalls()
 	if len(calls) == 0 {
 		return nil
@@ -244,7 +256,7 @@ func modelToolCallEvents(message model.Message, resp *model.Response, messageID 
 			event.Message = &message
 			event.Text = message.TextContent()
 			if resp != nil {
-				event.Invocation = responseInvocation(resp, requestPrefix...)
+				event.Invocation = responseInvocationForModel(resp, invocationModel, requestPrefix...)
 			}
 		}
 		out = append(out, event)

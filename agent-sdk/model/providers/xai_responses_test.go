@@ -53,7 +53,7 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 				map[string]any{"type": "response.function_call_arguments.delta", "item_id": "fc_1", "output_index": 1, "delta": "{\"query\":\"weather\"}"},
 				map[string]any{"type": "response.output_item.done", "output_index": 1, "item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{\"query\":\"weather\"}"}},
 				map[string]any{"type": "response.completed", "response": map[string]any{
-					"model": "grok-4.5", "status": "completed",
+					"model": "grok-4.5-build", "status": "completed",
 					"output": []any{
 						map[string]any{"id": "rs_1", "type": "reasoning", "encrypted_content": "xai-encrypted", "summary": []any{map[string]any{"type": "summary_text", "text": "checking"}}},
 						map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{\"query\":\"weather\"}"},
@@ -103,6 +103,9 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Generate() error = %v", err)
 	}
+	if first.Model != "grok-4.5-build" {
+		t.Fatalf("first response model = %q, want raw provider response model", first.Model)
+	}
 	reasoning := first.Message.ReasoningParts()
 	if len(reasoning) != 1 || reasoning[0].Replay == nil || reasoning[0].Replay.Provider != "xai" || reasoning[0].Replay.Token != "xai-encrypted" {
 		t.Fatalf("reasoning = %#v", reasoning)
@@ -132,6 +135,9 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	defer mu.Unlock()
 	if len(bodies) != 2 {
 		t.Fatalf("request bodies = %d, want 2", len(bodies))
+	}
+	if bodies[0]["model"] != "grok-4.5" || bodies[1]["model"] != "grok-4.5" {
+		t.Fatalf("request models = %#v/%#v, want grok-4.5", bodies[0]["model"], bodies[1]["model"])
 	}
 	if bodies[0]["max_output_tokens"] != float64(128) {
 		t.Fatalf("max_output_tokens = %#v", bodies[0]["max_output_tokens"])

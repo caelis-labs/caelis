@@ -1897,6 +1897,39 @@ func TestSessionTokenUsageBreakdownNormalizesAnthropicCachedInput(t *testing.T) 
 	}
 }
 
+func TestSessionTokenUsageBreakdownMergesLegacyXAIInvocationModel(t *testing.T) {
+	t.Parallel()
+
+	events := []*session.Event{
+		{
+			Type: session.EventTypeAssistant,
+			Invocation: &session.EventInvocation{
+				Provider: "xai",
+				Model:    "grok-4.5-build",
+			},
+			Meta: modelUsageMetaForRuntimeTest(10, 8, 2, 12),
+		},
+		{
+			Type: session.EventTypeAssistant,
+			Invocation: &session.EventInvocation{
+				Provider: "xai",
+				Model:    "grok-4.5",
+			},
+			Meta: modelUsageMetaForRuntimeTest(20, 18, 3, 23),
+		},
+	}
+
+	usage := sessionTokenUsageBreakdownFromEvents(events, tokenUsageCategoryMain)
+	if len(usage.ByModel) != 1 {
+		t.Fatalf("by-model usage = %#v, want one stable xAI model row", usage.ByModel)
+	}
+	row := usage.ByModel["xai\x00grok-4.5"]
+	if row.Provider != "xai" || row.Model != "grok-4.5" ||
+		row.Usage.PromptTokens != 30 || row.Usage.CompletionTokens != 5 || row.Usage.TotalTokens != 35 {
+		t.Fatalf("by-model row = %+v, want merged xai/grok-4.5 usage", row)
+	}
+}
+
 func TestAdapterSessionTokenUsageBreakdownIncludesSubagentsAndAutoReview(t *testing.T) {
 	t.Parallel()
 
