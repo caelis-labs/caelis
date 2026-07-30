@@ -849,8 +849,12 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 	if event.Kind != SEToolCall || event.CallID != "spawn-1" || event.Name != "SPAWN" {
 		t.Fatalf("spawn event = %#v, want SPAWN tool call", event)
 	}
-	if event.TaskHandle != "task-1" || !strings.Contains(event.Output, "subagent found the issue") {
-		t.Fatalf("spawn event = %#v, want anchored subagent output", event)
+	if strings.Contains(event.Output, "subagent found the issue") {
+		t.Fatalf("spawn event = %#v, child output must stay in the detached view", event)
+	}
+	view := requireSubagentOutputViewForTest(t, model, "spawn-1")
+	if got := subagentOutputNarrativeTextForTest(view, SEAssistant); got != "subagent found the issue" {
+		t.Fatalf("detached child output = %q, want anchored narrative", got)
 	}
 }
 
@@ -924,8 +928,12 @@ func TestHandleACPEventEnvelopeStreamsDurableChildNarrativeBeforeCompletion(t *t
 		if spawn.Done {
 			t.Fatalf("after child chunk %d Spawn completed while child is still running: %#v", index, spawn)
 		}
-		if spawn.Output != chunk.want {
-			t.Fatalf("after child chunk %d Spawn output = %q, want %q", index, spawn.Output, chunk.want)
+		if spawn.Output != "" {
+			t.Fatalf("after child chunk %d Spawn leaked output %q", index, spawn.Output)
+		}
+		view := requireSubagentOutputViewForTest(t, model, "spawn-call-1")
+		if got := subagentOutputNarrativeTextForTest(view, SEAssistant); got != chunk.want {
+			t.Fatalf("after child chunk %d detached output = %q, want %q", index, got, chunk.want)
 		}
 	}
 
@@ -934,8 +942,17 @@ func TestHandleACPEventEnvelopeStreamsDurableChildNarrativeBeforeCompletion(t *t
 	}
 	model.syncViewportContent()
 	plain := strings.Join(model.viewportPlainLines, "\n")
-	if strings.Contains(plain, "(wait subagent output)") || !strings.Contains(plain, "first second") {
-		t.Fatalf("running Spawn panel did not replace its placeholder incrementally:\n%s", plain)
+	if strings.Contains(plain, "(wait subagent output)") || strings.Contains(plain, "first second") {
+		t.Fatalf("main Spawn row leaked inline child output:\n%s", plain)
+	}
+	block := requireMainACPTurnBlockForTest(t, model)
+	model.width = 96
+	model.height = 28
+	if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-call-1") {
+		t.Fatal("running Spawn did not open its output overlay")
+	}
+	if overlay := subagentOutputOverlayPlain(model); !strings.Contains(overlay, "first second") {
+		t.Fatalf("running output overlay did not preserve child chunks:\n%s", overlay)
 	}
 
 	completed := schema.ToolStatusCompleted
@@ -957,12 +974,18 @@ func TestHandleACPEventEnvelopeStreamsDurableChildNarrativeBeforeCompletion(t *t
 		},
 	})
 
-	block := requireMainACPTurnBlockForTest(t, model)
+	block = requireMainACPTurnBlockForTest(t, model)
 	if len(block.Events) != 1 {
 		t.Fatalf("after truncated final main events = %#v, want one Spawn panel", block.Events)
 	}
-	if spawn := block.Events[0]; !spawn.Done || spawn.Output != "first second" {
-		t.Fatalf("after truncated final Spawn = %#v, want complete live narrative preserved", spawn)
+	if spawn := block.Events[0]; !spawn.Done {
+		t.Fatalf("after truncated final Spawn = %#v, want completed owner", spawn)
+	}
+	if got := subagentOutputNarrativeTextForTest(
+		requireSubagentOutputViewForTest(t, model, "spawn-call-1"),
+		SEAssistant,
+	); got != "first second" {
+		t.Fatalf("after truncated final detached output = %q, want complete live narrative preserved", got)
 	}
 }
 
@@ -1020,8 +1043,12 @@ func TestHandleACPEventEnvelopeChildFinalChunksDoNotCloseOrTruncateSpawn(t *test
 			t.Fatalf("after child chunk %d events = %#v, want one Spawn panel", index, block.Events)
 		}
 		spawn := block.Events[0]
-		if spawn.Done || spawn.Output != chunk.want {
-			t.Fatalf("after child chunk %d Spawn = %#v, want running output %q", index, spawn, chunk.want)
+		if spawn.Done || spawn.Output != "" {
+			t.Fatalf("after child chunk %d Spawn = %#v, want compact running owner", index, spawn)
+		}
+		view := requireSubagentOutputViewForTest(t, model, "spawn-call-1")
+		if got := subagentOutputNarrativeTextForTest(view, SEAssistant); got != chunk.want {
+			t.Fatalf("after child chunk %d detached output = %q, want %q", index, got, chunk.want)
 		}
 	}
 
@@ -1050,8 +1077,14 @@ func TestHandleACPEventEnvelopeChildFinalChunksDoNotCloseOrTruncateSpawn(t *test
 	if len(block.Events) != 1 {
 		t.Fatalf("after repeated parent final events = %#v, want one Spawn panel", block.Events)
 	}
-	if spawn := block.Events[0]; !spawn.Done || spawn.Output != "当前目录下共有 12 个文件。" {
-		t.Fatalf("after repeated parent final Spawn = %#v, want complete child narrative preserved", spawn)
+	if spawn := block.Events[0]; !spawn.Done {
+		t.Fatalf("after repeated parent final Spawn = %#v, want completed owner", spawn)
+	}
+	if got := subagentOutputNarrativeTextForTest(
+		requireSubagentOutputViewForTest(t, model, "spawn-call-1"),
+		SEAssistant,
+	); got != "当前目录下共有 12 个文件。" {
+		t.Fatalf("after repeated parent final detached output = %q, want complete child narrative", got)
 	}
 }
 
@@ -1089,9 +1122,13 @@ func TestHandleACPEventEnvelopePreservesHiddenChildToolAsBlankMessageBoundary(t 
 		Content:       schema.TextContent{Type: "text", Text: "### 任务 4：创建文件"},
 	}))
 
-	block := requireMainACPTurnBlockForTest(t, model)
-	if len(block.Events) != 1 || block.Events[0].Output != "任务 3 完成。\n---\n\n### 任务 4：创建文件" {
-		t.Fatalf("Spawn events = %#v, want hidden child tool to preserve a Markdown message boundary", block.Events)
+	view := requireSubagentOutputViewForTest(t, model, "spawn-call-1")
+	physical := physicalTranscriptEventsForTest(view.block.Events)
+	if len(physical) != 3 ||
+		physical[0].Kind != SEAssistant || physical[0].Text != "任务 3 完成。\n---" ||
+		physical[1].Kind != SEToolCall ||
+		physical[2].Kind != SEAssistant || physical[2].Text != "### 任务 4：创建文件" {
+		t.Fatalf("detached events = %#v, want a structured tool boundary between Markdown messages", physical)
 	}
 }
 
@@ -1124,8 +1161,15 @@ func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T
 	if strings.Contains(plain, "(wait subagent output)") {
 		t.Fatalf("running Spawn still renders the empty-output placeholder:\n%s", plain)
 	}
-	if !strings.Contains(strings.ToLower(plain), "read") || !strings.Contains(plain, "config.go") {
-		t.Fatalf("running Spawn does not expose child tool activity:\n%s", plain)
+	block := requireMainACPTurnBlockForTest(t, model)
+	model.width = 96
+	model.height = 28
+	if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-call-1") {
+		t.Fatal("running Spawn did not open its output overlay")
+	}
+	overlay := subagentOutputOverlayPlain(model)
+	if !strings.Contains(strings.ToLower(overlay), "read") || !strings.Contains(overlay, "config.go") {
+		t.Fatalf("output overlay does not expose child tool activity:\n%s", overlay)
 	}
 
 	completed := schema.ToolStatusCompleted
@@ -1143,10 +1187,21 @@ func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T
 			}},
 		},
 	})
-	model.syncViewportContent()
-	plain = strings.Join(model.viewportPlainLines, "\n")
-	if !strings.Contains(plain, "loaded child settings") {
-		t.Fatalf("running Spawn does not expose latest child tool output:\n%s", plain)
+	overlay = subagentOutputOverlayPlain(model)
+	if model.subagentOutputOverlay.geometry.totalRows != 1 {
+		t.Fatalf("completed child tool did not default to a one-row summary:\n%s", overlay)
+	}
+	view := requireSubagentOutputViewForTest(t, model, "spawn-call-1")
+	if !view.block.toggleToolPanelClick("child-tool-1") {
+		t.Fatal("collapsed child tool panel could not be expanded")
+	}
+	view.touch(true)
+	overlay = subagentOutputOverlayPlain(model)
+	if !strings.Contains(overlay, "loaded child settings") {
+		t.Fatalf("expanded output overlay does not expose child tool output:\n%s", overlay)
+	}
+	if model.subagentOutputOverlay.geometry.totalRows <= 1 {
+		t.Fatalf("expanded child tool panel did not expose a structured body:\n%s", overlay)
 	}
 
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -1158,10 +1213,15 @@ func TestHandleACPEventEnvelopeShowsChildToolActivityInRunningSpawn(t *testing.T
 			Content:       schema.TextContent{Type: "text", Text: "found the configuration issue"},
 		},
 	})
+	overlay = subagentOutputOverlayPlain(model)
+	if !strings.Contains(overlay, "found the configuration issue") ||
+		!strings.Contains(overlay, "loaded child settings") {
+		t.Fatalf("output overlay did not retain the full child tool-to-narrative sequence:\n%s", overlay)
+	}
 	model.syncViewportContent()
 	plain = strings.Join(model.viewportPlainLines, "\n")
-	if !strings.Contains(plain, "found the configuration issue") || strings.Contains(plain, "loaded child settings") {
-		t.Fatalf("assistant narrative did not replace the transient child activity:\n%s", plain)
+	if strings.Contains(plain, "found the configuration issue") || strings.Contains(plain, "loaded child settings") {
+		t.Fatalf("child transcript leaked back into the compact Spawn row:\n%s", plain)
 	}
 }
 
@@ -1279,8 +1339,12 @@ func TestHandleACPEventEnvelopeRoutesCrossTurnChildContinuationToActiveTaskWrite
 		if len(blocks[1].Events) != 1 {
 			t.Fatalf("after child delta %d current Task events = %#v, want one Task write panel", index, blocks[1].Events)
 		}
-		if event := blocks[1].Events[0]; event.CallID != "task-write-1" || event.Done || event.Output != chunk.want || !event.OutputNarrative {
-			t.Fatalf("after child delta %d Task write = %#v, want open output %q", index, event, chunk.want)
+		if event := blocks[1].Events[0]; event.CallID != "task-write-1" || event.Done || event.Output != "" {
+			t.Fatalf("after child delta %d Task write = %#v, want compact open control row", index, event)
+		}
+		view := requireSubagentOutputViewForTest(t, model, "spawn-call-1")
+		if got := subagentOutputNarrativeTextForTest(view, SEAssistant); got != chunk.want {
+			t.Fatalf("after child delta %d detached output = %q, want %q", index, got, chunk.want)
 		}
 	}
 
@@ -1308,8 +1372,14 @@ func TestHandleACPEventEnvelopeRoutesCrossTurnChildContinuationToActiveTaskWrite
 	if len(blocks) != 2 || len(blocks[0].Events) != 1 || len(blocks[1].Events) != 1 {
 		t.Fatalf("final blocks = %#v, want one old Spawn and one current Task panel", blocks)
 	}
-	if event := blocks[1].Events[0]; !event.Done || event.Output != "当前目录下共有 12 个文件。" {
-		t.Fatalf("final Task write = %#v, want parent final to close without truncating child narrative", event)
+	if event := blocks[1].Events[0]; !event.Done {
+		t.Fatalf("final Task write = %#v, want completed control row", event)
+	}
+	if got := subagentOutputNarrativeTextForTest(
+		requireSubagentOutputViewForTest(t, model, "spawn-call-1"),
+		SEAssistant,
+	); got != "当前目录下共有 12 个文件。" {
+		t.Fatalf("final detached output = %q, want child continuation without truncation", got)
 	}
 }
 
@@ -1406,11 +1476,19 @@ func TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce(t *testing.T) {
 	if len(block.Events) != 1 {
 		t.Fatalf("main events = %#v, want only parent SPAWN event", block.Events)
 	}
-	if event := block.Events[0]; event.CallID != "spawn-call-1" || event.Output != "child semantic summary\n" {
-		t.Fatalf("spawn event = %#v, want semantic child narrative once", event)
+	if event := block.Events[0]; event.CallID != "spawn-call-1" || event.Output != "" {
+		t.Fatalf("spawn event = %#v, want compact parent owner", event)
 	}
-	if strings.Contains(block.Events[0].Output, "private thought") {
-		t.Fatalf("spawn event = %#v, must not merge child thought into parent output", block.Events[0])
+	view := requireSubagentOutputViewForTest(t, model, "spawn-call-1")
+	if got := subagentOutputNarrativeTextForTest(view, SEAssistant); got != "child semantic summary\n" {
+		t.Fatalf("detached assistant output = %q, want semantic narrative once", got)
+	}
+	if got := subagentOutputNarrativeTextForTest(view, SEReasoning); got != "child private thought" {
+		t.Fatalf("detached reasoning = %q, want complete child ACP reasoning", got)
+	}
+	physical := physicalTranscriptEventsForTest(view.block.Events)
+	if len(physical) != 4 {
+		t.Fatalf("detached child events = %#v, want tool, plan, reasoning, and assistant", physical)
 	}
 	if participant := model.findParticipantTurnBlock("akio"); participant != nil {
 		t.Fatalf("subagent participant block = %#v, want anchored output kept in parent panel", participant)

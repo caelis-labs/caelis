@@ -885,54 +885,6 @@ func (m *Model) ensureParticipantTurnBlock(sessionID string, actor string) *Part
 	return block
 }
 
-func (m *Model) handleParticipantTurnStreamEvent(sessionID, kind, actor, text string, final bool, source narrativeSourceIdentity, occurredAt ...time.Time) (tea.Model, tea.Cmd) {
-	m.finalizeAssistantBlock()
-	m.finalizeReasoningBlock()
-	text = tuikit.SanitizeLogText(text)
-	if text == "" && !final {
-		return m, nil
-	}
-	block := m.ensureParticipantTurnBlock(sessionID, actor)
-	if block == nil {
-		return m, nil
-	}
-	m.activeParticipantTurnSessionID = strings.TrimSpace(block.SessionID)
-	if !block.EndedAt.IsZero() {
-		block.EndedAt = time.Time{}
-	}
-	streamKind := normalizeStreamKind(kind)
-	switch streamKind {
-	case "reasoning":
-		if final {
-			block.ReplaceFinalStreamEvent(SEReasoning, text, source, occurredAt...)
-		} else if text != "" {
-			block.AppendStreamEvent(SEReasoning, text, source, occurredAt...)
-		}
-	default:
-		if final {
-			closeLatestReasoningTiming(block.Events, narrativeEventTime(occurredAt...))
-		}
-		if final {
-			block.ReplaceFinalStreamEvent(SEAssistant, text, source, occurredAt...)
-		} else if text != "" {
-			block.AppendStreamEvent(SEAssistant, text, source, occurredAt...)
-		}
-	}
-	if final && streamKind != "reasoning" {
-		block.SetStatus("completed", "", "", narrativeEventTime(occurredAt...))
-		m.activeParticipantTurnSessionID = ""
-	} else if final && strings.EqualFold(strings.TrimSpace(block.Status), "waiting_approval") {
-		block.Status = "running"
-	} else if state := strings.ToLower(strings.TrimSpace(block.Status)); state == "initializing" || state == "prompting" {
-		block.Status = "running"
-	}
-	m.markViewportBlockDirty(block.BlockID())
-	m.hasCommittedLine = true
-	m.lastCommittedStyle = tuikit.LineStyleAssistant
-	m.lastCommittedRaw = strings.TrimSpace(block.Actor) + ":"
-	return m, m.requestStreamViewportSync()
-}
-
 func (m *Model) handleParticipantStatusMsg(msg ParticipantStatusMsg) (tea.Model, tea.Cmd) {
 	block := m.ensureParticipantTurnBlock(msg.SessionID, msg.Actor)
 	if block == nil {

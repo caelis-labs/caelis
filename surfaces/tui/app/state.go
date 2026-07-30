@@ -361,10 +361,15 @@ type Model struct {
 	taskStreamCursors        map[string]string
 	taskStreamIDsByHandle    map[string]string
 	taskStreamHandlesByID    map[string]string
+	taskStreamIDsByCallID    map[string]string
+	taskStreamCallIDsByID    map[string]string
 	taskStreamResolveTokens  map[string]uint64
 	taskStreamResolveRetries map[string]int
 	taskStreamRetries        map[string]int
 	taskStreamNextToken      uint64
+	// Subagent output views are transient Surface projections keyed by the
+	// parent Spawn call. They are never persisted or used as Task identity.
+	subagentOutputViews map[string]*subagentOutputView
 
 	// Transient log replacement tracking — now uses block IDs.
 	transientBlockID string

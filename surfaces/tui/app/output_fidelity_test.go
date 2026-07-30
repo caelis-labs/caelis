@@ -38,51 +38,27 @@ func TestDurableTaskWaitFinalCompletesOriginalSpawnPanel(t *testing.T) {
 
 	model.syncViewportContent()
 	plain := strings.Join(model.viewportPlainLines, "\n")
-	wantPreview := []string{
-		"• Spawned reviewer: inspect",
-		"  └ # 完成",
-		"    已创建文件。",
-		"    ... +10 lines",
-		"    创建文件",
-		"    > **结果**",
-	}
-	if !reflect.DeepEqual(model.viewportPlainLines, wantPreview) {
-		t.Fatalf("rendered Spawn preview rows = %#v\nwant bounded preview rows = %#v", model.viewportPlainLines, wantPreview)
+	wantMain := []string{"• Spawned reviewer: inspect  ↗"}
+	if !reflect.DeepEqual(model.viewportPlainLines, wantMain) {
+		t.Fatalf("rendered Spawn rows = %#v\nwant compact overlay entry = %#v", model.viewportPlainLines, wantMain)
 	}
 	if strings.Contains(plain, "hello.go") || strings.Contains(plain, "fmt.Println") {
-		t.Fatalf("bounded Spawn preview leaked full child output into the main transcript:\n%s", plain)
+		t.Fatalf("compact Spawn row leaked full child output into the main transcript:\n%s", plain)
 	}
-	if !block.toggleToolPanelClick("spawn-call-1") {
-		t.Fatal("completed Spawn preview did not expose its canonical full output")
+	model.width = 100
+	model.height = 36
+	if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-call-1") {
+		t.Fatal("completed Spawn row did not open its canonical output overlay")
 	}
-	model.markViewportBlockDirty(block.BlockID())
-	model.syncViewportContent()
-	plain = strings.Join(model.viewportPlainLines, "\n")
-	if len(model.viewportPlainLines) <= len(wantPreview) {
-		t.Fatalf("expanded Spawn output stayed compact: %#v", model.viewportPlainLines)
-	}
-	for index, row := range model.viewportPlainLines[1:] {
-		if index == 0 {
-			if !strings.HasPrefix(row, "  └ ") {
-				t.Fatalf("first expanded Spawn row escaped its panel: %q", row)
-			}
-			continue
-		}
-		if strings.TrimSpace(row) == "" {
-			continue
-		}
-		if !strings.HasPrefix(row, "    ") {
-			t.Fatalf("expanded Spawn row %d escaped its panel: %q", index+2, row)
-		}
-	}
+	plain = subagentOutputOverlayPlain(model)
 	for _, want := range []string{"完成", "第一项", "第二项", "hello.go", "fmt.Println", "创建文件", "结果"} {
 		if !strings.Contains(plain, want) {
-			t.Fatalf("expanded Final Message missing %q:\n%s", want, plain)
+			t.Fatalf("output overlay Final Message missing %q:\n%s", want, plain)
 		}
 	}
 	for _, forbidden := range []string{"(wait subagent output)", "---###", "创建文件>"} {
 		if strings.Contains(plain, forbidden) {
-			t.Fatalf("rendered Final Message contains glued/placeholder text %q:\n%s", forbidden, plain)
+			t.Fatalf("output overlay contains glued/placeholder text %q:\n%s", forbidden, plain)
 		}
 	}
 }
@@ -277,9 +253,13 @@ func TestHiddenChildToolWithoutMessageIDCreatesMarkdownBoundary(t *testing.T) {
 		SessionUpdate: schema.UpdateAgentMessage, Content: schema.TextContent{Type: "text", Text: "### 任务 4：创建文件"},
 	}))
 
-	block := requireMainACPTurnBlockForTest(t, model)
-	if len(block.Events) != 1 || block.Events[0].Output != "任务 3 完成。\n---\n\n### 任务 4：创建文件" {
-		t.Fatalf("Spawn events = %#v, want a stable Markdown boundary around hidden child tool", block.Events)
+	view := requireSubagentOutputViewForTest(t, model, "spawn-call-1")
+	physical := physicalTranscriptEventsForTest(view.block.Events)
+	if len(physical) != 3 ||
+		physical[0].Kind != SEAssistant || physical[0].Text != "任务 3 完成。\n---" ||
+		physical[1].Kind != SEToolCall ||
+		physical[2].Kind != SEAssistant || physical[2].Text != "### 任务 4：创建文件" {
+		t.Fatalf("detached child events = %#v, want a structured tool boundary around Markdown messages", physical)
 	}
 }
 

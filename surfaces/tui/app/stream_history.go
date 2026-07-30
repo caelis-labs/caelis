@@ -9,6 +9,8 @@ import (
 
 func (m *Model) resetConversationView() {
 	m.flushStream()
+	m.closeTaskStreamSubscriptions()
+	m.closeSubagentOutputOverlay()
 	m.statusContext = ""
 	m.statusView.Tokens = ""
 	m.activeAssistantID = ""
@@ -32,6 +34,8 @@ func (m *Model) resetConversationView() {
 	m.runningActivityTracker.endTurn()
 	m.runningActivity = runningActivityState{}
 	m.compactNoticePair = compactNoticePairState{}
+	m.subagentOutputOverlay = nil
+	m.subagentOutputViews = map[string]*subagentOutputView{}
 	m.clearSelection()
 	m.clearInputSelection()
 	m.setViewportFollowState(viewportFollowTail)

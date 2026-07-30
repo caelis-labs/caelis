@@ -193,6 +193,14 @@ func (m *Model) currentFooterHelp() helpBindings {
 			},
 		}
 	}
+	if m.subagentOutputOverlay != nil {
+		return helpBindings{
+			short: enabledBindings(m.keys.OverlayScroll, m.keys.OverlayClose),
+			full: [][]key.Binding{
+				enabledBindings(m.keys.OverlayScroll, m.keys.PageUp, m.keys.PageDown, m.keys.OverlayClose),
+			},
+		}
+	}
 	if m.showPalette || len(m.resumeCandidates) > 0 || m.slashArgActive || len(m.slashCandidates) > 0 || len(m.mentionCandidates) > 0 {
 		return helpBindings{
 			short: enabledBindings(m.keys.Back),

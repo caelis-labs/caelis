@@ -12,6 +12,9 @@ import (
 )
 
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if handled, cmd := m.handleSubagentOutputOverlayMouse(msg); handled {
+		return m, cmd
+	}
 	if handled, cmd := m.handleSubagentOverlayMouse(msg); handled {
 		return m, cmd
 	}
@@ -535,6 +538,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// External prompt input takes priority.
 	if m.activePrompt != nil {
 		return m, m.handlePromptKey(msg)
+	}
+	if m.subagentOutputOverlay != nil {
+		return m, m.handleSubagentOutputOverlayKey(msg)
 	}
 	if m.subagentOverlay != nil {
 		return m, m.handleSubagentOverlayKey(msg)
@@ -1122,6 +1128,9 @@ func (m *Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if m.activePrompt != nil {
 		return m, m.handlePromptPaste(msg)
 	}
+	if m.subagentOutputOverlay != nil {
+		return m, nil
+	}
 	if m.subagentOverlay != nil {
 		return m, m.handleSubagentOverlayPaste(msg)
 	}
@@ -1477,6 +1486,9 @@ func (m *Model) tryToggleFoldToken(blockID string, token string) bool {
 	if key, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_exploration_stable:"); ok {
 		return m.tryToggleACPExplorationStageToken(blockID, key)
 	}
+	if callID, ok := strings.CutPrefix(strings.TrimSpace(token), subagentOutputOverlayTokenPrefix); ok {
+		return m.openSubagentOutputOverlay(blockID, callID)
+	}
 	callID, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_tool_panel:")
 	if !ok || strings.TrimSpace(callID) == "" {
 		return false
@@ -1488,7 +1500,7 @@ func (m *Model) tryToggleFoldToken(blockID string, token string) bool {
 			return false
 		}
 		if handle != "" {
-			m.wantTaskStreamForPanel(callID, handle, m.taskHandleHasExpandedPanel(handle))
+			m.applyTaskStreamDemand(callID, handle, m.taskStreamDemandForHandle(handle))
 		}
 		return true
 	case *MainACPTurnBlock:
@@ -1497,7 +1509,7 @@ func (m *Model) tryToggleFoldToken(blockID string, token string) bool {
 			return false
 		}
 		if handle != "" {
-			m.wantTaskStreamForPanel(callID, handle, m.taskHandleHasExpandedPanel(handle))
+			m.applyTaskStreamDemand(callID, handle, m.taskStreamDemandForHandle(handle))
 		}
 		return true
 	default:

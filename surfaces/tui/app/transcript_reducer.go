@@ -45,9 +45,14 @@ func (m *Model) applyTranscriptToolToParticipant(event TranscriptEvent, mutation
 		block := m.findParticipantTurnBlock(transcriptParticipantTurnKey(event))
 		if block != nil {
 			bindParticipantTurnBlock(block, event)
-			block.sealNarrativeSegmentWithGap()
-			m.markViewportBlockDirty(block.BlockID())
-			changed = true
+			result := applyTranscriptEventToParticipantTurn(block, event, participantTurnTranscriptPolicy{
+				actor:           participantTurnTranscriptActor(event),
+				hideTaskControl: true,
+			})
+			if result.changed {
+				m.markViewportBlockDirty(block.BlockID())
+				changed = true
+			}
 		}
 		if !changed {
 			// No participant narrative exists yet, so there is no segment to
@@ -61,13 +66,12 @@ func (m *Model) applyTranscriptToolToParticipant(event TranscriptEvent, mutation
 		return m, nil
 	}
 	bindParticipantTurnBlock(block, event)
-	if !event.OccurredAt.IsZero() && (block.StartedAt.IsZero() || event.OccurredAt.Before(block.StartedAt)) {
-		block.StartedAt = event.OccurredAt
+	result := applyTranscriptEventToParticipantTurn(block, event, participantTurnTranscriptPolicy{
+		actor: participantTurnTranscriptActor(event),
+	})
+	if !result.changed {
+		return m, nil
 	}
-	if state := strings.ToLower(strings.TrimSpace(block.Status)); state == "initializing" || state == "prompting" {
-		block.Status = "running"
-	}
-	block.UpdateToolWithMeta(mutation.callID, mutation.name, mutation.args, mutation.output, mutation.final, mutation.err, mutation.meta)
 	m.markViewportBlockDirty(block.BlockID())
 	return m, m.requestStreamViewportSync()
 }

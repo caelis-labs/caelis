@@ -251,6 +251,7 @@ func (m *Model) blockRenderContext(width int) BlockRenderContext {
 		ThemeKey:              m.cachedThemeRenderKey(),
 		Workspace:             m.renderWorkspacePath(),
 		SpinnerView:           m.spinner.View(),
+		AnimationsEnabled:     !m.noAnimation,
 		ObserveGlamourRender:  m.observeGlamourRender,
 		ObserveInlineMarkdown: m.observeInlineMarkdownRender,
 	}

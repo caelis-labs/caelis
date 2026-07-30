@@ -22,7 +22,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
-func TestTUITaskPanelSubscribesIndependentStreamAndCloseDoesNotCancelTask(t *testing.T) {
+func TestTUISubagentOutputSubscribesInBackgroundAndOverlayCloseDoesNotCancelTask(t *testing.T) {
 	t.Parallel()
 
 	subscription := newTUITestTaskSubscription()
@@ -47,6 +47,8 @@ func TestTUITaskPanelSubscribesIndependentStreamAndCloseDoesNotCancelTask(t *tes
 		TaskStreamPrincipal: taskstream.Principal{ID: "user-1"},
 		ProgramSender:       sender,
 	})
+	model.width = 100
+	model.height = 28
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
 		metautil.RuntimeToolName: "SPAWN",
@@ -78,7 +80,7 @@ func TestTUITaskPanelSubscribesIndependentStreamAndCloseDoesNotCancelTask(t *tes
 			t.Fatalf("Subscribe request = %#v", request)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("expanded Task panel did not subscribe")
+		t.Fatal("background subagent observer did not subscribe")
 	}
 	opened := receiveTUITaskStreamMessage[taskStreamOpenedMsg](t, messages)
 	if next, _ := model.Update(opened); next != nil {
@@ -109,27 +111,40 @@ func TestTUITaskPanelSubscribesIndependentStreamAndCloseDoesNotCancelTask(t *tes
 	if next, _ := model.Update(batch); next != nil {
 		model = next.(*Model)
 	}
-	block := requireMainACPTurnBlockForTest(t, model)
-	found := false
-	for _, event := range block.Events {
-		if event.TaskHandle == "zuri" && event.Output == "isolated child output" {
-			found = true
-		}
+	view := model.subagentOutputViews["spawn-1"]
+	if view == nil || view.block == nil {
+		t.Fatal("background subagent observer did not retain a transcript view")
 	}
-	if !found {
-		t.Fatalf("Task panel events = %#v, want isolated child output", block.Events)
+	childPlain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
+	if !strings.Contains(childPlain, "isolated child output") {
+		t.Fatalf("background child transcript omitted live output:\n%s", childPlain)
+	}
+	block := requireMainACPTurnBlockForTest(t, model)
+	mainPlain := strings.Join(renderedPlainRows(block.Render(model.blockRenderContext(96))), "\n")
+	if strings.Contains(mainPlain, "isolated child output") {
+		t.Fatalf("background child transcript leaked into the main Spawn row:\n%s", mainPlain)
+	}
+	if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-1") {
+		t.Fatal("Spawn did not open its already-observed Task output overlay")
+	}
+	if overlay := model.renderSubagentOutputOverlay(); !strings.Contains(overlay, "isolated child output") {
+		t.Fatalf("opened overlay omitted background transcript:\n%s", overlay)
 	}
 
-	model.wantTaskStreamForPanel("spawn-1", "zuri", false)
-	if got := subscription.closeCalls.Load(); got != 1 {
-		t.Fatalf("subscription Close calls = %d, want one delivery-only close", got)
+	model.closeSubagentOutputOverlay()
+	if got := subscription.closeCalls.Load(); got != 0 {
+		t.Fatalf("subscription Close calls = %d, hiding the overlay must retain observation", got)
 	}
 	if controlService.cancelCalls.Load() != 0 {
 		t.Fatalf("Task cancel calls = %d, closing panel must not cancel Task", controlService.cancelCalls.Load())
 	}
+	model.closeTaskStreamSubscriptions()
+	if got := subscription.closeCalls.Load(); got != 1 {
+		t.Fatalf("subscription Close calls after Session cleanup = %d, want one", got)
+	}
 }
 
-func TestTUITaskPanelRetriesDirectoryAndSubscriptionFailures(t *testing.T) {
+func TestTUIBackgroundSubagentObservationRetriesDirectoryAndSubscriptionFailures(t *testing.T) {
 	t.Parallel()
 
 	subscription := newTUIProtocolTaskSubscription()
@@ -161,7 +176,6 @@ func TestTUITaskPanelRetriesDirectoryAndSubscriptionFailures(t *testing.T) {
 			RawOutput: map[string]any{"handle": "zuri", "state": "running"}, Meta: meta,
 		},
 	})
-
 	missing := receiveTUITaskStreamMessage[taskStreamResolvedMsg](t, messages)
 	if !errors.Is(missing.err, errTaskStreamNotDiscoverable) {
 		t.Fatalf("first directory result error = %v, want retryable discovery miss", missing.err)
@@ -200,6 +214,302 @@ func TestTUITaskPanelRetriesDirectoryAndSubscriptionFailures(t *testing.T) {
 		t.Fatalf("Subscribe calls = %d, want failure plus retry", calls)
 	}
 	model.closeTaskStreamSubscriptions()
+}
+
+func TestTUIBackgroundSubagentObservationKeepsResolvingByParentCall(t *testing.T) {
+	t.Parallel()
+
+	service := &tuiRetryTaskStreamService{
+		subscription:     newTUIProtocolTaskSubscription(),
+		directoryMisses:  6,
+		descriptorHandle: "canonical-child",
+	}
+	messages := make(chan tea.Msg, 32)
+	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
+	defer sender.Close()
+	model := NewModel(Config{
+		Context: context.Background(), NoColor: true, NoAnimation: true,
+		TaskStreams: service, TaskStreamPrincipal: taskstream.Principal{ID: "user-1"}, ProgramSender: sender,
+	})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
+	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "SPAWN",
+	})
+	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "SPAWN helper",
+			Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"agent": "self", "prompt": "inspect"}, Meta: meta,
+		},
+	})
+	running := schema.ToolStatusInProgress
+	_, _ = model.handleACPEventEnvelope(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
+			RawOutput: map[string]any{"handle": "provisional-child", "state": "running"}, Meta: meta,
+		},
+	})
+
+	for attempt := 1; attempt <= 6; attempt++ {
+		missing := receiveTUITaskStreamMessage[taskStreamResolvedMsg](t, messages)
+		if !errors.Is(missing.err, errTaskStreamNotDiscoverable) {
+			t.Fatalf("directory attempt %d = %#v, want retryable miss", attempt, missing)
+		}
+		next, retry := model.Update(missing)
+		model = next.(*Model)
+		if retry == nil {
+			t.Fatalf("directory attempt %d stopped retrying", attempt)
+		}
+		next, _ = model.handleTaskStreamResolveRetry(taskStreamResolveRetryMsg{
+			sessionID: missing.sessionID,
+			callID:    missing.callID,
+			handle:    missing.handle,
+			token:     missing.token,
+		})
+		model = next.(*Model)
+	}
+
+	resolved := receiveTUITaskStreamMessage[taskStreamResolvedMsg](t, messages)
+	if resolved.err != nil || resolved.taskID != "task-1" || resolved.handle != "canonical-child" {
+		t.Fatalf("resolved Task = %#v, want canonical descriptor matched by parent call", resolved)
+	}
+	next, _ := model.Update(resolved)
+	model = next.(*Model)
+	view := requireSubagentOutputViewForTest(t, model, "spawn-1")
+	if view.taskHandle != "canonical-child" {
+		t.Fatalf("subagent public handle = %q, want canonical directory handle", view.taskHandle)
+	}
+}
+
+func TestTUIBackgroundSubagentObservationStopsDirectoryRetryAfterSpawnTerminal(t *testing.T) {
+	t.Parallel()
+
+	service := &tuiRetryTaskStreamService{
+		subscription:    newTUIProtocolTaskSubscription(),
+		directoryMisses: 100,
+	}
+	messages := make(chan tea.Msg, 8)
+	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
+	defer sender.Close()
+	model := NewModel(Config{
+		Context: context.Background(), NoColor: true, NoAnimation: true,
+		TaskStreams: service, TaskStreamPrincipal: taskstream.Principal{ID: "user-1"}, ProgramSender: sender,
+	})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
+	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "SPAWN",
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall, ToolCallID: "spawn-1", Title: "SPAWN helper",
+			Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
+			RawInput: map[string]any{"agent": "self", "prompt": "inspect"}, Meta: meta,
+		},
+	})
+	running := schema.ToolStatusInProgress
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
+			RawOutput: map[string]any{"handle": "zuri", "state": "running"}, Meta: meta,
+		},
+	})
+	missing := receiveTUITaskStreamMessage[taskStreamResolvedMsg](t, messages)
+	next, retry := model.Update(missing)
+	model = next.(*Model)
+	if retry == nil {
+		t.Fatal("running Spawn directory miss did not schedule a retry")
+	}
+
+	completed := schema.ToolStatusCompleted
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &completed,
+			RawOutput: map[string]any{"handle": "zuri", "state": "completed", "final_response": "done"}, Meta: meta,
+		},
+	})
+	if token := model.taskStreamResolveTokens["spawn-1"]; token != 0 {
+		t.Fatalf("terminal Spawn resolve token = %d, want invalidated", token)
+	}
+	next, _ = model.Update(retry())
+	model = next.(*Model)
+	if calls := service.listCalls.Load(); calls != 1 {
+		t.Fatalf("Task directory List calls after terminal Spawn = %d, want one initial call", calls)
+	}
+	if token := model.taskStreamResolveTokens["spawn-1"]; token != 0 {
+		t.Fatalf("terminal Spawn resolve token = %d, want invalidated", token)
+	}
+}
+
+func TestTUIBackgroundSubagentObservationStopsSubscribeRetryAfterSpawnTerminal(t *testing.T) {
+	t.Parallel()
+
+	service := &tuiRetryTaskStreamService{
+		subscription:      newTUIProtocolTaskSubscription(),
+		subscribeFailures: 100,
+	}
+	messages := make(chan tea.Msg, 8)
+	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
+	defer sender.Close()
+	model := NewModel(Config{
+		Context: context.Background(), NoColor: true, NoAnimation: true,
+		TaskStreams: service, TaskStreamPrincipal: taskstream.Principal{ID: "user-1"}, ProgramSender: sender,
+	})
+	model.currentSessionID = "session-1"
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.taskHandle = "zuri"
+	model.taskStreamIDsByHandle["zuri"] = "task-1"
+	model.taskStreamHandlesByID["task-1"] = "zuri"
+	model.taskStreamWanted["task-1"] = true
+	model.taskStreamTokens["task-1"] = 7
+
+	next, retry := model.handleTaskStreamClosed(taskStreamClosedMsg{
+		sessionID: "session-1", taskID: "task-1", token: 7,
+		err: errorcode.New(errorcode.Unavailable, "temporary"),
+	})
+	model = next.(*Model)
+	if retry == nil {
+		t.Fatal("running Spawn subscription failure did not schedule a retry")
+	}
+
+	completed := schema.ToolStatusCompleted
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &completed,
+			RawOutput: map[string]any{"handle": "zuri", "state": "completed", "final_response": "done"},
+			Meta:      acpToolNameMeta("SPAWN"),
+		},
+	})
+	if model.taskStreamWanted["task-1"] {
+		t.Fatal("terminal Spawn retained Task stream demand")
+	}
+	next, _ = model.Update(retry())
+	model = next.(*Model)
+	if calls := service.subscribeCalls.Load(); calls != 0 {
+		t.Fatalf("Task Subscribe calls after terminal Spawn = %d, want zero", calls)
+	}
+	if strings.Contains(model.hint, "live output is unavailable") {
+		t.Fatalf("terminal Spawn surfaced a stale Task stream hint: %q", model.hint)
+	}
+}
+
+func TestTaskStreamDemandStopsForEveryTerminalSubagentStatus(t *testing.T) {
+	t.Parallel()
+
+	for _, status := range []string{
+		"completed",
+		"succeeded",
+		"success",
+		"failed",
+		"cancelled",
+		"canceled",
+		"interrupted",
+		"terminated",
+		eventstream.LifecycleStateUnknown,
+	} {
+		t.Run(status, func(t *testing.T) {
+			model := NewModel(Config{NoColor: true, NoAnimation: true})
+			view := model.ensureSubagentOutputView("spawn-1")
+			view.taskHandle = "zuri"
+			view.block.Status = status
+			demand := model.taskStreamDemandForAnchor("spawn-1", "zuri")
+			if demand != taskStreamDemandFinishedSubagent || demand.wanted() {
+				t.Fatalf("terminal status %q demand = %v wanted=%v", status, demand, demand.wanted())
+			}
+		})
+	}
+}
+
+func TestTUIBackgroundSubagentObservationClosesRemappedActiveStreamAfterSpawnTerminal(t *testing.T) {
+	t.Parallel()
+
+	subscription := newTUIProtocolTaskSubscription()
+	service := &tuiRetryTaskStreamService{subscription: subscription}
+	sender := &ProgramSender{Send: func(tea.Msg) {}}
+	defer sender.Close()
+	model := NewModel(Config{
+		Context: context.Background(), NoColor: true, NoAnimation: true,
+		TaskStreams: service, TaskStreamPrincipal: taskstream.Principal{ID: "user-1"}, ProgramSender: sender,
+	})
+	model.currentSessionID = "session-1"
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.taskHandle = "canonical-child"
+	model.taskStreamIDsByHandle["canonical-child"] = "task-1"
+	model.taskStreamHandlesByID["task-1"] = "canonical-child"
+	model.taskStreamIDsByCallID["spawn-1"] = "task-1"
+	model.taskStreamCallIDsByID["task-1"] = "spawn-1"
+	model.taskStreamWanted["task-1"] = true
+	model.taskStreamTokens["task-1"] = 7
+	model.taskStreamSubscriptions["task-1"] = subscription
+
+	completed := schema.ToolStatusCompleted
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &completed,
+			RawOutput: map[string]any{"handle": "provisional-child", "state": "completed", "final_response": "done"},
+			Meta:      acpToolNameMeta("SPAWN"),
+		},
+	})
+	if model.taskStreamWanted["task-1"] {
+		t.Fatal("terminal Spawn retained active Task stream demand")
+	}
+	if model.taskStreamSubscriptions["task-1"] != nil {
+		t.Fatal("terminal Spawn retained its active Task stream subscription")
+	}
+	if _, open := <-subscription.events; open {
+		t.Fatal("terminal Spawn did not close the remapped Task stream")
+	}
+}
+
+func TestTUIClearHistoryClosesBackgroundSubagentStreams(t *testing.T) {
+	t.Parallel()
+
+	subscription := newTUIProtocolTaskSubscription()
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.currentSessionID = "session-old"
+	model.taskStreamWanted["task-old"] = true
+	model.taskStreamTokens["task-old"] = 7
+	model.taskStreamSubscriptions["task-old"] = subscription
+	model.taskStreamCursors["task-old"] = "cursor-old"
+	model.taskStreamIDsByHandle["child-old"] = "task-old"
+	model.taskStreamHandlesByID["task-old"] = "child-old"
+	model.taskStreamIDsByCallID["spawn-old"] = "task-old"
+	model.taskStreamCallIDsByID["task-old"] = "spawn-old"
+	model.ensureSubagentOutputView("spawn-old")
+
+	next, _ := model.Update(ClearHistoryMsg{})
+	model = next.(*Model)
+
+	if _, open := <-subscription.events; open {
+		t.Fatal("ClearHistory left the old Session Task stream open")
+	}
+	if len(model.taskStreamWanted) != 0 ||
+		len(model.taskStreamTokens) != 0 ||
+		len(model.taskStreamSubscriptions) != 0 ||
+		len(model.taskStreamCursors) != 0 ||
+		len(model.taskStreamIDsByHandle) != 0 ||
+		len(model.taskStreamHandlesByID) != 0 ||
+		len(model.taskStreamIDsByCallID) != 0 ||
+		len(model.taskStreamCallIDsByID) != 0 {
+		t.Fatalf(
+			"Task stream state survived ClearHistory: wanted=%v tokens=%v subscriptions=%v cursors=%v handles=%v calls=%v",
+			model.taskStreamWanted,
+			model.taskStreamTokens,
+			model.taskStreamSubscriptions,
+			model.taskStreamCursors,
+			model.taskStreamIDsByHandle,
+			model.taskStreamIDsByCallID,
+		)
+	}
+	if len(model.subagentOutputViews) != 0 {
+		t.Fatalf("subagent output views survived ClearHistory: %#v", model.subagentOutputViews)
+	}
 }
 
 func TestTUITaskMailboxBoundsOneUpdateBatch(t *testing.T) {
@@ -295,9 +605,12 @@ type tuiTestTaskStreamService struct {
 }
 
 type tuiRetryTaskStreamService struct {
-	listCalls      atomic.Int32
-	subscribeCalls atomic.Int32
-	subscription   *tuiProtocolTaskSubscription
+	listCalls         atomic.Int32
+	subscribeCalls    atomic.Int32
+	subscription      *tuiProtocolTaskSubscription
+	directoryMisses   int32
+	descriptorHandle  string
+	subscribeFailures int32
 }
 
 type tuiProtocolTaskSubscription struct {
@@ -318,11 +631,19 @@ func (s *tuiProtocolTaskSubscription) Close() error {
 }
 
 func (s *tuiRetryTaskStreamService) List(context.Context, taskstream.Principal, taskstream.ListRequest) (taskstream.ListResult, error) {
-	if s.listCalls.Add(1) == 1 {
+	misses := s.directoryMisses
+	if misses <= 0 {
+		misses = 1
+	}
+	if s.listCalls.Add(1) <= misses {
 		return taskstream.ListResult{}, nil
 	}
+	handle := strings.TrimSpace(s.descriptorHandle)
+	if handle == "" {
+		handle = "zuri"
+	}
 	return taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
-		SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
+		SessionID: "session-1", TaskID: "task-1", Handle: handle, Kind: task.KindSubagent,
 		State: task.StateRunning, Running: true,
 		ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "SPAWN"},
 	}}}, nil
@@ -333,7 +654,11 @@ func (*tuiRetryTaskStreamService) Events(context.Context, taskstream.Principal, 
 }
 
 func (s *tuiRetryTaskStreamService) Subscribe(context.Context, taskstream.Principal, taskstream.SubscribeRequest) (taskstream.SubscribeResult, error) {
-	if s.subscribeCalls.Add(1) == 1 {
+	failures := s.subscribeFailures
+	if failures <= 0 {
+		failures = 1
+	}
+	if s.subscribeCalls.Add(1) <= failures {
 		return taskstream.SubscribeResult{}, errorcode.New(errorcode.Unavailable, "task stream temporarily unavailable")
 	}
 	return taskstream.SubscribeResult{Subscription: s.subscription, ResumeMode: taskstream.ResumeModeExact}, nil

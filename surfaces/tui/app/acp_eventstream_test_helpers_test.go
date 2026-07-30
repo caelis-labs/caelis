@@ -57,6 +57,30 @@ func requireMainACPTurnBlockForTest(t *testing.T, model *Model) *MainACPTurnBloc
 	return nil
 }
 
+func requireSubagentOutputViewForTest(t *testing.T, model *Model, callID string) *subagentOutputView {
+	t.Helper()
+	if model != nil {
+		if view := model.subagentOutputViews[strings.TrimSpace(callID)]; view != nil && view.block != nil {
+			return view
+		}
+	}
+	t.Fatalf("subagent output view %q missing", callID)
+	return nil
+}
+
+func subagentOutputNarrativeTextForTest(view *subagentOutputView, kind SubagentEventKind) string {
+	if view == nil || view.block == nil {
+		return ""
+	}
+	var text strings.Builder
+	for _, event := range view.block.Events {
+		if event.Kind == kind {
+			text.WriteString(event.Text)
+		}
+	}
+	return text.String()
+}
+
 func mainACPTurnBlocksForTest(model *Model) []*MainACPTurnBlock {
 	if model == nil || model.doc == nil {
 		return nil

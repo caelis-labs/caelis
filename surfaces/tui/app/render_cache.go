@@ -109,7 +109,13 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 			if strings.TrimSpace(sourcePlain) == "" {
 				sourcePlain = plainLine
 			}
-			if wrappedPlain, wrappedStyled, ok := wrapACPTranscriptHeaderForViewport(sourcePlain, wrapWidth, ctx); ok {
+			if wrappedPlain, wrappedStyled, ok := wrapACPTranscriptHeaderForViewport(
+				sourcePlain,
+				wrapWidth,
+				ctx,
+				row.acpHeaderMarkTone,
+				row.acpHeaderMarkDim,
+			); ok {
 				styledLines = append(styledLines, wrappedStyled...)
 				plainLines = append(plainLines, wrappedPlain...)
 				for range wrappedStyled {
@@ -291,7 +297,13 @@ func styleACPTranscriptNarrativePrefix(ctx BlockRenderContext, prefix string, li
 	}
 }
 
-func wrapACPTranscriptHeaderForViewport(plain string, width int, ctx BlockRenderContext) ([]string, []string, bool) {
+func wrapACPTranscriptHeaderForViewport(
+	plain string,
+	width int,
+	ctx BlockRenderContext,
+	markTone acpHeaderMarkTone,
+	markDim bool,
+) ([]string, []string, bool) {
 	if width <= 0 {
 		width = 1
 	}
@@ -335,7 +347,7 @@ func wrapACPTranscriptHeaderForViewport(plain string, width int, ctx BlockRender
 	styledLines := make([]string, 0, len(plainLines))
 	for i, line := range plainLines {
 		if i == 0 {
-			styledLines = append(styledLines, styleACPTranscriptHeader(ctx, line))
+			styledLines = append(styledLines, styleACPTranscriptHeaderWithMark(ctx, line, markTone, markDim))
 			continue
 		}
 		styledLines = append(styledLines, styleACPTranscriptHeaderContinuation(ctx, verb, continuationPrefix, line))

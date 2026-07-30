@@ -15,6 +15,13 @@ import (
 func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea.Cmd) {
 	m.observeTaskStreamSession(env)
 	if env.Err != nil || env.Kind == eventstream.KindError {
+		errorEnvelope := env
+		if strings.TrimSpace(errorEnvelope.Error) == "" && env.Err != nil {
+			errorEnvelope.Error = env.Err.Error()
+		}
+		if m.observeSubagentOutputEvents(m.projectACPEventToTranscriptEvents(errorEnvelope)) {
+			return m, m.requestSubagentOutputRender()
+		}
 		return m, nil
 	}
 	if m.suppressPairedCompactNotice(env) {

@@ -12,16 +12,27 @@ import (
 // RenderedRow — a single visual line produced by rendering a Block.
 // ---------------------------------------------------------------------------
 
+type acpHeaderMarkTone uint8
+
+const (
+	acpHeaderMarkDefault acpHeaderMarkTone = iota
+	acpHeaderMarkAccent
+	acpHeaderMarkSuccess
+	acpHeaderMarkDanger
+)
+
 // RenderedRow is one terminal line of output from a block's Render method.
 type RenderedRow struct {
-	Styled        string // ANSI-colored display text
-	Plain         string // plain text for selection/copy
-	BlockID       string // originating block ID
-	ClickToken    string // optional interaction token for row-level hit testing
-	ClickStartCol int    // inclusive display-column start; valid when ClickEndCol > ClickStartCol
-	ClickEndCol   int    // exclusive display-column end for a bounded click target
-	PreWrapped    bool   // if true, already wrapped to viewport width — skip re-wrapping
-	ACPHeader     bool   // if true, wrap as an ACP transcript header row
+	Styled            string // ANSI-colored display text
+	Plain             string // plain text for selection/copy
+	BlockID           string // originating block ID
+	ClickToken        string // optional interaction token for row-level hit testing
+	ClickStartCol     int    // inclusive display-column start; valid when ClickEndCol > ClickStartCol
+	ClickEndCol       int    // exclusive display-column end for a bounded click target
+	PreWrapped        bool   // if true, already wrapped to viewport width — skip re-wrapping
+	ACPHeader         bool   // if true, wrap as an ACP transcript header row
+	acpHeaderMarkTone acpHeaderMarkTone
+	acpHeaderMarkDim  bool
 }
 
 // StyledRow creates a RenderedRow from a styled line, deriving Plain automatically.
@@ -97,6 +108,7 @@ type BlockRenderContext struct {
 	ThemeKey              string       // cached theme render key for hot render paths
 	Workspace             string       // display workspace path for path compaction
 	SpinnerView           string       // current spinner frame for animated blocks
+	AnimationsEnabled     bool         // whether transient block animation is allowed
 	ObserveGlamourRender  func()
 	ObserveInlineMarkdown func()
 }

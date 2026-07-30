@@ -111,11 +111,12 @@ func (m *Model) finishLiveTurn(endedAt time.Time, interrupted bool, err error) t
 	m.liveTurn.Divider = false
 	m.ensureViewportLayout()
 	m.syncViewportContent()
+	resumeAnimationCmd := m.resumeRunningAnimationIfNeeded()
 	if hasNextPending {
 		_, cmd := m.submitPendingPrompt(nextPending)
-		return tea.Batch(tea.ClearScreen, cmd)
+		return tea.Batch(tea.ClearScreen, cmd, resumeAnimationCmd)
 	}
-	return tea.ClearScreen
+	return tea.Batch(tea.ClearScreen, resumeAnimationCmd)
 }
 
 func (m *Model) captureLiveTurnDuration(endedAt time.Time) {

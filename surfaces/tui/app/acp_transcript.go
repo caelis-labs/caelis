@@ -309,13 +309,22 @@ func renderACPTranscriptHeaderRow(blockID string, plain string, width int, ctx B
 }
 
 func styleACPTranscriptHeader(ctx BlockRenderContext, plain string) string {
+	return styleACPTranscriptHeaderWithMark(ctx, plain, acpHeaderMarkDefault, false)
+}
+
+func styleACPTranscriptHeaderWithMark(
+	ctx BlockRenderContext,
+	plain string,
+	markTone acpHeaderMarkTone,
+	markDim bool,
+) string {
 	trimmed := strings.TrimSpace(plain)
 	if !strings.HasPrefix(trimmed, "• ") {
 		return ctx.Theme.ToolStyle().Render(plain)
 	}
 	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "•"))
 	verb, detail, _ := strings.Cut(rest, " ")
-	styled := ctx.Theme.ToolStyle().Bold(true).Render("•")
+	styled := renderACPTranscriptHeaderMark(ctx, markTone, markDim)
 	if verb != "" {
 		styled += " " + toolActionStyle(ctx, verb).Render(verb)
 	}
@@ -323,6 +332,23 @@ func styleACPTranscriptHeader(ctx BlockRenderContext, plain string) string {
 		styled += " " + styleACPTranscriptHeaderDetail(ctx, verb, detail)
 	}
 	return styled
+}
+
+func renderACPTranscriptHeaderMark(ctx BlockRenderContext, tone acpHeaderMarkTone, dim bool) string {
+	style := ctx.Theme.ToolStyle().Bold(true)
+	tokens := ctx.Theme.Tokens()
+	switch tone {
+	case acpHeaderMarkAccent:
+		style = tokens.Accent.Bold(true)
+	case acpHeaderMarkSuccess:
+		style = tokens.Success.Bold(true)
+	case acpHeaderMarkDanger:
+		style = tokens.Danger.Bold(true)
+	}
+	if dim {
+		style = style.Faint(true)
+	}
+	return style.Render("•")
 }
 
 func styleACPTranscriptHeaderDetail(ctx BlockRenderContext, verb string, detail string) string {

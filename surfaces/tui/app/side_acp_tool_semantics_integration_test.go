@@ -195,8 +195,17 @@ func TestSideACPProjectedFailedWaitRepairsSpawnWithReason(t *testing.T) {
 	})
 	plain := joinRenderedPlain(rows)
 	if !strings.Contains(plain, "• Spawned breeze") ||
-		!strings.Contains(plain, "ACP child prompt failed") ||
+		!strings.Contains(plain, "↗") ||
+		strings.Contains(strings.ToLower(plain), "failed") ||
 		strings.Contains(plain, "• Ran wait") {
 		t.Fatalf("Side ACP failed Spawn transcript mismatch:\n%s", plain)
+	}
+	model.width = 96
+	model.height = 28
+	if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-1") {
+		t.Fatal("failed Side ACP Spawn did not open its output overlay")
+	}
+	if overlay := subagentOutputOverlayPlain(model); !strings.Contains(overlay, "ACP child prompt failed") {
+		t.Fatalf("Side ACP failure reason missing from output overlay:\n%s", overlay)
 	}
 }

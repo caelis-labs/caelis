@@ -40,7 +40,7 @@ func (m *Model) stopRunningAnimation() {
 }
 
 func (m *Model) scheduleSpinnerTick() tea.Cmd {
-	if m == nil || m.noAnimation || !m.runningIndicatorActive() || m.spinnerTickScheduled {
+	if m == nil || m.noAnimation || !m.animationIndicatorActive() || m.spinnerTickScheduled {
 		return nil
 	}
 	m.spinnerTickScheduled = true
@@ -48,7 +48,7 @@ func (m *Model) scheduleSpinnerTick() tea.Cmd {
 }
 
 func (m *Model) resumeRunningAnimationIfNeeded() tea.Cmd {
-	if m == nil || !m.runningIndicatorActive() {
+	if m == nil || !m.animationIndicatorActive() {
 		return nil
 	}
 	return m.scheduleSpinnerTick()
@@ -151,4 +151,8 @@ func formatACPSetupBytes(size int64) string {
 
 func (m *Model) runningIndicatorActive() bool {
 	return m != nil && (m.turnRunning() || m.slashArgLoadPending)
+}
+
+func (m *Model) animationIndicatorActive() bool {
+	return m != nil && (m.runningIndicatorActive() || m.subagentOutputPulseActive())
 }

@@ -5,7 +5,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
-	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int) {
@@ -451,43 +450,26 @@ func isAttentionLoopTool(name string) bool {
 func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, expanded bool, final bool, fullOutput bool, opts acpTranscriptRenderOptions) []RenderedRow {
 	headerEvent := ev
 	spawn := names.CanonicalOrSelf(toolSemanticName(ev.Name, ev.ToolKind)) == names.Spawn
-	if spawn && !final && !renderableTextHasContent(text) {
-		text = ev.Activity
+	if spawn {
+		return renderSubagentOutputLifecycleRows(blockID, headerEvent, callID, width, ctx, final, err)
 	}
 	if fullOutput {
 		if fullArgs := strings.TrimSpace(ev.FullArgs); fullArgs != "" {
 			headerEvent.Args = fullArgs
 		}
 	}
-	displayText := text
-	if spawn {
-		displayText = summarizeSubagentTerminalPanelText(displayText, final)
-	}
 	header := terminalLifecycleHeader(headerEvent)
-	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, displayText, final, err))
+	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, text, final, err))
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
-	if !renderableTextHasContent(text) && !final && spawn {
-		text = "(wait subagent output)"
-	}
 	if !expanded || !shouldRenderACPToolPanel(text, err) {
 		return rows
 	}
 	if ev.OutputGapBefore {
 		rows = append(rows, renderACPTerminalGapRow(blockID, width, ctx, token))
 	}
-	if spawn && final && fullOutput {
-		rows = append(rows, renderACPSpawnFinalMessageRows(blockID, displayText, width, ctx, token)...)
-		return rows
-	}
 	if final && fullOutput {
 		rows = append(rows, renderACPFullTerminalPanelRows(blockID, callID, text, width, ctx, err, token)...)
 		return rows
-	}
-	if spawn {
-		text = displayText
-		if !renderableTextHasContent(text) && !final {
-			text = "(wait subagent output)"
-		}
 	}
 	text = summarizeACPToolPanelText(text, final)
 	rows = append(rows, renderACPToolPanelRows(blockID, callID, toolSemanticName(ev.Name, ev.ToolKind), text, width, ctx, err, token, opts)...)
@@ -502,37 +484,6 @@ func renderACPTerminalGapRow(blockID string, width int, ctx BlockRenderContext, 
 		return PlainRow(blockID, terminalOutputGapNotice)
 	}
 	return rows[0]
-}
-
-func renderACPSpawnFinalMessageRows(blockID string, text string, width int, ctx BlockRenderContext, token string) []RenderedRow {
-	rows := RenderTextWithContext(ctx, TextRenderRequest{
-		Kind:           TextAssistant,
-		Mode:           RenderFinal,
-		MarkdownPolicy: MarkdownFull,
-		Raw:            text,
-		Prefix:         "  └ ",
-		Width:          width,
-		BlockID:        blockID,
-		ClickToken:     token,
-		LineStyle:      tuikit.LineStyleAssistant,
-	}).Rows
-	return alignSpawnFinalMessageRows(rows)
-}
-
-func alignSpawnFinalMessageRows(rows []RenderedRow) []RenderedRow {
-	if len(rows) <= 1 {
-		return rows
-	}
-	const continuation = "    "
-	out := append([]RenderedRow(nil), rows...)
-	for index := 1; index < len(out); index++ {
-		if strings.HasPrefix(out[index].Plain, continuation) {
-			continue
-		}
-		out[index].Plain = continuation + out[index].Plain
-		out[index].Styled = continuation + out[index].Styled
-	}
-	return out
 }
 
 func terminalLifecycleHeader(ev SubagentEvent) string {

@@ -1,0 +1,938 @@
+package tuiapp
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
+)
+
+func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 100
+	model.height = 32
+	model.ready = true
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(300, 0))
+
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		TurnID:    "turn-1",
+		Scope:     eventstream.ScopeMain,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "spawn-1",
+			Title:         "SPAWN explorer: inspect task streams",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect task streams"},
+			Meta:          acpToolNameMeta("SPAWN"),
+		},
+	})
+	running := schema.ToolStatusInProgress
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		TurnID:    "turn-1",
+		Scope:     eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "spawn-1",
+			Status:        &running,
+			RawOutput:     map[string]any{"handle": "zuri", "state": "running"},
+			Meta:          acpToolNameMeta("SPAWN"),
+		},
+	})
+
+	child := func(update schema.Update) eventstream.Envelope {
+		return eventstream.Envelope{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "session-1",
+			TurnID:    "child-turn-1",
+			Scope:     eventstream.ScopeSubagent,
+			ScopeID:   "zuri",
+			Actor:     "explorer",
+			ParentTool: &eventstream.ParentToolRelation{
+				ToolCallID: "spawn-1",
+				ToolName:   "SPAWN",
+			},
+			Update: update,
+		}
+	}
+	model = applyACPEnvelopeForTest(t, model, child(schema.ContentChunk{
+		SessionUpdate: schema.UpdateAgentThought,
+		MessageID:     "thought-1",
+		Content:       schema.TextContent{Type: "text", Text: "checking the task directory"},
+	}))
+	model = applyACPEnvelopeForTest(t, model, child(schema.PlanUpdate{
+		SessionUpdate: schema.UpdatePlan,
+		Entries: []schema.PlanEntry{{
+			Content: "inspect stream ownership",
+			Status:  "in_progress",
+		}},
+	}))
+	model = applyACPEnvelopeForTest(t, model, child(schema.ToolCall{
+		SessionUpdate: schema.UpdateToolCall,
+		ToolCallID:    "child-tool-1",
+		Title:         "Search taskstream",
+		Kind:          schema.ToolKindRead,
+		Status:        schema.ToolStatusInProgress,
+		RawInput:      map[string]any{"query": "taskstream"},
+	}))
+	completed := schema.ToolStatusCompleted
+	model = applyACPEnvelopeForTest(t, model, child(schema.ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo,
+		ToolCallID:    "child-tool-1",
+		Status:        &completed,
+		RawOutput:     map[string]any{"matches": 4},
+	}))
+	model = applyACPEnvelopeForTest(t, model, child(schema.ContentChunk{
+		SessionUpdate: schema.UpdateAgentMessage,
+		MessageID:     "answer-1",
+		Content:       schema.TextContent{Type: "text", Text: "The stream is Control-owned."},
+	}))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindNotice,
+		SessionID: "session-1",
+		TurnID:    "child-turn-1",
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "zuri",
+		Actor:     "explorer",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-1",
+			ToolName:   "SPAWN",
+		},
+		Notice: "retrying child request",
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindError,
+		SessionID: "session-1",
+		TurnID:    "child-turn-1",
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "zuri",
+		Actor:     "explorer",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-1",
+			ToolName:   "SPAWN",
+		},
+		Err: errors.New("child transport failed"),
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	model.syncViewportContent()
+	mainTranscript := strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(mainTranscript, "↗") {
+		t.Fatalf("Spawn row omitted overlay affordance:\n%s", mainTranscript)
+	}
+	for _, forbidden := range []string{"↗ output", " running", " done", " failed"} {
+		if strings.Contains(mainTranscript, forbidden) {
+			t.Fatalf("Spawn row retained visible status/output label %q:\n%s", forbidden, mainTranscript)
+		}
+	}
+	if strings.Contains(mainTranscript, "checking the task directory") ||
+		strings.Contains(mainTranscript, "The stream is Control-owned.") ||
+		strings.Contains(mainTranscript, "retrying child request") ||
+		strings.Contains(mainTranscript, "child transport failed") {
+		t.Fatalf("full child transcript leaked into the main Spawn row:\n%s", mainTranscript)
+	}
+
+	if !model.tryToggleFoldToken(block.BlockID(), subagentOutputOverlayClickToken("spawn-1")) {
+		t.Fatal("Spawn output click did not open the overlay")
+	}
+	if model.subagentOutputOverlay == nil {
+		t.Fatal("subagent output overlay is nil after opening")
+	}
+	overlay := model.renderSubagentOutputOverlay()
+	for _, want := range []string{
+		"explorer",
+		"checking the task directory",
+		"inspect stream ownership",
+		"Read",
+		"The stream is Control-owned.",
+		"retrying child request",
+		"child transport failed",
+		"esc close",
+	} {
+		if !strings.Contains(overlay, want) {
+			t.Fatalf("subagent output overlay omitted %q:\n%s", want, overlay)
+		}
+	}
+
+	next, _ := model.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	model = next.(*Model)
+	if model.subagentOutputOverlay != nil {
+		t.Fatal("Esc did not close the subagent output overlay")
+	}
+}
+
+func TestSubagentOutputOverlayKeepsPromptAboveOutput(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 100
+	model.height = 28
+	model.ready = true
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1", followTail: true}
+	model.activePrompt = newPromptState(PromptRequestMsg{
+		Title:  "Approval",
+		Prompt: "Allow child tool?",
+		Choices: []PromptChoice{{
+			Label: "Allow",
+			Value: "allow",
+		}},
+		Response: make(chan PromptResponse, 1),
+	})
+
+	frame := model.View().Content
+	promptIndex := strings.LastIndex(frame, "Approval")
+	outputIndex := strings.LastIndex(frame, "Subagent")
+	if promptIndex < 0 || outputIndex < 0 {
+		t.Fatalf("frame omitted prompt or subagent overlay:\n%s", frame)
+	}
+	if promptIndex < outputIndex {
+		t.Fatalf("approval prompt rendered beneath subagent output overlay:\n%s", frame)
+	}
+}
+
+func TestSubagentOutputOverlayAlwaysAppendsDurableFinalResponseAfterPartialStream(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 100
+	model.height = 28
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.actor = "reviewer"
+	view.block.Actor = "reviewer"
+	view.block.AppendStreamEvent(
+		SEReasoning,
+		"checking the first candidate",
+		newNarrativeSourceIdentity("thought-1", "", ""),
+		time.Unix(320, 0),
+	)
+	view.block.AppendStreamEvent(
+		SEAssistant,
+		"Partial observation.",
+		newNarrativeSourceIdentity("message-1", "", ""),
+		time.Unix(321, 0),
+	)
+	view.observeOwnerEvent(SubagentEvent{
+		Kind:   SEToolCall,
+		CallID: "spawn-1",
+		Output: "# Final answer\n\nThe durable conclusion.",
+		Done:   true,
+	})
+
+	rows := model.subagentOutputRows(view, 96, 20)
+	plain := strings.Join(renderedPlainRows(rows), "\n")
+	for _, want := range []string{
+		"checking the first candidate",
+		"Partial observation.",
+		"· Final answer",
+		"The durable conclusion.",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("overlay rows omitted %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "Final response") {
+		t.Fatalf("durable FinalResponse retained its redundant section label:\n%s", plain)
+	}
+	if strings.Index(plain, "The durable conclusion.") < strings.Index(plain, "Partial observation.") {
+		t.Fatalf("durable FinalResponse did not render at the transcript tail:\n%s", plain)
+	}
+}
+
+func TestSubagentOutputOverlayDoesNotDuplicateMatchingFinalAssistantTail(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 100
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.block.AppendStreamEvent(
+		SEAssistant,
+		"The canonical final response.",
+		newNarrativeSourceIdentity("message-final", "", ""),
+		time.Unix(325, 0),
+	)
+	view.observeOwnerEvent(SubagentEvent{
+		Kind:   SEToolCall,
+		CallID: "spawn-1",
+		Output: "The canonical final response.",
+		Done:   true,
+	})
+
+	plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
+	if got := strings.Count(plain, "The canonical final response."); got != 1 {
+		t.Fatalf("matching FinalResponse rendered %d times:\n%s", got, plain)
+	}
+	if strings.Contains(plain, "Final response") {
+		t.Fatalf("matching assistant tail received a duplicate FinalResponse section:\n%s", plain)
+	}
+}
+
+func TestSubagentOutputOverlayDeduplicatesSameProjectionAcrossDeliveryPaths(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	event := TranscriptEvent{
+		Kind:               TranscriptEventNarrative,
+		Scope:              ACPProjectionSubagent,
+		ScopeID:            "zuri",
+		Actor:              "reviewer",
+		AnchorToolCallID:   "spawn-1",
+		AnchorToolName:     "SPAWN",
+		SourceEventID:      "child-event-1",
+		SourceProjectionID: "child-event-1:0",
+		MessageID:          "child-message-1",
+		NarrativeKind:      TranscriptNarrativeAssistant,
+		Text:               "one physical child chunk",
+	}
+	if changed := model.observeSubagentOutputEvents([]TranscriptEvent{event}); !changed {
+		t.Fatal("first delivery did not mutate the subagent output view")
+	}
+	if changed := model.observeSubagentOutputEvents([]TranscriptEvent{event}); changed {
+		t.Fatal("duplicate delivery reported a second subagent output mutation")
+	}
+
+	view := requireSubagentOutputViewForTest(t, model, "spawn-1")
+	plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
+	if got := strings.Count(plain, event.Text); got != 1 {
+		t.Fatalf("same child projection rendered %d times across delivery paths:\n%s", got, plain)
+	}
+}
+
+func TestSubagentOutputOverlayLatePlanDoesNotReopenTerminalStatus(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.taskHandle = "zuri"
+	view.observeChildEvent(TranscriptEvent{
+		Kind:             TranscriptEventLifecycle,
+		Scope:            ACPProjectionSubagent,
+		ScopeID:          "zuri",
+		AnchorToolCallID: "spawn-1",
+		AnchorToolName:   "SPAWN",
+		State:            eventstream.LifecycleStateCompleted,
+	})
+	view.observeChildEvent(TranscriptEvent{
+		Kind:             TranscriptEventPlan,
+		Scope:            ACPProjectionSubagent,
+		ScopeID:          "zuri",
+		AnchorToolCallID: "spawn-1",
+		AnchorToolName:   "SPAWN",
+		PlanEntries: []transcript.PlanEntry{{
+			Content: "late plan projection",
+			Status:  "completed",
+		}},
+	})
+
+	if view.block.Status != eventstream.LifecycleStateCompleted {
+		t.Fatalf("late PlanUpdate changed terminal status to %q", view.block.Status)
+	}
+	if demand := model.taskStreamDemandForAnchor("spawn-1", "zuri"); demand != taskStreamDemandFinishedSubagent {
+		t.Fatalf("late PlanUpdate restored Task stream demand: %v", demand)
+	}
+}
+
+func TestSubagentOutputOverlayScrollUsesCachedRows(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 100
+	model.height = 28
+	view := model.ensureSubagentOutputView("spawn-1")
+	for index := range 1_000 {
+		view.observeChildEvent(TranscriptEvent{
+			Kind:       TranscriptEventNotice,
+			Scope:      ACPProjectionSubagent,
+			ScopeID:    "zuri",
+			Text:       fmt.Sprintf("child output row %04d", index),
+			NoticeKind: "",
+		})
+	}
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1", followTail: true}
+
+	_ = model.renderSubagentOutputOverlay()
+	if got := view.renderCache.renders; got != 1 {
+		t.Fatalf("initial overlay render count = %d, want one", got)
+	}
+	for range 40 {
+		model.scrollSubagentOutputOverlay(-1)
+		_ = model.renderSubagentOutputOverlay()
+	}
+	if got := view.renderCache.renders; got != 1 {
+		t.Fatalf("scroll rerendered the full child transcript %d times, want cached one", got)
+	}
+
+	view.observeChildEvent(TranscriptEvent{
+		Kind:          TranscriptEventNarrative,
+		Scope:         ACPProjectionSubagent,
+		ScopeID:       "zuri",
+		NarrativeKind: TranscriptNarrativeAssistant,
+		Text:          "new live child output",
+	})
+	_ = model.renderSubagentOutputOverlay()
+	if got := view.renderCache.renders; got != 1 {
+		t.Fatalf("live event bypassed render coalescing: renders=%d", got)
+	}
+	refresh := model.requestSubagentOutputRender()
+	if refresh == nil {
+		t.Fatal("visible dirty child transcript did not schedule a render")
+	}
+	next, _ := model.handleSubagentOutputRenderTick(refresh().(subagentOutputRenderTickMsg))
+	model = next.(*Model)
+	model.subagentOutputOverlay.followTail = true
+	rendered := model.renderSubagentOutputOverlay()
+	if got := view.renderCache.renders; got != 2 {
+		t.Fatalf("coalesced child refresh render count = %d, want two total", got)
+	}
+	if !strings.Contains(rendered, "new live child output") {
+		t.Fatalf("coalesced child refresh omitted new output:\n%s", rendered)
+	}
+}
+
+func TestVisibleSubagentOutputOverlaySchedulesRefreshFromTranscriptPath(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 100
+	model.height = 28
+	view := model.ensureSubagentOutputView("spawn-1")
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1", followTail: true}
+	_ = model.renderSubagentOutputOverlay()
+
+	next, cmd := model.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:             TranscriptEventNarrative,
+		Scope:            ACPProjectionSubagent,
+		ScopeID:          "zuri",
+		Actor:            "reviewer",
+		AnchorToolCallID: "spawn-1",
+		AnchorToolName:   "SPAWN",
+		NarrativeKind:    TranscriptNarrativeAssistant,
+		Text:             "live child output from the Session projection",
+	}}})
+	model = next.(*Model)
+	if cmd == nil || !view.renderScheduled {
+		t.Fatal("visible child transcript mutation did not schedule a coalesced overlay refresh")
+	}
+
+	next, _ = model.handleSubagentOutputRenderTick(subagentOutputRenderTickMsg{callID: "spawn-1"})
+	model = next.(*Model)
+	rendered := model.renderSubagentOutputOverlay()
+	if !strings.Contains(rendered, "live child output from the Session projection") {
+		t.Fatalf("coalesced Session-projected child refresh omitted new output:\n%s", rendered)
+	}
+}
+
+func TestSubagentOutputOverlayMouseCloseDoesNotInterruptRunningTurn(t *testing.T) {
+	var interruptCalls atomic.Int32
+	model := NewModel(Config{
+		NoColor:     true,
+		NoAnimation: true,
+		CancelRunning: func() bool {
+			interruptCalls.Add(1)
+			return true
+		},
+	})
+	model.width = 100
+	model.height = 28
+	model.ready = true
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(326, 0))
+	model.ensureSubagentOutputView("spawn-1")
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1", followTail: true}
+	_ = model.renderSubagentOutputOverlay()
+
+	geometry := model.subagentOutputOverlay.geometry
+	closeMouse := tea.Mouse{Button: tea.MouseLeft, X: geometry.closeX, Y: geometry.closeY}
+	next, _ := model.handleMouse(tea.MouseClickMsg(closeMouse))
+	model = next.(*Model)
+	next, _ = model.handleMouse(tea.MouseReleaseMsg(closeMouse))
+	model = next.(*Model)
+	if model.subagentOutputOverlay != nil {
+		t.Fatal("mouse release on × did not close the subagent output overlay")
+	}
+
+	for range 3 {
+		next, _ = model.handleMouse(tea.MouseClickMsg(closeMouse))
+		model = next.(*Model)
+		next, _ = model.handleMouse(tea.MouseReleaseMsg(closeMouse))
+		model = next.(*Model)
+	}
+	if got := interruptCalls.Load(); got != 0 {
+		t.Fatalf("repeated overlay close clicks requested %d main-Turn interrupts", got)
+	}
+}
+
+func TestSubagentOutputOverlayRunCommandUsesParticipantPanelDefaults(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 100
+	model.height = 28
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.observeChildEvent(TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		ToolCallID: "command-date",
+		ToolName:   "RUN_COMMAND",
+		ToolKind:   "execute",
+		ToolArgs:   "date",
+	})
+	view.observeChildEvent(TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		ToolCallID: "command-date",
+		ToolName:   "RUN_COMMAND",
+		ToolKind:   "execute",
+		ToolArgs:   "date",
+		ToolOutput: "Thu Jul 30 16:42:00 CST 2026",
+		Final:      true,
+	})
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1", followTail: true}
+
+	overlay := subagentOutputOverlayPlain(model)
+	if !strings.Contains(overlay, "• Ran date") ||
+		!strings.Contains(overlay, "Thu Jul 30 16:42:00 CST 2026") {
+		t.Fatalf("completed RUN_COMMAND did not retain the participant transcript defaults:\n%s", overlay)
+	}
+	if !view.block.toolPanelExpanded("command-date") {
+		t.Fatal("completed RUN_COMMAND was collapsed only in the subagent overlay")
+	}
+	for _, token := range model.subagentOutputOverlay.geometry.rowTokens {
+		if token == acpToolPanelClickToken("command-date") {
+			t.Fatalf("short RUN_COMMAND exposed a click target with no hidden details:\n%s", overlay)
+		}
+	}
+}
+
+func TestSubagentOutputOverlayLongRunCommandMouseTogglesFullAndSummary(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 100
+	model.height = 28
+	view := model.ensureSubagentOutputView("spawn-1")
+	outputLines := make([]string, acpTerminalPanelMaxLines+8)
+	for index := range outputLines {
+		outputLines[index] = fmt.Sprintf("command output line %02d", index)
+	}
+	view.observeChildEvent(TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		ToolCallID: "command-ls",
+		ToolName:   "RUN_COMMAND",
+		ToolKind:   "execute",
+		ToolArgs:   "ls -la",
+	})
+	view.observeChildEvent(TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		ToolCallID: "command-ls",
+		ToolName:   "RUN_COMMAND",
+		ToolKind:   "execute",
+		ToolArgs:   "ls -la",
+		ToolOutput: strings.Join(outputLines, "\n"),
+		Final:      true,
+	})
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1", followTail: true}
+
+	summary := subagentOutputOverlayPlain(model)
+	middleLine := outputLines[len(outputLines)/2]
+	if !strings.Contains(summary, "... +") || strings.Contains(summary, middleLine) {
+		t.Fatalf("long RUN_COMMAND did not default to the bounded participant summary:\n%s", summary)
+	}
+
+	clickSubagentOutputToolPanelForTest(t, model, "command-ls")
+	full := subagentOutputOverlayPlain(model)
+	if !view.block.toolPanelFullOutput("command-ls") || !strings.Contains(full, middleLine) {
+		t.Fatalf("overlay mouse click did not expand the complete command output:\n%s", full)
+	}
+
+	clickSubagentOutputToolPanelForTest(t, model, "command-ls")
+	summary = subagentOutputOverlayPlain(model)
+	if view.block.toolPanelFullOutput("command-ls") ||
+		!view.block.toolPanelExpanded("command-ls") ||
+		!strings.Contains(summary, "... +") ||
+		strings.Contains(summary, middleLine) {
+		t.Fatalf("second overlay mouse click did not return to the bounded summary:\n%s", summary)
+	}
+}
+
+func clickSubagentOutputToolPanelForTest(t *testing.T, model *Model, callID string) {
+	t.Helper()
+	if model == nil || model.subagentOutputOverlay == nil {
+		t.Fatal("subagent output overlay is unavailable")
+	}
+	token := acpToolPanelClickToken(callID)
+	geometry := model.subagentOutputOverlay.geometry
+	rowIndex := -1
+	for index, rowToken := range geometry.rowTokens {
+		if rowToken == token {
+			rowIndex = index
+			break
+		}
+	}
+	if rowIndex < 0 {
+		t.Fatalf("visible overlay rows omitted tool panel token %q: %#v", token, geometry.rowTokens)
+	}
+	mouse := tea.Mouse{
+		Button: tea.MouseLeft,
+		X:      geometry.x + maxInt(1, geometry.contentWidth/2),
+		Y:      geometry.contentY + rowIndex,
+	}
+	next, _ := model.handleMouse(tea.MouseClickMsg(mouse))
+	model = next.(*Model)
+	next, _ = model.handleMouse(tea.MouseReleaseMsg(mouse))
+	if next.(*Model) != model {
+		t.Fatal("overlay mouse release unexpectedly replaced the model")
+	}
+}
+
+func TestSubagentOutputOverlayTitleUsesOnlySemanticDot(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.actor = "reviewer"
+	view.block.Actor = "reviewer"
+	view.setStatus("completed", time.Unix(330, 0))
+
+	title := ansi.Strip(model.renderSubagentOutputTitle(view, 72))
+	for _, want := range []string{"•", "Subagent", "reviewer", "×"} {
+		if !strings.Contains(title, want) {
+			t.Fatalf("overlay title omitted %q: %q", want, title)
+		}
+	}
+	for _, forbidden := range []string{"output", "running", "done", "failed"} {
+		if strings.Contains(strings.ToLower(title), forbidden) {
+			t.Fatalf("overlay title retained visible status/output label %q: %q", forbidden, title)
+		}
+	}
+}
+
+func TestSubagentOutputLifecycleDotUsesSemanticStatusAndReducedMotion(t *testing.T) {
+	model := NewModel(Config{})
+	model.theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	model.themeCacheKey = ""
+	base := SubagentEvent{
+		Kind:   SEToolCall,
+		CallID: "spawn-1",
+		Name:   "SPAWN",
+		Args:   "reviewer: inspect",
+	}
+
+	render := func(event SubagentEvent, frame string, animationsEnabled bool) RenderedRow {
+		t.Helper()
+		ctx := model.blockRenderContext(96)
+		ctx.SpinnerView = frame
+		ctx.AnimationsEnabled = animationsEnabled
+		rows := renderSubagentOutputLifecycleRows("block-1", event, event.CallID, 96, ctx, event.Done, event.Err)
+		if len(rows) != 1 {
+			t.Fatalf("Spawn rows = %#v, want one compact entry", rows)
+		}
+		return rows[0]
+	}
+
+	runningBright := render(base, runningSpinnerFrames[0], true)
+	runningDim := render(base, runningSpinnerFrames[len(runningSpinnerFrames)/2], true)
+	if runningBright.Plain != "• Spawned reviewer: inspect  ↗" {
+		t.Fatalf("running Spawn row = %q", runningBright.Plain)
+	}
+	if runningBright.Styled == runningDim.Styled {
+		t.Fatal("running semantic dot did not change breathing phase")
+	}
+	accentFG := sgrForegroundCode(t, model.theme.Tokens().Accent.GetForeground())
+	if got := normalizeInlineStyleText(textWithSGRForeground(runningBright.Styled, accentFG)); !strings.Contains(got, "•") {
+		t.Fatalf("accent foreground omitted running status dot: %q", got)
+	}
+	wrappedPlain, wrappedStyled, ok := wrapACPTranscriptHeaderForViewport(
+		runningBright.Plain,
+		24,
+		model.blockRenderContext(24),
+		runningBright.acpHeaderMarkTone,
+		runningBright.acpHeaderMarkDim,
+	)
+	if !ok || len(wrappedPlain) < 2 || len(wrappedPlain) != len(wrappedStyled) {
+		t.Fatalf("narrow Spawn entry did not retain ACP header wrapping: %#v / %#v", wrappedPlain, wrappedStyled)
+	}
+	if got := normalizeInlineStyleText(textWithSGRForeground(wrappedStyled[0], accentFG)); !strings.Contains(got, "•") {
+		t.Fatalf("wrapped Spawn entry lost running status color: %q", got)
+	}
+
+	completed := base
+	completed.Done = true
+	completedRow := render(completed, runningSpinnerFrames[0], true)
+	successFG := sgrForegroundCode(t, model.theme.Tokens().Success.GetForeground())
+	if got := normalizeInlineStyleText(textWithSGRForeground(completedRow.Styled, successFG)); !strings.Contains(got, "•") {
+		t.Fatalf("success foreground omitted completed status dot: %q", got)
+	}
+
+	failed := completed
+	failed.Err = true
+	failedRow := render(failed, runningSpinnerFrames[0], true)
+	dangerFG := sgrForegroundCode(t, model.theme.Tokens().Danger.GetForeground())
+	if got := normalizeInlineStyleText(textWithSGRForeground(failedRow.Styled, dangerFG)); !strings.Contains(got, "•") {
+		t.Fatalf("danger foreground omitted failed status dot: %q", got)
+	}
+	if strings.Contains(strings.ToLower(failedRow.Plain), "failed") {
+		t.Fatalf("failed Spawn row exposed textual status: %q", failedRow.Plain)
+	}
+
+	staticBright := render(base, runningSpinnerFrames[0], false)
+	staticDim := render(base, runningSpinnerFrames[len(runningSpinnerFrames)/2], false)
+	if staticBright.Styled != staticDim.Styled {
+		t.Fatal("reduced-motion Spawn dot changed with spinner phase")
+	}
+}
+
+func TestSubagentOutputPulseSchedulesWithoutMainTurn(t *testing.T) {
+	model := NewModel(Config{})
+	block := NewMainACPTurnBlock("turn-1")
+	block.Events = append(block.Events, SubagentEvent{
+		Kind:   SEToolCall,
+		CallID: "spawn-1",
+		Name:   "SPAWN",
+		Args:   "reviewer: inspect",
+	})
+	model.doc.Append(block)
+
+	if model.runningIndicatorActive() {
+		t.Fatal("background subagent changed the main running indicator")
+	}
+	if !model.subagentOutputPulseActive() || !model.animationIndicatorActive() {
+		t.Fatal("running Spawn did not activate its independent status animation")
+	}
+	if cmd := model.scheduleSpinnerTick(); cmd == nil {
+		t.Fatal("background subagent did not schedule a spinner tick")
+	}
+}
+
+func TestSubagentOutputOverlayIsResponsiveAndPinsScrolledHistory(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 60
+	model.height = 18
+	model.ready = true
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.actor = "reviewer"
+	view.block.Actor = "reviewer"
+	lines := make([]string, 40)
+	for index := range lines {
+		lines[index] = "output line " + strings.Repeat("x", index%4)
+	}
+	source := newNarrativeSourceIdentity("message-1", "", "")
+	view.block.AppendStreamEvent(SEAssistant, strings.Join(lines, "\n"), source, time.Unix(310, 0))
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1", followTail: true}
+
+	frame := model.renderSubagentOutputOverlay()
+	if width := lipgloss.Width(frame); width > model.width {
+		t.Fatalf("narrow overlay width = %d, terminal width = %d:\n%s", width, model.width, frame)
+	}
+	if height := len(strings.Split(frame, "\n")); height > model.height {
+		t.Fatalf("narrow overlay height = %d, terminal height = %d:\n%s", height, model.height, frame)
+	}
+	if model.subagentOutputOverlay.offset == 0 {
+		t.Fatal("long running output did not follow its tail")
+	}
+
+	model.scrollSubagentOutputOverlay(-1)
+	pinnedOffset := model.subagentOutputOverlay.offset
+	view.block.AppendStreamEvent(SEAssistant, "\nnew tail", source, time.Unix(311, 0))
+	_ = model.renderSubagentOutputOverlay()
+	if model.subagentOutputOverlay.followTail || model.subagentOutputOverlay.offset != pinnedOffset {
+		t.Fatalf(
+			"scrolled output moved after a new chunk: follow=%v offset=%d want=%d",
+			model.subagentOutputOverlay.followTail,
+			model.subagentOutputOverlay.offset,
+			pinnedOffset,
+		)
+	}
+
+	_, _ = model.handleKey(tea.KeyPressMsg{Code: tea.KeyEnd})
+	_ = model.renderSubagentOutputOverlay()
+	if !model.subagentOutputOverlay.followTail ||
+		model.subagentOutputOverlay.offset != model.subagentOutputOverlayMaxOffset() {
+		t.Fatalf(
+			"End did not resume tail following: follow=%v offset=%d max=%d",
+			model.subagentOutputOverlay.followTail,
+			model.subagentOutputOverlay.offset,
+			model.subagentOutputOverlayMaxOffset(),
+		)
+	}
+}
+
+func TestSubagentOutputOverlayFixedComposerMatchesResponsiveFrame(t *testing.T) {
+	t.Parallel()
+
+	for _, size := range []struct {
+		name   string
+		width  int
+		height int
+		color  bool
+	}{
+		{name: "bordered", width: 100, height: 28},
+		{name: "borderless", width: 60, height: 18},
+		{name: "bordered-color", width: 100, height: 28, color: true},
+		{name: "borderless-color", width: 60, height: 18, color: true},
+	} {
+		t.Run(size.name, func(t *testing.T) {
+			t.Parallel()
+
+			model := NewModel(Config{NoColor: !size.color, NoAnimation: true})
+			if size.color {
+				model.theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+				model.themeCacheKey = ""
+			}
+			model.width = size.width
+			model.height = size.height
+			view := model.ensureSubagentOutputView("spawn-1")
+			for index := range 80 {
+				view.observeChildEvent(TranscriptEvent{
+					Kind:       TranscriptEventNotice,
+					Scope:      ACPProjectionSubagent,
+					ScopeID:    "reviewer",
+					Text:       fmt.Sprintf("响应式输出行 %03d", index),
+					NoticeKind: "test",
+				})
+			}
+			model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1", followTail: true}
+
+			got := model.renderSubagentOutputOverlay()
+			want := legacySubagentOutputOverlayFrameForTest(model)
+			if got != want {
+				t.Fatalf("fixed-width overlay changed the responsive frame:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
+}
+
+func TestSubagentOutputOverlayLayoutRebuildsOnlyAfterResize(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 100
+	model.height = 28
+	view := model.ensureSubagentOutputView("spawn-1")
+	for index := range 100 {
+		view.observeChildEvent(TranscriptEvent{
+			Kind:       TranscriptEventNotice,
+			Scope:      ACPProjectionSubagent,
+			ScopeID:    "reviewer",
+			Text:       fmt.Sprintf("output row %03d", index),
+			NoticeKind: "test",
+		})
+	}
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1", followTail: true}
+	_ = model.renderSubagentOutputOverlay()
+	initialLayout := model.subagentOutputOverlay.layout
+	initialRenders := view.renderCache.renders
+
+	for range 20 {
+		model.scrollSubagentOutputOverlay(-1)
+		_ = model.renderSubagentOutputOverlay()
+	}
+	if got := model.subagentOutputOverlay.layout; got != initialLayout {
+		t.Fatalf("stable terminal size rebuilt overlay layout:\ngot  %#v\nwant %#v", got, initialLayout)
+	}
+	if got := view.renderCache.renders; got != initialRenders {
+		t.Fatalf("stable terminal size rerendered transcript %d times, want %d", got, initialRenders)
+	}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 20})
+	model = updated.(*Model)
+	frame := model.renderSubagentOutputOverlay()
+	resizedLayout := model.subagentOutputOverlay.layout
+	if resizedLayout == initialLayout ||
+		resizedLayout.termWidth != 72 ||
+		resizedLayout.termHeight != 20 ||
+		resizedLayout.useBorder {
+		t.Fatalf("resize did not rebuild responsive borderless layout: %#v", resizedLayout)
+	}
+	if width := lipgloss.Width(frame); width > 72 {
+		t.Fatalf("resized overlay width = %d, terminal width = 72", width)
+	}
+	if height := len(strings.Split(frame, "\n")); height > 20 {
+		t.Fatalf("resized overlay height = %d, terminal height = 20", height)
+	}
+	if got := view.renderCache.renders; got != initialRenders+1 {
+		t.Fatalf("resize transcript render count = %d, want %d", got, initialRenders+1)
+	}
+
+	model.scrollSubagentOutputOverlay(-1)
+	_ = model.renderSubagentOutputOverlay()
+	if got := model.subagentOutputOverlay.layout; got != resizedLayout {
+		t.Fatalf("post-resize scroll rebuilt stable layout:\ngot  %#v\nwant %#v", got, resizedLayout)
+	}
+}
+
+func legacySubagentOutputOverlayFrameForTest(model *Model) string {
+	state := model.subagentOutputOverlay
+	view := model.subagentOutputViews[state.callID]
+	layout := model.subagentOutputLayout(state)
+	rows := model.subagentOutputRows(view, layout.innerWidth, layout.contentRows)
+	end := minInt(len(rows), state.offset+layout.contentRows)
+	visible := rows[state.offset:end]
+	body := make([]string, 0, layout.contentRows+4)
+	body = append(body, model.renderSubagentOutputTitle(view, layout.innerWidth))
+	body = append(body, model.theme.SeparatorStyle().Render(strings.Repeat("─", layout.innerWidth)))
+	for index := 0; index < layout.contentRows; index++ {
+		if index < len(visible) {
+			body = append(body, visible[index].Styled)
+		} else {
+			body = append(body, "")
+		}
+	}
+	body = append(body, model.theme.SeparatorStyle().Render(strings.Repeat("─", layout.innerWidth)))
+	body = append(body, model.renderSubagentOutputFooter(state.offset, end, len(rows), layout.innerWidth))
+	return tuikit.RenderResponsiveOverlayFrame(model.theme, tuikit.ResponsiveOverlayFrameModel{
+		Body:      body,
+		Width:     layout.frameWidth,
+		UseBorder: layout.useBorder,
+	})
+}
+
+var subagentOutputOverlayBenchmarkSink string
+
+func BenchmarkSubagentOutputOverlayScroll(b *testing.B) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 180
+	model.height = 60
+	view := model.ensureSubagentOutputView("spawn-1")
+	for index := range 800 {
+		view.observeChildEvent(TranscriptEvent{
+			Kind:       TranscriptEventNotice,
+			Scope:      ACPProjectionSubagent,
+			ScopeID:    "reviewer",
+			Text:       fmt.Sprintf("步骤 %04d：读取并分析当前目录中的 Markdown 与工具输出", index),
+			NoticeKind: "benchmark",
+		})
+	}
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1", followTail: true}
+	_ = model.renderSubagentOutputOverlay()
+	model.scrollSubagentOutputOverlay(-10)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; b.Loop(); index++ {
+		if index%2 == 0 {
+			model.scrollSubagentOutputOverlay(-1)
+		} else {
+			model.scrollSubagentOutputOverlay(1)
+		}
+		subagentOutputOverlayBenchmarkSink = model.renderSubagentOutputOverlay()
+	}
+}
+
+func subagentOutputOverlayPlain(model *Model) string {
+	if model == nil {
+		return ""
+	}
+	if model.subagentOutputOverlay != nil {
+		if view := model.subagentOutputViews[model.subagentOutputOverlay.callID]; view != nil {
+			view.prepareVisibleRender()
+		}
+	}
+	return ansi.Strip(model.renderSubagentOutputOverlay())
+}

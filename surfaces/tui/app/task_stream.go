@@ -18,12 +18,25 @@ import (
 
 const (
 	taskStreamMailboxBatchSize = 64
-	taskStreamMailboxBudget    = 4 * time.Millisecond
+	taskStreamMailboxBudget    = 16 * time.Millisecond
 	taskStreamRetryDelay       = 250 * time.Millisecond
-	taskStreamRetryLimit       = 4
+	taskStreamRetryBackoffCap  = 4
 )
 
 var errTaskStreamNotDiscoverable = errors.New("task stream is not discoverable yet")
+
+type taskStreamDemand uint8
+
+const (
+	taskStreamDemandNone taskStreamDemand = iota
+	taskStreamDemandFinishedSubagent
+	taskStreamDemandExpandedPanel
+	taskStreamDemandBackgroundSubagent
+)
+
+func (d taskStreamDemand) wanted() bool {
+	return d == taskStreamDemandExpandedPanel || d == taskStreamDemandBackgroundSubagent
+}
 
 type taskStreamOpenedMsg struct {
 	sessionID    string
@@ -77,6 +90,8 @@ func (m *Model) observeTaskStreamSession(env eventstream.Envelope) {
 		return
 	}
 	m.closeTaskStreamSubscriptions()
+	m.subagentOutputOverlay = nil
+	m.subagentOutputViews = map[string]*subagentOutputView{}
 	m.runningActivityTracker.resetSession()
 	m.refreshRunningActivity()
 	m.currentSessionID = sessionID
@@ -93,10 +108,13 @@ func (m *Model) observeTaskStreamAnchor(env eventstream.Envelope) {
 	}
 	input, output := taskStreamToolValues(env.Update)
 	handle := display.ToolTaskHandle(input, output, nil)
-	if handle == "" || !m.taskPanelExpanded(callID, handle) {
+	if handle == "" {
 		return
 	}
-	m.wantTaskStreamForPanel(callID, handle, true)
+	if view := m.subagentOutputViews[callID]; view != nil {
+		view.taskHandle = normalizeTaskStreamHandle(handle)
+	}
+	m.applyTaskStreamDemand(callID, handle, m.taskStreamDemandForAnchor(callID, handle))
 }
 
 func taskStreamToolValues(update schema.Update) (map[string]any, map[string]any) {
@@ -154,9 +172,49 @@ func (m *Model) taskPanelExpanded(callID, handle string) bool {
 	return false
 }
 
-func (m *Model) taskHandleHasExpandedPanel(handle string) bool {
-	if m == nil || m.doc == nil || strings.TrimSpace(handle) == "" {
-		return false
+func (m *Model) taskStreamDemandForAnchor(callID, handle string) taskStreamDemand {
+	if m == nil {
+		return taskStreamDemandNone
+	}
+	callID = strings.TrimSpace(callID)
+	handle = normalizeTaskStreamHandle(handle)
+	if view := m.subagentOutputViews[callID]; view != nil {
+		if view.block == nil {
+			return taskStreamDemandNone
+		}
+		if subagentOutputStatusFromState(view.block.Status) != subagentOutputRunning {
+			return taskStreamDemandFinishedSubagent
+		}
+		return taskStreamDemandBackgroundSubagent
+	}
+	if m.taskPanelExpanded(callID, handle) {
+		return taskStreamDemandExpandedPanel
+	}
+	return taskStreamDemandNone
+}
+
+func (m *Model) taskStreamDemandForHandle(handle string) taskStreamDemand {
+	if m == nil {
+		return taskStreamDemandNone
+	}
+	handle = normalizeTaskStreamHandle(handle)
+	if handle == "" {
+		return taskStreamDemandNone
+	}
+	demand := taskStreamDemandNone
+	for _, view := range m.subagentOutputViews {
+		if view != nil && normalizeTaskStreamHandle(view.taskHandle) == handle {
+			viewDemand := m.taskStreamDemandForAnchor(view.callID, handle)
+			if viewDemand == taskStreamDemandBackgroundSubagent {
+				return viewDemand
+			}
+			if viewDemand > demand {
+				demand = viewDemand
+			}
+		}
+	}
+	if m.doc == nil {
+		return demand
 	}
 	for _, block := range m.doc.Blocks() {
 		var events []SubagentEvent
@@ -170,34 +228,50 @@ func (m *Model) taskHandleHasExpandedPanel(handle string) bool {
 			continue
 		}
 		for _, event := range events {
-			if event.Kind == SEToolCall && strings.TrimSpace(event.TaskHandle) == handle && expanded(event.CallID) {
-				return true
+			if event.Kind != SEToolCall || normalizeTaskStreamHandle(event.TaskHandle) != handle {
+				continue
+			}
+			if m.subagentOutputViews[strings.TrimSpace(event.CallID)] != nil {
+				continue
+			}
+			if expanded(event.CallID) {
+				return taskStreamDemandExpandedPanel
 			}
 		}
 	}
-	return false
+	return demand
 }
 
-func (m *Model) wantTaskStreamForPanel(callID, rawHandle string, wanted bool) {
+func (m *Model) applyTaskStreamDemand(callID, rawHandle string, demand taskStreamDemand) {
 	if m == nil || m.cfg.TaskStreams == nil || m.cfg.ProgramSender == nil {
 		return
 	}
+	wanted := demand.wanted()
 	callID = strings.TrimSpace(callID)
-	handle := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(rawHandle), "@"))
+	handle := normalizeTaskStreamHandle(rawHandle)
 	if callID == "" || handle == "" {
+		return
+	}
+	if taskID := strings.TrimSpace(m.taskStreamIDsByCallID[callID]); taskID != "" {
+		m.wantResolvedTaskStream(taskID, wanted)
 		return
 	}
 	if taskID := strings.TrimSpace(m.taskStreamIDsByHandle[handle]); taskID != "" {
 		m.wantResolvedTaskStream(taskID, wanted)
 		return
 	}
-	m.taskStreamNextToken++
-	token := m.taskStreamNextToken
-	m.taskStreamResolveTokens[callID] = token
 	if !wanted {
+		m.taskStreamNextToken++
+		m.taskStreamResolveTokens[callID] = 0
 		delete(m.taskStreamResolveRetries, callID)
 		return
 	}
+	if wanted && m.taskStreamResolveTokens[callID] != 0 {
+		return
+	}
+	m.taskStreamNextToken++
+	token := m.taskStreamNextToken
+	m.taskStreamResolveTokens[callID] = token
 	m.startTaskStreamResolver(strings.TrimSpace(m.currentSessionID), callID, handle, token)
 }
 
@@ -216,9 +290,6 @@ func (m *Model) startTaskStreamResolver(sessionID, callID, handle string, token 
 				if strings.TrimSpace(descriptor.ParentTool.ToolCallID) != callID {
 					continue
 				}
-				if descriptorHandle := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(descriptor.Handle), "@")); descriptorHandle != "" && descriptorHandle != handle {
-					continue
-				}
 				if matched != nil && strings.TrimSpace(matched.TaskID) != strings.TrimSpace(descriptor.TaskID) {
 					err = fmt.Errorf("task stream directory has multiple Tasks for tool call %q", callID)
 					matched = nil
@@ -230,7 +301,11 @@ func (m *Model) startTaskStreamResolver(sessionID, callID, handle string, token 
 				err = fmt.Errorf("%w for handle %q", errTaskStreamNotDiscoverable, handle)
 			}
 			if matched != nil {
-				cfg.ProgramSender.SendMsg(taskStreamResolvedMsg{sessionID: sessionID, callID: callID, handle: handle, taskID: strings.TrimSpace(matched.TaskID), token: token})
+				resolvedHandle := normalizeTaskStreamHandle(matched.Handle)
+				if resolvedHandle == "" {
+					resolvedHandle = handle
+				}
+				cfg.ProgramSender.SendMsg(taskStreamResolvedMsg{sessionID: sessionID, callID: callID, handle: resolvedHandle, taskID: strings.TrimSpace(matched.TaskID), token: token})
 				return
 			}
 		}
@@ -239,14 +314,20 @@ func (m *Model) startTaskStreamResolver(sessionID, callID, handle string, token 
 }
 
 func (m *Model) handleTaskStreamResolved(msg taskStreamResolvedMsg) (tea.Model, tea.Cmd) {
-	if m == nil || msg.sessionID != m.currentSessionID || m.taskStreamResolveTokens[msg.callID] != msg.token || !m.taskPanelExpanded(msg.callID, msg.handle) {
+	if m == nil || msg.sessionID != m.currentSessionID || m.taskStreamResolveTokens[msg.callID] != msg.token {
+		return m, nil
+	}
+	demand := m.taskStreamDemandForAnchor(msg.callID, msg.handle)
+	if !demand.wanted() {
+		m.applyTaskStreamDemand(msg.callID, msg.handle, demand)
 		return m, nil
 	}
 	if msg.err != nil || strings.TrimSpace(msg.taskID) == "" {
-		if taskStreamRetryable(msg.err) && m.taskStreamResolveRetries[msg.callID] < taskStreamRetryLimit {
+		if taskStreamRetryable(msg.err) {
 			m.taskStreamResolveRetries[msg.callID]++
 			return m, taskStreamResolveRetryCmd(msg, m.taskStreamResolveRetries[msg.callID])
 		}
+		m.taskStreamResolveTokens[msg.callID] = 0
 		return m, m.showHint(taskStreamUnavailableHint(msg.handle, msg.err), hintOptions{
 			priority: HintPriorityHigh, clearOnMessage: true, clearAfter: systemHintDuration,
 		})
@@ -254,6 +335,15 @@ func (m *Model) handleTaskStreamResolved(msg taskStreamResolvedMsg) (tea.Model, 
 	delete(m.taskStreamResolveRetries, msg.callID)
 	m.taskStreamIDsByHandle[msg.handle] = msg.taskID
 	m.taskStreamHandlesByID[msg.taskID] = msg.handle
+	m.taskStreamIDsByCallID[msg.callID] = msg.taskID
+	m.taskStreamCallIDsByID[msg.taskID] = msg.callID
+	if view := m.subagentOutputViews[msg.callID]; view != nil {
+		view.taskHandle = msg.handle
+		if view.actor == "" {
+			view.actor = subagentOutputActor("", view.title, msg.handle)
+			view.block.Actor = participantActorDisplayName(view.actor)
+		}
+	}
 	m.wantResolvedTaskStream(msg.taskID, true)
 	return m, nil
 }
@@ -392,7 +482,7 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 		}
 		cmds = append(cmds, cmd)
 	}
-	m.syncViewportContent()
+	cmds = append(cmds, m.requestSubagentOutputRender())
 	return m, tea.Batch(cmds...)
 }
 
@@ -404,9 +494,16 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 	if cursor := strings.TrimSpace(msg.cursor); cursor != "" {
 		m.taskStreamCursors[msg.taskID] = cursor
 	}
+	demand := m.taskStreamDemandForTaskID(msg.taskID)
+	if !demand.wanted() {
+		m.wantResolvedTaskStream(msg.taskID, false)
+		if demand == taskStreamDemandFinishedSubagent {
+			return m, nil
+		}
+	}
 	// Delivery failures are local to this panel. Recoverable failures resume
 	// from the last accepted cursor; an evicted prefix is returned as a gap.
-	if taskStreamRetryable(msg.err) && m.taskStreamWanted[msg.taskID] && m.taskStreamRetries[msg.taskID] < taskStreamRetryLimit {
+	if taskStreamRetryable(msg.err) && m.taskStreamWanted[msg.taskID] && demand.wanted() {
 		m.taskStreamRetries[msg.taskID]++
 		m.taskStreamTokens[msg.taskID] = 0
 		return m, taskStreamSubscribeRetryCmd(msg.sessionID, msg.taskID, m.taskStreamRetries[msg.taskID])
@@ -422,7 +519,7 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 
 func (m *Model) handleTaskStreamResolveRetry(msg taskStreamResolveRetryMsg) (tea.Model, tea.Cmd) {
 	if m == nil || msg.sessionID != m.currentSessionID || m.taskStreamResolveTokens[msg.callID] != msg.token ||
-		!m.taskPanelExpanded(msg.callID, msg.handle) {
+		!m.taskStreamDemandForAnchor(msg.callID, msg.handle).wanted() {
 		return m, nil
 	}
 	m.startTaskStreamResolver(msg.sessionID, msg.callID, msg.handle, msg.token)
@@ -431,11 +528,25 @@ func (m *Model) handleTaskStreamResolveRetry(msg taskStreamResolveRetryMsg) (tea
 
 func (m *Model) handleTaskStreamSubscribeRetry(msg taskStreamSubscribeRetryMsg) (tea.Model, tea.Cmd) {
 	if m == nil || msg.sessionID != m.currentSessionID || !m.taskStreamWanted[msg.taskID] ||
-		m.taskStreamTokens[msg.taskID] != 0 || !m.taskHandleHasExpandedPanel(m.taskStreamHandlesByID[msg.taskID]) {
+		m.taskStreamTokens[msg.taskID] != 0 || !m.taskStreamDemandForTaskID(msg.taskID).wanted() {
 		return m, nil
 	}
 	m.wantResolvedTaskStream(msg.taskID, true)
 	return m, nil
+}
+
+func (m *Model) taskStreamDemandForTaskID(taskID string) taskStreamDemand {
+	if m == nil {
+		return taskStreamDemandNone
+	}
+	taskID = strings.TrimSpace(taskID)
+	handle := m.taskStreamHandlesByID[taskID]
+	if callID := strings.TrimSpace(m.taskStreamCallIDsByID[taskID]); callID != "" {
+		if demand := m.taskStreamDemandForAnchor(callID, handle); demand != taskStreamDemandNone {
+			return demand
+		}
+	}
+	return m.taskStreamDemandForHandle(handle)
 }
 
 func taskStreamResolveRetryCmd(msg taskStreamResolvedMsg, attempt int) tea.Cmd {
@@ -456,8 +567,12 @@ func taskStreamRetryBackoff(attempt int) time.Duration {
 	if attempt <= 1 {
 		return taskStreamRetryDelay
 	}
-	delay := taskStreamRetryDelay << min(attempt-1, taskStreamRetryLimit-1)
+	delay := taskStreamRetryDelay << min(attempt-1, taskStreamRetryBackoffCap-1)
 	return delay
+}
+
+func normalizeTaskStreamHandle(handle string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(handle), "@"))
 }
 
 func taskStreamRetryable(err error) bool {
@@ -502,6 +617,8 @@ func (m *Model) closeTaskStreamSubscriptions() {
 	m.taskStreamCursors = map[string]string{}
 	m.taskStreamIDsByHandle = map[string]string{}
 	m.taskStreamHandlesByID = map[string]string{}
+	m.taskStreamIDsByCallID = map[string]string{}
+	m.taskStreamCallIDsByID = map[string]string{}
 	m.taskStreamResolveTokens = map[string]uint64{}
 	m.taskStreamResolveRetries = map[string]int{}
 	m.taskStreamRetries = map[string]int{}

@@ -37,6 +37,57 @@ func TestObservedSpawnResultUsesHandleWhenCallIDIsReusedAcrossTurns(t *testing.T
 	}
 }
 
+func TestObservedSpawnResultUpdatesAlreadyOpenOutputOverlay(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 100
+	model.height = 28
+	block := NewMainACPTurnBlock("turn-1")
+	block.UpdateToolWithMeta(
+		"spawn-1",
+		"SPAWN",
+		"reviewer: inspect",
+		"",
+		false,
+		false,
+		ToolUpdateMeta{TaskHandle: "alpha"},
+	)
+	appendObservedSpawnOwner(model, block, "spawn-1", "alpha")
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.block.AppendStreamEvent(
+		SEAssistant,
+		"Partial child stream.",
+		newNarrativeSourceIdentity("message-1", "", ""),
+	)
+	if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-1") {
+		t.Fatal("openSubagentOutputOverlay() = false")
+	}
+
+	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
+		ParentCallID: "spawn-1",
+		Status:       schema.ToolStatusCompleted,
+		RawOutput: map[string]any{
+			"handle":        "alpha",
+			"state":         "completed",
+			"final_message": "## Durable child final\n\n- complete",
+		},
+	}})
+
+	if view.finalResponse != "## Durable child final\n\n- complete" {
+		t.Fatalf("overlay FinalResponse = %q", view.finalResponse)
+	}
+	plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
+	for _, want := range []string{"Partial child stream.", "· Durable child final", "complete"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("open overlay omitted %q after durable repair:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "Final response") {
+		t.Fatalf("observed FinalResponse retained its redundant section label:\n%s", plain)
+	}
+}
+
 func TestObservedSpawnResultBatchClosesReusedCallIDByHandle(t *testing.T) {
 	t.Parallel()
 
