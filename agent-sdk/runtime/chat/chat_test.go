@@ -951,7 +951,7 @@ func TestToolCallEventsPersistCompleteAssistantMessage(t *testing.T) {
 		},
 	}
 
-	events := modelToolCallEvents(message, resp, "message-1")
+	events := modelToolCallEvents(message, resp, "message-1", nil)
 	if got, want := len(events), 2; got != want {
 		t.Fatalf("len(events) = %d, want %d", got, want)
 	}
@@ -1035,13 +1035,38 @@ func TestCollectFinalResponseAnnotatesContextWindow(t *testing.T) {
 	if final.ContextWindowTokens != 128000 {
 		t.Fatalf("final.ContextWindowTokens = %d, want model context window", final.ContextWindowTokens)
 	}
-	event := modelResponseEvent(final.Message, final, "")
+	event := modelResponseEvent(final.Message, final, "", nil)
 	if event.Invocation == nil || event.Invocation.ContextWindowTokens != 128000 {
 		t.Fatalf("event.Invocation = %#v, want context window", event.Invocation)
 	}
 	usage := session.UsageSnapshotFromSessionEvent(event)
 	if usage == nil || usage.ContextWindowTokens != 128000 {
 		t.Fatalf("UsageSnapshotFromSessionEvent() = %#v, want context window", usage)
+	}
+}
+
+func TestResponseInvocationUsesRequestedModelIdentity(t *testing.T) {
+	t.Parallel()
+
+	resp := &model.Response{
+		Message:             model.NewTextMessage(model.RoleAssistant, "done"),
+		Model:               "grok-4.5-build",
+		Provider:            "xai",
+		ContextWindowTokens: 500000,
+	}
+	event := modelResponseEvent(resp.Message, resp, "", invocationIdentityModel{
+		name:     "grok-4.5",
+		provider: "xai",
+	})
+	invocation := event.Invocation
+	if invocation == nil {
+		t.Fatal("modelResponseEvent().Invocation = nil")
+	}
+	if invocation.Provider != "xai" || invocation.Model != "grok-4.5" {
+		t.Fatalf("invocation identity = %q/%q, want xai/grok-4.5", invocation.Provider, invocation.Model)
+	}
+	if resp.Model != "grok-4.5-build" {
+		t.Fatalf("response model = %q, want raw provider identity preserved", resp.Model)
 	}
 }
 
@@ -1095,7 +1120,7 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 		Args:             `{"value":"two"}`,
 		ThoughtSignature: "sig-two",
 	}})
-	for _, event := range modelToolCallEvents(assistant, &model.Response{Message: assistant}, "") {
+	for _, event := range modelToolCallEvents(assistant, &model.Response{Message: assistant}, "", nil) {
 		appendEvent(event)
 	}
 	appendEvent(persistedToolResultEvent("call-1", "ECHO", map[string]any{"value": "one"}, map[string]any{"value": "ok"}))
@@ -3156,6 +3181,19 @@ func (m *recordingModel) Generate(_ context.Context, req *model.Request) iter.Se
 			},
 		}, nil)
 	}
+}
+
+type invocationIdentityModel struct {
+	name     string
+	provider string
+}
+
+func (m invocationIdentityModel) Name() string { return m.name }
+
+func (m invocationIdentityModel) ProviderName() string { return m.provider }
+
+func (invocationIdentityModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	return func(func(*model.StreamEvent, error) bool) {}
 }
 
 func ptrMessage(message model.Message) *model.Message {

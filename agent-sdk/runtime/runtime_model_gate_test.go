@@ -228,6 +228,50 @@ func TestAutoCompactDecisionBeforeModelRequestStillUsesProviderHighWater(t *test
 	}
 }
 
+func TestAutoCompactDecisionBeforeModelRequestAcceptsLegacyXAIResponseModel(t *testing.T) {
+	t.Parallel()
+
+	runtime, activeSession := newGateDecisionRuntimeForTest(t, CompactionConfig{
+		Enabled:                    true,
+		DefaultContextWindowTokens: 500000,
+	})
+	providerEvent := providerUsageGateEvent(499550)
+	providerEvent.Invocation.Provider = "xai"
+	providerEvent.Invocation.Model = "grok-4.5-build"
+	providerEvent.Invocation.ContextWindowTokens = 500000
+	sdkMeta := nestedMap(providerEvent.Meta, "caelis", "sdk")
+	sdkMeta["provider"] = "xai"
+	sdkMeta["model"] = "grok-4.5-build"
+	sdkMeta["context_window_tokens"] = 500000
+	appendTestEvent(t, runtime.sessions, activeSession.SessionRef, providerEvent)
+
+	currentModel := identifiedCompactionModel{
+		staticModel:  staticModel{text: "ok"},
+		providerName: "xai",
+		modelName:    "grok-4.5",
+	}
+	decision, err := runtime.autoCompactDecisionBeforeModelRequest(
+		context.Background(),
+		activeSession.SessionRef,
+		currentModel,
+		&model.Request{Messages: []model.Message{model.NewTextMessage(model.RoleUser, "small delta")}},
+	)
+	if err != nil {
+		t.Fatalf("autoCompactDecisionBeforeModelRequest() error = %v", err)
+	}
+	if decision.Reason != "model_request_context_limit" {
+		t.Fatalf("reason = %q, want legacy xAI usage to trigger model_request_context_limit", decision.Reason)
+	}
+	if decision.Usage.Source != compact.UsageSourceProvider || decision.Usage.TotalTokens < 499550 {
+		t.Fatalf("usage = %+v, want legacy xAI provider high-water baseline", decision.Usage)
+	}
+
+	incompatible := providerTokenSnapshot{Provider: "xai", Model: "grok-4.20-build"}
+	if providerSnapshotCompatibleWithIdentity(incompatible, "xai", "grok-4.5") {
+		t.Fatal("grok-4.20-build must not match grok-4.5")
+	}
+}
+
 func TestAutoCompactDecisionBeforeModelRequestSkipsFreshUserWithoutCurrentTurnProgress(t *testing.T) {
 	t.Parallel()
 

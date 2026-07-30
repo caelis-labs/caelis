@@ -240,6 +240,26 @@ func responseInvocation(resp *model.Response, requestPrefix ...prefixusage.Snaps
 	}
 }
 
+func responseInvocationForModel(
+	resp *model.Response,
+	invocationModel model.LLM,
+	requestPrefix ...prefixusage.Snapshot,
+) *session.EventInvocation {
+	invocation := responseInvocation(resp, requestPrefix...)
+	if invocation == nil || invocationModel == nil {
+		return invocation
+	}
+	if modelName := strings.TrimSpace(invocationModel.Name()); modelName != "" {
+		invocation.Model = modelName
+	}
+	if provider, ok := invocationModel.(interface{ ProviderName() string }); ok {
+		if providerName := strings.TrimSpace(provider.ProviderName()); providerName != "" {
+			invocation.Provider = providerName
+		}
+	}
+	return invocation
+}
+
 func toolMeta(name string) map[string]any {
 	name = strings.TrimSpace(name)
 	if name == "" {

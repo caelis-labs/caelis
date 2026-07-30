@@ -113,7 +113,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				return
 			}
 			if len(calls) == 0 {
-				assistantEvent := modelResponseEvent(assistantMessage, final, messageID, requestPrefix)
+				assistantEvent := modelResponseEvent(assistantMessage, final, messageID, a.model, requestPrefix)
 				if !yield(assistantEvent, nil) {
 					return
 				}
@@ -126,7 +126,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				}
 				return
 			}
-			toolCallEvents := modelToolCallEvents(assistantMessage, final, messageID, requestPrefix)
+			toolCallEvents := modelToolCallEvents(assistantMessage, final, messageID, a.model, requestPrefix)
 			for _, event := range toolCallEvents {
 				if !yield(event, nil) {
 					return
