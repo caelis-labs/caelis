@@ -257,7 +257,7 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 	if b == nil {
 		return
 	}
-	b.sealNarrativeSegment()
+	eventCount := len(b.Events)
 	events, _, collapse := applyToolEventUpdate(b.Events, toolEventUpdate{
 		CallID: callID,
 		Name:   name,
@@ -268,6 +268,9 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 		Meta:   meta,
 	}, b.toolEventIndex)
 	b.Events = events
+	if len(b.Events) > eventCount {
+		b.advanceNarrativeBoundary()
+	}
 	if collapse {
 		b.setToolPanelExpanded(strings.TrimSpace(callID), false)
 	}
@@ -358,7 +361,6 @@ func (b *MainACPTurnBlock) UpdatePlan(entries []planEntryState) {
 	if b == nil {
 		return
 	}
-	b.sealNarrativeSegment()
 	if n := len(b.Events); n > 0 && b.Events[n-1].Kind == SEPlan {
 		b.Events[n-1].PlanEntries = entries
 		return
@@ -367,6 +369,7 @@ func (b *MainACPTurnBlock) UpdatePlan(entries []planEntryState) {
 		Kind:        SEPlan,
 		PlanEntries: entries,
 	})
+	b.advanceNarrativeBoundary()
 }
 
 func (b *MainACPTurnBlock) SetStatus(state string, approvalTool string, approvalCommand string, occurredAt time.Time) {
@@ -377,7 +380,7 @@ func (b *MainACPTurnBlock) SetStatus(state string, approvalTool string, approval
 	collapseTools := false
 	switch b.Status {
 	case "completed", "failed", "interrupted", "cancelled", "canceled", "terminated":
-		b.sealNarrativeSegment()
+		b.closeNarrativeStream()
 		if b.EndedAt.IsZero() {
 			collapseTools = true
 			if !occurredAt.IsZero() {
@@ -395,7 +398,6 @@ func (b *MainACPTurnBlock) SetStatus(state string, approvalTool string, approval
 	if !strings.EqualFold(b.Status, "waiting_approval") {
 		return
 	}
-	b.sealNarrativeSegment()
 	if n := len(b.Events); n > 0 && b.Events[n-1].Kind == SEApproval {
 		b.Events[n-1].ApprovalTool = strings.TrimSpace(approvalTool)
 		b.Events[n-1].ApprovalCommand = strings.TrimSpace(approvalCommand)
@@ -406,14 +408,18 @@ func (b *MainACPTurnBlock) SetStatus(state string, approvalTool string, approval
 		ApprovalTool:    strings.TrimSpace(approvalTool),
 		ApprovalCommand: strings.TrimSpace(approvalCommand),
 	})
+	b.advanceNarrativeBoundary()
 }
 
 func (b *MainACPTurnBlock) AddApprovalReviewEvent(callID, tool, command, status, risk, authorization, text string) {
 	if b == nil {
 		return
 	}
-	b.sealNarrativeSegment()
-	b.Events, _ = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, risk, authorization, text)
+	var insertedAt int
+	b.Events, _, insertedAt = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, risk, authorization, text)
+	if insertedAt == len(b.Events)-1 {
+		b.advanceNarrativeBoundary()
+	}
 }
 
 func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
@@ -572,7 +578,7 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 	if b == nil {
 		return
 	}
-	b.sealNarrativeSegment()
+	eventCount := len(b.Events)
 	events, _, collapse := applyToolEventUpdate(b.Events, toolEventUpdate{
 		CallID: callID,
 		Name:   name,
@@ -583,6 +589,9 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 		Meta:   meta,
 	}, b.toolEventIndex)
 	b.Events = events
+	if len(b.Events) > eventCount {
+		b.advanceNarrativeBoundary()
+	}
 	if collapse {
 		b.setToolPanelExpanded(strings.TrimSpace(callID), false)
 	}
@@ -592,7 +601,6 @@ func (b *ParticipantTurnBlock) UpdatePlan(entries []planEntryState) {
 	if b == nil {
 		return
 	}
-	b.sealNarrativeSegment()
 	if n := len(b.Events); n > 0 && b.Events[n-1].Kind == SEPlan {
 		b.Events[n-1].PlanEntries = entries
 		return
@@ -601,6 +609,7 @@ func (b *ParticipantTurnBlock) UpdatePlan(entries []planEntryState) {
 		Kind:        SEPlan,
 		PlanEntries: entries,
 	})
+	b.advanceNarrativeBoundary()
 }
 
 func (b *ParticipantTurnBlock) SetStatus(state string, approvalTool string, approvalCommand string, occurredAt time.Time) {
@@ -611,7 +620,7 @@ func (b *ParticipantTurnBlock) SetStatus(state string, approvalTool string, appr
 	collapseTools := false
 	switch b.Status {
 	case "completed", "failed", "interrupted", "cancelled", "canceled", "terminated":
-		b.sealNarrativeSegment()
+		b.closeNarrativeStream()
 		if b.EndedAt.IsZero() {
 			collapseTools = true
 			if !occurredAt.IsZero() {
@@ -629,7 +638,6 @@ func (b *ParticipantTurnBlock) SetStatus(state string, approvalTool string, appr
 	if !strings.EqualFold(b.Status, "waiting_approval") {
 		return
 	}
-	b.sealNarrativeSegment()
 	if n := len(b.Events); n > 0 && b.Events[n-1].Kind == SEApproval {
 		b.Events[n-1].ApprovalTool = strings.TrimSpace(approvalTool)
 		b.Events[n-1].ApprovalCommand = strings.TrimSpace(approvalCommand)
@@ -640,14 +648,18 @@ func (b *ParticipantTurnBlock) SetStatus(state string, approvalTool string, appr
 		ApprovalTool:    strings.TrimSpace(approvalTool),
 		ApprovalCommand: strings.TrimSpace(approvalCommand),
 	})
+	b.advanceNarrativeBoundary()
 }
 
 func (b *ParticipantTurnBlock) AddApprovalReviewEvent(callID, tool, command, status, risk, authorization, text string) {
 	if b == nil {
 		return
 	}
-	b.sealNarrativeSegment()
-	b.Events, _ = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, risk, authorization, text)
+	var insertedAt int
+	b.Events, _, insertedAt = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, risk, authorization, text)
+	if insertedAt == len(b.Events)-1 {
+		b.advanceNarrativeBoundary()
+	}
 }
 
 func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
@@ -771,7 +783,7 @@ func visibleNarrativeEvents(events []SubagentEvent, status string) []SubagentEve
 	return out
 }
 
-func addApprovalReviewSubagentEvent(events []SubagentEvent, callID, tool, command, status, risk, authorization, text string) ([]SubagentEvent, bool) {
+func addApprovalReviewSubagentEvent(events []SubagentEvent, callID, tool, command, status, risk, authorization, text string) ([]SubagentEvent, bool, int) {
 	review := SubagentEvent{
 		Kind:            SEApproval,
 		CallID:          strings.TrimSpace(callID),
@@ -789,13 +801,14 @@ func addApprovalReviewSubagentEvent(events []SubagentEvent, callID, tool, comman
 			}
 			mergeApprovalReviewEvent(&events[i], review)
 			events, _ = relocateApprovalReviewEventsAfterTool(events, review.CallID)
-			return events, true
+			return events, true, -1
 		}
 		if toolIdx := latestToolEventIndexForCallID(events, review.CallID); toolIdx >= 0 {
-			return insertSubagentEvent(events, approvalReviewInsertIndex(events, toolIdx, review.CallID), review), true
+			insertAt := approvalReviewInsertIndex(events, toolIdx, review.CallID)
+			return insertSubagentEvent(events, insertAt, review), true, insertAt
 		}
 	}
-	return append(events, review), true
+	return append(events, review), true, len(events)
 }
 
 func mergeApprovalReviewEvent(target *SubagentEvent, review SubagentEvent) {

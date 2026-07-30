@@ -35,21 +35,17 @@ func (s narrativeSourceIdentity) stableKey() string {
 }
 
 type narrativeStreamTarget struct {
+	epoch    uint64
 	segment  uint64
 	kind     SubagentEventKind
 	identity string
 }
 
-type narrativeStreamIdentity struct {
-	kind     SubagentEventKind
-	identity string
-}
-
 type narrativeStreamState struct {
-	segment      uint64
-	targets      map[narrativeStreamTarget]int
-	pending      map[narrativeStreamTarget]string
-	sealedPrefix map[narrativeStreamIdentity]string
+	epoch   uint64
+	segment uint64
+	targets map[narrativeStreamTarget]int
+	pending map[narrativeStreamTarget]string
 }
 
 func (b *MainACPTurnBlock) AppendStreamEvent(kind SubagentEventKind, chunk string, source narrativeSourceIdentity, occurredAt ...time.Time) {
@@ -73,18 +69,31 @@ func (b *MainACPTurnBlock) ClearActiveBuffers() {
 	clearNarrativeStream(&b.Events, &b.narrativeStream)
 }
 
-func (b *MainACPTurnBlock) sealNarrativeSegment() {
+// advanceNarrativeBoundary closes only identity-free streams. A typed ACP
+// MessageID or source EventID owns its narrative event across unrelated tool,
+// plan, approval, and notice mutations; those events cannot close another
+// message.
+func (b *MainACPTurnBlock) advanceNarrativeBoundary() {
 	if b == nil {
 		return
 	}
-	b.narrativeStream.sealSegment(b.Events)
+	b.narrativeStream.advanceBoundary()
 }
 
-func (b *MainACPTurnBlock) sealNarrativeSegmentWithGap() {
+func (b *MainACPTurnBlock) advanceNarrativeBoundaryWithGap() {
 	if b == nil {
 		return
 	}
 	appendNarrativeSemanticBoundary(&b.Events, &b.narrativeStream)
+}
+
+// closeNarrativeStream is reserved for a boundary that owns the complete Turn,
+// such as terminal lifecycle or moving the main timeline to another Turn.
+func (b *MainACPTurnBlock) closeNarrativeStream() {
+	if b == nil {
+		return
+	}
+	b.narrativeStream.reset()
 }
 
 func (b *ParticipantTurnBlock) AppendStreamEvent(kind SubagentEventKind, chunk string, source narrativeSourceIdentity, occurredAt ...time.Time) {
@@ -101,18 +110,25 @@ func (b *ParticipantTurnBlock) ReplaceFinalStreamEvent(kind SubagentEventKind, c
 	replaceFinalNarrativeStreamEvent(&b.Events, &b.narrativeStream, kind, chunk, source, narrativeEventTime(occurredAt...))
 }
 
-func (b *ParticipantTurnBlock) sealNarrativeSegment() {
+func (b *ParticipantTurnBlock) advanceNarrativeBoundary() {
 	if b == nil {
 		return
 	}
-	b.narrativeStream.sealSegment(b.Events)
+	b.narrativeStream.advanceBoundary()
 }
 
-func (b *ParticipantTurnBlock) sealNarrativeSegmentWithGap() {
+func (b *ParticipantTurnBlock) advanceNarrativeBoundaryWithGap() {
 	if b == nil {
 		return
 	}
 	appendNarrativeSemanticBoundary(&b.Events, &b.narrativeStream)
+}
+
+func (b *ParticipantTurnBlock) closeNarrativeStream() {
+	if b == nil {
+		return
+	}
+	b.narrativeStream.reset()
 }
 
 func appendNarrativeStreamEvent(
@@ -143,7 +159,7 @@ func clearNarrativeStream(events *[]SubagentEvent, stream *narrativeStreamState)
 }
 
 func appendNarrativeSemanticBoundary(events *[]SubagentEvent, stream *narrativeStreamState) {
-	stream.sealSegment(*events)
+	stream.advanceBoundary()
 	if len(*events) > 0 && (*events)[len(*events)-1].Kind == SESemanticBoundary {
 		return
 	}
@@ -153,6 +169,9 @@ func appendNarrativeSemanticBoundary(events *[]SubagentEvent, stream *narrativeS
 func (s *narrativeStreamState) append(events []SubagentEvent, kind SubagentEventKind, chunk string, source narrativeSourceIdentity, at time.Time) []SubagentEvent {
 	target := s.target(kind, source.stableKey())
 	if idx, ok := s.targetIndex(events, target); ok {
+		if events[idx].narrativeFinal {
+			return events
+		}
 		chunk = s.prependPending(target, chunk, false)
 		appendNarrativeEventChunk(&events[idx], kind, chunk, at, appendDeltaStreamChunk)
 		return events
@@ -163,6 +182,7 @@ func (s *narrativeStreamState) append(events []SubagentEvent, kind SubagentEvent
 	}
 	chunk = s.prependPending(target, chunk, false)
 	events = append(events, newNarrativeEventChunk(kind, chunk, at))
+	bindNarrativeTarget(&events[len(events)-1], target, false)
 	s.rememberTarget(target, len(events)-1)
 	return events
 }
@@ -175,39 +195,27 @@ func (s *narrativeStreamState) replaceFinal(events []SubagentEvent, kind Subagen
 	}
 	chunk = normalizeNarrativeLineEndings(chunk)
 	if idx, ok := s.targetIndex(events, target); ok {
-		var cumulative bool
-		chunk, cumulative = s.currentSegmentFinal(target, chunk)
-		if cumulative && !renderableTextHasContent(chunk) {
-			return s.removeTargetEvent(events, idx)
-		}
 		replaceNarrativeEventFinal(&events[idx], chunk, at)
+		bindNarrativeTarget(&events[idx], target, true)
 		return events
 	}
 	// A canonical final snapshot may adopt an anonymous provisional stream only
-	// inside the current semantic segment. Once sealSegment has run, the
-	// anonymous target is no longer reachable and cannot be rewritten.
+	// inside the current anonymous segment. Once a presentation boundary advances
+	// that segment, the anonymous target is no longer reachable and cannot be
+	// rewritten.
 	anonymous := s.target(kind, "")
 	if target.identity != "" {
 		if idx, ok := s.targetIndex(events, anonymous); ok {
-			var cumulative bool
-			chunk, cumulative = s.currentSegmentFinal(target, chunk)
-			if cumulative && !renderableTextHasContent(chunk) {
-				return s.removeTargetEvent(events, idx)
-			}
 			replaceNarrativeEventFinal(&events[idx], chunk, at)
 			delete(s.targets, anonymous)
+			bindNarrativeTarget(&events[idx], target, true)
 			s.rememberTarget(target, idx)
 			return events
 		}
 	}
-	if current, cumulative := s.currentSegmentFinal(target, chunk); cumulative {
-		if !renderableTextHasContent(current) {
-			return events
-		}
-		chunk = current
-	}
 	ev := SubagentEvent{Kind: kind, Text: chunk}
 	markNarrativeTiming(&ev, at)
+	bindNarrativeTarget(&ev, target, true)
 	events = append(events, ev)
 	s.rememberTarget(target, len(events)-1)
 	return events
@@ -218,31 +226,36 @@ func (s *narrativeStreamState) targetIndex(events []SubagentEvent, target narrat
 		return 0, false
 	}
 	idx, ok := s.targets[target]
-	if !ok || idx < 0 || idx >= len(events) || events[idx].Kind != target.kind {
-		if ok {
-			delete(s.targets, target)
-		}
-		return 0, false
+	if ok && validNarrativeTargetEvent(events, idx, target) {
+		return idx, true
 	}
-	return idx, true
+	for index := range events {
+		if validNarrativeTargetEvent(events, index, target) {
+			s.rememberTarget(target, index)
+			return index, true
+		}
+	}
+	if ok {
+		delete(s.targets, target)
+	}
+	return 0, false
 }
 
-func (s *narrativeStreamState) removeTargetEvent(events []SubagentEvent, idx int) []SubagentEvent {
-	if s == nil || idx < 0 || idx >= len(events) {
-		return events
+func validNarrativeTargetEvent(events []SubagentEvent, idx int, target narrativeStreamTarget) bool {
+	if idx < 0 || idx >= len(events) {
+		return false
 	}
-	copy(events[idx:], events[idx+1:])
-	clear(events[len(events)-1:])
-	events = events[:len(events)-1]
-	for target, targetIndex := range s.targets {
-		switch {
-		case targetIndex == idx:
-			delete(s.targets, target)
-		case targetIndex > idx:
-			s.targets[target] = targetIndex - 1
-		}
+	event := events[idx]
+	return event.narrativeTracked && event.Kind == target.kind && event.narrativeTarget == target
+}
+
+func bindNarrativeTarget(event *SubagentEvent, target narrativeStreamTarget, final bool) {
+	if event == nil {
+		return
 	}
-	return events
+	event.narrativeTarget = target
+	event.narrativeTracked = true
+	event.narrativeFinal = final
 }
 
 func (s *narrativeStreamState) rememberTarget(target narrativeStreamTarget, idx int) {
@@ -294,61 +307,36 @@ func (s *narrativeStreamState) target(kind SubagentEventKind, identity string) n
 	if s == nil {
 		return narrativeStreamTarget{kind: kind, identity: identity}
 	}
-	return narrativeStreamTarget{segment: s.segment, kind: kind, identity: identity}
+	if strings.TrimSpace(identity) != "" {
+		// Stable typed identity is the message boundary. It is deliberately not
+		// scoped by the anonymous presentation segment.
+		return narrativeStreamTarget{epoch: s.epoch, kind: kind, identity: identity}
+	}
+	return narrativeStreamTarget{epoch: s.epoch, segment: s.segment, kind: kind, identity: identity}
 }
 
-// currentSegmentFinal accepts cumulative final snapshots only when stable ACP
-// identity proves that the final belongs to a narrative spanning semantic
-// segments. The complete sealed prefix must match byte-for-byte at offset zero.
-// Identity-free or divergent snapshots fail closed and remain intact.
-// cumulative reports whether the prefix matched even when the current-segment
-// suffix is empty, so callers can remove a provisional event or avoid creating
-// a duplicate structural event.
-func (s *narrativeStreamState) currentSegmentFinal(target narrativeStreamTarget, finalText string) (text string, cumulative bool) {
-	if s == nil || target.identity == "" {
-		return finalText, false
-	}
-	sealedPrefix := s.sealedPrefix[narrativeStreamIdentity{
-		kind:     target.kind,
-		identity: target.identity,
-	}]
-	if !renderableTextHasContent(sealedPrefix) || !strings.HasPrefix(finalText, sealedPrefix) {
-		return finalText, false
-	}
-	suffix := strings.TrimLeft(finalText[len(sealedPrefix):], " \t\r\n")
-	return suffix, true
-}
-
-func (s *narrativeStreamState) sealSegment(events []SubagentEvent) {
+func (s *narrativeStreamState) advanceBoundary() {
 	if s == nil {
 		return
 	}
-	if len(s.targets) > 0 {
-		if s.sealedPrefix == nil {
-			s.sealedPrefix = make(map[narrativeStreamIdentity]string)
-		}
-		for target, idx := range s.targets {
-			if target.identity == "" || idx < 0 || idx >= len(events) {
-				continue
-			}
-			event := events[idx]
-			if event.Kind != target.kind || !activeNarrativeEventKind(event.Kind) || !renderableTextHasContent(event.Text) {
-				continue
-			}
-			identity := narrativeStreamIdentity{kind: target.kind, identity: target.identity}
-			s.sealedPrefix[identity] += event.Text
+	s.segment++
+	for target := range s.targets {
+		if target.identity == "" {
+			delete(s.targets, target)
 		}
 	}
-	s.segment++
-	s.targets = nil
-	s.pending = nil
+	for target := range s.pending {
+		if target.identity == "" {
+			delete(s.pending, target)
+		}
+	}
 }
 
 func (s *narrativeStreamState) reset() {
 	if s == nil {
 		return
 	}
-	*s = narrativeStreamState{segment: s.segment + 1}
+	*s = narrativeStreamState{epoch: s.epoch + 1, segment: s.segment + 1}
 }
 
 func clearActiveNarrativeBuffers(events []SubagentEvent) []SubagentEvent {

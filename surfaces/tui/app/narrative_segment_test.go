@@ -53,6 +53,26 @@ func TestNarrativeStreamScopesSharedMessageIdentityByKind(t *testing.T) {
 	}
 }
 
+func TestNarrativeStreamKeepsDistinctMessageIdentitiesSeparate(t *testing.T) {
+	t.Parallel()
+
+	block := NewMainACPTurnBlock("turn-1")
+	block.AppendStreamEvent(
+		SEReasoning,
+		"first",
+		newNarrativeSourceIdentity("message-1", "event-1", "projection-1"),
+	)
+	block.AppendStreamEvent(
+		SEReasoning,
+		"second",
+		newNarrativeSourceIdentity("message-2", "event-2", "projection-2"),
+	)
+
+	if len(block.Events) != 2 || block.Events[0].Text != "first" || block.Events[1].Text != "second" {
+		t.Fatalf("events = %#v, want distinct MessageIDs to retain separate owners", block.Events)
+	}
+}
+
 func TestTypedMessageIdentityConvergesACPChunksAndCanonicalFinal(t *testing.T) {
 	t.Parallel()
 
@@ -107,6 +127,82 @@ func TestTypedMessageIdentityConvergesACPChunksAndCanonicalFinal(t *testing.T) {
 	}
 	if block.Events[1].Kind != SEAssistant || block.Events[1].Text != "final answer" {
 		t.Fatalf("assistant = %#v, want converged canonical answer", block.Events[1])
+	}
+}
+
+func TestACPEnvelopeReasoningIdentitySurvivesInterleavedToolEvent(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	apply := func(eventID string, event *session.Event) {
+		t.Helper()
+		event.ID = eventID
+		event.SessionID = "session-1"
+		base := acpprojector.EnvelopeBaseFromSessionEvent(
+			session.SessionRef{SessionID: "session-1"},
+			event,
+			acpprojector.SessionEventTransport{TurnID: "turn-1"},
+		)
+		for _, envelope := range acpprojector.ProjectSessionEventEnvelope(base, event) {
+			model = applyACPEnvelopeForTest(t, model, envelope)
+		}
+	}
+
+	const messageID = "message-1"
+	first := sdkmodel.NewReasoningMessage(
+		sdkmodel.RoleAssistant,
+		"**Identifying spec duplication and reuse opportunities**",
+		sdkmodel.ReasoningVisibilityVisible,
+	)
+	apply("thought-1", session.MarkUIOnly(&session.Event{
+		Type: session.EventTypeAssistant, MessageID: messageID, Message: &first,
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentThought),
+			MessageID:     messageID,
+			Content:       session.ProtocolTextContent(first.ReasoningText()),
+		}},
+	}))
+	apply("tool-1", session.CanonicalizeEvent(narrativeTestToolCallEvent(
+		"read-1",
+		"Read",
+		`{"path":"generated.md"}`,
+		"",
+		"",
+	)))
+	secondText := "\n**Identifying major test coverage gaps in runners**\n**Inspecting generated skill documentation sources**"
+	second := sdkmodel.NewReasoningMessage(sdkmodel.RoleAssistant, secondText, sdkmodel.ReasoningVisibilityVisible)
+	apply("thought-2", session.MarkUIOnly(&session.Event{
+		Type: session.EventTypeAssistant, MessageID: messageID, Message: &second,
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentThought),
+			MessageID:     messageID,
+			Content:       session.ProtocolTextContent(secondText),
+		}},
+	}))
+	finalText := first.ReasoningText() + secondText
+	final := sdkmodel.NewReasoningMessage(sdkmodel.RoleAssistant, finalText, sdkmodel.ReasoningVisibilityVisible)
+	apply("thought-final", session.CanonicalizeEvent(&session.Event{
+		Type: session.EventTypeAssistant, MessageID: messageID, Message: &final,
+	}))
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	var reasoning []SubagentEvent
+	for _, event := range block.Events {
+		if event.Kind == SEReasoning {
+			reasoning = append(reasoning, event)
+		}
+	}
+	if len(reasoning) != 1 || reasoning[0].Text != finalText {
+		t.Fatalf("reasoning = %#v (events %#v), want one canonical message owner", reasoning, block.Events)
+	}
+	var reasoningHeads int
+	for _, row := range renderedPlainRows(block.Render(model.blockRenderContext(180))) {
+		if strings.HasPrefix(strings.TrimSpace(row), "›") {
+			reasoningHeads++
+		}
+	}
+	if reasoningHeads != 1 {
+		t.Fatalf("reasoning rendered as %d blocks, want 1", reasoningHeads)
 	}
 }
 
@@ -193,24 +289,25 @@ func TestNarrativeStreamFallsBackToSourceEventIdentity(t *testing.T) {
 	}
 }
 
-func TestNarrativeStreamFinalCannotCrossSemanticBarrier(t *testing.T) {
+func TestNarrativeStreamStableIdentitySurvivesForeignSemanticBoundary(t *testing.T) {
 	t.Parallel()
 
 	block := NewMainACPTurnBlock("turn-1")
-	block.AppendStreamEvent(SEReasoning, "before wait", narrativeTestSource())
-	block.sealNarrativeSegment()
-	block.AppendStreamEvent(SEReasoning, "after wait", narrativeTestSource())
-	block.ReplaceFinalStreamEvent(SEReasoning, "after wait final", narrativeTestSource())
+	source := narrativeTestSource()
+	block.AppendStreamEvent(SEReasoning, "before wait", source)
+	block.advanceNarrativeBoundary()
+	block.AppendStreamEvent(SEReasoning, " after wait", source)
+	block.ReplaceFinalStreamEvent(SEReasoning, "before wait after wait final", source)
 
-	if len(block.Events) != 2 {
-		t.Fatalf("events = %#v, want one reasoning event per semantic segment", block.Events)
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one identity-owned reasoning event", block.Events)
 	}
-	if block.Events[0].Text != "before wait" || block.Events[1].Text != "after wait final" {
-		t.Fatalf("events = %#v, want final snapshot to replace only the open segment", block.Events)
+	if block.Events[0].Text != "before wait after wait final" {
+		t.Fatalf("events = %#v, want final snapshot to replace its original owner", block.Events)
 	}
 }
 
-func TestNarrativeStreamNonNarrativeEventsSealSemanticSegment(t *testing.T) {
+func TestNarrativeStreamNonNarrativeEventsCannotCloseIdentifiedMessage(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -242,25 +339,210 @@ func TestNarrativeStreamNonNarrativeEventsSealSemanticSegment(t *testing.T) {
 			t.Parallel()
 
 			block := NewMainACPTurnBlock("turn-1")
-			block.AppendStreamEvent(SEReasoning, "before", narrativeTestSource())
+			source := narrativeTestSource()
+			block.AppendStreamEvent(SEReasoning, "before", source)
 			test.barrier(block)
-			block.AppendStreamEvent(SEReasoning, "after", narrativeTestSource())
-			block.ReplaceFinalStreamEvent(SEReasoning, "after final", narrativeTestSource())
+			block.AppendStreamEvent(SEReasoning, " after", source)
+			block.ReplaceFinalStreamEvent(SEReasoning, "before after final", source)
 
-			reasoning := make([]string, 0, 2)
+			var reasoning []string
+			for _, event := range block.Events {
+				if event.Kind == SEReasoning {
+					reasoning = append(reasoning, event.Text)
+				}
+			}
+			if len(reasoning) != 1 || reasoning[0] != "before after final" {
+				t.Fatalf("reasoning = %#v (events %#v), want one identity-owned message", reasoning, block.Events)
+			}
+		})
+	}
+}
+
+func TestNarrativeStreamNonNarrativeEventsStillSeparateAnonymousMessages(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		barrier func(*MainACPTurnBlock)
+	}{
+		{
+			name: "tool",
+			barrier: func(block *MainACPTurnBlock) {
+				block.UpdateToolWithMeta("read-1", "READ", "file.go", "ok", true, false, ToolUpdateMeta{})
+			},
+		},
+		{
+			name: "plan",
+			barrier: func(block *MainACPTurnBlock) {
+				block.UpdatePlan([]planEntryState{{Content: "inspect", Status: "in_progress"}})
+			},
+		},
+		{
+			name: "notice",
+			barrier: func(block *MainACPTurnBlock) {
+				block.AddNotice("retrying", time.Time{}, transcript.NoticeKindModelRetry)
+			},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			block := NewMainACPTurnBlock("turn-1")
+			block.AppendStreamEvent(SEReasoning, "before", narrativeSourceIdentity{})
+			test.barrier(block)
+			block.AppendStreamEvent(SEReasoning, "after", narrativeSourceIdentity{})
+			block.ReplaceFinalStreamEvent(SEReasoning, "after final", narrativeSourceIdentity{})
+
+			var reasoning []string
 			for _, event := range block.Events {
 				if event.Kind == SEReasoning {
 					reasoning = append(reasoning, event.Text)
 				}
 			}
 			if len(reasoning) != 2 || reasoning[0] != "before" || reasoning[1] != "after final" {
-				t.Fatalf("reasoning = %#v (events %#v), want barrier-preserved segments", reasoning, block.Events)
+				t.Fatalf("reasoning = %#v (events %#v), want anonymous boundary-preserved messages", reasoning, block.Events)
 			}
 		})
 	}
 }
 
-func TestTranscriptUsageTelemetryDoesNotSealNarrativeSegment(t *testing.T) {
+func TestIdentifiedReasoningRendersOnceAcrossHiddenCompletedTool(t *testing.T) {
+	t.Parallel()
+
+	type narrativeBlock interface {
+		AppendStreamEvent(SubagentEventKind, string, narrativeSourceIdentity, ...time.Time)
+		ReplaceFinalStreamEvent(SubagentEventKind, string, narrativeSourceIdentity, ...time.Time)
+		UpdateToolWithMeta(string, string, string, string, bool, bool, ToolUpdateMeta)
+		Render(BlockRenderContext) []RenderedRow
+	}
+	tests := []struct {
+		name  string
+		block func() narrativeBlock
+	}{
+		{name: "main", block: func() narrativeBlock { return NewMainACPTurnBlock("turn-1") }},
+		{name: "participant", block: func() narrativeBlock {
+			return NewParticipantTurnBlock("participant-1", "@reviewer")
+		}},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			block := test.block()
+			source := newNarrativeSourceIdentity("message-1", "event-1", "projection-1")
+			block.AppendStreamEvent(SEReasoning, "**Identifying spec duplication and reuse opportunities**", source)
+			block.UpdateToolWithMeta("late-hidden-tool", "Read", "", "", true, false, ToolUpdateMeta{ToolKind: "read"})
+			block.AppendStreamEvent(
+				SEReasoning,
+				"\n**Identifying major test coverage gaps in runners**\n**Inspecting generated skill documentation sources**",
+				source,
+			)
+			block.ReplaceFinalStreamEvent(
+				SEReasoning,
+				"**Identifying spec duplication and reuse opportunities**\n**Identifying major test coverage gaps in runners**\n**Inspecting generated skill documentation sources**",
+				source,
+			)
+
+			model := NewModel(Config{NoColor: true, NoAnimation: true})
+			var reasoningHeads int
+			for _, row := range renderedPlainRows(block.Render(model.blockRenderContext(180))) {
+				trimmed := strings.TrimSpace(row)
+				if strings.HasPrefix(trimmed, "›") {
+					reasoningHeads++
+				}
+			}
+			if reasoningHeads != 1 {
+				t.Fatalf("same reasoning message rendered as %d blocks, want 1", reasoningHeads)
+			}
+		})
+	}
+}
+
+func TestHistoricalPresentationRepairsDoNotAdvanceAnonymousNarrative(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		setup  func(*MainACPTurnBlock)
+		repair func(*MainACPTurnBlock)
+	}{
+		{
+			name: "tool final",
+			setup: func(block *MainACPTurnBlock) {
+				block.UpdateToolWithMeta("read-1", "Read", "file.go", "", false, false, ToolUpdateMeta{ToolKind: "read"})
+			},
+			repair: func(block *MainACPTurnBlock) {
+				block.UpdateToolWithMeta("read-1", "Read", "", "", true, false, ToolUpdateMeta{ToolKind: "read"})
+			},
+		},
+		{
+			name: "approval settlement",
+			setup: func(block *MainACPTurnBlock) {
+				block.UpdateToolWithMeta("write-1", "Write", "file.go", "", false, false, ToolUpdateMeta{ToolKind: "edit"})
+				block.AddApprovalReviewEvent("write-1", "Write", "file.go", "pending", "", "", "")
+			},
+			repair: func(block *MainACPTurnBlock) {
+				block.AddApprovalReviewEvent("write-1", "Write", "file.go", "approved", "", "session", "approved")
+			},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			block := NewMainACPTurnBlock("turn-1")
+			test.setup(block)
+			block.AppendStreamEvent(SEReasoning, "first ", narrativeSourceIdentity{})
+			test.repair(block)
+			block.AppendStreamEvent(SEReasoning, "second", narrativeSourceIdentity{})
+
+			var reasoning []SubagentEvent
+			for _, event := range block.Events {
+				if event.Kind == SEReasoning {
+					reasoning = append(reasoning, event)
+				}
+			}
+			if len(reasoning) != 1 || reasoning[0].Text != "first second" {
+				t.Fatalf("reasoning = %#v (events %#v), want repair to preserve anonymous owner", reasoning, block.Events)
+			}
+		})
+	}
+}
+
+func TestNarrativeFinalClosesOnlyItsOwnMessage(t *testing.T) {
+	t.Parallel()
+
+	block := NewMainACPTurnBlock("turn-1")
+	source := newNarrativeSourceIdentity("message-1", "event-1", "projection-1")
+	block.AppendStreamEvent(SEAssistant, "partial", source)
+	block.ReplaceFinalStreamEvent(SEAssistant, "final", source)
+	block.AppendStreamEvent(SEAssistant, " late delta", source)
+	block.ReplaceFinalStreamEvent(SEAssistant, "richer final", source)
+
+	if len(block.Events) != 1 || block.Events[0].Text != "richer final" {
+		t.Fatalf("events = %#v, want late delta ignored and duplicate final converged", block.Events)
+	}
+}
+
+func TestTurnBoundaryCanCloseAllNarrativeOwners(t *testing.T) {
+	t.Parallel()
+
+	block := NewMainACPTurnBlock("turn-1")
+	source := newNarrativeSourceIdentity("message-1", "event-1", "projection-1")
+	block.ReplaceFinalStreamEvent(SEAssistant, "first turn", source)
+	block.closeNarrativeStream()
+	block.ReplaceFinalStreamEvent(SEAssistant, "next turn", source)
+
+	if len(block.Events) != 2 || block.Events[0].Text != "first turn" || block.Events[1].Text != "next turn" {
+		t.Fatalf("events = %#v, want Turn epoch to prevent owner reuse", block.Events)
+	}
+}
+
+func TestTranscriptUsageTelemetryDoesNotAdvanceNarrativeBoundary(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -300,10 +582,10 @@ func TestNarrativeStreamStableFinalAdoptsAnonymousProvisionalOnlyInCurrentSegmen
 		t.Fatalf("same-segment final events = %#v, want canonical adoption", block.Events)
 	}
 
-	block.sealNarrativeSegment()
-	block.ReplaceFinalStreamEvent(SEAssistant, "next", newNarrativeSourceIdentity("message-1", "event-2", "projection-2"))
+	block.advanceNarrativeBoundary()
+	block.ReplaceFinalStreamEvent(SEAssistant, "next", newNarrativeSourceIdentity("message-2", "event-2", "projection-2"))
 	if len(block.Events) != 2 || block.Events[0].Text != "canonical" || block.Events[1].Text != "next" {
-		t.Fatalf("cross-segment final events = %#v, want prior narrative preserved", block.Events)
+		t.Fatalf("distinct final events = %#v, want prior identified message preserved", block.Events)
 	}
 }
 
@@ -312,7 +594,7 @@ func TestNarrativeStreamIdentityFreeFinalFailsClosedAcrossBarrier(t *testing.T) 
 
 	block := NewMainACPTurnBlock("turn-1")
 	block.AppendStreamEvent(SEAssistant, "before", narrativeSourceIdentity{})
-	block.sealNarrativeSegment()
+	block.advanceNarrativeBoundary()
 	block.AppendStreamEvent(SEAssistant, "after", narrativeSourceIdentity{})
 	block.ReplaceFinalStreamEvent(SEAssistant, "before after final", narrativeSourceIdentity{})
 
@@ -324,42 +606,36 @@ func TestNarrativeStreamIdentityFreeFinalFailsClosedAcrossBarrier(t *testing.T) 
 	}
 }
 
-func TestNarrativeStreamCumulativeFinalRequiresExactIdentityPrefix(t *testing.T) {
+func TestNarrativeStreamStableFinalReplacesOriginalOwnerAcrossBoundary(t *testing.T) {
 	t.Parallel()
 
 	block := NewMainACPTurnBlock("turn-1")
 	source := newNarrativeSourceIdentity("message-1", "event-1", "projection-1")
 	block.AppendStreamEvent(SEAssistant, "before", source)
-	block.sealNarrativeSegment()
+	block.advanceNarrativeBoundary()
 	block.AppendStreamEvent(SEAssistant, "after", source)
 	block.ReplaceFinalStreamEvent(SEAssistant, "  before\nafter final", source)
 
-	if len(block.Events) != 2 {
-		t.Fatalf("events = %#v, want one assistant event per segment", block.Events)
-	}
-	if got := block.Events[1].Text; got != "  before\nafter final" {
-		t.Fatalf("current segment final = %q, want whitespace-divergent snapshot preserved intact", got)
+	if len(block.Events) != 1 || block.Events[0].Text != "  before\nafter final" {
+		t.Fatalf("events = %#v, want stable final on the original message owner", block.Events)
 	}
 }
 
-func TestNarrativeStreamFinalOnlySegmentStripsExactSealedPrefix(t *testing.T) {
+func TestNarrativeStreamStableFinalOnlyUpdateDoesNotCreateBoundarySegment(t *testing.T) {
 	t.Parallel()
 
 	block := NewMainACPTurnBlock("turn-1")
 	source := newNarrativeSourceIdentity("message-1", "event-1", "projection-1")
 	block.AppendStreamEvent(SEAssistant, "before", source)
-	block.sealNarrativeSegment()
+	block.advanceNarrativeBoundary()
 	block.ReplaceFinalStreamEvent(SEAssistant, "before\nafter final", source)
 
-	if len(block.Events) != 2 {
-		t.Fatalf("events = %#v, want one assistant event per semantic segment", block.Events)
-	}
-	if block.Events[0].Text != "before" || block.Events[1].Text != "after final" {
-		t.Fatalf("events = %#v, want only the exact current-segment suffix appended", block.Events)
+	if len(block.Events) != 1 || block.Events[0].Text != "before\nafter final" {
+		t.Fatalf("events = %#v, want final to update the identified owner", block.Events)
 	}
 }
 
-func TestNarrativeStreamFinalEqualToSealedPrefixAddsNoDuplicateSegment(t *testing.T) {
+func TestNarrativeStreamFinalEqualToIdentifiedMessageAddsNoDuplicate(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -377,20 +653,20 @@ func TestNarrativeStreamFinalEqualToSealedPrefixAddsNoDuplicateSegment(t *testin
 			block := NewParticipantTurnBlock("participant-1", "@reviewer")
 			source := newNarrativeSourceIdentity("message-1", "event-1", "projection-1")
 			block.AppendStreamEvent(SEReasoning, "before", source)
-			block.sealNarrativeSegment()
+			block.advanceNarrativeBoundary()
 			if test.provisional != "" {
 				block.AppendStreamEvent(SEReasoning, test.provisional, source)
 			}
 			block.ReplaceFinalStreamEvent(SEReasoning, "before", source)
 
 			if len(block.Events) != 1 || block.Events[0].Text != "before" {
-				t.Fatalf("events = %#v, want only the sealed reasoning segment", block.Events)
+				t.Fatalf("events = %#v, want only the identified reasoning message", block.Events)
 			}
 		})
 	}
 }
 
-func TestHiddenTaskWaitStillSealsMainNarrativeSegment(t *testing.T) {
+func TestHiddenTaskWaitStillCreatesAnonymousNarrativeBoundary(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -849,7 +1125,7 @@ func TestSemanticBoundaryStillAllowsNewDenseExplorationRun(t *testing.T) {
 	block := NewMainACPTurnBlock("turn-1")
 	block.Status = "completed"
 	block.AppendStreamEvent(SEReasoning, "pre-wait reasoning", narrativeTestSource())
-	block.sealNarrativeSegmentWithGap()
+	block.advanceNarrativeBoundaryWithGap()
 	block.AppendStreamEvent(SEReasoning, "new dense exploration", narrativeTestSource())
 	block.UpdateToolWithMeta("read-1", "Read", "first.go", "", true, false, ToolUpdateMeta{ToolKind: "read"})
 	block.UpdateToolWithMeta("read-2", "Read", "second.go", "", true, false, ToolUpdateMeta{ToolKind: "read"})

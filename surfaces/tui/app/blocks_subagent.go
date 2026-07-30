@@ -36,6 +36,12 @@ type SubagentEvent struct {
 	// ActiveBuffer is transient UI state derived from Text for streaming
 	// narrative rendering. It is not canonical session data.
 	ActiveBuffer *activeNarrativeBuffer `json:"-"`
+	// narrativeTarget is reducer-local ownership. Stable ACP identity keeps one
+	// message attached to its original event even when unrelated presentation
+	// events are inserted or repaired around it.
+	narrativeTarget  narrativeStreamTarget
+	narrativeTracked bool
+	narrativeFinal   bool
 
 	// ToolCall fields.
 	CallID   string

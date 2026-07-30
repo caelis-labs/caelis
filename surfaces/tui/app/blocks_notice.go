@@ -15,8 +15,9 @@ func (b *MainACPTurnBlock) AddNotice(text string, occurredAt time.Time, noticeKi
 	if text == "" {
 		return
 	}
-	b.sealNarrativeSegment()
-	appendNoticeEvent(&b.Events, text, occurredAt, noticeKind)
+	if appendNoticeEvent(&b.Events, text, occurredAt, noticeKind) {
+		b.advanceNarrativeBoundary()
+	}
 }
 
 func (b *ParticipantTurnBlock) AddNotice(text string, occurredAt time.Time, noticeKind transcript.NoticeKind) {
@@ -27,13 +28,14 @@ func (b *ParticipantTurnBlock) AddNotice(text string, occurredAt time.Time, noti
 	if text == "" {
 		return
 	}
-	b.sealNarrativeSegment()
-	appendNoticeEvent(&b.Events, text, occurredAt, noticeKind)
+	if appendNoticeEvent(&b.Events, text, occurredAt, noticeKind) {
+		b.advanceNarrativeBoundary()
+	}
 }
 
-func appendNoticeEvent(events *[]SubagentEvent, text string, occurredAt time.Time, noticeKind transcript.NoticeKind) {
+func appendNoticeEvent(events *[]SubagentEvent, text string, occurredAt time.Time, noticeKind transcript.NoticeKind) bool {
 	if events == nil {
-		return
+		return false
 	}
 	ev := SubagentEvent{Kind: SENotice, Text: text, NoticeKind: noticeKind}
 	if !occurredAt.IsZero() {
@@ -43,8 +45,9 @@ func appendNoticeEvent(events *[]SubagentEvent, text string, occurredAt time.Tim
 	if noticeKind == transcript.NoticeKindModelRetry {
 		if n := len(*events); n > 0 && (*events)[n-1].Kind == SENotice && (*events)[n-1].NoticeKind == transcript.NoticeKindModelRetry {
 			(*events)[n-1] = ev
-			return
+			return false
 		}
 	}
 	*events = append(*events, ev)
+	return true
 }

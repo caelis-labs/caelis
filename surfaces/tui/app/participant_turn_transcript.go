@@ -90,7 +90,7 @@ func applyTranscriptEventToParticipantTurn(
 		block.UpdatePlan(transcriptPlanEntries(event))
 	case TranscriptEventTool:
 		if _, hidden := hiddenTaskControlAction(event); hidden && policy.hideTaskControl {
-			block.sealNarrativeSegmentWithGap()
+			block.advanceNarrativeBoundaryWithGap()
 			break
 		}
 		mutation := transcriptToolMutationFromEvent(event)

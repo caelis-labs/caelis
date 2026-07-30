@@ -155,7 +155,7 @@ func (m *Model) applyTranscriptToolToMain(event TranscriptEvent, mutation transc
 		mutation.meta.TaskAction = action
 		if m.doc != nil {
 			if block, _ := m.doc.Find(strings.TrimSpace(m.mainTimelineTailID)).(*MainACPTurnBlock); block != nil {
-				block.sealNarrativeSegmentWithGap()
+				block.advanceNarrativeBoundaryWithGap()
 				m.markViewportBlockDirty(block.BlockID())
 			}
 		}

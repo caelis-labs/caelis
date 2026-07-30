@@ -364,7 +364,7 @@ func TestTerminalToolFinalOutputReplacesStreamedOutput(t *testing.T) {
 	}
 }
 
-func TestMainACPFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
+func TestMainACPIdentifiedFinalStaysWithPreToolMessage(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	block.AppendStreamEvent(SEAssistant, "Before tool.", narrativeTestSource())
 	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "pwd", "ok", true, false, ToolUpdateMeta{})
@@ -372,17 +372,14 @@ func TestMainACPFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 
 	block.ReplaceFinalStreamEvent(SEAssistant, "Before tool.\n\nAfter tool done.", narrativeTestSource())
 
-	if len(block.Events) != 3 {
-		t.Fatalf("events = %#v, want pre-tool assistant, tool, post-tool assistant", block.Events)
+	if len(block.Events) != 2 {
+		t.Fatalf("events = %#v, want one identified assistant message followed by tool", block.Events)
 	}
-	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool." {
-		t.Fatalf("pre-tool event = %#v, want original assistant text", block.Events[0])
+	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool.\n\nAfter tool done." {
+		t.Fatalf("assistant event = %#v, want canonical final on its original owner", block.Events[0])
 	}
 	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "RUN_COMMAND" {
-		t.Fatalf("tool event = %#v, want RUN_COMMAND between assistant chunks", block.Events[1])
-	}
-	if block.Events[2].Kind != SEAssistant || block.Events[2].Text != "After tool done." {
-		t.Fatalf("post-tool event = %#v, want only final suffix after prior text", block.Events[2])
+		t.Fatalf("tool event = %#v, want RUN_COMMAND after its owning assistant message", block.Events[1])
 	}
 }
 
@@ -439,12 +436,12 @@ func TestMainACPReasoningAppendStreamEventPreservesPendingPrefixWithoutGhostEven
 	}
 }
 
-func TestMainACPAppendStreamEventClearsPendingPrefixAcrossToolBarrier(t *testing.T) {
+func TestMainACPAppendStreamEventClearsAnonymousPendingPrefixAcrossToolBoundary(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 
-	block.AppendStreamEvent(SEAssistant, "\n", narrativeTestSource())
+	block.AppendStreamEvent(SEAssistant, "\n", narrativeSourceIdentity{})
 	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "pwd", "ok", true, false, ToolUpdateMeta{})
-	block.AppendStreamEvent(SEAssistant, "after", narrativeTestSource())
+	block.AppendStreamEvent(SEAssistant, "after", narrativeSourceIdentity{})
 
 	if len(block.Events) != 2 {
 		t.Fatalf("events = %#v, want tool plus assistant event", block.Events)
@@ -522,7 +519,7 @@ func TestMainACPClearActiveBuffersDropsSpeculativeNarrativeText(t *testing.T) {
 	}
 }
 
-func TestParticipantFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
+func TestParticipantIdentifiedFinalStaysWithPreToolMessage(t *testing.T) {
 	block := NewParticipantTurnBlock("session-1", "@self")
 	block.AppendStreamEvent(SEAssistant, "Before tool.", narrativeTestSource())
 	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "pwd", "ok", true, false, ToolUpdateMeta{})
@@ -530,17 +527,14 @@ func TestParticipantFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 
 	block.ReplaceFinalStreamEvent(SEAssistant, "Before tool.\n\nAfter tool done.", narrativeTestSource())
 
-	if len(block.Events) != 3 {
-		t.Fatalf("events = %#v, want pre-tool assistant, tool, post-tool assistant", block.Events)
+	if len(block.Events) != 2 {
+		t.Fatalf("events = %#v, want one identified assistant message followed by tool", block.Events)
 	}
-	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool." {
-		t.Fatalf("pre-tool event = %#v, want original assistant text", block.Events[0])
+	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool.\n\nAfter tool done." {
+		t.Fatalf("assistant event = %#v, want canonical final on its original owner", block.Events[0])
 	}
 	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "RUN_COMMAND" {
-		t.Fatalf("tool event = %#v, want RUN_COMMAND between assistant chunks", block.Events[1])
-	}
-	if block.Events[2].Kind != SEAssistant || block.Events[2].Text != "After tool done." {
-		t.Fatalf("post-tool event = %#v, want only final suffix after prior text", block.Events[2])
+		t.Fatalf("tool event = %#v, want RUN_COMMAND after its owning assistant message", block.Events[1])
 	}
 }
 
