@@ -300,6 +300,349 @@
           "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
+    },
+    "/sessions/{session_id}/participants/handles": {
+      "get": {
+        "operationId": "listParticipantHandles",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/StringList"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/participants/start": {
+      "post": {
+        "operationId": "startParticipant",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StartParticipantRequest"}}}},
+        "responses": {"200":{"$ref":"#/components/responses/CommandCommitted"},"202":{"$ref":"#/components/responses/CommandAccepted"},"400":{"$ref":"#/components/responses/CommandBadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/CommandConflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/participants/prompt": {
+      "post": {
+        "operationId": "promptParticipant",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PromptParticipantRequest"}}}},
+        "responses": {"200":{"$ref":"#/components/responses/CommandCommitted"},"202":{"$ref":"#/components/responses/CommandAccepted"},"400":{"$ref":"#/components/responses/CommandBadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/CommandConflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/participants/cancel": {
+      "post": {
+        "operationId": "cancelParticipant",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CancelParticipantRequest"}}}},
+        "responses": {"200":{"$ref":"#/components/responses/CommandCommitted"},"202":{"$ref":"#/components/responses/CommandAccepted"},"400":{"$ref":"#/components/responses/CommandBadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/CommandConflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/configuration/session-mode": {
+      "post": {
+        "operationId": "configureSessionMode",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionModeRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/StatusSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/configuration/connect-model": {
+      "post": {
+        "operationId": "connectModel",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConnectModelRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/StatusSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/configuration/use-model": {
+      "post": {
+        "operationId": "useModel",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UseModelRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/StatusSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/configuration/delete-model": {
+      "post": {
+        "operationId": "deleteModel",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeleteModelRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/EmptyResult"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/configuration/sandbox-backend": {
+      "post": {
+        "operationId": "setSandboxBackend",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SandboxRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/StatusSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/configuration/sandbox-prepare": {
+      "post": {
+        "operationId": "prepareSandbox",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SandboxRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/StatusSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/configuration/sandbox-repair": {
+      "post": {
+        "operationId": "repairSandbox",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SandboxRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/StatusSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/configuration/sandbox-refresh": {
+      "post": {
+        "operationId": "refreshSandbox",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SandboxRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/EmptyResult"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/list": {
+      "post": {
+        "operationId": "listAgents",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentCandidateList"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/status": {
+      "post": {
+        "operationId": "getAgentStatus",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentStatusSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/handoff": {
+      "post": {
+        "operationId": "handoffAgent",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HandoffAgentRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentStatusSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/discover-acp": {
+      "post": {
+        "operationId": "discoverACPConnection",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConnectACPRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DiscoverySnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/connect-acp": {
+      "post": {
+        "operationId": "connectACP",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConnectACPRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ConnectResult"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/disconnect-candidates": {
+      "post": {
+        "operationId": "listDisconnectCandidates",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DisconnectACPRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DisconnectCandidateList"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/disconnect-acp": {
+      "post": {
+        "operationId": "disconnectACP",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DisconnectACPRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DisconnectResult"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/binding-status": {
+      "post": {
+        "operationId": "getAgentBindingStatus",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentBindingStatus"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/bind": {
+      "post": {
+        "operationId": "bindAgent",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentBindingRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentBindingStatus"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/reset-binding": {
+      "post": {
+        "operationId": "resetAgentBinding",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentBindingRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentBindingStatus"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/create-role": {
+      "post": {
+        "operationId": "createAgentRole",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentBindingRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentBindingStatus"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/delete-role": {
+      "post": {
+        "operationId": "deleteAgentRole",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentBindingRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentBindingStatus"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/save-binding-set": {
+      "post": {
+        "operationId": "saveAgentBindingSet",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentBindingRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentBindingStatus"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/apply-binding-set": {
+      "post": {
+        "operationId": "applyAgentBindingSet",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentBindingRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentBindingStatus"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/agents/delete-binding-set": {
+      "post": {
+        "operationId": "deleteAgentBindingSet",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentBindingRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentBindingStatus"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/completion/files": {
+      "post": {
+        "operationId": "completeFiles",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CompletionRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CompletionCandidateList"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/completion/skills": {
+      "post": {
+        "operationId": "completeSkills",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CompletionRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CompletionCandidateList"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/completion/sessions": {
+      "post": {
+        "operationId": "completeSessions",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CompletionRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ResumeCandidateList"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/completion/slash-arguments": {
+      "post": {
+        "operationId": "completeSlashArguments",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CompletionRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/SlashArgCandidateList"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/completion/resolve-skill": {
+      "post": {
+        "operationId": "resolveSkill",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CompletionRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/SkillResolveResult"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/plugins/list": {
+      "post": {
+        "operationId": "listPlugins",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PluginRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PluginSnapshotList"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/plugins/add-marketplace": {
+      "post": {
+        "operationId": "addMarketplace",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PluginRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/MarketplaceSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/plugins/list-marketplaces": {
+      "post": {
+        "operationId": "listMarketplaces",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PluginRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/MarketplaceSnapshotList"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/plugins/update-marketplace": {
+      "post": {
+        "operationId": "updateMarketplace",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PluginRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/MarketplaceSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/plugins/remove-marketplace": {
+      "post": {
+        "operationId": "removeMarketplace",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PluginRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/EmptyResult"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/plugins/add-path": {
+      "post": {
+        "operationId": "addPluginPath",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PluginRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PluginSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/plugins/install": {
+      "post": {
+        "operationId": "installPlugin",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PluginRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PluginSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/plugins/enable": {
+      "post": {
+        "operationId": "enablePlugin",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PluginRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PluginSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/plugins/disable": {
+      "post": {
+        "operationId": "disablePlugin",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PluginRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PluginSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/plugins/remove": {
+      "post": {
+        "operationId": "removePlugin",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PluginRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/EmptyResult"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/plugins/inspect": {
+      "post": {
+        "operationId": "inspectPlugin",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PluginRequest"}}}},
+        "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PluginSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
     }
   },
   "components": {
@@ -336,6 +679,45 @@
       "ServiceUnavailable": {"description": "Host is shutting down or temporarily unavailable", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
     },
     "schemas": {
+      "EmptyResult": {"type":"object","additionalProperties":false},
+      "StringList": {"type":"array","items":{"type":"string"}},
+      "StartParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"role":{"$ref":"#/components/schemas/ParticipantRole"},"label":{"type":"string"},"source":{"type":"string"},"input":{"type":"string"},"display_input":{"type":"string"},"display_address":{"type":"string"},"display_title":{"type":"string"},"content_parts":{"type":"array","items":{"$ref":"#/components/schemas/PromptContentPart"}},"transient":{"type":"boolean"},"detach_source":{"type":"string"}},"additionalProperties":false}]},
+      "PromptParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["participant_id"],"properties":{"participant_id":{"type":"string"},"input":{"type":"string"},"display_input":{"type":"string"},"display_address":{"type":"string"},"display_title":{"type":"string"},"content_parts":{"type":"array","items":{"$ref":"#/components/schemas/PromptContentPart"}},"source":{"type":"string"}},"additionalProperties":false}]},
+      "CancelParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["participant_id","target"],"properties":{"participant_id":{"type":"string"},"target":{"$ref":"#/components/schemas/TurnTarget"},"reason":{"type":"string"}},"additionalProperties":false}]},
+      "SessionModeRequest": {"type":"object","required":["session_id"],"properties":{"session_id":{"type":"string"},"mode":{"type":"string"},"cycle":{"type":"boolean"},"surface":{"type":"string"}},"additionalProperties":false},
+      "ConnectConfig": {"type":"object","required":["provider","model"],"properties":{"provider":{"type":"string"},"endpoint_id":{"type":"string"},"model":{"type":"string"},"base_url":{"type":"string"},"timeout_seconds":{"type":"integer"},"stream_first_event_timeout_seconds":{"type":"integer"},"api_key":{"type":"string","writeOnly":true},"auth_type":{"type":"string"},"context_window_tokens":{"type":"integer"},"max_output_tokens":{"type":"integer"},"reasoning_effort":{"type":"string"},"reasoning_levels":{"type":"array","items":{"type":"string"}},"image_input":{"type":"boolean"}},"additionalProperties":false},
+      "ConnectModelRequest": {"type":"object","required":["session_id","config"],"properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"config":{"$ref":"#/components/schemas/ConnectConfig"}},"additionalProperties":false},
+      "UseModelRequest": {"type":"object","required":["session_id","model"],"properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"model":{"type":"string"},"reasoning_effort":{"type":"string"}},"additionalProperties":false},
+      "DeleteModelRequest": {"type":"object","required":["session_id","model"],"properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"model":{"type":"string"}},"additionalProperties":false},
+      "SandboxRequest": {"type":"object","required":["session_id"],"properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"backend":{"type":"string"}},"additionalProperties":false},
+      "AgentRequest": {"type":"object","required":["session_id"],"properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"limit":{"type":"integer"}},"additionalProperties":false},
+      "HandoffAgentRequest": {"type":"object","required":["session_id","target"],"properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"target":{"type":"string"}},"additionalProperties":false},
+      "ConnectACPRequest": {"type":"object","required":["session_id","request"],"properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"request":{"$ref":"#/components/schemas/JSONObject"}},"additionalProperties":false},
+      "DisconnectACPRequest": {"type":"object","required":["session_id"],"properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"agent_id":{"type":"string"}},"additionalProperties":false},
+      "AgentBindingRequest": {"type":"object","required":["session_id","binding","role"],"properties":{"session_id":{"type":"string"},"binding":{"$ref":"#/components/schemas/JSONObject"},"handle":{"type":"string"},"role":{"$ref":"#/components/schemas/JSONObject"},"set_name":{"type":"string"}},"additionalProperties":false},
+      "CompletionRequest": {"type":"object","required":["session_id"],"properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"query":{"type":"string"},"command":{"type":"string"},"name":{"type":"string"},"limit":{"type":"integer"}},"additionalProperties":false},
+      "PluginRequest": {"type":"object","required":["session_id"],"properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"source":{"type":"string"},"name":{"type":"string"},"id":{"type":"string"},"path":{"type":"string"}},"additionalProperties":false},
+      "AgentCandidate": {"type":"object","required":["name"],"properties":{"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":false},
+      "AgentCandidateList": {"type":"array","items":{"$ref":"#/components/schemas/AgentCandidate"}},
+      "AgentParticipantSnapshot": {"type":"object","required":["id"],"properties":{"id":{"type":"string"},"label":{"type":"string"},"agent_name":{"type":"string"},"kind":{"type":"string"},"role":{"type":"string"},"source":{"type":"string"},"session_id":{"type":"string"}},"additionalProperties":false},
+      "AgentStatusSnapshot": {"type":"object","properties":{"session_id":{"type":"string"},"controller_kind":{"type":"string"},"controller_label":{"type":"string"},"controller_epoch":{"type":"string"},"controller_model":{"type":"string"},"controller_reasoning_effort":{"type":"string"},"controller_commands":{"type":"array","items":{"type":"string"}},"controller_models":{"$ref":"#/components/schemas/SlashArgCandidateList"},"controller_efforts":{"$ref":"#/components/schemas/SlashArgCandidateList"},"has_active_turn":{"type":"boolean"},"active_turn_kind":{"type":"string"},"available_agents":{"$ref":"#/components/schemas/AgentCandidateList"},"participants":{"type":"array","items":{"$ref":"#/components/schemas/AgentParticipantSnapshot"}},"delegated_participants":{"type":"array","items":{"$ref":"#/components/schemas/AgentParticipantSnapshot"}}},"additionalProperties":false},
+      "DiscoverySnapshot": {"type":"object","additionalProperties":{"$ref":"#/components/schemas/JSONValue"}},
+      "ConnectResult": {"type":"object","additionalProperties":{"$ref":"#/components/schemas/JSONValue"}},
+      "DisconnectCandidateList": {"type":"array","items":{"$ref":"#/components/schemas/JSONObject"}},
+      "DisconnectResult": {"type":"object","additionalProperties":{"$ref":"#/components/schemas/JSONValue"}},
+      "AgentBindingStatus": {"type":"object","additionalProperties":{"$ref":"#/components/schemas/JSONValue"}},
+      "CompletionCandidate": {"type":"object","required":["value"],"properties":{"value":{"type":"string"},"display":{"type":"string"},"kind":{"type":"string"},"detail":{"type":"string"},"path":{"type":"string"}},"additionalProperties":false},
+      "CompletionCandidateList": {"type":"array","items":{"$ref":"#/components/schemas/CompletionCandidate"}},
+      "ResumeCandidate": {"type":"object","required":["session_id"],"properties":{"session_id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"model":{"type":"string"},"workspace":{"type":"string"},"age":{"type":"string"},"updated_at":{"type":"string","format":"date-time"}},"additionalProperties":false},
+      "ResumeCandidateList": {"type":"array","items":{"$ref":"#/components/schemas/ResumeCandidate"}},
+      "SlashArgCandidate": {"type":"object","required":["value"],"properties":{"value":{"type":"string"},"display":{"type":"string"},"detail":{"type":"string"},"no_auth":{"type":"boolean"},"model_metadata_complete":{"type":"boolean"},"model_image_input_known":{"type":"boolean"}},"additionalProperties":false},
+      "SlashArgCandidateList": {"type":"array","items":{"$ref":"#/components/schemas/SlashArgCandidate"}},
+      "SkillResolveResult": {"type":"object","properties":{"canonical":{"type":"string"},"matches":{"type":"array","items":{"type":"string"}}},"additionalProperties":false},
+      "MCPServerSnapshot": {"type":"object","required":["name","status"],"properties":{"name":{"type":"string"},"status":{"type":"string"},"tools":{"type":"array","items":{"type":"string"}},"warning":{"type":"string"}},"additionalProperties":false},
+      "PluginSnapshot": {"type":"object","required":["id","name","version","description","root","enabled","skills","hooks","status"],"properties":{"id":{"type":"string"},"name":{"type":"string"},"version":{"type":"string"},"description":{"type":"string"},"root":{"type":"string"},"enabled":{"type":"boolean"},"skills":{"type":"array","items":{"type":"string"}},"hooks":{"type":"array","items":{"type":"string"}},"agents":{"type":"array","items":{"type":"string"}},"mcp_servers":{"type":"array","items":{"$ref":"#/components/schemas/MCPServerSnapshot"}},"status":{"type":"string"},"warning":{"type":"string"}},"additionalProperties":false},
+      "PluginSnapshotList": {"type":"array","items":{"$ref":"#/components/schemas/PluginSnapshot"}},
+      "MarketplaceSnapshot": {"type":"object","required":["name"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"owner":{"type":"string"},"source":{"type":"string"},"root":{"type":"string"},"version":{"type":"string"},"plugin_root":{"type":"string"},"allow_cross_marketplace_dependencies":{"type":"array","items":{"type":"string"}},"plugin_count":{"type":"integer"}},"additionalProperties":false},
+      "MarketplaceSnapshotList": {"type":"array","items":{"$ref":"#/components/schemas/MarketplaceSnapshot"}},
       "JSONValue": {
         "oneOf": [
           {"type": "null"},

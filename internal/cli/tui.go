@@ -16,7 +16,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/updater"
 	"github.com/caelis-labs/caelis/internal/version"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 	"github.com/caelis-labs/caelis/surfaces/tui/app"
 )
 
@@ -28,51 +27,11 @@ type tuiOptions struct {
 
 func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appCfg gatewayapp.Config, modelText string, options tuiOptions, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	principal := controlclient.Principal{ID: stack.UserID}
-	sessionClient, err := controlclient.BindSessionClient(stack.ControlClient(), principal)
+	appServer, err := local.NewAppServer(stack)
 	if err != nil {
 		return err
 	}
-	participantClient, err := controlclient.BindParticipantClient(stack.ControlParticipants(), principal)
-	if err != nil {
-		return err
-	}
-	statusService, err := local.NewStatusService(stack)
-	if err != nil {
-		return err
-	}
-	statusClient, err := controlclient.BindStatusClient(statusService, principal)
-	if err != nil {
-		return err
-	}
-	configurationService, err := local.NewConfigurationService(stack, statusService)
-	if err != nil {
-		return err
-	}
-	configurationClient, err := controlclient.BindConfigurationClient(configurationService, principal)
-	if err != nil {
-		return err
-	}
-	agentService, err := local.NewAgentService(stack)
-	if err != nil {
-		return err
-	}
-	agentClient, err := controlclient.BindAgentClient(agentService, principal)
-	if err != nil {
-		return err
-	}
-	completionService, err := local.NewCompletionService(stack)
-	if err != nil {
-		return err
-	}
-	completionClient, err := controlclient.BindCompletionClient(completionService, principal)
-	if err != nil {
-		return err
-	}
-	pluginService, err := local.NewPluginService(stack)
-	if err != nil {
-		return err
-	}
-	pluginClient, err := controlclient.BindPluginClient(pluginService, principal)
+	clients, taskClient, err := appServer.Bind(principal)
 	if err != nil {
 		return err
 	}
@@ -81,21 +40,14 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appC
 		WorkspaceKey:       strings.TrimSpace(stack.Workspace.Key),
 		WorkspaceDir:       strings.TrimSpace(stack.Workspace.CWD),
 		Surface:            "cli-tui",
-		Sessions:           sessionClient,
-		Participants:       participantClient,
-		Status:             statusClient,
-		Configuration:      configurationClient,
-		Agents:             agentClient,
-		Completion:         completionClient,
-		Plugins:            pluginClient,
+		Sessions:           clients.Sessions,
+		Participants:       clients.Participants,
+		Status:             clients.Status,
+		Configuration:      clients.Configuration,
+		Agents:             clients.Agents,
+		Completion:         clients.Completion,
+		Plugins:            clients.Plugins,
 	})
-	if err != nil {
-		return err
-	}
-	taskClient, err := taskstream.BindClient(
-		stack.TaskStreams(),
-		taskstream.Principal{ID: stack.UserID},
-	)
 	if err != nil {
 		return err
 	}

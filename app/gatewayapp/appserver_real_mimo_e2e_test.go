@@ -87,8 +87,7 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 		t.Fatal(err)
 	}
 	server, err := controlserver.New(controlserver.HandlerConfig{
-		Service:       stack.ControlClient(),
-		Status:        gatewayTestStatusService{},
+		Services:      gatewayTestAppServerServices(stack.ControlClient(), gatewayTestStatusService{}),
 		TaskStreams:   stack.TaskStreams(),
 		Authenticator: authenticator,
 		AllowedHosts:  []string{"127.0.0.1", "localhost", "::1"},

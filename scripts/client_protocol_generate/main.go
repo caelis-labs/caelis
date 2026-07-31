@@ -14,7 +14,7 @@ import (
 	"unicode"
 )
 
-const generatorVersion = "caelis-client-protocol-gen/v2.5.0"
+const generatorVersion = "caelis-client-protocol-gen/v2.6.0"
 
 var check = flag.Bool("check", false, "verify generated output without writing")
 
@@ -104,13 +104,16 @@ func validateSpec(spec openAPISpec) error {
 	if spec.OpenAPI != "3.1.0" {
 		return fmt.Errorf("openapi version = %q, want 3.1.0", spec.OpenAPI)
 	}
-	if len(operationIDs(spec)) != 15 {
-		return fmt.Errorf("operation count = %d, want 15", len(operationIDs(spec)))
+	if len(operationIDs(spec)) != 58 {
+		return fmt.Errorf("operation count = %d, want 58", len(operationIDs(spec)))
 	}
 	required := []string{
 		"CreateSessionRequest", "CloseSessionRequest", "CompactSessionRequest", "PromptRequest", "SteerRequest", "CancelRequest",
 		"ResolveApprovalRequest", "CommandResult", "ServerInfo", "SessionState", "StatusSnapshot", "Envelope",
-		"TaskDescriptor", "TaskList", "TaskEventBatch",
+		"TaskDescriptor", "TaskList", "TaskEventBatch", "StartParticipantRequest", "PromptParticipantRequest", "CancelParticipantRequest",
+		"SessionModeRequest", "ConnectModelRequest", "UseModelRequest", "DeleteModelRequest", "SandboxRequest",
+		"AgentRequest", "HandoffAgentRequest", "ConnectACPRequest", "DisconnectACPRequest", "AgentBindingRequest",
+		"CompletionRequest", "PluginRequest", "AgentStatusSnapshot", "PluginSnapshot", "MarketplaceSnapshot",
 	}
 	for _, name := range required {
 		if spec.Components.Schemas[name] == nil {
@@ -154,9 +157,6 @@ func validateSpec(spec openAPISpec) error {
 
 func validateOperationResponses(spec openAPISpec, method string, operation operation) error {
 	required := []string{"200", "400", "401", "403", "409", "500"}
-	if method != "get" {
-		required = []string{"200", "202", "400", "401", "403", "409", "500"}
-	}
 	for _, status := range required {
 		declared, ok := operation.Responses[status]
 		if !ok {

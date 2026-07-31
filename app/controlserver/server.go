@@ -18,8 +18,7 @@ import (
 // Dependencies contains only the Control contracts exposed over HTTP.
 // Product assembly remains outside the listener package.
 type Dependencies struct {
-	Service     controlclient.Service
-	Status      controlclient.StatusService
+	Services    controlclient.AppServerServices
 	TaskStreams taskstream.Service
 	Lifecycle   interface {
 		Quiesce(context.Context) error
@@ -40,20 +39,17 @@ type Config struct {
 }
 
 func Handler(deps Dependencies, config Config) (http.Handler, error) {
-	if deps.Service == nil {
-		return nil, errors.New("controlserver: Control client service is required")
+	if err := deps.Services.Validate(); err != nil {
+		return nil, fmt.Errorf("controlserver: invalid AppServer services: %w", err)
 	}
 	if deps.TaskStreams == nil {
 		return nil, errors.New("controlserver: Task stream service is required")
-	}
-	if deps.Status == nil {
-		return nil, errors.New("controlserver: status service is required")
 	}
 	if config.Authenticator == nil {
 		return nil, errors.New("controlserver: authenticator is required for an HTTP handler")
 	}
 	server, err := New(HandlerConfig{
-		Service: deps.Service, Status: deps.Status, TaskStreams: deps.TaskStreams, Authenticator: config.Authenticator,
+		Services: deps.Services, TaskStreams: deps.TaskStreams, Authenticator: config.Authenticator,
 		AllowedHosts: append([]string(nil), config.AllowedHosts...), Heartbeat: config.Heartbeat,
 	})
 	if err != nil {

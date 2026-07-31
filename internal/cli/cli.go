@@ -273,12 +273,12 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		} else if tokenFile == "" {
 			tokenFile = controlserver.DefaultTokenFile(cfg.StoreDir)
 		}
-		statusService, statusErr := local.NewStatusService(stack)
-		if statusErr != nil {
-			return statusErr
+		appServer, appServerErr := local.NewAppServer(stack)
+		if appServerErr != nil {
+			return appServerErr
 		}
 		return runControlServerCommand(ctx, controlserver.Dependencies{
-			Service: stack.ControlClient(), Status: statusService, TaskStreams: stack.TaskStreams(), Lifecycle: stack,
+			Services: appServer.Services, TaskStreams: appServer.TaskStreams, Lifecycle: stack,
 		}, controlserver.Config{
 			Address: strings.TrimSpace(*controlListen), Authenticator: authenticator, Principal: principal,
 			TokenFile: tokenFile, AllowedHosts: splitCommaSeparated(*controlHosts),

@@ -43,8 +43,7 @@ func (f AuthenticatorFunc) Authenticate(request *http.Request) (controlclient.Pr
 // HandlerConfig configures the authenticated Control HTTP handler without
 // listener or process-lifecycle policy.
 type HandlerConfig struct {
-	Service       controlclient.Service
-	Status        controlclient.StatusService
+	Services      controlclient.AppServerServices
 	TaskStreams   taskstream.Service
 	Authenticator Authenticator
 	AllowedHosts  []string
@@ -59,11 +58,8 @@ type Server struct {
 
 // New constructs the authenticated Control HTTP handler.
 func New(config HandlerConfig) (*Server, error) {
-	if config.Service == nil {
-		return nil, errors.New("controlserver: control client service is required")
-	}
-	if config.Status == nil {
-		return nil, errors.New("controlserver: status service is required")
+	if err := config.Services.Validate(); err != nil {
+		return nil, fmt.Errorf("controlserver: invalid AppServer services: %w", err)
 	}
 	if config.TaskStreams == nil {
 		return nil, errors.New("controlserver: Task stream service is required")
@@ -113,6 +109,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks", s.listTasks)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/events", s.taskEvents)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/subscribe", s.subscribeTask)
+	s.focusedRoutes()
 }
 
 func (s *Server) initialize(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +148,7 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	result, err := s.config.Service.ListSessions(r.Context(), principal, controlclient.ListSessionsRequest{WorkspaceKey: r.URL.Query().Get("workspace_key"), Cursor: r.URL.Query().Get("cursor"), Limit: limit})
+	result, err := s.config.Services.Sessions.ListSessions(r.Context(), principal, controlclient.ListSessionsRequest{WorkspaceKey: r.URL.Query().Get("workspace_key"), Cursor: r.URL.Query().Get("cursor"), Limit: limit})
 	writeJSONResult(w, result, err)
 }
 
@@ -164,7 +161,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, "") {
 		return
 	}
-	result, err := s.config.Service.CreateSession(r.Context(), principal, req)
+	result, err := s.config.Services.Sessions.CreateSession(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
 
@@ -177,7 +174,7 @@ func (s *Server) closeSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
-	result, err := s.config.Service.CloseSession(r.Context(), principal, req)
+	result, err := s.config.Services.Sessions.CloseSession(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
 
@@ -190,7 +187,7 @@ func (s *Server) compactSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
-	result, err := s.config.Service.CompactSession(r.Context(), principal, req)
+	result, err := s.config.Services.Sessions.CompactSession(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
 
@@ -199,7 +196,7 @@ func (s *Server) sessionState(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.config.Service.InspectSession(r.Context(), principal, controlclient.StateRequest{SessionID: r.PathValue("session_id")})
+	result, err := s.config.Services.Sessions.InspectSession(r.Context(), principal, controlclient.StateRequest{SessionID: r.PathValue("session_id")})
 	writeJSONResult(w, result, err)
 }
 
@@ -217,7 +214,7 @@ func (s *Server) sessionStatus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	result, err := s.config.Status.SessionStatus(r.Context(), principal, controlclient.StatusRequest{
+	result, err := s.config.Services.Status.SessionStatus(r.Context(), principal, controlclient.StatusRequest{
 		SessionID:          r.PathValue("session_id"),
 		Surface:            strings.TrimSpace(r.URL.Query().Get("surface")),
 		IncludeDiagnostics: diagnostics,
@@ -234,7 +231,7 @@ func (s *Server) reconnectSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.config.Service.Reconnect(r.Context(), principal, controlclient.ReconnectRequest{
+	result, err := s.config.Services.Sessions.Reconnect(r.Context(), principal, controlclient.ReconnectRequest{
 		SessionID: r.PathValue("session_id"),
 		Cursor:    cursor,
 	})
@@ -329,7 +326,7 @@ func (s *Server) prompt(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
-	result, err := s.config.Service.Prompt(r.Context(), principal, req)
+	result, err := s.config.Services.Sessions.Prompt(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
 func (s *Server) steer(w http.ResponseWriter, r *http.Request) {
@@ -341,7 +338,7 @@ func (s *Server) steer(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
-	result, err := s.config.Service.Steer(r.Context(), principal, req)
+	result, err := s.config.Services.Sessions.Steer(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
 func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {
@@ -353,7 +350,7 @@ func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
-	result, err := s.config.Service.Cancel(r.Context(), principal, req)
+	result, err := s.config.Services.Sessions.Cancel(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
 func (s *Server) resolveApproval(w http.ResponseWriter, r *http.Request) {
@@ -370,7 +367,7 @@ func (s *Server) resolveApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.ApprovalRequestID = r.PathValue("approval_request_id")
-	result, err := s.config.Service.ResolveApproval(r.Context(), principal, req)
+	result, err := s.config.Services.Sessions.ResolveApproval(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
 func (s *Server) requirePrincipal(w http.ResponseWriter, r *http.Request) (controlclient.Principal, bool) {
