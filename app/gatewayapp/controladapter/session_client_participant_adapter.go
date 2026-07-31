@@ -181,3 +181,31 @@ func allocateParticipantLabel(participants []session.ParticipantBinding, handle 
 	}
 	return "@" + agenthandle.Allocate(used, handle)
 }
+
+func reviewDisplayTitle(instructions string) string {
+	if strings.TrimSpace(instructions) != "" {
+		return ""
+	}
+	return "Code review requested"
+}
+
+func shiftControlAttachments(items []controlprompt.Attachment, offset int) []controlprompt.Attachment {
+	if len(items) == 0 || offset == 0 {
+		return append([]controlprompt.Attachment(nil), items...)
+	}
+	out := make([]controlprompt.Attachment, 0, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(item.Name)
+		data := strings.TrimSpace(item.Data)
+		if name == "" && data == "" {
+			continue
+		}
+		out = append(out, controlprompt.Attachment{
+			Name:     name,
+			Offset:   max(item.Offset, 0) + offset,
+			MimeType: strings.TrimSpace(item.MimeType),
+			Data:     data,
+		})
+	}
+	return out
+}

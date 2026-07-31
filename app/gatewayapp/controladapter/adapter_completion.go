@@ -99,7 +99,7 @@ func (d *assembler) CompleteResume(ctx context.Context, query string, limit int)
 	limit = normalizeCompletionLimit(limit)
 	query = strings.TrimSpace(strings.ToLower(query))
 	if query == "" {
-		return d.ListSessions(ctx, limit)
+		return d.listResumeCandidates(ctx, limit)
 	}
 	ctx, cancel := completionContext(ctx, resumeCompletionTimeout)
 	defer cancel()
@@ -479,65 +479,6 @@ func (d *assembler) completeModelAliases(ctx context.Context, query string, limi
 	return out, nil
 }
 
-func (d *assembler) completeAgentCatalog(query string, limit int) []controlprompt.SlashArgCandidate {
-	agents := d.agentCatalog(limit)
-	if len(agents) == 0 {
-		return nil
-	}
-	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(agents)))
-	for _, agent := range agents {
-		if query != "" && !hasSlashArgPrefix(query, agent.Name, agent.Description) {
-			continue
-		}
-		out = append(out, controlprompt.SlashArgCandidate{
-			Value:   agent.Name,
-			Display: agent.Name,
-			Detail:  firstNonEmpty(agent.Description, "configured ACP agent"),
-		})
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
-}
-
-func (d *assembler) completeAgentParticipants(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
-	activeSession, ok := d.currentSession()
-	if !ok {
-		return nil, nil
-	}
-	gw, err := d.gatewayControlPlane()
-	if err != nil {
-		return nil, err
-	}
-	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{
-		SessionRef: activeSession.SessionRef,
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(state.Participants)))
-	for _, participant := range state.Participants {
-		id := strings.TrimSpace(participant.ID)
-		label := strings.TrimSpace(firstNonEmpty(participant.Label, participant.ID))
-		if id == "" {
-			continue
-		}
-		if query != "" && !hasSlashArgPrefix(query, id, label, participant.SessionID, string(participant.Role)) {
-			continue
-		}
-		out = append(out, controlprompt.SlashArgCandidate{
-			Value:   id,
-			Display: label,
-			Detail:  strings.Join(compactNonEmpty([]string{string(participant.Role), strings.TrimSpace(participant.SessionID)}), " · "),
-		})
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out, nil
-}
-
 func (d *assembler) agentCatalog(limit int) []controlprompt.AgentCandidate {
 	if d.stack.Agent.ListFn == nil {
 		return nil
@@ -560,59 +501,6 @@ func (d *assembler) agentCatalog(limit int) []controlprompt.AgentCandidate {
 		}
 	}
 	return out
-}
-
-func (d *assembler) resolveAgentName(input string) (string, error) {
-	input = strings.ToLower(strings.TrimSpace(input))
-	if input == "" {
-		return "", fmt.Errorf("app/gatewayapp/controladapter: agent name is required")
-	}
-	var exact string
-	prefixMatches := make([]string, 0, 2)
-	for _, agent := range d.agentCatalog(0) {
-		name := strings.TrimSpace(agent.Name)
-		normalized := strings.ToLower(name)
-		if normalized == "" {
-			continue
-		}
-		if normalized == input {
-			exact = name
-			break
-		}
-		if strings.HasPrefix(normalized, input) {
-			prefixMatches = append(prefixMatches, name)
-		}
-	}
-	if exact != "" {
-		return exact, nil
-	}
-	switch len(prefixMatches) {
-	case 1:
-		return prefixMatches[0], nil
-	case 0:
-		return "", fmt.Errorf("app/gatewayapp/controladapter: agent %q is not configured", input)
-	default:
-		return "", fmt.Errorf("app/gatewayapp/controladapter: agent %q is ambiguous", input)
-	}
-}
-
-func (d *assembler) resolveParticipantID(ctx context.Context, ref session.SessionRef, input string) (string, error) {
-	gw, err := d.gatewayControlPlane()
-	if err != nil {
-		return "", err
-	}
-	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: ref})
-	if err != nil {
-		return "", err
-	}
-	participants := make([]participantAddress, 0, len(state.Participants))
-	for _, participant := range state.Participants {
-		participants = append(participants, participantAddress{
-			ID: participant.ID, Kind: participant.Kind, Role: participant.Role,
-			Label: participant.Label, SessionID: participant.SessionID, Source: participant.Source,
-		})
-	}
-	return resolveParticipantID(participants, input)
 }
 
 type participantAddress struct {

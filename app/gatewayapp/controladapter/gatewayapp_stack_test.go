@@ -65,7 +65,6 @@ func TestGatewayAppStackForRuntimeTestWiresFullRuntimeSurface(t *testing.T) {
 		"turn":          stack.Gateway.TurnServiceFn != nil,
 		"session":       stack.Gateway.SessionServiceFn != nil,
 		"control-plane": stack.Gateway.ControlPlaneServiceFn != nil,
-		"stream":        stack.Gateway.StreamProviderFn != nil,
 	}
 	for name, ok := range gatewayHooks {
 		if !ok {
@@ -78,8 +77,6 @@ func TestGatewayAppStackForRuntimeTestWiresFullRuntimeSurface(t *testing.T) {
 		"setBackend": stack.Sandbox.SetBackendFn != nil,
 		"prepare":    stack.Sandbox.PrepareFn != nil,
 		"repair":     stack.Sandbox.RepairFn != nil,
-		"preflight":  stack.Sandbox.PreflightFn != nil,
-		"reset":      stack.Sandbox.ResetFn != nil,
 	}
 	for name, ok := range sandboxHooks {
 		if !ok {

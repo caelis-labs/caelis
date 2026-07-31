@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -44,18 +43,14 @@ func TestGatewayProviderLiveReasoningBoundaryFromLocalConfigE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	result, err := stack.KernelTurns().BeginTurn(ctx, kernel.BeginTurnRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "介绍一下你自己。",
-		Surface:    "cli-tui",
-	})
+	turn, err := startEvalSessionTurn(t, ctx, stack, activeSession, "介绍一下你自己。")
 	if err != nil {
-		t.Fatalf("BeginTurn() error = %v", err)
+		t.Fatalf("SessionTurnClient.Start() error = %v", err)
 	}
-	defer result.Handle.Close()
+	defer turn.Close()
 
 	var trace liveReasoningTrace
-	for env := range result.Handle.ACPEvents() {
+	for env := range turn.Events() {
 		if env.Kind == eventstream.KindError {
 			t.Fatalf("handle event error = %v", env.Err)
 		}

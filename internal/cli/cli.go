@@ -22,11 +22,8 @@ import (
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/acpserver"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 	"github.com/google/uuid"
@@ -294,9 +291,18 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	}
 
 	if headlessMode {
+		appServer, err := local.NewAppServer(stack)
+		if err != nil {
+			return err
+		}
+		clients, _, err := appServer.Bind(controlclient.Principal{ID: stack.UserID})
+		if err != nil {
+			return err
+		}
 		activeSessionID, err := runHeadless(
 			ctx,
-			stack,
+			clients.Sessions,
+			stack.Workspace,
 			preferredHeadlessSessionID(*sessionID),
 			headlessInput,
 			headlessFormat,
@@ -353,21 +359,15 @@ func preferredHeadlessSessionID(sessionID string) string {
 
 func runHeadless(
 	ctx context.Context,
-	stack *gatewayapp.Stack,
+	client controlclient.SessionClient,
+	workspace session.WorkspaceRef,
 	sessionID string,
 	input string,
 	format outputFormat,
 	stdout io.Writer,
 ) (string, error) {
-	if stack == nil {
-		return "", errors.New("cli: gateway app stack is unavailable")
-	}
-	client, err := controlclient.BindSessionClient(
-		stack.ControlClient(),
-		controlclient.Principal{ID: stack.UserID},
-	)
-	if err != nil {
-		return "", err
+	if client == nil {
+		return "", errors.New("cli: Headless Session client is unavailable")
 	}
 	if _, err := client.Initialize(ctx); err != nil {
 		return "", err
@@ -375,7 +375,7 @@ func runHeadless(
 	activeSessionID, err := createOrResumeHeadlessSession(
 		ctx,
 		client,
-		stack.Workspace,
+		workspace,
 		sessionID,
 	)
 	if err != nil {
@@ -567,58 +567,6 @@ func renderConfiguredModelText(alias string, provider string, model string) stri
 		return model
 	}
 	return provider + "/" + model
-}
-
-func streamHandle(ctx context.Context, handle kernel.TurnHandle, stdout io.Writer, stderr io.Writer) error {
-	if handle == nil {
-		return nil
-	}
-	defer handle.Close()
-
-	var assistant schema.FinalAssistantAccumulator
-	for env := range acpprojector.ACPEventsFromGatewayHandle(handle) {
-		if err := streamEnvelopeError(env); err != nil {
-			return err
-		}
-		if env.Kind == eventstream.KindRequestPermission {
-			fmt.Fprintln(stderr, "[approval] denied by default")
-			if err := handle.Submit(ctx, kernel.SubmitRequest{
-				Kind: kernel.SubmissionKindApproval,
-				Approval: &kernel.ApprovalDecision{
-					RequestID: env.ApprovalRequestID,
-					Approved:  false,
-					Outcome:   string(kernel.ApprovalStatusRejected),
-				},
-			}); err != nil {
-				return err
-			}
-			continue
-		}
-		if !streamMainSessionUpdate(env) {
-			continue
-		}
-		update := assistant.ObserveUpdate(env.Update)
-		if update.Assistant && update.Text != "" {
-			fmt.Fprintln(stdout, update.Text)
-		}
-	}
-	return nil
-}
-
-func streamMainSessionUpdate(env eventstream.Envelope) bool {
-	return env.Kind == eventstream.KindSessionUpdate &&
-		env.Update != nil &&
-		(env.Scope == "" || env.Scope == eventstream.ScopeMain)
-}
-
-func streamEnvelopeError(env eventstream.Envelope) error {
-	if env.Err != nil {
-		return env.Err
-	}
-	if env.Kind == eventstream.KindError && strings.TrimSpace(env.Error) != "" {
-		return errors.New(strings.TrimSpace(env.Error))
-	}
-	return nil
 }
 
 func writeDoctorResult(w io.Writer, format outputFormat, result doctorResult) error {

@@ -40,14 +40,16 @@ type PromptRouterFactory func(context.Context, session.Session) (controlprompt.R
 // so this integration package does not depend on presentation packages.
 type SlashResultFormatter func(controlprompt.SlashCommandResult) string
 
-// Config configures one runtime-backed ACP agent adapter.
+// Config configures the lower-level ACP bridge used for protocol conformance.
+// Product assembly uses GatewayAgentConfig and supplies typed AppServer clients
+// instead of selecting the direct Runtime path.
 type Config struct {
 	Runtime  agent.Runtime
 	Sessions session.Service
-	// SessionClient is the principal-bound AppServer client used by product
-	// ACP assembly. When present, Session lifecycle mutations and ordinary
-	// prompt ingress must stay on that client; Runtime remains available only
-	// for ACP terminal handles and the explicitly supported legacy adapter mode.
+	// SessionClient is the principal-bound AppServer client used by product ACP
+	// assembly. When present, Session lifecycle mutations and ordinary prompt
+	// ingress stay on that client; Runtime and Sessions are inputs only to the
+	// lower-level direct Runtime conformance path.
 	SessionClient controlclient.SessionClient
 	// PresentationClient and TerminalClient are the remaining product ACP
 	// facets. When SessionClient is set, product assembly supplies all three and
@@ -70,9 +72,9 @@ type Config struct {
 	SlashResultFormatter SlashResultFormatter
 	PromptCaps           acp.PromptCapabilitiesProvider
 	TaskStreamClient     taskstream.Client
-	// TaskStreams and TaskStreamPrincipal are the compatibility input for
-	// generic RuntimeAgent users. Product assembly binds TaskStreamClient once
-	// at the AppServer boundary instead of forwarding a selectable principal.
+	// TaskStreams and TaskStreamPrincipal are inputs to the lower-level direct
+	// Runtime conformance path. Product assembly binds TaskStreamClient once at
+	// the AppServer boundary instead of forwarding a selectable principal.
 	TaskStreams           taskstream.Service
 	TaskStreamPrincipal   taskstream.Principal
 	ApprovalReviewer      approval.Reviewer
@@ -121,7 +123,8 @@ type RuntimeAgent struct {
 	taskMuxes    map[string]map[*acpTaskStreamMux]struct{}
 }
 
-// New constructs one runtime-backed ACP agent.
+// New constructs the lower-level ACP bridge in typed-client or direct Runtime
+// conformance mode. Product code should use NewGatewayAgent.
 func New(cfg Config) (*RuntimeAgent, error) {
 	if cfg.SessionClient == nil && cfg.Sessions == nil {
 		return nil, errors.New("internal/acpagentbridge: session service is required")

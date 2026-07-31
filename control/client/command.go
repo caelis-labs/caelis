@@ -230,8 +230,8 @@ type CommandClient interface {
 	Handoff(context.Context, Principal, HandoffRequest) (CommandResult, error)
 }
 
-// ParticipantStarter is the focused in-process extension used by product
-// participant surfaces. It is intentionally not part of the MVP HTTP protocol.
+// ParticipantStarter is the principal-aware server-side capability used to
+// assemble the focused ParticipantClient exposed by AppServer transports.
 type ParticipantStarter interface {
 	StartParticipant(context.Context, Principal, StartParticipantRequest) (CommandResult, error)
 }

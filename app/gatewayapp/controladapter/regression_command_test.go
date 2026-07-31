@@ -99,17 +99,17 @@ func TestRegressionCommandAgentStatus(t *testing.T) {
 	_ = status
 }
 
-func TestRegressionCommandListSessions(t *testing.T) {
+func TestRegressionCommandResumeCandidates(t *testing.T) {
 	t.Parallel()
 	driver, _ := newRegressionDriver(t)
 	ctx := context.Background()
 
-	sessions, err := driver.ListSessions(ctx, 10)
+	sessions, err := driver.listResumeCandidates(ctx, 10)
 	if err != nil {
-		t.Fatalf("ListSessions() error = %v", err)
+		t.Fatalf("listResumeCandidates() error = %v", err)
 	}
 	if len(sessions) == 0 {
-		t.Log("ListSessions() returned 0 sessions; session may not be persisted yet")
+		t.Log("listResumeCandidates() returned 0 sessions; session may not be persisted yet")
 	}
 }
 

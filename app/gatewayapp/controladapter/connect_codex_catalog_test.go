@@ -14,7 +14,7 @@ func TestCodexConnectCompletionUsesAccountCatalogAndEffective56Context(t *testin
 	t.Parallel()
 
 	ctx := context.Background()
-	driver, err := newAssembler(ctx, &RuntimeStack{
+	driver := newAssemblerForStack(&RuntimeStack{
 		Model: ModelRuntimeDeps{
 			AuthenticateFn: func(_ context.Context, req modelconfig.AuthenticateRequest) (modelconfig.AuthenticateResult, error) {
 				if req.Provider != "openai-codex" || req.Purpose != modelconfig.AuthPurposeModelSelection {
@@ -34,10 +34,7 @@ func TestCodexConnectCompletionUsesAccountCatalogAndEffective56Context(t *testin
 				}, nil
 			},
 		},
-	}, "", "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	}, "", "")
 	state := connectwizard.ConnectWizardState{
 		Provider:       "codex",
 		BaseURL:        modelconfig.CodexOAuthBaseURL,
@@ -81,14 +78,11 @@ func slashCandidateValues(candidates []controlprompt.SlashArgCandidate) []string
 func TestCodexConnectCompletionFallbackOmitsDeprecated52(t *testing.T) {
 	t.Parallel()
 
-	driver, err := newAssembler(context.Background(), &RuntimeStack{
+	driver := newAssemblerForStack(&RuntimeStack{
 		Model: ModelRuntimeDeps{AuthenticateFn: func(context.Context, modelconfig.AuthenticateRequest) (modelconfig.AuthenticateResult, error) {
 			return modelconfig.AuthenticateResult{}, nil
 		}},
-	}, "", "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	}, "", "")
 	state := connectwizard.ConnectWizardState{Provider: "codex", BaseURL: modelconfig.CodexOAuthBaseURL}
 	models, err := driver.CompleteSlashArg(context.Background(), "connect-model:"+state.EncodeCompletionState(), "", 20)
 	if err != nil {
@@ -102,4 +96,13 @@ func TestCodexConnectCompletionFallbackOmitsDeprecated52(t *testing.T) {
 	if slashCandidatesHaveValue(models, "gpt-5.2") {
 		t.Fatalf("Codex fallback candidates retained deprecated 5.2 = %#v", models)
 	}
+}
+
+func slashCandidatesHaveValue(candidates []controlprompt.SlashArgCandidate, value string) bool {
+	for _, candidate := range candidates {
+		if candidate.Value == value {
+			return true
+		}
+	}
+	return false
 }

@@ -43,8 +43,9 @@ func (c *Client) ListSessions(ctx context.Context, principal Principal, req List
 	return c.config.Sessions.ListSessions(ctx, listReq)
 }
 
-// StartParticipant delegates the in-process-only participant start extension
-// without adding it to the bounded HTTP command contract.
+// StartParticipant delegates the focused participant capability implemented by
+// the underlying command service. AppServer transports expose this operation
+// through ParticipantClient rather than expanding SessionClient.
 func (c *Client) StartParticipant(ctx context.Context, principal Principal, req StartParticipantRequest) (CommandResult, error) {
 	starter, ok := c.CommandClient.(ParticipantStarter)
 	if !ok {

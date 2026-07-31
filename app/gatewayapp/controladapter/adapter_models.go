@@ -138,7 +138,7 @@ func (d *assembler) hasReusableConnectAuth(ctx context.Context, provider string,
 }
 
 func (d *assembler) UseModel(ctx context.Context, model string, reasoningEffort ...string) (controlstatus.StatusSnapshot, error) {
-	activeSession, err := d.ensureSession(ctx)
+	activeSession, err := d.requireSession()
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
 	}
@@ -188,7 +188,7 @@ func (d *assembler) UseModel(ctx context.Context, model string, reasoningEffort 
 }
 
 func (d *assembler) DeleteModel(ctx context.Context, alias string) error {
-	activeSession, err := d.ensureSession(ctx)
+	activeSession, err := d.requireSession()
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func (d *assembler) DeleteModel(ctx context.Context, alias string) error {
 }
 
 func (d *assembler) CycleSessionMode(ctx context.Context) (controlstatus.StatusSnapshot, error) {
-	activeSession, err := d.ensureSession(ctx)
+	activeSession, err := d.requireSession()
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
 	}
@@ -288,22 +288,8 @@ func (d *assembler) RepairSandbox(ctx context.Context) (controlstatus.StatusSnap
 	return d.Status(ctx)
 }
 
-func (d *assembler) ResetSandbox(ctx context.Context) (controlstatus.StatusSnapshot, error) {
-	if d.stack.Sandbox.ResetFn == nil {
-		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("sandbox reset")
-	}
-	status, err := d.stack.Sandbox.ResetFn(ctx)
-	if err != nil {
-		return controlstatus.StatusSnapshot{}, err
-	}
-	d.mu.Lock()
-	d.sandboxType = firstNonEmpty(status.ResolvedBackend, status.RequestedBackend, d.sandboxType)
-	d.mu.Unlock()
-	return d.Status(ctx)
-}
-
 func (d *assembler) SetSessionMode(ctx context.Context, mode string) (controlstatus.StatusSnapshot, error) {
-	activeSession, err := d.ensureSession(ctx)
+	activeSession, err := d.requireSession()
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
 	}

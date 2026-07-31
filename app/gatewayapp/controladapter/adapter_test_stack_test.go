@@ -1,11 +1,20 @@
 package controladapter
 
 import (
+	"context"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 )
+
+func TestMain(m *testing.M) {
+	readGitWorkspaceStatusForDisplay = func(context.Context, string) (gitWorkspaceStatus, bool) {
+		return gitWorkspaceStatus{}, false
+	}
+	os.Exit(m.Run())
+}
 
 func newAdapterTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack, error) {
 	t.Helper()

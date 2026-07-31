@@ -12,9 +12,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-// ParticipantClient is the principal-bound in-process participant command
-// contract. It stays separate from SessionClient because participant
-// administration is not part of the bounded HTTP/SSE MVP.
+// ParticipantClient is the principal-bound participant command contract. It
+// stays separate from SessionClient so participant execution remains a focused
+// capability across embedded and HTTP AppServer transports.
 type ParticipantClient interface {
 	Handles(context.Context, string) ([]string, error)
 	StartParticipant(context.Context, StartParticipantRequest) (CommandResult, error)
@@ -33,8 +33,8 @@ type ParticipantHandleService interface {
 	ListParticipantHandles(context.Context, Principal, string) ([]string, error)
 }
 
-// ParticipantService is the focused principal-aware in-process extension used
-// to bind participant execution without growing the bounded Service contract.
+// ParticipantService is the focused principal-aware server-side capability
+// used to bind participant execution without growing the Session Service.
 type ParticipantService interface {
 	ParticipantStarter
 	ParticipantHandleService
@@ -119,7 +119,8 @@ type ParticipantTurnClient struct {
 	participants ParticipantClient
 }
 
-// NewParticipantTurnClient constructs the in-process participant Turn client.
+// NewParticipantTurnClient constructs a participant Turn client from the
+// transport-neutral Session and participant contracts.
 func NewParticipantTurnClient(sessions SessionClient, participants ParticipantClient) (*ParticipantTurnClient, error) {
 	if sessions == nil || participants == nil {
 		return nil, errors.New("controlclient: Session and participant clients are required")

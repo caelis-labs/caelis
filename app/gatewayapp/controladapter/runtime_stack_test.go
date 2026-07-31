@@ -189,39 +189,6 @@ func TestRuntimeStackSandboxDepsUseGroupedFields(t *testing.T) {
 				return stack.Sandbox.RepairFn(ctx)
 			},
 		},
-		{
-			name: "preflight",
-			stack: func(t *testing.T, called *int) *RuntimeStack {
-				t.Helper()
-				return &RuntimeStack{Sandbox: SandboxRuntimeDeps{
-					PreflightFn: func(_ context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
-						if !allowNonElevatedRepair {
-							t.Fatal("PreflightSandbox allowNonElevatedRepair = false, want true")
-						}
-						(*called)++
-						return statusFor("preflight"), nil
-					},
-				}}
-			},
-			call: func(ctx context.Context, stack *RuntimeStack) (SandboxStatus, error) {
-				return stack.Sandbox.PreflightFn(ctx, true)
-			},
-		},
-		{
-			name: "reset",
-			stack: func(t *testing.T, called *int) *RuntimeStack {
-				t.Helper()
-				return &RuntimeStack{Sandbox: SandboxRuntimeDeps{
-					ResetFn: func(context.Context) (SandboxStatus, error) {
-						(*called)++
-						return statusFor("reset"), nil
-					},
-				}}
-			},
-			call: func(ctx context.Context, stack *RuntimeStack) (SandboxStatus, error) {
-				return stack.Sandbox.ResetFn(ctx)
-			},
-		},
 	}
 
 	for _, tt := range tests {

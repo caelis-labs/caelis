@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -71,8 +72,19 @@ func (a *SessionClientAdapter) ResumeSession(ctx context.Context, sessionID stri
 	if strings.TrimSpace(result.State.SessionID) != strings.TrimSpace(sessionID) {
 		return controlprompt.SessionSnapshot{}, errors.New("app/gatewayapp/controladapter: reconnect state belongs to another Session")
 	}
+	registerActive := result.State.Run.Active || result.State.Approval.Active != nil
+	if registerActive {
+		target := reconnect.target()
+		if target.HandleID == "" || target.RunID == "" || target.TurnID == "" {
+			return controlprompt.SessionSnapshot{}, errors.New("app/gatewayapp/controladapter: active reconnect returned no complete Turn target")
+		}
+	}
 	a.closeActiveTurn()
 	a.setClientSession(result.State.SessionID, result.State.CWD)
+	if registerActive {
+		reconnect.onClose = func() { a.clearActiveReconnect(reconnect) }
+		a.setActiveReconnect(reconnect)
+	}
 	abort = false
 	return controlprompt.SessionSnapshot{SessionID: result.State.SessionID, Reconnect: reconnect}, nil
 }
@@ -103,8 +115,17 @@ func (a *SessionClientAdapter) ListSessions(ctx context.Context, limit int) ([]c
 }
 
 func (a *SessionClientAdapter) closeActiveTurn() {
-	if active := a.activeTurn(); active != nil {
+	a.activeMu.Lock()
+	active := a.active
+	reconnect := a.reconnect
+	a.active = nil
+	a.reconnect = nil
+	a.activeMu.Unlock()
+	if active != nil {
 		_ = active.Close()
+	}
+	if reconnect != nil {
+		_ = reconnect.Close()
 	}
 }
 
@@ -113,6 +134,7 @@ type clientSessionReconnect struct {
 	subscription controlclient.FeedSubscription
 	client       controlclient.SessionClient
 	bootstrap    []eventstream.Envelope
+	onClose      func()
 	closeOnce    sync.Once
 }
 
@@ -181,17 +203,13 @@ func (r *clientSessionReconnect) SubmitApproval(ctx context.Context, decision co
 	if r == nil || r.client == nil {
 		return errors.New("app/gatewayapp/controladapter: reconnect client is unavailable")
 	}
-	state, err := r.client.InspectSession(ctx, controlclient.StateRequest{SessionID: r.state.SessionID})
+	base, err := r.writeBase(ctx, "reconnect-approval")
 	if err != nil {
 		return err
 	}
-	revision := state.Revision
 	_, err = r.client.ResolveApproval(ctx, controlclient.ResolveApprovalRequest{
-		WriteBase: controlclient.WriteBase{
-			OperationID: "reconnect-approval-" + uuid.NewString(), SessionID: state.SessionID,
-			ExpectedRevision: &revision, ExpectedControllerEpoch: state.Controller.EpochID,
-		},
-		Target:            controlclient.TurnTarget{HandleID: state.Run.HandleID, RunID: state.Run.RunID, TurnID: state.Run.TurnID},
+		WriteBase:         base,
+		Target:            r.target(),
 		ApprovalRequestID: string(decision.RequestID), Outcome: strings.TrimSpace(decision.Outcome),
 		OptionID: strings.TrimSpace(decision.OptionID), Approved: decision.Approved,
 		Reason: strings.TrimSpace(decision.Reason), ReviewText: strings.TrimSpace(decision.ReviewText),
@@ -200,22 +218,62 @@ func (r *clientSessionReconnect) SubmitApproval(ctx context.Context, decision co
 }
 
 func (r *clientSessionReconnect) Cancel() {
+	_ = r.cancel(context.Background(), "reconnected surface interrupt")
+}
+
+func (r *clientSessionReconnect) steer(ctx context.Context, input, displayInput string, contentParts []model.ContentPart) error {
 	if r == nil || r.client == nil || !r.state.Run.Active {
-		return
+		return noActiveTurnSubmissionError()
 	}
-	state, err := r.client.InspectSession(context.Background(), controlclient.StateRequest{SessionID: r.state.SessionID})
-	if err != nil || !state.Run.Active {
-		return
+	base, err := r.writeBase(ctx, "reconnect-steer")
+	if err != nil {
+		return err
+	}
+	_, err = r.client.Steer(ctx, controlclient.SteerRequest{
+		WriteBase: base, Target: r.target(), Input: input, DisplayInput: displayInput,
+		ContentParts: append([]model.ContentPart(nil), contentParts...),
+	})
+	return err
+}
+
+func (r *clientSessionReconnect) cancel(ctx context.Context, reason string) error {
+	if r == nil || r.client == nil || !r.state.Run.Active {
+		return noActiveTurnSubmissionError()
+	}
+	base, err := r.writeBase(ctx, "reconnect-cancel")
+	if err != nil {
+		return err
+	}
+	_, err = r.client.Cancel(ctx, controlclient.CancelRequest{
+		WriteBase: base, Target: r.target(), Reason: strings.TrimSpace(reason),
+	})
+	return err
+}
+
+func (r *clientSessionReconnect) writeBase(ctx context.Context, prefix string) (controlclient.WriteBase, error) {
+	if r == nil || r.client == nil {
+		return controlclient.WriteBase{}, errors.New("app/gatewayapp/controladapter: reconnect client is unavailable")
+	}
+	state, err := r.client.InspectSession(ctx, controlclient.StateRequest{SessionID: r.state.SessionID})
+	if err != nil {
+		return controlclient.WriteBase{}, err
 	}
 	revision := state.Revision
-	_, _ = r.client.Cancel(context.Background(), controlclient.CancelRequest{
-		WriteBase: controlclient.WriteBase{
-			OperationID: "reconnect-cancel-" + uuid.NewString(), SessionID: state.SessionID,
-			ExpectedRevision: &revision, ExpectedControllerEpoch: state.Controller.EpochID,
-		},
-		Target: controlclient.TurnTarget{HandleID: state.Run.HandleID, RunID: state.Run.RunID, TurnID: state.Run.TurnID},
-		Reason: "reconnected surface interrupt",
-	})
+	return controlclient.WriteBase{
+		OperationID: prefix + "-" + uuid.NewString(), SessionID: r.state.SessionID,
+		ExpectedRevision: &revision, ExpectedControllerEpoch: strings.TrimSpace(r.state.Controller.EpochID),
+	}, nil
+}
+
+func (r *clientSessionReconnect) target() controlclient.TurnTarget {
+	if r == nil {
+		return controlclient.TurnTarget{}
+	}
+	return controlclient.TurnTarget{
+		HandleID: strings.TrimSpace(r.state.Run.HandleID),
+		RunID:    strings.TrimSpace(r.state.Run.RunID),
+		TurnID:   strings.TrimSpace(r.state.Run.TurnID),
+	}
 }
 
 func (r *clientSessionReconnect) Close() error {
@@ -224,7 +282,35 @@ func (r *clientSessionReconnect) Close() error {
 	}
 	var err error
 	r.closeOnce.Do(func() { err = r.subscription.Close() })
+	if r.onClose != nil {
+		r.onClose()
+	}
 	return err
+}
+
+func cloneReconnectState(in controlclient.SessionState) controlclient.SessionState {
+	out := in
+	out.Metadata = session.CloneState(in.Metadata)
+	out.BoundaryPosition = eventstream.CloneFeedPosition(in.BoundaryPosition)
+	out.Participants = session.CloneParticipantBindings(in.Participants)
+	if in.Approval.Active != nil {
+		active := *in.Approval.Active
+		active.ParentTool = cloneReconnectParentTool(in.Approval.Active.ParentTool)
+		if in.Approval.Active.Permission != nil {
+			permission := session.CloneProtocolApproval(*in.Approval.Active.Permission)
+			active.Permission = &permission
+		}
+		out.Approval.Active = &active
+	}
+	return out
+}
+
+func cloneReconnectParentTool(in *eventstream.ParentToolRelation) *eventstream.ParentToolRelation {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
 
 var _ controlprompt.SessionReconnect = (*clientSessionReconnect)(nil)

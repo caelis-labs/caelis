@@ -27,20 +27,16 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 	}
 	models := stack.Models()
 	agents := stack.Agents()
-	bindings := stack.AgentBindings()
 	skills := stack.Skills()
 	status := stack.Status()
 	plugins := stack.Plugins()
 	return &RuntimeStack{
-		Gateway:          gatewayDepsFromStack(stack),
-		ControlFeeds:     stack.ControlClientFeeds(),
-		ControlReconnect: stack.ControlClientReconnect(),
+		Gateway: gatewayDepsFromStack(stack),
 		Session: SessionRuntimeDeps{
 			Store:     stack.Sessions,
 			AppName:   stack.AppName,
 			UserID:    stack.UserID,
 			Workspace: stack.Workspace,
-			CompactFn: stack.CompactSession,
 		},
 		Status: StatusRuntimeDeps{
 			RuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
@@ -61,10 +57,6 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 			DisconnectCandidatesFn: agents.DisconnectCandidates,
 			DisconnectFn:           agents.Disconnect,
 			ListFn:                 func() []ACPAgentInfo { return adapters.ACPAgents(agents.List()) },
-		},
-		AgentBinding: AgentBindingRuntimeDeps{
-			Configuration: bindings,
-			ResolveFn:     stack.ResolveHandlePlacement,
 		},
 		Model: ModelRuntimeDeps{
 			DefaultAliasFn:  models.DefaultAlias,
@@ -99,14 +91,6 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 			},
 			RepairFn: func(ctx context.Context) (SandboxStatus, error) {
 				snapshot, err := status.RepairSandbox(ctx)
-				return adapters.SandboxStatus(snapshot), err
-			},
-			PreflightFn: func(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
-				snapshot, err := status.PreflightSandbox(ctx, allowNonElevatedRepair)
-				return adapters.SandboxStatus(snapshot), err
-			},
-			ResetFn: func(ctx context.Context) (SandboxStatus, error) {
-				snapshot, err := status.ResetSandbox(ctx)
 				return adapters.SandboxStatus(snapshot), err
 			},
 		},
@@ -150,9 +134,8 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 
 func gatewayDepsFromStack(stack *gatewayapp.Stack) GatewayRuntimeDeps {
 	return GatewayRuntimeDeps{
-		TurnServiceFn:         func() GatewayTurnService { return stack.KernelTurns() },
-		SessionServiceFn:      func() GatewaySessionService { return stack.KernelSessions() },
-		ControlPlaneServiceFn: func() GatewayControlPlaneService { return stack.KernelControlPlane() },
-		StreamProviderFn:      func() GatewayStreamProvider { return stack.KernelStreams() },
+		TurnServiceFn:         func() GatewayTurnService { return stack.KernelTurnState() },
+		SessionServiceFn:      func() GatewaySessionService { return stack.KernelSessionState() },
+		ControlPlaneServiceFn: func() GatewayControlPlaneService { return stack.KernelControlPlaneState() },
 	}
 }

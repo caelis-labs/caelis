@@ -69,6 +69,24 @@ type ModelConfig = modelconfig.Config
 type ProviderEndpointConfig = modelconfig.ProviderEndpointConfig
 type ModelChoice = modelconfig.Choice
 
+// KernelTurnReader is the read-only live Turn projection required by
+// server-side status assembly.
+type KernelTurnReader interface {
+	ActiveTurns() []kernelimpl.ActiveTurnState
+}
+
+// KernelSessionReader is the read-only Session projection required by
+// server-side completion assembly.
+type KernelSessionReader interface {
+	ListSessions(context.Context, kernelimpl.ListSessionsRequest) (session.SessionList, error)
+}
+
+// KernelControlPlaneReader is the read-only controller and participant
+// projection required by server-side status assembly.
+type KernelControlPlaneReader interface {
+	ControlPlaneState(context.Context, kernelimpl.ControlPlaneStateRequest) (kernelimpl.ControlPlaneState, error)
+}
+
 // DefaultControlOperationRetention is the production replay guarantee for
 // proven terminal Control operations.
 const DefaultControlOperationRetention = controlclient.DefaultOperationTerminalRetention
@@ -102,8 +120,6 @@ type Stack struct {
 	acpControlPlane          *acpassembly.ControlPlane
 	taskStore                task.Store
 	controlFeeds             controlclient.FeedRegistry
-	controlState             controlclient.StateReader
-	controlCommands          controlclient.CommandClient
 	controlClient            controlclient.Service
 	taskStreams              acptaskstream.Service
 	operations               *controlclient.FileOperationStore
@@ -126,27 +142,28 @@ type Stack struct {
 	refreshConfiguredAgentsHook func() error
 }
 
-// KernelTurns returns the current gateway turn service without exposing the
-// broader session/control-plane aggregate to callers that only submit turns.
-func (s *Stack) KernelTurns() kernelimpl.TurnService {
+// KernelTurnState returns the current read-only live Turn projection. Turn
+// writes remain behind typed AppServer clients.
+func (s *Stack) KernelTurnState() KernelTurnReader {
 	if gw := s.currentGateway(); gw != nil {
 		return gw
 	}
 	return nil
 }
 
-// KernelSessions returns the current gateway session service without exposing
-// turn or control-plane operations to session-only callers.
-func (s *Stack) KernelSessions() kernelimpl.SessionService {
+// KernelSessionState returns the current read-only Session projection. Session
+// writes remain behind typed AppServer clients.
+func (s *Stack) KernelSessionState() KernelSessionReader {
 	if gw := s.currentGateway(); gw != nil {
 		return gw
 	}
 	return nil
 }
 
-// KernelControlPlane returns the current gateway control-plane service without
-// exposing turn/session operations to controller-only callers.
-func (s *Stack) KernelControlPlane() kernelimpl.ControlPlaneService {
+// KernelControlPlaneState returns the current read-only controller and
+// participant projection. Control-plane writes remain behind focused typed
+// AppServer clients.
+func (s *Stack) KernelControlPlaneState() KernelControlPlaneReader {
 	if gw := s.currentGateway(); gw != nil {
 		return gw
 	}
@@ -162,40 +179,6 @@ func (s *Stack) KernelStreams() kernelimpl.StreamProvider {
 	return nil
 }
 
-// ControlClientFeeds returns the Control-owned Session feed registry shared by
-// every in-process and network adapter.
-func (s *Stack) ControlClientFeeds() controlclient.FeedRegistry {
-	if s == nil {
-		return nil
-	}
-	return s.controlFeeds
-}
-
-// ControlClientState returns the typed reconnect bootstrap reader.
-func (s *Stack) ControlClientState() controlclient.StateReader {
-	if s == nil {
-		return nil
-	}
-	return s.controlState
-}
-
-// ControlClientReconnect returns the atomic typed bootstrap/splice service.
-func (s *Stack) ControlClientReconnect() controlclient.ReconnectReader {
-	if s == nil {
-		return nil
-	}
-	reconnect, _ := s.controlState.(controlclient.ReconnectReader)
-	return reconnect
-}
-
-// ControlClientCommands returns the request-scoped authorized command service.
-func (s *Stack) ControlClientCommands() controlclient.CommandClient {
-	if s == nil {
-		return nil
-	}
-	return s.controlCommands
-}
-
 // ControlClient returns the complete transport-neutral client service.
 func (s *Stack) ControlClient() controlclient.Service {
 	if s == nil {
@@ -204,8 +187,9 @@ func (s *Stack) ControlClient() controlclient.Service {
 	return s.controlClient
 }
 
-// ControlParticipants returns the focused in-process participant extension.
-// It is intentionally separate from the bounded transport-neutral Service.
+// ControlParticipants returns the focused server-side participant capability
+// assembled into embedded and HTTP AppServer clients. It stays separate from
+// the Session lifecycle and main-Turn Service.
 func (s *Stack) ControlParticipants() controlclient.ParticipantService {
 	if s == nil {
 		return nil
@@ -214,8 +198,9 @@ func (s *Stack) ControlParticipants() controlclient.ParticipantService {
 	return participants
 }
 
-// TaskStreams returns the Control-owned, Session-authorized Task stream
-// service used by the current in-process and ACP presentation adapters.
+// TaskStreams returns the Control-owned, Session-authorized Task service shared
+// by embedded and HTTP AppServer clients independently of the main Session
+// feed.
 func (s *Stack) TaskStreams() acptaskstream.Service {
 	if s == nil {
 		return nil
@@ -490,7 +475,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	stack.controlState = controlState
 	controlOperations, err := controlclient.NewFileOperationStoreWithConfig(
 		filepath.Join(storeDir, "control-operations"),
 		controlclient.OperationRetentionConfig{TerminalRetention: cfg.ControlOperationRetention},
@@ -515,7 +499,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	stack.controlCommands = controlCommands
 	controlClient, err := controlclient.NewClient(controlclient.ClientConfig{
 		Commands: controlCommands, State: controlState, Feeds: controlFeeds,
 		Authorizer:         controlclient.SessionAuthorizer{Sessions: sessions},

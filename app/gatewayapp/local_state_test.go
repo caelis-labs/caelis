@@ -18,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -408,21 +409,27 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 		return http.DefaultClient, nil
 	}
 
-	resumed, err := reloaded.KernelSessions().ResumeSession(ctx, kernel.ResumeSessionRequest{
-		AppName: appName, UserID: userID, Workspace: reloaded.Workspace,
-		SessionID: active.SessionID, MetadataOnly: true,
-	})
+	client, err := controlclient.BindSessionClient(reloaded.ControlClient(), controlclient.Principal{ID: userID})
 	if err != nil {
-		t.Fatalf("ResumeSession() error = %v", err)
+		t.Fatalf("BindSessionClient() error = %v", err)
 	}
-	state, err := reloaded.SessionRuntimeState(ctx, resumed.Session.SessionRef)
+	reconnected, err := client.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: active.SessionID})
+	if err != nil {
+		t.Fatalf("Reconnect() error = %v", err)
+	}
+	if reconnected.Subscription != nil {
+		defer func() { _ = reconnected.Subscription.Close() }()
+	}
+	resumed := reconnected.State
+	resumedRef := session.SessionRef{SessionID: resumed.SessionID}
+	state, err := reloaded.SessionRuntimeState(ctx, resumedRef)
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
 	}
 	if state.ModelAlias != "xai/grok-4.5" {
 		t.Fatalf("resumed ModelAlias = %q, want xai/grok-4.5", state.ModelAlias)
 	}
-	usage, err := reloaded.SessionUsageSnapshot(ctx, resumed.Session.SessionRef, state.ModelAlias)
+	usage, err := reloaded.SessionUsageSnapshot(ctx, resumedRef, state.ModelAlias)
 	if err != nil {
 		t.Fatalf("SessionUsageSnapshot() error = %v", err)
 	}
@@ -431,7 +438,7 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 	}
 
 	resolved, err := reloaded.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{
-		SessionRef: resumed.Session.SessionRef,
+		SessionRef: resumedRef,
 	})
 	if err != nil {
 		t.Fatalf("ResolveTurn(resumed) error = %v", err)

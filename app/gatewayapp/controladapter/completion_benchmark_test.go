@@ -77,12 +77,12 @@ func BenchmarkResumeCompletion200Sessions500Events(b *testing.B) {
 	b.ReportMetric(100000, "events")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		candidates, err := driver.ListSessions(ctx, 200)
+		candidates, err := driver.listResumeCandidates(ctx, 200)
 		if err != nil {
 			b.Fatal(err)
 		}
 		if len(candidates) != 200 {
-			b.Fatalf("ListSessions() returned %d candidates", len(candidates))
+			b.Fatalf("listResumeCandidates() returned %d candidates", len(candidates))
 		}
 	}
 }

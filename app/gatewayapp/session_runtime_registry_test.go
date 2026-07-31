@@ -1295,8 +1295,6 @@ func assertSessionRuntimeSharingContract(t *testing.T, host, child *Stack) {
 		t.Fatal("Session child shared its MCP manager")
 	}
 	if child.sessionRuntimes != nil ||
-		child.controlState != nil ||
-		child.controlCommands != nil ||
 		child.controlClient != nil ||
 		child.taskStreams != nil ||
 		child.operations != nil ||

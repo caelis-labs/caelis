@@ -14,48 +14,26 @@ import (
 )
 
 type assembler struct {
-	mu                  sync.Mutex
-	sessionChangeMu     sync.Mutex
-	stack               *RuntimeStack
-	session             session.Session
-	hasSession          bool
-	bindingKey          string
-	defaultModelText    string
-	modelText           string
-	defaultSessionMode  string
-	sessionMode         string
-	defaultSandboxType  string
-	sandboxType         string
-	activeCommandID     uint64
-	activeCommandCancel context.CancelFunc
-	acpDiscoveries      map[string]acpDiscoveryCacheEntry
-	acpEndpointAuth     map[string]acpEndpointAuthCacheEntry
-}
-
-func newAssembler(ctx context.Context, stack *RuntimeStack, preferredSessionID string, bindingKey string, modelText string) (*assembler, error) {
-	if stack == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	driver := newAssemblerForStack(stack, bindingKey, modelText)
-	if preferredSessionID = strings.TrimSpace(preferredSessionID); preferredSessionID != "" {
-		if driver.stack.Session.StartFn == nil {
-			return nil, missingRuntimeDependency("start session")
-		}
-		activeSession, err := driver.stack.Session.StartFn(ctx, preferredSessionID, driver.bindingKey)
-		if err != nil {
-			return nil, err
-		}
-		driver.bindSession(ctx, activeSession)
-	}
-	return driver, nil
+	mu                 sync.Mutex
+	stack              *RuntimeStack
+	session            session.Session
+	hasSession         bool
+	bindingKey         string
+	defaultModelText   string
+	modelText          string
+	defaultSessionMode string
+	sessionMode        string
+	defaultSandboxType string
+	sandboxType        string
+	acpDiscoveries     map[string]acpDiscoveryCacheEntry
+	acpEndpointAuth    map[string]acpEndpointAuthCacheEntry
 }
 
 // newAssemblerForSession constructs an assembler bound to an already resolved
-// session. It is used by ACP prompt routing, where the session lookup has
-// already applied the client workspace and must not be repeated via StartFn.
+// session. Session lifecycle and Turn ingress remain owned by typed AppServer
+// clients; these private assemblers expose only the server-side projections
+// needed by focused status, configuration, Agent, completion, and plugin
+// services.
 func newAssemblerForSession(ctx context.Context, stack *RuntimeStack, activeSession session.Session, bindingKey string, modelText string) (*assembler, error) {
 	if stack == nil {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
@@ -111,10 +89,6 @@ func (d *assembler) gatewayControlPlane() (GatewayControlPlaneService, error) {
 	return resolveGatewayDep(d, gatewayControlPlaneServiceFn, "gateway control-plane service", "gateway control-plane service is unavailable")
 }
 
-func (d *assembler) gatewayStreams() (GatewayStreamProvider, error) {
-	return resolveGatewayDep(d, gatewayStreamProviderFn, "gateway stream provider", "gateway stream provider is unavailable")
-}
-
 func resolveGatewayDep[T any](driver *assembler, provider func(GatewayRuntimeDeps) func() T, depName, unavailable string) (T, error) {
 	var zero T
 	if driver == nil || driver.stack == nil {
@@ -142,10 +116,6 @@ func gatewayControlPlaneServiceFn(deps GatewayRuntimeDeps) func() GatewayControl
 	return deps.ControlPlaneServiceFn
 }
 
-func gatewayStreamProviderFn(deps GatewayRuntimeDeps) func() GatewayStreamProvider {
-	return deps.StreamProviderFn
-}
-
 func anyString(value any) string {
 	switch typed := value.(type) {
 	case string:
@@ -169,26 +139,11 @@ func (d *assembler) WorkspaceDir() string {
 	return strings.TrimSpace(d.stack.Session.Workspace.CWD)
 }
 
-func (d *assembler) ensureSession(ctx context.Context) (session.Session, error) {
+func (d *assembler) requireSession() (session.Session, error) {
 	if activeSession, ok := d.currentSession(); ok {
 		return activeSession, nil
 	}
-	if d == nil || d.stack == nil {
-		return session.Session{}, fmt.Errorf("app/gatewayapp/controladapter: stack is unavailable")
-	}
-	if d.stack.Session.StartFn == nil {
-		return session.Session{}, missingRuntimeDependency("start session")
-	}
-	activeSession, err := d.stack.Session.StartFn(ctx, "", d.bindingKey)
-	if err != nil {
-		return session.Session{}, err
-	}
-	d.mu.Lock()
-	d.session = activeSession
-	d.hasSession = true
-	d.mu.Unlock()
-	d.refreshSessionDisplay(ctx, activeSession)
-	return activeSession, nil
+	return session.Session{}, fmt.Errorf("app/gatewayapp/controladapter: no bound session")
 }
 
 func (d *assembler) currentSession() (session.Session, bool) {
@@ -230,84 +185,6 @@ func (d *assembler) activeACPControllerStatus(ctx context.Context) (controller.C
 	return status, true, nil
 }
 
-func (d *assembler) Submit(ctx context.Context, submission controlprompt.Submission) (controlprompt.Turn, error) {
-	activeSession, err := d.ensureSession(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rawInput := strings.TrimSpace(submission.Text)
-	displayInput := strings.TrimSpace(submission.DisplayText)
-	if displayInput == rawInput {
-		displayInput = ""
-	}
-	contentParts, err := contentPartsFromSubmission(rawInput, submission.Attachments, d.WorkspaceDir())
-	if err != nil {
-		return nil, err
-	}
-	gw, err := d.gatewayTurns()
-	if err != nil {
-		return nil, err
-	}
-	if submission.Mode == controlprompt.SubmissionModeActiveTurn {
-		if !isBuiltInControllerSession(activeSession) || !activeKernelTurnForSession(gw.ActiveTurns(), activeSession.SessionRef) {
-			return nil, noActiveTurnSubmissionError()
-		}
-		err := gw.SubmitActiveTurn(ctx, kernel.SubmitActiveTurnRequest{
-			SessionRef:   activeSession.SessionRef,
-			Kind:         kernel.SubmissionKindConversation,
-			Text:         rawInput,
-			DisplayText:  displayInput,
-			ContentParts: contentParts,
-			Metadata: map[string]any{
-				"submission_mode": string(submission.Mode),
-			},
-		})
-		if err == nil {
-			return nil, nil
-		}
-		return nil, err
-	}
-	feedSubscription, err := d.subscribeGatewayTurn(activeSession.SessionRef)
-	if err != nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: establish turn feed boundary: %w", err)
-	}
-	result, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
-		SessionRef:   activeSession.SessionRef,
-		Input:        rawInput,
-		DisplayInput: displayInput,
-		ContentParts: contentParts,
-		Surface:      d.bindingKey,
-		Metadata: map[string]any{
-			"submission_mode": string(submission.Mode),
-		},
-	})
-	if err != nil {
-		if feedSubscription != nil {
-			_ = feedSubscription.Close()
-		}
-		return nil, err
-	}
-	d.mu.Lock()
-	d.session = result.Session
-	d.hasSession = true
-	d.mu.Unlock()
-	if result.Handle == nil {
-		if feedSubscription != nil {
-			_ = feedSubscription.Close()
-		}
-		return nil, nil
-	}
-	return d.newGatewayTurnWithSubscription(result.Handle, feedSubscription, true, ctx), nil
-}
-
-func activeKernelTurnForSession(active []kernel.ActiveTurnState, ref session.SessionRef) bool {
-	kind, ok := activeTurnKindForSession(active, ref)
-	if !ok {
-		return false
-	}
-	return kind == "" || strings.EqualFold(kind, string(kernel.ActiveTurnKindKernel))
-}
-
 func activeTurnKindForSession(active []kernel.ActiveTurnState, ref session.SessionRef) (string, bool) {
 	state, ok := activeTurnStateForSession(active, ref)
 	if !ok {
@@ -329,98 +206,11 @@ func activeTurnStateForSession(active []kernel.ActiveTurnState, ref session.Sess
 	return kernel.ActiveTurnState{}, false
 }
 
-func isBuiltInControllerSession(activeSession session.Session) bool {
-	switch activeSession.Controller.Kind {
-	case "", session.ControllerKindKernel:
-		return true
-	default:
-		return false
-	}
-}
-
 func noActiveTurnSubmissionError() error {
 	return kernel.NoActiveRunError("")
 }
 
-func (d *assembler) Interrupt(ctx context.Context) error {
-	cancelCommand := d.activeCommandInterrupt()
-	if cancelCommand != nil {
-		cancelCommand()
-	}
-	activeSession, ok := d.currentSession()
-	if !ok {
-		if cancelCommand != nil {
-			return nil
-		}
-		return fmt.Errorf("app/gatewayapp/controladapter: no active session")
-	}
-	gw, err := d.gatewayTurns()
-	if err != nil {
-		return err
-	}
-	if err := gw.Interrupt(ctx, kernel.InterruptRequest{
-		SessionRef: activeSession.SessionRef,
-		BindingKey: d.bindingKey,
-		Reason:     "tui interrupt",
-	}); err != nil {
-		if cancelCommand != nil {
-			return nil
-		}
-		return err
-	}
-	return nil
-}
-
-func (d *assembler) beginInterruptibleCommand(ctx context.Context) (context.Context, func()) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	commandCtx, cancel := context.WithCancel(ctx)
-	d.mu.Lock()
-	d.activeCommandID++
-	id := d.activeCommandID
-	d.activeCommandCancel = cancel
-	d.mu.Unlock()
-	return commandCtx, func() {
-		d.mu.Lock()
-		if d.activeCommandID == id {
-			d.activeCommandCancel = nil
-		}
-		d.mu.Unlock()
-		cancel()
-	}
-}
-
-func (d *assembler) activeCommandInterrupt() context.CancelFunc {
-	if d == nil {
-		return nil
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.activeCommandCancel
-}
-
-func (d *assembler) NewSession(ctx context.Context) (controlprompt.SessionSnapshot, error) {
-	if d.stack.Session.StartFn == nil {
-		return controlprompt.SessionSnapshot{}, missingRuntimeDependency("start session")
-	}
-	activeSession, err := d.stack.Session.StartFn(ctx, "", d.bindingKey)
-	if err != nil {
-		return controlprompt.SessionSnapshot{}, err
-	}
-	d.mu.Lock()
-	d.session = activeSession
-	d.hasSession = true
-	d.mu.Unlock()
-	d.refreshSessionDisplay(ctx, activeSession)
-	return sessionSnapshotFromSession(activeSession), nil
-}
-
-func sessionSnapshotFromSession(activeSession session.Session) controlprompt.SessionSnapshot {
-	return controlprompt.SessionSnapshot{SessionID: strings.TrimSpace(activeSession.SessionID)}
-}
-
-func (d *assembler) ListSessions(ctx context.Context, limit int) ([]controlprompt.ResumeCandidate, error) {
+func (d *assembler) listResumeCandidates(ctx context.Context, limit int) ([]controlprompt.ResumeCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 	ctx, cancel := completionContext(ctx, resumeCompletionTimeout)
 	defer cancel()
@@ -446,17 +236,6 @@ func (d *assembler) ListSessions(ctx context.Context, limit int) ([]controlpromp
 		out = append(out, candidate)
 	}
 	return out, nil
-}
-
-func (d *assembler) Compact(ctx context.Context) error {
-	activeSession, ok := d.currentSession()
-	if !ok {
-		return fmt.Errorf("app/gatewayapp/controladapter: no active session")
-	}
-	if d.stack.Session.CompactFn == nil {
-		return missingRuntimeDependency("compact")
-	}
-	return d.stack.Session.CompactFn(ctx, activeSession.SessionRef)
 }
 
 func (d *assembler) ListAgents(ctx context.Context, limit int) ([]controlprompt.AgentCandidate, error) {
@@ -527,46 +306,6 @@ func agentParticipantSnapshot(participant kernel.ParticipantState) controlprompt
 		Source:    strings.TrimSpace(participant.Source),
 		SessionID: strings.TrimSpace(participant.SessionID),
 	}
-}
-
-func (d *assembler) HandoffAgent(ctx context.Context, target string) (controlprompt.AgentStatusSnapshot, error) {
-	activeSession, err := d.ensureSession(ctx)
-	if err != nil {
-		return controlprompt.AgentStatusSnapshot{}, err
-	}
-	target = strings.TrimSpace(target)
-	req := kernel.HandoffControllerRequest{
-		SessionRef: activeSession.SessionRef,
-		BindingKey: d.bindingKey,
-		Source:     "user_agent_handoff",
-	}
-	switch strings.ToLower(target) {
-	case "", "main", "local", "kernel":
-		req.Kind = session.ControllerKindKernel
-		req.Reason = "resume local control"
-	default:
-		agent, resolveErr := d.resolveAgentName(target)
-		if resolveErr != nil {
-			return controlprompt.AgentStatusSnapshot{}, resolveErr
-		}
-		req.Kind = session.ControllerKindACP
-		req.Agent = agent
-		req.Reason = "handoff to agent"
-	}
-	gw, err := d.gatewayControlPlane()
-	if err != nil {
-		return controlprompt.AgentStatusSnapshot{}, err
-	}
-	updated, err := gw.HandoffController(ctx, req)
-	if err != nil {
-		return controlprompt.AgentStatusSnapshot{}, err
-	}
-	d.mu.Lock()
-	d.session = updated
-	d.hasSession = true
-	d.mu.Unlock()
-	d.refreshSessionDisplay(ctx, updated)
-	return d.AgentStatus(ctx)
 }
 
 func firstNonEmpty(values ...string) string {

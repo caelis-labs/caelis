@@ -16,14 +16,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
-	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
 	"github.com/caelis-labs/caelis/internal/updater"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRunServeStartsProductControlServer(t *testing.T) {
@@ -339,14 +338,15 @@ func TestRunHeadlessRejectsClosedSessionWithoutRecreatingIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	client, err := controlclient.BindSessionClient(
-		stack.ControlClient(),
-		controlclient.Principal{ID: stack.UserID},
-	)
+	server, err := local.NewAppServer(stack)
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := client.CreateSession(context.Background(), controlclient.CreateSessionRequest{
+	clients, _, err := server.Bind(controlclient.Principal{ID: stack.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := clients.Sessions.CreateSession(context.Background(), controlclient.CreateSessionRequest{
 		WriteBase:          controlclient.WriteBase{OperationID: "create-closed-headless"},
 		PreferredSessionID: "closed-headless",
 		WorkspaceKey:       "workspace",
@@ -355,7 +355,7 @@ func TestRunHeadlessRejectsClosedSessionWithoutRecreatingIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = client.CloseSession(context.Background(), controlclient.CloseSessionRequest{
+	_, err = clients.Sessions.CloseSession(context.Background(), controlclient.CloseSessionRequest{
 		WriteBase: controlclient.WriteBase{
 			OperationID: "close-closed-headless",
 			SessionID:   created.SessionID,
@@ -368,7 +368,8 @@ func TestRunHeadlessRejectsClosedSessionWithoutRecreatingIt(t *testing.T) {
 	var output bytes.Buffer
 	resumedID, err := runHeadless(
 		context.Background(),
-		stack,
+		clients.Sessions,
+		stack.Workspace,
 		created.SessionID,
 		"hello",
 		outputJSON,
@@ -626,109 +627,6 @@ func clearSelfAgentEnv(t *testing.T) {
 	}
 }
 
-func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {
-	title := "RUN_COMMAND"
-	handle := newFakeHandle([]eventstream.Envelope{
-		{
-			Kind:              eventstream.KindRequestPermission,
-			ApprovalRequestID: "approval-1",
-			Permission: &schema.RequestPermissionRequest{
-				SessionID: "s1",
-				ToolCall: schema.ToolCallUpdate{
-					SessionUpdate: schema.UpdateToolCallInfo,
-					ToolCallID:    "call-1",
-					Title:         &title,
-				},
-			},
-		},
-		{
-			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "interactive ok"},
-			},
-		},
-	})
-	var out bytes.Buffer
-	var errBuf bytes.Buffer
-	if err := streamHandle(context.Background(), handle, &out, &errBuf); err != nil {
-		t.Fatalf("streamHandle() error = %v", err)
-	}
-	if got := out.String(); !strings.Contains(got, "interactive ok") {
-		t.Fatalf("stdout = %q", got)
-	}
-	if got := errBuf.String(); !strings.Contains(got, "denied by default") {
-		t.Fatalf("stderr = %q", got)
-	}
-	if len(handle.submits) != 1 || handle.submits[0].Approval == nil || handle.submits[0].Approval.Approved {
-		t.Fatalf("submits = %#v", handle.submits)
-	}
-}
-
-func TestStreamHandleAppendsPrefixGrowingACPMessageDeltasExactly(t *testing.T) {
-	handle := newFakeHandle([]eventstream.Envelope{
-		{
-			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				MessageID:     "message-1",
-				Content:       schema.TextContent{Type: "text", Text: "a"},
-			},
-		},
-		{
-			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				MessageID:     "message-1",
-				Content:       schema.TextContent{Type: "text", Text: "ab"},
-			},
-		},
-	})
-	var out bytes.Buffer
-	var errBuf bytes.Buffer
-	if err := streamHandle(context.Background(), handle, &out, &errBuf); err != nil {
-		t.Fatalf("streamHandle() error = %v", err)
-	}
-	if got, want := out.String(), "a\naab\n"; got != want {
-		t.Fatalf("stdout = %q, want cumulative render %q from exact ACP deltas", got, want)
-	}
-	if errBuf.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", errBuf.String())
-	}
-}
-
-func TestStreamHandleIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
-	handle := newFakeHandle([]eventstream.Envelope{
-		{
-			Kind: eventstream.KindApprovalReview,
-			ApprovalReview: &eventstream.ApprovalReview{
-				Status: string(kernel.ApprovalReviewStatusInProgress),
-			},
-		},
-		{
-			Kind: eventstream.KindSessionUpdate,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "interactive ok"},
-			},
-		},
-	})
-	var out bytes.Buffer
-	var errBuf bytes.Buffer
-	if err := streamHandle(context.Background(), handle, &out, &errBuf); err != nil {
-		t.Fatalf("streamHandle() error = %v", err)
-	}
-	if got := out.String(); !strings.Contains(got, "interactive ok") {
-		t.Fatalf("stdout = %q", got)
-	}
-	if got := errBuf.String(); got != "" {
-		t.Fatalf("stderr = %q, want empty", got)
-	}
-	if len(handle.submits) != 0 {
-		t.Fatalf("submits = %#v, want no manual decision for auto-review event", handle.submits)
-	}
-}
-
 func TestRunDoctorJSONDoesNotLeakToken(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	storeDir := cliTestStoreDir(t)
@@ -960,41 +858,4 @@ func TestRunSandboxCleanSubcommandAliasesReset(t *testing.T) {
 	if !strings.Contains(out.String(), "sandbox_requested_backend: host") {
 		t.Fatalf("sandbox clean output = %q, want requested host backend", out.String())
 	}
-}
-
-type fakeHandle struct {
-	events    chan eventstream.Envelope
-	submits   []kernel.SubmitRequest
-	closed    bool
-	cancelled bool
-}
-
-func newFakeHandle(events []eventstream.Envelope) *fakeHandle {
-	ch := make(chan eventstream.Envelope, len(events))
-	for _, event := range events {
-		ch <- event
-	}
-	close(ch)
-	return &fakeHandle{events: ch}
-}
-
-func (h *fakeHandle) HandleID() string { return "h1" }
-func (h *fakeHandle) RunID() string    { return "r1" }
-func (h *fakeHandle) TurnID() string   { return "t1" }
-func (h *fakeHandle) SessionRef() session.SessionRef {
-	return session.SessionRef{SessionID: "s1"}
-}
-func (h *fakeHandle) CreatedAt() time.Time                   { return time.Time{} }
-func (h *fakeHandle) ACPEvents() <-chan eventstream.Envelope { return h.events }
-func (h *fakeHandle) Submit(_ context.Context, req kernel.SubmitRequest) error {
-	h.submits = append(h.submits, req)
-	return nil
-}
-func (h *fakeHandle) Cancel() kernel.CancelResult {
-	h.cancelled = true
-	return kernel.CancelResult{Status: kernel.CancelStatusCancelled}
-}
-func (h *fakeHandle) Close() error {
-	h.closed = true
-	return nil
 }

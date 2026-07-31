@@ -33,8 +33,9 @@ type SessionClientAdapter struct {
 	sessionID       string
 	workspaceDir    string
 
-	activeMu sync.Mutex
-	active   *sessionClientTurn
+	activeMu  sync.Mutex
+	active    *sessionClientTurn
+	reconnect *clientSessionReconnect
 }
 
 // AppServerAdapterConfig binds one presentation facade to a Session address
@@ -116,13 +117,19 @@ func (a *SessionClientAdapter) Submit(
 	}
 	if submission.Mode == controlprompt.SubmissionModeActiveTurn {
 		active := a.activeTurn()
-		if active == nil {
-			return nil, noActiveTurnSubmissionError()
+		if active != nil {
+			if err := active.steer(ctx, rawInput, displayInput, contentParts); err != nil {
+				return nil, err
+			}
+			return nil, nil
 		}
-		if err := active.steer(ctx, rawInput, displayInput, contentParts); err != nil {
-			return nil, err
+		if reconnect := a.activeReconnect(); reconnect != nil {
+			if err := reconnect.steer(ctx, rawInput, displayInput, contentParts); err != nil {
+				return nil, err
+			}
+			return nil, nil
 		}
-		return nil, nil
+		return nil, noActiveTurnSubmissionError()
 	}
 	turn, err := a.turns.Start(ctx, controlclient.SessionTurnStartRequest{
 		SessionID:    state.SessionID,
@@ -146,6 +153,9 @@ func (a *SessionClientAdapter) Interrupt(ctx context.Context) error {
 	if active := a.activeTurn(); active != nil {
 		return active.cancel(ctx, "tui interrupt")
 	}
+	if reconnect := a.activeReconnect(); reconnect != nil {
+		return reconnect.cancel(ctx, "tui interrupt")
+	}
 	return noActiveTurnSubmissionError()
 }
 
@@ -161,10 +171,15 @@ func (a *SessionClientAdapter) activeTurn() *sessionClientTurn {
 func (a *SessionClientAdapter) setActiveTurn(turn *sessionClientTurn) {
 	a.activeMu.Lock()
 	previous := a.active
+	previousReconnect := a.reconnect
 	a.active = turn
+	a.reconnect = nil
 	a.activeMu.Unlock()
 	if previous != nil && previous != turn {
 		_ = previous.Close()
+	}
+	if previousReconnect != nil {
+		_ = previousReconnect.Close()
 	}
 }
 
@@ -172,6 +187,38 @@ func (a *SessionClientAdapter) clearActiveTurn(turn *sessionClientTurn) {
 	a.activeMu.Lock()
 	if a.active == turn {
 		a.active = nil
+	}
+	a.activeMu.Unlock()
+}
+
+func (a *SessionClientAdapter) activeReconnect() *clientSessionReconnect {
+	if a == nil {
+		return nil
+	}
+	a.activeMu.Lock()
+	defer a.activeMu.Unlock()
+	return a.reconnect
+}
+
+func (a *SessionClientAdapter) setActiveReconnect(reconnect *clientSessionReconnect) {
+	a.activeMu.Lock()
+	previous := a.active
+	previousReconnect := a.reconnect
+	a.active = nil
+	a.reconnect = reconnect
+	a.activeMu.Unlock()
+	if previous != nil {
+		_ = previous.Close()
+	}
+	if previousReconnect != nil && previousReconnect != reconnect {
+		_ = previousReconnect.Close()
+	}
+}
+
+func (a *SessionClientAdapter) clearActiveReconnect(reconnect *clientSessionReconnect) {
+	a.activeMu.Lock()
+	if a.reconnect == reconnect {
+		a.reconnect = nil
 	}
 	a.activeMu.Unlock()
 }
@@ -278,6 +325,12 @@ func (t *sessionClientTurn) Err() error {
 		return nil
 	}
 	return t.turn.Err()
+}
+
+func closedEnvelopeChannel() <-chan eventstream.Envelope {
+	closed := make(chan eventstream.Envelope)
+	close(closed)
+	return closed
 }
 
 var _ controlprompt.Service = (*SessionClientAdapter)(nil)

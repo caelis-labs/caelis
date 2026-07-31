@@ -15,7 +15,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
@@ -86,16 +85,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	}
 	activeSession := startEvalSession(t, ctx, stack, "")
 	claudeAgent := connectClaudeAgentForE2E(ctx, t, stack)
-	updated, err := stack.KernelControlPlane().HandoffController(ctx, kernel.HandoffControllerRequest{
-		SessionRef: activeSession.SessionRef,
-		Kind:       session.ControllerKindACP,
-		Agent:      claudeAgent,
-		Source:     "test",
-		Reason:     "exercise real Claude ACP session/resume",
-	})
-	if err != nil {
-		t.Fatalf("HandoffController(claude) error = %v", err)
-	}
+	updated := handoffEvalController(t, ctx, stack, activeSession, claudeAgent, "claude-acp-e2e")
 	if updated.Controller.Kind != session.ControllerKindACP || strings.TrimSpace(updated.Controller.RemoteSessionID) == "" {
 		t.Fatalf("controller binding = %#v, want Claude ACP remote session", updated.Controller)
 	}
@@ -104,7 +94,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	const marker = "caelis claude acp resume e2e"
 	const wantFirst = marker + " first ok"
 	prompt := "Reply with exactly this text and no markdown: " + wantFirst
-	result, err := runEvalHeadlessOnce(t, ctx, stack, updated, prompt, headless.Options{})
+	result, err := runEvalHeadlessOnce(t, ctx, stack, activeSession, prompt, headless.Options{})
 	if err != nil {
 		t.Fatalf("RunSessionOnce(claude) error = %v", err)
 	}
@@ -112,16 +102,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 		t.Fatalf("RunSessionOnce(first Claude turn) output = %q, want marker %q", result.Output, marker)
 	}
 
-	resumed, err := stack.KernelControlPlane().HandoffController(ctx, kernel.HandoffControllerRequest{
-		SessionRef: activeSession.SessionRef,
-		Kind:       session.ControllerKindACP,
-		Agent:      claudeAgent,
-		Source:     "test-resume",
-		Reason:     "resume existing Claude ACP remote session",
-	})
-	if err != nil {
-		t.Fatalf("HandoffController(claude resume) error = %v", err)
-	}
+	resumed := handoffEvalController(t, ctx, stack, activeSession, claudeAgent, "claude-acp-resume-e2e")
 	resumedRemoteSessionID := strings.TrimSpace(resumed.Controller.RemoteSessionID)
 	if resumedRemoteSessionID == "" {
 		t.Fatalf("resumed controller binding = %#v, want non-empty Claude ACP remote session", resumed.Controller)
@@ -131,7 +112,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	}
 
 	const wantSecond = marker + " second ok"
-	result, err = runEvalHeadlessOnce(t, ctx, stack, resumed, "Reply with exactly this text and no markdown: "+wantSecond, headless.Options{})
+	result, err = runEvalHeadlessOnce(t, ctx, stack, activeSession, "Reply with exactly this text and no markdown: "+wantSecond, headless.Options{})
 	if err != nil {
 		t.Fatalf("RunSessionOnce(second Claude turn) error = %v", err)
 	}

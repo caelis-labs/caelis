@@ -198,7 +198,7 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	report.Warnings = append(report.Warnings, s.sessionMigrationWarnings()...)
 	report.Warnings = append(report.Warnings, s.legacyPluginSkillCopyWarnings()...)
 
-	if gw := s.KernelTurns(); gw != nil {
+	if gw := s.KernelTurnState(); gw != nil {
 		active := gw.ActiveTurns()
 		report.ActiveTurnCount = len(active)
 		report.HasActiveTurn = len(active) > 0

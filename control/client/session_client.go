@@ -13,10 +13,10 @@ import (
 // presentation client. Authentication binds the principal before this
 // interface; callers cannot choose or forward another principal.
 //
-// The first common slice intentionally covers Session lifecycle, observation,
-// and the main-Turn commands needed by Bar/Pet. Focused participant and Task
-// clients remain separate, and remote participant/handoff parity is deferred
-// until a concrete product client requires it.
+// SessionClient covers Session lifecycle, observation, and main-Turn commands.
+// Participant execution and Task observation remain separate focused clients;
+// the complete AppServer client set provides the same contracts through
+// embedded and HTTP transports.
 type SessionClient interface {
 	Initialize(context.Context) (ServerInfo, error)
 	ListSessions(context.Context, ListSessionsRequest) (session.SessionList, error)

@@ -72,6 +72,81 @@ func startEvalSession(
 	return active
 }
 
+func evalAppServerClients(
+	t *testing.T,
+	stack *gatewayapp.Stack,
+	principalID string,
+) controlclient.AppServerClients {
+	t.Helper()
+	server, err := local.NewAppServer(stack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clients, _, err := server.Bind(controlclient.Principal{ID: principalID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return clients
+}
+
+func inspectEvalSession(
+	t *testing.T,
+	ctx context.Context,
+	stack *gatewayapp.Stack,
+	active session.Session,
+) controlclient.SessionState {
+	t.Helper()
+	clients := evalAppServerClients(t, stack, active.UserID)
+	state, err := clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: active.SessionID})
+	if err != nil {
+		t.Fatalf("InspectSession(%s) error = %v", active.SessionID, err)
+	}
+	return state
+}
+
+func handoffEvalController(
+	t *testing.T,
+	ctx context.Context,
+	stack *gatewayapp.Stack,
+	active session.Session,
+	target string,
+	surface string,
+) controlclient.SessionState {
+	t.Helper()
+	clients := evalAppServerClients(t, stack, active.UserID)
+	if _, err := clients.Agents.HandoffAgent(ctx, controlclient.HandoffAgentRequest{
+		SessionID: active.SessionID,
+		Surface:   surface,
+		Target:    target,
+	}); err != nil {
+		t.Fatalf("HandoffAgent(%s) error = %v", target, err)
+	}
+	state, err := clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: active.SessionID})
+	if err != nil {
+		t.Fatalf("InspectSession(%s after handoff) error = %v", active.SessionID, err)
+	}
+	return state
+}
+
+func startEvalSessionTurn(
+	t *testing.T,
+	ctx context.Context,
+	stack *gatewayapp.Stack,
+	active session.Session,
+	input string,
+) (controlclient.TargetTurn, error) {
+	t.Helper()
+	clients := evalAppServerClients(t, stack, active.UserID)
+	turns, err := controlclient.NewSessionTurnClient(clients.Sessions)
+	if err != nil {
+		return nil, err
+	}
+	return turns.Start(ctx, controlclient.SessionTurnStartRequest{
+		SessionID: active.SessionID,
+		Input:     input,
+	})
+}
+
 func newEvalAppServerAdapter(
 	t *testing.T,
 	stack *gatewayapp.Stack,

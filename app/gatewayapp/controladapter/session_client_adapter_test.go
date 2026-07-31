@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
@@ -285,6 +286,71 @@ func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) 
 	}
 	if err := resumed.Reconnect.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAppServerAdapterReconnectsActiveTurnForSteerAndClonesState(t *testing.T) {
+	target := controlclient.TurnTarget{HandleID: "handle-resumed", RunID: "run-resumed", TurnID: "turn-resumed"}
+	client := &sessionClientAdapterTestClient{
+		subscription: newSessionClientAdapterTestSubscription(),
+		state: controlclient.SessionState{
+			SessionID: "session-resumed", Revision: 7,
+			Controller: session.ControllerBinding{EpochID: "epoch-resumed"},
+			Run: controlclient.RunState{
+				Active: true, HandleID: target.HandleID, RunID: target.RunID, TurnID: target.TurnID,
+			},
+			Participants: []session.ParticipantBinding{{
+				ID: "participant-1",
+				Placement: placement.Placement{
+					Kind: placement.KindAgent, Agent: "codex",
+					SessionConfigValues: map[string]string{"mode": "plan"},
+				},
+			}},
+		},
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "", "cli-tui")
+	resumed, err := adapter.ResumeSession(context.Background(), "session-resumed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstState := resumed.Reconnect.State()
+	firstState.Participants[0].Placement.SessionConfigValues["mode"] = "mutated"
+	secondState := resumed.Reconnect.State()
+	if got := secondState.Participants[0].Placement.SessionConfigValues["mode"]; got != "plan" {
+		t.Fatalf("Reconnect.State participant mode = %q after caller mutation, want plan", got)
+	}
+
+	if _, err := adapter.Submit(context.Background(), controlprompt.Submission{
+		Text: "continue resumed Turn", Mode: controlprompt.SubmissionModeActiveTurn,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client.mu.Lock()
+	steer := client.steer
+	client.mu.Unlock()
+	if steer.Input != "continue resumed Turn" || steer.Target != target ||
+		steer.ExpectedRevision == nil || *steer.ExpectedRevision != 7 ||
+		steer.ExpectedControllerEpoch != "epoch-resumed" {
+		t.Fatalf("reconnected steer = %#v, want exact resumed target and fence", steer)
+	}
+	if err := adapter.Interrupt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	client.mu.Lock()
+	cancel := client.cancel
+	client.mu.Unlock()
+	if cancel.Target != target || cancel.ExpectedRevision == nil || *cancel.ExpectedRevision != 7 ||
+		cancel.ExpectedControllerEpoch != "epoch-resumed" {
+		t.Fatalf("reconnected cancel = %#v, want exact resumed target and fence", cancel)
+	}
+
+	if err := resumed.Reconnect.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.Submit(context.Background(), controlprompt.Submission{
+		Text: "too late", Mode: controlprompt.SubmissionModeActiveTurn,
+	}); err == nil {
+		t.Fatal("reconnected Turn remained steerable after reconnect closed")
 	}
 }
 

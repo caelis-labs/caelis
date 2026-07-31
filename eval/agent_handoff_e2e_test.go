@@ -20,7 +20,6 @@ import (
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlassembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/headless"
@@ -150,10 +149,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	if got := strings.TrimSpace(directOutput); got != "opus owns this turn" {
 		t.Fatalf("direct Agent output = %q, want %q", got, "opus owns this turn")
 	}
-	state, err := stack.KernelControlPlane().ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: active.SessionRef})
-	if err != nil {
-		t.Fatalf("ControlPlaneState(after profile run) error = %v", err)
-	}
+	state := inspectEvalSession(t, ctx, stack, active)
 	continuedCommand := ""
 	for _, participant := range state.Participants {
 		if participant.Source == controlagents.DirectRunSource(agentbinding.HandleOrbit) {
@@ -183,10 +179,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	if _, err := driver.HandoffAgent(ctx, agentID); err != nil {
 		t.Fatalf("HandoffAgent(%s) error = %v", agentID, err)
 	}
-	state, err = stack.KernelControlPlane().ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: active.SessionRef})
-	if err != nil {
-		t.Fatalf("ControlPlaneState(after handoff) error = %v", err)
-	}
+	state = inspectEvalSession(t, ctx, stack, active)
 	if state.Controller.Kind != session.ControllerKindACP || !strings.EqualFold(state.Controller.AgentName, agentID) || strings.TrimSpace(state.Controller.EpochID) == "" {
 		t.Fatalf("controller after HandoffAgent(%s) = %+v", agentID, state.Controller)
 	}
@@ -218,10 +211,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	if _, err := driver.HandoffAgent(ctx, "local"); err != nil {
 		t.Fatalf("HandoffAgent(local) error = %v", err)
 	}
-	state, err = stack.KernelControlPlane().ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: active.SessionRef})
-	if err != nil {
-		t.Fatalf("ControlPlaneState(after return) error = %v", err)
-	}
+	state = inspectEvalSession(t, ctx, stack, active)
 	if state.Controller.Kind != session.ControllerKindKernel {
 		t.Fatalf("controller after HandoffAgent(local) = %+v", state.Controller)
 	}

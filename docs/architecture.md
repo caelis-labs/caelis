@@ -167,7 +167,7 @@ Document responsibilities are intentionally separate:
   first hides its Runtime from routing, waits already-routed synchronous
   mutations, and shutdown drains in-flight assembly and release before closing
   all Session Gateways and the Host composition. Headless, TUI, and product ACP
-  Session lifecycle plus main-Turn ingress use typed in-process AppServer
+  Session lifecycle plus main-Turn ingress use principal-bound embedded AppServer
   clients. TUI and product ACP slash routers also use focused status,
   configuration, Agent, participant, completion/skill, and plugin clients;
   slash parsing and display stay client-side. The production TUI facade
@@ -186,7 +186,8 @@ Document responsibilities are intentionally separate:
   Control semantics plus the presentation-facing typed-client facade. The
   production facade contains clients only; the broad `Adapter` facade and its
   compatibility constructors have been removed, and tests exercise either the
-  same narrow assemblers used by AppServer services or typed clients. Do not add product-client operations to the private
+  same narrow assemblers used by AppServer services or typed clients. Do not
+  add product-client operations to the private
   `internal/controlprompt.Service` aggregate or recreate `ports/*`; stable
   capabilities belong in coherent `control/*` packages.
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and

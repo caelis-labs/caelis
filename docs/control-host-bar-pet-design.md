@@ -167,7 +167,7 @@ suggests.
 | Authenticated HTTP/SSE Host adapter with TLS and host policy | `app/controlserver`, `control/client/wirev1` | Yes; it is infrastructure around Control, not a Surface |
 | Host-owned accepted main-Turn lifetime | `internal/kernel/gateway_turns.go`, `app/gatewayapp/stack.go` | Yes; HTTP request cancellation must not cancel accepted work |
 | Principal-bound embedded and HTTP AppServer clients | `control/client`, `control/client/httpclient` | Yes; all focused capabilities share one facade |
-| Headless typed Turn and structured output | `control/client/session_turn.go`, `surfaces/headless`, `internal/cli/headless_output.go` | Yes; Headless uses the in-process Session client and exposes text, JSON, and versioned JSONL without a private Gateway ingress |
+| Headless typed Turn and structured output | `control/client/session_turn.go`, `surfaces/headless`, `internal/cli/headless_output.go` | Yes; Headless uses the embedded AppServer's Session client and exposes text, JSON, and versioned JSONL without a private Gateway ingress |
 | ACP typed lifecycle, replay, main/participant Turns, presentation, terminal RPC, slash capabilities, and Task observation | `app/gatewayapp/acpagent`, `internal/acpagentbridge` | Yes; product assembly receives clients only |
 | Session-fixed participant command discovery | `control/client/participant_client.go`, `app/gatewayapp/control_client_participants.go` | Yes; an active Runtime exposes its frozen bound handles, while an idle Session reads current configuration without activation |
 | Session-routed workspace Runtime ownership | `app/gatewayapp/session_runtime_registry.go`, `workspace_config_assembler.go` | Yes for the bounded Session-client slice: workspace composition is loaded on demand, Session ID selects it, and UserID is not a Runtime key |
@@ -178,16 +178,16 @@ suggests.
 ### G1 — There is no single live lifecycle authority
 
 **Evidence.** The ordinary CLI constructs a new `gatewayapp.Stack` for each
-process (`internal/cli/cli.go:194-228`). The TUI receives that Stack and uses an
-in-process adapter (`internal/cli/tui.go:25-55`). `caelis serve` exposes the
-Control service from its own separately constructed Stack. The feed registry
-is explicitly process-local (`control/client/feed_broker.go:1317-1365`), and
-live handle and approval state comes from the current process's Gateway maps
-(`internal/kernel/control_client_state.go:14-44`).
+process (`internal/cli/cli.go`). TUI and Headless bind typed clients from that
+process's embedded AppServer, while `caelis serve` exposes clients backed by a
+separately constructed Stack. The feed registry is explicitly process-local
+(`control/client/feed_broker.go`), and live handle and approval state comes
+from the current process's Gateway maps
+(`internal/kernel/control_client_state.go`).
 
 **Failure mode.** A Bar connected to `caelis serve` can list durable Sessions,
-but it cannot reliably observe or steer a Turn owned by a different TUI
-process. It sees the server process's live registry, not the TUI process's
+but it cannot reliably observe or steer a Turn owned by a different embedded
+TUI process. It sees the server process's live registry, not the TUI process's
 handle, approval FIFO, or live feed. Leases prevent unsafe duplicate execution,
 but they do not turn two Stacks into one live host.
 
@@ -539,7 +539,7 @@ The current AppServer slice includes:
   by Session ID; create and observers allocate no execution Runtime, durable
   Sessions retain only workspace identity, and the stateless assembler owns no
   workspace configuration cache;
-- Headless uses the same typed Session Turn over the in-process client, with
+- Headless uses the same typed Session Turn from the embedded AppServer, with
   plain final output plus versioned JSON and JSONL contracts suitable for
   scripts and program integration;
 - the embedded TUI uses focused typed clients for every

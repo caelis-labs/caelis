@@ -13,9 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
-	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
@@ -57,26 +55,12 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 
 	activeSession := startEvalSession(t, context.Background(), stack, "gateway-acp-main")
 
-	updated, err := stack.KernelControlPlane().HandoffController(context.Background(), kernel.HandoffControllerRequest{
-		SessionRef: activeSession.SessionRef,
-		Kind:       session.ControllerKindACP,
-		Agent:      "codex",
-		Source:     "test",
-		Reason:     "delegate main control",
-	})
-	if err != nil {
-		t.Fatalf("HandoffController() error = %v", err)
-	}
+	updated := handoffEvalController(t, context.Background(), stack, activeSession, "codex", "gateway-acp-main-e2e")
 	if updated.Controller.Kind != session.ControllerKindACP {
 		t.Fatalf("controller kind = %q, want %q", updated.Controller.Kind, session.ControllerKindACP)
 	}
 
-	state, err := stack.KernelControlPlane().ControlPlaneState(context.Background(), kernel.ControlPlaneStateRequest{
-		SessionRef: activeSession.SessionRef,
-	})
-	if err != nil {
-		t.Fatalf("ControlPlaneState() error = %v", err)
-	}
+	state := inspectEvalSession(t, context.Background(), stack, activeSession)
 	if state.Controller.Kind != session.ControllerKindACP || strings.TrimSpace(state.Controller.EpochID) == "" {
 		t.Fatalf("control state = %+v", state)
 	}
@@ -104,7 +88,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	result, err := runEvalHeadlessOnce(t, ctx, stack, updated, "run through acp controller", headless.Options{})
+	result, err := runEvalHeadlessOnce(t, ctx, stack, activeSession, "run through acp controller", headless.Options{})
 	if err != nil {
 		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
@@ -167,37 +151,24 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 		t.Fatalf("gatewayapp.NewLocalStack() error = %v", err)
 	}
 	activeSession := startEvalSession(t, context.Background(), stack, "gateway-acp-command")
-	updated, err := stack.KernelControlPlane().HandoffController(context.Background(), kernel.HandoffControllerRequest{
-		SessionRef: activeSession.SessionRef,
-		Kind:       session.ControllerKindACP,
-		Agent:      "codex",
-		Source:     "test",
-		Reason:     "delegate main control",
-	})
-	if err != nil {
-		t.Fatalf("HandoffController() error = %v", err)
-	}
+	handoffEvalController(t, context.Background(), stack, activeSession, "codex", "gateway-acp-command-shape-e2e")
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	result, err := stack.KernelTurns().BeginTurn(ctx, kernel.BeginTurnRequest{
-		SessionRef: updated.SessionRef,
-		Input:      "run a simple command",
-		Surface:    "headless-acp-command-shape-e2e",
-	})
+	turn, err := startEvalSessionTurn(t, ctx, stack, activeSession, "run a simple command")
 	if err != nil {
-		t.Fatalf("BeginTurn() error = %v", err)
+		t.Fatalf("SessionTurnClient.Start() error = %v", err)
 	}
-	if result.Handle == nil {
-		t.Fatal("BeginTurn() returned nil handle")
+	if turn == nil {
+		t.Fatal("SessionTurnClient.Start() returned nil Turn")
 	}
-	defer result.Handle.Close()
+	defer turn.Close()
 
 	var sawCommandCall bool
 	var sawCommandUpdate bool
 	var sawCommandOutput bool
 	var sawCommandFinal bool
 	var sawTaskFinal bool
-	for env := range projector.ACPEventsFromGatewayHandle(result.Handle) {
+	for env := range turn.Events() {
 		switch update := env.Update.(type) {
 		case schema.ToolCall:
 			if update.ToolCallID == "command-async-1" &&
@@ -307,31 +278,18 @@ func TestLocalStackGatewayACPInteractiveTaskReadWriteE2E(t *testing.T) {
 		t.Fatalf("gatewayapp.NewLocalStack() error = %v", err)
 	}
 	activeSession := startEvalSession(t, context.Background(), stack, "gateway-acp-interactive")
-	updated, err := stack.KernelControlPlane().HandoffController(context.Background(), kernel.HandoffControllerRequest{
-		SessionRef: activeSession.SessionRef,
-		Kind:       session.ControllerKindACP,
-		Agent:      "codex",
-		Source:     "test",
-		Reason:     "exercise interactive Task output",
-	})
-	if err != nil {
-		t.Fatalf("HandoffController() error = %v", err)
-	}
+	handoffEvalController(t, context.Background(), stack, activeSession, "codex", "gateway-acp-interactive-e2e")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	result, err := stack.KernelTurns().BeginTurn(ctx, kernel.BeginTurnRequest{
-		SessionRef: updated.SessionRef,
-		Input:      "exercise Task write and read",
-		Surface:    "headless-acp-interactive-e2e",
-	})
+	turn, err := startEvalSessionTurn(t, ctx, stack, activeSession, "exercise Task write and read")
 	if err != nil {
-		t.Fatalf("BeginTurn() error = %v", err)
+		t.Fatalf("SessionTurnClient.Start() error = %v", err)
 	}
-	if result.Handle == nil {
-		t.Fatal("BeginTurn() returned nil handle")
+	if turn == nil {
+		t.Fatal("SessionTurnClient.Start() returned nil Turn")
 	}
-	defer result.Handle.Close()
+	defer turn.Close()
 
 	var (
 		commandOutput strings.Builder
@@ -339,7 +297,7 @@ func TestLocalStackGatewayACPInteractiveTaskReadWriteE2E(t *testing.T) {
 		sawRead       bool
 		sawCancel     bool
 	)
-	for env := range projector.ACPEventsFromGatewayHandle(result.Handle) {
+	for env := range turn.Events() {
 		update, ok := env.Update.(schema.ToolCallUpdate)
 		if !ok {
 			continue

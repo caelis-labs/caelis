@@ -5,14 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
-	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -21,33 +18,21 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-// GatewayTurnService exposes the turn operations used by server assemblers.
+// GatewayTurnService exposes the live-turn state read used by server
+// assemblers. Turn mutation remains behind typed AppServer clients.
 type GatewayTurnService interface {
-	BeginTurn(context.Context, kernel.BeginTurnRequest) (kernel.BeginTurnResult, error)
-	SubmitActiveTurn(context.Context, kernel.SubmitActiveTurnRequest) error
-	Interrupt(context.Context, kernel.InterruptRequest) error
 	ActiveTurns() []kernel.ActiveTurnState
 }
 
-// GatewaySessionService exposes the session operations used by server assemblers.
+// GatewaySessionService exposes the Session list read used by completion.
 type GatewaySessionService interface {
-	ResumeSession(context.Context, kernel.ResumeSessionRequest) (session.LoadedSession, error)
 	ListSessions(context.Context, kernel.ListSessionsRequest) (session.SessionList, error)
 }
 
-// GatewayControlPlaneService exposes controller and participant operations used by server assemblers.
+// GatewayControlPlaneService exposes the controller and participant state read
+// used by status and completion.
 type GatewayControlPlaneService interface {
 	ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error)
-	HandoffController(context.Context, kernel.HandoffControllerRequest) (session.Session, error)
-	AttachParticipant(context.Context, kernel.AttachParticipantRequest) (session.Session, error)
-	PromptParticipant(context.Context, kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error)
-	StartParticipant(context.Context, kernel.StartParticipantRequest) (kernel.BeginTurnResult, error)
-	DetachParticipant(context.Context, kernel.DetachParticipantRequest) (session.Session, error)
-}
-
-// GatewayStreamProvider exposes stream subscription access used by server assemblers.
-type GatewayStreamProvider interface {
-	kernel.StreamProvider
 }
 
 type ModelConfig = modelconfig.Config
@@ -61,13 +46,6 @@ type ModelChoice struct {
 	EndpointID         string
 	BaseURL            string
 	Detail             string
-}
-
-// AgentBindingRuntimeDeps carries the one Control-owned Agent configuration
-// service.
-type AgentBindingRuntimeDeps struct {
-	Configuration agentbinding.ConfigurationService
-	ResolveFn     func(context.Context, agentbinding.Handle) (sdkplacement.Placement, error)
 }
 
 type SessionRuntimeState struct {
@@ -164,24 +142,21 @@ type PluginRuntimeDeps struct {
 	InspectPluginFn     func(context.Context, string) (controlprompt.PluginSnapshot, error)
 }
 
-// GatewayRuntimeDeps is required for turn/session stream operations.
+// GatewayRuntimeDeps carries only read-only gateway projections needed while
+// assembling focused AppServer services.
 type GatewayRuntimeDeps struct {
 	TurnServiceFn         func() GatewayTurnService
 	SessionServiceFn      func() GatewaySessionService
 	ControlPlaneServiceFn func() GatewayControlPlaneService
-	StreamProviderFn      func() GatewayStreamProvider
 }
 
 // SessionRuntimeDeps owns durable session identity and storage dependencies.
-// Store is optional for lightweight adapters; StartFn and CompactFn are
-// required only when the corresponding session operation is invoked.
+// Store is optional for lightweight assemblers.
 type SessionRuntimeDeps struct {
 	Store     session.Service
 	AppName   string
 	UserID    string
 	Workspace session.WorkspaceRef
-	StartFn   func(context.Context, string, string) (session.Session, error)
-	CompactFn func(context.Context, session.SessionRef) error
 }
 
 // StatusRuntimeDeps carries runtime state lookups. Read-only status hooks may
@@ -246,22 +221,17 @@ type SandboxRuntimeDeps struct {
 	SetBackendFn func(context.Context, string) (SandboxStatus, error)
 	PrepareFn    func(context.Context) (SandboxStatus, error)
 	RepairFn     func(context.Context) (SandboxStatus, error)
-	PreflightFn  func(context.Context, bool) (SandboxStatus, error)
-	ResetFn      func(context.Context) (SandboxStatus, error)
 }
 
 type RuntimeStack struct {
-	Gateway          GatewayRuntimeDeps
-	ControlFeeds     controlclient.FeedRegistry
-	ControlReconnect controlclient.ReconnectReader
-	Session          SessionRuntimeDeps
-	Status           StatusRuntimeDeps
-	Agent            AgentRuntimeDeps
-	AgentBinding     AgentBindingRuntimeDeps
-	Model            ModelRuntimeDeps
-	Sandbox          SandboxRuntimeDeps
-	Skill            SkillRuntimeDeps
-	Plugin           PluginRuntimeDeps
+	Gateway GatewayRuntimeDeps
+	Session SessionRuntimeDeps
+	Status  StatusRuntimeDeps
+	Agent   AgentRuntimeDeps
+	Model   ModelRuntimeDeps
+	Sandbox SandboxRuntimeDeps
+	Skill   SkillRuntimeDeps
+	Plugin  PluginRuntimeDeps
 }
 
 func missingRuntimeDependency(name string) error {

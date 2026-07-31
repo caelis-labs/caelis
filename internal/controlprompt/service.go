@@ -22,7 +22,7 @@ type Turn interface {
 	Close() error
 }
 
-// SessionReconnect is the transitional in-process view of one Control-owned
+// SessionReconnect is the presentation-facing view of one Control-owned
 // reconnect transaction. Backfill is transcript-only; Events is the already
 // spliced live continuation. Closing it never cancels the Runtime Turn.
 type SessionReconnect interface {
