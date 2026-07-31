@@ -16,6 +16,7 @@ class CaelisAgent(BaseInstalledAgent):
 
     _REMOTE_BINARY = PurePosixPath("/usr/local/bin/caelis")
     _REMOTE_STORE = PurePosixPath("/opt/caelis-store")
+    _REMOTE_CA_BUNDLE = _REMOTE_STORE / "cacert.pem"
     _OUTPUT_FILENAME = "caelis.jsonl"
     _STDERR_FILENAME = "caelis.stderr"
 
@@ -26,18 +27,21 @@ class CaelisAgent(BaseInstalledAgent):
         config_path: str,
         credential_path: str,
         credential_name: str,
+        ca_bundle_path: str,
         reasoning_effort: str = "high",
         **kwargs,
     ):
         self._binary_path = Path(binary_path).expanduser().resolve()
         self._config_path = Path(config_path).expanduser().resolve()
         self._credential_path = Path(credential_path).expanduser().resolve()
+        self._ca_bundle_path = Path(ca_bundle_path).expanduser().resolve()
         self._credential_name = Path(credential_name).name
         self._reasoning_effort = reasoning_effort.strip() or "high"
         for label, path in (
             ("binary", self._binary_path),
             ("config", self._config_path),
             ("credential", self._credential_path),
+            ("CA bundle", self._ca_bundle_path),
         ):
             if not path.is_file():
                 raise ValueError(f"Caelis {label} path is not a file: {path}")
@@ -70,6 +74,7 @@ class CaelisAgent(BaseInstalledAgent):
         await environment.upload_file(self._binary_path, str(self._REMOTE_BINARY))
         await environment.upload_file(self._config_path, str(remote_config))
         await environment.upload_file(self._credential_path, str(remote_credential))
+        await environment.upload_file(self._ca_bundle_path, str(self._REMOTE_CA_BUNDLE))
 
         owner = environment.default_user
         owner_command = ""
@@ -85,7 +90,8 @@ class CaelisAgent(BaseInstalledAgent):
                 owner_command
                 + f"chmod 755 {shlex.quote(str(self._REMOTE_BINARY))} && "
                 + f"chmod 600 {shlex.quote(str(remote_config))} "
-                + f"{shlex.quote(str(remote_credential))}"
+                + f"{shlex.quote(str(remote_credential))} && "
+                + f"chmod 644 {shlex.quote(str(self._REMOTE_CA_BUNDLE))}"
             ),
         )
 
@@ -103,6 +109,7 @@ class CaelisAgent(BaseInstalledAgent):
         stderr_path = EnvironmentPaths.agent_dir / self._STDERR_FILENAME
         command = " ".join(
             [
+                f"SSL_CERT_FILE={shlex.quote(str(self._REMOTE_CA_BUNDLE))}",
                 shlex.quote(str(self._REMOTE_BINARY)),
                 "-p",
                 shlex.quote(instruction),

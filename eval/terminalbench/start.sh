@@ -34,6 +34,11 @@ if [[ ! -x "$harbor_python" ]]; then
   printf 'cannot resolve Harbor Python; set HARBOR_PYTHON explicitly\n' >&2
   exit 1
 fi
+ca_bundle_source="$("$harbor_python" -c 'import certifi; print(certifi.where())')"
+[[ -f "$ca_bundle_source" ]] || {
+  printf 'Harbor certifi CA bundle is unavailable: %s\n' "$ca_bundle_source" >&2
+  exit 1
+}
 
 source_store="${CAELIS_EVAL_SOURCE_STORE:-$HOME/.caelis}"
 source_config="$source_store/config.json"
@@ -63,6 +68,9 @@ run_dir="$state_root/$run_id"
   exit 1
 }
 mkdir -p "$run_dir/bundle" "$run_dir/jobs"
+ca_bundle_path="$run_dir/bundle/cacert.pem"
+cp "$ca_bundle_source" "$ca_bundle_path"
+chmod 644 "$ca_bundle_path"
 
 config_path="$run_dir/bundle/config.json"
 jq -e \
@@ -137,8 +145,8 @@ jq -n \
     task_count:$task_count, status:"prepared"}' >"$run_dir/manifest.json"
 
 tmux_name="caelis-tbench-${run_id//[^[:alnum:]-]/-}"
-printf -v worker_command '%q %q %q %q %q' \
-  "$script_dir/worker.sh" "$run_dir" "$credential_path" "$credential_name" "$tmux_name"
+printf -v worker_command '%q %q %q %q %q %q' \
+  "$script_dir/worker.sh" "$run_dir" "$credential_path" "$credential_name" "$ca_bundle_path" "$tmux_name"
 tmux new-session -d -s "$tmux_name" "$worker_command"
 tmux set-option -t "$tmux_name" remain-on-exit on
 

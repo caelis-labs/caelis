@@ -43,7 +43,7 @@ class ReportTest(unittest.TestCase):
                 json.dumps(
                     {
                         "task_name": "regex-log",
-                        "exception_info": {"exception_type": "AgentTimeoutError"},
+                        "exception_info": {"exception_type": "NonZeroAgentExitCodeError"},
                     }
                 ),
                 encoding="utf-8",
@@ -91,6 +91,62 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(report["n_cache_tokens"], 80)
         self.assertEqual(report["n_output_tokens"], 20)
         self.assertEqual(report["n_reasoning_tokens"], 5)
+
+    def test_timeout_with_valid_jsonl_prefix_is_classified_not_corrupted(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            job_dir = Path(raw)
+            trial = job_dir / "timeout"
+            trial.mkdir()
+            write_jsonl(trial, valid=False)
+            (trial / "result.json").write_text(
+                json.dumps(
+                    {
+                        "task_name": "headless-terminal",
+                        "exception_info": {"exception_type": "AgentTimeoutError"},
+                        "verifier_result": {"rewards": {"reward": 0}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            report = build_report(
+                {"run_id": "test"}, ["terminal-bench/headless-terminal"], job_dir
+            )
+        self.assertTrue(report["complete"])
+        self.assertEqual(report["structured_errors"], 0)
+        self.assertEqual(report["tasks"][0]["structured_output_state"], "truncated-timeout")
+
+    def test_structured_error_record_is_a_valid_failure_terminal(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            job_dir = Path(raw)
+            trial = job_dir / "failed"
+            trial.mkdir()
+            agent_dir = trial / "agent"
+            agent_dir.mkdir()
+            (agent_dir / "caelis.jsonl").write_text(
+                "\n".join(
+                    json.dumps(record)
+                    for record in [
+                        {"schema_version": "caelis.headless/v1", "type": "envelope"},
+                        {"schema_version": "caelis.headless/v1", "type": "error"},
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (trial / "result.json").write_text(
+                json.dumps(
+                    {
+                        "task_name": "regex-log",
+                        "exception_info": {"exception_type": "NonZeroAgentExitCodeError"},
+                        "verifier_result": {"rewards": {"reward": 0}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            report = build_report({"run_id": "test"}, ["terminal-bench/regex-log"], job_dir)
+        self.assertTrue(report["complete"])
+        self.assertEqual(report["structured_errors"], 0)
+        self.assertEqual(report["tasks"][0]["structured_output_state"], "error-record")
 
 
 if __name__ == "__main__":

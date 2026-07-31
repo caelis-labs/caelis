@@ -104,10 +104,10 @@ def caelis_structured_usage(trial_dir: Path) -> dict[str, int]:
     return {}
 
 
-def structured_output_error(trial_dir: Path) -> str | None:
+def structured_output_check(trial_dir: Path, error_type: str | None) -> tuple[str, str | None]:
     output_path = trial_dir / "agent" / "caelis.jsonl"
     if not output_path.is_file():
-        return "missing-caelis-jsonl"
+        return "invalid", "missing-caelis-jsonl"
     records: list[dict[str, Any]] = []
     for line_number, line in enumerate(output_path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
@@ -115,21 +115,26 @@ def structured_output_error(trial_dir: Path) -> str | None:
         try:
             record = json.loads(line)
         except json.JSONDecodeError:
-            return f"invalid-json-line-{line_number}"
+            return "invalid", f"invalid-json-line-{line_number}"
         if not isinstance(record, dict):
-            return f"non-object-line-{line_number}"
+            return "invalid", f"non-object-line-{line_number}"
         if record.get("schema_version") != "caelis.headless/v1":
-            return f"invalid-schema-line-{line_number}"
-        if record.get("type") not in {"envelope", "result"}:
-            return f"invalid-record-type-line-{line_number}"
+            return "invalid", f"invalid-schema-line-{line_number}"
+        if record.get("type") not in {"envelope", "result", "error"}:
+            return "invalid", f"invalid-record-type-line-{line_number}"
         records.append(record)
     if not records:
-        return "empty-caelis-jsonl"
+        return "invalid", "empty-caelis-jsonl"
     if not any(record.get("type") == "envelope" for record in records):
-        return "missing-envelope"
-    if records[-1].get("type") != "result":
-        return "missing-final-result"
-    return None
+        return "invalid", "missing-envelope"
+    final_type = records[-1].get("type")
+    if final_type == "result":
+        return "complete", None
+    if final_type == "error":
+        return "error-record", None
+    if error_type == "AgentTimeoutError":
+        return "truncated-timeout", None
+    return "invalid", "missing-final-result"
 
 
 def build_report(manifest: dict[str, Any], expected: list[str], job_dir: Path) -> dict[str, Any]:
@@ -147,7 +152,9 @@ def build_report(manifest: dict[str, Any], expected: list[str], job_dir: Path) -
         reward = primary_reward(result) if result is not None else None
         exception = result.get("exception_info") if result is not None else None
         error_type = exception.get("exception_type") if isinstance(exception, dict) else None
-        output_error = structured_output_error(trial[1]) if trial is not None else None
+        output_state, output_error = (
+            structured_output_check(trial[1], error_type) if trial is not None else ("missing", None)
+        )
         if reward is not None:
             scored += 1
             reward_sum += reward
@@ -165,6 +172,7 @@ def build_report(manifest: dict[str, Any], expected: list[str], job_dir: Path) -
                 "error": error_type,
                 "duration_seconds": duration_seconds(result) if result is not None else None,
                 "structured_output": output_error is None and trial is not None,
+                "structured_output_state": output_state,
                 "structured_output_error": output_error,
             }
         )
@@ -211,7 +219,7 @@ def markdown(report: dict[str, Any]) -> str:
     for row in report["tasks"]:
         reward = "-" if row["reward"] is None else f"{row['reward']:.3f}"
         error = row["error"] or "-"
-        structured = row["structured_output_error"] or "ok"
+        structured = row["structured_output_error"] or row["structured_output_state"]
         seconds = "-" if row["duration_seconds"] is None else f"{row['duration_seconds']:.1f}"
         lines.append(f"| `{row['task']}` | {reward} | {error} | {structured} | {seconds} |")
     lines.append("")

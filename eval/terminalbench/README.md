@@ -9,7 +9,8 @@ under `${XDG_STATE_HOME:-$HOME/.local/state}/caelis/evals/terminalbench`.
 The persistent bundle never contains the API key. `start.sh` resolves the
 selected provider's opaque credential file and the Harbor adapter uploads it
 directly into each temporary task container. Harbor deletes the container after
-verification.
+verification. The bundle includes Harbor's public certifi CA bundle so minimal
+task images can reach the configured model endpoint consistently.
 
 Run the one-task harness smoke before the fixed five-task acceptance slice:
 

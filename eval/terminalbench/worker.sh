@@ -4,7 +4,8 @@ set -euo pipefail
 run_dir="$1"
 credential_path="$2"
 credential_name="$3"
-tmux_name="$4"
+ca_bundle_path="$4"
+tmux_name="$5"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd "$script_dir/../.." && pwd)"
 binary_path="$run_dir/bundle/caelis-linux-amd64"
@@ -37,6 +38,7 @@ harbor_args=(
   --agent-kwarg "config_path=$config_path"
   --agent-kwarg "credential_path=$credential_path"
   --agent-kwarg "credential_name=$credential_name"
+  --agent-kwarg "ca_bundle_path=$ca_bundle_path"
   --agent-kwarg reasoning_effort=high
 )
 while IFS= read -r task_name; do
