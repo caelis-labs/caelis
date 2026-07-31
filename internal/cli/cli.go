@@ -14,14 +14,13 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/acpagent"
-	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -29,19 +28,28 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/acpserver"
 	"github.com/caelis-labs/caelis/surfaces/headless"
+	"github.com/google/uuid"
 )
 
 type outputFormat string
 
 const (
-	outputText outputFormat = "text"
-	outputJSON outputFormat = "json"
+	outputText  outputFormat = "text"
+	outputJSON  outputFormat = "json"
+	outputJSONL outputFormat = "jsonl"
 )
 
 type runResult struct {
-	SessionID    string `json:"session_id"`
-	Output       string `json:"output"`
-	PromptTokens int    `json:"prompt_tokens,omitempty"`
+	SchemaVersion string                     `json:"schema_version"`
+	Type          string                     `json:"type"`
+	SessionID     string                     `json:"session_id"`
+	Turn          controlclient.TurnTarget   `json:"turn"`
+	Status        string                     `json:"status"`
+	StopReason    string                     `json:"stop_reason,omitempty"`
+	Output        string                     `json:"output"`
+	Cursor        string                     `json:"cursor,omitempty"`
+	Usage         *eventstream.UsageSnapshot `json:"usage,omitempty"`
+	PromptTokens  int                        `json:"prompt_tokens,omitempty"`
 }
 
 type doctorResult = gatewayapp.DoctorReport
@@ -107,7 +115,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 
 	var (
 		prompt             = fs.String("p", "", "Single-shot prompt text")
-		format             = fs.String("format", string(outputText), "Output format: text|json")
+		format             = fs.String("format", string(outputText), "Output format: text|json|jsonl")
 		appName            = fs.String("app", envOr("CAELIS_APP_NAME", "caelis"), "App name")
 		userID             = fs.String("user", envOr("CAELIS_USER_ID", "local-user"), "User id")
 		sessionID          = fs.String("session", envOr("CAELIS_SESSION_ID", ""), "Session id")
@@ -141,6 +149,44 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			return nil
 		}
 		return err
+	}
+	headlessInput := ""
+	headlessFormat := outputText
+	headlessMode := false
+	headlessResultWritten := false
+	headlessSessionForError := strings.TrimSpace(*sessionID)
+	headlessCandidate := !acpSubcommand &&
+		!controlServerSubcommand &&
+		!doctorSubcommand &&
+		!*doctor &&
+		sandboxSubcommand == "" &&
+		!*forceInteractive &&
+		(strings.TrimSpace(*prompt) != "" || stdin != nil && !readerIsTTY(stdin))
+	if headlessCandidate {
+		var err error
+		headlessFormat, err = parseOutputFormat(*format)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if runErr != nil && !headlessResultWritten {
+				runErr = writeHeadlessFailure(
+					stdout,
+					headlessFormat,
+					headlessSessionForError,
+					runErr,
+				)
+			}
+		}()
+		headlessInput, headlessMode, err = resolveTurnInput(
+			*prompt,
+			stdin,
+			readerIsTTY(stdin),
+			false,
+		)
+		if err != nil {
+			return err
+		}
 	}
 	if len(fs.Args()) > 0 {
 		return fmt.Errorf("unknown arguments: %v", fs.Args())
@@ -242,17 +288,20 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return runDoctor(ctx, stack, strings.TrimSpace(*sessionID), outFmt, stdout)
 	}
 
-	stdinTTY := readerIsTTY(stdin)
-	input, singleShot, err := resolveTurnInput(*prompt, stdin, stdinTTY, *forceInteractive)
-	if err != nil {
-		return err
-	}
-	if singleShot {
-		outFmt, err := parseOutputFormat(*format)
-		if err != nil {
-			return err
+	if headlessMode {
+		activeSessionID, err := runHeadless(
+			ctx,
+			stack,
+			preferredHeadlessSessionID(*sessionID),
+			headlessInput,
+			headlessFormat,
+			stdout,
+		)
+		if activeSessionID != "" {
+			headlessSessionForError = activeSessionID
 		}
-		return runHeadless(ctx, stack, preferredHeadlessSessionID(*sessionID), input, outFmt, stdout)
+		headlessResultWritten = err == nil
+		return err
 	}
 	return runInteractive(ctx, stack, preferredInteractiveSessionID(*sessionID), cfg, renderModelText(cfg), tuiOptions{
 		NoAnimation: *noAnimation,
@@ -297,24 +346,136 @@ func preferredHeadlessSessionID(sessionID string) string {
 	return strings.TrimSpace(sessionID)
 }
 
-func runHeadless(ctx context.Context, stack *gatewayapp.Stack, sessionID string, input string, format outputFormat, stdout io.Writer) error {
-	session, err := stack.StartSession(ctx, sessionID, "cli-headless")
+func runHeadless(
+	ctx context.Context,
+	stack *gatewayapp.Stack,
+	sessionID string,
+	input string,
+	format outputFormat,
+	stdout io.Writer,
+) (string, error) {
+	if stack == nil {
+		return "", errors.New("cli: gateway app stack is unavailable")
+	}
+	client, err := controlclient.BindSessionClient(
+		stack.ControlClient(),
+		controlclient.Principal{ID: stack.UserID},
+	)
 	if err != nil {
+		return "", err
+	}
+	if _, err := client.Initialize(ctx); err != nil {
+		return "", err
+	}
+	activeSessionID, err := createOrResumeHeadlessSession(
+		ctx,
+		client,
+		stack.Workspace,
+		sessionID,
+	)
+	if err != nil {
+		return "", err
+	}
+	turns, err := controlclient.NewSessionTurnClient(client)
+	if err != nil {
+		return activeSessionID, err
+	}
+	headlessOptions := headless.Options{}
+	if format == outputJSONL {
+		headlessOptions.ObserveEnvelope = func(envelope eventstream.Envelope) error {
+			return writeHeadlessEnvelope(stdout, envelope)
+		}
+	}
+	result, err := headless.RunSessionOnce(
+		ctx,
+		turns,
+		controlclient.SessionTurnStartRequest{
+			SessionID: activeSessionID,
+			Input:     input,
+		},
+		headlessOptions,
+	)
+	if err != nil {
+		return activeSessionID, headlessSessionRunError(activeSessionID, err)
+	}
+	summary := runResult{
+		SchemaVersion: headlessOutputSchemaVersion,
+		Type:          headlessOutputTypeResult,
+		SessionID:     activeSessionID,
+		Turn:          result.Target,
+		Status:        strings.TrimSpace(result.LifecycleState),
+		StopReason:    strings.TrimSpace(result.StopReason),
+		Output:        strings.TrimSpace(result.Output),
+		Cursor:        strings.TrimSpace(result.LastCursor),
+		PromptTokens:  result.PromptTokens,
+	}
+	if result.Usage != (eventstream.UsageSnapshot{}) {
+		usage := result.Usage
+		summary.Usage = &usage
+	}
+	return activeSessionID, writeResult(stdout, format, summary)
+}
+
+func headlessSessionRunError(sessionID string, err error) error {
+	if !errors.Is(err, controlclient.ErrSessionClosed) {
 		return err
 	}
-	driver, err := local.NewLocalAdapterForSession(ctx, stack, session, "headless", "")
-	if err != nil {
-		return err
+	return fmt.Errorf(
+		"cli: Session %q is closed; omit -session to create a new Session: %w",
+		strings.TrimSpace(sessionID),
+		err,
+	)
+}
+
+func createOrResumeHeadlessSession(
+	ctx context.Context,
+	client controlclient.SessionClient,
+	workspace session.WorkspaceRef,
+	preferredSessionID string,
+) (string, error) {
+	preferredSessionID = strings.TrimSpace(preferredSessionID)
+	if preferredSessionID != "" {
+		state, err := client.InspectSession(ctx, controlclient.StateRequest{
+			SessionID: preferredSessionID,
+		})
+		switch {
+		case err == nil:
+			resumedSessionID := strings.TrimSpace(state.SessionID)
+			if resumedSessionID == "" {
+				return "", errors.New("cli: inspect Session returned no Session ID")
+			}
+			if resumedSessionID != preferredSessionID {
+				return "", fmt.Errorf(
+					"cli: inspect Session returned %q for requested Session %q",
+					resumedSessionID,
+					preferredSessionID,
+				)
+			}
+			return resumedSessionID, nil
+		case errors.Is(err, session.ErrSessionNotFound):
+		default:
+			return "", err
+		}
 	}
-	result, err := headless.RunOnce(ctx, driver, controlprompt.Submission{Text: input}, headless.Options{})
-	if err != nil {
-		return err
-	}
-	return writeResult(stdout, format, runResult{
-		SessionID:    session.SessionID,
-		Output:       strings.TrimSpace(result.Output),
-		PromptTokens: result.PromptTokens,
+	result, err := client.CreateSession(ctx, controlclient.CreateSessionRequest{
+		WriteBase: controlclient.WriteBase{
+			OperationID: "headless-create-" + uuid.NewString(),
+		},
+		PreferredSessionID: preferredSessionID,
+		WorkspaceKey:       workspace.Key,
+		CWD:                workspace.CWD,
 	})
+	if err != nil {
+		return "", err
+	}
+	if result.Outcome != controlclient.OutcomeCommitted &&
+		result.Outcome != controlclient.OutcomeAccepted {
+		return "", fmt.Errorf("cli: create or resume Session outcome is %q", result.Outcome)
+	}
+	if strings.TrimSpace(result.SessionID) == "" {
+		return "", errors.New("cli: create or resume Session returned no Session ID")
+	}
+	return strings.TrimSpace(result.SessionID), nil
 }
 
 func runDoctor(ctx context.Context, stack *gatewayapp.Stack, sessionID string, format outputFormat, stdout io.Writer) error {
@@ -507,7 +668,7 @@ func firstNonEmptyString(values ...string) string {
 
 func writeResult(w io.Writer, format outputFormat, result runResult) error {
 	switch format {
-	case outputJSON:
+	case outputJSON, outputJSONL:
 		enc := json.NewEncoder(w)
 		enc.SetEscapeHTML(false)
 		return enc.Encode(result)
@@ -562,8 +723,10 @@ func parseOutputFormat(raw string) (outputFormat, error) {
 		return outputText, nil
 	case string(outputJSON):
 		return outputJSON, nil
+	case string(outputJSONL):
+		return outputJSONL, nil
 	default:
-		return "", fmt.Errorf("invalid format %q, expected text|json", raw)
+		return "", fmt.Errorf("invalid format %q, expected text|json|jsonl", raw)
 	}
 }
 

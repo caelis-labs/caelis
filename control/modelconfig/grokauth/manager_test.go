@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/internal/testenv"
 )
 
 func TestEnsureAuthenticatedCompletesPKCECallback(t *testing.T) {
@@ -291,13 +292,10 @@ func TestCallbackServerHandlesAccountsAppPrivateNetworkPreflight(t *testing.T) {
 	}
 }
 
-func TestCallbackServerCompletesPrivateNetworkFetchOverRealLoopback(t *testing.T) {
+func TestCallbackServerCompletesPrivateNetworkFetchWithoutHostSocket(t *testing.T) {
 	t.Parallel()
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Skipf("real loopback socket is unavailable in this environment: %v", err)
-	}
+	listener := testenv.NewMemoryListener("127.0.0.1:1455")
 	redirectURI, err := loopbackRedirectURI(listener)
 	if err != nil || strings.Contains(redirectURI, ":0/") {
 		t.Fatalf("loopbackRedirectURI() = %q, %v", redirectURI, err)
@@ -311,10 +309,9 @@ func TestCallbackServerCompletesPrivateNetworkFetchOverRealLoopback(t *testing.T
 		<-serveDone
 	})
 
-	client := &http.Client{
-		Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true},
-		Timeout:   time.Second,
-	}
+	client := testenv.NewMemoryHTTPClient(listener)
+	client.Timeout = time.Second
+	t.Cleanup(client.CloseIdleConnections)
 	callbackURL := "http://" + listener.Addr().String() + "/callback"
 	preflight, err := http.NewRequest(http.MethodOptions, callbackURL, nil)
 	if err != nil {

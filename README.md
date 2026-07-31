@@ -61,6 +61,19 @@ Run a single headless prompt:
 caelis -p "Summarize this repository."
 ```
 
+Consume one versioned JSON result:
+
+```bash
+caelis -p "Summarize this repository." -format json
+```
+
+Stream target-filtered ACP Envelopes as JSONL and receive one terminal result
+or post-flag-parsing error record:
+
+```bash
+caelis -p "Summarize this repository." -format jsonl
+```
+
 Read a prompt from stdin:
 
 ```bash
@@ -88,7 +101,7 @@ caelis -h
 Common flags:
 
 - `-p`: headless prompt text.
-- `-format`: `text` or `json` for headless output.
+- `-format`: `text`, `json`, or `jsonl` for headless output.
 - `-interactive`: force TUI mode when stdin is piped.
 - `-no-animation`: reduce TUI motion (also available as
   `CAELIS_TUI_NO_ANIMATION=true`).

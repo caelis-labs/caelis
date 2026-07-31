@@ -2,6 +2,7 @@ package controlserver
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	controlclient "github.com/caelis-labs/caelis/control/client"
+	"github.com/caelis-labs/caelis/internal/testenv"
 )
 
 func TestResolveNetworkConfigRequiresTLSOffLoopback(t *testing.T) {
@@ -64,11 +66,14 @@ func TestListenAndServeQuiescesHostBeforeReturning(t *testing.T) {
 	lifecycle := &recordingLifecycle{}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err = ListenAndServe(ctx, Dependencies{
+	listener := testenv.NewMemoryListener("127.0.0.1:1455")
+	err = listenAndServe(ctx, Dependencies{
 		Service: &fakeService{}, Lifecycle: lifecycle,
 	}, Config{
 		Address: "127.0.0.1:0", Authenticator: authenticator,
 		DrainTimeout: time.Second,
+	}, func(string, string) (net.Listener, error) {
+		return listener, nil
 	})
 	if err != nil {
 		t.Fatal(err)

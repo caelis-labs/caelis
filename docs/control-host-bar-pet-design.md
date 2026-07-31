@@ -106,6 +106,46 @@ implementation mechanically:
 - Pet `ready` is not Runtime truth. It is a client-local unread/read
   projection and must not become durable Session state.
 
+## Non-interactive Client Contract
+
+The relevant comparison is behavioral rather than flag spelling. Codex
+documents its non-interactive entry as `codex exec`; Grok exposes `grok -p`;
+Caelis exposes `caelis -p`.
+
+| Capability | Codex non-interactive | Grok `-p` | Caelis Headless |
+| --- | --- | --- | --- |
+| Human default | Final agent message on stdout; progress on stderr | Final response on stdout | Final response on stdout |
+| Single machine-readable result | Last-message file output | `json` summary with Session, usage, model, and cost data | `json` result with schema version, Session/Turn target, lifecycle, cursor, output, and available usage |
+| Structured stream | `--json` JSONL lifecycle and item events | `streaming-json` text, thought, end, and error records | `jsonl` exact versioned ACP Envelope records followed by one terminal result or error record |
+| Resume | Resume by Session or last Session | Resume or continue by Session | `-session` resumes the durable Session |
+| Constrained final shape | `--output-schema` | `--json-schema` | Not yet supported |
+
+The Codex behavior is defined by the current
+[non-interactive mode documentation](https://learn.chatgpt.com/docs/non-interactive-mode).
+The Grok comparison is against `grok 0.2.114 --help` and its installed
+Headless Mode guide. Both products keep stdout script-safe and send diagnostics
+to stderr.
+
+Caelis therefore does not treat plain final-only output as the integration
+contract. Plain text remains the human-friendly default, while:
+
+- after successful CLI flag parsing, `json` emits exactly one
+  `caelis.headless/v1` result or error object, including configuration and Host
+  bootstrap failures;
+- `jsonl` emits target-filtered `envelope` objects using the maintained
+  `control/client/wirev1` Envelope codec, then exactly one `result` or `error`;
+- each successful result includes durable Session identity, exact Handle/Run/
+  Turn identity, terminal lifecycle, last accepted cursor, final assistant
+  output, and the available typed usage snapshot;
+- a streaming writer failure explicitly cancels the addressed Turn and drains
+  toward its terminal producer boundary for a bounded interval; a missing
+  terminal detaches only observation while Control retains the accepted Turn
+  lifetime.
+
+Output-schema validation, model-by-model cost reporting, structured flag-parser
+errors, and precise signal-specific exit codes remain product gaps. They do not
+require another Runtime or protocol path.
+
 ## Current Caelis Foundation
 
 The infrastructure is substantially closer than the current process topology
@@ -121,6 +161,7 @@ suggests.
 | Authenticated HTTP/SSE Host adapter with TLS and host policy | `app/controlserver`, `control/client/wirev1` | Yes; it is infrastructure around Control, not a Surface |
 | Host-owned accepted main-Turn lifetime | `internal/kernel/gateway_turns.go`, `app/gatewayapp/stack.go` | Yes; HTTP request cancellation must not cancel accepted work |
 | Principal-bound local and remote Session clients | `control/client/session_client.go`, `control/client/httpclient` | Yes; extend the common facade only as parity requires |
+| Headless typed Turn and structured output | `control/client/session_turn.go`, `surfaces/headless`, `internal/cli/headless_output.go` | Yes; Headless uses the in-process Session client and exposes text, JSON, and versioned JSONL without a private Gateway ingress |
 | Session-routed workspace Runtime ownership | `app/gatewayapp/session_runtime_registry.go`, `workspace_config_assembler.go` | Yes for the bounded Session-client slice: workspace composition is loaded on demand, Session ID selects it, and UserID is not a Runtime key |
 | Independent Task observation | `control/taskstream`, `protocol/acp/taskstream` | Yes; Task output must not be folded into the Session control stream |
 
@@ -186,7 +227,12 @@ locks.
 `control/client/httpclient.Client` implement the same principal-bound
 `control/client.SessionClient` slice for initialize, list, create, close,
 inspect, atomic reconnect, and main-Turn writes. Remote SSE delivery is bounded
-and reports a cursor-addressed gap. The production TUI still uses
+and reports a cursor-addressed gap. `control/client.SessionTurnClient` now
+builds one target-filtered main Turn on that common facade, and Headless uses
+it through the in-process client. It first inspects the current feed boundary,
+then reconnects from that cursor before Prompt, so a long resumed Session does
+not replay and discard its entire durable prefix. The same Headless integration
+test also runs through the HTTP client. The production TUI still uses
 `controladapter/local.NewLocalAdapter` and directly receives
 `*gatewayapp.Stack` (`internal/cli/tui.go:25-31`). Participant administration,
 handoff, attachments, automatic reconnect policy, and the TUI's other private
@@ -260,22 +306,28 @@ mutation that already acquired the Runtime. Failed sandbox or MCP closure
 retains the resource owner so Host shutdown can retry cleanup. Session close
 releases its Runtime.
 
-The ordinary TUI, private prompt services, and Task stream lookup still address
-the default Stack. There is not yet a public client detach/release operation or
-idle eviction policy, so an open idle Session activation remains resident until
-Session close or Host shutdown; the registry's release primitive is currently
-internal lifecycle machinery. Observation subscriptions deliberately do not
-control Runtime lifetime.
+The ordinary TUI, ACP adapter, private prompt services, and Task stream lookup
+still address the default Stack. There is not yet a public client
+detach/release operation or idle eviction policy, so an open idle Session
+activation remains resident until Session close or Host shutdown; the
+registry's release primitive is currently internal lifecycle machinery.
+Observation subscriptions deliberately do not control Runtime lifetime.
 
-**Transitional TODO.** Until TUI/headless Session creation and Turn ingress use
-the typed `SessionClient`, `Stack.StartSession` records a process-local
-default-Stack ownership marker for that Session. Control reconnect and mutation
-routing must honor this marker so one legacy TUI Session cannot acquire a
-second detached Gateway. This marker is not durable workspace configuration or
-a Session Runtime cache. Remove the marker and its routing branches only after
-the TUI/headless path no longer calls the private default Gateway directly and
-the shared local/remote client parity suite covers resume, prompt, steer,
-cancel, approval, and close.
+**Transitional TODO.** Headless Session creation and Turn ingress now use the
+typed `SessionClient`; they no longer call the private default Gateway.
+An existing `-session` is inspected and resumed directly rather than routed
+through Session creation; a missing preferred ID alone creates, and a closed
+Session reports an explicit create-new instruction. The legacy
+`surfaces/headless.RunOnce` remains only for eval/private Gateway coverage and
+is deprecated until those callers use the typed Session client.
+`Stack.StartSession` must still record a process-local default-Stack ownership
+marker for the remaining TUI, ACP, and private prompt Sessions. Control
+reconnect and mutation routing must honor this marker so one legacy Session
+cannot acquire a second detached Gateway. This marker is not durable workspace
+configuration or a Session Runtime cache. Remove the marker and its routing
+branches only after those remaining paths are Session-directed and the shared
+local/remote client parity suite covers their required resume, prompt, steer,
+cancel, approval, and close behavior.
 
 **Failure mode.** The bounded app-server Session path can operate concurrently
 across local workspaces without mixing prompt, skills, sandbox CWD, Gateway, or
@@ -363,6 +415,8 @@ flowchart LR
     subgraph Presentation["Presentation clients"]
         TUI1["TUI window A<br/>one Session"]
         TUI2["TUI window B<br/>one Session"]
+        HEADLESS["Headless CLI<br/>one scripted Turn"]
+        ACP["ACP adapter<br/>one client Session"]
         BAR["System Bar<br/>many Sessions + quick input"]
         PET["Pet renderer<br/>assets + animation only"]
     end
@@ -389,6 +443,8 @@ flowchart LR
 
     TUI1 --> LOCAL
     TUI2 --> REMOTE
+    HEADLESS --> LOCAL
+    ACP --> LOCAL
     BAR --> REMOTE
     REMOTE --> REDUCER
     REDUCER --> PET
@@ -406,7 +462,7 @@ flowchart LR
 The dependency direction remains:
 
 ```text
-TUI / Bar / Pet adapter
+TUI / Headless / ACP / Bar / Pet adapter
           |
           v
 typed Control client adapter
@@ -495,13 +551,16 @@ The infrastructure MVP is intentionally smaller than a TUI migration:
   compositions, but every client mutation and observation is still addressed
   by Session ID; create and observers allocate no execution Runtime, durable
   Sessions retain only workspace identity, and the stateless assembler owns no
-  workspace configuration cache.
+  workspace configuration cache;
+- Headless uses the same typed Session Turn over the in-process client, with
+  plain final output plus versioned JSON and JSONL contracts suitable for
+  scripts and program integration.
 
-TUI composition remains unchanged until the same integration suite proves the
-in-process and remote clients can replace its current Session path. Readiness,
-automatic retry policy, participant/handoff and Task remote clients,
-client-visible Runtime release, catalog activity, Bar, and Pet are deferred
-capabilities, not placeholders in the MVP protocol.
+TUI and ACP composition remain unchanged until their parity suites prove the
+in-process and remote clients can replace their current Session paths.
+Readiness, automatic retry policy, participant/handoff and Task remote clients,
+client-visible Runtime release, catalog activity, output-schema validation,
+Bar, and Pet are deferred capabilities, not placeholders in the MVP protocol.
 
 ## Quality Gates
 

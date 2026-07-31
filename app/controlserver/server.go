@@ -54,9 +54,21 @@ func Handler(deps Dependencies, config Config) (http.Handler, error) {
 }
 
 func ListenAndServe(ctx context.Context, deps Dependencies, config Config) error {
+	return listenAndServe(ctx, deps, config, net.Listen)
+}
+
+func listenAndServe(
+	ctx context.Context,
+	deps Dependencies,
+	config Config,
+	listen func(string, string) (net.Listener, error),
+) error {
 	resolved, useTLS, err := resolveNetworkConfig(config)
 	if err != nil {
 		return err
+	}
+	if listen == nil {
+		return errors.New("controlserver: listener factory is required")
 	}
 	var certificate tls.Certificate
 	if useTLS {
@@ -72,7 +84,7 @@ func ListenAndServe(ctx context.Context, deps Dependencies, config Config) error
 	if deps.Lifecycle == nil {
 		return errors.New("controlserver: Host lifecycle is required")
 	}
-	listener, err := net.Listen("tcp", resolved.Address)
+	listener, err := listen("tcp", resolved.Address)
 	if err != nil {
 		return err
 	}

@@ -13,6 +13,9 @@ import (
 )
 
 func runHeadlessOnceForGatewayAppTest(ctx context.Context, stack *Stack, activeSession session.Session, surface string, input string, opts headless.Options) (headless.Result, error) {
+	// TODO: migrate the remaining private-Gateway tests to SessionTurnStarter,
+	// then delete this helper together with surfaces/headless.RunOnce.
+	//nolint:staticcheck // This helper deliberately isolates the deprecated migration path.
 	return headless.RunOnce(ctx, gatewayHeadlessStarter{
 		turns:      stack.KernelTurns(),
 		sessionRef: activeSession.SessionRef,

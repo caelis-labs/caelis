@@ -3,7 +3,6 @@ package gatewayapp
 import (
 	"context"
 	"fmt"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -16,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/internal/testenv"
 
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -94,12 +94,13 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	httpServer := httptest.NewServer(server.Handler())
+	httpServer := testenv.NewHTTPServer(t, server.Handler())
 	defer httpServer.Close()
 	remote, err := httpclient.New(httpclient.Config{
 		BaseURL:     httpServer.URL,
 		BearerToken: token,
 		EventBuffer: 256,
+		HTTPClient:  httpServer.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)

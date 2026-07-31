@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
@@ -125,8 +128,259 @@ func TestParseOutputFormat(t *testing.T) {
 	if got, err := parseOutputFormat("json"); err != nil || got != outputJSON {
 		t.Fatalf("parseOutputFormat() = %q, %v", got, err)
 	}
+	if got, err := parseOutputFormat("jsonl"); err != nil || got != outputJSONL {
+		t.Fatalf("parseOutputFormat(jsonl) = %q, %v", got, err)
+	}
 	if _, err := parseOutputFormat("xml"); err == nil {
 		t.Fatal("parseOutputFormat(xml) error = nil")
+	}
+}
+
+func TestHeadlessJSONLUsesVersionedEnvelopeAndTerminalResultRecords(t *testing.T) {
+	t.Parallel()
+
+	envelope := eventstream.Envelope{
+		Kind:      eventstream.KindNotice,
+		SessionID: "session-1",
+		HandleID:  "handle-1",
+		RunID:     "run-1",
+		TurnID:    "turn-1",
+		Cursor:    "cursor-1",
+		Position: &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{
+			Seq: math.MaxUint64,
+		}},
+		Notice: "working",
+	}
+	var output bytes.Buffer
+	if err := writeHeadlessEnvelope(&output, envelope); err != nil {
+		t.Fatal(err)
+	}
+	usage := eventstream.UsageSnapshot{PromptTokens: 11, TotalTokens: 17}
+	if err := writeResult(&output, outputJSONL, runResult{
+		SchemaVersion: headlessOutputSchemaVersion,
+		Type:          headlessOutputTypeResult,
+		SessionID:     "session-1",
+		Turn:          controlclient.TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
+		Status:        eventstream.LifecycleStateCompleted,
+		Output:        "done",
+		Cursor:        "cursor-2",
+		Usage:         &usage,
+		PromptTokens:  11,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("JSONL lines = %d\n%s", len(lines), output.String())
+	}
+	var first struct {
+		SchemaVersion string          `json:"schema_version"`
+		Type          string          `json:"type"`
+		Envelope      json.RawMessage `json:"envelope"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.SchemaVersion != headlessOutputSchemaVersion || first.Type != headlessOutputTypeEnvelope {
+		t.Fatalf("first record = %#v", first)
+	}
+	var envelopeWire struct {
+		Position struct {
+			Durable struct {
+				Seq string `json:"seq"`
+			} `json:"durable"`
+		} `json:"position"`
+	}
+	if err := json.Unmarshal(first.Envelope, &envelopeWire); err != nil {
+		t.Fatal(err)
+	}
+	if envelopeWire.Position.Durable.Seq != "18446744073709551615" {
+		t.Fatalf("wire sequence = %q", envelopeWire.Position.Durable.Seq)
+	}
+	var final runResult
+	if err := json.Unmarshal([]byte(lines[1]), &final); err != nil {
+		t.Fatal(err)
+	}
+	if final.SchemaVersion != headlessOutputSchemaVersion ||
+		final.Type != headlessOutputTypeResult ||
+		final.SessionID != "session-1" ||
+		final.Status != eventstream.LifecycleStateCompleted ||
+		final.Output != "done" ||
+		final.Usage == nil ||
+		final.Usage.TotalTokens != 17 {
+		t.Fatalf("final record = %#v", final)
+	}
+}
+
+func TestHeadlessStructuredFailureKeepsStdoutMachineReadable(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	runErr := errors.New("injected headless failure")
+	if err := writeHeadlessFailure(&output, outputJSONL, "session-1", runErr); !errors.Is(err, runErr) {
+		t.Fatalf("writeHeadlessFailure() = %v", err)
+	}
+	var record headlessErrorOutput
+	if err := json.Unmarshal(output.Bytes(), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.SchemaVersion != headlessOutputSchemaVersion ||
+		record.Type != headlessOutputTypeError ||
+		record.SessionID != "session-1" ||
+		record.Message != runErr.Error() {
+		t.Fatalf("error record = %#v", record)
+	}
+}
+
+func TestRunHeadlessStructuredFormatsEncodePreStackFailures(t *testing.T) {
+	t.Parallel()
+
+	for _, format := range []string{"json", "jsonl"} {
+		t.Run(format, func(t *testing.T) {
+			t.Parallel()
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			runErr := run(
+				context.Background(),
+				[]string{
+					"-p", "hello",
+					"-format", format,
+					"-control-operation-retention", "invalid",
+				},
+				strings.NewReader(""),
+				&stdout,
+				&stderr,
+			)
+			if runErr == nil {
+				t.Fatal("run() error = nil")
+			}
+			var record headlessErrorOutput
+			if err := json.Unmarshal(stdout.Bytes(), &record); err != nil {
+				t.Fatalf("decode stdout %q: %v", stdout.String(), err)
+			}
+			if record.SchemaVersion != headlessOutputSchemaVersion ||
+				record.Type != headlessOutputTypeError ||
+				!strings.Contains(record.Message, "invalid duration") {
+				t.Fatalf("structured error = %#v", record)
+			}
+		})
+	}
+}
+
+func TestCreateOrResumeHeadlessSessionUsesExistingSessionWithoutCreate(t *testing.T) {
+	t.Parallel()
+
+	client := &headlessLifecycleTestClient{
+		state: controlclient.SessionState{
+			SessionID:    "session-1",
+			WorkspaceKey: "durable-workspace",
+			CWD:          "/durable/workspace",
+		},
+	}
+	sessionID, err := createOrResumeHeadlessSession(
+		context.Background(),
+		client,
+		session.WorkspaceRef{Key: "current-workspace", CWD: "/current/workspace"},
+		"session-1",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessionID != "session-1" || client.createCalls != 0 {
+		t.Fatalf("created Session = %q, request = %#v", sessionID, client.created)
+	}
+}
+
+func TestCreateOrResumeHeadlessSessionCreatesMissingPreferredSession(t *testing.T) {
+	t.Parallel()
+
+	client := &headlessLifecycleTestClient{inspectErr: session.ErrSessionNotFound}
+	sessionID, err := createOrResumeHeadlessSession(
+		context.Background(),
+		client,
+		session.WorkspaceRef{Key: "current-workspace", CWD: "/current/workspace"},
+		"session-new",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessionID != "session-new" ||
+		client.createCalls != 1 ||
+		client.created.PreferredSessionID != "session-new" ||
+		client.created.WorkspaceKey != "current-workspace" ||
+		client.created.CWD != "/current/workspace" {
+		t.Fatalf("created Session = %q, request = %#v", sessionID, client.created)
+	}
+}
+
+func TestHeadlessSessionRunErrorExplainsClosedResume(t *testing.T) {
+	t.Parallel()
+
+	err := headlessSessionRunError("session-closed", controlclient.ErrSessionClosed)
+	if !errors.Is(err, controlclient.ErrSessionClosed) ||
+		!strings.Contains(err.Error(), "omit -session to create a new Session") {
+		t.Fatalf("headlessSessionRunError() = %v", err)
+	}
+}
+
+func TestRunHeadlessRejectsClosedSessionWithoutRecreatingIt(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: "workspace",
+		WorkspaceCWD: workspace,
+		SkillDirs:    []string{},
+		Sandbox:      gatewayapp.SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	client, err := controlclient.BindSessionClient(
+		stack.ControlClient(),
+		controlclient.Principal{ID: stack.UserID},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := client.CreateSession(context.Background(), controlclient.CreateSessionRequest{
+		WriteBase:          controlclient.WriteBase{OperationID: "create-closed-headless"},
+		PreferredSessionID: "closed-headless",
+		WorkspaceKey:       "workspace",
+		CWD:                workspace,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.CloseSession(context.Background(), controlclient.CloseSessionRequest{
+		WriteBase: controlclient.WriteBase{
+			OperationID: "close-closed-headless",
+			SessionID:   created.SessionID,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var output bytes.Buffer
+	resumedID, err := runHeadless(
+		context.Background(),
+		stack,
+		created.SessionID,
+		"hello",
+		outputJSON,
+		&output,
+	)
+	if resumedID != created.SessionID ||
+		!errors.Is(err, controlclient.ErrSessionClosed) ||
+		!strings.Contains(err.Error(), "omit -session to create a new Session") {
+		t.Fatalf("runHeadless() = Session %q, error %v", resumedID, err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("runHeadless() wrote result before caller error encoding: %q", output.String())
 	}
 }
 
@@ -138,6 +392,33 @@ func TestAssemblyFromEnvReturnsParserErrors(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), acpagentenv.EnvArgsJSON) {
 		t.Fatalf("assemblyFromEnv() error = %v, want parser error", err)
 	}
+}
+
+type headlessLifecycleTestClient struct {
+	controlclient.SessionClient
+	state       controlclient.SessionState
+	inspectErr  error
+	created     controlclient.CreateSessionRequest
+	createCalls int
+}
+
+func (client *headlessLifecycleTestClient) InspectSession(
+	context.Context,
+	controlclient.StateRequest,
+) (controlclient.SessionState, error) {
+	return client.state, client.inspectErr
+}
+
+func (client *headlessLifecycleTestClient) CreateSession(
+	_ context.Context,
+	request controlclient.CreateSessionRequest,
+) (controlclient.CommandResult, error) {
+	client.createCalls++
+	client.created = request
+	return controlclient.CommandResult{
+		Outcome:   controlclient.OutcomeCommitted,
+		SessionID: request.PreferredSessionID,
+	}, nil
 }
 
 func TestRunHelpReturnsNil(t *testing.T) {

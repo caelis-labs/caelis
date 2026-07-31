@@ -768,6 +768,12 @@ func sdkOwnedPortsCompatFileMessage(pkg string) string {
 
 func temporaryArchitectureException(rel string, target string) bool {
 	switch {
+	case rel == "control/modelconfig/grokauth/manager_test.go" &&
+		target == "internal/testenv":
+		// This test needs a real net/http server over the repository's
+		// net.Pipe listener to cover OAuth callback cancellation without a host
+		// socket. Keep the exception narrower than the Control/SDK boundaries.
+		return true
 	case strings.HasPrefix(rel, "internal/kernel/") &&
 		strings.HasSuffix(rel, "_test.go") &&
 		pathIn(target, "agent-sdk/session/file", "agent-sdk/session/memory"):

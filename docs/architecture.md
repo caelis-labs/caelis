@@ -165,10 +165,12 @@ Document responsibilities are intentionally separate:
   Assembly and app configuration mutation share one Host lock, while release
   first hides its Runtime from routing, waits already-routed synchronous
   mutations, and shutdown drains in-flight assembly and release before closing
-  all Session and transitional default Gateways. Until TUI/headless ingress
-  uses the typed Session client, direct default-Stack Sessions retain an
-  explicit process-local ownership marker; the marker is a migration fence, not
-  durable configuration, and is removed with the private default-Gateway path.
+  all Session and transitional default Gateways. Headless Session creation and
+  Turn ingress use the typed in-process Session client. Until the remaining
+  TUI, ACP, and private prompt paths are Session-directed, their direct
+  default-Stack Sessions retain an explicit process-local ownership marker; the
+  marker is a migration fence, not durable configuration, and is removed with
+  the private default-Gateway path.
   `UserID` remains a compatibility authorization/persistence field and is not a
   Runtime partition key.
 - `internal/kernel`: Control-owned Session/Turn coordination, gateway

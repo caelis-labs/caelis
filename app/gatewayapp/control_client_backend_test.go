@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"iter"
-	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,6 +20,7 @@ import (
 	"github.com/caelis-labs/caelis/control/client/httpclient"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
+	"github.com/caelis-labs/caelis/internal/testenv"
 
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -570,10 +570,11 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	httpServer := httptest.NewServer(server.Handler())
+	httpServer := testenv.NewHTTPServer(t, server.Handler())
 	defer httpServer.Close()
 	remote, err := httpclient.New(httpclient.Config{
 		BaseURL: httpServer.URL, BearerToken: "0123456789abcdef0123456789abcdef",
+		HTTPClient: httpServer.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)

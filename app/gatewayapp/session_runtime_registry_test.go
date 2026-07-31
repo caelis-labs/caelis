@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -22,6 +20,7 @@ import (
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/client/httpclient"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
+	"github.com/caelis-labs/caelis/internal/testenv"
 )
 
 func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
@@ -1107,7 +1106,7 @@ func newWorkspaceRuntimeHTTPClient(
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := controlserver.New(controlserver.HandlerConfig{
+	controlServer, err := controlserver.New(controlserver.HandlerConfig{
 		Service:       stack.ControlClient(),
 		Authenticator: authenticator,
 		AllowedHosts:  []string{"127.0.0.1", "localhost", "::1"},
@@ -1115,27 +1114,16 @@ func newWorkspaceRuntimeHTTPClient(
 	if err != nil {
 		t.Fatal(err)
 	}
+	server := testenv.NewHTTPServer(t, controlServer.Handler())
 	remote, err := httpclient.New(httpclient.Config{
-		BaseURL:     "http://127.0.0.1",
+		BaseURL:     server.URL,
 		BearerToken: token,
-		HTTPClient: &http.Client{
-			Transport: workspaceRuntimeHandlerTransport{handler: server.Handler()},
-		},
+		HTTPClient:  server.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return remote
-}
-
-type workspaceRuntimeHandlerTransport struct {
-	handler http.Handler
-}
-
-func (transport workspaceRuntimeHandlerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	recorder := httptest.NewRecorder()
-	transport.handler.ServeHTTP(recorder, request)
-	return recorder.Result(), nil
 }
 
 type sessionLookupErrorService struct {

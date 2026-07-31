@@ -2,9 +2,13 @@ package headless
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -346,6 +350,174 @@ func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 	}
 }
 
+func TestRunSessionOnceProjectsTargetedResultAndStructuredObservation(t *testing.T) {
+	t.Parallel()
+
+	target := controlclient.TurnTarget{
+		HandleID: "handle-1",
+		RunID:    "run-1",
+		TurnID:   "turn-1",
+	}
+	terminal := eventstream.TurnCompleted(target.HandleID, target.RunID, target.TurnID, time.Now())
+	terminal.SessionID = "session-1"
+	terminal.Cursor = "cursor-terminal"
+	terminal.Lifecycle.StopReason = "end_turn"
+	turn := newFakeSessionTurn(target, []eventstream.Envelope{
+		{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "session-1",
+			HandleID:  target.HandleID,
+			RunID:     target.RunID,
+			TurnID:    target.TurnID,
+			Cursor:    "cursor-output",
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "done"},
+			},
+		},
+		{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "session-1",
+			HandleID:  target.HandleID,
+			RunID:     target.RunID,
+			TurnID:    target.TurnID,
+			Cursor:    "cursor-usage",
+			Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
+				PromptTokens: 11,
+				TotalTokens:  17,
+			}, nil),
+		},
+		terminal,
+	})
+	var observed []eventstream.Envelope
+	result, err := RunSessionOnce(
+		context.Background(),
+		fakeSessionTurnStarter{turn: turn},
+		controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"},
+		Options{
+			ObserveEnvelope: func(envelope eventstream.Envelope) error {
+				observed = append(observed, envelope)
+				return nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != "done" ||
+		result.LastCursor != "cursor-terminal" ||
+		result.PromptTokens != 11 ||
+		result.Usage.TotalTokens != 17 ||
+		result.LifecycleState != eventstream.LifecycleStateCompleted ||
+		result.StopReason != "end_turn" ||
+		result.Target != target {
+		t.Fatalf("RunSessionOnce result = %#v", result)
+	}
+	if len(observed) != 3 || observed[2].Cursor != "cursor-terminal" {
+		t.Fatalf("observed Envelopes = %#v", observed)
+	}
+	if !turn.closed {
+		t.Fatal("Session Turn observation was not closed")
+	}
+	if turn.cancelled {
+		t.Fatal("successful Session Turn was cancelled")
+	}
+}
+
+func TestRunSessionOnceCancelsAndDrainsAfterStructuredOutputFailure(t *testing.T) {
+	t.Parallel()
+
+	target := controlclient.TurnTarget{
+		HandleID: "handle-1",
+		RunID:    "run-1",
+		TurnID:   "turn-1",
+	}
+	terminal := eventstream.TurnCancelled(target.HandleID, target.RunID, target.TurnID, "cancelled", time.Now())
+	terminal.SessionID = "session-1"
+	turn := newFakeSessionTurn(target, []eventstream.Envelope{
+		{
+			Kind:      eventstream.KindNotice,
+			SessionID: "session-1",
+			HandleID:  target.HandleID,
+			RunID:     target.RunID,
+			TurnID:    target.TurnID,
+			Notice:    "first",
+		},
+		{
+			Kind:      eventstream.KindNotice,
+			SessionID: "session-1",
+			HandleID:  target.HandleID,
+			RunID:     target.RunID,
+			TurnID:    target.TurnID,
+			Notice:    "must still drain",
+		},
+		terminal,
+	})
+	outputErr := errors.New("injected output failure")
+	observations := 0
+	result, err := RunSessionOnce(
+		context.Background(),
+		fakeSessionTurnStarter{turn: turn},
+		controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"},
+		Options{
+			ObserveEnvelope: func(eventstream.Envelope) error {
+				observations++
+				return outputErr
+			},
+		},
+	)
+	if !errors.Is(err, outputErr) {
+		t.Fatalf("RunSessionOnce() error = %v, want %v", err, outputErr)
+	}
+	if observations != 1 {
+		t.Fatalf("structured observer calls = %d, want one after first failure", observations)
+	}
+	if !turn.cancelled || !turn.closed {
+		t.Fatalf("Turn cancelled=%t closed=%t", turn.cancelled, turn.closed)
+	}
+	if result.LifecycleState != eventstream.LifecycleStateCancelled {
+		t.Fatalf("result lifecycle = %q, want cancelled", result.LifecycleState)
+	}
+}
+
+func TestRunSessionOnceCancellationTimeoutDetachesWithoutTerminal(t *testing.T) {
+	t.Parallel()
+
+	target := controlclient.TurnTarget{
+		HandleID: "handle-1",
+		RunID:    "run-1",
+		TurnID:   "turn-1",
+	}
+	cancelErr := errors.New("injected cancel failure")
+	turn := &fakeSessionTurn{
+		target:    target,
+		events:    make(chan eventstream.Envelope),
+		cancelErr: cancelErr,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	startedAt := time.Now()
+	_, err := runSessionOnce(
+		ctx,
+		fakeSessionTurnStarter{turn: turn},
+		controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"},
+		Options{},
+		10*time.Millisecond,
+	)
+	if !errors.Is(err, context.Canceled) ||
+		!errors.Is(err, cancelErr) ||
+		!strings.Contains(err.Error(), "timed out waiting for cancelled Turn terminal") {
+		t.Fatalf("runSessionOnce() error = %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed > time.Second {
+		t.Fatalf("runSessionOnce() cancellation took %s", elapsed)
+	}
+	if !turn.cancelled || !turn.closed {
+		t.Fatalf("Turn cancelled=%t closed=%t", turn.cancelled, turn.closed)
+	}
+}
+
 type fakeStarter struct {
 	turn controlprompt.Turn
 	err  error
@@ -380,3 +552,59 @@ func (h *fakeTurnHandle) SubmitApproval(_ context.Context, decision controlpromp
 }
 func (h *fakeTurnHandle) Cancel()      {}
 func (h *fakeTurnHandle) Close() error { return nil }
+
+type fakeSessionTurnStarter struct {
+	turn controlclient.SessionTurn
+	err  error
+}
+
+func (f fakeSessionTurnStarter) Start(
+	context.Context,
+	controlclient.SessionTurnStartRequest,
+) (controlclient.SessionTurn, error) {
+	return f.turn, f.err
+}
+
+type fakeSessionTurn struct {
+	target    controlclient.TurnTarget
+	events    <-chan eventstream.Envelope
+	last      string
+	cancelErr error
+	cancelled bool
+	closed    bool
+}
+
+func newFakeSessionTurn(
+	target controlclient.TurnTarget,
+	events []eventstream.Envelope,
+) *fakeSessionTurn {
+	channel := make(chan eventstream.Envelope, len(events))
+	last := ""
+	for _, envelope := range events {
+		channel <- envelope
+		if envelope.Cursor != "" {
+			last = envelope.Cursor
+		}
+	}
+	close(channel)
+	return &fakeSessionTurn{target: target, events: channel, last: last}
+}
+
+func (*fakeSessionTurn) SessionID() string { return "session-1" }
+func (t *fakeSessionTurn) Target() controlclient.TurnTarget {
+	return t.target
+}
+func (t *fakeSessionTurn) Events() <-chan eventstream.Envelope { return t.events }
+func (*fakeSessionTurn) ResolveApproval(context.Context, controlclient.ApprovalResolution) error {
+	return nil
+}
+func (t *fakeSessionTurn) Cancel(context.Context, string) error {
+	t.cancelled = true
+	return t.cancelErr
+}
+func (t *fakeSessionTurn) LastCursor() string { return t.last }
+func (*fakeSessionTurn) Err() error           { return nil }
+func (t *fakeSessionTurn) Close() error {
+	t.closed = true
+	return nil
+}
