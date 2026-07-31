@@ -37,7 +37,7 @@ func TestAllowedHostAndProductionBearerReachService(t *testing.T) {
 	}
 	service := &authBoundaryService{}
 	server, err := New(HandlerConfig{
-		Service: service, TaskStreams: &fakeTaskService{}, Authenticator: authenticator, AllowedHosts: []string{"control.example.test"},
+		Service: service, Status: staticStatusService{}, TaskStreams: &fakeTaskService{}, Authenticator: authenticator, AllowedHosts: []string{"control.example.test"},
 	})
 	if err != nil {
 		t.Fatal(err)

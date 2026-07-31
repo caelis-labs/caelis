@@ -16,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/client/wirev1"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -187,6 +188,31 @@ func TestCreatesCompactsAndClosesSessionThroughTypedFacade(t *testing.T) {
 		closed.OperationID != "operation-close" ||
 		closed.ExpectedControllerEpoch != "epoch-1" {
 		t.Fatalf("CloseSession result/request = %#v / %#v", closedResult, closed)
+	}
+}
+
+func TestReadsSessionStatusThroughTypedFacade(t *testing.T) {
+	client, closeServer := newFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != wirev1.APIPrefix+"/sessions/session-1/status" ||
+			r.Method != http.MethodGet ||
+			r.URL.Query().Get("surface") != "pet" ||
+			r.URL.Query().Get("diagnostics") != "true" {
+			t.Fatalf("status request = %s %s", r.Method, r.URL.String())
+		}
+		writeFixtureJSON(t, w, http.StatusOK, controlstatus.StatusSnapshot{
+			Session:     controlstatus.StatusSession{ID: "session-1", Surface: "pet"},
+			ModelStatus: controlstatus.StatusModel{Display: "mimo-v2.5-pro"},
+		})
+	})
+	defer closeServer()
+	status, err := client.SessionStatus(context.Background(), controlclient.StatusRequest{
+		SessionID: "session-1", Surface: "pet", IncludeDiagnostics: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Session.ID != "session-1" || status.Session.Surface != "pet" || status.ModelStatus.Display != "mimo-v2.5-pro" {
+		t.Fatalf("status = %#v", status)
 	}
 }
 

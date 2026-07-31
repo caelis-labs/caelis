@@ -18,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/acpagent"
+	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -272,8 +273,12 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		} else if tokenFile == "" {
 			tokenFile = controlserver.DefaultTokenFile(cfg.StoreDir)
 		}
+		statusService, statusErr := local.NewStatusService(stack)
+		if statusErr != nil {
+			return statusErr
+		}
 		return runControlServerCommand(ctx, controlserver.Dependencies{
-			Service: stack.ControlClient(), TaskStreams: stack.TaskStreams(), Lifecycle: stack,
+			Service: stack.ControlClient(), Status: statusService, TaskStreams: stack.TaskStreams(), Lifecycle: stack,
 		}, controlserver.Config{
 			Address: strings.TrimSpace(*controlListen), Authenticator: authenticator, Principal: principal,
 			TokenFile: tokenFile, AllowedHosts: splitCommaSeparated(*controlHosts),
@@ -537,6 +542,7 @@ func runSandboxReset(ctx context.Context, stack *gatewayapp.Stack, format output
 }
 
 func runInteractive(ctx context.Context, stack *gatewayapp.Stack, sessionID string, cfg gatewayapp.Config, displayModelText string, options tuiOptions, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	stack.StartApprovalRecovery(ctx)
 	return runTUI(ctx, stack, strings.TrimSpace(sessionID), cfg, displayModelText, options, stdin, stdout, stderr)
 }
 

@@ -397,6 +397,85 @@ func (r *sessionRuntimeRegistry) acquireLoadedRuntime(sessionID string) (*sessio
 	return runtime, releaseUse, nil
 }
 
+// acquireControlRuntime resolves the fixed Runtime for an active Session or a
+// disposable, current workspace composition for an idle observation. The
+// disposable branch deliberately has no cache or registry entry.
+func (r *sessionRuntimeRegistry) acquireControlRuntime(
+	ctx context.Context,
+	sessionID string,
+	activate bool,
+) (*sessionRuntime, session.Session, func(context.Context) error, error) {
+	if r == nil || r.owner == nil {
+		return nil, session.Session{}, nil, errors.New("gatewayapp: Session Runtime registry is unavailable")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, session.Session{}, nil, errors.New("gatewayapp: Session ID is required")
+	}
+	if r.defaultSession(sessionID) {
+		active, err := r.owner.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
+		return &sessionRuntime{sessionID: sessionID, workspace: r.owner.Workspace, stack: r.owner}, active, nil, err
+	}
+	if activate {
+		runtime, active, err := r.activateSession(ctx, sessionID)
+		if err != nil {
+			return nil, active, nil, err
+		}
+		release, err := r.acquireRuntimeUse(runtime)
+		if err != nil {
+			return nil, active, nil, err
+		}
+		return runtime, active, func(context.Context) error { release(); return nil }, nil
+	}
+
+	buildCtx, unlock, err := r.lockActivation(ctx)
+	if err != nil {
+		return nil, session.Session{}, nil, err
+	}
+	defer unlock()
+	if r.defaultSession(sessionID) {
+		active, loadErr := r.owner.Sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
+		return &sessionRuntime{sessionID: sessionID, workspace: r.owner.Workspace, stack: r.owner}, active, nil, loadErr
+	}
+	loaded, releaseUse, err := r.acquireLoadedRuntime(sessionID)
+	if err != nil {
+		return nil, session.Session{}, nil, err
+	}
+	if loaded != nil {
+		active, loadErr := r.owner.Sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
+		if loadErr != nil {
+			releaseUse()
+			return nil, session.Session{}, nil, loadErr
+		}
+		return loaded, active, func(context.Context) error { releaseUse(); return nil }, nil
+	}
+	active, err := r.owner.Sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
+	if err != nil {
+		return nil, session.Session{}, nil, err
+	}
+	workspace, err := canonicalSessionWorkspace(active)
+	if err != nil {
+		return nil, active, nil, err
+	}
+	if err := r.validateWorkspaceIdentity(workspace); err != nil {
+		return nil, active, nil, err
+	}
+	stack, err := r.assembler.assembleLocked(buildCtx, workspace)
+	if err != nil {
+		return nil, active, nil, err
+	}
+	runtime := &sessionRuntime{sessionID: sessionID, workspace: workspace, stack: stack}
+	return runtime, active, func(closeCtx context.Context) error {
+		if closeCtx == nil {
+			closeCtx = context.Background()
+		}
+		return errors.Join(stack.Quiesce(closeCtx), stack.closeWorkspaceResources())
+	}, nil
+}
+
 // retainRuntimeLocked records one routed synchronous command. The caller holds
 // r.mu and owns the returned idempotent release function.
 func (r *sessionRuntimeRegistry) retainRuntimeLocked(runtime *sessionRuntime) func() {

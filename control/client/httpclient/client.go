@@ -21,6 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/client/wirev1"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -204,6 +205,34 @@ func (c *Client) InspectSession(ctx context.Context, request controlclient.State
 	}
 	if err := validateRemoteState(result); err != nil {
 		return controlclient.SessionState{}, err
+	}
+	return result, nil
+}
+
+func (c *Client) SessionStatus(ctx context.Context, request controlclient.StatusRequest) (controlstatus.StatusSnapshot, error) {
+	sessionID, err := remotePathID("session", request.SessionID)
+	if err != nil {
+		return controlstatus.StatusSnapshot{}, err
+	}
+	query := make(url.Values)
+	if request.Surface != "" {
+		query.Set("surface", request.Surface)
+	}
+	if request.IncludeDiagnostics {
+		query.Set("diagnostics", "true")
+	}
+	response, err := c.do(ctx, http.MethodGet, "/sessions/"+sessionID+"/status", query, nil, nil)
+	if err != nil {
+		return controlstatus.StatusSnapshot{}, err
+	}
+	defer response.Body.Close()
+	raw, err := readRemoteResponse(response)
+	if err != nil {
+		return controlstatus.StatusSnapshot{}, err
+	}
+	var result controlstatus.StatusSnapshot
+	if err := wirev1.Unmarshal(raw, &result); err != nil {
+		return controlstatus.StatusSnapshot{}, fmt.Errorf("control http client: decode Session status: %w", err)
 	}
 	return result, nil
 }
@@ -686,4 +715,5 @@ func (s *remoteSubscription) wasClosed() bool {
 }
 
 var _ controlclient.SessionClient = (*Client)(nil)
+var _ controlclient.StatusClient = (*Client)(nil)
 var _ controlclient.FeedSubscription = (*remoteSubscription)(nil)

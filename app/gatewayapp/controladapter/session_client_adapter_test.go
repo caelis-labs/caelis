@@ -10,6 +10,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -210,6 +211,112 @@ func TestSessionClientAdapterRoutesCompactThroughTypedSessionClient(t *testing.T
 	}
 }
 
+func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) {
+	client := &sessionClientAdapterTestClient{
+		createSessionID: "session-new",
+		subscription:    newSessionClientAdapterTestSubscription(),
+		state: controlclient.SessionState{
+			Revision: 7,
+			Controller: session.ControllerBinding{
+				EpochID: "epoch-1",
+			},
+		},
+		list: session.SessionList{Sessions: []session.SessionSummary{{
+			SessionRef: session.SessionRef{SessionID: "session-listed"}, Title: "listed", CWD: t.TempDir(), UpdatedAt: time.Now(),
+		}}},
+	}
+	workspaceDir := t.TempDir()
+	adapter, err := NewAppServerAdapter(AppServerAdapterConfig{
+		WorkspaceKey:  "workspace",
+		WorkspaceDir:  workspaceDir,
+		Surface:       "cli-tui",
+		Sessions:      client,
+		Participants:  &sessionClientAdapterTestParticipantClient{},
+		Status:        sessionClientAdapterTestStatusClient{},
+		Configuration: sessionClientAdapterTestConfigurationClient{},
+		Agents:        &sessionClientAdapterTestAgentClient{},
+		Completion:    &sessionClientAdapterTestCompletionClient{},
+		Plugins:       &sessionClientAdapterTestPluginClient{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := adapter.NewSession(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.SessionID != "session-new" ||
+		client.create.WorkspaceKey != "workspace" ||
+		!strings.HasPrefix(client.create.OperationID, "session-new-") {
+		t.Fatalf("created/request = %#v / %#v", created, client.create)
+	}
+	listed, err := adapter.ListSessions(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].SessionID != "session-listed" || listed[0].Title != "listed" {
+		t.Fatalf("listed = %#v", listed)
+	}
+	resumed, err := adapter.ResumeSession(context.Background(), "session-resumed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.SessionID != "session-resumed" || resumed.Reconnect == nil || adapter.clientSessionID() != "session-resumed" {
+		t.Fatalf("resumed = %#v active=%q", resumed, adapter.clientSessionID())
+	}
+	if err := resumed.Reconnect.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAppServerAdapterRoutesSlashDiscoveryAndPluginsThroughTypedClients(t *testing.T) {
+	sessions := &sessionClientAdapterTestClient{state: controlclient.SessionState{
+		SessionID: "session-typed", CWD: t.TempDir(), Revision: 3,
+		Controller: session.ControllerBinding{EpochID: "epoch-1"},
+	}}
+	completion := &recordingCompletionClient{}
+	plugins := &recordingPluginClient{}
+	adapter, err := NewAppServerAdapter(AppServerAdapterConfig{
+		SessionID:     "session-typed",
+		WorkspaceKey:  "workspace",
+		WorkspaceDir:  sessions.state.CWD,
+		Surface:       "cli-tui",
+		Sessions:      sessions,
+		Participants:  &sessionClientAdapterTestParticipantClient{},
+		Status:        sessionClientAdapterTestStatusClient{},
+		Configuration: sessionClientAdapterTestConfigurationClient{},
+		Agents:        &sessionClientAdapterTestAgentClient{},
+		Completion:    completion,
+		Plugins:       plugins,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := adapter.CompleteSlashArg(context.Background(), "model use", "mi", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].Value != "mimo" ||
+		completion.slash.SessionID != "session-typed" || completion.slash.Surface != "cli-tui" ||
+		completion.slash.Command != "model use" || completion.slash.Query != "mi" || completion.slash.Limit != 7 {
+		t.Fatalf("slash candidates/request = %#v / %#v", candidates, completion.slash)
+	}
+	resolved, err := adapter.ResolveSkill(context.Background(), "review-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Canonical != "review-code" || completion.resolve.Name != "review-code" || completion.resolve.SessionID != "session-typed" {
+		t.Fatalf("skill result/request = %#v / %#v", resolved, completion.resolve)
+	}
+	plugin, err := adapter.EnablePlugin(context.Background(), "plugin-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plugin.ID != "plugin-1" || plugins.enable.ID != "plugin-1" || plugins.enable.SessionID != "session-typed" {
+		t.Fatalf("plugin/request = %#v / %#v", plugin, plugins.enable)
+	}
+}
+
 func collectSessionClientAdapterEvents(events <-chan eventstream.Envelope) []eventstream.Envelope {
 	var out []eventstream.Envelope
 	for envelope := range events {
@@ -219,9 +326,11 @@ func collectSessionClientAdapterEvents(events <-chan eventstream.Envelope) []eve
 }
 
 type sessionClientAdapterTestClient struct {
-	target       controlclient.TurnTarget
-	subscription *sessionClientAdapterTestSubscription
-	state        controlclient.SessionState
+	target          controlclient.TurnTarget
+	subscription    *sessionClientAdapterTestSubscription
+	state           controlclient.SessionState
+	list            session.SessionList
+	createSessionID string
 
 	mu       sync.Mutex
 	prompt   controlclient.PromptRequest
@@ -229,18 +338,24 @@ type sessionClientAdapterTestClient struct {
 	approval controlclient.ResolveApprovalRequest
 	cancel   controlclient.CancelRequest
 	compact  controlclient.CompactSessionRequest
+	create   controlclient.CreateSessionRequest
 }
 
 func (*sessionClientAdapterTestClient) Initialize(context.Context) (controlclient.ServerInfo, error) {
 	return controlclient.ServerInfo{}, nil
 }
 
-func (*sessionClientAdapterTestClient) ListSessions(context.Context, controlclient.ListSessionsRequest) (session.SessionList, error) {
-	return session.SessionList{}, nil
+func (c *sessionClientAdapterTestClient) ListSessions(context.Context, controlclient.ListSessionsRequest) (session.SessionList, error) {
+	return c.list, nil
 }
 
-func (*sessionClientAdapterTestClient) CreateSession(context.Context, controlclient.CreateSessionRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{}, errors.New("unexpected CreateSession")
+func (c *sessionClientAdapterTestClient) CreateSession(_ context.Context, request controlclient.CreateSessionRequest) (controlclient.CommandResult, error) {
+	c.create = request
+	sessionID := strings.TrimSpace(c.createSessionID)
+	if sessionID == "" {
+		return controlclient.CommandResult{}, errors.New("unexpected CreateSession")
+	}
+	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted, SessionID: sessionID}, nil
 }
 
 func (*sessionClientAdapterTestClient) CloseSession(context.Context, controlclient.CloseSessionRequest) (controlclient.CommandResult, error) {
@@ -258,8 +373,11 @@ func (c *sessionClientAdapterTestClient) CompactSession(_ context.Context, reque
 	}, nil
 }
 
-func (c *sessionClientAdapterTestClient) InspectSession(context.Context, controlclient.StateRequest) (controlclient.SessionState, error) {
+func (c *sessionClientAdapterTestClient) InspectSession(_ context.Context, request controlclient.StateRequest) (controlclient.SessionState, error) {
 	state := c.state
+	if state.SessionID == "" {
+		state.SessionID = strings.TrimSpace(request.SessionID)
+	}
 	if state.SessionID == "" {
 		state.SessionID = "session-1"
 	}
@@ -267,10 +385,10 @@ func (c *sessionClientAdapterTestClient) InspectSession(context.Context, control
 	return state, nil
 }
 
-func (c *sessionClientAdapterTestClient) Reconnect(context.Context, controlclient.ReconnectRequest) (controlclient.ReconnectResult, error) {
+func (c *sessionClientAdapterTestClient) Reconnect(_ context.Context, request controlclient.ReconnectRequest) (controlclient.ReconnectResult, error) {
 	state := c.state
 	if state.SessionID == "" {
-		state.SessionID = "session-1"
+		state.SessionID = strings.TrimSpace(request.SessionID)
 	}
 	if state.Revision == 0 {
 		state.Revision = 4
@@ -282,6 +400,79 @@ func (c *sessionClientAdapterTestClient) Reconnect(context.Context, controlclien
 		State:        state,
 		Subscription: c.subscription,
 	}, nil
+}
+
+type sessionClientAdapterTestStatusClient struct{}
+
+func (sessionClientAdapterTestStatusClient) SessionStatus(context.Context, controlclient.StatusRequest) (controlstatus.StatusSnapshot, error) {
+	return controlstatus.StatusSnapshot{}, nil
+}
+
+type sessionClientAdapterTestConfigurationClient struct{}
+
+func (sessionClientAdapterTestConfigurationClient) ConfigureSessionMode(context.Context, controlclient.SessionModeRequest) (controlstatus.StatusSnapshot, error) {
+	return controlstatus.StatusSnapshot{}, nil
+}
+
+func (sessionClientAdapterTestConfigurationClient) RefreshSandbox(context.Context, controlclient.SandboxRequest) error {
+	return nil
+}
+
+type sessionClientAdapterTestAgentClient struct {
+	controlclient.AgentClient
+}
+
+type sessionClientAdapterTestCompletionClient struct {
+	controlclient.CompletionClient
+}
+
+type sessionClientAdapterTestPluginClient struct {
+	controlclient.PluginClient
+}
+
+type recordingCompletionClient struct {
+	controlclient.CompletionClient
+	slash   controlclient.CompletionRequest
+	resolve controlclient.CompletionRequest
+}
+
+func (c *recordingCompletionClient) CompleteSlashArg(_ context.Context, request controlclient.CompletionRequest) ([]controlclient.SlashArgCandidate, error) {
+	c.slash = request
+	return []controlclient.SlashArgCandidate{{Value: "mimo"}}, nil
+}
+
+func (c *recordingCompletionClient) ResolveSkill(_ context.Context, request controlclient.CompletionRequest) (controlclient.SkillResolveResult, error) {
+	c.resolve = request
+	return controlclient.SkillResolveResult{Canonical: request.Name}, nil
+}
+
+type recordingPluginClient struct {
+	controlclient.PluginClient
+	enable controlclient.PluginRequest
+}
+
+func (c *recordingPluginClient) EnablePlugin(_ context.Context, request controlclient.PluginRequest) (controlclient.PluginSnapshot, error) {
+	c.enable = request
+	return controlclient.PluginSnapshot{ID: request.ID}, nil
+}
+
+func (sessionClientAdapterTestConfigurationClient) ConnectModel(context.Context, controlclient.ConnectModelRequest) (controlstatus.StatusSnapshot, error) {
+	return controlstatus.StatusSnapshot{}, nil
+}
+func (sessionClientAdapterTestConfigurationClient) UseModel(context.Context, controlclient.UseModelRequest) (controlstatus.StatusSnapshot, error) {
+	return controlstatus.StatusSnapshot{}, nil
+}
+func (sessionClientAdapterTestConfigurationClient) DeleteModel(context.Context, controlclient.DeleteModelRequest) error {
+	return nil
+}
+func (sessionClientAdapterTestConfigurationClient) SetSandboxBackend(context.Context, controlclient.SandboxRequest) (controlstatus.StatusSnapshot, error) {
+	return controlstatus.StatusSnapshot{}, nil
+}
+func (sessionClientAdapterTestConfigurationClient) PrepareSandbox(context.Context, controlclient.SandboxRequest) (controlstatus.StatusSnapshot, error) {
+	return controlstatus.StatusSnapshot{}, nil
+}
+func (sessionClientAdapterTestConfigurationClient) RepairSandbox(context.Context, controlclient.SandboxRequest) (controlstatus.StatusSnapshot, error) {
+	return controlstatus.StatusSnapshot{}, nil
 }
 
 func (c *sessionClientAdapterTestClient) Prompt(_ context.Context, request controlclient.PromptRequest) (controlclient.CommandResult, error) {

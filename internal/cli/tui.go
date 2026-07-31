@@ -27,10 +27,6 @@ type tuiOptions struct {
 }
 
 func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appCfg gatewayapp.Config, modelText string, options tuiOptions, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
-	driver, err := local.NewLocalAdapter(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
-	if err != nil {
-		return err
-	}
 	principal := controlclient.Principal{ID: stack.UserID}
 	sessionClient, err := controlclient.BindSessionClient(stack.ControlClient(), principal)
 	if err != nil {
@@ -40,11 +36,59 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appC
 	if err != nil {
 		return err
 	}
-	typedDriver, err := controladapter.NewSessionClientAdapterWithParticipants(
-		driver,
-		sessionClient,
-		participantClient,
-	)
+	statusService, err := local.NewStatusService(stack)
+	if err != nil {
+		return err
+	}
+	statusClient, err := controlclient.BindStatusClient(statusService, principal)
+	if err != nil {
+		return err
+	}
+	configurationService, err := local.NewConfigurationService(stack, statusService)
+	if err != nil {
+		return err
+	}
+	configurationClient, err := controlclient.BindConfigurationClient(configurationService, principal)
+	if err != nil {
+		return err
+	}
+	agentService, err := local.NewAgentService(stack)
+	if err != nil {
+		return err
+	}
+	agentClient, err := controlclient.BindAgentClient(agentService, principal)
+	if err != nil {
+		return err
+	}
+	completionService, err := local.NewCompletionService(stack)
+	if err != nil {
+		return err
+	}
+	completionClient, err := controlclient.BindCompletionClient(completionService, principal)
+	if err != nil {
+		return err
+	}
+	pluginService, err := local.NewPluginService(stack)
+	if err != nil {
+		return err
+	}
+	pluginClient, err := controlclient.BindPluginClient(pluginService, principal)
+	if err != nil {
+		return err
+	}
+	typedDriver, err := controladapter.NewAppServerAdapter(controladapter.AppServerAdapterConfig{
+		PreferredSessionID: strings.TrimSpace(sessionID),
+		WorkspaceKey:       strings.TrimSpace(stack.Workspace.Key),
+		WorkspaceDir:       strings.TrimSpace(stack.Workspace.CWD),
+		Surface:            "cli-tui",
+		Sessions:           sessionClient,
+		Participants:       participantClient,
+		Status:             statusClient,
+		Configuration:      configurationClient,
+		Agents:             agentClient,
+		Completion:         completionClient,
+		Plugins:            pluginClient,
+	})
 	if err != nil {
 		return err
 	}
@@ -73,8 +117,7 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appC
 		NoAnimation:         options.NoAnimation,
 		TaskStreams:         taskClient,
 		OnStart: func() {
-			stack.StartApprovalRecovery(programCtx)
-			startTUISandboxRefresh(programCtx, stack, sender)
+			startTUISandboxRefresh(programCtx, typedDriver, sender)
 			startTUIUpdateCheck(programCtx, appCfg.StoreDir, sender)
 		},
 		OnUpdateRequested: func() {
@@ -95,14 +138,18 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appC
 	return nil
 }
 
-func startTUISandboxRefresh(ctx context.Context, stack *gatewayapp.Stack, sender *tuiapp.ProgramSender) {
-	if stack == nil || sender == nil {
+type tuiSandboxRefresher interface {
+	RefreshSandbox(context.Context) error
+}
+
+func startTUISandboxRefresh(ctx context.Context, service tuiSandboxRefresher, sender *tuiapp.ProgramSender) {
+	if service == nil || sender == nil {
 		return
 	}
 	go func() {
 		refreshCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
-		if err := stack.RefreshSandbox(refreshCtx); err != nil && !errors.Is(err, context.Canceled) {
+		if err := service.RefreshSandbox(refreshCtx); err != nil && !errors.Is(err, context.Canceled) {
 			sender.SendMsg(tuiapp.LogChunkMsg{Chunk: formatTUISandboxRefreshError(err) + "\n"})
 		}
 	}()

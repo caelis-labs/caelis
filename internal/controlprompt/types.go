@@ -1,8 +1,7 @@
 package controlprompt
 
 import (
-	"time"
-
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -43,32 +42,9 @@ type SessionSnapshot struct {
 	Reconnect SessionReconnect
 }
 
-type ResumeCandidate struct {
-	SessionID string
-	Title     string
-	Prompt    string
-	Model     string
-	Workspace string
-	Age       string
-	UpdatedAt time.Time
-}
-
-type CompletionCandidate struct {
-	Value   string
-	Display string
-	Kind    string
-	Detail  string
-	Path    string
-}
-
-type SlashArgCandidate struct {
-	Value                 string
-	Display               string
-	Detail                string
-	NoAuth                bool
-	ModelMetadataComplete bool
-	ModelImageInputKnown  bool
-}
+type ResumeCandidate = controlclient.ResumeCandidate
+type CompletionCandidate = controlclient.CompletionCandidate
+type SlashArgCandidate = controlclient.SlashArgCandidate
 
 // SlashCommandResultKind identifies the domain payload produced by a slash
 // command. Surfaces decide how to render each payload.
@@ -122,53 +98,10 @@ type CommandHelpItem struct {
 	LocalDuringACP bool     `json:"local_during_acp,omitempty"`
 }
 
-type AgentCandidate struct {
-	Name        string
-	Description string
-}
-
-type AgentParticipantSnapshot struct {
-	ID        string
-	Label     string
-	AgentName string
-	Kind      string
-	Role      string
-	Source    string
-	SessionID string
-}
-
-type AgentStatusSnapshot struct {
-	SessionID                 string
-	ControllerKind            string
-	ControllerLabel           string
-	ControllerEpoch           string
-	ControllerModel           string
-	ControllerReasoningEffort string
-	ControllerCommands        []string
-	ControllerModels          []SlashArgCandidate
-	ControllerEfforts         []SlashArgCandidate
-	HasActiveTurn             bool
-	ActiveTurnKind            string
-	AvailableAgents           []AgentCandidate
-	Participants              []AgentParticipantSnapshot
-	DelegatedParticipants     []AgentParticipantSnapshot
-}
-
-type ConnectConfig struct {
-	Provider                       string
-	EndpointID                     string
-	Model                          string
-	BaseURL                        string
-	TimeoutSeconds                 int
-	StreamFirstEventTimeoutSeconds int
-	APIKey                         string
-	AuthType                       string
-	ContextWindowTokens            int
-	MaxOutputTokens                int
-	ReasoningEffort                string
-	ReasoningLevels                []string
-	ImageInput                     *bool
-}
+type AgentCandidate = controlclient.AgentCandidate
+type AgentParticipantSnapshot = controlclient.AgentParticipantSnapshot
+type AgentStatusSnapshot = controlclient.AgentStatusSnapshot
+type ConnectConfig = controlclient.ConnectConfig
 
 type ApprovalDecision struct {
 	// RequestID must match the approval_request_id on the permission Envelope
@@ -182,36 +115,6 @@ type ApprovalDecision struct {
 	ReviewText string
 }
 
-type MCPServerSnapshot struct {
-	Name    string   `json:"name"`
-	Status  string   `json:"status"`
-	Tools   []string `json:"tools,omitempty"`
-	Warning string   `json:"warning,omitempty"`
-}
-
-type PluginSnapshot struct {
-	ID          string              `json:"id"`
-	Name        string              `json:"name"`
-	Version     string              `json:"version"`
-	Description string              `json:"description"`
-	Root        string              `json:"root"`
-	Enabled     bool                `json:"enabled"`
-	Skills      []string            `json:"skills"`
-	Hooks       []string            `json:"hooks"`
-	Agents      []string            `json:"agents,omitempty"`
-	MCPServers  []MCPServerSnapshot `json:"mcp_servers,omitempty"`
-	Status      string              `json:"status"`
-	Warning     string              `json:"warning,omitempty"`
-}
-
-type MarketplaceSnapshot struct {
-	Name                              string   `json:"name"`
-	Description                       string   `json:"description,omitempty"`
-	Owner                             string   `json:"owner,omitempty"`
-	Source                            string   `json:"source,omitempty"`
-	Root                              string   `json:"root,omitempty"`
-	Version                           string   `json:"version,omitempty"`
-	PluginRoot                        string   `json:"plugin_root,omitempty"`
-	AllowCrossMarketplaceDependencies []string `json:"allow_cross_marketplace_dependencies,omitempty"`
-	PluginCount                       int      `json:"plugin_count,omitempty"`
-}
+type MCPServerSnapshot = controlclient.MCPServerSnapshot
+type PluginSnapshot = controlclient.PluginSnapshot
+type MarketplaceSnapshot = controlclient.MarketplaceSnapshot

@@ -385,6 +385,12 @@ type LifecycleEvent struct {
 	StopReason *string `json:"stopReason,omitempty"`
 }
 
+type ModelUsageSnapshot struct {
+	Model    *string       `json:"model,omitempty"`
+	Provider *string       `json:"provider,omitempty"`
+	Usage    UsageSnapshot `json:"usage"`
+}
+
 type NoticeEnvelope struct {
 	Meta          *ACPMetadata        `json:"_meta,omitempty"`
 	Actor         *string             `json:"actor,omitempty"`
@@ -600,6 +606,28 @@ type SDKMetadata map[string]JSONValue
 
 type SDKUsageMetadata map[string]JSONValue
 
+type SandboxSetupCheck struct {
+	Counts    map[string]any `json:"counts,omitempty"`
+	Current   *bool          `json:"current,omitempty"`
+	Details   map[string]any `json:"details,omitempty"`
+	Error     *string        `json:"error,omitempty"`
+	Name      *string        `json:"name,omitempty"`
+	Reason    *string        `json:"reason,omitempty"`
+	Required  *bool          `json:"required,omitempty"`
+	Root      *string        `json:"root,omitempty"`
+	Scope     *string        `json:"scope,omitempty"`
+	UpdatedAt *time.Time     `json:"updated_at,omitempty"`
+	Version   *int           `json:"version,omitempty"`
+}
+
+type SandboxSetupStatus struct {
+	Checks   []SandboxSetupCheck `json:"checks,omitempty"`
+	Counts   map[string]any      `json:"counts,omitempty"`
+	Details  map[string]any      `json:"details,omitempty"`
+	Error    *string             `json:"error,omitempty"`
+	Required *bool               `json:"required,omitempty"`
+}
+
 type ServerInfo struct {
 	ApiVersion      string `json:"api_version"`
 	EnvelopeVersion string `json:"envelope_version"`
@@ -670,6 +698,81 @@ type SessionUpdateEnvelope struct {
 	SessionId     *string             `json:"session_id,omitempty"`
 	TurnId        *string             `json:"turn_id,omitempty"`
 	Update        ACPUpdate           `json:"update"`
+}
+
+type StatusModel struct {
+	Display         *string `json:"display,omitempty"`
+	MissingApiKey   *bool   `json:"missing_api_key,omitempty"`
+	Name            *string `json:"name,omitempty"`
+	Provider        *string `json:"provider,omitempty"`
+	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
+}
+
+type StatusRateLimit struct {
+	Id      *string                 `json:"id,omitempty"`
+	Name    *string                 `json:"name,omitempty"`
+	Windows []StatusRateLimitWindow `json:"windows,omitempty"`
+}
+
+type StatusRateLimitWindow struct {
+	DurationMinutes *int       `json:"duration_minutes,omitempty"`
+	Kind            *string    `json:"kind,omitempty"`
+	Label           *string    `json:"label,omitempty"`
+	ResetsAt        *time.Time `json:"resets_at,omitempty"`
+	UsedPercent     *float64   `json:"used_percent,omitempty"`
+}
+
+type StatusRateLimits struct {
+	CapturedAt *time.Time        `json:"captured_at,omitempty"`
+	Limits     []StatusRateLimit `json:"limits,omitempty"`
+	Plan       *string           `json:"plan,omitempty"`
+	Provider   *string           `json:"provider,omitempty"`
+}
+
+type StatusRuntime struct {
+	ActiveJobs     *int    `json:"active_jobs,omitempty"`
+	ActiveTurnKind *string `json:"active_turn_kind,omitempty"`
+	Running        *bool   `json:"running,omitempty"`
+}
+
+type StatusSandbox struct {
+	FallbackReason   *string            `json:"fallback_reason,omitempty"`
+	FullAccessMode   *bool              `json:"full_access_mode,omitempty"`
+	HostExecution    *bool              `json:"host_execution,omitempty"`
+	InstallHint      *string            `json:"install_hint,omitempty"`
+	RequestedBackend *string            `json:"requested_backend,omitempty"`
+	ResolvedBackend  *string            `json:"resolved_backend,omitempty"`
+	Route            *string            `json:"route,omitempty"`
+	SecuritySummary  *string            `json:"security_summary,omitempty"`
+	Setup            SandboxSetupStatus `json:"setup"`
+	Type             *string            `json:"type,omitempty"`
+}
+
+type StatusSession struct {
+	Id          *string `json:"id,omitempty"`
+	ModeLabel   *string `json:"mode_label,omitempty"`
+	SessionMode *string `json:"session_mode,omitempty"`
+	StoreDir    *string `json:"store_dir,omitempty"`
+	Surface     *string `json:"surface,omitempty"`
+	Workspace   *string `json:"workspace,omitempty"`
+}
+
+type StatusSnapshot struct {
+	ModelStatus   StatusModel      `json:"model_status"`
+	RateLimits    StatusRateLimits `json:"rate_limits"`
+	Runtime       StatusRuntime    `json:"runtime"`
+	SandboxStatus StatusSandbox    `json:"sandbox_status"`
+	Session       StatusSession    `json:"session"`
+	Usage         StatusUsage      `json:"usage"`
+}
+
+type StatusUsage struct {
+	CompletionTokens    *int                 `json:"completion_tokens,omitempty"`
+	ContextWindowTokens *int                 `json:"context_window_tokens,omitempty"`
+	PromptTokens        *int                 `json:"prompt_tokens,omitempty"`
+	SessionUsageByModel []ModelUsageSnapshot `json:"session_usage_by_model,omitempty"`
+	SessionUsageTotal   UsageSnapshot        `json:"session_usage_total"`
+	TotalTokens         *int                 `json:"total_tokens,omitempty"`
 }
 
 type SteerRequest struct {
@@ -789,6 +892,14 @@ type UsageCost struct {
 
 type UsageMetadata map[string]JSONValue
 
+type UsageSnapshot struct {
+	CachedInputTokens *int `json:"cached_input_tokens,omitempty"`
+	CompletionTokens  *int `json:"completion_tokens,omitempty"`
+	PromptTokens      *int `json:"prompt_tokens,omitempty"`
+	ReasoningTokens   *int `json:"reasoning_tokens,omitempty"`
+	TotalTokens       *int `json:"total_tokens,omitempty"`
+}
+
 type WriteBase struct {
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
@@ -796,4 +907,4 @@ type WriteBase struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
-var OperationIDs = []string{"cancelSessionTurn", "closeSession", "compactSession", "createSession", "getSessionState", "initializeClient", "listSessionTasks", "listSessions", "promptSession", "readTaskEvents", "reconnectSession", "resolveApproval", "steerSession", "subscribeTaskEvents"}
+var OperationIDs = []string{"cancelSessionTurn", "closeSession", "compactSession", "createSession", "getSessionState", "getSessionStatus", "initializeClient", "listSessionTasks", "listSessions", "promptSession", "readTaskEvents", "reconnectSession", "resolveApproval", "steerSession", "subscribeTaskEvents"}

@@ -8,118 +8,118 @@ import (
 
 // UsageSnapshot is one provider/model token-usage aggregate.
 type UsageSnapshot struct {
-	PromptTokens      int
-	CachedInputTokens int
-	CompletionTokens  int
-	ReasoningTokens   int
-	TotalTokens       int
+	PromptTokens      int `json:"prompt_tokens,omitempty"`
+	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
+	CompletionTokens  int `json:"completion_tokens,omitempty"`
+	ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
+	TotalTokens       int `json:"total_tokens,omitempty"`
 }
 
 // ModelUsageSnapshot associates token usage with one provider model.
 type ModelUsageSnapshot struct {
-	Provider string
-	Model    string
-	Usage    UsageSnapshot
+	Provider string        `json:"provider,omitempty"`
+	Model    string        `json:"model,omitempty"`
+	Usage    UsageSnapshot `json:"usage"`
 }
 
 // StatusSession describes the active product Session for status consumers.
 type StatusSession struct {
-	ID          string
-	Workspace   string
-	StoreDir    string
-	ModeLabel   string
-	SessionMode string
-	Surface     string
+	ID          string `json:"id,omitempty"`
+	Workspace   string `json:"workspace,omitempty"`
+	StoreDir    string `json:"store_dir,omitempty"`
+	ModeLabel   string `json:"mode_label,omitempty"`
+	SessionMode string `json:"session_mode,omitempty"`
+	Surface     string `json:"surface,omitempty"`
 }
 
 // StatusModel describes the currently selected model.
 type StatusModel struct {
-	Display         string
-	Provider        string
-	Name            string
-	ReasoningEffort string
-	MissingAPIKey   bool
+	Display         string `json:"display,omitempty"`
+	Provider        string `json:"provider,omitempty"`
+	Name            string `json:"name,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	MissingAPIKey   bool   `json:"missing_api_key,omitempty"`
 }
 
 // StatusSandbox describes the resolved sandbox route and setup state.
 type StatusSandbox struct {
-	Type             string
-	RequestedBackend string
-	ResolvedBackend  string
-	Route            string
-	FallbackReason   string
-	InstallHint      string
-	Setup            SandboxSetupStatus
-	SecuritySummary  string
-	HostExecution    bool
-	FullAccessMode   bool
+	Type             string             `json:"type,omitempty"`
+	RequestedBackend string             `json:"requested_backend,omitempty"`
+	ResolvedBackend  string             `json:"resolved_backend,omitempty"`
+	Route            string             `json:"route,omitempty"`
+	FallbackReason   string             `json:"fallback_reason,omitempty"`
+	InstallHint      string             `json:"install_hint,omitempty"`
+	Setup            SandboxSetupStatus `json:"setup"`
+	SecuritySummary  string             `json:"security_summary,omitempty"`
+	HostExecution    bool               `json:"host_execution,omitempty"`
+	FullAccessMode   bool               `json:"full_access_mode,omitempty"`
 }
 
 // StatusUsage describes current-context plus cumulative total and per-model
 // Session token usage.
 type StatusUsage struct {
-	PromptTokens        int
-	CompletionTokens    int
-	TotalTokens         int
-	ContextWindowTokens int
-	SessionUsageTotal   UsageSnapshot
-	SessionUsageByModel []ModelUsageSnapshot
+	PromptTokens        int                  `json:"prompt_tokens,omitempty"`
+	CompletionTokens    int                  `json:"completion_tokens,omitempty"`
+	TotalTokens         int                  `json:"total_tokens,omitempty"`
+	ContextWindowTokens int                  `json:"context_window_tokens,omitempty"`
+	SessionUsageTotal   UsageSnapshot        `json:"session_usage_total"`
+	SessionUsageByModel []ModelUsageSnapshot `json:"session_usage_by_model,omitempty"`
 }
 
 // StatusRuntime describes the live execution state exposed to status surfaces.
 type StatusRuntime struct {
-	ActiveJobs     int
-	ActiveTurnKind string
-	Running        bool
+	ActiveJobs     int    `json:"active_jobs,omitempty"`
+	ActiveTurnKind string `json:"active_turn_kind,omitempty"`
+	Running        bool   `json:"running,omitempty"`
 }
 
 // StatusRateLimits is the provider-neutral account usage projection exposed
 // to TUI, headless, Control Host clients, and future GUI status surfaces.
 type StatusRateLimits struct {
-	Provider   string
-	Plan       string
-	CapturedAt time.Time
-	Limits     []StatusRateLimit
+	Provider   string            `json:"provider,omitempty"`
+	Plan       string            `json:"plan,omitempty"`
+	CapturedAt time.Time         `json:"captured_at,omitempty"`
+	Limits     []StatusRateLimit `json:"limits,omitempty"`
 }
 
 // StatusRateLimit is one provider account quota bucket.
 type StatusRateLimit struct {
-	ID      string
-	Name    string
-	Windows []StatusRateLimitWindow
+	ID      string                  `json:"id,omitempty"`
+	Name    string                  `json:"name,omitempty"`
+	Windows []StatusRateLimitWindow `json:"windows,omitempty"`
 }
 
 // StatusRateLimitWindow is one provider quota window.
 type StatusRateLimitWindow struct {
-	Kind            string
-	Label           string
-	UsedPercent     float64
-	DurationMinutes int64
-	ResetsAt        time.Time
+	Kind            string    `json:"kind,omitempty"`
+	Label           string    `json:"label,omitempty"`
+	UsedPercent     float64   `json:"used_percent,omitempty"`
+	DurationMinutes int64     `json:"duration_minutes,omitempty"`
+	ResetsAt        time.Time `json:"resets_at,omitempty"`
 }
 
 // SandboxSetupStatus is the normalized setup result for one sandbox backend.
 type SandboxSetupStatus struct {
-	Required bool
-	Error    string
-	Details  map[string]string
-	Counts   map[string]int
-	Checks   []SandboxSetupCheck
+	Required bool                `json:"required,omitempty"`
+	Error    string              `json:"error,omitempty"`
+	Details  map[string]string   `json:"details,omitempty"`
+	Counts   map[string]int      `json:"counts,omitempty"`
+	Checks   []SandboxSetupCheck `json:"checks,omitempty"`
 }
 
 // SandboxSetupCheck is one named sandbox setup check.
 type SandboxSetupCheck struct {
-	Name      string
-	Scope     string
-	Current   bool
-	Required  bool
-	Reason    string
-	Error     string
-	Version   int
-	Root      string
-	UpdatedAt time.Time
-	Details   map[string]string
-	Counts    map[string]int
+	Name      string            `json:"name,omitempty"`
+	Scope     string            `json:"scope,omitempty"`
+	Current   bool              `json:"current,omitempty"`
+	Required  bool              `json:"required,omitempty"`
+	Reason    string            `json:"reason,omitempty"`
+	Error     string            `json:"error,omitempty"`
+	Version   int               `json:"version,omitempty"`
+	Root      string            `json:"root,omitempty"`
+	UpdatedAt time.Time         `json:"updated_at,omitempty"`
+	Details   map[string]string `json:"details,omitempty"`
+	Counts    map[string]int    `json:"counts,omitempty"`
 }
 
 // CloneSandboxSetupStatus returns an isolated normalized copy.
@@ -178,12 +178,12 @@ func cloneTrimmedStringMap(in map[string]string) map[string]string {
 
 // StatusSnapshot is the product-level status read model.
 type StatusSnapshot struct {
-	Session       StatusSession
-	ModelStatus   StatusModel
-	SandboxStatus StatusSandbox
-	Usage         StatusUsage
-	RateLimits    StatusRateLimits
-	Runtime       StatusRuntime
+	Session       StatusSession    `json:"session"`
+	ModelStatus   StatusModel      `json:"model_status"`
+	SandboxStatus StatusSandbox    `json:"sandbox_status"`
+	Usage         StatusUsage      `json:"usage"`
+	RateLimits    StatusRateLimits `json:"rate_limits"`
+	Runtime       StatusRuntime    `json:"runtime"`
 }
 
 // SandboxSetupView describes whether the current sandbox needs setup or repair.

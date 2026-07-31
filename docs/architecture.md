@@ -166,18 +166,14 @@ Document responsibilities are intentionally separate:
   Assembly and app configuration mutation share one Host lock, while release
   first hides its Runtime from routing, waits already-routed synchronous
   mutations, and shutdown drains in-flight assembly and release before closing
-  all Session and transitional default Gateways. Headless and product ACP
-  Session lifecycle plus main-Turn ingress use the typed in-process Session
-  client. The embedded TUI also uses typed clients for main-Turn and Task
-  observation. Product ACP also routes `/review`, direct-Agent participant
-  starts/follow-ups, cancellation, approval, and observation through focused
-  typed participant clients; direct-command discovery reads the same fixed
-  Session Runtime placement snapshot and does not activate an idle Runtime.
-  Until the remaining TUI lifecycle/status and
-  participant paths are Session-directed, TUI default-Stack Sessions retain an
-  explicit process-local ownership marker; the marker is a
-  migration fence, not durable configuration, and is removed with the private
-  default-Gateway path.
+  all Session and transitional default Gateways. Headless, TUI, and product ACP
+  Session lifecycle plus main-Turn ingress use typed in-process AppServer
+  clients. TUI and product ACP slash routers also use focused status,
+  configuration, Agent, participant, completion/skill, and plugin clients;
+  slash parsing and display stay client-side. The production TUI facade
+  contains no Runtime, Stack, or embedded compatibility Adapter. Product ACP
+  direct-command discovery reads the same fixed Session Runtime placement
+  snapshot and does not activate an idle Runtime.
   `UserID` remains a compatibility authorization/persistence field and is not a
   Runtime partition key.
 - `internal/kernel`: Control-owned Session/Turn coordination, gateway
@@ -186,18 +182,23 @@ Document responsibilities are intentionally separate:
 - other `internal/control*` packages: current Control integration
   implementations that may converge with adjacent `app/*` and `control/*`
   ownership before any later package split.
-- `app/gatewayapp/controladapter`: transitional in-process implementation of
-  the private `internal/controlprompt.Service` prompt facade. Do not add
-  product-client operations to this aggregate interface or recreate `ports/*`;
-  new capabilities belong in coherent `control/*` packages.
+- `app/gatewayapp/controladapter`: server-side adapters for existing Control
+  semantics plus the presentation-facing typed-client facade. The production
+  facade contains clients only; the older `Adapter` remains behind local
+  focused services and explicit legacy/eval tests until those server-side
+  assemblers are replaced. Do not add product-client operations to the private
+  `internal/controlprompt.Service` aggregate or recreate `ports/*`; stable
+  capabilities belong in coherent `control/*` packages.
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
   product integration adapters that make external endpoints implement the same
   SDK controller/participant contracts used by built-in Agents. Product
-  assembly supplies principal-bound Session, participant, and Task clients;
-  ordinary prompts, lifecycle operations, and execution-bearing participant
-  commands fail closed on those clients. The direct Runtime adapter remains
-  only for generic/eval embedding, while non-execution slash/status/config
-  facets retain the documented local compatibility adapter.
+  assembly supplies principal-bound Session, participant, Task, status,
+  configuration, Agent, completion, and plugin clients; prompt and slash
+  operations fail closed on those clients. The direct Runtime adapter remains
+  only for generic/eval embedding. Product ACP still receives the local ACP
+  mode/config/model projection and terminal stream adapter directly; moving
+  those ACP-protocol facets behind focused AppServer contracts is an explicit
+  retirement item, not an alternative prompt or Turn authority.
   The bridge does not import presentation packages.
 - `platform/*`: product support code for platform-specific host behavior.
 

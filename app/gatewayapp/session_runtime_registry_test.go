@@ -158,7 +158,52 @@ func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
 	}
 }
 
-func TestDefaultRuntimeSessionRemainsControlRoutedDuringTUIMigration(t *testing.T) {
+func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "workspace-observe", "Observe rule.")
+	stack, err := NewLocalStack(Config{
+		StoreDir: t.TempDir(), WorkspaceKey: "workspace-observe", WorkspaceCWD: workspace,
+		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	client := newWorkspaceRuntimeHTTPClient(t, stack, "local-user")
+	sessionID := createWorkspaceRuntimeTestSession(t, client, "create-observe", "session-observe", "workspace-observe", workspace)
+	principal := controlclient.Principal{ID: "local-user"}
+
+	observed, err := stack.AcquireControlRuntime(ctx, principal, sessionID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.Runtime() == nil || observed.Session().SessionID != sessionID || observed.Session().CWD != workspace {
+		t.Fatalf("observed lease = runtime=%p session=%#v", observed.Runtime(), observed.Session())
+	}
+	if _, ok := stack.sessionRuntimes.loaded(sessionID); ok {
+		t.Fatal("read-only Control observation retained an idle Session Runtime")
+	}
+	if err := observed.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := activateSessionRuntime(t, stack, sessionID)
+	pinned, err := stack.AcquireControlRuntime(ctx, principal, sessionID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pinned.Runtime() != loaded.stack {
+		t.Fatalf("loaded Runtime lease = %p, want %p", pinned.Runtime(), loaded.stack)
+	}
+	if err := pinned.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if current, ok := stack.sessionRuntimes.loaded(sessionID); !ok || current != loaded {
+		t.Fatal("closing an observation lease released the Session activation")
+	}
+}
+
+func TestDefaultRuntimeSessionRemainsControlRoutedForLegacyAdapter(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
 	allowStop := make(chan struct{})
@@ -1168,6 +1213,7 @@ func newWorkspaceRuntimeHTTPClient(
 	}
 	controlServer, err := controlserver.New(controlserver.HandlerConfig{
 		Service:       stack.ControlClient(),
+		Status:        gatewayTestStatusService{},
 		TaskStreams:   stack.TaskStreams(),
 		Authenticator: authenticator,
 		AllowedHosts:  []string{"127.0.0.1", "localhost", "::1"},

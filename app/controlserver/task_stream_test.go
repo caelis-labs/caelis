@@ -118,6 +118,7 @@ func newTaskTestServer(t *testing.T, tasks taskstream.Service) *Server {
 	t.Helper()
 	server, err := New(HandlerConfig{
 		Service:       &fakeService{},
+		Status:        staticStatusService{},
 		TaskStreams:   tasks,
 		Authenticator: testAuthenticator(),
 		AllowedHosts:  []string{"example.test", "127.0.0.1"},

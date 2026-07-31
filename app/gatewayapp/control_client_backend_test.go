@@ -20,6 +20,7 @@ import (
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/client/httpclient"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
 
@@ -675,7 +676,7 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	server, err := controlserver.New(controlserver.HandlerConfig{
-		Service: service, TaskStreams: controlClientNoopTaskStreams{}, Authenticator: authenticator,
+		Service: service, Status: gatewayTestStatusService{}, TaskStreams: controlClientNoopTaskStreams{}, Authenticator: authenticator,
 		AllowedHosts: []string{"127.0.0.1", "localhost", "::1"},
 	})
 	if err != nil {
@@ -732,6 +733,12 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	if err := stack.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+type gatewayTestStatusService struct{}
+
+func (gatewayTestStatusService) SessionStatus(context.Context, controlclient.Principal, controlclient.StatusRequest) (controlstatus.StatusSnapshot, error) {
+	return controlstatus.StatusSnapshot{}, nil
 }
 
 type controlClientNoopTaskStreams struct{}

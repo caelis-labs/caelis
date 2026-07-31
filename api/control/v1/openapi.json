@@ -111,6 +111,25 @@
         }
       }
     },
+    "/sessions/{session_id}/status": {
+      "get": {
+        "operationId": "getSessionStatus",
+        "parameters": [
+          {"$ref": "#/components/parameters/SessionID"},
+          {"name": "surface", "in": "query", "schema": {"type": "string"}},
+          {"name": "diagnostics", "in": "query", "schema": {"type": "boolean"}}
+        ],
+        "responses": {
+          "200": {"description": "Session-scoped product status", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StatusSnapshot"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    },
     "/sessions/{session_id}/reconnect": {
       "get": {
         "operationId": "reconnectSession",
@@ -487,6 +506,102 @@
       },
       "CloseSessionRequest": {"allOf": [{"$ref": "#/components/schemas/WriteBase"}], "unevaluatedProperties": false},
       "CompactSessionRequest": {"allOf": [{"$ref": "#/components/schemas/WriteBase"}], "unevaluatedProperties": false},
+      "StatusSession": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"}, "workspace": {"type": "string"}, "store_dir": {"type": "string"},
+          "mode_label": {"type": "string"}, "session_mode": {"type": "string"}, "surface": {"type": "string"}
+        }
+      },
+      "StatusModel": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "display": {"type": "string"}, "provider": {"type": "string"}, "name": {"type": "string"},
+          "reasoning_effort": {"type": "string"}, "missing_api_key": {"type": "boolean"}
+        }
+      },
+      "SandboxSetupCheck": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"}, "scope": {"type": "string"}, "current": {"type": "boolean"},
+          "required": {"type": "boolean"}, "reason": {"type": "string"}, "error": {"type": "string"},
+          "version": {"type": "integer"}, "root": {"type": "string"}, "updated_at": {"type": "string", "format": "date-time"},
+          "details": {"type": "object", "additionalProperties": {"type": "string"}},
+          "counts": {"type": "object", "additionalProperties": {"type": "integer"}}
+        }
+      },
+      "SandboxSetupStatus": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "required": {"type": "boolean"}, "error": {"type": "string"},
+          "details": {"type": "object", "additionalProperties": {"type": "string"}},
+          "counts": {"type": "object", "additionalProperties": {"type": "integer"}},
+          "checks": {"type": "array", "items": {"$ref": "#/components/schemas/SandboxSetupCheck"}}
+        }
+      },
+      "StatusSandbox": {
+        "type": "object", "additionalProperties": false,
+        "required": ["setup"],
+        "properties": {
+          "type": {"type": "string"}, "requested_backend": {"type": "string"}, "resolved_backend": {"type": "string"},
+          "route": {"type": "string"}, "fallback_reason": {"type": "string"}, "install_hint": {"type": "string"},
+          "setup": {"$ref": "#/components/schemas/SandboxSetupStatus"}, "security_summary": {"type": "string"},
+          "host_execution": {"type": "boolean"}, "full_access_mode": {"type": "boolean"}
+        }
+      },
+      "UsageSnapshot": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "prompt_tokens": {"type": "integer"}, "cached_input_tokens": {"type": "integer"},
+          "completion_tokens": {"type": "integer"}, "reasoning_tokens": {"type": "integer"}, "total_tokens": {"type": "integer"}
+        }
+      },
+      "ModelUsageSnapshot": {
+        "type": "object", "additionalProperties": false, "required": ["usage"],
+        "properties": {"provider": {"type": "string"}, "model": {"type": "string"}, "usage": {"$ref": "#/components/schemas/UsageSnapshot"}}
+      },
+      "StatusUsage": {
+        "type": "object", "additionalProperties": false, "required": ["session_usage_total"],
+        "properties": {
+          "prompt_tokens": {"type": "integer"}, "completion_tokens": {"type": "integer"}, "total_tokens": {"type": "integer"},
+          "context_window_tokens": {"type": "integer"}, "session_usage_total": {"$ref": "#/components/schemas/UsageSnapshot"},
+          "session_usage_by_model": {"type": "array", "items": {"$ref": "#/components/schemas/ModelUsageSnapshot"}}
+        }
+      },
+      "StatusRuntime": {
+        "type": "object", "additionalProperties": false,
+        "properties": {"active_jobs": {"type": "integer"}, "active_turn_kind": {"type": "string"}, "running": {"type": "boolean"}}
+      },
+      "StatusRateLimitWindow": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "kind": {"type": "string"}, "label": {"type": "string"}, "used_percent": {"type": "number"},
+          "duration_minutes": {"type": "integer"}, "resets_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "StatusRateLimit": {
+        "type": "object", "additionalProperties": false,
+        "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "windows": {"type": "array", "items": {"$ref": "#/components/schemas/StatusRateLimitWindow"}}}
+      },
+      "StatusRateLimits": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "provider": {"type": "string"}, "plan": {"type": "string"}, "captured_at": {"type": "string", "format": "date-time"},
+          "limits": {"type": "array", "items": {"$ref": "#/components/schemas/StatusRateLimit"}}
+        }
+      },
+      "StatusSnapshot": {
+        "type": "object", "additionalProperties": false,
+        "required": ["session", "model_status", "sandbox_status", "usage", "rate_limits", "runtime"],
+        "properties": {
+          "session": {"$ref": "#/components/schemas/StatusSession"},
+          "model_status": {"$ref": "#/components/schemas/StatusModel"},
+          "sandbox_status": {"$ref": "#/components/schemas/StatusSandbox"},
+          "usage": {"$ref": "#/components/schemas/StatusUsage"},
+          "rate_limits": {"$ref": "#/components/schemas/StatusRateLimits"},
+          "runtime": {"$ref": "#/components/schemas/StatusRuntime"}
+        }
+      },
       "PromptTextContentPart": {
         "type": "object",
         "additionalProperties": false,

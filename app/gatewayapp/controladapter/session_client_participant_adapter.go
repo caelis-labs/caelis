@@ -17,8 +17,7 @@ import (
 )
 
 // StartAgentRun routes an execution-bearing direct Agent command through the
-// Runtime fixed to the active Session. The embedded Adapter remains the
-// compatibility path for callers that have not supplied a participant client.
+// Runtime fixed to the active Session.
 func (a *SessionClientAdapter) StartAgentRun(
 	ctx context.Context,
 	target string,
@@ -26,10 +25,7 @@ func (a *SessionClientAdapter) StartAgentRun(
 	attachments []controlprompt.Attachment,
 ) (controlprompt.Turn, error) {
 	if a == nil || a.participants == nil {
-		if a == nil || a.Adapter == nil {
-			return nil, errors.New("app/gatewayapp/controladapter: Session client adapter is unavailable")
-		}
-		return a.Adapter.StartAgentRun(ctx, target, prompt, attachments)
+		return nil, errors.New("app/gatewayapp/controladapter: participant client is unavailable")
 	}
 	handle := agentbinding.NormalizeHandle(agentbinding.Handle(target))
 	source := controlagents.DirectRunSource(handle)
@@ -78,10 +74,7 @@ func (a *SessionClientAdapter) ContinueAgentRun(
 	attachments []controlprompt.Attachment,
 ) (controlprompt.Turn, error) {
 	if a == nil || a.participants == nil {
-		if a == nil || a.Adapter == nil {
-			return nil, errors.New("app/gatewayapp/controladapter: Session client adapter is unavailable")
-		}
-		return a.Adapter.ContinueAgentRun(ctx, handle, prompt, attachments)
+		return nil, errors.New("app/gatewayapp/controladapter: participant client is unavailable")
 	}
 	state, err := a.activeClientSessionState(ctx)
 	if err != nil {
@@ -125,10 +118,7 @@ func (a *SessionClientAdapter) StartReview(
 	attachments []controlprompt.Attachment,
 ) (controlprompt.Turn, error) {
 	if a == nil || a.participants == nil {
-		if a == nil || a.Adapter == nil {
-			return nil, errors.New("app/gatewayapp/controladapter: Session client adapter is unavailable")
-		}
-		return a.Adapter.StartReview(ctx, instructions, attachments)
+		return nil, errors.New("app/gatewayapp/controladapter: participant client is unavailable")
 	}
 	state, err := a.activeClientSessionState(ctx)
 	if err != nil {
@@ -164,11 +154,15 @@ func (a *SessionClientAdapter) activeClientSessionState(ctx context.Context) (co
 	if a == nil || a.sessionClient == nil {
 		return controlclient.SessionState{}, errors.New("app/gatewayapp/controladapter: Session client is unavailable")
 	}
-	active, err := a.ensureSession(ctx)
-	if err != nil {
-		return controlclient.SessionState{}, err
+	sessionID := a.clientSessionID()
+	if sessionID == "" {
+		return a.ensureClientSession(ctx)
 	}
-	return a.sessionClient.InspectSession(ctx, controlclient.StateRequest{SessionID: active.SessionID})
+	state, err := a.sessionClient.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
+	if err == nil {
+		a.setClientSession(state.SessionID, state.CWD)
+	}
+	return state, err
 }
 
 func (a *SessionClientAdapter) wrapParticipantTurn(turn controlclient.TargetTurn) controlprompt.Turn {

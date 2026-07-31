@@ -44,6 +44,7 @@ func (f AuthenticatorFunc) Authenticate(request *http.Request) (controlclient.Pr
 // listener or process-lifecycle policy.
 type HandlerConfig struct {
 	Service       controlclient.Service
+	Status        controlclient.StatusService
 	TaskStreams   taskstream.Service
 	Authenticator Authenticator
 	AllowedHosts  []string
@@ -60,6 +61,9 @@ type Server struct {
 func New(config HandlerConfig) (*Server, error) {
 	if config.Service == nil {
 		return nil, errors.New("controlserver: control client service is required")
+	}
+	if config.Status == nil {
+		return nil, errors.New("controlserver: status service is required")
 	}
 	if config.TaskStreams == nil {
 		return nil, errors.New("controlserver: Task stream service is required")
@@ -100,6 +104,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE "+apiPrefix+"/sessions/{session_id}", s.closeSession)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/compact", s.compactSession)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/state", s.sessionState)
+	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/status", s.sessionStatus)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/reconnect", s.reconnectSession)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/prompt", s.prompt)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/steer", s.steer)
@@ -195,6 +200,28 @@ func (s *Server) sessionState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.config.Service.InspectSession(r.Context(), principal, controlclient.StateRequest{SessionID: r.PathValue("session_id")})
+	writeJSONResult(w, result, err)
+}
+
+func (s *Server) sessionStatus(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	diagnostics := false
+	if raw := strings.TrimSpace(r.URL.Query().Get("diagnostics")); raw != "" {
+		var err error
+		diagnostics, err = strconv.ParseBool(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "diagnostics must be a boolean")
+			return
+		}
+	}
+	result, err := s.config.Status.SessionStatus(r.Context(), principal, controlclient.StatusRequest{
+		SessionID:          r.PathValue("session_id"),
+		Surface:            strings.TrimSpace(r.URL.Query().Get("surface")),
+		IncludeDiagnostics: diagnostics,
+	})
 	writeJSONResult(w, result, err)
 }
 

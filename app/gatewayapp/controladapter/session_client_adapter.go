@@ -12,32 +12,52 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
-// SessionClientAdapter is the reversible TUI migration boundary for main-Turn
-// ingress. It delegates unconfigured compatibility facets to Adapter while
-// ordinary prompt, steer, approval, cancel, and observation use the common
-// typed Session client. The participant-aware constructor additionally routes
-// execution-bearing participant facets through a focused typed client.
-//
-// TODO(control-client-parity): remove the embedded Adapter only after Session
-// lifecycle, status/config commands, and TUI Side ACP participant operations
-// all have narrow typed clients. Until then NewSession and ResumeSession retain
-// the default-Stack ownership marker so private facets cannot target a
-// different Runtime than the typed main Turn.
+// SessionClientAdapter is the presentation-facing AppServer client facade. It
+// contains no Runtime or Stack handle; every semantic operation is routed
+// through a focused typed client.
 type SessionClientAdapter struct {
-	*Adapter
+	turns            *controlclient.SessionTurnClient
+	participants     *controlclient.ParticipantTurnClient
+	sessionClient    controlclient.SessionClient
+	statusClient     controlclient.StatusClient
+	configClient     controlclient.ConfigurationClient
+	agentClient      controlclient.AgentClient
+	completionClient controlclient.CompletionClient
+	pluginClient     controlclient.PluginClient
+	surface          string
+	workspaceKey     string
+	preferredID      string
 
-	turns         *controlclient.SessionTurnClient
-	participants  *controlclient.ParticipantTurnClient
-	sessionClient controlclient.SessionClient
+	sessionMu       sync.RWMutex
+	sessionChangeMu sync.Mutex
+	sessionID       string
+	workspaceDir    string
 
 	activeMu sync.Mutex
 	active   *sessionClientTurn
 }
 
-// NewSessionClientAdapter wraps one already-bound private Adapter. The
-// Adapter's existing Session binding remains the transitional source for
-// private facets; accepted main Turns have only the typed Session client as
-// their ingress and observation path.
+// AppServerAdapterConfig binds one presentation facade to a Session address
+// and the focused AppServer capabilities it may consume.
+type AppServerAdapterConfig struct {
+	SessionID          string
+	PreferredSessionID string
+	WorkspaceKey       string
+	WorkspaceDir       string
+	Surface            string
+	Sessions           controlclient.SessionClient
+	Participants       controlclient.ParticipantClient
+	Status             controlclient.StatusClient
+	Configuration      controlclient.ConfigurationClient
+	Agents             controlclient.AgentClient
+	Completion         controlclient.CompletionClient
+	Plugins            controlclient.PluginClient
+}
+
+// NewSessionClientAdapter is a compatibility constructor for focused client
+// tests. It extracts only immutable address metadata from Adapter; the result
+// never retains or calls Adapter. Remove it when the remaining legacy Adapter
+// tests have been rewritten around AppServerAdapterConfig.
 func NewSessionClientAdapter(
 	adapter *Adapter,
 	client controlclient.SessionClient,
@@ -49,12 +69,17 @@ func NewSessionClientAdapter(
 	if err != nil {
 		return nil, err
 	}
-	return &SessionClientAdapter{Adapter: adapter, turns: turns, sessionClient: client}, nil
+	active, _ := adapter.currentSession()
+	return &SessionClientAdapter{
+		turns: turns, sessionClient: client,
+		surface: strings.TrimSpace(adapter.bindingKey), workspaceKey: strings.TrimSpace(adapter.stack.Session.Workspace.Key),
+		sessionID: strings.TrimSpace(active.SessionID), workspaceDir: strings.TrimSpace(adapter.WorkspaceDir()),
+	}, nil
 }
 
-// NewSessionClientAdapterWithParticipants also routes execution-bearing Side
-// ACP commands through the addressed Session Runtime. TUI callers retain the
-// two-argument constructor until their participant parity slice lands.
+// NewSessionClientAdapterWithParticipants is the participant-aware companion
+// to the compatibility test constructor above. Production uses
+// NewAppServerAdapter.
 func NewSessionClientAdapterWithParticipants(
 	adapter *Adapter,
 	sessions controlclient.SessionClient,
@@ -72,14 +97,50 @@ func NewSessionClientAdapterWithParticipants(
 	return wrapped, nil
 }
 
+// NewAppServerAdapter composes the complete typed facade used by production
+// presentation surfaces.
+func NewAppServerAdapter(config AppServerAdapterConfig) (*SessionClientAdapter, error) {
+	turns, err := controlclient.NewSessionTurnClient(config.Sessions)
+	if err != nil {
+		return nil, err
+	}
+	participantTurns, err := controlclient.NewParticipantTurnClient(config.Sessions, config.Participants)
+	if err != nil {
+		return nil, err
+	}
+	if config.Status == nil {
+		return nil, errors.New("app/gatewayapp/controladapter: status client is required")
+	}
+	if config.Configuration == nil {
+		return nil, errors.New("app/gatewayapp/controladapter: configuration client is required")
+	}
+	if config.Agents == nil {
+		return nil, errors.New("app/gatewayapp/controladapter: Agent client is required")
+	}
+	if config.Completion == nil {
+		return nil, errors.New("app/gatewayapp/controladapter: completion client is required")
+	}
+	if config.Plugins == nil {
+		return nil, errors.New("app/gatewayapp/controladapter: plugin client is required")
+	}
+	return &SessionClientAdapter{
+		turns: turns, participants: participantTurns, sessionClient: config.Sessions,
+		statusClient: config.Status, configClient: config.Configuration,
+		agentClient: config.Agents, completionClient: config.Completion, pluginClient: config.Plugins,
+		surface: strings.TrimSpace(config.Surface), workspaceKey: strings.TrimSpace(config.WorkspaceKey),
+		preferredID: strings.TrimSpace(config.PreferredSessionID), sessionID: strings.TrimSpace(config.SessionID),
+		workspaceDir: strings.TrimSpace(config.WorkspaceDir),
+	}, nil
+}
+
 func (a *SessionClientAdapter) Submit(
 	ctx context.Context,
 	submission controlprompt.Submission,
 ) (controlprompt.Turn, error) {
-	if a == nil || a.Adapter == nil || a.turns == nil {
+	if a == nil || a.turns == nil {
 		return nil, errors.New("app/gatewayapp/controladapter: Session client adapter is unavailable")
 	}
-	activeSession, err := a.ensureSession(ctx)
+	state, err := a.ensureClientSession(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +168,7 @@ func (a *SessionClientAdapter) Submit(
 		return nil, nil
 	}
 	turn, err := a.turns.Start(ctx, controlclient.SessionTurnStartRequest{
-		SessionID:    activeSession.SessionID,
+		SessionID:    state.SessionID,
 		Input:        rawInput,
 		DisplayInput: displayInput,
 		ContentParts: contentParts,
@@ -122,17 +183,13 @@ func (a *SessionClientAdapter) Submit(
 }
 
 func (a *SessionClientAdapter) Interrupt(ctx context.Context) error {
-	if a == nil || a.Adapter == nil {
+	if a == nil {
 		return errors.New("app/gatewayapp/controladapter: Session client adapter is unavailable")
-	}
-	cancelCommand := a.activeCommandInterrupt()
-	if cancelCommand != nil {
-		cancelCommand()
 	}
 	if active := a.activeTurn(); active != nil {
 		return active.cancel(ctx, "tui interrupt")
 	}
-	return a.Adapter.Interrupt(ctx)
+	return noActiveTurnSubmissionError()
 }
 
 func (a *SessionClientAdapter) activeTurn() *sessionClientTurn {

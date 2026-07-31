@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	controlclient "github.com/caelis-labs/caelis/control/client"
 )
 
 // SkillResolver resolves slash-entered skill identities for prompt routing.
@@ -12,12 +14,7 @@ type SkillResolver interface {
 	ResolveSkill(context.Context, string) (SkillResolveResult, error)
 }
 
-// SkillResolveResult distinguishes one canonical skill from an ambiguous set.
-// An empty result means the reference was not found.
-type SkillResolveResult struct {
-	Canonical string
-	Matches   []string
-}
+type SkillResolveResult = controlclient.SkillResolveResult
 
 func (r router) dispatchDirectSkill(ctx context.Context, command string, args string, argsStart int, submission Submission) (Result, bool, error) {
 	if r.skillResolver == nil {

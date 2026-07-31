@@ -17,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/client/wirev1/generated"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
@@ -71,6 +72,39 @@ func TestHTTPCompactUsesSessionPathAndWriteHeaders(t *testing.T) {
 		service.compacted.ExpectedRevision == nil || *service.compacted.ExpectedRevision != 8 ||
 		service.compacted.ExpectedControllerEpoch != "epoch-1" {
 		t.Fatalf("principal/request = %#v %#v", service.principal, service.compacted)
+	}
+}
+
+func TestHTTPStatusAddressesSessionAndDiagnostics(t *testing.T) {
+	statusService := &recordingStatusService{status: controlstatus.StatusSnapshot{
+		Session: controlstatus.StatusSession{ID: "session-1", Surface: "pet"},
+	}}
+	server, err := New(HandlerConfig{
+		Service: &fakeService{}, Status: statusService, TaskStreams: &fakeTaskService{},
+		Authenticator: testAuthenticator(), AllowedHosts: []string{"example.test"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/status?surface=pet&diagnostics=true", nil)
+	authorizeTestRequest(request)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if statusService.principal.ID != "trusted-owner" ||
+		statusService.request.SessionID != "session-1" ||
+		statusService.request.Surface != "pet" ||
+		!statusService.request.IncludeDiagnostics {
+		t.Fatalf("principal/request = %#v %#v", statusService.principal, statusService.request)
+	}
+	var got controlstatus.StatusSnapshot
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Session.ID != "session-1" || got.Session.Surface != "pet" {
+		t.Fatalf("status response = %#v", got)
 	}
 }
 
@@ -184,10 +218,10 @@ func TestReconnectRejectsMismatchedResumeInputsAndCredentialQuery(t *testing.T) 
 }
 
 func TestNewRequiresNetworkAuthenticatorAndHostAllowlist(t *testing.T) {
-	if _, err := New(HandlerConfig{Service: &fakeService{}, TaskStreams: &fakeTaskService{}, AllowedHosts: []string{"example.test"}}); err == nil {
+	if _, err := New(HandlerConfig{Service: &fakeService{}, Status: staticStatusService{}, TaskStreams: &fakeTaskService{}, AllowedHosts: []string{"example.test"}}); err == nil {
 		t.Fatal("New accepted an unauthenticated HTTP handler")
 	}
-	if _, err := New(HandlerConfig{Service: &fakeService{}, TaskStreams: &fakeTaskService{}, Authenticator: testAuthenticator()}); err == nil {
+	if _, err := New(HandlerConfig{Service: &fakeService{}, Status: staticStatusService{}, TaskStreams: &fakeTaskService{}, Authenticator: testAuthenticator()}); err == nil {
 		t.Fatal("New accepted an empty Host allowlist")
 	}
 }
@@ -444,13 +478,34 @@ func (s *fakeService) Reconnect(_ context.Context, _ controlclient.Principal, re
 func newTestServer(t *testing.T, service controlclient.Service, heartbeat time.Duration) *Server {
 	t.Helper()
 	server, err := New(HandlerConfig{
-		Service: service, TaskStreams: &fakeTaskService{}, Authenticator: testAuthenticator(),
+		Service: service, Status: staticStatusService{}, TaskStreams: &fakeTaskService{}, Authenticator: testAuthenticator(),
 		AllowedHosts: []string{"example.test", "127.0.0.1"}, Heartbeat: heartbeat,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return server
+}
+
+type staticStatusService struct {
+	status controlstatus.StatusSnapshot
+	err    error
+}
+
+func (s staticStatusService) SessionStatus(context.Context, controlclient.Principal, controlclient.StatusRequest) (controlstatus.StatusSnapshot, error) {
+	return s.status, s.err
+}
+
+type recordingStatusService struct {
+	principal controlclient.Principal
+	request   controlclient.StatusRequest
+	status    controlstatus.StatusSnapshot
+}
+
+func (s *recordingStatusService) SessionStatus(_ context.Context, principal controlclient.Principal, request controlclient.StatusRequest) (controlstatus.StatusSnapshot, error) {
+	s.principal = principal
+	s.request = request
+	return s.status, nil
 }
 
 type fakeTaskService struct {
