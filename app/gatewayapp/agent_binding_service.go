@@ -110,14 +110,18 @@ func (s AgentBindingService) mutate(
 	if err := ctx.Err(); err != nil {
 		return agentbinding.Status{}, err
 	}
-	s.stack.reconfigureMu.Lock()
-	defer s.stack.reconfigureMu.Unlock()
-	s.stack.assemblyMutationMu.Lock()
-	defer s.stack.assemblyMutationMu.Unlock()
 	if refreshRuntime {
-		if err := s.stack.rejectReconfigureWhileActive(action); err != nil {
+		unlock, err := s.stack.lockRuntimeGenerationMutation(action)
+		if err != nil {
 			return agentbinding.Status{}, err
 		}
+		defer unlock()
+	} else {
+		gate := s.stack.reconfigureLock()
+		gate.Lock()
+		defer gate.Unlock()
+		s.stack.assemblyMutationLock().Lock()
+		defer s.stack.assemblyMutationLock().Unlock()
 	}
 	doc, err := s.stack.store.Load()
 	if err != nil {

@@ -44,6 +44,17 @@ func (s *Stack) invalidatePlacementSnapshot() {
 	if s == nil {
 		return
 	}
+	if s.workspaceRuntimes != nil {
+		s.workspaceRuntimes.invalidatePlacementSnapshots()
+		return
+	}
+	s.invalidateOwnPlacementSnapshot()
+}
+
+func (s *Stack) invalidateOwnPlacementSnapshot() {
+	if s == nil {
+		return
+	}
 	s.placementCacheMu.Lock()
 	s.placementCache = nil
 	s.placementCacheGeneration++

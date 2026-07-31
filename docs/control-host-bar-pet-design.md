@@ -121,6 +121,7 @@ suggests.
 | Authenticated HTTP/SSE Host adapter with TLS and host policy | `app/controlserver`, `control/client/wirev1` | Yes; it is infrastructure around Control, not a Surface |
 | Host-owned accepted main-Turn lifetime | `internal/kernel/gateway_turns.go`, `app/gatewayapp/stack.go` | Yes; HTTP request cancellation must not cancel accepted work |
 | Principal-bound local and remote Session clients | `control/client/session_client.go`, `control/client/httpclient` | Yes; extend the common facade only as parity requires |
+| Session-routed workspace Runtime ownership | `app/gatewayapp/workspace_runtime_registry.go` | Yes for the bounded Session-client slice: workspace composition is loaded on demand, Session ID selects it, and UserID is not a Runtime key |
 | Independent Task observation | `control/taskstream`, `protocol/acp/taskstream` | Yes; Task output must not be folded into the Session control stream |
 
 ## Infrastructure Gaps
@@ -222,26 +223,49 @@ remote clients. Disconnect during a Turn, restart the client, reconnect from
 the last accepted cursor, and compare the rebuilt transcript and typed state
 with an uninterrupted client.
 
-### G4 — One Stack is still a single-workspace composition root
+### G4 — Workspace Runtime ownership is only partially converged
 
-**Evidence.** `gatewayapp.Config` and `Stack` contain one workspace, runtime
-configuration, sandbox, execution runtime, MCP manager, and Agent assembly
-(`app/gatewayapp/stack.go:41-111`). Stack construction builds the system prompt,
-skills, sandbox, and runtime around that workspace
-(`app/gatewayapp/stack.go:274-430`). The network create-session command accepts
-an arbitrary workspace key and CWD
-(`app/gatewayapp/control_client_backend.go:53-61`), but no workspace-runtime
-registry mediates that request.
+**Evidence.** The app-scoped registry now canonicalizes workspace identity,
+loads an independent Gateway, execution engine, sandbox, prompt/skill catalog,
+MCP manager, and Agent assembly on demand, and resolves each durable Session ID
+to the current Runtime for exactly one workspace without retaining a second
+process-local Session binding map
+(`app/gatewayapp/workspace_runtime_registry.go`). This fixes workspace identity,
+not the workspace configuration generation.
+Control-client create, mutation, inspect, and reconnect paths route by Session;
+ambiguous key/CWD aliases fail before Session creation. The registry is rebuilt
+from durable Session workspace facts after Host restart. `UserID` remains in
+authorization and persistence for compatibility but does not partition
+Runtime. Workspace composition construction runs outside the registry lock but
+shares the Host generation lock with live reconfiguration. App-wide Runtime
+mutation therefore rejects multi-Runtime state before changing memory or
+durable configuration, and its active-Turn fence observes every loaded
+workspace Gateway. Workspace load admission and in-flight builds are canceled
+and drained by Host Quiesce before shared resources close. Closed and open
+Sessions are both routed from durable workspace facts, so observing Session
+history does not create retained process-local Session bindings.
 
-**Failure mode.** Multi-session within one workspace is supported. Treating
-arbitrary CWDs as independent workspaces inside the same Stack can mix
-workspace-scoped prompt, skill, sandbox, MCP, Agent, or reconfiguration state.
+The ordinary TUI and private prompt services still address the default
+workspace Stack directly. Task stream lookup still uses the default Runtime
+stream provider, and live global reconfiguration is rejected while more than
+one workspace Runtime is loaded rather than attempting a partial update.
+With only one loaded Runtime, reconfiguration still replaces that workspace
+composition in place; after Host restart, a Session resolves the current
+workspace configuration rather than the generation under which it was created.
+Loaded workspace compositions currently remain resident until Host shutdown;
+idle eviction is not part of this MVP lifecycle.
 
-**Bounded repair.** Add a Control-owned `WorkspaceRuntimeRegistry` keyed by a
-canonical workspace identity. Each entry owns workspace-scoped composition;
-Session runtime entries remain keyed strictly by Session ID. Creating or
-resuming a Session first resolves its workspace runtime and rejects ambiguous
-or incompatible bindings. Do not use workspace path as Session identity.
+**Failure mode.** The bounded app-server Session path can operate across local
+workspaces without mixing their prompt, skills, sandbox CWD, Gateway, or engine.
+Moving TUI/private services or live configuration mutations prematurely would
+still either bypass Session routing or produce incoherent generations.
+
+**Bounded repair.** Keep Session as the public unit and extend Runtime lookup
+only when a concrete Session capability requires it. Move Task lookup and the
+remaining private services behind Session-directed owners, then define one
+atomic workspace-runtime generation policy for app configuration changes.
+Do not expose workspace Runtime handles to Surfaces or use workspace/UserID as
+Session identity.
 
 **Acceptance.** Run Sessions from two workspaces concurrently and prove that
 their CWD, write roots, skills, MCP endpoints, external Agent launch CWD, model
@@ -442,12 +466,16 @@ The infrastructure MVP is intentionally smaller than a TUI migration:
 - reconnect is the sole atomic state/replay/live attachment operation;
 - generated wire clients and conformance tests share
   `control/client/wirev1`.
+- the app-scoped Runtime registry permits multiple local workspace
+  compositions, but every client mutation and observation is still addressed
+  by Session ID; no process-local Session binding mirror is retained, while
+  loaded workspace compositions retain Host lifetime.
 
 TUI composition remains unchanged until the same integration suite proves the
 in-process and remote clients can replace its current Session path. Readiness,
 automatic retry policy, participant/handoff and Task remote clients,
-multi-workspace runtime ownership, catalog activity, Bar, and Pet are deferred
-capabilities, not placeholders in the MVP protocol.
+cross-workspace live reconfiguration, catalog activity, Bar, and Pet are
+deferred capabilities, not placeholders in the MVP protocol.
 
 ## Quality Gates
 

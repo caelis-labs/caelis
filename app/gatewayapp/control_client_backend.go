@@ -28,7 +28,58 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 	if s == nil {
 		return controlclient.CommandResult{}, errors.New("gatewayapp: stack is unavailable")
 	}
-	if s.closing.Load() {
+	if s.isClosing() {
+		return controlclient.CommandResult{Outcome: controlclient.OutcomeRejected},
+			controlclient.NewOutcomeError(
+				controlclient.OutcomeRejected,
+				errorcode.New(errorcode.Unavailable, "gatewayapp: host is closing"),
+			)
+	}
+	if s.workspaceRuntimes == nil {
+		return s.executeControlCommand(ctx, principal, action, request)
+	}
+
+	if create, ok := request.(controlclient.CreateSessionRequest); ok {
+		runtime, err := s.workspaceRuntimes.resolveCreateWorkspace(
+			ctx,
+			principal,
+			session.WorkspaceRef{Key: create.WorkspaceKey, CWD: create.CWD},
+			create.PreferredSessionID,
+		)
+		if err != nil {
+			return controlclient.CommandResult{Outcome: controlclient.OutcomeRejected},
+				classifyControlPreDispatchError(err)
+		}
+		create.WorkspaceKey = runtime.workspace.Key
+		create.CWD = runtime.workspace.CWD
+		result, commandErr = runtime.stack.executeControlCommand(ctx, principal, action, create)
+		if commandErr != nil || result.Outcome != controlclient.OutcomeCommitted || strings.TrimSpace(result.SessionID) == "" {
+			return result, commandErr
+		}
+		active, err := s.Sessions.Session(ctx, session.SessionRef{SessionID: result.SessionID})
+		if err != nil {
+			return result, controlclient.NewOutcomeError(controlclient.OutcomeUnknown, err)
+		}
+		if _, err := newSessionRuntime(active, runtime); err != nil {
+			return result, controlclient.NewOutcomeError(controlclient.OutcomeUnknown, err)
+		}
+		return result, nil
+	}
+
+	sessionID := controlCommandSessionID(request)
+	binding, _, err := s.workspaceRuntimes.resolveSession(ctx, sessionID)
+	if err != nil {
+		return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
+	}
+	result, commandErr = binding.workspace.stack.executeControlCommand(ctx, principal, action, request)
+	return result, commandErr
+}
+
+func (s *Stack) executeControlCommand(ctx context.Context, principal controlclient.Principal, action controlclient.Action, request any) (result controlclient.CommandResult, commandErr error) {
+	if s == nil {
+		return controlclient.CommandResult{}, errors.New("gatewayapp: stack is unavailable")
+	}
+	if s.isClosing() {
 		return controlclient.CommandResult{Outcome: controlclient.OutcomeRejected},
 			controlclient.NewOutcomeError(
 				controlclient.OutcomeRejected,
@@ -204,6 +255,43 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 	default:
 		return controlclient.CommandResult{}, fmt.Errorf("gatewayapp: unsupported control command %q (%T)", action, request)
 	}
+}
+
+func controlCommandSessionID(request any) string {
+	switch typed := request.(type) {
+	case controlclient.CloseSessionRequest:
+		return strings.TrimSpace(typed.SessionID)
+	case controlclient.PromptRequest:
+		return strings.TrimSpace(typed.SessionID)
+	case controlclient.SteerRequest:
+		return strings.TrimSpace(typed.SessionID)
+	case controlclient.CancelRequest:
+		return strings.TrimSpace(typed.SessionID)
+	case controlclient.ResolveApprovalRequest:
+		return strings.TrimSpace(typed.SessionID)
+	case controlclient.AttachParticipantRequest:
+		return strings.TrimSpace(typed.SessionID)
+	case controlclient.PromptParticipantRequest:
+		return strings.TrimSpace(typed.SessionID)
+	case controlclient.CancelParticipantRequest:
+		return strings.TrimSpace(typed.SessionID)
+	case controlclient.DetachParticipantRequest:
+		return strings.TrimSpace(typed.SessionID)
+	case controlclient.HandoffRequest:
+		return strings.TrimSpace(typed.SessionID)
+	default:
+		return ""
+	}
+}
+
+func classifyControlPreDispatchError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errorcode.CodeOf(err) == errorcode.Unknown {
+		err = errorcode.Wrap(errorcode.Internal, "gatewayapp: resolve control Runtime", err)
+	}
+	return controlclient.NewOutcomeError(controlclient.OutcomeRejected, err)
 }
 
 func (s *Stack) controlRuntimeContext(fallback context.Context) context.Context {

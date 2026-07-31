@@ -38,13 +38,11 @@ func (s *Stack) ConnectModels(configs []ModelConfig) (profiles []modelprofile.Mo
 	if len(configs) == 0 {
 		return nil, fmt.Errorf("gatewayapp: at least one model config is required")
 	}
-	s.reconfigureMu.Lock()
-	defer s.reconfigureMu.Unlock()
-	s.assemblyMutationMu.Lock()
-	defer s.assemblyMutationMu.Unlock()
-	if err := s.rejectReconfigureWhileActive("connect model"); err != nil {
+	unlock, err := s.lockRuntimeGenerationMutation("connect model")
+	if err != nil {
 		return nil, err
 	}
+	defer unlock()
 	if s.lookup == nil {
 		return nil, fmt.Errorf("gatewayapp: model lookup unavailable")
 	}
@@ -127,13 +125,11 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 	if s == nil || s.Sessions == nil {
 		return fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
-	s.reconfigureMu.Lock()
-	defer s.reconfigureMu.Unlock()
-	s.assemblyMutationMu.Lock()
-	defer s.assemblyMutationMu.Unlock()
-	if err := s.rejectReconfigureWhileActive("switch model"); err != nil {
+	unlock, err := s.lockRuntimeGenerationMutation("switch model")
+	if err != nil {
 		return err
 	}
+	defer unlock()
 	alias = strings.TrimSpace(alias)
 	if alias == "" {
 		return fmt.Errorf("gatewayapp: model alias is required")
@@ -218,13 +214,11 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 	if s == nil || s.Sessions == nil {
 		return fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
-	s.reconfigureMu.Lock()
-	defer s.reconfigureMu.Unlock()
-	s.assemblyMutationMu.Lock()
-	defer s.assemblyMutationMu.Unlock()
-	if err := s.rejectReconfigureWhileActive("delete model"); err != nil {
+	unlock, err := s.lockRuntimeGenerationMutation("delete model")
+	if err != nil {
 		return err
 	}
+	defer unlock()
 	alias = strings.TrimSpace(alias)
 	if alias == "" {
 		return fmt.Errorf("gatewayapp: model alias is required")

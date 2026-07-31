@@ -152,7 +152,19 @@ Document responsibilities are intentionally separate:
 - `internal/controlassembly`: product Agent assembly resolution.
 - `internal/controlplane`: shared-ledger routing, endpoint lifecycle/recovery,
   and handoff coordination.
-- `app/gatewayapp`: the current product Control host and composition entry.
+- `app/gatewayapp`: the current product Control host and composition entry. Its
+  app-scoped workspace Runtime registry resolves every public Control command
+  from Session ID to one canonical workspace composition. Session remains the
+  external interaction unit; workspace Runtime and process App lifetime are
+  internal ownership boundaries. Workspace composition loading and app-wide
+  Runtime reconfiguration share one Host lock; global mutation fails before any
+  write once multiple workspace Runtimes are loaded. In-flight workspace loads
+  are Host lifecycle work: shutdown closes load admission, cancels their build
+  contexts, and drains them before closing shared resources. The registry is
+  currently keyed by workspace identity only; durable configuration generations
+  and Session-to-generation binding remain future work. `UserID` remains a
+  compatibility authorization/persistence field and is not a Runtime partition
+  key.
 - `internal/kernel`: Control-owned Session/Turn coordination, gateway
   contracts, and their current implementation. The contracts formerly exposed
   by `ports/gateway` now have one authority here rather than a forwarding port.

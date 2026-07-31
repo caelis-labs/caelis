@@ -14,13 +14,11 @@ func (s *Stack) SetSandboxBackend(_ context.Context, backend string) (SandboxSta
 	if s == nil {
 		return SandboxStatus{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
-	s.reconfigureMu.Lock()
-	defer s.reconfigureMu.Unlock()
-	s.assemblyMutationMu.Lock()
-	defer s.assemblyMutationMu.Unlock()
-	if err := s.rejectReconfigureWhileActive("change sandbox backend"); err != nil {
+	unlock, err := s.lockRuntimeGenerationMutation("change sandbox backend")
+	if err != nil {
 		return SandboxStatus{}, err
 	}
+	defer unlock()
 	normalized, err := normalizeSandboxBackend(backend)
 	if err != nil {
 		return SandboxStatus{}, err
@@ -36,7 +34,7 @@ func (s *Stack) SetSandboxBackend(_ context.Context, backend string) (SandboxSta
 	s.mu.Lock()
 	s.sandbox = next
 	s.mu.Unlock()
-	if err := s.rebuildGateway(); err != nil {
+	if err := s.rebuildGatewayLocked(); err != nil {
 		s.mu.Lock()
 		s.sandbox = previous
 		s.mu.Unlock()

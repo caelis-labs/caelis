@@ -32,6 +32,9 @@ func buildPluginStack(t *testing.T, storeDir, workspaceDir string) *Stack {
 	// Full Stack construction opens SQLite and durable file stores. Callers
 	// intentionally remain serial so host fsync contention does not dominate
 	// otherwise independent plugin assertions.
+	if err := os.MkdirAll(workspaceDir, 0o700); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
 	cfg := Config{
 		AppName:      "CAELIS",
 		StoreDir:     storeDir,

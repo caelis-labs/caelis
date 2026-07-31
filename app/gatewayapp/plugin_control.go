@@ -50,14 +50,19 @@ func (h pluginHost) UpdatePluginState(_ context.Context, mutation plugin.Mutatio
 		return fmt.Errorf("plugin service: plugin state mutation is required")
 	}
 
-	h.stack.reconfigureMu.Lock()
-	defer h.stack.reconfigureMu.Unlock()
 	if mutation.Reconfigure {
-		h.stack.assemblyMutationMu.Lock()
-		defer h.stack.assemblyMutationMu.Unlock()
-	}
-	if err := h.stack.rejectReconfigureWhileActive(mutation.GuardAction); err != nil {
-		return err
+		unlock, err := h.stack.lockRuntimeGenerationMutation(mutation.GuardAction)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+	} else {
+		gate := h.stack.reconfigureLock()
+		gate.Lock()
+		defer gate.Unlock()
+		if err := h.stack.rejectReconfigureWhileActive(mutation.GuardAction); err != nil {
+			return err
+		}
 	}
 
 	oldDoc, err := h.stack.store.Load()
@@ -76,7 +81,7 @@ func (h pluginHost) UpdatePluginState(_ context.Context, mutation plugin.Mutatio
 		return err
 	}
 	if mutation.Reconfigure {
-		if err := h.stack.rebuildGateway(); err != nil {
+		if err := h.stack.rebuildGatewayLocked(); err != nil {
 			return h.rollbackPluginMutation(mutation.FailureAction, err, oldDoc)
 		}
 	}
@@ -102,7 +107,7 @@ func (h pluginHost) rollbackPluginMutation(action string, mutationErr error, old
 	if rollbackErr != nil {
 		return fmt.Errorf("plugin service: failed to %s (rollback config save failed): %w, rollback error: %w", action, mutationErr, rollbackErr)
 	}
-	if rebuildErr := h.stack.rebuildGateway(); rebuildErr != nil {
+	if rebuildErr := h.stack.rebuildGatewayLocked(); rebuildErr != nil {
 		return fmt.Errorf("plugin service: failed to %s (rollback rebuild failed): %w, rollback error: %w", action, mutationErr, rebuildErr)
 	}
 	return fmt.Errorf("plugin service: failed to %s (rollback successful): %w", action, mutationErr)

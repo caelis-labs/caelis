@@ -90,13 +90,11 @@ func (s *Stack) ConnectACP(ctx context.Context, req controlagents.ConnectRequest
 		return controlagents.ConnectResult{}, fmt.Errorf("gatewayapp: %w", err)
 	}
 
-	s.reconfigureMu.Lock()
-	defer s.reconfigureMu.Unlock()
-	s.assemblyMutationMu.Lock()
-	defer s.assemblyMutationMu.Unlock()
-	if err := s.rejectReconfigureWhileActive("connect ACP Agent"); err != nil {
+	unlock, err := s.lockRuntimeGenerationMutation("connect ACP Agent")
+	if err != nil {
 		return controlagents.ConnectResult{}, err
 	}
+	defer unlock()
 	doc, err := s.store.Load()
 	if err != nil {
 		return controlagents.ConnectResult{}, err
@@ -155,8 +153,9 @@ func (s *Stack) DisconnectCandidates(ctx context.Context) ([]controlagents.Disco
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	s.reconfigureMu.Lock()
-	defer s.reconfigureMu.Unlock()
+	gate := s.reconfigureLock()
+	gate.Lock()
+	defer gate.Unlock()
 	doc, err := s.store.Load()
 	if err != nil {
 		return nil, err
@@ -178,13 +177,11 @@ func (s *Stack) DisconnectACP(ctx context.Context, agentID string) (controlagent
 		return controlagents.DisconnectResult{}, err
 	}
 
-	s.reconfigureMu.Lock()
-	defer s.reconfigureMu.Unlock()
-	s.assemblyMutationMu.Lock()
-	defer s.assemblyMutationMu.Unlock()
-	if err := s.rejectReconfigureWhileActive("disconnect ACP Agent"); err != nil {
+	unlock, err := s.lockRuntimeGenerationMutation("disconnect ACP Agent")
+	if err != nil {
 		return controlagents.DisconnectResult{}, err
 	}
+	defer unlock()
 	doc, err := s.store.Load()
 	if err != nil {
 		return controlagents.DisconnectResult{}, err

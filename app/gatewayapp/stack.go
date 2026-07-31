@@ -85,9 +85,11 @@ type Stack struct {
 	leaseOwnerID              string
 	mu                        sync.RWMutex
 	reconfigureMu             sync.Mutex
+	reconfigureGate           *sync.Mutex
 	// assemblyMutationMu serializes live Agent assembly mutations with durable
 	// controller binding changes. Coordinators receive its read side.
 	assemblyMutationMu       sync.RWMutex
+	assemblyMutationGate     *sync.RWMutex
 	placementCacheMu         sync.RWMutex
 	placementCache           *placementSnapshot
 	placementCacheGeneration uint64
@@ -114,6 +116,7 @@ type Stack struct {
 	grokAuth                 *grokauth.Manager
 	apiKeyCredentials        *credentialstore.Store
 	providerUsage            *providerusage.Registry
+	workspaceRuntimes        *workspaceRuntimeRegistry
 
 	// Optional test seam; nil uses the platform lifecycle runtime factory.
 	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
@@ -212,7 +215,15 @@ func (s *Stack) TaskStreams() acptaskstream.Service {
 // ControlClientRuntimeState delegates bootstrap live-state reads to the
 // currently installed Control gateway.
 func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (controlclient.RuntimeState, error) {
-	gateway := s.currentGateway()
+	runtimeStack := s
+	if s != nil && s.workspaceRuntimes != nil {
+		binding, _, err := s.workspaceRuntimes.resolveSession(ctx, ref.SessionID)
+		if err != nil {
+			return controlclient.RuntimeState{}, err
+		}
+		runtimeStack = binding.workspace.stack
+	}
+	gateway := runtimeStack.currentGateway()
 	if gateway == nil {
 		return controlclient.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
 	}
@@ -226,6 +237,40 @@ func (s *Stack) currentGateway() *kernelimpl.Gateway {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.gateway
+}
+
+func (s *Stack) isClosing() bool {
+	if s == nil {
+		return true
+	}
+	if s.lifecycleCtx != nil {
+		select {
+		case <-s.lifecycleCtx.Done():
+			return true
+		default:
+		}
+	}
+	return s.closing.Load()
+}
+
+func (s *Stack) reconfigureLock() *sync.Mutex {
+	if s == nil {
+		return nil
+	}
+	if s.reconfigureGate != nil {
+		return s.reconfigureGate
+	}
+	return &s.reconfigureMu
+}
+
+func (s *Stack) assemblyMutationLock() *sync.RWMutex {
+	if s == nil {
+		return nil
+	}
+	if s.assemblyMutationGate != nil {
+		return s.assemblyMutationGate
+	}
+	return &s.assemblyMutationMu
 }
 
 type SessionRuntimeState struct {
@@ -284,6 +329,13 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	userID := firstNonEmpty(strings.TrimSpace(cfg.UserID), "local-user")
 	workspaceCWD := firstNonEmpty(strings.TrimSpace(cfg.WorkspaceCWD), mustGetwd())
 	workspaceKey := firstNonEmpty(strings.TrimSpace(cfg.WorkspaceKey), "workspace")
+	workspace, err := canonicalWorkspaceRef(
+		session.WorkspaceRef{Key: workspaceKey, CWD: workspaceCWD},
+		session.WorkspaceRef{},
+	)
+	if err != nil {
+		return nil, err
+	}
 	storeDir := strings.TrimSpace(cfg.StoreDir)
 	if storeDir == "" {
 		storeDir = defaultStoreDir()
@@ -379,13 +431,10 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	stack := &Stack{
-		Sessions: sessions,
-		AppName:  appName,
-		UserID:   userID,
-		Workspace: session.WorkspaceRef{
-			Key: workspaceKey,
-			CWD: workspaceCWD,
-		},
+		Sessions:          sessions,
+		AppName:           appName,
+		UserID:            userID,
+		Workspace:         workspace,
 		lookup:            lookup,
 		store:             configStore,
 		storeDir:          storeDir,
@@ -470,10 +519,17 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	stack.taskStreams = acptaskstream.New(controlTaskStreams)
+	stack.lifecycleCtx, stack.lifecycleCancel = context.WithCancel(context.Background())
 	if err := stack.rebuildGateway(); err != nil {
+		stack.lifecycleCancel()
 		return nil, err
 	}
-	stack.lifecycleCtx, stack.lifecycleCancel = context.WithCancel(context.Background())
+	workspaceRuntimes, err := newWorkspaceRuntimeRegistry(stack)
+	if err != nil {
+		_ = stack.Close()
+		return nil, err
+	}
+	stack.workspaceRuntimes = workspaceRuntimes
 	return stack, nil
 }
 
@@ -591,6 +647,24 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 	if s.lifecycleCancel != nil {
 		s.lifecycleCancel()
 	}
+	if s.workspaceRuntimes != nil {
+		var errs []error
+		runtimes, err := s.workspaceRuntimes.closeAdmission(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("drain workspace Runtime loads: %w", err))
+		}
+		for _, runtime := range runtimes {
+			if runtime == nil || runtime.stack == nil {
+				continue
+			}
+			if gateway := runtime.stack.currentGateway(); gateway != nil {
+				if err := gateway.Quiesce(ctx); err != nil {
+					errs = append(errs, fmt.Errorf("workspace %q: %w", runtime.workspace.Key, err))
+				}
+			}
+		}
+		return errors.Join(errs...)
+	}
 	if gateway := s.currentGateway(); gateway != nil {
 		return gateway.Quiesce(ctx)
 	}
@@ -604,11 +678,22 @@ func (s *Stack) Close() error {
 	quiesceCtx, cancelQuiesce := context.WithTimeout(context.Background(), 5*time.Second)
 	quiesceErr := s.Quiesce(quiesceCtx)
 	cancelQuiesce()
+	var workspaceCloseErrs []error
+	if s.workspaceRuntimes != nil {
+		for _, runtime := range s.workspaceRuntimes.snapshot() {
+			if runtime == nil || runtime.stack == nil || runtime.stack == s {
+				continue
+			}
+			if err := runtime.stack.closeWorkspaceResources(); err != nil {
+				workspaceCloseErrs = append(
+					workspaceCloseErrs,
+					fmt.Errorf("workspace %q: %w", runtime.workspace.Key, err),
+				)
+			}
+		}
+	}
+	workspaceResourceErr := s.closeWorkspaceResources()
 	s.mu.Lock()
-	exec := s.exec
-	s.exec = nil
-	mcpMgr := s.mcpMgr
-	s.mcpMgr = nil
 	controlOperations := s.operations
 	s.operations = nil
 	s.mu.Unlock()
@@ -617,6 +702,33 @@ func (s *Stack) Close() error {
 	if quiesceErr != nil {
 		errs = append(errs, fmt.Errorf("quiesce: %w", quiesceErr))
 	}
+	if workspaceResourceErr != nil {
+		errs = append(errs, workspaceResourceErr)
+	}
+	errs = append(errs, workspaceCloseErrs...)
+	if controlOperations != nil {
+		if err := controlOperations.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("gatewayapp stack: close failed: %w", errors.Join(errs...))
+	}
+	return nil
+}
+
+func (s *Stack) closeWorkspaceResources() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	exec := s.exec
+	s.exec = nil
+	mcpMgr := s.mcpMgr
+	s.mcpMgr = nil
+	s.mu.Unlock()
+
+	var errs []error
 	if exec != nil {
 		if err := exec.Close(); err != nil {
 			errs = append(errs, err)
@@ -627,15 +739,7 @@ func (s *Stack) Close() error {
 			errs = append(errs, err)
 		}
 	}
-	if controlOperations != nil {
-		if err := controlOperations.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("gatewayapp stack: close failed: %w", errors.Join(errs...))
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (s *Stack) MCPServersStatus(pluginID string) []mcp.MCPServerInfo {

@@ -25,7 +25,7 @@ func (s *Stack) StartSession(ctx context.Context, preferredSessionID string, bin
 	if gw == nil {
 		return session.Session{}, fmt.Errorf("gatewayapp: gateway is unavailable")
 	}
-	return gw.StartSession(ctx, kernel.StartSessionRequest{
+	active, err := gw.StartSession(ctx, kernel.StartSessionRequest{
 		AppName:            s.AppName,
 		UserID:             s.UserID,
 		Workspace:          s.Workspace,
@@ -36,6 +36,17 @@ func (s *Stack) StartSession(ctx context.Context, preferredSessionID string, bin
 			Owner:   s.AppName,
 		},
 	})
+	if err != nil || s.workspaceRuntimes == nil {
+		return active, err
+	}
+	workspace, err := s.workspaceRuntimes.resolveWorkspace(ctx, s.Workspace)
+	if err != nil {
+		return active, err
+	}
+	if _, err := newSessionRuntime(active, workspace); err != nil {
+		return active, err
+	}
+	return active, nil
 }
 
 func (s *Stack) StartSubagent(

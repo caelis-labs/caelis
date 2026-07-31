@@ -76,6 +76,32 @@ func (s *Stack) rebuildGateway() error {
 	if s == nil {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}
+	unlock, err := s.lockRuntimeGenerationMutation("rebuild the default Runtime")
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.rebuildGatewayLocked()
+}
+
+// rebuildGatewayLocked replaces one workspace composition while its Host
+// generation lock is held. Startup may call rebuildGateway before the workspace
+// registry exists; live mutation paths must use this locked form after their
+// pre-write generation checks.
+func (s *Stack) rebuildGatewayLocked() error {
+	return s.rebuildGatewayLockedContext(context.Background())
+}
+
+func (s *Stack) rebuildGatewayLockedContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.rejectMultiWorkspaceRuntimeMutation("rebuild the default Runtime"); err != nil {
+		return err
+	}
 	s.mu.RLock()
 	oldGateway := s.gateway
 	sandboxCfg := s.sandbox
@@ -89,11 +115,22 @@ func (s *Stack) rebuildGateway() error {
 	if err != nil {
 		return err
 	}
-	bundle, err := s.buildGatewayRuntime(plan)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	bundle, err := s.buildGatewayRuntimeContext(ctx, plan)
 	if err != nil {
 		return err
 	}
-	if err := s.rejectRemovedAssemblyAgents(context.Background(), runtimeCfg.Assembly.Agents, bundle.RuntimeConfig.Assembly.Agents); err != nil {
+	if err := ctx.Err(); err != nil {
+		bundle.Close()
+		return err
+	}
+	if err := s.rejectRemovedAssemblyAgents(ctx, runtimeCfg.Assembly.Agents, bundle.RuntimeConfig.Assembly.Agents); err != nil {
+		bundle.Close()
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		bundle.Close()
 		return err
 	}
@@ -164,7 +201,7 @@ func closeIfSupported(v any) {
 }
 
 func guardNoActiveTurns(gw *kernelimpl.Gateway, action string) error {
-	return rejectReconfigureWithActiveTurns(gw, action)
+	return rejectReconfigureWithActiveTurns([]*kernelimpl.Gateway{gw}, action)
 }
 
 func (s *Stack) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runtimeCfg stackRuntimeConfig) (gatewayBuildPlan, error) {
@@ -199,6 +236,19 @@ func (s *Stack) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runtimeCfg stackR
 }
 
 func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundle, error) {
+	return s.buildGatewayRuntimeContext(context.Background(), plan)
+}
+
+func (s *Stack) buildGatewayRuntimeContext(
+	ctx context.Context,
+	plan gatewayBuildPlan,
+) (*gatewayRuntimeBundle, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	runtimeCfg := plan.RuntimeConfig
 	sandboxCfg := plan.SandboxConfig
 	route, err := sandboxrouter.Current(sandbox.Backend(sandboxCfg.RequestedType))
@@ -220,12 +270,20 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 	}
 	bundle := &gatewayRuntimeBundle{Exec: sandboxRuntime}
 
-	mcpMgr, err := mcp.NewManager(context.Background(), plan.Plugins.MCPServerSpecs)
+	if err := ctx.Err(); err != nil {
+		bundle.Close()
+		return nil, err
+	}
+	mcpMgr, err := mcp.NewManager(ctx, plan.Plugins.MCPServerSpecs)
 	if err != nil {
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
 	}
 	bundle.MCP = mcpMgr
+	if err := ctx.Err(); err != nil {
+		bundle.Close()
+		return nil, err
+	}
 
 	effectivePolicyProfile := policyProfile(runtimeCfg.PolicyProfile)
 	effectiveBaseMetadata := cloneMap(runtimeCfg.BaseMetadata)
@@ -295,7 +353,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		Sessions:              s.Sessions,
 		Controllers:           localCfg.Controllers,
 		Context:               contextRouter,
-		ControllerBindingGate: s.assemblyMutationMu.RLocker(),
+		ControllerBindingGate: s.assemblyMutationLock().RLocker(),
 	})
 	if err != nil {
 		bundle.Close()
@@ -345,9 +403,9 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 			return withSystemAgentReasoningEffort(resolved), bound, nil
 		},
 		ToolAugmenter: func(ctx context.Context, req kernelimpl.ToolAugmentContext) (kernelimpl.ToolAugmentation, error) {
-			s.assemblyMutationMu.RLock()
+			s.assemblyMutationLock().RLock()
 			agents, targets, err := s.delegationSpawnConfiguration(req.Session)
-			s.assemblyMutationMu.RUnlock()
+			s.assemblyMutationLock().RUnlock()
 			if err != nil {
 				return kernelimpl.ToolAugmentation{}, err
 			}

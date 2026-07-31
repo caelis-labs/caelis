@@ -77,14 +77,26 @@ func (s *Stack) rejectReconfigureWhileActive(action string) error {
 	if s == nil {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}
-	return rejectReconfigureWithActiveTurns(s.currentGateway(), action)
+	gateways := []*kernelimpl.Gateway{s.currentGateway()}
+	if s.workspaceRuntimes != nil {
+		gateways = gateways[:0]
+		for _, runtime := range s.workspaceRuntimes.snapshot() {
+			if runtime == nil || runtime.stack == nil {
+				continue
+			}
+			gateways = append(gateways, runtime.stack.currentGateway())
+		}
+	}
+	return rejectReconfigureWithActiveTurns(gateways, action)
 }
 
-func rejectReconfigureWithActiveTurns(gw *kernelimpl.Gateway, action string) error {
-	if gw == nil {
-		return nil
+func rejectReconfigureWithActiveTurns(gateways []*kernelimpl.Gateway, action string) error {
+	var active []kernelimpl.ActiveTurnState
+	for _, gateway := range gateways {
+		if gateway != nil {
+			active = append(active, gateway.ActiveTurns()...)
+		}
 	}
-	active := gw.ActiveTurns()
 	if len(active) == 0 {
 		return nil
 	}
@@ -111,6 +123,52 @@ func rejectReconfigureWithActiveTurns(gw *kernelimpl.Gateway, action string) err
 		label,
 		len(active),
 	)
+}
+
+func (s *Stack) rejectMultiWorkspaceRuntimeMutation(action string) error {
+	if s == nil || s.workspaceRuntimes == nil {
+		return nil
+	}
+	loaded := len(s.workspaceRuntimes.snapshot())
+	if loaded <= 1 {
+		return nil
+	}
+	label := strings.TrimSpace(action)
+	if label == "" {
+		label = "reconfigure runtime"
+	}
+	return fmt.Errorf(
+		"gatewayapp: cannot %s while %d workspace Runtimes are loaded; restart the Host to apply the configuration coherently",
+		label,
+		loaded,
+	)
+}
+
+// lockRuntimeGenerationMutation serializes one app-wide Runtime generation
+// mutation with workspace Runtime loading and new Turn assembly. Callers must
+// acquire this before any durable or in-memory configuration write and release
+// it after rollback or commit is complete.
+func (s *Stack) lockRuntimeGenerationMutation(action string) (func(), error) {
+	if s == nil {
+		return nil, fmt.Errorf("gatewayapp: stack is unavailable")
+	}
+	gate := s.reconfigureLock()
+	gate.Lock()
+	if err := s.rejectMultiWorkspaceRuntimeMutation(action); err != nil {
+		gate.Unlock()
+		return nil, err
+	}
+	assemblyGate := s.assemblyMutationLock()
+	assemblyGate.Lock()
+	if err := s.rejectReconfigureWhileActive(action); err != nil {
+		assemblyGate.Unlock()
+		gate.Unlock()
+		return nil, err
+	}
+	return func() {
+		assemblyGate.Unlock()
+		gate.Unlock()
+	}, nil
 }
 
 func dedupeNonEmptyStrings(values []string) []string {
