@@ -225,6 +225,7 @@ func newHeadlessRealMimoHTTPClient(
 	}
 	server, err := controlserver.New(controlserver.HandlerConfig{
 		Service:       stack.ControlClient(),
+		TaskStreams:   stack.TaskStreams(),
 		Authenticator: authenticator,
 		AllowedHosts:  []string{"127.0.0.1", "localhost", "::1"},
 	})

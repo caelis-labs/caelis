@@ -506,14 +506,8 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	}
 	stack.controlClient = controlClient
 	controlTaskStreams, err := controltaskstream.New(controltaskstream.Config{
-		Tasks: taskStore,
-		Streams: func() stream.Service {
-			provider := stack.KernelStreams()
-			if provider == nil {
-				return nil
-			}
-			return provider.Streams()
-		},
+		Tasks:      taskStore,
+		Streams:    func() stream.Service { return hostTaskStreamService{host: stack} },
 		Authorizer: taskStreamAuthorizer{inner: controlclient.SessionAuthorizer{Sessions: sessions}},
 		Secret:     cursorSecret,
 	})

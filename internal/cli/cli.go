@@ -273,7 +273,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			tokenFile = controlserver.DefaultTokenFile(cfg.StoreDir)
 		}
 		return runControlServerCommand(ctx, controlserver.Dependencies{
-			Service: stack.ControlClient(), Lifecycle: stack,
+			Service: stack.ControlClient(), TaskStreams: stack.TaskStreams(), Lifecycle: stack,
 		}, controlserver.Config{
 			Address: strings.TrimSpace(*controlListen), Authenticator: authenticator, Principal: principal,
 			TokenFile: tokenFile, AllowedHosts: splitCommaSeparated(*controlHosts),

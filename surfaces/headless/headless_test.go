@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -596,6 +597,9 @@ func (t *fakeSessionTurn) Target() controlclient.TurnTarget {
 }
 func (t *fakeSessionTurn) Events() <-chan eventstream.Envelope { return t.events }
 func (*fakeSessionTurn) ResolveApproval(context.Context, controlclient.ApprovalResolution) error {
+	return nil
+}
+func (*fakeSessionTurn) Steer(context.Context, string, string, []model.ContentPart) error {
 	return nil
 }
 func (t *fakeSessionTurn) Cancel(context.Context, string) error {

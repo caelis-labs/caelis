@@ -676,6 +676,68 @@ type SteerRequest struct {
 	Target                  TurnTarget          `json:"target"`
 }
 
+type TaskDescriptor struct {
+	AgentHandle    *string         `json:"agent_handle,omitempty"`
+	CurrentTurnId  *string         `json:"current_turn_id,omitempty"`
+	Handle         string          `json:"handle"`
+	Kind           TaskKind        `json:"kind"`
+	ParentTool     *TaskParentTool `json:"parent_tool,omitempty"`
+	ParticipantId  *string         `json:"participant_id,omitempty"`
+	Running        bool            `json:"running"`
+	SessionId      string          `json:"session_id"`
+	State          TaskState       `json:"state"`
+	SupportsCancel *bool           `json:"supports_cancel,omitempty"`
+	SupportsInput  *bool           `json:"supports_input,omitempty"`
+	TaskId         string          `json:"task_id"`
+	Title          *string         `json:"title,omitempty"`
+	UpdatedAt      *time.Time      `json:"updated_at,omitempty"`
+}
+
+type TaskEventBatch struct {
+	BoundaryCursor *string        `json:"boundary_cursor,omitempty"`
+	Events         []Envelope     `json:"events,omitempty"`
+	ResumeMode     TaskResumeMode `json:"resume_mode"`
+	TransientGap   *bool          `json:"transient_gap,omitempty"`
+}
+
+type TaskKind string
+
+const (
+	TaskKindCommand  TaskKind = "command"
+	TaskKindSubagent TaskKind = "subagent"
+)
+
+type TaskList struct {
+	Tasks []TaskDescriptor `json:"tasks,omitempty"`
+}
+
+type TaskParentTool struct {
+	ToolCallId *string `json:"tool_call_id,omitempty"`
+	ToolName   *string `json:"tool_name,omitempty"`
+}
+
+type TaskResumeMode string
+
+const (
+	TaskResumeModeExact        TaskResumeMode = "exact"
+	TaskResumeModeCurrentState TaskResumeMode = "current_state"
+)
+
+type TaskState string
+
+const (
+	TaskStatePrepared        TaskState = "prepared"
+	TaskStateRunning         TaskState = "running"
+	TaskStateWaitingInput    TaskState = "waiting_input"
+	TaskStateCompleted       TaskState = "completed"
+	TaskStateFailed          TaskState = "failed"
+	TaskStateCancelled       TaskState = "cancelled"
+	TaskStateInterrupted     TaskState = "interrupted"
+	TaskStateTerminated      TaskState = "terminated"
+	TaskStateWaitingApproval TaskState = "waiting_approval"
+	TaskStateUnknownOutcome  TaskState = "unknown_outcome"
+)
+
 type TextContent struct {
 	Text string `json:"text"`
 	Type string `json:"type"`
@@ -727,4 +789,4 @@ type WriteBase struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
-var OperationIDs = []string{"cancelSessionTurn", "closeSession", "createSession", "getSessionState", "initializeClient", "listSessions", "promptSession", "reconnectSession", "resolveApproval", "steerSession"}
+var OperationIDs = []string{"cancelSessionTurn", "closeSession", "createSession", "getSessionState", "initializeClient", "listSessionTasks", "listSessions", "promptSession", "readTaskEvents", "reconnectSession", "resolveApproval", "steerSession", "subscribeTaskEvents"}

@@ -19,6 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/control/client/wirev1/generated"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 func TestHTTPCreateUsesTrustedPrincipalAndHeaderContracts(t *testing.T) {
@@ -157,10 +158,10 @@ func TestReconnectRejectsMismatchedResumeInputsAndCredentialQuery(t *testing.T) 
 }
 
 func TestNewRequiresNetworkAuthenticatorAndHostAllowlist(t *testing.T) {
-	if _, err := New(HandlerConfig{Service: &fakeService{}, AllowedHosts: []string{"example.test"}}); err == nil {
+	if _, err := New(HandlerConfig{Service: &fakeService{}, TaskStreams: &fakeTaskService{}, AllowedHosts: []string{"example.test"}}); err == nil {
 		t.Fatal("New accepted an unauthenticated HTTP handler")
 	}
-	if _, err := New(HandlerConfig{Service: &fakeService{}, Authenticator: testAuthenticator()}); err == nil {
+	if _, err := New(HandlerConfig{Service: &fakeService{}, TaskStreams: &fakeTaskService{}, Authenticator: testAuthenticator()}); err == nil {
 		t.Fatal("New accepted an empty Host allowlist")
 	}
 }
@@ -411,7 +412,7 @@ func (s *fakeService) Reconnect(_ context.Context, _ controlclient.Principal, re
 func newTestServer(t *testing.T, service controlclient.Service, heartbeat time.Duration) *Server {
 	t.Helper()
 	server, err := New(HandlerConfig{
-		Service: service, Authenticator: testAuthenticator(),
+		Service: service, TaskStreams: &fakeTaskService{}, Authenticator: testAuthenticator(),
 		AllowedHosts: []string{"example.test", "127.0.0.1"}, Heartbeat: heartbeat,
 	})
 	if err != nil {
@@ -419,6 +420,31 @@ func newTestServer(t *testing.T, service controlclient.Service, heartbeat time.D
 	}
 	return server
 }
+
+type fakeTaskService struct {
+	principal taskstream.Principal
+	list      taskstream.ListResult
+	batch     taskstream.Batch
+	subscribe taskstream.SubscribeResult
+	err       error
+}
+
+func (s *fakeTaskService) List(_ context.Context, principal taskstream.Principal, _ taskstream.ListRequest) (taskstream.ListResult, error) {
+	s.principal = principal
+	return s.list, s.err
+}
+
+func (s *fakeTaskService) Events(_ context.Context, principal taskstream.Principal, _ taskstream.ReadRequest) (taskstream.Batch, error) {
+	s.principal = principal
+	return s.batch, s.err
+}
+
+func (s *fakeTaskService) Subscribe(_ context.Context, principal taskstream.Principal, _ taskstream.SubscribeRequest) (taskstream.SubscribeResult, error) {
+	s.principal = principal
+	return s.subscribe, s.err
+}
+
+var _ taskstream.Service = (*fakeTaskService)(nil)
 
 func testAuthenticator() Authenticator {
 	return AuthenticatorFunc(func(request *http.Request) (controlclient.Principal, error) {

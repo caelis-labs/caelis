@@ -255,6 +255,7 @@ func TestSessionTurnClientRoutesApprovalAndCancelWithoutClosingSession(t *testin
 	subscription := newOpenSessionTurnTestSubscription()
 	var approvalRequest ResolveApprovalRequest
 	var cancelRequest CancelRequest
+	var steerRequest SteerRequest
 	client := &sessionTurnTestClient{
 		inspectFn: func(context.Context, StateRequest) (SessionState, error) {
 			return SessionState{
@@ -290,6 +291,10 @@ func TestSessionTurnClientRoutesApprovalAndCancelWithoutClosingSession(t *testin
 			cancelRequest = request
 			return CommandResult{Outcome: OutcomeCommitted}, nil
 		},
+		steerFn: func(_ context.Context, request SteerRequest) (CommandResult, error) {
+			steerRequest = request
+			return CommandResult{Outcome: OutcomeCommitted}, nil
+		},
 	}
 	starter, err := NewSessionTurnClient(client)
 	if err != nil {
@@ -311,6 +316,10 @@ func TestSessionTurnClientRoutesApprovalAndCancelWithoutClosingSession(t *testin
 	}); err != nil {
 		t.Fatal(err)
 	}
+	contentParts := []model.ContentPart{{Type: model.ContentPartText, Text: "continue"}}
+	if err := turn.Steer(context.Background(), " continue ", " continue shown ", contentParts); err != nil {
+		t.Fatal(err)
+	}
 	if err := turn.Cancel(context.Background(), "test cancellation"); err != nil {
 		t.Fatal(err)
 	}
@@ -330,6 +339,15 @@ func TestSessionTurnClientRoutesApprovalAndCancelWithoutClosingSession(t *testin
 		cancelRequest.Target != target ||
 		cancelRequest.Reason != "test cancellation" {
 		t.Fatalf("Cancel request = %#v", cancelRequest)
+	}
+	if steerRequest.SessionID != "session-1" ||
+		steerRequest.ExpectedControllerEpoch != "epoch-1" ||
+		steerRequest.Target != target ||
+		steerRequest.Input != "continue" ||
+		steerRequest.DisplayInput != "continue shown" ||
+		len(steerRequest.ContentParts) != 1 ||
+		steerRequest.ContentParts[0] != contentParts[0] {
+		t.Fatalf("Steer request = %#v", steerRequest)
 	}
 	if client.closeSessionCalls != 0 {
 		t.Fatalf("CloseSession calls = %d, want zero", client.closeSessionCalls)
@@ -369,6 +387,7 @@ type sessionTurnTestClient struct {
 	inspectFn         func(context.Context, StateRequest) (SessionState, error)
 	reconnectFn       func(context.Context, ReconnectRequest) (ReconnectResult, error)
 	promptFn          func(context.Context, PromptRequest) (CommandResult, error)
+	steerFn           func(context.Context, SteerRequest) (CommandResult, error)
 	resolveApprovalFn func(context.Context, ResolveApprovalRequest) (CommandResult, error)
 	cancelFn          func(context.Context, CancelRequest) (CommandResult, error)
 	closeSessionCalls int
@@ -409,8 +428,11 @@ func (c *sessionTurnTestClient) Prompt(ctx context.Context, request PromptReques
 	return c.promptFn(ctx, request)
 }
 
-func (*sessionTurnTestClient) Steer(context.Context, SteerRequest) (CommandResult, error) {
-	return CommandResult{}, errors.New("unexpected Steer")
+func (c *sessionTurnTestClient) Steer(ctx context.Context, request SteerRequest) (CommandResult, error) {
+	if c.steerFn == nil {
+		return CommandResult{}, errors.New("unexpected Steer")
+	}
+	return c.steerFn(ctx, request)
 }
 
 func (c *sessionTurnTestClient) Cancel(ctx context.Context, request CancelRequest) (CommandResult, error) {

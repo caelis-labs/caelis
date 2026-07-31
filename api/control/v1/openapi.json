@@ -189,12 +189,84 @@
           "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
+    },
+    "/sessions/{session_id}/tasks": {
+      "get": {
+        "operationId": "listSessionTasks",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "responses": {
+          "200": {"description": "Authorized Task directory for one Session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TaskList"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    },
+    "/sessions/{session_id}/tasks/{task_id}/events": {
+      "get": {
+        "operationId": "readTaskEvents",
+        "parameters": [
+          {"$ref": "#/components/parameters/SessionID"},
+          {"$ref": "#/components/parameters/TaskID"},
+          {"$ref": "#/components/parameters/After"},
+          {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Finite Task output suffix and resumable boundary",
+            "headers": {
+              "Caelis-Resume-Mode": {"schema": {"$ref": "#/components/schemas/TaskResumeMode"}},
+              "Caelis-Transient-Gap": {"schema": {"type": "boolean"}},
+              "Caelis-Boundary-Cursor": {"schema": {"type": "string"}}
+            },
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TaskEventBatch"}}}
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    },
+    "/sessions/{session_id}/tasks/{task_id}/subscribe": {
+      "get": {
+        "operationId": "subscribeTaskEvents",
+        "parameters": [
+          {"$ref": "#/components/parameters/SessionID"},
+          {"$ref": "#/components/parameters/TaskID"},
+          {"$ref": "#/components/parameters/After"},
+          {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Independent Task SSE stream. A named done or typed error event distinguishes intentional completion from transport EOF.",
+            "headers": {
+              "Caelis-Resume-Mode": {"schema": {"$ref": "#/components/schemas/TaskResumeMode"}},
+              "Caelis-Transient-Gap": {"schema": {"type": "boolean"}},
+              "Caelis-Boundary-Cursor": {"schema": {"type": "string"}}
+            },
+            "content": {"text/event-stream": {"schema": {"type": "string"}}}
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
     }
   },
   "components": {
     "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}},
     "parameters": {
       "SessionID": {"name": "session_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
+      "TaskID": {"name": "task_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
       "IdempotencyKey": {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 1}},
       "IfMatch": {"name": "If-Match", "in": "header", "schema": {"type": "string"}},
       "After": {"name": "after", "in": "query", "schema": {"type": "string"}}
@@ -342,6 +414,9 @@
       },
       "Outcome": {"type": "string", "enum": ["accepted", "committed", "conflicted", "rejected", "unknown"]},
       "ResumeMode": {"type": "string", "enum": ["exact", "durable_fallback"]},
+      "TaskResumeMode": {"type": "string", "enum": ["exact", "current_state"]},
+      "TaskKind": {"type": "string", "enum": ["command", "subagent"]},
+      "TaskState": {"type": "string", "enum": ["prepared", "running", "waiting_input", "completed", "failed", "cancelled", "interrupted", "terminated", "waiting_approval", "unknown_outcome"]},
       "ControllerKind": {"type": "string", "enum": ["kernel", "acp"]},
       "ParticipantKind": {"type": "string", "enum": ["acp", "subagent"]},
       "ParticipantRole": {"type": "string", "enum": ["sidecar", "delegated", "observer"]},
@@ -569,6 +644,40 @@
           {"$ref": "#/components/schemas/ErrorEnvelope"}
         ],
         "discriminator": {"propertyName": "kind"}
+      },
+      "TaskParentTool": {"type": "object", "additionalProperties": false, "properties": {"tool_call_id": {"type": "string"}, "tool_name": {"type": "string"}}},
+      "TaskDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["session_id", "task_id", "handle", "kind", "state", "running"],
+        "properties": {
+          "session_id": {"type": "string"},
+          "task_id": {"type": "string"},
+          "handle": {"type": "string"},
+          "agent_handle": {"type": "string"},
+          "kind": {"$ref": "#/components/schemas/TaskKind"},
+          "title": {"type": "string"},
+          "state": {"$ref": "#/components/schemas/TaskState"},
+          "running": {"type": "boolean"},
+          "supports_input": {"type": "boolean"},
+          "supports_cancel": {"type": "boolean"},
+          "parent_tool": {"$ref": "#/components/schemas/TaskParentTool"},
+          "participant_id": {"type": "string"},
+          "current_turn_id": {"type": "string"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "TaskList": {"type": "object", "additionalProperties": false, "properties": {"tasks": {"type": "array", "items": {"$ref": "#/components/schemas/TaskDescriptor"}}}},
+      "TaskEventBatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["resume_mode"],
+        "properties": {
+          "events": {"type": "array", "items": {"$ref": "#/components/schemas/Envelope"}},
+          "resume_mode": {"$ref": "#/components/schemas/TaskResumeMode"},
+          "transient_gap": {"type": "boolean"},
+          "boundary_cursor": {"type": "string"}
+        }
       },
       "SessionRef": {"type": "object", "additionalProperties": false, "properties": {"app_name": {"type": "string"}, "user_id": {"type": "string"}, "session_id": {"type": "string"}, "workspace_key": {"type": "string"}}},
       "ControllerBinding": {"type": "object", "additionalProperties": false, "properties": {"kind": {"$ref": "#/components/schemas/ControllerKind"}, "controller_id": {"type": "string"}, "agent_name": {"type": "string"}, "label": {"type": "string"}, "epoch_id": {"type": "string"}, "remote_session_id": {"type": "string"}, "context_sync_seq": {"$ref": "#/components/schemas/Uint64Decimal"}, "attached_at": {"type": "string", "format": "date-time"}, "source": {"type": "string"}}},

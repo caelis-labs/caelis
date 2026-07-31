@@ -163,7 +163,7 @@ suggests.
 | Principal-bound local and remote Session clients | `control/client/session_client.go`, `control/client/httpclient` | Yes; extend the common facade only as parity requires |
 | Headless typed Turn and structured output | `control/client/session_turn.go`, `surfaces/headless`, `internal/cli/headless_output.go` | Yes; Headless uses the in-process Session client and exposes text, JSON, and versioned JSONL without a private Gateway ingress |
 | Session-routed workspace Runtime ownership | `app/gatewayapp/session_runtime_registry.go`, `workspace_config_assembler.go` | Yes for the bounded Session-client slice: workspace composition is loaded on demand, Session ID selects it, and UserID is not a Runtime key |
-| Independent Task observation | `control/taskstream`, `protocol/acp/taskstream` | Yes; Task output must not be folded into the Session control stream |
+| Independent Task observation | `control/taskstream`, `protocol/acp/taskstream`, `app/controlserver/task_stream.go` | Yes; the principal-bound in-process client and authenticated AppServer list/read/subscribe routes address Task output by Session ID without folding it into the Session control stream |
 
 ## Infrastructure Gaps
 
@@ -227,28 +227,41 @@ locks.
 `control/client/httpclient.Client` implement the same principal-bound
 `control/client.SessionClient` slice for initialize, list, create, close,
 inspect, atomic reconnect, and main-Turn writes. Remote SSE delivery is bounded
-and reports a cursor-addressed gap. `control/client.SessionTurnClient` now
+and reports a cursor-addressed gap. `protocol/acp/taskstream.Client` provides
+the principal-bound in-process Task list/read/subscribe contract, and AppServer
+exposes the same authorized operations over HTTP/SSE. A maintained remote Task
+client is deliberately deferred until the local-daemon slice; Task resume
+metadata and transient gaps remain independent from the Session feed cursor.
+`control/client.SessionTurnClient` now
 builds one target-filtered main Turn on that common facade, and Headless uses
 it through the in-process client. It first inspects the current feed boundary,
 then reconnects from that cursor before Prompt, so a long resumed Session does
 not replay and discard its entire durable prefix. Typed text and inline-image
 content parts cross the same in-process and HTTP prompt/steer contract; local
 filesystem attachment resolution remains a Surface responsibility. The same
-Headless integration test also runs through the HTTP client. The production
-TUI still uses
-`controladapter/local.NewLocalAdapter` and directly receives
-`*gatewayapp.Stack` (`internal/cli/tui.go:25-31`). Participant administration,
-handoff, attachment materialization, automatic reconnect policy, and the TUI's
-other private Control services are not part of the common slice. The public
-HTTP protocol intentionally omits participant, handoff, Task, and standalone
-events/stream routes until their owner and parity requirement are proven.
+Headless integration test also runs through the HTTP client.
+
+The production embedded TUI now submits and observes ordinary main Turns
+through `SessionTurnClient`, and observes asynchronous Shell and Subagent output
+through the separate typed Task client. Its compatibility adapter still embeds
+`controladapter/local.Adapter` for lifecycle commands, status/configuration,
+`/review`, and direct-Agent participant Turns. Consequently the CLI composition
+still receives `*gatewayapp.Stack`, but the migrated main-Turn and Task paths do
+not use it directly. Participant administration, handoff, automatic reconnect
+policy, and those remaining private Control services are not part of the common
+slice. The public HTTP protocol intentionally omits participant, handoff, and
+standalone events/stream routes until their owner and parity requirement are
+proven.
 The broader in-process `control/client.Service` still exposes participant
 commands whose Runtime context is request-scoped; that interface is not the
 MVP client facade, and the Host-owned lifetime claim applies only to accepted
 main Turns in `SessionClient`.
 
-**Failure mode.** Switching the TUI now would either remove working features or
-force presentation code to reach around the typed client.
+**Failure mode.** Removing the compatibility adapter now would either remove
+working slash/participant features or force presentation code to reach around
+the typed clients. Merging Task events into the main Turn stream would also
+duplicate asynchronous output and let a slow Task observer affect parent
+presentation.
 
 **Bounded repair.** Extend the client only when a parity test identifies a
 missing TUI capability:
@@ -261,7 +274,7 @@ missing TUI capability:
   parts, and add participant, handoff, model/profile, and other services
   through their existing semantic owners rather than a TUI aggregate;
 - run the same integration suite against in-process and remote clients before
-  changing TUI composition.
+  removing the embedded compatibility path.
 
 Keep the Control-domain-bound HTTP wire DTOs and codec in
 `control/client/wirev1`, and listener policy in `app/controlserver`. The TUI
@@ -310,8 +323,10 @@ mutation that already acquired the Runtime. Failed sandbox or MCP closure
 retains the resource owner so Host shutdown can retry cleanup. Session close
 releases its Runtime.
 
-The ordinary TUI, ACP adapter, private prompt services, and Task stream lookup
-still address the default Stack. There is not yet a public client
+The ACP adapter, TUI lifecycle/status/participant compatibility methods, and
+private prompt services still address the default Stack. Main TUI Turn ingress
+and observation are Session-directed, while Task list/read/subscribe routes by
+Session ID through the Host Runtime registry. There is not yet a public client
 detach/release operation or idle eviction policy, so an open idle Session
 activation remains resident until Session close or Host shutdown; the
 registry's release primitive is currently internal lifecycle machinery.
@@ -324,14 +339,20 @@ through Session creation; a missing preferred ID alone creates, and a closed
 Session reports an explicit create-new instruction. The legacy
 `surfaces/headless.RunOnce` remains only for eval/private Gateway coverage and
 is deprecated until those callers use the typed Session client.
-`Stack.StartSession` must still record a process-local default-Stack ownership
-marker for the remaining TUI, ACP, and private prompt Sessions. Control
-reconnect and mutation routing must honor this marker so one legacy Session
-cannot acquire a second detached Gateway. This marker is not durable workspace
-configuration or a Session Runtime cache. Remove the marker and its routing
-branches only after those remaining paths are Session-directed and the shared
-local/remote client parity suite covers their required resume, prompt, steer,
-cancel, approval, and close behavior.
+The TUI compatibility adapter now routes ordinary prompt, steer, cancel,
+approval, main-Turn observation, and Task observation through typed clients.
+It deliberately retains the local adapter for `/new`, `/resume`, status and
+configuration, `/review`, and direct-Agent participant Turns. Side ACP remains
+a separate participant Turn and publishes its own target-filtered Session-feed
+events; it must not leak into the main-Turn client or Task stream.
+`Stack.StartSession` must therefore still record a process-local default-Stack
+ownership marker for the remaining TUI, ACP, and private prompt Sessions.
+Control reconnect and mutation routing must honor this marker so one legacy
+Session cannot acquire a second detached Gateway. This marker is not durable
+workspace configuration or a Session Runtime cache. Remove the compatibility
+adapter, marker, and routing branches only after lifecycle/status and
+participant capabilities have focused typed owners, ACP consumes them, and the
+shared local/remote parity suite covers their required behavior.
 
 **Failure mode.** The bounded app-server Session path can operate concurrently
 across local workspaces without mixing prompt, skills, sandbox CWD, Gateway, or
@@ -341,10 +362,10 @@ routing or keep idle Session compositions resident indefinitely.
 
 **Bounded repair.** Keep Session as the public unit and extend Runtime routing
 only when a concrete Session capability requires it. Define the smallest
-client-visible activation release needed by TUI switching before migrating the
-TUI, then move Task lookup and remaining private services behind
-Session-directed owners. Do not expose workspace Runtime handles to Surfaces or
-use workspace/UserID as Session identity.
+client-visible activation release needed before removing the TUI compatibility
+path, then move remaining private services behind Session-directed owners. Do
+not expose workspace Runtime handles to Surfaces or use workspace/UserID as
+Session identity.
 
 **Acceptance.** Run Sessions from two workspaces concurrently and prove that
 their CWD, write roots, skills, MCP endpoints, external Agent launch CWD, model
@@ -453,14 +474,16 @@ flowchart LR
     REMOTE --> REDUCER
     REDUCER --> PET
     LOCAL --> CONTROL
+    LOCAL --> TASKS
     REMOTE --> API
     API --> CONTROL
+    API --> TASKS
     CATALOG --> CONTROL
     CONTROL --> RUNTIME
+    TASKS --> RUNTIME
     RUNTIME --> ASSEMBLER
     CONTROL --> STORE
     CONTROL --> OPS
-    TASKS --> STORE
 ```
 
 The dependency direction remains:
@@ -546,8 +569,9 @@ The infrastructure MVP is intentionally smaller than a TUI migration:
   active producers, waits for handle release, and then closes resources;
 - one principal-bound `SessionClient` contract has in-process and HTTP/SSE
   implementations;
-- the public v1 protocol contains only initialize, Session
-  list/create/close/state/reconnect, prompt/steer/cancel, and approval resolve;
+- the public v1 protocol contains initialize, Session
+  list/create/close/state/reconnect, prompt/steer/cancel, approval resolve, and
+  independent Task list/read/subscribe;
 - reconnect is the sole atomic state/replay/live attachment operation;
 - generated wire clients and conformance tests share
   `control/client/wirev1`.
@@ -558,13 +582,18 @@ The infrastructure MVP is intentionally smaller than a TUI migration:
   workspace configuration cache;
 - Headless uses the same typed Session Turn over the in-process client, with
   plain final output plus versioned JSON and JSONL contracts suitable for
-  scripts and program integration.
+  scripts and program integration;
+- the embedded TUI uses the typed Session Turn for the main agent and the typed
+  Task client for asynchronous Shell/Subagent observation, while its remaining
+  lifecycle/status and Side ACP participant methods stay on a documented
+  compatibility adapter.
 
-TUI and ACP composition remain unchanged until their parity suites prove the
-in-process and remote clients can replace their current Session paths.
-Readiness, automatic retry policy, participant/handoff and Task remote clients,
-client-visible Runtime release, catalog activity, output-schema validation,
-Bar, and Pet are deferred capabilities, not placeholders in the MVP protocol.
+ACP and the remaining TUI compatibility methods stay unchanged until their
+parity suites prove focused typed clients can replace them. Readiness,
+automatic retry policy, participant/handoff clients, client-visible Runtime
+release, the maintained remote Task client, catalog activity,
+output-schema validation, Bar, and Pet are deferred capabilities, not
+placeholders in the MVP protocol.
 
 ## Quality Gates
 

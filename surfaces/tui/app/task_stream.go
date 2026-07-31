@@ -282,7 +282,7 @@ func (m *Model) startTaskStreamResolver(sessionID, callID, handle string, token 
 	}
 	ctx := contextOrBackground(cfg.Context)
 	cfg.ProgramSender.startForwarder(func() {
-		result, err := cfg.TaskStreams.List(ctx, cfg.TaskStreamPrincipal, taskstream.ListRequest{SessionID: sessionID})
+		result, err := cfg.TaskStreams.List(ctx, taskstream.ListRequest{SessionID: sessionID})
 		if err == nil {
 			var matched *taskstream.TaskDescriptor
 			for index := range result.Tasks {
@@ -388,7 +388,7 @@ func (m *Model) startTaskStreamForwarder(sessionID, taskID string, token uint64,
 	}
 	ctx := contextOrBackground(cfg.Context)
 	cfg.ProgramSender.startForwarder(func() {
-		result, err := cfg.TaskStreams.Subscribe(ctx, cfg.TaskStreamPrincipal, taskstream.SubscribeRequest{
+		result, err := cfg.TaskStreams.Subscribe(ctx, taskstream.SubscribeRequest{
 			SessionID: sessionID,
 			TaskID:    taskID,
 			Cursor:    cursor,

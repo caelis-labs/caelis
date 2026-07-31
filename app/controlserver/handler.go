@@ -14,14 +14,15 @@ import (
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/client/wirev1"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 const apiPrefix = wirev1.APIPrefix
 
 const (
-	resumeModeHeader      = "Caelis-Resume-Mode"
-	transientGapHeader    = "Caelis-Transient-Gap"
-	boundaryCursorHeader  = "Caelis-Boundary-Cursor"
+	resumeModeHeader      = wirev1.ResumeModeHeader
+	transientGapHeader    = wirev1.TransientGapHeader
+	boundaryCursorHeader  = wirev1.BoundaryCursorHeader
 	resumeEventName       = wirev1.ResumeEventName
 	bootstrapEventName    = wirev1.BootstrapEventName
 	backfillDoneEventName = wirev1.BackfillDoneEventName
@@ -43,6 +44,7 @@ func (f AuthenticatorFunc) Authenticate(request *http.Request) (controlclient.Pr
 // listener or process-lifecycle policy.
 type HandlerConfig struct {
 	Service       controlclient.Service
+	TaskStreams   taskstream.Service
 	Authenticator Authenticator
 	AllowedHosts  []string
 	Heartbeat     time.Duration
@@ -58,6 +60,9 @@ type Server struct {
 func New(config HandlerConfig) (*Server, error) {
 	if config.Service == nil {
 		return nil, errors.New("controlserver: control client service is required")
+	}
+	if config.TaskStreams == nil {
+		return nil, errors.New("controlserver: Task stream service is required")
 	}
 	if config.Authenticator == nil {
 		return nil, errors.New("controlserver: authenticator is required for an HTTP handler")
@@ -99,6 +104,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/steer", s.steer)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/cancel", s.cancel)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/approvals/{approval_request_id}/resolve", s.resolveApproval)
+	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks", s.listTasks)
+	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/events", s.taskEvents)
+	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/subscribe", s.subscribeTask)
 }
 
 func (s *Server) initialize(w http.ResponseWriter, r *http.Request) {

@@ -22,6 +22,9 @@ const (
 	ResumeEventName       = "caelis.control.resume"
 	BootstrapEventName    = "caelis.control.bootstrap"
 	BackfillDoneEventName = "caelis.control.backfill_done"
+	ResumeModeHeader      = "Caelis-Resume-Mode"
+	TransientGapHeader    = "Caelis-Transient-Gap"
+	BoundaryCursorHeader  = "Caelis-Boundary-Cursor"
 )
 
 // ResumeBoundary is the wire notification that tells a disconnected client

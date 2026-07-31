@@ -24,6 +24,7 @@ import (
 
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	acptaskstream "github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 func TestClassifyControlBackendErrorTreatsLeaseConflictAsConflict(t *testing.T) {
@@ -564,7 +565,7 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	server, err := controlserver.New(controlserver.HandlerConfig{
-		Service: service, Authenticator: authenticator,
+		Service: service, TaskStreams: controlClientNoopTaskStreams{}, Authenticator: authenticator,
 		AllowedHosts: []string{"127.0.0.1", "localhost", "::1"},
 	})
 	if err != nil {
@@ -622,6 +623,22 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type controlClientNoopTaskStreams struct{}
+
+func (controlClientNoopTaskStreams) List(context.Context, acptaskstream.Principal, acptaskstream.ListRequest) (acptaskstream.ListResult, error) {
+	return acptaskstream.ListResult{}, nil
+}
+
+func (controlClientNoopTaskStreams) Events(context.Context, acptaskstream.Principal, acptaskstream.ReadRequest) (acptaskstream.Batch, error) {
+	return acptaskstream.Batch{}, nil
+}
+
+func (controlClientNoopTaskStreams) Subscribe(context.Context, acptaskstream.Principal, acptaskstream.SubscribeRequest) (acptaskstream.SubscribeResult, error) {
+	return acptaskstream.SubscribeResult{}, nil
+}
+
+var _ acptaskstream.Service = controlClientNoopTaskStreams{}
 
 func TestControlClientCancelParticipantRejectsMainTurnWithArbitraryParticipantID(t *testing.T) {
 	t.Parallel()

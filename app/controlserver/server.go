@@ -12,13 +12,15 @@ import (
 	"time"
 
 	controlclient "github.com/caelis-labs/caelis/control/client"
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 // Dependencies contains only the Control contracts exposed over HTTP.
 // Product assembly remains outside the listener package.
 type Dependencies struct {
-	Service   controlclient.Service
-	Lifecycle interface {
+	Service     controlclient.Service
+	TaskStreams taskstream.Service
+	Lifecycle   interface {
 		Quiesce(context.Context) error
 	}
 }
@@ -40,11 +42,14 @@ func Handler(deps Dependencies, config Config) (http.Handler, error) {
 	if deps.Service == nil {
 		return nil, errors.New("controlserver: Control client service is required")
 	}
+	if deps.TaskStreams == nil {
+		return nil, errors.New("controlserver: Task stream service is required")
+	}
 	if config.Authenticator == nil {
 		return nil, errors.New("controlserver: authenticator is required for an HTTP handler")
 	}
 	server, err := New(HandlerConfig{
-		Service: deps.Service, Authenticator: config.Authenticator,
+		Service: deps.Service, TaskStreams: deps.TaskStreams, Authenticator: config.Authenticator,
 		AllowedHosts: append([]string(nil), config.AllowedHosts...), Heartbeat: config.Heartbeat,
 	})
 	if err != nil {

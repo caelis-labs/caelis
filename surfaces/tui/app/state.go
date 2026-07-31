@@ -124,8 +124,7 @@ type Config struct {
 	CommandDetails         map[string]string
 	Wizards                []WizardDef
 	ControlService         controlprompt.Service
-	TaskStreams            taskstream.Service
-	TaskStreamPrincipal    taskstream.Principal
+	TaskStreams            taskstream.Client
 	ProgramSender          *ProgramSender
 	PromptRouterFactory    controlprompt.RouterFactory
 	OnStart                func()

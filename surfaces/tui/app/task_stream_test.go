@@ -40,12 +40,11 @@ func TestTUISubagentOutputSubscribesInBackgroundAndOverlayCloseDoesNotCancelTask
 	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
 	defer sender.Close()
 	model := NewModel(Config{
-		Context:             context.Background(),
-		NoColor:             true,
-		NoAnimation:         true,
-		TaskStreams:         service,
-		TaskStreamPrincipal: taskstream.Principal{ID: "user-1"},
-		ProgramSender:       sender,
+		Context:       context.Background(),
+		NoColor:       true,
+		NoAnimation:   true,
+		TaskStreams:   bindTaskStreamTestClient(t, service),
+		ProgramSender: sender,
 	})
 	model.width = 100
 	model.height = 28
@@ -154,7 +153,7 @@ func TestTUIBackgroundSubagentObservationRetriesDirectoryAndSubscriptionFailures
 	defer sender.Close()
 	model := NewModel(Config{
 		Context: context.Background(), NoColor: true, NoAnimation: true,
-		TaskStreams: service, TaskStreamPrincipal: taskstream.Principal{ID: "user-1"}, ProgramSender: sender,
+		TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender,
 	})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
@@ -229,7 +228,7 @@ func TestTUIBackgroundSubagentObservationKeepsResolvingByParentCall(t *testing.T
 	defer sender.Close()
 	model := NewModel(Config{
 		Context: context.Background(), NoColor: true, NoAnimation: true,
-		TaskStreams: service, TaskStreamPrincipal: taskstream.Principal{ID: "user-1"}, ProgramSender: sender,
+		TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender,
 	})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
@@ -295,7 +294,7 @@ func TestTUIBackgroundSubagentObservationStopsDirectoryRetryAfterSpawnTerminal(t
 	defer sender.Close()
 	model := NewModel(Config{
 		Context: context.Background(), NoColor: true, NoAnimation: true,
-		TaskStreams: service, TaskStreamPrincipal: taskstream.Principal{ID: "user-1"}, ProgramSender: sender,
+		TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender,
 	})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
@@ -357,7 +356,7 @@ func TestTUIBackgroundSubagentObservationStopsSubscribeRetryAfterSpawnTerminal(t
 	defer sender.Close()
 	model := NewModel(Config{
 		Context: context.Background(), NoColor: true, NoAnimation: true,
-		TaskStreams: service, TaskStreamPrincipal: taskstream.Principal{ID: "user-1"}, ProgramSender: sender,
+		TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender,
 	})
 	model.currentSessionID = "session-1"
 	view := model.ensureSubagentOutputView("spawn-1")
@@ -434,7 +433,7 @@ func TestTUIBackgroundSubagentObservationClosesRemappedActiveStreamAfterSpawnTer
 	defer sender.Close()
 	model := NewModel(Config{
 		Context: context.Background(), NoColor: true, NoAnimation: true,
-		TaskStreams: service, TaskStreamPrincipal: taskstream.Principal{ID: "user-1"}, ProgramSender: sender,
+		TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender,
 	})
 	model.currentSessionID = "session-1"
 	view := model.ensureSubagentOutputView("spawn-1")
@@ -662,6 +661,15 @@ func (s *tuiRetryTaskStreamService) Subscribe(context.Context, taskstream.Princi
 		return taskstream.SubscribeResult{}, errorcode.New(errorcode.Unavailable, "task stream temporarily unavailable")
 	}
 	return taskstream.SubscribeResult{Subscription: s.subscription, ResumeMode: taskstream.ResumeModeExact}, nil
+}
+
+func bindTaskStreamTestClient(t *testing.T, service taskstream.Service) taskstream.Client {
+	t.Helper()
+	client, err := taskstream.BindClient(service, taskstream.Principal{ID: "user-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
 }
 
 func (s *tuiTestTaskStreamService) List(context.Context, controltaskstream.Principal, controltaskstream.ListRequest) (controltaskstream.ListResult, error) {

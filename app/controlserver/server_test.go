@@ -68,7 +68,7 @@ func TestListenAndServeQuiescesHostBeforeReturning(t *testing.T) {
 	cancel()
 	listener := testenv.NewMemoryListener("127.0.0.1:1455")
 	err = listenAndServe(ctx, Dependencies{
-		Service: &fakeService{}, Lifecycle: lifecycle,
+		Service: &fakeService{}, TaskStreams: &fakeTaskService{}, Lifecycle: lifecycle,
 	}, Config{
 		Address: "127.0.0.1:0", Authenticator: authenticator,
 		DrainTimeout: time.Second,

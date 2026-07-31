@@ -10,7 +10,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/updater"
 	"github.com/caelis-labs/caelis/internal/version"
@@ -29,11 +31,27 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appC
 	if err != nil {
 		return err
 	}
+	principal := controlclient.Principal{ID: stack.UserID}
+	sessionClient, err := controlclient.BindSessionClient(stack.ControlClient(), principal)
+	if err != nil {
+		return err
+	}
+	typedDriver, err := controladapter.NewSessionClientAdapter(driver, sessionClient)
+	if err != nil {
+		return err
+	}
+	taskClient, err := taskstream.BindClient(
+		stack.TaskStreams(),
+		taskstream.Principal{ID: stack.UserID},
+	)
+	if err != nil {
+		return err
+	}
 	programCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	sender := &tuiapp.ProgramSender{}
 	updateRequested := false
-	tuiCfg := tuiapp.ConfigFromControlService(driver, sender, tuiapp.Config{
+	tuiCfg := tuiapp.ConfigFromControlService(typedDriver, sender, tuiapp.Config{
 		Context:             programCtx,
 		AppName:             "CAELIS",
 		Version:             version.String(),
@@ -45,8 +63,7 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appC
 		PromptRouterFactory: controlprompt.New,
 		RenderFPS:           envInt("CAELIS_TUI_RENDER_FPS", 0),
 		NoAnimation:         options.NoAnimation,
-		TaskStreams:         stack.TaskStreams(),
-		TaskStreamPrincipal: taskstream.Principal{ID: stack.UserID},
+		TaskStreams:         taskClient,
 		OnStart: func() {
 			stack.StartApprovalRecovery(programCtx)
 			startTUISandboxRefresh(programCtx, stack, sender)

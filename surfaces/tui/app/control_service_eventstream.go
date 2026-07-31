@@ -30,7 +30,11 @@ type eventStreamNarrativeBatcher struct {
 }
 
 func forwardTurnEventStream(ctx context.Context, turn controlprompt.Turn, sender *ProgramSender) executeLineResult {
-	return forwardControlEventStream(ctx, turn, nil, sender)
+	var closureError func() error
+	if source, ok := turn.(interface{ Err() error }); ok {
+		closureError = source.Err
+	}
+	return forwardControlEventStream(ctx, turn, closureError, sender)
 }
 
 func forwardSessionReconnectEventStream(ctx context.Context, reconnect controlprompt.SessionReconnect, sender *ProgramSender) executeLineResult {

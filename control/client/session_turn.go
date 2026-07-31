@@ -46,6 +46,7 @@ type SessionTurn interface {
 	// cannot block Runtime publication or sibling observers.
 	Events() <-chan eventstream.Envelope
 	ResolveApproval(context.Context, ApprovalResolution) error
+	Steer(context.Context, string, string, []model.ContentPart) error
 	Cancel(context.Context, string) error
 	LastCursor() string
 	Err() error
@@ -239,6 +240,43 @@ func (t *sessionTurn) ResolveApproval(
 		Approved:          resolution.Approved,
 		Reason:            strings.TrimSpace(resolution.Reason),
 		ReviewText:        strings.TrimSpace(resolution.ReviewText),
+	})
+	return err
+}
+
+// Steer submits additional prompt content to this exact active main Turn.
+// The target and controller epoch captured at admission fence the write
+// without asking a Surface to reconstruct live identity.
+func (t *sessionTurn) Steer(
+	ctx context.Context,
+	input string,
+	displayInput string,
+	contentParts []model.ContentPart,
+) error {
+	if t == nil || t.client == nil {
+		return errors.New("controlclient: Session turn is unavailable")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	input = strings.TrimSpace(input)
+	displayInput = strings.TrimSpace(displayInput)
+	if input == "" && len(contentParts) == 0 {
+		return errors.New("controlclient: Session steer requires prompt input")
+	}
+	if displayInput == input {
+		displayInput = ""
+	}
+	_, err := t.client.Steer(ctx, SteerRequest{
+		WriteBase: WriteBase{
+			OperationID:             newSessionTurnOperationID("steer"),
+			SessionID:               t.sessionID,
+			ExpectedControllerEpoch: t.controllerEpoch,
+		},
+		Target:       t.target,
+		Input:        input,
+		DisplayInput: displayInput,
+		ContentParts: append([]model.ContentPart(nil), contentParts...),
 	})
 	return err
 }
