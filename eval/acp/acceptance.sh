@@ -135,6 +135,11 @@ acpx_base=(
 acpx_status=0
 HOME="$run_dir/acpx-home" "${acpx_base[@]}" sessions new --name typed \
   >"$run_dir/logs/session-new.jsonl" 2>"$run_dir/logs/session-new.stderr" || acpx_status=1
+acpx_session_id="$(jq -er '
+  select(.action == "session_ensured" and .created == true)
+  | .acpxSessionId
+  | select(type == "string" and length > 0)
+' "$run_dir/logs/session-new.jsonl")" || acpx_status=1
 HOME="$run_dir/acpx-home" "${acpx_base[@]}" prompt -s typed \
   'Reply exactly ACP_FIRST_OK.' \
   >"$run_dir/logs/prompt-first.jsonl" 2>"$run_dir/logs/prompt-first.stderr" || acpx_status=1
@@ -160,6 +165,26 @@ agent_message_text() {
     | select(.params.update.sessionUpdate == "agent_message_chunk")
     | .params.update.content.text] | join("")' "$1"
 }
+assert_prompt_lifecycle() {
+  local output="$1"
+  jq -e -s --arg session_id "$acpx_session_id" '
+    any(.[];
+      .method == "initialize"
+      and .params.protocolVersion == 1)
+    and any(.[];
+      .id == 0
+      and .result.protocolVersion == 1
+      and .result.agentCapabilities.loadSession == true)
+    and any(.[];
+      .method == "session/resume"
+      and .params.sessionId == $session_id)
+    and any(.[];
+      .method == "session/prompt"
+      and .params.sessionId == $session_id)
+  ' "$output" >/dev/null
+}
+assert_prompt_lifecycle "$run_dir/logs/prompt-first.jsonl" || structured_status=1
+assert_prompt_lifecycle "$run_dir/logs/prompt-resume.jsonl" || structured_status=1
 [[ "$(agent_message_text "$run_dir/logs/prompt-first.jsonl")" == "ACP_FIRST_OK" ]] || structured_status=1
 [[ "$(agent_message_text "$run_dir/logs/prompt-resume.jsonl")" == "ACP_RESUME_OK" ]] || structured_status=1
 [[ "$(agent_message_text "$run_dir/logs/prompt-task.jsonl")" == "ACP_TASK_OK" ]] || structured_status=1
@@ -173,6 +198,15 @@ jq -e -s '
 ' "$run_dir/logs/prompt-task.jsonl" >/dev/null || structured_status=1
 jq -e -s 'any(.[]; .method == "session/request_permission")' \
   "$run_dir/logs/prompt-task.jsonl" >/dev/null || structured_status=1
+jq -e --arg session_id "$acpx_session_id" --arg cwd "$run_dir/workspace" '
+  .cwd == $cwd
+  and any(.sessions[]; .sessionId == $session_id and .cwd == $cwd)
+' "$run_dir/logs/session-list.jsonl" >/dev/null || structured_status=1
+jq -e --arg session_id "$acpx_session_id" '
+  .action == "session_closed"
+  and .acpxSessionId == $session_id
+  and .acpxRecordId == $session_id
+' "$run_dir/logs/session-close.jsonl" >/dev/null || structured_status=1
 
 passed=false
 if [[ "$gate_status" -eq 0 && "$acpx_status" -eq 0 && "$structured_status" -eq 0 ]]; then
@@ -198,7 +232,7 @@ jq -n \
   printf -- '- Run: `%s`\n' "$run_id"
   printf -- '- Commit: `%s`\n' "$commit"
   printf -- '- Deterministic protocol/product/TUI gates: `%s`\n' "$gate_status"
-  printf -- '- Real acpx lifecycle/prompt/resume/task/close: `%s`\n' "$acpx_status"
+  printf -- '- Real acpx initialize/resume/prompt/task/list and local record close: `%s`\n' "$acpx_status"
   printf -- '- Structured JSON and marker validation: `%s`\n' "$structured_status"
   printf -- '- Passed: `%s`\n' "$passed"
 } >"$run_dir/report.md"

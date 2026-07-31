@@ -3,11 +3,16 @@
 `acceptance.sh` combines three deterministic gates with one real `acpx` run:
 
 - ACP wire/projection ordering, cancellation, Spawn lifecycle, and load replay;
-- product ACP typed Session lifecycle/main-Turn integration;
+- product ACP typed Session lifecycle/main-Turn/participant integration,
+  including the durable product close gate;
 - TUI Side ACP and Subagent overlay live/replay fidelity;
 - real stdio initialize/new/prompt, process restart plus load/resume, terminal
   Task output with ACP client approval, session/list, structured JSON events,
-  and durable close using the configured MiMo ModelProfile.
+  and local `acpx` session-record close using the configured MiMo ModelProfile.
+
+The final `acpx sessions close` checks the client-side saved-session lifecycle;
+it does not send ACP `session/close`. Durable product Session close is covered by
+the deterministic product typed-client gate above.
 
 Run it from the repository root:
 

@@ -6,13 +6,37 @@ import unittest
 from eval.terminalbench.report import build_report
 
 
+def envelope_record() -> dict[str, object]:
+    turn = {"handle_id": "handle-1", "run_id": "run-1", "turn_id": "turn-1"}
+    return {
+        "schema_version": "caelis.headless/v1",
+        "type": "envelope",
+        "session_id": "session-1",
+        "turn": turn,
+        "envelope": {
+            "kind": "caelis/notice",
+            "session_id": "session-1",
+            **turn,
+        },
+    }
+
+
+def result_record(*, usage: dict[str, int] | None = None) -> dict[str, object]:
+    return {
+        "schema_version": "caelis.headless/v1",
+        "type": "result",
+        "session_id": "session-1",
+        "turn": {"handle_id": "handle-1", "run_id": "run-1", "turn_id": "turn-1"},
+        "status": "completed",
+        "output": "done",
+        "usage": usage or {},
+    }
+
+
 def write_jsonl(trial_dir: Path, *, valid: bool = True, usage: dict[str, int] | None = None) -> None:
     agent_dir = trial_dir / "agent"
     agent_dir.mkdir()
-    records = [
-        {"schema_version": "caelis.headless/v1", "type": "envelope"},
-        {"schema_version": "caelis.headless/v1", "type": "result", "usage": usage or {}},
-    ]
+    records = [envelope_record(), result_record(usage=usage)]
     if not valid:
         records.pop()
     (agent_dir / "caelis.jsonl").write_text(
@@ -126,8 +150,11 @@ class ReportTest(unittest.TestCase):
                 "\n".join(
                     json.dumps(record)
                     for record in [
-                        {"schema_version": "caelis.headless/v1", "type": "envelope"},
-                        {"schema_version": "caelis.headless/v1", "type": "error"},
+                        {
+                            "schema_version": "caelis.headless/v1",
+                            "type": "error",
+                            "message": "agent failed before a Session was created",
+                        },
                     ]
                 )
                 + "\n",
@@ -147,6 +174,97 @@ class ReportTest(unittest.TestCase):
         self.assertTrue(report["complete"])
         self.assertEqual(report["structured_errors"], 0)
         self.assertEqual(report["tasks"][0]["structured_output_state"], "error-record")
+
+    def test_terminal_followed_by_an_envelope_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            job_dir = Path(raw)
+            trial = job_dir / "bad-order"
+            trial.mkdir()
+            agent_dir = trial / "agent"
+            agent_dir.mkdir()
+            records = [envelope_record(), result_record(), envelope_record()]
+            (agent_dir / "caelis.jsonl").write_text(
+                "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+            )
+            (trial / "result.json").write_text(
+                json.dumps({"task_name": "fix-git", "verifier_result": {"rewards": {"reward": 1}}}),
+                encoding="utf-8",
+            )
+            report = build_report({"run_id": "test"}, ["terminal-bench/fix-git"], job_dir)
+        self.assertFalse(report["complete"])
+        self.assertEqual(
+            report["tasks"][0]["structured_output_error"], "record-after-terminal-line-3"
+        )
+
+    def test_mismatched_envelope_target_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            job_dir = Path(raw)
+            trial = job_dir / "bad-target"
+            trial.mkdir()
+            agent_dir = trial / "agent"
+            agent_dir.mkdir()
+            envelope = envelope_record()
+            envelope["envelope"]["turn_id"] = "other-turn"  # type: ignore[index]
+            records = [envelope, result_record()]
+            (agent_dir / "caelis.jsonl").write_text(
+                "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+            )
+            (trial / "result.json").write_text(
+                json.dumps({"task_name": "fix-git", "verifier_result": {"rewards": {"reward": 1}}}),
+                encoding="utf-8",
+            )
+            report = build_report({"run_id": "test"}, ["terminal-bench/fix-git"], job_dir)
+        self.assertFalse(report["complete"])
+        self.assertEqual(
+            report["tasks"][0]["structured_output_error"],
+            "envelope-turn_id-mismatch-line-1",
+        )
+
+    def test_non_terminal_result_status_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            job_dir = Path(raw)
+            trial = job_dir / "running-result"
+            trial.mkdir()
+            agent_dir = trial / "agent"
+            agent_dir.mkdir()
+            result = result_record()
+            result["status"] = "running"
+            records = [envelope_record(), result]
+            (agent_dir / "caelis.jsonl").write_text(
+                "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+            )
+            (trial / "result.json").write_text(
+                json.dumps({"task_name": "fix-git", "verifier_result": {"rewards": {"reward": 1}}}),
+                encoding="utf-8",
+            )
+            report = build_report({"run_id": "test"}, ["terminal-bench/fix-git"], job_dir)
+        self.assertFalse(report["complete"])
+        self.assertEqual(
+            report["tasks"][0]["structured_output_error"], "invalid-result-status-line-2"
+        )
+
+    def test_result_target_must_match_envelope_target(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            job_dir = Path(raw)
+            trial = job_dir / "bad-result-target"
+            trial.mkdir()
+            agent_dir = trial / "agent"
+            agent_dir.mkdir()
+            result = result_record()
+            result["turn"]["turn_id"] = "other-turn"  # type: ignore[index]
+            records = [envelope_record(), result]
+            (agent_dir / "caelis.jsonl").write_text(
+                "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+            )
+            (trial / "result.json").write_text(
+                json.dumps({"task_name": "fix-git", "verifier_result": {"rewards": {"reward": 1}}}),
+                encoding="utf-8",
+            )
+            report = build_report({"run_id": "test"}, ["terminal-bench/fix-git"], job_dir)
+        self.assertFalse(report["complete"])
+        self.assertEqual(
+            report["tasks"][0]["structured_output_error"], "record-target-mismatch-line-2"
+        )
 
 
 if __name__ == "__main__":

@@ -125,16 +125,115 @@ def structured_output_check(trial_dir: Path, error_type: str | None) -> tuple[st
         records.append(record)
     if not records:
         return "invalid", "empty-caelis-jsonl"
-    if not any(record.get("type") == "envelope" for record in records):
-        return "invalid", "missing-envelope"
-    final_type = records[-1].get("type")
-    if final_type == "result":
-        return "complete", None
-    if final_type == "error":
+
+    terminal_index: int | None = None
+    envelope_count = 0
+    expected_target: tuple[str, str, str, str] | None = None
+    for index, record in enumerate(records):
+        record_type = record["type"]
+        line_number = index + 1
+        if terminal_index is not None:
+            return "invalid", f"record-after-terminal-line-{line_number}"
+        if record_type == "envelope":
+            envelope_count += 1
+            error = validate_envelope_record(record)
+        elif record_type == "result":
+            terminal_index = index
+            error = validate_result_record(record)
+        else:
+            terminal_index = index
+            error = validate_error_record(record)
+        if error is not None:
+            return "invalid", f"{error}-line-{line_number}"
+        if record_type in {"envelope", "result"}:
+            target = record_target(record)
+            if expected_target is None:
+                expected_target = target
+            elif target != expected_target:
+                return "invalid", f"record-target-mismatch-line-{line_number}"
+
+    if terminal_index is not None:
+        final_type = records[terminal_index]["type"]
+        if final_type == "result":
+            if envelope_count == 0:
+                return "invalid", "result-without-envelope"
+            return "complete", None
         return "error-record", None
-    if error_type == "AgentTimeoutError":
+    if error_type == "AgentTimeoutError" and envelope_count > 0:
         return "truncated-timeout", None
     return "invalid", "missing-final-result"
+
+
+def nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def validate_turn(record: dict[str, Any]) -> str | None:
+    turn = record.get("turn")
+    if not isinstance(turn, dict):
+        return "invalid-turn"
+    for field in ("handle_id", "run_id", "turn_id"):
+        if not nonempty_string(turn.get(field)):
+            return f"invalid-turn-{field}"
+    return None
+
+
+def record_target(record: dict[str, Any]) -> tuple[str, str, str, str]:
+    turn = record["turn"]
+    return record["session_id"], turn["handle_id"], turn["run_id"], turn["turn_id"]
+
+
+def validate_envelope_record(record: dict[str, Any]) -> str | None:
+    if not nonempty_string(record.get("session_id")):
+        return "invalid-session-id"
+    if error := validate_turn(record):
+        return error
+    envelope = record.get("envelope")
+    if not isinstance(envelope, dict):
+        return "invalid-envelope"
+    turn = record["turn"]
+    expected = {
+        "session_id": record["session_id"],
+        "handle_id": turn["handle_id"],
+        "run_id": turn["run_id"],
+        "turn_id": turn["turn_id"],
+    }
+    for field, value in expected.items():
+        if envelope.get(field) != value:
+            return f"envelope-{field}-mismatch"
+    if not nonempty_string(envelope.get("kind")):
+        return "invalid-envelope-kind"
+    return None
+
+
+def validate_result_record(record: dict[str, Any]) -> str | None:
+    if not nonempty_string(record.get("session_id")):
+        return "invalid-session-id"
+    if error := validate_turn(record):
+        return error
+    if record.get("status") not in {
+        "completed",
+        "failed",
+        "interrupted",
+        "cancelled",
+        "canceled",
+        "terminated",
+        "unknown_outcome",
+    }:
+        return "invalid-result-status"
+    usage = record.get("usage")
+    if usage is not None and not isinstance(usage, dict):
+        return "invalid-result-usage"
+    return None
+
+
+def validate_error_record(record: dict[str, Any]) -> str | None:
+    if not nonempty_string(record.get("message")):
+        return "invalid-error-message"
+    session_id = record.get("session_id")
+    if session_id is not None and not nonempty_string(session_id):
+        return "invalid-session-id"
+    return None
 
 
 def build_report(manifest: dict[str, Any], expected: list[str], job_dir: Path) -> dict[str, Any]:
