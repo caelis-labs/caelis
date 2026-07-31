@@ -18,11 +18,11 @@ import (
 
 const resumeCompletionPageLimit = 200
 
-func (d *Adapter) CompleteFile(ctx context.Context, query string, limit int) ([]controlprompt.CompletionCandidate, error) {
+func (d *assembler) CompleteFile(ctx context.Context, query string, limit int) ([]controlprompt.CompletionCandidate, error) {
 	return completeWorkspaceFiles(ctx, d.WorkspaceDir(), query, limit)
 }
 
-func (d *Adapter) CompleteSkill(ctx context.Context, query string, limit int) ([]controlprompt.CompletionCandidate, error) {
+func (d *assembler) CompleteSkill(ctx context.Context, query string, limit int) ([]controlprompt.CompletionCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 
 	skills, err := d.skillCompletionMetas(ctx)
@@ -44,7 +44,7 @@ func (d *Adapter) CompleteSkill(ctx context.Context, query string, limit int) ([
 	return sortAndTrimCandidates(scored, limit), nil
 }
 
-func (d *Adapter) ResolveSkill(ctx context.Context, name string) (controlprompt.SkillResolveResult, error) {
+func (d *assembler) ResolveSkill(ctx context.Context, name string) (controlprompt.SkillResolveResult, error) {
 	catalog, err := d.skillCompletionCatalog(ctx)
 	if err != nil {
 		return controlprompt.SkillResolveResult{}, err
@@ -52,7 +52,7 @@ func (d *Adapter) ResolveSkill(ctx context.Context, name string) (controlprompt.
 	return resolveSkillCatalog(catalog, name), nil
 }
 
-func (d *Adapter) skillCompletionCatalog(ctx context.Context) (skill.Catalog, error) {
+func (d *assembler) skillCompletionCatalog(ctx context.Context) (skill.Catalog, error) {
 	if d == nil || d.stack == nil {
 		return skill.Catalog{}, missingRuntimeDependency("skill discovery")
 	}
@@ -64,7 +64,7 @@ func (d *Adapter) skillCompletionCatalog(ctx context.Context) (skill.Catalog, er
 	return d.stack.Skill.Snapshot(), nil
 }
 
-func (d *Adapter) skillCompletionMetas(ctx context.Context) ([]skill.Meta, error) {
+func (d *assembler) skillCompletionMetas(ctx context.Context) ([]skill.Meta, error) {
 	catalog, err := d.skillCompletionCatalog(ctx)
 	if err != nil {
 		return nil, err
@@ -95,7 +95,7 @@ func resolveSkillCatalog(catalog skill.Catalog, name string) controlprompt.Skill
 	}
 }
 
-func (d *Adapter) CompleteResume(ctx context.Context, query string, limit int) ([]controlprompt.ResumeCandidate, error) {
+func (d *assembler) CompleteResume(ctx context.Context, query string, limit int) ([]controlprompt.ResumeCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 	query = strings.TrimSpace(strings.ToLower(query))
 	if query == "" {
@@ -140,7 +140,7 @@ func (d *Adapter) CompleteResume(ctx context.Context, query string, limit int) (
 	return matched, nil
 }
 
-func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func (d *assembler) CompleteSlashArg(ctx context.Context, command string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	if limit <= 0 {
 		limit = 8
 	}
@@ -200,7 +200,7 @@ func filterSlashCandidates(candidates []controlprompt.SlashArgCandidate, query s
 	return out
 }
 
-func (d *Adapter) completeACPControllerSlashArg(status controller.ControllerStatus, command string, query string, limit int) ([]controlprompt.SlashArgCandidate, bool) {
+func (d *assembler) completeACPControllerSlashArg(status controller.ControllerStatus, command string, query string, limit int) ([]controlprompt.SlashArgCandidate, bool) {
 	normalized := strings.TrimSpace(strings.ToLower(command))
 	switch normalized {
 	case "model":
@@ -225,7 +225,7 @@ func (d *Adapter) completeACPControllerSlashArg(status controller.ControllerStat
 	return nil, false
 }
 
-func (d *Adapter) completeModelReasoningLevels(ctx context.Context, aliasQuery string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func (d *assembler) completeModelReasoningLevels(ctx context.Context, aliasQuery string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	alias, err := d.resolveStoredModelAlias(ctx, aliasQuery)
 	if err != nil {
 		return nil, nil
@@ -255,7 +255,7 @@ func (d *Adapter) completeModelReasoningLevels(ctx context.Context, aliasQuery s
 	return out, nil
 }
 
-func (d *Adapter) modelAliasSupportsReasoningLevel(alias string, level string) bool {
+func (d *assembler) modelAliasSupportsReasoningLevel(alias string, level string) bool {
 	if d.stack.Model.ConfigFn == nil {
 		return false
 	}
@@ -271,7 +271,7 @@ func (d *Adapter) modelAliasSupportsReasoningLevel(alias string, level string) b
 	return false
 }
 
-func (d *Adapter) configuredModelReasoningLevels(cfg ModelConfig) []string {
+func (d *assembler) configuredModelReasoningLevels(cfg ModelConfig) []string {
 	levels := modelconfig.NormalizeReasoningLevels(cfg.ReasoningLevels)
 	for _, level := range modelconfig.ReasoningLevelsForConfig(cfg) {
 		seen := false
@@ -448,7 +448,7 @@ func controllerChoicesToSlashCandidates(choices []controller.ControllerConfigCho
 	return out
 }
 
-func (d *Adapter) completeModelAliases(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func (d *assembler) completeModelAliases(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	ref := session.SessionRef{}
 	if activeSession, ok := d.currentSession(); ok {
 		ref = activeSession.SessionRef
@@ -479,7 +479,7 @@ func (d *Adapter) completeModelAliases(ctx context.Context, query string, limit 
 	return out, nil
 }
 
-func (d *Adapter) completeAgentCatalog(query string, limit int) []controlprompt.SlashArgCandidate {
+func (d *assembler) completeAgentCatalog(query string, limit int) []controlprompt.SlashArgCandidate {
 	agents := d.agentCatalog(limit)
 	if len(agents) == 0 {
 		return nil
@@ -501,7 +501,7 @@ func (d *Adapter) completeAgentCatalog(query string, limit int) []controlprompt.
 	return out
 }
 
-func (d *Adapter) completeAgentParticipants(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func (d *assembler) completeAgentParticipants(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	activeSession, ok := d.currentSession()
 	if !ok {
 		return nil, nil
@@ -538,7 +538,7 @@ func (d *Adapter) completeAgentParticipants(ctx context.Context, query string, l
 	return out, nil
 }
 
-func (d *Adapter) agentCatalog(limit int) []controlprompt.AgentCandidate {
+func (d *assembler) agentCatalog(limit int) []controlprompt.AgentCandidate {
 	if d.stack.Agent.ListFn == nil {
 		return nil
 	}
@@ -562,7 +562,7 @@ func (d *Adapter) agentCatalog(limit int) []controlprompt.AgentCandidate {
 	return out
 }
 
-func (d *Adapter) resolveAgentName(input string) (string, error) {
+func (d *assembler) resolveAgentName(input string) (string, error) {
 	input = strings.ToLower(strings.TrimSpace(input))
 	if input == "" {
 		return "", fmt.Errorf("app/gatewayapp/controladapter: agent name is required")
@@ -596,7 +596,7 @@ func (d *Adapter) resolveAgentName(input string) (string, error) {
 	}
 }
 
-func (d *Adapter) resolveParticipantID(ctx context.Context, ref session.SessionRef, input string) (string, error) {
+func (d *assembler) resolveParticipantID(ctx context.Context, ref session.SessionRef, input string) (string, error) {
 	gw, err := d.gatewayControlPlane()
 	if err != nil {
 		return "", err
@@ -673,7 +673,7 @@ func resolveParticipantID(participants []participantAddress, input string) (stri
 	}
 }
 
-func (d *Adapter) resolveStoredModelAlias(ctx context.Context, input string) (string, error) {
+func (d *assembler) resolveStoredModelAlias(ctx context.Context, input string) (string, error) {
 	input = strings.ToLower(strings.TrimSpace(input))
 	if input == "" {
 		return "", fmt.Errorf("app/gatewayapp/controladapter: model alias is required")
@@ -746,7 +746,7 @@ func hasSlashArgPrefix(query string, values ...string) bool {
 	return false
 }
 
-func (d *Adapter) completePluginIDs(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func (d *assembler) completePluginIDs(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	if d.stack.Plugin.ListPluginsFn == nil {
 		return nil, missingRuntimeDependency("list plugins")
 	}
@@ -780,7 +780,7 @@ func pluginMarketplaceActionCandidates() []controlprompt.SlashArgCandidate {
 	}
 }
 
-func (d *Adapter) completeMarketplaceNames(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func (d *assembler) completeMarketplaceNames(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	if d.stack.Plugin.ListMarketplacesFn == nil {
 		return nil, missingRuntimeDependency("list marketplaces")
 	}

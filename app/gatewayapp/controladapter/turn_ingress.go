@@ -16,11 +16,11 @@ func newGatewayTurn(handle kernel.TurnHandle) *gatewayTurn {
 	}
 }
 
-func (d *Adapter) newGatewayTurn(handle kernel.TurnHandle) *gatewayTurn {
+func (d *assembler) newGatewayTurn(handle kernel.TurnHandle) *gatewayTurn {
 	return d.newGatewayTurnWithSubscription(handle, nil, false)
 }
 
-func (d *Adapter) subscribeGatewayTurn(ref session.SessionRef) (controlclient.FeedSubscription, error) {
+func (d *assembler) subscribeGatewayTurn(ref session.SessionRef) (controlclient.FeedSubscription, error) {
 	if d == nil || d.stack == nil || d.stack.ControlFeeds == nil {
 		return nil, nil
 	}
@@ -35,7 +35,7 @@ func (d *Adapter) subscribeGatewayTurn(ref session.SessionRef) (controlclient.Fe
 	return feed.SubscribeFromNow(context.Background())
 }
 
-func (d *Adapter) newGatewayTurnWithSubscription(
+func (d *assembler) newGatewayTurnWithSubscription(
 	handle kernel.TurnHandle,
 	prepared controlclient.FeedSubscription,
 	preparedBeforeTurn bool,

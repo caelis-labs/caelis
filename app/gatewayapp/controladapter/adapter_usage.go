@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func (d *Adapter) sessionTokenUsage(ctx context.Context, ref session.SessionRef) (kernel.UsageSnapshot, error) {
+func (d *assembler) sessionTokenUsage(ctx context.Context, ref session.SessionRef) (kernel.UsageSnapshot, error) {
 	breakdown, err := d.sessionTokenUsageBreakdown(ctx, ref)
 	if err != nil {
 		return kernel.UsageSnapshot{}, err
@@ -50,7 +50,7 @@ const (
 	tokenUsageCategoryAutoReview = "auto_review"
 )
 
-func (d *Adapter) sessionTokenUsageBreakdown(ctx context.Context, ref session.SessionRef) (sessionTokenUsageBreakdown, error) {
+func (d *assembler) sessionTokenUsageBreakdown(ctx context.Context, ref session.SessionRef) (sessionTokenUsageBreakdown, error) {
 	if d == nil || d.stack == nil || d.stack.Session.Store == nil {
 		return sessionTokenUsageBreakdown{}, nil
 	}
@@ -346,7 +346,7 @@ func normalizeUsageCategory(category string) string {
 	}
 }
 
-func (d *Adapter) subagentSessionRefs(ctx context.Context, ref session.SessionRef) []session.SessionRef {
+func (d *assembler) subagentSessionRefs(ctx context.Context, ref session.SessionRef) []session.SessionRef {
 	if d == nil || d.stack == nil || d.stack.Session.Store == nil {
 		return nil
 	}

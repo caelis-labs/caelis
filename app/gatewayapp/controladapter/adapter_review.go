@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-func (d *Adapter) StartReview(ctx context.Context, instructions string, attachments []controlprompt.Attachment) (controlprompt.Turn, error) {
+func (d *assembler) StartReview(ctx context.Context, instructions string, attachments []controlprompt.Attachment) (controlprompt.Turn, error) {
 	if d == nil || d.stack == nil || d.stack.AgentBinding.ResolveFn == nil {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: system Agent placement is unavailable")
 	}

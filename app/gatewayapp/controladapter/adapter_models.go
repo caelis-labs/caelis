@@ -11,7 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-func (d *Adapter) Connect(ctx context.Context, cfg controlprompt.ConnectConfig) (controlstatus.StatusSnapshot, error) {
+func (d *assembler) Connect(ctx context.Context, cfg controlprompt.ConnectConfig) (controlstatus.StatusSnapshot, error) {
 	if d == nil || d.stack == nil {
 		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("stack")
 	}
@@ -107,7 +107,7 @@ func connectModelSelections(cfg controlprompt.ConnectConfig) []modelconfig.Model
 	return selections
 }
 
-func (d *Adapter) hasReusableConnectAuth(ctx context.Context, provider string, baseURL string) bool {
+func (d *assembler) hasReusableConnectAuth(ctx context.Context, provider string, baseURL string) bool {
 	if d == nil || d.stack == nil {
 		return false
 	}
@@ -137,7 +137,7 @@ func (d *Adapter) hasReusableConnectAuth(ctx context.Context, provider string, b
 	return false
 }
 
-func (d *Adapter) UseModel(ctx context.Context, model string, reasoningEffort ...string) (controlstatus.StatusSnapshot, error) {
+func (d *assembler) UseModel(ctx context.Context, model string, reasoningEffort ...string) (controlstatus.StatusSnapshot, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
@@ -187,7 +187,7 @@ func (d *Adapter) UseModel(ctx context.Context, model string, reasoningEffort ..
 	return d.Status(ctx)
 }
 
-func (d *Adapter) DeleteModel(ctx context.Context, alias string) error {
+func (d *assembler) DeleteModel(ctx context.Context, alias string) error {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
 		return err
@@ -213,7 +213,7 @@ func (d *Adapter) DeleteModel(ctx context.Context, alias string) error {
 	return nil
 }
 
-func (d *Adapter) CycleSessionMode(ctx context.Context) (controlstatus.StatusSnapshot, error) {
+func (d *assembler) CycleSessionMode(ctx context.Context) (controlstatus.StatusSnapshot, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
@@ -246,7 +246,7 @@ func (d *Adapter) CycleSessionMode(ctx context.Context) (controlstatus.StatusSna
 	return d.Status(ctx)
 }
 
-func (d *Adapter) SetSandboxBackend(ctx context.Context, backend string) (controlstatus.StatusSnapshot, error) {
+func (d *assembler) SetSandboxBackend(ctx context.Context, backend string) (controlstatus.StatusSnapshot, error) {
 	if d.stack.Sandbox.SetBackendFn == nil {
 		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("sandbox backend")
 	}
@@ -260,7 +260,7 @@ func (d *Adapter) SetSandboxBackend(ctx context.Context, backend string) (contro
 	return d.Status(ctx)
 }
 
-func (d *Adapter) PrepareSandbox(ctx context.Context) (controlstatus.StatusSnapshot, error) {
+func (d *assembler) PrepareSandbox(ctx context.Context) (controlstatus.StatusSnapshot, error) {
 	if d.stack.Sandbox.PrepareFn == nil {
 		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("sandbox prepare")
 	}
@@ -274,7 +274,7 @@ func (d *Adapter) PrepareSandbox(ctx context.Context) (controlstatus.StatusSnaps
 	return d.Status(ctx)
 }
 
-func (d *Adapter) RepairSandbox(ctx context.Context) (controlstatus.StatusSnapshot, error) {
+func (d *assembler) RepairSandbox(ctx context.Context) (controlstatus.StatusSnapshot, error) {
 	if d.stack.Sandbox.RepairFn == nil {
 		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("sandbox repair")
 	}
@@ -288,7 +288,7 @@ func (d *Adapter) RepairSandbox(ctx context.Context) (controlstatus.StatusSnapsh
 	return d.Status(ctx)
 }
 
-func (d *Adapter) ResetSandbox(ctx context.Context) (controlstatus.StatusSnapshot, error) {
+func (d *assembler) ResetSandbox(ctx context.Context) (controlstatus.StatusSnapshot, error) {
 	if d.stack.Sandbox.ResetFn == nil {
 		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("sandbox reset")
 	}
@@ -302,7 +302,7 @@ func (d *Adapter) ResetSandbox(ctx context.Context) (controlstatus.StatusSnapsho
 	return d.Status(ctx)
 }
 
-func (d *Adapter) SetSessionMode(ctx context.Context, mode string) (controlstatus.StatusSnapshot, error) {
+func (d *assembler) SetSessionMode(ctx context.Context, mode string) (controlstatus.StatusSnapshot, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err

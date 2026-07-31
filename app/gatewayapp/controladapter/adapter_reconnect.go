@@ -19,8 +19,8 @@ type gatewaySessionBinder interface {
 }
 
 // ResumeSession stages target resolution and Control bootstrap before changing
-// either the gateway binding or the Adapter's current Session.
-func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (controlprompt.SessionSnapshot, error) {
+// either the gateway binding or the assembler's current Session.
+func (d *assembler) ResumeSession(ctx context.Context, sessionID string) (controlprompt.SessionSnapshot, error) {
 	if d == nil || d.stack == nil {
 		return controlprompt.SessionSnapshot{}, errors.New("app/gatewayapp/controladapter: stack is required")
 	}

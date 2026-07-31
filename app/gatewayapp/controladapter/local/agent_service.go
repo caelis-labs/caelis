@@ -9,6 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlclient "github.com/caelis-labs/caelis/control/client"
@@ -170,20 +171,20 @@ func (s *AgentService) authorizedSession(ctx context.Context, principal controlc
 	return s.host.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
 }
 
-func (s *AgentService) hostAdapter(ctx context.Context, principal controlclient.Principal, sessionID, surface string) (*Adapter, error) {
+func (s *AgentService) hostAdapter(ctx context.Context, principal controlclient.Principal, sessionID, surface string) (controladapter.AgentAssembler, error) {
 	active, err := s.authorizedSession(ctx, principal, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	return NewLocalAdapterForSession(ctx, s.host, active, strings.TrimSpace(surface), "")
+	return controladapter.NewAgentAssemblerForSession(ctx, runtimeStack(s.host), active, strings.TrimSpace(surface), "")
 }
 
-func (s *AgentService) runtimeAdapter(ctx context.Context, principal controlclient.Principal, sessionID, surface string, activate bool) (*Adapter, func(), error) {
+func (s *AgentService) runtimeAdapter(ctx context.Context, principal controlclient.Principal, sessionID, surface string, activate bool) (controladapter.AgentAssembler, func(), error) {
 	lease, err := s.host.AcquireControlRuntime(ctx, principal, sessionID, activate)
 	if err != nil {
 		return nil, nil, err
 	}
-	driver, err := NewLocalAdapterForSession(ctx, lease.Runtime(), lease.Session(), strings.TrimSpace(surface), "")
+	driver, err := controladapter.NewAgentAssemblerForSession(ctx, runtimeStack(lease.Runtime()), lease.Session(), strings.TrimSpace(surface), "")
 	if err != nil {
 		_ = lease.Close(ctx)
 		return nil, nil, err

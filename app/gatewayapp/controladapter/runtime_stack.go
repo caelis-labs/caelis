@@ -21,7 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-// GatewayTurnService exposes the turn operations used by Adapter.
+// GatewayTurnService exposes the turn operations used by server assemblers.
 type GatewayTurnService interface {
 	BeginTurn(context.Context, kernel.BeginTurnRequest) (kernel.BeginTurnResult, error)
 	SubmitActiveTurn(context.Context, kernel.SubmitActiveTurnRequest) error
@@ -29,13 +29,13 @@ type GatewayTurnService interface {
 	ActiveTurns() []kernel.ActiveTurnState
 }
 
-// GatewaySessionService exposes the session operations used by Adapter.
+// GatewaySessionService exposes the session operations used by server assemblers.
 type GatewaySessionService interface {
 	ResumeSession(context.Context, kernel.ResumeSessionRequest) (session.LoadedSession, error)
 	ListSessions(context.Context, kernel.ListSessionsRequest) (session.SessionList, error)
 }
 
-// GatewayControlPlaneService exposes controller and participant operations used by Adapter.
+// GatewayControlPlaneService exposes controller and participant operations used by server assemblers.
 type GatewayControlPlaneService interface {
 	ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error)
 	HandoffController(context.Context, kernel.HandoffControllerRequest) (session.Session, error)
@@ -45,7 +45,7 @@ type GatewayControlPlaneService interface {
 	DetachParticipant(context.Context, kernel.DetachParticipantRequest) (session.Session, error)
 }
 
-// GatewayStreamProvider exposes stream subscription access used by Adapter.
+// GatewayStreamProvider exposes stream subscription access used by server assemblers.
 type GatewayStreamProvider interface {
 	kernel.StreamProvider
 }

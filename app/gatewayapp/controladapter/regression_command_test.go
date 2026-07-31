@@ -10,7 +10,7 @@ import (
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
-func newRegressionDriver(t *testing.T) (*Adapter, *gatewayapp.Stack) {
+func newRegressionDriver(t *testing.T) (*assembler, *gatewayapp.Stack) {
 	t.Helper()
 	ctx := context.Background()
 	storeDir := t.TempDir()

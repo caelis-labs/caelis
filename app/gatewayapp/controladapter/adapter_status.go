@@ -7,15 +7,15 @@ import (
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
-func (d *Adapter) LightweightStatus(ctx context.Context) (controlstatus.StatusSnapshot, error) {
+func (d *assembler) LightweightStatus(ctx context.Context) (controlstatus.StatusSnapshot, error) {
 	return d.status(ctx, false)
 }
 
-func (d *Adapter) Status(ctx context.Context) (controlstatus.StatusSnapshot, error) {
+func (d *assembler) Status(ctx context.Context) (controlstatus.StatusSnapshot, error) {
 	return d.status(ctx, true)
 }
 
-func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (controlstatus.StatusSnapshot, error) {
+func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (controlstatus.StatusSnapshot, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}

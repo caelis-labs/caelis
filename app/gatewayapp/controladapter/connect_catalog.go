@@ -24,7 +24,7 @@ type connectModelChoice struct {
 
 type connectWizardPayload = connectwizard.ConnectWizardState
 
-func completeConnectArgs(ctx context.Context, driver *Adapter, command string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func completeConnectArgs(ctx context.Context, driver *assembler, command string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	switch {
 	case command == "connect":
 		return completeConnectSources(ctx, driver, query, limit), nil
@@ -63,7 +63,7 @@ func completeConnectArgs(ctx context.Context, driver *Adapter, command string, q
 	}
 }
 
-func completeConnectSources(ctx context.Context, driver *Adapter, query string, limit int) []controlprompt.SlashArgCandidate {
+func completeConnectSources(ctx context.Context, driver *assembler, query string, limit int) []controlprompt.SlashArgCandidate {
 	candidates := []controlprompt.SlashArgCandidate{
 		{Value: "model", Display: "Model provider", Detail: "Connect an API or local model provider"},
 		{Value: "acp", Display: "Local ACP Agent", Detail: "Connect an ACP Registry Agent or another local ACP command"},
@@ -78,7 +78,7 @@ func completeConnectSources(ctx context.Context, driver *Adapter, query string, 
 	return filterSlashArgCandidates(candidates, query, limit)
 }
 
-func completeConnectDisconnectAgents(ctx context.Context, driver *Adapter, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func completeConnectDisconnectAgents(ctx context.Context, driver *assembler, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	if driver == nil {
 		return nil, missingRuntimeDependency("ACP Agent disconnect")
 	}
@@ -101,7 +101,7 @@ func completeConnectDisconnectAgents(ctx context.Context, driver *Adapter, query
 	return filterSlashArgCandidates(candidates, query, limit), nil
 }
 
-func completeConnectDisconnectConfirmation(ctx context.Context, driver *Adapter, agentID string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func completeConnectDisconnectConfirmation(ctx context.Context, driver *assembler, agentID string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	if driver == nil {
 		return nil, missingRuntimeDependency("ACP Agent disconnect")
 	}
@@ -216,7 +216,7 @@ func connectableACPAgentDetail(agent agentregistry.ConnectableAgent) string {
 	return firstNonEmpty(detail+" · "+source, source)
 }
 
-func completeConnectACPModels(ctx context.Context, driver *Adapter, raw string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func completeConnectACPModels(ctx context.Context, driver *assembler, raw string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	_, snapshot, err := discoverConnectACPState(ctx, driver, raw)
 	if err != nil {
 		return nil, err
@@ -238,7 +238,7 @@ func completeConnectACPModels(ctx context.Context, driver *Adapter, raw string, 
 	return filterSlashArgCandidates(candidates, query, limit), nil
 }
 
-func completeConnectACPConfig(ctx context.Context, driver *Adapter, raw string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func completeConnectACPConfig(ctx context.Context, driver *assembler, raw string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	payload, snapshot, err := discoverConnectACPState(ctx, driver, raw)
 	if err != nil {
 		return nil, err
@@ -265,7 +265,7 @@ func completeConnectACPConfig(ctx context.Context, driver *Adapter, raw string, 
 	return filterSlashArgCandidates(candidates, query, limit), nil
 }
 
-func discoverConnectACPState(ctx context.Context, driver *Adapter, raw string) (controlagents.ConnectState, controlagents.DiscoverySnapshot, error) {
+func discoverConnectACPState(ctx context.Context, driver *assembler, raw string) (controlagents.ConnectState, controlagents.DiscoverySnapshot, error) {
 	if driver == nil || driver.stack == nil || driver.stack.Agent.DiscoverConnectionFn == nil {
 		return controlagents.ConnectState{}, controlagents.DiscoverySnapshot{}, missingRuntimeDependency("ACP agent discovery")
 	}
@@ -297,7 +297,7 @@ func completeConnectProviders(query string, limit int) []controlprompt.SlashArgC
 	return out
 }
 
-func completeConnectBaseURL(ctx context.Context, driver *Adapter, provider string, query string, limit int) []controlprompt.SlashArgCandidate {
+func completeConnectBaseURL(ctx context.Context, driver *assembler, provider string, query string, limit int) []controlprompt.SlashArgCandidate {
 	template, ok := modelconfig.LookupProvider(provider)
 	if !ok {
 		return nil
@@ -341,7 +341,7 @@ func completeConnectTimeout(provider string, query string, limit int) []controlp
 	return filterSlashArgCandidates(out, query, limit)
 }
 
-func completeConnectModels(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func completeConnectModels(ctx context.Context, driver *assembler, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	template, ok := modelconfig.LookupProvider(payload.Provider)
 	if !ok {
 		return nil, nil
@@ -389,7 +389,7 @@ func completeConnectImageInput(query string, limit int) []controlprompt.SlashArg
 	}, query, limit)
 }
 
-func completeConnectContext(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func completeConnectContext(ctx context.Context, driver *assembler, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	_ = ctx
 	_ = driver
 	defaults, err := modelconfig.ResolveModelDefaultsForEndpoint(payload.Provider, payload.BaseURL, payload.Model)
@@ -399,7 +399,7 @@ func completeConnectContext(ctx context.Context, driver *Adapter, payload connec
 	return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{{Value: strconv.Itoa(defaults.ContextWindowTokens), Display: strconv.Itoa(defaults.ContextWindowTokens), Detail: "context window tokens"}}, query, limit), nil
 }
 
-func completeConnectMaxOutput(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func completeConnectMaxOutput(ctx context.Context, driver *assembler, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	_ = ctx
 	_ = driver
 	defaults, err := modelconfig.ResolveModelDefaultsForEndpoint(payload.Provider, payload.BaseURL, payload.Model)
@@ -409,7 +409,7 @@ func completeConnectMaxOutput(ctx context.Context, driver *Adapter, payload conn
 	return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{{Value: strconv.Itoa(defaults.MaxOutputTokens), Display: strconv.Itoa(defaults.MaxOutputTokens), Detail: "max output tokens"}}, query, limit), nil
 }
 
-func completeConnectReasoningLevels(ctx context.Context, driver *Adapter, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func completeConnectReasoningLevels(ctx context.Context, driver *assembler, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	_ = ctx
 	_ = driver
 	defaults, err := modelconfig.ResolveModelDefaultsForEndpoint(payload.Provider, payload.BaseURL, payload.Model)

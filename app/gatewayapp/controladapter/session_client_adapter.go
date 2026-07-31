@@ -54,49 +54,6 @@ type AppServerAdapterConfig struct {
 	Plugins            controlclient.PluginClient
 }
 
-// NewSessionClientAdapter is a compatibility constructor for focused client
-// tests. It extracts only immutable address metadata from Adapter; the result
-// never retains or calls Adapter. Remove it when the remaining legacy Adapter
-// tests have been rewritten around AppServerAdapterConfig.
-func NewSessionClientAdapter(
-	adapter *Adapter,
-	client controlclient.SessionClient,
-) (*SessionClientAdapter, error) {
-	if adapter == nil {
-		return nil, errors.New("app/gatewayapp/controladapter: Adapter is required")
-	}
-	turns, err := controlclient.NewSessionTurnClient(client)
-	if err != nil {
-		return nil, err
-	}
-	active, _ := adapter.currentSession()
-	return &SessionClientAdapter{
-		turns: turns, sessionClient: client,
-		surface: strings.TrimSpace(adapter.bindingKey), workspaceKey: strings.TrimSpace(adapter.stack.Session.Workspace.Key),
-		sessionID: strings.TrimSpace(active.SessionID), workspaceDir: strings.TrimSpace(adapter.WorkspaceDir()),
-	}, nil
-}
-
-// NewSessionClientAdapterWithParticipants is the participant-aware companion
-// to the compatibility test constructor above. Production uses
-// NewAppServerAdapter.
-func NewSessionClientAdapterWithParticipants(
-	adapter *Adapter,
-	sessions controlclient.SessionClient,
-	participants controlclient.ParticipantClient,
-) (*SessionClientAdapter, error) {
-	wrapped, err := NewSessionClientAdapter(adapter, sessions)
-	if err != nil {
-		return nil, err
-	}
-	participantTurns, err := controlclient.NewParticipantTurnClient(sessions, participants)
-	if err != nil {
-		return nil, err
-	}
-	wrapped.participants = participantTurns
-	return wrapped, nil
-}
-
 // NewAppServerAdapter composes the complete typed facade used by production
 // presentation surfaces.
 func NewAppServerAdapter(config AppServerAdapterConfig) (*SessionClientAdapter, error) {

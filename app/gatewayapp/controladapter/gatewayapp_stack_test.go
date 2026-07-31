@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-func newAdapterFromGatewayAppStack(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*Adapter, error) {
+func newAdapterFromGatewayAppStack(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*assembler, error) {
 	return NewAdapter(ctx, gatewayAppStackForRuntimeTest(stack), preferredSessionID, bindingKey, modelText)
 }
 

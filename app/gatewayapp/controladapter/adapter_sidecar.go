@@ -15,7 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func (d *Adapter) StartAgentRun(ctx context.Context, target string, prompt string, attachments []controlprompt.Attachment) (controlprompt.Turn, error) {
+func (d *assembler) StartAgentRun(ctx context.Context, target string, prompt string, attachments []controlprompt.Attachment) (controlprompt.Turn, error) {
 	handle := agentbinding.NormalizeHandle(agentbinding.Handle(target))
 	if d == nil || d.stack == nil || d.stack.AgentBinding.Configuration == nil {
 		return nil, missingRuntimeDependency("Agent binding status")
@@ -70,7 +70,7 @@ type startSidecarTurnRequest struct {
 	Transient      bool
 }
 
-func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequest) (controlprompt.Turn, error) {
+func (d *assembler) startSidecarTurn(ctx context.Context, req startSidecarTurnRequest) (controlprompt.Turn, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
 		return nil, err
@@ -145,7 +145,7 @@ func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequ
 	return d.newGatewayTurnWithSubscription(result.Handle, feedSubscription, true, ctx), nil
 }
 
-func (d *Adapter) allocateSideAgentLabel(ctx context.Context, ref session.SessionRef, agent string) string {
+func (d *assembler) allocateSideAgentLabel(ctx context.Context, ref session.SessionRef, agent string) string {
 	used := map[string]struct{}{}
 	if gw, err := d.gatewayControlPlane(); err == nil {
 		if state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: ref}); err == nil {
@@ -160,7 +160,7 @@ func (d *Adapter) allocateSideAgentLabel(ctx context.Context, ref session.Sessio
 	return "@" + agenthandle.Allocate(used, agent)
 }
 
-func (d *Adapter) ContinueAgentRun(ctx context.Context, handle string, prompt string, attachments []controlprompt.Attachment) (controlprompt.Turn, error) {
+func (d *assembler) ContinueAgentRun(ctx context.Context, handle string, prompt string, attachments []controlprompt.Attachment) (controlprompt.Turn, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {
 		return nil, err

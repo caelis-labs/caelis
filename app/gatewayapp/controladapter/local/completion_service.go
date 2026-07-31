@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 )
 
@@ -67,7 +68,7 @@ func (s *CompletionService) ResolveSkill(ctx context.Context, principal controlc
 	return driver.ResolveSkill(ctx, req.Name)
 }
 
-func (s *CompletionService) runtimeAdapter(ctx context.Context, principal controlclient.Principal, req controlclient.CompletionRequest) (*Adapter, func(), error) {
+func (s *CompletionService) runtimeAdapter(ctx context.Context, principal controlclient.Principal, req controlclient.CompletionRequest) (controladapter.CompletionAssembler, func(), error) {
 	if s == nil || s.host == nil {
 		return nil, nil, errors.New("app/gatewayapp/controladapter/local: completion service is unavailable")
 	}
@@ -75,7 +76,7 @@ func (s *CompletionService) runtimeAdapter(ctx context.Context, principal contro
 	if err != nil {
 		return nil, nil, err
 	}
-	driver, err := NewLocalAdapterForSession(ctx, lease.Runtime(), lease.Session(), strings.TrimSpace(req.Surface), "")
+	driver, err := controladapter.NewCompletionAssemblerForSession(ctx, runtimeStack(lease.Runtime()), lease.Session(), strings.TrimSpace(req.Surface), "")
 	if err != nil {
 		_ = lease.Close(ctx)
 		return nil, nil, err

@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-func newCommandExecDriver(t *testing.T, modelCfg gatewayapp.ModelConfig) (*Adapter, *gatewayapp.Stack) {
+func newCommandExecDriver(t *testing.T, modelCfg gatewayapp.ModelConfig) (*assembler, *gatewayapp.Stack) {
 	t.Helper()
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{

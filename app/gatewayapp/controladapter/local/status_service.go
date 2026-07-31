@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
@@ -38,9 +39,9 @@ func (s *StatusService) SessionStatus(
 		return controlstatus.StatusSnapshot{}, err
 	}
 	defer lease.Close(context.Background())
-	driver, err := NewLocalAdapterForSession(
+	driver, err := controladapter.NewStatusAssemblerForSession(
 		ctx,
-		lease.Runtime(),
+		runtimeStack(lease.Runtime()),
 		lease.Session(),
 		strings.TrimSpace(request.Surface),
 		"",

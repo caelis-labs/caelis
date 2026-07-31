@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 )
 
@@ -111,7 +112,7 @@ func (s *PluginService) InspectPlugin(ctx context.Context, principal controlclie
 	return driver.InspectPlugin(ctx, req.ID)
 }
 
-func (s *PluginService) hostAdapter(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) (*Adapter, error) {
+func (s *PluginService) hostAdapter(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) (controladapter.PluginAssembler, error) {
 	if s == nil || s.host == nil || s.host.Sessions == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: plugin service is unavailable")
 	}
@@ -123,7 +124,7 @@ func (s *PluginService) hostAdapter(ctx context.Context, principal controlclient
 	if err != nil {
 		return nil, err
 	}
-	return NewLocalAdapterForSession(ctx, s.host, active, strings.TrimSpace(req.Surface), "")
+	return controladapter.NewPluginAssemblerForSession(ctx, runtimeStack(s.host), active, strings.TrimSpace(req.Surface), "")
 }
 
 var _ controlclient.PluginService = (*PluginService)(nil)

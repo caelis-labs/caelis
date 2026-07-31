@@ -1,16 +1,12 @@
 package local
 
 import (
-	"context"
-
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-type Adapter = controladapter.Adapter
 type RuntimeStack = controladapter.RuntimeStack
 type ModelConfig = controladapter.ModelConfig
 type ModelChoice = controladapter.ModelChoice
@@ -19,14 +15,6 @@ type SandboxStatus = controladapter.SandboxStatus
 type DoctorRequest = controladapter.DoctorRequest
 type DoctorReport = controladapter.DoctorReport
 type ACPAgentInfo = controladapter.ACPAgentInfo
-
-func NewLocalAdapter(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*Adapter, error) {
-	return controladapter.NewAdapter(ctx, runtimeStack(stack), preferredSessionID, bindingKey, modelText)
-}
-
-func NewLocalAdapterForSession(ctx context.Context, stack *gatewayapp.Stack, activeSession session.Session, bindingKey string, modelText string) (*Adapter, error) {
-	return controladapter.NewAdapterForSession(ctx, runtimeStack(stack), activeSession, bindingKey, modelText)
-}
 
 func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
 	return controladapter.NewRuntimeStackFromGatewayApp(stack, controladapter.RuntimeStackGatewayAppAdapters{

@@ -22,27 +22,7 @@ func TestSessionClientAdapterRoutesMainTurnWritesAndObservationThroughTypedClien
 		target:       target,
 		subscription: subscription,
 	}
-	legacy := &Adapter{
-		stack: &RuntimeStack{Session: SessionRuntimeDeps{
-			AppName: "caelis",
-			UserID:  "owner",
-			Workspace: session.WorkspaceRef{
-				Key: "workspace", CWD: t.TempDir(),
-			},
-		}},
-		session: session.Session{
-			SessionRef: session.SessionRef{
-				AppName: "caelis", UserID: "owner",
-				SessionID: "session-1", WorkspaceKey: "workspace",
-			},
-		},
-		hasSession: true,
-		bindingKey: "cli-tui",
-	}
-	adapter, err := NewSessionClientAdapter(legacy, client)
-	if err != nil {
-		t.Fatal(err)
-	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
 	turn, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "hello"})
 	if err != nil {
 		t.Fatal(err)
@@ -129,24 +109,7 @@ func TestSessionClientAdapterRoutesReviewThroughTypedParticipantClient(t *testin
 		},
 	}
 	participants := &sessionClientAdapterTestParticipantClient{target: target}
-	legacy := &Adapter{
-		stack: &RuntimeStack{Session: SessionRuntimeDeps{
-			AppName: "caelis",
-			UserID:  "owner",
-			Workspace: session.WorkspaceRef{
-				Key: "workspace", CWD: t.TempDir(),
-			},
-		}},
-		session: session.Session{SessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "owner", SessionID: "session-1", WorkspaceKey: "workspace",
-		}},
-		hasSession: true,
-		bindingKey: "acp",
-	}
-	adapter, err := NewSessionClientAdapterWithParticipants(legacy, client, participants)
-	if err != nil {
-		t.Fatal(err)
-	}
+	adapter := newSessionClientAdapterForTest(t, client, participants, "session-1", "acp")
 	turn, err := adapter.StartReview(context.Background(), "inspect typed routing", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -182,23 +145,7 @@ func TestSessionClientAdapterRoutesCompactThroughTypedSessionClient(t *testing.T
 			EpochID: "epoch-1",
 		},
 	}}
-	legacy := &Adapter{
-		stack: &RuntimeStack{Session: SessionRuntimeDeps{
-			AppName: "caelis",
-			UserID:  "owner",
-			Workspace: session.WorkspaceRef{
-				Key: "workspace", CWD: t.TempDir(),
-			},
-		}},
-		session: session.Session{SessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "owner", SessionID: "session-1", WorkspaceKey: "workspace",
-		}},
-		hasSession: true,
-	}
-	adapter, err := NewSessionClientAdapter(legacy, client)
-	if err != nil {
-		t.Fatal(err)
-	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
 	if err := adapter.Compact(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -209,6 +156,33 @@ func TestSessionClientAdapterRoutesCompactThroughTypedSessionClient(t *testing.T
 		!strings.HasPrefix(request.OperationID, "compact-") {
 		t.Fatalf("typed compact request = %#v", request)
 	}
+}
+
+func newSessionClientAdapterForTest(
+	t *testing.T,
+	sessions controlclient.SessionClient,
+	participants controlclient.ParticipantClient,
+	sessionID string,
+	surface string,
+) *SessionClientAdapter {
+	t.Helper()
+	adapter, err := NewAppServerAdapter(AppServerAdapterConfig{
+		SessionID:     sessionID,
+		WorkspaceKey:  "workspace",
+		WorkspaceDir:  t.TempDir(),
+		Surface:       surface,
+		Sessions:      sessions,
+		Participants:  participants,
+		Status:        sessionClientAdapterTestStatusClient{},
+		Configuration: sessionClientAdapterTestConfigurationClient{},
+		Agents:        &sessionClientAdapterTestAgentClient{},
+		Completion:    &sessionClientAdapterTestCompletionClient{},
+		Plugins:       &sessionClientAdapterTestPluginClient{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return adapter
 }
 
 func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) {

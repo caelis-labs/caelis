@@ -27,7 +27,7 @@ type acpEndpointAuthCacheEntry struct {
 
 // DiscoverACPConnection probes one temporary empty session for the guided
 // /connect flow without adding the endpoint to the user roster.
-func (d *Adapter) DiscoverACPConnection(ctx context.Context, req controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
+func (d *assembler) DiscoverACPConnection(ctx context.Context, req controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
 	if d == nil || d.stack == nil || d.stack.Agent.DiscoverConnectionFn == nil {
 		return controlagents.DiscoverySnapshot{}, missingRuntimeDependency("ACP agent discovery")
 	}
@@ -75,7 +75,7 @@ func (d *Adapter) DiscoverACPConnection(ctx context.Context, req controlagents.C
 
 // ConnectACP validates and persists the explicitly selected remote model as a
 // standard ModelProfile.
-func (d *Adapter) ConnectACP(ctx context.Context, req controlagents.ConnectRequest) (controlagents.ConnectResult, error) {
+func (d *assembler) ConnectACP(ctx context.Context, req controlagents.ConnectRequest) (controlagents.ConnectResult, error) {
 	if d == nil || d.stack == nil || d.stack.Agent.ConnectFn == nil {
 		return controlagents.ConnectResult{}, missingRuntimeDependency("ACP agent connect")
 	}
@@ -114,7 +114,7 @@ func (d *Adapter) ConnectACP(ctx context.Context, req controlagents.ConnectReque
 }
 
 // DisconnectCandidates lists only user-configured external ACP Agents.
-func (d *Adapter) DisconnectCandidates(ctx context.Context) ([]controlagents.DisconnectCandidate, error) {
+func (d *assembler) DisconnectCandidates(ctx context.Context) ([]controlagents.DisconnectCandidate, error) {
 	if d == nil || d.stack == nil || d.stack.Agent.DisconnectCandidatesFn == nil {
 		return nil, missingRuntimeDependency("ACP Agent disconnect candidates")
 	}
@@ -124,7 +124,7 @@ func (d *Adapter) DisconnectCandidates(ctx context.Context) ([]controlagents.Dis
 // DisconnectACP removes the selected external Agent's profiles without
 // uninstalling its ACP adapter. If it releases the final Connection reference,
 // endpoint-scoped discovery completions are invalidated as well.
-func (d *Adapter) DisconnectACP(ctx context.Context, agentID string) (controlagents.DisconnectResult, error) {
+func (d *assembler) DisconnectACP(ctx context.Context, agentID string) (controlagents.DisconnectResult, error) {
 	if d == nil || d.stack == nil || d.stack.Agent.DisconnectFn == nil {
 		return controlagents.DisconnectResult{}, missingRuntimeDependency("ACP Agent disconnect")
 	}
@@ -162,7 +162,7 @@ func acpDiscoveryEndpointKey(req controlagents.ConnectRequest) string {
 	return acpDiscoveryRequestKey(req)
 }
 
-func (d *Adapter) expireACPDiscoveryStateLocked(now time.Time) {
+func (d *assembler) expireACPDiscoveryStateLocked(now time.Time) {
 	for cachedKey, entry := range d.acpDiscoveries {
 		if acpDiscoveryCacheExpired(entry, now) {
 			delete(d.acpDiscoveries, cachedKey)

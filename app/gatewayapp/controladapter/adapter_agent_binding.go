@@ -7,7 +7,7 @@ import (
 )
 
 // AgentBindingStatus returns the Control-owned Agent configuration view.
-func (d *Adapter) AgentBindingStatus(ctx context.Context) (agentbinding.Status, error) {
+func (d *assembler) AgentBindingStatus(ctx context.Context) (agentbinding.Status, error) {
 	if d == nil || d.stack == nil || d.stack.AgentBinding.Configuration == nil {
 		return agentbinding.Status{}, missingRuntimeDependency("Agent binding status")
 	}
@@ -15,7 +15,7 @@ func (d *Adapter) AgentBindingStatus(ctx context.Context) (agentbinding.Status, 
 }
 
 // BindAgentBinding binds one handle to a ModelProfile and effort.
-func (d *Adapter) BindAgentBinding(ctx context.Context, binding agentbinding.Binding) (agentbinding.Status, error) {
+func (d *assembler) BindAgentBinding(ctx context.Context, binding agentbinding.Binding) (agentbinding.Status, error) {
 	if d == nil || d.stack == nil || d.stack.AgentBinding.Configuration == nil {
 		return agentbinding.Status{}, missingRuntimeDependency("Agent binding mutation")
 	}
@@ -23,7 +23,7 @@ func (d *Adapter) BindAgentBinding(ctx context.Context, binding agentbinding.Bin
 }
 
 // ResetAgentBinding removes one handle's explicit profile binding.
-func (d *Adapter) ResetAgentBinding(ctx context.Context, handle agentbinding.Handle) (agentbinding.Status, error) {
+func (d *assembler) ResetAgentBinding(ctx context.Context, handle agentbinding.Handle) (agentbinding.Status, error) {
 	if d == nil || d.stack == nil || d.stack.AgentBinding.Configuration == nil {
 		return agentbinding.Status{}, missingRuntimeDependency("Agent binding reset")
 	}
@@ -31,7 +31,7 @@ func (d *Adapter) ResetAgentBinding(ctx context.Context, handle agentbinding.Han
 }
 
 // CreateAgentRole adds one custom delegation role.
-func (d *Adapter) CreateAgentRole(
+func (d *assembler) CreateAgentRole(
 	ctx context.Context,
 	role agentbinding.Role,
 	initial agentbinding.Binding,
@@ -43,7 +43,7 @@ func (d *Adapter) CreateAgentRole(
 }
 
 // DeleteAgentRole removes one custom delegation role.
-func (d *Adapter) DeleteAgentRole(ctx context.Context, handle agentbinding.Handle) (agentbinding.Status, error) {
+func (d *assembler) DeleteAgentRole(ctx context.Context, handle agentbinding.Handle) (agentbinding.Status, error) {
 	if d == nil || d.stack == nil || d.stack.AgentBinding.Configuration == nil {
 		return agentbinding.Status{}, missingRuntimeDependency("Agent role deletion")
 	}
@@ -51,7 +51,7 @@ func (d *Adapter) DeleteAgentRole(ctx context.Context, handle agentbinding.Handl
 }
 
 // SaveAgentBindingSet snapshots the active bindings under name.
-func (d *Adapter) SaveAgentBindingSet(ctx context.Context, name string) (agentbinding.Status, error) {
+func (d *assembler) SaveAgentBindingSet(ctx context.Context, name string) (agentbinding.Status, error) {
 	if d == nil || d.stack == nil || d.stack.AgentBinding.Configuration == nil {
 		return agentbinding.Status{}, missingRuntimeDependency("Agent binding-set save")
 	}
@@ -59,7 +59,7 @@ func (d *Adapter) SaveAgentBindingSet(ctx context.Context, name string) (agentbi
 }
 
 // ApplyAgentBindingSet atomically activates one saved binding snapshot.
-func (d *Adapter) ApplyAgentBindingSet(ctx context.Context, name string) (agentbinding.Status, error) {
+func (d *assembler) ApplyAgentBindingSet(ctx context.Context, name string) (agentbinding.Status, error) {
 	if d == nil || d.stack == nil || d.stack.AgentBinding.Configuration == nil {
 		return agentbinding.Status{}, missingRuntimeDependency("Agent binding-set apply")
 	}
@@ -67,7 +67,7 @@ func (d *Adapter) ApplyAgentBindingSet(ctx context.Context, name string) (agentb
 }
 
 // DeleteAgentBindingSet removes one saved binding snapshot.
-func (d *Adapter) DeleteAgentBindingSet(ctx context.Context, name string) (agentbinding.Status, error) {
+func (d *assembler) DeleteAgentBindingSet(ctx context.Context, name string) (agentbinding.Status, error) {
 	if d == nil || d.stack == nil || d.stack.AgentBinding.Configuration == nil {
 		return agentbinding.Status{}, missingRuntimeDependency("Agent binding-set deletion")
 	}
@@ -80,5 +80,3 @@ func bindingContext(ctx context.Context) context.Context {
 	}
 	return ctx
 }
-
-var _ agentbinding.ConfigurationService = (*Adapter)(nil)

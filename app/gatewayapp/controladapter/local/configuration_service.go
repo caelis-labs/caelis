@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
@@ -53,12 +54,12 @@ func (s *ConfigurationService) UseModel(ctx context.Context, principal controlcl
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
 	}
-	var driver *Adapter
+	var driver controladapter.ConfigurationAssembler
 	closeDriver := func() {}
 	if active.Controller.Kind == session.ControllerKindACP {
 		driver, closeDriver, err = s.runtimeAdapter(ctx, principal, req.SessionID, req.Surface, true)
 	} else {
-		driver, err = NewLocalAdapterForSession(ctx, s.host, active, req.Surface, "")
+		driver, err = controladapter.NewConfigurationAssemblerForSession(ctx, runtimeStack(s.host), active, req.Surface, "")
 	}
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
@@ -129,20 +130,20 @@ func (s *ConfigurationService) authorizedSession(ctx context.Context, principal 
 	return s.host.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
 }
 
-func (s *ConfigurationService) hostAdapter(ctx context.Context, principal controlclient.Principal, sessionID, surface string) (*Adapter, error) {
+func (s *ConfigurationService) hostAdapter(ctx context.Context, principal controlclient.Principal, sessionID, surface string) (controladapter.ConfigurationAssembler, error) {
 	active, err := s.authorizedSession(ctx, principal, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	return NewLocalAdapterForSession(ctx, s.host, active, strings.TrimSpace(surface), "")
+	return controladapter.NewConfigurationAssemblerForSession(ctx, runtimeStack(s.host), active, strings.TrimSpace(surface), "")
 }
 
-func (s *ConfigurationService) runtimeAdapter(ctx context.Context, principal controlclient.Principal, sessionID, surface string, activate bool) (*Adapter, func(), error) {
+func (s *ConfigurationService) runtimeAdapter(ctx context.Context, principal controlclient.Principal, sessionID, surface string, activate bool) (controladapter.ConfigurationAssembler, func(), error) {
 	lease, err := s.host.AcquireControlRuntime(ctx, principal, sessionID, activate)
 	if err != nil {
 		return nil, nil, err
 	}
-	driver, err := NewLocalAdapterForSession(ctx, lease.Runtime(), lease.Session(), strings.TrimSpace(surface), "")
+	driver, err := controladapter.NewConfigurationAssemblerForSession(ctx, runtimeStack(lease.Runtime()), lease.Session(), strings.TrimSpace(surface), "")
 	if err != nil {
 		_ = lease.Close(ctx)
 		return nil, nil, err
