@@ -1,10 +1,11 @@
 # ACP acceptance suite
 
-`acceptance.sh` combines three deterministic gates with one real `acpx` run:
+`acceptance.sh` combines four deterministic gates with one real `acpx` run:
 
 - ACP wire/projection ordering, cancellation, Spawn lifecycle, and load replay;
-- product ACP typed Session lifecycle/main-Turn/participant integration,
-  including the durable product close gate;
+- product ACP typed Session lifecycle/main-Turn integration, including the
+  durable product close gate, plus deterministic typed participant command
+  translation and Host-owned producer-lifetime coverage;
 - TUI Side ACP and Subagent overlay live/replay fidelity;
 - real stdio initialize/new/prompt, process restart plus load/resume, terminal
   Task output with ACP client approval, session/list, structured JSON events,

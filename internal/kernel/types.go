@@ -130,8 +130,12 @@ type DetachParticipantRequest struct {
 }
 
 type PromptParticipantRequest struct {
-	SessionRef     session.SessionRef
-	BindingKey     string
+	SessionRef session.SessionRef
+	BindingKey string
+	// RuntimeContext owns the accepted participant Turn producer lifetime.
+	// Admission and request preparation still use the method context. When nil,
+	// the method context remains the runtime parent for compatibility.
+	RuntimeContext context.Context
 	ParticipantID  string
 	Input          string
 	DisplayInput   string
@@ -151,8 +155,12 @@ const (
 )
 
 type StartParticipantRequest struct {
-	SessionRef     session.SessionRef
-	BindingKey     string
+	SessionRef session.SessionRef
+	BindingKey string
+	// RuntimeContext owns the accepted participant Turn producer lifetime.
+	// Admission and participant attachment still use the method context. When
+	// nil, the method context remains the runtime parent for compatibility.
+	RuntimeContext context.Context
 	Agent          string
 	Role           session.ParticipantRole
 	Label          string

@@ -1028,6 +1028,204 @@ func TestBeginTurnRuntimeContextOutlivesAdmissionContext(t *testing.T) {
 	}
 }
 
+func TestParticipantRuntimeContextOutlivesAdmissionContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		start func(context.Context, context.Context, *Gateway, session.Session) (BeginTurnResult, error)
+	}{
+		{
+			name: "follow-up",
+			start: func(admissionCtx context.Context, runtimeCtx context.Context, gw *Gateway, active session.Session) (BeginTurnResult, error) {
+				return gw.PromptParticipant(admissionCtx, PromptParticipantRequest{
+					SessionRef:     active.SessionRef,
+					RuntimeContext: runtimeCtx,
+					ParticipantID:  "participant-1",
+					Input:          "continue",
+				})
+			},
+		},
+		{
+			name: "start",
+			start: func(admissionCtx context.Context, runtimeCtx context.Context, gw *Gateway, active session.Session) (BeginTurnResult, error) {
+				return gw.StartParticipant(admissionCtx, StartParticipantRequest{
+					SessionRef:     active.SessionRef,
+					RuntimeContext: runtimeCtx,
+					Agent:          "reviewer",
+					Role:           session.ParticipantRoleSidecar,
+					Label:          "@reviewer",
+					Input:          "inspect",
+					Source:         "slash_review",
+				})
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			active := session.Session{SessionRef: session.SessionRef{
+				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+			}}
+			attached := active
+			attached.Participants = []session.ParticipantBinding{{
+				ID: "participant-1", Kind: session.ParticipantKindACP,
+				Role: session.ParticipantRoleSidecar, AgentName: "reviewer", Label: "@reviewer",
+			}}
+			runtime := &controlPlaneRuntime{
+				session: active, attachResp: attached,
+				promptStart: make(chan struct{}), promptStop: make(chan struct{}),
+			}
+			gw, err := New(Config{
+				Sessions: staticSessionService{session: active}, Runtime: runtime,
+				Control: runtime, Resolver: staticResolver{resolved: ResolvedTurn{}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			admissionCtx, cancelAdmission := context.WithCancel(context.Background())
+			runtimeCtx, cancelRuntime := context.WithCancel(context.Background())
+			result, err := test.start(admissionCtx, runtimeCtx, gw, active)
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-runtime.promptStart:
+			case <-time.After(2 * time.Second):
+				t.Fatal("participant Runtime did not start")
+			}
+
+			cancelAdmission()
+			select {
+			case <-runtime.promptStop:
+				t.Fatal("admission context cancellation stopped the accepted participant Turn")
+			case <-time.After(50 * time.Millisecond):
+			}
+
+			cancelRuntime()
+			select {
+			case <-runtime.promptStop:
+			case <-time.After(2 * time.Second):
+				t.Fatal("runtime context cancellation did not stop the accepted participant Turn")
+			}
+			collectHandleEvents(t, result.Handle)
+		})
+	}
+}
+
+func TestPromptParticipantConflictReleasesRuntimeContext(t *testing.T) {
+	t.Parallel()
+
+	active := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+	}}
+	runtime := &cancellableRuntime{
+		session: active, started: make(chan struct{}), cancelled: make(chan struct{}),
+	}
+	control := &controlPlaneRuntime{session: active, attachResp: active}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: active}, Runtime: runtime,
+		Control: control, Resolver: staticResolver{resolved: ResolvedTurn{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainTurn, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: active.SessionRef, Input: "keep active",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-runtime.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("main Runtime did not start")
+	}
+
+	runtimeCtx := newAfterFuncTrackingContext()
+	_, err = gw.PromptParticipant(context.Background(), PromptParticipantRequest{
+		SessionRef: active.SessionRef, RuntimeContext: runtimeCtx,
+		ParticipantID: "participant-1", Input: "must conflict",
+	})
+	var gatewayErr *Error
+	if !As(err, &gatewayErr) || gatewayErr.Code != CodeActiveRunConflict {
+		t.Fatalf("PromptParticipant() error = %v, want active run conflict", err)
+	}
+	if registrations := runtimeCtx.registrationCount(); registrations != 0 {
+		t.Fatalf("RuntimeContext registrations after conflict = %d, want 0", registrations)
+	}
+
+	mainTurn.Handle.Cancel()
+	collectHandleEvents(t, mainTurn.Handle)
+}
+
+func TestAcceptedTurnCompletionReleasesRuntimeContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		start func(context.Context, *Gateway, session.Session) (BeginTurnResult, error)
+	}{
+		{
+			name: "main",
+			start: func(runtimeCtx context.Context, gw *Gateway, active session.Session) (BeginTurnResult, error) {
+				return gw.BeginTurn(context.Background(), BeginTurnRequest{
+					SessionRef: active.SessionRef, RuntimeContext: runtimeCtx, Input: "hello",
+				})
+			},
+		},
+		{
+			name: "participant follow-up",
+			start: func(runtimeCtx context.Context, gw *Gateway, active session.Session) (BeginTurnResult, error) {
+				return gw.PromptParticipant(context.Background(), PromptParticipantRequest{
+					SessionRef: active.SessionRef, RuntimeContext: runtimeCtx,
+					ParticipantID: "participant-1", Input: "continue",
+				})
+			},
+		},
+		{
+			name: "participant start",
+			start: func(runtimeCtx context.Context, gw *Gateway, active session.Session) (BeginTurnResult, error) {
+				return gw.StartParticipant(context.Background(), StartParticipantRequest{
+					SessionRef: active.SessionRef, RuntimeContext: runtimeCtx,
+					Agent: "reviewer", Role: session.ParticipantRoleSidecar,
+					Label: "@reviewer", Input: "inspect", Source: "slash_review",
+				})
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			active := session.Session{SessionRef: session.SessionRef{
+				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+			}}
+			attached := active
+			attached.Participants = []session.ParticipantBinding{{
+				ID: "participant-1", Kind: session.ParticipantKindACP,
+				Role: session.ParticipantRoleSidecar, AgentName: "reviewer", Label: "@reviewer",
+			}}
+			runtime := &controlPlaneRuntime{session: active, attachResp: attached}
+			gw, err := New(Config{
+				Sessions: staticSessionService{session: active}, Runtime: runtime,
+				Control: runtime, Resolver: staticResolver{resolved: ResolvedTurn{}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			runtimeCtx := newAfterFuncTrackingContext()
+			result, err := test.start(runtimeCtx, gw, active)
+			if err != nil {
+				t.Fatal(err)
+			}
+			collectHandleEvents(t, result.Handle)
+			if registrations := runtimeCtx.registrationCount(); registrations != 0 {
+				t.Fatalf("RuntimeContext registrations after completion = %d, want 0", registrations)
+			}
+		})
+	}
+}
+
 func TestGatewayQuiesceCancelsAndDrainsActiveTurnThenRejectsAdmission(t *testing.T) {
 	t.Parallel()
 

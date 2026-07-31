@@ -120,7 +120,11 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 		return BeginTurnResult{}, err
 	}
 	g.bind(req.BindingKey, session.SessionRef, BindingDescriptor{})
-	runCtx, cancel := context.WithCancel(ctx)
+	runtimeParent := ctx
+	if req.RuntimeContext != nil {
+		runtimeParent = req.RuntimeContext
+	}
+	runCtx, cancel := context.WithCancel(runtimeParent)
 	cancelFn := sync.OnceValue(func() bool {
 		cancel()
 		return true
@@ -134,6 +138,7 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 	}
 	if _, ok := g.active[session.SessionID]; ok {
 		g.mu.Unlock()
+		cancel()
 		return BeginTurnResult{}, &Error{
 			Kind:        KindConflict,
 			Code:        CodeActiveRunConflict,
@@ -168,7 +173,7 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 	g.noteActiveHandleLocked(session.SessionID, handle)
 	g.mu.Unlock()
 
-	go g.runParticipantTurn(runCtx, session, req, handle)
+	go g.runParticipantTurn(runCtx, cancelFn, session, req, handle)
 
 	return BeginTurnResult{
 		Session: session,

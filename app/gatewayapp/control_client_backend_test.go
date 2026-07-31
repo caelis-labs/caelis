@@ -517,6 +517,89 @@ func TestControlClientPromptUsesHostLifecycleAfterAdmission(t *testing.T) {
 	}
 }
 
+func TestControlClientParticipantPromptUsesHostLifecycleAfterAdmission(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	sessions := sessionmemory.NewStore(sessionmemory.Config{})
+	active, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "owner", PreferredSessionID: "session-participant-host-lifecycle",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &controlClientLifecycleRuntime{
+		session:            active,
+		participantStarted: make(chan struct{}),
+		participantStopped: make(chan struct{}),
+	}
+	kernel, err := kernelimpl.New(kernelimpl.Config{
+		Sessions: sessions, Runtime: runtime, Control: runtime, Resolver: controlClientIngressResolver{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{
+		Secret: []byte("0123456789abcdef0123456789abcdef"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{
+		Reader: sessions, CursorCodec: codec,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostCtx, cancelHost := context.WithCancel(context.Background())
+	stack := &Stack{
+		Sessions:        sessions,
+		controlFeeds:    feeds,
+		gateway:         kernel,
+		lifecycleCtx:    hostCtx,
+		lifecycleCancel: cancelHost,
+	}
+
+	admissionCtx, cancelAdmission := context.WithCancel(context.Background())
+	result, err := stack.ExecuteControlCommand(
+		admissionCtx,
+		controlclient.Principal{ID: "owner"},
+		controlclient.ActionParticipantPrompt,
+		controlclient.PromptParticipantRequest{
+			WriteBase: controlclient.WriteBase{
+				OperationID: "operation-participant-host-lifecycle",
+				SessionID:   active.SessionID,
+			},
+			ParticipantID: "participant-1",
+			Input:         "keep running",
+		},
+	)
+	if err != nil || result.Target.HandleID == "" || result.Target.RunID == "" || result.Target.TurnID == "" {
+		t.Fatalf("PromptParticipant result = %#v, %v", result, err)
+	}
+	select {
+	case <-runtime.participantStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("participant Runtime did not start")
+	}
+
+	cancelAdmission()
+	select {
+	case <-runtime.participantStopped:
+		t.Fatal("request cancellation stopped the Host-owned participant Turn")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if err := stack.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-runtime.participantStopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stack.Close did not stop the Host-owned participant Turn")
+	}
+}
+
 func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	t.Parallel()
 
@@ -718,8 +801,11 @@ func (controlClientBlockingRuntime) RunState(context.Context, session.SessionRef
 }
 
 type controlClientLifecycleRuntime struct {
-	started chan struct{}
-	stopped chan struct{}
+	session            session.Session
+	started            chan struct{}
+	stopped            chan struct{}
+	participantStarted chan struct{}
+	participantStopped chan struct{}
 }
 
 func (runtime *controlClientLifecycleRuntime) Run(ctx context.Context, _ agent.RunRequest) (agent.RunResult, error) {
@@ -731,6 +817,25 @@ func (runtime *controlClientLifecycleRuntime) Run(ctx context.Context, _ agent.R
 
 func (*controlClientLifecycleRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
 	return agent.RunState{}, nil
+}
+
+func (runtime *controlClientLifecycleRuntime) HandoffController(context.Context, agent.HandoffControllerRequest) (session.Session, error) {
+	return runtime.session, nil
+}
+
+func (runtime *controlClientLifecycleRuntime) AttachParticipant(context.Context, agent.AttachParticipantRequest) (session.Session, error) {
+	return runtime.session, nil
+}
+
+func (runtime *controlClientLifecycleRuntime) PromptParticipant(ctx context.Context, _ agent.PromptParticipantRequest) (agent.RunResult, error) {
+	close(runtime.participantStarted)
+	<-ctx.Done()
+	close(runtime.participantStopped)
+	return agent.RunResult{}, ctx.Err()
+}
+
+func (runtime *controlClientLifecycleRuntime) DetachParticipant(context.Context, agent.DetachParticipantRequest) (session.Session, error) {
+	return runtime.session, nil
 }
 
 type controlClientIngressRuntime struct {

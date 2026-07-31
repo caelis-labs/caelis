@@ -300,12 +300,52 @@ type controlPlaneRuntime struct {
 	promptReq   agent.PromptParticipantRequest
 	promptResp  agent.RunResult
 	promptErr   error
+	promptStart chan struct{}
+	promptStop  chan struct{}
 	detachReq   agent.DetachParticipantRequest
 	detachResp  session.Session
 	detachErr   error
 	// detachBlock, when non-nil, blocks DetachParticipant until the request
 	// context is cancelled or the channel is closed.
 	detachBlock <-chan struct{}
+}
+
+type afterFuncTrackingContext struct {
+	mu            sync.Mutex
+	done          chan struct{}
+	registrations int
+}
+
+func newAfterFuncTrackingContext() *afterFuncTrackingContext {
+	return &afterFuncTrackingContext{done: make(chan struct{})}
+}
+
+func (*afterFuncTrackingContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (ctx *afterFuncTrackingContext) Done() <-chan struct{}   { return ctx.done }
+func (*afterFuncTrackingContext) Err() error                  { return nil }
+func (*afterFuncTrackingContext) Value(any) any               { return nil }
+
+func (ctx *afterFuncTrackingContext) AfterFunc(func()) func() bool {
+	ctx.mu.Lock()
+	ctx.registrations++
+	ctx.mu.Unlock()
+	var once sync.Once
+	return func() bool {
+		stopped := false
+		once.Do(func() {
+			ctx.mu.Lock()
+			ctx.registrations--
+			ctx.mu.Unlock()
+			stopped = true
+		})
+		return stopped
+	}
+}
+
+func (ctx *afterFuncTrackingContext) registrationCount() int {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	return ctx.registrations
 }
 
 func (r *controlPlaneRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
@@ -326,8 +366,16 @@ func (r *controlPlaneRuntime) AttachParticipant(_ context.Context, req agent.Att
 	return r.attachResp, nil
 }
 
-func (r *controlPlaneRuntime) PromptParticipant(_ context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error) {
+func (r *controlPlaneRuntime) PromptParticipant(ctx context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error) {
 	r.promptReq = req
+	if r.promptStart != nil {
+		close(r.promptStart)
+		<-ctx.Done()
+		if r.promptStop != nil {
+			close(r.promptStop)
+		}
+		return agent.RunResult{}, ctx.Err()
+	}
 	if r.promptErr != nil {
 		return agent.RunResult{}, r.promptErr
 	}

@@ -292,6 +292,7 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 		}
 		startReq := kernelimpl.StartParticipantRequest{
 			SessionRef:     active.SessionRef,
+			RuntimeContext: s.controlRuntimeContext(ctx),
 			Agent:          agentName,
 			Role:           req.Role,
 			Label:          req.Label,
@@ -324,6 +325,7 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 		}
 		result, err := gw.PromptParticipant(ctx, kernelimpl.PromptParticipantRequest{
 			SessionRef:     active.SessionRef,
+			RuntimeContext: s.controlRuntimeContext(ctx),
 			ParticipantID:  req.ParticipantID,
 			Input:          req.Input,
 			DisplayInput:   req.DisplayInput,

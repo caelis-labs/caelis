@@ -109,6 +109,9 @@ run_gate protocol-conformance \
   -run '^(TestBuiltInProjectionAndExternalWireShareSDKSemantics|TestRuntimeAgentConformance.*|TestRuntimeAgentACPSessionLoadSpawnGolden|TestRuntimeAgentACPSpawnLifecycleGolden)$' || gate_status=1
 run_gate product-typed-client \
   go test -count=1 ./app/gatewayapp/acpagent -run '^TestNewFromStack' || gate_status=1
+run_gate product-typed-participant \
+  go test -count=1 ./app/gatewayapp ./app/gatewayapp/controladapter \
+  -run '^(TestControlClientParticipantPromptUsesHostLifecycleAfterAdmission|TestSessionClientAdapterRoutesReviewThroughTypedParticipantClient)$' || gate_status=1
 run_gate tui-side-acp-overlay \
   go test -count=1 ./surfaces/tui/app \
   -run '^(TestDurableTaskWaitFinalCompletesOriginalSpawnPanel|TestCanonicalTaskSequenceRendersIdenticallyLiveAndReplay|TestSideACPProjected.*)$' || gate_status=1

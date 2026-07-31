@@ -15,6 +15,7 @@ import (
 type startParticipantRequest struct {
 	SessionRef     session.SessionRef
 	BindingKey     string
+	RuntimeContext context.Context
 	Agent          string
 	Role           session.ParticipantRole
 	Label          string
@@ -38,6 +39,7 @@ func (g *Gateway) StartParticipant(ctx context.Context, req StartParticipantRequ
 	result, attached, participantID, err := g.startParticipant(ctx, startParticipantRequest{
 		SessionRef:     req.SessionRef,
 		BindingKey:     req.BindingKey,
+		RuntimeContext: req.RuntimeContext,
 		Agent:          req.Agent,
 		Role:           req.Role,
 		Label:          req.Label,
@@ -85,6 +87,7 @@ func (g *Gateway) startParticipant(ctx context.Context, req startParticipantRequ
 	result, err := g.PromptParticipant(ctx, PromptParticipantRequest{
 		SessionRef:     attached.SessionRef,
 		BindingKey:     req.BindingKey,
+		RuntimeContext: req.RuntimeContext,
 		ParticipantID:  participantID,
 		Input:          req.Input,
 		DisplayInput:   req.DisplayInput,
