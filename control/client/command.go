@@ -36,6 +36,7 @@ type Action string
 const (
 	ActionSessionCreate     Action = "session.create"
 	ActionSessionClose      Action = "session.close"
+	ActionSessionCompact    Action = "session.compact"
 	ActionPrompt            Action = "turn.prompt"
 	ActionSteer             Action = "turn.steer"
 	ActionCancel            Action = "turn.cancel"
@@ -100,6 +101,10 @@ type CreateSessionRequest struct {
 }
 
 type CloseSessionRequest struct{ WriteBase }
+
+// CompactSessionRequest starts one manual model-backed checkpoint for the
+// addressed Session Runtime.
+type CompactSessionRequest struct{ WriteBase }
 
 type PromptRequest struct {
 	WriteBase
@@ -213,6 +218,7 @@ type CommandBackend interface {
 type CommandClient interface {
 	CreateSession(context.Context, Principal, CreateSessionRequest) (CommandResult, error)
 	CloseSession(context.Context, Principal, CloseSessionRequest) (CommandResult, error)
+	CompactSession(context.Context, Principal, CompactSessionRequest) (CommandResult, error)
 	Prompt(context.Context, Principal, PromptRequest) (CommandResult, error)
 	Steer(context.Context, Principal, SteerRequest) (CommandResult, error)
 	Cancel(context.Context, Principal, CancelRequest) (CommandResult, error)

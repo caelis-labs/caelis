@@ -98,6 +98,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions", s.listSessions)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions", s.createSession)
 	s.mux.HandleFunc("DELETE "+apiPrefix+"/sessions/{session_id}", s.closeSession)
+	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/compact", s.compactSession)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/state", s.sessionState)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/reconnect", s.reconnectSession)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/prompt", s.prompt)
@@ -172,6 +173,19 @@ func (s *Server) closeSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.config.Service.CloseSession(r.Context(), principal, req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) compactSession(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	var req controlclient.CompactSessionRequest
+	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
+		return
+	}
+	result, err := s.config.Service.CompactSession(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
 

@@ -36,6 +36,9 @@ func (s *CommandService) CreateSession(ctx context.Context, principal Principal,
 func (s *CommandService) CloseSession(ctx context.Context, principal Principal, req CloseSessionRequest) (CommandResult, error) {
 	return s.execute(ctx, principal, ActionSessionClose, req.WriteBase, req.SessionID, req)
 }
+func (s *CommandService) CompactSession(ctx context.Context, principal Principal, req CompactSessionRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionSessionCompact, req.WriteBase, req.SessionID, req)
+}
 func (s *CommandService) Prompt(ctx context.Context, principal Principal, req PromptRequest) (CommandResult, error) {
 	return s.execute(ctx, principal, ActionPrompt, req.WriteBase, req.SessionID, req)
 }
@@ -196,6 +199,8 @@ func validateCommandRequest(action Action, request any) error {
 	case CreateSessionRequest:
 		return nil
 	case CloseSessionRequest:
+		return requireSession(typed.SessionID)
+	case CompactSessionRequest:
 		return requireSession(typed.SessionID)
 	case PromptRequest:
 		if err := requireSession(typed.SessionID); err != nil {

@@ -239,6 +239,13 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 			Metadata: map[string]any{"operation_id": req.OperationID},
 		})
 		return sessionCommandResult(active), classifyControlBackendError(err)
+	case controlclient.CompactSessionRequest:
+		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
+		if err != nil {
+			return sessionCommandResult(active), classifyControlBackendError(err)
+		}
+		err = s.CompactSession(ctx, active.SessionRef)
+		return sessionCommandResult(active), classifyControlBackendError(err)
 	case controlclient.CancelRequest:
 		active, err := s.checkControlTurnTarget(ctx, req.WriteBase, req.Target)
 		if err != nil {
@@ -399,6 +406,8 @@ func controlCommandSessionID(request any) string {
 	switch typed := request.(type) {
 	case controlclient.CloseSessionRequest:
 		return strings.TrimSpace(typed.SessionID)
+	case controlclient.CompactSessionRequest:
+		return strings.TrimSpace(typed.SessionID)
 	case controlclient.PromptRequest:
 		return strings.TrimSpace(typed.SessionID)
 	case controlclient.SteerRequest:
@@ -427,6 +436,7 @@ func controlCommandSessionID(request any) string {
 func controlActionActivatesSessionRuntime(action controlclient.Action) bool {
 	switch action {
 	case controlclient.ActionPrompt,
+		controlclient.ActionSessionCompact,
 		controlclient.ActionParticipantAttach,
 		controlclient.ActionParticipantStart,
 		controlclient.ActionParticipantPrompt,

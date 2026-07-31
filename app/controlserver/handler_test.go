@@ -48,6 +48,32 @@ func TestHTTPCreateUsesTrustedPrincipalAndHeaderContracts(t *testing.T) {
 	}
 }
 
+func TestHTTPCompactUsesSessionPathAndWriteHeaders(t *testing.T) {
+	service := &fakeService{}
+	server := newTestServer(t, service, 0)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		apiPrefix+"/sessions/session-1/compact",
+		strings.NewReader(`{"expected_controller_epoch":"epoch-1"}`),
+	)
+	authorizeTestRequest(request)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "operation-compact")
+	request.Header.Set("If-Match", `"8"`)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if service.principal.ID != "trusted-owner" ||
+		service.compacted.SessionID != "session-1" ||
+		service.compacted.OperationID != "operation-compact" ||
+		service.compacted.ExpectedRevision == nil || *service.compacted.ExpectedRevision != 8 ||
+		service.compacted.ExpectedControllerEpoch != "epoch-1" {
+		t.Fatalf("principal/request = %#v %#v", service.principal, service.compacted)
+	}
+}
+
 func TestReconnectSSEBootstrapsStateBeforeBackfillAndLiveEvents(t *testing.T) {
 	backfill := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, Cursor: "cursor-backfill", SessionID: "session-1",
@@ -358,6 +384,7 @@ type fakeService struct {
 	principal      controlclient.Principal
 	created        controlclient.CreateSessionRequest
 	closed         controlclient.CloseSessionRequest
+	compacted      controlclient.CompactSessionRequest
 	prompted       controlclient.PromptRequest
 	promptResult   *controlclient.CommandResult
 	promptErr      error
@@ -381,6 +408,11 @@ func (s *fakeService) CloseSession(_ context.Context, principal controlclient.Pr
 	s.principal = principal
 	s.closed = req
 	return controlclient.CommandResult{OperationID: req.OperationID, Outcome: controlclient.OutcomeCommitted, SessionID: req.SessionID, Revision: 2}, nil
+}
+func (s *fakeService) CompactSession(_ context.Context, principal controlclient.Principal, req controlclient.CompactSessionRequest) (controlclient.CommandResult, error) {
+	s.principal = principal
+	s.compacted = req
+	return controlclient.CommandResult{OperationID: req.OperationID, Outcome: controlclient.OutcomeCommitted, SessionID: req.SessionID, Revision: 3}, nil
 }
 func (s *fakeService) Prompt(_ context.Context, principal controlclient.Principal, req controlclient.PromptRequest) (controlclient.CommandResult, error) {
 	s.principal = principal

@@ -162,6 +162,9 @@ func (s *errorMappingService) CreateSession(context.Context, controlclient.Princ
 func (s *errorMappingService) CloseSession(context.Context, controlclient.Principal, controlclient.CloseSessionRequest) (controlclient.CommandResult, error) {
 	return s.result()
 }
+func (s *errorMappingService) CompactSession(context.Context, controlclient.Principal, controlclient.CompactSessionRequest) (controlclient.CommandResult, error) {
+	return s.result()
+}
 func (s *errorMappingService) Prompt(context.Context, controlclient.Principal, controlclient.PromptRequest) (controlclient.CommandResult, error) {
 	return s.result()
 }

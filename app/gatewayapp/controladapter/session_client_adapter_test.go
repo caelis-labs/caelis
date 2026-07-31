@@ -173,6 +173,43 @@ func TestSessionClientAdapterRoutesReviewThroughTypedParticipantClient(t *testin
 	}
 }
 
+func TestSessionClientAdapterRoutesCompactThroughTypedSessionClient(t *testing.T) {
+	client := &sessionClientAdapterTestClient{state: controlclient.SessionState{
+		SessionID: "session-1",
+		Revision:  7,
+		Controller: session.ControllerBinding{
+			EpochID: "epoch-1",
+		},
+	}}
+	legacy := &Adapter{
+		stack: &RuntimeStack{Session: SessionRuntimeDeps{
+			AppName: "caelis",
+			UserID:  "owner",
+			Workspace: session.WorkspaceRef{
+				Key: "workspace", CWD: t.TempDir(),
+			},
+		}},
+		session: session.Session{SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "owner", SessionID: "session-1", WorkspaceKey: "workspace",
+		}},
+		hasSession: true,
+	}
+	adapter, err := NewSessionClientAdapter(legacy, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Compact(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	request := client.compact
+	if request.SessionID != "session-1" ||
+		request.ExpectedRevision == nil || *request.ExpectedRevision != 7 ||
+		request.ExpectedControllerEpoch != "epoch-1" ||
+		!strings.HasPrefix(request.OperationID, "compact-") {
+		t.Fatalf("typed compact request = %#v", request)
+	}
+}
+
 func collectSessionClientAdapterEvents(events <-chan eventstream.Envelope) []eventstream.Envelope {
 	var out []eventstream.Envelope
 	for envelope := range events {
@@ -191,6 +228,7 @@ type sessionClientAdapterTestClient struct {
 	steer    controlclient.SteerRequest
 	approval controlclient.ResolveApprovalRequest
 	cancel   controlclient.CancelRequest
+	compact  controlclient.CompactSessionRequest
 }
 
 func (*sessionClientAdapterTestClient) Initialize(context.Context) (controlclient.ServerInfo, error) {
@@ -207,6 +245,17 @@ func (*sessionClientAdapterTestClient) CreateSession(context.Context, controlcli
 
 func (*sessionClientAdapterTestClient) CloseSession(context.Context, controlclient.CloseSessionRequest) (controlclient.CommandResult, error) {
 	return controlclient.CommandResult{}, errors.New("unexpected CloseSession")
+}
+
+func (c *sessionClientAdapterTestClient) CompactSession(_ context.Context, request controlclient.CompactSessionRequest) (controlclient.CommandResult, error) {
+	c.mu.Lock()
+	c.compact = request
+	c.mu.Unlock()
+	return controlclient.CommandResult{
+		OperationID: request.OperationID,
+		Outcome:     controlclient.OutcomeCommitted,
+		SessionID:   request.SessionID,
+	}, nil
 }
 
 func (c *sessionClientAdapterTestClient) InspectSession(context.Context, controlclient.StateRequest) (controlclient.SessionState, error) {

@@ -34,6 +34,13 @@ func TestEveryWriteCommandAuthorizationIdempotencyCASAndUnknownOutcome(t *testin
 			}
 			return s.CloseSession(context.Background(), p, CloseSessionRequest{WriteBase: WriteBase{OperationID: op, SessionID: "session-1", ExpectedRevision: &expected}})
 		}},
+		{"session compact", ActionSessionCompact, func(s *CommandService, p Principal, op string, changed bool) (CommandResult, error) {
+			expected := revision
+			if changed {
+				expected++
+			}
+			return s.CompactSession(context.Background(), p, CompactSessionRequest{WriteBase: WriteBase{OperationID: op, SessionID: "session-1", ExpectedRevision: &expected, ExpectedControllerEpoch: epoch}})
+		}},
 		{"prompt", ActionPrompt, func(s *CommandService, p Principal, op string, changed bool) (CommandResult, error) {
 			input := "hello"
 			if changed {
@@ -342,6 +349,8 @@ func operationIDOf(request any) string {
 	case CreateSessionRequest:
 		return req.OperationID
 	case CloseSessionRequest:
+		return req.OperationID
+	case CompactSessionRequest:
 		return req.OperationID
 	case PromptRequest:
 		return req.OperationID

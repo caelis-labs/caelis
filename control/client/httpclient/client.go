@@ -176,6 +176,14 @@ func (c *Client) CloseSession(ctx context.Context, request controlclient.CloseSe
 	return c.doCommand(ctx, http.MethodDelete, "/sessions/"+sessionID, request.WriteBase, request)
 }
 
+func (c *Client) CompactSession(ctx context.Context, request controlclient.CompactSessionRequest) (controlclient.CommandResult, error) {
+	sessionID, err := remotePathID("session", request.SessionID)
+	if err != nil {
+		return controlclient.CommandResult{}, err
+	}
+	return c.doCommand(ctx, http.MethodPost, "/sessions/"+sessionID+"/compact", request.WriteBase, request)
+}
+
 func (c *Client) InspectSession(ctx context.Context, request controlclient.StateRequest) (controlclient.SessionState, error) {
 	sessionID, err := remotePathID("session", request.SessionID)
 	if err != nil {

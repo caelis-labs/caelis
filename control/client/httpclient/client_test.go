@@ -107,8 +107,9 @@ func TestPromptPreservesTypedWriteContract(t *testing.T) {
 	}
 }
 
-func TestCreatesAndClosesSessionThroughTypedFacade(t *testing.T) {
+func TestCreatesCompactsAndClosesSessionThroughTypedFacade(t *testing.T) {
 	var created controlclient.CreateSessionRequest
+	var compacted controlclient.CompactSessionRequest
 	var closed controlclient.CloseSessionRequest
 	client, closeServer := newFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -130,6 +131,15 @@ func TestCreatesAndClosesSessionThroughTypedFacade(t *testing.T) {
 				SessionID:   "session-created",
 				Revision:    2,
 			})
+		case wirev1.APIPrefix + "/sessions/session-created/compact":
+			assertFixtureRequest(t, r, http.MethodPost, "operation-compact")
+			decodeFixtureRequest(t, r, &compacted)
+			writeFixtureJSON(t, w, http.StatusOK, controlclient.CommandResult{
+				OperationID: compacted.OperationID,
+				Outcome:     controlclient.OutcomeCommitted,
+				SessionID:   "session-created",
+				Revision:    2,
+			})
 		default:
 			http.NotFound(w, r)
 		}
@@ -145,6 +155,22 @@ func TestCreatesAndClosesSessionThroughTypedFacade(t *testing.T) {
 	}
 	if createdResult.SessionID != "session-created" || created.PreferredSessionID != "session-1" {
 		t.Fatalf("CreateSession result/request = %#v / %#v", createdResult, created)
+	}
+
+	compactedResult, err := client.CompactSession(context.Background(), controlclient.CompactSessionRequest{
+		WriteBase: controlclient.WriteBase{
+			OperationID:             "operation-compact",
+			SessionID:               "session-created",
+			ExpectedControllerEpoch: "epoch-1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compactedResult.SessionID != "session-created" ||
+		compacted.OperationID != "operation-compact" ||
+		compacted.ExpectedControllerEpoch != "epoch-1" {
+		t.Fatalf("CompactSession result/request = %#v / %#v", compactedResult, compacted)
 	}
 
 	closedResult, err := client.CloseSession(context.Background(), controlclient.CloseSessionRequest{

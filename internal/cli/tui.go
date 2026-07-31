@@ -36,7 +36,15 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appC
 	if err != nil {
 		return err
 	}
-	typedDriver, err := controladapter.NewSessionClientAdapter(driver, sessionClient)
+	participantClient, err := controlclient.BindParticipantClient(stack.ControlParticipants(), principal)
+	if err != nil {
+		return err
+	}
+	typedDriver, err := controladapter.NewSessionClientAdapterWithParticipants(
+		driver,
+		sessionClient,
+		participantClient,
+	)
 	if err != nil {
 		return err
 	}

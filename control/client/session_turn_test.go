@@ -410,6 +410,10 @@ func (c *sessionTurnTestClient) CloseSession(context.Context, CloseSessionReques
 	return CommandResult{}, errors.New("unexpected CloseSession")
 }
 
+func (*sessionTurnTestClient) CompactSession(context.Context, CompactSessionRequest) (CommandResult, error) {
+	return CommandResult{}, errors.New("unexpected CompactSession")
+}
+
 func (c *sessionTurnTestClient) InspectSession(
 	ctx context.Context,
 	request StateRequest,

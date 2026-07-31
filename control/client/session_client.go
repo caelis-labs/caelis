@@ -22,6 +22,7 @@ type SessionClient interface {
 	ListSessions(context.Context, ListSessionsRequest) (session.SessionList, error)
 	CreateSession(context.Context, CreateSessionRequest) (CommandResult, error)
 	CloseSession(context.Context, CloseSessionRequest) (CommandResult, error)
+	CompactSession(context.Context, CompactSessionRequest) (CommandResult, error)
 	InspectSession(context.Context, StateRequest) (SessionState, error)
 	Reconnect(context.Context, ReconnectRequest) (ReconnectResult, error)
 	Prompt(context.Context, PromptRequest) (CommandResult, error)
@@ -70,6 +71,10 @@ func (c *boundSessionClient) CreateSession(ctx context.Context, request CreateSe
 
 func (c *boundSessionClient) CloseSession(ctx context.Context, request CloseSessionRequest) (CommandResult, error) {
 	return c.service.CloseSession(ctx, c.boundPrincipal(), request)
+}
+
+func (c *boundSessionClient) CompactSession(ctx context.Context, request CompactSessionRequest) (CommandResult, error) {
+	return c.service.CompactSession(ctx, c.boundPrincipal(), request)
 }
 
 func (c *boundSessionClient) InspectSession(ctx context.Context, request StateRequest) (SessionState, error) {

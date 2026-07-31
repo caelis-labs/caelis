@@ -188,6 +188,13 @@ type CommandTarget struct {
 
 type CompactMetadata map[string]JSONValue
 
+type CompactSessionRequest struct {
+	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
+	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
+	OperationId             *string        `json:"operation_id,omitempty"`
+	SessionId               *string        `json:"session_id,omitempty"`
+}
+
 type ContentBlock struct {
 	Data     *string `json:"data,omitempty"`
 	MimeType *string `json:"mimeType,omitempty"`
@@ -789,4 +796,4 @@ type WriteBase struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
-var OperationIDs = []string{"cancelSessionTurn", "closeSession", "createSession", "getSessionState", "initializeClient", "listSessionTasks", "listSessions", "promptSession", "readTaskEvents", "reconnectSession", "resolveApproval", "steerSession", "subscribeTaskEvents"}
+var OperationIDs = []string{"cancelSessionTurn", "closeSession", "compactSession", "createSession", "getSessionState", "initializeClient", "listSessionTasks", "listSessions", "promptSession", "readTaskEvents", "reconnectSession", "resolveApproval", "steerSession", "subscribeTaskEvents"}

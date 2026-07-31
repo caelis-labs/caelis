@@ -75,6 +75,27 @@
         }
       }
     },
+    "/sessions/{session_id}/compact": {
+      "post": {
+        "operationId": "compactSession",
+        "parameters": [
+          {"$ref": "#/components/parameters/SessionID"},
+          {"$ref": "#/components/parameters/IdempotencyKey"},
+          {"$ref": "#/components/parameters/IfMatch"}
+        ],
+        "requestBody": {"$ref": "#/components/requestBodies/CompactSession"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/CommandCommitted"},
+          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "400": {"$ref": "#/components/responses/CommandBadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/CommandConflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    },
     "/sessions/{session_id}/state": {
       "get": {
         "operationId": "getSessionState",
@@ -273,6 +294,7 @@
     },
     "requestBodies": {
       "CloseSession": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CloseSessionRequest"}}}},
+      "CompactSession": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CompactSessionRequest"}}}},
       "Prompt": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PromptRequest"}}}},
       "Steer": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SteerRequest"}}}},
       "Cancel": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CancelRequest"}}}},
@@ -464,6 +486,7 @@
         "unevaluatedProperties": false
       },
       "CloseSessionRequest": {"allOf": [{"$ref": "#/components/schemas/WriteBase"}], "unevaluatedProperties": false},
+      "CompactSessionRequest": {"allOf": [{"$ref": "#/components/schemas/WriteBase"}], "unevaluatedProperties": false},
       "PromptTextContentPart": {
         "type": "object",
         "additionalProperties": false,
