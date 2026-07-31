@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -100,15 +101,17 @@ type CloseSessionRequest struct{ WriteBase }
 
 type PromptRequest struct {
 	WriteBase
-	Input        string `json:"input"`
-	DisplayInput string `json:"display_input,omitempty"`
+	Input        string              `json:"input,omitempty"`
+	DisplayInput string              `json:"display_input,omitempty"`
+	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
 }
 
 type SteerRequest struct {
 	WriteBase
-	Target       TurnTarget `json:"target"`
-	Input        string     `json:"input"`
-	DisplayInput string     `json:"display_input,omitempty"`
+	Target       TurnTarget          `json:"target"`
+	Input        string              `json:"input,omitempty"`
+	DisplayInput string              `json:"display_input,omitempty"`
+	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
 }
 
 type CancelRequest struct {

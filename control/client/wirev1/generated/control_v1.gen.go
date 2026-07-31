@@ -486,13 +486,34 @@ type PlanEntry struct {
 
 type PositiveUint64Decimal string
 
+type PromptContentPart struct {
+	Data     *string `json:"data,omitempty"`
+	FileName *string `json:"file_name,omitempty"`
+	MimeType *string `json:"mime_type,omitempty"`
+	Text     *string `json:"text,omitempty"`
+	Type     string  `json:"type"`
+}
+
+type PromptImageContentPart struct {
+	Data     string  `json:"data"`
+	FileName *string `json:"file_name,omitempty"`
+	MimeType string  `json:"mime_type"`
+	Type     string  `json:"type"`
+}
+
 type PromptRequest struct {
-	DisplayInput            *string        `json:"display_input,omitempty"`
-	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
-	Input                   string         `json:"input"`
-	OperationId             *string        `json:"operation_id,omitempty"`
-	SessionId               *string        `json:"session_id,omitempty"`
+	ContentParts            []PromptContentPart `json:"content_parts,omitempty"`
+	DisplayInput            *string             `json:"display_input,omitempty"`
+	ExpectedControllerEpoch *string             `json:"expected_controller_epoch,omitempty"`
+	ExpectedRevision        *Uint64Decimal      `json:"expected_revision,omitempty"`
+	Input                   *string             `json:"input,omitempty"`
+	OperationId             *string             `json:"operation_id,omitempty"`
+	SessionId               *string             `json:"session_id,omitempty"`
+}
+
+type PromptTextContentPart struct {
+	Text string `json:"text"`
+	Type string `json:"type"`
 }
 
 type RequestPermission struct {
@@ -645,13 +666,14 @@ type SessionUpdateEnvelope struct {
 }
 
 type SteerRequest struct {
-	DisplayInput            *string        `json:"display_input,omitempty"`
-	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
-	Input                   string         `json:"input"`
-	OperationId             *string        `json:"operation_id,omitempty"`
-	SessionId               *string        `json:"session_id,omitempty"`
-	Target                  TurnTarget     `json:"target"`
+	ContentParts            []PromptContentPart `json:"content_parts,omitempty"`
+	DisplayInput            *string             `json:"display_input,omitempty"`
+	ExpectedControllerEpoch *string             `json:"expected_controller_epoch,omitempty"`
+	ExpectedRevision        *Uint64Decimal      `json:"expected_revision,omitempty"`
+	Input                   *string             `json:"input,omitempty"`
+	OperationId             *string             `json:"operation_id,omitempty"`
+	SessionId               *string             `json:"session_id,omitempty"`
+	Target                  TurnTarget          `json:"target"`
 }
 
 type TextContent struct {

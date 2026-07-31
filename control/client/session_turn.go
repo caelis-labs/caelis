@@ -9,16 +9,19 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 // SessionTurnStartRequest starts one main Turn after atomically attaching to
-// the addressed Session feed. Input remains text-only until the common
-// SessionClient contract gains typed content parts.
+// the addressed Session feed. ContentParts carries provider-neutral prompt
+// text and inline images; filesystem attachment resolution remains a Surface
+// concern.
 type SessionTurnStartRequest struct {
 	SessionID    string
 	Input        string
 	DisplayInput string
+	ContentParts []model.ContentPart
 }
 
 // ApprovalResolution is the client-selected response for one permission
@@ -91,7 +94,7 @@ func (c *SessionTurnClient) Start(
 	if sessionID == "" {
 		return nil, errors.New("controlclient: Session turn requires a Session ID")
 	}
-	if input == "" {
+	if input == "" && len(request.ContentParts) == 0 {
 		return nil, errors.New("controlclient: Session turn requires prompt input")
 	}
 	if displayInput == input {
@@ -131,6 +134,7 @@ func (c *SessionTurnClient) Start(
 		},
 		Input:        input,
 		DisplayInput: displayInput,
+		ContentParts: append([]model.ContentPart(nil), request.ContentParts...),
 	})
 	if err != nil {
 		_ = reconnected.Subscription.Close()

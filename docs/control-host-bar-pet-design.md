@@ -231,14 +231,17 @@ and reports a cursor-addressed gap. `control/client.SessionTurnClient` now
 builds one target-filtered main Turn on that common facade, and Headless uses
 it through the in-process client. It first inspects the current feed boundary,
 then reconnects from that cursor before Prompt, so a long resumed Session does
-not replay and discard its entire durable prefix. The same Headless integration
-test also runs through the HTTP client. The production TUI still uses
+not replay and discard its entire durable prefix. Typed text and inline-image
+content parts cross the same in-process and HTTP prompt/steer contract; local
+filesystem attachment resolution remains a Surface responsibility. The same
+Headless integration test also runs through the HTTP client. The production
+TUI still uses
 `controladapter/local.NewLocalAdapter` and directly receives
 `*gatewayapp.Stack` (`internal/cli/tui.go:25-31`). Participant administration,
-handoff, attachments, automatic reconnect policy, and the TUI's other private
-Control services are not part of the common slice. The public HTTP protocol
-intentionally omits participant, handoff, Task, and standalone events/stream
-routes until their owner and parity requirement are proven.
+handoff, attachment materialization, automatic reconnect policy, and the TUI's
+other private Control services are not part of the common slice. The public
+HTTP protocol intentionally omits participant, handoff, Task, and standalone
+events/stream routes until their owner and parity requirement are proven.
 The broader in-process `control/client.Service` still exposes participant
 commands whose Runtime context is request-scoped; that interface is not the
 MVP client facade, and the Host-owned lifetime claim applies only to accepted
@@ -254,7 +257,8 @@ missing TUI capability:
   writes as the stable core;
 - add bounded retry with jitter and explicit disconnected, reconnecting,
   incompatible, and gap states;
-- add attachments, participant, handoff, model/profile, and other services
+- route the TUI's existing attachment materialization into typed content
+  parts, and add participant, handoff, model/profile, and other services
   through their existing semantic owners rather than a TUI aggregate;
 - run the same integration suite against in-process and remote clients before
   changing TUI composition.

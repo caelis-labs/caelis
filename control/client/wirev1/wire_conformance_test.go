@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/client/wirev1/generated"
@@ -22,11 +23,15 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	revision := uint64(7)
 	base := controlclient.WriteBase{OperationID: "operation-1", SessionID: "session-1", ExpectedRevision: &revision, ExpectedControllerEpoch: "epoch-1"}
 	target := controlclient.TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
+	contentParts := []model.ContentPart{
+		{Type: model.ContentPartText, Text: "hello "},
+		{Type: model.ContentPartImage, MimeType: "image/png", Data: "aW1n", FileName: "shot.png"},
+	}
 	requests := map[string]any{
 		"CreateSessionRequest":   controlclient.CreateSessionRequest{WriteBase: base, PreferredSessionID: "session-1", WorkspaceKey: "workspace-1", CWD: "/tmp/workspace", Title: "Session", Metadata: map[string]any{"source": "test"}},
 		"CloseSessionRequest":    controlclient.CloseSessionRequest{WriteBase: base},
-		"PromptRequest":          controlclient.PromptRequest{WriteBase: base, Input: "hello", DisplayInput: "hello"},
-		"SteerRequest":           controlclient.SteerRequest{WriteBase: base, Target: target, Input: "continue"},
+		"PromptRequest":          controlclient.PromptRequest{WriteBase: base, Input: "hello", DisplayInput: "hello", ContentParts: contentParts},
+		"SteerRequest":           controlclient.SteerRequest{WriteBase: base, Target: target, ContentParts: contentParts},
 		"CancelRequest":          controlclient.CancelRequest{WriteBase: base, Target: target, Reason: "stop"},
 		"ResolveApprovalRequest": controlclient.ResolveApprovalRequest{WriteBase: base, Target: target, ApprovalRequestID: "approval-1", Outcome: "selected", OptionID: schema.PermAllowOnce, Approved: true},
 	}

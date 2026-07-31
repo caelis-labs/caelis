@@ -433,13 +433,28 @@ export interface PlanEntry {
 
 export type PositiveUint64Decimal = string;
 
+export type PromptContentPart = PromptTextContentPart | PromptImageContentPart;
+
+export interface PromptImageContentPart {
+  data: string;
+  file_name?: string;
+  mime_type: string;
+  type: "image";
+}
+
 export interface PromptRequest {
+  content_parts?: Array<PromptContentPart>;
   display_input?: string;
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
-  input: string;
+  input?: string;
   operation_id?: string;
   session_id?: string;
+}
+
+export interface PromptTextContentPart {
+  text: string;
+  type: "text";
 }
 
 export interface RequestPermission {
@@ -608,10 +623,11 @@ export interface SessionUpdateEnvelope {
 }
 
 export interface SteerRequest {
+  content_parts?: Array<PromptContentPart>;
   display_input?: string;
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
-  input: string;
+  input?: string;
   operation_id?: string;
   session_id?: string;
   target: TurnTarget;

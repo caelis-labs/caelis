@@ -3,6 +3,7 @@ package gatewayapp
 import (
 	"context"
 	"iter"
+	"slices"
 	"testing"
 	"time"
 
@@ -47,6 +48,11 @@ func TestHeadlessSessionTurnMatchesInProcessAndHTTPClients(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			requests := make(chan agent.RunRequest, 1)
+			contentParts := []model.ContentPart{
+				{Type: model.ContentPartText, Text: "describe "},
+				{Type: model.ContentPartImage, MimeType: "image/png", Data: "aW1n", FileName: "shot.png"},
+			}
 			runtime, active, err := stack.sessionRuntimes.activateSession(ctx, created.SessionID)
 			if err != nil {
 				t.Fatal(err)
@@ -55,6 +61,7 @@ func TestHeadlessSessionTurnMatchesInProcessAndHTTPClients(t *testing.T) {
 				Sessions: stack.Sessions,
 				Runtime: headlessSessionTestRuntime{
 					response: "headless " + transport + " ok",
+					requests: requests,
 				},
 				Resolver: headlessSessionTestResolver{},
 			})
@@ -73,8 +80,9 @@ func TestHeadlessSessionTurnMatchesInProcessAndHTTPClients(t *testing.T) {
 				ctx,
 				turns,
 				controlclient.SessionTurnStartRequest{
-					SessionID: active.SessionID,
-					Input:     "return the fixed test response",
+					SessionID:    active.SessionID,
+					Input:        "return the fixed test response",
+					ContentParts: contentParts,
 				},
 				headless.Options{},
 			)
@@ -89,6 +97,15 @@ func TestHeadlessSessionTurnMatchesInProcessAndHTTPClients(t *testing.T) {
 				result.Target.TurnID == "" ||
 				result.LastCursor == "" {
 				t.Fatalf("Headless result = %#v, want output %q", result, want)
+			}
+			select {
+			case request := <-requests:
+				if request.Input != "return the fixed test response" ||
+					!slices.Equal(request.ContentParts, contentParts) {
+					t.Fatalf("Runtime request = %#v", request)
+				}
+			default:
+				t.Fatal("Runtime did not receive the typed prompt content")
 			}
 		})
 	}
@@ -141,12 +158,16 @@ func headlessSessionTestClient(
 
 type headlessSessionTestRuntime struct {
 	response string
+	requests chan<- agent.RunRequest
 }
 
 func (runtime headlessSessionTestRuntime) Run(
 	_ context.Context,
 	request agent.RunRequest,
 ) (agent.RunResult, error) {
+	if runtime.requests != nil {
+		runtime.requests <- request
+	}
 	message := model.NewTextMessage(model.RoleAssistant, runtime.response)
 	return agent.RunResult{
 		Session: session.Session{SessionRef: request.SessionRef},
@@ -179,8 +200,10 @@ func (headlessSessionTestResolver) ResolveTurn(
 ) (kernelimpl.ResolvedTurn, error) {
 	return kernelimpl.ResolvedTurn{
 		RunRequest: agent.RunRequest{
-			SessionRef: intent.SessionRef,
-			Input:      intent.Input,
+			SessionRef:   intent.SessionRef,
+			Input:        intent.Input,
+			DisplayInput: intent.DisplayInput,
+			ContentParts: append([]model.ContentPart(nil), intent.ContentParts...),
 		},
 	}, nil
 }

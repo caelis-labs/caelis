@@ -389,12 +389,57 @@
         "unevaluatedProperties": false
       },
       "CloseSessionRequest": {"allOf": [{"$ref": "#/components/schemas/WriteBase"}], "unevaluatedProperties": false},
+      "PromptTextContentPart": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "text"],
+        "properties": {
+          "type": {"const": "text"},
+          "text": {"type": "string", "minLength": 1}
+        }
+      },
+      "PromptImageContentPart": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "mime_type", "data"],
+        "properties": {
+          "type": {"const": "image"},
+          "mime_type": {"type": "string", "pattern": "^image/\\S+$"},
+          "data": {"type": "string", "minLength": 1, "contentEncoding": "base64"},
+          "file_name": {"type": "string"}
+        }
+      },
+      "PromptContentPart": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/PromptTextContentPart"},
+          {"$ref": "#/components/schemas/PromptImageContentPart"}
+        ],
+        "discriminator": {"propertyName": "type"}
+      },
       "PromptRequest": {
-        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["input"], "properties": {"input": {"type": "string", "minLength": 1}, "display_input": {"type": "string"}}}],
+        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {
+          "type": "object",
+          "properties": {
+            "input": {"type": "string", "minLength": 1},
+            "display_input": {"type": "string"},
+            "content_parts": {"type": "array", "minItems": 1, "items": {"$ref": "#/components/schemas/PromptContentPart"}}
+          },
+          "anyOf": [{"required": ["input"]}, {"required": ["content_parts"]}]
+        }],
         "unevaluatedProperties": false
       },
       "SteerRequest": {
-        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["target", "input"], "properties": {"target": {"$ref": "#/components/schemas/TurnTarget"}, "input": {"type": "string", "minLength": 1}, "display_input": {"type": "string"}}}],
+        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {
+          "type": "object",
+          "required": ["target"],
+          "properties": {
+            "target": {"$ref": "#/components/schemas/TurnTarget"},
+            "input": {"type": "string", "minLength": 1},
+            "display_input": {"type": "string"},
+            "content_parts": {"type": "array", "minItems": 1, "items": {"$ref": "#/components/schemas/PromptContentPart"}}
+          },
+          "anyOf": [{"required": ["input"]}, {"required": ["content_parts"]}]
+        }],
         "unevaluatedProperties": false
       },
       "CancelRequest": {

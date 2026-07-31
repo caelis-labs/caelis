@@ -2,12 +2,15 @@ package controlclient
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 type CommandServiceConfig struct {
@@ -194,15 +197,15 @@ func validateCommandRequest(action Action, request any) error {
 		if err := requireSession(typed.SessionID); err != nil {
 			return err
 		}
-		if strings.TrimSpace(typed.Input) == "" {
-			return errors.New("controlclient: prompt input is required")
+		if err := validatePromptContent("prompt", typed.Input, typed.ContentParts); err != nil {
+			return err
 		}
 	case SteerRequest:
 		if err := requireSessionAndTurn(typed.SessionID, typed.Target); err != nil {
 			return err
 		}
-		if strings.TrimSpace(typed.Input) == "" {
-			return errors.New("controlclient: steer input is required")
+		if err := validatePromptContent("steer", typed.Input, typed.ContentParts); err != nil {
+			return err
 		}
 	case CancelRequest:
 		return requireSessionAndTurn(typed.SessionID, typed.Target)
@@ -250,6 +253,44 @@ func validateCommandRequest(action Action, request any) error {
 		}
 	default:
 		return fmt.Errorf("controlclient: unsupported request for %s", action)
+	}
+	return nil
+}
+
+func validatePromptContent(kind string, input string, parts []model.ContentPart) error {
+	hasMeaningfulContent := strings.TrimSpace(input) != ""
+	for index, part := range parts {
+		switch part.Type {
+		case model.ContentPartText:
+			if part.Text == "" {
+				return fmt.Errorf("controlclient: %s content_parts[%d] text is required", kind, index)
+			}
+			if part.MimeType != "" || part.Data != "" || part.FileName != "" {
+				return fmt.Errorf("controlclient: %s content_parts[%d] text contains image fields", kind, index)
+			}
+			hasMeaningfulContent = hasMeaningfulContent || strings.TrimSpace(part.Text) != ""
+		case model.ContentPartImage:
+			if part.Text != "" {
+				return fmt.Errorf("controlclient: %s content_parts[%d] image contains text", kind, index)
+			}
+			mimeType := strings.TrimSpace(part.MimeType)
+			if !strings.HasPrefix(strings.ToLower(mimeType), "image/") ||
+				len(mimeType) == len("image/") ||
+				strings.IndexFunc(mimeType, unicode.IsSpace) >= 0 {
+				return fmt.Errorf("controlclient: %s content_parts[%d] image MIME type is required", kind, index)
+			}
+			data := strings.TrimSpace(part.Data)
+			decoded, err := base64.StdEncoding.DecodeString(data)
+			if err != nil || len(decoded) == 0 {
+				return fmt.Errorf("controlclient: %s content_parts[%d] image data must be non-empty base64", kind, index)
+			}
+			hasMeaningfulContent = true
+		default:
+			return fmt.Errorf("controlclient: %s content_parts[%d] has unsupported type %q", kind, index, part.Type)
+		}
+	}
+	if !hasMeaningfulContent {
+		return fmt.Errorf("controlclient: %s input is required", kind)
 	}
 	return nil
 }

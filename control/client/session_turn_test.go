@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -101,6 +102,52 @@ func TestSessionTurnClientAttachesBeforePromptAndFiltersExactTarget(t *testing.T
 	}
 	if turn.LastCursor() != "cursor-terminal" {
 		t.Fatalf("LastCursor() = %q", turn.LastCursor())
+	}
+}
+
+func TestSessionTurnClientAcceptsImageOnlyPrompt(t *testing.T) {
+	t.Parallel()
+
+	target := TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
+	contentParts := []model.ContentPart{{
+		Type: model.ContentPartImage, MimeType: "image/png", Data: "aW1n", FileName: "shot.png",
+	}}
+	subscription := newOpenSessionTurnTestSubscription()
+	client := &sessionTurnTestClient{
+		inspectFn: func(context.Context, StateRequest) (SessionState, error) {
+			return SessionState{SessionID: "session-1", BoundaryCursor: "cursor-boundary"}, nil
+		},
+		reconnectFn: func(context.Context, ReconnectRequest) (ReconnectResult, error) {
+			return ReconnectResult{
+				State:        SessionState{SessionID: "session-1", Revision: 1},
+				Subscription: subscription,
+			}, nil
+		},
+		promptFn: func(_ context.Context, request PromptRequest) (CommandResult, error) {
+			if request.Input != "" || len(request.ContentParts) != 1 || request.ContentParts[0] != contentParts[0] {
+				t.Fatalf("Prompt request = %#v", request)
+			}
+			return CommandResult{
+				OperationID: request.OperationID,
+				Outcome:     OutcomeCommitted,
+				SessionID:   request.SessionID,
+				Target:      target,
+			}, nil
+		},
+	}
+	starter, err := NewSessionTurnClient(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := starter.Start(context.Background(), SessionTurnStartRequest{
+		SessionID:    "session-1",
+		ContentParts: contentParts,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := turn.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

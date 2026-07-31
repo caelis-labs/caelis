@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/client/wirev1"
@@ -73,13 +74,18 @@ func TestPromptPreservesTypedWriteContract(t *testing.T) {
 		t.Fatalf("Initialize result = %#v", info)
 	}
 	revision := uint64(math.MaxUint64)
+	contentParts := []model.ContentPart{
+		{Type: model.ContentPartText, Text: "hello "},
+		{Type: model.ContentPartImage, MimeType: "image/png", Data: "aW1n", FileName: "shot.png"},
+	}
 	result, err := client.Prompt(context.Background(), controlclient.PromptRequest{
 		WriteBase: controlclient.WriteBase{
 			OperationID:      "operation-remote-prompt",
 			SessionID:        "session-1",
 			ExpectedRevision: &revision,
 		},
-		Input: "hello from Pet",
+		Input:        "hello from Pet",
+		ContentParts: contentParts,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +99,10 @@ func TestPromptPreservesTypedWriteContract(t *testing.T) {
 	if prompted.OperationID != "operation-remote-prompt" ||
 		prompted.ExpectedRevision == nil ||
 		*prompted.ExpectedRevision != math.MaxUint64 ||
-		prompted.Input != "hello from Pet" {
+		prompted.Input != "hello from Pet" ||
+		len(prompted.ContentParts) != 2 ||
+		prompted.ContentParts[0] != contentParts[0] ||
+		prompted.ContentParts[1] != contentParts[1] {
 		t.Fatalf("Prompt request = %#v", prompted)
 	}
 }

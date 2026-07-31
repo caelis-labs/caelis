@@ -215,6 +215,7 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 			RuntimeContext: s.controlRuntimeContext(ctx),
 			Input:          req.Input,
 			DisplayInput:   req.DisplayInput,
+			ContentParts:   req.ContentParts,
 			Surface:        "control-client",
 			Metadata:       map[string]any{"operation_id": req.OperationID},
 		})
@@ -231,7 +232,11 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		err = gw.SubmitActiveTurn(ctx, kernelimpl.SubmitActiveTurnRequest{SessionRef: active.SessionRef, Kind: kernelimpl.SubmissionKindConversation, Text: req.Input, DisplayText: req.DisplayInput, Metadata: map[string]any{"operation_id": req.OperationID}})
+		err = gw.SubmitActiveTurn(ctx, kernelimpl.SubmitActiveTurnRequest{
+			SessionRef: active.SessionRef, Kind: kernelimpl.SubmissionKindConversation,
+			Text: req.Input, DisplayText: req.DisplayInput, ContentParts: req.ContentParts,
+			Metadata: map[string]any{"operation_id": req.OperationID},
+		})
 		return sessionCommandResult(active), classifyControlBackendError(err)
 	case controlclient.CancelRequest:
 		active, err := s.checkControlTurnTarget(ctx, req.WriteBase, req.Target)
