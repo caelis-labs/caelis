@@ -36,14 +36,10 @@ func (s *Stack) StartSession(ctx context.Context, preferredSessionID string, bin
 			Owner:   s.AppName,
 		},
 	})
-	if err != nil || s.workspaceRuntimes == nil {
+	if err != nil || s.sessionRuntimes == nil {
 		return active, err
 	}
-	workspace, err := s.workspaceRuntimes.resolveWorkspace(ctx, s.Workspace)
-	if err != nil {
-		return active, err
-	}
-	if _, err := newSessionRuntime(active, workspace); err != nil {
+	if err := s.sessionRuntimes.bindDefaultSession(active); err != nil {
 		return active, err
 	}
 	return active, nil

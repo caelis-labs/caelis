@@ -211,6 +211,31 @@ func TestSandboxLifecyclePropagatesActionError(t *testing.T) {
 	}
 }
 
+func TestCloseWorkspaceResourcesRetainsFailedRuntimeForRetry(t *testing.T) {
+	closeErr := errors.New("close failed")
+	runtime := newSandboxLifecycleTestRuntime(sandbox.BackendHost, sandbox.BackendHost)
+	runtime.closeErr = closeErr
+	stack := sandboxLifecycleTestStack(runtime, "host")
+
+	if err := stack.closeWorkspaceResources(); !errors.Is(err, closeErr) {
+		t.Fatalf("first closeWorkspaceResources() error = %v, want %v", err, closeErr)
+	}
+	if stack.exec != runtime {
+		t.Fatal("failed sandbox Runtime close discarded the retryable resource owner")
+	}
+
+	runtime.closeErr = nil
+	if err := stack.closeWorkspaceResources(); err != nil {
+		t.Fatalf("retry closeWorkspaceResources() error = %v", err)
+	}
+	if stack.exec != nil {
+		t.Fatal("successful sandbox Runtime close retained the resource")
+	}
+	if runtime.closeCalls != 2 {
+		t.Fatalf("Close() calls = %d, want 2", runtime.closeCalls)
+	}
+}
+
 func sandboxLifecycleTestStack(runtime sandbox.Runtime, requestedBackend string) *Stack {
 	return &Stack{
 		Workspace: session.WorkspaceRef{CWD: "/workspace"},
@@ -224,6 +249,7 @@ type sandboxLifecycleTestRuntime struct {
 	status     sandbox.Status
 	selection  sandbox.Status
 	closeCalls int
+	closeErr   error
 }
 
 func newSandboxLifecycleTestRuntime(requested sandbox.Backend, resolved sandbox.Backend) *sandboxLifecycleTestRuntime {
@@ -279,7 +305,7 @@ func (r *sandboxLifecycleTestRuntime) SelectionStatus() sandbox.Status {
 
 func (r *sandboxLifecycleTestRuntime) Close() error {
 	r.closeCalls++
-	return nil
+	return r.closeErr
 }
 
 type sandboxLifecyclePrepareRuntime struct {

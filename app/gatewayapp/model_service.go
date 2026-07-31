@@ -38,7 +38,7 @@ func (s *Stack) ConnectModels(configs []ModelConfig) (profiles []modelprofile.Mo
 	if len(configs) == 0 {
 		return nil, fmt.Errorf("gatewayapp: at least one model config is required")
 	}
-	unlock, err := s.lockRuntimeGenerationMutation("connect model")
+	unlock, err := s.lockRuntimeConfigurationMutation("connect model")
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 	if s == nil || s.Sessions == nil {
 		return fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
-	unlock, err := s.lockRuntimeGenerationMutation("switch model")
+	unlock, err := s.lockRuntimeConfigurationMutation("switch model")
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 	if s == nil || s.Sessions == nil {
 		return fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
-	unlock, err := s.lockRuntimeGenerationMutation("delete model")
+	unlock, err := s.lockRuntimeConfigurationMutation("delete model")
 	if err != nil {
 		return err
 	}

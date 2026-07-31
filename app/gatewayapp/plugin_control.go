@@ -51,7 +51,7 @@ func (h pluginHost) UpdatePluginState(_ context.Context, mutation plugin.Mutatio
 	}
 
 	if mutation.Reconfigure {
-		unlock, err := h.stack.lockRuntimeGenerationMutation(mutation.GuardAction)
+		unlock, err := h.stack.lockRuntimeConfigurationMutation(mutation.GuardAction)
 		if err != nil {
 			return err
 		}

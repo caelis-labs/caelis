@@ -90,7 +90,7 @@ func (s *Stack) ConnectACP(ctx context.Context, req controlagents.ConnectRequest
 		return controlagents.ConnectResult{}, fmt.Errorf("gatewayapp: %w", err)
 	}
 
-	unlock, err := s.lockRuntimeGenerationMutation("connect ACP Agent")
+	unlock, err := s.lockRuntimeConfigurationMutation("connect ACP Agent")
 	if err != nil {
 		return controlagents.ConnectResult{}, err
 	}
@@ -177,7 +177,7 @@ func (s *Stack) DisconnectACP(ctx context.Context, agentID string) (controlagent
 		return controlagents.DisconnectResult{}, err
 	}
 
-	unlock, err := s.lockRuntimeGenerationMutation("disconnect ACP Agent")
+	unlock, err := s.lockRuntimeConfigurationMutation("disconnect ACP Agent")
 	if err != nil {
 		return controlagents.DisconnectResult{}, err
 	}

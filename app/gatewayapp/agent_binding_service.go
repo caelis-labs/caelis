@@ -111,7 +111,7 @@ func (s AgentBindingService) mutate(
 		return agentbinding.Status{}, err
 	}
 	if refreshRuntime {
-		unlock, err := s.stack.lockRuntimeGenerationMutation(action)
+		unlock, err := s.stack.lockRuntimeConfigurationMutation(action)
 		if err != nil {
 			return agentbinding.Status{}, err
 		}

@@ -35,13 +35,19 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 				errorcode.New(errorcode.Unavailable, "gatewayapp: host is closing"),
 			)
 	}
-	if s.workspaceRuntimes == nil {
+	if s.sessionRuntimes == nil {
 		return s.executeControlCommand(ctx, principal, action, request)
 	}
 
 	if create, ok := request.(controlclient.CreateSessionRequest); ok {
-		runtime, err := s.workspaceRuntimes.resolveCreateWorkspace(
-			ctx,
+		activationCtx, unlock, err := s.sessionRuntimes.lockActivation(ctx)
+		if err != nil {
+			return controlclient.CommandResult{Outcome: controlclient.OutcomeRejected},
+				classifyControlPreDispatchError(err)
+		}
+		defer unlock()
+		workspace, err := s.sessionRuntimes.resolveCreateWorkspaceLocked(
+			activationCtx,
 			principal,
 			session.WorkspaceRef{Key: create.WorkspaceKey, CWD: create.CWD},
 			create.PreferredSessionID,
@@ -50,28 +56,83 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 			return controlclient.CommandResult{Outcome: controlclient.OutcomeRejected},
 				classifyControlPreDispatchError(err)
 		}
-		create.WorkspaceKey = runtime.workspace.Key
-		create.CWD = runtime.workspace.CWD
-		result, commandErr = runtime.stack.executeControlCommand(ctx, principal, action, create)
+		create.WorkspaceKey = workspace.Key
+		create.CWD = workspace.CWD
+		result, commandErr = s.executeControlCommand(activationCtx, principal, action, create)
 		if commandErr != nil || result.Outcome != controlclient.OutcomeCommitted || strings.TrimSpace(result.SessionID) == "" {
 			return result, commandErr
 		}
-		active, err := s.Sessions.Session(ctx, session.SessionRef{SessionID: result.SessionID})
+		active, err := s.Sessions.Session(activationCtx, session.SessionRef{SessionID: result.SessionID})
 		if err != nil {
 			return result, controlclient.NewOutcomeError(controlclient.OutcomeUnknown, err)
 		}
-		if _, err := newSessionRuntime(active, runtime); err != nil {
+		if err := s.sessionRuntimes.bindCreatedWorkspaceLocked(active, workspace); err != nil {
 			return result, controlclient.NewOutcomeError(controlclient.OutcomeUnknown, err)
 		}
 		return result, nil
 	}
 
 	sessionID := controlCommandSessionID(request)
-	binding, _, err := s.workspaceRuntimes.resolveSession(ctx, sessionID)
-	if err != nil {
-		return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
+	runtimeStack := s
+	var releaseRuntimeUse func()
+	defer func() {
+		if releaseRuntimeUse != nil {
+			releaseRuntimeUse()
+		}
+	}()
+	defaultSession := s.sessionRuntimes.defaultSession(sessionID)
+	switch {
+	case controlActionActivatesSessionRuntime(action) && !defaultSession:
+		runtime, _, err := s.sessionRuntimes.activateSession(ctx, sessionID)
+		if err != nil {
+			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
+		}
+		releaseRuntimeUse, err = s.sessionRuntimes.acquireRuntimeUse(runtime)
+		if err != nil {
+			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
+		}
+		runtimeStack = runtime.stack
+	case controlActionTargetsActiveRuntime(action) && !defaultSession:
+		runtime, releaseUse, err := s.sessionRuntimes.acquireLoadedRuntime(sessionID)
+		if err != nil {
+			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
+		}
+		if runtime == nil {
+			coded := errorcode.New(
+				errorcode.Conflict,
+				"gatewayapp: active Turn Runtime is unavailable",
+			)
+			return controlclient.CommandResult{SessionID: sessionID},
+				controlclient.NewOutcomeError(controlclient.OutcomeConflicted, coded)
+		}
+		releaseRuntimeUse = releaseUse
+		runtimeStack = runtime.stack
+	case action == controlclient.ActionSessionClose && !defaultSession:
+		runtime, releaseUse, err := s.sessionRuntimes.acquireLoadedRuntime(sessionID)
+		if err != nil {
+			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
+		}
+		if runtime != nil {
+			releaseRuntimeUse = releaseUse
+			runtimeStack = runtime.stack
+		} else if _, err := s.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID}); err != nil {
+			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
+		}
 	}
-	result, commandErr = binding.workspace.stack.executeControlCommand(ctx, principal, action, request)
+	result, commandErr = runtimeStack.executeControlCommand(ctx, principal, action, request)
+	if action == controlclient.ActionSessionClose &&
+		commandErr == nil &&
+		result.Outcome == controlclient.OutcomeCommitted {
+		if releaseRuntimeUse != nil {
+			releaseRuntimeUse()
+			releaseRuntimeUse = nil
+		}
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
+		defer cancel()
+		if err := s.sessionRuntimes.releaseSession(releaseCtx, sessionID); err != nil {
+			result.Detail = "session closed; execution Runtime cleanup remains pending"
+		}
+	}
 	return result, commandErr
 }
 
@@ -281,6 +342,31 @@ func controlCommandSessionID(request any) string {
 		return strings.TrimSpace(typed.SessionID)
 	default:
 		return ""
+	}
+}
+
+func controlActionActivatesSessionRuntime(action controlclient.Action) bool {
+	switch action {
+	case controlclient.ActionPrompt,
+		controlclient.ActionParticipantAttach,
+		controlclient.ActionParticipantPrompt,
+		controlclient.ActionParticipantDetach,
+		controlclient.ActionControllerHandoff:
+		return true
+	default:
+		return false
+	}
+}
+
+func controlActionTargetsActiveRuntime(action controlclient.Action) bool {
+	switch action {
+	case controlclient.ActionSteer,
+		controlclient.ActionCancel,
+		controlclient.ActionApprovalResolve,
+		controlclient.ActionParticipantCancel:
+		return true
+	default:
+		return false
 	}
 }
 

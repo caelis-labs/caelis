@@ -14,7 +14,7 @@ func (s *Stack) SetSandboxBackend(_ context.Context, backend string) (SandboxSta
 	if s == nil {
 		return SandboxStatus{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
-	unlock, err := s.lockRuntimeGenerationMutation("change sandbox backend")
+	unlock, err := s.lockRuntimeConfigurationMutation("change sandbox backend")
 	if err != nil {
 		return SandboxStatus{}, err
 	}

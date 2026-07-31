@@ -121,7 +121,7 @@ suggests.
 | Authenticated HTTP/SSE Host adapter with TLS and host policy | `app/controlserver`, `control/client/wirev1` | Yes; it is infrastructure around Control, not a Surface |
 | Host-owned accepted main-Turn lifetime | `internal/kernel/gateway_turns.go`, `app/gatewayapp/stack.go` | Yes; HTTP request cancellation must not cancel accepted work |
 | Principal-bound local and remote Session clients | `control/client/session_client.go`, `control/client/httpclient` | Yes; extend the common facade only as parity requires |
-| Session-routed workspace Runtime ownership | `app/gatewayapp/workspace_runtime_registry.go` | Yes for the bounded Session-client slice: workspace composition is loaded on demand, Session ID selects it, and UserID is not a Runtime key |
+| Session-routed workspace Runtime ownership | `app/gatewayapp/session_runtime_registry.go`, `workspace_config_assembler.go` | Yes for the bounded Session-client slice: workspace composition is loaded on demand, Session ID selects it, and UserID is not a Runtime key |
 | Independent Task observation | `control/taskstream`, `protocol/acp/taskstream` | Yes; Task output must not be folded into the Session control stream |
 
 ## Infrastructure Gaps
@@ -223,54 +223,79 @@ remote clients. Disconnect during a Turn, restart the client, reconnect from
 the last accepted cursor, and compare the rebuilt transcript and typed state
 with an uninterrupted client.
 
-### G4 — Workspace Runtime ownership is only partially converged
+### G4 — Session Runtime ownership is bounded but not fully converged
 
-**Evidence.** The app-scoped registry now canonicalizes workspace identity,
-loads an independent Gateway, execution engine, sandbox, prompt/skill catalog,
-MCP manager, and Agent assembly on demand, and resolves each durable Session ID
-to the current Runtime for exactly one workspace without retaining a second
-process-local Session binding map
-(`app/gatewayapp/workspace_runtime_registry.go`). This fixes workspace identity,
-not the workspace configuration generation.
-Control-client create, mutation, inspect, and reconnect paths route by Session;
-ambiguous key/CWD aliases fail before Session creation. The registry is rebuilt
-from durable Session workspace facts after Host restart. `UserID` remains in
-authorization and persistence for compatibility but does not partition
-Runtime. Workspace composition construction runs outside the registry lock but
-shares the Host generation lock with live reconfiguration. App-wide Runtime
-mutation therefore rejects multi-Runtime state before changing memory or
-durable configuration, and its active-Turn fence observes every loaded
-workspace Gateway. Workspace load admission and in-flight builds are canceled
-and drained by Host Quiesce before shared resources close. Closed and open
-Sessions are both routed from durable workspace facts, so observing Session
-history does not create retained process-local Session bindings.
+**Evidence.** The app-scoped Session Runtime registry now routes Control-client
+execution by durable Session ID. A stateless workspace configuration assembler
+reads current `AppConfig` and workspace files on the first execution after no
+live activation and builds an independent Gateway, execution engine, sandbox,
+prompt/skill catalog, MCP manager, model lookup, placement snapshot, and Agent
+assembly for that Session (`app/gatewayapp/session_runtime_registry.go`,
+`app/gatewayapp/workspace_config_assembler.go`). Two Sessions in the same
+workspace have separate execution Runtimes but the same canonical workspace
+identity. `UserID` remains in authorization and persistence for compatibility
+and does not partition workspace identity.
 
-The ordinary TUI and private prompt services still address the default
-workspace Stack directly. Task stream lookup still uses the default Runtime
-stream provider, and live global reconfiguration is rejected while more than
-one workspace Runtime is loaded rather than attempting a partial update.
-With only one loaded Runtime, reconfiguration still replaces that workspace
-composition in place; after Host restart, a Session resolves the current
-workspace configuration rather than the generation under which it was created.
-Loaded workspace compositions currently remain resident until Host shutdown;
-idle eviction is not part of this MVP lifecycle.
+An assembled Session Runtime is detached from later app configuration writes.
+Every later prompt in that activation reuses the same prefix and composition;
+new Sessions allocate only durable state and assemble current configuration on
+their first execution. Released Sessions reactivated later do the same. Host
+restart naturally drops all activations, so an old durable Session uses current
+configuration on its next execution. No configuration generation is persisted
+or cached by workspace. Durable Sessions store only workspace key/CWD. Inspect,
+reconnect, and multiple feed observers read durable and already-live state
+without assembling or retaining execution state. Ambiguous key/CWD aliases fail
+before Session creation; accepted aliases remain a Host-lifetime identity fence
+because their durable Sessions may reactivate later.
 
-**Failure mode.** The bounded app-server Session path can operate across local
-workspaces without mixing their prompt, skills, sandbox CWD, Gateway, or engine.
-Moving TUI/private services or live configuration mutations prematurely would
-still either bypass Session routing or produce incoherent generations.
+App configuration mutation and Session assembly share one Host lock, so a new
+activation cannot observe a partial write. Mutation rebuilds only the
+transitional default Stack and leaves every existing Session Runtime fixed,
+including an active Turn. Host Quiesce closes activation admission, cancels and
+drains in-flight assembly and Runtime release, quiesces all Session Gateways and
+the transitional default Gateway, then closes resources. Release first marks a
+Runtime unavailable to routing, so concurrent prompts cannot enter resources
+being quiesced; Runtime release also waits for every routed synchronous Control
+mutation that already acquired the Runtime. Failed sandbox or MCP closure
+retains the resource owner so Host shutdown can retry cleanup. Session close
+releases its Runtime.
 
-**Bounded repair.** Keep Session as the public unit and extend Runtime lookup
-only when a concrete Session capability requires it. Move Task lookup and the
-remaining private services behind Session-directed owners, then define one
-atomic workspace-runtime generation policy for app configuration changes.
-Do not expose workspace Runtime handles to Surfaces or use workspace/UserID as
-Session identity.
+The ordinary TUI, private prompt services, and Task stream lookup still address
+the default Stack. There is not yet a public client detach/release operation or
+idle eviction policy, so an open idle Session activation remains resident until
+Session close or Host shutdown; the registry's release primitive is currently
+internal lifecycle machinery. Observation subscriptions deliberately do not
+control Runtime lifetime.
+
+**Transitional TODO.** Until TUI/headless Session creation and Turn ingress use
+the typed `SessionClient`, `Stack.StartSession` records a process-local
+default-Stack ownership marker for that Session. Control reconnect and mutation
+routing must honor this marker so one legacy TUI Session cannot acquire a
+second detached Gateway. This marker is not durable workspace configuration or
+a Session Runtime cache. Remove the marker and its routing branches only after
+the TUI/headless path no longer calls the private default Gateway directly and
+the shared local/remote client parity suite covers resume, prompt, steer,
+cancel, approval, and close.
+
+**Failure mode.** The bounded app-server Session path can operate concurrently
+across local workspaces without mixing prompt, skills, sandbox CWD, Gateway, or
+engine. Moving the TUI/private services before they acquire Session-directed
+execution and an explicit activation-release boundary would bypass this
+routing or keep idle Session compositions resident indefinitely.
+
+**Bounded repair.** Keep Session as the public unit and extend Runtime routing
+only when a concrete Session capability requires it. Define the smallest
+client-visible activation release needed by TUI switching before migrating the
+TUI, then move Task lookup and remaining private services behind
+Session-directed owners. Do not expose workspace Runtime handles to Surfaces or
+use workspace/UserID as Session identity.
 
 **Acceptance.** Run Sessions from two workspaces concurrently and prove that
 their CWD, write roots, skills, MCP endpoints, external Agent launch CWD, model
-profile selection, and reconfiguration fences do not cross. Restart the host
-and reproduce the same bindings from durable state.
+profile selection, and active configuration snapshots do not cross. Change
+configuration during an active Turn, prove that Turn keeps its prefix, then
+prove a new or released-and-reactivated Session uses current configuration.
+Restart the Host and reproduce workspace bindings from durable Session state.
 
 ### G5 — Host discovery and compatibility are incomplete
 
@@ -353,8 +378,8 @@ flowchart LR
         CATALOG["Session catalog/activity projection"]
         CONTROL["control/client<br/>commands + reconnect + feed"]
         TASKS["control/taskstream"]
-        REGISTRY["WorkspaceRuntimeRegistry"]
-        RUNTIME["Session runtime registry<br/>keyed by Session ID"]
+        ASSEMBLER["Stateless workspace<br/>config assembler"]
+        RUNTIME["Session Runtime registry<br/>keyed by Session ID"]
     end
 
     subgraph Durable["Durable truth"]
@@ -371,8 +396,8 @@ flowchart LR
     REMOTE --> API
     API --> CONTROL
     CATALOG --> CONTROL
-    CONTROL --> REGISTRY
-    REGISTRY --> RUNTIME
+    CONTROL --> RUNTIME
+    RUNTIME --> ASSEMBLER
     CONTROL --> STORE
     CONTROL --> OPS
     TASKS --> STORE
@@ -468,14 +493,15 @@ The infrastructure MVP is intentionally smaller than a TUI migration:
   `control/client/wirev1`.
 - the app-scoped Runtime registry permits multiple local workspace
   compositions, but every client mutation and observation is still addressed
-  by Session ID; no process-local Session binding mirror is retained, while
-  loaded workspace compositions retain Host lifetime.
+  by Session ID; create and observers allocate no execution Runtime, durable
+  Sessions retain only workspace identity, and the stateless assembler owns no
+  workspace configuration cache.
 
 TUI composition remains unchanged until the same integration suite proves the
 in-process and remote clients can replace its current Session path. Readiness,
 automatic retry policy, participant/handoff and Task remote clients,
-cross-workspace live reconfiguration, catalog activity, Bar, and Pet are
-deferred capabilities, not placeholders in the MVP protocol.
+client-visible Runtime release, catalog activity, Bar, and Pet are deferred
+capabilities, not placeholders in the MVP protocol.
 
 ## Quality Gates
 

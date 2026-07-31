@@ -44,10 +44,8 @@ func (s *Stack) invalidatePlacementSnapshot() {
 	if s == nil {
 		return
 	}
-	if s.workspaceRuntimes != nil {
-		s.workspaceRuntimes.invalidatePlacementSnapshots()
-		return
-	}
+	// Session Runtime placement snapshots are immutable for one activation and
+	// must not observe later app configuration writes.
 	s.invalidateOwnPlacementSnapshot()
 }
 

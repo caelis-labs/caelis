@@ -76,7 +76,7 @@ func (s *Stack) rebuildGateway() error {
 	if s == nil {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}
-	unlock, err := s.lockRuntimeGenerationMutation("rebuild the default Runtime")
+	unlock, err := s.lockRuntimeConfigurationMutation("rebuild the default Runtime")
 	if err != nil {
 		return err
 	}
@@ -84,10 +84,9 @@ func (s *Stack) rebuildGateway() error {
 	return s.rebuildGatewayLocked()
 }
 
-// rebuildGatewayLocked replaces one workspace composition while its Host
-// generation lock is held. Startup may call rebuildGateway before the workspace
-// registry exists; live mutation paths must use this locked form after their
-// pre-write generation checks.
+// rebuildGatewayLocked replaces the transitional default composition while
+// the Host configuration lock is held. Session-scoped Runtimes are never
+// rebuilt by app configuration mutation.
 func (s *Stack) rebuildGatewayLocked() error {
 	return s.rebuildGatewayLockedContext(context.Background())
 }
@@ -97,9 +96,6 @@ func (s *Stack) rebuildGatewayLockedContext(ctx context.Context) error {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := s.rejectMultiWorkspaceRuntimeMutation("rebuild the default Runtime"); err != nil {
 		return err
 	}
 	s.mu.RLock()
@@ -480,6 +476,9 @@ func (s *Stack) installGatewayRuntimeBundle(oldGateway *kernelimpl.Gateway, bund
 }
 
 func (s *Stack) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
+	s.workspaceCloseMu.Lock()
+	defer s.workspaceCloseMu.Unlock()
+
 	s.mu.Lock()
 	oldExec := s.exec
 	oldMcpMgr := s.mcpMgr

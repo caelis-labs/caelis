@@ -84,6 +84,7 @@ type Stack struct {
 	controlOperationRetention time.Duration
 	leaseOwnerID              string
 	mu                        sync.RWMutex
+	workspaceCloseMu          sync.Mutex
 	reconfigureMu             sync.Mutex
 	reconfigureGate           *sync.Mutex
 	// assemblyMutationMu serializes live Agent assembly mutations with durable
@@ -116,7 +117,7 @@ type Stack struct {
 	grokAuth                 *grokauth.Manager
 	apiKeyCredentials        *credentialstore.Store
 	providerUsage            *providerusage.Registry
-	workspaceRuntimes        *workspaceRuntimeRegistry
+	sessionRuntimes          *sessionRuntimeRegistry
 
 	// Optional test seam; nil uses the platform lifecycle runtime factory.
 	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
@@ -212,16 +213,17 @@ func (s *Stack) TaskStreams() acptaskstream.Service {
 	return s.taskStreams
 }
 
-// ControlClientRuntimeState delegates bootstrap live-state reads to the
-// currently installed Control gateway.
+// ControlClientRuntimeState reads live state only from an already activated
+// Session Runtime. Observation must not assemble or retain execution state.
 func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (controlclient.RuntimeState, error) {
 	runtimeStack := s
-	if s != nil && s.workspaceRuntimes != nil {
-		binding, _, err := s.workspaceRuntimes.resolveSession(ctx, ref.SessionID)
-		if err != nil {
-			return controlclient.RuntimeState{}, err
+	if s != nil && s.sessionRuntimes != nil &&
+		!s.sessionRuntimes.defaultSession(ref.SessionID) {
+		runtime, ok := s.sessionRuntimes.loaded(ref.SessionID)
+		if !ok {
+			return controlclient.RuntimeState{}, nil
 		}
-		runtimeStack = binding.workspace.stack
+		runtimeStack = runtime.stack
 	}
 	gateway := runtimeStack.currentGateway()
 	if gateway == nil {
@@ -524,12 +526,12 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		stack.lifecycleCancel()
 		return nil, err
 	}
-	workspaceRuntimes, err := newWorkspaceRuntimeRegistry(stack)
+	sessionRuntimes, err := newSessionRuntimeRegistry(stack)
 	if err != nil {
 		_ = stack.Close()
 		return nil, err
 	}
-	stack.workspaceRuntimes = workspaceRuntimes
+	stack.sessionRuntimes = sessionRuntimes
 	return stack, nil
 }
 
@@ -647,11 +649,11 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 	if s.lifecycleCancel != nil {
 		s.lifecycleCancel()
 	}
-	if s.workspaceRuntimes != nil {
+	if s.sessionRuntimes != nil {
 		var errs []error
-		runtimes, err := s.workspaceRuntimes.closeAdmission(ctx)
+		runtimes, err := s.sessionRuntimes.closeAdmission(ctx)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("drain workspace Runtime loads: %w", err))
+			errs = append(errs, fmt.Errorf("drain Session Runtime loads: %w", err))
 		}
 		for _, runtime := range runtimes {
 			if runtime == nil || runtime.stack == nil {
@@ -659,8 +661,13 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 			}
 			if gateway := runtime.stack.currentGateway(); gateway != nil {
 				if err := gateway.Quiesce(ctx); err != nil {
-					errs = append(errs, fmt.Errorf("workspace %q: %w", runtime.workspace.Key, err))
+					errs = append(errs, fmt.Errorf("Session %q: %w", runtime.sessionID, err))
 				}
+			}
+		}
+		if gateway := s.currentGateway(); gateway != nil {
+			if err := gateway.Quiesce(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("default Runtime: %w", err))
 			}
 		}
 		return errors.Join(errs...)
@@ -678,16 +685,16 @@ func (s *Stack) Close() error {
 	quiesceCtx, cancelQuiesce := context.WithTimeout(context.Background(), 5*time.Second)
 	quiesceErr := s.Quiesce(quiesceCtx)
 	cancelQuiesce()
-	var workspaceCloseErrs []error
-	if s.workspaceRuntimes != nil {
-		for _, runtime := range s.workspaceRuntimes.snapshot() {
-			if runtime == nil || runtime.stack == nil || runtime.stack == s {
+	var sessionCloseErrs []error
+	if s.sessionRuntimes != nil {
+		for _, runtime := range s.sessionRuntimes.snapshot() {
+			if runtime == nil || runtime.stack == nil {
 				continue
 			}
 			if err := runtime.stack.closeWorkspaceResources(); err != nil {
-				workspaceCloseErrs = append(
-					workspaceCloseErrs,
-					fmt.Errorf("workspace %q: %w", runtime.workspace.Key, err),
+				sessionCloseErrs = append(
+					sessionCloseErrs,
+					fmt.Errorf("Session %q: %w", runtime.sessionID, err),
 				)
 			}
 		}
@@ -705,7 +712,7 @@ func (s *Stack) Close() error {
 	if workspaceResourceErr != nil {
 		errs = append(errs, workspaceResourceErr)
 	}
-	errs = append(errs, workspaceCloseErrs...)
+	errs = append(errs, sessionCloseErrs...)
 	if controlOperations != nil {
 		if err := controlOperations.Close(); err != nil {
 			errs = append(errs, err)
@@ -721,6 +728,9 @@ func (s *Stack) closeWorkspaceResources() error {
 	if s == nil {
 		return nil
 	}
+	s.workspaceCloseMu.Lock()
+	defer s.workspaceCloseMu.Unlock()
+
 	s.mu.Lock()
 	exec := s.exec
 	s.exec = nil
@@ -728,18 +738,25 @@ func (s *Stack) closeWorkspaceResources() error {
 	s.mcpMgr = nil
 	s.mu.Unlock()
 
-	var errs []error
+	var execErr error
 	if exec != nil {
-		if err := exec.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		execErr = exec.Close()
 	}
+	var mcpErr error
 	if mcpMgr != nil {
-		if err := mcpMgr.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		mcpErr = mcpMgr.Close()
 	}
-	return errors.Join(errs...)
+	if execErr != nil || mcpErr != nil {
+		s.mu.Lock()
+		if execErr != nil && s.exec == nil {
+			s.exec = exec
+		}
+		if mcpErr != nil && s.mcpMgr == nil {
+			s.mcpMgr = mcpMgr
+		}
+		s.mu.Unlock()
+	}
+	return errors.Join(execErr, mcpErr)
 }
 
 func (s *Stack) MCPServersStatus(pluginID string) []mcp.MCPServerInfo {
