@@ -145,7 +145,7 @@ func TestNewFromStackUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 		AppName:      "caelis",
 		UserID:       "acpagent-test",
 		StoreDir:     t.TempDir(),
-		WorkspaceKey: workspace,
+		WorkspaceKey: "acp-typed-workspace",
 		WorkspaceCWD: workspace,
 		ApprovalMode: "auto-review",
 		SkillDirs:    []string{t.TempDir()},
@@ -179,6 +179,13 @@ func TestNewFromStackUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 	}
 	if len(listed.Sessions) != 1 || listed.Sessions[0].SessionID != created.SessionID {
 		t.Fatalf("ListSessions() = %#v, want created Session", listed)
+	}
+	active, err := stack.Sessions.Session(ctx, session.SessionRef{SessionID: created.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.WorkspaceKey != "acp-typed-workspace" {
+		t.Fatalf("created WorkspaceKey = %q, want stable Host workspace key", active.WorkspaceKey)
 	}
 	callbacks := &recordingCallbacks{}
 	result, err := agent.Prompt(ctx, acp.PromptRequest{

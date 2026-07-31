@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -74,7 +75,11 @@ type Config struct {
 	AppName               string
 	UserID                string
 	WorkspaceKey          string
-	AgentInfo             *acp.Implementation
+	// WorkspaceCWD pairs the product Host's stable Workspace key with its
+	// canonical directory. ACP identifies a workspace by CWD, so typed Session
+	// creation uses this pair to preserve the Host's registered identity.
+	WorkspaceCWD string
+	AgentInfo    *acp.Implementation
 }
 
 // RuntimeAgent adapts Agent SDK runtime and session contracts into the standard
@@ -100,6 +105,7 @@ type RuntimeAgent struct {
 	appName               string
 	userID                string
 	workspaceKey          string
+	workspaceCWD          string
 	agentInfo             *acp.Implementation
 
 	mu           sync.Mutex
@@ -183,6 +189,7 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		appName:               appName,
 		userID:                userID,
 		workspaceKey:          strings.TrimSpace(cfg.WorkspaceKey),
+		workspaceCWD:          strings.TrimSpace(cfg.WorkspaceCWD),
 		agentInfo:             normalizeAgentInfo(cfg.AgentInfo, appName),
 		cancels:               map[string]context.CancelFunc{},
 		terminalRefs:          map[string]stream.Ref{},
@@ -251,7 +258,7 @@ func (a *RuntimeAgent) NewSession(ctx context.Context, req acp.NewSessionRequest
 			WriteBase: controlclient.WriteBase{
 				OperationID: newACPSessionOperationID("create"),
 			},
-			WorkspaceKey: strings.TrimSpace(req.CWD),
+			WorkspaceKey: a.workspaceKeyForCWD(req.CWD),
 			CWD:          strings.TrimSpace(req.CWD),
 		})
 		if err != nil {
@@ -325,7 +332,7 @@ func (a *RuntimeAgent) ListSessions(ctx context.Context, req acp.SessionListRequ
 	var err error
 	if a.sessionClient != nil {
 		list, err = a.sessionClient.ListSessions(ctx, controlclient.ListSessionsRequest{
-			WorkspaceKey: strings.TrimSpace(req.CWD),
+			WorkspaceKey: a.workspaceKeyForCWD(req.CWD),
 			Cursor:       strings.TrimSpace(req.Cursor),
 		})
 	} else {
@@ -355,6 +362,29 @@ func (a *RuntimeAgent) ListSessions(ctx context.Context, req acp.SessionListRequ
 		resp.Sessions = append(resp.Sessions, summary)
 	}
 	return resp, nil
+}
+
+func (a *RuntimeAgent) workspaceKeyForCWD(cwd string) string {
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" || a.workspaceKey == "" || a.workspaceCWD == "" {
+		return cwd
+	}
+	if canonicalACPWorkspacePath(cwd) == canonicalACPWorkspacePath(a.workspaceCWD) {
+		return a.workspaceKey
+	}
+	return cwd
+}
+
+func canonicalACPWorkspacePath(path string) string {
+	absolute, err := filepath.Abs(strings.TrimSpace(path))
+	if err != nil {
+		return filepath.Clean(strings.TrimSpace(path))
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err == nil {
+		absolute = resolved
+	}
+	return filepath.Clean(absolute)
 }
 
 func (a *RuntimeAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest, cb acp.PromptCallbacks) (acp.LoadSessionResponse, error) {

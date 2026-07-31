@@ -25,6 +25,7 @@ type GatewayAgentConfig struct {
 	AppName              string
 	UserID               string
 	WorkspaceKey         string
+	WorkspaceCWD         string
 	SurfaceBuilder       SurfaceBuilder
 	PromptRouterFactory  PromptRouterFactory
 	SlashResultFormatter SlashResultFormatter
@@ -109,6 +110,7 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		AppName:               cfg.AppName,
 		UserID:                cfg.UserID,
 		WorkspaceKey:          cfg.WorkspaceKey,
+		WorkspaceCWD:          cfg.WorkspaceCWD,
 		AgentInfo:             &acp.Implementation{Name: cfg.AppName, Version: version.String()},
 	})
 }

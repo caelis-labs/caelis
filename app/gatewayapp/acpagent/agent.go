@@ -44,6 +44,7 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 		AppName:              deps.AppName,
 		UserID:               deps.UserID,
 		WorkspaceKey:         strings.TrimSpace(stack.Workspace.Key),
+		WorkspaceCWD:         strings.TrimSpace(stack.Workspace.CWD),
 		TaskStreamClient:     taskStreamClient,
 		SlashResultFormatter: promptview.FormatSlashResult,
 		SurfaceBuilder: func(req runtimeacp.SurfaceRequest) runtimeacp.Surface {
