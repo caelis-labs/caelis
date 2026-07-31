@@ -643,6 +643,75 @@
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PluginRequest"}}}},
         "responses": {"200":{"description":"Typed AppServer result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PluginSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
       }
+    },
+    "/presentation/capabilities": {
+      "get": {
+        "operationId": "getPresentationCapabilities",
+        "responses": {"200":{"description":"Presentation capabilities","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PresentationCapabilities"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/presentation": {
+      "get": {
+        "operationId": "getSessionPresentation",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "responses": {"200":{"description":"Session presentation snapshot","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PresentationSnapshot"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/presentation/mode": {
+      "post": {
+        "operationId": "setPresentationMode",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SetPresentationModeRequest"}}}},
+        "responses": {"200":{"description":"Presentation mode updated","content":{"application/json":{"schema":{"$ref":"#/components/schemas/EmptyResult"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/presentation/config": {
+      "post": {
+        "operationId": "setPresentationConfig",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SetPresentationConfigRequest"}}}},
+        "responses": {"200":{"description":"Updated presentation configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PresentationConfigOptionList"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/presentation/model": {
+      "post": {
+        "operationId": "setPresentationModel",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SetPresentationModelRequest"}}}},
+        "responses": {"200":{"description":"Presentation model updated","content":{"application/json":{"schema":{"$ref":"#/components/schemas/EmptyResult"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/terminals/output": {
+      "post": {
+        "operationId": "getTerminalOutput",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TerminalRequest"}}}},
+        "responses": {"200":{"description":"Terminal output snapshot","content":{"application/json":{"schema":{"$ref":"#/components/schemas/TerminalOutput"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"404":{"$ref":"#/components/responses/NotFound"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/terminals/wait": {
+      "post": {
+        "operationId": "waitTerminal",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TerminalRequest"}}}},
+        "responses": {"200":{"description":"Terminal exit status","content":{"application/json":{"schema":{"$ref":"#/components/schemas/TerminalExitStatus"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"404":{"$ref":"#/components/responses/NotFound"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/terminals/kill": {
+      "post": {
+        "operationId": "killTerminal",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TerminalRequest"}}}},
+        "responses": {"200":{"description":"Terminal killed","content":{"application/json":{"schema":{"$ref":"#/components/schemas/EmptyResult"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"404":{"$ref":"#/components/responses/NotFound"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
+    },
+    "/sessions/{session_id}/terminals/release": {
+      "post": {
+        "operationId": "releaseTerminal",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TerminalRequest"}}}},
+        "responses": {"200":{"description":"Terminal released","content":{"application/json":{"schema":{"$ref":"#/components/schemas/EmptyResult"}}}},"400":{"$ref":"#/components/responses/BadRequest"},"401":{"$ref":"#/components/responses/Unauthorized"},"403":{"$ref":"#/components/responses/Forbidden"},"404":{"$ref":"#/components/responses/NotFound"},"409":{"$ref":"#/components/responses/Conflict"},"500":{"$ref":"#/components/responses/InternalServerError"},"503":{"$ref":"#/components/responses/ServiceUnavailable"}}
+      }
     }
   },
   "components": {
@@ -674,6 +743,7 @@
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
       },
       "Forbidden": {"description": "Authenticated principal is not authorized", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+      "NotFound": {"description": "Addressed resource was not found", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
       "Conflict": {"description": "Revision, idempotency, or state conflict", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
       "InternalServerError": {"description": "Internal server error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
       "ServiceUnavailable": {"description": "Host is shutting down or temporarily unavailable", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
@@ -681,6 +751,23 @@
     "schemas": {
       "EmptyResult": {"type":"object","additionalProperties":false},
       "StringList": {"type":"array","items":{"type":"string"}},
+      "PresentationCapabilities": {"type":"object","required":["audio","embedded_context","image"],"properties":{"audio":{"type":"boolean"},"embedded_context":{"type":"boolean"},"image":{"type":"boolean"}},"additionalProperties":false},
+      "PresentationMode": {"type":"object","required":["id","name"],"properties":{"id":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":false},
+      "PresentationModeState": {"type":"object","required":["available_modes","current_mode_id"],"properties":{"available_modes":{"type":"array","items":{"$ref":"#/components/schemas/PresentationMode"}},"current_mode_id":{"type":"string"}},"additionalProperties":false},
+      "PresentationSelectOption": {"type":"object","required":["value","name"],"properties":{"value":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":false},
+      "PresentationConfigOption": {"type":"object","required":["type","id","name","current_value"],"properties":{"type":{"type":"string"},"id":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"},"category":{"type":"string"},"current_value":{"$ref":"#/components/schemas/JSONValue"},"options":{"type":"array","items":{"$ref":"#/components/schemas/PresentationSelectOption"}}},"additionalProperties":false},
+      "PresentationConfigOptionList": {"type":"array","items":{"$ref":"#/components/schemas/PresentationConfigOption"}},
+      "PresentationModel": {"type":"object","required":["id","name"],"properties":{"id":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":false},
+      "PresentationModelState": {"type":"object","required":["current_model_id","available_models"],"properties":{"current_model_id":{"type":"string"},"available_models":{"type":"array","items":{"$ref":"#/components/schemas/PresentationModel"}}},"additionalProperties":false},
+      "PresentationCommandInput": {"type":"object","properties":{"hint":{"type":"string"}},"additionalProperties":false},
+      "PresentationCommand": {"type":"object","required":["name"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"input":{"$ref":"#/components/schemas/PresentationCommandInput"}},"additionalProperties":false},
+      "PresentationSnapshot": {"type":"object","properties":{"modes":{"$ref":"#/components/schemas/PresentationModeState"},"config_options":{"$ref":"#/components/schemas/PresentationConfigOptionList"},"models":{"$ref":"#/components/schemas/PresentationModelState"},"commands":{"type":"array","items":{"$ref":"#/components/schemas/PresentationCommand"}}},"additionalProperties":false},
+      "SetPresentationModeRequest": {"type":"object","required":["session_id","mode_id"],"properties":{"session_id":{"type":"string"},"mode_id":{"type":"string"}},"additionalProperties":false},
+      "SetPresentationConfigRequest": {"type":"object","required":["session_id","config_id","value"],"properties":{"session_id":{"type":"string"},"config_id":{"type":"string"},"type":{"type":"string"},"value":{"$ref":"#/components/schemas/JSONValue"}},"additionalProperties":false},
+      "SetPresentationModelRequest": {"type":"object","required":["session_id","model_id"],"properties":{"session_id":{"type":"string"},"model_id":{"type":"string"}},"additionalProperties":false},
+      "TerminalRequest": {"type":"object","required":["session_id","terminal_id"],"properties":{"session_id":{"type":"string"},"terminal_id":{"type":"string"}},"additionalProperties":false},
+      "TerminalExitStatus": {"type":"object","properties":{"exit_code":{"type":"integer"},"signal":{"type":"string"}},"additionalProperties":false},
+      "TerminalOutput": {"type":"object","required":["output","truncated"],"properties":{"output":{"type":"string"},"truncated":{"type":"boolean"},"exit_status":{"$ref":"#/components/schemas/TerminalExitStatus"}},"additionalProperties":false},
       "StartParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"role":{"$ref":"#/components/schemas/ParticipantRole"},"label":{"type":"string"},"source":{"type":"string"},"input":{"type":"string"},"display_input":{"type":"string"},"display_address":{"type":"string"},"display_title":{"type":"string"},"content_parts":{"type":"array","items":{"$ref":"#/components/schemas/PromptContentPart"}},"transient":{"type":"boolean"},"detach_source":{"type":"string"}},"additionalProperties":false}]},
       "PromptParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["participant_id"],"properties":{"participant_id":{"type":"string"},"input":{"type":"string"},"display_input":{"type":"string"},"display_address":{"type":"string"},"display_title":{"type":"string"},"content_parts":{"type":"array","items":{"$ref":"#/components/schemas/PromptContentPart"}},"source":{"type":"string"}},"additionalProperties":false}]},
       "CancelParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["participant_id","target"],"properties":{"participant_id":{"type":"string"},"target":{"$ref":"#/components/schemas/TurnTarget"},"reason":{"type":"string"}},"additionalProperties":false}]},

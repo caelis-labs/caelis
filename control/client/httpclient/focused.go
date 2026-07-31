@@ -12,6 +12,50 @@ import (
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
+func (c *Client) PresentationCapabilities(ctx context.Context) (controlclient.PresentationCapabilities, error) {
+	return doFocusedJSON[controlclient.PresentationCapabilities](ctx, c, http.MethodGet, "/presentation/capabilities", nil)
+}
+
+func (c *Client) PresentationSnapshot(ctx context.Context, req controlclient.PresentationRequest) (controlclient.PresentationSnapshot, error) {
+	path, err := focusedSessionPath(req.SessionID, "/presentation")
+	if err != nil {
+		return controlclient.PresentationSnapshot{}, err
+	}
+	return doFocusedJSON[controlclient.PresentationSnapshot](ctx, c, http.MethodGet, path, nil)
+}
+
+func (c *Client) SetPresentationMode(ctx context.Context, req controlclient.SetPresentationModeRequest) error {
+	_, err := doFocusedSessionJSON[struct{}](ctx, c, req.SessionID, "/presentation/mode", req)
+	return err
+}
+
+func (c *Client) SetPresentationConfig(ctx context.Context, req controlclient.SetPresentationConfigRequest) ([]controlclient.PresentationConfigOption, error) {
+	return doFocusedSessionJSON[[]controlclient.PresentationConfigOption](ctx, c, req.SessionID, "/presentation/config", req)
+}
+
+func (c *Client) SetPresentationModel(ctx context.Context, req controlclient.SetPresentationModelRequest) error {
+	_, err := doFocusedSessionJSON[struct{}](ctx, c, req.SessionID, "/presentation/model", req)
+	return err
+}
+
+func (c *Client) TerminalOutput(ctx context.Context, req controlclient.TerminalRequest) (controlclient.TerminalOutput, error) {
+	return doFocusedSessionJSON[controlclient.TerminalOutput](ctx, c, req.SessionID, "/terminals/output", req)
+}
+
+func (c *Client) WaitTerminal(ctx context.Context, req controlclient.TerminalRequest) (controlclient.TerminalExitStatus, error) {
+	return doFocusedSessionJSON[controlclient.TerminalExitStatus](ctx, c, req.SessionID, "/terminals/wait", req)
+}
+
+func (c *Client) KillTerminal(ctx context.Context, req controlclient.TerminalRequest) error {
+	_, err := doFocusedSessionJSON[struct{}](ctx, c, req.SessionID, "/terminals/kill", req)
+	return err
+}
+
+func (c *Client) ReleaseTerminal(ctx context.Context, req controlclient.TerminalRequest) error {
+	_, err := doFocusedSessionJSON[struct{}](ctx, c, req.SessionID, "/terminals/release", req)
+	return err
+}
+
 func (c *Client) Handles(ctx context.Context, sessionID string) ([]string, error) {
 	path, err := focusedSessionPath(sessionID, "/participants/handles")
 	if err != nil {
@@ -208,3 +252,5 @@ var _ controlclient.ConfigurationClient = (*Client)(nil)
 var _ controlclient.AgentClient = (*Client)(nil)
 var _ controlclient.CompletionClient = (*Client)(nil)
 var _ controlclient.PluginClient = (*Client)(nil)
+var _ controlclient.PresentationClient = (*Client)(nil)
+var _ controlclient.TerminalClient = (*Client)(nil)

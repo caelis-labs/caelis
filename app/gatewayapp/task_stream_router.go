@@ -45,6 +45,42 @@ func (s hostTaskStreamService) Subscribe(
 	}
 }
 
+func (s hostTaskStreamService) Wait(ctx context.Context, ref stream.Ref) (stream.Snapshot, error) {
+	service, err := s.service(ref.SessionID)
+	if err != nil {
+		return stream.Snapshot{}, err
+	}
+	controller, ok := service.(stream.Controller)
+	if !ok {
+		return stream.Snapshot{}, taskStreamControlUnavailable()
+	}
+	return controller.Wait(ctx, ref)
+}
+
+func (s hostTaskStreamService) Kill(ctx context.Context, ref stream.Ref) error {
+	service, err := s.service(ref.SessionID)
+	if err != nil {
+		return err
+	}
+	controller, ok := service.(stream.Controller)
+	if !ok {
+		return taskStreamControlUnavailable()
+	}
+	return controller.Kill(ctx, ref)
+}
+
+func (s hostTaskStreamService) Release(ctx context.Context, ref stream.Ref) error {
+	service, err := s.service(ref.SessionID)
+	if err != nil {
+		return err
+	}
+	controller, ok := service.(stream.Controller)
+	if !ok {
+		return taskStreamControlUnavailable()
+	}
+	return controller.Release(ctx, ref)
+}
+
 func (s hostTaskStreamService) service(sessionID string) (stream.Service, error) {
 	host := s.host
 	if host == nil {
@@ -71,4 +107,9 @@ func taskStreamRuntimeUnavailable() error {
 	return errorcode.New(errorcode.Unavailable, "gatewayapp: Task Runtime stream is unavailable")
 }
 
+func taskStreamControlUnavailable() error {
+	return errorcode.New(errorcode.Unavailable, "gatewayapp: terminal stream control is unavailable")
+}
+
 var _ stream.Service = hostTaskStreamService{}
+var _ stream.Controller = hostTaskStreamService{}

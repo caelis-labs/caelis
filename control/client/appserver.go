@@ -16,6 +16,8 @@ type AppServerServices struct {
 	Agents        AgentService
 	Completion    CompletionService
 	Plugins       PluginService
+	Presentation  PresentationService
+	Terminal      TerminalService
 }
 
 // Validate rejects partial AppServer assemblies. A transport adapter may use a
@@ -33,6 +35,8 @@ func (s AppServerServices) Validate() error {
 		{name: "Agent", value: s.Agents},
 		{name: "completion", value: s.Completion},
 		{name: "plugin", value: s.Plugins},
+		{name: "presentation", value: s.Presentation},
+		{name: "terminal", value: s.Terminal},
 	}
 	for _, item := range required {
 		if item.value == nil {
@@ -53,6 +57,8 @@ type AppServerClients struct {
 	Agents        AgentClient
 	Completion    CompletionClient
 	Plugins       PluginClient
+	Presentation  PresentationClient
+	Terminal      TerminalClient
 }
 
 // BindAppServerClients binds one trusted principal to a complete AppServer.
@@ -88,9 +94,18 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 	if err != nil {
 		return AppServerClients{}, err
 	}
+	presentation, err := BindPresentationClient(services.Presentation, principal)
+	if err != nil {
+		return AppServerClients{}, err
+	}
+	terminal, err := BindTerminalClient(services.Terminal, principal)
+	if err != nil {
+		return AppServerClients{}, err
+	}
 	clients := AppServerClients{
 		Sessions: sessions, Participants: participants, Status: status,
 		Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
+		Presentation: presentation, Terminal: terminal,
 	}
 	if err := clients.Validate(); err != nil {
 		return AppServerClients{}, err
@@ -101,7 +116,7 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 // Validate rejects a partial presentation client facade.
 func (c AppServerClients) Validate() error {
 	if c.Sessions == nil || c.Participants == nil || c.Status == nil || c.Configuration == nil ||
-		c.Agents == nil || c.Completion == nil || c.Plugins == nil {
+		c.Agents == nil || c.Completion == nil || c.Plugins == nil || c.Presentation == nil || c.Terminal == nil {
 		return errors.New("controlclient: complete AppServer clients are required")
 	}
 	return nil

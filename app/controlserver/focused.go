@@ -11,6 +11,15 @@ import (
 // AppServer clients. Paths are explicit semantic operations; there is no raw
 // command or slash dispatch endpoint.
 func (s *Server) focusedRoutes() {
+	s.mux.HandleFunc("GET "+apiPrefix+"/presentation/capabilities", s.presentationCapabilities)
+	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/presentation", s.presentationSnapshot)
+	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/presentation/mode", s.setPresentationMode)
+	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/presentation/config", s.setPresentationConfig)
+	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/presentation/model", s.setPresentationModel)
+	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/terminals/output", s.terminalOutput)
+	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/terminals/wait", s.waitTerminal)
+	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/terminals/kill", s.killTerminal)
+	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/terminals/release", s.releaseTerminal)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/participants/handles", s.participantHandles)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/participants/start", s.startParticipant)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/participants/prompt", s.promptParticipant)
@@ -44,6 +53,102 @@ func (s *Server) focusedRoutes() {
 	} {
 		s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/plugins/"+path, s.pluginHandler(action))
 	}
+}
+
+func (s *Server) presentationCapabilities(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.config.Services.Presentation.PresentationCapabilities(r.Context(), principal)
+	writeJSONResult(w, result, err)
+}
+
+func (s *Server) presentationSnapshot(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.config.Services.Presentation.PresentationSnapshot(r.Context(), principal, controlclient.PresentationRequest{SessionID: r.PathValue("session_id")})
+	writeJSONResult(w, result, err)
+}
+
+func (s *Server) setPresentationMode(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	var req controlclient.SetPresentationModeRequest
+	if decodeSessionBody(w, r, r.PathValue("session_id"), &req.SessionID, &req) {
+		writeEmptyResult(w, s.config.Services.Presentation.SetPresentationMode(r.Context(), principal, req))
+	}
+}
+
+func (s *Server) setPresentationConfig(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	var req controlclient.SetPresentationConfigRequest
+	if decodeSessionBody(w, r, r.PathValue("session_id"), &req.SessionID, &req) {
+		result, err := s.config.Services.Presentation.SetPresentationConfig(r.Context(), principal, req)
+		writeJSONResult(w, result, err)
+	}
+}
+
+func (s *Server) setPresentationModel(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	var req controlclient.SetPresentationModelRequest
+	if decodeSessionBody(w, r, r.PathValue("session_id"), &req.SessionID, &req) {
+		writeEmptyResult(w, s.config.Services.Presentation.SetPresentationModel(r.Context(), principal, req))
+	}
+}
+
+func (s *Server) terminalOutput(w http.ResponseWriter, r *http.Request) {
+	principal, req, ok := terminalRequest(w, r, s)
+	if !ok {
+		return
+	}
+	result, err := s.config.Services.Terminal.TerminalOutput(r.Context(), principal, req)
+	writeJSONResult(w, result, err)
+}
+
+func (s *Server) waitTerminal(w http.ResponseWriter, r *http.Request) {
+	principal, req, ok := terminalRequest(w, r, s)
+	if !ok {
+		return
+	}
+	result, err := s.config.Services.Terminal.WaitTerminal(r.Context(), principal, req)
+	writeJSONResult(w, result, err)
+}
+
+func (s *Server) killTerminal(w http.ResponseWriter, r *http.Request) {
+	principal, req, ok := terminalRequest(w, r, s)
+	if ok {
+		writeEmptyResult(w, s.config.Services.Terminal.KillTerminal(r.Context(), principal, req))
+	}
+}
+
+func (s *Server) releaseTerminal(w http.ResponseWriter, r *http.Request) {
+	principal, req, ok := terminalRequest(w, r, s)
+	if ok {
+		writeEmptyResult(w, s.config.Services.Terminal.ReleaseTerminal(r.Context(), principal, req))
+	}
+}
+
+func terminalRequest(w http.ResponseWriter, r *http.Request, s *Server) (controlclient.Principal, controlclient.TerminalRequest, bool) {
+	principal, ok := s.requirePrincipal(w, r)
+	if !ok {
+		return controlclient.Principal{}, controlclient.TerminalRequest{}, false
+	}
+	var req controlclient.TerminalRequest
+	if !decodeSessionBody(w, r, r.PathValue("session_id"), &req.SessionID, &req) {
+		return controlclient.Principal{}, controlclient.TerminalRequest{}, false
+	}
+	return principal, req, true
 }
 
 func (s *Server) participantHandles(w http.ResponseWriter, r *http.Request) {

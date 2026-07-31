@@ -12,6 +12,8 @@ type testFocusedServices struct {
 	controlclient.AgentService
 	controlclient.CompletionService
 	controlclient.PluginService
+	controlclient.PresentationService
+	controlclient.TerminalService
 }
 
 func testAppServerServices(sessions controlclient.Service, status controlclient.StatusService) controlclient.AppServerServices {
@@ -19,5 +21,6 @@ func testAppServerServices(sessions controlclient.Service, status controlclient.
 	return controlclient.AppServerServices{
 		Sessions: sessions, Participants: focused, Status: status, Configuration: focused,
 		Agents: focused, Completion: focused, Plugins: focused,
+		Presentation: focused, Terminal: focused,
 	}
 }

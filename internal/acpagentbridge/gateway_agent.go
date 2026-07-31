@@ -19,6 +19,8 @@ type GatewayAgentConfig struct {
 	Runtime              agent.Runtime
 	Sessions             session.Service
 	SessionClient        controlclient.SessionClient
+	PresentationClient   controlclient.PresentationClient
+	TerminalClient       controlclient.TerminalClient
 	Resolver             kernel.RuntimeResolver
 	ApprovalReviewer     kernel.ApprovalReviewer
 	Assembly             assemblyapi.ResolvedAssembly
@@ -54,6 +56,21 @@ type Surface interface {
 }
 
 func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
+	if cfg.SessionClient != nil && cfg.PresentationClient != nil && cfg.TerminalClient != nil {
+		return New(Config{
+			SessionClient:        cfg.SessionClient,
+			PresentationClient:   cfg.PresentationClient,
+			TerminalClient:       cfg.TerminalClient,
+			PromptRouterFactory:  cfg.PromptRouterFactory,
+			SlashResultFormatter: cfg.SlashResultFormatter,
+			TaskStreamClient:     cfg.TaskStreamClient,
+			AppName:              cfg.AppName,
+			UserID:               cfg.UserID,
+			WorkspaceKey:         cfg.WorkspaceKey,
+			WorkspaceCWD:         cfg.WorkspaceCWD,
+			AgentInfo:            &acp.Implementation{Name: cfg.AppName, Version: version.String()},
+		})
+	}
 	if cfg.SessionClient == nil && cfg.Resolver == nil {
 		return nil, fmt.Errorf("internal/acpagentbridge: gateway resolver is required")
 	}

@@ -16,12 +16,16 @@ func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 	agents := &focusedAgentService{}
 	completion := &focusedCompletionService{}
 	plugins := &focusedPluginService{}
+	presentation := &focusedPresentationService{}
+	terminals := &focusedTerminalService{}
 	services := testAppServerServices(&fakeService{}, staticStatusService{})
 	services.Participants = participants
 	services.Configuration = configuration
 	services.Agents = agents
 	services.Completion = completion
 	services.Plugins = plugins
+	services.Presentation = presentation
+	services.Terminal = terminals
 	server, err := New(HandlerConfig{
 		Services: services, TaskStreams: &fakeTaskService{}, Authenticator: testAuthenticator(),
 		AllowedHosts: []string{"127.0.0.1"},
@@ -57,9 +61,18 @@ func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 	if err != nil || plugin.ID != "demo" {
 		t.Fatalf("InspectPlugin() = %#v, %v", plugin, err)
 	}
+	snapshot, err := client.PresentationSnapshot(context.Background(), controlclient.PresentationRequest{SessionID: "session-1"})
+	if err != nil || snapshot.Modes == nil || snapshot.Modes.CurrentModeID != "manual" {
+		t.Fatalf("PresentationSnapshot() = %#v, %v", snapshot, err)
+	}
+	terminal, err := client.TerminalOutput(context.Background(), controlclient.TerminalRequest{SessionID: "session-1", TerminalID: "call-1"})
+	if err != nil || terminal.Output != "done\n" {
+		t.Fatalf("TerminalOutput() = %#v, %v", terminal, err)
+	}
 	if participants.principal.ID != "trusted-owner" || participants.sessionID != "session-1" ||
 		configuration.request.SessionID != "session-1" || agents.request.SessionID != "session-1" ||
-		completion.request.SessionID != "session-1" || plugins.request.SessionID != "session-1" {
+		completion.request.SessionID != "session-1" || plugins.request.SessionID != "session-1" ||
+		presentation.request.SessionID != "session-1" || terminals.request.SessionID != "session-1" {
 		t.Fatalf("focused requests were not principal-bound and Session-addressed: %#v %#v %#v %#v %#v", participants, configuration.request, agents.request, completion.request, plugins.request)
 	}
 }
@@ -108,6 +121,26 @@ func (s *focusedCompletionService) CompleteFile(_ context.Context, _ controlclie
 type focusedPluginService struct {
 	controlclient.PluginService
 	request controlclient.PluginRequest
+}
+
+type focusedPresentationService struct {
+	controlclient.PresentationService
+	request controlclient.PresentationRequest
+}
+
+func (s *focusedPresentationService) PresentationSnapshot(_ context.Context, _ controlclient.Principal, request controlclient.PresentationRequest) (controlclient.PresentationSnapshot, error) {
+	s.request = request
+	return controlclient.PresentationSnapshot{Modes: &controlclient.PresentationModeState{CurrentModeID: "manual"}}, nil
+}
+
+type focusedTerminalService struct {
+	controlclient.TerminalService
+	request controlclient.TerminalRequest
+}
+
+func (s *focusedTerminalService) TerminalOutput(_ context.Context, _ controlclient.Principal, request controlclient.TerminalRequest) (controlclient.TerminalOutput, error) {
+	s.request = request
+	return controlclient.TerminalOutput{Output: "done\n"}, nil
 }
 
 func (s *focusedPluginService) InspectPlugin(_ context.Context, _ controlclient.Principal, request controlclient.PluginRequest) (controlclient.PluginSnapshot, error) {

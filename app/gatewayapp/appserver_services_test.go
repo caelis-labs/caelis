@@ -8,6 +8,8 @@ type gatewayTestFocusedServices struct {
 	controlclient.AgentService
 	controlclient.CompletionService
 	controlclient.PluginService
+	controlclient.PresentationService
+	controlclient.TerminalService
 }
 
 func gatewayTestAppServerServices(sessions controlclient.Service, status controlclient.StatusService) controlclient.AppServerServices {
@@ -15,5 +17,6 @@ func gatewayTestAppServerServices(sessions controlclient.Service, status control
 	return controlclient.AppServerServices{
 		Sessions: sessions, Participants: focused, Status: status, Configuration: focused,
 		Agents: focused, Completion: focused, Plugins: focused,
+		Presentation: focused, Terminal: focused,
 	}
 }

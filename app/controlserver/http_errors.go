@@ -24,6 +24,8 @@ func statusForError(err error) int {
 		return http.StatusUnauthorized
 	case errorcode.PermissionDenied:
 		return http.StatusForbidden
+	case errorcode.NotFound:
+		return http.StatusNotFound
 	case errorcode.AlreadyExists, errorcode.Conflict, errorcode.FailedPrecondition:
 		return http.StatusConflict
 	case errorcode.Unavailable:
@@ -44,6 +46,8 @@ func writeMappedError(w http.ResponseWriter, err error) {
 		detail = "authentication required"
 	case http.StatusForbidden:
 		detail = "forbidden"
+	case http.StatusNotFound:
+		detail = "not found"
 	case http.StatusConflict:
 		detail = "conflict"
 	case http.StatusServiceUnavailable:

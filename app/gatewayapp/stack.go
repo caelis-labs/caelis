@@ -223,6 +223,16 @@ func (s *Stack) TaskStreams() acptaskstream.Service {
 	return s.taskStreams
 }
 
+// ControlTerminalStreams returns the Session-routed Runtime terminal stream
+// used by AppServer terminal services. Presentation surfaces must consume the
+// typed TerminalClient instead of this Runtime-facing controller.
+func (s *Stack) ControlTerminalStreams() stream.Controller {
+	if s == nil {
+		return nil
+	}
+	return hostTaskStreamService{host: s}
+}
+
 // ControlClientRuntimeState reads live state only from an already activated
 // Session Runtime. Observation must not assemble or retain execution state.
 func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (controlclient.RuntimeState, error) {

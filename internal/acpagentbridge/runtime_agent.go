@@ -48,11 +48,16 @@ type Config struct {
 	// ACP assembly. When present, Session lifecycle mutations and ordinary
 	// prompt ingress must stay on that client; Runtime remains available only
 	// for ACP terminal handles and the explicitly supported legacy adapter mode.
-	SessionClient  controlclient.SessionClient
-	BuildAgentSpec BuildAgentSpecFunc
-	Projector      projector.Projector
-	Loader         acp.SessionLoader
-	Modes          acp.ModeProvider
+	SessionClient controlclient.SessionClient
+	// PresentationClient and TerminalClient are the remaining product ACP
+	// facets. When SessionClient is set, product assembly supplies all three and
+	// does not expose Runtime, Stack, or ACP surface providers.
+	PresentationClient controlclient.PresentationClient
+	TerminalClient     controlclient.TerminalClient
+	BuildAgentSpec     BuildAgentSpecFunc
+	Projector          projector.Projector
+	Loader             acp.SessionLoader
+	Modes              acp.ModeProvider
 	// ApprovalModes is the dedicated approval-routing mode source. Do not point
 	// this at app-owned assembly modes; those are client-visible session modes,
 	// while approval routing is restricted to manual/auto-review.
@@ -88,6 +93,8 @@ type RuntimeAgent struct {
 	runtime               agent.Runtime
 	sessions              session.Service
 	sessionClient         controlclient.SessionClient
+	presentationClient    controlclient.PresentationClient
+	terminalClient        controlclient.TerminalClient
 	buildAgentSpec        BuildAgentSpecFunc
 	projector             projector.Projector
 	loader                acp.SessionLoader
@@ -116,7 +123,7 @@ type RuntimeAgent struct {
 
 // New constructs one runtime-backed ACP agent.
 func New(cfg Config) (*RuntimeAgent, error) {
-	if cfg.Sessions == nil {
+	if cfg.SessionClient == nil && cfg.Sessions == nil {
 		return nil, errors.New("internal/acpagentbridge: session service is required")
 	}
 	if cfg.SessionClient == nil {
@@ -128,6 +135,8 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		}
 	} else if cfg.PromptRouterFactory == nil {
 		return nil, errors.New("internal/acpagentbridge: typed Session client mode requires a prompt router")
+	} else if cfg.PresentationClient == nil || cfg.TerminalClient == nil {
+		return nil, errors.New("internal/acpagentbridge: typed Session client mode requires presentation and terminal clients")
 	}
 	if cfg.PromptRouterFactory != nil && cfg.SlashResultFormatter == nil {
 		return nil, errors.New("internal/acpagentbridge: slash result formatter is required with prompt router factory")
@@ -172,6 +181,8 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		runtime:               cfg.Runtime,
 		sessions:              cfg.Sessions,
 		sessionClient:         cfg.SessionClient,
+		presentationClient:    cfg.PresentationClient,
+		terminalClient:        cfg.TerminalClient,
 		buildAgentSpec:        cfg.BuildAgentSpec,
 		projector:             eventProjector,
 		loader:                sessionLoader,
@@ -218,7 +229,13 @@ func (a *RuntimeAgent) Initialize(ctx context.Context, _ acp.InitializeRequest) 
 		EmbeddedContext: false,
 		Image:           false,
 	}
-	if a.promptCaps != nil {
+	if a.presentationClient != nil {
+		caps, err := a.presentationClient.PresentationCapabilities(ctx)
+		if err != nil {
+			return acp.InitializeResponse{}, err
+		}
+		promptCaps = acp.PromptCapabilities{Audio: caps.Audio, EmbeddedContext: caps.EmbeddedContext, Image: caps.Image}
+	} else if a.promptCaps != nil {
 		caps, err := a.promptCaps.PromptCapabilities(ctx)
 		if err != nil {
 			return acp.InitializeResponse{}, err
@@ -303,6 +320,14 @@ func (a *RuntimeAgent) NewSession(ctx context.Context, req acp.NewSessionRequest
 
 func (a *RuntimeAgent) newSessionResponse(ctx context.Context, activeSession session.Session) (acp.NewSessionResponse, error) {
 	resp := acp.NewSessionResponse{SessionID: activeSession.SessionID}
+	if a.presentationClient != nil {
+		snapshot, err := a.presentationClient.PresentationSnapshot(ctx, controlclient.PresentationRequest{SessionID: activeSession.SessionID})
+		if err != nil {
+			return acp.NewSessionResponse{}, err
+		}
+		resp.Modes, resp.ConfigOptions, resp.Models, _ = acpPresentationSnapshot(snapshot)
+		return resp, nil
+	}
 	if a.modes != nil {
 		modes, err := a.modes.SessionModes(ctx, activeSession)
 		if err != nil {
@@ -405,7 +430,13 @@ func (a *RuntimeAgent) LoadSession(ctx context.Context, req acp.LoadSessionReque
 	if err != nil {
 		return acp.LoadSessionResponse{}, err
 	}
-	if a.models != nil {
+	if a.presentationClient != nil {
+		snapshot, err := a.presentationClient.PresentationSnapshot(ctx, controlclient.PresentationRequest{SessionID: req.SessionID})
+		if err != nil {
+			return acp.LoadSessionResponse{}, err
+		}
+		resp.Modes, resp.ConfigOptions, resp.Models, _ = acpPresentationSnapshot(snapshot)
+	} else if a.models != nil {
 		session, err := a.session(ctx, req.SessionID)
 		if err != nil {
 			return acp.LoadSessionResponse{}, err
@@ -430,6 +461,14 @@ func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionR
 		return acp.ResumeSessionResponse{}, err
 	}
 	resp := acp.ResumeSessionResponse{}
+	if a.presentationClient != nil {
+		snapshot, err := a.presentationClient.PresentationSnapshot(ctx, controlclient.PresentationRequest{SessionID: req.SessionID})
+		if err != nil {
+			return acp.ResumeSessionResponse{}, err
+		}
+		resp.Modes, resp.ConfigOptions, resp.Models, _ = acpPresentationSnapshot(snapshot)
+		return resp, nil
+	}
 	if a.modes != nil {
 		modes, err := a.modes.SessionModes(ctx, session)
 		if err != nil {
@@ -496,6 +535,10 @@ func (a *RuntimeAgent) clearSessionDelivery(sessionID string) {
 }
 
 func (a *RuntimeAgent) SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+	if a.presentationClient != nil {
+		err := a.presentationClient.SetPresentationMode(ctx, controlclient.SetPresentationModeRequest{SessionID: req.SessionID, ModeID: req.ModeID})
+		return acp.SetSessionModeResponse{}, err
+	}
 	if a.modes == nil {
 		return acp.SetSessionModeResponse{}, acp.ErrCapabilityUnsupported
 	}
@@ -503,6 +546,12 @@ func (a *RuntimeAgent) SetSessionMode(ctx context.Context, req acp.SetSessionMod
 }
 
 func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	if a.presentationClient != nil {
+		options, err := a.presentationClient.SetPresentationConfig(ctx, controlclient.SetPresentationConfigRequest{
+			SessionID: req.SessionID, ConfigID: req.ConfigID, Type: req.Type, Value: req.Value,
+		})
+		return acp.SetSessionConfigOptionResponse{ConfigOptions: acpPresentationConfigOptions(options)}, err
+	}
 	if a.config == nil {
 		return acp.SetSessionConfigOptionResponse{}, acp.ErrCapabilityUnsupported
 	}
@@ -510,6 +559,10 @@ func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSe
 }
 
 func (a *RuntimeAgent) SetSessionModel(ctx context.Context, req acp.SetSessionModelRequest) (acp.SetSessionModelResponse, error) {
+	if a.presentationClient != nil {
+		err := a.presentationClient.SetPresentationModel(ctx, controlclient.SetPresentationModelRequest{SessionID: req.SessionID, ModelID: req.ModelID})
+		return acp.SetSessionModelResponse{}, err
+	}
 	if a.models == nil {
 		return acp.SetSessionModelResponse{}, acp.ErrCapabilityUnsupported
 	}
@@ -517,6 +570,14 @@ func (a *RuntimeAgent) SetSessionModel(ctx context.Context, req acp.SetSessionMo
 }
 
 func (a *RuntimeAgent) AvailableCommands(ctx context.Context, sessionID string) ([]acp.AvailableCommand, error) {
+	if a.presentationClient != nil {
+		snapshot, err := a.presentationClient.PresentationSnapshot(ctx, controlclient.PresentationRequest{SessionID: sessionID})
+		if err != nil {
+			return nil, err
+		}
+		_, _, _, commands := acpPresentationSnapshot(snapshot)
+		return commands, nil
+	}
 	if a.commands == nil {
 		return nil, nil
 	}
@@ -716,6 +777,19 @@ func (a *RuntimeAgent) Cancel(_ context.Context, req acp.CancelNotification) err
 }
 
 func (a *RuntimeAgent) session(ctx context.Context, sessionID string) (session.Session, error) {
+	if a.sessionClient != nil {
+		state, err := a.sessionClient.InspectSession(ctx, controlclient.StateRequest{SessionID: strings.TrimSpace(sessionID)})
+		if err != nil {
+			return session.Session{}, err
+		}
+		return session.Session{
+			SessionRef: session.NormalizeSessionRef(session.SessionRef{
+				AppName: a.appName, UserID: a.userID, WorkspaceKey: state.WorkspaceKey, SessionID: state.SessionID,
+			}),
+			Revision: state.Revision, CWD: state.CWD, Title: state.Title,
+			Metadata: state.Metadata, Controller: state.Controller, Participants: state.Participants,
+		}, nil
+	}
 	return a.sessions.Session(ctx, a.sessionRef(sessionID))
 }
 
@@ -745,6 +819,17 @@ func (a *RuntimeAgent) activeSessionRef(activeSession session.Session, sessionID
 }
 
 func (a *RuntimeAgent) Output(ctx context.Context, req acp.TerminalOutputRequest) (acp.TerminalOutputResponse, error) {
+	if a.terminalClient != nil {
+		result, err := a.terminalClient.TerminalOutput(ctx, controlclient.TerminalRequest{SessionID: req.SessionID, TerminalID: req.TerminalID})
+		if err != nil {
+			return acp.TerminalOutputResponse{}, err
+		}
+		response := acp.TerminalOutputResponse{Output: result.Output, Truncated: result.Truncated}
+		if result.ExitStatus != nil {
+			response.ExitStatus = &acp.TerminalExitStatus{ExitCode: result.ExitStatus.ExitCode, Signal: result.ExitStatus.Signal}
+		}
+		return response, nil
+	}
 	adapter, ok := a.terminalAdapter()
 	if !ok {
 		return acp.TerminalOutputResponse{}, acp.ErrCapabilityUnsupported
@@ -753,6 +838,10 @@ func (a *RuntimeAgent) Output(ctx context.Context, req acp.TerminalOutputRequest
 }
 
 func (a *RuntimeAgent) WaitForExit(ctx context.Context, req acp.TerminalWaitForExitRequest) (acp.TerminalWaitForExitResponse, error) {
+	if a.terminalClient != nil {
+		result, err := a.terminalClient.WaitTerminal(ctx, controlclient.TerminalRequest{SessionID: req.SessionID, TerminalID: req.TerminalID})
+		return acp.TerminalWaitForExitResponse{ExitCode: result.ExitCode, Signal: result.Signal}, err
+	}
 	adapter, ok := a.terminalAdapter()
 	if !ok {
 		return acp.TerminalWaitForExitResponse{}, acp.ErrCapabilityUnsupported
@@ -761,6 +850,9 @@ func (a *RuntimeAgent) WaitForExit(ctx context.Context, req acp.TerminalWaitForE
 }
 
 func (a *RuntimeAgent) Kill(ctx context.Context, req acp.TerminalKillRequest) error {
+	if a.terminalClient != nil {
+		return a.terminalClient.KillTerminal(ctx, controlclient.TerminalRequest{SessionID: req.SessionID, TerminalID: req.TerminalID})
+	}
 	adapter, ok := a.terminalAdapter()
 	if !ok {
 		return acp.ErrCapabilityUnsupported
@@ -769,6 +861,9 @@ func (a *RuntimeAgent) Kill(ctx context.Context, req acp.TerminalKillRequest) er
 }
 
 func (a *RuntimeAgent) Release(ctx context.Context, req acp.TerminalReleaseRequest) error {
+	if a.terminalClient != nil {
+		return a.terminalClient.ReleaseTerminal(ctx, controlclient.TerminalRequest{SessionID: req.SessionID, TerminalID: req.TerminalID})
+	}
 	adapter, ok := a.terminalAdapter()
 	if !ok {
 		return acp.ErrCapabilityUnsupported

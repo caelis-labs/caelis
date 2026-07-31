@@ -5,6 +5,7 @@ import (
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controlclient "github.com/caelis-labs/caelis/control/client"
+	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
@@ -41,10 +42,27 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	if err != nil {
 		return nil, err
 	}
+	dependencies, err := host.ACPAgentDependencies()
+	if err != nil {
+		return nil, err
+	}
+	modes, configs := bridgeassembly.ProvidersFromAssembly(bridgeassembly.ProviderConfig{
+		AppName: dependencies.AppName, UserID: dependencies.UserID,
+		Assembly: dependencies.Assembly, Sessions: dependencies.Sessions,
+	})
+	presentation, err := NewPresentationService(host, modes, len(dependencies.Assembly.Modes) > 0, configs)
+	if err != nil {
+		return nil, err
+	}
+	terminal, err := NewTerminalService(host.TaskStreams(), host.ControlTerminalStreams())
+	if err != nil {
+		return nil, err
+	}
 	server := &AppServer{
 		Services: controlclient.AppServerServices{
 			Sessions: host.ControlClient(), Participants: host.ControlParticipants(), Status: status,
 			Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
+			Presentation: presentation, Terminal: terminal,
 		},
 		TaskStreams: host.TaskStreams(),
 	}
