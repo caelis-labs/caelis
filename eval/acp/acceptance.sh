@@ -143,7 +143,7 @@ HOME="$run_dir/acpx-home" "${acpx_base[@]}" prompt -s typed \
   'This process must load the existing ACP Session. Reply exactly ACP_RESUME_OK.' \
   >"$run_dir/logs/prompt-resume.jsonl" 2>"$run_dir/logs/prompt-resume.stderr" || acpx_status=1
 HOME="$run_dir/acpx-home" "${acpx_base[@]}" prompt -s typed \
-  "Use the terminal to write ACP_TASK_FILE_OK to $run_dir/workspace/acp-task.txt, read it back, then reply exactly ACP_TASK_OK." \
+  "Use RunCommand, not Write or Patch, to run: printf '%s' ACP_TASK_FILE_OK > $run_dir/workspace/acp-task.txt && cat $run_dir/workspace/acp-task.txt. If Host permission is required, retry the same command with require_escalated and a concrete justification. Then reply exactly ACP_TASK_OK." \
   >"$run_dir/logs/prompt-task.jsonl" 2>"$run_dir/logs/prompt-task.stderr" || acpx_status=1
 HOME="$run_dir/acpx-home" "${acpx_base[@]}" sessions list --filter-cwd "$run_dir/workspace" \
   >"$run_dir/logs/session-list.jsonl" 2>"$run_dir/logs/session-list.stderr" || acpx_status=1
@@ -154,9 +154,15 @@ structured_status=0
 for output in "$run_dir"/logs/*.jsonl; do
   jq -e -s 'all(.[]; type == "object")' "$output" >/dev/null || structured_status=1
 done
-grep -Fq 'ACP_FIRST_OK' "$run_dir/logs/prompt-first.jsonl" || structured_status=1
-grep -Fq 'ACP_RESUME_OK' "$run_dir/logs/prompt-resume.jsonl" || structured_status=1
-grep -Fq 'ACP_TASK_OK' "$run_dir/logs/prompt-task.jsonl" || structured_status=1
+agent_message_text() {
+  jq -rs '[.[]
+    | select(.method == "session/update")
+    | select(.params.update.sessionUpdate == "agent_message_chunk")
+    | .params.update.content.text] | join("")' "$1"
+}
+[[ "$(agent_message_text "$run_dir/logs/prompt-first.jsonl")" == "ACP_FIRST_OK" ]] || structured_status=1
+[[ "$(agent_message_text "$run_dir/logs/prompt-resume.jsonl")" == "ACP_RESUME_OK" ]] || structured_status=1
+[[ "$(agent_message_text "$run_dir/logs/prompt-task.jsonl")" == "ACP_TASK_OK" ]] || structured_status=1
 grep -Fq 'ACP_TASK_FILE_OK' "$run_dir/workspace/acp-task.txt" || structured_status=1
 jq -e -s '
   any(.[];
