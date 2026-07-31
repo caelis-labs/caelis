@@ -6,25 +6,29 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 // SessionClientAdapter is the reversible TUI migration boundary for main-Turn
-// ingress. It delegates slash/status/participant facets to Adapter while
+// ingress. It delegates unconfigured compatibility facets to Adapter while
 // ordinary prompt, steer, approval, cancel, and observation use the common
-// typed Session client.
+// typed Session client. The participant-aware constructor additionally routes
+// execution-bearing participant facets through a focused typed client.
 //
 // TODO(control-client-parity): remove the embedded Adapter only after Session
-// lifecycle, status/config commands, and Side ACP participant operations all
-// have narrow typed clients. Until then NewSession and ResumeSession retain
+// lifecycle, status/config commands, and TUI Side ACP participant operations
+// all have narrow typed clients. Until then NewSession and ResumeSession retain
 // the default-Stack ownership marker so private facets cannot target a
 // different Runtime than the typed main Turn.
 type SessionClientAdapter struct {
 	*Adapter
 
-	turns *controlclient.SessionTurnClient
+	turns         *controlclient.SessionTurnClient
+	participants  *controlclient.ParticipantTurnClient
+	sessionClient controlclient.SessionClient
 
 	activeMu sync.Mutex
 	active   *sessionClientTurn
@@ -32,8 +36,8 @@ type SessionClientAdapter struct {
 
 // NewSessionClientAdapter wraps one already-bound private Adapter. The
 // Adapter's existing Session binding remains the transitional source for
-// private slash and Side ACP facets; accepted main Turns have only the typed
-// Session client as their ingress and observation path.
+// private facets; accepted main Turns have only the typed Session client as
+// their ingress and observation path.
 func NewSessionClientAdapter(
 	adapter *Adapter,
 	client controlclient.SessionClient,
@@ -45,7 +49,27 @@ func NewSessionClientAdapter(
 	if err != nil {
 		return nil, err
 	}
-	return &SessionClientAdapter{Adapter: adapter, turns: turns}, nil
+	return &SessionClientAdapter{Adapter: adapter, turns: turns, sessionClient: client}, nil
+}
+
+// NewSessionClientAdapterWithParticipants also routes execution-bearing Side
+// ACP commands through the addressed Session Runtime. TUI callers retain the
+// two-argument constructor until their participant parity slice lands.
+func NewSessionClientAdapterWithParticipants(
+	adapter *Adapter,
+	sessions controlclient.SessionClient,
+	participants controlclient.ParticipantClient,
+) (*SessionClientAdapter, error) {
+	wrapped, err := NewSessionClientAdapter(adapter, sessions)
+	if err != nil {
+		return nil, err
+	}
+	participantTurns, err := controlclient.NewParticipantTurnClient(sessions, participants)
+	if err != nil {
+		return nil, err
+	}
+	wrapped.participants = participantTurns
+	return wrapped, nil
 }
 
 func (a *SessionClientAdapter) Submit(
@@ -77,7 +101,7 @@ func (a *SessionClientAdapter) Submit(
 		if active == nil {
 			return nil, noActiveTurnSubmissionError()
 		}
-		if err := active.turn.Steer(ctx, rawInput, displayInput, contentParts); err != nil {
+		if err := active.steer(ctx, rawInput, displayInput, contentParts); err != nil {
 			return nil, err
 		}
 		return nil, nil
@@ -139,13 +163,26 @@ func (a *SessionClientAdapter) clearActiveTurn(turn *sessionClientTurn) {
 }
 
 type sessionClientTurn struct {
-	turn    controlclient.SessionTurn
+	turn    controlclient.TargetTurn
 	onClose func()
 
 	cancelOnce sync.Once
 	cancelErr  error
 	closeOnce  sync.Once
 	closeErr   error
+}
+
+func (t *sessionClientTurn) steer(
+	ctx context.Context,
+	input string,
+	displayInput string,
+	contentParts []model.ContentPart,
+) error {
+	mainTurn, ok := t.turn.(controlclient.SessionTurn)
+	if !ok {
+		return noActiveTurnSubmissionError()
+	}
+	return mainTurn.Steer(ctx, input, displayInput, contentParts)
 }
 
 func (t *sessionClientTurn) HandleID() string {

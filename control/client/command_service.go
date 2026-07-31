@@ -52,6 +52,10 @@ func (s *CommandService) AttachParticipant(ctx context.Context, principal Princi
 	target := strings.TrimSpace(req.ProfileID) + ":" + strings.TrimSpace(req.Effort)
 	return s.execute(ctx, principal, ActionParticipantAttach, req.WriteBase, target, req)
 }
+func (s *CommandService) StartParticipant(ctx context.Context, principal Principal, req StartParticipantRequest) (CommandResult, error) {
+	target := strings.TrimSpace(req.Handle) + ":" + strings.TrimSpace(req.Label)
+	return s.execute(ctx, principal, ActionParticipantStart, req.WriteBase, target, req)
+}
 func (s *CommandService) PromptParticipant(ctx context.Context, principal Principal, req PromptParticipantRequest) (CommandResult, error) {
 	return s.execute(ctx, principal, ActionParticipantPrompt, req.WriteBase, req.ParticipantID, req)
 }
@@ -223,12 +227,25 @@ func validateCommandRequest(action Action, request any) error {
 		if strings.TrimSpace(typed.ProfileID) == "" || strings.TrimSpace(typed.Effort) == "" {
 			return errors.New("controlclient: participant profile_id and effort are required")
 		}
+	case StartParticipantRequest:
+		if err := requireSession(typed.SessionID); err != nil {
+			return err
+		}
+		if strings.TrimSpace(typed.Handle) == "" {
+			return errors.New("controlclient: participant handle is required")
+		}
+		if err := validatePromptContent("participant prompt", typed.Input, typed.ContentParts); err != nil {
+			return err
+		}
 	case PromptParticipantRequest:
 		if err := requireSession(typed.SessionID); err != nil {
 			return err
 		}
-		if strings.TrimSpace(typed.ParticipantID) == "" || strings.TrimSpace(typed.Input) == "" {
-			return errors.New("controlclient: participant id and input are required")
+		if strings.TrimSpace(typed.ParticipantID) == "" {
+			return errors.New("controlclient: participant id is required")
+		}
+		if err := validatePromptContent("participant prompt", typed.Input, typed.ContentParts); err != nil {
+			return err
 		}
 	case CancelParticipantRequest:
 		if err := requireSessionAndTurn(typed.SessionID, typed.Target); err != nil {

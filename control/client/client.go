@@ -10,11 +10,12 @@ import (
 )
 
 type ClientConfig struct {
-	Commands   CommandClient
-	State      StateReader
-	Feeds      FeedRegistry
-	Authorizer Authorizer
-	Sessions   interface {
+	Commands           CommandClient
+	State              StateReader
+	Feeds              FeedRegistry
+	Authorizer         Authorizer
+	ParticipantHandles ParticipantHandleReader
+	Sessions           interface {
 		ListSessions(context.Context, session.ListSessionsRequest) (session.SessionList, error)
 	}
 }
@@ -40,6 +41,30 @@ func (c *Client) ListSessions(ctx context.Context, principal Principal, req List
 		listReq.UserID = strings.TrimSpace(principal.ID)
 	}
 	return c.config.Sessions.ListSessions(ctx, listReq)
+}
+
+// StartParticipant delegates the in-process-only participant start extension
+// without adding it to the bounded HTTP command contract.
+func (c *Client) StartParticipant(ctx context.Context, principal Principal, req StartParticipantRequest) (CommandResult, error) {
+	starter, ok := c.CommandClient.(ParticipantStarter)
+	if !ok {
+		return CommandResult{}, errors.New("controlclient: participant start service is unavailable")
+	}
+	return starter.StartParticipant(ctx, principal, req)
+}
+
+// ListParticipantHandles returns the Session Runtime's frozen direct-command
+// catalog when activated, or the current catalog for an idle Session.
+func (c *Client) ListParticipantHandles(ctx context.Context, principal Principal, sessionID string) ([]string, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if err := c.config.Authorizer.Authorize(ctx, principal, ActionParticipantList, sessionID); err != nil {
+		return nil, err
+	}
+	if c.config.ParticipantHandles == nil {
+		return nil, errors.New("controlclient: participant handle service is unavailable")
+	}
+	handles, err := c.config.ParticipantHandles.ParticipantHandles(ctx, sessionID)
+	return append([]string(nil), handles...), err
 }
 
 func (c *Client) InspectSession(ctx context.Context, principal Principal, req StateRequest) (SessionState, error) {

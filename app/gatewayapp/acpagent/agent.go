@@ -29,6 +29,13 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 	if err != nil {
 		return nil, err
 	}
+	participantClient, err := controlclient.BindParticipantClient(
+		stack.ControlParticipants(),
+		controlclient.Principal{ID: deps.UserID},
+	)
+	if err != nil {
+		return nil, err
+	}
 	taskStreamClient, err := taskstream.BindClient(
 		deps.TaskStreams,
 		taskstream.Principal{ID: deps.UserID},
@@ -55,18 +62,19 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 			if err != nil {
 				return nil, err
 			}
-			driverWithTypedTurns, err := controladapter.NewSessionClientAdapter(driver, sessionClient)
+			driverWithTypedTurns, err := controladapter.NewSessionClientAdapterWithParticipants(
+				driver,
+				sessionClient,
+				participantClient,
+			)
 			if err != nil {
 				return nil, err
 			}
 			router := controlprompt.New(controlprompt.RouterConfig{
 				Service: driverWithTypedTurns,
 				CommandNames: func(ctx context.Context, service controlprompt.Service) []string {
-					var bindingStatus agentbinding.Status
-					if bindingService, ok := service.(agentbinding.Service); ok {
-						bindingStatus, _ = bindingService.AgentBindingStatus(ctx)
-					}
-					out := acpPromptCommandNames(bindingStatus)
+					handles, _ := participantClient.Handles(ctx, activeSession.SessionID)
+					out := acpPromptCommandNamesFromHandles(handles)
 					status, err := service.AgentStatus(ctx)
 					if err != nil {
 						return out
@@ -84,6 +92,26 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 
 func acpPromptCommandNames(status agentbinding.Status) []string {
 	return agentbinding.ProjectBoundDirectNames(controlprompt.DefaultACPNames(), status)
+}
+
+func acpPromptCommandNamesFromHandles(handles []string) []string {
+	out := agentbinding.ProjectBoundDirectNames(controlprompt.DefaultACPNames(), agentbinding.Status{})
+	seen := make(map[string]struct{}, len(out)+len(handles))
+	for _, name := range out {
+		seen[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+	}
+	for _, raw := range handles {
+		name := controlagents.NormalizeName(raw)
+		if !controlagents.IsName(name) {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		out = append(out, name)
+		seen[name] = struct{}{}
+	}
+	return out
 }
 
 func acpDirectAgentRuns(status controlprompt.AgentStatusSnapshot) []controlagents.Run {

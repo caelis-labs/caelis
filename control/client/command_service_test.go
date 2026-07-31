@@ -69,6 +69,13 @@ func TestEveryWriteCommandAuthorizationIdempotencyCASAndUnknownOutcome(t *testin
 			}
 			return s.AttachParticipant(context.Background(), p, AttachParticipantRequest{WriteBase: WriteBase{OperationID: op, SessionID: "session-1", ExpectedRevision: &revision, ExpectedControllerEpoch: epoch}, ProfileID: profileID, Effort: "high"})
 		}},
+		{"participant start", ActionParticipantStart, func(s *CommandService, p Principal, op string, changed bool) (CommandResult, error) {
+			input := "review"
+			if changed {
+				input = "changed"
+			}
+			return s.StartParticipant(context.Background(), p, StartParticipantRequest{WriteBase: WriteBase{OperationID: op, SessionID: "session-1", ExpectedRevision: &revision, ExpectedControllerEpoch: epoch}, Handle: "reviewer", Label: "@review", Input: input})
+		}},
 		{"participant prompt", ActionParticipantPrompt, func(s *CommandService, p Principal, op string, changed bool) (CommandResult, error) {
 			input := "review"
 			if changed {
@@ -345,6 +352,8 @@ func operationIDOf(request any) string {
 	case ResolveApprovalRequest:
 		return req.OperationID
 	case AttachParticipantRequest:
+		return req.OperationID
+	case StartParticipantRequest:
 		return req.OperationID
 	case PromptParticipantRequest:
 		return req.OperationID

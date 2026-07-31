@@ -22,8 +22,9 @@ type EventBatch struct {
 	BoundaryCursor string                 `json:"boundary_cursor,omitempty"`
 }
 
-// Service is the complete Control-owned client contract consumed by
-// presentation and network adapters.
+// Service is the complete bounded Control-owned contract consumed by
+// presentation and network adapters. Focused in-process extensions compose
+// this service without expanding the HTTP mapping.
 type Service interface {
 	CommandClient
 	ListSessions(context.Context, Principal, ListSessionsRequest) (session.SessionList, error)

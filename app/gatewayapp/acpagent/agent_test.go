@@ -396,6 +396,23 @@ func TestACPPromptCommandNamesExposeOnlyBoundProfilesAndHideAgentCatalog(t *test
 	}
 }
 
+func TestACPPromptCommandNamesFromSessionRuntimeHandles(t *testing.T) {
+	commands := acpPromptCommandNamesFromHandles([]string{"orbit", "research", "ORBIT", "bad name"})
+	for _, want := range []string{"status", "review", "orbit", "research"} {
+		if !containsCommand(commands, want) {
+			t.Fatalf("acpPromptCommandNamesFromHandles() = %#v, want %q", commands, want)
+		}
+	}
+	for _, hidden := range []string{"breeze", "zenith", "bad name"} {
+		if containsCommand(commands, hidden) {
+			t.Fatalf("acpPromptCommandNamesFromHandles() = %#v, should hide %q", commands, hidden)
+		}
+	}
+	if countCommand(commands, "orbit") != 1 {
+		t.Fatalf("acpPromptCommandNamesFromHandles() = %#v, want one orbit", commands)
+	}
+}
+
 func newACPAgentTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack, error) {
 	t.Helper()
 	model := cfg.Model

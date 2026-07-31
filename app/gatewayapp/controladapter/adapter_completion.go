@@ -597,10 +597,6 @@ func (d *Adapter) resolveAgentName(input string) (string, error) {
 }
 
 func (d *Adapter) resolveParticipantID(ctx context.Context, ref session.SessionRef, input string) (string, error) {
-	input = strings.ToLower(strings.TrimSpace(input))
-	if input == "" {
-		return "", fmt.Errorf("app/gatewayapp/controladapter: participant id is required")
-	}
 	gw, err := d.gatewayControlPlane()
 	if err != nil {
 		return "", err
@@ -609,10 +605,34 @@ func (d *Adapter) resolveParticipantID(ctx context.Context, ref session.SessionR
 	if err != nil {
 		return "", err
 	}
+	participants := make([]participantAddress, 0, len(state.Participants))
+	for _, participant := range state.Participants {
+		participants = append(participants, participantAddress{
+			ID: participant.ID, Kind: participant.Kind, Role: participant.Role,
+			Label: participant.Label, SessionID: participant.SessionID, Source: participant.Source,
+		})
+	}
+	return resolveParticipantID(participants, input)
+}
+
+type participantAddress struct {
+	ID        string
+	Kind      session.ParticipantKind
+	Role      session.ParticipantRole
+	Label     string
+	SessionID string
+	Source    string
+}
+
+func resolveParticipantID(participants []participantAddress, input string) (string, error) {
+	input = strings.ToLower(strings.TrimSpace(input))
+	if input == "" {
+		return "", fmt.Errorf("app/gatewayapp/controladapter: participant id is required")
+	}
 	runAgent, runHandle, directRun := controlagents.ParseRunName(input)
 	var exact string
 	prefixMatches := make([]string, 0, 2)
-	for _, participant := range state.Participants {
+	for _, participant := range participants {
 		if participant.Kind != session.ParticipantKindACP || participant.Role != session.ParticipantRoleSidecar {
 			continue
 		}

@@ -41,6 +41,8 @@ const (
 	ActionCancel            Action = "turn.cancel"
 	ActionApprovalResolve   Action = "approval.resolve"
 	ActionParticipantAttach Action = "participant.attach"
+	ActionParticipantList   Action = "participant.list"
+	ActionParticipantStart  Action = "participant.start"
 	ActionParticipantPrompt Action = "participant.prompt"
 	ActionParticipantCancel Action = "participant.cancel"
 	ActionParticipantDetach Action = "participant.detach"
@@ -140,11 +142,34 @@ type AttachParticipantRequest struct {
 	Source    string                  `json:"source,omitempty"`
 }
 
+// StartParticipantRequest atomically attaches one handle-selected participant
+// and starts its first Turn. Handle resolution occurs inside the addressed
+// Session Runtime so an active workspace composition cannot observe later Host
+// configuration changes.
+type StartParticipantRequest struct {
+	WriteBase
+	Handle         string                  `json:"handle"`
+	Role           session.ParticipantRole `json:"role,omitempty"`
+	Label          string                  `json:"label,omitempty"`
+	Source         string                  `json:"source,omitempty"`
+	Input          string                  `json:"input,omitempty"`
+	DisplayInput   string                  `json:"display_input,omitempty"`
+	DisplayAddress string                  `json:"display_address,omitempty"`
+	DisplayTitle   string                  `json:"display_title,omitempty"`
+	ContentParts   []model.ContentPart     `json:"content_parts,omitempty"`
+	Transient      bool                    `json:"transient,omitempty"`
+	DetachSource   string                  `json:"detach_source,omitempty"`
+}
+
 type PromptParticipantRequest struct {
 	WriteBase
-	ParticipantID string `json:"participant_id"`
-	Input         string `json:"input"`
-	DisplayInput  string `json:"display_input,omitempty"`
+	ParticipantID  string              `json:"participant_id"`
+	Input          string              `json:"input,omitempty"`
+	DisplayInput   string              `json:"display_input,omitempty"`
+	DisplayAddress string              `json:"display_address,omitempty"`
+	DisplayTitle   string              `json:"display_title,omitempty"`
+	ContentParts   []model.ContentPart `json:"content_parts,omitempty"`
+	Source         string              `json:"source,omitempty"`
 }
 
 type CancelParticipantRequest struct {
@@ -170,12 +195,13 @@ type HandoffRequest struct {
 
 // CommandResult is the typed recovery result persisted by the operation ledger.
 type CommandResult struct {
-	OperationID string     `json:"operation_id"`
-	Outcome     Outcome    `json:"outcome"`
-	SessionID   string     `json:"session_id,omitempty"`
-	Revision    uint64     `json:"revision,omitempty"`
-	Target      TurnTarget `json:"target,omitempty"`
-	Detail      string     `json:"detail,omitempty"`
+	OperationID   string     `json:"operation_id"`
+	Outcome       Outcome    `json:"outcome"`
+	SessionID     string     `json:"session_id,omitempty"`
+	Revision      uint64     `json:"revision,omitempty"`
+	Target        TurnTarget `json:"target,omitempty"`
+	ParticipantID string     `json:"participant_id,omitempty"`
+	Detail        string     `json:"detail,omitempty"`
 }
 
 // CommandBackend executes already-authorized request-scoped commands.
@@ -196,6 +222,12 @@ type CommandClient interface {
 	CancelParticipant(context.Context, Principal, CancelParticipantRequest) (CommandResult, error)
 	DetachParticipant(context.Context, Principal, DetachParticipantRequest) (CommandResult, error)
 	Handoff(context.Context, Principal, HandoffRequest) (CommandResult, error)
+}
+
+// ParticipantStarter is the focused in-process extension used by product
+// participant surfaces. It is intentionally not part of the MVP HTTP protocol.
+type ParticipantStarter interface {
+	StartParticipant(context.Context, Principal, StartParticipantRequest) (CommandResult, error)
 }
 
 func (o Outcome) Valid() bool {

@@ -141,7 +141,8 @@ Document responsibilities are intentionally separate:
   `control/client.BindSessionClient`; both expose the same typed contract.
 - `app/controlserver`: the Control Host's HTTP handler and production listener,
   including authentication, request policy, TLS, token-file policy, and
-  shutdown drain. It maps only the bounded Session-client protocol and depends
+  shutdown drain. It maps the bounded Session-client protocol and independent
+  Task observation protocol and depends
   on explicit Control contracts rather than `gatewayapp.Stack`.
 - `internal/controlprompt`: current Control-owned surface-neutral prompt input
   contract, private prompt facade, command catalog, parsing helpers,
@@ -168,9 +169,13 @@ Document responsibilities are intentionally separate:
   all Session and transitional default Gateways. Headless and product ACP
   Session lifecycle plus main-Turn ingress use the typed in-process Session
   client. The embedded TUI also uses typed clients for main-Turn and Task
-  observation. Until the remaining TUI lifecycle/status and TUI/ACP
-  slash/participant paths are Session-directed, their direct default-Stack
-  Sessions retain an explicit process-local ownership marker; the marker is a
+  observation. Product ACP also routes `/review`, direct-Agent participant
+  starts/follow-ups, cancellation, approval, and observation through focused
+  typed participant clients; direct-command discovery reads the same fixed
+  Session Runtime placement snapshot and does not activate an idle Runtime.
+  Until the remaining TUI lifecycle/status and
+  participant paths are Session-directed, TUI default-Stack Sessions retain an
+  explicit process-local ownership marker; the marker is a
   migration fence, not durable configuration, and is removed with the private
   default-Gateway path.
   `UserID` remains a compatibility authorization/persistence field and is not a
@@ -188,10 +193,11 @@ Document responsibilities are intentionally separate:
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
   product integration adapters that make external endpoints implement the same
   SDK controller/participant contracts used by built-in Agents. Product
-  assembly supplies principal-bound Session and Task clients; ordinary prompts
-  and lifecycle operations fail closed on those clients. The direct Runtime
-  adapter remains only for generic/eval embedding, while product slash and
-  direct-participant commands use the documented local compatibility adapter.
+  assembly supplies principal-bound Session, participant, and Task clients;
+  ordinary prompts, lifecycle operations, and execution-bearing participant
+  commands fail closed on those clients. The direct Runtime adapter remains
+  only for generic/eval embedding, while non-execution slash/status/config
+  facets retain the documented local compatibility adapter.
   The bridge does not import presentation packages.
 - `platform/*`: product support code for platform-specific host behavior.
 

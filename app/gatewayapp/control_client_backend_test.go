@@ -15,6 +15,7 @@ import (
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/app/controlserver"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/client/httpclient"
@@ -135,6 +136,32 @@ func TestControlParticipantPlacementStoreFailureRemainsUnknown(t *testing.T) {
 	classified := classifyControlBackendError(err)
 	var outcomeErr *controlclient.OutcomeError
 	if !errors.As(classified, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeUnknown || errorcode.CodeOf(classified) != errorcode.Unknown {
+		t.Fatalf("classifyControlBackendError(store failure) = %v, want unknown outcome", classified)
+	}
+}
+
+func TestControlHandlePlacementRejectsDeterministicSelectionFailure(t *testing.T) {
+	stack := &Stack{store: newAppConfigStore(t.TempDir())}
+	_, err := stack.resolveControlHandlePlacement(context.Background(), agentbinding.Handle("missing"))
+	var outcomeErr *controlclient.OutcomeError
+	if !errors.As(err, &outcomeErr) ||
+		outcomeErr.Outcome != controlclient.OutcomeRejected ||
+		errorcode.CodeOf(err) != errorcode.FailedPrecondition {
+		t.Fatalf("resolveControlHandlePlacement(missing) = %v, want rejected failed_precondition", err)
+	}
+}
+
+func TestControlHandlePlacementStoreFailureRemainsUnknown(t *testing.T) {
+	store := newAppConfigStore(t.TempDir())
+	store.path = t.TempDir()
+	stack := &Stack{store: store}
+	_, err := stack.resolveControlHandlePlacement(context.Background(), agentbinding.HandleReviewer)
+	if err == nil || errorcode.CodeOf(err) == errorcode.FailedPrecondition {
+		t.Fatalf("resolveControlHandlePlacement(store failure) = %v, want internal failure", err)
+	}
+	classified := classifyControlBackendError(err)
+	var outcomeErr *controlclient.OutcomeError
+	if !errors.As(classified, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeUnknown {
 		t.Fatalf("classifyControlBackendError(store failure) = %v, want unknown outcome", classified)
 	}
 }

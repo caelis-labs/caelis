@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/client/httpclient"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
@@ -707,6 +709,64 @@ func TestSessionObservationDoesNotActivateRuntime(t *testing.T) {
 	}
 	if _, ok := stack.sessionRuntimes.loaded(sessionID); ok {
 		t.Fatal("inspect/reconnect observers activated a Session Runtime")
+	}
+}
+
+func TestParticipantHandlesUseFixedSessionRuntimeSnapshot(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
+	stack, err := NewLocalStack(Config{
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: "workspace",
+		WorkspaceCWD: workspace,
+		SkillDirs:    []string{},
+		Sandbox:      SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	if _, err := stack.Connect(ModelConfig{Provider: "ollama", Model: "llama3"}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := stack.AgentBindings().AgentBindingStatus(ctx)
+	if err != nil || len(status.Targets) == 0 {
+		t.Fatalf("AgentBindingStatus() = %#v, %v", status, err)
+	}
+	if _, err := stack.AgentBindings().BindAgentBinding(ctx, agentbinding.Binding{
+		Handle:    agentbinding.HandleOrbit,
+		ProfileID: status.Targets[0].ID,
+		Effort:    status.Targets[0].Effort.DefaultEffort,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "local-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	participants, err := controlclient.BindParticipantClient(stack.ControlParticipants(), controlclient.Principal{ID: "local-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstID := createWorkspaceRuntimeTestSession(t, sessions, "create-first-handles", "first-handles", "workspace", workspace)
+	if handles, err := participants.Handles(ctx, firstID); err != nil || !slices.Contains(handles, "orbit") {
+		t.Fatalf("idle participant handles = %#v, %v; want orbit", handles, err)
+	}
+	activateSessionRuntime(t, stack, firstID)
+	if _, err := stack.AgentBindings().ResetAgentBinding(ctx, agentbinding.HandleOrbit); err != nil {
+		t.Fatal(err)
+	}
+	if handles, err := participants.Handles(ctx, firstID); err != nil || !slices.Contains(handles, "orbit") {
+		t.Fatalf("active participant handles = %#v, %v; want frozen orbit", handles, err)
+	}
+
+	secondID := createWorkspaceRuntimeTestSession(t, sessions, "create-second-handles", "second-handles", "workspace", workspace)
+	if handles, err := participants.Handles(ctx, secondID); err != nil || slices.Contains(handles, "orbit") {
+		t.Fatalf("new participant handles = %#v, %v; want current unbound catalog", handles, err)
+	}
+	if _, loaded := stack.sessionRuntimes.loaded(secondID); loaded {
+		t.Fatal("participant handle observation activated an idle Session Runtime")
 	}
 }
 

@@ -35,10 +35,10 @@ type ApprovalResolution struct {
 	ReviewText string
 }
 
-// SessionTurn is one target-filtered main Turn view built from the common
-// SessionClient contract. Closing the view detaches observation only; it does
-// not cancel the Runtime Turn or durably close the Session.
-type SessionTurn interface {
+// TargetTurn is one target-filtered main or participant Turn view. Closing the
+// view detaches observation only; it does not cancel the Runtime Turn or
+// durably close the Session.
+type TargetTurn interface {
 	SessionID() string
 	Target() TurnTarget
 	// Events is an intentionally unbuffered view for one consumer. Backpressure
@@ -46,11 +46,16 @@ type SessionTurn interface {
 	// cannot block Runtime publication or sibling observers.
 	Events() <-chan eventstream.Envelope
 	ResolveApproval(context.Context, ApprovalResolution) error
-	Steer(context.Context, string, string, []model.ContentPart) error
 	Cancel(context.Context, string) error
 	LastCursor() string
 	Err() error
 	Close() error
+}
+
+// SessionTurn is a TargetTurn that accepts main-conversation steer input.
+type SessionTurn interface {
+	TargetTurn
+	Steer(context.Context, string, string, []model.ContentPart) error
 }
 
 // SessionTurnStarter establishes one target-filtered main Turn view.
@@ -102,28 +107,9 @@ func (c *SessionTurnClient) Start(
 		displayInput = ""
 	}
 
-	// Inspect supplies a cursor for the current feed cut without retaining its
-	// diagnostic subscription. Reconnecting from that cut preserves any events
-	// accepted between the two calls while avoiding a replay of the Session's
-	// entire durable history.
-	inspected, err := c.client.InspectSession(ctx, StateRequest{SessionID: sessionID})
+	feedCtx, stopFeed, reconnected, err := openTargetObservation(ctx, c.client, sessionID)
 	if err != nil {
 		return nil, err
-	}
-	boundaryCursor := strings.TrimSpace(inspected.BoundaryCursor)
-
-	feedCtx, stopFeed := context.WithCancel(context.WithoutCancel(ctx))
-	reconnected, err := c.client.Reconnect(feedCtx, ReconnectRequest{
-		SessionID: sessionID,
-		Cursor:    boundaryCursor,
-	})
-	if err != nil {
-		stopFeed()
-		return nil, err
-	}
-	if reconnected.Subscription == nil {
-		stopFeed()
-		return nil, errors.New("controlclient: Session reconnect returned no subscription")
 	}
 	revision := reconnected.State.Revision
 	result, err := c.client.Prompt(ctx, PromptRequest{
@@ -157,19 +143,84 @@ func (c *SessionTurnClient) Start(
 		return nil, errors.New("controlclient: prompt returned no complete Turn target")
 	}
 
-	turn := &sessionTurn{
-		client:          c.client,
-		sessionID:       sessionID,
+	turn := newTargetTurn(c.client, sessionID, reconnected, feedCtx, stopFeed, result.Target)
+	turn.steerFn = func(steerCtx context.Context, input, displayInput string, contentParts []model.ContentPart) error {
+		_, steerErr := c.client.Steer(steerCtx, SteerRequest{
+			WriteBase: WriteBase{
+				OperationID:             newSessionTurnOperationID("steer"),
+				SessionID:               sessionID,
+				ExpectedControllerEpoch: turn.controllerEpoch,
+			},
+			Target:       turn.target,
+			Input:        input,
+			DisplayInput: displayInput,
+			ContentParts: append([]model.ContentPart(nil), contentParts...),
+		})
+		return steerErr
+	}
+	turn.cancelFn = func(cancelCtx context.Context, reason string) error {
+		_, cancelErr := c.client.Cancel(cancelCtx, CancelRequest{
+			WriteBase: WriteBase{
+				OperationID:             newSessionTurnOperationID("cancel"),
+				SessionID:               sessionID,
+				ExpectedControllerEpoch: turn.controllerEpoch,
+			},
+			Target: turn.target,
+			Reason: reason,
+		})
+		return cancelErr
+	}
+	go turn.relay()
+	return turn, nil
+}
+
+// openTargetObservation establishes the feed cut before a command is
+// admitted, preserving fast target output without replaying the old Session
+// prefix. The caller owns stopFeed and the returned subscription on success.
+func openTargetObservation(
+	ctx context.Context,
+	client SessionClient,
+	sessionID string,
+) (context.Context, context.CancelFunc, ReconnectResult, error) {
+	inspected, err := client.InspectSession(ctx, StateRequest{SessionID: sessionID})
+	if err != nil {
+		return nil, nil, ReconnectResult{}, err
+	}
+	feedCtx, stopFeed := context.WithCancel(context.WithoutCancel(ctx))
+	reconnected, err := client.Reconnect(feedCtx, ReconnectRequest{
+		SessionID: sessionID,
+		Cursor:    strings.TrimSpace(inspected.BoundaryCursor),
+	})
+	if err != nil {
+		stopFeed()
+		return nil, nil, ReconnectResult{}, err
+	}
+	if reconnected.Subscription == nil {
+		stopFeed()
+		return nil, nil, ReconnectResult{}, errors.New("controlclient: Session reconnect returned no subscription")
+	}
+	return feedCtx, stopFeed, reconnected, nil
+}
+
+func newTargetTurn(
+	client SessionClient,
+	sessionID string,
+	reconnected ReconnectResult,
+	feedCtx context.Context,
+	stopFeed context.CancelFunc,
+	target TurnTarget,
+) *sessionTurn {
+	return &sessionTurn{
+		client:          client,
+		sessionID:       strings.TrimSpace(sessionID),
 		controllerEpoch: strings.TrimSpace(reconnected.State.Controller.EpochID),
-		target:          result.Target,
+		target:          target,
 		feedCtx:         feedCtx,
 		stopFeed:        stopFeed,
 		subscription:    reconnected.Subscription,
 		events:          make(chan eventstream.Envelope),
 		done:            make(chan struct{}),
 	}
-	go turn.relay()
-	return turn, nil
 }
 
 type sessionTurn struct {
@@ -179,6 +230,8 @@ type sessionTurn struct {
 	target          TurnTarget
 	feedCtx         context.Context
 	stopFeed        context.CancelFunc
+	steerFn         func(context.Context, string, string, []model.ContentPart) error
+	cancelFn        func(context.Context, string) error
 
 	mu           sync.RWMutex
 	subscription FeedSubscription
@@ -267,18 +320,10 @@ func (t *sessionTurn) Steer(
 	if displayInput == input {
 		displayInput = ""
 	}
-	_, err := t.client.Steer(ctx, SteerRequest{
-		WriteBase: WriteBase{
-			OperationID:             newSessionTurnOperationID("steer"),
-			SessionID:               t.sessionID,
-			ExpectedControllerEpoch: t.controllerEpoch,
-		},
-		Target:       t.target,
-		Input:        input,
-		DisplayInput: displayInput,
-		ContentParts: append([]model.ContentPart(nil), contentParts...),
-	})
-	return err
+	if t.steerFn == nil {
+		return errors.New("controlclient: target Turn does not accept main-conversation steer input")
+	}
+	return t.steerFn(ctx, input, displayInput, contentParts)
 }
 
 func (t *sessionTurn) Cancel(ctx context.Context, reason string) error {
@@ -288,16 +333,10 @@ func (t *sessionTurn) Cancel(ctx context.Context, reason string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, err := t.client.Cancel(ctx, CancelRequest{
-		WriteBase: WriteBase{
-			OperationID:             newSessionTurnOperationID("cancel"),
-			SessionID:               t.sessionID,
-			ExpectedControllerEpoch: t.controllerEpoch,
-		},
-		Target: t.target,
-		Reason: strings.TrimSpace(reason),
-	})
-	return err
+	if t.cancelFn == nil {
+		return errors.New("controlclient: target Turn cannot be cancelled")
+	}
+	return t.cancelFn(ctx, strings.TrimSpace(reason))
 }
 
 func (t *sessionTurn) LastCursor() string {
@@ -486,3 +525,4 @@ func newSessionTurnOperationID(kind string) string {
 
 var _ SessionTurnStarter = (*SessionTurnClient)(nil)
 var _ SessionTurn = (*sessionTurn)(nil)
+var _ TargetTurn = (*sessionTurn)(nil)

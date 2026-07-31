@@ -14,8 +14,9 @@ import (
 // interface; callers cannot choose or forward another principal.
 //
 // The first common slice intentionally covers Session lifecycle, observation,
-// and the main-Turn commands needed by Bar/Pet. Participant, handoff, and Task
-// administration remain with their semantic owners until parity is proven.
+// and the main-Turn commands needed by Bar/Pet. Focused participant and Task
+// clients remain separate, and remote participant/handoff parity is deferred
+// until a concrete product client requires it.
 type SessionClient interface {
 	Initialize(context.Context) (ServerInfo, error)
 	ListSessions(context.Context, ListSessionsRequest) (session.SessionList, error)

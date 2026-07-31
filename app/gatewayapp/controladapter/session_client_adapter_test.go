@@ -3,6 +3,7 @@ package controladapter
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -111,6 +112,67 @@ func TestSessionClientAdapterRoutesMainTurnWritesAndObservationThroughTypedClien
 	}
 }
 
+func TestSessionClientAdapterRoutesReviewThroughTypedParticipantClient(t *testing.T) {
+	target := controlclient.TurnTarget{HandleID: "participant-handle", RunID: "participant-run", TurnID: "participant-turn"}
+	subscription := newSessionClientAdapterTestSubscription()
+	client := &sessionClientAdapterTestClient{
+		target:       target,
+		subscription: subscription,
+		state: controlclient.SessionState{
+			SessionID: "session-1",
+			Revision:  7,
+			CWD:       t.TempDir(),
+			Controller: session.ControllerBinding{
+				EpochID: "epoch-1",
+			},
+		},
+	}
+	participants := &sessionClientAdapterTestParticipantClient{target: target}
+	legacy := &Adapter{
+		stack: &RuntimeStack{Session: SessionRuntimeDeps{
+			AppName: "caelis",
+			UserID:  "owner",
+			Workspace: session.WorkspaceRef{
+				Key: "workspace", CWD: t.TempDir(),
+			},
+		}},
+		session: session.Session{SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "owner", SessionID: "session-1", WorkspaceKey: "workspace",
+		}},
+		hasSession: true,
+		bindingKey: "acp",
+	}
+	adapter, err := NewSessionClientAdapterWithParticipants(legacy, client, participants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := adapter.StartReview(context.Background(), "inspect typed routing", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn == nil || turn.HandleID() != target.HandleID {
+		t.Fatalf("review Turn = %#v, want typed participant target", turn)
+	}
+	request := participants.start
+	if request.SessionID != "session-1" || request.Handle != "reviewer" ||
+		request.Source != "slash_review" || request.DisplayAddress != "/review" ||
+		!request.Transient || request.DetachSource != "side_agent_complete" ||
+		!strings.HasPrefix(request.Label, "@") ||
+		!strings.Contains(request.Input, "inspect typed routing") {
+		t.Fatalf("typed review request = %#v", request)
+	}
+	terminal := eventstream.TurnCompleted(target.HandleID, target.RunID, target.TurnID, time.Now())
+	terminal.SessionID = "session-1"
+	subscription.events <- terminal
+	close(subscription.events)
+	if got := collectSessionClientAdapterEvents(turn.Events()); len(got) != 1 || !eventstream.IsTurnTerminalLifecycle(got[0]) {
+		t.Fatalf("review Turn events = %#v", got)
+	}
+	if err := turn.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func collectSessionClientAdapterEvents(events <-chan eventstream.Envelope) []eventstream.Envelope {
 	var out []eventstream.Envelope
 	for envelope := range events {
@@ -122,6 +184,7 @@ func collectSessionClientAdapterEvents(events <-chan eventstream.Envelope) []eve
 type sessionClientAdapterTestClient struct {
 	target       controlclient.TurnTarget
 	subscription *sessionClientAdapterTestSubscription
+	state        controlclient.SessionState
 
 	mu       sync.Mutex
 	prompt   controlclient.PromptRequest
@@ -146,19 +209,28 @@ func (*sessionClientAdapterTestClient) CloseSession(context.Context, controlclie
 	return controlclient.CommandResult{}, errors.New("unexpected CloseSession")
 }
 
-func (*sessionClientAdapterTestClient) InspectSession(context.Context, controlclient.StateRequest) (controlclient.SessionState, error) {
-	return controlclient.SessionState{SessionID: "session-1", BoundaryCursor: "boundary-0"}, nil
+func (c *sessionClientAdapterTestClient) InspectSession(context.Context, controlclient.StateRequest) (controlclient.SessionState, error) {
+	state := c.state
+	if state.SessionID == "" {
+		state.SessionID = "session-1"
+	}
+	state.BoundaryCursor = "boundary-0"
+	return state, nil
 }
 
 func (c *sessionClientAdapterTestClient) Reconnect(context.Context, controlclient.ReconnectRequest) (controlclient.ReconnectResult, error) {
+	state := c.state
+	if state.SessionID == "" {
+		state.SessionID = "session-1"
+	}
+	if state.Revision == 0 {
+		state.Revision = 4
+	}
+	if state.Controller.EpochID == "" {
+		state.Controller.EpochID = "epoch-1"
+	}
 	return controlclient.ReconnectResult{
-		State: controlclient.SessionState{
-			SessionID: "session-1",
-			Revision:  4,
-			Controller: session.ControllerBinding{
-				EpochID: "epoch-1",
-			},
-		},
+		State:        state,
 		Subscription: c.subscription,
 	}, nil
 }
@@ -193,6 +265,34 @@ func (c *sessionClientAdapterTestClient) ResolveApproval(_ context.Context, requ
 	c.mu.Lock()
 	c.approval = request
 	c.mu.Unlock()
+	return controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted}, nil
+}
+
+type sessionClientAdapterTestParticipantClient struct {
+	target controlclient.TurnTarget
+	start  controlclient.StartParticipantRequest
+}
+
+func (*sessionClientAdapterTestParticipantClient) Handles(context.Context, string) ([]string, error) {
+	return []string{"reviewer"}, nil
+}
+
+func (c *sessionClientAdapterTestParticipantClient) StartParticipant(_ context.Context, request controlclient.StartParticipantRequest) (controlclient.CommandResult, error) {
+	c.start = request
+	return controlclient.CommandResult{
+		OperationID:   request.OperationID,
+		Outcome:       controlclient.OutcomeCommitted,
+		SessionID:     request.SessionID,
+		Target:        c.target,
+		ParticipantID: "participant-1",
+	}, nil
+}
+
+func (*sessionClientAdapterTestParticipantClient) PromptParticipant(context.Context, controlclient.PromptParticipantRequest) (controlclient.CommandResult, error) {
+	return controlclient.CommandResult{}, errors.New("unexpected PromptParticipant")
+}
+
+func (*sessionClientAdapterTestParticipantClient) CancelParticipant(context.Context, controlclient.CancelParticipantRequest) (controlclient.CommandResult, error) {
 	return controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted}, nil
 }
 
@@ -235,4 +335,5 @@ func (*sessionClientAdapterTestSubscription) Err() error         { return nil }
 func (*sessionClientAdapterTestSubscription) LastCursor() string { return "" }
 
 var _ controlclient.SessionClient = (*sessionClientAdapterTestClient)(nil)
+var _ controlclient.ParticipantClient = (*sessionClientAdapterTestParticipantClient)(nil)
 var _ controlclient.FeedSubscription = (*sessionClientAdapterTestSubscription)(nil)

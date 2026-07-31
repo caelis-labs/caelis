@@ -204,6 +204,16 @@ func (s *Stack) ControlClient() controlclient.Service {
 	return s.controlClient
 }
 
+// ControlParticipants returns the focused in-process participant extension.
+// It is intentionally separate from the bounded transport-neutral Service.
+func (s *Stack) ControlParticipants() controlclient.ParticipantService {
+	if s == nil {
+		return nil
+	}
+	participants, _ := s.controlClient.(controlclient.ParticipantService)
+	return participants
+}
+
 // TaskStreams returns the Control-owned, Session-authorized Task stream
 // service used by the current in-process and ACP presentation adapters.
 func (s *Stack) TaskStreams() acptaskstream.Service {
@@ -499,7 +509,9 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	stack.controlCommands = controlCommands
 	controlClient, err := controlclient.NewClient(controlclient.ClientConfig{
 		Commands: controlCommands, State: controlState, Feeds: controlFeeds,
-		Authorizer: controlclient.SessionAuthorizer{Sessions: sessions}, Sessions: sessions,
+		Authorizer:         controlclient.SessionAuthorizer{Sessions: sessions},
+		ParticipantHandles: stack,
+		Sessions:           sessions,
 	})
 	if err != nil {
 		return nil, err

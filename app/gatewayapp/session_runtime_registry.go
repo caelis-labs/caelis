@@ -293,7 +293,7 @@ func (r *sessionRuntimeRegistry) loaded(sessionID string) (*sessionRuntime, bool
 }
 
 // bindDefaultSession records the transitional default Stack as the execution
-// owner for a Session created or resumed through the private TUI/headless path.
+// owner for a Session created or resumed through the private TUI path.
 // It is not a detached Session Runtime and must never be quiesced independently.
 func (r *sessionRuntimeRegistry) bindDefaultSession(active session.Session) error {
 	if r == nil || r.owner == nil {

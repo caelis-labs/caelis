@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
@@ -275,16 +276,67 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 			Placement:  participantPlacement,
 		})
 		return sessionCommandResult(updated), classifyControlBackendError(err)
+	case controlclient.StartParticipantRequest:
+		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
+		if err != nil {
+			return sessionCommandResult(active), classifyControlBackendError(err)
+		}
+		handle := agentbinding.NormalizeHandle(agentbinding.Handle(req.Handle))
+		placement, err := s.resolveControlHandlePlacement(ctx, handle)
+		if err != nil {
+			return sessionCommandResult(active), classifyControlBackendError(err)
+		}
+		agentName := strings.TrimSpace(placement.Agent)
+		if placement.Kind == sdkplacement.KindModel {
+			agentName = string(handle)
+		}
+		startReq := kernelimpl.StartParticipantRequest{
+			SessionRef:     active.SessionRef,
+			Agent:          agentName,
+			Role:           req.Role,
+			Label:          req.Label,
+			Placement:      placement,
+			Input:          req.Input,
+			DisplayInput:   req.DisplayInput,
+			DisplayAddress: req.DisplayAddress,
+			DisplayTitle:   req.DisplayTitle,
+			ContentParts:   req.ContentParts,
+			Source:         req.Source,
+			DetachSource:   req.DetachSource,
+		}
+		if req.Transient {
+			startReq.Lifecycle = kernelimpl.ParticipantLifecycleTransient
+		}
+		started, err := gw.StartParticipant(ctx, startReq)
+		if err == nil && started.Handle != nil {
+			s.attachControlClientHandle(started.Handle)
+		}
+		out := sessionCommandResult(started.Session)
+		out.ParticipantID = controlParticipantID(started.Session.Participants, req.Label, req.Source)
+		if started.Handle != nil {
+			out.Target = controlclient.TurnTarget{HandleID: started.Handle.HandleID(), RunID: started.Handle.RunID(), TurnID: started.Handle.TurnID()}
+		}
+		return out, classifyControlBackendError(err)
 	case controlclient.PromptParticipantRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		result, err := gw.PromptParticipant(ctx, kernelimpl.PromptParticipantRequest{SessionRef: active.SessionRef, ParticipantID: req.ParticipantID, Input: req.Input, DisplayInput: req.DisplayInput, Source: "control-client"})
+		result, err := gw.PromptParticipant(ctx, kernelimpl.PromptParticipantRequest{
+			SessionRef:     active.SessionRef,
+			ParticipantID:  req.ParticipantID,
+			Input:          req.Input,
+			DisplayInput:   req.DisplayInput,
+			DisplayAddress: req.DisplayAddress,
+			DisplayTitle:   req.DisplayTitle,
+			ContentParts:   req.ContentParts,
+			Source:         firstNonEmpty(strings.TrimSpace(req.Source), "control-client"),
+		})
 		if err == nil && result.Handle != nil {
 			s.attachControlClientHandle(result.Handle)
 		}
 		out := sessionCommandResult(result.Session)
+		out.ParticipantID = strings.TrimSpace(req.ParticipantID)
 		if result.Handle != nil {
 			out.Target = controlclient.TurnTarget{HandleID: result.Handle.HandleID(), RunID: result.Handle.RunID(), TurnID: result.Handle.TurnID()}
 		}
@@ -323,6 +375,24 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 	}
 }
 
+func controlParticipantID(participants []session.ParticipantBinding, label, source string) string {
+	label = strings.TrimSpace(label)
+	source = strings.TrimSpace(source)
+	for i := len(participants) - 1; i >= 0; i-- {
+		participant := participants[i]
+		if label != "" && !strings.EqualFold(strings.TrimSpace(participant.Label), label) {
+			continue
+		}
+		if source != "" && strings.TrimSpace(participant.Source) != source {
+			continue
+		}
+		if id := strings.TrimSpace(participant.ID); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
 func controlCommandSessionID(request any) string {
 	switch typed := request.(type) {
 	case controlclient.CloseSessionRequest:
@@ -336,6 +406,8 @@ func controlCommandSessionID(request any) string {
 	case controlclient.ResolveApprovalRequest:
 		return strings.TrimSpace(typed.SessionID)
 	case controlclient.AttachParticipantRequest:
+		return strings.TrimSpace(typed.SessionID)
+	case controlclient.StartParticipantRequest:
 		return strings.TrimSpace(typed.SessionID)
 	case controlclient.PromptParticipantRequest:
 		return strings.TrimSpace(typed.SessionID)
@@ -354,6 +426,7 @@ func controlActionActivatesSessionRuntime(action controlclient.Action) bool {
 	switch action {
 	case controlclient.ActionPrompt,
 		controlclient.ActionParticipantAttach,
+		controlclient.ActionParticipantStart,
 		controlclient.ActionParticipantPrompt,
 		controlclient.ActionParticipantDetach,
 		controlclient.ActionControllerHandoff:
@@ -409,6 +482,36 @@ func (s *Stack) resolveControlParticipantPlacement(ctx context.Context, profileI
 		return sdkplacement.Placement{}, err
 	}
 	return resolved, nil
+}
+
+func (s *Stack) resolveControlHandlePlacement(ctx context.Context, handle agentbinding.Handle) (sdkplacement.Placement, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return sdkplacement.Placement{}, err
+	}
+	snapshot, err := s.placementSnapshot(ctx)
+	if err != nil {
+		return sdkplacement.Placement{}, err
+	}
+	handle = agentbinding.NormalizeHandle(handle)
+	purpose, err := controlplacement.PurposeForHandle(
+		agentbinding.CatalogFor(snapshot.placement.Bindings),
+		handle,
+	)
+	if err == nil {
+		placement, resolveErr := controlplacement.ResolveHandle(
+			snapshot.placement,
+			controlplacement.HandleRequest{Handle: handle, Purpose: purpose},
+		)
+		if resolveErr == nil {
+			return placement, nil
+		}
+		err = resolveErr
+	}
+	coded := errorcode.Wrap(errorcode.FailedPrecondition, "gatewayapp: participant handle is unavailable", err)
+	return sdkplacement.Placement{}, controlclient.NewOutcomeError(controlclient.OutcomeRejected, coded)
 }
 
 func (s *Stack) checkControlCommandCAS(ctx context.Context, base controlclient.WriteBase) (session.Session, error) {
