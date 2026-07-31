@@ -1,4 +1,4 @@
-package appserver
+package controlserver
 
 import (
 	"crypto/sha256"
@@ -18,7 +18,7 @@ func BearerTokenAuthenticator(token string, principal controlclient.Principal) (
 	token = strings.TrimSpace(token)
 	principal.ID = strings.TrimSpace(principal.ID)
 	if len(token) < sha256.Size || principal.ID == "" || strings.ContainsAny(token, " \t\r\n") {
-		return nil, errors.New("appserver: bearer token and principal are required")
+		return nil, errors.New("controlserver: bearer token and principal are required")
 	}
 	expected := sha256.Sum256([]byte(token))
 	return AuthenticatorFunc(func(request *http.Request) (controlclient.Principal, error) {
@@ -39,5 +39,5 @@ func BearerTokenAuthenticator(token string, principal controlclient.Principal) (
 }
 
 func bearerAuthenticationError() error {
-	return errorcode.New(errorcode.Unauthenticated, "appserver: bearer authentication failed")
+	return errorcode.New(errorcode.Unauthenticated, "controlserver: bearer authentication failed")
 }

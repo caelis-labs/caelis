@@ -25,15 +25,25 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		return BeginTurnResult{}, wrapSessionError(err)
 	}
 	req.SessionRef = activeSession.SessionRef
-	runCtx, cancel := context.WithCancel(ctx)
+	runtimeParent := ctx
+	if req.RuntimeContext != nil {
+		runtimeParent = req.RuntimeContext
+	}
+	runCtx, cancel := context.WithCancel(runtimeParent)
 	cancelFn := sync.OnceValue(func() bool {
 		cancel()
 		return true
 	})
 	approvals := g.sessionApprovals(activeSession.SessionRef)
 	g.mu.Lock()
+	if g.quiescing {
+		g.mu.Unlock()
+		cancel()
+		return BeginTurnResult{}, hostClosingError()
+	}
 	if _, ok := g.active[activeSession.SessionID]; ok {
 		g.mu.Unlock()
+		cancel()
 		return BeginTurnResult{}, &Error{
 			Kind:        KindConflict,
 			Code:        CodeActiveRunConflict,
@@ -63,6 +73,7 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		settleApproval:  g.approvalSettler(activeSession.SessionRef, turnID),
 	})
 	g.active[activeSession.SessionID] = handle
+	g.signalActiveChangedLocked()
 	g.mu.Unlock()
 
 	// Dispatch SessionStart hooks before resolving the first model invocation.

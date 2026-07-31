@@ -1,4 +1,4 @@
-package appserver
+package controlserver
 
 import (
 	"context"
@@ -36,7 +36,7 @@ func TestAllowedHostAndProductionBearerReachService(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := &authBoundaryService{}
-	server, err := New(Config{
+	server, err := New(HandlerConfig{
 		Service: service, Authenticator: authenticator, AllowedHosts: []string{"control.example.test"},
 	})
 	if err != nil {

@@ -127,6 +127,11 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 	})
 	approvals := g.sessionApprovals(session.SessionRef)
 	g.mu.Lock()
+	if g.quiescing {
+		g.mu.Unlock()
+		cancel()
+		return BeginTurnResult{}, hostClosingError()
+	}
 	if _, ok := g.active[session.SessionID]; ok {
 		g.mu.Unlock()
 		return BeginTurnResult{}, &Error{
@@ -159,6 +164,7 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 		settleApproval:  g.approvalSettler(session.SessionRef, turnID),
 	})
 	g.active[session.SessionID] = handle
+	g.signalActiveChangedLocked()
 	g.noteActiveHandleLocked(session.SessionID, handle)
 	g.mu.Unlock()
 

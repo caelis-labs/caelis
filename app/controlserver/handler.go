@@ -1,6 +1,4 @@
-// Package appserver maps the transport-neutral Control client contract to
-// HTTP JSON and Server-Sent Events. It owns no Runtime or persistence logic.
-package appserver
+package controlserver
 
 import (
 	"encoding/json"
@@ -14,23 +12,22 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
+	"github.com/caelis-labs/caelis/control/client/wirev1"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
-const apiPrefix = "/api/control/v1"
+const apiPrefix = wirev1.APIPrefix
 
 const (
-	resumeModeHeader     = "Caelis-Resume-Mode"
-	transientGapHeader   = "Caelis-Transient-Gap"
-	boundaryCursorHeader = "Caelis-Boundary-Cursor"
-	resumeEventName      = "caelis.control.resume"
+	resumeModeHeader      = "Caelis-Resume-Mode"
+	transientGapHeader    = "Caelis-Transient-Gap"
+	boundaryCursorHeader  = "Caelis-Boundary-Cursor"
+	resumeEventName       = wirev1.ResumeEventName
+	bootstrapEventName    = wirev1.BootstrapEventName
+	backfillDoneEventName = wirev1.BackfillDoneEventName
 )
 
-type resumeBoundary struct {
-	ResumeMode     controlclient.ResumeMode `json:"resume_mode"`
-	TransientGap   bool                     `json:"transient_gap,omitempty"`
-	BoundaryCursor string                   `json:"boundary_cursor,omitempty"`
-}
+type resumeBoundary = wirev1.ResumeBoundary
 
 type Authenticator interface {
 	Authenticate(*http.Request) (controlclient.Principal, error)
@@ -42,26 +39,28 @@ func (f AuthenticatorFunc) Authenticate(request *http.Request) (controlclient.Pr
 	return f(request)
 }
 
-type Config struct {
+// HandlerConfig configures the authenticated Control HTTP handler without
+// listener or process-lifecycle policy.
+type HandlerConfig struct {
 	Service       controlclient.Service
-	TaskStreams   taskstream.Service
 	Authenticator Authenticator
 	AllowedHosts  []string
 	Heartbeat     time.Duration
 }
 
 type Server struct {
-	config Config
+	config HandlerConfig
 	mux    *http.ServeMux
 	policy *requestPolicy
 }
 
-func New(config Config) (*Server, error) {
+// New constructs the authenticated Control HTTP handler.
+func New(config HandlerConfig) (*Server, error) {
 	if config.Service == nil {
-		return nil, errors.New("appserver: control client service is required")
+		return nil, errors.New("controlserver: control client service is required")
 	}
 	if config.Authenticator == nil {
-		return nil, errors.New("appserver: authenticator is required for an HTTP handler")
+		return nil, errors.New("controlserver: authenticator is required for an HTTP handler")
 	}
 	if config.Heartbeat <= 0 {
 		config.Heartbeat = 15 * time.Second
@@ -90,145 +89,36 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) routes() {
+	s.mux.HandleFunc("GET "+apiPrefix+"/initialize", s.initialize)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions", s.listSessions)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions", s.createSession)
 	s.mux.HandleFunc("DELETE "+apiPrefix+"/sessions/{session_id}", s.closeSession)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/state", s.sessionState)
-	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/events", s.sessionEvents)
-	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/stream", s.streamSessionEvents)
-	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks", s.listTasks)
-	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/events", s.taskEvents)
-	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/stream", s.streamTaskEvents)
+	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/reconnect", s.reconnectSession)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/prompt", s.prompt)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/steer", s.steer)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/cancel", s.cancel)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/approvals/{approval_request_id}/resolve", s.resolveApproval)
-	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/participants", s.attachParticipant)
-	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/participants/{participant_id}/prompt", s.promptParticipant)
-	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/participants/{participant_id}/cancel", s.cancelParticipant)
-	s.mux.HandleFunc("DELETE "+apiPrefix+"/sessions/{session_id}/participants/{participant_id}", s.detachParticipant)
-	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/handoff", s.handoff)
 }
 
-func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
+func (s *Server) initialize(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requirePrincipal(w, r); !ok {
 		return
 	}
-	if s.config.TaskStreams == nil {
-		writeMappedError(w, errorcode.New(errorcode.Unavailable, "appserver: task streams are unavailable"))
-		return
-	}
-	result, err := s.config.TaskStreams.List(r.Context(), taskStreamPrincipal(principal), taskstream.ListRequest{SessionID: r.PathValue("session_id")})
-	writeJSONResult(w, result, err)
-}
-
-func (s *Server) taskEvents(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
-	}
-	if s.config.TaskStreams == nil {
-		writeMappedError(w, errorcode.New(errorcode.Unavailable, "appserver: task streams are unavailable"))
-		return
-	}
-	cursor, ok := resumeCursor(w, r)
-	if !ok {
-		return
-	}
-	result, err := s.config.TaskStreams.Events(r.Context(), taskStreamPrincipal(principal), taskstream.ReadRequest{
-		SessionID: r.PathValue("session_id"), TaskID: r.PathValue("task_id"), Cursor: cursor,
+	writeJSON(w, http.StatusOK, controlclient.ServerInfo{
+		ProtocolVersion: schema.CurrentProtocolVersion,
+		EnvelopeVersion: controlclient.EnvelopeVersion,
+		APIVersion:      controlclient.HTTPAPIVersion,
 	})
-	writeJSONResult(w, result, err)
-}
-
-func (s *Server) streamTaskEvents(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
-	}
-	if s.config.TaskStreams == nil {
-		writeMappedError(w, errorcode.New(errorcode.Unavailable, "appserver: task streams are unavailable"))
-		return
-	}
-	cursor, ok := resumeCursor(w, r)
-	if !ok {
-		return
-	}
-	result, err := s.config.TaskStreams.Subscribe(r.Context(), taskStreamPrincipal(principal), taskstream.SubscribeRequest{
-		SessionID: r.PathValue("session_id"), TaskID: r.PathValue("task_id"), Cursor: cursor,
-	})
-	if err != nil {
-		writeMappedError(w, err)
-		return
-	}
-	defer result.Subscription.Close()
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming is unavailable")
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.Header().Set(resumeModeHeader, string(result.ResumeMode))
-	w.Header().Set(transientGapHeader, strconv.FormatBool(result.TransientGap))
-	if result.BoundaryCursor != "" {
-		w.Header().Set(boundaryCursorHeader, result.BoundaryCursor)
-	}
-	w.WriteHeader(http.StatusOK)
-	boundary, err := json.Marshal(map[string]any{
-		"resume_mode": result.ResumeMode, "transient_gap": result.TransientGap, "boundary_cursor": result.BoundaryCursor,
-	})
-	if err != nil {
-		return
-	}
-	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", resumeEventName, boundary)
-	flusher.Flush()
-	heartbeat := time.NewTicker(s.config.Heartbeat)
-	defer heartbeat.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-heartbeat.C:
-			_, _ = fmt.Fprint(w, ": heartbeat\n\n")
-			flusher.Flush()
-		case envelope, open := <-result.Subscription.Events():
-			if !open {
-				if errors.Is(result.Subscription.Err(), taskstream.ErrSlowConsumer) {
-					retry, marshalErr := json.Marshal(map[string]any{
-						"resume_mode": taskstream.ResumeModeCurrentState, "transient_gap": true,
-						"boundary_cursor": result.Subscription.LastCursor(),
-					})
-					if marshalErr == nil {
-						_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", resumeEventName, retry)
-						flusher.Flush()
-					}
-				}
-				return
-			}
-			data, marshalErr := marshalEnvelope(envelope)
-			if marshalErr != nil {
-				return
-			}
-			_, _ = fmt.Fprintf(w, "id: %s\ndata: %s\n\n", envelope.Cursor, data)
-			flusher.Flush()
-		}
-	}
-}
-
-func taskStreamPrincipal(principal controlclient.Principal) taskstream.Principal {
-	return taskstream.Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)}
 }
 
 func (s *Server) principal(request *http.Request) (controlclient.Principal, error) {
 	principal, err := s.config.Authenticator.Authenticate(request)
 	if err != nil {
-		return controlclient.Principal{}, errorcode.Wrap(errorcode.Unauthenticated, "appserver: authentication failed", err)
+		return controlclient.Principal{}, errorcode.Wrap(errorcode.Unauthenticated, "controlserver: authentication failed", err)
 	}
 	if strings.TrimSpace(principal.ID) == "" {
-		return controlclient.Principal{}, errorcode.New(errorcode.Unauthenticated, "appserver: authentication failed")
+		return controlclient.Principal{}, errorcode.New(errorcode.Unauthenticated, "controlserver: authentication failed")
 	}
 	return principal, nil
 }
@@ -269,8 +159,8 @@ func (s *Server) closeSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	req := controlclient.CloseSessionRequest{}
-	if !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
+	var req controlclient.CloseSessionRequest
+	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
 	result, err := s.config.Service.CloseSession(r.Context(), principal, req)
@@ -286,7 +176,7 @@ func (s *Server) sessionState(w http.ResponseWriter, r *http.Request) {
 	writeJSONResult(w, result, err)
 }
 
-func (s *Server) sessionEvents(w http.ResponseWriter, r *http.Request) {
+func (s *Server) reconnectSession(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.requirePrincipal(w, r)
 	if !ok {
 		return
@@ -295,50 +185,53 @@ func (s *Server) sessionEvents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.config.Service.Events(r.Context(), principal, controlclient.SubscribeRequest{SessionID: r.PathValue("session_id"), Cursor: cursor})
-	writeJSONResult(w, result, err)
-}
-
-func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
-	}
-	cursor, ok := resumeCursor(w, r)
-	if !ok {
-		return
-	}
-	result, err := s.config.Service.Subscribe(r.Context(), principal, controlclient.SubscribeRequest{SessionID: r.PathValue("session_id"), Cursor: cursor})
+	result, err := s.config.Service.Reconnect(r.Context(), principal, controlclient.ReconnectRequest{
+		SessionID: r.PathValue("session_id"),
+		Cursor:    cursor,
+	})
 	if err != nil {
 		writeMappedError(w, err)
 		return
 	}
 	defer result.Subscription.Close()
+	s.streamControlSubscription(
+		w,
+		r,
+		result.Subscription,
+		result.State,
+	)
+}
+
+func (s *Server) streamControlSubscription(
+	w http.ResponseWriter,
+	r *http.Request,
+	subscription controlclient.FeedSubscription,
+	state controlclient.SessionState,
+) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "streaming is unavailable")
 		return
 	}
+	initial, err := wirev1.Marshal(state)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
-	w.Header().Set(resumeModeHeader, string(result.Mode))
-	w.Header().Set(transientGapHeader, strconv.FormatBool(result.TransientGap))
-	if result.BoundaryCursor != "" {
-		w.Header().Set(boundaryCursorHeader, result.BoundaryCursor)
+	w.Header().Set(resumeModeHeader, string(state.ResumeMode))
+	w.Header().Set(transientGapHeader, strconv.FormatBool(state.TransientGap))
+	if state.BoundaryCursor != "" {
+		w.Header().Set(boundaryCursorHeader, state.BoundaryCursor)
 	}
 	w.WriteHeader(http.StatusOK)
-	boundary, err := json.Marshal(resumeBoundary{
-		ResumeMode: result.Mode, TransientGap: result.TransientGap, BoundaryCursor: result.BoundaryCursor,
-	})
-	if err != nil {
-		return
-	}
-	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", resumeEventName, boundary)
+	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", bootstrapEventName, initial)
 	flusher.Flush()
 	heartbeat := time.NewTicker(s.config.Heartbeat)
 	defer heartbeat.Stop()
-	events := result.Subscription.Backfill()
+	events := subscription.Backfill()
 	backfill := true
 	for {
 		select {
@@ -351,11 +244,13 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request) {
 			if !open {
 				if backfill {
 					backfill = false
-					events = result.Subscription.Events()
+					_, _ = fmt.Fprintf(w, "event: %s\ndata: {}\n\n", backfillDoneEventName)
+					flusher.Flush()
+					events = subscription.Events()
 					continue
 				}
 				var gap *controlclient.FeedGapError
-				if errors.As(result.Subscription.Err(), &gap) {
+				if errors.As(subscription.Err(), &gap) {
 					retry, marshalErr := json.Marshal(resumeBoundary{
 						ResumeMode: gap.Mode, TransientGap: gap.TransientGap, BoundaryCursor: gap.RetryCursor,
 					})
@@ -366,7 +261,7 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request) {
 				}
 				return
 			}
-			data, err := marshalEnvelope(envelope)
+			data, err := wirev1.MarshalEnvelope(envelope)
 			if err != nil {
 				return
 			}
@@ -429,67 +324,6 @@ func (s *Server) resolveApproval(w http.ResponseWriter, r *http.Request) {
 	result, err := s.config.Service.ResolveApproval(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
-func (s *Server) attachParticipant(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
-	}
-	var req controlclient.AttachParticipantRequest
-	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
-		return
-	}
-	result, err := s.config.Service.AttachParticipant(r.Context(), principal, req)
-	writeCommandResult(w, result, err)
-}
-func (s *Server) promptParticipant(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
-	}
-	var req controlclient.PromptParticipantRequest
-	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) || !applyParticipantPath(w, &req.ParticipantID, r.PathValue("participant_id")) {
-		return
-	}
-	result, err := s.config.Service.PromptParticipant(r.Context(), principal, req)
-	writeCommandResult(w, result, err)
-}
-func (s *Server) cancelParticipant(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
-	}
-	var req controlclient.CancelParticipantRequest
-	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) || !applyParticipantPath(w, &req.ParticipantID, r.PathValue("participant_id")) {
-		return
-	}
-	result, err := s.config.Service.CancelParticipant(r.Context(), principal, req)
-	writeCommandResult(w, result, err)
-}
-func (s *Server) detachParticipant(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
-	}
-	req := controlclient.DetachParticipantRequest{ParticipantID: r.PathValue("participant_id")}
-	if !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
-		return
-	}
-	result, err := s.config.Service.DetachParticipant(r.Context(), principal, req)
-	writeCommandResult(w, result, err)
-}
-func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
-	}
-	var req controlclient.HandoffRequest
-	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
-		return
-	}
-	result, err := s.config.Service.Handoff(r.Context(), principal, req)
-	writeCommandResult(w, result, err)
-}
-
 func (s *Server) requirePrincipal(w http.ResponseWriter, r *http.Request) (controlclient.Principal, bool) {
 	principal, err := s.principal(r)
 	if err != nil {
@@ -515,7 +349,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, target any) bool {
 		writeError(w, http.StatusBadRequest, "request body must contain exactly one JSON value")
 		return false
 	}
-	if err := decodeWireRequest(raw, target); err != nil {
+	if err := wirev1.DecodeRequest(raw, target); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON request: "+err.Error())
 		return false
 	}
@@ -564,7 +398,7 @@ func applyWriteHeaders(w http.ResponseWriter, r *http.Request, base *controlclie
 		return false
 	}
 	ifMatch = ifMatch[1 : len(ifMatch)-1]
-	revision, err := parseUint64Decimal(ifMatch)
+	revision, err := wirev1.ParseUint64Decimal(ifMatch)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid If-Match revision")
 		return false
@@ -574,15 +408,6 @@ func applyWriteHeaders(w http.ResponseWriter, r *http.Request, base *controlclie
 		return false
 	}
 	base.ExpectedRevision = &revision
-	return true
-}
-
-func applyParticipantPath(w http.ResponseWriter, value *string, path string) bool {
-	if *value != "" && strings.TrimSpace(*value) != path {
-		writeError(w, http.StatusBadRequest, "participant id mismatch")
-		return false
-	}
-	*value = path
 	return true
 }
 
@@ -697,7 +522,7 @@ func writeError(w http.ResponseWriter, status int, detail string) {
 	writeJSON(w, status, map[string]any{"error": strings.TrimSpace(detail)})
 }
 func writeJSON(w http.ResponseWriter, status int, value any) {
-	data, err := marshalWireValue(value)
+	data, err := wirev1.Marshal(value)
 	if err != nil {
 		status = http.StatusInternalServerError
 		data = []byte(`{"error":"internal server error"}`)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,8 +15,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/app/controlserver"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlclient "github.com/caelis-labs/caelis/control/client"
+	"github.com/caelis-labs/caelis/control/client/httpclient"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 
@@ -51,6 +54,14 @@ func TestClassifyControlBackendErrorAddsTypedHTTPCategories(t *testing.T) {
 			err:     &kernelimpl.Error{Kind: kernelimpl.KindInternal, Code: kernelimpl.CodeInternal, Message: "private failure"},
 			outcome: controlclient.OutcomeUnknown,
 			code:    errorcode.Unknown,
+		},
+		{
+			name: "host closing",
+			err: &kernelimpl.Error{
+				Kind: kernelimpl.KindUnavailable, Code: kernelimpl.CodeHostClosing, Message: "gateway: host is closing",
+			},
+			outcome: controlclient.OutcomeRejected,
+			code:    errorcode.Unavailable,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -397,6 +408,220 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	_ = turn.Handle.Close()
 }
 
+func TestControlClientPromptUsesHostLifecycleAfterAdmission(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	sessions := sessionmemory.NewStore(sessionmemory.Config{})
+	active, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "owner", PreferredSessionID: "session-host-lifecycle",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &controlClientLifecycleRuntime{
+		started: make(chan struct{}),
+		stopped: make(chan struct{}),
+	}
+	kernel, err := kernelimpl.New(kernelimpl.Config{
+		Sessions: sessions, Runtime: runtime, Resolver: controlClientIngressResolver{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{
+		Secret: []byte("0123456789abcdef0123456789abcdef"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{
+		Reader: sessions, CursorCodec: codec,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostCtx, cancelHost := context.WithCancel(context.Background())
+	stack := &Stack{
+		Sessions:        sessions,
+		controlFeeds:    feeds,
+		gateway:         kernel,
+		lifecycleCtx:    hostCtx,
+		lifecycleCancel: cancelHost,
+	}
+
+	admissionCtx, cancelAdmission := context.WithCancel(context.Background())
+	result, err := stack.ExecuteControlCommand(
+		admissionCtx,
+		controlclient.Principal{ID: "owner"},
+		controlclient.ActionPrompt,
+		controlclient.PromptRequest{
+			WriteBase: controlclient.WriteBase{
+				OperationID: "operation-host-lifecycle",
+				SessionID:   active.SessionID,
+			},
+			Input: "keep running",
+		},
+	)
+	if err != nil || result.Target.HandleID == "" || result.Target.RunID == "" || result.Target.TurnID == "" {
+		t.Fatalf("Prompt result = %#v, %v", result, err)
+	}
+	select {
+	case <-runtime.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime did not start")
+	}
+
+	cancelAdmission()
+	select {
+	case <-runtime.stopped:
+		t.Fatal("request cancellation stopped the Host-owned Turn")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if err := stack.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-runtime.stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stack.Close did not stop the Host-owned Turn")
+	}
+}
+
+func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	sessions := sessionmemory.NewStore(sessionmemory.Config{})
+	active, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "owner", PreferredSessionID: "session-remote-host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &controlClientLifecycleRuntime{
+		started: make(chan struct{}),
+		stopped: make(chan struct{}),
+	}
+	kernel, err := kernelimpl.New(kernelimpl.Config{
+		Sessions: sessions, Runtime: runtime, Resolver: controlClientIngressResolver{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{
+		Secret: []byte("0123456789abcdef0123456789abcdef"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{
+		Reader: sessions, CursorCodec: codec,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostCtx, cancelHost := context.WithCancel(context.Background())
+	stack := &Stack{
+		Sessions:        sessions,
+		controlFeeds:    feeds,
+		gateway:         kernel,
+		lifecycleCtx:    hostCtx,
+		lifecycleCancel: cancelHost,
+	}
+	state, err := controlclient.NewStateService(controlclient.StateServiceConfig{
+		Sessions: sessions, Runtime: stack, Feeds: feeds,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
+		Authorizer: controlclient.SessionAuthorizer{Sessions: sessions},
+		Operations: controlclient.NewMemoryOperationStore(),
+		Backend:    stack,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := controlclient.NewClient(controlclient.ClientConfig{
+		Commands: commands,
+		State:    state,
+		Feeds:    feeds,
+		Authorizer: controlclient.SessionAuthorizer{
+			Sessions: sessions,
+		},
+		Sessions: sessions,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := controlserver.BearerTokenAuthenticator(
+		"0123456789abcdef0123456789abcdef",
+		controlclient.Principal{ID: "owner"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := controlserver.New(controlserver.HandlerConfig{
+		Service: service, Authenticator: authenticator,
+		AllowedHosts: []string{"127.0.0.1", "localhost", "::1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	remote, err := httpclient.New(httpclient.Config{
+		BaseURL: httpServer.URL, BearerToken: "0123456789abcdef0123456789abcdef",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	admissionCtx, cancelAdmission := context.WithCancel(context.Background())
+	prompt, err := remote.Prompt(admissionCtx, controlclient.PromptRequest{
+		WriteBase: controlclient.WriteBase{
+			OperationID: "operation-remote-host-prompt",
+			SessionID:   active.SessionID,
+		},
+		Input: "continue after this HTTP request",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-runtime.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime did not start through the Control Host")
+	}
+	cancelAdmission()
+	select {
+	case <-runtime.stopped:
+		t.Fatal("completed HTTP request owned the accepted Turn lifetime")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if _, err := remote.Cancel(context.Background(), controlclient.CancelRequest{
+		WriteBase: controlclient.WriteBase{
+			OperationID: "operation-remote-host-cancel",
+			SessionID:   active.SessionID,
+		},
+		Target: prompt.Target,
+		Reason: "cancel from a second client request",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-runtime.stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("remote Cancel did not stop the Host-owned Turn")
+	}
+	if err := stack.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestControlClientCancelParticipantRejectsMainTurnWithArbitraryParticipantID(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -444,6 +669,22 @@ func (controlClientBlockingRuntime) Run(ctx context.Context, _ agent.RunRequest)
 }
 
 func (controlClientBlockingRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+	return agent.RunState{}, nil
+}
+
+type controlClientLifecycleRuntime struct {
+	started chan struct{}
+	stopped chan struct{}
+}
+
+func (runtime *controlClientLifecycleRuntime) Run(ctx context.Context, _ agent.RunRequest) (agent.RunResult, error) {
+	close(runtime.started)
+	<-ctx.Done()
+	close(runtime.stopped)
+	return agent.RunResult{}, ctx.Err()
+}
+
+func (*controlClientLifecycleRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
 	return agent.RunState{}, nil
 }
 

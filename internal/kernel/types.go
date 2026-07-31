@@ -12,15 +12,19 @@ import (
 )
 
 type BeginTurnRequest struct {
-	SessionRef   session.SessionRef
-	Input        string
-	DisplayInput string
-	ContentParts []model.ContentPart
-	ModeName     string
-	ModelHint    string
-	Surface      string
-	Metadata     map[string]any
-	Request      agent.ModelRequestOptions
+	SessionRef session.SessionRef
+	// RuntimeContext owns the accepted Turn producer lifetime. Admission and
+	// request preparation still use the BeginTurn method context. When nil,
+	// the method context remains the runtime parent for compatibility.
+	RuntimeContext context.Context
+	Input          string
+	DisplayInput   string
+	ContentParts   []model.ContentPart
+	ModeName       string
+	ModelHint      string
+	Surface        string
+	Metadata       map[string]any
+	Request        agent.ModelRequestOptions
 }
 
 type TurnIntent = BeginTurnRequest

@@ -1,8 +1,6 @@
-package appserver
+package controlserver
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -19,9 +16,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
+	"github.com/caelis-labs/caelis/control/client/wirev1/generated"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/surfaces/appserver/generated"
 )
 
 func TestHTTPCreateUsesTrustedPrincipalAndHeaderContracts(t *testing.T) {
@@ -50,105 +47,79 @@ func TestHTTPCreateUsesTrustedPrincipalAndHeaderContracts(t *testing.T) {
 	}
 }
 
-func TestHTTPParticipantAttachUsesProfileAndEffortContract(t *testing.T) {
-	service := &fakeService{}
-	server := newTestServer(t, service, 0)
-	request := httptest.NewRequest(http.MethodPost, apiPrefix+"/sessions/session-1/participants", strings.NewReader(`{"profile_id":"acp:helper","effort":"xhigh","role":"sidecar","label":"Helper"}`))
-	authorizeTestRequest(request)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Idempotency-Key", "attach-operation-1")
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+func TestReconnectSSEBootstrapsStateBeforeBackfillAndLiveEvents(t *testing.T) {
+	backfill := eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, Cursor: "cursor-backfill", SessionID: "session-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "backfill"},
+		},
 	}
-	if service.attached.ProfileID != "acp:helper" || service.attached.Effort != "xhigh" || service.attached.SessionID != "session-1" || service.attached.OperationID != "attach-operation-1" {
-		t.Fatalf("attach request = %#v", service.attached)
+	live := eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, Cursor: "cursor-live", SessionID: "session-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "live"},
+		},
 	}
-
-	legacy := httptest.NewRequest(http.MethodPost, apiPrefix+"/sessions/session-1/participants", strings.NewReader(`{"agent":"helper","role":"sidecar"}`))
-	authorizeTestRequest(legacy)
-	legacy.Header.Set("Content-Type", "application/json")
-	legacy.Header.Set("Idempotency-Key", "attach-operation-2")
-	legacyRecorder := httptest.NewRecorder()
-	server.ServeHTTP(legacyRecorder, legacy)
-	if legacyRecorder.Code != http.StatusBadRequest {
-		t.Fatalf("legacy agent request status=%d body=%s", legacyRecorder.Code, legacyRecorder.Body.String())
+	subscription := newTestSubscription(live)
+	subscription.backfill = envelopeChannel(backfill)
+	service := &fakeService{
+		subscription: subscription,
+		reconnectState: controlclient.SessionState{
+			ProtocolVersion: schema.CurrentProtocolVersion,
+			EnvelopeVersion: controlclient.EnvelopeVersion,
+			APIVersion:      controlclient.HTTPAPIVersion,
+			SessionID:       "session-1", Revision: math.MaxUint64,
+			ResumeMode: controlclient.ResumeModeExact, BoundaryCursor: "cursor-boundary",
+		},
 	}
-}
-
-func TestSSEUsesCursorIDAndWholeEnvelopeData(t *testing.T) {
-	want := eventstream.Envelope{
-		Kind: eventstream.KindSessionUpdate, Cursor: "signed-cursor-1", SessionID: "session-1",
-		Position: &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
-			Anchor: eventstream.DurableFeedPosition{Seq: math.MaxUint64}, Generation: "generation-1", Sequence: math.MaxUint64,
-		}},
-		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
-		Update:   schema.ContentChunk{SessionUpdate: schema.UpdateAgentMessage, Content: schema.TextContent{Type: "text", Text: "hello"}},
-		Meta: map[string]any{"compact": map[string]any{
-			"summarized_through_seq": uint64(math.MaxUint64),
-		}},
-	}
-	subscription := newTestSubscription(want)
-	service := &fakeService{subscription: subscription}
 	server := newTestServer(t, service, time.Hour)
-	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/stream", nil)
+	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/reconnect?after=cursor-client", nil)
 	authorizeTestRequest(request)
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	response := recorder.Result()
 	defer response.Body.Close()
-	if response.Header.Get(resumeModeHeader) != string(controlclient.ResumeModeExact) || response.Header.Get(transientGapHeader) != "false" || response.Header.Get(boundaryCursorHeader) != "signed-cursor-1" {
-		t.Fatalf("SSE resume headers = %#v", response.Header)
+
+	if service.reconnectReq.SessionID != "session-1" || service.reconnectReq.Cursor != "cursor-client" {
+		t.Fatalf("Reconnect request = %#v", service.reconnectReq)
 	}
-	reader := bufio.NewReader(response.Body)
-	eventLine, _ := reader.ReadString('\n')
-	resumeData, _ := reader.ReadString('\n')
-	_, _ = reader.ReadString('\n')
-	if eventLine != "event: caelis.control.resume\n" {
-		t.Fatalf("resume event line = %q", eventLine)
-	}
-	var boundary resumeBoundary
-	if err := json.Unmarshal(bytes.TrimSpace([]byte(strings.TrimPrefix(resumeData, "data: "))), &boundary); err != nil {
-		t.Fatal(err)
-	}
-	if boundary.ResumeMode != controlclient.ResumeModeExact || boundary.TransientGap || boundary.BoundaryCursor != "signed-cursor-1" {
-		t.Fatalf("resume boundary = %#v", boundary)
-	}
-	idLine, _ := reader.ReadString('\n')
-	dataLine, _ := reader.ReadString('\n')
-	if idLine != "id: signed-cursor-1\n" || !strings.HasPrefix(dataLine, "data: ") {
-		t.Fatalf("SSE = %q %q", idLine, dataLine)
-	}
-	if !strings.Contains(dataLine, `"seq":"18446744073709551615"`) ||
-		!strings.Contains(dataLine, `"sequence":"18446744073709551615"`) ||
-		!strings.Contains(dataLine, `"summarized_through_seq":"18446744073709551615"`) {
-		t.Fatalf("SSE lost max uint64 precision: %s", dataLine)
-	}
-	wantJSON, err := marshalEnvelope(want)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var gotObject, wantObject any
-	if err := json.Unmarshal(bytes.TrimSpace([]byte(strings.TrimPrefix(dataLine, "data: "))), &gotObject); err != nil {
-		t.Fatal(err)
+	text := string(body)
+	bootstrapAt := strings.Index(text, "event: "+bootstrapEventName)
+	backfillAt := strings.Index(text, "id: cursor-backfill")
+	doneAt := strings.Index(text, "event: "+backfillDoneEventName)
+	liveAt := strings.Index(text, "id: cursor-live")
+	if bootstrapAt < 0 || backfillAt <= bootstrapAt || doneAt <= backfillAt || liveAt <= doneAt {
+		t.Fatalf("Reconnect SSE ordering is not bootstrap -> backfill -> marker -> live:\n%s", text)
 	}
-	if err := json.Unmarshal(wantJSON, &wantObject); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(gotObject, wantObject) {
-		t.Fatalf("SSE Envelope = %#v, want %#v", gotObject, wantObject)
+	if !strings.Contains(text, `"revision":"18446744073709551615"`) ||
+		response.Header.Get(boundaryCursorHeader) != "cursor-boundary" {
+		t.Fatalf("Reconnect bootstrap lost state or boundary: headers=%#v body=%s", response.Header, text)
 	}
 }
 
-func TestSSEReportsTypedGapWithRetryCursor(t *testing.T) {
+func TestReconnectReportsTypedGapWithRetryCursor(t *testing.T) {
 	subscription := newTestSubscription()
 	subscription.err = &controlclient.FeedGapError{
 		Cause: errors.New("splice overtaken"), RetryCursor: "retry-cursor",
 		Mode: controlclient.ResumeModeDurableFallback, TransientGap: true,
 	}
-	server := newTestServer(t, &fakeService{subscription: subscription}, time.Hour)
-	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/stream", nil)
+	server := newTestServer(t, &fakeService{
+		subscription: subscription,
+		reconnectState: controlclient.SessionState{
+			ProtocolVersion: schema.CurrentProtocolVersion,
+			EnvelopeVersion: controlclient.EnvelopeVersion,
+			APIVersion:      controlclient.HTTPAPIVersion,
+			SessionID:       "session-1",
+			ResumeMode:      controlclient.ResumeModeExact,
+		},
+	}, time.Hour)
+	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/reconnect", nil)
 	authorizeTestRequest(request)
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
@@ -158,7 +129,7 @@ func TestSSEReportsTypedGapWithRetryCursor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(body), "event: "+resumeEventName) != 2 ||
+	if strings.Count(string(body), "event: "+resumeEventName) != 1 ||
 		!strings.Contains(string(body), `"resume_mode":"durable_fallback"`) ||
 		!strings.Contains(string(body), `"transient_gap":true`) ||
 		!strings.Contains(string(body), `"boundary_cursor":"retry-cursor"`) {
@@ -166,9 +137,9 @@ func TestSSEReportsTypedGapWithRetryCursor(t *testing.T) {
 	}
 }
 
-func TestSSERejectsMismatchedResumeInputsAndCredentialQuery(t *testing.T) {
+func TestReconnectRejectsMismatchedResumeInputsAndCredentialQuery(t *testing.T) {
 	server := newTestServer(t, &fakeService{}, 0)
-	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/stream?after=a", nil)
+	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/reconnect?after=a", nil)
 	authorizeTestRequest(request)
 	request.Header.Set("Last-Event-ID", "b")
 	recorder := httptest.NewRecorder()
@@ -186,10 +157,10 @@ func TestSSERejectsMismatchedResumeInputsAndCredentialQuery(t *testing.T) {
 }
 
 func TestNewRequiresNetworkAuthenticatorAndHostAllowlist(t *testing.T) {
-	if _, err := New(Config{Service: &fakeService{}, AllowedHosts: []string{"example.test"}}); err == nil {
+	if _, err := New(HandlerConfig{Service: &fakeService{}, AllowedHosts: []string{"example.test"}}); err == nil {
 		t.Fatal("New accepted an unauthenticated HTTP handler")
 	}
-	if _, err := New(Config{Service: &fakeService{}, Authenticator: testAuthenticator()}); err == nil {
+	if _, err := New(HandlerConfig{Service: &fakeService{}, Authenticator: testAuthenticator()}); err == nil {
 		t.Fatal("New accepted an empty Host allowlist")
 	}
 }
@@ -383,12 +354,17 @@ func TestOpenAPI31ContainsEveryGeneratedOperation(t *testing.T) {
 
 type fakeService struct {
 	controlclient.Service
-	principal    controlclient.Principal
-	created      controlclient.CreateSessionRequest
-	attached     controlclient.AttachParticipantRequest
-	subscription controlclient.FeedSubscription
-	listCalls    int
-	inspectErr   error
+	principal      controlclient.Principal
+	created        controlclient.CreateSessionRequest
+	closed         controlclient.CloseSessionRequest
+	prompted       controlclient.PromptRequest
+	promptResult   *controlclient.CommandResult
+	promptErr      error
+	subscription   controlclient.FeedSubscription
+	reconnectReq   controlclient.ReconnectRequest
+	reconnectState controlclient.SessionState
+	listCalls      int
+	inspectErr     error
 }
 
 func (s *fakeService) ListSessions(context.Context, controlclient.Principal, controlclient.ListSessionsRequest) (session.SessionList, error) {
@@ -400,10 +376,26 @@ func (s *fakeService) CreateSession(_ context.Context, principal controlclient.P
 	s.created = req
 	return controlclient.CommandResult{OperationID: req.OperationID, Outcome: controlclient.OutcomeCommitted, SessionID: "session-created", Revision: 1}, nil
 }
-func (s *fakeService) AttachParticipant(_ context.Context, principal controlclient.Principal, req controlclient.AttachParticipantRequest) (controlclient.CommandResult, error) {
+func (s *fakeService) CloseSession(_ context.Context, principal controlclient.Principal, req controlclient.CloseSessionRequest) (controlclient.CommandResult, error) {
 	s.principal = principal
-	s.attached = req
+	s.closed = req
 	return controlclient.CommandResult{OperationID: req.OperationID, Outcome: controlclient.OutcomeCommitted, SessionID: req.SessionID, Revision: 2}, nil
+}
+func (s *fakeService) Prompt(_ context.Context, principal controlclient.Principal, req controlclient.PromptRequest) (controlclient.CommandResult, error) {
+	s.principal = principal
+	s.prompted = req
+	if s.promptResult != nil {
+		return *s.promptResult, s.promptErr
+	}
+	return controlclient.CommandResult{
+		OperationID: req.OperationID,
+		Outcome:     controlclient.OutcomeCommitted,
+		SessionID:   req.SessionID,
+		Revision:    math.MaxUint64,
+		Target: controlclient.TurnTarget{
+			HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1",
+		},
+	}, nil
 }
 func (s *fakeService) InspectSession(context.Context, controlclient.Principal, controlclient.StateRequest) (controlclient.SessionState, error) {
 	return controlclient.SessionState{}, s.inspectErr
@@ -411,10 +403,14 @@ func (s *fakeService) InspectSession(context.Context, controlclient.Principal, c
 func (s *fakeService) Subscribe(context.Context, controlclient.Principal, controlclient.SubscribeRequest) (controlclient.SubscribeResult, error) {
 	return controlclient.SubscribeResult{Subscription: s.subscription, Mode: controlclient.ResumeModeExact, BoundaryCursor: "signed-cursor-1"}, nil
 }
+func (s *fakeService) Reconnect(_ context.Context, _ controlclient.Principal, req controlclient.ReconnectRequest) (controlclient.ReconnectResult, error) {
+	s.reconnectReq = req
+	return controlclient.ReconnectResult{State: s.reconnectState, Subscription: s.subscription}, nil
+}
 
 func newTestServer(t *testing.T, service controlclient.Service, heartbeat time.Duration) *Server {
 	t.Helper()
-	server, err := New(Config{
+	server, err := New(HandlerConfig{
 		Service: service, Authenticator: testAuthenticator(),
 		AllowedHosts: []string{"example.test", "127.0.0.1"}, Heartbeat: heartbeat,
 	})
@@ -444,20 +440,28 @@ func authorizeTestRequest(request *http.Request) {
 }
 
 type testSubscription struct {
-	events chan eventstream.Envelope
-	err    error
+	backfill chan eventstream.Envelope
+	events   chan eventstream.Envelope
+	err      error
 }
 
 func newTestSubscription(events ...eventstream.Envelope) *testSubscription {
+	return &testSubscription{events: envelopeChannel(events...)}
+}
+
+func envelopeChannel(events ...eventstream.Envelope) chan eventstream.Envelope {
 	channel := make(chan eventstream.Envelope, len(events))
 	for _, event := range events {
 		channel <- event
 	}
 	close(channel)
-	return &testSubscription{events: channel}
+	return channel
 }
 func (s *testSubscription) Events() <-chan eventstream.Envelope { return s.events }
-func (*testSubscription) Backfill() <-chan eventstream.Envelope {
+func (s *testSubscription) Backfill() <-chan eventstream.Envelope {
+	if s.backfill != nil {
+		return s.backfill
+	}
 	done := make(chan eventstream.Envelope)
 	close(done)
 	return done

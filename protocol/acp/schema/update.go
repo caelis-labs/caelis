@@ -1,6 +1,9 @@
 package schema
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 const (
 	MethodSessionUpdate        = "session/update"
@@ -50,6 +53,68 @@ const (
 // the only codec boundary between those semantics and these wire DTOs.
 type Update interface {
 	SessionUpdateType() string
+}
+
+// DecodeUpdateJSON decodes one ACP update union member while preserving
+// unknown vendor updates as RawUpdate.
+func DecodeUpdateJSON(raw json.RawMessage) (Update, error) {
+	var probe struct {
+		SessionUpdate string `json:"sessionUpdate"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return nil, err
+	}
+	var target Update
+	switch probe.SessionUpdate {
+	case UpdateUserMessage, UpdateAgentMessage, UpdateAgentThought:
+		target = &ContentChunk{}
+	case UpdateToolCall:
+		target = &ToolCall{}
+	case UpdateToolCallInfo:
+		target = &ToolCallUpdate{}
+	case UpdatePlan:
+		target = &PlanUpdate{}
+	case UpdateUsage:
+		target = &UsageUpdate{}
+	case UpdateAvailableCmds:
+		target = &AvailableCommandsUpdate{}
+	case UpdateCurrentMode:
+		target = &CurrentModeUpdate{}
+	case UpdateConfigOption:
+		target = &ConfigOptionUpdate{}
+	case UpdateSessionInfo:
+		target = &SessionInfoUpdate{}
+	default:
+		return RawUpdate{
+			SessionUpdate: strings.TrimSpace(probe.SessionUpdate),
+			Raw:           append(json.RawMessage(nil), raw...),
+		}, nil
+	}
+	if err := json.Unmarshal(raw, target); err != nil {
+		return nil, err
+	}
+	switch typed := target.(type) {
+	case *ContentChunk:
+		return *typed, nil
+	case *ToolCall:
+		return *typed, nil
+	case *ToolCallUpdate:
+		return *typed, nil
+	case *PlanUpdate:
+		return *typed, nil
+	case *UsageUpdate:
+		return *typed, nil
+	case *AvailableCommandsUpdate:
+		return *typed, nil
+	case *CurrentModeUpdate:
+		return *typed, nil
+	case *ConfigOptionUpdate:
+		return *typed, nil
+	case *SessionInfoUpdate:
+		return *typed, nil
+	default:
+		panic("unreachable ACP update target")
+	}
 }
 
 type RawUpdate struct {

@@ -1,4 +1,5 @@
-package appserver
+// Package wirev1 owns the Control-client-bound HTTP/SSE v1 wire codec.
+package wirev1
 
 import (
 	"bytes"
@@ -13,10 +14,36 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
+const APIPrefix = "/api/control/v1"
+
+const (
+	ResumeEventName       = "caelis.control.resume"
+	BootstrapEventName    = "caelis.control.bootstrap"
+	BackfillDoneEventName = "caelis.control.backfill_done"
+)
+
+// ResumeBoundary is the wire notification that tells a disconnected client
+// where to atomically attach again.
+type ResumeBoundary struct {
+	ResumeMode     controlclient.ResumeMode `json:"resume_mode"`
+	TransientGap   bool                     `json:"transient_gap,omitempty"`
+	BoundaryCursor string                   `json:"boundary_cursor,omitempty"`
+}
+
 const maxSafeJSONInteger = uint64(1<<53 - 1)
+
+// ParseUint64Decimal parses one canonical base-10 uint64 wire value.
+func ParseUint64Decimal(value string) (uint64, error) {
+	return parseUint64Decimal(value)
+}
+
+// ValidateJSONNumbers rejects JSON numeric tokens outside the wire's exact
+// cross-language integer range.
+func ValidateJSONNumbers(raw []byte) error {
+	return validateWireJSONNumbers(raw)
+}
 
 type wireDurableFeedPosition struct {
 	Seq             string `json:"seq"`
@@ -69,6 +96,21 @@ func marshalWireValue(value any) ([]byte, error) {
 	return raw, nil
 }
 
+// Marshal encodes one Control value according to the v1 JSON contract.
+func Marshal(value any) ([]byte, error) {
+	return marshalWireValue(value)
+}
+
+// MarshalEnvelope encodes one typed ACP-shaped Control Envelope.
+func MarshalEnvelope(envelope eventstream.Envelope) ([]byte, error) {
+	return marshalEnvelope(envelope)
+}
+
+// DecodeRequest decodes one strict v1 write request.
+func DecodeRequest(raw json.RawMessage, target any) error {
+	return decodeWireRequest(raw, target)
+}
+
 func marshalWireValueUnchecked(value any) ([]byte, error) {
 	switch typed := value.(type) {
 	case controlclient.CreateSessionRequest:
@@ -83,47 +125,15 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case controlclient.ResolveApprovalRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case controlclient.AttachParticipantRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case controlclient.PromptParticipantRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case controlclient.CancelParticipantRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case controlclient.DetachParticipantRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case controlclient.HandoffRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case controlclient.CommandResult:
 		return marshalCommandResult(typed)
 	case controlclient.SessionState:
 		return marshalSessionState(typed)
-	case controlclient.EventBatch:
-		return marshalEventBatch(typed)
-	case taskstream.Batch:
-		return marshalTaskEventBatch(typed)
 	case eventstream.Envelope:
 		return marshalEnvelope(typed)
 	default:
 		return json.Marshal(value)
 	}
-}
-
-func marshalTaskEventBatch(batch taskstream.Batch) ([]byte, error) {
-	type wireBatch struct {
-		Events         []json.RawMessage     `json:"events,omitempty"`
-		ResumeMode     taskstream.ResumeMode `json:"resume_mode"`
-		TransientGap   bool                  `json:"transient_gap,omitempty"`
-		BoundaryCursor string                `json:"boundary_cursor,omitempty"`
-	}
-	out := wireBatch{ResumeMode: batch.ResumeMode, TransientGap: batch.TransientGap, BoundaryCursor: batch.BoundaryCursor}
-	for _, envelope := range batch.Events {
-		raw, err := marshalEnvelope(envelope)
-		if err != nil {
-			return nil, err
-		}
-		out.Events = append(out.Events, raw)
-	}
-	return json.Marshal(out)
 }
 
 func marshalWriteRequest(request any, expectedRevision *uint64) ([]byte, error) {
@@ -161,7 +171,7 @@ func marshalSessionState(state controlclient.SessionState) ([]byte, error) {
 	}
 	if state.BoundaryPosition != nil {
 		if err := state.BoundaryPosition.Validate(); err != nil {
-			return nil, fmt.Errorf("appserver: invalid boundary position: %w", err)
+			return nil, fmt.Errorf("control wire v1: invalid boundary position: %w", err)
 		}
 	}
 	fields, err := marshalObject(state)
@@ -207,34 +217,11 @@ func marshalBinding(binding any, contextSyncSeq uint64) (json.RawMessage, error)
 	return json.Marshal(fields)
 }
 
-func marshalEventBatch(batch controlclient.EventBatch) ([]byte, error) {
-	type wireBatch struct {
-		Events         []json.RawMessage        `json:"events,omitempty"`
-		ResumeMode     controlclient.ResumeMode `json:"resume_mode"`
-		TransientGap   bool                     `json:"transient_gap,omitempty"`
-		BoundaryCursor string                   `json:"boundary_cursor,omitempty"`
-	}
-	out := wireBatch{
-		ResumeMode: batch.ResumeMode, TransientGap: batch.TransientGap, BoundaryCursor: batch.BoundaryCursor,
-	}
-	if len(batch.Events) > 0 {
-		out.Events = make([]json.RawMessage, 0, len(batch.Events))
-		for _, envelope := range batch.Events {
-			raw, err := marshalEnvelope(envelope)
-			if err != nil {
-				return nil, err
-			}
-			out.Events = append(out.Events, raw)
-		}
-	}
-	return json.Marshal(out)
-}
-
 func marshalEnvelope(envelope eventstream.Envelope) ([]byte, error) {
 	wireEnvelope := eventstream.CloneEnvelope(envelope)
 	if wireEnvelope.Position != nil {
 		if err := wireEnvelope.Position.Validate(); err != nil {
-			return nil, fmt.Errorf("appserver: invalid Envelope position: %w", err)
+			return nil, fmt.Errorf("control wire v1: invalid Envelope position: %w", err)
 		}
 	}
 	if err := prepareEnvelopeMetadata(&wireEnvelope); err != nil {
@@ -268,7 +255,7 @@ func marshalEnvelope(envelope eventstream.Envelope) ([]byte, error) {
 
 func prepareEnvelopeMetadata(envelope *eventstream.Envelope) error {
 	if envelope == nil {
-		return fmt.Errorf("appserver: nil Envelope")
+		return fmt.Errorf("control wire v1: nil Envelope")
 	}
 	var err error
 	envelope.Meta, err = decimalizeKnownMetadata(envelope.Meta)
@@ -334,12 +321,23 @@ func validateLocations(locations []schema.ToolCallLocation) error {
 
 func validateSafeInt(name string, value int) error {
 	if value < 0 || uint64(value) > maxSafeJSONInteger {
-		return fmt.Errorf("appserver: %s exceeds the exact JSON integer range", name)
+		return fmt.Errorf("control wire v1: %s exceeds the exact JSON integer range", name)
 	}
 	return nil
 }
 
 func decimalizeKnownMetadata(meta map[string]any) (map[string]any, error) {
+	return transformKnownMetadata(meta, decimalizeMapValue)
+}
+
+func parseKnownMetadata(meta map[string]any) (map[string]any, error) {
+	return transformKnownMetadata(meta, parseDecimalMapValue)
+}
+
+func transformKnownMetadata(
+	meta map[string]any,
+	transform func(map[string]any, string) error,
+) (map[string]any, error) {
 	out := metautil.CloneMap(meta)
 	if len(out) == 0 {
 		return out, nil
@@ -350,7 +348,7 @@ func decimalizeKnownMetadata(meta map[string]any) (map[string]any, error) {
 			return nil, err
 		}
 		if present {
-			if err := decimalizeMapValue(binding, "context_sync_seq"); err != nil {
+			if err := transform(binding, "context_sync_seq"); err != nil {
 				return nil, err
 			}
 		}
@@ -361,7 +359,7 @@ func decimalizeKnownMetadata(meta map[string]any) (map[string]any, error) {
 	}
 	if hasCompact {
 		for _, key := range compactIntegerKeys() {
-			if err := decimalizeMapValue(compact, key); err != nil {
+			if err := transform(compact, key); err != nil {
 				return nil, err
 			}
 		}
@@ -379,7 +377,7 @@ func decimalizeKnownMetadata(meta map[string]any) (map[string]any, error) {
 			return nil, mapErr
 		} else if present {
 			for _, key := range []string{"output_cursor", "event_cursor", "turn_seq"} {
-				if err := decimalizeMapValue(task, key); err != nil {
+				if err := transform(task, key); err != nil {
 					return nil, err
 				}
 			}
@@ -387,7 +385,7 @@ func decimalizeKnownMetadata(meta map[string]any) (map[string]any, error) {
 		if stream, present, mapErr := childMap(runtime, metautil.RuntimeStream); mapErr != nil {
 			return nil, mapErr
 		} else if present {
-			if err := decimalizeMapValue(stream, metautil.RuntimeStreamBefore); err != nil {
+			if err := transform(stream, metautil.RuntimeStreamBefore); err != nil {
 				return nil, err
 			}
 		}
@@ -396,7 +394,7 @@ func decimalizeKnownMetadata(meta map[string]any) (map[string]any, error) {
 		return nil, mapErr
 	} else if present {
 		for _, key := range usageMetadataIntegerKeys(false) {
-			if err := decimalizeMapValue(usage, key); err != nil {
+			if err := transform(usage, key); err != nil {
 				return nil, err
 			}
 		}
@@ -404,14 +402,14 @@ func decimalizeKnownMetadata(meta map[string]any) (map[string]any, error) {
 	if sdk, present, mapErr := childMap(caelis, "sdk"); mapErr != nil {
 		return nil, mapErr
 	} else if present {
-		if err := decimalizeMapValue(sdk, "context_window_tokens"); err != nil {
+		if err := transform(sdk, "context_window_tokens"); err != nil {
 			return nil, err
 		}
 		if usage, present, usageErr := childMap(sdk, "usage"); usageErr != nil {
 			return nil, usageErr
 		} else if present {
 			for _, key := range usageMetadataIntegerKeys(true) {
-				if err := decimalizeMapValue(usage, key); err != nil {
+				if err := transform(usage, key); err != nil {
 					return nil, err
 				}
 			}
@@ -445,7 +443,7 @@ func childMap(parent map[string]any, key string) (map[string]any, bool, error) {
 	}
 	child, ok := value.(map[string]any)
 	if !ok {
-		return nil, false, fmt.Errorf("appserver: _meta.%s must be an object", key)
+		return nil, false, fmt.Errorf("control wire v1: _meta.%s must be an object", key)
 	}
 	return child, true, nil
 }
@@ -457,9 +455,26 @@ func decimalizeMapValue(values map[string]any, key string) error {
 	}
 	decimal, err := decimalString(value)
 	if err != nil {
-		return fmt.Errorf("appserver: _meta %s: %w", key, err)
+		return fmt.Errorf("control wire v1: _meta %s: %w", key, err)
 	}
 	values[key] = decimal
+	return nil
+}
+
+func parseDecimalMapValue(values map[string]any, key string) error {
+	value, ok := values[key]
+	if !ok {
+		return nil
+	}
+	decimal, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("control wire v1: _meta.%s must be a uint64 decimal string", key)
+	}
+	parsed, err := parseUint64Decimal(decimal)
+	if err != nil {
+		return fmt.Errorf("control wire v1: invalid _meta.%s: %w", key, err)
+	}
+	values[key] = parsed
 	return nil
 }
 
@@ -568,10 +583,10 @@ func validateWireJSONNumbers(raw []byte) error {
 	decoder.UseNumber()
 	var value any
 	if err := decoder.Decode(&value); err != nil {
-		return fmt.Errorf("appserver: decode marshaled wire JSON: %w", err)
+		return fmt.Errorf("control wire v1: decode marshaled wire JSON: %w", err)
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return fmt.Errorf("appserver: marshaled wire JSON contains trailing data")
+		return fmt.Errorf("control wire v1: marshaled wire JSON contains trailing data")
 	}
 	return validateWireJSONValue(value)
 }
@@ -583,18 +598,18 @@ func validateWireJSONValue(value any) error {
 		approximate, err := strconv.ParseFloat(text, 64)
 		magnitude := math.Abs(approximate)
 		if math.IsInf(approximate, 0) || math.IsNaN(approximate) || err != nil && magnitude != 0 {
-			return fmt.Errorf("appserver: JSON number %q exceeds the exact JavaScript range; encode it as a string", typed)
+			return fmt.Errorf("control wire v1: JSON number %q exceeds the exact JavaScript range; encode it as a string", typed)
 		}
 		maximum := float64(maxSafeJSONInteger)
 		if magnitude < maximum {
 			return nil
 		}
 		if magnitude > maximum || len(text) > 128 {
-			return fmt.Errorf("appserver: JSON number %q exceeds the exact JavaScript range; encode it as a string", typed)
+			return fmt.Errorf("control wire v1: JSON number %q exceeds the exact JavaScript range; encode it as a string", typed)
 		}
 		number, ok := new(big.Rat).SetString(text)
 		if !ok || new(big.Rat).Abs(number).Cmp(big.NewRat(int64(maxSafeJSONInteger), 1)) > 0 {
-			return fmt.Errorf("appserver: JSON number %q exceeds the exact JavaScript range; encode it as a string", typed)
+			return fmt.Errorf("control wire v1: JSON number %q exceeds the exact JavaScript range; encode it as a string", typed)
 		}
 	case []any:
 		for _, item := range typed {

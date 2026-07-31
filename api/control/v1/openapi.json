@@ -2,10 +2,24 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Caelis Control Client API",
-    "version": "1.0.0-m2"
+    "version": "1.0.0-m3"
   },
   "servers": [{"url": "/api/control/v1"}],
   "paths": {
+    "/initialize": {
+      "get": {
+        "operationId": "initializeClient",
+        "responses": {
+          "200": {"description": "Control protocol compatibility handshake", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ServerInfo"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    },
     "/sessions": {
       "get": {
         "operationId": "listSessions",
@@ -20,7 +34,8 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "409": {"$ref": "#/components/responses/Conflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       },
       "post": {
@@ -34,7 +49,8 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "409": {"$ref": "#/components/responses/CommandConflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
     },
@@ -46,6 +62,7 @@
           {"$ref": "#/components/parameters/IdempotencyKey"},
           {"$ref": "#/components/parameters/IfMatch"}
         ],
+        "requestBody": {"$ref": "#/components/requestBodies/CloseSession"},
         "responses": {
           "200": {"$ref": "#/components/responses/CommandCommitted"},
           "202": {"$ref": "#/components/responses/CommandAccepted"},
@@ -53,7 +70,8 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "409": {"$ref": "#/components/responses/CommandConflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
     },
@@ -67,27 +85,14 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "409": {"$ref": "#/components/responses/Conflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
     },
-    "/sessions/{session_id}/events": {
+    "/sessions/{session_id}/reconnect": {
       "get": {
-        "operationId": "getSessionEvents",
-        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/After"}],
-        "responses": {
-          "200": {"description": "Finite feed backfill", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EventBatch"}}}},
-          "400": {"$ref": "#/components/responses/BadRequest"},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "409": {"$ref": "#/components/responses/Conflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
-        }
-      }
-    },
-    "/sessions/{session_id}/stream": {
-      "get": {
-        "operationId": "streamSessionEvents",
+        "operationId": "reconnectSession",
         "parameters": [
           {"$ref": "#/components/parameters/SessionID"},
           {"$ref": "#/components/parameters/After"},
@@ -95,7 +100,7 @@
         ],
         "responses": {
           "200": {
-            "description": "SSE Envelope stream. The first named event is the ResumeBoundary metadata frame.",
+            "description": "Atomic SessionState bootstrap and SSE continuation. The first named event is SessionState; a backfill-done marker separates replay from live Envelopes.",
             "headers": {
               "Caelis-Resume-Mode": {"schema": {"$ref": "#/components/schemas/ResumeMode"}},
               "Caelis-Transient-Gap": {"schema": {"type": "boolean"}},
@@ -107,62 +112,8 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "409": {"$ref": "#/components/responses/Conflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
-        }
-      }
-    },
-    "/sessions/{session_id}/tasks": {
-      "get": {
-        "operationId": "listSessionTasks",
-        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
-        "responses": {
-          "200": {"description": "Session Task directory", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TaskList"}}}},
-          "400": {"$ref": "#/components/responses/BadRequest"},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "409": {"$ref": "#/components/responses/Conflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
-        }
-      }
-    },
-    "/sessions/{session_id}/tasks/{task_id}/events": {
-      "get": {
-        "operationId": "getTaskEvents",
-        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/TaskID"}, {"$ref": "#/components/parameters/After"}],
-        "responses": {
-          "200": {"description": "Finite retained Task stream suffix", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TaskEventBatch"}}}},
-          "400": {"$ref": "#/components/responses/BadRequest"},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "409": {"$ref": "#/components/responses/Conflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
-        }
-      }
-    },
-    "/sessions/{session_id}/tasks/{task_id}/stream": {
-      "get": {
-        "operationId": "streamTaskEvents",
-        "parameters": [
-          {"$ref": "#/components/parameters/SessionID"},
-          {"$ref": "#/components/parameters/TaskID"},
-          {"$ref": "#/components/parameters/After"},
-          {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string"}}
-        ],
-        "responses": {
-          "200": {
-            "description": "SSE stream for one Task. The first named event is TaskResumeBoundary metadata.",
-            "headers": {
-              "Caelis-Resume-Mode": {"schema": {"$ref": "#/components/schemas/TaskResumeMode"}},
-              "Caelis-Transient-Gap": {"schema": {"type": "boolean"}},
-              "Caelis-Boundary-Cursor": {"schema": {"type": "string"}}
-            },
-            "content": {"text/event-stream": {"schema": {"type": "string"}}}
-          },
-          "400": {"$ref": "#/components/responses/BadRequest"},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "409": {"$ref": "#/components/responses/Conflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
     },
@@ -178,7 +129,8 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "409": {"$ref": "#/components/responses/CommandConflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
     },
@@ -194,7 +146,8 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "409": {"$ref": "#/components/responses/CommandConflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
     },
@@ -210,7 +163,8 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "409": {"$ref": "#/components/responses/CommandConflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
     },
@@ -231,86 +185,8 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "409": {"$ref": "#/components/responses/CommandConflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
-        }
-      }
-    },
-    "/sessions/{session_id}/participants": {
-      "post": {
-        "operationId": "attachParticipant",
-        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/IfMatch"}],
-        "requestBody": {"$ref": "#/components/requestBodies/AttachParticipant"},
-        "responses": {
-          "200": {"$ref": "#/components/responses/CommandCommitted"},
-          "202": {"$ref": "#/components/responses/CommandAccepted"},
-          "400": {"$ref": "#/components/responses/CommandBadRequest"},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "409": {"$ref": "#/components/responses/CommandConflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
-        }
-      }
-    },
-    "/sessions/{session_id}/participants/{participant_id}/prompt": {
-      "post": {
-        "operationId": "promptParticipant",
-        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/ParticipantID"}, {"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/IfMatch"}],
-        "requestBody": {"$ref": "#/components/requestBodies/PromptParticipant"},
-        "responses": {
-          "200": {"$ref": "#/components/responses/CommandCommitted"},
-          "202": {"$ref": "#/components/responses/CommandAccepted"},
-          "400": {"$ref": "#/components/responses/CommandBadRequest"},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "409": {"$ref": "#/components/responses/CommandConflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
-        }
-      }
-    },
-    "/sessions/{session_id}/participants/{participant_id}/cancel": {
-      "post": {
-        "operationId": "cancelParticipant",
-        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/ParticipantID"}, {"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/IfMatch"}],
-        "requestBody": {"$ref": "#/components/requestBodies/CancelParticipant"},
-        "responses": {
-          "200": {"$ref": "#/components/responses/CommandCommitted"},
-          "202": {"$ref": "#/components/responses/CommandAccepted"},
-          "400": {"$ref": "#/components/responses/CommandBadRequest"},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "409": {"$ref": "#/components/responses/CommandConflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
-        }
-      }
-    },
-    "/sessions/{session_id}/participants/{participant_id}": {
-      "delete": {
-        "operationId": "detachParticipant",
-        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/ParticipantID"}, {"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/IfMatch"}],
-        "responses": {
-          "200": {"$ref": "#/components/responses/CommandCommitted"},
-          "202": {"$ref": "#/components/responses/CommandAccepted"},
-          "400": {"$ref": "#/components/responses/CommandBadRequest"},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "409": {"$ref": "#/components/responses/CommandConflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
-        }
-      }
-    },
-    "/sessions/{session_id}/handoff": {
-      "post": {
-        "operationId": "handoffController",
-        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/IfMatch"}],
-        "requestBody": {"$ref": "#/components/requestBodies/Handoff"},
-        "responses": {
-          "200": {"$ref": "#/components/responses/CommandCommitted"},
-          "202": {"$ref": "#/components/responses/CommandAccepted"},
-          "400": {"$ref": "#/components/responses/CommandBadRequest"},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "409": {"$ref": "#/components/responses/CommandConflict"},
-          "500": {"$ref": "#/components/responses/InternalServerError"}
+          "500": {"$ref": "#/components/responses/InternalServerError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
     }
@@ -319,21 +195,16 @@
     "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}},
     "parameters": {
       "SessionID": {"name": "session_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
-      "TaskID": {"name": "task_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
-      "ParticipantID": {"name": "participant_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
       "IdempotencyKey": {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 1}},
       "IfMatch": {"name": "If-Match", "in": "header", "schema": {"type": "string"}},
       "After": {"name": "after", "in": "query", "schema": {"type": "string"}}
     },
     "requestBodies": {
+      "CloseSession": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CloseSessionRequest"}}}},
       "Prompt": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PromptRequest"}}}},
       "Steer": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SteerRequest"}}}},
       "Cancel": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CancelRequest"}}}},
-      "ResolveApproval": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ResolveApprovalRequest"}}}},
-      "AttachParticipant": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AttachParticipantRequest"}}}},
-      "PromptParticipant": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PromptParticipantRequest"}}}},
-      "CancelParticipant": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CancelParticipantRequest"}}}},
-      "Handoff": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HandoffRequest"}}}}
+      "ResolveApproval": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ResolveApprovalRequest"}}}}
     },
     "responses": {
       "CommandCommitted": {"description": "Command committed synchronously", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CommandResult"}}}},
@@ -348,7 +219,8 @@
       },
       "Forbidden": {"description": "Authenticated principal is not authorized", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
       "Conflict": {"description": "Revision, idempotency, or state conflict", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
-      "InternalServerError": {"description": "Internal server error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
+      "InternalServerError": {"description": "Internal server error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+      "ServiceUnavailable": {"description": "Host is shutting down or temporarily unavailable", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
     },
     "schemas": {
       "JSONValue": {
@@ -470,9 +342,6 @@
       },
       "Outcome": {"type": "string", "enum": ["accepted", "committed", "conflicted", "rejected", "unknown"]},
       "ResumeMode": {"type": "string", "enum": ["exact", "durable_fallback"]},
-      "TaskResumeMode": {"type": "string", "enum": ["exact", "current_state"]},
-      "TaskKind": {"type": "string", "enum": ["command", "subagent"]},
-      "TaskState": {"type": "string", "enum": ["prepared", "running", "waiting_input", "waiting_approval", "completed", "failed", "cancelled", "interrupted", "terminated", "unknown_outcome"]},
       "ControllerKind": {"type": "string", "enum": ["kernel", "acp"]},
       "ParticipantKind": {"type": "string", "enum": ["acp", "subagent"]},
       "ParticipantRole": {"type": "string", "enum": ["sidecar", "delegated", "observer"]},
@@ -542,26 +411,6 @@
           "reason": {"type": "string"},
           "review_text": {"type": "string"}
         }}],
-        "unevaluatedProperties": false
-      },
-      "AttachParticipantRequest": {
-        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["profile_id", "effort"], "properties": {"profile_id": {"type": "string", "minLength": 1}, "effort": {"type": "string", "minLength": 1}, "role": {"$ref": "#/components/schemas/ParticipantRole"}, "label": {"type": "string"}, "source": {"type": "string"}}}],
-        "unevaluatedProperties": false
-      },
-      "PromptParticipantRequest": {
-        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["participant_id", "input"], "properties": {"participant_id": {"type": "string", "minLength": 1}, "input": {"type": "string", "minLength": 1}, "display_input": {"type": "string"}}}],
-        "unevaluatedProperties": false
-      },
-      "CancelParticipantRequest": {
-        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["participant_id", "target"], "properties": {"participant_id": {"type": "string", "minLength": 1}, "target": {"$ref": "#/components/schemas/TurnTarget"}, "reason": {"type": "string"}}}],
-        "unevaluatedProperties": false
-      },
-      "DetachParticipantRequest": {
-        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["participant_id"], "properties": {"participant_id": {"type": "string", "minLength": 1}, "source": {"type": "string"}}}],
-        "unevaluatedProperties": false
-      },
-      "HandoffRequest": {
-        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["kind"], "properties": {"kind": {"$ref": "#/components/schemas/ControllerKind"}, "agent": {"type": "string"}, "source": {"type": "string"}, "reason": {"type": "string"}}}],
         "unevaluatedProperties": false
       },
       "CommandResult": {
@@ -676,22 +525,6 @@
         ],
         "discriminator": {"propertyName": "kind"}
       },
-      "ResumeBoundary": {"type": "object", "additionalProperties": false, "required": ["resume_mode"], "properties": {"resume_mode": {"$ref": "#/components/schemas/ResumeMode"}, "transient_gap": {"type": "boolean"}, "boundary_cursor": {"type": "string"}}},
-      "EventBatch": {"type": "object", "additionalProperties": false, "required": ["resume_mode"], "properties": {"events": {"type": "array", "items": {"$ref": "#/components/schemas/Envelope"}}, "resume_mode": {"$ref": "#/components/schemas/ResumeMode"}, "transient_gap": {"type": "boolean"}, "boundary_cursor": {"type": "string"}}},
-      "TaskDescriptor": {
-        "type": "object", "additionalProperties": false,
-        "required": ["session_id", "task_id", "handle", "kind", "state", "running"],
-        "properties": {
-          "session_id": {"type": "string"}, "task_id": {"type": "string"}, "handle": {"type": "string", "minLength": 1}, "agent_handle": {"type": "string"}, "kind": {"$ref": "#/components/schemas/TaskKind"},
-          "title": {"type": "string"}, "state": {"$ref": "#/components/schemas/TaskState"}, "running": {"type": "boolean"},
-          "supports_input": {"type": "boolean"}, "supports_cancel": {"type": "boolean"},
-          "parent_tool": {"$ref": "#/components/schemas/ParentToolRelation"}, "participant_id": {"type": "string"},
-          "current_turn_id": {"type": "string"}, "updated_at": {"type": "string", "format": "date-time"}
-        }
-      },
-      "TaskList": {"type": "object", "additionalProperties": false, "properties": {"tasks": {"type": "array", "items": {"$ref": "#/components/schemas/TaskDescriptor"}}}},
-      "TaskResumeBoundary": {"type": "object", "additionalProperties": false, "required": ["resume_mode"], "properties": {"resume_mode": {"$ref": "#/components/schemas/TaskResumeMode"}, "transient_gap": {"type": "boolean"}, "boundary_cursor": {"type": "string"}}},
-      "TaskEventBatch": {"type": "object", "additionalProperties": false, "required": ["resume_mode"], "properties": {"events": {"type": "array", "items": {"$ref": "#/components/schemas/Envelope"}}, "resume_mode": {"$ref": "#/components/schemas/TaskResumeMode"}, "transient_gap": {"type": "boolean"}, "boundary_cursor": {"type": "string"}}},
       "SessionRef": {"type": "object", "additionalProperties": false, "properties": {"app_name": {"type": "string"}, "user_id": {"type": "string"}, "session_id": {"type": "string"}, "workspace_key": {"type": "string"}}},
       "ControllerBinding": {"type": "object", "additionalProperties": false, "properties": {"kind": {"$ref": "#/components/schemas/ControllerKind"}, "controller_id": {"type": "string"}, "agent_name": {"type": "string"}, "label": {"type": "string"}, "epoch_id": {"type": "string"}, "remote_session_id": {"type": "string"}, "context_sync_seq": {"$ref": "#/components/schemas/Uint64Decimal"}, "attached_at": {"type": "string", "format": "date-time"}, "source": {"type": "string"}}},
       "ParticipantBinding": {"type": "object", "additionalProperties": false, "properties": {"id": {"type": "string"}, "kind": {"$ref": "#/components/schemas/ParticipantKind"}, "role": {"$ref": "#/components/schemas/ParticipantRole"}, "agent_name": {"type": "string"}, "label": {"type": "string"}, "session_id": {"type": "string"}, "source": {"type": "string"}, "parent_turn_id": {"type": "string"}, "delegation_id": {"type": "string"}, "attachment_generation": {"type": "string"}, "context_sync_seq": {"$ref": "#/components/schemas/Uint64Decimal"}, "attached_at": {"type": "string", "format": "date-time"}, "controller_ref": {"type": "string"}}},
@@ -713,6 +546,7 @@
           "approval": {"$ref": "#/components/schemas/ApprovalState"}, "capabilities": {"$ref": "#/components/schemas/ClientCapabilities"}
         }
       },
+      "ServerInfo": {"type": "object", "additionalProperties": false, "required": ["protocol_version", "envelope_version", "api_version"], "properties": {"protocol_version": {"type": "integer"}, "envelope_version": {"type": "string"}, "api_version": {"type": "string"}}},
       "SessionSummary": {"type": "object", "additionalProperties": false, "properties": {"app_name": {"type": "string"}, "user_id": {"type": "string"}, "session_id": {"type": "string"}, "workspace_key": {"type": "string"}, "cwd": {"type": "string"}, "title": {"type": "string"}, "metadata": {"$ref": "#/components/schemas/JSONObject"}, "updated_at": {"type": "string", "format": "date-time"}}},
       "SessionList": {"type": "object", "additionalProperties": false, "properties": {"sessions": {"type": "array", "items": {"$ref": "#/components/schemas/SessionSummary"}}, "next_cursor": {"type": "string"}}}
     }

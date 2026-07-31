@@ -4,14 +4,15 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/surfaces/appserver"
 )
 
 func TestResolveNetworkConfigRequiresTLSOffLoopback(t *testing.T) {
-	authenticator, err := appserver.BearerTokenAuthenticator(
+	authenticator, err := BearerTokenAuthenticator(
 		"0123456789abcdef0123456789abcdef0123456789abcdef",
 		controlclient.Principal{ID: "owner"},
 	)
@@ -52,8 +53,33 @@ func TestResolveNetworkConfigRequiresTLSOffLoopback(t *testing.T) {
 	}
 }
 
+func TestListenAndServeQuiescesHostBeforeReturning(t *testing.T) {
+	authenticator, err := BearerTokenAuthenticator(
+		"0123456789abcdef0123456789abcdef0123456789abcdef",
+		controlclient.Principal{ID: "owner"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := &recordingLifecycle{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = ListenAndServe(ctx, Dependencies{
+		Service: &fakeService{}, Lifecycle: lifecycle,
+	}, Config{
+		Address: "127.0.0.1:0", Authenticator: authenticator,
+		DrainTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lifecycle.calls.Load() != 1 {
+		t.Fatalf("Host Quiesce calls = %d, want 1", lifecycle.calls.Load())
+	}
+}
+
 func TestResolveNetworkConfigRejectsAmbiguousOrIncompleteTrust(t *testing.T) {
-	authenticator, err := appserver.BearerTokenAuthenticator(
+	authenticator, err := BearerTokenAuthenticator(
 		"0123456789abcdef0123456789abcdef0123456789abcdef",
 		controlclient.Principal{ID: "owner"},
 	)
@@ -107,7 +133,7 @@ func TestResolveNetworkConfigBuildsLoopbackAuthenticatorFromTokenFile(t *testing
 
 func TestResolvedBearerAuthenticatorRejectsAmbiguousAuthorization(t *testing.T) {
 	const token = "0123456789abcdef0123456789abcdef0123456789abcdef"
-	authenticator, err := appserver.BearerTokenAuthenticator(token, controlclient.Principal{ID: "owner"})
+	authenticator, err := BearerTokenAuthenticator(token, controlclient.Principal{ID: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,4 +156,13 @@ func TestResolvedBearerAuthenticatorRejectsAmbiguousAuthorization(t *testing.T) 
 			}
 		})
 	}
+}
+
+type recordingLifecycle struct {
+	calls atomic.Int32
+}
+
+func (l *recordingLifecycle) Quiesce(context.Context) error {
+	l.calls.Add(1)
+	return nil
 }

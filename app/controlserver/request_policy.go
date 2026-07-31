@@ -1,4 +1,4 @@
-package appserver
+package controlserver
 
 import (
 	"fmt"
@@ -18,12 +18,12 @@ func newRequestPolicy(allowedHosts []string) (*requestPolicy, error) {
 	for _, allowed := range allowedHosts {
 		host, _, err := splitAuthority(allowed)
 		if err != nil {
-			return nil, fmt.Errorf("appserver: invalid allowed host %q: %w", allowed, err)
+			return nil, fmt.Errorf("controlserver: invalid allowed host %q: %w", allowed, err)
 		}
 		policy.allowedHosts[host] = struct{}{}
 	}
 	if len(policy.allowedHosts) == 0 {
-		return nil, fmt.Errorf("appserver: at least one allowed Host is required")
+		return nil, fmt.Errorf("controlserver: at least one allowed Host is required")
 	}
 	return policy, nil
 }

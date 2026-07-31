@@ -28,7 +28,6 @@ import (
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/acpserver"
-	"github.com/caelis-labs/caelis/surfaces/appserver"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
@@ -62,7 +61,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	return run(ctx, args, stdin, stdout, stderr)
 }
 
-func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) (runErr error) {
 	cwd, _ := os.Getwd()
 	defaultStore := defaultStoreDir(cwd)
 	if len(args) > 0 {
@@ -195,6 +194,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err := stack.Close(); runErr == nil && err != nil {
+			runErr = err
+		}
+	}()
 	if acpSubcommand {
 		agent, err := acpagent.NewFromStack(stack)
 		if err != nil {
@@ -203,15 +207,19 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return acpserver.ServeStdio(ctx, agent, stdin, stdout)
 	}
 	if controlServerSubcommand {
+		stack.StartApprovalRecovery(ctx)
+		if err := stack.WaitApprovalRecovery(ctx); err != nil {
+			return err
+		}
 		principal := controlclient.Principal{ID: strings.TrimSpace(*userID)}
 		token := strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN"))
 		tokenFile := strings.TrimSpace(*controlTokenFile)
-		var authenticator appserver.Authenticator
+		var authenticator controlserver.Authenticator
 		if token != "" {
 			if tokenFile != "" {
 				return errors.New("configure either CAELIS_CONTROL_TOKEN or a Control token file, not both")
 			}
-			authenticator, err = appserver.BearerTokenAuthenticator(token, principal)
+			authenticator, err = controlserver.BearerTokenAuthenticator(token, principal)
 			if err != nil {
 				return err
 			}
@@ -219,7 +227,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			tokenFile = controlserver.DefaultTokenFile(cfg.StoreDir)
 		}
 		return runControlServerCommand(ctx, controlserver.Dependencies{
-			Service: stack.ControlClient(), TaskStreams: stack.TaskStreams(),
+			Service: stack.ControlClient(), Lifecycle: stack,
 		}, controlserver.Config{
 			Address: strings.TrimSpace(*controlListen), Authenticator: authenticator, Principal: principal,
 			TokenFile: tokenFile, AllowedHosts: splitCommaSeparated(*controlHosts),

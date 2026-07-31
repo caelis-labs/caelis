@@ -1,4 +1,4 @@
-package appserver
+package controlserver
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -24,6 +25,7 @@ func TestHTTPStatusMappingUsesTypedErrorsNotMessages(t *testing.T) {
 		{err: errorcode.New(errorcode.Unauthenticated, "bad"), status: http.StatusUnauthorized},
 		{err: errorcode.New(errorcode.PermissionDenied, "bad"), status: http.StatusForbidden},
 		{err: errorcode.New(errorcode.Conflict, "bad"), status: http.StatusConflict},
+		{err: errorcode.New(errorcode.Unavailable, "bad"), status: http.StatusServiceUnavailable},
 		{err: errors.New("unauthorized conflict invalid request"), status: http.StatusInternalServerError},
 	} {
 		if got := statusForError(tt.err); got != tt.status {
@@ -43,19 +45,13 @@ func TestEveryHandlerUsesTypedHTTPErrorMappingGolden(t *testing.T) {
 	routes := []route{
 		{name: "list sessions", method: http.MethodGet, path: "/sessions"},
 		{name: "create session", method: http.MethodPost, path: "/sessions", body: `{"workspace_key":"workspace"}`, command: true},
-		{name: "close session", method: http.MethodDelete, path: "/sessions/session-1", command: true},
+		{name: "close session", method: http.MethodDelete, path: "/sessions/session-1", body: `{}`, command: true},
 		{name: "session state", method: http.MethodGet, path: "/sessions/session-1/state"},
-		{name: "session events", method: http.MethodGet, path: "/sessions/session-1/events"},
-		{name: "session stream", method: http.MethodGet, path: "/sessions/session-1/stream"},
+		{name: "reconnect", method: http.MethodGet, path: "/sessions/session-1/reconnect"},
 		{name: "prompt", method: http.MethodPost, path: "/sessions/session-1/prompt", body: `{"input":"hello"}`, command: true},
 		{name: "steer", method: http.MethodPost, path: "/sessions/session-1/steer", body: `{"input":"continue","target":{"handle_id":"handle-1","run_id":"run-1","turn_id":"turn-1"}}`, command: true},
 		{name: "cancel", method: http.MethodPost, path: "/sessions/session-1/cancel", body: `{"target":{"handle_id":"handle-1","run_id":"run-1","turn_id":"turn-1"}}`, command: true},
 		{name: "resolve approval", method: http.MethodPost, path: "/sessions/session-1/approvals/approval-1/resolve", body: `{"outcome":"selected","option_id":"allow_once","approved":true,"target":{"handle_id":"handle-1","run_id":"run-1","turn_id":"turn-1"}}`, command: true},
-		{name: "attach participant", method: http.MethodPost, path: "/sessions/session-1/participants", body: `{"profile_id":"acp:reviewer","effort":"high","role":"sidecar"}`, command: true},
-		{name: "prompt participant", method: http.MethodPost, path: "/sessions/session-1/participants/participant-1/prompt", body: `{"input":"review"}`, command: true},
-		{name: "cancel participant", method: http.MethodPost, path: "/sessions/session-1/participants/participant-1/cancel", body: `{"target":{"handle_id":"handle-1","run_id":"run-1","turn_id":"turn-1"}}`, command: true},
-		{name: "detach participant", method: http.MethodDelete, path: "/sessions/session-1/participants/participant-1", command: true},
-		{name: "handoff", method: http.MethodPost, path: "/sessions/session-1/handoff", body: `{"kind":"kernel"}`, command: true},
 	}
 	type mapping struct {
 		name   string
@@ -68,6 +64,7 @@ func TestEveryHandlerUsesTypedHTTPErrorMappingGolden(t *testing.T) {
 		{name: "401", status: http.StatusUnauthorized},
 		{name: "403", status: http.StatusForbidden, code: errorcode.PermissionDenied, auth: true},
 		{name: "409", status: http.StatusConflict, code: errorcode.Conflict, auth: true},
+		{name: "503", status: http.StatusServiceUnavailable, code: errorcode.Unavailable, auth: true},
 	}
 	golden := readHTTPErrorGolden(t)
 	for _, route := range routes {
@@ -115,6 +112,21 @@ func readHTTPErrorGolden(t *testing.T) map[string]json.RawMessage {
 		t.Fatal(err)
 	}
 	return golden
+}
+
+func assertJSONEquivalent(t *testing.T, got, want []byte) {
+	t.Helper()
+	var gotValue any
+	if err := json.Unmarshal(got, &gotValue); err != nil {
+		t.Fatalf("decode got JSON: %v", err)
+	}
+	var wantValue any
+	if err := json.Unmarshal(want, &wantValue); err != nil {
+		t.Fatalf("decode want JSON: %v", err)
+	}
+	if !reflect.DeepEqual(gotValue, wantValue) {
+		t.Fatalf("JSON mismatch\ngot:  %s\nwant: %s", got, want)
+	}
 }
 
 type errorMappingService struct {

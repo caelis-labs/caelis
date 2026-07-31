@@ -5,14 +5,18 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/caelis-labs/caelis/internal/bootstrap"
 	"github.com/caelis-labs/caelis/internal/cli"
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	code := runMain(
-		context.Background(),
+		ctx,
 		os.Args[1:],
 		os.Stdin,
 		os.Stdout,

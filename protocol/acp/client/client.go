@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/transport/stdio"
 )
 
@@ -410,31 +411,7 @@ func decodeUpdate(raw json.RawMessage) (Update, error) {
 	}
 	switch probe.SessionUpdate {
 	case UpdateUserMessage, UpdateAgentMessage, UpdateAgentThought:
-		var chunk ContentChunk
-		if err := json.Unmarshal(raw, &chunk); err != nil {
-			return nil, err
-		}
-		return chunk, nil
-	case UpdateToolCall:
-		var call ToolCall
-		if err := json.Unmarshal(raw, &call); err != nil {
-			return nil, err
-		}
-		return call, nil
-	case UpdateToolCallState:
-		var call ToolCallUpdate
-		if err := json.Unmarshal(raw, &call); err != nil {
-			return nil, err
-		}
-		return call, nil
-	case UpdatePlan:
-		var plan PlanUpdate
-		if err := json.Unmarshal(raw, &plan); err != nil {
-			return nil, err
-		}
-		return plan, nil
-	case UpdateUsage:
-		var update UsageUpdate
+		var update ContentChunk
 		if err := json.Unmarshal(raw, &update); err != nil {
 			return nil, err
 		}
@@ -445,30 +422,14 @@ func decodeUpdate(raw json.RawMessage) (Update, error) {
 			return nil, err
 		}
 		return update, nil
-	case UpdateCurrentMode:
-		var update CurrentModeUpdate
-		if err := json.Unmarshal(raw, &update); err != nil {
-			return nil, err
-		}
-		return update, nil
 	case UpdateConfigOption:
 		var update ConfigOptionUpdate
 		if err := json.Unmarshal(raw, &update); err != nil {
 			return nil, err
 		}
 		return update, nil
-	case UpdateSessionInfo:
-		var update SessionInfoUpdate
-		if err := json.Unmarshal(raw, &update); err != nil {
-			return nil, err
-		}
-		return update, nil
-	default:
-		return RawUpdate{
-			SessionUpdate: strings.TrimSpace(probe.SessionUpdate),
-			Raw:           append(json.RawMessage(nil), raw...),
-		}, nil
 	}
+	return schema.DecodeUpdateJSON(raw)
 }
 
 type stderrBufferWriter struct {

@@ -16,6 +16,14 @@ const (
 
 var ErrStateRevisionConflict = errorcode.New(errorcode.Conflict, "controlclient: session state changed during bootstrap")
 
+// ServerInfo is the minimal compatibility handshake available before a
+// client has selected or created a Session.
+type ServerInfo struct {
+	ProtocolVersion int    `json:"protocol_version"`
+	EnvelopeVersion string `json:"envelope_version"`
+	APIVersion      string `json:"api_version"`
+}
+
 // ClientCapabilities declares presentation ownership and reserved bootstrap
 // capability slots without implying Runtime support.
 type ClientCapabilities struct {

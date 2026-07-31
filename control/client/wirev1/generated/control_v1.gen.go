@@ -132,18 +132,6 @@ type ApprovalState struct {
 	QueuedCount *int            `json:"queued_count,omitempty"`
 }
 
-type AttachParticipantRequest struct {
-	Effort                  string          `json:"effort"`
-	ExpectedControllerEpoch *string         `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal  `json:"expected_revision,omitempty"`
-	Label                   *string         `json:"label,omitempty"`
-	OperationId             *string         `json:"operation_id,omitempty"`
-	ProfileId               string          `json:"profile_id"`
-	Role                    ParticipantRole `json:"role,omitempty"`
-	SessionId               *string         `json:"session_id,omitempty"`
-	Source                  *string         `json:"source,omitempty"`
-}
-
 type AudioContent struct {
 	Data     string `json:"data"`
 	MimeType string `json:"mimeType"`
@@ -159,16 +147,6 @@ type AvailableCommand struct {
 type CaelisMetadata map[string]JSONValue
 
 type CaelisRuntimeMetadata map[string]JSONValue
-
-type CancelParticipantRequest struct {
-	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
-	OperationId             *string        `json:"operation_id,omitempty"`
-	ParticipantId           string         `json:"participant_id"`
-	Reason                  *string        `json:"reason,omitempty"`
-	SessionId               *string        `json:"session_id,omitempty"`
-	Target                  TurnTarget     `json:"target"`
-}
 
 type CancelRequest struct {
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
@@ -261,15 +239,6 @@ const (
 	DeliveryModeMirror    DeliveryMode = "mirror"
 	DeliveryModeTransient DeliveryMode = "transient"
 )
-
-type DetachParticipantRequest struct {
-	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
-	OperationId             *string        `json:"operation_id,omitempty"`
-	ParticipantId           string         `json:"participant_id"`
-	SessionId               *string        `json:"session_id,omitempty"`
-	Source                  *string        `json:"source,omitempty"`
-}
 
 type DurableFeedPosition struct {
 	ProjectionIndex uint32        `json:"projection_index"`
@@ -364,30 +333,12 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
-type EventBatch struct {
-	BoundaryCursor *string    `json:"boundary_cursor,omitempty"`
-	Events         []Envelope `json:"events,omitempty"`
-	ResumeMode     ResumeMode `json:"resume_mode"`
-	TransientGap   *bool      `json:"transient_gap,omitempty"`
-}
-
 type FeedPosition struct {
 	Durable   *DurableFeedPosition   `json:"durable,omitempty"`
 	Transient *TransientFeedPosition `json:"transient,omitempty"`
 }
 
 type HandoffBindingMetadata map[string]JSONValue
-
-type HandoffRequest struct {
-	Agent                   *string        `json:"agent,omitempty"`
-	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
-	Kind                    ControllerKind `json:"kind"`
-	OperationId             *string        `json:"operation_id,omitempty"`
-	Reason                  *string        `json:"reason,omitempty"`
-	SessionId               *string        `json:"session_id,omitempty"`
-	Source                  *string        `json:"source,omitempty"`
-}
 
 type ImageContent struct {
 	Data     string `json:"data"`
@@ -535,16 +486,6 @@ type PlanEntry struct {
 
 type PositiveUint64Decimal string
 
-type PromptParticipantRequest struct {
-	DisplayInput            *string        `json:"display_input,omitempty"`
-	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
-	Input                   string         `json:"input"`
-	OperationId             *string        `json:"operation_id,omitempty"`
-	ParticipantId           string         `json:"participant_id"`
-	SessionId               *string        `json:"session_id,omitempty"`
-}
-
 type PromptRequest struct {
 	DisplayInput            *string        `json:"display_input,omitempty"`
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
@@ -605,12 +546,6 @@ type ResourceContent struct {
 	Uri      string  `json:"uri"`
 }
 
-type ResumeBoundary struct {
-	BoundaryCursor *string    `json:"boundary_cursor,omitempty"`
-	ResumeMode     ResumeMode `json:"resume_mode"`
-	TransientGap   *bool      `json:"transient_gap,omitempty"`
-}
-
 type ResumeMode string
 
 const (
@@ -636,6 +571,12 @@ type RuntimeTaskMetadata map[string]JSONValue
 type SDKMetadata map[string]JSONValue
 
 type SDKUsageMetadata map[string]JSONValue
+
+type ServerInfo struct {
+	ApiVersion      string `json:"api_version"`
+	EnvelopeVersion string `json:"envelope_version"`
+	ProtocolVersion int    `json:"protocol_version"`
+}
 
 type SessionList struct {
 	NextCursor *string          `json:"next_cursor,omitempty"`
@@ -713,69 +654,6 @@ type SteerRequest struct {
 	Target                  TurnTarget     `json:"target"`
 }
 
-type TaskDescriptor struct {
-	AgentHandle    *string             `json:"agent_handle,omitempty"`
-	CurrentTurnId  *string             `json:"current_turn_id,omitempty"`
-	Handle         string              `json:"handle"`
-	Kind           TaskKind            `json:"kind"`
-	ParentTool     *ParentToolRelation `json:"parent_tool,omitempty"`
-	ParticipantId  *string             `json:"participant_id,omitempty"`
-	Running        bool                `json:"running"`
-	SessionId      string              `json:"session_id"`
-	State          TaskState           `json:"state"`
-	SupportsCancel *bool               `json:"supports_cancel,omitempty"`
-	SupportsInput  *bool               `json:"supports_input,omitempty"`
-	TaskId         string              `json:"task_id"`
-	Title          *string             `json:"title,omitempty"`
-	UpdatedAt      *time.Time          `json:"updated_at,omitempty"`
-}
-
-type TaskEventBatch struct {
-	BoundaryCursor *string        `json:"boundary_cursor,omitempty"`
-	Events         []Envelope     `json:"events,omitempty"`
-	ResumeMode     TaskResumeMode `json:"resume_mode"`
-	TransientGap   *bool          `json:"transient_gap,omitempty"`
-}
-
-type TaskKind string
-
-const (
-	TaskKindCommand  TaskKind = "command"
-	TaskKindSubagent TaskKind = "subagent"
-)
-
-type TaskList struct {
-	Tasks []TaskDescriptor `json:"tasks,omitempty"`
-}
-
-type TaskResumeBoundary struct {
-	BoundaryCursor *string        `json:"boundary_cursor,omitempty"`
-	ResumeMode     TaskResumeMode `json:"resume_mode"`
-	TransientGap   *bool          `json:"transient_gap,omitempty"`
-}
-
-type TaskResumeMode string
-
-const (
-	TaskResumeModeExact        TaskResumeMode = "exact"
-	TaskResumeModeCurrentState TaskResumeMode = "current_state"
-)
-
-type TaskState string
-
-const (
-	TaskStatePrepared        TaskState = "prepared"
-	TaskStateRunning         TaskState = "running"
-	TaskStateWaitingInput    TaskState = "waiting_input"
-	TaskStateWaitingApproval TaskState = "waiting_approval"
-	TaskStateCompleted       TaskState = "completed"
-	TaskStateFailed          TaskState = "failed"
-	TaskStateCancelled       TaskState = "cancelled"
-	TaskStateInterrupted     TaskState = "interrupted"
-	TaskStateTerminated      TaskState = "terminated"
-	TaskStateUnknownOutcome  TaskState = "unknown_outcome"
-)
-
 type TextContent struct {
 	Text string `json:"text"`
 	Type string `json:"type"`
@@ -827,4 +705,4 @@ type WriteBase struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
-var OperationIDs = []string{"attachParticipant", "cancelParticipant", "cancelSessionTurn", "closeSession", "createSession", "detachParticipant", "getSessionEvents", "getSessionState", "getTaskEvents", "handoffController", "listSessionTasks", "listSessions", "promptParticipant", "promptSession", "resolveApproval", "steerSession", "streamSessionEvents", "streamTaskEvents"}
+var OperationIDs = []string{"cancelSessionTurn", "closeSession", "createSession", "getSessionState", "initializeClient", "listSessions", "promptSession", "reconnectSession", "resolveApproval", "steerSession"}

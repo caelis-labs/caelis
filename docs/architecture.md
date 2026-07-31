@@ -39,8 +39,8 @@ and participant semantics. Native ACP means semantic equivalence; an in-process
 built-in Agent does not need to serialize calls through JSON-RPC.
 
 The SDK owns reusable normalized semantics without importing the Caelis product
-`protocol/acp` implementation. The root `protocol/acp` packages own wire schema,
-transport compatibility, and surface projection. Canonical runtime events still
+`protocol/acp` implementation. The root `protocol/acp` packages own ACP wire
+schema, transport compatibility, and surface projection. Canonical runtime events still
 carry model and tool truth below that protocol view. More detail lives in
 [docs/agent-sdk-boundary.md](agent-sdk-boundary.md) and
 [docs/acp-projection-architecture.md](acp-projection-architecture.md).
@@ -54,6 +54,8 @@ Document responsibilities are intentionally separate:
   wire, and surface projection boundaries;
 - [Control Convergence](control-convergence.md) owns the desired Control
   direction and end-state constraints;
+- [Control Host, Bar, and Pet](control-host-bar-pet-design.md) owns the target
+  multi-client host topology and desktop activity presentation contract;
 - [Release](release.md) owns release mechanics.
 
 ## Current Map
@@ -130,11 +132,17 @@ Document responsibilities are intentionally separate:
   any transitional host fields before constructing this read model. Structured
   `SessionUsageTotal` and `SessionUsageByModel` values are likewise the sole
   cumulative Session-usage sources; the public model carries no flat mirrors.
-- `surfaces/appserver`: thin HTTP JSON/SSE, request-policy, and authentication
-  mapping over `control/client` and `protocol/acp/taskstream`.
-- `app/controlserver`: production listener, TLS, token-file, and fail-closed
-  network configuration. It accepts the exact Control client and Task stream
-  contracts and does not depend on the product `gatewayapp.Stack`.
+- `control/client/wirev1`: the versioned, Control-client-bound HTTP/SSE schema
+  bindings, generated types, and strict JSON/Envelope codec. Because the codec
+  serializes `control/client` domain values directly, it stays with that
+  semantic owner instead of pretending to be a product-neutral protocol.
+- `control/client/httpclient`: the authenticated remote implementation of the
+  principal-bound `control/client.SessionClient`. In-process clients use
+  `control/client.BindSessionClient`; both expose the same typed contract.
+- `app/controlserver`: the Control Host's HTTP handler and production listener,
+  including authentication, request policy, TLS, token-file policy, and
+  shutdown drain. It maps only the bounded Session-client protocol and depends
+  on explicit Control contracts rather than `gatewayapp.Stack`.
 - `internal/controlprompt`: current Control-owned surface-neutral prompt input
   contract, private prompt facade, command catalog, parsing helpers,
   connect-wizard state, and shared slash orchestration. It is not a product

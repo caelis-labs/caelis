@@ -1,4 +1,4 @@
-package appserver
+package wirev1
 
 import (
 	"bytes"
@@ -11,9 +11,9 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
+	"github.com/caelis-labs/caelis/control/client/wirev1/generated"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/surfaces/appserver/generated"
 )
 
 func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
@@ -41,7 +41,7 @@ func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
 				t.Fatalf("generated expected_revision = %#v, want %q", requestDTO.ExpectedRevision, decimal)
 			}
 			var decodedRequest controlclient.PromptRequest
-			if err := decodeWireRequest(requestJSON, &decodedRequest); err != nil {
+			if err := DecodeRequest(requestJSON, &decodedRequest); err != nil {
 				t.Fatal(err)
 			}
 			if decodedRequest.ExpectedRevision == nil || *decodedRequest.ExpectedRevision != value {
@@ -230,7 +230,7 @@ func TestUnsafeExtensionIntegerMustUseDecimalString(t *testing.T) {
 		SessionUpdate: "vendor/custom",
 		Raw:           json.RawMessage(`{"sessionUpdate":"vendor/custom","unsafe":9007199254740993}`),
 	}
-	if _, err := marshalEnvelope(envelope); err == nil {
+	if _, err := MarshalEnvelope(envelope); err == nil {
 		t.Fatal("unsafe extension JSON number was emitted")
 	}
 	envelope.Update = schema.RawUpdate{
@@ -250,7 +250,7 @@ func TestWireNumberGuardComparesDecimalBoundsWithoutFloatRounding(t *testing.T) 
 		json.RawMessage(`{"value":9.0071992547409911e15}`),
 		json.RawMessage(`{"value":1e1000000000}`),
 	} {
-		if err := validateWireJSONNumbers(raw); err == nil {
+		if err := ValidateJSONNumbers(raw); err == nil {
 			t.Fatalf("unsafe numeric token accepted: %s", raw)
 		}
 	}
@@ -260,14 +260,14 @@ func TestWireNumberGuardComparesDecimalBoundsWithoutFloatRounding(t *testing.T) 
 		json.RawMessage(`{"value":1.25}`),
 		json.RawMessage(`{"value":1e-1000000000}`),
 	} {
-		if err := validateWireJSONNumbers(raw); err != nil {
+		if err := ValidateJSONNumbers(raw); err != nil {
 			t.Fatalf("safe numeric token rejected: %s: %v", raw, err)
 		}
 	}
 }
 
 func TestGeneratedTypeScriptUsesDecimalStringForUint64WireFields(t *testing.T) {
-	data, err := os.ReadFile("../../clients/typescript/control-v1.gen.ts")
+	data, err := os.ReadFile("../../../clients/typescript/control-v1.gen.ts")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestGeneratedTypeScriptUsesDecimalStringForUint64WireFields(t *testing.T) {
 
 func mustMarshalWire(t *testing.T, value any) []byte {
 	t.Helper()
-	raw, err := marshalWireValue(value)
+	raw, err := Marshal(value)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func mustMarshalWire(t *testing.T, value any) []byte {
 
 func mustMarshalEnvelope(t *testing.T, envelope eventstream.Envelope) []byte {
 	t.Helper()
-	raw, err := marshalEnvelope(envelope)
+	raw, err := MarshalEnvelope(envelope)
 	if err != nil {
 		t.Fatal(err)
 	}

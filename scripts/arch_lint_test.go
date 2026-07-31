@@ -19,7 +19,7 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 	}{
 		{
 			name:       "retired control client port retains replacement",
-			rel:        "surfaces/appserver/server.go",
+			rel:        "app/controlserver/handler.go",
 			importPath: modulePath + "/ports/controlclient",
 			want:       "production code must not depend on ports/controlclient; use control/client",
 		},
@@ -354,6 +354,18 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 		want    string
 		wantSub string
 	}{
+		{
+			name:    "deleted appserver surface fails",
+			rel:     "surfaces/appserver/server.go",
+			want:    "must not recreate surfaces/appserver; the Control Host belongs to app/controlserver and its typed clients and wire codec to control/client",
+			wantSub: "surfaces/appserver",
+		},
+		{
+			name:    "deleted Control protocol package fails",
+			rel:     "protocol/control/v1/wire.go",
+			want:    "must not recreate protocol/control; the domain-bound Control wire codec belongs to control/client/wirev1",
+			wantSub: "protocol/control/v1",
+		},
 		{
 			name:    "deleted product control client port fails",
 			rel:     "ports/controlclient/service.go",

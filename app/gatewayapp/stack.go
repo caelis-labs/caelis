@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -103,6 +105,9 @@ type Stack struct {
 	taskStreams              acptaskstream.Service
 	operations               *controlclient.FileOperationStore
 	approvalRecovery         *controlclient.ApprovalRecoveryGate
+	lifecycleCtx             context.Context
+	lifecycleCancel          context.CancelFunc
+	closing                  atomic.Bool
 	gateway                  *kernelimpl.Gateway
 	mcpMgr                   *mcp.Manager
 	codexAuth                *codexauth.Manager
@@ -196,7 +201,7 @@ func (s *Stack) ControlClient() controlclient.Service {
 }
 
 // TaskStreams returns the Control-owned, Session-authorized Task stream
-// service used by in-process and HTTP presentation adapters.
+// service used by the current in-process and ACP presentation adapters.
 func (s *Stack) TaskStreams() acptaskstream.Service {
 	if s == nil {
 		return nil
@@ -468,6 +473,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err := stack.rebuildGateway(); err != nil {
 		return nil, err
 	}
+	stack.lifecycleCtx, stack.lifecycleCancel = context.WithCancel(context.Background())
 	return stack, nil
 }
 
@@ -503,6 +509,15 @@ func (s *Stack) StartApprovalRecovery(ctx context.Context) {
 		return
 	}
 	s.approvalRecovery.Start(ctx)
+}
+
+// WaitApprovalRecovery blocks Host readiness until abandoned durable approval
+// mirrors have been settled.
+func (s *Stack) WaitApprovalRecovery(ctx context.Context) error {
+	if s == nil || s.approvalRecovery == nil {
+		return nil
+	}
+	return s.approvalRecovery.Wait(ctx)
 }
 
 func newStackLeaseOwnerID() (string, error) {
@@ -563,10 +578,32 @@ func promptDefaultPermissionSummary(cfg SandboxConfig) string {
 	return "sandbox default; Host only via one-shot approval"
 }
 
+// Quiesce permanently closes Control Turn admission and waits for every active
+// producer to release its Gateway handle.
+func (s *Stack) Quiesce(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.closing.Store(true)
+	if s.lifecycleCancel != nil {
+		s.lifecycleCancel()
+	}
+	if gateway := s.currentGateway(); gateway != nil {
+		return gateway.Quiesce(ctx)
+	}
+	return nil
+}
+
 func (s *Stack) Close() error {
 	if s == nil {
 		return nil
 	}
+	quiesceCtx, cancelQuiesce := context.WithTimeout(context.Background(), 5*time.Second)
+	quiesceErr := s.Quiesce(quiesceCtx)
+	cancelQuiesce()
 	s.mu.Lock()
 	exec := s.exec
 	s.exec = nil
@@ -577,6 +614,9 @@ func (s *Stack) Close() error {
 	s.mu.Unlock()
 
 	var errs []error
+	if quiesceErr != nil {
+		errs = append(errs, fmt.Errorf("quiesce: %w", quiesceErr))
+	}
 	if exec != nil {
 		if err := exec.Close(); err != nil {
 			errs = append(errs, err)
@@ -593,7 +633,7 @@ func (s *Stack) Close() error {
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("gatewayapp stack: close failed: %v", errs)
+		return fmt.Errorf("gatewayapp stack: close failed: %w", errors.Join(errs...))
 	}
 	return nil
 }

@@ -167,3 +167,49 @@ func (g *Gateway) CancelActiveTurns() {
 		handle.Cancel()
 	}
 }
+
+// Quiesce permanently closes Turn admission, cancels every active producer,
+// and waits until all producer goroutines have released their active handles.
+func (g *Gateway) Quiesce(ctx context.Context) error {
+	if g == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		g.mu.Lock()
+		g.quiescing = true
+		handles := make([]*turnHandle, 0, len(g.active))
+		for _, handle := range g.active {
+			if handle != nil {
+				handles = append(handles, handle)
+			}
+		}
+		if len(handles) == 0 {
+			g.mu.Unlock()
+			return nil
+		}
+		changed := g.activeChanged
+		g.mu.Unlock()
+
+		for _, handle := range handles {
+			handle.Cancel()
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changed:
+		}
+	}
+}
+
+func hostClosingError() *Error {
+	return &Error{
+		Kind:        KindUnavailable,
+		Code:        CodeHostClosing,
+		Retryable:   true,
+		UserVisible: true,
+		Message:     "gateway: host is closing",
+	}
+}

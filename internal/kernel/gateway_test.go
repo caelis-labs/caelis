@@ -974,6 +974,118 @@ func TestBeginTurnRejectsSecondActiveRunForSameSession(t *testing.T) {
 	}
 }
 
+func TestBeginTurnRuntimeContextOutlivesAdmissionContext(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	rt := &cancellableRuntime{
+		session:   activeSession,
+		started:   make(chan struct{}),
+		cancelled: make(chan struct{}),
+	}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: activeSession},
+		Runtime:  rt,
+		Resolver: staticResolver{resolved: ResolvedTurn{}},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	admissionCtx, cancelAdmission := context.WithCancel(context.Background())
+	runtimeCtx, cancelRuntime := context.WithCancel(context.Background())
+	result, err := gw.BeginTurn(admissionCtx, BeginTurnRequest{
+		SessionRef:     activeSession.SessionRef,
+		Input:          "hello",
+		RuntimeContext: runtimeCtx,
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	defer result.Handle.Close()
+	select {
+	case <-rt.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime did not start")
+	}
+
+	cancelAdmission()
+	select {
+	case <-rt.cancelled:
+		t.Fatal("admission context cancellation stopped the accepted Turn")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	cancelRuntime()
+	select {
+	case <-rt.cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime context cancellation did not stop the accepted Turn")
+	}
+}
+
+func TestGatewayQuiesceCancelsAndDrainsActiveTurnThenRejectsAdmission(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	rt := &cancellableRuntime{
+		session:   activeSession,
+		started:   make(chan struct{}),
+		cancelled: make(chan struct{}),
+	}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: activeSession},
+		Runtime:  rt,
+		Resolver: staticResolver{resolved: ResolvedTurn{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "keep running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-rt.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime did not start")
+	}
+
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelDrain()
+	if err := gw.Quiesce(drainCtx); err != nil {
+		t.Fatalf("Quiesce() error = %v", err)
+	}
+	select {
+	case <-rt.cancelled:
+	default:
+		t.Fatal("Quiesce returned before the Runtime producer stopped")
+	}
+	active, _ := gw.ActiveCounts()
+	if active != 0 {
+		t.Fatalf("active Turns after Quiesce = %d, want 0", active)
+	}
+
+	_, err = gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "must be rejected",
+	})
+	var gatewayErr *Error
+	if !As(err, &gatewayErr) || gatewayErr.Kind != KindUnavailable || gatewayErr.Code != CodeHostClosing {
+		t.Fatalf("BeginTurn after Quiesce error = %v, want host closing", err)
+	}
+}
+
 func TestBeginTurnChecksActiveConflictBeforeResolver(t *testing.T) {
 	t.Parallel()
 

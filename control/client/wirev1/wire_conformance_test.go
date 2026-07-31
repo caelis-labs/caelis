@@ -1,11 +1,8 @@
-package appserver
+package wirev1
 
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"reflect"
 	"strconv"
@@ -15,95 +12,23 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
+	"github.com/caelis-labs/caelis/control/client/wirev1/generated"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/surfaces/appserver/generated"
 	jsonschema "github.com/google/jsonschema-go/jsonschema"
 )
-
-func TestCommandOutcomeHTTPStatusesMatchOpenAPI(t *testing.T) {
-	for _, test := range []struct {
-		outcome controlclient.Outcome
-		status  int
-	}{
-		{outcome: controlclient.OutcomeCommitted, status: http.StatusOK},
-		{outcome: controlclient.OutcomeAccepted, status: http.StatusAccepted},
-		{outcome: controlclient.OutcomeUnknown, status: http.StatusAccepted},
-		{outcome: controlclient.OutcomeRejected, status: http.StatusBadRequest},
-		{outcome: controlclient.OutcomeConflicted, status: http.StatusConflict},
-	} {
-		t.Run(string(test.outcome), func(t *testing.T) {
-			result := controlclient.CommandResult{OperationID: "operation-1", Outcome: test.outcome}
-			recorder := httptest.NewRecorder()
-			writeCommandResult(recorder, result, nil)
-			if recorder.Code != test.status {
-				t.Fatalf("status = %d, want %d", recorder.Code, test.status)
-			}
-			validateWireValue(t, "CommandResult", result)
-		})
-	}
-}
-
-func TestCommandOutcomeRecoverySurvivesUncodedBackendError(t *testing.T) {
-	for _, tt := range []struct {
-		outcome controlclient.Outcome
-		status  int
-	}{
-		{outcome: controlclient.OutcomeUnknown, status: http.StatusAccepted},
-		{outcome: controlclient.OutcomeConflicted, status: http.StatusConflict},
-	} {
-		t.Run(string(tt.outcome), func(t *testing.T) {
-			result := controlclient.CommandResult{OperationID: "operation-1", Outcome: tt.outcome, Detail: "recovery detail"}
-			err := controlclient.NewOutcomeError(tt.outcome, errors.New("uncoded backend failure"))
-			recorder := httptest.NewRecorder()
-			writeCommandResult(recorder, result, err)
-			if recorder.Code != tt.status {
-				t.Fatalf("status = %d, want %d; body = %s", recorder.Code, tt.status, recorder.Body.String())
-			}
-			var got controlclient.CommandResult
-			if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
-				t.Fatal(err)
-			}
-			if got.Outcome != tt.outcome || got.OperationID != result.OperationID {
-				t.Fatalf("CommandResult = %#v, want %#v", got, result)
-			}
-		})
-	}
-
-	recorder := httptest.NewRecorder()
-	writeCommandResult(recorder, controlclient.CommandResult{
-		OperationID: "operation-1", Outcome: controlclient.OutcomeRejected, Detail: "private backend detail",
-	}, controlclient.NewOutcomeError(controlclient.OutcomeRejected, errors.New("uncoded backend failure")))
-	if recorder.Code != http.StatusInternalServerError ||
-		!bytes.Contains(recorder.Body.Bytes(), []byte("internal server error")) ||
-		bytes.Contains(recorder.Body.Bytes(), []byte("private backend detail")) ||
-		bytes.Contains(recorder.Body.Bytes(), []byte("uncoded backend failure")) {
-		t.Fatalf("uncoded rejected fallback = %d %s", recorder.Code, recorder.Body.String())
-	}
-
-	recorder = httptest.NewRecorder()
-	writeCommandResult(recorder, controlclient.CommandResult{}, errors.New("uncoded backend failure"))
-	if recorder.Code != http.StatusInternalServerError || !bytes.Contains(recorder.Body.Bytes(), []byte("internal server error")) {
-		t.Fatalf("invalid outcome fallback = %d %s", recorder.Code, recorder.Body.String())
-	}
-}
 
 func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	revision := uint64(7)
 	base := controlclient.WriteBase{OperationID: "operation-1", SessionID: "session-1", ExpectedRevision: &revision, ExpectedControllerEpoch: "epoch-1"}
 	target := controlclient.TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
 	requests := map[string]any{
-		"CreateSessionRequest":     controlclient.CreateSessionRequest{WriteBase: base, PreferredSessionID: "session-1", WorkspaceKey: "workspace-1", CWD: "/tmp/workspace", Title: "Session", Metadata: map[string]any{"source": "test"}},
-		"CloseSessionRequest":      controlclient.CloseSessionRequest{WriteBase: base},
-		"PromptRequest":            controlclient.PromptRequest{WriteBase: base, Input: "hello", DisplayInput: "hello"},
-		"SteerRequest":             controlclient.SteerRequest{WriteBase: base, Target: target, Input: "continue"},
-		"CancelRequest":            controlclient.CancelRequest{WriteBase: base, Target: target, Reason: "stop"},
-		"ResolveApprovalRequest":   controlclient.ResolveApprovalRequest{WriteBase: base, Target: target, ApprovalRequestID: "approval-1", Outcome: "selected", OptionID: schema.PermAllowOnce, Approved: true},
-		"AttachParticipantRequest": controlclient.AttachParticipantRequest{WriteBase: base, ProfileID: "acp:reviewer", Effort: "high", Role: session.ParticipantRoleSidecar, Label: "Reviewer", Source: "control"},
-		"PromptParticipantRequest": controlclient.PromptParticipantRequest{WriteBase: base, ParticipantID: "participant-1", Input: "review"},
-		"CancelParticipantRequest": controlclient.CancelParticipantRequest{WriteBase: base, ParticipantID: "participant-1", Target: target, Reason: "stop"},
-		"DetachParticipantRequest": controlclient.DetachParticipantRequest{WriteBase: base, ParticipantID: "participant-1", Source: "control"},
-		"HandoffRequest":           controlclient.HandoffRequest{WriteBase: base, Kind: session.ControllerKindACP, Agent: "external", Source: "control", Reason: "delegate"},
+		"CreateSessionRequest":   controlclient.CreateSessionRequest{WriteBase: base, PreferredSessionID: "session-1", WorkspaceKey: "workspace-1", CWD: "/tmp/workspace", Title: "Session", Metadata: map[string]any{"source": "test"}},
+		"CloseSessionRequest":    controlclient.CloseSessionRequest{WriteBase: base},
+		"PromptRequest":          controlclient.PromptRequest{WriteBase: base, Input: "hello", DisplayInput: "hello"},
+		"SteerRequest":           controlclient.SteerRequest{WriteBase: base, Target: target, Input: "continue"},
+		"CancelRequest":          controlclient.CancelRequest{WriteBase: base, Target: target, Reason: "stop"},
+		"ResolveApprovalRequest": controlclient.ResolveApprovalRequest{WriteBase: base, Target: target, ApprovalRequestID: "approval-1", Outcome: "selected", OptionID: schema.PermAllowOnce, Approved: true},
 	}
 	for name, request := range requests {
 		t.Run("request/"+name, func(t *testing.T) { validateWireValue(t, name, request) })
@@ -131,8 +56,6 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		Capabilities: controlclient.ClientCapabilities{CaelisTerminalStream: true},
 	}
 	validateWireValue(t, "SessionState", state)
-	validateWireValue(t, "ResumeBoundary", resumeBoundary{ResumeMode: controlclient.ResumeModeExact, BoundaryCursor: "cursor-1"})
-	validateWireValue(t, "EventBatch", controlclient.EventBatch{ResumeMode: controlclient.ResumeModeExact, Events: []eventstream.Envelope{noticeEnvelope()}})
 }
 
 func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
@@ -324,7 +247,7 @@ func stringPointer(value string) *string { return &value }
 
 func validateWireValue(t *testing.T, schemaName string, value any) {
 	t.Helper()
-	raw, err := marshalWireValue(value)
+	raw, err := Marshal(value)
 	if err != nil {
 		t.Fatalf("marshal %s: %v", schemaName, err)
 	}
@@ -336,7 +259,7 @@ func validateWireValue(t *testing.T, schemaName string, value any) {
 
 func openAPIValidator(t *testing.T, schemaName string) *jsonschema.Resolved {
 	t.Helper()
-	data, err := os.ReadFile("../../api/control/v1/openapi.json")
+	data, err := os.ReadFile("../../../api/control/v1/openapi.json")
 	if err != nil {
 		t.Fatal(err)
 	}

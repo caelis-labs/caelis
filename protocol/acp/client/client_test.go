@@ -68,6 +68,49 @@ func TestDecodeUpdatePreservesUnknownRawUpdate(t *testing.T) {
 	}
 }
 
+func TestDecodeUpdatePreservesClientLocalPayloadTypes(t *testing.T) {
+	t.Run("content chunk", func(t *testing.T) {
+		raw := json.RawMessage(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"},"messageId":"message-1"}`)
+		update, err := decodeUpdate(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		chunk, ok := update.(ContentChunk)
+		if !ok {
+			t.Fatalf("update = %T, want ContentChunk", update)
+		}
+		if chunk.MessageID != "message-1" || string(chunk.Content) != `{"type":"text","text":"hello"}` {
+			t.Fatalf("ContentChunk = %#v", chunk)
+		}
+	})
+
+	t.Run("available commands", func(t *testing.T) {
+		raw := json.RawMessage(`{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"review","description":"Review changes","input":{"hint":"scope"}}]}`)
+		update, err := decodeUpdate(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		commands, ok := update.(AvailableCommandsUpdate)
+		if !ok {
+			t.Fatalf("update = %T, want AvailableCommandsUpdate", update)
+		}
+		if len(commands.AvailableCommands) != 1 || commands.AvailableCommands[0]["name"] != "review" {
+			t.Fatalf("AvailableCommandsUpdate = %#v", commands)
+		}
+	})
+
+	t.Run("config options", func(t *testing.T) {
+		raw := json.RawMessage(`{"sessionUpdate":"config_option_update","configOptions":[]}`)
+		update, err := decodeUpdate(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := update.(ConfigOptionUpdate); !ok {
+			t.Fatalf("update = %T, want ConfigOptionUpdate", update)
+		}
+	})
+}
+
 func TestDecodeUpdateRecognizesUsageUpdate(t *testing.T) {
 	t.Parallel()
 

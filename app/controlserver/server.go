@@ -1,4 +1,4 @@
-// Package controlserver assembles and runs the HTTP Control client surface.
+// Package controlserver assembles and runs the HTTP adapter around Control.
 package controlserver
 
 import (
@@ -12,26 +12,28 @@ import (
 	"time"
 
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
-	"github.com/caelis-labs/caelis/surfaces/appserver"
 )
 
 // Dependencies contains only the Control contracts exposed over HTTP.
 // Product assembly remains outside the listener package.
 type Dependencies struct {
-	Service     controlclient.Service
-	TaskStreams taskstream.Service
+	Service   controlclient.Service
+	Lifecycle interface {
+		Quiesce(context.Context) error
+	}
 }
 
+// Config configures the Control Host listener and shutdown lifecycle.
 type Config struct {
 	Address       string
-	Authenticator appserver.Authenticator
+	Authenticator Authenticator
 	Principal     controlclient.Principal
 	TokenFile     string
 	AllowedHosts  []string
 	TLSCertFile   string
 	TLSKeyFile    string
 	Heartbeat     time.Duration
+	DrainTimeout  time.Duration
 }
 
 func Handler(deps Dependencies, config Config) (http.Handler, error) {
@@ -41,8 +43,8 @@ func Handler(deps Dependencies, config Config) (http.Handler, error) {
 	if config.Authenticator == nil {
 		return nil, errors.New("controlserver: authenticator is required for an HTTP handler")
 	}
-	server, err := appserver.New(appserver.Config{
-		Service: deps.Service, TaskStreams: deps.TaskStreams, Authenticator: config.Authenticator,
+	server, err := New(HandlerConfig{
+		Service: deps.Service, Authenticator: config.Authenticator,
 		AllowedHosts: append([]string(nil), config.AllowedHosts...), Heartbeat: config.Heartbeat,
 	})
 	if err != nil {
@@ -67,6 +69,9 @@ func ListenAndServe(ctx context.Context, deps Dependencies, config Config) error
 	if err != nil {
 		return err
 	}
+	if deps.Lifecycle == nil {
+		return errors.New("controlserver: Host lifecycle is required")
+	}
 	listener, err := net.Listen("tcp", resolved.Address)
 	if err != nil {
 		return err
@@ -74,6 +79,9 @@ func ListenAndServe(ctx context.Context, deps Dependencies, config Config) error
 	server := &http.Server{
 		Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
 	}
+	requestCtx, cancelRequests := context.WithCancel(context.Background())
+	defer cancelRequests()
+	server.BaseContext = func(net.Listener) context.Context { return requestCtx }
 	if useTLS {
 		server.TLSConfig = &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}
 	}
@@ -87,18 +95,45 @@ func ListenAndServe(ctx context.Context, deps Dependencies, config Config) error
 	}()
 	select {
 	case err := <-done:
+		drainErr := quiesceHost(deps.Lifecycle, resolved.DrainTimeout)
 		if errors.Is(err, http.ErrServerClosed) {
-			return nil
+			return drainErr
+		}
+		if drainErr != nil {
+			return errors.Join(err, drainErr)
 		}
 		return err
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		drainErr := quiesceHost(deps.Lifecycle, resolved.DrainTimeout)
+		cancelRequests()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), drainTimeout(resolved.DrainTimeout))
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			return err
+			return errors.Join(drainErr, err)
+		}
+		if drainErr != nil {
+			return drainErr
+		}
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil
 		}
 		return ctx.Err()
 	}
+}
+
+func quiesceHost(lifecycle interface {
+	Quiesce(context.Context) error
+}, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), drainTimeout(timeout))
+	defer cancel()
+	return lifecycle.Quiesce(ctx)
+}
+
+func drainTimeout(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return 5 * time.Second
+	}
+	return timeout
 }
 
 func resolveNetworkConfig(config Config) (Config, bool, error) {
@@ -139,7 +174,7 @@ func resolveNetworkConfig(config Config) (Config, bool, error) {
 		if loadErr != nil {
 			return Config{}, false, loadErr
 		}
-		config.Authenticator, loadErr = appserver.BearerTokenAuthenticator(token, config.Principal)
+		config.Authenticator, loadErr = BearerTokenAuthenticator(token, config.Principal)
 		if loadErr != nil {
 			return Config{}, false, loadErr
 		}

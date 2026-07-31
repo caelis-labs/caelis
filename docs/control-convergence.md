@@ -33,8 +33,10 @@ Control should own:
   Loop.
 
 The SDK should own reusable Runtime, model, tool, Session, sandbox, task, and
-normalized collaboration contracts. Protocol packages should own wire schema,
-compatibility, and projection. Surfaces should own presentation and input only.
+normalized collaboration contracts. Protocol packages should own
+product-neutral wire schema, compatibility, and projection. A transport codec
+that directly serializes one Control domain stays with that Control owner.
+Surfaces should own presentation and input only.
 
 ## Client Boundary
 
@@ -44,11 +46,14 @@ The target client contract is:
 - request-scoped, with explicit Session and target identity;
 - revision-aware and idempotent for mutations;
 - typed for conflicts, unsupported capabilities, and unknown outcomes;
-- usable in-process and through thin HTTP/SSE or ACP adapters;
+- usable in-process and through a thin HTTP/SSE Host adapter; ACP remains its
+  separate protocol surface;
 - composed from focused Control domains rather than one ever-growing Service.
 
-HTTP, SSE, CLI, TUI, ACP, and future GUI mappings should translate DTOs and
-errors without owning business policy, replay, approval queues, or persistence.
+The HTTP Host adapter, CLI, TUI, ACP, and future GUI mappings should translate
+DTOs and errors without owning business policy, replay, approval queues, or
+persistence. The Host adapter is infrastructure around Control, not a
+presentation surface parallel to TUI or ACP.
 
 ## Data and Stream Model
 
@@ -87,7 +92,8 @@ removes real coupling or a duplicate path.
 - stable product domains converge under focused `control/*` packages;
 - composition and host-specific adapters remain private;
 - presentation code remains under `surfaces/*`;
-- product wire types remain under `protocol/*`.
+- product-neutral wire types remain under `protocol/*`; domain-bound codecs
+  remain with their semantic owner.
 
 Do not recreate `ports/*`, grow private prompt or Surface facades into product
 APIs, or move packages merely to make the tree look complete. When a replacement

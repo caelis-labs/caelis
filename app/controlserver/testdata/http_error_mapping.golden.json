@@ -3,6 +3,8 @@
   "read/401": {"error": "authentication required"},
   "read/403": {"error": "forbidden"},
   "read/409": {"error": "conflict"},
+  "read/503": {"error": "service unavailable"},
   "command/400": {"operation_id": "operation-1", "outcome": "rejected", "target": {}},
-  "command/409": {"operation_id": "operation-1", "outcome": "conflicted", "target": {}, "detail": "conflict"}
+  "command/409": {"operation_id": "operation-1", "outcome": "conflicted", "target": {}, "detail": "conflict"},
+  "command/503": {"error": "service unavailable"}
 }

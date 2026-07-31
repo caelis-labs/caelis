@@ -1,4 +1,4 @@
-package appserver
+package controlserver
 
 import (
 	"bufio"
@@ -16,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
@@ -47,7 +48,7 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	want := receiveParityEnvelope(t, inProcess.Subscription.Backfill())
 	_ = inProcess.Subscription.Close()
 
-	server, err := New(Config{
+	server, err := New(HandlerConfig{
 		Service: parityService{feed: feed},
 		Authenticator: AuthenticatorFunc(func(*http.Request) (controlclient.Principal, error) {
 			return controlclient.Principal{ID: "owner"}, nil
@@ -57,7 +58,7 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := http.NewRequest(http.MethodGet, "http://control.test/api/control/v1/sessions/session-1/stream", nil)
+	request, err := http.NewRequest(http.MethodGet, "http://control.test/api/control/v1/sessions/session-1/reconnect", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +127,23 @@ type parityService struct {
 	feed controlclient.SessionFeed
 }
 
-func (s parityService) Subscribe(ctx context.Context, _ controlclient.Principal, req controlclient.SubscribeRequest) (controlclient.SubscribeResult, error) {
-	return s.feed.Subscribe(ctx, req)
+func (s parityService) Reconnect(ctx context.Context, _ controlclient.Principal, req controlclient.ReconnectRequest) (controlclient.ReconnectResult, error) {
+	subscription, err := s.feed.Subscribe(ctx, controlclient.SubscribeRequest(req))
+	if err != nil {
+		return controlclient.ReconnectResult{}, err
+	}
+	return controlclient.ReconnectResult{
+		State: controlclient.SessionState{
+			ProtocolVersion: schema.CurrentProtocolVersion,
+			EnvelopeVersion: controlclient.EnvelopeVersion,
+			APIVersion:      controlclient.HTTPAPIVersion,
+			SessionID:       req.SessionID,
+			ResumeMode:      subscription.Mode,
+			TransientGap:    subscription.TransientGap,
+			BoundaryCursor:  subscription.BoundaryCursor,
+		},
+		Subscription: subscription.Subscription,
+	}, nil
 }
 
 func receiveParityEnvelope(t *testing.T, events <-chan eventstream.Envelope) eventstream.Envelope {

@@ -28,6 +28,13 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 	if s == nil {
 		return controlclient.CommandResult{}, errors.New("gatewayapp: stack is unavailable")
 	}
+	if s.closing.Load() {
+		return controlclient.CommandResult{Outcome: controlclient.OutcomeRejected},
+			controlclient.NewOutcomeError(
+				controlclient.OutcomeRejected,
+				errorcode.New(errorcode.Unavailable, "gatewayapp: host is closing"),
+			)
+	}
 	gw := s.currentGateway()
 	if gw == nil {
 		return controlclient.CommandResult{}, errors.New("gatewayapp: gateway is unavailable")
@@ -92,8 +99,12 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
 		result, err := gw.BeginTurn(ctx, kernelimpl.BeginTurnRequest{
-			SessionRef: active.SessionRef, Input: req.Input, DisplayInput: req.DisplayInput, Surface: "control-client",
-			Metadata: map[string]any{"operation_id": req.OperationID},
+			SessionRef:     active.SessionRef,
+			RuntimeContext: s.controlRuntimeContext(ctx),
+			Input:          req.Input,
+			DisplayInput:   req.DisplayInput,
+			Surface:        "control-client",
+			Metadata:       map[string]any{"operation_id": req.OperationID},
 		})
 		if err == nil && result.Handle != nil {
 			s.attachControlClientHandle(result.Handle)
@@ -193,6 +204,13 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 	default:
 		return controlclient.CommandResult{}, fmt.Errorf("gatewayapp: unsupported control command %q (%T)", action, request)
 	}
+}
+
+func (s *Stack) controlRuntimeContext(fallback context.Context) context.Context {
+	if s != nil && s.lifecycleCtx != nil {
+		return s.lifecycleCtx
+	}
+	return fallback
 }
 
 func (s *Stack) resolveControlParticipantPlacement(ctx context.Context, profileID, effort string) (sdkplacement.Placement, error) {
@@ -312,6 +330,9 @@ func classifyControlBackendError(err error) error {
 		case kernelimpl.KindConflict, kernelimpl.KindApproval:
 			coded := errorcode.Wrap(errorcode.Conflict, "gatewayapp: command conflict", err)
 			return controlclient.NewOutcomeError(controlclient.OutcomeConflicted, coded)
+		case kernelimpl.KindUnavailable:
+			coded := errorcode.Wrap(errorcode.Unavailable, gatewayErr.Error(), err)
+			return controlclient.NewOutcomeError(controlclient.OutcomeRejected, coded)
 		}
 	}
 	if errors.Is(err, session.ErrRevisionConflict) || errors.Is(err, session.ErrLeaseConflict) {

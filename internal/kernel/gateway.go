@@ -54,11 +54,13 @@ type Gateway struct {
 	clock                func() time.Time
 	sessionStartHooks    []plugin.HookSpec
 
-	mu        sync.Mutex
-	active    map[string]*turnHandle
-	approvals map[string]*approvalCoordinator
-	bindings  map[string]sessionBinding
-	nextID    atomic.Uint64
+	mu            sync.Mutex
+	active        map[string]*turnHandle
+	quiescing     bool
+	activeChanged chan struct{}
+	approvals     map[string]*approvalCoordinator
+	bindings      map[string]sessionBinding
+	nextID        atomic.Uint64
 }
 
 // TurnStartGate blocks Turn creation until Control startup invariants hold.
@@ -128,6 +130,7 @@ func New(cfg Config) (*Gateway, error) {
 		clock:                cfg.Clock,
 		sessionStartHooks:    cfg.SessionStartHooks,
 		active:               map[string]*turnHandle{},
+		activeChanged:        make(chan struct{}),
 		approvals:            map[string]*approvalCoordinator{},
 		bindings:             map[string]sessionBinding{},
 	}, nil

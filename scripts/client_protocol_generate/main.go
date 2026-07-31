@@ -83,8 +83,8 @@ func main() {
 	goOutput, err := generateGo(spec, operations)
 	must(err)
 	outputs := map[string][]byte{
-		filepath.Join(root, "surfaces/appserver/generated/control_v1.gen.go"): goOutput,
-		filepath.Join(root, "clients/typescript/control-v1.gen.ts"):           generateTypeScript(spec, operations),
+		filepath.Join(root, "control/client/wirev1/generated/control_v1.gen.go"): goOutput,
+		filepath.Join(root, "clients/typescript/control-v1.gen.ts"):              generateTypeScript(spec, operations),
 	}
 	for path, want := range outputs {
 		want = append(bytes.TrimSpace(want), '\n')
@@ -104,14 +104,12 @@ func validateSpec(spec openAPISpec) error {
 	if spec.OpenAPI != "3.1.0" {
 		return fmt.Errorf("openapi version = %q, want 3.1.0", spec.OpenAPI)
 	}
-	if len(operationIDs(spec)) != 18 {
-		return fmt.Errorf("operation count = %d, want 18", len(operationIDs(spec)))
+	if len(operationIDs(spec)) != 10 {
+		return fmt.Errorf("operation count = %d, want 10", len(operationIDs(spec)))
 	}
 	required := []string{
 		"CreateSessionRequest", "CloseSessionRequest", "PromptRequest", "SteerRequest", "CancelRequest",
-		"ResolveApprovalRequest", "AttachParticipantRequest", "PromptParticipantRequest", "CancelParticipantRequest",
-		"DetachParticipantRequest", "HandoffRequest", "CommandResult", "SessionState", "Envelope", "EventBatch",
-		"TaskDescriptor", "TaskList", "TaskResumeBoundary", "TaskEventBatch",
+		"ResolveApprovalRequest", "CommandResult", "ServerInfo", "SessionState", "Envelope",
 	}
 	for _, name := range required {
 		if spec.Components.Schemas[name] == nil {

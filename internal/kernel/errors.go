@@ -11,6 +11,7 @@ const (
 	KindInternal    ErrorKind = "internal"
 	KindApproval    ErrorKind = "approval"
 	KindUnsupported ErrorKind = "unsupported"
+	KindUnavailable ErrorKind = "unavailable"
 )
 
 const (
@@ -29,6 +30,7 @@ const (
 	CodeNoActiveRun             = "no_active_run"
 	CodeModeNotFound            = "mode_not_found"
 	CodeControlPlaneUnsupported = "control_plane_unsupported"
+	CodeHostClosing             = "host_closing"
 )
 
 type Error struct {

@@ -74,7 +74,7 @@ type StatusRuntime struct {
 }
 
 // StatusRateLimits is the provider-neutral account usage projection exposed
-// to TUI, headless, app-server, and future GUI status surfaces.
+// to TUI, headless, Control Host clients, and future GUI status surfaces.
 type StatusRateLimits struct {
 	Provider   string
 	Plan       string

@@ -586,10 +586,6 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		if strings.HasPrefix(target, "surfaces/") {
 			return "impl must not depend on surfaces"
 		}
-	case strings.HasPrefix(rel, "surfaces/appserver/"):
-		if strings.HasPrefix(target, "app/") || strings.HasPrefix(target, "internal/") {
-			return "surfaces/appserver must not depend on app or internal implementation packages"
-		}
 	case strings.HasPrefix(rel, "surfaces/"):
 		if strings.HasPrefix(target, "app/") {
 			return "surfaces must not depend directly on app"
@@ -702,6 +698,10 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "", "", 0
 	}
 	switch {
+	case pkg == "surfaces/appserver" || strings.HasPrefix(pkg, "surfaces/appserver/"):
+		return "must not recreate surfaces/appserver; the Control Host belongs to app/controlserver and its typed clients and wire codec to control/client", pkg, 1
+	case pkg == "protocol/control" || strings.HasPrefix(pkg, "protocol/control/"):
+		return "must not recreate protocol/control; the domain-bound Control wire codec belongs to control/client/wirev1", pkg, 1
 	case pkg == "ports/controlclient" || strings.HasPrefix(pkg, "ports/controlclient/"):
 		return "must not recreate ports/controlclient; product client contracts and behavior belong to control/client", pkg, 1
 	case pkg == "ports/gateway" || strings.HasPrefix(pkg, "ports/gateway/"):

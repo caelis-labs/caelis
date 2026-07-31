@@ -1,4 +1,4 @@
-package appserver
+package controlserver
 
 import (
 	"errors"
@@ -26,6 +26,8 @@ func statusForError(err error) int {
 		return http.StatusForbidden
 	case errorcode.AlreadyExists, errorcode.Conflict, errorcode.FailedPrecondition:
 		return http.StatusConflict
+	case errorcode.Unavailable:
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}
@@ -44,6 +46,8 @@ func writeMappedError(w http.ResponseWriter, err error) {
 		detail = "forbidden"
 	case http.StatusConflict:
 		detail = "conflict"
+	case http.StatusServiceUnavailable:
+		detail = "service unavailable"
 	}
 	writeError(w, status, detail)
 }

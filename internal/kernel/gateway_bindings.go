@@ -14,6 +14,12 @@ func (g *Gateway) releaseActive(sessionID string, handle *turnHandle) {
 		return
 	}
 	delete(g.active, sessionID)
+	g.signalActiveChangedLocked()
+}
+
+func (g *Gateway) signalActiveChangedLocked() {
+	close(g.activeChanged)
+	g.activeChanged = make(chan struct{})
 }
 
 func (g *Gateway) CurrentSession(bindingKey string) (session.SessionRef, bool) {

@@ -272,11 +272,15 @@ func (r *blockingRuntime) RunState(context.Context, session.SessionRef) (agent.R
 
 type cancellableRuntime struct {
 	session   session.Session
+	started   chan struct{}
 	cancelled chan struct{}
 }
 
 func (r *cancellableRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
 	_ = req
+	if r.started != nil {
+		close(r.started)
+	}
 	<-ctx.Done()
 	close(r.cancelled)
 	return agent.RunResult{}, ctx.Err()
