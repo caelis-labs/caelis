@@ -14,7 +14,7 @@ func TestCodexConnectCompletionUsesAccountCatalogAndEffective56Context(t *testin
 	t.Parallel()
 
 	ctx := context.Background()
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Model: ModelRuntimeDeps{
 			AuthenticateFn: func(_ context.Context, req modelconfig.AuthenticateRequest) (modelconfig.AuthenticateResult, error) {
 				if req.Provider != "openai-codex" || req.Purpose != modelconfig.AuthPurposeModelSelection {
@@ -81,7 +81,7 @@ func slashCandidateValues(candidates []controlprompt.SlashArgCandidate) []string
 func TestCodexConnectCompletionFallbackOmitsDeprecated52(t *testing.T) {
 	t.Parallel()
 
-	driver, err := NewAdapter(context.Background(), &RuntimeStack{
+	driver, err := newAssembler(context.Background(), &RuntimeStack{
 		Model: ModelRuntimeDeps{AuthenticateFn: func(context.Context, modelconfig.AuthenticateRequest) (modelconfig.AuthenticateResult, error) {
 			return modelconfig.AuthenticateResult{}, nil
 		}},

@@ -81,9 +81,8 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 			releaseRuntimeUse()
 		}
 	}()
-	defaultSession := s.sessionRuntimes.defaultSession(sessionID)
 	switch {
-	case controlActionActivatesSessionRuntime(action) && !defaultSession:
+	case controlActionActivatesSessionRuntime(action):
 		runtime, _, err := s.sessionRuntimes.activateSession(ctx, sessionID)
 		if err != nil {
 			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
@@ -93,7 +92,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
 		runtimeStack = runtime.stack
-	case controlActionTargetsActiveRuntime(action) && !defaultSession:
+	case controlActionTargetsActiveRuntime(action):
 		runtime, releaseUse, err := s.sessionRuntimes.acquireLoadedRuntime(sessionID)
 		if err != nil {
 			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
@@ -108,7 +107,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 		}
 		releaseRuntimeUse = releaseUse
 		runtimeStack = runtime.stack
-	case action == controlclient.ActionSessionClose && !defaultSession:
+	case action == controlclient.ActionSessionClose:
 		runtime, releaseUse, err := s.sessionRuntimes.acquireLoadedRuntime(sessionID)
 		if err != nil {
 			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)

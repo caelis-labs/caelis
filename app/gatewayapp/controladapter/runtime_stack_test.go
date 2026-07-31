@@ -56,7 +56,7 @@ func TestHasReusableConnectAuthUsesCredentialValidationHook(t *testing.T) {
 	t.Parallel()
 
 	called := false
-	driver := &Adapter{stack: &RuntimeStack{
+	driver := &assembler{stack: &RuntimeStack{
 		Model: ModelRuntimeDeps{
 			HasReusableAuthFn: func(_ context.Context, provider string, baseURL string) bool {
 				called = true

@@ -14,9 +14,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
@@ -42,10 +40,7 @@ func TestLocalStackClaudeBuiltInACPE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gatewayapp.NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(ctx, "", "claude-e2e")
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
+	activeSession := startEvalSession(t, ctx, stack, "")
 	claudeAgent := connectClaudeAgentForE2E(ctx, t, stack)
 
 	const want = "caelis claude acp e2e ok"
@@ -89,10 +84,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gatewayapp.NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(ctx, "", "claude-resume-e2e")
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
+	activeSession := startEvalSession(t, ctx, stack, "")
 	claudeAgent := connectClaudeAgentForE2E(ctx, t, stack)
 	updated, err := stack.KernelControlPlane().HandoffController(ctx, kernel.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
@@ -112,16 +104,12 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	const marker = "caelis claude acp resume e2e"
 	const wantFirst = marker + " first ok"
 	prompt := "Reply with exactly this text and no markdown: " + wantFirst
-	driver, err := local.NewLocalAdapterForSession(ctx, stack, updated, "headless-claude-acp-resume-e2e", "")
+	result, err := runEvalHeadlessOnce(t, ctx, stack, updated, prompt, headless.Options{})
 	if err != nil {
-		t.Fatalf("NewLocalAdapterForSession(first) error = %v", err)
-	}
-	result, err := headless.RunOnce(ctx, driver, controlprompt.Submission{Text: prompt}, headless.Options{})
-	if err != nil {
-		t.Fatalf("RunOnce(claude) error = %v", err)
+		t.Fatalf("RunSessionOnce(claude) error = %v", err)
 	}
 	if !strings.Contains(strings.TrimSpace(result.Output), marker) {
-		t.Fatalf("RunOnce(first Claude turn) output = %q, want marker %q", result.Output, marker)
+		t.Fatalf("RunSessionOnce(first Claude turn) output = %q, want marker %q", result.Output, marker)
 	}
 
 	resumed, err := stack.KernelControlPlane().HandoffController(ctx, kernel.HandoffControllerRequest{
@@ -143,13 +131,9 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	}
 
 	const wantSecond = marker + " second ok"
-	driver, err = local.NewLocalAdapterForSession(ctx, stack, resumed, "headless-claude-acp-resume-e2e", "")
+	result, err = runEvalHeadlessOnce(t, ctx, stack, resumed, "Reply with exactly this text and no markdown: "+wantSecond, headless.Options{})
 	if err != nil {
-		t.Fatalf("NewLocalAdapterForSession(second) error = %v", err)
-	}
-	result, err = headless.RunOnce(ctx, driver, controlprompt.Submission{Text: "Reply with exactly this text and no markdown: " + wantSecond}, headless.Options{})
-	if err != nil {
-		t.Fatalf("RunOnce(second Claude turn) error = %v", err)
+		t.Fatalf("RunSessionOnce(second Claude turn) error = %v", err)
 	}
 	if output := strings.TrimSpace(result.Output); output == "" {
 		t.Log("Claude ACP second turn completed without assistant text after resume/new handoff")

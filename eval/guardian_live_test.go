@@ -181,10 +181,7 @@ func runGuardianE2EScenario(t *testing.T, modelAlias string, scenario guardianE2
 			t.Errorf("Stack.Close() error = %v", err)
 		}
 	})
-	active, err := stack.StartSession(context.Background(), "", "guardian-live-e2e")
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
+	active := startEvalSession(t, context.Background(), stack, "")
 	if err := stack.UseModel(context.Background(), active.SessionRef, modelAlias); err != nil {
 		t.Fatalf("UseModel(%q) error = %v", modelAlias, err)
 	}

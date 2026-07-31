@@ -60,7 +60,7 @@ func TestCompleteResumeSearchesBeyondFirstTwoHundredSessions(t *testing.T) {
 			Title:      "needle target", UpdatedAt: time.Unix(1, 0),
 		}}},
 	}}
-	driver := &Adapter{stack: &RuntimeStack{
+	driver := &assembler{stack: &RuntimeStack{
 		Gateway: GatewayRuntimeDeps{SessionServiceFn: func() GatewaySessionService { return gw }},
 		Session: SessionRuntimeDeps{
 			AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws"},
@@ -95,7 +95,7 @@ func TestCompleteResumeStopsWhenFirstPageSatisfiesLimit(t *testing.T) {
 		},
 		errors: map[string]error{"page-2": errors.New("later page unavailable")},
 	}
-	driver := &Adapter{stack: &RuntimeStack{
+	driver := &assembler{stack: &RuntimeStack{
 		Gateway: GatewayRuntimeDeps{SessionServiceFn: func() GatewaySessionService { return gw }},
 		Session: SessionRuntimeDeps{
 			AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws"},

@@ -12,9 +12,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
@@ -57,10 +55,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 		t.Fatalf("gatewayapp.NewLocalStack() error = %v", err)
 	}
 
-	activeSession, err := stack.StartSession(context.Background(), "gateway-acp-main", "surface-acp-main")
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
+	activeSession := startEvalSession(t, context.Background(), stack, "gateway-acp-main")
 
 	updated, err := stack.KernelControlPlane().HandoffController(context.Background(), kernel.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
@@ -109,16 +104,12 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	driver, err := local.NewLocalAdapterForSession(ctx, stack, updated, "headless-acp-main-e2e", "")
+	result, err := runEvalHeadlessOnce(t, ctx, stack, updated, "run through acp controller", headless.Options{})
 	if err != nil {
-		t.Fatalf("NewLocalAdapterForSession() error = %v", err)
-	}
-	result, err := headless.RunOnce(ctx, driver, controlprompt.Submission{Text: "run through acp controller"}, headless.Options{})
-	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
+		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
 	if got := strings.TrimSpace(result.Output); got != "gateway acp main ok" {
-		t.Fatalf("RunOnce() output = %q, want %q", got, "gateway acp main ok")
+		t.Fatalf("RunSessionOnce() output = %q, want %q", got, "gateway acp main ok")
 	}
 
 	loaded, err := stack.Sessions.LoadSession(ctx, session.LoadSessionRequest{
@@ -175,10 +166,7 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gatewayapp.NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(context.Background(), "gateway-acp-command", "surface-acp-command")
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
+	activeSession := startEvalSession(t, context.Background(), stack, "gateway-acp-command")
 	updated, err := stack.KernelControlPlane().HandoffController(context.Background(), kernel.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,
@@ -318,10 +306,7 @@ func TestLocalStackGatewayACPInteractiveTaskReadWriteE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gatewayapp.NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(context.Background(), "gateway-acp-interactive", "surface-acp-interactive")
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
+	activeSession := startEvalSession(t, context.Background(), stack, "gateway-acp-interactive")
 	updated, err := stack.KernelControlPlane().HandoffController(context.Background(), kernel.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,

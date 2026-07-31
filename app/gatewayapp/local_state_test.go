@@ -156,7 +156,7 @@ func TestNewLocalStackUsesRuntimeConfigApprovalAndPolicyProfile(t *testing.T) {
 	if stack.runtime.PolicyProfile != "workspace-write" {
 		t.Fatalf("runtime PolicyProfile = %q, want workspace-write", stack.runtime.PolicyProfile)
 	}
-	session, err := stack.StartSession(context.Background(), "runtime config session", "surface-runtime-config")
+	session, err := startGatewayAppTestSession(context.Background(), stack, "runtime config session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
@@ -183,7 +183,7 @@ func TestNewLocalStackPersistsTasksInSessionSQLiteIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(context.Background(), "task store session", "surface-task-store")
+	activeSession, err := startGatewayAppTestSession(context.Background(), stack, "task store session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
@@ -344,7 +344,7 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 		t.Fatalf("NewLocalStack(first) error = %v", err)
 	}
 	grokID := first.DefaultModelID()
-	active, err := first.StartSession(ctx, "grok context resume", "surface")
+	active, err := startGatewayAppTestSession(ctx, first, "grok context resume")
 	if err != nil {
 		_ = first.Close()
 		t.Fatalf("StartSession() error = %v", err)
@@ -550,7 +550,7 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(ctx, "delete-profile-session", "surface")
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "delete-profile-session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
@@ -689,7 +689,7 @@ func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(ctx, "delete-only-model-session", "surface")
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "delete-only-model-session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
@@ -767,7 +767,7 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(ctx, "persist-session", "surface-persist")
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "persist-session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
@@ -805,7 +805,7 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
 	}
-	reloadedSession, err := reloaded.StartSession(ctx, "persist-session", "surface-persist")
+	reloadedSession, err := startGatewayAppTestSession(ctx, reloaded, "persist-session")
 	if err != nil {
 		t.Fatalf("StartSession(reloaded) error = %v", err)
 	}
@@ -986,7 +986,7 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(ctx, "auto compact session", "surface-auto-compact")
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "auto compact session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
@@ -997,7 +997,7 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Next action: verify the default app runtime invokes model-backed compact before the turn."))
 
 	if _, err := runHeadlessOnceForGatewayAppTest(ctx, stack, activeSession, "headless-auto-compact-test", "continue after app auto compact", headless.Options{}); err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
+		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
 	if got := server.compactionCalls.Load(); got == 0 {
 		t.Fatal("expected app default runtime to invoke compaction")
@@ -1044,14 +1044,14 @@ func TestLocalStackAutoCompactCountsPromptPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(ctx, "auto compact prefix session", "surface-auto-compact-prefix")
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "auto compact prefix session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Short durable event."))
 
 	if _, err := runHeadlessOnceForGatewayAppTest(ctx, stack, activeSession, "headless-auto-compact-prefix-test", "continue after prefix pressure", headless.Options{}); err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
+		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
 	if got := server.compactionCalls.Load(); got == 0 {
 		t.Fatal("expected prompt-prefix pressure to trigger auto compaction")
@@ -1081,7 +1081,7 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(ctx, "manual compact session", "surface-manual-compact")
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "manual compact session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
@@ -1141,7 +1141,7 @@ func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(ctx, "compact usage prefix session", "surface-compact-usage-prefix")
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "compact usage prefix session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
@@ -1201,7 +1201,7 @@ func TestSessionUsageSnapshotUsesActiveMainModelBaseline(t *testing.T) {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 	defer stack.Close()
-	activeSession, err := stack.StartSession(ctx, "usage active model session", "surface-usage-active-model")
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "usage active model session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
@@ -1292,7 +1292,7 @@ func newLocalStateTestStack(t *testing.T) (*Stack, session.Session) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(context.Background(), "state-test-session", "surface-state-test")
+	activeSession, err := startGatewayAppTestSession(context.Background(), stack, "state-test-session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}

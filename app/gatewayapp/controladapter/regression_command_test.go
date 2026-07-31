@@ -35,9 +35,9 @@ func newRegressionDriver(t *testing.T) (*assembler, *gatewayapp.Stack) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "regression-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "regression-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	return driver, stack
 }
@@ -62,55 +62,6 @@ func TestRegressionCommandStatusSnapshot(t *testing.T) {
 	}
 	if status.Session.SessionMode == "" {
 		t.Fatal("Status().SessionMode should not be empty")
-	}
-}
-
-func TestRegressionCommandStatusAfterLazySession(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	storeDir := t.TempDir()
-	workspace := t.TempDir()
-	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:      "caelis",
-		UserID:       "lazy-regression",
-		StoreDir:     storeDir,
-		WorkspaceKey: workspace,
-		WorkspaceCWD: workspace,
-		ApprovalMode: "default",
-		Assembly:     assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
-			Provider: "ollama",
-			API:      providers.APIOllama,
-			Model:    "llama3",
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewLocalStack() error = %v", err)
-	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "", "surface", "ollama/llama3")
-	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
-	}
-
-	status, err := driver.Status(ctx)
-	if err != nil {
-		t.Fatalf("Status() error = %v", err)
-	}
-	if status.Session.ID != "" {
-		t.Fatalf("Status().SessionID = %q, want empty before first submission", status.Session.ID)
-	}
-
-	_, err = driver.ensureSession(ctx)
-	if err != nil {
-		t.Fatalf("ensureSession() error = %v", err)
-	}
-
-	status, err = driver.Status(ctx)
-	if err != nil {
-		t.Fatalf("Status() after ensureSession error = %v", err)
-	}
-	if status.Session.ID == "" {
-		t.Fatal("Status().SessionID should not be empty after ensureSession")
 	}
 }
 
@@ -376,9 +327,9 @@ func TestRegressionCommandNewDriverWithSandboxConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "sandbox-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "sandbox-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	status, err := driver.Status(ctx)

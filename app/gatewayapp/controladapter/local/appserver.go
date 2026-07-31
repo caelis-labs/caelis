@@ -42,7 +42,7 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	dependencies, err := host.ACPAgentDependencies()
+	dependencies, err := host.PresentationDependencies()
 	if err != nil {
 		return nil, err
 	}

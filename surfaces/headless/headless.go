@@ -8,21 +8,10 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
-
-// Starter is the legacy private-prompt entry retained only for eval and
-// default-Stack migration coverage.
-//
-// Deprecated: new product paths must use controlclient.SessionTurnStarter.
-// Remove this contract with RunOnce after the remaining eval/private Gateway
-// callers exercise the typed Session client instead.
-type Starter interface {
-	Submit(context.Context, controlprompt.Submission) (controlprompt.Turn, error)
-}
 
 type ApprovalPolicy string
 
@@ -229,57 +218,6 @@ func runSessionOnce(
 	)
 }
 
-// RunOnce reduces one legacy private-prompt Turn.
-//
-// Deprecated: use RunSessionOnce. Remove this compatibility path after its
-// eval/private Gateway callers migrate to controlclient.SessionTurnStarter.
-func RunOnce(ctx context.Context, starter Starter, submission controlprompt.Submission, opts Options) (Result, error) {
-	turn, err := starter.Submit(ctx, submission)
-	if err != nil {
-		return Result{}, err
-	}
-	if turn == nil {
-		return Result{}, nil
-	}
-	defer turn.Close()
-
-	out := Result{}
-	var assistant assistantOutputReducer
-	for env := range turn.Events() {
-		if env.Cursor != "" {
-			out.LastCursor = env.Cursor
-		}
-		if err := envelopeError(env); err != nil {
-			return out, err
-		}
-		if usage := eventstream.UsageSnapshotFromEnvelope(env); usage != nil && isMainScope(env) {
-			if usage.PromptTokens > 0 {
-				out.PromptTokens = usage.PromptTokens
-			}
-			continue
-		}
-		if env.Kind == eventstream.KindRequestPermission {
-			payload := projector.ApprovalPayloadFromPermission(env.Permission)
-			approvalReq := ApprovalRequest{RequestID: env.ApprovalRequestID, Payload: payload}
-			decision, err := resolveApproval(ctx, opts, approvalReq)
-			if err != nil {
-				return out, err
-			}
-			if err := turn.SubmitApproval(ctx, controlApprovalDecision(approvalReq, decision)); err != nil {
-				return out, err
-			}
-			continue
-		}
-		if !isMainSessionUpdate(env) {
-			continue
-		}
-		if text, ok := assistant.Observe(env); ok {
-			out.Output = text
-		}
-	}
-	return out, nil
-}
-
 // assistantOutputReducer keeps exact ACP delta semantics for live updates while
 // allowing one canonical final snapshot to replace its transient delivery.
 // Final is the semantic boundary: EventID is intentionally not required because
@@ -341,18 +279,6 @@ func resolveApproval(ctx context.Context, opts Options, req ApprovalRequest) (ap
 		return approval.Decision{Approved: true, Outcome: string(approval.StatusApproved)}, nil
 	}
 	return approval.Decision{Approved: false, Outcome: string(approval.StatusRejected)}, nil
-}
-
-func controlApprovalDecision(req ApprovalRequest, decision approval.Decision) controlprompt.ApprovalDecision {
-	response := approval.RuntimeResponseFromFinalReview(approval.FinalizeReviewResult(req.Payload, decision))
-	return controlprompt.ApprovalDecision{
-		RequestID:  req.RequestID,
-		Outcome:    response.Outcome,
-		OptionID:   response.OptionID,
-		Approved:   response.Approved,
-		Reason:     response.Reason,
-		ReviewText: response.ReviewText,
-	}
 }
 
 func controlClientApprovalResolution(

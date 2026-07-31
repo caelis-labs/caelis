@@ -137,6 +137,51 @@ func TestSessionClientAdapterRoutesReviewThroughTypedParticipantClient(t *testin
 	}
 }
 
+func TestSessionClientAdapterRoutesSideAgentStartAndFollowUpThroughTypedClients(t *testing.T) {
+	target := controlclient.TurnTarget{HandleID: "participant-handle", RunID: "participant-run", TurnID: "participant-turn"}
+	sessions := &sessionClientAdapterTestClient{
+		target:       target,
+		subscription: newSessionClientAdapterTestSubscription(),
+		state: controlclient.SessionState{
+			SessionID: "session-1", Revision: 7, CWD: t.TempDir(),
+			Controller: session.ControllerBinding{EpochID: "epoch-1"},
+		},
+	}
+	participants := &sessionClientAdapterTestParticipantClient{target: target}
+	adapter := newSessionClientAdapterForTest(t, sessions, participants, "session-1", "cli-tui")
+
+	started, err := adapter.StartAgentRun(context.Background(), "orbit", " inspect ", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started == nil || participants.start.SessionID != "session-1" ||
+		participants.start.Handle != "orbit" || participants.start.Source != "slash_profile_orbit" ||
+		participants.start.Role != session.ParticipantRoleSidecar || participants.start.Input != "inspect" {
+		t.Fatalf("typed participant start = %#v, Turn=%#v", participants.start, started)
+	}
+	if err := started.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions.subscription = newSessionClientAdapterTestSubscription()
+	sessions.state.Participants = []session.ParticipantBinding{{
+		ID: "participant-1", Kind: session.ParticipantKindACP,
+		Role: session.ParticipantRoleSidecar, Label: participants.start.Label, Source: participants.start.Source,
+	}}
+	followUp, err := adapter.ContinueAgentRun(context.Background(), participants.start.Label, " continue ", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if followUp == nil || participants.prompt.SessionID != "session-1" ||
+		participants.prompt.ParticipantID != "participant-1" || participants.prompt.Input != "continue" ||
+		participants.prompt.Source != "user_side_agent" {
+		t.Fatalf("typed participant follow-up = %#v, Turn=%#v", participants.prompt, followUp)
+	}
+	if err := followUp.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSessionClientAdapterRoutesCompactThroughTypedSessionClient(t *testing.T) {
 	client := &sessionClientAdapterTestClient{state: controlclient.SessionState{
 		SessionID: "session-1",
@@ -243,6 +288,20 @@ func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) 
 	}
 }
 
+func TestAppServerAdapterResumeFailurePreservesCurrentSession(t *testing.T) {
+	client := &sessionClientAdapterTestClient{
+		reconnectErr: errors.New("bootstrap failed"),
+		state:        controlclient.SessionState{SessionID: "session-current"},
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-current", "cli-tui")
+	if _, err := adapter.ResumeSession(context.Background(), "session-target"); !errors.Is(err, client.reconnectErr) {
+		t.Fatalf("ResumeSession() error = %v, want %v", err, client.reconnectErr)
+	}
+	if got := adapter.clientSessionID(); got != "session-current" {
+		t.Fatalf("active Session after failed resume = %q, want session-current", got)
+	}
+}
+
 func TestAppServerAdapterRoutesSlashDiscoveryAndPluginsThroughTypedClients(t *testing.T) {
 	sessions := &sessionClientAdapterTestClient{state: controlclient.SessionState{
 		SessionID: "session-typed", CWD: t.TempDir(), Revision: 3,
@@ -305,6 +364,7 @@ type sessionClientAdapterTestClient struct {
 	state           controlclient.SessionState
 	list            session.SessionList
 	createSessionID string
+	reconnectErr    error
 
 	mu       sync.Mutex
 	prompt   controlclient.PromptRequest
@@ -360,6 +420,9 @@ func (c *sessionClientAdapterTestClient) InspectSession(_ context.Context, reque
 }
 
 func (c *sessionClientAdapterTestClient) Reconnect(_ context.Context, request controlclient.ReconnectRequest) (controlclient.ReconnectResult, error) {
+	if c.reconnectErr != nil {
+		return controlclient.ReconnectResult{}, c.reconnectErr
+	}
 	state := c.state
 	if state.SessionID == "" {
 		state.SessionID = strings.TrimSpace(request.SessionID)
@@ -485,6 +548,7 @@ func (c *sessionClientAdapterTestClient) ResolveApproval(_ context.Context, requ
 type sessionClientAdapterTestParticipantClient struct {
 	target controlclient.TurnTarget
 	start  controlclient.StartParticipantRequest
+	prompt controlclient.PromptParticipantRequest
 }
 
 func (*sessionClientAdapterTestParticipantClient) Handles(context.Context, string) ([]string, error) {
@@ -502,8 +566,14 @@ func (c *sessionClientAdapterTestParticipantClient) StartParticipant(_ context.C
 	}, nil
 }
 
-func (*sessionClientAdapterTestParticipantClient) PromptParticipant(context.Context, controlclient.PromptParticipantRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{}, errors.New("unexpected PromptParticipant")
+func (c *sessionClientAdapterTestParticipantClient) PromptParticipant(_ context.Context, request controlclient.PromptParticipantRequest) (controlclient.CommandResult, error) {
+	c.prompt = request
+	return controlclient.CommandResult{
+		OperationID: request.OperationID,
+		Outcome:     controlclient.OutcomeCommitted,
+		SessionID:   request.SessionID,
+		Target:      c.target,
+	}, nil
 }
 
 func (*sessionClientAdapterTestParticipantClient) CancelParticipant(context.Context, controlclient.CancelParticipantRequest) (controlclient.CommandResult, error) {

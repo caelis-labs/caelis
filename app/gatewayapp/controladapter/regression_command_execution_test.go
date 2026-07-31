@@ -2,7 +2,6 @@ package controladapter
 
 import (
 	"context"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -29,9 +28,9 @@ func newCommandExecDriver(t *testing.T, modelCfg gatewayapp.ModelConfig) (*assem
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "cmd-exec-session", "surface", modelCfg.Provider+"/"+modelCfg.Model)
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "cmd-exec-session", "surface", modelCfg.Provider+"/"+modelCfg.Model)
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	return driver, stack
 }
@@ -133,9 +132,9 @@ func TestRegressionCommandExecModelUseWithReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "reasoning-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "reasoning-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	status, err := driver.UseModel(ctx, "ollama/llama3", "high")
@@ -214,9 +213,9 @@ func TestRegressionCommandExecDeleteCurrentModelClearsStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "delete-current-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "delete-current-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	_, err = driver.Connect(ctx, controlprompt.ConnectConfig{
@@ -395,121 +394,6 @@ func TestRegressionCommandExecConnectMultipleModels(t *testing.T) {
 
 // --- /new ---
 
-func TestRegressionCommandExecNewSession(t *testing.T) {
-	t.Parallel()
-	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
-	ctx := context.Background()
-
-	before, err := driver.Status(ctx)
-	if err != nil {
-		t.Fatalf("Status() error = %v", err)
-	}
-	for _, model := range []string{"codex-sim", "claude-sim"} {
-		if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{Provider: "ollama", Model: model}); err != nil {
-			t.Fatalf("Connect(%s) error = %v", model, err)
-		}
-	}
-	agentsBefore, err := driver.ListAgents(ctx, 100)
-	if err != nil {
-		t.Fatalf("ListAgents() before /new error = %v", err)
-	}
-
-	newSess, err := driver.NewSession(ctx)
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
-	}
-	if newSess.SessionID == "" {
-		t.Fatal("NewSession().SessionID empty")
-	}
-	if newSess.SessionID == before.Session.ID {
-		t.Fatalf("NewSession() returned same ID %q", newSess.SessionID)
-	}
-
-	after, err := driver.Status(ctx)
-	if err != nil {
-		t.Fatalf("Status() error = %v", err)
-	}
-	if after.Session.ID != newSess.SessionID {
-		t.Fatalf("Status().SessionID = %q, want %q after NewSession", after.Session.ID, newSess.SessionID)
-	}
-	agentsAfter, err := driver.ListAgents(ctx, 100)
-	if err != nil {
-		t.Fatalf("ListAgents() after /new error = %v", err)
-	}
-	if !reflect.DeepEqual(agentsAfter, agentsBefore) {
-		t.Fatalf("global Agent roster changed across /new:\nbefore: %#v\nafter:  %#v", agentsBefore, agentsAfter)
-	}
-}
-
-// --- /resume ---
-
-func TestRegressionCommandExecResumeSession(t *testing.T) {
-	t.Parallel()
-	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
-	ctx := context.Background()
-
-	original, err := driver.Status(ctx)
-	if err != nil {
-		t.Fatalf("Status() error = %v", err)
-	}
-
-	_, err = driver.NewSession(ctx)
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
-	}
-
-	_, err = driver.ResumeSession(ctx, original.Session.ID)
-	if err != nil {
-		t.Fatalf("ResumeSession(%s) error = %v", original.Session.ID, err)
-	}
-
-	current, err := driver.Status(ctx)
-	if err != nil {
-		t.Fatalf("Status() error = %v", err)
-	}
-	if current.Session.ID != original.Session.ID {
-		t.Fatalf("Status().SessionID = %q, want %q after resume", current.Session.ID, original.Session.ID)
-	}
-}
-
-func TestRegressionCommandExecResumeNoArgs(t *testing.T) {
-	t.Parallel()
-	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
-	ctx := context.Background()
-
-	sessions, err := driver.ListSessions(ctx, 10)
-	if err != nil {
-		t.Fatalf("ListSessions() error = %v", err)
-	}
-	_ = sessions
-}
-
-func TestRegressionCommandExecResumeNonexistent(t *testing.T) {
-	t.Parallel()
-	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
-	ctx := context.Background()
-
-	_, err := driver.ResumeSession(ctx, "nonexistent-session-id")
-	if err == nil {
-		t.Fatal("ResumeSession(nonexistent) should return error")
-	}
-}
-
-// --- /compact ---
-
-func TestRegressionCommandExecCompact(t *testing.T) {
-	t.Parallel()
-	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
-	ctx := context.Background()
-
-	err := driver.Compact(ctx)
-	if err != nil {
-		t.Fatalf("Compact() error = %v", err)
-	}
-}
-
-// --- Model alias lifecycle ---
-
 func TestRegressionCommandExecModelAliasLifecycle(t *testing.T) {
 	t.Parallel()
 	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
@@ -677,9 +561,9 @@ func TestRegressionCommandExecModelReasoningCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "reasoning-completion-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "reasoning-completion-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	candidates, err := driver.CompleteSlashArg(ctx, "model use", "ollama/llama3 ", 10)

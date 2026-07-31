@@ -12,7 +12,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlassembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -74,14 +73,8 @@ func TestSideACPAgentDirectRunEnvelopeE2E(t *testing.T) {
 		t.Fatalf("BindAgentBinding(zenith) error = %v", err)
 	}
 
-	active, err := stack.StartSession(ctx, "side-acp-direct-run", "side-acp-e2e")
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-	driver, err := local.NewLocalAdapterForSession(ctx, stack, active, "side-acp-e2e", "")
-	if err != nil {
-		t.Fatalf("NewLocalAdapterForSession() error = %v", err)
-	}
+	active := startEvalSession(t, ctx, stack, "side-acp-direct-run")
+	driver := newEvalAppServerAdapter(t, stack, active, "side-acp-e2e")
 	t.Cleanup(func() {
 		_ = stack.Close()
 	})

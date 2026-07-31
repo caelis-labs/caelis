@@ -17,34 +17,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func (s *Stack) StartSession(ctx context.Context, preferredSessionID string, bindingKey string) (session.Session, error) {
-	if s == nil {
-		return session.Session{}, fmt.Errorf("gatewayapp: stack is unavailable")
-	}
-	gw := s.KernelSessions()
-	if gw == nil {
-		return session.Session{}, fmt.Errorf("gatewayapp: gateway is unavailable")
-	}
-	active, err := gw.StartSession(ctx, kernel.StartSessionRequest{
-		AppName:            s.AppName,
-		UserID:             s.UserID,
-		Workspace:          s.Workspace,
-		PreferredSessionID: strings.TrimSpace(preferredSessionID),
-		BindingKey:         strings.TrimSpace(bindingKey),
-		Binding: kernel.BindingDescriptor{
-			Surface: strings.TrimSpace(bindingKey),
-			Owner:   s.AppName,
-		},
-	})
-	if err != nil || s.sessionRuntimes == nil {
-		return active, err
-	}
-	if err := s.sessionRuntimes.bindDefaultSession(active); err != nil {
-		return active, err
-	}
-	return active, nil
-}
-
 func (s *Stack) StartSubagent(
 	ctx context.Context,
 	ref session.SessionRef,

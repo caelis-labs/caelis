@@ -10,12 +10,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
-func TestRunOnceDrainsAssistantOutput(t *testing.T) {
+func TestRunSessionOnceDrainsAssistantOutput(t *testing.T) {
 	t.Parallel()
 
 	handle := newFakeACPHandle([]eventstream.Envelope{
@@ -37,19 +36,19 @@ func TestRunOnceDrainsAssistantOutput(t *testing.T) {
 		turn: handle,
 	}
 
-	result, err := RunOnce(context.Background(), gw, controlprompt.Submission{Text: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), gw, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
+		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
 	if result.Output != "done" {
-		t.Fatalf("RunOnce() output = %q, want %q", result.Output, "done")
+		t.Fatalf("RunSessionOnce() output = %q, want %q", result.Output, "done")
 	}
 	if result.PromptTokens != 11 {
-		t.Fatalf("RunOnce() prompt tokens = %d, want %d", result.PromptTokens, 11)
+		t.Fatalf("RunSessionOnce() prompt tokens = %d, want %d", result.PromptTokens, 11)
 	}
 }
 
-func TestRunOnceAppendsPrefixGrowingACPMessageDeltasExactly(t *testing.T) {
+func TestRunSessionOnceAppendsPrefixGrowingACPMessageDeltasExactly(t *testing.T) {
 	t.Parallel()
 
 	handle := newFakeACPHandle([]eventstream.Envelope{
@@ -70,16 +69,16 @@ func TestRunOnceAppendsPrefixGrowingACPMessageDeltasExactly(t *testing.T) {
 			},
 		},
 	})
-	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, controlprompt.Submission{Text: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), fakeStarter{turn: handle}, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
+		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
 	if result.Output != "aab" {
-		t.Fatalf("RunOnce() output = %q, want exact ACP deltas aab", result.Output)
+		t.Fatalf("RunSessionOnce() output = %q, want exact ACP deltas aab", result.Output)
 	}
 }
 
-func TestRunOnceReplacesTransientAssistantWithCanonicalFinal(t *testing.T) {
+func TestRunSessionOnceReplacesTransientAssistantWithCanonicalFinal(t *testing.T) {
 	t.Parallel()
 
 	handle := newFakeACPHandle([]eventstream.Envelope{
@@ -105,16 +104,16 @@ func TestRunOnceReplacesTransientAssistantWithCanonicalFinal(t *testing.T) {
 			},
 		},
 	})
-	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, controlprompt.Submission{Text: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), fakeStarter{turn: handle}, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
+		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
 	if result.Output != "canonical answer" {
-		t.Fatalf("RunOnce() output = %q, want canonical replacement", result.Output)
+		t.Fatalf("RunSessionOnce() output = %q, want canonical replacement", result.Output)
 	}
 }
 
-func TestRunOncePreservesIdenticalAssistantDeltas(t *testing.T) {
+func TestRunSessionOncePreservesIdenticalAssistantDeltas(t *testing.T) {
 	t.Parallel()
 
 	handle := newFakeACPHandle([]eventstream.Envelope{
@@ -135,16 +134,16 @@ func TestRunOncePreservesIdenticalAssistantDeltas(t *testing.T) {
 			},
 		},
 	})
-	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, controlprompt.Submission{Text: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), fakeStarter{turn: handle}, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
+		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
 	if result.Output != "haha" {
-		t.Fatalf("RunOnce() output = %q, want both exact deltas", result.Output)
+		t.Fatalf("RunSessionOnce() output = %q, want both exact deltas", result.Output)
 	}
 }
 
-func TestRunOnceKeepsSDKOnlyAssistantWithoutDurableIdentity(t *testing.T) {
+func TestRunSessionOnceKeepsSDKOnlyAssistantWithoutDurableIdentity(t *testing.T) {
 	t.Parallel()
 
 	handle := newFakeACPHandle([]eventstream.Envelope{{
@@ -156,16 +155,16 @@ func TestRunOnceKeepsSDKOnlyAssistantWithoutDurableIdentity(t *testing.T) {
 			Content:       schema.TextContent{Type: "text", Text: "sdk-only"},
 		},
 	}})
-	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, controlprompt.Submission{Text: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), fakeStarter{turn: handle}, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
+		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
 	if result.Output != "sdk-only" {
-		t.Fatalf("RunOnce() output = %q, want identity-free SDK output", result.Output)
+		t.Fatalf("RunSessionOnce() output = %q, want identity-free SDK output", result.Output)
 	}
 }
 
-func TestRunOnceIgnoresScopedTraceOutput(t *testing.T) {
+func TestRunSessionOnceIgnoresScopedTraceOutput(t *testing.T) {
 	t.Parallel()
 
 	handle := newFakeACPHandle([]eventstream.Envelope{
@@ -205,19 +204,19 @@ func TestRunOnceIgnoresScopedTraceOutput(t *testing.T) {
 		turn: handle,
 	}
 
-	result, err := RunOnce(context.Background(), gw, controlprompt.Submission{Text: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), gw, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
+		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
 	if result.Output != "main answer" {
-		t.Fatalf("RunOnce() output = %q, want main answer", result.Output)
+		t.Fatalf("RunSessionOnce() output = %q, want main answer", result.Output)
 	}
 	if result.PromptTokens != 11 {
-		t.Fatalf("RunOnce() prompt tokens = %d, want main-scope usage", result.PromptTokens)
+		t.Fatalf("RunSessionOnce() prompt tokens = %d, want main-scope usage", result.PromptTokens)
 	}
 }
 
-func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
+func TestRunSessionOnceAutoDeniesApprovalByDefault(t *testing.T) {
 	t.Parallel()
 
 	title := "RUN_COMMAND"
@@ -240,8 +239,8 @@ func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 		turn: handle,
 	}
 
-	if _, err := RunOnce(context.Background(), gw, controlprompt.Submission{Text: "hello"}, Options{}); err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
+	if _, err := RunSessionOnce(context.Background(), gw, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{}); err != nil {
+		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
 	if len(handle.submissions) != 1 {
 		t.Fatalf("submissions = %d, want 1", len(handle.submissions))
@@ -251,7 +250,7 @@ func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 	}
 }
 
-func TestRunOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
+func TestRunSessionOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 	t.Parallel()
 
 	title := "RUN_COMMAND"
@@ -285,7 +284,7 @@ func TestRunOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 		turn: handle,
 	}
 	called := false
-	_, err := RunOnce(context.Background(), gw, controlprompt.Submission{Text: "hello"}, Options{
+	_, err := RunSessionOnce(context.Background(), gw, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{
 		ResolveApproval: func(_ context.Context, req ApprovalRequest) (approval.Decision, error) {
 			called = true
 			if req.Payload == nil {
@@ -301,7 +300,7 @@ func TestRunOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
+		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
 	if !called {
 		t.Fatal("ResolveApproval was not called")
@@ -314,7 +313,7 @@ func TestRunOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 	}
 }
 
-func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
+func TestRunSessionOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 	t.Parallel()
 
 	handle := newFakeACPHandle([]eventstream.Envelope{
@@ -339,12 +338,12 @@ func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 		turn: handle,
 	}
 
-	result, err := RunOnce(context.Background(), gw, controlprompt.Submission{Text: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), gw, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
+		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
 	if result.Output != "done" {
-		t.Fatalf("RunOnce() output = %q, want done", result.Output)
+		t.Fatalf("RunSessionOnce() output = %q, want done", result.Output)
 	}
 	if len(handle.submissions) != 0 {
 		t.Fatalf("submissions = %d, want no manual decision for auto-review event", len(handle.submissions))
@@ -520,17 +519,17 @@ func TestRunSessionOnceCancellationTimeoutDetachesWithoutTerminal(t *testing.T) 
 }
 
 type fakeStarter struct {
-	turn controlprompt.Turn
+	turn controlclient.SessionTurn
 	err  error
 }
 
-func (f fakeStarter) Submit(context.Context, controlprompt.Submission) (controlprompt.Turn, error) {
+func (f fakeStarter) Start(context.Context, controlclient.SessionTurnStartRequest) (controlclient.SessionTurn, error) {
 	return f.turn, f.err
 }
 
 type fakeTurnHandle struct {
 	acpEvents   <-chan eventstream.Envelope
-	submissions []controlprompt.ApprovalDecision
+	submissions []controlclient.ApprovalResolution
 }
 
 func newFakeACPHandle(events []eventstream.Envelope) *fakeTurnHandle {
@@ -546,13 +545,20 @@ func (h *fakeTurnHandle) HandleID() string                       { return "h1" }
 func (h *fakeTurnHandle) RunID() string                          { return "run-1" }
 func (h *fakeTurnHandle) TurnID() string                         { return "turn-1" }
 func (h *fakeTurnHandle) ACPEvents() <-chan eventstream.Envelope { return h.acpEvents }
-func (h *fakeTurnHandle) Events() <-chan eventstream.Envelope    { return h.acpEvents }
-func (h *fakeTurnHandle) SubmitApproval(_ context.Context, decision controlprompt.ApprovalDecision) error {
+func (*fakeTurnHandle) SessionID() string                        { return "session-1" }
+func (h *fakeTurnHandle) Target() controlclient.TurnTarget {
+	return controlclient.TurnTarget{HandleID: h.HandleID(), RunID: h.RunID(), TurnID: h.TurnID()}
+}
+func (h *fakeTurnHandle) Events() <-chan eventstream.Envelope { return h.acpEvents }
+func (h *fakeTurnHandle) ResolveApproval(_ context.Context, decision controlclient.ApprovalResolution) error {
 	h.submissions = append(h.submissions, decision)
 	return nil
 }
-func (h *fakeTurnHandle) Cancel()      {}
-func (h *fakeTurnHandle) Close() error { return nil }
+func (*fakeTurnHandle) Steer(context.Context, string, string, []model.ContentPart) error { return nil }
+func (*fakeTurnHandle) Cancel(context.Context, string) error                             { return nil }
+func (*fakeTurnHandle) LastCursor() string                                               { return "" }
+func (*fakeTurnHandle) Err() error                                                       { return nil }
+func (*fakeTurnHandle) Close() error                                                     { return nil }
 
 type fakeSessionTurnStarter struct {
 	turn controlclient.SessionTurn

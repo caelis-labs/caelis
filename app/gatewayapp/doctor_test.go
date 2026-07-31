@@ -143,7 +143,7 @@ func TestDoctorReportFindsAPIKeyThroughCredentialReferenceAfterReload(t *testing
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	session, err := stack.StartSession(ctx, "doctor-session", "cli-headless")
+	session, err := startGatewayAppTestSession(ctx, stack, "doctor-session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}

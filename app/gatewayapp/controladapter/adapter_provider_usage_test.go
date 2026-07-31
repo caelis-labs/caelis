@@ -33,7 +33,7 @@ func TestAdapterFullStatusQueriesProviderUsageAndFailsSoft(t *testing.T) {
 			},
 		},
 	}
-	driver := newAdapterForStack(stack, "surface", "")
+	driver := newAssemblerForStack(stack, "surface", "")
 	driver.session = session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}}
 	driver.hasSession = true
 

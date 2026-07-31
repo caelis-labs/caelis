@@ -28,7 +28,7 @@ func (s *Stack) ParticipantHandles(ctx context.Context, sessionID string) ([]str
 
 	runtimeStack := s
 	var release func()
-	if s.sessionRuntimes != nil && !s.sessionRuntimes.defaultSession(sessionID) {
+	if s.sessionRuntimes != nil {
 		// Serialize the loaded check with activation and configuration mutation.
 		// If another command is assembling this Session, wait until it publishes
 		// the fixed Runtime rather than projecting a newer Host catalog.

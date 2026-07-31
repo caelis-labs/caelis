@@ -136,13 +136,13 @@ Document responsibilities are intentionally separate:
   bindings, generated types, and strict JSON/Envelope codec. Because the codec
   serializes `control/client` domain values directly, it stays with that
   semantic owner instead of pretending to be a product-neutral protocol.
-- `control/client/httpclient`: the authenticated remote implementation of the
-  principal-bound `control/client.SessionClient`. In-process clients use
-  `control/client.BindSessionClient`; both expose the same typed contract.
+- `control/client/httpclient`: the authenticated HTTP implementation of the
+  complete focused AppServer client set. In-process clients bind the same
+  contracts directly; transport selection does not change surface semantics.
 - `app/controlserver`: the Control Host's HTTP handler and production listener,
   including authentication, request policy, TLS, token-file policy, and
-  shutdown drain. It maps the bounded Session-client protocol and independent
-  Task observation protocol and depends
+  shutdown drain. It maps the complete focused AppServer protocol and
+  independent Task observation protocol and depends
   on explicit Control contracts rather than `gatewayapp.Stack`.
 - `internal/controlprompt`: current Control-owned surface-neutral prompt input
   contract, private prompt facade, command catalog, parsing helpers,
@@ -166,7 +166,7 @@ Document responsibilities are intentionally separate:
   Assembly and app configuration mutation share one Host lock, while release
   first hides its Runtime from routing, waits already-routed synchronous
   mutations, and shutdown drains in-flight assembly and release before closing
-  all Session and transitional default Gateways. Headless, TUI, and product ACP
+  all Session Gateways and the Host composition. Headless, TUI, and product ACP
   Session lifecycle plus main-Turn ingress use typed in-process AppServer
   clients. TUI and product ACP slash routers also use focused status,
   configuration, Agent, participant, completion/skill, and plugin clients;
@@ -182,23 +182,21 @@ Document responsibilities are intentionally separate:
 - other `internal/control*` packages: current Control integration
   implementations that may converge with adjacent `app/*` and `control/*`
   ownership before any later package split.
-- `app/gatewayapp/controladapter`: server-side adapters for existing Control
-  semantics plus the presentation-facing typed-client facade. The production
-  facade contains clients only; the older `Adapter` remains behind local
-  focused services and explicit legacy/eval tests until those server-side
-  assemblers are replaced. Do not add product-client operations to the private
+- `app/gatewayapp/controladapter`: narrow server-side assemblers for existing
+  Control semantics plus the presentation-facing typed-client facade. The
+  production facade contains clients only; the broad `Adapter` facade and its
+  compatibility constructors have been removed, and tests exercise either the
+  same narrow assemblers used by AppServer services or typed clients. Do not add product-client operations to the private
   `internal/controlprompt.Service` aggregate or recreate `ports/*`; stable
   capabilities belong in coherent `control/*` packages.
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
   product integration adapters that make external endpoints implement the same
   SDK controller/participant contracts used by built-in Agents. Product
-  assembly supplies principal-bound Session, participant, Task, status,
-  configuration, Agent, completion, and plugin clients; prompt and slash
-  operations fail closed on those clients. The direct Runtime adapter remains
-  only for generic/eval embedding. Product ACP still receives the local ACP
-  mode/config/model projection and terminal stream adapter directly; moving
-  those ACP-protocol facets behind focused AppServer contracts is an explicit
-  retirement item, not an alternative prompt or Turn authority.
+  assembly supplies principal-bound Session, presentation, terminal,
+  participant, Task, status, configuration, Agent, completion, and plugin
+  clients; prompt and slash operations fail closed on those clients. The
+  direct Runtime adapter remains only for lower-level bridge conformance and
+  is not selectable through product `GatewayAgentConfig`.
   The bridge does not import presentation packages.
 - `platform/*`: product support code for platform-specific host behavior.
 

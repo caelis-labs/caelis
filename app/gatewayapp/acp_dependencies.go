@@ -3,37 +3,33 @@ package gatewayapp
 import (
 	"fmt"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
-type ACPAgentDependencies struct {
-	Runtime     agent.Runtime
-	Sessions    session.Service
-	Assembly    assembly.ResolvedAssembly
-	AppName     string
-	UserID      string
-	TaskStreams taskstream.Service
+// AppServerPresentationDependencies is the narrow host snapshot required to
+// assemble protocol-neutral presentation providers. Runtime execution and Task
+// streams remain behind their dedicated AppServer services.
+type AppServerPresentationDependencies struct {
+	Sessions session.Service
+	Assembly assembly.ResolvedAssembly
+	AppName  string
+	UserID   string
 }
 
-func (s *Stack) ACPAgentDependencies() (ACPAgentDependencies, error) {
+// PresentationDependencies returns the inputs owned by AppServer presentation
+// assembly without exposing the Host Runtime or Stack to surfaces.
+func (s *Stack) PresentationDependencies() (AppServerPresentationDependencies, error) {
 	if s == nil {
-		return ACPAgentDependencies{}, fmt.Errorf("gatewayapp: stack is unavailable")
+		return AppServerPresentationDependencies{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	s.mu.RLock()
-	deps := ACPAgentDependencies{
-		Runtime:     s.engine,
-		Sessions:    s.Sessions,
-		Assembly:    s.runtime.Assembly,
-		AppName:     s.AppName,
-		UserID:      s.UserID,
-		TaskStreams: s.taskStreams,
+	deps := AppServerPresentationDependencies{
+		Sessions: s.Sessions,
+		Assembly: assembly.CloneResolvedAssembly(s.runtime.Assembly),
+		AppName:  s.AppName,
+		UserID:   s.UserID,
 	}
 	s.mu.RUnlock()
-	if deps.Runtime == nil {
-		return ACPAgentDependencies{}, fmt.Errorf("gatewayapp: runtime is unavailable")
-	}
 	return deps, nil
 }

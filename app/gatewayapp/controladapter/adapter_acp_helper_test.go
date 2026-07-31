@@ -30,7 +30,7 @@ func TestAdapterACPHelperProcess(t *testing.T) {
 				AgentCapabilities: schema.AgentCapabilities{},
 				AgentInfo: &acpclient.Implementation{
 					Name:    "adapter-test-acp",
-					Title:   "Adapter Test ACP",
+					Title:   "Assembler Test ACP",
 					Version: "test",
 				},
 			}, nil

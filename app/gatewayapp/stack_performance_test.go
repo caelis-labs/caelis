@@ -50,7 +50,7 @@ func BenchmarkNewSessionControlPath(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := stack.StartSession(context.Background(), fmt.Sprintf("new-session-%06d", i), "benchmark-tui"); err != nil {
+		if _, err := startGatewayAppTestSession(context.Background(), stack, fmt.Sprintf("new-session-%06d", i)); err != nil {
 			b.Fatal(err)
 		}
 	}

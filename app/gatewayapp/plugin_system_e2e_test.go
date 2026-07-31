@@ -87,16 +87,16 @@ func TestPluginSystemE2E(t *testing.T) {
 		t.Fatalf("e2e plugin not active in list: %+v", list)
 	}
 
-	session, err := stack.StartSession(context.Background(), "", "plugin-e2e")
+	session, err := startGatewayAppTestSession(context.Background(), stack, "")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 	result, err := runHeadlessOnceForGatewayAppTest(context.Background(), stack, session, "plugin-e2e", "Run the Caelis plugin system E2E. Use the available MCP tool.", headless.Options{})
 	if err != nil {
-		t.Fatalf("headless RunOnce() error = %v", err)
+		t.Fatalf("headless RunSessionOnce() error = %v", err)
 	}
 	if strings.TrimSpace(result.Output) != pluginE2EFinalMessage {
-		t.Fatalf("RunOnce output = %q, want %q; provider=%s; events=%s", result.Output, pluginE2EFinalMessage, fakeProvider.Summary(), pluginSystemE2EEventSummary(t, stack, session.SessionRef))
+		t.Fatalf("RunSessionOnce output = %q, want %q; provider=%s; events=%s", result.Output, pluginE2EFinalMessage, fakeProvider.Summary(), pluginSystemE2EEventSummary(t, stack, session.SessionRef))
 	}
 	fakeProvider.Assert(t, pluginSystemE2EEventSummary(t, stack, session.SessionRef))
 }

@@ -14,7 +14,7 @@ import (
 func TestAdapterACPConnectDiscoveryIsReusedForModelsConfigAndPersist(t *testing.T) {
 	discoveryCalls := 0
 	connectCalls := 0
-	driver := &Adapter{stack: &RuntimeStack{
+	driver := &assembler{stack: &RuntimeStack{
 		Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: t.TempDir()}},
 		Agent: AgentRuntimeDeps{
 			DiscoverConnectionFn: func(_ context.Context, req controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
@@ -114,7 +114,7 @@ func TestAdapterACPConnectDiscoveryIsReusedForModelsConfigAndPersist(t *testing.
 func TestCompleteConnectACPModelsOffersAgentDefaultWithoutCatalog(t *testing.T) {
 	t.Parallel()
 
-	driver := &Adapter{stack: &RuntimeStack{
+	driver := &assembler{stack: &RuntimeStack{
 		Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: t.TempDir()}},
 		Agent: AgentRuntimeDeps{DiscoverConnectionFn: func(_ context.Context, req controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
 			return controlagents.DiscoverySnapshot{
@@ -137,7 +137,7 @@ func TestCompleteConnectACPModelsOffersAgentDefaultWithoutCatalog(t *testing.T) 
 
 func TestAdapterACPDiscoveryCacheExpires(t *testing.T) {
 	calls := 0
-	driver := &Adapter{stack: &RuntimeStack{
+	driver := &assembler{stack: &RuntimeStack{
 		Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: t.TempDir()}},
 		Agent: AgentRuntimeDeps{DiscoverConnectionFn: func(_ context.Context, req controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
 			calls++
@@ -166,7 +166,7 @@ func TestAdapterACPEndpointAuthenticationExpiresExplicitly(t *testing.T) {
 	t.Parallel()
 
 	calls := 0
-	driver := &Adapter{stack: &RuntimeStack{
+	driver := &assembler{stack: &RuntimeStack{
 		Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: t.TempDir()}},
 		Agent: AgentRuntimeDeps{DiscoverConnectionFn: func(_ context.Context, req controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
 			calls++
@@ -201,7 +201,7 @@ func TestAdapterACPEndpointAuthenticationExpiresExplicitly(t *testing.T) {
 
 func TestAdapterACPConnectDoesNotUseExpiredDiscovery(t *testing.T) {
 	var connectedDiscovery *controlagents.DiscoverySnapshot
-	driver := &Adapter{stack: &RuntimeStack{
+	driver := &assembler{stack: &RuntimeStack{
 		Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: t.TempDir()}},
 		Agent: AgentRuntimeDeps{
 			DiscoverConnectionFn: func(_ context.Context, req controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
@@ -277,7 +277,7 @@ func TestCompleteConnectACPIncludesRegistryAndNativeAgentCatalog(t *testing.T) {
 }
 
 func TestCompleteConnectACPPreservesCaseSensitiveCustomCommand(t *testing.T) {
-	driver := &Adapter{stack: &RuntimeStack{
+	driver := &assembler{stack: &RuntimeStack{
 		Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: t.TempDir()}},
 		Agent: AgentRuntimeDeps{DiscoverConnectionFn: func(_ context.Context, req controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
 			if req.CommandLine != "/Tmp/MyACP --stdio" {
@@ -298,7 +298,7 @@ func TestAdapterDisconnectACPUsesControlOwnedRosterCapability(t *testing.T) {
 	t.Parallel()
 
 	disconnectCalls := 0
-	driver := &Adapter{stack: &RuntimeStack{Agent: AgentRuntimeDeps{
+	driver := &assembler{stack: &RuntimeStack{Agent: AgentRuntimeDeps{
 		DisconnectCandidatesFn: func(context.Context) ([]controlagents.DisconnectCandidate, error) {
 			return []controlagents.DisconnectCandidate{{AgentID: "codex", Name: "Codex", ConnectionID: "codex", LastOnConnection: true}}, nil
 		},
@@ -363,7 +363,7 @@ func TestAdapterDisconnectACPMapsControlOwnedCurrentControllerError(t *testing.T
 	t.Parallel()
 
 	disconnectCalls := 0
-	driver := &Adapter{
+	driver := &assembler{
 		stack: &RuntimeStack{Agent: AgentRuntimeDeps{
 			DisconnectFn: func(context.Context, string) (controlagents.DisconnectResult, error) {
 				disconnectCalls++

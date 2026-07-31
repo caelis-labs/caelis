@@ -39,10 +39,7 @@ func TestGatewayProviderLiveReasoningBoundaryFromLocalConfigE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(context.Background(), "gateway-live-local-config-e2e", "")
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
+	activeSession := startEvalSession(t, context.Background(), stack, "gateway-live-local-config-e2e")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()

@@ -42,7 +42,6 @@ type sessionRuntimeRegistry struct {
 
 	mu           sync.RWMutex
 	sessions     map[string]*sessionRuntime
-	defaults     map[string]struct{}
 	workspaceCWD map[string]string
 	workspaceKey map[string]string
 	closed       bool
@@ -69,7 +68,6 @@ func newSessionRuntimeRegistry(owner *Stack) (*sessionRuntimeRegistry, error) {
 		owner:        owner,
 		assembler:    assembler,
 		sessions:     map[string]*sessionRuntime{},
-		defaults:     map[string]struct{}{},
 		workspaceCWD: map[string]string{workspace.Key: workspace.CWD},
 		workspaceKey: map[string]string{workspace.CWD: workspace.Key},
 		buildsIdle:   buildsIdle,
@@ -292,67 +290,6 @@ func (r *sessionRuntimeRegistry) loaded(sessionID string) (*sessionRuntime, bool
 	return runtime, true
 }
 
-// bindDefaultSession records the transitional default Stack as the execution
-// owner for a Session created or resumed through the private TUI path.
-// It is not a detached Session Runtime and must never be quiesced independently.
-func (r *sessionRuntimeRegistry) bindDefaultSession(active session.Session) error {
-	if r == nil || r.owner == nil {
-		return errors.New("gatewayapp: Session Runtime registry is unavailable")
-	}
-	sessionID := strings.TrimSpace(active.SessionID)
-	if sessionID == "" {
-		return errors.New("gatewayapp: cannot bind an empty default Session ID")
-	}
-	workspace, err := canonicalSessionWorkspace(active)
-	if err != nil {
-		return err
-	}
-	if workspace != r.owner.Workspace {
-		return fmt.Errorf(
-			"gatewayapp: default Session %q belongs to workspace %q at %q, not %q at %q",
-			sessionID,
-			workspace.Key,
-			workspace.CWD,
-			r.owner.Workspace.Key,
-			r.owner.Workspace.CWD,
-		)
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed || r.owner.isClosing() {
-		return sessionRuntimeHostClosingError()
-	}
-	if runtime := r.sessions[sessionID]; runtime != nil {
-		return fmt.Errorf("gatewayapp: Session %q already has a detached Runtime", sessionID)
-	}
-	r.defaults[sessionID] = struct{}{}
-	return nil
-}
-
-func (r *sessionRuntimeRegistry) defaultSession(sessionID string) bool {
-	if r == nil {
-		return false
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	_, ok := r.defaults[strings.TrimSpace(sessionID)]
-	return ok
-}
-
-func (r *sessionRuntimeRegistry) unbindDefaultSession(sessionID string) bool {
-	if r == nil {
-		return false
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	sessionID = strings.TrimSpace(sessionID)
-	if _, ok := r.defaults[sessionID]; !ok {
-		return false
-	}
-	delete(r.defaults, sessionID)
-	return true
-}
-
 // acquireRuntimeUse prevents release from quiescing one Runtime between command
 // routing and completion of a synchronous Control mutation.
 func (r *sessionRuntimeRegistry) acquireRuntimeUse(runtime *sessionRuntime) (func(), error) {
@@ -415,10 +352,6 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 	if sessionID == "" {
 		return nil, session.Session{}, nil, errors.New("gatewayapp: Session ID is required")
 	}
-	if r.defaultSession(sessionID) {
-		active, err := r.owner.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
-		return &sessionRuntime{sessionID: sessionID, workspace: r.owner.Workspace, stack: r.owner}, active, nil, err
-	}
 	if activate {
 		runtime, active, err := r.activateSession(ctx, sessionID)
 		if err != nil {
@@ -436,10 +369,6 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 		return nil, session.Session{}, nil, err
 	}
 	defer unlock()
-	if r.defaultSession(sessionID) {
-		active, loadErr := r.owner.Sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
-		return &sessionRuntime{sessionID: sessionID, workspace: r.owner.Workspace, stack: r.owner}, active, nil, loadErr
-	}
 	loaded, releaseUse, err := r.acquireLoadedRuntime(sessionID)
 	if err != nil {
 		return nil, session.Session{}, nil, err
@@ -548,9 +477,6 @@ func (r *sessionRuntimeRegistry) release(ctx context.Context, sessionID string) 
 }
 
 func (r *sessionRuntimeRegistry) releaseSession(ctx context.Context, sessionID string) error {
-	if r.unbindDefaultSession(sessionID) {
-		return nil
-	}
 	return r.release(ctx, sessionID)
 }
 

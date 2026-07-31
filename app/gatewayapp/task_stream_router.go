@@ -88,8 +88,7 @@ func (s hostTaskStreamService) service(sessionID string) (stream.Service, error)
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	runtimeStack := host
-	if registry := host.sessionRuntimes; registry != nil &&
-		!registry.defaultSession(sessionID) {
+	if registry := host.sessionRuntimes; registry != nil {
 		runtime, ok := registry.loaded(sessionID)
 		if !ok || runtime == nil || runtime.stack == nil {
 			return nil, taskStreamRuntimeUnavailable()

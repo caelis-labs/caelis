@@ -36,6 +36,12 @@ feed/replay implementation, operation ledger, execution leases, and Task stream
 remain the semantic foundation. The design does not replace them with Codex
 JSON-RPC types or create a second state machine.
 
+The current version stops at a complete AppServer slice: embedded and HTTP
+transports implement the same focused contracts, while TUI, Headless, and
+product ACP consume the embedded clients. Local-daemon discovery, readiness,
+automatic remote connection, GUI, Bar, and Pet implementation are explicitly
+outside this version.
+
 ## Product Shape
 
 ```text
@@ -156,13 +162,13 @@ suggests.
 | Transport-neutral product client | `control/client/service.go`, `client.go` | Yes; all presentation clients should consume it |
 | Atomic reconnect state plus feed splice | `control/client/reconnect_bootstrap.go` | Yes; use for TUI and Bar attachment |
 | Durable cursor, replay, bounded subscriber handling, gap recovery | `control/client/feed.go`, `feed_broker.go` | Yes; this is the authoritative Session stream |
-| Focused typed clients for prompt, lifecycle, status, configuration, Agent, participant, completion/skill, and plugin operations | `control/client`, `app/gatewayapp/controladapter/local` | Yes for in-process AppServer clients; slash text is parsed by the client and never becomes a generic server command |
+| Focused typed clients for prompt, lifecycle, status, configuration, Agent, participant, completion/skill, plugin, presentation, and terminal operations | `control/client`, `app/gatewayapp/controladapter/local` | Yes for embedded and HTTP AppServer clients; slash text is parsed by the client and never becomes a generic server command |
 | Durable idempotency operation ledger and CAS/lease checks | `control/client/operation_store.go`, `app/gatewayapp/control_client_backend.go` | Yes; every remote write supplies operation and target identity |
 | Authenticated HTTP/SSE Host adapter with TLS and host policy | `app/controlserver`, `control/client/wirev1` | Yes; it is infrastructure around Control, not a Surface |
 | Host-owned accepted main-Turn lifetime | `internal/kernel/gateway_turns.go`, `app/gatewayapp/stack.go` | Yes; HTTP request cancellation must not cancel accepted work |
-| Principal-bound local and remote Session clients | `control/client/session_client.go`, `control/client/httpclient` | Yes; extend the common facade only as parity requires |
+| Principal-bound embedded and HTTP AppServer clients | `control/client`, `control/client/httpclient` | Yes; all focused capabilities share one facade |
 | Headless typed Turn and structured output | `control/client/session_turn.go`, `surfaces/headless`, `internal/cli/headless_output.go` | Yes; Headless uses the in-process Session client and exposes text, JSON, and versioned JSONL without a private Gateway ingress |
-| ACP typed lifecycle, replay, main/participant Turns, slash capabilities, and Task observation | `app/gatewayapp/acpagent`, `internal/acpagentbridge` | Yes for Control and slash semantics; ACP mode/config/model projection and terminal RPC remain explicit transport-facet retirement work |
+| ACP typed lifecycle, replay, main/participant Turns, presentation, terminal RPC, slash capabilities, and Task observation | `app/gatewayapp/acpagent`, `internal/acpagentbridge` | Yes; product assembly receives clients only |
 | Session-fixed participant command discovery | `control/client/participant_client.go`, `app/gatewayapp/control_client_participants.go` | Yes; an active Runtime exposes its frozen bound handles, while an idle Session reads current configuration without activation |
 | Session-routed workspace Runtime ownership | `app/gatewayapp/session_runtime_registry.go`, `workspace_config_assembler.go` | Yes for the bounded Session-client slice: workspace composition is loaded on demand, Session ID selects it, and UserID is not a Runtime key |
 | Independent Task observation | `control/taskstream`, `protocol/acp/taskstream`, `app/controlserver/task_stream.go` | Yes; the principal-bound in-process client and authenticated AppServer list/read/subscribe routes address Task output by Session ID without folding it into the Session control stream |
@@ -223,57 +229,34 @@ abandoned approvals are recovered before a new Turn starts, readiness changes
 at the correct boundaries, and a second clean start succeeds without stale
 locks.
 
-### G3 — In-process TUI parity is complete; remote parity is not
+### G3 — AppServer capability parity is complete; process selection is deferred
 
-**Evidence.** `SessionClientAdapter` is now a pure client facade. Production
-TUI construction supplies principal-bound Session, participant, status,
-configuration, Agent, completion/skill, and plugin clients; Task observation
-uses its independent typed client. The facade contains no `Stack`, Runtime, or
-embedded `controladapter.Adapter`, and each semantic method fails closed when
-its focused client is absent. `/new`, `/resume`, `/compact`, status, model and
-sandbox configuration, Agent handoff/bindings, `/review`, direct Side ACP
-prompts, completion, skill resolution, and plugin commands therefore have no
-TUI-local fallback. Slash parsing remains in `internal/controlprompt`; only
-already-classified typed requests cross AppServer.
+**Evidence.** `control/client.AppServerClients` is the complete focused client
+set for Session lifecycle and Turns, participant Turns, status, configuration,
+Agent operations, completion/skill, plugin operations, ACP presentation, and
+terminal RPC. Task observation remains an independent typed side channel owned
+by the same embedded AppServer assembly. Both the principal-bound embedded
+implementation and authenticated HTTP implementation cover these contracts and
+share the maintained wire codec and generated protocol checks.
 
-Product ACP uses the same facade for its prompt router, so ordinary prompts,
-participant Turns, and slash semantics share the TUI path. Its independent
-Task client remains the sole asynchronous Shell/Subagent observation path.
-The generic direct Runtime agent and direct Session loader remain explicit
-eval/private APIs and are not selected by product prompt composition.
+TUI and product ACP bind one embedded AppServer and receive clients only. Their
+prompt and slash routers contain no `Stack`, Runtime, Session store, local
+mode/config provider, or terminal controller. Headless uses the same typed
+Session Turn. Slash parsing stays client-side; only classified typed operations
+cross AppServer. The generic direct Runtime ACP bridge remains a lower-level
+conformance API and is not selectable by product `GatewayAgentConfig`.
 
-The authenticated HTTP/SSE client has parity for Session lifecycle, main Turn,
-reconnect/feed, compact, status, and Task observation. The newly focused
-configuration, Agent, participant, completion, and plugin contracts currently
-have only their principal-bound in-process implementation. Product ACP also
-still receives ACP mode/config/model projection and terminal stream access from
-the embedded Host composition. These are transport-parity and retirement gaps,
-not competing Session or Turn authorities.
+**Current boundary.** This version does not select or discover a daemon and
+does not make TUI/ACP remote clients. The HTTP transport is protocol parity and
+future extension capacity, not a claim that local-daemon lifecycle, automatic
+reconnect policy, or remote product UX exists. Task events remain separate from
+the Session feed so slow Task observers cannot affect parent Turn delivery.
 
-**Failure mode.** Claiming remote parity now would make a future GUI, Bar, or
-remote TUI either lose working commands or reach around AppServer. Folding Task
-events into the Session feed would duplicate asynchronous output and let a slow
-Task observer affect parent presentation.
-
-**Bounded repair.** Keep the focused contracts and add transport mappings
-without a generic slash endpoint:
-
-1. expose participant, configuration, Agent, completion, and plugin operations
-   through `app/controlserver` and `control/client/httpclient`;
-2. move ACP mode/config/model and terminal facets behind focused AppServer
-   contracts, then remove those fields from product ACP dependencies;
-3. add bounded retry and explicit disconnected, reconnecting, incompatible,
-   and gap states in a later local-daemon client;
-4. run the same TUI/ACP integration suite against in-process and remote clients.
-
-Keep the Control-domain-bound HTTP wire DTOs and codec in
-`control/client/wirev1`, and listener policy in `app/controlserver`. TUI and ACP
-must not depend on JSON, SSE framing, bearer-token files, or Runtime handles.
-
-**Acceptance.** The same TUI and ACP parity suites pass against in-process and
-remote clients. Disconnect during a Turn, reconnect from the last accepted
-cursor, and compare typed state, main output, Side ACP overlays, Shell output,
-and Subagent output with an uninterrupted client.
+**Later acceptance.** When daemon/remote mode is implemented, the same
+TUI/ACP suites must pass against embedded and HTTP clients, including cursor
+reconnect, Side ACP overlays, Shell output, and Subagent output. That later work
+must select a transport for the existing contracts rather than add another
+surface API.
 
 ### G4 — Session Runtime ownership is bounded but not fully converged
 
@@ -301,16 +284,15 @@ before Session creation; accepted aliases remain a Host-lifetime identity fence
 because their durable Sessions may reactivate later.
 
 App configuration mutation and Session assembly share one Host lock, so a new
-activation cannot observe a partial write. Mutation rebuilds only the
-transitional default Stack and leaves every existing Session Runtime fixed,
-including an active Turn. Host Quiesce closes activation admission, cancels and
-drains in-flight assembly and Runtime release, quiesces all Session Gateways and
-the transitional default Gateway, then closes resources. Release first marks a
-Runtime unavailable to routing, so concurrent prompts cannot enter resources
-being quiesced; Runtime release also waits for every routed synchronous Control
-mutation that already acquired the Runtime. Failed sandbox or MCP closure
-retains the resource owner so Host shutdown can retry cleanup. Session close
-releases its Runtime.
+activation cannot observe a partial write. Existing Session Runtimes remain
+fixed, including during an active Turn. Host Quiesce closes activation
+admission, cancels and drains in-flight assembly and Runtime release, quiesces
+all Session Gateways and the Host composition, then closes resources. Release
+first marks a Runtime unavailable to routing, so concurrent prompts cannot
+enter resources being quiesced; Runtime release also waits for every routed
+synchronous Control mutation that already acquired the Runtime. Failed sandbox
+or MCP closure retains the resource owner so Host shutdown can retry cleanup.
+Session close releases its Runtime.
 
 Headless, TUI, and product ACP lifecycle/replay/main-Turn operations are
 Session-directed. TUI and product ACP prompt routers also address status,
@@ -322,37 +304,25 @@ Session close or Host shutdown; the registry's release primitive is currently
 internal lifecycle machinery. Observation subscriptions deliberately do not
 control Runtime lifetime.
 
-**Transitional TODO.** Headless Session creation and Turn ingress use the typed
-`SessionClient`; they no longer call the private default Gateway.
-An existing `-session` is inspected and resumed directly rather than routed
-through Session creation; a missing preferred ID alone creates, and a closed
-Session reports an explicit create-new instruction. The legacy
-`surfaces/headless.RunOnce` remains only for eval/private Gateway coverage and
-is deprecated until those callers use the typed Session client.
-The production TUI facade no longer embeds the local Adapter. Side ACP remains
-a separate participant Turn and publishes its own target-filtered Session-feed
-events; it must not leak into the main-Turn client or Task stream. Product ACP
-uses the same typed prompt facade, while its ACP mode/config/model projection
-and terminal stream adapter remain direct Host dependencies. The generic direct
-Runtime adapter remains available to eval/private embedders and is not selected
-by product prompt composition.
-
-`Stack.StartSession` still records a process-local default-Stack ownership
-marker only for direct legacy Adapter/eval callers. Remove the marker, its
-routing branches, the compatibility constructors in
-`session_client_adapter.go`, and legacy Headless/Adapter entry points together
-after repository callers and tests use typed clients. This marker is not
-durable workspace configuration or a Session Runtime cache.
+Headless, TUI, ACP, and maintained e2e fixtures bind typed AppServer clients.
+The production Headless package has no private `RunOnce` entry, the broad local
+Adapter and compatibility constructors are absent, and
+the Session Runtime registry has no default-Stack ownership marker or routing
+exception. Side ACP remains a separate participant Turn with its own
+target-filtered Session-feed events; it must not leak into the main-Turn client
+or Task stream. Gatewayapp and e2e fixtures create Sessions through the same
+typed Control client used by embedded AppServer consumers; no test-only Stack
+lifecycle wrapper is retained.
 
 **Failure mode.** The AppServer Session path can operate concurrently across
 local workspaces without mixing prompt, skills, sandbox CWD, Gateway, or engine.
-Leaving direct legacy callers indefinitely would preserve a second apparent
-entry path even though production TUI no longer uses it.
+Adding a direct surface-to-Stack shortcut would recreate the retired second
+authority.
 
 **Bounded repair.** Keep Session as the public unit and extend Runtime routing
 only when a concrete Session capability requires it. Add the smallest
-client-visible activation release needed for daemon residency, retire direct
-legacy callers as one audited slice, and never expose workspace Runtime handles
+client-visible activation release needed for daemon residency, and never
+expose workspace Runtime handles
 to Surfaces or use workspace/UserID as Session identity.
 
 **Acceptance.** Run Sessions from two workspaces concurrently and prove that
@@ -549,17 +519,18 @@ If the command result is lost, the client retries with the same operation ID.
 If the connection is lost, it reconnects from the last accepted cursor. It
 never retries a lease conflict through an unfenced path.
 
-## MVP Boundary
+## Current Version Boundary
 
-The embedded AppServer MVP now includes the TUI migration:
+The current AppServer slice includes:
 
 - one permanent Host shutdown gate closes writes, rejects new Turns, cancels
   active producers, waits for handle release, and then closes resources;
 - one principal-bound `SessionClient` contract has in-process and HTTP/SSE
   implementations;
-- the public HTTP v1 protocol contains initialize, Session
-  list/create/close/state/reconnect, prompt/steer/cancel, approval resolve,
-  compact, status, and independent Task list/read/subscribe;
+- the public HTTP v1 protocol and generated clients cover initialize, Session
+  lifecycle/state/reconnect, prompt/steer/cancel/approval, compact, status,
+  participant, configuration, Agent, completion/skill, plugin, presentation,
+  terminal, and independent Task operations;
 - reconnect is the sole atomic state/replay/live attachment operation;
 - generated wire clients and conformance tests share
   `control/client/wirev1`.
@@ -574,45 +545,20 @@ The embedded AppServer MVP now includes the TUI migration:
 - the embedded TUI uses focused typed clients for every
   `internal/controlprompt.Service` capability and a separate Task client; its
   production facade owns no Stack, Runtime, or compatibility Adapter;
-- product ACP uses the same typed prompt facade and Task client. Its ACP
-  mode/config/model projection and terminal RPC are the remaining direct Host
-  facets.
+- product ACP uses the same typed prompt, presentation, terminal, and Task
+  clients; its product configuration accepts no Runtime, Stack, Session store,
+  Assembly, or SurfaceBuilder;
+- the local server implementation exposes narrow status, configuration, Agent,
+  completion, and plugin assemblers; the broad Adapter is not a production API;
+- Headless has one typed Session-Turn production entry, and all Session routing
+  uses the Session Runtime registry without a default-Stack exception.
 
-Remote mappings for participant, configuration, Agent, completion, and plugin
-clients; ACP transport-facet retirement; readiness; automatic retry;
-client-visible Runtime release; local-daemon discovery; catalog activity; Bar;
-and Pet are deferred milestones. They must extend these focused contracts, not
-reintroduce a generic slash or Surface-private authority.
-
-## Production-path retirement order
-
-Retirement is ordered so every deletion follows a parity proof and never leaves
-two production authorities:
-
-1. Add HTTP/client mappings for the existing focused participant,
-   configuration, Agent, completion, and plugin contracts. Do not add a raw
-   slash endpoint. Run one shared TUI/ACP parity suite against in-process and
-   HTTP clients.
-2. Introduce focused ACP session-presentation and terminal contracts. Product
-   ACP then drops `Runtime`, `Sessions`, `Assembly`, and `SurfaceBuilder` from
-   its composition dependencies; generic direct-Runtime ACP construction stays
-   test/eval-only and is named as such.
-3. Replace the local focused services' use of the broad server-side `Adapter`
-   with narrow Control assemblers, then delete Adapter methods that have no
-   direct test/eval owner. This is implementation cleanup, not a new client
-   protocol.
-4. Rewrite the remaining compatibility-constructor and legacy Headless tests
-   around typed clients. Then remove `NewSessionClientAdapter`,
-   `NewSessionClientAdapterWithParticipants`, the default-Stack Session marker,
-   and its routing branches in one commit.
-5. Only after these gates, add local-daemon discovery and reconnect policy.
-   Embedded, daemon, and later remote modes select different transports for the
-   same focused contracts; GUI, Bar, and Pet never receive a `Stack`.
-
-At every step, repository-wide production call-site searches must show one
-semantic ingress for Session/Turn writes and one observation path for Session
-and Task output. Compatibility code without a named test/eval owner is deleted,
-not deprecated indefinitely.
+This version explicitly does **not** implement local-daemon discovery,
+readiness/liveness endpoints, automatic remote connection or reconnect UX,
+client-visible Runtime release, catalog activity, GUI, Bar, or Pet. Those later
+features must select or extend the existing focused contracts; they must not
+reintroduce a generic slash endpoint, a Surface-private authority, or a `Stack`
+dependency in presentation code.
 
 ## Quality Gates
 

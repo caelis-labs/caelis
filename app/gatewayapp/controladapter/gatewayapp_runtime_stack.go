@@ -40,7 +40,6 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 			AppName:   stack.AppName,
 			UserID:    stack.UserID,
 			Workspace: stack.Workspace,
-			StartFn:   stack.StartSession,
 			CompactFn: stack.CompactSession,
 		},
 		Status: StatusRuntimeDeps{

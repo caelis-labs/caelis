@@ -159,9 +159,9 @@ func TestAdapterUsesCurrentTurnServiceAfterSandboxRebuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "rebuild-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "rebuild-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	beforeTurns := stack.KernelTurns()
 	if got, err := driver.gatewayTurns(); err != nil || got != beforeTurns {
@@ -194,72 +194,6 @@ func TestAllocateSideAgentLabelUsesHumanHandles(t *testing.T) {
 	}
 }
 
-func TestAdapterDefersBlankSessionUntilFirstSubmission(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	storeDir := t.TempDir()
-	workspace := t.TempDir()
-	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:      "caelis",
-		UserID:       "lazy-session-test",
-		StoreDir:     storeDir,
-		WorkspaceKey: workspace,
-		WorkspaceCWD: workspace,
-		ApprovalMode: "default",
-		Assembly:     assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
-			Provider: "ollama",
-			API:      providers.APIOllama,
-			Model:    "llama3",
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewLocalStack() error = %v", err)
-	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "", "surface", "ollama/llama3")
-	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
-	}
-	status, err := driver.Status(ctx)
-	if err != nil {
-		t.Fatalf("Status() error = %v", err)
-	}
-	if status.Session.ID != "" {
-		t.Fatalf("Status().SessionID = %q, want empty before first submission", status.Session.ID)
-	}
-	before, err := stack.KernelSessions().ListSessions(ctx, kernel.ListSessionsRequest{
-		AppName:      stack.AppName,
-		UserID:       stack.UserID,
-		WorkspaceKey: stack.Workspace.Key,
-		Limit:        10,
-	})
-	if err != nil {
-		t.Fatalf("ListSessions(before) error = %v", err)
-	}
-	if len(before.Sessions) != 0 {
-		t.Fatalf("ListSessions(before) = %d sessions, want none", len(before.Sessions))
-	}
-
-	turn, err := driver.Submit(ctx, controlprompt.Submission{Text: "hello"})
-	if err != nil {
-		t.Fatalf("Submit() error = %v", err)
-	}
-	closeAdapterTestTurn(t, turn)
-	after, err := stack.KernelSessions().ListSessions(ctx, kernel.ListSessionsRequest{
-		AppName:      stack.AppName,
-		UserID:       stack.UserID,
-		WorkspaceKey: stack.Workspace.Key,
-		Limit:        10,
-	})
-	if err != nil {
-		t.Fatalf("ListSessions(after) error = %v", err)
-	}
-	if len(after.Sessions) != 1 {
-		t.Fatalf("ListSessions(after) = %d sessions, want one after first submission", len(after.Sessions))
-	}
-}
-
 func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 	t.Parallel()
 
@@ -279,7 +213,7 @@ func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 			TurnID:     "turn-1",
 		}},
 	}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
@@ -292,7 +226,7 @@ func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
+		t.Fatalf("newAssembler() error = %v", err)
 	}
 
 	turn, err := driver.Submit(ctx, controlprompt.Submission{Text: "  steer next step  ", DisplayText: "$cmpctl steer next step", Mode: controlprompt.SubmissionModeActiveTurn})
@@ -344,7 +278,7 @@ func TestAdapterResumeCommitsAtomicReconnectAndSteersActiveTurn(t *testing.T) {
 		},
 		Subscription: &errorFeedSubscription{},
 	}}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Gateway: gatewayRuntimeDepsForTest(gw), ControlReconnect: reconnect,
 		Session: SessionRuntimeDeps{
 			AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws", CWD: oldSession.CWD},
@@ -389,7 +323,7 @@ func TestAdapterResumeBootstrapFailurePreservesCurrentSessionAndBinding(t *testi
 	oldSession := session.Session{SessionRef: session.SessionRef{SessionID: "old-session"}}
 	target := session.Session{SessionRef: session.SessionRef{SessionID: "target-session"}}
 	gw := &activeSubmitGatewayService{resume: target}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Gateway:          gatewayRuntimeDepsForTest(gw),
 		ControlReconnect: &fixedReconnectReader{err: errors.New("bootstrap failed")},
 		Session:          SessionRuntimeDeps{StartFn: func(context.Context, string, string) (session.Session, error) { return oldSession, nil }},
@@ -425,7 +359,7 @@ func TestAdapterSubmitDefaultModeStartsNewTurnDespiteActiveKernelTurn(t *testing
 			TurnID:     "turn-1",
 		}},
 	}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
@@ -438,7 +372,7 @@ func TestAdapterSubmitDefaultModeStartsNewTurnDespiteActiveKernelTurn(t *testing
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
+		t.Fatalf("newAssembler() error = %v", err)
 	}
 
 	_, err = driver.Submit(ctx, controlprompt.Submission{Text: "  fresh prompt after resume  "})
@@ -487,7 +421,7 @@ func TestAdapterSubmitActiveTurnRequiresActiveKernelTurn(t *testing.T) {
 				Controller: session.ControllerBinding{Kind: tc.controllerKind},
 			}
 			gw := &activeSubmitGatewayService{active: tc.active}
-			driver, err := NewAdapter(ctx, &RuntimeStack{
+			driver, err := newAssembler(ctx, &RuntimeStack{
 				Gateway: gatewayRuntimeDepsForTest(gw),
 				Session: SessionRuntimeDeps{
 					Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
@@ -500,7 +434,7 @@ func TestAdapterSubmitActiveTurnRequiresActiveKernelTurn(t *testing.T) {
 				},
 			}, activeSession.SessionID, "surface", "")
 			if err != nil {
-				t.Fatalf("NewAdapter() error = %v", err)
+				t.Fatalf("newAssembler() error = %v", err)
 			}
 
 			turn, err := driver.Submit(ctx, controlprompt.Submission{Text: "steer running turn", Mode: controlprompt.SubmissionModeActiveTurn})
@@ -543,7 +477,7 @@ func TestAdapterSubmitActiveTurnNoActiveRunErrorDoesNotBeginTurn(t *testing.T) {
 			Message:     "gateway: no active run is available for this session",
 		},
 	}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
@@ -556,7 +490,7 @@ func TestAdapterSubmitActiveTurnNoActiveRunErrorDoesNotBeginTurn(t *testing.T) {
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
+		t.Fatalf("newAssembler() error = %v", err)
 	}
 
 	turn, err := driver.Submit(ctx, controlprompt.Submission{Text: "steer running turn", Mode: controlprompt.SubmissionModeActiveTurn})
@@ -598,7 +532,7 @@ func TestAdapterSubmitForwardsReferencesToGateway(t *testing.T) {
 		CWD: workspace,
 	}
 	gw := &activeSubmitGatewayService{}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: workspace},
@@ -611,7 +545,7 @@ func TestAdapterSubmitForwardsReferencesToGateway(t *testing.T) {
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
+		t.Fatalf("newAssembler() error = %v", err)
 	}
 
 	raw := "$CMPCTL inspect @dict.go"
@@ -648,7 +582,7 @@ func TestAdapterStartupDoesNotQuerySandboxStatus(t *testing.T) {
 		},
 		CWD: t.TempDir(),
 	}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
 			StartFn: func(context.Context, string, string) (session.Session, error) {
@@ -663,7 +597,7 @@ func TestAdapterStartupDoesNotQuerySandboxStatus(t *testing.T) {
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
+		t.Fatalf("newAssembler() error = %v", err)
 	}
 	if driver.sandboxType != "auto" {
 		t.Fatalf("startup sandbox type = %q, want lightweight default", driver.sandboxType)
@@ -710,7 +644,7 @@ func TestAdapterLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 			},
 		},
 	}
-	driver := newAdapterForStack(stack, "surface", "")
+	driver := newAssemblerForStack(stack, "surface", "")
 	driver.session = session.Session{
 		SessionRef: session.SessionRef{AppName: "caelis", UserID: "user-1", SessionID: "session-1", WorkspaceKey: "ws"},
 		CWD:        stack.Session.Workspace.CWD,
@@ -743,7 +677,7 @@ func TestAdapterLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 func TestAdapterLightweightStatusPropagatesCallerCancellation(t *testing.T) {
 	t.Parallel()
 
-	driver := newAdapterForStack(&RuntimeStack{
+	driver := newAssemblerForStack(&RuntimeStack{
 		Status: StatusRuntimeDeps{
 			RuntimeStateFn: func(ctx context.Context, _ session.SessionRef) (SessionRuntimeState, error) {
 				<-ctx.Done()
@@ -774,7 +708,7 @@ func TestAdapterLightweightStatusDoesNotWaitForBlockedEventReader(t *testing.T) 
 		entered: make(chan struct{}, 1),
 		release: make(chan struct{}),
 	}
-	driver := newAdapterForStack(&RuntimeStack{
+	driver := newAssemblerForStack(&RuntimeStack{
 		Session: SessionRuntimeDeps{Store: store},
 	}, "surface", "")
 	driver.session = session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}}
@@ -853,7 +787,7 @@ func TestAdapterSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t *test
 			TurnID:     "turn-1",
 		}},
 	}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
@@ -866,7 +800,7 @@ func TestAdapterSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t *test
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
+		t.Fatalf("newAssembler() error = %v", err)
 	}
 
 	_, err = driver.Submit(ctx, controlprompt.Submission{Text: "  main prompt after side run  "})
@@ -919,9 +853,9 @@ func TestAdapterListSessionsSkipsUntitledSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession(titled) error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	candidates, err := driver.ListSessions(ctx, 10)
 	if err != nil {
@@ -969,9 +903,9 @@ func TestAdapterCompleteSlashArgConnectSeparatesSourcesAndProviders(t *testing.T
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "connect-flow-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "connect-flow-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	sources, err := driver.CompleteSlashArg(ctx, "connect", "", 20)
 	if err != nil {
@@ -1169,9 +1103,9 @@ func TestAdapterCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "slash-model-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "slash-model-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
@@ -1210,7 +1144,7 @@ func TestAdapterCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 func TestAdapterCompleteSlashArgACPModelUseOnly(t *testing.T) {
 	t.Parallel()
 
-	driver := &Adapter{}
+	driver := &assembler{}
 	status := gatewayapp.ACPControllerStatus{
 		ModelOptions: []gatewayapp.ACPControllerConfigChoice{{
 			Value:       "claude-sonnet",
@@ -1243,7 +1177,7 @@ func TestAdapterCompleteSlashArgACPModelUseOnly(t *testing.T) {
 func TestAdapterCompleteSlashArgACPModelUsesConfigEfforts(t *testing.T) {
 	t.Parallel()
 
-	driver := &Adapter{}
+	driver := &assembler{}
 	status := gatewayapp.ACPControllerStatus{
 		ModelOptions: []gatewayapp.ACPControllerConfigChoice{
 			{Value: "gpt-5.5", Name: "GPT-5.5"},
@@ -1267,7 +1201,7 @@ func TestAdapterCompleteSlashArgACPModelUsesConfigEfforts(t *testing.T) {
 func TestConfiguredModelReasoningLevelsUsesEndpointCatalog(t *testing.T) {
 	t.Parallel()
 
-	driver := &Adapter{}
+	driver := &assembler{}
 	levels := driver.configuredModelReasoningLevels(ModelConfig{
 		Provider: "ollama",
 		Model:    "glm-5.2",
@@ -1281,7 +1215,7 @@ func TestConfiguredModelReasoningLevelsUsesEndpointCatalog(t *testing.T) {
 func TestAdapterCompleteSlashArgACPModelUsesModelSpecificEfforts(t *testing.T) {
 	t.Parallel()
 
-	driver := &Adapter{}
+	driver := &assembler{}
 	status := gatewayapp.ACPControllerStatus{
 		ModelOptions: []gatewayapp.ACPControllerConfigChoice{
 			{Value: "gpt-5.5", Name: "GPT-5.5"},
@@ -1327,9 +1261,9 @@ func TestAdapterCompletesAndPersistsSessionModelReasoningLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "model-reasoning-session", "surface", "deepseek/deepseek-v4-pro")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "model-reasoning-session", "surface", "deepseek/deepseek-v4-pro")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	levels, err := driver.CompleteSlashArg(ctx, "model use deepseek/deepseek-v4-pro", "", 10)
@@ -1390,9 +1324,9 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "connect-defaults-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "connect-defaults-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	status, err := driver.Connect(ctx, controlprompt.ConnectConfig{
@@ -1535,9 +1469,9 @@ func TestAdapterConnectPersistsCompatibleImageInputCapability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "connect-image-input-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "connect-image-input-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	enabled := true
@@ -1598,9 +1532,9 @@ func TestAdapterConnectRejectsEnvironmentCredentialReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "connect-token-env-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "connect-token-env-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "deepseek",
@@ -1639,9 +1573,9 @@ func TestAdapterCodeFreeModelHasNoReasoningLevels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "codefree-no-reasoning-session", "surface", "codefree/glm-5.1")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "codefree-no-reasoning-session", "surface", "codefree/glm-5.1")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	levels, err := driver.CompleteSlashArg(ctx, "model use codefree/glm-5.1", "", 10)
 	if err != nil {
@@ -1686,9 +1620,9 @@ func TestAdapterConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "codefree-connect-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "codefree-connect-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	status, err := driver.Connect(ctx, controlprompt.ConnectConfig{
@@ -1732,9 +1666,9 @@ func TestAdapterStatusIncludesContextUsageSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "status-usage-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "status-usage-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	activeSession, ok := driver.currentSession()
 	if !ok {
@@ -1822,9 +1756,9 @@ func TestAdapterSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *testing
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "status-usage-dedupe-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "status-usage-dedupe-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	activeSession, ok := driver.currentSession()
 	if !ok {
@@ -1951,9 +1885,9 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSubagentsAndAutoReview(t *test
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "status-usage-breakdown-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "status-usage-breakdown-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	activeSession, ok := driver.currentSession()
 	if !ok {
@@ -2207,9 +2141,9 @@ func TestAdapterDeleteModelRemovesConfiguredAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "delete-model-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "delete-model-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
@@ -2254,9 +2188,9 @@ func TestAdapterDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "delete-only-model-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "delete-only-model-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "ollama",
@@ -2304,9 +2238,9 @@ func TestAdapterUseModelResolvesCaseInsensitiveAliasWithAssembledEffort(t *testi
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "use-model-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "use-model-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "minimax",
@@ -2364,9 +2298,9 @@ func TestAdapterAgentRegistryAndControllerUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "agent-driver-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "agent-driver-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	agents, err := driver.ListAgents(ctx, 10)
@@ -2449,7 +2383,7 @@ func TestAdapterStartAgentRunRollsBackAttachmentOnPromptConflict(t *testing.T) {
 			Message: "active participant run already in progress",
 		},
 	}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{
@@ -2468,7 +2402,7 @@ func TestAdapterStartAgentRunRollsBackAttachmentOnPromptConflict(t *testing.T) {
 		AgentBinding: boundAgentBindingRuntimeForTest(agentbinding.HandleOrbit, "copilot", "high"),
 	}, activeSession.SessionID, "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
+		t.Fatalf("newAssembler() error = %v", err)
 	}
 	imageRaw, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
 	if err != nil {
@@ -2519,7 +2453,7 @@ func TestAdapterStartAgentRunRollsBackAttachmentOnPromptConflict(t *testing.T) {
 func TestAdapterStartAgentRunFailsClosedWhenProfileIsUnbound(t *testing.T) {
 	t.Parallel()
 
-	driver, err := NewAdapter(context.Background(), &RuntimeStack{
+	driver, err := newAssembler(context.Background(), &RuntimeStack{
 		AgentBinding: AgentBindingRuntimeDeps{
 			Configuration: staticAgentBindingConfiguration{status: agentbinding.Status{Handles: []agentbinding.HandleStatus{{
 				Definition: agentbinding.Definition{
@@ -2533,7 +2467,7 @@ func TestAdapterStartAgentRunFailsClosedWhenProfileIsUnbound(t *testing.T) {
 		},
 	}, "", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
+		t.Fatalf("newAssembler() error = %v", err)
 	}
 	if _, err := driver.StartAgentRun(context.Background(), "breeze", "inspect", nil); err == nil || !strings.Contains(err.Error(), "/breeze is not bound") {
 		t.Fatalf("StartAgentRun(unbound Breeze) error = %v, want bind guidance", err)
@@ -2557,7 +2491,7 @@ func TestAdapterStartAgentRunKeepsRunAttachedForFollowUp(t *testing.T) {
 	gw := &sideAgentRollbackGatewayService{
 		session: activeSession,
 	}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{
@@ -2576,7 +2510,7 @@ func TestAdapterStartAgentRunKeepsRunAttachedForFollowUp(t *testing.T) {
 		AgentBinding: boundAgentBindingRuntimeForTest(agentbinding.HandleOrbit, "copilot", "high"),
 	}, activeSession.SessionID, "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
+		t.Fatalf("newAssembler() error = %v", err)
 	}
 
 	turn, err := driver.StartAgentRun(ctx, "orbit", "first prompt", nil)
@@ -2687,9 +2621,9 @@ func TestAdapterStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, reloaded, "startup-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, reloaded, "startup-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {
@@ -2716,9 +2650,9 @@ func TestAdapterStartupUsesRequestedSessionID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "sticky-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "sticky-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	activeSession, ok := driver.currentSession()
 	if !ok {
@@ -2755,13 +2689,13 @@ func TestAdapterStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	stale, err := stack.StartSession(ctx, "stale-session", "surface")
+	stale, err := startGatewayAppSessionForTest(ctx, stack, "stale-session")
 	if err != nil {
 		t.Fatalf("StartSession(stale) error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "sticky-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "sticky-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {
@@ -2794,14 +2728,14 @@ func TestAdapterStartupReusesExistingRequestedSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	existing, err := stack.StartSession(ctx, "sticky-session", "other-surface")
+	existing, err := startGatewayAppSessionForTest(ctx, stack, "sticky-session")
 	if err != nil {
 		t.Fatalf("StartSession(sticky-session) error = %v", err)
 	}
 
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "sticky-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "sticky-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {
@@ -2812,7 +2746,7 @@ func TestAdapterStartupReusesExistingRequestedSession(t *testing.T) {
 	}
 }
 
-func TestNewAdapterForSessionBindsResolvedWorkspaceWithoutStarting(t *testing.T) {
+func TestAssemblerForSessionBindsResolvedWorkspaceWithoutStarting(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -2844,9 +2778,9 @@ func TestNewAdapterForSessionBindsResolvedWorkspaceWithoutStarting(t *testing.T)
 		},
 		CWD: clientWorkspace,
 	}
-	driver, err := NewAdapterForSession(ctx, runtimeStack, resolved, "acp", "")
+	driver, err := newAssemblerForSession(ctx, runtimeStack, resolved, "acp", "")
 	if err != nil {
-		t.Fatalf("NewAdapterForSession() error = %v", err)
+		t.Fatalf("newAssemblerForSession() error = %v", err)
 	}
 	activeSession, ok := driver.currentSession()
 	if !ok {
@@ -2873,9 +2807,9 @@ func TestAdapterCycleSessionModeUsesStartupSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "sticky-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "sticky-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	startup, ok := driver.currentSession()
 	if !ok {
@@ -2912,7 +2846,7 @@ func TestAdapterSetSessionModeUpdatesLocalApprovalModeUnderACPController(t *test
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(ctx, "acp-approval-session", "surface")
+	activeSession, err := startGatewayAppSessionForTest(ctx, stack, "acp-approval-session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
@@ -2928,7 +2862,7 @@ func TestAdapterSetSessionModeUpdatesLocalApprovalModeUnderACPController(t *test
 	if err != nil {
 		t.Fatalf("BindController() error = %v", err)
 	}
-	driver := &Adapter{
+	driver := &assembler{
 		stack:              gatewayAppStackForRuntimeTest(stack),
 		session:            activeSession,
 		hasSession:         true,
@@ -2988,7 +2922,7 @@ func TestAdapterCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.T) {
 	}
 	var localCycleCalled bool
 	var setRemoteMode string
-	driver := &Adapter{
+	driver := &assembler{
 		stack: &RuntimeStack{
 			Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: activeSession.CWD}},
 			Gateway: gatewayRuntimeDepsForTest(&activeSubmitGatewayService{}),
@@ -3100,7 +3034,7 @@ func TestAdapterACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.T) {
 			RemoteSessionID: "remote-1",
 		},
 	}
-	driver := &Adapter{
+	driver := &assembler{
 		stack: &RuntimeStack{
 			Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: activeSession.CWD}},
 			Gateway: gatewayRuntimeDepsForTest(&activeSubmitGatewayService{}),
@@ -3164,7 +3098,7 @@ func TestAdapterACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	activeSession, err := stack.StartSession(ctx, "acp-fallback-session", "surface")
+	activeSession, err := startGatewayAppSessionForTest(ctx, stack, "acp-fallback-session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
@@ -3181,7 +3115,7 @@ func TestAdapterACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T) {
 		t.Fatalf("BindController() error = %v", err)
 	}
 
-	driver := &Adapter{
+	driver := &assembler{
 		stack:              gatewayAppStackForRuntimeTest(stack),
 		session:            activeSession,
 		hasSession:         true,
@@ -3219,13 +3153,13 @@ func TestAdapterIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "stale-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "stale-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
-	activeSession, err := driver.NewSession(ctx)
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
+	activeSession, ok := driver.currentSession()
+	if !ok {
+		t.Fatal("assembler has no bound Session")
 	}
 	if _, err := stack.Sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: session.SessionRef{SessionID: activeSession.SessionID}, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
@@ -3276,9 +3210,9 @@ func TestAdapterCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "prefix-model-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "prefix-model-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	modelActions, err := driver.CompleteSlashArg(ctx, "model", "de", 10)
@@ -3333,9 +3267,9 @@ func TestAdapterCompleteSlashArgPluginRootOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "plugin-root-order-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "plugin-root-order-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	candidates, err := driver.CompleteSlashArg(ctx, "plugin", "", 10)
@@ -3356,7 +3290,7 @@ func TestAdapterCompleteSlashArgPluginMarketplace(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Plugin: PluginRuntimeDeps{
 			ListMarketplacesFn: func(context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
 				return []controlprompt.MarketplaceSnapshot{
@@ -3367,7 +3301,7 @@ func TestAdapterCompleteSlashArgPluginMarketplace(t *testing.T) {
 		},
 	}, "", "", "")
 	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
+		t.Fatalf("newAssembler() error = %v", err)
 	}
 
 	actions, err := driver.CompleteSlashArg(ctx, "plugin marketplace", "", 10)
@@ -3424,9 +3358,9 @@ func TestAdapterConnectPersistsMultipleProviders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "multi-provider-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "multi-provider-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "minimax",
@@ -3537,9 +3471,9 @@ func TestAdapterConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "xiaomi-token-plan-connect-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "xiaomi-token-plan-connect-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "xiaomi",
@@ -3611,9 +3545,9 @@ func TestAdapterConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "xiaomi-endpoint-coexist-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "xiaomi-endpoint-coexist-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	for _, cfg := range []controlprompt.ConnectConfig{
 		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: modelconfig.XiaomiAPIBaseURL, APIKey: "xiaomi-api-secret"},
@@ -3691,9 +3625,9 @@ func TestAdapterConnectReusesExistingEndpointAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "connect-reuse-auth-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "connect-reuse-auth-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "xiaomi",
@@ -3787,9 +3721,9 @@ func TestAdapterCompleteFileUsesRelativePathsAndSkipsNoise(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "file-complete-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "file-complete-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	candidates, err := driver.CompleteFile(ctx, "src/ma", 10)
@@ -3847,9 +3781,9 @@ func TestAdapterCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "skill-complete-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "skill-complete-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	candidates, err := driver.CompleteSkill(ctx, "", 10)
@@ -3910,9 +3844,9 @@ func TestAdapterCompleteSkillUsesRuntimeSnapshot(t *testing.T) {
 		t.Fatalf("WriteFile(late SKILL.md) error = %v", err)
 	}
 
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "skill-snapshot-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "skill-snapshot-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	candidates, err := driver.CompleteSkill(ctx, "", 10)
 	if err != nil {
@@ -3952,9 +3886,9 @@ func TestAdapterCompleteSkillRefreshesAfterRuntimeRebuild(t *testing.T) {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "skill-reconfigure-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "skill-reconfigure-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 
 	initialCandidates, err := driver.CompleteSkill(ctx, "", 10)
@@ -4095,9 +4029,9 @@ func TestAdapterAgentStatusClassifiesDirectAndDelegatedParticipants(t *testing.T
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "mention-complete-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "mention-complete-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	activeSession, err := driver.ensureSession(ctx)
 	if err != nil {
@@ -4223,9 +4157,9 @@ func TestAdapterCompleteResumeUsesSummaryMetadataAndRecentFirst(t *testing.T) {
 		t.Fatalf("UpdateState(second) error = %v", err)
 	}
 
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "resume-complete-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "resume-complete-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	candidates, err := driver.CompleteResume(ctx, "task", 10)
 	if err != nil {
@@ -4263,9 +4197,9 @@ func TestAdapterDeleteModelRejectsUnknownAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "delete-unknown-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "delete-unknown-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	if err := driver.DeleteModel(ctx, "minimax/minimax-m1"); err == nil {
 		t.Fatal("DeleteModel() error = nil, want unknown alias error")
@@ -4293,9 +4227,9 @@ func TestAdapterConnectModelCandidatesIncludeConfiguredProviderModels(t *testing
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "connect-candidates-session", "surface", "ollama/llama3")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "connect-candidates-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "minimax",
@@ -4399,9 +4333,9 @@ func TestAdapterConnectRejectsMissingAPIKeyWithActionableError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "missing-key-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "missing-key-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "openai",
@@ -4427,9 +4361,9 @@ func TestAdapterConnectRejectsInvalidBaseURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "invalid-baseurl-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "invalid-baseurl-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "openai-compatible",
@@ -4459,9 +4393,9 @@ func TestAdapterStatusIncludesDoctorDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "doctor-status-session", "surface", "")
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "doctor-status-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newAssemblerFromGatewayAppSession() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, controlprompt.ConnectConfig{
 		Provider: "minimax",

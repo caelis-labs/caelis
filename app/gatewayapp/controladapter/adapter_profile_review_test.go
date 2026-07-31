@@ -45,7 +45,7 @@ func TestAdapterStartReviewUsesHiddenReviewerProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
@@ -58,7 +58,7 @@ func TestAdapterStartReviewUsesHiddenReviewerProfile(t *testing.T) {
 		}},
 	}, activeSession.SessionID, "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
+		t.Fatalf("newAssembler() error = %v", err)
 	}
 	imageData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 	turn, err := driver.StartReview(ctx, "  inspect the image  ", []controlprompt.Attachment{{
@@ -146,7 +146,7 @@ func TestAdapterStartReviewFailureFlowsThroughControlFeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	driver, err := newAssembler(ctx, &RuntimeStack{
 		Gateway:      gatewayRuntimeDepsForTest(gw),
 		ControlFeeds: feeds,
 		Session: SessionRuntimeDeps{
@@ -160,7 +160,7 @@ func TestAdapterStartReviewFailureFlowsThroughControlFeed(t *testing.T) {
 		}},
 	}, activeSession.SessionID, "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
+		t.Fatalf("newAssembler() error = %v", err)
 	}
 
 	turn, err := driver.StartReview(ctx, "inspect the change", nil)

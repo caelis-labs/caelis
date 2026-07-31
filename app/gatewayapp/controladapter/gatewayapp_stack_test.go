@@ -4,16 +4,24 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
+
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-func newAdapterFromGatewayAppStack(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*assembler, error) {
-	return NewAdapter(ctx, gatewayAppStackForRuntimeTest(stack), preferredSessionID, bindingKey, modelText)
+func newAssemblerFromGatewayAppSession(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*assembler, error) {
+	active, err := startGatewayAppSessionForTest(ctx, stack, preferredSessionID)
+	if err != nil {
+		return nil, err
+	}
+	return newAssemblerForSession(ctx, gatewayAppStackForRuntimeTest(stack), active, bindingKey, modelText)
 }
 
 func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
-	return NewRuntimeStackFromGatewayApp(stack, RuntimeStackGatewayAppAdapters{
+	runtimeStack := NewRuntimeStackFromGatewayApp(stack, RuntimeStackGatewayAppAdapters{
 		SandboxStatus:        testRuntimeSandboxStatus,
 		SessionRuntimeState:  testRuntimeSessionRuntimeState,
 		ModelChoices:         testRuntimeModelChoices,
@@ -25,6 +33,24 @@ func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
 		MarketplaceSnapshots: testRuntimeMarketplaceSnapshots,
 		MarketplaceSnapshot:  testRuntimeMarketplaceSnapshotWithError,
 	})
+	return runtimeStack
+}
+
+func startGatewayAppSessionForTest(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string) (session.Session, error) {
+	client, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: stack.UserID})
+	if err != nil {
+		return session.Session{}, err
+	}
+	result, err := client.CreateSession(ctx, controlclient.CreateSessionRequest{
+		WriteBase:          controlclient.WriteBase{OperationID: "adapter-test-session-" + uuid.NewString()},
+		PreferredSessionID: preferredSessionID,
+		WorkspaceKey:       stack.Workspace.Key,
+		CWD:                stack.Workspace.CWD,
+	})
+	if err != nil {
+		return session.Session{}, err
+	}
+	return stack.Sessions.Session(ctx, session.SessionRef{SessionID: result.SessionID})
 }
 
 func TestGatewayAppStackForRuntimeTestWiresFullRuntimeSurface(t *testing.T) {

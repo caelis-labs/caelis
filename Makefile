@@ -9,7 +9,8 @@ GO_TEST_TIMEOUT ?= 5m
 EVAL_REGRESSION_SELECTOR ?= ^TestRegression
 TUI_GOLDEN_SELECTOR ?= ^TestRegressionACPEventstreamToolCallFrame120x32$$
 TUI_INTERACTION_SELECTOR ?= ^(TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBeforeTool|TestTypedResumeEnterLoadsEmptyQueryAndSubmitsSelectedSession|TestResumeTabRetriesAfterTransientCompletionFailure|TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce|TestHandleACPEventEnvelopeScopedChildTerminalKeepsOneSpawnPanelAndMainTurnAlive)$$
-CONTROL_FEED_REGRESSION_SELECTOR ?= ^(TestMainTurnIngressDoesNotFanInTaskOutput|TestMainTurnIngressTerminalDoesNotWaitForTaskSource|TestGatewayTurnAttachmentFailureEmitsFailedTerminal|TestGatewayTurnCloseUnblocksUnreadSubscriptionDelivery|TestGatewayTurnHistoricalUnstampedTerminalCannotEndCurrentTurn)$$
+CONTROL_TURN_REGRESSION_SELECTOR ?= ^(TestSessionTurnClientAttachesBeforePromptAndFiltersExactTarget|TestSessionTurnClientRecoversGapFromLastAcceptedCursor|TestSessionTurnClientRoutesApprovalAndCancelWithoutClosingSession)$$
+SURFACE_CLIENT_REGRESSION_SELECTOR ?= ^(TestSessionClientAdapterRoutesMainTurnWritesAndObservationThroughTypedClient|TestSessionClientAdapterRoutesReviewThroughTypedParticipantClient|TestSessionClientAdapterRoutesSideAgentStartAndFollowUpThroughTypedClients|TestAppServerAdapterResumeFailurePreservesCurrentSession)$$
 COMMAND_REGRESSION_SELECTOR ?= ^TestRegression(Command(Status|Workspace|List|Agent|Parse|Connect|NewDriver)|Slash)
 COMMAND_EXECUTION_REGRESSION_SELECTOR ?= ^TestRegressionCommandExec
 CACHE_ROOT ?= $(CURDIR)/.tmp/cache
@@ -86,7 +87,8 @@ tui-interaction: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(TUI_INTERACTION_SELECTOR)' tui-interaction
 
 control-feed-regression: cache-dirs
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(CONTROL_FEED_REGRESSION_SELECTOR)' control-feed-regression
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./control/client '$(CONTROL_TURN_REGRESSION_SELECTOR)' control-turn-regression
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(SURFACE_CLIENT_REGRESSION_SELECTOR)' surface-client-regression
 
 command-regression: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(COMMAND_REGRESSION_SELECTOR)' command-regression

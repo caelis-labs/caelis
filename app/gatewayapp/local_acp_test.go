@@ -156,7 +156,7 @@ func acpCommandForToolTest(commands []acp.AvailableCommand, name string) *acp.Av
 func newStackWithAssemblyForToolTest(t *testing.T, resolved assembly.ResolvedAssembly) (*Stack, session.Session) {
 	t.Helper()
 	stack := newStackForToolTest(t, resolved)
-	activeSession, err := stack.StartSession(context.Background(), "", "surface-tool-test")
+	activeSession, err := startGatewayAppTestSession(context.Background(), stack, "")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}

@@ -2,74 +2,28 @@ package gatewayapp
 
 import (
 	"context"
-	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
-func runHeadlessOnceForGatewayAppTest(ctx context.Context, stack *Stack, activeSession session.Session, surface string, input string, opts headless.Options) (headless.Result, error) {
-	// TODO: migrate the remaining private-Gateway tests to SessionTurnStarter,
-	// then delete this helper together with surfaces/headless.RunOnce.
-	//nolint:staticcheck // This helper deliberately isolates the deprecated migration path.
-	return headless.RunOnce(ctx, gatewayHeadlessStarter{
-		turns:      stack.KernelTurns(),
-		sessionRef: activeSession.SessionRef,
-		surface:    surface,
-	}, controlprompt.Submission{Text: input}, opts)
-}
-
-type gatewayHeadlessStarter struct {
-	turns      kernel.TurnService
-	sessionRef session.SessionRef
-	surface    string
-}
-
-func (s gatewayHeadlessStarter) Submit(ctx context.Context, submission controlprompt.Submission) (controlprompt.Turn, error) {
-	result, err := s.turns.BeginTurn(ctx, kernel.BeginTurnRequest{
-		SessionRef:   s.sessionRef,
-		Input:        strings.TrimSpace(submission.Text),
-		DisplayInput: strings.TrimSpace(submission.DisplayText),
-		Surface:      strings.TrimSpace(s.surface),
-		Metadata: map[string]any{
-			"submission_mode": string(submission.Mode),
-		},
-	})
+func runHeadlessOnceForGatewayAppTest(ctx context.Context, stack *Stack, activeSession session.Session, _ string, input string, opts headless.Options) (headless.Result, error) {
+	client, err := controlclient.BindSessionClient(
+		stack.ControlClient(),
+		controlclient.Principal{ID: activeSession.UserID},
+	)
 	if err != nil {
-		return nil, err
+		return headless.Result{}, err
 	}
-	if result.Handle == nil {
-		return nil, nil
+	turns, err := controlclient.NewSessionTurnClient(client)
+	if err != nil {
+		return headless.Result{}, err
 	}
-	return gatewayHeadlessTurn{handle: result.Handle}, nil
+	return headless.RunSessionOnce(
+		ctx,
+		turns,
+		controlclient.SessionTurnStartRequest{SessionID: activeSession.SessionID, Input: input},
+		opts,
+	)
 }
-
-type gatewayHeadlessTurn struct {
-	handle kernel.TurnHandle
-}
-
-func (t gatewayHeadlessTurn) HandleID() string { return t.handle.HandleID() }
-func (t gatewayHeadlessTurn) RunID() string    { return t.handle.RunID() }
-func (t gatewayHeadlessTurn) TurnID() string   { return t.handle.TurnID() }
-func (t gatewayHeadlessTurn) Events() <-chan eventstream.Envelope {
-	return acpprojector.ACPEventsFromGatewayHandle(t.handle)
-}
-func (t gatewayHeadlessTurn) SubmitApproval(ctx context.Context, decision controlprompt.ApprovalDecision) error {
-	return t.handle.Submit(ctx, kernel.SubmitRequest{
-		Kind: kernel.SubmissionKindApproval,
-		Approval: &kernel.ApprovalDecision{
-			RequestID:  decision.RequestID,
-			Outcome:    strings.TrimSpace(decision.Outcome),
-			OptionID:   strings.TrimSpace(decision.OptionID),
-			Approved:   decision.Approved,
-			Reason:     strings.TrimSpace(decision.Reason),
-			ReviewText: strings.TrimSpace(decision.ReviewText),
-		},
-	})
-}
-func (t gatewayHeadlessTurn) Cancel()      { _ = t.handle.Cancel() }
-func (t gatewayHeadlessTurn) Close() error { return t.handle.Close() }

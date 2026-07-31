@@ -237,8 +237,7 @@ func (s *Stack) ControlTerminalStreams() stream.Controller {
 // Session Runtime. Observation must not assemble or retain execution state.
 func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (controlclient.RuntimeState, error) {
 	runtimeStack := s
-	if s != nil && s.sessionRuntimes != nil &&
-		!s.sessionRuntimes.defaultSession(ref.SessionID) {
+	if s != nil && s.sessionRuntimes != nil {
 		runtime, ok := s.sessionRuntimes.loaded(ref.SessionID)
 		if !ok {
 			return controlclient.RuntimeState{}, nil

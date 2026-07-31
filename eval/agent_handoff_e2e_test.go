@@ -15,7 +15,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -134,14 +133,8 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("BindAgentBinding(orbit) error = %v", err)
 	}
-	active, err := stack.StartSession(ctx, "agent-handoff-e2e", "surface-handoff-e2e")
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-	driver, err := local.NewLocalAdapterForSession(ctx, stack, active, "headless-agent-handoff-e2e", "")
-	if err != nil {
-		t.Fatalf("NewLocalAdapterForSession() error = %v", err)
-	}
+	active := startEvalSession(t, ctx, stack, "agent-handoff-e2e")
+	driver := newEvalAppServerAdapter(t, stack, active, "headless-agent-handoff-e2e")
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
@@ -208,7 +201,7 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	controllerSessionID := assertOneNewChildSession(t, ctx, childRoot, workdir, afterDirectSessions, nil, nil)
 	afterHandoffSessions := childSessionIDs(t, ctx, childRoot, workdir)
 
-	result, err := headless.RunOnce(ctx, routed, controlprompt.Submission{Text: "who owns this turn?"}, headless.Options{})
+	result, err := runEvalHeadlessOnce(t, ctx, stack, active, "who owns this turn?", headless.Options{})
 	if err != nil {
 		t.Fatalf("prompt after HandoffAgent(%s) error = %v", agentID, err)
 	}
@@ -257,7 +250,11 @@ func TestAgentHandoffProductFlowE2E(t *testing.T) {
 	}
 }
 
-func runScopedAgentOnce(ctx context.Context, starter headless.Starter, submission controlprompt.Submission) (string, error) {
+type scopedAgentStarter interface {
+	Submit(context.Context, controlprompt.Submission) (controlprompt.Turn, error)
+}
+
+func runScopedAgentOnce(ctx context.Context, starter scopedAgentStarter, submission controlprompt.Submission) (string, error) {
 	turn, err := starter.Submit(ctx, submission)
 	if err != nil {
 		return "", err
