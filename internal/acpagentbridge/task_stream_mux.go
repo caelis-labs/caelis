@@ -22,8 +22,7 @@ import (
 type acpTaskStreamMux struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
-	service   taskstream.Service
-	principal taskstream.Principal
+	client    taskstream.Client
 	sessionID string
 	events    chan eventstream.Envelope
 
@@ -43,9 +42,20 @@ func newACPTaskStreamMux(parent context.Context, service taskstream.Service, pri
 	if service == nil {
 		return nil
 	}
+	client, err := taskstream.BindClient(service, principal)
+	if err != nil {
+		return nil
+	}
+	return newACPTaskStreamClientMux(parent, client, sessionID)
+}
+
+func newACPTaskStreamClientMux(parent context.Context, client taskstream.Client, sessionID string) *acpTaskStreamMux {
+	if client == nil {
+		return nil
+	}
 	ctx, cancel := context.WithCancel(parent)
 	return &acpTaskStreamMux{
-		ctx: ctx, cancel: cancel, service: service, principal: principal,
+		ctx: ctx, cancel: cancel, client: client,
 		sessionID: strings.TrimSpace(sessionID), events: make(chan eventstream.Envelope, 128),
 		observations: map[string]*acpTaskStreamObservation{},
 	}
@@ -55,7 +65,7 @@ func (a *RuntimeAgent) startACPTaskStreamMux(parent context.Context, sessionID s
 	if a == nil {
 		return nil
 	}
-	mux := newACPTaskStreamMux(context.WithoutCancel(parent), a.taskStreams, a.taskStreamPrincipal, sessionID)
+	mux := newACPTaskStreamClientMux(context.WithoutCancel(parent), a.taskStreamClient, sessionID)
 	if mux == nil {
 		return nil
 	}
@@ -290,7 +300,7 @@ func (m *acpTaskStreamMux) resolveSubscription(
 	anchor acpTaskStreamAnchor,
 	generation *acpTaskStreamObservationGeneration,
 ) (acpTaskStreamAttachment, error) {
-	directory, err := m.service.List(generation.ctx, m.principal, taskstream.ListRequest{SessionID: m.sessionID})
+	directory, err := m.client.List(generation.ctx, taskstream.ListRequest{SessionID: m.sessionID})
 	if err != nil {
 		return acpTaskStreamAttachment{}, err
 	}
@@ -343,7 +353,7 @@ func (m *acpTaskStreamMux) resumeSubscriptionWithGrace(
 }
 
 func (m *acpTaskStreamMux) subscribeTaskStream(ctx context.Context, taskID string, cursor string) (taskstream.SubscribeResult, error) {
-	result, err := m.service.Subscribe(ctx, m.principal, taskstream.SubscribeRequest{
+	result, err := m.client.Subscribe(ctx, taskstream.SubscribeRequest{
 		SessionID: m.sessionID,
 		TaskID:    taskID,
 		Cursor:    cursor,

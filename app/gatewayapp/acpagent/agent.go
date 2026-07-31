@@ -6,9 +6,11 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
@@ -20,17 +22,29 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 	if err != nil {
 		return nil, err
 	}
+	sessionClient, err := controlclient.BindSessionClient(
+		stack.ControlClient(),
+		controlclient.Principal{ID: deps.UserID},
+	)
+	if err != nil {
+		return nil, err
+	}
+	taskStreamClient, err := taskstream.BindClient(
+		deps.TaskStreams,
+		taskstream.Principal{ID: deps.UserID},
+	)
+	if err != nil {
+		return nil, err
+	}
 	return runtimeacp.NewGatewayAgent(runtimeacp.GatewayAgentConfig{
 		Runtime:              deps.Runtime,
 		Sessions:             deps.Sessions,
-		Resolver:             deps.Resolver,
-		ApprovalReviewer:     deps.ApprovalReviewer,
+		SessionClient:        sessionClient,
 		Assembly:             deps.Assembly,
 		AppName:              deps.AppName,
 		UserID:               deps.UserID,
 		WorkspaceKey:         strings.TrimSpace(stack.Workspace.Key),
-		TaskStreams:          deps.TaskStreams,
-		TaskStreamPrincipal:  taskstream.Principal{ID: deps.UserID},
+		TaskStreamClient:     taskStreamClient,
 		SlashResultFormatter: promptview.FormatSlashResult,
 		SurfaceBuilder: func(req runtimeacp.SurfaceRequest) runtimeacp.Surface {
 			return stack.ACPSurface(req.Modes, req.UseFallbackModes, req.Config)
@@ -40,8 +54,12 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 			if err != nil {
 				return nil, err
 			}
+			driverWithTypedTurns, err := controladapter.NewSessionClientAdapter(driver, sessionClient)
+			if err != nil {
+				return nil, err
+			}
 			router := controlprompt.New(controlprompt.RouterConfig{
-				Service: driver,
+				Service: driverWithTypedTurns,
 				CommandNames: func(ctx context.Context, service controlprompt.Service) []string {
 					var bindingStatus agentbinding.Status
 					if bindingService, ok := service.(agentbinding.Service); ok {

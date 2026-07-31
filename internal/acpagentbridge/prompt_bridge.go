@@ -167,6 +167,7 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 	for events := result.Turn.Events(); events != nil; {
 		select {
 		case <-ctx.Done():
+			result.Turn.Cancel()
 			_ = result.Turn.Close()
 			return context.Canceled
 		case taskEnvelope, ok := <-taskEvents:

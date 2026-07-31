@@ -180,9 +180,13 @@ func TestACPTaskStreamMuxDetachedDeliveryOutlivesParentPrompt(t *testing.T) {
 			ParentTool: taskstream.ParentTool{ToolCallID: "command-1", ToolName: "RUN_COMMAND"},
 		}}},
 	}
+	client, err := taskstream.BindClient(service, taskstream.Principal{ID: "user-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	agent := &RuntimeAgent{
-		taskStreams: service, taskStreamPrincipal: taskstream.Principal{ID: "user-1"},
-		taskMuxes: map[string]map[*acpTaskStreamMux]struct{}{},
+		taskStreamClient: client,
+		taskMuxes:        map[string]map[*acpTaskStreamMux]struct{}{},
 	}
 	mux := agent.startACPTaskStreamMux(context.Background(), "session-1")
 	meta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{

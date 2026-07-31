@@ -165,12 +165,14 @@ Document responsibilities are intentionally separate:
   Assembly and app configuration mutation share one Host lock, while release
   first hides its Runtime from routing, waits already-routed synchronous
   mutations, and shutdown drains in-flight assembly and release before closing
-  all Session and transitional default Gateways. Headless Session creation and
-  Turn ingress use the typed in-process Session client. Until the remaining
-  TUI, ACP, and private prompt paths are Session-directed, their direct
-  default-Stack Sessions retain an explicit process-local ownership marker; the
-  marker is a migration fence, not durable configuration, and is removed with
-  the private default-Gateway path.
+  all Session and transitional default Gateways. Headless and product ACP
+  Session lifecycle plus main-Turn ingress use the typed in-process Session
+  client. The embedded TUI also uses typed clients for main-Turn and Task
+  observation. Until the remaining TUI lifecycle/status and TUI/ACP
+  slash/participant paths are Session-directed, their direct default-Stack
+  Sessions retain an explicit process-local ownership marker; the marker is a
+  migration fence, not durable configuration, and is removed with the private
+  default-Gateway path.
   `UserID` remains a compatibility authorization/persistence field and is not a
   Runtime partition key.
 - `internal/kernel`: Control-owned Session/Turn coordination, gateway
@@ -186,8 +188,11 @@ Document responsibilities are intentionally separate:
 - `internal/acpagentbridge`: external ACP transport, process-lifecycle, and
   product integration adapters that make external endpoints implement the same
   SDK controller/participant contracts used by built-in Agents. Product
-  assembly supplies any plain-text prompt-result projector; the bridge does not
-  import presentation packages.
+  assembly supplies principal-bound Session and Task clients; ordinary prompts
+  and lifecycle operations fail closed on those clients. The direct Runtime
+  adapter remains only for generic/eval embedding, while product slash and
+  direct-participant commands use the documented local compatibility adapter.
+  The bridge does not import presentation packages.
 - `platform/*`: product support code for platform-specific host behavior.
 
 ## SDK Boundary

@@ -6,19 +6,16 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 type ACPAgentDependencies struct {
-	Runtime          agent.Runtime
-	Sessions         session.Service
-	Resolver         kernel.RuntimeResolver
-	ApprovalReviewer kernel.ApprovalReviewer
-	Assembly         assembly.ResolvedAssembly
-	AppName          string
-	UserID           string
-	TaskStreams      taskstream.Service
+	Runtime     agent.Runtime
+	Sessions    session.Service
+	Assembly    assembly.ResolvedAssembly
+	AppName     string
+	UserID      string
+	TaskStreams taskstream.Service
 }
 
 func (s *Stack) ACPAgentDependencies() (ACPAgentDependencies, error) {
@@ -26,28 +23,17 @@ func (s *Stack) ACPAgentDependencies() (ACPAgentDependencies, error) {
 		return ACPAgentDependencies{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	s.mu.RLock()
-	var resolver kernel.RuntimeResolver
-	var reviewer kernel.ApprovalReviewer
-	if s.gateway != nil {
-		resolver = s.gateway.Resolver()
-		reviewer = s.gateway.ApprovalReviewer()
-	}
 	deps := ACPAgentDependencies{
-		Runtime:          s.engine,
-		Sessions:         s.Sessions,
-		Resolver:         resolver,
-		ApprovalReviewer: reviewer,
-		Assembly:         s.runtime.Assembly,
-		AppName:          s.AppName,
-		UserID:           s.UserID,
-		TaskStreams:      s.taskStreams,
+		Runtime:     s.engine,
+		Sessions:    s.Sessions,
+		Assembly:    s.runtime.Assembly,
+		AppName:     s.AppName,
+		UserID:      s.UserID,
+		TaskStreams: s.taskStreams,
 	}
 	s.mu.RUnlock()
 	if deps.Runtime == nil {
 		return ACPAgentDependencies{}, fmt.Errorf("gatewayapp: runtime is unavailable")
-	}
-	if deps.Resolver == nil {
-		return ACPAgentDependencies{}, fmt.Errorf("gatewayapp: gateway resolver is unavailable")
 	}
 	return deps, nil
 }

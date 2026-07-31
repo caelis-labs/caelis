@@ -3,15 +3,23 @@ package acpagent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/testenv"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
@@ -107,13 +115,102 @@ func TestNewFromStackStatusSlashUsesClientWorkspaceSession(t *testing.T) {
 		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
 	}
 	message := cb.firstAgentMessage()
-	clientWorkspaceDisplay := controladapter.FormatWorkspacePathForDisplay(clientWorkspace)
+	canonicalClientWorkspace, err := filepath.EvalSymlinks(clientWorkspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientWorkspaceDisplay := controladapter.FormatWorkspacePathForDisplay(canonicalClientWorkspace)
 	if !strings.Contains(message, "Workspace: "+clientWorkspaceDisplay) {
 		t.Fatalf("status output = %q, want client workspace %q", message, clientWorkspaceDisplay)
 	}
 	stackWorkspaceDisplay := controladapter.FormatWorkspacePathForDisplay(stackWorkspace)
 	if strings.Contains(message, "Workspace: "+stackWorkspaceDisplay) {
 		t.Fatalf("status output = %q, should not use stack workspace %q", message, stackWorkspaceDisplay)
+	}
+}
+
+func TestNewFromStackUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	workspace := t.TempDir()
+	provider := testenv.NewHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"acp-typed-1\",\"object\":\"chat.completion.chunk\",\"model\":\"typed-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"typed ACP ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	stack, err := newACPAgentTestStack(t, gatewayapp.Config{
+		AppName:      "caelis",
+		UserID:       "acpagent-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "auto-review",
+		SkillDirs:    []string{t.TempDir()},
+		Sandbox:      gatewayapp.SandboxConfig{RequestedType: "host"},
+		Model: gatewayapp.ModelConfig{
+			Provider:   "openai-compatible",
+			API:        providers.APIOpenAICompatible,
+			Model:      "typed-test",
+			BaseURL:    provider.URL,
+			HTTPClient: provider.Client(),
+			Token:      "typed-test-token",
+			AuthType:   model.AuthBearerToken,
+			Timeout:    2 * time.Second,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	agent, err := NewFromStack(stack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: workspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := agent.ListSessions(ctx, acp.SessionListRequest{CWD: workspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Sessions) != 1 || listed.Sessions[0].SessionID != created.SessionID {
+		t.Fatalf("ListSessions() = %#v, want created Session", listed)
+	}
+	callbacks := &recordingCallbacks{}
+	result, err := agent.Prompt(ctx, acp.PromptRequest{
+		SessionID: created.SessionID,
+		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"reply once"}`)},
+	}, callbacks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.StopReason != acp.StopReasonEndTurn || callbacks.firstAgentMessage() != "typed ACP ok" {
+		t.Fatalf("Prompt() = %#v, message %q", result, callbacks.firstAgentMessage())
+	}
+	replayed := &recordingCallbacks{}
+	if _, err := agent.LoadSession(ctx, acp.LoadSessionRequest{SessionID: created.SessionID, CWD: workspace}, replayed); err != nil {
+		t.Fatal(err)
+	}
+	if replayed.firstAgentMessage() != "typed ACP ok" {
+		t.Fatalf("LoadSession replay = %q, want typed ACP output", replayed.firstAgentMessage())
+	}
+	if _, err := agent.CloseSession(ctx, acp.CloseSessionRequest{SessionID: created.SessionID}); err != nil {
+		t.Fatal(err)
+	}
+	bound, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: stack.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = bound.Prompt(ctx, controlclient.PromptRequest{
+		WriteBase: controlclient.WriteBase{OperationID: "prompt-after-acp-close", SessionID: created.SessionID},
+		Input:     "must be rejected",
+	})
+	if !errorcode.Is(err, errorcode.FailedPrecondition) {
+		t.Fatalf("Prompt after ACP close error = %v, want failed precondition", err)
 	}
 }
 

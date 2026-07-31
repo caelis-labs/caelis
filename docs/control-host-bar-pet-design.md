@@ -162,6 +162,7 @@ suggests.
 | Host-owned accepted main-Turn lifetime | `internal/kernel/gateway_turns.go`, `app/gatewayapp/stack.go` | Yes; HTTP request cancellation must not cancel accepted work |
 | Principal-bound local and remote Session clients | `control/client/session_client.go`, `control/client/httpclient` | Yes; extend the common facade only as parity requires |
 | Headless typed Turn and structured output | `control/client/session_turn.go`, `surfaces/headless`, `internal/cli/headless_output.go` | Yes; Headless uses the in-process Session client and exposes text, JSON, and versioned JSONL without a private Gateway ingress |
+| ACP typed lifecycle, replay, main Turn, and Task observation | `app/gatewayapp/acpagent`, `internal/acpagentbridge` | Yes; product ACP binds the same principal-scoped Session and Task clients, while protocol framing and slash classification remain at the adapter boundary |
 | Session-routed workspace Runtime ownership | `app/gatewayapp/session_runtime_registry.go`, `workspace_config_assembler.go` | Yes for the bounded Session-client slice: workspace composition is loaded on demand, Session ID selects it, and UserID is not a Runtime key |
 | Independent Task observation | `control/taskstream`, `protocol/acp/taskstream`, `app/controlserver/task_stream.go` | Yes; the principal-bound in-process client and authenticated AppServer list/read/subscribe routes address Task output by Session ID without folding it into the Session control stream |
 
@@ -252,6 +253,18 @@ policy, and those remaining private Control services are not part of the common
 slice. The public HTTP protocol intentionally omits participant, handoff, and
 standalone events/stream routes until their owner and parity requirement are
 proven.
+
+Product ACP now creates, lists, loads/replays, resumes, closes, and prompts
+Sessions through the same principal-bound in-process `SessionClient`. Its
+single prompt router classifies input once: ordinary prompts use
+`SessionTurnClient`, while slash/status and direct-participant commands retain
+the local compatibility adapter. An unhandled ordinary prompt fails closed
+rather than falling back to direct Runtime execution. ACP Task list/read/
+subscribe uses the separately bound Task client, so asynchronous Shell and
+Subagent output does not acquire a second observation path. The direct Runtime
+agent and direct Session loader remain generic/eval embedding APIs, not a
+product ACP fallback.
+
 The broader in-process `control/client.Service` still exposes participant
 commands whose Runtime context is request-scoped; that interface is not the
 MVP client facade, and the Host-owned lifetime claim applies only to accepted
@@ -323,14 +336,14 @@ mutation that already acquired the Runtime. Failed sandbox or MCP closure
 retains the resource owner so Host shutdown can retry cleanup. Session close
 releases its Runtime.
 
-The ACP adapter, TUI lifecycle/status/participant compatibility methods, and
-private prompt services still address the default Stack. Main TUI Turn ingress
-and observation are Session-directed, while Task list/read/subscribe routes by
-Session ID through the Host Runtime registry. There is not yet a public client
-detach/release operation or idle eviction policy, so an open idle Session
-activation remains resident until Session close or Host shutdown; the
-registry's release primitive is currently internal lifecycle machinery.
-Observation subscriptions deliberately do not control Runtime lifetime.
+Product ACP lifecycle/replay/main-Turn and Task operations are Session-directed,
+as are main TUI Turn ingress and observation. TUI lifecycle/status and TUI/ACP
+slash or direct-participant compatibility methods still address the default
+Stack. There is not yet a public client detach/release operation or idle
+eviction policy, so an open idle Session activation remains resident until
+Session close or Host shutdown; the registry's release primitive is currently
+internal lifecycle machinery. Observation subscriptions deliberately do not
+control Runtime lifetime.
 
 **Transitional TODO.** Headless Session creation and Turn ingress now use the
 typed `SessionClient`; they no longer call the private default Gateway.
@@ -345,8 +358,14 @@ It deliberately retains the local adapter for `/new`, `/resume`, status and
 configuration, `/review`, and direct-Agent participant Turns. Side ACP remains
 a separate participant Turn and publishes its own target-filtered Session-feed
 events; it must not leak into the main-Turn client or Task stream.
+Product ACP now uses the typed Session client for lifecycle, replay, and
+ordinary main Turns, and the typed Task client for asynchronous output. It
+retains local compatibility only for slash/status and direct-participant
+commands; the generic direct Runtime adapter remains available to eval/private
+embedders and is not selected by product composition.
 `Stack.StartSession` must therefore still record a process-local default-Stack
-ownership marker for the remaining TUI, ACP, and private prompt Sessions.
+ownership marker for the remaining TUI lifecycle/status, TUI/ACP
+slash/participant, and private prompt Sessions.
 Control reconnect and mutation routing must honor this marker so one legacy
 Session cannot acquire a second detached Gateway. This marker is not durable
 workspace configuration or a Session Runtime cache. Remove the compatibility
@@ -586,10 +605,14 @@ The infrastructure MVP is intentionally smaller than a TUI migration:
 - the embedded TUI uses the typed Session Turn for the main agent and the typed
   Task client for asynchronous Shell/Subagent observation, while its remaining
   lifecycle/status and Side ACP participant methods stay on a documented
+  compatibility adapter;
+- product ACP uses the typed Session client for lifecycle, replay, and ordinary
+  main Turns plus the typed Task client for asynchronous observation; only
+  slash/status and direct-participant commands retain the documented local
   compatibility adapter.
 
-ACP and the remaining TUI compatibility methods stay unchanged until their
-parity suites prove focused typed clients can replace them. Readiness,
+The remaining TUI/ACP compatibility methods stay unchanged until their parity
+suites prove focused typed owners can replace them. Readiness,
 automatic retry policy, participant/handoff clients, client-visible Runtime
 release, the maintained remote Task client, catalog activity,
 output-schema validation, Bar, and Pet are deferred capabilities, not

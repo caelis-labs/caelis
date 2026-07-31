@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/loader"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/terminal"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -21,6 +22,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
+	"github.com/google/uuid"
 )
 
 // BuildAgentSpecFunc assembles the runtime-facing agent spec for one ACP
@@ -39,8 +41,13 @@ type SlashResultFormatter func(controlprompt.SlashCommandResult) string
 
 // Config configures one runtime-backed ACP agent adapter.
 type Config struct {
-	Runtime        agent.Runtime
-	Sessions       session.Service
+	Runtime  agent.Runtime
+	Sessions session.Service
+	// SessionClient is the principal-bound AppServer client used by product
+	// ACP assembly. When present, Session lifecycle mutations and ordinary
+	// prompt ingress must stay on that client; Runtime remains available only
+	// for ACP terminal handles and the explicitly supported legacy adapter mode.
+	SessionClient  controlclient.SessionClient
 	BuildAgentSpec BuildAgentSpecFunc
 	Projector      projector.Projector
 	Loader         acp.SessionLoader
@@ -54,8 +61,12 @@ type Config struct {
 	Commands            acp.CommandProvider
 	PromptRouterFactory PromptRouterFactory
 	// SlashResultFormatter is required when PromptRouterFactory is configured.
-	SlashResultFormatter  SlashResultFormatter
-	PromptCaps            acp.PromptCapabilitiesProvider
+	SlashResultFormatter SlashResultFormatter
+	PromptCaps           acp.PromptCapabilitiesProvider
+	TaskStreamClient     taskstream.Client
+	// TaskStreams and TaskStreamPrincipal are the compatibility input for
+	// generic RuntimeAgent users. Product assembly binds TaskStreamClient once
+	// at the AppServer boundary instead of forwarding a selectable principal.
 	TaskStreams           taskstream.Service
 	TaskStreamPrincipal   taskstream.Principal
 	ApprovalReviewer      approval.Reviewer
@@ -71,6 +82,7 @@ type Config struct {
 type RuntimeAgent struct {
 	runtime               agent.Runtime
 	sessions              session.Service
+	sessionClient         controlclient.SessionClient
 	buildAgentSpec        BuildAgentSpecFunc
 	projector             projector.Projector
 	loader                acp.SessionLoader
@@ -82,8 +94,7 @@ type RuntimeAgent struct {
 	promptRouterFactory   PromptRouterFactory
 	slashResultFormatter  SlashResultFormatter
 	promptCaps            acp.PromptCapabilitiesProvider
-	taskStreams           taskstream.Service
-	taskStreamPrincipal   taskstream.Principal
+	taskStreamClient      taskstream.Client
 	approvalReviewer      approval.Reviewer
 	approvalModelResolver ApprovalModelResolver
 	appName               string
@@ -99,14 +110,18 @@ type RuntimeAgent struct {
 
 // New constructs one runtime-backed ACP agent.
 func New(cfg Config) (*RuntimeAgent, error) {
-	if cfg.Runtime == nil {
-		return nil, errors.New("internal/acpagentbridge: runtime is required")
-	}
 	if cfg.Sessions == nil {
 		return nil, errors.New("internal/acpagentbridge: session service is required")
 	}
-	if cfg.BuildAgentSpec == nil {
-		return nil, errors.New("internal/acpagentbridge: agent spec builder is required")
+	if cfg.SessionClient == nil {
+		if cfg.Runtime == nil {
+			return nil, errors.New("internal/acpagentbridge: runtime is required")
+		}
+		if cfg.BuildAgentSpec == nil {
+			return nil, errors.New("internal/acpagentbridge: agent spec builder is required")
+		}
+	} else if cfg.PromptRouterFactory == nil {
+		return nil, errors.New("internal/acpagentbridge: typed Session client mode requires a prompt router")
 	}
 	if cfg.PromptRouterFactory != nil && cfg.SlashResultFormatter == nil {
 		return nil, errors.New("internal/acpagentbridge: slash result formatter is required with prompt router factory")
@@ -124,7 +139,7 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		userID = "acp"
 	}
 	sessionLoader := cfg.Loader
-	if sessionLoader == nil {
+	if sessionLoader == nil && cfg.SessionClient == nil {
 		sessionLoader = defaultSessionLoader{inner: loader.NewSessionServiceLoader(loader.SessionServiceLoaderConfig{
 			Sessions:     cfg.Sessions,
 			Projector:    eventProjector,
@@ -139,9 +154,18 @@ func New(cfg Config) (*RuntimeAgent, error) {
 	if approvalModes == nil {
 		approvalModes = cfg.Modes
 	}
+	taskStreamClient := cfg.TaskStreamClient
+	if taskStreamClient == nil && cfg.TaskStreams != nil {
+		var err error
+		taskStreamClient, err = taskstream.BindClient(cfg.TaskStreams, cfg.TaskStreamPrincipal)
+		if err != nil {
+			return nil, fmt.Errorf("internal/acpagentbridge: bind Task stream client: %w", err)
+		}
+	}
 	return &RuntimeAgent{
 		runtime:               cfg.Runtime,
 		sessions:              cfg.Sessions,
+		sessionClient:         cfg.SessionClient,
 		buildAgentSpec:        cfg.BuildAgentSpec,
 		projector:             eventProjector,
 		loader:                sessionLoader,
@@ -153,8 +177,7 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		promptRouterFactory:   cfg.PromptRouterFactory,
 		slashResultFormatter:  cfg.SlashResultFormatter,
 		promptCaps:            cfg.PromptCaps,
-		taskStreams:           cfg.TaskStreams,
-		taskStreamPrincipal:   cfg.TaskStreamPrincipal,
+		taskStreamClient:      taskStreamClient,
 		approvalReviewer:      cfg.ApprovalReviewer,
 		approvalModelResolver: cfg.ApprovalModelResolver,
 		appName:               appName,
@@ -204,7 +227,7 @@ func (a *RuntimeAgent) Initialize(ctx context.Context, _ acp.InitializeRequest) 
 		PromptCapabilities:  promptCaps,
 		SessionCapabilities: map[string]json.RawMessage{},
 	}
-	if a.loader != nil {
+	if a.loader != nil || a.sessionClient != nil {
 		caps.LoadSession = true
 	}
 	caps.SessionCapabilities["list"] = json.RawMessage(`{}`)
@@ -223,6 +246,30 @@ func (a *RuntimeAgent) Authenticate(context.Context, acp.AuthenticateRequest) (a
 }
 
 func (a *RuntimeAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	if a.sessionClient != nil {
+		created, err := a.sessionClient.CreateSession(ctx, controlclient.CreateSessionRequest{
+			WriteBase: controlclient.WriteBase{
+				OperationID: newACPSessionOperationID("create"),
+			},
+			WorkspaceKey: strings.TrimSpace(req.CWD),
+			CWD:          strings.TrimSpace(req.CWD),
+		})
+		if err != nil {
+			return acp.NewSessionResponse{}, err
+		}
+		if created.Outcome != controlclient.OutcomeCommitted && created.Outcome != controlclient.OutcomeAccepted {
+			return acp.NewSessionResponse{}, fmt.Errorf(
+				"internal/acpagentbridge: create Session operation %q ended with outcome %q",
+				created.OperationID,
+				created.Outcome,
+			)
+		}
+		activeSession, err := a.session(ctx, created.SessionID)
+		if err != nil {
+			return acp.NewSessionResponse{}, err
+		}
+		return a.newSessionResponse(ctx, activeSession)
+	}
 	activeSession, err := a.sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: a.appName,
 		UserID:  a.userID,
@@ -244,6 +291,10 @@ func (a *RuntimeAgent) NewSession(ctx context.Context, req acp.NewSessionRequest
 			Source:       "acp",
 		},
 	})
+	return a.newSessionResponse(ctx, activeSession)
+}
+
+func (a *RuntimeAgent) newSessionResponse(ctx context.Context, activeSession session.Session) (acp.NewSessionResponse, error) {
 	resp := acp.NewSessionResponse{SessionID: activeSession.SessionID}
 	if a.modes != nil {
 		modes, err := a.modes.SessionModes(ctx, activeSession)
@@ -270,12 +321,21 @@ func (a *RuntimeAgent) NewSession(ctx context.Context, req acp.NewSessionRequest
 }
 
 func (a *RuntimeAgent) ListSessions(ctx context.Context, req acp.SessionListRequest) (acp.SessionListResponse, error) {
-	list, err := a.sessions.ListSessions(ctx, session.ListSessionsRequest{
-		AppName:      a.appName,
-		UserID:       a.userID,
-		WorkspaceKey: strings.TrimSpace(req.CWD),
-		Cursor:       strings.TrimSpace(req.Cursor),
-	})
+	var list session.SessionList
+	var err error
+	if a.sessionClient != nil {
+		list, err = a.sessionClient.ListSessions(ctx, controlclient.ListSessionsRequest{
+			WorkspaceKey: strings.TrimSpace(req.CWD),
+			Cursor:       strings.TrimSpace(req.Cursor),
+		})
+	} else {
+		list, err = a.sessions.ListSessions(ctx, session.ListSessionsRequest{
+			AppName:      a.appName,
+			UserID:       a.userID,
+			WorkspaceKey: strings.TrimSpace(req.CWD),
+			Cursor:       strings.TrimSpace(req.Cursor),
+		})
+	}
 	if err != nil {
 		return acp.SessionListResponse{}, err
 	}
@@ -298,14 +358,20 @@ func (a *RuntimeAgent) ListSessions(ctx context.Context, req acp.SessionListRequ
 }
 
 func (a *RuntimeAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest, cb acp.PromptCallbacks) (acp.LoadSessionResponse, error) {
-	if a.loader == nil {
+	if a.loader == nil && a.sessionClient == nil {
 		return acp.LoadSessionResponse{}, acp.ErrCapabilityUnsupported
 	}
 	loadCallbacks := cb
 	if cb != nil {
 		loadCallbacks = normalizingPromptCallbacks{inner: cb}
 	}
-	resp, err := a.loader.LoadSession(ctx, req, loadCallbacks)
+	var resp acp.LoadSessionResponse
+	var err error
+	if a.sessionClient != nil {
+		resp, err = a.loadSessionFromClient(ctx, req, loadCallbacks)
+	} else {
+		resp, err = a.loader.LoadSession(ctx, req, loadCallbacks)
+	}
 	if err != nil {
 		return acp.LoadSessionResponse{}, err
 	}
@@ -324,6 +390,11 @@ func (a *RuntimeAgent) LoadSession(ctx context.Context, req acp.LoadSessionReque
 }
 
 func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+	if a.sessionClient != nil {
+		if _, err := a.sessionClient.InspectSession(ctx, controlclient.StateRequest{SessionID: strings.TrimSpace(req.SessionID)}); err != nil {
+			return acp.ResumeSessionResponse{}, err
+		}
+	}
 	session, err := a.session(ctx, req.SessionID)
 	if err != nil {
 		return acp.ResumeSessionResponse{}, err
@@ -354,15 +425,44 @@ func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionR
 }
 
 func (a *RuntimeAgent) CloseSession(ctx context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
+	if a.sessionClient != nil {
+		sessionID := strings.TrimSpace(req.SessionID)
+		state, err := a.sessionClient.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
+		if err != nil {
+			return acp.CloseSessionResponse{}, err
+		}
+		result, err := a.sessionClient.CloseSession(ctx, controlclient.CloseSessionRequest{WriteBase: controlclient.WriteBase{
+			OperationID:             newACPSessionOperationID("close"),
+			SessionID:               sessionID,
+			ExpectedRevision:        &state.Revision,
+			ExpectedControllerEpoch: strings.TrimSpace(state.Controller.EpochID),
+		}})
+		if err != nil {
+			return acp.CloseSessionResponse{}, err
+		}
+		if result.Outcome != controlclient.OutcomeCommitted && result.Outcome != controlclient.OutcomeAccepted {
+			return acp.CloseSessionResponse{}, fmt.Errorf(
+				"internal/acpagentbridge: close Session operation %q ended with outcome %q",
+				result.OperationID,
+				result.Outcome,
+			)
+		}
+		a.clearSessionDelivery(sessionID)
+		return acp.CloseSessionResponse{}, nil
+	}
 	if err := a.Cancel(ctx, acp.CancelNotification(req)); err != nil {
 		return acp.CloseSessionResponse{}, err
 	}
-	sessionID := strings.TrimSpace(req.SessionID)
+	a.clearSessionDelivery(req.SessionID)
+	return acp.CloseSessionResponse{}, nil
+}
+
+func (a *RuntimeAgent) clearSessionDelivery(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
 	a.mu.Lock()
 	delete(a.cancels, sessionID)
 	a.mu.Unlock()
 	a.closeACPTaskStreamMuxes(sessionID)
-	return acp.CloseSessionResponse{}, nil
 }
 
 func (a *RuntimeAgent) SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
@@ -432,6 +532,9 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 	}
 	if handled {
 		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+	}
+	if a.sessionClient != nil {
+		return acp.PromptResponse{}, errors.New("internal/acpagentbridge: typed Session client prompt was not handled by the shared router")
 	}
 
 	approvalMode, err := a.promptApprovalMode(ctx, activeSession)
@@ -683,6 +786,59 @@ func stringPtr(v string) *string {
 		return nil
 	}
 	return &v
+}
+
+func newACPSessionOperationID(action string) string {
+	action = strings.TrimSpace(action)
+	if action == "" {
+		action = "session"
+	}
+	return "acp-" + action + "-" + uuid.NewString()
+}
+
+func (a *RuntimeAgent) loadSessionFromClient(
+	ctx context.Context,
+	req acp.LoadSessionRequest,
+	cb acp.PromptCallbacks,
+) (acp.LoadSessionResponse, error) {
+	sessionID := strings.TrimSpace(req.SessionID)
+	reconnected, err := a.sessionClient.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: sessionID})
+	if err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
+	if reconnected.Subscription == nil {
+		return acp.LoadSessionResponse{}, errors.New("internal/acpagentbridge: Session reconnect returned no subscription")
+	}
+	defer reconnected.Subscription.Close()
+	if cb != nil {
+		filter := newACPNarrativeFilter(false)
+		for envelope := range reconnected.Subscription.Backfill() {
+			if err := a.emitControlBackfillEnvelope(ctx, cb, sessionID, envelope, filter); err != nil {
+				return acp.LoadSessionResponse{}, err
+			}
+		}
+	}
+	if err := reconnected.Subscription.Err(); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
+	activeSession, err := a.session(ctx, sessionID)
+	if err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
+	resp := acp.LoadSessionResponse{}
+	if a.modes != nil {
+		resp.Modes, err = a.modes.SessionModes(ctx, activeSession)
+		if err != nil {
+			return acp.LoadSessionResponse{}, err
+		}
+	}
+	if a.config != nil {
+		resp.ConfigOptions, err = a.config.SessionConfigOptions(ctx, activeSession)
+		if err != nil {
+			return acp.LoadSessionResponse{}, err
+		}
+	}
+	return resp, nil
 }
 
 func promptContent(prompt []json.RawMessage) (string, []model.ContentPart, error) {

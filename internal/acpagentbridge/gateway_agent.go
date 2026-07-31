@@ -6,6 +6,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -17,6 +18,7 @@ import (
 type GatewayAgentConfig struct {
 	Runtime              agent.Runtime
 	Sessions             session.Service
+	SessionClient        controlclient.SessionClient
 	Resolver             kernel.RuntimeResolver
 	ApprovalReviewer     kernel.ApprovalReviewer
 	Assembly             assemblyapi.ResolvedAssembly
@@ -28,6 +30,7 @@ type GatewayAgentConfig struct {
 	SlashResultFormatter SlashResultFormatter
 	TaskStreams          taskstream.Service
 	TaskStreamPrincipal  taskstream.Principal
+	TaskStreamClient     taskstream.Client
 }
 
 type SurfaceRequest struct {
@@ -50,7 +53,7 @@ type Surface interface {
 }
 
 func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
-	if cfg.Resolver == nil {
+	if cfg.SessionClient == nil && cfg.Resolver == nil {
 		return nil, fmt.Errorf("internal/acpagentbridge: gateway resolver is required")
 	}
 	if cfg.SurfaceBuilder == nil {
@@ -72,10 +75,9 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		UseFallbackModes: false,
 		Config:           nil,
 	})
-	return New(Config{
-		Runtime:  cfg.Runtime,
-		Sessions: cfg.Sessions,
-		BuildAgentSpec: func(ctx context.Context, session session.Session, req acp.PromptRequest) (agent.AgentSpec, error) {
+	var buildAgentSpec BuildAgentSpecFunc
+	if cfg.SessionClient == nil {
+		buildAgentSpec = func(ctx context.Context, session session.Session, req acp.PromptRequest) (agent.AgentSpec, error) {
 			resolved, err := cfg.Resolver.ResolveTurn(ctx, kernel.TurnIntent{
 				SessionRef: session.SessionRef,
 				Surface:    "acp",
@@ -84,7 +86,13 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 				return agent.AgentSpec{}, err
 			}
 			return resolved.RunRequest.AgentSpec, nil
-		},
+		}
+	}
+	return New(Config{
+		Runtime:               cfg.Runtime,
+		Sessions:              cfg.Sessions,
+		SessionClient:         cfg.SessionClient,
+		BuildAgentSpec:        buildAgentSpec,
 		Modes:                 surface,
 		ApprovalModes:         approvalSurface,
 		Config:                surface,
@@ -95,6 +103,7 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		PromptCaps:            surface,
 		TaskStreams:           cfg.TaskStreams,
 		TaskStreamPrincipal:   cfg.TaskStreamPrincipal,
+		TaskStreamClient:      cfg.TaskStreamClient,
 		ApprovalReviewer:      cfg.ApprovalReviewer,
 		ApprovalModelResolver: cfg.Resolver,
 		AppName:               cfg.AppName,
