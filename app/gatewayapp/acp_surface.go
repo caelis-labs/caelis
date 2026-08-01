@@ -3,6 +3,7 @@ package gatewayapp
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -37,6 +38,9 @@ func newGatewayACPSurface(stack *Stack, fallbackModes acp.ModeProvider, useFallb
 }
 
 func (p gatewayACPSurface) SessionModes(ctx context.Context, session session.Session) (*acp.SessionModeState, error) {
+	if p.stack != nil && p.stack.processSecurityPosture().FullAccessMode {
+		return &acp.SessionModeState{CurrentModeID: dangerouslySkipPermissionsModeLabel}, nil
+	}
 	if p.useFallbackModes {
 		return p.fallbackModes.SessionModes(ctx, session)
 	}
@@ -57,6 +61,11 @@ func (p gatewayACPSurface) SessionModes(ctx context.Context, session session.Ses
 }
 
 func (p gatewayACPSurface) SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+	if p.stack != nil {
+		if err := p.stack.processSecurityPosture().validateSessionModeMutation(); err != nil {
+			return acp.SetSessionModeResponse{}, err
+		}
+	}
 	if p.useFallbackModes {
 		return p.fallbackModes.SetSessionMode(ctx, req)
 	}
@@ -92,6 +101,12 @@ func (p gatewayACPSurface) SessionConfigOptions(ctx context.Context, session ses
 		fallback, err := p.fallbackConfig.SessionConfigOptions(ctx, session)
 		if err != nil {
 			return nil, err
+		}
+		if p.stack != nil && p.stack.processSecurityPosture().FullAccessMode {
+			fallback = slices.DeleteFunc(fallback, func(option acp.SessionConfigOption) bool {
+				return strings.EqualFold(strings.TrimSpace(option.ID), acpConfigModeID) ||
+					strings.EqualFold(strings.TrimSpace(option.Category), acpConfigModeID)
+			})
 		}
 		options = append(options, fallback...)
 	}

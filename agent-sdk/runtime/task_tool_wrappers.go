@@ -9,6 +9,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -51,6 +52,7 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 			hasSpawn = true
 			resolver, _ := one.(spawn.Resolver)
 			out = append(out, runtimeSpawnTool{
+				runtime:      r,
 				base:         one,
 				resolver:     resolver,
 				session:      session.CloneSession(activeSession),
@@ -211,6 +213,7 @@ func commandStartDiagnosticToolResult(call tool.Call, def tool.Definition, comma
 }
 
 type runtimeSpawnTool struct {
+	runtime      *Runtime
 	base         tool.Tool
 	resolver     spawn.Resolver
 	session      session.Session
@@ -269,7 +272,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 		Source:       "agent_tool",
 		Mode:         strings.TrimSpace(t.mode),
 		ApprovalMode: strings.TrimSpace(t.approvalMode),
-		Approval:     newSubagentApprovalRequester(t.approval, t.session, t.sessionRef),
+		Approval:     newSubagentApprovalRequester(t.runtime, t.mode, t.approval, t.session, t.sessionRef),
 	})
 	if err != nil {
 		return tool.Result{}, err
@@ -326,20 +329,26 @@ type runtimeTaskTool struct {
 }
 
 type subagentApprovalRequester struct {
+	runtime    *Runtime
+	mode       string
 	requester  agent.ApprovalRequester
 	session    session.Session
 	sessionRef session.SessionRef
 }
 
 func newSubagentApprovalRequester(
+	runtime *Runtime,
+	mode string,
 	requester agent.ApprovalRequester,
 	activeSession session.Session,
 	sessionRef session.SessionRef,
 ) subagent.ApprovalRequester {
-	if requester == nil {
+	if requester == nil && (runtime == nil || normalizePolicyMode(mode) != presets.ModeDangerFullAccess) {
 		return nil
 	}
 	return subagentApprovalRequester{
+		runtime:    runtime,
+		mode:       strings.TrimSpace(mode),
 		requester:  requester,
 		session:    session.CloneSession(activeSession),
 		sessionRef: session.NormalizeSessionRef(sessionRef),
@@ -350,9 +359,6 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 	ctx context.Context,
 	req subagent.ApprovalRequest,
 ) (subagent.ApprovalResponse, error) {
-	if r.requester == nil {
-		return subagent.ApprovalResponse{}, nil
-	}
 	options := make([]session.ProtocolApprovalOption, 0, len(req.Options))
 	for _, item := range req.Options {
 		options = append(options, session.ProtocolApprovalOption{
@@ -372,7 +378,7 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 			callInput = data
 		}
 	}
-	resp, err := r.requester.RequestApproval(ctx, agent.ApprovalRequest{
+	runtimeRequest := agent.ApprovalRequest{
 		SessionRef: r.sessionRef,
 		Session:    session.CloneSession(r.session),
 		Tool: tool.Definition{
@@ -405,7 +411,17 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 			"parent_call_id": strings.TrimSpace(req.ParentCallID),
 			"parent_tool":    names.Spawn,
 		},
-	})
+	}
+	if r.runtime != nil {
+		mode := firstNonEmpty(req.Mode, r.mode)
+		if response, handled, err := r.runtime.resolveEndpointApprovalByPolicy(ctx, mode, runtimeRequest); handled {
+			return response, err
+		}
+	}
+	if r.requester == nil {
+		return subagent.ApprovalResponse{}, nil
+	}
+	resp, err := r.requester.RequestApproval(ctx, runtimeRequest)
 	if err != nil {
 		return subagent.ApprovalResponse{}, err
 	}

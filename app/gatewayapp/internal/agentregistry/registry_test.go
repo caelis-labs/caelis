@@ -40,6 +40,36 @@ func TestSelfRuntimeInvocationCarriesOnlyModelProfile(t *testing.T) {
 	}
 }
 
+func TestSelfRuntimeInvocationPropagatesDangerousProcessModeOnlyWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	args, _ := SelfRuntimeInvocation(RuntimeConfig{DangerouslySkipPermissions: true})
+	if !slices.Contains(args, "--dangerously-skip-permissions") {
+		t.Fatalf("SelfRuntimeInvocation() args = %#v, want dangerous process flag", args)
+	}
+	args, _ = SelfRuntimeInvocation(RuntimeConfig{})
+	if slices.Contains(args, "--dangerously-skip-permissions") {
+		t.Fatalf("SelfRuntimeInvocation() args = %#v, dangerous process flag must be opt-in", args)
+	}
+
+	agent, err := configuredSelfAgent(DefaultSelfConfig{
+		Config: RuntimeConfig{
+			PolicyProfile:              "workspace-write",
+			DangerouslySkipPermissions: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(agent.Args, " ")
+	if !strings.Contains(joined, "-policy-profile workspace-write") || !slices.Contains(agent.Args, "--dangerously-skip-permissions") {
+		t.Fatalf("configuredSelfAgent() args = %#v, want user policy plus dangerous flag", agent.Args)
+	}
+	if strings.Contains(joined, "danger-full-access") {
+		t.Fatalf("configuredSelfAgent() args = %#v, escape policy must not travel as user profile", agent.Args)
+	}
+}
+
 func TestManagedACPAdaptersMatchRegistrySnapshot(t *testing.T) {
 	t.Parallel()
 

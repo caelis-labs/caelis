@@ -149,7 +149,7 @@ func (r *Runtime) executeACPControllerTurn(
 		ContentParts:      req.ContentParts,
 		Stream:            req.Request.StreamEnabled(false),
 		Mode:              r.policyMode(req.AgentSpec),
-		ApprovalRequester: controllerApprovalRequester{requester: req.ApprovalRequester, sessionRef: ref, session: activeSession, runID: runID, turnID: turnID},
+		ApprovalRequester: controllerApprovalRequester{runtime: r, requester: req.ApprovalRequester, sessionRef: ref, session: activeSession, runID: runID, turnID: turnID},
 	}
 	contextTransfer, contextSeq, err := r.buildControllerTurnContext(ctx, activeSession, ref, turnID)
 	if err != nil {

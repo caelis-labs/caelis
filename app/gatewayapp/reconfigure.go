@@ -7,6 +7,8 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -281,7 +283,21 @@ func (s *Stack) buildGatewayRuntimeContext(
 		return nil, err
 	}
 
-	effectivePolicyProfile := policyProfile(runtimeCfg.PolicyProfile)
+	securityPosture := resolveProcessSecurityPosture(runtimeCfg)
+	effectivePolicyProfile := securityPosture.PolicyMode
+	var policyRegistry policy.Registry
+	if securityPosture.FullAccessMode {
+		registry, registryErr := presets.NewRegistry()
+		if registryErr != nil {
+			bundle.Close()
+			return nil, registryErr
+		}
+		policyRegistry = registry
+		if err := registry.Register(presets.DangerFullAccessMode()); err != nil {
+			bundle.Close()
+			return nil, err
+		}
+	}
 	effectiveBaseMetadata := cloneMap(runtimeCfg.BaseMetadata)
 	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{
 		Runtime:      sandboxRuntime,
@@ -317,6 +333,7 @@ func (s *Stack) buildGatewayRuntimeContext(
 		Sessions:                 s.Sessions,
 		AgentFactory:             chat.Factory{},
 		DefaultPolicyMode:        effectivePolicyProfile,
+		PolicyRegistry:           policyRegistry,
 		DefaultApprovalMode:      string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
 		Compaction:               compactionCfg,
 		ControllerContextRouter:  contextRouter,

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
@@ -35,6 +36,8 @@ const (
 	outputText  outputFormat = "text"
 	outputJSON  outputFormat = "json"
 	outputJSONL outputFormat = "jsonl"
+
+	dangerouslySkipPermissionsWarning = "DANGER: YOLO mode is active. Tools run directly on the host with no sandbox, human approval, or Guardian review.\nThe built-in destructive-command blacklist remains active, but it is limited and is not a security boundary."
 )
 
 type runResult struct {
@@ -123,11 +126,16 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			envOr("CAELIS_CONTROL_OPERATION_RETENTION", ""),
 			fmt.Sprintf("Terminal Control operation idempotency window (default %s)", gatewayapp.DefaultControlOperationRetention),
 		)
-		workspaceKey     = fs.String("workspace-key", envOr("CAELIS_WORKSPACE_KEY", defaultWorkspaceKey), "Workspace key")
-		workspaceCWD     = fs.String("workspace-cwd", envOr("CAELIS_WORKSPACE_CWD", cwd), "Workspace cwd")
-		systemPrompt     = fs.String("system-prompt", envOr("CAELIS_SYSTEM_PROMPT", ""), "Session override text to append into the assembled system prompt")
-		approvalMode     = fs.String("approval-mode", envOr("CAELIS_APPROVAL_MODE", ""), "Approval mode: auto-review|manual")
-		policyProfile    = fs.String("policy-profile", envOr("CAELIS_POLICY_PROFILE", ""), "Policy profile: workspace-write")
+		workspaceKey               = fs.String("workspace-key", envOr("CAELIS_WORKSPACE_KEY", defaultWorkspaceKey), "Workspace key")
+		workspaceCWD               = fs.String("workspace-cwd", envOr("CAELIS_WORKSPACE_CWD", cwd), "Workspace cwd")
+		systemPrompt               = fs.String("system-prompt", envOr("CAELIS_SYSTEM_PROMPT", ""), "Session override text to append into the assembled system prompt")
+		approvalMode               = fs.String("approval-mode", envOr("CAELIS_APPROVAL_MODE", ""), "Approval mode: auto-review|manual")
+		policyProfile              = fs.String("policy-profile", envOr("CAELIS_POLICY_PROFILE", ""), "Policy profile: workspace-write")
+		dangerouslySkipPermissions = fs.Bool(
+			"dangerously-skip-permissions",
+			false,
+			"DANGEROUS: run tools directly on the host without sandbox or approval review",
+		)
 		modelProfile     = fs.String("model-profile", envOr("CAELIS_MODEL_PROFILE", ""), "Control-owned ModelProfile ID")
 		reasoningEffort  = fs.String("reasoning-effort", envOr("CAELIS_REASONING_EFFORT", ""), "Selected ModelProfile reasoning effort")
 		sandboxBackend   = fs.String("sandbox-backend", envOr("CAELIS_SANDBOX_BACKEND", ""), "Sandbox backend override: host or this platform's required backend (legacy auto/default aliases are accepted)")
@@ -195,18 +203,19 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	}
 
 	cfg, err := normalizeConfig(gatewayapp.Config{
-		AppName:                   *appName,
-		UserID:                    *userID,
-		StoreDir:                  *storeDir,
-		ControlOperationRetention: controlOperationRetention,
-		WorkspaceKey:              *workspaceKey,
-		WorkspaceCWD:              *workspaceCWD,
-		ApprovalMode:              *approvalMode,
-		PolicyProfile:             *policyProfile,
-		ContextWindow:             *contextWindow,
-		SystemPrompt:              *systemPrompt,
-		ModelProfileID:            *modelProfile,
-		ModelProfileEffort:        *reasoningEffort,
+		AppName:                    *appName,
+		UserID:                     *userID,
+		StoreDir:                   *storeDir,
+		ControlOperationRetention:  controlOperationRetention,
+		WorkspaceKey:               *workspaceKey,
+		WorkspaceCWD:               *workspaceCWD,
+		ApprovalMode:               *approvalMode,
+		PolicyProfile:              *policyProfile,
+		DangerouslySkipPermissions: *dangerouslySkipPermissions,
+		ContextWindow:              *contextWindow,
+		SystemPrompt:               *systemPrompt,
+		ModelProfileID:             *modelProfile,
+		ModelProfileEffort:         *reasoningEffort,
 		Sandbox: gatewayapp.SandboxConfig{
 			RequestedType: strings.TrimSpace(*sandboxBackend),
 			HelperPath:    strings.TrimSpace(*sandboxHelper),
@@ -218,6 +227,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	cfg.Assembly, err = assemblyFromEnv()
 	if err != nil {
 		return err
+	}
+	interactiveLaunch := !acpSubcommand && !controlServerSubcommand && !doctorSubcommand && !*doctor && sandboxSubcommand == "" && !headlessMode
+	if cfg.DangerouslySkipPermissions && !interactiveLaunch {
+		_, _ = fmt.Fprintln(stderr, dangerouslySkipPermissionsWarning)
 	}
 	if sandboxSubcommand != "" {
 		outFmt, err := parseOutputFormat(*format)
@@ -236,7 +249,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 
 	stack, err := gatewayapp.NewLocalStack(cfg)
 	if err != nil {
-		return err
+		return sandboxStartupEscapeError(err)
 	}
 	defer func() {
 		if err := stack.Close(); runErr == nil && err != nil {
@@ -315,7 +328,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return err
 	}
 	return runInteractive(ctx, stack, preferredInteractiveSessionID(*sessionID), cfg, renderModelText(cfg), tuiOptions{
-		NoAnimation: *noAnimation,
+		NoAnimation:                *noAnimation,
+		DangerouslySkipPermissions: cfg.DangerouslySkipPermissions,
 	}, stdin, stdout, stderr)
 }
 
@@ -603,6 +617,8 @@ func formatSandboxStatus(status sandboxStatusResult) string {
 		fmt.Sprintf("sandbox_requested_backend: %s", firstNonEmptyString(strings.TrimSpace(status.RequestedBackend), "-")),
 		fmt.Sprintf("sandbox_resolved_backend: %s", firstNonEmptyString(strings.TrimSpace(status.ResolvedBackend), "-")),
 		fmt.Sprintf("sandbox_route: %s", firstNonEmptyString(strings.TrimSpace(status.Route), "-")),
+		fmt.Sprintf("sandbox_full_access_mode: %t", status.FullAccessMode),
+		fmt.Sprintf("sandbox_security_summary: %s", firstNonEmptyString(strings.TrimSpace(status.SecuritySummary), "-")),
 		fmt.Sprintf("sandbox_setup_required: %t", setupRequired),
 		fmt.Sprintf("sandbox_setup_error: %s", firstNonEmptyString(strings.TrimSpace(setupError), "-")),
 		fmt.Sprintf("sandbox_setup_marker_current: %t", setupMarkerCurrent),
@@ -767,4 +783,18 @@ func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
 	cfg.ModelProfileID = strings.ToLower(strings.TrimSpace(cfg.ModelProfileID))
 	cfg.ModelProfileEffort = strings.ToLower(strings.TrimSpace(cfg.ModelProfileEffort))
 	return cfg, nil
+}
+
+func sandboxStartupEscapeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var unavailable *sandbox.BackendUnavailableError
+	if !errors.As(err, &unavailable) {
+		return err
+	}
+	return fmt.Errorf(
+		"%w Escape option: restart with --dangerously-skip-permissions to run directly on the host. WARNING: this disables sandbox isolation, human approval, and Guardian review; the remaining destructive-command blacklist is limited and is not a security boundary",
+		err,
+	)
 }

@@ -430,6 +430,7 @@ func (r *Runtime) executeACPParticipantTurn(
 		Stream:        req.Stream,
 		Mode:          r.policyMode(agent.AgentSpec{}),
 		ApprovalRequester: controllerApprovalRequester{
+			runtime:              r,
 			requester:            req.ApprovalRequester,
 			sessionRef:           ref,
 			session:              activeSession,

@@ -110,9 +110,10 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	ref := s.resolveDoctorSessionRef(ctx, req)
 	report.SessionID = strings.TrimSpace(ref.SessionID)
 	s.mu.RLock()
-	report.SessionMode = approvalMode(s.runtime.ApprovalMode)
-	report.PolicyProfile = policyProfile(s.runtime.PolicyProfile)
+	securityPosture := resolveProcessSecurityPosture(s.runtime)
 	s.mu.RUnlock()
+	report.SessionMode = securityPosture.DisplayMode
+	report.PolicyProfile = securityPosture.PolicyMode
 	alias := ""
 	modelRef := ""
 	if strings.TrimSpace(ref.SessionID) != "" {
@@ -179,8 +180,13 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	report.SandboxWorkspaceSetupPolicyHash = strings.TrimSpace(sandbox.WorkspaceSetupPolicyHash)
 	report.SandboxWorkspaceSetupUpdatedAt = sandbox.WorkspaceSetupUpdatedAt
 	report.HostExecution = strings.EqualFold(report.SandboxRoute, "host") || strings.EqualFold(report.SandboxResolvedBackend, "host")
-	report.FullAccessMode = false
-	if report.HostExecution {
+	report.FullAccessMode = sandbox.FullAccessMode
+	if report.FullAccessMode {
+		report.Warnings = append(report.Warnings,
+			"YOLO mode is active: tools run directly on the host without sandbox isolation, human approval, or Guardian review",
+			"the destructive-command blacklist remains active but is limited and is not a security boundary",
+		)
+	} else if report.HostExecution {
 		report.Warnings = append(report.Warnings, "sandbox execution is using host route")
 	}
 	if report.SandboxInstallHint != "" {

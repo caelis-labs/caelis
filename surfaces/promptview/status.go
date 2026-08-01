@@ -177,7 +177,10 @@ func StatusDisplayFromSnapshot(status controlstatus.StatusSnapshot) StatusDispla
 	if status.ModelStatus.MissingAPIKey {
 		warnings = append(warnings, "API key is missing; reconnect with a key")
 	}
-	if status.SandboxStatus.HostExecution || status.SandboxStatus.FullAccessMode {
+	if status.SandboxStatus.FullAccessMode {
+		warnings = append(warnings, "YOLO mode is active: tools run directly on the host without sandbox isolation")
+		warnings = append(warnings, "Human and Guardian approval review is disabled; the destructive-command blacklist is limited and is not a security boundary")
+	} else if status.SandboxStatus.HostExecution {
 		warnings = append(warnings, "Commands may run on the host with reduced sandbox isolation")
 		warnings = append(warnings, "Auto-Review remains enabled and can approve host execution; switch approval mode to manual for sensitive work")
 	}

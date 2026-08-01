@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
@@ -566,6 +567,46 @@ func TestParseControlOperationRetention(t *testing.T) {
 	}
 }
 
+func TestDangerousModeWarningIsHiddenUntilEnabled(t *testing.T) {
+	t.Parallel()
+
+	if logs := dangerousModeInitialLogs(false); logs != nil {
+		t.Fatalf("dangerousModeInitialLogs(false) = %#v, want hidden by default", logs)
+	}
+	logs := dangerousModeInitialLogs(true)
+	if len(logs) != 1 || !strings.Contains(logs[0], "YOLO mode is active") || !strings.Contains(logs[0], "not a security boundary") {
+		t.Fatalf("dangerousModeInitialLogs(true) = %#v, want explicit risk warning", logs)
+	}
+}
+
+func TestSandboxStartupEscapeErrorSuggestsExplicitDangerousMode(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("bwrap unavailable")
+	backendErr := &sandbox.BackendUnavailableError{
+		Backend: sandbox.BackendBwrap,
+		Err:     cause,
+	}
+	wrapped := sandboxStartupEscapeError(backendErr)
+	if !errors.Is(wrapped, cause) {
+		t.Fatalf("sandboxStartupEscapeError() = %v, want wrapped backend cause", wrapped)
+	}
+	message := wrapped.Error()
+	for _, want := range []string{
+		"--dangerously-skip-permissions",
+		"disables sandbox isolation, human approval, and Guardian review",
+		"not a security boundary",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("sandboxStartupEscapeError() = %q, want %q", message, want)
+		}
+	}
+	ordinary := errors.New("ordinary startup failure")
+	if got := sandboxStartupEscapeError(ordinary); !errors.Is(got, ordinary) {
+		t.Fatalf("ordinary error = %v, want unchanged identity", got)
+	}
+}
+
 func TestPreferredSessionIDDefaultsDifferBetweenInteractiveAndHeadless(t *testing.T) {
 	if got := preferredInteractiveSessionID(""); got != "" {
 		t.Fatalf("preferredInteractiveSessionID(\"\") = %q, want empty for fresh TUI session", got)
@@ -654,6 +695,35 @@ func TestRunDoctorJSONDoesNotLeakToken(t *testing.T) {
 	}
 	if got := report["active_provider"]; got != "minimax" {
 		t.Fatalf("active_provider = %#v, want minimax", got)
+	}
+}
+
+func TestRunDoctorDangerouslySkipPermissionsActivatesVisibleYOLOMode(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	storeDir := cliTestStoreDir(t)
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"doctor",
+		"--dangerously-skip-permissions",
+		"-format", "json",
+		"-store-dir", storeDir,
+		"-workspace-key", "doctor-yolo",
+		"-workspace-cwd", t.TempDir(),
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run(doctor --dangerously-skip-permissions) error = %v", err)
+	}
+	var report gatewayapp.DoctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !report.FullAccessMode || !report.HostExecution || report.PolicyProfile != "danger-full-access" {
+		t.Fatalf("doctor report = %#v, want active YOLO Host mode", report)
+	}
+	warning := errBuf.String()
+	if !strings.Contains(warning, "YOLO mode is active") || !strings.Contains(warning, "not a security boundary") {
+		t.Fatalf("stderr = %q, want explicit YOLO risk warning", warning)
 	}
 }
 

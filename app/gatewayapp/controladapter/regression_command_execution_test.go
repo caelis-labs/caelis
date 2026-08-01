@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
@@ -285,6 +286,47 @@ func TestRegressionCommandExecApprovalMode(t *testing.T) {
 	}
 	if current.Session.SessionMode != newMode {
 		t.Fatalf("Status().SessionMode = %q, want %q", current.Session.SessionMode, newMode)
+	}
+}
+
+func TestRegressionCommandExecYOLOModeCannotChangeSessionMode(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	modelCfg := defaultOllamaModelCfg()
+	stack, err := newAdapterTestStack(t, gatewayapp.Config{
+		AppName:                    "caelis",
+		UserID:                     "cmd-exec-yolo-test",
+		StoreDir:                   t.TempDir(),
+		WorkspaceKey:               "cmd-exec-yolo-workspace",
+		WorkspaceCWD:               t.TempDir(),
+		PolicyProfile:              "workspace-write",
+		DangerouslySkipPermissions: true,
+		Assembly:                   assembly.ResolvedAssembly{},
+		Sandbox:                    gatewayapp.SandboxConfig{RequestedType: "auto"},
+		Model:                      modelCfg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := newAssemblerFromGatewayAppSession(ctx, stack, "cmd-exec-yolo-session", "surface", modelCfg.Provider+"/"+modelCfg.Model)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, change := range map[string]func() (controlstatus.StatusSnapshot, error){
+		"set":   func() (controlstatus.StatusSnapshot, error) { return driver.SetSessionMode(ctx, "manual") },
+		"cycle": func() (controlstatus.StatusSnapshot, error) { return driver.CycleSessionMode(ctx) },
+	} {
+		if status, err := change(); err == nil {
+			t.Fatalf("%s session mode = %#v, nil; want YOLO posture rejection", name, status)
+		}
+	}
+	status, err := driver.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Session.SessionMode != "yolo" || status.Session.ModeLabel != "yolo" || !status.SandboxStatus.FullAccessMode {
+		t.Fatalf("Status() after rejected mode changes = %#v, want authoritative YOLO posture", status)
 	}
 }
 

@@ -192,6 +192,7 @@ func testRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
 		SetupMarkerCurrent: status.SetupMarkerCurrent,
 		SetupMarkerReason:  status.SetupMarkerReason,
 		SecuritySummary:    status.SecuritySummary,
+		FullAccessMode:     status.FullAccessMode,
 	}
 }
 

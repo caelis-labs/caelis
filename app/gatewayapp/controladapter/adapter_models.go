@@ -218,6 +218,11 @@ func (d *assembler) CycleSessionMode(ctx context.Context) (controlstatus.StatusS
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
 	}
+	if mode, locked, err := d.processOwnedSessionMode(ctx, activeSession); err != nil {
+		return controlstatus.StatusSnapshot{}, err
+	} else if locked {
+		return controlstatus.StatusSnapshot{}, processOwnedSessionModeMutationError(mode)
+	}
 	if controllerStatus, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
 		return controlstatus.StatusSnapshot{}, err
 	} else if activeACP {
@@ -293,6 +298,11 @@ func (d *assembler) SetSessionMode(ctx context.Context, mode string) (controlsta
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
 	}
+	if current, locked, err := d.processOwnedSessionMode(ctx, activeSession); err != nil {
+		return controlstatus.StatusSnapshot{}, err
+	} else if locked {
+		return controlstatus.StatusSnapshot{}, processOwnedSessionModeMutationError(current)
+	}
 	if d.stack.Status.SetSessionModeFn == nil {
 		return controlstatus.StatusSnapshot{}, missingRuntimeDependency("session mode")
 	}
@@ -307,7 +317,5 @@ func (d *assembler) SetSessionMode(ctx context.Context, mode string) (controlsta
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
 	}
-	status.Session.SessionMode = normalized
-	status.Session.ModeLabel = normalized
 	return status, nil
 }

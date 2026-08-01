@@ -49,10 +49,13 @@ type Config struct {
 	WorkspaceCWD              string
 	ApprovalMode              string
 	PolicyProfile             string
-	ContextWindow             int
-	SystemPrompt              string
-	Assembly                  assembly.ResolvedAssembly
-	SkillDirs                 []string
+	// DangerouslySkipPermissions enables the process-only Host escape mode. It
+	// is never loaded from or saved to AppConfig.
+	DangerouslySkipPermissions bool
+	ContextWindow              int
+	SystemPrompt               string
+	Assembly                   assembly.ResolvedAssembly
+	SkillDirs                  []string
 	// ModelProfileID selects one Control-owned ModelProfile for this process.
 	// Runtime startup is read-only: profiles and provider credentials may only
 	// be created or replaced by the /connect owner.
@@ -310,6 +313,7 @@ type SandboxStatus struct {
 	SetupDenyRead            int
 	SetupDenyWrite           int
 	SecuritySummary          string
+	FullAccessMode           bool
 	GlobalSetupCurrent       bool
 	GlobalSetupRequired      bool
 	GlobalSetupReason        string
@@ -431,7 +435,25 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		}
 	}
 	lookup.resolveAPIKey = apiKeyCredentials.Get
+	runtimeCfg := stackRuntimeConfig{
+		ApprovalMode:               effectiveApprovalMode,
+		PolicyProfile:              effectivePolicyProfile,
+		DangerouslySkipPermissions: cfg.DangerouslySkipPermissions,
+		ContextWindow:              cfg.ContextWindow,
+		SystemPrompt:               cfg.SystemPrompt,
+		ModelProfileID:             modelProfileID,
+		ModelProfileEffort:         modelProfileEffort,
+		Model:                      runtimeModel,
+		SkillDirs:                  cloneStringSlicePreserveNil(cfg.SkillDirs),
+		Plugins:                    clonePluginConfigs(doc.Plugins),
+		BaseAssembly:               baseAssembly,
+		Assembly:                   assembly.CloneResolvedAssembly(baseAssembly),
+	}
+	securityPosture := resolveProcessSecurityPosture(runtimeCfg)
 	sandboxCfg := mergeSandboxConfig(doc.Sandbox, cfg.Sandbox)
+	if securityPosture.RequiredSandboxBackend != "" {
+		sandboxCfg.RequestedType = string(securityPosture.RequiredSandboxBackend)
+	}
 	leaseOwnerID, err := newStackLeaseOwnerID()
 	if err != nil {
 		return nil, err
@@ -452,20 +474,8 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		grokAuth:          grokAuth,
 		apiKeyCredentials: apiKeyCredentials,
 		providerUsage:     providerUsage,
-		runtime: stackRuntimeConfig{
-			ApprovalMode:       effectiveApprovalMode,
-			PolicyProfile:      effectivePolicyProfile,
-			ContextWindow:      cfg.ContextWindow,
-			SystemPrompt:       cfg.SystemPrompt,
-			ModelProfileID:     modelProfileID,
-			ModelProfileEffort: modelProfileEffort,
-			Model:              runtimeModel,
-			SkillDirs:          cloneStringSlicePreserveNil(cfg.SkillDirs),
-			Plugins:            clonePluginConfigs(doc.Plugins),
-			BaseAssembly:       baseAssembly,
-			Assembly:           assembly.CloneResolvedAssembly(baseAssembly),
-		},
-		sandbox: sandboxCfg,
+		runtime:           runtimeCfg,
+		sandbox:           sandboxCfg,
 	}
 	stack.placementCache = newPlacementSnapshot(doc)
 	configStore.savedHook = stack.invalidatePlacementSnapshot

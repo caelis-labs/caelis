@@ -5,6 +5,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -23,6 +24,18 @@ func TestPolicyModelFeedbackDistinguishesResolvedDenialFromPendingApproval(t *te
 	pending, pendingHint := policyModelFeedback(decision, agent.ApprovalResponse{})
 	if pending != "host execution requested" || pendingHint == "" {
 		t.Fatalf("pending approval feedback = (%q, %q), want request reason and retry hint", pending, pendingHint)
+	}
+}
+
+func TestDangerFullAccessDefaultCannotBeOverriddenByAgentMetadata(t *testing.T) {
+	t.Parallel()
+
+	runtime := &Runtime{defaultPolicyMode: presets.ModeDangerFullAccess}
+	got := runtime.policyMode(agent.AgentSpec{Metadata: map[string]any{
+		policy.MetadataPolicyProfile: presets.ModeWorkspaceWrite,
+	}})
+	if got != presets.ModeDangerFullAccess {
+		t.Fatalf("policyMode() = %q, want process-owned %q", got, presets.ModeDangerFullAccess)
 	}
 }
 

@@ -16,6 +16,10 @@ import (
 
 const (
 	ModeWorkspaceWrite = policy.ProfileWorkspaceWrite
+	// ModeDangerFullAccess is an explicitly registered escape policy for hosts
+	// that cannot provide a supported sandbox. It is intentionally omitted from
+	// NewRegistry so ordinary policy configuration cannot enable it.
+	ModeDangerFullAccess = "danger-full-access"
 
 	// ModeAutoReview and ModeManual are legacy policy names kept for callers
 	// that still import them. They normalize to ModeWorkspaceWrite.
@@ -82,6 +86,27 @@ func WorkspaceWriteMode() policy.Mode {
 				}
 				return deny("tool is not allowed by workspace-write policy"), nil
 			}
+		},
+	}
+}
+
+// DangerFullAccessMode allows tools to execute directly on the Host while
+// retaining the small machine-level RUN_COMMAND denylist. Callers must
+// register this mode explicitly; it is not a substitute for sandbox isolation.
+func DangerFullAccessMode() policy.Mode {
+	return policy.NamedMode{
+		ID: ModeDangerFullAccess,
+		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
+			if toolName(input) == names.RunCommand {
+				command, err := commandArg(input)
+				if err != nil {
+					return policy.Decision{}, err
+				}
+				if class := scanCommandTree(command, input.Options, classifyMachineHardDeny); class.Action == policy.ActionDeny {
+					return deny(class.Reason), nil
+				}
+			}
+			return allow(hostExecutionConstraints()), nil
 		},
 	}
 }

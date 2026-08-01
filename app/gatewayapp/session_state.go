@@ -15,6 +15,9 @@ func (s *Stack) SetSessionMode(ctx context.Context, ref session.SessionRef, mode
 	if s == nil || s.Sessions == nil {
 		return "", fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
+	if err := s.processSecurityPosture().validateSessionModeMutation(); err != nil {
+		return "", err
+	}
 	if err := s.rejectReconfigureWhileActive("change session mode"); err != nil {
 		return "", err
 	}
@@ -67,6 +70,9 @@ func (s *Stack) replaceSessionState(ctx context.Context, ref session.SessionRef,
 }
 
 func (s *Stack) CycleSessionMode(ctx context.Context, ref session.SessionRef) (string, error) {
+	if err := s.processSecurityPosture().validateSessionModeMutation(); err != nil {
+		return "", err
+	}
 	state, err := s.SessionRuntimeState(ctx, ref)
 	if err != nil {
 		return "", err
@@ -97,12 +103,22 @@ func (s *Stack) SessionRuntimeState(ctx context.Context, ref session.SessionRef)
 			modelAlias = cfg.Alias
 		}
 	}
+	s.mu.RLock()
+	runtimeConfig := s.runtime
+	s.mu.RUnlock()
+	securityPosture := resolveProcessSecurityPosture(runtimeConfig)
+	sessionMode := kernel.CurrentSessionModeOrDefault(state, runtimeConfig.ApprovalMode)
+	effectivePolicyProfile := firstNonEmpty(kernel.CurrentPolicyProfile(state), policyProfile(runtimeConfig.PolicyProfile))
+	if securityPosture.FullAccessMode {
+		sessionMode = securityPosture.DisplayMode
+		effectivePolicyProfile = securityPosture.PolicyMode
+	}
 	return SessionRuntimeState{
 		ModelID:         modelID,
 		ModelAlias:      modelAlias,
 		ReasoningEffort: kernel.CurrentReasoningEffort(state),
-		SessionMode:     kernel.CurrentSessionModeOrDefault(state, s.runtime.ApprovalMode),
-		PolicyProfile:   firstNonEmpty(kernel.CurrentPolicyProfile(state), policyProfile(s.runtime.PolicyProfile)),
+		SessionMode:     sessionMode,
+		PolicyProfile:   effectivePolicyProfile,
 	}, nil
 }
 

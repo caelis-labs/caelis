@@ -315,6 +315,13 @@ func TestDiscoveryHelperProcess(t *testing.T) {
 			panic(err)
 		}
 	}
+	// Publish the process identity before initialize completes. The close-block
+	// case deliberately races a short client cleanup deadline against process
+	// termination, so publishing it from the close handler can lose the marker
+	// when the client kills the helper immediately after the deadline.
+	if mode == "close-block" {
+		writeMarker("pid", strconv.Itoa(os.Getpid()))
+	}
 	conn := jsonrpc.New(os.Stdin, os.Stdout)
 	_ = conn.Serve(context.Background(), func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
 		switch msg.Method {
@@ -401,7 +408,6 @@ func TestDiscoveryHelperProcess(t *testing.T) {
 			}
 			writeMarker("session-close", "yes")
 			if mode == "close-block" {
-				writeMarker("pid", strconv.Itoa(os.Getpid()))
 				select {}
 			}
 			return client.CloseSessionResponse{}, nil

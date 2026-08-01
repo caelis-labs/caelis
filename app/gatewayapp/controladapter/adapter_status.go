@@ -35,7 +35,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		reasoningEffort = strings.TrimSpace(d.stack.Model.DefaultEffortFn())
 	}
 	sandboxStatus := SandboxStatus{}
-	if includeDiagnostics && d.stack != nil && d.stack.Sandbox.StatusFn != nil {
+	if d.stack != nil && d.stack.Sandbox.StatusFn != nil {
 		sandboxStatus = d.stack.Sandbox.StatusFn()
 	}
 	activeSession, ok := d.currentSession()
@@ -57,6 +57,10 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 			return controlstatus.StatusSnapshot{}, ctx.Err()
 		}
 	}
+	if sandboxStatus.FullAccessMode {
+		sessionMode = processOwnedFullAccessSessionMode
+	}
+	processOwnedSessionMode := isProcessOwnedSessionMode(sessionMode)
 	acpStatus, activeACP, acpStatusErr := d.activeACPControllerStatus(ctx)
 	if acpStatusErr != nil {
 		return controlstatus.StatusSnapshot{}, acpStatusErr
@@ -115,6 +119,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 			Setup:            sandboxSetupStatusFromPort(sandboxStatus.Setup),
 			SecuritySummary:  securitySummary,
 			HostExecution:    strings.EqualFold(strings.TrimSpace(route), "host"),
+			FullAccessMode:   sandboxStatus.FullAccessMode,
 		},
 	}
 	if d.stack != nil {
@@ -172,16 +177,15 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		rawModelText = firstNonEmpty(strings.TrimSpace(acpStatus.Model), acpModelText, rawModelText)
 		status.ModelStatus.Display = formatReasoningModelDisplay(rawModelText, strings.TrimSpace(acpStatus.ReasoningEffort))
 		status.ModelStatus.ReasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
-		if acpModeID != "" {
+		if acpModeID != "" && !processOwnedSessionMode {
 			status.Session.SessionMode = acpModeID
 		}
-		if acpModeLabel != "" || acpModeID != "" {
+		if !processOwnedSessionMode && (acpModeLabel != "" || acpModeID != "") {
 			status.Session.ModeLabel = firstNonEmpty(acpModeLabel, acpModeID)
 		}
 		status.ModelStatus.Provider = "acp"
 		status.ModelStatus.Name = strings.TrimSpace(acpStatus.Model)
 		status.ModelStatus.MissingAPIKey = false
-		status.SandboxStatus.FullAccessMode = false
 		status.Usage.PromptTokens = 0
 		status.Usage.CompletionTokens = 0
 		status.Usage.TotalTokens = 0

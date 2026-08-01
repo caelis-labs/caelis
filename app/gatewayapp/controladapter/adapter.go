@@ -13,6 +13,8 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
+const processOwnedFullAccessSessionMode = "yolo"
+
 type assembler struct {
 	mu                 sync.Mutex
 	stack              *RuntimeStack
@@ -153,6 +155,32 @@ func (d *assembler) currentSession() (session.Session, bool) {
 		return session.Session{}, false
 	}
 	return d.session, true
+}
+
+func (d *assembler) processOwnedSessionMode(ctx context.Context, activeSession session.Session) (string, bool, error) {
+	if d == nil || d.stack == nil {
+		return "", false, nil
+	}
+	if d.stack.Sandbox.StatusFn != nil && d.stack.Sandbox.StatusFn().FullAccessMode {
+		return processOwnedFullAccessSessionMode, true, nil
+	}
+	if d.stack.Status.RuntimeStateFn == nil {
+		return "", false, nil
+	}
+	state, err := d.stack.Status.RuntimeStateFn(ctx, activeSession.SessionRef)
+	if err != nil {
+		return "", false, err
+	}
+	mode := strings.TrimSpace(state.SessionMode)
+	return mode, isProcessOwnedSessionMode(mode), nil
+}
+
+func isProcessOwnedSessionMode(mode string) bool {
+	return strings.EqualFold(strings.TrimSpace(mode), processOwnedFullAccessSessionMode)
+}
+
+func processOwnedSessionModeMutationError(mode string) error {
+	return fmt.Errorf("app/gatewayapp/controladapter: session mode %q is process-owned and cannot be changed", strings.TrimSpace(mode))
 }
 
 func (d *assembler) activeACPControllerStatus(ctx context.Context) (controller.ControllerStatus, bool, error) {

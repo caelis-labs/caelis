@@ -161,7 +161,7 @@ func (r *Runtime) StartSubagentWithOptions(
 		Source:       firstNonEmpty(strings.TrimSpace(source), "user"),
 		Mode:         strings.TrimSpace(r.defaultPolicyMode),
 		ApprovalMode: approvalMode,
-		Approval:     newSubagentApprovalRequester(opts.ApprovalRequester, activeSession, ref),
+		Approval:     newSubagentApprovalRequester(r, r.defaultPolicyMode, opts.ApprovalRequester, activeSession, ref),
 	})
 	if err != nil || !snapshot.Running {
 		return snapshot, err

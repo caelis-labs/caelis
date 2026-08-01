@@ -15,9 +15,12 @@ import (
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
 
+const dangerouslySkipPermissionsModeLabel = "yolo"
+
 type stackRuntimeConfig struct {
 	ApprovalMode                string
 	PolicyProfile               string
+	DangerouslySkipPermissions  bool
 	ContextWindow               int
 	SystemPrompt                string
 	ModelProfileID              string

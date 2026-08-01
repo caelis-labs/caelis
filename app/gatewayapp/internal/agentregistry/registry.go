@@ -12,18 +12,19 @@ import (
 )
 
 type RuntimeConfig struct {
-	AppName                   string
-	UserID                    string
-	StoreDir                  string
-	WorkspaceKey              string
-	WorkspaceCWD              string
-	ApprovalMode              string
-	PolicyProfile             string
-	ControlOperationRetention time.Duration
-	ContextWindow             int
-	SystemPrompt              string
-	ModelProfileID            string
-	ModelProfileEffort        string
+	AppName                    string
+	UserID                     string
+	StoreDir                   string
+	WorkspaceKey               string
+	WorkspaceCWD               string
+	ApprovalMode               string
+	PolicyProfile              string
+	DangerouslySkipPermissions bool
+	ControlOperationRetention  time.Duration
+	ContextWindow              int
+	SystemPrompt               string
+	ModelProfileID             string
+	ModelProfileEffort         string
 }
 
 type DefaultSelfConfig struct {
@@ -120,6 +121,9 @@ func SelfRuntimeInvocation(cfg RuntimeConfig) ([]string, map[string]string) {
 	appendFlag("-model-profile", cfg.ModelProfileID)
 	appendFlag("-reasoning-effort", cfg.ModelProfileEffort)
 	appendFlag("-system-prompt", cfg.SystemPrompt)
+	if cfg.DangerouslySkipPermissions {
+		args = append(args, "--dangerously-skip-permissions")
+	}
 	if cfg.ControlOperationRetention > 0 {
 		args = append(args, "-control-operation-retention", cfg.ControlOperationRetention.String())
 	}

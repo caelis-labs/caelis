@@ -2743,6 +2743,66 @@ func TestRuntimePolicyWriteOutsideAllowedRootsRequiresApproval(t *testing.T) {
 	}
 }
 
+func TestRuntimeDangerFullAccessExecutesWithoutApprovalRequester(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-policy-danger-full-access")
+	registry, err := presets.NewRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register(presets.DangerFullAccessMode()); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := New(Config{
+		Sessions: sessions,
+		AgentFactory: chat.Factory{
+			SystemPrompt: "Use tools when necessary.",
+		},
+		PolicyRegistry:    registry,
+		DefaultPolicyMode: presets.ModeDangerFullAccess,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeTool, err := filesystem.NewWrite(hostRuntimeForTest(t, activeSession.CWD))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "yolo-outside.txt")
+	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		t.Fatal("danger full-access policy routed an allowed tool call to approval")
+		return agent.ApprovalResponse{}, nil
+	})
+	result, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef:        activeSession.SessionRef,
+		Input:             "write outside workspace without approval",
+		ApprovalRequester: requester,
+		AgentSpec: agent.AgentSpec{
+			Name:  "chat",
+			Model: &writePathRuntimeModel{path: target, content: "yolo\n"},
+			Tools: []tool.Tool{writeTool},
+			Metadata: map[string]any{
+				policy.MetadataPolicyProfile: presets.ModeWorkspaceWrite,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := drainRunnerEvents(t, result.Handle); err != nil {
+		t.Fatalf("runner error = %v", err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "yolo\n" {
+		t.Fatalf("written content = %q, want yolo", data)
+	}
+}
+
 func TestRuntimePolicyWriteOutsideAllowedRootsExecutesAfterApproval(t *testing.T) {
 	t.Parallel()
 

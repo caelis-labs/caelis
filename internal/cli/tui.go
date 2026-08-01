@@ -22,7 +22,8 @@ import (
 const tuiBackgroundUpdateCheckTimeout = 2 * time.Minute
 
 type tuiOptions struct {
-	NoAnimation bool
+	NoAnimation                bool
+	DangerouslySkipPermissions bool
 }
 
 func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appCfg gatewayapp.Config, modelText string, options tuiOptions, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
@@ -67,6 +68,7 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appC
 		PromptRouterFactory: controlprompt.New,
 		RenderFPS:           envInt("CAELIS_TUI_RENDER_FPS", 0),
 		NoAnimation:         options.NoAnimation,
+		InitialLogs:         dangerousModeInitialLogs(options.DangerouslySkipPermissions),
 		TaskStreams:         taskClient,
 		OnStart: func() {
 			startTUISandboxRefresh(programCtx, typedDriver, sender)
@@ -88,6 +90,13 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appC
 		return runUpdate(ctx, appCfg.StoreDir, false, stdout, stderr)
 	}
 	return nil
+}
+
+func dangerousModeInitialLogs(enabled bool) []string {
+	if !enabled {
+		return nil
+	}
+	return []string{dangerouslySkipPermissionsWarning}
 }
 
 type tuiSandboxRefresher interface {

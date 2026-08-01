@@ -2,9 +2,12 @@ package controladapter
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
+	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
@@ -25,6 +28,116 @@ func TestRuntimeStackPluginDepsUseGroupedField(t *testing.T) {
 	}
 	if len(plugins) != 1 || plugins[0].ID != "grouped" {
 		t.Fatalf("ListPlugins() = %#v, want grouped plugin", plugins)
+	}
+}
+
+func TestSetSessionModeRejectsProcessOwnedRuntimeMode(t *testing.T) {
+	t.Parallel()
+
+	setCalls := 0
+	stack := &RuntimeStack{
+		Status: StatusRuntimeDeps{
+			RuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
+				return SessionRuntimeState{SessionMode: "manual"}, nil
+			},
+			SetSessionModeFn: func(context.Context, session.SessionRef, string) (string, error) {
+				setCalls++
+				return "manual", nil
+			},
+		},
+		Sandbox: SandboxRuntimeDeps{
+			StatusFn: func() SandboxStatus {
+				return SandboxStatus{FullAccessMode: true, Route: "host", ResolvedBackend: "host"}
+			},
+		},
+	}
+	driver := newAssemblerForStack(stack, "surface", "")
+	driver.session = session.Session{SessionRef: session.SessionRef{SessionID: "session-yolo"}}
+	driver.hasSession = true
+
+	_, err := driver.SetSessionMode(context.Background(), "manual")
+	if err == nil || !strings.Contains(err.Error(), "process-owned") {
+		t.Fatalf("SetSessionMode(manual) error = %v, want process-owned mode rejection", err)
+	}
+	if setCalls != 0 {
+		t.Fatalf("SetSessionModeFn calls = %d, want zero", setCalls)
+	}
+}
+
+func TestYOLONeverProjectsRemoteACPModeOrMutatesIt(t *testing.T) {
+	t.Parallel()
+
+	controllerModeSetCalls := 0
+	stack := &RuntimeStack{
+		Status: StatusRuntimeDeps{
+			RuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
+				return SessionRuntimeState{SessionMode: "yolo"}, nil
+			},
+			SetSessionModeFn: func(context.Context, session.SessionRef, string) (string, error) {
+				t.Fatal("SetSessionModeFn must not be called in YOLO mode")
+				return "", nil
+			},
+			CycleModeFn: func(context.Context, session.SessionRef) (string, error) {
+				t.Fatal("CycleModeFn must not be called in YOLO mode")
+				return "", nil
+			},
+		},
+		Sandbox: SandboxRuntimeDeps{
+			StatusFn: func() SandboxStatus {
+				return SandboxStatus{FullAccessMode: true, Route: "host", ResolvedBackend: "host"}
+			},
+		},
+		Agent: AgentRuntimeDeps{
+			ControllerStatusFn: func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error) {
+				return controller.ControllerStatus{
+					Mode: "manual",
+					ModeOptions: []controller.ControllerMode{
+						{ID: "manual", Name: "Manual"},
+						{ID: "auto-review", Name: "Auto Review"},
+					},
+				}, true, nil
+			},
+			SetControllerModeFn: func(context.Context, session.SessionRef, string) (controller.ControllerStatus, error) {
+				controllerModeSetCalls++
+				return controller.ControllerStatus{Mode: "manual"}, nil
+			},
+		},
+	}
+	driver := newAssemblerForStack(stack, "surface", "")
+	driver.session = session.Session{
+		SessionRef: session.SessionRef{SessionID: "session-yolo-acp"},
+		Controller: session.ControllerBinding{Kind: session.ControllerKindACP},
+	}
+	driver.hasSession = true
+
+	for name, read := range map[string]func(context.Context) (controlstatus.StatusSnapshot, error){
+		"full":        driver.Status,
+		"lightweight": driver.LightweightStatus,
+	} {
+		status, err := read(context.Background())
+		if err != nil {
+			t.Fatalf("%s Status() error = %v", name, err)
+		}
+		if status.Session.SessionMode != "yolo" || status.Session.ModeLabel != "yolo" {
+			t.Fatalf("%s Status() session = %#v, want process-owned YOLO mode", name, status.Session)
+		}
+		if !status.SandboxStatus.FullAccessMode || status.SandboxStatus.Route != "host" || status.SandboxStatus.ResolvedBackend != "host" {
+			t.Fatalf("%s Status() sandbox = %#v, want visible full-access Host posture", name, status.SandboxStatus)
+		}
+	}
+
+	for name, mutate := range map[string]func(context.Context) (controlstatus.StatusSnapshot, error){
+		"set": func(ctx context.Context) (controlstatus.StatusSnapshot, error) {
+			return driver.SetSessionMode(ctx, "manual")
+		},
+		"cycle": driver.CycleSessionMode,
+	} {
+		if _, err := mutate(context.Background()); err == nil || !strings.Contains(err.Error(), "process-owned") {
+			t.Fatalf("%s session mode error = %v, want process-owned mode rejection", name, err)
+		}
+	}
+	if controllerModeSetCalls != 0 {
+		t.Fatalf("SetControllerModeFn calls = %d, want zero", controllerModeSetCalls)
 	}
 }
 

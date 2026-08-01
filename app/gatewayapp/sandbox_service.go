@@ -25,7 +25,14 @@ func (s *Stack) SetSandboxBackend(_ context.Context, backend string) (SandboxSta
 	}
 	s.mu.RLock()
 	previous := s.sandbox
+	securityPosture := resolveProcessSecurityPosture(s.runtime)
 	s.mu.RUnlock()
+	if err := securityPosture.validateSandboxBackend(sandbox.Backend(normalized)); err != nil {
+		return SandboxStatus{}, err
+	}
+	if securityPosture.RequiredSandboxBackend != "" {
+		return s.SandboxStatus(), nil
+	}
 	next := previous
 	next.RequestedType = normalized
 	if err := s.saveSandboxConfigValue(next); err != nil {
@@ -53,8 +60,10 @@ func (s *Stack) SandboxStatus() SandboxStatus {
 	s.mu.RLock()
 	cfg := s.sandbox
 	exec := s.exec
+	securityPosture := resolveProcessSecurityPosture(s.runtime)
 	s.mu.RUnlock()
-	return sandboxStatusFromRuntime(cfg, exec)
+	status := sandboxStatusFromRuntime(cfg, exec)
+	return securityPosture.applySandboxStatus(status)
 }
 
 func sandboxStatusFromRuntime(cfg SandboxConfig, exec sandbox.Runtime) SandboxStatus {

@@ -93,6 +93,7 @@ func isMissingACPControllerRun(err error) bool {
 }
 
 type controllerApprovalRequester struct {
+	runtime              *Runtime
 	requester            agent.ApprovalRequester
 	sessionRef           session.SessionRef
 	session              session.Session
@@ -104,9 +105,6 @@ type controllerApprovalRequester struct {
 }
 
 func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Context, req controller.ApprovalRequest) (controller.ApprovalResponse, error) {
-	if r.requester == nil {
-		return controller.ApprovalResponse{}, nil
-	}
 	options := make([]session.ProtocolApprovalOption, 0, len(req.Options))
 	for _, item := range req.Options {
 		options = append(options, session.ProtocolApprovalOption{
@@ -134,7 +132,7 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 		metadata["participant_session_id"] = strings.TrimSpace(r.participantSessionID)
 		metadata["source"] = "acp_participant"
 	}
-	resp, err := r.requester.RequestApproval(ctx, agent.ApprovalRequest{
+	runtimeRequest := agent.ApprovalRequest{
 		SessionRef: session.NormalizeSessionRef(r.sessionRef),
 		Session:    session.CloneSession(r.session),
 		RunID:      strings.TrimSpace(r.runID),
@@ -162,7 +160,16 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 			Options: options,
 		},
 		Metadata: metadata,
-	})
+	}
+	if r.runtime != nil {
+		if response, handled, err := r.runtime.resolveEndpointApprovalByPolicy(ctx, req.Mode, runtimeRequest); handled {
+			return response, err
+		}
+	}
+	if r.requester == nil {
+		return controller.ApprovalResponse{}, nil
+	}
+	resp, err := r.requester.RequestApproval(ctx, runtimeRequest)
 	if err != nil {
 		return controller.ApprovalResponse{}, err
 	}

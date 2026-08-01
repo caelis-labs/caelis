@@ -68,6 +68,7 @@ type SandboxStatus struct {
 	SetupMarkerCurrent       bool
 	SetupMarkerReason        string
 	SecuritySummary          string
+	FullAccessMode           bool
 	GlobalSetupCurrent       bool
 	GlobalSetupRequired      bool
 	GlobalSetupReason        string
