@@ -7,7 +7,10 @@ import argparse
 from datetime import datetime
 import json
 from pathlib import Path
+import subprocess
 from typing import Any
+
+from eval.terminalbench.trace_usage import collect_trace_usage
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -61,50 +64,39 @@ def duration_seconds(result: dict[str, Any]) -> float | None:
         return None
 
 
-def usage_totals(trials: dict[str, tuple[dict[str, Any], Path]]) -> dict[str, int | None]:
-    fields = ("n_input_tokens", "n_cache_tokens", "n_output_tokens", "n_reasoning_tokens")
+def usage_totals(trials: dict[str, tuple[dict[str, Any], Path]]) -> dict[str, Any]:
+    fields = (
+        "n_input_tokens",
+        "n_cache_tokens",
+        "n_output_tokens",
+        "n_reasoning_tokens",
+        "n_total_tokens",
+        "cost_micros",
+    )
     totals: dict[str, int | None] = {field: None for field in fields}
+    coverage = {"complete": 0, "partial_lower_bound": 0, "unavailable": 0}
     for result, trial_dir in trials.values():
         agent_result = result.get("agent_result")
-        structured_usage = caelis_structured_usage(trial_dir)
+        structured_usage = collect_trace_usage(trial_dir / "agent" / "caelis.jsonl")
+        coverage[structured_usage["usage_coverage"]] += 1
         for field in fields:
             value = agent_result.get(field) if isinstance(agent_result, dict) else None
-            if not isinstance(value, int) or isinstance(value, bool):
-                value = structured_usage.get(field)
+            # The Caelis trace contains one canonical usage_update per model
+            # invocation. Harbor's legacy AgentResult may contain only the final
+            # invocation, so prefer the trace aggregation whenever available.
+            trace_value = structured_usage.get(field)
+            if isinstance(trace_value, int) and not isinstance(trace_value, bool):
+                value = trace_value
             if isinstance(value, int) and not isinstance(value, bool):
                 totals[field] = (totals[field] or 0) + value
-    return totals
+    return {**totals, "usage_coverage": coverage}
 
 
-def caelis_structured_usage(trial_dir: Path) -> dict[str, int]:
-    output_path = trial_dir / "agent" / "caelis.jsonl"
-    if not output_path.is_file():
-        return {}
-    for line in reversed(output_path.read_text(encoding="utf-8").splitlines()):
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(record, dict) or record.get("type") != "result":
-            continue
-        usage = record.get("usage")
-        if not isinstance(usage, dict):
-            return {}
-        mapping = {
-            "n_input_tokens": "prompt_tokens",
-            "n_cache_tokens": "cached_input_tokens",
-            "n_output_tokens": "completion_tokens",
-            "n_reasoning_tokens": "reasoning_tokens",
-        }
-        return {
-            target: usage[source]
-            for target, source in mapping.items()
-            if isinstance(usage.get(source), int) and not isinstance(usage[source], bool)
-        }
-    return {}
-
-
-def structured_output_check(trial_dir: Path, error_type: str | None) -> tuple[str, str | None]:
+def structured_output_check(
+    trial_dir: Path,
+    error_type: str | None,
+    wire_validator: Path | None = None,
+) -> tuple[str, str | None]:
     output_path = trial_dir / "agent" / "caelis.jsonl"
     if not output_path.is_file():
         return "invalid", "missing-caelis-jsonl"
@@ -125,6 +117,17 @@ def structured_output_check(trial_dir: Path, error_type: str | None) -> tuple[st
         records.append(record)
     if not records:
         return "invalid", "empty-caelis-jsonl"
+
+    if wire_validator is not None:
+        validated = subprocess.run(
+            [str(wire_validator), str(output_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if validated.returncode != 0:
+            detail = validated.stderr.strip().replace(" ", "-")
+            return "invalid", f"wirev1-validation-failed:{detail or validated.returncode}"
 
     terminal_index: int | None = None
     envelope_count = 0
@@ -236,7 +239,17 @@ def validate_error_record(record: dict[str, Any]) -> str | None:
     return None
 
 
-def build_report(manifest: dict[str, Any], expected: list[str], job_dir: Path) -> dict[str, Any]:
+def phase_duration_seconds(result: dict[str, Any], phase: str) -> float | None:
+    value = result.get(phase)
+    return duration_seconds(value) if isinstance(value, dict) else None
+
+
+def build_report(
+    manifest: dict[str, Any],
+    expected: list[str],
+    job_dir: Path,
+    wire_validator: Path | None = None,
+) -> dict[str, Any]:
     trials = collect_trials(job_dir)
     rows: list[dict[str, Any]] = []
     reward_sum = 0.0
@@ -244,6 +257,12 @@ def build_report(manifest: dict[str, Any], expected: list[str], job_dir: Path) -
     passed = 0
     errors = 0
     structured_errors = 0
+    phase_totals: dict[str, float] = {
+        "environment_setup": 0.0,
+        "agent_setup": 0.0,
+        "agent_execution": 0.0,
+        "verifier": 0.0,
+    }
     for task_name in expected:
         normalized = normalize_task_name(task_name)
         trial = trials.get(normalized)
@@ -252,8 +271,22 @@ def build_report(manifest: dict[str, Any], expected: list[str], job_dir: Path) -
         exception = result.get("exception_info") if result is not None else None
         error_type = exception.get("exception_type") if isinstance(exception, dict) else None
         output_state, output_error = (
-            structured_output_check(trial[1], error_type) if trial is not None else ("missing", None)
+            structured_output_check(trial[1], error_type, wire_validator)
+            if trial is not None
+            else ("missing", None)
         )
+        usage = (
+            collect_trace_usage(trial[1] / "agent" / "caelis.jsonl")
+            if trial is not None
+            else collect_trace_usage(Path("missing"))
+        )
+        phases = {
+            phase: phase_duration_seconds(result, phase) if result is not None else None
+            for phase in phase_totals
+        }
+        for phase, seconds in phases.items():
+            if seconds is not None:
+                phase_totals[phase] += seconds
         if reward is not None:
             scored += 1
             reward_sum += reward
@@ -270,9 +303,12 @@ def build_report(manifest: dict[str, Any], expected: list[str], job_dir: Path) -
                 "passed": reward is not None and reward >= 1.0,
                 "error": error_type,
                 "duration_seconds": duration_seconds(result) if result is not None else None,
+                "phase_seconds": phases,
+                "trial_dir": str(trial[1].relative_to(job_dir)) if trial is not None else None,
                 "structured_output": output_error is None and trial is not None,
                 "structured_output_state": output_state,
                 "structured_output_error": output_error,
+                "usage": usage,
             }
         )
     planned = len(expected)
@@ -284,6 +320,21 @@ def build_report(manifest: dict[str, Any], expected: list[str], job_dir: Path) -
         "dataset_digest": manifest.get("dataset_digest"),
         "taskset": manifest.get("taskset"),
         "model_profile_id": manifest.get("model_profile_id"),
+        "provider_endpoint_id": manifest.get("provider_endpoint_id"),
+        "model_config_id": manifest.get("model_config_id"),
+        "model": manifest.get("model"),
+        "reasoning_effort": manifest.get("reasoning_effort"),
+        "started_at": manifest.get("started_at"),
+        "harbor_finished_at": manifest.get("harbor_finished_at"),
+        "duration_seconds": manifest_duration_seconds(manifest),
+        "execution_mode": manifest.get("execution_mode"),
+        "execution": manifest.get("execution"),
+        "harness_digest": manifest.get("harness_digest"),
+        "binary_digest": manifest.get("binary_digest"),
+        "config_digest": manifest.get("config_digest"),
+        "tasks_digest": manifest.get("tasks_digest"),
+        "runtime": manifest.get("runtime"),
+        "verifier_cache": manifest.get("verifier_cache"),
         "planned": planned,
         "completed": len(trials),
         "scored": scored,
@@ -292,11 +343,18 @@ def build_report(manifest: dict[str, Any], expected: list[str], job_dir: Path) -
         "structured_errors": structured_errors,
         "score": reward_sum / planned if planned else 0.0,
         "mean_scored_reward": reward_sum / scored if scored else None,
+        "phase_seconds": phase_totals,
         "complete": len(trials) == planned and scored == planned and structured_errors == 0,
         "tasks": rows,
     }
     report.update(usage_totals(trials))
     return report
+
+
+def manifest_duration_seconds(manifest: dict[str, Any]) -> float | None:
+    return duration_seconds(
+        {"started_at": manifest.get("started_at"), "finished_at": manifest.get("harbor_finished_at")}
+    )
 
 
 def markdown(report: dict[str, Any]) -> str:
@@ -306,10 +364,19 @@ def markdown(report: dict[str, Any]) -> str:
         f"- Run: `{report['run_id']}`",
         f"- Commit: `{report['commit']}`",
         f"- Task set: `{report['taskset']}`",
+        f"- Model: `{report.get('model')}` (`{report.get('model_profile_id')}`)",
+        f"- Reasoning effort: `{report.get('reasoning_effort')}`",
+        f"- Execution mode: `{report.get('execution_mode')}`",
+        f"- Started/Harbor finished: `{report.get('started_at')}` / `{report.get('harbor_finished_at')}`",
+        f"- Wall seconds: `{report.get('duration_seconds')}`",
+        f"- Harness digest: `{report.get('harness_digest')}`",
+        f"- Verifier cache: `{cache_summary(report.get('verifier_cache'))}`",
         f"- Score: **{report['score']:.3f}** ({report['passed']}/{report['planned']} passed)",
         f"- Completed/scored/errors: {report['completed']}/{report['scored']}/{report['errors']}",
         f"- Structured output errors: {report['structured_errors']}",
-        f"- Tokens input/cache/output/reasoning: {report['n_input_tokens']}/{report['n_cache_tokens']}/{report['n_output_tokens']}/{report['n_reasoning_tokens']}",
+        f"- Tokens input/cache/output/reasoning/total: {report['n_input_tokens']}/{report['n_cache_tokens']}/{report['n_output_tokens']}/{report['n_reasoning_tokens']}/{report['n_total_tokens']}",
+        f"- Usage coverage complete/partial/unavailable: {report['usage_coverage']['complete']}/{report['usage_coverage']['partial_lower_bound']}/{report['usage_coverage']['unavailable']}",
+        f"- Phase seconds environment/agent setup/agent execution/verifier: {report['phase_seconds']['environment_setup']:.1f}/{report['phase_seconds']['agent_setup']:.1f}/{report['phase_seconds']['agent_execution']:.1f}/{report['phase_seconds']['verifier']:.1f}",
         f"- Complete: `{str(report['complete']).lower()}`",
         "",
         "| Task | Reward | Error | JSONL | Seconds |",
@@ -325,17 +392,42 @@ def markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def cache_summary(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return "unknown"
+    mode = raw.get("mode")
+    if mode == "disabled":
+        return "disabled"
+    if mode == "apt-cacher-ng+uv-mirror":
+        apt = raw.get("apt") if isinstance(raw.get("apt"), dict) else {}
+        uv = raw.get("uv") if isinstance(raw.get("uv"), dict) else {}
+        return (
+            "apt-cacher-ng+uv-mirror"
+            f"; apt_image_reused={str(bool(apt.get('image_reused'))).lower()}"
+            f"; apt_volume_reused={str(bool(apt.get('volume_reused'))).lower()}"
+            f"; uv_image_reused={str(bool(uv.get('image_reused'))).lower()}"
+        )
+    if mode != "apt-cacher-ng":
+        return str(mode or "unknown")
+    return (
+        "apt-cacher-ng"
+        f"; image_reused={str(bool(raw.get('image_reused'))).lower()}"
+        f"; volume_reused={str(bool(raw.get('volume_reused'))).lower()}"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--job-dir", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--tasks", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--wire-validator", type=Path)
     args = parser.parse_args()
 
     manifest = load_json(args.manifest)
     expected = [line.strip() for line in args.tasks.read_text(encoding="utf-8").splitlines() if line.strip()]
-    report = build_report(manifest, expected, args.job_dir)
+    report = build_report(manifest, expected, args.job_dir, args.wire_validator)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "score.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"

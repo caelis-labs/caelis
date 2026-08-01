@@ -1,6 +1,5 @@
 """Harbor installed-agent adapter for the local Caelis headless binary."""
 
-import json
 from pathlib import Path, PurePosixPath
 import shlex
 from typing import override
@@ -9,6 +8,8 @@ from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_templat
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.trial.paths import EnvironmentPaths
+
+from eval.terminalbench.trace_usage import collect_trace_usage
 
 
 class CaelisAgent(BaseInstalledAgent):
@@ -107,6 +108,22 @@ class CaelisAgent(BaseInstalledAgent):
             raise ValueError("Caelis ModelProfile ID is required")
         output_path = EnvironmentPaths.agent_dir / self._OUTPUT_FILENAME
         stderr_path = EnvironmentPaths.agent_dir / self._STDERR_FILENAME
+        command = self._command(instruction, output_path, stderr_path)
+        await self.exec_as_agent(environment, command=command)
+        context.metadata = {
+            "execution_mode": "dangerously-skip-permissions",
+            "model_profile_id": self.model_name,
+            "reasoning_effort": self._reasoning_effort,
+            "output_contract": "caelis.headless/v1",
+            "output_path": str(output_path),
+        }
+
+    def _command(
+        self,
+        instruction: str,
+        output_path: PurePosixPath,
+        stderr_path: PurePosixPath,
+    ) -> str:
         command = " ".join(
             [
                 f"SSL_CERT_FILE={shlex.quote(str(self._REMOTE_CA_BUNDLE))}",
@@ -122,41 +139,26 @@ class CaelisAgent(BaseInstalledAgent):
                 shlex.quote(self.model_name),
                 "-reasoning-effort",
                 shlex.quote(self._reasoning_effort),
-                "-approval-mode auto-review",
                 "-policy-profile workspace-write",
-                "-sandbox-backend auto",
+                "--dangerously-skip-permissions",
                 f"2> {shlex.quote(str(stderr_path))} </dev/null | "
                 f"tee {shlex.quote(str(output_path))}",
             ]
         )
-        await self.exec_as_agent(environment, command=command)
-        context.metadata = {
-            "output_contract": "caelis.headless/v1",
-            "output_path": str(output_path),
-        }
+        return command
 
     @override
     def populate_context_post_run(self, context: AgentContext) -> None:
         output_path = self.logs_dir / self._OUTPUT_FILENAME
-        if not output_path.is_file():
-            return
-        for line in reversed(output_path.read_text(encoding="utf-8").splitlines()):
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if record.get("type") != "result" or not isinstance(record.get("usage"), dict):
-                continue
-            usage = record["usage"]
-            context.n_input_tokens = _optional_int(usage.get("prompt_tokens"))
-            context.n_cache_tokens = _optional_int(usage.get("cached_input_tokens"))
-            context.n_output_tokens = _optional_int(usage.get("completion_tokens"))
-            metadata = dict(context.metadata or {})
-            metadata["reasoning_tokens"] = _optional_int(usage.get("reasoning_tokens"))
-            metadata["context_window_tokens"] = _optional_int(usage.get("context_window_tokens"))
-            context.metadata = metadata
-            return
-
-
-def _optional_int(value: object) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
+        usage = collect_trace_usage(output_path)
+        context.n_input_tokens = usage["n_input_tokens"]
+        context.n_cache_tokens = usage["n_cache_tokens"]
+        context.n_output_tokens = usage["n_output_tokens"]
+        metadata = dict(context.metadata or {})
+        metadata["reasoning_tokens"] = usage["n_reasoning_tokens"]
+        metadata["total_tokens"] = usage["n_total_tokens"]
+        metadata["context_window_tokens"] = usage["context_window_tokens"]
+        metadata["cost_micros"] = usage["cost_micros"]
+        metadata["usage_updates"] = usage["usage_updates"]
+        metadata["usage_coverage"] = usage["usage_coverage"]
+        context.metadata = metadata

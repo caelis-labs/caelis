@@ -3,7 +3,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from eval.terminalbench.report import build_report
+from eval.terminalbench.report import build_report, cache_summary
+from eval.terminalbench.trace_usage import collect_trace_usage
 
 
 def envelope_record() -> dict[str, object]:
@@ -45,6 +46,24 @@ def write_jsonl(trial_dir: Path, *, valid: bool = True, usage: dict[str, int] | 
 
 
 class ReportTest(unittest.TestCase):
+    def test_cache_metadata_is_preserved_and_summarized(self) -> None:
+        cache = {
+            "mode": "apt-cacher-ng+uv-mirror",
+            "apt": {"image_reused": True, "volume_reused": False},
+            "uv": {"image_reused": True},
+        }
+        report = build_report(
+            {"run_id": "test", "verifier_cache": cache},
+            [],
+            Path("missing"),
+        )
+        self.assertEqual(report["verifier_cache"], cache)
+        self.assertEqual(
+            cache_summary(report["verifier_cache"]),
+            "apt-cacher-ng+uv-mirror; apt_image_reused=true; "
+            "apt_volume_reused=false; uv_image_reused=true",
+        )
+
     def test_errors_and_missing_trials_score_as_zero(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             job_dir = Path(raw)
@@ -115,6 +134,46 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(report["n_cache_tokens"], 80)
         self.assertEqual(report["n_output_tokens"], 20)
         self.assertEqual(report["n_reasoning_tokens"], 5)
+
+    def test_usage_updates_are_summed_and_timeout_is_lower_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            output = Path(raw) / "caelis.jsonl"
+            records = []
+            for index, prompt_tokens in enumerate((100, 120), 1):
+                records.append(
+                    {
+                        "schema_version": "caelis.headless/v1",
+                        "type": "envelope",
+                        "envelope": {
+                            "event_id": f"usage-{index}",
+                            "update": {
+                                "sessionUpdate": "usage_update",
+                                "_meta": {
+                                    "caelis": {
+                                        "usage": {
+                                            "prompt_tokens": str(prompt_tokens),
+                                            "cached_input_tokens": "80",
+                                            "completion_tokens": "20",
+                                            "reasoning_tokens": "5",
+                                            "total_tokens": str(prompt_tokens + 20),
+                                        }
+                                    }
+                                },
+                            },
+                        },
+                    }
+                )
+            output.write_text(
+                "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+            )
+            usage = collect_trace_usage(output)
+        self.assertEqual(usage["n_input_tokens"], 220)
+        self.assertEqual(usage["n_cache_tokens"], 160)
+        self.assertEqual(usage["n_output_tokens"], 40)
+        self.assertEqual(usage["n_reasoning_tokens"], 10)
+        self.assertEqual(usage["n_total_tokens"], 260)
+        self.assertEqual(usage["usage_updates"], 2)
+        self.assertEqual(usage["usage_coverage"], "partial_lower_bound")
 
     def test_timeout_with_valid_jsonl_prefix_is_classified_not_corrupted(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

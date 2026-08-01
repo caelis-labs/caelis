@@ -1,0 +1,3 @@
+# Remaining failures after fix-git passed the required YOLO smoke.
+terminal-bench/openssl-selfsigned-cert
+terminal-bench/sqlite-db-truncate
