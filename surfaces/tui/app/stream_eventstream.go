@@ -40,7 +40,7 @@ func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea
 	if next, ok := model.(*Model); ok {
 		m = next
 	}
-	m.observeTaskStreamAnchor(env)
+	m.observeTaskPanelStreamOwner(env)
 	return m, tea.Batch(m.applyACPRunningActivity(env, presentation.Events), cmd)
 }
 

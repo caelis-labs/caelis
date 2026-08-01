@@ -11,6 +11,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
@@ -97,7 +98,10 @@ func (m *Model) observeTaskStreamSession(env eventstream.Envelope) {
 	m.currentSessionID = sessionID
 }
 
-func (m *Model) observeTaskStreamAnchor(env eventstream.Envelope) {
+// observeTaskPanelStreamOwner keeps live command output tied to the
+// RunCommand panel that owns it. Task control calls are observers or mutations
+// of an existing Task and never own a Task-stream subscription.
+func (m *Model) observeTaskPanelStreamOwner(env eventstream.Envelope) {
 	if m == nil || m.cfg.TaskStreams == nil || m.cfg.ProgramSender == nil ||
 		(env.Scope != "" && env.Scope != eventstream.ScopeMain) {
 		return
@@ -111,10 +115,10 @@ func (m *Model) observeTaskStreamAnchor(env eventstream.Envelope) {
 	if handle == "" {
 		return
 	}
-	if view := m.subagentOutputViews[callID]; view != nil {
-		view.taskHandle = normalizeTaskStreamHandle(handle)
+	if m.subagentOutputViews[callID] != nil || !m.taskStreamPanelExpanded(callID, handle) {
+		return
 	}
-	m.applyTaskStreamDemand(callID, handle, m.taskStreamDemandForAnchor(callID, handle))
+	m.reconcileTaskStreamOwner(callID, handle)
 }
 
 func taskStreamToolValues(update schema.Update) (map[string]any, map[string]any) {
@@ -141,30 +145,34 @@ func taskStreamToolCallID(update schema.Update) string {
 	}
 }
 
-func taskHandleForToolPanel(events []SubagentEvent, callID string) string {
+func taskStreamPanelHandle(events []SubagentEvent, callID string) string {
 	callID = strings.TrimSpace(callID)
 	for i := len(events) - 1; i >= 0; i-- {
-		if events[i].Kind == SEToolCall && strings.TrimSpace(events[i].CallID) == callID {
-			if taskHandle := strings.TrimSpace(events[i].TaskHandle); taskHandle != "" {
-				return taskHandle
-			}
+		event := events[i]
+		if event.Kind != SEToolCall || strings.TrimSpace(event.CallID) != callID ||
+			names.CanonicalOrSelf(toolSemanticName(event.Name, event.ToolKind)) != names.RunCommand {
+			continue
+		}
+		if taskHandle := normalizeTaskStreamHandle(event.TaskHandle); taskHandle != "" {
+			return taskHandle
 		}
 	}
 	return ""
 }
 
-func (m *Model) taskPanelExpanded(callID, handle string) bool {
+func (m *Model) taskStreamPanelExpanded(callID, handle string) bool {
 	if m == nil || m.doc == nil {
 		return false
 	}
+	handle = normalizeTaskStreamHandle(handle)
 	for _, block := range m.doc.Blocks() {
 		switch typed := block.(type) {
 		case *MainACPTurnBlock:
-			if taskHandleForToolPanel(typed.Events, callID) == handle {
+			if taskStreamPanelHandle(typed.Events, callID) == handle {
 				return typed.toolPanelExpanded(callID)
 			}
 		case *ParticipantTurnBlock:
-			if taskHandleForToolPanel(typed.Events, callID) == handle {
+			if taskStreamPanelHandle(typed.Events, callID) == handle {
 				return typed.toolPanelExpanded(callID)
 			}
 		}
@@ -172,7 +180,7 @@ func (m *Model) taskPanelExpanded(callID, handle string) bool {
 	return false
 }
 
-func (m *Model) taskStreamDemandForAnchor(callID, handle string) taskStreamDemand {
+func (m *Model) taskStreamDemandForOwner(callID, handle string) taskStreamDemand {
 	if m == nil {
 		return taskStreamDemandNone
 	}
@@ -187,83 +195,51 @@ func (m *Model) taskStreamDemandForAnchor(callID, handle string) taskStreamDeman
 		}
 		return taskStreamDemandBackgroundSubagent
 	}
-	if m.taskPanelExpanded(callID, handle) {
+	if m.taskStreamPanelExpanded(callID, handle) {
 		return taskStreamDemandExpandedPanel
 	}
 	return taskStreamDemandNone
 }
 
-func (m *Model) taskStreamDemandForHandle(handle string) taskStreamDemand {
+// reconcileSubagentOutputTaskStreams makes each Spawn output view the sole
+// presentation owner of its child subscription. Visibility of the overlay is
+// intentionally irrelevant: closing the overlay does not stop observation.
+func (m *Model) reconcileSubagentOutputTaskStreams() {
 	if m == nil {
-		return taskStreamDemandNone
+		return
 	}
-	handle = normalizeTaskStreamHandle(handle)
-	if handle == "" {
-		return taskStreamDemandNone
-	}
-	demand := taskStreamDemandNone
-	for _, view := range m.subagentOutputViews {
-		if view != nil && normalizeTaskStreamHandle(view.taskHandle) == handle {
-			viewDemand := m.taskStreamDemandForAnchor(view.callID, handle)
-			if viewDemand == taskStreamDemandBackgroundSubagent {
-				return viewDemand
-			}
-			if viewDemand > demand {
-				demand = viewDemand
-			}
-		}
-	}
-	if m.doc == nil {
-		return demand
-	}
-	for _, block := range m.doc.Blocks() {
-		var events []SubagentEvent
-		var expanded func(string) bool
-		switch typed := block.(type) {
-		case *MainACPTurnBlock:
-			events, expanded = typed.Events, typed.toolPanelExpanded
-		case *ParticipantTurnBlock:
-			events, expanded = typed.Events, typed.toolPanelExpanded
-		default:
+	for callID, view := range m.subagentOutputViews {
+		if view == nil {
 			continue
 		}
-		for _, event := range events {
-			if event.Kind != SEToolCall || normalizeTaskStreamHandle(event.TaskHandle) != handle {
-				continue
-			}
-			if m.subagentOutputViews[strings.TrimSpace(event.CallID)] != nil {
-				continue
-			}
-			if expanded(event.CallID) {
-				return taskStreamDemandExpandedPanel
-			}
-		}
+		m.reconcileTaskStreamOwner(callID, view.taskHandle)
 	}
-	return demand
 }
 
-func (m *Model) applyTaskStreamDemand(callID, rawHandle string, demand taskStreamDemand) {
+func (m *Model) reconcileTaskStreamOwner(callID, rawHandle string) {
 	if m == nil || m.cfg.TaskStreams == nil || m.cfg.ProgramSender == nil {
 		return
 	}
+	demand := m.taskStreamDemandForOwner(callID, rawHandle)
 	wanted := demand.wanted()
 	callID = strings.TrimSpace(callID)
 	handle := normalizeTaskStreamHandle(rawHandle)
-	if callID == "" || handle == "" {
+	if callID == "" {
 		return
 	}
 	if taskID := strings.TrimSpace(m.taskStreamIDsByCallID[callID]); taskID != "" {
 		m.wantResolvedTaskStream(taskID, wanted)
 		return
 	}
-	if taskID := strings.TrimSpace(m.taskStreamIDsByHandle[handle]); taskID != "" {
-		m.wantResolvedTaskStream(taskID, wanted)
-		return
-	}
 	if !wanted {
-		m.taskStreamNextToken++
+		if m.taskStreamResolveTokens[callID] == 0 && m.taskStreamResolveRetries[callID] == 0 {
+			return
+		}
 		m.taskStreamResolveTokens[callID] = 0
 		delete(m.taskStreamResolveRetries, callID)
+		return
+	}
+	if handle == "" {
 		return
 	}
 	if wanted && m.taskStreamResolveTokens[callID] != 0 {
@@ -317,9 +293,9 @@ func (m *Model) handleTaskStreamResolved(msg taskStreamResolvedMsg) (tea.Model, 
 	if m == nil || msg.sessionID != m.currentSessionID || m.taskStreamResolveTokens[msg.callID] != msg.token {
 		return m, nil
 	}
-	demand := m.taskStreamDemandForAnchor(msg.callID, msg.handle)
+	demand := m.taskStreamDemandForOwner(msg.callID, msg.handle)
 	if !demand.wanted() {
-		m.applyTaskStreamDemand(msg.callID, msg.handle, demand)
+		m.reconcileTaskStreamOwner(msg.callID, msg.handle)
 		return m, nil
 	}
 	if msg.err != nil || strings.TrimSpace(msg.taskID) == "" {
@@ -333,7 +309,6 @@ func (m *Model) handleTaskStreamResolved(msg taskStreamResolvedMsg) (tea.Model, 
 		})
 	}
 	delete(m.taskStreamResolveRetries, msg.callID)
-	m.taskStreamIDsByHandle[msg.handle] = msg.taskID
 	m.taskStreamHandlesByID[msg.taskID] = msg.handle
 	m.taskStreamIDsByCallID[msg.callID] = msg.taskID
 	m.taskStreamCallIDsByID[msg.taskID] = msg.callID
@@ -357,8 +332,11 @@ func (m *Model) wantResolvedTaskStream(taskID string, wanted bool) {
 		return
 	}
 	if !wanted {
-		m.taskStreamWanted[taskID] = false
 		delete(m.taskStreamRetries, taskID)
+		if !m.taskStreamWanted[taskID] && m.taskStreamSubscriptions[taskID] == nil {
+			return
+		}
+		m.taskStreamWanted[taskID] = false
 		m.taskStreamNextToken++
 		m.taskStreamTokens[taskID] = m.taskStreamNextToken
 		if sub := m.taskStreamSubscriptions[taskID]; sub != nil {
@@ -497,9 +475,7 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 	demand := m.taskStreamDemandForTaskID(msg.taskID)
 	if !demand.wanted() {
 		m.wantResolvedTaskStream(msg.taskID, false)
-		if demand == taskStreamDemandFinishedSubagent {
-			return m, nil
-		}
+		return m, nil
 	}
 	// Delivery failures are local to this panel. Recoverable failures resume
 	// from the last accepted cursor; an evicted prefix is returned as a gap.
@@ -519,7 +495,7 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 
 func (m *Model) handleTaskStreamResolveRetry(msg taskStreamResolveRetryMsg) (tea.Model, tea.Cmd) {
 	if m == nil || msg.sessionID != m.currentSessionID || m.taskStreamResolveTokens[msg.callID] != msg.token ||
-		!m.taskStreamDemandForAnchor(msg.callID, msg.handle).wanted() {
+		!m.taskStreamDemandForOwner(msg.callID, msg.handle).wanted() {
 		return m, nil
 	}
 	m.startTaskStreamResolver(msg.sessionID, msg.callID, msg.handle, msg.token)
@@ -542,11 +518,9 @@ func (m *Model) taskStreamDemandForTaskID(taskID string) taskStreamDemand {
 	taskID = strings.TrimSpace(taskID)
 	handle := m.taskStreamHandlesByID[taskID]
 	if callID := strings.TrimSpace(m.taskStreamCallIDsByID[taskID]); callID != "" {
-		if demand := m.taskStreamDemandForAnchor(callID, handle); demand != taskStreamDemandNone {
-			return demand
-		}
+		return m.taskStreamDemandForOwner(callID, handle)
 	}
-	return m.taskStreamDemandForHandle(handle)
+	return taskStreamDemandNone
 }
 
 func taskStreamResolveRetryCmd(msg taskStreamResolvedMsg, attempt int) tea.Cmd {
@@ -615,7 +589,6 @@ func (m *Model) closeTaskStreamSubscriptions() {
 	m.taskStreamWanted = map[string]bool{}
 	m.taskStreamTokens = map[string]uint64{}
 	m.taskStreamCursors = map[string]string{}
-	m.taskStreamIDsByHandle = map[string]string{}
 	m.taskStreamHandlesByID = map[string]string{}
 	m.taskStreamIDsByCallID = map[string]string{}
 	m.taskStreamCallIDsByID = map[string]string{}

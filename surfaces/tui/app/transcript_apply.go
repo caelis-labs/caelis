@@ -21,6 +21,10 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	}
 	observedSpawnCmd := m.applyObservedSpawnResults(msg.OwnerRepairs.Spawns)
 	m.applyObservedCommandResults(msg.OwnerRepairs.Commands)
+	// Spawn views, including terminal owner repairs projected from Task
+	// observations, drive child subscription lifetime. The Task invocation does
+	// not own or redirect that stream.
+	m.reconcileSubagentOutputTaskStreams()
 	var subagentOutputCmd tea.Cmd
 	if subagentOutputChanged {
 		subagentOutputCmd = m.requestSubagentOutputRender()

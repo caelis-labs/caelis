@@ -197,7 +197,6 @@ func TestApplySessionReconnectStateAtomicallyResetsTaskStreamSession(t *testing.
 			model.taskStreamTokens["task-old"] = 7
 			model.taskStreamSubscriptions["task-old"] = subscription
 			model.taskStreamCursors["task-old"] = "cursor-old"
-			model.taskStreamIDsByHandle["handle-old"] = "task-old"
 			model.taskStreamHandlesByID["task-old"] = "handle-old"
 			model.taskStreamIDsByCallID["call-old"] = "task-old"
 			model.taskStreamCallIDsByID["task-old"] = "call-old"
@@ -218,16 +217,14 @@ func TestApplySessionReconnectStateAtomicallyResetsTaskStreamSession(t *testing.
 				len(model.taskStreamTokens) != 0 ||
 				len(model.taskStreamSubscriptions) != 0 ||
 				len(model.taskStreamCursors) != 0 ||
-				len(model.taskStreamIDsByHandle) != 0 ||
 				len(model.taskStreamHandlesByID) != 0 ||
 				len(model.taskStreamIDsByCallID) != 0 ||
 				len(model.taskStreamCallIDsByID) != 0 {
-				t.Fatalf("Task-stream state survived reconnect: wanted=%v tokens=%v subscriptions=%v cursors=%v ids=%v handles=%v calls=%v taskCalls=%v",
+				t.Fatalf("Task-stream state survived reconnect: wanted=%v tokens=%v subscriptions=%v cursors=%v handles=%v calls=%v taskCalls=%v",
 					model.taskStreamWanted,
 					model.taskStreamTokens,
 					model.taskStreamSubscriptions,
 					model.taskStreamCursors,
-					model.taskStreamIDsByHandle,
 					model.taskStreamHandlesByID,
 					model.taskStreamIDsByCallID,
 					model.taskStreamCallIDsByID,

@@ -1495,21 +1495,21 @@ func (m *Model) tryToggleFoldToken(blockID string, token string) bool {
 	}
 	switch blk := m.doc.Find(strings.TrimSpace(blockID)).(type) {
 	case *ParticipantTurnBlock:
-		handle := taskHandleForToolPanel(blk.Events, callID)
+		handle := taskStreamPanelHandle(blk.Events, callID)
 		if !blk.toggleToolPanelClick(callID) {
 			return false
 		}
 		if handle != "" {
-			m.applyTaskStreamDemand(callID, handle, m.taskStreamDemandForHandle(handle))
+			m.reconcileTaskStreamOwner(callID, handle)
 		}
 		return true
 	case *MainACPTurnBlock:
-		handle := taskHandleForToolPanel(blk.Events, callID)
+		handle := taskStreamPanelHandle(blk.Events, callID)
 		if !blk.toggleToolPanelClick(callID) {
 			return false
 		}
 		if handle != "" {
-			m.applyTaskStreamDemand(callID, handle, m.taskStreamDemandForHandle(handle))
+			m.reconcileTaskStreamOwner(callID, handle)
 		}
 		return true
 	default:

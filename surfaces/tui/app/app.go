@@ -126,7 +126,6 @@ func NewModel(cfg Config) *Model {
 		taskStreamTokens:         map[string]uint64{},
 		taskStreamSubscriptions:  map[string]taskstream.Subscription{},
 		taskStreamCursors:        map[string]string{},
-		taskStreamIDsByHandle:    map[string]string{},
 		taskStreamHandlesByID:    map[string]string{},
 		taskStreamIDsByCallID:    map[string]string{},
 		taskStreamCallIDsByID:    map[string]string{},

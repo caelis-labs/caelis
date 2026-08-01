@@ -352,13 +352,14 @@ type Model struct {
 	compactNoticePair  compactNoticePairState
 
 	// Task output is transient and independently subscribed from the Session
-	// feed. These maps are mutated only by the Bubble Tea update loop.
+	// feed. Spawn output views and RunCommand panels own subscriptions by their
+	// producer call ID; Task control calls never own or redirect them. These maps
+	// are mutated only by the Bubble Tea update loop.
 	currentSessionID         string
 	taskStreamWanted         map[string]bool
 	taskStreamTokens         map[string]uint64
 	taskStreamSubscriptions  map[string]taskstream.Subscription
 	taskStreamCursors        map[string]string
-	taskStreamIDsByHandle    map[string]string
 	taskStreamHandlesByID    map[string]string
 	taskStreamIDsByCallID    map[string]string
 	taskStreamCallIDsByID    map[string]string

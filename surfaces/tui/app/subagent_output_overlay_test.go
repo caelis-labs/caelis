@@ -344,7 +344,7 @@ func TestSubagentOutputOverlayLatePlanDoesNotReopenTerminalStatus(t *testing.T) 
 	if view.block.Status != eventstream.LifecycleStateCompleted {
 		t.Fatalf("late PlanUpdate changed terminal status to %q", view.block.Status)
 	}
-	if demand := model.taskStreamDemandForAnchor("spawn-1", "zuri"); demand != taskStreamDemandFinishedSubagent {
+	if demand := model.taskStreamDemandForOwner("spawn-1", "zuri"); demand != taskStreamDemandFinishedSubagent {
 		t.Fatalf("late PlanUpdate restored Task stream demand: %v", demand)
 	}
 }
