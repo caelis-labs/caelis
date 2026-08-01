@@ -63,8 +63,8 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 	if modelReq.Output == nil || modelReq.Output.Mode != model.OutputModeSchema {
 		t.Fatalf("Output = %#v, want schema output", modelReq.Output)
 	}
-	if modelReq.Output.MaxOutputTokens != guardianMaxOutputTokens {
-		t.Fatalf("Output.MaxOutputTokens = %d, want %d", modelReq.Output.MaxOutputTokens, guardianMaxOutputTokens)
+	if modelReq.Output.MaxOutputTokens != 0 {
+		t.Fatalf("Output.MaxOutputTokens = %d, want unset", modelReq.Output.MaxOutputTokens)
 	}
 	if got := len(modelReq.Instructions); got != 1 {
 		t.Fatalf("len(Instructions) = %d, want guardian policy", got)
@@ -162,10 +162,10 @@ func TestApprovalReviewerFallsBackToTextForModelWithoutStructuredOutput(t *testi
 	}
 	output := requests[0].Output
 	if output == nil || output.Mode != model.OutputModeText || output.JSONSchema != nil {
-		t.Fatalf("Output = %#v, want bounded text fallback", output)
+		t.Fatalf("Output = %#v, want text fallback", output)
 	}
-	if output.MaxOutputTokens != guardianMaxOutputTokens {
-		t.Fatalf("Output.MaxOutputTokens = %d, want %d", output.MaxOutputTokens, guardianMaxOutputTokens)
+	if output.MaxOutputTokens != 0 {
+		t.Fatalf("Output.MaxOutputTokens = %d, want unset", output.MaxOutputTokens)
 	}
 }
 
@@ -201,14 +201,40 @@ func TestApprovalReviewerUsesSystemManagedGuardianRunner(t *testing.T) {
 	if !strings.HasPrefix(runner.req.ParentSession.SessionID, activeSession.SessionID+"-approval-review-") {
 		t.Fatalf("system agent session = %q, want guardian review session for %q", runner.req.ParentSession.SessionID, activeSession.SessionID)
 	}
-	if runner.req.Output == nil || runner.req.Output.MaxOutputTokens != guardianMaxOutputTokens {
-		t.Fatalf("system agent output = %#v, want guardian schema output", runner.req.Output)
+	if runner.req.Output == nil || runner.req.Output.MaxOutputTokens != 0 {
+		t.Fatalf("system agent output = %#v, want Guardian schema without an output-token limit", runner.req.Output)
 	}
 	if len(runner.req.Tools) != 0 {
 		t.Fatalf("system agent tools = %d, want no guardian tools", len(runner.req.Tools))
 	}
 	if len(runner.req.Events) != 1 || !strings.Contains(session.EventText(runner.req.Events[0]), "Please inspect the workspace.") {
 		t.Fatalf("system agent events = %#v, want guardian prompt event with transcript", runner.req.Events)
+	}
+}
+
+func TestApprovalReviewerUsesCallerContextDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	wantDeadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("test context has no deadline")
+	}
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	testModel := &approvalReviewerFakeModel{}
+	runner := &approvalReviewerSystemAgentRunner{}
+	reviewer := newModelApprovalReviewer(service).(*guardianApprovalReviewer)
+	reviewer.systemAgents = runner
+
+	if _, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(
+		activeSession,
+		testModel,
+		"inspect workspace",
+		map[string]any{"cmd": "rg TODO"},
+	)); err != nil {
+		t.Fatalf("ReviewApproval() error = %v", err)
+	}
+	if !runner.hasDeadline || !runner.deadline.Equal(wantDeadline) {
+		t.Fatalf("Guardian runner deadline = %v, %t; want caller deadline %v", runner.deadline, runner.hasDeadline, wantDeadline)
 	}
 }
 
@@ -469,6 +495,7 @@ func TestGuardianPolicyPromptUsesGeneralRecoveryBoundary(t *testing.T) {
 		"bounded read-only diagnostics do not by themselves break a material match",
 		"Repeated Host requests after a denial remain denied unless",
 		"outer tool call completed after an earlier inner failure",
+		"Base the decision on evidence material to the requested action",
 		"The selected option is authoritative",
 		"option_id, outcome, and rationale agree",
 		"always include option_id, risk_level, user_authorization, outcome, and rationale",
@@ -962,8 +989,8 @@ func TestApprovalReviewerProviderE2EReportsCachedPromptHit(t *testing.T) {
 		if _, exists := payload["tools"]; exists {
 			t.Fatalf("provider payload unexpectedly contains tools: %#v", payload["tools"])
 		}
-		if got, ok := payload["max_tokens"].(float64); !ok || int(got) != guardianMaxOutputTokens {
-			t.Fatalf("max_tokens = %#v, want %d", payload["max_tokens"], guardianMaxOutputTokens)
+		if got, exists := payload["max_tokens"]; exists {
+			t.Fatalf("max_tokens = %#v, want omitted for Guardian", got)
 		}
 
 		serverMu.Lock()
@@ -1189,15 +1216,18 @@ type approvalReviewerFakeModel struct {
 }
 
 type approvalReviewerSystemAgentRunner struct {
-	calls    int
-	req      systemManagedAgentRunRequest
-	response string
-	err      error
+	calls       int
+	req         systemManagedAgentRunRequest
+	response    string
+	err         error
+	deadline    time.Time
+	hasDeadline bool
 }
 
-func (r *approvalReviewerSystemAgentRunner) Run(_ context.Context, req systemManagedAgentRunRequest) (systemManagedAgentRunResult, error) {
+func (r *approvalReviewerSystemAgentRunner) Run(ctx context.Context, req systemManagedAgentRunRequest) (systemManagedAgentRunResult, error) {
 	r.calls++
 	r.req = req
+	r.deadline, r.hasDeadline = ctx.Deadline()
 	if r.err != nil {
 		return systemManagedAgentRunResult{}, r.err
 	}

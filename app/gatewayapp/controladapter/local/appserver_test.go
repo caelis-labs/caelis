@@ -33,6 +33,7 @@ func TestAppServerFacadeCreatesIndependentWorkspaceSessions(t *testing.T) {
 	host, err := gatewayapp.NewLocalStack(gatewayapp.Config{
 		AppName: "caelis-test", UserID: "local-user", StoreDir: filepath.Join(root, "store"),
 		WorkspaceKey: "workspace-a", WorkspaceCWD: workspaceA,
+		Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
 	})
 	if err != nil {
 		t.Fatal(err)

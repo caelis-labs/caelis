@@ -253,9 +253,9 @@ func (s *Stack) buildGatewayRuntimeContext(
 	}
 	sandboxRuntime, err := sandbox.New(sandbox.Config{
 		CWD:                 s.Workspace.CWD,
-		RequestedBackend:    sandbox.Backend(sandboxCfg.RequestedType),
+		RequestedBackend:    route.Backend,
 		BackendCandidates:   route.BackendCandidates,
-		FallbackInstallHint: route.FallbackInstallHint,
+		FallbackInstallHint: route.InstallHint,
 		HelperPath:          sandboxCfg.HelperPath,
 		StateDir:            s.storeDir,
 		WritableRoots:       append([]string(nil), sandboxCfg.WritableRoots...),
@@ -283,18 +283,6 @@ func (s *Stack) buildGatewayRuntimeContext(
 
 	effectivePolicyProfile := policyProfile(runtimeCfg.PolicyProfile)
 	effectiveBaseMetadata := cloneMap(runtimeCfg.BaseMetadata)
-	sandboxStatus := sandbox.SelectionStatus(sandboxRuntime)
-	if sandboxStatus.FallbackToHost {
-		if effectiveBaseMetadata == nil {
-			effectiveBaseMetadata = map[string]any{}
-		}
-		if hint := strings.TrimSpace(sandboxStatus.FallbackInstallHint); hint != "" {
-			effectiveBaseMetadata["sandbox_install_hint"] = hint
-		}
-		if reason := strings.TrimSpace(sandboxStatus.FallbackReason); reason != "" {
-			effectiveBaseMetadata["sandbox_fallback_reason"] = reason
-		}
-	}
 	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{
 		Runtime:      sandboxRuntime,
 		SkillLoader:  skillfs.Loader{},

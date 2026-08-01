@@ -54,6 +54,7 @@ func guardianPolicyPrompt() string {
 		"- Deny an unnecessary or merely habitual Host request when the action clearly or probably fits the sandbox capabilities; tell the agent to run this action with use_default.",
 		"- Repeated Host requests after a denial remain denied unless the request adds new concrete boundary evidence, identifies a predictable boundary, or materially narrows the action.",
 		"- Do not deny solely because the outer tool call completed after an earlier inner failure, because the failure is quoted by the assistant rather than repeated in tool output, or because harmless shell wrappers differ.",
+		"- Base the decision on evidence material to the requested action, Host necessity, risk, user authorization, and option consistency; ignore irrelevant transcript details and do not restate this policy in the final response.",
 		"- After choosing the option, write a rationale that directly supports it, then check that option_id, outcome, and rationale agree.",
 		"- Never allow while saying Host is unnecessary or sandbox execution is sufficient.",
 		"- Never deny while saying Host is necessary, appropriately scoped, and authorized.",

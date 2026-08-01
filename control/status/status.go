@@ -42,6 +42,9 @@ type StatusModel struct {
 }
 
 // StatusSandbox describes the resolved sandbox route and setup state.
+// FallbackReason is a legacy compatibility field: successful product startup
+// is fail-closed and never uses an implicit Host fallback, so surfaces present
+// a non-empty value as backend repair context.
 type StatusSandbox struct {
 	Type             string             `json:"type,omitempty"`
 	RequestedBackend string             `json:"requested_backend,omitempty"`

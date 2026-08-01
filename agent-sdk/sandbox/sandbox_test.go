@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
 func TestCloneRequestIsolatesMutableFields(t *testing.T) {
@@ -793,7 +795,7 @@ func TestNewAutoBackendReportsSkippedSandboxCandidate(t *testing.T) {
 	}
 }
 
-func TestNewAutoBackendFallsBackToHostWithInstallHint(t *testing.T) {
+func TestNewAutoBackendFailsClosedWithRepairHint(t *testing.T) {
 	candidates := []Backend{Backend("test-failed-backend")}
 
 	backendFactoriesMu.Lock()
@@ -819,25 +821,23 @@ func TestNewAutoBackendFallsBackToHostWithInstallHint(t *testing.T) {
 		BackendCandidates:   candidates,
 		FallbackInstallHint: "install test sandbox backend",
 	})
-	if err != nil {
-		t.Fatalf("New(auto) error = %v", err)
+	if rt != nil {
+		t.Fatalf("New(auto) runtime = %#v, want nil when required sandbox is unavailable", rt)
 	}
-	t.Cleanup(func() {
-		_ = rt.Close()
-	})
-
-	status := rt.Status()
-	if !status.FallbackToHost {
-		t.Fatal("Status().FallbackToHost = false, want host fallback for unavailable auto backend")
+	if errorcode.CodeOf(err) != errorcode.Unavailable {
+		t.Fatalf("New(auto) error = %v (code %q), want unavailable", err, errorcode.CodeOf(err))
 	}
-	if status.ResolvedBackend != BackendHost {
-		t.Fatalf("Status().ResolvedBackend = %q, want host", status.ResolvedBackend)
+	var unavailable *BackendUnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("New(auto) error = %T, want *BackendUnavailableError", err)
 	}
-	if strings.TrimSpace(status.FallbackInstallHint) == "" {
-		t.Fatal("Status().FallbackInstallHint is empty, want install guidance")
+	if unavailable.Backend != candidates[0] {
+		t.Fatalf("unavailable backend = %q, want %q", unavailable.Backend, candidates[0])
 	}
-	if status.FallbackInstallHint != "install test sandbox backend" {
-		t.Fatalf("FallbackInstallHint = %q, want configured hint", status.FallbackInstallHint)
+	for _, want := range []string{"sandbox backend unavailable", "install test sandbox backend", "refused to run"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("New(auto) error = %q, want to contain %q", err, want)
+		}
 	}
 }
 

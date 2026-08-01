@@ -42,7 +42,6 @@ func backendRegistrationError() error {
 }
 
 func New(cfg Config) (Runtime, error) {
-	autoRequested := CanonicalBackend(cfg.RequestedBackend) == ""
 	cfg = NormalizeConfig(cfg)
 
 	hostRuntime, err := buildRegisteredRuntime(BackendHost, cfg)
@@ -71,11 +70,11 @@ func New(cfg Config) (Runtime, error) {
 		return nil, err
 	}
 	if len(candidates) == 0 {
-		rt.status.FallbackToHost = true
-		rt.status.ResolvedBackend = BackendHost
-		rt.status.FallbackReason = "no sandbox backend candidates"
-		rt.status.FallbackInstallHint = fallbackInstallHint(cfg)
-		return rt, nil
+		_ = hostRuntime.Close()
+		return nil, &BackendUnavailableError{
+			RepairHint: fallbackInstallHint(cfg),
+			Err:        errors.New("no sandbox backend selected"),
+		}
 	}
 	rt.status.RequestedBackend = requested
 	rt.status.ResolvedBackend = candidates[0]
@@ -98,15 +97,16 @@ func New(cfg Config) (Runtime, error) {
 		return rt, nil
 	}
 
-	if !autoRequested {
-		_ = hostRuntime.Close()
-		return nil, fmt.Errorf("ports/sandbox: requested backend %q unavailable: %s", requested, strings.Join(failures, "; "))
+	_ = hostRuntime.Close()
+	failedBackend := requested
+	if failedBackend == "" && len(candidates) == 1 {
+		failedBackend = candidates[0]
 	}
-	rt.status.FallbackToHost = true
-	rt.status.ResolvedBackend = BackendHost
-	rt.status.FallbackReason = strings.Join(failures, "; ")
-	rt.status.FallbackInstallHint = fallbackInstallHint(cfg)
-	return rt, nil
+	return nil, &BackendUnavailableError{
+		Backend:    failedBackend,
+		RepairHint: fallbackInstallHint(cfg),
+		Err:        errors.New(strings.Join(failures, "; ")),
+	}
 }
 
 func NormalizeConfig(cfg Config) Config {
@@ -193,7 +193,7 @@ func fallbackInstallHint(cfg Config) string {
 	if hint := strings.TrimSpace(cfg.FallbackInstallHint); hint != "" {
 		return hint
 	}
-	return "Install or enable a supported sandbox backend for this environment; until then commands may run on the host."
+	return "Install or enable the required sandbox backend for this environment, then retry."
 }
 
 func normalizeStringSlice(values []string) []string {

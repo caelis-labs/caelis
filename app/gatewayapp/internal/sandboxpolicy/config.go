@@ -12,8 +12,10 @@ func NormalizeBackend(backend string) (string, error) {
 	switch normalized := sandbox.CanonicalBackend(sandbox.Backend(backend)); normalized {
 	case "":
 		return "auto", nil
-	case sandbox.BackendHost, sandbox.BackendSeatbelt, sandbox.BackendBwrap, sandbox.BackendLandlock, sandbox.BackendWindows:
+	case sandbox.BackendHost, sandbox.BackendSeatbelt, sandbox.BackendBwrap, sandbox.BackendWindows:
 		return string(normalized), nil
+	case sandbox.BackendLandlock:
+		return "", fmt.Errorf("gatewayapp: sandbox backend %q is retired from the product; use auto (bwrap on Linux) or explicit host execution", backend)
 	default:
 		return "", fmt.Errorf("gatewayapp: unknown sandbox backend %q", backend)
 	}

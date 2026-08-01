@@ -64,8 +64,9 @@ type turnHandle struct {
 	approvals               *approvalCoordinator
 	finishHooks             []func()
 
-	approvalReviewSeq uint64
-	acpCursorSeq      uint64
+	approvalReviewSeq              uint64
+	guardianExecutionFailureStreak int
+	acpCursorSeq                   uint64
 }
 
 func newTurnHandle(cfg turnHandleConfig) *turnHandle {
@@ -437,6 +438,17 @@ func (h *turnHandle) nextApprovalReviewID() string {
 	defer h.mu.Unlock()
 	h.approvalReviewSeq++
 	return fmt.Sprintf("%s-approval-review-%d", h.handleID, h.approvalReviewSeq)
+}
+
+func (h *turnHandle) recordGuardianExecutionResult(err error) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err == nil {
+		h.guardianExecutionFailureStreak = 0
+		return 0
+	}
+	h.guardianExecutionFailureStreak++
+	return h.guardianExecutionFailureStreak
 }
 
 func (h *turnHandle) publishError(err error) {

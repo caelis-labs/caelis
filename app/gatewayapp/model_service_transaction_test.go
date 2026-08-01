@@ -347,6 +347,7 @@ func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 		StoreDir:     storeDir,
 		WorkspaceKey: workspaceKey,
 		WorkspaceCWD: workspaceCWD,
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 	})
 	if reloadErr != nil {
 		t.Fatal(reloadErr)

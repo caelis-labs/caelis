@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -14,8 +13,6 @@ import (
 )
 
 const (
-	defaultApprovalReviewTimeout = 90 * time.Second
-
 	guardianAssessmentMaxAttempts      = 3
 	guardianMaxMessageTranscriptTokens = 10_000
 	guardianMaxToolTranscriptTokens    = 10_000
@@ -23,14 +20,12 @@ const (
 	guardianMaxToolEntryTokens         = 1_000
 	guardianMaxActionStringTokens      = 16_000
 	guardianRecentEntryLimit           = 40
-	guardianMaxOutputTokens            = 128
 )
 
 type guardianApprovalReviewer struct {
 	sessions       session.Service
 	systemAgents   systemManagedAgentRunner
 	systemSessions *systemManagedAgentSessionCache
-	timeout        time.Duration
 	accountingMu   sync.Mutex
 	accounting     map[string]approvalReviewAccounting
 }
@@ -82,7 +77,6 @@ func newGuardianApprovalReviewer(service session.Service) kernel.ApprovalReviewe
 		sessions:       service,
 		systemAgents:   newSystemManagedAgentRuntime(nil),
 		systemSessions: newSystemManagedAgentSessionCache(service),
-		timeout:        defaultApprovalReviewTimeout,
 		accounting:     map[string]approvalReviewAccounting{},
 	}
 }
@@ -94,13 +88,6 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req kerne
 	if r == nil || r.sessions == nil {
 		return kernel.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires session history")
 	}
-	timeout := r.timeout
-	if timeout <= 0 {
-		timeout = defaultApprovalReviewTimeout
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	_, _, assistantEvent, parsed, trace, err := r.runGuardianReview(ctx, req)
 	if err != nil {
 		return kernel.ApprovalReviewResult{}, err

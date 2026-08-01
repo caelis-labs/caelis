@@ -24,6 +24,8 @@ type approvalReviewAccountingProvider interface {
 	ApprovalReviewAccounting(context.Context, ApprovalReviewRequest, ApprovalReviewResult) (*UsageSnapshot, *session.EventInvocation, error)
 }
 
+const guardianExecutionFailureThreshold = 3
+
 func (g *Gateway) resolveApprovalRequest(
 	turnCtx context.Context,
 	approvalCtx context.Context,
@@ -165,6 +167,16 @@ func (g *Gateway) resolveActiveAutoApproval(
 	} else {
 		result, err = approver.Decide(approvalCtx, reviewReq)
 	}
+	guardianFailureStreak := 0
+	switch {
+	case err == nil:
+		handle.recordGuardianExecutionResult(nil)
+	case turnCtx.Err() != nil || approvalCtx.Err() != nil:
+		// Parent lifecycle termination is not evidence that Guardian is unavailable,
+		// regardless of whether the provider reports cancellation or a deadline.
+	default:
+		guardianFailureStreak = handle.recordGuardianExecutionResult(err)
+	}
 	var reviewErrStatus ApprovalReviewStatus
 	if err != nil {
 		status, rationale, _ := approval.ReviewErrorOutcome(err)
@@ -204,9 +216,12 @@ func (g *Gateway) resolveActiveAutoApproval(
 	// the main-turn context meter with the Guardian model's snapshot.
 	handle.publishApprovalReviewPayloadWithInvocation(req, terminal, invocation)
 	_ = g.persistApprovalReviewSessionAccounting(context.WithoutCancel(turnCtx), req, usage, terminal.DecisionSource, invocation)
+	if err != nil && guardianFailureStreak >= guardianExecutionFailureThreshold {
+		return agent.ApprovalResponse{}, guardianUnavailableError(guardianFailureStreak, err)
+	}
 
-	// Do not abort the turn after repeated denials: a per-turn circuit breaker
-	// overwrote the reviewer's rationale with a generic "too many approval requests" error.
+	// Valid denials remain ordinary reviewer decisions. Only consecutive
+	// Guardian execution failures trip the per-Turn availability breaker.
 	response.ReviewText = strings.TrimSpace(result.DisplayText)
 	return response, nil
 }

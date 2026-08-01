@@ -38,7 +38,7 @@ func TestRunServeStartsProductControlServer(t *testing.T) {
 		return nil
 	}
 	err := run(context.Background(), []string{
-		"serve", "--store-dir", t.TempDir(), "--listen", "127.0.0.1:7777",
+		"serve", "--store-dir", t.TempDir(), "--listen", "127.0.0.1:7777", "--sandbox-backend", "host",
 	}, nil, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestRunServeDefaultsToPersistentTokenFile(t *testing.T) {
 		return nil
 	}
 	storeDir := t.TempDir()
-	err := run(context.Background(), []string{"serve", "--store-dir", storeDir}, nil, io.Discard, io.Discard)
+	err := run(context.Background(), []string{"serve", "--store-dir", storeDir, "--sandbox-backend", "host"}, nil, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

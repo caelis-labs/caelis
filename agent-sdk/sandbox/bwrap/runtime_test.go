@@ -107,11 +107,13 @@ func TestBwrapProbeFailureDetailDetectsAppArmorUserNSRestriction(t *testing.T) {
 		"AppArmor bwrap profile not detected",
 		"/etc/apparmor.d/bwrap",
 		"sudo apparmor_parser -r /etc/apparmor.d/bwrap",
-		"sandbox.requested_type=landlock",
 	} {
 		if !strings.Contains(detail, want) {
 			t.Fatalf("expected detail to contain %q, got %q", want, detail)
 		}
+	}
+	if strings.Contains(detail, "landlock") {
+		t.Fatalf("detail recommends retired product landlock backend: %q", detail)
 	}
 }
 

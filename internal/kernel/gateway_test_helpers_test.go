@@ -220,6 +220,34 @@ type staticApprovalReviewer struct {
 	sessionAccounting *UsageSnapshot
 }
 
+type scriptedApprovalReviewStep struct {
+	result ApprovalReviewResult
+	err    error
+}
+
+type scriptedApprovalReviewer struct {
+	mu    sync.Mutex
+	steps []scriptedApprovalReviewStep
+	calls int
+}
+
+func (r *scriptedApprovalReviewer) ReviewApproval(context.Context, ApprovalReviewRequest) (ApprovalReviewResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.calls >= len(r.steps) {
+		return ApprovalReviewResult{}, errors.New("unexpected approval review call")
+	}
+	step := r.steps[r.calls]
+	r.calls++
+	return step.result, step.err
+}
+
+func (r *scriptedApprovalReviewer) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
 type recordingApprovalReviewer struct {
 	req    ApprovalReviewRequest
 	result ApprovalReviewResult

@@ -303,6 +303,7 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 
 func TestFormatDoctorTextIncludesSandboxSetupDiagnostics(t *testing.T) {
 	report := DoctorReport{
+		SandboxFallbackReason:     "bwrap is unavailable",
 		SandboxSetupRequired:      true,
 		SandboxSetupVersion:       1,
 		SandboxSetupMarkerCurrent: false,
@@ -318,6 +319,7 @@ func TestFormatDoctorTextIncludesSandboxSetupDiagnostics(t *testing.T) {
 	}
 	out := FormatDoctorText(report)
 	for _, want := range []string{
+		"sandbox_repair_reason: bwrap is unavailable",
 		"sandbox_setup_required: true",
 		"sandbox_setup_version: 1",
 		"sandbox_setup_marker_current: false",
@@ -334,5 +336,8 @@ func TestFormatDoctorTextIncludesSandboxSetupDiagnostics(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("FormatDoctorText() = %q, want %q", out, want)
 		}
+	}
+	if strings.Contains(out, "sandbox_fallback_reason:") {
+		t.Fatalf("FormatDoctorText() = %q, must not expose legacy fallback wording", out)
 	}
 }

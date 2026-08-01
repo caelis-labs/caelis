@@ -40,6 +40,7 @@ func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testi
 	workspace := t.TempDir()
 	stack, err := NewLocalStack(Config{
 		StoreDir: root, WorkspaceKey: "credential-test", WorkspaceCWD: workspace,
+		Sandbox: SandboxConfig{RequestedType: "host"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -89,6 +90,7 @@ func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testi
 	child, err := NewLocalStack(Config{
 		StoreDir: root, WorkspaceKey: "credential-child", WorkspaceCWD: workspace,
 		ModelProfileID: profile.ID, ModelProfileEffort: "high",
+		Sandbox: SandboxConfig{RequestedType: "host"},
 	})
 	if err != nil {
 		t.Fatal(err)

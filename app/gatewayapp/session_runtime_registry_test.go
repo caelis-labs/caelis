@@ -363,15 +363,26 @@ func TestHostCloseRetriesFailedSessionRuntimeResourceRelease(t *testing.T) {
 	}
 }
 
-func TestSessionRuntimeConfigIsDetachedFromHostMutation(t *testing.T) {
+func TestSessionRuntimeSandboxConfigIsDetachedFromHostMutation(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
+	initialWritableRoot := filepath.Join(workspace, "initial-writable")
+	updatedWritableRoot := filepath.Join(workspace, "updated-writable")
+	if err := os.MkdirAll(initialWritableRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(updatedWritableRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	stack, err := NewLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
 		SkillDirs:    []string{},
-		Sandbox:      SandboxConfig{RequestedType: "host"},
+		Sandbox: SandboxConfig{
+			RequestedType: "host",
+			WritableRoots: []string{initialWritableRoot},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -413,15 +424,17 @@ func TestSessionRuntimeConfigIsDetachedFromHostMutation(t *testing.T) {
 		t.Fatal("Session Runtime did not start")
 	}
 
-	status, err := stack.SetSandboxBackend(ctx, "auto")
-	if err != nil {
-		t.Fatal(err)
+	assemblyGate := stack.assemblyMutationLock()
+	assemblyGate.Lock()
+	stack.mu.Lock()
+	stack.sandbox.WritableRoots = []string{updatedWritableRoot}
+	stack.mu.Unlock()
+	assemblyGate.Unlock()
+	if !slices.Equal(stack.sandbox.WritableRoots, []string{updatedWritableRoot}) {
+		t.Fatalf("host sandbox writable roots = %#v, want updated snapshot", stack.sandbox.WritableRoots)
 	}
-	if stack.sandbox.RequestedType != "auto" {
-		t.Fatalf("host sandbox config = %q, want auto (status %#v)", stack.sandbox.RequestedType, status)
-	}
-	if first.stack.sandbox.RequestedType != "host" {
-		t.Fatalf("live Session sandbox changed to %q, want pinned host", first.stack.sandbox.RequestedType)
+	if !slices.Equal(first.stack.sandbox.WritableRoots, []string{initialWritableRoot}) {
+		t.Fatalf("live Session sandbox writable roots = %#v, want pinned initial snapshot", first.stack.sandbox.WritableRoots)
 	}
 	if _, err := client.Cancel(ctx, controlclient.CancelRequest{
 		WriteBase: controlclient.WriteBase{OperationID: "cancel-first", SessionID: firstID},
@@ -435,11 +448,10 @@ func TestSessionRuntimeConfigIsDetachedFromHostMutation(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Session Runtime did not stop")
 	}
-
 	secondID := createWorkspaceRuntimeTestSession(t, client, "create-second", "session-second", "workspace", workspace)
 	second := activateSessionRuntime(t, stack, secondID)
-	if second.stack.sandbox.RequestedType != "auto" {
-		t.Fatalf("new Session sandbox = %q, want current auto config", second.stack.sandbox.RequestedType)
+	if !slices.Equal(second.stack.sandbox.WritableRoots, []string{updatedWritableRoot}) {
+		t.Fatalf("new Session sandbox writable roots = %#v, want current snapshot", second.stack.sandbox.WritableRoots)
 	}
 	if err := stack.sessionRuntimes.release(ctx, firstID); err != nil {
 		t.Fatal(err)
@@ -448,8 +460,36 @@ func TestSessionRuntimeConfigIsDetachedFromHostMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if refreshed.stack.sandbox.RequestedType != "auto" {
-		t.Fatalf("reactivated Session sandbox = %q, want current auto config", refreshed.stack.sandbox.RequestedType)
+	if !slices.Equal(refreshed.stack.sandbox.WritableRoots, []string{updatedWritableRoot}) {
+		t.Fatalf("reactivated Session sandbox writable roots = %#v, want current snapshot", refreshed.stack.sandbox.WritableRoots)
+	}
+}
+
+func TestSetSandboxBackendRollsBackWhenRequiredBackendIsUnavailable(t *testing.T) {
+	ctx := context.Background()
+	stack, err := NewLocalStack(Config{
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: "workspace",
+		WorkspaceCWD: newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule."),
+		SkillDirs:    []string{},
+		Sandbox:      SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	before := cloneSandboxConfig(stack.sandbox)
+
+	_, err = stack.SetSandboxBackend(ctx, "auto")
+	if err == nil {
+		t.Skip("platform-required sandbox backend is available; unavailable rollback path is not applicable")
+	}
+	var unavailable *sandbox.BackendUnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("SetSandboxBackend(auto) error = %v, want backend unavailable", err)
+	}
+	if !reflect.DeepEqual(stack.sandbox, before) {
+		t.Fatalf("failed sandbox mutation left config = %#v, want rolled back %#v", stack.sandbox, before)
 	}
 }
 

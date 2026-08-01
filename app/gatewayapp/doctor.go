@@ -24,6 +24,10 @@ type DoctorRequest struct {
 	BindingKey string
 }
 
+// DoctorReport is the product diagnostics snapshot. SandboxFallbackReason is
+// retained for JSON compatibility; successful product startup never implicitly
+// falls back to Host, and text output presents a non-empty value as repair
+// context.
 type DoctorReport struct {
 	GoVersion                       string                   `json:"go_version,omitempty"`
 	GOOS                            string                   `json:"goos,omitempty"`
@@ -356,7 +360,7 @@ func FormatDoctorText(report DoctorReport) string {
 		fmt.Sprintf("sandbox_requested_backend: %s", firstNonEmpty(strings.TrimSpace(report.SandboxRequestedBackend), "-")),
 		fmt.Sprintf("sandbox_resolved_backend: %s", firstNonEmpty(strings.TrimSpace(report.SandboxResolvedBackend), "-")),
 		fmt.Sprintf("sandbox_route: %s", firstNonEmpty(strings.TrimSpace(report.SandboxRoute), "-")),
-		fmt.Sprintf("sandbox_fallback_reason: %s", firstNonEmpty(strings.TrimSpace(report.SandboxFallbackReason), "-")),
+		fmt.Sprintf("sandbox_repair_reason: %s", firstNonEmpty(strings.TrimSpace(report.SandboxFallbackReason), "-")),
 		fmt.Sprintf("sandbox_install_hint: %s", firstNonEmpty(strings.TrimSpace(report.SandboxInstallHint), "-")),
 		fmt.Sprintf("sandbox_setup_required: %t", report.SandboxSetupRequired),
 		fmt.Sprintf("sandbox_setup_error: %s", firstNonEmpty(strings.TrimSpace(report.SandboxSetupError), "-")),

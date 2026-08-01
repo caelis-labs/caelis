@@ -55,11 +55,10 @@ func guardianOutputSpec(payload *kernel.ApprovalPayload) *model.OutputSpec {
 			"properties":           properties,
 			"required":             []any{"outcome"},
 		},
-		MaxOutputTokens: guardianMaxOutputTokens,
 	}
 }
 
-// guardianOutputSpecForModel preserves Guardian's bounded response contract
+// guardianOutputSpecForModel preserves Guardian's structured response contract
 // without requiring native schema output from providers such as Codex OAuth.
 // The fixed Guardian instructions and parser still enforce the JSON shape when
 // the model can only return plain text.

@@ -5,10 +5,48 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
 const SandboxPermissionDeniedMessage = "Sandbox permission denied. Narrow the path or operation first. If still required, retry THIS SAME command once with sandbox_permissions=require_escalated and a justification that cites this failure. Do not escalate later similar commands by habit."
 const HostExecutionRequiresApprovalMessage = "Host execution requires approval. If still required, retry THIS SAME command once with sandbox_permissions=require_escalated and a non-empty justification. Do not escalate later similar commands by habit."
+
+// BackendUnavailableError reports that the required sandbox backend could not
+// be constructed. It is a startup failure: callers must not silently replace
+// the sandbox with Host execution.
+type BackendUnavailableError struct {
+	Backend    Backend
+	RepairHint string
+	Err        error
+}
+
+func (e *BackendUnavailableError) Error() string {
+	if e == nil {
+		return "sandbox backend is unavailable"
+	}
+	backend := strings.TrimSpace(string(e.Backend))
+	if backend == "" {
+		backend = "platform default"
+	}
+	message := fmt.Sprintf("sandbox: required backend %q is unavailable", backend)
+	if e.Err != nil {
+		message += ": " + e.Err.Error()
+	}
+	if hint := strings.TrimSpace(e.RepairHint); hint != "" {
+		message += ". Repair: " + strings.TrimRight(hint, ". ")
+	}
+	return message + ". Caelis refused to run without the required sandbox."
+}
+
+func (e *BackendUnavailableError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func (*BackendUnavailableError) ErrorCode() errorcode.Code { return errorcode.Unavailable }
 
 // CommandExitError marks a normal non-zero process exit. It distinguishes a
 // command result from an infrastructure failure without relying on error text.

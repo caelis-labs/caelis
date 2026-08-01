@@ -130,7 +130,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		policyProfile    = fs.String("policy-profile", envOr("CAELIS_POLICY_PROFILE", ""), "Policy profile: workspace-write")
 		modelProfile     = fs.String("model-profile", envOr("CAELIS_MODEL_PROFILE", ""), "Control-owned ModelProfile ID")
 		reasoningEffort  = fs.String("reasoning-effort", envOr("CAELIS_REASONING_EFFORT", ""), "Selected ModelProfile reasoning effort")
-		sandboxBackend   = fs.String("sandbox-backend", envOr("CAELIS_SANDBOX_BACKEND", ""), "Sandbox backend: auto|host|bwrap|landlock|seatbelt|windows")
+		sandboxBackend   = fs.String("sandbox-backend", envOr("CAELIS_SANDBOX_BACKEND", ""), "Sandbox backend override: host or this platform's required backend (legacy auto/default aliases are accepted)")
 		sandboxHelper    = fs.String("sandbox-helper-path", envOr("CAELIS_SANDBOX_HELPER_PATH", ""), "Sandbox helper executable path")
 		contextWindow    = fs.Int("context-window", envInt("CAELIS_CONTEXT_WINDOW", 0), "Context window override")
 		forceInteractive = fs.Bool("interactive", false, "Force interactive local main path")

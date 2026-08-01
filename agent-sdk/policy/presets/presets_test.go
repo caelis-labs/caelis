@@ -3,11 +3,13 @@ package presets
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	_ "github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
@@ -610,7 +612,7 @@ func TestDefaultModeRequiresApprovalWhenDefaultCommandWouldRunOnHost(t *testing.
 	}
 }
 
-func TestDefaultModeRequiresApprovalForCompositeHostFallbackDescriptor(t *testing.T) {
+func TestDefaultModeCannotReceiveHostFallbackWhenSandboxIsUnavailable(t *testing.T) {
 	t.Parallel()
 
 	runtime, err := sandbox.New(sandbox.Config{
@@ -620,25 +622,15 @@ func TestDefaultModeRequiresApprovalForCompositeHostFallbackDescriptor(t *testin
 			sandbox.Backend("unavailable-test-sandbox"),
 		},
 	})
-	if err != nil {
-		t.Fatalf("sandbox.New() error = %v", err)
+	if runtime != nil {
+		t.Fatalf("sandbox.New() runtime = %#v, want no Host fallback", runtime)
 	}
-	t.Cleanup(func() {
-		_ = runtime.Close()
-	})
-	status := runtime.Status()
-	if !status.FallbackToHost {
-		t.Fatalf("runtime Status().FallbackToHost = false, want fallback host status: %+v", status)
+	if errorcode.CodeOf(err) != errorcode.Unavailable {
+		t.Fatalf("sandbox.New() error = %v (code %q), want unavailable", err, errorcode.CodeOf(err))
 	}
-
-	input := commandCtx("git log --oneline -3", false)
-	input.Sandbox = runtime.Describe()
-	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
-	if err != nil {
-		t.Fatalf("DecideTool() error = %v", err)
-	}
-	if decision.Action != policy.ActionAskApproval {
-		t.Fatalf("Action = %q, want ask_approval", decision.Action)
+	var unavailable *sandbox.BackendUnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("sandbox.New() error = %T, want *sandbox.BackendUnavailableError", err)
 	}
 }
 

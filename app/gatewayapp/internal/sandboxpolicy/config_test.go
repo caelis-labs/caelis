@@ -1,6 +1,7 @@
 package sandboxpolicy
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
@@ -29,6 +30,18 @@ func TestNormalizeBackendAcceptsHost(t *testing.T) {
 	}
 	if got != "host" {
 		t.Fatalf("NormalizeBackend(host) = %q, want host", got)
+	}
+}
+
+func TestNormalizeBackendRejectsRetiredProductLandlockBackend(t *testing.T) {
+	t.Parallel()
+
+	_, err := NormalizeBackend("landlock")
+	if err == nil {
+		t.Fatal("NormalizeBackend(landlock) error = nil, want retired product backend rejection")
+	}
+	if message := err.Error(); !strings.Contains(message, "retired") || !strings.Contains(message, "bwrap") {
+		t.Fatalf("NormalizeBackend(landlock) error = %q, want actionable retirement guidance", message)
 	}
 }
 

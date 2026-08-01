@@ -10,8 +10,9 @@ import (
 )
 
 type Route struct {
-	BackendCandidates   []sandbox.Backend
-	FallbackInstallHint string
+	Backend           sandbox.Backend
+	BackendCandidates []sandbox.Backend
+	InstallHint       string
 }
 
 func Current(requested sandbox.Backend) (Route, error) {
@@ -22,32 +23,35 @@ func ForGOOS(goos string, requested sandbox.Backend) (Route, error) {
 	requested = sandbox.CanonicalBackend(requested)
 	switch strings.TrimSpace(goos) {
 	case "darwin":
-		return routeForPlatform(goos, requested, []sandbox.Backend{sandbox.BackendSeatbelt}, darwinInstallHint())
+		return routeForPlatform(goos, requested, sandbox.BackendSeatbelt, darwinInstallHint())
 	case "linux":
-		return routeForPlatform(goos, requested, []sandbox.Backend{sandbox.BackendBwrap, sandbox.BackendLandlock}, linuxInstallHint())
+		return routeForPlatform(goos, requested, sandbox.BackendBwrap, linuxInstallHint())
 	case "windows":
-		return routeForPlatform(goos, requested, []sandbox.Backend{sandbox.BackendWindows}, windowsInstallHint())
+		return routeForPlatform(goos, requested, sandbox.BackendWindows, windowsInstallHint())
 	default:
-		if requested == "" || requested == sandbox.BackendHost {
-			return Route{FallbackInstallHint: genericInstallHint(goos)}, nil
+		if requested == sandbox.BackendHost {
+			return Route{Backend: sandbox.BackendHost, InstallHint: genericInstallHint(goos)}, nil
 		}
-		return Route{}, fmt.Errorf("sandbox router: backend %q is unsupported on %s", requested, goos)
+		return Route{}, fmt.Errorf("sandbox router: no supported platform sandbox is available on %s; %s", goos, genericInstallHint(goos))
 	}
 }
 
-func routeForPlatform(goos string, requested sandbox.Backend, candidates []sandbox.Backend, hint string) (Route, error) {
+func routeForPlatform(goos string, requested sandbox.Backend, platformBackend sandbox.Backend, hint string) (Route, error) {
 	if requested == "" {
-		return Route{BackendCandidates: append([]sandbox.Backend(nil), candidates...), FallbackInstallHint: hint}, nil
+		return Route{Backend: platformBackend, BackendCandidates: []sandbox.Backend{platformBackend}, InstallHint: hint}, nil
 	}
 	if requested == sandbox.BackendHost {
-		return Route{FallbackInstallHint: hint}, nil
+		return Route{Backend: sandbox.BackendHost, InstallHint: hint}, nil
 	}
-	for _, candidate := range candidates {
-		if requested == candidate {
-			return Route{BackendCandidates: []sandbox.Backend{requested}, FallbackInstallHint: hint}, nil
-		}
+	if requested == platformBackend {
+		return Route{Backend: requested, BackendCandidates: []sandbox.Backend{requested}, InstallHint: hint}, nil
 	}
-	return Route{}, fmt.Errorf("sandbox router: backend %q is unsupported on %s", requested, goos)
+	return Route{}, fmt.Errorf(
+		"sandbox router: backend %q is unsupported on %s; use %q or choose explicit Host execution",
+		requested,
+		goos,
+		platformBackend,
+	)
 }
 
 func linuxInstallHint() string {
@@ -55,16 +59,16 @@ func linuxInstallHint() string {
 	for _, id := range ids {
 		switch id {
 		case "debian", "ubuntu", "linuxmint", "pop":
-			return "Install bubblewrap with: sudo apt install bubblewrap. If bubblewrap is blocked, Caelis can fall back to Landlock on supported kernels."
+			return "Install bubblewrap with: sudo apt install bubblewrap, ensure unprivileged user namespaces are enabled, then retry."
 		case "fedora", "rhel", "centos", "rocky", "almalinux":
-			return "Install bubblewrap with: sudo dnf install bubblewrap. If user namespaces are blocked, enable them or rely on Landlock when supported."
+			return "Install bubblewrap with: sudo dnf install bubblewrap, ensure unprivileged user namespaces are enabled, then retry."
 		case "arch", "manjaro":
-			return "Install bubblewrap with: sudo pacman -S bubblewrap. If user namespaces are blocked, enable them or rely on Landlock when supported."
+			return "Install bubblewrap with: sudo pacman -S bubblewrap, ensure unprivileged user namespaces are enabled, then retry."
 		case "opensuse", "suse", "sles":
-			return "Install bubblewrap with: sudo zypper install bubblewrap. If user namespaces are blocked, enable them or rely on Landlock when supported."
+			return "Install bubblewrap with: sudo zypper install bubblewrap, ensure unprivileged user namespaces are enabled, then retry."
 		}
 	}
-	return "Install bubblewrap for this distribution or use a Landlock-capable Linux kernel; until then commands may run on the host."
+	return "Install bubblewrap for this distribution, ensure unprivileged user namespaces are enabled, then retry."
 }
 
 func linuxDistroIDs() []string {
@@ -103,7 +107,7 @@ func linuxDistroIDs() []string {
 }
 
 func darwinInstallHint() string {
-	return "macOS sandboxing uses sandbox-exec/seatbelt and should be available by default; update macOS if the backend is unavailable."
+	return "Ensure this process and any outer container or security profile permit /usr/bin/sandbox-exec, then retry; update macOS if Seatbelt is unavailable."
 }
 
 func windowsInstallHint() string {
@@ -115,5 +119,5 @@ func genericInstallHint(goos string) string {
 	if goos == "" {
 		goos = "this OS"
 	}
-	return "Install a supported sandbox backend for " + goos + "; until then commands may run on the host."
+	return "use macOS, Linux, or Windows with its required sandbox backend; " + goos + " has no supported platform sandbox and Caelis will not fall back to Host execution"
 }

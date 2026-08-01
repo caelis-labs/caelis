@@ -2643,6 +2643,151 @@ func TestBeginTurnAutoReviewRepeatedDenialsDoNotReplaceReviewerDecision(t *testi
 	}
 }
 
+func TestBeginTurnAutoReviewStopsAfterThreeConsecutiveGuardianExecutionFailures(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	reviewer := &scriptedApprovalReviewer{steps: []scriptedApprovalReviewStep{
+		{err: errors.New("guardian execution failed 1")},
+		{err: errors.New("guardian execution failed 2")},
+		{err: errors.New("approval reviewer returned no final assessment")},
+		{result: ApprovalReviewResult{Approved: true}},
+	}}
+	gw, err := New(Config{
+		Sessions:         staticSessionService{session: activeSession},
+		Runtime:          &approvalRuntime{session: activeSession, requests: 4},
+		Resolver:         staticResolver{resolved: ResolvedTurn{RunRequest: agent.RunRequest{}}},
+		ApprovalReviewer: reviewer,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	events := collectHandleEvents(t, result.Handle)
+	if got := reviewer.callCount(); got != guardianExecutionFailureThreshold {
+		t.Fatalf("Guardian review calls = %d, want %d", got, guardianExecutionFailureThreshold)
+	}
+	failedReviews := 0
+	for _, env := range events {
+		if env.Kind == eventstream.KindApprovalReview && env.ApprovalReview != nil && env.ApprovalReview.Status == string(ApprovalReviewStatusFailed) {
+			failedReviews++
+		}
+	}
+	if failedReviews != guardianExecutionFailureThreshold {
+		t.Fatalf("failed Guardian reviews = %d, want %d: %#v", failedReviews, guardianExecutionFailureThreshold, events)
+	}
+	if len(events) == 0 || events[len(events)-1].Kind != eventstream.KindError {
+		t.Fatalf("last event = %#v, want guardian_unavailable error", events)
+	}
+	var gatewayErr *Error
+	if !errors.As(events[len(events)-1].Err, &gatewayErr) || gatewayErr.Code != CodeGuardianUnavailable || gatewayErr.Kind != KindUnavailable || !gatewayErr.Retryable {
+		t.Fatalf("terminal error = %#v, want unavailable/%s", events[len(events)-1].Err, CodeGuardianUnavailable)
+	}
+}
+
+func TestResolveActiveAutoApprovalDoesNotCountParentDeadlineAsGuardianFailure(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	reviewer := &scriptedApprovalReviewer{steps: []scriptedApprovalReviewStep{
+		{err: context.DeadlineExceeded},
+	}}
+	gw, err := New(Config{
+		Sessions:         staticSessionService{session: activeSession},
+		Runtime:          mockRuntime{},
+		Resolver:         staticResolver{},
+		ApprovalReviewer: reviewer,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	handle := newTestTurnHandle()
+	handle.recordGuardianExecutionResult(errors.New("guardian execution failed 1"))
+	handle.recordGuardianExecutionResult(errors.New("guardian execution failed 2"))
+	approvalCtx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	_, err = gw.resolveActiveAutoApproval(
+		context.Background(),
+		approvalCtx,
+		handle,
+		&agent.ApprovalRequest{
+			SessionRef: activeSession.SessionRef,
+			Session:    activeSession,
+			RunID:      "run-1",
+			TurnID:     "turn-1",
+			Tool:       tool.Definition{Name: "RUN_COMMAND"},
+			Call:       tool.Call{ID: "call-deadline", Name: "RUN_COMMAND"},
+		},
+		nil,
+		ApprovalModeAutoReview,
+	)
+	if err != nil {
+		t.Fatalf("resolveActiveAutoApproval() error = %v, parent deadline must not trip Guardian breaker", err)
+	}
+	if got := reviewer.callCount(); got != 1 {
+		t.Fatalf("Guardian review calls = %d, want 1", got)
+	}
+	if got := handle.recordGuardianExecutionResult(errors.New("guardian execution failed 3")); got != guardianExecutionFailureThreshold {
+		t.Fatalf("Guardian failure streak after ignored parent deadline = %d, want %d", got, guardianExecutionFailureThreshold)
+	}
+}
+
+func TestBeginTurnAutoReviewValidDecisionResetsGuardianExecutionFailures(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	reviewer := &scriptedApprovalReviewer{steps: []scriptedApprovalReviewStep{
+		{err: errors.New("guardian execution failed 1")},
+		{err: errors.New("guardian execution failed 2")},
+		{result: ApprovalReviewResult{Approved: false, Rationale: "valid denial resets the breaker"}},
+		{err: errors.New("guardian execution failed 3")},
+		{err: errors.New("guardian execution failed 4")},
+	}}
+	gw, err := New(Config{
+		Sessions:         staticSessionService{session: activeSession},
+		Runtime:          &approvalRuntime{session: activeSession, requests: 5},
+		Resolver:         staticResolver{resolved: ResolvedTurn{RunRequest: agent.RunRequest{}}},
+		ApprovalReviewer: reviewer,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	events := collectHandleEvents(t, result.Handle)
+	if got := reviewer.callCount(); got != 5 {
+		t.Fatalf("Guardian review calls = %d, want 5", got)
+	}
+	for _, env := range events {
+		if env.Kind == eventstream.KindError {
+			t.Fatalf("events contain terminal error after a valid reset: %#v", events)
+		}
+	}
+}
+
 func TestBindSessionExpiresBinding(t *testing.T) {
 	t.Parallel()
 

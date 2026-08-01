@@ -1,6 +1,9 @@
 package kernel
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 type ErrorKind string
 
@@ -31,6 +34,7 @@ const (
 	CodeModeNotFound            = "mode_not_found"
 	CodeControlPlaneUnsupported = "control_plane_unsupported"
 	CodeHostClosing             = "host_closing"
+	CodeGuardianUnavailable     = "guardian_unavailable"
 )
 
 type Error struct {
@@ -67,6 +71,18 @@ func NoActiveRunError(message string) *Error {
 		Code:        CodeNoActiveRun,
 		UserVisible: true,
 		Message:     message,
+	}
+}
+
+func guardianUnavailableError(failures int, cause error) *Error {
+	return &Error{
+		Kind:        KindUnavailable,
+		Code:        CodeGuardianUnavailable,
+		Retryable:   true,
+		UserVisible: true,
+		Message:     fmt.Sprintf("guardian_unavailable: automatic approval review failed %d consecutive times; retry the Turn after Guardian is available", failures),
+		Detail:      fmt.Sprintf("consecutive_execution_failures=%d", failures),
+		Cause:       cause,
 	}
 }
 

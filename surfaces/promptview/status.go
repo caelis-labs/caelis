@@ -148,7 +148,7 @@ func StatusDisplayFromSnapshot(status controlstatus.StatusSnapshot) StatusDispla
 	appendDisplayField("Session", strings.TrimSpace(status.Session.ID))
 	appendDisplayField("Context", FormatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens))
 	if status.SandboxStatus.FallbackReason != "" {
-		appendDisplayField("Fallback", strings.TrimSpace(status.SandboxStatus.FallbackReason))
+		appendDisplayField("Repair", strings.TrimSpace(status.SandboxStatus.FallbackReason))
 	}
 	if status.SandboxStatus.InstallHint != "" {
 		appendDisplayField("Install", strings.TrimSpace(status.SandboxStatus.InstallHint))
@@ -187,7 +187,7 @@ func StatusDisplayFromSnapshot(status controlstatus.StatusSnapshot) StatusDispla
 		warnings = append(warnings, sandboxSetupWarning(setup, "current workspace ACLs"))
 	}
 	if strings.TrimSpace(status.SandboxStatus.FallbackReason) != "" {
-		warnings = append(warnings, "Requested sandbox backend is unavailable and a fallback is in effect")
+		warnings = append(warnings, "Required sandbox backend is unavailable; repair is required and no implicit Host fallback is active")
 	}
 	return StatusDisplay{
 		Fields:     fields,

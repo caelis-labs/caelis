@@ -498,7 +498,7 @@ func bwrapProbeFailureDetail(
 			if !apparmorBwrapProfileLoaded(readFileFn, bwrapPath) {
 				parts = append(parts,
 					"AppArmor bwrap profile not detected",
-					"fix: create /etc/apparmor.d/bwrap with a userns rule and reload it with sudo apparmor_parser -r /etc/apparmor.d/bwrap, or use sandbox.requested_type=landlock",
+					"fix: create /etc/apparmor.d/bwrap with a userns rule and reload it with sudo apparmor_parser -r /etc/apparmor.d/bwrap",
 				)
 			}
 		}
