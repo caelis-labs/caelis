@@ -923,6 +923,8 @@
         "additionalProperties": {"$ref": "#/components/schemas/JSONValue"}
       },
       "Outcome": {"type": "string", "enum": ["accepted", "committed", "conflicted", "rejected", "unknown"]},
+      "ErrorCode": {"type": "string", "enum": ["unknown", "invalid_argument", "not_found", "already_exists", "conflict", "permission_denied", "unauthenticated", "failed_precondition", "resource_exhausted", "rate_limited", "overloaded", "timeout", "cancelled", "interrupted", "unavailable", "unsupported", "unknown_outcome", "internal"]},
+      "ErrorKind": {"type": "string", "enum": ["session_closed", "unauthorized", "operation_conflict", "state_revision_conflict"]},
       "ResumeMode": {"type": "string", "enum": ["exact", "durable_fallback"]},
       "TaskResumeMode": {"type": "string", "enum": ["exact", "current_state"]},
       "TaskKind": {"type": "string", "enum": ["command", "subagent"]},
@@ -1150,14 +1152,20 @@
           "session_id": {"type": "string"},
           "revision": {"$ref": "#/components/schemas/Uint64Decimal"},
           "target": {"$ref": "#/components/schemas/CommandTarget"},
-          "detail": {"type": "string"}
+          "detail": {"type": "string"},
+          "error_code": {"$ref": "#/components/schemas/ErrorCode"},
+          "error_kind": {"$ref": "#/components/schemas/ErrorKind"}
         }
       },
       "ErrorResponse": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["error"],
-        "properties": {"error": {"type": "string"}}
+        "required": ["error", "code"],
+        "properties": {
+          "error": {"type": "string"},
+          "code": {"$ref": "#/components/schemas/ErrorCode"},
+          "kind": {"$ref": "#/components/schemas/ErrorKind"}
+        }
       },
       "DurableFeedPosition": {
         "type": "object", "additionalProperties": false, "required": ["seq", "projection_index"],

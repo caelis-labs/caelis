@@ -246,6 +246,8 @@ export interface CloseSessionRequest {
 
 export interface CommandResult {
   detail?: string;
+  error_code?: ErrorCode;
+  error_kind?: ErrorKind;
   operation_id: string;
   outcome: Outcome;
   revision?: Uint64Decimal;
@@ -409,6 +411,8 @@ export interface EnvelopeBase {
 
 export type EnvelopeKind = "session/update" | "session/request_permission" | "caelis/notice" | "caelis/participant" | "caelis/lifecycle" | "caelis/approval_review" | "caelis/error";
 
+export type ErrorCode = "unknown" | "invalid_argument" | "not_found" | "already_exists" | "conflict" | "permission_denied" | "unauthenticated" | "failed_precondition" | "resource_exhausted" | "rate_limited" | "overloaded" | "timeout" | "cancelled" | "interrupted" | "unavailable" | "unsupported" | "unknown_outcome" | "internal";
+
 export interface ErrorEnvelope {
   _meta?: ACPMetadata;
   actor?: string;
@@ -431,8 +435,12 @@ export interface ErrorEnvelope {
   turn_id?: string;
 }
 
+export type ErrorKind = "session_closed" | "unauthorized" | "operation_conflict" | "state_revision_conflict";
+
 export interface ErrorResponse {
+  code: ErrorCode;
   error: string;
+  kind?: ErrorKind;
 }
 
 export type FeedPosition = { durable: DurableFeedPosition } | { transient: TransientFeedPosition };

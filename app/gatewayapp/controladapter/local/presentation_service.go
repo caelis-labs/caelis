@@ -34,7 +34,7 @@ func NewPresentationService(host *gatewayapp.Stack, modes acp.ModeProvider, useM
 }
 
 func (s *PresentationService) PresentationSnapshot(ctx context.Context, principal controlclient.Principal, req controlclient.PresentationRequest) (controlclient.PresentationSnapshot, error) {
-	active, err := s.authorizedSession(ctx, principal, req.SessionID)
+	active, err := s.authorizedSession(ctx, principal, controlclient.ActionSessionInspect, req.SessionID)
 	if err != nil {
 		return controlclient.PresentationSnapshot{}, err
 	}
@@ -69,7 +69,7 @@ func (s *PresentationService) PresentationCapabilities(ctx context.Context, prin
 }
 
 func (s *PresentationService) SetPresentationMode(ctx context.Context, principal controlclient.Principal, req controlclient.SetPresentationModeRequest) error {
-	if _, err := s.authorizedSession(ctx, principal, req.SessionID); err != nil {
+	if _, err := s.authorizedSession(ctx, principal, controlclient.ActionSessionConfigure, req.SessionID); err != nil {
 		return err
 	}
 	_, err := s.surface.SetSessionMode(ctx, acp.SetSessionModeRequest{SessionID: req.SessionID, ModeID: req.ModeID})
@@ -77,7 +77,7 @@ func (s *PresentationService) SetPresentationMode(ctx context.Context, principal
 }
 
 func (s *PresentationService) SetPresentationConfig(ctx context.Context, principal controlclient.Principal, req controlclient.SetPresentationConfigRequest) ([]controlclient.PresentationConfigOption, error) {
-	if _, err := s.authorizedSession(ctx, principal, req.SessionID); err != nil {
+	if _, err := s.authorizedSession(ctx, principal, controlclient.ActionSessionConfigure, req.SessionID); err != nil {
 		return nil, err
 	}
 	result, err := s.surface.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
@@ -90,24 +90,22 @@ func (s *PresentationService) SetPresentationConfig(ctx context.Context, princip
 }
 
 func (s *PresentationService) SetPresentationModel(ctx context.Context, principal controlclient.Principal, req controlclient.SetPresentationModelRequest) error {
-	if _, err := s.authorizedSession(ctx, principal, req.SessionID); err != nil {
+	if _, err := s.authorizedSession(ctx, principal, controlclient.ActionSessionConfigure, req.SessionID); err != nil {
 		return err
 	}
 	_, err := s.surface.SetSessionModel(ctx, acp.SetSessionModelRequest{SessionID: req.SessionID, ModelID: req.ModelID})
 	return err
 }
 
-func (s *PresentationService) authorizedSession(ctx context.Context, principal controlclient.Principal, sessionID string) (session.Session, error) {
-	if s == nil || s.host == nil || s.surface == nil {
+func (s *PresentationService) authorizedSession(ctx context.Context, principal controlclient.Principal, action controlclient.Action, sessionID string) (session.Session, error) {
+	if s == nil || s.host == nil || s.host.Sessions == nil || s.surface == nil {
 		return session.Session{}, errors.New("app/gatewayapp/controladapter/local: presentation service is unavailable")
 	}
-	state, err := s.host.ControlClient().InspectSession(ctx, principal, controlclient.StateRequest{SessionID: strings.TrimSpace(sessionID)})
-	if err != nil {
+	sessionID = strings.TrimSpace(sessionID)
+	if err := (controlclient.SessionAuthorizer{Sessions: s.host.Sessions}).Authorize(ctx, principal, action, sessionID); err != nil {
 		return session.Session{}, err
 	}
-	return s.host.Sessions.Session(ctx, session.NormalizeSessionRef(session.SessionRef{
-		AppName: s.host.AppName, UserID: s.host.UserID, WorkspaceKey: state.WorkspaceKey, SessionID: state.SessionID,
-	}))
+	return s.host.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
 }
 
 func presentationSnapshot(modes *acp.SessionModeState, configs []acp.SessionConfigOption, models *acp.SessionModelState, commands []acp.AvailableCommand) controlclient.PresentationSnapshot {

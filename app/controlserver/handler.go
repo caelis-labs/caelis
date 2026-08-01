@@ -508,6 +508,15 @@ func writeCommandResult(w http.ResponseWriter, result controlclient.CommandResul
 		result.Detail = "conflict"
 	}
 	if err != nil {
+		if result.ErrorCode == "" {
+			result.ErrorCode = errorcode.CodeOf(err)
+			if result.ErrorCode == errorcode.Unknown && result.Outcome == controlclient.OutcomeUnknown {
+				result.ErrorCode = errorcode.UnknownOutcome
+			}
+		}
+		if result.ErrorKind == "" {
+			result.ErrorKind = controlclient.ErrorKindOf(err)
+		}
 		mapped := statusForError(err)
 		switch mapped {
 		case http.StatusUnauthorized, http.StatusForbidden:
@@ -518,8 +527,10 @@ func writeCommandResult(w http.ResponseWriter, result controlclient.CommandResul
 				writeMappedError(w, err)
 				return
 			}
-			status = mapped
-			if mapped == http.StatusConflict && strings.TrimSpace(result.Detail) != "" {
+			// The CommandResult outcome is the recovery contract. A rejected
+			// failed-precondition, for example, remains HTTP 400 rather than
+			// contradicting its outcome with HTTP 409.
+			if status == http.StatusConflict && strings.TrimSpace(result.Detail) != "" {
 				result.Detail = "conflict"
 			}
 		default:
@@ -565,13 +576,24 @@ func writeJSONResult(w http.ResponseWriter, value any, err error) {
 	writeJSON(w, http.StatusOK, value)
 }
 func writeError(w http.ResponseWriter, status int, detail string) {
-	writeJSON(w, status, map[string]any{"error": strings.TrimSpace(detail)})
+	writeErrorIdentity(w, status, detail, errorCodeForStatus(status), "")
+}
+
+func writeErrorIdentity(w http.ResponseWriter, status int, detail string, code errorcode.Code, kind controlclient.ErrorKind) {
+	response := map[string]any{
+		"error": strings.TrimSpace(detail),
+		"code":  code,
+	}
+	if kind != "" {
+		response["kind"] = kind
+	}
+	writeJSON(w, status, response)
 }
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	data, err := wirev1.Marshal(value)
 	if err != nil {
 		status = http.StatusInternalServerError
-		data = []byte(`{"error":"internal server error"}`)
+		data = []byte(`{"error":"internal server error","code":"internal"}`)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

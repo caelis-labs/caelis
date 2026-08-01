@@ -34,7 +34,7 @@ func (s *StatusService) SessionStatus(
 	if s == nil || s.host == nil {
 		return controlstatus.StatusSnapshot{}, errors.New("app/gatewayapp/controladapter/local: status service is unavailable")
 	}
-	lease, err := s.host.AcquireControlRuntime(ctx, principal, request.SessionID, false)
+	lease, err := s.host.AcquireControlRuntime(ctx, principal, controlclient.ActionSessionInspect, request.SessionID, false)
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
 	}

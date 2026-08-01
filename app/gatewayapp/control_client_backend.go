@@ -75,6 +75,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 
 	sessionID := controlCommandSessionID(request)
 	runtimeStack := s
+	var newlyActivatedRuntime *sessionRuntime
 	var releaseRuntimeUse func()
 	defer func() {
 		if releaseRuntimeUse != nil {
@@ -83,7 +84,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 	}()
 	switch {
 	case controlActionActivatesSessionRuntime(action):
-		runtime, _, err := s.sessionRuntimes.activateSession(ctx, sessionID)
+		runtime, _, activated, err := s.sessionRuntimes.activateSessionTracked(ctx, sessionID)
 		if err != nil {
 			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
@@ -92,6 +93,9 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
 		runtimeStack = runtime.stack
+		if activated {
+			newlyActivatedRuntime = runtime
+		}
 	case controlActionTargetsActiveRuntime(action):
 		runtime, releaseUse, err := s.sessionRuntimes.acquireLoadedRuntime(sessionID)
 		if err != nil {
@@ -120,6 +124,21 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 		}
 	}
 	result, commandErr = runtimeStack.executeControlCommand(ctx, principal, action, request)
+	if newlyActivatedRuntime != nil && controlCommandProvesNoEffect(commandErr) {
+		if releaseRuntimeUse != nil {
+			releaseRuntimeUse()
+			releaseRuntimeUse = nil
+		}
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
+		cleanupErr := s.sessionRuntimes.releaseRejectedActivation(releaseCtx, newlyActivatedRuntime)
+		cancel()
+		if cleanupErr != nil {
+			commandErr = errors.Join(
+				commandErr,
+				errorcode.Wrap(errorcode.Internal, "gatewayapp: discard rejected Session Runtime activation", cleanupErr),
+			)
+		}
+	}
 	if action == controlclient.ActionSessionClose &&
 		commandErr == nil &&
 		result.Outcome == controlclient.OutcomeCommitted {
@@ -134,6 +153,15 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 		}
 	}
 	return result, commandErr
+}
+
+func controlCommandProvesNoEffect(err error) bool {
+	var outcomeErr *controlclient.OutcomeError
+	if !errors.As(err, &outcomeErr) {
+		return false
+	}
+	return outcomeErr.Outcome == controlclient.OutcomeRejected ||
+		outcomeErr.Outcome == controlclient.OutcomeConflicted
 }
 
 func (s *Stack) executeControlCommand(ctx context.Context, principal controlclient.Principal, action controlclient.Action, request any) (result controlclient.CommandResult, commandErr error) {

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/control/client/wirev1"
@@ -56,6 +57,8 @@ type Client struct {
 type RemoteError struct {
 	StatusCode int
 	Detail     string
+	Code       errorcode.Code
+	Kind       controlclient.ErrorKind
 }
 
 func (e *RemoteError) Error() string {
@@ -66,6 +69,34 @@ func (e *RemoteError) Error() string {
 		return fmt.Sprintf("control http client: remote request failed with HTTP %d", e.StatusCode)
 	}
 	return fmt.Sprintf("control http client: remote request failed with HTTP %d: %s", e.StatusCode, e.Detail)
+}
+
+// ErrorCode preserves the transport-neutral category carried by the Control
+// wire. Status mapping remains a compatibility fallback for older servers.
+func (e *RemoteError) ErrorCode() errorcode.Code {
+	if e == nil {
+		return errorcode.Unknown
+	}
+	return normalizeRemoteErrorCode(e.Code, e.StatusCode)
+}
+
+// Is restores exact Control error identities used by client recovery logic.
+func (e *RemoteError) Is(target error) bool {
+	if e == nil {
+		return false
+	}
+	switch e.Kind {
+	case controlclient.ErrorKindSessionClosed:
+		return target == controlclient.ErrSessionClosed
+	case controlclient.ErrorKindUnauthorized:
+		return target == controlclient.ErrUnauthorized
+	case controlclient.ErrorKindOperationConflict:
+		return target == controlclient.ErrOperationConflict
+	case controlclient.ErrorKindStateRevisionConflict:
+		return target == controlclient.ErrStateRevisionConflict
+	default:
+		return false
+	}
 }
 
 // New constructs one authenticated Control HTTP client.
@@ -374,7 +405,12 @@ func (c *Client) doCommand(
 		if detail == "" {
 			detail = string(result.Outcome)
 		}
-		return result, controlclient.NewOutcomeError(result.Outcome, errors.New(detail))
+		return result, controlclient.NewOutcomeError(result.Outcome, &RemoteError{
+			StatusCode: response.StatusCode,
+			Detail:     detail,
+			Code:       result.ErrorCode,
+			Kind:       result.ErrorKind,
+		})
 	}
 	return result, errors.New("control http client: unsupported Control command outcome")
 }
@@ -459,10 +495,58 @@ func readRemoteResponse(response *http.Response) ([]byte, error) {
 
 func remoteError(status int, raw []byte) error {
 	var response struct {
-		Error string `json:"error"`
+		Error string                  `json:"error"`
+		Code  errorcode.Code          `json:"code"`
+		Kind  controlclient.ErrorKind `json:"kind"`
 	}
 	_ = json.Unmarshal(raw, &response)
-	return &RemoteError{StatusCode: status, Detail: strings.TrimSpace(response.Error)}
+	return &RemoteError{
+		StatusCode: status,
+		Detail:     strings.TrimSpace(response.Error),
+		Code:       response.Code,
+		Kind:       response.Kind,
+	}
+}
+
+func normalizeRemoteErrorCode(code errorcode.Code, status int) errorcode.Code {
+	switch code {
+	case errorcode.InvalidArgument,
+		errorcode.NotFound,
+		errorcode.AlreadyExists,
+		errorcode.Conflict,
+		errorcode.PermissionDenied,
+		errorcode.Unauthenticated,
+		errorcode.FailedPrecondition,
+		errorcode.ResourceExhausted,
+		errorcode.RateLimited,
+		errorcode.Overloaded,
+		errorcode.Timeout,
+		errorcode.Cancelled,
+		errorcode.Interrupted,
+		errorcode.Unavailable,
+		errorcode.Unsupported,
+		errorcode.UnknownOutcome,
+		errorcode.Internal:
+		return code
+	}
+	switch status {
+	case http.StatusBadRequest:
+		return errorcode.InvalidArgument
+	case http.StatusUnauthorized:
+		return errorcode.Unauthenticated
+	case http.StatusForbidden:
+		return errorcode.PermissionDenied
+	case http.StatusNotFound:
+		return errorcode.NotFound
+	case http.StatusConflict:
+		return errorcode.Conflict
+	case http.StatusServiceUnavailable:
+		return errorcode.Unavailable
+	case http.StatusInternalServerError:
+		return errorcode.Internal
+	default:
+		return errorcode.Unknown
+	}
 }
 
 func remotePathID(kind, value string) (string, error) {

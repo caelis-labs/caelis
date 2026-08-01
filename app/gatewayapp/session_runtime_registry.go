@@ -26,11 +26,14 @@ type sessionRuntime struct {
 	// is set, command routing must not return this Runtime again. inUse covers
 	// synchronous Control mutation dispatches that already obtained the Runtime;
 	// release waits for usesIdle before quiescing detached resources.
-	releasing   bool
-	releaseDone chan struct{}
-	releaseErr  error
-	inUse       int
-	usesIdle    chan struct{}
+	// useAdmissions prevents rejected first-command cleanup from discarding a
+	// Runtime that any concurrent caller could already have used.
+	releasing     bool
+	releaseDone   chan struct{}
+	releaseErr    error
+	inUse         int
+	useAdmissions uint64
+	usesIdle      chan struct{}
 }
 
 // sessionRuntimeRegistry is the app-scoped owner of live Session execution
@@ -220,61 +223,72 @@ func (r *sessionRuntimeRegistry) activateSession(
 	ctx context.Context,
 	sessionID string,
 ) (*sessionRuntime, session.Session, error) {
+	runtime, active, _, err := r.activateSessionTracked(ctx, sessionID)
+	return runtime, active, err
+}
+
+// activateSessionTracked reports whether this call assembled and bound the
+// returned Runtime. Command routing uses that fact to discard a first
+// activation when the command proves that no effect occurred.
+func (r *sessionRuntimeRegistry) activateSessionTracked(
+	ctx context.Context,
+	sessionID string,
+) (*sessionRuntime, session.Session, bool, error) {
 	if r == nil || r.owner == nil || r.owner.Sessions == nil {
-		return nil, session.Session{}, errors.New("gatewayapp: Session Runtime registry is unavailable")
+		return nil, session.Session{}, false, errors.New("gatewayapp: Session Runtime registry is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return nil, session.Session{}, errors.New("gatewayapp: Session ID is required")
+		return nil, session.Session{}, false, errors.New("gatewayapp: Session ID is required")
 	}
 	if r.isReleasing(sessionID) {
-		return nil, session.Session{}, sessionRuntimeReleasingError(sessionID)
+		return nil, session.Session{}, false, sessionRuntimeReleasingError(sessionID)
 	}
 	if loaded, ok := r.loaded(sessionID); ok {
 		active, err := r.owner.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
-		return loaded, active, err
+		return loaded, active, false, err
 	}
 
 	buildCtx, unlock, err := r.lockActivation(ctx)
 	if err != nil {
-		return nil, session.Session{}, err
+		return nil, session.Session{}, false, err
 	}
 	defer unlock()
 	if r.isReleasing(sessionID) {
-		return nil, session.Session{}, sessionRuntimeReleasingError(sessionID)
+		return nil, session.Session{}, false, sessionRuntimeReleasingError(sessionID)
 	}
 	if loaded, ok := r.loaded(sessionID); ok {
 		active, err := r.owner.Sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
-		return loaded, active, err
+		return loaded, active, false, err
 	}
 	active, err := r.owner.Sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
 	if err != nil {
-		return nil, session.Session{}, err
+		return nil, session.Session{}, false, err
 	}
 	closed, err := controlclient.IsSessionClosed(buildCtx, r.owner.Sessions, active.SessionRef)
 	if err != nil {
-		return nil, active, err
+		return nil, active, false, err
 	}
 	if closed {
-		return nil, active, controlclient.ErrSessionClosed
+		return nil, active, false, controlclient.ErrSessionClosed
 	}
 	workspace, err := canonicalSessionWorkspace(active)
 	if err != nil {
-		return nil, active, err
+		return nil, active, false, err
 	}
 	if err := r.validateWorkspaceIdentity(workspace); err != nil {
-		return nil, active, err
+		return nil, active, false, err
 	}
 	stack, err := r.assembler.assembleLocked(buildCtx, workspace)
 	if err != nil {
-		return nil, active, err
+		return nil, active, false, err
 	}
 	runtime := &sessionRuntime{sessionID: sessionID, workspace: workspace, stack: stack}
 	if err := r.bindActivatedLocked(active, runtime); err != nil {
 		_ = stack.closeWorkspaceResources()
-		return nil, active, err
+		return nil, active, false, err
 	}
-	return runtime, active, nil
+	return runtime, active, true, nil
 }
 
 func (r *sessionRuntimeRegistry) loaded(sessionID string) (*sessionRuntime, bool) {
@@ -412,6 +426,7 @@ func (r *sessionRuntimeRegistry) retainRuntimeLocked(runtime *sessionRuntime) fu
 		runtime.usesIdle = make(chan struct{})
 	}
 	runtime.inUse++
+	runtime.useAdmissions++
 
 	var once sync.Once
 	return func() {
@@ -425,6 +440,34 @@ func (r *sessionRuntimeRegistry) retainRuntimeLocked(runtime *sessionRuntime) fu
 			r.mu.Unlock()
 		})
 	}
+}
+
+// releaseRejectedActivation removes a Runtime only when one rejected command
+// was its sole admitted user. A concurrent observer or command makes the
+// activation non-discardable because it may already have accepted an effect.
+func (r *sessionRuntimeRegistry) releaseRejectedActivation(
+	ctx context.Context,
+	runtime *sessionRuntime,
+) error {
+	if r == nil || runtime == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	r.mu.Lock()
+	if r.sessions[runtime.sessionID] != runtime ||
+		runtime.releasing ||
+		runtime.inUse != 0 ||
+		runtime.useAdmissions != 1 {
+		r.mu.Unlock()
+		return nil
+	}
+	runtime.releasing = true
+	runtime.releaseDone = make(chan struct{})
+	done := runtime.releaseDone
+	r.mu.Unlock()
+	return r.completeRuntimeRelease(ctx, runtime, done, false)
 }
 
 func (r *sessionRuntimeRegistry) release(ctx context.Context, sessionID string) error {
@@ -459,7 +502,19 @@ func (r *sessionRuntimeRegistry) release(ctx context.Context, sessionID string) 
 	done := runtime.releaseDone
 	r.mu.Unlock()
 
-	releaseErr := r.waitRuntimeUnused(ctx, runtime)
+	return r.completeRuntimeRelease(ctx, runtime, done, true)
+}
+
+func (r *sessionRuntimeRegistry) completeRuntimeRelease(
+	ctx context.Context,
+	runtime *sessionRuntime,
+	done chan struct{},
+	waitForUse bool,
+) error {
+	var releaseErr error
+	if waitForUse {
+		releaseErr = r.waitRuntimeUnused(ctx, runtime)
+	}
 	if releaseErr == nil {
 		releaseErr = runtime.stack.Quiesce(ctx)
 	}
@@ -468,8 +523,8 @@ func (r *sessionRuntimeRegistry) release(ctx context.Context, sessionID string) 
 	}
 	r.mu.Lock()
 	runtime.releaseErr = releaseErr
-	if releaseErr == nil && r.sessions[sessionID] == runtime {
-		delete(r.sessions, sessionID)
+	if releaseErr == nil && r.sessions[runtime.sessionID] == runtime {
+		delete(r.sessions, runtime.sessionID)
 	}
 	close(done)
 	r.mu.Unlock()

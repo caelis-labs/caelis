@@ -25,7 +25,7 @@ func NewPluginService(host *gatewayapp.Stack) (*PluginService, error) {
 }
 
 func (s *PluginService) ListPlugins(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) ([]controlclient.PluginSnapshot, error) {
-	driver, err := s.hostAdapter(ctx, principal, req)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionInspect, req)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func (s *PluginService) ListPlugins(ctx context.Context, principal controlclient
 }
 
 func (s *PluginService) AddMarketplace(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) (controlclient.MarketplaceSnapshot, error) {
-	driver, err := s.hostAdapter(ctx, principal, req)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionConfigure, req)
 	if err != nil {
 		return controlclient.MarketplaceSnapshot{}, err
 	}
@@ -41,7 +41,7 @@ func (s *PluginService) AddMarketplace(ctx context.Context, principal controlcli
 }
 
 func (s *PluginService) ListMarketplaces(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) ([]controlclient.MarketplaceSnapshot, error) {
-	driver, err := s.hostAdapter(ctx, principal, req)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionInspect, req)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +49,7 @@ func (s *PluginService) ListMarketplaces(ctx context.Context, principal controlc
 }
 
 func (s *PluginService) UpdateMarketplace(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) (controlclient.MarketplaceSnapshot, error) {
-	driver, err := s.hostAdapter(ctx, principal, req)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionConfigure, req)
 	if err != nil {
 		return controlclient.MarketplaceSnapshot{}, err
 	}
@@ -57,7 +57,7 @@ func (s *PluginService) UpdateMarketplace(ctx context.Context, principal control
 }
 
 func (s *PluginService) RemoveMarketplace(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) error {
-	driver, err := s.hostAdapter(ctx, principal, req)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionConfigure, req)
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func (s *PluginService) RemoveMarketplace(ctx context.Context, principal control
 }
 
 func (s *PluginService) AddPluginPath(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) (controlclient.PluginSnapshot, error) {
-	driver, err := s.hostAdapter(ctx, principal, req)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionConfigure, req)
 	if err != nil {
 		return controlclient.PluginSnapshot{}, err
 	}
@@ -73,7 +73,7 @@ func (s *PluginService) AddPluginPath(ctx context.Context, principal controlclie
 }
 
 func (s *PluginService) InstallPlugin(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) (controlclient.PluginSnapshot, error) {
-	driver, err := s.hostAdapter(ctx, principal, req)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionConfigure, req)
 	if err != nil {
 		return controlclient.PluginSnapshot{}, err
 	}
@@ -81,7 +81,7 @@ func (s *PluginService) InstallPlugin(ctx context.Context, principal controlclie
 }
 
 func (s *PluginService) EnablePlugin(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) (controlclient.PluginSnapshot, error) {
-	driver, err := s.hostAdapter(ctx, principal, req)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionConfigure, req)
 	if err != nil {
 		return controlclient.PluginSnapshot{}, err
 	}
@@ -89,7 +89,7 @@ func (s *PluginService) EnablePlugin(ctx context.Context, principal controlclien
 }
 
 func (s *PluginService) DisablePlugin(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) (controlclient.PluginSnapshot, error) {
-	driver, err := s.hostAdapter(ctx, principal, req)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionConfigure, req)
 	if err != nil {
 		return controlclient.PluginSnapshot{}, err
 	}
@@ -97,7 +97,7 @@ func (s *PluginService) DisablePlugin(ctx context.Context, principal controlclie
 }
 
 func (s *PluginService) RemovePlugin(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) error {
-	driver, err := s.hostAdapter(ctx, principal, req)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionConfigure, req)
 	if err != nil {
 		return err
 	}
@@ -105,19 +105,19 @@ func (s *PluginService) RemovePlugin(ctx context.Context, principal controlclien
 }
 
 func (s *PluginService) InspectPlugin(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) (controlclient.PluginSnapshot, error) {
-	driver, err := s.hostAdapter(ctx, principal, req)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionInspect, req)
 	if err != nil {
 		return controlclient.PluginSnapshot{}, err
 	}
 	return driver.InspectPlugin(ctx, req.ID)
 }
 
-func (s *PluginService) hostAdapter(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) (controladapter.PluginAssembler, error) {
+func (s *PluginService) hostAdapter(ctx context.Context, principal controlclient.Principal, action controlclient.Action, req controlclient.PluginRequest) (controladapter.PluginAssembler, error) {
 	if s == nil || s.host == nil || s.host.Sessions == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: plugin service is unavailable")
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
-	if err := (controlclient.SessionAuthorizer{Sessions: s.host.Sessions}).Authorize(ctx, principal, controlclient.ActionSessionInspect, sessionID); err != nil {
+	if err := (controlclient.SessionAuthorizer{Sessions: s.host.Sessions}).Authorize(ctx, principal, action, sessionID); err != nil {
 		return nil, err
 	}
 	active, err := s.host.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})

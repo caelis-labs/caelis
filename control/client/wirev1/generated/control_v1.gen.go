@@ -233,6 +233,8 @@ type CloseSessionRequest struct {
 
 type CommandResult struct {
 	Detail      *string        `json:"detail,omitempty"`
+	ErrorCode   ErrorCode      `json:"error_code,omitempty"`
+	ErrorKind   ErrorKind      `json:"error_kind,omitempty"`
 	OperationId string         `json:"operation_id"`
 	Outcome     Outcome        `json:"outcome"`
 	Revision    *Uint64Decimal `json:"revision,omitempty"`
@@ -443,6 +445,29 @@ const (
 	EnvelopeKindCaelisError              EnvelopeKind = "caelis/error"
 )
 
+type ErrorCode string
+
+const (
+	ErrorCodeUnknown            ErrorCode = "unknown"
+	ErrorCodeInvalidArgument    ErrorCode = "invalid_argument"
+	ErrorCodeNotFound           ErrorCode = "not_found"
+	ErrorCodeAlreadyExists      ErrorCode = "already_exists"
+	ErrorCodeConflict           ErrorCode = "conflict"
+	ErrorCodePermissionDenied   ErrorCode = "permission_denied"
+	ErrorCodeUnauthenticated    ErrorCode = "unauthenticated"
+	ErrorCodeFailedPrecondition ErrorCode = "failed_precondition"
+	ErrorCodeResourceExhausted  ErrorCode = "resource_exhausted"
+	ErrorCodeRateLimited        ErrorCode = "rate_limited"
+	ErrorCodeOverloaded         ErrorCode = "overloaded"
+	ErrorCodeTimeout            ErrorCode = "timeout"
+	ErrorCodeCancelled          ErrorCode = "cancelled"
+	ErrorCodeInterrupted        ErrorCode = "interrupted"
+	ErrorCodeUnavailable        ErrorCode = "unavailable"
+	ErrorCodeUnsupported        ErrorCode = "unsupported"
+	ErrorCodeUnknownOutcome     ErrorCode = "unknown_outcome"
+	ErrorCodeInternal           ErrorCode = "internal"
+)
+
 type ErrorEnvelope struct {
 	Meta          *ACPMetadata        `json:"_meta,omitempty"`
 	Actor         *string             `json:"actor,omitempty"`
@@ -465,8 +490,19 @@ type ErrorEnvelope struct {
 	TurnId        *string             `json:"turn_id,omitempty"`
 }
 
+type ErrorKind string
+
+const (
+	ErrorKindSessionClosed         ErrorKind = "session_closed"
+	ErrorKindUnauthorized          ErrorKind = "unauthorized"
+	ErrorKindOperationConflict     ErrorKind = "operation_conflict"
+	ErrorKindStateRevisionConflict ErrorKind = "state_revision_conflict"
+)
+
 type ErrorResponse struct {
-	Error string `json:"error"`
+	Code  ErrorCode `json:"code"`
+	Error string    `json:"error"`
+	Kind  ErrorKind `json:"kind,omitempty"`
 }
 
 type FeedPosition struct {

@@ -77,19 +77,19 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 	sessionID := strings.TrimSpace(base.SessionID)
 	if operationID == "" {
 		err := errorcode.New(errorcode.InvalidArgument, "controlclient: operation_id is required")
-		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(err, OutcomeRejected)), err
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(err, OutcomeRejected), err), err
 	}
 	if err := validateCommandRequest(action, request); err != nil {
 		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
-		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected)), coded
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected), coded), coded
 	}
 	if err := s.config.Authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
-		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(err, OutcomeRejected)), err
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(err, OutcomeRejected), err), err
 	}
 	digest, err := requestDigest(request)
 	if err != nil {
 		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
-		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected)), coded
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected), coded), coded
 	}
 	intent := OperationIntent{
 		PrincipalID: strings.TrimSpace(principal.ID), OperationID: operationID, Action: action,
@@ -97,11 +97,11 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 	}
 	record, created, err := s.config.Operations.Begin(ctx, intent)
 	if errors.Is(err, ErrOperationConflict) {
-		return commandFailure(operationID, sessionID, OutcomeConflicted, publicCommandDetail(err, OutcomeConflicted)), err
+		return commandFailure(operationID, sessionID, OutcomeConflicted, publicCommandDetail(err, OutcomeConflicted), err), err
 	}
 	if err != nil {
 		coded := internalCommandError("controlclient: begin operation", err)
-		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected)), coded
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected), coded), coded
 	}
 	if !created {
 		if record.Result != nil {
@@ -110,7 +110,8 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 		// An intent without a result may still be executing in this or another
 		// process. Report the conservative outcome without claiming completion;
 		// only the creator may persist the eventual result.
-		unknown := commandFailure(operationID, sessionID, OutcomeUnknown, "operation intent exists without a provable result")
+		unknownErr := errorcode.New(errorcode.UnknownOutcome, "operation intent exists without a provable result")
+		unknown := commandFailure(operationID, sessionID, OutcomeUnknown, unknownErr.Error(), unknownErr)
 		return unknown, nil
 	}
 
@@ -128,7 +129,7 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 	defer cancelCompletion()
 	if _, completeErr := s.config.Operations.Complete(completionCtx, intent, result); completeErr != nil {
 		coded := internalCommandError("controlclient: complete operation", completeErr)
-		return commandFailure(operationID, result.SessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown)), coded
+		return commandFailure(operationID, result.SessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
 	}
 	return result, dispatchErr
 }
@@ -155,6 +156,11 @@ func resultForBackendError(result CommandResult, err error) CommandResult {
 		result.Outcome = OutcomeUnknown
 	}
 	result.Detail = publicCommandDetail(err, result.Outcome)
+	result.ErrorCode = errorcode.CodeOf(err)
+	if result.ErrorCode == errorcode.Unknown && result.Outcome == OutcomeUnknown {
+		result.ErrorCode = errorcode.UnknownOutcome
+	}
+	result.ErrorKind = ErrorKindOf(err)
 	return result
 }
 
@@ -190,8 +196,19 @@ func publicCommandDetail(err error, outcome Outcome) string {
 	}
 }
 
-func commandFailure(operationID, sessionID string, outcome Outcome, detail string) CommandResult {
-	return CommandResult{OperationID: operationID, SessionID: sessionID, Outcome: outcome, Detail: strings.TrimSpace(detail)}
+func commandFailure(operationID, sessionID string, outcome Outcome, detail string, err error) CommandResult {
+	code := errorcode.CodeOf(err)
+	if code == errorcode.Unknown && outcome == OutcomeUnknown {
+		code = errorcode.UnknownOutcome
+	}
+	return CommandResult{
+		OperationID: operationID,
+		SessionID:   sessionID,
+		Outcome:     outcome,
+		Detail:      strings.TrimSpace(detail),
+		ErrorCode:   code,
+		ErrorKind:   ErrorKindOf(err),
+	}
 }
 
 func validateCommandRequest(action Action, request any) error {

@@ -73,7 +73,7 @@ func (s *AgentService) HandoffAgent(ctx context.Context, principal controlclient
 }
 
 func (s *AgentService) DiscoverACPConnection(ctx context.Context, principal controlclient.Principal, req controlclient.ConnectACPRequest) (controlagents.DiscoverySnapshot, error) {
-	driver, err := s.hostAdapter(ctx, principal, req.SessionID, req.Surface)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionInspect, req.SessionID, req.Surface)
 	if err != nil {
 		return controlagents.DiscoverySnapshot{}, err
 	}
@@ -81,7 +81,7 @@ func (s *AgentService) DiscoverACPConnection(ctx context.Context, principal cont
 }
 
 func (s *AgentService) ConnectACP(ctx context.Context, principal controlclient.Principal, req controlclient.ConnectACPRequest) (controlagents.ConnectResult, error) {
-	driver, err := s.hostAdapter(ctx, principal, req.SessionID, req.Surface)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionConfigure, req.SessionID, req.Surface)
 	if err != nil {
 		return controlagents.ConnectResult{}, err
 	}
@@ -89,7 +89,7 @@ func (s *AgentService) ConnectACP(ctx context.Context, principal controlclient.P
 }
 
 func (s *AgentService) DisconnectCandidates(ctx context.Context, principal controlclient.Principal, req controlclient.DisconnectACPRequest) ([]controlagents.DisconnectCandidate, error) {
-	driver, err := s.hostAdapter(ctx, principal, req.SessionID, req.Surface)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionInspect, req.SessionID, req.Surface)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (s *AgentService) DisconnectCandidates(ctx context.Context, principal contr
 }
 
 func (s *AgentService) DisconnectACP(ctx context.Context, principal controlclient.Principal, req controlclient.DisconnectACPRequest) (controlagents.DisconnectResult, error) {
-	driver, err := s.hostAdapter(ctx, principal, req.SessionID, req.Surface)
+	driver, err := s.hostAdapter(ctx, principal, controlclient.ActionSessionConfigure, req.SessionID, req.Surface)
 	if err != nil {
 		return controlagents.DisconnectResult{}, err
 	}
@@ -105,74 +105,74 @@ func (s *AgentService) DisconnectACP(ctx context.Context, principal controlclien
 }
 
 func (s *AgentService) AgentBindingStatus(ctx context.Context, principal controlclient.Principal, req controlclient.AgentRequest) (agentbinding.Status, error) {
-	if _, err := s.authorizedSession(ctx, principal, req.SessionID); err != nil {
+	if _, err := s.authorizedSession(ctx, principal, controlclient.ActionSessionInspect, req.SessionID); err != nil {
 		return agentbinding.Status{}, err
 	}
 	return s.host.AgentBindings().AgentBindingStatus(ctx)
 }
 
 func (s *AgentService) BindAgentBinding(ctx context.Context, principal controlclient.Principal, req controlclient.AgentBindingRequest) (agentbinding.Status, error) {
-	if _, err := s.authorizedSession(ctx, principal, req.SessionID); err != nil {
+	if _, err := s.authorizedSession(ctx, principal, controlclient.ActionSessionConfigure, req.SessionID); err != nil {
 		return agentbinding.Status{}, err
 	}
 	return s.host.AgentBindings().BindAgentBinding(ctx, req.Binding)
 }
 
 func (s *AgentService) ResetAgentBinding(ctx context.Context, principal controlclient.Principal, req controlclient.AgentBindingRequest) (agentbinding.Status, error) {
-	if _, err := s.authorizedSession(ctx, principal, req.SessionID); err != nil {
+	if _, err := s.authorizedSession(ctx, principal, controlclient.ActionSessionConfigure, req.SessionID); err != nil {
 		return agentbinding.Status{}, err
 	}
 	return s.host.AgentBindings().ResetAgentBinding(ctx, req.Handle)
 }
 
 func (s *AgentService) CreateAgentRole(ctx context.Context, principal controlclient.Principal, req controlclient.AgentBindingRequest) (agentbinding.Status, error) {
-	if _, err := s.authorizedSession(ctx, principal, req.SessionID); err != nil {
+	if _, err := s.authorizedSession(ctx, principal, controlclient.ActionSessionConfigure, req.SessionID); err != nil {
 		return agentbinding.Status{}, err
 	}
 	return s.host.AgentBindings().CreateAgentRole(ctx, req.Role, req.Binding)
 }
 
 func (s *AgentService) DeleteAgentRole(ctx context.Context, principal controlclient.Principal, req controlclient.AgentBindingRequest) (agentbinding.Status, error) {
-	if _, err := s.authorizedSession(ctx, principal, req.SessionID); err != nil {
+	if _, err := s.authorizedSession(ctx, principal, controlclient.ActionSessionConfigure, req.SessionID); err != nil {
 		return agentbinding.Status{}, err
 	}
 	return s.host.AgentBindings().DeleteAgentRole(ctx, req.Handle)
 }
 
 func (s *AgentService) SaveAgentBindingSet(ctx context.Context, principal controlclient.Principal, req controlclient.AgentBindingRequest) (agentbinding.Status, error) {
-	if _, err := s.authorizedSession(ctx, principal, req.SessionID); err != nil {
+	if _, err := s.authorizedSession(ctx, principal, controlclient.ActionSessionConfigure, req.SessionID); err != nil {
 		return agentbinding.Status{}, err
 	}
 	return s.host.AgentBindings().SaveAgentBindingSet(ctx, req.SetName)
 }
 
 func (s *AgentService) ApplyAgentBindingSet(ctx context.Context, principal controlclient.Principal, req controlclient.AgentBindingRequest) (agentbinding.Status, error) {
-	if _, err := s.authorizedSession(ctx, principal, req.SessionID); err != nil {
+	if _, err := s.authorizedSession(ctx, principal, controlclient.ActionSessionConfigure, req.SessionID); err != nil {
 		return agentbinding.Status{}, err
 	}
 	return s.host.AgentBindings().ApplyAgentBindingSet(ctx, req.SetName)
 }
 
 func (s *AgentService) DeleteAgentBindingSet(ctx context.Context, principal controlclient.Principal, req controlclient.AgentBindingRequest) (agentbinding.Status, error) {
-	if _, err := s.authorizedSession(ctx, principal, req.SessionID); err != nil {
+	if _, err := s.authorizedSession(ctx, principal, controlclient.ActionSessionConfigure, req.SessionID); err != nil {
 		return agentbinding.Status{}, err
 	}
 	return s.host.AgentBindings().DeleteAgentBindingSet(ctx, req.SetName)
 }
 
-func (s *AgentService) authorizedSession(ctx context.Context, principal controlclient.Principal, sessionID string) (session.Session, error) {
+func (s *AgentService) authorizedSession(ctx context.Context, principal controlclient.Principal, action controlclient.Action, sessionID string) (session.Session, error) {
 	if s == nil || s.host == nil || s.host.Sessions == nil {
 		return session.Session{}, errors.New("app/gatewayapp/controladapter/local: Agent service is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	if err := (controlclient.SessionAuthorizer{Sessions: s.host.Sessions}).Authorize(ctx, principal, controlclient.ActionSessionInspect, sessionID); err != nil {
+	if err := (controlclient.SessionAuthorizer{Sessions: s.host.Sessions}).Authorize(ctx, principal, action, sessionID); err != nil {
 		return session.Session{}, err
 	}
 	return s.host.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
 }
 
-func (s *AgentService) hostAdapter(ctx context.Context, principal controlclient.Principal, sessionID, surface string) (controladapter.AgentAssembler, error) {
-	active, err := s.authorizedSession(ctx, principal, sessionID)
+func (s *AgentService) hostAdapter(ctx context.Context, principal controlclient.Principal, action controlclient.Action, sessionID, surface string) (controladapter.AgentAssembler, error) {
+	active, err := s.authorizedSession(ctx, principal, action, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,7 @@ func (s *AgentService) hostAdapter(ctx context.Context, principal controlclient.
 }
 
 func (s *AgentService) runtimeAdapter(ctx context.Context, principal controlclient.Principal, sessionID, surface string, activate bool) (controladapter.AgentAssembler, func(), error) {
-	lease, err := s.host.AcquireControlRuntime(ctx, principal, sessionID, activate)
+	lease, err := s.host.AcquireControlRuntime(ctx, principal, controlclient.ActionSessionInspect, sessionID, activate)
 	if err != nil {
 		return nil, nil, err
 	}

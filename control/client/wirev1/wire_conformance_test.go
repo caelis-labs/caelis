@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
@@ -46,10 +47,13 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		t.Run("response/CommandResult/"+string(outcome), func(t *testing.T) {
 			validateWireValue(t, "CommandResult", controlclient.CommandResult{
 				OperationID: "operation-1", Outcome: outcome, SessionID: "session-1", Revision: 8, Target: target, Detail: "detail",
+				ErrorCode: errorcode.FailedPrecondition, ErrorKind: controlclient.ErrorKindSessionClosed,
 			})
 		})
 	}
-	validateWireValue(t, "ErrorResponse", map[string]any{"error": "invalid request"})
+	validateWireValue(t, "ErrorResponse", map[string]any{
+		"error": "invalid request", "code": errorcode.FailedPrecondition, "kind": controlclient.ErrorKindSessionClosed,
+	})
 	validateWireValue(t, "SessionList", session.SessionList{Sessions: []session.SessionSummary{{
 		SessionRef: session.SessionRef{AppName: "caelis", UserID: "owner", SessionID: "session-1", WorkspaceKey: "workspace-1"},
 		CWD:        "/tmp/workspace", Title: "Session", UpdatedAt: time.Unix(100, 0).UTC(), Metadata: map[string]any{"source": "test"},

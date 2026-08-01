@@ -124,7 +124,7 @@ func (s *ConfigurationService) authorizedSession(ctx context.Context, principal 
 		return session.Session{}, errors.New("app/gatewayapp/controladapter/local: configuration service is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	if err := (controlclient.SessionAuthorizer{Sessions: s.host.Sessions}).Authorize(ctx, principal, controlclient.ActionSessionInspect, sessionID); err != nil {
+	if err := (controlclient.SessionAuthorizer{Sessions: s.host.Sessions}).Authorize(ctx, principal, controlclient.ActionSessionConfigure, sessionID); err != nil {
 		return session.Session{}, err
 	}
 	return s.host.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
@@ -139,7 +139,7 @@ func (s *ConfigurationService) hostAdapter(ctx context.Context, principal contro
 }
 
 func (s *ConfigurationService) runtimeAdapter(ctx context.Context, principal controlclient.Principal, sessionID, surface string, activate bool) (controladapter.ConfigurationAssembler, func(), error) {
-	lease, err := s.host.AcquireControlRuntime(ctx, principal, sessionID, activate)
+	lease, err := s.host.AcquireControlRuntime(ctx, principal, controlclient.ActionSessionConfigure, sessionID, activate)
 	if err != nil {
 		return nil, nil, err
 	}

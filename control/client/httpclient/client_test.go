@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/control/client"
@@ -263,8 +264,33 @@ func TestPromptReportsRemoteHostUnavailable(t *testing.T) {
 	if !errors.As(err, &remoteErr) || remoteErr.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("Prompt error = %T %v, want HTTP 503 RemoteError", err, err)
 	}
+	if errorcode.CodeOf(err) != errorcode.Unavailable {
+		t.Fatalf("Prompt error code = %q, want unavailable", errorcode.CodeOf(err))
+	}
 	if result != (controlclient.CommandResult{}) {
 		t.Fatalf("Prompt result = %#v, want zero result", result)
+	}
+}
+
+func TestFocusedMutationPreservesRemoteSessionClosed(t *testing.T) {
+	client, closeServer := newFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != wirev1.APIPrefix+"/sessions/session-1/configuration/session-mode" {
+			t.Fatalf("focused request = %s %s", r.Method, r.URL.Path)
+		}
+		writeFixtureJSON(t, w, http.StatusConflict, map[string]string{
+			"error": "conflict",
+			"code":  string(errorcode.FailedPrecondition),
+			"kind":  string(controlclient.ErrorKindSessionClosed),
+		})
+	})
+	defer closeServer()
+
+	_, err := client.ConfigureSessionMode(context.Background(), controlclient.SessionModeRequest{
+		SessionID: "session-1",
+		Mode:      "manual",
+	})
+	if !errors.Is(err, controlclient.ErrSessionClosed) || errorcode.CodeOf(err) != errorcode.FailedPrecondition {
+		t.Fatalf("focused closed error = %T %v (code %q), want ErrSessionClosed", err, err, errorcode.CodeOf(err))
 	}
 }
 

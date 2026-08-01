@@ -72,7 +72,7 @@ func (s *CompletionService) runtimeAdapter(ctx context.Context, principal contro
 	if s == nil || s.host == nil {
 		return nil, nil, errors.New("app/gatewayapp/controladapter/local: completion service is unavailable")
 	}
-	lease, err := s.host.AcquireControlRuntime(ctx, principal, req.SessionID, false)
+	lease, err := s.host.AcquireControlRuntime(ctx, principal, controlclient.ActionSessionInspect, req.SessionID, false)
 	if err != nil {
 		return nil, nil, err
 	}

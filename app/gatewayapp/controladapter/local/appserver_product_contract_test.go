@@ -2,6 +2,7 @@ package local
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +15,79 @@ import (
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
+
+func TestClosedSessionRejectsFocusedMutations(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	host, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+		AppName: "caelis-test", UserID: "local-user", StoreDir: filepath.Join(root, "store"),
+		WorkspaceKey: "workspace", WorkspaceCWD: workspace,
+		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = host.Close() })
+	clients := bindAppServerTestClients(t, host)
+	sessionID := createAppServerTestSession(t, clients, "create-closed-mutations", "closed-mutations", workspace)
+	closed, err := clients.Sessions.CloseSession(ctx, controlclient.CloseSessionRequest{
+		WriteBase: controlclient.WriteBase{OperationID: "close-before-mutations", SessionID: sessionID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "configuration",
+			run: func() error {
+				_, err := clients.Configuration.ConfigureSessionMode(ctx, controlclient.SessionModeRequest{SessionID: sessionID, Mode: "manual"})
+				return err
+			},
+		},
+		{
+			name: "presentation",
+			run: func() error {
+				return clients.Presentation.SetPresentationMode(ctx, controlclient.SetPresentationModeRequest{SessionID: sessionID, ModeID: "manual"})
+			},
+		},
+		{
+			name: "agent binding",
+			run: func() error {
+				_, err := clients.Agents.BindAgentBinding(ctx, controlclient.AgentBindingRequest{SessionID: sessionID})
+				return err
+			},
+		},
+		{
+			name: "plugin",
+			run: func() error {
+				_, err := clients.Plugins.EnablePlugin(ctx, controlclient.PluginRequest{SessionID: sessionID, ID: "missing"})
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.run(); !errors.Is(err, controlclient.ErrSessionClosed) {
+				t.Fatalf("closed mutation error = %v, want ErrSessionClosed", err)
+			}
+		})
+	}
+	state, err := clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Revision != closed.Revision {
+		t.Fatalf("closed mutation revision = %d, want unchanged %d", state.Revision, closed.Revision)
+	}
+}
 
 func TestBoundAppServerProjectsACPControllerAndFailsClosedWithoutRemoteModes(t *testing.T) {
 	ctx := context.Background()
@@ -192,7 +266,7 @@ func TestBoundAppServerKeepsSessionSkillSnapshotUntilHostRebuild(t *testing.T) {
 	})
 	clients := bindAppServerTestClients(t, host)
 	sessionID := createAppServerTestSession(t, clients, "create-skill-snapshot", "skill-snapshot", workspace)
-	lease, err := host.AcquireControlRuntime(ctx, controlclient.Principal{ID: "local-user"}, sessionID, true)
+	lease, err := host.AcquireControlRuntime(ctx, controlclient.Principal{ID: "local-user"}, controlclient.ActionSessionInspect, sessionID, true)
 	if err != nil {
 		t.Fatal(err)
 	}

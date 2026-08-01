@@ -153,8 +153,61 @@ func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
 	if state, err := remote.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionB}); err != nil || state.CWD != workspaceB {
 		t.Fatalf("inspect closed Session = %#v, %v", state, err)
 	}
+	closedPrompt, err := remote.Prompt(ctx, controlclient.PromptRequest{
+		WriteBase: controlclient.WriteBase{OperationID: "prompt-closed-b", SessionID: sessionB},
+		Input:     "must remain closed",
+	})
+	if !errors.Is(err, controlclient.ErrSessionClosed) ||
+		errorcode.CodeOf(err) != errorcode.FailedPrecondition ||
+		closedPrompt.Outcome != controlclient.OutcomeRejected {
+		t.Fatalf("HTTP Prompt on closed Session = %#v, %v; want typed ErrSessionClosed", closedPrompt, err)
+	}
 	if _, ok := stack.sessionRuntimes.loaded(sessionB); ok {
 		t.Fatal("inspect reactivated a closed Session Runtime")
+	}
+}
+
+func TestRejectedFirstCommandDoesNotPinSessionRuntime(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "workspace-rejected", "Rejected activation rule.")
+	stack, err := NewLocalStack(Config{
+		StoreDir: t.TempDir(), WorkspaceKey: "workspace-rejected", WorkspaceCWD: workspace,
+		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	client := newWorkspaceRuntimeHTTPClient(t, stack, "local-user")
+	sessionID := createWorkspaceRuntimeTestSession(
+		t,
+		client,
+		"create-rejected-activation",
+		"rejected-activation",
+		"workspace-rejected",
+		workspace,
+	)
+	active, err := stack.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleRevision := active.Revision + 1
+	result, err := client.Prompt(ctx, controlclient.PromptRequest{
+		WriteBase: controlclient.WriteBase{
+			OperationID:      "reject-first-prompt",
+			SessionID:        sessionID,
+			ExpectedRevision: &staleRevision,
+		},
+		Input: "must not activate",
+	})
+	var outcomeErr *controlclient.OutcomeError
+	if !errors.As(err, &outcomeErr) ||
+		outcomeErr.Outcome != controlclient.OutcomeConflicted ||
+		result.Outcome != controlclient.OutcomeConflicted {
+		t.Fatalf("stale first Prompt = %#v, %v; want conflicted", result, err)
+	}
+	if _, loaded := stack.sessionRuntimes.loaded(sessionID); loaded {
+		t.Fatal("stale first Prompt retained a Session Runtime")
 	}
 }
 
@@ -173,7 +226,7 @@ func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *
 	sessionID := createWorkspaceRuntimeTestSession(t, client, "create-observe", "session-observe", "workspace-observe", workspace)
 	principal := controlclient.Principal{ID: "local-user"}
 
-	observed, err := stack.AcquireControlRuntime(ctx, principal, sessionID, false)
+	observed, err := stack.AcquireControlRuntime(ctx, principal, controlclient.ActionSessionInspect, sessionID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +241,7 @@ func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *
 	}
 
 	loaded := activateSessionRuntime(t, stack, sessionID)
-	pinned, err := stack.AcquireControlRuntime(ctx, principal, sessionID, false)
+	pinned, err := stack.AcquireControlRuntime(ctx, principal, controlclient.ActionSessionInspect, sessionID, false)
 	if err != nil {
 		t.Fatal(err)
 	}

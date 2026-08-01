@@ -73,6 +73,9 @@ func TestCloseSessionRequiresQuiescentLeaseAndIsIdempotent(t *testing.T) {
 	if err := authorizer.Authorize(ctx, principal, ActionSessionInspect, active.SessionID); err != nil {
 		t.Fatalf("closed inspect authorization = %v", err)
 	}
+	if err := authorizer.Authorize(ctx, principal, ActionSessionConfigure, active.SessionID); !errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("closed configuration authorization = %v", err)
+	}
 	if err := authorizer.Authorize(ctx, principal, ActionSessionClose, active.SessionID); err != nil {
 		t.Fatalf("repeated close authorization = %v", err)
 	}

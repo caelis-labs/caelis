@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -50,6 +51,7 @@ const (
 	ActionControllerHandoff Action = "controller.handoff"
 	ActionSessionList       Action = "session.list"
 	ActionSessionInspect    Action = "session.inspect"
+	ActionSessionConfigure  Action = "session.configure"
 )
 
 type Outcome string
@@ -200,13 +202,15 @@ type HandoffRequest struct {
 
 // CommandResult is the typed recovery result persisted by the operation ledger.
 type CommandResult struct {
-	OperationID   string     `json:"operation_id"`
-	Outcome       Outcome    `json:"outcome"`
-	SessionID     string     `json:"session_id,omitempty"`
-	Revision      uint64     `json:"revision,omitempty"`
-	Target        TurnTarget `json:"target,omitempty"`
-	ParticipantID string     `json:"participant_id,omitempty"`
-	Detail        string     `json:"detail,omitempty"`
+	OperationID   string         `json:"operation_id"`
+	Outcome       Outcome        `json:"outcome"`
+	SessionID     string         `json:"session_id,omitempty"`
+	Revision      uint64         `json:"revision,omitempty"`
+	Target        TurnTarget     `json:"target,omitempty"`
+	ParticipantID string         `json:"participant_id,omitempty"`
+	Detail        string         `json:"detail,omitempty"`
+	ErrorCode     errorcode.Code `json:"error_code,omitempty"`
+	ErrorKind     ErrorKind      `json:"error_kind,omitempty"`
 }
 
 // CommandBackend executes already-authorized request-scoped commands.

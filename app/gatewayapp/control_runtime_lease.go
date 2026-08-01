@@ -28,6 +28,7 @@ type ControlRuntimeLease struct {
 func (s *Stack) AcquireControlRuntime(
 	ctx context.Context,
 	principal controlclient.Principal,
+	action controlclient.Action,
 	sessionID string,
 	activate bool,
 ) (*ControlRuntimeLease, error) {
@@ -36,7 +37,7 @@ func (s *Stack) AcquireControlRuntime(
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	authorizer := controlclient.SessionAuthorizer{Sessions: s.Sessions}
-	if err := authorizer.Authorize(ctx, principal, controlclient.ActionSessionInspect, sessionID); err != nil {
+	if err := authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
 		return nil, err
 	}
 	runtime, active, release, err := s.sessionRuntimes.acquireControlRuntime(ctx, sessionID, activate)

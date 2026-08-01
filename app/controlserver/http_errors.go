@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -37,6 +38,10 @@ func statusForError(err error) int {
 
 func writeMappedError(w http.ResponseWriter, err error) {
 	status := statusForError(err)
+	code := errorcode.CodeOf(err)
+	if code == errorcode.Unknown {
+		code = errorCodeForStatus(status)
+	}
 	detail := "internal server error"
 	switch status {
 	case http.StatusBadRequest:
@@ -53,5 +58,24 @@ func writeMappedError(w http.ResponseWriter, err error) {
 	case http.StatusServiceUnavailable:
 		detail = "service unavailable"
 	}
-	writeError(w, status, detail)
+	writeErrorIdentity(w, status, detail, code, controlclient.ErrorKindOf(err))
+}
+
+func errorCodeForStatus(status int) errorcode.Code {
+	switch status {
+	case http.StatusBadRequest:
+		return errorcode.InvalidArgument
+	case http.StatusUnauthorized:
+		return errorcode.Unauthenticated
+	case http.StatusForbidden:
+		return errorcode.PermissionDenied
+	case http.StatusNotFound:
+		return errorcode.NotFound
+	case http.StatusConflict:
+		return errorcode.Conflict
+	case http.StatusServiceUnavailable:
+		return errorcode.Unavailable
+	default:
+		return errorcode.Internal
+	}
 }
