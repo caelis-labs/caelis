@@ -51,6 +51,8 @@ class CaelisAgentTest(unittest.TestCase):
             )
             agent = object.__new__(CaelisAgent)
             agent.logs_dir = logs_dir
+            agent.model_name = "provider:test/model"
+            agent._reasoning_effort = "max"
             context = AgentContext(metadata={"output_contract": "caelis.headless/v1"})
             agent.populate_context_post_run(context)
 
@@ -59,6 +61,8 @@ class CaelisAgentTest(unittest.TestCase):
         self.assertEqual(context.n_output_tokens, 20)
         self.assertEqual(context.metadata["reasoning_tokens"], 5)
         self.assertEqual(context.metadata["context_window_tokens"], 1000)
+        self.assertEqual(context.metadata["model_profile_id"], "provider:test/model")
+        self.assertEqual(context.metadata["reasoning_effort"], "max")
 
     def test_populate_context_sums_unique_invocation_usage_updates(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -102,6 +106,8 @@ class CaelisAgentTest(unittest.TestCase):
             )
             agent = object.__new__(CaelisAgent)
             agent.logs_dir = logs_dir
+            agent.model_name = "provider:test/model"
+            agent._reasoning_effort = "max"
             context = AgentContext(metadata={})
             agent.populate_context_post_run(context)
 

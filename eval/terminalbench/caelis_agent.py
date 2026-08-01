@@ -110,13 +110,6 @@ class CaelisAgent(BaseInstalledAgent):
         stderr_path = EnvironmentPaths.agent_dir / self._STDERR_FILENAME
         command = self._command(instruction, output_path, stderr_path)
         await self.exec_as_agent(environment, command=command)
-        context.metadata = {
-            "execution_mode": "dangerously-skip-permissions",
-            "model_profile_id": self.model_name,
-            "reasoning_effort": self._reasoning_effort,
-            "output_contract": "caelis.headless/v1",
-            "output_path": str(output_path),
-        }
 
     def _command(
         self,
@@ -155,6 +148,11 @@ class CaelisAgent(BaseInstalledAgent):
         context.n_cache_tokens = usage["n_cache_tokens"]
         context.n_output_tokens = usage["n_output_tokens"]
         metadata = dict(context.metadata or {})
+        metadata["execution_mode"] = "dangerously-skip-permissions"
+        metadata["model_profile_id"] = self.model_name
+        metadata["reasoning_effort"] = self._reasoning_effort
+        metadata["output_contract"] = "caelis.headless/v1"
+        metadata["output_path"] = str(EnvironmentPaths.agent_dir / self._OUTPUT_FILENAME)
         metadata["reasoning_tokens"] = usage["n_reasoning_tokens"]
         metadata["total_tokens"] = usage["n_total_tokens"]
         metadata["context_window_tokens"] = usage["context_window_tokens"]
