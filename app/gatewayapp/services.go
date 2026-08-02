@@ -178,9 +178,11 @@ func (s ModelService) UsageSnapshot(ctx context.Context, ref session.SessionRef,
 	return s.stack.SessionUsageSnapshot(ctx, ref, modelAlias)
 }
 
-// ProviderUsage returns account-level subscription windows for the selected
-// model's provider. found=false means the provider has no usage adapter or the
-// model is not backed by a subscription credential.
+// ProviderUsage returns the latest cached account-level subscription windows
+// for the selected model's provider and schedules a bounded asynchronous
+// refresh. It never waits for the provider account API. found=false means the
+// provider has no usage adapter or the model is not backed by a subscription
+// credential.
 func (s ModelService) ProviderUsage(ctx context.Context, modelAlias string) (providerusage.Snapshot, bool, error) {
 	if s.stack == nil || s.stack.providerUsage == nil {
 		return providerusage.Snapshot{}, false, nil
