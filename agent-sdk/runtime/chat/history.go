@@ -314,6 +314,13 @@ func messageFromDurableEvent(event *session.Event) (model.Message, bool) {
 		if text := strings.TrimSpace(session.EventText(event)); text != "" {
 			return model.NewTextMessage(model.RoleUser, text), true
 		}
+	case session.EventTypeCompact:
+		// Compact checkpoints retain Runtime/System provenance in the internal
+		// overlay. Providers receive user-role history for compatibility with
+		// APIs that reject or discard system-role messages mid-conversation.
+		if text := strings.TrimSpace(session.EventText(event)); text != "" {
+			return model.NewTextMessage(model.RoleUser, text), true
+		}
 	case session.EventTypeAssistant:
 		if text := strings.TrimSpace(session.EventText(event)); text != "" {
 			return model.NewTextMessage(model.RoleAssistant, text), true

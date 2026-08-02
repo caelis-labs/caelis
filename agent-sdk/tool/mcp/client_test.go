@@ -43,11 +43,55 @@ func TestMCPServerHelperProcess(t *testing.T) {
 			},
 		}, nil, nil
 	})
+	if mode == "bad_schema" {
+		server.AddTool(&mcpsdk.Tool{
+			Name:        "bad",
+			Description: "Malformed nested schema",
+			InputSchema: map[string]any{"type": "object", "properties": []any{}},
+		}, func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return &mcpsdk.CallToolResult{}, nil
+		})
+	}
 	if err := server.Run(context.Background(), &mcpsdk.StdioTransport{}); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+func TestMCPManagerQuarantinesOnlyMalformedToolAndReportsWarning(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mgr, err := NewManager(ctx, []ServerSpec{{
+		PluginID: "myplugin",
+		Name:     "myserver",
+		Command:  os.Args[0],
+		Args:     []string{"-test.run=^TestMCPServerHelperProcess$"},
+		Env: map[string]string{
+			"CAELIS_MCP_HELPER":      "1",
+			"CAELIS_MCP_HELPER_MODE": "bad_schema",
+		},
+		WorkDir: os.TempDir(),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	tools := mgr.Tools()
+	if len(tools) != 1 || tools[0].Definition().Name != "mcp__myplugin__myserver__echo" {
+		t.Fatalf("tools = %#v, want only valid echo", tools)
+	}
+	mutated := tools[0].Definition()
+	mutated.InputSchema["type"] = "array"
+	if got := tools[0].Definition().InputSchema["type"]; got != "object" {
+		t.Fatalf("Definition schema after caller mutation = %#v, want object", got)
+	}
+	infos := mgr.GetServerInfos("myplugin")
+	if len(infos) != 1 || !strings.Contains(infos[0].Warning, `tool "bad" quarantined`) {
+		t.Fatalf("server infos = %#v, want bad-tool quarantine warning", infos)
+	}
 }
 
 func TestMCPToolCallServerExitReturnsErrorResult(t *testing.T) {
@@ -121,8 +165,12 @@ func TestMCPManagerAndTool(t *testing.T) {
 	if def.Name != "mcp__myplugin__myserver__echo" {
 		t.Errorf("unexpected tool name: %s", def.Name)
 	}
-	if def.Description != "Echoes input" {
+	if !strings.HasPrefix(def.Description, tool.ExternalCapabilityDescriptionPrefix) || !strings.Contains(def.Description, "Echoes input") {
 		t.Errorf("unexpected tool description: %s", def.Description)
+	}
+	if def.Metadata[tool.MetadataExternalCapability] != true ||
+		def.Metadata[tool.MetadataDescriptionAuthority] != tool.MetadataAuthorityNonAuthorizing {
+		t.Errorf("unexpected external capability metadata: %#v", def.Metadata)
 	}
 
 	res, err := oneTool.Call(ctx, tool.Call{

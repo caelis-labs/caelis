@@ -25,7 +25,35 @@ const (
 var runCommandAllowedArgs = []string{"command", "workdir", "yield_time_ms", "sandbox_permissions", "justification"}
 
 func ValidateRunCommandArgs(args map[string]any) error {
-	return tool.RejectUnknownArgs(args, runCommandAllowedArgs...)
+	if err := tool.RejectUnknownArgs(args, runCommandAllowedArgs...); err != nil {
+		return err
+	}
+	permission := tool.CommandSandboxPermissionUseDefault
+	if raw, present := args["sandbox_permissions"]; present && raw != nil {
+		value, ok := raw.(string)
+		if !ok {
+			return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"sandbox_permissions\" must be string")
+		}
+		normalized, err := tool.NormalizeCommandSandboxPermission(value, true)
+		if err != nil {
+			return err
+		}
+		permission = normalized
+	}
+	justification := ""
+	if raw, present := args["justification"]; present && raw != nil {
+		value, ok := raw.(string)
+		if !ok {
+			return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"justification\" must be string")
+		}
+		justification = value
+	}
+	if permission == tool.CommandSandboxPermissionRequireEscalated {
+		if strings.TrimSpace(justification) == "" {
+			return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"justification\" is required when sandbox_permissions is require_escalated")
+		}
+	}
+	return nil
 }
 
 type RunCommandConfig struct {
@@ -86,6 +114,15 @@ func (t *RunCommandTool) Definition() tool.Definition {
 			},
 			"required":             []string{"command"},
 			"additionalProperties": false,
+			"allOf": []any{map[string]any{
+				"if": map[string]any{
+					"properties": map[string]any{
+						"sandbox_permissions": map[string]any{"const": tool.CommandSandboxPermissionRequireEscalated},
+					},
+					"required": []string{"sandbox_permissions"},
+				},
+				"then": map[string]any{"required": []string{"justification"}},
+			}},
 		},
 		Metadata:     toolutil.AnnotationMetadata(false, true, false, true),
 		Capabilities: tool.Capabilities{ParallelSafe: true},

@@ -51,7 +51,6 @@ const (
 )
 
 type ApprovalPayload = approval.Payload
-type ApprovalReviewTrace = approval.ReviewTrace
 
 type ApprovalReviewRequest = approval.Request
 type ApprovalReviewResult = approval.Decision

@@ -24,8 +24,6 @@ type approvalReviewAccountingProvider interface {
 	ApprovalReviewAccounting(context.Context, ApprovalReviewRequest, ApprovalReviewResult) (*UsageSnapshot, *session.EventInvocation, error)
 }
 
-const guardianExecutionFailureThreshold = 3
-
 func (g *Gateway) resolveApprovalRequest(
 	turnCtx context.Context,
 	approvalCtx context.Context,
@@ -110,9 +108,9 @@ func waitForApprovalDecision(turnCtx context.Context, approvalCtx context.Contex
 	}
 }
 
-// resolveActiveAutoApproval runs Guardian/Reviewer work only after the
-// request reaches the Control queue head. Its result is returned to the common
-// resolver path instead of bypassing the approval registry.
+// resolveActiveAutoApproval runs Guardian only after the request reaches the
+// Control queue head. Its result is returned to the common resolver path
+// instead of bypassing the approval registry.
 func (g *Gateway) resolveActiveAutoApproval(
 	turnCtx context.Context,
 	approvalCtx context.Context,
@@ -167,29 +165,29 @@ func (g *Gateway) resolveActiveAutoApproval(
 	} else {
 		result, err = approver.Decide(approvalCtx, reviewReq)
 	}
-	guardianFailureStreak := 0
-	switch {
-	case err == nil:
-		handle.recordGuardianExecutionResult(nil)
-	case turnCtx.Err() != nil || approvalCtx.Err() != nil:
-		// Parent lifecycle termination is not evidence that Guardian is unavailable,
-		// regardless of whether the provider reports cancellation or a deadline.
-	default:
-		guardianFailureStreak = handle.recordGuardianExecutionResult(err)
-	}
 	var reviewErrStatus ApprovalReviewStatus
 	if err != nil {
 		status, rationale, _ := approval.ReviewErrorOutcome(err)
 		reviewErrStatus = status
-		result = approval.FinalizeReviewResult(payload, ApprovalReviewResult{
-			Approved:       false,
-			Outcome:        string(ApprovalStatusRejected),
-			Risk:           "unknown",
-			Authorization:  "unknown",
-			Rationale:      rationale,
-			DisplayText:    FormatApprovalReviewText(false, "unknown", "unknown", rationale),
-			DecisionSource: string(ApprovalModeAutoReview),
-		})
+		terminal := cloneApprovalPayload(payload)
+		terminal.Status = ApprovalStatusRejected
+		terminal.ReviewStatus = reviewErrStatus
+		terminal.ReviewText = strings.TrimSpace(rationale)
+		terminal.Risk = "unknown"
+		terminal.Authorization = "unknown"
+		terminal.DecisionSource = ""
+		handle.publishApprovalReviewPayload(req, terminal)
+		if turnCtx.Err() != nil {
+			return agent.ApprovalResponse{}, turnCtx.Err()
+		}
+		if approvalCtx.Err() != nil {
+			return agent.ApprovalResponse{}, approvalCtx.Err()
+		}
+		// A Guardian execution failure is not a Guardian denial. Auto-review has no
+		// human fallback and the tool cannot run without a valid model decision, so
+		// surface a typed availability error immediately instead of synthesizing an
+		// approval response that the model never produced.
+		return agent.ApprovalResponse{}, guardianUnavailableError(err)
 	}
 	response := approval.RuntimeResponseFromFinalReview(result)
 	if strings.TrimSpace(result.DecisionSource) == "" {
@@ -202,26 +200,17 @@ func (g *Gateway) resolveActiveAutoApproval(
 		terminal.Status = ApprovalStatusApproved
 	}
 	terminal.ReviewStatus = approvalReviewTerminalStatus(result)
-	if reviewErrStatus != "" {
-		terminal.ReviewStatus = reviewErrStatus
-	}
 	terminal.ReviewText = strings.TrimSpace(result.DisplayText)
 	terminal.Risk = strings.TrimSpace(result.Risk)
 	terminal.Authorization = strings.TrimSpace(result.Authorization)
 	terminal.DecisionSource = strings.TrimSpace(result.DecisionSource)
-	terminal.ReviewTrace = approval.CloneReviewTrace(result.Trace)
 	usage, invocation := g.approvalReviewSessionAccounting(context.WithoutCancel(turnCtx), reviewReq, result)
 	// Reviewer usage is durable accounting, not the parent's active model
 	// context. Publishing it as a Session UsageUpdate would temporarily replace
 	// the main-turn context meter with the Guardian model's snapshot.
 	handle.publishApprovalReviewPayloadWithInvocation(req, terminal, invocation)
 	_ = g.persistApprovalReviewSessionAccounting(context.WithoutCancel(turnCtx), req, usage, terminal.DecisionSource, invocation)
-	if err != nil && guardianFailureStreak >= guardianExecutionFailureThreshold {
-		return agent.ApprovalResponse{}, guardianUnavailableError(guardianFailureStreak, err)
-	}
-
-	// Valid denials remain ordinary reviewer decisions. Only consecutive
-	// Guardian execution failures trip the per-Turn availability breaker.
+	// Valid denials remain ordinary Guardian decisions.
 	response.ReviewText = strings.TrimSpace(result.DisplayText)
 	return response, nil
 }
@@ -238,44 +227,7 @@ func (g *Gateway) approvalReviewSessionAccounting(ctx context.Context, req Appro
 		}
 		return usage, invocation
 	}
-	usage, invocation, _ := g.approvalReviewTraceSessionAccounting(ctx, result.Trace)
-	return usage, invocation
-}
-
-func (g *Gateway) approvalReviewTraceSessionAccounting(ctx context.Context, trace *approval.ReviewTrace) (*UsageSnapshot, *session.EventInvocation, error) {
-	if g == nil || g.sessions == nil || trace == nil {
-		return nil, nil, nil
-	}
-	sessionID := strings.TrimSpace(trace.SessionID)
-	assistantEventID := strings.TrimSpace(trace.AssistantEventID)
-	if sessionID == "" || assistantEventID == "" {
-		return nil, nil, nil
-	}
-	events, err := g.sessions.Events(ctx, session.EventsRequest{
-		SessionRef:       session.SessionRef{SessionID: sessionID},
-		IncludeTransient: true,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, event := range events {
-		if event == nil || strings.TrimSpace(event.ID) != assistantEventID {
-			continue
-		}
-		return UsageSnapshotFromSessionEvent(event), approvalReviewAccountingInvocationFromSessionEvent(event), nil
-	}
-	return nil, nil, nil
-}
-
-func approvalReviewAccountingInvocationFromSessionEvent(event *session.Event) *session.EventInvocation {
-	if event == nil || event.Invocation == nil {
-		return nil
-	}
-	invocation := session.CloneEventInvocation(*event.Invocation)
-	if invocation.Provider == "" && invocation.Model == "" {
-		return nil
-	}
-	return &invocation
+	return nil, nil
 }
 
 func (g *Gateway) persistApprovalReviewSessionAccounting(ctx context.Context, req *agent.ApprovalRequest, usage *UsageSnapshot, source string, invocation *session.EventInvocation) error {

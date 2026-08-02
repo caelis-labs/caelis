@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -424,7 +423,7 @@ func (s *Stack) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, err
 	}
-	approvalReviewer := s.newModelApprovalReviewer()
+	guardianApprover := s.newGuardianApprover()
 	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions:             s.Sessions,
 		Runtime:              leasedRuntime,
@@ -433,8 +432,7 @@ func (s *Stack) buildGatewayRuntimeContext(
 		Resolver:             resolver,
 		ExecutionValidator:   executionValidator,
 		DefaultApprovalMode:  kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode),
-		ApprovalApprover:     approval.ReviewerAdapter{Reviewer: approvalReviewer},
-		ApprovalReviewer:     approvalReviewer,
+		ApprovalApprover:     guardianApprover,
 		SubmissionReferences: s.submissionReferenceProjector(),
 		SessionStartHooks:    plan.Plugins.SessionStartHooks,
 	})

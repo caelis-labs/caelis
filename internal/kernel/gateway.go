@@ -30,8 +30,12 @@ type Config struct {
 	// request after surface defaults are applied and before Runtime starts.
 	ExecutionValidator  ExecutionRequirementsValidator
 	DefaultApprovalMode ApprovalMode
-	ApprovalApprover    approval.Approver
-	ApprovalReviewer    ApprovalReviewer
+	// ApprovalApprover is the canonical automatic-approval authority.
+	ApprovalApprover approval.Approver
+	// ApprovalReviewer is a legacy injection compatibility path. Gateway adapts
+	// it to ApprovalApprover only when no canonical Approver was supplied; it is
+	// never populated from an Approver.
+	ApprovalReviewer ApprovalReviewer
 	// SubmissionReferences projects internal skill references and @file
 	// before a turn reaches the model/runtime boundary.
 	SubmissionReferences SubmissionReferenceProjector
@@ -112,9 +116,6 @@ func New(cfg Config) (*Gateway, error) {
 			cfg.ApprovalApprover = denyingApprovalApprover{}
 		}
 	}
-	if cfg.ApprovalReviewer == nil {
-		cfg.ApprovalReviewer = approval.ApproverAdapter{Approver: cfg.ApprovalApprover}
-	}
 	return &Gateway{
 		sessions:             cfg.Sessions,
 		runtime:              cfg.Runtime,
@@ -177,15 +178,6 @@ func (g *Gateway) Resolver() *AssemblyResolver {
 	}
 	r, _ := g.resolver.(*AssemblyResolver)
 	return r
-}
-
-// ApprovalReviewer returns the reviewer configured for automatic approval
-// decisions so non-gateway surfaces can reuse the same policy bridge.
-func (g *Gateway) ApprovalReviewer() ApprovalReviewer {
-	if g == nil {
-		return nil
-	}
-	return g.approvalReviewer
 }
 
 func (g *Gateway) Interrupt(ctx context.Context, req InterruptRequest) error {

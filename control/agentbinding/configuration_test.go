@@ -1,10 +1,26 @@
 package agentbinding
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestValidateRolesRejectsProjectionOverflow(t *testing.T) {
+	t.Parallel()
+
+	roles := make([]Role, 0, maxCustomRoles+1)
+	for i := 0; i < maxCustomRoles+1; i++ {
+		roles = append(roles, Role{Handle: Handle(fmt.Sprintf("role-%02d", i)), Description: "bounded role"})
+	}
+	if err := ValidateRoles(roles); err == nil {
+		t.Fatal("ValidateRoles(over count) succeeded")
+	}
+	if err := ValidateRoles([]Role{{Handle: "research", Description: strings.Repeat("界", maxCustomRoleDescriptionRunes+1)}}); err == nil {
+		t.Fatal("ValidateRoles(overlong description) succeeded")
+	}
+}
 
 func TestCreateRoleAddsBoundCustomDelegationDefinition(t *testing.T) {
 	profiles := testProfiles()

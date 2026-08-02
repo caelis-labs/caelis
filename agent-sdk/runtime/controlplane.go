@@ -121,7 +121,7 @@ func (r *Runtime) executeACPControllerTurn(
 		}
 	}()
 
-	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts)
+	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputCompaction)
 	if userEvent != nil {
 		persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
 			SessionRef:    ref,

@@ -58,3 +58,25 @@ func TestForRequestChangesWithInstructionsAndUsesBoundedInstructionMedia(t *test
 		t.Fatalf("instruction media tokens = %d, want at least %d", smallMedia.Tokens, EstimatedImageMediaTokens)
 	}
 }
+
+func TestForRequestTracksActualProjectedToolsAtRequestBoundary(t *testing.T) {
+	t.Parallel()
+
+	base := &model.Request{Tools: []model.ToolSpec{
+		model.NewFunctionToolSpec("ToolSearch", "", map[string]any{"type": "object"}),
+	}}
+	before := ForRequest(base)
+	afterRequest := *base
+	afterRequest.Tools = append(
+		append([]model.ToolSpec(nil), base.Tools...),
+		model.NewFunctionToolSpec(
+			"mcp__calendar__demo__create_event",
+			"Create a calendar event",
+			map[string]any{"type": "object"},
+		),
+	)
+	after := ForRequest(&afterRequest)
+	if before.Fingerprint == after.Fingerprint || after.Tokens <= before.Tokens {
+		t.Fatalf("request prefix before=%+v after=%+v, want admitted tool reflected at request boundary", before, after)
+	}
+}

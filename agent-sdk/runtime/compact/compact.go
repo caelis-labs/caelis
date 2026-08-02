@@ -295,7 +295,7 @@ func PromptEventsFromLatestCompact(events []*session.Event) []*session.Event {
 	}
 	if data, ok := CompactEventDataFromEvent(visible[index]); ok {
 		out := make([]*session.Event, 0, len(visible[index:]))
-		if replacement := replacementTextEvent(session.EventText(visible[index])); replacement != nil {
+		if replacement := replacementTextEvent(visible[index]); replacement != nil {
 			out = append(out, replacement)
 		}
 		out = append(out, eventsAfterCheckpointCoverage(visible, index, data)...)
@@ -401,15 +401,20 @@ func lastCompactIndex(events []*session.Event) int {
 	return legacyIndex
 }
 
-func replacementTextEvent(text string) *session.Event {
-	text = strings.TrimSpace(text)
+func replacementTextEvent(source *session.Event) *session.Event {
+	if source == nil {
+		return nil
+	}
+	text := strings.TrimSpace(session.EventText(source))
 	if text == "" {
 		return nil
 	}
+	cloned := session.CloneEvent(source)
 	return &session.Event{
-		Type:       session.EventTypeUser,
+		Type:       session.EventTypeCompact,
 		Visibility: session.VisibilityCanonical,
-		Actor:      session.ActorRef{Kind: session.ActorKindUser, Name: "user"},
+		Actor:      session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
 		Text:       text,
+		Meta:       cloned.Meta,
 	}
 }

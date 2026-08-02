@@ -804,6 +804,20 @@ func TestCloneEventPreservesCompactEnvelope(t *testing.T) {
 	}
 }
 
+func TestCloneEventDeepClonesCompactionContext(t *testing.T) {
+	event := &Event{Compaction: &EventCompactionContext{
+		UserEvidence: []string{"explicit user constraint"},
+	}}
+	cloned := CloneEvent(event)
+	if cloned == nil || cloned.Compaction == nil || len(cloned.Compaction.UserEvidence) != 1 {
+		t.Fatalf("CloneEvent() = %#v, want compaction context", cloned)
+	}
+	event.Compaction.UserEvidence[0] = "mutated source"
+	if got := cloned.Compaction.UserEvidence[0]; got != "explicit user constraint" {
+		t.Fatalf("cloned user evidence = %q, want isolated copy", got)
+	}
+}
+
 func TestCloneEventPreservesTextWhitespace(t *testing.T) {
 	t.Parallel()
 

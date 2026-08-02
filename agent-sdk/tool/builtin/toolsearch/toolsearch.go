@@ -7,12 +7,20 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-const defaultLimit = 8
+const (
+	defaultLimit                  = 8
+	maxLimit                      = 16
+	maxQueryRunes                 = 256
+	maxDescriptionSources         = 6
+	maxToolSearchDescriptionRunes = 4096
+	maxSourceMetadataRunes        = 256
+)
 
 type Tool struct {
 	def     tool.Definition
@@ -49,11 +57,13 @@ func New(tools []tool.Tool) tool.Tool {
 						"type":        "string",
 						"description": "Search query for deferred tools.",
 						"minLength":   1,
+						"maxLength":   maxQueryRunes,
 					},
 					"limit": map[string]any{
 						"type":        "integer",
 						"description": fmt.Sprintf("Maximum number of tools to return. Defaults to %d.", defaultLimit),
 						"minimum":     1,
+						"maximum":     maxLimit,
 					},
 				},
 			},
@@ -95,14 +105,25 @@ func description(entries []entry) string {
 	}
 	sources := make([]string, 0, len(sourceSet))
 	for source := range sourceSet {
-		sources = append(sources, "- "+source)
+		sources = append(sources, source)
 	}
 	sort.Strings(sources)
+	omitted := 0
+	if len(sources) > maxDescriptionSources {
+		omitted = len(sources) - maxDescriptionSources
+		sources = sources[:maxDescriptionSources]
+	}
+	for index := range sources {
+		sources[index] = "- " + sources[index]
+	}
+	if omitted > 0 {
+		sources = append(sources, fmt.Sprintf("- %d additional sources omitted", omitted))
+	}
 	sourceDescriptions := "None currently enabled."
 	if len(sources) > 0 {
 		sourceDescriptions = strings.Join(sources, "\n")
 	}
-	return fmt.Sprintf("# Tool discovery\n\nSearches over deferred MCP tool metadata and exposes matching tools for the next model call.\n\nYou have access to tools from the following sources:\n%s\nSome of the tools may not have been provided to you upfront, and you should use this tool (`%s`) to search for the required tools.", sourceDescriptions, tool.ToolSearchToolName)
+	return truncateRunes(fmt.Sprintf("# Tool discovery\n\nSearches over deferred MCP tool metadata and exposes matching tools for the next model call.\n\nYou have access to tools from the following sources:\n%s\nSome of the tools may not have been provided to you upfront, and you should use this tool (`%s`) to search for the required tools.", sourceDescriptions, tool.ToolSearchToolName), maxToolSearchDescriptionRunes)
 }
 
 func (t *Tool) Definition() tool.Definition {
@@ -121,11 +142,18 @@ func (t *Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 		return tool.Result{}, err
 	}
 	matches := t.search(args.Query, args.Limit)
-	definitions := make([]tool.Definition, 0, len(matches))
+	result := tool.ToolSearchResult{Tools: make([]tool.ToolSearchDiscoveredTool, 0, len(matches))}
 	for _, match := range matches {
-		definitions = append(definitions, match.def)
+		result.Tools = append(result.Tools, tool.NewToolSearchDiscoveredTool(match.def))
 	}
-	raw, err := json.Marshal(tool.NewToolSearchResult(definitions))
+	result.Count = len(result.Tools)
+	for tool.EstimateToolSearchResultPromptTokens(result) > tool.MaxToolSearchResultPromptTokens && len(result.Tools) > 0 {
+		result.Tools = result.Tools[:len(result.Tools)-1]
+		result.Count = len(result.Tools)
+		result.Truncated = true
+		result.OmittedCount++
+	}
+	raw, err := json.Marshal(result)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -157,7 +185,17 @@ func parseRequest(raw json.RawMessage) (request, error) {
 	if args.Query == "" {
 		return args, tool.NewError(tool.ErrorCodeInvalidInput, "ToolSearch query is required")
 	}
-	if args.Limit <= 0 {
+	if utf8.RuneCountInString(args.Query) > maxQueryRunes {
+		return args, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("ToolSearch query must be at most %d characters", maxQueryRunes))
+	}
+	_, limitProvided := values["limit"]
+	if limitProvided && args.Limit < 1 {
+		return args, tool.NewError(tool.ErrorCodeInvalidInput, "ToolSearch limit must be at least 1")
+	}
+	if args.Limit > maxLimit {
+		return args, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("ToolSearch limit must be at most %d", maxLimit))
+	}
+	if !limitProvided {
 		args.Limit = defaultLimit
 	}
 	return args, nil
@@ -272,7 +310,16 @@ func sourceName(def tool.Definition) string {
 
 func stringMetadata(def tool.Definition, key string) string {
 	value, _ := def.Metadata[key].(string)
-	return strings.TrimSpace(value)
+	return truncateRunes(value, maxSourceMetadataRunes)
+}
+
+func truncateRunes(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	runes := []rune(value)
+	if limit <= 0 || len(runes) <= limit {
+		return value
+	}
+	return strings.TrimSpace(string(runes[:limit]))
 }
 
 func tokenize(text string) []string {

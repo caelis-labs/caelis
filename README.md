@@ -112,6 +112,12 @@ Common flags:
 - `-model-profile`: select an existing Control-owned `ModelProfile`.
 - `-reasoning-effort`: select an effort supported by that profile.
 
+In `auto-review`, Guardian model requests use the provider-neutral bounded retry
+policy. If Guardian still cannot produce one validated decision, Caelis stops
+the current Turn with `guardian_unavailable`, executes no requested action, and
+does not silently fall back to manual approval. Retry the Turn after Guardian is
+available, or select `manual` before starting sensitive work.
+
 Provider setup and API-key replacement are available only through `/connect`.
 Runtime startup never creates or overwrites model profiles or credentials.
 `/model use` changes the global default by storing one existing ModelProfile ID

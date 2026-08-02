@@ -105,6 +105,11 @@ func (g *Gateway) CloseSessionApprovals(ref session.SessionRef, reason string) {
 	if coordinator != nil {
 		coordinator.clear(reason)
 	}
+	for _, candidate := range []any{g.approvalApprover, g.approvalReviewer} {
+		if releaser, ok := candidate.(interface{ ReleaseApprovalContext(session.SessionRef) }); ok {
+			releaser.ReleaseApprovalContext(ref)
+		}
+	}
 }
 
 func (g *Gateway) SubmitActiveTurn(ctx context.Context, req SubmitActiveTurnRequest) error {

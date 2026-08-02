@@ -2,11 +2,7 @@ package gatewayapp
 
 import (
 	"strings"
-
-	"github.com/caelis-labs/caelis/internal/kernel"
 )
-
-const guardianSceneID = "guardian"
 
 // ReviewerAgentID is the hidden Control-owned Agent used by /review.
 const ReviewerAgentID = "reviewer"
@@ -25,10 +21,6 @@ Be demanding about quality, not only correctness:
 - Do not make code changes unless the request explicitly asks for fixes.
 
 Default to analysis only. Keep residual summary secondary to findings.`
-
-func (s *Stack) newModelApprovalReviewer() kernel.ApprovalReviewer {
-	return newModelApprovalReviewer(s.Sessions)
-}
 
 // ReviewPrompt returns the model-visible /review prompt and the rune offset
 // where user-provided instructions begin after the fixed workspace scope.

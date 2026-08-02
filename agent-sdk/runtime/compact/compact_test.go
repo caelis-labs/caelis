@@ -94,8 +94,11 @@ func TestPromptEventsFromLatestCompactUsesPureTextPromptEvent(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("prompt event count = %d, want 2 (%+v)", len(got), got)
 	}
-	if got[0].Type != session.EventTypeUser || got[0].Visibility != session.VisibilityCanonical {
-		t.Fatalf("first prompt event = %+v, want canonical user prompt text", got[0])
+	if got[0].Type != session.EventTypeCompact || got[0].Visibility != session.VisibilityCanonical {
+		t.Fatalf("first prompt event = %+v, want canonical compact prompt text", got[0])
+	}
+	if got[0].Actor.Kind != session.ActorKindSystem {
+		t.Fatalf("first prompt actor = %+v, want Runtime system provenance", got[0].Actor)
 	}
 	if got[0].Message != nil || got[0].Protocol != nil {
 		t.Fatalf("first prompt event carries duplicated structured payload: message=%+v protocol=%+v", got[0].Message, got[0].Protocol)

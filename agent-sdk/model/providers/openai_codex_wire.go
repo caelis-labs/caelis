@@ -13,6 +13,10 @@ import (
 const (
 	openAICodexReplayProvider = "openai"
 	openAICodexReplayKind     = "reasoning_encrypted_content"
+	// Codex OAuth's Responses endpoint has not been verified to accept strict
+	// function-tool declarations. Keep the provider downgrade explicit rather
+	// than silently discarding the canonical ToolSpec bit in the serializer.
+	openAICodexStrictFunctionTools = false
 )
 
 type openAICodexRequest struct {
@@ -108,7 +112,7 @@ func openAICodexRequestFromModel(req *model.Request, modelName string) (openAICo
 	if err != nil {
 		return openAICodexRequest{}, err
 	}
-	tools := openAICodexTools(req.Tools)
+	tools := openAICodexTools(req.Tools, openAICodexStrictFunctionTools)
 	toolChoice := ""
 	if len(tools) > 0 {
 		toolChoice = "auto"
@@ -127,7 +131,7 @@ func openAICodexRequestFromModel(req *model.Request, modelName string) (openAICo
 	}, nil
 }
 
-func openAICodexTools(specs []model.ToolSpec) []openAICodexTool {
+func openAICodexTools(specs []model.ToolSpec, strictFunctionTools bool) []openAICodexTool {
 	definitions := model.FunctionToolDefinitions(specs)
 	if len(definitions) == 0 {
 		return nil
@@ -139,7 +143,7 @@ func openAICodexTools(specs []model.ToolSpec) []openAICodexTool {
 			Name:        strings.TrimSpace(definition.Name),
 			Description: definition.Description,
 			Parameters:  cloneAnyMap(definition.Parameters),
-			Strict:      false,
+			Strict:      strictFunctionTools && definition.Strict,
 		})
 	}
 	return out

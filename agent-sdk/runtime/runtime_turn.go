@@ -98,6 +98,7 @@ func (r *Runtime) runWithOverflowRecovery(
 	batch *[]*session.Event,
 	sink *runner,
 ) error {
+	currentTurnInput := session.CloneEvent(pendingInput)
 	var toolFactOrdinal uint64
 	// Share the durable tool-step counter across overflow retries so a reused
 	// provider-local call ID cannot collide with a prior successful execution.
@@ -113,7 +114,7 @@ func (r *Runtime) runWithOverflowRecovery(
 		}
 		if recovery, ok := compactionRecoveryFromError(err); ok {
 			*batch = append(*batch, attemptBatch...)
-			progress, compacted, compactErr := r.recoverByCompacting(ctx, activeSession, ref, turnID, req, recovery, sink)
+			progress, compacted, compactErr := r.recoverByCompacting(ctx, activeSession, ref, turnID, req, recovery, currentTurnInput, sink)
 			if compactErr != nil {
 				return compactErr
 			}

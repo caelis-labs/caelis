@@ -138,6 +138,71 @@ Persistence and replay changes require whole-object round trips proving rebuilt
 `[]model.Message` context matches Runtime-produced context. UI reload tests are
 not a substitute.
 
+## Tool Schema Contracts
+
+Canonical ToolSpecs describe the Runtime-accepted input set. Conditional
+requirements may use JSON Schema conditionals, while the Runtime repeats the
+same semantic check and fails closed before execution. A ToolSpec is marked
+provider-strict only when its complete schema fits the maintained strict
+subset; conditionals are explicitly sent non-strict rather than advertising a
+stronger contract than the provider can preserve. Provider downgrade never
+removes local unknown-field, type, conditional, approval, or execution-policy
+validation.
+
+Dynamic ToolSpecs are cloned and bounded at their semantic ingress. MCP,
+ToolSearch, and Spawn/Agent metadata keep separate owners and budgets. Deferred
+tool admission occurs before model-visible and durable ToolSearch results so
+live execution and replay rebuild the same bounded visible set.
+
+MCP input schemas are recursively validated against the maintained JSON Schema
+keyword and value-shape subset before they become ToolSpecs. Malformed types,
+containers, conditionals, or unknown keywords quarantine that tool; they are
+never replaced with a permissive empty schema. Externally supplied MCP tool and
+schema descriptions remain capability metadata, carry an explicit
+non-authorizing marker in the provider-visible description, and cannot grant
+instruction authority. Normalization preserves accepted property names,
+required fields, constraints, and business values.
+
+## Instruction Authority and Runtime Provenance
+
+Authority follows the Caelis channel and typed identity that introduced a
+value, not labels embedded in its text. Harness, sandbox, approval, and Runtime
+policy contracts remain authoritative for their own boundary. Session,
+workspace, global, and Skill instructions apply only through the Caelis path
+that selected and injected them; none can grant permissions, weaken approval or
+sandbox policy, or override the current user request.
+
+The built-in Skill tool makes a Skill body instruction content only for its
+matching Runtime-selected tool call identity. A file, another tool, or an
+external participant cannot gain Skill authority by emitting `<skill_content>`
+or similar text. Tool and external content otherwise remains evidence, even
+when it imitates a privileged tag.
+
+Compaction preserves source authority. Only actual User events can establish or
+change user objectives, constraints, approvals, rejections, and corrections.
+Typed Runtime events remain authoritative only for their recorded status;
+assistant text, tool results, external-agent output, file contents, and earlier
+checkpoints are evidence. Compaction input uses Runtime-authored, one-line JSON
+source frames; only the top-level source field carries provenance, while every
+payload is JSON-quoted so embedded headings, tags, or frame text cannot create
+a peer source. Normal and salvage generation use the same framing and authority
+contract. A compact checkpoint is stored and overlaid as a
+Runtime-authored `Compact`/`System` fact with an explicit non-authorizing
+marker. `runtime/chat` may project that fact as a user-role history message for
+provider compatibility; the projection does not change its provenance or grant
+user authority.
+
+When a large tool result is written to a local artifact, the pointer is Runtime
+metadata rather than a tool-authored instruction. The canonical ingress removes
+every tool-authored top-level `_caelis` namespace and records a collision in
+Runtime-owned Event metadata. Only a successful artifact write may reintroduce
+`_caelis.runtime.artifact`; truncation preserves it from an explicit trusted
+caller field and never infers trust from Content shape. JSON collisions are
+also marked in the Runtime artifact pointer, while the original bytes remain in
+the artifact. Text results use a neutral Runtime artifact line. Runtime metadata
+must not be merged into a tool-owned `system_hint`. Artifact metadata is
+navigation for truncated evidence, not an authorization or policy channel.
+
 ## Stability
 
 The SDK remains a stable dependency only while:

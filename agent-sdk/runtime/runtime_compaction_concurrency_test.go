@@ -181,7 +181,7 @@ func TestCompactionReplayRoundTripKeepsConcurrentCoveredSequenceSuccessor(t *tes
 	if err != nil {
 		t.Fatalf("Session() error = %v", err)
 	}
-	checkpointMessage := model.NewTextMessage(model.RoleUser, "CONTEXT CHECKPOINT\nsummary through Seq 10")
+	checkpointMessage := model.NewTextMessage(model.RoleUser, normalizeCompactMarkdown("CONTEXT CHECKPOINT\nsummary through Seq 10"))
 	checkpoint := buildCompactEvent(current, checkpointMessage.TextContent(), compact.CompactEventData{
 		ContractVersion:      compact.CompactContractVersion,
 		SummarizedThroughSeq: 10,

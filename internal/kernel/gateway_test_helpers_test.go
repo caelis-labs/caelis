@@ -6,6 +6,7 @@ import (
 	"iter"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -62,9 +63,10 @@ func (r *recordingRuntime) RunState(context.Context, session.SessionRef) (agent.
 }
 
 type approvalRuntime struct {
-	session  session.Session
-	requests int
-	mode     string
+	session    session.Session
+	requests   int
+	mode       string
+	executions atomic.Int64
 }
 
 func (r *approvalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
@@ -76,7 +78,7 @@ func (r *approvalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 		requests = 1
 	}
 	for range requests {
-		_, err := req.ApprovalRequester.RequestApproval(ctx, agent.ApprovalRequest{
+		response, err := req.ApprovalRequester.RequestApproval(ctx, agent.ApprovalRequest{
 			SessionRef: r.session.SessionRef,
 			Session:    r.session,
 			RunID:      "run-1",
@@ -100,6 +102,9 @@ func (r *approvalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 		if err != nil {
 			return agent.RunResult{}, err
 		}
+		if response.Approved {
+			r.executions.Add(1)
+		}
 	}
 	return agent.RunResult{
 		Session: r.session,
@@ -107,6 +112,10 @@ func (r *approvalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 			events: []*session.Event{{ID: "approved", Type: session.EventTypeNotice}},
 		},
 	}, nil
+}
+
+func (r *approvalRuntime) executionCount() int {
+	return int(r.executions.Load())
 }
 
 func (r *approvalRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {

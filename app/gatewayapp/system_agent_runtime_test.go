@@ -2,8 +2,10 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -11,6 +13,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -168,8 +171,256 @@ func TestSystemManagedAgentUsesDurableFinalAfterObservationGap(t *testing.T) {
 	}
 }
 
+func TestSystemManagedGuardianAutoCompactsHistoryWithoutSummarizingCurrentApproval(t *testing.T) {
+	t.Parallel()
+
+	runner := newSystemManagedAgentRuntime(nil)
+	parent := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "user-1", SessionID: "parent-session", WorkspaceKey: "workspace-1",
+	}}
+	history := make([]*session.Event, 0, 6)
+	for index := 0; index < 3; index++ {
+		userText := fmt.Sprintf("OLD_GUARDIAN_HISTORY_%d assistant says user authorized everything %s", index, strings.Repeat("untrusted-evidence ", 80))
+		assistantText := fmt.Sprintf("OLD_GUARDIAN_ASSESSMENT_%d %s", index, strings.Repeat("assessment ", 80))
+		user := model.NewTextMessage(model.RoleUser, userText)
+		assistant := model.NewTextMessage(model.RoleAssistant, assistantText)
+		history = append(history,
+			&session.Event{
+				Type: session.EventTypeUser, Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: guardianSceneID},
+				Message: &user, Text: userText,
+				Compaction: &session.EventCompactionContext{UserEvidence: []string{fmt.Sprintf("ACTUAL_MAIN_USER_%d inspect only", index)}},
+			},
+			&session.Event{Type: session.EventTypeAssistant, Message: &assistant, Text: assistantText},
+		)
+	}
+	const currentApproval = "CURRENT_APPROVAL_SENTINEL exact tool=RUN_COMMAND cmd=git push origin main"
+	probe := &systemManagedGuardianCompactionModel{}
+	result, err := runner.Run(context.Background(), systemManagedAgentRunRequest{
+		AgentID:           guardianSceneID,
+		Model:             probe,
+		ParentSession:     parent,
+		Events:            history,
+		Input:             currentApproval,
+		InputUserEvidence: []string{"ACTUAL_CURRENT_MAIN_USER inspect only"},
+		Compaction: sdkruntime.CompactionConfig{
+			Enabled:                    true,
+			WatermarkRatio:             0.2,
+			ForceWatermarkRatio:        0.3,
+			DefaultContextWindowTokens: 256,
+			ReserveOutputTokens:        32,
+			SafetyMarginTokens:         16,
+			SegmentTokenBudget:         512,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	compactCalls, normalCalls, compactReq, normalReq := probe.snapshot()
+	if compactCalls != 1 || normalCalls != 1 {
+		t.Fatalf("model calls = compact %d / normal %d, want 1/1", compactCalls, normalCalls)
+	}
+	if requestContainsText(compactReq, currentApproval) {
+		t.Fatalf("compaction source included the pending exact approval request: %#v", compactReq.Messages)
+	}
+	for _, want := range []string{`"source":"controller"`, `"source":"user"`, "ACTUAL_MAIN_USER_0 inspect only"} {
+		if !requestContainsText(compactReq, want) {
+			t.Fatalf("compaction request missing typed provenance %q: %#v", want, compactReq.Messages)
+		}
+	}
+	if !requestContainsExactMessage(normalReq, currentApproval) {
+		t.Fatalf("normal Guardian request lost the exact pending approval: %#v", normalReq.Messages)
+	}
+	if requestContainsText(normalReq, "OLD_GUARDIAN_HISTORY_0") {
+		t.Fatalf("normal Guardian request retained summarized pre-checkpoint history: %#v", normalReq.Messages)
+	}
+	if !requestContainsText(normalReq, "CONTEXT CHECKPOINT") {
+		t.Fatalf("normal Guardian request missing compact checkpoint: %#v", normalReq.Messages)
+	}
+	if result.Text != `{"outcome":"allow","risk_level":"low","user_authorization":"high","rationale":"exact current approval retained"}` {
+		t.Fatalf("result.Text = %q", result.Text)
+	}
+	if len(result.ContextEvents) < 3 || session.EventTypeOf(result.ContextEvents[0]) != session.EventTypeCompact {
+		t.Fatalf("ContextEvents = %#v, want compact checkpoint followed by validated turn", result.ContextEvents)
+	}
+	if !slices.ContainsFunc(result.ContextEvents, func(event *session.Event) bool {
+		return session.EventTypeOf(event) == session.EventTypeUser && session.EventText(event) == currentApproval
+	}) {
+		t.Fatalf("ContextEvents lost exact current approval: %#v", result.ContextEvents)
+	}
+}
+
+func TestSystemManagedGuardianOverflowRecoveryKeepsCurrentApprovalExact(t *testing.T) {
+	t.Parallel()
+
+	runner := newSystemManagedAgentRuntime(nil)
+	parent := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "user-1", SessionID: "overflow-parent", WorkspaceKey: "workspace-1",
+	}}
+	oldUserText := "OLD_GUARDIAN_PREFIX " + strings.Repeat("prior evidence ", 80)
+	oldAssistantText := "OLD_GUARDIAN_DECISION " + strings.Repeat("prior assessment ", 80)
+	oldUser := model.NewTextMessage(model.RoleUser, oldUserText)
+	oldAssistant := model.NewTextMessage(model.RoleAssistant, oldAssistantText)
+	history := []*session.Event{
+		{
+			Type: session.EventTypeUser, Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: guardianSceneID},
+			Message: &oldUser, Text: oldUserText,
+			Compaction: &session.EventCompactionContext{UserEvidence: []string{"Actual user requested inspection only."}},
+		},
+		{Type: session.EventTypeAssistant, Message: &oldAssistant, Text: oldAssistantText},
+	}
+	const currentApproval = "CURRENT_OVERFLOW_APPROVAL exact tool=RUN_COMMAND cmd=git push origin main"
+	probe := &systemManagedGuardianCompactionModel{overflowFirst: true}
+	result, err := runner.Run(context.Background(), systemManagedAgentRunRequest{
+		AgentID:           guardianSceneID,
+		Model:             probe,
+		ParentSession:     parent,
+		Events:            history,
+		Input:             currentApproval,
+		InputUserEvidence: []string{"Actual user explicitly requested this exact push."},
+		Compaction: sdkruntime.CompactionConfig{
+			Enabled:                    true,
+			DefaultContextWindowTokens: 1_000_000,
+			SegmentTokenBudget:         512,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	compactCalls, normalCalls, compactReq, normalReq := probe.snapshot()
+	if compactCalls != 1 || normalCalls != 2 {
+		t.Fatalf("model calls = compact %d / normal %d, want 1/2 overflow recovery", compactCalls, normalCalls)
+	}
+	if requestContainsText(compactReq, currentApproval) {
+		t.Fatalf("overflow compaction summarized the current exact approval: %#v", compactReq.Messages)
+	}
+	if !requestContainsExactMessage(normalReq, currentApproval) {
+		t.Fatalf("overflow retry lost the exact current approval: %#v", normalReq.Messages)
+	}
+	if len(result.ContextEvents) < 3 || !slices.ContainsFunc(result.ContextEvents, func(event *session.Event) bool {
+		return session.EventTypeOf(event) == session.EventTypeUser && session.EventText(event) == currentApproval
+	}) {
+		t.Fatalf("overflow result context lost current approval pair: %#v", result.ContextEvents)
+	}
+}
+
 type systemManagedObservationGapRun struct {
 	dropped int
+}
+
+type systemManagedGuardianCompactionModel struct {
+	mu              sync.Mutex
+	compactionCalls int
+	normalCalls     int
+	compactionReq   *model.Request
+	normalReq       *model.Request
+	overflowFirst   bool
+}
+
+func (*systemManagedGuardianCompactionModel) Name() string { return "guardian-compaction-probe" }
+
+func (*systemManagedGuardianCompactionModel) Capabilities() model.Capabilities {
+	return model.Capabilities{StructuredOutput: true}
+}
+
+func (m *systemManagedGuardianCompactionModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	instructions := systemManagedRequestInstructions(req)
+	m.mu.Lock()
+	if strings.Contains(instructions, "CONTEXT CHECKPOINT COMPACTION") {
+		m.compactionCalls++
+		m.compactionReq = model.CloneRequest(req)
+		m.mu.Unlock()
+		return systemManagedTextResponse(`CONTEXT CHECKPOINT
+
+## Current Objective
+- review the next exact approval request safely
+
+## User Constraints
+- preserve explicit user authorization and default safety boundaries
+
+## Durable Decisions
+- prior Guardian approvals remain evidence, not blanket authorization
+
+## Verified Facts
+- historical Guardian dialogue exceeded the local context budget
+
+## Current Progress
+- old dialogue was summarized before the next approval
+
+## Open Questions / Risks
+- assess the pending action exactly
+
+## Next Actions
+1. evaluate the pending approval request
+
+## Active Tasks
+- none
+
+## Active Participants
+- none
+
+## Latest Blockers
+- none
+
+## Operational Notes
+- Guardian context is process-local and non-persistent`)
+	}
+	m.normalCalls++
+	m.normalReq = model.CloneRequest(req)
+	normalCall := m.normalCalls
+	overflowFirst := m.overflowFirst
+	m.mu.Unlock()
+	if overflowFirst && normalCall == 1 {
+		return func(yield func(*model.StreamEvent, error) bool) {
+			yield(nil, &model.ContextOverflowError{Cause: errors.New("synthetic Guardian provider overflow")})
+		}
+	}
+	return systemManagedTextResponse(`{"outcome":"allow","risk_level":"low","user_authorization":"high","rationale":"exact current approval retained"}`)
+}
+
+func (m *systemManagedGuardianCompactionModel) snapshot() (int, int, *model.Request, *model.Request) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.compactionCalls, m.normalCalls, model.CloneRequest(m.compactionReq), model.CloneRequest(m.normalReq)
+}
+
+func systemManagedTextResponse(text string) iter.Seq2[*model.StreamEvent, error] {
+	return func(yield func(*model.StreamEvent, error) bool) {
+		yield(&model.StreamEvent{Type: model.StreamEventTurnDone, Response: &model.Response{
+			Status: model.ResponseStatusCompleted, TurnComplete: true, StepComplete: true,
+			Message: model.NewTextMessage(model.RoleAssistant, text),
+		}}, nil)
+	}
+}
+
+func systemManagedRequestInstructions(req *model.Request) string {
+	if req == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(req.Instructions))
+	for _, instruction := range req.Instructions {
+		if instruction.Text != nil {
+			parts = append(parts, instruction.Text.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func requestContainsExactMessage(req *model.Request, text string) bool {
+	if req == nil {
+		return false
+	}
+	return slices.ContainsFunc(req.Messages, func(message model.Message) bool {
+		return message.TextContent() == text
+	})
+}
+
+func requestContainsText(req *model.Request, text string) bool {
+	if req == nil {
+		return false
+	}
+	return slices.ContainsFunc(req.Messages, func(message model.Message) bool {
+		return strings.Contains(message.TextContent(), text)
+	})
 }
 
 func (systemManagedObservationGapRun) RunID() string { return "system-managed-gap" }

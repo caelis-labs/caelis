@@ -204,6 +204,22 @@ func TestOpenAICodexTokenOnlyReasoningAndPrematureEOF(t *testing.T) {
 	}
 }
 
+func TestOpenAICodexToolStrategyExplicitlyDowngradesStrict(t *testing.T) {
+	t.Parallel()
+
+	spec := model.NewFunctionToolSpec("closed", "closed schema", map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{"value": map[string]any{"type": "string"}},
+		"required":             []string{"value"},
+		"additionalProperties": false,
+	})
+	spec.Function.Strict = true
+	tools := openAICodexTools([]model.ToolSpec{spec}, openAICodexStrictFunctionTools)
+	if len(tools) != 1 || tools[0].Strict {
+		t.Fatalf("Codex tools = %#v, want explicit strict downgrade", tools)
+	}
+}
+
 func TestOpenAIResponsesInputsCarryViewImageToolResult(t *testing.T) {
 	t.Parallel()
 

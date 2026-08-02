@@ -13,16 +13,34 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 )
 
-func buildUserEvent(activeSession session.Session, turnID string, input string, displayInput string, parts []model.ContentPart) *session.Event {
+func buildUserEvent(
+	activeSession session.Session,
+	turnID string,
+	input string,
+	displayInput string,
+	parts []model.ContentPart,
+	actor session.ActorRef,
+	compaction *session.EventCompactionContext,
+) *session.Event {
 	if strings.TrimSpace(input) == "" && len(parts) == 0 {
 		return nil
 	}
 	message, displayText, meta := userdisplay.Resolve(input, displayInput, parts, nil)
+	if !session.ActorRefHasIdentity(actor) {
+		actor = session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
+	}
+	var compactionCopy *session.EventCompactionContext
+	if compaction != nil {
+		cloned := *compaction
+		cloned.UserEvidence = append([]string(nil), compaction.UserEvidence...)
+		compactionCopy = &cloned
+	}
 	return &session.Event{
 		IdempotencyKey: "turn-input:" + strings.TrimSpace(turnID),
 		Type:           session.EventTypeUser,
 		Visibility:     session.VisibilityCanonical,
-		Actor:          session.ActorRef{Kind: session.ActorKindUser, Name: "user"},
+		Actor:          actor,
+		Compaction:     compactionCopy,
 		Scope:          ptrScope(defaultScope(activeSession, turnID)),
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{

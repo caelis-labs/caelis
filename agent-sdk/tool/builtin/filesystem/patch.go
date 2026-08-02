@@ -49,6 +49,15 @@ func (t *PatchTool) Definition() tool.Definition {
 						},
 						"required":             []string{"old", "new"},
 						"additionalProperties": false,
+						"allOf": []any{map[string]any{
+							"if": map[string]any{
+								"properties": map[string]any{
+									"replace_all": map[string]any{"const": true},
+								},
+								"required": []string{"replace_all"},
+							},
+							"then": map[string]any{"required": []string{"expected_replacements"}},
+						}},
 					},
 				},
 				"if_revision": map[string]any{

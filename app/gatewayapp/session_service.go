@@ -172,6 +172,9 @@ func (s *Stack) estimatedPromptPrefixTokens(ctx context.Context, ref session.Ses
 	runtimeCfg := s.runtime
 	runtimeCfg.Assembly = assembly.CloneResolvedAssembly(runtimeCfg.Assembly)
 	runtimeCfg.BaseMetadata = cloneMap(runtimeCfg.BaseMetadata)
+	// This is an initial/static status estimate only. The Runtime model gate and
+	// durable usage snapshots derive the authoritative prefix from each actual
+	// model request, including the currently admitted deferred-tool projection.
 	base := runtimeCfg.EstimatedPromptPrefixTokens
 	s.mu.RUnlock()
 	if base < 0 {

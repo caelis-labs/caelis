@@ -70,14 +70,20 @@ type ApprovalRequester interface {
 
 // RunRequest is the minimal runtime execution request.
 type RunRequest struct {
-	SessionRef        session.SessionRef  `json:"session_ref"`
-	Input             string              `json:"input,omitempty"`
-	DisplayInput      string              `json:"display_input,omitempty"`
-	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
-	Request           ModelRequestOptions `json:"request,omitempty"`
-	ApprovalRequester ApprovalRequester   `json:"-"`
-	Agent             Agent               `json:"-"`
-	AgentSpec         AgentSpec           `json:"-"`
+	SessionRef   session.SessionRef  `json:"session_ref"`
+	Input        string              `json:"input,omitempty"`
+	DisplayInput string              `json:"display_input,omitempty"`
+	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
+	// InputActor identifies who authored Input while preserving its user-role
+	// chatbot message shape. Empty retains the default real-user actor.
+	InputActor session.ActorRef `json:"-"`
+	// InputCompaction preserves typed provenance if Runtime later summarizes the
+	// input. It does not alter the provider-visible message.
+	InputCompaction   *session.EventCompactionContext `json:"-"`
+	Request           ModelRequestOptions             `json:"request,omitempty"`
+	ApprovalRequester ApprovalRequester               `json:"-"`
+	Agent             Agent                           `json:"-"`
+	AgentSpec         AgentSpec                       `json:"-"`
 }
 
 // RunResult is one runtime execution result.

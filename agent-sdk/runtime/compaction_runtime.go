@@ -160,17 +160,42 @@ func (r *Runtime) compactAfterOverflow(
 	ref session.SessionRef,
 	turnID string,
 	req agent.RunRequest,
+	currentTurnInput *session.Event,
 	cause error,
 	sink *runner,
 ) (compactionProgress, bool, error) {
 	return r.compactAndNotify(ctx, activeSession, ref, turnID, nil, nil, sink, func(events []*session.Event) (compact.Result, error) {
+		sourceEvents, pendingEvents := overflowCompactionEvents(events, currentTurnInput)
 		return r.compactor.CompactOnOverflow(ctx, compact.Request{
-			Session:    activeSession,
-			SessionRef: ref,
-			Events:     events,
-			Model:      req.AgentSpec.Model,
+			Session:       activeSession,
+			SessionRef:    ref,
+			Events:        sourceEvents,
+			PendingEvents: pendingEvents,
+			Model:         req.AgentSpec.Model,
 		}, cause)
 	})
+}
+
+func overflowCompactionEvents(events []*session.Event, currentTurnInput *session.Event) ([]*session.Event, []*session.Event) {
+	if currentTurnInput == nil {
+		return session.CloneEvents(events), nil
+	}
+	wantKey := strings.TrimSpace(currentTurnInput.IdempotencyKey)
+	wantID := strings.TrimSpace(currentTurnInput.ID)
+	for index, event := range events {
+		if event == nil {
+			continue
+		}
+		matches := wantKey != "" && strings.TrimSpace(event.IdempotencyKey) == wantKey
+		if !matches && wantID != "" {
+			matches = strings.TrimSpace(event.ID) == wantID
+		}
+		if !matches {
+			continue
+		}
+		return session.CloneEvents(events[:index]), []*session.Event{session.CloneEvent(event)}
+	}
+	return session.CloneEvents(events), []*session.Event{session.CloneEvent(currentTurnInput)}
 }
 
 func (r *Runtime) compactAfterModelRequestWatermark(

@@ -51,6 +51,17 @@ type TruncationInfo struct {
 // TruncateResultWithInfo returns one bounded tool result and the non-model
 // metadata describing any truncation that was applied.
 func TruncateResultWithInfo(result Result, policy TruncationPolicy) (Result, TruncationInfo) {
+	return truncateResultWithInfo(result, policy, nil)
+}
+
+// TruncateResultWithInfoAndProtectedJSONFields truncates one result while
+// preserving caller-supplied top-level JSON fields. Protected values are
+// trusted call parameters: this function never infers them from result content.
+func TruncateResultWithInfoAndProtectedJSONFields(result Result, policy TruncationPolicy, protected map[string]any) (Result, TruncationInfo) {
+	return truncateResultWithInfo(result, policy, protected)
+}
+
+func truncateResultWithInfo(result Result, policy TruncationPolicy, protected map[string]any) (Result, TruncationInfo) {
 	if policy.tokenBudget() <= 0 {
 		policy = DefaultTruncationPolicy()
 	}
@@ -66,7 +77,7 @@ func TruncateResultWithInfo(result Result, policy TruncationPolicy) (Result, Tru
 		return out, newTruncationInfo(policy)
 	}
 	var info TruncationInfo
-	out.Content, info = TruncateParts(out.Content, policy)
+	out.Content, info = truncatePartsWithProtectedJSONFields(out.Content, policy, protected)
 	return out, info
 }
 
@@ -82,22 +93,27 @@ func ResultNeedsTruncation(result Result, policy TruncationPolicy) bool {
 // TruncateParts applies one shared budget to model content items while
 // preserving non-text references such as images and files.
 func TruncateParts(parts []model.Part, policy TruncationPolicy) ([]model.Part, TruncationInfo) {
+	return truncatePartsWithProtectedJSONFields(parts, policy, nil)
+}
+
+func truncatePartsWithProtectedJSONFields(parts []model.Part, policy TruncationPolicy, protected map[string]any) ([]model.Part, TruncationInfo) {
 	info := newTruncationInfo(policy)
 	budgetTokens := policy.tokenBudget()
 	if budgetTokens <= 0 {
 		return model.CloneParts(parts), info
 	}
-	totalTokens := estimateTokensForParts(parts)
+	prepared, protectedPart := injectProtectedJSONFields(parts, protected)
+	totalTokens := estimateTokensForParts(prepared)
 	info.EstimatedTokens = totalTokens
 	info.EstimatedBytes = totalTokens * approxBytesPerToken
 	if totalTokens <= budgetTokens {
-		return model.CloneParts(parts), info
+		return prepared, info
 	}
 
 	remaining := budgetTokens
 	out := make([]model.Part, 0, len(parts)+1)
 	omitted := 0
-	for _, part := range model.CloneParts(parts) {
+	for index, part := range prepared {
 		switch {
 		case part.JSON != nil:
 			if remaining <= 0 {
@@ -111,7 +127,11 @@ func TruncateParts(parts []model.Part, policy TruncationPolicy) ([]model.Part, T
 				out = append(out, part)
 				continue
 			}
-			truncatedRaw, subInfo := TruncateJSON(raw, TruncationPolicy{MaxTokens: remaining})
+			var protectedFields map[string]any
+			if index == protectedPart {
+				protectedFields = protected
+			}
+			truncatedRaw, subInfo := truncateJSONWithProtectedFields(raw, TruncationPolicy{MaxTokens: remaining}, protectedFields)
 			part.JSON.Value = truncatedRaw
 			out = append(out, part)
 			remaining = 0
@@ -144,8 +164,38 @@ func TruncateParts(parts []model.Part, policy TruncationPolicy) ([]model.Part, T
 	return out, info
 }
 
+func injectProtectedJSONFields(parts []model.Part, protected map[string]any) ([]model.Part, int) {
+	out := model.CloneParts(parts)
+	if len(protected) == 0 {
+		return out, -1
+	}
+	for index := range out {
+		part := &out[index]
+		if part.JSON == nil {
+			continue
+		}
+		var payload map[string]any
+		if json.Unmarshal(part.JSON.Value, &payload) != nil {
+			continue
+		}
+		for key, value := range protected {
+			if strings.TrimSpace(key) == "" {
+				continue
+			}
+			payload[key] = cloneTruncationValue(value)
+		}
+		part.JSON.Value = mustMarshalMap(payload)
+		return out, index
+	}
+	return out, -1
+}
+
 // TruncateJSON applies recursive truncation to one JSON payload.
 func TruncateJSON(raw json.RawMessage, policy TruncationPolicy) (json.RawMessage, TruncationInfo) {
+	return truncateJSONWithProtectedFields(raw, policy, nil)
+}
+
+func truncateJSONWithProtectedFields(raw json.RawMessage, policy TruncationPolicy, protected map[string]any) (json.RawMessage, TruncationInfo) {
 	info := newTruncationInfo(policy)
 	budgetTokens := policy.tokenBudget()
 	if len(raw) == 0 || budgetTokens <= 0 {
@@ -161,7 +211,7 @@ func TruncateJSON(raw json.RawMessage, policy TruncationPolicy) (json.RawMessage
 		return mustMarshalAny(text), info
 	}
 	if payload, ok := parsed.(map[string]any); ok {
-		out, mapInfo := TruncateMap(payload, policy)
+		out, mapInfo := truncateMapWithProtectedJSONFields(payload, policy, protected)
 		return mustMarshalMap(out), mapInfo
 	}
 	totalTokens := estimateTokensForJSONValue(parsed)
@@ -187,19 +237,29 @@ func TruncateJSON(raw json.RawMessage, policy TruncationPolicy) (json.RawMessage
 
 // TruncateMap applies recursive truncation to one JSON-like object.
 func TruncateMap(input map[string]any, policy TruncationPolicy) (map[string]any, TruncationInfo) {
+	return truncateMapWithProtectedJSONFields(input, policy, nil)
+}
+
+func truncateMapWithProtectedJSONFields(input map[string]any, policy TruncationPolicy, protected map[string]any) (map[string]any, TruncationInfo) {
 	info := newTruncationInfo(policy)
 	budgetTokens := policy.tokenBudget()
 	if input == nil || budgetTokens <= 0 {
 		return cloneMapValue(input), info
 	}
-	totalTokens := estimateTokensForJSONValue(input)
+	prepared := cloneMapValue(input)
+	for key, value := range protected {
+		if strings.TrimSpace(key) != "" {
+			prepared[key] = cloneTruncationValue(value)
+		}
+	}
+	totalTokens := estimateTokensForJSONValue(prepared)
 	info.EstimatedTokens = totalTokens
 	info.EstimatedBytes = totalTokens * approxBytesPerToken
 	if totalTokens <= budgetTokens {
-		return cloneMapValue(input), info
+		return prepared, info
 	}
 
-	out, state := truncateMapToJSONBudget(input, budgetTokens)
+	out, state := truncateMapToJSONBudget(prepared, budgetTokens, protected)
 	info.Truncated = true
 	info.OmittedItems = state.omitted
 	info.RemovedTokens = max(totalTokens-budgetTokens, 0)
@@ -656,8 +716,8 @@ func truncateLineUnit(line string, budgetTokens int) string {
 	return out
 }
 
-func truncateMapToJSONBudget(input map[string]any, budgetTokens int) (map[string]any, *truncationState) {
-	body, protected := splitProtectedJSONFields(input, budgetTokens)
+func truncateMapToJSONBudget(input map[string]any, budgetTokens int, trustedProtected map[string]any) (map[string]any, *truncationState) {
+	body, protected := splitProtectedJSONFields(input, budgetTokens, trustedProtected)
 	target := budgetTokens
 	if len(protected) > 0 {
 		target = max(budgetTokens-estimateTokensForJSONValue(protected), 1)
@@ -699,17 +759,32 @@ func truncateMapToJSONBudget(input map[string]any, budgetTokens int) (map[string
 	return last, lastState
 }
 
-func splitProtectedJSONFields(input map[string]any, budgetTokens int) (map[string]any, map[string]any) {
+func splitProtectedJSONFields(input map[string]any, budgetTokens int, trustedProtected map[string]any) (map[string]any, map[string]any) {
 	body := cloneMapValue(input)
+	protected := map[string]any{}
+	for key, value := range trustedProtected {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		candidate := cloneMapValue(protected)
+		candidate[key] = cloneTruncationValue(value)
+		if estimateTokensForJSONValue(candidate) < budgetTokens {
+			protected[key] = cloneTruncationValue(value)
+			delete(body, key)
+		}
+	}
 	hint, _ := body["system_hint"].(string)
-	if strings.TrimSpace(hint) == "" {
+	if strings.TrimSpace(hint) != "" {
+		candidate := cloneMapValue(protected)
+		candidate["system_hint"] = hint
+		if estimateTokensForJSONValue(candidate) < budgetTokens {
+			protected["system_hint"] = hint
+			delete(body, "system_hint")
+		}
+	}
+	if len(protected) == 0 {
 		return body, nil
 	}
-	protected := map[string]any{"system_hint": hint}
-	if estimateTokensForJSONValue(protected) >= budgetTokens {
-		return body, nil
-	}
-	delete(body, "system_hint")
 	return body, protected
 }
 

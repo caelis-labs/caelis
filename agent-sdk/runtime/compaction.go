@@ -210,12 +210,41 @@ func ComputeUsageSnapshotForModel(
 	modelName string,
 ) compact.UsageSnapshot {
 	promptEvents := compact.PromptEventsFromLatestCompact(events)
+	promptEvents = promptEventsWithPending(promptEvents, pendingEvents)
+	// When a provider omits usage, prefer the prefix recorded from the actual
+	// last model-visible request over the static assembly fallback. This reuses
+	// the request-boundary fingerprint path and avoids reconstructing ToolSearch
+	// visibility or dynamic Spawn specs in the status service.
+	if tokens, ok := latestPromptPrefixTokensForIdentity(events, provider, modelName); ok {
+		cfg.EstimatedPromptPrefixTokens = tokens
+	}
 	return snapshotUsageWithResolvedWindowUsing(
-		promptEventsWithPending(promptEvents, pendingEvents),
+		promptEvents,
 		contextWindow,
 		cfg,
 		func(snapshot providerTokenSnapshot) bool {
 			return providerSnapshotCompatibleWithIdentity(snapshot, provider, modelName)
 		},
 	)
+}
+
+func latestPromptPrefixTokensForIdentity(events []*session.Event, provider string, modelName string) (int, bool) {
+	provider, modelName = session.StableInvocationIdentity(provider, modelName)
+	if provider == "" || modelName == "" {
+		return 0, false
+	}
+	for index := len(events) - 1; index >= 0; index-- {
+		event := events[index]
+		if event == nil || event.Invocation == nil || event.Invocation.PromptPrefixTokens <= 0 {
+			continue
+		}
+		candidateProvider, candidateModel := session.StableInvocationIdentity(
+			event.Invocation.Provider,
+			event.Invocation.Model,
+		)
+		if strings.EqualFold(candidateProvider, provider) && strings.EqualFold(candidateModel, modelName) {
+			return event.Invocation.PromptPrefixTokens, true
+		}
+	}
+	return 0, false
 }

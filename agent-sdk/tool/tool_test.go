@@ -3,6 +3,8 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -134,6 +136,37 @@ func TestModelSpecsInfersStrictForClosedAnyOfSchema(t *testing.T) {
 	}
 }
 
+func TestModelSpecsDoesNotInferStrictForConditionalSchema(t *testing.T) {
+	t.Parallel()
+
+	specs := ModelSpecs([]Tool{
+		NamedTool{
+			Def: Definition{
+				Name:        "conditional",
+				Description: "conditional schema",
+				InputSchema: map[string]any{
+					"type":                 "object",
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"mode":   map[string]any{"type": "string"},
+						"reason": map[string]any{"type": "string"},
+					},
+					"allOf": []any{map[string]any{
+						"if":   map[string]any{"properties": map[string]any{"mode": map[string]any{"const": "guarded"}}},
+						"then": map[string]any{"required": []string{"reason"}},
+					}},
+				},
+			},
+		},
+	})
+	if len(specs) != 1 || specs[0].Function == nil {
+		t.Fatalf("specs = %#v, want one function spec", specs)
+	}
+	if specs[0].Function.Strict {
+		t.Fatal("Function.Strict = true, want explicit downgrade for conditional schema")
+	}
+}
+
 func TestToolVisibilityDefersMCPToolsBehindToolSearch(t *testing.T) {
 	t.Parallel()
 
@@ -171,6 +204,100 @@ func TestToolVisibilityDefersMCPToolsBehindToolSearch(t *testing.T) {
 	allSpecs := AllModelSpecs(tools)
 	if got, want := toolSpecNames(allSpecs), []string{"inspect", ToolSearchToolName, "mcp__plugin__server__read"}; !equalStrings(got, want) {
 		t.Fatalf("AllModelSpecs names = %v, want %v", got, want)
+	}
+}
+
+func TestToolVisibilityAdmitsBoundedToolSearchResults(t *testing.T) {
+	t.Parallel()
+
+	search := NamedTool{Def: Definition{
+		Name:     ToolSearchToolName,
+		Metadata: map[string]any{MetadataToolKind: MetadataToolKindToolSearch},
+	}}
+	tools := []Tool{search}
+	definitions := make([]Definition, 0, MaxDeferredToolsPerRun+6)
+	for i := 0; i < MaxDeferredToolsPerRun+6; i++ {
+		def := Definition{
+			Name:        fmt.Sprintf("mcp__plugin__server__tool_%03d", i),
+			Description: "Deferred external tool",
+			InputSchema: map[string]any{"type": "object"},
+			Metadata:    map[string]any{MetadataToolKind: MetadataToolKindMCP},
+		}
+		definitions = append(definitions, def)
+		tools = append(tools, NamedTool{Def: def})
+	}
+	visibility := NewToolVisibility(tools)
+	admitted := visibility.AdmitToolSearchResult(NewToolSearchResult(definitions))
+	if got, want := len(admitted.Tools), MaxDeferredToolsPerRun; got != want {
+		t.Fatalf("admitted tools = %d, want %d", got, want)
+	}
+	if !admitted.Truncated || admitted.OmittedCount != 6 {
+		t.Fatalf("admitted result = %#v, want truncated with 6 omitted", admitted)
+	}
+	if got, want := len(visibility.ModelSpecs()), 1+MaxDeferredToolsPerRun; got != want {
+		t.Fatalf("visible specs = %d, want %d", got, want)
+	}
+
+	repeated := visibility.AdmitToolSearchResult(NewToolSearchResult(definitions))
+	if len(repeated.Tools) != 0 || repeated.AlreadyVisibleCount != MaxDeferredToolsPerRun {
+		t.Fatalf("repeated admission = %#v, want no duplicate schemas", repeated)
+	}
+}
+
+func TestToolVisibilityAdmitsBoundedCumulativePromptCost(t *testing.T) {
+	t.Parallel()
+
+	search := NamedTool{Def: Definition{
+		Name:     ToolSearchToolName,
+		Metadata: map[string]any{MetadataToolKind: MetadataToolKindToolSearch},
+	}}
+	tools := []Tool{search}
+	definitions := make([]Definition, 0, MaxDeferredToolsPerRun)
+	for i := 0; i < MaxDeferredToolsPerRun; i++ {
+		def := Definition{
+			Name:        fmt.Sprintf("mcp__plugin__server__heavy_%03d", i),
+			Description: strings.Repeat("heavy metadata ", 300),
+			InputSchema: map[string]any{"type": "object"},
+			Metadata:    map[string]any{MetadataToolKind: MetadataToolKindMCP},
+		}
+		definitions = append(definitions, def)
+		tools = append(tools, NamedTool{Def: def})
+	}
+	visibility := NewToolVisibility(tools)
+	admitted := visibility.AdmitToolSearchResult(NewToolSearchResult(definitions))
+	if !admitted.Truncated || len(admitted.Tools) >= MaxDeferredToolsPerRun {
+		t.Fatalf("admitted result = %#v, want cumulative prompt-cost truncation", admitted)
+	}
+	if visibility.deferredPromptTokens > MaxDeferredToolPromptTokensPerRun {
+		t.Fatalf("deferred prompt tokens = %d, want <= %d", visibility.deferredPromptTokens, MaxDeferredToolPromptTokensPerRun)
+	}
+}
+
+func TestToolVisibilityCommitFailureReturnsExactFailClosedResult(t *testing.T) {
+	t.Parallel()
+
+	search := NamedTool{Def: Definition{
+		Name:     ToolSearchToolName,
+		Metadata: map[string]any{MetadataToolKind: MetadataToolKindToolSearch},
+	}}
+	visibility := NewToolVisibility([]Tool{search})
+	planned := ToolSearchResult{
+		Tools: []ToolSearchDiscoveredTool{
+			{Name: "mcp__missing__one"},
+			{Name: "mcp__missing__two"},
+		},
+		Count:               2,
+		Truncated:           true,
+		OmittedCount:        3,
+		AlreadyVisibleCount: 4,
+	}
+
+	got := visibility.commitToolSearchAdmission(planned, []string{"mcp__missing__one", "mcp__missing__two"})
+	if len(got.Tools) != 0 || got.Count != 0 || !got.Truncated || got.OmittedCount != 5 || got.AlreadyVisibleCount != 4 {
+		t.Fatalf("commit failure result = %#v, want empty exact fail-closed result with 5 omitted and 4 already visible", got)
+	}
+	if gotSpecs := visibility.ModelSpecs(); len(gotSpecs) != 1 || gotSpecs[0].Function == nil || gotSpecs[0].Function.Name != ToolSearchToolName {
+		t.Fatalf("visibility changed after failed atomic commit: %#v", gotSpecs)
 	}
 }
 

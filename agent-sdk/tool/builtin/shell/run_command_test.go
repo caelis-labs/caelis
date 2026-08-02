@@ -126,6 +126,20 @@ func TestRunCommandCallRejectsUnsupportedArgsAndSandboxPermissions(t *testing.T)
 				"timeout_ms": 1,
 			},
 		},
+		{
+			name: "non-string sandbox permission",
+			args: map[string]any{
+				"command":             "go test ./...",
+				"sandbox_permissions": 1,
+			},
+		},
+		{
+			name: "non-string justification",
+			args: map[string]any{
+				"command":       "go test ./...",
+				"justification": true,
+			},
+		},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -150,8 +164,38 @@ func TestRunCommandCallRejectsUnsupportedArgsAndSandboxPermissions(t *testing.T)
 	if err != nil {
 		t.Fatalf("json.Marshal(require_escalated) error = %v", err)
 	}
+	if _, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw}); err == nil {
+		t.Fatal("Call(require_escalated without justification) error = nil, want validation failure")
+	}
+	raw, err = json.Marshal(map[string]any{
+		"command":             "curl https://example.com",
+		"sandbox_permissions": "require_escalated",
+		"justification":       "The requested endpoint is unavailable from the sandbox.",
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal(require_escalated with justification) error = %v", err)
+	}
 	if _, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw}); err != nil {
-		t.Fatalf("Call(require_escalated) error = %v", err)
+		t.Fatalf("Call(require_escalated with justification) error = %v", err)
+	}
+}
+
+func TestRunCommandSchemaRequiresJustificationForExplicitEscalation(t *testing.T) {
+	t.Parallel()
+
+	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: sandboxPermissionRuntime{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allOf, _ := runCommandTool.Definition().InputSchema["allOf"].([]any)
+	if len(allOf) != 1 {
+		t.Fatalf("allOf = %#v, want one conditional", allOf)
+	}
+	condition, _ := allOf[0].(map[string]any)
+	thenSchema, _ := condition["then"].(map[string]any)
+	required, _ := thenSchema["required"].([]string)
+	if strings.Join(required, ",") != "justification" {
+		t.Fatalf("conditional required = %#v, want justification", thenSchema["required"])
 	}
 }
 

@@ -73,13 +73,14 @@ func (r *Runtime) recoverByCompacting(
 	turnID string,
 	req agent.RunRequest,
 	recovery compactionRecovery,
+	currentTurnInput *session.Event,
 	sink *runner,
 ) (compactionProgress, bool, error) {
 	switch recovery.kind {
 	case compactionRecoveryKindWatermark, compactionRecoveryKindRetryExhausted:
 		return r.compactAfterModelRequestWatermark(ctx, activeSession, ref, turnID, recovery.decision, sink)
 	case compactionRecoveryKindOverflow:
-		return r.compactAfterOverflow(ctx, activeSession, ref, turnID, req, recovery.cause, sink)
+		return r.compactAfterOverflow(ctx, activeSession, ref, turnID, req, currentTurnInput, recovery.cause, sink)
 	default:
 		return compactionProgress{}, false, fmt.Errorf("agent-sdk/runtime: unknown compaction recovery kind %q", recovery.kind)
 	}

@@ -294,6 +294,24 @@ func toolTruncationEventMeta(info tool.TruncationInfo) map[string]any {
 	}
 }
 
+func toolReservedNamespaceCollisionEventMeta(collision bool) map[string]any {
+	if !collision {
+		return nil
+	}
+	return map[string]any{
+		"caelis": map[string]any{
+			"version": 1,
+			"runtime": map[string]any{
+				"tool": map[string]any{
+					"provenance": map[string]any{
+						"reserved_namespace_collision": true,
+					},
+				},
+			},
+		},
+	}
+}
+
 func toolEventPayload(call model.ToolCall, status string, rawInput map[string]any, rawOutput map[string]any, content []session.EventToolContent) *session.EventTool {
 	payload := &session.EventTool{
 		ID:      strings.TrimSpace(call.ID),

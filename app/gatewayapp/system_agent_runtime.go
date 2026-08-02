@@ -7,11 +7,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -58,16 +60,37 @@ type systemManagedAgentRunRequest struct {
 	Purpose           systemManagedAgentPurpose
 	Model             model.LLM
 	ParentSession     session.Session
+	Input             string
+	InputUserEvidence []string
 	Events            []*session.Event
 	Tools             []tool.Tool
 	Output            *model.OutputSpec
+	Compaction        sdkruntime.CompactionConfig
 	Metadata          map[string]any
 	CapabilityProfile systemManagedAgentCapabilityProfile
 }
 
 type systemManagedAgentRunResult struct {
 	AssistantEvent *session.Event
+	ContextEvents  []*session.Event
 	Text           string
+}
+
+// systemManagedAgentCompactRequest asks the transient system-agent runner to
+// compact only its supplied process-local context. The staging Session used to
+// perform the compaction is discarded with the call.
+type systemManagedAgentCompactRequest struct {
+	AgentID       string
+	Purpose       systemManagedAgentPurpose
+	Model         model.LLM
+	ParentSession session.Session
+	Events        []*session.Event
+	Compaction    sdkruntime.CompactionConfig
+}
+
+type systemManagedAgentCompactResult struct {
+	Events    []*session.Event
+	Compacted bool
 }
 
 // systemManagedAgentRunPlan is the normalized runtime plan after applying the
@@ -80,14 +103,25 @@ type systemManagedAgentRunPlan struct {
 	CapabilityProfile systemManagedAgentCapabilityProfile
 	Model             model.LLM
 	Session           session.Session
+	Input             string
+	InputUserEvidence []string
 	Events            []*session.Event
 	Tools             []tool.Tool
 	Output            *model.OutputSpec
+	Compaction        sdkruntime.CompactionConfig
 	Metadata          map[string]any
 }
 
 type systemManagedAgentRunner interface {
 	Run(context.Context, systemManagedAgentRunRequest) (systemManagedAgentRunResult, error)
+}
+
+type systemManagedAgentContextCompactor interface {
+	CompactContext(context.Context, systemManagedAgentCompactRequest) (systemManagedAgentCompactResult, error)
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 type systemManagedAgentRuntime struct {
@@ -153,10 +187,9 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 		metadata["reasoning_effort"] = strings.TrimSpace(plan.Spec.ReasoningEffort)
 	}
 	// System-agent attempts execute through Core Runtime in an isolated staging
-	// session. The domain owner validates the result before atomically committing
-	// canonical prompt/assistant facts to its reusable durable session, so a
-	// malformed attempt receives the common safety and journal pipeline without
-	// poisoning the next model prefix.
+	// session. The domain owner validates the result before atomically advancing
+	// its process-local conversation, so a malformed attempt receives the common
+	// safety and journal pipeline without poisoning the next model prefix.
 	staging := config.StagingSessions()
 	if staging == nil {
 		return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: system-managed agent staging session service is unavailable")
@@ -195,6 +228,7 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	core, err := sdkruntime.New(sdkruntime.Config{
 		Sessions:              staging,
 		AgentFactory:          config.AgentFactory,
+		Compaction:            plan.Compaction,
 		LifecycleInterceptors: config.LifecycleInterceptors,
 		TraceSink:             config.TraceSink,
 		Guardrails:            config.Guardrails,
@@ -204,6 +238,11 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	}
 	run, err := core.Run(stagingCtx, agent.RunRequest{
 		SessionRef: activeSession.SessionRef,
+		Input:      strings.TrimSpace(plan.Input),
+		InputActor: session.ActorRef{Kind: session.ActorKindSystem, Name: plan.AgentID},
+		InputCompaction: &session.EventCompactionContext{
+			UserEvidence: append([]string(nil), plan.InputUserEvidence...),
+		},
 		AgentSpec: agent.AgentSpec{
 			Name:  plan.AgentID,
 			Model: plan.Model,
@@ -223,6 +262,87 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	}
 	defer run.Handle.Close()
 	return collectSystemManagedAgentResult(stagingCtx, staging, activeSession.SessionRef, baselineSeq, run.Handle)
+}
+
+// CompactContext performs one explicit compaction of a system agent's supplied
+// in-memory dialogue. It does not create or update any durable system-agent
+// Session; the returned Events are the only state that can leave the staging
+// store.
+func (r *systemManagedAgentRuntime) CompactContext(
+	ctx context.Context,
+	req systemManagedAgentCompactRequest,
+) (systemManagedAgentCompactResult, error) {
+	plan, err := systemManagedAgentRunPlanFor(systemManagedAgentRunRequest{
+		AgentID:       req.AgentID,
+		Purpose:       req.Purpose,
+		Model:         req.Model,
+		ParentSession: req.ParentSession,
+		Events:        req.Events,
+		Compaction:    req.Compaction,
+	})
+	if err != nil {
+		return systemManagedAgentCompactResult{}, err
+	}
+	if len(plan.Events) == 0 {
+		return systemManagedAgentCompactResult{}, nil
+	}
+
+	config := systemManagedAgentRuntimeConfig{}
+	if r != nil {
+		config = r.config
+	}
+	if config.AgentFactory == nil || config.StagingSessions == nil {
+		config = newSystemManagedAgentRuntimeWithConfig(config).config
+	}
+	staging := config.StagingSessions()
+	if staging == nil {
+		return systemManagedAgentCompactResult{}, fmt.Errorf("gatewayapp: system-managed agent staging session service is unavailable")
+	}
+	stagingCtx := session.ContextWithoutRuntimeLease(ctx)
+	activeSession, err := startSystemManagedAgentStagingSession(stagingCtx, staging, plan.Session)
+	if err != nil {
+		return systemManagedAgentCompactResult{}, err
+	}
+	batch, ok := staging.(session.EventBatchService)
+	if !ok {
+		return systemManagedAgentCompactResult{}, fmt.Errorf("gatewayapp: system-managed agent staging service requires event batches")
+	}
+	if _, err := batch.AppendEvents(stagingCtx, session.AppendEventsRequest{
+		SessionRef: activeSession.SessionRef,
+		Events:     session.CloneEvents(plan.Events),
+	}); err != nil {
+		return systemManagedAgentCompactResult{}, err
+	}
+	core, err := sdkruntime.New(sdkruntime.Config{
+		Sessions:              staging,
+		AgentFactory:          config.AgentFactory,
+		Compaction:            plan.Compaction,
+		LifecycleInterceptors: config.LifecycleInterceptors,
+		TraceSink:             config.TraceSink,
+		Guardrails:            config.Guardrails,
+	})
+	if err != nil {
+		return systemManagedAgentCompactResult{}, err
+	}
+	compacted, err := core.Compact(stagingCtx, sdkruntime.CompactRequest{
+		SessionRef: activeSession.SessionRef,
+		Model:      plan.Model,
+		Trigger:    "guardian_prompt_budget",
+	})
+	if err != nil {
+		return systemManagedAgentCompactResult{}, err
+	}
+	events, err := staging.Events(stagingCtx, session.EventsRequest{
+		SessionRef:       activeSession.SessionRef,
+		IncludeTransient: true,
+	})
+	if err != nil {
+		return systemManagedAgentCompactResult{}, err
+	}
+	return systemManagedAgentCompactResult{
+		Events:    systemManagedAgentConversationEvents(events),
+		Compacted: compacted.Compacted,
+	}, nil
 }
 
 // collectSystemManagedAgentResult treats Runner events as a best-effort live
@@ -266,10 +386,41 @@ func collectSystemManagedAgentResult(
 			result.AssistantEvent = session.CloneEvent(event)
 		}
 	}
+	result.ContextEvents = systemManagedAgentConversationEvents(durableEvents)
 	if result.AssistantEvent != nil {
 		result.Text = session.EventText(result.AssistantEvent)
 	}
 	return result, nil
+}
+
+// systemManagedAgentConversationEvents returns a reusable, process-local model
+// context rather than a durable Session projection. Compact coverage sequence
+// numbers belong to the isolated staging Session, so the retained checkpoint is
+// deliberately normalized to a legacy in-memory checkpoint before a later
+// invocation assigns fresh staging sequence numbers.
+func systemManagedAgentConversationEvents(events []*session.Event) []*session.Event {
+	promptEvents := compact.PromptEventsFromLatestCompact(events)
+	out := make([]*session.Event, 0, len(promptEvents))
+	for _, event := range promptEvents {
+		if event == nil {
+			continue
+		}
+		cloned := session.CloneEvent(event)
+		cloned.ID = ""
+		cloned.IdempotencyKey = ""
+		cloned.SessionID = ""
+		cloned.Seq = 0
+		cloned.Time = time.Time{}
+		cloned.Scope = nil
+		if compact.IsCompactEvent(cloned) && cloned.Meta != nil {
+			delete(cloned.Meta, compact.MetaKeyCompact)
+			if len(cloned.Meta) == 0 {
+				cloned.Meta = nil
+			}
+		}
+		out = append(out, cloned)
+	}
+	return out
 }
 
 func startSystemManagedAgentStagingSession(ctx context.Context, service session.Service, planned session.Session) (session.Session, error) {
@@ -338,9 +489,12 @@ func systemManagedAgentRunPlanFor(req systemManagedAgentRunRequest) (systemManag
 		CapabilityProfile: capabilityProfile,
 		Model:             req.Model,
 		Session:           systemManagedAgentSessionForParent(req.ParentSession, spec, sessionMetadata),
+		Input:             strings.TrimSpace(req.Input),
+		InputUserEvidence: append([]string(nil), req.InputUserEvidence...),
 		Events:            session.CloneEvents(req.Events),
 		Tools:             tools,
 		Output:            req.Output,
+		Compaction:        req.Compaction,
 		Metadata:          metadata,
 	}, nil
 }
@@ -423,7 +577,6 @@ func guardianSystemManagedAgentSpec() systemManagedAgentSpec {
 		ID:                guardianSceneID,
 		Instructions:      guardianPolicyPrompt(),
 		SessionSuffix:     "approval-review",
-		SessionID:         guardianReviewSessionIDFromMetadata,
 		Purpose:           systemManagedAgentPurposeApprovalReview,
 		CapabilityProfile: systemManagedAgentCapabilityNone,
 		ReasoningEffort:   "none",
@@ -434,10 +587,6 @@ func guardianSystemManagedAgentSpec() systemManagedAgentSpec {
 	}
 }
 
-func guardianReviewSessionIDFromMetadata(parent session.Session, metadata map[string]any) string {
-	return guardianReviewSessionID(parent, stringFromMap(metadata, systemManagedAgentStateReuseKey))
-}
-
 func systemManagedAgentSessionForParent(parent session.Session, spec systemManagedAgentSpec, metadata map[string]any) session.Session {
 	out := session.CloneSession(parent)
 	if strings.EqualFold(strings.TrimSpace(stringFromMap(out.Metadata, "system_managed_agent")), strings.TrimSpace(spec.ID)) {
@@ -446,6 +595,8 @@ func systemManagedAgentSessionForParent(parent session.Session, spec systemManag
 	}
 	if spec.SessionID != nil {
 		out.SessionID = strings.TrimSpace(spec.SessionID(parent, metadata))
+	} else {
+		out.SessionID = ""
 	}
 	suffix := firstNonEmpty(strings.TrimSpace(spec.SessionSuffix), strings.TrimSpace(spec.ID))
 	out.SessionID = firstNonEmpty(out.SessionID, strings.TrimSpace(parent.SessionID)+"-"+suffix, suffix)

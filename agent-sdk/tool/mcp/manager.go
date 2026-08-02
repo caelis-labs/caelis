@@ -3,12 +3,12 @@ package mcp
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -21,9 +21,10 @@ type MCPServerInfo struct {
 }
 
 type Manager struct {
-	mu      sync.Mutex
-	clients map[string]*Client // Key: pluginID + "/" + serverName
-	tools   []tool.Tool
+	mu       sync.Mutex
+	clients  map[string]*Client // Key: pluginID + "/" + serverName
+	tools    []tool.Tool
+	warnings map[string][]string
 }
 
 func formatToolName(pluginID, serverName, toolName string) string {
@@ -43,11 +44,20 @@ type clientStarter func(context.Context, ServerSpec) (*Client, error)
 
 func newManager(ctx context.Context, specs []ServerSpec, start clientStarter) (*Manager, error) {
 	mgr := &Manager{
-		clients: make(map[string]*Client),
+		clients:  make(map[string]*Client),
+		warnings: make(map[string][]string),
 	}
 	usedToolNames := map[string]string{}
 
 	for _, spec := range specs {
+		if err := validateMCPIdentity("plugin id", spec.PluginID, maxMCPPluginIDRunes); err != nil {
+			_ = mgr.Close()
+			return nil, fmt.Errorf("mcp manager: %w", err)
+		}
+		if err := validateMCPIdentity("server name", spec.Name, maxMCPServerNameRunes); err != nil {
+			_ = mgr.Close()
+			return nil, fmt.Errorf("mcp manager: %w", err)
+		}
 		client, err := start(ctx, spec)
 		if err != nil {
 			_ = mgr.Close()
@@ -65,30 +75,58 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter) (*
 			return nil, fmt.Errorf("mcp manager: failed to list tools for %s/%s: %w", spec.PluginID, spec.Name, err)
 		}
 
+		sort.SliceStable(toolInfos, func(i, j int) bool {
+			if toolInfos[i] == nil {
+				return false
+			}
+			if toolInfos[j] == nil {
+				return true
+			}
+			return toolInfos[i].Name < toolInfos[j].Name
+		})
+		acceptedForServer := 0
 		for _, info := range toolInfos {
 			if info == nil || strings.TrimSpace(info.Name) == "" {
 				continue
 			}
+			toolLabel := mcpWarningToolName(info.Name)
+			if err := validateMCPIdentity("remote tool name", info.Name, maxMCPRemoteToolNameRunes); err != nil {
+				mgr.addWarning(key, fmt.Sprintf("tool %s quarantined: %v", toolLabel, err))
+				continue
+			}
+			if acceptedForServer >= maxMCPToolsPerServer || len(mgr.tools) >= maxMCPToolsPerManager {
+				mgr.addWarning(key, fmt.Sprintf("tool %s quarantined: MCP tool count limit reached", toolLabel))
+				continue
+			}
 			identity := spec.PluginID + "\x00" + spec.Name + "\x00" + info.Name
-			namespacedName := uniqueToolName(formatToolName(spec.PluginID, spec.Name, info.Name), identity, usedToolNames)
+			baseName := formatToolName(spec.PluginID, spec.Name, info.Name)
+			def, warning, err := normalizeListedToolDefinition(tool.Definition{
+				Name:        baseName,
+				Description: info.Description,
+				Metadata: map[string]any{
+					tool.MetadataToolKind:  tool.MetadataToolKindMCP,
+					tool.MetadataPluginID:  spec.PluginID,
+					tool.MetadataMCPServer: spec.Name,
+					tool.MetadataMCPTool:   info.Name,
+				},
+			}, info.InputSchema)
+			if warning != "" {
+				mgr.addWarning(key, fmt.Sprintf("tool %s: %s", toolLabel, warning))
+			}
+			if err != nil {
+				mgr.addWarning(key, fmt.Sprintf("tool %s quarantined: %v", toolLabel, err))
+				continue
+			}
+			def.Name = uniqueToolName(baseName, identity, usedToolNames)
 			t := &MCPTool{
 				client:     client,
 				pluginID:   spec.PluginID,
 				serverName: spec.Name,
 				origName:   info.Name,
-				def: tool.Definition{
-					Name:        namespacedName,
-					Description: info.Description,
-					InputSchema: inputSchemaMap(info.InputSchema),
-					Metadata: map[string]any{
-						tool.MetadataToolKind:  tool.MetadataToolKindMCP,
-						tool.MetadataPluginID:  spec.PluginID,
-						tool.MetadataMCPServer: spec.Name,
-						tool.MetadataMCPTool:   info.Name,
-					},
-				},
+				def:        def,
 			}
 			mgr.tools = append(mgr.tools, t)
+			acceptedForServer++
 		}
 	}
 	sort.SliceStable(mgr.tools, func(i, j int) bool {
@@ -96,6 +134,29 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter) (*
 	})
 
 	return mgr, nil
+}
+
+func mcpWarningToolName(name string) string {
+	const maxWarningNameRunes = 80
+	name = strings.TrimSpace(name)
+	if utf8.RuneCountInString(name) > maxWarningNameRunes {
+		name = truncateRunes(name, maxWarningNameRunes) + "..."
+	}
+	return fmt.Sprintf("%q", name)
+}
+
+func (m *Manager) addWarning(key string, warning string) {
+	if m == nil || strings.TrimSpace(warning) == "" {
+		return
+	}
+	warnings := m.warnings[key]
+	if len(warnings) < maxMCPWarningsPerServer {
+		m.warnings[key] = append(warnings, warning)
+		return
+	}
+	if len(warnings) == maxMCPWarningsPerServer {
+		m.warnings[key] = append(warnings, "additional MCP ingress warnings omitted")
+	}
 }
 
 func sanitizeToolName(raw string) string {
@@ -166,24 +227,6 @@ func shortenToolName(name string, identity string) string {
 	return prefix + "__" + suffix
 }
 
-func inputSchemaMap(schema any) map[string]any {
-	if schema == nil {
-		return map[string]any{"type": "object"}
-	}
-	if typed, ok := schema.(map[string]any); ok {
-		return typed
-	}
-	data, err := json.Marshal(schema)
-	if err != nil {
-		return map[string]any{"type": "object"}
-	}
-	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil || len(out) == 0 {
-		return map[string]any{"type": "object"}
-	}
-	return out
-}
-
 func (m *Manager) Tools() []tool.Tool {
 	if m == nil {
 		return nil
@@ -224,12 +267,12 @@ func (m *Manager) GetServerInfos(pluginID string) []MCPServerInfo {
 		serverName := parts[1]
 
 		status := "running"
-		var warning string
+		warnings := append([]string(nil), m.warnings[key]...)
 		select {
 		case <-client.closed:
 			status = "failed"
 			if client.closeErr != nil {
-				warning = client.closeErr.Error()
+				warnings = append(warnings, client.closeErr.Error())
 			}
 		default:
 		}
@@ -246,7 +289,7 @@ func (m *Manager) GetServerInfos(pluginID string) []MCPServerInfo {
 			Name:    serverName,
 			Status:  status,
 			Tools:   tools,
-			Warning: warning,
+			Warning: strings.Join(warnings, "; "),
 		})
 	}
 	sort.SliceStable(infos, func(i, j int) bool {

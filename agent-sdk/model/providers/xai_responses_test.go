@@ -215,6 +215,28 @@ func TestXAIResponsesNonReasoningRequestOmitsReasoningFields(t *testing.T) {
 	}
 }
 
+func TestXAIResponsesToolStrategyExplicitlyDowngradesStrict(t *testing.T) {
+	t.Parallel()
+
+	spec := model.NewFunctionToolSpec("closed", "closed schema", map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{"value": map[string]any{"type": "string"}},
+		"required":             []string{"value"},
+		"additionalProperties": false,
+	})
+	spec.Function.Strict = true
+	payload, err := xAIResponsesRequestFromModel(&model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+		Tools:    []model.ToolSpec{spec},
+	}, "grok-4.5", 32768)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Tools) != 1 || payload.Tools[0].Strict {
+		t.Fatalf("xAI tools = %#v, want explicit strict downgrade", payload.Tools)
+	}
+}
+
 type xAIResponsesTestAuthTransport struct {
 	base http.RoundTripper
 }

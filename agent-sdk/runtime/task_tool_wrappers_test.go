@@ -177,3 +177,47 @@ func TestRuntimeTaskWaitRejectsTimeoutMSAlias(t *testing.T) {
 		t.Fatalf("TASK wait error = %v, want timeout_ms mention", err)
 	}
 }
+
+func TestRuntimeTaskWriteRequiresNonBlankInput(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	targetTool := runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}
+	for _, input := range []any{nil, "   "} {
+		args := map[string]any{"action": "write", "handle": "command-1"}
+		if input != nil {
+			args["input"] = input
+		}
+		_, err := targetTool.Call(context.Background(), tool.Call{
+			ID:    "task-write-missing-input",
+			Name:  tasktool.ToolName,
+			Input: mustJSONRaw(args),
+		})
+		if err == nil || !strings.Contains(err.Error(), "input") {
+			t.Fatalf("Task write input %#v error = %v, want input validation failure", input, err)
+		}
+	}
+}
+
+func TestRuntimeTaskRejectsNonStringInput(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	targetTool := runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}
+	_, err := targetTool.Call(context.Background(), tool.Call{
+		ID:    "task-read-invalid-input",
+		Name:  tasktool.ToolName,
+		Input: mustJSONRaw(map[string]any{"action": "read", "handle": "command-1", "input": 1}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "input") {
+		t.Fatalf("Task non-string input error = %v, want input validation failure", err)
+	}
+}

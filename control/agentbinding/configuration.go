@@ -4,13 +4,16 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
 const (
-	maxCustomHandleLength = 32
-	maxBindingSetName     = 32
+	maxCustomHandleLength         = 32
+	maxBindingSetName             = 32
+	maxCustomRoles                = 16
+	maxCustomRoleDescriptionRunes = 240
 )
 
 var (
@@ -82,14 +85,14 @@ func ValidateSetName(raw string) error {
 
 // ValidateRoles validates custom role identity without consulting bindings.
 func ValidateRoles(roles []Role) error {
+	if len(roles) > maxCustomRoles {
+		return fmt.Errorf("control/agentbinding: custom roles exceed maximum %d", maxCustomRoles)
+	}
 	seen := make(map[Handle]struct{}, len(roles))
 	for _, raw := range roles {
 		role := NormalizeRole(raw)
-		if err := ValidateCustomHandle(role.Handle); err != nil {
+		if err := validateRole(role); err != nil {
 			return err
-		}
-		if role.Description == "" {
-			return fmt.Errorf("control/agentbinding: custom role %q requires a description", role.Handle)
 		}
 		if _, ok := seen[role.Handle]; ok {
 			return fmt.Errorf("control/agentbinding: duplicate custom role %q", role.Handle)
@@ -108,16 +111,17 @@ func CreateRole(
 	profiles modelprofile.Configuration,
 ) (Configuration, error) {
 	role := NormalizeRole(rawRole)
-	if err := ValidateCustomHandle(role.Handle); err != nil {
+	if err := validateRole(role); err != nil {
 		return Configuration{}, err
 	}
-	if role.Description == "" {
-		return Configuration{}, fmt.Errorf("control/agentbinding: custom role %q requires a description", role.Handle)
+	normalizedCurrent := NormalizeConfiguration(current)
+	if len(normalizedCurrent.Roles) >= maxCustomRoles {
+		return Configuration{}, fmt.Errorf("control/agentbinding: custom roles exceed maximum %d", maxCustomRoles)
 	}
 	if _, ok := LookupRole(current, role.Handle); ok {
 		return Configuration{}, fmt.Errorf("control/agentbinding: custom role %q already exists", role.Handle)
 	}
-	next := NormalizeConfiguration(current)
+	next := normalizedCurrent
 	next.Roles = append(next.Roles, role)
 	next = NormalizeConfiguration(next)
 
@@ -134,6 +138,23 @@ func CreateRole(
 		return Configuration{}, err
 	}
 	return NormalizeConfiguration(next), nil
+}
+
+func validateRole(role Role) error {
+	if err := ValidateCustomHandle(role.Handle); err != nil {
+		return err
+	}
+	if role.Description == "" {
+		return fmt.Errorf("control/agentbinding: custom role %q requires a description", role.Handle)
+	}
+	if utf8.RuneCountInString(role.Description) > maxCustomRoleDescriptionRunes {
+		return fmt.Errorf(
+			"control/agentbinding: custom role %q description exceeds %d characters",
+			role.Handle,
+			maxCustomRoleDescriptionRunes,
+		)
+	}
+	return nil
 }
 
 // DeleteRole removes one custom role, its active binding, and its entries from

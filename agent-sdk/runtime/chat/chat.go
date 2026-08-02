@@ -135,7 +135,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			messages = append(messages, assistantMessage)
 			toolMessages, toolEvents, ok, err := a.executeStepToolCalls(ctx, calls, func(event *session.Event) bool {
 				return yield(event, nil)
-			})
+			}, &visibility)
 			if !ok {
 				return
 			}
@@ -220,19 +220,20 @@ func (a *Agent) executeStepToolCalls(
 	ctx context.Context,
 	calls []model.ToolCall,
 	yieldProgress func(*session.Event) bool,
+	visibility *tool.ToolVisibility,
 ) ([]model.Message, []*session.Event, bool, error) {
 	if len(calls) == 0 {
 		return nil, nil, true, nil
 	}
 	if len(calls) == 1 {
-		toolMessage, toolEvent, err := a.executeToolCallWithProgress(ctx, calls[0], yieldProgress)
+		toolMessage, toolEvent, err := a.executeToolCallWithProgressAdmitted(ctx, calls[0], yieldProgress, visibility)
 		if err != nil {
 			return nil, nil, true, err
 		}
 		return []model.Message{toolMessage}, []*session.Event{toolEvent}, true, nil
 	}
 	if !a.canExecuteStepToolCallsConcurrently(calls) {
-		return a.executeStepToolCallsSerial(ctx, calls, yieldProgress)
+		return a.executeStepToolCallsSerial(ctx, calls, yieldProgress, visibility)
 	}
 
 	callCtx, cancel := context.WithCancel(ctx)
@@ -245,7 +246,7 @@ func (a *Agent) executeStepToolCalls(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			toolMessage, toolEvent, err := a.executeToolCallWithProgress(callCtx, call, func(event *session.Event) bool {
+			toolMessage, toolEvent, err := a.executeToolCallWithProgressAdmitted(callCtx, call, func(event *session.Event) bool {
 				if event == nil {
 					return true
 				}
@@ -255,7 +256,7 @@ func (a *Agent) executeStepToolCalls(
 				case <-callCtx.Done():
 					return false
 				}
-			})
+			}, visibility)
 			doneCh <- stepToolCallResult{index: i, message: toolMessage, event: toolEvent, err: err}
 		}()
 	}
@@ -324,11 +325,12 @@ func (a *Agent) executeStepToolCallsSerial(
 	ctx context.Context,
 	calls []model.ToolCall,
 	yieldProgress func(*session.Event) bool,
+	visibility *tool.ToolVisibility,
 ) ([]model.Message, []*session.Event, bool, error) {
 	messages := make([]model.Message, 0, len(calls))
 	events := make([]*session.Event, 0, len(calls))
 	for _, call := range calls {
-		toolMessage, toolEvent, err := a.executeToolCallWithProgress(ctx, call, yieldProgress)
+		toolMessage, toolEvent, err := a.executeToolCallWithProgressAdmitted(ctx, call, yieldProgress, visibility)
 		if err != nil {
 			return nil, nil, true, err
 		}

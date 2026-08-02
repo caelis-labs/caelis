@@ -108,7 +108,7 @@ func TestGuardianRealMimoReviewWithoutOutputBudget(t *testing.T) {
 			}
 			req := guardianRealMimoApprovalRequest(activeSession, guardianModel, repetition)
 			startedAt := time.Now()
-			_, _, assistantEvent, parsed, _, reviewErr := reviewer.runGuardianReview(ctx, req)
+			_, _, assistantEvent, parsed, reviewErr := reviewer.runGuardianReview(ctx, req)
 			observations := diagnostic.snapshot()
 			t.Logf(
 				"Guardian acceptance profile=%s effort=%s elapsed=%s observations=%+v error=%v",

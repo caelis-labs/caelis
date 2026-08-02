@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
@@ -14,7 +15,24 @@ const ToolName = names.Task
 var allowedArgs = []string{"action", "handle", "input"}
 
 func ValidateArgs(args map[string]any) error {
-	return tool.RejectUnknownArgs(args, allowedArgs...)
+	if err := tool.RejectUnknownArgs(args, allowedArgs...); err != nil {
+		return err
+	}
+	action, _ := args["action"].(string)
+	input := ""
+	if raw, present := args["input"]; present && raw != nil {
+		value, ok := raw.(string)
+		if !ok {
+			return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"input\" must be string")
+		}
+		input = value
+	}
+	if strings.EqualFold(strings.TrimSpace(action), "write") {
+		if strings.TrimSpace(input) == "" {
+			return tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"input\" is required when action is write")
+		}
+	}
+	return nil
 }
 
 // Tool is the runtime-managed async task control plane declaration.
@@ -43,11 +61,21 @@ func (Tool) Definition() tool.Definition {
 				},
 				"input": map[string]any{
 					"type":        "string",
+					"minLength":   1,
 					"description": "Required only for write. For RunCommand, send terminal stdin and briefly await its response. For a completed Spawn, send the follow-up prompt that starts its next turn.",
 				},
 			},
 			"required":             []string{"action", "handle"},
 			"additionalProperties": false,
+			"allOf": []any{map[string]any{
+				"if": map[string]any{
+					"properties": map[string]any{
+						"action": map[string]any{"const": "write"},
+					},
+					"required": []string{"action"},
+				},
+				"then": map[string]any{"required": []string{"input"}},
+			}},
 		},
 		Metadata: toolutil.AnnotationMetadata(false, true, false, true),
 	}

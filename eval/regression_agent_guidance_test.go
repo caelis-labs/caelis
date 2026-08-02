@@ -95,8 +95,11 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 					t.Fatalf("%s description missing %q: %q", check.toolName, want, spec.Function.Description)
 				}
 			}
-			if !spec.Function.Strict {
-				t.Fatalf("%s Function.Strict = false, want strict inferred from closed tool schema", check.toolName)
+			conditionalSchema := check.toolName == shell.RunCommandToolName ||
+				check.toolName == filesystem.PatchToolName ||
+				check.toolName == task.ToolName
+			if got, want := spec.Function.Strict, !conditionalSchema; got != want {
+				t.Fatalf("%s Function.Strict = %v, want %v for its canonical schema", check.toolName, got, want)
 			}
 		})
 	}

@@ -270,7 +270,7 @@ func (r *Runtime) executeKernelTurn(
 	defer r.unregisterActiveRun(runID)
 
 	batch := make([]*session.Event, 0, 4)
-	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts)
+	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputCompaction)
 	lifecycleErr := r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "", ""), func(runCtx context.Context) error {
 		return r.executeLifecycle(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "", ""), func(turnCtx context.Context) error {
 			return r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, userEvent, &batch, handle)

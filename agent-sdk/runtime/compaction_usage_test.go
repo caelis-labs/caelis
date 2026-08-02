@@ -162,6 +162,120 @@ func TestComputeUsageSnapshotForModelIgnoresNewerDifferentModelBaseline(t *testi
 	}
 }
 
+func TestComputeUsageSnapshotForModelUsesRecordedRequestPrefixWithoutProviderUsage(t *testing.T) {
+	t.Parallel()
+
+	user := model.NewTextMessage(model.RoleUser, "hello")
+	assistant := model.NewTextMessage(model.RoleAssistant, "answer")
+	events := []*session.Event{
+		{
+			ID:         "u1",
+			Type:       session.EventTypeUser,
+			Visibility: session.VisibilityCanonical,
+			Message:    &user,
+		},
+		{
+			ID:         "a1",
+			Type:       session.EventTypeAssistant,
+			Visibility: session.VisibilityCanonical,
+			Message:    &assistant,
+			Invocation: &session.EventInvocation{
+				Provider:                "openai-codex",
+				Model:                   "gpt-main",
+				PromptPrefixFingerprint: "sha256:actual-request",
+				PromptPrefixTokens:      777,
+			},
+		},
+	}
+
+	got := ComputeUsageSnapshotForModel(
+		events,
+		nil,
+		258_400,
+		CompactionConfig{EstimatedPromptPrefixTokens: 12_345},
+		"openai-codex",
+		"gpt-main",
+	)
+
+	if got.Source != compact.UsageSourceEstimated {
+		t.Fatalf("usage source = %q, want estimated without provider usage", got.Source)
+	}
+	if got.EstimatedPrefixTokens != 777 {
+		t.Fatalf("estimated prefix = %d, want last actual request prefix 777", got.EstimatedPrefixTokens)
+	}
+	if got.TotalTokens <= got.EstimatedPrefixTokens {
+		t.Fatalf("usage = %+v, want history plus request prefix", got)
+	}
+}
+
+func TestComputeUsageSnapshotForModelKeepsRecordedPrefixAcrossCompact(t *testing.T) {
+	t.Parallel()
+
+	assistant := model.NewTextMessage(model.RoleAssistant, "answer")
+	compactMessage := model.NewTextMessage(model.RoleUser, "CONTEXT CHECKPOINT\n\nObjective:\n- keep working")
+	events := []*session.Event{
+		{
+			ID:         "a1",
+			Type:       session.EventTypeAssistant,
+			Visibility: session.VisibilityCanonical,
+			Message:    &assistant,
+			Invocation: &session.EventInvocation{
+				Provider:           "openai-codex",
+				Model:              "gpt-main",
+				PromptPrefixTokens: 777,
+			},
+		},
+		{
+			ID:         "compact-1",
+			Type:       session.EventTypeCompact,
+			Actor:      session.ActorRef{Kind: session.ActorKindSystem},
+			Visibility: session.VisibilityCanonical,
+			Message:    &compactMessage,
+		},
+	}
+
+	got := ComputeUsageSnapshotForModel(
+		events,
+		nil,
+		258_400,
+		CompactionConfig{EstimatedPromptPrefixTokens: 12_345},
+		"openai-codex",
+		"gpt-main",
+	)
+	if got.EstimatedPrefixTokens != 777 {
+		t.Fatalf("estimated prefix = %d, want last request prefix 777 across compact", got.EstimatedPrefixTokens)
+	}
+}
+
+func TestComputeUsageSnapshotForModelDoesNotReuseDifferentModelRequestPrefix(t *testing.T) {
+	t.Parallel()
+
+	assistant := model.NewTextMessage(model.RoleAssistant, "answer")
+	events := []*session.Event{{
+		ID:         "guardian-a1",
+		Type:       session.EventTypeAssistant,
+		Visibility: session.VisibilityCanonical,
+		Message:    &assistant,
+		Invocation: &session.EventInvocation{
+			Provider:           "deepseek",
+			Model:              "guardian",
+			PromptPrefixTokens: 999,
+		},
+	}}
+
+	got := ComputeUsageSnapshotForModel(
+		events,
+		nil,
+		258_400,
+		CompactionConfig{EstimatedPromptPrefixTokens: 321},
+		"openai-codex",
+		"gpt-main",
+	)
+	if got.EstimatedPrefixTokens != 321 {
+		t.Fatalf("estimated prefix = %d, want static fallback 321", got.EstimatedPrefixTokens)
+	}
+}
+
 func TestDynamicCompactionDefaultsByContextWindow(t *testing.T) {
 	t.Parallel()
 
@@ -548,5 +662,50 @@ func TestEstimateModelRequestTokensChargesEachInlineImage(t *testing.T) {
 	}
 	if three >= 50000 {
 		t.Fatalf("three image estimate = %d, want bounded attachment estimate below 50000", three)
+	}
+}
+
+func TestEvaluateModelRequestBudgetUsesOneFullyAssembledRequest(t *testing.T) {
+	t.Parallel()
+
+	req := &model.Request{
+		Instructions: []model.Part{model.NewTextPart("fixed guardian policy")},
+		Messages: []model.Message{
+			model.NewTextMessage(model.RoleUser, "historical request"),
+			model.NewTextMessage(model.RoleAssistant, "prior assessment"),
+			model.NewTextMessage(model.RoleUser, strings.Repeat("exact approval ", 160)),
+		},
+		Tools: []model.ToolSpec{model.NewFunctionToolSpec(
+			"bounded_tool",
+			"model-visible tool definition",
+			map[string]any{"type": "object"},
+		)},
+		Output: &model.OutputSpec{
+			Mode:            model.OutputModeSchema,
+			JSONSchema:      map[string]any{"type": "object", "required": []any{"outcome"}},
+			MaxOutputTokens: 256,
+		},
+	}
+	cfg := CompactionConfig{
+		DefaultContextWindowTokens:  4_096,
+		ReserveOutputTokens:         512,
+		SafetyMarginTokens:          256,
+		EstimatedPromptPrefixTokens: 99_999,
+	}
+
+	got := EvaluateModelRequestBudget(nil, req, cfg)
+	wantTokens := estimateModelRequestTokens(req)
+	if got.Usage.TotalTokens != wantTokens {
+		t.Fatalf("TotalTokens = %d, want exact request estimate %d", got.Usage.TotalTokens, wantTokens)
+	}
+	wantEffective := resolveEffectiveInputBudget(4_096, 512, 256)
+	if got.Usage.EffectiveInputBudget != wantEffective {
+		t.Fatalf("EffectiveInputBudget = %d, want %d", got.Usage.EffectiveInputBudget, wantEffective)
+	}
+	if got.Usage.EstimatedPrefixTokens != 0 {
+		t.Fatalf("EstimatedPrefixTokens = %d, want no separately added prefix", got.Usage.EstimatedPrefixTokens)
+	}
+	if got.Compaction != evaluateWatermark(got.Usage, cfg) {
+		t.Fatalf("Compaction = %#v, want Runtime watermark result %#v", got.Compaction, evaluateWatermark(got.Usage, cfg))
 	}
 }

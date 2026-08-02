@@ -964,7 +964,7 @@ func (m *overflowRecoveryModel) Generate(_ context.Context, req *model.Request) 
 	if strings.Contains(instructions, "CONTEXT CHECKPOINT COMPACTION") {
 		m.compactionCalls++
 		compactionInput := strings.Join(requestMessageTexts(req), "\n")
-		if !strings.Contains(compactionInput, "## Tool Result") ||
+		if !strings.Contains(compactionInput, `"source":"tool_result"`) ||
 			!strings.Contains(compactionInput, "tool: ECHO") ||
 			!strings.Contains(compactionInput, "value: pong") {
 			m.t.Fatalf("compaction input missing tool result continuity: %q", compactionInput)

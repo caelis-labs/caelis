@@ -16,6 +16,11 @@ import (
 
 const defaultXAIResponsesBaseURL = "https://cli-chat-proxy.grok.com/v1"
 
+// xAI Responses has not been verified to accept strict function-tool
+// declarations. Keep this independent from the Codex OAuth strategy even
+// though both dialects currently share the flattened wire shape.
+const xAIResponsesStrictFunctionTools = false
+
 // xAIResponsesLLM implements xAI's Responses dialect without inheriting the
 // ChatGPT-only headers, endpoint, or request-affinity semantics of Codex.
 type xAIResponsesLLM struct {
@@ -239,7 +244,7 @@ func xAIResponsesRequestFromModel(req *model.Request, modelName string, maxOutpu
 	if err != nil {
 		return openAICodexRequest{}, err
 	}
-	tools := openAICodexTools(req.Tools)
+	tools := openAICodexTools(req.Tools, xAIResponsesStrictFunctionTools)
 	toolChoice := ""
 	if len(tools) > 0 {
 		toolChoice = "auto"

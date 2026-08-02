@@ -44,6 +44,11 @@ func CloneEvent(in *Event) *Event {
 	out.Text = in.Text
 	out.Meta = cloneProtocolAnyMap(in.Meta)
 	out.Actor = CloneActorRef(in.Actor)
+	if in.Compaction != nil {
+		compaction := *in.Compaction
+		compaction.UserEvidence = append([]string(nil), in.Compaction.UserEvidence...)
+		out.Compaction = &compaction
+	}
 	if in.Invocation != nil {
 		invocation := CloneEventInvocation(*in.Invocation)
 		out.Invocation = &invocation

@@ -57,24 +57,33 @@ type EventToolContent struct {
 	NewText    string  `json:"new_text,omitempty"`
 }
 
+// EventCompactionContext carries typed provenance needed only when Runtime
+// summarizes a model-visible event. UserEvidence contains Control-projected
+// text from actual main-Session user events; the surrounding event may still
+// be a system-managed chatbot input authored by Control.
+type EventCompactionContext struct {
+	UserEvidence []string `json:"user_evidence,omitempty"`
+}
+
 // Event is the compact canonical event envelope. Durable model-visible
 // messages live in Message. Durable tool execution state lives in Tool. Protocol
 // is the ACP projection/control payload and must not be used as the local model
 // replay source.
 type Event struct {
-	ID                string            `json:"id,omitempty"`
-	IdempotencyKey    string            `json:"idempotency_key,omitempty"`
-	SessionID         string            `json:"session_id,omitempty"`
-	Seq               uint64            `json:"seq,omitempty"`
-	Schema            int               `json:"schema,omitempty"`
-	Type              EventType         `json:"type,omitempty"`
-	Visibility        Visibility        `json:"visibility,omitempty"`
-	Time              time.Time         `json:"time,omitempty"`
-	Actor             ActorRef          `json:"actor,omitempty"`
-	Scope             *EventScope       `json:"scope,omitempty"`
-	ChildOrigin       *EventChildOrigin `json:"child_origin,omitempty"`
-	ApprovalRequestID string            `json:"approval_request_id,omitempty"`
-	Invocation        *EventInvocation  `json:"invocation,omitempty"`
+	ID                string                  `json:"id,omitempty"`
+	IdempotencyKey    string                  `json:"idempotency_key,omitempty"`
+	SessionID         string                  `json:"session_id,omitempty"`
+	Seq               uint64                  `json:"seq,omitempty"`
+	Schema            int                     `json:"schema,omitempty"`
+	Type              EventType               `json:"type,omitempty"`
+	Visibility        Visibility              `json:"visibility,omitempty"`
+	Time              time.Time               `json:"time,omitempty"`
+	Actor             ActorRef                `json:"actor,omitempty"`
+	Scope             *EventScope             `json:"scope,omitempty"`
+	ChildOrigin       *EventChildOrigin       `json:"child_origin,omitempty"`
+	ApprovalRequestID string                  `json:"approval_request_id,omitempty"`
+	Invocation        *EventInvocation        `json:"invocation,omitempty"`
+	Compaction        *EventCompactionContext `json:"compaction_context,omitempty"`
 	// MessageID identifies one logical message across transient chunks and its
 	// canonical durable event. It is semantic event state, not display metadata.
 	MessageID   string                 `json:"message_id,omitempty"`

@@ -19,7 +19,7 @@ type MCPTool struct {
 }
 
 func (t *MCPTool) Definition() tool.Definition {
-	return t.def
+	return tool.CloneDefinition(t.def)
 }
 
 func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {

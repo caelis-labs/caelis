@@ -765,6 +765,16 @@ func requirePatchEditSchema(t *testing.T, def tool.Definition) {
 	if got := expectedProp["minimum"]; got != 1 {
 		t.Fatalf("PATCH edits.expected_replacements minimum = %#v, want 1", got)
 	}
+	allOf, _ := items["allOf"].([]any)
+	if len(allOf) != 1 {
+		t.Fatalf("PATCH edits item allOf = %#v, want replace_all conditional", allOf)
+	}
+	condition, _ := allOf[0].(map[string]any)
+	thenSchema, _ := condition["then"].(map[string]any)
+	required, _ := thenSchema["required"].([]string)
+	if !slices.Contains(required, "expected_replacements") {
+		t.Fatalf("PATCH conditional required = %#v, want expected_replacements", thenSchema["required"])
+	}
 }
 
 func requirePlanSchema(t *testing.T, def tool.Definition) {
