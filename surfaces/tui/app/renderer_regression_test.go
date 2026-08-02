@@ -203,7 +203,7 @@ func TestLiveExplorationScrollbarHardScrollPreservesWideReasoning(t *testing.T) 
 
 	updates := renderFullscreenFramesForTest(t, width, height, before, after)
 	second := updates[1]
-	if !strings.Contains(second, ansi.SetTopBottomMargins(1, height-2)) {
+	if !strings.Contains(second, ansi.SetTopBottomMargins(1, height-3)) {
 		t.Fatalf("live exploration did not use hard-scroll optimization: %q", second)
 	}
 	assertPhysicalFullscreenFrame(t, width, height, after, updates)
