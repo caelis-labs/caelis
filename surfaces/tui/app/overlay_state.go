@@ -40,11 +40,15 @@ type OverlayState struct {
 	mentionEnd        int
 	mentionLimit      int
 
-	slashCandidates []string
-	slashDisplays   map[string]string
-	slashDetails    map[string]string
-	slashIndex      int
-	slashPrefix     string
+	slashCandidates       []string
+	slashDisplays         map[string]string
+	slashDetails          map[string]string
+	slashIndex            int
+	slashPrefix           string
+	slashSkillCatalog     []CompletionCandidate
+	slashSkillLoaded      bool
+	slashSkillLoadPending bool
+	slashSkillLoadSeq     uint64
 
 	resumeActive         bool
 	resumeQuery          string

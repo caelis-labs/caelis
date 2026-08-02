@@ -842,7 +842,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// terminal protocols; under real PTY input some printable keys may not
 		// populate msg.Key().Text even though the composer changed.
 		if before != after {
-			return m, tea.Batch(cmd, m.requestCompletionRefresh())
+			m.refreshSlashCommands()
+			return m, tea.Batch(cmd, m.requestSlashSkillCatalog(), m.requestCompletionRefresh())
 		}
 		return m, cmd
 	}
@@ -1142,7 +1143,8 @@ func (m *Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.insertComposerTextOrCollapse(text)
-	return m, m.requestCompletionRefresh()
+	m.refreshSlashCommands()
+	return m, tea.Batch(m.requestSlashSkillCatalog(), m.requestCompletionRefresh())
 }
 
 func (m *Model) insertComposerText(text string) {

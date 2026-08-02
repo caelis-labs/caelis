@@ -121,7 +121,7 @@ func (m *Model) refreshCompletionOverlaysNow() tea.Cmd {
 		}
 	}
 	m.refreshSlashCommands()
-	return resumeCmd
+	return tea.Batch(resumeCmd, m.requestSlashSkillCatalog())
 }
 
 // ---------------------------------------------------------------------------

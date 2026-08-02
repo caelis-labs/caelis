@@ -518,7 +518,7 @@ func TestSlashCompletionMergesSkillsWithoutShadowingCommands(t *testing.T) {
 	})
 
 	model.setInputText("/")
-	model.refreshSlashCommands()
+	loadSlashSkillCatalog(t, model)
 
 	counts := map[string]int{}
 	for _, candidate := range model.slashCandidates {
@@ -558,7 +558,7 @@ func TestSlashCompletionDistinguishesDuplicateSkillLabelsFromCanonicalValues(t *
 	})
 
 	model.setInputText("/")
-	model.refreshSlashCommands()
+	loadSlashSkillCatalog(t, model)
 
 	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/one:lint", "/two:lint"}) {
 		t.Fatalf("slashCandidates = %#v, want unique canonical command values", got)
@@ -590,14 +590,15 @@ func TestSlashCompletionRebuildClearsStaleSkillDetails(t *testing.T) {
 		},
 	})
 	model.setInputText("/")
-	model.refreshSlashCommands()
+	loadSlashSkillCatalog(t, model)
 	if detail := model.commandCompletionDetail("/lint"); !strings.Contains(detail, "Run lint checks") {
 		t.Fatalf("initial /lint detail = %q, want skill detail", detail)
 	}
 
 	skills = nil
+	model.resetSlashSkillCatalog()
 	model.setInputText("/h")
-	model.refreshSlashCommands()
+	loadSlashSkillCatalog(t, model)
 	if len(model.slashDetails) != 0 {
 		t.Fatalf("slashDetails after rebuild = %#v, want stale skill metadata cleared", model.slashDetails)
 	}
@@ -621,6 +622,90 @@ func TestDollarDoesNotInvokeSkillCompletion(t *testing.T) {
 	}
 	if model.completionOverlayActive() {
 		t.Fatal("$ input opened a completion overlay, want slash-only skill discovery")
+	}
+}
+
+func TestSlashCommandTypingRefreshesBuiltinsImmediately(t *testing.T) {
+	model := NewModel(Config{Commands: []string{"help", "status", "stop"}})
+
+	_, _ = model.handleKey(keyPress("/"))
+	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/status", "/stop"}) {
+		t.Fatalf("slashCandidates after / = %#v, want immediate built-in commands", got)
+	}
+
+	_, _ = model.handleKey(keyPress("st"))
+	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/status", "/stop"}) {
+		t.Fatalf("slashCandidates after /st = %#v, want immediate prefix matches", got)
+	}
+}
+
+func TestSlashSkillCatalogLoadDoesNotBlockUpdateLoop(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	model := NewModel(Config{
+		Commands: []string{"help", "status"},
+		SkillComplete: func(query string, limit int) ([]CompletionCandidate, error) {
+			if query != "" || limit != completionCandidateMaxLimit {
+				t.Errorf("SkillComplete(%q, %d), want full bounded catalog", query, limit)
+			}
+			close(started)
+			<-release
+			return []CompletionCandidate{{Value: "lint", Display: "lint", Kind: "Skill"}}, nil
+		},
+	})
+	model.setInputText("/")
+	model.refreshSlashCommands()
+
+	start := time.Now()
+	cmd := model.requestSlashSkillCatalog()
+	if elapsed := time.Since(start); elapsed > 30*time.Millisecond {
+		t.Fatalf("requestSlashSkillCatalog() blocked for %s", elapsed)
+	}
+	if cmd == nil {
+		t.Fatal("requestSlashSkillCatalog() = nil, want asynchronous command")
+	}
+	select {
+	case <-started:
+		t.Fatal("SkillComplete ran on the caller before the command started")
+	default:
+	}
+
+	result := make(chan tea.Msg, 1)
+	go func() { result <- cmd() }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("skill completion backend did not start")
+	}
+	updateStarted := time.Now()
+	_, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	if elapsed := time.Since(updateStarted); elapsed > 30*time.Millisecond {
+		t.Fatalf("WindowSize Update blocked behind skill completion for %s", elapsed)
+	}
+	close(release)
+	msg := <-result
+	_, _ = model.Update(msg)
+	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/lint", "/status"}) {
+		t.Fatalf("slashCandidates after async load = %#v", got)
+	}
+}
+
+func TestSlashSkillCatalogRejectsResultAfterSessionReset(t *testing.T) {
+	model := NewModel(Config{
+		Commands: []string{"help"},
+		SkillComplete: func(string, int) ([]CompletionCandidate, error) {
+			return []CompletionCandidate{{Value: "old-skill", Display: "old-skill"}}, nil
+		},
+	})
+	model.setInputText("/")
+	cmd := model.requestSlashSkillCatalog()
+	if cmd == nil {
+		t.Fatal("requestSlashSkillCatalog() = nil")
+	}
+	model.resetSlashSkillCatalog()
+	_, _ = model.Update(cmd())
+	if model.slashSkillLoaded || len(model.slashSkillCatalog) != 0 {
+		t.Fatalf("stale skill catalog survived reset: loaded=%v candidates=%#v", model.slashSkillLoaded, model.slashSkillCatalog)
 	}
 }
 
@@ -1693,4 +1778,16 @@ func runCompletionCmd(t *testing.T, model *Model, cmd tea.Cmd) {
 func completeResumeCandidates(t *testing.T, model *Model) {
 	t.Helper()
 	runCompletionCmd(t, model, model.updateResumeCandidates())
+}
+
+func loadSlashSkillCatalog(t *testing.T, model *Model) {
+	t.Helper()
+	cmd := model.requestSlashSkillCatalog()
+	if cmd == nil {
+		t.Fatal("requestSlashSkillCatalog() = nil")
+	}
+	updated, _ := model.Update(cmd())
+	if next, ok := updated.(*Model); ok && next != model {
+		*model = *next
+	}
 }

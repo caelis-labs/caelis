@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -31,17 +32,7 @@ func (m *Model) refreshSlashCommands() {
 		return
 	}
 
-	var skills []CompletionCandidate
-	if m.cfg.SkillComplete != nil {
-		// Bare slash is the unified skill catalog. The Control adapter filters
-		// an immutable in-memory Runtime snapshot; this cap bounds UI work while
-		// still keeping the full ordinary catalog discoverable.
-		completed, err := m.cfg.SkillComplete(query, completionCandidateMaxLimit)
-		if err == nil {
-			skills = completed
-		}
-	}
-	assembled := assembleSlashCompletionCandidates(m.cfg.Commands, skills, query)
+	assembled := assembleSlashCompletionCandidates(m.cfg.Commands, m.slashSkillCatalog, query)
 	if len(assembled.commands) == 0 {
 		return
 	}
@@ -58,6 +49,57 @@ func (m *Model) refreshSlashCommands() {
 		}
 	}
 	m.slashPrefix = "/" + query
+}
+
+// requestSlashSkillCatalog loads the immutable Runtime skill snapshot outside
+// the Bubble Tea update loop. Built-in slash commands are always refreshed
+// immediately; the skill results are merged when this command completes.
+func (m *Model) requestSlashSkillCatalog() tea.Cmd {
+	if m == nil || m.cfg.SkillComplete == nil || m.slashSkillLoaded || m.slashSkillLoadPending || m.turnRunning() {
+		return nil
+	}
+	if _, ok := slashCommandQueryAtCursor(m.input, m.cursor); !ok {
+		return nil
+	}
+	m.slashSkillLoadSeq++
+	seq := m.slashSkillLoadSeq
+	m.slashSkillLoadPending = true
+	complete := m.cfg.SkillComplete
+	return func() tea.Msg {
+		started := time.Now()
+		candidates, err := complete("", completionCandidateMaxLimit)
+		return slashSkillCompletionResultMsg{
+			seq:        seq,
+			candidates: append([]CompletionCandidate(nil), candidates...),
+			err:        err,
+			latency:    time.Since(started),
+		}
+	}
+}
+
+func (m *Model) handleSlashSkillCompletionResultMsg(msg slashSkillCompletionResultMsg) (tea.Model, tea.Cmd) {
+	if m == nil || msg.seq != m.slashSkillLoadSeq || !m.slashSkillLoadPending {
+		return m, nil
+	}
+	m.slashSkillLoadPending = false
+	m.diag.LastSlashSkillLatency = msg.latency
+	if msg.err != nil {
+		return m, nil
+	}
+	m.slashSkillLoaded = true
+	m.slashSkillCatalog = append(m.slashSkillCatalog[:0], msg.candidates...)
+	m.refreshSlashCommands()
+	return m, nil
+}
+
+func (m *Model) resetSlashSkillCatalog() {
+	if m == nil {
+		return
+	}
+	m.slashSkillLoadSeq++
+	m.slashSkillCatalog = nil
+	m.slashSkillLoaded = false
+	m.slashSkillLoadPending = false
 }
 
 func assembleSlashCompletionCandidates(commands []string, skills []CompletionCandidate, query string) slashCompletionCandidates {

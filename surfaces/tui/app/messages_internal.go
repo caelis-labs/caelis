@@ -53,6 +53,13 @@ type completionRefreshMsg struct {
 	seq uint64
 }
 
+type slashSkillCompletionResultMsg struct {
+	seq        uint64
+	candidates []CompletionCandidate
+	err        error
+	latency    time.Duration
+}
+
 type resumeCompletionResultMsg struct {
 	seq        uint64
 	query      string

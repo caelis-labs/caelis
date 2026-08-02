@@ -100,6 +100,7 @@ type Diagnostics struct {
 	AvgInputLatency             time.Duration
 	P95InputLatency             time.Duration
 	LastMentionLatency          time.Duration
+	LastSlashSkillLatency       time.Duration
 	LastResumeLatency           time.Duration
 	RedrawMode                  string
 }

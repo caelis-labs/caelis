@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
@@ -161,52 +162,65 @@ func TestLiveExplorationScrollbarHardScrollPreservesWideReasoning(t *testing.T) 
 		reasoning = "复现一下当时 Grep 返回 0 的调用方式，确认是工具问题还是参数用法问题。"
 		search    = `"service_tag|resource_type|MonitorCloudInstance" in overview, "service"`
 	)
-	model := NewModel(Config{NoColor: false, NoAnimation: true})
-	updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: height})
-	model = updated.(*Model)
-	for range 60 {
-		model.doc.Append(NewUserNarrativeBlock("historical line that keeps the viewport pinned at the tail"))
+	tests := []struct {
+		name         string
+		profile      colorprofile.Profile
+		marginBottom int
+	}{
+		{name: "ANSI", profile: colorprofile.ANSI, marginBottom: height - 2},
+		{name: "ANSI256", profile: colorprofile.ANSI256, marginBottom: height - 3},
+		{name: "TrueColor", profile: colorprofile.TrueColor, marginBottom: height - 3},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model := NewModel(Config{NoColor: false, NoAnimation: true, ColorProfile: tt.profile})
+			updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: height})
+			model = updated.(*Model)
+			for range 60 {
+				model.doc.Append(NewUserNarrativeBlock("historical line that keeps the viewport pinned at the tail"))
+			}
 
-	block := NewMainACPTurnBlock("turn-renderer-repro")
-	block.AppendStreamEvent(
-		SEReasoning,
-		"先读取相关文件并定位 Grep 的实现。",
-		newNarrativeSourceIdentity("reasoning-old", "event-old", "projection-old"),
-	)
-	block.UpdateToolWithMeta("read-1", "Read", "overview.md", "", true, false, ToolUpdateMeta{ToolKind: "read"})
-	block.UpdateToolWithMeta("list-1", "List", "overview", "", true, false, ToolUpdateMeta{ToolKind: "search"})
-	block.AppendStreamEvent(
-		SEReasoning,
-		reasoning,
-		newNarrativeSourceIdentity("reasoning-current", "event-current", "projection-current"),
-	)
-	model.doc.Append(block)
-	model.syncViewportContent()
-	model.viewportScrollbarVisibleUntil = time.Now().Add(time.Hour)
-	before := model.View().Content
-	if plain := ansi.Strip(before); !strings.Contains(plain, "Explored") ||
-		!strings.Contains(plain, reasoning) ||
-		(!strings.Contains(plain, "▏") && !strings.Contains(plain, "▎")) {
-		t.Fatalf("setup frame missing stable exploration or reasoning: %q", plain)
-	}
+			block := NewMainACPTurnBlock("turn-renderer-repro")
+			block.AppendStreamEvent(
+				SEReasoning,
+				"先读取相关文件并定位 Grep 的实现。",
+				newNarrativeSourceIdentity("reasoning-old", "event-old", "projection-old"),
+			)
+			block.UpdateToolWithMeta("read-1", "Read", "overview.md", "", true, false, ToolUpdateMeta{ToolKind: "read"})
+			block.UpdateToolWithMeta("list-1", "List", "overview", "", true, false, ToolUpdateMeta{ToolKind: "search"})
+			block.AppendStreamEvent(
+				SEReasoning,
+				reasoning,
+				newNarrativeSourceIdentity("reasoning-current", "event-current", "projection-current"),
+			)
+			model.doc.Append(block)
+			model.syncViewportContent()
+			model.viewportScrollbarVisibleUntil = time.Now().Add(time.Hour)
+			before := model.View().Content
+			if plain := ansi.Strip(before); !strings.Contains(plain, "Explored") ||
+				!strings.Contains(plain, reasoning) ||
+				(!strings.Contains(plain, "▏") && !strings.Contains(plain, "▎")) {
+				t.Fatalf("setup frame missing stable exploration or reasoning: %q", plain)
+			}
 
-	block.UpdateToolWithMeta("grep-1", "Grep", search, "", false, false, ToolUpdateMeta{ToolKind: "search"})
-	model.markViewportBlockDirty(block.BlockID())
-	model.syncViewportContent()
-	model.viewportScrollbarVisibleUntil = time.Now().Add(time.Hour)
-	after := model.View().Content
-	plain := ansi.Strip(after)
-	if !strings.Contains(plain, reasoning) || !strings.Contains(plain, "Search "+search) {
-		t.Fatalf("live exploration frame missing expected rows: %q", plain)
-	}
+			block.UpdateToolWithMeta("grep-1", "Grep", search, "", false, false, ToolUpdateMeta{ToolKind: "search"})
+			model.markViewportBlockDirty(block.BlockID())
+			model.syncViewportContent()
+			model.viewportScrollbarVisibleUntil = time.Now().Add(time.Hour)
+			after := model.View().Content
+			plain := ansi.Strip(after)
+			if !strings.Contains(plain, reasoning) || !strings.Contains(plain, "Search "+search) {
+				t.Fatalf("live exploration frame missing expected rows: %q", plain)
+			}
 
-	updates := renderFullscreenFramesForTest(t, width, height, before, after)
-	second := updates[1]
-	if !strings.Contains(second, ansi.SetTopBottomMargins(1, height-3)) {
-		t.Fatalf("live exploration did not use hard-scroll optimization: %q", second)
+			updates := renderFullscreenFramesForTest(t, width, height, before, after)
+			second := updates[1]
+			if !strings.Contains(second, ansi.SetTopBottomMargins(1, tt.marginBottom)) {
+				t.Fatalf("live exploration did not use hard-scroll optimization: %q", second)
+			}
+			assertPhysicalFullscreenFrame(t, width, height, after, updates)
+		})
 	}
-	assertPhysicalFullscreenFrame(t, width, height, after, updates)
 }
 
 func TestASCIITranscriptLineMoveKeepsHardScrollOptimization(t *testing.T) {

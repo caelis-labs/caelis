@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"maps"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ func requestBackgroundColorCmd() tea.Cmd {
 }
 
 func NewModel(cfg Config) *Model {
+	cfg.CommandDetails = maps.Clone(cfg.CommandDetails)
 	theme := tuikit.ResolveThemeFromOptions(cfg.NoColor, cfg.ColorProfile)
 	themeAuto := tuikit.ThemeUsesAutoBackground()
 
@@ -172,6 +174,7 @@ func (m *Model) setCommands(commands []string) {
 		return
 	}
 	m.cfg.Commands = append([]string(nil), commands...)
+	m.cacheCommandCompletionDetails(m.cfg.Commands)
 	items := make([]list.Item, 0, len(m.cfg.Commands))
 	for _, one := range m.cfg.Commands {
 		name := strings.TrimSpace(one)
@@ -329,6 +332,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case completionRefreshMsg:
 		return m.handleCompletionRefreshMsg(typed)
+
+	case slashSkillCompletionResultMsg:
+		return m.handleSlashSkillCompletionResultMsg(typed)
 
 	case resumeCompletionResultMsg:
 		return m.handleResumeCompletionResultMsg(typed)

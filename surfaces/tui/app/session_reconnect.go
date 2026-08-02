@@ -24,6 +24,7 @@ func (m *Model) applySessionReconnectState(state controlclient.SessionState) tea
 	m.pendingPrompt = nil
 	m.closeTaskStreamSubscriptions()
 	m.currentSessionID = strings.TrimSpace(state.SessionID)
+	m.resetSlashSkillCatalog()
 	m.runningActivityTracker.resetSession()
 	m.resetConversationView()
 	var warning tea.Cmd

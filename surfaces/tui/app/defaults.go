@@ -156,6 +156,31 @@ func DefaultCommands() []string {
 	return controlprompt.DefaultNames()
 }
 
+const defaultExternalCommandCompletionDetail = "Send a prompt to the registered ACP agent"
+
+// cacheCommandCompletionDetails resolves configured command descriptions when
+// the roster changes so completion rendering never rebuilds the Control
+// command registry for every visible row and frame.
+func (m *Model) cacheCommandCompletionDetails(commands []string) {
+	if m == nil {
+		return
+	}
+	if m.cfg.CommandDetails == nil {
+		m.cfg.CommandDetails = make(map[string]string, len(commands))
+	}
+	for _, command := range commands {
+		name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command, "/")))
+		if name == "" || strings.TrimSpace(m.cfg.CommandDetails[name]) != "" {
+			continue
+		}
+		detail := defaultExternalCommandCompletionDetail
+		if spec, ok := controlprompt.Lookup(name); ok {
+			detail = strings.TrimSpace(spec.Description)
+		}
+		m.cfg.CommandDetails[name] = detail
+	}
+}
+
 func (m *Model) commandCompletionDetail(command string) string {
 	name := strings.TrimPrefix(strings.TrimSpace(command), "/")
 	if name == "" {
@@ -172,7 +197,7 @@ func (m *Model) commandCompletionDetail(command string) string {
 	if spec, ok := controlprompt.Lookup(name); ok {
 		return strings.TrimSpace(spec.Description)
 	}
-	return "Send a prompt to the registered ACP agent"
+	return defaultExternalCommandCompletionDetail
 }
 
 // DefaultWizards returns the set of multi-step wizard flows for the TUI.
