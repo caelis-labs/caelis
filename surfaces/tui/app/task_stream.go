@@ -454,6 +454,11 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 			m.taskStreamCursors[msg.taskID] = cursor
 		}
 		if taskstream.IsTransientGapEnvelope(envelope) {
+			if callID := strings.TrimSpace(m.taskStreamCallIDsByID[msg.taskID]); callID != "" {
+				if view := m.subagentOutputViews[callID]; view != nil {
+					view.resetForCurrentState()
+				}
+			}
 			continue
 		}
 		model, cmd := m.handleACPEventEnvelope(envelope)

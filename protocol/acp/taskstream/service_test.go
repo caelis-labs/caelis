@@ -82,6 +82,49 @@ func TestProjectRecordKeepsTaskScopeAndTransientCursor(t *testing.T) {
 	}
 }
 
+func TestProjectRecordProjectsHistoricalTurnBoundaryWithoutTaskTerminalTransport(t *testing.T) {
+	t.Parallel()
+
+	at := time.Unix(205, 0)
+	record := controltaskstream.Record{
+		Cursor: "cursor-boundary", Generation: "generation-1", Sequence: 4,
+		Task: controltaskstream.TaskDescriptor{
+			SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
+			State: task.StateRunning, Running: true, CurrentTurnID: "turn-2",
+			ParentTool: controltaskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "SPAWN"},
+		},
+		Frame: &sdkstream.Frame{
+			Ref:    sdkstream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"},
+			Cursor: sdkstream.Cursor{Events: 200}, UpdatedAt: at,
+			Event: &session.Event{
+				ID: "boundary-turn-1", Type: session.EventTypeLifecycle, Visibility: session.VisibilityUIOnly,
+				Time: at,
+				Scope: &session.EventScope{
+					TurnID: "turn-1", Source: "task_stream_turn_boundary",
+					Participant: session.ParticipantRef{
+						ID: "task-1", Kind: session.ParticipantKindSubagent, DelegationID: "task-1",
+					},
+				},
+				Lifecycle: &session.EventLifecycle{Status: string(task.StateCompleted)},
+			},
+		},
+	}
+
+	projected := projectRecord(record)
+	if len(projected) != 1 || projected[0].Kind != eventstream.KindLifecycle || projected[0].Lifecycle == nil {
+		t.Fatalf("projectRecord() = %#v, want one lifecycle boundary", projected)
+	}
+	envelope := projected[0]
+	if envelope.TurnID != "turn-1" || envelope.Lifecycle.State != eventstream.LifecycleStateCompleted ||
+		envelope.Final || !envelope.OccurredAt.Equal(at) {
+		t.Fatalf("historical Turn boundary = %#v", envelope)
+	}
+	if envelope.Scope != eventstream.ScopeSubagent || envelope.ScopeID != "task-1" ||
+		envelope.ParentTool == nil || envelope.ParentTool.ToolCallID != "spawn-1" {
+		t.Fatalf("historical Turn boundary identity = %#v", envelope)
+	}
+}
+
 func TestProjectRecordMountsRunCommandOutputOnParentTerminal(t *testing.T) {
 	t.Parallel()
 

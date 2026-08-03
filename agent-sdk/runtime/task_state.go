@@ -24,8 +24,17 @@ const (
 	taskOutputQuietPeriod           = 100 * time.Millisecond
 	taskCancelWait                  = 10 * time.Millisecond
 	commandLiveOutputBufferCapBytes = 64 * 1024
-	subagentStreamFrameCap          = 1024
-	subagentStreamByteCap           = 4 * 1024 * 1024
+	// Subagent observation deliberately keeps two bounded, process-local views:
+	// a short exact delta window for lossless resume and a larger ingest-merged
+	// semantic view for gap recovery. The semantic byte budget retains exact
+	// completed Final Messages after lower-priority context, while the latest
+	// Final is additionally protected by the Task result contract. The combined
+	// bounded allocation is about 5 MiB per active subagent, plus that latest
+	// Final. Neither view is durable or parent model context.
+	subagentStreamFrameCap       = 128
+	subagentExactStreamByteCap   = 1024 * 1024
+	subagentStreamByteCap        = 4 * 1024 * 1024
+	subagentOutputPreviewByteCap = 1600
 )
 
 type taskRuntime struct {
@@ -210,6 +219,11 @@ type subagentTask struct {
 	streamEventBase      int64
 	streamOutputCursor   int64
 	streamBytes          int
+	semanticRetention    subagentSemanticRetention
+	latestFinalText      string
+	latestFinalTurnSeq   int64
+	latestFinalOrder     int64
+	latestFinalAt        time.Time
 	streamTerminalFramed bool
 	streamChanged        chan struct{}
 	completionReady      bool

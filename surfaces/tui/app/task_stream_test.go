@@ -653,13 +653,17 @@ func TestTUISubagentOutputStopsMaskingRepeatedCleanFollowExit(t *testing.T) {
 	}
 }
 
-func TestTUITaskPanelSilentlyAdvancesTransientGapBoundary(t *testing.T) {
+func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 	t.Parallel()
 
+	startedAt := time.Unix(300, 0)
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.currentSessionID = "session-1"
 	model.taskStreamWanted["task-1"] = true
 	model.taskStreamTokens["task-1"] = 7
+	model.taskStreamCallIDsByID["task-1"] = "spawn-1"
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.block.AppendStreamEvent(SEReasoning, "stale partial prefix", narrativeSourceIdentity{})
 
 	next, _ := model.handleTaskStreamBatch(taskStreamBatchMsg{
 		sessionID: "session-1",
@@ -675,11 +679,121 @@ func TestTUITaskPanelSilentlyAdvancesTransientGapBoundary(t *testing.T) {
 			Meta: map[string]any{
 				"task_stream": map[string]any{"transient_gap": true},
 			},
+		}, {
+			Kind:       eventstream.KindSessionUpdate,
+			SessionID:  "session-1",
+			TurnID:     "task-1:1",
+			Scope:      eventstream.ScopeSubagent,
+			ScopeID:    "task-1",
+			Cursor:     "boundary-cursor",
+			OccurredAt: startedAt,
+			ParentTool: &eventstream.ParentToolRelation{
+				ToolCallID: "spawn-1", ToolName: "SPAWN",
+			},
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentThought,
+				MessageID:     "reasoning-turn-1",
+				Content:       schema.TextContent{Type: "text", Text: "complete rebuilt first reasoning"},
+			},
+		}, {
+			Kind:       eventstream.KindSessionUpdate,
+			SessionID:  "session-1",
+			TurnID:     "task-1:1",
+			Scope:      eventstream.ScopeSubagent,
+			ScopeID:    "task-1",
+			Cursor:     "boundary-cursor",
+			OccurredAt: startedAt.Add(3 * time.Second),
+			ParentTool: &eventstream.ParentToolRelation{
+				ToolCallID: "spawn-1", ToolName: "SPAWN",
+			},
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				MessageID:     "final-turn-1",
+				Content:       schema.TextContent{Type: "text", Text: "first exact Final Message"},
+			},
+		}, {
+			Kind:       eventstream.KindLifecycle,
+			SessionID:  "session-1",
+			TurnID:     "task-1:1",
+			Scope:      eventstream.ScopeSubagent,
+			ScopeID:    "task-1",
+			Cursor:     "boundary-cursor",
+			OccurredAt: startedAt.Add(4 * time.Second),
+			ParentTool: &eventstream.ParentToolRelation{
+				ToolCallID: "spawn-1", ToolName: "SPAWN",
+			},
+			Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
+		}, {
+			Kind:       eventstream.KindSessionUpdate,
+			SessionID:  "session-1",
+			TurnID:     "task-1:2",
+			Scope:      eventstream.ScopeSubagent,
+			ScopeID:    "task-1",
+			Cursor:     "boundary-cursor",
+			OccurredAt: startedAt.Add(10 * time.Second),
+			ParentTool: &eventstream.ParentToolRelation{
+				ToolCallID: "spawn-1", ToolName: "SPAWN",
+			},
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentThought,
+				MessageID:     "reasoning-turn-2",
+				Content:       schema.TextContent{Type: "text", Text: "complete rebuilt second reasoning"},
+			},
+		}, {
+			Kind:       eventstream.KindSessionUpdate,
+			SessionID:  "session-1",
+			TurnID:     "task-1:2",
+			Scope:      eventstream.ScopeSubagent,
+			ScopeID:    "task-1",
+			Cursor:     "boundary-cursor",
+			OccurredAt: startedAt.Add(17 * time.Second),
+			ParentTool: &eventstream.ParentToolRelation{
+				ToolCallID: "spawn-1", ToolName: "SPAWN",
+			},
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				MessageID:     "final-turn-2",
+				Content:       schema.TextContent{Type: "text", Text: "second exact Final Message"},
+			},
+		}, {
+			Kind:       eventstream.KindLifecycle,
+			SessionID:  "session-1",
+			TurnID:     "task-1:2",
+			Scope:      eventstream.ScopeSubagent,
+			ScopeID:    "task-1",
+			Cursor:     "current-state-cursor",
+			OccurredAt: startedAt.Add(18 * time.Second),
+			ParentTool: &eventstream.ParentToolRelation{
+				ToolCallID: "spawn-1", ToolName: "SPAWN",
+			},
+			Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
 		}},
 	})
 	model = next.(*Model)
-	if got := model.taskStreamCursors["task-1"]; got != "boundary-cursor" {
-		t.Fatalf("Task cursor = %q, want accepted gap boundary", got)
+	if got := model.taskStreamCursors["task-1"]; got != "current-state-cursor" {
+		t.Fatalf("Task cursor = %q, want rebuilt current-state boundary", got)
+	}
+	plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 40)), "\n")
+	for _, want := range []string{
+		"complete rebuilt first reasoning",
+		"first exact Final Message",
+		"complete rebuilt second reasoning",
+		"second exact Final Message",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rebuilt multi-Turn current state omitted %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "stale partial prefix") {
+		t.Fatalf("rebuilt multi-Turn current state retained stale prefix:\n%s", plain)
+	}
+	if len(view.turnBlocks) != 2 {
+		t.Fatalf("rebuilt internal Turn groups = %d, want two", len(view.turnBlocks))
+	}
+	for _, duration := range []string{"4.0s", "8.0s"} {
+		if !strings.Contains(plain, duration) {
+			t.Fatalf("rebuilt multi-Turn current state omitted footer %q:\n%s", duration, plain)
+		}
 	}
 	if frame := model.View().Content; strings.Contains(frame, "transient Task output") {
 		t.Fatalf("Task transient gap leaked into TUI frame:\n%s", frame)

@@ -128,45 +128,58 @@ func (s *service) forward(
 	follow bool,
 ) {
 	defer sub.finish(nil)
-	for _, record := range initial {
-		if !sub.enqueue(record) {
-			return
-		}
+	if !sub.enqueueCatchup(initial) {
+		return
 	}
-	req := stream.SubscribeRequest{
-		Ref:    stream.Ref{SessionID: entry.Session.SessionID, TaskID: entry.TaskID},
-		Cursor: point.Cursor,
-		Follow: follow,
-	}
-	for frame, err := range streams.Subscribe(sub.ctx, req) {
-		if err != nil {
-			sub.finish(err)
-			return
-		}
-		if frame == nil {
-			continue
-		}
-		descriptor := descriptorForFrame(entry, *frame)
-		if frame.EventsTruncatedBefore > point.Cursor.Events || frame.TruncatedBefore > point.Cursor.Output {
-			point.Cursor.Events = max(point.Cursor.Events, frame.EventsTruncatedBefore)
-			point.Cursor.Output = max(point.Cursor.Output, frame.TruncatedBefore)
-			gap, next, stampErr := s.gapRecord(entry, descriptor, point)
-			if stampErr != nil || !sub.enqueue(gap) {
-				sub.finish(stampErr)
+	ref := stream.Ref{SessionID: entry.Session.SessionID, TaskID: entry.TaskID}
+	for {
+		recoverCurrentState := false
+		for frame, err := range streams.Subscribe(sub.ctx, stream.SubscribeRequest{
+			Ref: ref, Cursor: point.Cursor, Follow: follow,
+		}) {
+			if err != nil {
+				sub.finish(err)
+				return
+			}
+			if frame == nil {
+				continue
+			}
+			if frame.EventsTruncatedBefore > point.Cursor.Events || frame.TruncatedBefore > point.Cursor.Output {
+				// A live gap may represent a multi-frame semantic current-state
+				// snapshot. Stop this incremental iterator and rebuild the whole
+				// batch through the snapshot path so descriptor and delivery
+				// boundaries remain coherent.
+				recoverCurrentState = true
+				break
+			}
+			descriptor := descriptorForFrame(entry, *frame)
+			records, next, projectErr := s.recordFrame(entry, descriptor, *frame, point)
+			if projectErr != nil {
+				sub.finish(projectErr)
 				return
 			}
 			point = next
+			for _, record := range records {
+				if !sub.enqueue(record) {
+					return
+				}
+			}
 		}
-		records, next, projectErr := s.recordFrame(entry, descriptor, *frame, point)
-		if projectErr != nil {
-			sub.finish(projectErr)
+		if !recoverCurrentState {
+			return
+		}
+
+		snapshot, catchup, _, _, next, readErr := s.initialRead(sub.ctx, entry, point, true)
+		if readErr != nil {
+			sub.finish(readErr)
 			return
 		}
 		point = next
-		for _, record := range records {
-			if !sub.enqueue(record) {
-				return
-			}
+		if !sub.enqueueCatchup(catchup) {
+			return
+		}
+		if !snapshot.Running && (!follow || entry.Kind != task.KindSubagent) {
+			return
 		}
 	}
 }
@@ -202,8 +215,13 @@ func (s *service) initialRead(ctx context.Context, entry *task.Entry, point curs
 	readCursor := stream.CloneCursor(point.Cursor)
 	mode := ResumeModeExact
 	gap := false
+	replaySubagentCurrentState := !sameGeneration && entry.Kind == task.KindSubagent
 	if !sameGeneration {
-		readCursor = stream.Cursor{Output: math.MaxInt64, Events: math.MaxInt64}
+		if replaySubagentCurrentState {
+			readCursor = stream.Cursor{}
+		} else {
+			readCursor = stream.Cursor{Output: math.MaxInt64, Events: math.MaxInt64}
+		}
 		mode = ResumeModeCurrentState
 		gap = true
 	}
@@ -213,15 +231,23 @@ func (s *service) initialRead(ctx context.Context, entry *task.Entry, point curs
 	if err != nil {
 		return stream.Snapshot{}, nil, "", false, point, err
 	}
+	subagentCurrentState := replaySubagentCurrentState
 	if snapshot.EventsTruncatedBefore > readCursor.Events || snapshot.TruncatedBefore > readCursor.Output {
 		mode = ResumeModeCurrentState
 		gap = true
+		subagentCurrentState = entry.Kind == task.KindSubagent && snapshot.EventsTruncatedBefore > readCursor.Events
 	}
 	descriptor := descriptorForSnapshot(entry, snapshot)
 	events := make([]Record, 0, len(snapshot.Frames)+1)
 	if gap {
 		if !sameGeneration {
-			point.Cursor = stream.CloneCursor(snapshot.Cursor)
+			if replaySubagentCurrentState {
+				point.Cursor = stream.CloneCursor(readCursor)
+				point.Cursor.Events = max(point.Cursor.Events, snapshot.EventsTruncatedBefore)
+				point.Cursor.Output = max(point.Cursor.Output, snapshot.TruncatedBefore)
+			} else {
+				point.Cursor = stream.CloneCursor(snapshot.Cursor)
+			}
 		} else {
 			point.Cursor.Events = max(point.Cursor.Events, snapshot.EventsTruncatedBefore)
 			point.Cursor.Output = max(point.Cursor.Output, snapshot.TruncatedBefore)
@@ -233,7 +259,7 @@ func (s *service) initialRead(ctx context.Context, entry *task.Entry, point curs
 		}
 		events = append(events, record)
 	}
-	if !sameGeneration {
+	if !sameGeneration && !replaySubagentCurrentState {
 		point.Cursor = stream.CloneCursor(snapshot.Cursor)
 		if stream.IsTerminalState(snapshot.State) {
 			frame := stream.Frame{
@@ -269,7 +295,29 @@ func (s *service) initialRead(ctx context.Context, entry *task.Entry, point curs
 		point = next
 		events = append(events, projected...)
 	}
+	if subagentCurrentState {
+		if err := s.makeCurrentStateBatchReplayable(entry, events, readCursor); err != nil {
+			return stream.Snapshot{}, nil, "", false, point, err
+		}
+	}
 	return snapshot, events, mode, gap, point, nil
+}
+
+// makeCurrentStateBatchReplayable keeps every partial-batch cursor anchored
+// before the lost exact window. Only the final record acknowledges the semantic
+// snapshot boundary. A disconnect anywhere earlier therefore replays the gap,
+// allowing the Surface to reset and rebuild instead of silently losing the
+// unconsumed suffix.
+func (s *service) makeCurrentStateBatchReplayable(entry *task.Entry, records []Record, anchor stream.Cursor) error {
+	for index := 0; index+1 < len(records); index++ {
+		point := cursorPoint{Cursor: stream.CloneCursor(anchor), Sequence: records[index].Sequence}
+		cursor, err := s.cursors.encode(entry.Session.SessionID, entry.TaskID, point)
+		if err != nil {
+			return err
+		}
+		records[index].Cursor = cursor
+	}
+	return nil
 }
 
 func (s *service) recordFrame(entry *task.Entry, descriptor TaskDescriptor, frame stream.Frame, point cursorPoint) ([]Record, cursorPoint, error) {
@@ -303,10 +351,11 @@ func (s *service) gapRecord(entry *task.Entry, descriptor TaskDescriptor, point 
 
 func descriptorForSnapshot(entry *task.Entry, snapshot stream.Snapshot) TaskDescriptor {
 	descriptor := descriptorFromEntry(entry)
-	if state := strings.TrimSpace(snapshot.State); state != "" {
+	state := strings.TrimSpace(snapshot.State)
+	if state != "" {
 		descriptor.State = task.State(state)
 	}
-	descriptor.Running = snapshot.Running
+	descriptor.Running = snapshot.Running && !stream.IsTerminalState(state)
 	descriptor.SupportsInput = entry != nil && entry.Kind == task.KindCommand && snapshot.SupportsInput
 	if turnID := strings.TrimSpace(snapshot.Ref.TerminalID); turnID != "" {
 		descriptor.CurrentTurnID = turnID
@@ -323,7 +372,7 @@ func descriptorForFrame(entry *task.Entry, frame stream.Frame) TaskDescriptor {
 	switch {
 	case state != "":
 		descriptor.State = task.State(state)
-		descriptor.Running = frame.Running
+		descriptor.Running = frame.Running && !stream.IsTerminalState(state)
 		descriptor.SupportsInput = false
 	case frame.Running:
 		descriptor.State = task.StateRunning

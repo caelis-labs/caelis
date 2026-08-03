@@ -122,6 +122,26 @@ func (m *Model) ensureSubagentOutputView(callID string) *subagentOutputView {
 	return view
 }
 
+// resetForCurrentState drops only the transient child projection after a Task
+// stream gap. Stable Spawn/Task ownership stays mounted while the following
+// semantic snapshot rebuilds the visible child timeline.
+func (v *subagentOutputView) resetForCurrentState() {
+	if v == nil {
+		return
+	}
+	block := NewParticipantTurnBlock(v.callID, v.actor)
+	block.ParticipantID = v.taskHandle
+	document := NewDocument()
+	document.Append(block)
+	v.document = document
+	v.turnBlocks = map[string]*ParticipantTurnBlock{}
+	v.turnID = ""
+	v.block = block
+	v.seenProjections = nil
+	v.renderCache = subagentOutputRenderCache{}
+	v.touch(true)
+}
+
 func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 	if v == nil {
 		return

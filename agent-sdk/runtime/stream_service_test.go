@@ -3,8 +3,10 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -2040,7 +2042,7 @@ func TestSubagentOversizedFrameAdvancesCursorAndMarksTransientGap(t *testing.T) 
 		running:    true,
 	}
 	task.mu.Lock()
-	task.appendStreamFrameLocked(stream.Frame{Text: strings.Repeat("x", subagentStreamByteCap+1), Running: true})
+	task.appendStreamFrameLocked(stream.Frame{Text: strings.Repeat("x", subagentExactStreamByteCap+1), Running: true})
 	retainedOutput := task.stdout
 	task.mu.Unlock()
 
@@ -2048,11 +2050,15 @@ func TestSubagentOversizedFrameAdvancesCursorAndMarksTransientGap(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retainedOutput != "" || snapshot.Cursor.Events != 1 || snapshot.Cursor.Output != subagentStreamByteCap+1 || len(snapshot.Frames) != 1 {
-		t.Fatalf("oversized subagent stream = %#v retained=%d, want cursor-only marker", snapshot, len(retainedOutput))
+	if len(retainedOutput) != subagentOutputPreviewByteCap || snapshot.Cursor.Events != 1 || snapshot.Cursor.Output != subagentExactStreamByteCap+1 || len(snapshot.Frames) != 1 {
+		t.Fatalf("oversized subagent stream = frames:%d cursor:%#v retained=%d", len(snapshot.Frames), snapshot.Cursor, len(retainedOutput))
 	}
-	if frame := snapshot.Frames[0]; frame.Text != "" || frame.Event != nil || frame.EventsTruncatedBefore != 1 {
-		t.Fatalf("oversized frame marker = %#v, want explicit event gap", frame)
+	frame := snapshot.Frames[0]
+	if frame.Event != nil || frame.EventsTruncatedBefore != 1 || frame.Cursor != snapshot.Cursor ||
+		!strings.Contains(frame.Text, "bytes of transient output omitted") ||
+		!strings.HasPrefix(frame.Text, "xxxx") || !strings.HasSuffix(frame.Text, "xxxx") ||
+		len(frame.Text) > subagentSemanticUnitByteCap+256 {
+		t.Fatalf("oversized current-state frame = event:%v lower:%d cursor:%#v bytes:%d", frame.Event != nil, frame.EventsTruncatedBefore, frame.Cursor, len(frame.Text))
 	}
 }
 
@@ -2076,8 +2082,497 @@ func TestSubagentFrameRingEvictionReportsEventLowerBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Frames) != subagentStreamFrameCap || snapshot.EventsTruncatedBefore != 1 || snapshot.Cursor.Events != subagentStreamFrameCap+1 {
+	if len(snapshot.Frames) != 1 || snapshot.EventsTruncatedBefore != 1 || snapshot.Cursor.Events != subagentStreamFrameCap+1 {
 		t.Fatalf("evicted subagent stream = frames:%d lower:%d cursor:%d", len(snapshot.Frames), snapshot.EventsTruncatedBefore, snapshot.Cursor.Events)
+	}
+	if frame := snapshot.Frames[0]; len(frame.Text) != subagentStreamFrameCap+1 || frame.Cursor != snapshot.Cursor {
+		t.Fatalf("semantic current state = bytes:%d cursor:%#v, want complete coalesced text at boundary %#v", len(frame.Text), frame.Cursor, snapshot.Cursor)
+	}
+}
+
+func TestSubagentTwoTurnCurrentStateRetainsBothExactFinals(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	appendReasoning := func(turnID string, messageID string, count int) {
+		for index := 0; index < count; index++ {
+			task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+				ID: fmt.Sprintf("%s-%03d", messageID, index), MessageID: messageID,
+				Type: session.EventTypeAssistant, Text: "r", Scope: &session.EventScope{TurnID: turnID},
+				Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+					SessionUpdate: string(session.ProtocolUpdateTypeAgentThought), MessageID: messageID,
+					Content: session.ProtocolTextContent("r"),
+				}},
+			}})
+		}
+	}
+
+	task.mu.Lock()
+	appendReasoning(subagentTurnID(task.ref.TaskID, task.turnSeq), "reasoning-turn-1", 82)
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "first exact Final"})
+	firstFinalAt := task.latestFinalAt
+	task.ensureTerminalStreamFrameLocked()
+	task.mu.Unlock()
+
+	task.beginMessageTurn()
+	task.mu.Lock()
+	appendReasoning(subagentTurnID(task.ref.TaskID, task.turnSeq), "reasoning-turn-2", 82)
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "second exact Final"})
+	secondFinalAt := task.latestFinalAt
+	task.ensureTerminalStreamFrameLocked()
+	task.mu.Unlock()
+
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.EventsTruncatedBefore == 0 || snapshot.Cursor.Events <= subagentStreamFrameCap {
+		t.Fatalf("two-Turn snapshot did not exercise current-state recovery: %#v", snapshot)
+	}
+	finals := map[string]string{}
+	finalTimes := map[string]time.Time{}
+	for _, frame := range snapshot.Frames {
+		if frame.Event == nil || frame.Event.Scope == nil || frame.Event.Scope.Source != "subagent_result" {
+			continue
+		}
+		finals[subagentFrameTurnID(frame)] = session.EventText(frame.Event)
+		finalTimes[subagentFrameTurnID(frame)] = frame.Event.Time
+	}
+	want := map[string]string{
+		subagentTurnID(task.ref.TaskID, 1): "first exact Final",
+		subagentTurnID(task.ref.TaskID, 2): "second exact Final",
+	}
+	if !reflect.DeepEqual(finals, want) {
+		t.Fatalf("two-Turn current-state Finals = %#v, want %#v", finals, want)
+	}
+	wantTimes := map[string]time.Time{
+		subagentTurnID(task.ref.TaskID, 1): firstFinalAt,
+		subagentTurnID(task.ref.TaskID, 2): secondFinalAt,
+	}
+	if !reflect.DeepEqual(finalTimes, wantTimes) {
+		t.Fatalf("two-Turn current-state Final times = %#v, want stable completion times %#v", finalTimes, wantTimes)
+	}
+}
+
+func TestSubagentCurrentStateRetainsCompletedFinalsBelowByteBudget(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	task.mu.Lock()
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "exact final turn one"})
+	task.ensureTerminalStreamFrameLocked()
+	task.mu.Unlock()
+
+	task.beginMessageTurn()
+	task.mu.Lock()
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "exact final turn two"})
+	task.ensureTerminalStreamFrameLocked()
+	task.mu.Unlock()
+
+	// A third running Turn exceeds both the exact frame window and the transient
+	// semantic unit count. Neither threshold may discard small completed Finals
+	// while the semantic byte budget remains available.
+	task.beginMessageTurn()
+	task.mu.Lock()
+	for index := 0; index < subagentSemanticUnitCap+128; index++ {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: fmt.Sprintf("participant-%04d", index), Type: session.EventTypeParticipant,
+		}})
+	}
+	if task.semanticRetention.bytes > subagentStreamByteCap || task.semanticRetention.contextUnitCount() > subagentSemanticUnitCap {
+		t.Fatalf("semantic retention exceeded budget: bytes=%d context_units=%d", task.semanticRetention.bytes, task.semanticRetention.contextUnitCount())
+	}
+	task.mu.Unlock()
+
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	texts := make([]string, 0, len(snapshot.Frames))
+	for _, frame := range snapshot.Frames {
+		if text := session.EventText(frame.Event); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	for _, want := range []string{"exact final turn one", "exact final turn two"} {
+		if !slices.Contains(texts, want) {
+			t.Fatalf("current state lost completed Final %q: %q", want, texts)
+		}
+	}
+}
+
+func TestSubagentMultiTurnCurrentStateRetainsHistoricalTurnBoundaryWithoutRewritingRunningTask(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	task.mu.Lock()
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "exact final turn one"})
+	task.ensureTerminalStreamFrameLocked()
+	task.mu.Unlock()
+
+	task.beginMessageTurn()
+	turnTwo := subagentTurnID(task.ref.TaskID, task.turnSeq)
+	task.mu.Lock()
+	for index := 0; index < subagentStreamFrameCap+64; index++ {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: fmt.Sprintf("thought-%04d", index), MessageID: "thought-turn-two",
+			Type: session.EventTypeAssistant, Text: "r",
+			Scope: &session.EventScope{TurnID: turnTwo},
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentThought),
+				MessageID:     "thought-turn-two", Content: session.ProtocolTextContent("r"),
+			}},
+		}})
+	}
+	task.mu.Unlock()
+
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.Running || snapshot.State != string(taskapi.StateRunning) || snapshot.EventsTruncatedBefore == 0 {
+		t.Fatalf("turn-two current state = %#v, want running snapshot after exact-window gap", snapshot)
+	}
+	var foundHistoricalFinal bool
+	var foundHistoricalBoundary bool
+	var foundCurrentTurn bool
+	for _, frame := range snapshot.Frames {
+		turnID := subagentFrameTurnID(frame)
+		if turnID != turnTwo && (frame.Closed || stream.IsTerminalState(frame.State)) {
+			t.Fatalf("current state replayed historical terminal frame: %#v", frame)
+		}
+		if frame.Event != nil && frame.Event.Scope != nil && frame.Event.Scope.Source == "subagent_result" {
+			foundHistoricalFinal = true
+			if frame.Running {
+				t.Fatalf("historical Final inherited current running state: %#v", frame)
+			}
+		}
+		if turnID != turnTwo && subagentSemanticTurnBoundary(frame) {
+			foundHistoricalBoundary = true
+			if frame.Event.Time.IsZero() || frame.UpdatedAt.IsZero() || !frame.Event.Time.Equal(frame.UpdatedAt) {
+				t.Fatalf("historical Turn boundary lost completion time: %#v", frame)
+			}
+			if frame.Running || frame.Closed || frame.State != "" {
+				t.Fatalf("historical display boundary carried Task state: %#v", frame)
+			}
+		}
+		if turnID == turnTwo && session.ProtocolSessionUpdateType(frame.Event) == string(session.ProtocolUpdateTypeAgentThought) {
+			foundCurrentTurn = true
+			if !frame.Running {
+				t.Fatalf("current-turn reasoning lost running state: %#v", frame)
+			}
+		}
+	}
+	if !foundHistoricalFinal || !foundHistoricalBoundary || !foundCurrentTurn {
+		t.Fatalf("current state = %#v, want historical Final/boundary and current-turn reasoning", snapshot.Frames)
+	}
+}
+
+func TestSubagentHistoricalFinalsIgnoreContextUnitCapBelowByteBudget(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	completedTurns := subagentSemanticUnitCap + 32
+	for turn := 1; turn <= completedTurns; turn++ {
+		task.mu.Lock()
+		task.applyResult(delegation.Result{
+			TaskID: task.ref.TaskID, State: delegation.StateCompleted,
+			Result: fmt.Sprintf("exact final turn %d", turn),
+		})
+		task.ensureTerminalStreamFrameLocked()
+		task.mu.Unlock()
+		task.beginMessageTurn()
+	}
+
+	currentTurn := subagentTurnID(task.ref.TaskID, task.turnSeq)
+	task.mu.Lock()
+	task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+		ID: "current-thought", MessageID: "current-thought", Type: session.EventTypeAssistant, Text: "still working",
+		Scope: &session.EventScope{TurnID: currentTurn},
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentThought),
+			MessageID:     "current-thought", Content: session.ProtocolTextContent("still working"),
+		}},
+	}})
+	if got := task.semanticRetention.contextUnitCount(); got != subagentSemanticUnitCap {
+		t.Fatalf("semantic context units = %d, want bounded Turn boundaries plus current reasoning", got)
+	}
+	finalUnits := 0
+	latestFinalUnits := 0
+	for _, unit := range task.semanticRetention.units {
+		if unit != nil && unit.priority == subagentSemanticFinal {
+			finalUnits++
+			if unit.latestFinal {
+				latestFinalUnits++
+			}
+		}
+	}
+	if finalUnits != completedTurns || latestFinalUnits != 1 {
+		t.Fatalf("semantic Finals = %d (latest=%d), want %d (latest=1)", finalUnits, latestFinalUnits, completedTurns)
+	}
+	if got := len(task.semanticRetention.units); got != completedTurns+subagentSemanticUnitCap {
+		t.Fatalf("semantic units = %d, want %d Finals plus %d bounded context units", got, finalUnits, task.semanticRetention.contextUnitCount())
+	}
+	task.mu.Unlock()
+
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.EventsTruncatedBefore == 0 || !snapshot.Running {
+		t.Fatalf("current state = %#v, want running snapshot after exact-window eviction", snapshot)
+	}
+	finals := map[string]struct{}{}
+	boundaries := 0
+	var reasoning string
+	for _, frame := range snapshot.Frames {
+		if frame.Closed || stream.IsTerminalState(frame.State) {
+			t.Fatalf("running current state retained historical terminal: %#v", frame)
+		}
+		if frame.Event == nil {
+			continue
+		}
+		if subagentSemanticTurnBoundary(frame) {
+			boundaries++
+			continue
+		}
+		switch session.ProtocolSessionUpdateType(frame.Event) {
+		case string(session.ProtocolUpdateTypeAgentMessage):
+			finals[session.EventText(frame.Event)] = struct{}{}
+		case string(session.ProtocolUpdateTypeAgentThought):
+			reasoning = session.EventText(frame.Event)
+		}
+	}
+	if len(finals) != completedTurns {
+		t.Fatalf("current-state Final count = %d, want %d", len(finals), completedTurns)
+	}
+	if boundaries != subagentSemanticUnitCap-1 {
+		t.Fatalf("current-state Turn boundaries = %d, want %d after context cap", boundaries, subagentSemanticUnitCap-1)
+	}
+	for _, want := range []string{"exact final turn 1", fmt.Sprintf("exact final turn %d", completedTurns)} {
+		if _, ok := finals[want]; !ok {
+			t.Fatalf("current-state Finals omitted %q", want)
+		}
+	}
+	if reasoning != "still working" {
+		t.Fatalf("current-state reasoning = %q, want current Turn", reasoning)
+	}
+}
+
+func TestSubagentHistoricalFinalEvictionIsLastAndOldest(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	largeFinal := func(marker byte) string {
+		return string([]byte{marker}) + strings.Repeat(string([]byte{marker}), subagentStreamByteCap/2+64*1024)
+	}
+	firstFinal := largeFinal('a')
+	secondFinal := largeFinal('b')
+
+	task.mu.Lock()
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: firstFinal})
+	task.ensureTerminalStreamFrameLocked()
+	task.mu.Unlock()
+
+	task.beginMessageTurn()
+	task.mu.Lock()
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: secondFinal})
+	task.ensureTerminalStreamFrameLocked()
+	task.mu.Unlock()
+
+	task.beginMessageTurn()
+	currentTurn := subagentTurnID(task.ref.TaskID, task.turnSeq)
+	task.mu.Lock()
+	for index := 0; index < subagentStreamFrameCap+1; index++ {
+		text := strings.Repeat("r", subagentSemanticHeadByteCap/(subagentStreamFrameCap+1))
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: fmt.Sprintf("current-reasoning-%d", index), MessageID: "current-reasoning", Type: session.EventTypeAssistant,
+			Text: text, Scope: &session.EventScope{TurnID: currentTurn},
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentThought), MessageID: "current-reasoning",
+				Content: session.ProtocolTextContent(text),
+			}},
+		}})
+	}
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "latest exact final"})
+	task.ensureTerminalStreamFrameLocked()
+	if task.semanticRetention.bytes > subagentStreamByteCap {
+		t.Fatalf("semantic retention bytes = %d, cap %d", task.semanticRetention.bytes, subagentStreamByteCap)
+	}
+	if task.semanticRetention.contextUnitCount() != 1 {
+		t.Fatalf("semantic context = %d units, want only the post-completion Turn boundary", task.semanticRetention.contextUnitCount())
+	}
+	var boundary *subagentSemanticUnit
+	for _, unit := range task.semanticRetention.units {
+		if unit != nil && unit.turnID == currentTurn && subagentSemanticTurnBoundary(unit.frame) {
+			boundary = unit
+			break
+		}
+	}
+	if boundary == nil {
+		t.Fatal("post-completion current Turn boundary was not retained")
+	}
+	if task.semanticRetention.units["final:"+subagentTurnID(task.ref.TaskID, 1)] != nil {
+		t.Fatal("oldest historical Final survived after exact Final cache exceeded byte budget")
+	}
+	if task.semanticRetention.units["final:"+subagentTurnID(task.ref.TaskID, 2)] == nil {
+		t.Fatal("newer historical Final was evicted before the oldest Final")
+	}
+	task.mu.Unlock()
+
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotSecond, gotLatest bool
+	for _, frame := range snapshot.Frames {
+		text := session.EventText(frame.Event)
+		gotSecond = gotSecond || text == secondFinal
+		gotLatest = gotLatest || text == "latest exact final"
+		if text == firstFinal || strings.Contains(text, "rrrr") {
+			t.Fatalf("current state retained lower-priority or oldest overflow content: turn=%q bytes=%d", subagentFrameTurnID(frame), len(text))
+		}
+	}
+	if !gotSecond || !gotLatest {
+		t.Fatalf("current state lost retained Finals: second=%v latest=%v", gotSecond, gotLatest)
+	}
+}
+
+func TestSubagentSemanticRetentionTreatsProgressLifecycleAsReplaceableNoise(t *testing.T) {
+	t.Parallel()
+
+	retention := &subagentSemanticRetention{}
+	turnID := "task-1:1"
+	retention.observe(stream.Frame{Event: &session.Event{
+		ID: "assistant", MessageID: "assistant", Type: session.EventTypeAssistant, Text: "answer",
+		Scope: &session.EventScope{TurnID: turnID},
+	}}, 1)
+	retention.observe(stream.Frame{Event: &session.Event{
+		ID: "tool", Type: session.EventTypeToolCall, Scope: &session.EventScope{TurnID: turnID},
+		Tool: &session.EventTool{ID: "call-1", Name: "read"},
+	}}, 2)
+	for index := 0; index < subagentSemanticUnitCap+128; index++ {
+		retention.observe(stream.Frame{Event: &session.Event{
+			ID: fmt.Sprintf("progress-%04d", index), Type: session.EventTypeLifecycle,
+			Scope:     &session.EventScope{TurnID: turnID},
+			Lifecycle: &session.EventLifecycle{Status: "progress", Reason: fmt.Sprintf("step-%04d", index)},
+		}}, int64(index+3))
+	}
+	if retention.units["narrative:"+turnID+":assistant:assistant"] == nil {
+		t.Fatal("progress lifecycle pressure evicted assistant current state")
+	}
+	if retention.units["tool:"+turnID+":call:call-1"] == nil {
+		t.Fatal("progress lifecycle pressure evicted tool current state")
+	}
+	progressUnits := 0
+	for _, unit := range retention.units {
+		if unit != nil && unit.turnID == turnID && unit.priority == subagentSemanticNoise &&
+			session.EventTypeOf(unit.frame.Event) == session.EventTypeLifecycle {
+			progressUnits++
+		}
+	}
+	if progressUnits != 1 {
+		t.Fatalf("retained progress lifecycle units = %d, want one latest replaceable unit", progressUnits)
+	}
+}
+
+func TestSubagentGapRebuildsTypedSemanticStateInsteadOfRawSuffix(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref: taskapi.Ref{TaskID: "task-1"}, sessionRef: session.SessionRef{SessionID: "session-1"},
+		createdAt: time.Now(), state: taskapi.StateRunning, running: true, turnSeq: 1,
+	}
+	turnID := subagentTurnID(task.ref.TaskID, task.turnSeq)
+	task.mu.Lock()
+	for index := 0; index < subagentStreamFrameCap+64; index++ {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: fmt.Sprintf("thought-%04d", index), MessageID: "thought-message",
+			Type: session.EventTypeAssistant, Text: "r",
+			Scope: &session.EventScope{TurnID: turnID},
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentThought),
+				MessageID:     "thought-message", Content: session.ProtocolTextContent("r"),
+			}},
+		}})
+	}
+	for index := 0; index < 64; index++ {
+		task.appendStreamFrameLocked(stream.Frame{Running: true, Event: &session.Event{
+			ID: fmt.Sprintf("plan-%02d", index), Type: session.EventTypePlan,
+			Scope: &session.EventScope{TurnID: turnID},
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypePlan),
+				Entries:       []session.ProtocolPlanEntry{{Content: fmt.Sprintf("plan %d", index), Status: "pending"}},
+			}},
+		}})
+	}
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "exact final"})
+	task.ensureTerminalStreamFrameLocked()
+	task.mu.Unlock()
+
+	snapshot, err := (&streamService{}).readSubagent(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.EventsTruncatedBefore == 0 {
+		t.Fatal("typed stream did not enter current-state mode after raw eviction")
+	}
+	var reasoning string
+	var plan string
+	var final string
+	for _, frame := range snapshot.Frames {
+		if frame.Cursor != snapshot.Cursor {
+			t.Fatalf("current-state cursor = %#v, want boundary %#v", frame.Cursor, snapshot.Cursor)
+		}
+		if frame.Event == nil {
+			continue
+		}
+		switch session.ProtocolSessionUpdateType(frame.Event) {
+		case string(session.ProtocolUpdateTypeAgentThought):
+			reasoning = session.EventText(frame.Event)
+		case string(session.ProtocolUpdateTypePlan):
+			if update := session.ProtocolUpdateOf(frame.Event); update != nil && len(update.Entries) == 1 {
+				plan = update.Entries[0].Content
+			}
+		case string(session.ProtocolUpdateTypeAgentMessage):
+			if frame.Event.Scope != nil && frame.Event.Scope.Source == "subagent_result" {
+				final = session.EventText(frame.Event)
+			}
+		}
+	}
+	if len(reasoning) != subagentStreamFrameCap+64 || !strings.HasPrefix(reasoning, "rrrr") {
+		t.Fatalf("coalesced reasoning bytes = %d", len(reasoning))
+	}
+	if plan != "plan 63" {
+		t.Fatalf("replacement plan = %q, want latest", plan)
+	}
+	if final != "exact final" {
+		t.Fatalf("latest Final = %q, want exact", final)
+	}
+	delivered := stream.FramesForSnapshot(snapshot)
+	terminalFrames := 0
+	for _, frame := range delivered {
+		if frame.Closed || subagentSemanticTurnBoundary(frame) {
+			terminalFrames++
+		}
+	}
+	if terminalFrames != 1 || !delivered[len(delivered)-1].Closed {
+		t.Fatalf("completed current-state terminal delivery = %#v, want one authoritative close", delivered)
 	}
 }
 

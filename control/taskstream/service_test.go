@@ -3,6 +3,7 @@ package taskstream
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"strings"
 	"sync"
@@ -150,6 +151,259 @@ func TestGenerationChangeFallsBackToCurrentTaskState(t *testing.T) {
 	}
 }
 
+func TestGenerationChangeReplaysSubagentLatestFinalCurrentState(t *testing.T) {
+	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
+	store := newTaskStreamTestStore(entry)
+	oldRuntime := &taskStreamTestRuntime{snapshots: map[string]stream.Snapshot{
+		"task-1": taskStreamTestSnapshot("session-1", "task-1", "turn-1", "old transient output"),
+	}}
+	oldService := newTaskStreamTestService(t, store, oldRuntime, "old-generation")
+	oldBatch, err := oldService.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{SessionID: "session-1", TaskID: "task-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	final := &session.Event{
+		ID: "final-1", MessageID: "final-1", Type: session.EventTypeAssistant,
+		Text: "latest exact Final", Scope: &session.EventScope{TurnID: "turn-1", Source: "subagent_result"},
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+			MessageID:     "final-1", Content: session.ProtocolTextContent("latest exact Final"),
+		}},
+	}
+	current := stream.Snapshot{
+		Ref:    stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"},
+		Cursor: stream.Cursor{Events: 6}, EventsTruncatedBefore: 5,
+		State: string(task.StateCompleted), TerminalFramed: true,
+		Frames: []stream.Frame{
+			{Ref: stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"}, Cursor: stream.Cursor{Events: 6}, EventsTruncatedBefore: 5, Event: final},
+			{Ref: stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"}, Cursor: stream.Cursor{Events: 6}, EventsTruncatedBefore: 5, State: string(task.StateCompleted), Closed: true},
+		},
+	}
+	newService := newTaskStreamTestService(t, store, &taskStreamTestRuntime{snapshots: map[string]stream.Snapshot{"task-1": current}}, "new-generation")
+	resumed, err := newService.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{
+		SessionID: "session-1", TaskID: "task-1", Cursor: oldBatch.BoundaryCursor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.ResumeMode != ResumeModeCurrentState || !resumed.TransientGap || len(resumed.Records) != 3 {
+		t.Fatalf("subagent generation fallback = %#v, want gap plus Final and terminal", resumed)
+	}
+	if resumed.Records[0].Gap == nil || resumed.Records[1].Frame == nil || session.EventText(resumed.Records[1].Frame.Event) != "latest exact Final" {
+		t.Fatalf("subagent current state = %#v", resumed.Records)
+	}
+}
+
+func TestMultiTurnCurrentStateKeepsRunningDescriptorAndCarriesHistoricalDisplayBoundary(t *testing.T) {
+	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
+	entry.State = task.StateRunning
+	entry.Running = true
+	historicalFinal := &session.Event{
+		ID: "final-turn-1", MessageID: "final-turn-1", Type: session.EventTypeAssistant,
+		Text: "turn one final", Scope: &session.EventScope{TurnID: "turn-1", Source: "subagent_result"},
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+			MessageID:     "final-turn-1", Content: session.ProtocolTextContent("turn one final"),
+		}},
+	}
+	currentThought := &session.Event{
+		ID: "thought-turn-2", MessageID: "thought-turn-2", Type: session.EventTypeAssistant,
+		Text: "working", Scope: &session.EventScope{TurnID: "turn-2"},
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentThought),
+			MessageID:     "thought-turn-2", Content: session.ProtocolTextContent("working"),
+		}},
+	}
+	historicalBoundary := &session.Event{
+		ID: "boundary-turn-1", Type: session.EventTypeLifecycle, Visibility: session.VisibilityUIOnly,
+		Time: time.Unix(105, 0),
+		Scope: &session.EventScope{
+			TurnID: "turn-1", Source: "task_stream_turn_boundary",
+			Participant: session.ParticipantRef{
+				ID: "task-1", Kind: session.ParticipantKindSubagent, DelegationID: "task-1",
+			},
+		},
+		Lifecycle: &session.EventLifecycle{Status: string(task.StateCompleted)},
+	}
+	current := stream.Snapshot{
+		Ref:    stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-2"},
+		Cursor: stream.Cursor{Events: 200}, EventsTruncatedBefore: 72,
+		State: string(task.StateRunning), Running: true,
+		Frames: []stream.Frame{
+			{Ref: stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"}, Cursor: stream.Cursor{Events: 200}, EventsTruncatedBefore: 72, Event: historicalFinal},
+			{Ref: stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"}, Cursor: stream.Cursor{Events: 200}, EventsTruncatedBefore: 72, UpdatedAt: historicalBoundary.Time, Event: historicalBoundary},
+			{Ref: stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-2"}, Cursor: stream.Cursor{Events: 200}, EventsTruncatedBefore: 72, Running: true, Event: currentThought},
+		},
+	}
+	service := newTaskStreamTestService(t, newTaskStreamTestStore(entry), &taskStreamTestRuntime{
+		snapshots: map[string]stream.Snapshot{"task-1": current},
+	}, "generation-1")
+	batch, err := service.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{
+		SessionID: "session-1", TaskID: "task-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batch.ResumeMode != ResumeModeCurrentState || !batch.TransientGap || len(batch.Records) != 4 {
+		t.Fatalf("multi-turn current state = %#v, want gap plus Final, boundary, and current reasoning", batch)
+	}
+	foundBoundary := false
+	for _, record := range batch.Records {
+		if record.Task.State != task.StateRunning || !record.Task.Running {
+			t.Fatalf("current-state descriptor regressed from running: %#v", record)
+		}
+		if record.Frame != nil && record.Frame.Ref.TerminalID == "turn-1" &&
+			(record.Frame.Closed || stream.IsTerminalState(record.Frame.State)) {
+			t.Fatalf("current state projected historical terminal: %#v", record.Frame)
+		}
+		if record.Frame != nil && record.Frame.Event != nil &&
+			session.EventTypeOf(record.Frame.Event) == session.EventTypeLifecycle {
+			foundBoundary = record.Frame.Event.Lifecycle != nil &&
+				record.Frame.Event.Lifecycle.Status == string(task.StateCompleted)
+		}
+	}
+	if !foundBoundary {
+		t.Fatalf("current state omitted historical display boundary: %#v", batch.Records)
+	}
+}
+
+func TestCurrentStatePartialCursorReplaysWholeSemanticBatch(t *testing.T) {
+	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
+	entry.State = task.StateRunning
+	entry.Running = true
+	final := &session.Event{
+		ID: "final-turn-1", MessageID: "final-turn-1", Type: session.EventTypeAssistant,
+		Text: "turn one final", Scope: &session.EventScope{TurnID: "turn-1", Source: "subagent_result"},
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+			MessageID:     "final-turn-1", Content: session.ProtocolTextContent("turn one final"),
+		}},
+	}
+	thought := &session.Event{
+		ID: "thought-turn-2", MessageID: "thought-turn-2", Type: session.EventTypeAssistant,
+		Text: "working", Scope: &session.EventScope{TurnID: "turn-2"},
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentThought),
+			MessageID:     "thought-turn-2", Content: session.ProtocolTextContent("working"),
+		}},
+	}
+	current := stream.Snapshot{
+		Ref:    stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-2"},
+		Cursor: stream.Cursor{Events: 200}, EventsTruncatedBefore: 72,
+		State: string(task.StateRunning), Running: true,
+		Frames: []stream.Frame{
+			{Ref: stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"}, Cursor: stream.Cursor{Events: 200}, EventsTruncatedBefore: 72, Event: final},
+			{Ref: stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-2"}, Cursor: stream.Cursor{Events: 200}, EventsTruncatedBefore: 72, Running: true, Event: thought},
+		},
+	}
+	runtime := &taskStreamTestRuntime{readSnapshot: func(req stream.ReadRequest) (stream.Snapshot, error) {
+		if req.Cursor.Events >= current.Cursor.Events {
+			return stream.Snapshot{Ref: current.Ref, Cursor: current.Cursor, State: current.State, Running: true}, nil
+		}
+		return stream.CloneSnapshot(current), nil
+	}}
+	api := newTaskStreamTestService(t, newTaskStreamTestStore(entry), runtime, "generation-1")
+
+	first, err := api.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{
+		SessionID: "session-1", TaskID: "task-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Records) != 3 || first.Records[0].Gap == nil {
+		t.Fatalf("first current state = %#v, want gap plus two semantic frames", first)
+	}
+	service := api.(*service)
+	partial, sameGeneration, err := service.cursors.decode("session-1", "task-1", first.Records[1].Cursor)
+	if err != nil || !sameGeneration || partial.Cursor != (stream.Cursor{}) {
+		t.Fatalf("partial current-state cursor = %#v same=%v err=%v, want pre-gap anchor", partial, sameGeneration, err)
+	}
+	boundary, _, err := service.cursors.decode("session-1", "task-1", first.Records[len(first.Records)-1].Cursor)
+	if err != nil || boundary.Cursor != current.Cursor {
+		t.Fatalf("final current-state cursor = %#v err=%v, want boundary %#v", boundary, err, current.Cursor)
+	}
+
+	resumed, err := api.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{
+		SessionID: "session-1", TaskID: "task-1", Cursor: first.Records[1].Cursor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resumed.Records) != 3 || resumed.Records[0].Gap == nil ||
+		resumed.Records[2].Frame == nil || session.EventText(resumed.Records[2].Frame.Event) != "working" {
+		t.Fatalf("resumed current state = %#v, want whole semantic batch replay", resumed)
+	}
+}
+
+func TestLiveGapCatchupUsesSnapshotDescriptorAndBoundedDrain(t *testing.T) {
+	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
+	entry.State = task.StateCompleted
+	entry.Running = false
+	initial := stream.Snapshot{
+		Ref:    stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"},
+		Cursor: stream.Cursor{Events: 10}, State: string(task.StateCompleted), TerminalFramed: true,
+	}
+	frames := make([]stream.Frame, 0, subscriberEventCap+2)
+	for index := 0; index < subscriberEventCap+2; index++ {
+		turnID := "turn-2"
+		running := true
+		if index == 0 {
+			turnID = "turn-1"
+			running = false
+		}
+		frames = append(frames, stream.Frame{
+			Ref:  stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: turnID},
+			Text: fmt.Sprintf("semantic-%03d", index), Cursor: stream.Cursor{Events: 300},
+			EventsTruncatedBefore: 100, Running: running,
+		})
+	}
+	current := stream.Snapshot{
+		Ref:    stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-2"},
+		Cursor: stream.Cursor{Events: 300}, EventsTruncatedBefore: 100,
+		State: string(task.StateRunning), Running: true, Frames: frames,
+	}
+	runtime := &taskStreamTestRuntime{
+		readSnapshots:         []stream.Snapshot{initial, current},
+		subscribeFramesByCall: [][]stream.Frame{frames},
+	}
+	api := newTaskStreamTestService(t, newTaskStreamTestStore(entry), runtime, "generation-1")
+	result, err := api.Subscribe(context.Background(), Principal{ID: "owner"}, SubscribeRequest{
+		SessionID: "session-1", TaskID: "task-1", Follow: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Subscription.Close()
+
+	// Let the catch-up exceed the live queue capacity before consuming it. A
+	// fail-fast live path would close here; bounded catch-up must wait instead.
+	time.Sleep(20 * time.Millisecond)
+	records := make([]Record, 0, len(frames)+1)
+	for len(records) < len(frames)+1 {
+		select {
+		case record, ok := <-result.Subscription.Records():
+			if !ok {
+				t.Fatalf("live recovery closed after %d records: %v", len(records), result.Subscription.Err())
+			}
+			records = append(records, record)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out after %d live recovery records", len(records))
+		}
+	}
+	if records[0].Gap == nil || records[0].Task.State != task.StateRunning || !records[0].Task.Running || records[0].Task.CurrentTurnID != "turn-2" {
+		t.Fatalf("live recovery gap descriptor = %#v, want running turn-2 snapshot", records[0])
+	}
+	for _, record := range records[1:] {
+		if record.Task.State != task.StateRunning || !record.Task.Running || record.Task.CurrentTurnID != "turn-2" {
+			t.Fatalf("live recovery frame descriptor = %#v, want running turn-2 snapshot", record.Task)
+		}
+	}
+	if err := result.Subscription.Err(); err != nil {
+		t.Fatalf("live recovery error = %v", err)
+	}
+}
+
 func TestCloseSubscriptionCancelsOnlyDelivery(t *testing.T) {
 	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
 	entry.State = task.StateRunning
@@ -238,7 +492,26 @@ func TestSubscribeRefreshesTaskDescriptorWithinOneActivityPeriod(t *testing.T) {
 	}
 }
 
-func TestSlowSubscriberDisconnectsItself(t *testing.T) {
+func TestTaskDescriptorRejectsTerminalRunningContradiction(t *testing.T) {
+	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
+	entry.State = task.StateRunning
+	entry.Running = true
+
+	fromFrame := descriptorForFrame(entry, stream.Frame{
+		State: string(task.StateCompleted), Running: true, Closed: true,
+	})
+	if fromFrame.State != task.StateCompleted || fromFrame.Running {
+		t.Fatalf("terminal frame descriptor = %#v, want completed and not running", fromFrame)
+	}
+	fromSnapshot := descriptorForSnapshot(entry, stream.Snapshot{
+		State: string(task.StateCompleted), Running: true, TerminalFramed: true,
+	})
+	if fromSnapshot.State != task.StateCompleted || fromSnapshot.Running {
+		t.Fatalf("terminal snapshot descriptor = %#v, want completed and not running", fromSnapshot)
+	}
+}
+
+func TestInitialCatchupDoesNotUseLiveSlowConsumerBudget(t *testing.T) {
 	entry := taskStreamTestEntry("session-1", "task-1", task.KindCommand)
 	frames := make([]stream.Frame, 0, subscriberEventCap+2)
 	for index := 1; index <= subscriberEventCap+2; index++ {
@@ -258,12 +531,78 @@ func TestSlowSubscriberDisconnectsItself(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer result.Subscription.Close()
-	deadline := time.Now().Add(time.Second)
-	for !errors.Is(result.Subscription.Err(), ErrSlowConsumer) && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
+	for index := range frames {
+		select {
+		case record, ok := <-result.Subscription.Records():
+			if !ok {
+				t.Fatalf("initial catch-up closed after %d records: %v", index, result.Subscription.Err())
+			}
+			if record.Frame == nil || record.Frame.Cursor.Events != int64(index+1) {
+				t.Fatalf("initial record %d = %#v", index, record)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out receiving initial record %d", index)
+		}
 	}
-	if !errors.Is(result.Subscription.Err(), ErrSlowConsumer) {
-		t.Fatalf("subscription error = %v, want ErrSlowConsumer", result.Subscription.Err())
+	if errors.Is(result.Subscription.Err(), ErrSlowConsumer) {
+		t.Fatalf("initial catch-up used live slow-consumer failure: %v", result.Subscription.Err())
+	}
+}
+
+func TestSubscribeDrainsInitialCatchupBeforeStartingLiveDelivery(t *testing.T) {
+	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
+	entry.State = task.StateRunning
+	entry.Running = true
+	frames := make([]stream.Frame, 0, subscriberEventCap)
+	for index := 1; index <= subscriberEventCap; index++ {
+		frames = append(frames, stream.Frame{
+			Ref:  stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"},
+			Text: "initial", Running: true, Cursor: stream.Cursor{Events: int64(index)},
+		})
+	}
+	runtime := &taskStreamTestRuntime{
+		snapshots: map[string]stream.Snapshot{"task-1": {
+			Ref:    stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"},
+			Cursor: stream.Cursor{Events: subscriberEventCap}, State: string(task.StateRunning), Running: true,
+			Frames: frames,
+		}},
+		subscribeFrames: []stream.Frame{
+			{Ref: stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"}, Text: "live-1", Running: true, Cursor: stream.Cursor{Events: subscriberEventCap + 1}},
+			{Ref: stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"}, Text: "live-2", Running: true, Cursor: stream.Cursor{Events: subscriberEventCap + 2}},
+		},
+		subscribeStarted: make(chan struct{}),
+	}
+	service := newTaskStreamTestService(t, newTaskStreamTestStore(entry), runtime, "generation-1")
+	result, err := service.Subscribe(context.Background(), Principal{ID: "owner"}, SubscribeRequest{
+		SessionID: "session-1", TaskID: "task-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Subscription.Close()
+
+	select {
+	case <-runtime.subscribeStarted:
+		// The old implementation reaches live delivery while initial records are
+		// still queued. Continue draining so the assertion below captures the
+		// resulting slow-consumer disconnect instead of deadlocking the test.
+	case <-time.After(20 * time.Millisecond):
+	}
+	for index := 1; index <= subscriberEventCap+2; index++ {
+		select {
+		case record, ok := <-result.Subscription.Records():
+			if !ok {
+				t.Fatalf("subscription closed after %d records: %v", index-1, result.Subscription.Err())
+			}
+			if record.Frame == nil || record.Frame.Cursor.Events != int64(index) {
+				t.Fatalf("record %d = %#v", index, record)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out receiving record %d", index)
+		}
+	}
+	if err := result.Subscription.Err(); err != nil {
+		t.Fatalf("initial-to-live transition failed: %v", err)
 	}
 }
 
@@ -362,18 +701,35 @@ func (s *taskStreamTestStore) GetSessionTaskByHandle(_ context.Context, ref sess
 }
 
 type taskStreamTestRuntime struct {
-	mu                   sync.Mutex
-	snapshots            map[string]stream.Snapshot
-	subscribeFrames      []stream.Frame
-	lastSubscribeRequest stream.SubscribeRequest
-	subscribeStarted     chan struct{}
-	subscribeStopped     chan struct{}
+	mu                    sync.Mutex
+	snapshots             map[string]stream.Snapshot
+	readSnapshot          func(stream.ReadRequest) (stream.Snapshot, error)
+	readSnapshots         []stream.Snapshot
+	readCalls             int
+	subscribeFrames       []stream.Frame
+	subscribeFramesByCall [][]stream.Frame
+	subscribeCalls        int
+	lastSubscribeRequest  stream.SubscribeRequest
+	subscribeStarted      chan struct{}
+	subscribeStopped      chan struct{}
 }
 
 func (r *taskStreamTestRuntime) Read(_ context.Context, req stream.ReadRequest) (stream.Snapshot, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	if r.readSnapshot != nil {
+		read := r.readSnapshot
+		r.mu.Unlock()
+		return read(req)
+	}
+	if len(r.readSnapshots) > 0 {
+		index := min(r.readCalls, len(r.readSnapshots)-1)
+		r.readCalls++
+		snapshot := stream.CloneSnapshot(r.readSnapshots[index])
+		r.mu.Unlock()
+		return snapshot, nil
+	}
 	snapshot, ok := r.snapshots[req.Ref.TaskID]
+	r.mu.Unlock()
 	if !ok {
 		return stream.Snapshot{}, errors.New("stream not found")
 	}
@@ -385,7 +741,18 @@ func (r *taskStreamTestRuntime) Subscribe(ctx context.Context, req stream.Subscr
 		r.mu.Lock()
 		r.lastSubscribeRequest = req
 		frames := append([]stream.Frame(nil), r.subscribeFrames...)
+		if len(r.subscribeFramesByCall) > 0 {
+			if r.subscribeCalls < len(r.subscribeFramesByCall) {
+				frames = append([]stream.Frame(nil), r.subscribeFramesByCall[r.subscribeCalls]...)
+			} else {
+				frames = nil
+			}
+			r.subscribeCalls++
+		}
 		r.mu.Unlock()
+		if r.subscribeStarted != nil {
+			close(r.subscribeStarted)
+		}
 		for _, frame := range frames {
 			cloned := stream.CloneFrame(frame)
 			if !yield(&cloned, nil) {
@@ -394,9 +761,6 @@ func (r *taskStreamTestRuntime) Subscribe(ctx context.Context, req stream.Subscr
 		}
 		if len(frames) > 0 {
 			return
-		}
-		if r.subscribeStarted != nil {
-			close(r.subscribeStarted)
 		}
 		<-ctx.Done()
 		if r.subscribeStopped != nil {

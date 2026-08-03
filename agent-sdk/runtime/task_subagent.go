@@ -616,6 +616,20 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	if cursor, ok := taskInt64Value(entry.Metadata[subagentStreamOutputCursorMeta]); ok && cursor >= 0 {
 		task.streamOutputCursor = cursor
 	}
+	if task.state == taskapi.StateCompleted {
+		if final := firstNonBlankTaskOutput(taskRawStringValue(task.result["final_message"]), taskRawStringValue(task.result["result"])); taskOutputHasNonBlankLine(final) {
+			task.latestFinalText = final
+			task.latestFinalTurnSeq = max(task.turnSeq, 1)
+			task.latestFinalOrder = task.streamEventBase
+			task.latestFinalAt = entry.UpdatedAt
+			if task.latestFinalAt.IsZero() {
+				task.latestFinalAt = entry.CreatedAt
+			}
+			task.semanticRetention.protectLatestFinal(
+				subagentTurnID(task.ref.TaskID, task.latestFinalTurnSeq), task.latestFinalOrder,
+			)
+		}
+	}
 	if task.metadata == nil {
 		task.metadata = map[string]any{}
 	}
@@ -644,6 +658,9 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 	result = delegation.CloneResult(result)
 	t.state = taskStateFromDelegation(result.State)
 	t.running = result.State == delegation.StateRunning
+	if t.state == taskapi.StateCompleted && taskOutputHasNonBlankLine(result.Result) {
+		t.retainCompletedFinalLocked(result.Result)
+	}
 	if t.result == nil {
 		t.result = map[string]any{}
 	}

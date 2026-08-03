@@ -95,10 +95,21 @@ func (t *subagentTask) seedStreamFromResult(result delegation.Result) {
 // delegated Task streams intentionally do not interpret untyped text frames as
 // child dialogue.
 func (t *subagentTask) resultStreamEvent(text string) *session.Event {
+	return t.resultStreamEventForTurn(text, t.turnSeq)
+}
+
+func (t *subagentTask) resultStreamEventForTurn(text string, turnSeq int64) *session.Event {
+	return t.resultStreamEventForTurnAt(text, turnSeq, time.Now())
+}
+
+func (t *subagentTask) resultStreamEventForTurnAt(text string, turnSeq int64, at time.Time) *session.Event {
 	if t == nil || !taskOutputHasNonBlankLine(text) {
 		return nil
 	}
-	turnID := subagentTurnID(t.ref.TaskID, t.turnSeq)
+	if at.IsZero() {
+		at = time.Now()
+	}
+	turnID := subagentTurnID(t.ref.TaskID, turnSeq)
 	role := subagentParticipantRole(t)
 	participantID := strings.TrimSpace(t.anchor.AgentID)
 	handle := strings.TrimPrefix(strings.TrimSpace(t.handle), "@")
@@ -106,13 +117,13 @@ func (t *subagentTask) resultStreamEvent(text string) *session.Event {
 	if handle != "" {
 		actorName = "@" + handle
 	}
-	messageID := fmt.Sprintf("subagent-result:%s:%d", strings.TrimSpace(t.ref.TaskID), max(t.turnSeq, 1))
+	messageID := fmt.Sprintf("subagent-result:%s:%d", strings.TrimSpace(t.ref.TaskID), max(turnSeq, 1))
 	return &session.Event{
 		ID:         messageID,
 		MessageID:  messageID,
 		Type:       session.EventTypeAssistant,
 		Visibility: session.VisibilityUIOnly,
-		Time:       time.Now(),
+		Time:       at,
 		Actor: session.ActorRef{
 			Kind: session.ActorKindParticipant,
 			ID:   participantID,
@@ -139,6 +150,38 @@ func (t *subagentTask) resultStreamEvent(text string) *session.Event {
 			},
 		},
 	}
+}
+
+// retainCompletedFinalLocked keeps the current Final Message outside the
+// evictable transient budget through the Task result contract. When a newer
+// Turn completes, the previous Final moves into the semantic byte budget as an
+// exact, highest-priority unit; only real byte pressure may evict it after all
+// lower-priority context has been removed.
+func (t *subagentTask) retainCompletedFinalLocked(text string) {
+	if t == nil || !taskOutputHasNonBlankLine(text) {
+		return
+	}
+	turnSeq := max(t.turnSeq, 1)
+	turnID := subagentTurnID(t.ref.TaskID, turnSeq)
+	order := t.streamEventBase + int64(len(t.streamFrames))
+	if t.latestFinalTurnSeq != 0 && t.latestFinalTurnSeq != turnSeq {
+		previousTurnID := subagentTurnID(t.ref.TaskID, t.latestFinalTurnSeq)
+		t.semanticRetention.archiveLatestFinal(stream.Frame{
+			Ref: stream.Ref{
+				SessionID: strings.TrimSpace(t.sessionRef.SessionID),
+				TaskID:    strings.TrimSpace(t.ref.TaskID), TerminalID: previousTurnID,
+			},
+			Event:     t.resultStreamEventForTurnAt(t.latestFinalText, t.latestFinalTurnSeq, t.latestFinalAt),
+			UpdatedAt: t.latestFinalAt,
+		}, t.latestFinalOrder)
+	}
+	completedAt := time.Now()
+	t.latestFinalText = text
+	t.latestFinalTurnSeq = turnSeq
+	t.latestFinalOrder = order
+	t.latestFinalAt = completedAt
+	t.semanticRetention.dropAssistantTurn(turnID)
+	t.semanticRetention.protectLatestFinal(turnID, order)
 }
 
 func subagentFramesContainAssistantTextForTurn(frames []stream.Frame, turnID string) bool {
@@ -241,16 +284,20 @@ func (t *subagentTask) appendStreamLocked(text string) {
 		return
 	}
 	t.streamOutputCursor += int64(len([]byte(text)))
-	t.appendRetainedSubagentTextLocked(text)
+	t.appendBoundedSubagentTextLocked(text, subagentStreamByteCap)
 }
 
 func (t *subagentTask) appendRetainedSubagentTextLocked(text string) {
+	t.appendBoundedSubagentTextLocked(text, subagentOutputPreviewByteCap)
+}
+
+func (t *subagentTask) appendBoundedSubagentTextLocked(text string, byteCap int) {
 	if t == nil || text == "" {
 		return
 	}
 	raw := append([]byte(t.stdout), []byte(text)...)
-	if len(raw) > subagentStreamByteCap {
-		dropped := len(raw) - subagentStreamByteCap
+	if len(raw) > byteCap {
+		dropped := len(raw) - byteCap
 		for dropped < len(raw) && !utf8.RuneStart(raw[dropped]) {
 			dropped++
 		}
@@ -279,15 +326,25 @@ func (t *subagentTask) appendStreamFrameLocked(frame stream.Frame) {
 		Output: t.streamOutputCursor + int64(len([]byte(text))),
 		Events: t.streamEventBase + int64(len(t.streamFrames)) + 1,
 	}
+	t.semanticRetention.observe(frame, frame.Cursor.Events)
 	frameBytes := subagentStreamFrameSize(frame)
-	if frameBytes > subagentStreamByteCap {
+	if frameBytes > subagentExactStreamByteCap {
 		t.streamOutputCursor = frame.Cursor.Output
-		frame.Text = ""
-		frame.Event = nil
-		// Preserve the absolute event position while making the missing body
-		// explicit to readers. Control projects this boundary as a transient gap.
-		frame.EventsTruncatedBefore = frame.Cursor.Events
-		frameBytes = subagentStreamFrameSize(frame)
+		if text != "" {
+			t.appendRetainedSubagentTextLocked(text)
+		}
+		// An exact delta chain cannot cross one frame that is too large to retain.
+		// Drop the raw ring through this cursor; lagging readers rebuild from the
+		// independently bounded semantic current-state view.
+		for index := range t.streamFrames {
+			t.streamFrames[index] = stream.Frame{}
+		}
+		t.streamFrames = nil
+		t.streamFrameSizes = nil
+		t.streamBytes = 0
+		t.streamEventBase = frame.Cursor.Events
+		t.notifyStreamChangeLocked()
+		return
 	} else if text != "" {
 		t.streamOutputCursor = frame.Cursor.Output
 		t.appendRetainedSubagentTextLocked(text)
@@ -295,7 +352,7 @@ func (t *subagentTask) appendStreamFrameLocked(frame stream.Frame) {
 	t.streamFrames = append(t.streamFrames, frame)
 	t.streamFrameSizes = append(t.streamFrameSizes, frameBytes)
 	t.streamBytes += frameBytes
-	for len(t.streamFrames) > 0 && (len(t.streamFrames) > subagentStreamFrameCap || t.streamBytes > subagentStreamByteCap) {
+	for len(t.streamFrames) > 0 && (len(t.streamFrames) > subagentStreamFrameCap || t.streamBytes > subagentExactStreamByteCap) {
 		evictedBytes := subagentStreamFrameSize(t.streamFrames[0])
 		if len(t.streamFrameSizes) > 0 {
 			evictedBytes = t.streamFrameSizes[0]

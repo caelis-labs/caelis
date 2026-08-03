@@ -322,6 +322,7 @@ func TestSubagentOutputViewUsesSpawnOnlyForIdentityAndDropsSyntheticNoOutput(t *
 func TestSubagentOutputWorkspaceRendersMultipleTurnsAsOneChronologicalTranscript(t *testing.T) {
 	t.Parallel()
 
+	startedAt := time.Unix(100, 0)
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	view := model.ensureSubagentOutputView("spawn-1")
 	view.taskHandle = "zuri"
@@ -333,15 +334,15 @@ func TestSubagentOutputWorkspaceRendersMultipleTurnsAsOneChronologicalTranscript
 	})
 	view.observeChildEvent(TranscriptEvent{
 		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "child-turn-1",
-		NarrativeKind: TranscriptNarrativeReasoning, Text: "first turn reasoning",
+		NarrativeKind: TranscriptNarrativeReasoning, Text: "first turn reasoning", OccurredAt: startedAt,
 	})
 	view.observeChildEvent(TranscriptEvent{
 		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "child-turn-1",
-		NarrativeKind: TranscriptNarrativeAssistant, Text: "first turn complete", Final: true,
+		NarrativeKind: TranscriptNarrativeAssistant, Text: "first turn complete", Final: true, OccurredAt: startedAt.Add(3 * time.Second),
 	})
 	view.observeChildEvent(TranscriptEvent{
 		Kind: TranscriptEventLifecycle, Scope: ACPProjectionSubagent, TurnID: "child-turn-1",
-		State: eventstream.LifecycleStateCompleted,
+		State: eventstream.LifecycleStateCompleted, OccurredAt: startedAt.Add(4 * time.Second),
 	})
 	view.observeChildEvent(TranscriptEvent{
 		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "child-turn-2",
@@ -349,15 +350,15 @@ func TestSubagentOutputWorkspaceRendersMultipleTurnsAsOneChronologicalTranscript
 	})
 	view.observeChildEvent(TranscriptEvent{
 		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "child-turn-2",
-		NarrativeKind: TranscriptNarrativeReasoning, Text: "second turn reasoning",
+		NarrativeKind: TranscriptNarrativeReasoning, Text: "second turn reasoning", OccurredAt: startedAt.Add(10 * time.Second),
 	})
 	view.observeChildEvent(TranscriptEvent{
 		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "child-turn-2",
-		NarrativeKind: TranscriptNarrativeAssistant, Text: "second turn complete", Final: true,
+		NarrativeKind: TranscriptNarrativeAssistant, Text: "second turn complete", Final: true, OccurredAt: startedAt.Add(17 * time.Second),
 	})
 	view.observeChildEvent(TranscriptEvent{
 		Kind: TranscriptEventLifecycle, Scope: ACPProjectionSubagent, TurnID: "child-turn-2",
-		State: eventstream.LifecycleStateCompleted,
+		State: eventstream.LifecycleStateCompleted, OccurredAt: startedAt.Add(18 * time.Second),
 	})
 
 	plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 40)), "\n")
@@ -376,6 +377,11 @@ func TestSubagentOutputWorkspaceRendersMultipleTurnsAsOneChronologicalTranscript
 	for _, forbidden := range []string{"Turn 1", "Turn 2", "Message from parent", "(no output)"} {
 		if strings.Contains(plain, forbidden) {
 			t.Fatalf("subagent workspace exposed internal lifecycle label %q:\n%s", forbidden, plain)
+		}
+	}
+	for _, duration := range []string{"4.0s", "8.0s"} {
+		if !strings.Contains(plain, duration) {
+			t.Fatalf("subagent workspace omitted Turn footer %q:\n%s", duration, plain)
 		}
 	}
 	if len(view.turnBlocks) != 2 {
@@ -761,8 +767,7 @@ func TestSubagentOutputOverlaySelectionExcludesNarrativeMarkerColumn(t *testing.
 	}
 
 	endMouse.Button = tea.MouseNone
-	next, cmd := model.handleMouse(tea.MouseReleaseMsg(endMouse))
-	model = next.(*Model)
+	_, cmd := model.handleMouse(tea.MouseReleaseMsg(endMouse))
 	if cmd == nil {
 		t.Fatal("overlay marker-column selection did not return a clipboard command")
 	}

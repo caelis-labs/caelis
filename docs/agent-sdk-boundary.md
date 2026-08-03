@@ -76,6 +76,32 @@ observers may lose transient output but must not block execution, durable
 writes, or completion. Observation gaps are typed and do not change canonical
 state.
 
+Subagent Task observation intentionally pays for two process-local bounded
+views: a 128-frame/1 MiB exact delta window and an ingest-merged semantic
+current-state view with a 1,024-unit cap for transient context and a 4 MiB
+shared byte budget. Completed Final Messages remain exact, chronological, and
+highest priority inside that byte budget; unit-count pressure alone cannot
+discard them. Context pressure removes replaceable progress first, then oldest
+historical Turn boundaries before current reasoning, tools, or ordinary
+assistant content; byte pressure removes Final Messages only after all of that,
+from oldest to newest. The latest completed Turn's exact Final is additionally
+retained by the Task result contract. This is therefore an approximately 5 MiB
+transient per-active-subagent trade-off, plus that latest Final, rather than a
+memory reduction from the former single ring.
+It prevents an absent or late Surface from determining retention quality while
+keeping exact resume cheap inside the short window. Both views remain one
+Runtime-owned observation path; neither is durable or parent model context.
+Raw `Closed` and terminal `State` frames remain current Task lifecycle
+authority. For semantic current-state rebuilds, Runtime retains an older Turn's
+completion only as a typed `ui_only` lifecycle event with its completion time;
+it carries no Task terminal transport fields and therefore cannot regress the
+current Task descriptor. This lets detached child transcripts render the same
+per-Turn duration footer after a gap without loading the child ACP Session.
+Control delivers a semantic current-state snapshot as one replayable catch-up
+batch: partial-record cursors remain anchored before the lost exact window, and
+only the final record acknowledges the rebuilt boundary. A disconnect therefore
+replays the typed gap and whole snapshot instead of losing an unconsumed suffix.
+
 Agent-loop safety belongs to each Agent implementation at its model boundary.
 Control may observe lifecycle and accept explicit cancellation, but it does not
 inspect model content or apply a parent watchdog to external ACP controllers,

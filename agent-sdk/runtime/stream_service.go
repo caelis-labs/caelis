@@ -423,7 +423,36 @@ func (s *streamService) readSubagent(_ context.Context, sub *subagentTask, curso
 			)
 		}
 	}
-	if start := cursor.Events; start < nextEvents {
+	currentState := eventsTruncatedBefore > 0
+	if currentState {
+		// The semantic view retains historical Turn completion as UI-only
+		// lifecycle events, never as raw Task Closed/State frames. Let
+		// FramesForSnapshot derive the one authoritative current Task terminal
+		// boundary when the active Turn has completed.
+		if !sub.running && stream.IsTerminalState(string(state)) {
+			snap.TerminalFramed = false
+		}
+		latestFinal := stream.Frame{}
+		if taskOutputHasNonBlankLine(sub.latestFinalText) && sub.latestFinalTurnSeq > 0 {
+			latestFinal = stream.Frame{
+				Ref: stream.Ref{
+					SessionID: strings.TrimSpace(sub.sessionRef.SessionID), TaskID: strings.TrimSpace(sub.ref.TaskID),
+					TerminalID: subagentTurnID(sub.ref.TaskID, sub.latestFinalTurnSeq),
+				},
+				Event:     sub.resultStreamEventForTurnAt(sub.latestFinalText, sub.latestFinalTurnSeq, sub.latestFinalAt),
+				UpdatedAt: sub.latestFinalAt,
+			}
+		}
+		snap.Frames = sub.semanticRetention.frames(
+			snap.Cursor, subagentTurnID(sub.ref.TaskID, sub.turnSeq), sub.running,
+			eventsTruncatedBefore, latestFinal, sub.latestFinalOrder,
+		)
+		for index := range snap.Frames {
+			if snap.Frames[index].UpdatedAt.IsZero() {
+				snap.Frames[index].UpdatedAt = snap.UpdatedAt
+			}
+		}
+	} else if start := cursor.Events; start < nextEvents {
 		if start < sub.streamEventBase {
 			start = sub.streamEventBase
 		}
@@ -444,7 +473,7 @@ func (s *streamService) readSubagent(_ context.Context, sub *subagentTask, curso
 	// Older in-process producers may populate only the aggregate text buffer.
 	// Keep that fallback local to a task with no structured frames; normal
 	// producers publish cursor-owned frames through PublishStream.
-	if len(sub.streamFrames) == 0 && output != "" {
+	if !currentState && len(sub.streamFrames) == 0 && output != "" {
 		turnBase := nextOutput - int64(len([]byte(output)))
 		if cursor.Output >= turnBase {
 			if delta := sliceStringFromByteCursor(output, cursor.Output-turnBase); delta != "" {
