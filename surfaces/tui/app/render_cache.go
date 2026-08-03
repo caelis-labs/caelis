@@ -15,15 +15,16 @@ import (
 )
 
 type viewportRenderEntry struct {
-	blockID     string
-	cacheKey    string
-	rhythm      viewportRhythmClass
-	lineStart   int
-	lineCount   int
-	styledLines []string
-	plainLines  []string
-	clickTokens []string
-	clickBounds []clickColumnRange
+	blockID          string
+	cacheKey         string
+	rhythm           viewportRhythmClass
+	lineStart        int
+	lineCount        int
+	styledLines      []string
+	plainLines       []string
+	selectionIndents []int
+	clickTokens      []string
+	clickBounds      []clickColumnRange
 }
 
 type viewportRhythmClass string
@@ -31,8 +32,6 @@ type viewportRhythmClass string
 const (
 	viewportRhythmNone      viewportRhythmClass = ""
 	viewportRhythmUser      viewportRhythmClass = "user"
-	viewportRhythmAssistant viewportRhythmClass = "assistant"
-	viewportRhythmReasoning viewportRhythmClass = "reasoning"
 	viewportRhythmOperation viewportRhythmClass = "operation"
 	viewportRhythmPanel     viewportRhythmClass = "panel"
 )
@@ -80,24 +79,26 @@ func (m *Model) viewportRenderCacheMatchesDocument(ctx BlockRenderContext) bool 
 
 func (m *Model) renderViewportEntry(block Block, cacheKey string, ctx BlockRenderContext) viewportRenderEntry {
 	m.observeBlockRender(block.Kind())
-	styledLines, plainLines, clickTokens, clickBounds := m.wrapRenderedRowsForViewport(block, block.Render(ctx), ctx.Width, ctx)
+	styledLines, plainLines, selectionIndents, clickTokens, clickBounds := m.wrapRenderedRowsForViewport(block, block.Render(ctx), ctx.Width, ctx)
 	return viewportRenderEntry{
-		blockID:     block.BlockID(),
-		cacheKey:    cacheKey,
-		rhythm:      viewportRhythmForBlock(block),
-		styledLines: styledLines,
-		plainLines:  plainLines,
-		clickTokens: clickTokens,
-		clickBounds: clickBounds,
+		blockID:          block.BlockID(),
+		cacheKey:         cacheKey,
+		rhythm:           viewportRhythmForBlock(block),
+		styledLines:      styledLines,
+		plainLines:       plainLines,
+		selectionIndents: selectionIndents,
+		clickTokens:      clickTokens,
+		clickBounds:      clickBounds,
 	}
 }
 
-func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, wrapWidth int, ctx BlockRenderContext) ([]string, []string, []string, []clickColumnRange) {
+func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, wrapWidth int, ctx BlockRenderContext) ([]string, []string, []int, []string, []clickColumnRange) {
 	if wrapWidth <= 0 {
 		wrapWidth = 1
 	}
 	styledLines := make([]string, 0, len(rawRows)+8)
 	plainLines := make([]string, 0, len(rawRows)+8)
+	selectionIndents := make([]int, 0, len(rawRows)+8)
 	clickTokens := make([]string, 0, len(rawRows)+8)
 	clickBounds := make([]clickColumnRange, 0, len(rawRows)+8)
 
@@ -119,6 +120,7 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 				styledLines = append(styledLines, wrappedStyled...)
 				plainLines = append(plainLines, wrappedPlain...)
 				for range wrappedStyled {
+					selectionIndents = append(selectionIndents, row.selectionIndent)
 					clickTokens = append(clickTokens, row.ClickToken)
 				}
 				clickBounds = append(clickBounds, wrappedClickColumnRanges(row, wrappedPlain)...)
@@ -134,6 +136,7 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 				styledLines = append(styledLines, wrappedStyled...)
 				plainLines = append(plainLines, wrappedPlain...)
 				for range wrappedStyled {
+					selectionIndents = append(selectionIndents, row.selectionIndent)
 					clickTokens = append(clickTokens, row.ClickToken)
 					clickBounds = append(clickBounds, clickColumnRange{})
 				}
@@ -153,22 +156,14 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 				plainParts = []string{plainLine}
 			}
 		} else {
-			switch block.Kind() {
-			case BlockAssistant, BlockReasoning:
-				wrappedStyled = m.wrapNarrativeRowStyled(row, wrapWidth)
-				plainParts = m.wrapNarrativeRowPlain(row, wrapWidth)
-			case BlockMainACPTurn, BlockParticipantTurn:
-				wrappedStyled = hardWrapDisplayLine(styledLine, wrapWidth)
-				plainParts = normalizeWrappedPlainSegments(graphemeHardWrap(plainLine, wrapWidth))
-			default:
-				wrappedStyled = hardWrapDisplayLine(styledLine, wrapWidth)
-				plainParts = normalizeWrappedPlainSegments(graphemeHardWrap(plainLine, wrapWidth))
-			}
+			wrappedStyled = hardWrapDisplayLine(styledLine, wrapWidth)
+			plainParts = normalizeWrappedPlainSegments(graphemeHardWrap(plainLine, wrapWidth))
 		}
 
 		if wrappedStyled == "" {
 			styledLines = append(styledLines, "")
 			plainLines = append(plainLines, "")
+			selectionIndents = append(selectionIndents, row.selectionIndent)
 			clickTokens = append(clickTokens, row.ClickToken)
 			clickBounds = append(clickBounds, clickColumnRange{})
 			continue
@@ -181,12 +176,13 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 		styledLines = append(styledLines, sParts...)
 		plainLines = append(plainLines, plainParts...)
 		for range sParts {
+			selectionIndents = append(selectionIndents, row.selectionIndent)
 			clickTokens = append(clickTokens, row.ClickToken)
 		}
 		clickBounds = append(clickBounds, wrappedClickColumnRanges(row, plainParts)...)
 	}
 
-	return styledLines, plainLines, clickTokens, clickBounds
+	return styledLines, plainLines, selectionIndents, clickTokens, clickBounds
 }
 
 func wrappedClickColumnRanges(row RenderedRow, plainParts []string) []clickColumnRange {
@@ -396,6 +392,7 @@ func splitACPTranscriptHeaderPrefix(plain string) (prefix string, detail string,
 func (m *Model) rebuildViewportLineCaches(ctx BlockRenderContext) {
 	styledLines := make([]string, 0, 64)
 	plainLines := make([]string, 0, 64)
+	selectionIndents := make([]int, 0, 64)
 	blockIDs := make([]string, 0, 64)
 	clickTokens := make([]string, 0, 64)
 	clickBounds := make([]clickColumnRange, 0, 64)
@@ -406,6 +403,7 @@ func (m *Model) rebuildViewportLineCaches(ctx BlockRenderContext) {
 		if shouldInsertViewportRhythmGap(prevEntry, entry) {
 			styledLines = append(styledLines, "")
 			plainLines = append(plainLines, "")
+			selectionIndents = append(selectionIndents, 0)
 			blockIDs = append(blockIDs, "")
 			clickTokens = append(clickTokens, "")
 			clickBounds = append(clickBounds, clickColumnRange{})
@@ -414,6 +412,7 @@ func (m *Model) rebuildViewportLineCaches(ctx BlockRenderContext) {
 		entry.lineCount = len(entry.styledLines)
 		styledLines = append(styledLines, entry.styledLines...)
 		plainLines = append(plainLines, entry.plainLines...)
+		selectionIndents = append(selectionIndents, entry.selectionIndents...)
 		clickTokens = append(clickTokens, entry.clickTokens...)
 		clickBounds = append(clickBounds, entry.clickBounds...)
 		for range entry.styledLines {
@@ -427,6 +426,7 @@ func (m *Model) rebuildViewportLineCaches(ctx BlockRenderContext) {
 	streamStyled, streamPlain, streamBlockIDs := m.renderStreamViewportLines(ctx)
 	styledLines = append(styledLines, streamStyled...)
 	plainLines = append(plainLines, streamPlain...)
+	selectionIndents = append(selectionIndents, make([]int, len(streamPlain))...)
 	blockIDs = append(blockIDs, streamBlockIDs...)
 	for range streamStyled {
 		clickTokens = append(clickTokens, "")
@@ -435,6 +435,7 @@ func (m *Model) rebuildViewportLineCaches(ctx BlockRenderContext) {
 
 	m.viewportStyledLines = append(m.viewportStyledLines[:0], styledLines...)
 	m.viewportPlainLines = append(m.viewportPlainLines[:0], plainLines...)
+	m.viewportSelectionIndents = append(m.viewportSelectionIndents[:0], selectionIndents...)
 	m.viewportBlockIDs = append(m.viewportBlockIDs[:0], blockIDs...)
 	m.viewportClickTokens = append(m.viewportClickTokens[:0], clickTokens...)
 	m.viewportClickBounds = append(m.viewportClickBounds[:0], clickBounds...)
@@ -445,6 +446,7 @@ func (m *Model) syncDirtyViewportRenderEntries(ctx BlockRenderContext) bool {
 		len(m.dirtyViewportBlocks) == 0 ||
 		m.viewportStructureDirty ||
 		len(m.viewportClickBounds) != len(m.viewportStyledLines) ||
+		len(m.viewportSelectionIndents) != len(m.viewportStyledLines) ||
 		m.lastViewportRenderContextKey != viewportRenderContextKey(ctx) {
 		return false
 	}
@@ -482,6 +484,7 @@ func (m *Model) syncDirtyViewportRenderEntries(ctx BlockRenderContext) bool {
 		}
 		m.viewportStyledLines = spliceStrings(m.viewportStyledLines, start, count, next.styledLines)
 		m.viewportPlainLines = spliceStrings(m.viewportPlainLines, start, count, next.plainLines)
+		m.viewportSelectionIndents = spliceInts(m.viewportSelectionIndents, start, count, next.selectionIndents)
 		m.viewportClickTokens = spliceStrings(m.viewportClickTokens, start, count, next.clickTokens)
 		m.viewportClickBounds = spliceClickColumnRanges(m.viewportClickBounds, start, count, next.clickBounds)
 		blockIDs := make([]string, len(next.styledLines))
@@ -546,14 +549,18 @@ func spliceClickColumnRanges(base []clickColumnRange, start int, count int, repl
 	return out
 }
 
+func spliceInts(base []int, start int, count int, repl []int) []int {
+	out := make([]int, 0, len(base)-count+len(repl))
+	out = append(out, base[:start]...)
+	out = append(out, repl...)
+	out = append(out, base[start+count:]...)
+	return out
+}
+
 func viewportRhythmForBlock(block Block) viewportRhythmClass {
 	switch b := block.(type) {
 	case *UserNarrativeBlock:
 		return viewportRhythmUser
-	case *AssistantBlock:
-		return viewportRhythmAssistant
-	case *ReasoningBlock:
-		return viewportRhythmReasoning
 	case *MainACPTurnBlock, *ParticipantTurnBlock:
 		return viewportRhythmPanel
 	case *TranscriptBlock:
@@ -749,23 +756,6 @@ func viewportBlockRenderKey(block Block, ctx BlockRenderContext) string {
 		builder.addBool(b.PreStyled)
 	case *UserNarrativeBlock:
 		builder.addString(b.Raw)
-	case *AssistantBlock:
-		builder.addString(b.Actor)
-		builder.addBool(b.Streaming)
-		if b.Streaming && b.activeBuffer != nil && !b.activeBuffer.Empty() {
-			builder.addString(b.activeBuffer.CacheKey())
-		} else {
-			builder.addString(b.Raw)
-		}
-		builder.addString(b.LastFinal)
-	case *ReasoningBlock:
-		builder.addString(b.Actor)
-		builder.addBool(b.Streaming)
-		if b.Streaming && b.activeBuffer != nil && !b.activeBuffer.Empty() {
-			builder.addString(b.activeBuffer.CacheKey())
-		} else {
-			builder.addString(b.Raw)
-		}
 	case *ParticipantTurnBlock:
 		builder.addString(b.SessionID)
 		builder.addString(b.Actor)
@@ -842,6 +832,8 @@ func writeRenderedRows(builder *blockKeyBuilder, rows []RenderedRow) {
 		builder.addString(row.Styled)
 		builder.addString(row.Plain)
 		builder.addBool(row.PreWrapped)
+		builder.addInt(row.selectionIndent)
+		builder.addBool(row.activeTail)
 	}
 }
 

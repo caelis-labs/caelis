@@ -143,13 +143,18 @@ func appendNarrativeEventChunk(ev *SubagentEvent, kind SubagentEventKind, chunk 
 	if merge == nil {
 		merge = appendDeltaStreamChunk
 	}
-	text := normalizeNarrativeLineEndings(merge(ev.Text, chunk))
+	previous := ev.Text
+	text := normalizeNarrativeLineEndings(merge(previous, chunk))
 	ev.Kind = kind
 	ev.Text = text
 	if ev.ActiveBuffer == nil {
 		ev.ActiveBuffer = &activeNarrativeBuffer{}
+		ev.ActiveBuffer.SetText(text)
+	} else if strings.HasPrefix(text, previous) && ev.ActiveBuffer.Text() == previous {
+		ev.ActiveBuffer.Append(strings.TrimPrefix(text, previous))
+	} else {
+		ev.ActiveBuffer.SetText(text)
 	}
-	ev.ActiveBuffer.SetText(text)
 	markNarrativeTiming(ev, at)
 }
 
@@ -164,7 +169,11 @@ func replaceNarrativeEventFinal(ev *SubagentEvent, text string, at time.Time) {
 		return
 	}
 	ev.Text = normalizeNarrativeLineEndings(text)
-	ev.ActiveBuffer = nil
+	if ev.ActiveBuffer == nil {
+		ev.ActiveBuffer = &activeNarrativeBuffer{}
+	}
+	ev.ActiveBuffer.SetText(ev.Text)
+	ev.ActiveBuffer.Seal()
 	markNarrativeTiming(ev, at)
 }
 
@@ -320,7 +329,7 @@ func narrativeEventActive(events []SubagentEvent, idx int, terminal bool) bool {
 		return false
 	}
 	ev := events[idx]
-	if ev.Kind != SEAssistant && ev.Kind != SEReasoning {
+	if ev.narrativeFinal || (ev.Kind != SEAssistant && ev.Kind != SEReasoning) {
 		return false
 	}
 	for j := idx + 1; j < len(events); j++ {

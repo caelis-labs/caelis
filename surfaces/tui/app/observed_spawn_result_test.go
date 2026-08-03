@@ -366,7 +366,7 @@ func TestObservedSpawnResultDoesNotSplitActiveAssistantMessage(t *testing.T) {
 			assistantEvents = append(assistantEvents, event)
 		}
 	}
-	if len(assistantEvents) != 1 || assistantEvents[0].Text != answer || assistantEvents[0].ActiveBuffer != nil {
+	if len(assistantEvents) != 1 || assistantEvents[0].Text != answer || assistantEvents[0].ActiveBuffer == nil || assistantEvents[0].ActiveBuffer.HasTail() {
 		t.Fatalf("assistant events = %#v, want one finalized message after the observed Spawn completion", assistantEvents)
 	}
 	if event := block.Events[0]; !event.Done || event.Output != "8" {

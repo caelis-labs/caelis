@@ -40,41 +40,7 @@ func inputSelectionContentRange(
 	start, end textSelectionPoint,
 	promptWidth int,
 ) (contentFrom, contentTo int, selected bool) {
-	if globalLine < start.line || globalLine > end.line {
-		return 0, 0, false
-	}
-	width := displayColumns(line)
-	selFrom := 0
-	selTo := width
-	if globalLine == start.line {
-		selFrom = start.col
-	}
-	if globalLine == end.line {
-		selTo = end.col
-	}
-	if selFrom < 0 {
-		selFrom = 0
-	}
-	if selTo > width {
-		selTo = width
-	}
-	if selTo < selFrom {
-		selTo = selFrom
-	}
-
-	contentPlain := sliceByDisplayColumns(line, promptWidth, width)
-	contentFrom = maxInt(0, selFrom-promptWidth)
-	contentTo = maxInt(0, selTo-promptWidth)
-	contentFrom = alignDisplayColumnToCharBoundary(contentPlain, contentFrom)
-	contentTo = alignDisplayColumnToCharBoundary(contentPlain, contentTo)
-	contentW := displayColumns(contentPlain)
-	if contentTo > contentW {
-		contentTo = contentW
-	}
-	if contentTo < contentFrom {
-		contentTo = contentFrom
-	}
-	return contentFrom, contentTo, contentTo > contentFrom
+	return selectionContentRange(line, globalLine, start, end, promptWidth)
 }
 
 func selectionTextFromInputLines(lines []string, start, end textSelectionPoint, promptWidth int) string {

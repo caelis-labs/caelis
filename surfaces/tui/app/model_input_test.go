@@ -292,6 +292,73 @@ func TestViewportSelectionUsesInputSelectionStyle(t *testing.T) {
 	}
 }
 
+func TestAssistantViewportSelectionUsesContentIndentInsteadOfRoleMarker(t *testing.T) {
+	model := NewModel(Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m = applyTranscriptEventForTest(t, m, TranscriptEvent{
+		Kind:          TranscriptEventNarrative,
+		NarrativeKind: TranscriptNarrativeAssistant,
+		Scope:         ACPProjectionMain,
+		ScopeID:       "session-selection",
+		TurnID:        "turn-selection",
+		MessageID:     "message-selection",
+		Actor:         "assistant",
+		Text:          "审查结论",
+		Final:         false,
+	})
+	m.syncViewportContent()
+
+	line := -1
+	for index, plain := range m.viewportPlainLines {
+		if strings.Contains(plain, "审查结论") {
+			line = index
+			break
+		}
+	}
+	if line < 0 {
+		t.Fatalf("assistant row missing from viewport: %#v", m.viewportPlainLines)
+	}
+	if got := m.viewportPlainLines[line]; got != "· 审查结论" {
+		t.Fatalf("viewport plain row = %q, want rendered role marker", got)
+	}
+	if got := m.viewportSelectionIndents[line]; got != displayColumns("· ") {
+		t.Fatalf("selection indent = %d, want decorative role-marker width", got)
+	}
+	if styled := m.viewportStyledLines[line]; !strings.Contains(styled, wideCellRendererSentinel()) {
+		t.Fatalf("active ACP narrative row missing bounded repaint protection: %q", styled)
+	}
+
+	// Dragging from the visible marker column must snap to the same content
+	// boundary as the composer prompt, rather than copying the decoration.
+	startX := m.mainColumnX() + tuikit.GutterNarrative
+	start, ok := m.mousePointToContentPoint(startX, line-m.viewportVisibleOffset(), false)
+	if !ok {
+		t.Fatal("assistant text start was not selectable")
+	}
+	if start.col != displayColumns("· ") {
+		t.Fatalf("selection start column = %d, want content indent", start.col)
+	}
+	endX := startX + displayColumns("· 审查结论")
+	end, ok := m.mousePointToContentPoint(endX, line-m.viewportVisibleOffset(), false)
+	if !ok {
+		t.Fatal("assistant text end was not selectable")
+	}
+	if got := selectionTextFromLinesWithIndents(m.viewportPlainLines, m.viewportSelectionIndents, start, end); got != "审查结论" {
+		t.Fatalf("selected assistant text = %q, want role-marker-free content", got)
+	}
+
+	m.selectionStart = start
+	m.selectionEnd = end
+	rendered := m.renderViewportSelectionView()
+	if plain := ansi.Strip(rendered); !strings.Contains(plain, "· 审查结论") {
+		t.Fatalf("selection view lost decorative role marker or content: %q", plain)
+	}
+	if marker := m.theme.InputSelectionStyle().Render("· "); strings.Contains(rendered, marker) {
+		t.Fatalf("selection view highlighted decorative role marker: %q", rendered)
+	}
+}
+
 func TestInputSelectionUsesInputSelectionStyleWithComposerBg(t *testing.T) {
 	model := NewModel(Config{})
 	model.width = 80

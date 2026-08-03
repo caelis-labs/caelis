@@ -13,8 +13,6 @@ func (m *Model) resetConversationView() {
 	m.closeSubagentOutputOverlay()
 	m.statusContext = ""
 	m.statusView.Tokens = ""
-	m.activeAssistantID = ""
-	m.activeReasoningID = ""
 	m.transientBlockID = ""
 	m.mainTimelineTailID = ""
 	m.mainAnchorBlockIDs = nil
@@ -23,6 +21,7 @@ func (m *Model) resetConversationView() {
 	m.doc.Clear()
 	m.viewportStyledLines = m.viewportStyledLines[:0]
 	m.viewportPlainLines = m.viewportPlainLines[:0]
+	m.viewportSelectionIndents = m.viewportSelectionIndents[:0]
 	m.hasCommittedLine = false
 	m.lastCommittedStyle = tuikit.LineStyleDefault
 	m.lastCommittedRaw = ""

@@ -77,11 +77,9 @@ func (m *Model) finishLiveTurn(endedAt time.Time, interrupted bool, err error) t
 		return nil
 	}
 	if interrupted {
-		m.discardActiveAssistantStream()
+		m.discardActiveLogStream()
 	} else {
 		m.flushStream()
-		m.finalizeAssistantBlock()
-		m.finalizeReasoningBlock()
 	}
 	m.finalizeMainTimelineTail(interrupted, err)
 	participantFailureAlreadyRendered := m.activeParticipantTurnHasFailureNotice(err)

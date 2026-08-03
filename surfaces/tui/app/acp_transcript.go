@@ -169,7 +169,24 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 	if len(statusRows) > 0 {
 		rows = appendACPTranscriptSemanticRows(rows, blockID, statusRows, &pendingSemanticGap)
 	}
+	markACPTranscriptSelectionIndents(rows)
+	rows = protectActiveNarrativeRepaintRows(rows, width)
 	return rows
+}
+
+func markACPTranscriptSelectionIndents(rows []RenderedRow) {
+	for i := range rows {
+		if rows[i].selectionIndent > 0 {
+			continue
+		}
+		plain := rows[i].Plain
+		if plain == "" {
+			plain = ansi.Strip(rows[i].Styled)
+		}
+		if rows[i].ACPHeader || strings.HasPrefix(plain, "• ") || strings.HasPrefix(plain, "› ") || strings.HasPrefix(plain, "· ") {
+			rows[i].selectionIndent = 2
+		}
+	}
 }
 
 type acpTranscriptGroupKind int
@@ -306,6 +323,7 @@ func renderACPTranscriptHeaderRow(blockID string, plain string, width int, ctx B
 		row.ClickToken = token
 	}
 	row.ACPHeader = true
+	row.selectionIndent = 2
 	return row
 }
 

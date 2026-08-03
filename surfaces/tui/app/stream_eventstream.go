@@ -119,8 +119,6 @@ func (m *Model) appendEventStreamTranscriptText(text string) (tea.Model, tea.Cmd
 	if text == "" {
 		return m, nil
 	}
-	m.finalizeAssistantBlock()
-	m.finalizeReasoningBlock()
 	block := NewTranscriptBlock(text, tuikit.DetectLineStyle(text))
 	m.appendMainTranscriptBlock(block)
 	m.hasCommittedLine = true

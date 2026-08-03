@@ -122,10 +122,46 @@ func RenderText(req TextRenderRequest) TextRenderResult {
 	default:
 		result.Rows = renderPlainStructuralText(req)
 	}
+	result.Rows = markNarrativeSelectionIndent(result.Rows, req.Prefix)
 	if req.ClickToken != "" {
 		result.Rows = applyTextRenderClickToken(result.Rows, req.ClickToken)
 	}
 	return result
+}
+
+func protectActiveNarrativeRepaintRows(rows []RenderedRow, width int) []RenderedRow {
+	if width <= 1 {
+		return rows
+	}
+	for i := range rows {
+		if !rows[i].activeTail {
+			continue
+		}
+		rows[i].Styled = protectWideCellRepaintLine(rows[i].Styled, width)
+	}
+	return rows
+}
+
+func markNarrativeSelectionIndent(rows []RenderedRow, prefix string) []RenderedRow {
+	indent := narrativeSelectionIndent(prefix)
+	if indent == 0 {
+		return rows
+	}
+	for i := range rows {
+		rows[i].selectionIndent = indent
+	}
+	return rows
+}
+
+func narrativeSelectionIndent(prefix string) int {
+	switch {
+	case strings.HasPrefix(prefix, "· "):
+		return displayColumns("· ")
+	case strings.HasPrefix(prefix, "› "):
+		return displayColumns("› ")
+	default:
+		return 0
+	}
 }
 
 func renderAssistantText(req TextRenderRequest, policy MarkdownPolicy) TextRenderResult {

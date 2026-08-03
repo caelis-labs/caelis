@@ -265,8 +265,11 @@ func (m *Model) renderSubagentOutputSelection(
 
 	styled := append([]string(nil), visibleFixedRows...)
 	plain := make([]string, len(styled))
+	indents := make([]int, len(styled))
 	for index := range plain {
-		plain[index] = rows[state.offset+index].Plain
+		row := rows[state.offset+index]
+		plain[index] = row.Plain
+		indents[index] = row.selectionIndent
 	}
 	localStart := textSelectionPoint{line: maxInt(start.line, state.offset) - state.offset, col: start.col}
 	localFinish := textSelectionPoint{line: minInt(finish.line, end-1) - state.offset, col: finish.col}
@@ -276,15 +279,20 @@ func (m *Model) renderSubagentOutputSelection(
 	if finish.line >= end {
 		localFinish.col = displayColumns(plain[len(plain)-1])
 	}
-	styled = renderSelectionOnStyledLines(
+	styled = renderSelectionOnStyledLinesWithIndents(
 		styled,
 		plain,
+		indents,
 		localStart,
 		localFinish,
 		m.theme.InputSelectionStyle(),
 	)
 	for index := range styled {
 		styled[index] = normalizeFullscreenFrameLine(styled[index], width)
+		globalLine := state.offset + index
+		if globalLine >= start.line && globalLine <= finish.line {
+			styled[index] = protectWideCellRepaintLine(styled[index], width)
+		}
 	}
 	return styled
 }

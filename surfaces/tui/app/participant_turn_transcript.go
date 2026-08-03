@@ -26,8 +26,6 @@ type participantTurnTranscriptResult struct {
 }
 
 func (m *Model) applyTranscriptNarrativeToParticipantTurn(event TranscriptEvent) (tea.Model, tea.Cmd) {
-	m.finalizeAssistantBlock()
-	m.finalizeReasoningBlock()
 	text := tuikit.SanitizeLogText(transcriptNarrativeText(event))
 	if text == "" && !event.Final {
 		return m, nil

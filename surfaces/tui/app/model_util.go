@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/caelis-labs/caelis/internal/controlprompt/promptrefs"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/rivo/uniseg"
 )
 
@@ -728,6 +729,10 @@ func normalizedSelectionRange(start textSelectionPoint, end textSelectionPoint, 
 }
 
 func selectionTextFromLines(lines []string, start textSelectionPoint, end textSelectionPoint) string {
+	return selectionTextFromLinesWithIndents(lines, nil, start, end)
+}
+
+func selectionTextFromLinesWithIndents(lines []string, indents []int, start textSelectionPoint, end textSelectionPoint) string {
 	if len(lines) == 0 {
 		return ""
 	}
@@ -738,26 +743,52 @@ func selectionTextFromLines(lines []string, start textSelectionPoint, end textSe
 	for i := start.line; i <= end.line && i < len(lines); i++ {
 		line := lines[i]
 		width := displayColumns(line)
-		from := 0
-		to := width
-		if i == start.line {
-			from = start.col
-		}
-		if i == end.line {
-			to = end.col
-		}
-		if from < 0 {
-			from = 0
-		}
-		if to > width {
-			to = width
-		}
-		if to < from {
-			to = from
-		}
-		out = append(out, sliceByDisplayColumns(line, from, to))
+		indent := selectionIndentAt(indents, i, width)
+		content := sliceByDisplayColumns(line, indent, width)
+		from, to, _ := selectionContentRange(line, i, start, end, indent)
+		out = append(out, sliceByDisplayColumns(content, from, to))
 	}
 	return strings.Join(out, "\n")
+}
+
+func selectionIndentAt(indents []int, line int, width int) int {
+	if line < 0 || line >= len(indents) {
+		return 0
+	}
+	return clampInt(indents[line], 0, maxInt(0, width))
+}
+
+func selectionContentRange(
+	line string,
+	globalLine int,
+	start, end textSelectionPoint,
+	indent int,
+) (contentFrom, contentTo int, selected bool) {
+	if globalLine < start.line || globalLine > end.line {
+		return 0, 0, false
+	}
+	width := displayColumns(line)
+	indent = clampInt(indent, 0, width)
+	selFrom := 0
+	selTo := width
+	if globalLine == start.line {
+		selFrom = start.col
+	}
+	if globalLine == end.line {
+		selTo = end.col
+	}
+	selFrom = clampInt(selFrom, 0, width)
+	selTo = clampInt(selTo, selFrom, width)
+
+	contentPlain := sliceByDisplayColumns(line, indent, width)
+	contentFrom = maxInt(0, selFrom-indent)
+	contentTo = maxInt(0, selTo-indent)
+	contentFrom = alignDisplayColumnToCharBoundary(contentPlain, contentFrom)
+	contentTo = alignDisplayColumnToCharBoundary(contentPlain, contentTo)
+	contentW := displayColumns(contentPlain)
+	contentFrom = clampInt(contentFrom, 0, contentW)
+	contentTo = clampInt(contentTo, contentFrom, contentW)
+	return contentFrom, contentTo, contentTo > contentFrom
 }
 
 func renderSelectionOnLines(lines []string, start textSelectionPoint, end textSelectionPoint, highlight lipgloss.Style) []string {
@@ -806,6 +837,13 @@ func renderSelectionOnLines(lines []string, start textSelectionPoint, end textSe
 // plain text with the configured selection style so the selection boundary is
 // visually unambiguous.
 func renderSelectionOnStyledLines(styledLines, plainLines []string, start textSelectionPoint, end textSelectionPoint, highlight lipgloss.Style) []string {
+	return renderSelectionOnStyledLinesWithIndents(styledLines, plainLines, nil, start, end, highlight)
+}
+
+// renderSelectionOnStyledLinesWithIndents follows the same model as composer
+// selection: the decorative gutter is rendered independently, while selection
+// and clipboard coordinates apply only to the plain content plane.
+func renderSelectionOnStyledLinesWithIndents(styledLines, plainLines []string, indents []int, start textSelectionPoint, end textSelectionPoint, highlight lipgloss.Style) []string {
 	if len(styledLines) == 0 {
 		return nil
 	}
@@ -816,35 +854,32 @@ func renderSelectionOnStyledLines(styledLines, plainLines []string, start textSe
 			out = append(out, styledLines[i])
 			continue
 		}
-		// Selected line: use plain text with reverse highlight on the
-		// selected portion.
 		line := plainLines[i]
 		width := displayColumns(line)
-		from := 0
-		to := width
-		if i == start.line {
-			from = start.col
+		indent := selectionIndentAt(indents, i, width)
+		content := sliceByDisplayColumns(line, indent, width)
+		from, to, selected := selectionContentRange(line, i, start, end, indent)
+		if !selected {
+			out = append(out, styledLines[i])
+			continue
 		}
-		if i == end.line {
-			to = end.col
+		styledLine := styledLines[i]
+		decoration := ""
+		if indent > 0 {
+			decoration = ansi.Cut(styledLine, 0, indent)
+			if displayColumns(ansi.Strip(decoration)) < indent {
+				decoration = sliceByDisplayColumns(line, 0, indent)
+			}
 		}
-		if from < 0 {
-			from = 0
-		}
-		if to > width {
-			to = width
-		}
-		if to < from {
-			to = from
-		}
-		prefix := sliceByDisplayColumns(line, 0, from)
-		middle := sliceByDisplayColumns(line, from, to)
-		suffix := sliceByDisplayColumns(line, to, width)
+		contentWidth := displayColumns(content)
+		prefix := sliceByDisplayColumns(content, 0, from)
+		middle := sliceByDisplayColumns(content, from, to)
+		suffix := sliceByDisplayColumns(content, to, contentWidth)
 		if middle == "" {
 			out = append(out, styledLines[i])
 			continue
 		}
-		out = append(out, prefix+highlight.Render(middle)+suffix)
+		out = append(out, decoration+prefix+highlight.Render(middle)+suffix)
 	}
 	return out
 }

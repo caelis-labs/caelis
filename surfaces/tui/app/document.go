@@ -33,6 +33,8 @@ type RenderedRow struct {
 	ACPHeader         bool   // if true, wrap as an ACP transcript header row
 	acpHeaderMarkTone acpHeaderMarkTone
 	acpHeaderMarkDim  bool
+	selectionIndent   int // decorative gutter columns excluded from selection and copy
+	activeTail        bool
 }
 
 // StyledRow creates a RenderedRow from a styled line, deriving Plain automatically.
@@ -88,8 +90,6 @@ type BlockKind string
 
 const (
 	BlockTranscript      BlockKind = "transcript"
-	BlockAssistant       BlockKind = "assistant"
-	BlockReasoning       BlockKind = "reasoning"
 	BlockDivider         BlockKind = "divider"
 	BlockMainACPTurn     BlockKind = "main_acp_turn"
 	BlockParticipantTurn BlockKind = "participant_turn"

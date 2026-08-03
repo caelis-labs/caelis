@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	sdkmodel "github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -28,8 +29,103 @@ func TestNarrativeStreamUsesStableMessageIdentityWithinSegment(t *testing.T) {
 	if got := block.Events[0].Text; got != "final answer" {
 		t.Fatalf("final narrative = %q, want final answer", got)
 	}
-	if block.Events[0].ActiveBuffer != nil {
-		t.Fatal("final narrative retained an active stream buffer")
+	if buffer := block.Events[0].ActiveBuffer; buffer == nil || buffer.HasTail() {
+		t.Fatalf("final narrative buffer = %#v, want sealed render cache", buffer)
+	}
+}
+
+func TestNarrativePresentationSealsAtToolAndTurnBoundaries(t *testing.T) {
+	t.Parallel()
+
+	ctx := BlockRenderContext{Width: 96, Height: 30}
+	toolBlock := NewMainACPTurnBlock("turn-tool")
+	source := newNarrativeSourceIdentity("message-tool", "event-tool", "projection-tool")
+	toolBlock.AppendStreamEvent(SEAssistant, "审查结论\n\n先确认未提交改动的范围", source)
+	toolBlock.UpdateToolWithMeta("call-1", "READ", "file.go", "", false, false, ToolUpdateMeta{})
+	buffer := toolBlock.Events[0].ActiveBuffer
+	if buffer == nil || buffer.HasTail() {
+		t.Fatalf("tool boundary buffer = %#v, want sealed stable prefix", buffer)
+	}
+	for _, row := range toolBlock.Render(ctx) {
+		if row.activeTail {
+			t.Fatalf("tool boundary retained lightweight row: %#v", row)
+		}
+	}
+
+	turnBlock := NewMainACPTurnBlock("turn-terminal")
+	turnBlock.AppendStreamEvent(SEAssistant, "先确认未提交改动的范围", source)
+	turnBlock.SetStatus("completed", "", "", time.Unix(400, 0))
+	buffer = turnBlock.Events[0].ActiveBuffer
+	if buffer == nil || buffer.HasTail() {
+		t.Fatalf("terminal boundary buffer = %#v, want sealed stable prefix", buffer)
+	}
+	for _, row := range turnBlock.Render(ctx) {
+		if row.activeTail {
+			t.Fatalf("terminal boundary retained lightweight row: %#v", row)
+		}
+	}
+
+	finalOnlyBlock := NewMainACPTurnBlock("turn-final-only")
+	finalOnlyBlock.ReplaceFinalStreamEvent(SEAssistant, "先确认未提交改动的范围", source)
+	for _, row := range finalOnlyBlock.Render(ctx) {
+		if row.activeTail {
+			t.Fatalf("final-only narrative retained lightweight row: %#v", row)
+		}
+	}
+}
+
+func TestSealedNarrativePrefixIsNotRerenderedWhenToolOutputChanges(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	block := NewMainACPTurnBlock("turn-cache")
+	source := newNarrativeSourceIdentity("message-cache", "event-cache", "projection-cache")
+	block.AppendStreamEvent(SEAssistant, "审查结论\n\n先确认未提交改动的范围", source)
+	block.UpdateToolWithMeta("call-cache", "READ", "file.go", "first", false, false, ToolUpdateMeta{})
+
+	ctx := model.blockRenderContext(96)
+	block.Render(ctx)
+	firstCalls := model.diag.GlamourRenderCalls
+	if firstCalls == 0 {
+		t.Fatal("sealed narrative prefix did not use Glamour")
+	}
+
+	block.UpdateToolWithMeta("call-cache", "READ", "file.go", "second", false, false, ToolUpdateMeta{})
+	block.Render(ctx)
+	if got := model.diag.GlamourRenderCalls; got != firstCalls {
+		t.Fatalf("tool output update rerendered sealed narrative: calls %d, before %d", got, firstCalls)
+	}
+}
+
+func TestProductionMainACPTurnUsesActiveTailViewportPathUntilToolBoundary(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 24})
+	model = updated.(*Model)
+	event := TranscriptEvent{
+		Kind:          TranscriptEventNarrative,
+		NarrativeKind: TranscriptNarrativeAssistant,
+		Scope:         ACPProjectionMain,
+		ScopeID:       "session-active-tail",
+		TurnID:        "turn-active-tail",
+		MessageID:     "message-active-tail",
+		Actor:         "assistant",
+		Text:          "先确认",
+	}
+	model = applyTranscriptEventForTest(t, model, event)
+	model.syncViewportContent()
+
+	event.Text = "未提交改动的范围"
+	model = applyTranscriptEventForTest(t, model, event)
+	block := requireMainACPTurnBlockForTest(t, model)
+	if _, ok := model.doc.Find(block.BlockID()).(*MainACPTurnBlock); !ok {
+		t.Fatalf("production transcript block = %T, want *MainACPTurnBlock", model.doc.Find(block.BlockID()))
+	}
+	if !model.dirtyViewportBlocksOnlyActiveNarrative() {
+		t.Fatal("active MainACPTurnBlock tail did not use the direct viewport path")
+	}
+
+	block.UpdateToolWithMeta("call-active-tail", "READ", "file.go", "", false, false, ToolUpdateMeta{})
+	model.markViewportBlockDirty(block.BlockID())
+	if model.dirtyViewportBlocksOnlyActiveNarrative() {
+		t.Fatal("tool boundary incorrectly retained the active-tail viewport path")
 	}
 }
 

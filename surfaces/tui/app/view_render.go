@@ -634,6 +634,9 @@ func (m *Model) renderViewportView() string {
 	} else {
 		vpView = strings.TrimRight(m.viewport.View(), "\n")
 	}
+	if m.hasSelectionRange() {
+		vpView = protectWideCellRepaintBlock(vpView, m.viewport.Width())
+	}
 	if showScrollbar {
 		vpView = m.renderViewportScrollbar(vpView)
 	}
@@ -660,6 +663,10 @@ func (m *Model) renderViewportLinesView(applySelection bool) string {
 	}
 	styled := append([]string(nil), m.viewportStyledLines[offset:end]...)
 	plain := m.viewportPlainLines[offset:end]
+	indents := make([]int, len(styled))
+	if offset < len(m.viewportSelectionIndents) {
+		copy(indents, m.viewportSelectionIndents[offset:minInt(end, len(m.viewportSelectionIndents))])
+	}
 	if applySelection {
 		start, finish, ok := normalizedSelectionRange(m.selectionStart, m.selectionEnd, len(m.viewportPlainLines))
 		if ok && len(styled) > 0 && finish.line >= offset && start.line < end {
@@ -671,7 +678,7 @@ func (m *Model) renderViewportLinesView(applySelection bool) string {
 			if finish.line >= end {
 				localFinish.col = displayColumns(plain[len(plain)-1])
 			}
-			styled = renderSelectionOnStyledLines(styled, plain, localStart, localFinish, m.theme.InputSelectionStyle())
+			styled = renderSelectionOnStyledLinesWithIndents(styled, plain, indents, localStart, localFinish, m.theme.InputSelectionStyle())
 		}
 	}
 	vp := m.viewport

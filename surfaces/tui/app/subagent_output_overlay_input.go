@@ -187,10 +187,12 @@ func (m *Model) subagentOutputSelectionText() string {
 		return ""
 	}
 	plain := make([]string, len(rows))
+	indents := make([]int, len(rows))
 	for index := range rows {
 		plain[index] = rows[index].Plain
+		indents[index] = rows[index].selectionIndent
 	}
-	return selectionTextFromLines(plain, start, finish)
+	return selectionTextFromLinesWithIndents(plain, indents, start, finish)
 }
 
 func (m *Model) subagentOutputPointFromMouse(mouse tea.Mouse, clamp bool) (textSelectionPoint, bool) {
@@ -225,7 +227,13 @@ func (m *Model) subagentOutputPointFromMouse(mouse tea.Mouse, clamp bool) (textS
 	if line < 0 || line >= len(view.renderCache.rows) {
 		return textSelectionPoint{}, false
 	}
-	col = clampInt(col, 0, displayColumns(view.renderCache.rows[line].Plain))
+	selectedRow := view.renderCache.rows[line]
+	width := displayColumns(selectedRow.Plain)
+	col = clampInt(col, 0, width)
+	indent := clampInt(selectedRow.selectionIndent, 0, width)
+	content := sliceByDisplayColumns(selectedRow.Plain, indent, width)
+	contentCol := alignDisplayColumnToCharBoundary(content, maxInt(0, col-indent))
+	col = indent + contentCol
 	return textSelectionPoint{line: line, col: col}, true
 }
 

@@ -50,6 +50,23 @@ func (b *activeNarrativeBuffer) Append(text string) {
 	b.version++
 }
 
+// Seal promotes the complete lightweight tail into the stable Glamour prefix.
+// It is a presentation boundary only; canonical narrative identity and text
+// remain owned by the surrounding SubagentEvent.
+func (b *activeNarrativeBuffer) Seal() bool {
+	if b == nil || b.tailRaw == "" {
+		return false
+	}
+	b.stablePrefixRaw += b.tailRaw
+	b.tailRaw = ""
+	b.version++
+	return true
+}
+
+func (b *activeNarrativeBuffer) HasTail() bool {
+	return b != nil && b.tailRaw != ""
+}
+
 func (b *activeNarrativeBuffer) Text() string {
 	if b == nil {
 		return ""
@@ -114,7 +131,7 @@ func (b *activeNarrativeBuffer) renderRows(blockID, rolePrefix string, roleStyle
 		kind = TextReasoning
 		policy = MarkdownNone
 	}
-	return RenderTextWithContext(ctx, TextRenderRequest{
+	rows := RenderTextWithContext(ctx, TextRenderRequest{
 		Kind:            kind,
 		Mode:            RenderStream,
 		MarkdownPolicy:  policy,
@@ -126,62 +143,10 @@ func (b *activeNarrativeBuffer) renderRows(blockID, rolePrefix string, roleStyle
 		StablePrefixRaw: b.stablePrefixRaw,
 		TailRaw:         b.tailRaw,
 	}).Rows
-}
-
-func renderActiveNarrativeTextRows(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, ctx BlockRenderContext) []RenderedRow {
-	buffer := &activeNarrativeBuffer{}
-	buffer.SetText(raw)
-	return buffer.RenderRows(blockID, rolePrefix, roleStyle, ctx)
-}
-
-func (b *AssistantBlock) appendActiveDelta(text string) {
-	if b == nil || text == "" {
-		return
-	}
-	if b.activeBuffer == nil {
-		b.activeBuffer = &activeNarrativeBuffer{}
-		if b.Raw != "" {
-			b.activeBuffer.Append(b.Raw)
-			b.Raw = ""
+	if kind == TextReasoning && b.HasTail() {
+		for i := range rows {
+			rows[i].activeTail = true
 		}
 	}
-	b.activeBuffer.Append(text)
-}
-
-func (b *AssistantBlock) finalizeActiveText(incoming string) string {
-	if b == nil {
-		return incoming
-	}
-	existing := b.Raw
-	if b.activeBuffer != nil {
-		existing = b.activeBuffer.Text()
-	}
-	b.activeBuffer = nil
-	return mergeStreamChunk(existing, incoming, true)
-}
-
-func (b *ReasoningBlock) appendActiveDelta(text string) {
-	if b == nil || text == "" {
-		return
-	}
-	if b.activeBuffer == nil {
-		b.activeBuffer = &activeNarrativeBuffer{}
-		if b.Raw != "" {
-			b.activeBuffer.Append(b.Raw)
-			b.Raw = ""
-		}
-	}
-	b.activeBuffer.Append(text)
-}
-
-func (b *ReasoningBlock) finalizeActiveText(incoming string) string {
-	if b == nil {
-		return incoming
-	}
-	existing := b.Raw
-	if b.activeBuffer != nil {
-		existing = b.activeBuffer.Text()
-	}
-	b.activeBuffer = nil
-	return mergeStreamChunk(existing, incoming, true)
+	return rows
 }

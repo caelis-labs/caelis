@@ -144,12 +144,12 @@ func (m *Model) dirtyViewportBlocksOnlyActiveNarrative() bool {
 	}
 	for blockID := range m.dirtyViewportBlocks {
 		switch block := m.doc.Find(blockID).(type) {
-		case *AssistantBlock:
-			if !block.Streaming || block.activeBuffer == nil || block.activeBuffer.Empty() {
+		case *MainACPTurnBlock:
+			if !narrativeEventsHaveActiveTail(block.Events, block.Status) {
 				return false
 			}
-		case *ReasoningBlock:
-			if !block.Streaming || block.activeBuffer == nil || block.activeBuffer.Empty() {
+		case *ParticipantTurnBlock:
+			if !narrativeEventsHaveActiveTail(block.Events, block.Status) {
 				return false
 			}
 		default:
@@ -157,6 +157,20 @@ func (m *Model) dirtyViewportBlocksOnlyActiveNarrative() bool {
 		}
 	}
 	return true
+}
+
+func narrativeEventsHaveActiveTail(events []SubagentEvent, status string) bool {
+	if isTerminalACPTranscriptStatus(status) {
+		return false
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		event := events[i]
+		if !activeNarrativeEventKind(event.Kind) {
+			continue
+		}
+		return event.ActiveBuffer != nil && event.ActiveBuffer.HasTail()
+	}
+	return false
 }
 
 func (m *Model) beginDeferredViewportSync() {
@@ -175,37 +189,6 @@ func (m *Model) endDeferredViewportSync() {
 		m.viewportDirty = false
 		m.syncViewportContent()
 	}
-}
-
-func (m *Model) wrapNarrativeRowStyled(row RenderedRow, width int) string {
-	if width <= 0 {
-		return row.Styled
-	}
-	plain := ansi.Strip(row.Styled)
-	// If the line already fits, preserve the original styled text (which may
-	// include inline markdown formatting from block.Render).
-	if graphemeWidth(plain) <= width {
-		return row.Styled
-	}
-	return ansi.Wrap(row.Styled, width, " ")
-}
-
-func (m *Model) wrapNarrativeRowPlain(row RenderedRow, width int) []string {
-	plain := strings.TrimRight(row.Plain, " ")
-	if plain == "" {
-		plain = strings.TrimRight(ansi.Strip(row.Styled), " ")
-	}
-	if width <= 0 {
-		return []string{plain}
-	}
-	if graphemeWidth(plain) <= width {
-		return []string{plain}
-	}
-	segments := graphemeWordWrap(plain, width)
-	if len(segments) == 0 {
-		return []string{""}
-	}
-	return normalizeWrappedPlainSegments(segments)
 }
 
 func normalizeWrappedPlainSegments(segments []string) []string {
@@ -423,12 +406,10 @@ func (m *Model) flushPendingOffscreenViewportSync(now time.Time) tea.Cmd {
 		now = time.Now()
 	}
 	if m.shouldDeferStreamViewportSync() {
-		m.flushDeferredMainStreamSmoothing()
 		m.offscreenViewportSyncAt = now.Add(m.offscreenViewportSyncInterval())
 		m.diag.ViewportSkippedSyncs++
 		return m.ensureOffscreenViewportTick()
 	}
-	m.flushDeferredMainStreamSmoothing()
 	m.syncViewportContent()
 	return nil
 }
@@ -566,6 +547,10 @@ func (m *Model) mousePointToContentPoint(x int, y int, clamp bool) (textSelectio
 	if col > width {
 		col = width
 	}
+	indent := selectionIndentAt(m.viewportSelectionIndents, line, width)
+	content := sliceByDisplayColumns(m.viewportPlainLines[line], indent, width)
+	contentCol := alignDisplayColumnToCharBoundary(content, maxInt(0, col-indent))
+	col = indent + contentCol
 	return textSelectionPoint{line: line, col: col}, true
 }
 
@@ -615,7 +600,7 @@ func (m *Model) selectionText() string {
 	if !ok {
 		return ""
 	}
-	return selectionTextFromLines(m.viewportPlainLines, start, end)
+	return selectionTextFromLinesWithIndents(m.viewportPlainLines, m.viewportSelectionIndents, start, end)
 }
 
 func (m *Model) renderSelectionLines() []string {
@@ -625,7 +610,7 @@ func (m *Model) renderSelectionLines() []string {
 	}
 	// Rendered-text-first selection: non-selected lines keep styled output,
 	// selected lines show plain text with reverse highlight.
-	return renderSelectionOnStyledLines(m.viewportStyledLines, m.viewportPlainLines, start, end, m.theme.InputSelectionStyle())
+	return renderSelectionOnStyledLinesWithIndents(m.viewportStyledLines, m.viewportPlainLines, m.viewportSelectionIndents, start, end, m.theme.InputSelectionStyle())
 }
 
 type fixedTextRegion struct {

@@ -66,8 +66,6 @@ func (m *Model) appendSlashOutputLines(lines []slashOutputLine) (tea.Model, tea.
 	if len(lines) == 0 {
 		return m, nil
 	}
-	m.finalizeAssistantBlock()
-	m.finalizeReasoningBlock()
 	if m.hasCommittedLine {
 		m.appendSlashOutputSpacer()
 	}

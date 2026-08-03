@@ -51,9 +51,8 @@ func NewSpacerBlock() *TranscriptBlock {
 // ---------------------------------------------------------------------------
 
 type UserNarrativeBlock struct {
-	id          string
-	Raw         string // user's display text (without the "> " prefix)
-	renderCache narrativeBlockRenderCache
+	id  string
+	Raw string // user's display text (without the "> " prefix)
 }
 
 func NewUserNarrativeBlock(text string) *UserNarrativeBlock {
@@ -72,145 +71,6 @@ func (b *UserNarrativeBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		BlockID:        b.id,
 		LineStyle:      tuikit.LineStyleUser,
 	}).Rows
-}
-
-type narrativeBlockRenderCache struct {
-	width      int
-	themeKey   string
-	raw        string
-	rolePrefix string
-	rows       []RenderedRow
-}
-
-func (c *narrativeBlockRenderCache) renderTextRows(blockID, raw, rolePrefix string, lineStyle tuikit.LineStyle, ctx BlockRenderContext) []RenderedRow {
-	themeKey := ctx.renderThemeKey()
-	if cached := c.cachedRows(raw, rolePrefix, ctx.Width, themeKey); cached != nil {
-		return cached
-	}
-	mode := RenderFinal
-	policy := MarkdownFull
-	if lineStyle == tuikit.LineStyleReasoning {
-		policy = MarkdownNone
-	}
-	rows := RenderTextWithContext(ctx, TextRenderRequest{
-		Kind:           textKindForLineStyle(lineStyle),
-		Mode:           mode,
-		MarkdownPolicy: policy,
-		Raw:            raw,
-		Prefix:         rolePrefix,
-		BlockID:        blockID,
-		LineStyle:      lineStyle,
-	}).Rows
-	c.width = ctx.Width
-	c.themeKey = themeKey
-	c.raw = raw
-	c.rolePrefix = rolePrefix
-	c.rows = rows
-	return rows
-}
-
-func (c *narrativeBlockRenderCache) cachedRows(raw, rolePrefix string, width int, themeKey string) []RenderedRow {
-	if c == nil || len(c.rows) == 0 {
-		return nil
-	}
-	if c.width != width || c.themeKey != themeKey {
-		return nil
-	}
-	if c.raw != raw || c.rolePrefix != rolePrefix {
-		return nil
-	}
-	return c.rows
-}
-
-// ---------------------------------------------------------------------------
-// AssistantBlock — streaming or finalized assistant answer.
-// ---------------------------------------------------------------------------
-
-type AssistantBlock struct {
-	id           string
-	Actor        string
-	Raw          string
-	Streaming    bool
-	LastFinal    string // dedup for duplicate final events
-	renderCache  narrativeBlockRenderCache
-	activeBuffer *activeNarrativeBuffer
-}
-
-func NewAssistantBlock(actor ...string) *AssistantBlock {
-	label := ""
-	if len(actor) > 0 {
-		label = strings.TrimSpace(actor[0])
-	}
-	return &AssistantBlock{id: nextBlockID(), Actor: label, Streaming: true}
-}
-
-func (b *AssistantBlock) BlockID() string { return b.id }
-func (b *AssistantBlock) Kind() BlockKind { return BlockAssistant }
-func (b *AssistantBlock) Render(ctx BlockRenderContext) []RenderedRow {
-	rolePrefix := "· " + assistantActorPrefix(b.Actor)
-	if b.Streaming {
-		if b.activeBuffer != nil && !b.activeBuffer.Empty() {
-			return b.activeBuffer.RenderRows(b.id, rolePrefix, tuikit.LineStyleAssistant, ctx)
-		}
-		if strings.TrimSpace(b.Raw) != "" {
-			return renderActiveNarrativeTextRows(b.id, b.Raw, rolePrefix, tuikit.LineStyleAssistant, ctx)
-		}
-		return nil
-	}
-	return b.renderCache.renderTextRows(
-		b.id,
-		b.Raw,
-		rolePrefix,
-		tuikit.LineStyleAssistant,
-		ctx,
-	)
-}
-
-func assistantActorPrefix(actor string) string {
-	if actor = strings.TrimSpace(actor); actor != "" && !strings.EqualFold(actor, "assistant") {
-		return actor + ": "
-	}
-	return ""
-}
-
-// ---------------------------------------------------------------------------
-// ReasoningBlock — streaming or finalized reasoning/thinking.
-// ---------------------------------------------------------------------------
-
-type ReasoningBlock struct {
-	id           string
-	Actor        string
-	Raw          string
-	Streaming    bool
-	renderCache  narrativeBlockRenderCache
-	activeBuffer *activeNarrativeBuffer
-}
-
-func NewReasoningBlock(actor ...string) *ReasoningBlock {
-	label := ""
-	if len(actor) > 0 {
-		label = strings.TrimSpace(actor[0])
-	}
-	return &ReasoningBlock{id: nextBlockID(), Actor: label, Streaming: true}
-}
-
-func (b *ReasoningBlock) BlockID() string { return b.id }
-func (b *ReasoningBlock) Kind() BlockKind { return BlockReasoning }
-func (b *ReasoningBlock) Render(ctx BlockRenderContext) []RenderedRow {
-	prefix := "› "
-	if actor := strings.TrimSpace(b.Actor); actor != "" && !strings.EqualFold(actor, "assistant") {
-		prefix += actor + ": "
-	}
-	if b.Streaming {
-		if b.activeBuffer != nil && !b.activeBuffer.Empty() {
-			return b.activeBuffer.RenderRows(b.id, prefix, tuikit.LineStyleReasoning, ctx)
-		}
-		if strings.TrimSpace(b.Raw) != "" {
-			return renderActiveNarrativeTextRows(b.id, b.Raw, prefix, tuikit.LineStyleReasoning, ctx)
-		}
-		return nil
-	}
-	return b.renderCache.renderTextRows(b.id, b.Raw, prefix, tuikit.LineStyleReasoning, ctx)
 }
 
 // ---------------------------------------------------------------------------

@@ -71,10 +71,6 @@ func (m *Model) handleLogChunk(chunk string) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(line) != "" && m.transientBlockID != "" && m.transientRemove && !isTransientWarningLine(line) {
 			m.removeTransientLogLine()
 		}
-		if strings.TrimSpace(line) != "" {
-			m.finalizeAssistantBlock()
-			m.finalizeReasoningBlock()
-		}
 		m.commitLine(line)
 	}
 
@@ -82,36 +78,10 @@ func (m *Model) handleLogChunk(chunk string) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *Model) finalizeAssistantBlock() {
-	m.activeAssistantID = ""
-	m.activeAssistantActor = ""
-}
-
-func (m *Model) discardActiveAssistantStream() {
+func (m *Model) discardActiveLogStream() {
 	m.streamLine = ""
 	m.logStreamBuffer.Reset()
-	// Remove active assistant block from doc.
-	if m.activeAssistantID != "" {
-		m.doc.Remove(m.activeAssistantID)
-		m.activeAssistantID = ""
-		m.activeAssistantActor = ""
-	}
-	// Remove active reasoning block from doc.
-	if m.activeReasoningID != "" {
-		m.doc.Remove(m.activeReasoningID)
-		m.activeReasoningID = ""
-		m.activeReasoningActor = ""
-	}
 	m.syncViewportContent()
-}
-
-func normalizeStreamKind(kind string) string {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "reasoning", "thinking":
-		return "reasoning"
-	default:
-		return "answer"
-	}
 }
 
 func (m *Model) streamTickInterval() time.Duration {
@@ -161,219 +131,6 @@ func (m *Model) streamCatchupMaxPerTick() int {
 		return streamSmoothingCatchupMaxPerFrameDefault
 	}
 	return m.cfg.StreamCatchupMaxTick
-}
-
-func (m *Model) enqueueMainDelta(kind string, actor string, text string, final bool) (tea.Model, tea.Cmd) {
-	streamKind := normalizeStreamKind(kind)
-	m.flushMainStreamSmoothingExcept(streamKind)
-	if final {
-		m.dropPendingStreamSmoothing(streamSmoothingKey("main", "", streamKind, actor))
-		return m.applyStreamBlockImmediate(streamKind, actor, text, true)
-	}
-	if !m.enqueueStreamDelta("main", "", streamKind, actor, text, false) {
-		return m, nil
-	}
-	if m.shouldDeferStreamViewportSync() {
-		return m, m.requestStreamViewportSync()
-	}
-	return m, m.ensurePendingStreamSmoothingTick()
-}
-
-func (m *Model) handleStreamBlock(kind string, actor string, text string, final bool) (tea.Model, tea.Cmd) {
-	streamKind := normalizeStreamKind(kind)
-	if final {
-		m.dropPendingStreamSmoothing(streamSmoothingKey("main", "", streamKind, actor))
-	}
-	return m.applyStreamBlockImmediate(streamKind, actor, text, final)
-}
-
-func (m *Model) applyStreamBlockImmediate(streamKind string, actor string, text string, final bool) (tea.Model, tea.Cmd) {
-	if text == "" && !final {
-		return m, nil
-	}
-	if text == "" && final && streamKind != "reasoning" && m.activeAssistantID == "" {
-		return m, nil
-	}
-	if streamKind == "reasoning" {
-		return m.handleReasoningStream(actor, text, final)
-	}
-	return m.handleAnswerStream(actor, text, final)
-}
-
-func (m *Model) handleAnswerStream(actor string, text string, final bool) (tea.Model, tea.Cmd) {
-	actor = strings.TrimSpace(actor)
-	if m.activeAssistantID != "" && strings.TrimSpace(m.activeAssistantActor) != actor {
-		m.finalizeAssistantBlock()
-	}
-	if final && m.activeAssistantID == "" && m.shouldSuppressDuplicateFinalAnswer(actor, text) {
-		return m, nil
-	}
-
-	if m.activeAssistantID == "" {
-		block := NewAssistantBlock(actor)
-		block.Streaming = !final
-		if final {
-			block.Raw = text
-			block.LastFinal = text
-		} else {
-			block.appendActiveDelta(text)
-		}
-		m.appendMainTranscriptBlock(block)
-		m.activeAssistantID = block.BlockID()
-		m.activeAssistantActor = actor
-		m.hasCommittedLine = true
-		m.lastCommittedStyle = tuikit.LineStyleAssistant
-		m.lastCommittedRaw = "· "
-		if final {
-			m.activeAssistantID = ""
-			m.activeAssistantActor = ""
-		}
-		m.markViewportStructureDirty()
-		return m, m.requestStreamViewportSync()
-	}
-
-	block := m.doc.Find(m.activeAssistantID)
-	if block == nil {
-		m.activeAssistantID = ""
-		m.activeAssistantActor = ""
-		return m, nil
-	}
-	ab := block.(*AssistantBlock)
-	ab.Actor = actor
-	if final {
-		ab.Raw = ab.finalizeActiveText(text)
-		ab.Streaming = false
-		ab.LastFinal = ab.Raw
-	} else {
-		ab.appendActiveDelta(text)
-	}
-	if final {
-		m.activeAssistantID = ""
-		m.activeAssistantActor = ""
-	}
-	m.lastCommittedStyle = tuikit.LineStyleAssistant
-	m.lastCommittedRaw = "· "
-	m.markViewportBlockDirty(ab.BlockID())
-	return m, m.requestStreamViewportSync()
-}
-
-func (m *Model) shouldSuppressDuplicateFinalAnswer(actor string, text string) bool {
-	if m == nil {
-		return false
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return false
-	}
-	blocks := m.doc.Blocks()
-	for i := len(blocks) - 1; i >= 0; i-- {
-		switch block := blocks[i].(type) {
-		case *TranscriptBlock:
-			if strings.TrimSpace(block.Raw) == "" {
-				continue
-			}
-			return false
-		case *AssistantBlock:
-			if block.Streaming {
-				return false
-			}
-			lastFinal := strings.TrimSpace(block.LastFinal)
-			if lastFinal == "" {
-				lastFinal = strings.TrimSpace(block.Raw)
-			}
-			return strings.TrimSpace(block.Actor) == actor && lastFinal == text
-		default:
-			return false
-		}
-	}
-	return false
-}
-
-func (m *Model) handleReasoningStream(actor string, text string, final bool) (tea.Model, tea.Cmd) {
-	actor = strings.TrimSpace(actor)
-	if m.activeReasoningID != "" && strings.TrimSpace(m.activeReasoningActor) != actor {
-		m.finalizeReasoningBlock()
-	}
-	if final {
-		if m.activeReasoningID == "" {
-			if strings.TrimSpace(text) == "" {
-				return m, nil
-			}
-			block := NewReasoningBlock(actor)
-			block.Raw = text
-			block.Streaming = false
-			m.appendMainTranscriptBlock(block)
-			m.hasCommittedLine = true
-			m.lastCommittedStyle = tuikit.LineStyleReasoning
-			m.lastCommittedRaw = "› "
-			m.markViewportStructureDirty()
-			return m, m.requestStreamViewportSync()
-		}
-		block := m.doc.Find(m.activeReasoningID)
-		if block == nil {
-			m.activeReasoningID = ""
-			m.activeReasoningActor = ""
-			return m, nil
-		}
-		rb := block.(*ReasoningBlock)
-		rb.Actor = actor
-		rb.Raw = rb.finalizeActiveText(text)
-		rb.Streaming = false
-		m.activeReasoningID = ""
-		m.activeReasoningActor = ""
-		m.lastCommittedStyle = tuikit.LineStyleReasoning
-		m.lastCommittedRaw = "› "
-		m.markViewportBlockDirty(rb.BlockID())
-		return m, m.requestStreamViewportSync()
-	}
-
-	if m.activeReasoningID == "" {
-		block := NewReasoningBlock(actor)
-		block.appendActiveDelta(text)
-		m.appendMainTranscriptBlock(block)
-		m.activeReasoningID = block.BlockID()
-		m.activeReasoningActor = actor
-		m.hasCommittedLine = true
-		m.lastCommittedStyle = tuikit.LineStyleReasoning
-		m.lastCommittedRaw = "› "
-		m.markViewportStructureDirty()
-		return m, m.requestStreamViewportSync()
-	}
-
-	block := m.doc.Find(m.activeReasoningID)
-	if block == nil {
-		m.activeReasoningID = ""
-		m.activeReasoningActor = ""
-		return m, nil
-	}
-	rb := block.(*ReasoningBlock)
-	rb.Actor = actor
-	rb.appendActiveDelta(text)
-	m.lastCommittedStyle = tuikit.LineStyleReasoning
-	m.lastCommittedRaw = "› "
-	m.markViewportBlockDirty(rb.BlockID())
-	return m, m.requestStreamViewportSync()
-}
-
-const minReplayLen = 16
-
-func mergeStreamChunk(existing string, incoming string, final bool) string {
-	if final {
-		if incoming == "" {
-			return existing
-		}
-		return incoming
-	}
-	if incoming == "" {
-		return existing
-	}
-	if existing == "" {
-		return incoming
-	}
-	if len(incoming) >= minReplayLen && strings.HasPrefix(existing, incoming) {
-		return existing
-	}
-	return existing + incoming
 }
 
 func (m *Model) streamSmoothingState(key string) *streamSmoothingState {
@@ -469,19 +226,9 @@ func (m *Model) hasImmediateStreamSmoothingWork() bool {
 		if state == nil || len(state.pending) == 0 {
 			continue
 		}
-		if m.shouldDeferMainStreamSmoothing(state) {
-			continue
-		}
 		return true
 	}
 	return false
-}
-
-func (m *Model) shouldDeferMainStreamSmoothing(state *streamSmoothingState) bool {
-	if m == nil || state == nil {
-		return false
-	}
-	return state.targetKind == "main" && m.shouldDeferStreamViewportSync()
 }
 
 func (m *Model) drainPendingStreamSmoothing(now time.Time) tea.Cmd {
@@ -505,9 +252,6 @@ func (m *Model) drainPendingStreamSmoothing(now time.Time) tea.Cmd {
 		state := m.streamSmoothing[key]
 		if state == nil || len(state.pending) == 0 {
 			delete(m.streamSmoothing, key)
-			continue
-		}
-		if m.shouldDeferMainStreamSmoothing(state) {
 			continue
 		}
 		backlog := len(state.pending)
@@ -575,33 +319,6 @@ func (m *Model) pendingStreamSmoothingKeys() []string {
 	return keys
 }
 
-func (m *Model) flushDeferredMainStreamSmoothing() {
-	if m == nil || len(m.streamSmoothing) == 0 {
-		return
-	}
-	keys := make([]string, 0, len(m.streamSmoothing))
-	for key, state := range m.streamSmoothing {
-		if state == nil || len(state.pending) == 0 || state.targetKind != "main" {
-			continue
-		}
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	m.beginDeferredViewportSync()
-	defer m.endDeferredViewportSync()
-	for _, key := range keys {
-		state := m.streamSmoothing[key]
-		if state == nil || len(state.pending) == 0 || state.targetKind != "main" {
-			continue
-		}
-		_ = m.applyPendingSmoothChunk(state, joinGraphemeClusters(state.pending))
-		delete(m.streamSmoothing, key)
-	}
-	if !m.hasImmediateStreamSmoothingWork() {
-		m.streamSmoothingTickScheduled = false
-	}
-}
-
 func (m *Model) revealPendingSmoothedText(state *streamSmoothingState, now time.Time) (string, int) {
 	if state == nil || len(state.pending) == 0 {
 		return "", 0
@@ -646,7 +363,7 @@ func (m *Model) revealPendingSmoothedText(state *streamSmoothingState, now time.
 	if want > len(state.pending) {
 		want = len(state.pending)
 	}
-	want = m.chooseRevealClusterCountForState(state, want, maxPerFrame)
+	want = chooseRevealClusterCount(state.pending, want, maxPerFrame)
 	if want <= 0 {
 		return "", 0
 	}
@@ -664,66 +381,14 @@ func (m *Model) revealPendingSmoothedText(state *streamSmoothingState, now time.
 	return chunk, want
 }
 
-func (m *Model) chooseRevealClusterCountForState(state *streamSmoothingState, desired int, maxPerFrame int) int {
-	if state == nil {
-		return 0
-	}
-	count := chooseRevealClusterCount(state.pending, desired, maxPerFrame)
-	if count <= 0 || state.targetKind != "main" {
-		return count
-	}
-	wrapWidth := m.viewportContentWidth()
-	if wrapWidth <= 0 {
-		return count
-	}
-	existing := m.currentMainStreamRaw(state)
-	return extendRevealToStableRenderedRows(existing, state.pending, count, maxPerFrame, wrapWidth, state.streamKind, state.actor, state.upstreamDone)
-}
-
-func (m *Model) currentMainStreamRaw(state *streamSmoothingState) string {
-	if m == nil || state == nil {
-		return ""
-	}
-	switch state.streamKind {
-	case "reasoning":
-		if m.activeReasoningID == "" {
-			return ""
-		}
-		block, ok := m.doc.Find(m.activeReasoningID).(*ReasoningBlock)
-		if !ok || block == nil {
-			return ""
-		}
-		if block.Streaming && block.activeBuffer != nil && !block.activeBuffer.Empty() {
-			return block.activeBuffer.Text()
-		}
-		return block.Raw
-	default:
-		if m.activeAssistantID == "" {
-			return ""
-		}
-		block, ok := m.doc.Find(m.activeAssistantID).(*AssistantBlock)
-		if !ok || block == nil {
-			return ""
-		}
-		if block.Streaming && block.activeBuffer != nil && !block.activeBuffer.Empty() {
-			return block.activeBuffer.Text()
-		}
-		return block.Raw
-	}
-}
-
 func (m *Model) applyPendingSmoothChunk(state *streamSmoothingState, chunk string) tea.Cmd {
 	if m == nil || state == nil || chunk == "" {
 		return nil
 	}
-	switch state.targetKind {
-	case "btw":
+	if state.targetKind == "btw" {
 		m.applyBTWOverlayImmediate(chunk, false)
-		return nil
-	default:
-		_, cmd := m.applyStreamBlockImmediate(state.streamKind, state.actor, chunk, false)
-		return cmd
 	}
+	return nil
 }
 
 func (m *Model) flushAllPendingStreamSmoothing() {
@@ -752,45 +417,6 @@ func (m *Model) flushAllPendingStreamSmoothingWithReason(reason string) {
 		delete(m.streamSmoothing, key)
 	}
 	m.streamSmoothingTickScheduled = false
-}
-
-func (m *Model) flushMainStreamSmoothingExcept(streamKind string) {
-	m.flushMatchingStreamSmoothing(func(state *streamSmoothingState) bool {
-		return state != nil && state.targetKind == "main" && state.streamKind != streamKind
-	})
-}
-
-func (m *Model) flushSubagentStreamSmoothingExcept(sessionKey string, streamKind string) {
-	m.flushMatchingStreamSmoothing(func(state *streamSmoothingState) bool {
-		return state != nil && state.targetKind == "subagent" && state.sessionKey == sessionKey && state.streamKind != streamKind
-	})
-}
-
-func (m *Model) flushMatchingStreamSmoothing(match func(*streamSmoothingState) bool) {
-	if m == nil || len(m.streamSmoothing) == 0 || match == nil {
-		return
-	}
-	keys := make([]string, 0, len(m.streamSmoothing))
-	for key, state := range m.streamSmoothing {
-		if match(state) {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-	m.beginDeferredViewportSync()
-	defer m.endDeferredViewportSync()
-	for _, key := range keys {
-		state := m.streamSmoothing[key]
-		if state == nil {
-			delete(m.streamSmoothing, key)
-			continue
-		}
-		m.applyPendingSmoothChunk(state, joinGraphemeClusters(state.pending))
-		delete(m.streamSmoothing, key)
-	}
-	if len(m.streamSmoothing) == 0 {
-		m.streamSmoothingTickScheduled = false
-	}
 }
 
 func (m *Model) dropPendingStreamSmoothing(key string) {
@@ -852,10 +478,6 @@ func (m *Model) enqueueBTWDelta(text string, final bool) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, m.ensurePendingStreamSmoothingTick()
-}
-
-func (m *Model) finalizeReasoningBlock() {
-	m.activeReasoningID = ""
 }
 
 func (m *Model) ensureParticipantTurnBlock(sessionID string, actor string) *ParticipantTurnBlock {

@@ -328,12 +328,6 @@ type Model struct {
 	// --- Document model (source of truth for viewport content) ---
 	doc *Document
 
-	// Active block tracking IDs (empty string means no active block).
-	activeAssistantID    string
-	activeAssistantActor string
-	activeReasoningID    string
-	activeReasoningActor string
-
 	// Main transcript routing is timeline-first. Unanchored main events append
 	// to mainTimelineTailID; only stable entity anchors use mainAnchorBlockIDs.
 	mainTimelineTailID             string
@@ -380,6 +374,7 @@ type Model struct {
 	// Viewport caches — populated by syncViewportContent from Document.
 	viewportStyledLines           []string
 	viewportPlainLines            []string
+	viewportSelectionIndents      []int
 	viewportBlockIDs              []string
 	viewportClickTokens           []string
 	viewportClickBounds           []clickColumnRange

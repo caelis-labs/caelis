@@ -45,7 +45,7 @@ func TestRenderDiagnosticsCountsMessageLaneAndViewportSetContent(t *testing.T) {
 
 func TestRenderDiagnosticsCountsSmoothingFlushReason(t *testing.T) {
 	m := NewModel(Config{NoColor: true})
-	_, _ = m.enqueueMainDelta("answer", "assistant", "hello", false)
+	_, _ = m.enqueueBTWDelta("hello", false)
 
 	m.flushAllPendingStreamSmoothingWithReason("semantic_barrier")
 
@@ -90,9 +90,8 @@ func TestRenderDiagnosticsCountsMarkdownGlamourAndStatusCallbacks(t *testing.T) 
 		t.Fatal("inline markdown render counter was not incremented")
 	}
 
-	block := NewAssistantBlock("assistant")
-	block.Raw = "**bold** answer"
-	block.Streaming = false
+	block := NewMainACPTurnBlock("turn-1")
+	block.ReplaceFinalStreamEvent(SEAssistant, "**bold** answer", narrativeSourceIdentity{})
 	m.doc.Append(block)
 	m.markViewportStructureDirty()
 	m.syncViewportContent()
@@ -105,9 +104,12 @@ func TestStableMarkdownWheelScrollDoesNotRerenderDocument(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 96, Height: 24})
 	m = updated.(*Model)
-	block := NewAssistantBlock("assistant")
-	block.Raw = strings.Repeat("## 中文标题\n\n这是一段稳定的 Markdown 内容，用于验证滚动路径。\n\n", 24)
-	block.Streaming = false
+	block := NewMainACPTurnBlock("turn-1")
+	block.ReplaceFinalStreamEvent(
+		SEAssistant,
+		strings.Repeat("## 中文标题\n\n这是一段稳定的 Markdown 内容，用于验证滚动路径。\n\n", 24),
+		narrativeSourceIdentity{},
+	)
 	m.doc.Append(block)
 	m.markViewportStructureDirty()
 	m.syncViewportContent()
@@ -117,7 +119,7 @@ func TestStableMarkdownWheelScrollDoesNotRerenderDocument(t *testing.T) {
 
 	offsetBefore := m.viewport.YOffset()
 	glamourBefore := m.diag.GlamourRenderCalls
-	blockRendersBefore := m.diag.BlockRenderCallsByKind[BlockAssistant]
+	blockRendersBefore := m.diag.BlockRenderCallsByKind[BlockMainACPTurn]
 	updated, _ = m.handleMouse(tea.MouseWheelMsg(tea.Mouse{
 		Button: tea.MouseWheelUp,
 		X:      m.mainColumnX() + tuikit.GutterNarrative + 2,
@@ -132,8 +134,8 @@ func TestStableMarkdownWheelScrollDoesNotRerenderDocument(t *testing.T) {
 	if got := m.diag.GlamourRenderCalls; got != glamourBefore {
 		t.Fatalf("stable Markdown wheel reran Glamour: calls %d, before %d", got, glamourBefore)
 	}
-	if got := m.diag.BlockRenderCallsByKind[BlockAssistant]; got != blockRendersBefore {
-		t.Fatalf("stable Markdown wheel rerendered assistant block: calls %d, before %d", got, blockRendersBefore)
+	if got := m.diag.BlockRenderCallsByKind[BlockMainACPTurn]; got != blockRendersBefore {
+		t.Fatalf("stable Markdown wheel rerendered main ACP turn: calls %d, before %d", got, blockRendersBefore)
 	}
 }
 

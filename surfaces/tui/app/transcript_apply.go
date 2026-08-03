@@ -193,7 +193,6 @@ func (m *Model) applyTranscriptNotice(event TranscriptEvent) (tea.Model, tea.Cmd
 		return m, nil
 	}
 	if m.shouldAnchorMainNotice(event) {
-		m.prepareForTranscriptScope(event.Scope)
 		block := m.ensureMainTimelineBlock(event)
 		if block != nil {
 			block.AddNotice(text, event.OccurredAt, event.NoticeKind)
@@ -219,14 +218,6 @@ func formatTranscriptNoticeText(text string) string {
 	return text
 }
 
-func (m *Model) prepareForTranscriptScope(scope ACPProjectionScope) {
-	switch scope {
-	case ACPProjectionMain, ACPProjectionParticipant, ACPProjectionSubagent:
-		m.finalizeAssistantBlock()
-		m.finalizeReasoningBlock()
-	}
-}
-
 func (m *Model) applyTranscriptNarrative(event TranscriptEvent) (tea.Model, tea.Cmd) {
 	switch event.NarrativeKind {
 	case TranscriptNarrativeUser:
@@ -238,7 +229,6 @@ func (m *Model) applyTranscriptNarrative(event TranscriptEvent) (tea.Model, tea.
 		return m.appendEventStreamTranscriptText(event.Text)
 	}
 
-	m.prepareForTranscriptScope(event.Scope)
 	switch event.Scope {
 	case ACPProjectionParticipant:
 		return m.applyTranscriptNarrativeToParticipantTurn(event)
@@ -297,7 +287,6 @@ func (m *Model) applyTranscriptMainNarrative(event TranscriptEvent) (tea.Model, 
 }
 
 func (m *Model) applyTranscriptPlan(event TranscriptEvent) (tea.Model, tea.Cmd) {
-	m.prepareForTranscriptScope(event.Scope)
 	switch event.Scope {
 	case ACPProjectionParticipant:
 		return m.applyTranscriptPlanToParticipantTurn(event, false)
@@ -321,7 +310,6 @@ func (m *Model) applyTranscriptPlan(event TranscriptEvent) (tea.Model, tea.Cmd) 
 }
 
 func (m *Model) applyTranscriptTool(event TranscriptEvent) (tea.Model, tea.Cmd) {
-	m.prepareForTranscriptScope(event.Scope)
 	mutation := transcriptToolMutationFromEvent(event)
 	switch event.Scope {
 	case ACPProjectionParticipant:
@@ -334,7 +322,6 @@ func (m *Model) applyTranscriptTool(event TranscriptEvent) (tea.Model, tea.Cmd) 
 }
 
 func (m *Model) applyTranscriptApproval(event TranscriptEvent) (tea.Model, tea.Cmd) {
-	m.prepareForTranscriptScope(event.Scope)
 	if strings.TrimSpace(event.ApprovalText) != "" {
 		return m.applyTranscriptApprovalReview(event)
 	}
@@ -443,7 +430,6 @@ func approvalReviewTailOutput(event TranscriptEvent) string {
 }
 
 func (m *Model) applyTranscriptParticipant(event TranscriptEvent) (tea.Model, tea.Cmd) {
-	m.prepareForTranscriptScope(event.Scope)
 	switch event.Scope {
 	case ACPProjectionSubagent:
 		if eventTargetsParentToolPanel(event) {
@@ -456,7 +442,6 @@ func (m *Model) applyTranscriptParticipant(event TranscriptEvent) (tea.Model, te
 }
 
 func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.Cmd) {
-	m.prepareForTranscriptScope(event.Scope)
 	switch event.Scope {
 	case ACPProjectionParticipant:
 		return m.applyTranscriptStatusToParticipantTurn(event, event.State, "", "")

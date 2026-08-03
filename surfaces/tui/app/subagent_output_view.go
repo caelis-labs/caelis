@@ -283,7 +283,9 @@ func finalizeSubagentOutputNarratives(block *ParticipantTurnBlock) {
 		if event.Kind != SEAssistant && event.Kind != SEReasoning {
 			continue
 		}
-		event.ActiveBuffer = nil
+		if event.ActiveBuffer != nil {
+			event.ActiveBuffer.Seal()
+		}
 	}
 }
 

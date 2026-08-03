@@ -403,11 +403,7 @@ func TestNarrativeViewportWrapPreservesRenderedInlineCodeANSI(t *testing.T) {
 	m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
 	raw := "前缀前缀前缀前缀前缀前缀，用 `Shell` 验证结果。"
 	styled := renderInlineMarkdown(raw, m.theme.TextStyle(), m.theme)
-	wrapped := m.wrapNarrativeRowStyled(RenderedRow{
-		Styled:  styled,
-		Plain:   ansi.Strip(styled),
-		BlockID: "assistant-row",
-	}, 24)
+	wrapped := hardWrapDisplayLine(styled, 24)
 
 	assertInlineCodeForegroundScope(t,
 		firstStyledLineContaining(wrapped, "Shell"),

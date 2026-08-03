@@ -175,9 +175,10 @@ func normalizeFullscreenFrameLine(line string, width int) string {
 	return padRightDisplay(line, width)
 }
 
-// protectWideCellRepaintBlock is intentionally limited to the bounded composer
-// chrome. Transcript and fullscreen frames must stay free of row sentinels so
-// terminal hard-scroll optimization remains available.
+// protectWideCellRepaintBlock is intentionally limited to bounded, high-churn
+// regions: composer chrome, active narrative tails, and selection frames.
+// Stable transcript rows stay free of sentinels so terminal hard-scroll
+// optimization remains available.
 func protectWideCellRepaintBlock(text string, width int) string {
 	if text == "" || width <= 1 {
 		return text

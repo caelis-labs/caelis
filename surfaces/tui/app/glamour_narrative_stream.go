@@ -82,6 +82,7 @@ func renderStreamingNarrativeTailRows(blockID, raw, rolePrefix string, roleStyle
 				Plain:      plain,
 				BlockID:    blockID,
 				PreWrapped: true,
+				activeTail: true,
 			})
 		}
 	}

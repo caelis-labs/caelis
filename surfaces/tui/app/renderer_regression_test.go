@@ -332,6 +332,103 @@ func TestComposerMixedWidthDeletePreservesPhysicalWideText(t *testing.T) {
 	assertPhysicalComposerFrame(t, model.fixedRowWidth(), after, outputs)
 }
 
+func TestDynamicWideNarrativeAndSelectionUseBoundedRepaintProtection(t *testing.T) {
+	const (
+		width  = 48
+		height = 8
+	)
+	model := NewModel(Config{NoAnimation: true})
+	model.width = width
+	model.height = height
+	model.viewport.SetWidth(width - 3)
+	model.viewport.SetHeight(2)
+	model.viewportStyledLines = []string{"· 先确认未提交改动的范围"}
+	model.viewportPlainLines = []string{"· 先确认未提交改动的范围"}
+	model.viewportSelectionIndents = []int{2}
+	model.viewport.SetContentLines(model.viewportStyledLines)
+
+	stable := model.renderViewportView()
+	if strings.Contains(stable, wideCellRendererSentinel()) {
+		t.Fatalf("stable viewport unexpectedly used dynamic repaint protection: %q", stable)
+	}
+
+	activeBlock := NewMainACPTurnBlock("active-wide-narrative")
+	activeBlock.AppendStreamEvent(
+		SEAssistant,
+		"先确认未提交改动的范围",
+		newNarrativeSourceIdentity("active-wide-message", "", ""),
+	)
+	activeRows := activeBlock.Render(model.blockRenderContext(model.viewport.Width()))
+	activeFrame := joinRenderedStyled(activeRows)
+	if len(activeRows) != 1 || !strings.Contains(activeFrame, wideCellRendererSentinel()) {
+		t.Fatalf("active wide narrative missing bounded repaint protection: %#v", activeRows)
+	}
+	finalBlock := NewMainACPTurnBlock("final-wide-narrative")
+	finalBlock.ReplaceFinalStreamEvent(
+		SEAssistant,
+		"先确认未提交改动的范围",
+		newNarrativeSourceIdentity("final-wide-message", "", ""),
+	)
+	finalRows := finalBlock.Render(model.blockRenderContext(model.viewport.Width()))
+	if len(finalRows) != 1 || strings.Contains(joinRenderedStyled(finalRows), wideCellRendererSentinel()) {
+		t.Fatalf("stable final narrative unexpectedly used repaint protection: %#v", finalRows)
+	}
+
+	model.selectionStart = textSelectionPoint{line: 0, col: 2}
+	model.selectionEnd = textSelectionPoint{line: 0, col: displayColumns(model.viewportPlainLines[0])}
+	model.bumpViewportSelectionVersion()
+	selected := model.renderViewportView()
+	if !strings.Contains(selected, wideCellRendererSentinel()) {
+		t.Fatalf("selected wide viewport missing bounded repaint protection: %q", selected)
+	}
+
+	activeUpdates := renderComposerFramesForTest(t, model.viewport.Width(), activeFrame, selected)
+	assertPhysicalComposerFrame(t, model.viewport.Width(), selected, activeUpdates)
+}
+
+func TestActiveNarrativeRepaintProtectionUsesFinalTranscriptRowWidth(t *testing.T) {
+	const width = 24
+	tests := []struct {
+		name string
+		kind SubagentEventKind
+	}{
+		{name: "assistant", kind: SEAssistant},
+		{name: "reasoning", kind: SEReasoning},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model := NewModel(Config{NoAnimation: true})
+			block := NewMainACPTurnBlock("active-multiline-" + tt.name)
+			source := newNarrativeSourceIdentity("message-"+tt.name, "", "")
+			block.AppendStreamEvent(tt.kind, "第一行\n", source)
+			before := joinRenderedStyled(block.Render(model.blockRenderContext(width)))
+			block.AppendStreamEvent(tt.kind, "第二行", source)
+			rows := block.Render(model.blockRenderContext(width))
+			after := joinRenderedStyled(rows)
+
+			activeRows := 0
+			for _, row := range rows {
+				if !row.activeTail {
+					continue
+				}
+				activeRows++
+				if got := displayColumns(row.Styled); got != width {
+					t.Fatalf("active %s row width = %d, want %d: plain=%q styled=%q", tt.name, got, width, row.Plain, row.Styled)
+				}
+				if !strings.Contains(row.Styled, wideCellRendererSentinel()) {
+					t.Fatalf("active %s row missing repaint sentinel: plain=%q styled=%q", tt.name, row.Plain, row.Styled)
+				}
+			}
+			if activeRows < 2 {
+				t.Fatalf("active %s rows = %#v, want protected multiline tail", tt.name, rows)
+			}
+
+			updates := renderComposerFramesForTest(t, width, before, after)
+			assertPhysicalComposerFrame(t, width, after, updates)
+		})
+	}
+}
+
 func TestNormalizeFullscreenFrameLineFitsDisplayWidth(t *testing.T) {
 	tests := []struct {
 		name           string

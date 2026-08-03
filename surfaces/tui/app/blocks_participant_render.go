@@ -31,7 +31,7 @@ func renderParticipantTurnNarrativeEventRows(blockID string, ev SubagentEvent, l
 
 func renderParticipantTurnNarrativeRowsWithBuffer(blockID string, raw string, activeBuffer *activeNarrativeBuffer, lineStyle tuikit.LineStyle, width int, ctx BlockRenderContext, active bool) []RenderedRow {
 	rolePrefix, continuationPrefix := narrativeLinePrefixes(lineStyle)
-	if active && activeBuffer != nil && !activeBuffer.Empty() {
+	if activeBuffer != nil && !activeBuffer.Empty() {
 		rows := activeBuffer.RenderRowsAtWidth(blockID, rolePrefix, lineStyle, width, ctx)
 		return alignParticipantNarrativeContinuationRows(rows, continuationPrefix)
 	}

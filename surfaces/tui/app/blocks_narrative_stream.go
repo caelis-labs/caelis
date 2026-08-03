@@ -77,6 +77,7 @@ func (b *MainACPTurnBlock) advanceNarrativeBoundary() {
 	if b == nil {
 		return
 	}
+	sealNarrativeBuffers(b.Events)
 	b.narrativeStream.advanceBoundary()
 }
 
@@ -84,6 +85,7 @@ func (b *MainACPTurnBlock) advanceNarrativeBoundaryWithGap() {
 	if b == nil {
 		return
 	}
+	sealNarrativeBuffers(b.Events)
 	appendNarrativeSemanticBoundary(&b.Events, &b.narrativeStream)
 }
 
@@ -93,6 +95,7 @@ func (b *MainACPTurnBlock) closeNarrativeStream() {
 	if b == nil {
 		return
 	}
+	sealNarrativeBuffers(b.Events)
 	b.narrativeStream.reset()
 }
 
@@ -114,6 +117,7 @@ func (b *ParticipantTurnBlock) advanceNarrativeBoundary() {
 	if b == nil {
 		return
 	}
+	sealNarrativeBuffers(b.Events)
 	b.narrativeStream.advanceBoundary()
 }
 
@@ -121,6 +125,7 @@ func (b *ParticipantTurnBlock) advanceNarrativeBoundaryWithGap() {
 	if b == nil {
 		return
 	}
+	sealNarrativeBuffers(b.Events)
 	appendNarrativeSemanticBoundary(&b.Events, &b.narrativeStream)
 }
 
@@ -128,6 +133,7 @@ func (b *ParticipantTurnBlock) closeNarrativeStream() {
 	if b == nil {
 		return
 	}
+	sealNarrativeBuffers(b.Events)
 	b.narrativeStream.reset()
 }
 
@@ -180,6 +186,7 @@ func (s *narrativeStreamState) append(events []SubagentEvent, kind SubagentEvent
 		s.appendPending(target, chunk)
 		return events
 	}
+	sealNarrativeBuffers(events)
 	chunk = s.prependPending(target, chunk, false)
 	events = append(events, newNarrativeEventChunk(kind, chunk, at))
 	bindNarrativeTarget(&events[len(events)-1], target, false)
@@ -213,8 +220,8 @@ func (s *narrativeStreamState) replaceFinal(events []SubagentEvent, kind Subagen
 			return events
 		}
 	}
-	ev := SubagentEvent{Kind: kind, Text: chunk}
-	markNarrativeTiming(&ev, at)
+	ev := SubagentEvent{Kind: kind}
+	replaceNarrativeEventFinal(&ev, chunk, at)
 	bindNarrativeTarget(&ev, target, true)
 	events = append(events, ev)
 	s.rememberTarget(target, len(events)-1)
@@ -342,14 +349,27 @@ func (s *narrativeStreamState) reset() {
 func clearActiveNarrativeBuffers(events []SubagentEvent) []SubagentEvent {
 	out := events[:0]
 	for _, ev := range events {
-		if ev.ActiveBuffer != nil && activeNarrativeEventKind(ev.Kind) {
+		if ev.ActiveBuffer != nil && activeNarrativeEventKind(ev.Kind) && !ev.narrativeFinal {
 			continue
 		}
-		ev.ActiveBuffer = nil
+		if !ev.narrativeFinal {
+			ev.ActiveBuffer = nil
+		}
 		out = append(out, ev)
 	}
 	clear(events[len(out):])
 	return out
+}
+
+func sealNarrativeBuffers(events []SubagentEvent) bool {
+	changed := false
+	for i := range events {
+		if !activeNarrativeEventKind(events[i].Kind) || events[i].ActiveBuffer == nil {
+			continue
+		}
+		changed = events[i].ActiveBuffer.Seal() || changed
+	}
+	return changed
 }
 
 func activeNarrativeEventKind(kind SubagentEventKind) bool {

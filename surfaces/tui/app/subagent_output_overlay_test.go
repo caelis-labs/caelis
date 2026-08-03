@@ -595,6 +595,115 @@ func TestSubagentOutputOverlayDragSelectionCopiesWideText(t *testing.T) {
 	}
 }
 
+func TestSubagentOutputOverlaySelectionExcludesNarrativeMarkerColumn(t *testing.T) {
+	var copied string
+	model := NewModel(Config{
+		NoAnimation: true,
+		WriteClipboardText: func(text string) error {
+			copied = text
+			return nil
+		},
+	})
+	model.theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	model.themeCacheKey = ""
+	model.width = 100
+	model.height = 28
+	view := model.ensureSubagentOutputView("spawn-marker")
+	view.block.AppendStreamEvent(
+		SEAssistant,
+		"先确认未提交改动的范围",
+		newNarrativeSourceIdentity("message-marker", "", ""),
+		time.Unix(328, 0),
+	)
+	model.subagentOutputOverlay = &subagentOutputOverlayState{
+		callID:      "spawn-marker",
+		followTail:  false,
+		selectStart: textSelectionPoint{line: -1, col: -1},
+		selectEnd:   textSelectionPoint{line: -1, col: -1},
+	}
+
+	_ = model.renderSubagentOutputOverlay()
+	rowIndex, _ := subagentOutputMarkerPositionForTest(t, model, "先确认未提交改动的范围")
+	row := view.renderCache.rows[rowIndex]
+	if row.selectionIndent != displayColumns("· ") {
+		t.Fatalf("overlay selection indent = %d, want role-marker width", row.selectionIndent)
+	}
+	geometry := model.subagentOutputOverlay.geometry
+	startMouse := tea.Mouse{
+		Button: tea.MouseLeft,
+		X:      geometry.contentX,
+		Y:      geometry.contentY + rowIndex - model.subagentOutputOverlay.offset,
+	}
+	endMouse := startMouse
+	endMouse.X += displayColumns(row.Plain)
+
+	next, _ := model.handleMouse(tea.MouseClickMsg(startMouse))
+	model = next.(*Model)
+	if got := model.subagentOutputOverlay.selectStart.col; got != row.selectionIndent {
+		t.Fatalf("overlay selection start = %d, want content indent %d", got, row.selectionIndent)
+	}
+	next, _ = model.handleMouse(tea.MouseMotionMsg(endMouse))
+	model = next.(*Model)
+	highlighted := model.renderSubagentOutputOverlay()
+	if marker := model.theme.InputSelectionStyle().Render("· "); strings.Contains(highlighted, marker) {
+		t.Fatalf("overlay highlighted decorative marker column: %q", highlighted)
+	}
+
+	endMouse.Button = tea.MouseNone
+	next, cmd := model.handleMouse(tea.MouseReleaseMsg(endMouse))
+	model = next.(*Model)
+	if cmd == nil {
+		t.Fatal("overlay marker-column selection did not return a clipboard command")
+	}
+	if result, ok := cmd().(clipboardCopyResultMsg); !ok {
+		t.Fatalf("clipboard command returned %T, want clipboardCopyResultMsg", result)
+	} else if result.err != nil {
+		t.Fatalf("clipboard command returned error: %v", result.err)
+	}
+	if copied != "先确认未提交改动的范围" {
+		t.Fatalf("clipboard text = %q, want marker-free narrative", copied)
+	}
+}
+
+func TestSubagentOutputOverlayActiveNarrativeProtectionFitsContentWidth(t *testing.T) {
+	model := NewModel(Config{NoAnimation: true})
+	model.width = 56
+	model.height = 20
+	view := model.ensureSubagentOutputView("spawn-active-width")
+	view.block.AppendStreamEvent(
+		SEAssistant,
+		"第一行\n第二行",
+		newNarrativeSourceIdentity("message-active-width", "", ""),
+		time.Unix(329, 0),
+	)
+	model.subagentOutputOverlay = &subagentOutputOverlayState{
+		callID:      "spawn-active-width",
+		followTail:  true,
+		selectStart: textSelectionPoint{line: -1, col: -1},
+		selectEnd:   textSelectionPoint{line: -1, col: -1},
+	}
+
+	_ = model.renderSubagentOutputOverlay()
+	width := model.subagentOutputOverlay.geometry.contentWidth
+	activeRows := 0
+	for i, row := range view.renderCache.rows {
+		if !row.activeTail {
+			continue
+		}
+		activeRows++
+		if got := displayColumns(row.Styled); got != width {
+			t.Fatalf("overlay active row width = %d, want %d: plain=%q styled=%q", got, width, row.Plain, row.Styled)
+		}
+		if !strings.Contains(row.Styled, wideCellRendererSentinel()) ||
+			!strings.Contains(view.renderCache.fixedRows[i], wideCellRendererSentinel()) {
+			t.Fatalf("overlay active row lost repaint sentinel: row=%q fixed=%q", row.Styled, view.renderCache.fixedRows[i])
+		}
+	}
+	if activeRows < 2 {
+		t.Fatalf("overlay active rows = %#v, want protected multiline tail", view.renderCache.rows)
+	}
+}
+
 func TestSubagentOutputOverlaySelectionWheelExtendsAcrossRows(t *testing.T) {
 	var copied string
 	model := NewModel(Config{

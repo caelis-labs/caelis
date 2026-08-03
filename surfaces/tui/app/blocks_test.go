@@ -10,9 +10,9 @@ import (
 	"github.com/charmbracelet/colorprofile"
 )
 
-func TestAssistantBlockRenderSuppressesDefaultAssistantLabel(t *testing.T) {
-	block := NewAssistantBlock("assistant")
-	block.Raw = "hello"
+func TestMainACPTurnAssistantRenderSuppressesDefaultAssistantLabel(t *testing.T) {
+	block := NewMainACPTurnBlock("turn-1")
+	block.ReplaceFinalStreamEvent(SEAssistant, "hello", narrativeSourceIdentity{})
 	rows := block.Render(BlockRenderContext{
 		Width:     80,
 		TermWidth: 100,
@@ -26,9 +26,9 @@ func TestAssistantBlockRenderSuppressesDefaultAssistantLabel(t *testing.T) {
 	}
 }
 
-func TestReasoningBlockRenderSuppressesDefaultAssistantLabel(t *testing.T) {
-	block := NewReasoningBlock("assistant")
-	block.Raw = "thinking"
+func TestMainACPTurnReasoningRenderSuppressesDefaultAssistantLabel(t *testing.T) {
+	block := NewMainACPTurnBlock("turn-1")
+	block.ReplaceFinalStreamEvent(SEReasoning, "thinking", narrativeSourceIdentity{})
 	rows := block.Render(BlockRenderContext{
 		Width:     80,
 		TermWidth: 100,
@@ -39,6 +39,45 @@ func TestReasoningBlockRenderSuppressesDefaultAssistantLabel(t *testing.T) {
 	}
 	if strings.Contains(rows[0].Plain, "assistant:") {
 		t.Fatalf("reasoning row = %q, want no assistant label", rows[0].Plain)
+	}
+}
+
+func TestACPTranscriptDecorativeColumnsAreExcludedFromSelection(t *testing.T) {
+	block := NewMainACPTurnBlock("turn-selection-gutters")
+	block.AppendStreamEvent(SEReasoning, "检查范围", newNarrativeSourceIdentity("reasoning-1", "", ""))
+	block.AppendStreamEvent(SEAssistant, "审查结论", newNarrativeSourceIdentity("answer-1", "", ""))
+	block.UpdateToolWithMeta("call-1", "READ", "file.go", "", false, false, ToolUpdateMeta{})
+	rows := block.Render(BlockRenderContext{
+		Width:     80,
+		TermWidth: 100,
+		Theme:     tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY),
+	})
+
+	wantPrefixes := map[string]bool{"› ": false, "· ": false, "• ": false}
+	for _, row := range rows {
+		for prefix := range wantPrefixes {
+			if !strings.HasPrefix(row.Plain, prefix) {
+				continue
+			}
+			wantPrefixes[prefix] = true
+			if row.selectionIndent != displayColumns(prefix) {
+				t.Fatalf("row %q selection indent = %d, want %d", row.Plain, row.selectionIndent, displayColumns(prefix))
+			}
+			copied := selectionTextFromLinesWithIndents(
+				[]string{row.Plain},
+				[]int{row.selectionIndent},
+				textSelectionPoint{line: 0, col: 0},
+				textSelectionPoint{line: 0, col: displayColumns(row.Plain)},
+			)
+			if strings.HasPrefix(copied, prefix) || strings.TrimSpace(copied) == "" {
+				t.Fatalf("copied row = %q, want non-empty marker-free content from %q", copied, row.Plain)
+			}
+		}
+	}
+	for prefix, seen := range wantPrefixes {
+		if !seen {
+			t.Fatalf("rendered transcript missing decorative prefix %q: %#v", prefix, rows)
+		}
 	}
 }
 
@@ -516,6 +555,20 @@ func TestMainACPClearActiveBuffersDropsSpeculativeNarrativeText(t *testing.T) {
 	}
 	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "retry answer" {
 		t.Fatalf("retry event = %#v, want clean assistant retry text", block.Events[0])
+	}
+}
+
+func TestMainACPClearActiveBuffersPreservesCanonicalFinalNarrative(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	block.ReplaceFinalStreamEvent(SEAssistant, "final answer", narrativeTestSource())
+
+	block.ClearActiveBuffers()
+
+	if len(block.Events) != 1 || block.Events[0].Text != "final answer" {
+		t.Fatalf("events = %#v, want canonical final narrative preserved", block.Events)
+	}
+	if buffer := block.Events[0].ActiveBuffer; buffer == nil || buffer.HasTail() {
+		t.Fatalf("final narrative buffer = %#v, want preserved sealed cache", buffer)
 	}
 }
 
