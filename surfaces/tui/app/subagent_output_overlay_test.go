@@ -179,6 +179,117 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 	}
 }
 
+func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testing.T) {
+	t.Parallel()
+
+	newModel := func(t *testing.T) *Model {
+		t.Helper()
+		model := NewModel(Config{NoColor: true, NoAnimation: true})
+		model.width = 100
+		model.height = 32
+		model.ready = true
+		model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(310, 0))
+		return applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "session-1",
+			TurnID:    "parent-turn",
+			Scope:     eventstream.ScopeMain,
+			Update: schema.ToolCall{
+				SessionUpdate: schema.UpdateToolCall,
+				ToolCallID:    "spawn-1",
+				Title:         "SPAWN breeze: inspect process state",
+				Kind:          schema.ToolKindExecute,
+				Status:        schema.ToolStatusInProgress,
+				RawInput:      map[string]any{"agent": "breeze", "prompt": "inspect process state"},
+				Meta:          acpToolNameMeta("SPAWN"),
+			},
+		})
+	}
+	childTool := eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		TurnID:    "child-turn",
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "task-1",
+		Actor:     "breeze",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-1",
+			ToolName:   "SPAWN",
+		},
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "child-command-1",
+			Title:         "ps aux | head -5",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"command": "ps aux | head -5"},
+		},
+	}
+	approvalReview := eventstream.Envelope{
+		Kind:      eventstream.KindApprovalReview,
+		SessionID: "session-1",
+		// Approval review is emitted through the parent Turn even though its
+		// scope and ToolCallID identify the child tool invocation.
+		TurnID:  "parent-turn",
+		Scope:   eventstream.ScopeSubagent,
+		ScopeID: "task-1",
+		Actor:   "breeze",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-1",
+			ToolName:   "SPAWN",
+		},
+		ApprovalReview: &eventstream.ApprovalReview{
+			ToolCallID:    "child-command-1",
+			ToolName:      "RUN_COMMAND",
+			RawInput:      map[string]any{"command": "ps aux | head -5"},
+			Status:        "denied",
+			Risk:          "low",
+			Authorization: "high",
+			Text:          "approval denied",
+		},
+	}
+
+	t.Run("observed tool", func(t *testing.T) {
+		t.Parallel()
+		model := newModel(t)
+		model = applyACPEnvelopeForTest(t, model, childTool)
+		model = applyACPEnvelopeForTest(t, model, approvalReview)
+
+		view := requireSubagentOutputViewForTest(t, model, "spawn-1")
+		if view.document.Len() != 1 {
+			t.Fatalf("overlay blocks = %d, want approval in the existing child Turn block", view.document.Len())
+		}
+		block, _ := view.document.Blocks()[0].(*ParticipantTurnBlock)
+		if block == nil || len(block.Events) != 2 ||
+			block.Events[0].Kind != SEToolCall || block.Events[0].CallID != "child-command-1" ||
+			block.Events[1].Kind != SEApproval || block.Events[1].CallID != "child-command-1" {
+			t.Fatalf("overlay events = %#v, want child tool followed by its approval review", block)
+		}
+		plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
+		toolAt := strings.Index(plain, "ps aux | head -5")
+		reviewAt := strings.Index(plain, "Automatic approval review denied")
+		if toolAt < 0 || reviewAt <= toolAt {
+			t.Fatalf("approval review did not render after its child tool:\n%s", plain)
+		}
+	})
+
+	t.Run("review arrives before tool", func(t *testing.T) {
+		t.Parallel()
+		model := newModel(t)
+		model = applyACPEnvelopeForTest(t, model, approvalReview)
+		model = applyACPEnvelopeForTest(t, model, childTool)
+
+		view := requireSubagentOutputViewForTest(t, model, "spawn-1")
+		plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
+		if strings.Contains(plain, "Automatic approval review") || strings.Contains(plain, "approval denied") {
+			t.Fatalf("unanchored approval review was rendered in the overlay:\n%s", plain)
+		}
+		if !strings.Contains(plain, "ps aux | head -5") {
+			t.Fatalf("child tool missing after an early approval review:\n%s", plain)
+		}
+	})
+}
+
 func TestSubagentOutputViewUsesSpawnOnlyForIdentityAndDropsSyntheticNoOutput(t *testing.T) {
 	t.Parallel()
 

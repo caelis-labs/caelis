@@ -140,7 +140,12 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 		v.touch(false)
 		return
 	}
-	block := v.blockForEvent(event)
+	var block *ParticipantTurnBlock
+	if event.Kind == TranscriptEventApproval {
+		block = v.blockForObservedChildTool(event.ToolCallID)
+	} else {
+		block = v.blockForEvent(event)
+	}
 	if block == nil {
 		return
 	}
@@ -165,6 +170,28 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 		finalizeSubagentOutputNarratives(block)
 	}
 	v.touch(false)
+}
+
+func (v *subagentOutputView) blockForObservedChildTool(callID string) *ParticipantTurnBlock {
+	if v == nil || v.document == nil {
+		return nil
+	}
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return nil
+	}
+	blocks := v.document.Blocks()
+	for i := len(blocks) - 1; i >= 0; i-- {
+		block, ok := blocks[i].(*ParticipantTurnBlock)
+		if ok && latestToolEventIndexForCallID(block.Events, callID) >= 0 {
+			return block
+		}
+	}
+	// Approval review is delivered through the parent Session feed, so its
+	// TurnID is not a child transcript position. Without the typed child tool
+	// call anchor, omitting the transient review is safer than creating a
+	// detached block at the wrong point in the overlay.
+	return nil
 }
 
 func (v *subagentOutputView) blockForEvent(event TranscriptEvent) *ParticipantTurnBlock {
