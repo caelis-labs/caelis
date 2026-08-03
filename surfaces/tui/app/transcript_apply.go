@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/promptview"
@@ -12,7 +13,16 @@ import (
 )
 
 func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, tea.Cmd) {
-	subagentOutputChanged := m.observeSubagentOutputEvents(msg.Events)
+	// Preserve projection order within replay batches: a Spawn owner must be
+	// observed before a later SendMessage resolves that owner's public handle.
+	// Decorating the whole batch first would permanently erase the structured
+	// target before the earlier Spawn event had mounted its view.
+	subagentOutputChanged := false
+	for index := range msg.Events {
+		one := msg.Events[index : index+1]
+		subagentOutputChanged = m.observeSubagentOutputEvents(one) || subagentOutputChanged
+		m.decorateAgentMessageDisplayTargets(one)
+	}
 	// Mount/update transcript owners before applying the correlated repairs;
 	// exact owner resolution intentionally fails closed without a BlockID.
 	model, transcriptCmd := m.applyTranscriptEvents(msg.Events)
@@ -30,6 +40,66 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 		subagentOutputCmd = m.requestSubagentOutputRender()
 	}
 	return m, tea.Batch(transcriptCmd, observedSpawnCmd, subagentOutputCmd, m.resumeRunningAnimationIfNeeded())
+}
+
+func (m *Model) decorateAgentMessageDisplayTargets(events []TranscriptEvent) []TranscriptEvent {
+	for index := range events {
+		event := &events[index]
+		if event.Kind != TranscriptEventTool ||
+			names.CanonicalOrSelf(toolSemanticName(event.ToolName, event.ToolKind)) != names.SendMessage {
+			continue
+		}
+		target := event.ToolMessageTarget
+		label := m.agentMessageTargetDisplayLabel(target)
+		if label == "" {
+			continue
+		}
+		event.ToolArgs = replaceAgentMessageDisplayTarget(event.ToolArgs, target, label)
+		event.ToolFullArgs = replaceAgentMessageDisplayTarget(event.ToolFullArgs, target, label)
+		if m.subagentOutputCallIDForHandle(target) == "" {
+			// Keep the semantic label, but do not manufacture a dead overlay
+			// affordance for parent or an unresolved/failed destination.
+			event.ToolMessageTarget = ""
+		}
+	}
+	return events
+}
+
+func (m *Model) agentMessageTargetDisplayLabel(rawTarget string) string {
+	target := normalizeTaskStreamHandle(rawTarget)
+	if target == "" {
+		return ""
+	}
+	for _, view := range m.subagentOutputViews {
+		if view == nil || normalizeTaskStreamHandle(view.taskHandle) != target {
+			continue
+		}
+		label := strings.TrimSpace(view.title)
+		if before, _, ok := strings.Cut(label, ":"); ok {
+			label = strings.TrimSpace(before)
+		}
+		if label != "" {
+			return label
+		}
+	}
+	return target
+}
+
+func replaceAgentMessageDisplayTarget(args, rawTarget, label string) string {
+	args = strings.TrimSpace(args)
+	label = strings.TrimSpace(label)
+	if args == "" || label == "" {
+		return args
+	}
+	target := display.AgentMessageTarget(rawTarget)
+	if target == "" {
+		target = "@" + normalizeTaskStreamHandle(rawTarget)
+	}
+	prefix := "to " + target
+	if !strings.HasPrefix(args, prefix) {
+		return args
+	}
+	return label + strings.TrimPrefix(args, prefix)
 }
 
 func (m *Model) applyTranscriptEvents(events []TranscriptEvent) (tea.Model, tea.Cmd) {
@@ -604,6 +674,7 @@ func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 		TaskAction:             event.ToolTaskAction,
 		TaskInput:              event.ToolTaskInput,
 		TaskTargetKind:         event.ToolTaskTargetKind,
+		MessageTarget:          event.ToolMessageTarget,
 		ToolKind:               event.ToolKind,
 		FullArgs:               event.ToolFullArgs,
 		ToolStatus:             event.ToolStatus,

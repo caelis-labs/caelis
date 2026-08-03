@@ -43,9 +43,6 @@ func (m *Model) applyObservedSpawnResults(results []acpprojector.SpawnTaskResult
 		}
 		mergeOpenFinalToolEvent(&owner.block.Events[owner.eventIndex], &finalEvent, true)
 		updateToolEventIndex(owner.block.toolEventIndex, owner.block.Events, parentCallID)
-		if view := m.subagentOutputViews[parentCallID]; view != nil {
-			view.observeOwnerEvent(owner.block.Events[owner.eventIndex])
-		}
 		m.runningActivityTracker.complete(owner.activity.Key)
 		m.refreshRunningActivity()
 		m.markViewportBlockDirty(owner.block.BlockID())

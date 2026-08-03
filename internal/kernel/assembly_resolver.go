@@ -167,10 +167,14 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 
 	return ResolvedTurn{
 		RunRequest: agent.RunRequest{
-			SessionRef:   intent.SessionRef,
-			Input:        intent.Input,
-			ContentParts: append([]model.ContentPart(nil), intent.ContentParts...),
-			AgentSpec:    spec,
+			SessionRef:     intent.SessionRef,
+			Input:          intent.Input,
+			ContentParts:   append([]model.ContentPart(nil), intent.ContentParts...),
+			InputType:      intent.InputType,
+			InputMessageID: intent.InputMessageID,
+			InputActor:     session.CloneActorRef(intent.InputActor),
+			InputScope:     cloneEventScopePointer(intent.InputScope),
+			AgentSpec:      spec,
 		},
 	}, nil
 }
@@ -189,10 +193,14 @@ func (r *AssemblyResolver) ResolveControllerTurn(ctx context.Context, intent Tur
 	}
 	return ResolvedTurn{
 		RunRequest: agent.RunRequest{
-			SessionRef:   intent.SessionRef,
-			Input:        intent.Input,
-			ContentParts: append([]model.ContentPart(nil), intent.ContentParts...),
-			AgentSpec:    spec,
+			SessionRef:     intent.SessionRef,
+			Input:          intent.Input,
+			ContentParts:   append([]model.ContentPart(nil), intent.ContentParts...),
+			InputType:      intent.InputType,
+			InputMessageID: intent.InputMessageID,
+			InputActor:     session.CloneActorRef(intent.InputActor),
+			InputScope:     cloneEventScopePointer(intent.InputScope),
+			AgentSpec:      spec,
 		},
 	}, nil
 }

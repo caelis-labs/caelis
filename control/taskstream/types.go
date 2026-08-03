@@ -66,7 +66,14 @@ type ReadRequest struct {
 	Cursor    string `json:"cursor,omitempty"`
 }
 
-type SubscribeRequest = ReadRequest
+type SubscribeRequest struct {
+	SessionID string `json:"session_id"`
+	TaskID    string `json:"task_id"`
+	Cursor    string `json:"cursor,omitempty"`
+	// Follow keeps a subagent Task timeline attached across activity periods
+	// until the observer closes it. It never changes Task lifecycle.
+	Follow bool `json:"follow,omitempty"`
+}
 
 type Batch struct {
 	Records        []Record   `json:"records,omitempty"`

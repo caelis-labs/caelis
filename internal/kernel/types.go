@@ -25,6 +25,10 @@ type BeginTurnRequest struct {
 	Surface        string
 	Metadata       map[string]any
 	Request        agent.ModelRequestOptions
+	InputType      session.EventType
+	InputMessageID string
+	InputActor     session.ActorRef
+	InputScope     *session.EventScope
 }
 
 type TurnIntent = BeginTurnRequest
@@ -402,6 +406,7 @@ type SubmissionKind = agent.SubmissionKind
 
 const (
 	SubmissionKindConversation                = agent.SubmissionKindConversation
+	SubmissionKindAgentMessage                = agent.SubmissionKindAgentMessage
 	SubmissionKindApproval     SubmissionKind = "approval"
 )
 
@@ -428,6 +433,10 @@ type SubmitRequest struct {
 	DisplayText  string
 	ContentParts []model.ContentPart
 	Metadata     map[string]any
+	MessageID    string
+	Actor        session.ActorRef
+	Scope        *session.EventScope
+	Persisted    bool
 	Approval     *ApprovalDecision
 }
 
@@ -438,12 +447,24 @@ type SubmitActiveTurnRequest struct {
 	DisplayText  string
 	ContentParts []model.ContentPart
 	Metadata     map[string]any
+	MessageID    string
+	Actor        session.ActorRef
+	Scope        *session.EventScope
+	Persisted    bool
 	Approval     *ApprovalDecision
 }
 
 type BeginTurnResult struct {
 	Session session.Session
 	Handle  TurnHandle
+}
+
+// AgentMessageDelivery reports durable acceptance and an optional turn started
+// because the target Session was idle.
+type AgentMessageDelivery struct {
+	Accepted bool
+	State    string
+	Turn     TurnHandle
 }
 
 type TurnHandle interface {

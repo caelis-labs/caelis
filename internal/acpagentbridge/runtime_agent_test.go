@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	sdkchat "github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -20,6 +22,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -44,6 +47,74 @@ func TestRuntimeAgentInitializeCapabilitiesDefault(t *testing.T) {
 		if _, ok := resp.AgentCapabilities.SessionCapabilities[capability]; !ok {
 			t.Fatalf("sessionCapabilities[%q] missing", capability)
 		}
+	}
+	if _, ok := resp.AgentCapabilities.Meta[acp.MethodSessionMessage]; ok {
+		t.Fatal("message capability advertised without a delivery handler")
+	}
+}
+
+func TestRuntimeAgentInitializeAdvertisesBuiltInMessageCapability(t *testing.T) {
+	t.Parallel()
+
+	agent, _ := newRuntimeAgentWithConfig(t, runtimeacp.Config{
+		AgentMessages: func(context.Context, string, agentmessage.Request) (runtimeacp.AgentMessageDelivery, error) {
+			return runtimeacp.AgentMessageDelivery{Accepted: true, State: "delivered"}, nil
+		},
+	})
+	resp, err := agent.Initialize(context.Background(), acp.InitializeRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resp.AgentCapabilities.Meta[acp.MethodSessionMessage]; !ok {
+		t.Fatalf("agent capability _meta = %#v, want %s", resp.AgentCapabilities.Meta, acp.MethodSessionMessage)
+	}
+}
+
+func TestRuntimeAgentSessionMessageBindsOutboundCallbackForMessageAuthoredTurn(t *testing.T) {
+	t.Parallel()
+
+	callbacks := &roundTripAgentMessageCallbacks{}
+	agent, sessions := newRuntimeAgentWithConfig(t, runtimeacp.Config{
+		AgentMessages: func(ctx context.Context, sessionID string, req agentmessage.Request) (runtimeacp.AgentMessageDelivery, error) {
+			if sessionID != "child-session" || req.Text != "continue" {
+				t.Fatalf("inbound message = session %q request %#v", sessionID, req)
+			}
+			sender := agentmessage.SenderFromContext(ctx)
+			if sender == nil {
+				return runtimeacp.AgentMessageDelivery{}, errors.New("outbound parent transport missing")
+			}
+			response, err := sender.SendMessage(ctx, agentmessage.Request{
+				MessageID: "child-ack-1", To: agentmessage.Parent, Text: "ACK",
+			})
+			if err != nil {
+				return runtimeacp.AgentMessageDelivery{}, err
+			}
+			if !response.Accepted {
+				return runtimeacp.AgentMessageDelivery{}, errors.New("outbound parent message rejected")
+			}
+			return runtimeacp.AgentMessageDelivery{
+				Accepted: true, State: "completed", TurnID: "child-turn-2", StartedTurn: true,
+			}, nil
+		},
+	})
+	if _, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "child-session",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := agent.SessionMessage(context.Background(), acp.SessionMessageRequest{
+		SessionID: "child-session", MessageID: "parent-message-1", From: "main", Message: "continue",
+	}, callbacks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !response.Accepted || response.State != "completed" || response.TurnID != "child-turn-2" || !response.StartedTurn {
+		t.Fatalf("SessionMessage response = %#v", response)
+	}
+	if callbacks.request.SessionID != "child-session" || callbacks.request.MessageID != "child-ack-1" ||
+		callbacks.request.To != agentmessage.Parent || callbacks.request.Message != "ACK" {
+		t.Fatalf("outbound child callback = %#v", callbacks.request)
 	}
 }
 
@@ -80,6 +151,50 @@ func TestRuntimeAgentNewSessionIncludesInjectedModesAndConfig(t *testing.T) {
 	}
 	if got, want := len(resp.ConfigOptions), 1; got != want {
 		t.Fatalf("len(resp.ConfigOptions) = %d, want %d", got, want)
+	}
+}
+
+func TestRuntimeAgentNewSessionNormalizesManagedSubagentMetadata(t *testing.T) {
+	t.Parallel()
+
+	agent, sessions := newRuntimeAgentWithConfig(t, runtimeacp.Config{})
+	meta := metautil.WithCompactRuntimeSection(map[string]any{
+		"vendor": map[string]any{"untrusted": true},
+	}, metautil.RuntimeSession, map[string]any{
+		metautil.RuntimeSessionKind:     metautil.RuntimeSessionKindSubagent,
+		metautil.RuntimeSessionParentID: "parent-session",
+		metautil.RuntimeTaskID:          "task-1",
+	})
+	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir(), Meta: meta})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := sessions.Session(context.Background(), session.SessionRef{SessionID: resp.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"system_managed_agent":             "subagent",
+		"system_managed_parent_session_id": "parent-session",
+		"system_managed_task_id":           "task-1",
+	}
+	if !reflect.DeepEqual(created.Metadata, want) {
+		t.Fatalf("created Session metadata = %#v, want %#v", created.Metadata, want)
+	}
+
+	ordinary, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
+		CWD:  t.TempDir(),
+		Meta: map[string]any{"system_managed_agent": "guardian"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinarySession, err := sessions.Session(context.Background(), session.SessionRef{SessionID: ordinary.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ordinarySession.Metadata) != 0 {
+		t.Fatalf("ordinary Session metadata = %#v, want no arbitrary ACP metadata", ordinarySession.Metadata)
 	}
 }
 
@@ -221,6 +336,21 @@ func TestRuntimeAgentListResumeAndCloseSession(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
+	}
+	_, err = sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "/tmp/acp-list",
+			CWD: "/tmp/acp-list",
+		},
+		Title: "Managed child",
+		Metadata: map[string]any{
+			sessionvisibility.MetadataSystemManagedAgent: "subagent",
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartSession(managed) error = %v", err)
 	}
 
 	list, err := agent.ListSessions(ctx, acp.SessionListRequest{CWD: "/tmp/acp-list"})
@@ -810,6 +940,7 @@ func newRuntimeAgentWithSessionsAndConfig(t *testing.T, sessions session.Service
 		Config:               override.Config,
 		Models:               override.Models,
 		Commands:             override.Commands,
+		AgentMessages:        override.AgentMessages,
 		PromptRouterFactory:  override.PromptRouterFactory,
 		SlashResultFormatter: override.SlashResultFormatter,
 		PromptCaps:           override.PromptCaps,
@@ -954,6 +1085,23 @@ func (t *testControlTurn) Close() error {
 type recordingPromptCallbacks struct {
 	mu            sync.Mutex
 	notifications []acp.SessionNotification
+}
+
+type roundTripAgentMessageCallbacks struct {
+	request acp.SessionMessageRequest
+}
+
+func (*roundTripAgentMessageCallbacks) SessionUpdate(context.Context, acp.SessionNotification) error {
+	return nil
+}
+
+func (*roundTripAgentMessageCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	return acp.RequestPermissionResponse{}, nil
+}
+
+func (c *roundTripAgentMessageCallbacks) SessionMessage(_ context.Context, req acp.SessionMessageRequest) (acp.SessionMessageResponse, error) {
+	c.request = req
+	return acp.SessionMessageResponse{MessageID: req.MessageID, Accepted: true, State: "delivered"}, nil
 }
 
 func (c *recordingPromptCallbacks) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {

@@ -152,6 +152,10 @@ func (g *Gateway) SubmitActiveTurn(ctx context.Context, req SubmitActiveTurnRequ
 		DisplayText:  req.DisplayText,
 		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
 		Metadata:     cloneMap(req.Metadata),
+		MessageID:    strings.TrimSpace(req.MessageID),
+		Actor:        session.CloneActorRef(req.Actor),
+		Scope:        cloneEventScopePointer(req.Scope),
+		Persisted:    req.Persisted,
 		Approval:     req.Approval,
 	})
 }

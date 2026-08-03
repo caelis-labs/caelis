@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +16,11 @@ import (
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+)
+
+const (
+	subagentStreamEventCursorMeta  = "stream_event_cursor"
+	subagentStreamOutputCursorMeta = "stream_output_cursor"
 )
 
 func subagentSpawnTaskID(ref session.SessionRef, spawnID string) (string, error) {
@@ -174,39 +180,6 @@ func (r *Runtime) StartSubagentWithOptions(
 	})
 }
 
-func (r *Runtime) ContinueSubagentByHandle(
-	ctx context.Context,
-	ref session.SessionRef,
-	handle string,
-	prompt string,
-	yield time.Duration,
-) (taskapi.Snapshot, error) {
-	if r == nil || r.sessions == nil || r.tasks == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: runtime is unavailable")
-	}
-	ref = session.NormalizeSessionRef(ref)
-	activeSession, err := r.sessions.Session(ctx, ref)
-	if err != nil {
-		return taskapi.Snapshot{}, err
-	}
-	taskID, binding, ok := subagentTaskIDForHandle(activeSession, handle)
-	if !ok {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent handle %q not found", strings.TrimSpace(handle))
-	}
-	contextTransfer, _, err := r.buildSideSubagentPromptContext(ctx, activeSession, ref, strings.TrimSpace(handle), binding.ContextSyncSeq)
-	if err != nil {
-		return taskapi.Snapshot{}, err
-	}
-	return r.tasks.Write(ctx, ref, taskapi.ControlRequest{
-		TaskID:    taskID,
-		Input:     strings.TrimSpace(prompt),
-		Yield:     yield,
-		Principal: session.ActorKindUser,
-		Source:    "user",
-		Context:   contextTransfer,
-	})
-}
-
 func (r *Runtime) WaitSubagentTask(
 	ctx context.Context,
 	ref session.SessionRef,
@@ -228,54 +201,34 @@ func (r *Runtime) WaitSubagentTask(
 	})
 }
 
-func subagentTaskIDForHandle(activeSession session.Session, handle string) (string, session.ParticipantBinding, bool) {
-	handle = normalizeTaskHandle(handle)
-	if handle == "" {
-		return "", session.ParticipantBinding{}, false
-	}
-	for _, participant := range activeSession.Participants {
-		if participant.Kind != session.ParticipantKindSubagent || participant.Role != session.ParticipantRoleSidecar {
-			continue
-		}
-		if normalizeTaskHandle(participant.Label) != handle {
-			continue
-		}
-		taskID := strings.TrimSpace(participant.DelegationID)
-		return taskID, session.CloneParticipantBinding(participant), taskID != ""
-	}
-	return "", session.ParticipantBinding{}, false
-}
-
 func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yield time.Duration) (taskapi.Snapshot, error) {
 	if task == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
 	}
 	task.mu.Lock()
 	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata["cancel_phase"]))
+	runner := task.runner
+	running := task.running
+	anchor := delegation.CloneAnchor(task.anchor)
+	turnSeq := task.turnSeq
 	task.mu.Unlock()
 	if cancelPhase != subagentCancelPhaseNone && cancelPhase != subagentCancelPhaseCompleted {
-		return tm.advanceSubagentCancel(ctx, task, cancelPhase, int(yield/time.Millisecond))
+		return tm.observePendingSubagentCancel(ctx, task, turnSeq, int(yield/time.Millisecond))
 	}
-	if task.runner == nil {
-		task.mu.Lock()
-		snapshot := task.snapshotLocked()
-		task.mu.Unlock()
-		return snapshot, nil
+	if runner == nil || !running {
+		return task.snapshot(), nil
 	}
-	if !task.isRunning() {
-		task.mu.Lock()
-		snapshot := task.snapshotLocked()
-		task.mu.Unlock()
-		return snapshot, nil
-	}
-	result, err := task.runner.Wait(ctx, delegation.CloneAnchor(task.anchor), int(yield/time.Millisecond))
+	result, err := runner.Wait(ctx, anchor, int(yield/time.Millisecond))
 	if err != nil {
-		if task.isRunning() {
-			return tm.interruptSubagentTask(ctx, task, "subagent session interrupted during recovery")
+		// Cancelling a Task observation cancels only the observer. In
+		// particular, wait-any cancels losing waits after one target finishes;
+		// that must never interrupt the child itself.
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return task.snapshot(), err
 		}
-		return taskapi.Snapshot{}, err
+		return tm.interruptObservedSubagent(ctx, task, turnSeq, err)
 	}
-	return tm.applyObservedSubagentResult(ctx, task, result, true)
+	return tm.applyObservedSubagentResult(ctx, task, turnSeq, result, true)
 }
 
 // observeSubagent samples the attached child without advancing cancellation or
@@ -290,6 +243,7 @@ func (tm *taskRuntime) observeSubagent(ctx context.Context, task *subagentTask) 
 	runner := task.runner
 	running := task.running
 	anchor := delegation.CloneAnchor(task.anchor)
+	turnSeq := task.turnSeq
 	task.mu.Unlock()
 	if cancelPhase != subagentCancelPhaseNone && cancelPhase != subagentCancelPhaseCompleted {
 		return task.snapshot(), nil
@@ -301,7 +255,67 @@ func (tm *taskRuntime) observeSubagent(ctx context.Context, task *subagentTask) 
 	if err != nil {
 		return task.snapshot(), err
 	}
-	return tm.applyObservedSubagentResult(ctx, task, result, false)
+	return tm.applyObservedSubagentResult(ctx, task, turnSeq, result, false)
+}
+
+// observePendingSubagentCancel lets Task wait help reconcile a previously
+// claimed cancellation without turning an observation into a competing
+// lifecycle operation. If another owner is already applying the saga, the
+// current snapshot is a successful observation and callers can wait again.
+func (tm *taskRuntime) observePendingSubagentCancel(
+	ctx context.Context,
+	task *subagentTask,
+	expectedTurnSeq int64,
+	yieldMS int,
+) (taskapi.Snapshot, error) {
+	release, claimed := tm.tryClaimSubagentOperation(task.sessionRef, task.ref.TaskID)
+	if !claimed {
+		return task.snapshot(), nil
+	}
+	defer release()
+	canonical, err := tm.lookupSubagentCanonical(ctx, task.sessionRef, task.ref.TaskID)
+	if err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	canonical.mu.Lock()
+	turnSeq := canonical.turnSeq
+	phase := subagentCancelPhase(taskStringValue(canonical.metadata["cancel_phase"]))
+	snapshot := canonical.snapshotLocked()
+	canonical.mu.Unlock()
+	if turnSeq != expectedTurnSeq || phase == subagentCancelPhaseNone || phase == subagentCancelPhaseCompleted {
+		return snapshot, nil
+	}
+	return tm.advanceSubagentCancel(ctx, canonical, phase, yieldMS)
+}
+
+// interruptObservedSubagent converts a failed wait into the existing bounded
+// recovery state only while the sampled Turn is still current. A newer Turn or
+// an in-flight lifecycle owner makes the failed sample stale and prevents it
+// from interrupting current work.
+func (tm *taskRuntime) interruptObservedSubagent(
+	ctx context.Context,
+	task *subagentTask,
+	expectedTurnSeq int64,
+	observationErr error,
+) (taskapi.Snapshot, error) {
+	release, claimed := tm.tryClaimSubagentOperation(task.sessionRef, task.ref.TaskID)
+	if !claimed {
+		return task.snapshot(), observationErr
+	}
+	defer release()
+	canonical, err := tm.lookupSubagentCanonical(ctx, task.sessionRef, task.ref.TaskID)
+	if err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	canonical.mu.Lock()
+	currentTurnSeq := canonical.turnSeq
+	running := canonical.running
+	snapshot := canonical.snapshotLocked()
+	canonical.mu.Unlock()
+	if currentTurnSeq != expectedTurnSeq || !running {
+		return snapshot, nil
+	}
+	return tm.interruptSubagentTask(ctx, canonical, "subagent session interrupted during recovery")
 }
 
 // applyObservedSubagentResult records a canonical producer result or a
@@ -311,10 +325,26 @@ func (tm *taskRuntime) observeSubagent(ctx context.Context, task *subagentTask) 
 func (tm *taskRuntime) applyObservedSubagentResult(
 	ctx context.Context,
 	task *subagentTask,
+	expectedTurnSeq int64,
 	result delegation.Result,
 	persistRunning bool,
 ) (taskapi.Snapshot, error) {
+	release, claimed := tm.tryClaimSubagentOperation(task.sessionRef, task.ref.TaskID)
+	if !claimed {
+		return task.snapshot(), nil
+	}
+	defer release()
+	canonical, err := tm.lookupSubagentCanonical(ctx, task.sessionRef, task.ref.TaskID)
+	if err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	task = canonical
 	task.mu.Lock()
+	if task.turnSeq != expectedTurnSeq {
+		snapshot := task.snapshotLocked()
+		task.mu.Unlock()
+		return snapshot, nil
+	}
 	if task.running && !persistRunning &&
 		(result.Running || result.State == delegation.StateRunning) {
 		snapshot := task.snapshotLocked()
@@ -580,6 +610,12 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		metadata:        session.CloneState(entry.Metadata),
 		completionReady: true,
 	}
+	if cursor, ok := taskInt64Value(entry.Metadata[subagentStreamEventCursorMeta]); ok && cursor >= 0 {
+		task.streamEventBase = cursor
+	}
+	if cursor, ok := taskInt64Value(entry.Metadata[subagentStreamOutputCursorMeta]); ok && cursor >= 0 {
+		task.streamOutputCursor = cursor
+	}
 	if task.metadata == nil {
 		task.metadata = map[string]any{}
 	}
@@ -782,7 +818,7 @@ func (t *subagentTask) snapshotLocked() taskapi.Snapshot {
 		Title:          t.title,
 		State:          t.state,
 		Running:        t.running,
-		SupportsInput:  !t.running && t.state == taskapi.StateCompleted,
+		SupportsInput:  false,
 		SupportsCancel: true,
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      time.Now(),
@@ -799,6 +835,12 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 	if t == nil {
 		return nil
 	}
+	metadata := session.CloneState(t.metadata)
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata[subagentStreamEventCursorMeta] = t.streamEventBase + int64(len(t.streamFrames))
+	metadata[subagentStreamOutputCursorMeta] = t.streamOutputCursor
 	entry := &taskapi.Entry{
 		TaskID:         t.ref.TaskID,
 		Handle:         t.handle,
@@ -808,7 +850,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		Title:          t.title,
 		State:          t.state,
 		Running:        t.running,
-		SupportsInput:  !t.running && t.state == taskapi.StateCompleted,
+		SupportsInput:  false,
 		SupportsCancel: true,
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      now,
@@ -819,9 +861,6 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"spawn_identity":       taskStringValue(t.metadata["spawn_identity"]),
 			"spawn_request_digest": taskStringValue(t.metadata["spawn_request_digest"]),
 			"spawn_phase":          taskStringValue(t.metadata["spawn_status"]),
-			"continue_phase":       taskStringValue(t.metadata["continue_phase"]),
-			"continue_digest":      taskStringValue(t.metadata["continue_digest"]),
-			"continue_turn_seq":    t.metadata["continue_turn_seq"],
 			"cancel_phase":         taskStringValue(t.metadata["cancel_phase"]),
 			"session_id":           t.anchor.SessionID,
 			"agent_id":             t.anchor.AgentID,
@@ -833,7 +872,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"spawn_result":         taskapi.SanitizeResultForPersistence(t.result, taskapi.ResultPersistenceCanonical),
 		},
 		Result:   subagentTaskEntryResult(t.result, t.running),
-		Metadata: session.CloneState(t.metadata),
+		Metadata: metadata,
 	}
 	normalizeSubagentEntryResult(entry, taskRawStringValue(t.result["error"]))
 	return entry

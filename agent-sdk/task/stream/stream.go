@@ -55,9 +55,8 @@ type Snapshot struct {
 	TruncatedBefore       int64 `json:"truncated_before,omitempty"`
 	EventsTruncatedBefore int64 `json:"events_truncated_before,omitempty"`
 	Running               bool  `json:"running,omitempty"`
-	// SupportsInput is the owning Task's Task-plane input capability. For a
-	// completed subagent it means TASK write may Continue the same Task; it is
-	// not a terminal stdin capability.
+	// SupportsInput is the owning Task's Task-plane input capability. Only a
+	// live command terminal can accept Task write input.
 	SupportsInput bool `json:"supports_input,omitempty"`
 	// TerminalFramed means the producer owns explicit terminal-frame delivery;
 	// consumers must not infer another close from Running=false.
@@ -77,10 +76,12 @@ type ReadRequest struct {
 type SubscribeRequest struct {
 	Ref    Ref    `json:"ref,omitempty"`
 	Cursor Cursor `json:"cursor,omitempty"`
-	// FollowContinues keeps a completed Task whose Task-plane SupportsInput
-	// capability is true open so a later Continue is delivered on the same
-	// Task stream. It does not imply terminal stdin ownership.
-	FollowContinues bool `json:"follow_continues,omitempty"`
+	// Follow keeps a subagent Task timeline attached across completed activity
+	// periods until the caller cancels the subscription. A completed activity
+	// releases its concrete producer observation; the stream waits by stable
+	// SessionID/TaskID and re-resolves the producer only after new activity.
+	// Command Tasks always stop at terminal state.
+	Follow bool `json:"follow,omitempty"`
 }
 
 // Service is the unified output read/subscribe surface used by app-layer

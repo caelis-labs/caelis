@@ -14,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	_ "github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func TestAutoReviewModeAllowsWorkspaceWrites(t *testing.T) {
@@ -216,7 +217,7 @@ func TestDefaultModeAllowsExplicitWebAndMCPTools(t *testing.T) {
 	}
 }
 
-func TestDefaultModeDeniesUnknownNonMCPTools(t *testing.T) {
+func TestDefaultModeAllowsAssembledToolsWithoutANameAllowlist(t *testing.T) {
 	t.Parallel()
 
 	tests := []policy.ToolContext{
@@ -234,8 +235,26 @@ func TestDefaultModeDeniesUnknownNonMCPTools(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s DecideTool() error = %v", input.Tool.Name, err)
 		}
-		if decision.Action != policy.ActionDeny {
-			t.Fatalf("%s Action = %q, want deny", input.Tool.Name, decision.Action)
+		if decision.Action != policy.ActionAllow {
+			t.Fatalf("%s Action = %q, want allow (reason=%q)", input.Tool.Name, decision.Action, decision.Reason)
+		}
+	}
+}
+
+func TestDefaultModeAllowsAssembledAgentCoordinationTools(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{names.Spawn, names.Task, names.SendMessage} {
+		input := policy.ToolContext{
+			Tool: policyToolDefinition(name),
+			Call: policyToolCall(name, map[string]any{}),
+		}
+		decision, err := WorkspaceWriteMode().DecideTool(context.Background(), input)
+		if err != nil {
+			t.Fatalf("%s DecideTool() error = %v", name, err)
+		}
+		if decision.Action != policy.ActionAllow {
+			t.Fatalf("%s Action = %q, want allow (reason=%q)", name, decision.Action, decision.Reason)
 		}
 	}
 }

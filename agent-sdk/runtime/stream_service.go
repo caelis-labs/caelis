@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
@@ -25,7 +26,7 @@ func newStreamService(tasks *taskRuntime) *streamService {
 func (s *streamService) Read(ctx context.Context, req stream.ReadRequest) (stream.Snapshot, error) {
 	ref := stream.NormalizeRef(req.Ref)
 	cursor := stream.CloneCursor(req.Cursor)
-	read, _, err := s.resolveReader(ctx, ref)
+	read, _, _, err := s.resolveReader(ctx, ref)
 	if err != nil {
 		return stream.Snapshot{}, err
 	}
@@ -33,18 +34,21 @@ func (s *streamService) Read(ctx context.Context, req stream.ReadRequest) (strea
 }
 
 type resolvedStreamReader func(context.Context, stream.Cursor) (stream.Snapshot, error)
-type resolvedStreamAwaiter func(context.Context, stream.Cursor, bool) (stream.Snapshot, error)
+type resolvedStreamAwaiter func(context.Context, stream.Cursor) (stream.Snapshot, error)
 
 // resolveReader pins one stream operation to the task instance it resolved.
 // A completed task may leave the live registry before its canonical result is
 // promoted from the deferred durable entry; re-resolving during that interval
 // would close an active subscription against an empty reconstructed snapshot.
-func (s *streamService) resolveReader(ctx context.Context, ref stream.Ref) (resolvedStreamReader, resolvedStreamAwaiter, error) {
+func (s *streamService) resolveReader(
+	ctx context.Context,
+	ref stream.Ref,
+) (resolvedStreamReader, resolvedStreamAwaiter, task.Kind, error) {
 	if err := stream.ValidateRef(ref); err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	if s == nil {
-		return nil, nil, fmt.Errorf("agent-sdk/runtime: task stream service is unavailable")
+		return nil, nil, "", fmt.Errorf("agent-sdk/runtime: task stream service is unavailable")
 	}
 	resolved, err := s.tasks.resolveStreamTask(
 		ctx,
@@ -52,25 +56,25 @@ func (s *streamService) resolveReader(ctx context.Context, ref stream.Ref) (reso
 		ref.TaskID,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	switch resolved.kind {
 	case task.KindCommand:
 		command := resolved.command
 		return func(readCtx context.Context, cursor stream.Cursor) (stream.Snapshot, error) {
 				return s.readCommand(readCtx, command, cursor)
-			}, func(awaitCtx context.Context, cursor stream.Cursor, followContinue bool) (stream.Snapshot, error) {
-				return s.awaitCommand(awaitCtx, command, cursor, followContinue)
-			}, nil
+			}, func(awaitCtx context.Context, cursor stream.Cursor) (stream.Snapshot, error) {
+				return s.awaitCommand(awaitCtx, command, cursor)
+			}, task.KindCommand, nil
 	case task.KindSubagent:
 		subagent := resolved.subagent
 		return func(readCtx context.Context, cursor stream.Cursor) (stream.Snapshot, error) {
 				return s.readSubagent(readCtx, subagent, cursor)
-			}, func(awaitCtx context.Context, cursor stream.Cursor, followContinue bool) (stream.Snapshot, error) {
-				return s.awaitSubagent(awaitCtx, subagent, cursor, followContinue)
-			}, nil
+			}, func(awaitCtx context.Context, cursor stream.Cursor) (stream.Snapshot, error) {
+				return s.awaitSubagent(awaitCtx, subagent, cursor)
+			}, task.KindSubagent, nil
 	default:
-		return nil, nil, fmt.Errorf("agent-sdk/runtime: unsupported resolved task kind %q", resolved.kind)
+		return nil, nil, "", fmt.Errorf("agent-sdk/runtime: unsupported resolved task kind %q", resolved.kind)
 	}
 }
 
@@ -219,14 +223,14 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 func (s *streamService) await(ctx context.Context, req stream.ReadRequest) (stream.Snapshot, error) {
 	ref := stream.NormalizeRef(req.Ref)
 	cursor := stream.CloneCursor(req.Cursor)
-	_, await, err := s.resolveReader(ctx, ref)
+	_, await, _, err := s.resolveReader(ctx, ref)
 	if err != nil {
 		return stream.Snapshot{}, err
 	}
-	return await(ctx, cursor, false)
+	return await(ctx, cursor)
 }
 
-func (s *streamService) awaitCommand(ctx context.Context, task *commandTask, cursor stream.Cursor, followContinue bool) (stream.Snapshot, error) {
+func (s *streamService) awaitCommand(ctx context.Context, task *commandTask, cursor stream.Cursor) (stream.Snapshot, error) {
 	if task == nil || task.session == nil {
 		return stream.Snapshot{}, fmt.Errorf("agent-sdk/runtime: command task has no observable sandbox session")
 	}
@@ -278,7 +282,7 @@ func (s *streamService) awaitCommand(ctx context.Context, task *commandTask, cur
 		if err != nil {
 			return stream.Snapshot{}, err
 		}
-		if streamSnapshotReady(snap, cursor, followContinue) {
+		if streamSnapshotReady(snap, cursor) {
 			return snap, nil
 		}
 		task.mu.Lock()
@@ -308,17 +312,17 @@ func (s *streamService) awaitCommand(ctx context.Context, task *commandTask, cur
 	}
 }
 
-func (s *streamService) awaitSubagent(ctx context.Context, task *subagentTask, cursor stream.Cursor, followContinue bool) (stream.Snapshot, error) {
+func (s *streamService) awaitSubagent(ctx context.Context, task *subagentTask, cursor stream.Cursor) (stream.Snapshot, error) {
 	for {
 		snap, err := s.readSubagent(ctx, task, cursor)
 		if err != nil {
 			return stream.Snapshot{}, err
 		}
-		if streamSnapshotReady(snap, cursor, followContinue) {
+		if streamSnapshotReady(snap, cursor) {
 			return snap, nil
 		}
 		task.mu.Lock()
-		wait, ready := task.streamChangeWaiterLocked(cursor, followContinue)
+		wait, ready := task.streamChangeWaiterLocked(cursor)
 		task.mu.Unlock()
 		if ready {
 			continue
@@ -331,7 +335,7 @@ func (s *streamService) awaitSubagent(ctx context.Context, task *subagentTask, c
 	}
 }
 
-func streamSnapshotReady(snap stream.Snapshot, cursor stream.Cursor, followContinue bool) bool {
+func streamSnapshotReady(snap stream.Snapshot, cursor stream.Cursor) bool {
 	if snap.Cursor.Output > cursor.Output || snap.Cursor.Events > cursor.Events {
 		return true
 	}
@@ -341,7 +345,7 @@ func streamSnapshotReady(snap stream.Snapshot, cursor stream.Cursor, followConti
 	if snap.Running || !stream.IsTerminalState(snap.State) {
 		return false
 	}
-	return !followContinue || !snap.SupportsInput
+	return true
 }
 
 func commandStatusWithoutSession(task *commandTask) (sandbox.SessionStatus, error) {
@@ -402,7 +406,7 @@ func (s *streamService) readSubagent(_ context.Context, sub *subagentTask, curso
 		EventsTruncatedBefore: eventsTruncatedBefore,
 		Running:               sub.running,
 		State:                 string(state),
-		SupportsInput:         !sub.running && state == task.StateCompleted,
+		SupportsInput:         false,
 		TerminalFramed:        !sub.running && stream.IsTerminalState(string(state)),
 		StartedAt:             sub.createdAt,
 		UpdatedAt:             time.Now(),
@@ -461,28 +465,58 @@ func (s *streamService) Subscribe(ctx context.Context, req stream.SubscribeReque
 	return func(yield func(*stream.Frame, error) bool) {
 		ref := stream.NormalizeRef(req.Ref)
 		cursor := stream.CloneCursor(req.Cursor)
-		_, await, err := s.resolveReader(ctx, ref)
-		if err != nil {
-			yield(nil, err)
-			return
-		}
+		followEstablished := false
 		for {
-			snap, err := await(ctx, cursor, req.FollowContinues)
+			activity := s.tasks.watchTaskStreamActivity(ref.SessionID, ref.TaskID)
+			_, await, kind, err := s.resolveReader(ctx, ref)
 			if err != nil {
+				if req.Follow && followEstablished && errorcode.Is(err, errorcode.NotFound) {
+					if waitErr := activity.Await(ctx); waitErr != nil {
+						if ctx.Err() == nil {
+							yield(nil, waitErr)
+						}
+						return
+					}
+					continue
+				}
+				activity.Close()
 				yield(nil, err)
 				return
 			}
-			for _, frame := range stream.FramesForSnapshot(snap) {
-				cloned := stream.CloneFrame(frame)
-				if !yield(&cloned, nil) {
+			for {
+				snap, awaitErr := await(ctx, cursor)
+				if awaitErr != nil {
+					activity.Close()
+					yield(nil, awaitErr)
 					return
 				}
+				for _, frame := range stream.FramesForSnapshot(snap) {
+					cloned := stream.CloneFrame(frame)
+					if !yield(&cloned, nil) {
+						activity.Close()
+						return
+					}
+				}
+				// The cursor represents the whole source snapshot. Advance it only
+				// after every frame from that snapshot was accepted by the consumer.
+				cursor = stream.CloneCursor(snap.Cursor)
+				if !snap.Running {
+					break
+				}
 			}
-			// The cursor represents the whole source snapshot. Advance it only
-			// after every frame from that snapshot was accepted by the consumer.
-			cursor = stream.CloneCursor(snap.Cursor)
-			followContinue := req.FollowContinues && snap.SupportsInput
-			if !snap.Running && !followContinue {
+			if !req.Follow || kind != task.KindSubagent {
+				activity.Close()
+				return
+			}
+			followEstablished = true
+			// A completed subagent may be removed from the live registry and later
+			// rehydrated for a message-authored turn. Wait by stable Task identity,
+			// then re-resolve the concrete producer and continue from the same
+			// absolute cursor.
+			if err := activity.Await(ctx); err != nil {
+				if ctx.Err() == nil {
+					yield(nil, err)
+				}
 				return
 			}
 		}
@@ -504,13 +538,13 @@ func subagentStreamOutput(stdout string, stderr string) string {
 
 func (s *streamService) Wait(ctx context.Context, ref stream.Ref) (stream.Snapshot, error) {
 	ref = stream.NormalizeRef(ref)
-	_, await, err := s.resolveReader(ctx, ref)
+	_, await, _, err := s.resolveReader(ctx, ref)
 	if err != nil {
 		return stream.Snapshot{}, err
 	}
 	cursor := stream.Cursor{}
 	for {
-		snap, err := await(ctx, cursor, false)
+		snap, err := await(ctx, cursor)
 		if err != nil {
 			return stream.Snapshot{}, err
 		}

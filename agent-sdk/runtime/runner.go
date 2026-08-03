@@ -136,7 +136,7 @@ func (r *runner) claimEventStream(requested string) error {
 }
 
 func (r *runner) Submit(sub agent.Submission) error {
-	if sub.Kind != agent.SubmissionKindConversation {
+	if sub.Kind != agent.SubmissionKindConversation && sub.Kind != agent.SubmissionKindAgentMessage {
 		return fmt.Errorf("agent-sdk/runtime: unsupported submission kind %q", sub.Kind)
 	}
 	r.mu.Lock()

@@ -82,7 +82,7 @@ func (r *Runtime) runACPControllerTurn(
 	handle.setCancelHook(func() error {
 		return r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 	})
-	r.registerActiveRun(ref, activeSession, handle)
+	r.registerActiveRun(ref, activeSession, turnID, handle)
 	go func() {
 		defer cancel()
 		r.executeACPControllerTurn(ctx, activeSession, ref, req, runID, turnID, handle)
@@ -121,12 +121,12 @@ func (r *Runtime) executeACPControllerTurn(
 		}
 	}()
 
-	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputCompaction)
-	if userEvent != nil {
+	inputEvent := buildInputEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputType, req.InputMessageID, req.InputScope, req.InputCompaction)
+	if inputEvent != nil {
 		persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
 			SessionRef:    ref,
 			MutationGuard: session.RuntimeMutationGuard(ctx),
-			Event:         userEvent,
+			Event:         inputEvent,
 		})
 		if err != nil {
 			r.setRunState(ref.SessionID, agent.RunState{

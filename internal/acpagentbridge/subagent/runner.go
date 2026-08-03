@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
@@ -21,11 +22,16 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type PermissionHandler func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error)
+
+// MessageHandler routes a child-originated message within the parent topology.
+// Spawn and Anchor are trusted identities; wire-level From is not authoritative.
+type MessageHandler func(context.Context, subagent.SpawnContext, delegation.Anchor, agentmessage.Request) (agentmessage.Response, error)
 
 // PlacementResolver materializes a durable model placement at the external
 // effect boundary. The product host owns model configuration and must reject a
@@ -50,6 +56,7 @@ type RunnerConfig struct {
 	PermissionHandler PermissionHandler
 	PermissionBridge  PermissionBridge
 	PlacementResolver PlacementResolver
+	MessageHandler    MessageHandler
 }
 
 type Runner struct {
@@ -59,6 +66,7 @@ type Runner struct {
 	permissionHandler PermissionHandler
 	permissionBridge  PermissionBridge
 	placementResolver PlacementResolver
+	messageHandler    MessageHandler
 
 	counter atomic.Uint64
 	mu      sync.RWMutex
@@ -71,6 +79,8 @@ type childRun struct {
 	client                *client.Client
 	configuredAuth        controlagents.Authentication
 	authenticationMethods []controlagents.AuthenticationMethod
+	spawn                 subagent.SpawnContext
+	supportsMessages      bool
 	taskID                string
 	sink                  stream.Sink
 	completion            delegation.CompletionSink
@@ -108,8 +118,20 @@ func NewRunner(cfg RunnerConfig) (*Runner, error) {
 		permissionHandler: cfg.PermissionHandler,
 		permissionBridge:  cfg.PermissionBridge,
 		placementResolver: cfg.PlacementResolver,
+		messageHandler:    cfg.MessageHandler,
 		runs:              map[string]*childRun{},
 	}, nil
+}
+
+// BindMessageHandler connects the runner to its owning Runtime after product
+// composition has constructed both sides.
+func (r *Runner) BindMessageHandler(handler MessageHandler) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.messageHandler = handler
+	r.mu.Unlock()
 }
 
 func (r *Runner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
@@ -136,6 +158,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		done:           make(chan struct{}),
 		agentName:      strings.TrimSpace(cfg.Name),
 		configuredAuth: controlagents.NormalizeAuthentication(cfg.Authentication),
+		spawn:          spawn,
 	}
 	detachedCtx := detachedChildContext(ctx)
 	childCtx, childCancel := context.WithCancel(detachedCtx)
@@ -160,6 +183,9 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		OnPermissionRequest: func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
 			return r.permissionCallback(spawn, cfg, agentID)(ctx, req)
 		},
+		OnSessionMessage: func(ctx context.Context, req client.SessionMessageRequest) (client.SessionMessageResponse, error) {
+			return r.handleChildMessage(ctx, run, req)
+		},
 	})
 	if err != nil {
 		childCancel()
@@ -179,7 +205,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		Methods:        authenticationMethods,
 		AgentID:        cfg.Name,
 		Authentication: cfg.Authentication,
-	}, spawn.CWD)
+	}, spawn.CWD, subagentSessionMeta(spawn))
 	if err != nil {
 		childCancel()
 		_ = acpClient.Close(ctx)
@@ -210,6 +236,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 	run.anchor = anchor
 	run.client = acpClient
 	run.authenticationMethods = controlagents.CloneAuthenticationMethods(authenticationMethods)
+	run.supportsMessages = hasACPMessageCapability(initialize)
 	runKey, err := childRunKey(anchor)
 	if err != nil {
 		childCancel()
@@ -276,6 +303,14 @@ func hasACPSessionCapability(resp client.InitializeResponse, name string) bool {
 	return ok
 }
 
+func hasACPMessageCapability(resp client.InitializeResponse) bool {
+	if resp.AgentCapabilities.Meta == nil {
+		return false
+	}
+	_, ok := resp.AgentCapabilities.Meta[client.MethodSessionMessage]
+	return ok
+}
+
 func (r *Runner) Wait(ctx context.Context, anchor delegation.Anchor, yieldTimeMS int) (delegation.Result, error) {
 	run, err := r.lookup(anchor)
 	if err != nil {
@@ -284,19 +319,47 @@ func (r *Runner) Wait(ctx context.Context, anchor delegation.Anchor, yieldTimeMS
 	return r.waitRun(ctx, run, yieldTimeMS), nil
 }
 
-func (r *Runner) Continue(ctx context.Context, anchor delegation.Anchor, req delegation.ContinueRequest) (delegation.Result, error) {
+// Message delivers to a running child or queues a new message-authored turn on
+// a completed child. For a completed child, returning transfers asynchronous
+// delivery ownership to the runner; it does not wait for target consumption or
+// Turn completion.
+func (r *Runner) Message(ctx context.Context, anchor delegation.Anchor, req subagent.MessageRequest) (delegation.Result, error) {
 	run, err := r.lookup(anchor)
 	if err != nil {
 		return delegation.Result{}, err
 	}
-	prompt := strings.TrimSpace(req.Prompt)
-	if prompt == "" {
-		return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: continuation prompt is required")
+	messageReq := agentmessage.NormalizeRequest(req.Request)
+	if messageReq.MessageID == "" || messageReq.Text == "" {
+		return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: message id and text are required")
 	}
 	run.mu.Lock()
+	if !run.supportsMessages {
+		run.mu.Unlock()
+		return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child session %q does not support %s", run.anchor.SessionID, client.MethodSessionMessage)
+	}
 	if run.running || run.finishing {
 		run.mu.Unlock()
-		return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child session %q is still running; use TASK wait before write", run.anchor.SessionID)
+		resp, err := r.callSessionMessage(ctx, run, messageReq)
+		if err != nil {
+			var unknown *messageTurnOutcomeUnknownError
+			if errors.As(err, &unknown) {
+				detail := unknown.Error()
+				return delegation.Result{
+					TaskID: run.taskID, State: delegation.StateUnknownOutcome,
+					OutputPreview: detail, Error: detail, UpdatedAt: r.clock(),
+				}, nil
+			}
+			return delegation.Result{}, err
+		}
+		if !resp.Accepted {
+			return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child rejected message %q", messageReq.MessageID)
+		}
+		return r.waitRun(ctx, run, 0), nil
+	}
+	if run.state != delegation.StateCompleted {
+		state := run.state
+		run.mu.Unlock()
+		return delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child session %q is %s", run.anchor.SessionID, state)
 	}
 	run.state = delegation.StateRunning
 	run.running = true
@@ -317,12 +380,20 @@ func (r *Runner) Continue(ctx context.Context, anchor delegation.Anchor, req del
 		runCtx = detachedChildContext(ctx)
 	}
 	run.mu.Unlock()
-	go r.drivePrompt(runCtx, run, prompt)
-	return r.waitRun(ctx, run, req.YieldTimeMS), nil
+	go r.driveMessage(runCtx, run, messageReq)
+	return r.waitRun(ctx, run, 0), nil
 }
 
 func detachedChildContext(ctx context.Context) context.Context {
 	return session.ContextWithoutRuntimeLease(context.WithoutCancel(ctx))
+}
+
+func subagentSessionMeta(spawn subagent.SpawnContext) map[string]any {
+	return metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
+		metautil.RuntimeSessionKind:     metautil.RuntimeSessionKindSubagent,
+		metautil.RuntimeSessionParentID: spawn.SessionRef.SessionID,
+		metautil.RuntimeTaskID:          spawn.TaskID,
+	})
 }
 
 func (r *Runner) Cancel(ctx context.Context, anchor delegation.Anchor) error {
@@ -374,6 +445,79 @@ func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) 
 			return activeClient.Prompt(callCtx, run.anchor.SessionID, prompt, nil)
 		},
 	)
+	r.finishDrive(ctx, run, resp.StopReason, err)
+}
+
+func (r *Runner) driveMessage(ctx context.Context, run *childRun, req agentmessage.Request) {
+	resp, err := r.callSessionMessage(ctx, run, req)
+	if err == nil && !resp.Accepted {
+		err = fmt.Errorf("child rejected message %q", req.MessageID)
+	}
+	if err == nil && !strings.EqualFold(strings.TrimSpace(resp.State), string(delegation.StateCompleted)) {
+		err = &messageTurnOutcomeUnknownError{state: strings.TrimSpace(resp.State)}
+	}
+	r.finishDrive(ctx, run, "end_turn", err)
+}
+
+type messageTurnOutcomeUnknownError struct {
+	state string
+	cause error
+}
+
+func (e *messageTurnOutcomeUnknownError) Error() string {
+	if e == nil {
+		return "child message delivery outcome is unknown"
+	}
+	if e.cause != nil {
+		return fmt.Sprintf("child message delivery outcome is unknown: %v", e.cause)
+	}
+	state := strings.TrimSpace(e.state)
+	if state == "" {
+		state = "unspecified"
+	}
+	return fmt.Sprintf("child accepted message but returned non-terminal state %q", state)
+}
+
+func (e *messageTurnOutcomeUnknownError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func (r *Runner) callSessionMessage(ctx context.Context, run *childRun, req agentmessage.Request) (client.SessionMessageResponse, error) {
+	if run == nil {
+		return client.SessionMessageResponse{}, fmt.Errorf("internal/acpagentbridge/subagent: child run is unavailable")
+	}
+	run.mu.RLock()
+	acpClient := run.client
+	sessionID := strings.TrimSpace(run.anchor.SessionID)
+	agentID := firstNonEmpty(run.agentName, run.anchor.Agent)
+	configured := controlagents.NormalizeAuthentication(run.configuredAuth)
+	methods := controlagents.CloneAuthenticationMethods(run.authenticationMethods)
+	run.mu.RUnlock()
+	if acpClient == nil || sessionID == "" {
+		return client.SessionMessageResponse{}, fmt.Errorf("internal/acpagentbridge/subagent: child message transport is unavailable")
+	}
+	response, err := authentication.RecoverConfiguredCall(
+		ctx, acpClient, methods, agentID, configured,
+		func(callCtx context.Context, activeClient *client.Client) (client.SessionMessageResponse, error) {
+			return activeClient.SessionMessage(callCtx, client.SessionMessageRequest{
+				SessionID: sessionID, MessageID: req.MessageID, To: req.To,
+				From: firstNonEmpty(req.From.Name, req.From.ID), Message: req.Text,
+			})
+		},
+	)
+	if err != nil {
+		// Once the RPC is dispatched, a transport or callback error cannot prove
+		// that the target failed to persist the stable MessageID. Preserve that
+		// uncertainty so callers never turn response loss into a fresh delivery.
+		return client.SessionMessageResponse{}, &messageTurnOutcomeUnknownError{cause: err}
+	}
+	return response, nil
+}
+
+func (r *Runner) finishDrive(ctx context.Context, run *childRun, stopReason string, err error) {
 	run.mu.Lock()
 	if run.cancelRequested && run.cancelResolved != nil {
 		cancelResolved := run.cancelResolved
@@ -398,7 +542,14 @@ func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) 
 		run.result = ""
 		closeClient = true
 	} else if err != nil {
-		if errors.Is(err, context.Canceled) {
+		var unknown *messageTurnOutcomeUnknownError
+		if errors.As(err, &unknown) {
+			run.state = delegation.StateUnknownOutcome
+			run.failureDetail = unknown.Error()
+			run.outputPreview = run.failureDetail
+			run.result = ""
+			closeClient = true
+		} else if errors.Is(err, context.Canceled) {
 			if run.state != delegation.StateCancelled {
 				run.state = delegation.StateInterrupted
 				run.outputPreview = "interrupted"
@@ -413,7 +564,7 @@ func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) 
 			run.result = ""
 			closeClient = true
 		}
-	} else if strings.EqualFold(strings.TrimSpace(resp.StopReason), "cancelled") {
+	} else if strings.EqualFold(strings.TrimSpace(stopReason), "cancelled") {
 		run.state = delegation.StateCancelled
 		run.outputPreview = "cancelled"
 		run.failureDetail = ""
@@ -429,7 +580,7 @@ func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) 
 	done := run.done
 	run.mu.Unlock()
 
-	if closeClient {
+	if closeClient && run.client != nil {
 		_ = run.client.Close(context.WithoutCancel(ctx))
 	}
 	run.mu.Lock()
@@ -439,6 +590,29 @@ func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) 
 	if completion != nil {
 		completion.PublishSubagentCompletion(result)
 	}
+}
+
+func (r *Runner) handleChildMessage(ctx context.Context, run *childRun, req client.SessionMessageRequest) (client.SessionMessageResponse, error) {
+	if run == nil {
+		return client.SessionMessageResponse{}, fmt.Errorf("internal/acpagentbridge/subagent: child run is unavailable")
+	}
+	r.mu.RLock()
+	handler := r.messageHandler
+	r.mu.RUnlock()
+	if handler == nil {
+		return client.SessionMessageResponse{}, fmt.Errorf("internal/acpagentbridge/subagent: message router is unavailable")
+	}
+	messageReq := agentmessage.Request{
+		MessageID: strings.TrimSpace(req.MessageID), To: strings.TrimSpace(req.To), Text: strings.TrimSpace(req.Message),
+	}
+	response, err := handler(ctx, run.spawn, delegation.CloneAnchor(run.anchor), messageReq)
+	if err != nil {
+		return client.SessionMessageResponse{}, err
+	}
+	return client.SessionMessageResponse{
+		MessageID: response.MessageID, Accepted: response.Accepted, State: response.State,
+		TurnID: response.TurnID, StartedTurn: response.StartedTurn,
+	}, nil
 }
 
 func (r *Runner) waitRun(ctx context.Context, run *childRun, yieldTimeMS int) delegation.Result {
@@ -674,6 +848,9 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 	case client.ContentChunk:
 		if text := chunkText(update); text != "" {
 			switch strings.TrimSpace(update.SessionUpdate) {
+			case client.UpdateUserMessage:
+				event = run.acpUpdateEvent(env, run.updatedAt)
+				markSubagentInputEvent(event)
 			case client.UpdateAgentMessage:
 				textOverride := run.appendAgentMessageChunkLocked(update.MessageID, text)
 				run.outputPreview = compactPreview(run.agentText)
@@ -717,6 +894,24 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 	if frame != nil {
 		run.emit(*frame)
 	}
+}
+
+func markSubagentInputEvent(event *session.Event) {
+	if event == nil {
+		return
+	}
+	// ACP calls this a user_message because it is the input side of the child
+	// transcript. Within the parent Task stream it is an Agent-to-Agent context
+	// message, not a canonical end-user submission.
+	event.Type = session.EventTypeContext
+	event.Actor = session.ActorRef{Kind: session.ActorKindController, ID: "parent", Name: "parent"}
+	if event.Scope != nil {
+		event.Scope.Source = "agent_message_input"
+	}
+	if event.Meta == nil {
+		event.Meta = map[string]any{}
+	}
+	event.Meta["agent_message"] = true
 }
 
 func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, textOverride ...string) *session.Event {

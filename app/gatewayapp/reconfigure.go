@@ -16,6 +16,7 @@ import (
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -366,6 +367,7 @@ func (s *Stack) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	bundle.Engine = rt
+	bindSubagentMessageRouter(acpControlPlane, rt)
 	leaseService, ok := s.Sessions.(session.SessionLeaseService)
 	if !ok {
 		bundle.Close()
@@ -414,7 +416,7 @@ func (s *Stack) buildGatewayRuntimeContext(
 				metadata["system_prompt"] = systemPromptWithDelegationGuidance(systemPrompt)
 			}
 			return kernelimpl.ToolAugmentation{
-				Tools:    []tool.Tool{spawn.NewWithTargets(agents, targets)},
+				Tools:    []tool.Tool{spawn.NewWithTargets(agents, targets), sendmessage.New()},
 				Metadata: metadata,
 			}, nil
 		},

@@ -40,25 +40,25 @@ func (o taskToolObserver) ObserveTaskSnapshot(snapshot taskapi.Snapshot) {
 }
 
 func (tm *taskRuntime) Wait(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return tm.control(ctx, ref, req, taskControlObserve, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
 		return target.Wait(ctx, normalized)
 	})
 }
 
 func (tm *taskRuntime) Read(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return tm.control(ctx, ref, req, taskControlObserve, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
 		return target.Read(ctx, normalized)
 	})
 }
 
 func (tm *taskRuntime) Write(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return tm.control(ctx, ref, req, taskControlExclusive, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
 		return target.Write(ctx, normalized)
 	})
 }
 
 func (tm *taskRuntime) Cancel(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return tm.control(ctx, ref, req, taskControlExclusive, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
 		return target.Cancel(ctx, normalized)
 	})
 }
@@ -288,6 +288,10 @@ func taskPublicHandle(snapshot taskapi.Snapshot) string {
 }
 
 func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entry) error {
+	return tm.persistTaskEntryWithConflictInvalidation(ctx, entry, true)
+}
+
+func (tm *taskRuntime) persistTaskEntryWithConflictInvalidation(ctx context.Context, entry *taskapi.Entry, invalidateOnConflict bool) error {
 	if tm == nil || tm.store == nil || entry == nil {
 		return nil
 	}
@@ -309,7 +313,7 @@ func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entr
 		if err != nil {
 			if !session.IsCommitted(err) {
 				var conflict *taskapi.RevisionConflictError
-				if entry.Kind == taskapi.KindSubagent && errors.As(err, &conflict) {
+				if invalidateOnConflict && entry.Kind == taskapi.KindSubagent && errors.As(err, &conflict) {
 					tm.invalidateSubagentTask(entry.Session, entry.TaskID, expected)
 				}
 				return err

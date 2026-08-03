@@ -116,6 +116,14 @@ type Event struct {
 	ToolTaskAction     string
 	ToolTaskInput      string
 	ToolTaskTargetKind string
+	// ToolTaskState is the lifecycle of the operation targeted by a control
+	// tool. It is deliberately separate from ToolStatus, which describes the
+	// tool invocation itself.
+	ToolTaskState string
+	// ToolMessageTarget carries the structured SendMessage destination for
+	// display. Delivery state remains in the result payload and never controls
+	// Task observation.
+	ToolMessageTarget string
 
 	PlanEntries []PlanEntry
 

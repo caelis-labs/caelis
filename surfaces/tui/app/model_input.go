@@ -338,6 +338,12 @@ func (m *Model) tryHandleViewportClick(mouse tea.Mouse) tea.Cmd {
 	}
 	if contentLine >= 0 && contentLine < len(m.viewportClickTokens) {
 		if token := strings.TrimSpace(m.viewportClickTokens[contentLine]); token != "" {
+			if messageCallID, ok := strings.CutPrefix(token, agentMessageTargetOverlayTokenPrefix); ok {
+				if m.openSubagentOutputOverlayForMessage(bid, messageCallID) {
+					m.syncViewportContent()
+				}
+				return nil
+			}
 			if m.tryToggleFoldToken(bid, token) {
 				m.syncViewportContent()
 				return nil
@@ -1490,6 +1496,9 @@ func (m *Model) tryToggleFoldToken(blockID string, token string) bool {
 	}
 	if callID, ok := strings.CutPrefix(strings.TrimSpace(token), subagentOutputOverlayTokenPrefix); ok {
 		return m.openSubagentOutputOverlay(blockID, callID)
+	}
+	if callID, ok := strings.CutPrefix(strings.TrimSpace(token), agentMessageTargetOverlayTokenPrefix); ok {
+		return m.openSubagentOutputOverlayForMessage(blockID, callID)
 	}
 	callID, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_tool_panel:")
 	if !ok || strings.TrimSpace(callID) == "" {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
@@ -498,10 +499,18 @@ func classifyControlPreDispatchError(err error) error {
 }
 
 func (s *Stack) controlRuntimeContext(fallback context.Context) context.Context {
+	runtimeCtx := fallback
 	if s != nil && s.lifecycleCtx != nil {
-		return s.lifecycleCtx
+		runtimeCtx = s.lifecycleCtx
 	}
-	return fallback
+	// Accepted Control turns outlive their admission request, so their
+	// cancellation parent is the Stack lifecycle. Preserve only the negotiated
+	// Agent-message transport from the request context: it is a trusted host
+	// capability required by ACP child turns, not arbitrary request state.
+	if sender := agentmessage.SenderFromContext(fallback); sender != nil {
+		runtimeCtx = agentmessage.WithSender(runtimeCtx, sender)
+	}
+	return runtimeCtx
 }
 
 func (s *Stack) resolveControlParticipantPlacement(ctx context.Context, profileID, effort string) (sdkplacement.Placement, error) {

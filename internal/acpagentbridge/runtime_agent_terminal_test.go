@@ -1,12 +1,86 @@
 package acpagentbridge
 
 import (
+	"strings"
 	"testing"
 
 	protocolacp "github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
+
+func TestACPChildTerminalProjectorUsesSemanticSendMessageTitle(t *testing.T) {
+	t.Parallel()
+
+	projector := newACPChildTerminalProjector()
+	envelope := eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
+		ScopeID: "task-1", TurnID: "child-turn-1",
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		Update: protocolacp.ToolCall{
+			SessionUpdate: protocolacp.UpdateToolCall, ToolCallID: "message-1",
+			Title: `Ran SendMessage {"message":"READY","to":"parent"}`,
+			Kind:  protocolacp.ToolKindExecute, Status: protocolacp.ToolStatusInProgress,
+			RawInput: map[string]any{"to": "parent", "message": "READY"},
+			Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+				metautil.RuntimeToolName: "SendMessage",
+			}),
+		},
+	}
+	notification, handled := projector.project(envelope, "")
+	if !handled {
+		t.Fatal("SendMessage child tool was not handled")
+	}
+	update, ok := notification.Update.(protocolacp.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("projected update = %T, want ToolCallUpdate", notification.Update)
+	}
+	output, ok := metautil.TerminalOutput(update.Meta)
+	if !ok || !strings.Contains(output.Data, "Send message to @parent: READY") || strings.Contains(output.Data, `{"message"`) {
+		t.Fatalf("semantic SendMessage terminal output = %q", output.Data)
+	}
+}
+
+func TestACPChildTerminalProjectorReopensOnlyForDistinctChildTurn(t *testing.T) {
+	t.Parallel()
+
+	projector := newACPChildTerminalProjector()
+	progress := func(turnID, messageID, text string) eventstream.Envelope {
+		return eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
+			ScopeID: "task-1", TurnID: turnID,
+			ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+			Update: protocolacp.ContentChunk{
+				SessionUpdate: protocolacp.UpdateAgentMessage, MessageID: messageID,
+				Content: protocolacp.TextContent{Type: "text", Text: text},
+			},
+		}
+	}
+	if notification, handled := projector.project(progress("child-turn-1", "message-1", "first turn"), ""); !handled || notification.Update == nil {
+		t.Fatalf("first child turn projection = %#v handled=%v", notification, handled)
+	}
+	lifecycle := eventstream.Envelope{
+		Kind: eventstream.KindLifecycle, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
+		ScopeID: "task-1", TurnID: "child-turn-1", Final: true,
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
+	}
+	if _, handled := projector.projectLifecycle(lifecycle, ""); !handled {
+		t.Fatal("first child lifecycle was not handled")
+	}
+	if late, handled := projector.project(progress("child-turn-1", "message-late", "late same-turn output"), ""); !handled || late.Update != nil {
+		t.Fatalf("same-turn late projection = %#v handled=%v, want suppressed", late, handled)
+	}
+	next, handled := projector.project(progress("child-turn-2", "message-2", "second turn progress"), "")
+	if !handled || next.Update == nil {
+		t.Fatalf("distinct child turn projection = %#v handled=%v, want reopened output", next, handled)
+	}
+	update := next.Update.(protocolacp.ToolCallUpdate)
+	output, ok := metautil.TerminalOutput(update.Meta)
+	if !ok || !strings.Contains(output.Data, "second turn progress") {
+		t.Fatalf("reopened child output = %q", output.Data)
+	}
+}
 
 func TestACPObservedParentClosesFromBatchWaitOnlyTerminalSubagents(t *testing.T) {
 	completed := protocolacp.ToolStatusCompleted

@@ -120,8 +120,8 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 				plainLines = append(plainLines, wrappedPlain...)
 				for range wrappedStyled {
 					clickTokens = append(clickTokens, row.ClickToken)
-					clickBounds = append(clickBounds, clickColumnRange{})
 				}
+				clickBounds = append(clickBounds, wrappedClickColumnRanges(row, wrappedPlain)...)
 				continue
 			}
 		}
@@ -361,7 +361,7 @@ func isApprovalReviewHeaderPlain(plain string) bool {
 
 func acpTranscriptHeaderUsesRailContinuation(verb string) bool {
 	switch strings.ToLower(strings.TrimSpace(verb)) {
-	case "ran", "spawned":
+	case "ran", "spawned", "sent":
 		return true
 	default:
 		return false

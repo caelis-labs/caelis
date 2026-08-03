@@ -156,10 +156,6 @@ func (staticSubagentRunner) Spawn(context.Context, SubagentSpawnContext, delegat
 	}, nil
 }
 
-func (staticSubagentRunner) Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error) {
-	return delegation.Result{TaskID: "task-sub-1", State: delegation.StateRunning, OutputPreview: "helper continued"}, nil
-}
-
 func (staticSubagentRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
 	return delegation.Result{TaskID: "task-sub-1", State: delegation.StateRunning, OutputPreview: "helper started"}, nil
 }

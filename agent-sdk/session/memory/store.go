@@ -160,16 +160,20 @@ func (s *Store) ListSessions(
 }
 
 func (s *Store) AppendEvent(
-	_ context.Context,
+	ctx context.Context,
 	req session.AppendEventRequest,
 ) (*session.Event, error) {
-	return s.appendEventRequest(req)
+	result, err := s.AppendEventWithOutcome(ctx, req)
+	return result.Event, err
 }
 
-func (s *Store) appendEventRequest(req session.AppendEventRequest) (*session.Event, error) {
+func (s *Store) AppendEventWithOutcome(
+	_ context.Context,
+	req session.AppendEventRequest,
+) (session.AppendEventResult, error) {
 	event := req.Event
 	if event == nil {
-		return nil, session.ErrInvalidEvent
+		return session.AppendEventResult{}, session.ErrInvalidEvent
 	}
 
 	s.mu.Lock()
@@ -177,19 +181,19 @@ func (s *Store) appendEventRequest(req session.AppendEventRequest) (*session.Eve
 
 	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
-		return nil, session.ErrSessionNotFound
+		return session.AppendEventResult{}, session.ErrSessionNotFound
 	}
 	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
-		return nil, err
+		return session.AppendEventResult{}, err
 	}
 
 	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil, req.ExpectedRevision, "", "")
 	if err != nil {
-		return nil, err
+		return session.AppendEventResult{}, err
 	}
 	normalized := tx.Prepared.Events[0]
 	s.applyAppendTransactionToRecord(record, tx)
-	return session.CloneEvent(normalized), nil
+	return session.AppendEventResult{Event: session.CloneEvent(normalized), Appended: tx.Changed}, nil
 }
 
 // SettlePendingApproval appends one approval settlement only while the exact

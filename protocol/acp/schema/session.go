@@ -17,6 +17,9 @@ const (
 	MethodSessionSetModel  = "session/set_model"
 	MethodSessionPrompt    = "session/prompt"
 	MethodSessionCancel    = "session/cancel"
+	// MethodSessionMessage is the Caelis ACP v1 extension for bidirectional
+	// mid-turn Agent messages. Support is negotiated through _meta.
+	MethodSessionMessage = "_caelis.dev/session/message"
 
 	StopReasonEndTurn   = "end_turn"
 	StopReasonCancelled = "cancelled"
@@ -42,6 +45,7 @@ type AgentCapabilities struct {
 	MCPCapabilities     MCPCapabilities            `json:"mcpCapabilities,omitempty"`
 	PromptCapabilities  PromptCapabilities         `json:"promptCapabilities,omitempty"`
 	SessionCapabilities map[string]json.RawMessage `json:"sessionCapabilities,omitempty"`
+	Meta                map[string]json.RawMessage `json:"_meta,omitempty"`
 }
 
 type MCPCapabilities struct {
@@ -83,6 +87,7 @@ type AuthMethod struct {
 type NewSessionRequest struct {
 	CWD        string            `json:"cwd"`
 	MCPServers []json.RawMessage `json:"mcpServers"`
+	Meta       map[string]any    `json:"_meta,omitempty"`
 }
 
 type NewSessionResponse struct {
@@ -193,6 +198,22 @@ type PromptRequest struct {
 
 type PromptResponse struct {
 	StopReason string `json:"stopReason"`
+}
+
+type SessionMessageRequest struct {
+	SessionID string `json:"sessionId"`
+	MessageID string `json:"messageId"`
+	To        string `json:"to"`
+	From      string `json:"from,omitempty"`
+	Message   string `json:"message"`
+}
+
+type SessionMessageResponse struct {
+	MessageID   string `json:"messageId"`
+	Accepted    bool   `json:"accepted"`
+	State       string `json:"state,omitempty"`
+	TurnID      string `json:"turnId,omitempty"`
+	StartedTurn bool   `json:"startedTurn,omitempty"`
 }
 
 type CancelNotification struct {

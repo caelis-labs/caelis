@@ -412,6 +412,13 @@ type AppendEventRequest struct {
 	Event            *Event        `json:"event"`
 }
 
+// AppendEventResult distinguishes a newly committed event from an idempotent
+// retry that resolved to the already durable event.
+type AppendEventResult struct {
+	Event    *Event
+	Appended bool
+}
+
 // AppendEventsRequest appends multiple events to one session as one batch.
 // Implementations must validate the full batch before making any event durable.
 type AppendEventsRequest struct {
@@ -660,6 +667,43 @@ type Reader interface {
 // EventAppender appends canonical events with optional revision CAS.
 type EventAppender interface {
 	AppendEvent(context.Context, AppendEventRequest) (*Event, error)
+}
+
+// EventAppenderWithOutcome is the optional precise append contract used when
+// repeating a live side effect must be gated on whether persistence was new.
+type EventAppenderWithOutcome interface {
+	AppendEventWithOutcome(context.Context, AppendEventRequest) (AppendEventResult, error)
+}
+
+// AppendEventWithOutcome uses the precise contract when available. A legacy
+// Session reader/appender gets a read-before-append fallback for sequential
+// idempotent retries; implementations that admit concurrent writers should
+// provide EventAppenderWithOutcome for an atomic result.
+func AppendEventWithOutcome(ctx context.Context, appender EventAppender, req AppendEventRequest) (AppendEventResult, error) {
+	if precise, ok := appender.(EventAppenderWithOutcome); ok {
+		return precise.AppendEventWithOutcome(ctx, req)
+	}
+	alreadyDurable := false
+	if reader, ok := appender.(Reader); ok && req.Event != nil {
+		events, err := reader.Events(ctx, EventsRequest{SessionRef: req.SessionRef, IncludeTransient: true})
+		if err != nil {
+			return AppendEventResult{}, err
+		}
+		requestedID := strings.TrimSpace(req.Event.ID)
+		requestedKey := strings.TrimSpace(req.Event.IdempotencyKey)
+		for _, event := range events {
+			if event == nil {
+				continue
+			}
+			if requestedID != "" && strings.TrimSpace(event.ID) == requestedID ||
+				requestedKey != "" && strings.TrimSpace(event.IdempotencyKey) == requestedKey {
+				alreadyDurable = true
+				break
+			}
+		}
+	}
+	event, err := appender.AppendEvent(ctx, req)
+	return AppendEventResult{Event: event, Appended: err == nil && !alreadyDurable}, err
 }
 
 // ControllerBindingStore mutates the durable active-controller binding.

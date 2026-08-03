@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
@@ -68,23 +67,15 @@ func WorkspaceWriteMode() policy.Mode {
 				}
 			}
 			switch name {
-			case names.Plan, names.Spawn:
-				return allow(def), nil
-			case names.Skill:
-				return allow(def), nil
 			case names.Write, names.Patch:
 				return decideFilesystemWrite(input, def)
-			case names.Task:
-				return allow(def), nil
 			case names.RunCommand:
 				return decideCommand(input, def)
-			case names.WebSearch, names.WebFetch:
-				return allow(def), nil
 			default:
-				if isMCPTool(input.Tool) || tool.IsToolSearchDefinition(input.Tool) {
-					return allow(def), nil
-				}
-				return deny("tool is not allowed by workspace-write policy"), nil
+				// Tool assembly is the capability-admission boundary. This
+				// preset classifies calls that need path, command, or sandbox
+				// restrictions; it is not a second tool-name allowlist.
+				return allow(def), nil
 			}
 		},
 	}
@@ -191,14 +182,6 @@ func toolKind(name string) string {
 		return string(info.Kind)
 	}
 	return string(names.KindOther)
-}
-
-func isMCPTool(def tool.Definition) bool {
-	if len(def.Metadata) == 0 {
-		return false
-	}
-	kind, _ := def.Metadata[tool.MetadataToolKind].(string)
-	return strings.EqualFold(strings.TrimSpace(kind), tool.MetadataToolKindMCP)
 }
 
 func approvalTitle(name string, call map[string]any) string {

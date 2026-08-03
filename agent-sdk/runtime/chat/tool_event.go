@@ -13,6 +13,14 @@ import (
 )
 
 func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Message, extraMeta ...map[string]any) *session.Event {
+	return toolEvent(call, result, message, "", extraMeta...)
+}
+
+func toolProgressEvent(call model.ToolCall, result tool.Result, extraMeta ...map[string]any) *session.Event {
+	return toolEvent(call, result, nil, "in_progress", extraMeta...)
+}
+
+func toolEvent(call model.ToolCall, result tool.Result, message *model.Message, statusOverride string, extraMeta ...map[string]any) *session.Event {
 	rawInput := mustObject(call.Args)
 	rawOutput := toolResultRawOutput(result)
 	journal := toolExecutionJournalFromResult(result)
@@ -21,7 +29,10 @@ func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Mes
 	metaParts := []map[string]any{resultMetadata}
 	metaParts = append(metaParts, extraMeta...)
 	metaParts = append(metaParts, toolMeta(call.Name))
-	status := toolCallStatus(call, result, rawOutput)
+	status := strings.TrimSpace(statusOverride)
+	if status == "" {
+		status = toolCallStatus(call, result, rawOutput)
+	}
 	meta := mergeEventMeta(metaParts...)
 	event := &session.Event{
 		Type: session.EventTypeToolResult,
@@ -147,24 +158,25 @@ func toolCallStatus(call model.ToolCall, result tool.Result, rawOutput map[strin
 	if result.IsError {
 		return "failed"
 	}
-	// Task is a synchronous control invocation over another asynchronous
-	// operation. A successful wait, write, or cancel call is complete even
-	// when the observed Task remains running or has reached a failed terminal
-	// state. The observed state stays in rawOutput for Task lifecycle
-	// projection and model context.
-	if names.ExecutableOrSelf(call.Name) == names.Task {
-		return "completed"
-	}
-	if state, _ := rawOutput["state"].(string); strings.TrimSpace(state) != "" {
+	// A returned result completes the invocation. Only command execution owns
+	// the process state carried in its payload; control tools such as Spawn,
+	// Task, and SendMessage report a separate target lifecycle that must not
+	// keep the tool invocation open.
+	info, _ := names.Lookup(call.Name)
+	if info.ResultStyle == names.ResultCommand {
+		state, _ := rawOutput["state"].(string)
+		if strings.TrimSpace(state) == "" {
+			if exitCode, ok := intValue(rawOutput["exit_code"]); ok && exitCode != 0 {
+				return "failed"
+			}
+			return "completed"
+		}
 		switch strings.TrimSpace(state) {
 		case "running", "waiting_input", "waiting_approval":
 			return strings.TrimSpace(state)
 		case "failed", "interrupted", "cancelled", "canceled", "terminated":
 			return strings.TrimSpace(state)
 		}
-	}
-	if exitCode, ok := intValue(rawOutput["exit_code"]); ok && exitCode != 0 {
-		return "failed"
 	}
 	return "completed"
 }

@@ -51,6 +51,43 @@ func acpMuxCommandOutputEnvelope(cursor string, output string) eventstream.Envel
 	}
 }
 
+func acpMuxSubagentAnchor(handle string) eventstream.Envelope {
+	return eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1",
+			RawOutput: map[string]any{
+				"handle": handle, "state": "running", "parent_call": "spawn-1", "parent_tool": "Spawn",
+			},
+			Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+				metautil.RuntimeToolName: "Spawn",
+			}),
+		},
+	}
+}
+
+func acpMuxSubagentLifecycleEnvelope(cursor string, turnID string, state string) eventstream.Envelope {
+	return eventstream.Envelope{
+		Kind: eventstream.KindLifecycle, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
+		ScopeID: "task-1", TurnID: turnID, Cursor: cursor,
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		Lifecycle:  &eventstream.Lifecycle{State: state},
+		Final:      eventstream.IsTerminalLifecycleState(state),
+	}
+}
+
+func acpMuxSubagentMessageEnvelope(cursor string, turnID string, messageID string, text string) eventstream.Envelope {
+	return eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
+		ScopeID: "task-1", TurnID: turnID, Cursor: cursor,
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage, MessageID: messageID,
+			Content: schema.TextContent{Type: "text", Text: text},
+		},
+	}
+}
+
 func receiveACPTaskStreamRequest(t *testing.T, requests <-chan taskstream.SubscribeRequest) taskstream.SubscribeRequest {
 	t.Helper()
 	select {
@@ -316,10 +353,18 @@ func (s *acpMuxTestSubscription) finish(err error, cursor string) {
 		s.mu.Lock()
 		s.done = true
 		s.err = err
-		s.lastCursor = cursor
+		if cursor != "" {
+			s.lastCursor = cursor
+		}
 		s.mu.Unlock()
 		close(s.events)
 	})
+}
+
+func (s *acpMuxTestSubscription) setLastCursor(cursor string) {
+	s.mu.Lock()
+	s.lastCursor = cursor
+	s.mu.Unlock()
 }
 
 func (s *acpMuxTestSubscription) closed() bool {

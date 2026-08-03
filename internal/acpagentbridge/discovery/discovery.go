@@ -68,7 +68,7 @@ func (s Service) Discover(ctx context.Context, connection controlagents.Connecti
 			return s.startInitializedClient(restartCtx, connection, workDir)
 		},
 		CleanupTimeout: s.cleanupTimeout(),
-	}, cwd)
+	}, cwd, nil)
 	acpClient = recovered.Client
 	if recoveryErr != nil {
 		return controlagents.DiscoverySnapshot{}, fmt.Errorf("internal/acpagentbridge/discovery: create discovery session for %q: %w", connection.ID, recoveryErr)

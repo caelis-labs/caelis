@@ -90,14 +90,67 @@ canonical tool result through the Session path. Child messages, thoughts,
 tools, plans, and terminal bytes must not be flattened into parent model
 context. Typed scope and parent-tool fields relate them to the owning call.
 
+Agent communication is not Task input. `Task write` accepts only stdin for a
+live `RunCommand`; Spawn Tasks never advertise `supports_input`. Agents use the
+runtime-managed `SendMessage {to, message}` tool, where `to=parent` addresses
+the parent and a Session-scoped Spawn handle addresses a child or sibling.
+The target receives a canonical `Context` event with a typed source Actor, not
+a synthetic User event. Explicit `agent_message` metadata or a maintained Agent
+message source selects the provider projection, which includes that Actor as
+`Agent message from <actor>:`; Actor kind alone is not a routing signal. The
+runtime commits a local target Context before wakeup; an idle main Agent consumes
+it on its next Turn, while a completed child may begin a new message-authored
+Turn. A child-directed message is recorded in the parent Session only after the
+delivery runner accepts ownership and only as a mirror, so its body is not
+duplicated into main model context. This acknowledgement does not wait for
+target consumption. Once delivery ownership transfers, failure to refresh the
+sender's Task index returns accepted state `accepted_unpersisted`, not a
+retryable delivery error.
+
+Subagent Task output keeps one absolute cursor across message-authored Turns,
+independent from `supports_input` and `Task write`. Product subscriptions cover
+one activity period by default. A consumer that needs the complete child
+workspace sets `follow`; Runtime then releases the completed activity's producer
+observation, waits on the stable Session/Task identity, and re-resolves it when
+a later message-authored activity begins. Absolute event/output frontiers are
+persisted with the Task so rehydration cannot reset cursor numbering. No Session-feed
+wakeup event or tool result controls this subscription. The `SendMessage` result
+is only a delivery acknowledgement, and `turn_id` only groups transcript events.
+
+The TUI opens a following subscription when the child workspace overlay becomes
+visible, catches up from its last cursor, and renders all child events through
+the same transcript blocks used by the main workspace. Closing the overlay
+cancels only delivery and retains the Document and cursor; reopening resumes.
+Terminal lifecycle frames finalize their transcript segment but do not close a
+visible following workspace, so a later child Turn appears in chronological
+order without exposing Turn identifiers in the UX.
+
+The product ACP parent projection also follows each anchored subagent Task while
+that parent Prompt remains active, so a message-authored child Turn stays visible
+without a second Spawn anchor. Sealing the parent Prompt stops discovery of new
+Tasks. An already-running child activity may deliver through its typed terminal;
+once the subscription is parked at an activity boundary it closes, so later
+activities cannot leak into the completed Prompt. RunCommand remains a
+single-activity terminal stream.
+
+Asynchronous child completion emits one compact Agent Context notice containing
+state and handle only. The final payload remains owned by the Task result and is
+retrieved with `Task read`; notification never duplicates the child final into
+the parent transcript. Waiting on multiple comma-separated handles is a
+wait-any operation: all waits share one concurrent observation window, a
+running/yielded snapshot is not a winner, and the call returns when the first
+target becomes terminal, with current snapshots for the remaining handles.
+Cancelling those losing observations never changes child lifecycle.
+
 Permission requests are Control interactions, not Task frames. Control emits
 the approval Envelope on the Session feed after the request has durable
 identity. A Surface returns only that identity and the user's decision.
 
 A Task control invocation and its target have independent lifecycles. A
-successful read, wait, write, or cancel invocation does not prove that the
-target completed successfully; target state remains explicit in the canonical
-result.
+successful read, wait, command write, or cancel invocation does not prove that
+the target completed successfully; target state remains explicit in the
+canonical result. Likewise, an accepted `SendMessage` acknowledges routing
+ownership, not target consumption or completion of the target Agent Turn.
 
 ACP stdio cannot carry surrounding Envelope scope in a standard
 `session/update`. Compatibility projection may mount scoped child output on its
@@ -128,6 +181,15 @@ Runtime command must not be advertised as a client-owned terminal.
 
 Session ID is the product identity. Workspace or CWD metadata may guide policy
 and display but cannot repair a missing Session ID through a Surface cache.
+
+A built-in ACP subagent classifies its `session/new` request under
+`_meta.caelis.runtime.session`. The receiving Runtime promotes only the exact
+recognized subagent classification into `system_managed_agent` Session
+metadata, preserving parent Session and Task references for diagnostics. The
+Control Session directory excludes this product-managed Session from user
+resume candidates. Arbitrary ACP `_meta` values are not copied into durable
+Session metadata, and legacy unmarked child Sessions are not inferred from
+their title.
 
 Every Surface must:
 

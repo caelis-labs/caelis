@@ -205,7 +205,7 @@ func TestSideACPProjectedFailedWaitRepairsSpawnWithReason(t *testing.T) {
 	if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-1") {
 		t.Fatal("failed Side ACP Spawn did not open its output overlay")
 	}
-	if overlay := subagentOutputOverlayPlain(model); !strings.Contains(overlay, "ACP child prompt failed") {
-		t.Fatalf("Side ACP failure reason missing from output overlay:\n%s", overlay)
+	if overlay := subagentOutputOverlayPlain(model); strings.Contains(overlay, "ACP child prompt failed") {
+		t.Fatalf("parent Task failure was injected into child stream order:\n%s", overlay)
 	}
 }

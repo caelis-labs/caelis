@@ -3,11 +3,13 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -16,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
@@ -24,13 +27,11 @@ import (
 )
 
 func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session.SessionRef, spec agent.AgentSpec, toolCtx runtimeToolContext) []tool.Tool {
-	if len(spec.Tools) == 0 {
-		return spec.Tools
-	}
-	out := make([]tool.Tool, 0, len(spec.Tools)+1)
+	out := make([]tool.Tool, 0, len(spec.Tools)+2)
 	hasCommand := false
 	hasSpawn := false
 	hasTask := false
+	hasSendMessage := false
 	for _, one := range spec.Tools {
 		if one == nil {
 			continue
@@ -70,6 +71,12 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 				sessionRef: session.NormalizeSessionRef(ref),
 				tasks:      r.tasks,
 			})
+		case sendmessage.ToolName:
+			hasSendMessage = true
+			out = append(out, runtimeSendMessageTool{
+				base: one, runtime: r, session: session.CloneSession(activeSession),
+				sessionRef: session.NormalizeSessionRef(ref), external: toolCtx.messageSender,
+			})
 		default:
 			out = append(out, one)
 		}
@@ -81,7 +88,111 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 			tasks:      r.tasks,
 		})
 	}
+	// Product Agents assemble SendMessage explicitly with Spawn so AgentSpec is
+	// auditable. A hosted child receives its parent/sibling transport only at
+	// runtime through context, so that SDK host boundary remains the sole
+	// intentional augmentation.
+	if toolCtx.messageSender != nil && !hasSendMessage {
+		out = append(out, runtimeSendMessageTool{
+			base: sendmessage.New(), runtime: r, session: session.CloneSession(activeSession),
+			sessionRef: session.NormalizeSessionRef(ref), external: toolCtx.messageSender,
+		})
+	}
 	return out
+}
+
+type runtimeSendMessageTool struct {
+	base       tool.Tool
+	runtime    *Runtime
+	session    session.Session
+	sessionRef session.SessionRef
+	external   agentmessage.Sender
+}
+
+func (t runtimeSendMessageTool) Definition() tool.Definition {
+	return tool.CloneDefinition(t.base.Definition())
+}
+
+func (t runtimeSendMessageTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	args, err := decodeJSONMap(call.Input)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	if err := sendmessage.ValidateArgs(args); err != nil {
+		return tool.Result{}, err
+	}
+	to, _ := stringArg(args, "to")
+	text, _ := stringArg(args, "message")
+	messageID, err := agentmessage.ToolMessageID(t.sessionRef, call.ID)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	req := agentmessage.Request{
+		MessageID: messageID, To: strings.TrimSpace(to), Text: strings.TrimSpace(text),
+		From: session.ActorRef{Kind: session.ActorKindController, ID: strings.TrimSpace(t.session.Controller.ControllerID), Name: "main"},
+	}
+	var response agentmessage.Response
+	localTarget := t.hasLocalTaskTarget(ctx, req.To)
+	switch {
+	case strings.EqualFold(req.To, agentmessage.Parent):
+		if t.external == nil {
+			return tool.Result{}, fmt.Errorf("agent-sdk/runtime: the main Agent has no parent target")
+		}
+		response, err = t.external.SendMessage(ctx, req)
+	case localTarget:
+		if t.runtime == nil {
+			return tool.Result{}, fmt.Errorf("agent-sdk/runtime: local Agent message service is unavailable")
+		}
+		response, err = t.runtime.SendAgentMessage(ctx, t.sessionRef, req)
+	case t.external != nil:
+		response, err = t.external.SendMessage(ctx, req)
+	default:
+		if t.runtime == nil {
+			return tool.Result{}, fmt.Errorf("agent-sdk/runtime: local Agent message service is unavailable")
+		}
+		response, err = t.runtime.SendAgentMessage(ctx, t.sessionRef, req)
+	}
+	if err != nil {
+		return tool.Result{}, err
+	}
+	raw, err := json.Marshal(map[string]any{
+		"accepted": response.Accepted, "message_id": response.MessageID,
+		"to": req.To, "state": response.State,
+		"turn_id": response.TurnID, "started_turn": response.StartedTurn,
+	})
+	if err != nil {
+		return tool.Result{}, err
+	}
+	return tool.Result{ID: strings.TrimSpace(call.ID), Name: sendmessage.ToolName, Content: []model.Part{model.NewJSONPart(raw)}}, nil
+}
+
+func (t runtimeSendMessageTool) hasLocalTaskTarget(ctx context.Context, target string) bool {
+	if sessionHasSubagentTarget(t.session, target) {
+		return true
+	}
+	if t.runtime == nil || t.runtime.tasks == nil {
+		return false
+	}
+	_, err := t.runtime.tasks.resolveTaskHandle(ctx, t.sessionRef, target)
+	return err == nil
+}
+
+func sessionHasSubagentTarget(activeSession session.Session, target string) bool {
+	targetHandle := taskapi.NormalizeHandle(target)
+	targetID := strings.TrimSpace(target)
+	if targetHandle == "" {
+		return false
+	}
+	for _, participant := range activeSession.Participants {
+		if participant.Kind != session.ParticipantKindSubagent {
+			continue
+		}
+		if taskapi.NormalizeHandle(participant.Label) == targetHandle ||
+			(targetID != "" && strings.EqualFold(strings.TrimSpace(participant.DelegationID), targetID)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (tm *taskRuntime) registerSandboxRuntime(runtime sandbox.Runtime) {
@@ -474,6 +585,9 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if err != nil {
 		return tool.Result{}, err
 	}
+	if normalizedAction == "write" && identity.kind != taskapi.KindCommand {
+		return tool.Result{}, fmt.Errorf("agent-sdk/runtime: Task write accepts RunCommand handles only; use SendMessage for subagent %q", handles[0])
+	}
 	yield := time.Duration(0)
 	switch normalizedAction {
 	case "wait":
@@ -517,6 +631,9 @@ func durationMillis(value time.Duration) int {
 }
 
 func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Call, action string, handles []string, input string) tool.Result {
+	if strings.EqualFold(action, "wait") {
+		return t.callBatchTaskWaitAny(ctx, call, handles)
+	}
 	items := make([]taskBatchControlItem, 0, len(handles))
 	started := time.Now()
 	for _, handle := range handles {
@@ -564,6 +681,89 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Cal
 	}
 	result := taskBatchControlToolResult(call, t.base.Definition(), items, action, actualWaitMS)
 	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, action, input, actualWaitMS, items)
+	return result
+}
+
+func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Call, handles []string) tool.Result {
+	type target struct {
+		handle   string
+		identity taskControlIdentity
+	}
+	type outcome struct {
+		target
+		snapshot taskapi.Snapshot
+		err      error
+		waitMS   int
+	}
+	itemsByHandle := make(map[string]taskBatchControlItem, len(handles))
+	targets := make([]target, 0, len(handles))
+	for _, handle := range handles {
+		identity, err := t.tasks.resolveTaskHandle(ctx, t.sessionRef, handle)
+		if err != nil {
+			itemsByHandle[handle] = taskBatchControlItem{Handle: handle, Err: err}
+			continue
+		}
+		targets = append(targets, target{handle: handle, identity: identity})
+	}
+	started := time.Now()
+	if len(targets) > 0 {
+		waitCtx, cancel := context.WithCancel(ctx)
+		results := make(chan outcome, len(targets))
+		for _, item := range targets {
+			go func(item target) {
+				itemStarted := time.Now()
+				snapshot, err := t.tasks.Wait(waitCtx, t.sessionRef, taskapi.ControlRequest{
+					TaskID: item.identity.taskID, Yield: taskWaitMaxYield,
+					Principal: session.ActorKindTool, Source: "agent_tool",
+				})
+				results <- outcome{target: item, snapshot: snapshot, err: err, waitMS: durationMillis(time.Since(itemStarted))}
+			}(item)
+		}
+		var winner outcome
+		outcomes := make(map[string]outcome, len(targets))
+		received := 0
+		for received < len(targets) {
+			result := <-results
+			received++
+			outcomes[result.handle] = result
+			// A running snapshot is not a wait-any winner. It may be an
+			// observation taken while another lifecycle owner is committing,
+			// or a normal yield expiry. Keep the other waits alive until one
+			// target is terminal or every target has returned.
+			if result.err == nil && !result.snapshot.Running {
+				winner = result
+				break
+			}
+		}
+		cancel()
+		for received < len(targets) {
+			result := <-results
+			received++
+			outcomes[result.handle] = result
+		}
+		for _, item := range targets {
+			waited := outcomes[item.handle]
+			if waited.err == nil {
+				itemsByHandle[item.handle] = taskBatchControlItem{Handle: item.handle, Snapshot: waited.snapshot, OK: true, ActualWaitMS: waited.waitMS}
+				continue
+			}
+			if winner.handle == "" || !errors.Is(waited.err, context.Canceled) {
+				itemsByHandle[item.handle] = taskBatchControlItem{Handle: item.handle, Err: waited.err, ActualWaitMS: waited.waitMS}
+				continue
+			}
+			snapshot, err := t.tasks.Read(ctx, t.sessionRef, taskapi.ControlRequest{
+				TaskID: item.identity.taskID, Principal: session.ActorKindTool, Source: "agent_tool",
+			})
+			itemsByHandle[item.handle] = taskBatchControlItem{Handle: item.handle, Snapshot: snapshot, OK: err == nil, Err: err}
+		}
+	}
+	items := make([]taskBatchControlItem, 0, len(handles))
+	for _, handle := range handles {
+		items = append(items, itemsByHandle[handle])
+	}
+	actualWaitMS := durationMillis(time.Since(started))
+	result := taskBatchControlToolResult(call, t.base.Definition(), items, "wait", actualWaitMS)
+	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, "wait", "", actualWaitMS, items)
 	return result
 }
 

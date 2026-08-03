@@ -18,6 +18,7 @@ type GatewayAgentConfig struct {
 	PromptRouterFactory  PromptRouterFactory
 	SlashResultFormatter SlashResultFormatter
 	TaskStreamClient     taskstream.Client
+	AgentMessages        AgentMessageHandler
 }
 
 // NewGatewayAgent constructs the product ACP surface exclusively from typed
@@ -31,6 +32,7 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		PromptRouterFactory:  cfg.PromptRouterFactory,
 		SlashResultFormatter: cfg.SlashResultFormatter,
 		TaskStreamClient:     cfg.TaskStreamClient,
+		AgentMessages:        cfg.AgentMessages,
 		AppName:              cfg.AppName,
 		UserID:               cfg.UserID,
 		WorkspaceKey:         cfg.WorkspaceKey,

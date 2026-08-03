@@ -179,6 +179,134 @@ func TestSubagentOutputOverlayRendersFullAnchoredACPTranscript(t *testing.T) {
 	}
 }
 
+func TestSubagentOutputViewUsesSpawnOnlyForIdentityAndDropsSyntheticNoOutput(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	view := model.ensureSubagentOutputView("spawn-1")
+	initialStatus := view.block.Status
+	view.observeOwnerIdentity(SubagentEvent{
+		Kind: SEToolCall, CallID: "spawn-1", Name: "SPAWN",
+		Args: "xena[breeze]: inspect", TaskHandle: "xena",
+		Done: true, Output: "(no output)", OutputSynthetic: true,
+	})
+	view.observeChildEvent(TranscriptEvent{
+		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent,
+		Actor: "self", TurnID: "task-1:1", AnchorToolCallID: "spawn-1", AnchorToolName: "SPAWN",
+		NarrativeKind: TranscriptNarrativeReasoning, Text: "child reasoning",
+	})
+
+	if view.actor != "xena[breeze]" || view.block.Actor != "xena[breeze]" {
+		t.Fatalf("overlay actor = %q/%q, want stable Spawn identity", view.actor, view.block.Actor)
+	}
+	if view.block.Status != initialStatus {
+		t.Fatalf("Spawn owner changed child transcript status to %q", view.block.Status)
+	}
+	plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
+	if !strings.Contains(plain, "child reasoning") || strings.Contains(plain, "(no output)") {
+		t.Fatalf("overlay rows did not preserve child transcript without placeholder:\n%s", plain)
+	}
+}
+
+func TestSubagentOutputWorkspaceRendersMultipleTurnsAsOneChronologicalTranscript(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.taskHandle = "zuri"
+	view.actor = "zuri[breeze]"
+
+	view.observeChildEvent(TranscriptEvent{
+		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "child-turn-1",
+		NarrativeKind: TranscriptNarrativeUser, Actor: "user", Text: "inspect the repository",
+	})
+	view.observeChildEvent(TranscriptEvent{
+		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "child-turn-1",
+		NarrativeKind: TranscriptNarrativeReasoning, Text: "first turn reasoning",
+	})
+	view.observeChildEvent(TranscriptEvent{
+		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "child-turn-1",
+		NarrativeKind: TranscriptNarrativeAssistant, Text: "first turn complete", Final: true,
+	})
+	view.observeChildEvent(TranscriptEvent{
+		Kind: TranscriptEventLifecycle, Scope: ACPProjectionSubagent, TurnID: "child-turn-1",
+		State: eventstream.LifecycleStateCompleted,
+	})
+	view.observeChildEvent(TranscriptEvent{
+		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "child-turn-2",
+		NarrativeKind: TranscriptNarrativeUser, Actor: "parent", Text: "check the follow-up",
+	})
+	view.observeChildEvent(TranscriptEvent{
+		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "child-turn-2",
+		NarrativeKind: TranscriptNarrativeReasoning, Text: "second turn reasoning",
+	})
+	view.observeChildEvent(TranscriptEvent{
+		Kind: TranscriptEventNarrative, Scope: ACPProjectionSubagent, TurnID: "child-turn-2",
+		NarrativeKind: TranscriptNarrativeAssistant, Text: "second turn complete", Final: true,
+	})
+	view.observeChildEvent(TranscriptEvent{
+		Kind: TranscriptEventLifecycle, Scope: ACPProjectionSubagent, TurnID: "child-turn-2",
+		State: eventstream.LifecycleStateCompleted,
+	})
+
+	plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 40)), "\n")
+	for _, want := range []string{
+		"inspect the repository",
+		"first turn reasoning",
+		"first turn complete",
+		"parent: check the follow-up",
+		"second turn reasoning",
+		"second turn complete",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("subagent workspace omitted %q:\n%s", want, plain)
+		}
+	}
+	for _, forbidden := range []string{"Turn 1", "Turn 2", "Message from parent", "(no output)"} {
+		if strings.Contains(plain, forbidden) {
+			t.Fatalf("subagent workspace exposed internal lifecycle label %q:\n%s", forbidden, plain)
+		}
+	}
+	if len(view.turnBlocks) != 2 {
+		t.Fatalf("internal Turn groups = %d, want two", len(view.turnBlocks))
+	}
+}
+
+func TestOpeningSubagentOutputOverlayDoesNotCompleteRunningChild(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	block := NewMainACPTurnBlock("turn-1")
+	// The Spawn tool invocation is complete once it returns the handle. Its
+	// child Task is independently still running.
+	block.UpdateToolWithMeta(
+		"spawn-1",
+		"SPAWN",
+		"zuri[breeze]: inspect",
+		"(no output)",
+		true,
+		false,
+		ToolUpdateMeta{TaskHandle: "zuri", OutputSynthetic: true},
+	)
+	model.doc.Append(block)
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.taskHandle = "zuri"
+	view.block.Status = eventstream.LifecycleStateRunning
+
+	if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-1") {
+		t.Fatal("openSubagentOutputOverlay() = false")
+	}
+	if view.block.Status != eventstream.LifecycleStateRunning {
+		t.Fatalf("opening overlay changed child state to %q, want running", view.block.Status)
+	}
+	if demand := model.taskStreamDemandForOwner("spawn-1", "zuri"); demand != taskStreamDemandVisibleSubagent {
+		t.Fatalf("opening overlay changed Task stream demand to %v, want background observation", demand)
+	}
+	if view.actor != "zuri[breeze]" || view.taskHandle != "zuri" {
+		t.Fatalf("opening overlay identity = actor %q handle %q", view.actor, view.taskHandle)
+	}
+}
+
 func TestSubagentOutputOverlayKeepsPromptAboveOutput(t *testing.T) {
 	t.Parallel()
 
@@ -205,82 +333,6 @@ func TestSubagentOutputOverlayKeepsPromptAboveOutput(t *testing.T) {
 	}
 	if promptIndex < outputIndex {
 		t.Fatalf("approval prompt rendered beneath subagent output overlay:\n%s", frame)
-	}
-}
-
-func TestSubagentOutputOverlayAlwaysAppendsDurableFinalResponseAfterPartialStream(t *testing.T) {
-	t.Parallel()
-
-	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	model.width = 100
-	model.height = 28
-	view := model.ensureSubagentOutputView("spawn-1")
-	view.actor = "reviewer"
-	view.block.Actor = "reviewer"
-	view.block.AppendStreamEvent(
-		SEReasoning,
-		"checking the first candidate",
-		newNarrativeSourceIdentity("thought-1", "", ""),
-		time.Unix(320, 0),
-	)
-	view.block.AppendStreamEvent(
-		SEAssistant,
-		"Partial observation.",
-		newNarrativeSourceIdentity("message-1", "", ""),
-		time.Unix(321, 0),
-	)
-	view.observeOwnerEvent(SubagentEvent{
-		Kind:   SEToolCall,
-		CallID: "spawn-1",
-		Output: "# Final answer\n\nThe durable conclusion.",
-		Done:   true,
-	})
-
-	rows := model.subagentOutputRows(view, 96, 20)
-	plain := strings.Join(renderedPlainRows(rows), "\n")
-	for _, want := range []string{
-		"checking the first candidate",
-		"Partial observation.",
-		"· Final answer",
-		"The durable conclusion.",
-	} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("overlay rows omitted %q:\n%s", want, plain)
-		}
-	}
-	if strings.Contains(plain, "Final response") {
-		t.Fatalf("durable FinalResponse retained its redundant section label:\n%s", plain)
-	}
-	if strings.Index(plain, "The durable conclusion.") < strings.Index(plain, "Partial observation.") {
-		t.Fatalf("durable FinalResponse did not render at the transcript tail:\n%s", plain)
-	}
-}
-
-func TestSubagentOutputOverlayDoesNotDuplicateMatchingFinalAssistantTail(t *testing.T) {
-	t.Parallel()
-
-	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	model.width = 100
-	view := model.ensureSubagentOutputView("spawn-1")
-	view.block.AppendStreamEvent(
-		SEAssistant,
-		"The canonical final response.",
-		newNarrativeSourceIdentity("message-final", "", ""),
-		time.Unix(325, 0),
-	)
-	view.observeOwnerEvent(SubagentEvent{
-		Kind:   SEToolCall,
-		CallID: "spawn-1",
-		Output: "The canonical final response.",
-		Done:   true,
-	})
-
-	plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
-	if got := strings.Count(plain, "The canonical final response."); got != 1 {
-		t.Fatalf("matching FinalResponse rendered %d times:\n%s", got, plain)
-	}
-	if strings.Contains(plain, "Final response") {
-		t.Fatalf("matching assistant tail received a duplicate FinalResponse section:\n%s", plain)
 	}
 }
 
@@ -344,7 +396,7 @@ func TestSubagentOutputOverlayLatePlanDoesNotReopenTerminalStatus(t *testing.T) 
 	if view.block.Status != eventstream.LifecycleStateCompleted {
 		t.Fatalf("late PlanUpdate changed terminal status to %q", view.block.Status)
 	}
-	if demand := model.taskStreamDemandForOwner("spawn-1", "zuri"); demand != taskStreamDemandFinishedSubagent {
+	if demand := model.taskStreamDemandForOwner("spawn-1", "zuri"); demand != taskStreamDemandNone {
 		t.Fatalf("late PlanUpdate restored Task stream demand: %v", demand)
 	}
 }
@@ -807,7 +859,7 @@ func TestSubagentOutputOverlayTitleUsesOnlySemanticDot(t *testing.T) {
 	view := model.ensureSubagentOutputView("spawn-1")
 	view.actor = "reviewer"
 	view.block.Actor = "reviewer"
-	view.setStatus("completed", time.Unix(330, 0))
+	view.block.Status = eventstream.LifecycleStateCompleted
 
 	title := ansi.Strip(model.renderSubagentOutputTitle(view, 72))
 	for _, want := range []string{"•", "Subagent", "reviewer", "×"} {

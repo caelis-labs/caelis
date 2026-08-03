@@ -162,11 +162,19 @@ func TestCloseSubscriptionCancelsOnlyDelivery(t *testing.T) {
 		subscribeStarted: make(chan struct{}), subscribeStopped: make(chan struct{}),
 	}
 	service := newTaskStreamTestService(t, newTaskStreamTestStore(entry), runtime, "generation-1")
-	result, err := service.Subscribe(context.Background(), Principal{ID: "owner"}, SubscribeRequest{SessionID: "session-1", TaskID: "task-1"})
+	result, err := service.Subscribe(context.Background(), Principal{ID: "owner"}, SubscribeRequest{
+		SessionID: "session-1", TaskID: "task-1", Follow: true,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitTaskStreamSignal(t, runtime.subscribeStarted, "runtime subscription start")
+	runtime.mu.Lock()
+	request := runtime.lastSubscribeRequest
+	runtime.mu.Unlock()
+	if !request.Follow {
+		t.Fatalf("Runtime Subscribe request = %#v, want Follow", request)
+	}
 	if err := result.Subscription.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -176,20 +184,18 @@ func TestCloseSubscriptionCancelsOnlyDelivery(t *testing.T) {
 	}
 }
 
-func TestSubscribeRefreshesTaskDescriptorAcrossContinue(t *testing.T) {
+func TestSubscribeRefreshesTaskDescriptorWithinOneActivityPeriod(t *testing.T) {
 	t.Parallel()
 
 	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
-	entry.State = task.StateCompleted
-	entry.Running = false
-	entry.Metadata["turn_id"] = "turn-1"
+	entry.State = task.StateRunning
+	entry.Running = true
+	entry.Metadata["turn_id"] = "turn-2"
 	initial := stream.Snapshot{
-		Ref:    stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"},
-		Cursor: stream.Cursor{Events: 1}, State: string(task.StateCompleted), SupportsInput: true, TerminalFramed: true,
-		Frames: []stream.Frame{{
-			Ref:   stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1"},
-			State: string(task.StateCompleted), Cursor: stream.Cursor{Events: 1}, Closed: true,
-		}},
+		Ref:     stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-2"},
+		Cursor:  stream.Cursor{Events: 1},
+		State:   string(task.StateRunning),
+		Running: true,
 	}
 	runtime := &taskStreamTestRuntime{
 		snapshots: map[string]stream.Snapshot{"task-1": initial},
@@ -227,8 +233,8 @@ func TestSubscribeRefreshesTaskDescriptorAcrossContinue(t *testing.T) {
 	if got := continued[0].Task; got.CurrentTurnID != "turn-2" || got.State != task.StateRunning || !got.Running || got.SupportsInput {
 		t.Fatalf("running descriptor = %#v, want live turn-2 state", got)
 	}
-	if got := continued[1].Task; got.CurrentTurnID != "turn-2" || got.State != task.StateCompleted || got.Running || !got.SupportsInput {
-		t.Fatalf("terminal descriptor = %#v, want continuable completed turn-2 state", got)
+	if got := continued[1].Task; got.CurrentTurnID != "turn-2" || got.State != task.StateCompleted || got.Running || got.SupportsInput {
+		t.Fatalf("terminal descriptor = %#v, want completed turn-2 without Task input", got)
 	}
 }
 
@@ -276,7 +282,7 @@ func newTaskStreamTestService(t *testing.T, store task.Store, runtime stream.Ser
 func taskStreamTestEntry(sessionID, taskID string, kind task.Kind) *task.Entry {
 	return &task.Entry{
 		TaskID: taskID, Handle: "handle-" + taskID, Session: session.SessionRef{SessionID: sessionID}, Kind: kind,
-		Title: "Task " + taskID, State: task.StateCompleted, SupportsInput: kind == task.KindSubagent,
+		Title: "Task " + taskID, State: task.StateCompleted, SupportsInput: false,
 		SupportsCancel: true, Metadata: map[string]any{"parent_call": "parent-" + taskID, "turn_id": "turn-1", "agent": "orbit"},
 	}
 }
@@ -356,11 +362,12 @@ func (s *taskStreamTestStore) GetSessionTaskByHandle(_ context.Context, ref sess
 }
 
 type taskStreamTestRuntime struct {
-	mu               sync.Mutex
-	snapshots        map[string]stream.Snapshot
-	subscribeFrames  []stream.Frame
-	subscribeStarted chan struct{}
-	subscribeStopped chan struct{}
+	mu                   sync.Mutex
+	snapshots            map[string]stream.Snapshot
+	subscribeFrames      []stream.Frame
+	lastSubscribeRequest stream.SubscribeRequest
+	subscribeStarted     chan struct{}
+	subscribeStopped     chan struct{}
 }
 
 func (r *taskStreamTestRuntime) Read(_ context.Context, req stream.ReadRequest) (stream.Snapshot, error) {
@@ -373,9 +380,10 @@ func (r *taskStreamTestRuntime) Read(_ context.Context, req stream.ReadRequest) 
 	return stream.CloneSnapshot(snapshot), nil
 }
 
-func (r *taskStreamTestRuntime) Subscribe(ctx context.Context, _ stream.SubscribeRequest) iter.Seq2[*stream.Frame, error] {
+func (r *taskStreamTestRuntime) Subscribe(ctx context.Context, req stream.SubscribeRequest) iter.Seq2[*stream.Frame, error] {
 	return func(yield func(*stream.Frame, error) bool) {
 		r.mu.Lock()
+		r.lastSubscribeRequest = req
 		frames := append([]stream.Frame(nil), r.subscribeFrames...)
 		r.mu.Unlock()
 		for _, frame := range frames {

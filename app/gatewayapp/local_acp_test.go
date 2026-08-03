@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/control/agentbinding"
@@ -32,8 +33,10 @@ func TestLocalStackInjectsOnlySelfUntilProfileIsBound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveTurn() error = %v", err)
 	}
-	if !toolSetHas(resolved.RunRequest.AgentSpec.Tools, spawn.ToolName) || !toolSetHas(resolved.RunRequest.AgentSpec.Tools, task.ToolName) {
-		t.Fatalf("tools = %#v, want SPAWN and task tools", resolved.RunRequest.AgentSpec.Tools)
+	if !toolSetHas(resolved.RunRequest.AgentSpec.Tools, spawn.ToolName) ||
+		!toolSetHas(resolved.RunRequest.AgentSpec.Tools, task.ToolName) ||
+		!toolSetHas(resolved.RunRequest.AgentSpec.Tools, sendmessage.ToolName) {
+		t.Fatalf("tools = %#v, want explicit SPAWN, Task, and SendMessage capabilities", resolved.RunRequest.AgentSpec.Tools)
 	}
 	if !spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "self") {
 		t.Fatal("SPAWN Agent enum missing self")

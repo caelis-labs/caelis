@@ -926,6 +926,108 @@ func TestChatAgentDrainsPendingUserSubmissionAfterToolResults(t *testing.T) {
 	}
 }
 
+func TestChatAgentDrainsAgentMessageAsContextNotUserEvent(t *testing.T) {
+	t.Parallel()
+
+	for _, persisted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("persisted=%t", persisted), func(t *testing.T) {
+			scope := session.EventScope{TurnID: "turn-1", Source: "agent_message"}
+			ctx := agent.NewContext(agent.ContextSpec{
+				Context: context.Background(),
+				Session: session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}},
+				DrainSubmissions: func() []agent.Submission {
+					return []agent.Submission{{
+						Kind: agent.SubmissionKindAgentMessage, Text: "child update",
+						MessageID: "message-1", Persisted: persisted,
+						Actor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@orbit"},
+						Scope: &scope,
+					}}
+				},
+			})
+			var messages []model.Message
+			var events []*session.Event
+			accepted, err := (&Agent{}).drainPendingSubmissions(ctx, &messages, func(event *session.Event) bool {
+				events = append(events, event)
+				return true
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !accepted || len(messages) != 1 || messages[0].Role != model.RoleUser || messages[0].TextContent() != "Agent message from @orbit: child update" {
+				t.Fatalf("accepted/messages = %t / %#v", accepted, messages)
+			}
+			if persisted {
+				if len(events) != 0 {
+					t.Fatalf("persisted submission emitted duplicate events: %#v", events)
+				}
+				return
+			}
+			if len(events) != 1 || session.EventTypeOf(events[0]) != session.EventTypeContext {
+				t.Fatalf("events = %#v, want one Context", events)
+			}
+			if events[0].Actor.Kind != session.ActorKindParticipant || events[0].MessageID != "message-1" || events[0].Protocol != nil {
+				t.Fatalf("Agent Context = %#v", events[0])
+			}
+		})
+	}
+}
+
+func TestChatAgentRejectsMalformedAgentMessageSubmission(t *testing.T) {
+	t.Parallel()
+
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		DrainSubmissions: func() []agent.Submission {
+			return []agent.Submission{{
+				Kind: agent.SubmissionKindAgentMessage, Text: "untrusted wakeup", MessageID: "message-1",
+				Actor: session.ActorRef{Kind: session.ActorKindUser, ID: "user-1", Name: "user"},
+			}}
+		},
+	})
+	var messages []model.Message
+	accepted, err := (&Agent{}).drainPendingSubmissions(ctx, &messages, func(*session.Event) bool { return true })
+	if err == nil || accepted || len(messages) != 0 {
+		t.Fatalf("malformed Agent message = accepted %t messages %#v error %v, want fail closed", accepted, messages, err)
+	}
+}
+
+func TestAgentContextHistoryProjectsTypedActorIntoProviderMessage(t *testing.T) {
+	t.Parallel()
+
+	message := model.NewTextMessage(model.RoleUser, "child update")
+	event := &session.Event{
+		Type: session.EventTypeContext, Visibility: session.VisibilityCanonical,
+		Actor:   session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@orbit"},
+		Message: &message, Text: "child update",
+		Scope: &session.EventScope{Source: "runtime_delivery"},
+		Meta:  map[string]any{"agent_message": true},
+	}
+	messages := messagesFromContext(agent.NewContext(agent.ContextSpec{
+		Context: context.Background(), Events: []*session.Event{event},
+	}))
+	if len(messages) != 1 || messages[0].Role != model.RoleUser || messages[0].TextContent() != "Agent message from @orbit: child update" {
+		t.Fatalf("Agent Context messages = %#v", messages)
+	}
+}
+
+func TestTypedActorContextWithoutAgentMessageMarkerKeepsOriginalProjection(t *testing.T) {
+	t.Parallel()
+
+	message := model.NewTextMessage(model.RoleUser, "policy context")
+	event := &session.Event{
+		Type: session.EventTypeContext, Visibility: session.VisibilityCanonical,
+		Actor:   session.ActorRef{Kind: session.ActorKindController, ID: "controller-1", Name: "main"},
+		Message: &message, Text: "policy context",
+		Scope: &session.EventScope{Source: "runtime_policy"},
+	}
+	messages := messagesFromContext(agent.NewContext(agent.ContextSpec{
+		Context: context.Background(), Events: []*session.Event{event},
+	}))
+	if len(messages) != 1 || messages[0].Role != model.RoleUser || messages[0].TextContent() != "policy context" {
+		t.Fatalf("non-Agent Context messages = %#v, want original projection", messages)
+	}
+}
+
 func TestToolCallEventsPersistCompleteAssistantMessage(t *testing.T) {
 	t.Parallel()
 
@@ -1090,6 +1192,7 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 	}
 
 	contextMessage := model.NewTextMessage(model.RoleUser, "[Plugin context: prompt-plugin]\nprefer concise answers")
+	agentMessage := model.NewTextMessage(model.RoleUser, "child status")
 	user := model.NewTextMessage(model.RoleUser, "inspect both values")
 	appendEvent := func(event *session.Event) {
 		t.Helper()
@@ -1106,6 +1209,12 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 		Message:    &contextMessage,
 		Text:       contextMessage.TextContent(),
 		Meta:       map[string]any{"source": "plugin_hook"},
+	})
+	appendEvent(&session.Event{
+		Type: session.EventTypeContext, Visibility: session.VisibilityCanonical,
+		Actor:   session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@orbit"},
+		Message: &agentMessage, Text: agentMessage.TextContent(),
+		Scope: &session.EventScope{Source: "subagent_message"},
 	})
 	appendEvent(&session.Event{Type: session.EventTypeUser, Message: &user})
 
@@ -1136,23 +1245,26 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 		Events:  loaded.Events,
 	})
 	messages := messagesFromContext(ctx)
-	if got, want := len(messages), 5; got != want {
+	if got, want := len(messages), 6; got != want {
 		t.Fatalf("len(messages) = %d, want %d: %#v", got, want, messages)
 	}
 	if got := messages[0].TextContent(); !strings.Contains(got, "prefer concise answers") {
 		t.Fatalf("context text = %q, want durable plugin context", got)
 	}
-	if got := messages[1].TextContent(); got != "inspect both values" {
+	if got := messages[1].TextContent(); got != "Agent message from @orbit: child status" {
+		t.Fatalf("Agent Context text = %q, want typed actor prefix", got)
+	}
+	if got := messages[2].TextContent(); got != "inspect both values" {
 		t.Fatalf("user text = %q, want original text", got)
 	}
-	if got := messages[2].ReasoningText(); got != "Need both tool results." {
+	if got := messages[3].ReasoningText(); got != "Need both tool results." {
 		t.Fatalf("assistant reasoning = %q, want original reasoning", got)
 	}
-	calls := messages[2].ToolCalls()
+	calls := messages[3].ToolCalls()
 	if len(calls) != 2 || calls[0].ThoughtSignature != "sig-one" || calls[1].ThoughtSignature != "sig-two" {
 		t.Fatalf("assistant tool calls = %#v, want calls with replay signatures", calls)
 	}
-	if got := len(messages[3].ToolResults()) + len(messages[4].ToolResults()); got != 2 {
+	if got := len(messages[4].ToolResults()) + len(messages[5].ToolResults()); got != 2 {
 		t.Fatalf("tool result count = %d, want 2", got)
 	}
 }
@@ -2180,7 +2292,7 @@ func TestCollectFinalResponseRejectsImagesForTextOnlyModel(t *testing.T) {
 	}
 }
 
-func TestToolResultEventPreservesSpawnObservedRunningStatus(t *testing.T) {
+func TestToolResultEventCompletesSpawnInvocationWhileChildRuns(t *testing.T) {
 	t.Parallel()
 
 	event := toolResultEvent(model.ToolCall{
@@ -2199,8 +2311,25 @@ func TestToolResultEventPreservesSpawnObservedRunningStatus(t *testing.T) {
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
 	}
-	if got := event.Tool.Status; got != "running" {
-		t.Fatalf("status = %q, want Spawn observed running status", got)
+	if got := event.Tool.Status; got != "completed" {
+		t.Fatalf("status = %q, want completed Spawn invocation", got)
+	}
+}
+
+func TestToolResultEventCompletesSendMessageInvocationWhileTargetRuns(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID: "message-1", Name: "SendMessage", Args: `{"to":"bryn","message":"continue"}`,
+	}, tool.Result{
+		ID: "message-1", Name: "SendMessage",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"accepted": true, "state": "running", "to": "bryn",
+		}))},
+	}, nil)
+
+	if event.Tool == nil || event.Tool.Status != "completed" {
+		t.Fatalf("event = %#v, want completed delivery invocation", event)
 	}
 }
 
@@ -2720,7 +2849,7 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 				t.Fatal("Run() ended before tool progress")
 				continue
 			}
-			if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Status == "running" {
+			if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Status == "in_progress" {
 				progress = event
 			}
 		case <-deadline:

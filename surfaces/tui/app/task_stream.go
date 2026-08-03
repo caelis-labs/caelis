@@ -22,21 +22,23 @@ const (
 	taskStreamMailboxBudget    = 16 * time.Millisecond
 	taskStreamRetryDelay       = 250 * time.Millisecond
 	taskStreamRetryBackoffCap  = 4
+	taskStreamCleanExitRetries = 3
 )
 
 var errTaskStreamNotDiscoverable = errors.New("task stream is not discoverable yet")
+var errTaskStreamUnexpectedClose = errors.New("following task stream ended unexpectedly")
 
 type taskStreamDemand uint8
 
 const (
 	taskStreamDemandNone taskStreamDemand = iota
-	taskStreamDemandFinishedSubagent
 	taskStreamDemandExpandedPanel
-	taskStreamDemandBackgroundSubagent
+	taskStreamDemandVisibleSubagent
 )
 
 func (d taskStreamDemand) wanted() bool {
-	return d == taskStreamDemandExpandedPanel || d == taskStreamDemandBackgroundSubagent
+	return d == taskStreamDemandExpandedPanel ||
+		d == taskStreamDemandVisibleSubagent
 }
 
 type taskStreamOpenedMsg struct {
@@ -187,13 +189,11 @@ func (m *Model) taskStreamDemandForOwner(callID, handle string) taskStreamDemand
 	callID = strings.TrimSpace(callID)
 	handle = normalizeTaskStreamHandle(handle)
 	if view := m.subagentOutputViews[callID]; view != nil {
-		if view.block == nil {
-			return taskStreamDemandNone
+		if m.subagentOutputOverlay != nil &&
+			strings.TrimSpace(m.subagentOutputOverlay.callID) == callID {
+			return taskStreamDemandVisibleSubagent
 		}
-		if subagentOutputStatusFromState(view.block.Status) != subagentOutputRunning {
-			return taskStreamDemandFinishedSubagent
-		}
-		return taskStreamDemandBackgroundSubagent
+		return taskStreamDemandNone
 	}
 	if m.taskStreamPanelExpanded(callID, handle) {
 		return taskStreamDemandExpandedPanel
@@ -201,9 +201,9 @@ func (m *Model) taskStreamDemandForOwner(callID, handle string) taskStreamDemand
 	return taskStreamDemandNone
 }
 
-// reconcileSubagentOutputTaskStreams makes each Spawn output view the sole
-// presentation owner of its child subscription. Visibility of the overlay is
-// intentionally irrelevant: closing the overlay does not stop observation.
+// reconcileSubagentOutputTaskStreams keeps Task output observation scoped to
+// visible presentation demand. A hidden subagent workspace retains its
+// Document and absolute cursor but owns no live subscription.
 func (m *Model) reconcileSubagentOutputTaskStreams() {
 	if m == nil {
 		return
@@ -364,12 +364,14 @@ func (m *Model) startTaskStreamForwarder(sessionID, taskID string, token uint64,
 	if cfg.ProgramSender == nil || cfg.TaskStreams == nil {
 		return
 	}
+	follow := m.taskStreamDemandForTaskID(taskID) == taskStreamDemandVisibleSubagent
 	ctx := contextOrBackground(cfg.Context)
 	cfg.ProgramSender.startForwarder(func() {
 		result, err := cfg.TaskStreams.Subscribe(ctx, taskstream.SubscribeRequest{
 			SessionID: sessionID,
 			TaskID:    taskID,
 			Cursor:    cursor,
+			Follow:    follow,
 		})
 		if err != nil {
 			cfg.ProgramSender.SendMsg(taskStreamClosedMsg{sessionID: sessionID, taskID: taskID, token: token, cursor: cursor, err: err})
@@ -476,6 +478,18 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 	if !demand.wanted() {
 		m.wantResolvedTaskStream(msg.taskID, false)
 		return m, nil
+	}
+	if msg.err == nil && demand == taskStreamDemandVisibleSubagent && m.taskStreamWanted[msg.taskID] {
+		m.taskStreamRetries[msg.taskID]++
+		if m.taskStreamRetries[msg.taskID] > taskStreamCleanExitRetries {
+			m.taskStreamTokens[msg.taskID] = 0
+			handle := m.taskStreamHandlesByID[msg.taskID]
+			return m, m.showHint(taskStreamUnavailableHint(handle, errTaskStreamUnexpectedClose), hintOptions{
+				priority: HintPriorityHigh, clearOnMessage: true, clearAfter: systemHintDuration,
+			})
+		}
+		m.taskStreamTokens[msg.taskID] = 0
+		return m, taskStreamSubscribeRetryCmd(msg.sessionID, msg.taskID, m.taskStreamRetries[msg.taskID])
 	}
 	// Delivery failures are local to this panel. Recoverable failures resume
 	// from the last accepted cursor; an evicted prefix is returned as a gap.

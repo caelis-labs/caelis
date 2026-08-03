@@ -2,14 +2,18 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 )
+
+const subagentParticipantAttachAttempts = 4
 
 func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSession session.Session, task *subagentTask, parentCall string) error {
 	if tm == nil || tm.runtime == nil || tm.runtime.sessions == nil || task == nil {
@@ -37,60 +41,57 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSess
 	if !ok {
 		return fmt.Errorf("agent-sdk/runtime: participant lifecycle store does not support atomic subagent attachment")
 	}
-	current, err := tm.runtime.sessions.Session(ctx, task.sessionRef)
-	if err != nil {
-		return err
-	}
-	binding := session.ParticipantBinding{
-		ID:            strings.TrimSpace(task.anchor.AgentID),
-		Kind:          session.ParticipantKindSubagent,
-		Role:          role,
-		AgentName:     strings.TrimSpace(task.agent),
-		Label:         mention,
-		Placement:     delegationPlacement(task),
-		SessionID:     strings.TrimSpace(task.anchor.SessionID),
-		Source:        firstNonEmpty(strings.TrimSpace(taskStringValue(task.metadata["source"])), "agent_spawn"),
-		ParentTurnID:  strings.TrimSpace(parentCall),
-		DelegationID:  strings.TrimSpace(task.ref.TaskID),
-		AttachedAt:    tm.runtime.now(),
-		ControllerRef: strings.TrimSpace(current.Controller.EpochID),
-	}
-	event := &session.Event{
-		IdempotencyKey: "subagent-participant:" + task.ref.TaskID + ":attached",
-		Type:           session.EventTypeParticipant,
-		Visibility:     session.VisibilityMirror,
-		Time:           tm.runtime.now(),
-		Actor: session.ActorRef{
-			Kind: session.ActorKindSystem,
-			ID:   "spawn",
-			Name: "spawn",
-		},
-		Protocol: ptrEventProtocol(session.NewParticipantProtocol(session.ProtocolParticipant{Action: "attached"})),
-		Scope: &session.EventScope{
-			Participant: session.ParticipantRef{
-				ID:           strings.TrimSpace(task.anchor.AgentID),
-				Kind:         session.ParticipantKindSubagent,
-				Role:         role,
-				DelegationID: strings.TrimSpace(task.ref.TaskID),
+	var lastErr error
+	for range subagentParticipantAttachAttempts {
+		current, err := tm.runtime.sessions.Session(ctx, task.sessionRef)
+		if err != nil {
+			return err
+		}
+		if existing, ok := participantBinding(current, task.anchor.AgentID); ok {
+			if strings.TrimSpace(existing.DelegationID) == strings.TrimSpace(task.ref.TaskID) {
+				return nil
+			}
+			return &session.ParticipantBindingConflictError{
+				ParticipantID: task.anchor.AgentID, ExpectedDelegation: task.ref.TaskID, ActualDelegation: existing.DelegationID,
+			}
+		}
+		binding := session.ParticipantBinding{
+			ID: strings.TrimSpace(task.anchor.AgentID), Kind: session.ParticipantKindSubagent, Role: role,
+			AgentName: strings.TrimSpace(task.agent), Label: mention, Placement: delegationPlacement(task),
+			SessionID:    strings.TrimSpace(task.anchor.SessionID),
+			Source:       firstNonEmpty(strings.TrimSpace(taskStringValue(task.metadata["source"])), "agent_spawn"),
+			ParentTurnID: strings.TrimSpace(parentCall), DelegationID: strings.TrimSpace(task.ref.TaskID),
+			AttachedAt: tm.runtime.now(), ControllerRef: strings.TrimSpace(current.Controller.EpochID),
+		}
+		event := &session.Event{
+			IdempotencyKey: "subagent-participant:" + task.ref.TaskID + ":attached",
+			Type:           session.EventTypeParticipant, Visibility: session.VisibilityMirror, Time: tm.runtime.now(),
+			Actor:    session.ActorRef{Kind: session.ActorKindSystem, ID: "spawn", Name: "spawn"},
+			Protocol: ptrEventProtocol(session.NewParticipantProtocol(session.ProtocolParticipant{Action: "attached"})),
+			Scope: &session.EventScope{Participant: session.ParticipantRef{
+				ID: strings.TrimSpace(task.anchor.AgentID), Kind: session.ParticipantKindSubagent,
+				Role: role, DelegationID: strings.TrimSpace(task.ref.TaskID),
+			}},
+			Meta: map[string]any{
+				"task_id": task.ref.TaskID, "agent": task.agent, "agent_id": task.anchor.AgentID,
+				"handle": handle, "mention": mention, "profile_id": task.target.Placement.ProfileID,
+				"reasoning_effort": task.target.Placement.ReasoningEffort,
+				"session_id":       task.anchor.SessionID, "state": string(task.state),
 			},
-		},
-		Meta: map[string]any{
-			"task_id":          task.ref.TaskID,
-			"agent":            task.agent,
-			"agent_id":         task.anchor.AgentID,
-			"handle":           handle,
-			"mention":          mention,
-			"profile_id":       task.target.Placement.ProfileID,
-			"reasoning_effort": task.target.Placement.ReasoningEffort,
-			"session_id":       task.anchor.SessionID,
-			"state":            string(task.state),
-		},
+		}
+		_, _, err = lifecycle.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
+			SessionRef: task.sessionRef, ExpectedRevision: &current.Revision, MutationGuard: session.RuntimeMutationGuard(ctx),
+			ExpectedDelegationID: stringPointer(task.ref.TaskID), Binding: binding, Event: event,
+		})
+		if err == nil || session.IsCommitted(err) {
+			return err
+		}
+		if !errors.Is(err, session.ErrRevisionConflict) {
+			return err
+		}
+		lastErr = err
 	}
-	_, _, err = lifecycle.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
-		SessionRef: task.sessionRef, ExpectedRevision: &current.Revision, MutationGuard: session.RuntimeMutationGuard(ctx),
-		ExpectedDelegationID: stringPointer(task.ref.TaskID), Binding: binding, Event: event,
-	})
-	return err
+	return lastErr
 }
 
 func delegationPlacement(task *subagentTask) placement.Placement {
@@ -179,6 +180,43 @@ func (tm *taskRuntime) appendSideSubagentUserEvent(ctx context.Context, task *su
 		},
 	})
 	return err
+}
+
+// appendSubagentMessageMirror records accepted outbound delivery for parent
+// audit/replay without adding the child-directed body to main model context.
+// The target Agent owns the canonical Context in its own Session.
+func (tm *taskRuntime) appendSubagentMessageMirror(ctx context.Context, task *subagentTask, req agentmessage.Request) error {
+	if tm == nil || tm.runtime == nil || tm.runtime.sessions == nil || task == nil {
+		return nil
+	}
+	req = agentmessage.NormalizeRequest(req)
+	if req.MessageID == "" || req.Text == "" {
+		return fmt.Errorf("agent-sdk/runtime: Agent message id and text are required")
+	}
+	role := subagentParticipantRole(task)
+	message := model.NewTextMessage(model.RoleUser, req.Text)
+	return tm.appendSubagentSagaEvent(ctx, task.sessionRef, &session.Event{
+		IdempotencyKey: "agent-message-mirror:" + req.MessageID,
+		MessageID:      req.MessageID,
+		Type:           session.EventTypeContext, Visibility: session.VisibilityMirror,
+		Time: tm.runtime.now(), Actor: session.CloneActorRef(req.From),
+		Scope: &session.EventScope{
+			TurnID: subagentTurnID(task.ref.TaskID, task.turnSeq), Source: "agent_message_outbound",
+			Executor: session.ParticipantExecutor(session.ParticipantBinding{
+				ID: task.anchor.AgentID, Kind: session.ParticipantKindSubagent, Role: role,
+				AgentName: task.agent, Label: "@" + strings.TrimPrefix(strings.TrimSpace(task.handle), "@"),
+			}),
+			Participant: session.ParticipantRef{
+				ID: task.anchor.AgentID, Kind: session.ParticipantKindSubagent, Role: role,
+				DelegationID: task.ref.TaskID,
+			},
+		},
+		Message: &message, Text: req.Text,
+		Meta: map[string]any{
+			"agent_message": true, "delivery_state": "accepted", "to": strings.TrimSpace(task.handle),
+			"handle": strings.TrimSpace(task.handle), "agent": strings.TrimSpace(task.agent),
+		},
+	})
 }
 
 func (tm *taskRuntime) appendSideSubagentFinalEvent(ctx context.Context, task *subagentTask) error {

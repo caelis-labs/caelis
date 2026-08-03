@@ -11,6 +11,7 @@ type ToolUpdateMeta struct {
 	TaskAction      string
 	TaskInput       string
 	TaskTargetKind  string
+	MessageTarget   string
 	ToolKind        string
 	FullArgs        string
 	MessageID       string
@@ -52,6 +53,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	taskAction := strings.ToLower(strings.TrimSpace(update.Meta.TaskAction))
 	taskInput := strings.TrimSpace(update.Meta.TaskInput)
 	taskTargetKind := strings.ToLower(strings.TrimSpace(update.Meta.TaskTargetKind))
+	messageTarget := strings.TrimSpace(update.Meta.MessageTarget)
 	authoritativeFinal := update.Meta.OutputAuthoritative || toolFinalOutputAuthoritative(update.Err, update.Meta.ToolStatus)
 	effectiveName, effectiveToolKind, openIdx := effectiveToolEventIdentity(out, update, toolIndex, name, toolKind)
 	semanticName := toolSemanticName(effectiveName, effectiveToolKind)
@@ -103,6 +105,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			TaskAction:        taskAction,
 			TaskInput:         taskInput,
 			TaskTargetKind:    taskTargetKind,
+			MessageTarget:     messageTarget,
 		})
 		return out, true, false
 	}
@@ -131,6 +134,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		TaskAction:        taskAction,
 		TaskInput:         taskInput,
 		TaskTargetKind:    taskTargetKind,
+		MessageTarget:     messageTarget,
 	}
 	if i := openToolEventIndexForUpdate(out, update, toolIndex); i >= 0 {
 		ev := &out[i]
@@ -270,6 +274,9 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 	if ev.TaskTargetKind == "" {
 		ev.TaskTargetKind = taskTargetKind
 	}
+	if ev.MessageTarget == "" {
+		ev.MessageTarget = strings.TrimSpace(meta.MessageTarget)
+	}
 	if meta.Terminal {
 		ev.Terminal = true
 	}
@@ -336,6 +343,9 @@ func fillFinalToolEventFromExisting(finalEvent *SubagentEvent, existing Subagent
 	if strings.TrimSpace(finalEvent.ToolKind) == "" {
 		finalEvent.ToolKind = strings.TrimSpace(existing.ToolKind)
 	}
+	if strings.TrimSpace(finalEvent.MessageTarget) == "" {
+		finalEvent.MessageTarget = strings.TrimSpace(existing.MessageTarget)
+	}
 	if !finalEvent.Terminal {
 		finalEvent.Terminal = existing.Terminal
 	}
@@ -387,6 +397,9 @@ func fillMissingFinalToolEventFromExisting(finalEvent *SubagentEvent, existing S
 	if strings.TrimSpace(finalEvent.ToolKind) == "" {
 		finalEvent.ToolKind = strings.TrimSpace(existing.ToolKind)
 	}
+	if strings.TrimSpace(finalEvent.MessageTarget) == "" {
+		finalEvent.MessageTarget = strings.TrimSpace(existing.MessageTarget)
+	}
 	if !finalEvent.Terminal {
 		finalEvent.Terminal = existing.Terminal
 	}
@@ -406,6 +419,7 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authorita
 	ev.Args = finalEvent.Args
 	mergeStartArgs(ev, finalEvent.StartArgs, finalEvent.Args)
 	ev.FullArgs = finalEvent.FullArgs
+	ev.MessageTarget = firstNonEmpty(finalEvent.MessageTarget, ev.MessageTarget)
 	ev.Terminal = ev.Terminal || finalEvent.Terminal
 	ev.OutputGapBefore = ev.OutputGapBefore || finalEvent.OutputGapBefore
 	outputReplaced := false

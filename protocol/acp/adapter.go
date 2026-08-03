@@ -32,6 +32,11 @@ type SessionModelAdapter interface {
 	SetSessionModel(context.Context, SetSessionModelRequest) (SetSessionModelResponse, error)
 }
 
+// SessionMessageAdapter accepts one Agent-authored Context message.
+type SessionMessageAdapter interface {
+	SessionMessage(context.Context, SessionMessageRequest, PromptCallbacks) (SessionMessageResponse, error)
+}
+
 func AsSessionListAdapter(agent Agent) (SessionListAdapter, bool) {
 	adapter, ok := agent.(SessionListAdapter)
 	return adapter, ok
@@ -59,6 +64,11 @@ func AsSessionConfigAdapter(agent Agent) (SessionConfigAdapter, bool) {
 
 func AsSessionModelAdapter(agent Agent) (SessionModelAdapter, bool) {
 	adapter, ok := agent.(SessionModelAdapter)
+	return adapter, ok
+}
+
+func AsSessionMessageAdapter(agent Agent) (SessionMessageAdapter, bool) {
+	adapter, ok := agent.(SessionMessageAdapter)
 	return adapter, ok
 }
 

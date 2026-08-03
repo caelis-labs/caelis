@@ -23,8 +23,8 @@ The bridge owns one authenticated-operation recovery path:
 4. execute the method according to its declared type;
 5. retry the original operation once.
 
-This path covers Session open and resume as well as prompts on active
-controller, participant, and spawned-Agent Sessions.
+This path covers Session open and resume as well as prompts and negotiated
+Agent messages on active controller, participant, and spawned-Agent Sessions.
 
 Stable agent-managed methods call `authenticate` with the declared `methodId`
 on the current ACP connection. A missing method type normalizes to `agent`, as
@@ -56,6 +56,45 @@ Session and falls back to `session/new`; method selection, login, and repeated
 See the upstream
 [ACP authentication methods RFD](https://agentclientprotocol.com/rfds/auth-methods)
 for the wire contract.
+
+## Agent Messages
+
+Built-in Caelis ACP children support bidirectional Agent messages through the
+negotiated `_caelis.dev/session/message` extension. An Agent advertises support
+under `initialize.agentCapabilities._meta`; a client with an inbound handler
+advertises the same key in `clientCapabilities`. Missing capability fails
+explicitly and is never emulated with a new `session/prompt` or `Task write`.
+
+The extension carries `sessionId`, `messageId`, `to`, optional display-only
+`from`, and `message`. Caelis derives the authoritative source from the trusted
+Spawn/Session binding rather than the wire `from` value. Delivery to a running
+child is mid-turn; delivery to a completed child queues its next Turn on the
+same ACP Session. Child-to-parent and child-to-sibling delivery returns once
+the routing boundary owns asynchronous delivery, independently of target
+consumption or completion. Parent-side outbound audit is written only after
+that ownership transfer and remains a mirror; the remote target Session owns
+canonical message context. If that acceptance succeeds but the sender cannot refresh its local Task index, Caelis returns
+`accepted_unpersisted` without a delivery error so callers do not blindly repeat
+the queued effect with a new message ID.
+
+For a message-authored Turn on a previously completed child, the spawning
+runner owns the asynchronous ACP request after `SendMessage` returns. The ACP
+child keeps `_caelis.dev/session/message` open until that Turn is terminal and
+returns `state: completed`; the runner publishes that later outcome through the
+Task lifecycle. The response also carries `startedTurn` and `turnId` for Task
+observation. A non-terminal acknowledgement such as `state: running` does not
+prove completion; the runner records `unknown_outcome` rather than a false
+completed Task result.
+
+`SendMessage` is the incremental channel for updates and questions. A child's
+terminal answer remains its final response and is retrieved by the parent with
+`Task read` or `Task wait`; sending the same terminal answer through both paths
+creates duplicate narrative. Result fields are observation, not a second Task
+lifecycle: `pending` means canonical context is durable for a later Turn,
+`delivered` means a live target accepted submission, `running` means a new
+message-authored child activity started, and `completed` is returned only after
+that ACP activity closes. `startedTurn` marks that transition and `turnId`
+groups the activity; neither is a completion guarantee.
 
 ## Agent Default Model
 

@@ -19,7 +19,7 @@ import (
 
 const structuredFinalMessageForFidelityTest = "# 完成\n\n已创建文件。\n\n---\n\n### 结果\n\n- 第一项\n- 第二项\n\n| 文件 | 状态 |\n| --- | --- |\n| `hello.go` | 好 |\n\n```go\nfmt.Println(\"你好\")\n```\n\n创建文件\n\n> **结果**"
 
-func TestDurableTaskWaitFinalCompletesOriginalSpawnPanel(t *testing.T) {
+func TestDurableTaskWaitFinalCompletesOriginalSpawnPanelWithoutInjectingChildWorkspace(t *testing.T) {
 	t.Parallel()
 
 	model := applyCanonicalOutputFidelitySequence(t, acpprojector.SessionEventTransport{})
@@ -51,15 +51,8 @@ func TestDurableTaskWaitFinalCompletesOriginalSpawnPanel(t *testing.T) {
 		t.Fatal("completed Spawn row did not open its canonical output overlay")
 	}
 	plain = subagentOutputOverlayPlain(model)
-	for _, want := range []string{"完成", "第一项", "第二项", "hello.go", "fmt.Println", "创建文件", "结果"} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("output overlay Final Message missing %q:\n%s", want, plain)
-		}
-	}
-	for _, forbidden := range []string{"(wait subagent output)", "---###", "创建文件>"} {
-		if strings.Contains(plain, forbidden) {
-			t.Fatalf("output overlay contains glued/placeholder text %q:\n%s", forbidden, plain)
-		}
+	if strings.Contains(plain, "hello.go") || strings.Contains(plain, "fmt.Println") {
+		t.Fatalf("parent Task result was injected into child workspace order:\n%s", plain)
 	}
 }
 

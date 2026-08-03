@@ -333,34 +333,36 @@ func (m *Model) toggleSubagentOutputRow(token string) bool {
 		return false
 	}
 	view := m.subagentOutputViews[m.subagentOutputOverlay.callID]
-	if view == nil || view.block == nil {
+	if view == nil || view.document == nil {
 		return false
 	}
 	token = strings.TrimSpace(token)
-	switch {
-	case strings.HasPrefix(token, "acp_tool_panel:"):
-		callID := strings.TrimSpace(strings.TrimPrefix(token, "acp_tool_panel:"))
-		if !view.block.toggleToolPanelClick(callID) {
+	for _, documentBlock := range view.document.Blocks() {
+		block, ok := documentBlock.(*ParticipantTurnBlock)
+		if !ok {
+			continue
+		}
+		var changed bool
+		switch {
+		case strings.HasPrefix(token, "acp_tool_panel:"):
+			callID := strings.TrimSpace(strings.TrimPrefix(token, "acp_tool_panel:"))
+			changed = block.toggleToolPanelClick(callID)
+		case strings.HasPrefix(token, "acp_reasoning:"):
+			key := strings.TrimSpace(strings.TrimPrefix(token, "acp_reasoning:"))
+			changed = block.toggleReasoningExpanded(key)
+		case strings.HasPrefix(token, "acp_exploration_stage:"):
+			key := strings.TrimSpace(strings.TrimPrefix(token, "acp_exploration_stage:"))
+			changed = block.toggleExplorationExpanded(key)
+		case strings.HasPrefix(token, "acp_exploration_stable:"):
+			key := strings.TrimSpace(strings.TrimPrefix(token, "acp_exploration_stable:"))
+			changed = block.toggleExplorationExpanded(key)
+		default:
 			return false
 		}
-	case strings.HasPrefix(token, "acp_reasoning:"):
-		key := strings.TrimSpace(strings.TrimPrefix(token, "acp_reasoning:"))
-		if !view.block.toggleReasoningExpanded(key) {
-			return false
+		if changed {
+			view.touch(true)
+			return true
 		}
-	case strings.HasPrefix(token, "acp_exploration_stage:"):
-		key := strings.TrimSpace(strings.TrimPrefix(token, "acp_exploration_stage:"))
-		if !view.block.toggleExplorationExpanded(key) {
-			return false
-		}
-	case strings.HasPrefix(token, "acp_exploration_stable:"):
-		key := strings.TrimSpace(strings.TrimPrefix(token, "acp_exploration_stable:"))
-		if !view.block.toggleExplorationExpanded(key) {
-			return false
-		}
-	default:
-		return false
 	}
-	view.touch(true)
-	return true
+	return false
 }

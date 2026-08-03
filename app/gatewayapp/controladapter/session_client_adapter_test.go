@@ -368,6 +368,79 @@ func TestAppServerAdapterResumeFailurePreservesCurrentSession(t *testing.T) {
 	}
 }
 
+func TestAppServerAdapterStaleStatusCannotUndoResume(t *testing.T) {
+	baseClient := &sessionClientAdapterTestClient{
+		target:       controlclient.TurnTarget{HandleID: "handle-resumed", RunID: "run-resumed", TurnID: "turn-resumed"},
+		subscription: newSessionClientAdapterTestSubscription(),
+		state: controlclient.SessionState{
+			Revision:   7,
+			CWD:        t.TempDir(),
+			Controller: session.ControllerBinding{EpochID: "epoch-1"},
+		},
+	}
+	client := &blockingInspectSessionClient{
+		sessionClientAdapterTestClient: baseClient,
+		started:                        make(chan controlclient.StateRequest, 1),
+		release:                        make(chan struct{}),
+	}
+	adapter, err := NewAppServerAdapter(AppServerAdapterConfig{
+		SessionID:     "session-startup",
+		WorkspaceKey:  "workspace",
+		WorkspaceDir:  baseClient.state.CWD,
+		Surface:       "cli-tui",
+		Sessions:      client,
+		Participants:  &sessionClientAdapterTestParticipantClient{},
+		Status:        sessionClientAdapterTestStatusClient{},
+		Configuration: sessionClientAdapterTestConfigurationClient{},
+		Agents:        &sessionClientAdapterTestAgentClient{},
+		Completion:    &sessionClientAdapterTestCompletionClient{},
+		Plugins:       &sessionClientAdapterTestPluginClient{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	statusDone := make(chan error, 1)
+	go func() {
+		_, statusErr := adapter.LightweightStatus(context.Background())
+		statusDone <- statusErr
+	}()
+	request := <-client.started
+	if request.SessionID != "session-startup" {
+		t.Fatalf("stale status inspection SessionID = %q, want session-startup", request.SessionID)
+	}
+
+	resumed, err := adapter.ResumeSession(context.Background(), "session-resumed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := resumed.Reconnect.Close(); err != nil {
+		t.Fatal(err)
+	}
+	close(client.release)
+	if err := <-statusDone; err != nil {
+		t.Fatal(err)
+	}
+
+	baseClient.subscription = newSessionClientAdapterTestSubscription()
+	turn, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "continue resumed session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn == nil {
+		t.Fatal("Submit() Turn = nil")
+	}
+	if err := turn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	baseClient.mu.Lock()
+	prompt := baseClient.prompt
+	baseClient.mu.Unlock()
+	if prompt.SessionID != "session-resumed" || adapter.clientSessionID() != "session-resumed" {
+		t.Fatalf("post-resume prompt SessionID = %q, active = %q, want session-resumed", prompt.SessionID, adapter.clientSessionID())
+	}
+}
+
 func TestAppServerAdapterRoutesSlashDiscoveryAndPluginsThroughTypedClients(t *testing.T) {
 	sessions := &sessionClientAdapterTestClient{state: controlclient.SessionState{
 		SessionID: "session-typed", CWD: t.TempDir(), Revision: 3,
@@ -509,6 +582,24 @@ type sessionClientAdapterTestStatusClient struct{}
 
 func (sessionClientAdapterTestStatusClient) SessionStatus(context.Context, controlclient.StatusRequest) (controlstatus.StatusSnapshot, error) {
 	return controlstatus.StatusSnapshot{}, nil
+}
+
+type blockingInspectSessionClient struct {
+	*sessionClientAdapterTestClient
+	started chan controlclient.StateRequest
+	release chan struct{}
+	once    sync.Once
+}
+
+func (c *blockingInspectSessionClient) InspectSession(ctx context.Context, request controlclient.StateRequest) (controlclient.SessionState, error) {
+	c.once.Do(func() {
+		c.started <- request
+		select {
+		case <-c.release:
+		case <-ctx.Done():
+		}
+	})
+	return c.sessionClientAdapterTestClient.InspectSession(ctx, request)
 }
 
 type sessionClientAdapterTestConfigurationClient struct{}

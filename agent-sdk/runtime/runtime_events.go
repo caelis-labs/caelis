@@ -7,19 +7,37 @@ import (
 	"fmt"
 	"strings"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 )
 
-func buildUserEvent(
+func validateRunInput(req agent.RunRequest) error {
+	switch req.InputType {
+	case "", session.EventTypeUser:
+		return nil
+	case session.EventTypeContext:
+		if strings.TrimSpace(req.InputMessageID) == "" || !session.ActorRefHasIdentity(req.InputActor) {
+			return fmt.Errorf("agent-sdk/runtime: Agent message input requires message id and source actor")
+		}
+		return nil
+	default:
+		return fmt.Errorf("agent-sdk/runtime: unsupported run input event type %q", req.InputType)
+	}
+}
+
+func buildInputEvent(
 	activeSession session.Session,
 	turnID string,
 	input string,
 	displayInput string,
 	parts []model.ContentPart,
 	actor session.ActorRef,
+	eventType session.EventType,
+	messageID string,
+	inputScope *session.EventScope,
 	compaction *session.EventCompactionContext,
 ) *session.Event {
 	if strings.TrimSpace(input) == "" && len(parts) == 0 {
@@ -29,29 +47,45 @@ func buildUserEvent(
 	if !session.ActorRefHasIdentity(actor) {
 		actor = session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
 	}
+	if eventType == "" {
+		eventType = session.EventTypeUser
+	}
 	var compactionCopy *session.EventCompactionContext
 	if compaction != nil {
 		cloned := *compaction
 		cloned.UserEvidence = append([]string(nil), compaction.UserEvidence...)
 		compactionCopy = &cloned
 	}
-	return &session.Event{
-		IdempotencyKey: "turn-input:" + strings.TrimSpace(turnID),
-		Type:           session.EventTypeUser,
+	idempotencyKey := "turn-input:" + strings.TrimSpace(turnID)
+	if messageID = strings.TrimSpace(messageID); messageID != "" {
+		idempotencyKey = "agent-message:" + messageID
+	}
+	scope := defaultScope(activeSession, turnID)
+	if inputScope != nil {
+		scope = session.CloneEventScope(*inputScope)
+		if scope.TurnID == "" {
+			scope.TurnID = strings.TrimSpace(turnID)
+		}
+	}
+	event := &session.Event{
+		IdempotencyKey: idempotencyKey,
+		Type:           eventType,
 		Visibility:     session.VisibilityCanonical,
 		Actor:          actor,
 		Compaction:     compactionCopy,
-		Scope:          ptrScope(defaultScope(activeSession, turnID)),
-		Protocol: &session.EventProtocol{
-			Update: &session.ProtocolUpdate{
-				SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
-				Content:       session.ProtocolTextContent(displayText),
-			},
-		},
-		Message: &message,
-		Text:    displayText,
-		Meta:    meta,
+		Scope:          &scope,
+		MessageID:      messageID,
+		Message:        &message,
+		Text:           displayText,
+		Meta:           meta,
 	}
+	if eventType == session.EventTypeUser {
+		event.Protocol = &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
+			Content:       session.ProtocolTextContent(displayText),
+		}}
+	}
+	return event
 }
 
 func normalizeEvent(activeSession session.Session, turnID string, event *session.Event) *session.Event {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/sessionvisibility"
 )
 
 func (g *Gateway) StartSession(ctx context.Context, req StartSessionRequest) (session.Session, error) {
@@ -45,6 +46,9 @@ func (g *Gateway) LoadSession(ctx context.Context, req LoadSessionRequest) (sess
 	if err != nil {
 		return session.LoadedSession{}, wrapSessionError(err)
 	}
+	if sessionvisibility.IsSystemManagedSession(loaded.Session) {
+		return session.LoadedSession{}, resumeSessionNotFoundError()
+	}
 	g.bind(req.BindingKey, loaded.Session.SessionRef, req.Binding)
 	return loaded, nil
 }
@@ -58,7 +62,7 @@ func (g *Gateway) ResumeSession(ctx context.Context, req ResumeSessionRequest) (
 		loaded, err := g.loadResumeTarget(ctx, session.SessionRef{SessionID: targetID}, req, limit)
 		switch {
 		case err == nil && loaded.Session.SessionID == targetID:
-			if !resumeSessionInScope(loaded.Session, req) {
+			if !resumeSessionInScope(loaded.Session, req) || sessionvisibility.IsSystemManagedSession(loaded.Session) {
 				return session.LoadedSession{}, resumeSessionNotFoundError()
 			}
 			g.bind(req.BindingKey, loaded.Session.SessionRef, req.Binding)
@@ -86,7 +90,7 @@ func (g *Gateway) ResumeSession(ctx context.Context, req ResumeSessionRequest) (
 	if err != nil {
 		return session.LoadedSession{}, wrapSessionError(err)
 	}
-	if !resumeSessionInScope(loaded.Session, req) {
+	if !resumeSessionInScope(loaded.Session, req) || sessionvisibility.IsSystemManagedSession(loaded.Session) {
 		return session.LoadedSession{}, resumeSessionNotFoundError()
 	}
 	g.bind(req.BindingKey, loaded.Session.SessionRef, req.Binding)
@@ -238,7 +242,7 @@ func (g *Gateway) filterListedSessions(ctx context.Context, summaries []session.
 }
 
 func (g *Gateway) isSystemManagedSessionSummary(ctx context.Context, summary session.SessionSummary) (bool, error) {
-	if metadataString(summary.Metadata, "system_managed_agent") != "" {
+	if sessionvisibility.IsSystemManagedSummary(summary) {
 		return true, nil
 	}
 	if !looksLikeLegacySystemManagedSessionSummary(summary) {
@@ -251,7 +255,7 @@ func (g *Gateway) isSystemManagedSessionSummary(ctx context.Context, summary ses
 	if err != nil {
 		return false, err
 	}
-	return metadataString(loaded.Metadata, "system_managed_agent") != "", nil
+	return sessionvisibility.IsSystemManagedSession(loaded), nil
 }
 
 func looksLikeLegacySystemManagedSessionSummary(summary session.SessionSummary) bool {

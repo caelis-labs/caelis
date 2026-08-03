@@ -92,7 +92,9 @@ func (s *service) Events(ctx context.Context, principal Principal, req ReadReque
 }
 
 func (s *service) Subscribe(ctx context.Context, principal Principal, req SubscribeRequest) (SubscribeResult, error) {
-	entry, point, sameGeneration, err := s.prepare(ctx, principal, req)
+	entry, point, sameGeneration, err := s.prepare(ctx, principal, ReadRequest{
+		SessionID: req.SessionID, TaskID: req.TaskID, Cursor: req.Cursor,
+	})
 	if err != nil {
 		return SubscribeResult{}, err
 	}
@@ -111,13 +113,20 @@ func (s *service) Subscribe(ctx context.Context, principal Principal, req Subscr
 		_ = sub.Close()
 		return SubscribeResult{}, errorcode.New(errorcode.Unavailable, "taskstream: runtime streams are unavailable")
 	}
-	go s.forward(sub, streams, entry, point, initial)
+	go s.forward(sub, streams, entry, point, initial, req.Follow)
 	return SubscribeResult{
 		Subscription: sub, ResumeMode: mode, TransientGap: gap, BoundaryCursor: boundary,
 	}, nil
 }
 
-func (s *service) forward(sub *subscription, streams stream.Service, entry *task.Entry, point cursorPoint, initial []Record) {
+func (s *service) forward(
+	sub *subscription,
+	streams stream.Service,
+	entry *task.Entry,
+	point cursorPoint,
+	initial []Record,
+	follow bool,
+) {
 	defer sub.finish(nil)
 	for _, record := range initial {
 		if !sub.enqueue(record) {
@@ -126,7 +135,8 @@ func (s *service) forward(sub *subscription, streams stream.Service, entry *task
 	}
 	req := stream.SubscribeRequest{
 		Ref:    stream.Ref{SessionID: entry.Session.SessionID, TaskID: entry.TaskID},
-		Cursor: point.Cursor, FollowContinues: entry.Kind == task.KindSubagent,
+		Cursor: point.Cursor,
+		Follow: follow,
 	}
 	for frame, err := range streams.Subscribe(sub.ctx, req) {
 		if err != nil {
@@ -297,7 +307,7 @@ func descriptorForSnapshot(entry *task.Entry, snapshot stream.Snapshot) TaskDesc
 		descriptor.State = task.State(state)
 	}
 	descriptor.Running = snapshot.Running
-	descriptor.SupportsInput = snapshot.SupportsInput
+	descriptor.SupportsInput = entry != nil && entry.Kind == task.KindCommand && snapshot.SupportsInput
 	if turnID := strings.TrimSpace(snapshot.Ref.TerminalID); turnID != "" {
 		descriptor.CurrentTurnID = turnID
 	}
@@ -314,8 +324,7 @@ func descriptorForFrame(entry *task.Entry, frame stream.Frame) TaskDescriptor {
 	case state != "":
 		descriptor.State = task.State(state)
 		descriptor.Running = frame.Running
-		descriptor.SupportsInput = entry != nil && entry.Kind == task.KindSubagent &&
-			!frame.Running && descriptor.State == task.StateCompleted
+		descriptor.SupportsInput = false
 	case frame.Running:
 		descriptor.State = task.StateRunning
 		descriptor.Running = true
@@ -358,7 +367,7 @@ func descriptorFromEntry(entry *task.Entry) TaskDescriptor {
 		Handle:      firstString(entry.Handle, mapString(entry.Metadata, "handle"), mapString(entry.Spec, "handle"), entry.TaskID),
 		AgentHandle: firstString(mapString(entry.Metadata, "agent"), mapString(entry.Spec, "agent")),
 		Kind:        entry.Kind, Title: strings.TrimSpace(entry.Title), State: entry.State, Running: entry.Running,
-		SupportsInput: entry.SupportsInput, SupportsCancel: entry.SupportsCancel,
+		SupportsInput: entry.Kind == task.KindCommand && entry.SupportsInput, SupportsCancel: entry.SupportsCancel,
 		ParentTool:    ParentTool{ToolCallID: parentCall, ToolName: parentTool},
 		ParticipantID: firstString(mapString(entry.Metadata, "agent_id"), mapString(entry.Spec, "agent_id")),
 		CurrentTurnID: firstString(mapString(entry.Metadata, "turn_id"), mapString(entry.Spec, "turn_id"), entry.Terminal.TerminalID),

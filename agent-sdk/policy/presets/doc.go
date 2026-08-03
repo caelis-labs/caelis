@@ -13,6 +13,9 @@
 //
 // workspace-write classification rules:
 //
+//   - The assembled Tool set owns capability admission. This preset is not a
+//     second Tool-name allowlist; calls without a maintained risk classifier
+//     are allowed under the default workspace constraints.
 //   - Hard deny is reserved for machine-level catastrophic operations
 //     (system/home root recursive deletes, device wipes, remote pipe execution).
 //   - Built-in filesystem writes outside allowed roots ask for approval with

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
@@ -547,6 +548,71 @@ func TestResumeSessionLoadsExactGlobalIDWithoutListingAndChecksScope(t *testing.
 	}
 }
 
+func TestResumeSessionRejectsExactSystemManagedSessionBeforeBinding(t *testing.T) {
+	t.Parallel()
+
+	for _, metadataOnly := range []bool{false, true} {
+		t.Run(fmt.Sprintf("metadata_only_%v", metadataOnly), func(t *testing.T) {
+			t.Parallel()
+
+			target := session.Session{
+				SessionRef: session.SessionRef{
+					AppName: "caelis", UserID: "user-1", SessionID: "system-child", WorkspaceKey: "workspace-1",
+				},
+				Metadata: map[string]any{"system_managed_agent": "subagent"},
+			}
+			svc := &recordingSessionService{
+				sessionResult:     target,
+				loadSessionResult: session.LoadedSession{Session: target},
+			}
+			gw, err := New(Config{Sessions: svc, Runtime: mockRuntime{}, Resolver: staticResolver{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = gw.ResumeSession(context.Background(), ResumeSessionRequest{
+				AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "workspace-1"},
+				SessionID: target.SessionID, MetadataOnly: metadataOnly, BindingKey: "surface-1",
+			})
+			var gatewayErr *Error
+			if !As(err, &gatewayErr) || gatewayErr.Code != CodeSessionNotFound {
+				t.Fatalf("ResumeSession() error = %v, want session_not_found", err)
+			}
+			if _, ok := gw.CurrentSession("surface-1"); ok {
+				t.Fatal("ResumeSession() bound a system-managed Session")
+			}
+			if svc.listCalls != 0 {
+				t.Fatalf("ListSessions() calls = %d, want exact lookup without fallback", svc.listCalls)
+			}
+		})
+	}
+}
+
+func TestLoadSessionRejectsSystemManagedSessionBeforeBinding(t *testing.T) {
+	t.Parallel()
+
+	target := session.Session{
+		SessionRef: session.SessionRef{SessionID: "guardian-session"},
+		Metadata:   map[string]any{"system_managed_agent": "guardian"},
+	}
+	svc := &recordingSessionService{loadSessionResult: session.LoadedSession{Session: target}}
+	gw, err := New(Config{Sessions: svc, Runtime: mockRuntime{}, Resolver: staticResolver{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = gw.LoadSession(context.Background(), LoadSessionRequest{
+		SessionRef: target.SessionRef, BindingKey: "surface-1",
+	})
+	var gatewayErr *Error
+	if !As(err, &gatewayErr) || gatewayErr.Code != CodeSessionNotFound {
+		t.Fatalf("LoadSession() error = %v, want session_not_found", err)
+	}
+	if _, ok := gw.CurrentSession("surface-1"); ok {
+		t.Fatal("LoadSession() bound a system-managed Session")
+	}
+}
+
 func TestResumeSessionRejectsAmbiguousPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -1006,6 +1072,128 @@ func TestBeginTurnRejectsSecondActiveRunForSameSession(t *testing.T) {
 	var gwErr *Error
 	if !As(err, &gwErr) || gwErr.Code != CodeActiveRunConflict {
 		t.Fatalf("BeginTurn(second) error = %v, want active run conflict", err)
+	}
+}
+
+func TestDeliverAgentMessagePersistsContextThenStartsIdleTurn(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "u", SessionID: "s-message", WorkspaceKey: "ws",
+	}}
+	svc := &recordingSessionService{sessionResult: activeSession}
+	runtime := &recordingRuntime{
+		result: agent.RunResult{Session: activeSession, Handle: &recordingRunner{}},
+		ran:    make(chan struct{}),
+	}
+	gw, err := New(Config{Sessions: svc, Runtime: runtime, Resolver: staticResolver{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery, err := gw.DeliverAgentMessage(context.Background(), activeSession.SessionRef, agentmessage.Request{
+		MessageID: "message-1", To: "orbit", Text: "please inspect",
+		From: session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@maya"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !delivery.Accepted || delivery.State != "running" || delivery.Turn == nil {
+		t.Fatalf("delivery = %#v, want accepted running Turn", delivery)
+	}
+	defer delivery.Turn.Close()
+	select {
+	case <-runtime.ran:
+	case <-time.After(time.Second):
+		t.Fatal("idle Agent message did not start target Turn")
+	}
+	if runtime.lastReq.Input != "" || runtime.lastReq.InputType != "" {
+		t.Fatalf("runtime request = %#v, want durable-history wakeup without duplicate input", runtime.lastReq)
+	}
+	if len(svc.appendReqs) != 1 {
+		t.Fatalf("append requests = %#v, want one durable Agent Context", svc.appendReqs)
+	}
+	appendReq := svc.appendReqs[0]
+	if appendReq.MutationGuard.Purpose != session.ControlMutationPurposeAgentMessage || appendReq.Event == nil ||
+		session.EventTypeOf(appendReq.Event) != session.EventTypeContext || appendReq.Event.Actor.ID != "child-1" {
+		t.Fatalf("Agent Context append = %#v", appendReq)
+	}
+}
+
+func TestDeliverAgentMessageReturnsAcceptedPendingWhenWakeupFails(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "u", SessionID: "s-message-pending", WorkspaceKey: "ws",
+	}}
+	svc := &recordingSessionService{sessionResult: activeSession}
+	gw, err := New(Config{
+		Sessions: svc,
+		Runtime:  &recordingRuntime{session: activeSession},
+		Resolver: staticResolver{err: errors.New("target assembly unavailable")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery, err := gw.DeliverAgentMessage(context.Background(), activeSession.SessionRef, agentmessage.Request{
+		MessageID: "message-pending-1", To: "orbit", Text: "please inspect later",
+		From: session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@maya"},
+	})
+	if err != nil {
+		t.Fatalf("DeliverAgentMessage() error = %v, want durable acceptance", err)
+	}
+	if !delivery.Accepted || delivery.State != "pending" || delivery.Turn != nil {
+		t.Fatalf("delivery = %#v, want accepted pending without Turn", delivery)
+	}
+	if len(svc.appendReqs) != 1 || svc.appendReqs[0].Event == nil || svc.appendReqs[0].Event.MessageID != "message-pending-1" {
+		t.Fatalf("durable Agent Context requests = %#v", svc.appendReqs)
+	}
+}
+
+func TestDeliverAgentMessageRetryDoesNotResubmitLiveContext(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "u", SessionID: "s-message-retry", WorkspaceKey: "ws",
+	}}
+	svc := &recordingSessionService{sessionResult: activeSession, appendOutcomes: []bool{true, false}}
+	runner := &submitRecordingBlockingRunner{release: make(chan struct{})}
+	runtime := &recordingRuntime{
+		result: agent.RunResult{Session: activeSession, Handle: runner},
+		ran:    make(chan struct{}),
+	}
+	gw, err := New(Config{Sessions: svc, Runtime: runtime, Resolver: staticResolver{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := agentmessage.Request{
+		MessageID: "message-retry-1", To: "orbit", Text: "please inspect",
+		From: session.ActorRef{Kind: session.ActorKindParticipant, ID: "child-1", Name: "@maya"},
+	}
+	first, err := gw.DeliverAgentMessage(context.Background(), activeSession.SessionRef, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-runtime.ran:
+	case <-time.After(time.Second):
+		t.Fatal("first message did not start a Turn")
+	}
+	second, err := gw.DeliverAgentMessage(context.Background(), activeSession.SessionRef, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Accepted || second.State != "pending" {
+		t.Fatalf("deliveries = %#v, %#v; want accepted then idempotent pending", first, second)
+	}
+	events := first.Turn.ACPEvents()
+	close(runner.release)
+	for range events {
+	}
+	if submissions := runner.snapshot(); len(submissions) != 0 {
+		t.Fatalf("retry submissions = %#v, want no duplicate live Agent message", submissions)
+	}
+	if len(svc.appendReqs) != 2 {
+		t.Fatalf("append attempts = %d, want two idempotent attempts", len(svc.appendReqs))
 	}
 }
 

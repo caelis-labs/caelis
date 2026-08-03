@@ -4,21 +4,22 @@ package identity
 import "strings"
 
 const (
-	Read       = "Read"
-	ViewImage  = "ViewImage"
-	Write      = "Write"
-	Patch      = "Patch"
-	List       = "List"
-	Glob       = "Glob"
-	Grep       = "Grep"
-	RunCommand = "RunCommand"
-	Task       = "Task"
-	Plan       = "Plan"
-	Skill      = "Skill"
-	WebSearch  = "WebSearch"
-	WebFetch   = "WebFetch"
-	Spawn      = "Spawn"
-	ToolSearch = "ToolSearch"
+	Read        = "Read"
+	ViewImage   = "ViewImage"
+	Write       = "Write"
+	Patch       = "Patch"
+	List        = "List"
+	Glob        = "Glob"
+	Grep        = "Grep"
+	RunCommand  = "RunCommand"
+	Task        = "Task"
+	Plan        = "Plan"
+	Skill       = "Skill"
+	WebSearch   = "WebSearch"
+	WebFetch    = "WebFetch"
+	Spawn       = "Spawn"
+	SendMessage = "SendMessage"
+	ToolSearch  = "ToolSearch"
 )
 
 // Kind is the provider-neutral behavior category of a built-in tool.
@@ -43,6 +44,7 @@ const (
 	TitleURL           TitleStyle = "url"
 	TitleCommandAction TitleStyle = "command_action"
 	TitleSpawn         TitleStyle = "spawn"
+	TitleMessage       TitleStyle = "message"
 )
 
 // ResultStyle identifies the shared result renderer for a built-in tool.
@@ -95,6 +97,7 @@ var entries = []entry{
 	{Info: Info{Name: WebSearch, Kind: KindSearch, ExplorationVerb: "Search", TitleStyle: TitleQuery, ResultStyle: ResultWebSearch}, aliases: []string{"websearch", "web_search"}},
 	{Info: Info{Name: WebFetch, Kind: KindSearch, ExplorationVerb: "Fetch", TitleStyle: TitleURL, ResultStyle: ResultWebFetch}, aliases: []string{"webfetch", "web_fetch"}},
 	{Info: Info{Name: Spawn, Kind: KindExecute, TitleStyle: TitleSpawn, ResultStyle: ResultSpawn, TerminalKnown: true, TerminalPanel: true}, aliases: []string{"spawn"}},
+	{Info: Info{Name: SendMessage, Kind: KindExecute, TitleStyle: TitleMessage}, aliases: []string{"sendmessage", "send_message"}},
 	{Info: Info{Name: ToolSearch, Kind: KindOther}, aliases: []string{"toolsearch", "tool_search"}},
 }
 

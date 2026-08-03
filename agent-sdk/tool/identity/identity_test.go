@@ -58,7 +58,7 @@ func TestRegistryOwnsCompleteCanonicalNameSet(t *testing.T) {
 	}
 	want := []string{
 		Read, ViewImage, Write, Patch, Glob, Grep, RunCommand, Task, Plan, Skill,
-		WebSearch, WebFetch, Spawn, ToolSearch,
+		WebSearch, WebFetch, Spawn, SendMessage, ToolSearch,
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("executable registry names = %#v, want %#v", got, want)

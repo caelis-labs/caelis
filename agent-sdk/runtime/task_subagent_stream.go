@@ -2,12 +2,12 @@ package runtime
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
@@ -83,7 +83,62 @@ func (t *subagentTask) seedStreamFromResult(result delegation.Result) {
 	if !taskOutputHasNonBlankLine(text) {
 		return
 	}
-	t.appendStreamFrameLocked(stream.Frame{Text: text, Running: false})
+	t.appendStreamFrameLocked(stream.Frame{
+		Running: false,
+		Event:   t.resultStreamEvent(text),
+	})
+}
+
+// resultStreamEvent turns a runner-only final result into the same semantic
+// child event shape used by live ACP updates. This is a compatibility fallback
+// for runners that return a Result without publishing a final assistant event;
+// delegated Task streams intentionally do not interpret untyped text frames as
+// child dialogue.
+func (t *subagentTask) resultStreamEvent(text string) *session.Event {
+	if t == nil || !taskOutputHasNonBlankLine(text) {
+		return nil
+	}
+	turnID := subagentTurnID(t.ref.TaskID, t.turnSeq)
+	role := subagentParticipantRole(t)
+	participantID := strings.TrimSpace(t.anchor.AgentID)
+	handle := strings.TrimPrefix(strings.TrimSpace(t.handle), "@")
+	actorName := ""
+	if handle != "" {
+		actorName = "@" + handle
+	}
+	messageID := fmt.Sprintf("subagent-result:%s:%d", strings.TrimSpace(t.ref.TaskID), max(t.turnSeq, 1))
+	return &session.Event{
+		ID:         messageID,
+		MessageID:  messageID,
+		Type:       session.EventTypeAssistant,
+		Visibility: session.VisibilityUIOnly,
+		Time:       time.Now(),
+		Actor: session.ActorRef{
+			Kind: session.ActorKindParticipant,
+			ID:   participantID,
+			Role: string(role),
+			Name: actorName,
+		},
+		Scope: &session.EventScope{
+			TurnID: turnID,
+			Source: "subagent_result",
+			Participant: session.ParticipantRef{
+				ID:           participantID,
+				Kind:         session.ParticipantKindSubagent,
+				Role:         role,
+				DelegationID: strings.TrimSpace(t.ref.TaskID),
+			},
+		},
+		Text: text,
+		Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodSessionUpdate,
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+				MessageID:     messageID,
+				Content:       session.ProtocolTextContent(text),
+			},
+		},
+	}
 }
 
 func subagentFramesContainAssistantTextForTurn(frames []stream.Frame, turnID string) bool {
@@ -286,7 +341,7 @@ func (t *subagentTask) notifyStreamChangeLocked() {
 	t.streamChanged = make(chan struct{})
 }
 
-func (t *subagentTask) streamChangeWaiterLocked(cursor stream.Cursor, followContinue bool) (<-chan struct{}, bool) {
+func (t *subagentTask) streamChangeWaiterLocked(cursor stream.Cursor) (<-chan struct{}, bool) {
 	if t == nil {
 		return nil, true
 	}
@@ -298,7 +353,7 @@ func (t *subagentTask) streamChangeWaiterLocked(cursor stream.Cursor, followCont
 		return nil, true
 	}
 	state := string(t.state)
-	if !t.running && stream.IsTerminalState(state) && (!followContinue || t.state != task.StateCompleted) {
+	if !t.running && stream.IsTerminalState(state) {
 		return nil, true
 	}
 	if t.streamChanged == nil {

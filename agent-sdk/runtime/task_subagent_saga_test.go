@@ -12,6 +12,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -175,9 +176,6 @@ func (r *sagaRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req d
 	r.spawnCalls++
 	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-saga", Agent: req.Agent, AgentID: "child-agent-saga"}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted, Result: "saga result"}, nil
 }
-func (*sagaRunner) Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error) {
-	return delegation.Result{}, nil
-}
 func (*sagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
 	return delegation.Result{}, nil
 }
@@ -195,6 +193,129 @@ type sagaSessionService struct {
 	canonicalCalls    int
 	commitCanonical   bool
 	failDetach        bool
+}
+
+type completionNoticeFailSessionService struct {
+	*sagaSessionService
+	fail  atomic.Bool
+	calls atomic.Int64
+}
+
+type revisionBumpBeforeParticipantSessionService struct {
+	session.Service
+	once  sync.Once
+	calls atomic.Int64
+}
+
+type blockingRevisionConflictSessionService struct {
+	session.Service
+	once      sync.Once
+	attempted chan struct{}
+	release   chan struct{}
+	calls     atomic.Int64
+}
+
+type completionPublishingSagaRunner struct {
+	spawnContext subagent.SpawnContext
+	cancelCalls  atomic.Int64
+}
+
+func (r *completionPublishingSagaRunner) Spawn(
+	_ context.Context,
+	spawn subagent.SpawnContext,
+	req delegation.Request,
+) (delegation.Anchor, delegation.Result, error) {
+	r.spawnContext = spawn
+	return delegation.Anchor{
+		TaskID: spawn.TaskID, SessionID: "child-persistent-conflict", Agent: req.Agent, AgentID: spawn.TaskID,
+	}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateRunning, Running: true}, nil
+}
+
+func (*completionPublishingSagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
+	return delegation.Result{}, nil
+}
+
+func (r *completionPublishingSagaRunner) Cancel(context.Context, delegation.Anchor) error {
+	r.cancelCalls.Add(1)
+	return nil
+}
+
+func (s *revisionBumpBeforeParticipantSessionService) PutParticipantWithEvent(
+	ctx context.Context,
+	req session.PutParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	s.calls.Add(1)
+	var bumpErr error
+	s.once.Do(func() {
+		_, bumpErr = agentmessage.AppendContext(
+			ctx,
+			s.Service,
+			req.SessionRef,
+			session.ControlMutationGuard(session.ControlMutationPurposeAgentMessage),
+			session.EventScope{Source: "subagent_completion"},
+			agentmessage.Request{
+				MessageID: "subagent-completion:concurrent:1",
+				To:        agentmessage.Parent,
+				Text:      "Subagent @other is failed. Use Task read with handle other for its full result.",
+				From: session.ActorRef{
+					Kind: session.ActorKindParticipant, ID: "other", Name: "@other",
+				},
+			},
+		)
+	})
+	if bumpErr != nil {
+		return session.Session{}, nil, bumpErr
+	}
+	return s.Service.(session.ParticipantLifecycleService).PutParticipantWithEvent(ctx, req)
+}
+
+func (s *revisionBumpBeforeParticipantSessionService) RemoveParticipantWithEvent(
+	ctx context.Context,
+	req session.RemoveParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	return s.Service.(session.ParticipantLifecycleService).RemoveParticipantWithEvent(ctx, req)
+}
+
+func (s *blockingRevisionConflictSessionService) PutParticipantWithEvent(
+	ctx context.Context,
+	req session.PutParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	s.calls.Add(1)
+	s.once.Do(func() { close(s.attempted) })
+	select {
+	case <-ctx.Done():
+		return session.Session{}, nil, ctx.Err()
+	case <-s.release:
+	}
+	expected := uint64(0)
+	if req.ExpectedRevision != nil {
+		expected = *req.ExpectedRevision
+	}
+	return session.Session{}, nil, &session.RevisionConflictError{
+		SessionID: req.SessionRef.SessionID, Expected: expected, Actual: expected + 1,
+	}
+}
+
+func (s *blockingRevisionConflictSessionService) RemoveParticipantWithEvent(
+	ctx context.Context,
+	req session.RemoveParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	return s.Service.(session.ParticipantLifecycleService).RemoveParticipantWithEvent(ctx, req)
+}
+
+func (s *completionNoticeFailSessionService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+	if req.Event != nil && strings.HasPrefix(strings.TrimSpace(req.Event.MessageID), "subagent-completion:") {
+		s.calls.Add(1)
+		if s.fail.Load() {
+			return nil, errors.New("forced completion notice failure")
+		}
+	}
+	return s.sagaSessionService.AppendEvent(ctx, req)
+}
+
+func (s *completionNoticeFailSessionService) AppendEventWithOutcome(ctx context.Context, req session.AppendEventRequest) (session.AppendEventResult, error) {
+	event, err := s.AppendEvent(ctx, req)
+	return session.AppendEventResult{Event: event, Appended: err == nil}, err
 }
 
 func (s *sagaSessionService) PutParticipantWithEvent(ctx context.Context, req session.PutParticipantWithEventRequest) (session.Session, *session.Event, error) {
@@ -401,6 +522,212 @@ func TestSubagentProducerCompletionRetriesSideFinalWithoutTaskObservation(t *tes
 	}
 	if final != "side final after retry" {
 		t.Fatalf("side final = %q, want retried canonical assistant event", final)
+	}
+}
+
+func TestSubagentProducerCompletionDoesNotWaitForCompletionNotice(t *testing.T) {
+	baseSessions := memory.NewStore(memory.Config{})
+	sessions := &completionNoticeFailSessionService{sagaSessionService: &sagaSessionService{Service: baseSessions}}
+	sessions.fail.Store(true)
+	store := newSagaTaskStore()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, active := newSubagentCompletionSagaRuntime(t, store, sessions, runner)
+	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "completion-notice-failure", Agent: "helper", Prompt: "inspect", Role: session.ParticipantRoleDelegated,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	published := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID, State: delegation.StateCompleted, Result: "done without notice",
+		})
+		close(published)
+	}()
+	select {
+	case <-published:
+	case <-time.After(500 * time.Millisecond):
+		sessions.fail.Store(false)
+		select {
+		case <-published:
+		case <-time.After(time.Second):
+		}
+		t.Fatal("producer completion waited for non-authoritative completion notice")
+	}
+	entry, err := store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil || entry.Running || entry.State != taskapi.StateCompleted {
+		t.Fatalf("durable completion = %#v, %v; want completed despite notice failure", entry, err)
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for sessions.calls.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if sessions.calls.Load() == 0 {
+		t.Fatal("completion notice path was not exercised asynchronously")
+	}
+}
+
+func TestSubagentSpawnRetriesParticipantAttachAfterConcurrentAgentMessage(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	sessions := &revisionBumpBeforeParticipantSessionService{Service: base}
+	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "spawn-revision-retry",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newSagaTaskStore()
+	runner := &sagaRunner{}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "spawn-after-agent-message", Agent: "helper", Prompt: "inspect",
+		Role: session.ParticipantRoleDelegated,
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	if got := sessions.calls.Load(); got != 2 {
+		t.Fatalf("PutParticipantWithEvent() calls = %d, want one conflicted attempt and one retry", got)
+	}
+	if runner.cancelCalls != 0 {
+		t.Fatalf("runner Cancel() calls = %d, want live child preserved", runner.cancelCalls)
+	}
+	entry, err := store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil || spawnPhaseOf(entry) != spawnPhaseCommitted {
+		t.Fatalf("durable Spawn entry = %#v, %v; want committed", entry, err)
+	}
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Session.Participants) != 1 || loaded.Session.Participants[0].DelegationID != started.Ref.TaskID {
+		t.Fatalf("participants = %#v, want retried Spawn attachment", loaded.Session.Participants)
+	}
+	events, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawMessage bool
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		if event.MessageID == "subagent-completion:concurrent:1" {
+			sawMessage = true
+		}
+	}
+	if !sawMessage {
+		t.Fatalf("events lost concurrent Agent message: %#v", events)
+	}
+}
+
+func TestSubagentSpawnCompensatesAfterPersistentParticipantRevisionConflicts(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	sessions := &blockingRevisionConflictSessionService{
+		Service: base, attempted: make(chan struct{}), release: make(chan struct{}),
+	}
+	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "spawn-persistent-revision-conflict",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newSagaTaskStore()
+	runner := &completionPublishingSagaRunner{}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const spawnID = "persistent-participant-conflict"
+	taskID, err := subagentSpawnTaskID(active.SessionRef, spawnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spawnErr := make(chan error, 1)
+	go func() {
+		_, startErr := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+			SpawnID: spawnID, Agent: "helper", Prompt: "inspect", Role: session.ParticipantRoleDelegated,
+		})
+		spawnErr <- startErr
+	}()
+	select {
+	case <-sessions.attempted:
+	case <-time.After(time.Second):
+		t.Fatal("participant attachment did not start")
+	}
+
+	published := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: taskID, State: delegation.StateCompleted, Result: "completed during failed attachment",
+		})
+		close(published)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		runtime.tasks.mu.Lock()
+		_, queued := runtime.tasks.completions[taskID]
+		runtime.tasks.mu.Unlock()
+		if queued {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("producer completion was not queued while Spawn attachment was pending")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(sessions.release)
+
+	select {
+	case startErr := <-spawnErr:
+		if !errors.Is(startErr, session.ErrRevisionConflict) || !strings.Contains(startErr.Error(), "was compensated") {
+			t.Fatalf("StartSubagent() error = %v, want compensated revision conflict", startErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("StartSubagent() did not finish after persistent revision conflicts")
+	}
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("queued producer completion was not released after compensation")
+	}
+	if got := sessions.calls.Load(); got != subagentParticipantAttachAttempts {
+		t.Fatalf("PutParticipantWithEvent() calls = %d, want %d bounded attempts", got, subagentParticipantAttachAttempts)
+	}
+	if got := runner.cancelCalls.Load(); got != 1 {
+		t.Fatalf("runner Cancel() calls = %d, want one compensation", got)
+	}
+	entry, err := store.Get(context.Background(), taskID)
+	if err != nil || spawnPhaseOf(entry) != spawnPhaseCompensated || entry.Running {
+		t.Fatalf("durable Spawn entry = %#v, %v; want terminal compensated", entry, err)
+	}
+
+	latePublished := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: taskID, State: delegation.StateCompleted, Result: "late completion after compensation",
+		})
+		close(latePublished)
+	}()
+	select {
+	case <-latePublished:
+	case <-time.After(time.Second):
+		t.Fatal("late producer completion was not rejected after compensation")
 	}
 }
 
@@ -947,9 +1274,6 @@ type invalidAnchorSagaRunner struct {
 func (*invalidAnchorSagaRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
 	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-invalid", Agent: req.Agent}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted}, nil
 }
-func (*invalidAnchorSagaRunner) Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error) {
-	return delegation.Result{}, nil
-}
 func (*invalidAnchorSagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
 	return delegation.Result{}, nil
 }
@@ -1192,9 +1516,6 @@ func (r *countingSagaRunner) Spawn(_ context.Context, spawn subagent.SpawnContex
 	r.spawnCalls.Add(1)
 	time.Sleep(10 * time.Millisecond)
 	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-concurrent", Agent: req.Agent, AgentID: "child-agent-concurrent"}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted, Result: "done"}, nil
-}
-func (*countingSagaRunner) Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error) {
-	return delegation.Result{}, nil
 }
 func (*countingSagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
 	return delegation.Result{}, nil

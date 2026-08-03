@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -85,7 +86,12 @@ func (m *Model) openSubagentOutputOverlay(blockID, callID string) bool {
 	if view == nil {
 		return false
 	}
-	view.observeOwnerEvent(owner)
+	// Opening a presentation surface must not advance child lifecycle. The
+	// Spawn invocation is already Done once it returns a handle, while the
+	// child Task represented by that handle may still be running. Only hydrate
+	// the stable identity here; terminal Task observations arrive separately.
+	view.observeOwnerIdentity(owner)
+	view.touch(true)
 	if m.subagentOutputOverlay != nil {
 		m.closeSubagentOutputOverlay()
 	}
@@ -99,15 +105,77 @@ func (m *Model) openSubagentOutputOverlay(blockID, callID string) bool {
 		selectEnd:   textSelectionPoint{line: -1, col: -1},
 	}
 	view.prepareVisibleRender()
+	m.reconcileTaskStreamOwner(callID, view.taskHandle)
 	return true
+}
+
+func (m *Model) openSubagentOutputOverlayForMessage(blockID, messageCallID string) bool {
+	if m == nil || m.doc == nil {
+		return false
+	}
+	target := agentMessageTargetFromBlock(m.doc.Find(strings.TrimSpace(blockID)), messageCallID)
+	callID := m.subagentOutputCallIDForHandle(target)
+	if callID == "" {
+		return false
+	}
+	for _, block := range m.doc.Blocks() {
+		if _, ok := m.subagentOutputOwner(block.BlockID(), callID); ok {
+			return m.openSubagentOutputOverlay(block.BlockID(), callID)
+		}
+	}
+	return false
+}
+
+func agentMessageTargetFromBlock(block Block, messageCallID string) string {
+	messageCallID = strings.TrimSpace(messageCallID)
+	var events []SubagentEvent
+	switch typed := block.(type) {
+	case *MainACPTurnBlock:
+		events = typed.Events
+	case *ParticipantTurnBlock:
+		events = typed.Events
+	}
+	for index := len(events) - 1; index >= 0; index-- {
+		event := events[index]
+		if event.Kind == SEToolCall && strings.TrimSpace(event.CallID) == messageCallID &&
+			names.CanonicalOrSelf(toolSemanticName(event.Name, event.ToolKind)) == names.SendMessage {
+			return event.MessageTarget
+		}
+	}
+	return ""
+}
+
+func (m *Model) subagentOutputCallIDForHandle(handle string) string {
+	handle = normalizeTaskStreamHandle(handle)
+	if m == nil || handle == "" || handle == "parent" {
+		return ""
+	}
+	for taskID, candidate := range m.taskStreamHandlesByID {
+		if normalizeTaskStreamHandle(candidate) == handle {
+			if callID := strings.TrimSpace(m.taskStreamCallIDsByID[taskID]); callID != "" {
+				return callID
+			}
+		}
+	}
+	for callID, view := range m.subagentOutputViews {
+		if view != nil && normalizeTaskStreamHandle(view.taskHandle) == handle {
+			return strings.TrimSpace(callID)
+		}
+	}
+	return ""
 }
 
 func (m *Model) closeSubagentOutputOverlay() {
 	if m == nil || m.subagentOutputOverlay == nil {
 		return
 	}
+	callID := strings.TrimSpace(m.subagentOutputOverlay.callID)
+	view := m.subagentOutputViews[callID]
 	m.cancelSelectionAutoScroll()
 	m.subagentOutputOverlay = nil
+	if view != nil {
+		m.reconcileTaskStreamOwner(callID, view.taskHandle)
+	}
 }
 
 func (m *Model) renderSubagentOutputOverlay() string {
@@ -346,28 +414,8 @@ func (m *Model) subagentOutputRows(view *subagentOutputView, width, height int) 
 	ctx.Width = width
 	ctx.Height = height
 	ctx.TermWidth = m.width
-	if view != nil && view.block != nil && len(view.block.Events) > 0 {
-		rows = view.block.Render(ctx)
-	}
-	if view != nil && strings.TrimSpace(view.finalResponse) != "" &&
-		!subagentOutputBlockEndsWithAssistantText(view.block, view.finalResponse) {
-		rows = appendSubagentOutputAssistantRows(
-			rows,
-			ctx,
-			"subagent-output-"+view.callID,
-			view.finalResponse,
-			width,
-		)
-	}
-	if view != nil && strings.TrimSpace(view.terminalFailure) != "" &&
-		!subagentOutputBlockEndsWithText(view.block, view.terminalFailure) {
-		rows = appendSubagentOutputFailureRows(
-			rows,
-			ctx,
-			"subagent-output-"+view.callID,
-			view.terminalFailure,
-			width,
-		)
+	if view != nil && view.document != nil && view.document.Len() > 0 {
+		rows = view.document.RenderAll(ctx)
 	}
 	if len(rows) == 0 {
 		label := "Waiting for subagent transcript…"
@@ -414,84 +462,6 @@ func (m *Model) cachedSubagentOutputRows(view *subagentOutputView, width, height
 		return cache.rows, true
 	}
 	return nil, false
-}
-
-func appendSubagentOutputAssistantRows(
-	rows []RenderedRow,
-	ctx BlockRenderContext,
-	blockID string,
-	text string,
-	width int,
-) []RenderedRow {
-	if len(rows) > 0 {
-		rows = append(rows, PlainRow(blockID, ""))
-	}
-	return append(rows, renderParticipantTurnNarrativeRowsWithBuffer(
-		blockID,
-		text,
-		nil,
-		tuikit.LineStyleAssistant,
-		width,
-		ctx,
-		false,
-	)...)
-}
-
-func appendSubagentOutputFailureRows(
-	rows []RenderedRow,
-	ctx BlockRenderContext,
-	blockID string,
-	text string,
-	width int,
-) []RenderedRow {
-	if len(rows) > 0 {
-		rows = append(rows, PlainRow(blockID, ""))
-	}
-	rows = append(rows, StyledPlainRow(blockID, "Error", ctx.Theme.ErrorStyle().Bold(true).Render("Error")))
-	rendered := RenderTextWithContext(ctx, TextRenderRequest{
-		Kind:           TextAssistant,
-		Mode:           RenderFinal,
-		MarkdownPolicy: MarkdownFull,
-		Raw:            text,
-		Width:          width,
-		BlockID:        blockID,
-		LineStyle:      tuikit.LineStyleError,
-	}).Rows
-	return append(rows, rendered...)
-}
-
-func subagentOutputBlockEndsWithAssistantText(block *ParticipantTurnBlock, text string) bool {
-	if block == nil {
-		return false
-	}
-	text = strings.TrimSpace(text)
-	for index := len(block.Events) - 1; index >= 0; index-- {
-		event := block.Events[index]
-		if event.Kind == SESemanticBoundary {
-			continue
-		}
-		return event.Kind == SEAssistant && strings.TrimSpace(event.Text) == text
-	}
-	return false
-}
-
-func subagentOutputBlockEndsWithText(block *ParticipantTurnBlock, text string) bool {
-	if block == nil {
-		return false
-	}
-	text = strings.TrimSpace(text)
-	for index := len(block.Events) - 1; index >= 0; index-- {
-		event := block.Events[index]
-		switch event.Kind {
-		case SESemanticBoundary:
-			continue
-		case SEAssistant, SEReasoning, SENotice:
-			return strings.TrimSpace(event.Text) == text
-		default:
-			return false
-		}
-	}
-	return false
 }
 
 func (m *Model) renderSubagentOutputTitle(view *subagentOutputView, width int) string {

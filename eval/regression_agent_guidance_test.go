@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
@@ -32,7 +33,10 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 		t.Fatalf("BuildCoreTools() error = %v", err)
 	}
 	tools := append([]tool.Tool{}, coreTools...)
-	tools = append(tools, spawn.New([]delegation.Agent{{Name: "self", Description: "same runtime child"}}))
+	tools = append(tools,
+		spawn.New([]delegation.Agent{{Name: "self", Description: "same runtime child"}}),
+		sendmessage.New(),
+	)
 
 	scripted := evalharness.NewScriptedModel("agent-guidance", evalharness.TextStep("ok"))
 	run, err := evalharness.RunChatScenario(context.Background(), evalharness.ChatScenario{
@@ -83,6 +87,19 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 			},
 		},
 		{name: "spawn remains bounded", toolName: spawn.ToolName, wants: []string{"bounded delegated child session", "self-contained"}},
+		{
+			name:     "send message separates incremental and terminal channels",
+			toolName: sendmessage.ToolName,
+			wants: []string{
+				"incremental update or question",
+				"terminal answer in the final response",
+				"Task read or wait",
+				"routing boundary owns delivery",
+				"not that the target finished",
+				"started_turn",
+				"turn_id only groups",
+			},
+		},
 	}
 	for _, check := range checks {
 		t.Run(check.name, func(t *testing.T) {
@@ -127,9 +144,9 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 
 	taskSpec := toolByName[task.ToolName]
 	taskPropertyGuidance := map[string][]string{
-		"action": {"RunCommand briefly waits for output", "Spawn returns output_preview", "exact final_message", "wait observes up to one minute", "may stay running", "write sends input", "cancel stops work"},
+		"action": {"RunCommand briefly waits for output", "Spawn returns output_preview", "exact final_message", "wait may stay running for up to one minute", "multiple handles return after any result", "write sends stdin only to RunCommand", "cancel stops work"},
 		"handle": {"Session-scoped handle", "Only wait and cancel", "comma-separated handles"},
-		"input":  {"Required only for write", "terminal stdin", "completed Spawn", "follow-up prompt"},
+		"input":  {"Required only for write", "terminal stdin", "Spawn tasks reject write", "SendMessage"},
 	}
 	for property, wants := range taskPropertyGuidance {
 		description := functionPropertyDescription(t, taskSpec, property)

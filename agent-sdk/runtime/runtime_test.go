@@ -11,6 +11,7 @@ import (
 	"reflect"
 	goruntime "runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -3482,7 +3483,7 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 	}
 
 	var finalText string
-	var runningToolUpdate bool
+	var progressToolUpdate bool
 	for event, seqErr := range result.Handle.Events() {
 		if seqErr != nil {
 			t.Fatalf("runner error = %v", seqErr)
@@ -3490,15 +3491,15 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 		if event == nil {
 			continue
 		}
-		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Status == "running" {
-			runningToolUpdate = true
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Status == "in_progress" {
+			progressToolUpdate = true
 		}
 		if event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
 	}
-	if !runningToolUpdate {
-		t.Fatal("expected running tool update after yielded RUN_COMMAND")
+	if !progressToolUpdate {
+		t.Fatal("expected in-progress tool update after yielded RUN_COMMAND")
 	}
 	if finalText != "async command done" {
 		t.Fatalf("finalText = %q, want %q", finalText, "async command done")
@@ -4508,7 +4509,7 @@ func TestRuntimeTaskWaitAcceptsCommaSeparatedTaskIDs(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskBatchWaitUsesSharedYieldBudget(t *testing.T) {
+func TestRuntimeTaskBatchWaitRunsAllWaitsWithinOneConcurrentBudget(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -4534,9 +4535,149 @@ func TestRuntimeTaskBatchWaitUsesSharedYieldBudget(t *testing.T) {
 	if batchFirst > taskWaitMaxYield || batchFirst < taskWaitMaxYield-time.Millisecond {
 		t.Fatalf("first batch wait = %v, want near %v", batchFirst, taskWaitMaxYield)
 	}
-	if batchSecond >= batchFirst || batchSecond < batchFirst-100*time.Millisecond {
-		t.Fatalf("second batch wait = %v, want remaining shared one-minute budget below %v", batchSecond, batchFirst)
+	if batchSecond > taskWaitMaxYield || batchSecond < taskWaitMaxYield-time.Millisecond {
+		t.Fatalf("second batch wait = %v, want its concurrent wait near %v", batchSecond, taskWaitMaxYield)
 	}
+}
+
+func TestRuntimeTaskBatchWaitIgnoresEarlyRunningObservation(t *testing.T) {
+	t.Parallel()
+
+	runningRunner := &delayedSubagentWaitRunner{
+		recordingSubagentRunner: &recordingSubagentRunner{
+			spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+			waitResult:  delegation.Result{State: delegation.StateRunning, Running: true},
+		},
+	}
+	terminalRunner := &delayedSubagentWaitRunner{
+		recordingSubagentRunner: &recordingSubagentRunner{
+			spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+			waitResult:  delegation.Result{State: delegation.StateCompleted, Result: "terminal winner"},
+		},
+		delay: 25 * time.Millisecond,
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runningRunner)
+	first, err := runtime.tasks.StartSubagent(context.Background(), activeSession, activeSession.SessionRef, runningRunner, taskapi.SubagentStartRequest{
+		Agent: "helper", Prompt: "keep running",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := runtime.tasks.StartSubagent(context.Background(), activeSession, activeSession.SessionRef, terminalRunner, taskapi.SubagentStartRequest{
+		Agent: "helper", Prompt: "finish later",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := callRuntimeTaskTool(t, runtimeTaskTool{
+		base: tasktool.New(), sessionRef: activeSession.SessionRef, tasks: runtime.tasks,
+	}, map[string]any{
+		"action": "wait",
+		"handle": first.Handle + "," + second.Handle,
+	})
+	if result.IsError {
+		t.Fatalf("batch wait result = %#v, want no observation error", testToolResultPayload(t, result))
+	}
+	if calls := terminalRunner.waitCallCount(); calls != 1 {
+		t.Fatalf("terminal target Wait calls = %d, want early running result not to cancel and re-read it", calls)
+	}
+	payload := testToolResultPayload(t, result)
+	items, _ := payload["tasks"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("batch tasks = %#v", payload["tasks"])
+	}
+	terminal, _ := items[1].(map[string]any)
+	if terminal["state"] != string(taskapi.StateCompleted) || terminal["final_message"] != "terminal winner" {
+		t.Fatalf("terminal batch item = %#v", terminal)
+	}
+}
+
+func TestRuntimeTaskBatchWaitCancellationDoesNotInterruptLosingChild(t *testing.T) {
+	t.Parallel()
+
+	slowRunningRunner := &delayedSubagentWaitRunner{
+		recordingSubagentRunner: &recordingSubagentRunner{
+			spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+			waitResult:  delegation.Result{State: delegation.StateRunning, Running: true},
+		},
+		delay: 100 * time.Millisecond,
+	}
+	terminalRunner := &delayedSubagentWaitRunner{
+		recordingSubagentRunner: &recordingSubagentRunner{
+			spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+			waitResult:  delegation.Result{State: delegation.StateCompleted, Result: "winner"},
+		},
+		delay: 20 * time.Millisecond,
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, slowRunningRunner)
+	loser, err := runtime.tasks.StartSubagent(context.Background(), activeSession, activeSession.SessionRef, slowRunningRunner, taskapi.SubagentStartRequest{
+		Agent: "helper", Prompt: "keep running",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	winner, err := runtime.tasks.StartSubagent(context.Background(), activeSession, activeSession.SessionRef, terminalRunner, taskapi.SubagentStartRequest{
+		Agent: "helper", Prompt: "finish first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := callRuntimeTaskTool(t, runtimeTaskTool{
+		base: tasktool.New(), sessionRef: activeSession.SessionRef, tasks: runtime.tasks,
+	}, map[string]any{
+		"action": "wait",
+		"handle": loser.Handle + "," + winner.Handle,
+	})
+	if result.IsError {
+		t.Fatalf("batch wait result = %#v, want canceled observer recovered by read", testToolResultPayload(t, result))
+	}
+	payload := testToolResultPayload(t, result)
+	items, _ := payload["tasks"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("batch tasks = %#v", payload["tasks"])
+	}
+	losingItem, _ := items[0].(map[string]any)
+	if losingItem["state"] != string(taskapi.StateRunning) {
+		t.Fatalf("losing child was changed by observer cancellation: %#v", losingItem)
+	}
+	stored, err := runtime.tasks.store.Get(context.Background(), loser.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored == nil || !stored.Running || stored.State != taskapi.StateRunning {
+		t.Fatalf("stored losing child = %#v, want running", stored)
+	}
+}
+
+type delayedSubagentWaitRunner struct {
+	*recordingSubagentRunner
+	delay time.Duration
+	mu    sync.Mutex
+	calls int
+}
+
+func (r *delayedSubagentWaitRunner) Wait(ctx context.Context, _ delegation.Anchor, _ int) (delegation.Result, error) {
+	r.mu.Lock()
+	r.calls++
+	r.mu.Unlock()
+	if r.delay > 0 {
+		timer := time.NewTimer(r.delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return delegation.Result{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return delegation.CloneResult(r.waitResult), nil
+}
+
+func (r *delayedSubagentWaitRunner) waitCallCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
 }
 
 func TestRuntimeTaskCancelAcceptsCommaSeparatedTaskIDs(t *testing.T) {

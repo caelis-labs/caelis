@@ -9,11 +9,107 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
+
+func TestACPTaskStreamMuxDoesNotTreatChildLifecycleAsObservationControl(t *testing.T) {
+	t.Parallel()
+
+	service := &acpMuxTestService{requests: make(chan taskstream.SubscribeRequest, 1)}
+	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
+	defer mux.Close()
+
+	mux.Observe(eventstream.Envelope{
+		Kind: eventstream.KindLifecycle, SessionID: "session-1", Scope: eventstream.ScopeSubagent,
+		ScopeID: "task-1", TurnID: "child-turn-2",
+		ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		Lifecycle:  &eventstream.Lifecycle{State: eventstream.LifecycleStateRunning, Reason: "turn_started"},
+	})
+
+	select {
+	case request := <-service.requests:
+		t.Fatalf("child lifecycle restarted Task observation: %#v", request)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestACPTaskStreamMuxFollowsMessageAuthoredSubagentActivityUntilSeal(t *testing.T) {
+	t.Parallel()
+
+	subscription := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 8)}
+	service := &acpMuxTestService{
+		requests: make(chan taskstream.SubscribeRequest, 1),
+		sub:      subscription,
+		list: taskstream.ListResult{Tasks: []taskstream.TaskDescriptor{{
+			SessionID: "session-1", TaskID: "task-1", Handle: "orbit", Kind: task.KindSubagent,
+			State: task.StateRunning, Running: true,
+			ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "Spawn"},
+		}}},
+	}
+	mux := newACPTaskStreamMux(context.Background(), service, taskstream.Principal{ID: "user-1"}, "session-1")
+	defer mux.Close()
+	mux.Observe(acpMuxSubagentAnchor("orbit"))
+
+	request := receiveACPTaskStreamRequest(t, service.requests)
+	if !request.Follow {
+		t.Fatalf("subagent Subscribe request = %#v, want Follow across message-authored Turns", request)
+	}
+
+	subscription.events <- acpMuxSubagentLifecycleEnvelope("cursor-1", "child-turn-1", eventstream.LifecycleStateRunning)
+	subscription.events <- acpMuxSubagentMessageEnvelope("cursor-2", "child-turn-1", "message-1", "first turn")
+	subscription.events <- acpMuxSubagentLifecycleEnvelope("cursor-3", "child-turn-1", eventstream.LifecycleStateCompleted)
+	for index := 0; index < 3; index++ {
+		select {
+		case <-mux.Events():
+		case <-time.After(time.Second):
+			t.Fatalf("first activity envelope %d was not forwarded", index+1)
+		}
+	}
+	select {
+	case request := <-service.requests:
+		t.Fatalf("child lifecycle restarted observation instead of using Follow: %#v", request)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	subscription.events <- acpMuxSubagentLifecycleEnvelope("cursor-4", "child-turn-2", eventstream.LifecycleStateRunning)
+	subscription.events <- acpMuxSubagentMessageEnvelope("cursor-5", "child-turn-2", "message-2", "second turn")
+	for index := 0; index < 2; index++ {
+		select {
+		case envelope := <-mux.Events():
+			if envelope.TurnID != "child-turn-2" {
+				t.Fatalf("second activity envelope = %#v", envelope)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("message-authored activity envelope %d was not forwarded", index+1)
+		}
+	}
+
+	// Seal stops discovery but lets the already-running activity reach its typed
+	// terminal. Future child activities belong to a later ACP Prompt.
+	mux.Seal()
+	subscription.events <- acpMuxSubagentLifecycleEnvelope("cursor-6", "child-turn-2", eventstream.LifecycleStateCompleted)
+	select {
+	case envelope := <-mux.Events():
+		if envelope.TurnID != "child-turn-2" || envelope.Lifecycle == nil ||
+			envelope.Lifecycle.State != eventstream.LifecycleStateCompleted {
+			t.Fatalf("sealed current-activity terminal = %#v", envelope)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Seal cut off the current child activity before terminal")
+	}
+	select {
+	case _, open := <-mux.Events():
+		if open {
+			t.Fatal("sealed mux remained open after the followed activity reached terminal")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("sealed mux did not close at the followed activity boundary")
+	}
+}
 
 func TestACPTaskStreamMuxResumesActiveStreamFromLastCursorAndFiltersGap(t *testing.T) {
 	t.Parallel()

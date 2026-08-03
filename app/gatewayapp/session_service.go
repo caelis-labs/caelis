@@ -47,22 +47,6 @@ func (s *Stack) StartSubagentWithOptions(
 	return snapshot, err
 }
 
-func (s *Stack) ContinueSubagentByHandle(
-	ctx context.Context,
-	ref session.SessionRef,
-	handle string,
-	prompt string,
-	yield time.Duration,
-) (task.Snapshot, error) {
-	var snapshot task.Snapshot
-	err := s.withPlaced(ctx, ref, func(runCtx context.Context, engine *sdkruntime.Runtime) error {
-		var err error
-		snapshot, err = engine.ContinueSubagentByHandle(runCtx, ref, handle, prompt, yield)
-		return err
-	})
-	return snapshot, err
-}
-
 func (s *Stack) WaitSubagentTask(
 	ctx context.Context,
 	ref session.SessionRef,

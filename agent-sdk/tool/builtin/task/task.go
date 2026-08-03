@@ -45,14 +45,14 @@ func New() Tool {
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Control asynchronous work started by RunCommand or Spawn. Use it after receiving a task handle to inspect progress or results, wait for changes, send input or a follow-up, or cancel work.",
+		Description: "Control asynchronous work started by RunCommand or Spawn. Use it after receiving a task handle to inspect progress or results, wait for changes, send terminal input to a running command, or cancel work. Use SendMessage for subagent communication.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        []string{"wait", "read", "write", "cancel"},
-					"description": "read inspects progress/results: RunCommand briefly waits for output; Spawn returns output_preview while running or exact final_message when done. wait observes up to one minute and may stay running; write sends input; cancel stops work.",
+					"description": "read: RunCommand briefly waits for output; Spawn returns output_preview or exact final_message. wait may stay running for up to one minute; multiple handles return after any result. write sends stdin only to RunCommand; cancel stops work.",
 				},
 				"handle": map[string]any{
 					"type":        "string",
@@ -62,7 +62,7 @@ func (Tool) Definition() tool.Definition {
 				"input": map[string]any{
 					"type":        "string",
 					"minLength":   1,
-					"description": "Required only for write. For RunCommand, send terminal stdin and briefly await its response. For a completed Spawn, send the follow-up prompt that starts its next turn.",
+					"description": "Required only for write. Sends terminal stdin to a RunCommand task and briefly awaits its response. Spawn tasks reject write; use SendMessage instead.",
 				},
 			},
 			"required":             []string{"action", "handle"},

@@ -32,7 +32,7 @@ func TestStreamResolveReaderUsesDurableTaskKindOnce(t *testing.T) {
 	}}
 	service := newStreamService(newTaskRuntime(&Runtime{clock: time.Now}, store))
 
-	read, _, err := service.resolveReader(context.Background(), stream.Ref{
+	read, _, _, err := service.resolveReader(context.Background(), stream.Ref{
 		SessionID: "session-1",
 		TaskID:    "task-1",
 	})
@@ -60,7 +60,7 @@ func TestStreamResolveReaderPreservesDurableLookupErrorWithoutFallback(t *testin
 	}
 	service := newStreamService(newTaskRuntime(&Runtime{clock: time.Now}, store))
 
-	_, _, err := service.resolveReader(context.Background(), stream.Ref{
+	_, _, _, err := service.resolveReader(context.Background(), stream.Ref{
 		SessionID: "session-1",
 		TaskID:    "task-1",
 	})

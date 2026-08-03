@@ -60,11 +60,11 @@ func TestTaskSchemaUsesServiceOwnedObservationBudgets(t *testing.T) {
 	}
 	actionDesc, _ := action["description"].(string)
 	for _, want := range []string{
-		"read inspects progress/results",
 		"RunCommand briefly waits for output",
-		"Spawn returns output_preview while running or exact final_message when done",
-		"wait observes up to one minute and may stay running",
-		"write sends input",
+		"Spawn returns output_preview or exact final_message",
+		"wait may stay running for up to one minute",
+		"multiple handles return after any result",
+		"write sends stdin only to RunCommand",
 		"cancel stops work",
 	} {
 		if !strings.Contains(actionDesc, want) {
@@ -83,7 +83,7 @@ func TestTaskSchemaUsesServiceOwnedObservationBudgets(t *testing.T) {
 	}
 	input, _ := props["input"].(map[string]any)
 	inputDesc, _ := input["description"].(string)
-	for _, want := range []string{"Required only for write", "terminal stdin", "completed Spawn", "follow-up prompt", "next turn"} {
+	for _, want := range []string{"Required only for write", "terminal stdin", "Spawn tasks reject write", "SendMessage"} {
 		if !strings.Contains(inputDesc, want) {
 			t.Fatalf("input description = %q, want %q", inputDesc, want)
 		}

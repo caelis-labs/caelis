@@ -43,10 +43,6 @@ func (*cancelEffectProbeRunner) Spawn(context.Context, subagent.SpawnContext, de
 	return delegation.Anchor{}, delegation.Result{}, errors.New("unexpected spawn")
 }
 
-func (*cancelEffectProbeRunner) Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error) {
-	return delegation.Result{}, errors.New("unexpected continue")
-}
-
 func (r *cancelEffectProbeRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

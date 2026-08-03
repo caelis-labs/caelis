@@ -63,6 +63,13 @@ top-level abstractions.
 Hosts inject model, tool, Session, sandbox, task, policy, and endpoint
 implementations. Runtime validates the actual assembled capabilities and fails
 closed when a required model, output, tool, or executor feature is unavailable.
+The assembled Tool set is the capability-admission boundary. The built-in
+workspace-write policy applies argument- and effect-specific restrictions; it
+is not a second Tool-name allowlist. Hosts that need to prohibit an otherwise
+assembled Tool omit it from the Agent or register an explicit stricter policy
+profile. Caelis product assembly adds `SendMessage` explicitly alongside
+`Spawn`; Runtime augments only a hosted child whose parent/sibling message
+transport is supplied through the execution context.
 
 A Runner exposes one bounded, single-consumer observation stream. Slow
 observers may lose transient output but must not block execution, durable
@@ -78,6 +85,43 @@ Cancellation requested is distinct from proven terminal cancellation.
 Similarly, a completed Task control call is not evidence that its target
 completed. Unknown side-effect outcomes remain explicit and must not be retried
 blindly.
+
+`agent-sdk/message` owns the small provider-neutral Agent message contract.
+Runtime owns trusted source identity, Session-scoped handle resolution, durable
+Context persistence, and live-turn wakeup. The model-facing tool intentionally
+exposes only `to` and `message`; delivery acknowledgements are not completion
+claims. Task remains the common lifecycle and observation abstraction for
+commands and subagents, but Task input is reserved for live command stdin and
+does not double as Agent communication. Subagent `Task read` and `Task wait`
+do not hold the lifecycle mutation claim while awaiting remote state. A sampled
+result is applied only under a short mutation claim and only when its child Turn
+is still current; observer cancellation never cancels or interrupts the child.
+
+Tool invocation lifecycle and target lifecycle are separate contracts. Observer
+callbacks produce in-progress tool events; a successful returned result
+completes the invocation even when a Spawn or SendMessage target remains
+running. Target state stays explicit in the result and Task stream. When an
+accepted message reopens an existing subagent Task, a following Task-stream
+subscription waits by stable Session/Task identity and re-resolves the concrete
+producer. No Host callback, tool result, or Session-feed event acquires a second
+subscription or lifecycle authority.
+
+Every target uses the shared `agent-sdk/message` canonical Context builder.
+Agent-message persistence requires an atomic append outcome so only a newly
+committed event may wake the target; the sequential read-before-append fallback
+is not an accepted delivery boundary. A completion notice is a bounded,
+best-effort parent hint after Task and any required sidecar final are durable.
+Notice failure never delays producer completion or reopens Task terminal state.
+
+The wake behavior is fixed by owner and target state; it is not a caller option:
+
+| Message path | Durable owner and effect | Target activity |
+| --- | --- | --- |
+| Hosted child to its main parent | Parent Session appends one canonical Context | Submit to an active parent Turn; an idle parent remains pending for its next ordinary Turn |
+| ACP participant or sibling to main through Gateway | Main Session appends one canonical Context | Submit to an active Turn, or start exactly one Turn when idle |
+| Parent to a running spawned child | Remote child Session owns canonical Context; parent record is audit only | Deliver into the current child Turn without starting another Turn |
+| Parent to a completed spawned child | Remote child Session owns canonical Context; parent record is audit only | Start the next Turn on the same child Session and existing Task identity |
+| Retry with the same message identity and payload | Existing canonical Context is returned | Never submit or start a second Turn; changed payload conflicts |
 
 ## Control and Handoff
 
@@ -113,6 +157,16 @@ External effects use stable identities and durable intent/effect/terminal
 transitions. Identical retries deduplicate; changed payloads conflict;
 committed-but-unreported and indeterminate effects remain recoverable or
 `unknown_outcome`, never silently repeated.
+
+The SendMessage migration retains one bounded compatibility reader for Task
+records written by the retired Continue saga. It never calls the old remote
+effect: prepared records become interrupted, pending or unproven running
+post-effect records become `unknown_outcome`, and proven terminal post-effect
+records finish their canonical sidecar commit. `v0.35.0` is the last released
+writer of `continue_phase`. The first release containing this migration must be
+recorded as the first no-write release in its release notes. Remove the reader
+only when the documented minimum supported upgrade source is that no-write
+release or newer; until then a direct upgrade from `v0.35.0` remains supported.
 
 ## Durable Facts and Replay
 

@@ -65,14 +65,19 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 			return acpTaskStreamAnchor{}, false
 		}
 	}
+	parentTerminal := acpToolStatusFinalString(status)
+	if kind == task.KindSubagent {
+		// Spawn returning completes the tool invocation, not the child Task.
+		// Only the target state may close Task observation.
+		targetState := strings.ToLower(strings.TrimSpace(display.MapString(output, "state")))
+		parentTerminal = eventstream.IsTerminalLifecycleState(targetState) ||
+			(targetState == "" && strings.EqualFold(strings.TrimSpace(status), schema.ToolStatusFailed))
+	}
 	return acpTaskStreamAnchor{
-		callID: callID,
-		handle: handle,
-		kind:   kind,
-		// Only the typed ACP tool status closes discovery permanently. Raw
-		// output is compatibility/display data and may carry a stale or
-		// intermediate state before the parent tool call itself is terminal.
-		parentTerminal: acpToolStatusFinalString(status),
+		callID:         callID,
+		handle:         handle,
+		kind:           kind,
+		parentTerminal: parentTerminal,
 	}, callID != "" && handle != ""
 }
 
@@ -91,16 +96,11 @@ func acpTaskStreamEnvelopeAllowed(anchor acpTaskStreamAnchor, envelope eventstre
 			return envelope.Update != nil
 		case eventstream.KindNotice:
 			return strings.TrimSpace(envelope.Notice) != ""
+		case eventstream.KindLifecycle:
+			return envelope.Lifecycle != nil
 		}
 	}
 	return false
-}
-
-func acpSubagentTaskLifecycleAllowed(anchor acpTaskStreamAnchor, envelope eventstream.Envelope) bool {
-	return anchor.kind == task.KindSubagent && envelope.Scope == eventstream.ScopeSubagent &&
-		envelope.ParentTool != nil && strings.TrimSpace(envelope.ParentTool.ToolCallID) == anchor.callID &&
-		identity.CanonicalOrSelf(envelope.ParentTool.ToolName) == identity.Spawn &&
-		envelope.Lifecycle != nil && eventstream.IsTerminalLifecycleState(envelope.Lifecycle.State)
 }
 
 func taskStreamParentToolName(kind task.Kind) string {

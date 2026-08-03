@@ -154,7 +154,7 @@ func (tm *taskRuntime) startSubagentTarget(
 		childPrompt := contextprompt.ComposeTextPrompt(req.Context, strings.TrimSpace(req.Prompt))
 		spawnContext := subagent.SpawnContext{
 			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession), CWD: strings.TrimSpace(activeSession.CWD),
-			TaskID: taskID, ParentCallID: strings.TrimSpace(req.ParentCall), Mode: mode, ApprovalMode: strings.TrimSpace(req.ApprovalMode),
+			TaskID: taskID, Handle: handle, Role: role, ParentCallID: strings.TrimSpace(req.ParentCall), Mode: mode, ApprovalMode: strings.TrimSpace(req.ApprovalMode),
 			ApprovalRequester: req.Approval, Streams: tm,
 			Completion: newSubagentCompletionSink(ctx, tm, taskID, 1),
 		}
@@ -436,7 +436,7 @@ func validateSubagentSpawnResult(taskID string, anchor delegation.Anchor, result
 	}
 	switch result.State {
 	case delegation.StateRunning, delegation.StateCompleted, delegation.StateFailed, delegation.StateCancelled,
-		delegation.StateInterrupted, delegation.StateWaitingApproval:
+		delegation.StateInterrupted, delegation.StateUnknownOutcome, delegation.StateWaitingApproval:
 		return nil
 	default:
 		return fmt.Errorf("agent-sdk/runtime: spawned subagent result has invalid state %q", result.State)
@@ -663,6 +663,10 @@ func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task
 		if err := tm.markSubagentSpawnPhase(context.WithoutCancel(ctx), task, spawnPhaseCompensated, subagentSpawnCompensatedDiagnostic); err != nil {
 			return errors.Join(cause, err)
 		}
+		// Producer completion may race the failed attachment after the child was
+		// made discoverable. Cancellation is now the durable authority, so release
+		// any queued producer and reject later completion for this Spawn attempt.
+		tm.discardSubagentCompletion(task.ref.TaskID)
 		return fmt.Errorf("agent-sdk/runtime: subagent spawn %q was compensated: %w", taskStringValue(task.metadata["spawn_identity"]), cause)
 	}
 	return errors.Join(cause, fmt.Errorf("agent-sdk/runtime: cannot resume compensation from phase %q", phase))

@@ -72,7 +72,14 @@ type ReadRequest struct {
 }
 
 // SubscribeRequest selects one independently delivered Task stream.
-type SubscribeRequest ReadRequest
+type SubscribeRequest struct {
+	SessionID string `json:"session_id"`
+	TaskID    string `json:"task_id"`
+	Cursor    string `json:"cursor,omitempty"`
+	// Follow keeps a subagent Task timeline attached across activity periods
+	// until the observer closes it. It never changes Task lifecycle.
+	Follow bool `json:"follow,omitempty"`
+}
 
 const (
 	ResumeModeExact        ResumeMode = "exact"
@@ -159,7 +166,7 @@ func (s *service) Events(ctx context.Context, principal Principal, req ReadReque
 
 func (s *service) Subscribe(ctx context.Context, principal Principal, req SubscribeRequest) (SubscribeResult, error) {
 	result, err := s.control.Subscribe(ctx, controlPrincipal(principal), controltaskstream.SubscribeRequest{
-		SessionID: req.SessionID, TaskID: req.TaskID, Cursor: req.Cursor,
+		SessionID: req.SessionID, TaskID: req.TaskID, Cursor: req.Cursor, Follow: req.Follow,
 	})
 	if err != nil {
 		return SubscribeResult{}, err

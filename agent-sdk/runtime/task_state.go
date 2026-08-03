@@ -6,6 +6,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/textstream"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -39,6 +40,10 @@ type taskRuntime struct {
 	backends   map[sandbox.Backend]sandbox.Runtime
 	handles    map[string]map[string]struct{}
 	operations map[string]struct{}
+	// streamActivity is a TaskID-stable condition variable for subagent stream
+	// activity. Concrete subagentTask values may be removed and rehydrated after
+	// completion, so a cross-activity observer must never wait on one instance.
+	streamActivity map[string]*taskStreamActivitySignal
 
 	completions        map[string]*subagentCompletion
 	completionApplying map[string]struct{}
@@ -201,7 +206,7 @@ type subagentTask struct {
 	streamFrames     []stream.Frame
 	streamFrameSizes []int
 	// Stream cursors are absolute for the Task lifetime and do not reset when
-	// Continue starts another child turn.
+	// an Agent message starts another child turn.
 	streamEventBase      int64
 	streamOutputCursor   int64
 	streamBytes          int
@@ -210,25 +215,29 @@ type subagentTask struct {
 	completionReady      bool
 }
 
-type subagentContinuationCheckpoint struct {
+type subagentMessageTurnCheckpoint struct {
 	stdout         string
 	stderr         string
 	stdoutCursor   int64
 	stderrCursor   int64
 	turnSeq        int64
+	state          taskapi.State
+	running        bool
+	metadata       map[string]any
 	terminalFramed bool
 }
 
-// beginContinuationTurn snapshots current-turn result state, advances turnSeq,
-// and reopens the same absolute Task stream for the next child turn. Retained
-// frames and absolute event/output cursors deliberately survive Continue.
-func (task *subagentTask) beginContinuationTurn() subagentContinuationCheckpoint {
+// beginMessageTurn snapshots current-turn result state, advances turnSeq, and
+// reopens the same absolute Task stream for the next Agent-message turn.
+// Retained frames and absolute event/output cursors deliberately survive.
+func (task *subagentTask) beginMessageTurn() subagentMessageTurnCheckpoint {
 	task.mu.Lock()
 	defer task.mu.Unlock()
-	checkpoint := subagentContinuationCheckpoint{
+	checkpoint := subagentMessageTurnCheckpoint{
 		stdout: task.stdout, stderr: task.stderr,
 		stdoutCursor: task.stdoutCursor, stderrCursor: task.stderrCursor,
-		turnSeq: task.turnSeq, terminalFramed: task.streamTerminalFramed,
+		turnSeq: task.turnSeq, state: task.state, running: task.running,
+		metadata: session.CloneState(task.metadata), terminalFramed: task.streamTerminalFramed,
 	}
 	task.turnSeq++
 	if task.turnSeq <= 0 {
@@ -238,17 +247,20 @@ func (task *subagentTask) beginContinuationTurn() subagentContinuationCheckpoint
 	task.stderr = ""
 	task.stdoutCursor = 0
 	task.stderrCursor = 0
+	task.state = taskapi.StateRunning
+	task.running = true
 	task.streamTerminalFramed = false
-	task.notifyStreamChangeLocked()
 	if task.metadata != nil {
+		task.metadata["state"] = string(taskapi.StateRunning)
 		delete(task.metadata, "final_event_persisted")
 	}
+	task.notifyStreamChangeLocked()
 	return checkpoint
 }
 
-// restoreContinuationTurn reverts beginContinuationTurn when parent intent or
-// remote continue fails. force restores even if stream output already arrived.
-func (task *subagentTask) restoreContinuationTurn(checkpoint subagentContinuationCheckpoint, force bool) {
+// restoreMessageTurn reverts beginMessageTurn when durable parent Context or
+// remote message delivery fails. force restores even if output already arrived.
+func (task *subagentTask) restoreMessageTurn(checkpoint subagentMessageTurnCheckpoint, force bool) {
 	task.mu.Lock()
 	defer task.mu.Unlock()
 	if !force && (task.stdout != "" || task.stderr != "") {
@@ -259,6 +271,9 @@ func (task *subagentTask) restoreContinuationTurn(checkpoint subagentContinuatio
 	task.stdoutCursor = checkpoint.stdoutCursor
 	task.stderrCursor = checkpoint.stderrCursor
 	task.turnSeq = checkpoint.turnSeq
+	task.state = checkpoint.state
+	task.running = checkpoint.running
+	task.metadata = session.CloneState(checkpoint.metadata)
 	task.streamTerminalFramed = checkpoint.terminalFramed
 	task.notifyStreamChangeLocked()
 }
@@ -274,6 +289,7 @@ func newTaskRuntime(runtime *Runtime, store taskapi.Store) *taskRuntime {
 		backends:           map[sandbox.Backend]sandbox.Runtime{},
 		handles:            map[string]map[string]struct{}{},
 		operations:         map[string]struct{}{},
+		streamActivity:     map[string]*taskStreamActivitySignal{},
 		completions:        map[string]*subagentCompletion{},
 		completionApplying: map[string]struct{}{},
 	}
@@ -325,6 +341,7 @@ type runtimeToolContext struct {
 	approvalRequester agent.ApprovalRequester
 	runID             string
 	turnID            string
+	messageSender     agentmessage.Sender
 }
 
 type StartSubagentOptions struct {
@@ -367,6 +384,8 @@ func taskStateFromDelegation(state delegation.State) taskapi.State {
 		return taskapi.StateCancelled
 	case delegation.StateInterrupted:
 		return taskapi.StateInterrupted
+	case delegation.StateUnknownOutcome:
+		return taskapi.StateUnknownOutcome
 	case delegation.StateWaitingApproval:
 		return taskapi.StateWaitingApproval
 	case delegation.StateFailed:

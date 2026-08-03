@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 const subagentOutputRenderInterval = 50 * time.Millisecond
@@ -21,12 +20,16 @@ type subagentOutputRenderTickMsg struct {
 // of the main Document and never becomes Session or Task authority. Views and
 // their complete child transcript are retained until the Session changes.
 type subagentOutputView struct {
-	callID          string
-	taskHandle      string
-	actor           string
-	title           string
-	finalResponse   string
-	terminalFailure string
+	callID     string
+	taskHandle string
+	actor      string
+	title      string
+	document   *Document
+	turnBlocks map[string]*ParticipantTurnBlock
+	turnID     string
+	// block is the current transcript block. Historical blocks remain in
+	// document and are rendered in stream order; TurnID is internal routing
+	// metadata, never overlay identity or lifecycle authority.
 	block           *ParticipantTurnBlock
 	revision        uint64
 	renderReady     bool
@@ -84,31 +87,9 @@ func (m *Model) observeSubagentOutputOwner(event TranscriptEvent) {
 	if title := sanitizeSpawnHeaderArgs(event.ToolArgs); title != "" {
 		view.title = title
 	}
-	if actor := subagentOutputActor(event.Actor, view.title, view.taskHandle); actor != "" {
+	if actor := subagentOutputActor("", view.title, view.taskHandle); actor != "" {
 		view.actor = actor
 		view.block.Actor = participantActorDisplayName(actor)
-	}
-	state := strings.ToLower(strings.TrimSpace(event.ToolStatus))
-	if event.Final {
-		if event.ToolError {
-			state = "failed"
-			if output := strings.TrimSpace(event.ToolOutput); output != "" {
-				view.terminalFailure = event.ToolOutput
-			}
-		} else if !eventstream.IsTerminalLifecycleState(state) {
-			state = "completed"
-		}
-		if !event.ToolError {
-			if output := strings.TrimSpace(event.ToolOutput); output != "" {
-				view.finalResponse = event.ToolOutput
-			}
-		}
-	}
-	if state == "in_progress" || state == "prompting" || state == "initializing" {
-		state = "running"
-	}
-	if state != "" {
-		view.setStatus(state, event.OccurredAt)
 	}
 	view.touch(true)
 }
@@ -128,8 +109,12 @@ func (m *Model) ensureSubagentOutputView(callID string) *subagentOutputView {
 		return existing
 	}
 	block := NewParticipantTurnBlock(callID, "")
+	document := NewDocument()
+	document.Append(block)
 	view := &subagentOutputView{
 		callID:      callID,
+		document:    document,
+		turnBlocks:  map[string]*ParticipantTurnBlock{},
 		block:       block,
 		renderReady: true,
 	}
@@ -138,7 +123,7 @@ func (m *Model) ensureSubagentOutputView(callID string) *subagentOutputView {
 }
 
 func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
-	if v == nil || v.block == nil {
+	if v == nil {
 		return
 	}
 	if projectionID := strings.TrimSpace(event.SourceProjectionID); projectionID != "" {
@@ -150,11 +135,23 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 		}
 		v.seenProjections[projectionID] = struct{}{}
 	}
-	actor := subagentOutputActor(event.Actor, v.title, v.taskHandle)
-	if actor != "" {
-		v.actor = actor
+	if event.Kind == TranscriptEventNarrative && event.NarrativeKind == TranscriptNarrativeUser {
+		v.appendInput(event)
+		v.touch(false)
+		return
 	}
-	result := applyTranscriptEventToParticipantTurn(v.block, event, participantTurnTranscriptPolicy{
+	block := v.blockForEvent(event)
+	if block == nil {
+		return
+	}
+	actor := strings.TrimSpace(v.actor)
+	if actor == "" {
+		actor = subagentOutputActor(event.Actor, v.title, v.taskHandle)
+		if actor != "" {
+			v.actor = actor
+		}
+	}
+	result := applyTranscriptEventToParticipantTurn(block, event, participantTurnTranscriptPolicy{
 		actor:                actor,
 		appendFinalNarrative: true,
 		hideTaskControl:      true,
@@ -165,28 +162,67 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 		return
 	}
 	if result.terminal {
-		finalizeSubagentOutputNarratives(v.block)
+		finalizeSubagentOutputNarratives(block)
 	}
 	v.touch(false)
 }
 
-func (v *subagentOutputView) setStatus(state string, occurredAt time.Time) {
-	if v == nil || v.block == nil {
+func (v *subagentOutputView) blockForEvent(event TranscriptEvent) *ParticipantTurnBlock {
+	if v == nil {
+		return nil
+	}
+	turnID := strings.TrimSpace(event.TurnID)
+	if turnID == "" {
+		return v.block
+	}
+	if block := v.turnBlocks[turnID]; block != nil {
+		return block
+	}
+	if v.document == nil {
+		v.document = NewDocument()
+	}
+	if v.turnBlocks == nil {
+		v.turnBlocks = map[string]*ParticipantTurnBlock{}
+	}
+	block := v.block
+	if v.turnID != "" || block == nil || len(block.Events) > 0 {
+		block = NewParticipantTurnBlock(turnID, v.actor)
+		v.document.Append(block)
+	}
+	block.SessionID = turnID
+	block.ParticipantID = v.taskHandle
+	block.Actor = participantActorDisplayName(v.actor)
+	if v.document.Find(block.BlockID()) == nil {
+		v.document.Append(block)
+	}
+	if !event.OccurredAt.IsZero() {
+		block.StartedAt = event.OccurredAt
+	}
+	v.turnBlocks[turnID] = block
+	v.block = block
+	v.turnID = turnID
+	return block
+}
+
+func (v *subagentOutputView) appendInput(event TranscriptEvent) {
+	if v == nil {
 		return
 	}
-	state = strings.ToLower(strings.TrimSpace(state))
-	if state == "" {
+	text := strings.TrimSpace(transcriptNarrativeText(event))
+	if text == "" {
 		return
 	}
-	currentTerminal := eventstream.IsTerminalLifecycleState(v.block.Status)
-	nextTerminal := eventstream.IsTerminalLifecycleState(state)
-	if currentTerminal && !nextTerminal {
-		return
+	actor := strings.TrimPrefix(strings.TrimSpace(event.Actor), "@")
+	if actor != "" && actor != "user" {
+		text = actor + ": " + text
 	}
-	v.block.SetStatus(state, "", "", occurredAt)
-	if nextTerminal {
-		finalizeSubagentOutputNarratives(v.block)
+	if v.document == nil {
+		v.document = NewDocument()
 	}
+	if v.block != nil && len(v.block.Events) == 0 && v.turnID == "" {
+		v.document.Remove(v.block.BlockID())
+	}
+	v.document.Append(NewUserNarrativeBlock(text))
 }
 
 func (v *subagentOutputView) touch(immediate bool) {
@@ -265,7 +301,10 @@ func subagentOutputActor(actor, title, handle string) string {
 	return strings.TrimSpace(handle)
 }
 
-func (v *subagentOutputView) observeOwnerEvent(event SubagentEvent) {
+// observeOwnerIdentity hydrates the stable Spawn-to-Task relation without
+// interpreting Spawn tool completion as child Task completion. It is safe to
+// call while opening or reopening the overlay.
+func (v *subagentOutputView) observeOwnerIdentity(event SubagentEvent) {
 	if v == nil || v.block == nil {
 		return
 	}
@@ -279,19 +318,6 @@ func (v *subagentOutputView) observeOwnerEvent(event SubagentEvent) {
 		v.actor = actor
 		v.block.Actor = participantActorDisplayName(actor)
 	}
-	if event.Done {
-		state := "completed"
-		if event.Err {
-			state = "failed"
-			if output := strings.TrimSpace(event.Output); output != "" {
-				v.terminalFailure = event.Output
-			}
-		} else if output := strings.TrimSpace(event.Output); output != "" {
-			v.finalResponse = event.Output
-		}
-		v.setStatus(state, event.EndedAt)
-	}
-	v.touch(true)
 }
 
 func (m *Model) subagentOutputOwner(blockID, callID string) (SubagentEvent, bool) {

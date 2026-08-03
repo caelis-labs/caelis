@@ -3,9 +3,11 @@ package acpagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +23,7 @@ import (
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/testenv"
 	"github.com/caelis-labs/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestNewFromStackRoutesStatusSlashThroughSharedPromptRouter(t *testing.T) {
@@ -126,6 +129,125 @@ func TestNewFromStackStatusSlashUsesClientWorkspaceSession(t *testing.T) {
 	stackWorkspaceDisplay := controladapter.FormatWorkspacePathForDisplay(stackWorkspace)
 	if strings.Contains(message, "Workspace: "+stackWorkspaceDisplay) {
 		t.Fatalf("status output = %q, should not use stack workspace %q", message, stackWorkspaceDisplay)
+	}
+}
+
+func TestNewFromStackHidesManagedSubagentSessionFromResume(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	provider := testenv.NewHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"managed-child-1\",\"object\":\"chat.completion.chunk\",\"model\":\"managed-child-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"managed child ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	stack, err := newACPAgentTestStack(t, gatewayapp.Config{
+		AppName:      "caelis",
+		UserID:       "acpagent-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "auto-review",
+		SkillDirs:    []string{t.TempDir()},
+		Sandbox:      gatewayapp.SandboxConfig{RequestedType: "host"},
+		Model: gatewayapp.ModelConfig{
+			Provider: "openai-compatible", API: providers.APIOpenAICompatible,
+			Model: "managed-child-test", BaseURL: provider.URL, HTTPClient: provider.Client(),
+			Token: "managed-child-token", AuthType: model.AuthBearerToken, Timeout: 2 * time.Second,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	agent, err := NewFromStack(stack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinary, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: workspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
+		metautil.RuntimeSessionKind:     metautil.RuntimeSessionKindSubagent,
+		metautil.RuntimeSessionParentID: ordinary.SessionID,
+		metautil.RuntimeTaskID:          "task-1",
+	})
+	child, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: workspace, Meta: meta})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childSession, err := stack.Sessions.Session(ctx, session.SessionRef{SessionID: child.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if childSession.Metadata["system_managed_agent"] != "subagent" {
+		t.Fatalf("child Session metadata = %#v, want managed subagent marker", childSession.Metadata)
+	}
+	foreign, err := stack.Sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: stack.AppName,
+		UserID:  stack.UserID,
+		Workspace: session.WorkspaceRef{
+			Key: workspace,
+			CWD: workspace,
+		},
+		Metadata: session.CloneState(childSession.Metadata),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignBefore := foreign
+	if _, err := agent.Prompt(ctx, acp.PromptRequest{
+		SessionID: foreign.SessionID,
+		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"must not run"}`)},
+	}, &recordingCallbacks{}); !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("Prompt(foreign system-managed child) error = %v, want session not found", err)
+	}
+	if _, err := agent.SessionMessage(ctx, acp.SessionMessageRequest{
+		SessionID: foreign.SessionID, MessageID: "foreign-message", From: "main", To: "parent", Message: "must not deliver",
+	}, &recordingCallbacks{}); !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("SessionMessage(foreign system-managed child) error = %v, want session not found", err)
+	}
+	if _, err := agent.SetSessionMode(ctx, acp.SetSessionModeRequest{
+		SessionID: foreign.SessionID, ModeID: "manual",
+	}); !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("SetSessionMode(foreign system-managed child) error = %v, want session not found", err)
+	}
+	if _, err := agent.CloseSession(ctx, acp.CloseSessionRequest{SessionID: foreign.SessionID}); !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("CloseSession(foreign system-managed child) error = %v, want session not found", err)
+	}
+	foreignAfter, err := stack.Sessions.Session(ctx, foreign.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foreignAfter.Revision != foreignBefore.Revision || !reflect.DeepEqual(foreignAfter.Metadata, foreignBefore.Metadata) {
+		t.Fatalf("foreign managed Session changed: before=%#v after=%#v", foreignBefore, foreignAfter)
+	}
+	callbacks := &recordingCallbacks{}
+	result, err := agent.Prompt(ctx, acp.PromptRequest{
+		SessionID: child.SessionID,
+		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"reply once"}`)},
+	}, callbacks)
+	if err != nil {
+		t.Fatalf("Prompt(system-managed child) error = %v", err)
+	}
+	if result.StopReason != acp.StopReasonEndTurn || callbacks.firstAgentMessage() != "managed child ok" {
+		t.Fatalf("Prompt(system-managed child) = %#v, message %q", result, callbacks.firstAgentMessage())
+	}
+	listed, err := agent.ListSessions(ctx, acp.SessionListRequest{CWD: workspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Sessions) != 1 || listed.Sessions[0].SessionID != ordinary.SessionID {
+		t.Fatalf("ListSessions() = %#v, want only ordinary Session %q", listed.Sessions, ordinary.SessionID)
+	}
+	if _, err := agent.LoadSession(ctx, acp.LoadSessionRequest{SessionID: child.SessionID, CWD: workspace}, &recordingCallbacks{}); !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("LoadSession(system-managed child) error = %v, want session not found", err)
+	}
+	if _, err := agent.ResumeSession(ctx, acp.ResumeSessionRequest{SessionID: child.SessionID, CWD: workspace}); !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("ResumeSession(system-managed child) error = %v, want session not found", err)
 	}
 }
 

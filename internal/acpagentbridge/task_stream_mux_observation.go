@@ -20,28 +20,40 @@ const (
 // parent tool call. Its mutation methods are called only while the mux lock is
 // held; workers never compare or write its fields directly.
 type acpTaskStreamObservation struct {
-	phase      acpTaskStreamObservationPhase
-	notices    acpTaskStreamNoticeKind
-	generation *acpTaskStreamObservationGeneration
+	phase            acpTaskStreamObservationPhase
+	notices          acpTaskStreamNoticeKind
+	cursor           string
+	activityTerminal bool
+	generation       *acpTaskStreamObservationGeneration
 }
 
 type acpTaskStreamObservationGeneration struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	boundary chan struct{}
+	settled  chan struct{}
+	cursor   string
+	// followActivities identifies a subagent observation whose transport stays
+	// attached across message-authored activity periods while the parent ACP
+	// Prompt remains active.
+	followActivities bool
 }
 
-func (o *acpTaskStreamObservation) claim(parent context.Context) *acpTaskStreamObservationGeneration {
+func (o *acpTaskStreamObservation) claim(parent context.Context, followActivities bool) *acpTaskStreamObservationGeneration {
 	if o == nil || o.phase != acpTaskStreamObservationIdle {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(parent)
 	generation := &acpTaskStreamObservationGeneration{
-		ctx:      ctx,
-		cancel:   cancel,
-		boundary: make(chan struct{}, 1),
+		ctx:              ctx,
+		cancel:           cancel,
+		boundary:         make(chan struct{}, 1),
+		settled:          make(chan struct{}),
+		cursor:           strings.TrimSpace(o.cursor),
+		followActivities: followActivities,
 	}
 	o.phase = acpTaskStreamObservationResolving
+	o.activityTerminal = false
 	o.generation = generation
 	return generation
 }
@@ -74,8 +86,34 @@ func (o *acpTaskStreamObservation) finishResume(generation *acpTaskStreamObserva
 	return true
 }
 
-func (o *acpTaskStreamObservation) closeGeneration(generation *acpTaskStreamObservationGeneration) bool {
+func (o *acpTaskStreamObservation) recordCursor(generation *acpTaskStreamObservationGeneration, cursor string) bool {
 	if !o.owns(generation) {
+		return false
+	}
+	if cursor = strings.TrimSpace(cursor); cursor != "" {
+		o.cursor = cursor
+	}
+	return true
+}
+
+func (o *acpTaskStreamObservation) observeActivityLifecycle(
+	generation *acpTaskStreamObservationGeneration,
+	terminal bool,
+) bool {
+	if !o.owns(generation) || !generation.followActivities {
+		return false
+	}
+	switch o.phase {
+	case acpTaskStreamObservationAttached, acpTaskStreamObservationResuming:
+		o.activityTerminal = terminal
+		return true
+	default:
+		return false
+	}
+}
+
+func (o *acpTaskStreamObservation) closeGeneration(generation *acpTaskStreamObservationGeneration, cursor string) bool {
+	if !o.recordCursor(generation, cursor) {
 		return false
 	}
 	o.phase = acpTaskStreamObservationClosed
@@ -96,6 +134,19 @@ func (o *acpTaskStreamObservation) cancelResolving() *acpTaskStreamObservationGe
 	}
 	o.phase = acpTaskStreamObservationClosed
 	return o.generation
+}
+
+func (o *acpTaskStreamObservation) cancelSealedActivityBoundary() *acpTaskStreamObservationGeneration {
+	if o == nil || o.generation == nil || !o.generation.followActivities || !o.activityTerminal {
+		return nil
+	}
+	switch o.phase {
+	case acpTaskStreamObservationAttached, acpTaskStreamObservationResuming:
+		o.phase = acpTaskStreamObservationClosed
+		return o.generation
+	default:
+		return nil
+	}
 }
 
 func (o *acpTaskStreamObservation) retryStopped(
@@ -193,18 +244,29 @@ func (m *acpTaskStreamMux) observationLocked(callID string) *acpTaskStreamObserv
 	return observation
 }
 
-func (m *acpTaskStreamMux) claimObservation(callID string) *acpTaskStreamObservationGeneration {
+func (m *acpTaskStreamMux) claimObservation(callID string, followActivities bool) *acpTaskStreamObservationGeneration {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.sealed {
 		return nil
 	}
-	generation := m.observationLocked(callID).claim(m.ctx)
+	generation := m.observationLocked(callID).claim(m.ctx, followActivities)
 	if generation != nil {
 		m.active++
 		m.wg.Add(1)
 	}
 	return generation
+}
+
+func (m *acpTaskStreamMux) observeSubagentActivityLifecycle(
+	callID string,
+	generation *acpTaskStreamObservationGeneration,
+	terminal bool,
+) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	observation := m.observations[strings.TrimSpace(callID)]
+	return observation != nil && observation.observeActivityLifecycle(generation, terminal) && m.sealed
 }
 
 func (m *acpTaskStreamMux) closeParentObservation(callID string) *acpTaskStreamObservationGeneration {
@@ -253,9 +315,20 @@ func (m *acpTaskStreamMux) finishObservationResume(
 func (m *acpTaskStreamMux) closeObservation(
 	callID string,
 	generation *acpTaskStreamObservationGeneration,
+	cursor string,
 ) bool {
 	return m.updateObservation(callID, func(observation *acpTaskStreamObservation) bool {
-		return observation.closeGeneration(generation)
+		return observation.closeGeneration(generation, cursor)
+	})
+}
+
+func (m *acpTaskStreamMux) recordObservationCursor(
+	callID string,
+	generation *acpTaskStreamObservationGeneration,
+	cursor string,
+) bool {
+	return m.updateObservation(callID, func(observation *acpTaskStreamObservation) bool {
+		return observation.recordCursor(generation, cursor)
 	})
 }
 
@@ -278,7 +351,7 @@ func (m *acpTaskStreamMux) prepareResolveFailure(
 ) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	stopped := m.sealed || generation == nil || generation.ctx.Err() != nil
+	stopped := generation == nil || generation.ctx.Err() != nil || m.sealed
 	observation := m.observations[strings.TrimSpace(callID)]
 	return observation != nil && observation.prepareResolveFailure(generation, stopped)
 }
@@ -290,7 +363,7 @@ func (m *acpTaskStreamMux) completeResolveFailure(
 ) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	stopped := m.sealed || generation == nil || generation.ctx.Err() != nil
+	stopped := generation == nil || generation.ctx.Err() != nil || m.sealed
 	observation := m.observations[strings.TrimSpace(callID)]
 	if observation != nil {
 		observation.finishResolveFailure(generation, stopped, retryable)
@@ -326,13 +399,17 @@ func (m *acpTaskStreamMux) observationBoundary(callID string) chan struct{} {
 	return observation.boundary()
 }
 
-func (m *acpTaskStreamMux) cancelResolvingObservations() []*acpTaskStreamObservationGeneration {
+func (m *acpTaskStreamMux) sealObservations() []*acpTaskStreamObservationGeneration {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sealed = true
 	generations := make([]*acpTaskStreamObservationGeneration, 0)
 	for _, observation := range m.observations {
 		if generation := observation.cancelResolving(); generation != nil {
+			generations = append(generations, generation)
+			continue
+		}
+		if generation := observation.cancelSealedActivityBoundary(); generation != nil {
 			generations = append(generations, generation)
 		}
 	}

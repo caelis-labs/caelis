@@ -248,9 +248,10 @@ func OpenNewSession(
 	ctx context.Context,
 	config RecoveryConfig,
 	cwd string,
+	meta map[string]any,
 ) (RecoveryResult[client.NewSessionResponse], error) {
 	return recoverCall(ctx, config, func(openCtx context.Context, activeClient *client.Client) (client.NewSessionResponse, error) {
-		return activeClient.NewSession(openCtx, strings.TrimSpace(cwd), nil)
+		return activeClient.NewSession(openCtx, strings.TrimSpace(cwd), meta)
 	})
 }
 

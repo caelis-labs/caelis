@@ -20,6 +20,7 @@ type ControlPlane struct {
 	Subagents   subagent.Runner
 	Updater     assembly.AgentConfigUpdater
 	manager     *acpcontroller.Manager
+	runner      *acpsubagent.Runner
 }
 
 // ControlPlaneConfig configures one shared-registry ACP control plane.
@@ -51,7 +52,17 @@ func NewControlPlane(cfg ControlPlaneConfig) (*ControlPlane, error) {
 		Subagents:   runner,
 		Updater:     &registryUpdater{registry: registry},
 		manager:     manager,
+		runner:      runner,
 	}, nil
+}
+
+// BindMessageHandler connects child-originated ACP requests to the owning
+// Runtime after product composition completes.
+func (c *ControlPlane) BindMessageHandler(handler acpsubagent.MessageHandler) {
+	if c == nil || c.runner == nil {
+		return
+	}
+	c.runner.BindMessageHandler(handler)
 }
 
 func (c *ControlPlane) ControllerStatus(ctx context.Context, ref session.SessionRef) (acpcontroller.ControllerStatus, bool, error) {

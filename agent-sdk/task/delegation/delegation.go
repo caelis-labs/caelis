@@ -49,6 +49,7 @@ const (
 	StateFailed          State = "failed"
 	StateCancelled       State = "cancelled"
 	StateInterrupted     State = "interrupted"
+	StateUnknownOutcome  State = "unknown_outcome"
 	StateWaitingApproval State = "waiting_approval"
 )
 
@@ -80,23 +81,9 @@ type TargetRequest struct {
 	Prompt string `json:"prompt,omitempty"`
 }
 
-// ContinueRequest describes a prompt appended to an existing child session.
-// YieldTimeMS belongs to the TASK control plane, not the SPAWN tool surface.
-type ContinueRequest struct {
-	// Agent is retained for SDK compatibility and is derived from the Anchor by
-	// the Runtime.
-	// Deprecated: use the Agent carried by Anchor.
-	Agent       string `json:"agent,omitempty"`
-	Prompt      string `json:"prompt,omitempty"`
-	YieldTimeMS int    `json:"yield_time_ms,omitempty"`
-	// Completion replaces the Spawn turn's sink for this continuation. Runtime
-	// lifecycle must not depend on a later Task read or wait observing the child.
-	Completion CompletionSink `json:"-"`
-}
-
 // CompletionSink receives the terminal result owned by one child execution
 // turn. Producers publish from their independent completion path after
-// Spawn/Continue returns and after releasing their own locks. Publish does not
+// Spawn/Message returns and after releasing their own locks. Publish does not
 // return until Runtime has durably converged the terminal result.
 type CompletionSink interface {
 	PublishSubagentCompletion(Result)
@@ -166,13 +153,6 @@ func ValidateTarget(raw Target) error {
 	return nil
 }
 
-func CloneContinueRequest(in ContinueRequest) ContinueRequest {
-	out := in
-	out.Agent = strings.TrimSpace(in.Agent)
-	out.Prompt = strings.TrimSpace(in.Prompt)
-	return out
-}
-
 func CloneResult(in Result) Result {
 	out := in
 	out.State = State(strings.TrimSpace(string(in.State)))
@@ -180,7 +160,7 @@ func CloneResult(in Result) Result {
 	out.OutputPreview = strings.TrimSpace(in.OutputPreview)
 	out.Error = strings.TrimSpace(in.Error)
 	out.Result = strings.TrimSpace(in.Result)
-	if out.State != StateFailed && out.State != StateInterrupted {
+	if out.State != StateFailed && out.State != StateInterrupted && out.State != StateUnknownOutcome {
 		out.Error = ""
 	}
 	return out

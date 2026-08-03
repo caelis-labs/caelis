@@ -280,6 +280,9 @@ func TestRuntimeAgentACPSpawnLifecycleGolden(t *testing.T) {
 		Scope: eventstream.ScopeSubagent, ScopeID: "task-yara", ParentTool: parent, Final: true,
 		Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
 	}
+	if err := subscription.Close(); err != nil {
+		t.Fatalf("close completed Task subscription: %v", err)
+	}
 	// The typed child lifecycle must close the Spawn terminal without requiring
 	// any Task wait tool call.
 	waitGoldenNotification(t, callbacks)

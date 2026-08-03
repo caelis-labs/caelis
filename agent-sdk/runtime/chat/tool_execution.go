@@ -70,7 +70,7 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 					continue
 				}
 				canonical, truncationMeta := canonicalToolResult(progress, nil)
-				_ = yieldProgress(session.MarkUIOnly(toolResultEvent(call, canonical, nil, truncationMeta)))
+				_ = yieldProgress(session.MarkUIOnly(toolProgressEvent(call, canonical, truncationMeta)))
 			default:
 				return done.message, done.event, done.err
 			}
@@ -83,7 +83,7 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 				continue
 			}
 			canonical, truncationMeta := canonicalToolResult(progress, nil)
-			if !yieldProgress(session.MarkUIOnly(toolResultEvent(call, canonical, nil, truncationMeta))) {
+			if !yieldProgress(session.MarkUIOnly(toolProgressEvent(call, canonical, truncationMeta))) {
 				return model.Message{}, nil, context.Canceled
 			}
 		case done := <-doneCh:

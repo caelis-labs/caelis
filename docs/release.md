@@ -24,6 +24,10 @@ release-dry-run.
    automation waits for that exact run. Do not rerun `commit-check` merely
    because a tag is about to be created.
 5. Prepare concise release notes for user-visible changes.
+6. When a release retires a durable writer but keeps a compatibility reader,
+   record the last writer and this first no-write version in the release notes.
+   Keep the reader until the documented minimum supported upgrade source is the
+   first no-write version or newer.
 
 `make sdk-race`, `make regression`, `make sdk-proxy-smoke`, and
 `make release-dry-run` remain available for a change that specifically needs

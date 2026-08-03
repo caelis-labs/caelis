@@ -841,7 +841,7 @@ func TestCompletedTaskSessionAwaitOutputRejectsCursorAhead(t *testing.T) {
 	}
 }
 
-func TestStreamSubscribeFollowsOnlyAReopenedSubagentContinue(t *testing.T) {
+func TestStreamSubscribeStopsAtCompletedSubagentTask(t *testing.T) {
 	t.Parallel()
 
 	task := &subagentTask{
@@ -862,8 +862,7 @@ func TestStreamSubscribeFollowsOnlyAReopenedSubagentContinue(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		for frame, err := range service.Subscribe(ctx, stream.SubscribeRequest{
-			Ref:             stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
-			FollowContinues: true,
+			Ref: stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
 		}) {
 			if err != nil {
 				done <- err
@@ -880,40 +879,365 @@ func TestStreamSubscribeFollowsOnlyAReopenedSubagentContinue(t *testing.T) {
 	if !first.Closed || first.State != string(taskapi.StateCompleted) {
 		t.Fatalf("first frame = %#v, want completed turn close", first)
 	}
-	task.applyStreamFrames([]stream.Frame{{
-		Text: "late first-turn output", State: string(taskapi.StateRunning), Running: true,
-	}})
-	task.mu.Lock()
-	lateState, lateRunning, lateResult := task.state, task.running, task.result["output_preview"]
-	task.mu.Unlock()
-	if lateState != taskapi.StateCompleted || lateRunning || lateResult != nil {
-		t.Fatalf("late frame changed closed Task to state=%q running=%t result=%#v", lateState, lateRunning, lateResult)
-	}
-	select {
-	case frame := <-frames:
-		t.Fatalf("post-terminal frame was delivered before Continue: %#v", frame)
-	case <-time.After(20 * time.Millisecond):
-	}
-
-	task.beginContinuationTurn()
-	task.mu.Lock()
-	task.state = taskapi.StateRunning
-	task.running = true
-	task.mu.Unlock()
-	task.applyStreamFrames([]stream.Frame{{Text: "continued output", Running: true}})
-	continued := receiveStreamFrame(t, frames)
-	if continued.Closed || continued.Text != "continued output" || continued.Ref.TerminalID != "task-1:2" || continued.Cursor.Events <= first.Cursor.Events {
-		t.Fatalf("continued frame = %#v, want reopened Task stream with a higher absolute cursor", continued)
-	}
-
-	cancel()
 	select {
 	case err := <-done:
 		if err != nil && !errors.Is(err, context.Canceled) {
 			t.Fatalf("Subscribe() error = %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("Subscribe() did not stop after cancellation")
+		t.Fatal("Subscribe() did not stop at completed subagent Task")
+	}
+}
+
+func TestStreamSubscribeRestartsMessageAuthoredSubagentTurnFromAbsoluteCursor(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "session-1", TerminalID: "task-1:1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		state:      taskapi.StateCompleted,
+		turnSeq:    1,
+		createdAt:  time.Now(),
+		result:     map[string]any{"result": "first turn"},
+	}
+	tasks := &taskRuntime{
+		tasks:     map[string]*commandTask{},
+		subagents: map[string]*subagentTask{task.ref.TaskID: task},
+	}
+	service := newStreamService(tasks)
+	ctx := context.Background()
+	frames := make(chan stream.Frame, 8)
+	done := make(chan error, 1)
+	go func() {
+		for frame, err := range service.Subscribe(ctx, stream.SubscribeRequest{
+			Ref: stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
+		}) {
+			if err != nil {
+				done <- err
+				return
+			}
+			if frame != nil {
+				frames <- stream.CloneFrame(*frame)
+			}
+		}
+		done <- nil
+	}()
+
+	first := receiveStreamFrame(t, frames)
+	if !first.Closed || first.State != string(taskapi.StateCompleted) {
+		t.Fatalf("first frame = %#v, want completed turn-1 close", first)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("first activity subscription error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first activity subscription remained open after completion")
+	}
+
+	task.beginMessageTurn()
+	reopened, err := service.Read(ctx, stream.ReadRequest{
+		Ref:    stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
+		Cursor: first.Cursor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reopened.Running || reopened.State != string(taskapi.StateRunning) || reopened.TerminalFramed || len(reopened.Frames) != 0 {
+		t.Fatalf("reopened snapshot = %#v, want running turn without a premature close", reopened)
+	}
+	task.mu.Lock()
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateRunning, Running: true})
+	task.mu.Unlock()
+	tasks.PublishStream(stream.Frame{
+		Ref: stream.Ref{TaskID: task.ref.TaskID}, Text: "turn-2 output",
+		State: string(delegation.StateRunning), Running: true,
+	})
+	done = make(chan error, 1)
+	go func() {
+		for frame, err := range service.Subscribe(ctx, stream.SubscribeRequest{
+			Ref:    stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
+			Cursor: first.Cursor,
+		}) {
+			if err != nil {
+				done <- err
+				return
+			}
+			if frame != nil {
+				frames <- stream.CloneFrame(*frame)
+			}
+		}
+		done <- nil
+	}()
+	second := receiveStreamFrame(t, frames)
+	if second.Text != "turn-2 output" || !second.Running || second.Closed {
+		t.Fatalf("second frame = %#v, want live turn-2 output", second)
+	}
+	if second.Cursor.Events <= first.Cursor.Events {
+		t.Fatalf("turn-2 cursor = %#v, want after turn-1 %#v", second.Cursor, first.Cursor)
+	}
+
+	task.mu.Lock()
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "turn-2 done"})
+	task.mu.Unlock()
+	terminal := receiveStreamFrame(t, frames)
+	if !terminal.Closed || terminal.State != string(taskapi.StateCompleted) {
+		t.Fatalf("terminal frame = %#v, want completed turn-2 close", terminal)
+	}
+	if terminal.Cursor.Events <= second.Cursor.Events {
+		t.Fatalf("turn-2 terminal cursor = %#v, want after output %#v", terminal.Cursor, second.Cursor)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("second activity Subscribe() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second activity subscription did not stop after completion")
+	}
+}
+
+func TestStreamSubscribeFollowTracksMessageAuthoredSubagentTurnsUntilCanceled(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "session-1", TerminalID: "task-1:1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		state:      taskapi.StateCompleted,
+		turnSeq:    1,
+		createdAt:  time.Now(),
+		result:     map[string]any{"result": "first turn"},
+	}
+	tasks := newTaskRuntime(&Runtime{clock: time.Now}, nil)
+	tasks.subagents[task.ref.TaskID] = task
+	service := newStreamService(tasks)
+	ctx, cancel := context.WithCancel(context.Background())
+	frames := make(chan stream.Frame, 8)
+	done := make(chan error, 1)
+	go func() {
+		for frame, err := range service.Subscribe(ctx, stream.SubscribeRequest{
+			Ref:    stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID},
+			Follow: true,
+		}) {
+			if err != nil {
+				done <- err
+				return
+			}
+			if frame != nil {
+				frames <- stream.CloneFrame(*frame)
+			}
+		}
+		done <- nil
+	}()
+
+	first := receiveStreamFrame(t, frames)
+	if !first.Closed || first.State != string(taskapi.StateCompleted) {
+		t.Fatalf("first frame = %#v, want completed turn-1 close", first)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("Follow subscription stopped at first completion: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	// Recovery or a newer durable revision may replace the concrete task object.
+	// Rehydrate one at the durable absolute frontier before beginning the
+	// message-authored Turn; Follow must not retain or depend on the first
+	// object pointer.
+	entry := task.entrySnapshot(time.Now())
+	entry.Metadata[subagentStreamEventCursorMeta] = first.Cursor.Events
+	entry.Metadata[subagentStreamOutputCursorMeta] = first.Cursor.Output
+	rehydrated := tasks.rehydrateSubagentTask(entry)
+	rehydrated.beginMessageTurn()
+	tasks.mu.Lock()
+	delete(tasks.subagents, task.ref.TaskID)
+	tasks.subagents[rehydrated.ref.TaskID] = rehydrated
+	tasks.mu.Unlock()
+	task = rehydrated
+	tasks.notifyTaskStreamActivity(task.sessionRef.SessionID, task.ref.TaskID)
+	tasks.PublishStream(stream.Frame{
+		Ref: stream.Ref{TaskID: task.ref.TaskID}, Text: "turn-2 output",
+		State: string(delegation.StateRunning), Running: true,
+	})
+	second := receiveStreamFrame(t, frames)
+	if second.Text != "turn-2 output" || !second.Running || second.Closed {
+		t.Fatalf("second frame = %#v, want live turn-2 output", second)
+	}
+	if second.Cursor.Events <= first.Cursor.Events {
+		t.Fatalf("turn-2 cursor = %#v, want after turn-1 %#v", second.Cursor, first.Cursor)
+	}
+
+	task.mu.Lock()
+	task.applyResult(delegation.Result{TaskID: task.ref.TaskID, State: delegation.StateCompleted, Result: "turn-2 done"})
+	task.mu.Unlock()
+	terminal := receiveStreamFrame(t, frames)
+	if !terminal.Closed || terminal.Cursor.Events <= second.Cursor.Events {
+		t.Fatalf("turn-2 terminal = %#v, want close after output", terminal)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("Follow subscription stopped at second completion: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Follow subscription cancellation error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Follow subscription did not stop after cancellation")
+	}
+}
+
+func TestStreamSubscribeFollowWaitsThroughTemporaryTaskNotFound(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref:        taskapi.Ref{TaskID: "task-gap", SessionID: "session-gap", TerminalID: "task-gap:1"},
+		sessionRef: session.SessionRef{SessionID: "session-gap"},
+		state:      taskapi.StateCompleted,
+		turnSeq:    1,
+		createdAt:  time.Now(),
+		result:     map[string]any{"result": "first turn"},
+	}
+	tasks := newTaskRuntime(&Runtime{clock: time.Now}, nil)
+	tasks.subagents[task.ref.TaskID] = task
+	service := newStreamService(tasks)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	frames := make(chan stream.Frame, 8)
+	done := make(chan error, 1)
+	go func() {
+		for frame, err := range service.Subscribe(ctx, stream.SubscribeRequest{
+			Ref: stream.Ref{SessionID: task.sessionRef.SessionID, TaskID: task.ref.TaskID}, Follow: true,
+		}) {
+			if err != nil {
+				done <- err
+				return
+			}
+			if frame != nil {
+				frames <- stream.CloneFrame(*frame)
+			}
+		}
+		done <- nil
+	}()
+
+	first := receiveStreamFrame(t, frames)
+	entry := task.entrySnapshot(time.Now())
+	entry.Metadata[subagentStreamEventCursorMeta] = first.Cursor.Events
+	entry.Metadata[subagentStreamOutputCursorMeta] = first.Cursor.Output
+	tasks.mu.Lock()
+	delete(tasks.subagents, task.ref.TaskID)
+	tasks.mu.Unlock()
+	// Wake the first completed-activity watch while the durable/live directory
+	// intentionally cannot resolve the Task.
+	tasks.notifyTaskStreamActivity(task.sessionRef.SessionID, task.ref.TaskID)
+	deadline := time.Now().Add(time.Second)
+	for {
+		tasks.mu.RLock()
+		waitingAfterMiss := false
+		for _, signal := range tasks.streamActivity {
+			waitingAfterMiss = signal.watchers == 1 && signal.generation == 0
+		}
+		tasks.mu.RUnlock()
+		if waitingAfterMiss {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Follow did not soft-wait after temporary task not found")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	rehydrated := tasks.rehydrateSubagentTask(entry)
+	rehydrated.beginMessageTurn()
+	tasks.mu.Lock()
+	tasks.subagents[rehydrated.ref.TaskID] = rehydrated
+	tasks.mu.Unlock()
+	tasks.notifyTaskStreamActivity(rehydrated.sessionRef.SessionID, rehydrated.ref.TaskID)
+	tasks.PublishStream(stream.Frame{
+		Ref: stream.Ref{TaskID: rehydrated.ref.TaskID}, Text: "turn-2 after gap",
+		State: string(delegation.StateRunning), Running: true,
+	})
+	second := receiveStreamFrame(t, frames)
+	if second.Text != "turn-2 after gap" || !second.Running || second.Cursor.Events <= first.Cursor.Events {
+		t.Fatalf("resumed Follow frame = %#v, want turn-2 after temporary miss", second)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("Follow cancellation error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Follow did not stop after cancellation")
+	}
+}
+
+func TestStreamCursorSurvivesCompletedSubagentMessageTurn(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult:    delegation.Result{State: delegation.StateCompleted, Result: "turn-1 done"},
+		continueResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, taskapi.SubagentStartRequest{
+		Agent: "helper", Prompt: "first turn",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	service := newStreamService(runtime.tasks)
+	first, err := service.Read(ctx, stream.ReadRequest{
+		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Running || !stream.IsTerminalState(first.State) || first.Cursor.Events == 0 {
+		t.Fatalf("first turn snapshot = %#v, want terminal cursor", first)
+	}
+
+	continued, err := sendSubagentMessageForTest(ctx, runtime, activeSession.SessionRef, started.Handle, "second turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !continued.Running || runner.continueCompletion == nil {
+		t.Fatalf("continued Task = %#v completion=%T, want running message turn", continued, runner.continueCompletion)
+	}
+	runner.spawnContext.Streams.PublishStream(stream.Frame{
+		Ref: stream.Ref{TaskID: started.Ref.TaskID}, Text: "turn-2 reasoning", Running: true,
+	})
+	runner.continueCompletion.PublishSubagentCompletion(delegation.Result{
+		TaskID: started.Ref.TaskID, State: delegation.StateCompleted, Result: "turn-2 done",
+	})
+
+	second, err := service.Read(ctx, stream.ReadRequest{
+		Ref:    stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
+		Cursor: first.Cursor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Cursor.Events <= first.Cursor.Events {
+		t.Fatalf("second turn cursor = %#v, want after first turn %#v", second.Cursor, first.Cursor)
+	}
+	found := false
+	for _, frame := range second.Frames {
+		if strings.Contains(frame.Text, "turn-2 reasoning") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("second turn snapshot = %#v, want retained output after canonical Task refresh", second)
 	}
 }
 
@@ -1050,7 +1374,7 @@ func TestResolvedStreamReaderKeepsLiveTaskAcrossDeferredDurableReplacement(t *te
 	}
 	tasks := &taskRuntime{tasks: map[string]*commandTask{live.ref.TaskID: live}}
 	service := newStreamService(tasks)
-	read, _, err := service.resolveReader(context.Background(), stream.Ref{
+	read, _, _, err := service.resolveReader(context.Background(), stream.Ref{
 		SessionID: live.sessionRef.SessionID,
 		TaskID:    live.ref.TaskID,
 	})
@@ -1195,7 +1519,7 @@ func TestAwaitCommandWakesWhenCallbackAppendsFrame(t *testing.T) {
 	done := make(chan stream.Snapshot, 1)
 	errs := make(chan error, 1)
 	go func() {
-		snapshot, err := service.awaitCommand(ctx, task, stream.Cursor{}, false)
+		snapshot, err := service.awaitCommand(ctx, task, stream.Cursor{})
 		if err != nil {
 			errs <- err
 			return
@@ -1241,7 +1565,7 @@ func TestAwaitCommandRetainsOneBackendObserverAcrossStreamWake(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := (&streamService{}).awaitCommand(ctx, task, stream.Cursor{}, false)
+		_, err := (&streamService{}).awaitCommand(ctx, task, stream.Cursor{})
 		done <- err
 	}()
 	select {

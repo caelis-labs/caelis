@@ -33,6 +33,16 @@ func TestSummarizeToolCallTitleIncludesSpawnPrompt(t *testing.T) {
 	}
 }
 
+func TestSummarizeToolCallTitleUsesSemanticAgentMessage(t *testing.T) {
+	raw := map[string]any{
+		"to":      "parent",
+		"message": "READY file=payload",
+	}
+	if got := SummarizeToolCallTitle("SendMessage", raw); got != "Send message to @parent: READY file=payload" {
+		t.Fatalf("SummarizeToolCallTitle(SendMessage) = %q", got)
+	}
+}
+
 func TestSkillToolKeepsDistinctSemanticName(t *testing.T) {
 	if got := SemanticToolName("skill", ToolKindForName("skill")); got != "Skill" {
 		t.Fatalf("SemanticToolName(skill) = %q, want Skill", got)

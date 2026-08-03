@@ -239,6 +239,8 @@ one Agent must not inspect or cancel an unrelated external endpoint.
 Durable model-visible facts require canonical payloads:
 
 - `Event.Message` for model messages;
+- canonical `EventTypeContext` plus typed `Event.Actor` for Agent-authored
+  messages that must not impersonate User input;
 - `Event.Tool` for tool calls and results;
 - `PlanPayload` for plan state;
 - `EventProtocol{Method, Update, Permission}` for ACP-compatible coordination
@@ -258,6 +260,30 @@ Visibility categories:
 
 Subagent stream chunks are `ui_only`; the parent receives subagent output
 through durable `Spawn`/`Task` tool results.
+
+Agent-to-Agent delivery uses one target-owned canonical Context path.
+`SendMessage` routes parent, child, and sibling messages; local target delivery
+persists before wakeup and does not create a second mailbox truth or reuse
+`Task write`. Parent-side child-directed audit is an accepted-delivery mirror,
+not main model context. Acceptance means the delivery runner owns the queued
+work; it does not mean the target consumed the message. Agent-message projection requires explicit message
+metadata or a maintained Agent-message source in addition to typed Actor
+identity. After delivery ownership transfers, failure to refresh the sender's Task index
+returns `accepted_unpersisted` rather than a retryable delivery error.
+Completion notices carry only state and the Session-scoped Task handle, leaving
+final output under the Task owner. They are best-effort hints after authoritative
+Task/sidecar completion and cannot delay the terminal producer. Task observers follow later message-authored
+child Turns with the same absolute cursor without advertising Task input.
+The Task stream subscription declares whether it follows the complete subagent
+timeline. A following observer releases each completed activity's producer
+observation, waits on the stable Session/Task identity, and re-resolves the
+producer when the child starts another activity period. The absolute
+event/output frontier is persisted
+with the Task so replacement or rehydration cannot reset cursor numbering.
+Command Tasks and non-following subscriptions still stop at terminal state.
+`SendMessage` output is only the delivery acknowledgement; it does not manage
+subscriptions. Likewise, `turn_id` groups transcript events and never owns the
+Task or presentation lifecycle.
 
 ## Migration Rules
 

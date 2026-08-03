@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/transport/stdio"
 )
@@ -17,6 +18,7 @@ import (
 type RequestHandler func(context.Context, jsonrpc.Message) (any, *jsonrpc.RPCError)
 type NotificationHandler func(context.Context, jsonrpc.Message)
 type PermissionHandler func(context.Context, RequestPermissionRequest) (RequestPermissionResponse, error)
+type SessionMessageHandler func(context.Context, SessionMessageRequest) (SessionMessageResponse, error)
 
 type TerminalHandler interface {
 	CreateTerminal(context.Context, CreateTerminalRequest) (CreateTerminalResponse, error)
@@ -39,6 +41,7 @@ type Config struct {
 	ClientInfo          *Implementation
 	OnUpdate            func(UpdateEnvelope)
 	OnPermissionRequest PermissionHandler
+	OnSessionMessage    SessionMessageHandler
 	Terminal            TerminalHandler
 	TerminalAuth        bool
 	FileSystem          FileSystemHandler
@@ -109,6 +112,9 @@ func (c *Client) Initialize(ctx context.Context) (InitializeResponse, error) {
 	if c.cfg.FileSystem != nil {
 		clientCapabilities["fs"] = map[string]any{"readTextFile": true, "writeTextFile": true}
 	}
+	if c.cfg.OnSessionMessage != nil {
+		clientCapabilities[MethodSessionMessage] = map[string]any{}
+	}
 	err := c.conn.Call(ctx, MethodInitialize, InitializeRequest{
 		ProtocolVersion:    1,
 		ClientCapabilities: clientCapabilities,
@@ -130,8 +136,8 @@ func (c *Client) NewSession(ctx context.Context, cwd string, meta map[string]any
 	err := c.conn.Call(ctx, MethodSessionNew, NewSessionRequest{
 		CWD:        cwd,
 		MCPServers: []json.RawMessage{},
+		Meta:       metautil.CloneMap(meta),
 	}, &resp)
-	_ = meta
 	return resp, err
 }
 
@@ -207,6 +213,12 @@ func (c *Client) PromptParts(ctx context.Context, sessionID string, prompt []jso
 	return resp, err
 }
 
+func (c *Client) SessionMessage(ctx context.Context, req SessionMessageRequest) (SessionMessageResponse, error) {
+	var resp SessionMessageResponse
+	err := c.conn.Call(ctx, MethodSessionMessage, req, &resp)
+	return resp, err
+}
+
 func (c *Client) Cancel(ctx context.Context, sessionID string) error {
 	return c.conn.Notify(MethodSessionCancel, CancelRequest{SessionID: sessionID})
 }
@@ -278,6 +290,16 @@ func (c *Client) StderrTail(limit int) string {
 
 func (c *Client) handleRequest(ctx context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
 	switch msg.Method {
+	case MethodSessionMessage:
+		if c.cfg.OnSessionMessage == nil {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+		var req SessionMessageRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+		}
+		resp, err := c.cfg.OnSessionMessage(ctx, req)
+		return responseOrRPCError(resp, err)
 	case MethodSessionReqPermission:
 		var req RequestPermissionRequest
 		if err := decodeParams(msg.Params, &req); err != nil {

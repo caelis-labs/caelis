@@ -49,6 +49,13 @@ const (
 	RuntimeStreamParentCallID = "parent_call_id"
 	RuntimeStreamParentTool   = "parent_tool"
 	RuntimeStreamParentTaskID = "parent_task_id"
+
+	// RuntimeSession classifies a product-owned ACP Session creation request.
+	// The receiving Runtime must normalize recognized values before persistence.
+	RuntimeSession             = "session"
+	RuntimeSessionKind         = "kind"
+	RuntimeSessionParentID     = "parent_session_id"
+	RuntimeSessionKindSubagent = "subagent"
 )
 
 // WithSection returns a copy of meta with one direct _meta.caelis section

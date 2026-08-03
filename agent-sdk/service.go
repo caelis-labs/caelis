@@ -77,6 +77,11 @@ type RunRequest struct {
 	// InputActor identifies who authored Input while preserving its user-role
 	// chatbot message shape. Empty retains the default real-user actor.
 	InputActor session.ActorRef `json:"-"`
+	// InputType defaults to EventTypeUser. Agent messages use EventTypeContext
+	// so durable history never impersonates a real user submission.
+	InputType      session.EventType   `json:"-"`
+	InputMessageID string              `json:"-"`
+	InputScope     *session.EventScope `json:"-"`
 	// InputCompaction preserves typed provenance if Runtime later summarizes the
 	// input. It does not alter the provider-visible message.
 	InputCompaction   *session.EventCompactionContext `json:"-"`

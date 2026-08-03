@@ -37,7 +37,7 @@ func TestObservedSpawnResultUsesHandleWhenCallIDIsReusedAcrossTurns(t *testing.T
 	}
 }
 
-func TestObservedSpawnResultUpdatesAlreadyOpenOutputOverlay(t *testing.T) {
+func TestObservedSpawnResultDoesNotInjectParentTaskResultIntoOpenOutputOverlay(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -63,6 +63,7 @@ func TestObservedSpawnResultUpdatesAlreadyOpenOutputOverlay(t *testing.T) {
 	if !model.openSubagentOutputOverlay(block.BlockID(), "spawn-1") {
 		t.Fatal("openSubagentOutputOverlay() = false")
 	}
+	initialStatus := view.block.Status
 
 	model.applyObservedSpawnResults([]acpprojector.SpawnTaskResult{{
 		ParentCallID: "spawn-1",
@@ -74,17 +75,15 @@ func TestObservedSpawnResultUpdatesAlreadyOpenOutputOverlay(t *testing.T) {
 		},
 	}})
 
-	if view.finalResponse != "## Durable child final\n\n- complete" {
-		t.Fatalf("overlay FinalResponse = %q", view.finalResponse)
+	if view.block.Status != initialStatus {
+		t.Fatalf("parent Task result changed child transcript status to %q", view.block.Status)
 	}
 	plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
-	for _, want := range []string{"Partial child stream.", "· Durable child final", "complete"} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("open overlay omitted %q after durable repair:\n%s", want, plain)
-		}
+	if !strings.Contains(plain, "Partial child stream.") {
+		t.Fatalf("open overlay lost child stream after parent owner repair:\n%s", plain)
 	}
-	if strings.Contains(plain, "Final response") {
-		t.Fatalf("observed FinalResponse retained its redundant section label:\n%s", plain)
+	if strings.Contains(plain, "Durable child final") {
+		t.Fatalf("parent Task result was injected into child stream order:\n%s", plain)
 	}
 }
 

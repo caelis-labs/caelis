@@ -23,6 +23,7 @@ const (
 	MethodSessionSetModel      = schema.MethodSessionSetModel
 	MethodSessionPrompt        = schema.MethodSessionPrompt
 	MethodSessionCancel        = schema.MethodSessionCancel
+	MethodSessionMessage       = schema.MethodSessionMessage
 	MethodSessionUpdate        = schema.MethodSessionUpdate
 	MethodSessionReqPermission = schema.MethodSessionReqPermission
 	MethodReadTextFile         = schema.MethodReadTextFile
@@ -73,6 +74,8 @@ type SetSessionConfigOptionRequest = schema.SetSessionConfigOptionRequest
 type SetSessionConfigOptionResponse = schema.SetSessionConfigOptionResponse
 type PromptRequest = schema.PromptRequest
 type PromptResponse = schema.PromptResponse
+type SessionMessageRequest = schema.SessionMessageRequest
+type SessionMessageResponse = schema.SessionMessageResponse
 type SessionMode = schema.SessionMode
 type SessionModeState = schema.SessionModeState
 type ModelInfo = schema.ModelInfo

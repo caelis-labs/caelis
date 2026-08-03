@@ -77,8 +77,11 @@ type SubagentEvent struct {
 	TaskAction     string
 	TaskInput      string
 	TaskTargetKind string
-	Done           bool
-	Err            bool
+	// MessageTarget preserves the structured SendMessage destination. The
+	// rendered label may be decorated, so navigation must not parse Args.
+	MessageTarget string
+	Done          bool
+	Err           bool
 	// Plan fields.
 	PlanEntries []planEntryState
 

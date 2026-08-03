@@ -278,6 +278,9 @@ func messageFromInvocationEvent(event *session.Event) (model.Message, bool) {
 	if event == nil || !session.IsMainInvocationVisibleEvent(event) {
 		return model.Message{}, false
 	}
+	if message, ok := agentContextMessage(event); ok {
+		return message, true
+	}
 	if event.Scope == nil || strings.TrimSpace(event.Scope.Participant.ID) == "" {
 		if message, ok := session.ModelMessageOf(event); ok {
 			return message, true
@@ -302,6 +305,55 @@ func messageFromInvocationEvent(event *session.Event) (model.Message, bool) {
 			return message, true
 		}
 		return messageFromDurableEvent(event)
+	}
+}
+
+// agentContextMessage keeps provider-visible Agent communication distinct from
+// user input even though conversational provider APIs require a user-role
+// message at a mid-conversation boundary. Explicit Agent-message provenance
+// selects this projection; Actor kind alone is not sufficient because other
+// Context producers may also use Controller or Participant actors.
+func agentContextMessage(event *session.Event) (model.Message, bool) {
+	if event == nil || session.EventTypeOf(event) != session.EventTypeContext || !isAgentMessageContext(event) {
+		return model.Message{}, false
+	}
+	switch event.Actor.Kind {
+	case session.ActorKindController, session.ActorKindParticipant:
+	default:
+		return model.Message{}, false
+	}
+	text := strings.TrimSpace(session.EventText(event))
+	if text == "" {
+		return model.Message{}, false
+	}
+	label := strings.TrimSpace(event.Actor.Name)
+	if label == "" {
+		label = strings.TrimSpace(event.Actor.ID)
+	}
+	if label == "" {
+		label = string(event.Actor.Kind)
+	}
+	if event.Actor.Kind == session.ActorKindParticipant && !strings.HasPrefix(label, "@") {
+		label = "@" + label
+	}
+	return model.NewTextMessage(model.RoleUser, fmt.Sprintf("Agent message from %s: %s", label, text)), true
+}
+
+func isAgentMessageContext(event *session.Event) bool {
+	if event == nil {
+		return false
+	}
+	if marked, ok := event.Meta["agent_message"].(bool); ok && marked {
+		return true
+	}
+	if event.Scope == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(event.Scope.Source)) {
+	case "agent_message", "subagent_message", "subagent_completion", "acp_agent_message":
+		return true
+	default:
+		return false
 	}
 }
 

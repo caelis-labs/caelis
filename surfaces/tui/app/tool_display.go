@@ -90,6 +90,8 @@ func toolDisplayArgsForKind(name string, kind string, raw map[string]any, fallba
 		if command := terminalCommandDisplay(raw); command != "" {
 			return display.NormalizeDisplayArg(command)
 		}
+	case names.SendMessage:
+		return display.AgentMessageFullDisplayArgs(raw)
 	}
 	if summary := genericToolArgs(raw); summary != "" {
 		return summary
@@ -229,6 +231,15 @@ func isASCIILetter(ch byte) bool {
 // toolDisplayArguments owns the paired compact and full representations used
 // by expandable tool headers.
 func toolDisplayArguments(name string, kind string, raw map[string]any, fallback ...string) (string, string) {
+	if names.CanonicalOrSelf(name) == names.SendMessage {
+		if full := display.AgentMessageFullDisplayArgs(raw); full != "" {
+			preview, folded := longCommandDisplayPreview(full)
+			if folded {
+				return preview, full
+			}
+			return preview, ""
+		}
+	}
 	if preview, full, ok := commandDisplayArguments(name, kind, raw); ok {
 		return preview, full
 	}
@@ -246,6 +257,8 @@ func toolDisplayFullArgs(name string, kind string, raw map[string]any) string {
 	switch names.CanonicalOrSelf(name) {
 	case names.Spawn:
 		return spawnFullDisplayArgs(raw)
+	case names.SendMessage:
+		return display.AgentMessageFullDisplayArgs(raw)
 	default:
 		return ""
 	}
@@ -301,6 +314,8 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 		return searchTitleDisplayArgs(title)
 	case names.Write, names.Patch:
 		return compactMutationTitleDetail(prefixedTitleDetail(title, "Write", "Edit", "Patch", "Delete", "Move"))
+	case names.SendMessage:
+		return prefixedTitleDetail(title, "Send message", "Sent message", "SendMessage")
 	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "execute":

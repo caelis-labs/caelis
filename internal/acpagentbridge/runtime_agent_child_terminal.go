@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // acpChildTerminalProjector is the ACP stdio compatibility renderer for
@@ -29,6 +30,7 @@ type acpChildTerminalKey struct {
 }
 
 type acpChildTerminalState struct {
+	turnID            string
 	started           bool
 	endsLine          bool
 	lastKind          string
@@ -67,9 +69,26 @@ func (p *acpChildTerminalProjector) track(env eventstream.Envelope, fallbackSess
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.parents[key] == nil {
-		p.parents[key] = &acpChildTerminalState{tools: map[string]acpChildToolState{}}
+	p.childTurnStateLocked(key, strings.TrimSpace(env.TurnID))
+}
+
+func (p *acpChildTerminalProjector) childTurnStateLocked(key acpChildTerminalKey, turnID string) *acpChildTerminalState {
+	state := p.parents[key]
+	if state == nil {
+		state = &acpChildTerminalState{turnID: turnID, tools: map[string]acpChildToolState{}}
+		p.parents[key] = state
+		return state
 	}
+	turnID = strings.TrimSpace(turnID)
+	if state.closed && turnID != "" && (state.turnID == "" || state.turnID != turnID) {
+		state = &acpChildTerminalState{turnID: turnID, tools: map[string]acpChildToolState{}}
+		p.parents[key] = state
+		return state
+	}
+	if state.turnID == "" {
+		state.turnID = turnID
+	}
+	return state
 }
 
 // project converts one typed subagent Envelope into a parent terminal update.
@@ -90,11 +109,7 @@ func (p *acpChildTerminalProjector) project(env eventstream.Envelope, fallbackSe
 	key := acpChildTerminalKey{SessionID: sessionID, ToolCallID: parentCallID}
 
 	p.mu.Lock()
-	state := p.parents[key]
-	if state == nil {
-		state = &acpChildTerminalState{tools: map[string]acpChildToolState{}}
-		p.parents[key] = state
-	}
+	state := p.childTurnStateLocked(key, strings.TrimSpace(env.TurnID))
 	if state.closed {
 		p.mu.Unlock()
 		return acp.SessionNotification{}, true
@@ -286,11 +301,7 @@ func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, f
 	}
 	key := acpChildTerminalKey{SessionID: sessionID, ToolCallID: parentCallID}
 	p.mu.Lock()
-	state := p.parents[key]
-	if state == nil {
-		state = &acpChildTerminalState{tools: map[string]acpChildToolState{}}
-		p.parents[key] = state
-	}
+	state := p.childTurnStateLocked(key, strings.TrimSpace(env.TurnID))
 	if state.closed {
 		p.mu.Unlock()
 		return acp.SessionNotification{}, true
@@ -326,11 +337,7 @@ func (p *acpChildTerminalProjector) projectNotice(env eventstream.Envelope, fall
 	}
 	key := acpChildTerminalKey{SessionID: sessionID, ToolCallID: parentCallID}
 	p.mu.Lock()
-	state := p.parents[key]
-	if state == nil {
-		state = &acpChildTerminalState{tools: map[string]acpChildToolState{}}
-		p.parents[key] = state
-	}
+	state := p.childTurnStateLocked(key, strings.TrimSpace(env.TurnID))
 	if state.closed {
 		p.mu.Unlock()
 		return acp.SessionNotification{}, true
@@ -417,7 +424,7 @@ func childNarrativeTerminalSegment(update acp.ContentChunk) (string, string, boo
 func childToolCallTerminalSegment(state *acpChildTerminalState, update acp.ToolCall) string {
 	toolCallID := strings.TrimSpace(update.ToolCallID)
 	tool := state.tool(toolCallID)
-	if title := childTerminalToolTitle(update.Title, update.Kind); title != "" {
+	if title := childTerminalToolTitle(update.Title, update.Kind, update.RawInput, update.Meta); title != "" {
 		tool.title = title
 	}
 	if tool.title == "" {
@@ -435,7 +442,7 @@ func childToolCallTerminalSegment(state *acpChildTerminalState, update acp.ToolC
 func childToolUpdateTerminalSegment(state *acpChildTerminalState, update acp.ToolCallUpdate) (string, string, bool) {
 	toolCallID := strings.TrimSpace(update.ToolCallID)
 	tool := state.tool(toolCallID)
-	if title := childTerminalToolTitle(stringPtrText(update.Title), stringPtrText(update.Kind)); title != "" {
+	if title := childTerminalToolTitle(stringPtrText(update.Title), stringPtrText(update.Kind), update.RawInput, update.Meta); title != "" {
 		tool.title = title
 	}
 	state.setTool(toolCallID, tool)
@@ -484,7 +491,14 @@ func childPlanTerminalSegment(update acp.PlanUpdate) string {
 	return text.String()
 }
 
-func childTerminalToolTitle(title string, kind string) string {
+func childTerminalToolTitle(title string, kind string, rawInput any, meta map[string]any) string {
+	toolName := metautil.String(meta,
+		metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName)
+	if identity.CanonicalOrSelf(toolName) == identity.SendMessage {
+		if semantic := display.SummarizeToolCallTitle(toolName, schema.NormalizeRawMap(rawInput)); semantic != "" {
+			return semantic
+		}
+	}
 	if title = strings.TrimSpace(title); title != "" {
 		return title
 	}

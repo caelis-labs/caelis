@@ -193,6 +193,17 @@ func overflowCompactionEvents(events []*session.Event, currentTurnInput *session
 		if !matches {
 			continue
 		}
+		for _, later := range events[index+1:] {
+			if session.EventTypeOf(later) == session.EventTypeToolResult {
+				// A post-tool overflow must checkpoint the complete durable Turn,
+				// including the accepted Tool call and result. Keeping only the
+				// User input would lose progress and invite a repeated side effect.
+				return session.CloneEvents(events), nil
+			}
+		}
+		// Without a completed Tool effect, preserve the current input exactly.
+		// This is required for approval and other system-managed prompts that
+		// must not be replaced by a model-authored summary.
 		return session.CloneEvents(events[:index]), []*session.Event{session.CloneEvent(event)}
 	}
 	return session.CloneEvents(events), []*session.Event{session.CloneEvent(currentTurnInput)}

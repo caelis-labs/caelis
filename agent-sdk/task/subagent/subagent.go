@@ -4,6 +4,7 @@ import (
 	"context"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 )
 
@@ -44,9 +45,23 @@ type SpawnContext = agent.SubagentSpawnContext
 // run in its own session and persist its own transcript independently.
 type Runner interface {
 	Spawn(context.Context, SpawnContext, delegation.Request) (delegation.Anchor, delegation.Result, error)
-	Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error)
 	Wait(context.Context, delegation.Anchor, int) (delegation.Result, error)
 	Cancel(context.Context, delegation.Anchor) error
+}
+
+// MessageRequest carries one trusted Agent message to an existing child. A
+// completed child receives Completion for the newly started turn; a running
+// child injects the message at its next safe boundary.
+type MessageRequest struct {
+	agentmessage.Request
+	Completion delegation.CompletionSink `json:"-"`
+}
+
+// MessageRunner is the optional Agent-message extension required by
+// SendMessage. Message returns when the runner accepts ownership of delivery;
+// target consumption and a newly started child Turn continue asynchronously.
+type MessageRunner interface {
+	Message(context.Context, delegation.Anchor, MessageRequest) (delegation.Result, error)
 }
 
 // PlacementRunner is the optional typed Spawn extension used when Control has

@@ -101,7 +101,7 @@ func TestThinkingFallbackDoesNotResetAVisibleClock(t *testing.T) {
 	}
 }
 
-func TestTaskActivityUsesGenericFallbackAndStableFinalKey(t *testing.T) {
+func TestTaskWaitUsesGenericFallbackAndStableFinalKey(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
 	m.liveTurn.Active = true
 	start := TranscriptEvent{
@@ -129,7 +129,7 @@ func TestTaskActivityUsesGenericFallbackAndStableFinalKey(t *testing.T) {
 	}
 }
 
-func TestNonControlTaskActivityHasMatchingFinal(t *testing.T) {
+func TestTaskWriteHasMatchingFinal(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
 	m.liveTurn.Active = true
 	start := TranscriptEvent{
@@ -182,25 +182,6 @@ func TestTaskReadAndCommandWriteUseSemanticShellActivity(t *testing.T) {
 				t.Fatalf("runningActivity label = %q, want %q", got, test.label)
 			}
 		})
-	}
-}
-
-func TestTaskWriteToSubagentRemainsWorkActivity(t *testing.T) {
-	t.Parallel()
-
-	m := NewModel(Config{NoColor: true, NoAnimation: true})
-	m.liveTurn.Active = true
-	m.applyTranscriptRunningActivity(TranscriptEvent{
-		Kind:               TranscriptEventTool,
-		Scope:              ACPProjectionMain,
-		ToolCallID:         "task-write",
-		ToolName:           "TASK",
-		ToolTaskAction:     "write",
-		ToolTaskTargetKind: "subagent",
-		ToolTaskHandle:     "orbit",
-	})
-	if m.runningActivity.Phase != runningPhaseThinking || m.runningActivity.Target != "" {
-		t.Fatalf("runningActivity = %#v, want Thinking for subagent continuation", m.runningActivity)
 	}
 }
 

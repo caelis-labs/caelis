@@ -427,20 +427,21 @@ func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		return nil
 	}
 	rows := renderACPTranscriptRows(b.id, b.Events, b.Status, maxInt(8, ctx.Width), ctx, acpTranscriptRenderOptions{
-		UseStatusPlaceholder:   true,
-		PlaceholderAsMeta:      true,
-		HideWaitingApprovalRow: true,
-		HideCompletedRow:       true,
-		HideFailedRow:          true,
-		ToolOutputPanels:       true,
-		ToolPanelExpanded:      b.toolPanelExpanded,
-		ToolPanelFullOutput:    b.toolPanelFullOutput,
-		ToolPanelRows:          b.renderToolPanelRows,
-		ExplorationExpanded:    b.explorationExpanded,
-		StableExplorationPrep:  b.explorationProjection.reconcile,
-		StableExplorationRows:  b.stableExplorationRows,
-		ToolPanelScrollState:   b.toolPanelScrollState,
-		ReasoningExpanded:      b.reasoningExpanded,
+		UseStatusPlaceholder:    true,
+		PlaceholderAsMeta:       true,
+		HideWaitingApprovalRow:  true,
+		HideCompletedRow:        true,
+		HideFailedRow:           true,
+		ToolOutputPanels:        true,
+		ToolPanelExpanded:       b.toolPanelExpanded,
+		ToolPanelFullOutput:     b.toolPanelFullOutput,
+		ToolPanelRows:           b.renderToolPanelRows,
+		ExplorationExpanded:     b.explorationExpanded,
+		StableExplorationPrep:   b.explorationProjection.reconcile,
+		StableExplorationRows:   b.stableExplorationRows,
+		ToolPanelScrollState:    b.toolPanelScrollState,
+		ReasoningExpanded:       b.reasoningExpanded,
+		AgentMessageTargetLinks: true,
 	})
 	return b.compactHeightBudget.apply(b.id, rows, b.Events, b.Status, ctx)
 }

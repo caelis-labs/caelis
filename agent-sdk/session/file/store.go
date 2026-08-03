@@ -260,21 +260,26 @@ func (s *Store) AppendEvent(
 	ctx context.Context,
 	req session.AppendEventRequest,
 ) (*session.Event, error) {
-	return s.appendEventRequest(ctx, req)
+	result, err := s.AppendEventWithOutcome(ctx, req)
+	return result.Event, err
 }
 
-func (s *Store) appendEventRequest(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+func (s *Store) AppendEventWithOutcome(
+	ctx context.Context,
+	req session.AppendEventRequest,
+) (session.AppendEventResult, error) {
 	event := req.Event
 	if event == nil {
-		return nil, session.ErrInvalidEvent
+		return session.AppendEventResult{}, session.ErrInvalidEvent
 	}
 
 	if err := s.mu.LockContext(ctx); err != nil {
-		return nil, err
+		return session.AppendEventResult{}, err
 	}
 	defer s.mu.Unlock()
 
 	var out *session.Event
+	var appended bool
 	if err := s.withRootWriteLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
@@ -301,11 +306,12 @@ func (s *Store) appendEventRequest(ctx context.Context, req session.AppendEventR
 			return err
 		}
 		out = session.CloneEvent(normalized)
+		appended = true
 		return nil
 	}); err != nil {
-		return nil, err
+		return session.AppendEventResult{}, err
 	}
-	return out, nil
+	return session.AppendEventResult{Event: out, Appended: appended}, nil
 }
 
 func (s *Store) prepareAppendTransactionForDocument(

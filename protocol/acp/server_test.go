@@ -223,6 +223,88 @@ func TestServeStdioHandlesStableSessionLifecycleMethods(t *testing.T) {
 	}
 }
 
+func TestServeStdioRoutesSessionMessageInBothDirections(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	defer clientToServerReader.Close()
+	defer clientToServerWriter.Close()
+	defer serverToClientReader.Close()
+	defer serverToClientWriter.Close()
+
+	agent := &messageBridgeAgent{}
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- ServeStdio(ctx, agent, clientToServerReader, serverToClientWriter)
+	}()
+
+	callbackRequests := make(chan SessionMessageRequest, 1)
+	conn := jsonrpc.New(serverToClientReader, clientToServerWriter)
+	go func() {
+		_ = conn.Serve(ctx, func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
+			if msg.Method != MethodSessionMessage {
+				return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+			}
+			var req SessionMessageRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			callbackRequests <- req
+			return SessionMessageResponse{MessageID: req.MessageID, Accepted: true, State: "delivered"}, nil
+		}, nil)
+	}()
+
+	var initialized InitializeResponse
+	if err := conn.Call(ctx, MethodInitialize, InitializeRequest{
+		ClientCapabilities: map[string]any{MethodSessionMessage: map[string]any{}},
+	}, &initialized); err != nil {
+		t.Fatal(err)
+	}
+	request := SessionMessageRequest{
+		SessionID: "session-1", MessageID: "message-1", To: "orbit", From: "parent", Message: "please verify",
+	}
+	var response SessionMessageResponse
+	if err := conn.Call(ctx, MethodSessionMessage, request, &response); err != nil {
+		t.Fatal(err)
+	}
+	if agent.request != request || !response.Accepted || response.MessageID != request.MessageID ||
+		response.TurnID != "child-turn-2" || !response.StartedTurn {
+		t.Fatalf("agent request/response = %#v / %#v", agent.request, response)
+	}
+	select {
+	case callback := <-callbackRequests:
+		if callback.To != "parent" || callback.Message != "child progress" || callback.MessageID != "message-from-child" {
+			t.Fatalf("client callback = %#v", callback)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for child-to-parent message callback")
+	}
+
+	cancel()
+	_ = clientToServerWriter.Close()
+	_ = serverToClientReader.Close()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("server did not stop after context cancellation")
+	}
+}
+
+func TestServerPromptCallbacksExposeMessagesOnlyWhenNegotiated(t *testing.T) {
+	t.Parallel()
+
+	conn := &serverConn{}
+	if _, ok := conn.promptCallbacks().(MessageCallbacks); ok {
+		t.Fatal("Prompt callbacks exposed SessionMessage without client capability")
+	}
+	conn.clientMessage.Store(true)
+	if _, ok := conn.promptCallbacks().(MessageCallbacks); !ok {
+		t.Fatal("Prompt callbacks omitted negotiated SessionMessage capability")
+	}
+}
+
 type availableCommandsNotification struct {
 	SessionID string `json:"sessionId"`
 	Update    struct {
@@ -263,6 +345,32 @@ func (commandAgent) AvailableCommands(context.Context, string) ([]AvailableComma
 
 type terminalClientAgent struct {
 	commandAgent
+}
+
+type messageBridgeAgent struct {
+	commandAgent
+	request SessionMessageRequest
+}
+
+func (a *messageBridgeAgent) SessionMessage(ctx context.Context, req SessionMessageRequest, callbacks PromptCallbacks) (SessionMessageResponse, error) {
+	a.request = req
+	messages, ok := callbacks.(MessageCallbacks)
+	if !ok {
+		return SessionMessageResponse{}, fmt.Errorf("message callbacks unavailable")
+	}
+	callback, err := messages.SessionMessage(ctx, SessionMessageRequest{
+		SessionID: req.SessionID, MessageID: "message-from-child", To: "parent", From: "orbit", Message: "child progress",
+	})
+	if err != nil {
+		return SessionMessageResponse{}, err
+	}
+	if !callback.Accepted {
+		return SessionMessageResponse{}, fmt.Errorf("client rejected child callback")
+	}
+	return SessionMessageResponse{
+		MessageID: req.MessageID, Accepted: true, State: "running",
+		TurnID: "child-turn-2", StartedTurn: true,
+	}, nil
 }
 
 func (terminalClientAgent) Prompt(ctx context.Context, req PromptRequest, cb PromptCallbacks) (PromptResponse, error) {

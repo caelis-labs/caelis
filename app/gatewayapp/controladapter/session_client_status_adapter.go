@@ -36,14 +36,11 @@ func (a *SessionClientAdapter) sessionStatus(ctx context.Context, diagnostics bo
 		Surface:            a.surface,
 		IncludeDiagnostics: diagnostics,
 	})
-	if err == nil && strings.TrimSpace(state.CWD) != "" {
-		a.setClientSession(state.SessionID, state.CWD)
-	}
 	return status, err
 }
 
-// WorkspaceDir returns the last typed Session workspace snapshot. The value is
-// refreshed by status/inspect and never resolved through a default Stack.
+// WorkspaceDir returns the workspace selected by Session lifecycle operations.
+// Read-only status and inspection calls must not change the active Session.
 func (a *SessionClientAdapter) WorkspaceDir() string {
 	if a == nil {
 		return ""

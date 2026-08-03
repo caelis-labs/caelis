@@ -266,6 +266,13 @@ func cloneSubmitRequest(req SubmitRequest) SubmitRequest {
 		DisplayText:  req.DisplayText,
 		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
 		Metadata:     cloneMap(req.Metadata),
+		MessageID:    strings.TrimSpace(req.MessageID),
+		Actor:        session.CloneActorRef(req.Actor),
+		Persisted:    req.Persisted,
+	}
+	if req.Scope != nil {
+		scope := session.CloneEventScope(*req.Scope)
+		out.Scope = &scope
 	}
 	if req.Approval != nil {
 		approval := *req.Approval
@@ -281,13 +288,28 @@ func runnerSubmissionFromSubmitRequest(req SubmitRequest) agent.Submission {
 		DisplayInput: strings.TrimSpace(req.DisplayText),
 		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
 		Metadata:     cloneMap(req.Metadata),
+		MessageID:    strings.TrimSpace(req.MessageID),
+		Actor:        session.CloneActorRef(req.Actor),
+		Scope:        cloneEventScopePointer(req.Scope),
+		Persisted:    req.Persisted,
 	}
+}
+
+func cloneEventScopePointer(scope *session.EventScope) *session.EventScope {
+	if scope == nil {
+		return nil
+	}
+	cloned := session.CloneEventScope(*scope)
+	return &cloned
 }
 
 func validateSubmitRequest(req SubmitRequest) error {
 	switch req.Kind {
-	case SubmissionKindConversation:
+	case SubmissionKindConversation, SubmissionKindAgentMessage:
 		if req.Approval != nil {
+			return invalidSubmissionKind(req.Kind)
+		}
+		if req.Kind == SubmissionKindAgentMessage && (!session.ActorRefHasIdentity(req.Actor) || strings.TrimSpace(req.MessageID) == "") {
 			return invalidSubmissionKind(req.Kind)
 		}
 		return nil

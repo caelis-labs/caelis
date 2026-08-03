@@ -935,7 +935,7 @@ func (m *Manager) startACPClient(
 			return nil, "", controllerClientState{}, err
 		}
 	}
-	recovered, err := authentication.OpenNewSession(ctx, recovery, cwd)
+	recovered, err := authentication.OpenNewSession(ctx, recovery, cwd, nil)
 	if err != nil {
 		_ = acpClient.Close(ctx)
 		return nil, "", controllerClientState{}, err

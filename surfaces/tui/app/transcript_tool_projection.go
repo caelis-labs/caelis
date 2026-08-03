@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
@@ -19,6 +20,10 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		semanticName = refinedName
 	}
 	toolTaskHandle := display.ToolTaskHandle(rawInput, nil, input.Meta)
+	toolMessageTarget := ""
+	if names.CanonicalOrSelf(semanticName) == names.SendMessage {
+		toolMessageTarget = display.AgentMessageTarget(display.MapString(rawInput, "to"))
+	}
 	content := acpToolContentToDisplay(input.Content)
 	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
 	outputCursor, outputCursorKnown, outputStartCursor, outputStartCursorKnown := transcriptToolOutputRange(input.Meta)
@@ -53,6 +58,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolTaskAction:             display.ToolTaskAction(rawInput, nil, input.Meta),
 		ToolTaskInput:              display.ToolTaskInput(rawInput, nil, input.Meta),
 		ToolTaskTargetKind:         display.ToolTaskTargetKind(rawInput, nil, input.Meta),
+		ToolMessageTarget:          toolMessageTarget,
 	}
 }
 
@@ -164,6 +170,14 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		display.MapString(rawOutput, "target_kind"),
 		display.ToolTaskTargetKind(rawInput, taskOutput, input.Meta),
 	)
+	toolTaskState := strings.ToLower(strings.TrimSpace(display.MapString(rawOutput, "state")))
+	toolMessageTarget := ""
+	if names.CanonicalOrSelf(semanticName) == names.SendMessage {
+		toolMessageTarget = display.AgentMessageTarget(firstNonEmpty(
+			display.MapString(rawOutput, "to"),
+			display.MapString(rawInput, "to"),
+		))
+	}
 	if strings.EqualFold(semanticName, "TASK") {
 		toolArgs = taskDisplayArgsWithHandle(toolArgs, toolTaskHandle)
 	}
@@ -208,6 +222,8 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolTaskAction:             toolTaskAction,
 		ToolTaskInput:              toolTaskInput,
 		ToolTaskTargetKind:         toolTaskTargetKind,
+		ToolTaskState:              toolTaskState,
+		ToolMessageTarget:          toolMessageTarget,
 		Final:                      transcript.ToolStatusFinal(status, toolErr),
 	}, true
 }

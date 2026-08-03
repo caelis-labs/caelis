@@ -13,6 +13,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -25,6 +26,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/google/uuid"
 )
 
 func ptrModelMessage(message model.Message) *model.Message {
@@ -38,6 +40,28 @@ func mustSealPlacement(t *testing.T, value placement.Placement) placement.Placem
 		t.Fatal(err)
 	}
 	return sealed
+}
+
+func sendSubagentMessageForTest(ctx context.Context, runtime *Runtime, ref session.SessionRef, handle, message string) (task.Snapshot, error) {
+	response, err := runtime.SendAgentMessage(ctx, ref, agentmessage.Request{
+		MessageID: uuid.NewString(), To: handle, Text: message,
+		From: session.ActorRef{Kind: session.ActorKindController, Name: "main"},
+	})
+	if err != nil {
+		return task.Snapshot{}, err
+	}
+	if !response.Accepted {
+		return task.Snapshot{}, fmt.Errorf("Agent message %q was not accepted", response.MessageID)
+	}
+	identity, err := runtime.tasks.resolveTaskHandle(ctx, ref, handle)
+	if err != nil {
+		return task.Snapshot{}, err
+	}
+	child, err := runtime.tasks.lookupSubagentCanonical(ctx, ref, identity.taskID)
+	if err != nil {
+		return task.Snapshot{}, err
+	}
+	return child.snapshot(), nil
 }
 
 func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *testing.T) {
@@ -187,35 +211,6 @@ func TestSlashSideSubagentPersistsStreamBackedFinalDialogue(t *testing.T) {
 	}
 }
 
-func TestSubagentTaskIDForHandleAllowsSidecarCustomSource(t *testing.T) {
-	t.Parallel()
-
-	activeSession := session.Session{
-		Participants: []session.ParticipantBinding{{
-			ID:           "side-1",
-			Kind:         session.ParticipantKindSubagent,
-			Role:         session.ParticipantRoleSidecar,
-			Label:        "@jeff",
-			Source:       "custom_codex",
-			DelegationID: "task-side",
-		}, {
-			ID:           "delegated-1",
-			Kind:         session.ParticipantKindSubagent,
-			Role:         session.ParticipantRoleDelegated,
-			Label:        "@jude",
-			Source:       "agent_spawn",
-			DelegationID: "task-delegated",
-		}},
-	}
-	taskID, binding, ok := subagentTaskIDForHandle(activeSession, "jeff")
-	if !ok || taskID != "task-side" || binding.ID != "side-1" {
-		t.Fatalf("subagentTaskIDForHandle(sidecar) = (%q, %#v, %v), want custom-source sidecar", taskID, binding, ok)
-	}
-	if _, _, ok := subagentTaskIDForHandle(activeSession, "jude"); ok {
-		t.Fatal("subagentTaskIDForHandle(delegated) = ok, want hidden from @handle")
-	}
-}
-
 func TestSubagentRoleComesFromNeutralRequestNotProductSource(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"}}
@@ -274,11 +269,9 @@ func TestSubagentControlAuthorizationUsesNeutralPrincipalNotProductSource(t *tes
 	if err != nil {
 		t.Fatalf("StartSubagent(delegated) error = %v", err)
 	}
-	_, err = runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: delegated.Ref.TaskID, Input: "follow up", Source: "custom-origin", Principal: session.ActorKindUser,
-	})
-	if err == nil || !strings.Contains(err.Error(), "user principal") {
-		t.Fatalf("user principal delegated error = %v, want isolation error", err)
+	_, err = runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{TaskID: delegated.Ref.TaskID, Input: "follow up", Principal: session.ActorKindUser})
+	if err == nil || !strings.Contains(err.Error(), "SendMessage") {
+		t.Fatalf("subagent Task write error = %v, want SendMessage retirement error", err)
 	}
 	if _, err := runtime.tasks.Read(ctx, activeSession.SessionRef, task.ControlRequest{
 		TaskID: delegated.Ref.TaskID, Source: "custom-origin", Principal: session.ActorKindUser,
@@ -431,6 +424,27 @@ func TestSubagentProducerCompletionDoesNotRequireTaskObservation(t *testing.T) {
 	if runner.waitCalls != 0 {
 		t.Fatalf("runner Wait calls = %d, want producer completion independent of Task observation", runner.waitCalls)
 	}
+	events, err := runtime.sessions.Events(ctx, session.EventsRequest{SessionRef: activeSession.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	wantMessageID := "subagent-completion:" + started.Ref.TaskID + ":1"
+	var notice *session.Event
+	for _, event := range events {
+		if event != nil && event.MessageID == wantMessageID {
+			notice = event
+			break
+		}
+	}
+	if notice == nil {
+		t.Fatalf("events missing completion notice %q", wantMessageID)
+	}
+	if session.EventTypeOf(notice) != session.EventTypeContext || notice.Actor.Kind != session.ActorKindParticipant {
+		t.Fatalf("completion notice = %#v, want participant-authored Context", notice)
+	}
+	if !strings.Contains(notice.Text, "Use Task read") || !strings.Contains(notice.Text, started.Handle) || strings.Contains(notice.Text, "producer-owned final") {
+		t.Fatalf("completion notice text = %q, want compact handle hint without final payload", notice.Text)
+	}
 }
 
 func TestSubagentContinuationProducerCompletionDoesNotRequireTaskObservation(t *testing.T) {
@@ -448,17 +462,15 @@ func TestSubagentContinuationProducerCompletionDoesNotRequireTaskObservation(t *
 	if err != nil {
 		t.Fatalf("StartSubagent() error = %v", err)
 	}
-	continued, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Input: "inspect more",
-	})
+	continued, err := sendSubagentMessageForTest(ctx, runtime, activeSession.SessionRef, started.Handle, "inspect more")
 	if err != nil {
-		t.Fatalf("Write() error = %v", err)
+		t.Fatalf("SendAgentMessage() error = %v", err)
 	}
 	if !continued.Running || continued.State != task.StateRunning {
-		t.Fatalf("Write() = %#v, want running continuation", continued)
+		t.Fatalf("SendAgentMessage() = %#v, want running next turn", continued)
 	}
 	if runner.continueCompletion == nil {
-		t.Fatal("ContinueRequest.Completion is nil")
+		t.Fatal("MessageRequest.Completion is nil")
 	}
 
 	runner.continueCompletion.PublishSubagentCompletion(delegation.Result{
@@ -512,7 +524,7 @@ func TestSubagentTaskWaitKeepsRequestedYieldSemantics(t *testing.T) {
 	}
 }
 
-func TestSubagentProducerCompletionQueuedBehindTaskWait(t *testing.T) {
+func TestSubagentProducerCompletionIsNotBlockedByTaskWait(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -527,35 +539,119 @@ func TestSubagentProducerCompletionQueuedBehindTaskWait(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSubagent() error = %v", err)
 	}
-	var publishOnce sync.Once
 	runner.waitHook = func() {
-		publishOnce.Do(func() {
-			go runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
-				TaskID: started.Ref.TaskID,
-				State:  delegation.StateCompleted,
-				Result: "completed while Task wait owned the operation",
-			})
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID,
+			State:  delegation.StateCompleted,
+			Result: "completed while Task wait was observing",
 		})
 	}
-	if _, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Yield: time.Millisecond,
-	}); err != nil {
-		t.Fatalf("Wait() error = %v", err)
+	type waitOutcome struct {
+		snapshot task.Snapshot
+		err      error
+	}
+	done := make(chan waitOutcome, 1)
+	go func() {
+		snapshot, waitErr := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
+			TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Yield: time.Millisecond,
+		})
+		done <- waitOutcome{snapshot: snapshot, err: waitErr}
+	}()
+	select {
+	case outcome := <-done:
+		if outcome.err != nil {
+			t.Fatalf("Wait() error = %v", outcome.err)
+		}
+		if outcome.snapshot.Running || outcome.snapshot.State != task.StateCompleted ||
+			taskRawStringValue(outcome.snapshot.Result["final_message"]) != "completed while Task wait was observing" {
+			t.Fatalf("Wait() = %#v, want producer completion observed without claim deadlock", outcome.snapshot)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("producer completion was blocked behind Task wait observation")
+	}
+}
+
+func TestSubagentWaitDoesNotExposeConcurrentLifecycleClaim(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		waitResult:  delegation.Result{State: delegation.StateCompleted, Result: "done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "inspect",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, claimed := runtime.tasks.tryClaimSubagentOperation(activeSession.SessionRef, started.Ref.TaskID)
+	if !claimed {
+		t.Fatal("failed to establish concurrent lifecycle operation")
+	}
+	snapshot, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+	})
+	release()
+	if err != nil {
+		t.Fatalf("Wait() exposed concurrent lifecycle claim: %v", err)
+	}
+	if !snapshot.Running || snapshot.State != task.StateRunning {
+		t.Fatalf("Wait() = %#v, want current running snapshot while lifecycle owner commits", snapshot)
 	}
 
-	deadline := time.Now().Add(time.Second)
-	for {
-		stored, getErr := runtime.tasks.store.Get(ctx, started.Ref.TaskID)
-		if getErr != nil {
-			t.Fatalf("Get() error = %v", getErr)
-		}
-		if stored != nil && !stored.Running && stored.State == task.StateCompleted {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("stored task = %#v, want queued producer completion after Task wait released", stored)
-		}
-		time.Sleep(time.Millisecond)
+	settled, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settled.Running || settled.State != task.StateCompleted {
+		t.Fatalf("settled Wait() = %#v, want completed", settled)
+	}
+}
+
+func TestSubagentObservationCannotApplyPreviousTurnResultToNewTurn(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		waitResult:  delegation.Result{State: delegation.StateCompleted, Result: "stale turn one final"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "inspect",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.tasks.mu.RLock()
+	child := runtime.tasks.subagents[started.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	runner.waitHook = func() {
+		child.mu.Lock()
+		child.applyResult(delegation.Result{State: delegation.StateCompleted, Result: "turn one final"})
+		child.mu.Unlock()
+		child.beginMessageTurn()
+		child.mu.Lock()
+		child.applyResult(delegation.Result{State: delegation.StateRunning, Running: true})
+		child.mu.Unlock()
+	}
+
+	snapshot, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnSeq, _ := taskInt64Value(snapshot.Metadata["turn_seq"])
+	if !snapshot.Running || snapshot.State != task.StateRunning || turnSeq != 2 {
+		t.Fatalf("Wait() applied stale previous-Turn result: %#v", snapshot)
+	}
+	if got := taskRawStringValue(snapshot.Result["final_message"]); got != "" {
+		t.Fatalf("new Turn final_message = %q, want stale final rejected", got)
 	}
 }
 
@@ -855,28 +951,7 @@ func (s *handleLookupTaskStore) GetSessionTaskByHandle(_ context.Context, ref se
 	return task.CloneEntry(s.entry), nil
 }
 
-func TestTaskToolResultEventMetaMarksSubagentWriteTarget(t *testing.T) {
-	t.Parallel()
-
-	meta := taskToolResultEventMeta(nil, "write", "请追加两行", 0, task.Snapshot{
-		Ref:  task.Ref{TaskID: "task-1"},
-		Kind: task.KindSubagent,
-		Result: map[string]any{
-			"handle": "maya",
-		},
-	})
-	caelis, ok := meta["caelis"].(map[string]any)
-	if !ok {
-		t.Fatalf("meta = %#v, want caelis extension", meta)
-	}
-	runtimeMeta, _ := caelis["runtime"].(map[string]any)
-	targetTool, _ := runtimeMeta["tool"].(map[string]any)
-	if targetTool["name"] != "Task" || targetTool["action"] != "write" || targetTool["target_kind"] != "subagent" || targetTool["target_handle"] != "maya" || targetTool["input"] != "请追加两行" {
-		t.Fatalf("runtime.tool = %#v, want Task write subagent target", targetTool)
-	}
-}
-
-func TestTaskWriteContinuesCompletedSpawnChild(t *testing.T) {
+func TestSendMessageContinuesCompletedSpawnChild(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first done"},
@@ -898,12 +973,9 @@ func TestTaskWriteContinuesCompletedSpawnChild(t *testing.T) {
 		t.Fatalf("started state = %q, want completed", started.State)
 	}
 
-	continued, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
-		Input: "next prompt",
-	})
+	continued, err := sendSubagentMessageForTest(ctx, runtime, activeSession.SessionRef, started.Handle, "next prompt")
 	if err != nil {
-		t.Fatalf("Write(completed spawn) error = %v", err)
+		t.Fatalf("SendAgentMessage(completed spawn) error = %v", err)
 	}
 	if got, _ := continued.Result["result"].(string); got != "follow-up done" {
 		t.Fatalf("continued result = %q, want follow-up done", got)
@@ -919,6 +991,254 @@ func TestTaskWriteContinuesCompletedSpawnChild(t *testing.T) {
 	}
 	if got, want := taskStringValue(continued.Result["turn_id"]), started.Ref.TaskID+":2"; got != want {
 		t.Fatalf("continued turn_id = %q, want %q", got, want)
+	}
+}
+
+func TestSendMessageRecordsOutboundContextAsParentMirrorAfterDelivery(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult:    delegation.Result{State: delegation.StateCompleted, Result: "first done"},
+		continueResult: delegation.Result{State: delegation.StateCompleted, Result: "message done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const messageID = "agent-message-context-1"
+	response, err := runtime.SendAgentMessage(ctx, activeSession.SessionRef, agentmessage.Request{
+		MessageID: messageID, To: started.Handle, Text: "inspect the second issue",
+		From: session.ActorRef{Kind: session.ActorKindController, ID: "main-controller", Name: "main"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !response.Accepted {
+		t.Fatalf("response = %#v, want accepted", response)
+	}
+	if !response.StartedTurn || response.TurnID != started.Ref.TaskID+":2" {
+		t.Fatalf("response turn = %#v, want newly started second Turn", response)
+	}
+	events, err := runtime.sessions.Events(ctx, session.EventsRequest{SessionRef: activeSession.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *session.Event
+	for _, event := range events {
+		if event != nil && event.MessageID == messageID {
+			found = event
+		}
+		if event != nil && session.EventTypeOf(event) == session.EventTypeUser && event.Text == "inspect the second issue" {
+			t.Fatalf("Agent message was persisted as User input: %#v", event)
+		}
+	}
+	if found == nil || session.EventTypeOf(found) != session.EventTypeContext || found.Visibility != session.VisibilityMirror {
+		t.Fatalf("Agent message event = %#v, want durable parent mirror Context", found)
+	}
+	if found.Actor.Kind != session.ActorKindController || found.Actor.ID != "main-controller" {
+		t.Fatalf("Agent message actor = %#v, want trusted controller", found.Actor)
+	}
+	if found.Scope == nil || found.Scope.TurnID != started.Ref.TaskID+":2" {
+		t.Fatalf("Agent message scope = %#v, want second child turn", found.Scope)
+	}
+	if session.IsMainInvocationVisibleEvent(found) {
+		t.Fatalf("outbound Agent message leaked into main model context: %#v", found)
+	}
+}
+
+func TestSendMessageRemoteFailureLeavesNoAcceptedContext(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first done"},
+		messageErr:  errors.New("remote message rejected"),
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const messageID = "agent-message-rejected-1"
+	_, err = runtime.SendAgentMessage(ctx, activeSession.SessionRef, agentmessage.Request{
+		MessageID: messageID, To: started.Handle, Text: "must not become durable success",
+		From: session.ActorRef{Kind: session.ActorKindController, ID: "main-controller", Name: "main"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "remote message rejected") {
+		t.Fatalf("SendAgentMessage() error = %v", err)
+	}
+	events, err := runtime.sessions.Events(ctx, session.EventsRequest{SessionRef: activeSession.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event != nil && event.MessageID == messageID {
+			t.Fatalf("failed remote delivery left durable accepted Context: %#v", event)
+		}
+	}
+	snapshot, err := runtime.tasks.Read(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool, Source: "agent_tool",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := taskStringValue(snapshot.Result["turn_id"]); got != started.Ref.TaskID+":1" {
+		t.Fatalf("failed message turn id = %q, want restored first turn", got)
+	}
+	if snapshot.Running || snapshot.State != task.StateCompleted {
+		t.Fatalf("failed message task = %#v, want restored completed state", snapshot)
+	}
+}
+
+func TestSendMessageReportsAcceptedWhenTaskPersistenceFailsAfterRemoteDelivery(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult:    delegation.Result{State: delegation.StateCompleted, Result: "first done"},
+		continueResult: delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "working on follow-up"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	store := newSagaTaskStore()
+	runtime.tasks.store = store
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	store.failOnPut = store.puts + 1
+	store.mu.Unlock()
+
+	response, err := runtime.SendAgentMessage(ctx, activeSession.SessionRef, agentmessage.Request{
+		MessageID: "agent-message-unpersisted-1", To: started.Handle, Text: "continue remotely",
+		From: session.ActorRef{Kind: session.ActorKindController, ID: "main-controller", Name: "main"},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentMessage() error = %v, want accepted delivery ownership", err)
+	}
+	if !response.Accepted || response.State != agentmessage.StateAcceptedUnpersisted ||
+		!response.StartedTurn || response.TurnID != started.Ref.TaskID+":2" {
+		t.Fatalf("response = %#v, want accepted_unpersisted", response)
+	}
+	if runner.continuePrompt != "continue remotely" {
+		t.Fatalf("remote message prompt = %q, want delivered text", runner.continuePrompt)
+	}
+	child, err := runtime.tasks.lookupSubagentCanonical(ctx, activeSession.SessionRef, started.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := child.snapshot()
+	if !snapshot.Running || snapshot.State != task.StateRunning {
+		t.Fatalf("in-memory task = %#v, want accepted running turn", snapshot)
+	}
+}
+
+type messageTurnConflictStore struct {
+	*sagaTaskStore
+	conflict sync.Once
+}
+
+func (s *messageTurnConflictStore) Put(ctx context.Context, req task.PutRequest) (*task.Entry, error) {
+	shouldConflict := req.Entry != nil && req.Entry.Kind == task.KindSubagent && req.Entry.Running &&
+		taskTurnSeqFromSpec(req.Entry.Spec) == 2
+	fired := false
+	if shouldConflict {
+		s.conflict.Do(func() { fired = true })
+	}
+	if fired {
+		current, err := s.Get(ctx, req.Entry.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		if current.Metadata == nil {
+			current.Metadata = map[string]any{}
+		}
+		current.Metadata["concurrent_observer"] = "committed"
+		if _, err := s.sagaTaskStore.Put(ctx, task.PutRequest{Entry: current, ExpectedRevision: current.Revision}); err != nil {
+			return nil, err
+		}
+	}
+	return s.sagaTaskStore.Put(ctx, req)
+}
+
+func TestSendMessageCASConflictConvergesAcceptedTurnAndProducerCompletion(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult:    delegation.Result{State: delegation.StateCompleted, Result: "first done"},
+		continueResult: delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "working"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	store := &messageTurnConflictStore{sagaTaskStore: newSagaTaskStore()}
+	runtime.tasks.store = store
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := runtime.tasks.lookupSubagentCanonical(ctx, activeSession.SessionRef, started.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := runtime.SendAgentMessage(ctx, activeSession.SessionRef, agentmessage.Request{
+		MessageID: "agent-message-cas-1", To: started.Handle, Text: "continue after concurrent observation",
+		From: session.ActorRef{Kind: session.ActorKindController, ID: "main-controller", Name: "main"},
+	})
+	if err != nil || !response.Accepted || !response.StartedTurn {
+		t.Fatalf("SendAgentMessage() = %#v, %v; want accepted second Turn", response, err)
+	}
+	if runner.continueCompletion == nil {
+		t.Fatal("MessageRequest.Completion is nil")
+	}
+
+	published := make(chan struct{})
+	go func() {
+		runner.continueCompletion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID, State: delegation.StateCompleted, Result: "second done",
+		})
+		close(published)
+	}()
+	select {
+	case <-published:
+	case <-time.After(500 * time.Millisecond):
+		// Unblock the red-test failure path so it cannot leak a producer goroutine.
+		current, getErr := store.Get(ctx, started.Ref.TaskID)
+		if getErr == nil {
+			live.mu.Lock()
+			live.revision = current.Revision
+			live.mu.Unlock()
+			runtime.tasks.mu.Lock()
+			runtime.tasks.subagents[started.Ref.TaskID] = live
+			runtime.tasks.mu.Unlock()
+			runtime.tasks.kickSubagentCompletion(started.Ref.TaskID)
+		}
+		select {
+		case <-published:
+		case <-time.After(time.Second):
+		}
+		t.Fatal("accepted message completion did not converge after Task CAS conflict")
+	}
+
+	stored, err := store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Running || stored.State != task.StateCompleted || taskTurnSeqFromSpec(stored.Spec) != 2 {
+		t.Fatalf("stored accepted Turn = %#v, want completed turn 2", stored)
+	}
+	if stored.Metadata["concurrent_observer"] != "committed" {
+		t.Fatalf("stored metadata = %#v, want concurrent update preserved", stored.Metadata)
 	}
 }
 
@@ -941,8 +1261,8 @@ func TestSideAndDelegatedSubagentsHaveSeparateControlSurfaces(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), "tool principal") {
 		t.Fatalf("TASK wait on side err = %v, want isolation error", err)
 	}
-	if _, err := runtime.ContinueSubagentByHandle(ctx, activeSession.SessionRef, taskStringValue(side.Result["handle"]), "follow up", 0); err != nil {
-		t.Fatalf("ContinueSubagentByHandle(side) error = %v", err)
+	if _, err := sendSubagentMessageForTest(ctx, runtime, activeSession.SessionRef, taskStringValue(side.Result["handle"]), "follow up"); err != nil {
+		t.Fatalf("SendAgentMessage(side) error = %v", err)
 	}
 	if runner.continuePrompt != "follow up" {
 		t.Fatalf("side continuation prompt = %q, want raw current request for an empty offset", runner.continuePrompt)
@@ -962,12 +1282,12 @@ func TestSideAndDelegatedSubagentsHaveSeparateControlSurfaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSubagent(delegated) error = %v", err)
 	}
-	if _, err := runtime.ContinueSubagentByHandle(ctx, activeSession.SessionRef, taskStringValue(delegated.Result["handle"]), "user follow up", 0); err == nil {
-		t.Fatal("ContinueSubagentByHandle(delegated) succeeded, want not found")
+	if _, err := sendSubagentMessageForTest(ctx, runtime, activeSession.SessionRef, taskStringValue(delegated.Result["handle"]), "user follow up"); err != nil {
+		t.Fatalf("SendAgentMessage(delegated) error = %v", err)
 	}
 }
 
-func TestTaskWriteContinuesSpawnChildAfterWaitCompletes(t *testing.T) {
+func TestSendMessageContinuesSpawnChildAfterWaitCompletes(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateRunning, OutputPreview: "working", Running: true},
@@ -996,12 +1316,9 @@ func TestTaskWriteContinuesSpawnChildAfterWaitCompletes(t *testing.T) {
 		t.Fatalf("completed state = %q, want completed", completed.State)
 	}
 
-	continued, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
-		Input: "next prompt",
-	})
+	continued, err := sendSubagentMessageForTest(ctx, runtime, activeSession.SessionRef, started.Handle, "next prompt")
 	if err != nil {
-		t.Fatalf("Write(completed spawn after wait) error = %v", err)
+		t.Fatalf("SendAgentMessage(completed spawn after wait) error = %v", err)
 	}
 	if got, _ := continued.Result["result"].(string); got != "follow-up done" {
 		t.Fatalf("continued result = %q, want follow-up done", got)
@@ -1011,7 +1328,7 @@ func TestTaskWriteContinuesSpawnChildAfterWaitCompletes(t *testing.T) {
 	}
 }
 
-func TestTaskWriteCanContinueCompletedSpawnChildRepeatedly(t *testing.T) {
+func TestSendMessageCanContinueCompletedSpawnChildRepeatedly(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first done"},
@@ -1029,24 +1346,18 @@ func TestTaskWriteCanContinueCompletedSpawnChildRepeatedly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSubagent() error = %v", err)
 	}
-	if _, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
-		Input: "second prompt",
-	}); err != nil {
-		t.Fatalf("first Write(completed spawn) error = %v", err)
+	if _, err := sendSubagentMessageForTest(ctx, runtime, activeSession.SessionRef, started.Handle, "second prompt"); err != nil {
+		t.Fatalf("first SendAgentMessage(completed spawn) error = %v", err)
 	}
-	if _, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
-		Input: "third prompt",
-	}); err != nil {
-		t.Fatalf("second Write(completed spawn) error = %v", err)
+	if _, err := sendSubagentMessageForTest(ctx, runtime, activeSession.SessionRef, started.Handle, "third prompt"); err != nil {
+		t.Fatalf("second SendAgentMessage(completed spawn) error = %v", err)
 	}
 	if runner.continuePrompt != "third prompt" {
 		t.Fatalf("last continue prompt = %q, want third prompt", runner.continuePrompt)
 	}
 }
 
-func TestTaskWriteContinuesSubagentStreamCursorAcrossTurns(t *testing.T) {
+func TestSendMessageContinuesSubagentStreamCursorAcrossTurns(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult:    delegation.Result{State: delegation.StateCompleted},
@@ -1078,11 +1389,8 @@ func TestTaskWriteContinuesSubagentStreamCursorAcrossTurns(t *testing.T) {
 		t.Fatalf("first frames = %#v, want first streamed frame and terminal frame", first.Frames)
 	}
 
-	if _, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
-		Input: "next prompt",
-	}); err != nil {
-		t.Fatalf("Write(completed spawn) error = %v", err)
+	if _, err := sendSubagentMessageForTest(ctx, runtime, activeSession.SessionRef, started.Handle, "next prompt"); err != nil {
+		t.Fatalf("SendAgentMessage(completed spawn) error = %v", err)
 	}
 	runtime.tasks.PublishStream(stream.Frame{
 		Ref:     stream.Ref{TaskID: started.Ref.TaskID},
@@ -1115,7 +1423,7 @@ func TestTaskWriteContinuesSubagentStreamCursorAcrossTurns(t *testing.T) {
 	}
 }
 
-func TestTaskWriteRejectsRunningSpawnChildWithWaitHint(t *testing.T) {
+func TestSendMessageDeliversToRunningSpawnChild(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateRunning, OutputPreview: "still running", Running: true},
@@ -1130,18 +1438,50 @@ func TestTaskWriteRejectsRunningSpawnChildWithWaitHint(t *testing.T) {
 		t.Fatalf("StartSubagent() error = %v", err)
 	}
 
-	_, err = runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
-		Input: "too soon",
+	if _, err = sendSubagentMessageForTest(ctx, runtime, activeSession.SessionRef, started.Handle, "mid-turn update"); err != nil {
+		t.Fatalf("SendAgentMessage(running spawn) error = %v", err)
+	}
+	if runner.continuePrompt != "mid-turn update" {
+		t.Fatalf("message prompt = %q, want mid-turn update", runner.continuePrompt)
+	}
+}
+
+func TestSendMessagePreservesUnknownRunningDeliveryWithoutAcceptedMirror(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "still running"},
+		continueResult: delegation.Result{
+			State: delegation.StateUnknownOutcome, Error: "child message delivery outcome is unknown",
+		},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "first",
 	})
-	if err == nil {
-		t.Fatal("Write(running spawn) error = nil, want wait hint")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "Task wait") {
-		t.Fatalf("Write(running spawn) error = %v, want Task wait hint", err)
+	const messageID = "agent-message-running-unknown"
+	response, err := runtime.SendAgentMessage(ctx, activeSession.SessionRef, agentmessage.Request{
+		MessageID: messageID, To: started.Handle, Text: "mid-turn update",
+		From: session.ActorRef{Kind: session.ActorKindController, ID: "main-controller", Name: "main"},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentMessage() error = %v, want explicit unknown outcome", err)
 	}
-	if runner.continuePrompt != "" {
-		t.Fatalf("Continue was called for running task with prompt %q", runner.continuePrompt)
+	if response.Accepted || response.State != agentmessage.StateUnknownOutcome || response.MessageID != messageID {
+		t.Fatalf("response = %#v, want unaccepted unknown_outcome with stable identity", response)
+	}
+	events, err := runtime.sessions.Events(ctx, session.EventsRequest{SessionRef: activeSession.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event != nil && event.MessageID == messageID {
+			t.Fatalf("unknown delivery was recorded as an accepted mirror: %#v", event)
+		}
 	}
 }
 
@@ -1456,11 +1796,19 @@ func TestSubagentStructuredToolFramesStillSurfaceFinalResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read(first structured frame) error = %v", err)
 	}
-	if len(first.Frames) != 3 || first.Frames[0].Event == nil || strings.TrimSpace(first.Frames[1].Text) != "final answer" || !first.Frames[2].Closed {
+	if len(first.Frames) != 3 || first.Frames[0].Event == nil || first.Frames[1].Event == nil || !first.Frames[2].Closed {
 		t.Fatalf("first frames = %#v, want tool frame, final answer, and terminal frame", first.Frames)
 	}
 	if first.Frames[0].Text != "" {
 		t.Fatalf("first frame text = %q, want no final result mixed into tool frame", first.Frames[0].Text)
+	}
+	finalEvent := first.Frames[1].Event
+	if session.EventTypeOf(finalEvent) != session.EventTypeAssistant || session.EventText(finalEvent) != "final answer" ||
+		finalEvent.Scope == nil || finalEvent.Scope.TurnID == "" || finalEvent.Scope.Participant.DelegationID != started.Ref.TaskID {
+		t.Fatalf("fallback final event = %#v, want semantic assistant scoped to the child Turn", finalEvent)
+	}
+	if finalEvent.Visibility != session.VisibilityUIOnly || session.ProtocolSessionUpdateType(finalEvent) != string(session.ProtocolUpdateTypeAgentMessage) {
+		t.Fatalf("fallback final event visibility/update = %q/%q, want transient agent message", finalEvent.Visibility, session.ProtocolSessionUpdateType(finalEvent))
 	}
 }
 
@@ -1822,10 +2170,6 @@ func (r *overlappingSubagentRunner) Spawn(ctx context.Context, spawn subagent.Sp
 	}, nil
 }
 
-func (r *overlappingSubagentRunner) Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error) {
-	return delegation.Result{}, nil
-}
-
 func (r *overlappingSubagentRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
 	return delegation.Result{State: delegation.StateRunning, Running: true}, nil
 }
@@ -1972,10 +2316,8 @@ func TestRuntimeSpawnToolPersistsResolvedPlacementBeforeSpawn(t *testing.T) {
 	if target.Selector != "orbit" || target.Placement.Model != "provider/model" || target.Placement.ReasoningEffort != "high" || !strings.HasPrefix(target.Placement.Fingerprint, "sha256:") {
 		t.Fatalf("durable target = %#v", target)
 	}
-	if _, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: taskID, Input: "follow up", Principal: session.ActorKindTool,
-	}); err != nil {
-		t.Fatalf("Write(placement task) error = %v", err)
+	if _, err := sendSubagentMessageForTest(ctx, runtime, activeSession.SessionRef, taskStringValue(entry.Metadata["handle"]), "follow up"); err != nil {
+		t.Fatalf("SendAgentMessage(placement task) error = %v", err)
 	}
 	if runner.continueAgent != "orbit" {
 		t.Fatalf("continue Agent = %q, want stable selector", runner.continueAgent)
@@ -2127,6 +2469,7 @@ type recordingSubagentRunner struct {
 	continueAgent      string
 	continuePrompt     string
 	continueCompletion delegation.CompletionSink
+	messageErr         error
 	waitYieldMS        int
 	waitCalls          int
 	waitHook           func()
@@ -2164,12 +2507,12 @@ func (r *recordingSubagentRunner) SpawnTarget(ctx context.Context, spawn subagen
 	return r.Spawn(ctx, spawn, delegation.Request{Agent: req.Target.Selector, Prompt: req.Prompt})
 }
 
-func (r *recordingSubagentRunner) Continue(_ context.Context, anchor delegation.Anchor, req delegation.ContinueRequest) (delegation.Result, error) {
+func (r *recordingSubagentRunner) Message(_ context.Context, anchor delegation.Anchor, req subagent.MessageRequest) (delegation.Result, error) {
 	r.continueAnchor = delegation.CloneAnchor(anchor)
 	r.continueAgent = strings.TrimSpace(anchor.Agent)
-	r.continuePrompt = strings.TrimSpace(req.Prompt)
+	r.continuePrompt = strings.TrimSpace(req.Text)
 	r.continueCompletion = req.Completion
-	return delegation.CloneResult(r.continueResult), nil
+	return delegation.CloneResult(r.continueResult), r.messageErr
 }
 
 func (r *recordingSubagentRunner) Wait(_ context.Context, _ delegation.Anchor, yieldTimeMS int) (delegation.Result, error) {

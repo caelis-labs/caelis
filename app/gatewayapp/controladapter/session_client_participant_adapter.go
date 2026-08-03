@@ -158,11 +158,7 @@ func (a *SessionClientAdapter) activeClientSessionState(ctx context.Context) (co
 	if sessionID == "" {
 		return a.ensureClientSession(ctx)
 	}
-	state, err := a.sessionClient.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
-	if err == nil {
-		a.setClientSession(state.SessionID, state.CWD)
-	}
-	return state, err
+	return a.sessionClient.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
 }
 
 func (a *SessionClientAdapter) wrapParticipantTurn(turn controlclient.TargetTurn) controlprompt.Turn {

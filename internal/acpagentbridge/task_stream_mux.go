@@ -17,7 +17,8 @@ import (
 // acpTaskStreamMux keeps the standard ACP bridge compatible with mounted
 // RunCommand and Spawn terminals without flattening subagent semantics into
 // the main session/update stream. After its parent prompt is sealed, active
-// command subscriptions remain available until their Task stream ends.
+// command streams and the current subagent activity remain available until
+// their terminal boundary; later subagent activities belong to a later Prompt.
 // Stopping the mux closes only delivery subscriptions, never Tasks.
 type acpTaskStreamMux struct {
 	ctx       context.Context
@@ -155,7 +156,7 @@ func (m *acpTaskStreamMux) Observe(envelope eventstream.Envelope) {
 		}
 		return
 	}
-	generation := m.claimObservation(anchor.callID)
+	generation := m.claimObservation(anchor.callID, anchor.kind == task.KindSubagent)
 	if generation == nil {
 		return
 	}
@@ -168,6 +169,7 @@ func (m *acpTaskStreamMux) Observe(envelope eventstream.Envelope) {
 type acpTaskStreamAnchor struct {
 	callID         string
 	handle         string
+	taskID         string
 	kind           task.Kind
 	parentTerminal bool
 }
@@ -178,6 +180,7 @@ func (m *acpTaskStreamMux) resolveAndForward(
 ) {
 	defer m.wg.Done()
 	defer m.finishOperation()
+	defer close(generation.settled)
 	defer m.signalGenerationBoundary(anchor.callID, generation.boundary)
 	defer generation.cancel()
 
@@ -188,7 +191,7 @@ func (m *acpTaskStreamMux) resolveAndForward(
 	}
 	if !m.attachObservation(anchor.callID, generation) {
 		_ = attachment.result.Subscription.Close()
-		m.closeObservation(anchor.callID, generation)
+		m.closeObservation(anchor.callID, generation, "")
 		return
 	}
 
@@ -196,13 +199,14 @@ func (m *acpTaskStreamMux) resolveAndForward(
 	subscription := attachment.result.Subscription
 	resumeCursor := ""
 	for {
-		lastCursor, streamErr, sawBoundary := m.forwardUntilClose(anchor, subscription, generation.ctx)
+		lastCursor, streamErr := m.forwardUntilClose(anchor, subscription, generation)
 		_ = subscription.Close()
+		m.recordObservationCursor(anchor.callID, generation, lastCursor)
 		if lastCursor != "" {
 			resumeCursor = lastCursor
 		}
-		if sawBoundary || streamErr == nil || generation.ctx.Err() != nil {
-			m.closeObservation(anchor.callID, generation)
+		if streamErr == nil || generation.ctx.Err() != nil {
+			m.closeObservation(anchor.callID, generation, lastCursor)
 			return
 		}
 		if !acpTaskStreamResolveRetryable(streamErr) || resumeCursor == "" {
@@ -210,7 +214,7 @@ func (m *acpTaskStreamMux) resolveAndForward(
 			return
 		}
 		if !m.beginObservationResume(anchor.callID, generation) {
-			m.closeObservation(anchor.callID, generation)
+			m.closeObservation(anchor.callID, generation, lastCursor)
 			return
 		}
 
@@ -219,11 +223,12 @@ func (m *acpTaskStreamMux) resolveAndForward(
 			generation,
 			taskID,
 			resumeCursor,
+			anchor.kind == task.KindSubagent,
 			acpTaskStreamResumeMaxAttempts,
 		)
 		if resumeErr != nil {
 			if m.observationRetryStopped(anchor.callID, generation) {
-				m.closeObservation(anchor.callID, generation)
+				m.closeObservation(anchor.callID, generation, lastCursor)
 				return
 			}
 			m.finishActiveFailure(anchor, generation, resumeErr, true, acpTaskStreamResolveRetryable(resumeErr) &&
@@ -232,7 +237,7 @@ func (m *acpTaskStreamMux) resolveAndForward(
 		}
 		if !m.finishObservationResume(anchor.callID, generation) {
 			_ = next.result.Subscription.Close()
-			m.closeObservation(anchor.callID, generation)
+			m.closeObservation(anchor.callID, generation, lastCursor)
 			return
 		}
 		subscription = next.result.Subscription
@@ -247,36 +252,45 @@ type acpTaskStreamAttachment struct {
 func (m *acpTaskStreamMux) forwardUntilClose(
 	anchor acpTaskStreamAnchor,
 	subscription taskstream.Subscription,
-	deliveryCtx context.Context,
-) (string, error, bool) {
+	generation *acpTaskStreamObservationGeneration,
+) (string, error) {
+	deliveryCtx := generation.ctx
 	for {
 		select {
 		case <-deliveryCtx.Done():
-			return strings.TrimSpace(subscription.LastCursor()), deliveryCtx.Err(), false
+			return strings.TrimSpace(subscription.LastCursor()), deliveryCtx.Err()
 		case envelope, ok := <-subscription.Events():
 			if !ok {
-				return strings.TrimSpace(subscription.LastCursor()), subscription.Err(), false
+				return strings.TrimSpace(subscription.LastCursor()), subscription.Err()
 			}
 			if taskstream.IsTransientGapEnvelope(envelope) {
 				continue
 			}
-			if anchor.kind == task.KindSubagent && envelope.Kind == eventstream.KindLifecycle && envelope.Final {
-				if acpSubagentTaskLifecycleAllowed(anchor, envelope) {
-					select {
-					case <-deliveryCtx.Done():
-						return strings.TrimSpace(subscription.LastCursor()), deliveryCtx.Err(), false
-					case m.events <- envelope:
-					}
-				}
-				return strings.TrimSpace(subscription.LastCursor()), nil, true
+			cursor := strings.TrimSpace(envelope.Cursor)
+			if cursor == "" {
+				cursor = strings.TrimSpace(subscription.LastCursor())
 			}
+			m.recordObservationCursor(anchor.callID, generation, cursor)
 			if !acpTaskStreamEnvelopeAllowed(anchor, envelope) {
 				continue
 			}
 			select {
 			case <-deliveryCtx.Done():
-				return strings.TrimSpace(subscription.LastCursor()), deliveryCtx.Err(), false
+				return strings.TrimSpace(subscription.LastCursor()), deliveryCtx.Err()
 			case m.events <- envelope:
+			}
+			if anchor.kind == task.KindSubagent && envelope.Kind == eventstream.KindLifecycle && envelope.Lifecycle != nil {
+				terminal := eventstream.IsTerminalLifecycleState(envelope.Lifecycle.State)
+				sealed := m.observeSubagentActivityLifecycle(anchor.callID, generation, terminal)
+				if terminal {
+					// Parent Task read/wait projection may be waiting for this child
+					// lifecycle before closing its mounted terminal. Signaling the
+					// boundary does not end a live following subscription.
+					m.signalGenerationBoundary(anchor.callID, generation.boundary)
+				}
+				if terminal && sealed {
+					return strings.TrimSpace(subscription.LastCursor()), nil
+				}
 			}
 		}
 	}
@@ -300,6 +314,13 @@ func (m *acpTaskStreamMux) resolveSubscription(
 	anchor acpTaskStreamAnchor,
 	generation *acpTaskStreamObservationGeneration,
 ) (acpTaskStreamAttachment, error) {
+	if taskID := strings.TrimSpace(anchor.taskID); taskID != "" {
+		result, err := m.subscribeTaskStream(generation.ctx, taskID, generation.cursor, anchor.kind == task.KindSubagent)
+		if err != nil {
+			return acpTaskStreamAttachment{}, err
+		}
+		return acpTaskStreamAttachment{taskID: taskID, result: result}, nil
+	}
 	directory, err := m.client.List(generation.ctx, taskstream.ListRequest{SessionID: m.sessionID})
 	if err != nil {
 		return acpTaskStreamAttachment{}, err
@@ -324,7 +345,7 @@ func (m *acpTaskStreamMux) resolveSubscription(
 	if taskID == "" {
 		return acpTaskStreamAttachment{}, errorcode.New(errorcode.NotFound, "task is not discoverable yet")
 	}
-	result, err := m.subscribeTaskStream(generation.ctx, taskID, "")
+	result, err := m.subscribeTaskStream(generation.ctx, taskID, generation.cursor, anchor.kind == task.KindSubagent)
 	if err != nil {
 		return acpTaskStreamAttachment{}, err
 	}
@@ -336,6 +357,7 @@ func (m *acpTaskStreamMux) resumeSubscriptionWithGrace(
 	generation *acpTaskStreamObservationGeneration,
 	taskID string,
 	cursor string,
+	follow bool,
 	maxAttempts int,
 ) (acpTaskStreamAttachment, int, error) {
 	return retryACPTaskStream(
@@ -343,7 +365,7 @@ func (m *acpTaskStreamMux) resumeSubscriptionWithGrace(
 		maxAttempts,
 		func() bool { return !m.observationRetryStopped(callID, generation) },
 		func() (acpTaskStreamAttachment, error) {
-			result, err := m.subscribeTaskStream(generation.ctx, taskID, cursor)
+			result, err := m.subscribeTaskStream(generation.ctx, taskID, cursor, follow)
 			if err != nil {
 				return acpTaskStreamAttachment{}, err
 			}
@@ -352,11 +374,17 @@ func (m *acpTaskStreamMux) resumeSubscriptionWithGrace(
 	)
 }
 
-func (m *acpTaskStreamMux) subscribeTaskStream(ctx context.Context, taskID string, cursor string) (taskstream.SubscribeResult, error) {
+func (m *acpTaskStreamMux) subscribeTaskStream(
+	ctx context.Context,
+	taskID string,
+	cursor string,
+	follow bool,
+) (taskstream.SubscribeResult, error) {
 	result, err := m.client.Subscribe(ctx, taskstream.SubscribeRequest{
 		SessionID: m.sessionID,
 		TaskID:    taskID,
 		Cursor:    cursor,
+		Follow:    follow,
 	})
 	if err != nil {
 		return taskstream.SubscribeResult{}, err
@@ -466,13 +494,14 @@ func (m *acpTaskStreamMux) Close() {
 	m.closeEvents()
 }
 
-// Seal prevents discovery of new terminal-backed Tasks while allowing
-// already-started subscriptions to deliver until their Task stream ends.
+// Seal prevents discovery of new terminal-backed Tasks. Command streams and a
+// currently running subagent activity may finish; a following subagent stream
+// already parked at an activity boundary is released immediately.
 func (m *acpTaskStreamMux) Seal() {
 	if m == nil {
 		return
 	}
-	generations := m.cancelResolvingObservations()
+	generations := m.sealObservations()
 	m.mu.Lock()
 	closeEvents := m.active == 0
 	m.mu.Unlock()

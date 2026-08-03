@@ -22,7 +22,14 @@ type taskControlIdentity struct {
 	kind   taskapi.Kind
 }
 
-func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest, fn func(taskControlTarget, taskapi.ControlRequest) (taskapi.Snapshot, error)) (taskapi.Snapshot, error) {
+type taskControlAccess uint8
+
+const (
+	taskControlObserve taskControlAccess = iota
+	taskControlExclusive
+)
+
+func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest, access taskControlAccess, fn func(taskControlTarget, taskapi.ControlRequest) (taskapi.Snapshot, error)) (taskapi.Snapshot, error) {
 	req = normalizeTaskControlRequest(req)
 	if err := validateTaskControlPrincipal(req.Principal); err != nil {
 		return taskapi.Snapshot{}, err
@@ -30,6 +37,16 @@ func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req 
 	identity, err := tm.resolveControlIdentity(ctx, ref, req.TaskID)
 	if err != nil {
 		return taskapi.Snapshot{}, err
+	}
+	// Subagent read/wait are observations, not lifecycle operations. They must
+	// not contend with SendMessage or producer completion for the mutation
+	// claim. Result application is fenced by the observed child Turn instead.
+	if access == taskControlObserve && identity.kind == taskapi.KindSubagent {
+		task, err := tm.lookupSubagent(ctx, ref, identity.taskID)
+		if err != nil {
+			return taskapi.Snapshot{}, err
+		}
+		return fn(subagentControlTarget{runtime: tm, task: task}, req)
 	}
 	release, claimed := tm.tryClaimSubagentOperation(ref, identity.taskID)
 	if !claimed {
@@ -39,11 +56,6 @@ func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req 
 	target, err := tm.lookupControlTargetClaimed(ctx, ref, identity)
 	if err != nil {
 		return taskapi.Snapshot{}, err
-	}
-	if subagent, ok := target.(subagentControlTarget); ok {
-		if err := tm.recoverPendingSubagentControlClaimed(ctx, subagent.task); err != nil {
-			return taskapi.Snapshot{}, err
-		}
 	}
 	return fn(target, req)
 }
@@ -235,7 +247,9 @@ func (t subagentControlTarget) Read(ctx context.Context, req taskapi.ControlRequ
 }
 
 func (t subagentControlTarget) Write(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return t.runtime.continueSubagentClaimed(ctx, t.task, req)
+	_ = ctx
+	_ = req
+	return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: Task write accepts RunCommand tasks only; use SendMessage for subagent %q", t.task.handle)
 }
 
 func (t subagentControlTarget) Cancel(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {

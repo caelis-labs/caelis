@@ -357,7 +357,7 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 	}
 	switch strings.TrimSpace(update.SessionUpdate) {
 	case schema.UpdateUserMessage:
-		if scope != ScopeMain && scope != ScopeParticipant {
+		if scope != ScopeMain && scope != ScopeParticipant && scope != ScopeSubagent {
 			return nil
 		}
 		return []Event{{

@@ -453,6 +453,7 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 	if spawn {
 		return renderSubagentOutputLifecycleRows(blockID, headerEvent, callID, width, ctx, final, err)
 	}
+	sendMessage := names.CanonicalOrSelf(toolSemanticName(ev.Name, ev.ToolKind)) == names.SendMessage
 	if fullOutput {
 		if fullArgs := strings.TrimSpace(ev.FullArgs); fullArgs != "" {
 			headerEvent.Args = fullArgs
@@ -460,7 +461,14 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 	}
 	header := terminalLifecycleHeader(headerEvent)
 	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, text, final, err))
-	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
+	var headerRow RenderedRow
+	if sendMessage && opts.AgentMessageTargetLinks && agentMessageTargetCanOpenOverlay(ev.MessageTarget) {
+		token = agentMessageTargetOverlayClickToken(callID)
+		headerRow = renderAgentMessageTargetHeaderRow(blockID, header, width, ctx, token)
+	} else {
+		headerRow = renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)
+	}
+	rows := []RenderedRow{headerRow}
 	if !expanded || !shouldRenderACPToolPanel(text, err) {
 		return rows
 	}
@@ -474,6 +482,20 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 	text = summarizeACPToolPanelText(text, final)
 	rows = append(rows, renderACPToolPanelRows(blockID, callID, toolSemanticName(ev.Name, ev.ToolKind), text, width, ctx, err, token, opts)...)
 	return rows
+}
+
+func agentMessageTargetCanOpenOverlay(target string) bool {
+	target = normalizeTaskStreamHandle(target)
+	return target != "" && !strings.EqualFold(target, "parent")
+}
+
+func renderAgentMessageTargetHeaderRow(blockID, header string, width int, ctx BlockRenderContext, token string) RenderedRow {
+	header = sanitizeRenderableText(header)
+	plain := header + "  ↗"
+	styled := styleACPTranscriptHeader(ctx, header) + ctx.Theme.TranscriptMetaStyle().Render("  ↗")
+	row := StyledPlainClickableRow(blockID, plain, styled, token)
+	row.ACPHeader = true
+	return row
 }
 
 const terminalOutputGapNotice = "… earlier output unavailable …"
@@ -502,6 +524,11 @@ func terminalLifecycleHeader(ev SubagentEvent) string {
 			return "• Spawned " + args
 		}
 		return "• Spawned"
+	case names.SendMessage:
+		if args != "" {
+			return "• Sent " + args
+		}
+		return "• Sent"
 	default:
 		if isExecuteToolKind(ev.ToolKind) {
 			if command := executeToolCommandDisplay(rawName, args); command != "" {

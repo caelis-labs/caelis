@@ -17,21 +17,22 @@ import (
 // should therefore render through the same event timeline.
 
 type acpTranscriptRenderOptions struct {
-	EmptyPlaceholder       string
-	UseStatusPlaceholder   bool
-	PlaceholderAsMeta      bool
-	HideWaitingApprovalRow bool
-	HideCompletedRow       bool
-	HideFailedRow          bool
-	ToolOutputPanels       bool
-	ToolPanelExpanded      func(callID string) bool
-	ToolPanelFullOutput    func(callID string) bool
-	ToolPanelRows          func(toolPanelRenderRequest) []RenderedRow
-	ExplorationExpanded    func(key string) bool
-	StableExplorationPrep  func(events []SubagentEvent, status string)
-	StableExplorationRows  func(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool)
-	ToolPanelScrollState   func(callID string) toolPanelScrollState
-	ReasoningExpanded      func(key string) bool
+	EmptyPlaceholder        string
+	UseStatusPlaceholder    bool
+	PlaceholderAsMeta       bool
+	HideWaitingApprovalRow  bool
+	HideCompletedRow        bool
+	HideFailedRow           bool
+	ToolOutputPanels        bool
+	ToolPanelExpanded       func(callID string) bool
+	ToolPanelFullOutput     func(callID string) bool
+	ToolPanelRows           func(toolPanelRenderRequest) []RenderedRow
+	ExplorationExpanded     func(key string) bool
+	StableExplorationPrep   func(events []SubagentEvent, status string)
+	StableExplorationRows   func(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool)
+	ToolPanelScrollState    func(callID string) toolPanelScrollState
+	ReasoningExpanded       func(key string) bool
+	AgentMessageTargetLinks bool
 }
 
 type toolPanelRenderRequest struct {
@@ -355,7 +356,8 @@ func styleACPTranscriptHeaderDetail(ctx BlockRenderContext, verb string, detail 
 	if strings.EqualFold(strings.TrimSpace(verb), "Ran") {
 		return styleShellCommandText(ctx, detail)
 	}
-	if strings.EqualFold(strings.TrimSpace(verb), "Spawned") {
+	if strings.EqualFold(strings.TrimSpace(verb), "Spawned") ||
+		strings.EqualFold(strings.TrimSpace(verb), "Sent") {
 		return styleSpawnedHeaderDetail(ctx, detail)
 	}
 	return styleToolDetailNumbers(detail, ctx, ctx.Theme.ToolArgsStyle())
@@ -760,6 +762,16 @@ func acpToolPanelClickToken(callID string) string {
 		return ""
 	}
 	return "acp_tool_panel:" + callID
+}
+
+const agentMessageTargetOverlayTokenPrefix = "agent_message_target_overlay:"
+
+func agentMessageTargetOverlayClickToken(callID string) string {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return ""
+	}
+	return agentMessageTargetOverlayTokenPrefix + callID
 }
 
 func acpToolPanelClickTokenIf(callID string, enabled bool) string {

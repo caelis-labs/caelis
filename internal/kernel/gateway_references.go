@@ -36,6 +36,10 @@ func (f SubmissionReferenceProjectorFunc) ProjectSubmissionReferences(ctx contex
 }
 
 func (g *Gateway) prepareBeginTurnRequest(ctx context.Context, activeSession session.Session, req BeginTurnRequest) (BeginTurnRequest, error) {
+	if req.InputType == session.EventTypeContext {
+		req.Input = strings.TrimSpace(req.Input)
+		return req, nil
+	}
 	input, displayInput, parts, meta, err := g.prepareUserInput(ctx, activeSession, req.Input, req.DisplayInput, req.ContentParts, req.Metadata)
 	if err != nil {
 		return BeginTurnRequest{}, err

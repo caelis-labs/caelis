@@ -10,16 +10,159 @@ import (
 	"testing"
 	"time"
 
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/transport/stdio"
 )
 
 type detachedChildContextMarker struct{}
+
+func TestSubagentSessionMetaMarksParentAndTask(t *testing.T) {
+	t.Parallel()
+
+	meta := subagentSessionMeta(tasksubagent.SpawnContext{
+		SessionRef: session.SessionRef{SessionID: "parent-session"},
+		TaskID:     "task-1",
+	})
+	path := []string{metautil.Root, metautil.Runtime, metautil.RuntimeSession}
+	if got := metautil.String(meta, append(path, metautil.RuntimeSessionKind)...); got != metautil.RuntimeSessionKindSubagent {
+		t.Fatalf("session kind = %q, want subagent", got)
+	}
+	if got := metautil.String(meta, append(path, metautil.RuntimeSessionParentID)...); got != "parent-session" {
+		t.Fatalf("parent Session ID = %q, want parent-session", got)
+	}
+	if got := metautil.String(meta, append(path, metautil.RuntimeTaskID)...); got != "task-1" {
+		t.Fatalf("Task ID = %q, want task-1", got)
+	}
+}
+
+func TestMessageAcknowledgementWithoutTerminalStateIsUnknownOutcome(t *testing.T) {
+	t.Parallel()
+
+	published := make(chan delegation.Result, 1)
+	run := &childRun{
+		taskID: "task-message-unknown", state: delegation.StateRunning, running: true,
+		done: make(chan struct{}), completion: completionSinkFunc(func(result delegation.Result) {
+			published <- result
+		}),
+	}
+	runner := &Runner{clock: time.Now}
+	runner.finishDrive(context.Background(), run, "end_turn", &messageTurnOutcomeUnknownError{state: "running"})
+
+	result := <-published
+	if result.State != delegation.StateUnknownOutcome || result.Running || !strings.Contains(result.Error, "non-terminal state") {
+		t.Fatalf("completion = %#v, want explicit unknown outcome", result)
+	}
+	select {
+	case <-run.done:
+	default:
+		t.Fatal("unknown message outcome did not close the local Turn observation")
+	}
+}
+
+func TestRunningChildMessageResponseLossIsUnknownOutcome(t *testing.T) {
+	t.Parallel()
+
+	remote, requestReceived := newLostSessionMessageResponseClient(t)
+	run := &childRun{
+		anchor: delegation.Anchor{
+			TaskID: "task-message-running-unknown", SessionID: "child-message-running-unknown", Agent: "helper",
+		},
+		taskID: "task-message-running-unknown", client: remote, supportsMessages: true,
+		state: delegation.StateRunning, running: true, done: make(chan struct{}), updatedAt: time.Now(),
+	}
+	runner := &Runner{clock: time.Now, runs: map[string]*childRun{run.taskID: run}}
+
+	result, err := runner.Message(context.Background(), run.anchor, tasksubagent.MessageRequest{Request: agentmessage.Request{
+		MessageID: "message-running-unknown", To: "child", Text: "continue",
+	}})
+	if err != nil {
+		t.Fatalf("Message() error = %v, want non-retryable unknown outcome", err)
+	}
+	if result.State != delegation.StateUnknownOutcome || result.Running || !strings.Contains(result.Error, "outcome is unknown") {
+		t.Fatalf("Message() = %#v, want unknown outcome", result)
+	}
+	select {
+	case <-requestReceived:
+	case <-time.After(time.Second):
+		t.Fatal("remote did not receive session/message before response loss")
+	}
+}
+
+func TestCompletedChildMessageResponseLossFinishesUnknownOutcome(t *testing.T) {
+	t.Parallel()
+
+	remote, requestReceived := newLostSessionMessageResponseClient(t)
+	run := &childRun{
+		anchor: delegation.Anchor{
+			TaskID: "task-message-completed-unknown", SessionID: "child-message-completed-unknown", Agent: "helper",
+		},
+		taskID: "task-message-completed-unknown", client: remote, supportsMessages: true,
+		state: delegation.StateCompleted, done: make(chan struct{}), updatedAt: time.Now(), ctx: context.Background(),
+	}
+	runner := &Runner{clock: time.Now, runs: map[string]*childRun{run.taskID: run}}
+
+	accepted, err := runner.Message(context.Background(), run.anchor, tasksubagent.MessageRequest{Request: agentmessage.Request{
+		MessageID: "message-completed-unknown", To: "child", Text: "continue",
+	}})
+	if err != nil || !accepted.Running || accepted.State != delegation.StateRunning {
+		t.Fatalf("Message() = (%#v, %v), want queued running delivery", accepted, err)
+	}
+	select {
+	case <-requestReceived:
+	case <-time.After(time.Second):
+		t.Fatal("remote did not receive session/message before response loss")
+	}
+	select {
+	case <-run.done:
+	case <-time.After(time.Second):
+		t.Fatal("response loss did not settle the asynchronous message turn")
+	}
+	final := runner.waitRun(context.Background(), run, 0)
+	if final.State != delegation.StateUnknownOutcome || final.Running || !strings.Contains(final.Error, "outcome is unknown") {
+		t.Fatalf("final message turn = %#v, want unknown outcome", final)
+	}
+}
+
+func newLostSessionMessageResponseClient(t *testing.T) (*client.Client, <-chan struct{}) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	clientToAgentReader, clientToAgentWriter := io.Pipe()
+	agentToClientReader, agentToClientWriter := io.Pipe()
+	requestReceived := make(chan struct{}, 1)
+	agentConn := jsonrpc.New(clientToAgentReader, agentToClientWriter)
+	go func() {
+		_ = agentConn.Serve(ctx, func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
+			if msg.Method != client.MethodSessionMessage {
+				return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+			}
+			requestReceived <- struct{}{}
+			_ = agentToClientWriter.CloseWithError(io.ErrUnexpectedEOF)
+			return client.SessionMessageResponse{
+				MessageID: "lost-response", Accepted: true, State: string(delegation.StateCompleted),
+			}, nil
+		}, nil)
+	}()
+	remote := client.NewProcessClient(ctx, &stdio.Process{
+		Stdin: clientToAgentWriter, Stdout: agentToClientReader,
+	}, client.Config{})
+	t.Cleanup(func() {
+		cancel()
+		_ = remote.Close(context.Background())
+		_ = clientToAgentReader.Close()
+		_ = clientToAgentWriter.Close()
+		_ = agentToClientReader.Close()
+		_ = agentToClientWriter.Close()
+	})
+	return remote, requestReceived
+}
 
 func TestRunnerResolvesTypedPlacementWithoutRegistryIdentity(t *testing.T) {
 	registry, err := NewRegistry([]AgentConfig{{Name: "helper", Command: "helper-acp"}})
@@ -246,6 +389,123 @@ func TestRunnerCancelReturnsRemoteNotificationFailure(t *testing.T) {
 	run.mu.RUnlock()
 	if state == delegation.StateCancelled {
 		t.Fatalf("child state = %q, must not claim cancellation after remote failure", state)
+	}
+}
+
+func TestCompletedChildMessageReturnsWhenAsyncDeliveryIsQueued(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	clientToAgentReader, clientToAgentWriter := io.Pipe()
+	agentToClientReader, agentToClientWriter := io.Pipe()
+	defer clientToAgentReader.Close()
+	defer clientToAgentWriter.Close()
+	defer agentToClientReader.Close()
+	defer agentToClientWriter.Close()
+
+	requestReceived := make(chan struct{})
+	turnCompleted := make(chan struct{})
+	agentConn := jsonrpc.New(clientToAgentReader, agentToClientWriter)
+	go func() {
+		_ = agentConn.Serve(ctx, func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
+			if msg.Method != client.MethodSessionMessage {
+				return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+			}
+			close(requestReceived)
+			<-turnCompleted
+			return client.SessionMessageResponse{
+				MessageID: "message-1", Accepted: true, State: string(delegation.StateCompleted),
+			}, nil
+		}, nil)
+	}()
+
+	var runner *Runner
+	var run *childRun
+	remote := client.NewProcessClient(ctx, &stdio.Process{
+		Stdin: clientToAgentWriter, Stdout: agentToClientReader,
+	}, client.Config{OnUpdate: func(env client.UpdateEnvelope) {
+		runner.handleUpdate(run, env)
+	}})
+	defer remote.Close(context.Background())
+	run = &childRun{
+		anchor: delegation.Anchor{
+			TaskID: "task-message", SessionID: "child-message", Agent: "helper", AgentID: "helper-1",
+		},
+		taskID: "task-message", client: remote, supportsMessages: true,
+		state: delegation.StateCompleted, updatedAt: time.Now(), ctx: context.Background(),
+	}
+	runner = &Runner{
+		clock: time.Now,
+		runs:  map[string]*childRun{"task-message": run},
+	}
+
+	type messageOutcome struct {
+		result delegation.Result
+		err    error
+	}
+	outcome := make(chan messageOutcome, 1)
+	go func() {
+		result, err := runner.Message(ctx, run.anchor, tasksubagent.MessageRequest{Request: agentmessage.Request{
+			MessageID: "message-1", To: "child", Text: "continue",
+		}})
+		outcome <- messageOutcome{result: result, err: err}
+	}()
+
+	select {
+	case <-requestReceived:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for remote session/message request")
+	}
+	var accepted messageOutcome
+	select {
+	case accepted = <-outcome:
+	case <-ctx.Done():
+		t.Fatal("Message() waited for target activity instead of accepting asynchronous delivery")
+	}
+	if accepted.err != nil || !accepted.result.Running || accepted.result.State != delegation.StateRunning {
+		t.Fatalf("Message() = (%#v, %v), want queued running Turn", accepted.result, accepted.err)
+	}
+
+	run.mu.RLock()
+	done := run.done
+	run.mu.RUnlock()
+	close(turnCompleted)
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("message-authored Turn did not complete")
+	}
+	final := runner.waitRun(ctx, run, 0)
+	if final.Running || final.State != delegation.StateCompleted {
+		t.Fatalf("final message Turn = %#v, want completed", final)
+	}
+}
+
+func TestChildWithoutMessageCapabilityFailsBeforeQueueing(t *testing.T) {
+	t.Parallel()
+
+	run := &childRun{
+		anchor: delegation.Anchor{
+			TaskID: "task-no-messages", SessionID: "child-no-messages", Agent: "helper",
+		},
+		taskID: "task-no-messages", state: delegation.StateCompleted, done: make(chan struct{}),
+	}
+	runner := &Runner{
+		clock: time.Now,
+		runs:  map[string]*childRun{"task-no-messages": run},
+	}
+
+	result, err := runner.Message(context.Background(), run.anchor, tasksubagent.MessageRequest{Request: agentmessage.Request{
+		MessageID: "message-unsupported", To: "child", Text: "continue",
+	}})
+	if err == nil || !strings.Contains(err.Error(), "does not support") {
+		t.Fatalf("Message() = (%#v, %v), want immediate unsupported capability error", result, err)
+	}
+	run.mu.RLock()
+	defer run.mu.RUnlock()
+	if run.running || run.state != delegation.StateCompleted {
+		t.Fatalf("unsupported message mutated child state: running=%v state=%s", run.running, run.state)
 	}
 }
 
@@ -491,16 +751,22 @@ func TestRunnerHandleUpdateUsesAgentMessageDeltas(t *testing.T) {
 	}
 	runner := &Runner{clock: time.Now}
 
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateUserMessage, "ignored prompt"))
+	runner.handleUpdate(run, contentUpdate(t, client.UpdateUserMessage, "continue from parent"))
 	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "我来按步骤"))
 	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "执行"))
 	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "这个任务。"))
 
-	if got := len(sink.frames); got != 3 {
-		t.Fatalf("stream frames = %#v, want three agent delta updates", sink.frames)
+	if got := len(sink.frames); got != 4 {
+		t.Fatalf("stream frames = %#v, want input plus three agent delta updates", sink.frames)
+	}
+	input := sink.frames[0].Event
+	if input == nil || session.EventTypeOf(input) != session.EventTypeContext ||
+		input.Visibility != session.VisibilityUIOnly || input.Actor.Kind != session.ActorKindController ||
+		input.Actor.Name != "parent" || input.Text != "continue from parent" {
+		t.Fatalf("child input event = %#v, want typed UI-only parent Context", input)
 	}
 	var renderedEvents string
-	for _, frame := range sink.frames {
+	for _, frame := range sink.frames[1:] {
 		if frame.Text != "" {
 			t.Fatalf("stream frame text = %q, want event-only child update", frame.Text)
 		}

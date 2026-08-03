@@ -3,10 +3,12 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -23,6 +25,8 @@ type subagentCompletion struct {
 	done          chan struct{}
 	acknowledge   sync.Once
 }
+
+const subagentCompletionNoticeTimeout = 5 * time.Second
 
 func (completion *subagentCompletion) acknowledgeDurable() {
 	if completion == nil {
@@ -70,7 +74,8 @@ func (sink subagentCompletionSink) PublishSubagentCompletion(result delegation.R
 	case delegation.StateCompleted,
 		delegation.StateFailed,
 		delegation.StateCancelled,
-		delegation.StateInterrupted:
+		delegation.StateInterrupted,
+		delegation.StateUnknownOutcome:
 	default:
 		return
 	}
@@ -112,17 +117,42 @@ func (tm *taskRuntime) enqueueSubagentCompletion(completion *subagentCompletion)
 	}
 	task := tm.subagents[taskID]
 	ready := false
+	discard := false
 	if task != nil {
 		completion.task = task
 		task.mu.Lock()
 		ready = task.completionReady
+		discard = spawnPhaseOfTask(task) == spawnPhaseCompensated
 		task.mu.Unlock()
+	}
+	if discard {
+		delete(tm.completions, taskID)
+		tm.mu.Unlock()
+		completion.acknowledgeDurable()
+		return completion.done
 	}
 	tm.mu.Unlock()
 	if ready {
 		tm.kickSubagentCompletion(taskID)
 	}
 	return completion.done
+}
+
+// discardSubagentCompletion releases a producer completion that raced a
+// compensated Spawn. Once cancellation is durably recorded, the child no
+// longer owns Task terminal state for that failed Spawn attempt.
+func (tm *taskRuntime) discardSubagentCompletion(taskID string) {
+	if tm == nil {
+		return
+	}
+	taskID = strings.TrimSpace(taskID)
+	tm.mu.Lock()
+	completion := tm.completions[taskID]
+	delete(tm.completions, taskID)
+	tm.mu.Unlock()
+	if completion != nil {
+		completion.acknowledgeDurable()
+	}
 }
 
 // kickSubagentCompletion serializes a producer terminal with Task control
@@ -199,6 +229,7 @@ func (tm *taskRuntime) applySubagentCompletion(completion *subagentCompletion, o
 
 	if err == nil {
 		completion.acknowledgeDurable()
+		tm.publishSubagentCompletionNoticeAsync(completion)
 		if pending != nil {
 			tm.kickSubagentCompletion(taskID)
 		}
@@ -262,6 +293,57 @@ func (tm *taskRuntime) persistSubagentCompletion(completion *subagentCompletion)
 	return nil
 }
 
+// publishSubagentCompletionNoticeAsync keeps the optional parent hint outside
+// the producer's durable Task/sidecar completion boundary. The idempotency key
+// makes a later independent retry safe, but this best-effort attempt never
+// delays or reopens authoritative completion.
+func (tm *taskRuntime) publishSubagentCompletionNoticeAsync(completion *subagentCompletion) {
+	if tm == nil || tm.runtime == nil || completion == nil || completion.task == nil {
+		return
+	}
+	ref, req, ok := subagentCompletionNotice(completion.task, completion.result, completion.turnSeq)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(completion.ctx), subagentCompletionNoticeTimeout)
+	go func() {
+		defer cancel()
+		_, _ = tm.runtime.deliverAgentMessageToMain(ctx, ref, req)
+	}()
+}
+
+func subagentCompletionNotice(task *subagentTask, result delegation.Result, turnSeq int64) (session.SessionRef, agentmessage.Request, bool) {
+	if task == nil {
+		return session.SessionRef{}, agentmessage.Request{}, false
+	}
+	task.mu.Lock()
+	ref := session.NormalizeSessionRef(task.sessionRef)
+	handle := strings.TrimSpace(task.handle)
+	if handle == "" {
+		task.mu.Unlock()
+		return session.SessionRef{}, agentmessage.Request{}, false
+	}
+	role := subagentParticipantRole(task)
+	agentID := strings.TrimSpace(task.anchor.AgentID)
+	taskID := strings.TrimSpace(task.ref.TaskID)
+	task.mu.Unlock()
+
+	state := strings.TrimSpace(string(result.State))
+	text := fmt.Sprintf("Subagent @%s is %s. Use Task read with handle %s for its full result.", strings.TrimPrefix(handle, "@"), state, handle)
+	return ref, agentmessage.Request{
+		MessageID: fmt.Sprintf("subagent-completion:%s:%d", taskID, max(turnSeq, 1)),
+		To:        agentmessage.Parent, Text: text,
+		From: session.ActorRef{
+			Kind: session.ActorKindParticipant, ID: agentID,
+			Name: "@" + strings.TrimPrefix(handle, "@"), Role: string(role),
+		},
+		Scope: &session.EventScope{Source: "subagent_completion", Participant: session.ParticipantRef{
+			ID: agentID, Kind: session.ParticipantKindSubagent,
+			Role: role, DelegationID: taskID,
+		}},
+	}, true
+}
+
 // refreshSubagentCompletionTask reloads only after a CAS conflict. Ordinary
 // persistence and sidecar-final failures retain the in-memory terminal result,
 // which may be intentionally absent from the canonical Task index.
@@ -294,7 +376,13 @@ func (tm *taskRuntime) refreshSubagentCompletionTask(completion *subagentComplet
 		completion.acknowledgeDurable()
 		return
 	}
-	if turnSeq == completion.turnSeq {
+	if turnSeq < completion.turnSeq && completion.task != nil {
+		rebased := tm.rebaseAcceptedSubagentTask(completion.task, entry)
+		if rebased != nil {
+			completion.taskPersisted = false
+			tm.subagents[taskID] = completion.task
+		}
+	} else if turnSeq == completion.turnSeq {
 		completion.task = durable
 		completion.taskPersisted = !running
 		tm.subagents[taskID] = durable

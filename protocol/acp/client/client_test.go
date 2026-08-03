@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -147,11 +148,26 @@ func TestStableSessionLifecycleMethodsSendExpectedRequests(t *testing.T) {
 	defer agentToClientWriter.Close()
 
 	agentConn := jsonrpc.New(clientToAgentReader, agentToClientWriter)
-	seen := make(chan string, 3)
+	seen := make(chan string, 4)
 	go func() {
 		_ = agentConn.Serve(ctx, func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
 			seen <- msg.Method
 			switch msg.Method {
+			case MethodSessionNew:
+				var req NewSessionRequest
+				if err := json.Unmarshal(msg.Params, &req); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+				}
+				if req.CWD != "/tmp/project" || metautil.String(
+					req.Meta,
+					metautil.Root,
+					metautil.Runtime,
+					metautil.RuntimeSession,
+					metautil.RuntimeSessionKind,
+				) != metautil.RuntimeSessionKindSubagent {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/new params"}
+				}
+				return NewSessionResponse{SessionID: "session-new"}, nil
 			case MethodSessionList:
 				var req SessionListRequest
 				if err := json.Unmarshal(msg.Params, &req); err != nil {
@@ -190,6 +206,16 @@ func TestStableSessionLifecycleMethodsSendExpectedRequests(t *testing.T) {
 		_ = client.conn.Serve(ctx, client.handleRequest, client.handleNotification)
 	}()
 
+	meta := metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
+		metautil.RuntimeSessionKind: metautil.RuntimeSessionKindSubagent,
+	})
+	created, err := client.NewSession(ctx, "/tmp/project", meta)
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	if created.SessionID != "session-new" {
+		t.Fatalf("NewSession() = %#v, want session-new", created)
+	}
 	list, err := client.ListSessions(ctx, SessionListRequest{CWD: "/tmp/project", Cursor: "cursor-1"})
 	if err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
@@ -203,7 +229,7 @@ func TestStableSessionLifecycleMethodsSendExpectedRequests(t *testing.T) {
 	if err := client.CloseSession(ctx, "session-1"); err != nil {
 		t.Fatalf("CloseSession() error = %v", err)
 	}
-	for _, want := range []string{MethodSessionList, MethodSessionResume, MethodSessionClose} {
+	for _, want := range []string{MethodSessionNew, MethodSessionList, MethodSessionResume, MethodSessionClose} {
 		select {
 		case got := <-seen:
 			if got != want {
@@ -246,6 +272,9 @@ func TestInitializeAdvertisesClientCapabilitiesFromHandlers(t *testing.T) {
 		Terminal:     recordingTerminalHandler{},
 		TerminalAuth: true,
 		FileSystem:   recordingFileSystemHandler{},
+		OnSessionMessage: func(context.Context, SessionMessageRequest) (SessionMessageResponse, error) {
+			return SessionMessageResponse{Accepted: true}, nil
+		},
 	}}
 	go func() {
 		_ = client.conn.Serve(ctx, client.handleRequest, client.handleNotification)
@@ -265,6 +294,9 @@ func TestInitializeAdvertisesClientCapabilitiesFromHandlers(t *testing.T) {
 		fs, ok := req.ClientCapabilities["fs"].(map[string]any)
 		if !ok || fs["readTextFile"] != true || fs["writeTextFile"] != true {
 			t.Fatalf("fs capability = %#v, want read/write true", req.ClientCapabilities["fs"])
+		}
+		if _, ok := req.ClientCapabilities[MethodSessionMessage]; !ok {
+			t.Fatalf("message capability missing: %#v", req.ClientCapabilities)
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for initialize request")

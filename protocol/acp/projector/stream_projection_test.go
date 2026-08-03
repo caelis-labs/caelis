@@ -484,6 +484,31 @@ func TestProjectTaskStreamFrameProjectsEventOnlySpawnChildSemantics(t *testing.T
 		assert func(*testing.T, eventstream.Envelope)
 	}{
 		{
+			name: "parent Agent message input",
+			event: &session.Event{
+				ID: "child-input-1", Type: session.EventTypeContext, Visibility: session.VisibilityUIOnly,
+				Actor: session.ActorRef{Kind: session.ActorKindController, ID: "parent", Name: "parent"},
+				Text:  "continue from parent", Scope: spawnSubagentScope("jack"),
+				Protocol: &session.EventProtocol{
+					Method: session.ProtocolMethodSessionUpdate,
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
+						MessageID:     "child-input-1",
+						Content:       session.ProtocolTextContent("continue from parent"),
+					},
+				},
+			},
+			assert: func(t *testing.T, env eventstream.Envelope) {
+				t.Helper()
+				update, ok := env.Update.(schema.ContentChunk)
+				content, contentOK := update.Content.(schema.TextContent)
+				if !ok || !contentOK || update.SessionUpdate != schema.UpdateUserMessage ||
+					content.Text != "continue from parent" || env.Actor != "parent" {
+					t.Fatalf("child input = %#v, want scoped parent-authored prompt", env)
+				}
+			},
+		},
+		{
 			name: "agent message",
 			event: &session.Event{
 				ID:         "child-message-1",

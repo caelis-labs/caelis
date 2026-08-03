@@ -17,6 +17,13 @@ type Principal struct {
 	Roles []string `json:"roles,omitempty"`
 }
 
+const (
+	// RoleSystemSessionRuntime allows a dedicated internal Turn-delivery client
+	// to observe a system-managed Session. Surface lifecycle clients must not
+	// receive this role, and the Session remains hidden from list/load/resume.
+	RoleSystemSessionRuntime = "system-session-runtime"
+)
+
 // HasRole reports whether the principal has role, ignoring surrounding
 // whitespace and case.
 func (p Principal) HasRole(role string) bool {

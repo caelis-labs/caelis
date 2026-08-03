@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -59,6 +60,7 @@ func (r *Runtime) resolveAgent(
 		approvalRequester: req.ApprovalRequester,
 		runID:             strings.TrimSpace(runID),
 		turnID:            strings.TrimSpace(turnID),
+		messageSender:     agentmessage.SenderFromContext(ctx),
 	})
 	spec.Tools = r.wrapToolsForExecutionJournal(ref, runID, turnID, toolStepSequence, spec.Tools)
 	spec.Tools = r.wrapToolsForPolicy(activeSession, ref, state, spec, approvalContext{

@@ -606,7 +606,7 @@ func TestCanonicalSubagentBatchNormalizesEachFailureIndependently(t *testing.T) 
 	normalizeSubagentResultForState(
 		&unknownResult,
 		task.StateUnknownOutcome,
-		subagentContinueUnknownDiagnostic,
+		"subagent outcome could not be confirmed",
 	)
 	items := []taskBatchControlItem{
 		{
@@ -636,10 +636,10 @@ func TestCanonicalSubagentBatchNormalizesEachFailureIndependently(t *testing.T) 
 			outputs[0], "completed", task.StateFailed, "subagent prompt failed",
 		)["error"]),
 		taskStringValue(canonicalSubagentTaskOutput(
-			outputs[1], "completed", task.StateUnknownOutcome, subagentContinueUnknownDiagnostic,
+			outputs[1], "completed", task.StateUnknownOutcome, "subagent outcome could not be confirmed",
 		)["error"]),
 	}
-	want := []string{"subagent prompt failed", subagentContinueUnknownDiagnostic}
+	want := []string{"subagent prompt failed", "subagent outcome could not be confirmed"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("canonical batch diagnostic[%d] = %q, want %q", i, got[i], want[i])

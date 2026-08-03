@@ -176,6 +176,9 @@ func (r *Runtime) Run(
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := validateRunInput(req); err != nil {
+		return agent.RunResult{}, err
+	}
 	ref := session.NormalizeSessionRef(req.SessionRef)
 	activeSession, err := r.sessions.Session(ctx, ref)
 	if err != nil {
@@ -228,7 +231,7 @@ func (r *Runtime) Run(
 	handle.setCancelHook(func() error {
 		return r.transitionRunTurnJournal(context.WithoutCancel(runCtx), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 	})
-	r.registerActiveRun(ref, activeSession, handle)
+	r.registerActiveRun(ref, activeSession, turnID, handle)
 	go func() {
 		defer cancel()
 		r.executeKernelTurn(runCtx, activeSession, ref, runID, turnID, req, handle)
@@ -270,10 +273,10 @@ func (r *Runtime) executeKernelTurn(
 	defer r.unregisterActiveRun(runID)
 
 	batch := make([]*session.Event, 0, 4)
-	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputCompaction)
+	inputEvent := buildInputEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts, req.InputActor, req.InputType, req.InputMessageID, req.InputScope, req.InputCompaction)
 	lifecycleErr := r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "", ""), func(runCtx context.Context) error {
 		return r.executeLifecycle(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "", ""), func(turnCtx context.Context) error {
-			return r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, userEvent, &batch, handle)
+			return r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, inputEvent, &batch, handle)
 		})
 	})
 	if err := lifecycleErr; err != nil {

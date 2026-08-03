@@ -17,15 +17,16 @@ type activeRun struct {
 	ref     session.SessionRef
 	session session.Session
 	handle  *runner
+	turnID  string
 }
 
-func (r *Runtime) registerActiveRun(ref session.SessionRef, activeSession session.Session, handle *runner) {
+func (r *Runtime) registerActiveRun(ref session.SessionRef, activeSession session.Session, turnID string, handle *runner) {
 	if r == nil || handle == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.activeRunners[handle.RunID()] = activeRun{ref: session.NormalizeSessionRef(ref), session: session.CloneSession(activeSession), handle: handle}
+	r.activeRunners[handle.RunID()] = activeRun{ref: session.NormalizeSessionRef(ref), session: session.CloneSession(activeSession), turnID: strings.TrimSpace(turnID), handle: handle}
 }
 
 func (r *Runtime) unregisterActiveRun(runID string) {

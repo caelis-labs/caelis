@@ -31,6 +31,9 @@ type SubmissionKind string
 
 const (
 	SubmissionKindConversation SubmissionKind = "conversation"
+	// SubmissionKindAgentMessage injects a canonical participant-authored
+	// Context event at the next safe model boundary.
+	SubmissionKindAgentMessage SubmissionKind = "agent_message"
 )
 
 // Submission is one runtime continuation submission.
@@ -40,6 +43,12 @@ type Submission struct {
 	DisplayInput string              `json:"display_input,omitempty"`
 	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
 	Metadata     map[string]any      `json:"metadata,omitempty"`
+	MessageID    string              `json:"message_id,omitempty"`
+	Actor        session.ActorRef    `json:"actor,omitempty"`
+	Scope        *session.EventScope `json:"scope,omitempty"`
+	// Persisted means the canonical Context event was committed before this
+	// live-run wakeup and must not be appended a second time.
+	Persisted bool `json:"persisted,omitempty"`
 }
 
 // CancelStatus identifies the outcome of one cancellation request.
@@ -115,7 +124,6 @@ type RunnerCompletionWaiter interface {
 // registry name and the resulting child instance ref.
 type SubagentRunner interface {
 	Spawn(context.Context, SubagentSpawnContext, delegation.Request) (delegation.Anchor, delegation.Result, error)
-	Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error)
 	Wait(context.Context, delegation.Anchor, int) (delegation.Result, error)
 	Cancel(context.Context, delegation.Anchor) error
 }
@@ -163,6 +171,8 @@ type SubagentSpawnContext struct {
 	Session           session.Session           `json:"session,omitempty"`
 	CWD               string                    `json:"cwd,omitempty"`
 	TaskID            string                    `json:"task_id,omitempty"`
+	Handle            string                    `json:"handle,omitempty"`
+	Role              session.ParticipantRole   `json:"role,omitempty"`
 	ParentCallID      string                    `json:"parent_call_id,omitempty"`
 	Mode              string                    `json:"mode,omitempty"`
 	ApprovalMode      string                    `json:"approval_mode,omitempty"`
@@ -393,13 +403,21 @@ func (c *contextSnapshot) Overlay() bool {
 
 // CloneSubmission copies one submission before queueing or fan-out.
 func CloneSubmission(sub Submission) Submission {
-	return Submission{
+	out := Submission{
 		Kind:         sub.Kind,
 		Text:         sub.Text,
 		DisplayInput: sub.DisplayInput,
 		ContentParts: append([]model.ContentPart(nil), sub.ContentParts...),
 		Metadata:     jsonvalue.CloneMap(sub.Metadata),
+		MessageID:    sub.MessageID,
+		Actor:        session.CloneActorRef(sub.Actor),
+		Persisted:    sub.Persisted,
 	}
+	if sub.Scope != nil {
+		scope := session.CloneEventScope(*sub.Scope)
+		out.Scope = &scope
+	}
+	return out
 }
 
 // CloneSubmissions copies one submission slice before queueing or fan-out.

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -40,7 +41,46 @@ func (c *Client) ListSessions(ctx context.Context, principal Principal, req List
 	if !principal.HasRole("admin") {
 		listReq.UserID = strings.TrimSpace(principal.ID)
 	}
-	return c.config.Sessions.ListSessions(ctx, listReq)
+	if req.Limit <= 0 {
+		list, err := c.config.Sessions.ListSessions(ctx, listReq)
+		if err != nil {
+			return session.SessionList{}, err
+		}
+		list.Sessions = userVisibleSessionSummaries(list.Sessions)
+		return list, nil
+	}
+
+	visible := make([]session.SessionSummary, 0, req.Limit)
+	seen := make(map[string]struct{}, req.Limit)
+	cursor := listReq.Cursor
+	for len(visible) < req.Limit {
+		listReq.Cursor = cursor
+		listReq.Limit = req.Limit - len(visible)
+		page, err := c.config.Sessions.ListSessions(ctx, listReq)
+		if err != nil {
+			return session.SessionList{}, err
+		}
+		for _, summary := range userVisibleSessionSummaries(page.Sessions) {
+			sessionID := strings.TrimSpace(summary.SessionID)
+			if _, ok := seen[sessionID]; ok {
+				continue
+			}
+			seen[sessionID] = struct{}{}
+			visible = append(visible, summary)
+		}
+		next := strings.TrimSpace(page.NextCursor)
+		if len(visible) >= req.Limit {
+			return session.SessionList{
+				Sessions:   session.CloneSessionSummaries(visible[:req.Limit]),
+				NextCursor: next,
+			}, nil
+		}
+		if next == "" || next == cursor {
+			return session.SessionList{Sessions: session.CloneSessionSummaries(visible)}, nil
+		}
+		cursor = next
+	}
+	return session.SessionList{Sessions: session.CloneSessionSummaries(visible)}, nil
 }
 
 // StartParticipant delegates the focused participant capability implemented by
@@ -84,7 +124,17 @@ func (c *Client) Reconnect(ctx context.Context, principal Principal, req Reconne
 	if !ok {
 		return ReconnectResult{}, errors.New("controlclient: reconnect service is unavailable")
 	}
-	return reconnect.Reconnect(ctx, req)
+	result, err := reconnect.Reconnect(ctx, req)
+	if err != nil {
+		return ReconnectResult{}, err
+	}
+	if sessionvisibility.IsSystemManagedMetadata(result.State.Metadata) && !principal.HasRole(RoleSystemSessionRuntime) {
+		if result.Subscription != nil {
+			_ = result.Subscription.Close()
+		}
+		return ReconnectResult{}, session.ErrSessionNotFound
+	}
+	return result, nil
 }
 
 func (c *Client) Subscribe(ctx context.Context, principal Principal, req SubscribeRequest) (SubscribeResult, error) {

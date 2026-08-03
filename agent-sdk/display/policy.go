@@ -59,6 +59,10 @@ func SummarizeToolCallTitle(name string, args map[string]any) string {
 		if display := SpawnFullDisplayArgs(args); strings.TrimSpace(display) != "" {
 			return strings.TrimSpace(name + " " + display)
 		}
+	case names.TitleMessage:
+		if display := AgentMessageFullDisplayArgs(args); display != "" {
+			return "Send message " + display
+		}
 	}
 	return name
 }
