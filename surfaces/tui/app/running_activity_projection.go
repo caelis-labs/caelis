@@ -2,11 +2,13 @@ package tuiapp
 
 import (
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
 // applyACPRunningActivity derives presentation-only activity from the same
@@ -54,50 +56,63 @@ func (m *Model) applyTranscriptRunningActivity(event TranscriptEvent) {
 	case TranscriptEventNarrative:
 		switch event.NarrativeKind {
 		case TranscriptNarrativeReasoning:
-			m.runningActivityTracker.setFocus(runningPhaseThinking, "", runningNarrativeActivityKey("reasoning", event))
+			m.runningHintTracker.setFocus(
+				runningPhaseThinking,
+				"",
+				runningNarrativeActivityKey("reasoning", event),
+				time.Now(),
+			)
 		case TranscriptNarrativeAssistant:
-			m.runningActivityTracker.setFocus(runningPhaseResponding, "", runningNarrativeActivityKey("response", event))
+			m.runningHintTracker.setFocus(
+				runningPhaseResponding,
+				"",
+				runningNarrativeActivityKey("response", event),
+				time.Now(),
+			)
 		}
 		m.refreshRunningActivity()
 	case TranscriptEventPlan:
-		m.runningActivityTracker.setFocus(runningPhaseThinking, "", "plan")
+		m.runningHintTracker.setFocus(runningPhaseThinking, "", "plan", time.Now())
 		m.refreshRunningActivity()
 	case TranscriptEventTool:
 		m.applyToolRunningActivity(event)
+	case TranscriptEventLifecycle:
+		if strings.EqualFold(strings.TrimSpace(event.State), "attempt_reset") &&
+			transcript.MetaBool(event.Meta, "caelis", "runtime", "attempt_reset", "retrying") {
+			// attempt_reset clears only speculative model output. Active tool
+			// owners represent external work started by an earlier completed
+			// model step and must remain observable across the retry.
+			m.runningHintTracker.setFocus(runningPhaseRetrying, "", "retry", time.Now())
+			m.refreshRunningActivity()
+		}
 	}
 }
 
+// applyToolRunningActivity intentionally projects only operations that usually
+// remain pending on external work. Short local and unknown tools leave the
+// current model phase unchanged; add a named case when a new tool has reliable
+// long-running semantics instead of inferring activity from text or a timeout.
 func (m *Model) applyToolRunningActivity(event TranscriptEvent) {
 	semanticName := names.CanonicalOrSelf(toolSemanticName(event.ToolName, event.ToolKind))
-	key := m.runningActivityTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt)
+	key := m.runningHintTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt)
 	switch semanticName {
 	case names.WebSearch:
 		m.updateToolRunningActivity(event.Final, runningPhaseSearch, "", key, event.ToolCallID)
+	case names.WebFetch:
+		m.updateToolRunningActivity(event.Final, runningPhaseFetch, "", key, event.ToolCallID)
 	case names.RunCommand:
-		m.updateToolRunningActivity(event.Final, runningPhaseWait, runningTargetShell, key, event.ToolCallID)
+		m.updateToolRunningActivity(event.Final, runningPhaseToolWait, runningTargetShell, key, event.ToolCallID)
 	case names.Spawn:
-		m.updateToolRunningActivity(event.Final, runningPhaseWait, runningTargetSubagent, key, event.ToolCallID)
+		m.updateToolRunningActivity(event.Final, runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
 	case names.Task:
 		action := strings.ToLower(strings.TrimSpace(event.ToolTaskAction))
 		target := m.taskControlActivityTarget(event)
 		switch action {
 		case "wait":
-			m.updateToolRunningActivity(event.Final, runningPhaseWait, target, key, event.ToolCallID)
-		case "read":
-			m.updateToolRunningActivity(event.Final, runningPhaseRead, target, key, event.ToolCallID)
+			m.updateToolRunningActivity(event.Final, runningPhaseToolWait, target, key, event.ToolCallID)
 		case "cancel":
 			m.updateToolRunningActivity(event.Final, runningPhaseCancel, target, key, event.ToolCallID)
-		case "write":
-			if target == runningTargetShell {
-				m.updateToolRunningActivity(event.Final, runningPhaseWait, target, key, event.ToolCallID)
-				return
-			}
-			m.updateToolRunningActivity(event.Final, runningPhaseThinking, "", key, event.ToolCallID)
-		default:
-			m.updateToolRunningActivity(event.Final, runningPhaseThinking, "", key, event.ToolCallID)
 		}
-	default:
-		m.updateToolRunningActivity(event.Final, runningPhaseThinking, "", key, event.ToolCallID)
 	}
 }
 
@@ -139,13 +154,13 @@ func (m *Model) observeRunningActivityTargets(events []TranscriptEvent) {
 			continue
 		}
 		owner := runningActivityOwner{
-			Key:    m.runningActivityTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt),
+			Key:    m.runningHintTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt),
 			CallID: event.ToolCallID,
 			Target: target,
 		}
-		m.runningActivityTracker.observeOwner("", owner)
+		m.runningHintTracker.observeOwner("", owner)
 		for _, handle := range runningActivityTaskHandles(event.ToolTaskHandle) {
-			m.runningActivityTracker.observeOwner(handle, owner)
+			m.runningHintTracker.observeOwner(handle, owner)
 		}
 	}
 }
@@ -167,8 +182,8 @@ func (m *Model) observeToolPresentationOwner(block *MainACPTurnBlock, event Tran
 	default:
 		return
 	}
-	m.runningActivityTracker.observeOwner(event.ToolTaskHandle, runningActivityOwner{
-		Key:     m.runningActivityTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt),
+	m.runningHintTracker.observeOwner(event.ToolTaskHandle, runningActivityOwner{
+		Key:     m.runningHintTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt),
 		CallID:  event.ToolCallID,
 		Handle:  event.ToolTaskHandle,
 		BlockID: block.BlockID(),
@@ -195,7 +210,7 @@ func (m *Model) taskControlActivityTarget(event TranscriptEvent) runningActivity
 	if len(handles) == 0 || m == nil {
 		return runningTargetTask
 	}
-	target := m.runningActivityTracker.targetForHandles(handles)
+	target := m.runningHintTracker.targetForHandles(handles)
 	if target == "" {
 		return runningTargetTask
 	}

@@ -5,13 +5,37 @@ import (
 	"time"
 )
 
-func TestRunningActivityObservedOwnerCandidatesFailClosedOnConflictingCorrelations(t *testing.T) {
+func TestRunningHintTrackerPreservesPhaseStartAcrossMatchingUpdates(t *testing.T) {
 	t.Parallel()
 
-	tracker := newRunningActivityTracker()
+	tracker := newRunningHintTracker()
+	turnStartedAt := time.Unix(100, 0)
+	tracker.beginTurn(turnStartedAt)
+	if got := tracker.visible(true); got.Phase != runningPhaseModelWait || !got.StartedAt.Equal(turnStartedAt) {
+		t.Fatalf("initial activity = %#v, want model waiting from Turn start", got)
+	}
+
+	thinkingAt := time.Unix(101, 0)
+	tracker.setFocus(runningPhaseThinking, "", "reasoning:message-1", thinkingAt)
+	tracker.setFocus(runningPhaseThinking, "", "reasoning:message-1", time.Unix(102, 0))
+	if got := tracker.visible(true); !got.StartedAt.Equal(thinkingAt) {
+		t.Fatalf("continued thinking = %#v, want original phase clock", got)
+	}
+
+	respondingAt := time.Unix(103, 0)
+	tracker.setFocus(runningPhaseResponding, "", "response:message-1", respondingAt)
+	if got := tracker.visible(true); got.Phase != runningPhaseResponding || !got.StartedAt.Equal(respondingAt) {
+		t.Fatalf("response activity = %#v, want a new response clock", got)
+	}
+}
+
+func TestRunningHintTrackerObservedOwnerCandidatesFailClosedOnConflictingCorrelations(t *testing.T) {
+	t.Parallel()
+
+	tracker := newRunningHintTracker()
 	tracker.start(
 		"tool:turn-1:spawn-1",
-		runningPhaseWait,
+		runningPhaseToolWait,
 		runningTargetSubagent,
 		time.Unix(1, 0),
 		"spawn-1",
@@ -23,7 +47,7 @@ func TestRunningActivityObservedOwnerCandidatesFailClosedOnConflictingCorrelatio
 	})
 	tracker.start(
 		"tool:turn-1:spawn-2",
-		runningPhaseWait,
+		runningPhaseToolWait,
 		runningTargetSubagent,
 		time.Unix(2, 0),
 		"spawn-2",
@@ -42,10 +66,10 @@ func TestRunningActivityObservedOwnerCandidatesFailClosedOnConflictingCorrelatio
 	}
 }
 
-func TestRunningActivityPresentationOwnerNormalizesHandle(t *testing.T) {
+func TestRunningHintTrackerPresentationOwnerNormalizesHandle(t *testing.T) {
 	t.Parallel()
 
-	tracker := newRunningActivityTracker()
+	tracker := newRunningHintTracker()
 	tracker.observeOwner("@Command-3", runningActivityOwner{
 		Key:     "tool:turn-1:command-1",
 		CallID:  "command-1",
@@ -62,10 +86,10 @@ func TestRunningActivityPresentationOwnerNormalizesHandle(t *testing.T) {
 	}
 }
 
-func TestRunningActivityPresentationOwnerFailsClosedOnIdentityMismatch(t *testing.T) {
+func TestRunningHintTrackerPresentationOwnerFailsClosedOnIdentityMismatch(t *testing.T) {
 	t.Parallel()
 
-	tracker := newRunningActivityTracker()
+	tracker := newRunningHintTracker()
 	tracker.observeOwner("command-3", runningActivityOwner{
 		Key:     "tool:turn-1:command-1",
 		CallID:  "command-1",

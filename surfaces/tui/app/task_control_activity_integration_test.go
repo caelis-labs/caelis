@@ -42,10 +42,10 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 			RawInput: taskInput, Meta: acpToolNameMeta("TASK"),
 		},
 	})
-	if model.runningActivity.Phase != runningPhaseWait || model.runningActivity.Target != runningTargetSubagent {
+	if model.runningActivity.Phase != runningPhaseToolWait || model.runningActivity.Target != runningTargetSubagent {
 		t.Fatalf("runningActivity = %#v, want Wait subagent", model.runningActivity)
 	}
-	if hint := model.buildHintText(); !strings.Contains(hint, "Wait subagent") || strings.Contains(hint, "command-48") {
+	if hint := model.buildHintText(); !strings.Contains(hint, "Waiting on subagent") || strings.Contains(hint, "command-48") {
 		t.Fatalf("hint = %q, want semantic activity without raw Task handle", hint)
 	}
 	if blocks := mainACPTurnBlocksForTest(model); len(blocks) != 1 {
@@ -69,7 +69,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 			Meta: acpToolNameMeta("TASK"),
 		},
 	})
-	if model.runningActivity.Phase != runningPhaseWait ||
+	if model.runningActivity.Phase != runningPhaseToolWait ||
 		model.runningActivity.Key != "tool:turn-1:spawn-1" {
 		t.Fatalf("runningActivity = %#v, want completed wait observer removed while running Spawn owner remains", model.runningActivity)
 	}
@@ -99,7 +99,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 			Meta: acpToolNameMeta("TASK"),
 		},
 	})
-	if model.runningActivity.Phase != runningPhaseWait || model.runningActivity.Target != runningTargetSubagent {
+	if model.runningActivity.Phase != runningPhaseToolWait || model.runningActivity.Target != runningTargetSubagent {
 		t.Fatalf("runningActivity = %#v, want the still-running Task wait restored after cancel completes", model.runningActivity)
 	}
 	if blocks := mainACPTurnBlocksForTest(model); len(blocks) != 1 {
@@ -123,7 +123,7 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 			Meta: acpToolNameMeta("TASK"),
 		},
 	})
-	if model.runningActivity.Phase != runningPhaseThinking {
+	if model.runningActivity.Phase != runningPhaseModelWait {
 		t.Fatalf("runningActivity = %#v, want terminal Task observation to close both observer and Spawn owner", model.runningActivity)
 	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -133,8 +133,8 @@ func TestTaskWaitAndCancelUseActivityHintWithoutTranscriptRows(t *testing.T) {
 			RawOutput: map[string]any{"handle": "command-48", "state": "completed"}, Meta: acpToolNameMeta("SPAWN"),
 		},
 	})
-	if model.runningActivity.Phase != runningPhaseThinking {
-		t.Fatalf("runningActivity = %#v, want thinking after the Spawn and Task controls complete", model.runningActivity)
+	if model.runningActivity.Phase != runningPhaseModelWait {
+		t.Fatalf("runningActivity = %#v, want model waiting after the Spawn and Task controls complete", model.runningActivity)
 	}
 
 	failed := schema.ToolStatusFailed

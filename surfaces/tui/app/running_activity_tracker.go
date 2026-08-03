@@ -9,14 +9,16 @@ import (
 type runningActivityPhase string
 
 const (
+	runningPhaseModelWait  runningActivityPhase = "waiting"
 	runningPhaseThinking   runningActivityPhase = "thinking"
 	runningPhaseResponding runningActivityPhase = "responding"
 	runningPhaseSearch     runningActivityPhase = "search"
-	runningPhaseWait       runningActivityPhase = "wait"
-	runningPhaseRead       runningActivityPhase = "read"
+	runningPhaseFetch      runningActivityPhase = "fetch"
+	runningPhaseToolWait   runningActivityPhase = "wait"
 	runningPhaseCancel     runningActivityPhase = "cancel"
 	runningPhaseReview     runningActivityPhase = "review"
 	runningPhaseInterrupt  runningActivityPhase = "interrupt"
+	runningPhaseRetrying   runningActivityPhase = "retrying"
 )
 
 type runningActivityTarget string
@@ -43,12 +45,12 @@ type runningActivityOwner struct {
 	Target  runningActivityTarget
 }
 
-// runningActivityTracker owns the live hint projection. Tool invocations are
-// independently keyed activities: an observer such as Task wait can finish
-// without finishing the Spawn or RunCommand owner it observes. Completed keys
-// are retained for the Session so late non-terminal projections cannot revive
-// an already closed activity.
-type runningActivityTracker struct {
+// runningHintTracker owns the TUI-only live hint projection derived from ACP
+// updates. Tool invocations remain independently keyed activities, so an
+// observer such as Task wait can finish without finishing the Spawn or
+// RunCommand owner it observes. Completed keys are retained for the Session so
+// late non-terminal projections cannot revive an already closed activity.
+type runningHintTracker struct {
 	focus           runningActivityState
 	focusForeground bool
 	foregroundKey   string
@@ -62,8 +64,8 @@ type runningActivityTracker struct {
 	turnStartedAt   time.Time
 }
 
-func newRunningActivityTracker() runningActivityTracker {
-	return runningActivityTracker{
+func newRunningHintTracker() runningHintTracker {
+	return runningHintTracker{
 		active:         map[string]runningActivityState{},
 		completed:      map[string]struct{}{},
 		ownersByHandle: map[string]runningActivityOwner{},
@@ -71,7 +73,7 @@ func newRunningActivityTracker() runningActivityTracker {
 	}
 }
 
-func (t *runningActivityTracker) ensure() {
+func (t *runningHintTracker) ensure() {
 	if t.active == nil {
 		t.active = map[string]runningActivityState{}
 	}
@@ -86,19 +88,20 @@ func (t *runningActivityTracker) ensure() {
 	}
 }
 
-func (t *runningActivityTracker) beginTurn(startedAt time.Time) {
+func (t *runningHintTracker) beginTurn(startedAt time.Time) {
 	t.ensure()
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
 	clear(t.active)
 	t.order = t.order[:0]
 	t.overlay = runningActivityState{}
-	t.focus = runningActivityState{Phase: runningPhaseThinking}
-	t.focusForeground = true
-	t.foregroundKey = ""
+	t.setModelWait(startedAt)
 	t.turnGeneration++
 	t.turnStartedAt = startedAt
 }
 
-func (t *runningActivityTracker) endTurn() {
+func (t *runningHintTracker) endTurn() {
 	t.ensure()
 	clear(t.active)
 	t.order = t.order[:0]
@@ -109,24 +112,35 @@ func (t *runningActivityTracker) endTurn() {
 	t.turnStartedAt = time.Time{}
 }
 
-func (t *runningActivityTracker) resetSession() {
-	*t = newRunningActivityTracker()
+func (t *runningHintTracker) resetSession() {
+	*t = newRunningHintTracker()
 }
 
-func (t *runningActivityTracker) setFocus(phase runningActivityPhase, target runningActivityTarget, key string) {
+func (t *runningHintTracker) setFocus(
+	phase runningActivityPhase,
+	target runningActivityTarget,
+	key string,
+	now time.Time,
+) {
 	if phase == "" {
 		return
 	}
+	key = strings.TrimSpace(key)
+	startedAt := now
+	if t.focus.Phase == phase && t.focus.Target == target && t.focus.Key == key && !t.focus.StartedAt.IsZero() {
+		startedAt = t.focus.StartedAt
+	}
 	t.focus = runningActivityState{
-		Phase:  phase,
-		Target: target,
-		Key:    strings.TrimSpace(key),
+		Phase:     phase,
+		Target:    target,
+		Key:       key,
+		StartedAt: startedAt,
 	}
 	t.focusForeground = true
 	t.foregroundKey = ""
 }
 
-func (t *runningActivityTracker) start(
+func (t *runningHintTracker) start(
 	key string,
 	phase runningActivityPhase,
 	target runningActivityTarget,
@@ -142,13 +156,11 @@ func (t *runningActivityTracker) start(
 		return
 	}
 	entry := runningActivityState{
-		Phase:  phase,
-		Target: target,
-		Key:    key,
-		CallID: strings.TrimSpace(callID),
-	}
-	if phase.showsElapsed() {
-		entry.StartedAt = now
+		Phase:     phase,
+		Target:    target,
+		Key:       key,
+		CallID:    strings.TrimSpace(callID),
+		StartedAt: now,
 	}
 	_, existed := t.active[key]
 	if previous, exists := t.active[key]; exists {
@@ -167,7 +179,7 @@ func (t *runningActivityTracker) start(
 	}
 }
 
-func (t *runningActivityTracker) complete(key string) {
+func (t *runningHintTracker) complete(key string, now time.Time) {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return
@@ -179,9 +191,22 @@ func (t *runningActivityTracker) complete(key string) {
 	if t.foregroundKey == key {
 		t.foregroundKey = ""
 	}
+	if len(t.active) == 0 && !t.focusForeground {
+		t.setModelWait(now)
+	}
 }
 
-func (t *runningActivityTracker) setOverlay(phase runningActivityPhase, key string, now time.Time) {
+func (t *runningHintTracker) setModelWait(now time.Time) {
+	t.focus = runningActivityState{
+		Phase:     runningPhaseModelWait,
+		Key:       "model",
+		StartedAt: now,
+	}
+	t.focusForeground = true
+	t.foregroundKey = ""
+}
+
+func (t *runningHintTracker) setOverlay(phase runningActivityPhase, key string, now time.Time) {
 	key = strings.TrimSpace(key)
 	if phase == "" || key == "" {
 		return
@@ -193,14 +218,14 @@ func (t *runningActivityTracker) setOverlay(phase runningActivityPhase, key stri
 	}
 }
 
-func (t *runningActivityTracker) clearOverlay(key string) {
+func (t *runningHintTracker) clearOverlay(key string) {
 	key = strings.TrimSpace(key)
 	if key == "" || t.overlay.Key == key {
 		t.overlay = runningActivityState{}
 	}
 }
 
-func (t *runningActivityTracker) visible(turnRunning bool) runningActivityState {
+func (t *runningHintTracker) visible(turnRunning bool) runningActivityState {
 	if t.overlay.Phase != "" {
 		return t.overlay
 	}
@@ -221,12 +246,16 @@ func (t *runningActivityTracker) visible(turnRunning bool) runningActivityState 
 		return t.focus
 	}
 	if turnRunning {
-		return runningActivityState{Phase: runningPhaseThinking}
+		return runningActivityState{
+			Phase:     runningPhaseModelWait,
+			Key:       "model",
+			StartedAt: t.turnStartedAt,
+		}
 	}
 	return runningActivityState{}
 }
 
-func (t *runningActivityTracker) observeOwner(handle string, owner runningActivityOwner) {
+func (t *runningHintTracker) observeOwner(handle string, owner runningActivityOwner) {
 	handle = normalizeRunningActivityHandle(handle)
 	owner.Key = strings.TrimSpace(owner.Key)
 	owner.CallID = strings.TrimSpace(owner.CallID)
@@ -284,7 +313,7 @@ func mergeRunningActivityOwner(previous runningActivityOwner, current runningAct
 // toolKey prefers the typed Turn identity. Some compatibility/live Envelopes
 // omit TurnID, so the current Turn generation supplies a bounded fallback and
 // OccurredAt rejects updates that predate that generation.
-func (t *runningActivityTracker) toolKey(turnID string, callID string, occurredAt time.Time) string {
+func (t *runningHintTracker) toolKey(turnID string, callID string, occurredAt time.Time) string {
 	callID = strings.TrimSpace(callID)
 	if callID == "" {
 		return ""
@@ -298,7 +327,7 @@ func (t *runningActivityTracker) toolKey(turnID string, callID string, occurredA
 	return "tool:g" + strconv.FormatUint(t.turnGeneration, 10) + ":" + callID
 }
 
-func (t *runningActivityTracker) observedOwnerCandidates(handle string, parentCallID string) []runningActivityOwner {
+func (t *runningHintTracker) observedOwnerCandidates(handle string, parentCallID string) []runningActivityOwner {
 	handle = normalizeRunningActivityHandle(handle)
 	parentCallID = strings.TrimSpace(parentCallID)
 	t.ensure()
@@ -323,7 +352,7 @@ func (t *runningActivityTracker) observedOwnerCandidates(handle string, parentCa
 // normalized handle/call index used by running activity. When both identities
 // are present they must agree; handle-free compatibility input is accepted only
 // when the parent call has one compatible rendered owner.
-func (t *runningActivityTracker) presentationOwner(
+func (t *runningHintTracker) presentationOwner(
 	handle string,
 	parentCallID string,
 	target runningActivityTarget,
@@ -357,7 +386,7 @@ func (t *runningActivityTracker) presentationOwner(
 	return match, match.Key != ""
 }
 
-func (t *runningActivityTracker) targetForHandles(handles []string) runningActivityTarget {
+func (t *runningHintTracker) targetForHandles(handles []string) runningActivityTarget {
 	if len(handles) == 0 {
 		return ""
 	}
@@ -374,7 +403,7 @@ func (t *runningActivityTracker) targetForHandles(handles []string) runningActiv
 	return target
 }
 
-func (t *runningActivityTracker) removeOrderKey(key string) {
+func (t *runningHintTracker) removeOrderKey(key string) {
 	for index := len(t.order) - 1; index >= 0; index-- {
 		if t.order[index] != key {
 			continue

@@ -25,7 +25,7 @@ func (m *Model) applySessionReconnectState(state controlclient.SessionState) tea
 	m.closeTaskStreamSubscriptions()
 	m.currentSessionID = strings.TrimSpace(state.SessionID)
 	m.resetSlashSkillCatalog()
-	m.runningActivityTracker.resetSession()
+	m.runningHintTracker.resetSession()
 	m.resetConversationView()
 	var warning tea.Cmd
 	if state.TransientGap {

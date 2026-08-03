@@ -31,7 +31,7 @@ func (m *Model) resetConversationView() {
 	m.hintEntries = nil
 	m.hint = ""
 	m.liveTurn = liveTurnState{}
-	m.runningActivityTracker.endTurn()
+	m.runningHintTracker.endTurn()
 	m.runningActivity = runningActivityState{}
 	m.compactNoticePair = compactNoticePairState{}
 	m.subagentOutputOverlay = nil

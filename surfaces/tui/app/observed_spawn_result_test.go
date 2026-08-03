@@ -312,7 +312,7 @@ func TestObservedSpawnResultClosesBlockAndActivityThroughSameOwner(t *testing.T)
 	if !block.Events[0].Done || block.Events[0].Output != "done" {
 		t.Fatalf("owner block = %#v, want completed", block.Events[0])
 	}
-	if model.runningActivity.Phase != runningPhaseThinking {
+	if model.runningActivity.Phase != runningPhaseModelWait {
 		t.Fatalf("runningActivity = %#v, want the same owner activity completed", model.runningActivity)
 	}
 }
@@ -445,7 +445,7 @@ func TestTerminalTaskReadRepairsSpawnBlockAndActivity(t *testing.T) {
 	if event := block.Events[0]; !event.Done || event.Err || event.Output != "## Exact child result\n\n- done" {
 		t.Fatalf("Spawn owner = %#v, want exact terminal Task read result", event)
 	}
-	if model.runningActivity.Phase != runningPhaseThinking {
+	if model.runningActivity.Phase != runningPhaseModelWait {
 		t.Fatalf("runningActivity = %#v, want repaired Spawn activity closed", model.runningActivity)
 	}
 }

@@ -16,7 +16,7 @@ func TestRunningHintShowsStableActivityElapsedAndPending(t *testing.T) {
 	m.width = 100
 	m.liveTurn.Active = true
 	m.runningActivity = runningActivityState{
-		Phase:     runningPhaseWait,
+		Phase:     runningPhaseToolWait,
 		Target:    runningTargetSubagent,
 		Key:       "task:wait:orbit",
 		StartedAt: time.Unix(100, 0),
@@ -27,7 +27,7 @@ func TestRunningHintShowsStableActivityElapsedAndPending(t *testing.T) {
 	)
 
 	got := ansi.Strip(m.buildRunningHintTextAt(time.Unix(112, 0)))
-	if !strings.Contains(got, "Wait subagent · 12s · 2 pending") {
+	if !strings.Contains(got, "Waiting on subagent · 12s · 2 pending") {
 		t.Fatalf("running hint = %q, want stable activity, elapsed time, and pending suffix", got)
 	}
 	if strings.Contains(got, "Esc") {
@@ -39,11 +39,12 @@ func TestNoAnimationUsesStaticMarkerAndDoesNotScheduleSpinner(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
 	m.liveTurn.Active = true
 	m.runningActivity = runningActivityState{
-		Phase: runningPhaseThinking,
+		Phase:     runningPhaseThinking,
+		StartedAt: time.Unix(103, 0),
 	}
 
 	got := ansi.Strip(m.buildRunningHintTextAt(time.Unix(103, 0)))
-	if got != "• Thinking" {
+	if got != "• Thinking · 0.1s" {
 		t.Fatalf("running hint = %q, want reduced-motion marker", got)
 	}
 	if cmd := m.scheduleSpinnerTick(); cmd != nil {
@@ -55,6 +56,30 @@ func TestNoAnimationUsesStaticMarkerAndDoesNotScheduleSpinner(t *testing.T) {
 	}
 	if next := updated.(*Model); next.spinnerTickScheduled {
 		t.Fatal("spinner tick remained scheduled with animation disabled")
+	}
+}
+
+func TestRunningActivityElapsedUsesTenthsBeforeTenSeconds(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Unix(100, 0)
+	for _, test := range []struct {
+		name    string
+		elapsed time.Duration
+		want    string
+	}{
+		{name: "starts moving", elapsed: 0, want: "0.1s"},
+		{name: "sub tenth", elapsed: 99 * time.Millisecond, want: "0.1s"},
+		{name: "tenths", elapsed: 1900 * time.Millisecond, want: "1.9s"},
+		{name: "last tenth", elapsed: 9999 * time.Millisecond, want: "9.9s"},
+		{name: "whole seconds", elapsed: 10999 * time.Millisecond, want: "10s"},
+		{name: "minutes", elapsed: 61*time.Second + 900*time.Millisecond, want: "1m01s"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := formatRunningActivityElapsed(startedAt.Add(test.elapsed), startedAt); got != test.want {
+				t.Fatalf("formatRunningActivityElapsed(%s) = %q, want %q", test.elapsed, got, test.want)
+			}
+		})
 	}
 }
 
@@ -74,7 +99,7 @@ func TestPendingPromptIsOnlySummarizedInRunningHint(t *testing.T) {
 	if strings.Contains(frame, "do not preview this queued prompt") {
 		t.Fatalf("frame exposed the pending prompt body:\n%s", frame)
 	}
-	if !strings.Contains(frame, "Thinking · 1 pending") {
+	if !strings.Contains(frame, "Waiting for response · 0.1s · 1 pending") {
 		t.Fatalf("frame = %q, want pending count appended to the running hint", frame)
 	}
 	if got := m.preComposerFixedHeight(); got != fixedHeight {
@@ -82,22 +107,25 @@ func TestPendingPromptIsOnlySummarizedInRunningHint(t *testing.T) {
 	}
 }
 
-func TestThinkingFallbackDoesNotResetAVisibleClock(t *testing.T) {
+func TestToolCompletionStartsFreshModelWaitClock(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
 	m.liveTurn.Active = true
-	m.runningActivity = runningActivityState{
-		Phase:     runningPhaseWait,
-		Target:    runningTargetShell,
-		Key:       "tool:command-1",
-		StartedAt: time.Unix(100, 0),
-	}
-	if got := ansi.Strip(m.buildRunningHintTextAt(time.Unix(112, 0))); got != "• Wait shell · 12s" {
+	key := "tool:command-1"
+	m.runningHintTracker.beginTurn(time.Unix(90, 0))
+	m.runningHintTracker.start(key, runningPhaseToolWait, runningTargetShell, time.Unix(100, 0), "command-1")
+	m.refreshRunningActivity()
+	if got := ansi.Strip(m.buildRunningHintTextAt(time.Unix(112, 0))); got != "• Waiting on shell · 12s" {
 		t.Fatalf("wait hint = %q", got)
 	}
 
-	m.completeRunningActivity("tool:command-1")
-	if got := ansi.Strip(m.buildRunningHintTextAt(time.Unix(113, 0))); got != "• Thinking" {
-		t.Fatalf("thinking fallback = %q, want no reset elapsed clock", got)
+	completedAt := time.Unix(113, 0)
+	m.runningHintTracker.complete(key, completedAt)
+	m.refreshRunningActivity()
+	if !m.runningActivity.StartedAt.Equal(completedAt) {
+		t.Fatalf("model wait started at %v, want completion time %v", m.runningActivity.StartedAt, completedAt)
+	}
+	if got := ansi.Strip(m.buildRunningHintTextAt(completedAt.Add(900 * time.Millisecond))); got != "• Waiting for response · 0.9s" {
+		t.Fatalf("waiting fallback = %q, want a fresh model-wait clock", got)
 	}
 }
 
@@ -113,7 +141,7 @@ func TestTaskWaitUsesGenericFallbackAndStableFinalKey(t *testing.T) {
 		ToolTaskHandle: "command-48",
 	}
 	m.applyTranscriptRunningActivity(start)
-	if m.runningActivity.Phase != runningPhaseWait || m.runningActivity.Target != runningTargetTask {
+	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetTask {
 		t.Fatalf("runningActivity = %#v, want generic Wait task without typed target or parent", m.runningActivity)
 	}
 	if m.runningActivity.Key != "tool:g0:task-wait-1" {
@@ -124,14 +152,16 @@ func TestTaskWaitUsesGenericFallbackAndStableFinalKey(t *testing.T) {
 	final.Final = true
 	final.ToolTaskTargetKind = "subagent"
 	m.applyTranscriptRunningActivity(final)
-	if m.runningActivity.Phase != runningPhaseThinking {
+	if m.runningActivity.Phase != runningPhaseModelWait {
 		t.Fatalf("runningActivity = %#v, want final update with refined target to complete the same activity", m.runningActivity)
 	}
 }
 
-func TestTaskWriteHasMatchingFinal(t *testing.T) {
+func TestTaskWriteDoesNotReplaceModelWaitingActivity(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
 	m.liveTurn.Active = true
+	m.runningHintTracker.beginTurn(time.Unix(100, 0))
+	m.refreshRunningActivity()
 	start := TranscriptEvent{
 		Kind:           TranscriptEventTool,
 		Scope:          ACPProjectionMain,
@@ -140,48 +170,152 @@ func TestTaskWriteHasMatchingFinal(t *testing.T) {
 		ToolTaskAction: "write",
 	}
 	m.applyTranscriptRunningActivity(start)
-	if m.runningActivity.Phase != runningPhaseThinking || m.runningActivity.Key != "tool:g0:task-write-1" {
-		t.Fatalf("runningActivity = %#v, want keyed thinking activity", m.runningActivity)
+	if m.runningActivity.Phase != runningPhaseModelWait || m.runningActivity.Key != "model" {
+		t.Fatalf("runningActivity = %#v, want Task write to preserve model waiting", m.runningActivity)
 	}
 
 	start.Final = true
 	m.applyTranscriptRunningActivity(start)
-	if m.runningActivity.Phase != runningPhaseThinking || m.runningActivity.Key != "" {
-		t.Fatalf("runningActivity = %#v, want Task final to clear its keyed activity", m.runningActivity)
+	if m.runningActivity.Phase != runningPhaseModelWait || m.runningActivity.Key != "model" {
+		t.Fatalf("runningActivity = %#v, want Task final to preserve model waiting", m.runningActivity)
 	}
 }
 
-func TestTaskReadAndCommandWriteUseSemanticShellActivity(t *testing.T) {
+func TestTaskReadAndWriteDoNotReplaceModelWaitingActivity(t *testing.T) {
 	t.Parallel()
 
-	for _, test := range []struct {
-		action string
-		phase  runningActivityPhase
-		label  string
-	}{
-		{action: "read", phase: runningPhaseRead, label: "Read shell"},
-		{action: "write", phase: runningPhaseWait, label: "Wait shell"},
-	} {
-		t.Run(test.action, func(t *testing.T) {
+	for _, action := range []string{"read", "write"} {
+		t.Run(action, func(t *testing.T) {
 			m := NewModel(Config{NoColor: true, NoAnimation: true})
 			m.liveTurn.Active = true
+			m.runningHintTracker.beginTurn(time.Unix(100, 0))
+			m.refreshRunningActivity()
 			m.applyTranscriptRunningActivity(TranscriptEvent{
 				Kind:               TranscriptEventTool,
 				Scope:              ACPProjectionMain,
-				ToolCallID:         "task-" + test.action,
+				ToolCallID:         "task-" + action,
 				ToolName:           "TASK",
-				ToolTaskAction:     test.action,
+				ToolTaskAction:     action,
 				ToolTaskTargetKind: "command",
 				ToolTaskHandle:     "command-48",
 			})
-			if m.runningActivity.Phase != test.phase ||
-				m.runningActivity.Target != runningTargetShell {
-				t.Fatalf("runningActivity = %#v, want %s for Task %s", m.runningActivity, test.label, test.action)
+			if m.runningActivity.Phase != runningPhaseModelWait || m.runningActivity.Key != "model" {
+				t.Fatalf("runningActivity = %#v, want Task %s to preserve model waiting", m.runningActivity, action)
+			}
+		})
+	}
+}
+
+func TestShortFileToolsDoNotReplaceCurrentACPActivity(t *testing.T) {
+	t.Parallel()
+
+	for _, toolName := range []string{"READ", "WRITE", "PATCH", "GLOB", "GREP"} {
+		t.Run(toolName, func(t *testing.T) {
+			m := NewModel(Config{NoColor: true, NoAnimation: true})
+			m.liveTurn.Active = true
+			m.runningHintTracker.beginTurn(time.Unix(100, 0))
+			m.refreshRunningActivity()
+			before := m.runningActivity
+
+			m.applyTranscriptRunningActivity(TranscriptEvent{
+				Kind:       TranscriptEventTool,
+				Scope:      ACPProjectionMain,
+				ToolCallID: "short-tool-1",
+				ToolName:   toolName,
+			})
+			if m.runningActivity != before {
+				t.Fatalf("runningActivity = %#v, want %s to preserve %#v", m.runningActivity, toolName, before)
+			}
+		})
+	}
+}
+
+func TestLongRunningWebToolsUseDistinctWebActivity(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		toolName string
+		phase    runningActivityPhase
+		label    string
+	}{
+		{toolName: "WEB_SEARCH", phase: runningPhaseSearch, label: "Searching web"},
+		{toolName: "WEB_FETCH", phase: runningPhaseFetch, label: "Fetching web"},
+	} {
+		t.Run(test.toolName, func(t *testing.T) {
+			m := NewModel(Config{NoColor: true, NoAnimation: true})
+			m.liveTurn.Active = true
+			m.applyTranscriptRunningActivity(TranscriptEvent{
+				Kind:       TranscriptEventTool,
+				Scope:      ACPProjectionMain,
+				ToolCallID: "web-tool-1",
+				ToolName:   test.toolName,
+			})
+			if m.runningActivity.Phase != test.phase || m.runningActivity.StartedAt.IsZero() {
+				t.Fatalf("runningActivity = %#v, want timed web activity for %s", m.runningActivity, test.toolName)
 			}
 			if got := m.runningActivity.label(); got != test.label {
 				t.Fatalf("runningActivity label = %q, want %q", got, test.label)
 			}
 		})
+	}
+}
+
+func TestAttemptResetShowsRetryingWithoutDroppingActiveToolOwner(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.liveTurn.Active = true
+	m.runningHintTracker.beginTurn(time.Unix(100, 0))
+	commandKey := "tool:turn-1:command-1"
+	m.runningHintTracker.start(commandKey, runningPhaseToolWait, runningTargetShell, time.Unix(101, 0), "command-1")
+	m.applyTranscriptRunningActivity(TranscriptEvent{
+		Kind:  TranscriptEventLifecycle,
+		Scope: ACPProjectionMain,
+		State: "attempt_reset",
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"attempt_reset": map[string]any{"retrying": true},
+				},
+			},
+		},
+	})
+	if m.runningActivity.Phase != runningPhaseRetrying || m.runningActivity.StartedAt.IsZero() {
+		t.Fatalf("runningActivity = %#v, want timed retry activity", m.runningActivity)
+	}
+	if _, active := m.runningHintTracker.active[commandKey]; !active {
+		t.Fatalf("active activities = %#v, want real shell owner preserved across model retry", m.runningHintTracker.active)
+	}
+
+	m.applyTranscriptRunningActivity(TranscriptEvent{
+		Kind:          TranscriptEventNarrative,
+		NarrativeKind: TranscriptNarrativeReasoning,
+		Scope:         ACPProjectionMain,
+		MessageID:     "reasoning-after-retry",
+	})
+	if m.runningActivity.Phase != runningPhaseThinking {
+		t.Fatalf("runningActivity = %#v, want reasoning to replace retry activity", m.runningActivity)
+	}
+	if _, active := m.runningHintTracker.active[commandKey]; !active {
+		t.Fatalf("active activities = %#v, want background shell owner to remain observable", m.runningHintTracker.active)
+	}
+}
+
+func TestAttemptResetWithoutRetryingMetaKeepsCurrentActivity(t *testing.T) {
+	t.Parallel()
+
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.liveTurn.Active = true
+	m.runningHintTracker.beginTurn(time.Unix(100, 0))
+	m.refreshRunningActivity()
+	before := m.runningActivity
+	m.applyTranscriptRunningActivity(TranscriptEvent{
+		Kind:  TranscriptEventLifecycle,
+		Scope: ACPProjectionMain,
+		State: "attempt_reset",
+	})
+	if m.runningActivity != before {
+		t.Fatalf("runningActivity = %#v, want non-retrying reset to preserve %#v", m.runningActivity, before)
 	}
 }
 
@@ -201,7 +335,7 @@ func TestParallelToolCompletionRestoresRemainingActivity(t *testing.T) {
 		ToolCallID: "spawn-1",
 		ToolName:   "SPAWN",
 	})
-	if m.runningActivity.Phase != runningPhaseWait || m.runningActivity.Target != runningTargetSubagent {
+	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetSubagent {
 		t.Fatalf("runningActivity = %#v, want latest parallel Spawn activity", m.runningActivity)
 	}
 
@@ -212,7 +346,7 @@ func TestParallelToolCompletionRestoresRemainingActivity(t *testing.T) {
 		ToolName:   "SPAWN",
 		Final:      true,
 	})
-	if m.runningActivity.Phase != runningPhaseWait || m.runningActivity.Target != runningTargetShell ||
+	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetShell ||
 		m.runningActivity.Key != "tool:g0:command-1" {
 		t.Fatalf("runningActivity = %#v, want remaining command activity after Spawn completes", m.runningActivity)
 	}
@@ -224,8 +358,8 @@ func TestParallelToolCompletionRestoresRemainingActivity(t *testing.T) {
 		ToolName:   "RUN_COMMAND",
 		Final:      true,
 	})
-	if m.runningActivity.Phase != runningPhaseThinking || m.runningActivity.Key != "" {
-		t.Fatalf("runningActivity = %#v, want thinking after all parallel tools complete", m.runningActivity)
+	if m.runningActivity.Phase != runningPhaseModelWait || m.runningActivity.Key != "model" {
+		t.Fatalf("runningActivity = %#v, want model waiting after all parallel tools complete", m.runningActivity)
 	}
 }
 
@@ -246,9 +380,9 @@ func TestParallelWebSearchShowsElapsedAndRestoresRemainingSearch(t *testing.T) {
 	// Production timestamps each independently keyed activity on receipt.
 	// Pin both clocks here so the rendered elapsed values are deterministic.
 	firstKey := "tool:turn-search:search-1"
-	first := m.runningActivityTracker.active[firstKey]
+	first := m.runningHintTracker.active[firstKey]
 	first.StartedAt = firstStartedAt
-	m.runningActivityTracker.active[firstKey] = first
+	m.runningHintTracker.active[firstKey] = first
 
 	m.applyTranscriptRunningActivity(TranscriptEvent{
 		Kind:       TranscriptEventTool,
@@ -259,12 +393,12 @@ func TestParallelWebSearchShowsElapsedAndRestoresRemainingSearch(t *testing.T) {
 		ToolName:   "WebSearch",
 	})
 	secondKey := "tool:turn-search:search-2"
-	second := m.runningActivityTracker.active[secondKey]
+	second := m.runningHintTracker.active[secondKey]
 	second.StartedAt = secondStartedAt
-	m.runningActivityTracker.active[secondKey] = second
+	m.runningHintTracker.active[secondKey] = second
 	m.refreshRunningActivity()
 
-	if got := ansi.Strip(m.buildRunningHintTextAt(time.Unix(112, 0))); got != "• Searching web · 9s" {
+	if got := ansi.Strip(m.buildRunningHintTextAt(time.Unix(112, 0))); got != "• Searching web · 9.0s" {
 		t.Fatalf("running hint = %q, want latest search with its own elapsed time", got)
 	}
 
@@ -290,8 +424,8 @@ func TestParallelWebSearchShowsElapsedAndRestoresRemainingSearch(t *testing.T) {
 		ToolName:   "WebSearch",
 		Final:      true,
 	})
-	if m.runningActivity.Phase != runningPhaseThinking || m.runningActivity.Key != "" {
-		t.Fatalf("runningActivity = %#v, want thinking after all searches complete", m.runningActivity)
+	if m.runningActivity.Phase != runningPhaseModelWait || m.runningActivity.Key != "model" {
+		t.Fatalf("runningActivity = %#v, want model waiting after all searches complete", m.runningActivity)
 	}
 }
 
@@ -307,7 +441,7 @@ func TestNarrativeForegroundOverridesRunningBackgroundTool(t *testing.T) {
 		ToolName:   "RUN_COMMAND",
 	}
 	m.applyTranscriptRunningActivity(command)
-	if m.runningActivity.Phase != runningPhaseWait || m.runningActivity.Target != runningTargetShell {
+	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetShell {
 		t.Fatalf("runningActivity = %#v, want foreground command", m.runningActivity)
 	}
 
@@ -335,12 +469,12 @@ func TestNarrativeForegroundOverridesRunningBackgroundTool(t *testing.T) {
 		ToolName:   "SPAWN",
 	}
 	m.applyTranscriptRunningActivity(spawn)
-	if m.runningActivity.Phase != runningPhaseWait || m.runningActivity.Target != runningTargetSubagent {
+	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetSubagent {
 		t.Fatalf("runningActivity = %#v, want newly started Spawn foreground", m.runningActivity)
 	}
 	spawn.Final = true
 	m.applyTranscriptRunningActivity(spawn)
-	if m.runningActivity.Phase != runningPhaseWait || m.runningActivity.Target != runningTargetShell {
+	if m.runningActivity.Phase != runningPhaseToolWait || m.runningActivity.Target != runningTargetShell {
 		t.Fatalf("runningActivity = %#v, want active background command after foreground Spawn completes", m.runningActivity)
 	}
 }
@@ -351,8 +485,8 @@ func TestObservedTerminalCommandClosesExactRunningActivityOwner(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
 	m.liveTurn.Active = true
 	key := "tool:turn-1:command-call"
-	m.runningActivityTracker.start(key, runningPhaseWait, runningTargetShell, time.Unix(1, 0), "command-call")
-	m.runningActivityTracker.observeOwner("command-3", runningActivityOwner{
+	m.runningHintTracker.start(key, runningPhaseToolWait, runningTargetShell, time.Unix(1, 0), "command-call")
+	m.runningHintTracker.observeOwner("command-3", runningActivityOwner{
 		Key:     key,
 		CallID:  "command-call",
 		BlockID: "block-1",
@@ -364,7 +498,7 @@ func TestObservedTerminalCommandClosesExactRunningActivityOwner(t *testing.T) {
 		ParentCallID: "different-command",
 		Handle:       "command-3",
 	}})
-	if _, active := m.runningActivityTracker.active[key]; !active {
+	if _, active := m.runningHintTracker.active[key]; !active {
 		t.Fatal("conflicting command observation closed the owner")
 	}
 
@@ -372,11 +506,11 @@ func TestObservedTerminalCommandClosesExactRunningActivityOwner(t *testing.T) {
 		ParentCallID: "command-call",
 		Handle:       "command-3",
 	}})
-	if _, active := m.runningActivityTracker.active[key]; active {
-		t.Fatalf("active activities = %#v, want exact terminal command owner closed", m.runningActivityTracker.active)
+	if _, active := m.runningHintTracker.active[key]; active {
+		t.Fatalf("active activities = %#v, want exact terminal command owner closed", m.runningHintTracker.active)
 	}
-	if m.runningActivity.Phase != runningPhaseThinking {
-		t.Fatalf("runningActivity = %#v, want thinking fallback after terminal command", m.runningActivity)
+	if m.runningActivity.Phase != runningPhaseModelWait {
+		t.Fatalf("runningActivity = %#v, want model waiting after terminal command", m.runningActivity)
 	}
 }
 
@@ -576,7 +710,7 @@ func TestRejectedInterruptRestoresActivityAdvancedWhilePending(t *testing.T) {
 	if next.runningActivity.Phase != runningPhaseResponding || next.runningActivity.Key != "response:response-1" {
 		t.Fatalf("runningActivity = %#v, want latest response activity after rejected interrupt", next.runningActivity)
 	}
-	if len(next.runningActivityTracker.active) != 0 {
-		t.Fatalf("active activities = %#v, want completed command removed while interrupt was pending", next.runningActivityTracker.active)
+	if len(next.runningHintTracker.active) != 0 {
+		t.Fatalf("active activities = %#v, want completed command removed while interrupt was pending", next.runningHintTracker.active)
 	}
 }

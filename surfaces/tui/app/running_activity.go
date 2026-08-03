@@ -8,22 +8,26 @@ import (
 
 func (phase runningActivityPhase) label() string {
 	switch phase {
+	case runningPhaseModelWait:
+		return "Waiting for response"
 	case runningPhaseThinking:
 		return "Thinking"
 	case runningPhaseResponding:
 		return "Responding"
 	case runningPhaseSearch:
 		return "Searching web"
-	case runningPhaseWait:
-		return "Wait"
-	case runningPhaseRead:
-		return "Read"
+	case runningPhaseFetch:
+		return "Fetching web"
+	case runningPhaseToolWait:
+		return "Waiting on"
 	case runningPhaseCancel:
-		return "Cancel"
+		return "Canceling"
 	case runningPhaseReview:
 		return "Review approval"
 	case runningPhaseInterrupt:
 		return "Interrupting"
+	case runningPhaseRetrying:
+		return "Retrying"
 	default:
 		return ""
 	}
@@ -51,19 +55,14 @@ func (state runningActivityState) label() string {
 }
 
 func (phase runningActivityPhase) showsElapsed() bool {
-	switch phase {
-	case runningPhaseSearch, runningPhaseWait, runningPhaseRead, runningPhaseCancel, runningPhaseReview, runningPhaseInterrupt:
-		return true
-	default:
-		return false
-	}
+	return phase != ""
 }
 
 func (m *Model) completeRunningActivity(key string) {
 	if m == nil {
 		return
 	}
-	m.runningActivityTracker.complete(key)
+	m.runningHintTracker.complete(key, time.Now())
 	m.refreshRunningActivity()
 }
 
@@ -76,7 +75,7 @@ func (m *Model) setRunningToolActivity(
 	if m == nil {
 		return
 	}
-	m.runningActivityTracker.start(key, phase, target, time.Now(), callID)
+	m.runningHintTracker.start(key, phase, target, time.Now(), callID)
 	m.refreshRunningActivity()
 }
 
@@ -84,7 +83,7 @@ func (m *Model) setRunningInterruptActivity() {
 	if m == nil {
 		return
 	}
-	m.runningActivityTracker.setOverlay(runningPhaseInterrupt, "interrupt", time.Now())
+	m.runningHintTracker.setOverlay(runningPhaseInterrupt, "interrupt", time.Now())
 	m.refreshRunningActivity()
 }
 
@@ -92,7 +91,7 @@ func (m *Model) clearRunningInterruptActivity() {
 	if m == nil {
 		return
 	}
-	m.runningActivityTracker.clearOverlay("interrupt")
+	m.runningHintTracker.clearOverlay("interrupt")
 	m.refreshRunningActivity()
 }
 
@@ -100,7 +99,7 @@ func (m *Model) refreshRunningActivity() {
 	if m == nil {
 		return
 	}
-	m.runningActivity = m.runningActivityTracker.visible(m.turnRunning())
+	m.runningActivity = m.runningHintTracker.visible(m.turnRunning())
 }
 
 func (m *Model) runningActivityText() (string, lipgloss.Style) {

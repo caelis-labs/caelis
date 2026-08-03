@@ -135,7 +135,7 @@ func NewModel(cfg Config) *Model {
 		taskStreamResolveRetries: map[string]int{},
 		taskStreamRetries:        map[string]int{},
 		subagentOutputViews:      map[string]*subagentOutputView{},
-		runningActivityTracker:   newRunningActivityTracker(),
+		runningHintTracker:       newRunningHintTracker(),
 	}
 	m.help = help.New()
 	m.applyTheme(theme)

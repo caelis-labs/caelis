@@ -26,7 +26,7 @@ func (m *Model) runningFrame() string {
 func (m *Model) startRunningAnimation() {
 	m.spinnerTickScheduled = false
 	if m.turnRunning() {
-		m.runningActivityTracker.beginTurn(m.liveTurn.StartedAt)
+		m.runningHintTracker.beginTurn(m.liveTurn.StartedAt)
 		m.refreshRunningActivity()
 		return
 	}
@@ -34,7 +34,7 @@ func (m *Model) startRunningAnimation() {
 }
 
 func (m *Model) stopRunningAnimation() {
-	m.runningActivityTracker.endTurn()
+	m.runningHintTracker.endTurn()
 	m.runningActivity = runningActivityState{}
 	m.spinnerTickScheduled = false
 }
@@ -69,7 +69,7 @@ func (m *Model) buildRunningHintTextAt(now time.Time) string {
 	}
 	text, style := m.runningActivityText()
 	if text == "" {
-		text = runningPhaseThinking.label()
+		text = runningPhaseModelWait.label()
 		style = m.theme.HelpHintTextStyle()
 	}
 	parts := []string{text}
@@ -88,9 +88,14 @@ func (m *Model) buildRunningHintTextAt(now time.Time) string {
 
 func formatRunningActivityElapsed(now time.Time, startedAt time.Time) string {
 	if startedAt.IsZero() || now.Before(startedAt) {
-		return "0s"
+		return "0.1s"
 	}
-	elapsed := now.Sub(startedAt).Truncate(time.Second)
+	elapsed := now.Sub(startedAt)
+	if elapsed < 10*time.Second {
+		tenths := maxInt(1, int(elapsed/(100*time.Millisecond)))
+		return fmt.Sprintf("%.1fs", float64(tenths)/10)
+	}
+	elapsed = elapsed.Truncate(time.Second)
 	if elapsed < time.Minute {
 		return fmt.Sprintf("%ds", int(elapsed/time.Second))
 	}

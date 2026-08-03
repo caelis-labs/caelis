@@ -417,7 +417,7 @@ type Model struct {
 
 	runningInterruptRequested bool
 	runningActivity           runningActivityState
-	runningActivityTracker    runningActivityTracker
+	runningHintTracker        runningHintTracker
 
 	statusModel            string
 	statusContext          string

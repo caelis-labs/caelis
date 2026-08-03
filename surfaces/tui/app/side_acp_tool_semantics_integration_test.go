@@ -79,7 +79,7 @@ func TestSideACPProjectedTaskWaitMatchesNativeTranscriptSemantics(t *testing.T) 
 		}),
 	})
 
-	if hint := model.buildHintText(); !strings.Contains(hint, "Wait subagent") {
+	if hint := model.buildHintText(); !strings.Contains(hint, "Waiting on subagent") {
 		t.Fatalf("Side ACP hint = %q, want native Task wait activity", hint)
 	}
 	blocks := mainACPTurnBlocksForTest(model)

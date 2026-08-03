@@ -1,5 +1,7 @@
 package tuiapp
 
+import "time"
+
 import acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 
 // applyObservedCommandResults is activity-only repair: terminal transcript
@@ -13,7 +15,7 @@ func (m *Model) applyObservedCommandResults(results []acpprojector.CommandTaskRe
 	}
 	changed := false
 	for _, result := range results {
-		owner, ok := m.runningActivityTracker.presentationOwner(
+		owner, ok := m.runningHintTracker.presentationOwner(
 			result.Handle,
 			result.ParentCallID,
 			runningTargetShell,
@@ -21,7 +23,7 @@ func (m *Model) applyObservedCommandResults(results []acpprojector.CommandTaskRe
 		if !ok {
 			continue
 		}
-		m.runningActivityTracker.complete(owner.Key)
+		m.runningHintTracker.complete(owner.Key, time.Now())
 		changed = true
 	}
 	if changed {

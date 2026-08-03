@@ -95,7 +95,7 @@ func (m *Model) observeTaskStreamSession(env eventstream.Envelope) {
 	m.closeTaskStreamSubscriptions()
 	m.subagentOutputOverlay = nil
 	m.subagentOutputViews = map[string]*subagentOutputView{}
-	m.runningActivityTracker.resetSession()
+	m.runningHintTracker.resetSession()
 	m.refreshRunningActivity()
 	m.currentSessionID = sessionID
 }

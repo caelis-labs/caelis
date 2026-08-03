@@ -201,7 +201,7 @@ func TestApplySessionReconnectStateAtomicallyResetsTaskStreamSession(t *testing.
 			model.taskStreamIDsByCallID["call-old"] = "task-old"
 			model.taskStreamCallIDsByID["task-old"] = "call-old"
 			model.taskStreamNextToken = 7
-			model.runningActivityTracker.observeOwner("handle-old", runningActivityOwner{
+			model.runningHintTracker.observeOwner("handle-old", runningActivityOwner{
 				Key: "owner-old", CallID: "call-old", Target: runningTargetSubagent,
 			})
 
@@ -233,11 +233,11 @@ func TestApplySessionReconnectStateAtomicallyResetsTaskStreamSession(t *testing.
 			if model.taskStreamNextToken != 7 {
 				t.Fatalf("Task-stream token generation = %d, want monotonic 7", model.taskStreamNextToken)
 			}
-			if len(model.runningActivityTracker.ownersByHandle) != 0 ||
-				len(model.runningActivityTracker.ownersByCallID) != 0 {
+			if len(model.runningHintTracker.ownersByHandle) != 0 ||
+				len(model.runningHintTracker.ownersByCallID) != 0 {
 				t.Fatalf("old activity owner index survived reconnect: handles=%v calls=%v",
-					model.runningActivityTracker.ownersByHandle,
-					model.runningActivityTracker.ownersByCallID,
+					model.runningHintTracker.ownersByHandle,
+					model.runningHintTracker.ownersByCallID,
 				)
 			}
 
@@ -255,14 +255,14 @@ func TestApplySessionReconnectStateAtomicallyResetsTaskStreamSession(t *testing.
 				t.Fatalf("stale Task-stream batch rendered %d blocks after reconnect", len(model.doc.Blocks()))
 			}
 
-			model.runningActivityTracker.observeOwner("handle-backfill", runningActivityOwner{
+			model.runningHintTracker.observeOwner("handle-backfill", runningActivityOwner{
 				Key: "owner-backfill", CallID: "call-backfill", Target: runningTargetSubagent,
 			})
 			model.observeTaskStreamSession(eventstream.Envelope{
 				SessionID: test.reconnectSession,
 				Scope:     eventstream.ScopeMain,
 			})
-			if got := model.runningActivityTracker.ownersByHandle["handle-backfill"].Key; got != "owner-backfill" {
+			if got := model.runningHintTracker.ownersByHandle["handle-backfill"].Key; got != "owner-backfill" {
 				t.Fatalf("first live Envelope reset backfill activity owner = %q, want owner-backfill", got)
 			}
 		})

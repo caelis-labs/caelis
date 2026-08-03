@@ -217,7 +217,7 @@ func (m *Model) absorbCommandTaskObservation(event TranscriptEvent, mutation *tr
 	if action != "read" && action != "wait" {
 		return nil
 	}
-	owner, ok := m.runningActivityTracker.presentationOwner(
+	owner, ok := m.runningHintTracker.presentationOwner(
 		mutation.meta.TaskHandle,
 		event.AnchorToolCallID,
 		runningTargetShell,

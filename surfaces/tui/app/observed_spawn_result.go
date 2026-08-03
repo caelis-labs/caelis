@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -43,7 +44,7 @@ func (m *Model) applyObservedSpawnResults(results []acpprojector.SpawnTaskResult
 		}
 		mergeOpenFinalToolEvent(&owner.block.Events[owner.eventIndex], &finalEvent, true)
 		updateToolEventIndex(owner.block.toolEventIndex, owner.block.Events, parentCallID)
-		m.runningActivityTracker.complete(owner.activity.Key)
+		m.runningHintTracker.complete(owner.activity.Key, time.Now())
 		m.refreshRunningActivity()
 		m.markViewportBlockDirty(owner.block.BlockID())
 		changed = true
@@ -70,7 +71,7 @@ func (m *Model) openMainSpawnOwner(callID string, handle string) (openSpawnOwner
 	}
 	callID = strings.TrimSpace(callID)
 	handle = normalizeRunningActivityHandle(handle)
-	candidates := m.runningActivityTracker.observedOwnerCandidates(handle, callID)
+	candidates := m.runningHintTracker.observedOwnerCandidates(handle, callID)
 	var exact []openSpawnOwner
 	var compatible []openSpawnOwner
 	candidateCount := 0

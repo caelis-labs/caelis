@@ -189,7 +189,7 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 			RawInput: taskInput, Meta: taskMeta,
 		},
 	})
-	if model.runningActivity.Phase != runningPhaseWait || model.runningActivity.Target != runningTargetShell {
+	if model.runningActivity.Phase != runningPhaseToolWait || model.runningActivity.Target != runningTargetShell {
 		t.Fatalf("runningActivity = %#v, want Wait shell while TASK observes command", model.runningActivity)
 	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -210,8 +210,8 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 	if command := blocks[0].Events[0]; command.Output != recovered || !command.OutputSynthetic || strings.Contains(command.Output, "(no output)") {
 		t.Fatalf("recovered command = %#v, want replaceable durable TASK snapshot in empty owner panel", command)
 	}
-	if model.runningActivity.Phase != runningPhaseThinking {
-		t.Fatalf("runningActivity = %#v, want thinking after TASK wait completes", model.runningActivity)
+	if model.runningActivity.Phase != runningPhaseModelWait {
+		t.Fatalf("runningActivity = %#v, want model waiting after TASK wait completes", model.runningActivity)
 	}
 }
 
@@ -269,11 +269,11 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 		Title: "TASK read command-3", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 		RawInput: readInput, Meta: readMeta,
 	})
-	if model.runningActivity.Phase != runningPhaseRead || model.runningActivity.Target != runningTargetShell {
-		t.Fatalf("runningActivity = %#v, want Read shell", model.runningActivity)
+	if model.runningActivity.Phase != runningPhaseToolWait || model.runningActivity.Target != runningTargetShell {
+		t.Fatalf("runningActivity = %#v, want Task read to preserve the running shell owner", model.runningActivity)
 	}
-	if hint := model.buildHintText(); !strings.Contains(hint, "Read shell") || strings.Contains(hint, "command-3") {
-		t.Fatalf("hint = %q, want semantic read activity without raw handle", hint)
+	if hint := model.buildHintText(); !strings.Contains(hint, "Waiting on shell") || strings.Contains(hint, "command-3") {
+		t.Fatalf("hint = %q, want shell activity without raw handle", hint)
 	}
 	completed := schema.ToolStatusCompleted
 	apply(schema.ToolCallUpdate{
@@ -329,8 +329,8 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 		Title: "TASK read command-3", Kind: schema.ToolKindExecute, Status: schema.ToolStatusInProgress,
 		RawInput: terminalReadInput, Meta: terminalReadMeta,
 	})
-	if model.runningActivity.Phase != runningPhaseRead {
-		t.Fatalf("runningActivity = %#v, want terminal Read observation in progress", model.runningActivity)
+	if model.runningActivity.Phase != runningPhaseToolWait {
+		t.Fatalf("runningActivity = %#v, want terminal Task read to preserve the running shell owner", model.runningActivity)
 	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
@@ -353,11 +353,11 @@ func TestTaskReadUsesActivityHintAndFoldsObservationIntoCommandOwner(t *testing.
 			Meta: terminalReadMeta,
 		},
 	})
-	if _, active := model.runningActivityTracker.active["tool:turn-1:command-call"]; active {
-		t.Fatalf("active activities = %#v, want terminal Task read to close RunCommand owner", model.runningActivityTracker.active)
+	if _, active := model.runningHintTracker.active["tool:turn-1:command-call"]; active {
+		t.Fatalf("active activities = %#v, want terminal Task read to close RunCommand owner", model.runningHintTracker.active)
 	}
-	if model.runningActivity.Phase != runningPhaseThinking {
-		t.Fatalf("runningActivity = %#v, want thinking after Task read and RunCommand both close", model.runningActivity)
+	if model.runningActivity.Phase != runningPhaseModelWait {
+		t.Fatalf("runningActivity = %#v, want model waiting after Task read and RunCommand both close", model.runningActivity)
 	}
 }
 
@@ -1830,8 +1830,8 @@ func TestHandleACPEventEnvelopeAppliesApprovalReview(t *testing.T) {
 			Text:          "approved by policy",
 		},
 	})
-	if model.runningActivity.Phase != runningPhaseThinking {
-		t.Fatalf("runningActivity = %#v, want thinking fallback after terminal review", model.runningActivity)
+	if model.runningActivity.Phase != runningPhaseModelWait {
+		t.Fatalf("runningActivity = %#v, want model waiting after terminal review", model.runningActivity)
 	}
 	block := requireMainACPTurnBlockForTest(t, model)
 	if len(block.Events) != 1 || block.Events[0].Kind != SEApproval || block.Events[0].ApprovalStatus != "approved" {
@@ -3226,7 +3226,7 @@ func TestMainTimelineRoutesCrossTurnTaskObserverStreamToOriginalCommandPanel(t *
 	if len(blocks[0].Events) != 1 || blocks[0].Events[0].CallID != "command-1" || blocks[0].Events[0].Output != "initial\ntail\n" {
 		t.Fatalf("original command block = %#v, want observer tail appended in place", blocks[0].Events)
 	}
-	if model.runningActivity.Phase != runningPhaseWait || model.runningActivity.Target != runningTargetShell {
+	if model.runningActivity.Phase != runningPhaseToolWait || model.runningActivity.Target != runningTargetShell {
 		t.Fatalf("runningActivity = %#v, want Wait shell while TASK remains in progress", model.runningActivity)
 	}
 }
