@@ -13,6 +13,13 @@ CONTROL_TURN_REGRESSION_SELECTOR ?= ^(TestSessionTurnClientAttachesBeforePromptA
 SURFACE_CLIENT_REGRESSION_SELECTOR ?= ^(TestSessionClientAdapterRoutesMainTurnWritesAndObservationThroughTypedClient|TestSessionClientAdapterRoutesReviewThroughTypedParticipantClient|TestSessionClientAdapterRoutesSideAgentStartAndFollowUpThroughTypedClients|TestAppServerAdapterResumeFailurePreservesCurrentSession)$$
 COMMAND_REGRESSION_SELECTOR ?= ^TestRegression(Command(Status|Workspace|List|Agent|Parse|Connect|NewDriver)|Slash)
 COMMAND_EXECUTION_REGRESSION_SELECTOR ?= ^TestRegressionCommandExec
+PRODUCT_TUI_SELECTOR ?= ^TestProductScenarioContextCompactionRuntimeToPhysicalTUI$$
+PRODUCT_RUNTIME_SELECTOR ?= ^(TestRuntimeRecoveryConvergesCommandRehydrateFailure|TestRuntimeRecoveryCommandRepairFileStoreRoundTrip|TestSessionWriteQueueCancellationPassesAdmissionToSuccessor|TestSessionWriteQueueCancellationUnlinksBeforePredecessorCompletes|TestCompactionAndAgentCompletionCommitFIFOWhenCompactionArrivesFirst|TestTwoRuntimesRejectStaleCompactionAndRebuildWholeModelContext|TestRuntimeAutoCompactFailurePublishesLiveNotice)$$
+PRODUCT_CONTROLLER_SELECTOR ?= ^(TestControllerRunRejectsOverlappingTurns|TestControllerRunConcurrentAdmissionAllowsOneTurn|TestManagerDeactivateCancelsInFlightControllerTurn|TestManagerDetachCancelsInFlightParticipantPrompt)$$
+PRODUCT_SUBAGENT_SELECTOR ?= ^(TestRunnerActionSummaryKeepsFinalizingIntentAcrossSparseToolUpdate|TestRunnerActionSummaryConcurrentUpdateAndWait|TestRunnerCompletedResultKeepsActionSummary|TestRunnerTerminalDiagnosticOverridesActionSummary)$$
+PRODUCT_CONTROL_CLIENT_SELECTOR ?= ^(TestStateServiceDoesNotStarveWhileSessionRevisionChanges|TestStateServiceReconnectSucceedsDuringContinuousPublish)$$
+PRODUCT_WIRE_SELECTOR ?= ^TestEveryProductionEnvelopeVariantConformsToOpenAPI$$
+PRODUCT_DIAGNOSTICS_SELECTOR ?= ^(TestRuntimeDiagnosticsLoggerWritesPrivateJSONLFile|TestBoundedDiagnosticWriterKeepsOneSizeBoundedBackup)$$
 CACHE_ROOT ?= $(CURDIR)/.tmp/cache
 GOMODCACHE ?= $(CACHE_ROOT)/gomod
 GOCACHE ?= $(CACHE_ROOT)/gocache
@@ -20,7 +27,7 @@ GOTMPDIR ?= $(CACHE_ROOT)/gotmp
 GOLANGCI_LINT_CACHE ?= $(CACHE_ROOT)/golangci-lint
 XDG_CACHE_HOME ?= $(CACHE_ROOT)/xdg
 export GOMODCACHE GOCACHE GOTMPDIR GOLANGCI_LINT_CACHE XDG_CACHE_HOME
-.PHONY: arch-lint build build-cli cache-dirs client-protocol-check client-protocol-generate command-regression command-execution-regression commit-check control-feed-regression docs-links eval-smoke fmt fmt-check guardian-eval install lint quality regression sdk-boundary-check sdk-proxy-smoke sdk-race test tui-golden tui-interaction vet release-dry-run
+.PHONY: arch-lint build build-cli cache-dirs client-protocol-check client-protocol-generate command-regression command-execution-regression commit-check control-feed-regression docs-links eval-smoke fmt fmt-check guardian-eval install lint product-acceptance quality regression sdk-boundary-check sdk-proxy-smoke sdk-race test tui-golden tui-interaction vet release-dry-run
 
 cache-dirs:
 	mkdir -p "$(GOMODCACHE)" "$(GOCACHE)" "$(GOTMPDIR)" "$(GOLANGCI_LINT_CACHE)" "$(XDG_CACHE_HOME)"
@@ -72,7 +79,16 @@ quality: fmt-check lint arch-lint sdk-boundary-check client-protocol-check vet t
 
 commit-check: quality build
 
-regression: eval-smoke tui-golden tui-interaction control-feed-regression command-regression command-execution-regression
+regression: product-acceptance eval-smoke tui-golden tui-interaction control-feed-regression command-regression command-execution-regression
+
+product-acceptance: cache-dirs
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./agent-sdk/runtime '$(PRODUCT_RUNTIME_SELECTOR)' product-runtime
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./internal/acpagentbridge/controller '$(PRODUCT_CONTROLLER_SELECTOR)' product-controller
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./internal/acpagentbridge/subagent '$(PRODUCT_SUBAGENT_SELECTOR)' product-subagent
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./control/client '$(PRODUCT_CONTROL_CLIENT_SELECTOR)' product-control-client
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./control/client/wirev1 '$(PRODUCT_WIRE_SELECTOR)' product-wire
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp '$(PRODUCT_DIAGNOSTICS_SELECTOR)' product-diagnostics
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(PRODUCT_TUI_SELECTOR)' product-tui
 
 eval-smoke: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./eval '$(EVAL_REGRESSION_SELECTOR)' eval-smoke

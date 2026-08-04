@@ -56,6 +56,8 @@ Document responsibilities are intentionally separate:
   direction and end-state constraints;
 - [Control Host, Bar, and Pet](control-host-bar-pet-design.md) owns the target
   multi-client host topology and desktop activity presentation contract;
+- [Product Testing](testing.md) owns deterministic cross-layer regression,
+  physical TUI observation, and quality-gate placement;
 - [Release](release.md) owns release mechanics.
 
 ## Current Map

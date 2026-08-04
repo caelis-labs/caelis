@@ -74,6 +74,24 @@ jobs:
       - name: Focused Agent SDK race
         run: make sdk-race
 
+  product-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Exercises selected Runtime and Control contracts plus a physical TUI
+      # scenario. Selectors fail closed when a covered test is renamed away.
+      - name: Deterministic product acceptance
+        run: make product-acceptance
+
   windows-persistence:
     runs-on: windows-latest
     timeout-minutes: 20
@@ -87,5 +105,8 @@ jobs:
 
       # Cross-compilation cannot catch Windows file-lock and durable-rename
       # behavior. Keep the supported release target on a real Windows runner.
-      - name: Windows persistence and credential runtime
-        run: go test -count=1 ./agent-sdk/session/file ./control/client ./app/controlserver
+      - name: Windows persistence product acceptance
+        run: go test -count=1 ./agent-sdk/session/file
+
+      - name: Windows control and credential runtime
+        run: go test -count=1 ./control/client ./app/controlserver

@@ -6,10 +6,11 @@ publishes six CLI archives, checksums, six platform npm packages, and the main
 
 ## Gate model
 
-Quality belongs to `quality.yml`. The tag workflow waits for the successful
-`main` quality run with the exact tag SHA, then builds and publishes artifacts.
-It does not rerun ordinary tests, race suites, regressions, proxy smoke, or
-release-dry-run.
+Quality belongs to `quality.yml`, including its deterministic
+`product-acceptance` and real-Windows persistence jobs. The tag workflow waits
+for the successful `main` quality run with the exact tag SHA, then builds and
+publishes artifacts. It does not rerun ordinary tests, race suites, the broader
+regression target, proxy smoke, or release-dry-run.
 
 ## Preflight
 
