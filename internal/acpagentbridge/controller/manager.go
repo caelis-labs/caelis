@@ -78,24 +78,25 @@ type controllerRun struct {
 	context               agent.ContextTransfer
 	contextPending        bool
 
-	mu                sync.Mutex
-	commands          []ControllerCommand
-	configOptions     []ControllerConfigOption
-	models            *client.SessionModelState
-	mode              string
-	legacyMode        string
-	modeOptions       []ControllerMode
-	legacyModeOptions []ControllerMode
-	remoteTitle       string
-	turnID            string
-	turnSession       session.Session
-	turnStream        bool
-	turnMode          string
-	approvalRequester controller.ApprovalRequester
-	handle            *turnHandle
-	events            []*session.Event
-	updatedAt         time.Time
-	reconnectMu       sync.Mutex
+	mu                  sync.Mutex
+	commands            []ControllerCommand
+	configOptions       []ControllerConfigOption
+	models              *client.SessionModelState
+	mode                string
+	legacyMode          string
+	modeOptions         []ControllerMode
+	legacyModeOptions   []ControllerMode
+	remoteTitle         string
+	turnID              string
+	turnSession         session.Session
+	turnStream          bool
+	turnMode            string
+	approvalRequester   controller.ApprovalRequester
+	handle              *turnHandle
+	events              []*session.Event
+	turnAdmissionClosed bool
+	updatedAt           time.Time
+	reconnectMu         sync.Mutex
 }
 
 type controllerClientState struct {
@@ -121,15 +122,16 @@ type participantRun struct {
 	authenticationMethods []controlagents.AuthenticationMethod
 	promptCapabilities    schema.PromptCapabilities
 
-	mu                sync.Mutex
-	turnID            string
-	turnSession       session.Session
-	turnStream        bool
-	turnMode          string
-	approvalRequester controller.ApprovalRequester
-	handle            *turnHandle
-	events            []*session.Event
-	updatedAt         time.Time
+	mu                    sync.Mutex
+	turnID                string
+	turnSession           session.Session
+	turnStream            bool
+	turnMode              string
+	approvalRequester     controller.ApprovalRequester
+	handle                *turnHandle
+	events                []*session.Event
+	promptAdmissionClosed bool
+	updatedAt             time.Time
 }
 
 func NewManager(cfg Config) (*Manager, error) {
@@ -261,23 +263,26 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 	}
 
 	prompt := buildPromptParts(req.Input, req.ContentParts)
-	prompt = composeACPContextPrompt(prompt, agent.MergeContextTransfers(run.consumeContext(), req.Context))
 	turnCtx, cancel := context.WithCancel(ctx)
 	handle := newTurnHandle(cancel)
-	run.beginTurn(req, handle)
+	if err := run.beginTurn(req, handle); err != nil {
+		cancel()
+		return controller.TurnResult{}, err
+	}
+	prompt = composeACPContextPrompt(prompt, agent.MergeContextTransfers(run.consumeContext(), req.Context))
 	if len(prompt) == 0 {
-		run.finishTurn()
+		run.finishTurn(handle)
 		handle.finish()
 		return controller.TurnResult{Handle: handle, UpdatedAt: m.clock()}, nil
 	}
 	go func() {
 		defer handle.finish()
 		if err := m.promptControllerRun(turnCtx, run, prompt); err != nil {
-			run.finishTurn()
+			run.finishTurn(handle)
 			handle.publishError(err)
 			return
 		}
-		buffered, stream := run.finishTurn()
+		buffered, stream := run.finishTurn(handle)
 		if !stream {
 			for _, event := range buffered {
 				handle.publishEvent(event)
@@ -457,6 +462,7 @@ func (m *Manager) shutdownControllerRun(ctx context.Context, run *controllerRun,
 	if run == nil {
 		return
 	}
+	run.closeTurnAdmission()
 	run.reconnectMu.Lock()
 	defer run.reconnectMu.Unlock()
 	m.shutdownControllerRunLocked(ctx, run, closeRemote)
@@ -693,11 +699,11 @@ func (m *Manager) PromptParticipant(ctx context.Context, req controller.Particip
 	go func() {
 		defer handle.finish()
 		if _, err := run.promptParts(turnCtx, prompt); err != nil {
-			_, _ = run.finishPrompt()
+			_, _ = run.finishPrompt(handle)
 			handle.publishError(err)
 			return
 		}
-		buffered, stream := run.finishPrompt()
+		buffered, stream := run.finishPrompt(handle)
 		if !stream {
 			for _, event := range buffered {
 				handle.publishEvent(event)
@@ -733,8 +739,11 @@ func (m *Manager) Detach(ctx context.Context, req controller.DetachRequest) erro
 		}
 	}
 	m.mu.Unlock()
-	if run != nil && run.client != nil {
-		_ = run.client.Close(context.WithoutCancel(ctx))
+	if run != nil {
+		run.closePromptAdmission()
+		if run.client != nil {
+			_ = run.client.Close(context.WithoutCancel(ctx))
+		}
 	}
 	return nil
 }
@@ -1094,24 +1103,6 @@ func controllerBinding(agent string, source string, epochID string, now time.Tim
 	}
 }
 
-func (r *controllerRun) beginTurn(req controller.TurnRequest, handle *turnHandle) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.turnID = strings.TrimSpace(req.TurnID)
-	r.turnSession = session.CloneSession(req.Session)
-	r.turnStream = req.Stream
-	r.turnMode = strings.TrimSpace(req.Mode)
-	if req.ContextSyncSeq > r.binding.ContextSyncSeq {
-		r.binding.ContextSyncSeq = req.ContextSyncSeq
-	}
-	r.approvalRequester = req.ApprovalRequester
-	r.handle = handle
-	r.events = nil
-}
-
 func (r *controllerRun) consumeContext() agent.ContextTransfer {
 	if r == nil {
 		return agent.ContextTransfer{}
@@ -1146,27 +1137,6 @@ func composeACPContextPrompt(prompt []json.RawMessage, contextTransfer agent.Con
 	out = append(out, backgroundRaw, currentRaw)
 	out = append(out, prompt...)
 	return out
-}
-
-func (r *controllerRun) finishTurn() ([]*session.Event, bool) {
-	if r == nil {
-		return nil, false
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	buffered := make([]*session.Event, 0, len(r.events))
-	for _, event := range r.events {
-		buffered = append(buffered, session.CloneEvent(event))
-	}
-	stream := r.turnStream
-	r.turnID = ""
-	r.turnSession = session.Session{}
-	r.turnStream = false
-	r.turnMode = ""
-	r.approvalRequester = nil
-	r.handle = nil
-	r.events = nil
-	return buffered, stream
 }
 
 func (r *controllerRun) handleUpdate(clock func() time.Time, env client.UpdateEnvelope) {
@@ -1438,46 +1408,6 @@ func validatedControllerConfigResponse(resp client.SetSessionConfigOptionRespons
 		return options, nil
 	}
 	return nil, fmt.Errorf("internal/acpagentbridge/controller: ACP response omitted updated config option %q", configID)
-}
-
-func (r *participantRun) beginPrompt(req controller.ParticipantPromptRequest, handle *turnHandle) error {
-	if r == nil {
-		return fmt.Errorf("internal/acpagentbridge/controller: participant run is unavailable")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.handle != nil || strings.TrimSpace(r.turnID) != "" {
-		return fmt.Errorf("internal/acpagentbridge/controller: participant %q already has a prompt in progress", r.id)
-	}
-	r.turnID = firstNonEmpty(strings.TrimSpace(req.TurnID), strings.TrimSpace(req.ParticipantID), r.id)
-	r.turnSession = session.CloneSession(req.Session)
-	r.turnStream = req.Stream
-	r.turnMode = strings.TrimSpace(req.Mode)
-	r.approvalRequester = req.ApprovalRequester
-	r.handle = handle
-	r.events = nil
-	return nil
-}
-
-func (r *participantRun) finishPrompt() ([]*session.Event, bool) {
-	if r == nil {
-		return nil, false
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	buffered := make([]*session.Event, 0, len(r.events))
-	for _, event := range r.events {
-		buffered = append(buffered, session.CloneEvent(event))
-	}
-	stream := r.turnStream
-	r.turnID = ""
-	r.turnSession = session.Session{}
-	r.turnStream = false
-	r.turnMode = ""
-	r.approvalRequester = nil
-	r.handle = nil
-	r.events = nil
-	return buffered, stream
 }
 
 func (r *participantRun) refreshBinding(binding session.ParticipantBinding) session.ParticipantBinding {

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -1562,13 +1563,32 @@ func TestParticipantRunRejectsOverlappingPrompts(t *testing.T) {
 	if err := run.beginPrompt(controller.ParticipantPromptRequest{TurnID: "turn-1", ParticipantID: run.id}, first); err != nil {
 		t.Fatal(err)
 	}
-	if err := run.beginPrompt(controller.ParticipantPromptRequest{TurnID: "turn-2", ParticipantID: run.id}, newTurnHandle(nil)); err == nil {
+	second := newTurnHandle(nil)
+	if err := run.beginPrompt(controller.ParticipantPromptRequest{TurnID: "turn-2", ParticipantID: run.id}, second); err == nil {
 		t.Fatal("overlapping participant prompt was allowed to overwrite active turn state")
 	}
-	run.finishPrompt()
-	if err := run.beginPrompt(controller.ParticipantPromptRequest{TurnID: "turn-3", ParticipantID: run.id}, newTurnHandle(nil)); err != nil {
+	if _, _ = run.finishPrompt(second); run.handle != first {
+		t.Fatal("stale participant prompt owner cleared the active prompt")
+	}
+	run.finishPrompt(first)
+	first.finish()
+	second.finish()
+
+	third := newTurnHandle(nil)
+	if err := run.beginPrompt(controller.ParticipantPromptRequest{TurnID: "turn-3", ParticipantID: run.id}, third); err != nil {
 		t.Fatalf("prompt after completion remained busy: %v", err)
 	}
+	run.closePromptAdmission()
+	if got := third.Cancel().Status; got != controller.CancelStatusAlreadyCancelled {
+		t.Fatalf("Cancel() after closePromptAdmission status = %q, want %q", got, controller.CancelStatusAlreadyCancelled)
+	}
+	fourth := newTurnHandle(nil)
+	if err := run.beginPrompt(controller.ParticipantPromptRequest{TurnID: "turn-4", ParticipantID: run.id}, fourth); !errors.Is(err, controller.ErrNotActive) {
+		t.Fatalf("beginPrompt() after close error = %v, want ErrNotActive", err)
+	}
+	run.finishPrompt(third)
+	third.finish()
+	fourth.finish()
 }
 
 func TestManagerRejectsContradictoryParticipantSessionIdentity(t *testing.T) {
