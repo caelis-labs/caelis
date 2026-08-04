@@ -100,6 +100,7 @@ func decodePersistedDocumentWithReport(data []byte) (persistedDocument, Migratio
 func rejectUnsupportedLegacyDocument(data []byte, path string) error {
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(data, &root); err != nil {
+		//nolint:nilerr // This legacy-shape probe defers malformed JSON to the authoritative document decoder.
 		return nil
 	}
 	raw, ok := root["events"]

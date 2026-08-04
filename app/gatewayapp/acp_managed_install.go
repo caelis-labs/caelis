@@ -511,6 +511,7 @@ func managedACPInstallTreeSize(root string) int64 {
 	var total int64
 	_ = filepath.WalkDir(root, func(_ string, entry os.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
+			//nolint:nilerr // Install-tree size is progress metadata; unreadable entries do not fail installation.
 			return nil
 		}
 		info, infoErr := entry.Info()

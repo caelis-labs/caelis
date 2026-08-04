@@ -52,6 +52,7 @@ func (g *Gateway) DeliverAgentMessage(ctx context.Context, ref session.SessionRe
 			Actor: req.From, Scope: persisted.Scope, Metadata: persisted.Meta, Persisted: true,
 		})
 		if err != nil {
+			//nolint:nilerr // The message is durably accepted; wake failure is pending so callers do not duplicate it.
 			return AgentMessageDelivery{Accepted: true, State: agentmessage.StatePending}, nil
 		}
 		return AgentMessageDelivery{Accepted: true, State: agentmessage.StateDelivered}, nil
@@ -73,6 +74,7 @@ func (g *Gateway) DeliverAgentMessage(ctx context.Context, ref session.SessionRe
 			Text: req.Text, MessageID: req.MessageID, Actor: req.From,
 			Scope: persisted.Scope, Metadata: persisted.Meta, Persisted: true,
 		}); submitErr != nil {
+			//nolint:nilerr // The message is durably accepted; wake failure is pending so callers do not duplicate it.
 			return AgentMessageDelivery{Accepted: true, State: agentmessage.StatePending}, nil
 		}
 		return AgentMessageDelivery{Accepted: true, State: agentmessage.StateDelivered}, nil

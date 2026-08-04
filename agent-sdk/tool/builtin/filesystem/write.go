@@ -114,6 +114,7 @@ func createWorkspaceParentDirs(fsys sandbox.FileSystem, target string) error {
 	target = filepath.Clean(target)
 	rel, err := filepath.Rel(cwd, target)
 	if err != nil || rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		//nolint:nilerr // Parent creation is optional outside a workspace-relative path; the write owns its final error.
 		return nil
 	}
 	parent := filepath.Dir(target)

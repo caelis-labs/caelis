@@ -427,11 +427,13 @@ func (s *FileOperationStore) sweepOperationRecordLocked(
 	record, err := readOperationRecord(path)
 	if err != nil || !s.operationRecordMatchesPath(path, record) || filepath.Base(path) != filename {
 		result.Corrupt++
+		//nolint:nilerr // Sweep counts and retains corrupt ledger records; only proven terminal records are reclaimable.
 		return "", false, nil
 	}
 	disposition, _, err := classifyOperationRecord(record, now, retention)
 	if err != nil {
 		result.Corrupt++
+		//nolint:nilerr // Sweep counts and retains corrupt ledger records; only proven terminal records are reclaimable.
 		return "", false, nil
 	}
 	switch disposition {
@@ -443,6 +445,7 @@ func (s *FileOperationStore) sweepOperationRecordLocked(
 		materialized, changed, err := materializeTerminalRetention(record, retention)
 		if err != nil {
 			result.Corrupt++
+			//nolint:nilerr // Sweep counts and retains corrupt ledger records; only proven terminal records are reclaimable.
 			return "", false, nil
 		}
 		if changed {

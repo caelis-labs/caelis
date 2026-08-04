@@ -10,8 +10,14 @@ linters:
     - govet
     - ineffassign
     - misspell
+    - nilerr
+    - nolintlint
     - staticcheck
     - unconvert
+  settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
   exclusions:
     generated: lax
     presets:

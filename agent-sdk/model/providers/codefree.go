@@ -484,6 +484,7 @@ func codeFreeResponseError(raw []byte, contentType string) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	if err := decoder.Decode(&payload); err != nil || len(payload) == 0 {
+		//nolint:nilerr // Provider-error parsing is a best-effort probe; callers own authoritative response decoding.
 		return nil
 	}
 	code, field, ok := codeFreeResponseErrorCode(payload)

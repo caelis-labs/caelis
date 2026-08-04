@@ -220,6 +220,7 @@ func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref sessi
 	}
 	events, err := tm.runtime.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
 	if err != nil {
+		//nolint:nilerr // History backfill is optional enrichment; the durable Task entry remains authoritative.
 		return entry, nil
 	}
 	var (

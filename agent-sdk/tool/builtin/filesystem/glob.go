@@ -119,6 +119,7 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	maxMatches := globResultLimit + 1
 	err = walkDir(fsys, root, func(candidate string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil || d == nil {
+			//nolint:nilerr // Glob is best-effort across unreadable entries and returns the remaining matches.
 			return nil
 		}
 		if candidate != root && shouldExcludePath(root, candidate, d.IsDir(), excludeRules) {
@@ -132,6 +133,7 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 		}
 		rel, err := filepath.Rel(root, candidate)
 		if err != nil || rel == "." {
+			//nolint:nilerr // A candidate that cannot be made relative to the walk root is not a match.
 			return nil
 		}
 		if pathGlobMatch(relPattern, rel) {

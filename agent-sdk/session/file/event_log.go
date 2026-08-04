@@ -302,6 +302,7 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 func rejectUnsupportedLegacyEventLogLine(data []byte, path string, lineNo int) error {
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(data, &root); err != nil {
+		//nolint:nilerr // This legacy-field probe defers malformed JSON to the authoritative event decoder.
 		return nil
 	}
 	for _, key := range []string{

@@ -143,6 +143,7 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	if info.IsDir() {
 		walkErr := walkDir(fsys, target, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
+				//nolint:nilerr // Search is best-effort across unreadable paths and returns accessible matches.
 				return nil
 			}
 			if path != target && shouldExcludePath(root, path, d != nil && d.IsDir(), excludeRules) {

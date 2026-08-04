@@ -190,10 +190,12 @@ func (s Service) Install(ctx context.Context, source string) (Info, error) {
 func (s Service) installLocalPluginSource(ctx context.Context, source string) (Info, bool, error) {
 	absPath, err := filepath.Abs(strings.TrimSpace(source))
 	if err != nil {
+		//nolint:nilerr // Local-path detection is a probe; failure falls through to marketplace source parsing.
 		return Info{}, false, nil
 	}
 	fi, err := os.Stat(absPath)
 	if err != nil || !fi.IsDir() {
+		//nolint:nilerr // Local-path detection is a probe; failure falls through to marketplace source parsing.
 		return Info{}, false, nil
 	}
 	info, err := s.AddPath(ctx, absPath)

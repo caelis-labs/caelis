@@ -228,6 +228,7 @@ func (d *assembler) completeACPControllerSlashArg(status controller.ControllerSt
 func (d *assembler) completeModelReasoningLevels(ctx context.Context, aliasQuery string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	alias, err := d.resolveStoredModelAlias(ctx, aliasQuery)
 	if err != nil {
+		//nolint:nilerr // Completion is best-effort; an unresolved alias yields no candidates.
 		return nil, nil
 	}
 	if d.stack.Model.ConfigFn == nil {

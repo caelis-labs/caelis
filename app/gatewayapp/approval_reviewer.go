@@ -68,6 +68,7 @@ func (r *guardianApprovalReviewer) Decide(ctx context.Context, req kernel.Approv
 	}
 	if req.Approval != nil && len(req.Approval.Options) > 0 {
 		if err := approval.ValidateStrictOptions(req.Approval.Options); err != nil {
+			//nolint:nilerr // Strict validation failure is a resolved deterministic denial, not a reviewer transport error.
 			return guardianDeterministicDenial(req.Approval, "automatic approval review denied malformed approval options: "+err.Error()), nil
 		}
 	}

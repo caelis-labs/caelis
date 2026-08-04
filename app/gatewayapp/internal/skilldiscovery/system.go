@@ -267,6 +267,7 @@ func rejectLinkedManagedPath(target string, root string) error {
 		}
 		rel, err := filepath.Rel(current, target)
 		if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+			//nolint:nilerr // The root fence already passed; inability to advance ends this linked-path probe.
 			return nil
 		}
 		nextPart := rel
