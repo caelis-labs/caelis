@@ -86,7 +86,7 @@ func (s *Store) pendingApprovalsForSession(ctx context.Context, ref session.Sess
 			doc.PendingApprovals = pendingApprovalsFromEvents(events)
 			// This is derived persistence metadata, not a semantic Session
 			// mutation: revision, lease, state, and canonical events stay fixed.
-			if err := s.writeDocumentInternal(doc, false, false); err != nil {
+			if err := s.writeDocumentInternal(ctx, doc, false, false); err != nil {
 				return err
 			}
 		}
@@ -175,7 +175,7 @@ func (s *Store) SettlePendingApproval(
 		if !tx.Changed {
 			return nil
 		}
-		return s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted)
+		return s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted)
 	})
 	return out, err
 }

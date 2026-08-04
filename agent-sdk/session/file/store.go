@@ -19,6 +19,7 @@ func NewStore(cfg Config) *Store {
 		sessionIDGenerator: cfg.SessionIDGenerator,
 		eventIDGenerator:   cfg.EventIDGenerator,
 		clock:              cfg.Clock,
+		diagnostics:        cfg.Diagnostics,
 		pathCache:          map[string]string{},
 		eventPageIndexes:   map[string]*eventPageIndex{},
 		eventLogCaches:     map[string]*eventLogCache{},
@@ -109,7 +110,7 @@ func (s *Store) withRootLockContext(ctx context.Context, mode storeRootLockMode,
 		// maintain a durable root marker, so subsequent operations pay only one
 		// Stat unless a committed WAL was abandoned by a crashed process.
 		if !rootLock.recoveryInitialized || pending {
-			if err := s.recoverTransactions(); err != nil {
+			if err := s.recoverTransactions(ctx); err != nil {
 				return err
 			}
 			rootLock.recoveryInitialized = true
@@ -197,7 +198,7 @@ func (s *Store) StartSession(
 		// document/index recovery boundary as a compound mutation. Otherwise a
 		// crash after the document rename can leave a valid Session permanently
 		// absent from the only lookup/listing index.
-		if err := s.writeRecoverableDocumentTransaction(doc, nil); err != nil {
+		if err := s.writeRecoverableDocumentTransaction(ctx, doc, nil); err != nil {
 			return err
 		}
 		return nil
@@ -302,7 +303,7 @@ func (s *Store) AppendEventWithOutcome(
 			out = session.CloneEvent(normalized)
 			return nil
 		}
-		if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
+		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted); err != nil {
 			return err
 		}
 		out = session.CloneEvent(normalized)
@@ -374,12 +375,12 @@ func (s *Store) prepareAppendTransactionForDocument(
 	return doc, tx, nil
 }
 
-func (s *Store) writeDocumentWithEvents(doc persistedDocument, events []*session.Event) error {
+func (s *Store) writeDocumentWithEvents(ctx context.Context, doc persistedDocument, events []*session.Event) error {
 	events = persistedEvents(events)
 	if len(events) == 0 {
-		return s.writeDocument(doc)
+		return s.writeDocument(ctx, doc)
 	}
-	if err := s.writeRecoverableDocumentTransaction(doc, events); err != nil {
+	if err := s.writeRecoverableDocumentTransaction(ctx, doc, events); err != nil {
 		if documentWriteCommitted(err) {
 			return &session.CommittedError{Err: err}
 		}
@@ -419,7 +420,7 @@ func (s *Store) AppendEvents(
 			return err
 		}
 		if tx.Changed {
-			if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
+			if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted); err != nil {
 				return err
 			}
 		}
@@ -462,7 +463,7 @@ func (s *Store) AppendEventsAndUpdateState(
 			return err
 		}
 		if tx.Changed {
-			if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
+			if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted); err != nil {
 				return err
 			}
 		}
@@ -591,7 +592,7 @@ func (s *Store) bindControllerRequest(ctx context.Context, req session.BindContr
 		doc.Session.Controller = session.CloneControllerBinding(req.Binding)
 		doc.Session.Revision++
 		doc.Session.UpdatedAt = s.now()
-		if err := s.writeDocument(doc); err != nil {
+		if err := s.writeDocument(ctx, doc); err != nil {
 			return err
 		}
 		out = session.CloneSession(doc.Session)
@@ -641,7 +642,7 @@ func (s *Store) BindControllerWithEvent(
 			return err
 		}
 		normalized := tx.Prepared.Events[0]
-		if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
+		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted); err != nil {
 			return err
 		}
 		out = session.CloneSession(nextDoc.Session)
@@ -691,7 +692,7 @@ func (s *Store) putParticipantRequest(ctx context.Context, req session.PutPartic
 			doc.Session.Revision++
 			doc.Session.UpdatedAt = s.now()
 			out = session.CloneSession(doc.Session)
-			if err := s.writeDocument(doc); err != nil {
+			if err := s.writeDocument(ctx, doc); err != nil {
 				if documentWriteCommitted(err) {
 					return &session.CommittedError{Err: err}
 				}
@@ -759,7 +760,7 @@ func (s *Store) PutParticipantWithEvent(
 		normalizedEvent := tx.Prepared.Events[0]
 		out = session.CloneSession(nextDoc.Session)
 		outEvent = session.CloneEvent(normalizedEvent)
-		if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
+		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted); err != nil {
 			return err
 		}
 		return nil
@@ -806,7 +807,7 @@ func (s *Store) removeParticipantRequest(ctx context.Context, req session.Remove
 			doc.Session.Revision++
 			doc.Session.UpdatedAt = s.now()
 			out = session.CloneSession(doc.Session)
-			if err := s.writeDocument(doc); err != nil {
+			if err := s.writeDocument(ctx, doc); err != nil {
 				if documentWriteCommitted(err) {
 					return &session.CommittedError{Err: err}
 				}
@@ -870,7 +871,7 @@ func (s *Store) RemoveParticipantWithEvent(
 		normalizedEvent := tx.Prepared.Events[0]
 		out = session.CloneSession(nextDoc.Session)
 		outEvent = session.CloneEvent(normalizedEvent)
-		if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
+		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted); err != nil {
 			return err
 		}
 		return nil
@@ -934,7 +935,7 @@ func (s *Store) ReplaceState(
 		doc.Session.Revision++
 		doc.Session.UpdatedAt = s.now()
 		out = session.CloneSession(doc.Session)
-		if err := s.writeDocument(doc); err != nil {
+		if err := s.writeDocument(ctx, doc); err != nil {
 			if documentWriteCommitted(err) {
 				return &session.CommittedError{Err: err}
 			}
@@ -981,7 +982,7 @@ func (s *Store) UpdateState(
 		doc.Session.Revision++
 		doc.Session.UpdatedAt = s.now()
 		out = session.CloneSession(doc.Session)
-		if err := s.writeDocument(doc); err != nil {
+		if err := s.writeDocument(ctx, doc); err != nil {
 			if documentWriteCommitted(err) {
 				return &session.CommittedError{Err: err}
 			}

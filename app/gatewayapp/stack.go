@@ -363,7 +363,8 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	effectivePolicyProfile := policyProfile(firstNonEmpty(cfg.PolicyProfile, doc.Runtime.PolicyProfile))
 	baseAssembly := assembly.CloneResolvedAssembly(cfg.Assembly)
 	sessionStore := sessionfile.NewStore(sessionfile.Config{
-		RootDir: filepath.Join(storeDir, "sessions"),
+		RootDir:     filepath.Join(storeDir, "sessions"),
+		Diagnostics: newRuntimeDiagnosticsLogger(storeDir),
 	})
 	sessions := sessionStore
 	taskStore := sessionfile.NewTaskStore(sessionStore)

@@ -1,6 +1,7 @@
 package file
 
 import (
+	"log/slog"
 	"sync"
 	"time"
 
@@ -36,6 +37,9 @@ type Config struct {
 	SessionIDGenerator func() string
 	EventIDGenerator   func() string
 	Clock              func() time.Time
+	// Diagnostics receives bounded runtime/environment diagnostics. The file
+	// store never includes paths, Session identities, events, or business data.
+	Diagnostics *slog.Logger
 }
 
 // Store is the file-backed implementation of session.Service.
@@ -47,6 +51,7 @@ type Store struct {
 	sessionIDGenerator      func() string
 	eventIDGenerator        func() string
 	clock                   func() time.Time
+	diagnostics             *slog.Logger
 	pathCache               map[string]string
 	eventPageIndexes        map[string]*eventPageIndex
 	eventPageIndexClock     uint64

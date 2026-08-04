@@ -1,6 +1,7 @@
 package file
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"os"
@@ -39,7 +40,7 @@ func TestWriteDocumentDurabilityBoundaries(t *testing.T) {
 			syncFile: func(*os.File) error { return fault },
 		}
 
-		err := store.writeDocumentInternal(doc, false, false)
+		err := store.writeDocumentInternal(context.Background(), doc, false, false)
 		if !errors.Is(err, fault) {
 			t.Fatalf("writeDocumentInternal() error = %v, want %v", err, fault)
 		}
@@ -60,7 +61,7 @@ func TestWriteDocumentDurabilityBoundaries(t *testing.T) {
 			syncDirectory: func(string) error { return fault },
 		}
 
-		err := store.writeDocumentInternal(doc, false, false)
+		err := store.writeDocumentInternal(context.Background(), doc, false, false)
 		if !errors.Is(err, fault) {
 			t.Fatalf("writeDocumentInternal() error = %v, want %v", err, fault)
 		}
@@ -146,7 +147,7 @@ func TestWriteTransactionDurabilityBoundaries(t *testing.T) {
 			syncDirectory: func(string) error { return nil },
 		}
 
-		err := store.writeTransaction(path, persistedTransaction{})
+		err := store.writeTransaction(context.Background(), path, persistedTransaction{})
 		if !errors.Is(err, fault) {
 			t.Fatalf("writeTransaction() error = %v, want %v", err, fault)
 		}
@@ -174,7 +175,7 @@ func TestWriteTransactionDurabilityBoundaries(t *testing.T) {
 			},
 		}
 
-		err := store.writeTransaction(path, persistedTransaction{})
+		err := store.writeTransaction(context.Background(), path, persistedTransaction{})
 		if !errors.Is(err, fault) {
 			t.Fatalf("writeTransaction() error = %v, want %v", err, fault)
 		}

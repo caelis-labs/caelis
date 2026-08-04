@@ -110,6 +110,12 @@ func (e *CommittedError) Unwrap() error {
 
 func (e *CommittedError) ErrorCode() errorcode.Code { return errorcode.UnknownOutcome }
 
+// DisplayMessage hides persistence paths and platform diagnostics from
+// user-facing surfaces while preserving the committed outcome.
+func (e *CommittedError) DisplayMessage() string {
+	return "The change was saved, but Caelis could not finish local storage maintenance."
+}
+
 // IsCommitted reports whether err is a post-commit reporting failure.
 func IsCommitted(err error) bool {
 	var committed *CommittedError

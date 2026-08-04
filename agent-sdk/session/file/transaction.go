@@ -37,7 +37,7 @@ func transactionPath(documentPath string) string { return documentPath + transac
 // events behind a durable WAL. Once the WAL rename succeeds, every later error
 // is a committed reporting error: recovery owns completing the document, index,
 // and WAL cleanup in that order.
-func (s *Store) writeRecoverableDocumentTransaction(doc persistedDocument, events []*session.Event) error {
+func (s *Store) writeRecoverableDocumentTransaction(ctx context.Context, doc persistedDocument, events []*session.Event) error {
 	if s.writeDocumentFault != nil {
 		if err := s.writeDocumentFault(); err != nil {
 			return err
@@ -51,16 +51,16 @@ func (s *Store) writeRecoverableDocumentTransaction(doc persistedDocument, event
 	record := persistedTransaction{
 		Kind: transactionKind, Version: transactionVersion, Document: doc, Events: persistedEvents(events),
 	}
-	if err := s.writeTransaction(txnPath, record); err != nil {
+	if err := s.writeTransaction(ctx, txnPath, record); err != nil {
 		return err
 	}
 	if err := s.injectTransactionFault("after_commit"); err != nil {
 		return committedDocumentWrite(err)
 	}
-	if err := s.applyTransaction(txnPath, record); err != nil {
+	if err := s.applyTransaction(ctx, txnPath, record); err != nil {
 		return committedDocumentWrite(err)
 	}
-	if err := s.clearTransactionRecoveryMarker(); err != nil {
+	if err := s.clearTransactionRecoveryMarker(ctx); err != nil {
 		return committedDocumentWrite(err)
 	}
 	return nil
@@ -106,9 +106,9 @@ func (s *Store) markTransactionRecoveryPending() error {
 	return s.durability.SyncDirectory(root)
 }
 
-func (s *Store) clearTransactionRecoveryMarker() error {
+func (s *Store) clearTransactionRecoveryMarker(ctx context.Context) error {
 	path := s.transactionRecoveryMarkerPath()
-	if err := os.Remove(path); err != nil {
+	if err := removeFile(ctx, s.diagnostics, fileOperationRemoveRecoveryMarker, path); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
@@ -117,7 +117,7 @@ func (s *Store) clearTransactionRecoveryMarker() error {
 	return s.durability.SyncDirectory(filepath.Dir(path))
 }
 
-func (s *Store) writeTransaction(path string, record persistedTransaction) error {
+func (s *Store) writeTransaction(ctx context.Context, path string, record persistedTransaction) error {
 	if err := s.markTransactionRecoveryPending(); err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func (s *Store) writeTransaction(path string, record persistedTransaction) error
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := replaceFile(tmpName, path); err != nil {
+	if err := replaceFile(ctx, s.diagnostics, fileOperationReplaceTransaction, tmpName, path); err != nil {
 		return err
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
@@ -165,7 +165,7 @@ func (s *Store) writeTransaction(path string, record persistedTransaction) error
 	return nil
 }
 
-func (s *Store) recoverTransactions() error {
+func (s *Store) recoverTransactions(ctx context.Context) error {
 	if s != nil && s.transactionRecoveryScan != nil {
 		s.transactionRecoveryScan()
 	}
@@ -194,11 +194,11 @@ func (s *Store) recoverTransactions() error {
 			return fmt.Errorf("agent-sdk/session/file: decode committed transaction %s: %w", path, err)
 		}
 		s.recordMigrationReport(report)
-		if err := s.applyTransaction(path, record); err != nil {
+		if err := s.applyTransaction(ctx, path, record); err != nil {
 			return err
 		}
 	}
-	return s.clearTransactionRecoveryMarker()
+	return s.clearTransactionRecoveryMarker(ctx)
 }
 
 func decodePersistedTransaction(data []byte) (persistedTransaction, error) {
@@ -240,7 +240,7 @@ func decodePersistedTransactionWithReport(data []byte) (persistedTransaction, Mi
 	return record, report, nil
 }
 
-func (s *Store) applyTransaction(path string, record persistedTransaction) error {
+func (s *Store) applyTransaction(ctx context.Context, path string, record persistedTransaction) error {
 	if record.Kind != transactionKind || record.Version != transactionVersion {
 		return fmt.Errorf("agent-sdk/session/file: unsupported transaction %q version %d", record.Kind, record.Version)
 	}
@@ -258,7 +258,7 @@ func (s *Store) applyTransaction(path string, record persistedTransaction) error
 	if err := s.injectTransactionFault("after_event_log"); err != nil {
 		return err
 	}
-	if err := s.writeDocumentInternal(record.Document, false, false); err != nil {
+	if err := s.writeDocumentInternal(ctx, record.Document, false, false); err != nil {
 		return err
 	}
 	if err := s.injectTransactionFault("after_document"); err != nil {
@@ -274,7 +274,7 @@ func (s *Store) applyTransaction(path string, record persistedTransaction) error
 	if err := s.injectTransactionFault("after_index"); err != nil {
 		return err
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if err := removeFile(ctx, s.diagnostics, fileOperationRemoveTransaction, path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	if err := s.durability.SyncDirectory(filepath.Dir(path)); err != nil {

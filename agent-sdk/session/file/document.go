@@ -1,6 +1,7 @@
 package file
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -145,11 +146,11 @@ func committedDocumentWrite(err error) error {
 	return &committedDocumentWriteError{err: err}
 }
 
-func (s *Store) writeDocument(doc persistedDocument) error {
-	return s.writeDocumentInternal(doc, true, true)
+func (s *Store) writeDocument(ctx context.Context, doc persistedDocument) error {
+	return s.writeDocumentInternal(ctx, doc, true, true)
 }
 
-func (s *Store) writeDocumentInternal(doc persistedDocument, injectFault bool, updateIndex bool) error {
+func (s *Store) writeDocumentInternal(ctx context.Context, doc persistedDocument, injectFault bool, updateIndex bool) error {
 	doc.Kind = documentKind
 	doc.Version = documentVersion
 	doc.Session = session.CloneSession(doc.Session)
@@ -195,7 +196,7 @@ func (s *Store) writeDocumentInternal(doc persistedDocument, injectFault bool, u
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := replaceFile(tmpName, path); err != nil {
+	if err := replaceFile(ctx, s.diagnostics, fileOperationReplaceDocument, tmpName, path); err != nil {
 		return err
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
