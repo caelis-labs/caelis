@@ -94,9 +94,6 @@ func TestAutoCompactDecisionBeforeModelRequestUsesRequestEstimate(t *testing.T) 
 	if decision.RequestTokens == 0 || decision.Usage.TotalTokens < decision.RequestTokens {
 		t.Fatalf("decision usage/request = %+v/%d, want request estimate included", decision.Usage, decision.RequestTokens)
 	}
-	if len(decision.Events) == 0 {
-		t.Fatal("expected decision to retain event snapshot for recovery")
-	}
 }
 
 func TestAutoCompactDecisionBeforeModelRequestKeepsProviderUsageAuthoritativeForInlineImages(t *testing.T) {
@@ -376,9 +373,6 @@ func TestAutoCompactDecisionAfterRetryExhaustedUsesEmergencyWatermark(t *testing
 	}
 	if decision.Kind != compactionRecoveryKindRetryExhausted {
 		t.Fatalf("kind = %q, want %q", decision.Kind, compactionRecoveryKindRetryExhausted)
-	}
-	if len(decision.Events) == 0 {
-		t.Fatal("expected decision to retain event snapshot for recovery")
 	}
 }
 

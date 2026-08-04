@@ -31,6 +31,34 @@ func TestPageEventsClientReplayIncludesCanonicalAndMirrorOnly(t *testing.T) {
 	}
 }
 
+func TestClientReplaySkipsUnprojectedAgentContext(t *testing.T) {
+	t.Parallel()
+
+	event := &Event{
+		ID: "agent-context", Seq: 2, Type: EventTypeContext,
+		Visibility: VisibilityCanonical,
+		Actor:      ActorRef{Kind: ActorKindParticipant, ID: "reviewer"},
+		Text:       "Subagent @reviewer is completed.",
+	}
+	if IsClientReplayEvent(event) {
+		t.Fatalf("IsClientReplayEvent(%#v) = true, want model-only Context excluded", event)
+	}
+	if got := FilterClientReplayEvents([]*Event{event}); len(got) != 0 {
+		t.Fatalf("FilterClientReplayEvents() = %#v, want model-only Context excluded", got)
+	}
+
+	event.Protocol = &EventProtocol{
+		Method: ProtocolMethodSessionUpdate,
+		Update: &ProtocolUpdate{
+			SessionUpdate: string(ProtocolUpdateTypeAgentMessage),
+			Content:       ProtocolTextContent("projected context"),
+		},
+	}
+	if !IsClientReplayEvent(event) {
+		t.Fatalf("IsClientReplayEvent(%#v) = false, want explicit protocol Context retained", event)
+	}
+}
+
 func TestValidateEventChildOriginRequiresDurableRelation(t *testing.T) {
 	valid := EventChildOrigin{
 		Scope:         EventChildScopeSubagent,

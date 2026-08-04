@@ -57,6 +57,7 @@ type Runtime struct {
 	controllerRecovery       controller.RecoveryCoordinator
 	controllerEventForwarder agent.ControllerEventForwarder
 	subagents                agent.SubagentRunner
+	sessionWrites            sessionWriteQueue
 	executionMu              sync.Mutex
 	participantMu            sync.Mutex
 	participantPromptClaims  map[participantPromptKey]struct{}

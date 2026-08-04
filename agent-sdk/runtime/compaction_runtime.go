@@ -24,6 +24,11 @@ func (r *Runtime) prepareInvocationContext(
 	if err := r.recoverRuntimeState(ctx, ref); err != nil {
 		return invocationContext{}, err
 	}
+	release, err := r.acquireSessionWrite(ctx, ref)
+	if err != nil {
+		return invocationContext{}, err
+	}
+	defer release()
 	loaded, err := r.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: ref})
 	if err != nil {
 		return invocationContext{}, err
@@ -89,6 +94,11 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 	if err := r.recoverRuntimeState(ctx, ref); err != nil {
 		return CompactResult{}, err
 	}
+	release, err := r.acquireSessionWrite(ctx, ref)
+	if err != nil {
+		return CompactResult{}, err
+	}
+	defer release()
 	loaded, err := r.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: ref})
 	if err != nil {
 		return CompactResult{}, err
@@ -132,7 +142,7 @@ func (r *Runtime) persistCompactionArtifacts(
 	activeSession session.Session,
 	ref session.SessionRef,
 	turnID string,
-	sourceRevision uint64,
+	admittedRevision uint64,
 	result compact.Result,
 ) (*session.Event, error) {
 	if result.CompactEvent == nil {
@@ -146,7 +156,7 @@ func (r *Runtime) persistCompactionArtifacts(
 	}
 	persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
 		SessionRef:       ref,
-		ExpectedRevision: &sourceRevision,
+		ExpectedRevision: &admittedRevision,
 		MutationGuard:    session.RuntimeMutationGuard(ctx),
 		Event:            compactEvent,
 	})
@@ -158,7 +168,6 @@ func (r *Runtime) persistCompactionArtifacts(
 
 func (r *Runtime) compactAfterOverflow(
 	ctx context.Context,
-	activeSession session.Session,
 	ref session.SessionRef,
 	turnID string,
 	req agent.RunRequest,
@@ -166,10 +175,10 @@ func (r *Runtime) compactAfterOverflow(
 	cause error,
 	sink *runner,
 ) (compactionProgress, bool, error) {
-	return r.compactAndNotify(ctx, activeSession, ref, turnID, nil, nil, sink, func(compactCtx context.Context, events []*session.Event) (compact.Result, error) {
+	return r.compactAndNotify(ctx, ref, turnID, sink, func(compactCtx context.Context, current session.Session, events []*session.Event) (compact.Result, error) {
 		sourceEvents, pendingEvents := overflowCompactionEvents(events, currentTurnInput)
 		return r.compactor.CompactOnOverflow(compactCtx, compact.Request{
-			Session:       activeSession,
+			Session:       current,
 			SessionRef:    ref,
 			Events:        sourceEvents,
 			PendingEvents: pendingEvents,
@@ -213,7 +222,6 @@ func overflowCompactionEvents(events []*session.Event, currentTurnInput *session
 
 func (r *Runtime) compactAfterModelRequestWatermark(
 	ctx context.Context,
-	activeSession session.Session,
 	ref session.SessionRef,
 	turnID string,
 	decision autoCompactDecision,
@@ -227,14 +235,9 @@ func (r *Runtime) compactAfterModelRequestWatermark(
 	if trigger == "" {
 		trigger = "model_request_context_watermark"
 	}
-	var events []*session.Event
-	sourceRevision := decision.SourceRevision
-	if decision.Events != nil {
-		events = decision.Events
-	}
-	return r.compactAndNotify(ctx, activeSession, ref, turnID, events, &sourceRevision, sink, func(compactCtx context.Context, events []*session.Event) (compact.Result, error) {
+	return r.compactAndNotify(ctx, ref, turnID, sink, func(compactCtx context.Context, current session.Session, events []*session.Event) (compact.Result, error) {
 		return forceCompactor.Force(compactCtx, compact.Request{
-			Session:    activeSession,
+			Session:    current,
 			SessionRef: ref,
 			Events:     events,
 			Model:      decision.Model,
@@ -244,33 +247,30 @@ func (r *Runtime) compactAfterModelRequestWatermark(
 
 func (r *Runtime) compactAndNotify(
 	ctx context.Context,
-	activeSession session.Session,
 	ref session.SessionRef,
 	turnID string,
-	events []*session.Event,
-	sourceRevision *uint64,
 	sink *runner,
-	compactFn func(context.Context, []*session.Event) (compact.Result, error),
+	compactFn func(context.Context, session.Session, []*session.Event) (compact.Result, error),
 ) (compactionProgress, bool, error) {
 	if compactFn == nil {
 		return compactionProgress{}, false, errors.New("agent-sdk/runtime: compact function is required")
 	}
-	var err error
-	if events == nil || sourceRevision == nil {
-		loaded, loadErr := r.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: ref})
-		err = loadErr
-		if err != nil {
-			return compactionProgress{}, false, err
-		}
-		events = loaded.Events
-		revision := loaded.Session.Revision
-		sourceRevision = &revision
+	release, err := r.acquireSessionWrite(ctx, ref)
+	if err != nil {
+		return compactionProgress{}, false, err
 	}
+	defer release()
+	loaded, err := r.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: ref})
+	if err != nil {
+		return compactionProgress{}, false, err
+	}
+	activeSession := loaded.Session
+	events := loaded.Events
 	var result compact.Result
 	compactCtx := r.withCompactActivity(ctx, activeSession, turnID, sink)
 	err = r.executeLifecycle(compactCtx, r.lifecycleEvent(compactCtx, agent.LifecycleCompact, "", ""), func(callCtx context.Context) error {
 		var compactErr error
-		result, compactErr = compactFn(callCtx, events)
+		result, compactErr = compactFn(callCtx, activeSession, events)
 		return compactErr
 	})
 	if err != nil {
@@ -283,7 +283,7 @@ func (r *Runtime) compactAndNotify(
 	if progress := compactionProgressFromEvent(result.CompactEvent); progress.hasCompactData && !progress.hasSourceProgress() {
 		return compactionProgress{}, true, nil
 	}
-	persisted, err := r.persistCompactionArtifacts(ctx, activeSession, ref, turnID, *sourceRevision, result)
+	persisted, err := r.persistCompactionArtifacts(ctx, activeSession, ref, turnID, activeSession.Revision, result)
 	if err != nil {
 		r.publishCompactFailureNotice(activeSession, turnID, sink, err)
 		return compactionProgress{}, false, err

@@ -116,7 +116,7 @@ func (r *Runtime) runWithOverflowRecovery(
 		}
 		if recovery, ok := compactionRecoveryFromError(err); ok {
 			*batch = append(*batch, attemptBatch...)
-			progress, compacted, compactErr := r.recoverByCompacting(ctx, activeSession, ref, turnID, req, recovery, currentTurnInput, sink)
+			progress, compacted, compactErr := r.recoverByCompacting(ctx, ref, turnID, req, recovery, currentTurnInput, sink)
 			if compactErr != nil {
 				return compactErr
 			}

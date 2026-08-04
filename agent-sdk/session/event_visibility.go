@@ -33,6 +33,13 @@ func IsClientReplayEvent(event *Event) bool {
 	if event == nil || IsTransient(event) || IsJournal(event) {
 		return false
 	}
+	// Agent-authored Context is durable model input, not a client-feed fact.
+	// Unless it carries an explicit protocol or usage projection, treating it
+	// as the replay tail produces a boundary that the ACP projector cannot
+	// materialize.
+	if EventTypeOf(event) == EventTypeContext && event.Protocol == nil && UsageSnapshotFromSessionEvent(event) == nil {
+		return false
+	}
 	return IsCanonicalHistoryEvent(event) || IsMirror(event)
 }
 

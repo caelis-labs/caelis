@@ -184,6 +184,56 @@ func TestStateServiceMapsCheckpointLagToRevisionConflict(t *testing.T) {
 	}
 }
 
+func TestStateServiceAcceptsCheckpointCoveredByNonProjectingCanonicalEvent(t *testing.T) {
+	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := &checkpointPageReader{active: session.Session{
+		SessionRef: session.SessionRef{SessionID: "session-1"}, Revision: 2,
+	}, events: []*session.Event{
+		durableProtocolEvent(1, "accepted before Agent completion"),
+		{
+			ID: "agent-completion-context", SessionID: "session-1", Seq: 2,
+			Type: session.EventTypeContext, Visibility: session.VisibilityCanonical,
+			Actor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "reviewer-agent"},
+			Text:  "Subagent @reviewer is completed.",
+		},
+	}}
+	feeds, err := NewFeedRegistry(FeedRegistryConfig{Reader: reader, CursorCodec: codec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed, err := feeds.Session(session.SessionRef{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := feed.Publish(projectedEnvelope(1, "accepted before Agent completion")); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewStateService(StateServiceConfig{
+		Sessions: readerSessionLookup{reader}, Runtime: staticRuntimeStateReader{}, Feeds: feeds,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, err := reader.EventCheckpoint(context.Background(), session.SessionRef{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checkpoint.ThroughSeq != 2 || checkpoint.LastClientReplayEvent == nil || checkpoint.LastClientReplayEvent.Seq != 1 {
+		t.Fatalf("checkpoint = %#v, want durable high-water 2 and projectable feed tail 1", checkpoint)
+	}
+
+	state, err := service.State(context.Background(), StateRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("State() error = %v, want checkpoint ThroughSeq to cover the accepted durable feed", err)
+	}
+	if state.Revision != 2 {
+		t.Fatalf("State() revision = %d, want 2", state.Revision)
+	}
+}
+
 func TestReconnectStateUsesExactFeedCutModeGapAndBoundary(t *testing.T) {
 	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {

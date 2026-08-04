@@ -33,6 +33,12 @@ func (r *Runtime) SendAgentMessage(ctx context.Context, ref session.SessionRef, 
 }
 
 func (r *Runtime) deliverAgentMessageToMain(ctx context.Context, ref session.SessionRef, req agentmessage.Request) (agentmessage.Response, error) {
+	release, err := r.acquireSessionWrite(ctx, ref)
+	if err != nil {
+		return agentmessage.Response{}, err
+	}
+	defer release()
+
 	activeSession, err := r.sessions.Session(ctx, ref)
 	if err != nil {
 		return agentmessage.Response{}, err

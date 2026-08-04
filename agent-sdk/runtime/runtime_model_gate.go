@@ -13,13 +13,11 @@ import (
 )
 
 type autoCompactDecision struct {
-	Reason         string
-	Kind           compactionRecoveryKind
-	Usage          compact.UsageSnapshot
-	RequestTokens  int
-	Model          model.LLM
-	Events         []*session.Event
-	SourceRevision uint64
+	Reason        string
+	Kind          compactionRecoveryKind
+	Usage         compact.UsageSnapshot
+	RequestTokens int
+	Model         model.LLM
 }
 
 type autoCompactRequiredError struct {
@@ -175,13 +173,11 @@ func (r *Runtime) autoCompactDecisionBeforeModelRequest(
 		return autoCompactDecision{}, nil
 	}
 	return autoCompactDecision{
-		Reason:         modelRequestWatermarkReason(trigger.Reason),
-		Kind:           compactionRecoveryKindWatermark,
-		Usage:          view.usage,
-		RequestTokens:  view.requestTokens,
-		Model:          llm,
-		Events:         view.events,
-		SourceRevision: view.sourceRevision,
+		Reason:        modelRequestWatermarkReason(trigger.Reason),
+		Kind:          compactionRecoveryKindWatermark,
+		Usage:         view.usage,
+		RequestTokens: view.requestTokens,
+		Model:         llm,
 	}, nil
 }
 
@@ -204,21 +200,17 @@ func (r *Runtime) autoCompactDecisionAfterModelRequestFailure(
 		return autoCompactDecision{}, false, nil
 	}
 	return autoCompactDecision{
-		Reason:         "model_request_retry_exhausted_high_water",
-		Kind:           compactionRecoveryKindRetryExhausted,
-		Usage:          view.usage,
-		RequestTokens:  view.requestTokens,
-		Model:          llm,
-		Events:         view.events,
-		SourceRevision: view.sourceRevision,
+		Reason:        "model_request_retry_exhausted_high_water",
+		Kind:          compactionRecoveryKindRetryExhausted,
+		Usage:         view.usage,
+		RequestTokens: view.requestTokens,
+		Model:         llm,
 	}, true, nil
 }
 
 type autoCompactModelRequestView struct {
-	usage          compact.UsageSnapshot
-	requestTokens  int
-	events         []*session.Event
-	sourceRevision uint64
+	usage         compact.UsageSnapshot
+	requestTokens int
 }
 
 func (r *Runtime) autoCompactModelRequestView(
@@ -251,10 +243,8 @@ func (r *Runtime) autoCompactModelRequestView(
 		return autoCompactModelRequestView{}, false, nil
 	}
 	return autoCompactModelRequestView{
-		usage:          usage,
-		requestTokens:  requestTokens,
-		events:         events,
-		sourceRevision: loaded.Session.Revision,
+		usage:         usage,
+		requestTokens: requestTokens,
 	}, true, nil
 }
 
