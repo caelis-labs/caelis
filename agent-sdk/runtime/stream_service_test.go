@@ -378,14 +378,14 @@ func TestRehydrateRunningCommandRejectsCheckpointAheadOfModelObservation(t *test
 	}
 }
 
-func TestRehydrateCommandRejectsExhaustedStreamEventCursor(t *testing.T) {
+func TestRehydrateRunningCommandRejectsExhaustedStreamEventCursor(t *testing.T) {
 	t.Parallel()
 
 	entry := &taskapi.Entry{
 		TaskID:    "task-1",
 		Session:   session.SessionRef{SessionID: "session-1"},
-		State:     taskapi.StateCompleted,
-		Running:   false,
+		State:     taskapi.StateRunning,
+		Running:   true,
 		CreatedAt: time.Unix(100, 0),
 		UpdatedAt: time.Unix(200, 0),
 		Metadata: map[string]any{
@@ -395,6 +395,40 @@ func TestRehydrateCommandRejectsExhaustedStreamEventCursor(t *testing.T) {
 	if _, err := (&taskRuntime{}).rehydrateCommandTask(entry); err == nil ||
 		!strings.Contains(err.Error(), "event cursor is exhausted") {
 		t.Fatalf("rehydrateCommandTask() error = %v, want exhausted event cursor rejection", err)
+	}
+}
+
+func TestRehydrateTerminalCommandAllowsExhaustedStreamEventCursor(t *testing.T) {
+	t.Parallel()
+
+	entry := &taskapi.Entry{
+		TaskID:    "task-1",
+		Session:   session.SessionRef{SessionID: "session-1"},
+		State:     taskapi.StateUnknownOutcome,
+		Running:   false,
+		CreatedAt: time.Unix(100, 0),
+		UpdatedAt: time.Unix(200, 0),
+		Result:    map[string]any{"state": string(taskapi.StateUnknownOutcome), "error": "outcome unavailable"},
+		Metadata: map[string]any{
+			"state":                      string(taskapi.StateUnknownOutcome),
+			"running":                    false,
+			"command_phase":              commandPhaseUnknown,
+			commandStreamEventCursorMeta: int64(math.MaxInt64),
+		},
+	}
+	task, err := (&taskRuntime{}).rehydrateCommandTask(entry)
+	if err != nil {
+		t.Fatalf("rehydrateCommandTask() error = %v", err)
+	}
+	snapshot, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatalf("readCommand() error = %v", err)
+	}
+	frames := stream.FramesForSnapshot(snapshot)
+	if snapshot.State != string(taskapi.StateUnknownOutcome) || snapshot.Running || !snapshot.TerminalFramed ||
+		snapshot.Cursor.Events != math.MaxInt64 || len(frames) != 1 || !frames[0].Closed ||
+		frames[0].Cursor.Events != math.MaxInt64 {
+		t.Fatalf("terminal exhausted-cursor snapshot = %#v frames = %#v", snapshot, frames)
 	}
 }
 

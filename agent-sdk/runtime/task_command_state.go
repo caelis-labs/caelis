@@ -74,9 +74,11 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 		metadata: session.CloneState(entry.Metadata),
 	}
 	if eventCursor, ok := taskInt64Value(entry.Metadata[commandStreamEventCursorMeta]); ok && eventCursor >= 0 {
-		if eventCursor == math.MaxInt64 {
+		if eventCursor == math.MaxInt64 && (entry.Running || !stream.IsTerminalState(string(entry.State))) {
 			return nil, fmt.Errorf("agent-sdk/runtime: command stream event cursor is exhausted")
 		}
+		// A terminal task cannot advance an exhausted event frontier, but it can
+		// still be observed through the terminal snapshot at that frontier.
 		task.streamEventBase = eventCursor
 	}
 	if task.parentCall == "" {
