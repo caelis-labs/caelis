@@ -90,6 +90,7 @@ type childRun struct {
 	mu              sync.RWMutex
 	state           delegation.State
 	outputPreview   string
+	actionSummary   subagentActionSummary
 	failureDetail   string
 	result          string
 	agentText       string
@@ -364,6 +365,7 @@ func (r *Runner) Message(ctx context.Context, anchor delegation.Anchor, req suba
 	run.state = delegation.StateRunning
 	run.running = true
 	run.outputPreview = ""
+	run.actionSummary.reset()
 	run.failureDetail = ""
 	run.result = ""
 	run.agentText = ""
@@ -802,25 +804,6 @@ func trimStringPtr(value *string) string {
 	return strings.TrimSpace(*value)
 }
 
-func compactPreview(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-	lines := strings.FieldsFunc(text, func(r rune) bool { return r == '\n' || r == '\r' })
-	if len(lines) == 0 {
-		return ""
-	}
-	last := strings.TrimSpace(lines[len(lines)-1])
-	if last == "" {
-		last = strings.TrimSpace(text)
-	}
-	if len(last) <= 160 {
-		return last
-	}
-	return strings.TrimSpace(last[:80]) + " ...[truncated]... " + strings.TrimSpace(last[len(last)-48:])
-}
-
 func subagentPromptFailureDetail(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "subagent prompt timed out"
@@ -852,29 +835,45 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 				event = run.acpUpdateEvent(env, run.updatedAt)
 				markSubagentInputEvent(event)
 			case client.UpdateAgentMessage:
-				textOverride := run.appendAgentMessageChunkLocked(update.MessageID, text)
-				run.outputPreview = compactPreview(run.agentText)
-				if textOverride != "" {
-					event = run.acpUpdateEvent(env, run.updatedAt, textOverride)
+				if run.running {
+					textOverride := run.appendAgentMessageChunkLocked(update.MessageID, text)
+					run.actionSummary.observeAssistant(run.agentText)
+					run.outputPreview = run.actionSummary.previewOrEmpty()
+					if textOverride != "" {
+						event = run.acpUpdateEvent(env, run.updatedAt, textOverride)
+					}
 				}
 			case client.UpdateAgentThought:
-				run.clearFinalAssistantLocked()
+				if run.running {
+					run.clearFinalAssistantLocked()
+					run.actionSummary.observeThought(update.MessageID, text)
+					run.outputPreview = run.actionSummary.previewOrEmpty()
+				}
 				event = run.acpUpdateEvent(env, run.updatedAt)
 			default:
 				break
 			}
 		}
 	case client.ToolCall:
-		run.clearFinalAssistantLocked()
-		run.outputPreview = compactPreview(toolActivity(update.Title, update.Kind, update.Status))
+		if run.running {
+			run.clearFinalAssistantLocked()
+			run.actionSummary.observeAction(toolActivity(update.Title, update.Kind, update.Status))
+			run.outputPreview = run.actionSummary.previewOrEmpty()
+		}
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	case client.ToolCallUpdate:
-		run.clearFinalAssistantLocked()
-		run.outputPreview = compactPreview(toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)))
+		if run.running {
+			run.clearFinalAssistantLocked()
+			run.actionSummary.observeAction(toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)))
+			run.outputPreview = run.actionSummary.previewOrEmpty()
+		}
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	case client.PlanUpdate:
-		run.clearFinalAssistantLocked()
-		run.outputPreview = "updating plan"
+		if run.running {
+			run.clearFinalAssistantLocked()
+			run.actionSummary.observeAction(planActivity(update.Entries))
+			run.outputPreview = run.actionSummary.previewOrEmpty()
+		}
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	}
 	if event != nil {
