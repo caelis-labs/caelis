@@ -19,7 +19,10 @@ const (
 	runningPhaseReview     runningActivityPhase = "review"
 	runningPhaseInterrupt  runningActivityPhase = "interrupt"
 	runningPhaseRetrying   runningActivityPhase = "retrying"
+	runningPhaseCompact    runningActivityPhase = "compact"
 )
+
+const runningCompactActivityKey = "context-compact"
 
 type runningActivityTarget string
 
@@ -194,6 +197,20 @@ func (t *runningHintTracker) complete(key string, now time.Time) {
 	if len(t.active) == 0 && !t.focusForeground {
 		t.setModelWait(now)
 	}
+}
+
+func (t *runningHintTracker) completeFocus(key string, now time.Time) {
+	key = strings.TrimSpace(key)
+	if key == "" || t.focus.Key != key {
+		return
+	}
+	t.focus = runningActivityState{
+		Phase:     runningPhaseModelWait,
+		Key:       "model",
+		StartedAt: now,
+	}
+	t.focusForeground = len(t.active) == 0
+	t.foregroundKey = ""
 }
 
 func (t *runningHintTracker) setModelWait(now time.Time) {

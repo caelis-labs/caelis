@@ -142,6 +142,7 @@ func canonicalOutputFidelityEvents() []*session.Event {
 		{
 			ID:         "spawn-start-1",
 			SessionID:  "session-1",
+			Seq:        1,
 			Type:       session.EventTypeToolCall,
 			Visibility: session.VisibilityCanonical,
 			Time:       time.Unix(300, 0),
@@ -159,6 +160,7 @@ func canonicalOutputFidelityEvents() []*session.Event {
 		{
 			ID:         "task-wait-final-1",
 			SessionID:  "session-1",
+			Seq:        2,
 			Type:       session.EventTypeToolResult,
 			Visibility: session.VisibilityCanonical,
 			Time:       time.Unix(301, 0),

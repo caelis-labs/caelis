@@ -79,6 +79,20 @@ func TestProjectReplayEventsSkipsCompactNotice(t *testing.T) {
 	}
 }
 
+func TestProjectReplayEventsSkipsTransientEnvelope(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectReplayEvents([]eventstream.Envelope{{
+		Kind:      eventstream.KindLifecycle,
+		Scope:     eventstream.ScopeMain,
+		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		Lifecycle: &eventstream.Lifecycle{State: "context_compacting"},
+	}}, nil)
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want transient envelope skipped during replay", events)
+	}
+}
+
 func TestProjectReplayEventsProjectsMainDurableTrace(t *testing.T) {
 	t.Parallel()
 

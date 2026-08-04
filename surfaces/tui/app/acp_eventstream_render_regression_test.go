@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/evalharness"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -198,6 +199,56 @@ func TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBefore
 		if strings.TrimSpace(plain[i]) == "" {
 			t.Fatalf("whitespace-only assistant chunk inserted fixed blank spacing before tool header at row %d: %#v", i, plain)
 		}
+	}
+}
+
+func TestRegressionACPEventstreamContextCompactingHint120x32(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{
+		AppName:     "CAELIS",
+		Version:     "dev",
+		Workspace:   "/tmp/workspace",
+		ModelAlias:  "minimax/MiniMax-M1",
+		Commands:    DefaultCommands(),
+		Wizards:     DefaultWizards(),
+		NoColor:     true,
+		NoAnimation: true,
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
+	model = updated.(*Model)
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+
+	for _, env := range []eventstream.Envelope{
+		{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "sess-regression",
+			TurnID:    "turn-compact",
+			Scope:     eventstream.ScopeMain,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentThought,
+				Content:       schema.TextContent{Type: "text", Text: "Reviewing the remaining context budget."},
+			},
+		},
+		{
+			Kind:      eventstream.KindLifecycle,
+			SessionID: "sess-regression",
+			TurnID:    "turn-compact",
+			Scope:     eventstream.ScopeMain,
+			Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+			Lifecycle: &eventstream.Lifecycle{State: session.LifecycleStatusContextCompacting},
+		},
+	} {
+		updated, _ = model.Update(env)
+		model = updated.(*Model)
+	}
+
+	frame := evalharness.NormalizeFrame(model.View().Content)
+	if !strings.Contains(frame, "Compacting context") {
+		t.Fatalf("context compacting frame missing dedicated hint:\n%s", frame)
+	}
+	if strings.Contains(frame, "Thinking ·") || strings.Contains(frame, session.LifecycleStatusContextCompacting) {
+		t.Fatalf("context compacting frame leaked generic/internal status:\n%s", frame)
 	}
 }
 

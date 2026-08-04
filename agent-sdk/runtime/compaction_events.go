@@ -33,6 +33,19 @@ func buildCompactEvent(activeSession session.Session, compactText string, data c
 	}
 }
 
+func buildCompactActivityEvent(activeSession session.Session, turnID string, occurredAt time.Time) *session.Event {
+	scope := defaultScope(activeSession, turnID)
+	return session.MarkUIOnly(&session.Event{
+		Type:  session.EventTypeLifecycle,
+		Time:  occurredAt,
+		Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
+		Scope: &scope,
+		Lifecycle: &session.EventLifecycle{
+			Status: session.LifecycleStatusContextCompacting,
+		},
+	})
+}
+
 func buildCompactNoticeEvent(activeSession session.Session, turnID string, occurredAt time.Time) *session.Event {
 	scope := defaultScope(activeSession, turnID)
 	event := &session.Event{

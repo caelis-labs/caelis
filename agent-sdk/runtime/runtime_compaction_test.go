@@ -82,11 +82,21 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 	userIndex := slices.IndexFunc(runEvents, func(event *session.Event) bool {
 		return event != nil && event.Type == session.EventTypeUser && strings.Contains(session.EventText(event), "continue")
 	})
+	activityIndex := slices.IndexFunc(runEvents, func(event *session.Event) bool {
+		return event != nil && event.Lifecycle != nil &&
+			event.Lifecycle.Status == session.LifecycleStatusContextCompacting
+	})
 	noticeIndex := slices.IndexFunc(runEvents, func(event *session.Event) bool {
 		notice, ok := session.NoticeOf(event)
 		return ok && notice.Text == compact.CompactNoticeLabel
 	})
-	if userIndex < 0 || noticeIndex < 0 || userIndex > noticeIndex {
+	if activityIndex < 0 || noticeIndex < 0 || activityIndex > noticeIndex {
+		t.Fatalf("runner event order = %#v, want compact activity before compact notice", runEvents)
+	}
+	if runEvents[activityIndex].Visibility != session.VisibilityUIOnly {
+		t.Fatalf("compact activity visibility = %q, want ui_only", runEvents[activityIndex].Visibility)
+	}
+	if userIndex < 0 || userIndex > noticeIndex {
 		t.Fatalf("runner event order = %#v, want user echo before compact notice", runEvents)
 	}
 	if slices.ContainsFunc(runEvents, func(event *session.Event) bool {
@@ -115,6 +125,10 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 		if event != nil && event.Type == session.EventTypeUser &&
 			strings.Contains(session.EventText(event), "continue") && event.Scope != nil {
 			inputTurnID = strings.TrimSpace(event.Scope.TurnID)
+		}
+		if event != nil && event.Lifecycle != nil &&
+			event.Lifecycle.Status == session.LifecycleStatusContextCompacting {
+			t.Fatalf("transient compact activity was persisted: %+v", event)
 		}
 		if event != nil && event.Type == session.EventTypeCompact {
 			if strings.TrimSpace(event.IdempotencyKey) == "" {
@@ -1667,6 +1681,7 @@ func TestRuntimeDoesNotCompactProductionSizedInlineImagesBelowProviderWatermark(
 
 	var finalText string
 	sawCompactNotice := false
+	sawCompactActivity := false
 	for event, seqErr := range result.Handle.Events() {
 		if seqErr != nil {
 			t.Fatalf("runner error = %v", seqErr)
@@ -1677,12 +1692,16 @@ func TestRuntimeDoesNotCompactProductionSizedInlineImagesBelowProviderWatermark(
 		if notice, ok := session.NoticeOf(event); ok && notice.Text == compact.CompactNoticeLabel {
 			sawCompactNotice = true
 		}
+		if event != nil && event.Lifecycle != nil &&
+			event.Lifecycle.Status == session.LifecycleStatusContextCompacting {
+			sawCompactActivity = true
+		}
 	}
 	if finalText != "completed without false compact" {
 		t.Fatalf("finalText = %q, want completed response", finalText)
 	}
-	if sawCompactNotice {
-		t.Fatal("unexpected live compact notice for provider usage below watermark")
+	if sawCompactNotice || sawCompactActivity {
+		t.Fatalf("unexpected compact activity below provider watermark: notice=%v activity=%v", sawCompactNotice, sawCompactActivity)
 	}
 	if testModel.compactionCalls != 0 {
 		t.Fatalf("compactionCalls = %d, want 0", testModel.compactionCalls)
@@ -1768,6 +1787,10 @@ func TestRuntimeAutoCompactFailurePublishesLiveNotice(t *testing.T) {
 	if !strings.Contains(seqErr.Error(), "streaming is required") {
 		t.Fatalf("runner error = %v, want compact provider detail", seqErr)
 	}
+	activityIndex := slices.IndexFunc(events, func(event *session.Event) bool {
+		return event != nil && event.Lifecycle != nil &&
+			event.Lifecycle.Status == session.LifecycleStatusContextCompacting
+	})
 	noticeIndex := slices.IndexFunc(events, func(event *session.Event) bool {
 		notice, ok := session.NoticeOf(event)
 		return ok &&
@@ -1776,8 +1799,8 @@ func TestRuntimeAutoCompactFailurePublishesLiveNotice(t *testing.T) {
 			strings.Contains(notice.Text, compact.CompactFailureLabel) &&
 			strings.Contains(notice.Text, "streaming is required")
 	})
-	if noticeIndex < 0 {
-		t.Fatalf("runner events = %#v, want compact failure notice", events)
+	if activityIndex < 0 || noticeIndex < 0 || activityIndex > noticeIndex {
+		t.Fatalf("runner events = %#v, want compact activity before compact failure notice", events)
 	}
 	if events[noticeIndex].Visibility != session.VisibilityUIOnly {
 		t.Fatalf("compact failure notice visibility = %q, want ui_only", events[noticeIndex].Visibility)
@@ -1798,6 +1821,10 @@ func TestRuntimeAutoCompactFailurePublishesLiveNotice(t *testing.T) {
 	for _, event := range loaded.Events {
 		if session.IsNotice(event) {
 			t.Fatalf("compact failure notice must not be persisted: %#v", event)
+		}
+		if event != nil && event.Lifecycle != nil &&
+			event.Lifecycle.Status == session.LifecycleStatusContextCompacting {
+			t.Fatalf("transient compact activity was persisted: %+v", event)
 		}
 		if event != nil && event.Type == session.EventTypeCompact {
 			t.Fatalf("failed compact must not persist compact event: %#v", event)

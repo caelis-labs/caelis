@@ -24,6 +24,11 @@ type EventLifecycle struct {
 	Meta   map[string]any `json:"meta,omitempty"`
 }
 
+// LifecycleStatusContextCompacting marks the transient interval in which the
+// Runtime is generating a context checkpoint. It is not a durable checkpoint
+// or a terminal Turn lifecycle state.
+const LifecycleStatusContextCompacting = "context_compacting"
+
 // EventTool is the durable SDK tool-execution payload for one tool call or
 // result event. ACP wire shapes are derived from this payload by surface
 // projectors; they are not the storage contract.

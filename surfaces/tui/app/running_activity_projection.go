@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
@@ -71,14 +73,24 @@ func (m *Model) applyTranscriptRunningActivity(event TranscriptEvent) {
 			)
 		}
 		m.refreshRunningActivity()
+	case TranscriptEventNotice:
+		if event.NoticeKind == transcript.NoticeKindCompact ||
+			strings.HasPrefix(strings.TrimSpace(event.Text), display.CompactFailureNoticeLabel) {
+			m.runningHintTracker.completeFocus(runningCompactActivityKey, time.Now())
+			m.refreshRunningActivity()
+		}
 	case TranscriptEventPlan:
 		m.runningHintTracker.setFocus(runningPhaseThinking, "", "plan", time.Now())
 		m.refreshRunningActivity()
 	case TranscriptEventTool:
 		m.applyToolRunningActivity(event)
 	case TranscriptEventLifecycle:
-		if strings.EqualFold(strings.TrimSpace(event.State), "attempt_reset") &&
-			transcript.MetaBool(event.Meta, "caelis", "runtime", "attempt_reset", "retrying") {
+		switch {
+		case strings.EqualFold(strings.TrimSpace(event.State), session.LifecycleStatusContextCompacting):
+			m.runningHintTracker.setFocus(runningPhaseCompact, "", runningCompactActivityKey, time.Now())
+			m.refreshRunningActivity()
+		case strings.EqualFold(strings.TrimSpace(event.State), "attempt_reset") &&
+			transcript.MetaBool(event.Meta, "caelis", "runtime", "attempt_reset", "retrying"):
 			// attempt_reset clears only speculative model output. Active tool
 			// owners represent external work started by an earlier completed
 			// model step and must remain observable across the retry.

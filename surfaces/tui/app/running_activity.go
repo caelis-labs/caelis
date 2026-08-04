@@ -28,6 +28,8 @@ func (phase runningActivityPhase) label() string {
 		return "Interrupting"
 	case runningPhaseRetrying:
 		return "Retrying"
+	case runningPhaseCompact:
+		return "Compacting context"
 	default:
 		return ""
 	}

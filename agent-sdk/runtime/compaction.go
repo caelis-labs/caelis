@@ -143,6 +143,7 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 		}, nil
 	}
 
+	notifyCompactionStarted(ctx)
 	compactText, err := c.generateCompactMarkdown(ctx, req.Model, baseText, summaryEvents)
 	if err != nil {
 		return compact.Result{}, err

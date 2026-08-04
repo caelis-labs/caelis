@@ -19,6 +19,7 @@ func (r *Runtime) prepareInvocationContext(
 	turnID string,
 	req agent.RunRequest,
 	pendingInput *session.Event,
+	sink *runner,
 ) (invocationContext, error) {
 	if err := r.recoverRuntimeState(ctx, ref); err != nil {
 		return invocationContext{}, err
@@ -32,7 +33,8 @@ func (r *Runtime) prepareInvocationContext(
 	if state == nil {
 		state = map[string]any{}
 	}
-	result, err := r.compactor.Prepare(ctx, compact.Request{
+	compactCtx := r.withCompactActivity(ctx, loaded.Session, turnID, sink)
+	result, err := r.compactor.Prepare(compactCtx, compact.Request{
 		Session:       loaded.Session,
 		SessionRef:    ref,
 		Events:        events,
@@ -164,9 +166,9 @@ func (r *Runtime) compactAfterOverflow(
 	cause error,
 	sink *runner,
 ) (compactionProgress, bool, error) {
-	return r.compactAndNotify(ctx, activeSession, ref, turnID, nil, nil, sink, func(events []*session.Event) (compact.Result, error) {
+	return r.compactAndNotify(ctx, activeSession, ref, turnID, nil, nil, sink, func(compactCtx context.Context, events []*session.Event) (compact.Result, error) {
 		sourceEvents, pendingEvents := overflowCompactionEvents(events, currentTurnInput)
-		return r.compactor.CompactOnOverflow(ctx, compact.Request{
+		return r.compactor.CompactOnOverflow(compactCtx, compact.Request{
 			Session:       activeSession,
 			SessionRef:    ref,
 			Events:        sourceEvents,
@@ -230,8 +232,8 @@ func (r *Runtime) compactAfterModelRequestWatermark(
 	if decision.Events != nil {
 		events = decision.Events
 	}
-	return r.compactAndNotify(ctx, activeSession, ref, turnID, events, &sourceRevision, sink, func(events []*session.Event) (compact.Result, error) {
-		return forceCompactor.Force(ctx, compact.Request{
+	return r.compactAndNotify(ctx, activeSession, ref, turnID, events, &sourceRevision, sink, func(compactCtx context.Context, events []*session.Event) (compact.Result, error) {
+		return forceCompactor.Force(compactCtx, compact.Request{
 			Session:    activeSession,
 			SessionRef: ref,
 			Events:     events,
@@ -248,7 +250,7 @@ func (r *Runtime) compactAndNotify(
 	events []*session.Event,
 	sourceRevision *uint64,
 	sink *runner,
-	compactFn func([]*session.Event) (compact.Result, error),
+	compactFn func(context.Context, []*session.Event) (compact.Result, error),
 ) (compactionProgress, bool, error) {
 	if compactFn == nil {
 		return compactionProgress{}, false, errors.New("agent-sdk/runtime: compact function is required")
@@ -265,9 +267,10 @@ func (r *Runtime) compactAndNotify(
 		sourceRevision = &revision
 	}
 	var result compact.Result
-	err = r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleCompact, "", ""), func(context.Context) error {
+	compactCtx := r.withCompactActivity(ctx, activeSession, turnID, sink)
+	err = r.executeLifecycle(compactCtx, r.lifecycleEvent(compactCtx, agent.LifecycleCompact, "", ""), func(callCtx context.Context) error {
 		var compactErr error
-		result, compactErr = compactFn(events)
+		result, compactErr = compactFn(callCtx, events)
 		return compactErr
 	})
 	if err != nil {

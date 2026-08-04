@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	sdkmodel "github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -2654,6 +2655,118 @@ func TestHandleACPEventEnvelopeSuppressesImageAttachmentUserEcho(t *testing.T) {
 	}
 }
 
+func TestHandleACPEventEnvelopeShowsContextCompactingHintUntilSuccessNotice(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		TurnID:    "turn-1",
+		Scope:     eventstream.ScopeMain,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentThought,
+			Content:       schema.TextContent{Type: "text", Text: "Checking the remaining context."},
+		},
+	})
+	if hint := model.buildHintText(); !strings.Contains(hint, "Thinking") {
+		t.Fatalf("pre-compact hint = %q, want Thinking", hint)
+	}
+
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindLifecycle,
+		SessionID: "session-1",
+		TurnID:    "turn-1",
+		Scope:     eventstream.ScopeMain,
+		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		Lifecycle: &eventstream.Lifecycle{State: session.LifecycleStatusContextCompacting},
+	})
+	if model.runningActivity.Phase != runningPhaseCompact {
+		t.Fatalf("runningActivity = %#v, want context compacting", model.runningActivity)
+	}
+	if hint := model.buildHintText(); !strings.Contains(hint, "Compacting context") || strings.Contains(hint, "Thinking") {
+		t.Fatalf("compacting hint = %q, want dedicated compact phase without Thinking", hint)
+	}
+	block := requireMainACPTurnBlockForTest(t, model)
+	if block.Status == session.LifecycleStatusContextCompacting {
+		t.Fatalf("main Turn status = %q, transient compact activity must remain hint-only", block.Status)
+	}
+
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		TurnID:    "turn-1",
+		Scope:     eventstream.ScopeMain,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateCompact,
+			Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
+		},
+		Final: true,
+	})
+	if model.runningActivity.Phase != runningPhaseModelWait {
+		t.Fatalf("runningActivity = %#v, want model wait after compact completes", model.runningActivity)
+	}
+	if hint := model.buildHintText(); strings.Contains(hint, "Compacting context") {
+		t.Fatalf("post-compact hint = %q, want compact activity cleared", hint)
+	}
+	block = requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) == 0 || block.Events[len(block.Events)-1].Text != "• "+transcript.CompactNoticeLabel {
+		t.Fatalf("main ACP events = %#v, want existing compacted notice", block.Events)
+	}
+}
+
+func TestHandleACPEventEnvelopeClearsContextCompactingHintOnFailureAndTurnCancel(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name     string
+		terminal eventstream.Envelope
+		want     runningActivityPhase
+	}{
+		{
+			name: "failure notice",
+			terminal: eventstream.Envelope{
+				Kind:   eventstream.KindNotice,
+				Scope:  eventstream.ScopeMain,
+				Notice: display.CompactFailureNoticeLabel + ": provider unavailable",
+			},
+			want: runningPhaseModelWait,
+		},
+		{
+			name: "turn cancellation",
+			terminal: eventstream.Envelope{
+				Kind:      eventstream.KindLifecycle,
+				Scope:     eventstream.ScopeMain,
+				Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateCancelled},
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			model := NewModel(Config{NoColor: true, NoAnimation: true})
+			model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+			model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+				Kind:      eventstream.KindLifecycle,
+				SessionID: "session-1",
+				TurnID:    "turn-1",
+				Scope:     eventstream.ScopeMain,
+				Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+				Lifecycle: &eventstream.Lifecycle{State: session.LifecycleStatusContextCompacting},
+			})
+			terminal := test.terminal
+			terminal.SessionID = "session-1"
+			terminal.TurnID = "turn-1"
+			model = applyACPEnvelopeForTest(t, model, terminal)
+			if model.runningActivity.Phase != test.want {
+				t.Fatalf("runningActivity = %#v, want phase %q", model.runningActivity, test.want)
+			}
+			if hint := model.buildHintText(); strings.Contains(hint, "Compacting context") {
+				t.Fatalf("terminal hint = %q, want compact activity cleared", hint)
+			}
+		})
+	}
+}
+
 func TestHandleACPEventEnvelopeAnchorsCompactNoticeInMainTurn(t *testing.T) {
 	t.Parallel()
 
@@ -2869,6 +2982,39 @@ func TestProjectResumeReplayEventsUsesACPEnvelopeTrace(t *testing.T) {
 	}
 	if events[1].Kind != TranscriptEventLifecycle || events[1].State != "completed" {
 		t.Fatalf("lifecycle replay event = %#v, want completed lifecycle", events[1])
+	}
+}
+
+func TestResumeReplayDoesNotRestoreTransientContextCompactingHint(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+	model.applyTranscriptRunningActivity(TranscriptEvent{
+		Kind:  TranscriptEventLifecycle,
+		Scope: ACPProjectionMain,
+		State: session.LifecycleStatusContextCompacting,
+	})
+	if model.runningActivity.Phase != runningPhaseCompact {
+		t.Fatalf("runningActivity = %#v, want compact before reconnect", model.runningActivity)
+	}
+
+	model.resetConversationView()
+	replay := projectResumeReplayEvents([]eventstream.Envelope{{
+		Kind:      eventstream.KindLifecycle,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeMain,
+		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		Lifecycle: &eventstream.Lifecycle{State: session.LifecycleStatusContextCompacting},
+	}})
+	if len(replay) != 0 {
+		t.Fatalf("projectResumeReplayEvents() = %#v, want transient compact activity filtered at replay boundary", replay)
+	}
+	for _, event := range replay {
+		model = applyTranscriptEventForTest(t, model, event)
+	}
+	if model.runningActivity.Phase != "" || strings.Contains(model.buildHintText(), "Compacting context") {
+		t.Fatalf("replayed compact activity restored stale hint: %#v %q", model.runningActivity, model.buildHintText())
 	}
 }
 

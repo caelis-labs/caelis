@@ -429,6 +429,31 @@ func TestProjectSessionEventNotificationsPreservesCustomNotificationsAndAppendsU
 	}
 }
 
+func TestProjectSessionEventEnvelopeProjectsContextCompactingAsTransientLifecycle(t *testing.T) {
+	event := session.MarkUIOnly(&session.Event{
+		Type: session.EventTypeLifecycle,
+		Lifecycle: &session.EventLifecycle{
+			Status: session.LifecycleStatusContextCompacting,
+		},
+	})
+	base := EnvelopeBaseFromSessionEvent(
+		session.SessionRef{SessionID: "session-1"},
+		event,
+		SessionEventTransport{RunID: "run-1", TurnID: "turn-1"},
+	)
+	events := ProjectSessionEventEnvelope(base, event)
+	if len(events) != 1 || events[0].Kind != eventstream.KindLifecycle || events[0].Lifecycle == nil ||
+		events[0].Lifecycle.State != session.LifecycleStatusContextCompacting {
+		t.Fatalf("context compacting projection = %#v, want one lifecycle envelope", events)
+	}
+	if events[0].Delivery == nil || events[0].Delivery.Mode != eventstream.DeliveryTransient || events[0].Position != nil {
+		t.Fatalf("context compacting delivery = %#v position=%#v, want transient and unpositioned", events[0].Delivery, events[0].Position)
+	}
+	if eventstream.IsTurnTerminalLifecycle(events[0]) {
+		t.Fatalf("context compacting envelope ended the Turn: %#v", events[0])
+	}
+}
+
 func TestProjectSessionEventEnvelopeProjectsParticipantAndLifecycleExtensions(t *testing.T) {
 	participant := ProjectSessionEventEnvelope(eventstream.Envelope{
 		Cursor:        "participant-1",
