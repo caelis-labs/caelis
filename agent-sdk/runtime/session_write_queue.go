@@ -17,8 +17,11 @@ type sessionWriteQueue struct {
 }
 
 type sessionWriteTicket struct {
-	done sync.Once
-	wake chan struct{}
+	done     sync.Once
+	ready    chan struct{}
+	previous *sessionWriteTicket
+	next     *sessionWriteTicket
+	admitted bool
 }
 
 func (q *sessionWriteQueue) acquire(ctx context.Context, ref session.SessionRef) (func(), error) {
@@ -33,22 +36,26 @@ func (q *sessionWriteQueue) acquire(ctx context.Context, ref session.SessionRef)
 		return func() {}, nil
 	}
 
-	ticket := &sessionWriteTicket{wake: make(chan struct{})}
+	ticket := &sessionWriteTicket{ready: make(chan struct{})}
 	q.mu.Lock()
 	if q.tails == nil {
 		q.tails = map[string]*sessionWriteTicket{}
 	}
 	predecessor := q.tails[key]
+	ticket.previous = predecessor
+	if predecessor != nil {
+		predecessor.next = ticket
+	} else {
+		ticket.admitted = true
+		close(ticket.ready)
+	}
 	q.tails[key] = ticket
 	q.mu.Unlock()
 
 	finish := func() {
 		ticket.done.Do(func() {
-			close(ticket.wake)
 			q.mu.Lock()
-			if q.tails[key] == ticket {
-				delete(q.tails, key)
-			}
+			q.finishLocked(key, ticket)
 			q.mu.Unlock()
 		})
 	}
@@ -56,18 +63,61 @@ func (q *sessionWriteQueue) acquire(ctx context.Context, ref session.SessionRef)
 		return finish, nil
 	}
 	select {
-	case <-predecessor.wake:
+	case <-ticket.ready:
 		return finish, nil
 	case <-ctx.Done():
-		// Preserve the registered FIFO chain even when this waiter leaves. Its
-		// successor may already be queued behind it, so pass admission onward
-		// only after the predecessor completes.
-		go func() {
-			<-predecessor.wake
-			finish()
-		}()
+		// Retire the ticket synchronously. If admission raced with
+		// cancellation, advance its successor; otherwise unlink it from the
+		// pending chain without leaving a goroutine waiting on its predecessor.
+		ticket.done.Do(func() {
+			q.mu.Lock()
+			if ticket.admitted {
+				q.finishLocked(key, ticket)
+			} else {
+				q.unlinkLocked(key, ticket)
+			}
+			q.mu.Unlock()
+		})
 		return nil, ctx.Err()
 	}
+}
+
+func (q *sessionWriteQueue) finishLocked(key string, ticket *sessionWriteTicket) {
+	if ticket == nil {
+		return
+	}
+	next := ticket.next
+	if next != nil {
+		next.previous = nil
+		next.admitted = true
+		close(next.ready)
+	} else if q.tails[key] == ticket {
+		delete(q.tails, key)
+	}
+	ticket.previous = nil
+	ticket.next = nil
+}
+
+func (q *sessionWriteQueue) unlinkLocked(key string, ticket *sessionWriteTicket) {
+	if ticket == nil {
+		return
+	}
+	previous := ticket.previous
+	next := ticket.next
+	if previous != nil {
+		previous.next = next
+	}
+	if next != nil {
+		next.previous = previous
+	} else if q.tails[key] == ticket {
+		if previous == nil {
+			delete(q.tails, key)
+		} else {
+			q.tails[key] = previous
+		}
+	}
+	ticket.previous = nil
+	ticket.next = nil
 }
 
 func (r *Runtime) acquireSessionWrite(ctx context.Context, ref session.SessionRef) (func(), error) {

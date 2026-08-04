@@ -70,6 +70,7 @@ type corpusWireEnvelope struct {
 	Update            json.RawMessage                  `json:"update"`
 	Permission        *schema.RequestPermissionRequest `json:"permission"`
 	Notice            string                           `json:"notice"`
+	NoticeKind        eventstream.NoticeKind           `json:"notice_kind"`
 	ApprovalReview    *eventstream.ApprovalReview      `json:"approval_review"`
 	Participant       *eventstream.Participant         `json:"participant"`
 	Lifecycle         *eventstream.Lifecycle           `json:"lifecycle"`
@@ -154,7 +155,7 @@ func decodeTranscriptCorpusEnvelope(t *testing.T, raw json.RawMessage) decodedCo
 		SessionID: wire.SessionID, HandleID: wire.HandleID, RunID: wire.RunID, TurnID: wire.TurnID,
 		Scope: wire.Scope, ScopeID: wire.ScopeID, Actor: wire.Actor, ParticipantID: wire.ParticipantID,
 		Final: wire.Final, ParentTool: wire.ParentTool, Delivery: wire.Delivery,
-		ApprovalRequestID: wire.ApprovalRequestID, Permission: wire.Permission, Notice: wire.Notice,
+		ApprovalRequestID: wire.ApprovalRequestID, Permission: wire.Permission, Notice: wire.Notice, NoticeKind: wire.NoticeKind,
 		ApprovalReview: wire.ApprovalReview, Participant: wire.Participant, Lifecycle: wire.Lifecycle,
 		Meta: wire.Meta, Error: wire.Error,
 	}

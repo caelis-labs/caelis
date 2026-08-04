@@ -93,6 +93,39 @@ func TestSessionWriteQueueCancellationPassesAdmissionToSuccessor(t *testing.T) {
 	thirdRelease()
 }
 
+func TestSessionWriteQueueCancellationUnlinksBeforePredecessorCompletes(t *testing.T) {
+	t.Parallel()
+
+	var queue sessionWriteQueue
+	ref := session.SessionRef{SessionID: "cancelled-tail-session"}
+	firstRelease, err := queue.acquire(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := sessionWriteTailForTest(&queue, ref)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	secondDone := make(chan error, 1)
+	go func() {
+		_, acquireErr := queue.acquire(ctx, ref)
+		secondDone <- acquireErr
+	}()
+	waitForSessionWriteTailChange(t, &queue, ref, first)
+
+	cancel()
+	if err := <-secondDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled acquire error = %v, want context.Canceled", err)
+	}
+	if tail := sessionWriteTailForTest(&queue, ref); tail != first {
+		t.Fatalf("tail after cancellation = %p, want predecessor %p", tail, first)
+	}
+
+	firstRelease()
+	if tail := sessionWriteTailForTest(&queue, ref); tail != nil {
+		t.Fatalf("tail after predecessor release = %p, want nil", tail)
+	}
+}
+
 func sessionWriteTailForTest(queue *sessionWriteQueue, ref session.SessionRef) *sessionWriteTicket {
 	key := session.NormalizeSessionRef(ref).SessionID
 	queue.mu.Lock()

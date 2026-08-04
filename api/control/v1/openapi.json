@@ -934,6 +934,7 @@
       "ParticipantRole": {"type": "string", "enum": ["sidecar", "delegated", "observer"]},
       "DeliveryMode": {"type": "string", "enum": ["canonical", "mirror", "transient"]},
       "EnvelopeKind": {"type": "string", "enum": ["session/update", "session/request_permission", "caelis/notice", "caelis/participant", "caelis/lifecycle", "caelis/approval_review", "caelis/error"]},
+      "NoticeKind": {"type": "string", "enum": ["compact", "compact_failed"]},
       "WriteBase": {
         "type": "object",
         "properties": {
@@ -1246,7 +1247,7 @@
       },
       "SessionUpdateEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["update"], "properties": {"kind": {"const": "session/update"}, "update": {"$ref": "#/components/schemas/ACPUpdate"}}}], "unevaluatedProperties": false},
       "RequestPermissionEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["approval_request_id", "permission"], "properties": {"kind": {"const": "session/request_permission"}, "approval_request_id": {"type": "string", "minLength": 1}, "permission": {"$ref": "#/components/schemas/RequestPermission"}}}], "unevaluatedProperties": false},
-      "NoticeEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["notice"], "properties": {"kind": {"const": "caelis/notice"}, "notice": {"type": "string"}}}], "unevaluatedProperties": false},
+      "NoticeEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["notice"], "properties": {"kind": {"const": "caelis/notice"}, "notice": {"type": "string"}, "notice_kind": {"$ref": "#/components/schemas/NoticeKind"}}}], "unevaluatedProperties": false},
       "ParticipantEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["participant"], "properties": {"kind": {"const": "caelis/participant"}, "participant": {"$ref": "#/components/schemas/ParticipantEvent"}}}], "unevaluatedProperties": false},
       "LifecycleEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["lifecycle"], "properties": {"kind": {"const": "caelis/lifecycle"}, "lifecycle": {"$ref": "#/components/schemas/LifecycleEvent"}}}], "unevaluatedProperties": false},
       "ApprovalReviewEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["approval_review"], "properties": {"kind": {"const": "caelis/approval_review"}, "approval_review": {"$ref": "#/components/schemas/ApprovalReview"}}}], "unevaluatedProperties": false},

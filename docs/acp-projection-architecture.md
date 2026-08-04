@@ -42,6 +42,7 @@ Typed Envelope fields are authoritative for:
 - scope, participant, and parent-tool relation;
 - delivery mode and feed position;
 - approval identity;
+- normalized lifecycle and notice kinds independently from display text;
 - resume Cursor.
 
 `Envelope.Cursor` is the only public resume token. Event IDs, projection IDs,

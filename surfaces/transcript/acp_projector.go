@@ -79,13 +79,9 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 		}
 	case eventstream.KindNotice:
 		if text := strings.TrimSpace(env.Notice); text != "" {
-			noticeKind := NoticeKind("")
-			if text == CompactNoticeLabel {
-				noticeKind = NoticeKindCompact
-			}
 			out = append(out, Event{
 				Kind:          EventNotice,
-				NoticeKind:    noticeKind,
+				NoticeKind:    NoticeKind(env.NoticeKind),
 				Scope:         scope,
 				ScopeID:       scopeID,
 				Actor:         strings.TrimSpace(env.Actor),

@@ -48,8 +48,9 @@ const CompactNoticeLabel = display.CompactNoticeLabel
 type NoticeKind string
 
 const (
-	NoticeKindCompact    NoticeKind = "compact"
-	NoticeKindModelRetry NoticeKind = "model_retry"
+	NoticeKindCompact       NoticeKind = "compact"
+	NoticeKindCompactFailed NoticeKind = "compact_failed"
+	NoticeKindModelRetry    NoticeKind = "model_retry"
 )
 
 type PlanEntry struct {

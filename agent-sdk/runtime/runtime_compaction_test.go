@@ -88,7 +88,7 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 	})
 	noticeIndex := slices.IndexFunc(runEvents, func(event *session.Event) bool {
 		notice, ok := session.NoticeOf(event)
-		return ok && notice.Text == compact.CompactNoticeLabel
+		return ok && notice.Kind == session.EventNoticeKindCompact && notice.Text == compact.CompactNoticeLabel
 	})
 	if activityIndex < 0 || noticeIndex < 0 || activityIndex > noticeIndex {
 		t.Fatalf("runner event order = %#v, want compact activity before compact notice", runEvents)
@@ -1795,7 +1795,7 @@ func TestRuntimeAutoCompactFailurePublishesLiveNotice(t *testing.T) {
 		notice, ok := session.NoticeOf(event)
 		return ok &&
 			notice.Level == "warning" &&
-			notice.Kind == "compact_failed" &&
+			notice.Kind == session.EventNoticeKindCompactFailed &&
 			strings.Contains(notice.Text, compact.CompactFailureLabel) &&
 			strings.Contains(notice.Text, "streaming is required")
 	})

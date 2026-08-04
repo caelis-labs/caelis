@@ -10,7 +10,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	sdkmodel "github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -2727,9 +2726,10 @@ func TestHandleACPEventEnvelopeClearsContextCompactingHintOnFailureAndTurnCancel
 		{
 			name: "failure notice",
 			terminal: eventstream.Envelope{
-				Kind:   eventstream.KindNotice,
-				Scope:  eventstream.ScopeMain,
-				Notice: display.CompactFailureNoticeLabel + ": provider unavailable",
+				Kind:       eventstream.KindNotice,
+				Scope:      eventstream.ScopeMain,
+				Notice:     "localized compact failure",
+				NoticeKind: eventstream.NoticeKindCompactFailed,
 			},
 			want: runningPhaseModelWait,
 		},
@@ -2827,11 +2827,12 @@ func TestHandleACPEventEnvelopeCollapsesCanonicalAndTransientCompactSignals(t *t
 		Final: true,
 	}
 	transient := eventstream.Envelope{
-		Kind:      eventstream.KindNotice,
-		SessionID: "session-1",
-		TurnID:    "turn-1",
-		Scope:     eventstream.ScopeMain,
-		Notice:    transcript.CompactNoticeLabel,
+		Kind:       eventstream.KindNotice,
+		SessionID:  "session-1",
+		TurnID:     "turn-1",
+		Scope:      eventstream.ScopeMain,
+		Notice:     transcript.CompactNoticeLabel,
+		NoticeKind: eventstream.NoticeKindCompact,
 	}
 
 	for _, test := range []struct {
@@ -2873,11 +2874,12 @@ func TestHandleACPEventEnvelopeKeepsRepeatedCompactionsVisibleOnceEach(t *testin
 			Final: true,
 		})
 		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
-			Kind:      eventstream.KindNotice,
-			SessionID: "session-1",
-			TurnID:    "turn-1",
-			Scope:     eventstream.ScopeMain,
-			Notice:    transcript.CompactNoticeLabel,
+			Kind:       eventstream.KindNotice,
+			SessionID:  "session-1",
+			TurnID:     "turn-1",
+			Scope:      eventstream.ScopeMain,
+			Notice:     transcript.CompactNoticeLabel,
+			NoticeKind: eventstream.NoticeKindCompact,
 		})
 	}
 

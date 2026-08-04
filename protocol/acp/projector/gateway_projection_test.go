@@ -109,6 +109,7 @@ func TestProjectSessionEventEnvelopeProjectsNoticeEventstreamOnly(t *testing.T) 
 		SessionID: "session-1",
 		Type:      session.EventTypeNotice,
 	}, "notice", compact.CompactNoticeLabel)
+	event.Notice.Kind = session.EventNoticeKindCompact
 	events := ProjectSessionEventEnvelope(eventstream.Envelope{
 		SessionID: "session-1",
 		Scope:     eventstream.ScopeMain,
@@ -120,8 +121,23 @@ func TestProjectSessionEventEnvelopeProjectsNoticeEventstreamOnly(t *testing.T) 
 	if events[0].Kind != eventstream.KindNotice || events[0].Notice != compact.CompactNoticeLabel {
 		t.Fatalf("projected notice = %#v, want eventstream notice", events[0])
 	}
+	if events[0].NoticeKind != eventstream.NoticeKindCompact {
+		t.Fatalf("projected notice kind = %q, want compact", events[0].NoticeKind)
+	}
 	if eventstream.UpdateType(events[0].Update) != "" {
 		t.Fatalf("projected notice update = %#v, want eventstream-only notice", events[0].Update)
+	}
+}
+
+func TestProjectSessionEventEnvelopeUpgradesLegacyCompactNoticeKind(t *testing.T) {
+	event := session.MarkNotice(&session.Event{
+		ID:        "notice-legacy-compact",
+		SessionID: "session-1",
+		Type:      session.EventTypeNotice,
+	}, "notice", compact.CompactNoticeLabel)
+	events := ProjectSessionEventEnvelope(eventstream.Envelope{SessionID: "session-1"}, event)
+	if len(events) != 1 || events[0].NoticeKind != eventstream.NoticeKindCompact {
+		t.Fatalf("projected legacy compact notice = %#v, want typed compact kind", events)
 	}
 }
 

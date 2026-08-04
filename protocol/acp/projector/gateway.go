@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -441,6 +442,7 @@ func projectSessionEventstreamOnlyEvents(base eventstream.Envelope, event *sessi
 		next := base
 		next.Kind = eventstream.KindNotice
 		next.Notice = strings.TrimSpace(notice.Text)
+		next.NoticeKind = projectNoticeKind(notice)
 		return []eventstream.Envelope{next}
 	case session.EventTypeParticipant:
 		if event.Protocol == nil {
@@ -468,6 +470,23 @@ func projectSessionEventstreamOnlyEvents(base eventstream.Envelope, event *sessi
 	default:
 		return nil
 	}
+}
+
+func projectNoticeKind(notice session.EventNotice) eventstream.NoticeKind {
+	switch strings.TrimSpace(notice.Kind) {
+	case session.EventNoticeKindCompact:
+		return eventstream.NoticeKindCompact
+	case session.EventNoticeKindCompactFailed:
+		return eventstream.NoticeKindCompactFailed
+	case "":
+		// Compact success notices written before typed notice kinds used this
+		// stable display label. Upgrade them once at the ACP replay boundary so
+		// Surfaces never need to reconstruct lifecycle semantics from text.
+		if strings.TrimSpace(notice.Text) == display.CompactNoticeLabel {
+			return eventstream.NoticeKindCompact
+		}
+	}
+	return ""
 }
 
 func participantEventstreamEnvelope(base eventstream.Envelope, state string, actor string) []eventstream.Envelope {

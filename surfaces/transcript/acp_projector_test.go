@@ -49,6 +49,34 @@ func TestProjectACPEventToEventsUsesTypedRelationAndDeliveryWithoutMetadata(t *t
 	}
 }
 
+func TestProjectACPEventToEventsUsesTypedNoticeKindIndependentOfText(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		kind eventstream.NoticeKind
+		want NoticeKind
+	}{
+		{name: "compact", kind: eventstream.NoticeKindCompact, want: NoticeKindCompact},
+		{name: "compact failed", kind: eventstream.NoticeKindCompactFailed, want: NoticeKindCompactFailed},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			events := ProjectACPEventToEvents(eventstream.Envelope{
+				Kind:       eventstream.KindNotice,
+				Notice:     "localized display text",
+				NoticeKind: test.kind,
+				Scope:      eventstream.ScopeMain,
+			}, nil)
+			if len(events) != 1 {
+				t.Fatalf("events = %#v, want one notice", events)
+			}
+			if events[0].Text != "localized display text" || events[0].NoticeKind != test.want {
+				t.Fatalf("event = %#v, want typed notice independent of display text", events[0])
+			}
+		})
+	}
+}
+
 func TestProjectACPEventToEventsPrefersTypedRelationAndDeliveryOverConflictingLegacyMetadata(t *testing.T) {
 	t.Parallel()
 

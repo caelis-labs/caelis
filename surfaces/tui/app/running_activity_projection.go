@@ -6,7 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -75,7 +74,7 @@ func (m *Model) applyTranscriptRunningActivity(event TranscriptEvent) {
 		m.refreshRunningActivity()
 	case TranscriptEventNotice:
 		if event.NoticeKind == transcript.NoticeKindCompact ||
-			strings.HasPrefix(strings.TrimSpace(event.Text), display.CompactFailureNoticeLabel) {
+			event.NoticeKind == transcript.NoticeKindCompactFailed {
 			m.runningHintTracker.completeFocus(runningCompactActivityKey, time.Now())
 			m.refreshRunningActivity()
 		}

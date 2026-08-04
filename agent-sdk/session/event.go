@@ -9,6 +9,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
+const (
+	EventNoticeKindCompact       = "compact"
+	EventNoticeKindCompactFailed = "compact_failed"
+)
+
 // EventNotice is the structured notice payload for one transient notice event.
 type EventNotice struct {
 	Level string         `json:"level,omitempty"`

@@ -22,6 +22,15 @@ const (
 	KindError             Kind = "caelis/error"
 )
 
+// NoticeKind identifies one normalized runtime notice independently from its
+// display text.
+type NoticeKind string
+
+const (
+	NoticeKindCompact       NoticeKind = "compact"
+	NoticeKindCompactFailed NoticeKind = "compact_failed"
+)
+
 type Scope string
 
 const (
@@ -147,6 +156,7 @@ type Envelope struct {
 	Update     schema.Update                    `json:"update,omitempty"`
 	Permission *schema.RequestPermissionRequest `json:"permission,omitempty"`
 	Notice     string                           `json:"notice,omitempty"`
+	NoticeKind NoticeKind                       `json:"notice_kind,omitempty"`
 
 	ApprovalReview *ApprovalReview `json:"approval_review,omitempty"`
 	Participant    *Participant    `json:"participant,omitempty"`

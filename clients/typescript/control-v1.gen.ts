@@ -531,6 +531,7 @@ export interface NoticeEnvelope {
   handle_id?: string;
   kind: "caelis/notice";
   notice: string;
+  notice_kind?: NoticeKind;
   occurred_at?: string;
   parent_tool?: ParentToolRelation;
   participant_id?: string;
@@ -542,6 +543,8 @@ export interface NoticeEnvelope {
   session_id?: string;
   turn_id?: string;
 }
+
+export type NoticeKind = "compact" | "compact_failed";
 
 export type Outcome = "accepted" | "committed" | "conflicted" | "rejected" | "unknown";
 

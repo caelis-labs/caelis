@@ -26,6 +26,8 @@ type subagentCompletion struct {
 	acknowledge   sync.Once
 }
 
+const subagentCompletionNoticeTimeout = 5 * time.Second
+
 func (completion *subagentCompletion) acknowledgeDurable() {
 	if completion == nil {
 		return
@@ -292,9 +294,9 @@ func (tm *taskRuntime) persistSubagentCompletion(completion *subagentCompletion)
 }
 
 // publishSubagentCompletionNoticeAsync keeps the optional parent hint outside
-// the producer's durable Task/sidecar completion boundary. Its independent
-// goroutine may wait behind an earlier Session write, preserving FIFO without
-// delaying or reopening authoritative completion.
+// the producer's durable Task/sidecar completion boundary. The idempotency key
+// makes a later independent retry safe, but this bounded best-effort attempt
+// never delays or reopens authoritative completion.
 func (tm *taskRuntime) publishSubagentCompletionNoticeAsync(completion *subagentCompletion) {
 	if tm == nil || tm.runtime == nil || completion == nil || completion.task == nil {
 		return
@@ -303,8 +305,10 @@ func (tm *taskRuntime) publishSubagentCompletionNoticeAsync(completion *subagent
 	if !ok {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(completion.ctx), subagentCompletionNoticeTimeout)
 	go func() {
-		_, _ = tm.runtime.deliverAgentMessageToMain(context.WithoutCancel(completion.ctx), ref, req)
+		defer cancel()
+		_, _ = tm.runtime.deliverAgentMessageToMain(ctx, ref, req)
 	}()
 }
 

@@ -397,6 +397,7 @@ type Envelope struct {
 	Kind              string              `json:"kind"`
 	Lifecycle         *LifecycleEvent     `json:"lifecycle,omitempty"`
 	Notice            *string             `json:"notice,omitempty"`
+	NoticeKind        NoticeKind          `json:"notice_kind,omitempty"`
 	OccurredAt        *time.Time          `json:"occurred_at,omitempty"`
 	ParentTool        *ParentToolRelation `json:"parent_tool,omitempty"`
 	Participant       *ParticipantEvent   `json:"participant,omitempty"`
@@ -593,6 +594,7 @@ type NoticeEnvelope struct {
 	HandleId      *string             `json:"handle_id,omitempty"`
 	Kind          string              `json:"kind"`
 	Notice        string              `json:"notice"`
+	NoticeKind    NoticeKind          `json:"notice_kind,omitempty"`
 	OccurredAt    *time.Time          `json:"occurred_at,omitempty"`
 	ParentTool    *ParentToolRelation `json:"parent_tool,omitempty"`
 	ParticipantId *string             `json:"participant_id,omitempty"`
@@ -604,6 +606,13 @@ type NoticeEnvelope struct {
 	SessionId     *string             `json:"session_id,omitempty"`
 	TurnId        *string             `json:"turn_id,omitempty"`
 }
+
+type NoticeKind string
+
+const (
+	NoticeKindCompact       NoticeKind = "compact"
+	NoticeKindCompactFailed NoticeKind = "compact_failed"
+)
 
 type Outcome string
 

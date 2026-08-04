@@ -113,6 +113,7 @@ func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 	for name, envelope := range map[string]eventstream.Envelope{
 		"request_permission": permission,
 		"notice":             noticeEnvelope(),
+		"compact_notice":     compactNoticeEnvelope(),
 		"participant":        participant,
 		"lifecycle":          lifecycle,
 		"approval_review":    review,
@@ -249,6 +250,13 @@ func baseEnvelope(kind eventstream.Kind) eventstream.Envelope {
 func noticeEnvelope() eventstream.Envelope {
 	envelope := baseEnvelope(eventstream.KindNotice)
 	envelope.Notice = "connected"
+	return envelope
+}
+
+func compactNoticeEnvelope() eventstream.Envelope {
+	envelope := baseEnvelope(eventstream.KindNotice)
+	envelope.Notice = "Context compacted"
+	envelope.NoticeKind = eventstream.NoticeKindCompact
 	return envelope
 }
 

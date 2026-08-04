@@ -54,7 +54,11 @@ func buildCompactNoticeEvent(activeSession session.Session, turnID string, occur
 		Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
 		Scope: &scope,
 	}
-	return session.MarkNotice(event, "notice", compact.CompactNoticeLabel)
+	event = session.MarkNotice(event, "notice", compact.CompactNoticeLabel)
+	if event != nil && event.Notice != nil {
+		event.Notice.Kind = session.EventNoticeKindCompact
+	}
+	return event
 }
 
 func buildCompactFailureNoticeEvent(activeSession session.Session, turnID string, occurredAt time.Time, cause error) *session.Event {
@@ -67,7 +71,7 @@ func buildCompactFailureNoticeEvent(activeSession session.Session, turnID string
 	}
 	event = session.MarkNotice(event, "warning", compactFailureNoticeText(cause))
 	if event != nil && event.Notice != nil {
-		event.Notice.Kind = "compact_failed"
+		event.Notice.Kind = session.EventNoticeKindCompactFailed
 	}
 	return event
 }
