@@ -631,6 +631,59 @@ func TestSubagentRosterRefreshTracksContinuedCompletedChild(t *testing.T) {
 	}
 }
 
+func TestSubagentRosterRefreshRetriesAcceptedSendAfterTransientListFailure(t *testing.T) {
+	t.Parallel()
+
+	oldEndedAt := time.Date(2026, time.August, 5, 9, 0, 0, 0, time.Local)
+	restartedAt := oldEndedAt.Add(time.Minute)
+	service := &subagentRosterTestTaskStreamService{
+		list: protocoltaskstream.ListResult{Tasks: []protocoltaskstream.TaskDescriptor{
+			transcriptTaskDescriptor("turn-2", task.StateRunning, true, restartedAt),
+		}},
+		listErrors: []error{context.DeadlineExceeded},
+	}
+	model := NewModel(Config{
+		NoColor: true, NoAnimation: true, TaskStreams: bindTaskStreamTestClient(t, service),
+	})
+	model.currentSessionID = "session-1"
+	view := addSubagentRosterTestView(model, "spawn-rhea", "rhea", "rhea[reviewer]: continue audit", "completed", oldEndedAt.Add(-time.Minute), oldEndedAt)
+	view.block.SessionID = "turn-1"
+	model.subagentRosterTasks = subagentRosterTasksByCallID([]protocoltaskstream.TaskDescriptor{
+		transcriptTaskDescriptor("turn-1", task.StateCompleted, false, oldEndedAt),
+	})
+
+	first := requireSubagentRosterRefreshResult(t, model.requestSubagentRosterRefreshAfterAcceptedSend())
+	if first.err == nil {
+		t.Fatal("first accepted-send roster refresh unexpectedly succeeded")
+	}
+	if cmd := model.handleSubagentRosterRefreshResult(first); cmd == nil {
+		t.Fatal("transient accepted-send roster failure did not schedule a retry")
+	}
+	if !model.subagentRosterRefreshWake || model.subagentRosterRefreshWakeRetries != 1 {
+		t.Fatalf("accepted-send retry state = (%v, %d), want pending wake and one failure", model.subagentRosterRefreshWake, model.subagentRosterRefreshWakeRetries)
+	}
+
+	retryCmd := model.handleSubagentRosterRefreshTick(subagentRosterRefreshTickMsg{
+		sessionID: first.sessionID, generation: first.generation,
+	})
+	result := requireSubagentRosterRefreshResult(t, retryCmd)
+	if result.err != nil {
+		t.Fatalf("accepted-send roster retry error = %v", result.err)
+	}
+	if next := model.handleSubagentRosterRefreshResult(result); next == nil {
+		t.Fatal("running continued child did not resume ordinary roster polling")
+	}
+	if model.subagentRosterRefreshWake || model.subagentRosterRefreshWakeRetries != 0 {
+		t.Fatalf("accepted-send retry state survived successful refresh: (%v, %d)", model.subagentRosterRefreshWake, model.subagentRosterRefreshWakeRetries)
+	}
+	if got := model.subagentRosterRunningCount(); got != 1 {
+		t.Fatalf("running count after retry = %d, want 1", got)
+	}
+	if service.listCalls != 2 {
+		t.Fatalf("roster List calls = %d, want initial failure plus successful retry", service.listCalls)
+	}
+}
+
 func requireSubagentRosterRefreshResult(t *testing.T, cmd tea.Cmd) subagentRosterRefreshResultMsg {
 	t.Helper()
 	commands := []tea.Cmd{cmd}
@@ -728,11 +781,18 @@ func clickSubagentRosterFooter(t *testing.T, model *Model, bounds subagentRoster
 
 type subagentRosterTestTaskStreamService struct {
 	list              protocoltaskstream.ListResult
+	listErrors        []error
+	listCalls         int
 	subscribeRequests chan protocoltaskstream.SubscribeRequest
 	subscription      protocoltaskstream.Subscription
 }
 
 func (s *subagentRosterTestTaskStreamService) List(context.Context, protocoltaskstream.Principal, protocoltaskstream.ListRequest) (protocoltaskstream.ListResult, error) {
+	index := s.listCalls
+	s.listCalls++
+	if index < len(s.listErrors) && s.listErrors[index] != nil {
+		return protocoltaskstream.ListResult{}, s.listErrors[index]
+	}
 	return s.list, nil
 }
 

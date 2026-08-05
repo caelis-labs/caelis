@@ -9,7 +9,10 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
-const subagentRosterRefreshInterval = time.Second
+const (
+	subagentRosterRefreshInterval        = time.Second
+	subagentRosterAcceptedSendRetryLimit = 4
+)
 
 type subagentRosterRefreshResultMsg struct {
 	sessionID  string
@@ -33,12 +36,16 @@ func (m *Model) requestSubagentRosterRefreshAfterAcceptedSend() tea.Cmd {
 	return m.requestSubagentRosterRefreshCommand(true)
 }
 
-func (m *Model) requestSubagentRosterRefreshCommand(queueIfPending bool) tea.Cmd {
+func (m *Model) requestSubagentRosterRefreshCommand(afterAcceptedSend bool) tea.Cmd {
 	if m == nil || m.cfg.TaskStreams == nil || m.subagentRosterCount() == 0 {
 		return nil
 	}
+	if afterAcceptedSend {
+		m.subagentRosterRefreshWake = true
+		m.subagentRosterRefreshWakeRetries = 0
+	}
 	if m.subagentRosterRefreshPending {
-		m.subagentRosterRefreshQueued = m.subagentRosterRefreshQueued || queueIfPending
+		m.subagentRosterRefreshQueued = m.subagentRosterRefreshQueued || afterAcceptedSend
 		return nil
 	}
 	if m.subagentRosterRefreshScheduled {
@@ -87,6 +94,25 @@ func (m *Model) handleSubagentRosterRefreshResult(msg subagentRosterRefreshResul
 		m.subagentRosterRefreshScheduled = false
 		return m.requestSubagentRosterRefresh()
 	}
+	if msg.err == nil {
+		m.subagentRosterRefreshWake = false
+		m.subagentRosterRefreshWakeRetries = 0
+	} else if m.subagentRosterRefreshWake && taskStreamRetryable(msg.err) {
+		m.subagentRosterRefreshWakeRetries++
+		if m.subagentRosterRefreshWakeRetries <= subagentRosterAcceptedSendRetryLimit {
+			m.subagentRosterRefreshScheduled = true
+			sessionID := msg.sessionID
+			generation := msg.generation
+			return tea.Tick(subagentRosterRefreshInterval, func(time.Time) tea.Msg {
+				return subagentRosterRefreshTickMsg{sessionID: sessionID, generation: generation}
+			})
+		}
+		m.subagentRosterRefreshWake = false
+		m.subagentRosterRefreshWakeRetries = 0
+	} else {
+		m.subagentRosterRefreshWake = false
+		m.subagentRosterRefreshWakeRetries = 0
+	}
 	if !m.subagentRosterHasRunning() {
 		m.subagentRosterRefreshScheduled = false
 		return nil
@@ -116,6 +142,8 @@ func (m *Model) resetSubagentRosterRefresh() {
 	m.subagentRosterRefreshPending = false
 	m.subagentRosterRefreshQueued = false
 	m.subagentRosterRefreshScheduled = false
+	m.subagentRosterRefreshWake = false
+	m.subagentRosterRefreshWakeRetries = 0
 	m.subagentRosterTasks = map[string]taskstream.TaskDescriptor{}
 }
 
