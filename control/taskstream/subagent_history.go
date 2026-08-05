@@ -33,6 +33,14 @@ func (s *service) readTaskSnapshot(
 			Cursor: cursor,
 		})
 		if err == nil {
+			if durableSubagentHistoryPreferred(entry, snapshot, cursor) {
+				historical, historyErr := s.loadDurableSubagentHistory(ctx, entry, cursor)
+				if historyErr == nil {
+					return historical, true, nil
+				}
+				// The Runtime current-state snapshot is still usable when the
+				// independently durable child Session cannot be loaded.
+			}
 			return snapshot, false, nil
 		}
 		runtimeErr = err
@@ -52,9 +60,23 @@ func (s *service) readTaskSnapshot(
 }
 
 func durableSubagentHistoryEligible(entry *task.Entry, runtimeErr error) bool {
-	return entry != nil && entry.Kind == task.KindSubagent && !entry.Running &&
-		stream.IsTerminalState(string(entry.State)) &&
+	return terminalSubagentEntry(entry) &&
 		errorcode.CodeOf(runtimeErr) == errorcode.Unavailable
+}
+
+// A Runtime reconstructed from the durable Task index can answer Read while
+// retaining only the current terminal state. When its truncation boundary is
+// ahead of the requested cursor, the child Session is the only complete source
+// for the missing assistant history.
+func durableSubagentHistoryPreferred(entry *task.Entry, snapshot stream.Snapshot, cursor stream.Cursor) bool {
+	return terminalSubagentEntry(entry) && !snapshot.Running &&
+		stream.IsTerminalState(snapshot.State) &&
+		snapshot.EventsTruncatedBefore > cursor.Events
+}
+
+func terminalSubagentEntry(entry *task.Entry) bool {
+	return entry != nil && entry.Kind == task.KindSubagent && !entry.Running &&
+		stream.IsTerminalState(string(entry.State))
 }
 
 func (s *service) loadDurableSubagentHistory(

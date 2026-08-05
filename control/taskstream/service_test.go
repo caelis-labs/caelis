@@ -155,6 +155,73 @@ drained:
 	}
 }
 
+func TestColdTerminalSubagentPrefersDurableHistoryOverTruncatedRuntimeSnapshot(t *testing.T) {
+	t.Parallel()
+
+	entry := taskStreamTestEntry("session-parent", "task-1", task.KindSubagent)
+	entry.Running = false
+	entry.State = task.StateCompleted
+	entry.UpdatedAt = time.Unix(130, 0)
+	entry.Spec = map[string]any{"session_id": "session-child"}
+	entry.Metadata["agent_id"] = "participant-1"
+	entry.Metadata["stream_event_cursor"] = float64(12)
+	runtime := &taskStreamTestRuntime{readSnapshot: func(stream.ReadRequest) (stream.Snapshot, error) {
+		latest := &session.Event{
+			ID: "assistant-2", MessageID: "assistant-2", Type: session.EventTypeAssistant,
+			Time: time.Unix(120, 0), Scope: &session.EventScope{TurnID: "task-1:2"}, Text: "second durable answer",
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)}},
+		}
+		return stream.Snapshot{
+			Ref:    stream.Ref{SessionID: "session-parent", TaskID: "task-1", TerminalID: "task-1:2"},
+			Cursor: stream.Cursor{Events: 13}, EventsTruncatedBefore: 12,
+			State: string(task.StateCompleted), Running: false, TerminalFramed: false,
+			Frames: []stream.Frame{{
+				Ref:    stream.Ref{SessionID: "session-parent", TaskID: "task-1", TerminalID: "task-1:2"},
+				Cursor: stream.Cursor{Events: 13}, EventsTruncatedBefore: 12, Event: latest, UpdatedAt: latest.Time,
+			}},
+		}, nil
+	}}
+	loadCalls := 0
+	loader := taskStreamTestSessionLoader{loaded: session.LoadedSession{Events: []*session.Event{
+		{
+			ID: "assistant-1", MessageID: "assistant-1", Type: session.EventTypeAssistant,
+			Time: time.Unix(100, 0), Scope: &session.EventScope{TurnID: "child-turn-1"}, Text: "first durable answer",
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)}},
+		},
+		{
+			ID: "assistant-2", MessageID: "assistant-2", Type: session.EventTypeAssistant,
+			Time: time.Unix(120, 0), Scope: &session.EventScope{TurnID: "child-turn-2"}, Text: "second durable answer",
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)}},
+		},
+	}}, calls: &loadCalls}
+	service, err := New(Config{
+		Tasks: newTaskStreamTestStore(entry), Streams: func() stream.Service { return runtime }, Sessions: loader,
+		Authorizer: taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret, Generation: "generation-rehydrated",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	batch, err := service.Events(context.Background(), Principal{ID: "owner"}, ReadRequest{
+		SessionID: "session-parent", TaskID: "task-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var texts []string
+	for _, record := range batch.Records {
+		if record.Frame != nil && record.Frame.Event != nil {
+			texts = append(texts, session.EventText(record.Frame.Event))
+		}
+	}
+	if fmt.Sprint(texts) != "[first durable answer second durable answer]" {
+		t.Fatalf("assistant history = %#v, want all durable Turns instead of the reconstructed Runtime final", texts)
+	}
+	if loadCalls != 1 {
+		t.Fatalf("child Session loads = %d, want 1", loadCalls)
+	}
+}
+
 func TestTaskCursorIsBoundToSessionAndTask(t *testing.T) {
 	store := newTaskStreamTestStore(
 		taskStreamTestEntry("session-1", "task-1", task.KindCommand),

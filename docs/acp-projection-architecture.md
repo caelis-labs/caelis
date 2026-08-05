@@ -124,15 +124,17 @@ the same transcript blocks used by the main workspace. Closing the overlay
 cancels only delivery and retains the Document and cursor; reopening resumes.
 When the host restarts, viewing a terminal child must not activate an execution
 Runtime merely to recover presentation history. Control Task-stream first tries
-the live Runtime; if that Session Runtime no longer exists, it lazily rebuilds
-assistant-message history from the durable child Session used by ACP
-`session/load`. Task directory listing never loads child Sessions: only opening
-one child workspace with no resolved in-memory history may subscribe and load
-that selected child. The finite historical subscription excludes tool and
-reasoning history and closes after catch-up; reopening a terminal workspace
-uses its retained presentation cache. This projection changes neither Task
-lifecycle nor parent model context; the Task directory remains the current-state
-authority, and a later accepted `SendMessage` reopens live observation.
+the live Runtime; if that Session Runtime no longer exists, or its terminal
+current-state snapshot reports that the requested assistant prefix was
+truncated, it lazily rebuilds assistant-message history from the durable child
+Session used by ACP `session/load`. Task directory listing never loads child
+Sessions: only opening one child workspace with no resolved in-memory history
+may subscribe and load that selected child. The finite historical subscription
+excludes tool and reasoning history and closes after catch-up; reopening a
+terminal workspace uses its retained presentation cache. This projection
+changes neither Task lifecycle nor parent model context; the Task directory
+remains the current-state authority, and a later accepted `SendMessage` reopens
+live observation.
 Terminal lifecycle frames finalize their transcript segment but do not close a
 visible following workspace, so a later child Turn appears in chronological
 order without exposing Turn identifiers in the UX.
