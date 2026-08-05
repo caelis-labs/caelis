@@ -105,5 +105,5 @@ func (m *systemAgentReasoningRecorder) Generate(_ context.Context, req *model.Re
 }
 
 func (*systemAgentReasoningRecorder) Capabilities() model.Capabilities {
-	return model.Capabilities{StructuredOutput: true}
+	return model.Capabilities{Streaming: true, StructuredOutput: true}
 }

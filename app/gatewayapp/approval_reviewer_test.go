@@ -55,8 +55,8 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 		t.Fatalf("model calls = %d, want %d", got, want)
 	}
 	modelReq := requests[0]
-	if modelReq.Stream {
-		t.Fatal("model request Stream = true, want false")
+	if !modelReq.Stream {
+		t.Fatal("model request Stream = false, want true")
 	}
 	if got := len(modelReq.Tools); got != 0 {
 		t.Fatalf("len(Tools) = %d, want no reviewer tools", got)
@@ -1247,8 +1247,10 @@ func TestApprovalReviewerProviderE2EReportsCachedPromptHit(t *testing.T) {
 		}
 		content := fmt.Sprintf(`{"outcome":"allow","risk_level":"medium","user_authorization":"high","rationale":%q}`, rationale)
 		rawContent, _ := json.Marshal(content)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"model":"cache-provider","choices":[{"message":{"role":"assistant","content":%s},"finish_reason":"stop"}],"usage":{"prompt_tokens":2048,"completion_tokens":32,"total_tokens":2080,"prompt_tokens_details":{"cached_tokens":%d}}}`, rawContent, cached)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: {\"model\":\"cache-provider\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":%s},\"finish_reason\":\"stop\"}]}\n\n", rawContent)
+		_, _ = fmt.Fprintf(w, "data: {\"model\":\"cache-provider\",\"choices\":[],\"usage\":{\"prompt_tokens\":2048,\"completion_tokens\":32,\"total_tokens\":2080,\"prompt_tokens_details\":{\"cached_tokens\":%d}}}\n\n", cached)
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer server.Close()
 
@@ -1527,7 +1529,7 @@ func (m *approvalReviewerFakeModel) Name() string {
 }
 
 func (m *approvalReviewerFakeModel) Capabilities() model.Capabilities {
-	return model.Capabilities{StructuredOutput: !m.disableStructuredOutput}
+	return model.Capabilities{Streaming: true, StructuredOutput: !m.disableStructuredOutput}
 }
 
 func (m *approvalReviewerFakeModel) ContextWindowTokens() int {

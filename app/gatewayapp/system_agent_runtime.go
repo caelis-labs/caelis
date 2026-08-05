@@ -248,7 +248,10 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 			Model: plan.Model,
 			Tools: plan.Tools,
 			Request: agent.ModelRequestOptions{
-				Stream: boolPtr(false),
+				// Approval/Guardian and other system-managed reviews must stream.
+				// Anthropic-compatible SDKs reject long non-streaming requests, and
+				// there is no product path that needs a non-stream Guardian call.
+				Stream: boolPtr(true),
 				Output: plan.Output,
 			},
 			Metadata: metadata,

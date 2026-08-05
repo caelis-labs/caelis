@@ -3,6 +3,7 @@
 package eval
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -171,6 +172,9 @@ func runGuardianE2EScenario(t *testing.T, modelAlias string, scenario guardianE2
 		WorkspaceKey: repo,
 		WorkspaceCWD: repo,
 		ApprovalMode: "auto-review",
+		// Prefer the platform required backend (seatbelt on macOS). Host-only is
+		// reserved for environments where the required backend cannot probe.
+		Sandbox: gatewayapp.SandboxConfig{RequestedType: guardianE2ESandboxBackend()},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -221,6 +225,61 @@ func guardianE2EProviders() []string {
 	return out
 }
 
+func guardianE2ESandboxBackend() string {
+	switch backend := strings.ToLower(strings.TrimSpace(os.Getenv("CAELIS_GUARDIAN_E2E_SANDBOX"))); backend {
+	case "host", "seatbelt", "auto":
+		return backend
+	default:
+		// Empty keeps the product default (platform required backend).
+		return ""
+	}
+}
+
+func filterGuardianE2EModelProfiles(t *testing.T, raw json.RawMessage) json.RawMessage {
+	t.Helper()
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("decode model_profiles: %v", err)
+	}
+	profiles, _ := doc["profiles"].([]any)
+	filtered := make([]any, 0, len(profiles))
+	for _, item := range profiles {
+		profile, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := strings.ToLower(strings.TrimSpace(fmt.Sprint(profile["id"])))
+		if id == "" || strings.HasPrefix(id, "acp:") {
+			continue
+		}
+		backend, _ := profile["backend"].(map[string]any)
+		if backend != nil {
+			if _, hasACP := backend["acp"]; hasACP {
+				continue
+			}
+		}
+		filtered = append(filtered, profile)
+	}
+	doc["profiles"] = filtered
+	if defaultID := strings.ToLower(strings.TrimSpace(fmt.Sprint(doc["default_profile_id"]))); strings.HasPrefix(defaultID, "acp:") {
+		if len(filtered) > 0 {
+			if first, ok := filtered[0].(map[string]any); ok {
+				doc["default_profile_id"] = first["id"]
+			}
+		} else {
+			delete(doc, "default_profile_id")
+		}
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("encode filtered model_profiles: %v", err)
+	}
+	return out
+}
+
 func guardianE2ERepetitions(t *testing.T) int {
 	t.Helper()
 	raw := strings.TrimSpace(os.Getenv("CAELIS_GUARDIAN_E2E_REPETITIONS"))
@@ -265,19 +324,37 @@ func isolatedGuardianE2EStore(t *testing.T) string {
 	if err != nil || strings.TrimSpace(home) == "" {
 		t.Fatalf("UserHomeDir() error = %v", err)
 	}
-	raw, err := os.ReadFile(filepath.Join(home, ".caelis", "config.json"))
+	sourceRoot := filepath.Join(home, ".caelis")
+	raw, err := os.ReadFile(filepath.Join(sourceRoot, "config.json"))
 	if err != nil {
 		t.Fatalf("read local config: %v", err)
 	}
 	var source struct {
-		Models json.RawMessage `json:"models"`
+		SchemaVersion int             `json:"schema_version"`
+		Models        json.RawMessage `json:"models"`
+		ModelProfiles json.RawMessage `json:"model_profiles"`
+		Runtime       json.RawMessage `json:"runtime"`
 	}
 	if err := json.Unmarshal(raw, &source); err != nil {
 		t.Fatalf("decode local config: %v", err)
 	}
+	if source.SchemaVersion == 0 {
+		source.SchemaVersion = 2
+	}
+	// Drop ACP/external profiles that require external_agents so the isolated
+	// store can boot with only provider-backed models + credentials.
+	profiles := filterGuardianE2EModelProfiles(t, source.ModelProfiles)
 	minimal, err := json.Marshal(struct {
-		Models json.RawMessage `json:"models"`
-	}{Models: source.Models})
+		SchemaVersion int             `json:"schema_version"`
+		Models        json.RawMessage `json:"models"`
+		ModelProfiles json.RawMessage `json:"model_profiles,omitempty"`
+		Runtime       json.RawMessage `json:"runtime,omitempty"`
+	}{
+		SchemaVersion: source.SchemaVersion,
+		Models:        source.Models,
+		ModelProfiles: profiles,
+		Runtime:       source.Runtime,
+	})
 	if err != nil {
 		t.Fatalf("encode isolated model config: %v", err)
 	}
@@ -285,7 +362,32 @@ func isolatedGuardianE2EStore(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(root, "config.json"), minimal, 0o600); err != nil {
 		t.Fatalf("write isolated model config: %v", err)
 	}
-	sourceCredentialPath := codexauth.DefaultCredentialPath(filepath.Join(home, ".caelis"))
+	// Copy managed API-key credentials by opaque file identity only. Do not log
+	// or surface credential contents into test output.
+	sourceCredDir := filepath.Join(sourceRoot, "providers", "credentials")
+	targetCredDir := filepath.Join(root, "providers", "credentials")
+	if entries, err := os.ReadDir(sourceCredDir); err == nil {
+		if err := os.MkdirAll(targetCredDir, 0o700); err != nil {
+			t.Fatalf("create isolated credential directory: %v", err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			src := filepath.Join(sourceCredDir, entry.Name())
+			dst := filepath.Join(targetCredDir, entry.Name())
+			data, readErr := os.ReadFile(src)
+			if readErr != nil {
+				t.Fatalf("copy credential %s: %v", entry.Name(), readErr)
+			}
+			if writeErr := os.WriteFile(dst, data, 0o600); writeErr != nil {
+				t.Fatalf("write credential %s: %v", entry.Name(), writeErr)
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("read credential directory: %v", err)
+	}
+	sourceCredentialPath := codexauth.DefaultCredentialPath(sourceRoot)
 	credential, err := os.ReadFile(sourceCredentialPath)
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatalf("read Codex OAuth credential: %v", err)

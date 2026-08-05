@@ -237,7 +237,7 @@ func (*guardianMainSummaryCompactionProbe) Name() string {
 }
 
 func (*guardianMainSummaryCompactionProbe) Capabilities() model.Capabilities {
-	return model.Capabilities{StructuredOutput: true}
+	return model.Capabilities{Streaming: true, StructuredOutput: true}
 }
 
 func (m *guardianMainSummaryCompactionProbe) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {

@@ -319,7 +319,7 @@ type systemManagedGuardianCompactionModel struct {
 func (*systemManagedGuardianCompactionModel) Name() string { return "guardian-compaction-probe" }
 
 func (*systemManagedGuardianCompactionModel) Capabilities() model.Capabilities {
-	return model.Capabilities{StructuredOutput: true}
+	return model.Capabilities{Streaming: true, StructuredOutput: true}
 }
 
 func (m *systemManagedGuardianCompactionModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
@@ -570,7 +570,7 @@ type systemManagedAgentResponseModel struct{}
 func (systemManagedAgentResponseModel) Name() string { return "system-managed-response" }
 
 func (systemManagedAgentResponseModel) Capabilities() model.Capabilities {
-	return model.Capabilities{StructuredOutput: true}
+	return model.Capabilities{Streaming: true, StructuredOutput: true}
 }
 
 func (systemManagedAgentResponseModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
@@ -590,7 +590,7 @@ func (m systemManagedAgentTestModel) Name() string {
 }
 
 func (m systemManagedAgentTestModel) Capabilities() model.Capabilities {
-	return model.Capabilities{StructuredOutput: true}
+	return model.Capabilities{Streaming: true, StructuredOutput: true}
 }
 
 func (m systemManagedAgentTestModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {

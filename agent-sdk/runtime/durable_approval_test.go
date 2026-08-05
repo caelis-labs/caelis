@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,10 +21,24 @@ type postCommitApprovalService struct {
 	failResolved atomic.Bool
 }
 
+type rejectResolvedApprovalService struct {
+	session.Service
+	rejectResolved atomic.Bool
+}
+
 type cancelAfterCommitApprovalService struct {
 	session.Service
 	armed  atomic.Bool
 	cancel context.CancelFunc
+}
+
+func (s *rejectResolvedApprovalService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+	if s.rejectResolved.Load() {
+		if token := pauseTokenFromEvent(req.Event); token != nil && token.Status == session.PauseTokenResolved {
+			return nil, errors.New("simulated durable resolve failure")
+		}
+	}
+	return s.Service.AppendEvent(ctx, req)
 }
 
 func (s *cancelAfterCommitApprovalService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
@@ -195,6 +210,238 @@ func TestRequestDurableApprovalExposesPauseTokenIDToRequester(t *testing.T) {
 		}
 	}
 	t.Fatalf("requester pause token id %q was not persisted", observed.PauseTokenID)
+}
+
+func TestRequestDurableApprovalRequesterFailureLeavesStartedJournal(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "approval-request-fail")
+	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	const runID = "run-approval-request-fail"
+	const turnID = "turn-approval-request-fail"
+	if err := runtime.startRunTurnJournal(context.Background(), activeSession.SessionRef, runID, turnID); err != nil {
+		t.Fatalf("startRunTurnJournal() error = %v", err)
+	}
+
+	wantErr := errors.New("guardian execution failed")
+	_, err = runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
+		SessionRef: activeSession.SessionRef,
+		Session:    activeSession,
+		RunID:      runID,
+		TurnID:     turnID,
+		Tool:       tool.Definition{Name: "WRITE"},
+		Call:       tool.Call{ID: "call-approval-request-fail", Name: "WRITE"},
+	}, approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		return agent.ApprovalResponse{}, wantErr
+	}))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("requestDurableApproval() error = %v, want %v", err, wantErr)
+	}
+
+	state, err := runtime.RunState(context.Background(), activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("RunState() error = %v", err)
+	}
+	if state.Status != agent.RunLifecycleStatusRunning || state.WaitingApproval {
+		t.Fatalf("RunState() = %+v, want running without waiting_approval", state)
+	}
+
+	events, err := sessions.Events(context.Background(), session.EventsRequest{
+		SessionRef:       activeSession.SessionRef,
+		IncludeTransient: true,
+	})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	latest := latestRunTurnRecords(events, runID, turnID)
+	if len(latest) == 0 {
+		t.Fatal("missing run/turn journal records after approval failure")
+	}
+	for _, record := range latest {
+		if record.Status != session.ExecutionStarted {
+			t.Fatalf("%s journal status = %q, want started after approval requester failure", record.Kind, record.Status)
+		}
+	}
+	var latestPause session.PauseToken
+	for _, event := range events {
+		token := pauseTokenFromEvent(event)
+		if token == nil || token.RunID != runID {
+			continue
+		}
+		if token.Revision >= latestPause.Revision {
+			latestPause = session.ClonePauseToken(*token)
+		}
+	}
+	if latestPause.Status != session.PauseTokenCancelled {
+		t.Fatalf("pause token status = %q, want cancelled", latestPause.Status)
+	}
+
+	// Turn completion must remain legal after a Guardian/auto-review failure.
+	if err := runtime.transitionRunTurnJournal(context.Background(), activeSession.SessionRef, runID, turnID, session.ExecutionSucceeded, ""); err != nil {
+		t.Fatalf("transitionRunTurnJournal(succeeded) error = %v, want legal started -> succeeded", err)
+	}
+}
+
+func TestRequestDurableApprovalResolveFailureLeavesStartedJournal(t *testing.T) {
+	t.Parallel()
+
+	base, activeSession := newTestSessionService(t, "approval-resolve-fail")
+	sessions := &rejectResolvedApprovalService{Service: base}
+	sessions.rejectResolved.Store(true)
+	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	const runID = "run-approval-resolve-fail"
+	const turnID = "turn-approval-resolve-fail"
+	if err := runtime.startRunTurnJournal(context.Background(), activeSession.SessionRef, runID, turnID); err != nil {
+		t.Fatalf("startRunTurnJournal() error = %v", err)
+	}
+
+	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}
+	_, err = runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
+		SessionRef: activeSession.SessionRef,
+		Session:    activeSession,
+		RunID:      runID,
+		TurnID:     turnID,
+		Tool:       tool.Definition{Name: "WRITE"},
+		Call:       tool.Call{ID: "call-approval-resolve-fail", Name: "WRITE"},
+	}, approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		return decision, nil
+	}))
+	if err == nil || !strings.Contains(err.Error(), "simulated durable resolve failure") {
+		t.Fatalf("requestDurableApproval() error = %v, want resolve failure", err)
+	}
+
+	state, err := runtime.RunState(context.Background(), activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("RunState() error = %v", err)
+	}
+	if state.Status != agent.RunLifecycleStatusRunning || state.WaitingApproval {
+		t.Fatalf("RunState() = %+v, want running without waiting_approval", state)
+	}
+
+	events, err := sessions.Events(context.Background(), session.EventsRequest{
+		SessionRef:       activeSession.SessionRef,
+		IncludeTransient: true,
+	})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	for _, record := range latestRunTurnRecords(events, runID, turnID) {
+		if record.Status != session.ExecutionStarted {
+			t.Fatalf("%s journal status = %q, want started after resolve failure", record.Kind, record.Status)
+		}
+	}
+	var latestPause session.PauseToken
+	for _, event := range events {
+		token := pauseTokenFromEvent(event)
+		if token == nil || token.RunID != runID {
+			continue
+		}
+		if token.Revision >= latestPause.Revision {
+			latestPause = session.ClonePauseToken(*token)
+		}
+	}
+	if latestPause.Status != session.PauseTokenCancelled {
+		t.Fatalf("pause token status = %q, want cancelled after unresolved resolve failure", latestPause.Status)
+	}
+	if err := runtime.transitionRunTurnJournal(context.Background(), activeSession.SessionRef, runID, turnID, session.ExecutionSucceeded, ""); err != nil {
+		t.Fatalf("transitionRunTurnJournal(succeeded) error = %v", err)
+	}
+}
+
+func TestRequestDurableApprovalCancelDoesNotForceStarted(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "approval-request-cancel")
+	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	const runID = "run-approval-request-cancel"
+	const turnID = "turn-approval-request-cancel"
+	if err := runtime.startRunTurnJournal(context.Background(), activeSession.SessionRef, runID, turnID); err != nil {
+		t.Fatalf("startRunTurnJournal() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		_, requestErr := runtime.requestDurableApproval(ctx, agent.ApprovalRequest{
+			SessionRef: activeSession.SessionRef,
+			Session:    activeSession,
+			RunID:      runID,
+			TurnID:     turnID,
+			Tool:       tool.Definition{Name: "WRITE"},
+			Call:       tool.Call{ID: "call-approval-request-cancel", Name: "WRITE"},
+		}, approvalRequesterFunc(func(callCtx context.Context, _ agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			close(started)
+			<-callCtx.Done()
+			return agent.ApprovalResponse{}, callCtx.Err()
+		}))
+		result <- requestErr
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("approval requester did not start")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("requestDurableApproval() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("requestDurableApproval() did not return after cancel")
+	}
+
+	state, err := runtime.RunState(context.Background(), activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("RunState() error = %v", err)
+	}
+	// Cancel must not force the continue-after-tool-error path (Running without wait).
+	if state.Status == agent.RunLifecycleStatusRunning && !state.WaitingApproval {
+		t.Fatalf("RunState() = %+v, cancel must not force continue-ready Running", state)
+	}
+	events, err := sessions.Events(context.Background(), session.EventsRequest{
+		SessionRef:       activeSession.SessionRef,
+		IncludeTransient: true,
+	})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	var sawWaiting bool
+	for _, record := range latestRunTurnRecords(events, runID, turnID) {
+		switch record.Status {
+		case session.ExecutionWaitingApproval:
+			sawWaiting = true
+		case session.ExecutionSucceeded, session.ExecutionFailed, session.ExecutionCancelled:
+			t.Fatalf("%s journal status = %q after cancel, want waiting_approval left for terminal owner", record.Kind, record.Status)
+		}
+	}
+	if !sawWaiting {
+		t.Fatalf("run/turn journal missing waiting_approval after cancel: %#v", latestRunTurnRecords(events, runID, turnID))
+	}
+	var latestPause session.PauseToken
+	for _, event := range events {
+		token := pauseTokenFromEvent(event)
+		if token == nil || token.RunID != runID {
+			continue
+		}
+		if token.Revision >= latestPause.Revision {
+			latestPause = session.ClonePauseToken(*token)
+		}
+	}
+	if latestPause.Status != session.PauseTokenCancelled {
+		t.Fatalf("pause token status = %q, want cancelled after cancel", latestPause.Status)
+	}
 }
 
 func TestResolveApprovalRedeliversMatchingDurableDecision(t *testing.T) {

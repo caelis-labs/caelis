@@ -107,24 +107,102 @@ func (r *Runtime) requestDurableApproval(
 		req.PauseTokenID = token.TokenID
 		decision, err := requester.RequestApproval(ctx, req)
 		if err != nil {
-			_ = r.cancelPauseToken(context.WithoutCancel(ctx), req.SessionRef, token, err.Error())
-			return agent.ApprovalResponse{}, err
+			// Cancellation/deadline is owned by the turn cancel path. Only drop the
+			// pause token; do not force started/Running (that races cancel_requested).
+			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				_ = r.cancelPendingPauseToken(context.WithoutCancel(ctx), req.SessionRef, token, err.Error())
+				return agent.ApprovalResponse{}, err
+			}
+			// Guardian/auto-review failures surface as tool errors and the main
+			// Turn keeps running, so leave waiting_approval for a stable started
+			// state instead of blocking later terminal transitions.
+			return agent.ApprovalResponse{}, r.joinApprovalCleanup(err, r.abandonWaitingApproval(ctx, req, token, err.Error()))
 		}
 		if err := r.ResolveApproval(ctx, agent.ResolveApprovalRequest{SessionRef: req.SessionRef, TokenID: token.TokenID, Decision: decision}); err != nil {
-			return agent.ApprovalResponse{}, err
+			return agent.ApprovalResponse{}, r.joinApprovalCleanup(err, r.abandonWaitingApproval(ctx, req, token, err.Error()))
 		}
 	}
 	select {
 	case decision := <-waiter:
-		if err := r.transitionRunTurnJournal(context.WithoutCancel(ctx), req.SessionRef, req.RunID, req.TurnID, session.ExecutionStarted, "approval resolved"); err != nil {
+		if err := r.resumeAfterApproval(ctx, req, "approval resolved"); err != nil {
 			return agent.ApprovalResponse{}, err
 		}
-		r.setRunState(req.SessionRef.SessionID, agent.RunState{Status: agent.RunLifecycleStatusRunning, ActiveRunID: req.RunID, UpdatedAt: r.now()})
 		return decision, nil
 	case <-ctx.Done():
+		// Cancellation is not a continue-after-tool-error path. Only cancel the
+		// pause token and leave journal/run state for the cancel/terminal owner.
+		// Forcing started/Running here races with cancel_requested transitions.
 		_ = r.cancelPauseToken(context.WithoutCancel(ctx), req.SessionRef, token, ctx.Err().Error())
 		return agent.ApprovalResponse{}, ctx.Err()
 	}
+}
+
+// resumeAfterApproval moves Run/Turn journal from waiting_approval back to
+// started and clears the in-memory waiting flag. Journal leave is mandatory:
+// memory is updated only after durable resume succeeds.
+func (r *Runtime) resumeAfterApproval(ctx context.Context, req agent.ApprovalRequest, reason string) error {
+	if r == nil {
+		return errors.New("agent-sdk/runtime: runtime is unavailable")
+	}
+	persistCtx := context.WithoutCancel(ctx)
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "approval resumed"
+	}
+	if err := r.transitionRunTurnJournal(persistCtx, req.SessionRef, req.RunID, req.TurnID, session.ExecutionStarted, reason); err != nil {
+		return err
+	}
+	r.setRunState(req.SessionRef.SessionID, agent.RunState{
+		Status: agent.RunLifecycleStatusRunning, ActiveRunID: req.RunID, UpdatedAt: r.now(),
+	})
+	return nil
+}
+
+// abandonWaitingApproval resumes the Run/Turn after an unresolved approval
+// attempt so a model-visible tool error can continue, then cancels a still-
+// pending pause token. Journal resume is the gate; memory is only marked
+// running after that durable leave succeeds.
+func (r *Runtime) abandonWaitingApproval(ctx context.Context, req agent.ApprovalRequest, token session.PauseToken, reason string) error {
+	if r == nil {
+		return errors.New("agent-sdk/runtime: runtime is unavailable")
+	}
+	persistCtx := context.WithoutCancel(ctx)
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "approval request abandoned"
+	}
+	if err := r.resumeAfterApproval(persistCtx, req, reason); err != nil {
+		// Still try to drop a pending pause so recovery does not keep a live waiter.
+		_ = r.cancelPendingPauseToken(persistCtx, req.SessionRef, token, reason)
+		return err
+	}
+	return r.cancelPendingPauseToken(persistCtx, req.SessionRef, token, reason)
+}
+
+func (r *Runtime) cancelPendingPauseToken(ctx context.Context, ref session.SessionRef, token session.PauseToken, reason string) error {
+	if r == nil {
+		return errors.New("agent-sdk/runtime: runtime is unavailable")
+	}
+	current, err := r.pauseToken(ctx, ref, token.TokenID)
+	if err != nil {
+		// Fall back to the caller's pending snapshot when the store read fails
+		// mid-cleanup; the original token is still the best cancel base we have.
+		current = token
+	} else if current.Status != session.PauseTokenPending {
+		// Already resolved/cancelled by ResolveApproval or a concurrent path.
+		return nil
+	}
+	return r.cancelPauseToken(ctx, ref, current, reason)
+}
+
+func (r *Runtime) joinApprovalCleanup(primary error, cleanup error) error {
+	if cleanup == nil {
+		return primary
+	}
+	if primary == nil {
+		return cleanup
+	}
+	return errors.Join(primary, cleanup)
 }
 
 // ResolveApproval durably records one decision before waking the live run.
