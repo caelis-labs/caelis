@@ -407,3 +407,16 @@ func assertRecoveredCommandEntry(
 		t.Fatalf("recovered command entry = %#v, want terminal %q phase %q error containing %q with result=%v", got, wantState, wantPhase, wantError, wantResult)
 	}
 }
+
+func TestTaskInt64ValueSaturatesJSONFloatExtremes(t *testing.T) {
+	t.Parallel()
+
+	got, ok := taskInt64Value(float64(math.MaxInt64))
+	if !ok || got != math.MaxInt64 {
+		t.Fatalf("taskInt64Value(float64(MaxInt64)) = (%d, %v), want (%d, true)", got, ok, math.MaxInt64)
+	}
+	got, ok = taskInt64Value(float64(math.MinInt64))
+	if !ok || got != math.MinInt64 {
+		t.Fatalf("taskInt64Value(float64(MinInt64)) = (%d, %v), want (%d, true)", got, ok, math.MinInt64)
+	}
+}

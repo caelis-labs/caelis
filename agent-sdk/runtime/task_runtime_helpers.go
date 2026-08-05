@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -303,6 +304,19 @@ func taskInt64Value(raw any) (int64, bool) {
 	case int:
 		return int64(typed), true
 	case float64:
+		// JSON map decoding stores numbers as float64. Values at the int64
+		// extremes are not exactly representable, and converting the rounded
+		// float can wrap to MinInt64 on amd64. Saturate so durable sentinels
+		// such as math.MaxInt64 survive file/SQLite round-trips.
+		if math.IsNaN(typed) || math.IsInf(typed, 0) {
+			return 0, false
+		}
+		if typed >= float64(math.MaxInt64) {
+			return math.MaxInt64, true
+		}
+		if typed <= float64(math.MinInt64) {
+			return math.MinInt64, true
+		}
 		return int64(typed), true
 	case json.Number:
 		value, err := typed.Int64()
