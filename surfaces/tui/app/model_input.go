@@ -15,6 +15,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if handled, cmd := m.handleSubagentOutputOverlayMouse(msg); handled {
 		return m, cmd
 	}
+	if handled, cmd := m.handleSubagentRosterOverlayMouse(msg); handled {
+		return m, cmd
+	}
 	if handled, cmd := m.handleSubagentOverlayMouse(msg); handled {
 		return m, cmd
 	}
@@ -83,6 +86,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if handled, cmd := m.handleInputAreaMouse(mouse, mousePhasePress); handled {
 			return m, cmd
 		}
+		if handled, cmd := m.handleSubagentRosterFooterMouse(mouse, mousePhasePress); handled {
+			return m, cmd
+		}
 		if handled, cmd := m.handleFixedAreaMouse(mouse, mousePhasePress); handled {
 			return m, cmd
 		}
@@ -101,6 +107,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if handled, cmd := m.handleInputAreaMouse(mouse, mousePhaseMotion); handled {
 			return m, cmd
 		}
+		if handled, cmd := m.handleSubagentRosterFooterMouse(mouse, mousePhaseMotion); handled {
+			return m, cmd
+		}
 		if handled, cmd := m.handleFixedAreaMouse(mouse, mousePhaseMotion); handled {
 			return m, cmd
 		}
@@ -116,6 +125,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		if handled, cmd := m.handleInputAreaMouse(mouse, mousePhaseRelease); handled {
+			return m, cmd
+		}
+		if handled, cmd := m.handleSubagentRosterFooterMouse(mouse, mousePhaseRelease); handled {
 			return m, cmd
 		}
 		if handled, cmd := m.handleFixedAreaMouse(mouse, mousePhaseRelease); handled {
@@ -547,6 +559,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.subagentOutputOverlay != nil {
 		return m, m.handleSubagentOutputOverlayKey(msg)
+	}
+	if m.subagentRosterOverlay != nil {
+		return m, m.handleSubagentRosterOverlayKey(msg)
 	}
 	if m.subagentOverlay != nil {
 		return m, m.handleSubagentOverlayKey(msg)
@@ -1136,6 +1151,9 @@ func (m *Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		return m, m.handlePromptPaste(msg)
 	}
 	if m.subagentOutputOverlay != nil {
+		return m, nil
+	}
+	if m.subagentRosterOverlay != nil {
 		return m, nil
 	}
 	if m.subagentOverlay != nil {

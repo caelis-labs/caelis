@@ -113,6 +113,7 @@ type ResumeSessionRequest struct {
 	SessionID  string            `json:"sessionId"`
 	CWD        string            `json:"cwd"`
 	MCPServers []json.RawMessage `json:"mcpServers"`
+	Meta       map[string]any    `json:"_meta,omitempty"`
 }
 
 type ResumeSessionResponse struct {

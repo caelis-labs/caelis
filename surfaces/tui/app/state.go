@@ -364,7 +364,12 @@ type Model struct {
 	taskStreamNextToken      uint64
 	// Subagent output views are transient Surface projections keyed by the
 	// parent Spawn call. They are never persisted or used as Task identity.
-	subagentOutputViews map[string]*subagentOutputView
+	subagentOutputViews             map[string]*subagentOutputView
+	subagentRosterTasks             map[string]taskstream.TaskDescriptor
+	subagentRosterRefreshPending    bool
+	subagentRosterRefreshQueued     bool
+	subagentRosterRefreshScheduled  bool
+	subagentRosterRefreshGeneration uint64
 
 	// Transient log replacement tracking — now uses block IDs.
 	transientBlockID string

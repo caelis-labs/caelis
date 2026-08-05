@@ -135,6 +135,7 @@ func NewModel(cfg Config) *Model {
 		taskStreamResolveRetries: map[string]int{},
 		taskStreamRetries:        map[string]int{},
 		subagentOutputViews:      map[string]*subagentOutputView{},
+		subagentRosterTasks:      map[string]taskstream.TaskDescriptor{},
 		runningHintTracker:       newRunningHintTracker(),
 	}
 	m.help = help.New()
@@ -262,8 +263,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case subagentOutputRenderTickMsg:
 		return m.handleSubagentOutputRenderTick(typed)
 
+	case subagentRosterRefreshResultMsg:
+		return m, m.handleSubagentRosterRefreshResult(typed)
+
+	case subagentRosterRefreshTickMsg:
+		return m, m.handleSubagentRosterRefreshTick(typed)
+
 	case tea.WindowSizeMsg:
 		m.clearCompletionMouseState()
+		m.subagentRosterPressed = false
 		if m.subagentOverlay != nil {
 			m.subagentOverlay.pressedKey = ""
 		}
@@ -418,12 +426,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		m.spinnerTickScheduled = false
 		if m.animationIndicatorActive() && !m.noAnimation {
-			previousSubagentPulseDim := subagentOutputPulseDim(m.spinner.View())
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
-			if previousSubagentPulseDim != subagentOutputPulseDim(m.spinner.View()) {
-				m.refreshSubagentOutputPulse()
-			}
 			if cmd != nil {
 				m.spinnerTickScheduled = true
 			}

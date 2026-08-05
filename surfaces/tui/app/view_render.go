@@ -544,10 +544,11 @@ func (m *Model) renderStatusFooter() string {
 		return m.renderFixedRow(fixedSelectionFooter, m.footerRowText(), m.renderFooterRowStyledText(), style)
 	}
 	contentWidth := m.fixedRowContentWidth()
-	leftPlain, rightPlain := fitGenericFooterParts(contentWidth, m.footerLeftText(), m.footerContextText())
+	leftPlain, subagentsPlain, rightPlain := m.footerParts(contentWidth)
 	left := styleFooterLeft(m, leftPlain)
+	subagents := m.renderFooterSubagentText(subagentsPlain)
 	right := components.Status.Text.Render(rightPlain)
-	return style.Render(composeStyledFooter(contentWidth, left, right))
+	return style.Render(composeStatusFooter(contentWidth, left, subagents, right))
 }
 
 func (m *Model) shouldRenderPalette() bool {
@@ -715,8 +716,9 @@ func (m *Model) viewportMaxOffset() int {
 }
 
 func (m *Model) footerRowText() string {
-	left, right := fitGenericFooterParts(m.fixedRowContentWidth(), m.footerLeftText(), m.footerContextText())
-	return composeStyledFooter(m.fixedRowContentWidth(), left, right)
+	width := m.fixedRowContentWidth()
+	left, subagents, right := m.footerParts(width)
+	return composeStatusFooter(width, left, subagents, right)
 }
 
 func (m *Model) footerLeftText() string {
@@ -735,10 +737,62 @@ func (m *Model) footerLeftText() string {
 }
 
 func (m *Model) renderFooterRowStyledText() string {
-	leftPlain, rightPlain := fitGenericFooterParts(m.fixedRowContentWidth(), m.footerLeftText(), m.footerContextText())
+	width := m.fixedRowContentWidth()
+	leftPlain, subagentsPlain, rightPlain := m.footerParts(width)
 	left := styleFooterLeft(m, leftPlain)
+	subagents := m.renderFooterSubagentText(subagentsPlain)
 	right := m.theme.TextStyle().Render(rightPlain)
-	return composeStyledFooter(m.fixedRowContentWidth(), left, right)
+	return composeStatusFooter(width, left, subagents, right)
+}
+
+func (m *Model) footerParts(width int) (left string, subagents string, right string) {
+	return fitStatusFooterParts(
+		width,
+		m.footerLeftText(),
+		m.footerSubagentText(),
+		m.footerSubagentCompactText(),
+		m.footerContextText(),
+	)
+}
+
+func (m *Model) footerSubagentText() string {
+	if m == nil || m.subagentRosterCount() == 0 {
+		return ""
+	}
+	running := m.subagentRosterRunningCount()
+	if running > 0 {
+		return "• " + strconv.Itoa(running) + " running"
+	}
+	return "• " + strconv.Itoa(m.subagentRosterCount()) + " done"
+}
+
+func (m *Model) footerSubagentCompactText() string {
+	if m == nil || m.subagentRosterCount() == 0 {
+		return ""
+	}
+	if running := m.subagentRosterRunningCount(); running > 0 {
+		return "• " + strconv.Itoa(running)
+	}
+	return "• " + strconv.Itoa(m.subagentRosterCount())
+}
+
+func (m *Model) renderFooterSubagentText(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	running := m.subagentRosterRunningCount()
+	markerStyle := m.theme.MutedTextStyle()
+	if running > 0 {
+		markerStyle = m.theme.Tokens().Success
+		if !m.noAnimation && subagentOutputPulseDim(m.spinner.View()) {
+			markerStyle = markerStyle.Faint(true)
+		}
+	}
+	if marker, label, ok := strings.Cut(text, " "); ok {
+		return markerStyle.Render(marker) + " " + m.theme.SecondaryTextStyle().Render(label)
+	}
+	return markerStyle.Render(text)
 }
 
 func (m *Model) footerContextText() string {
@@ -778,6 +832,80 @@ func composeStyledFooter(width int, left string, right string) string {
 	}
 	gap := max(width-leftWidth-rightWidth, 1)
 	return left + strings.Repeat(" ", gap) + right
+}
+
+// composeStatusFooter keeps the subagent affordance immediately to the left
+// of context usage while preserving the existing left-aligned model/workspace.
+func composeStatusFooter(width int, left string, subagents string, right string) string {
+	left = strings.TrimSpace(left)
+	subagents = strings.TrimSpace(subagents)
+	right = strings.TrimSpace(right)
+	rightGroup := subagents
+	if rightGroup != "" && right != "" {
+		rightGroup += "  "
+	}
+	rightGroup += right
+	return composeStyledFooter(width, left, rightGroup)
+}
+
+// fitStatusFooterParts prioritizes context usage and subagent discoverability.
+// The full state label is preferred, then its compact marker/count form; the
+// left model and workspace segment is truncated last.
+func fitStatusFooterParts(width int, left string, subagents string, compact string, right string) (string, string, string) {
+	left = strings.TrimSpace(left)
+	subagents = strings.TrimSpace(subagents)
+	compact = strings.TrimSpace(compact)
+	right = strings.TrimSpace(right)
+	if width <= 0 {
+		return "", "", ""
+	}
+	if subagents == "" {
+		left, right = fitGenericFooterParts(width, left, right)
+		return left, "", right
+	}
+
+	right = truncateTailDisplay(right, width)
+	separatorWidth := func(label string) int {
+		if label != "" && right != "" {
+			return 2
+		}
+		return 0
+	}
+	choose := func(label string) bool {
+		if label == "" {
+			return false
+		}
+		groupWidth := displayColumns(label) + separatorWidth(label) + displayColumns(right)
+		return groupWidth <= width
+	}
+	selected := ""
+	if choose(subagents) {
+		selected = subagents
+	} else if choose(compact) {
+		selected = compact
+	} else if compact != "" {
+		budget := width - displayColumns(compact)
+		if right != "" {
+			budget -= 2
+		}
+		if budget >= 4 {
+			right = truncateTailDisplay(right, budget)
+			selected = compact
+		}
+	}
+	if selected == "" {
+		left, right = fitGenericFooterParts(width, left, right)
+		return left, "", right
+	}
+
+	groupWidth := displayColumns(selected) + separatorWidth(selected) + displayColumns(right)
+	leftBudget := width - groupWidth
+	if left != "" && leftBudget > 1 {
+		left = truncateTailDisplay(left, leftBudget-1)
+	} else {
+		left = ""
+	}
+	return left, selected, right
 }
 
 func fitHeaderRowParts(width int, workspace string, model string) (string, string) {

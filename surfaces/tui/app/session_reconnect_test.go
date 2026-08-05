@@ -10,12 +10,70 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	controlclient "github.com/caelis-labs/caelis/control/client"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	protocoltaskstream "github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
+
+func TestSessionReconnectMessageInstallsSessionBeforeSubagentBackfill(t *testing.T) {
+	t.Parallel()
+
+	descriptors := []protocoltaskstream.TaskDescriptor{
+		{
+			SessionID: "session-old", TaskID: "task-kira", Handle: "kira", Kind: task.KindSubagent,
+			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(103, 0),
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-kira", ToolName: "SPAWN"},
+		},
+		{
+			SessionID: "session-old", TaskID: "task-wen", Handle: "wen", Kind: task.KindSubagent,
+			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(102, 0),
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-wen", ToolName: "SPAWN"},
+		},
+		{
+			SessionID: "session-old", TaskID: "task-yara", Handle: "yara", Kind: task.KindSubagent,
+			State: task.StateCompleted, Running: false, UpdatedAt: time.Unix(101, 0),
+			ParentTool: protocoltaskstream.ParentTool{ToolCallID: "spawn-yara", ToolName: "SPAWN"},
+		},
+	}
+	service := &subagentRosterTestTaskStreamService{
+		list: protocoltaskstream.ListResult{Tasks: descriptors},
+	}
+	model := NewModel(Config{
+		NoColor: true, NoAnimation: true,
+		TaskStreams: bindTaskStreamTestClient(t, service),
+	})
+
+	next, _ := model.Update(SessionReconnectMsg{State: controlclient.SessionState{SessionID: "session-old"}})
+	model = next.(*Model)
+	if model.currentSessionID != "session-old" {
+		t.Fatalf("reconnect Session = %q, want session-old", model.currentSessionID)
+	}
+
+	events := make([]TranscriptEvent, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		events = append(events, TranscriptEvent{
+			Kind: TranscriptEventTool, Scope: ACPProjectionMain,
+			ToolCallID: descriptor.ParentTool.ToolCallID, ToolName: "Spawn", ToolTaskHandle: descriptor.Handle,
+			ToolArgs: descriptor.Handle + "[self]: historical task", OccurredAt: time.Unix(90, 0),
+		})
+	}
+	next, cmd := model.Update(TranscriptEventsMsg{Events: events})
+	model = next.(*Model)
+	refresh := requireSubagentRosterRefreshResult(t, cmd)
+	next, _ = model.Update(refresh)
+	model = next.(*Model)
+
+	if got := len(model.subagentRosterTasks); got != len(descriptors) {
+		t.Fatalf("reconnected Task directory rows = %d, want %d", got, len(descriptors))
+	}
+	if got := model.subagentRosterRunningCount(); got != 0 {
+		t.Fatalf("cold reconnected running count = %d, want completed Task directory state", got)
+	}
+}
 
 func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing.T) {
 	backfill := make(chan eventstream.Envelope, 1)

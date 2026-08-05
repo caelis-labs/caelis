@@ -34,6 +34,7 @@ type subagentOutputView struct {
 	revision        uint64
 	renderReady     bool
 	renderScheduled bool
+	historyResolved bool
 	renderCache     subagentOutputRenderCache
 	seenProjections map[string]struct{}
 }
@@ -80,6 +81,16 @@ func (m *Model) observeSubagentOutputOwner(event TranscriptEvent) {
 	view := m.ensureSubagentOutputView(event.ToolCallID)
 	if view == nil {
 		return
+	}
+	// The empty block is only a presentation shell until child output arrives.
+	// Preserve the Spawn observation time so a durable Task descriptor from the
+	// same historical Session can supersede it during reconnect. Leaving the
+	// constructor's time.Now here makes every replayed completed Task look older
+	// than a freshly-created "running" view.
+	if view.block != nil && view.turnID == "" && len(view.block.Events) == 0 &&
+		!event.OccurredAt.IsZero() &&
+		(view.block.StartedAt.IsZero() || event.OccurredAt.Before(view.block.StartedAt)) {
+		view.block.StartedAt = event.OccurredAt
 	}
 	if handle := strings.TrimSpace(event.ToolTaskHandle); handle != "" {
 		view.taskHandle = handle
@@ -137,6 +148,7 @@ func (v *subagentOutputView) resetForCurrentState() {
 	v.turnBlocks = map[string]*ParticipantTurnBlock{}
 	v.turnID = ""
 	v.block = block
+	v.historyResolved = false
 	v.seenProjections = nil
 	v.renderCache = subagentOutputRenderCache{}
 	v.touch(true)

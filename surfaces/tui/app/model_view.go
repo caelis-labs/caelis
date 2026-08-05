@@ -98,6 +98,12 @@ func (m *Model) View() tea.View {
 			view = tuikit.OverlayCenter(view, overlay, m.width, m.height)
 		}
 	}
+	if m.subagentRosterOverlay != nil && m.width > 0 && m.height > 0 {
+		if overlay := m.renderSubagentRosterOverlay(); overlay != "" {
+			normalizeBaseForOverlay()
+			view = tuikit.OverlayCenter(view, overlay, m.width, m.height)
+		}
+	}
 	if m.activePrompt != nil && m.width > 0 && m.height > 0 {
 		if promptView := m.renderPromptModal(); promptView != "" {
 			normalizeBaseForOverlay()
@@ -139,7 +145,7 @@ func (m *Model) View() tea.View {
 	frame.MouseMode = m.desiredMouseMode()
 	frame.ReportFocus = true
 	frame.WindowTitle = m.windowTitle()
-	if m.subagentOverlay == nil && m.subagentOutputOverlay == nil {
+	if m.subagentOverlay == nil && m.subagentOutputOverlay == nil && m.subagentRosterOverlay == nil {
 		if cursor := m.regularInputCursor(); cursor != nil {
 			cursor.X += m.mainColumnX()
 			cursor.Y += m.viewport.Height() + m.preComposerFixedHeight() + tuikit.ComposerPadTop

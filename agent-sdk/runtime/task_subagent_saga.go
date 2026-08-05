@@ -178,10 +178,10 @@ func (tm *taskRuntime) startSubagentTarget(
 		// Validate before any durable post_spawn commit so a crash cannot
 		// roll-forward an invalid anchor (empty AgentID, mismatched agent, etc.).
 		if validationErr := validateSubagentSpawnResult(taskID, anchor, result); validationErr != nil {
-			task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, target, req, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhaseExternalPending)
+			task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, target, req, mode, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhaseExternalPending)
 			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, validationErr)
 		}
-		task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, target, req, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhasePostSpawn)
+		task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, target, req, mode, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhasePostSpawn)
 		task.seedStreamFromResult(result)
 		spawnedEntry := task.entrySnapshot(tm.runtime.now())
 		if err := tm.persistSpawnEntry(ctx, spawnedEntry); err != nil {
@@ -375,6 +375,7 @@ func newSubagentTaskFromSpawn(
 	requestDigest string,
 	target delegation.Target,
 	req taskapi.SubagentStartRequest,
+	mode string,
 	role session.ParticipantRole,
 	handle string,
 	runner subagent.Runner,
@@ -390,7 +391,8 @@ func newSubagentTaskFromSpawn(
 		ref:        taskapi.Ref{TaskID: taskID, SessionID: strings.TrimSpace(anchor.SessionID), TerminalID: subagentTerminalID(taskID)},
 		sessionRef: session.NormalizeSessionRef(ref), anchor: delegation.CloneAnchor(anchor), runner: runner,
 		agent: agentName, target: target, handle: handle, title: spawn.ToolName + " " + agentName,
-		prompt: strings.TrimSpace(req.Prompt), createdAt: now, revision: revision,
+		prompt: strings.TrimSpace(req.Prompt), mode: strings.TrimSpace(mode),
+		approvalMode: strings.TrimSpace(req.ApprovalMode), createdAt: now, revision: revision,
 		state: taskStateFromDelegation(result.State), running: result.State == delegation.StateRunning, turnSeq: 1,
 		metadata: map[string]any{
 			"source": firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"), "participant_role": string(role),

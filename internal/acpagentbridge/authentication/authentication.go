@@ -262,10 +262,11 @@ func ResumeSession(
 	config RecoveryConfig,
 	sessionID string,
 	cwd string,
+	meta map[string]any,
 ) (RecoveryResult[client.ResumeSessionResponse], error) {
 	sessionID = strings.TrimSpace(sessionID)
 	return recoverCall(ctx, config, func(openCtx context.Context, activeClient *client.Client) (client.ResumeSessionResponse, error) {
-		return activeClient.ResumeSession(openCtx, sessionID, strings.TrimSpace(cwd), nil)
+		return activeClient.ResumeSession(openCtx, sessionID, strings.TrimSpace(cwd), meta)
 	})
 }
 

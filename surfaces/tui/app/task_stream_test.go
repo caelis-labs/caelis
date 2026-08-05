@@ -653,6 +653,52 @@ func TestTUISubagentOutputStopsMaskingRepeatedCleanFollowExit(t *testing.T) {
 	}
 }
 
+func TestTUITerminalHistoricalReplayDetachesAfterCleanExit(t *testing.T) {
+	t.Parallel()
+
+	sender := &ProgramSender{Send: func(tea.Msg) {}}
+	defer sender.Close()
+	model := NewModel(Config{
+		NoColor: true, NoAnimation: true,
+		TaskStreams: bindTaskStreamTestClient(t, &subagentRosterTestTaskStreamService{}), ProgramSender: sender,
+	})
+	model.currentSessionID = "session-1"
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.taskHandle = "zuri"
+	view.historyResolved = true
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1"}
+	model.subagentRosterTasks["spawn-1"] = taskstream.TaskDescriptor{
+		SessionID: "session-1", TaskID: "task-1", Handle: "zuri", Kind: task.KindSubagent,
+		State: task.StateCompleted, Running: false,
+		ParentTool: taskstream.ParentTool{ToolCallID: "spawn-1", ToolName: "SPAWN"},
+	}
+	model.taskStreamWanted["task-1"] = true
+	model.taskStreamTokens["task-1"] = 7
+	model.taskStreamHandlesByID["task-1"] = "zuri"
+	model.taskStreamIDsByCallID["spawn-1"] = "task-1"
+	model.taskStreamCallIDsByID["task-1"] = "spawn-1"
+	if demand := model.taskStreamDemandForTaskID("task-1"); demand != taskStreamDemandNone {
+		t.Fatalf("resolved terminal history demand = %v, want none", demand)
+	}
+	if status := model.subagentOutputCurrentStatus(view); status == subagentOutputRunning {
+		t.Fatalf("historical replay status = %v, want terminal", status)
+	}
+
+	next, cmd := model.handleTaskStreamClosed(taskStreamClosedMsg{
+		sessionID: "session-1", taskID: "task-1", token: 7,
+	})
+	model = next.(*Model)
+	if cmd != nil {
+		t.Fatal("terminal historical replay scheduled an unexpected retry")
+	}
+	if model.taskStreamWanted["task-1"] || model.taskStreamTokens["task-1"] == 7 {
+		t.Fatalf("terminal historical stream remains wanted: wanted=%v token=%d", model.taskStreamWanted["task-1"], model.taskStreamTokens["task-1"])
+	}
+	if model.hint != "" {
+		t.Fatalf("terminal historical clean exit surfaced an error hint: %q", model.hint)
+	}
+}
+
 func TestTUISubagentGapRebuildsCompleteMultiTurnCurrentState(t *testing.T) {
 	t.Parallel()
 

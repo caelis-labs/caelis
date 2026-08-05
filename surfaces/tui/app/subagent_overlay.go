@@ -118,6 +118,8 @@ func (m *Model) openSubagentOverlay() tea.Cmd {
 	}
 	m.clearInputOverlays()
 	m.showPalette = false
+	m.subagentRosterOverlay = nil
+	m.subagentRosterPressed = false
 	m.dismissWelcomeCard()
 	m.subagentRequestSeq++
 	request := m.subagentRequestSeq

@@ -34,7 +34,10 @@ func (m *Model) resetConversationView() {
 	m.runningActivity = runningActivityState{}
 	m.compactNoticePair = compactNoticePairState{}
 	m.subagentOutputOverlay = nil
+	m.subagentRosterOverlay = nil
+	m.subagentRosterPressed = false
 	m.subagentOutputViews = map[string]*subagentOutputView{}
+	m.resetSubagentRosterRefresh()
 	m.clearSelection()
 	m.clearInputSelection()
 	m.setViewportFollowState(viewportFollowTail)

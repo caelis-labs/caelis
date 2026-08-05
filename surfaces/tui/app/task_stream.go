@@ -94,7 +94,10 @@ func (m *Model) observeTaskStreamSession(env eventstream.Envelope) {
 	}
 	m.closeTaskStreamSubscriptions()
 	m.subagentOutputOverlay = nil
+	m.subagentRosterOverlay = nil
+	m.subagentRosterPressed = false
 	m.subagentOutputViews = map[string]*subagentOutputView{}
+	m.resetSubagentRosterRefresh()
 	m.runningHintTracker.resetSession()
 	m.refreshRunningActivity()
 	m.currentSessionID = sessionID
@@ -191,6 +194,9 @@ func (m *Model) taskStreamDemandForOwner(callID, handle string) taskStreamDemand
 	if view := m.subagentOutputViews[callID]; view != nil {
 		if m.subagentOutputOverlay != nil &&
 			strings.TrimSpace(m.subagentOutputOverlay.callID) == callID {
+			if m.subagentOutputTerminalHistoryCached(callID, view) {
+				return taskStreamDemandNone
+			}
 			return taskStreamDemandVisibleSubagent
 		}
 		return taskStreamDemandNone
@@ -199,6 +205,22 @@ func (m *Model) taskStreamDemandForOwner(callID, handle string) taskStreamDemand
 		return taskStreamDemandExpandedPanel
 	}
 	return taskStreamDemandNone
+}
+
+// subagentOutputTerminalHistoryCached prevents a terminal child workspace from
+// reopening durable Session history once this process already resolved it. The
+// Task directory owns terminality; historyResolved is only a presentation-cache
+// marker and remains false for a cold replay shell until the selected overlay
+// has actually loaded (including a successfully resolved empty history).
+func (m *Model) subagentOutputTerminalHistoryCached(callID string, view *subagentOutputView) bool {
+	if m == nil || view == nil || !view.historyResolved {
+		return false
+	}
+	descriptor, ok := m.subagentRosterTasks[strings.TrimSpace(callID)]
+	if !ok || descriptor.Running {
+		return false
+	}
+	return subagentOutputStatusFromState(string(descriptor.State)) != subagentOutputRunning
 }
 
 // reconcileSubagentOutputTaskStreams keeps Task output observation scoped to
@@ -467,6 +489,12 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 		}
 		cmds = append(cmds, cmd)
 	}
+	if callID := strings.TrimSpace(m.taskStreamCallIDsByID[msg.taskID]); callID != "" {
+		if view := m.subagentOutputViews[callID]; view != nil {
+			view.historyResolved = true
+			view.touch(true)
+		}
+	}
 	cmds = append(cmds, m.requestSubagentOutputRender())
 	return m, tea.Batch(cmds...)
 }
@@ -483,6 +511,17 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 	if !demand.wanted() {
 		m.wantResolvedTaskStream(msg.taskID, false)
 		return m, nil
+	}
+	if msg.err == nil && demand == taskStreamDemandVisibleSubagent {
+		callID := strings.TrimSpace(m.taskStreamCallIDsByID[msg.taskID])
+		view := m.subagentOutputViews[callID]
+		if view != nil && view.historyResolved && m.subagentOutputCurrentStatus(view) != subagentOutputRunning {
+			// A cold historical replay is finite. Detach cleanly once its terminal
+			// assistant history is delivered; a later accepted SendMessage will
+			// reopen observation for the next activity period.
+			m.wantResolvedTaskStream(msg.taskID, false)
+			return m, nil
+		}
 	}
 	if msg.err == nil && demand == taskStreamDemandVisibleSubagent && m.taskStreamWanted[msg.taskID] {
 		m.taskStreamRetries[msg.taskID]++

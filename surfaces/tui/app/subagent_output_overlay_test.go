@@ -1099,7 +1099,7 @@ func TestSubagentOutputOverlayTitleUsesOnlySemanticDot(t *testing.T) {
 	}
 }
 
-func TestSubagentOutputLifecycleDotUsesSemanticStatusAndReducedMotion(t *testing.T) {
+func TestSpawnToolRowUsesOrdinaryHeaderAndOverlayLink(t *testing.T) {
 	model := NewModel(Config{})
 	model.theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	model.themeCacheKey = ""
@@ -1115,9 +1115,9 @@ func TestSubagentOutputLifecycleDotUsesSemanticStatusAndReducedMotion(t *testing
 		ctx := model.blockRenderContext(96)
 		ctx.SpinnerView = frame
 		ctx.AnimationsEnabled = animationsEnabled
-		rows := renderSubagentOutputLifecycleRows("block-1", event, event.CallID, 96, ctx, event.Done, event.Err)
+		rows := renderACPSpawnToolRows("block-1", event, event.CallID, 96, ctx)
 		if len(rows) != 1 {
-			t.Fatalf("Spawn rows = %#v, want one compact entry", rows)
+			t.Fatalf("Spawn rows = %#v, want one ordinary tool entry", rows)
 		}
 		return rows[0]
 	}
@@ -1127,54 +1127,29 @@ func TestSubagentOutputLifecycleDotUsesSemanticStatusAndReducedMotion(t *testing
 	if runningBright.Plain != "• Spawned reviewer: inspect  ↗" {
 		t.Fatalf("running Spawn row = %q", runningBright.Plain)
 	}
-	if runningBright.Styled == runningDim.Styled {
-		t.Fatal("running semantic dot did not change breathing phase")
+	if runningBright.ClickToken != subagentOutputOverlayClickToken("spawn-1") {
+		t.Fatalf("Spawn click token = %q", runningBright.ClickToken)
 	}
-	accentFG := sgrForegroundCode(t, model.theme.Tokens().Accent.GetForeground())
-	if got := normalizeInlineStyleText(textWithSGRForeground(runningBright.Styled, accentFG)); !strings.Contains(got, "•") {
-		t.Fatalf("accent foreground omitted running status dot: %q", got)
+	if !runningBright.ACPHeader || runningBright.selectionIndent != 2 {
+		t.Fatalf("Spawn row lost ordinary ACP header semantics: %#v", runningBright)
 	}
-	wrappedPlain, wrappedStyled, ok := wrapACPTranscriptHeaderForViewport(
-		runningBright.Plain,
-		24,
-		model.blockRenderContext(24),
-		runningBright.acpHeaderMarkTone,
-		runningBright.acpHeaderMarkDim,
-	)
-	if !ok || len(wrappedPlain) < 2 || len(wrappedPlain) != len(wrappedStyled) {
-		t.Fatalf("narrow Spawn entry did not retain ACP header wrapping: %#v / %#v", wrappedPlain, wrappedStyled)
-	}
-	if got := normalizeInlineStyleText(textWithSGRForeground(wrappedStyled[0], accentFG)); !strings.Contains(got, "•") {
-		t.Fatalf("wrapped Spawn entry lost running status color: %q", got)
+	if runningBright.Styled != runningDim.Styled {
+		t.Fatal("ordinary Spawn row still changes with the spinner phase")
 	}
 
 	completed := base
 	completed.Done = true
 	completedRow := render(completed, runningSpinnerFrames[0], true)
-	successFG := sgrForegroundCode(t, model.theme.Tokens().Success.GetForeground())
-	if got := normalizeInlineStyleText(textWithSGRForeground(completedRow.Styled, successFG)); !strings.Contains(got, "•") {
-		t.Fatalf("success foreground omitted completed status dot: %q", got)
-	}
-
 	failed := completed
 	failed.Err = true
 	failedRow := render(failed, runningSpinnerFrames[0], true)
-	dangerFG := sgrForegroundCode(t, model.theme.Tokens().Danger.GetForeground())
-	if got := normalizeInlineStyleText(textWithSGRForeground(failedRow.Styled, dangerFG)); !strings.Contains(got, "•") {
-		t.Fatalf("danger foreground omitted failed status dot: %q", got)
-	}
-	if strings.Contains(strings.ToLower(failedRow.Plain), "failed") {
-		t.Fatalf("failed Spawn row exposed textual status: %q", failedRow.Plain)
-	}
-
-	staticBright := render(base, runningSpinnerFrames[0], false)
-	staticDim := render(base, runningSpinnerFrames[len(runningSpinnerFrames)/2], false)
-	if staticBright.Styled != staticDim.Styled {
-		t.Fatal("reduced-motion Spawn dot changed with spinner phase")
+	if completedRow.Plain != runningBright.Plain || completedRow.Styled != runningBright.Styled ||
+		failedRow.Plain != runningBright.Plain || failedRow.Styled != runningBright.Styled {
+		t.Fatal("Spawn transcript row still exposes child lifecycle state")
 	}
 }
 
-func TestSubagentOutputPulseSchedulesWithoutMainTurn(t *testing.T) {
+func TestSpawnToolRowDoesNotScheduleIndependentAnimation(t *testing.T) {
 	model := NewModel(Config{})
 	block := NewMainACPTurnBlock("turn-1")
 	block.Events = append(block.Events, SubagentEvent{
@@ -1188,11 +1163,25 @@ func TestSubagentOutputPulseSchedulesWithoutMainTurn(t *testing.T) {
 	if model.runningIndicatorActive() {
 		t.Fatal("background subagent changed the main running indicator")
 	}
+	if model.subagentOutputPulseActive() || model.animationIndicatorActive() {
+		t.Fatal("ordinary Spawn row retained an independent status animation")
+	}
+	if cmd := model.scheduleSpinnerTick(); cmd != nil {
+		t.Fatal("ordinary Spawn row scheduled a spinner tick")
+	}
+}
+
+func TestSubagentOutputPulseSchedulesForOpenOverlay(t *testing.T) {
+	model := NewModel(Config{})
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.block.Status = "running"
+	model.subagentOutputOverlay = &subagentOutputOverlayState{callID: "spawn-1"}
+
 	if !model.subagentOutputPulseActive() || !model.animationIndicatorActive() {
-		t.Fatal("running Spawn did not activate its independent status animation")
+		t.Fatal("open running subagent overlay did not activate its status animation")
 	}
 	if cmd := model.scheduleSpinnerTick(); cmd == nil {
-		t.Fatal("background subagent did not schedule a spinner tick")
+		t.Fatal("open running subagent overlay did not schedule a spinner tick")
 	}
 }
 

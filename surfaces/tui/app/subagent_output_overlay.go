@@ -91,6 +91,21 @@ func (m *Model) openSubagentOutputOverlay(blockID, callID string) bool {
 	// child Task represented by that handle may still be running. Only hydrate
 	// the stable identity here; terminal Task observations arrive separately.
 	view.observeOwnerIdentity(owner)
+	return m.openSubagentOutputOverlayView(callID, view)
+}
+
+// openSubagentOutputOverlayView opens a retained child workspace without
+// requiring its original Spawn row to still be visible in the transcript.
+// The Spawn call ID remains the presentation owner and Task identity is not
+// inferred from the public handle.
+func (m *Model) openSubagentOutputOverlayView(callID string, view *subagentOutputView) bool {
+	if m == nil || view == nil {
+		return false
+	}
+	callID = strings.TrimSpace(callID)
+	if callID == "" || m.subagentOutputViews[callID] != view {
+		return false
+	}
 	view.touch(true)
 	if m.subagentOutputOverlay != nil {
 		m.closeSubagentOutputOverlay()
@@ -98,6 +113,8 @@ func (m *Model) openSubagentOutputOverlay(blockID, callID string) bool {
 	m.clearInputOverlays()
 	m.showPalette = false
 	m.subagentOverlay = nil
+	m.subagentRosterOverlay = nil
+	m.subagentRosterPressed = false
 	m.subagentOutputOverlay = &subagentOutputOverlayState{
 		callID:      callID,
 		followTail:  true,
@@ -422,13 +439,18 @@ func (m *Model) subagentOutputRows(view *subagentOutputView, width, height int) 
 	ctx.Width = width
 	ctx.Height = height
 	ctx.TermWidth = m.width
-	if view != nil && view.document != nil && view.document.Len() > 0 {
+	if view != nil && subagentOutputViewHasTranscript(view) && view.document != nil && view.document.Len() > 0 {
 		rows = view.document.RenderAll(ctx)
 	}
 	if len(rows) == 0 {
-		label := "Waiting for subagent transcript…"
-		if view == nil {
+		label := "Waiting for subagent output…"
+		switch {
+		case view == nil:
 			label = "Subagent transcript is unavailable."
+		case m.subagentOutputCurrentStatus(view) != subagentOutputRunning && m.subagentOutputHistoryPending(view):
+			label = "Loading subagent history…"
+		case m.subagentOutputCurrentStatus(view) != subagentOutputRunning:
+			label = "No retained assistant messages for this subagent."
 		}
 		rows = []RenderedRow{StyledPlainRow(
 			"subagent-output",
@@ -451,6 +473,48 @@ func (m *Model) subagentOutputRows(view *subagentOutputView, width, height int) 
 		view.renderReady = false
 	}
 	return rows
+}
+
+func (m *Model) subagentOutputHistoryPending(view *subagentOutputView) bool {
+	if m == nil || view == nil || view.historyResolved {
+		return false
+	}
+	callID := strings.TrimSpace(view.callID)
+	if callID == "" {
+		return false
+	}
+	if taskID := strings.TrimSpace(m.taskStreamIDsByCallID[callID]); taskID != "" {
+		return m.taskStreamWanted[taskID] &&
+			(m.taskStreamTokens[taskID] != 0 || m.taskStreamSubscriptions[taskID] != nil)
+	}
+	return m.taskStreamResolveTokens[callID] != 0
+}
+
+func subagentOutputViewHasTranscript(view *subagentOutputView) bool {
+	if view == nil || view.document == nil {
+		return false
+	}
+	for _, block := range view.document.Blocks() {
+		switch typed := block.(type) {
+		case *ParticipantTurnBlock:
+			if len(typed.Events) > 0 {
+				return true
+			}
+		case *UserNarrativeBlock:
+			if strings.TrimSpace(typed.Raw) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (m *Model) subagentOutputCurrentStatus(view *subagentOutputView) subagentOutputStatus {
+	if view == nil {
+		return subagentOutputRunning
+	}
+	status, _, _ := m.subagentRosterViewState(view.callID, view)
+	return status
 }
 
 func (m *Model) cachedSubagentOutputRows(view *subagentOutputView, width, height int) ([]RenderedRow, bool) {
@@ -477,9 +541,7 @@ func (m *Model) renderSubagentOutputTitle(view *subagentOutputView, width int) s
 	status := subagentOutputRunning
 	if view != nil {
 		actor = firstNonEmpty(strings.TrimSpace(view.actor), strings.TrimSpace(view.taskHandle))
-		if view.block != nil {
-			status = subagentOutputStatusFromState(view.block.Status)
-		}
+		status = m.subagentOutputCurrentStatus(view)
 	}
 	title := "Subagent"
 	if actor != "" {

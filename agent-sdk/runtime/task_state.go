@@ -185,18 +185,20 @@ type commandTask struct {
 }
 
 type subagentTask struct {
-	ref        taskapi.Ref
-	sessionRef session.SessionRef
-	anchor     delegation.Anchor
-	runner     subagent.Runner
-	agent      string
-	target     delegation.Target
-	handle     string
-	title      string
-	prompt     string
-	createdAt  time.Time
-	revision   uint64
-	lease      taskapi.Lease
+	ref          taskapi.Ref
+	sessionRef   session.SessionRef
+	anchor       delegation.Anchor
+	runner       subagent.Runner
+	agent        string
+	target       delegation.Target
+	handle       string
+	title        string
+	prompt       string
+	mode         string
+	approvalMode string
+	createdAt    time.Time
+	revision     uint64
+	lease        taskapi.Lease
 
 	// streamMu preserves publication order across the pending-to-live handoff.
 	// It must be acquired before publishing the task in taskRuntime.subagents.

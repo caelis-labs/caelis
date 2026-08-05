@@ -281,8 +281,9 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 		ev.Terminal = true
 	}
 	ev.OutputGapBefore = ev.OutputGapBefore || meta.OutputGapBefore
-	// Spawn keeps terminal-panel styling, but its live output is structured
-	// child narrative rather than terminal bytes and must retain message scope.
+	// Spawn may carry a terminal relation for Task linkage, but its live output
+	// is structured child narrative rather than terminal bytes and must retain
+	// message scope.
 	terminalOutput := isTerminalPanelToolEvent(*ev) && !strings.EqualFold(semanticName, "SPAWN")
 	if shouldMergeOpenToolOutput(semanticName, output, terminalOutput) {
 		if terminalOutput {
@@ -365,6 +366,13 @@ func shouldUseExistingArgsForFinal(finalEvent SubagentEvent, existing SubagentEv
 		return true
 	}
 	if !strings.EqualFold(toolSemanticName(finalEvent.Name, finalEvent.ToolKind), "SPAWN") {
+		return false
+	}
+	// A final preview accompanied by its full Spawn invocation is one
+	// authoritative display pair. Comparing the folded previews by rune count
+	// can otherwise prefer the start row solely because middle truncation
+	// trimmed one more space, discarding a handle added by the result.
+	if strings.TrimSpace(finalEvent.FullArgs) != "" {
 		return false
 	}
 	return shouldReplaceSpawnDisplayArgs(finalEvent.Args, existing.Args)

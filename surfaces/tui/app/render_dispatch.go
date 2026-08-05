@@ -51,7 +51,7 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 		SetStatusMsg, StatusRefreshResultMsg, SetCommandsMsg, AttachmentCountMsg,
 		RunningInterruptResultMsg, SandboxProgressMsg, statusRefreshRequestMsg:
 		return renderEventPolicy{lane: renderLaneUIState}, true
-	case ClearHistoryMsg, UserMessageMsg, TaskResultMsg:
+	case ClearHistoryMsg, SessionReconnectMsg, UserMessageMsg, TaskResultMsg:
 		return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}, true
 	case BTWOverlayMsg:
 		return renderEventPolicy{lane: renderLaneOverlay}, true

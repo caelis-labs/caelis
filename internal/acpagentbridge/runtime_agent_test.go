@@ -198,6 +198,55 @@ func TestRuntimeAgentNewSessionNormalizesManagedSubagentMetadata(t *testing.T) {
 	}
 }
 
+func TestRuntimeAgentResumeReclaimsOnlyMatchingManagedSubagent(t *testing.T) {
+	t.Parallel()
+
+	sessions := inmemory.NewStore(inmemory.Config{})
+	agent, _ := newRuntimeAgentWithSessionsAndConfig(t, sessions, runtimeacp.Config{})
+	created, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
+		CWD: t.TempDir(),
+		Meta: metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
+			metautil.RuntimeSessionKind:     metautil.RuntimeSessionKindSubagent,
+			metautil.RuntimeSessionParentID: "parent-session",
+			metautil.RuntimeTaskID:          "task-1",
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := sessions.Session(context.Background(), session.SessionRef{SessionID: created.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, _ := newRuntimeAgentWithSessionsAndConfig(t, sessions, runtimeacp.Config{})
+	claim := metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
+		metautil.RuntimeSessionKind:     metautil.RuntimeSessionKindSubagent,
+		metautil.RuntimeSessionParentID: "parent-session",
+		metautil.RuntimeTaskID:          "task-1",
+	})
+	if _, err := restarted.ResumeSession(context.Background(), acp.ResumeSessionRequest{
+		SessionID: created.SessionID, CWD: loaded.CWD, Meta: claim,
+	}); err != nil {
+		t.Fatalf("ResumeSession(matching claim) error = %v", err)
+	}
+
+	for _, mismatch := range []map[string]any{
+		nil,
+		metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
+			metautil.RuntimeSessionKind: metautil.RuntimeSessionKindSubagent,
+			metautil.RuntimeTaskID:      "task-other",
+		}),
+	} {
+		isolated, _ := newRuntimeAgentWithSessionsAndConfig(t, sessions, runtimeacp.Config{})
+		if _, err := isolated.ResumeSession(context.Background(), acp.ResumeSessionRequest{
+			SessionID: created.SessionID, CWD: loaded.CWD, Meta: mismatch,
+		}); !errors.Is(err, session.ErrSessionNotFound) {
+			t.Fatalf("ResumeSession(mismatched claim) error = %v, want Session not found", err)
+		}
+	}
+}
+
 func TestRuntimeAgentNewSessionIncludesAssemblyModesAndConfig(t *testing.T) {
 	sessions := inmemory.NewStore(inmemory.Config{})
 	modes, configs := bridgeassembly.ProvidersFromAssembly(bridgeassembly.ProviderConfig{

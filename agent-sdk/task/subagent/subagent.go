@@ -5,6 +5,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 )
 
@@ -55,6 +56,30 @@ type Runner interface {
 type MessageRequest struct {
 	agentmessage.Request
 	Completion delegation.CompletionSink `json:"-"`
+	// Reconnect carries trusted durable execution identity when the Runtime
+	// recovered a completed Task but the runner has no process-local child.
+	Reconnect *ReconnectRequest `json:"-"`
+}
+
+// ReconnectRequest lets a MessageRunner reattach the exact durable child
+// Session and Task before accepting a new message-authored Turn. It is Runtime
+// recovery context, not a model-facing message argument.
+type ReconnectRequest struct {
+	Spawn  SpawnContext      `json:"-"`
+	Target delegation.Target `json:"-"`
+}
+
+// CloneReconnectRequest copies recovery values while preserving injected
+// callback interfaces owned by the current Runtime activation.
+func CloneReconnectRequest(in *ReconnectRequest) *ReconnectRequest {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.Spawn.SessionRef = session.NormalizeSessionRef(in.Spawn.SessionRef)
+	out.Spawn.Session = session.CloneSession(in.Spawn.Session)
+	out.Target = delegation.CloneTargetRequest(delegation.TargetRequest{Target: in.Target}).Target
+	return &out
 }
 
 // MessageRunner is the optional Agent-message extension required by

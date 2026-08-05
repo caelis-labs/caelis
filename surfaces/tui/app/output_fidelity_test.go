@@ -19,14 +19,14 @@ import (
 
 const structuredFinalMessageForFidelityTest = "# 完成\n\n已创建文件。\n\n---\n\n### 结果\n\n- 第一项\n- 第二项\n\n| 文件 | 状态 |\n| --- | --- |\n| `hello.go` | 好 |\n\n```go\nfmt.Println(\"你好\")\n```\n\n创建文件\n\n> **结果**"
 
-func TestDurableTaskWaitFinalCompletesOriginalSpawnPanelWithoutInjectingChildWorkspace(t *testing.T) {
+func TestDurableTaskWaitFinalCompletesOriginalSpawnRowWithoutInjectingChildWorkspace(t *testing.T) {
 	t.Parallel()
 
 	model := applyCanonicalOutputFidelitySequence(t, acpprojector.SessionEventTransport{})
 	block := requireMainACPTurnBlockForTest(t, model)
 	physical := physicalTranscriptEventsForTest(block.Events)
 	if len(physical) != 1 {
-		t.Fatalf("events = %#v, want one physical Spawn panel and no TASK result panel", block.Events)
+		t.Fatalf("events = %#v, want one physical Spawn entry and no TASK result row", block.Events)
 	}
 	spawn := physical[0]
 	if !spawn.Done || spawn.Err || !strings.EqualFold(toolSemanticName(spawn.Name, spawn.ToolKind), "SPAWN") {

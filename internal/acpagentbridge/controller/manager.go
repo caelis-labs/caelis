@@ -911,7 +911,7 @@ func (m *Manager) startACPClient(
 	}
 	remoteSessionID := strings.TrimSpace(resumeRemoteSessionID)
 	if remoteSessionID != "" && acpSessionCapability(initResp, "resume") {
-		recovered, err := authentication.ResumeSession(ctx, recovery, remoteSessionID, cwd)
+		recovered, err := authentication.ResumeSession(ctx, recovery, remoteSessionID, cwd, nil)
 		if err == nil {
 			configured, configureErr := sessionconfig.Apply(ctx, recovered.Client, remoteSessionID, sessionconfig.State{
 				ConfigOptions: recovered.Value.ConfigOptions,

@@ -600,6 +600,8 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		handle:          firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"])),
 		title:           strings.TrimSpace(entry.Title),
 		prompt:          taskSpecString(entry.Spec, "prompt"),
+		mode:            taskSpecString(entry.Spec, "mode"),
+		approvalMode:    taskSpecString(entry.Spec, "approval_mode"),
 		createdAt:       entry.CreatedAt,
 		revision:        entry.Revision,
 		lease:           taskapi.CloneLease(entry.Lease),
@@ -875,6 +877,8 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		Spec: map[string]any{
 			"target":               delegation.NormalizeTarget(t.target),
 			"prompt":               t.prompt,
+			"mode":                 t.mode,
+			"approval_mode":        t.approvalMode,
 			"spawn_identity":       taskStringValue(t.metadata["spawn_identity"]),
 			"spawn_request_digest": taskStringValue(t.metadata["spawn_request_digest"]),
 			"spawn_phase":          taskStringValue(t.metadata["spawn_status"]),

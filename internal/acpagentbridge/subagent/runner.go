@@ -327,7 +327,20 @@ func (r *Runner) Wait(ctx context.Context, anchor delegation.Anchor, yieldTimeMS
 func (r *Runner) Message(ctx context.Context, anchor delegation.Anchor, req subagent.MessageRequest) (delegation.Result, error) {
 	run, err := r.lookup(anchor)
 	if err != nil {
-		return delegation.Result{}, err
+		key, keyErr := childRunKey(anchor)
+		if keyErr != nil {
+			return delegation.Result{}, keyErr
+		}
+		r.mu.RLock()
+		existing := r.runs[key]
+		r.mu.RUnlock()
+		if existing != nil || req.Reconnect == nil {
+			return delegation.Result{}, err
+		}
+		run, err = r.reconnectCompletedChild(ctx, anchor, req.Reconnect)
+		if err != nil {
+			return delegation.Result{}, err
+		}
 	}
 	messageReq := agentmessage.NormalizeRequest(req.Request)
 	if messageReq.MessageID == "" || messageReq.Text == "" {

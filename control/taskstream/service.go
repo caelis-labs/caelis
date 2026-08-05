@@ -19,9 +19,16 @@ type Authorizer interface {
 	AuthorizeTaskStream(context.Context, Principal, string) error
 }
 
+// SessionLoader supplies canonical durable child history for terminal Tasks
+// whose process-local Runtime no longer exists after a host restart.
+type SessionLoader interface {
+	LoadSession(context.Context, session.LoadSessionRequest) (session.LoadedSession, error)
+}
+
 type Config struct {
 	Tasks      task.Store
 	Streams    func() stream.Service
+	Sessions   SessionLoader
 	Authorizer Authorizer
 	Secret     []byte
 	Generation string
@@ -30,6 +37,7 @@ type Config struct {
 type service struct {
 	tasks      task.Store
 	streams    func() stream.Service
+	sessions   SessionLoader
 	authorizer Authorizer
 	cursors    cursorCodec
 }
@@ -50,7 +58,7 @@ func New(config Config) (Service, error) {
 		generation = base64.RawURLEncoding.EncodeToString(raw[:])
 	}
 	return &service{
-		tasks: config.Tasks, streams: config.Streams, authorizer: config.Authorizer,
+		tasks: config.Tasks, streams: config.Streams, sessions: config.Sessions, authorizer: config.Authorizer,
 		cursors: cursorCodec{secret: append([]byte(nil), config.Secret...), generation: generation},
 	}, nil
 }
@@ -79,7 +87,7 @@ func (s *service) Events(ctx context.Context, principal Principal, req ReadReque
 	if err != nil {
 		return Batch{}, err
 	}
-	snapshot, events, mode, gap, point, err := s.initialRead(ctx, entry, point, sameGeneration)
+	snapshot, events, mode, gap, point, _, err := s.initialRead(ctx, entry, point, sameGeneration)
 	if err != nil {
 		return Batch{}, err
 	}
@@ -98,7 +106,7 @@ func (s *service) Subscribe(ctx context.Context, principal Principal, req Subscr
 	if err != nil {
 		return SubscribeResult{}, err
 	}
-	snapshot, initial, mode, gap, point, err := s.initialRead(ctx, entry, point, sameGeneration)
+	snapshot, initial, mode, gap, point, historical, err := s.initialRead(ctx, entry, point, sameGeneration)
 	if err != nil {
 		return SubscribeResult{}, err
 	}
@@ -109,11 +117,11 @@ func (s *service) Subscribe(ctx context.Context, principal Principal, req Subscr
 	}
 	sub := newSubscription(ctx)
 	streams := s.streams()
-	if streams == nil {
+	if streams == nil && !historical {
 		_ = sub.Close()
 		return SubscribeResult{}, errorcode.New(errorcode.Unavailable, "taskstream: runtime streams are unavailable")
 	}
-	go s.forward(sub, streams, entry, point, initial, req.Follow)
+	go s.forward(sub, streams, entry, point, initial, req.Follow, historical)
 	return SubscribeResult{
 		Subscription: sub, ResumeMode: mode, TransientGap: gap, BoundaryCursor: boundary,
 	}, nil
@@ -126,9 +134,13 @@ func (s *service) forward(
 	point cursorPoint,
 	initial []Record,
 	follow bool,
+	historical bool,
 ) {
 	defer sub.finish(nil)
 	if !sub.enqueueCatchup(initial) {
+		return
+	}
+	if historical {
 		return
 	}
 	ref := stream.Ref{SessionID: entry.Session.SessionID, TaskID: entry.TaskID}
@@ -169,13 +181,16 @@ func (s *service) forward(
 			return
 		}
 
-		snapshot, catchup, _, _, next, readErr := s.initialRead(sub.ctx, entry, point, true)
+		snapshot, catchup, _, _, next, historical, readErr := s.initialRead(sub.ctx, entry, point, true)
 		if readErr != nil {
 			sub.finish(readErr)
 			return
 		}
 		point = next
 		if !sub.enqueueCatchup(catchup) {
+			return
+		}
+		if historical {
 			return
 		}
 		if !snapshot.Running && (!follow || entry.Kind != task.KindSubagent) {
@@ -207,11 +222,7 @@ func (s *service) prepare(ctx context.Context, principal Principal, req ReadRequ
 	return task.CloneEntry(entry), point, sameGeneration, nil
 }
 
-func (s *service) initialRead(ctx context.Context, entry *task.Entry, point cursorPoint, sameGeneration bool) (stream.Snapshot, []Record, ResumeMode, bool, cursorPoint, error) {
-	streams := s.streams()
-	if streams == nil {
-		return stream.Snapshot{}, nil, "", false, point, errorcode.New(errorcode.Unavailable, "taskstream: runtime streams are unavailable")
-	}
+func (s *service) initialRead(ctx context.Context, entry *task.Entry, point cursorPoint, sameGeneration bool) (stream.Snapshot, []Record, ResumeMode, bool, cursorPoint, bool, error) {
 	readCursor := stream.CloneCursor(point.Cursor)
 	mode := ResumeModeExact
 	gap := false
@@ -225,11 +236,9 @@ func (s *service) initialRead(ctx context.Context, entry *task.Entry, point curs
 		mode = ResumeModeCurrentState
 		gap = true
 	}
-	snapshot, err := streams.Read(ctx, stream.ReadRequest{
-		Ref: stream.Ref{SessionID: entry.Session.SessionID, TaskID: entry.TaskID}, Cursor: readCursor,
-	})
+	snapshot, historical, err := s.readTaskSnapshot(ctx, entry, readCursor)
 	if err != nil {
-		return stream.Snapshot{}, nil, "", false, point, err
+		return stream.Snapshot{}, nil, "", false, point, false, err
 	}
 	subagentCurrentState := replaySubagentCurrentState
 	if snapshot.EventsTruncatedBefore > readCursor.Events || snapshot.TruncatedBefore > readCursor.Output {
@@ -255,7 +264,7 @@ func (s *service) initialRead(ctx context.Context, entry *task.Entry, point curs
 		var record Record
 		record, point, err = s.gapRecord(entry, descriptor, point)
 		if err != nil {
-			return stream.Snapshot{}, nil, "", false, point, err
+			return stream.Snapshot{}, nil, "", false, point, false, err
 		}
 		events = append(events, record)
 	}
@@ -269,11 +278,11 @@ func (s *service) initialRead(ctx context.Context, entry *task.Entry, point curs
 			var projected []Record
 			projected, point, err = s.recordFrame(entry, descriptor, frame, point)
 			if err != nil {
-				return stream.Snapshot{}, nil, "", false, point, err
+				return stream.Snapshot{}, nil, "", false, point, false, err
 			}
 			events = append(events, projected...)
 		}
-		return snapshot, events, mode, gap, point, nil
+		return snapshot, events, mode, gap, point, historical, nil
 	}
 	for _, frame := range stream.FramesForSnapshot(snapshot) {
 		if frame.EventsTruncatedBefore > point.Cursor.Events || frame.TruncatedBefore > point.Cursor.Output {
@@ -281,7 +290,7 @@ func (s *service) initialRead(ctx context.Context, entry *task.Entry, point curs
 			point.Cursor.Output = max(point.Cursor.Output, frame.TruncatedBefore)
 			gapRecord, next, gapErr := s.gapRecord(entry, descriptor, point)
 			if gapErr != nil {
-				return stream.Snapshot{}, nil, "", false, point, gapErr
+				return stream.Snapshot{}, nil, "", false, point, false, gapErr
 			}
 			point = next
 			events = append(events, gapRecord)
@@ -290,17 +299,17 @@ func (s *service) initialRead(ctx context.Context, entry *task.Entry, point curs
 		}
 		projected, next, projectErr := s.recordFrame(entry, descriptor, frame, point)
 		if projectErr != nil {
-			return stream.Snapshot{}, nil, "", false, point, projectErr
+			return stream.Snapshot{}, nil, "", false, point, false, projectErr
 		}
 		point = next
 		events = append(events, projected...)
 	}
 	if subagentCurrentState {
 		if err := s.makeCurrentStateBatchReplayable(entry, events, readCursor); err != nil {
-			return stream.Snapshot{}, nil, "", false, point, err
+			return stream.Snapshot{}, nil, "", false, point, false, err
 		}
 	}
-	return snapshot, events, mode, gap, point, nil
+	return snapshot, events, mode, gap, point, historical, nil
 }
 
 // makeCurrentStateBatchReplayable keeps every partial-batch cursor anchored

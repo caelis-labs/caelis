@@ -523,6 +523,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	controlTaskStreams, err := controltaskstream.New(controltaskstream.Config{
 		Tasks:      taskStore,
 		Streams:    func() stream.Service { return hostTaskStreamService{host: stack} },
+		Sessions:   sessions,
 		Authorizer: taskStreamAuthorizer{inner: controlclient.SessionAuthorizer{Sessions: sessions}},
 		Secret:     cursorSecret,
 	})

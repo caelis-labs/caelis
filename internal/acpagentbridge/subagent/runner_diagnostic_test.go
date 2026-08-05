@@ -10,11 +10,14 @@ import (
 	"testing"
 	"time"
 
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -127,10 +130,64 @@ func TestRunnerPromptRecoversConfiguredAuthentication(t *testing.T) {
 	}
 }
 
+func TestRunnerReconnectsCompletedChildBeforeMessage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	registry, err := NewRegistry([]AgentConfig{{
+		Name:    "helper",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestRunnerPromptFailureHelperProcess", "--"},
+		Env: map[string]string{
+			"CAELIS_ACP_SUBAGENT_HELPER": "message-reconnect",
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewRunner(RunnerConfig{Registry: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completion := make(chan delegation.Result, 1)
+	anchor := delegation.Anchor{
+		TaskID: "task-reconnect", SessionID: "child-reconnect", AgentID: "task-reconnect",
+	}
+	accepted, err := runner.Message(ctx, anchor, tasksubagent.MessageRequest{
+		Request: agentmessage.Request{
+			MessageID: "message-reconnect", To: "helper", Text: "continue after restart",
+		},
+		Completion: completionSinkFunc(func(result delegation.Result) { completion <- result }),
+		Reconnect: &tasksubagent.ReconnectRequest{
+			Spawn: tasksubagent.SpawnContext{
+				SessionRef: session.SessionRef{SessionID: "parent-reconnect"},
+				CWD:        "/tmp", TaskID: "task-reconnect", Handle: "helper",
+			},
+			Target: delegation.Target{
+				Selector:  "helper",
+				Placement: delegation.Placement{Kind: delegation.PlacementAgent, Agent: "helper"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Message() error = %v", err)
+	}
+	if !accepted.Running || accepted.State != delegation.StateRunning {
+		t.Fatalf("Message() = %#v, want accepted running Turn", accepted)
+	}
+	select {
+	case result := <-completion:
+		if result.Running || result.State != delegation.StateCompleted {
+			t.Fatalf("completion = %#v, want completed", result)
+		}
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for reconnected message Turn: %v", ctx.Err())
+	}
+}
+
 func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 	mode := os.Getenv("CAELIS_ACP_SUBAGENT_HELPER")
 	switch mode {
-	case "prompt-failure", "prompt-authentication":
+	case "prompt-failure", "prompt-authentication", "message-reconnect":
 	default:
 		return
 	}
@@ -140,6 +197,14 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 		switch msg.Method {
 		case client.MethodInitialize:
 			response := client.InitializeResponse{ProtocolVersion: 1}
+			if mode == "message-reconnect" {
+				response.AgentCapabilities.Meta = map[string]json.RawMessage{
+					client.MethodSessionMessage: json.RawMessage(`{}`),
+				}
+				response.AgentCapabilities.SessionCapabilities = map[string]json.RawMessage{
+					"resume": json.RawMessage(`{}`),
+				}
+			}
 			if mode == "prompt-authentication" {
 				response.AuthMethods = []json.RawMessage{
 					json.RawMessage(`{"id":"agent-login","name":"Agent login"}`),
@@ -148,6 +213,15 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 			return response, nil
 		case client.MethodSessionNew:
 			return client.NewSessionResponse{SessionID: "child-prompt-failure"}, nil
+		case client.MethodSessionResume:
+			var req client.ResumeSessionRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil ||
+				req.SessionID != "child-reconnect" || req.CWD != "/tmp" ||
+				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeSessionParentID) != "parent-reconnect" ||
+				metautil.String(req.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeSession, metautil.RuntimeTaskID) != "task-reconnect" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/resume request"}
+			}
+			return client.ResumeSessionResponse{}, nil
 		case client.MethodAuthenticate:
 			var req client.AuthenticateRequest
 			if err := json.Unmarshal(msg.Params, &req); err != nil || req.MethodID != "agent-login" {
@@ -167,6 +241,14 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 				Code:    -32000,
 				Message: "prompt rejected Authorization: Bearer rpc-super-secret at /Users/private/workspace",
 			}
+		case client.MethodSessionMessage:
+			var req client.SessionMessageRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil || req.SessionID != "child-reconnect" || req.Message != "continue after restart" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/message request"}
+			}
+			return client.SessionMessageResponse{
+				MessageID: req.MessageID, Accepted: true, State: string(delegation.StateCompleted),
+			}, nil
 		default:
 			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 		}

@@ -139,12 +139,33 @@ func (tm *taskRuntime) sendSubagentMessage(ctx context.Context, ref session.Sess
 	if state != taskapi.StateCompleted {
 		return agentmessage.Response{}, fmt.Errorf("agent-sdk/runtime: subagent %q is %s", req.To, state)
 	}
+	activeSession, err := tm.runtime.sessions.Session(ctx, ref)
+	if err != nil {
+		return agentmessage.Response{}, err
+	}
+	task.mu.Lock()
+	reconnect := &subagent.ReconnectRequest{
+		Spawn: subagent.SpawnContext{
+			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession),
+			CWD: strings.TrimSpace(activeSession.CWD), TaskID: strings.TrimSpace(task.ref.TaskID),
+			Handle: strings.TrimSpace(task.handle), Role: subagentParticipantRole(task),
+			ParentCallID: taskStringValue(task.metadata["parent_call"]), Mode: strings.TrimSpace(task.mode),
+			ApprovalMode: strings.TrimSpace(task.approvalMode), Streams: tm,
+		},
+		Target: delegation.CloneTargetRequest(delegation.TargetRequest{Target: task.target}).Target,
+	}
+	task.mu.Unlock()
+	reconnect.Spawn.ApprovalRequester = newSubagentApprovalRequester(
+		tm.runtime, reconnect.Spawn.Mode, nil, activeSession, ref,
+	)
 	checkpoint := task.beginMessageTurn()
 	task.mu.Lock()
 	turnSeq := task.turnSeq
 	turnID = subagentTurnID(task.ref.TaskID, turnSeq)
 	task.mu.Unlock()
 	messageReq.Completion = newSubagentCompletionSink(ctx, tm, task.ref.TaskID, turnSeq)
+	reconnect.Spawn.Completion = messageReq.Completion
+	messageReq.Reconnect = reconnect
 	result, sendErr := runner.Message(ctx, delegation.CloneAnchor(task.anchor), messageReq)
 	if sendErr != nil {
 		task.restoreMessageTurn(checkpoint, true)

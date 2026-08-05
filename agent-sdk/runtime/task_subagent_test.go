@@ -986,6 +986,21 @@ func TestSendMessageContinuesCompletedSpawnChild(t *testing.T) {
 	if runner.continueAnchor.TaskID != started.Ref.TaskID {
 		t.Fatalf("continue anchor task id = %q, want %q", runner.continueAnchor.TaskID, started.Ref.TaskID)
 	}
+	if runner.continueReconnect == nil {
+		t.Fatal("MessageRequest.Reconnect is nil for a completed child")
+	}
+	if got := runner.continueReconnect.Spawn.SessionRef.SessionID; got != activeSession.SessionID {
+		t.Fatalf("reconnect parent Session ID = %q, want %q", got, activeSession.SessionID)
+	}
+	if got := runner.continueReconnect.Spawn.TaskID; got != started.Ref.TaskID {
+		t.Fatalf("reconnect Task ID = %q, want %q", got, started.Ref.TaskID)
+	}
+	if got := runner.continueReconnect.Target.Selector; got != "helper" {
+		t.Fatalf("reconnect target selector = %q, want helper", got)
+	}
+	if got := runner.continueReconnect.Spawn.CWD; got != activeSession.CWD {
+		t.Fatalf("reconnect CWD = %q, want %q", got, activeSession.CWD)
+	}
 	if continued.StdoutCursor != int64(len("follow-up done")) {
 		t.Fatalf("continued stdout cursor = %d, want only follow-up output length", continued.StdoutCursor)
 	}
@@ -2469,6 +2484,7 @@ type recordingSubagentRunner struct {
 	continueAgent      string
 	continuePrompt     string
 	continueCompletion delegation.CompletionSink
+	continueReconnect  *subagent.ReconnectRequest
 	messageErr         error
 	waitYieldMS        int
 	waitCalls          int
@@ -2512,6 +2528,7 @@ func (r *recordingSubagentRunner) Message(_ context.Context, anchor delegation.A
 	r.continueAgent = strings.TrimSpace(anchor.Agent)
 	r.continuePrompt = strings.TrimSpace(req.Text)
 	r.continueCompletion = req.Completion
+	r.continueReconnect = subagent.CloneReconnectRequest(req.Reconnect)
 	return delegation.CloneResult(r.continueResult), r.messageErr
 }
 

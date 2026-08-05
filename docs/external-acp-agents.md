@@ -86,6 +86,15 @@ observation. A non-terminal acknowledgement such as `state: running` does not
 prove completion; the runner records `unknown_outcome` rather than a false
 completed Task result.
 
+After the parent host or Session Runtime restarts, the durable Task still owns
+the child handle, placement, ACP Session ID, and Task ID. The first message to a
+completed child lazily recreates only the endpoint process, resumes that exact
+ACP Session, and then starts the next message-authored Turn on the existing
+Task. It never substitutes `session/new` or a new handle. Built-in managed child
+Sessions remain hidden from ordinary lifecycle clients: the internal resume
+claim must match both the durable parent Session and Spawn Task recorded on the
+child before that bridge instance may address it.
+
 `SendMessage` is the incremental channel for updates and questions. A child's
 terminal answer remains its final response and is retrieved by the parent with
 `Task read` or `Task wait`; sending the same terminal answer through both paths

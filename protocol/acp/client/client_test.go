@@ -182,7 +182,13 @@ func TestStableSessionLifecycleMethodsSendExpectedRequests(t *testing.T) {
 				if err := json.Unmarshal(msg.Params, &req); err != nil {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
 				}
-				if req.SessionID != "session-1" || req.CWD != "/tmp/project" {
+				if req.SessionID != "session-1" || req.CWD != "/tmp/project" || metautil.String(
+					req.Meta,
+					metautil.Root,
+					metautil.Runtime,
+					metautil.RuntimeSession,
+					metautil.RuntimeTaskID,
+				) != "task-resume" {
 					return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/resume params"}
 				}
 				return ResumeSessionResponse{}, nil
@@ -223,7 +229,10 @@ func TestStableSessionLifecycleMethodsSendExpectedRequests(t *testing.T) {
 	if len(list.Sessions) != 1 || list.Sessions[0].SessionID != "session-1" {
 		t.Fatalf("ListSessions() = %#v, want session-1", list)
 	}
-	if _, err := client.ResumeSession(ctx, "session-1", "/tmp/project", nil); err != nil {
+	resumeMeta := metautil.WithCompactRuntimeSection(nil, metautil.RuntimeSession, map[string]any{
+		metautil.RuntimeTaskID: "task-resume",
+	})
+	if _, err := client.ResumeSession(ctx, "session-1", "/tmp/project", resumeMeta); err != nil {
 		t.Fatalf("ResumeSession() error = %v", err)
 	}
 	if err := client.CloseSession(ctx, "session-1"); err != nil {

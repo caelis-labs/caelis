@@ -19,9 +19,11 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	// Decorating the whole batch first would permanently erase the structured
 	// target before the earlier Spawn event had mounted its view.
 	subagentOutputChanged := false
+	subagentRosterRefreshNeeded := false
 	for index := range msg.Events {
 		one := msg.Events[index : index+1]
 		subagentOutputChanged = m.observeSubagentOutputEvents(one) || subagentOutputChanged
+		subagentRosterRefreshNeeded = m.acceptedSendMessageTargetsSubagent(one[0]) || subagentRosterRefreshNeeded
 		m.decorateAgentMessageDisplayTargets(one)
 	}
 	// Mount/update transcript owners before applying the correlated repairs;
@@ -36,11 +38,26 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	// observations, drive child subscription lifetime. The Task invocation does
 	// not own or redirect that stream.
 	m.reconcileSubagentOutputTaskStreams()
-	var subagentOutputCmd tea.Cmd
+	var subagentOutputCmd, subagentRosterCmd tea.Cmd
 	if subagentOutputChanged {
 		subagentOutputCmd = m.requestSubagentOutputRender()
 	}
-	return m, tea.Batch(transcriptCmd, observedSpawnCmd, subagentOutputCmd, m.resumeRunningAnimationIfNeeded())
+	if subagentRosterRefreshNeeded {
+		subagentRosterCmd = m.requestSubagentRosterRefreshAfterAcceptedSend()
+	} else if subagentOutputChanged {
+		subagentRosterCmd = m.requestSubagentRosterRefresh()
+	}
+	return m, tea.Batch(transcriptCmd, observedSpawnCmd, subagentOutputCmd, subagentRosterCmd, m.resumeRunningAnimationIfNeeded())
+}
+
+// acceptedSendMessageTargetsSubagent detects the delivery acknowledgement that
+// can start a new Turn on a retained child workspace. The canonical Task
+// directory remains the lifecycle owner; this signal only resumes polling it.
+func (m *Model) acceptedSendMessageTargetsSubagent(event TranscriptEvent) bool {
+	return m != nil && event.Scope == ACPProjectionMain && event.Kind == TranscriptEventTool &&
+		event.Final && !event.ToolError &&
+		names.CanonicalOrSelf(toolSemanticName(event.ToolName, event.ToolKind)) == names.SendMessage &&
+		m.subagentOutputCallIDForHandle(event.ToolMessageTarget) != ""
 }
 
 func (m *Model) decorateAgentMessageDisplayTargets(events []TranscriptEvent) []TranscriptEvent {

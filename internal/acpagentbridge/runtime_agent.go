@@ -497,9 +497,11 @@ func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionR
 	if err != nil {
 		return acp.ResumeSessionResponse{}, err
 	}
-	if sessionvisibility.IsSystemManagedSession(activeSession) {
+	managedSession := sessionvisibility.IsSystemManagedSession(activeSession)
+	if managedSession && !matchesManagedSubagentResumeClaim(activeSession, req.Meta) {
 		return acp.ResumeSessionResponse{}, session.ErrSessionNotFound
 	}
+	claimManagedSession := managedSession && !a.ownsManagedSession(req.SessionID)
 	resp := acp.ResumeSessionResponse{}
 	if a.presentationClient != nil {
 		snapshot, err := a.presentationClient.PresentationSnapshot(ctx, controlclient.PresentationRequest{SessionID: req.SessionID})
@@ -507,6 +509,9 @@ func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionR
 			return acp.ResumeSessionResponse{}, err
 		}
 		resp.Modes, resp.ConfigOptions, resp.Models, _ = acpPresentationSnapshot(snapshot)
+		if claimManagedSession {
+			a.rememberManagedSession(activeSession)
+		}
 		return resp, nil
 	}
 	if a.modes != nil {
@@ -529,6 +534,9 @@ func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionR
 			return acp.ResumeSessionResponse{}, err
 		}
 		resp.Models = models
+	}
+	if claimManagedSession {
+		a.rememberManagedSession(activeSession)
 	}
 	return resp, nil
 }
