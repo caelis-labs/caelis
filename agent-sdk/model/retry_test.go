@@ -533,7 +533,7 @@ func TestRetryExhaustedErrorKeepsCauseOutOfDisplayMessage(t *testing.T) {
 	t.Parallel()
 
 	cause := errors.New("model: http status 500 body=Internal Server Error")
-	err := retryExhaustedError(retryPolicy{maxRetries: 5}, cause)
+	err := retryExhaustedError(retryPolicy{maxRetries: 5}, 5, cause)
 	var exhausted *RetryExhaustedError
 	if !errors.As(err, &exhausted) {
 		t.Fatalf("retryExhaustedError() = %T, want RetryExhaustedError", err)
@@ -800,4 +800,125 @@ func TestWithRetryNoRetryAfterFinalResponse(t *testing.T) {
 	if got, want := inner.calls, 1; got != want {
 		t.Fatalf("calls = %d, want %d (no retry should happen after final response)", got, want)
 	}
+}
+
+func TestWithRetryHonorsFailureRetryLimitAndResetsConnections(t *testing.T) {
+	t.Parallel()
+
+	timeoutErr := retryLimitedTestError{maxRetries: 1}
+	inner := &retryLimitedResetLLM{retryTestLLM: &retryTestLLM{errs: []error{timeoutErr, timeoutErr, timeoutErr}}}
+	llm := WithRetry(inner, RetryConfig{
+		MaxRetries: 5,
+		BaseDelay:  time.Nanosecond,
+		MaxDelay:   time.Nanosecond,
+	})
+
+	var gotErr error
+	for _, err := range llm.Generate(context.Background(), &Request{Messages: []Message{NewTextMessage(RoleUser, "hello")}}) {
+		if err != nil {
+			gotErr = err
+		}
+	}
+	var exhausted *RetryExhaustedError
+	if !errors.As(gotErr, &exhausted) || exhausted.MaxRetries != 1 {
+		t.Fatalf("Generate() error = %#v, want retry exhaustion capped at one retry", gotErr)
+	}
+	if got := inner.calls; got != 2 {
+		t.Fatalf("calls = %d, want initial attempt plus one retry", got)
+	}
+	if len(inner.resetErrors) != 1 || !errors.Is(inner.resetErrors[0], timeoutErr) {
+		t.Fatalf("connection resets = %#v, want one timeout reset", inner.resetErrors)
+	}
+}
+
+func TestWithRetryKeepsFailureRetryLimitAcrossMixedErrors(t *testing.T) {
+	t.Parallel()
+
+	timeoutErr := retryLimitedTestError{maxRetries: 1}
+	transientErr := errors.New("transient provider failure")
+	tests := []struct {
+		name        string
+		errs        []error
+		wantCause   error
+		wantCalls   int
+		wantRetries int
+		wantResets  int
+	}{
+		{
+			name:        "later generic error cannot reopen timeout budget",
+			errs:        []error{timeoutErr, transientErr, transientErr},
+			wantCause:   transientErr,
+			wantCalls:   2,
+			wantRetries: 1,
+			wantResets:  1,
+		},
+		{
+			name:        "late timeout reports retries already performed",
+			errs:        []error{transientErr, transientErr, timeoutErr},
+			wantCause:   timeoutErr,
+			wantCalls:   3,
+			wantRetries: 2,
+			wantResets:  2,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			inner := &retryLimitedResetLLM{retryTestLLM: &retryTestLLM{errs: tt.errs}}
+			llm := WithRetry(inner, RetryConfig{
+				MaxRetries: 5,
+				BaseDelay:  time.Nanosecond,
+				MaxDelay:   time.Nanosecond,
+			})
+
+			var gotErr error
+			for _, err := range llm.Generate(context.Background(), &Request{Messages: []Message{NewTextMessage(RoleUser, "hello")}}) {
+				if err != nil {
+					gotErr = err
+				}
+			}
+			var exhausted *RetryExhaustedError
+			if !errors.As(gotErr, &exhausted) {
+				t.Fatalf("Generate() error = %#v, want RetryExhaustedError", gotErr)
+			}
+			if !errors.Is(gotErr, tt.wantCause) {
+				t.Fatalf("Generate() error = %v, want cause %v", gotErr, tt.wantCause)
+			}
+			if exhausted.MaxRetries != tt.wantRetries {
+				t.Fatalf("reported retries = %d, want %d", exhausted.MaxRetries, tt.wantRetries)
+			}
+			if inner.calls != tt.wantCalls {
+				t.Fatalf("calls = %d, want %d", inner.calls, tt.wantCalls)
+			}
+			if len(inner.resetErrors) != tt.wantResets {
+				t.Fatalf("connection resets = %d, want %d", len(inner.resetErrors), tt.wantResets)
+			}
+		})
+	}
+}
+
+type retryLimitedTestError struct {
+	maxRetries int
+}
+
+func (e retryLimitedTestError) Error() string {
+	return "retry-limited timeout"
+}
+
+func (e retryLimitedTestError) Retryable() bool {
+	return true
+}
+
+func (e retryLimitedTestError) RetryMaxRetries() int {
+	return e.maxRetries
+}
+
+type retryLimitedResetLLM struct {
+	*retryTestLLM
+	resetErrors []error
+}
+
+func (l *retryLimitedResetLLM) ResetConnectionsForRetry(err error) {
+	l.resetErrors = append(l.resetErrors, err)
 }

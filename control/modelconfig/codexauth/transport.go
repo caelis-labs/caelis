@@ -17,6 +17,15 @@ type authenticatedTransport struct {
 	base    http.RoundTripper
 }
 
+func (t *authenticatedTransport) CloseIdleConnections() {
+	if t == nil || t.base == nil {
+		return
+	}
+	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
 func (t *authenticatedTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request == nil {
 		return nil, fmt.Errorf("codexauth: request is nil")

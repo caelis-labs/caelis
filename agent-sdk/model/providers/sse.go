@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -18,7 +19,11 @@ var errStreamFirstEventTimeout = errors.New("providers: stream first event timeo
 
 var errStreamIdleTimeout = errors.New("providers: stream idle timeout")
 
-const defaultStreamFirstEventTimeout = 5 * time.Minute
+const (
+	defaultStreamFirstEventTimeout = 5 * time.Minute
+	defaultStreamIdleTimeout       = 5 * time.Minute
+	streamTimeoutMaxRetries        = 1
+)
 
 type streamFirstEventTimeoutError struct {
 	timeout time.Duration
@@ -39,6 +44,10 @@ func (e streamFirstEventTimeoutError) Retryable() bool {
 	return true
 }
 
+func (e streamFirstEventTimeoutError) RetryMaxRetries() int {
+	return streamTimeoutMaxRetries
+}
+
 func (e streamFirstEventTimeoutError) ErrorCode() errorcode.Code { return errorcode.Timeout }
 
 func normalizeStreamFirstEventTimeout(timeout time.Duration) time.Duration {
@@ -47,6 +56,16 @@ func normalizeStreamFirstEventTimeout(timeout time.Duration) time.Duration {
 	}
 	if timeout == 0 {
 		return defaultStreamFirstEventTimeout
+	}
+	return timeout
+}
+
+func normalizeStreamIdleTimeout(timeout time.Duration) time.Duration {
+	if timeout < 0 {
+		return 0
+	}
+	if timeout == 0 {
+		return defaultStreamIdleTimeout
 	}
 	return timeout
 }
@@ -72,6 +91,10 @@ func (e streamIdleTimeoutError) Unwrap() error {
 
 func (e streamIdleTimeoutError) Retryable() bool {
 	return true
+}
+
+func (e streamIdleTimeoutError) RetryMaxRetries() int {
+	return streamTimeoutMaxRetries
 }
 
 func (e streamIdleTimeoutError) ErrorCode() errorcode.Code { return errorcode.Timeout }
@@ -126,13 +149,31 @@ func readSSEWithFirstEventTimeout(reader io.Reader, timeout time.Duration, onDat
 }
 
 func readSSEWithEventTimeout(reader io.Reader, firstEventTimeout time.Duration, idleTimeout time.Duration, onData func([]byte) error) error {
+	return readSSEWithActivityTimeout(reader, firstEventTimeout, idleTimeout, func([]byte) bool { return true }, onData)
+}
+
+// readSSEWithActivityTimeout switches from the first-event budget to the idle
+// budget after the first complete data event. Later events reset the idle
+// budget only when isActivity reports semantic progress, so provider heartbeat
+// frames cannot keep a stalled attempt alive indefinitely.
+func readSSEWithActivityTimeout(
+	reader io.Reader,
+	firstEventTimeout time.Duration,
+	idleTimeout time.Duration,
+	isActivity func([]byte) bool,
+	onData func([]byte) error,
+) error {
 	if firstEventTimeout <= 0 && idleTimeout <= 0 {
 		return readSSE(reader, onData)
 	}
 	errCh := make(chan error, 1)
 	eventCh := make(chan struct{}, 1)
+	var activitySeen atomic.Bool
 	go func() {
 		errCh <- readSSE(reader, func(data []byte) error {
+			if isActivity == nil || isActivity(data) {
+				activitySeen.Store(true)
+			}
 			select {
 			case eventCh <- struct{}{}:
 			default:
@@ -178,8 +219,11 @@ func readSSEWithEventTimeout(reader io.Reader, firstEventTimeout time.Duration, 
 		case err := <-errCh:
 			return err
 		case <-eventCh:
+			activity := activitySeen.Swap(false)
+			if !seenEvent || activity {
+				resetTimer(idleTimeout)
+			}
 			seenEvent = true
-			resetTimer(idleTimeout)
 		case <-timerCh:
 			if closer, ok := reader.(interface{ Close() error }); ok {
 				_ = closer.Close()

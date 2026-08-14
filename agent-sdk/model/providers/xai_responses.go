@@ -24,16 +24,18 @@ const xAIResponsesStrictFunctionTools = false
 // xAIResponsesLLM implements xAI's Responses dialect without inheriting the
 // ChatGPT-only headers, endpoint, or request-affinity semantics of Codex.
 type xAIResponsesLLM struct {
-	name                string
-	provider            string
-	baseURL             string
-	headers             map[string]string
-	client              *http.Client
-	requestTimeout      time.Duration
-	firstEventTimeout   time.Duration
-	maxOutputTok        int
-	contextWindowTokens int
-	imageInput          bool
+	name                  string
+	provider              string
+	baseURL               string
+	headers               map[string]string
+	client                *http.Client
+	requestTimeout        time.Duration
+	responseHeaderTimeout time.Duration
+	firstEventTimeout     time.Duration
+	idleTimeout           time.Duration
+	maxOutputTok          int
+	contextWindowTokens   int
+	imageInput            bool
 }
 
 func newXAIResponses(cfg Config) *xAIResponsesLLM {
@@ -42,16 +44,18 @@ func newXAIResponses(cfg Config) *xAIResponsesLLM {
 		baseURL = defaultXAIResponsesBaseURL
 	}
 	return &xAIResponsesLLM{
-		name:                strings.TrimSpace(cfg.Model),
-		provider:            strings.TrimSpace(cfg.Provider),
-		baseURL:             baseURL,
-		headers:             cloneHeaders(cfg.Headers),
-		client:              coalesceHTTPClient(cfg.HTTPClient),
-		requestTimeout:      cfg.Timeout,
-		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
-		maxOutputTok:        cfg.MaxOutputTok,
-		contextWindowTokens: cfg.ContextWindowTokens,
-		imageInput:          cfg.ImageInput,
+		name:                  strings.TrimSpace(cfg.Model),
+		provider:              strings.TrimSpace(cfg.Provider),
+		baseURL:               baseURL,
+		headers:               cloneHeaders(cfg.Headers),
+		client:                coalesceHTTPClient(cfg.HTTPClient),
+		requestTimeout:        cfg.Timeout,
+		responseHeaderTimeout: normalizeStreamResponseHeaderTimeout(cfg.StreamResponseHeaderTimeout),
+		firstEventTimeout:     normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
+		idleTimeout:           normalizeStreamIdleTimeout(cfg.StreamIdleTimeout),
+		maxOutputTok:          cfg.MaxOutputTok,
+		contextWindowTokens:   cfg.ContextWindowTokens,
+		imageInput:            cfg.ImageInput,
 	}
 }
 
@@ -74,6 +78,12 @@ func (l *xAIResponsesLLM) ContextWindowTokens() int {
 		return 0
 	}
 	return l.contextWindowTokens
+}
+
+func (l *xAIResponsesLLM) ResetConnectionsForRetry(error) {
+	if l != nil && l.client != nil {
+		l.client.CloseIdleConnections()
+	}
 }
 
 func (l *xAIResponsesLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
@@ -103,7 +113,7 @@ func (l *xAIResponsesLLM) Generate(ctx context.Context, req *model.Request) iter
 		applyDefaultAttributionHeaders(httpReq, APIXAIResponses)
 		applyConfiguredHeaders(httpReq, l.headers)
 
-		resp, err := l.client.Do(httpReq)
+		resp, err := doStreamingRequest(l.client, httpReq, l.responseHeaderTimeout)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -121,7 +131,7 @@ func (l *xAIResponsesLLM) Generate(ctx context.Context, req *model.Request) iter
 		accumulator := newOpenAIResponsesAccumulator("xai")
 		terminalSeen := false
 		stopped := false
-		err = readSSEWithFirstEventTimeout(resp.Body, l.firstEventTimeout, func(data []byte) error {
+		err = readSSEWithActivityTimeout(resp.Body, l.firstEventTimeout, l.idleTimeout, responsesSSEHasSemanticActivity, func(data []byte) error {
 			var event openAICodexStreamWire
 			if err := json.Unmarshal(data, &event); err != nil {
 				return fmt.Errorf("xai responses: decode stream event: %w", err)

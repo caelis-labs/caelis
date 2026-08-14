@@ -49,6 +49,19 @@ type BackpressureError interface {
 	Backpressure() bool
 }
 
+// RetryLimitError lets one failure class clamp the number of retries below the
+// provider-neutral request budget. It is intended for slow failures where each
+// attempt already consumed a substantial timeout window.
+type RetryLimitError interface {
+	RetryMaxRetries() int
+}
+
+// RetryConnectionResetter is an optional provider capability used to evict
+// pooled connections before replaying a failed request.
+type RetryConnectionResetter interface {
+	ResetConnectionsForRetry(error)
+}
+
 // WithRetry wraps one LLM so each Generate call retries the provider request
 // with the same caller context and a fresh clone of the same model request.
 func WithRetry(llm LLM, cfg RetryConfig) LLM {
@@ -301,6 +314,7 @@ func (l *retryingLLM) retryUntilOK(
 	if shouldRetry == nil {
 		shouldRetry = IsRetryableLLMError
 	}
+	effectiveMaxRetries := -1
 	for attempt := 0; ; attempt++ {
 		err := run(attempt)
 		if err == nil {
@@ -313,10 +327,17 @@ func (l *retryingLLM) retryUntilOK(
 			return err
 		}
 		policy := retryPolicyForError(l.cfg, err)
+		if effectiveMaxRetries < 0 || policy.maxRetries < effectiveMaxRetries {
+			effectiveMaxRetries = policy.maxRetries
+		}
+		policy.maxRetries = effectiveMaxRetries
 		if attempt >= policy.maxRetries {
-			return retryExhaustedError(policy, err)
+			return retryExhaustedError(policy, attempt, err)
 		}
 		delay := RetryDelayForAttempt(attempt, policy.baseDelay, policy.maxDelay)
+		if resetter, ok := l.inner.(RetryConnectionResetter); ok {
+			resetter.ResetConnectionsForRetry(err)
+		}
 		if beforeRetry != nil {
 			keepGoing, hookErr := beforeRetry(AttemptReset{
 				Attempt:          attempt + 1,
@@ -337,12 +358,12 @@ func (l *retryingLLM) retryUntilOK(
 	}
 }
 
-func retryExhaustedError(policy retryPolicy, err error) error {
+func retryExhaustedError(policy retryPolicy, retries int, err error) error {
 	if err == nil {
 		return nil
 	}
 	return &RetryExhaustedError{
-		MaxRetries:   policy.maxRetries,
+		MaxRetries:   max(0, retries),
 		Backpressure: policy.backpressure,
 		Cause:        err,
 	}
@@ -406,16 +427,25 @@ func retryExhaustedMessage(maxRetries int, backpressure bool, includeRuntimePref
 
 func retryPolicyForError(cfg RetryConfig, err error) retryPolicy {
 	cfg = NormalizeRetryConfig(cfg)
+	limit := func(maxRetries int) int {
+		var limiter RetryLimitError
+		if errors.As(err, &limiter) {
+			if retryLimit := limiter.RetryMaxRetries(); retryLimit >= 0 && retryLimit < maxRetries {
+				return retryLimit
+			}
+		}
+		return maxRetries
+	}
 	if IsBackpressureLLMError(err) {
 		return retryPolicy{
-			maxRetries:   cfg.RateLimitMaxRetries,
+			maxRetries:   limit(cfg.RateLimitMaxRetries),
 			baseDelay:    cfg.RateLimitBaseDelay,
 			maxDelay:     cfg.RateLimitMaxDelay,
 			backpressure: true,
 		}
 	}
 	return retryPolicy{
-		maxRetries: cfg.MaxRetries,
+		maxRetries: limit(cfg.MaxRetries),
 		baseDelay:  cfg.BaseDelay,
 		maxDelay:   cfg.MaxDelay,
 	}

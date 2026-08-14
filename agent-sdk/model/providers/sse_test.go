@@ -166,6 +166,44 @@ func TestReadSSEWithEventTimeout_AllowsSilenceWhenIdleDisabled(t *testing.T) {
 	}
 }
 
+func TestReadSSEWithActivityTimeout_HeartbeatsDoNotResetIdle(t *testing.T) {
+	t.Parallel()
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		if _, err := writer.Write([]byte("data: first\n\n")); err != nil {
+			return
+		}
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			if _, err := writer.Write([]byte("data: heartbeat\n\n")); err != nil {
+				return
+			}
+		}
+	}()
+
+	err := readSSEWithActivityTimeout(
+		reader,
+		time.Second,
+		30*time.Millisecond,
+		func(data []byte) bool { return string(data) != "heartbeat" },
+		func([]byte) error { return nil },
+	)
+	if !errors.Is(err, errStreamIdleTimeout) {
+		t.Fatalf("readSSEWithActivityTimeout() error = %v, want idle timeout", err)
+	}
+	select {
+	case <-writerDone:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat writer did not stop after reader timeout")
+	}
+}
+
 func TestStreamFirstEventTimeoutErrorIsRetryable(t *testing.T) {
 	t.Parallel()
 
@@ -206,5 +244,16 @@ func TestNormalizeStreamFirstEventTimeoutDefault(t *testing.T) {
 	}
 	if got := normalizeStreamFirstEventTimeout(-1); got != 0 {
 		t.Fatalf("normalizeStreamFirstEventTimeout(-1) = %s, want disabled zero", got)
+	}
+}
+
+func TestNormalizeStreamIdleTimeoutDefault(t *testing.T) {
+	t.Parallel()
+
+	if got := normalizeStreamIdleTimeout(0); got != 5*time.Minute {
+		t.Fatalf("normalizeStreamIdleTimeout(0) = %s, want 5m", got)
+	}
+	if got := normalizeStreamIdleTimeout(-1); got != 0 {
+		t.Fatalf("normalizeStreamIdleTimeout(-1) = %s, want disabled zero", got)
 	}
 }

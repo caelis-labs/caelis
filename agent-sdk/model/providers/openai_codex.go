@@ -21,15 +21,17 @@ const (
 )
 
 type openAICodexLLM struct {
-	name                string
-	provider            string
-	baseURL             string
-	headers             map[string]string
-	client              *http.Client
-	requestTimeout      time.Duration
-	firstEventTimeout   time.Duration
-	contextWindowTokens int
-	imageInput          bool
+	name                  string
+	provider              string
+	baseURL               string
+	headers               map[string]string
+	client                *http.Client
+	requestTimeout        time.Duration
+	responseHeaderTimeout time.Duration
+	firstEventTimeout     time.Duration
+	idleTimeout           time.Duration
+	contextWindowTokens   int
+	imageInput            bool
 }
 
 func newOpenAICodex(cfg Config) *openAICodexLLM {
@@ -38,15 +40,17 @@ func newOpenAICodex(cfg Config) *openAICodexLLM {
 		baseURL = defaultOpenAICodexBaseURL
 	}
 	return &openAICodexLLM{
-		name:                strings.TrimSpace(cfg.Model),
-		provider:            strings.TrimSpace(cfg.Provider),
-		baseURL:             baseURL,
-		headers:             cloneHeaders(cfg.Headers),
-		client:              coalesceHTTPClient(cfg.HTTPClient),
-		requestTimeout:      cfg.Timeout,
-		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
-		contextWindowTokens: cfg.ContextWindowTokens,
-		imageInput:          cfg.ImageInput,
+		name:                  strings.TrimSpace(cfg.Model),
+		provider:              strings.TrimSpace(cfg.Provider),
+		baseURL:               baseURL,
+		headers:               cloneHeaders(cfg.Headers),
+		client:                coalesceHTTPClient(cfg.HTTPClient),
+		requestTimeout:        cfg.Timeout,
+		responseHeaderTimeout: normalizeStreamResponseHeaderTimeout(cfg.StreamResponseHeaderTimeout),
+		firstEventTimeout:     normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
+		idleTimeout:           normalizeStreamIdleTimeout(cfg.StreamIdleTimeout),
+		contextWindowTokens:   cfg.ContextWindowTokens,
+		imageInput:            cfg.ImageInput,
 	}
 }
 
@@ -69,6 +73,12 @@ func (l *openAICodexLLM) ContextWindowTokens() int {
 		return 0
 	}
 	return l.contextWindowTokens
+}
+
+func (l *openAICodexLLM) ResetConnectionsForRetry(error) {
+	if l != nil && l.client != nil {
+		l.client.CloseIdleConnections()
+	}
 }
 
 func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
@@ -106,7 +116,7 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 		applyDefaultAttributionHeaders(httpReq, APIOpenAICodex)
 		applyConfiguredHeaders(httpReq, l.headers)
 
-		resp, err := l.client.Do(httpReq)
+		resp, err := doStreamingRequest(l.client, httpReq, l.responseHeaderTimeout)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -124,7 +134,7 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 		accumulator := newOpenAICodexAccumulator()
 		terminalSeen := false
 		stopped := false
-		err = readSSEWithFirstEventTimeout(resp.Body, l.firstEventTimeout, func(data []byte) error {
+		err = readSSEWithActivityTimeout(resp.Body, l.firstEventTimeout, l.idleTimeout, responsesSSEHasSemanticActivity, func(data []byte) error {
 			var event openAICodexStreamWire
 			if err := json.Unmarshal(data, &event); err != nil {
 				return fmt.Errorf("openai codex: decode stream event: %w", err)

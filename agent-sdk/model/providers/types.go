@@ -69,9 +69,15 @@ type Config struct {
 	HTTPClient *http.Client
 	// CredentialPath supplies a Host-scoped provider credential file. It is
 	// used only by providers that own their credential format.
-	CredentialPath            string
-	Timeout                   time.Duration
-	StreamFirstEventTimeout   time.Duration
+	CredentialPath string
+	Timeout        time.Duration
+	// StreamResponseHeaderTimeout bounds the wait for an HTTP streaming
+	// response to return headers. It does not bound the lifetime of the body.
+	StreamResponseHeaderTimeout time.Duration
+	StreamFirstEventTimeout     time.Duration
+	// StreamIdleTimeout bounds silence between complete SSE data events after
+	// the stream starts.
+	StreamIdleTimeout         time.Duration
 	MaxOutputTok              int
 	ContextWindowTokens       int
 	ImageInput                bool
