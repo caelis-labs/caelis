@@ -1,0 +1,96 @@
+name: release
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  wait-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      checks: read
+    steps:
+      - name: Wait for exact-SHA main quality
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          quality_run_id=""
+          for attempt in {1..30}; do
+            quality_run_id="$(
+              gh api --method GET \
+                -f branch=main \
+                -f event=push \
+                -f head_sha="${GITHUB_SHA}" \
+                -f per_page=100 \
+                "/repos/${GITHUB_REPOSITORY}/actions/workflows/quality.yml/runs" \
+                --jq '.workflow_runs | sort_by(.created_at) | last | .id // empty'
+            )"
+            if [[ -n "${quality_run_id}" ]]; then
+              break
+            fi
+            echo "waiting for main quality run for ${GITHUB_SHA} (${attempt}/30)"
+            sleep 10
+          done
+          if [[ -z "${quality_run_id}" ]]; then
+            echo "no main quality run found for ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+          echo "waiting for quality run https://github.com/${GITHUB_REPOSITORY}/actions/runs/${quality_run_id}"
+          gh run watch "${quality_run_id}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --interval 10 \
+            --exit-status
+
+  release:
+    needs: wait-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: default
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.1"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22.14.0"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - name: Upgrade npm for trusted publishing
+        run: |
+          npm i -g npm@^11.10.0
+          npm -v
+      - name: GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set package version from git tag
+        run: node ./npm/scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
+      - name: Stage platform packages
+        run: node ./npm/scripts/stage-release.mjs "${GITHUB_REF_NAME#v}" ./dist
+      - name: Publish platform packages
+        run: >
+          node ./npm/scripts/publish-release.mjs
+          ./npm/packages/caelis-darwin-arm64
+          ./npm/packages/caelis-darwin-x64
+          ./npm/packages/caelis-linux-arm64
+          ./npm/packages/caelis-linux-x64
+          ./npm/packages/caelis-windows-arm64
+          ./npm/packages/caelis-windows-x64
+      - name: Publish main package
+        run: node ./npm/scripts/publish-release.mjs ./npm

@@ -1,0 +1,11 @@
+services:
+  main:
+    networks:
+      - default
+      - caelis-terminalbench-cache
+
+networks:
+  default: {}
+  caelis-terminalbench-cache:
+    external: true
+    name: caelis-terminalbench-cache

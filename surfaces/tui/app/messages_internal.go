@@ -1,0 +1,128 @@
+package tuiapp
+
+import (
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+
+	controlstatus "github.com/caelis-labs/caelis/control/status"
+)
+
+type bootstrapMsg struct {
+	status controlstatus.StatusSnapshot
+	err    error
+}
+
+// statusRefreshRequestMsg schedules status work through Bubble Tea instead of
+// running storage-backed callbacks on the caller's message path.
+type statusRefreshRequestMsg struct{}
+
+type clearHintMsg struct {
+	id uint64
+}
+
+type clipboardCopyResultMsg struct {
+	err error
+}
+
+type ctrlCExpireMsg struct {
+	armedAt time.Time
+	seq     uint64
+}
+
+type paletteAnimationMsg struct{}
+type frameTickKind string
+
+const (
+	frameTickDeferredBatch    frameTickKind = "deferred_batch"
+	frameTickOffscreen        frameTickKind = "offscreen"
+	frameTickViewportSync     frameTickKind = "viewport_sync"
+	frameTickStreamSmoothing  frameTickKind = "stream_smoothing"
+	frameTickRenderDrain      frameTickKind = "render_drain"
+	frameTickScrollbarVisible frameTickKind = "scrollbar_visibility"
+	frameTickSelectionScroll  frameTickKind = "selection_scroll"
+)
+
+type frameTickMsg struct {
+	at    time.Time
+	kind  frameTickKind
+	token uint64
+}
+
+type completionRefreshMsg struct {
+	seq uint64
+}
+
+type mentionCompletionResultMsg struct {
+	seq              uint64
+	query            string
+	prefix           string
+	limit            int
+	advanceAfterLoad bool
+	candidates       []CompletionCandidate
+	err              error
+	latency          time.Duration
+}
+
+type slashSkillCompletionResultMsg struct {
+	seq        uint64
+	candidates []CompletionCandidate
+	err        error
+	latency    time.Duration
+}
+
+type slashArgCompletionResultMsg struct {
+	seq        uint64
+	command    string
+	query      string
+	candidates []SlashArgCandidate
+	err        error
+	latency    time.Duration
+}
+
+type resumeCompletionResultMsg struct {
+	seq        uint64
+	query      string
+	candidates []ResumeCandidate
+	err        error
+	latency    time.Duration
+}
+
+func animatePaletteCmd() tea.Cmd {
+	return tea.Tick(paletteAnimationInterval, func(time.Time) tea.Msg {
+		return paletteAnimationMsg{}
+	})
+}
+
+func frameTickCmd(kind frameTickKind, interval time.Duration) tea.Cmd {
+	if interval <= 0 {
+		interval = streamSmoothingTickIntervalDefault
+	}
+	return tea.Tick(interval, func(at time.Time) tea.Msg {
+		return frameTickMsg{at: at, kind: kind}
+	})
+}
+
+func clearHintLaterCmd(id uint64, after time.Duration) tea.Cmd {
+	if id == 0 || after <= 0 {
+		return nil
+	}
+	return tea.Tick(after, func(time.Time) tea.Msg {
+		return clearHintMsg{id: id}
+	})
+}
+
+func expireCtrlCCmd(armedAt time.Time, seq uint64) tea.Cmd {
+	if armedAt.IsZero() {
+		return nil
+	}
+	return tea.Tick(ctrlCExitWindow, func(time.Time) tea.Msg {
+		return ctrlCExpireMsg{armedAt: armedAt, seq: seq}
+	})
+}
+
+func tickStatusCmd() tea.Cmd {
+	return tea.Tick(1200*time.Millisecond, func(time.Time) tea.Msg {
+		return TickStatusMsg{}
+	})
+}

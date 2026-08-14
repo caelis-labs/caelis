@@ -1,0 +1,257 @@
+package sandbox
+
+import (
+	"context"
+	"fmt"
+	"strings"
+)
+
+type compositeRuntime struct {
+	host     Runtime
+	sandbox  Runtime
+	status   Status
+	backends map[Backend]Runtime
+}
+
+func (r *compositeRuntime) Describe() Descriptor {
+	if runtime := r.runtimeForConstraints(Constraints{}); runtime != nil {
+		return runtime.Describe()
+	}
+	return Descriptor{}
+}
+
+func (r *compositeRuntime) FileSystem() FileSystem {
+	return r.FileSystemFor(Constraints{})
+}
+
+func (r *compositeRuntime) FileSystemFor(constraints Constraints) FileSystem {
+	if runtime := r.runtimeForConstraints(constraints); runtime != nil {
+		return runtime.FileSystemFor(constraints)
+	}
+	return nil
+}
+
+func (r *compositeRuntime) Run(ctx context.Context, req CommandRequest) (CommandResult, error) {
+	constraints := EffectiveConstraints(req)
+	selection := r.runtimeSelectionForConstraints(constraints)
+	runtime := selection.runtime
+	if runtime == nil {
+		return CommandResult{}, fmt.Errorf("ports/sandbox: runtime is unavailable")
+	}
+	if selection.implicitHost {
+		result := CommandResult{
+			Error:   HostExecutionRequiresApprovalMessage,
+			Route:   RouteHost,
+			Backend: BackendHost,
+		}
+		return result, fmt.Errorf("ports/sandbox: %s", HostExecutionRequiresApprovalMessage)
+	}
+	result, err := runtime.Run(ctx, req)
+	if !ConstraintsRequestExplicitHost(constraints) {
+		return NormalizeSandboxPermissionFailure(result, err)
+	}
+	return result, err
+}
+
+func (r *compositeRuntime) Start(ctx context.Context, req CommandRequest) (Session, error) {
+	constraints := EffectiveConstraints(req)
+	selection := r.runtimeSelectionForConstraints(constraints)
+	runtime := selection.runtime
+	if runtime == nil {
+		return nil, fmt.Errorf("ports/sandbox: runtime is unavailable")
+	}
+	if selection.implicitHost {
+		return nil, fmt.Errorf("ports/sandbox: %s", HostExecutionRequiresApprovalMessage)
+	}
+	return runtime.Start(ctx, req)
+}
+
+func (r *compositeRuntime) OpenSession(id string) (Session, error) {
+	ref, err := splitSessionID(id)
+	if err != nil {
+		return nil, err
+	}
+	return r.OpenSessionRef(ref)
+}
+
+func (r *compositeRuntime) OpenSessionRef(ref SessionRef) (Session, error) {
+	ref = CloneSessionRef(ref)
+	if ref.Backend == "" || ref.SessionID == "" {
+		return nil, fmt.Errorf("ports/sandbox: session ref is incomplete")
+	}
+	runtime := r.backends[ref.Backend]
+	if runtime == nil {
+		return nil, fmt.Errorf("ports/sandbox: backend %q is unavailable", ref.Backend)
+	}
+	return runtime.OpenSession(ref.SessionID)
+}
+
+func (r *compositeRuntime) SupportedBackends() []Backend {
+	out := make([]Backend, 0, len(r.backends))
+	for backend := range r.backends {
+		out = append(out, backend)
+	}
+	return dedupeBackends(out)
+}
+
+func (r *compositeRuntime) Status() Status {
+	status := CloneStatus(r.status)
+	if r.sandbox == nil || status.FallbackToHost {
+		return status
+	}
+	backendStatus := CloneStatus(r.sandbox.Status())
+	if backendStatus.RequestedBackend == "" {
+		backendStatus.RequestedBackend = status.RequestedBackend
+	}
+	if backendStatus.ResolvedBackend == "" {
+		backendStatus.ResolvedBackend = status.ResolvedBackend
+	}
+	if backendStatus.FallbackReason == "" {
+		backendStatus.FallbackReason = status.FallbackReason
+	}
+	return backendStatus
+}
+
+func (r *compositeRuntime) SelectionStatus() Status {
+	if r == nil {
+		return Status{}
+	}
+	return CloneStatus(r.status)
+}
+
+func (r *compositeRuntime) Prepare(ctx context.Context) error {
+	if r == nil || r.sandbox == nil {
+		return nil
+	}
+	preparer, ok := r.sandbox.(PreparableRuntime)
+	if !ok {
+		return nil
+	}
+	return preparer.Prepare(ctx)
+}
+
+func (r *compositeRuntime) Repair(ctx context.Context) error {
+	if r == nil || r.sandbox == nil {
+		return nil
+	}
+	repairer, ok := r.sandbox.(RepairableRuntime)
+	if ok {
+		return repairer.Repair(ctx)
+	}
+	preparer, ok := r.sandbox.(PreparableRuntime)
+	if !ok {
+		return nil
+	}
+	return preparer.Prepare(ctx)
+}
+
+func (r *compositeRuntime) Preflight(ctx context.Context, opts PreflightOptions) error {
+	if r == nil || r.sandbox == nil {
+		return nil
+	}
+	preflight, ok := r.sandbox.(PreflightRuntime)
+	if !ok {
+		return nil
+	}
+	return preflight.Preflight(ctx, opts)
+}
+
+func (r *compositeRuntime) Refresh(ctx context.Context) error {
+	if r == nil || r.sandbox == nil {
+		return nil
+	}
+	refresher, ok := r.sandbox.(RefreshableRuntime)
+	if !ok {
+		return nil
+	}
+	return refresher.Refresh(ctx)
+}
+
+func (r *compositeRuntime) Reset(ctx context.Context) error {
+	if r == nil || r.sandbox == nil {
+		return nil
+	}
+	resetter, ok := r.sandbox.(ResettableRuntime)
+	if !ok {
+		return nil
+	}
+	return resetter.Reset(ctx)
+}
+
+func (r *compositeRuntime) Close() error {
+	var firstErr error
+	closed := map[Runtime]struct{}{}
+	for _, runtime := range r.backends {
+		if runtime == nil {
+			continue
+		}
+		if _, ok := closed[runtime]; ok {
+			continue
+		}
+		closed[runtime] = struct{}{}
+		if err := runtime.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (r *compositeRuntime) runtimeForConstraints(constraints Constraints) Runtime {
+	return r.runtimeSelectionForConstraints(constraints).runtime
+}
+
+type runtimeSelection struct {
+	runtime      Runtime
+	implicitHost bool
+}
+
+func (r *compositeRuntime) runtimeSelectionForConstraints(constraints Constraints) runtimeSelection {
+	constraints = NormalizeConstraints(constraints)
+	if ConstraintsRequestExplicitHost(constraints) {
+		return runtimeSelection{runtime: r.host}
+	}
+	if constraints.Backend != "" {
+		if runtime := r.backends[constraints.Backend]; runtime != nil {
+			return runtimeSelection{runtime: runtime}
+		}
+	}
+	if r.sandbox != nil {
+		return runtimeSelection{runtime: r.sandbox}
+	}
+	return runtimeSelection{runtime: r.host, implicitHost: r.host != nil}
+}
+
+func splitSessionID(raw string) (SessionRef, error) {
+	backendText, sessionID, ok := strings.Cut(strings.TrimSpace(raw), ":")
+	if !ok {
+		return SessionRef{}, fmt.Errorf("ports/sandbox: session id must be encoded as <backend>:<session-id>")
+	}
+	ref := SessionRef{
+		Backend:   Backend(strings.TrimSpace(backendText)),
+		SessionID: strings.TrimSpace(sessionID),
+	}
+	if ref.Backend == "" || ref.SessionID == "" {
+		return SessionRef{}, fmt.Errorf("ports/sandbox: invalid session id %q", raw)
+	}
+	return ref, nil
+}
+
+func dedupeBackends(values []Backend) []Backend {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]Backend, 0, len(values))
+	seen := map[Backend]struct{}{}
+	for _, value := range values {
+		value = Backend(strings.TrimSpace(string(value)))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}

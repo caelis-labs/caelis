@@ -1,0 +1,252 @@
+package compact
+
+import (
+	"encoding/json"
+	"math"
+	"strconv"
+	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+)
+
+func TestCompactEventDataContractMetadataRoundTrip(t *testing.T) {
+	data := CompactEventData{
+		Revision:             3,
+		ContractVersion:      CompactContractVersion,
+		SummarizedThroughID:  "event-9",
+		SummarizedThroughSeq: 9,
+		Generator:            "model_markdown",
+		Trigger:              "manual",
+		SourceEventCount:     8,
+		TotalTokens:          100,
+		ContextWindowTokens:  1000,
+		DiscoveredTools:      []string{"mcp__calendar__demo__create_event", "mcp__calendar__demo__create_event", ""},
+	}
+	value := CompactEventDataValue(data)
+	event := &session.Event{
+		Type: session.EventTypeCompact,
+		Meta: map[string]any{MetaKeyCompact: value},
+	}
+
+	got, ok := CompactEventDataFromEvent(event)
+	if !ok {
+		t.Fatal("CompactEventDataFromEvent() ok = false")
+	}
+	if got.ContractVersion != CompactContractVersion || got.SourceEventCount != 8 {
+		t.Fatalf("contract/source metadata = %d/%d, want %d/8", got.ContractVersion, got.SourceEventCount, CompactContractVersion)
+	}
+	if len(got.DiscoveredTools) != 1 || got.DiscoveredTools[0] != "mcp__calendar__demo__create_event" {
+		t.Fatalf("discovered tools = %v, want normalized MCP tool", got.DiscoveredTools)
+	}
+}
+
+func TestCompactEventSequencePersistsAsExactDecimalString(t *testing.T) {
+	for _, sequence := range []uint64{
+		9007199254740991,
+		9007199254740992,
+		9007199254740993,
+		math.MaxUint64,
+	} {
+		sequence := sequence
+		t.Run(strconv.FormatUint(sequence, 10), func(t *testing.T) {
+			before := session.Event{
+				Type: session.EventTypeCompact,
+				Meta: map[string]any{MetaKeyCompact: CompactEventDataValue(CompactEventData{
+					ContractVersion: CompactContractVersion, SummarizedThroughSeq: sequence,
+				})},
+			}
+			raw, err := json.Marshal(before)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var after session.Event
+			if err := json.Unmarshal(raw, &after); err != nil {
+				t.Fatal(err)
+			}
+			got, ok := CompactEventDataFromEvent(&after)
+			if !ok || got.SummarizedThroughSeq != sequence {
+				t.Fatalf("CompactEventDataFromEvent() = %#v, %v; want sequence %d", got, ok, sequence)
+			}
+		})
+	}
+}
+
+func TestPromptEventsFromLatestCompactUsesPureTextPromptEvent(t *testing.T) {
+	compactText := "CONTEXT CHECKPOINT\n\n## Current Objective\n- continue from compact"
+	compactEvent := &session.Event{
+		Type:       session.EventTypeCompact,
+		Visibility: session.VisibilityCanonical,
+		Text:       compactText,
+		Meta: map[string]any{
+			MetaKeyCompact: CompactEventDataValue(CompactEventData{
+				ContractVersion: CompactContractVersion,
+				Generator:       "model_markdown",
+			}),
+		},
+	}
+	next := &session.Event{
+		Type:       session.EventTypeUser,
+		Visibility: session.VisibilityCanonical,
+		Text:       "next user turn",
+	}
+
+	got := PromptEventsFromLatestCompact([]*session.Event{compactEvent, next})
+	if len(got) != 2 {
+		t.Fatalf("prompt event count = %d, want 2 (%+v)", len(got), got)
+	}
+	if got[0].Type != session.EventTypeCompact || got[0].Visibility != session.VisibilityCanonical {
+		t.Fatalf("first prompt event = %+v, want canonical compact prompt text", got[0])
+	}
+	if got[0].Actor.Kind != session.ActorKindSystem {
+		t.Fatalf("first prompt actor = %+v, want Runtime system provenance", got[0].Actor)
+	}
+	if got[0].Message != nil || got[0].Protocol != nil {
+		t.Fatalf("first prompt event carries duplicated structured payload: message=%+v protocol=%+v", got[0].Message, got[0].Protocol)
+	}
+	if got[0].Text != compactText {
+		t.Fatalf("first prompt text = %q, want exact compact text", got[0].Text)
+	}
+	if got[1].Text != "next user turn" {
+		t.Fatalf("second prompt text = %q, want next turn", got[1].Text)
+	}
+}
+
+func TestEventsAfterLatestCompactDoesNotInjectPromptReplacement(t *testing.T) {
+	compactText := "CONTEXT CHECKPOINT\n\n## Current Objective\n- continue from compact"
+	compactEvent := &session.Event{
+		Type:       session.EventTypeCompact,
+		Visibility: session.VisibilityCanonical,
+		Text:       compactText,
+		Meta: map[string]any{
+			MetaKeyCompact: CompactEventDataValue(CompactEventData{
+				ContractVersion: CompactContractVersion,
+				Generator:       "model_markdown",
+			}),
+		},
+	}
+	next := &session.Event{
+		Type:       session.EventTypeUser,
+		Visibility: session.VisibilityCanonical,
+		Text:       "next user turn",
+	}
+
+	got := EventsAfterLatestCompact([]*session.Event{compactEvent, next})
+	if len(got) != 1 {
+		t.Fatalf("event count = %d, want only post-compact event (%+v)", len(got), got)
+	}
+	if got[0].Text != "next user turn" {
+		t.Fatalf("first event text = %q, want next user turn", got[0].Text)
+	}
+}
+
+func TestPromptEventsFromLatestCompactIgnoresLegacyReplacementHistory(t *testing.T) {
+	compactEvent := &session.Event{
+		Type:       session.EventTypeCompact,
+		Visibility: session.VisibilityCanonical,
+		Text:       "CONTEXT CHECKPOINT\nnew compact text",
+		Meta: map[string]any{
+			MetaKeyCompact: map[string]any{
+				"contract_version": CompactContractVersion,
+				"replacement_history": []map[string]any{{
+					"text": "legacy retained instruction",
+				}},
+			},
+		},
+	}
+
+	got := PromptEventsFromLatestCompact([]*session.Event{compactEvent})
+	if len(got) != 1 {
+		t.Fatalf("prompt event count = %d, want 1 (%+v)", len(got), got)
+	}
+	if got[0].Text != "CONTEXT CHECKPOINT\nnew compact text" {
+		t.Fatalf("prompt text = %q, want current compact text", got[0].Text)
+	}
+	if got[0].Message != nil || got[0].Protocol != nil {
+		t.Fatalf("prompt overlay should be pure text, got message=%+v protocol=%+v", got[0].Message, got[0].Protocol)
+	}
+}
+
+func TestPromptEventsFromLatestCompactIgnoresLegacyRetainedInputs(t *testing.T) {
+	compactText := "CONTEXT CHECKPOINT\nlegacy summary"
+	compactEvent := &session.Event{
+		Type:       session.EventTypeCompact,
+		Visibility: session.VisibilityCanonical,
+		Text:       compactText,
+		Meta: map[string]any{
+			MetaKeyCompact: map[string]any{
+				"contract_version":     CompactContractVersion,
+				"retained_user_inputs": []string{"legacy user constraint", "legacy user constraint", ""},
+			},
+		},
+	}
+
+	got := PromptEventsFromLatestCompact([]*session.Event{compactEvent})
+	if len(got) != 1 {
+		t.Fatalf("prompt event count = %d, want compact text only (%+v)", len(got), got)
+	}
+	if got[0].Text != compactText {
+		t.Fatalf("prompt text = %q, want compact text", got[0].Text)
+	}
+}
+
+func TestPromptEventsSelectsValidCheckpointWithHighestCoveredSeq(t *testing.T) {
+	t.Parallel()
+
+	checkpoint := func(seq uint64, covered uint64, text string) *session.Event {
+		return &session.Event{
+			Seq:        seq,
+			Type:       session.EventTypeCompact,
+			Visibility: session.VisibilityCanonical,
+			Text:       text,
+			Meta: map[string]any{MetaKeyCompact: CompactEventDataValue(CompactEventData{
+				ContractVersion:      CompactContractVersion,
+				SummarizedThroughSeq: covered,
+			})},
+		}
+	}
+	events := []*session.Event{
+		{Seq: 1, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "old"},
+		checkpoint(8, 7, "highest coverage"),
+		{Seq: 9, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "after high"},
+		checkpoint(10, 3, "late but stale"),
+	}
+	got := PromptEventsFromLatestCompact(events)
+	if len(got) != 2 || got[0].Text != "highest coverage" || got[1].Text != "after high" {
+		t.Fatalf("PromptEventsFromLatestCompact() = %#v, want highest-coverage checkpoint plus later events", got)
+	}
+}
+
+func TestPromptEventsKeepCoveredSequenceSuccessorStoredBeforeCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	concurrent := &session.Event{
+		Seq:        11,
+		Type:       session.EventTypeUser,
+		Visibility: session.VisibilityCanonical,
+		Text:       "concurrent unsummarized fact",
+	}
+	checkpoint := &session.Event{
+		Seq:        12,
+		Type:       session.EventTypeCompact,
+		Visibility: session.VisibilityCanonical,
+		Text:       "summary through sequence 10",
+		Meta: map[string]any{MetaKeyCompact: CompactEventDataValue(CompactEventData{
+			ContractVersion:      CompactContractVersion,
+			SummarizedThroughSeq: 10,
+		})},
+	}
+
+	got := PromptEventsFromLatestCompact([]*session.Event{
+		{Seq: 10, Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "summarized fact"},
+		concurrent,
+		checkpoint,
+	})
+	if len(got) != 2 || got[0].Text != checkpoint.Text || got[1].Text != concurrent.Text {
+		t.Fatalf("PromptEventsFromLatestCompact() = %#v, want checkpoint plus Seq 11 fact", got)
+	}
+
+	after := EventsAfterLatestCompact([]*session.Event{concurrent, checkpoint})
+	if len(after) != 1 || after[0].Seq != concurrent.Seq || after[0].Text != concurrent.Text {
+		t.Fatalf("EventsAfterLatestCompact() = %#v, want Seq 11 fact", after)
+	}
+}

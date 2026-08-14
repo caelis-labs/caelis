@@ -1,0 +1,40 @@
+// Package eventstream defines the Caelis v1 client event protocol.
+//
+// Envelope is the stable stream container consumed by TUI, GUI, app-server,
+// headless, and compatibility bridges. It carries standard ACP
+// session/update and request_permission payloads plus Caelis extension events
+// for lifecycle, participant state, approval review, and notices. Usage is
+// represented only as standard ACP session/update usage_update.
+//
+// This package is a client protocol boundary, not the durable session model.
+// Durable replay input is agent-sdk/session.Event: model-visible messages live
+// in Event.Message and durable tool execution state lives in Event.Tool. ACP
+// updates in an Envelope are projections of those canonical facts, or live
+// transient trace events when Scope/visibility identify subagent or UI-only
+// streams.
+//
+// Transport mapping rules:
+//   - SSE uses Envelope.Cursor as the event id and serializes the full envelope
+//     as the event data.
+//   - WebSocket transports serialize the full envelope directly.
+//   - ACP stdio maps standard payloads to JSON-RPC session/update and
+//     session/request_permission messages; Caelis extension events remain
+//     extension envelopes on non-stdio streams.
+//
+// Cursor values are opaque signed resume ids issued by the Control Session
+// feed and are unique per envelope. Session-derived envelopes also carry
+// EventID, the durable source session event id, and ProjectionID, the stable
+// per-source projection identity. Neither identity is accepted as a resume
+// token. Clients should render standard ACP
+// payloads directly; helpers in this package only identify those payloads and
+// without depending on TUI transcript view models. Final marks a completed
+// semantic projection for the scoped
+// actor/message, while lifecycle terminal states close the turn stream.
+// ParentTool and Delivery are Caelis Envelope fields, never custom fields in
+// an ACP update payload. ParentTool carries only a real delegated parent tool
+// relationship. Delivery is one of canonical, mirror, or transient. Consumers use
+// ResolveRelationDelivery for typed-first legacy compatibility; neither role
+// has replay or model-context authority. Caelis-specific display hints
+// belong under _meta.caelis and must not be the only copy of model-critical
+// data.
+package eventstream

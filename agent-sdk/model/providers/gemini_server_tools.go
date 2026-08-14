@@ -1,0 +1,180 @@
+package providers
+
+import (
+	"encoding/json"
+	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"google.golang.org/genai"
+)
+
+const geminiGoogleSearchToolName = "google_search"
+const geminiReplayProvider = "gemini"
+const geminiReplayKindServerToolCall = "server_tool_call"
+const geminiReplayKindServerToolResponse = "server_tool_response"
+const geminiProviderDetailPart = "part"
+
+var geminiGoogleSearchMatcher = providerExecutedToolMatcher{
+	ProviderAliases: []string{"", "gemini", "google"},
+	Names:           []string{geminiGoogleSearchToolName, "google-search", "googlesearch", "grounding_with_google_search"},
+	DetailKeys:      []string{"google_search", "googleSearch"},
+}
+
+func geminiGoogleSearchEnabled(_ string, specs []model.ToolSpec) bool {
+	match := providerExecutedToolMatchFromSpecs(specs, geminiGoogleSearchMatcher)
+	return match.Enabled && !match.Disabled
+}
+
+func (l *geminiLLM) UsesProviderExecutedTools(req *model.Request) bool {
+	if l == nil || req == nil {
+		return false
+	}
+	return geminiGoogleSearchEnabled(l.name, req.Tools)
+}
+
+func toGeminiTools(specs []model.ToolSpec, groundingWithGoogleSearch bool) []*genai.Tool {
+	functionTools := model.FunctionToolDefinitions(specs)
+	out := make([]*genai.Tool, 0, 2)
+	if len(functionTools) > 0 {
+		declarations := make([]*genai.FunctionDeclaration, 0, len(functionTools))
+		for _, one := range functionTools {
+			declarations = append(declarations, &genai.FunctionDeclaration{
+				Name:                 one.Name,
+				Description:          one.Description,
+				ParametersJsonSchema: one.Parameters,
+			})
+		}
+		out = append(out, &genai.Tool{FunctionDeclarations: declarations})
+	}
+	if groundingWithGoogleSearch {
+		out = append(out, &genai.Tool{GoogleSearch: &genai.GoogleSearch{}})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func geminiServerToolReplayPart(kind string, value any, token string) (model.Part, bool) {
+	raw, err := json.Marshal(value)
+	if err != nil || len(raw) == 0 {
+		return model.Part{}, false
+	}
+	part := model.NewReasoningPart("", model.ReasoningVisibilityTokenOnly)
+	if part.Reasoning == nil {
+		return model.Part{}, false
+	}
+	part.Reasoning.Replay = &model.ReplayMeta{
+		Provider: geminiReplayProvider,
+		Kind:     kind,
+		Token:    strings.TrimSpace(token),
+	}
+	part.Reasoning.ProviderDetails = map[string]json.RawMessage{
+		geminiProviderDetailPart: append(json.RawMessage(nil), raw...),
+	}
+	return part, true
+}
+
+func geminiAssistantContentParts(m model.Message) []*genai.Part {
+	parts := make([]*genai.Part, 0, len(m.Parts))
+	skippedServerToolCalls := map[string]struct{}{}
+	for _, msgPart := range m.Parts {
+		switch msgPart.Kind {
+		case model.PartKindText:
+			if msgPart.Text != nil && strings.TrimSpace(msgPart.Text.Text) != "" {
+				parts = append(parts, genai.NewPartFromText(msgPart.Text.Text))
+			}
+		case model.PartKindReasoning:
+			replayPart, skippedCallID := geminiServerToolPartFromReplay(msgPart)
+			if skippedCallID != "" {
+				skippedServerToolCalls[skippedCallID] = struct{}{}
+			}
+			if replayPart == nil {
+				continue
+			}
+			if replayPart.ToolResponse != nil {
+				if _, skipped := skippedServerToolCalls[strings.TrimSpace(replayPart.ToolResponse.ID)]; skipped {
+					continue
+				}
+			}
+			parts = append(parts, replayPart)
+		case model.PartKindToolUse:
+			if msgPart.ToolUse == nil {
+				continue
+			}
+			call := model.ToolCall{
+				ID:               msgPart.ToolUse.ID,
+				Name:             msgPart.ToolUse.Name,
+				Args:             toolArgsRawFromMessagePart(msgPart),
+				ThoughtSignature: geminiReplayToken(msgPart.ToolUse.Replay),
+			}
+			// Gemini tool loop requires thought signature in functionCall parts.
+			// Skip legacy tool calls without signature to avoid request rejection.
+			if call.ThoughtSignature == "" {
+				continue
+			}
+			part := genai.NewPartFromFunctionCall(call.Name, toolArgsMap(call.Args))
+			if strings.TrimSpace(call.ID) != "" && part != nil && part.FunctionCall != nil {
+				part.FunctionCall.ID = call.ID
+			}
+			part.ThoughtSignature = decodeGeminiThoughtSignature(call.ThoughtSignature)
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
+func geminiReplayToken(replay *model.ReplayMeta) string {
+	if replay == nil {
+		return ""
+	}
+	return strings.TrimSpace(replay.Token)
+}
+
+func toolArgsRawFromMessagePart(part model.Part) string {
+	if part.ToolUse == nil {
+		return ""
+	}
+	calls := model.NewMessage(model.RoleAssistant, part).ToolCalls()
+	if len(calls) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(calls[0].Args)
+}
+
+func geminiServerToolPartFromReplay(part model.Part) (*genai.Part, string) {
+	if part.Reasoning == nil || part.Reasoning.Replay == nil {
+		return nil, ""
+	}
+	replay := part.Reasoning.Replay
+	if !strings.EqualFold(strings.TrimSpace(replay.Provider), geminiReplayProvider) {
+		return nil, ""
+	}
+	raw := part.Reasoning.ProviderDetails[geminiProviderDetailPart]
+	if len(raw) == 0 {
+		return nil, ""
+	}
+	switch strings.TrimSpace(replay.Kind) {
+	case geminiReplayKindServerToolCall:
+		var call genai.ToolCall
+		if err := json.Unmarshal(raw, &call); err != nil {
+			return nil, ""
+		}
+		token := geminiReplayToken(replay)
+		if token == "" {
+			return nil, strings.TrimSpace(call.ID)
+		}
+		return &genai.Part{
+			ToolCall:         &call,
+			ThoughtSignature: decodeGeminiThoughtSignature(token),
+		}, ""
+	case geminiReplayKindServerToolResponse:
+		var response genai.ToolResponse
+		if err := json.Unmarshal(raw, &response); err != nil {
+			return nil, ""
+		}
+		return &genai.Part{ToolResponse: &response}, ""
+	default:
+		return nil, ""
+	}
+}

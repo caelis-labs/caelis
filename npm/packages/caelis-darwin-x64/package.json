@@ -1,0 +1,29 @@
+{
+  "name": "@caelis/caelis-darwin-x64",
+  "version": "0.0.0-dev",
+  "description": "Platform-specific caelis binary for darwin x64",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caelis-labs/caelis.git",
+    "directory": "npm/packages/caelis-darwin-x64"
+  },
+  "homepage": "https://github.com/caelis-labs/caelis",
+  "bugs": {
+    "url": "https://github.com/caelis-labs/caelis/issues"
+  },
+  "files": [
+    "runtime/caelis",
+    "README.md"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

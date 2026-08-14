@@ -1,0 +1,1467 @@
+package gatewayapp
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	controlclient "github.com/caelis-labs/caelis/control/client"
+	"github.com/caelis-labs/caelis/control/modelconfig"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/kernel"
+	"github.com/caelis-labs/caelis/surfaces/headless"
+)
+
+func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T) {
+	ctx := context.Background()
+	stack, activeSession := newLocalStateTestStack(t)
+
+	profile, err := stack.connectTestModel(ModelConfig{
+		Provider: "ollama",
+		API:      providers.APIOllama,
+		Model:    "alt-model",
+	})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	alias := profile.Backend.Provider.ModelConfigID
+	current := mustCurrentSession(t, stack, activeSession.SessionID)
+	revision := current.Revision
+	modelResult, err := stack.ConfigurationCommands().UseSessionModel(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SessionModelRequest{
+		WriteBase: controlclient.WriteBase{OperationID: "state-model-alt", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
+		Model:     alias,
+	})
+	if err != nil || modelResult.Outcome != controlclient.OutcomeCommitted {
+		t.Fatalf("UseSessionModel() = %#v, %v", modelResult, err)
+	}
+	current = mustCurrentSession(t, stack, activeSession.SessionID)
+	revision = current.Revision
+	modeResult, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SessionModeRequest{
+		WriteBase: controlclient.WriteBase{OperationID: "state-mode-manual", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
+		Mode:      "manual",
+	})
+	if err != nil || modeResult.Outcome != controlclient.OutcomeCommitted {
+		t.Fatalf("ConfigureSessionMode(manual) = %#v, %v", modeResult, err)
+	}
+
+	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("SessionRuntimeState() error = %v", err)
+	}
+	if state.ModelID != alias {
+		t.Fatalf("model id = %q, want %q", state.ModelID, alias)
+	}
+	if state.ModelAlias != "ollama/alt-model" {
+		t.Fatalf("model alias = %q, want ollama/alt-model", state.ModelAlias)
+	}
+	if state.SessionMode != "manual" {
+		t.Fatalf("session mode = %q, want manual", state.SessionMode)
+	}
+
+	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, alias); err != nil {
+		t.Fatalf("DeleteModel() error = %v", err)
+	}
+	current = mustCurrentSession(t, stack, activeSession.SessionID)
+	revision = current.Revision
+	modeResult, err = stack.ConfigurationCommands().ConfigureSessionMode(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SessionModeRequest{
+		WriteBase: controlclient.WriteBase{OperationID: "state-mode-auto", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
+		Mode:      "auto-review",
+	})
+	if err != nil || modeResult.Outcome != controlclient.OutcomeCommitted {
+		t.Fatalf("ConfigureSessionMode(auto-review) = %#v, %v", modeResult, err)
+	}
+
+	state, err = stack.SessionRuntimeState(ctx, activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("SessionRuntimeState() after reset error = %v", err)
+	}
+	if state.ModelAlias != "" {
+		t.Fatalf("model alias after delete = %q, want empty", state.ModelAlias)
+	}
+	if state.SessionMode != "auto-review" {
+		t.Fatalf("session mode after reset = %q, want auto-review", state.SessionMode)
+	}
+}
+
+func TestStackSessionRuntimeStateRejectsLegacySessionState(t *testing.T) {
+	ctx := context.Background()
+	stack, activeSession := newLocalStateTestStack(t)
+	if _, err := stack.Sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
+		next := session.CloneState(state)
+		if next == nil {
+			next = map[string]any{}
+		}
+		next["gateway.current_session_mode"] = "manual"
+		return next, nil
+	}}); err != nil {
+		t.Fatalf("UpdateState() error = %v", err)
+	}
+
+	_, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
+	if !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+		t.Fatalf("SessionRuntimeState() error = %v, want ErrUnsupportedLegacyFormat", err)
+	}
+	if !strings.Contains(err.Error(), "gateway.current_session_mode") {
+		t.Fatalf("SessionRuntimeState() error = %v, want legacy key detail", err)
+	}
+}
+
+func TestPolicyModeDefaultsUnknownAndLegacyValues(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"":                "workspace-write",
+		"default":         "workspace-write",
+		"plan":            "workspace-write",
+		"full_access":     "workspace-write",
+		"full_control":    "workspace-write",
+		"manual":          "workspace-write",
+		"auto-review":     "workspace-write",
+		"workspace_write": "workspace-write",
+		"unknown":         "unknown",
+	}
+	for input, want := range tests {
+		if got := policyMode(input); got != want {
+			t.Fatalf("policyMode(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestNewLocalStackUsesRuntimeConfigApprovalAndPolicyProfile(t *testing.T) {
+	root := t.TempDir()
+	workdir := t.TempDir()
+	store := newAppConfigStore(root)
+	if err := store.Save(AppConfig{
+		Runtime: RuntimeConfig{
+			ApprovalMode:  "manual",
+			PolicyProfile: "workspace_write",
+		},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "runtime-config-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	if stack.runtime.ApprovalMode != "manual" {
+		t.Fatalf("runtime ApprovalMode = %q, want manual", stack.runtime.ApprovalMode)
+	}
+	if stack.runtime.PolicyProfile != "workspace-write" {
+		t.Fatalf("runtime PolicyProfile = %q, want workspace-write", stack.runtime.PolicyProfile)
+	}
+	session, err := startGatewayAppTestSession(context.Background(), stack, "runtime config session")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	state, err := stack.SessionRuntimeState(context.Background(), session.SessionRef)
+	if err != nil {
+		t.Fatalf("SessionRuntimeState() error = %v", err)
+	}
+	if state.SessionMode != "manual" {
+		t.Fatalf("SessionRuntimeState().SessionMode = %q, want configured manual default", state.SessionMode)
+	}
+}
+
+func TestNewLocalStackPersistsTasksInSessionSQLiteIndex(t *testing.T) {
+	root := t.TempDir()
+	workdir := t.TempDir()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "task-store-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	activeSession, err := startGatewayAppTestSession(context.Background(), stack, "task store session")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	if err := stack.taskStore.Upsert(context.Background(), &taskapi.Entry{
+		TaskID:  "task-stack",
+		Kind:    taskapi.KindCommand,
+		Session: activeSession.SessionRef,
+		Title:   "RUN_COMMAND echo ok",
+		State:   taskapi.StateCompleted,
+		Result: map[string]any{
+			"stdout": "transient\n",
+			"result": "ok\n",
+			"state":  "completed",
+		},
+	}); err != nil {
+		t.Fatalf("taskStore.Upsert() error = %v", err)
+	}
+	got, err := stack.taskStore.Get(context.Background(), "task-stack")
+	if err != nil {
+		t.Fatalf("taskStore.Get() error = %v", err)
+	}
+	if _, ok := got.Result["stdout"]; ok {
+		t.Fatalf("taskStore.Get() result unexpectedly contains stdout: %#v", got.Result)
+	}
+	if gotResult, _ := got.Result["result"].(string); gotResult != "ok\n" {
+		t.Fatalf("taskStore.Get() result = %q, want canonical result", gotResult)
+	}
+	if _, err := os.Stat(filepath.Join(root, "sessions", ".sessions.index.sqlite")); err != nil {
+		t.Fatalf("session sqlite index missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "tasks")); !os.IsNotExist(err) {
+		t.Fatalf("legacy task store dir should not exist, stat err = %v", err)
+	}
+}
+
+func TestModelLookupResolvesMiniMaxThroughProviderFactory(t *testing.T) {
+	t.Parallel()
+
+	server := newGatewayTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("request path = %q, want /v1/messages", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer minimax-secret" {
+			t.Fatalf("authorization = %q, want bearer minimax token", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":"msg_1","type":"message","role":"assistant","model":"MiniMax-M2","stop_reason":"end_turn","stop_sequence":"","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":3,"output_tokens":1}}`)
+	}))
+	defer server.Close()
+
+	lookup, err := newModelLookup(nil, 204800)
+	if err != nil {
+		t.Fatalf("newModelLookup() error = %v", err)
+	}
+	if _, err := lookup.Upsert(ModelConfig{
+		Provider:   "minimax",
+		Model:      "MiniMax-M2",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Token:      "minimax-secret",
+	}); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+	cfg, ok := lookup.Config("minimax/minimax-m2")
+	if !ok {
+		t.Fatal("expected minimax config")
+	}
+	if cfg.API != providers.APIMiniMax {
+		t.Fatalf("cfg.API = %q, want %q", cfg.API, providers.APIMiniMax)
+	}
+	if cfg.AuthType != providers.AuthBearerToken {
+		t.Fatalf("cfg.AuthType = %q, want %q", cfg.AuthType, providers.AuthBearerToken)
+	}
+
+	resolved, err := lookup.ResolveModel(context.Background(), "minimax/minimax-m2", 0)
+	if err != nil {
+		t.Fatalf("ResolveModel() error = %v", err)
+	}
+	var finalText string
+	for event, err := range resolved.Model.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		if event != nil && event.Response != nil && event.TurnComplete {
+			finalText = event.Response.Message.TextContent()
+		}
+	}
+	if finalText != "ok" {
+		t.Fatalf("final text = %q, want ok", finalText)
+	}
+}
+
+func TestModelLookupRequiresControlResolverForManagedCodexCredential(t *testing.T) {
+	t.Parallel()
+
+	lookup, err := newModelLookup(nil, 400000)
+	if err != nil {
+		t.Fatalf("newModelLookup() error = %v", err)
+	}
+	if _, err := lookup.Upsert(ModelConfig{
+		Provider:      "openai-codex",
+		API:           providers.APIOpenAICodex,
+		Model:         "gpt-5.4",
+		BaseURL:       modelconfig.CodexOAuthBaseURL,
+		CredentialRef: modelconfig.CodexOAuthCredentialRef,
+		AuthType:      providers.AuthOAuthToken,
+	}); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+	if _, err := lookup.ResolveModel(context.Background(), "openai-codex/gpt-5.4", 0); err == nil || !strings.Contains(err.Error(), "managed model credential") {
+		t.Fatalf("ResolveModel() error = %v, want unavailable managed credential", err)
+	}
+	resolverCalls := 0
+	lookup.resolveHTTPClient = func(_ context.Context, cfg ModelConfig) (*http.Client, error) {
+		resolverCalls++
+		if cfg.CredentialRef != modelconfig.CodexOAuthCredentialRef || cfg.Provider != "openai-codex" {
+			t.Fatalf("managed config = %#v", cfg)
+		}
+		return &http.Client{}, nil
+	}
+	if _, err := lookup.ResolveModel(context.Background(), "openai-codex/gpt-5.4", 0); err != nil {
+		t.Fatalf("ResolveModel() with Control resolver error = %v", err)
+	}
+	if resolverCalls != 1 {
+		t.Fatalf("resolver calls = %d, want 1", resolverCalls)
+	}
+}
+
+func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workspace := t.TempDir()
+	const (
+		appName = "caelis"
+		userID  = "grok-context-resume-test"
+	)
+
+	first, err := newGatewayAppTestStack(t, Config{
+		AppName:      appName,
+		UserID:       userID,
+		StoreDir:     root,
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
+		Model: ModelConfig{
+			Provider:            "xai",
+			API:                 providers.APIXAIResponses,
+			Model:               "grok-4.5",
+			BaseURL:             modelconfig.GrokOAuthBaseURL,
+			ContextWindowTokens: 500000,
+			MaxOutputTok:        32768,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack(first) error = %v", err)
+	}
+	grokID := first.lookup.DefaultID()
+	active, err := startGatewayAppTestSession(ctx, first, "grok context resume")
+	if err != nil {
+		_ = first.Close()
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	if err := first.useTestHostModel(ctx, session.SessionRef{}, grokID); err != nil {
+		_ = first.Close()
+		t.Fatalf("UseModel(grok) error = %v", err)
+	}
+	current := mustCurrentSession(t, first, active.SessionID)
+	revision := current.Revision
+	selected, err := first.ConfigurationCommands().UseSessionModel(ctx, controlclient.Principal{ID: first.UserID}, controlclient.SessionModelRequest{
+		WriteBase: controlclient.WriteBase{
+			OperationID:             "persist-grok-session-model",
+			SessionID:               current.SessionID,
+			ExpectedRevision:        &revision,
+			ExpectedControllerEpoch: current.Controller.EpochID,
+		},
+		Model: grokID,
+	})
+	if err != nil || selected.Outcome != controlclient.OutcomeCommitted {
+		_ = first.Close()
+		t.Fatalf("UseSessionModel(grok) = %#v, %v", selected, err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close(first) error = %v", err)
+	}
+
+	store := newAppConfigStore(root)
+	doc, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load(config) error = %v", err)
+	}
+	foundGrok := false
+	for i := range doc.Models.Configs {
+		if strings.EqualFold(doc.Models.Configs[i].ID, grokID) {
+			doc.Models.Configs[i].ContextWindowTokens = 0
+			foundGrok = true
+		}
+	}
+	if !foundGrok {
+		t.Fatalf("persisted configs = %#v, missing Grok model %q", doc.Models.Configs, grokID)
+	}
+	for i := range doc.Models.ProviderEndpoints {
+		if strings.EqualFold(doc.Models.ProviderEndpoints[i].ID, "xai@default") {
+			doc.Models.ProviderEndpoints[i].CredentialRef = modelconfig.GrokOAuthCredentialRef
+		}
+	}
+	deepSeek := modelconfig.NormalizeConfig(ModelConfig{
+		Provider:            "deepseek",
+		API:                 providers.APIDeepSeek,
+		Model:               "deepseek-v4-pro",
+		BaseURL:             "https://api.deepseek.com/anthropic",
+		ContextWindowTokens: 1048576,
+		MaxOutputTok:        32768,
+	})
+	doc.Models.ProviderEndpoints = append(doc.Models.ProviderEndpoints, modelconfig.ProviderEndpointFromConfig(deepSeek))
+	doc.Models.Configs = append(doc.Models.Configs, deepSeek)
+	if err := store.Save(doc); err != nil {
+		t.Fatalf("Save(config without Grok context) error = %v", err)
+	}
+
+	reloaded, err := newGatewayAppTestStack(t, Config{
+		AppName:      appName,
+		UserID:       userID,
+		StoreDir:     root,
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
+	}
+	defer reloaded.Close()
+	reloaded.lookup.resolveHTTPClient = func(context.Context, ModelConfig) (*http.Client, error) {
+		return http.DefaultClient, nil
+	}
+
+	client, err := controlclient.BindSessionClient(reloaded.ControlClient(), controlclient.Principal{ID: userID})
+	if err != nil {
+		t.Fatalf("BindSessionClient() error = %v", err)
+	}
+	reconnected, err := client.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: active.SessionID})
+	if err != nil {
+		t.Fatalf("Reconnect() error = %v", err)
+	}
+	if reconnected.Subscription != nil {
+		defer func() { _ = reconnected.Subscription.Close() }()
+	}
+	resumed := reconnected.State
+	resumedRef := session.SessionRef{SessionID: resumed.SessionID}
+	state, err := reloaded.SessionRuntimeState(ctx, resumedRef)
+	if err != nil {
+		t.Fatalf("SessionRuntimeState() error = %v", err)
+	}
+	if state.ModelAlias != "xai/grok-4.5" {
+		t.Fatalf("resumed ModelAlias = %q, want xai/grok-4.5", state.ModelAlias)
+	}
+	usage, err := reloaded.SessionUsageSnapshot(ctx, resumedRef, state.ModelAlias)
+	if err != nil {
+		t.Fatalf("SessionUsageSnapshot() error = %v", err)
+	}
+	if usage.ContextWindowTokens != 500000 {
+		t.Fatalf("resumed usage context window = %d, want 500000", usage.ContextWindowTokens)
+	}
+
+	resolved, err := reloaded.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{
+		SessionRef: resumedRef,
+	})
+	if err != nil {
+		t.Fatalf("ResolveTurn(resumed) error = %v", err)
+	}
+	withContext, ok := resolved.RunRequest.AgentSpec.Model.(interface{ ContextWindowTokens() int })
+	if !ok {
+		t.Fatalf("resolved Grok model %T has no context-window contract", resolved.RunRequest.AgentSpec.Model)
+	}
+	if got := withContext.ContextWindowTokens(); got != 500000 {
+		t.Fatalf("resumed model context window = %d, want 500000", got)
+	}
+}
+
+func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
+	root := t.TempDir()
+	workdir := t.TempDir()
+
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "sandbox-persist-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	expected, err := stack.ConfigurationRevision(context.Background())
+	if err != nil {
+		t.Fatalf("ConfigurationRevision() error = %v", err)
+	}
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), controlclient.Principal{ID: stack.UserID}, controlclient.SandboxRequest{
+		WriteBase: controlclient.WriteBase{OperationID: "sandbox-persist-restart", ExpectedRevision: &expected},
+		Backend:   "host",
+	})
+	if err != nil || result.Outcome != controlclient.OutcomeCommitted {
+		t.Fatalf("SetSandboxBackend() = %#v, %v", result, err)
+	}
+	status := stack.SandboxStatus()
+	if status.RequestedBackend != "host" {
+		t.Fatalf("requested backend = %q, want host", status.RequestedBackend)
+	}
+	if status.Route != "host" {
+		t.Fatalf("sandbox route = %q, want host", status.Route)
+	}
+
+	reloaded, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "sandbox-persist-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
+	}
+	reloadedStatus := reloaded.SandboxStatus()
+	if got := reloadedStatus.RequestedBackend; got != "host" {
+		t.Fatalf("SandboxStatus().RequestedBackend = %q, want host", got)
+	}
+	if got := reloadedStatus.Route; got != "host" {
+		t.Fatalf("SandboxStatus().Route = %q, want host", got)
+	}
+	doc, err := LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	if got := doc.Sandbox.RequestedType; got != "host" {
+		t.Fatalf("config sandbox requested_type = %q, want host", got)
+	}
+}
+
+func TestStackDeleteModelRemovesConfiguredAlias(t *testing.T) {
+	ctx := context.Background()
+	stack, activeSession := newLocalStateTestStack(t)
+
+	connected, err := stack.connectTestModel(ModelConfig{
+		Provider: "ollama",
+		API:      providers.APIOllama,
+		Model:    "alt-model",
+	})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	alias := connected.Backend.Provider.ModelConfigID
+	if err := stack.useTestHostModel(ctx, session.SessionRef{}, alias); err != nil {
+		t.Fatalf("UseModel() error = %v", err)
+	}
+	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, alias); err != nil {
+		t.Fatalf("DeleteModel() error = %v", err)
+	}
+
+	aliases, err := stack.ListModelAliases(ctx, activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("ListModelAliases() error = %v", err)
+	}
+	for _, item := range aliases {
+		if item == alias {
+			t.Fatalf("deleted alias %q still present in %#v", alias, aliases)
+		}
+	}
+	if got := stack.DefaultModelAlias(); got == alias {
+		t.Fatalf("default alias = %q, want deleted alias removed", got)
+	}
+}
+
+func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workdir := t.TempDir()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "delete-profile-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "delete-profile-session")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	firstProfile, err := stack.connectTestModel(ModelConfig{
+		Provider:     "deepseek",
+		API:          providers.APIDeepSeek,
+		Model:        "deepseek-v4-flash",
+		Token:        "secret",
+		PersistToken: true,
+	})
+	if err != nil {
+		t.Fatalf("Connect(first) error = %v", err)
+	}
+	firstID := firstProfile.Backend.Provider.ModelConfigID
+	secondProfile, err := stack.connectTestModel(ModelConfig{
+		Provider: "deepseek",
+		API:      providers.APIDeepSeek,
+		Model:    "deepseek-v4-pro",
+	})
+	if err != nil {
+		t.Fatalf("Connect(second) error = %v", err)
+	}
+	secondID := secondProfile.Backend.Provider.ModelConfigID
+	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, firstID); err != nil {
+		t.Fatalf("DeleteModel(first) error = %v", err)
+	}
+	doc, err := LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig(after first delete) error = %v", err)
+	}
+	if len(doc.Models.ProviderEndpoints) != 1 {
+		t.Fatalf("provider endpoints after deleting one model = %#v, want shared endpoint retained", doc.Models.ProviderEndpoints)
+	}
+	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, secondID); err != nil {
+		t.Fatalf("DeleteModel(second) error = %v", err)
+	}
+	doc, err = LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig(after second delete) error = %v", err)
+	}
+	if len(doc.Models.ProviderEndpoints) != 0 {
+		t.Fatalf("provider endpoints after deleting last model = %#v, want none", doc.Models.ProviderEndpoints)
+	}
+	if current := mustCurrentSession(t, stack, activeSession.SessionID); current.Revision != activeSession.Revision {
+		t.Fatalf("Host connect/delete changed Session revision from %d to %d", activeSession.Revision, current.Revision)
+	}
+}
+
+func TestStackUseModelReportsAmbiguousVisibleAlias(t *testing.T) {
+	ctx := context.Background()
+	stack, _ := newLocalStateTestStack(t)
+
+	for _, cfg := range []ModelConfig{
+		{Provider: "xiaomi", API: providers.APIMimo, Model: "mimo-v2.5-pro", BaseURL: "https://api.xiaomimimo.com/v1"},
+		{Provider: "xiaomi", API: providers.APIMimo, Model: "mimo-v2.5-pro", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1"},
+	} {
+		if _, err := stack.connectTestModel(cfg); err != nil {
+			t.Fatalf("Connect(%s) error = %v", cfg.BaseURL, err)
+		}
+	}
+	if !stack.lookup.HasAlias("xiaomi/mimo-v2.5-pro") {
+		t.Fatal("HasAlias(duplicate visible alias) = false, want true")
+	}
+	err := stack.useTestHostModel(ctx, session.SessionRef{}, "xiaomi/mimo-v2.5-pro")
+	if err == nil || !strings.Contains(err.Error(), "ambiguous model alias") {
+		t.Fatalf("UseModel(duplicate visible alias) error = %v, want ambiguity", err)
+	}
+}
+
+func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
+	ctx := context.Background()
+	stack, activeSession := newLocalStateTestStack(t)
+	apiProfile, err := stack.connectTestModel(ModelConfig{
+		Provider: "xiaomi",
+		API:      providers.APIMimo,
+		Model:    "mimo-v2.5-pro",
+		BaseURL:  "https://api.xiaomimimo.com/v1",
+	})
+	if err != nil {
+		t.Fatalf("Connect(api) error = %v", err)
+	}
+	apiID := apiProfile.Backend.Provider.ModelConfigID
+	tokenPlanProfile, err := stack.connectTestModel(ModelConfig{
+		Provider: "xiaomi",
+		API:      providers.APIMimo,
+		Model:    "mimo-v2.5-pro",
+		BaseURL:  "https://token-plan-cn.xiaomimimo.com/v1",
+	})
+	if err != nil {
+		t.Fatalf("Connect(token plan) error = %v", err)
+	}
+	tokenPlanID := tokenPlanProfile.Backend.Provider.ModelConfigID
+	current := mustCurrentSession(t, stack, activeSession.SessionID)
+	revision := current.Revision
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SessionModelRequest{
+		WriteBase: controlclient.WriteBase{
+			OperationID:             "select-stable-token-plan-profile",
+			SessionID:               current.SessionID,
+			ExpectedRevision:        &revision,
+			ExpectedControllerEpoch: current.Controller.EpochID,
+		},
+		Model: tokenPlanID,
+	})
+	if err != nil || selected.Outcome != controlclient.OutcomeCommitted {
+		t.Fatalf("UseSessionModel(token plan) = %#v, %v", selected, err)
+	}
+	activeSession = mustCurrentSession(t, stack, activeSession.SessionID)
+	surface := stack.ACPSurface(nil, false, nil)
+	models, err := surface.SessionModels(ctx, activeSession)
+	if err != nil {
+		t.Fatalf("SessionModels() error = %v", err)
+	}
+	if models == nil {
+		t.Fatal("SessionModels() = nil, want models")
+		return
+	}
+	if models.CurrentModelID != tokenPlanID {
+		t.Fatalf("CurrentModelID = %q, want %q", models.CurrentModelID, tokenPlanID)
+	}
+	seen := map[string]string{}
+	for _, model := range models.AvailableModels {
+		seen[model.ModelID] = model.Name
+	}
+	if seen[apiID] != "xiaomi/mimo-v2.5-pro" || seen[tokenPlanID] != "xiaomi/mimo-v2.5-pro" {
+		t.Fatalf("available models = %#v, want stable ids with visible alias names", models.AvailableModels)
+	}
+	current = mustCurrentSession(t, stack, activeSession.SessionID)
+	revision = current.Revision
+	result, err := stack.ConfigurationCommands().UseSessionModel(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SessionModelRequest{
+		WriteBase: controlclient.WriteBase{
+			OperationID:             "select-stable-api-profile",
+			SessionID:               current.SessionID,
+			ExpectedRevision:        &revision,
+			ExpectedControllerEpoch: current.Controller.EpochID,
+		},
+		Model: apiID,
+	})
+	if err != nil || result.Outcome != controlclient.OutcomeCommitted {
+		t.Fatalf("UseSessionModel(stable id) = %#v, %v", result, err)
+	}
+	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("SessionRuntimeState() error = %v", err)
+	}
+	if state.ModelID != apiID || state.ModelAlias != "xiaomi/mimo-v2.5-pro" {
+		t.Fatalf("runtime state = %#v, want API profile selected by stable id", state)
+	}
+}
+
+func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
+	ctx := context.Background()
+	workdir := t.TempDir()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "delete-only-model-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "delete-only-model-session")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	connected, err := stack.connectTestModel(ModelConfig{
+		Provider:        "deepseek",
+		API:             providers.APIDeepSeek,
+		Model:           "deepseek-v4-pro",
+		ReasoningLevels: []string{"none", "high", "max"},
+	})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	alias := connected.Backend.Provider.ModelConfigID
+	if err := stack.useTestHostModel(ctx, session.SessionRef{}, alias, "high"); err != nil {
+		t.Fatalf("UseModel() error = %v", err)
+	}
+	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, alias); err != nil {
+		t.Fatalf("DeleteModel() error = %v", err)
+	}
+	if got := stack.DefaultModelAlias(); got != "" {
+		t.Fatalf("DefaultModelAlias() = %q, want empty", got)
+	}
+	aliases, err := stack.ListModelAliases(ctx, activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("ListModelAliases() error = %v", err)
+	}
+	if len(aliases) != 0 {
+		t.Fatalf("ListModelAliases() = %#v, want empty", aliases)
+	}
+	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("SessionRuntimeState() error = %v", err)
+	}
+	if state.ModelAlias != "" || state.ReasoningEffort != "" {
+		t.Fatalf("runtime state = %#v, want model and reasoning cleared", state)
+	}
+}
+
+func TestSessionRuntimeStateIgnoresStaleModelAliasOutsideConfig(t *testing.T) {
+	ctx := context.Background()
+	stack, activeSession := newLocalStateTestStack(t)
+	if _, err := stack.Sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
+		next := session.CloneState(state)
+		if next == nil {
+			next = map[string]any{}
+		}
+		next["gateway.current_model_alias"] = "minimax/minimax-m2.7-highspeed"
+		return next, nil
+	}}); err != nil {
+		t.Fatalf("UpdateState() error = %v", err)
+	}
+	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("SessionRuntimeState() error = %v", err)
+	}
+	if state.ModelAlias != "" {
+		t.Fatalf("ModelAlias = %q, want empty because alias is not in config", state.ModelAlias)
+	}
+}
+
+func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workdir := t.TempDir()
+
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "persist-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	_, err = startGatewayAppTestSession(ctx, stack, "persist-session")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+
+	minimaxProfile, err := stack.connectTestModel(ModelConfig{
+		Provider: "minimax",
+		Model:    "MiniMax-M2.7-highspeed",
+		Token:    "minimax-secret",
+	})
+	if err != nil {
+		t.Fatalf("Connect(minimax) error = %v", err)
+	}
+	minimaxAlias := minimaxProfile.Backend.Provider.ModelConfigID
+	if _, err := stack.connectTestModel(ModelConfig{
+		Provider: "deepseek",
+		API:      providers.APIDeepSeek,
+		Model:    "deepseek-v4-pro",
+		Token:    "deepseek-secret",
+	}); err != nil {
+		t.Fatalf("Connect(deepseek) error = %v", err)
+	}
+	if err := stack.useTestHostModel(ctx, session.SessionRef{}, minimaxAlias); err != nil {
+		t.Fatalf("UseModel(minimax) error = %v", err)
+	}
+
+	reloaded, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "persist-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
+	}
+	reloadedSession, err := startGatewayAppTestSession(ctx, reloaded, "persist-session")
+	if err != nil {
+		t.Fatalf("StartSession(reloaded) error = %v", err)
+	}
+	aliases, err := reloaded.ListModelAliases(ctx, reloadedSession.SessionRef)
+	if err != nil {
+		t.Fatalf("ListModelAliases(reloaded) error = %v", err)
+	}
+	if len(aliases) < 2 {
+		t.Fatalf("reloaded aliases = %#v, want both minimax and deepseek aliases", aliases)
+	}
+	if !containsStringFold(aliases, "minimax/minimax-m2.7-highspeed") {
+		t.Fatalf("reloaded aliases = %#v, missing minimax/minimax-m2.7-highspeed", aliases)
+	}
+	if !containsStringFold(aliases, "deepseek/deepseek-v4-pro") {
+		t.Fatalf("reloaded aliases = %#v, missing deepseek/deepseek-v4-pro", aliases)
+	}
+	if got := reloaded.DefaultModelAlias(); got != "minimax/minimax-m2.7-highspeed" {
+		t.Fatalf("DefaultModelAlias(reloaded) = %q, want minimax/minimax-m2.7-highspeed", got)
+	}
+	doc, err := LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	if got := doc.Models.DefaultAlias; got != "" {
+		t.Fatalf("config persisted redundant default alias %q", got)
+	}
+	if got := doc.Models.DefaultID; got != "" {
+		t.Fatalf("config persisted redundant default model id %q", got)
+	}
+	if got := doc.ModelProfiles.DefaultProfileID; got != minimaxProfile.ID {
+		t.Fatalf("config default profile id = %q, want %q", got, minimaxProfile.ID)
+	}
+	if got := doc.ModelProfiles.DefaultEffort; got != minimaxProfile.Effort.DefaultEffort {
+		t.Fatalf("config default effort = %q, want %q", got, minimaxProfile.Effort.DefaultEffort)
+	}
+	if len(doc.Models.Configs) < 2 {
+		t.Fatalf("config models = %#v, want both minimax and deepseek configs", doc.Models.Configs)
+	}
+	if _, err := os.Stat(filepath.Join(root, "config.json")); err != nil {
+		t.Fatalf("config.json missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "config", "models.json")); !os.IsNotExist(err) {
+		t.Fatalf("legacy models.json should be removed, stat err = %v", err)
+	}
+}
+
+func TestNewLocalStackAllowsEmptyInitialModelConfig(t *testing.T) {
+	root := t.TempDir()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "empty-model-test",
+		StoreDir:     root,
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	if got := stack.DefaultModelAlias(); got != "" {
+		t.Fatalf("DefaultModelAlias() = %q, want empty", got)
+	}
+	assertSandboxNetworkEnabledDefault(t, stack)
+	if _, err := os.Stat(filepath.Join(root, "config.json")); !os.IsNotExist(err) {
+		t.Fatalf("config.json stat error = %v, want no config write during stack construction", err)
+	}
+}
+
+func TestNewLocalStackDoesNotPersistSandboxNetworkDefault(t *testing.T) {
+	root := t.TempDir()
+	workdir := t.TempDir()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) error = %v", err)
+	}
+	const rawConfig = `{"runtime":{"approval_mode":"manual"}}`
+	configPath := filepath.Join(root, "config.json")
+	if err := os.WriteFile(configPath, []byte(rawConfig), 0o600); err != nil {
+		t.Fatalf("WriteFile(config.json) error = %v", err)
+	}
+
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "sandbox-default-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	assertSandboxNetworkEnabledDefault(t, stack)
+	assertConfigSandboxNetworkUnset(t, configPath)
+}
+
+func TestNewLocalStackProductionBootstrapDoesNotPersistSandboxNetworkDefault(t *testing.T) {
+	root := t.TempDir()
+	workdir := t.TempDir()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) error = %v", err)
+	}
+	configPath := filepath.Join(root, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"runtime":{"approval_mode":"manual"}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(config.json) error = %v", err)
+	}
+
+	stack, err := NewLocalStack(Config{
+		AppName:      "caelis",
+		UserID:       "sandbox-bootstrap-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		Assembly:     assembly.ResolvedAssembly{},
+		Sandbox:      SandboxConfig{RequestedType: "host"},
+		SkillDirs:    []string{t.TempDir()},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	assertSandboxNetworkEnabledDefault(t, stack)
+	assertConfigSandboxNetworkUnset(t, configPath)
+}
+
+func assertSandboxNetworkEnabledDefault(t *testing.T, stack *Stack) {
+	t.Helper()
+	if stack == nil {
+		t.Fatal("stack is nil")
+	}
+	if stack.sandbox.NetworkEnabled == nil || !*stack.sandbox.NetworkEnabled {
+		t.Fatalf("stack sandbox NetworkEnabled = %#v, want runtime true default", stack.sandbox.NetworkEnabled)
+	}
+}
+
+func assertConfigSandboxNetworkUnset(t *testing.T, configPath string) {
+	t.Helper()
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", configPath, err)
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatalf("Unmarshal(%s) error = %v\n%s", configPath, err, data)
+	}
+	rawSandbox, ok := root["sandbox"]
+	if !ok {
+		return
+	}
+	var sandbox map[string]json.RawMessage
+	if err := json.Unmarshal(rawSandbox, &sandbox); err != nil {
+		t.Fatalf("sandbox config is not a JSON object: %v\n%s", err, rawSandbox)
+	}
+	if _, ok := sandbox["network_enabled"]; ok {
+		t.Fatalf("config sandbox.network_enabled persisted unexpectedly:\n%s", data)
+	}
+}
+
+func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
+	ctx := context.Background()
+	server := newGatewayAppCompactionOllamaServer(t)
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:       "caelis",
+		UserID:        "auto-compact-test",
+		StoreDir:      t.TempDir(),
+		WorkspaceKey:  t.TempDir(),
+		WorkspaceCWD:  t.TempDir(),
+		ApprovalMode:  "auto-review",
+		ContextWindow: 64,
+		Assembly:      assembly.ResolvedAssembly{},
+		Model: ModelConfig{
+			Provider:   "ollama",
+			API:        providers.APIOllama,
+			Model:      "compact-test",
+			BaseURL:    server.URL,
+			HTTPClient: server.Client(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "auto compact session")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Project objective: app default auto compact should be enabled in the upper app assembly."))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppAssistantEvent("ack"))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Current blocker: app assembly previously left compaction disabled unless tests opted in explicitly."))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppAssistantEvent("ack"))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Next action: verify the default app runtime invokes model-backed compact before the turn."))
+
+	if _, err := runHeadlessOnceForGatewayAppTest(ctx, stack, activeSession, "headless-auto-compact-test", "continue after app auto compact", headless.Options{}); err != nil {
+		t.Fatalf("RunSessionOnce() error = %v", err)
+	}
+	if got := server.compactionCalls.Load(); got == 0 {
+		t.Fatal("expected app default runtime to invoke compaction")
+	}
+	loaded, err := stack.Sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	compactEvent, ok := latestGatewayAppCompactEvent(loaded.Events)
+	if !ok {
+		t.Fatal("missing compact event after auto compact")
+	}
+	data, ok := compact.CompactEventDataFromEvent(compactEvent)
+	if !ok || data.SourceEventCount == 0 {
+		t.Fatalf("auto compact event missing compact metadata: meta=%+v", compactEvent.Meta)
+	}
+	promptEvents := compact.PromptEventsFromLatestCompact(loaded.Events)
+	if len(promptEvents) == 0 || strings.TrimSpace(session.EventText(promptEvents[0])) == "" {
+		t.Fatalf("auto compact prompt overlay missing checkpoint text: %+v", promptEvents)
+	}
+}
+
+func TestLocalStackAutoCompactCountsPromptPrefix(t *testing.T) {
+	ctx := context.Background()
+	server := newGatewayAppCompactionOllamaServer(t)
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:       "caelis",
+		UserID:        "auto-compact-prefix-test",
+		StoreDir:      t.TempDir(),
+		WorkspaceKey:  t.TempDir(),
+		WorkspaceCWD:  t.TempDir(),
+		ApprovalMode:  "auto-review",
+		ContextWindow: 4096,
+		SystemPrompt:  strings.Repeat("stable prompt prefix token. ", 600),
+		Assembly:      assembly.ResolvedAssembly{},
+		Model: ModelConfig{
+			Provider:   "ollama",
+			API:        providers.APIOllama,
+			Model:      "compact-test",
+			BaseURL:    server.URL,
+			HTTPClient: server.Client(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "auto compact prefix session")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Short durable event."))
+
+	if _, err := runHeadlessOnceForGatewayAppTest(ctx, stack, activeSession, "headless-auto-compact-prefix-test", "continue after prefix pressure", headless.Options{}); err != nil {
+		t.Fatalf("RunSessionOnce() error = %v", err)
+	}
+	if got := server.compactionCalls.Load(); got == 0 {
+		t.Fatal("expected prompt-prefix pressure to trigger auto compaction")
+	}
+}
+
+func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
+	ctx := context.Background()
+	server := newGatewayAppCompactionOllamaServer(t)
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:       "caelis",
+		UserID:        "manual-compact-test",
+		StoreDir:      t.TempDir(),
+		WorkspaceKey:  t.TempDir(),
+		WorkspaceCWD:  t.TempDir(),
+		ApprovalMode:  "auto-review",
+		ContextWindow: 4096,
+		Assembly:      assembly.ResolvedAssembly{},
+		Model: ModelConfig{
+			Provider:   "ollama",
+			API:        providers.APIOllama,
+			Model:      "compact-test",
+			BaseURL:    server.URL,
+			HTTPClient: server.Client(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "manual compact session")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Project objective: manual compact must preserve context with checkpoint overlay."))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppAssistantEvent("ack"))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Current blocker: a bare manual compact event truncates all prior prompt-visible history."))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppAssistantEvent("ack"))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Next action: force the runtime compactor with trigger manual."))
+
+	if err := stack.CompactSession(ctx, activeSession.SessionRef); err != nil {
+		t.Fatalf("CompactSession() error = %v", err)
+	}
+	if got := server.compactionCalls.Load(); got != 1 {
+		t.Fatalf("compactionCalls = %d, want 1", got)
+	}
+	loaded, err := stack.Sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	compactEvent, ok := latestGatewayAppCompactEvent(loaded.Events)
+	if !ok {
+		t.Fatal("missing compact event after manual compact")
+	}
+	data, ok := compact.CompactEventDataFromEvent(compactEvent)
+	if !ok {
+		t.Fatalf("manual compact event missing structured metadata: meta=%+v", compactEvent.Meta)
+	}
+	if data.Trigger != "manual" {
+		t.Fatalf("compact trigger = %q, want manual", data.Trigger)
+	}
+	if data.SourceEventCount == 0 {
+		t.Fatalf("manual compact source event count = %d, want > 0", data.SourceEventCount)
+	}
+	promptEvents := compact.PromptEventsFromLatestCompact(loaded.Events)
+	if len(promptEvents) == 0 || strings.TrimSpace(session.EventText(promptEvents[0])) == "" {
+		t.Fatalf("manual compact prompt overlay missing checkpoint text: %+v", promptEvents)
+	}
+}
+
+func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) {
+	ctx := context.Background()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "compact-usage-prefix-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "auto-review",
+		SystemPrompt: strings.Repeat("count this stable prefix instruction. ", 2000),
+		Model: ModelConfig{
+			Provider:            "ollama",
+			API:                 providers.APIOllama,
+			Model:               "llama3",
+			ContextWindowTokens: 1000000,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "compact usage prefix session")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	compactMessage := model.NewTextMessage(model.RoleUser, "CONTEXT CHECKPOINT\nObjective: compacted baseline")
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, &session.Event{
+		Type:       session.EventTypeCompact,
+		Visibility: session.VisibilityCanonical,
+		Message:    &compactMessage,
+		Text:       compactMessage.TextContent(),
+		Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodContextCheckpoint,
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: "compact",
+				Content:       session.ProtocolTextContent(compactMessage.TextContent()),
+			},
+		},
+		Meta: map[string]any{
+			compact.MetaKeyCompact: compact.CompactEventDataValue(compact.CompactEventData{
+				ContractVersion: compact.CompactContractVersion,
+			}),
+		},
+	})
+
+	usage, err := stack.SessionUsageSnapshot(ctx, activeSession.SessionRef, "ollama/llama3")
+	if err != nil {
+		t.Fatalf("SessionUsageSnapshot() error = %v", err)
+	}
+	if usage.Source != compact.UsageSourceEstimated {
+		t.Fatalf("usage source = %q, want estimated after compact without provider baseline", usage.Source)
+	}
+	if usage.EstimatedPrefixTokens < 5000 {
+		t.Fatalf("estimated prefix tokens = %d, want stable prompt prefix included", usage.EstimatedPrefixTokens)
+	}
+	if usage.TotalTokens <= usage.EstimatedPrefixTokens {
+		t.Fatalf("total tokens = %d, want compact history plus prefix %d", usage.TotalTokens, usage.EstimatedPrefixTokens)
+	}
+}
+
+func TestSessionUsageSnapshotUsesActiveMainModelBaseline(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "usage-active-model-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "auto-review",
+		Model: ModelConfig{
+			Provider:            "openai-codex",
+			Model:               "gpt-main",
+			ContextWindowTokens: 258_400,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	defer stack.Close()
+	activeSession, err := startGatewayAppTestSession(ctx, stack, "usage active model session")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	appendUsage := func(id string, provider string, modelName string, promptTokens int) {
+		message := model.NewTextMessage(model.RoleAssistant, "answer")
+		appendGatewayAppEvent(t, stack, activeSession.SessionRef, &session.Event{
+			ID:         id,
+			Type:       session.EventTypeAssistant,
+			Visibility: session.VisibilityCanonical,
+			Message:    &message,
+			Text:       message.TextContent(),
+			Invocation: &session.EventInvocation{Provider: provider, Model: modelName},
+			Meta: map[string]any{
+				"prompt_tokens":     promptTokens,
+				"completion_tokens": 5,
+				"total_tokens":      promptTokens + 5,
+			},
+		})
+	}
+	appendUsage("main-usage", "openai-codex", "gpt-main", 80_000)
+	appendUsage("guardian-usage", "deepseek", "guardian", 25_941)
+
+	usage, err := stack.SessionUsageSnapshot(ctx, activeSession.SessionRef, "openai-codex/gpt-main")
+	if err != nil {
+		t.Fatalf("SessionUsageSnapshot() error = %v", err)
+	}
+	if usage.Source != compact.UsageSourceProvider || usage.AsOfEventID != "main-usage" {
+		t.Fatalf("usage = %+v, want active main model baseline", usage)
+	}
+	if usage.TotalTokens < 80_000 || usage.ContextWindowTokens != 258_400 {
+		t.Fatalf("usage = %+v, want main model tokens and context window", usage)
+	}
+}
+
+func TestDefaultStoreDirUsesHomeDirectory(t *testing.T) {
+	home := t.TempDir()
+	setHomeForGatewayAppTest(t, home)
+	want := filepath.Join(home, ".caelis-dev", "default")
+	if got := defaultStoreDir(); got != want {
+		t.Fatalf("defaultStoreDir() = %q, want %q", got, want)
+	}
+}
+
+func newLocalStateTestStack(t *testing.T) (*Stack, session.Session) {
+	t.Helper()
+	root := t.TempDir()
+	workdir := t.TempDir()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "state-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
+		Model: ModelConfig{
+			Provider: "ollama",
+			API:      providers.APIOllama,
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	activeSession, err := startGatewayAppTestSession(context.Background(), stack, "state-test-session")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	return stack, activeSession
+}
+
+type gatewayAppCompactionOllamaServer struct {
+	URL             string
+	client          *http.Client
+	compactionCalls atomic.Int64
+	normalCalls     atomic.Int64
+}
+
+func newGatewayAppCompactionOllamaServer(t *testing.T) *gatewayAppCompactionOllamaServer {
+	t.Helper()
+	out := &gatewayAppCompactionOllamaServer{}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			http.NotFound(w, r)
+			return
+		}
+		var payload struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		joined := gatewayAppOllamaMessages(payload.Messages)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(joined, "CONTEXT CHECKPOINT COMPACTION") {
+			out.compactionCalls.Add(1)
+			fmt.Fprint(w, `{"model":"compact-test","message":{"role":"assistant","content":"CONTEXT CHECKPOINT\nObjective: app compact preserves context\nBlocker: bare compact events truncate prompt-visible history\nNext action: continue from structured checkpoint overlay\n\n## Current Progress\n- app runtime used model-backed compaction"},"done":true,"prompt_eval_count":64,"eval_count":12}`)
+			return
+		}
+		out.normalCalls.Add(1)
+		fmt.Fprint(w, `{"model":"compact-test","message":{"role":"assistant","content":"app turn ok"},"done":true,"prompt_eval_count":32,"eval_count":8}`)
+	})
+	out.URL = "http://gatewayapp.test"
+	out.client = &http.Client{Transport: gatewayAppRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		recorder := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			handler.ServeHTTP(recorder, req)
+		}()
+		select {
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		case <-done:
+			resp := recorder.Result()
+			resp.Request = req
+			return resp, nil
+		}
+	})}
+	return out
+}
+
+func (s *gatewayAppCompactionOllamaServer) Client() *http.Client {
+	return s.client
+}
+
+type gatewayAppRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f gatewayAppRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func gatewayAppOllamaMessages(messages []struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}) string {
+	parts := make([]string, 0, len(messages))
+	for _, message := range messages {
+		parts = append(parts, strings.TrimSpace(message.Role)+": "+strings.TrimSpace(message.Content))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func appendGatewayAppEvent(t *testing.T, stack *Stack, ref session.SessionRef, event *session.Event) {
+	t.Helper()
+	if _, err := stack.Sessions.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: ref,
+		Event:      event,
+	}); err != nil {
+		t.Fatalf("AppendEvent() error = %v", err)
+	}
+}
+
+func gatewayAppUserEvent(text string) *session.Event {
+	message := model.NewTextMessage(model.RoleUser, text)
+	return &session.Event{
+		Type:       session.EventTypeUser,
+		Visibility: session.VisibilityCanonical,
+		Message:    &message,
+		Text:       strings.TrimSpace(text),
+	}
+}
+
+func gatewayAppAssistantEvent(text string) *session.Event {
+	message := model.NewTextMessage(model.RoleAssistant, text)
+	return &session.Event{
+		Type:       session.EventTypeAssistant,
+		Visibility: session.VisibilityCanonical,
+		Message:    &message,
+		Text:       strings.TrimSpace(text),
+	}
+}
+
+func latestGatewayAppCompactEvent(events []*session.Event) (*session.Event, bool) {
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i] != nil && events[i].Type == session.EventTypeCompact {
+			return events[i], true
+		}
+	}
+	return nil, false
+}
+
+func containsStringFold(values []string, want string) bool {
+	for _, value := range values {
+		if strings.EqualFold(value, want) {
+			return true
+		}
+	}
+	return false
+}

@@ -1,0 +1,35 @@
+{
+  "cursor": "assistant-event-1",
+  "event": {
+    "kind": "assistant_message",
+    "occurred_at": "0001-01-01T00:00:00Z",
+    "session_ref": {
+      "app_name": "caelis",
+      "user_id": "user-1",
+      "session_id": "session-1",
+      "workspace_key": "workspace-1"
+    },
+    "origin": {
+      "scope": "main",
+      "scope_id": "session-1"
+    },
+    "protocol": {
+      "method": "session/update",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "text": "done",
+          "type": "text"
+        }
+      }
+    },
+    "narrative": {
+      "role": "assistant",
+      "text": "done",
+      "final": true,
+      "visibility": "canonical",
+      "update_type": "agent_message_chunk",
+      "scope": "main"
+    }
+  }
+}

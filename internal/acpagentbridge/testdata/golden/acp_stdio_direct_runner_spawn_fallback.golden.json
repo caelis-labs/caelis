@@ -1,0 +1,139 @@
+[
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "spawn-call-1",
+      "title": "Spawn breeze: explain your capability",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "agent": "breeze",
+        "prompt": "explain your capability"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "spawn-call-1",
+      "title": "Spawn",
+      "kind": "execute",
+      "status": "in_progress",
+      "rawOutput": {
+        "handle": "yara",
+        "parent_call": "spawn-call-1",
+        "parent_tool": "Spawn",
+        "state": "running",
+        "target_kind": "subagent"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "wait-call-1",
+      "title": "Task wait",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "action": "wait",
+        "handle": "yara"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Task"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "wait-call-1",
+      "title": "Task wait",
+      "kind": "execute",
+      "status": "completed",
+      "rawInput": {
+        "action": "wait",
+        "handle": "yara"
+      },
+      "rawOutput": {
+        "action": "wait",
+        "tasks": [
+          {
+            "final_message": "exact fallback final",
+            "handle": "yara",
+            "parent_call": "spawn-call-1",
+            "parent_tool": "Spawn",
+            "state": "completed",
+            "target_kind": "subagent"
+          }
+        ]
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Task"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "spawn-call-1",
+      "status": "completed",
+      "rawOutput": {
+        "final_message": "exact fallback final",
+        "handle": "yara",
+        "parent_call": "spawn-call-1",
+        "parent_tool": "Spawn",
+        "state": "completed",
+        "target_kind": "subagent"
+      },
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "text",
+            "text": "exact fallback final"
+          }
+        }
+      ]
+    }
+  }
+]

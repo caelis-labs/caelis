@@ -1,0 +1,83 @@
+package tuiapp
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/caelis-labs/caelis/internal/controlprompt"
+)
+
+func slashPluginMarketplaceWithContext(ctx context.Context, service controlprompt.PluginService, send func(tea.Msg), args string) TaskResultMsg {
+	action, rest, _ := controlprompt.ParseFirst(strings.TrimSpace(args))
+	switch action {
+	case "add":
+		source := strings.TrimSpace(rest)
+		if source == "" {
+			sendNotice(send, "usage: /plugin marketplace add <source>", SlashNoticeHint)
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
+		marketplace, err := service.AddMarketplace(ctx, source)
+		if err != nil {
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("plugin marketplace add", err)}
+		}
+		sendNotice(send, fmt.Sprintf("Added marketplace %s", marketplace.Name), SlashNoticeFeedback)
+		return TaskResultMsg{SuppressTurnDivider: true}
+	case "list":
+		marketplaces, err := service.ListMarketplaces(ctx)
+		if err != nil {
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("plugin marketplace list", err)}
+		}
+		if len(marketplaces) == 0 {
+			sendNotice(send, "No plugin marketplaces", SlashNoticeFeedback)
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
+		lines := make([]string, 0, len(marketplaces))
+		for _, marketplace := range marketplaces {
+			lines = append(lines, formatMarketplaceSummary(marketplace))
+		}
+		sendNotice(send, strings.Join(lines, "\n"), SlashNoticeContent)
+		return TaskResultMsg{SuppressTurnDivider: true}
+	case "update":
+		name := strings.TrimSpace(rest)
+		if name == "" {
+			sendNotice(send, "usage: /plugin marketplace update <name>", SlashNoticeHint)
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
+		marketplace, err := service.UpdateMarketplace(ctx, name)
+		if err != nil {
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("plugin marketplace update", err)}
+		}
+		sendNotice(send, fmt.Sprintf("Updated marketplace %s", marketplace.Name), SlashNoticeFeedback)
+		return TaskResultMsg{SuppressTurnDivider: true}
+	case "rm", "remove":
+		name := strings.TrimSpace(rest)
+		if name == "" {
+			sendNotice(send, "usage: /plugin marketplace rm <name>", SlashNoticeHint)
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
+		if err := service.RemoveMarketplace(ctx, name); err != nil {
+			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("plugin marketplace rm", err)}
+		}
+		sendNotice(send, fmt.Sprintf("Removed marketplace %s", name), SlashNoticeFeedback)
+		return TaskResultMsg{SuppressTurnDivider: true}
+	default:
+		sendNotice(send, "usage: /plugin marketplace add <source> | list | update <name> | rm <name>", SlashNoticeHint)
+		return TaskResultMsg{SuppressTurnDivider: true}
+	}
+}
+
+func formatMarketplaceSummary(m controlprompt.MarketplaceSnapshot) string {
+	count := "0 plugins"
+	if m.PluginCount == 1 {
+		count = "1 plugin"
+	} else if m.PluginCount > 1 {
+		count = fmt.Sprintf("%d plugins", m.PluginCount)
+	}
+	if strings.TrimSpace(m.Description) != "" {
+		return fmt.Sprintf("%s (%s) - %s", m.Name, count, m.Description)
+	}
+	return fmt.Sprintf("%s (%s)", m.Name, count)
+}

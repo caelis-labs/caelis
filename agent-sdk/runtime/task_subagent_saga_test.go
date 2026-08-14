@@ -1,0 +1,1558 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	memory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	taskstream "github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+)
+
+type sagaTaskStore struct {
+	mu          sync.Mutex
+	entries     map[string]*taskapi.Entry
+	puts        int
+	failOnPut   int
+	commitOnPut int
+	failStatus  string
+	failedState bool
+}
+
+type completionGateTaskStore struct {
+	base    *sagaTaskStore
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *completionGateTaskStore) Upsert(ctx context.Context, entry *taskapi.Entry) error {
+	current, _ := s.Get(ctx, entry.TaskID)
+	expected := uint64(0)
+	if current != nil {
+		expected = current.Revision
+	}
+	_, err := s.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: expected})
+	return err
+}
+
+func (s *completionGateTaskStore) Put(ctx context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {
+	if req.Entry != nil && req.Entry.Kind == taskapi.KindSubagent && !req.Entry.Running &&
+		taskstream.IsTerminalState(string(req.Entry.State)) {
+		s.once.Do(func() { close(s.started) })
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-s.release:
+		}
+	}
+	return s.base.Put(ctx, req)
+}
+
+func (s *completionGateTaskStore) Get(ctx context.Context, taskID string) (*taskapi.Entry, error) {
+	return s.base.Get(ctx, taskID)
+}
+
+func (s *completionGateTaskStore) ListSession(ctx context.Context, ref session.SessionRef) ([]*taskapi.Entry, error) {
+	return s.base.ListSession(ctx, ref)
+}
+
+func (s *completionGateTaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.SessionRef, handle string) (*taskapi.Entry, error) {
+	return s.base.GetSessionTaskByHandle(ctx, ref, handle)
+}
+
+type getFailingSagaTaskStore struct {
+	*sagaTaskStore
+	err error
+}
+
+func (s *getFailingSagaTaskStore) Get(context.Context, string) (*taskapi.Entry, error) {
+	return nil, s.err
+}
+
+func newSagaTaskStore() *sagaTaskStore { return &sagaTaskStore{entries: map[string]*taskapi.Entry{}} }
+
+func (s *sagaTaskStore) Upsert(ctx context.Context, entry *taskapi.Entry) error {
+	current, _ := s.Get(ctx, entry.TaskID)
+	expected := uint64(0)
+	if current != nil {
+		expected = current.Revision
+	}
+	_, err := s.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: expected})
+	return err
+}
+
+func (s *sagaTaskStore) Put(_ context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.puts++
+	if !s.failedState && s.failStatus != "" && taskStringValue(req.Entry.Metadata["spawn_status"]) == s.failStatus {
+		s.failedState = true
+		return nil, fmt.Errorf("forced task status persistence failure at %s", s.failStatus)
+	}
+	if s.failOnPut > 0 && s.puts == s.failOnPut {
+		return nil, fmt.Errorf("forced task persistence failure at put %d", s.puts)
+	}
+	current := s.entries[req.Entry.TaskID]
+	actual := uint64(0)
+	if current != nil {
+		actual = current.Revision
+	}
+	if actual != req.ExpectedRevision {
+		return nil, &taskapi.RevisionConflictError{TaskID: req.Entry.TaskID, Expected: req.ExpectedRevision, Actual: actual}
+	}
+	next := taskapi.CloneEntry(req.Entry)
+	next.Revision = actual + 1
+	s.entries[next.TaskID] = next
+	if s.commitOnPut > 0 && s.puts == s.commitOnPut {
+		return taskapi.CloneEntry(next), &session.CommittedError{Err: fmt.Errorf("forced committed task persistence error at put %d", s.puts)}
+	}
+	return taskapi.CloneEntry(next), nil
+}
+
+func (s *sagaTaskStore) Get(_ context.Context, taskID string) (*taskapi.Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[strings.TrimSpace(taskID)]
+	if entry == nil {
+		return nil, errors.New("not found")
+	}
+	return taskapi.CloneEntry(entry), nil
+}
+
+func (s *sagaTaskStore) ListSession(_ context.Context, ref session.SessionRef) ([]*taskapi.Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*taskapi.Entry
+	for _, entry := range s.entries {
+		if entry.Session.SessionID == ref.SessionID {
+			out = append(out, taskapi.CloneEntry(entry))
+		}
+	}
+	return out, nil
+}
+
+func (s *sagaTaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.SessionRef, handle string) (*taskapi.Entry, error) {
+	entries, _ := s.ListSession(ctx, ref)
+	for _, entry := range entries {
+		if taskapi.NormalizeHandle(firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"))) == taskapi.NormalizeHandle(handle) {
+			return entry, nil
+		}
+	}
+	return nil, errors.New("not found")
+}
+
+type sagaRunner struct {
+	spawnCalls  int
+	cancelCalls int
+	cancelErr   error
+}
+
+type placementSagaRunner struct{ sagaRunner }
+
+func (r *placementSagaRunner) SpawnTarget(_ context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (delegation.Anchor, delegation.Result, error) {
+	r.spawnCalls++
+	// The runner may report its concrete backend Agent identity. Runtime must
+	// not compare it with the public Target.Selector ("orbit" in the test).
+	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-saga", Agent: "backend-agent", AgentID: "child-agent-saga"}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted, Result: "saga result"}, nil
+}
+
+func (r *sagaRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
+	r.spawnCalls++
+	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-saga", Agent: req.Agent, AgentID: "child-agent-saga"}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted, Result: "saga result"}, nil
+}
+func (*sagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
+	return delegation.Result{}, nil
+}
+func (r *sagaRunner) Cancel(context.Context, delegation.Anchor) error {
+	r.cancelCalls++
+	return r.cancelErr
+}
+
+type sagaSessionService struct {
+	session.Service
+	failParticipant   bool
+	commitParticipant bool
+	failCanonical     bool
+	failCanonicalAt   int
+	canonicalCalls    int
+	commitCanonical   bool
+	failDetach        bool
+}
+
+type completionNoticeFailSessionService struct {
+	*sagaSessionService
+	fail  atomic.Bool
+	calls atomic.Int64
+}
+
+type revisionBumpBeforeParticipantSessionService struct {
+	session.Service
+	once  sync.Once
+	calls atomic.Int64
+}
+
+type blockingRevisionConflictSessionService struct {
+	session.Service
+	once      sync.Once
+	attempted chan struct{}
+	release   chan struct{}
+	calls     atomic.Int64
+}
+
+type completionPublishingSagaRunner struct {
+	spawnContext subagent.SpawnContext
+	cancelCalls  atomic.Int64
+}
+
+func (r *completionPublishingSagaRunner) Spawn(
+	_ context.Context,
+	spawn subagent.SpawnContext,
+	req delegation.Request,
+) (delegation.Anchor, delegation.Result, error) {
+	r.spawnContext = spawn
+	return delegation.Anchor{
+		TaskID: spawn.TaskID, SessionID: "child-persistent-conflict", Agent: req.Agent, AgentID: spawn.TaskID,
+	}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateRunning, Running: true}, nil
+}
+
+func (*completionPublishingSagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
+	return delegation.Result{}, nil
+}
+
+func (r *completionPublishingSagaRunner) Cancel(context.Context, delegation.Anchor) error {
+	r.cancelCalls.Add(1)
+	return nil
+}
+
+func (s *revisionBumpBeforeParticipantSessionService) PutParticipantWithEvent(
+	ctx context.Context,
+	req session.PutParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	s.calls.Add(1)
+	var bumpErr error
+	s.once.Do(func() {
+		_, bumpErr = agentmessage.AppendContext(
+			ctx,
+			s.Service,
+			req.SessionRef,
+			session.ControlMutationGuard(session.ControlMutationPurposeAgentMessage),
+			session.EventScope{Source: "subagent_completion"},
+			agentmessage.Request{
+				MessageID: "subagent-completion:concurrent:1",
+				To:        agentmessage.Parent,
+				Text:      "Subagent @other is failed. Use Task read with handle other for its full result.",
+				From: session.ActorRef{
+					Kind: session.ActorKindParticipant, ID: "other", Name: "@other",
+				},
+			},
+		)
+	})
+	if bumpErr != nil {
+		return session.Session{}, nil, bumpErr
+	}
+	return s.Service.(session.ParticipantLifecycleService).PutParticipantWithEvent(ctx, req)
+}
+
+func (s *revisionBumpBeforeParticipantSessionService) RemoveParticipantWithEvent(
+	ctx context.Context,
+	req session.RemoveParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	return s.Service.(session.ParticipantLifecycleService).RemoveParticipantWithEvent(ctx, req)
+}
+
+func (s *blockingRevisionConflictSessionService) PutParticipantWithEvent(
+	ctx context.Context,
+	req session.PutParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	s.calls.Add(1)
+	s.once.Do(func() { close(s.attempted) })
+	select {
+	case <-ctx.Done():
+		return session.Session{}, nil, ctx.Err()
+	case <-s.release:
+	}
+	expected := uint64(0)
+	if req.ExpectedRevision != nil {
+		expected = *req.ExpectedRevision
+	}
+	return session.Session{}, nil, &session.RevisionConflictError{
+		SessionID: req.SessionRef.SessionID, Expected: expected, Actual: expected + 1,
+	}
+}
+
+func (s *blockingRevisionConflictSessionService) RemoveParticipantWithEvent(
+	ctx context.Context,
+	req session.RemoveParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	return s.Service.(session.ParticipantLifecycleService).RemoveParticipantWithEvent(ctx, req)
+}
+
+func (s *completionNoticeFailSessionService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+	if req.Event != nil && strings.HasPrefix(strings.TrimSpace(req.Event.MessageID), "subagent-completion:") {
+		s.calls.Add(1)
+		if s.fail.Load() {
+			return nil, errors.New("forced completion notice failure")
+		}
+	}
+	return s.sagaSessionService.AppendEvent(ctx, req)
+}
+
+func (s *completionNoticeFailSessionService) AppendEventWithOutcome(ctx context.Context, req session.AppendEventRequest) (session.AppendEventResult, error) {
+	event, err := s.AppendEvent(ctx, req)
+	return session.AppendEventResult{Event: event, Appended: err == nil}, err
+}
+
+func (s *sagaSessionService) PutParticipantWithEvent(ctx context.Context, req session.PutParticipantWithEventRequest) (session.Session, *session.Event, error) {
+	if s.failParticipant {
+		return session.Session{}, nil, errors.New("forced participant lifecycle failure")
+	}
+	updated, event, err := s.Service.(session.ParticipantLifecycleService).PutParticipantWithEvent(ctx, req)
+	if err == nil && s.commitParticipant {
+		s.commitParticipant = false
+		return updated, event, &session.CommittedError{Err: errors.New("forced committed participant error")}
+	}
+	return updated, event, err
+}
+func (s *sagaSessionService) RemoveParticipantWithEvent(ctx context.Context, req session.RemoveParticipantWithEventRequest) (session.Session, *session.Event, error) {
+	if s.failDetach {
+		return session.Session{}, nil, errors.New("forced participant detach failure")
+	}
+	return s.Service.(session.ParticipantLifecycleService).RemoveParticipantWithEvent(ctx, req)
+}
+func (s *sagaSessionService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+	canonical := req.Event != nil && session.IsCanonicalHistoryEvent(req.Event)
+	if canonical {
+		s.canonicalCalls++
+		if s.failCanonical || (s.failCanonicalAt > 0 && s.canonicalCalls == s.failCanonicalAt) {
+			return nil, errors.New("forced canonical dialogue failure")
+		}
+	}
+	persisted, err := s.Service.AppendEvent(ctx, req)
+	if err == nil && canonical && s.commitCanonical {
+		s.commitCanonical = false
+		return persisted, &session.CommittedError{Err: errors.New("forced committed canonical error")}
+	}
+	return persisted, err
+}
+
+func TestSubagentProducerCompletionAcknowledgesDurableCommit(t *testing.T) {
+	baseStore := newSagaTaskStore()
+	store := &completionGateTaskStore{
+		base:    baseStore,
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, active := newSubagentCompletionSagaRuntime(t, store, nil, runner)
+	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "completion-ack", Agent: "helper", Prompt: "inspect", Role: session.ParticipantRoleDelegated,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	published := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID,
+			State:  delegation.StateCompleted,
+			Result: "done",
+		})
+		close(published)
+	}()
+
+	select {
+	case <-store.started:
+	case <-time.After(time.Second):
+		t.Fatal("terminal Task persistence did not start")
+	}
+	select {
+	case <-published:
+		t.Fatal("PublishSubagentCompletion returned before durable terminal commit")
+	default:
+	}
+	close(store.release)
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("PublishSubagentCompletion did not acknowledge durable terminal commit")
+	}
+	entry, err := store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil || entry.Running || entry.State != taskapi.StateCompleted {
+		t.Fatalf("durable completion = %#v, %v; want completed", entry, err)
+	}
+}
+
+func TestSubagentProducerCompletionRetriesWithoutTaskObservation(t *testing.T) {
+	store := newSagaTaskStore()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, active := newSubagentCompletionSagaRuntime(t, store, nil, runner)
+	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "completion-retry", Agent: "helper", Prompt: "inspect", Role: session.ParticipantRoleDelegated,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	store.failOnPut = store.puts + 1
+	store.mu.Unlock()
+
+	published := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID,
+			State:  delegation.StateCompleted,
+			Result: "done after retry",
+		})
+		close(published)
+	}()
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("producer completion did not retry independently")
+	}
+	entry, err := store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil || entry.Running || entry.State != taskapi.StateCompleted {
+		t.Fatalf("durable completion after retry = %#v, %v; want completed without Task read/wait", entry, err)
+	}
+}
+
+func TestSubagentProducerCompletionRefreshesAfterCASConflict(t *testing.T) {
+	store := newSagaTaskStore()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, active := newSubagentCompletionSagaRuntime(t, store, nil, runner)
+	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "completion-cas", Agent: "helper", Prompt: "inspect", Role: session.ParticipantRoleDelegated,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrent, err := store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrent.Metadata["concurrent_observer"] = "committed"
+	if _, err := store.Put(context.Background(), taskapi.PutRequest{
+		Entry: concurrent, ExpectedRevision: concurrent.Revision,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	published := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID,
+			State:  delegation.StateCompleted,
+			Result: "done after CAS refresh",
+		})
+		close(published)
+	}()
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("producer completion did not refresh and retry after CAS conflict")
+	}
+	entry, err := store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil || entry.Running || entry.State != taskapi.StateCompleted {
+		t.Fatalf("durable completion after CAS refresh = %#v, %v; want completed", entry, err)
+	}
+}
+
+func TestSubagentProducerCompletionRetriesSideFinalWithoutTaskObservation(t *testing.T) {
+	baseSessions := memory.NewStore(memory.Config{})
+	sessions := &sagaSessionService{Service: baseSessions, failCanonicalAt: 2}
+	store := newSagaTaskStore()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, active := newSubagentCompletionSagaRuntime(t, store, sessions, runner)
+	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "completion-side-final", Agent: "helper", Prompt: "inspect", Role: session.ParticipantRoleSidecar,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	published := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID,
+			State:  delegation.StateCompleted,
+			Result: "side final after retry",
+		})
+		close(published)
+	}()
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("producer completion did not retry the side final")
+	}
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var final string
+	for _, event := range loaded.Events {
+		if event != nil && event.Type == session.EventTypeAssistant &&
+			event.Scope != nil && event.Scope.Participant.DelegationID == started.Ref.TaskID {
+			final = strings.TrimSpace(event.Text)
+		}
+	}
+	if final != "side final after retry" {
+		t.Fatalf("side final = %q, want retried canonical assistant event", final)
+	}
+}
+
+func TestSubagentProducerCompletionDoesNotWaitForCompletionNotice(t *testing.T) {
+	baseSessions := memory.NewStore(memory.Config{})
+	sessions := &completionNoticeFailSessionService{sagaSessionService: &sagaSessionService{Service: baseSessions}}
+	sessions.fail.Store(true)
+	store := newSagaTaskStore()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, active := newSubagentCompletionSagaRuntime(t, store, sessions, runner)
+	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "completion-notice-failure", Agent: "helper", Prompt: "inspect", Role: session.ParticipantRoleDelegated,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	published := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: started.Ref.TaskID, State: delegation.StateCompleted, Result: "done without notice",
+		})
+		close(published)
+	}()
+	select {
+	case <-published:
+	case <-time.After(500 * time.Millisecond):
+		sessions.fail.Store(false)
+		select {
+		case <-published:
+		case <-time.After(time.Second):
+		}
+		t.Fatal("producer completion waited for non-authoritative completion notice")
+	}
+	entry, err := store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil || entry.Running || entry.State != taskapi.StateCompleted {
+		t.Fatalf("durable completion = %#v, %v; want completed despite notice failure", entry, err)
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for sessions.calls.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if sessions.calls.Load() == 0 {
+		t.Fatal("completion notice path was not exercised asynchronously")
+	}
+}
+
+func TestSubagentSpawnRetriesParticipantAttachAfterConcurrentAgentMessage(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	sessions := &revisionBumpBeforeParticipantSessionService{Service: base}
+	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "spawn-revision-retry",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newSagaTaskStore()
+	runner := &sagaRunner{}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "spawn-after-agent-message", Agent: "helper", Prompt: "inspect",
+		Role: session.ParticipantRoleDelegated,
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	if got := sessions.calls.Load(); got != 2 {
+		t.Fatalf("PutParticipantWithEvent() calls = %d, want one conflicted attempt and one retry", got)
+	}
+	if runner.cancelCalls != 0 {
+		t.Fatalf("runner Cancel() calls = %d, want live child preserved", runner.cancelCalls)
+	}
+	entry, err := store.Get(context.Background(), started.Ref.TaskID)
+	if err != nil || spawnPhaseOf(entry) != spawnPhaseCommitted {
+		t.Fatalf("durable Spawn entry = %#v, %v; want committed", entry, err)
+	}
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Session.Participants) != 1 || loaded.Session.Participants[0].DelegationID != started.Ref.TaskID {
+		t.Fatalf("participants = %#v, want retried Spawn attachment", loaded.Session.Participants)
+	}
+	events, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawMessage bool
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		if event.MessageID == "subagent-completion:concurrent:1" {
+			sawMessage = true
+		}
+	}
+	if !sawMessage {
+		t.Fatalf("events lost concurrent Agent message: %#v", events)
+	}
+}
+
+func TestSubagentSpawnCompensatesAfterPersistentParticipantRevisionConflicts(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	sessions := &blockingRevisionConflictSessionService{
+		Service: base, attempted: make(chan struct{}), release: make(chan struct{}),
+	}
+	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "spawn-persistent-revision-conflict",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newSagaTaskStore()
+	runner := &completionPublishingSagaRunner{}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const spawnID = "persistent-participant-conflict"
+	taskID, err := subagentSpawnTaskID(active.SessionRef, spawnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spawnErr := make(chan error, 1)
+	go func() {
+		_, startErr := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+			SpawnID: spawnID, Agent: "helper", Prompt: "inspect", Role: session.ParticipantRoleDelegated,
+		})
+		spawnErr <- startErr
+	}()
+	select {
+	case <-sessions.attempted:
+	case <-time.After(time.Second):
+		t.Fatal("participant attachment did not start")
+	}
+
+	published := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: taskID, State: delegation.StateCompleted, Result: "completed during failed attachment",
+		})
+		close(published)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		runtime.tasks.mu.Lock()
+		_, queued := runtime.tasks.completions[taskID]
+		runtime.tasks.mu.Unlock()
+		if queued {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("producer completion was not queued while Spawn attachment was pending")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(sessions.release)
+
+	select {
+	case startErr := <-spawnErr:
+		if !errors.Is(startErr, session.ErrRevisionConflict) || !strings.Contains(startErr.Error(), "was compensated") {
+			t.Fatalf("StartSubagent() error = %v, want compensated revision conflict", startErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("StartSubagent() did not finish after persistent revision conflicts")
+	}
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("queued producer completion was not released after compensation")
+	}
+	if got := sessions.calls.Load(); got != subagentParticipantAttachAttempts {
+		t.Fatalf("PutParticipantWithEvent() calls = %d, want %d bounded attempts", got, subagentParticipantAttachAttempts)
+	}
+	if got := runner.cancelCalls.Load(); got != 1 {
+		t.Fatalf("runner Cancel() calls = %d, want one compensation", got)
+	}
+	entry, err := store.Get(context.Background(), taskID)
+	if err != nil || spawnPhaseOf(entry) != spawnPhaseCompensated || entry.Running {
+		t.Fatalf("durable Spawn entry = %#v, %v; want terminal compensated", entry, err)
+	}
+
+	latePublished := make(chan struct{})
+	go func() {
+		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+			TaskID: taskID, State: delegation.StateCompleted, Result: "late completion after compensation",
+		})
+		close(latePublished)
+	}()
+	select {
+	case <-latePublished:
+	case <-time.After(time.Second):
+		t.Fatal("late producer completion was not rejected after compensation")
+	}
+}
+
+func newSubagentCompletionSagaRuntime(
+	t *testing.T,
+	store taskapi.Store,
+	sessions session.Service,
+	runner subagent.Runner,
+) (*Runtime, session.Session) {
+	t.Helper()
+	if sessions == nil {
+		sessions = memory.NewStore(memory.Config{})
+	}
+	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "completion-saga",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runtime, active
+}
+
+func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
+	t.Parallel()
+
+	// Durable put sequence for a successful sidecar spawn:
+	// 1 intent, 2 external claim, 3 post_spawn, 4 final_event_persisted (completed), 5 committed.
+	// Failures after remote spawn but before post_spawn commit compensate.
+	// Canonical dialogue failures leave post_spawn and roll-forward without respawn.
+	tests := []struct {
+		name            string
+		failPut         int
+		failParticipant bool
+		failCanonical   bool
+		failCanonicalAt int
+		failStatus      string
+		cancelErr       bool
+		wantSpawn       int
+		wantCancel      int
+		wantStatus      string
+		wantParticipant bool
+		rollForward     bool
+	}{
+		{name: "before spawn intent", failPut: 1, wantSpawn: 0, wantCancel: 0},
+		{name: "after spawn before task commit", failPut: 3, wantSpawn: 1, wantCancel: 1, wantStatus: spawnStatusCompensated},
+		{name: "after task before participant", failParticipant: true, wantSpawn: 1, wantCancel: 1, wantStatus: spawnStatusCompensated},
+		{name: "canonical user append failure", failCanonical: true, wantSpawn: 1, wantCancel: 0, wantStatus: spawnStatusSpawned, wantParticipant: true, rollForward: true},
+		{name: "after canonical user before final", failCanonicalAt: 2, wantSpawn: 1, wantCancel: 0, wantStatus: spawnStatusSpawned, wantParticipant: true, rollForward: true},
+		{name: "after dialogue before committed mark", failStatus: spawnStatusCommitted, wantSpawn: 1, wantCancel: 0, wantStatus: spawnStatusSpawned, wantParticipant: true, rollForward: true},
+		{name: "cancellation cannot prove termination", failParticipant: true, cancelErr: true, wantSpawn: 1, wantCancel: 1, wantStatus: spawnStatusUnknownOutcome},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			base := memory.NewStore(memory.Config{})
+			active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "saga"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sessions := &sagaSessionService{Service: base, failParticipant: test.failParticipant, failCanonical: test.failCanonical, failCanonicalAt: test.failCanonicalAt}
+			store := newSagaTaskStore()
+			store.failOnPut = test.failPut
+			store.failStatus = test.failStatus
+			runner := &sagaRunner{}
+			if test.cancelErr {
+				runner.cancelErr = errors.New("forced cancellation failure")
+			}
+			runtime, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+				SpawnID: "spawn-fault", Agent: "helper", Prompt: "review", Source: "slash_agent", Role: session.ParticipantRoleSidecar,
+			})
+			if err == nil {
+				t.Fatal("StartSubagent() error = nil, want injected saga failure")
+			}
+			if runner.spawnCalls != test.wantSpawn || runner.cancelCalls != test.wantCancel {
+				t.Fatalf("spawn/cancel calls = %d/%d, want %d/%d", runner.spawnCalls, runner.cancelCalls, test.wantSpawn, test.wantCancel)
+			}
+			loaded, loadErr := sessions.Session(context.Background(), active.SessionRef)
+			if loadErr != nil {
+				t.Fatal(loadErr)
+			}
+			if test.wantCancel > 0 && len(loaded.Participants) != 0 {
+				t.Fatalf("participants after compensation = %#v, want none", loaded.Participants)
+			}
+			if test.wantParticipant && len(loaded.Participants) != 1 {
+				t.Fatalf("participants = %#v, want durable attachment for roll-forward", loaded.Participants)
+			}
+			if test.wantStatus != "" {
+				taskID, _ := subagentSpawnTaskID(active.SessionRef, "spawn-fault")
+				entry, getErr := store.Get(context.Background(), taskID)
+				if getErr != nil || taskStringValue(entry.Metadata["spawn_status"]) != test.wantStatus {
+					t.Fatalf("durable spawn status = entry %#v error %v, want %q", entry, getErr, test.wantStatus)
+				}
+				if test.wantStatus == spawnStatusUnknownOutcome {
+					if got := taskStringValue(entry.Result["error"]); got != subagentSpawnCompensationUnknownDiagnostic {
+						t.Fatalf("unknown compensation error = %q, want fixed diagnostic", got)
+					}
+					for _, key := range []string{"result", "final_message", "output_preview"} {
+						if _, exists := entry.Result[key]; exists {
+							t.Fatalf("unknown compensation retained %q: %#v", key, entry.Result)
+						}
+					}
+					if persisted := fmt.Sprint(entry.Result, entry.Metadata); strings.Contains(persisted, "forced cancellation failure") {
+						t.Fatalf("unknown compensation persisted raw runner error: %s", persisted)
+					}
+					payload := taskToolPayload(snapshotFromTaskEntry(entry))
+					if got := taskStringValue(payload["error"]); got != subagentSpawnCompensationUnknownDiagnostic {
+						t.Fatalf("unknown compensation Task payload error = %q", got)
+					}
+					if _, exists := payload["final_message"]; exists {
+						t.Fatalf("unknown compensation manufactured final message: %#v", payload)
+					}
+				}
+			}
+			if test.rollForward {
+				sessions.failCanonical = false
+				sessions.failCanonicalAt = 0
+				restarted, restartErr := New(testConfigWithACPForwarder(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+				if restartErr != nil {
+					t.Fatal(restartErr)
+				}
+				_, retryErr := restarted.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+					SpawnID: "spawn-fault", Agent: "helper", Prompt: "review", Source: "slash_agent", Role: session.ParticipantRoleSidecar,
+				})
+				if retryErr != nil {
+					t.Fatalf("roll-forward retry error = %v", retryErr)
+				}
+				if runner.spawnCalls != 1 || runner.cancelCalls != 0 {
+					t.Fatalf("roll-forward spawn/cancel calls = %d/%d, want 1/0", runner.spawnCalls, runner.cancelCalls)
+				}
+				taskID, _ := subagentSpawnTaskID(active.SessionRef, "spawn-fault")
+				entry, getErr := store.Get(context.Background(), taskID)
+				if getErr != nil || taskStringValue(entry.Metadata["spawn_status"]) != spawnStatusCommitted {
+					t.Fatalf("rolled-forward entry = %#v, %v", entry, getErr)
+				}
+			}
+			assertSubagentSagaModelRoundTrip(t, sessions, active.SessionRef)
+		})
+	}
+}
+
+func TestSubagentSpawnRejectsAgentIDCollisionWithoutReplacingOriginalParticipant(t *testing.T) {
+	t.Parallel()
+	base := memory.NewStore(memory.Config{})
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "participant-collision",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newSagaTaskStore()
+	runner := &sagaRunner{}
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "collision-one", Agent: "helper", Prompt: "first", Role: session.ParticipantRoleSidecar,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "collision-two", Agent: "helper", Prompt: "second", Role: session.ParticipantRoleSidecar,
+	})
+	var conflict *session.ParticipantBindingConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("second spawn error = %v, want participant delegation conflict", err)
+	}
+	loaded, err := base.Session(context.Background(), active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, ok := participantBinding(loaded, "child-agent-saga")
+	if !ok || binding.DelegationID != first.Ref.TaskID {
+		t.Fatalf("participant after collision = %#v, want original delegation %q", binding, first.Ref.TaskID)
+	}
+	collidingTaskID, err := subagentSpawnTaskID(active.SessionRef, "collision-two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	colliding, err := store.Get(context.Background(), collidingTaskID)
+	if err != nil || taskStringValue(colliding.Metadata["spawn_status"]) != string(spawnPhaseCompensated) {
+		t.Fatalf("colliding task = %#v, %v; want terminal compensated", colliding, err)
+	}
+	_, retryErr := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "collision-two", Agent: "helper", Prompt: "second", Role: session.ParticipantRoleSidecar,
+	})
+	if retryErr == nil || !strings.Contains(retryErr.Error(), "was compensated") {
+		t.Fatalf("collision retry error = %v, want stable compensated terminal", retryErr)
+	}
+}
+
+func TestSubagentSpawnSagaRetryAndRestartNeverBlindlyRespawn(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "saga"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newSagaTaskStore()
+	runner := &sagaRunner{}
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := taskapi.SubagentStartRequest{SpawnID: "stable-spawn", Agent: "helper", Prompt: "review", Source: "slash_agent", Role: session.ParticipantRoleSidecar}
+	first, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req)
+	if err != nil {
+		t.Fatalf("first StartSubagent() error = %v", err)
+	}
+	second, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req)
+	if err != nil {
+		t.Fatalf("idempotent StartSubagent() error = %v", err)
+	}
+	if runner.spawnCalls != 1 || first.Ref.TaskID != second.Ref.TaskID {
+		t.Fatalf("idempotent spawn = calls %d task IDs %q/%q", runner.spawnCalls, first.Ref.TaskID, second.Ref.TaskID)
+	}
+
+	unknownStore := newSagaTaskStore()
+	taskID, _ := subagentSpawnTaskID(active.SessionRef, "restart-spawn")
+	restartReq := taskapi.SubagentStartRequest{SpawnID: "restart-spawn", Agent: "helper", Prompt: "review"}
+	restartDigest, err := subagentSpawnRequestDigest(restartReq, runtime.defaultPolicyMode, session.ParticipantRoleDelegated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = unknownStore.Put(context.Background(), taskapi.PutRequest{Entry: &taskapi.Entry{
+		TaskID: taskID, Kind: taskapi.KindSubagent, Session: active.SessionRef, State: taskapi.StatePrepared,
+		Spec: map[string]any{
+			"spawn_identity": "restart-spawn", "spawn_request_digest": restartDigest,
+			"agent": "helper", "prompt": "review",
+		},
+		Metadata: map[string]any{"spawn_status": spawnStatusSpawning, "spawn_request_digest": restartDigest},
+	}, ExpectedRevision: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedRunner := &sagaRunner{}
+	restarted, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: restartedRunner, TaskStore: unknownStore}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = restarted.tasks.StartSubagent(context.Background(), active, active.SessionRef, restartedRunner, restartReq)
+	if err == nil || restartedRunner.spawnCalls != 0 {
+		t.Fatalf("restart StartSubagent() = error %v spawn calls %d, want unknown outcome without respawn", err, restartedRunner.spawnCalls)
+	}
+	unknownEntry, getErr := unknownStore.Get(context.Background(), taskID)
+	if getErr != nil || taskStringValue(unknownEntry.Metadata["spawn_status"]) != spawnStatusUnknownOutcome || unknownEntry.State != taskapi.StateUnknownOutcome {
+		t.Fatalf("spawning recovery entry = %#v, %v; want durable unknown outcome", unknownEntry, getErr)
+	}
+	if got := taskStringValue(unknownEntry.Result["error"]); got != subagentSpawnUnknownDiagnostic {
+		t.Fatalf("spawning recovery error = %q, want fixed diagnostic", got)
+	}
+	if _, exists := taskToolPayload(snapshotFromTaskEntry(unknownEntry))["final_message"]; exists {
+		t.Fatalf("spawning recovery manufactured final message: %#v", unknownEntry.Result)
+	}
+
+	spawnedStore := newSagaTaskStore()
+	spawnedTaskID, _ := subagentSpawnTaskID(active.SessionRef, "spawned-restart")
+	spawnedReq := taskapi.SubagentStartRequest{
+		SpawnID: "spawned-restart", Agent: "helper", Prompt: "review", Role: session.ParticipantRoleSidecar,
+	}
+	spawnedDigest, err := subagentSpawnRequestDigest(spawnedReq, runtime.defaultPolicyMode, session.ParticipantRoleSidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = spawnedStore.Put(context.Background(), taskapi.PutRequest{Entry: &taskapi.Entry{
+		TaskID: spawnedTaskID, Kind: taskapi.KindSubagent, Session: active.SessionRef, State: taskapi.StateRunning, Running: true,
+		Spec: map[string]any{
+			"spawn_identity": "spawned-restart", "spawn_request_digest": spawnedDigest,
+			"agent": "helper", "prompt": "review", "session_id": "child-restart",
+			"agent_id": "child-agent-restart", "handle": "helper", "turn_seq": int64(1),
+		},
+		Metadata: map[string]any{
+			"spawn_status": spawnStatusSpawned, "spawn_identity": "spawned-restart", "spawn_request_digest": spawnedDigest,
+		},
+	}, ExpectedRevision: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spawnedRunner := &sagaRunner{}
+	spawnedSessions := &sagaSessionService{Service: base}
+	spawnedRuntime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: spawnedSessions, AgentFactory: chat.Factory{}, Subagents: spawnedRunner, TaskStore: spawnedStore,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = spawnedRuntime.tasks.StartSubagent(context.Background(), active, active.SessionRef, spawnedRunner, spawnedReq)
+	if err != nil || spawnedRunner.spawnCalls != 0 || spawnedRunner.cancelCalls != 0 {
+		t.Fatalf("spawned restart = error %v spawn/cancel %d/%d, want roll-forward without respawn", err, spawnedRunner.spawnCalls, spawnedRunner.cancelCalls)
+	}
+	spawnedEntry, err := spawnedStore.Get(context.Background(), spawnedTaskID)
+	if err != nil || taskStringValue(spawnedEntry.Metadata["spawn_status"]) != spawnStatusCommitted {
+		t.Fatalf("spawned restart durable entry = %#v, %v; want committed", spawnedEntry, err)
+	}
+}
+
+func TestSubagentSpawnCompensationResumesDetachBeforeTerminalState(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "detach-recovery"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := &sagaSessionService{Service: base, failDetach: true}
+	store := newSagaTaskStore()
+	runner := &sagaRunner{}
+	req := taskapi.SubagentStartRequest{SpawnID: "detach-recovery", Agent: "helper", Prompt: "review", Role: session.ParticipantRoleSidecar}
+	taskID, err := subagentSpawnTaskID(active.SessionRef, req.SpawnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Digest must match StartSubagent's mode defaulting (empty Mode uses runtime defaultPolicyMode).
+	probe, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mode := strings.TrimSpace(probe.defaultPolicyMode)
+	digest, err := subagentSpawnRequestDigest(req, mode, session.ParticipantRoleSidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Seed mid-compensation after a durable post-spawn attach, before detach.
+	// Pure intermediate marker failures no longer exist; resume from compensating.
+	lifecycle := sessions.Service.(session.ParticipantLifecycleService)
+	if _, _, err := lifecycle.PutParticipantWithEvent(context.Background(), session.PutParticipantWithEventRequest{
+		SessionRef: active.SessionRef,
+		Binding: session.ParticipantBinding{
+			ID: "child-agent-saga", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleSidecar,
+			AgentName: "helper", Label: "@helper", SessionID: "child-saga", DelegationID: taskID, AttachedAt: time.Now(),
+		},
+		Event: &session.Event{
+			Type: session.EventTypeParticipant, Visibility: session.VisibilityMirror, Time: time.Now(),
+			Protocol: ptrEventProtocol(session.NewParticipantProtocol(session.ProtocolParticipant{Action: "attached"})),
+			Scope:    &session.EventScope{Participant: session.ParticipantRef{ID: "child-agent-saga", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleSidecar, DelegationID: taskID}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := store.Put(context.Background(), taskapi.PutRequest{Entry: &taskapi.Entry{
+		TaskID: taskID, Kind: taskapi.KindSubagent, Session: active.SessionRef, Title: "SPAWN helper",
+		State: taskapi.StateRunning, CreatedAt: now, UpdatedAt: now, SupportsCancel: true, Running: true,
+		Spec: map[string]any{
+			"spawn_identity": req.SpawnID, "spawn_request_digest": digest, "agent": "helper", "prompt": "review",
+			"participant_role": string(session.ParticipantRoleSidecar), "handle": "helper",
+			"session_id": "child-saga", "agent_id": "child-agent-saga", "terminal_id": subagentTerminalID(taskID),
+			"spawn_phase": string(spawnPhaseCompensating),
+		},
+		Metadata: map[string]any{
+			"spawn_status": string(spawnPhaseCompensating), "spawn_identity": req.SpawnID,
+			"spawn_request_digest": digest, "spawn_reason": "forced compensation", "participant_role": string(session.ParticipantRoleSidecar),
+		},
+		Result: map[string]any{"state": string(taskapi.StateRunning), "error": "forced compensation"},
+	}, ExpectedRevision: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err == nil {
+		t.Fatal("StartSubagent() error = nil, want detach failure during compensation resume")
+	}
+	if runner.cancelCalls != 1 {
+		t.Fatalf("cancel calls after first resume = %d, want 1", runner.cancelCalls)
+	}
+	loaded, err := sessions.Session(context.Background(), active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Participants) != 1 {
+		t.Fatalf("participants after failed detach = %#v, want recoverable attachment", loaded.Participants)
+	}
+	entry, err := store.Get(context.Background(), taskID)
+	if err != nil || taskStringValue(entry.Metadata["spawn_status"]) != spawnStatusChildCancelled {
+		t.Fatalf("after failed detach entry = %#v, %v, want child_cancelled", entry, err)
+	}
+
+	sessions.failDetach = false
+	restarted, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err == nil {
+		t.Fatal("compensation retry error = nil, want compensated terminal outcome")
+	}
+	loaded, err = sessions.Session(context.Background(), active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Participants) != 0 {
+		t.Fatalf("participants after compensation retry = %#v, want detached", loaded.Participants)
+	}
+	entry, err = store.Get(context.Background(), taskID)
+	if err != nil || taskStringValue(entry.Metadata["spawn_status"]) != spawnStatusCompensated {
+		t.Fatalf("compensation entry = %#v, %v, want terminal compensated", entry, err)
+	}
+	if runner.spawnCalls != 0 {
+		t.Fatalf("spawn calls = %d, want 0 (compensation resume never respawns)", runner.spawnCalls)
+	}
+}
+
+func TestSubagentSpawnCancelSuccessCannotRollForwardAfterTerminalWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "cancel-terminal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := &sagaSessionService{Service: base, failParticipant: true}
+	store := newSagaTaskStore()
+	store.failStatus = spawnStatusCompensated
+	runner := &sagaRunner{}
+	req := taskapi.SubagentStartRequest{SpawnID: "cancel-terminal", Agent: "helper", Prompt: "review", Role: session.ParticipantRoleSidecar}
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err == nil {
+		t.Fatal("StartSubagent() error = nil, want participant and terminal write failures")
+	}
+	sessions.failParticipant = false
+	restarted, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err == nil {
+		t.Fatal("retry error = nil, want compensated outcome rather than roll-forward")
+	}
+	taskID, _ := subagentSpawnTaskID(active.SessionRef, req.SpawnID)
+	entry, err := store.Get(context.Background(), taskID)
+	if err != nil || taskStringValue(entry.Metadata["spawn_status"]) != spawnStatusCompensated {
+		t.Fatalf("retry entry = %#v, %v, want compensated", entry, err)
+	}
+	loaded, err := sessions.Session(context.Background(), active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Participants) != 0 || runner.spawnCalls != 1 || runner.cancelCalls != 1 {
+		t.Fatalf("participants=%#v spawn/cancel=%d/%d, want no roll-forward", loaded.Participants, runner.spawnCalls, runner.cancelCalls)
+	}
+}
+
+func TestSubagentSpawnIdentityBindsCompleteSemanticRequest(t *testing.T) {
+	t.Parallel()
+
+	changes := []struct {
+		name   string
+		change func(*taskapi.SubagentStartRequest)
+	}{
+		{name: "context", change: func(req *taskapi.SubagentStartRequest) {
+			req.Context = agent.ContextTransfer{Summary: "different context"}
+		}},
+		{name: "mode", change: func(req *taskapi.SubagentStartRequest) { req.Mode = "different-mode" }},
+		{name: "approval mode", change: func(req *taskapi.SubagentStartRequest) { req.ApprovalMode = "different-approval" }},
+		{name: "parent call", change: func(req *taskapi.SubagentStartRequest) { req.ParentCall = "different-call" }},
+		{name: "role", change: func(req *taskapi.SubagentStartRequest) { req.Role = session.ParticipantRoleDelegated }},
+	}
+	for _, change := range changes {
+		change := change
+		t.Run(change.name, func(t *testing.T) {
+			base := memory.NewStore(memory.Config{})
+			active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: change.name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := newSagaTaskStore()
+			runner := &sagaRunner{}
+			runtime, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := taskapi.SubagentStartRequest{
+				SpawnID: "semantic-request", Agent: "helper", Prompt: "review", Context: agent.ContextTransfer{Summary: "context"},
+				Mode: "allow", ApprovalMode: "ask", ParentCall: "call-1", Role: session.ParticipantRoleSidecar,
+			}
+			if _, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err != nil {
+				t.Fatal(err)
+			}
+			change.change(&req)
+			if _, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err == nil || !strings.Contains(err.Error(), "conflicts with durable intent") {
+				t.Fatalf("changed request error = %v, want durable identity conflict", err)
+			}
+			if runner.spawnCalls != 1 {
+				t.Fatalf("spawn calls = %d, want 1", runner.spawnCalls)
+			}
+		})
+	}
+}
+
+func TestSubagentSpawnRejectsEmptyParticipantAnchorAndCompensates(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "invalid-anchor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newSagaTaskStore()
+	runner := &invalidAnchorSagaRunner{}
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "invalid-anchor", Agent: "helper", Prompt: "review", Role: session.ParticipantRoleSidecar,
+	})
+	if err == nil || !strings.Contains(err.Error(), "agent_id") {
+		t.Fatalf("StartSubagent() error = %v, want invalid agent_id", err)
+	}
+	loaded, err := base.Session(context.Background(), active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Participants) != 0 || runner.cancelCalls != 1 {
+		t.Fatalf("participants=%#v cancel calls=%d, want compensated invalid child", loaded.Participants, runner.cancelCalls)
+	}
+	taskID, _ := subagentSpawnTaskID(active.SessionRef, "invalid-anchor")
+	entry, err := store.Get(context.Background(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := taskStringValue(entry.Metadata["spawn_status"])
+	if status == spawnStatusSpawned || status == spawnStatusParticipantAttached || status == spawnStatusCommitted {
+		t.Fatalf("durable spawn_status = %q after invalid anchor, want compensated path without roll-forward-ready spawned", status)
+	}
+}
+
+type invalidAnchorSagaRunner struct {
+	cancelCalls int
+}
+
+func (*invalidAnchorSagaRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
+	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-invalid", Agent: req.Agent}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted}, nil
+}
+func (*invalidAnchorSagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
+	return delegation.Result{}, nil
+}
+func (r *invalidAnchorSagaRunner) Cancel(context.Context, delegation.Anchor) error {
+	r.cancelCalls++
+	return nil
+}
+
+func TestSubagentSpawnRequiresCASBeforeExternalEffect(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "upsert-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &sagaRunner{}
+	store := &upsertOnlySagaStore{base: newSagaTaskStore()}
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{SpawnID: "upsert-only", Agent: "helper", Prompt: "review"})
+	if err == nil || !strings.Contains(err.Error(), "CASStore") || runner.spawnCalls != 0 {
+		t.Fatalf("StartSubagent() = %v, spawn calls %d; want fail closed before spawn", err, runner.spawnCalls)
+	}
+}
+
+func TestSubagentCancelFailsClosedWhenDurableReloadFails(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "reload-outage"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &sagaRunner{}
+	storeErr := errors.New("forced task store reload outage")
+	store := &getFailingSagaTaskStore{sagaTaskStore: newSagaTaskStore(), err: storeErr}
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := "cached-subagent"
+	runtime.tasks.subagents[taskID] = &subagentTask{
+		ref: taskapi.Ref{TaskID: taskID}, sessionRef: active.SessionRef,
+		anchor: delegation.Anchor{TaskID: taskID, SessionID: "child"}, runner: runner,
+		state: taskapi.StateRunning, running: true,
+	}
+	_, err = runtime.tasks.Cancel(context.Background(), active.SessionRef, taskapi.ControlRequest{
+		TaskID: taskID, Principal: session.ActorKindUser,
+	})
+	if !errors.Is(err, storeErr) {
+		t.Fatalf("Cancel() error = %v, want durable reload outage", err)
+	}
+	if runner.cancelCalls != 0 {
+		t.Fatalf("external Cancel calls = %d, want 0 before durable reload", runner.cancelCalls)
+	}
+}
+
+func TestConcurrentSubagentSpawnCASCallsExternalSpawnOnce(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "concurrent-spawn"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newSagaTaskStore()
+	runner := &countingSagaRunner{}
+	newRuntime := func() *Runtime {
+		runtime, runtimeErr := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+		if runtimeErr != nil {
+			t.Fatal(runtimeErr)
+		}
+		return runtime
+	}
+	runtimes := []*Runtime{newRuntime(), newRuntime()}
+	start := make(chan struct{})
+	errs := make(chan error, len(runtimes))
+	var wg sync.WaitGroup
+	for _, runtime := range runtimes {
+		wg.Add(1)
+		go func(runtime *Runtime) {
+			defer wg.Done()
+			<-start
+			_, startErr := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+				SpawnID: "shared-spawn", Agent: "helper", Prompt: "review", Role: session.ParticipantRoleSidecar,
+			})
+			errs <- startErr
+		}(runtime)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		var conflict *taskapi.RevisionConflictError
+		if err != nil && !errors.As(err, &conflict) && !strings.Contains(err.Error(), "claimed concurrently") && !strings.Contains(err.Error(), "refusing blind respawn") {
+			t.Fatalf("concurrent StartSubagent() error = %v", err)
+		}
+	}
+	if calls := runner.spawnCalls.Load(); calls != 1 {
+		t.Fatalf("external Spawn() calls = %d, want 1", calls)
+	}
+}
+
+func TestSubagentSpawnCommittedErrorsReloadAndRollForward(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewStore(memory.Config{})
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "committed-errors"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := &sagaSessionService{Service: base, commitParticipant: true, commitCanonical: true}
+	store := newSagaTaskStore()
+	// Put sequence: 1 intent, 2 claim, 3 post_spawn, 4 final_event_persisted, 5 committed.
+	// CommittedError recovery is implemented on spawn-phase CAS puts; exercise put 3.
+	store.commitOnPut = 3
+	runner := &sagaRunner{}
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "committed-errors", Agent: "helper", Prompt: "review", Role: session.ParticipantRoleSidecar,
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	entry, err := store.Get(context.Background(), snapshot.Ref.TaskID)
+	if err != nil || taskStringValue(entry.Metadata["spawn_status"]) != spawnStatusCommitted {
+		t.Fatalf("entry = %#v, %v, want committed", entry, err)
+	}
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Session.Participants) != 1 || runner.spawnCalls != 1 || runner.cancelCalls != 0 {
+		t.Fatalf("participants=%#v spawn/cancel=%d/%d", loaded.Session.Participants, runner.spawnCalls, runner.cancelCalls)
+	}
+	assertSubagentSagaModelRoundTrip(t, sessions, active.SessionRef)
+}
+
+func TestSubagentSpawnSagaFileRoundTripWholeObjects(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	sessions := store
+	tasks := sessionfile.NewTaskStore(store)
+	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "file-roundtrip", PreferredSessionID: "subagent-saga-roundtrip",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &placementSagaRunner{}
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: tasks}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	durableTarget := delegation.Target{
+		Selector: "orbit",
+		Placement: mustSealPlacement(t, delegation.Placement{
+			Kind: delegation.PlacementModel, Model: "provider/model", ReasoningEffort: "high",
+			ConfigFingerprint: "config-v1",
+		}),
+	}
+	snapshot, err := runtime.tasks.StartSubagentTarget(context.Background(), active, active.SessionRef, runner, durableTarget, taskapi.SubagentStartRequest{
+		SpawnID: "file-roundtrip", Prompt: "review", Source: "test", Role: session.ParticipantRoleSidecar,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTask, err := tasks.Get(context.Background(), snapshot.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSession, err := sessions.Session(context.Background(), active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wantSession.Participants) != 1 || !reflect.DeepEqual(wantSession.Participants[0].Placement, durableTarget.Placement) {
+		t.Fatalf("durable participant placement = %#v, want %#v", wantSession.Participants, durableTarget.Placement)
+	}
+	wantEvents, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reopenedStore := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopenedSessions := reopenedStore
+	reopenedTasks := sessionfile.NewTaskStore(reopenedStore)
+	gotTask, err := reopenedTasks.Get(context.Background(), snapshot.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotSession, err := reopenedSessions.Session(context.Background(), active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotEvents, err := reopenedSessions.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotTask, wantTask) {
+		t.Fatalf("reopened task = %#v, want %#v", gotTask, wantTask)
+	}
+	if got := taskSpecTarget(gotTask.Spec, "target"); !reflect.DeepEqual(got, durableTarget) {
+		t.Fatalf("reopened durable target = %#v, want %#v", got, durableTarget)
+	}
+	if !reflect.DeepEqual(gotSession, wantSession) {
+		t.Fatalf("reopened session binding = %#v, want %#v", gotSession, wantSession)
+	}
+	if !reflect.DeepEqual(gotEvents, wantEvents) {
+		t.Fatalf("reopened canonical dialogue = %#v, want %#v", gotEvents, wantEvents)
+	}
+	assertSubagentSagaModelRoundTrip(t, reopenedSessions, active.SessionRef)
+}
+
+type upsertOnlySagaStore struct{ base *sagaTaskStore }
+
+func (s *upsertOnlySagaStore) Upsert(ctx context.Context, entry *taskapi.Entry) error {
+	return s.base.Upsert(ctx, entry)
+}
+func (s *upsertOnlySagaStore) Get(ctx context.Context, taskID string) (*taskapi.Entry, error) {
+	return s.base.Get(ctx, taskID)
+}
+func (s *upsertOnlySagaStore) ListSession(ctx context.Context, ref session.SessionRef) ([]*taskapi.Entry, error) {
+	return s.base.ListSession(ctx, ref)
+}
+func (s *upsertOnlySagaStore) GetSessionTaskByHandle(ctx context.Context, ref session.SessionRef, handle string) (*taskapi.Entry, error) {
+	return s.base.GetSessionTaskByHandle(ctx, ref, handle)
+}
+
+type countingSagaRunner struct{ spawnCalls atomic.Int32 }
+
+func (r *countingSagaRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
+	r.spawnCalls.Add(1)
+	time.Sleep(10 * time.Millisecond)
+	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-concurrent", Agent: req.Agent, AgentID: "child-agent-concurrent"}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted, Result: "done"}, nil
+}
+func (*countingSagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
+	return delegation.Result{}, nil
+}
+func (*countingSagaRunner) Cancel(context.Context, delegation.Anchor) error { return nil }
+
+func assertSubagentSagaModelRoundTrip(t *testing.T, sessions session.Service, ref session.SessionRef) {
+	t.Helper()
+	firstProbe := &recoveryCaptureModel{}
+	first, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := first.Run(context.Background(), agent.RunRequest{SessionRef: ref, Input: "round-trip probe one", AgentSpec: agent.AgentSpec{Name: "chat", Model: firstProbe}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := drainRunnerEvents(t, run.Handle); err != nil {
+		t.Fatal(err)
+	}
+	secondProbe := &recoveryCaptureModel{}
+	second, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = second.Run(context.Background(), agent.RunRequest{SessionRef: ref, Input: "round-trip probe two", AgentSpec: agent.AgentSpec{Name: "chat", Model: secondProbe}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := drainRunnerEvents(t, run.Handle); err != nil {
+		t.Fatal(err)
+	}
+	want := append(model.CloneMessages(firstProbe.messages), model.NewTextMessage(model.RoleAssistant, "done"), model.NewTextMessage(model.RoleUser, "round-trip probe two"))
+	if !reflect.DeepEqual(secondProbe.messages, want) {
+		t.Fatalf("rebuilt model context = %#v, want live-produced %#v", secondProbe.messages, want)
+	}
+}

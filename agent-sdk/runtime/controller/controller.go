@@ -1,0 +1,255 @@
+package controller
+
+import (
+	"context"
+	"iter"
+	"strings"
+	"time"
+
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+)
+
+// ErrNotActive reports that a persisted controller binding has no live
+// endpoint and Control must reattach it before retrying the turn.
+var ErrNotActive = errorcode.New(errorcode.FailedPrecondition, "agent-sdk/runtime/controller: controller is not active")
+
+// ApprovalOption is one controller-side approval choice surfaced by a remote
+// ACP controller.
+type ApprovalOption = agent.ApprovalOption
+
+// ApprovalToolCall describes the remote tool invocation asking for approval.
+type ApprovalToolCall = agent.EndpointApprovalToolCall
+
+// ApprovalRequest is the runtime-owned approval bridge payload used by remote
+// ACP controllers. It is system-controlled and never exposed to the model.
+type ApprovalRequest struct {
+	SessionRef session.SessionRef `json:"session_ref,omitempty"`
+	Session    session.Session    `json:"session,omitempty"`
+	Agent      string             `json:"agent,omitempty"`
+	Mode       string             `json:"mode,omitempty"`
+	ToolCall   ApprovalToolCall   `json:"tool_call,omitempty"`
+	Options    []ApprovalOption   `json:"options,omitempty"`
+}
+
+// ApprovalResponse is one bridged controller approval outcome.
+type ApprovalResponse = agent.ApprovalResponse
+
+// ApprovalRequester bridges a remote controller approval request into the
+// parent runtime's approval surface.
+type ApprovalRequester interface {
+	RequestControllerApproval(context.Context, ApprovalRequest) (ApprovalResponse, error)
+}
+
+// AttachRequest creates one ACP-backed participant attachment.
+type AttachRequest struct {
+	SessionRef session.SessionRef         `json:"session_ref,omitempty"`
+	Session    session.Session            `json:"session,omitempty"`
+	Binding    session.ParticipantBinding `json:"binding,omitempty"`
+	Agent      string                     `json:"agent,omitempty"`
+	Role       session.ParticipantRole    `json:"role,omitempty"`
+	Source     string                     `json:"source,omitempty"`
+	Label      string                     `json:"label,omitempty"`
+	// Placement is the already resolved execution choice applied before the
+	// first prompt and reused for reattachment.
+	Placement placement.Placement `json:"placement"`
+}
+
+// DetachRequest removes one ACP-backed participant attachment.
+type DetachRequest struct {
+	SessionRef           session.SessionRef `json:"session_ref,omitempty"`
+	Session              session.Session    `json:"session,omitempty"`
+	ParticipantID        string             `json:"participant_id,omitempty"`
+	DelegationID         string             `json:"delegation_id,omitempty"`
+	AttachmentGeneration string             `json:"attachment_generation,omitempty"`
+	Source               string             `json:"source,omitempty"`
+}
+
+// HandoffRequest activates one ACP controller for a session.
+type HandoffRequest struct {
+	SessionRef     session.SessionRef    `json:"session_ref,omitempty"`
+	Session        session.Session       `json:"session,omitempty"`
+	Agent          string                `json:"agent,omitempty"`
+	Source         string                `json:"source,omitempty"`
+	Reason         string                `json:"reason,omitempty"`
+	Context        agent.ContextTransfer `json:"context,omitempty"`
+	ContextSyncSeq uint64                `json:"context_sync_seq,omitempty"`
+}
+
+// ContextRoute is one Control-selected context synchronization payload for an
+// endpoint turn or activation.
+type ContextRoute struct {
+	Context agent.ContextTransfer `json:"context,omitempty"`
+	SyncSeq uint64                `json:"sync_seq,omitempty"`
+}
+
+// ControllerContextRequest asks Control to select the canonical context that
+// one controller endpoint should receive. Runtime executes the returned route
+// but does not decide context-routing policy.
+type ControllerContextRequest struct {
+	SessionRef    session.SessionRef        `json:"session_ref,omitempty"`
+	Session       session.Session           `json:"session,omitempty"`
+	Controller    session.ControllerBinding `json:"controller,omitempty"`
+	SinceSeq      uint64                    `json:"since_seq,omitempty"`
+	ExcludeTurnID string                    `json:"exclude_turn_id,omitempty"`
+}
+
+// ParticipantContextRequest asks Control to select canonical background
+// context for one attached participant prompt.
+type ParticipantContextRequest struct {
+	SessionRef session.SessionRef         `json:"session_ref,omitempty"`
+	Session    session.Session            `json:"session,omitempty"`
+	Binding    session.ParticipantBinding `json:"binding,omitempty"`
+}
+
+// ContextRouter owns endpoint context-routing policy. Implementations belong
+// to the host Control layer; Runtime only consumes their neutral routes.
+type ContextRouter interface {
+	ControllerContext(context.Context, ControllerContextRequest) (ContextRoute, error)
+	ParticipantContext(context.Context, ParticipantContextRequest) (ContextRoute, error)
+	Checkpoint(context.Context, session.SessionRef, string) (uint64, error)
+}
+
+// RecoveryRequest identifies one persisted controller binding whose endpoint
+// process must be reattached before Runtime retries a turn.
+type RecoveryRequest struct {
+	SessionRef    session.SessionRef `json:"session_ref,omitempty"`
+	Session       session.Session    `json:"session,omitempty"`
+	ExcludeTurnID string             `json:"exclude_turn_id,omitempty"`
+}
+
+// RecoveryCoordinator owns endpoint process reattachment and any resulting
+// durable binding refresh. Implementations belong to host Control.
+type RecoveryCoordinator interface {
+	ReattachController(context.Context, RecoveryRequest) (session.Session, error)
+}
+
+// TurnRequest runs one turn through the active ACP controller.
+type TurnRequest struct {
+	SessionRef        session.SessionRef    `json:"session_ref,omitempty"`
+	Session           session.Session       `json:"session,omitempty"`
+	TurnID            string                `json:"turn_id,omitempty"`
+	Input             string                `json:"input,omitempty"`
+	ContentParts      []model.ContentPart   `json:"content_parts,omitempty"`
+	Context           agent.ContextTransfer `json:"context,omitempty"`
+	ContextSyncSeq    uint64                `json:"context_sync_seq,omitempty"`
+	Stream            bool                  `json:"stream,omitempty"`
+	Mode              string                `json:"mode,omitempty"`
+	ApprovalRequester ApprovalRequester     `json:"-"`
+}
+
+// ParticipantPromptRequest sends one bounded prompt to an attached ACP
+// participant without changing the main controller.
+type ParticipantPromptRequest struct {
+	SessionRef        session.SessionRef    `json:"session_ref,omitempty"`
+	Session           session.Session       `json:"session,omitempty"`
+	TurnID            string                `json:"turn_id,omitempty"`
+	ParticipantID     string                `json:"participant_id,omitempty"`
+	Input             string                `json:"input,omitempty"`
+	DisplayInput      string                `json:"display_input,omitempty"`
+	DisplayTitle      string                `json:"display_title,omitempty"`
+	ContentParts      []model.ContentPart   `json:"content_parts,omitempty"`
+	Context           agent.ContextTransfer `json:"context,omitempty"`
+	Stream            bool                  `json:"stream,omitempty"`
+	Mode              string                `json:"mode,omitempty"`
+	ApprovalRequester ApprovalRequester     `json:"-"`
+}
+
+type CancelStatus = agent.CancelStatus
+
+const (
+	CancelStatusCancelled        = agent.CancelStatusCancelled
+	CancelStatusAlreadyCancelled = agent.CancelStatusAlreadyCancelled
+)
+
+type CancelResult = agent.CancelResult
+
+type TurnHandle interface {
+	Events() iter.Seq2[*session.Event, error]
+	Cancel() CancelResult
+	Close() error
+}
+
+// TurnResult is one normalized ACP-controller turn result.
+type TurnResult struct {
+	Handle    TurnHandle `json:"-"`
+	UpdatedAt time.Time  `json:"updated_at,omitempty"`
+}
+
+// Backend is the runtime-facing control-plane contract for ACP-backed main
+// controllers and sidecar participants.
+type Backend interface {
+	Activate(context.Context, HandoffRequest) (session.ControllerBinding, error)
+	Deactivate(context.Context, session.SessionRef) error
+	RunTurn(context.Context, TurnRequest) (TurnResult, error)
+	Attach(context.Context, AttachRequest) (session.ParticipantBinding, error)
+	PromptParticipant(context.Context, ParticipantPromptRequest) (TurnResult, error)
+	Detach(context.Context, DetachRequest) error
+}
+
+func NormalizeAttachRequest(in AttachRequest) AttachRequest {
+	out := in
+	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
+	out.Session = session.CloneSession(in.Session)
+	out.Binding = session.CloneParticipantBinding(in.Binding)
+	out.Agent = strings.TrimSpace(in.Agent)
+	out.Source = strings.TrimSpace(in.Source)
+	out.Label = strings.TrimSpace(in.Label)
+	out.Placement = placement.Normalize(in.Placement)
+	return out
+}
+
+func NormalizeDetachRequest(in DetachRequest) DetachRequest {
+	out := in
+	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
+	out.Session = session.CloneSession(in.Session)
+	out.ParticipantID = strings.TrimSpace(in.ParticipantID)
+	out.DelegationID = strings.TrimSpace(in.DelegationID)
+	out.AttachmentGeneration = strings.TrimSpace(in.AttachmentGeneration)
+	out.Source = strings.TrimSpace(in.Source)
+	return out
+}
+
+func NormalizeHandoffRequest(in HandoffRequest) HandoffRequest {
+	out := in
+	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
+	out.Session = session.CloneSession(in.Session)
+	out.Agent = strings.TrimSpace(in.Agent)
+	out.Source = strings.TrimSpace(in.Source)
+	out.Reason = strings.TrimSpace(in.Reason)
+	out.Context = agent.CloneContextTransfer(in.Context)
+	out.ContextSyncSeq = in.ContextSyncSeq
+	return out
+}
+
+func NormalizeTurnRequest(in TurnRequest) TurnRequest {
+	out := in
+	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
+	out.Session = session.CloneSession(in.Session)
+	out.TurnID = strings.TrimSpace(in.TurnID)
+	out.Input = strings.TrimSpace(in.Input)
+	if len(in.ContentParts) > 0 {
+		out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)
+	}
+	out.Context = agent.CloneContextTransfer(in.Context)
+	out.ContextSyncSeq = in.ContextSyncSeq
+	out.Mode = strings.TrimSpace(in.Mode)
+	return out
+}
+
+func NormalizeParticipantPromptRequest(in ParticipantPromptRequest) ParticipantPromptRequest {
+	out := in
+	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
+	out.Session = session.CloneSession(in.Session)
+	out.TurnID = strings.TrimSpace(in.TurnID)
+	out.ParticipantID = strings.TrimSpace(in.ParticipantID)
+	out.Input = strings.TrimSpace(in.Input)
+	out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)
+	out.Context = agent.CloneContextTransfer(in.Context)
+	out.Stream = in.Stream
+	out.Mode = strings.TrimSpace(in.Mode)
+	return out
+}

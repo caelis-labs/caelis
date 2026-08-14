@@ -1,0 +1,103 @@
+package sandboxpolicy
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+)
+
+func NormalizeBackend(backend string) (string, error) {
+	switch normalized := sandbox.CanonicalBackend(sandbox.Backend(backend)); normalized {
+	case "":
+		return "auto", nil
+	case sandbox.BackendHost, sandbox.BackendSeatbelt, sandbox.BackendBwrap, sandbox.BackendWindows:
+		return string(normalized), nil
+	case sandbox.BackendLandlock:
+		return "", fmt.Errorf("gatewayapp: sandbox backend %q is retired from the product; use auto (bwrap on Linux) or explicit host execution", backend)
+	default:
+		return "", fmt.Errorf("gatewayapp: unknown sandbox backend %q", backend)
+	}
+}
+
+func MergeConfig(stored configstore.SandboxConfig, override configstore.SandboxConfig) configstore.SandboxConfig {
+	overrideNetworkSet := override.NetworkEnabled != nil
+	stored = configstore.NormalizeSandboxConfig(stored)
+	override = configstore.NormalizeSandboxConfig(override)
+	if override.RequestedType != "" {
+		stored.RequestedType = override.RequestedType
+	}
+	if override.HelperPath != "" {
+		stored.HelperPath = override.HelperPath
+	}
+	if len(override.WritableRoots) > 0 {
+		stored.WritableRoots = append([]string(nil), override.WritableRoots...)
+	}
+	if len(override.ReadOnlySubpaths) > 0 {
+		stored.ReadOnlySubpaths = append([]string(nil), override.ReadOnlySubpaths...)
+	}
+	if overrideNetworkSet {
+		value := *override.NetworkEnabled
+		stored.NetworkEnabled = &value
+	}
+	if stored.RequestedType == "" {
+		stored.RequestedType = "auto"
+	}
+	return configstore.DefaultSandboxConfig(stored)
+}
+
+func WithPolicyMetadata(metadata map[string]any, cfg configstore.SandboxConfig) map[string]any {
+	out := cloneMap(metadata)
+	if out == nil {
+		out = map[string]any{}
+	}
+	cfg = configstore.DefaultSandboxConfig(cfg)
+	if len(cfg.WritableRoots) > 0 {
+		out["policy_extra_write_roots"] = mergePolicyWriteRoots(out["policy_extra_write_roots"], cfg.WritableRoots)
+	}
+	out["policy_network_enabled"] = configstore.SandboxNetworkEnabled(cfg)
+	return out
+}
+
+func mergePolicyWriteRoots(existing any, values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	appendOne := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	switch typed := existing.(type) {
+	case []string:
+		for _, one := range typed {
+			appendOne(one)
+		}
+	case []any:
+		for _, one := range typed {
+			text, _ := one.(string)
+			appendOne(text)
+		}
+	}
+	for _, one := range values {
+		appendOne(one)
+	}
+	return out
+}
+
+func cloneMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
+}

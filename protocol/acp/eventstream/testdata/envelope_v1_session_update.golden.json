@@ -1,0 +1,35 @@
+{
+  "kind": "session/update",
+  "cursor": "acp-projection:ZXZlbnQtMQ:0",
+  "event_id": "event-1",
+  "projection_id": "acp-projection:ZXZlbnQtMQ:0",
+  "session_id": "session-1",
+  "handle_id": "handle-1",
+  "run_id": "run-1",
+  "turn_id": "turn-1",
+  "occurred_at": "2026-06-27T12:00:00Z",
+  "scope": "main",
+  "final": true,
+  "update": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+      "type": "text",
+      "text": "hello"
+    },
+    "messageId": "msg-1",
+    "_meta": {
+      "vendor": {
+        "trace": "abc"
+      }
+    }
+  },
+  "_meta": {
+    "caelis": {
+      "runtime": {
+        "tool": {
+          "status_detail": "completed"
+        }
+      }
+    }
+  }
+}

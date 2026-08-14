@@ -1,0 +1,31 @@
+{
+  "kind": "session/update",
+  "cursor": "turn-1:0003",
+  "session_id": "session-1",
+  "handle_id": "handle-1",
+  "run_id": "run-1",
+  "turn_id": "turn-1",
+  "occurred_at": "2026-06-27T12:00:02Z",
+  "scope": "main",
+  "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "call-1",
+    "title": "Read file",
+    "kind": "read",
+    "status": "pending",
+    "rawInput": {
+      "path": "main.go"
+    },
+    "locations": [
+      {
+        "path": "main.go",
+        "line": 7
+      }
+    ],
+    "_meta": {
+      "vendor": {
+        "trace": "abc"
+      }
+    }
+  }
+}

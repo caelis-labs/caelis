@@ -1,0 +1,43 @@
+version: 2
+
+project_name: caelis
+
+before:
+  hooks:
+    - go mod tidy
+    - go test -timeout 5m ./...
+
+builds:
+  - id: caelis
+    main: ./cmd/caelis
+    binary: caelis
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/caelis-labs/caelis/internal/version.Version={{ .Tag }}
+      - -X github.com/caelis-labs/caelis/internal/version.Commit={{ .Commit }}
+      - -X github.com/caelis-labs/caelis/internal/version.Date={{ .Date }}
+      - -X github.com/caelis-labs/caelis/internal/version.BuildID={{ .Commit }}@{{ .Date }}
+      - -X github.com/caelis-labs/caelis/internal/version.BuildKind=release
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    ids:
+      - caelis
+    formats: [tar.gz]
+    allow_different_binary_count: true
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: git
+  sort: asc

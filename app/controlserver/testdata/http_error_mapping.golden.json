@@ -1,0 +1,10 @@
+{
+  "read/400": {"error": "validation failed", "code": "invalid_argument"},
+  "read/401": {"error": "authentication required", "code": "unauthenticated"},
+  "read/403": {"error": "forbidden", "code": "permission_denied"},
+  "read/409": {"error": "conflict", "code": "conflict"},
+  "read/503": {"error": "service unavailable", "code": "unavailable"},
+  "command/400": {"operation_id": "operation-1", "outcome": "rejected", "target": {}, "error_code": "invalid_argument"},
+  "command/409": {"operation_id": "operation-1", "outcome": "conflicted", "target": {}, "detail": "conflict", "error_code": "conflict"},
+  "command/503": {"error": "service unavailable", "code": "unavailable"}
+}

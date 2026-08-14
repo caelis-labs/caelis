@@ -1,0 +1,407 @@
+[
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "spawn-alpha",
+      "title": "Spawn breeze: alpha work",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "agent": "breeze",
+        "prompt": "alpha work"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "spawn-beta",
+      "title": "Spawn orbit: beta work",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "agent": "orbit",
+        "prompt": "beta work"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "spawn-alpha",
+      "title": "Spawn",
+      "kind": "execute",
+      "status": "in_progress",
+      "rawOutput": {
+        "handle": "alpha",
+        "parent_call": "spawn-alpha",
+        "parent_tool": "Spawn",
+        "state": "running",
+        "target_kind": "subagent"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "spawn-beta",
+      "title": "Spawn",
+      "kind": "execute",
+      "status": "in_progress",
+      "rawOutput": {
+        "handle": "beta",
+        "parent_call": "spawn-beta",
+        "parent_tool": "Spawn",
+        "state": "running",
+        "target_kind": "subagent"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Spawn"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "agent_thought_chunk",
+      "content": {
+        "type": "text",
+        "text": "The sub-agents are running. I will wait for both results."
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "agent_message_chunk",
+      "content": {
+        "type": "text",
+        "text": "Waiting for alpha and beta."
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "wait-one",
+      "title": "Task wait",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "action": "wait",
+        "handle": "alpha,beta"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Task"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "wait-one",
+      "title": "Task wait",
+      "kind": "execute",
+      "status": "completed",
+      "rawInput": {
+        "action": "wait",
+        "handle": "alpha,beta"
+      },
+      "rawOutput": {
+        "action": "wait",
+        "tasks": [
+          {
+            "final_message": "# Alpha final\n\n- exact markdown\n",
+            "handle": "alpha",
+            "parent_call": "spawn-alpha",
+            "parent_tool": "Spawn",
+            "state": "completed",
+            "target_kind": "subagent"
+          },
+          {
+            "handle": "beta",
+            "parent_call": "spawn-beta",
+            "parent_tool": "Spawn",
+            "state": "running",
+            "target_kind": "subagent"
+          },
+          {
+            "handle": "command",
+            "parent_call": "command-call",
+            "parent_tool": "RunCommand",
+            "state": "completed",
+            "target_kind": "command"
+          }
+        ]
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Task"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "spawn-alpha",
+      "status": "completed",
+      "rawOutput": {
+        "final_message": "# Alpha final\n\n- exact markdown\n",
+        "handle": "alpha",
+        "parent_call": "spawn-alpha",
+        "parent_tool": "Spawn",
+        "state": "completed",
+        "target_kind": "subagent"
+      },
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "text",
+            "text": "# Alpha final\n\n- exact markdown\n"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "agent_thought_chunk",
+      "content": {
+        "type": "text",
+        "text": "Beta is still running after the first wait. I will wait again."
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "agent_message_chunk",
+      "content": {
+        "type": "text",
+        "text": "Continuing to wait for beta."
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "wait-two",
+      "title": "Task wait",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "action": "wait",
+        "handle": "beta"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Task"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "wait-two",
+      "title": "Task wait",
+      "kind": "execute",
+      "status": "completed",
+      "rawInput": {
+        "action": "wait",
+        "handle": "beta"
+      },
+      "rawOutput": {
+        "action": "wait",
+        "tasks": [
+          {
+            "final_message": "Beta final.",
+            "handle": "beta",
+            "parent_call": "spawn-beta",
+            "parent_tool": "Spawn",
+            "state": "completed",
+            "target_kind": "subagent"
+          },
+          {
+            "final_message": "duplicate alpha",
+            "handle": "alpha",
+            "parent_call": "spawn-alpha",
+            "parent_tool": "Spawn",
+            "state": "completed",
+            "target_kind": "subagent"
+          }
+        ]
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Task"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "spawn-beta",
+      "status": "completed",
+      "rawOutput": {
+        "final_message": "Beta final.",
+        "handle": "beta",
+        "parent_call": "spawn-beta",
+        "parent_tool": "Spawn",
+        "state": "completed",
+        "target_kind": "subagent"
+      },
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "text",
+            "text": "Beta final."
+          }
+        }
+      ]
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "agent_thought_chunk",
+      "content": {
+        "type": "text",
+        "text": "Both sub-agents completed. I will verify the generated report."
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "agent_message_chunk",
+      "content": {
+        "type": "text",
+        "text": "Reading the report now."
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "read-report",
+      "title": "Read report.md",
+      "kind": "read",
+      "status": "pending",
+      "rawInput": {
+        "path": "report.md"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Read"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "sessionId": "session-load-spawn",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "read-report",
+      "title": "Read report.md",
+      "kind": "read",
+      "status": "completed",
+      "rawInput": {
+        "path": "report.md"
+      },
+      "rawOutput": {
+        "result": "verified"
+      },
+      "_meta": {
+        "caelis": {
+          "runtime": {
+            "tool": {
+              "name": "Read"
+            }
+          },
+          "version": 1
+        }
+      }
+    }
+  }
+]

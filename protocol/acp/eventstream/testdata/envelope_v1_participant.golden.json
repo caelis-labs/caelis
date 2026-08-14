@@ -1,0 +1,14 @@
+{
+  "kind": "caelis/participant",
+  "cursor": "turn-1:0008",
+  "session_id": "session-1",
+  "turn_id": "turn-1",
+  "occurred_at": "2026-06-27T12:00:07Z",
+  "scope": "participant",
+  "scope_id": "participant-1",
+  "actor": "@reviewer",
+  "participant_id": "participant-1",
+  "participant": {
+    "state": "attached"
+  }
+}

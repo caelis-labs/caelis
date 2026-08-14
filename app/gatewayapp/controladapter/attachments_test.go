@@ -1,0 +1,158 @@
+package controladapter
+
+import (
+	"encoding/base64"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
+)
+
+func TestContentPartsFromAttachmentsReadsImageFiles(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	imagePath := filepath.Join(workspace, "shot.png")
+	raw, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(imagePath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	parts, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "shot.png"}}, workspace)
+	if err != nil {
+		t.Fatalf("contentPartsFromAttachments() error = %v", err)
+	}
+	if len(parts) != 1 {
+		t.Fatalf("len(parts) = %d, want 1", len(parts))
+	}
+	part := parts[0]
+	if part.Type != model.ContentPartImage {
+		t.Fatalf("part.Type = %q, want image", part.Type)
+	}
+	if part.MimeType != "image/png" {
+		t.Fatalf("part.MimeType = %q, want image/png", part.MimeType)
+	}
+	if part.FileName != "shot.png" {
+		t.Fatalf("part.FileName = %q, want shot.png", part.FileName)
+	}
+	if part.Data != base64.StdEncoding.EncodeToString(raw) {
+		t.Fatal("part.Data did not contain the base64 encoded image")
+	}
+}
+
+func TestContentPartsFromAttachmentsReadsInlineImageData(t *testing.T) {
+	t.Parallel()
+
+	imageData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+	parts, err := contentPartsFromAttachments([]controlprompt.Attachment{{
+		Name:     "inline.png",
+		MimeType: "image/png",
+		Data:     imageData,
+	}}, t.TempDir())
+	if err != nil {
+		t.Fatalf("contentPartsFromAttachments(inline data) error = %v", err)
+	}
+	if len(parts) != 1 {
+		t.Fatalf("len(parts) = %d, want 1", len(parts))
+	}
+	part := parts[0]
+	if part.Type != model.ContentPartImage || part.MimeType != "image/png" || part.Data != imageData || part.FileName != "inline.png" {
+		t.Fatalf("part = %#v, want inline png image", part)
+	}
+}
+
+func TestContentPartsFromSubmissionInterleavesTextAndImages(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	imagePath := filepath.Join(workspace, "shot.png")
+	raw, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(imagePath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	parts, err := contentPartsFromSubmission("first second", []controlprompt.Attachment{{Name: "shot.png", Offset: len([]rune("first "))}}, workspace)
+	if err != nil {
+		t.Fatalf("contentPartsFromSubmission() error = %v", err)
+	}
+	if len(parts) != 3 {
+		t.Fatalf("len(parts) = %d, want 3", len(parts))
+	}
+	if parts[0].Type != model.ContentPartText || parts[0].Text != "first " {
+		t.Fatalf("parts[0] = %#v, want first text segment", parts[0])
+	}
+	if parts[1].Type != model.ContentPartImage || parts[1].FileName != "shot.png" {
+		t.Fatalf("parts[1] = %#v, want image", parts[1])
+	}
+	if parts[2].Type != model.ContentPartText || parts[2].Text != "second" {
+		t.Fatalf("parts[2] = %#v, want second text segment", parts[2])
+	}
+}
+
+func TestDisplayInputWithAttachmentsUsesOrdinalMarkers(t *testing.T) {
+	t.Parallel()
+
+	got := displayInputWithAttachments("look here", []controlprompt.Attachment{
+		{Name: "first.png", Offset: 0},
+		{Name: "second.png", Offset: len([]rune("look "))},
+	})
+	if got != "[image #1] look [image #2] here" {
+		t.Fatalf("displayInputWithAttachments() = %q, want image markers", got)
+	}
+}
+
+func TestContentPartsFromAttachmentsRejectsNonImages(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "note.txt"), []byte("not an image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "note.txt"}}, workspace); err == nil {
+		t.Fatal("contentPartsFromAttachments() error = nil, want non-image rejection")
+	}
+}
+
+func TestContentPartsFromAttachmentsRejectsRenamedNonImages(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "not-really.png"), []byte("not an image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "not-really.png"}}, workspace); err == nil {
+		t.Fatal("contentPartsFromAttachments() error = nil, want content-based non-image rejection")
+	}
+}
+
+func TestContentPartsFromAttachmentsRejectsOversizedImages(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	imagePath := filepath.Join(workspace, "huge.png")
+	file, err := os.Create(imagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(maxAttachmentImageBytes + 1); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "huge.png"}}, workspace); err == nil {
+		t.Fatal("contentPartsFromAttachments() error = nil, want image size rejection")
+	}
+}

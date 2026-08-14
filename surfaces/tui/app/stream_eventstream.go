@@ -1,0 +1,128 @@
+package tuiapp
+
+import (
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
+)
+
+func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea.Cmd) {
+	m.observeTaskStreamSession(env)
+	if env.Err != nil || env.Kind == eventstream.KindError {
+		if text := display.UserVisibleError(env.Err); text != "" {
+			env.Error = text
+		}
+	}
+	if m.suppressPairedCompactNotice(env) {
+		return m, nil
+	}
+	if isMainTurnTerminalLifecycle(env) {
+		if !m.turnRunning() && !terminalLifecycleHasTranscriptIdentity(env) {
+			return m, nil
+		}
+		presentation := m.projectACPEnvelopePresentation(env)
+		model, cmd := m.handleTranscriptEventsMsg(presentation)
+		if next, ok := model.(*Model); ok {
+			m = next
+		}
+		finishCmd, _ := m.finishLiveTurnFromEnvelope(env)
+		return m, tea.Batch(cmd, finishCmd)
+	}
+	presentation := m.projectACPEnvelopePresentation(env)
+	model, cmd := m.handleTranscriptEventsMsg(presentation)
+	if next, ok := model.(*Model); ok {
+		m = next
+	}
+	m.observeTaskPanelStreamOwner(env)
+	return m, tea.Batch(m.applyACPRunningActivity(env, presentation.Events), cmd)
+}
+
+// projectACPEnvelopePresentation normalizes each Envelope once. Transcript
+// mutation and live activity remain separate Surface consumers of the same
+// typed projection; neither re-parses Task/Spawn relations independently.
+func (m *Model) projectACPEnvelopePresentation(env eventstream.Envelope) TranscriptEventsMsg {
+	return transcriptEventsMsgForEnvelope(m.projectACPEventToTranscriptEvents(env), env)
+}
+
+func transcriptEventsMsgForEnvelope(events []TranscriptEvent, env eventstream.Envelope) TranscriptEventsMsg {
+	return TranscriptEventsMsg{
+		Events:       events,
+		OwnerRepairs: acpprojector.TaskOwnerRepairsFromEnvelope(env),
+	}
+}
+
+type compactNoticeSource uint8
+
+const (
+	compactNoticeSourceCanonical compactNoticeSource = iota + 1
+	compactNoticeSourceTransient
+)
+
+// suppressPairedCompactNotice folds the durable compact projection and the
+// Runtime's transient success notice into one TUI row. Each unmatched signal
+// is still rendered, so SDK-only streams and repeated compactions remain
+// visible once per actual compaction.
+func (m *Model) suppressPairedCompactNotice(env eventstream.Envelope) bool {
+	if m == nil || (env.Scope != "" && env.Scope != eventstream.ScopeMain) {
+		return false
+	}
+	source := compactNoticeSource(0)
+	switch {
+	case env.Kind == eventstream.KindSessionUpdate && eventstream.UpdateType(env.Update) == schema.UpdateCompact:
+		source = compactNoticeSourceCanonical
+	case env.Kind == eventstream.KindNotice && strings.TrimSpace(env.Notice) == transcript.CompactNoticeLabel:
+		source = compactNoticeSourceTransient
+	default:
+		return false
+	}
+	turnID := strings.TrimSpace(env.TurnID)
+	if turnID == "" {
+		return false
+	}
+	key := strings.TrimSpace(env.SessionID) + "\x00" + turnID
+	if m.compactNoticePair.key != key {
+		m.compactNoticePair = compactNoticePairState{key: key}
+	}
+	switch source {
+	case compactNoticeSourceCanonical:
+		if m.compactNoticePair.transientUnmatched > 0 {
+			m.compactNoticePair.transientUnmatched--
+			return true
+		}
+		m.compactNoticePair.canonicalUnmatched++
+	case compactNoticeSourceTransient:
+		if m.compactNoticePair.canonicalUnmatched > 0 {
+			m.compactNoticePair.canonicalUnmatched--
+			return true
+		}
+		m.compactNoticePair.transientUnmatched++
+	}
+	return false
+}
+
+func terminalLifecycleHasTranscriptIdentity(env eventstream.Envelope) bool {
+	return strings.TrimSpace(env.SessionID) != "" ||
+		strings.TrimSpace(env.ScopeID) != "" ||
+		strings.TrimSpace(env.ParticipantID) != "" ||
+		strings.TrimSpace(env.Actor) != ""
+}
+
+func (m *Model) appendEventStreamTranscriptText(text string) (tea.Model, tea.Cmd) {
+	text = formatTranscriptNoticeText(text)
+	if text == "" {
+		return m, nil
+	}
+	block := NewTranscriptBlock(text, tuikit.DetectLineStyle(text))
+	m.appendMainTranscriptBlock(block)
+	m.hasCommittedLine = true
+	m.lastCommittedStyle = block.Style
+	m.syncViewportContent()
+	return m, nil
+}

@@ -1,0 +1,51 @@
+{
+  "name": "@caelis/caelis",
+  "version": "0.0.0-dev",
+  "description": "caelis CLI distributed via npm",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caelis-labs/caelis.git"
+  },
+  "homepage": "https://github.com/caelis-labs/caelis",
+  "bugs": {
+    "url": "https://github.com/caelis-labs/caelis/issues"
+  },
+  "bin": {
+    "caelis": "bin/caelis.js"
+  },
+  "files": [
+    "bin/caelis.js",
+    "lib/update-handoff.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "scripts": {
+    "test": "node --test ./test/*.test.js",
+    "prepare": "node ./scripts/prepare.mjs",
+    "set-version": "node ./scripts/set-version.mjs",
+    "stage-release": "node ./scripts/stage-release.mjs",
+    "publish-release": "node ./scripts/publish-release.mjs"
+  },
+  "optionalDependencies": {
+    "@caelis/caelis-darwin-arm64": "0.0.0-dev",
+    "@caelis/caelis-darwin-x64": "0.0.0-dev",
+    "@caelis/caelis-linux-arm64": "0.0.0-dev",
+    "@caelis/caelis-linux-x64": "0.0.0-dev",
+    "@caelis/caelis-windows-arm64": "0.0.0-dev",
+    "@caelis/caelis-windows-x64": "0.0.0-dev"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

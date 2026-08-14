@@ -1,0 +1,486 @@
+package controlclient
+
+import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+	"unicode"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+)
+
+type CommandServiceConfig struct {
+	Authorizer Authorizer
+	Operations OperationStore
+	Backend    CommandBackend
+}
+
+type CommandService struct{ config CommandServiceConfig }
+
+const operationCompletionTimeout = 5 * time.Second
+
+func NewCommandService(config CommandServiceConfig) (*CommandService, error) {
+	if config.Authorizer == nil || config.Operations == nil || config.Backend == nil {
+		return nil, errors.New("controlclient: command service dependencies are required")
+	}
+	return &CommandService{config: config}, nil
+}
+
+func (s *CommandService) CreateSession(ctx context.Context, principal Principal, req CreateSessionRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionSessionCreate, req.WriteBase, createSessionTarget(req), req)
+}
+func (s *CommandService) CloseSession(ctx context.Context, principal Principal, req CloseSessionRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionSessionClose, req.WriteBase, req.SessionID, req)
+}
+func (s *CommandService) CompactSession(ctx context.Context, principal Principal, req CompactSessionRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionSessionCompact, req.WriteBase, req.SessionID, req)
+}
+func (s *CommandService) Prompt(ctx context.Context, principal Principal, req PromptRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionPrompt, req.WriteBase, req.SessionID, req)
+}
+func (s *CommandService) Steer(ctx context.Context, principal Principal, req SteerRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionSteer, req.WriteBase, turnTargetKey(req.Target), req)
+}
+func (s *CommandService) Cancel(ctx context.Context, principal Principal, req CancelRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionCancel, req.WriteBase, turnTargetKey(req.Target), req)
+}
+func (s *CommandService) ResolveApproval(ctx context.Context, principal Principal, req ResolveApprovalRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionApprovalResolve, req.WriteBase, req.ApprovalRequestID+":"+turnTargetKey(req.Target), req)
+}
+func (s *CommandService) AttachParticipant(ctx context.Context, principal Principal, req AttachParticipantRequest) (CommandResult, error) {
+	target := strings.TrimSpace(req.ProfileID) + ":" + strings.TrimSpace(req.Effort)
+	return s.execute(ctx, principal, ActionParticipantAttach, req.WriteBase, target, req)
+}
+func (s *CommandService) StartParticipant(ctx context.Context, principal Principal, req StartParticipantRequest) (CommandResult, error) {
+	target := strings.TrimSpace(req.Handle) + ":" + strings.TrimSpace(req.Label)
+	return s.execute(ctx, principal, ActionParticipantStart, req.WriteBase, target, req)
+}
+func (s *CommandService) PromptParticipant(ctx context.Context, principal Principal, req PromptParticipantRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionParticipantPrompt, req.WriteBase, req.ParticipantID, req)
+}
+func (s *CommandService) CancelParticipant(ctx context.Context, principal Principal, req CancelParticipantRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionParticipantCancel, req.WriteBase, req.ParticipantID+":"+turnTargetKey(req.Target), req)
+}
+func (s *CommandService) DetachParticipant(ctx context.Context, principal Principal, req DetachParticipantRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionParticipantDetach, req.WriteBase, req.ParticipantID, req)
+}
+func (s *CommandService) Handoff(ctx context.Context, principal Principal, req HandoffRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionControllerHandoff, req.WriteBase, string(req.Kind)+":"+req.Agent, req)
+}
+
+func (s *CommandService) execute(ctx context.Context, principal Principal, action Action, base WriteBase, target string, request any) (CommandResult, error) {
+	operationID := strings.TrimSpace(base.OperationID)
+	sessionID := strings.TrimSpace(base.SessionID)
+	if operationID == "" {
+		err := errorcode.New(errorcode.InvalidArgument, "controlclient: operation_id is required")
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(err, OutcomeRejected), err), err
+	}
+	if err := validateCommandRequest(action, request); err != nil {
+		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected), coded), coded
+	}
+	if err := s.config.Authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(err, OutcomeRejected), err), err
+	}
+	digest, err := requestDigest(request)
+	if err != nil {
+		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected), coded), coded
+	}
+	intent := OperationIntent{
+		PrincipalID: strings.TrimSpace(principal.ID), OperationID: operationID, Action: action,
+		SessionID: sessionID, Target: strings.TrimSpace(target), Digest: digest,
+	}
+	recovery, recoveryBackend := s.config.Backend.(CommandRecoveryBackend)
+	recoverable := recoveryBackend && recovery.CanRecoverControlCommand(action)
+	if recoverable {
+		executionLease, leaseErr := s.config.Operations.AcquireExecution(ctx, intent)
+		if leaseErr != nil {
+			unknownErr := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: acquire operation execution gate", leaseErr)
+			return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(unknownErr, OutcomeUnknown), unknownErr), unknownErr
+		}
+		defer executionLease.Release()
+	}
+	record, created, err := s.config.Operations.Begin(ctx, intent)
+	if errors.Is(err, ErrOperationConflict) {
+		return commandFailure(operationID, sessionID, OutcomeConflicted, publicCommandDetail(err, OutcomeConflicted), err), err
+	}
+	if err != nil {
+		coded := internalCommandError("controlclient: begin operation", err)
+		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected), coded), coded
+	}
+	if !created {
+		if record.Result != nil {
+			return *record.Result, nil
+		}
+		if recoverable {
+			recovered, proven, recoveryErr := recovery.RecoverControlCommand(
+				withOperationIntent(ctx, intent), principal, intent, request,
+			)
+			if recoveryErr != nil {
+				unknownErr := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: recover operation result", recoveryErr)
+				return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(unknownErr, OutcomeUnknown), unknownErr), unknownErr
+			}
+			if proven {
+				recovered.OperationID = operationID
+				if recovered.SessionID == "" {
+					recovered.SessionID = sessionID
+				}
+				if !recovered.Outcome.Valid() {
+					recovered.Outcome = OutcomeCommitted
+				}
+				completionCtx, cancelCompletion := operationCompletionContext(ctx)
+				defer cancelCompletion()
+				if _, completeErr := s.config.Operations.Complete(completionCtx, intent, recovered); completeErr != nil {
+					coded := internalCommandError("controlclient: complete recovered operation", completeErr)
+					return commandFailure(operationID, recovered.SessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
+				}
+				return recovered, nil
+			}
+		}
+		// For recoverable actions the process-local execution gate proves that no
+		// creator is still running in this Host, but the durable domain evidence
+		// cannot prove the abandoned effect. For all other actions the creator may
+		// still be active.
+		// In either case, keep the intent incomplete and remain conservative.
+		unknownErr := errorcode.New(errorcode.UnknownOutcome, "operation intent exists without a provable result")
+		unknown := commandFailure(operationID, sessionID, OutcomeUnknown, unknownErr.Error(), unknownErr)
+		return unknown, nil
+	}
+
+	result, dispatchErr := s.config.Backend.ExecuteControlCommand(withOperationIntent(ctx, intent), principal, action, request)
+	result.OperationID = operationID
+	if result.SessionID == "" {
+		result.SessionID = sessionID
+	}
+	if dispatchErr != nil {
+		result = resultForBackendError(result, dispatchErr)
+	} else if !result.Outcome.Valid() {
+		result.Outcome = OutcomeCommitted
+	}
+	completionCtx, cancelCompletion := operationCompletionContext(ctx)
+	defer cancelCompletion()
+	if _, completeErr := s.config.Operations.Complete(completionCtx, intent, result); completeErr != nil {
+		coded := internalCommandError("controlclient: complete operation", completeErr)
+		return commandFailure(operationID, result.SessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
+	}
+	return result, dispatchErr
+}
+
+func operationCompletionContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// Once Backend has returned, Control knows the exact effect result. Client
+	// cancellation must not strand the durable ledger at intent-only/unknown and
+	// make a later retry unable to distinguish a committed effect from one that
+	// never ran. Bound the detached write so a broken store still returns.
+	return context.WithTimeout(context.WithoutCancel(ctx), operationCompletionTimeout)
+}
+
+func resultForBackendError(result CommandResult, err error) CommandResult {
+	var outcomeErr *OutcomeError
+	if errors.As(err, &outcomeErr) && outcomeErr.Outcome.Valid() {
+		result.Outcome = outcomeErr.Outcome
+	} else {
+		// An unclassified backend error does not prove that the effect was
+		// rejected before commit. Preserve the conservative outcome so retention
+		// cannot later erase the only guard against repeating an external effect.
+		result.Outcome = OutcomeUnknown
+	}
+	result.Detail = publicCommandDetail(err, result.Outcome)
+	result.ErrorCode = errorcode.CodeOf(err)
+	if result.ErrorCode == errorcode.Unknown && result.Outcome == OutcomeUnknown {
+		result.ErrorCode = errorcode.UnknownOutcome
+	}
+	result.ErrorKind = ErrorKindOf(err)
+	return result
+}
+
+func internalCommandError(message string, err error) error {
+	if err == nil || errorcode.CodeOf(err) != errorcode.Unknown {
+		return err
+	}
+	return errorcode.Wrap(errorcode.Internal, message, err)
+}
+
+func publicCommandDetail(err error, outcome Outcome) string {
+	switch errorcode.CodeOf(err) {
+	case errorcode.InvalidArgument:
+		return strings.TrimSpace(err.Error())
+	case errorcode.Unauthenticated:
+		return "authentication required"
+	case errorcode.PermissionDenied:
+		return "permission denied"
+	case errorcode.AlreadyExists, errorcode.Conflict, errorcode.FailedPrecondition:
+		return "conflict"
+	case errorcode.UnknownOutcome:
+		return "effect outcome cannot be proven"
+	}
+	switch outcome {
+	case OutcomeUnknown:
+		return "effect outcome cannot be proven"
+	case OutcomeConflicted:
+		return "conflict"
+	case OutcomeRejected:
+		return "command rejected"
+	default:
+		return ""
+	}
+}
+
+func commandFailure(operationID, sessionID string, outcome Outcome, detail string, err error) CommandResult {
+	code := errorcode.CodeOf(err)
+	if code == errorcode.Unknown && outcome == OutcomeUnknown {
+		code = errorcode.UnknownOutcome
+	}
+	return CommandResult{
+		OperationID: operationID,
+		SessionID:   sessionID,
+		Outcome:     outcome,
+		Detail:      strings.TrimSpace(detail),
+		ErrorCode:   code,
+		ErrorKind:   ErrorKindOf(err),
+	}
+}
+
+func validateCommandRequest(action Action, request any) error {
+	switch typed := request.(type) {
+	case CreateSessionRequest:
+		return nil
+	case CloseSessionRequest:
+		return requireSession(typed.SessionID)
+	case CompactSessionRequest:
+		return requireSession(typed.SessionID)
+	case PromptRequest:
+		if err := requireSession(typed.SessionID); err != nil {
+			return err
+		}
+		if err := validatePromptContent("prompt", typed.Input, typed.ContentParts); err != nil {
+			return err
+		}
+	case SteerRequest:
+		if err := requireSessionAndTurn(typed.SessionID, typed.Target); err != nil {
+			return err
+		}
+		if err := validatePromptContent("steer", typed.Input, typed.ContentParts); err != nil {
+			return err
+		}
+	case CancelRequest:
+		return requireSessionAndTurn(typed.SessionID, typed.Target)
+	case ResolveApprovalRequest:
+		if err := requireSessionAndTurn(typed.SessionID, typed.Target); err != nil {
+			return err
+		}
+		if strings.TrimSpace(typed.ApprovalRequestID) == "" {
+			return errors.New("controlclient: approval_request_id is required")
+		}
+	case AttachParticipantRequest:
+		if err := requireSession(typed.SessionID); err != nil {
+			return err
+		}
+		if strings.TrimSpace(typed.ProfileID) == "" || strings.TrimSpace(typed.Effort) == "" {
+			return errors.New("controlclient: participant profile_id and effort are required")
+		}
+	case StartParticipantRequest:
+		if err := requireSession(typed.SessionID); err != nil {
+			return err
+		}
+		if strings.TrimSpace(typed.Handle) == "" {
+			return errors.New("controlclient: participant handle is required")
+		}
+		if err := validatePromptContent("participant prompt", typed.Input, typed.ContentParts); err != nil {
+			return err
+		}
+	case PromptParticipantRequest:
+		if err := requireSession(typed.SessionID); err != nil {
+			return err
+		}
+		if strings.TrimSpace(typed.ParticipantID) == "" {
+			return errors.New("controlclient: participant id is required")
+		}
+		if err := validatePromptContent("participant prompt", typed.Input, typed.ContentParts); err != nil {
+			return err
+		}
+	case CancelParticipantRequest:
+		if err := requireSessionAndTurn(typed.SessionID, typed.Target); err != nil {
+			return err
+		}
+		if strings.TrimSpace(typed.ParticipantID) == "" {
+			return errors.New("controlclient: participant id is required")
+		}
+	case DetachParticipantRequest:
+		if err := requireSession(typed.SessionID); err != nil {
+			return err
+		}
+		if strings.TrimSpace(typed.ParticipantID) == "" {
+			return errors.New("controlclient: participant id is required")
+		}
+	case HandoffRequest:
+		return validateHandoffRequest(typed)
+	case SessionModeRequest:
+		return validateSessionModeRequest(typed)
+	case SessionModelRequest:
+		return validateSessionModelRequest(typed)
+	case SessionControllerModeRequest:
+		return validateSessionControllerModeRequest(typed)
+	case SessionPresentationModeRequest:
+		return validateSessionPresentationModeRequest(typed)
+	case SessionPresentationConfigRequest:
+		return validateSessionPresentationConfigRequest(typed)
+	case ConnectModelRequest:
+		return validateConnectModelRequest(typed)
+	case UseModelRequest:
+		return validateUseModelRequest(typed)
+	case DeleteModelRequest:
+		return validateDeleteModelRequest(typed)
+	case SandboxRequest:
+		return validateSandboxCommandRequest(action, typed)
+	case BindAgentBindingRequest:
+		return validateAgentBindingCommandRequest(action, typed.WriteBase, typed.Binding.Handle, "")
+	case ResetAgentBindingRequest:
+		return validateAgentBindingCommandRequest(action, typed.WriteBase, typed.Handle, "")
+	case CreateAgentRoleRequest:
+		return validateAgentBindingCommandRequest(action, typed.WriteBase, typed.Role.Handle, "")
+	case DeleteAgentRoleRequest:
+		return validateAgentBindingCommandRequest(action, typed.WriteBase, typed.Handle, "")
+	case AgentBindingSetRequest:
+		return validateAgentBindingCommandRequest(action, typed.WriteBase, "", typed.SetName)
+	case PrepareACPRequest:
+		return validateACPPrepareCommandRequest(action, typed)
+	case PrepareACPAuthenticationRequest:
+		return validateACPPrepareAuthenticationCommandRequest(action, typed)
+	case ConnectACPRequest:
+		return validateACPConnectCommandRequest(action, typed)
+	case DisconnectACPRequest:
+		return validateACPDisconnectCommandRequest(action, typed)
+	case AddMarketplaceRequest:
+		return validateAddMarketplaceRequest(action, typed)
+	case UpdateMarketplaceRequest:
+		return validateUpdateMarketplaceRequest(action, typed)
+	case RemoveMarketplaceRequest:
+		return validateRemoveMarketplaceRequest(action, typed)
+	case AddPluginPathRequest:
+		return validateAddPluginPathRequest(action, typed)
+	case InstallPluginRequest:
+		return validateInstallPluginRequest(action, typed)
+	case EnablePluginRequest:
+		return validateEnablePluginRequest(action, typed)
+	case DisablePluginRequest:
+		return validateDisablePluginRequest(action, typed)
+	case RemovePluginRequest:
+		return validateRemovePluginRequest(action, typed)
+	default:
+		return fmt.Errorf("controlclient: unsupported request for %s", action)
+	}
+	return nil
+}
+
+func validateACPDisconnectCommandRequest(action Action, request DisconnectACPRequest) error {
+	if action != ActionACPAgentDisconnect {
+		return fmt.Errorf("controlclient: unsupported ACP disconnect action %q", action)
+	}
+	if strings.TrimSpace(request.SessionID) != "" {
+		return errors.New("controlclient: Host ACP disconnect must not address a Session")
+	}
+	if request.ExpectedRevision == nil {
+		return errors.New("controlclient: Host ACP disconnect expected_revision is required")
+	}
+	if strings.TrimSpace(request.ExpectedControllerEpoch) != "" {
+		return errors.New("controlclient: Host ACP disconnect must not address a controller epoch")
+	}
+	if strings.TrimSpace(request.AgentID) == "" {
+		return errors.New("controlclient: ACP Agent id is required")
+	}
+	return nil
+}
+
+func validateHandoffRequest(request HandoffRequest) error {
+	if err := requireSession(request.SessionID); err != nil {
+		return err
+	}
+	if request.ExpectedRevision == nil {
+		return errors.New("controlclient: controller handoff expected_revision is required")
+	}
+	switch request.Kind {
+	case session.ControllerKindKernel:
+		if strings.TrimSpace(request.Agent) != "" {
+			return errors.New("controlclient: Kernel controller handoff must not name an Agent")
+		}
+	case session.ControllerKindACP:
+		if strings.TrimSpace(request.Agent) == "" {
+			return errors.New("controlclient: ACP controller handoff Agent is required")
+		}
+	default:
+		return errors.New("controlclient: supported controller kind is required")
+	}
+	return nil
+}
+
+func validatePromptContent(kind string, input string, parts []model.ContentPart) error {
+	hasMeaningfulContent := strings.TrimSpace(input) != ""
+	for index, part := range parts {
+		switch part.Type {
+		case model.ContentPartText:
+			if part.Text == "" {
+				return fmt.Errorf("controlclient: %s content_parts[%d] text is required", kind, index)
+			}
+			if part.MimeType != "" || part.Data != "" || part.FileName != "" {
+				return fmt.Errorf("controlclient: %s content_parts[%d] text contains image fields", kind, index)
+			}
+			hasMeaningfulContent = hasMeaningfulContent || strings.TrimSpace(part.Text) != ""
+		case model.ContentPartImage:
+			if part.Text != "" {
+				return fmt.Errorf("controlclient: %s content_parts[%d] image contains text", kind, index)
+			}
+			mimeType := strings.TrimSpace(part.MimeType)
+			if !strings.HasPrefix(strings.ToLower(mimeType), "image/") ||
+				len(mimeType) == len("image/") ||
+				strings.IndexFunc(mimeType, unicode.IsSpace) >= 0 {
+				return fmt.Errorf("controlclient: %s content_parts[%d] image MIME type is required", kind, index)
+			}
+			data := strings.TrimSpace(part.Data)
+			decoded, err := base64.StdEncoding.DecodeString(data)
+			if err != nil || len(decoded) == 0 {
+				return fmt.Errorf("controlclient: %s content_parts[%d] image data must be non-empty base64", kind, index)
+			}
+			hasMeaningfulContent = true
+		default:
+			return fmt.Errorf("controlclient: %s content_parts[%d] has unsupported type %q", kind, index, part.Type)
+		}
+	}
+	if !hasMeaningfulContent {
+		return fmt.Errorf("controlclient: %s input is required", kind)
+	}
+	return nil
+}
+
+func requireSession(sessionID string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return errors.New("controlclient: session id is required")
+	}
+	return nil
+}
+
+func requireSessionAndTurn(sessionID string, target TurnTarget) error {
+	if err := requireSession(sessionID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(target.HandleID) == "" || strings.TrimSpace(target.RunID) == "" || strings.TrimSpace(target.TurnID) == "" {
+		return errors.New("controlclient: explicit handle, run, and turn target is required")
+	}
+	return nil
+}
+
+func turnTargetKey(target TurnTarget) string {
+	return strings.TrimSpace(target.HandleID) + ":" + strings.TrimSpace(target.RunID) + ":" + strings.TrimSpace(target.TurnID)
+}
+
+func createSessionTarget(req CreateSessionRequest) string {
+	return strings.TrimSpace(req.PreferredSessionID) + ":" + strings.TrimSpace(req.WorkspaceKey)
+}

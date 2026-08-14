@@ -1,0 +1,14 @@
+{
+  "kind": "caelis/lifecycle",
+  "cursor": "turn-1:0009",
+  "session_id": "session-1",
+  "handle_id": "handle-1",
+  "run_id": "run-1",
+  "turn_id": "turn-1",
+  "occurred_at": "2026-06-27T12:00:08Z",
+  "scope": "main",
+  "lifecycle": {
+    "state": "completed",
+    "stopReason": "end_turn"
+  }
+}

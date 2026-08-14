@@ -1,0 +1,830 @@
+package session
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
+)
+
+var (
+	// ErrSessionNotFound reports that one session ref cannot be resolved.
+	ErrSessionNotFound = errorcode.New(errorcode.NotFound, "agent-sdk/session: session not found")
+
+	// ErrAmbiguousSession reports that one session ref matches multiple
+	// durable session documents and needs a narrower workspace key.
+	ErrAmbiguousSession = errorcode.New(errorcode.FailedPrecondition, "agent-sdk/session: ambiguous session")
+
+	// ErrInvalidSession reports that one session request is incomplete.
+	ErrInvalidSession = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid session")
+
+	// ErrInvalidEvent reports that one event payload is incomplete.
+	ErrInvalidEvent = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid event")
+
+	// ErrInvalidTransaction reports a compound mutation without a stable retry
+	// identity.
+	ErrInvalidTransaction = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid transaction")
+
+	// ErrInvalidValue reports a session value that cannot be represented by the
+	// shared JSON-compatible durable value contract.
+	ErrInvalidValue = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid JSON-compatible value")
+
+	// ErrRevisionConflict reports a failed expected-revision compare-and-swap.
+	ErrRevisionConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: revision conflict")
+
+	// ErrEventConflict reports reuse of a durable event ID with a different
+	// canonical payload.
+	ErrEventConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: event conflict")
+
+	// ErrLeaseConflict reports that a live lease is owned elsewhere or that
+	// lease identity/revision CAS failed.
+	ErrLeaseConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: lease conflict")
+
+	// ErrUnsupportedLegacyFormat reports an older on-disk session format that is
+	// no longer a supported replay source.
+	ErrUnsupportedLegacyFormat = errorcode.New(errorcode.Unsupported, "agent-sdk/session: unsupported legacy format")
+)
+
+// RevisionConflictError carries the expected and actual session revisions.
+type RevisionConflictError struct {
+	SessionID string
+	Expected  uint64
+	Actual    uint64
+}
+
+func (e *RevisionConflictError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%s: session %q expected %d, actual %d", ErrRevisionConflict, strings.TrimSpace(e.SessionID), e.Expected, e.Actual)
+}
+
+func (e *RevisionConflictError) Is(target error) bool { return target == ErrRevisionConflict }
+
+func (e *RevisionConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
+
+// LeaseConflictError carries the session and stable reason for one failed
+// store-level execution lease operation.
+type LeaseConflictError struct {
+	SessionID string
+	Detail    string
+}
+
+func (e *LeaseConflictError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%s: session %q: %s", ErrLeaseConflict, strings.TrimSpace(e.SessionID), strings.TrimSpace(e.Detail))
+}
+
+func (e *LeaseConflictError) Is(target error) bool { return target == ErrLeaseConflict }
+
+func (e *LeaseConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
+
+// CommittedError reports that a durable store committed a mutation even though
+// post-commit apply or reporting returned an error. Callers must treat the
+// mutation as durable: re-read state and retry with the same idempotency
+// identity rather than inventing a new write or rolling back process state.
+type CommittedError struct {
+	Err error
+}
+
+func (e *CommittedError) Error() string {
+	if e == nil || e.Err == nil {
+		return "agent-sdk/session: mutation committed"
+	}
+	return "agent-sdk/session: mutation committed: " + e.Err.Error()
+}
+
+func (e *CommittedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func (e *CommittedError) ErrorCode() errorcode.Code { return errorcode.UnknownOutcome }
+
+// DisplayMessage hides persistence paths and platform diagnostics from
+// user-facing surfaces while preserving the committed outcome.
+func (e *CommittedError) DisplayMessage() string {
+	return "The change was saved, but Caelis could not finish local storage maintenance."
+}
+
+// IsCommitted reports whether err is a post-commit reporting failure.
+func IsCommitted(err error) bool {
+	var committed *CommittedError
+	return errors.As(err, &committed)
+}
+
+// EventConflictError reports a stable event ID reused for different content.
+type EventConflictError struct {
+	SessionID      string
+	EventID        string
+	IdempotencyKey string
+}
+
+func (e *EventConflictError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	identity := strings.TrimSpace(e.EventID)
+	if identity == "" {
+		identity = strings.TrimSpace(e.IdempotencyKey)
+	}
+	return fmt.Sprintf("%s: session %q identity %q has different content", ErrEventConflict, strings.TrimSpace(e.SessionID), identity)
+}
+
+func (e *EventConflictError) Is(target error) bool { return target == ErrEventConflict }
+
+func (e *EventConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
+
+// CheckExpectedRevision applies the shared session compare-and-swap contract.
+func CheckExpectedRevision(active Session, expected *uint64) error {
+	if expected == nil || *expected == active.Revision {
+		return nil
+	}
+	return &RevisionConflictError{SessionID: active.SessionID, Expected: *expected, Actual: active.Revision}
+}
+
+// JSONValueError reports which durable session value failed validation.
+type JSONValueError struct {
+	Scope string
+	Err   error
+}
+
+func (e *JSONValueError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	scope := strings.TrimSpace(e.Scope)
+	if scope == "" {
+		scope = "value"
+	}
+	return fmt.Sprintf("%s: %s: %v", ErrInvalidValue, scope, e.Err)
+}
+
+func (e *JSONValueError) Unwrap() error {
+	if e == nil || e.Err == nil {
+		return ErrInvalidValue
+	}
+	return e.Err
+}
+
+func (e *JSONValueError) Is(target error) bool {
+	return target == ErrInvalidValue
+}
+
+func (e *JSONValueError) ErrorCode() errorcode.Code { return errorcode.InvalidArgument }
+
+// ValidateState validates one state object before a store makes it visible.
+func ValidateState(state map[string]any) error {
+	return validateJSONMap("state", state)
+}
+
+// ValidateMetadata validates one metadata object before durable storage.
+func ValidateMetadata(metadata map[string]any) error {
+	return validateJSONMap("metadata", metadata)
+}
+
+func validateJSONMap(scope string, value map[string]any) error {
+	if err := jsonvalue.ValidateMap(value); err != nil {
+		return &JSONValueError{Scope: scope, Err: err}
+	}
+	return nil
+}
+
+// EventType identifies one canonical session event kind.
+type EventType string
+
+const (
+	EventTypeUser        EventType = "user"
+	EventTypeAssistant   EventType = "assistant"
+	EventTypePlan        EventType = "plan"
+	EventTypeToolCall    EventType = "tool_call"
+	EventTypeToolResult  EventType = "tool_result"
+	EventTypeParticipant EventType = "participant"
+	EventTypeHandoff     EventType = "handoff"
+	EventTypeCompact     EventType = "compact"
+	EventTypeNotice      EventType = "notice"
+	EventTypeLifecycle   EventType = "lifecycle"
+	EventTypeSystem      EventType = "system"
+	EventTypeContext     EventType = "context"
+	EventTypeCustom      EventType = "custom"
+)
+
+// Visibility defines how one event participates in history and invocation
+// context reconstruction.
+type Visibility string
+
+const (
+	VisibilityCanonical Visibility = "canonical"
+	VisibilityUIOnly    Visibility = "ui_only"
+	VisibilityOverlay   Visibility = "overlay"
+	VisibilityMirror    Visibility = "mirror"
+	// VisibilityJournal marks durable execution-control facts that are excluded
+	// from canonical model history and transcript replay.
+	VisibilityJournal Visibility = "journal"
+)
+
+// ControllerKind identifies the main controller family of one session epoch.
+type ControllerKind string
+
+const (
+	ControllerKindKernel ControllerKind = "kernel"
+	ControllerKindACP    ControllerKind = "acp"
+)
+
+// ParticipantKind identifies one attached participant family.
+type ParticipantKind string
+
+const (
+	ParticipantKindACP      ParticipantKind = "acp"
+	ParticipantKindSubagent ParticipantKind = "subagent"
+)
+
+// ParticipantRole identifies the role of one attached participant.
+type ParticipantRole string
+
+const (
+	ParticipantRoleSidecar   ParticipantRole = "sidecar"
+	ParticipantRoleDelegated ParticipantRole = "delegated"
+	ParticipantRoleObserver  ParticipantRole = "observer"
+)
+
+// ActorKind identifies the high-level actor family of one event.
+type ActorKind string
+
+const (
+	ActorKindUser        ActorKind = "user"
+	ActorKindController  ActorKind = "controller"
+	ActorKindParticipant ActorKind = "participant"
+	ActorKindTool        ActorKind = "tool"
+	ActorKindSystem      ActorKind = "system"
+)
+
+// WorkspaceRef identifies one workspace boundary.
+type WorkspaceRef struct {
+	Key string `json:"key,omitempty"`
+	CWD string `json:"cwd,omitempty"`
+}
+
+// SessionRef identifies one logical session.
+type SessionRef struct {
+	AppName string `json:"app_name,omitempty"`
+	// Compatibility only: identity and authorization belong to the
+	// Control/AppServer principal boundary. This field remains for persisted
+	// stores while product code migrates to SessionID and WorkspaceKey addressing.
+	UserID       string `json:"user_id,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
+	WorkspaceKey string `json:"workspace_key,omitempty"`
+}
+
+// ControllerBinding is the durable active-controller binding for one session.
+type ControllerBinding struct {
+	Kind            ControllerKind `json:"kind,omitempty"`
+	ControllerID    string         `json:"controller_id,omitempty"`
+	AgentName       string         `json:"agent_name,omitempty"`
+	Label           string         `json:"label,omitempty"`
+	EpochID         string         `json:"epoch_id,omitempty"`
+	RemoteSessionID string         `json:"remote_session_id,omitempty"`
+	ContextSyncSeq  uint64         `json:"context_sync_seq,omitempty"`
+	AttachedAt      time.Time      `json:"attached_at,omitempty"`
+	Source          string         `json:"source,omitempty"`
+}
+
+// ParticipantBinding is the durable participant attachment for one session.
+type ParticipantBinding struct {
+	ID        string          `json:"id,omitempty"`
+	Kind      ParticipantKind `json:"kind,omitempty"`
+	Role      ParticipantRole `json:"role,omitempty"`
+	AgentName string          `json:"agent_name,omitempty"`
+	Label     string          `json:"label,omitempty"`
+	// Placement is the complete frozen execution choice used for attach and
+	// reattach. ProfileID is audit-only; Runtime never resolves it again.
+	Placement    placement.Placement `json:"placement"`
+	SessionID    string              `json:"session_id,omitempty"`
+	Source       string              `json:"source,omitempty"`
+	ParentTurnID string              `json:"parent_turn_id,omitempty"`
+	DelegationID string              `json:"delegation_id,omitempty"`
+	// AttachmentGeneration identifies the exact live endpoint instance behind
+	// this durable binding. Conditional detach must match it.
+	AttachmentGeneration string    `json:"attachment_generation,omitempty"`
+	ContextSyncSeq       uint64    `json:"context_sync_seq,omitempty"`
+	AttachedAt           time.Time `json:"attached_at,omitempty"`
+	ControllerRef        string    `json:"controller_ref,omitempty"`
+}
+
+// Session describes one session row.
+type Session struct {
+	SessionRef
+	Revision     uint64               `json:"revision,omitempty"`
+	CWD          string               `json:"cwd,omitempty"`
+	Title        string               `json:"title,omitempty"`
+	Metadata     map[string]any       `json:"metadata,omitempty"`
+	Controller   ControllerBinding    `json:"controller,omitempty"`
+	Participants []ParticipantBinding `json:"participants,omitempty"`
+	CreatedAt    time.Time            `json:"created_at,omitempty"`
+	UpdatedAt    time.Time            `json:"updated_at,omitempty"`
+}
+
+// SessionLease is a neutral cloud-store coordination record for one canonical
+// Turn or exclusive controller-ownership transition. It is not a lock against
+// all Session collaboration: explicitly classified Control mutations may
+// coexist, while Runtime and exclusive Control mutations carry its fence.
+// Worker-placement and scheduling policy remain in Control.
+type SessionLease struct {
+	SessionRef   SessionRef `json:"session_ref"`
+	LeaseID      string     `json:"lease_id,omitempty"`
+	OwnerID      string     `json:"owner_id,omitempty"`
+	Revision     uint64     `json:"revision,omitempty"`
+	FencingToken uint64     `json:"fencing_token,omitempty"`
+	AcquiredAt   time.Time  `json:"acquired_at,omitempty"`
+	HeartbeatAt  time.Time  `json:"heartbeat_at,omitempty"`
+	ExpiresAt    time.Time  `json:"expires_at,omitempty"`
+}
+
+// AcquireSessionLeaseRequest requests a store-level canonical execution or
+// controller-transition lease.
+type AcquireSessionLeaseRequest struct {
+	SessionRef SessionRef    `json:"session_ref"`
+	OwnerID    string        `json:"owner_id,omitempty"`
+	TTL        time.Duration `json:"ttl,omitempty"`
+}
+
+// HeartbeatSessionLeaseRequest renews one existing lease with lease CAS.
+type HeartbeatSessionLeaseRequest struct {
+	SessionRef            SessionRef    `json:"session_ref"`
+	LeaseID               string        `json:"lease_id,omitempty"`
+	OwnerID               string        `json:"owner_id,omitempty"`
+	ExpectedLeaseRevision uint64        `json:"expected_lease_revision,omitempty"`
+	TTL                   time.Duration `json:"ttl,omitempty"`
+}
+
+// ReleaseSessionLeaseRequest releases one existing lease with lease CAS.
+type ReleaseSessionLeaseRequest struct {
+	SessionRef            SessionRef `json:"session_ref"`
+	LeaseID               string     `json:"lease_id,omitempty"`
+	OwnerID               string     `json:"owner_id,omitempty"`
+	ExpectedLeaseRevision uint64     `json:"expected_lease_revision,omitempty"`
+}
+
+// LoadedSession is one loaded session plus canonical events and state.
+type LoadedSession struct {
+	Session Session        `json:"session"`
+	Events  []*Event       `json:"events,omitempty"`
+	State   map[string]any `json:"state,omitempty"`
+}
+
+// SessionSummary is one session listing row.
+type SessionSummary struct {
+	SessionRef
+	CWD       string         `json:"cwd,omitempty"`
+	Title     string         `json:"title,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	UpdatedAt time.Time      `json:"updated_at,omitempty"`
+}
+
+// SessionList is one paged session listing result.
+type SessionList struct {
+	Sessions   []SessionSummary `json:"sessions,omitempty"`
+	NextCursor string           `json:"next_cursor,omitempty"`
+}
+
+// StartSessionRequest creates or reuses one session skeleton.
+type StartSessionRequest struct {
+	AppName string `json:"app_name,omitempty"`
+	// Compatibility only: Control supplies owner metadata at the persistence
+	// boundary; reusable Runtime callers must not partition by this field.
+	UserID             string         `json:"user_id,omitempty"`
+	Workspace          WorkspaceRef   `json:"workspace,omitempty"`
+	PreferredSessionID string         `json:"preferred_session_id,omitempty"`
+	Title              string         `json:"title,omitempty"`
+	Metadata           map[string]any `json:"metadata,omitempty"`
+}
+
+// LoadSessionRequest loads one session and recent events.
+type LoadSessionRequest struct {
+	SessionRef       SessionRef `json:"session_ref"`
+	Limit            int        `json:"limit,omitempty"`
+	IncludeTransient bool       `json:"include_transient,omitempty"`
+}
+
+// AppendEventRequest appends one event to one session.
+type AppendEventRequest struct {
+	SessionRef       SessionRef    `json:"session_ref"`
+	ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+	Event            *Event        `json:"event"`
+}
+
+// AppendEventResult distinguishes a newly committed event from an idempotent
+// retry that resolved to the already durable event.
+type AppendEventResult struct {
+	Event    *Event
+	Appended bool
+}
+
+// SessionRevisionPrecondition requires one related Session to remain at the
+// exact revision observed while a cross-Session authority was resolved.
+type SessionRevisionPrecondition struct {
+	SessionRef       SessionRef
+	ExpectedRevision uint64
+}
+
+// ConditionalAppendEventRequest appends one target event only while every
+// related Session revision still matches. Stores check all preconditions and
+// commit the target append in one serialization boundary.
+type ConditionalAppendEventRequest struct {
+	AppendEventRequest
+	RelatedRevisions []SessionRevisionPrecondition
+}
+
+// AppendEventsRequest appends multiple events to one session as one batch.
+// Implementations must validate the full batch before making any event durable.
+type AppendEventsRequest struct {
+	SessionRef       SessionRef    `json:"session_ref"`
+	ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+	Events           []*Event      `json:"events"`
+}
+
+// AppendEventsAndUpdateStateRequest appends multiple events and derives the
+// next session state in one store transaction. TransactionID identifies the
+// complete event/state mutation across retries. UpdateState receives the
+// normalized events that will be returned to the caller; an event-derived
+// callback is not repeated when every input event deduplicates. A pure-state
+// mutation uses no Events. MutationDigest identifies the callback semantics;
+// it is combined with canonical event payloads and bound to TransactionID.
+type AppendEventsAndUpdateStateRequest struct {
+	SessionRef       SessionRef
+	ExpectedRevision *uint64
+	MutationGuard    MutationGuard
+	TransactionID    string
+	MutationDigest   string
+	Events           []*Event
+	UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
+}
+
+// ReplaceStateRequest replaces one durable Session state snapshot under an
+// explicit revision and mutation-authority fence.
+type ReplaceStateRequest struct {
+	SessionRef       SessionRef
+	ExpectedRevision *uint64
+	MutationGuard    MutationGuard
+	State            map[string]any
+}
+
+// UpdateStateRequest derives one durable Session state snapshot under an
+// explicit revision and mutation-authority fence.
+type UpdateStateRequest struct {
+	SessionRef       SessionRef
+	ExpectedRevision *uint64
+	MutationGuard    MutationGuard
+	Update           func(map[string]any) (map[string]any, error)
+}
+
+// EventsRequest lists events for one session.
+type EventsRequest struct {
+	SessionRef       SessionRef `json:"session_ref"`
+	Limit            int        `json:"limit,omitempty"`
+	IncludeTransient bool       `json:"include_transient,omitempty"`
+}
+
+// BindControllerRequest replaces the active controller binding for one session.
+type BindControllerRequest struct {
+	SessionRef    SessionRef        `json:"session_ref"`
+	MutationGuard MutationGuard     `json:"mutation_guard,omitempty"`
+	Binding       ControllerBinding `json:"binding"`
+}
+
+// BindControllerWithEventRequest atomically commits one controller ownership
+// transition and its matching durable transfer event.
+type BindControllerWithEventRequest struct {
+	SessionRef       SessionRef        `json:"session_ref"`
+	ExpectedRevision *uint64           `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard     `json:"mutation_guard,omitempty"`
+	Binding          ControllerBinding `json:"binding"`
+	Event            *Event            `json:"event"`
+}
+
+// PutParticipantRequest creates or updates one participant binding.
+type PutParticipantRequest struct {
+	SessionRef       SessionRef    `json:"session_ref"`
+	ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+	// ExpectedDelegationID optionally makes participant identity replacement a
+	// delegation CAS. Nil defaults to Binding.DelegationID, including empty.
+	ExpectedDelegationID *string            `json:"expected_delegation_id,omitempty"`
+	Binding              ParticipantBinding `json:"binding"`
+}
+
+// RemoveParticipantRequest detaches one participant binding.
+type RemoveParticipantRequest struct {
+	SessionRef       SessionRef    `json:"session_ref"`
+	ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+	ParticipantID    string        `json:"participant_id,omitempty"`
+	// ExpectedDelegationID, when non-nil, prevents one delegation from
+	// detaching another delegation that reused the same participant ID.
+	ExpectedDelegationID *string `json:"expected_delegation_id,omitempty"`
+}
+
+// PutParticipantWithEventRequest creates or updates one participant binding and
+// appends the matching lifecycle event in one store transaction.
+type PutParticipantWithEventRequest struct {
+	SessionRef       SessionRef    `json:"session_ref"`
+	ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+	// ExpectedDelegationID optionally makes participant identity replacement a
+	// delegation CAS. Nil defaults to Binding.DelegationID, including empty.
+	ExpectedDelegationID *string            `json:"expected_delegation_id,omitempty"`
+	Binding              ParticipantBinding `json:"binding"`
+	Event                *Event             `json:"event"`
+}
+
+// RemoveParticipantWithEventRequest removes one participant binding and appends
+// the matching lifecycle event in one store transaction.
+type RemoveParticipantWithEventRequest struct {
+	SessionRef       SessionRef    `json:"session_ref"`
+	ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+	ParticipantID    string        `json:"participant_id,omitempty"`
+	// ExpectedDelegationID, when non-nil, prevents one delegation from
+	// detaching another delegation that reused the same participant ID.
+	ExpectedDelegationID *string `json:"expected_delegation_id,omitempty"`
+	Event                *Event  `json:"event"`
+}
+
+// ListSessionsRequest lists sessions in one workspace or user namespace.
+type ListSessionsRequest struct {
+	AppName string `json:"app_name,omitempty"`
+	// Compatibility only: listing authorization belongs to the caller's Control
+	// principal. WorkspaceKey is the reusable SDK namespace during migration.
+	UserID       string `json:"user_id,omitempty"`
+	WorkspaceKey string `json:"workspace_key,omitempty"`
+	Cursor       string `json:"cursor,omitempty"`
+	Limit        int    `json:"limit,omitempty"`
+}
+
+// ActorRef identifies the actor associated with one event.
+type ActorRef struct {
+	Kind ActorKind `json:"kind,omitempty"`
+	ID   string    `json:"id,omitempty"`
+	Role string    `json:"role,omitempty"`
+	Name string    `json:"name,omitempty"`
+}
+
+// ActorRefHasIdentity reports whether one actor reference carries an actor
+// kind, stable ID, or display name. Role alone describes a relationship and
+// does not identify an actor.
+func ActorRefHasIdentity(ref ActorRef) bool {
+	return ref.Kind != "" || strings.TrimSpace(ref.ID) != "" || strings.TrimSpace(ref.Name) != ""
+}
+
+// ControllerExecutor returns the durable Turn executor identity for one
+// controller binding. The executor is distinct from an individual event actor:
+// a user event is authored by the user but executed by this Agent.
+func ControllerExecutor(binding ControllerBinding) ActorRef {
+	binding = CloneControllerBinding(binding)
+	return ActorRef{
+		Kind: ActorKindController,
+		ID:   binding.ControllerID,
+		Role: string(binding.Kind),
+		Name: firstExecutorName(binding.AgentName, binding.ControllerID, string(binding.Kind)),
+	}
+}
+
+// ParticipantExecutor returns the durable Turn executor identity for one
+// participant binding, including its addressable handle when available.
+func ParticipantExecutor(binding ParticipantBinding) ActorRef {
+	binding = CloneParticipantBinding(binding)
+	agentName := strings.TrimSpace(binding.AgentName)
+	handle := strings.Trim(strings.TrimSpace(binding.Label), "@/")
+	name := agentName
+	if handle != "" && !strings.EqualFold(handle, agentName) {
+		if name == "" {
+			name = handle
+		} else {
+			name += "(" + handle + ")"
+		}
+	}
+	return ActorRef{
+		Kind: ActorKindParticipant,
+		ID:   binding.ID,
+		Role: string(binding.Role),
+		Name: firstExecutorName(name, binding.ID, string(binding.Kind)),
+	}
+}
+
+func firstExecutorName(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return "unknown"
+}
+
+// ControllerRef identifies the controller epoch associated with one event.
+type ControllerRef struct {
+	Kind    ControllerKind `json:"kind,omitempty"`
+	ID      string         `json:"id,omitempty"`
+	EpochID string         `json:"epoch_id,omitempty"`
+}
+
+// ParticipantRef identifies the participant associated with one event.
+type ParticipantRef struct {
+	ID           string          `json:"id,omitempty"`
+	Kind         ParticipantKind `json:"kind,omitempty"`
+	Role         ParticipantRole `json:"role,omitempty"`
+	DelegationID string          `json:"delegation_id,omitempty"`
+}
+
+// ACPRef identifies ACP-specific origin details for one canonical event.
+type ACPRef struct {
+	SessionID string `json:"session_id,omitempty"`
+	EventType string `json:"event_type,omitempty"`
+}
+
+// EventInvocation records runtime-owned model invocation context for one event.
+// Provider token usage remains in provider metadata; this context lets usage
+// accounting group those tokens without overloading the provider Usage shape.
+type EventInvocation struct {
+	Provider            string `json:"provider,omitempty"`
+	Model               string `json:"model,omitempty"`
+	ContextWindowTokens int    `json:"context_window_tokens,omitempty"`
+	// PromptPrefixFingerprint identifies the runtime-controlled instructions,
+	// tools, and output shape used for this provider measurement.
+	PromptPrefixFingerprint string `json:"prompt_prefix_fingerprint,omitempty"`
+	// PromptPrefixTokens is the matching bounded local estimate. It supports
+	// reconciling prefix changes without re-estimating provider-measured history.
+	PromptPrefixTokens int `json:"prompt_prefix_tokens,omitempty"`
+}
+
+// EventScope is the compact session/controller/participant origin view for one
+// canonical event.
+type EventScope struct {
+	TurnID      string         `json:"turn_id,omitempty"`
+	Source      string         `json:"source,omitempty"`
+	Executor    ActorRef       `json:"executor,omitempty"`
+	Controller  ControllerRef  `json:"controller,omitempty"`
+	Participant ParticipantRef `json:"participant,omitempty"`
+	ACP         ACPRef         `json:"acp,omitempty"`
+}
+
+// Lifecycle starts, loads, and lists sessions without granting mutation of an
+// already active session.
+type Lifecycle interface {
+	StartSession(context.Context, StartSessionRequest) (Session, error)
+	LoadSession(context.Context, LoadSessionRequest) (LoadedSession, error)
+	ListSessions(context.Context, ListSessionsRequest) (SessionList, error)
+}
+
+// Reader exposes immutable session and event snapshots.
+type Reader interface {
+	Session(context.Context, SessionRef) (Session, error)
+	Events(context.Context, EventsRequest) ([]*Event, error)
+}
+
+// EventAppender appends canonical events with optional revision CAS.
+type EventAppender interface {
+	AppendEvent(context.Context, AppendEventRequest) (*Event, error)
+}
+
+// EventAppenderWithOutcome is the optional precise append contract used when
+// repeating a live side effect must be gated on whether persistence was new.
+type EventAppenderWithOutcome interface {
+	AppendEventWithOutcome(context.Context, AppendEventRequest) (AppendEventResult, error)
+}
+
+// ConditionalEventAppenderWithOutcome is the precise append contract for an
+// event whose authority depends on durable facts in other Sessions.
+type ConditionalEventAppenderWithOutcome interface {
+	AppendEventWithOutcomeConditional(context.Context, ConditionalAppendEventRequest) (AppendEventResult, error)
+}
+
+// AppendEventWithOutcome uses the precise contract when available. A legacy
+// Session reader/appender gets a read-before-append fallback for sequential
+// idempotent retries; implementations that admit concurrent writers should
+// provide EventAppenderWithOutcome for an atomic result.
+func AppendEventWithOutcome(ctx context.Context, appender EventAppender, req AppendEventRequest) (AppendEventResult, error) {
+	if precise, ok := appender.(EventAppenderWithOutcome); ok {
+		return precise.AppendEventWithOutcome(ctx, req)
+	}
+	alreadyDurable := false
+	if reader, ok := appender.(Reader); ok && req.Event != nil {
+		events, err := reader.Events(ctx, EventsRequest{SessionRef: req.SessionRef, IncludeTransient: true})
+		if err != nil {
+			return AppendEventResult{}, err
+		}
+		requestedID := strings.TrimSpace(req.Event.ID)
+		requestedKey := strings.TrimSpace(req.Event.IdempotencyKey)
+		for _, event := range events {
+			if event == nil {
+				continue
+			}
+			if requestedID != "" && strings.TrimSpace(event.ID) == requestedID ||
+				requestedKey != "" && strings.TrimSpace(event.IdempotencyKey) == requestedKey {
+				alreadyDurable = true
+				break
+			}
+		}
+	}
+	event, err := appender.AppendEvent(ctx, req)
+	return AppendEventResult{Event: event, Appended: err == nil && !alreadyDurable}, err
+}
+
+// ControllerBindingStore mutates the durable active-controller binding.
+type ControllerBindingStore interface {
+	BindController(context.Context, BindControllerRequest) (Session, error)
+}
+
+// ParticipantBindingStore mutates durable participant bindings.
+// Implementations must return RevisionConflictError for a failed revision CAS
+// and ParticipantBindingConflictError for a failed delegation CAS. If a
+// mutation commits but reporting it fails, implementations must return the
+// exact committed Session together with an error matching CommittedError.
+type ParticipantBindingStore interface {
+	PutParticipant(context.Context, PutParticipantRequest) (Session, error)
+	RemoveParticipant(context.Context, RemoveParticipantRequest) (Session, error)
+}
+
+// StateReader exposes recursively isolated durable state snapshots.
+type StateReader interface {
+	SnapshotState(context.Context, SessionRef) (map[string]any, error)
+}
+
+// StateWriter replaces or transactionally updates durable Session state.
+// Implementations enforce ExpectedRevision and MutationGuard before commit and
+// return the exact committed Session alongside post-commit reporting errors.
+type StateWriter interface {
+	ReplaceState(context.Context, ReplaceStateRequest) (Session, error)
+	UpdateState(context.Context, UpdateStateRequest) (Session, error)
+}
+
+// StateStore combines durable state reads and writes.
+type StateStore interface {
+	StateReader
+	StateWriter
+}
+
+// Service is the full reference session service. Consumers should accept the
+// narrow interfaces above unless they genuinely need the aggregate.
+type Service interface {
+	Lifecycle
+	Reader
+	EventAppender
+	ControllerBindingStore
+	ParticipantBindingStore
+	StateStore
+}
+
+// ParticipantLifecycleService is implemented by stores that can atomically
+// change participant bindings and append their replayable lifecycle events.
+// Implementations must enforce ExpectedRevision, MutationGuard, and the
+// delegation identity CAS carried by participant lifecycle requests. CAS
+// failures and post-commit reporting failures use the same normative error and
+// exact-result contract documented by ParticipantBindingStore.
+type ParticipantLifecycleService interface {
+	PutParticipantWithEvent(context.Context, PutParticipantWithEventRequest) (Session, *Event, error)
+	RemoveParticipantWithEvent(context.Context, RemoveParticipantWithEventRequest) (Session, *Event, error)
+}
+
+// ControllerHandoffService is implemented by stores that atomically commit a
+// controller binding and its matching durable handoff event.
+type ControllerHandoffService interface {
+	BindControllerWithEvent(context.Context, BindControllerWithEventRequest) (Session, *Event, error)
+}
+
+// EventBatchService is implemented by stores that can validate and append a
+// batch of events without exposing partially appended durable history.
+type EventBatchService interface {
+	AppendEvents(context.Context, AppendEventsRequest) ([]*Event, error)
+}
+
+// EventBatchStateService is implemented by stores that can append an event
+// batch and update session state without exposing only one side of the commit.
+type EventBatchStateService interface {
+	AppendEventsAndUpdateState(context.Context, AppendEventsAndUpdateStateRequest) ([]*Event, error)
+}
+
+// SessionLeaseService coordinates one canonical Turn or controller transition
+// across Runtime instances. Control owns placement and heartbeat policy;
+// stores own lease CAS and mutation-fence validation.
+type SessionLeaseService interface {
+	AcquireSessionLease(context.Context, AcquireSessionLeaseRequest) (SessionLease, error)
+	HeartbeatSessionLease(context.Context, HeartbeatSessionLeaseRequest) (SessionLease, error)
+	ReleaseSessionLease(context.Context, ReleaseSessionLeaseRequest) error
+}
+
+// SessionLeaseReader reloads the current durable lease after an unknown
+// reporting outcome. It does not acquire or renew ownership.
+type SessionLeaseReader interface {
+	SessionLease(context.Context, SessionRef) (SessionLease, error)
+}

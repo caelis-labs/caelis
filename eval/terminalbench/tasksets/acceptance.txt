@@ -1,0 +1,7 @@
+# Fixed Terminal-Bench 2.1 product-acceptance slice. Keep this stable so scores
+# remain comparable across AppServer/TUI/ACP migration commits.
+terminal-bench/fix-git
+terminal-bench/openssl-selfsigned-cert
+terminal-bench/regex-log
+terminal-bench/sqlite-db-truncate
+terminal-bench/headless-terminal

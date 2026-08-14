@@ -1,0 +1,929 @@
+package tuiapp
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/caelis-labs/caelis/internal/controlprompt/promptrefs"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/rivo/uniseg"
+)
+
+// ---------------------------------------------------------------------------
+// Diagnostics
+// ---------------------------------------------------------------------------
+
+func newDiagnostics() Diagnostics {
+	return Diagnostics{
+		RedrawMode:                 "fullscreen",
+		UpdateMessagesByLane:       make(map[renderEventLane]uint64),
+		UpdateMessagesByType:       make(map[string]uint64),
+		ViewportSetContentReason:   make(map[string]uint64),
+		BlockRenderCallsByKind:     make(map[BlockKind]uint64),
+		StreamSmoothingFlushReason: make(map[string]uint64),
+	}
+}
+
+func (m *Model) ensureDiagnosticsMaps() {
+	if m == nil {
+		return
+	}
+	if m.diag.UpdateMessagesByLane == nil {
+		m.diag.UpdateMessagesByLane = make(map[renderEventLane]uint64)
+	}
+	if m.diag.UpdateMessagesByType == nil {
+		m.diag.UpdateMessagesByType = make(map[string]uint64)
+	}
+	if m.diag.ViewportSetContentReason == nil {
+		m.diag.ViewportSetContentReason = make(map[string]uint64)
+	}
+	if m.diag.BlockRenderCallsByKind == nil {
+		m.diag.BlockRenderCallsByKind = make(map[BlockKind]uint64)
+	}
+	if m.diag.StreamSmoothingFlushReason == nil {
+		m.diag.StreamSmoothingFlushReason = make(map[string]uint64)
+	}
+}
+
+func (m *Model) observeRenderMessage(msg tea.Msg, policy renderEventPolicy) {
+	if m == nil {
+		return
+	}
+	m.ensureDiagnosticsMaps()
+	m.diag.UpdateMessagesByLane[policy.lane]++
+	m.diag.UpdateMessagesByType[fmt.Sprintf("%T", msg)]++
+}
+
+func (m *Model) observeViewportSetContent(lines []string, reason string) {
+	if m == nil {
+		return
+	}
+	m.ensureDiagnosticsMaps()
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "unknown"
+	}
+	m.diag.ViewportSetContentLines++
+	m.diag.ViewportSetContentLineCount += uint64(len(lines))
+	var bytes uint64
+	for _, line := range lines {
+		bytes += uint64(len(line))
+	}
+	m.diag.ViewportSetContentBytes += bytes
+	m.diag.ViewportSetContentReason[reason]++
+}
+
+func (m *Model) observeBlockRender(kind BlockKind) {
+	if m == nil {
+		return
+	}
+	m.ensureDiagnosticsMaps()
+	m.diag.BlockRenderCallsByKind[kind]++
+}
+
+func (m *Model) observeStreamSmoothingFlush(reason string) {
+	if m == nil {
+		return
+	}
+	m.ensureDiagnosticsMaps()
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "unknown"
+	}
+	m.diag.StreamSmoothingFlushReason[reason]++
+}
+
+func (m *Model) observeGlamourRender() {
+	if m == nil {
+		return
+	}
+	m.diag.GlamourRenderCalls++
+}
+
+func (m *Model) observeInlineMarkdownRender() {
+	if m == nil {
+		return
+	}
+	m.diag.InlineMarkdownCalls++
+}
+
+func (m *Model) observeControlStatusCall() {
+	if m == nil {
+		return
+	}
+	m.diag.ControlStatusCalls++
+}
+
+func (m *Model) observeRender(duration time.Duration, bytes int, redrawMode string) {
+	if m.cfg.ProgramSender != nil {
+		m.diag.ProgramSendsAfterClose = m.cfg.ProgramSender.DroppedAfterClose()
+	}
+	m.diag.Frames++
+	m.diag.LastFrameDuration = duration
+	if strings.TrimSpace(redrawMode) == "" {
+		redrawMode = "incremental"
+	}
+	m.diag.RedrawMode = redrawMode
+	if redrawMode == "fullscreen" || redrawMode == "full" {
+		m.diag.FullRepaints++
+	} else {
+		m.diag.IncrementalFrames++
+	}
+	if duration >= 40*time.Millisecond {
+		m.diag.SlowFrames++
+	}
+	if duration > m.diag.MaxFrameDuration {
+		m.diag.MaxFrameDuration = duration
+	}
+	if m.diag.Frames == 1 {
+		m.diag.AvgFrameDuration = duration
+	} else {
+		total := time.Duration(int64(m.diag.AvgFrameDuration)*(int64(m.diag.Frames)-1) + int64(duration))
+		m.diag.AvgFrameDuration = total / time.Duration(m.diag.Frames)
+	}
+	if bytes > 0 {
+		m.diag.RenderBytes += uint64(bytes)
+		if uint64(bytes) > m.diag.PeakFrameBytes {
+			m.diag.PeakFrameBytes = uint64(bytes)
+		}
+	}
+	m.observeInputLatency()
+	m.diag.LastRenderAt = time.Now()
+	if m.cfg.OnDiagnostics != nil {
+		m.cfg.OnDiagnostics(m.diag)
+	}
+	m.writeDiagnosticsDebugFile()
+}
+
+func (m *Model) writeDiagnosticsDebugFile() {
+	if m == nil {
+		return
+	}
+	path := strings.TrimSpace(m.cfg.DiagnosticsDebugFile)
+	if path == "" {
+		path = strings.TrimSpace(os.Getenv("CAELIS_TUI_RENDER_DEBUG_FILE"))
+	}
+	if path == "" {
+		return
+	}
+	now := time.Now()
+	if !m.lastDiagnosticsDebugWrite.IsZero() && now.Sub(m.lastDiagnosticsDebugWrite) < time.Second {
+		return
+	}
+	payload, err := json.MarshalIndent(m.diag, "", "  ")
+	if err != nil {
+		m.diag.DiagnosticsDebugWriteErrors++
+		return
+	}
+	if err := os.WriteFile(path, append(payload, '\n'), 0o600); err != nil {
+		m.diag.DiagnosticsDebugWriteErrors++
+		return
+	}
+	m.lastDiagnosticsDebugWrite = now
+}
+
+func (m *Model) observeInputLatency() {
+	if m.pendingInputAt.IsZero() {
+		return
+	}
+	latency := time.Since(m.pendingInputAt)
+	m.pendingInputAt = time.Time{}
+	m.diag.LastInputLatency = latency
+	m.inputLatencyCount++
+	if m.diag.AvgInputLatency == 0 || m.inputLatencyCount <= 1 {
+		m.diag.AvgInputLatency = latency
+	} else {
+		total := time.Duration(int64(m.diag.AvgInputLatency)*(int64(m.inputLatencyCount)-1) + int64(latency))
+		m.diag.AvgInputLatency = total / time.Duration(m.inputLatencyCount)
+	}
+	const window = 128
+	if len(m.inputLatencyWindow) >= window {
+		copy(m.inputLatencyWindow, m.inputLatencyWindow[1:])
+		m.inputLatencyWindow = m.inputLatencyWindow[:window-1]
+	}
+	m.inputLatencyWindow = append(m.inputLatencyWindow, latency)
+	m.diag.P95InputLatency = percentileDuration(m.inputLatencyWindow, 0.95)
+}
+
+// ---------------------------------------------------------------------------
+// Utility functions
+// ---------------------------------------------------------------------------
+
+func normalizeStatusModel(model string) string {
+	if model = strings.TrimSpace(model); model != "" {
+		return model
+	}
+	return "not configured (/connect)"
+}
+
+func contextOrBackground(ctx context.Context) context.Context {
+	if ctx != nil {
+		return ctx
+	}
+	return context.Background()
+}
+
+func (m *Model) cachedThemeRenderKey() string {
+	if m == nil {
+		return ""
+	}
+	if m.themeCacheKey == "" {
+		m.themeCacheKey = themeRenderCacheKey(m.theme)
+	}
+	return m.themeCacheKey
+}
+
+func (m *Model) blockRenderContext(width int) BlockRenderContext {
+	if width <= 0 {
+		width = 1
+	}
+	return BlockRenderContext{
+		Width:                 width,
+		Height:                m.viewport.Height(),
+		TermWidth:             m.width,
+		Theme:                 m.theme,
+		ThemeKey:              m.cachedThemeRenderKey(),
+		Workspace:             m.renderWorkspacePath(),
+		SpinnerView:           m.spinner.View(),
+		AnimationsEnabled:     !m.noAnimation,
+		ObserveGlamourRender:  m.observeGlamourRender,
+		ObserveInlineMarkdown: m.observeInlineMarkdownRender,
+	}
+}
+
+func (m *Model) renderWorkspacePath() string {
+	if m == nil {
+		return ""
+	}
+	if workspace := strings.TrimSpace(m.statusView.Workspace); workspace != "" {
+		if path, _, _, ok := parseWorkspaceStatusDisplay(workspace); ok {
+			return path
+		}
+		return workspace
+	}
+	return strings.TrimSpace(m.cfg.Workspace)
+}
+
+func (m *Model) setWorkspaceDisplay(workspace string) (string, bool) {
+	workspace = strings.TrimSpace(workspace)
+	if m == nil || workspace == "" {
+		return workspace, false
+	}
+	previous := firstNonEmpty(strings.TrimSpace(m.stableWorkspaceDisplay), strings.TrimSpace(m.cfg.Workspace))
+	next := stabilizeWorkspaceDisplay(previous, workspace)
+	if next == "" {
+		return "", false
+	}
+	changed := next != strings.TrimSpace(m.cfg.Workspace)
+	m.cfg.Workspace = next
+	m.stableWorkspaceDisplay = next
+	return next, changed
+}
+
+func (m *Model) normalizeStatusViewWorkspace() bool {
+	if m == nil {
+		return false
+	}
+	workspace := strings.TrimSpace(m.statusView.Workspace)
+	if workspace == "" {
+		return false
+	}
+	next, cfgChanged := m.setWorkspaceDisplay(workspace)
+	viewChanged := next != workspace
+	m.statusView.Workspace = next
+	return cfgChanged || viewChanged
+}
+
+func stabilizeWorkspaceDisplay(previous string, next string) string {
+	previous = strings.TrimSpace(previous)
+	next = strings.TrimSpace(next)
+	if next == "" {
+		return ""
+	}
+	if _, branch, _, ok := parseWorkspaceStatusDisplay(next); ok && strings.TrimSpace(branch) != "" {
+		return next
+	}
+	if prevPath, _, _, ok := parseWorkspaceStatusDisplay(previous); ok && sameWorkspaceDisplayPath(prevPath, next) {
+		return previous
+	}
+	return next
+}
+
+func sameWorkspaceDisplayPath(left string, right string) bool {
+	leftKey := workspacePathCompareKey(left)
+	rightKey := workspacePathCompareKey(right)
+	return leftKey != "" && rightKey != "" && leftKey == rightKey
+}
+
+func workspacePathCompareKey(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			home = strings.TrimRight(strings.TrimSpace(home), `/\`)
+			switch {
+			case path == "~":
+				path = home
+			case strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`):
+				path = home + path[1:]
+			}
+		}
+	}
+	windowsPath := looksWindowsPath(path)
+	path = strings.ReplaceAll(path, "\\", "/")
+	path = strings.TrimRight(path, "/")
+	if path == "" {
+		return ""
+	}
+	if windowsPath {
+		path = strings.ToLower(path)
+	}
+	return path
+}
+
+func looksWindowsPath(path string) bool {
+	if strings.Contains(path, `\`) {
+		return true
+	}
+	return len(path) >= 2 && path[1] == ':' &&
+		((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z'))
+}
+
+func (m *Model) renderInlineMarkdown(text string, base lipgloss.Style) string {
+	m.observeInlineMarkdownRender()
+	return renderInlineMarkdown(text, base, m.theme)
+}
+
+func (ctx BlockRenderContext) renderThemeKey() string {
+	if key := strings.TrimSpace(ctx.ThemeKey); key != "" {
+		return key
+	}
+	return themeRenderCacheKey(ctx.Theme)
+}
+
+func (ctx BlockRenderContext) observeGlamourRender() {
+	if ctx.ObserveGlamourRender != nil {
+		ctx.ObserveGlamourRender()
+	}
+}
+
+func (ctx BlockRenderContext) observeInlineMarkdownRender() {
+	if ctx.ObserveInlineMarkdown != nil {
+		ctx.ObserveInlineMarkdown()
+	}
+}
+
+func (m *Model) refreshModeLabelFromConfig() bool {
+	if m == nil || m.cfg.ModeLabel == nil {
+		return false
+	}
+	next := strings.TrimSpace(m.cfg.ModeLabel())
+	if next == m.statusModeLabel {
+		return false
+	}
+	m.statusModeLabel = next
+	return true
+}
+
+func mentionQueryAtCursor(input []rune, cursor int) (int, int, string, bool) {
+	start, end, query, _, ok := mentionQueryAtCursorWithPrefix(input, cursor)
+	return start, end, query, ok
+}
+
+func mentionQueryAtCursorWithPrefix(input []rune, cursor int) (int, int, string, string, bool) {
+	start, end, query, prefix, ok := promptrefs.MentionQueryAtCursorWithPrefix(input, cursor)
+	if !ok || prefix != "@" {
+		return 0, 0, "", "", false
+	}
+	return start, end, query, prefix, true
+}
+
+func resumeQueryAtCursor(input []rune, cursor int) (string, bool) {
+	if len(input) == 0 {
+		return "", false
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(input) {
+		cursor = len(input)
+	}
+	text := strings.TrimSpace(string(input[:cursor]))
+	if text == "" {
+		return "", false
+	}
+	if text == "/resume" {
+		return "", true
+	}
+	if !strings.HasPrefix(text, "/resume ") {
+		return "", false
+	}
+	query := strings.TrimSpace(strings.TrimPrefix(text, "/resume "))
+	return query, true
+}
+
+func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
+	if len(input) == 0 {
+		return "", "", false
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(input) {
+		cursor = len(input)
+	}
+	raw := string(input[:cursor])
+	text := strings.TrimSpace(raw)
+	if text == "" || !strings.HasPrefix(text, "/") {
+		return "", "", false
+	}
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return "", "", false
+	}
+	command := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fields[0])), "/")
+	hasTrailingDelimiter := false
+	if len(raw) > 0 {
+		last := raw[len(raw)-1]
+		hasTrailingDelimiter = last == ' ' || last == '\t'
+	}
+	switch command {
+	case "model":
+		if len(fields) == 1 {
+			if !hasTrailingDelimiter {
+				return "", "", false
+			}
+			return command, "", true
+		}
+		action := strings.ToLower(strings.TrimSpace(fields[1]))
+		if len(fields) == 2 {
+			if hasTrailingDelimiter {
+				switch action {
+				case "use":
+					return "model " + action, "", true
+				case "del":
+					return "model " + action, "", true
+				default:
+					return "", "", false
+				}
+			}
+			if action == "" {
+				return "", "", false
+			}
+			switch action {
+			case "use", "del":
+			default:
+				return "model", action, true
+			}
+			return "model", action, true
+		}
+		switch action {
+		case "use", "del":
+		default:
+			return "", "", false
+		}
+		if action == "del" {
+			return "model " + action, strings.TrimSpace(fields[2]), true
+		}
+		alias := strings.TrimSpace(fields[2])
+		if alias == "" {
+			return "", "", false
+		}
+		if len(fields) == 3 {
+			if hasTrailingDelimiter {
+				return "model use " + alias, "", true
+			}
+			return "model use", alias, true
+		}
+		return "model use " + alias, strings.TrimSpace(strings.Join(fields[3:], " ")), true
+	case "plugin":
+		return pluginSlashArgQuery(command, fields, hasTrailingDelimiter)
+	case "sandbox":
+		if len(fields) == 1 {
+			if !hasTrailingDelimiter {
+				return "", "", false
+			}
+			return command, "", true
+		}
+		if len(fields) == 2 {
+			return command, strings.TrimSpace(fields[1]), true
+		}
+		return "", "", false
+	default:
+		return "", "", false
+	}
+}
+
+func slashRootActionQuery(command string, fields []string, hasTrailingDelimiter bool, rootActions []string, valueActions []string) (string, string, bool) {
+	command = strings.ToLower(strings.TrimSpace(command))
+	if command == "" || len(fields) == 0 {
+		return "", "", false
+	}
+	if len(fields) == 1 {
+		return command, "", true
+	}
+	action := strings.ToLower(strings.TrimSpace(fields[1]))
+	if len(fields) == 2 {
+		if hasTrailingDelimiter {
+			if slashArgStringSliceContains(valueActions, action) {
+				return command + " " + action, "", true
+			}
+			return "", "", false
+		}
+		if action == "" {
+			return "", "", false
+		}
+		if slashArgStringSliceContains(rootActions, action) {
+			return command, action, true
+		}
+		return command, action, true
+	}
+	if slashArgStringSliceContains(valueActions, action) {
+		return command + " " + action, strings.TrimSpace(strings.Join(fields[2:], " ")), true
+	}
+	return "", "", false
+}
+
+func slashArgStringSliceContains(values []string, target string) bool {
+	target = strings.ToLower(strings.TrimSpace(target))
+	if target == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), target) {
+			return true
+		}
+	}
+	return false
+}
+
+func pluginSlashArgQuery(command string, fields []string, hasTrailingDelimiter bool) (string, string, bool) {
+	command = strings.ToLower(strings.TrimSpace(command))
+	if command == "" || len(fields) == 0 {
+		return "", "", false
+	}
+	if len(fields) == 1 {
+		return command, "", true
+	}
+	action := strings.ToLower(strings.TrimSpace(fields[1]))
+	if len(fields) == 2 {
+		if hasTrailingDelimiter {
+			switch action {
+			case "install", "rm":
+				return command + " " + action, "", true
+			case "marketplace":
+				return command + " marketplace", "", true
+			case "manage":
+				return "", "", false
+			default:
+				return "", "", false
+			}
+		}
+		if action == "" {
+			return "", "", false
+		}
+		return command, action, true
+	}
+	switch action {
+	case "install", "rm":
+		return command + " " + action, strings.TrimSpace(strings.Join(fields[2:], " ")), true
+	case "marketplace":
+		return pluginMarketplaceSlashArgQuery(command, fields, hasTrailingDelimiter)
+	default:
+		return "", "", false
+	}
+}
+
+func pluginMarketplaceSlashArgQuery(command string, fields []string, hasTrailingDelimiter bool) (string, string, bool) {
+	if len(fields) == 2 {
+		return command + " marketplace", "", true
+	}
+	marketplaceAction := strings.ToLower(strings.TrimSpace(fields[2]))
+	if len(fields) == 3 {
+		if hasTrailingDelimiter {
+			switch marketplaceAction {
+			case "update", "rm":
+				return command + " marketplace " + marketplaceAction, "", true
+			case "add", "list":
+				return "", "", false
+			default:
+				return "", "", false
+			}
+		}
+		if marketplaceAction == "" {
+			return "", "", false
+		}
+		return command + " marketplace", marketplaceAction, true
+	}
+	switch marketplaceAction {
+	case "update", "rm":
+		return command + " marketplace " + marketplaceAction, strings.TrimSpace(strings.Join(fields[3:], " ")), true
+	default:
+		return "", "", false
+	}
+}
+
+func slashArgQueryAtEnd(input []rune) (string, string, bool) {
+	return slashArgQueryAtCursor(input, len(input))
+}
+
+func resumeQueryAtEnd(input []rune) (string, bool) {
+	return resumeQueryAtCursor(input, len(input))
+}
+
+func slashCommandQueryAtCursor(input []rune, cursor int) (string, bool) {
+	if len(input) == 0 {
+		return "", false
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(input) {
+		cursor = len(input)
+	}
+	text := strings.TrimSpace(string(input[:cursor]))
+	if text == "" || !strings.HasPrefix(text, "/") {
+		return "", false
+	}
+	if strings.Contains(text, " ") {
+		return "", false
+	}
+	query := strings.TrimPrefix(text, "/")
+	return query, true
+}
+
+func isMentionQueryRune(r rune) bool {
+	return promptrefs.IsMentionQueryRune(r)
+}
+
+func replaceRuneSpan(input []rune, start int, end int, replacement string) ([]rune, int) {
+	if start < 0 {
+		start = 0
+	}
+	if end < start {
+		end = start
+	}
+	if end > len(input) {
+		end = len(input)
+	}
+	out := append([]rune(nil), input[:start]...)
+	repl := []rune(replacement)
+	out = append(out, repl...)
+	out = append(out, input[end:]...)
+	return out, start + len(repl)
+}
+
+func percentileDuration(values []time.Duration, percentile float64) time.Duration {
+	if len(values) == 0 {
+		return 0
+	}
+	if percentile <= 0 {
+		percentile = 0
+	}
+	if percentile >= 1 {
+		percentile = 1
+	}
+	sorted := append([]time.Duration(nil), values...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i] < sorted[j]
+	})
+	index := int(float64(len(sorted)-1) * percentile)
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(sorted) {
+		index = len(sorted) - 1
+	}
+	return sorted[index]
+}
+
+func normalizedSelectionRange(start textSelectionPoint, end textSelectionPoint, lineCount int) (textSelectionPoint, textSelectionPoint, bool) {
+	if lineCount <= 0 || start.line < 0 || end.line < 0 {
+		return textSelectionPoint{}, textSelectionPoint{}, false
+	}
+	if start.line >= lineCount {
+		start.line = lineCount - 1
+	}
+	if end.line >= lineCount {
+		end.line = lineCount - 1
+	}
+	if start.line > end.line || (start.line == end.line && start.col > end.col) {
+		start, end = end, start
+	}
+	if start.col < 0 {
+		start.col = 0
+	}
+	if end.col < 0 {
+		end.col = 0
+	}
+	return start, end, true
+}
+
+func selectionTextFromLines(lines []string, start textSelectionPoint, end textSelectionPoint) string {
+	return selectionTextFromLinesWithIndents(lines, nil, start, end)
+}
+
+func selectionTextFromLinesWithIndents(lines []string, indents []int, start textSelectionPoint, end textSelectionPoint) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	if start.line == end.line && start.col == end.col {
+		return ""
+	}
+	var out []string
+	for i := start.line; i <= end.line && i < len(lines); i++ {
+		line := lines[i]
+		width := displayColumns(line)
+		indent := selectionIndentAt(indents, i, width)
+		content := sliceByDisplayColumns(line, indent, width)
+		from, to, _ := selectionContentRange(line, i, start, end, indent)
+		out = append(out, sliceByDisplayColumns(content, from, to))
+	}
+	return strings.Join(out, "\n")
+}
+
+func selectionIndentAt(indents []int, line int, width int) int {
+	if line < 0 || line >= len(indents) {
+		return 0
+	}
+	return clampInt(indents[line], 0, maxInt(0, width))
+}
+
+func selectionContentRange(
+	line string,
+	globalLine int,
+	start, end textSelectionPoint,
+	indent int,
+) (contentFrom, contentTo int, selected bool) {
+	if globalLine < start.line || globalLine > end.line {
+		return 0, 0, false
+	}
+	width := displayColumns(line)
+	indent = clampInt(indent, 0, width)
+	selFrom := 0
+	selTo := width
+	if globalLine == start.line {
+		selFrom = start.col
+	}
+	if globalLine == end.line {
+		selTo = end.col
+	}
+	selFrom = clampInt(selFrom, 0, width)
+	selTo = clampInt(selTo, selFrom, width)
+
+	contentPlain := sliceByDisplayColumns(line, indent, width)
+	contentFrom = maxInt(0, selFrom-indent)
+	contentTo = maxInt(0, selTo-indent)
+	contentFrom = alignDisplayColumnToCharBoundary(contentPlain, contentFrom)
+	contentTo = alignDisplayColumnToCharBoundary(contentPlain, contentTo)
+	contentW := displayColumns(contentPlain)
+	contentFrom = clampInt(contentFrom, 0, contentW)
+	contentTo = clampInt(contentTo, contentFrom, contentW)
+	return contentFrom, contentTo, contentTo > contentFrom
+}
+
+func renderSelectionOnLines(lines []string, start textSelectionPoint, end textSelectionPoint, highlight lipgloss.Style) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		if i < start.line || i > end.line {
+			out = append(out, lines[i])
+			continue
+		}
+		line := lines[i]
+		width := displayColumns(line)
+		from := 0
+		to := width
+		if i == start.line {
+			from = start.col
+		}
+		if i == end.line {
+			to = end.col
+		}
+		if from < 0 {
+			from = 0
+		}
+		if to > width {
+			to = width
+		}
+		if to < from {
+			to = from
+		}
+		prefix := sliceByDisplayColumns(line, 0, from)
+		middle := sliceByDisplayColumns(line, from, to)
+		suffix := sliceByDisplayColumns(line, to, width)
+		if middle == "" {
+			out = append(out, line)
+			continue
+		}
+		out = append(out, prefix+highlight.Render(middle)+suffix)
+	}
+	return out
+}
+
+// renderSelectionOnStyledLines renders selection highlight while preserving
+// styled (ANSI-colored) output for non-selected lines. Selected lines show
+// plain text with the configured selection style so the selection boundary is
+// visually unambiguous.
+func renderSelectionOnStyledLines(styledLines, plainLines []string, start textSelectionPoint, end textSelectionPoint, highlight lipgloss.Style) []string {
+	return renderSelectionOnStyledLinesWithIndents(styledLines, plainLines, nil, start, end, highlight)
+}
+
+// renderSelectionOnStyledLinesWithIndents follows the same model as composer
+// selection: the decorative gutter is rendered independently, while selection
+// and clipboard coordinates apply only to the plain content plane.
+func renderSelectionOnStyledLinesWithIndents(styledLines, plainLines []string, indents []int, start textSelectionPoint, end textSelectionPoint, highlight lipgloss.Style) []string {
+	if len(styledLines) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(styledLines))
+	for i := 0; i < len(styledLines); i++ {
+		if i < start.line || i > end.line {
+			// Non-selected: keep styled (colored) output.
+			out = append(out, styledLines[i])
+			continue
+		}
+		line := plainLines[i]
+		width := displayColumns(line)
+		indent := selectionIndentAt(indents, i, width)
+		content := sliceByDisplayColumns(line, indent, width)
+		from, to, selected := selectionContentRange(line, i, start, end, indent)
+		if !selected {
+			out = append(out, styledLines[i])
+			continue
+		}
+		styledLine := styledLines[i]
+		decoration := ""
+		if indent > 0 {
+			decoration = ansi.Cut(styledLine, 0, indent)
+			if displayColumns(ansi.Strip(decoration)) < indent {
+				decoration = sliceByDisplayColumns(line, 0, indent)
+			}
+		}
+		contentWidth := displayColumns(content)
+		prefix := sliceByDisplayColumns(content, 0, from)
+		middle := sliceByDisplayColumns(content, from, to)
+		suffix := sliceByDisplayColumns(content, to, contentWidth)
+		if middle == "" {
+			out = append(out, styledLines[i])
+			continue
+		}
+		out = append(out, decoration+prefix+highlight.Render(middle)+suffix)
+	}
+	return out
+}
+
+func displayColumns(s string) int {
+	return graphemeWidth(s)
+}
+
+func sliceByDisplayColumns(s string, start int, end int) string {
+	return graphemeSlice(s, start, end)
+}
+
+func minInt(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func alignDisplayColumnToCharBoundary(s string, c int) int {
+	if c <= 0 {
+		return 0
+	}
+	col := 0
+	state := -1
+	remaining := s
+	for len(remaining) > 0 {
+		_, rest, w, newState := uniseg.FirstGraphemeClusterInString(remaining, state)
+		if c >= col && c < col+w {
+			return col
+		}
+		col += w
+		if col >= c {
+			return col
+		}
+		remaining = rest
+		state = newState
+	}
+	return col
+}

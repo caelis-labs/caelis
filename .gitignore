@@ -1,0 +1,32 @@
+.env
+.env.*
+!.env.example
+*.log
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.tmp/
+.tmp
+dist/
+dist
+.coverage/
+/bin/
+/cli
+.DS_Store
+tmp/
+.cache/
+.tmp-release/
+# Local Terminal-Bench runs. The versioned eval/terminalbench/cache/ tree
+# contains cache-service source definitions and must remain tracked.
+eval/terminalbench/.runs/
+eval/terminalbench/runs/
+npm/*.tgz
+npm/packages/*/runtime/
+.superpowers
+.caelis
+plans
+.claude

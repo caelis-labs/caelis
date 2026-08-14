@@ -1,0 +1,2 @@
+# One cheap end-to-end task used to validate the harness before the acceptance set.
+terminal-bench/fix-git
