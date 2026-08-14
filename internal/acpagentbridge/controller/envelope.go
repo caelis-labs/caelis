@@ -77,7 +77,7 @@ func applyACPParticipantDisplayMeta(meta map[string]any, binding session.Partici
 }
 
 func schemaUpdateFromClientUpdate(env client.UpdateEnvelope) schema.Update {
-	switch typed := env.Update.(type) {
+	switch typed := client.NormalizeInboundUpdate(env.Update).(type) {
 	case nil:
 		return nil
 	case client.ContentChunk:

@@ -59,7 +59,11 @@ func NormalizeTerminalOutput(meta map[string]any) map[string]any {
 		return WithTerminalOutput(out, output.TerminalID, output.Data)
 	}
 	output, ok := terminalOutputAt(out, TerminalOutputDeltaKey)
+	delete(out, TerminalOutputDeltaKey)
 	if !ok {
+		if len(out) == 0 {
+			return nil
+		}
 		return out
 	}
 	return WithTerminalOutput(out, output.TerminalID, output.Data)

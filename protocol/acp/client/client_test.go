@@ -296,6 +296,10 @@ func TestInitializeAdvertisesClientCapabilitiesFromHandlers(t *testing.T) {
 		if terminal, ok := req.ClientCapabilities["terminal"].(bool); !ok || !terminal {
 			t.Fatalf("terminal capability = %#v, want true", req.ClientCapabilities["terminal"])
 		}
+		meta, ok := req.ClientCapabilities["_meta"].(map[string]any)
+		if !ok || meta[metautil.TerminalOutputKey] != true {
+			t.Fatalf("terminal output extension capability = %#v, want true", meta)
+		}
 		auth, ok := req.ClientCapabilities["auth"].(map[string]any)
 		if !ok || auth["terminal"] != true {
 			t.Fatalf("auth capability = %#v, want terminal true", req.ClientCapabilities["auth"])
@@ -309,6 +313,40 @@ func TestInitializeAdvertisesClientCapabilitiesFromHandlers(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for initialize request")
+	}
+}
+
+func TestSessionUpdateNotificationConsumesTerminalOutputCompatibilityAlias(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{"sessionUpdate":"tool_call_update","toolCallId":"command-1","_meta":{"terminal_output_delta":{"terminal_id":"command-1","data":"compatibility output\n"}}}`)
+	params, err := json.Marshal(SessionNotification{SessionID: "remote-1", Update: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updates := make(chan UpdateEnvelope, 1)
+	client := &Client{cfg: Config{OnUpdate: func(env UpdateEnvelope) { updates <- env }}}
+	client.handleNotification(context.Background(), jsonrpc.Message{
+		Method: MethodSessionUpdate,
+		Params: params,
+	})
+
+	var env UpdateEnvelope
+	select {
+	case env = <-updates:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for normalized session update")
+	}
+	toolUpdate, ok := env.Update.(ToolCallUpdate)
+	if !ok {
+		t.Fatalf("session update = %T, want ToolCallUpdate", env.Update)
+	}
+	output, ok := metautil.TerminalOutput(toolUpdate.Meta)
+	if !ok || output.TerminalID != "command-1" || output.Data != "compatibility output\n" {
+		t.Fatalf("terminal output = %#v, %v; want normalized compatibility output", output, ok)
+	}
+	if _, ok := toolUpdate.Meta[metautil.TerminalOutputDeltaKey]; ok {
+		t.Fatalf("normalized update retained compatibility alias: %#v", toolUpdate.Meta)
 	}
 }
 

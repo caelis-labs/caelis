@@ -82,6 +82,25 @@ func TestNormalizeTerminalOutputConsumesCodexACPDeltaCompatibilityMeta(t *testin
 	}
 }
 
+func TestNormalizeTerminalOutputDropsMalformedCompatibilityAlias(t *testing.T) {
+	t.Parallel()
+
+	meta := map[string]any{
+		TerminalOutputDeltaKey: map[string]any{"data": "missing terminal id\n"},
+		"kept":                 true,
+	}
+	normalized := NormalizeTerminalOutput(meta)
+	if _, ok := normalized[TerminalOutputDeltaKey]; ok {
+		t.Fatalf("NormalizeTerminalOutput() retained malformed provider alias: %#v", normalized)
+	}
+	if _, ok := TerminalOutput(normalized); ok || normalized["kept"] != true {
+		t.Fatalf("NormalizeTerminalOutput() = %#v, want unrelated metadata without terminal output", normalized)
+	}
+	if _, ok := meta[TerminalOutputDeltaKey]; !ok {
+		t.Fatalf("NormalizeTerminalOutput() mutated provider metadata: %#v", meta)
+	}
+}
+
 func TestCanonicalTerminalOutputWinsAndClearsProviderAlias(t *testing.T) {
 	t.Parallel()
 

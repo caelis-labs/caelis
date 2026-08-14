@@ -216,6 +216,55 @@ func TestForwardSourceEventsPublishesPairedNativeContentBeforeCanonicalUsage(t *
 	}
 }
 
+func TestForwardSourceEventsKeepsPairedNativeTerminalAsSingleLiveAuthority(t *testing.T) {
+	t.Parallel()
+
+	handle := newTestTurnHandle()
+	meta := metautil.WithTerminalOutput(nil, "command-1", "exact terminal delta\n")
+	status := schema.ToolStatusInProgress
+	native := eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "command-1",
+			Status:        &status,
+			Meta:          meta,
+		},
+	}
+	source := acpbridge.SourceStream{Events: func(yield func(acpbridge.SourceEvent, error) bool) {
+		yield(acpbridge.SourceEvent{
+			Canonical: session.MarkUIOnly(&session.Event{
+				ID:   "terminal-delta",
+				Type: session.EventTypeToolCall,
+				Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+					SessionUpdate: schema.UpdateToolCallInfo,
+					ToolCallID:    "command-1",
+					Status:        status,
+					Meta:          meta,
+				}},
+			}),
+			ACP: &native,
+		}, nil)
+	}}
+	(&Gateway{}).forwardSourceEvents(session.Session{SessionRef: handle.sessionRef}, handle, source)
+
+	got, _, err := handle.eventsAfter("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("paired terminal projection = %#v, want one native terminal delta", got)
+	}
+	update, ok := got[0].Update.(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("terminal update = %T, want ToolCallUpdate", got[0].Update)
+	}
+	output, ok := metautil.TerminalOutput(update.Meta)
+	if !ok || output.Data != "exact terminal delta\n" {
+		t.Fatalf("terminal output = %#v, %v; want exact native delta", output, ok)
+	}
+}
+
 func TestForwardSourceEventsDoesNotDuplicateNativeUsage(t *testing.T) {
 	t.Parallel()
 

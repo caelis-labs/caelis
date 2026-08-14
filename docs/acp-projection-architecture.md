@@ -264,6 +264,14 @@ example, codex-acp `terminal_output_delta` becomes canonical
 `terminal_output` payload is an ordered delta; a compatibility adapter must not
 also publish a cumulative final payload.
 
+Standard ACP tool `content` remains the primary display payload. Caelis
+advertises `_meta.terminal_output=true` under `clientCapabilities` for the
+canonical streaming display extension; the maintained codex-acp
+`terminal_output_delta` alias is accepted only as an ingress compatibility
+supplement. Canonical and ACP-native projections consume the same normalized
+update, so participant transcripts and detached subagent overlays do not own
+separate terminal-output interpretations.
+
 The empty terminal content anchor remains a Zed compatibility projection, not
 an output transport. Standard ACP terminal content refers to a client-hosted
 terminal created through `terminal/create`; Caelis's Shell sandbox executes on

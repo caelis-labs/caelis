@@ -2631,6 +2631,74 @@ func TestParticipantRunNormalizesDelayedXSearchDisplayInput(t *testing.T) {
 	}
 }
 
+func TestParticipantRunSharesCanonicalTerminalCompatibilityAcrossSourceViews(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(nil)
+	run := &participantRun{
+		remoteSessionID: "remote-participant",
+		agent:           "codex",
+		binding: session.ParticipantBinding{
+			ID:            "participant-1",
+			Kind:          session.ParticipantKindACP,
+			Role:          "reviewer",
+			Label:         "@reviewer",
+			ControllerRef: "epoch-1",
+			SessionID:     "remote-participant",
+		},
+		turnID:     "turn-1",
+		turnStream: true,
+		handle:     handle,
+	}
+	run.handleUpdate(func() time.Time { return time.Unix(10, 0) }, client.UpdateEnvelope{
+		SessionID: "remote-participant",
+		Update: client.ToolCallUpdate{
+			SessionUpdate: client.UpdateToolCallState,
+			ToolCallID:    "command-1",
+			Kind:          testStringPtr(schema.ToolKindExecute),
+			Status:        testStringPtr(schema.ToolStatusInProgress),
+			Meta: map[string]any{
+				metautil.TerminalOutputDeltaKey: map[string]any{
+					"terminal_id": "command-1",
+					"data":        "participant output\n",
+				},
+			},
+		},
+	})
+	handle.finish()
+
+	var events []acpbridge.SourceEvent
+	for event, err := range handle.SourceEvents() {
+		if err != nil {
+			t.Fatalf("source error = %v", err)
+		}
+		events = append(events, event)
+	}
+	if len(events) != 1 || events[0].Canonical == nil || events[0].ACP == nil {
+		t.Fatalf("source events = %#v, want one paired canonical/native event", events)
+	}
+	canonicalUpdate := session.ProtocolUpdateOf(events[0].Canonical)
+	if canonicalUpdate == nil {
+		t.Fatal("canonical protocol update is nil")
+	}
+	nativeUpdate, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("native ACP update = %T, want ToolCallUpdate", events[0].ACP.Update)
+	}
+	for name, meta := range map[string]map[string]any{
+		"canonical": canonicalUpdate.Meta,
+		"native":    nativeUpdate.Meta,
+	} {
+		output, ok := metautil.TerminalOutput(meta)
+		if !ok || output.TerminalID != "command-1" || output.Data != "participant output\n" {
+			t.Fatalf("%s terminal output = %#v, %v; want shared canonical output", name, output, ok)
+		}
+		if _, ok := meta[metautil.TerminalOutputDeltaKey]; ok {
+			t.Fatalf("%s metadata retained provider alias: %#v", name, meta)
+		}
+	}
+}
+
 func TestParticipantPassthroughOnlyACPUpdatePreservesScope(t *testing.T) {
 	t.Parallel()
 

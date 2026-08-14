@@ -39,6 +39,7 @@ func UIOnlyVisibility(string, session.EventType) session.Visibility {
 }
 
 func NormalizeUpdate(update client.Update, opts Options) *session.Event {
+	update = client.NormalizeInboundUpdate(update)
 	switch typed := update.(type) {
 	case client.ContentChunk:
 		return normalizeContentChunk(typed, opts)
@@ -91,7 +92,7 @@ func normalizeContentChunk(chunk client.ContentChunk, opts Options) *session.Eve
 	if err != nil {
 		return nil
 	}
-	event.Protocol = normalizedProtocol(&session.EventProtocol{
+	event.Protocol = cloneProtocol(&session.EventProtocol{
 		Update: update,
 	})
 	return event
@@ -111,7 +112,7 @@ func normalizeToolCall(call client.ToolCall, opts Options) *session.Event {
 		session.CloneActorRef(opts.Actor),
 		opts,
 	)
-	event.Protocol = normalizedProtocol(&session.EventProtocol{Update: protocolUpdate})
+	event.Protocol = cloneProtocol(&session.EventProtocol{Update: protocolUpdate})
 	if event.Visibility == session.VisibilityCanonical {
 		return nil
 	}
@@ -133,7 +134,7 @@ func normalizeToolCallUpdate(update client.ToolCallUpdate, opts Options) *sessio
 		session.CloneActorRef(opts.Actor),
 		opts,
 	)
-	event.Protocol = normalizedProtocol(&session.EventProtocol{Update: protocolUpdate})
+	event.Protocol = cloneProtocol(&session.EventProtocol{Update: protocolUpdate})
 	if event.Visibility == session.VisibilityCanonical {
 		return nil
 	}
@@ -153,7 +154,7 @@ func normalizePlanUpdate(update client.PlanUpdate, opts Options) *session.Event 
 		session.CloneActorRef(opts.Actor),
 		opts,
 	)
-	event.Protocol = normalizedProtocol(&session.EventProtocol{
+	event.Protocol = cloneProtocol(&session.EventProtocol{
 		Update: protocolUpdate,
 	})
 	if event.Visibility == session.VisibilityCanonical {
@@ -203,14 +204,11 @@ func messageForContentChunk(chunk client.ContentChunk, text string) model.Messag
 	return model.NewTextMessage(role, text)
 }
 
-func normalizedProtocol(protocol *session.EventProtocol) *session.EventProtocol {
+func cloneProtocol(protocol *session.EventProtocol) *session.EventProtocol {
 	if protocol == nil {
 		return nil
 	}
 	normalized := session.CloneEventProtocol(*protocol)
-	if normalized.Update != nil {
-		normalized.Update.Meta = metautil.NormalizeTerminalOutput(normalized.Update.Meta)
-	}
 	return &normalized
 }
 

@@ -105,6 +105,9 @@ func (c *Client) Initialize(ctx context.Context) (InitializeResponse, error) {
 	var resp InitializeResponse
 	clientCapabilities := map[string]any{
 		"terminal": c.cfg.Terminal != nil,
+		"_meta": map[string]any{
+			metautil.TerminalOutputKey: true,
+		},
 	}
 	if c.cfg.TerminalAuth {
 		clientCapabilities["auth"] = map[string]any{"terminal": true}
@@ -399,7 +402,7 @@ func (c *Client) handleNotification(ctx context.Context, msg jsonrpc.Message) {
 			if update, err := decodeUpdate(note.Update); err == nil && update != nil {
 				c.cfg.OnUpdate(UpdateEnvelope{
 					SessionID: strings.TrimSpace(note.SessionID),
-					Update:    update,
+					Update:    NormalizeInboundUpdate(update),
 					Raw:       append(json.RawMessage(nil), note.Update...),
 				})
 			}

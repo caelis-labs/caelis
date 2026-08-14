@@ -404,9 +404,10 @@ func TestParticipantSpawnToolPanelExpandsFullFinalResponse(t *testing.T) {
 	}
 }
 
-func TestStandardSparseToolUpdateUsesSharedCanonicalTerminalFallback(t *testing.T) {
+func TestCanonicalTerminalDeltaUsesSharedParticipantAndOverlaySemantics(t *testing.T) {
 	t.Parallel()
 
+	running := schema.ToolStatusInProgress
 	completed := schema.ToolStatusCompleted
 	start := func(scope eventstream.Scope, scopeID, participantID, actor string) eventstream.Envelope {
 		return eventstream.Envelope{
@@ -417,18 +418,29 @@ func TestStandardSparseToolUpdateUsesSharedCanonicalTerminalFallback(t *testing.
 				Title: "RUN_COMMAND printf ok", Kind: schema.ToolKindExecute,
 				Status:   schema.ToolStatusInProgress,
 				RawInput: map[string]any{"command": "printf ok"},
-				Meta:     acpToolNameMeta("RUN_COMMAND"),
+				Meta:     metautil.WithTerminalInfo(acpToolNameMeta("RUN_COMMAND"), "command-1"),
+			},
+		}
+	}
+	delta := func(scope eventstream.Scope, scopeID, participantID, actor string) eventstream.Envelope {
+		return eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
+			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
+			Update: schema.ToolCallUpdate{
+				SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1", Status: &running,
+				Meta: metautil.WithTerminalOutput(nil, "command-1", "SHARED_TOOL_OUTPUT\n"),
 			},
 		}
 	}
 	finish := func(scope eventstream.Scope, scopeID, participantID, actor string) eventstream.Envelope {
+		exitCode := 0
 		return eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: scopeID,
 			Scope: scope, ScopeID: scopeID, ParticipantID: participantID, Actor: actor,
 			Update: schema.ToolCallUpdate{
 				SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "command-1", Status: &completed,
 				RawOutput: map[string]any{"formatted_output": "SHARED_TOOL_OUTPUT\n", "exit_code": 0},
-				Meta:      metautil.WithTerminalOutput(nil, "command-1", "SHARED_TOOL_OUTPUT\n"),
+				Meta:      metautil.WithTerminalExit(nil, "command-1", &exitCode, nil),
 			},
 		}
 	}
@@ -436,6 +448,7 @@ func TestStandardSparseToolUpdateUsesSharedCanonicalTerminalFallback(t *testing.
 	t.Run("participant transcript", func(t *testing.T) {
 		model := NewModel(Config{NoColor: true, NoAnimation: true})
 		model = applyACPEnvelopeForTest(t, model, start(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer"))
+		model = applyACPEnvelopeForTest(t, model, delta(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer"))
 		model = applyACPEnvelopeForTest(t, model, finish(eventstream.ScopeParticipant, "participant-turn-1", "reviewer", "@reviewer"))
 		block := model.findParticipantTurnBlock("participant-turn-1")
 		if block == nil {
@@ -444,7 +457,7 @@ func TestStandardSparseToolUpdateUsesSharedCanonicalTerminalFallback(t *testing.
 		plain := joinRenderedPlain(block.Render(BlockRenderContext{
 			Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme),
 		}))
-		if !strings.Contains(plain, "SHARED_TOOL_OUTPUT") || strings.Contains(plain, "tool update") {
+		if strings.Count(plain, "SHARED_TOOL_OUTPUT") != 1 || strings.Contains(plain, "tool update") {
 			t.Fatalf("participant sparse tool update rendered incorrectly:\n%s", plain)
 		}
 	})
@@ -463,6 +476,9 @@ func TestStandardSparseToolUpdateUsesSharedCanonicalTerminalFallback(t *testing.
 		childStart := start(eventstream.ScopeSubagent, "task-1", "codex", "@zenith")
 		childStart.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "SPAWN"}
 		model = applyACPEnvelopeForTest(t, model, childStart)
+		childDelta := delta(eventstream.ScopeSubagent, "task-1", "codex", "@zenith")
+		childDelta.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "SPAWN"}
+		model = applyACPEnvelopeForTest(t, model, childDelta)
 		childFinish := finish(eventstream.ScopeSubagent, "task-1", "codex", "@zenith")
 		childFinish.ParentTool = &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "SPAWN"}
 		model = applyACPEnvelopeForTest(t, model, childFinish)
@@ -471,7 +487,7 @@ func TestStandardSparseToolUpdateUsesSharedCanonicalTerminalFallback(t *testing.
 			t.Fatal("subagent output overlay did not open")
 		}
 		overlay := subagentOutputOverlayPlain(model)
-		if !strings.Contains(overlay, "SHARED_TOOL_OUTPUT") || strings.Contains(overlay, "tool update") {
+		if strings.Count(overlay, "SHARED_TOOL_OUTPUT") != 1 || strings.Contains(overlay, "tool update") {
 			t.Fatalf("subagent sparse tool update rendered incorrectly:\n%s", overlay)
 		}
 	})

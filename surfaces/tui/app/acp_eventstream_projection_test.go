@@ -301,6 +301,33 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardTerminalContentWithout
 	}
 }
 
+func TestProjectACPEventToTranscriptEventsPrefersStandardContentOverTerminalExtension(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusCompleted
+	kind := schema.ToolKindExecute
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Kind:          &kind,
+			Status:        &status,
+			Content: []schema.ToolCallContent{{
+				Type:    "content",
+				Content: schema.TextContent{Type: "text", Text: "standard ACP content\n"},
+			}},
+			Meta: metautil.WithTerminalOutput(nil, "call-1", "extension fallback\n"),
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	if events[0].ToolOutput != "standard ACP content\n" {
+		t.Fatalf("ToolOutput = %q, want standard ACP content to remain authoritative", events[0].ToolOutput)
+	}
+}
+
 func TestProjectACPEventToTranscriptEventsDisplaysTerminalContentWithoutToolKind(t *testing.T) {
 	t.Parallel()
 
