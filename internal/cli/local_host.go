@@ -30,17 +30,13 @@ const (
 )
 
 type localHostStartRequest struct {
-	Executable   string
-	StoreDir     string
-	WorkspaceKey string
-	WorkspaceCWD string
-	UserID       string
-	AppName      string
-	Listen       string
-	TokenFile    string
+	Executable string
+	StoreDir   string
+	Listen     string
+	TokenFile  string
 }
 
-func openManagedProductClients(ctx context.Context, _ gatewayapp.Config, options productClientOptions) (*productClients, error) {
+func openManagedProductClients(ctx context.Context, cfg gatewayapp.Config, options productClientOptions) (*productClients, error) {
 	defaultTokenFile := controlserver.DefaultTokenFile(options.StoreDir)
 	if options.Token != "" {
 		return nil, errors.New("CAELIS_CONTROL_TOKEN requires an explicit --control-url")
@@ -53,8 +49,18 @@ func openManagedProductClients(ctx context.Context, _ gatewayapp.Config, options
 	if err != nil {
 		return nil, err
 	}
+	missingBeforeStart := inspectManagedHost(ctx, options).Probe.State == servicelifecycle.ProbeMissing
 	if _, err := manager.Start(ctx, candidate); err != nil {
-		return nil, managedProductFailure(options.StoreDir, "start", err, options.SurfaceHostCause)
+		managedErr := managedProductFailure(options.StoreDir, "start", err, options.SurfaceHostCause)
+		if !missingBeforeStart || ctx.Err() != nil {
+			return nil, managedErr
+		}
+		embedded, embeddedErr := openEmbeddedProductClients(cfg, options)
+		if embeddedErr != nil {
+			return nil, errors.Join(managedErr, fmt.Errorf("cli: embedded fallback failed: %w", embeddedErr))
+		}
+		embedded.ManagedFallback = true
+		return embedded, nil
 	}
 	product, err := openManagedProductClientsFromDiscovery(ctx, options)
 	if err != nil {
@@ -391,10 +397,6 @@ func launchDetachedLocalHost(request localHostStartRequest) (servicelifecycle.La
 	args := []string{
 		"serve",
 		"--store-dir", request.StoreDir,
-		"--workspace-key", firstNonEmpty(request.WorkspaceKey, "workspace"),
-		"--workspace-cwd", firstNonEmpty(request.WorkspaceCWD, request.StoreDir),
-		"--user", firstNonEmpty(request.UserID, "local-user"),
-		"--app", firstNonEmpty(request.AppName, "caelis"),
 		"--listen", firstNonEmpty(request.Listen, defaultLocalHostListen),
 		"--control-token-file", request.TokenFile,
 	}
@@ -491,10 +493,9 @@ func newLocalServiceManager(options productClientOptions) (servicelifecycle.Mana
 	manager.Launch = func(staged servicelifecycle.Candidate) (servicelifecycle.LaunchedProcess, error) {
 		request := localHostStartRequest{
 			Executable: staged.Executable,
-			StoreDir:   options.StoreDir, WorkspaceKey: options.WorkspaceKey, WorkspaceCWD: options.WorkspaceCWD,
-			UserID: options.UserID, AppName: options.AppName,
-			Listen:    firstNonEmpty(options.ListenAddress, defaultLocalHostListen),
-			TokenFile: controlserver.DefaultTokenFile(options.StoreDir),
+			StoreDir:   options.StoreDir,
+			Listen:     firstNonEmpty(options.ListenAddress, defaultLocalHostListen),
+			TokenFile:  controlserver.DefaultTokenFile(options.StoreDir),
 		}
 		if options.LaunchLocalService != nil {
 			return options.LaunchLocalService(request)

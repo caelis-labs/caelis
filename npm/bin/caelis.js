@@ -78,8 +78,7 @@ function handoffEligible(platform, argv, stdinIsTTY) {
     'gateway',
     'sandbox',
   ]);
-  if (nonInteractiveCommands.has(first) ||
-      argv.some((value) => value === '--doctor' || value === '-doctor')) {
+  if (nonInteractiveCommands.has(first)) {
     return false;
   }
   if (argv.some((value) =>

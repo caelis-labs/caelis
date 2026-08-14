@@ -26,12 +26,11 @@ import (
 func TestHeadlessExplicitEmbeddedRunBindsAppServer(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	clearSelfAgentEnv(t)
-	t.Setenv("CAELIS_MODEL_PROFILE", "")
-	t.Setenv("CAELIS_REASONING_EFFORT", "")
 	t.Setenv("CAELIS_CONTROL_URL", "")
 	t.Setenv("CAELIS_CONTROL_EMBEDDED", "")
 
 	workspace := t.TempDir()
+	t.Chdir(workspace)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	runErr := runWithRoundTripEmbeddedControl(
@@ -41,10 +40,7 @@ func TestHeadlessExplicitEmbeddedRunBindsAppServer(t *testing.T) {
 			"--embedded",
 			"-p", "exercise top-level Headless",
 			"-format", "json",
-			"-store-dir", filepath.Join(t.TempDir(), "store"),
-			"-workspace-key", "headless-top-level",
-			"-workspace-cwd", workspace,
-			"-sandbox-backend", "host",
+			"-store-dir", cliTestStoreDir(t),
 		},
 		strings.NewReader(""),
 		&stdout,

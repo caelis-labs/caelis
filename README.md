@@ -107,16 +107,18 @@ Common flags:
   `CAELIS_TUI_NO_ANIMATION=true`).
 - `-session`: resume or target a session id.
 - `-store-dir`: override the default store directory.
-- `-workspace-cwd`: set the workspace directory.
-- `-approval-mode`: `auto-review` or `manual`.
-- `-model-profile`: select an existing Control-owned `ModelProfile`.
-- `-reasoning-effort`: select an effort supported by that profile.
+- `-control-url`: attach to an existing Control Host.
+- `-embedded`: force an in-process Host instead of managed local Host attach.
+
+The workspace is always the process's current directory. Caelis derives its
+internal workspace identity from the canonical absolute path; there is no
+workspace flag to keep in sync.
 
 In `auto-review`, Guardian model requests use the provider-neutral bounded retry
 policy. If Guardian still cannot produce one validated decision, Caelis stops
 the current Turn with `guardian_unavailable`, executes no requested action, and
 does not silently fall back to manual approval. Retry the Turn after Guardian is
-available, or select `manual` before starting sensitive work.
+available, or use `/mode manual` before starting sensitive work.
 
 Provider setup and API-key replacement are available only through `/connect`.
 Runtime startup never creates or overwrites model profiles or credentials.

@@ -27,6 +27,7 @@ import (
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/productpaths"
 	"github.com/caelis-labs/caelis/internal/version"
+	"github.com/caelis-labs/caelis/internal/workspaceidentity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/acpserver"
 	"github.com/caelis-labs/caelis/surfaces/headless"
@@ -36,9 +37,11 @@ import (
 type outputFormat string
 
 const (
-	outputText  outputFormat = "text"
-	outputJSON  outputFormat = "json"
-	outputJSONL outputFormat = "jsonl"
+	outputText         outputFormat = "text"
+	outputJSON         outputFormat = "json"
+	outputJSONL        outputFormat = "jsonl"
+	defaultAppName                  = "caelis"
+	defaultPrincipalID              = "local-user"
 
 	dangerouslySkipPermissionsWarning = "DANGER: YOLO mode is active. Tools run directly on the host with no sandbox, human approval, or Guardian review.\nThe built-in destructive-command blacklist remains active, but it is limited and is not a security boundary."
 )
@@ -72,6 +75,24 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	return run(ctx, args, stdin, stdout, stderr)
 }
 
+func helpRequested(args []string) bool {
+	for _, arg := range args {
+		switch strings.TrimSpace(arg) {
+		case "-h", "--help", "-help":
+			return true
+		}
+	}
+	return false
+}
+
+func workspaceAddressFromCWD(cwd string) (string, string, error) {
+	workspace, err := workspaceidentity.FromCWD(cwd)
+	if err != nil {
+		return "", "", fmt.Errorf("cli: resolve current workspace: %w", err)
+	}
+	return workspace.Key, workspace.CWD, nil
+}
+
 func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) (runErr error) {
 	return runWithProductClientOpener(ctx, args, stdin, stdout, stderr, openProductClients)
 }
@@ -87,12 +108,21 @@ func runWithProductClientOpener(
 	if openClients == nil {
 		return errors.New("cli: product client opener is required")
 	}
-	cwd, _ := os.Getwd()
+	if len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "version") {
+		return runVersionSubcommand(args[1:], stdout)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		if !helpRequested(args) {
+			return fmt.Errorf("cli: resolve current workspace: %w", err)
+		}
+		// Help only needs enough path context to render flag defaults. It must
+		// remain available when the shell's former working directory was removed.
+		cwd = "."
+	}
 	defaultStore := defaultStoreDir(cwd)
 	if len(args) > 0 {
 		switch strings.ToLower(strings.TrimSpace(args[0])) {
-		case "version":
-			return runVersionSubcommand(args[1:], stdout)
 		case "update":
 			return runUpdateSubcommand(ctx, args[1:], defaultStore, stdout, stderr)
 		}
@@ -138,41 +168,18 @@ func runWithProductClientOpener(
 	fs := flag.NewFlagSet("caelis", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	defaultWorkspaceKey := filepath.Base(cwd)
-	if defaultWorkspaceKey == "" || defaultWorkspaceKey == "." || defaultWorkspaceKey == string(filepath.Separator) {
-		defaultWorkspaceKey = "workspace"
-	}
-
 	var (
-		prompt             = fs.String("p", "", "Single-shot prompt text")
-		format             = fs.String("format", string(outputText), "Output format: text|json|jsonl")
-		appName            = fs.String("app", envOr("CAELIS_APP_NAME", "caelis"), "App name")
-		userID             = fs.String("user", envOr("CAELIS_USER_ID", "local-user"), "User id")
-		sessionID          = fs.String("session", envOr("CAELIS_SESSION_ID", ""), "Session id")
-		storeDir           = fs.String("store-dir", envOr("CAELIS_STORE_DIR", defaultStoreDir(cwd)), "Store directory")
-		operationRetention = fs.String(
-			"control-operation-retention",
-			envOr("CAELIS_CONTROL_OPERATION_RETENTION", ""),
-			fmt.Sprintf("Terminal Control operation idempotency window (default %s)", gatewayapp.DefaultControlOperationRetention),
-		)
-		workspaceKey               = fs.String("workspace-key", envOr("CAELIS_WORKSPACE_KEY", defaultWorkspaceKey), "Workspace key")
-		workspaceCWD               = fs.String("workspace-cwd", envOr("CAELIS_WORKSPACE_CWD", cwd), "Workspace cwd")
-		systemPrompt               = fs.String("system-prompt", envOr("CAELIS_SYSTEM_PROMPT", ""), "Session override text to append into the assembled system prompt")
-		approvalMode               = fs.String("approval-mode", envOr("CAELIS_APPROVAL_MODE", ""), "Approval mode: auto-review|manual")
-		policyProfile              = fs.String("policy-profile", envOr("CAELIS_POLICY_PROFILE", ""), "Policy profile: workspace-write")
+		prompt                     = fs.String("p", "", "Single-shot prompt text")
+		format                     = fs.String("format", string(outputText), "Output format: text|json|jsonl")
+		sessionID                  = fs.String("session", envOr("CAELIS_SESSION_ID", ""), "Session id")
+		storeDir                   = fs.String("store-dir", envOr("CAELIS_STORE_DIR", defaultStoreDir(cwd)), "Store directory")
 		dangerouslySkipPermissions = fs.Bool(
 			"dangerously-skip-permissions",
 			false,
 			"DANGEROUS: run tools directly on the host without sandbox or approval review",
 		)
-		modelProfile     = fs.String("model-profile", envOr("CAELIS_MODEL_PROFILE", ""), "Control-owned ModelProfile ID")
-		reasoningEffort  = fs.String("reasoning-effort", envOr("CAELIS_REASONING_EFFORT", ""), "Selected ModelProfile reasoning effort")
-		sandboxBackend   = fs.String("sandbox-backend", envOr("CAELIS_SANDBOX_BACKEND", ""), "Sandbox backend override: host or this platform's required backend (legacy auto/default aliases are accepted)")
-		sandboxHelper    = fs.String("sandbox-helper-path", envOr("CAELIS_SANDBOX_HELPER_PATH", ""), "Sandbox helper executable path")
-		contextWindow    = fs.Int("context-window", envInt("CAELIS_CONTEXT_WINDOW", 0), "Context window override")
 		forceInteractive = fs.Bool("interactive", false, "Force interactive local main path")
 		noAnimation      = fs.Bool("no-animation", envBool("CAELIS_TUI_NO_ANIMATION", false), "Reduce TUI motion")
-		doctor           = fs.Bool("doctor", false, "Print runtime/session/sandbox diagnostics and exit")
 		controlURL       = fs.String("control-url", envOr("CAELIS_CONTROL_URL", ""), "Attach to an existing Control Host origin (http://127.0.0.1:7777)")
 		embeddedHost     = fs.Bool("embedded", envBool("CAELIS_CONTROL_EMBEDDED", false), "Force single-client in-process Host mode; bypass managed local Host attach")
 		controlListen    = fs.String("listen", envOr("CAELIS_CONTROL_LISTEN", "127.0.0.1:7777"), "Control Host HTTP listen address for caelis serve")
@@ -186,6 +193,14 @@ func runWithProductClientOpener(
 			return nil
 		}
 		return err
+	}
+	workspaceKey, workspaceCWD, err := workspaceAddressFromCWD(cwd)
+	if err != nil {
+		return err
+	}
+	if acpSubcommand {
+		workspaceKey = envOr(acpagentenv.EnvWorkspaceKey, workspaceKey)
+		workspaceCWD = envOr(acpagentenv.EnvWorkspaceCWD, workspaceCWD)
 	}
 	managedListen := ""
 	if strings.TrimSpace(os.Getenv("CAELIS_CONTROL_LISTEN")) != "" {
@@ -205,7 +220,6 @@ func runWithProductClientOpener(
 		!controlServerSubcommand &&
 		!doctorSubcommand &&
 		serviceSubcommand == "" &&
-		!*doctor &&
 		sandboxSubcommand == "" &&
 		!*forceInteractive &&
 		(strings.TrimSpace(*prompt) != "" || stdin != nil && !readerIsTTY(stdin))
@@ -238,32 +252,13 @@ func runWithProductClientOpener(
 	if len(fs.Args()) > 0 {
 		return fmt.Errorf("unknown arguments: %v", fs.Args())
 	}
-	controlOperationRetention, err := parseControlOperationRetention(*operationRetention)
-	if err != nil {
-		return err
-	}
-
-	cfg, err := normalizeConfig(gatewayapp.Config{
-		AppName:                    *appName,
-		UserID:                     *userID,
+	cfg := gatewayapp.Config{
+		AppName:                    defaultAppName,
+		UserID:                     defaultPrincipalID,
 		StoreDir:                   *storeDir,
-		ControlOperationRetention:  controlOperationRetention,
-		WorkspaceKey:               *workspaceKey,
-		WorkspaceCWD:               *workspaceCWD,
-		ApprovalMode:               *approvalMode,
-		PolicyProfile:              *policyProfile,
+		WorkspaceKey:               workspaceKey,
+		WorkspaceCWD:               workspaceCWD,
 		DangerouslySkipPermissions: *dangerouslySkipPermissions,
-		ContextWindow:              *contextWindow,
-		SystemPrompt:               *systemPrompt,
-		ModelProfileID:             *modelProfile,
-		ModelProfileEffort:         *reasoningEffort,
-		Sandbox: gatewayapp.SandboxConfig{
-			RequestedType: strings.TrimSpace(*sandboxBackend),
-			HelperPath:    strings.TrimSpace(*sandboxHelper),
-		},
-	})
-	if err != nil {
-		return err
 	}
 	if serviceSubcommand != "" {
 		if *embeddedHost || strings.TrimSpace(*controlURL) != "" {
@@ -283,13 +278,13 @@ func runWithProductClientOpener(
 	if err != nil {
 		return err
 	}
-	interactiveLaunch := !acpSubcommand && !controlServerSubcommand && !doctorSubcommand && !*doctor && serviceSubcommand == "" && sandboxSubcommand == "" && !headlessMode
+	interactiveLaunch := !acpSubcommand && !controlServerSubcommand && !doctorSubcommand && serviceSubcommand == "" && sandboxSubcommand == "" && !headlessMode
 	if cfg.DangerouslySkipPermissions && !interactiveLaunch {
 		_, _ = fmt.Fprintln(stderr, dangerouslySkipPermissionsWarning)
 	}
 	if controlServerSubcommand {
 		return runControlHost(ctx, cfg, controlserver.Config{
-			Address: strings.TrimSpace(*controlListen), Principal: controlclient.Principal{ID: strings.TrimSpace(*userID)},
+			Address: strings.TrimSpace(*controlListen), Principal: controlclient.Principal{ID: defaultPrincipalID},
 			TokenFile: strings.TrimSpace(*controlTokenFile), AllowedHosts: splitCommaSeparated(*controlHosts),
 			TLSCertFile: strings.TrimSpace(*controlTLSCert), TLSKeyFile: strings.TrimSpace(*controlTLSKey),
 		})
@@ -303,19 +298,8 @@ func runWithProductClientOpener(
 		strings.TrimSpace(*controlTLSCert) != "" || strings.TrimSpace(*controlTLSKey) != "" {
 		return errors.New("cli: --listen, --control-allowed-hosts, and Control TLS flags require caelis serve")
 	}
-	if err := rejectRemoteHostOnlyOptions(clientMode, remoteHostOnlyOptions{
-		SystemPrompt:               strings.TrimSpace(*systemPrompt),
-		ApprovalMode:               strings.TrimSpace(*approvalMode),
-		PolicyProfile:              strings.TrimSpace(*policyProfile),
-		DangerouslySkipPermissions: *dangerouslySkipPermissions,
-		ModelProfile:               strings.TrimSpace(*modelProfile),
-		ReasoningEffort:            strings.TrimSpace(*reasoningEffort),
-		SandboxBackend:             strings.TrimSpace(*sandboxBackend),
-		SandboxHelper:              strings.TrimSpace(*sandboxHelper),
-		ContextWindow:              *contextWindow,
-		OperationRetention:         strings.TrimSpace(*operationRetention),
-	}); err != nil {
-		return err
+	if clientMode != productClientModeEmbedded && *dangerouslySkipPermissions {
+		return errors.New("cli: --dangerously-skip-permissions requires explicit --embedded mode; attached Hosts cannot enable Host escape mode")
 	}
 	clientOptions := productClientOptions{
 		Mode:             clientMode,
@@ -328,7 +312,7 @@ func runWithProductClientOpener(
 		AppName:          cfg.AppName,
 		StoreDir:         cfg.StoreDir,
 		ListenAddress:    managedListen,
-		SurfaceHostCause: doctorSubcommand || *doctor || sandboxSubcommand != "",
+		SurfaceHostCause: doctorSubcommand || sandboxSubcommand != "",
 	}
 	if sandboxSubcommand != "" {
 		outFmt, err := parseOutputFormat(*format)
@@ -354,8 +338,14 @@ func runWithProductClientOpener(
 			runErr = closeErr
 		}
 	}()
+	if product.ManagedFallback {
+		_, _ = fmt.Fprintln(stderr, "caelis: managed local Host unavailable; using embedded mode for this process")
+	}
+	if product.EmbeddedChildBridgeUnavailable {
+		_, _ = fmt.Fprintln(stderr, "caelis: loopback is unavailable; built-in child agents cannot connect for this process")
+	}
 	if product.Mode == productClientModeEmbedded && product.stack != nil {
-		if doctorSubcommand || *doctor {
+		if doctorSubcommand {
 			if err := product.stack.WaitApprovalRecovery(ctx); err != nil {
 				return err
 			}
@@ -374,7 +364,7 @@ func runWithProductClientOpener(
 		}
 		return acpserver.ServeStdio(ctx, agent, stdin, stdout)
 	}
-	if doctorSubcommand || *doctor {
+	if doctorSubcommand {
 		outFmt, err := parseOutputFormat(*format)
 		if err != nil {
 			return err
@@ -972,27 +962,6 @@ func splitNonEmptyCSV(value string) []string {
 		out = append(out, value)
 	}
 	return out
-}
-
-func parseControlOperationRetention(value string) (time.Duration, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0, nil
-	}
-	retention, err := time.ParseDuration(value)
-	if err != nil {
-		return 0, fmt.Errorf("invalid control operation retention %q: %w", value, err)
-	}
-	if retention <= 0 {
-		return 0, errors.New("control operation retention must be greater than zero")
-	}
-	return retention, nil
-}
-
-func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
-	cfg.ModelProfileID = strings.ToLower(strings.TrimSpace(cfg.ModelProfileID))
-	cfg.ModelProfileEffort = strings.ToLower(strings.TrimSpace(cfg.ModelProfileEffort))
-	return cfg, nil
 }
 
 func sandboxStartupEscapeError(err error) error {

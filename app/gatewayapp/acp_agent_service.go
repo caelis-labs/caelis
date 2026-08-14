@@ -38,8 +38,6 @@ func withSelfACPAgent(assembly assembly.ResolvedAssembly, self assembly.AgentCon
 }
 
 type defaultSpawnedSelfACPAgentConfig struct {
-	AppName          string
-	UserID           string
 	StoreDir         string
 	WorkspaceKey     string
 	WorkspaceCWD     string
@@ -52,8 +50,6 @@ type defaultSpawnedSelfACPAgentConfig struct {
 
 func defaultSpawnedSelfACPAgent(cfg defaultSpawnedSelfACPAgentConfig) (assembly.AgentConfig, error) {
 	agent, err := agentregistry.DefaultSelfAgent(agentregistry.DefaultSelfConfig{
-		AppName:        cfg.AppName,
-		UserID:         cfg.UserID,
 		StoreDir:       cfg.StoreDir,
 		WorkspaceKey:   cfg.WorkspaceKey,
 		WorkspaceCWD:   cfg.WorkspaceCWD,
@@ -69,8 +65,6 @@ func defaultSpawnedSelfACPAgent(cfg defaultSpawnedSelfACPAgentConfig) (assembly.
 
 func configuredModelSpawnedSelfACPAgent(cfg defaultSpawnedSelfACPAgentConfig) (assembly.AgentConfig, error) {
 	agent, err := agentregistry.ConfiguredModelSelfAgent(agentregistry.DefaultSelfConfig{
-		AppName:        cfg.AppName,
-		UserID:         cfg.UserID,
 		StoreDir:       cfg.StoreDir,
 		WorkspaceKey:   cfg.WorkspaceKey,
 		WorkspaceCWD:   cfg.WorkspaceCWD,
@@ -121,8 +115,6 @@ func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, plugins []Plu
 
 func (s *Stack) configuredAssemblyWithPluginAgents(base assembly.ResolvedAssembly, pluginAgents []pluginapi.AgentRegistration, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	self, err := defaultSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
-		AppName:      s.AppName,
-		UserID:       s.UserID,
 		StoreDir:     s.storeDir,
 		WorkspaceKey: s.Workspace.Key,
 		WorkspaceCWD: s.Workspace.CWD,

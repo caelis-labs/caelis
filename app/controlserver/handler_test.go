@@ -83,7 +83,8 @@ func TestHostHealthReadinessAndInitializeExposeOneInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 	if info.ServerID != controlclient.ServerIdentity || info.InstanceID != instanceID ||
-		!slices.Contains(info.Capabilities, controlclient.CapabilityMultiWorkspace) {
+		!slices.Contains(info.Capabilities, controlclient.CapabilityMultiWorkspace) ||
+		!slices.Contains(info.Capabilities, controlclient.CapabilityWorkspaceCWDList) {
 		t.Fatalf("initialize = %#v", info)
 	}
 }
@@ -336,7 +337,7 @@ func TestRequestTrustPolicyRejectsBrowserAndRebindingInputsBeforeService(t *test
 func TestSameOriginHostAndBearerAuthentication(t *testing.T) {
 	service := &fakeService{}
 	server := newTestServer(t, service, 0)
-	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions", nil)
+	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions?cwd=%2Fworkspace", nil)
 	request.Host = "example.test"
 	request.Header.Set("Origin", "http://example.test")
 	request.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -345,6 +346,9 @@ func TestSameOriginHostAndBearerAuthentication(t *testing.T) {
 	server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || service.listCalls != 1 {
 		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, service.listCalls, recorder.Body.String())
+	}
+	if service.listed.CWD != "/workspace" {
+		t.Fatalf("ListSessions request = %#v", service.listed)
 	}
 	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("Access-Control-Allow-Origin = %q", got)
@@ -498,11 +502,13 @@ type fakeService struct {
 	reconnectReq   controlclient.ReconnectRequest
 	reconnectState controlclient.SessionState
 	listCalls      int
+	listed         controlclient.ListSessionsRequest
 	inspectErr     error
 }
 
-func (s *fakeService) ListSessions(context.Context, controlclient.Principal, controlclient.ListSessionsRequest) (session.SessionList, error) {
+func (s *fakeService) ListSessions(_ context.Context, _ controlclient.Principal, req controlclient.ListSessionsRequest) (session.SessionList, error) {
 	s.listCalls++
+	s.listed = req
 	return session.SessionList{}, nil
 }
 func (s *fakeService) CreateSession(_ context.Context, principal controlclient.Principal, req controlclient.CreateSessionRequest) (controlclient.CommandResult, error) {

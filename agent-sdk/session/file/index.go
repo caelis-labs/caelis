@@ -47,6 +47,10 @@ func (s *Store) listFromSessionIndex(req session.ListSessionsRequest) (session.S
 		clauses = append(clauses, "workspace_key = ?")
 		args = append(args, workspaceKey)
 	}
+	if cwd := strings.TrimSpace(req.CWD); cwd != "" {
+		clauses = append(clauses, "cwd = ?")
+		args = append(args, filepath.Clean(cwd))
+	}
 	if encoded := strings.TrimSpace(req.Cursor); encoded != "" {
 		cursor, err := session.DecodeSessionListCursor(encoded)
 		if err != nil {

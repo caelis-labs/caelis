@@ -17,6 +17,7 @@ const (
 	CapabilityAppServerClients = "appserver-clients-v1"
 	CapabilityTaskStreams      = "task-streams-v1"
 	CapabilityMultiWorkspace   = "multi-workspace-sessions-v1"
+	CapabilityWorkspaceCWDList = "workspace-cwd-session-list-v1"
 	CapabilityHostReadiness    = "host-readiness-v1"
 )
 
@@ -46,13 +47,13 @@ type HostStatus struct {
 }
 
 // RequiredManagedHostCapabilities returns the capabilities required by
-// transparent local start-or-attach clients. Explicit remote clients retain
-// version-only compatibility with older Hosts.
+// transparent local start-or-attach clients.
 func RequiredManagedHostCapabilities() []string {
 	return []string{
 		CapabilityAppServerClients,
 		CapabilityTaskStreams,
 		CapabilityMultiWorkspace,
+		CapabilityWorkspaceCWDList,
 		CapabilityHostReadiness,
 	}
 }

@@ -56,3 +56,32 @@ func TestStoreListPaginatesWithStableKeysetCursor(t *testing.T) {
 		t.Fatalf("paged sessions = %v", seen)
 	}
 }
+
+func TestStoreListFiltersLegacyWorkspaceAliasesByCWD(t *testing.T) {
+	ctx := context.Background()
+	store := NewStore(Config{RootDir: t.TempDir()})
+	workspace := t.TempDir()
+	otherWorkspace := t.TempDir()
+	for key, sessionID := range map[string]string{"legacy-a": "session-a", "legacy-b": "session-b"} {
+		if _, err := store.StartSession(ctx, session.StartSessionRequest{
+			AppName: "caelis", UserID: "user-1",
+			Workspace: session.WorkspaceRef{Key: key, CWD: workspace}, PreferredSessionID: sessionID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1",
+		Workspace: session.WorkspaceRef{Key: "legacy-a", CWD: otherWorkspace}, PreferredSessionID: "other-session",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := store.ListSessions(ctx, session.ListSessionsRequest{UserID: "user-1", CWD: workspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Sessions) != 2 {
+		t.Fatalf("CWD-scoped Sessions = %#v", listed.Sessions)
+	}
+}

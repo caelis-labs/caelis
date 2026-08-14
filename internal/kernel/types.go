@@ -71,6 +71,7 @@ type ListSessionsRequest struct {
 	AppName      string
 	UserID       string
 	WorkspaceKey string
+	CWD          string
 	Cursor       string
 	Limit        int
 }

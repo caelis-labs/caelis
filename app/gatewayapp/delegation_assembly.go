@@ -140,8 +140,6 @@ func (s *Stack) materializeDelegatedModel(name, profileID, effort string, runtim
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve delegated profile %q: %w", profileID, err)
 	}
 	materialized, err := configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
-		AppName:      s.AppName,
-		UserID:       s.UserID,
 		StoreDir:     s.storeDir,
 		WorkspaceKey: s.Workspace.Key,
 		WorkspaceCWD: s.Workspace.CWD,

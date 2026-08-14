@@ -167,6 +167,32 @@ func TestEmbeddedRawControlTokenUsesSeparateChildCredential(t *testing.T) {
 	}
 }
 
+func TestEmbeddedProductClientsRemainAvailableWhenLoopbackIsForbidden(t *testing.T) {
+	storeDir := t.TempDir()
+	product, err := openProductClients(context.Background(), gatewayapp.Config{
+		StoreDir: storeDir, WorkspaceKey: "restricted", WorkspaceCWD: t.TempDir(),
+		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
+	}, productClientOptions{
+		Mode: productClientModeEmbedded,
+		EmbeddedControlEndpoint: func() (embeddedControlEndpoint, error) {
+			return nil, os.ErrPermission
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = product.Close() })
+	if product.Mode != productClientModeEmbedded || !product.EmbeddedChildBridgeUnavailable {
+		t.Fatalf("restricted embedded product = mode %d bridge unavailable %v", product.Mode, product.EmbeddedChildBridgeUnavailable)
+	}
+	if product.BaseURL != "" || product.embeddedControl != nil {
+		t.Fatalf("restricted embedded child endpoint = %q adapter=%T, want none", product.BaseURL, product.embeddedControl)
+	}
+	if err := product.Clients.Validate(); err != nil || product.Tasks == nil {
+		t.Fatalf("restricted embedded clients = %v, tasks=%T", err, product.Tasks)
+	}
+}
+
 func TestProductHostOwnershipIsExclusive(t *testing.T) {
 	storeDir := t.TempDir()
 	first, err := acquireProductHostOwnership(storeDir)
@@ -271,40 +297,5 @@ func TestProductHostOwnershipRetainsInodeAcrossRelease(t *testing.T) {
 	waiterMu.Unlock()
 	if closer != nil {
 		_ = closer.Close()
-	}
-}
-
-func TestRejectRemoteHostOnlyOptions(t *testing.T) {
-	if err := rejectRemoteHostOnlyOptions(productClientModeEmbedded, remoteHostOnlyOptions{
-		DangerouslySkipPermissions: true,
-		ModelProfile:               "profile",
-	}); err != nil {
-		t.Fatalf("embedded mode should accept Host-only options: %v", err)
-	}
-	if err := rejectRemoteHostOnlyOptions(productClientModeRemote, remoteHostOnlyOptions{}); err != nil {
-		t.Fatalf("remote mode with no Host-only options: %v", err)
-	}
-	if err := rejectRemoteHostOnlyOptions(productClientModeManaged, remoteHostOnlyOptions{}); err != nil {
-		t.Fatalf("managed mode with no Host-only options: %v", err)
-	}
-	if err := rejectRemoteHostOnlyOptions(productClientModeManaged, remoteHostOnlyOptions{
-		ModelProfile: "provider/model",
-	}); err == nil {
-		t.Fatal("managed attach must not silently mutate the shared Host model profile")
-	}
-	if err := rejectRemoteHostOnlyOptions(productClientModeRemote, remoteHostOnlyOptions{
-		DangerouslySkipPermissions: true,
-	}); err == nil {
-		t.Fatal("remote YOLO must be rejected")
-	}
-	if err := rejectRemoteHostOnlyOptions(productClientModeRemote, remoteHostOnlyOptions{
-		ModelProfile: "provider/model",
-	}); err == nil {
-		t.Fatal("remote model-profile must be rejected")
-	}
-	if err := rejectRemoteHostOnlyOptions(productClientModeRemote, remoteHostOnlyOptions{
-		SystemPrompt: "extra",
-	}); err == nil {
-		t.Fatal("remote system-prompt must be rejected")
 	}
 }

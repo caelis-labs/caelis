@@ -255,6 +255,9 @@ func (c *Client) ListSessions(ctx context.Context, request controlclient.ListSes
 	if request.WorkspaceKey != "" {
 		query.Set("workspace_key", request.WorkspaceKey)
 	}
+	if request.CWD != "" {
+		query.Set("cwd", request.CWD)
+	}
 	if request.Cursor != "" {
 		query.Set("cursor", request.Cursor)
 	}

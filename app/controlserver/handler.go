@@ -207,7 +207,12 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	result, err := s.config.Services.Sessions.ListSessions(r.Context(), principal, controlclient.ListSessionsRequest{WorkspaceKey: r.URL.Query().Get("workspace_key"), Cursor: r.URL.Query().Get("cursor"), Limit: limit})
+	result, err := s.config.Services.Sessions.ListSessions(r.Context(), principal, controlclient.ListSessionsRequest{
+		WorkspaceKey: r.URL.Query().Get("workspace_key"),
+		CWD:          r.URL.Query().Get("cwd"),
+		Cursor:       r.URL.Query().Get("cursor"),
+		Limit:        limit,
+	})
 	writeJSONResult(w, result, err)
 }
 

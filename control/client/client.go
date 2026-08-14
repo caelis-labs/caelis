@@ -36,7 +36,12 @@ func (c *Client) ListSessions(ctx context.Context, principal Principal, req List
 	if err := c.config.Authorizer.Authorize(ctx, principal, ActionSessionList, ""); err != nil {
 		return session.SessionList{}, err
 	}
-	listReq := session.ListSessionsRequest{WorkspaceKey: strings.TrimSpace(req.WorkspaceKey), Cursor: strings.TrimSpace(req.Cursor), Limit: req.Limit}
+	listReq := session.ListSessionsRequest{
+		WorkspaceKey: strings.TrimSpace(req.WorkspaceKey),
+		CWD:          strings.TrimSpace(req.CWD),
+		Cursor:       strings.TrimSpace(req.Cursor),
+		Limit:        req.Limit,
+	}
 	if !principal.HasRole("admin") {
 		listReq.UserID = strings.TrimSpace(principal.ID)
 	}

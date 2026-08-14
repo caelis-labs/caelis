@@ -17,6 +17,11 @@ const (
 	EnvArgsJSON    = "CAELIS_ACP_SELF_AGENT_ARGS_JSON"
 	EnvLegacyCmd   = "CAELIS_ACP_SELF_AGENT_CMD"
 	EnvWorkDir     = "CAELIS_ACP_SELF_AGENT_WORKDIR"
+	// EnvWorkspaceKey and EnvWorkspaceCWD carry the parent Host's exact
+	// workspace address to the built-in Caelis ACP child without exposing
+	// workspace-selection flags in the public CLI.
+	EnvWorkspaceKey = "CAELIS_ACP_WORKSPACE_KEY"
+	EnvWorkspaceCWD = "CAELIS_ACP_WORKSPACE_CWD"
 )
 
 type LookupFunc func(string) string

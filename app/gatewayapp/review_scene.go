@@ -48,8 +48,6 @@ func (s *Stack) materializeReviewerAgent(
 			return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve Reviewer model profile %q: %w", placement.ProfileID, err)
 		}
 		return configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
-			AppName:      s.AppName,
-			UserID:       s.UserID,
 			StoreDir:     s.storeDir,
 			WorkspaceKey: s.Workspace.Key,
 			WorkspaceCWD: s.Workspace.CWD,

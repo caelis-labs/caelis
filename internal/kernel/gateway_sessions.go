@@ -214,7 +214,7 @@ func (g *Gateway) ListSessions(ctx context.Context, req ListSessionsRequest) (se
 
 func (g *Gateway) listSessionPage(ctx context.Context, req ListSessionsRequest, cursor string, limit int) (session.SessionList, error) {
 	list, err := g.sessions.ListSessions(ctx, session.ListSessionsRequest{
-		AppName: req.AppName, UserID: req.UserID, WorkspaceKey: req.WorkspaceKey,
+		AppName: req.AppName, UserID: req.UserID, WorkspaceKey: req.WorkspaceKey, CWD: req.CWD,
 		Cursor: cursor, Limit: limit,
 	})
 	if err != nil {

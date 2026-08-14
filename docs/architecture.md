@@ -234,8 +234,13 @@ Document responsibilities are intentionally separate:
   development binaries derive that identity from executable content. Protocol,
   Envelope, API, and capability compatibility remains a Surface-owned policy
   independent of distribution selection. `--embedded` is the explicit
-  single-client in-process exception; its built-in ACP children use a private
-  authenticated loopback adapter to attach that same Host. An explicit
+  single-client in-process exception. A bare launch also falls back to that
+  mode only when the initial lifecycle probe proves no Host owns the Store and
+  the managed service cannot start; an existing Ready or Unreachable Host is
+  never bypassed. Embedded built-in ACP children use a private authenticated
+  loopback adapter to attach that same Host. When the environment forbids even
+  that private listener, the main in-process client remains available while
+  cross-process built-in children are unavailable. An explicit
   Control URL attaches a
   caller-selected Host and never falls back to managed local mode. Session
   lifecycle, main-Turn ingress, and Agent-message delivery use principal-bound
@@ -254,6 +259,14 @@ Document responsibilities are intentionally separate:
   context. A client without a selected Session explicitly addresses its
   workspace by key and canonical working directory; the persistent Host's
   startup workspace is never an implicit substitute for that client address.
+  Product clients derive the key from that canonical directory. Sessions
+  written before v0.42 may retain another key selected by the retired CLI
+  override; Control lists those compatibility aliases by canonical CWD and
+  exact Session resume retains the durable key. One key may never identify two
+  directories. HTTP clients require the `workspace-cwd-session-list-v1`
+  capability before sending this CWD-scoped read, so an older remote Host
+  cannot silently interpret it as an unscoped list. Keep this reader until the
+  minimum supported upgrade source is v0.42 or newer.
   `UserID` remains a deprecated compatibility persistence field, is
   not a Runtime partition key, and must not be introduced into new reusable SDK
   contracts; identity and authorization migrate outward to Control principals.

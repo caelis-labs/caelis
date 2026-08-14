@@ -19,7 +19,7 @@ func TestClientListSessionsFillsLimitAcrossManagedPages(t *testing.T) {
 		Sessions:   store,
 	}}
 	listed, err := client.ListSessions(context.Background(), Principal{ID: "owner"}, ListSessionsRequest{
-		WorkspaceKey: "workspace", Limit: 2,
+		WorkspaceKey: "workspace", CWD: "/workspace", Limit: 2,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +31,7 @@ func TestClientListSessionsFillsLimitAcrossManagedPages(t *testing.T) {
 		t.Fatalf("ListSessions requests = %#v, want remaining visible limit across raw pages", store.requests)
 	}
 	for _, request := range store.requests {
-		if request.UserID != "owner" || request.WorkspaceKey != "workspace" {
+		if request.UserID != "owner" || request.WorkspaceKey != "workspace" || request.CWD != "/workspace" {
 			t.Fatalf("ListSessions request = %#v, want principal and workspace scope", request)
 		}
 	}

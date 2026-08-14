@@ -6,14 +6,13 @@ import (
 	"testing"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/internal/acpagentenv"
 )
 
 func TestConfiguredSelfAgentAttachesManagedHostAndCarriesSessionOptions(t *testing.T) {
 	t.Parallel()
 
 	agent, err := configuredSelfAgent(DefaultSelfConfig{
-		AppName:          "caelis",
-		UserID:           "user",
 		StoreDir:         "/store",
 		WorkspaceKey:     "workspace",
 		WorkspaceCWD:     "/workspace",
@@ -29,8 +28,7 @@ func TestConfiguredSelfAgentAttachesManagedHostAndCarriesSessionOptions(t *testi
 		t.Fatal(err)
 	}
 	if got, want := agent.Args, []string{
-		"acp", "-app", "caelis", "-user", "user", "-store-dir", "/store",
-		"-workspace-key", "workspace", "-workspace-cwd", "/workspace",
+		"acp", "-store-dir", "/store",
 		"-control-url", "http://127.0.0.1:1234", "-control-token-file", "/run/caelis/child-token",
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("configuredSelfAgent() args = %#v, want managed attach args %#v", got, want)
@@ -48,14 +46,41 @@ func TestConfiguredSelfAgentAttachesManagedHostAndCarriesSessionOptions(t *testi
 	if got, want := agent.Env, map[string]string{
 		"CAELIS_CONTROL_TOKEN":      "",
 		"CAELIS_CONTROL_TOKEN_FILE": "",
+		acpagentenv.EnvWorkspaceKey: "workspace",
+		acpagentenv.EnvWorkspaceCWD: "/workspace",
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("configuredSelfAgent() env = %#v, want inherited raw credentials scrubbed %#v", got, want)
+	}
+	if agent.WorkDir != "/workspace" {
+		t.Fatalf("configuredSelfAgent() workdir = %q, want /workspace", agent.WorkDir)
 	}
 	if agent.SessionOptions.ModelID != "model-config" ||
 		agent.SessionOptions.ConfigValues["mode"] != "manual" ||
 		agent.SessionOptions.ConfigValues["reasoning_effort"] != "high" ||
 		agent.SessionOptions.ReasoningEffortConfigID != "reasoning_effort" {
 		t.Fatalf("configuredSelfAgent() SessionOptions = %#v, want normalized post-session/new values", agent.SessionOptions)
+	}
+}
+
+func TestConfiguredSelfAgentWithoutChildBridgeScrubsParentCredentials(t *testing.T) {
+	t.Parallel()
+
+	agent, err := configuredSelfAgent(DefaultSelfConfig{
+		StoreDir:     "/store",
+		WorkspaceKey: "workspace",
+		WorkspaceCWD: "/workspace",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := agent.Env["CAELIS_CONTROL_TOKEN"]; got != "" {
+		t.Fatalf("CAELIS_CONTROL_TOKEN = %q, want scrubbed", got)
+	}
+	if got := agent.Env["CAELIS_CONTROL_TOKEN_FILE"]; got != "" {
+		t.Fatalf("CAELIS_CONTROL_TOKEN_FILE = %q, want scrubbed", got)
+	}
+	if strings.Contains(strings.Join(agent.Args, " "), "control-token") {
+		t.Fatalf("configuredSelfAgent() args = %#v, contain unavailable child credential", agent.Args)
 	}
 }
 

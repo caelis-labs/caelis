@@ -2,6 +2,7 @@ package inmemory
 
 import (
 	"context"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -119,6 +120,9 @@ func (s *Store) ListSessions(
 			continue
 		}
 		if req.WorkspaceKey != "" && record.session.WorkspaceKey != strings.TrimSpace(req.WorkspaceKey) {
+			continue
+		}
+		if req.CWD != "" && filepath.Clean(record.session.CWD) != filepath.Clean(strings.TrimSpace(req.CWD)) {
 			continue
 		}
 		rows = append(rows, session.SessionSummary{

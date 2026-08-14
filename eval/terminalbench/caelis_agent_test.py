@@ -20,9 +20,18 @@ class CaelisAgentTest(unittest.TestCase):
             CaelisAgent._REMOTE_STORE / "caelis.stderr",
         )
 
+        self.assertIn("--embedded", command)
         self.assertIn("--dangerously-skip-permissions", command)
-        self.assertNotIn("-sandbox-backend", command)
-        self.assertNotIn("-approval-mode", command)
+        for retired in (
+            "-sandbox-backend",
+            "-approval-mode",
+            "-policy-profile",
+            "-workspace-key",
+            "-workspace-cwd",
+            "-model-profile",
+            "-reasoning-effort",
+        ):
+            self.assertNotIn(retired, command)
 
     def test_populate_context_reads_final_structured_usage(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

@@ -11,8 +11,6 @@ import (
 )
 
 type DefaultSelfConfig struct {
-	AppName          string
-	UserID           string
 	StoreDir         string
 	WorkspaceKey     string
 	WorkspaceCWD     string
@@ -73,11 +71,7 @@ func configuredSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
 	}
 	args := []string{
 		"acp",
-		"-app", strings.TrimSpace(cfg.AppName),
-		"-user", strings.TrimSpace(cfg.UserID),
 		"-store-dir", strings.TrimSpace(cfg.StoreDir),
-		"-workspace-key", strings.TrimSpace(cfg.WorkspaceKey),
-		"-workspace-cwd", strings.TrimSpace(cfg.WorkspaceCWD),
 	}
 	if controlURL := strings.TrimSpace(cfg.ControlURL); controlURL != "" {
 		args = append(args, "-control-url", controlURL)
@@ -85,22 +79,22 @@ func configuredSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
 			args = append(args, "-control-token-file", tokenFile)
 		}
 	}
-	var env map[string]string
-	if strings.TrimSpace(cfg.ControlURL) != "" {
-		// Built-in children authenticate only through the explicitly supplied
-		// protected token file. Do not let a raw parent Host credential leak into
-		// the child through stdio's inherited base environment.
-		env = map[string]string{
-			"CAELIS_CONTROL_TOKEN":      "",
-			"CAELIS_CONTROL_TOKEN_FILE": "",
-		}
+	env := map[string]string{
+		"CAELIS_CONTROL_TOKEN":      "",
+		"CAELIS_CONTROL_TOKEN_FILE": "",
+		acpagentenv.EnvWorkspaceKey: strings.TrimSpace(cfg.WorkspaceKey),
+		acpagentenv.EnvWorkspaceCWD: strings.TrimSpace(cfg.WorkspaceCWD),
 	}
+	// Built-in children never inherit parent Host credentials through stdio's
+	// base environment. When a child bridge is available, authentication is
+	// supplied explicitly through the protected token-file argument above.
 	return assembly.AgentConfig{
 		Name:           "self",
 		Description:    "Caelis self ACP agent",
 		Command:        executable,
 		Args:           args,
 		Env:            env,
+		WorkDir:        strings.TrimSpace(cfg.WorkspaceCWD),
 		SessionOptions: controlagents.NormalizeSessionOptions(cfg.SessionOptions),
 	}, nil
 }

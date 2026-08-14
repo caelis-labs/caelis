@@ -109,8 +109,8 @@ func (d *assembler) CompleteResume(ctx context.Context, query string, limit int)
 	for {
 		result, err := d.listSessions(ctx, kernel.ListSessionsRequest{
 			AppName: d.stack.Session.AppName, UserID: d.stack.Session.UserID,
-			WorkspaceKey: d.stack.Session.Workspace.Key,
-			Cursor:       cursor, Limit: resumeCompletionPageLimit,
+			CWD:    d.stack.Session.Workspace.CWD,
+			Cursor: cursor, Limit: resumeCompletionPageLimit,
 		})
 		if err != nil {
 			return nil, err

@@ -10,6 +10,7 @@ import (
 // ListSessionsRequest filters the Sessions visible to one trusted principal.
 type ListSessionsRequest struct {
 	WorkspaceKey string `json:"workspace_key,omitempty"`
+	CWD          string `json:"cwd,omitempty"`
 	Cursor       string `json:"cursor,omitempty"`
 	Limit        int    `json:"limit,omitempty"`
 }

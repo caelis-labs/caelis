@@ -320,6 +320,24 @@ func TestReadsSessionStatusThroughTypedFacade(t *testing.T) {
 	}
 }
 
+func TestListSessionsCarriesCanonicalCWD(t *testing.T) {
+	client, closeServer := newFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != wirev1.APIPrefix+"/sessions" ||
+			r.Method != http.MethodGet ||
+			r.URL.Query().Get("cwd") != "/tmp/workspace" ||
+			r.URL.Query().Get("limit") != "20" {
+			t.Fatalf("list request = %s %s", r.Method, r.URL.String())
+		}
+		writeFixtureJSON(t, w, http.StatusOK, session.SessionList{})
+	})
+	defer closeServer()
+	if _, err := client.ListSessions(context.Background(), controlclient.ListSessionsRequest{
+		CWD: "/tmp/workspace", Limit: 20,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHostFocusedRequestsUseUnscopedRoutes(t *testing.T) {
 	requests := []struct {
 		method string

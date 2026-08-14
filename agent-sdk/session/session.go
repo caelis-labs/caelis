@@ -568,6 +568,7 @@ type ListSessionsRequest struct {
 	// principal. WorkspaceKey is the reusable SDK namespace during migration.
 	UserID       string `json:"user_id,omitempty"`
 	WorkspaceKey string `json:"workspace_key,omitempty"`
+	CWD          string `json:"cwd,omitempty"`
 	Cursor       string `json:"cursor,omitempty"`
 	Limit        int    `json:"limit,omitempty"`
 }

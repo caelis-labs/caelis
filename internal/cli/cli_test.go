@@ -42,7 +42,7 @@ func TestRunServeStartsProductControlServer(t *testing.T) {
 		return nil
 	}
 	err := run(context.Background(), []string{
-		"serve", "--store-dir", t.TempDir(), "--listen", "127.0.0.1:7777", "--sandbox-backend", "host",
+		"serve", "--store-dir", cliTestStoreDir(t), "--listen", "127.0.0.1:7777",
 	}, nil, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestRunServeDefaultsToPersistentTokenFile(t *testing.T) {
 	t.Cleanup(func() { runControlServerCommand = previous })
 	var captured controlserver.Config
 	var published bool
-	storeDir := t.TempDir()
+	storeDir := cliTestStoreDir(t)
 	runControlServerCommand = func(_ context.Context, _ controlserver.Dependencies, config controlserver.Config) error {
 		captured = config
 		info := config.ServerInfo
@@ -88,7 +88,7 @@ func TestRunServeDefaultsToPersistentTokenFile(t *testing.T) {
 		published = true
 		return nil
 	}
-	err := run(context.Background(), []string{"serve", "--store-dir", storeDir, "--sandbox-backend", "host"}, nil, io.Discard, io.Discard)
+	err := run(context.Background(), []string{"serve", "--store-dir", storeDir}, nil, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,8 @@ func TestRunHeadlessStructuredFormatsEncodePreStackFailures(t *testing.T) {
 				[]string{
 					"-p", "hello",
 					"-format", format,
-					"-control-operation-retention", "invalid",
+					"--embedded",
+					"--control-url", "http://127.0.0.1:7777",
 				},
 				strings.NewReader(""),
 				&stdout,
@@ -338,7 +339,7 @@ func TestRunHeadlessStructuredFormatsEncodePreStackFailures(t *testing.T) {
 			}
 			if record.SchemaVersion != headlessOutputSchemaVersion ||
 				record.Type != headlessOutputTypeError ||
-				!strings.Contains(record.Message, "invalid duration") {
+				!strings.Contains(record.Message, "mutually exclusive") {
 				t.Fatalf("structured error = %#v", record)
 			}
 		})
@@ -511,11 +512,153 @@ func TestRunHelpReturnsNil(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if got := stderr.String(); !strings.Contains(got, "Usage of caelis:") ||
-		!strings.Contains(got, "Approval mode: auto-review|manual") ||
-		!strings.Contains(got, "Policy profile: workspace-write") ||
+	got := stderr.String()
+	if !strings.Contains(got, "Usage of caelis:") ||
+		!strings.Contains(got, "Single-shot prompt text") ||
+		!strings.Contains(got, "Force single-client in-process Host mode") ||
 		!strings.Contains(got, "Reduce TUI motion") {
-		t.Fatalf("stderr = %q, want help usage with approval, policy, and reduced-motion options", got)
+		t.Fatalf("stderr = %q, want slim help usage", got)
+	}
+	for _, retired := range []string{
+		"-app ", "-user ", "-workspace-key ", "-workspace-cwd ",
+		"-sandbox-backend ", "-sandbox-helper-path ", "-context-window ",
+		"-model-profile ", "-reasoning-effort ", "-system-prompt ",
+		"-approval-mode ", "-policy-profile ", "-control-operation-retention ", "-doctor",
+	} {
+		if strings.Contains(got, retired) {
+			t.Fatalf("stderr = %q, contains retired option %q", got, retired)
+		}
+	}
+}
+
+func TestRunVersionAndHelpDoNotRequireLiveWorkingDirectory(t *testing.T) {
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	if err := os.Remove(workspace); err != nil {
+		t.Fatal(err)
+	}
+
+	var versionOutput bytes.Buffer
+	if err := run(context.Background(), []string{"version"}, nil, &versionOutput, io.Discard); err != nil {
+		t.Fatalf("run(version) from removed cwd: %v", err)
+	}
+	if versionOutput.Len() == 0 {
+		t.Fatal("run(version) from removed cwd produced no output")
+	}
+
+	var helpOutput bytes.Buffer
+	if err := run(context.Background(), []string{"--help"}, nil, io.Discard, &helpOutput); err != nil {
+		t.Fatalf("run(--help) from removed cwd: %v", err)
+	}
+	if !strings.Contains(helpOutput.String(), "Usage of caelis:") {
+		t.Fatalf("help output = %q", helpOutput.String())
+	}
+}
+
+func TestRunRejectsRetiredOptions(t *testing.T) {
+	for _, arguments := range [][]string{
+		{"--app", "caelis"},
+		{"--user", "local-user"},
+		{"--workspace-key", "workspace"},
+		{"--workspace-cwd", t.TempDir()},
+		{"--sandbox-backend", "host"},
+		{"--sandbox-helper-path", "/helper"},
+		{"--context-window", "128000"},
+		{"--model-profile", "profile"},
+		{"--reasoning-effort", "high"},
+		{"--system-prompt", "extra"},
+		{"--approval-mode", "manual"},
+		{"--policy-profile", "workspace-write"},
+		{"--control-operation-retention", "720h"},
+		{"--doctor"},
+	} {
+		err := run(context.Background(), arguments, strings.NewReader(""), io.Discard, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+			t.Fatalf("run(%q) error = %v, want retired flag rejection", arguments, err)
+		}
+	}
+}
+
+func TestRunDerivesWorkspaceAndIdentityFromProcess(t *testing.T) {
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	t.Setenv("CAELIS_CONTROL_URL", "")
+	t.Setenv("CAELIS_CONTROL_EMBEDDED", "")
+	stop := errors.New("captured config")
+	var captured gatewayapp.Config
+	err := runWithProductClientOpener(
+		context.Background(),
+		[]string{"doctor"},
+		nil,
+		io.Discard,
+		io.Discard,
+		func(_ context.Context, cfg gatewayapp.Config, _ productClientOptions) (*productClients, error) {
+			captured = cfg
+			return nil, stop
+		},
+	)
+	if !errors.Is(err, stop) {
+		t.Fatalf("runWithProductClientOpener() error = %v, want capture stop", err)
+	}
+	canonicalWorkspace, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if captured.AppName != defaultAppName || captured.UserID != defaultPrincipalID ||
+		captured.WorkspaceCWD != canonicalWorkspace || captured.WorkspaceKey != canonicalWorkspace {
+		t.Fatalf("derived CLI config = %#v", captured)
+	}
+}
+
+func TestWorkspaceAddressFromCWDDoesNotCollideForSameBasename(t *testing.T) {
+	root := t.TempDir()
+	workspaceA := filepath.Join(root, "a", "repo")
+	workspaceB := filepath.Join(root, "b", "repo")
+	for _, workspace := range []string{workspaceA, workspaceB} {
+		if err := os.MkdirAll(workspace, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	keyA, cwdA, err := workspaceAddressFromCWD(workspaceA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyB, cwdB, err := workspaceAddressFromCWD(workspaceB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keyA == keyB {
+		t.Fatalf("same-basename workspace keys collide: %q", keyA)
+	}
+	if keyA != cwdA || keyB != cwdB {
+		t.Fatalf("workspace addresses = (%q, %q), (%q, %q), want canonical CWD keys", keyA, cwdA, keyB, cwdB)
+	}
+}
+
+func TestACPChildUsesPrivateWorkspaceAddress(t *testing.T) {
+	t.Setenv(acpagentenv.EnvWorkspaceKey, "parent-workspace")
+	t.Setenv(acpagentenv.EnvWorkspaceCWD, "/parent/workspace")
+	t.Setenv("CAELIS_CONTROL_URL", "")
+	t.Setenv("CAELIS_CONTROL_EMBEDDED", "")
+	stop := errors.New("captured config")
+	var captured gatewayapp.Config
+	err := runWithProductClientOpener(
+		context.Background(),
+		[]string{"acp"},
+		nil,
+		io.Discard,
+		io.Discard,
+		func(_ context.Context, cfg gatewayapp.Config, _ productClientOptions) (*productClients, error) {
+			captured = cfg
+			return nil, stop
+		},
+	)
+	if !errors.Is(err, stop) {
+		t.Fatalf("runWithProductClientOpener() error = %v, want capture stop", err)
+	}
+	if captured.WorkspaceKey != "parent-workspace" || captured.WorkspaceCWD != "/parent/workspace" {
+		t.Fatalf("ACP child workspace = %#v", captured)
 	}
 }
 
@@ -633,20 +776,6 @@ func TestDefaultStoreDirUsesHomeDirectory(t *testing.T) {
 	want := filepath.Join(home, ".caelis-dev", "default")
 	if got := defaultStoreDir(t.TempDir()); got != want {
 		t.Fatalf("defaultStoreDir() = %q, want %q", got, want)
-	}
-}
-
-func TestParseControlOperationRetention(t *testing.T) {
-	if got, err := parseControlOperationRetention(""); err != nil || got != 0 {
-		t.Fatalf("empty retention = %v, %v", got, err)
-	}
-	if got, err := parseControlOperationRetention("720h"); err != nil || got != 30*24*time.Hour {
-		t.Fatalf("parsed retention = %v, %v", got, err)
-	}
-	for _, value := range []string{"invalid", "0", "-1h"} {
-		if _, err := parseControlOperationRetention(value); err == nil {
-			t.Fatalf("retention %q unexpectedly succeeded", value)
-		}
 	}
 }
 
@@ -1032,6 +1161,8 @@ func clearSelfAgentEnv(t *testing.T) {
 		acpagentenv.EnvArgsJSON,
 		acpagentenv.EnvLegacyCmd,
 		acpagentenv.EnvWorkDir,
+		acpagentenv.EnvWorkspaceKey,
+		acpagentenv.EnvWorkspaceCWD,
 	} {
 		t.Setenv(key, "")
 	}
@@ -1046,12 +1177,10 @@ func TestRunDoctorJSONDoesNotLeakToken(t *testing.T) {
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	err := runWithRoundTripEmbeddedControl(t, context.Background(), []string{
+		"doctor",
 		"--embedded",
-		"-doctor",
 		"-format", "json",
 		"-store-dir", storeDir,
-		"-workspace-key", "doctor-ws",
-		"-workspace-cwd", t.TempDir(),
 	}, strings.NewReader(""), &out, &errBuf)
 	if err != nil {
 		t.Fatalf("run(-doctor) error = %v", err)
@@ -1079,8 +1208,6 @@ func TestRunDoctorDangerouslySkipPermissionsActivatesVisibleYOLOMode(t *testing.
 		"--dangerously-skip-permissions",
 		"-format", "json",
 		"-store-dir", storeDir,
-		"-workspace-key", "doctor-yolo",
-		"-workspace-cwd", t.TempDir(),
 	}, strings.NewReader(""), &out, &errBuf)
 	if err != nil {
 		t.Fatalf("run(doctor --dangerously-skip-permissions) error = %v", err)
@@ -1101,7 +1228,7 @@ func TestRunDoctorDangerouslySkipPermissionsActivatesVisibleYOLOMode(t *testing.
 func TestRunACPSubcommandConstructsStdioServer(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	storeDir := cliTestStoreDir(t)
-	profileID := seedCLIModel(t, storeDir, gatewayapp.ModelConfig{
+	seedCLIModel(t, storeDir, gatewayapp.ModelConfig{
 		Provider: "ollama", Model: "llama3",
 	})
 	var out bytes.Buffer
@@ -1112,9 +1239,6 @@ func TestRunACPSubcommandConstructsStdioServer(t *testing.T) {
 		"acp",
 		"--embedded",
 		"-store-dir", storeDir,
-		"-workspace-key", "acp-ws",
-		"-workspace-cwd", t.TempDir(),
-		"-model-profile", profileID,
 	}, strings.NewReader(""), &out, &errBuf)
 	if err != nil {
 		t.Fatalf("run(acp) error = %v; stderr=%q", err, errBuf.String())
@@ -1133,8 +1257,6 @@ func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 		"doctor",
 		"--embedded",
 		"-store-dir", storeDir,
-		"-workspace-key", "doctor-ws",
-		"-workspace-cwd", t.TempDir(),
 	}, strings.NewReader(""), &out, &errBuf)
 	if err != nil {
 		t.Fatalf("run(doctor) error = %v", err)
@@ -1179,10 +1301,7 @@ func TestRunSandboxSetupSubcommandTextOutput(t *testing.T) {
 		"sandbox",
 		"setup",
 		"--embedded",
-		"-sandbox-backend", "host",
 		"-store-dir", cliTestStoreDir(t),
-		"-workspace-key", "sandbox-ws",
-		"-workspace-cwd", t.TempDir(),
 	}, strings.NewReader(""), &out, &errBuf)
 	if err != nil {
 		t.Fatalf("run(sandbox setup) error = %v; stderr=%q", err, errBuf.String())
@@ -1210,10 +1329,7 @@ func TestRunSandboxSetupSubcommandJSONOutput(t *testing.T) {
 		"setup",
 		"--embedded",
 		"-format", "json",
-		"-sandbox-backend", "host",
 		"-store-dir", cliTestStoreDir(t),
-		"-workspace-key", "sandbox-ws",
-		"-workspace-cwd", t.TempDir(),
 	}, strings.NewReader(""), &out, &errBuf)
 	if err != nil {
 		t.Fatalf("run(sandbox setup json) error = %v; stderr=%q", err, errBuf.String())
@@ -1230,28 +1346,6 @@ func TestRunSandboxSetupSubcommandJSONOutput(t *testing.T) {
 	}
 }
 
-func TestRunSandboxSetupSubcommandAcceptsBackendOverride(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	useFakeSandboxCommandsForCLITest(t)
-	var out bytes.Buffer
-	var errBuf bytes.Buffer
-	err := run(context.Background(), []string{
-		"sandbox",
-		"setup",
-		"--embedded",
-		"-sandbox-backend", "host",
-		"-store-dir", t.TempDir(),
-		"-workspace-key", "sandbox-ws",
-		"-workspace-cwd", t.TempDir(),
-	}, strings.NewReader(""), &out, &errBuf)
-	if err != nil {
-		t.Fatalf("run(sandbox setup -sandbox-backend host) error = %v; stderr=%q", err, errBuf.String())
-	}
-	if !strings.Contains(out.String(), "sandbox_requested_backend: host") {
-		t.Fatalf("sandbox setup output = %q, want requested host backend", out.String())
-	}
-}
-
 func TestRunSandboxFixSubcommandTextOutput(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	useFakeSandboxCommandsForCLITest(t)
@@ -1261,10 +1355,7 @@ func TestRunSandboxFixSubcommandTextOutput(t *testing.T) {
 		"sandbox",
 		"fix",
 		"--embedded",
-		"-sandbox-backend", "host",
 		"-store-dir", cliTestStoreDir(t),
-		"-workspace-key", "sandbox-ws",
-		"-workspace-cwd", t.TempDir(),
 	}, strings.NewReader(""), &out, &errBuf)
 	if err != nil {
 		t.Fatalf("run(sandbox fix) error = %v; stderr=%q", err, errBuf.String())
@@ -1283,10 +1374,7 @@ func TestRunSandboxResetSubcommandTextOutput(t *testing.T) {
 		"sandbox",
 		"reset",
 		"--embedded",
-		"-sandbox-backend", "host",
 		"-store-dir", cliTestStoreDir(t),
-		"-workspace-key", "sandbox-ws",
-		"-workspace-cwd", t.TempDir(),
 	}, strings.NewReader(""), &out, &errBuf)
 	if err != nil {
 		t.Fatalf("run(sandbox reset) error = %v; stderr=%q", err, errBuf.String())
@@ -1305,10 +1393,7 @@ func TestRunSandboxCleanSubcommandAliasesReset(t *testing.T) {
 		"sandbox",
 		"clean",
 		"--embedded",
-		"-sandbox-backend", "host",
 		"-store-dir", cliTestStoreDir(t),
-		"-workspace-key", "sandbox-ws",
-		"-workspace-cwd", t.TempDir(),
 	}, strings.NewReader(""), &out, &errBuf)
 	if err != nil {
 		t.Fatalf("run(sandbox clean) error = %v; stderr=%q", err, errBuf.String())

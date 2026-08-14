@@ -61,6 +61,8 @@ jq -e \
       default_effort: "high",
       profiles: [.model_profiles.profiles[] | select(.id == $profile)]
     },
+    sandbox: {requested_type: "host"},
+    runtime: {approval_mode: "manual", policy_profile: "workspace-write"},
     agent_bindings: {},
     plugins: []
   }
@@ -119,9 +121,7 @@ run_gate tui-side-acp-overlay \
 printf 'ACP_ACCEPTANCE_WORKSPACE\n' >"$run_dir/workspace/README.txt"
 printf -v quoted_binary '%q' "$binary"
 printf -v quoted_store '%q' "$runtime_store"
-printf -v quoted_workspace '%q' "$run_dir/workspace"
-printf -v quoted_profile '%q' "$profile_id"
-agent_command="$quoted_binary acp -store-dir $quoted_store -workspace-key acp-acceptance -workspace-cwd $quoted_workspace -model-profile $quoted_profile -reasoning-effort high -approval-mode manual -policy-profile workspace-write -sandbox-backend host"
+agent_command="$quoted_binary acp --embedded -store-dir $quoted_store"
 
 acpx_base=(
   acpx

@@ -219,10 +219,10 @@ func (d *assembler) listResumeCandidates(ctx context.Context, limit int) ([]cont
 	ctx, cancel := completionContext(ctx, resumeCompletionTimeout)
 	defer cancel()
 	result, err := d.listSessions(ctx, kernel.ListSessionsRequest{
-		AppName:      d.stack.Session.AppName,
-		UserID:       d.stack.Session.UserID,
-		WorkspaceKey: d.stack.Session.Workspace.Key,
-		Limit:        limit,
+		AppName: d.stack.Session.AppName,
+		UserID:  d.stack.Session.UserID,
+		CWD:     d.stack.Session.Workspace.CWD,
+		Limit:   limit,
 	})
 	if err != nil {
 		return nil, err

@@ -223,7 +223,7 @@ func (a *SessionClientAdapter) ListSessions(ctx context.Context, limit int) ([]c
 		return nil, errors.New("app/gatewayapp/controladapter: Session client is unavailable")
 	}
 	result, err := a.sessionClient.ListSessions(ctx, controlclient.ListSessionsRequest{
-		WorkspaceKey: strings.TrimSpace(a.workspaceKey), Limit: normalizeCompletionLimit(limit),
+		CWD: strings.TrimSpace(a.WorkspaceDir()), Limit: normalizeCompletionLimit(limit),
 	})
 	if err != nil {
 		return nil, err

@@ -47,7 +47,7 @@ owns that Host's lifetime:
 | --- | --- | --- | --- |
 | Managed local service | Bare `caelis`, `caelis -p …`, or `caelis acp` performs idempotent service start and attaches | Product Host ownership guard taken at process entry before shared state opens; owns Gateway, feed, approvals, operation ledger, Task streams, and Session Runtimes | Any number of TUI, headless, product ACP, and future GUI clients for that store |
 | Explicit Control Host | `caelis serve` | Same Host authority; publishes discovery only for the protected default credential and a loopback listener | Local managed clients or explicit URL clients |
-| Explicit embedded Host | `caelis --embedded` | Same Host implementation and ownership guard inside one presentation process | Tests and deliberate single-client launches only |
+| Embedded Host | `caelis --embedded`, or a bare launch after a missing managed Host cannot start | Same Host implementation and ownership guard inside one presentation process | Tests, deliberate single-client launches, and environments that cannot start the loopback service |
 | Explicit presentation client | `caelis --control-url …`, `caelis -p --control-url …`, `caelis acp --control-url …` | None. Focused AppServer/Task clients only | Caller-selected external Host |
 
 Rules:
@@ -63,14 +63,23 @@ Rules:
   policy, and required capabilities before attaching focused HTTP/SSE clients.
   A short-lived lifecycle lock serializes concurrent start and replacement;
   the full-lifetime Host ownership guard still admits exactly one authority.
+  If the initial lifecycle probe proves the Host is missing and service start
+  fails, the presentation falls back to the embedded Host for that process.
+  It never bypasses a Ready or Unreachable Host, so ownership, compatibility,
+  authentication, and Store failures cannot create a second authority.
 - **Attach.** An explicit `--control-url` / `CAELIS_CONTROL_URL` uses the same
   focused HTTP contracts and never receives Runtime or Kernel handles. Attach
   failure returns a clear error and never silently falls back to local mode.
-- **Embedded.** `--embedded` is an explicit in-process exception. It is not a
+- **Embedded.** `--embedded` is an explicit in-process selection and the
+  missing-service fallback described above is its bounded automatic entry. It
+  is not a
   second product authority when a managed or explicit Host already owns the
   store directory. The presentation stays in-process; a private authenticated
   loopback AppServer exposes that same Host only so built-in ACP children can
-  attach without constructing another authority.
+  attach without constructing another authority. If the environment denies
+  that listener, the focused in-process presentation clients still run, but
+  cross-process built-in children cannot connect and the CLI reports that
+  limitation.
 - **Exit.** Host shutdown quiesces producers and releases ownership. Client exit
   never cancels accepted Host work and never stops a managed local Host. The
   shared Host deliberately does not infer liveness from HTTP connection count:
@@ -266,8 +275,10 @@ suggests.
 
 **Evidence.** Product clients open focused AppServer/Task clients through
 `internal/cli`. A bare local launch discovers or starts one independent Host and
-uses HTTP/SSE; an explicit Control URL uses the same transport. `caelis serve`
-and explicit `--embedded` take a product Host ownership guard at process entry
+uses HTTP/SSE, falling back to the embedded path only after proving the Host was
+missing and service start failed; an explicit Control URL uses the same
+transport. `caelis serve`, explicit `--embedded`, and the bounded embedded
+fallback take a product Host ownership guard at process entry
 before opening shared Host state (`internal/cli/host_ownership*.go`).
 HTTP clients bind the complete focused set plus Task observation
 (`control/client/httpclient`). The feed registry and live approval maps remain
@@ -279,7 +290,8 @@ observes the same live feed, approvals, Task streams, and operation ledger as
 every other attached client. Shared store directories remain durable truth only.
 
 **Bounded repair status.** Done for the product CLI topology with managed local
-start-or-attach, explicit URL attach, and explicit embedded mode. Desktop
+start-or-attach, explicit URL attach, explicit embedded mode, and a missing-
+service-only embedded fallback. Desktop
 reconnect after an already attached Host is replaced remains presentation work.
 
 **Acceptance.** `TestControlHostTwoClientsTwoSessionsInjectedTransport` runs one
@@ -325,8 +337,8 @@ HTTP Task observation is implemented by `control/client/httpclient.TaskClient`.
 TUI, Headless, and product ACP bind clients only. Their prompt and slash routers
 contain no `Stack`, Runtime, Session store, local mode/config provider, or
 terminal controller. Product process selection uses managed local HTTP clients
-by default, explicit embedded clients only on request, or attaches when an
-explicit Control URL is present. Slash parsing stays
+by default, uses embedded clients explicitly or when a proven-missing local
+service cannot start, or attaches when an explicit Control URL is present. Slash parsing stays
 client-side; only classified typed operations cross AppServer. The generic
 direct Runtime ACP bridge remains a lower-level conformance API and is not
 selectable by product `GatewayAgentConfig`.
@@ -365,9 +377,12 @@ or cached by workspace. Durable Sessions store only workspace key/CWD. Inspect
 reads durable and already-live state without assembling or retaining
 execution state. Explicit reconnect also does not assemble a Runtime, but its
 continuation owns one process-local observation reference. Multiple clients may
-attach to the same Session independently. Ambiguous key/CWD aliases fail before
-Session creation; accepted aliases remain a Host-lifetime identity fence because
-their durable Sessions may reactivate later.
+attach to the same Session independently. New product Sessions use the
+canonical CWD-derived key. Pre-v0.42 Sessions may retain multiple historical
+keys for that same CWD: listing and exact resume keep those aliases readable,
+while a key bound to another CWD still fails before Session creation. This
+compatibility reader remains until the minimum supported upgrade source is
+v0.42 or newer.
 
 Session assembly reads one complete `AppConfig` snapshot and does not acquire a
 Host-wide or cross-process assembly lock. The configuration store's atomic
@@ -654,7 +669,8 @@ The current AppServer slice includes:
   Assembly, or SurfaceBuilder;
 - product clients default to discovery/start/attach of one independent local
   Host and use a caller-selected remote transport only for an explicit Control
-  URL; `--embedded` is the explicit single-client exception; product Host
+  URL; `--embedded` is the explicit single-client selection and a failed start
+  may select it automatically only after a missing-Host probe; product Host
   ownership is taken only at Host process entry before shared state opens;
 - the local server implementation exposes narrow status, configuration, Agent,
   completion, and plugin assemblers; the broad Adapter is not a production API;

@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
@@ -213,6 +214,173 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 	stateA, err := clientB.Clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: "session-a"})
 	if err != nil || stateA.WorkspaceKey != "workspace-a" {
 		t.Fatalf("Session A after first client exit = %#v, %v", stateA, err)
+	}
+}
+
+func TestMissingManagedHostFallsBackToEmbedded(t *testing.T) {
+	storeDir := t.TempDir()
+	product, err := openProductClients(t.Context(), gatewayapp.Config{
+		AppName: "caelis", UserID: "local-user", StoreDir: storeDir,
+		WorkspaceKey: "fallback", WorkspaceCWD: t.TempDir(),
+		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
+	}, productClientOptions{
+		Mode: productClientModeManaged, ServiceInstallDir: t.TempDir(),
+		LaunchLocalService: func(localHostStartRequest) (servicelifecycle.LaunchedProcess, error) {
+			return servicelifecycle.LaunchedProcess{}, errors.New("loopback service unavailable")
+		},
+		EmbeddedControlEndpoint: roundTripEmbeddedControlFactory(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = product.Close() })
+	if product.Mode != productClientModeEmbedded || !product.ManagedFallback {
+		t.Fatalf("fallback product = mode %d fallback %v", product.Mode, product.ManagedFallback)
+	}
+	if err := product.Clients.Validate(); err != nil || product.Tasks == nil {
+		t.Fatalf("fallback clients = %v, tasks=%T", err, product.Tasks)
+	}
+}
+
+func TestAutomaticWorkspaceAddressListsAndResumesPersistedLegacyAliases(t *testing.T) {
+	ctx := t.Context()
+	storeDir := t.TempDir()
+	workspace := t.TempDir()
+	canonicalWorkspace, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacySessions := map[string]string{
+		"legacy-key-a": "legacy-workspace-session-a",
+		"legacy-key-b": "legacy-workspace-session-b",
+	}
+	for legacyKey, sessionID := range legacySessions {
+		legacy, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+			AppName: "caelis", UserID: "local-user", StoreDir: storeDir,
+			WorkspaceKey: legacyKey, WorkspaceCWD: workspace,
+			SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := legacy.Sessions.StartSession(ctx, session.StartSessionRequest{
+			AppName: legacy.AppName, UserID: legacy.UserID,
+			Workspace: legacy.Workspace, PreferredSessionID: sessionID,
+		}); err != nil {
+			_ = legacy.Close()
+			t.Fatal(err)
+		}
+		if err := legacy.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	product, err := openProductClients(ctx, gatewayapp.Config{
+		AppName: "caelis", UserID: "local-user", StoreDir: storeDir,
+		WorkspaceKey: canonicalWorkspace, WorkspaceCWD: canonicalWorkspace,
+		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
+	}, productClientOptions{
+		Mode: productClientModeEmbedded, EmbeddedControlEndpoint: roundTripEmbeddedControlFactory(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = product.Close() })
+	if product.Workspace.WorkspaceKey != canonicalWorkspace || product.Workspace.WorkspaceCWD != canonicalWorkspace {
+		t.Fatalf("automatic workspace = %#v, want canonical address %q", product.Workspace, canonicalWorkspace)
+	}
+	listed, err := product.Clients.Sessions.ListSessions(ctx, controlclient.ListSessionsRequest{
+		CWD: product.Workspace.WorkspaceCWD,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Sessions) != len(legacySessions) {
+		t.Fatalf("legacy workspace Sessions = %#v", listed.Sessions)
+	}
+	for _, summary := range listed.Sessions {
+		if want := legacySessions[summary.WorkspaceKey]; want != summary.SessionID {
+			t.Fatalf("legacy workspace Session = %#v, want %q", summary, want)
+		}
+		created, err := product.Clients.Sessions.CreateSession(ctx, controlclient.CreateSessionRequest{
+			WriteBase:          controlclient.WriteBase{OperationID: "resume-" + summary.SessionID},
+			PreferredSessionID: summary.SessionID,
+			WorkspaceKey:       product.Workspace.WorkspaceKey,
+			CWD:                product.Workspace.WorkspaceCWD,
+		})
+		if err != nil || created.SessionID != summary.SessionID {
+			t.Fatalf("resume legacy Session %q = %#v, %v", summary.SessionID, created, err)
+		}
+	}
+}
+
+func TestExplicitRemoteHostRequiresCWDSessionListingCapability(t *testing.T) {
+	server := testenv.NewHTTPServer(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/control/v1/initialize" {
+			http.NotFound(writer, request)
+			return
+		}
+		_ = json.NewEncoder(writer).Encode(controlclient.ServerInfo{
+			ProtocolVersion: schema.CurrentProtocolVersion,
+			EnvelopeVersion: controlclient.EnvelopeVersion,
+			APIVersion:      controlclient.HTTPAPIVersion,
+			ServerID:        controlclient.ServerIdentity,
+			Capabilities:    []string{controlclient.CapabilityMultiWorkspace},
+		})
+	}))
+	workspace := t.TempDir()
+	_, err := openProductClients(t.Context(), gatewayapp.Config{
+		WorkspaceKey: workspace, WorkspaceCWD: workspace,
+	}, productClientOptions{
+		Mode: productClientModeRemote, ControlURL: server.URL, Token: "test-token", HTTPClient: server.Client(),
+		WorkspaceKey: workspace, WorkspaceCWD: workspace,
+	})
+	if err == nil || !strings.Contains(err.Error(), controlclient.CapabilityWorkspaceCWDList) {
+		t.Fatalf("remote attach error = %v, want missing CWD-list capability", err)
+	}
+}
+
+func TestManagedHostOwnershipPreventsEmbeddedFallback(t *testing.T) {
+	storeDir := t.TempDir()
+	if _, err := controlserver.LoadOrCreateBearerToken(controlserver.DefaultTokenFile(storeDir)); err != nil {
+		t.Fatal(err)
+	}
+	build := version.BuildInfo()
+	if err := controlserver.PublishDiscoveryRecord(controlserver.DefaultDiscoveryFile(storeDir), controlserver.DiscoveryRecord{
+		SchemaVersion: controlserver.DiscoverySchemaVersion,
+		ServerID:      controlclient.ServerIdentity, InstanceID: uuid.NewString(),
+		AppName: "caelis", PrincipalID: "local-user", PID: 1, Endpoint: "http://127.0.0.1:7777",
+		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: controlclient.EnvelopeVersion,
+		APIVersion: controlclient.HTTPAPIVersion, Capabilities: controlclient.RequiredManagedHostCapabilities(),
+		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
+		Transports: []string{"http"}, StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ownership, err := acquireProductHostOwnership(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ownership.Close() })
+	var endpointCalls atomic.Int32
+	_, err = openProductClients(t.Context(), gatewayapp.Config{
+		AppName: "caelis", UserID: "local-user", StoreDir: storeDir,
+		WorkspaceKey: "owned", WorkspaceCWD: t.TempDir(),
+	}, productClientOptions{
+		Mode: productClientModeManaged,
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("loopback unavailable")
+		})},
+		EmbeddedControlEndpoint: func() (embeddedControlEndpoint, error) {
+			endpointCalls.Add(1)
+			return roundTripEmbeddedControlFactory(t)()
+		},
+	})
+	if err == nil {
+		t.Fatal("owned managed Host unexpectedly fell back")
+	}
+	if endpointCalls.Load() != 0 {
+		t.Fatalf("embedded fallback endpoint calls = %d, want 0", endpointCalls.Load())
 	}
 }
 

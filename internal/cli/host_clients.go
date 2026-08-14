@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -24,8 +25,9 @@ import (
 //
 // Product topology has one live Control Host per store. Managed mode discovers
 // or starts that independent Host and attaches focused clients. Explicit remote
-// mode attaches a caller-selected Host; embedded mode is an explicit
-// single-client exception. A shared state directory is never live authority.
+// mode attaches a caller-selected Host; embedded mode is a single-client
+// exception selected explicitly or after a proven-missing managed Host cannot
+// start. A shared state directory is never live authority.
 type productClientMode int
 
 const (
@@ -62,11 +64,13 @@ type productClientOptions struct {
 }
 
 type productClients struct {
-	Clients   controlclient.AppServerClients
-	Tasks     taskstream.Client
-	Mode      productClientMode
-	BaseURL   string
-	Workspace gatewayapp.Config
+	Clients                        controlclient.AppServerClients
+	Tasks                          taskstream.Client
+	Mode                           productClientMode
+	BaseURL                        string
+	Workspace                      gatewayapp.Config
+	ManagedFallback                bool
+	EmbeddedChildBridgeUnavailable bool
 	// stack is non-nil only for embedded single-client mode. Surfaces must not
 	// use it; it exists solely so the CLI can own Host lifecycle.
 	stack *gatewayapp.Stack
@@ -145,7 +149,7 @@ func openRemoteProductClients(ctx context.Context, options productClientOptions)
 		BearerToken:   token,
 		HTTPClient:    options.HTTPClient,
 		EventBuffer:   256,
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: controlclient.CurrentCompatibility(controlclient.CapabilityWorkspaceCWDList),
 	})
 	if err != nil {
 		return nil, err
@@ -176,29 +180,56 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 	if err != nil {
 		return nil, err
 	}
+	openEndpoint := options.EmbeddedControlEndpoint
+	if openEndpoint == nil {
+		openEndpoint = newLoopbackEmbeddedControlEndpoint
+	}
+	endpoint, err := openEndpoint()
+	childBridgeUnavailable := false
+	if err != nil {
+		if !errors.Is(err, os.ErrPermission) {
+			_ = ownership.Close()
+			return nil, err
+		}
+		childBridgeUnavailable = true
+	}
+	if err == nil && endpoint == nil {
+		_ = ownership.Close()
+		return nil, errors.New("cli: embedded child Control endpoint is unavailable")
+	}
+	if endpoint != nil && strings.TrimSpace(endpoint.BaseURL()) == "" {
+		_ = endpoint.Close()
+		_ = ownership.Close()
+		return nil, errors.New("cli: embedded child Control endpoint is unavailable")
+	}
 	token := strings.TrimSpace(options.Token)
 	tokenFile := strings.TrimSpace(options.TokenFile)
 	var childToken string
 	var childTokenFile string
 	var childCredentialCleanup func() error
 	if token != "" && tokenFile != "" {
+		if endpoint != nil {
+			_ = endpoint.Close()
+		}
 		_ = ownership.Close()
 		return nil, errors.New("cli: configure either CAELIS_CONTROL_TOKEN or a Control token file, not both")
 	}
-	if token == "" {
+	if endpoint != nil && token == "" {
 		if tokenFile == "" {
 			tokenFile = controlserver.DefaultTokenFile(cfg.StoreDir)
 		}
 		token, err = controlserver.LoadOrCreateBearerToken(tokenFile)
 		if err != nil {
+			_ = endpoint.Close()
 			_ = ownership.Close()
 			return nil, err
 		}
 		childToken = token
 		childTokenFile = tokenFile
-	} else {
+	} else if endpoint != nil {
 		childTokenFile, childToken, childCredentialCleanup, err = newEphemeralChildControlCredential()
 		if err != nil {
+			_ = endpoint.Close()
 			_ = ownership.Close()
 			return nil, err
 		}
@@ -208,37 +239,26 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 			_ = childCredentialCleanup()
 		}
 	}
-	openEndpoint := options.EmbeddedControlEndpoint
-	if openEndpoint == nil {
-		openEndpoint = newLoopbackEmbeddedControlEndpoint
-	}
-	endpoint, err := openEndpoint()
-	if err != nil {
-		cleanupChildCredentialOnError()
-		_ = ownership.Close()
-		return nil, err
-	}
-	if endpoint == nil || strings.TrimSpace(endpoint.BaseURL()) == "" {
-		cleanupChildCredentialOnError()
+	closeEndpoint := func() {
 		if endpoint != nil {
 			_ = endpoint.Close()
 		}
-		_ = ownership.Close()
-		return nil, errors.New("cli: embedded child Control endpoint is unavailable")
 	}
-	cfg.ChildControlURL = endpoint.BaseURL()
-	cfg.ChildControlTokenFile = childTokenFile
+	if endpoint != nil {
+		cfg.ChildControlURL = endpoint.BaseURL()
+		cfg.ChildControlTokenFile = childTokenFile
+	}
 	stack, err := gatewayapp.NewLocalStack(cfg)
 	if err != nil {
 		cleanupChildCredentialOnError()
-		_ = endpoint.Close()
+		closeEndpoint()
 		_ = ownership.Close()
 		return nil, err
 	}
 	appServer, err := local.NewAppServer(stack)
 	if err != nil {
 		cleanupChildCredentialOnError()
-		_ = endpoint.Close()
+		closeEndpoint()
 		_ = stack.Close()
 		_ = ownership.Close()
 		return nil, err
@@ -246,67 +266,74 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 	clients, tasks, err := appServer.Bind(controlclient.Principal{ID: stack.UserID})
 	if err != nil {
 		cleanupChildCredentialOnError()
-		_ = endpoint.Close()
+		closeEndpoint()
 		_ = stack.Close()
 		_ = ownership.Close()
 		return nil, err
 	}
-	authenticator, err := controlserver.BearerTokenAuthenticator(token, controlclient.Principal{ID: stack.UserID})
-	if err != nil {
-		cleanupChildCredentialOnError()
-		_ = endpoint.Close()
-		_ = stack.Close()
-		_ = ownership.Close()
-		return nil, err
-	}
-	if childToken != token {
-		childAuthenticator, childAuthErr := controlserver.BearerTokenAuthenticator(childToken, controlclient.Principal{ID: stack.UserID})
-		if childAuthErr != nil {
+	if endpoint != nil {
+		authenticator, authErr := controlserver.BearerTokenAuthenticator(token, controlclient.Principal{ID: stack.UserID})
+		if authErr != nil {
 			cleanupChildCredentialOnError()
-			_ = endpoint.Close()
+			closeEndpoint()
 			_ = stack.Close()
 			_ = ownership.Close()
-			return nil, childAuthErr
+			return nil, authErr
 		}
-		authenticator = anyControlAuthenticator(authenticator, childAuthenticator)
+		if childToken != token {
+			childAuthenticator, childAuthErr := controlserver.BearerTokenAuthenticator(childToken, controlclient.Principal{ID: stack.UserID})
+			if childAuthErr != nil {
+				cleanupChildCredentialOnError()
+				closeEndpoint()
+				_ = stack.Close()
+				_ = ownership.Close()
+				return nil, childAuthErr
+			}
+			authenticator = anyControlAuthenticator(authenticator, childAuthenticator)
+		}
+		build := version.BuildInfo()
+		handler, handlerErr := controlserver.Handler(controlserver.Dependencies{
+			Services: appServer.Services, TaskStreams: appServer.TaskStreams,
+		}, controlserver.Config{
+			Authenticator: authenticator,
+			AllowedHosts:  []string{"127.0.0.1"},
+			ServerInfo: controlclient.ServerInfo{
+				ServerID:            controlclient.ServerIdentity,
+				DistributionVersion: build.Version,
+				BuildID:             build.BuildID,
+				BuildKind:           build.BuildKind,
+				Capabilities:        controlclient.RequiredManagedHostCapabilities(),
+			},
+		})
+		if handlerErr != nil {
+			cleanupChildCredentialOnError()
+			closeEndpoint()
+			_ = stack.Close()
+			_ = ownership.Close()
+			return nil, handlerErr
+		}
+		if startErr := endpoint.Start(handler); startErr != nil {
+			cleanupChildCredentialOnError()
+			closeEndpoint()
+			_ = stack.Close()
+			_ = ownership.Close()
+			return nil, startErr
+		}
 	}
-	build := version.BuildInfo()
-	handler, err := controlserver.Handler(controlserver.Dependencies{
-		Services: appServer.Services, TaskStreams: appServer.TaskStreams,
-	}, controlserver.Config{
-		Authenticator: authenticator,
-		AllowedHosts:  []string{"127.0.0.1"},
-		ServerInfo: controlclient.ServerInfo{
-			ServerID:            controlclient.ServerIdentity,
-			DistributionVersion: build.Version,
-			BuildID:             build.BuildID,
-			BuildKind:           build.BuildKind,
-			Capabilities:        controlclient.RequiredManagedHostCapabilities(),
-		},
-	})
-	if err != nil {
-		cleanupChildCredentialOnError()
-		_ = endpoint.Close()
-		_ = stack.Close()
-		_ = ownership.Close()
-		return nil, err
-	}
-	if err := endpoint.Start(handler); err != nil {
-		cleanupChildCredentialOnError()
-		_ = endpoint.Close()
-		_ = stack.Close()
-		_ = ownership.Close()
-		return nil, err
+	baseURL := ""
+	if endpoint != nil {
+		baseURL = endpoint.BaseURL()
 	}
 	return &productClients{
-		Clients:                clients,
-		Tasks:                  tasks,
-		Mode:                   productClientModeEmbedded,
-		BaseURL:                endpoint.BaseURL(),
-		stack:                  stack,
-		ownership:              ownership,
-		embeddedControl:        endpoint,
-		childCredentialCleanup: childCredentialCleanup,
+		Clients:                        clients,
+		Tasks:                          tasks,
+		Mode:                           productClientModeEmbedded,
+		BaseURL:                        baseURL,
+		stack:                          stack,
+		ownership:                      ownership,
+		embeddedControl:                endpoint,
+		childCredentialCleanup:         childCredentialCleanup,
+		EmbeddedChildBridgeUnavailable: childBridgeUnavailable,
 		Workspace: gatewayapp.Config{
 			AppName: stack.AppName, UserID: stack.UserID, StoreDir: cfg.StoreDir,
 			WorkspaceKey: stack.Workspace.Key, WorkspaceCWD: stack.Workspace.CWD,
@@ -405,50 +432,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-type remoteHostOnlyOptions struct {
-	SystemPrompt               string
-	ApprovalMode               string
-	PolicyProfile              string
-	DangerouslySkipPermissions bool
-	ModelProfile               string
-	ReasoningEffort            string
-	SandboxBackend             string
-	SandboxHelper              string
-	ContextWindow              int
-	OperationRetention         string
-}
-
-// rejectRemoteHostOnlyOptions fails closed when remote attach is selected with
-// Host-construction flags that are not applied through the Control client path.
-// Callers must not display Host-only features as active when they were ignored.
-func rejectRemoteHostOnlyOptions(mode productClientMode, options remoteHostOnlyOptions) error {
-	if mode != productClientModeRemote && mode != productClientModeManaged {
-		return nil
-	}
-	switch {
-	case options.DangerouslySkipPermissions:
-		return errors.New("cli: --dangerously-skip-permissions requires explicit --embedded mode; attached Hosts cannot enable Host escape mode")
-	case options.SystemPrompt != "":
-		return errors.New("cli: --system-prompt requires explicit --embedded mode or a Host-side configuration mutation")
-	case options.ApprovalMode != "":
-		return errors.New("cli: --approval-mode requires explicit --embedded mode or a Host-side configuration mutation")
-	case options.PolicyProfile != "":
-		return errors.New("cli: --policy-profile requires explicit --embedded mode or a Host-side configuration mutation")
-	case options.ModelProfile != "":
-		return errors.New("cli: --model-profile requires explicit --embedded mode or a Host-side configuration mutation")
-	case options.ReasoningEffort != "":
-		return errors.New("cli: --reasoning-effort requires explicit --embedded mode or a Host-side configuration mutation")
-	case options.SandboxBackend != "":
-		return errors.New("cli: --sandbox-backend requires explicit --embedded mode or a Host-side configuration mutation")
-	case options.SandboxHelper != "":
-		return errors.New("cli: --sandbox-helper-path requires explicit --embedded mode")
-	case options.ContextWindow != 0:
-		return errors.New("cli: --context-window requires explicit --embedded mode or a Host-side configuration mutation")
-	case options.OperationRetention != "":
-		return errors.New("cli: --control-operation-retention requires explicit --embedded mode")
-	default:
-		return nil
-	}
 }

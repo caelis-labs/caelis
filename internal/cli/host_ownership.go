@@ -24,7 +24,7 @@ var ErrProductHostOwnershipConflict = errors.New("cli: another product Control H
 
 // acquireProductHostOwnership takes the exclusive product Host ownership guard
 // for one store directory. Call only at product Host process entry (caelis serve
-// or explicit --embedded) before opening shared Host state. Do not call from
+// or embedded, whether explicit or a missing-service fallback) before opening shared Host state. Do not call from
 // NewLocalStack or generic Runtime assembly.
 func acquireProductHostOwnership(storeDir string) (io.Closer, error) {
 	path := productHostOwnershipPath(storeDir)

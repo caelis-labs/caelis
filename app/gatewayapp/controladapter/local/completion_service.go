@@ -193,6 +193,7 @@ func (s *CompletionService) bindPrincipalSessionList(stack *controladapter.Runti
 	stack.Session.ListSessionsFn = func(ctx context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
 		return s.host.ControlClient().ListSessions(ctx, principal, controlclient.ListSessionsRequest{
 			WorkspaceKey: req.WorkspaceKey,
+			CWD:          req.CWD,
 			Cursor:       req.Cursor,
 			Limit:        req.Limit,
 		})

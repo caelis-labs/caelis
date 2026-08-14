@@ -53,7 +53,6 @@ type sessionRuntimeRegistry struct {
 	sessions     map[string]*sessionRuntime
 	observers    map[string]uint64
 	workspaceCWD map[string]string
-	workspaceKey map[string]string
 	closed       bool
 	building     int
 	buildsIdle   chan struct{}
@@ -81,7 +80,6 @@ func newSessionRuntimeRegistry(owner *Stack) (*sessionRuntimeRegistry, error) {
 		sessions:     map[string]*sessionRuntime{},
 		observers:    map[string]uint64{},
 		workspaceCWD: map[string]string{workspace.Key: workspace.CWD},
-		workspaceKey: map[string]string{workspace.CWD: workspace.Key},
 		buildsIdle:   buildsIdle,
 	}, nil
 }
@@ -117,7 +115,7 @@ func (r *sessionRuntimeRegistry) lockActivation(
 // resolveCreateWorkspaceLocked validates one durable create without assembling
 // execution state. The caller must hold the activation lock through durable
 // Session creation and bindCreatedWorkspaceLocked so concurrent creates cannot
-// claim conflicting workspace aliases.
+// bind one workspace key to conflicting directories.
 func (r *sessionRuntimeRegistry) resolveCreateWorkspaceLocked(
 	ctx context.Context,
 	principal controlclient.Principal,
@@ -144,7 +142,7 @@ func (r *sessionRuntimeRegistry) resolveCreateWorkspaceLocked(
 			if canonicalErr != nil {
 				return session.WorkspaceRef{}, canonicalErr
 			}
-			if actual != workspace {
+			if actual.CWD != workspace.CWD {
 				return session.WorkspaceRef{}, errorcode.New(
 					errorcode.InvalidArgument,
 					fmt.Sprintf(
@@ -155,6 +153,10 @@ func (r *sessionRuntimeRegistry) resolveCreateWorkspaceLocked(
 					),
 				)
 			}
+			// Retired CLI workspace-key overrides may have left more than one
+			// durable key for the same canonical directory. Exact Session resume
+			// keeps that historical key while new Sessions use the derived key.
+			workspace = actual
 		case !errors.Is(loadErr, session.ErrSessionNotFound):
 			return session.WorkspaceRef{}, loadErr
 		}
@@ -1018,23 +1020,11 @@ func (r *sessionRuntimeRegistry) validateWorkspaceIdentityLocked(workspace sessi
 			),
 		)
 	}
-	if existingKey := r.workspaceKey[workspace.CWD]; existingKey != "" && existingKey != workspace.Key {
-		return errorcode.New(
-			errorcode.InvalidArgument,
-			fmt.Sprintf(
-				"gatewayapp: workspace directory %q is already bound as %q, not %q",
-				workspace.CWD,
-				existingKey,
-				workspace.Key,
-			),
-		)
-	}
 	return nil
 }
 
 func (r *sessionRuntimeRegistry) recordWorkspaceIdentityLocked(workspace session.WorkspaceRef) {
 	r.workspaceCWD[workspace.Key] = workspace.CWD
-	r.workspaceKey[workspace.CWD] = workspace.Key
 }
 
 func validateSessionRuntime(active session.Session, runtime *sessionRuntime) error {
