@@ -6,6 +6,7 @@ package tuiapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -37,11 +38,13 @@ type ProgramSender struct {
 }
 
 type activeRunCancel struct {
-	id     uint64
-	cancel context.CancelFunc
+	id        uint64
+	cancel    context.CancelFunc
+	admitting bool
 }
 
 type programSenderBoundContextKey struct{}
+type programSenderRunContextKey struct{}
 
 const programSenderCloseTimeout = 250 * time.Millisecond
 
@@ -110,6 +113,16 @@ func (s *ProgramSender) bindContext(parent context.Context) context.Context {
 	if bound, ok := parent.Value(programSenderBoundContextKey{}).(*ProgramSender); ok && bound == s {
 		return parent
 	}
+	return s.observationContext(parent)
+}
+
+// observationContext returns the Program-lifetime feed context. Esc interrupt
+// must cancel the Host turn, not this observation.
+func (s *ProgramSender) observationContext(parent context.Context) context.Context {
+	parent = contextOrBackground(parent)
+	if s == nil {
+		return parent
+	}
 	if s.closed.Load() {
 		ctx, cancel := context.WithCancel(parent)
 		cancel()
@@ -139,8 +152,9 @@ func (s *ProgramSender) beginRunContext(parent context.Context) (context.Context
 	}
 	s.nextRunID++
 	id := s.nextRunID
-	s.runCancels = append(s.runCancels, activeRunCancel{id: id, cancel: cancel})
+	s.runCancels = append(s.runCancels, activeRunCancel{id: id, cancel: cancel, admitting: true})
 	s.mu.Unlock()
+	ctx = context.WithValue(ctx, programSenderRunContextKey{}, id)
 	return ctx, func() {
 		s.mu.Lock()
 		for i, run := range s.runCancels {
@@ -154,20 +168,46 @@ func (s *ProgramSender) beginRunContext(parent context.Context) (context.Context
 	}
 }
 
-func (s *ProgramSender) CancelActiveRuns() bool {
+// markRunAdmitted prevents the local Esc fallback from pretending it stopped
+// an already-addressable Host Turn. From this point onward only Control's
+// exact-target Interrupt may report acceptance; observation remains attached.
+func (s *ProgramSender) markRunAdmitted(ctx context.Context) {
+	if s == nil || ctx == nil {
+		return
+	}
+	id, _ := ctx.Value(programSenderRunContextKey{}).(uint64)
+	if id == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.runCancels {
+		if s.runCancels[i].id == id {
+			s.runCancels[i].admitting = false
+			return
+		}
+	}
+}
+
+// CancelPendingRuns aborts only requests that have not returned an
+// addressable Turn. Live Turn observation is Program-scoped and is never
+// detached by this fallback.
+func (s *ProgramSender) CancelPendingRuns() bool {
 	if s == nil {
 		return false
 	}
 	s.mu.Lock()
-	runCancels := append([]activeRunCancel(nil), s.runCancels...)
-	s.runCancels = nil
-	s.mu.Unlock()
-	for _, run := range runCancels {
-		if run.cancel != nil {
-			run.cancel()
+	cancels := make([]context.CancelFunc, 0, len(s.runCancels))
+	for _, run := range s.runCancels {
+		if run.admitting && run.cancel != nil {
+			cancels = append(cancels, run.cancel)
 		}
 	}
-	return len(runCancels) > 0
+	s.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	return len(cancels) > 0
 }
 
 func (s *ProgramSender) startForwarder(fn func()) bool {
@@ -400,9 +440,12 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 
 	if base.CancelRunning == nil {
 		base.CancelRunning = func() bool {
-			requested := sender != nil && sender.CancelActiveRuns()
-			err := service.Interrupt(ctx)
-			return requested || err == nil
+			// Ask Control to cancel the Host turn. Observation stays on the
+			// Program-lifetime context so the cancelled lifecycle can still arrive.
+			if service.Interrupt(ctx) == nil {
+				return true
+			}
+			return sender != nil && sender.CancelPendingRuns()
 		}
 	}
 
@@ -455,10 +498,9 @@ func (r executeLineResult) commandMessage() tea.Msg {
 }
 
 func executeLineViaControlServiceWithContextResult(ctx context.Context, service ControlServices, sender *ProgramSender, sub Submission, routerFactory controlprompt.RouterFactory) executeLineResult {
+	// Keep the executeLine run context for Route/Submit. Live observation is
+	// rebound onto the Program context inside the event-stream forwarder.
 	ctx = contextOrBackground(ctx)
-	if sender != nil {
-		ctx = sender.bindContext(ctx)
-	}
 	if routerFactory == nil {
 		return executeLineResult{completion: TaskResultMsg{Err: fmt.Errorf("control prompt router factory is required")}}
 	}
@@ -491,12 +533,24 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 		Attachments: convertAttachments(sub.Attachments),
 	}})
 	if err != nil {
+		if sender != nil {
+			sender.markRunAdmitted(ctx)
+		}
+		if errors.Is(err, context.Canceled) {
+			return executeLineResult{completion: TaskResultMsg{Interrupted: true}}
+		}
 		return executeLineResult{completion: TaskResultMsg{Err: err}}
 	}
 	if privateResult, ok := promptResult.PrivateResult.(executeLineResult); ok {
+		if sender != nil {
+			sender.markRunAdmitted(ctx)
+		}
 		return privateResult
 	}
 	if promptResult.Handled {
+		if sender != nil {
+			sender.markRunAdmitted(ctx)
+		}
 		return executeControlPromptResult(ctx, service, sender, promptResult)
 	}
 
@@ -508,7 +562,13 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 		Mode:        sub.Mode,
 		Attachments: convertAttachments(sub.Attachments),
 	})
+	if sender != nil {
+		sender.markRunAdmitted(ctx)
+	}
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return executeLineResult{completion: TaskResultMsg{Interrupted: true}}
+		}
 		return executeLineResult{completion: TaskResultMsg{Err: controlprompt.FriendlyCommandError("submit", err)}}
 	}
 	if turn == nil {

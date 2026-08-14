@@ -3,7 +3,6 @@ package controlclient
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -216,52 +215,47 @@ func (c *ParticipantTurnClient) startObserved(
 		return nil, err
 	}
 	result, err := start(reconnected.State)
-	if err != nil {
-		_ = reconnected.Subscription.Close()
-		stopFeed()
-		return nil, err
-	}
-	if result.Outcome != OutcomeCommitted && result.Outcome != OutcomeAccepted {
-		_ = reconnected.Subscription.Close()
-		stopFeed()
-		return nil, fmt.Errorf("controlclient: participant operation %q ended with outcome %q", result.OperationID, result.Outcome)
-	}
-	if !validSessionTurnTarget(result.Target) {
-		_ = reconnected.Subscription.Close()
-		stopFeed()
-		return nil, errors.New("controlclient: participant operation returned no complete Turn target")
-	}
 	participantID := strings.TrimSpace(result.ParticipantID)
-	if participantID == "" {
+	if canObserveAdmittedTurn(result, err) && participantID == "" {
 		latest, inspectErr := c.sessions.InspectSession(ctx, StateRequest{SessionID: sessionID})
-		if inspectErr != nil {
+		if inspectErr == nil {
+			participantID = strings.TrimSpace(resolveParticipantID(latest))
+		} else if !commandOutcomeUnknown(result, err) {
 			_ = reconnected.Subscription.Close()
 			stopFeed()
 			return nil, inspectErr
 		}
-		participantID = strings.TrimSpace(resolveParticipantID(latest))
 	}
-	if participantID == "" {
+	if canObserveAdmittedTurn(result, err) && participantID == "" && !commandOutcomeUnknown(result, err) {
 		_ = reconnected.Subscription.Close()
 		stopFeed()
 		return nil, errors.New("controlclient: participant operation returned no addressable participant")
 	}
-	turn := newTargetTurn(c.sessions, sessionID, reconnected, feedCtx, stopFeed, result.Target)
-	turn.cancelFn = func(cancelCtx context.Context, reason string) error {
-		_, cancelErr := c.participants.CancelParticipant(cancelCtx, CancelParticipantRequest{
-			WriteBase: WriteBase{
-				OperationID:             newParticipantOperationID("cancel"),
-				SessionID:               sessionID,
-				ExpectedControllerEpoch: turn.controllerEpoch,
+	turn, err := admitObservedTurn(c.sessions, sessionID, reconnected, feedCtx, stopFeed, result, err, func(turn *sessionTurn) {
+		cancelWrite := &turnCancelWrite{
+			operationID: newParticipantOperationID("cancel"),
+			newOperationID: func() string {
+				return newParticipantOperationID("cancel")
 			},
-			ParticipantID: participantID,
-			Target:        result.Target,
-			Reason:        strings.TrimSpace(reason),
-		})
-		return cancelErr
+			execute: func(cancelCtx context.Context, operationID, reason string) (CommandResult, error) {
+				return c.participants.CancelParticipant(cancelCtx, CancelParticipantRequest{
+					WriteBase: WriteBase{
+						OperationID:             operationID,
+						SessionID:               sessionID,
+						ExpectedControllerEpoch: turn.controllerEpoch,
+					},
+					ParticipantID: participantID,
+					Target:        result.Target,
+					Reason:        strings.TrimSpace(reason),
+				})
+			},
+		}
+		turn.cancelFn = cancelWrite.cancel
+	})
+	if turn == nil {
+		return nil, err
 	}
-	go turn.relay()
-	return turn, nil
+	return turn, err
 }
 
 func matchingParticipantID(participants []session.ParticipantBinding, label, source string) string {

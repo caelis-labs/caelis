@@ -106,6 +106,506 @@ func TestSessionClientAdapterRoutesMainTurnWritesAndObservationThroughTypedClien
 	}
 }
 
+func TestSessionClientAdapterInterruptsBlockedMainTurnAdmission(t *testing.T) {
+	t.Parallel()
+
+	target := controlclient.TurnTarget{HandleID: "handle-pending", RunID: "run-pending", TurnID: "turn-pending"}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	client := &sessionClientAdapterTestClient{
+		target:       target,
+		subscription: newSessionClientAdapterTestSubscription(),
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
+			newSessionClientAdapterTestSubscription(),
+			newSessionClientAdapterTestSubscription(),
+		},
+		promptStarted: started,
+		promptRelease: release,
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
+
+	done := make(chan struct {
+		turn controlprompt.Turn
+		err  error
+	}, 1)
+	go func() {
+		turn, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "hello"})
+		done <- struct {
+			turn controlprompt.Turn
+			err  error
+		}{turn, err}
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("Prompt() did not start")
+	}
+	interruptDone := make(chan error, 1)
+	go func() {
+		interruptDone <- adapter.Interrupt(context.Background())
+	}()
+	time.Sleep(20 * time.Millisecond)
+	client.mu.Lock()
+	cancelled := client.cancel.Target
+	client.mu.Unlock()
+	if cancelled != (controlclient.TurnTarget{}) {
+		t.Fatalf("Cancel() during blocked Start = %#v, want no cancel until admission finishes", cancelled)
+	}
+
+	close(release)
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("Submit() after pending interrupt = %v", got.err)
+		}
+		if got.turn == nil {
+			t.Fatal("Submit() Turn = nil, want admitted turn so the feed can observe cancellation")
+		}
+		defer got.turn.Close()
+	case <-time.After(time.Second):
+		t.Fatal("Submit() did not return after admission resumed")
+	}
+	select {
+	case err := <-interruptDone:
+		if err != nil {
+			t.Fatalf("Interrupt() = %v, want formal cancel after admission", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Interrupt() did not return after admission")
+	}
+
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.cancel.Target != target {
+		t.Fatalf("Cancel() after admission = %#v, want formal cancel of %#v", client.cancel.Target, target)
+	}
+}
+
+func TestSessionClientAdapterInterruptBoundsUncooperativeAdmissionAndCancelsLateTurn(t *testing.T) {
+	t.Parallel()
+
+	target := controlclient.TurnTarget{HandleID: "handle-late", RunID: "run-late", TurnID: "turn-late"}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	cancelled := make(chan controlclient.CancelRequest, 1)
+	client := &sessionClientAdapterTestClient{
+		target:       target,
+		subscription: newSessionClientAdapterTestSubscription(),
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
+			newSessionClientAdapterTestSubscription(),
+			newSessionClientAdapterTestSubscription(),
+		},
+		promptStarted:       started,
+		promptRelease:       release,
+		promptIgnoreContext: true,
+		cancelCalled:        cancelled,
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
+
+	submitDone := make(chan error, 1)
+	go func() {
+		_, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "hello"})
+		submitDone <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("Prompt() did not start")
+	}
+	startedAt := time.Now()
+	if err := adapter.Interrupt(context.Background()); err != nil {
+		t.Fatalf("Interrupt() = %v, want bounded local admission interrupt", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed > time.Second {
+		t.Fatalf("Interrupt() took %v, want bounded Esc response", elapsed)
+	}
+	select {
+	case err := <-submitDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Submit() = %v, want cancelled admission", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Submit() remained stuck after Esc")
+	}
+
+	// Simulate a transport that ignored cancellation and reports a committed
+	// target later. The adapter must still issue an exact-target cancel instead
+	// of orphaning that Turn.
+	close(release)
+	select {
+	case request := <-cancelled:
+		if request.Target != target {
+			t.Fatalf("late Cancel() target = %#v, want %#v", request.Target, target)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("late admitted Turn was not cancelled")
+	}
+}
+
+func TestSessionClientAdapterFailedAdmissionAfterInterruptDoesNotCancelNextTurn(t *testing.T) {
+	t.Parallel()
+
+	target := controlclient.TurnTarget{HandleID: "handle-next", RunID: "run-next", TurnID: "turn-next"}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	client := &sessionClientAdapterTestClient{
+		target:       target,
+		subscription: newSessionClientAdapterTestSubscription(),
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
+			newSessionClientAdapterTestSubscription(),
+			newSessionClientAdapterTestSubscription(),
+		},
+		promptStarted: started,
+		promptRelease: release,
+		promptErr:     errors.New("admission failed"),
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "hello"})
+		done <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("Prompt() did not start")
+	}
+	interruptDone := make(chan error, 1)
+	go func() {
+		interruptDone <- adapter.Interrupt(context.Background())
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Submit() error = nil, want failed admission")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Submit() did not return failed admission")
+	}
+	select {
+	case err := <-interruptDone:
+		if err == nil {
+			t.Fatal("Interrupt() = nil, want failed admission reported instead of accepted interrupt")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Interrupt() did not return after failed admission")
+	}
+
+	client.mu.Lock()
+	client.promptErr = nil
+	client.promptRelease = nil
+	client.mu.Unlock()
+	turn, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer turn.Close()
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.cancel.Target != (controlclient.TurnTarget{}) {
+		t.Fatalf("next Turn was cancelled = %#v, want leftover pending interrupt cleared", client.cancel.Target)
+	}
+}
+
+func TestSessionClientAdapterUnknownAdmissionWithoutTargetDoesNotAcceptInterrupt(t *testing.T) {
+	t.Parallel()
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	unknown := controlclient.NewOutcomeError(controlclient.OutcomeUnknown, errors.New("effect outcome cannot be proven"))
+	client := &sessionClientAdapterTestClient{
+		subscription: newSessionClientAdapterTestSubscription(),
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
+			newSessionClientAdapterTestSubscription(),
+			newSessionClientAdapterTestSubscription(),
+		},
+		promptStarted:    started,
+		promptRelease:    release,
+		promptErr:        unknown,
+		promptOutcome:    controlclient.OutcomeUnknown,
+		omitPromptTarget: true,
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "hello"})
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("Prompt() did not start")
+	}
+	interruptDone := make(chan error, 1)
+	go func() {
+		interruptDone <- adapter.Interrupt(context.Background())
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	select {
+	case err := <-done:
+		var receipt *controlclient.CommandReceiptError
+		if !errors.As(err, &receipt) || receipt.Receipt.Outcome != controlclient.OutcomeUnknown {
+			t.Fatalf("Submit() = %v, want unknown admission receipt", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Submit() did not return unknown admission")
+	}
+	select {
+	case err := <-interruptDone:
+		var receipt *controlclient.CommandReceiptError
+		if !errors.As(err, &receipt) || receipt.Receipt.Outcome != controlclient.OutcomeUnknown {
+			t.Fatalf("Interrupt() = %v, want unknown instead of accepted interrupt", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Interrupt() did not return after unknown admission")
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.cancel.Target != (controlclient.TurnTarget{}) {
+		t.Fatalf("Cancel() = %#v, want no ambient cancel without a proven target", client.cancel.Target)
+	}
+}
+
+func TestSessionClientAdapterUnknownAdmissionWithTargetKeepsTurnForCancel(t *testing.T) {
+	t.Parallel()
+
+	target := controlclient.TurnTarget{HandleID: "handle-unknown", RunID: "run-unknown", TurnID: "turn-unknown"}
+	client := &sessionClientAdapterTestClient{
+		target:       target,
+		subscription: newSessionClientAdapterTestSubscription(),
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
+			newSessionClientAdapterTestSubscription(),
+			newSessionClientAdapterTestSubscription(),
+		},
+		promptErr:     controlclient.NewOutcomeError(controlclient.OutcomeUnknown, errors.New("effect outcome cannot be proven")),
+		promptOutcome: controlclient.OutcomeUnknown,
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
+	turn, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "hello"})
+	if err != nil {
+		t.Fatalf("Submit() = %v, want admitted turn when unknown outcome still has a target", err)
+	}
+	defer turn.Close()
+	if err := adapter.Interrupt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.cancel.Target != target {
+		t.Fatalf("Cancel() = %#v, want proven unknown-admission target", client.cancel.Target)
+	}
+}
+
+func TestSessionClientAdapterReportsFailedCancelAfterAdmission(t *testing.T) {
+	t.Parallel()
+
+	target := controlclient.TurnTarget{HandleID: "handle-cancel", RunID: "run-cancel", TurnID: "turn-cancel"}
+	cancelErr := errors.New("cancel rejected")
+	client := &sessionClientAdapterTestClient{
+		target:       target,
+		subscription: newSessionClientAdapterTestSubscription(),
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
+			newSessionClientAdapterTestSubscription(),
+			newSessionClientAdapterTestSubscription(),
+		},
+		cancelErr: cancelErr,
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
+	turn, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer turn.Close()
+	if err := adapter.Interrupt(context.Background()); !errors.Is(err, cancelErr) {
+		t.Fatalf("Interrupt() = %v, want cancel error", err)
+	}
+}
+
+func TestSessionClientAdapterInterruptsBlockedReviewAdmission(t *testing.T) {
+	t.Parallel()
+
+	target := controlclient.TurnTarget{HandleID: "review-handle", RunID: "review-run", TurnID: "review-turn"}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	client := &sessionClientAdapterTestClient{
+		target:       target,
+		subscription: newSessionClientAdapterTestSubscription(),
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
+			newSessionClientAdapterTestSubscription(),
+			newSessionClientAdapterTestSubscription(),
+		},
+		state: controlclient.SessionState{
+			SessionID: "session-1",
+			Revision:  3,
+			Controller: session.ControllerBinding{
+				EpochID: "epoch-review",
+			},
+		},
+	}
+	participants := &sessionClientAdapterTestParticipantClient{
+		target:       target,
+		startStarted: started,
+		startRelease: release,
+	}
+	adapter := newSessionClientAdapterForTest(t, client, participants, "session-1", "cli-tui")
+	done := make(chan struct {
+		turn controlprompt.Turn
+		err  error
+	}, 1)
+	go func() {
+		turn, err := adapter.StartReview(context.Background(), "check the change", nil)
+		done <- struct {
+			turn controlprompt.Turn
+			err  error
+		}{turn, err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("StartParticipant() did not start")
+	}
+	interruptDone := make(chan error, 1)
+	go func() {
+		interruptDone <- adapter.Interrupt(context.Background())
+	}()
+	close(release)
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("StartReview() = %v", got.err)
+		}
+		defer got.turn.Close()
+	case <-time.After(time.Second):
+		t.Fatal("StartReview() did not return")
+	}
+	select {
+	case err := <-interruptDone:
+		if err != nil {
+			t.Fatalf("Interrupt() = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Interrupt() did not return after review admission")
+	}
+	if participants.cancel.Target != target {
+		t.Fatalf("CancelParticipant() = %#v, want %#v", participants.cancel.Target, target)
+	}
+}
+
+func TestSessionClientAdapterRetriesCancelAfterTransientFailure(t *testing.T) {
+	t.Parallel()
+
+	target := controlclient.TurnTarget{HandleID: "handle-retry", RunID: "run-retry", TurnID: "turn-retry"}
+	firstErr := context.DeadlineExceeded
+	client := &sessionClientAdapterTestClient{
+		target:       target,
+		subscription: newSessionClientAdapterTestSubscription(),
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
+			newSessionClientAdapterTestSubscription(),
+			newSessionClientAdapterTestSubscription(),
+		},
+		cancelErrs: []error{firstErr, nil},
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
+	turn, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer turn.Close()
+	if err := adapter.Interrupt(context.Background()); !errors.Is(err, firstErr) {
+		t.Fatalf("first Interrupt() = %v, want deadline", err)
+	}
+	if err := adapter.Interrupt(context.Background()); err != nil {
+		t.Fatalf("retry Interrupt() = %v", err)
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.cancelIDs) != 2 || client.cancelIDs[0] == "" || client.cancelIDs[0] != client.cancelIDs[1] {
+		t.Fatalf("Cancel operation IDs = %#v, want one stable ID reused after failure", client.cancelIDs)
+	}
+}
+
+func TestSessionClientAdapterRetriesRejectedCancelWithFreshOperationID(t *testing.T) {
+	t.Parallel()
+
+	target := controlclient.TurnTarget{HandleID: "handle-rejected", RunID: "run-rejected", TurnID: "turn-rejected"}
+	client := &sessionClientAdapterTestClient{
+		target:       target,
+		subscription: newSessionClientAdapterTestSubscription(),
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
+			newSessionClientAdapterTestSubscription(),
+			newSessionClientAdapterTestSubscription(),
+		},
+		cancelOutcomes: []controlclient.Outcome{controlclient.OutcomeRejected, controlclient.OutcomeCommitted},
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
+	turn, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer turn.Close()
+	var receipt *controlclient.CommandReceiptError
+	if err := adapter.Interrupt(context.Background()); !errors.As(err, &receipt) || receipt.Receipt.Outcome != controlclient.OutcomeRejected {
+		t.Fatalf("first Interrupt() = %v, want rejected receipt", err)
+	}
+	if err := adapter.Interrupt(context.Background()); err != nil {
+		t.Fatalf("retry Interrupt() = %v", err)
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.cancelIDs) != 2 || client.cancelIDs[0] == "" || client.cancelIDs[0] == client.cancelIDs[1] {
+		t.Fatalf("Cancel operation IDs = %#v, want a fresh ID after rejection", client.cancelIDs)
+	}
+}
+
+func TestSessionClientAdapterBoundsUncooperativeActiveCancel(t *testing.T) {
+	t.Parallel()
+
+	target := controlclient.TurnTarget{HandleID: "handle-cancel-blocked", RunID: "run-cancel-blocked", TurnID: "turn-cancel-blocked"}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	client := &sessionClientAdapterTestClient{
+		target:       target,
+		subscription: newSessionClientAdapterTestSubscription(),
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
+			newSessionClientAdapterTestSubscription(),
+			newSessionClientAdapterTestSubscription(),
+		},
+		cancelStarted: started,
+		cancelRelease: release,
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
+	turn, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer turn.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	interruptDone := make(chan error, 1)
+	go func() { interruptDone <- adapter.Interrupt(ctx) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("Cancel() did not start")
+	}
+	select {
+	case err := <-interruptDone:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Interrupt() = %v, want bounded deadline", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Interrupt() remained stuck in an uncooperative Cancel")
+	}
+	close(release)
+}
+
 func TestSessionClientAdapterCreatesSessionOnlyWhenMainPromptStartsWork(t *testing.T) {
 	target := controlclient.TurnTarget{HandleID: "handle-main", RunID: "run-main", TurnID: "turn-main"}
 	sessions := &sessionClientAdapterTestClient{
@@ -1615,13 +2115,26 @@ type sessionClientAdapterTestClient struct {
 	createSessionID        string
 	reconnectErr           error
 
-	mu       sync.Mutex
-	prompt   controlclient.PromptRequest
-	steer    controlclient.SteerRequest
-	approval controlclient.ResolveApprovalRequest
-	cancel   controlclient.CancelRequest
-	compact  controlclient.CompactSessionRequest
-	create   controlclient.CreateSessionRequest
+	mu                  sync.Mutex
+	prompt              controlclient.PromptRequest
+	steer               controlclient.SteerRequest
+	approval            controlclient.ResolveApprovalRequest
+	cancel              controlclient.CancelRequest
+	compact             controlclient.CompactSessionRequest
+	create              controlclient.CreateSessionRequest
+	promptStarted       chan struct{}
+	promptRelease       chan struct{}
+	promptIgnoreContext bool
+	promptErr           error
+	promptOutcome       controlclient.Outcome
+	omitPromptTarget    bool
+	cancelErr           error
+	cancelErrs          []error
+	cancelOutcomes      []controlclient.Outcome
+	cancelIDs           []string
+	cancelCalled        chan controlclient.CancelRequest
+	cancelStarted       chan struct{}
+	cancelRelease       chan struct{}
 }
 
 type detachOnlyTargetTurn struct {
@@ -2116,16 +2629,51 @@ func (sessionClientAdapterTestConfigurationClient) ResetSandbox(_ context.Contex
 	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted}, nil
 }
 
-func (c *sessionClientAdapterTestClient) Prompt(_ context.Context, request controlclient.PromptRequest) (controlclient.CommandResult, error) {
+func (c *sessionClientAdapterTestClient) Prompt(ctx context.Context, request controlclient.PromptRequest) (controlclient.CommandResult, error) {
 	c.mu.Lock()
 	c.prompt = request
+	started := c.promptStarted
+	release := c.promptRelease
+	ignoreContext := c.promptIgnoreContext
 	c.mu.Unlock()
-	return controlclient.CommandResult{
+	if started != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+	}
+	if release != nil {
+		if ignoreContext {
+			<-release
+		} else {
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return controlclient.CommandResult{}, ctx.Err()
+			}
+		}
+	}
+	c.mu.Lock()
+	err := c.promptErr
+	outcome := c.promptOutcome
+	target := c.target
+	if c.omitPromptTarget {
+		target = controlclient.TurnTarget{}
+	}
+	c.mu.Unlock()
+	if outcome == "" {
+		outcome = controlclient.OutcomeCommitted
+	}
+	result := controlclient.CommandResult{
 		OperationID: request.OperationID,
-		Outcome:     controlclient.OutcomeCommitted,
+		Outcome:     outcome,
 		SessionID:   request.SessionID,
-		Target:      c.target,
-	}, nil
+		Target:      target,
+	}
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func (c *sessionClientAdapterTestClient) Steer(_ context.Context, request controlclient.SteerRequest) (controlclient.CommandResult, error) {
@@ -2138,8 +2686,43 @@ func (c *sessionClientAdapterTestClient) Steer(_ context.Context, request contro
 func (c *sessionClientAdapterTestClient) Cancel(_ context.Context, request controlclient.CancelRequest) (controlclient.CommandResult, error) {
 	c.mu.Lock()
 	c.cancel = request
+	cancelIDs := append(c.cancelIDs, request.OperationID)
+	c.cancelIDs = cancelIDs
+	call := len(cancelIDs) - 1
+	err := c.cancelErr
+	cancelCalled := c.cancelCalled
+	cancelStarted := c.cancelStarted
+	cancelRelease := c.cancelRelease
+	var outcome controlclient.Outcome
+	if call < len(c.cancelOutcomes) {
+		outcome = c.cancelOutcomes[call]
+	}
+	if call < len(c.cancelErrs) {
+		err = c.cancelErrs[call]
+	}
 	c.mu.Unlock()
-	return controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted}, nil
+	if cancelStarted != nil {
+		select {
+		case cancelStarted <- struct{}{}:
+		default:
+		}
+	}
+	if cancelRelease != nil {
+		<-cancelRelease
+	}
+	if cancelCalled != nil {
+		select {
+		case cancelCalled <- request:
+		default:
+		}
+	}
+	if err != nil {
+		return controlclient.CommandResult{OperationID: request.OperationID, Outcome: outcome}, err
+	}
+	if outcome == "" {
+		outcome = controlclient.OutcomeCommitted
+	}
+	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: outcome}, nil
 }
 
 func (c *sessionClientAdapterTestClient) ResolveApproval(_ context.Context, request controlclient.ResolveApprovalRequest) (controlclient.CommandResult, error) {
@@ -2150,17 +2733,33 @@ func (c *sessionClientAdapterTestClient) ResolveApproval(_ context.Context, requ
 }
 
 type sessionClientAdapterTestParticipantClient struct {
-	target controlclient.TurnTarget
-	start  controlclient.StartParticipantRequest
-	prompt controlclient.PromptParticipantRequest
+	target       controlclient.TurnTarget
+	start        controlclient.StartParticipantRequest
+	prompt       controlclient.PromptParticipantRequest
+	cancel       controlclient.CancelParticipantRequest
+	startStarted chan struct{}
+	startRelease chan struct{}
 }
 
 func (*sessionClientAdapterTestParticipantClient) Handles(context.Context, string) ([]string, error) {
 	return []string{"reviewer"}, nil
 }
 
-func (c *sessionClientAdapterTestParticipantClient) StartParticipant(_ context.Context, request controlclient.StartParticipantRequest) (controlclient.CommandResult, error) {
+func (c *sessionClientAdapterTestParticipantClient) StartParticipant(ctx context.Context, request controlclient.StartParticipantRequest) (controlclient.CommandResult, error) {
 	c.start = request
+	if c.startStarted != nil {
+		select {
+		case c.startStarted <- struct{}{}:
+		default:
+		}
+	}
+	if c.startRelease != nil {
+		select {
+		case <-c.startRelease:
+		case <-ctx.Done():
+			return controlclient.CommandResult{}, ctx.Err()
+		}
+	}
 	return controlclient.CommandResult{
 		OperationID:   request.OperationID,
 		Outcome:       controlclient.OutcomeCommitted,
@@ -2180,7 +2779,8 @@ func (c *sessionClientAdapterTestParticipantClient) PromptParticipant(_ context.
 	}, nil
 }
 
-func (*sessionClientAdapterTestParticipantClient) CancelParticipant(context.Context, controlclient.CancelParticipantRequest) (controlclient.CommandResult, error) {
+func (c *sessionClientAdapterTestParticipantClient) CancelParticipant(_ context.Context, request controlclient.CancelParticipantRequest) (controlclient.CommandResult, error) {
+	c.cancel = request
 	return controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted}, nil
 }
 

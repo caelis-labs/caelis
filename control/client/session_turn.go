@@ -123,55 +123,121 @@ func (c *SessionTurnClient) Start(
 		DisplayInput: displayInput,
 		ContentParts: append([]model.ContentPart(nil), request.ContentParts...),
 	})
-	if err != nil {
-		_ = reconnected.Subscription.Close()
-		stopFeed()
+	turn, err := admitObservedTurn(c.client, sessionID, reconnected, feedCtx, stopFeed, result, err, func(turn *sessionTurn) {
+		turn.steerFn = func(steerCtx context.Context, input, displayInput string, contentParts []model.ContentPart) error {
+			_, steerErr := c.client.Steer(steerCtx, SteerRequest{
+				WriteBase: WriteBase{
+					OperationID:             newSessionTurnOperationID("steer"),
+					SessionID:               sessionID,
+					ExpectedControllerEpoch: turn.controllerEpoch,
+				},
+				Target:       turn.target,
+				Input:        input,
+				DisplayInput: displayInput,
+				ContentParts: append([]model.ContentPart(nil), contentParts...),
+			})
+			return steerErr
+		}
+		cancelWrite := &turnCancelWrite{
+			operationID: newSessionTurnOperationID("cancel"),
+			newOperationID: func() string {
+				return newSessionTurnOperationID("cancel")
+			},
+			execute: func(cancelCtx context.Context, operationID, reason string) (CommandResult, error) {
+				return c.client.Cancel(cancelCtx, CancelRequest{
+					WriteBase: WriteBase{
+						OperationID:             operationID,
+						SessionID:               sessionID,
+						ExpectedControllerEpoch: turn.controllerEpoch,
+					},
+					Target: turn.target,
+					Reason: reason,
+				})
+			},
+		}
+		turn.cancelFn = cancelWrite.cancel
+	})
+	if turn == nil {
 		return nil, err
 	}
-	if result.Outcome != OutcomeCommitted && result.Outcome != OutcomeAccepted {
-		_ = reconnected.Subscription.Close()
-		stopFeed()
-		return nil, fmt.Errorf(
-			"controlclient: prompt operation %q ended with outcome %q",
-			result.OperationID,
-			result.Outcome,
-		)
-	}
-	if !validSessionTurnTarget(result.Target) {
-		_ = reconnected.Subscription.Close()
-		stopFeed()
-		return nil, errors.New("controlclient: prompt returned no complete Turn target")
-	}
+	return turn, err
+}
 
-	turn := newTargetTurn(c.client, sessionID, reconnected, feedCtx, stopFeed, result.Target)
-	turn.steerFn = func(steerCtx context.Context, input, displayInput string, contentParts []model.ContentPart) error {
-		_, steerErr := c.client.Steer(steerCtx, SteerRequest{
-			WriteBase: WriteBase{
-				OperationID:             newSessionTurnOperationID("steer"),
-				SessionID:               sessionID,
-				ExpectedControllerEpoch: turn.controllerEpoch,
-			},
-			Target:       turn.target,
-			Input:        input,
-			DisplayInput: displayInput,
-			ContentParts: append([]model.ContentPart(nil), contentParts...),
-		})
-		return steerErr
+// turnCancelWrite serializes retries for one exact Turn target. An
+// unclassified/unknown response keeps the operation ID so retrying can recover
+// the original effect. A rejected or conflicted receipt proves that operation
+// did not cancel the Turn, so the next explicit retry needs a fresh ID instead
+// of replaying the durable rejection forever.
+type turnCancelWrite struct {
+	mu             sync.Mutex
+	operationID    string
+	newOperationID func() string
+	execute        func(context.Context, string, string) (CommandResult, error)
+}
+
+func (w *turnCancelWrite) cancel(ctx context.Context, reason string) error {
+	if w == nil || w.execute == nil || w.newOperationID == nil {
+		return errors.New("controlclient: Turn cancellation is unavailable")
 	}
-	turn.cancelFn = func(cancelCtx context.Context, reason string) error {
-		_, cancelErr := c.client.Cancel(cancelCtx, CancelRequest{
-			WriteBase: WriteBase{
-				OperationID:             newSessionTurnOperationID("cancel"),
-				SessionID:               sessionID,
-				ExpectedControllerEpoch: turn.controllerEpoch,
-			},
-			Target: turn.target,
-			Reason: reason,
-		})
-		return cancelErr
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.operationID == "" {
+		w.operationID = w.newOperationID()
 	}
-	go turn.relay()
-	return turn, nil
+	result, err := w.execute(ctx, w.operationID, reason)
+	commandErr := commandMutationError(result, err)
+	switch commandReceiptOutcome(result, err) {
+	case OutcomeRejected, OutcomeConflicted:
+		w.operationID = w.newOperationID()
+	}
+	return commandErr
+}
+
+func admitObservedTurn(
+	client SessionClient,
+	sessionID string,
+	reconnected ReconnectResult,
+	feedCtx context.Context,
+	stopFeed context.CancelFunc,
+	result CommandResult,
+	err error,
+	setup func(*sessionTurn),
+) (*sessionTurn, error) {
+	if canObserveAdmittedTurn(result, err) {
+		turn := newTargetTurn(client, sessionID, reconnected, feedCtx, stopFeed, result.Target)
+		if setup != nil {
+			setup(turn)
+		}
+		go turn.relay()
+		return turn, nil
+	}
+	if reconnected.Subscription != nil {
+		_ = reconnected.Subscription.Close()
+	}
+	if stopFeed != nil {
+		stopFeed()
+	}
+	if commandOutcomeUnknown(result, err) {
+		return nil, unknownTurnAdmissionError(result, err)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf(
+		"controlclient: operation %q ended with outcome %q",
+		result.OperationID,
+		result.Outcome,
+	)
+}
+
+func canObserveAdmittedTurn(result CommandResult, err error) bool {
+	if !validSessionTurnTarget(result.Target) {
+		return false
+	}
+	if commandOutcomeUnknown(result, err) {
+		return true
+	}
+	return err == nil && (result.Outcome == OutcomeCommitted || result.Outcome == OutcomeAccepted)
 }
 
 // openTargetObservation establishes the feed cut before a command is

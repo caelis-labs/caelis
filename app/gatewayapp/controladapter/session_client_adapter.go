@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -34,10 +35,15 @@ type SessionClientAdapter struct {
 	sessionID       string
 	workspaceDir    string
 
-	activeMu  sync.Mutex
-	active    *sessionClientTurn
-	reconnect *clientSessionReconnect
-	presence  *sessionPresence
+	activeMu      sync.Mutex
+	active        *sessionClientTurn
+	reconnect     *clientSessionReconnect
+	presence      *sessionPresence
+	starting      int
+	admissionWait chan struct{}
+	admissionErr  error
+	nextAdmission uint64
+	admissions    map[uint64]*turnAdmission
 
 	acpPreparationMu sync.Mutex
 	acpPreparations  map[string]controlagents.ACPPreparation
@@ -138,36 +144,244 @@ func (a *SessionClientAdapter) Submit(
 		}
 		return nil, noActiveTurnSubmissionError()
 	}
-	state, err := a.ensureSessionForMainPrompt(ctx)
-	if err != nil {
-		return nil, err
-	}
-	turn, err := a.turns.Start(ctx, controlclient.SessionTurnStartRequest{
-		SessionID:    state.SessionID,
-		Input:        rawInput,
-		DisplayInput: displayInput,
-		ContentParts: contentParts,
+	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (controlclient.TargetTurn, error) {
+		state, err := a.ensureSessionForMainPrompt(startCtx)
+		if err != nil {
+			return nil, err
+		}
+		return a.turns.Start(startCtx, controlclient.SessionTurnStartRequest{
+			SessionID:    state.SessionID,
+			Input:        rawInput,
+			DisplayInput: displayInput,
+			ContentParts: contentParts,
+		})
 	})
-	if err != nil {
-		return nil, err
-	}
-	wrapped := &sessionClientTurn{turn: turn}
-	wrapped.onClose = func() { a.clearActiveTurn(wrapped) }
-	a.setActiveTurn(wrapped)
-	return wrapped, nil
 }
+
+const (
+	interruptAdmissionGrace = 250 * time.Millisecond
+	interruptCancelTimeout  = 5 * time.Second
+)
 
 func (a *SessionClientAdapter) Interrupt(ctx context.Context) error {
 	if a == nil {
 		return errors.New("app/gatewayapp/controladapter: Session client adapter is unavailable")
 	}
-	if active := a.activeTurn(); active != nil {
-		return active.cancel(ctx, "tui interrupt")
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if reconnect := a.activeReconnect(); reconnect != nil {
-		return reconnect.cancel(ctx, "tui interrupt")
+	a.activeMu.Lock()
+	active := a.active
+	reconnect := a.reconnect
+	wait := a.admissionWait
+	starting := a.starting
+	a.activeMu.Unlock()
+	if active != nil {
+		return cancelTurnWithTimeout(ctx, active.cancel)
+	}
+	if reconnect != nil {
+		return cancelTurnWithTimeout(ctx, reconnect.cancel)
+	}
+	if starting == 0 || wait == nil {
+		return noActiveTurnSubmissionError()
+	}
+	admissionCtx, stopAdmission := context.WithTimeout(ctx, interruptAdmissionGrace)
+	defer stopAdmission()
+	select {
+	case <-admissionCtx.Done():
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		a.cancelTurnAdmissions(wait)
+		a.activeMu.Lock()
+		active = a.active
+		reconnect = a.reconnect
+		currentWait := a.admissionWait
+		admissionErr := a.admissionErr
+		a.activeMu.Unlock()
+		if active != nil {
+			return cancelTurnWithTimeout(ctx, active.cancel)
+		}
+		if reconnect != nil {
+			return cancelTurnWithTimeout(ctx, reconnect.cancel)
+		}
+		if currentWait != wait && admissionErr != nil {
+			return admissionErr
+		}
+		// The exact target was not admitted within the bounded grace period.
+		// Cancelling the registered admission releases the Surface immediately;
+		// startAdmittedTurn separately cancels any target that arrives late.
+		return nil
+	case <-wait:
+	}
+	a.activeMu.Lock()
+	active = a.active
+	reconnect = a.reconnect
+	admissionErr := a.admissionErr
+	a.activeMu.Unlock()
+	if active != nil {
+		return cancelTurnWithTimeout(ctx, active.cancel)
+	}
+	if reconnect != nil {
+		return cancelTurnWithTimeout(ctx, reconnect.cancel)
+	}
+	if admissionErr != nil {
+		return admissionErr
 	}
 	return noActiveTurnSubmissionError()
+}
+
+func cancelTurnWithTimeout(ctx context.Context, cancel func(context.Context, string) error) error {
+	if cancel == nil {
+		return noActiveTurnSubmissionError()
+	}
+	cancelCtx, stop := context.WithTimeout(ctx, interruptCancelTimeout)
+	defer stop()
+	result := make(chan error, 1)
+	go func() {
+		result <- cancel(cancelCtx, "tui interrupt")
+	}()
+	select {
+	case err := <-result:
+		return err
+	case <-cancelCtx.Done():
+		return cancelCtx.Err()
+	}
+}
+
+type turnAdmissionResult struct {
+	turn controlclient.TargetTurn
+	err  error
+}
+
+type turnAdmission struct {
+	cancel    context.CancelFunc
+	cancelled bool
+}
+
+func (a *SessionClientAdapter) startAdmittedTurn(
+	ctx context.Context,
+	start func(context.Context) (controlclient.TargetTurn, error),
+) (controlprompt.Turn, error) {
+	if start == nil {
+		return nil, errors.New("app/gatewayapp/controladapter: turn admission is unavailable")
+	}
+	admissionID, admissionCtx := a.markTurnAdmission(ctx)
+	resultCh := make(chan turnAdmissionResult, 1)
+	go func() {
+		turn, err := start(admissionCtx)
+		resultCh <- turnAdmissionResult{turn: turn, err: err}
+	}()
+	var result turnAdmissionResult
+	select {
+	case result = <-resultCh:
+	case <-admissionCtx.Done():
+		a.finishTurnAdmission(admissionID, admissionCtx.Err())
+		go cleanupLateAdmission(resultCh)
+		return nil, admissionCtx.Err()
+	}
+	turn, err := result.turn, result.err
+	if err != nil {
+		a.finishTurnAdmission(admissionID, err)
+		return nil, err
+	}
+	if turn == nil {
+		err = errors.New("app/gatewayapp/controladapter: turn admission returned no Turn")
+		a.finishTurnAdmission(admissionID, err)
+		return nil, err
+	}
+	wrapped := &sessionClientTurn{turn: turn}
+	wrapped.onClose = func() { a.clearActiveTurn(wrapped) }
+	if !a.setActiveTurnForAdmission(admissionID, admissionCtx, wrapped) {
+		err = context.Canceled
+		a.finishTurnAdmission(admissionID, err)
+		go cleanupAdmittedTurn(turn)
+		return nil, err
+	}
+	a.finishTurnAdmission(admissionID, nil)
+	return wrapped, nil
+}
+
+func (a *SessionClientAdapter) markTurnAdmission(parent context.Context) (uint64, context.Context) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	admissionCtx, cancel := context.WithCancel(parent)
+	a.activeMu.Lock()
+	defer a.activeMu.Unlock()
+	a.nextAdmission++
+	id := a.nextAdmission
+	if a.admissions == nil {
+		a.admissions = map[uint64]*turnAdmission{}
+	}
+	a.admissions[id] = &turnAdmission{cancel: cancel}
+	a.starting++
+	if a.admissionWait == nil {
+		a.admissionWait = make(chan struct{})
+		a.admissionErr = nil
+	}
+	return id, admissionCtx
+}
+
+func (a *SessionClientAdapter) finishTurnAdmission(id uint64, err error) {
+	if a == nil {
+		return
+	}
+	a.activeMu.Lock()
+	admission := a.admissions[id]
+	delete(a.admissions, id)
+	if err != nil {
+		a.admissionErr = err
+	}
+	if a.starting > 0 {
+		a.starting--
+	}
+	if a.starting == 0 && a.admissionWait != nil {
+		close(a.admissionWait)
+		a.admissionWait = nil
+	}
+	a.activeMu.Unlock()
+	if admission != nil && admission.cancel != nil {
+		admission.cancel()
+	}
+}
+
+func (a *SessionClientAdapter) cancelTurnAdmissions(wait chan struct{}) {
+	if a == nil {
+		return
+	}
+	a.activeMu.Lock()
+	if wait != nil && a.admissionWait != wait {
+		a.activeMu.Unlock()
+		return
+	}
+	cancels := make([]context.CancelFunc, 0, len(a.admissions))
+	for _, admission := range a.admissions {
+		if admission == nil || admission.cancelled {
+			continue
+		}
+		admission.cancelled = true
+		cancels = append(cancels, admission.cancel)
+	}
+	a.activeMu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+}
+
+func cleanupLateAdmission(resultCh <-chan turnAdmissionResult) {
+	result := <-resultCh
+	cleanupAdmittedTurn(result.turn)
+}
+
+func cleanupAdmittedTurn(turn controlclient.TargetTurn) {
+	if turn == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), interruptCancelTimeout)
+	_ = turn.Cancel(ctx, "tui interrupt during admission")
+	cancel()
+	_ = turn.Close()
 }
 
 func (a *SessionClientAdapter) activeTurn() *sessionClientTurn {
@@ -180,6 +394,9 @@ func (a *SessionClientAdapter) activeTurn() *sessionClientTurn {
 }
 
 func (a *SessionClientAdapter) setActiveTurn(turn *sessionClientTurn) {
+	if a == nil {
+		return
+	}
 	a.activeMu.Lock()
 	previous := a.active
 	previousReconnect := a.reconnect
@@ -192,6 +409,34 @@ func (a *SessionClientAdapter) setActiveTurn(turn *sessionClientTurn) {
 	if previousReconnect != nil {
 		_ = previousReconnect.Close()
 	}
+}
+
+func (a *SessionClientAdapter) setActiveTurnForAdmission(
+	id uint64,
+	ctx context.Context,
+	turn *sessionClientTurn,
+) bool {
+	if a == nil || turn == nil {
+		return false
+	}
+	a.activeMu.Lock()
+	admission := a.admissions[id]
+	if admission == nil || admission.cancelled || ctx.Err() != nil {
+		a.activeMu.Unlock()
+		return false
+	}
+	previous := a.active
+	previousReconnect := a.reconnect
+	a.active = turn
+	a.reconnect = nil
+	a.activeMu.Unlock()
+	if previous != nil && previous != turn {
+		_ = previous.Close()
+	}
+	if previousReconnect != nil {
+		_ = previousReconnect.Close()
+	}
+	return true
 }
 
 func (a *SessionClientAdapter) clearActiveTurn(turn *sessionClientTurn) {
@@ -238,10 +483,11 @@ type sessionClientTurn struct {
 	turn    controlclient.TargetTurn
 	onClose func()
 
-	cancelOnce sync.Once
-	cancelErr  error
-	closeOnce  sync.Once
-	closeErr   error
+	cancelMu        sync.Mutex
+	cancelWait      chan struct{}
+	cancelCommitted bool
+	closeOnce       sync.Once
+	closeErr        error
 }
 
 func (t *sessionClientTurn) steer(
@@ -310,10 +556,39 @@ func (t *sessionClientTurn) cancel(ctx context.Context, reason string) error {
 	if t == nil || t.turn == nil {
 		return nil
 	}
-	t.cancelOnce.Do(func() {
-		t.cancelErr = t.turn.Cancel(ctx, reason)
-	})
-	return t.cancelErr
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		t.cancelMu.Lock()
+		if t.cancelCommitted {
+			t.cancelMu.Unlock()
+			return nil
+		}
+		if wait := t.cancelWait; wait != nil {
+			t.cancelMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-wait:
+			}
+			continue
+		}
+		wait := make(chan struct{})
+		t.cancelWait = wait
+		t.cancelMu.Unlock()
+
+		err := t.turn.Cancel(ctx, reason)
+
+		t.cancelMu.Lock()
+		if err == nil {
+			t.cancelCommitted = true
+		}
+		t.cancelWait = nil
+		close(wait)
+		t.cancelMu.Unlock()
+		return err
+	}
 }
 
 func (t *sessionClientTurn) Close() error {

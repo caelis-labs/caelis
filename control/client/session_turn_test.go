@@ -151,6 +151,293 @@ func TestSessionTurnClientAcceptsImageOnlyPrompt(t *testing.T) {
 	}
 }
 
+func TestSessionTurnClientKeepsTurnWhenUnknownOutcomeHasTarget(t *testing.T) {
+	t.Parallel()
+
+	target := TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
+	subscription := newOpenSessionTurnTestSubscription()
+	client := &sessionTurnTestClient{
+		inspectFn: func(context.Context, StateRequest) (SessionState, error) {
+			return SessionState{SessionID: "session-1", BoundaryCursor: "cursor-boundary"}, nil
+		},
+		reconnectFn: func(context.Context, ReconnectRequest) (ReconnectResult, error) {
+			return ReconnectResult{
+				State:        SessionState{SessionID: "session-1", Revision: 1},
+				Subscription: subscription,
+			}, nil
+		},
+		promptFn: func(_ context.Context, request PromptRequest) (CommandResult, error) {
+			return CommandResult{
+				OperationID: request.OperationID,
+				Outcome:     OutcomeUnknown,
+				SessionID:   request.SessionID,
+				Target:      target,
+			}, NewOutcomeError(OutcomeUnknown, errors.New("effect outcome cannot be proven"))
+		},
+	}
+	starter, err := NewSessionTurnClient(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := starter.Start(context.Background(), SessionTurnStartRequest{SessionID: "session-1", Input: "hello"})
+	if err != nil {
+		t.Fatalf("Start() = %v, want turn when unknown outcome still has a target", err)
+	}
+	if turn.Target() != target {
+		t.Fatalf("Turn target = %#v", turn.Target())
+	}
+	if err := turn.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSessionTurnClientCancelsAfterPromptReceiptWriteFails(t *testing.T) {
+	t.Parallel()
+
+	target := TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
+	operations := &failFirstCompleteStore{OperationStore: NewMemoryOperationStore(), failLeft: 1}
+	backend := &promptTargetBackend{target: target}
+	service := newTestCommandService(t, allowAuthorizer{}, operations, backend)
+	subscription := newOpenSessionTurnTestSubscription()
+	client := &sessionTurnTestClient{
+		inspectFn: func(context.Context, StateRequest) (SessionState, error) {
+			return SessionState{
+				SessionID:      "session-1",
+				BoundaryCursor: "cursor-boundary",
+				Controller:     session.ControllerBinding{EpochID: "epoch-1"},
+			}, nil
+		},
+		reconnectFn: func(context.Context, ReconnectRequest) (ReconnectResult, error) {
+			return ReconnectResult{
+				State: SessionState{
+					SessionID:  "session-1",
+					Revision:   7,
+					Controller: session.ControllerBinding{EpochID: "epoch-1"},
+				},
+				Subscription: subscription,
+			}, nil
+		},
+		promptFn: func(ctx context.Context, request PromptRequest) (CommandResult, error) {
+			return service.Prompt(ctx, Principal{ID: "owner"}, request)
+		},
+		cancelFn: func(ctx context.Context, request CancelRequest) (CommandResult, error) {
+			return service.Cancel(ctx, Principal{ID: "owner"}, request)
+		},
+	}
+	starter, err := NewSessionTurnClient(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := starter.Start(context.Background(), SessionTurnStartRequest{SessionID: "session-1", Input: "hello"})
+	if err != nil {
+		t.Fatalf("Start() = %v, want observed turn after receipt-write failure", err)
+	}
+	defer turn.Close()
+	if turn.Target() != target {
+		t.Fatalf("Turn target = %#v", turn.Target())
+	}
+	if err := turn.Cancel(context.Background(), "tui interrupt"); err != nil {
+		t.Fatalf("Cancel() = %v", err)
+	}
+	if backend.cancel.Target != target {
+		t.Fatalf("Cancel request = %#v, want target %#v", backend.cancel, target)
+	}
+}
+
+func TestSessionTurnClientReusesCancelOperationID(t *testing.T) {
+	t.Parallel()
+
+	target := TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
+	var cancelIDs []string
+	subscription := newOpenSessionTurnTestSubscription()
+	client := &sessionTurnTestClient{
+		inspectFn: func(context.Context, StateRequest) (SessionState, error) {
+			return SessionState{SessionID: "session-1", BoundaryCursor: "cursor-boundary"}, nil
+		},
+		reconnectFn: func(context.Context, ReconnectRequest) (ReconnectResult, error) {
+			return ReconnectResult{
+				State:        SessionState{SessionID: "session-1", Revision: 1, Controller: session.ControllerBinding{EpochID: "epoch-1"}},
+				Subscription: subscription,
+			}, nil
+		},
+		promptFn: func(_ context.Context, request PromptRequest) (CommandResult, error) {
+			return CommandResult{OperationID: request.OperationID, Outcome: OutcomeCommitted, SessionID: request.SessionID, Target: target}, nil
+		},
+		cancelFn: func(_ context.Context, request CancelRequest) (CommandResult, error) {
+			cancelIDs = append(cancelIDs, request.OperationID)
+			if len(cancelIDs) == 1 {
+				return CommandResult{}, context.DeadlineExceeded
+			}
+			return CommandResult{Outcome: OutcomeCommitted}, nil
+		},
+	}
+	starter, err := NewSessionTurnClient(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := starter.Start(context.Background(), SessionTurnStartRequest{SessionID: "session-1", Input: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer turn.Close()
+	if err := turn.Cancel(context.Background(), "tui interrupt"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("first Cancel() = %v, want deadline", err)
+	}
+	if err := turn.Cancel(context.Background(), "tui interrupt"); err != nil {
+		t.Fatalf("retry Cancel() = %v", err)
+	}
+	if len(cancelIDs) != 2 || cancelIDs[0] == "" || cancelIDs[0] != cancelIDs[1] {
+		t.Fatalf("Cancel operation IDs = %#v, want one stable ID reused after failure", cancelIDs)
+	}
+}
+
+func TestSessionTurnClientRotatesCancelOperationIDAfterProvenNoEffect(t *testing.T) {
+	tests := []struct {
+		name     string
+		firstErr error
+	}{
+		{name: "in-process replay", firstErr: nil},
+		{name: "HTTP-style outcome error", firstErr: NewOutcomeError(OutcomeRejected, errors.New("cancel rejected"))},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			target := TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
+			var cancelIDs []string
+			client := &sessionTurnTestClient{
+				inspectFn: func(context.Context, StateRequest) (SessionState, error) {
+					return SessionState{SessionID: "session-1", BoundaryCursor: "cursor-boundary"}, nil
+				},
+				reconnectFn: func(context.Context, ReconnectRequest) (ReconnectResult, error) {
+					return ReconnectResult{
+						State:        SessionState{SessionID: "session-1", Revision: 1},
+						Subscription: newOpenSessionTurnTestSubscription(),
+					}, nil
+				},
+				promptFn: func(_ context.Context, request PromptRequest) (CommandResult, error) {
+					return CommandResult{OperationID: request.OperationID, Outcome: OutcomeCommitted, SessionID: request.SessionID, Target: target}, nil
+				},
+				cancelFn: func(_ context.Context, request CancelRequest) (CommandResult, error) {
+					cancelIDs = append(cancelIDs, request.OperationID)
+					if len(cancelIDs) == 1 {
+						return CommandResult{OperationID: request.OperationID, Outcome: OutcomeRejected, Detail: "cancel rejected"}, test.firstErr
+					}
+					return CommandResult{OperationID: request.OperationID, Outcome: OutcomeCommitted}, nil
+				},
+			}
+			starter, err := NewSessionTurnClient(client)
+			if err != nil {
+				t.Fatal(err)
+			}
+			turn, err := starter.Start(context.Background(), SessionTurnStartRequest{SessionID: "session-1", Input: "hello"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer turn.Close()
+			var receipt *CommandReceiptError
+			if err := turn.Cancel(context.Background(), "tui interrupt"); !errors.As(err, &receipt) || receipt.Receipt.Outcome != OutcomeRejected {
+				t.Fatalf("first Cancel() = %v, want rejected receipt", err)
+			}
+			if err := turn.Cancel(context.Background(), "tui interrupt"); err != nil {
+				t.Fatalf("retry Cancel() = %v", err)
+			}
+			if len(cancelIDs) != 2 || cancelIDs[0] == "" || cancelIDs[0] == cancelIDs[1] {
+				t.Fatalf("Cancel operation IDs = %#v, want a fresh ID after proven rejection", cancelIDs)
+			}
+		})
+	}
+}
+
+func TestParticipantTurnClientRotatesCancelOperationIDAfterConflict(t *testing.T) {
+	t.Parallel()
+
+	target := TurnTarget{HandleID: "participant-handle", RunID: "participant-run", TurnID: "participant-turn"}
+	sessions := &sessionTurnTestClient{
+		inspectFn: func(context.Context, StateRequest) (SessionState, error) {
+			return SessionState{SessionID: "session-1", BoundaryCursor: "cursor-boundary"}, nil
+		},
+		reconnectFn: func(context.Context, ReconnectRequest) (ReconnectResult, error) {
+			return ReconnectResult{
+				State:        SessionState{SessionID: "session-1", Revision: 1},
+				Subscription: newOpenSessionTurnTestSubscription(),
+			}, nil
+		},
+	}
+	var cancelIDs []string
+	participants := &participantTurnTestClient{
+		startFn: func(_ context.Context, request StartParticipantRequest) (CommandResult, error) {
+			return CommandResult{
+				OperationID: request.OperationID, Outcome: OutcomeCommitted, SessionID: request.SessionID,
+				ParticipantID: "participant-1", Target: target,
+			}, nil
+		},
+		cancelFn: func(_ context.Context, request CancelParticipantRequest) (CommandResult, error) {
+			cancelIDs = append(cancelIDs, request.OperationID)
+			if len(cancelIDs) == 1 {
+				return CommandResult{OperationID: request.OperationID, Outcome: OutcomeConflicted, Detail: "cancel conflicted"}, nil
+			}
+			return CommandResult{OperationID: request.OperationID, Outcome: OutcomeCommitted}, nil
+		},
+	}
+	client, err := NewParticipantTurnClient(sessions, participants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := client.Start(context.Background(), ParticipantTurnStartRequest{
+		SessionID: "session-1", Handle: "reviewer", Input: "review",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer turn.Close()
+	var receipt *CommandReceiptError
+	if err := turn.Cancel(context.Background(), "tui interrupt"); !errors.As(err, &receipt) || receipt.Receipt.Outcome != OutcomeConflicted {
+		t.Fatalf("first Cancel() = %v, want conflicted receipt", err)
+	}
+	if err := turn.Cancel(context.Background(), "tui interrupt"); err != nil {
+		t.Fatalf("retry Cancel() = %v", err)
+	}
+	if len(cancelIDs) != 2 || cancelIDs[0] == "" || cancelIDs[0] == cancelIDs[1] {
+		t.Fatalf("CancelParticipant operation IDs = %#v, want a fresh ID after conflict", cancelIDs)
+	}
+}
+
+func TestSessionTurnClientReportsUnknownAdmissionWithoutTarget(t *testing.T) {
+	t.Parallel()
+
+	subscription := newOpenSessionTurnTestSubscription()
+	client := &sessionTurnTestClient{
+		inspectFn: func(context.Context, StateRequest) (SessionState, error) {
+			return SessionState{SessionID: "session-1", BoundaryCursor: "cursor-boundary"}, nil
+		},
+		reconnectFn: func(context.Context, ReconnectRequest) (ReconnectResult, error) {
+			return ReconnectResult{
+				State:        SessionState{SessionID: "session-1", Revision: 1},
+				Subscription: subscription,
+			}, nil
+		},
+		promptFn: func(_ context.Context, request PromptRequest) (CommandResult, error) {
+			return CommandResult{
+				OperationID: request.OperationID,
+				Outcome:     OutcomeUnknown,
+				SessionID:   request.SessionID,
+			}, NewOutcomeError(OutcomeUnknown, errors.New("effect outcome cannot be proven"))
+		},
+	}
+	starter, err := NewSessionTurnClient(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := starter.Start(context.Background(), SessionTurnStartRequest{SessionID: "session-1", Input: "hello"})
+	if turn != nil {
+		t.Fatal("Start() returned a Turn without a proven target")
+	}
+	var receipt *CommandReceiptError
+	if !errors.As(err, &receipt) || receipt.Receipt.Outcome != OutcomeUnknown {
+		t.Fatalf("Start() = %v, want unknown admission receipt", err)
+	}
+}
+
 func TestSessionTurnClientRecoversGapFromLastAcceptedCursor(t *testing.T) {
 	t.Parallel()
 
@@ -391,6 +678,31 @@ type sessionTurnTestClient struct {
 	resolveApprovalFn func(context.Context, ResolveApprovalRequest) (CommandResult, error)
 	cancelFn          func(context.Context, CancelRequest) (CommandResult, error)
 	closeSessionCalls int
+}
+
+type participantTurnTestClient struct {
+	startFn  func(context.Context, StartParticipantRequest) (CommandResult, error)
+	promptFn func(context.Context, PromptParticipantRequest) (CommandResult, error)
+	cancelFn func(context.Context, CancelParticipantRequest) (CommandResult, error)
+}
+
+func (*participantTurnTestClient) Handles(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
+func (c *participantTurnTestClient) StartParticipant(ctx context.Context, request StartParticipantRequest) (CommandResult, error) {
+	return c.startFn(ctx, request)
+}
+
+func (c *participantTurnTestClient) PromptParticipant(ctx context.Context, request PromptParticipantRequest) (CommandResult, error) {
+	if c.promptFn == nil {
+		return CommandResult{}, errors.New("unexpected PromptParticipant")
+	}
+	return c.promptFn(ctx, request)
+}
+
+func (c *participantTurnTestClient) CancelParticipant(ctx context.Context, request CancelParticipantRequest) (CommandResult, error) {
+	return c.cancelFn(ctx, request)
 }
 
 func (*sessionTurnTestClient) Initialize(context.Context) (ServerInfo, error) {

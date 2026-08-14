@@ -42,30 +42,28 @@ func (a *SessionClientAdapter) StartAgentRun(
 	if strings.TrimSpace(prompt) == "" && len(contentParts) == 0 {
 		return nil, errors.New("app/gatewayapp/controladapter: direct Agent prompt input is required")
 	}
-	state, err := a.ensureSessionForParticipantStart(ctx)
-	if err != nil {
-		return nil, err
-	}
-	label := allocateParticipantLabel(state.Participants, string(handle))
-	displayAddress := "/" + string(handle)
-	if runName := controlagents.FormatRunName(string(handle), label); runName != "" {
-		displayAddress = "/" + runName
-	}
-	turn, err := a.participants.Start(ctx, controlclient.ParticipantTurnStartRequest{
-		SessionID:      state.SessionID,
-		Handle:         string(handle),
-		Role:           session.ParticipantRoleSidecar,
-		Label:          label,
-		Source:         source,
-		Input:          strings.TrimSpace(prompt),
-		DisplayInput:   displayInputWithAttachments(prompt, attachments),
-		DisplayAddress: displayAddress,
-		ContentParts:   contentParts,
+	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (controlclient.TargetTurn, error) {
+		state, err := a.ensureSessionForParticipantStart(startCtx)
+		if err != nil {
+			return nil, err
+		}
+		label := allocateParticipantLabel(state.Participants, string(handle))
+		displayAddress := "/" + string(handle)
+		if runName := controlagents.FormatRunName(string(handle), label); runName != "" {
+			displayAddress = "/" + runName
+		}
+		return a.participants.Start(startCtx, controlclient.ParticipantTurnStartRequest{
+			SessionID:      state.SessionID,
+			Handle:         string(handle),
+			Role:           session.ParticipantRoleSidecar,
+			Label:          label,
+			Source:         source,
+			Input:          strings.TrimSpace(prompt),
+			DisplayInput:   displayInputWithAttachments(prompt, attachments),
+			DisplayAddress: displayAddress,
+			ContentParts:   contentParts,
+		})
 	})
-	if err != nil {
-		return nil, err
-	}
-	return a.wrapParticipantTurn(turn), nil
 }
 
 // ContinueAgentRun routes a follow-up to the participant attachment visible in
@@ -79,38 +77,36 @@ func (a *SessionClientAdapter) ContinueAgentRun(
 	if a == nil || a.participants == nil {
 		return nil, errors.New("app/gatewayapp/controladapter: participant client is unavailable")
 	}
-	state, err := a.currentClientSessionState(ctx)
-	if err != nil {
-		return nil, err
-	}
-	participants := make([]participantAddress, 0, len(state.Participants))
-	for _, participant := range state.Participants {
-		participants = append(participants, participantAddress{
-			ID: participant.ID, Kind: participant.Kind, Role: participant.Role,
-			Label: participant.Label, SessionID: participant.SessionID, Source: participant.Source,
+	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (controlclient.TargetTurn, error) {
+		state, err := a.currentClientSessionState(startCtx)
+		if err != nil {
+			return nil, err
+		}
+		participants := make([]participantAddress, 0, len(state.Participants))
+		for _, participant := range state.Participants {
+			participants = append(participants, participantAddress{
+				ID: participant.ID, Kind: participant.Kind, Role: participant.Role,
+				Label: participant.Label, SessionID: participant.SessionID, Source: participant.Source,
+			})
+		}
+		participantID, err := resolveParticipantID(participants, handle)
+		if err != nil {
+			return nil, err
+		}
+		contentParts, err := contentPartsFromSubmission(prompt, attachments, state.CWD)
+		if err != nil {
+			return nil, err
+		}
+		return a.participants.Prompt(startCtx, controlclient.ParticipantTurnPromptRequest{
+			SessionID:      state.SessionID,
+			ParticipantID:  participantID,
+			Input:          strings.TrimSpace(prompt),
+			DisplayInput:   displayInputWithAttachments(prompt, attachments),
+			DisplayAddress: "/" + strings.TrimPrefix(strings.TrimSpace(handle), "/"),
+			ContentParts:   contentParts,
+			Source:         "user_side_agent",
 		})
-	}
-	participantID, err := resolveParticipantID(participants, handle)
-	if err != nil {
-		return nil, err
-	}
-	contentParts, err := contentPartsFromSubmission(prompt, attachments, state.CWD)
-	if err != nil {
-		return nil, err
-	}
-	turn, err := a.participants.Prompt(ctx, controlclient.ParticipantTurnPromptRequest{
-		SessionID:      state.SessionID,
-		ParticipantID:  participantID,
-		Input:          strings.TrimSpace(prompt),
-		DisplayInput:   displayInputWithAttachments(prompt, attachments),
-		DisplayAddress: "/" + strings.TrimPrefix(strings.TrimSpace(handle), "/"),
-		ContentParts:   contentParts,
-		Source:         "user_side_agent",
 	})
-	if err != nil {
-		return nil, err
-	}
-	return a.wrapParticipantTurn(turn), nil
 }
 
 // StartReview keeps review execution in the active Session Runtime while
@@ -129,28 +125,26 @@ func (a *SessionClientAdapter) StartReview(
 	if err != nil {
 		return nil, err
 	}
-	state, err := a.ensureSessionForParticipantStart(ctx)
-	if err != nil {
-		return nil, err
-	}
-	turn, err := a.participants.Start(ctx, controlclient.ParticipantTurnStartRequest{
-		SessionID:      state.SessionID,
-		Handle:         string(agentbinding.HandleReviewer),
-		Role:           session.ParticipantRoleSidecar,
-		Label:          allocateParticipantLabel(state.Participants, gatewayapp.ReviewerAgentID),
-		Source:         "slash_review",
-		Input:          prompt,
-		DisplayInput:   displayInputWithAttachments(instructions, attachments),
-		DisplayAddress: "/review",
-		DisplayTitle:   reviewDisplayTitle(instructions),
-		ContentParts:   contentParts,
-		Transient:      true,
-		DetachSource:   "side_agent_complete",
+	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (controlclient.TargetTurn, error) {
+		state, err := a.ensureSessionForParticipantStart(startCtx)
+		if err != nil {
+			return nil, err
+		}
+		return a.participants.Start(startCtx, controlclient.ParticipantTurnStartRequest{
+			SessionID:      state.SessionID,
+			Handle:         string(agentbinding.HandleReviewer),
+			Role:           session.ParticipantRoleSidecar,
+			Label:          allocateParticipantLabel(state.Participants, gatewayapp.ReviewerAgentID),
+			Source:         "slash_review",
+			Input:          prompt,
+			DisplayInput:   displayInputWithAttachments(instructions, attachments),
+			DisplayAddress: "/review",
+			DisplayTitle:   reviewDisplayTitle(instructions),
+			ContentParts:   contentParts,
+			Transient:      true,
+			DetachSource:   "side_agent_complete",
+		})
 	})
-	if err != nil {
-		return nil, err
-	}
-	return a.wrapParticipantTurn(turn), nil
 }
 
 func (a *SessionClientAdapter) currentClientSessionState(ctx context.Context) (controlclient.SessionState, error) {
@@ -162,13 +156,6 @@ func (a *SessionClientAdapter) currentClientSessionState(ctx context.Context) (c
 		return controlclient.SessionState{}, errors.New("app/gatewayapp/controladapter: no Session is selected")
 	}
 	return a.inspectWorkSession(ctx, sessionID)
-}
-
-func (a *SessionClientAdapter) wrapParticipantTurn(turn controlclient.TargetTurn) controlprompt.Turn {
-	wrapped := &sessionClientTurn{turn: turn}
-	wrapped.onClose = func() { a.clearActiveTurn(wrapped) }
-	a.setActiveTurn(wrapped)
-	return wrapped
 }
 
 func allocateParticipantLabel(participants []session.ParticipantBinding, handle string) string {

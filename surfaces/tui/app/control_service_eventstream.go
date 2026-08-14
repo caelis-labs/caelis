@@ -52,7 +52,7 @@ func forwardControlEventStream(
 ) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
-		ctx = sender.bindContext(ctx)
+		ctx = sender.observationContext(ctx)
 	}
 	send := sender.sendFunc()
 	if turn == nil || send == nil {
@@ -68,9 +68,9 @@ func forwardControlEventStream(
 	for events != nil {
 		select {
 		case <-ctx.Done():
-			// Surface shutdown only detaches this observation. A running Turn is
-			// durable Host work and must be cancelled only through the explicit
-			// Interrupt command.
+			// Program/surface shutdown only detaches this observation. Esc must
+			// cancel the Host turn through Interrupt and keep this feed open
+			// until the cancelled lifecycle arrives.
 			batcher.flush(send)
 			return executeLineResult{queued: true}
 		case now := <-ticker.C:

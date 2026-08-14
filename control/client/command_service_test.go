@@ -755,6 +755,25 @@ func TestCommandServicePersistsOnlyStablePublicFailureDetail(t *testing.T) {
 	}
 }
 
+func TestCommandServicePreservesTurnTargetWhenReceiptWriteFails(t *testing.T) {
+	t.Parallel()
+
+	target := TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
+	operations := &failFirstCompleteStore{OperationStore: NewMemoryOperationStore(), failLeft: 1}
+	backend := &promptTargetBackend{target: target}
+	service := newTestCommandService(t, allowAuthorizer{}, operations, backend)
+	result, err := service.Prompt(context.Background(), Principal{ID: "owner"}, PromptRequest{
+		WriteBase: WriteBase{OperationID: "prompt-op", SessionID: "session-1"},
+		Input:     "hello",
+	})
+	if err == nil || result.Outcome != OutcomeUnknown {
+		t.Fatalf("Prompt() = %#v, %v; want unknown receipt-write failure", result, err)
+	}
+	if result.Target != target || result.ParticipantID != "participant-1" {
+		t.Fatalf("Prompt() identity = %#v, want preserved backend target", result)
+	}
+}
+
 func TestFileOperationStoreSurvivesRestartAndBindsPayload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "operations")
 	intent := OperationIntent{PrincipalID: "owner", OperationID: "op-1", Action: ActionPrompt, SessionID: "session-1", Target: "session-1", Digest: "digest-a"}
@@ -897,6 +916,44 @@ func (a *recordingAuthorizer) Authorize(_ context.Context, _ Principal, action A
 	a.action = action
 	a.sessionID = sessionID
 	return nil
+}
+
+type failFirstCompleteStore struct {
+	OperationStore
+	failLeft int
+}
+
+func (s *failFirstCompleteStore) Complete(ctx context.Context, intent OperationIntent, result CommandResult) (OperationRecord, error) {
+	if s.failLeft > 0 {
+		s.failLeft--
+		return OperationRecord{}, errors.New("disk full")
+	}
+	return s.OperationStore.Complete(ctx, intent, result)
+}
+
+type promptTargetBackend struct {
+	target TurnTarget
+	cancel CancelRequest
+	calls  int
+}
+
+func (b *promptTargetBackend) ExecuteControlCommand(_ context.Context, _ Principal, action Action, request any) (CommandResult, error) {
+	b.calls++
+	switch action {
+	case ActionPrompt:
+		return CommandResult{
+			Outcome:       OutcomeCommitted,
+			Revision:      8,
+			SessionID:     "session-1",
+			Target:        b.target,
+			ParticipantID: "participant-1",
+		}, nil
+	case ActionCancel:
+		b.cancel = request.(CancelRequest)
+		return CommandResult{Outcome: OutcomeCommitted, SessionID: "session-1", Target: b.target}, nil
+	default:
+		return CommandResult{Outcome: OutcomeCommitted}, nil
+	}
 }
 
 type recordingCommandBackend struct {

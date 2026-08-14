@@ -167,7 +167,15 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 	defer cancelCompletion()
 	if _, completeErr := s.config.Operations.Complete(completionCtx, intent, result); completeErr != nil {
 		coded := internalCommandError("controlclient: complete operation", completeErr)
-		return commandFailure(operationID, result.SessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
+		// Backend already returned the effect identity. Keep the exact Turn
+		// target so observation and Cancel can continue after a receipt-write
+		// failure instead of treating the started Turn as unrecoverable.
+		failed := commandFailure(operationID, result.SessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded)
+		failed.Target = result.Target
+		failed.ParticipantID = result.ParticipantID
+		failed.Resource = result.Resource
+		failed.Revision = result.Revision
+		return failed, coded
 	}
 	return result, dispatchErr
 }

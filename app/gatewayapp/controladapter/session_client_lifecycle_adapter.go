@@ -106,6 +106,7 @@ func (a *SessionClientAdapter) Close() error {
 	}
 	a.sessionChangeMu.Lock()
 	defer a.sessionChangeMu.Unlock()
+	a.cancelTurnAdmissions(nil)
 	a.closeActiveTurn()
 	a.replaceSessionPresence(nil)
 	return nil

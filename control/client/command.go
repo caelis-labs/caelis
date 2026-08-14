@@ -2,6 +2,7 @@ package controlclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -346,4 +347,65 @@ func NewOutcomeError(outcome Outcome, err error) error {
 		return fmt.Errorf("controlclient: invalid outcome %q: %w", outcome, err)
 	}
 	return &OutcomeError{Outcome: outcome, Err: err}
+}
+
+func commandOutcomeUnknown(result CommandResult, err error) bool {
+	if result.Outcome == OutcomeUnknown {
+		return true
+	}
+	var outcomeErr *OutcomeError
+	if errors.As(err, &outcomeErr) && outcomeErr.Outcome == OutcomeUnknown {
+		return true
+	}
+	return errorcode.CodeOf(err) == errorcode.UnknownOutcome
+}
+
+func commandReceiptOutcome(result CommandResult, err error) Outcome {
+	if result.Outcome.Valid() {
+		return result.Outcome
+	}
+	var outcomeErr *OutcomeError
+	if errors.As(err, &outcomeErr) && outcomeErr.Outcome.Valid() {
+		return outcomeErr.Outcome
+	}
+	if errorcode.CodeOf(err) == errorcode.UnknownOutcome {
+		return OutcomeUnknown
+	}
+	return ""
+}
+
+// commandMutationError normalizes transport and in-process command behavior.
+// The in-process service may replay a persisted rejected result with a nil Go
+// error, while HTTP clients return an OutcomeError for the same receipt.
+func commandMutationError(result CommandResult, err error) error {
+	outcome := commandReceiptOutcome(result, err)
+	if err == nil && (outcome == OutcomeAccepted || outcome == OutcomeCommitted) {
+		return nil
+	}
+	if err == nil {
+		detail := strings.TrimSpace(result.Detail)
+		if detail == "" {
+			if outcome == "" {
+				detail = "command returned no terminal outcome"
+			} else {
+				detail = string(outcome)
+			}
+		}
+		if outcome == "" {
+			outcome = OutcomeUnknown
+			result.Outcome = outcome
+		}
+		err = NewOutcomeError(outcome, errors.New(detail))
+	}
+	return &CommandReceiptError{Receipt: result, Err: err}
+}
+
+func unknownTurnAdmissionError(result CommandResult, err error) error {
+	if err == nil {
+		err = errorcode.New(errorcode.UnknownOutcome, "controlclient: turn admission outcome cannot be proven")
+	}
+	if result.Outcome == "" {
+		result.Outcome = OutcomeUnknown
+	}
+	return &CommandReceiptError{Receipt: result, Err: err}
 }

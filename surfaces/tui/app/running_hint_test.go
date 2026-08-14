@@ -853,3 +853,41 @@ func TestRejectedInterruptRestoresActivityAdvancedWhilePending(t *testing.T) {
 		t.Fatalf("active activities = %#v, want completed command removed while interrupt was pending", next.runningHintTracker.active)
 	}
 }
+
+func TestAcceptedInterruptClearsAfterCancelledLifecycle(t *testing.T) {
+	m := NewModel(Config{
+		NoColor:     true,
+		NoAnimation: true,
+		CancelRunning: func() bool {
+			return true
+		},
+	})
+	m.liveTurn.Active = true
+	m.runningHintTracker.beginTurn(time.Now())
+	m.refreshRunningActivity()
+
+	updated, cmd := m.requestRunningInterrupt()
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("requestRunningInterrupt() cmd = nil")
+	}
+	updated, _ = next.handleRunningInterruptResultMsg(RunningInterruptResultMsg{Accepted: true})
+	next = updated.(*Model)
+	if next.runningActivity.Phase != runningPhaseInterrupt || !next.runningInterruptRequested {
+		t.Fatalf("after accepted interrupt: activity=%#v requested=%v", next.runningActivity, next.runningInterruptRequested)
+	}
+
+	_, ok := next.finishLiveTurnFromEnvelope(eventstream.TurnCancelled("h", "r", "t", "tui interrupt", time.Now()))
+	if !ok {
+		t.Fatal("finishLiveTurnFromEnvelope() = false, want cancelled lifecycle to end the live turn")
+	}
+	if next.turnRunning() {
+		t.Fatal("live turn still active after cancelled lifecycle")
+	}
+	if next.runningInterruptRequested {
+		t.Fatal("runningInterruptRequested still set after cancelled lifecycle")
+	}
+	if activity, _ := next.runningActivityText(); activity == "Interrupting" {
+		t.Fatalf("running activity = %q after terminal, want interrupt overlay cleared", activity)
+	}
+}
