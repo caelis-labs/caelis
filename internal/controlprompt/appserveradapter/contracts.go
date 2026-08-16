@@ -1,4 +1,4 @@
-package controladapter
+package appserveradapter
 
 import (
 	"github.com/caelis-labs/caelis/control/agentbinding"

@@ -42,7 +42,7 @@ func TestLocalStackInjectsOnlySelfUntilProfileIsBound(t *testing.T) {
 	if !spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "self") {
 		t.Fatal("SPAWN Agent enum missing self")
 	}
-	for _, hidden := range []string{"breeze", "orbit", "zenith", "helper", ReviewerAgentID, guardianSceneID} {
+	for _, hidden := range []string{"breeze", "orbit", "zenith", "helper", string(agentbinding.HandleReviewer), guardianSceneID} {
 		if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, hidden) {
 			t.Fatalf("SPAWN Agent enum exposes unbound or system Agent %q", hidden)
 		}
@@ -135,7 +135,7 @@ func TestACPSurfaceAvailableCommandsExposeOnlyBoundProfilesAndHideRosterAgents(t
 			t.Fatalf("AvailableCommands() = %#v, should hide unbound /%s", commands, profile)
 		}
 	}
-	for _, hidden := range []string{"helper", "lead", ReviewerAgentID, guardianSceneID, "agent", "subagent"} {
+	for _, hidden := range []string{"helper", "lead", string(agentbinding.HandleReviewer), guardianSceneID, "agent", "subagent"} {
 		if acpCommandForToolTest(commands, hidden) != nil {
 			t.Fatalf("AvailableCommands() exposes removed or system command %q: %#v", hidden, commands)
 		}

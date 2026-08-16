@@ -1,4 +1,4 @@
-package controladapter
+package appserveradapter
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
-	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -119,7 +118,7 @@ func (a *SessionClientAdapter) StartReview(
 	if a == nil || a.participants == nil {
 		return nil, errors.New("app/gatewayapp/controladapter: participant client is unavailable")
 	}
-	prompt, attachmentOffset := gatewayapp.ReviewPrompt(instructions)
+	prompt, attachmentOffset := controlprompt.ReviewPrompt(instructions)
 	shiftedAttachments := shiftControlAttachments(attachments, attachmentOffset)
 	contentParts, err := contentPartsFromSubmission(prompt, shiftedAttachments, a.WorkspaceDir())
 	if err != nil {
@@ -134,7 +133,7 @@ func (a *SessionClientAdapter) StartReview(
 			SessionID:      state.SessionID,
 			Handle:         string(agentbinding.HandleReviewer),
 			Role:           session.ParticipantRoleSidecar,
-			Label:          allocateParticipantLabel(state.Participants, gatewayapp.ReviewerAgentID),
+			Label:          allocateParticipantLabel(state.Participants, string(agentbinding.HandleReviewer)),
 			Source:         "slash_review",
 			Input:          prompt,
 			DisplayInput:   displayInputWithAttachments(instructions, attachments),

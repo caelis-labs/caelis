@@ -1,4 +1,4 @@
-package gatewayapp
+package controlprompt
 
 import (
 	"strings"

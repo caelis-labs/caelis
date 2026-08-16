@@ -106,7 +106,7 @@ tui-interaction: cache-dirs
 
 control-feed-regression: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./control/appserver '$(CONTROL_TURN_REGRESSION_SELECTOR)' control-turn-regression
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(SURFACE_CLIENT_REGRESSION_SELECTOR)' surface-client-regression
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./internal/controlprompt/appserveradapter '$(SURFACE_CLIENT_REGRESSION_SELECTOR)' surface-client-regression
 
 command-regression: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(COMMAND_REGRESSION_SELECTOR)' command-regression

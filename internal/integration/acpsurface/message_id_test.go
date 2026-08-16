@@ -1,4 +1,4 @@
-package acpagent
+package acpsurface
 
 import (
 	"context"
@@ -62,7 +62,7 @@ func TestProductACPStreamingChunksShareOneMessageID(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stack.Close() })
 
-	agent, err := NewFromStack(stack)
+	agent, err := newTestAgentFromStack(stack)
 	if err != nil {
 		t.Fatal(err)
 	}

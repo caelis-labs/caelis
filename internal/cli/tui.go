@@ -9,9 +9,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
+	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
 	"github.com/caelis-labs/caelis/internal/updater"
 	"github.com/caelis-labs/caelis/internal/version"
 	tuiapp "github.com/caelis-labs/caelis/surfaces/tui/app"
@@ -37,7 +37,7 @@ func runTUI(
 	stdout io.Writer,
 	stderr io.Writer,
 ) error {
-	typedDriver, err := controladapter.NewAppServerAdapter(controladapter.AppServerAdapterConfig{
+	typedDriver, err := appserveradapter.NewAppServerAdapter(appserveradapter.AppServerAdapterConfig{
 		PreferredSessionID: strings.TrimSpace(sessionID),
 		WorkspaceKey:       strings.TrimSpace(workspaceKey),
 		WorkspaceDir:       strings.TrimSpace(workspaceDir),

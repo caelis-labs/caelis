@@ -473,7 +473,7 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		return ""
 	}
 	target := strings.TrimPrefix(importPath, modulePath+"/")
-	if strings.HasPrefix(rel, "app/gatewayapp/acpagent/") &&
+	if strings.HasPrefix(rel, "surfaces/acp/") &&
 		(target == "internal/kernel" || strings.HasPrefix(target, "internal/kernel/") ||
 			target == "agent-sdk/runtime" || strings.HasPrefix(target, "agent-sdk/runtime/")) {
 		return "product ACP assembly must use principal-bound AppServer clients, not Runtime or Kernel"
@@ -496,11 +496,26 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if target == "control/client" || strings.HasPrefix(target, "control/client/") {
 		return "production code must not depend on retired control/client; use control/appserver"
 	}
+	if target == "surfaces/promptview" || strings.HasPrefix(target, "surfaces/promptview/") {
+		return "production code must not depend on retired surfaces/promptview; use surfaces/internal/promptview"
+	}
+	if target == "surfaces/statusbar" || strings.HasPrefix(target, "surfaces/statusbar/") {
+		return "production code must not depend on retired surfaces/statusbar; use surfaces/internal/statusbar"
+	}
+	if target == "surfaces/transcript" || strings.HasPrefix(target, "surfaces/transcript/") {
+		return "production code must not depend on retired surfaces/transcript; use surfaces/internal/transcript"
+	}
+	if target == "surfaces/acpserver" || strings.HasPrefix(target, "surfaces/acpserver/") {
+		return "production code must not depend on retired surfaces/acpserver; use surfaces/acp"
+	}
+	if target == "app/gatewayapp/acpagent" || strings.HasPrefix(target, "app/gatewayapp/acpagent/") {
+		return "production code must not depend on retired app/gatewayapp/acpagent; use surfaces/acp"
+	}
 	if target == "internal/controlpromptrouter" || strings.HasPrefix(target, "internal/controlpromptrouter/") {
 		return "production code must not depend on internal/controlpromptrouter; use internal/controlprompt"
 	}
 	if target == "protocol/acp/control" || strings.HasPrefix(target, "protocol/acp/control/") {
-		return "production code must not depend on retired protocol/acp/control; use internal/controlprompt, control/status, or surfaces/promptview"
+		return "production code must not depend on retired protocol/acp/control; use internal/controlprompt, control/status, or surfaces/internal/promptview"
 	}
 	if strings.HasPrefix(rel, "app/controlserver/") &&
 		(target == "app/gatewayapp" || strings.HasPrefix(target, "app/gatewayapp/")) {
@@ -565,6 +580,10 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		if target != "agent-sdk" && !strings.HasPrefix(target, "agent-sdk/") {
 			return "agent-sdk must not depend on non-SDK Caelis packages"
 		}
+	case strings.HasPrefix(rel, "internal/controlprompt/appserveradapter/"):
+		if startsWithAny(target, "app/", "surfaces/", "internal/kernel", "agent-sdk/runtime") {
+			return "AppServer prompt adapter must depend on Control clients and surface-neutral contracts, not Host, Surface, Runtime, or Kernel"
+		}
 	case strings.HasPrefix(rel, "internal/sandboxrouter/"):
 		if strings.HasSuffix(rel, "_test.go") {
 			return ""
@@ -585,6 +604,10 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		}
 		if !isAllowedSkillDiscoveryTarget(target) {
 			return "app/gatewayapp/internal/skilldiscovery must only depend on agent-sdk/skill and agent-sdk/skill/fs"
+		}
+	case strings.HasPrefix(rel, "app/"):
+		if !strings.HasSuffix(rel, "_test.go") && strings.HasPrefix(target, "surfaces/") {
+			return "app production code must compose through Control contracts, not depend on presentation surfaces"
 		}
 	case strings.HasPrefix(rel, "protocol/"):
 		if strings.HasPrefix(target, "internal/") {
@@ -724,6 +747,16 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "must not recreate control/client; the surface-facing product boundary belongs to control/appserver", pkg, 1
 	case pkg == "surfaces/appserver" || strings.HasPrefix(pkg, "surfaces/appserver/"):
 		return "must not recreate surfaces/appserver; the Control Host belongs to app/controlserver and its typed clients and wire codec to control/appserver", pkg, 1
+	case pkg == "surfaces/promptview" || strings.HasPrefix(pkg, "surfaces/promptview/"):
+		return "must not recreate surfaces/promptview; shared presentation projection belongs to surfaces/internal/promptview", pkg, 1
+	case pkg == "surfaces/statusbar" || strings.HasPrefix(pkg, "surfaces/statusbar/"):
+		return "must not recreate surfaces/statusbar; shared presentation projection belongs to surfaces/internal/statusbar", pkg, 1
+	case pkg == "surfaces/transcript" || strings.HasPrefix(pkg, "surfaces/transcript/"):
+		return "must not recreate surfaces/transcript; shared presentation projection belongs to surfaces/internal/transcript", pkg, 1
+	case pkg == "surfaces/acpserver" || strings.HasPrefix(pkg, "surfaces/acpserver/"):
+		return "must not recreate surfaces/acpserver; product ACP Surface ownership belongs to surfaces/acp", pkg, 1
+	case pkg == "app/gatewayapp/acpagent" || strings.HasPrefix(pkg, "app/gatewayapp/acpagent/"):
+		return "must not recreate app/gatewayapp/acpagent; product ACP Surface ownership belongs to surfaces/acp", pkg, 1
 	case pkg == "protocol/control" || strings.HasPrefix(pkg, "protocol/control/"):
 		return "must not recreate protocol/control; the domain-bound Control wire codec belongs to control/appserver/wirev1", pkg, 1
 	case pkg == "ports/controlclient" || strings.HasPrefix(pkg, "ports/controlclient/"):
@@ -739,7 +772,7 @@ func removedPackageFileRule(rel string) (string, string, int) {
 	case pkg == "internal/controlpromptrouter" || strings.HasPrefix(pkg, "internal/controlpromptrouter/"):
 		return "must not recreate internal/controlpromptrouter; prompt contracts and routing belong to internal/controlprompt", pkg, 1
 	case pkg == "protocol/acp/control" || strings.HasPrefix(pkg, "protocol/acp/control/"):
-		return "must not recreate protocol/acp/control; prompt contracts belong to internal/controlprompt, status data to control/status, and rendering to surfaces/promptview", pkg, 1
+		return "must not recreate protocol/acp/control; prompt contracts belong to internal/controlprompt, status data to control/status, and rendering to surfaces/internal/promptview", pkg, 1
 	case pkg == "impl/model/catalog" || strings.HasPrefix(pkg, "impl/model/catalog/"):
 		return "must not recreate impl/model/catalog; concrete model catalogs belong to Control", pkg, 1
 	case pkg == "agent-sdk/model/catalog" || strings.HasPrefix(pkg, "agent-sdk/model/catalog/"):

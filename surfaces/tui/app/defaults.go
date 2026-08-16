@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
-	"github.com/caelis-labs/caelis/surfaces/promptview"
+	"github.com/caelis-labs/caelis/surfaces/internal/promptview"
 )
 
 // defaults.go provides DefaultCommands and DefaultWizards for the TUI shell.

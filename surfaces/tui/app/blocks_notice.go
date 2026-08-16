@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
 func (b *MainACPTurnBlock) AddNotice(text string, occurredAt time.Time, noticeKind transcript.NoticeKind) {

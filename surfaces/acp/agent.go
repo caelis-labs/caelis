@@ -1,21 +1,18 @@
-package acpagent
+package acp
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
-	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/surfaces/promptview"
+	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
+	"github.com/caelis-labs/caelis/surfaces/internal/promptview"
 )
 
 // ClientsConfig constructs product ACP from focused AppServer clients only.
@@ -31,34 +28,6 @@ type ClientsConfig struct {
 	// client is used; Host exact-target Reconnect authorizes owners without
 	// granting RoleSystemSessionRuntime to Surface tokens.
 	AgentMessageSessionClient appserver.SessionClient
-}
-
-func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
-	if stack == nil {
-		return nil, errors.New("acpagent: stack is required")
-	}
-	appServer, err := local.NewAppServer(stack)
-	if err != nil {
-		return nil, err
-	}
-	clients, err := appServer.Bind(appserver.Principal{ID: stack.UserID})
-	if err != nil {
-		return nil, err
-	}
-	systemSessionClient, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{
-		ID: stack.UserID, Roles: []string{appserver.RoleSystemSessionRuntime},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return NewFromClients(ClientsConfig{
-		Clients:                   clients,
-		AppName:                   stack.AppName,
-		UserID:                    stack.UserID,
-		WorkspaceKey:              strings.TrimSpace(stack.Workspace.Key),
-		WorkspaceCWD:              strings.TrimSpace(stack.Workspace.CWD),
-		AgentMessageSessionClient: systemSessionClient,
-	})
 }
 
 // NewFromClients builds the product ACP surface from focused clients only.
@@ -89,7 +58,7 @@ func NewFromClients(cfg ClientsConfig) (*runtimeacp.RuntimeAgent, error) {
 			if sessionvisibility.IsSystemManagedSession(activeSession) {
 				turnSessions = systemSessionClient
 			}
-			driverWithTypedTurns, err := controladapter.NewAppServerAdapter(controladapter.AppServerAdapterConfig{
+			driverWithTypedTurns, err := appserveradapter.NewAppServerAdapter(appserveradapter.AppServerAdapterConfig{
 				SessionID:     strings.TrimSpace(activeSession.SessionID),
 				WorkspaceKey:  strings.TrimSpace(activeSession.WorkspaceKey),
 				WorkspaceDir:  strings.TrimSpace(activeSession.CWD),

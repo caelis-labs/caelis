@@ -17,7 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
 func TestProductScenarioContextCompactionRuntimeToPhysicalTUI(t *testing.T) {

@@ -20,7 +20,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/app/gatewayapp/acpagent"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
@@ -29,7 +28,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/internal/workspaceidentity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/surfaces/acpserver"
+	surfaceacp "github.com/caelis-labs/caelis/surfaces/acp"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 	"github.com/google/uuid"
 )
@@ -354,7 +353,7 @@ func runWithProductClientOpener(
 		}
 	}
 	if acpSubcommand {
-		agent, err := acpagent.NewFromClients(acpagent.ClientsConfig{
+		agent, err := surfaceacp.NewFromClients(surfaceacp.ClientsConfig{
 			Clients: product.Clients,
 			AppName: product.Workspace.AppName, UserID: product.Workspace.UserID,
 			WorkspaceKey: product.Workspace.WorkspaceKey, WorkspaceCWD: product.Workspace.WorkspaceCWD,
@@ -362,7 +361,7 @@ func runWithProductClientOpener(
 		if err != nil {
 			return err
 		}
-		return acpserver.ServeStdio(ctx, agent, stdin, stdout)
+		return surfaceacp.ServeStdio(ctx, agent, stdin, stdout)
 	}
 	if doctorSubcommand {
 		outFmt, err := parseOutputFormat(*format)

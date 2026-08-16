@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
 // SubagentEventKind identifies the type of a child session event.

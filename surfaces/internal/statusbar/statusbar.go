@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	controlstatus "github.com/caelis-labs/caelis/control/status"
-	"github.com/caelis-labs/caelis/surfaces/promptview"
+	"github.com/caelis-labs/caelis/surfaces/internal/promptview"
 )
 
 // FooterYoloLabel is the persistent TUI footer badge for process-owned Host escape mode.

@@ -20,7 +20,7 @@ import (
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/surfaces/promptview"
+	"github.com/caelis-labs/caelis/surfaces/internal/promptview"
 )
 
 // ProgramSender is set after the tea.Program is created so that the

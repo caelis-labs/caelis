@@ -13,9 +13,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
@@ -170,7 +170,7 @@ func newEvalAppServerAdapter(
 	stack *gatewayapp.Stack,
 	active session.Session,
 	surface string,
-) *controladapter.SessionClientAdapter {
+) *appserveradapter.SessionClientAdapter {
 	t.Helper()
 	server, err := local.NewAppServer(stack)
 	if err != nil {
@@ -180,7 +180,7 @@ func newEvalAppServerAdapter(
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter, err := controladapter.NewAppServerAdapter(controladapter.AppServerAdapterConfig{
+	adapter, err := appserveradapter.NewAppServerAdapter(appserveradapter.AppServerAdapterConfig{
 		SessionID:     active.SessionID,
 		WorkspaceKey:  active.WorkspaceKey,
 		WorkspaceDir:  active.CWD,

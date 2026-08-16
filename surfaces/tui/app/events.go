@@ -9,7 +9,7 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
-	"github.com/caelis-labs/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
 type HintPriority int
@@ -176,8 +176,8 @@ type ParticipantStatusMsg struct {
 }
 
 // Transitional aliases keep existing TUI call sites stable while shared
-// transcript semantics move to surfaces/transcript. New cross-surface code
-// should import surfaces/transcript directly.
+// transcript semantics move to surfaces/internal/transcript. New cross-surface code
+// should import surfaces/internal/transcript directly.
 type ACPProjectionScope = transcript.Scope
 
 const (

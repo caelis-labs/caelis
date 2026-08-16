@@ -63,7 +63,14 @@ Document responsibilities are intentionally separate:
 ## Current Map
 
 - `cmd/caelis`, `internal/cli`: process entry and mode selection.
-- `surfaces/*`: presentation adapters.
+- `surfaces/tui`, `surfaces/headless`, `surfaces/acp`: concrete presentation
+  entities. Product ACP owns both its AppServer-client assembly and stdio
+  transport adapter here; it receives the aggregate AppServer clients and no
+  Host, Runtime, Kernel, persistence, or assembly handle.
+- `surfaces/internal/promptview`, `surfaces/internal/statusbar`,
+  `surfaces/internal/transcript`: private shared presentation projection used
+  by concrete Surfaces. These packages are not independent product surfaces or
+  application-layer entry points.
 - `protocol/acp`: product ACP wire schema and transport, eventstream envelopes,
   projection helpers, compatibility handling, and documented `_meta`
   contracts. Reusable normalized ACP semantics may live in the SDK.
@@ -182,8 +189,10 @@ Document responsibilities are intentionally separate:
   contract, private prompt facade, command catalog, parsing helpers,
   connect-wizard state, and shared slash orchestration. It is not a product
   client API and must not accumulate transport or presentation semantics.
-- `surfaces/promptview`: shared text/display projection of structured prompt
-  results and Control status snapshots.
+- `internal/controlprompt/appserveradapter`: private client-side adaptation
+  from the aggregate `control/appserver.AppServerClients` capability set to the
+  prompt facade consumed by concrete Surfaces. It contains no Host, Runtime,
+  Kernel, persistence, or transport authority and is not a second product API.
 - `internal/controlassembly`: product Agent assembly resolution.
 - `internal/controlplane`: shared-ledger routing, endpoint lifecycle/recovery,
   and handoff coordination.
@@ -279,12 +288,13 @@ Document responsibilities are intentionally separate:
 - other `internal/control*` packages: current Control integration
   implementations that may converge with adjacent `app/*` and `control/*`
   ownership before any later package split.
-- `app/gatewayapp/controladapter`: narrow server-side assemblers for existing
-  Control semantics plus the presentation-facing typed-client facade. The
-  production facade contains clients only; the broad `Adapter` facade and its
+- `app/gatewayapp/controladapter`: narrow Host-private, server-side assemblers
+  for existing Control semantics. The presentation-facing typed-client facade
+  has moved to `internal/controlprompt/appserveradapter`; production `app/*`
+  code does not import `surfaces/*`. The broad `Adapter` facade and its
   compatibility constructors have been removed, and tests exercise either the
-  same narrow assemblers used by AppServer services or typed clients. Do not
-  add product-client operations to the private
+  same narrow assemblers used by AppServer services or the aggregate typed
+  clients. Do not add product-client operations to the private
   `internal/controlprompt.Service` aggregate or recreate `ports/*`; stable
   capabilities belong in coherent `control/*` packages. The TUI uses external
   ACP connections only as Side ACP participants; it does not bind an external

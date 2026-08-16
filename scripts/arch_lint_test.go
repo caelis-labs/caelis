@@ -30,6 +30,18 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "production code must not depend on retired control/client; use control/appserver",
 		},
 		{
+			name:       "retired prompt projection package retains replacement",
+			rel:        "surfaces/tui/app/defaults.go",
+			importPath: modulePath + "/surfaces/promptview",
+			want:       "production code must not depend on retired surfaces/promptview; use surfaces/internal/promptview",
+		},
+		{
+			name:       "retired ACP surface package retains replacement",
+			rel:        "internal/cli/cli.go",
+			importPath: modulePath + "/app/gatewayapp/acpagent",
+			want:       "production code must not depend on retired app/gatewayapp/acpagent; use surfaces/acp",
+		},
+		{
 			name:       "deleted gateway port retains replacement",
 			rel:        "app/gatewayapp/stack.go",
 			importPath: modulePath + "/ports/gateway",
@@ -141,7 +153,7 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			name:       "AppServer rejects unrelated ACP adapters",
 			rel:        "control/appserver/client.go",
 			importPath: modulePath + "/protocol/acp/control",
-			want:       "production code must not depend on retired protocol/acp/control; use internal/controlprompt, control/status, or surfaces/promptview",
+			want:       "production code must not depend on retired protocol/acp/control; use internal/controlprompt, control/status, or surfaces/internal/promptview",
 		},
 		{
 			name:       "control server rejects gateway stack assembly",
@@ -152,7 +164,7 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 		{
 			name:       "ACP bridge rejects presentation package dependency",
 			rel:        "internal/acpagentbridge/prompt_bridge.go",
-			importPath: modulePath + "/surfaces/promptview",
+			importPath: modulePath + "/surfaces/internal/promptview",
 			want:       "internal/acpagentbridge must receive presentation projection through assembly, not import surfaces",
 		},
 		{
@@ -180,26 +192,62 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "surfaces must not depend directly on app",
 		},
 		{
+			name:       "app production rejects presentation dependency",
+			rel:        "app/gatewayapp/host.go",
+			importPath: modulePath + "/surfaces/headless",
+			want:       "app production code must compose through Control contracts, not depend on presentation surfaces",
+		},
+		{
+			name:       "app integration test may compose a surface",
+			rel:        "app/gatewayapp/headless_test.go",
+			importPath: modulePath + "/surfaces/headless",
+			want:       "",
+		},
+		{
 			name:       "surface rejects runtime implementation",
 			rel:        "surfaces/gui/app.go",
 			importPath: modulePath + "/agent-sdk/runtime",
 			want:       "surfaces must use Control clients and projected Envelopes, not Runtime or Kernel",
 		},
 		{
-			name:       "surface rejects kernel implementation",
-			rel:        "surfaces/acpserver/server.go",
+			name:       "AppServer prompt adapter rejects Host implementation",
+			rel:        "internal/controlprompt/appserveradapter/adapter.go",
+			importPath: modulePath + "/app/gatewayapp",
+			want:       "AppServer prompt adapter must depend on Control clients and surface-neutral contracts, not Host, Surface, Runtime, or Kernel",
+		},
+		{
+			name:       "AppServer prompt adapter rejects Surface implementation",
+			rel:        "internal/controlprompt/appserveradapter/adapter.go",
+			importPath: modulePath + "/surfaces/internal/promptview",
+			want:       "AppServer prompt adapter must depend on Control clients and surface-neutral contracts, not Host, Surface, Runtime, or Kernel",
+		},
+		{
+			name:       "AppServer prompt adapter rejects Kernel implementation",
+			rel:        "internal/controlprompt/appserveradapter/adapter.go",
 			importPath: modulePath + "/internal/kernel",
-			want:       "surfaces must use Control clients and projected Envelopes, not Runtime or Kernel",
+			want:       "AppServer prompt adapter must depend on Control clients and surface-neutral contracts, not Host, Surface, Runtime, or Kernel",
+		},
+		{
+			name:       "AppServer prompt adapter rejects Runtime implementation",
+			rel:        "internal/controlprompt/appserveradapter/adapter.go",
+			importPath: modulePath + "/agent-sdk/runtime/chat",
+			want:       "AppServer prompt adapter must depend on Control clients and surface-neutral contracts, not Host, Surface, Runtime, or Kernel",
+		},
+		{
+			name:       "product ACP server rejects kernel implementation",
+			rel:        "surfaces/acp/server.go",
+			importPath: modulePath + "/internal/kernel",
+			want:       "product ACP assembly must use principal-bound AppServer clients, not Runtime or Kernel",
 		},
 		{
 			name:       "product ACP rejects runtime implementation",
-			rel:        "app/gatewayapp/acpagent/agent.go",
+			rel:        "surfaces/acp/agent.go",
 			importPath: modulePath + "/agent-sdk/runtime/chat",
 			want:       "product ACP assembly must use principal-bound AppServer clients, not Runtime or Kernel",
 		},
 		{
 			name:       "product ACP rejects kernel implementation",
-			rel:        "app/gatewayapp/acpagent/agent.go",
+			rel:        "surfaces/acp/agent.go",
 			importPath: modulePath + "/internal/kernel",
 			want:       "product ACP assembly must use principal-bound AppServer clients, not Runtime or Kernel",
 		},
@@ -421,6 +469,36 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 			wantSub: "surfaces/appserver",
 		},
 		{
+			name:    "deleted prompt projection surface fails",
+			rel:     "surfaces/promptview/status.go",
+			want:    "must not recreate surfaces/promptview; shared presentation projection belongs to surfaces/internal/promptview",
+			wantSub: "surfaces/promptview",
+		},
+		{
+			name:    "deleted status projection surface fails",
+			rel:     "surfaces/statusbar/status.go",
+			want:    "must not recreate surfaces/statusbar; shared presentation projection belongs to surfaces/internal/statusbar",
+			wantSub: "surfaces/statusbar",
+		},
+		{
+			name:    "deleted transcript projection surface fails",
+			rel:     "surfaces/transcript/event.go",
+			want:    "must not recreate surfaces/transcript; shared presentation projection belongs to surfaces/internal/transcript",
+			wantSub: "surfaces/transcript",
+		},
+		{
+			name:    "deleted ACP server surface fails",
+			rel:     "surfaces/acpserver/server.go",
+			want:    "must not recreate surfaces/acpserver; product ACP Surface ownership belongs to surfaces/acp",
+			wantSub: "surfaces/acpserver",
+		},
+		{
+			name:    "deleted app ACP assembly fails",
+			rel:     "app/gatewayapp/acpagent/agent.go",
+			want:    "must not recreate app/gatewayapp/acpagent; product ACP Surface ownership belongs to surfaces/acp",
+			wantSub: "app/gatewayapp/acpagent",
+		},
+		{
 			name:    "deleted Control protocol package fails",
 			rel:     "protocol/control/v1/wire.go",
 			want:    "must not recreate protocol/control; the domain-bound Control wire codec belongs to control/appserver/wirev1",
@@ -543,7 +621,7 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 		{
 			name:    "deleted protocol control path fails",
 			rel:     "protocol/acp/control/service.go",
-			want:    "must not recreate protocol/acp/control; prompt contracts belong to internal/controlprompt, status data to control/status, and rendering to surfaces/promptview",
+			want:    "must not recreate protocol/acp/control; prompt contracts belong to internal/controlprompt, status data to control/status, and rendering to surfaces/internal/promptview",
 			wantSub: "protocol/acp/control",
 		},
 		{

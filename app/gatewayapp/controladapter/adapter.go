@@ -210,10 +210,6 @@ func activeTurnStateForSession(active []kernel.ActiveTurnState, ref session.Sess
 	return kernel.ActiveTurnState{}, false
 }
 
-func noActiveTurnSubmissionError() error {
-	return kernel.NoActiveRunError("")
-}
-
 func (d *assembler) listResumeCandidates(ctx context.Context, limit int) ([]controlprompt.ResumeCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 	ctx, cancel := completionContext(ctx, resumeCompletionTimeout)

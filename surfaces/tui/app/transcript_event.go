@@ -6,11 +6,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
 // Transitional aliases keep the TUI renderer readable during the transcript
-// extraction. Shared surface code should use surfaces/transcript directly.
+// extraction. Shared surface code should use surfaces/internal/transcript directly.
 type TranscriptEventKind = transcript.EventKind
 
 const (

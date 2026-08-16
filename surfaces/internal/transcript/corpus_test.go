@@ -98,7 +98,7 @@ type corpusWireTransientPosition struct {
 func TestSharedTranscriptCorpusMatchesGoldenSemanticState(t *testing.T) {
 	t.Parallel()
 
-	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "transcript-parity", "corpus.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "transcript-parity", "corpus.json"))
 	if err != nil {
 		t.Fatalf("read transcript corpus: %v", err)
 	}

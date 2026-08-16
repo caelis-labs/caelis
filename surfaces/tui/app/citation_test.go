@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
 func TestFinalAssistantCitationBecomesTUILinkMarkdown(t *testing.T) {

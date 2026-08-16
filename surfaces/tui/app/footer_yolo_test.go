@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/surfaces/statusbar"
+	"github.com/caelis-labs/caelis/surfaces/internal/statusbar"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"

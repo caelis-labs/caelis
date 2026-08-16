@@ -9,8 +9,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
-	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -413,64 +411,6 @@ func (d *assembler) agentCatalog(limit int) []controlprompt.AgentCandidate {
 		}
 	}
 	return out
-}
-
-type participantAddress struct {
-	ID        string
-	Kind      session.ParticipantKind
-	Role      session.ParticipantRole
-	Label     string
-	SessionID string
-	Source    string
-}
-
-func resolveParticipantID(participants []participantAddress, input string) (string, error) {
-	input = strings.ToLower(strings.TrimSpace(input))
-	if input == "" {
-		return "", fmt.Errorf("app/gatewayapp/controladapter: participant id is required")
-	}
-	runAgent, runHandle, directRun := controlagents.ParseRunName(input)
-	var exact string
-	prefixMatches := make([]string, 0, 2)
-	for _, participant := range participants {
-		if participant.Kind != session.ParticipantKindACP || participant.Role != session.ParticipantRoleSidecar {
-			continue
-		}
-		id := strings.TrimSpace(participant.ID)
-		label := strings.TrimSpace(participant.Label)
-		handle := strings.TrimPrefix(label, "@")
-		sessionID := strings.TrimSpace(participant.SessionID)
-		if id == "" {
-			continue
-		}
-		if directRun {
-			handle, profileRun := controlagents.DirectRunHandleFromSource(participant.Source)
-			if profileRun && strings.EqualFold(string(handle), runAgent) &&
-				strings.EqualFold(taskapi.NormalizeHandle(label), runHandle) {
-				return id, nil
-			}
-			continue
-		}
-		if strings.EqualFold(id, input) || strings.EqualFold(label, input) || strings.EqualFold(handle, input) || strings.EqualFold(sessionID, input) {
-			return id, nil
-		}
-		for _, candidate := range []string{id, label, handle, sessionID} {
-			candidate = strings.ToLower(strings.TrimSpace(candidate))
-			if candidate != "" && strings.HasPrefix(candidate, input) {
-				exact = id
-				prefixMatches = append(prefixMatches, exact)
-				break
-			}
-		}
-	}
-	switch len(dedupeNonEmptyStrings(prefixMatches)) {
-	case 1:
-		return dedupeNonEmptyStrings(prefixMatches)[0], nil
-	case 0:
-		return "", fmt.Errorf("app/gatewayapp/controladapter: participant %q is not attached", input)
-	default:
-		return "", fmt.Errorf("app/gatewayapp/controladapter: participant %q is ambiguous", input)
-	}
 }
 
 func (d *assembler) resolveStoredModelAlias(ctx context.Context, input string) (string, error) {

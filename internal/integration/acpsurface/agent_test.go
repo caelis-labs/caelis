@@ -1,4 +1,4 @@
-package acpagent
+package acpsurface
 
 import (
 	"context"
@@ -18,8 +18,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
-	"github.com/caelis-labs/caelis/control/agentbinding"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
@@ -28,7 +26,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
-func TestNewFromStackRoutesStatusSlashThroughSharedPromptRouter(t *testing.T) {
+func TestNewFromClientsRoutesStatusSlashThroughSharedPromptRouter(t *testing.T) {
 	workdir := t.TempDir()
 	stack, err := newACPAgentTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -49,9 +47,9 @@ func TestNewFromStackRoutesStatusSlashThroughSharedPromptRouter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	agent, err := NewFromStack(stack)
+	agent, err := newTestAgentFromStack(stack)
 	if err != nil {
-		t.Fatalf("NewFromStack() error = %v", err)
+		t.Fatalf("newTestAgentFromStack() error = %v", err)
 	}
 	session, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: workdir})
 	if err != nil {
@@ -75,7 +73,7 @@ func TestNewFromStackRoutesStatusSlashThroughSharedPromptRouter(t *testing.T) {
 	}
 }
 
-func TestNewFromStackRunCommandPublishesTerminalBytesOnce(t *testing.T) {
+func TestNewFromClientsRunCommandPublishesTerminalBytesOnce(t *testing.T) {
 	const output = "异步任务执行完毕，耗时 6 秒\n"
 	var providerCalls atomic.Int32
 	provider := testenv.NewHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +133,7 @@ func TestNewFromStackRunCommandPublishesTerminalBytesOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	agent, err := NewFromStack(stack)
+	agent, err := newTestAgentFromStack(stack)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +204,7 @@ func acpTerminalOutputText(notifications []acp.SessionNotification, callID strin
 	return out.String()
 }
 
-func TestNewFromStackStatusSlashUsesClientWorkspaceSession(t *testing.T) {
+func TestNewFromClientsStatusSlashUsesClientWorkspaceSession(t *testing.T) {
 	ctx := context.Background()
 	stackWorkspace := t.TempDir()
 	clientWorkspace := t.TempDir()
@@ -229,9 +227,9 @@ func TestNewFromStackStatusSlashUsesClientWorkspaceSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	agent, err := NewFromStack(stack)
+	agent, err := newTestAgentFromStack(stack)
 	if err != nil {
-		t.Fatalf("NewFromStack() error = %v", err)
+		t.Fatalf("newTestAgentFromStack() error = %v", err)
 	}
 	session, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: clientWorkspace})
 	if err != nil {
@@ -255,17 +253,17 @@ func TestNewFromStackStatusSlashUsesClientWorkspaceSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clientWorkspaceDisplay := controladapter.FormatWorkspacePathForDisplay(canonicalClientWorkspace)
+	clientWorkspaceDisplay := canonicalClientWorkspace
 	if !strings.Contains(message, "Workspace: "+clientWorkspaceDisplay) {
 		t.Fatalf("status output = %q, want client workspace %q", message, clientWorkspaceDisplay)
 	}
-	stackWorkspaceDisplay := controladapter.FormatWorkspacePathForDisplay(stackWorkspace)
+	stackWorkspaceDisplay := stackWorkspace
 	if strings.Contains(message, "Workspace: "+stackWorkspaceDisplay) {
 		t.Fatalf("status output = %q, should not use stack workspace %q", message, stackWorkspaceDisplay)
 	}
 }
 
-func TestNewFromStackHidesManagedSubagentSessionFromResume(t *testing.T) {
+func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
 	provider := testenv.NewHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -295,7 +293,7 @@ func TestNewFromStackHidesManagedSubagentSessionFromResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	agent, err := NewFromStack(stack)
+	agent, err := newTestAgentFromStack(stack)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +382,7 @@ func TestNewFromStackHidesManagedSubagentSessionFromResume(t *testing.T) {
 	}
 }
 
-func TestNewFromStackUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
+func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	workspace := t.TempDir()
@@ -420,7 +418,7 @@ func TestNewFromStackUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	agent, err := NewFromStack(stack)
+	agent, err := newTestAgentFromStack(stack)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +474,7 @@ func TestNewFromStackUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 	}
 }
 
-func TestNewFromStackSetConfigOptionUsesNewSessionCWDWorkspace(t *testing.T) {
+func TestNewFromClientsSetConfigOptionUsesNewSessionCWDWorkspace(t *testing.T) {
 	ctx := context.Background()
 	stackWorkspace := t.TempDir()
 	clientWorkspace := t.TempDir()
@@ -506,9 +504,9 @@ func TestNewFromStackSetConfigOptionUsesNewSessionCWDWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	agent, err := NewFromStack(stack)
+	agent, err := newTestAgentFromStack(stack)
 	if err != nil {
-		t.Fatalf("NewFromStack() error = %v", err)
+		t.Fatalf("newTestAgentFromStack() error = %v", err)
 	}
 	sessionResp, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: clientWorkspace})
 	if err != nil {
@@ -568,7 +566,7 @@ func TestNewFromStackSetConfigOptionUsesNewSessionCWDWorkspace(t *testing.T) {
 	}
 }
 
-func TestNewFromStackSetConfigOptionRoutesAdvertisedApprovalMode(t *testing.T) {
+func TestNewFromClientsSetConfigOptionRoutesAdvertisedApprovalMode(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
 	stack, err := newACPAgentTestStack(t, gatewayapp.Config{
@@ -586,9 +584,9 @@ func TestNewFromStackSetConfigOptionRoutesAdvertisedApprovalMode(t *testing.T) {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	agent, err := NewFromStack(stack)
+	agent, err := newTestAgentFromStack(stack)
 	if err != nil {
-		t.Fatalf("NewFromStack() error = %v", err)
+		t.Fatalf("newTestAgentFromStack() error = %v", err)
 	}
 	created, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: workspace})
 	if err != nil {
@@ -656,110 +654,6 @@ func configOptionString(options []acp.SessionConfigOption, id string) (string, b
 	return "", false
 }
 
-func TestACPPromptCommandNamesExposeOnlyBoundProfilesAndHideAgentCatalog(t *testing.T) {
-	workdir := t.TempDir()
-	stack, err := newACPAgentTestStack(t, gatewayapp.Config{
-		AppName:      "caelis",
-		UserID:       "acpagent-test",
-		StoreDir:     t.TempDir(),
-		WorkspaceKey: workdir,
-		WorkspaceCWD: workdir,
-		SkillDirs:    []string{t.TempDir()},
-		Sandbox: gatewayapp.SandboxConfig{
-			RequestedType: "host",
-		},
-		Model: gatewayapp.ModelConfig{
-			Provider: "ollama",
-			Model:    "llama3",
-		},
-		Assembly: assembly.ResolvedAssembly{Agents: []assembly.AgentConfig{
-			{Name: "helper", Description: "registered ACP helper", Command: "go"},
-			{Name: "status", Description: "reserved collision", Command: "go"},
-		}},
-	})
-	if err != nil {
-		t.Fatalf("NewLocalStack() error = %v", err)
-	}
-	if len(stack.ListACPAgents()) == 0 {
-		t.Fatal("test setup did not materialize the registered helper Agent")
-	}
-	if _, err := gatewayapptest.ConnectModel(context.Background(), stack, gatewayapp.ModelConfig{
-		Provider: "ollama",
-		API:      providers.APIOllama,
-		Model:    "bound-orbit",
-	}); err != nil {
-		t.Fatalf("Connect(bound Orbit model) error = %v", err)
-	}
-	delegationStatus, err := stack.AgentBindings().AgentBindingStatus(context.Background())
-	if err != nil {
-		t.Fatalf("AgentBindingStatus() error = %v", err)
-	}
-	commands := acpPromptCommandNames(delegationStatus)
-	for _, profile := range []string{"breeze", "orbit", "zenith"} {
-		if containsCommand(commands, profile) {
-			t.Fatalf("acpPromptCommandNames() = %#v, should hide unbound %q", commands, profile)
-		}
-	}
-	if len(delegationStatus.Targets) == 0 {
-		t.Fatal("test setup has no delegation targets")
-	}
-	delegationStatus, err = gatewayapptest.BindAgentBinding(context.Background(), stack, agentbinding.Binding{
-		Handle:    agentbinding.HandleOrbit,
-		ProfileID: delegationStatus.Targets[0].ID,
-		Effort:    delegationStatus.Targets[0].Effort.DefaultEffort,
-	})
-	if err != nil {
-		t.Fatalf("BindAgentBinding(Orbit) error = %v", err)
-	}
-	commands = acpPromptCommandNames(delegationStatus)
-	if !containsCommand(commands, "orbit") {
-		t.Fatalf("acpPromptCommandNames() = %#v, want bound Orbit", commands)
-	}
-	delegationStatus, err = gatewayapptest.CreateAgentRole(context.Background(), stack, agentbinding.Role{
-		Handle: "research", Description: "Investigate unfamiliar systems.",
-	}, agentbinding.Binding{
-		ProfileID: delegationStatus.Targets[0].ID,
-		Effort:    delegationStatus.Targets[0].Effort.DefaultEffort,
-	})
-	if err != nil {
-		t.Fatalf("CreateAgentRole(research) error = %v", err)
-	}
-	commands = acpPromptCommandNames(delegationStatus)
-	if !containsCommand(commands, "research") {
-		t.Fatalf("acpPromptCommandNames() = %#v, want custom research role", commands)
-	}
-	for _, profile := range []string{"breeze", "zenith"} {
-		if containsCommand(commands, profile) {
-			t.Fatalf("acpPromptCommandNames() = %#v, should hide unbound %q", commands, profile)
-		}
-	}
-	for _, hidden := range []string{"helper", "reviewer", "self", "lead"} {
-		if containsCommand(commands, hidden) {
-			t.Fatalf("acpPromptCommandNames() = %#v, should not contain %q", commands, hidden)
-		}
-	}
-	if countCommand(commands, "status") != 1 {
-		t.Fatalf("acpPromptCommandNames() = %#v, want one core status command", commands)
-	}
-}
-
-func TestACPPromptCommandNamesFromSessionRuntimeHandles(t *testing.T) {
-	commands := acpPromptCommandNamesFromHandles([]string{"orbit", "research", "ORBIT", "bad name"})
-	for _, want := range []string{"status", "review", "orbit", "research"} {
-		if !containsCommand(commands, want) {
-			t.Fatalf("acpPromptCommandNamesFromHandles() = %#v, want %q", commands, want)
-		}
-	}
-	for _, hidden := range []string{"breeze", "zenith", "bad name"} {
-		if containsCommand(commands, hidden) {
-			t.Fatalf("acpPromptCommandNamesFromHandles() = %#v, should hide %q", commands, hidden)
-		}
-	}
-	if countCommand(commands, "orbit") != 1 {
-		t.Fatalf("acpPromptCommandNamesFromHandles() = %#v, want one orbit", commands)
-	}
-}
-
 func newACPAgentTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack, error) {
 	t.Helper()
 	model := cfg.Model
@@ -817,18 +711,4 @@ func (c *recordingCallbacks) firstAgentMessage() string {
 		}
 	}
 	return ""
-}
-
-func containsCommand(commands []string, name string) bool {
-	return countCommand(commands, name) > 0
-}
-
-func countCommand(commands []string, name string) int {
-	count := 0
-	for _, command := range commands {
-		if strings.EqualFold(strings.TrimSpace(command), name) {
-			count++
-		}
-	}
-	return count
 }

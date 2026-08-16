@@ -9,7 +9,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/lipgloss/v2"
 
-	"github.com/caelis-labs/caelis/surfaces/statusbar"
+	"github.com/caelis-labs/caelis/surfaces/internal/statusbar"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )

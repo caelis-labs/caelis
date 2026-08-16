@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
 )
 
 func TestAppServerFacadeResetDoesNotCreateWorkspaceSessions(t *testing.T) {
@@ -44,9 +44,9 @@ func TestAppServerFacadeResetDoesNotCreateWorkspaceSessions(t *testing.T) {
 		t.Fatal("AppServer task client is nil")
 	}
 
-	newFacade := func(workspaceKey, cwd string) *controladapter.SessionClientAdapter {
+	newFacade := func(workspaceKey, cwd string) *appserveradapter.SessionClientAdapter {
 		t.Helper()
-		facade, err := controladapter.NewAppServerAdapter(controladapter.AppServerAdapterConfig{
+		facade, err := appserveradapter.NewAppServerAdapter(appserveradapter.AppServerAdapterConfig{
 			WorkspaceKey: workspaceKey, WorkspaceDir: cwd, Surface: "test",
 			Sessions: clients.Sessions, Participants: clients.Participants, Status: clients.Status,
 			Configuration: clients.Configuration, Agents: clients.Agents,

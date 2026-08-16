@@ -10,7 +10,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
-	"github.com/caelis-labs/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
 func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string {

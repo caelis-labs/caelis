@@ -20,9 +20,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
 	"github.com/caelis-labs/caelis/internal/productpaths"
 	"github.com/caelis-labs/caelis/internal/servicelifecycle"
 	"github.com/caelis-labs/caelis/internal/testenv"
@@ -150,7 +150,7 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 			t.Fatalf("CreateSession(%s) = %#v, %v", one.sessionID, result, err)
 		}
 	}
-	driverB, err := controladapter.NewAppServerAdapter(controladapter.AppServerAdapterConfig{
+	driverB, err := appserveradapter.NewAppServerAdapter(appserveradapter.AppServerAdapterConfig{
 		WorkspaceKey: "workspace-b", WorkspaceDir: workspaceB, Surface: "cli-tui",
 		Sessions: clientB.Clients.Sessions, Participants: clientB.Clients.Participants,
 		Status: clientB.Clients.Status, Configuration: clientB.Clients.Configuration,

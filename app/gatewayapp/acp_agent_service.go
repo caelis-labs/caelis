@@ -197,9 +197,10 @@ func (s *Stack) withDirectProfileAgents(resolved assembly.ResolvedAssembly, runt
 
 func (s *Stack) withReviewerAgent(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	out := assembly.CloneResolvedAssembly(resolved)
+	reviewerAgentID := string(agentbinding.HandleReviewer)
 	for _, existing := range out.Agents {
-		if strings.EqualFold(strings.TrimSpace(existing.Name), ReviewerAgentID) {
-			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: host agent %q conflicts with the fixed Reviewer scene", ReviewerAgentID)
+		if strings.EqualFold(strings.TrimSpace(existing.Name), reviewerAgentID) {
+			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: host agent %q conflicts with the fixed Reviewer scene", reviewerAgentID)
 		}
 	}
 	if s.store == nil {
@@ -219,9 +220,9 @@ func (s *Stack) withReviewerAgent(resolved assembly.ResolvedAssembly, runtimeCfg
 	if err != nil {
 		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: materialize fixed Reviewer scene: %w", err)
 	}
-	reviewer.Name = ReviewerAgentID
+	reviewer.Name = reviewerAgentID
 	reviewer.Description = "Review current workspace changes"
-	reviewer.Env = withSystemSceneEnv(reviewer.Env, ReviewerAgentID)
+	reviewer.Env = withSystemSceneEnv(reviewer.Env, reviewerAgentID)
 	out.Agents = append(out.Agents, reviewer)
 	return out, nil
 }

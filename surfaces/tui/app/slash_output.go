@@ -7,7 +7,7 @@ import (
 
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/surfaces/promptview"
+	"github.com/caelis-labs/caelis/surfaces/internal/promptview"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 

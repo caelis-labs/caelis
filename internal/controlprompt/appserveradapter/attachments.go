@@ -1,4 +1,4 @@
-package controladapter
+package appserveradapter
 
 import (
 	"encoding/base64"

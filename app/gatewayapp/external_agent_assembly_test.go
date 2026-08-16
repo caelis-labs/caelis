@@ -217,10 +217,10 @@ func TestReviewerACPBindingMaterializesHiddenReviewScene(t *testing.T) {
 	activated := activateFutureAssemblyStack(t, stack, "reviewer-acp-binding")
 	agents := append([]assembly.AgentConfig(nil), activated.runtime.Assembly.Agents...)
 	for _, agent := range agents {
-		if agent.Name != ReviewerAgentID {
+		if agent.Name != string(agentbinding.HandleReviewer) {
 			continue
 		}
-		if agent.Command != "claude-acp" || strings.TrimSpace(agent.Env[systemSceneEnvKey]) != ReviewerAgentID {
+		if agent.Command != "claude-acp" || strings.TrimSpace(agent.Env[systemSceneEnvKey]) != string(agentbinding.HandleReviewer) {
 			t.Fatalf("Reviewer ACP scene = %#v", agent)
 		}
 		if agent.SessionOptions.ModelID != "Opus-V4" || agent.SessionOptions.ReasoningEffortConfigID != "thought_level" {
@@ -261,7 +261,7 @@ func TestSystemAgentBindingsApplySelectedModelAndEffort(t *testing.T) {
 
 	agents := append([]assembly.AgentConfig(nil), activated.runtime.Assembly.Agents...)
 	for _, agent := range agents {
-		if agent.Name != ReviewerAgentID {
+		if agent.Name != string(agentbinding.HandleReviewer) {
 			continue
 		}
 		if got := agent.SessionOptions.ModelID; got != profile.Backend.Provider.ModelConfigID {
