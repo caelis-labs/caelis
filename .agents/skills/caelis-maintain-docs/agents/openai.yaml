@@ -1,0 +1,4 @@
+interface:
+  display_name: "Caelis Documentation Maintenance"
+  short_description: "Maintain concise, contract-focused Caelis prose"
+  default_prompt: "Use $caelis-maintain-docs to review or update the requested Caelis prose with the authority the user provided."

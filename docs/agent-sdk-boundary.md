@@ -16,7 +16,8 @@ by more than one host; it does not require repository extraction.
 
 Ownership follows semantics rather than directory churn. Stable product
 capabilities belong in coherent `control/*` packages, reusable contracts in
-`agent-sdk/*`, and private composition glue in `internal/*`.
+`agent-sdk/*`, and concrete composition glue inside the Host-owned private
+implementation boundary.
 
 ## Dependency Contract
 

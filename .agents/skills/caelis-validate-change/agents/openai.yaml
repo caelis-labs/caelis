@@ -1,0 +1,4 @@
+interface:
+  display_name: "Caelis Change Validation"
+  short_description: "Select and run evidence for a Caelis change"
+  default_prompt: "Use $caelis-validate-change to select or run the checks for this Caelis change as requested."

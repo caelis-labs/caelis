@@ -1,0 +1,4 @@
+interface:
+  display_name: "Caelis Deep Review"
+  short_description: "Review Caelis changes across architecture boundaries"
+  default_prompt: "Use $caelis-deep-review to review the requested Caelis change without modifying the worktree."

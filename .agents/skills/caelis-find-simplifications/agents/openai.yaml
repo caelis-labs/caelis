@@ -1,0 +1,4 @@
+interface:
+  display_name: "Caelis Simplification Audit"
+  short_description: "Find evidence-backed convergence and deletion candidates"
+  default_prompt: "Use $caelis-find-simplifications to identify a few evidence-backed simplification candidates in the requested Caelis scope."
