@@ -15,6 +15,8 @@
 - Treat current package locations as migration evidence, not future precedent. Long-term, `app/*` owns Host composition, private concrete components, and thin transport or in-process adapters; it is not a second product-semantics layer.
 - Keep process-lifetime Host authorities, activated Session Runtime instances, and stateless Runtime assembly factories as distinct concepts. Adapters depend on focused Control contracts rather than a concrete Host, and lower layers never depend outward on composition.
 - `control/appserver` owns the aggregate product client contract, including the independently delivered Task observation capability. Session feed/replay, approval recovery, and the lifecycle write gate stay on their existing authoritative paths; Task semantics belong to `control/taskstream`. Main-Turn ingress remains private in `internal/controlclient/turningress`. Surfaces own neither stream discovery nor replay.
+- `app/gatewayapp/controladapter` is Host-private server assembly, not a second product API. Only its `local` adapter may consume the root package directly; other production packages use `control/appserver` or focused Control contracts.
+- Session Runtime registries, instances, assemblers, and assembly dependency snapshots must not retain a concrete Host `*gatewayapp.Stack`. Capture explicit process authorities and focused immutable snapshots instead.
 - Keep one semantic owner, one authoritative data path, and one durable source of truth. Typed Envelope fields own identity, relation, position, approval, and resume semantics; `_meta` is display/debug unless a maintained contract says otherwise.
 - Fence semantic Session writes for the complete producer lifetime. Never retry `ErrLeaseConflict` through an unfenced path; durable State repair requires an explicit revision-checked guarded mutation.
 - Dynamic orchestration belongs to Control. Do not add a deterministic workflow graph/node engine or let an Agent authorize its own handoff.
@@ -39,6 +41,7 @@
 - Tests should prefer whole-object/event comparisons and structured helpers over field-by-field assertions or ad hoc JSON/string digging.
 - Use `make regression` when projection, TUI behavior, command execution, or ACP integration changes broadly.
 - Run `make docs-links` after adding, removing, or renaming maintained documentation.
+- Run `npm --prefix npm test` after changing the npm launcher, update handoff, package manifests, or release scripts. Use `make release-dry-run` only when packaging or release assembly needs direct evidence, then verify it left the tracked worktree unchanged.
 
 ## Release
 - Keep release mechanics in `docs/release.md`; update that doc when the process changes.

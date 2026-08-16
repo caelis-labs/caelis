@@ -82,10 +82,6 @@ func toRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
 	}
 }
 
-func toRuntimeSandboxStatusWithError(status gatewayapp.SandboxStatus, err error) (SandboxStatus, error) {
-	return toRuntimeSandboxStatus(status), err
-}
-
 func toRuntimeSessionRuntimeState(state gatewayapp.SessionRuntimeState, err error) (SessionRuntimeState, error) {
 	return SessionRuntimeState{
 		ModelID:         state.ModelID,

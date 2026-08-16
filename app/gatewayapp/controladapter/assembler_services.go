@@ -81,12 +81,6 @@ func NewCompletionAssemblerForStack(stack *RuntimeStack, bindingKey, modelText s
 	return newAssemblerForStack(stack, bindingKey, modelText)
 }
 
-// NewPluginAssemblerForSession binds the plugin assembler to an already
-// authorized Session.
-func NewPluginAssemblerForSession(ctx context.Context, stack *RuntimeStack, active session.Session, bindingKey, modelText string) (PluginAssembler, error) {
-	return newAssemblerForSession(ctx, stack, active, bindingKey, modelText)
-}
-
 // NewPluginAssemblerForStack constructs Host-owned plugin and marketplace
 // configuration without a Session address.
 func NewPluginAssemblerForStack(stack *RuntimeStack, bindingKey, modelText string) PluginAssembler {

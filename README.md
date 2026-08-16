@@ -158,14 +158,25 @@ is provided.
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md) for the layer map and
+Caelis follows one dependency direction:
+
+```text
+TUI / Headless / ACP
+    -> control/appserver and focused Control contracts
+        -> Agent Runtime / SDK
+```
+
+`control/appserver` is the transport-neutral product entry point shared by
+in-process and HTTP clients. `app/*` owns the private Control Host composition,
+transport adapters, and concrete components; presentation code never depends
+on that Host implementation. `agent-sdk/*` remains reusable below the product
+Control layer.
+
+See [docs/architecture.md](docs/architecture.md) for the repository map,
 [docs/agent-sdk-boundary.md](docs/agent-sdk-boundary.md) for the reusable Agent
-SDK package boundary and ACP-native orchestration model. The
-[Agent SDK README](agent-sdk/README.md) is the consumer entry point. See
-[docs/acp-projection-architecture.md](docs/acp-projection-architecture.md) for
-ACP-to-Surface projection and
-[docs/control-convergence.md](docs/control-convergence.md) for the desired
-Control end state. Release mechanics live in
+SDK boundary, and [docs/acp-projection-architecture.md](docs/acp-projection-architecture.md)
+for ACP-to-Surface projection. The [Agent SDK README](agent-sdk/README.md) is
+the SDK consumer entry point. Release mechanics live in
 [docs/release.md](docs/release.md).
 
 ## Development

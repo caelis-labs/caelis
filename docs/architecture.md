@@ -296,14 +296,15 @@ Document responsibilities are intentionally separate:
   implementations that may converge with adjacent `app/*` and `control/*`
   ownership before any later package split.
 - `app/gatewayapp/controladapter`: narrow Host-private, server-side assemblers
-  for existing Control semantics. The presentation-facing typed-client facade
-  has moved to `internal/controlprompt/appserveradapter`; production `app/*`
-  code does not import `surfaces/*`. The broad `Adapter` facade and its
-  compatibility constructors have been removed, and tests exercise either the
-  same narrow assemblers used by AppServer services or the aggregate typed
-  clients. Do not add product-client operations to the private
-  `internal/controlprompt.Service` aggregate or recreate `ports/*`; stable
-  capabilities belong in coherent `control/*` packages. The TUI uses external
+  for existing Control semantics. Its `local` subpackage is the only production
+  package that consumes the root adapter package directly and assembles the
+  complete in-process AppServer service set. Every other production package
+  depends on `control/appserver`, a focused Control contract, or the composed
+  `local` adapter; the root adapter package is not a product-client API.
+  Production `app/*` code does not import `surfaces/*`. Do not add
+  product-client operations to the private `internal/controlprompt.Service`
+  aggregate or recreate `ports/*`; stable capabilities belong in coherent
+  `control/*` packages. The TUI uses external
   ACP connections only as Side ACP participants; it does not bind an external
   ACP endpoint as the Session's main controller or project that endpoint's
   slash/model catalog. A legacy ACP-controller Session cannot be resumed or
@@ -381,7 +382,9 @@ extraction commitment: the Runtime registry is constructed without retaining a
 concrete Host `gatewayapp.Stack`, and activated Sessions use private
 `sessionRuntimeInstance` values. `Stack`, `sessionRuntimeInstance`, and their
 shared private `runtimeComposition` implementation remain Host-owned lifecycle
-details rather than stable package contracts.
+details rather than stable package contracts. Architecture gates enforce the
+private adapter consumer boundary and prevent Registry, Runtime instance, and
+assembly types from retaining a concrete Host `Stack`.
 
 ## SDK Boundary
 

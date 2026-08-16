@@ -162,6 +162,24 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "app/controlserver must depend on explicit Control contracts, not gatewayapp assembly",
 		},
 		{
+			name:       "surface rejects Host-private control adapter",
+			rel:        "surfaces/tui/app/defaults.go",
+			importPath: modulePath + "/app/gatewayapp/controladapter",
+			want:       "app/gatewayapp/controladapter is Host-private; only its local adapter may consume it directly",
+		},
+		{
+			name:       "local adapter accepts Host-private control adapter",
+			rel:        "app/gatewayapp/controladapter/local/appserver.go",
+			importPath: modulePath + "/app/gatewayapp/controladapter",
+			want:       "",
+		},
+		{
+			name:       "CLI accepts composed local adapter",
+			rel:        "internal/cli/host_clients.go",
+			importPath: modulePath + "/app/gatewayapp/controladapter/local",
+			want:       "",
+		},
+		{
 			name:       "ACP bridge rejects presentation package dependency",
 			rel:        "internal/acpagentbridge/prompt_bridge.go",
 			importPath: modulePath + "/surfaces/internal/promptview",

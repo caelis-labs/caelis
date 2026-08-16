@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -9,6 +10,62 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 )
+
+func TestSessionRuntimeLifecycleTypesDoNotRetainHostStack(t *testing.T) {
+	t.Parallel()
+
+	stackType := reflect.TypeFor[Stack]()
+	tests := []struct {
+		name string
+		typ  reflect.Type
+	}{
+		{name: "Registry", typ: reflect.TypeFor[sessionRuntimeRegistry]()},
+		{name: "Runtime", typ: reflect.TypeFor[sessionRuntime]()},
+		{name: "Runtime instance", typ: reflect.TypeFor[sessionRuntimeInstance]()},
+		{name: "Workspace assembler", typ: reflect.TypeFor[workspaceConfigAssembler]()},
+		{name: "Assembly dependencies", typ: reflect.TypeFor[sessionRuntimeAssemblyDeps]()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if fieldPath, ok := retainedConcreteStack(tt.typ, stackType, nil); ok {
+				t.Fatalf("%s retains gatewayapp.Stack through %s", tt.name, fieldPath)
+			}
+		})
+	}
+}
+
+func retainedConcreteStack(typ reflect.Type, stackType reflect.Type, seen map[reflect.Type]bool) (string, bool) {
+	for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Array || typ.Kind() == reflect.Slice || typ.Kind() == reflect.Chan {
+		typ = typ.Elem()
+	}
+	if typ == stackType {
+		return typ.Name(), true
+	}
+	if typ.Kind() == reflect.Map {
+		if path, ok := retainedConcreteStack(typ.Key(), stackType, seen); ok {
+			return "map key." + path, true
+		}
+		return retainedConcreteStack(typ.Elem(), stackType, seen)
+	}
+	if typ.Kind() != reflect.Struct || typ.PkgPath() != stackType.PkgPath() {
+		return "", false
+	}
+	if seen == nil {
+		seen = map[reflect.Type]bool{}
+	}
+	if seen[typ] {
+		return "", false
+	}
+	seen[typ] = true
+	for i := range typ.NumField() {
+		field := typ.Field(i)
+		if path, ok := retainedConcreteStack(field.Type, stackType, seen); ok {
+			return field.Name + "." + path, true
+		}
+	}
+	return "", false
+}
 
 func TestSessionRuntimeRegistryUsesInjectedDependenciesWithoutHost(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

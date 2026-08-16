@@ -521,6 +521,13 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		(target == "app/gatewayapp" || strings.HasPrefix(target, "app/gatewayapp/")) {
 		return "app/controlserver must depend on explicit Control contracts, not gatewayapp assembly"
 	}
+	if target == "app/gatewayapp/controladapter" {
+		sourcePackage := filepath.ToSlash(filepath.Dir(rel))
+		if sourcePackage != "app/gatewayapp/controladapter" &&
+			sourcePackage != "app/gatewayapp/controladapter/local" {
+			return "app/gatewayapp/controladapter is Host-private; only its local adapter may consume it directly"
+		}
+	}
 	if strings.HasPrefix(rel, "internal/acpagentbridge/") && strings.HasPrefix(target, "surfaces/") {
 		return "internal/acpagentbridge must receive presentation projection through assembly, not import surfaces"
 	}
