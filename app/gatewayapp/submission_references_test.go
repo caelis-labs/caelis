@@ -17,8 +17,8 @@ func TestProjectSubmissionReferencesDoesNotBlockOnSkillDiscoveryError(t *testing
 
 	workspace := t.TempDir()
 	stack := &Stack{
-		Workspace: session.WorkspaceRef{CWD: workspace},
-		runtime:   stackRuntimeConfig{SkillDirs: []string{"\x00"}},
+		runtimeComposition: runtimeComposition{runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}}},
+		Workspace:          session.WorkspaceRef{CWD: workspace},
 	}
 
 	projected, err := stack.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
@@ -38,8 +38,8 @@ func TestProjectSubmissionReferencesKeepsShellVariableWhenSkillDiscoveryFails(t 
 
 	workspace := t.TempDir()
 	stack := &Stack{
-		Workspace: session.WorkspaceRef{CWD: workspace},
-		runtime:   stackRuntimeConfig{SkillDirs: []string{"\x00"}},
+		runtimeComposition: runtimeComposition{runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}}},
+		Workspace:          session.WorkspaceRef{CWD: workspace},
 	}
 
 	projected, err := stack.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
@@ -62,8 +62,8 @@ func TestProjectSubmissionReferencesProjectsFilesWhenSkillDiscoveryFails(t *test
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	stack := &Stack{
-		Workspace: session.WorkspaceRef{CWD: workspace},
-		runtime:   stackRuntimeConfig{SkillDirs: []string{"\x00"}},
+		runtimeComposition: runtimeComposition{runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}}},
+		Workspace:          session.WorkspaceRef{CWD: workspace},
 	}
 
 	projected, err := stack.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
@@ -89,8 +89,8 @@ func TestProjectSubmissionReferencesDoesNotDiscoverSkillsForFileOnlyReferences(t
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	stack := &Stack{
-		Workspace: session.WorkspaceRef{CWD: workspace},
-		runtime:   stackRuntimeConfig{SkillDirs: []string{"\x00"}},
+		runtimeComposition: runtimeComposition{runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}}},
+		Workspace:          session.WorkspaceRef{CWD: workspace},
 	}
 
 	projected, err := stack.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
@@ -116,14 +116,16 @@ func TestProjectSubmissionReferencesUsesRuntimeSkillSnapshot(t *testing.T) {
 		t.Fatalf("WriteFile(late SKILL.md) error = %v", err)
 	}
 	stack := &Stack{
-		Workspace: session.WorkspaceRef{CWD: workspace},
-		runtime: stackRuntimeConfig{
-			SkillCatalog: skill.NewCatalog([]skill.Meta{{
-				Name:      "known",
-				LocalName: "known",
-				Path:      filepath.Join(workspace, ".agents", "skills", "known", "SKILL.md"),
-			}}),
+		runtimeComposition: runtimeComposition{
+			runtime: stackRuntimeConfig{
+				SkillCatalog: skill.NewCatalog([]skill.Meta{{
+					Name:      "known",
+					LocalName: "known",
+					Path:      filepath.Join(workspace, ".agents", "skills", "known", "SKILL.md"),
+				}}),
+			},
 		},
+		Workspace: session.WorkspaceRef{CWD: workspace},
 	}
 
 	projected, err := stack.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{

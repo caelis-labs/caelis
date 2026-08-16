@@ -204,7 +204,11 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stack := &Stack{Sessions: sessions, controlFeeds: feeds, gateway: kernel}
+	stack := &Stack{
+		runtimeComposition: runtimeComposition{gateway: kernel},
+		Sessions:           sessions,
+		controlFeeds:       feeds,
+	}
 	feed, err := feeds.Session(active.SessionRef)
 	if err != nil {
 		t.Fatal(err)
@@ -335,7 +339,10 @@ func TestCommittedCommandKeepsOutcomeWhenFeedPrimeFailsAndLedgerReplays(t *testi
 	}
 	feed := &controlClientSessionFeed{primeErr: errors.New("injected prime failure")}
 	stack := &Stack{
-		Sessions: sessions, AppName: "caelis", controlFeeds: controlClientFeedRegistry{feed: feed}, gateway: kernel,
+		runtimeComposition: runtimeComposition{gateway: kernel},
+		Sessions:           sessions,
+		AppName:            "caelis",
+		controlFeeds:       controlClientFeedRegistry{feed: feed},
 	}
 	backend := &countingControlClientBackend{backend: stack}
 	commands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
@@ -404,7 +411,11 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 		t.Fatal(err)
 	}
 	defer subscription.Close()
-	stack := &Stack{Sessions: sessions, controlFeeds: feeds, gateway: kernel}
+	stack := &Stack{
+		runtimeComposition: runtimeComposition{gateway: kernel},
+		Sessions:           sessions,
+		controlFeeds:       feeds,
+	}
 	expected := active.Revision
 	result, err := stack.ExecuteControlCommand(ctx, appserver.Principal{ID: "owner"}, appserver.ActionSessionClose, appserver.CloseSessionRequest{
 		WriteBase: appserver.WriteBase{SessionID: active.SessionID, ExpectedRevision: &expected},
@@ -472,11 +483,10 @@ func TestControlClientPromptUsesHostLifecycleAfterAdmission(t *testing.T) {
 	}
 	hostCtx, cancelHost := context.WithCancel(context.Background())
 	stack := &Stack{
-		Sessions:        sessions,
-		controlFeeds:    feeds,
-		gateway:         kernel,
-		lifecycleCtx:    hostCtx,
-		lifecycleCancel: cancelHost,
+		runtimeComposition: runtimeComposition{gateway: kernel, lifecycleCtx: hostCtx},
+		Sessions:           sessions,
+		controlFeeds:       feeds,
+		lifecycleCancel:    cancelHost,
 	}
 
 	admissionCtx, cancelAdmission := context.WithCancel(context.Background())
@@ -554,11 +564,10 @@ func TestControlClientParticipantPromptUsesHostLifecycleAfterAdmission(t *testin
 	}
 	hostCtx, cancelHost := context.WithCancel(context.Background())
 	stack := &Stack{
-		Sessions:        sessions,
-		controlFeeds:    feeds,
-		gateway:         kernel,
-		lifecycleCtx:    hostCtx,
-		lifecycleCancel: cancelHost,
+		runtimeComposition: runtimeComposition{gateway: kernel, lifecycleCtx: hostCtx},
+		Sessions:           sessions,
+		controlFeeds:       feeds,
+		lifecycleCancel:    cancelHost,
 	}
 
 	admissionCtx, cancelAdmission := context.WithCancel(context.Background())
@@ -636,11 +645,10 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	}
 	hostCtx, cancelHost := context.WithCancel(context.Background())
 	stack := &Stack{
-		Sessions:        sessions,
-		controlFeeds:    feeds,
-		gateway:         kernel,
-		lifecycleCtx:    hostCtx,
-		lifecycleCancel: cancelHost,
+		runtimeComposition: runtimeComposition{gateway: kernel, lifecycleCtx: hostCtx},
+		Sessions:           sessions,
+		controlFeeds:       feeds,
+		lifecycleCancel:    cancelHost,
 	}
 	state, err := appserver.NewStateService(appserver.StateServiceConfig{
 		Sessions: sessions, Runtime: stack, Feeds: feeds,
@@ -783,7 +791,10 @@ func TestControlClientCancelParticipantRejectsMainTurnWithArbitraryParticipantID
 			t.Errorf("interrupt main turn: %v", err)
 		}
 	}()
-	stack := &Stack{Sessions: sessions, gateway: kernel}
+	stack := &Stack{
+		runtimeComposition: runtimeComposition{gateway: kernel},
+		Sessions:           sessions,
+	}
 	result, err := stack.ExecuteControlCommand(ctx, appserver.Principal{ID: "owner"}, appserver.ActionParticipantCancel, appserver.CancelParticipantRequest{
 		WriteBase: appserver.WriteBase{SessionID: active.SessionID}, ParticipantID: "not-the-main-turn",
 		Target: appserver.TurnTarget{HandleID: started.Handle.HandleID(), RunID: started.Handle.RunID(), TurnID: started.Handle.TurnID()},

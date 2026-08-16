@@ -270,11 +270,10 @@ func TestCloseWorkspaceResourcesRetainsFailedRuntimeForRetry(t *testing.T) {
 func sandboxLifecycleTestStack(runtime sandbox.Runtime, requestedBackend string) *Stack {
 	configured := SandboxConfig{RequestedType: requestedBackend}
 	return &Stack{
-		Workspace:        session.WorkspaceRef{CWD: "/workspace"},
-		sandbox:          configured,
-		sandboxPersisted: cloneSandboxConfig(configured),
-		exec:             runtime,
-		storeDir:         "/store",
+		runtimeComposition: runtimeComposition{sandbox: configured, exec: runtime},
+		Workspace:          session.WorkspaceRef{CWD: "/workspace"},
+		sandboxPersisted:   cloneSandboxConfig(configured),
+		storeDir:           "/store",
 	}
 }
 

@@ -17,10 +17,12 @@ func TestHostedChildMailboxRoutesParentAndSiblingThroughParentSession(t *testing
 	var got agentmessage.Request
 	var gotParent session.SessionRef
 	stack := &Stack{
-		hostedChildMailbox: func(_ context.Context, parentRef session.SessionRef, req agentmessage.Request) (agentmessage.Response, error) {
-			gotParent = parentRef
-			got = req
-			return agentmessage.Response{Accepted: true, State: agentmessage.StatePending}, nil
+		runtimeComposition: runtimeComposition{
+			hostedChildMailbox: func(_ context.Context, parentRef session.SessionRef, req agentmessage.Request) (agentmessage.Response, error) {
+				gotParent = parentRef
+				got = req
+				return agentmessage.Response{Accepted: true, State: agentmessage.StatePending}, nil
+			},
 		},
 	}
 	parent := session.Session{

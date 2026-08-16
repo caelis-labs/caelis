@@ -10,11 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -31,9 +29,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
-	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -117,43 +113,24 @@ type KernelControlPlaneReader interface {
 const DefaultControlOperationRetention = appserver.DefaultOperationTerminalRetention
 
 type Stack struct {
-	Sessions  session.Service
-	AppName   string
-	UserID    string
-	Workspace session.WorkspaceRef
-	lookup    *modelLookup
-	// modelCatalog is set only on a detached Session Runtime. It points at the
-	// live Host catalog used to validate explicit Session model selections;
-	// lookup remains the Runtime-owned pinned resolver used by Turns.
-	modelCatalog              *modelLookup
+	runtimeComposition
+	Sessions                  session.Service
+	AppName                   string
+	UserID                    string
+	Workspace                 session.WorkspaceRef
 	store                     *appConfigStore
 	storeDir                  string
 	controlOperationRetention time.Duration
 	leaseOwnerID              string
-	mu                        sync.RWMutex
-	workspaceCloseMu          sync.Mutex
 	spawnedSessionPinsMu      sync.Mutex
 	hostAuthenticationMu      sync.Mutex
 	hostAuthentications       map[string]struct{}
-	placementCacheMu          sync.RWMutex
-	placementCache            *placementSnapshot
-	placementCacheGeneration  uint64
-	// appConfigSnapshot is set only on a detached Session Runtime. It keeps
-	// plugin and Agent assembly on the same immutable AppConfig document used to
-	// resolve that activation's placement snapshot.
-	appConfigSnapshot *AppConfig
-	runtime           stackRuntimeConfig
-	sandbox           SandboxConfig
-	sandboxOverride   SandboxConfig
+	sandboxOverride           SandboxConfig
 	// sandboxPersisted and sandboxRevision cache the latest observed canonical
 	// Host policy for status. The live root and detached Session Runtimes remain
 	// bound to their activation snapshots.
 	sandboxPersisted          SandboxConfig
 	sandboxRevision           uint64
-	exec                      sandbox.Runtime
-	engine                    *runtime.Runtime
-	placement                 controlplane.PlacementExecutor
-	acpControlPlane           *acpassembly.ControlPlane
 	taskStore                 task.Store
 	controlFeeds              appserver.FeedRegistry
 	controlClient             appserver.Service
@@ -164,28 +141,15 @@ type Stack struct {
 	operations                *appserver.FileOperationStore
 	acpPreparations           *acpPreparationStore
 	approvalRecovery          *appserver.ApprovalRecoveryGate
-	lifecycleCtx              context.Context
 	lifecycleCancel           context.CancelFunc
-	closing                   atomic.Bool
-	gateway                   *kernelimpl.Gateway
-	mcpMgr                    *mcp.Manager
-	pluginCacheRelease        func() error
 	codexAuth                 *codexauth.Manager
 	grokAuth                  *grokauth.Manager
 	apiKeyCredentials         *credentialstore.Store
 	providerUsage             *providerusage.Registry
-	childControlURL           string
-	childControlTokenFile     string
 	sessionRuntimes           *sessionRuntimeRegistry
 	sessionModelPins          *sessionModelPinRegistry
 	modelRecovery             *sessionModelRecovery
 	spawnedSessionPinReleases map[string]func()
-	retainRuntimeWork         func(session.SessionRef) func()
-	runtimeTaskChanged        func(session.SessionRef)
-	// hostedChildMailbox is the Host-owned parent/sibling route used by spawned
-	// child Session Runtimes. Child stacks receive this callback and must not
-	// own sessionRuntimes.
-	hostedChildMailbox hostedChildMailboxFunc
 
 	// Optional test seam; nil uses the platform lifecycle runtime factory.
 	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
@@ -517,29 +481,31 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	stack := &Stack{
-		Sessions:              sessions,
-		AppName:               appName,
-		UserID:                userID,
-		Workspace:             workspace,
-		lookup:                lookup,
-		store:                 configStore,
-		storeDir:              storeDir,
-		leaseOwnerID:          leaseOwnerID,
-		taskStore:             taskStore,
-		controlFeeds:          controlFeeds,
-		approvalRecovery:      approvalRecovery,
-		codexAuth:             codexAuth,
-		grokAuth:              grokAuth,
-		apiKeyCredentials:     apiKeyCredentials,
-		providerUsage:         providerUsage,
-		sessionModelPins:      newSessionModelPinRegistry(),
-		childControlURL:       strings.TrimSpace(cfg.ChildControlURL),
-		childControlTokenFile: strings.TrimSpace(cfg.ChildControlTokenFile),
-		runtime:               runtimeCfg,
-		sandbox:               sandboxCfg,
-		sandboxOverride:       cloneSandboxConfig(cfg.Sandbox),
-		sandboxPersisted:      cloneSandboxConfig(doc.Sandbox),
-		sandboxRevision:       doc.ConfigurationRevision,
+		runtimeComposition: runtimeComposition{
+			lookup:                lookup,
+			childControlURL:       strings.TrimSpace(cfg.ChildControlURL),
+			childControlTokenFile: strings.TrimSpace(cfg.ChildControlTokenFile),
+			runtime:               runtimeCfg,
+			sandbox:               sandboxCfg,
+		},
+		Sessions:          sessions,
+		AppName:           appName,
+		UserID:            userID,
+		Workspace:         workspace,
+		store:             configStore,
+		storeDir:          storeDir,
+		leaseOwnerID:      leaseOwnerID,
+		taskStore:         taskStore,
+		controlFeeds:      controlFeeds,
+		approvalRecovery:  approvalRecovery,
+		codexAuth:         codexAuth,
+		grokAuth:          grokAuth,
+		apiKeyCredentials: apiKeyCredentials,
+		providerUsage:     providerUsage,
+		sessionModelPins:  newSessionModelPinRegistry(),
+		sandboxOverride:   cloneSandboxConfig(cfg.Sandbox),
+		sandboxPersisted:  cloneSandboxConfig(doc.Sandbox),
+		sandboxRevision:   doc.ConfigurationRevision,
 	}
 	stack.modelRecovery = newSessionModelRecovery(
 		stack.store,
