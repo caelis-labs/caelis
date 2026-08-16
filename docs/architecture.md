@@ -198,7 +198,10 @@ Document responsibilities are intentionally separate:
   and handoff coordination.
 - `app/gatewayapp`: the current product Control host and composition entry. Its
   app-scoped Session Runtime registry routes public Control execution by durable
-  Session ID. A stateless workspace assembler reads one complete app
+  Session ID. The registry is constructed from explicit process authorities and
+  a narrow assembler contract; it does not retain the Host `Stack`. It owns the
+  activated Runtime set, reference counting, release, and collective shutdown
+  drain. A stateless workspace assembler reads one complete app
   configuration document plus workspace files on the first execution after a
   Session has no live activation, then the detached Session Runtime keeps that
   context-shaping composition fixed until release. Durable Session creation,
@@ -369,9 +372,11 @@ import Host, Kernel, or Runtime implementations. The private
 `internal/controlprompt/appserveradapter` may translate the focused AppServer
 members selected from an already validated aggregate into surface-neutral
 prompt operations, but may not become a second capability boundary. Future
-extraction of Host and Session Runtime types starts only after the Runtime
-registry can be constructed and tested against a narrow factory without a
-concrete `gatewayapp.Stack`.
+Host/Session Runtime type extraction has a narrow construction seam: the
+Runtime registry can be constructed and tested without a concrete Host
+`gatewayapp.Stack`. Activated Session Runtime composition still uses `Stack` as
+its implementation type, so that type split is not yet a stable package
+boundary.
 
 ## SDK Boundary
 

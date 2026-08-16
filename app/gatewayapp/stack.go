@@ -758,24 +758,9 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 	s.closing.Store(true)
 	if s.sessionRuntimes != nil {
 		var errs []error
-		runtimes, err := s.sessionRuntimes.closeAdmission(ctx)
+		drain, err := s.sessionRuntimes.beginQuiesce(ctx)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("drain Session Runtime loads: %w", err))
-		}
-		for _, runtime := range runtimes {
-			if runtime == nil || runtime.stack == nil {
-				continue
-			}
-			if gateway := runtime.stack.currentGateway(); gateway != nil {
-				if err := gateway.Quiesce(ctx); err != nil {
-					errs = append(errs, fmt.Errorf("Session %q: %w", runtime.sessionID, err))
-				}
-			}
-			if runtime.stack.acpControlPlane != nil {
-				if err := runtime.stack.acpControlPlane.Quiesce(ctx); err != nil {
-					errs = append(errs, fmt.Errorf("Session %q child work: %w", runtime.sessionID, err))
-				}
-			}
+			errs = append(errs, err)
 		}
 		if gateway := s.currentGateway(); gateway != nil {
 			if err := gateway.Quiesce(ctx); err != nil {
@@ -787,10 +772,10 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 				errs = append(errs, fmt.Errorf("default Runtime child work: %w", err))
 			}
 		}
-		// Runtime work references can depend on Gateway/child cancellation to
-		// reach their terminal producer boundary, so wait only after quiescing.
-		if err := s.sessionRuntimes.waitForRuntimeWork(ctx, runtimes); err != nil {
-			errs = append(errs, fmt.Errorf("drain Session Runtime work: %w", err))
+		// Session producer completion may depend on cancellation from both its
+		// activated Runtime and the process-default Runtime.
+		if err := drain.wait(ctx); err != nil {
+			errs = append(errs, err)
 		}
 		return errors.Join(errs...)
 	}
@@ -812,19 +797,9 @@ func (s *Stack) Close() error {
 	quiesceCtx, cancelQuiesce := context.WithTimeout(context.Background(), 5*time.Second)
 	quiesceErr := s.Quiesce(quiesceCtx)
 	cancelQuiesce()
-	var sessionCloseErrs []error
+	var sessionCloseErr error
 	if s.sessionRuntimes != nil {
-		for _, runtime := range s.sessionRuntimes.snapshot() {
-			if runtime == nil || runtime.stack == nil {
-				continue
-			}
-			if err := runtime.stack.closeWorkspaceResources(); err != nil {
-				sessionCloseErrs = append(
-					sessionCloseErrs,
-					fmt.Errorf("Session %q: %w", runtime.sessionID, err),
-				)
-			}
-		}
+		sessionCloseErr = s.sessionRuntimes.closeRuntimeResources()
 	}
 	workspaceResourceErr := s.closeWorkspaceResources()
 	s.mu.Lock()
@@ -839,7 +814,9 @@ func (s *Stack) Close() error {
 	if workspaceResourceErr != nil {
 		errs = append(errs, workspaceResourceErr)
 	}
-	errs = append(errs, sessionCloseErrs...)
+	if sessionCloseErr != nil {
+		errs = append(errs, sessionCloseErr)
+	}
 	if controlOperations != nil {
 		if err := controlOperations.Close(); err != nil {
 			errs = append(errs, err)

@@ -808,6 +808,78 @@ func (r *sessionRuntimeRegistry) snapshot() []*sessionRuntime {
 	return out
 }
 
+type sessionRuntimeDrain struct {
+	registry *sessionRuntimeRegistry
+	runtimes []*sessionRuntime
+}
+
+// beginQuiesce closes Runtime admission, drains activation and release
+// transitions, and stops every activated Session execution path. The returned
+// handle keeps the Runtime set private while allowing the Host to quiesce its
+// process-default Runtime before waiting for retained Session producer work.
+func (r *sessionRuntimeRegistry) beginQuiesce(ctx context.Context) (*sessionRuntimeDrain, error) {
+	if r == nil {
+		return nil, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var errs []error
+	runtimes, err := r.closeAdmission(ctx)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("drain Session Runtime loads: %w", err))
+	}
+	for _, runtime := range runtimes {
+		if runtime == nil || runtime.stack == nil {
+			continue
+		}
+		if gateway := runtime.stack.currentGateway(); gateway != nil {
+			if err := gateway.Quiesce(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("Session %q: %w", runtime.sessionID, err))
+			}
+		}
+		if runtime.stack.acpControlPlane != nil {
+			if err := runtime.stack.acpControlPlane.Quiesce(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("Session %q child work: %w", runtime.sessionID, err))
+			}
+		}
+	}
+	return &sessionRuntimeDrain{registry: r, runtimes: runtimes}, errors.Join(errs...)
+}
+
+// wait completes the Session Runtime drain after both Session-scoped and
+// process-default execution paths have stopped accepting work.
+func (d *sessionRuntimeDrain) wait(ctx context.Context) error {
+	if d == nil || d.registry == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := d.registry.waitForRuntimeWork(ctx, d.runtimes); err != nil {
+		return fmt.Errorf("drain Session Runtime work: %w", err)
+	}
+	return nil
+}
+
+// closeRuntimeResources releases the workspace-scoped resources of every
+// activated Session Runtime after quiescence. Host resources are not in scope.
+func (r *sessionRuntimeRegistry) closeRuntimeResources() error {
+	if r == nil {
+		return nil
+	}
+	var errs []error
+	for _, runtime := range r.snapshot() {
+		if runtime == nil || runtime.stack == nil {
+			continue
+		}
+		if err := runtime.stack.closeWorkspaceResources(); err != nil {
+			errs = append(errs, fmt.Errorf("Session %q: %w", runtime.sessionID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func (r *sessionRuntimeRegistry) closeAdmission(ctx context.Context) ([]*sessionRuntime, error) {
 	if r == nil {
 		return nil, nil

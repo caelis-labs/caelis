@@ -67,6 +67,19 @@ func TestSessionRuntimeRegistryUsesInjectedDependenciesWithoutHost(t *testing.T)
 	if err == nil || !errorcode.Is(err, errorcode.Unavailable) {
 		t.Fatalf("new activation after Host lifecycle cancellation = %v, want unavailable", err)
 	}
+	drain, err := registry.beginQuiesce(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !registry.isClosed() {
+		t.Fatal("beginQuiesce did not close Runtime admission")
+	}
+	if err := drain.wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.closeRuntimeResources(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 type recordingSessionRuntimeAssembler struct {
