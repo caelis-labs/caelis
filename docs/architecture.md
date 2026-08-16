@@ -316,6 +316,63 @@ Document responsibilities are intentionally separate:
   The bridge does not import presentation packages.
 - `platform/*`: product support code for platform-specific host behavior.
 
+## Stable Skeleton and Composition Assets
+
+The stable skeleton is defined by semantic ownership, not by a package named
+`core`. It has three categories with different compatibility expectations:
+
+| Category | Current owners | Contract |
+| --- | --- | --- |
+| Reusable Runtime skeleton | `agent-sdk/*` | Runtime, Session, model, tool, sandbox, policy, and Task contracts stay independent of the Caelis product Host and wire implementation. |
+| Stable product skeleton | `control/appserver`, focused `control/*` packages, and `protocol/acp/*` | AppServer is the one aggregate capability boundary obtained and validated by product client composition. A concrete Surface receives the aggregate or only the focused members it consumes. Focused Control packages own product state and policy; ACP packages own wire compatibility and projection. |
+| Private lifecycle skeleton | `internal/kernel`, `internal/controlplane`, `app/gatewayapp` | Session/Turn coordination, controller ownership, Host authority, Runtime activation, reference counting, and shutdown ordering are mandatory product invariants, but remain private until their contracts can be separated without changing lifecycle semantics. |
+
+Concrete implementations are composed around that skeleton. They are
+replaceable at a declared binding boundary; they do not define another
+aggregate product API or take ownership of Control policy:
+
+| Binding boundary | Composed assets |
+| --- | --- |
+| Host startup | persistence stores, credential providers, operation ledger storage, HTTP/in-process transport, external process launch, and service lifecycle integration |
+| Session activation | model/provider client, plugin and skill contributions, sandbox backend, MCP connections, Agent endpoint backend, placement resolver, and approval decision backend |
+
+Replaceable means constructor- or activation-time injection, not mutation of an
+active Runtime. A live Session Runtime retains its fixed assembly snapshot until
+release. Host-wide authorities remain process-scoped, while request-scoped
+identity and idempotency never become fields on a reusable SDK Runtime. The
+principal, Session target, expected revision, operation ID, approval response,
+and observation cursor are request binding data and Control guards, not
+replaceable components.
+
+The current first package-convergence boundary is therefore:
+
+```text
+product client composition
+    -> control/appserver (obtain and validate one complete aggregate)
+        -> surfaces/acp (receives complete aggregate)
+        -> surfaces/tui (focused prompt clients plus Task observation)
+        -> surfaces/headless (focused Session/Turn client)
+
+focused Control authorities
+    -> agent-sdk Runtime contracts
+
+app/gatewayapp (Host composition and private lifecycle skeleton)
+    -> control/appserver (complete aggregate services)
+    -> concrete startup/session components
+
+surfaces/internal/{promptview,statusbar,transcript}
+    private presentation implementation only
+```
+
+Production `app/*` code must not import `surfaces/*`, and Surfaces must not
+import Host, Kernel, or Runtime implementations. The private
+`internal/controlprompt/appserveradapter` may translate the focused AppServer
+members selected from an already validated aggregate into surface-neutral
+prompt operations, but may not become a second capability boundary. Future
+extraction of Host and Session Runtime types starts only after the Runtime
+registry can be constructed and tested against a narrow factory without a
+concrete `gatewayapp.Stack`.
+
 ## SDK Boundary
 
 The Agent SDK is an ordinary package tree in the root Go module, imported under
