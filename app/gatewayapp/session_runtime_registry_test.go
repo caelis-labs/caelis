@@ -648,8 +648,8 @@ func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observed.Runtime() == nil || observed.Session().SessionID != sessionID || observed.Session().CWD != workspace {
-		t.Fatalf("observed lease = runtime=%p session=%#v", observed.Runtime(), observed.Session())
+	if observed.ControlRuntimeView() == nil || observed.Session().SessionID != sessionID || observed.Session().CWD != workspace {
+		t.Fatalf("observed lease = view:%t session=%#v", observed.ControlRuntimeView() != nil, observed.Session())
 	}
 	if _, ok := stack.sessionRuntimes.loaded(sessionID); ok {
 		t.Fatal("read-only Control observation retained an idle Session Runtime")
@@ -663,8 +663,8 @@ func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pinned.Runtime() != loaded.stack {
-		t.Fatalf("loaded Runtime lease = %p, want %p", pinned.Runtime(), loaded.stack)
+	if pinned.runtime != loaded.stack {
+		t.Fatalf("loaded Runtime lease = %p, want %p", pinned.runtime, loaded.stack)
 	}
 	if err := pinned.Close(ctx); err != nil {
 		t.Fatal(err)

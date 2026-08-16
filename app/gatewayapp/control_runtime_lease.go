@@ -53,13 +53,13 @@ func (s *Stack) AcquireControlRuntime(
 	return &ControlRuntimeLease{runtime: runtime.stack, session: session.CloneSession(active), release: release}, nil
 }
 
-// Runtime returns the server-side composition. It is intentionally scoped to
-// AppServer adapter packages and is not a presentation API.
-func (l *ControlRuntimeLease) Runtime() *Stack {
+// ControlRuntimeView returns the focused server-side read projection. It is
+// intentionally scoped to AppServer adapter packages and is not a product API.
+func (l *ControlRuntimeLease) ControlRuntimeView() *ControlRuntimeView {
 	if l == nil {
 		return nil
 	}
-	return l.runtime
+	return l.runtime.ControlRuntimeView()
 }
 
 // Session returns the authorized durable Session snapshot.

@@ -18,78 +18,74 @@ type RuntimeStackGatewayAppAdapters struct {
 	PluginSnapshots      func([]gatewayapp.PluginInfo, error) ([]controlprompt.PluginSnapshot, error)
 	PluginSnapshot       func(gatewayapp.PluginInfo, error) (controlprompt.PluginSnapshot, error)
 	MarketplaceSnapshots func([]gatewayapp.MarketplaceInfo, error) ([]controlprompt.MarketplaceSnapshot, error)
-	MarketplaceSnapshot  func(gatewayapp.MarketplaceInfo, error) (controlprompt.MarketplaceSnapshot, error)
 }
 
-func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStackGatewayAppAdapters) *RuntimeStack {
-	if stack == nil {
+func NewRuntimeStackFromGatewayApp(view *gatewayapp.ControlRuntimeView, adapters RuntimeStackGatewayAppAdapters) *RuntimeStack {
+	if view == nil {
 		return nil
 	}
-	models := stack.Models()
-	agents := stack.Agents()
-	skills := stack.Skills()
-	status := stack.Status()
-	plugins := stack.Plugins()
 	return &RuntimeStack{
-		Gateway: gatewayDepsFromStack(stack),
+		Gateway: GatewayRuntimeDeps{
+			TurnServiceFn: func() GatewayTurnService {
+				return view.TurnStateFn()
+			},
+			SessionServiceFn: func() GatewaySessionService {
+				return view.SessionStateFn()
+			},
+			ControlPlaneServiceFn: func() GatewayControlPlaneService {
+				return view.ControlPlaneStateFn()
+			},
+		},
 		Session: SessionRuntimeDeps{
-			Store:     stack.Sessions,
-			AppName:   stack.AppName,
-			UserID:    stack.UserID,
-			Workspace: stack.Workspace,
+			Store:     view.Sessions,
+			AppName:   view.AppName,
+			UserID:    view.UserID,
+			Workspace: view.Workspace,
 		},
 		Status: StatusRuntimeDeps{
 			RuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
-				return adapters.SessionRuntimeState(status.SessionRuntimeState(ctx, ref))
+				return adapters.SessionRuntimeState(view.RuntimeStateFn(ctx, ref))
 			},
-			ConfigurationRevisionFn: stack.ConfigurationRevision,
+			ConfigurationRevisionFn: view.ConfigurationRevisionFn,
 			DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
-				return adapters.DoctorReport(status.Doctor(ctx, adapters.DoctorRequest(req)))
+				return adapters.DoctorReport(view.DoctorFn(ctx, adapters.DoctorRequest(req)))
 			},
 		},
 		Agent: AgentRuntimeDeps{
-			ControllerStatusFn:     agents.ControllerStatus,
-			DisconnectCandidatesFn: agents.DisconnectCandidates,
-			ListFn:                 func() []ACPAgentInfo { return adapters.ACPAgents(agents.List()) },
+			ControllerStatusFn:     view.ControllerStatusFn,
+			DisconnectCandidatesFn: view.DisconnectCandidatesFn,
+			ListFn:                 func() []ACPAgentInfo { return adapters.ACPAgents(view.ListAgentsFn()) },
 		},
 		Model: ModelRuntimeDeps{
-			EffectiveAliasFn:  models.EffectiveAlias,
-			EffectiveEffortFn: models.EffectiveEffort,
+			EffectiveAliasFn:  view.EffectiveModelAliasFn,
+			EffectiveEffortFn: view.EffectiveModelEffortFn,
 			ConfigFn: func(alias string) (ModelConfig, bool) {
-				return models.Config(alias)
+				return view.ModelConfigFn(alias)
 			},
-			SessionUsageSnapshotFn: models.UsageSnapshot,
-			ProviderUsageFn:        models.ProviderUsage,
-			ListAliasesFn:          models.ListAliases,
+			SessionUsageSnapshotFn: view.SessionUsageSnapshotFn,
+			ProviderUsageFn:        view.ProviderUsageFn,
+			ListAliasesFn:          view.ListModelAliasesFn,
 			ListChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
-				return adapters.ModelChoices(models.ListChoices(ctx, ref))
+				return adapters.ModelChoices(view.ListModelChoicesFn(ctx, ref))
 			},
-			HasReusableAuthFn: models.HasReusableAuth,
+			HasReusableAuthFn: view.HasReusableAuthFn,
 		},
 		Skill: SkillRuntimeDeps{
-			SnapshotFn: skills.Snapshot,
+			SnapshotFn: view.SkillCatalogFn,
 		},
 		Sandbox: SandboxRuntimeDeps{
-			StatusFn: func() SandboxStatus { return adapters.SandboxStatus(status.Sandbox()) },
+			StatusFn: func() SandboxStatus { return adapters.SandboxStatus(view.SandboxFn()) },
 		},
 		Plugin: PluginRuntimeDeps{
 			ListPluginsFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
-				return adapters.PluginSnapshots(plugins.List(ctx))
+				return adapters.PluginSnapshots(view.ListPluginsFn(ctx))
 			},
 			ListMarketplacesFn: func(ctx context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
-				return adapters.MarketplaceSnapshots(plugins.ListMarketplaces(ctx))
+				return adapters.MarketplaceSnapshots(view.ListMarketplacesFn(ctx))
 			},
 			InspectPluginFn: func(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
-				return adapters.PluginSnapshot(plugins.Inspect(ctx, id))
+				return adapters.PluginSnapshot(view.InspectPluginFn(ctx, id))
 			},
 		},
-	}
-}
-
-func gatewayDepsFromStack(stack *gatewayapp.Stack) GatewayRuntimeDeps {
-	return GatewayRuntimeDeps{
-		TurnServiceFn:         func() GatewayTurnService { return stack.KernelTurnState() },
-		SessionServiceFn:      func() GatewaySessionService { return stack.KernelSessionState() },
-		ControlPlaneServiceFn: func() GatewayControlPlaneService { return stack.KernelControlPlaneState() },
 	}
 }

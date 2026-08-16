@@ -157,7 +157,10 @@ type GatewayRuntimeDeps struct {
 // SessionRuntimeDeps owns durable session identity and storage dependencies.
 // Store is optional for lightweight assemblers.
 type SessionRuntimeDeps struct {
-	Store   session.Service
+	Store interface {
+		session.Reader
+		session.StateReader
+	}
 	AppName string
 	// UserID is compatibility input for legacy Gateway session listings. New
 	// AppServer paths should supply ListSessionsFn with principal-bound Control.

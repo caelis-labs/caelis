@@ -67,7 +67,7 @@ func (s *StatusService) SessionStatus(
 	}()
 	driver, err := controladapter.NewStatusAssemblerForSession(
 		ctx,
-		runtimeStack(lease.Runtime()),
+		runtimeStackFromView(lease.ControlRuntimeView()),
 		lease.Session(),
 		strings.TrimSpace(request.Surface),
 		"",

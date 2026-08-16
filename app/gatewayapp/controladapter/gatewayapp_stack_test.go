@@ -21,7 +21,7 @@ func newAssemblerFromGatewayAppSession(ctx context.Context, stack *gatewayapp.St
 }
 
 func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
-	runtimeStack := NewRuntimeStackFromGatewayApp(stack, RuntimeStackGatewayAppAdapters{
+	runtimeStack := NewRuntimeStackFromGatewayApp(stack.ControlRuntimeView(), RuntimeStackGatewayAppAdapters{
 		SandboxStatus:        testRuntimeSandboxStatus,
 		SessionRuntimeState:  testRuntimeSessionRuntimeState,
 		ModelChoices:         testRuntimeModelChoices,
@@ -31,7 +31,6 @@ func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
 		PluginSnapshots:      testRuntimePluginSnapshots,
 		PluginSnapshot:       testRuntimePluginSnapshotWithError,
 		MarketplaceSnapshots: testRuntimeMarketplaceSnapshots,
-		MarketplaceSnapshot:  testRuntimeMarketplaceSnapshotWithError,
 	})
 	return runtimeStack
 }
@@ -155,13 +154,6 @@ func testRuntimeMarketplaceSnapshots(list []gatewayapp.MarketplaceInfo, err erro
 		out = append(out, testRuntimeMarketplaceSnapshot(info))
 	}
 	return out, nil
-}
-
-func testRuntimeMarketplaceSnapshotWithError(info gatewayapp.MarketplaceInfo, err error) (controlprompt.MarketplaceSnapshot, error) {
-	if err != nil {
-		return controlprompt.MarketplaceSnapshot{}, err
-	}
-	return testRuntimeMarketplaceSnapshot(info), nil
 }
 
 func testRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {

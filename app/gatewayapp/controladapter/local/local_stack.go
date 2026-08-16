@@ -20,7 +20,14 @@ type DoctorReport = controladapter.DoctorReport
 type ACPAgentInfo = controladapter.ACPAgentInfo
 
 func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
-	return controladapter.NewRuntimeStackFromGatewayApp(stack, controladapter.RuntimeStackGatewayAppAdapters{
+	if stack == nil {
+		return nil
+	}
+	return runtimeStackFromView(stack.ControlRuntimeView())
+}
+
+func runtimeStackFromView(view *gatewayapp.ControlRuntimeView) *RuntimeStack {
+	return controladapter.NewRuntimeStackFromGatewayApp(view, controladapter.RuntimeStackGatewayAppAdapters{
 		SandboxStatus:        toRuntimeSandboxStatus,
 		SessionRuntimeState:  toRuntimeSessionRuntimeState,
 		ModelChoices:         toRuntimeModelChoices,
@@ -30,7 +37,6 @@ func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
 		PluginSnapshots:      toRuntimePluginSnapshots,
 		PluginSnapshot:       toRuntimePluginSnapshotWithError,
 		MarketplaceSnapshots: toRuntimeMarketplaceSnapshots,
-		MarketplaceSnapshot:  toRuntimeMarketplaceSnapshotWithError,
 	})
 }
 
@@ -253,11 +259,4 @@ func toRuntimeMarketplaceSnapshots(list []gatewayapp.MarketplaceInfo, err error)
 		out = append(out, toRuntimeMarketplaceSnapshot(info))
 	}
 	return out, nil
-}
-
-func toRuntimeMarketplaceSnapshotWithError(info gatewayapp.MarketplaceInfo, err error) (controlprompt.MarketplaceSnapshot, error) {
-	if err != nil {
-		return controlprompt.MarketplaceSnapshot{}, err
-	}
-	return toRuntimeMarketplaceSnapshot(info), nil
 }

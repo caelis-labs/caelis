@@ -152,7 +152,7 @@ func (s *AgentService) runtimeAdapter(ctx context.Context, principal appserver.P
 	if err != nil {
 		return nil, nil, err
 	}
-	driver, err := controladapter.NewAgentAssemblerForSession(ctx, runtimeStack(lease.Runtime()), lease.Session(), strings.TrimSpace(surface), "")
+	driver, err := controladapter.NewAgentAssemblerForSession(ctx, runtimeStackFromView(lease.ControlRuntimeView()), lease.Session(), strings.TrimSpace(surface), "")
 	if err != nil {
 		_ = lease.Close(ctx)
 		return nil, nil, err

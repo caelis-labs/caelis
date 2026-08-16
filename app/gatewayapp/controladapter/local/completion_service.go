@@ -160,7 +160,7 @@ func (s *CompletionService) runtimeAdapter(ctx context.Context, principal appser
 	if err != nil {
 		return nil, nil, err
 	}
-	stack = runtimeStack(lease.Runtime())
+	stack = runtimeStackFromView(lease.ControlRuntimeView())
 	s.bindPrincipalSessionList(stack, principal)
 	driver, err := controladapter.NewCompletionAssemblerForSession(ctx, stack, lease.Session(), strings.TrimSpace(req.Surface), "")
 	if err != nil {
