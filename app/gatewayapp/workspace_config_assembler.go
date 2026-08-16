@@ -17,7 +17,7 @@ import (
 // cache: execution activation calls it on demand, while the resulting Session
 // Runtime keeps that assembled configuration stable for its lifetime.
 type workspaceConfigAssembler struct {
-	owner *Stack
+	deps sessionRuntimeAssemblyDeps
 }
 
 type sessionRuntimeActivity struct {
@@ -25,11 +25,11 @@ type sessionRuntimeActivity struct {
 	taskChanged func(session.SessionRef)
 }
 
-func newWorkspaceConfigAssembler(owner *Stack) (*workspaceConfigAssembler, error) {
-	if owner == nil {
-		return nil, errors.New("gatewayapp: workspace config assembler owner is required")
+func newWorkspaceConfigAssembler(deps sessionRuntimeAssemblyDeps) (*workspaceConfigAssembler, error) {
+	if deps.store == nil || deps.modelCatalog == nil || deps.loadProcessSnapshot == nil {
+		return nil, errors.New("gatewayapp: workspace config assembler dependencies are required")
 	}
-	return &workspaceConfigAssembler{owner: owner}, nil
+	return &workspaceConfigAssembler{deps: deps}, nil
 }
 
 // assembleSnapshot builds one Session-scoped composition from one AppConfig
@@ -39,8 +39,9 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	ctx context.Context,
 	active session.Session,
 	activity sessionRuntimeActivity,
+	sessions session.Service,
 ) (*Stack, error) {
-	if a == nil || a.owner == nil {
+	if a == nil || sessions == nil {
 		return nil, errors.New("gatewayapp: workspace config assembler is unavailable")
 	}
 	if ctx == nil {
@@ -50,31 +51,27 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 		return nil, err
 	}
 
-	owner := a.owner
+	deps := a.deps
 	workspace, err := canonicalSessionWorkspace(active)
 	if err != nil {
 		return nil, err
 	}
-	doc, err := owner.store.LoadContext(ctx)
+	doc, err := deps.store.LoadContext(ctx)
 	if err != nil {
 		return nil, err
 	}
-	owner.mu.RLock()
-	runtimeConfig := cloneSessionRuntimeConfig(owner.runtime)
-	sandboxOverride := cloneSandboxConfig(owner.sandboxOverride)
-	childControlURL := owner.childControlURL
-	childControlTokenFile := owner.childControlTokenFile
-	owner.mu.RUnlock()
-	sandboxConfig := mergeSandboxConfig(doc.Sandbox, sandboxOverride)
+	process := deps.loadProcessSnapshot()
+	runtimeConfig := process.runtime
+	sandboxConfig := mergeSandboxConfig(doc.Sandbox, process.sandboxOverride)
 	securityPosture := resolveProcessSecurityPosture(runtimeConfig)
 	if securityPosture.RequiredSandboxBackend != "" {
 		sandboxConfig.RequestedType = string(securityPosture.RequiredSandboxBackend)
 	}
-	lookup, err := cloneSessionModelLookup(owner.lookup, doc)
+	lookup, err := cloneSessionModelLookup(deps.modelCatalog, doc)
 	if err != nil {
 		return nil, err
 	}
-	if pinned, ok := owner.sessionModelPins.config(active.SessionID); ok {
+	if pinned, ok := deps.modelPins.config(active.SessionID); ok {
 		if _, err := lookup.upsert(pinned, false); err != nil {
 			return nil, fmt.Errorf("gatewayapp: inject pinned model for Session %q: %w", active.SessionID, err)
 		}
@@ -95,7 +92,24 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	}
 
 	child := &Stack{
+		Sessions:              sessions,
+		AppName:               deps.appName,
+		UserID:                deps.userID,
 		Workspace:             workspace,
+		store:                 deps.store,
+		storeDir:              deps.storeDir,
+		leaseOwnerID:          deps.leaseOwnerID,
+		taskStore:             deps.tasks,
+		controlFeeds:          deps.feeds,
+		approvalRecovery:      deps.approvalRecovery,
+		lifecycleCtx:          deps.lifecycleCtx,
+		codexAuth:             deps.codexAuth,
+		grokAuth:              deps.grokAuth,
+		apiKeyCredentials:     deps.apiKeyCredentials,
+		providerUsage:         deps.providerUsage,
+		modelCatalog:          deps.modelCatalog,
+		sessionModelPins:      deps.modelPins,
+		hostedChildMailbox:    deps.hostedChildMailbox,
 		runtime:               runtimeConfig,
 		sandbox:               sandboxConfig,
 		lookup:                lookup,
@@ -103,11 +117,9 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 		appConfigSnapshot:     ptrToConfigSnapshot(doc),
 		retainRuntimeWork:     activity.retainWork,
 		runtimeTaskChanged:    activity.taskChanged,
-		childControlURL:       childControlURL,
-		childControlTokenFile: childControlTokenFile,
-		sessionModelPins:      owner.sessionModelPins,
+		childControlURL:       process.childControlURL,
+		childControlTokenFile: process.childControlTokenFile,
 	}
-	owner.shareSessionHostState(child)
 	if err := child.buildInitialGatewayRuntime(ctx); err != nil {
 		return nil, fmt.Errorf(
 			"gatewayapp: assemble Session Runtime for workspace %q at %q: %w",
@@ -117,35 +129,6 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 		)
 	}
 	return child, nil
-}
-
-// shareSessionHostState is the single contract for state shared with one
-// Session Runtime. The App model catalog remains live for explicit selection,
-// while the child lookup and placement configuration stay pinned for Turn
-// execution. Durable stores, credentials, feeds, and Host lifecycle remain
-// shared authorities.
-func (s *Stack) shareSessionHostState(child *Stack) {
-	child.Sessions = s.Sessions
-	child.AppName = s.AppName
-	child.UserID = s.UserID // Compatibility only; not a Runtime partition key.
-	child.store = s.store
-	child.storeDir = s.storeDir
-	child.leaseOwnerID = s.leaseOwnerID
-	child.taskStore = s.taskStore
-	child.controlFeeds = s.controlFeeds
-	child.approvalRecovery = s.approvalRecovery
-	child.lifecycleCtx = s.lifecycleCtx
-	child.codexAuth = s.codexAuth
-	child.grokAuth = s.grokAuth
-	child.apiKeyCredentials = s.apiKeyCredentials
-	child.providerUsage = s.providerUsage
-	child.modelCatalog = s.lookup
-	child.sessionModelPins = s.sessionModelPins
-	if s.hostedChildMailbox != nil {
-		child.hostedChildMailbox = s.hostedChildMailbox
-	} else {
-		child.hostedChildMailbox = s.routeHostedChildMessage
-	}
 }
 
 func cloneSessionRuntimeConfig(config stackRuntimeConfig) stackRuntimeConfig {

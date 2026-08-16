@@ -67,7 +67,11 @@ func newSessionRuntimeRegistry(owner *Stack) (*sessionRuntimeRegistry, error) {
 	if err != nil {
 		return nil, err
 	}
-	assembler, err := newWorkspaceConfigAssembler(owner)
+	assemblyDeps, err := newSessionRuntimeAssemblyDeps(owner)
+	if err != nil {
+		return nil, err
+	}
+	assembler, err := newWorkspaceConfigAssembler(assemblyDeps)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +308,7 @@ func (r *sessionRuntimeRegistry) activateSessionTracked(
 			r.scheduleIdleRelease(runtime, ref)
 		},
 	}
-	stack, err := r.assembler.assembleSnapshot(buildCtx, active, activity)
+	stack, err := r.assembler.assembleSnapshot(buildCtx, active, activity, sessions)
 	if err != nil {
 		return nil, active, false, err
 	}
@@ -438,6 +442,7 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 	if sessionID == "" {
 		return nil, session.Session{}, nil, errors.New("gatewayapp: Session ID is required")
 	}
+	sessions := r.owner.Sessions
 	if activate {
 		runtime, active, release, _, err := r.acquireActivatedControlRuntime(ctx, sessionID)
 		return runtime, active, release, err
@@ -453,14 +458,14 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 		return nil, session.Session{}, nil, err
 	}
 	if loaded != nil {
-		active, loadErr := r.owner.Sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
+		active, loadErr := sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
 		if loadErr != nil {
 			releaseUse()
 			return nil, session.Session{}, nil, loadErr
 		}
 		return loaded, active, func(context.Context) error { releaseUse(); return nil }, nil
 	}
-	active, err := r.owner.Sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
+	active, err := sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
 	if err != nil {
 		return nil, session.Session{}, nil, err
 	}
@@ -471,7 +476,7 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 	if err := r.validateWorkspaceIdentity(workspace); err != nil {
 		return nil, active, nil, err
 	}
-	stack, err := r.assembler.assembleSnapshot(buildCtx, active, sessionRuntimeActivity{})
+	stack, err := r.assembler.assembleSnapshot(buildCtx, active, sessionRuntimeActivity{}, sessions)
 	if err != nil {
 		return nil, active, nil, err
 	}

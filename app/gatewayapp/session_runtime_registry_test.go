@@ -2159,7 +2159,11 @@ func assertSessionRuntimeSharingContract(t *testing.T, host, child *Stack) {
 	if child.lookup == host.lookup || child.placementCache == host.placementCache {
 		t.Fatal("Session child shared mutable model or placement configuration")
 	}
-	if child.store != host.store ||
+	if child.AppName != host.AppName ||
+		child.UserID != host.UserID ||
+		child.storeDir != host.storeDir ||
+		child.leaseOwnerID != host.leaseOwnerID ||
+		child.store != host.store ||
 		!sameSessionRuntimeReference(child.Sessions, host.Sessions) ||
 		!sameSessionRuntimeReference(child.taskStore, host.taskStore) ||
 		!sameSessionRuntimeReference(child.controlFeeds, host.controlFeeds) ||
@@ -2169,6 +2173,8 @@ func assertSessionRuntimeSharingContract(t *testing.T, host, child *Stack) {
 		child.grokAuth != host.grokAuth ||
 		child.apiKeyCredentials != host.apiKeyCredentials ||
 		child.providerUsage != host.providerUsage ||
+		child.modelCatalog != host.lookup ||
+		child.sessionModelPins != host.sessionModelPins ||
 		child.hostedChildMailbox == nil {
 		t.Fatal("Session child did not receive the required Host-shared state")
 	}
@@ -2184,6 +2190,7 @@ func assertSessionRuntimeSharingContract(t *testing.T, host, child *Stack) {
 		child.controlClient != nil ||
 		child.taskStreams != nil ||
 		child.operations != nil ||
+		child.modelRecovery != nil ||
 		child.lifecycleCancel != nil ||
 		child.sandboxLifecycleFactory != nil {
 		t.Fatal("Session child received Host-only ownership state")
