@@ -105,7 +105,7 @@ func builtinACPAdapterPackageFor(name string) (builtinACPAdapterPackage, bool) {
 	return agentregistry.BuiltinAdapterPackageFor(name)
 }
 
-func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, plugins []PluginConfig, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
+func (s *runtimeComposition) configuredAssembly(base assembly.ResolvedAssembly, plugins []PluginConfig, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	contributions, err := resolveGatewayPluginContributions(plugins)
 	if err != nil {
 		return assembly.ResolvedAssembly{}, err
@@ -113,7 +113,7 @@ func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, plugins []Plu
 	return s.configuredAssemblyWithPluginAgents(base, contributions.Agents, runtimeCfg)
 }
 
-func (s *Stack) configuredAssemblyWithPluginAgents(base assembly.ResolvedAssembly, pluginAgents []pluginapi.AgentRegistration, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
+func (s *runtimeComposition) configuredAssemblyWithPluginAgents(base assembly.ResolvedAssembly, pluginAgents []pluginapi.AgentRegistration, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	self, err := defaultSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		StoreDir:     s.storeDir,
 		WorkspaceKey: s.Workspace.Key,
@@ -153,7 +153,7 @@ func ptrToModelConfig(model ModelConfig) *ModelConfig {
 	return &cloned
 }
 
-func (s *Stack) withDirectProfileAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
+func (s *runtimeComposition) withDirectProfileAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	out := assembly.CloneResolvedAssembly(resolved)
 	if s == nil || s.store == nil || s.lookup == nil {
 		return out, nil
@@ -195,7 +195,7 @@ func (s *Stack) withDirectProfileAgents(resolved assembly.ResolvedAssembly, runt
 	return out, nil
 }
 
-func (s *Stack) withReviewerAgent(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
+func (s *runtimeComposition) withReviewerAgent(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	out := assembly.CloneResolvedAssembly(resolved)
 	reviewerAgentID := string(agentbinding.HandleReviewer)
 	for _, existing := range out.Agents {
@@ -227,7 +227,7 @@ func (s *Stack) withReviewerAgent(resolved assembly.ResolvedAssembly, runtimeCfg
 	return out, nil
 }
 
-func (s *Stack) withExternalACPAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
+func (s *runtimeComposition) withExternalACPAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	out := assembly.CloneResolvedAssembly(resolved)
 	if s == nil || s.store == nil {
 		return out, nil
@@ -266,7 +266,7 @@ func (s *Stack) withExternalACPAgents(resolved assembly.ResolvedAssembly, runtim
 	return out, nil
 }
 
-func (s *Stack) materializeExternalAgent(agent controlagents.Agent, connection controlagents.Connection) (assembly.AgentConfig, error) {
+func (s *runtimeComposition) materializeExternalAgent(agent controlagents.Agent, connection controlagents.Connection) (assembly.AgentConfig, error) {
 	if strings.TrimSpace(agent.ConnectionID) == "" || !strings.EqualFold(agent.ConnectionID, connection.ID) {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: external Agent %q has no matching ACP connection", agent.ID)
 	}
@@ -281,7 +281,7 @@ func (s *Stack) materializeExternalAgent(agent controlagents.Agent, connection c
 	}, nil
 }
 
-func (s *Stack) withPluginACPAgents(resolved assembly.ResolvedAssembly, pluginAgents []pluginapi.AgentRegistration) (assembly.ResolvedAssembly, error) {
+func (s *runtimeComposition) withPluginACPAgents(resolved assembly.ResolvedAssembly, pluginAgents []pluginapi.AgentRegistration) (assembly.ResolvedAssembly, error) {
 	out := assembly.CloneResolvedAssembly(resolved)
 	seen := map[string]struct{}{}
 	for _, agent := range out.Agents {
@@ -367,7 +367,7 @@ func reservedSlashCommandName(name string) bool {
 	return agentregistry.ReservedSlashCommandName(name)
 }
 
-func (s *Stack) ACPControllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
+func (s *runtimeComposition) ACPControllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
 	if s == nil {
 		return controller.ControllerStatus{}, false, nil
 	}
@@ -380,7 +380,7 @@ func (s *Stack) ACPControllerStatus(ctx context.Context, ref session.SessionRef)
 	return controlPlane.ControllerStatus(ctx, session.NormalizeSessionRef(ref))
 }
 
-func (s *Stack) ListACPAgents() []ACPAgentInfo {
+func (s *runtimeComposition) ListACPAgents() []ACPAgentInfo {
 	if s == nil {
 		return nil
 	}

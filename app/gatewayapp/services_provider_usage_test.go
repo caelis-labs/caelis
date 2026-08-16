@@ -52,12 +52,15 @@ func TestModelServiceProviderUsageSupportsGrokOAuthCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := &grokProviderUsageReader{}
-	service := ModelService{stack: &Stack{
-		runtimeComposition: runtimeComposition{lookup: lookup},
-		providerUsage: providerusage.NewRegistry(map[string]providerusage.Reader{
-			"xai": reader,
-		}),
-	}}
+	stack := &Stack{
+		runtimeComposition: runtimeComposition{
+			lookup: lookup,
+			providerUsage: providerusage.NewRegistry(map[string]providerusage.Reader{
+				"xai": reader,
+			}),
+		},
+	}
+	service := stack.Models()
 
 	snapshot, found, err := service.ProviderUsage(context.Background(), lookup.DefaultAlias())
 	if err != nil {
@@ -107,12 +110,15 @@ func TestModelServiceProviderUsageDoesNotWaitForProvider(t *testing.T) {
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(reader.release) }) }
 	defer release()
-	service := ModelService{stack: &Stack{
-		runtimeComposition: runtimeComposition{lookup: lookup},
-		providerUsage: providerusage.NewRegistry(map[string]providerusage.Reader{
-			"xai": reader,
-		}),
-	}}
+	stack := &Stack{
+		runtimeComposition: runtimeComposition{
+			lookup: lookup,
+			providerUsage: providerusage.NewRegistry(map[string]providerusage.Reader{
+				"xai": reader,
+			}),
+		},
+	}
+	service := stack.Models()
 
 	returned := make(chan struct{})
 	go func() {

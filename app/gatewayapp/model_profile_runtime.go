@@ -46,7 +46,7 @@ func resolveRuntimeProviderProfile(
 	return configured, nil
 }
 
-func (s *Stack) resolveProviderProfileConfig(profileID, effort string) (ModelConfig, error) {
+func (s *runtimeComposition) resolveProviderProfileConfig(profileID, effort string) (ModelConfig, error) {
 	if s == nil || s.store == nil {
 		return ModelConfig{}, fmt.Errorf("gatewayapp: model profile store is unavailable")
 	}

@@ -8,7 +8,7 @@ import (
 
 func TestStackNewGuardianApproverUsesStackSessions(t *testing.T) {
 	sessions := inmemory.NewStore(inmemory.Config{})
-	stack := &Stack{Sessions: sessions}
+	stack := &Stack{runtimeComposition: runtimeComposition{Sessions: sessions}}
 
 	approver := stack.newGuardianApprover()
 	if approver == nil {

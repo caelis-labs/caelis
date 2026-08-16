@@ -12,7 +12,7 @@ import (
 // updateSessionStateAtRevision applies one focused configuration mutation
 // against the revision observed at the AppServer boundary. Unlike the legacy
 // helper above, it never reloads and silently upgrades a stale caller intent.
-func (s *Stack) updateSessionStateAtRevision(
+func (s *runtimeComposition) updateSessionStateAtRevision(
 	ctx context.Context,
 	ref session.SessionRef,
 	expectedRevision uint64,
@@ -31,7 +31,7 @@ func (s *Stack) updateSessionStateAtRevision(
 
 // SessionRuntimeState returns the current per-session runtime overrides backed
 // by session state.
-func (s *Stack) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
+func (s *runtimeComposition) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
 	if s == nil || s.Sessions == nil {
 		return SessionRuntimeState{}, fmt.Errorf("gatewayapp: sessions service unavailable")
 	}

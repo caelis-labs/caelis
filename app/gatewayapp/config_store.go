@@ -142,7 +142,7 @@ func (s *appConfigStore) CompareAndSave(ctx context.Context, expected uint64, do
 // ConfigurationRevision returns the canonical persisted Host configuration
 // revision. It reads the shared document instead of a process-local cache so
 // status and later compare-and-save operations observe external writers.
-func (s *Stack) ConfigurationRevision(ctx context.Context) (uint64, error) {
+func (s *runtimeComposition) ConfigurationRevision(ctx context.Context) (uint64, error) {
 	if s == nil || s.store == nil {
 		return 0, fmt.Errorf("gatewayapp: app config store unavailable")
 	}

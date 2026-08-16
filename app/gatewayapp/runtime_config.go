@@ -35,7 +35,7 @@ type stackRuntimeConfig struct {
 	EstimatedPromptPrefixTokens int
 }
 
-func (s *Stack) delegationAgentsForSpawn() []delegation.Agent {
+func (s *runtimeComposition) delegationAgentsForSpawn() []delegation.Agent {
 	if s == nil {
 		return delegationAgentsForBindings(agentbinding.Configuration{}, true)
 	}

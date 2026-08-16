@@ -89,7 +89,7 @@ func (r *sessionModelPinRegistry) config(sessionID string) (ModelConfig, bool) {
 	return cloneSessionModelConfig(entry.config), true
 }
 
-func (s *Stack) prepareSpawnedACPSession(
+func (s *runtimeComposition) prepareSpawnedACPSession(
 	ctx context.Context,
 	_ tasksubagent.SpawnContext,
 	sessionID string,
@@ -119,7 +119,7 @@ func (s *Stack) prepareSpawnedACPSession(
 	return controlagents.NormalizeSessionOptions(options), nil
 }
 
-func (s *Stack) retainSpawnedSessionModelPin(sessionID string, config ModelConfig) error {
+func (s *runtimeComposition) retainSpawnedSessionModelPin(sessionID string, config ModelConfig) error {
 	if s == nil || s.sessionModelPins == nil {
 		return errors.New("gatewayapp: Session model pin registry is unavailable")
 	}
@@ -144,7 +144,7 @@ func (s *Stack) retainSpawnedSessionModelPin(sessionID string, config ModelConfi
 	return nil
 }
 
-func (s *Stack) releaseSpawnedSessionModelPin(sessionID string) {
+func (s *runtimeComposition) releaseSpawnedSessionModelPin(sessionID string) {
 	if s == nil {
 		return
 	}
@@ -158,7 +158,7 @@ func (s *Stack) releaseSpawnedSessionModelPin(sessionID string) {
 	}
 }
 
-func (s *Stack) selectPinnedSpawnedSessionModel(ctx context.Context, sessionID string, pinned ModelConfig) error {
+func (s *runtimeComposition) selectPinnedSpawnedSessionModel(ctx context.Context, sessionID string, pinned ModelConfig) error {
 	if s == nil || s.Sessions == nil {
 		return errors.New("gatewayapp: Sessions service is unavailable")
 	}
@@ -208,7 +208,7 @@ func (s *Stack) selectPinnedSpawnedSessionModel(ctx context.Context, sessionID s
 	return conflictErr
 }
 
-func (s *Stack) releaseSpawnedSessionModelPins() {
+func (s *runtimeComposition) releaseSpawnedSessionModelPins() {
 	if s == nil {
 		return
 	}

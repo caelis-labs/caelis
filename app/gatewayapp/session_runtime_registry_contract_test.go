@@ -93,12 +93,12 @@ func (a *recordingSessionRuntimeAssembler) assembleSnapshot(
 	_ session.Session,
 	_ sessionRuntimeActivity,
 	sessions session.Service,
-) (*Stack, error) {
+) (*sessionRuntimeInstance, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.calls++
 	a.sessions = sessions
-	return &Stack{Sessions: sessions}, nil
+	return &sessionRuntimeInstance{runtimeComposition: runtimeComposition{Sessions: sessions}}, nil
 }
 
 func (a *recordingSessionRuntimeAssembler) snapshot() (int, session.Service) {

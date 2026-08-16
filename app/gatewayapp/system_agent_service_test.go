@@ -29,7 +29,7 @@ func TestAgentBindingServicePersistsSystemBindingForFutureReviewerAssembly(t *te
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	stack := &Stack{store: store}
+	stack := &Stack{runtimeComposition: runtimeComposition{store: store}}
 	service := stack.testAgentBindings()
 	status, err := service.BindAgentBinding(context.Background(), agentbinding.Binding{
 		Handle: agentbinding.HandleReviewer, ProfileID: profile.ID, Effort: "xhigh",

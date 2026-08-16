@@ -19,14 +19,14 @@ import (
 // DisconnectCandidates returns only user-configured external ACP Agents. It
 // excludes model-backed, built-in, system, and plugin-provided Agents because
 // those lifecycles are owned by their respective Control capabilities.
-func (s *Stack) DisconnectCandidates(ctx context.Context) ([]controlagents.DisconnectCandidate, error) {
+func (s *runtimeComposition) DisconnectCandidates(ctx context.Context) ([]controlagents.DisconnectCandidate, error) {
 	snapshot, err := s.DisconnectCandidatesSnapshot(ctx)
 	return snapshot.Candidates, err
 }
 
 // DisconnectCandidatesSnapshot returns one canonical Host-revision-bound
 // roster view for presentation clients preparing a disconnect command.
-func (s *Stack) DisconnectCandidatesSnapshot(ctx context.Context) (appserver.DisconnectCandidatesSnapshot, error) {
+func (s *runtimeComposition) DisconnectCandidatesSnapshot(ctx context.Context) (appserver.DisconnectCandidatesSnapshot, error) {
 	if s == nil || s.store == nil {
 		return appserver.DisconnectCandidatesSnapshot{}, fmt.Errorf("gatewayapp: app config store unavailable")
 	}

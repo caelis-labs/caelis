@@ -17,7 +17,7 @@ func wrapOptionalError(message string, err error) error {
 	return fmt.Errorf("%s: %w", message, err)
 }
 
-func (s *Stack) setRuntimeDefaultModelFromLookup() {
+func (s *runtimeComposition) setRuntimeDefaultModelFromLookup() {
 	if s == nil || s.lookup == nil {
 		return
 	}
@@ -31,7 +31,7 @@ func (s *Stack) setRuntimeDefaultModelFromLookup() {
 	s.setRuntimeModel(profileID, cfg)
 }
 
-func (s *Stack) setRuntimeModel(profileID string, cfg ModelConfig) {
+func (s *runtimeComposition) setRuntimeModel(profileID string, cfg ModelConfig) {
 	if s == nil {
 		return
 	}
@@ -46,7 +46,7 @@ func (s *Stack) setRuntimeModel(profileID string, cfg ModelConfig) {
 
 // ListModelAliases returns the current session override plus resolver-known
 // model aliases for picker surfaces such as the TUI `/model` command.
-func (s *Stack) ListModelAliases(ctx context.Context, ref session.SessionRef) ([]string, error) {
+func (s *runtimeComposition) ListModelAliases(ctx context.Context, ref session.SessionRef) ([]string, error) {
 	choices, err := s.ListModelChoices(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func (s *Stack) ListModelAliases(ctx context.Context, ref session.SessionRef) ([
 	return dedupeNonEmptyStrings(aliases), nil
 }
 
-func (s *Stack) ListModelChoices(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
+func (s *runtimeComposition) ListModelChoices(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
 	if s == nil || s.Sessions == nil {
 		return nil, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -86,7 +86,7 @@ func (s *Stack) ListModelChoices(ctx context.Context, ref session.SessionRef) ([
 // catalog entries so deleting a model cannot invalidate pinned Runtime
 // generations. Invalid legacy credentials must not make /connect skip API-key
 // collection.
-func (s *Stack) HasReusableProviderAuth(ctx context.Context, provider string, baseURL string) bool {
+func (s *runtimeComposition) HasReusableProviderAuth(ctx context.Context, provider string, baseURL string) bool {
 	if s == nil {
 		return false
 	}
@@ -94,14 +94,14 @@ func (s *Stack) HasReusableProviderAuth(ctx context.Context, provider string, ba
 	return reusable
 }
 
-func (s *Stack) DefaultModelAlias() string {
+func (s *runtimeComposition) DefaultModelAlias() string {
 	if s == nil || s.lookup == nil {
 		return ""
 	}
 	return s.lookup.DefaultAlias()
 }
 
-func (s *Stack) DefaultModelEffort() string {
+func (s *runtimeComposition) DefaultModelEffort() string {
 	if s == nil || s.lookup == nil {
 		return ""
 	}
@@ -111,7 +111,7 @@ func (s *Stack) DefaultModelEffort() string {
 // EffectiveModelAlias returns the model selected for new work in this Host
 // process. Startup ModelProfile flags may intentionally make it differ from
 // the persisted Host default without mutating AppConfig.
-func (s *Stack) EffectiveModelAlias() string {
+func (s *runtimeComposition) EffectiveModelAlias() string {
 	if s == nil {
 		return ""
 	}
@@ -131,7 +131,7 @@ func (s *Stack) EffectiveModelAlias() string {
 
 // EffectiveModelEffort returns the reasoning effort selected for new work in
 // this Host process without conflating it with the persisted Host default.
-func (s *Stack) EffectiveModelEffort() string {
+func (s *runtimeComposition) EffectiveModelEffort() string {
 	if s == nil {
 		return ""
 	}
@@ -150,7 +150,7 @@ func (s *Stack) EffectiveModelEffort() string {
 	return ""
 }
 
-func (s *Stack) ModelConfig(alias string) (ModelConfig, bool) {
+func (s *runtimeComposition) ModelConfig(alias string) (ModelConfig, bool) {
 	if s == nil || s.lookup == nil {
 		return ModelConfig{}, false
 	}

@@ -23,7 +23,7 @@ const (
 	stateControllerConfigOperationID = "gateway.controller_config_operation_id"
 )
 
-func (s *Stack) executeSessionConfigurationCommand(
+func (s *runtimeComposition) executeSessionConfigurationCommand(
 	ctx context.Context,
 	action appserver.Action,
 	request any,
@@ -59,7 +59,7 @@ func (s *Stack) executeSessionConfigurationCommand(
 	}
 }
 
-func (s *Stack) configureSessionControllerMode(ctx context.Context, req appserver.SessionControllerModeRequest) (appserver.CommandResult, error) {
+func (s *runtimeComposition) configureSessionControllerMode(ctx context.Context, req appserver.SessionControllerModeRequest) (appserver.CommandResult, error) {
 	active, err := s.checkSessionConfigurationCAS(ctx, req.WriteBase)
 	if err != nil {
 		return sessionCommandResult(active), classifyControlBackendError(err)
@@ -102,7 +102,7 @@ func (s *Stack) configureSessionControllerMode(ctx context.Context, req appserve
 	return sessionCommandResult(updated), classifyACPSelectionStateError("mode", stateErr)
 }
 
-func (s *Stack) configureSessionApprovalMode(ctx context.Context, req appserver.SessionModeRequest) (appserver.CommandResult, error) {
+func (s *runtimeComposition) configureSessionApprovalMode(ctx context.Context, req appserver.SessionModeRequest) (appserver.CommandResult, error) {
 	active, err := s.checkSessionConfigurationCAS(ctx, req.WriteBase)
 	if err != nil {
 		return sessionCommandResult(active), classifyControlBackendError(err)
@@ -128,7 +128,7 @@ func (s *Stack) configureSessionApprovalMode(ctx context.Context, req appserver.
 	return sessionCommandResult(updated), classifyControlBackendError(err)
 }
 
-func (s *Stack) configureSessionModel(ctx context.Context, req appserver.SessionModelRequest) (appserver.CommandResult, error) {
+func (s *runtimeComposition) configureSessionModel(ctx context.Context, req appserver.SessionModelRequest) (appserver.CommandResult, error) {
 	active, err := s.checkSessionConfigurationCAS(ctx, req.WriteBase)
 	if err != nil {
 		return sessionCommandResult(active), classifyControlBackendError(err)
@@ -186,7 +186,7 @@ func (s *Stack) configureSessionModel(ctx context.Context, req appserver.Session
 	return sessionCommandResult(updated), classifyControlBackendError(err)
 }
 
-func (s *Stack) configureACPControllerModel(
+func (s *runtimeComposition) configureACPControllerModel(
 	ctx context.Context,
 	active session.Session,
 	req appserver.SessionModelRequest,
@@ -239,7 +239,7 @@ func classifyACPSelectionStateError(selection string, err error) error {
 	)
 }
 
-func (s *Stack) configureSessionPresentationMode(ctx context.Context, req appserver.SessionPresentationModeRequest) (appserver.CommandResult, error) {
+func (s *runtimeComposition) configureSessionPresentationMode(ctx context.Context, req appserver.SessionPresentationModeRequest) (appserver.CommandResult, error) {
 	active, err := s.checkSessionConfigurationCAS(ctx, req.WriteBase)
 	if err != nil {
 		return sessionCommandResult(active), classifyControlBackendError(err)
@@ -261,7 +261,7 @@ func (s *Stack) configureSessionPresentationMode(ctx context.Context, req appser
 	return sessionCommandResult(updated), classifyControlBackendError(err)
 }
 
-func (s *Stack) configureSessionPresentation(ctx context.Context, req appserver.SessionPresentationConfigRequest) (appserver.CommandResult, error) {
+func (s *runtimeComposition) configureSessionPresentation(ctx context.Context, req appserver.SessionPresentationConfigRequest) (appserver.CommandResult, error) {
 	active, err := s.checkSessionConfigurationCAS(ctx, req.WriteBase)
 	if err != nil {
 		return sessionCommandResult(active), classifyControlBackendError(err)
@@ -284,7 +284,7 @@ func (s *Stack) configureSessionPresentation(ctx context.Context, req appserver.
 	return sessionCommandResult(updated), classifyControlBackendError(err)
 }
 
-func (s *Stack) checkSessionConfigurationCAS(ctx context.Context, base appserver.WriteBase) (session.Session, error) {
+func (s *runtimeComposition) checkSessionConfigurationCAS(ctx context.Context, base appserver.WriteBase) (session.Session, error) {
 	active, err := s.checkControlCommandCAS(ctx, base)
 	if err != nil {
 		return active, err
@@ -302,7 +302,7 @@ func (s *Stack) checkSessionConfigurationCAS(ctx context.Context, base appserver
 	return active, nil
 }
 
-func (s *Stack) rejectSessionConfigurationDuringTurn(sessionID string) error {
+func (s *runtimeComposition) rejectSessionConfigurationDuringTurn(sessionID string) error {
 	if gateway := s.currentGateway(); gateway != nil {
 		if _, ok := gateway.ActiveTurn(strings.TrimSpace(sessionID)); ok {
 			return errors.New("gatewayapp: Session configuration cannot change while a Turn is active")
@@ -311,7 +311,7 @@ func (s *Stack) rejectSessionConfigurationDuringTurn(sessionID string) error {
 	return nil
 }
 
-func (s *Stack) resolvedSessionAssembly() assembly.ResolvedAssembly {
+func (s *runtimeComposition) resolvedSessionAssembly() assembly.ResolvedAssembly {
 	if s == nil {
 		return assembly.ResolvedAssembly{}
 	}
@@ -321,7 +321,7 @@ func (s *Stack) resolvedSessionAssembly() assembly.ResolvedAssembly {
 	return resolved
 }
 
-func (s *Stack) setACPControllerModel(ctx context.Context, req controller.SetControllerModelRequest) (controller.ControllerStatus, error) {
+func (s *runtimeComposition) setACPControllerModel(ctx context.Context, req controller.SetControllerModelRequest) (controller.ControllerStatus, error) {
 	if s == nil {
 		return controller.ControllerStatus{}, errors.New("gatewayapp: runtime engine unavailable")
 	}
@@ -334,7 +334,7 @@ func (s *Stack) setACPControllerModel(ctx context.Context, req controller.SetCon
 	return controlPlane.SetControllerModel(ctx, req)
 }
 
-func (s *Stack) setACPControllerMode(ctx context.Context, req controller.SetControllerModeRequest) (controller.ControllerStatus, error) {
+func (s *runtimeComposition) setACPControllerMode(ctx context.Context, req controller.SetControllerModeRequest) (controller.ControllerStatus, error) {
 	if s == nil {
 		return controller.ControllerStatus{}, errors.New("gatewayapp: runtime engine unavailable")
 	}

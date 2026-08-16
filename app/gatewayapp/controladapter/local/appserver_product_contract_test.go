@@ -120,6 +120,11 @@ func TestModelCatalogMutationsRefreshActiveSessionPickerWithoutReplacingRuntime(
 	if afterDelete.ModelStatus.Display != "ollama/late" {
 		t.Fatalf("active Session model after catalog deletion = %q, want pinned ollama/late", afterDelete.ModelStatus.Display)
 	}
+	if afterDelete.SandboxStatus.RequestedBackend != "host" ||
+		afterDelete.SandboxStatus.ResolvedBackend != "host" ||
+		afterDelete.SandboxStatus.Route != "host" {
+		t.Fatalf("active Session sandbox status = %#v, want pinned host Runtime", afterDelete.SandboxStatus)
+	}
 }
 
 func TestHostCapabilitiesDoNotCreateSession(t *testing.T) {

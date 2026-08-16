@@ -30,7 +30,7 @@ func TestAgentBindingServicePersistsUnifiedProfileBindingForFutureActivation(t *
 	}); err != nil {
 		t.Fatal(err)
 	}
-	stack := &Stack{store: store}
+	stack := &Stack{runtimeComposition: runtimeComposition{store: store}}
 	service := stack.testAgentBindings()
 	status, err := service.BindAgentBinding(context.Background(), agentbinding.Binding{
 		Handle: agentbinding.HandleOrbit, ProfileID: profile.ID, Effort: "none",

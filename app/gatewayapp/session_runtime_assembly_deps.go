@@ -52,8 +52,9 @@ func newSessionRuntimeAssemblyDeps(host *Stack) (sessionRuntimeAssemblyDeps, err
 	}
 	mailbox := host.hostedChildMailbox
 	if mailbox == nil {
-		mailbox = host.routeHostedChildMessage
+		return sessionRuntimeAssemblyDeps{}, errors.New("gatewayapp: hosted child mailbox is required")
 	}
+	runtimeRoot := &host.runtimeComposition
 	return sessionRuntimeAssemblyDeps{
 		appName:             host.AppName,
 		userID:              host.UserID,
@@ -71,11 +72,11 @@ func newSessionRuntimeAssemblyDeps(host *Stack) (sessionRuntimeAssemblyDeps, err
 		modelCatalog:        host.lookup,
 		modelPins:           host.sessionModelPins,
 		hostedChildMailbox:  mailbox,
-		loadProcessSnapshot: host.loadSessionRuntimeProcessSnapshot,
+		loadProcessSnapshot: runtimeRoot.loadSessionRuntimeProcessSnapshot,
 	}, nil
 }
 
-func (s *Stack) loadSessionRuntimeProcessSnapshot() sessionRuntimeProcessSnapshot {
+func (s *runtimeComposition) loadSessionRuntimeProcessSnapshot() sessionRuntimeProcessSnapshot {
 	if s == nil {
 		return sessionRuntimeProcessSnapshot{}
 	}

@@ -156,7 +156,7 @@ func (s *Stack) assembleHostModelConnect(ctx context.Context, cfg appserver.Conn
 	return assembled, authenticationStarted, err
 }
 
-func (s *Stack) reusableProviderCredentialRef(ctx context.Context, lookup *modelLookup, provider, endpointID, baseURL string) (string, bool) {
+func (s *runtimeComposition) reusableProviderCredentialRef(ctx context.Context, lookup *modelLookup, provider, endpointID, baseURL string) (string, bool) {
 	if s == nil || s.apiKeyCredentials == nil {
 		return "", false
 	}

@@ -17,7 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func (s *Stack) StartSubagent(
+func (s *runtimeComposition) StartSubagent(
 	ctx context.Context,
 	ref session.SessionRef,
 	agent string,
@@ -27,7 +27,7 @@ func (s *Stack) StartSubagent(
 	return s.StartSubagentWithOptions(ctx, ref, agent, prompt, source, StartSubagentOptions{})
 }
 
-func (s *Stack) StartSubagentWithOptions(
+func (s *runtimeComposition) StartSubagentWithOptions(
 	ctx context.Context,
 	ref session.SessionRef,
 	agent string,
@@ -47,7 +47,7 @@ func (s *Stack) StartSubagentWithOptions(
 	return snapshot, err
 }
 
-func (s *Stack) WaitSubagentTask(
+func (s *runtimeComposition) WaitSubagentTask(
 	ctx context.Context,
 	ref session.SessionRef,
 	taskID string,
@@ -64,7 +64,7 @@ func (s *Stack) WaitSubagentTask(
 
 // CompactSession forces a model-backed checkpoint compaction for the given
 // session.
-func (s *Stack) CompactSession(ctx context.Context, ref session.SessionRef) error {
+func (s *runtimeComposition) CompactSession(ctx context.Context, ref session.SessionRef) error {
 	if s == nil {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -90,7 +90,7 @@ func (s *Stack) CompactSession(ctx context.Context, ref session.SessionRef) erro
 
 // withPlaced runs a synchronous Control operation inside the production
 // placement envelope (leased heartbeat, cancel-on-loss).
-func (s *Stack) withPlaced(ctx context.Context, ref session.SessionRef, fn func(context.Context, *sdkruntime.Runtime) error) error {
+func (s *runtimeComposition) withPlaced(ctx context.Context, ref session.SessionRef, fn func(context.Context, *sdkruntime.Runtime) error) error {
 	if s == nil {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -119,7 +119,7 @@ func defaultCompactionConfig(contextWindow int) sdkruntime.CompactionConfig {
 	}
 }
 
-func (s *Stack) SessionUsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string) (compact.UsageSnapshot, error) {
+func (s *runtimeComposition) SessionUsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string) (compact.UsageSnapshot, error) {
 	if s == nil || s.Sessions == nil {
 		return compact.UsageSnapshot{}, fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
@@ -148,7 +148,7 @@ func (s *Stack) SessionUsageSnapshot(ctx context.Context, ref session.SessionRef
 	), nil
 }
 
-func (s *Stack) estimatedPromptPrefixTokens(ctx context.Context, ref session.SessionRef) int {
+func (s *runtimeComposition) estimatedPromptPrefixTokens(ctx context.Context, ref session.SessionRef) int {
 	if s == nil {
 		return 0
 	}
@@ -187,7 +187,7 @@ func spawnTools(agents []delegation.Agent) []tool.Tool {
 	return []tool.Tool{spawn.New(agents)}
 }
 
-func (s *Stack) currentContextWindowTokensForAlias(alias string) int {
+func (s *runtimeComposition) currentContextWindowTokensForAlias(alias string) int {
 	alias = strings.TrimSpace(alias)
 	if alias != "" {
 		if cfg, ok := s.modelConfigForAlias(alias); ok && cfg.ContextWindowTokens > 0 {

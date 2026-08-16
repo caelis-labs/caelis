@@ -15,7 +15,7 @@ import (
 
 // LoadHistory resolves the current external ACP control plane only when one
 // selected child overlay asks for provider-owned Session history.
-func (s *Stack) LoadHistory(ctx context.Context, req sdksubagent.HistoryRequest) (session.LoadedSession, error) {
+func (s *runtimeComposition) LoadHistory(ctx context.Context, req sdksubagent.HistoryRequest) (session.LoadedSession, error) {
 	if s == nil {
 		return session.LoadedSession{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -28,7 +28,7 @@ func (s *Stack) LoadHistory(ctx context.Context, req sdksubagent.HistoryRequest)
 	return controlPlane.LoadHistory(ctx, req)
 }
 
-func (s *Stack) delegationPlacementResolver(runtimeCfg stackRuntimeConfig) acpsubagent.PlacementResolver {
+func (s *runtimeComposition) delegationPlacementResolver(runtimeCfg stackRuntimeConfig) acpsubagent.PlacementResolver {
 	return func(_ context.Context, _ sdksubagent.SpawnContext, req delegation.TargetRequest) (acpsubagent.AgentConfig, error) {
 		return s.resolveDelegationPlacement(req, runtimeCfg)
 	}

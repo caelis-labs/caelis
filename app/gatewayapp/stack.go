@@ -17,7 +17,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
-	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
@@ -114,25 +113,9 @@ const DefaultControlOperationRetention = appserver.DefaultOperationTerminalReten
 
 type Stack struct {
 	runtimeComposition
-	Sessions                  session.Service
-	AppName                   string
-	UserID                    string
-	Workspace                 session.WorkspaceRef
-	store                     *appConfigStore
-	storeDir                  string
 	controlOperationRetention time.Duration
-	leaseOwnerID              string
-	spawnedSessionPinsMu      sync.Mutex
 	hostAuthenticationMu      sync.Mutex
 	hostAuthentications       map[string]struct{}
-	sandboxOverride           SandboxConfig
-	// sandboxPersisted and sandboxRevision cache the latest observed canonical
-	// Host policy for status. The live root and detached Session Runtimes remain
-	// bound to their activation snapshots.
-	sandboxPersisted          SandboxConfig
-	sandboxRevision           uint64
-	taskStore                 task.Store
-	controlFeeds              appserver.FeedRegistry
 	controlClient             appserver.Service
 	configurationCommands     appserver.ConfigurationCommandService
 	agentCommands             appserver.AgentCommandService
@@ -140,16 +123,9 @@ type Stack struct {
 	taskStreams               acptaskstream.Service
 	operations                *appserver.FileOperationStore
 	acpPreparations           *acpPreparationStore
-	approvalRecovery          *appserver.ApprovalRecoveryGate
 	lifecycleCancel           context.CancelFunc
-	codexAuth                 *codexauth.Manager
-	grokAuth                  *grokauth.Manager
-	apiKeyCredentials         *credentialstore.Store
-	providerUsage             *providerusage.Registry
 	sessionRuntimes           *sessionRuntimeRegistry
-	sessionModelPins          *sessionModelPinRegistry
 	modelRecovery             *sessionModelRecovery
-	spawnedSessionPinReleases map[string]func()
 
 	// Optional test seam; nil uses the platform lifecycle runtime factory.
 	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
@@ -157,7 +133,7 @@ type Stack struct {
 
 // KernelTurnState returns the current read-only live Turn projection. Turn
 // writes remain behind typed AppServer clients.
-func (s *Stack) KernelTurnState() KernelTurnReader {
+func (s *runtimeComposition) KernelTurnState() KernelTurnReader {
 	if gw := s.currentGateway(); gw != nil {
 		return gw
 	}
@@ -166,7 +142,7 @@ func (s *Stack) KernelTurnState() KernelTurnReader {
 
 // KernelSessionState returns the current read-only Session projection. Session
 // writes remain behind typed AppServer clients.
-func (s *Stack) KernelSessionState() KernelSessionReader {
+func (s *runtimeComposition) KernelSessionState() KernelSessionReader {
 	if gw := s.currentGateway(); gw != nil {
 		return gw
 	}
@@ -176,7 +152,7 @@ func (s *Stack) KernelSessionState() KernelSessionReader {
 // KernelControlPlaneState returns the current read-only controller and
 // participant projection. Control-plane writes remain behind focused typed
 // AppServer clients.
-func (s *Stack) KernelControlPlaneState() KernelControlPlaneReader {
+func (s *runtimeComposition) KernelControlPlaneState() KernelControlPlaneReader {
 	if gw := s.currentGateway(); gw != nil {
 		return gw
 	}
@@ -185,7 +161,7 @@ func (s *Stack) KernelControlPlaneState() KernelControlPlaneReader {
 
 // KernelStreams returns the current gateway stream provider without exposing
 // gateway control or session operations.
-func (s *Stack) KernelStreams() kernelimpl.StreamProvider {
+func (s *runtimeComposition) KernelStreams() kernelimpl.StreamProvider {
 	if gw := s.currentGateway(); gw != nil {
 		return gw
 	}
@@ -264,13 +240,16 @@ func (s *Stack) ControlTerminalStreams() stream.Controller {
 // ControlClientRuntimeState reads live state only from an already activated
 // Session Runtime. Observation must not assemble or retain execution state.
 func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (appserver.RuntimeState, error) {
-	runtimeStack := s
-	if s != nil && s.sessionRuntimes != nil {
+	if s == nil {
+		return appserver.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
+	}
+	runtimeStack := &s.runtimeComposition
+	if s.sessionRuntimes != nil {
 		runtime, ok := s.sessionRuntimes.loaded(ref.SessionID)
 		if !ok {
 			return appserver.RuntimeState{}, nil
 		}
-		runtimeStack = runtime.stack
+		runtimeStack = &runtime.stack.runtimeComposition
 	}
 	gateway := runtimeStack.currentGateway()
 	if gateway == nil {
@@ -279,7 +258,7 @@ func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.Sessi
 	return gateway.ControlClientRuntimeState(ctx, ref)
 }
 
-func (s *Stack) currentGateway() *kernelimpl.Gateway {
+func (s *runtimeComposition) currentGateway() *kernelimpl.Gateway {
 	if s == nil {
 		return nil
 	}
@@ -288,7 +267,7 @@ func (s *Stack) currentGateway() *kernelimpl.Gateway {
 	return s.gateway
 }
 
-func (s *Stack) isClosing() bool {
+func (s *runtimeComposition) isClosing() bool {
 	if s == nil {
 		return true
 	}
@@ -482,30 +461,30 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	}
 	stack := &Stack{
 		runtimeComposition: runtimeComposition{
+			Sessions:              sessions,
+			AppName:               appName,
+			UserID:                userID,
+			Workspace:             workspace,
+			store:                 configStore,
+			storeDir:              storeDir,
+			leaseOwnerID:          leaseOwnerID,
+			taskStore:             taskStore,
+			controlFeeds:          controlFeeds,
+			approvalRecovery:      approvalRecovery,
+			codexAuth:             codexAuth,
+			grokAuth:              grokAuth,
+			apiKeyCredentials:     apiKeyCredentials,
+			providerUsage:         providerUsage,
+			sessionModelPins:      newSessionModelPinRegistry(),
 			lookup:                lookup,
 			childControlURL:       strings.TrimSpace(cfg.ChildControlURL),
 			childControlTokenFile: strings.TrimSpace(cfg.ChildControlTokenFile),
 			runtime:               runtimeCfg,
 			sandbox:               sandboxCfg,
+			sandboxOverride:       cloneSandboxConfig(cfg.Sandbox),
+			sandboxPersisted:      cloneSandboxConfig(doc.Sandbox),
+			sandboxRevision:       doc.ConfigurationRevision,
 		},
-		Sessions:          sessions,
-		AppName:           appName,
-		UserID:            userID,
-		Workspace:         workspace,
-		store:             configStore,
-		storeDir:          storeDir,
-		leaseOwnerID:      leaseOwnerID,
-		taskStore:         taskStore,
-		controlFeeds:      controlFeeds,
-		approvalRecovery:  approvalRecovery,
-		codexAuth:         codexAuth,
-		grokAuth:          grokAuth,
-		apiKeyCredentials: apiKeyCredentials,
-		providerUsage:     providerUsage,
-		sessionModelPins:  newSessionModelPinRegistry(),
-		sandboxOverride:   cloneSandboxConfig(cfg.Sandbox),
-		sandboxPersisted:  cloneSandboxConfig(doc.Sandbox),
-		sandboxRevision:   doc.ConfigurationRevision,
 	}
 	stack.modelRecovery = newSessionModelRecovery(
 		stack.store,
@@ -582,6 +561,8 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		stack.lifecycleCancel()
 		return nil, err
 	}
+	mailboxRouter := &hostedChildMailboxRouter{}
+	stack.hostedChildMailbox = mailboxRouter.deliver
 	assemblyDeps, err := newSessionRuntimeAssemblyDeps(stack)
 	if err != nil {
 		_ = stack.Close()
@@ -605,6 +586,10 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	stack.sessionRuntimes = sessionRuntimes
+	if err := mailboxRouter.bind(sessionRuntimes); err != nil {
+		_ = stack.Close()
+		return nil, err
+	}
 	return stack, nil
 }
 
@@ -794,7 +779,7 @@ func (s *Stack) Close() error {
 	return nil
 }
 
-func (s *Stack) closeWorkspaceResources() error {
+func (s *runtimeComposition) closeWorkspaceResources() error {
 	if s == nil {
 		return nil
 	}
@@ -843,7 +828,7 @@ func (s *Stack) closeWorkspaceResources() error {
 	return pluginCacheErr
 }
 
-func (s *Stack) MCPServersStatus(pluginID string) []mcp.MCPServerInfo {
+func (s *runtimeComposition) MCPServersStatus(pluginID string) []mcp.MCPServerInfo {
 	s.mu.RLock()
 	mgr := s.mcpMgr
 	s.mu.RUnlock()

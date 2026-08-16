@@ -10,7 +10,7 @@ import (
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
-func (s *Stack) materializeReviewerAgent(
+func (s *runtimeComposition) materializeReviewerAgent(
 	ctx context.Context,
 	placement sdkplacement.Placement,
 	runtimeCfg stackRuntimeConfig,

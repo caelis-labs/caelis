@@ -34,7 +34,7 @@ func resolveProcessSecurityPosture(config stackRuntimeConfig) processSecurityPos
 	return posture
 }
 
-func (s *Stack) processSecurityPosture() processSecurityPosture {
+func (s *runtimeComposition) processSecurityPosture() processSecurityPosture {
 	if s == nil {
 		return resolveProcessSecurityPosture(stackRuntimeConfig{})
 	}

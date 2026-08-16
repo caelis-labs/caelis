@@ -27,7 +27,7 @@ func TestExternalAgentAssemblyDoesNotOwnModelDefaults(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	stack := &Stack{store: store}
+	stack := &Stack{runtimeComposition: runtimeComposition{store: store}}
 	resolved, err := stack.withExternalACPAgents(assembly.ResolvedAssembly{}, stackRuntimeConfig{})
 	if err != nil {
 		t.Fatalf("withExternalACPAgents() error = %v", err)
@@ -51,7 +51,7 @@ func TestExternalAgentAssemblyRejectsParallelLegacyTargetName(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	stack := &Stack{store: store}
+	stack := &Stack{runtimeComposition: runtimeComposition{store: store}}
 	_, err := stack.withExternalACPAgents(assembly.ResolvedAssembly{Agents: []assembly.AgentConfig{{Name: "claude", Command: "legacy-claude"}}}, stackRuntimeConfig{})
 	if err == nil {
 		t.Fatal("withExternalACPAgents() error = nil, want duplicate truth rejection")
@@ -284,7 +284,7 @@ func TestSystemAgentBindingsApplySelectedModelAndEffort(t *testing.T) {
 	t.Fatalf("runtime assembly = %#v, want fixed Reviewer", agents)
 }
 
-func activateFutureAssemblyStack(t *testing.T, stack *Stack, sessionID string) *Stack {
+func activateFutureAssemblyStack(t *testing.T, stack *Stack, sessionID string) *sessionRuntimeInstance {
 	t.Helper()
 	started, err := startGatewayAppTestSession(context.Background(), stack, sessionID)
 	if err != nil {

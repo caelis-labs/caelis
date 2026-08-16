@@ -49,7 +49,7 @@ func (s *Stack) invalidatePlacementSnapshot() {
 	s.invalidateOwnPlacementSnapshot()
 }
 
-func (s *Stack) invalidateOwnPlacementSnapshot() {
+func (s *runtimeComposition) invalidateOwnPlacementSnapshot() {
 	if s == nil {
 		return
 	}
@@ -59,7 +59,7 @@ func (s *Stack) invalidateOwnPlacementSnapshot() {
 	s.placementCacheMu.Unlock()
 }
 
-func (s *Stack) placementSnapshot(ctx context.Context) (*placementSnapshot, error) {
+func (s *runtimeComposition) placementSnapshot(ctx context.Context) (*placementSnapshot, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("gatewayapp: placement is unavailable")
 	}
@@ -97,7 +97,7 @@ func (s *Stack) placementSnapshot(ctx context.Context) (*placementSnapshot, erro
 	}
 }
 
-func (s *Stack) resolveHandlePlacement(ctx context.Context, req controlplacement.HandleRequest) (sdkplacement.Placement, error) {
+func (s *runtimeComposition) resolveHandlePlacement(ctx context.Context, req controlplacement.HandleRequest) (sdkplacement.Placement, error) {
 	snapshot, err := s.placementSnapshot(ctx)
 	if err != nil {
 		return sdkplacement.Placement{}, err
@@ -105,7 +105,7 @@ func (s *Stack) resolveHandlePlacement(ctx context.Context, req controlplacement
 	return controlplacement.ResolveHandle(snapshot.placement, req)
 }
 
-func (s *Stack) resolveParticipantPlacement(ctx context.Context, profileID, effort string) (sdkplacement.Placement, error) {
+func (s *runtimeComposition) resolveParticipantPlacement(ctx context.Context, profileID, effort string) (sdkplacement.Placement, error) {
 	snapshot, err := s.placementSnapshot(ctx)
 	if err != nil {
 		return sdkplacement.Placement{}, err
@@ -115,7 +115,7 @@ func (s *Stack) resolveParticipantPlacement(ctx context.Context, profileID, effo
 
 // ResolveHandlePlacement is the narrow adapter facet used by the transitional
 // in-process control adapter.
-func (s *Stack) ResolveHandlePlacement(ctx context.Context, handle agentbinding.Handle) (sdkplacement.Placement, error) {
+func (s *runtimeComposition) ResolveHandlePlacement(ctx context.Context, handle agentbinding.Handle) (sdkplacement.Placement, error) {
 	handle = agentbinding.NormalizeHandle(handle)
 	snapshot, err := s.placementSnapshot(ctx)
 	if err != nil {
@@ -131,7 +131,7 @@ func (s *Stack) ResolveHandlePlacement(ctx context.Context, handle agentbinding.
 	return controlplacement.ResolveHandle(snapshot.placement, controlplacement.HandleRequest{Handle: handle, Purpose: purpose})
 }
 
-func (s *Stack) resolveSystemAgentModel(
+func (s *runtimeComposition) resolveSystemAgentModel(
 	ctx context.Context,
 	handle agentbinding.Handle,
 	contextWindow int,

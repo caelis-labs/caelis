@@ -87,7 +87,7 @@ type DoctorReport struct {
 	Warnings                        []string                 `json:"warnings,omitempty"`
 }
 
-func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
+func (s *runtimeComposition) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
 	if s == nil {
 		return DoctorReport{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -96,11 +96,11 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 
 // DoctorForWorkspace returns Host diagnostics without substituting the
 // persistent Host's startup workspace for one explicitly addressed client.
-func (s *Stack) DoctorForWorkspace(ctx context.Context, workspace session.WorkspaceRef, req DoctorRequest) (DoctorReport, error) {
+func (s *runtimeComposition) DoctorForWorkspace(ctx context.Context, workspace session.WorkspaceRef, req DoctorRequest) (DoctorReport, error) {
 	return s.doctorForWorkspace(ctx, workspace, req)
 }
 
-func (s *Stack) doctorForWorkspace(ctx context.Context, workspace session.WorkspaceRef, req DoctorRequest) (DoctorReport, error) {
+func (s *runtimeComposition) doctorForWorkspace(ctx context.Context, workspace session.WorkspaceRef, req DoctorRequest) (DoctorReport, error) {
 	if s == nil {
 		return DoctorReport{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -235,7 +235,7 @@ func (s *Stack) doctorForWorkspace(ctx context.Context, workspace session.Worksp
 	return report, nil
 }
 
-func (s *Stack) sessionMigrationWarnings() []string {
+func (s *runtimeComposition) sessionMigrationWarnings() []string {
 	if s == nil || s.Sessions == nil {
 		return nil
 	}
@@ -266,7 +266,7 @@ func (s *Stack) sessionMigrationWarnings() []string {
 	return warnings
 }
 
-func (s *Stack) configMigrationWarnings() []string {
+func (s *runtimeComposition) configMigrationWarnings() []string {
 	if s == nil || s.store == nil {
 		return nil
 	}
@@ -309,7 +309,7 @@ func (s *Stack) configMigrationWarnings() []string {
 	return warnings
 }
 
-func (s *Stack) modelCredentialStatus(cfg ModelConfig) (bool, string) {
+func (s *runtimeComposition) modelCredentialStatus(cfg ModelConfig) (bool, string) {
 	ref := strings.TrimSpace(cfg.CredentialRef)
 	if ref == "" || !strings.HasPrefix(strings.ToLower(ref), "apikey:") {
 		return modelConfigMissingAPIKey(cfg), modelConfigTokenSource(cfg)
@@ -324,7 +324,7 @@ func (s *Stack) modelCredentialStatus(cfg ModelConfig) (bool, string) {
 	return strings.TrimSpace(source.APIKey) == "", "credential:" + ref
 }
 
-func (s *Stack) legacyPluginSkillCopyWarnings(workspace string) []string {
+func (s *runtimeComposition) legacyPluginSkillCopyWarnings(workspace string) []string {
 	if s == nil {
 		return nil
 	}
@@ -423,7 +423,7 @@ func (r DoctorReport) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-func (s *Stack) resolveDoctorSessionRef(ctx context.Context, req DoctorRequest) session.SessionRef {
+func (s *runtimeComposition) resolveDoctorSessionRef(ctx context.Context, req DoctorRequest) session.SessionRef {
 	if s == nil {
 		return session.SessionRef{}
 	}
@@ -449,7 +449,7 @@ func (s *Stack) resolveDoctorSessionRef(ctx context.Context, req DoctorRequest) 
 	return session.SessionRef{}
 }
 
-func (s *Stack) modelConfigForAlias(alias string) (ModelConfig, bool) {
+func (s *runtimeComposition) modelConfigForAlias(alias string) (ModelConfig, bool) {
 	if s == nil || s.lookup == nil {
 		return ModelConfig{}, false
 	}

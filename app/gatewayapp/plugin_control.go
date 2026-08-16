@@ -17,12 +17,12 @@ type MarketplaceInfo = plugin.MarketplaceInfo
 // Plugins exposes the Control-owned Plugin service through this application
 // host. GatewayApp supplies its product data root, revision-CAS persistence,
 // candidate validation, and live MCP status snapshots.
-func (s *Stack) Plugins() PluginService {
+func (s *runtimeComposition) Plugins() PluginService {
 	return plugin.NewService(pluginHost{stack: s})
 }
 
 type pluginHost struct {
-	stack *Stack
+	stack *runtimeComposition
 }
 
 func (h pluginHost) StoreDir() string {

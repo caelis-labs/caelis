@@ -74,7 +74,7 @@ func (s *Stack) persistSandboxConfigDocument(ctx context.Context, doc AppConfig)
 // buildInitialGatewayRuntime constructs the root or detached Session Runtime
 // exactly once from its fixed configuration snapshot. Host configuration
 // mutations never call this method.
-func (s *Stack) buildInitialGatewayRuntime(ctx context.Context) error {
+func (s *runtimeComposition) buildInitialGatewayRuntime(ctx context.Context) error {
 	if s == nil {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -164,7 +164,7 @@ func closeIfSupported(v any) {
 	_ = closer.Close()
 }
 
-func (s *Stack) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runtimeCfg stackRuntimeConfig) (gatewayBuildPlan, error) {
+func (s *runtimeComposition) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runtimeCfg stackRuntimeConfig) (gatewayBuildPlan, error) {
 	sandboxCfg = configstore.DefaultSandboxConfig(sandboxCfg)
 	doc, err := s.loadGatewayAppConfig()
 	if err != nil {
@@ -204,7 +204,7 @@ func (s *Stack) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runtimeCfg stackR
 	}, nil
 }
 
-func (s *Stack) retainManagedPluginCaches(configs []PluginConfig) func() error {
+func (s *runtimeComposition) retainManagedPluginCaches(configs []PluginConfig) func() error {
 	release := plugin.RetainManagedPluginCaches(s.storeDir, configs)
 	var releaseOnce sync.Once
 	return func() error {
@@ -213,7 +213,7 @@ func (s *Stack) retainManagedPluginCaches(configs []PluginConfig) func() error {
 	}
 }
 
-func (s *Stack) loadGatewayAppConfig() (AppConfig, error) {
+func (s *runtimeComposition) loadGatewayAppConfig() (AppConfig, error) {
 	if s != nil && s.appConfigSnapshot != nil {
 		return configstore.Normalize(*s.appConfigSnapshot), nil
 	}
@@ -223,11 +223,11 @@ func (s *Stack) loadGatewayAppConfig() (AppConfig, error) {
 	return s.store.Load()
 }
 
-func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundle, error) {
+func (s *runtimeComposition) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundle, error) {
 	return s.buildGatewayRuntimeContext(context.Background(), plan)
 }
 
-func (s *Stack) buildGatewayRuntimeContext(
+func (s *runtimeComposition) buildGatewayRuntimeContext(
 	ctx context.Context,
 	plan gatewayBuildPlan,
 ) (*gatewayRuntimeBundle, error) {
@@ -467,7 +467,7 @@ func runtimeDefaultModelAlias(runtimeCfg stackRuntimeConfig, lookup *modelLookup
 	return lookup.DefaultID()
 }
 
-func (s *Stack) installGatewayRuntimeBundle(oldGateway *kernelimpl.Gateway, bundle *gatewayRuntimeBundle) error {
+func (s *runtimeComposition) installGatewayRuntimeBundle(oldGateway *kernelimpl.Gateway, bundle *gatewayRuntimeBundle) error {
 	if oldGateway != nil {
 		bundle.Close()
 		return errors.New("gatewayapp: refusing to replace an initialized Runtime")
@@ -487,7 +487,7 @@ func (s *Stack) installGatewayRuntimeBundle(oldGateway *kernelimpl.Gateway, bund
 	return nil
 }
 
-func (s *Stack) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
+func (s *runtimeComposition) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	s.workspaceCloseMu.Lock()
 	defer s.workspaceCloseMu.Unlock()
 

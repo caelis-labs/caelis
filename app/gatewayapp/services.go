@@ -18,19 +18,20 @@ import (
 )
 
 type ModelService struct {
-	stack *Stack
+	stack *runtimeComposition
 }
 
 type AgentService struct {
-	stack *Stack
+	stack *runtimeComposition
 }
 
 type SkillService struct {
-	stack *Stack
+	stack *runtimeComposition
 }
 
 type StatusService struct {
-	stack *Stack
+	stack              *runtimeComposition
+	preflightSandboxFn func(context.Context, bool) (SandboxStatus, error)
 }
 
 // ACPPresentationService is the read-only ACP-shaped projection used behind
@@ -44,20 +45,30 @@ type ACPPresentationService interface {
 	PromptCapabilities(context.Context) (acp.PromptCapabilities, error)
 }
 
-func (s *Stack) Models() ModelService {
+func (s *runtimeComposition) Models() ModelService {
 	return ModelService{stack: s}
 }
 
-func (s *Stack) Agents() AgentService {
+func (s *runtimeComposition) Agents() AgentService {
 	return AgentService{stack: s}
 }
 
-func (s *Stack) Skills() SkillService {
+func (s *runtimeComposition) Skills() SkillService {
 	return SkillService{stack: s}
 }
 
-func (s *Stack) Status() StatusService {
+func (s *runtimeComposition) Status() StatusService {
 	return StatusService{stack: s}
+}
+
+// Status adds process-only bootstrap diagnostics when the projection is
+// requested from the Host. Detached Session Runtimes expose the same read
+// snapshot without Host lifecycle mutation seams.
+func (s *Stack) Status() StatusService {
+	if s == nil {
+		return StatusService{}
+	}
+	return StatusService{stack: &s.runtimeComposition, preflightSandboxFn: s.PreflightSandbox}
 }
 
 func (s *Stack) ACPSurface(modes acp.ModeProvider, useFallbackModes bool, configs acp.ConfigProvider) ACPPresentationService {
@@ -202,7 +213,7 @@ func (s SkillService) Snapshot() skill.Catalog {
 	return s.stack.skillCatalogSnapshot()
 }
 
-func (s *Stack) skillCatalogSnapshot() skill.Catalog {
+func (s *runtimeComposition) skillCatalogSnapshot() skill.Catalog {
 	if s == nil {
 		return skill.Catalog{}
 	}
@@ -223,7 +234,10 @@ func (s StatusService) Sandbox() SandboxStatus {
 // clients are available. Product lifecycle mutations belong to the typed,
 // principal-bound AppServer Configuration capability.
 func (s StatusService) PreflightSandbox(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
-	return s.stack.PreflightSandbox(ctx, allowNonElevatedRepair)
+	if s.preflightSandboxFn == nil {
+		return SandboxStatus{}, fmt.Errorf("gatewayapp: Host sandbox preflight is unavailable")
+	}
+	return s.preflightSandboxFn(ctx, allowNonElevatedRepair)
 }
 
 func (s StatusService) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {

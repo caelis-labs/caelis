@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -12,9 +13,60 @@ import (
 )
 
 // hostedChildMailboxFunc routes one child-originated Agent message through the
-// parent Session Runtime. Session child stacks receive this Host-owned callback
-// because they must not own sessionRuntimes.
+// parent Session Runtime. Session Runtime instances receive this Host-owned
+// callback because they must not own the Runtime registry.
 type hostedChildMailboxFunc func(context.Context, session.SessionRef, agentmessage.Request) (agentmessage.Response, error)
+
+// hostedChildMailboxRouter is the focused process-owned bridge from detached
+// Session Runtimes back to the Runtime registry. It is constructed before the
+// registry and bound once afterwards, so neither the registry nor an assembled
+// Runtime retains a closure over the complete Host Stack.
+type hostedChildMailboxRouter struct {
+	mu       sync.RWMutex
+	runtimes *sessionRuntimeRegistry
+}
+
+func (r *hostedChildMailboxRouter) bind(runtimes *sessionRuntimeRegistry) error {
+	if r == nil || runtimes == nil {
+		return fmt.Errorf("gatewayapp: hosted child mailbox registry is required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.runtimes != nil && r.runtimes != runtimes {
+		return fmt.Errorf("gatewayapp: hosted child mailbox registry is already bound")
+	}
+	r.runtimes = runtimes
+	return nil
+}
+
+func (r *hostedChildMailboxRouter) deliver(ctx context.Context, parentRef session.SessionRef, req agentmessage.Request) (agentmessage.Response, error) {
+	if r == nil {
+		return agentmessage.Response{}, fmt.Errorf("gatewayapp: hosted child mailbox is unavailable")
+	}
+	r.mu.RLock()
+	runtimes := r.runtimes
+	r.mu.RUnlock()
+	if runtimes == nil {
+		return agentmessage.Response{}, fmt.Errorf("gatewayapp: hosted child mailbox is unavailable")
+	}
+	parentRef = session.NormalizeSessionRef(parentRef)
+	if strings.TrimSpace(parentRef.SessionID) == "" {
+		return agentmessage.Response{}, fmt.Errorf("gatewayapp: parent Session is required")
+	}
+	runtime, _, release, err := runtimes.acquireControlRuntime(ctx, parentRef.SessionID, true)
+	if err != nil {
+		return agentmessage.Response{}, err
+	}
+	if release != nil {
+		defer func() {
+			_ = release(context.WithoutCancel(ctx))
+		}()
+	}
+	if runtime == nil || runtime.stack == nil || runtime.stack.engine == nil {
+		return agentmessage.Response{}, fmt.Errorf("gatewayapp: parent Agent message runtime is unavailable")
+	}
+	return runtime.stack.engine.SendAgentMessage(ctx, parentRef, req)
+}
 
 type hostedChildMessageSender struct {
 	deliver  hostedChildMailboxFunc
@@ -23,7 +75,7 @@ type hostedChildMessageSender struct {
 	child    session.Session
 }
 
-func (s *Stack) hostedChildMessageSender(active session.Session) agentmessage.Sender {
+func (s *runtimeComposition) hostedChildMessageSender(active session.Session) agentmessage.Sender {
 	if s == nil || !sessionvisibility.IsSpawnedSubagentSession(active) {
 		return nil
 	}
@@ -43,40 +95,11 @@ func (s *Stack) hostedChildMessageSender(active session.Session) agentmessage.Se
 	}
 }
 
-func (s *Stack) childMailbox() hostedChildMailboxFunc {
+func (s *runtimeComposition) childMailbox() hostedChildMailboxFunc {
 	if s == nil {
 		return nil
 	}
-	if s.hostedChildMailbox != nil {
-		return s.hostedChildMailbox
-	}
-	if s.sessionRuntimes != nil {
-		return s.routeHostedChildMessage
-	}
-	return nil
-}
-
-func (s *Stack) routeHostedChildMessage(ctx context.Context, parentRef session.SessionRef, req agentmessage.Request) (agentmessage.Response, error) {
-	if s == nil || s.sessionRuntimes == nil {
-		return agentmessage.Response{}, fmt.Errorf("gatewayapp: hosted child mailbox is unavailable")
-	}
-	parentRef = session.NormalizeSessionRef(parentRef)
-	if strings.TrimSpace(parentRef.SessionID) == "" {
-		return agentmessage.Response{}, fmt.Errorf("gatewayapp: parent Session is required")
-	}
-	runtime, _, release, err := s.sessionRuntimes.acquireControlRuntime(ctx, parentRef.SessionID, true)
-	if err != nil {
-		return agentmessage.Response{}, err
-	}
-	if release != nil {
-		defer func() {
-			_ = release(context.WithoutCancel(ctx))
-		}()
-	}
-	if runtime == nil || runtime.stack == nil || runtime.stack.engine == nil {
-		return agentmessage.Response{}, fmt.Errorf("gatewayapp: parent Agent message runtime is unavailable")
-	}
-	return runtime.stack.engine.SendAgentMessage(ctx, parentRef, req)
+	return s.hostedChildMailbox
 }
 
 func (s hostedChildMessageSender) SendMessage(ctx context.Context, raw agentmessage.Request) (agentmessage.Response, error) {

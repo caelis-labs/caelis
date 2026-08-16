@@ -12,7 +12,7 @@ import (
 // validateAgentAssemblyCandidate rejects candidate configuration that could
 // persist successfully but fail when a later Session assembles Agents from all
 // configured sources.
-func (s *Stack) validateAgentAssemblyCandidate(doc AppConfig) error {
+func (s *runtimeComposition) validateAgentAssemblyCandidate(doc AppConfig) error {
 	if s == nil {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}

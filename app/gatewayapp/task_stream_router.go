@@ -87,13 +87,13 @@ func (s hostTaskStreamService) service(sessionID string) (stream.Service, error)
 		return nil, taskStreamRuntimeUnavailable()
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	runtimeStack := host
+	runtimeStack := &host.runtimeComposition
 	if registry := host.sessionRuntimes; registry != nil {
 		runtime, ok := registry.loaded(sessionID)
 		if !ok || runtime == nil || runtime.stack == nil {
 			return nil, taskStreamRuntimeUnavailable()
 		}
-		runtimeStack = runtime.stack
+		runtimeStack = &runtime.stack.runtimeComposition
 	}
 	provider := runtimeStack.KernelStreams()
 	if provider == nil || provider.Streams() == nil {

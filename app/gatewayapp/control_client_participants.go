@@ -26,7 +26,7 @@ func (s *Stack) ParticipantHandles(ctx context.Context, sessionID string) ([]str
 		return nil, errors.New("gatewayapp: Session ID is required")
 	}
 
-	runtimeStack := s
+	runtimeStack := &s.runtimeComposition
 	var release func()
 	if s.sessionRuntimes != nil {
 		// Serialize the loaded check with activation and configuration mutation.
@@ -44,7 +44,7 @@ func (s *Stack) ParticipantHandles(ctx context.Context, sessionID string) ([]str
 		}
 		release = releaseUse
 		if runtime != nil {
-			runtimeStack = runtime.stack
+			runtimeStack = &runtime.stack.runtimeComposition
 		}
 	}
 	if release != nil {

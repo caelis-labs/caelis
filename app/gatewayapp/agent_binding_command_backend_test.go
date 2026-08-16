@@ -128,8 +128,8 @@ func TestAgentBindingCASAllowsOnlyOneConcurrentHostWriter(t *testing.T) {
 		}
 		return store
 	}
-	first := &Stack{store: makeStore()}
-	second := &Stack{store: makeStore()}
+	first := &Stack{runtimeComposition: runtimeComposition{store: makeStore()}}
+	second := &Stack{runtimeComposition: runtimeComposition{store: makeStore()}}
 	type outcome struct {
 		result agentBindingMutationResult
 		err    error

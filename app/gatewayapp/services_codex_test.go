@@ -32,7 +32,7 @@ func TestAuthenticateModelProviderUsesStoredCodexCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = (&Stack{codexAuth: manager}).authenticateModelProvider(context.Background(), modelconfig.AuthenticateRequest{
+	err = (&Stack{runtimeComposition: runtimeComposition{codexAuth: manager}}).authenticateModelProvider(context.Background(), modelconfig.AuthenticateRequest{
 		Provider: "openai-codex",
 	})
 	if err != nil {

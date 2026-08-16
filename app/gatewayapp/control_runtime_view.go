@@ -54,7 +54,7 @@ type ControlRuntimeView struct {
 
 // ControlRuntimeView returns the adapter projection for this composition. The
 // view is app-private glue and must not be exposed to presentation surfaces.
-func (s *Stack) ControlRuntimeView() *ControlRuntimeView {
+func (s *runtimeComposition) ControlRuntimeView() *ControlRuntimeView {
 	if s == nil {
 		return nil
 	}

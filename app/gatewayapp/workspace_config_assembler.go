@@ -40,7 +40,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	active session.Session,
 	activity sessionRuntimeActivity,
 	sessions session.Service,
-) (*Stack, error) {
+) (*sessionRuntimeInstance, error) {
 	if a == nil || sessions == nil {
 		return nil, errors.New("gatewayapp: workspace config assembler is unavailable")
 	}
@@ -91,36 +91,37 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 		return nil, err
 	}
 
-	child := &Stack{
+	child := &sessionRuntimeInstance{
 		runtimeComposition: runtimeComposition{
-			lookup:                lookup,
-			modelCatalog:          deps.modelCatalog,
-			placementCache:        placement,
-			appConfigSnapshot:     ptrToConfigSnapshot(doc),
-			runtime:               runtimeConfig,
-			sandbox:               sandboxConfig,
-			lifecycleCtx:          deps.lifecycleCtx,
-			childControlURL:       process.childControlURL,
-			childControlTokenFile: process.childControlTokenFile,
-			retainRuntimeWork:     activity.retainWork,
-			runtimeTaskChanged:    activity.taskChanged,
-			hostedChildMailbox:    deps.hostedChildMailbox,
+			Sessions:                sessions,
+			AppName:                 deps.appName,
+			UserID:                  deps.userID,
+			Workspace:               workspace,
+			store:                   deps.store,
+			storeDir:                deps.storeDir,
+			leaseOwnerID:            deps.leaseOwnerID,
+			taskStore:               deps.tasks,
+			controlFeeds:            deps.feeds,
+			approvalRecovery:        deps.approvalRecovery,
+			codexAuth:               deps.codexAuth,
+			grokAuth:                deps.grokAuth,
+			apiKeyCredentials:       deps.apiKeyCredentials,
+			providerUsage:           deps.providerUsage,
+			sessionModelPins:        deps.modelPins,
+			lookup:                  lookup,
+			modelCatalog:            deps.modelCatalog,
+			placementCache:          placement,
+			appConfigSnapshot:       ptrToConfigSnapshot(doc),
+			runtime:                 runtimeConfig,
+			sandbox:                 sandboxConfig,
+			sandboxActivationPinned: true,
+			lifecycleCtx:            deps.lifecycleCtx,
+			childControlURL:         process.childControlURL,
+			childControlTokenFile:   process.childControlTokenFile,
+			retainRuntimeWork:       activity.retainWork,
+			runtimeTaskChanged:      activity.taskChanged,
+			hostedChildMailbox:      deps.hostedChildMailbox,
 		},
-		Sessions:          sessions,
-		AppName:           deps.appName,
-		UserID:            deps.userID,
-		Workspace:         workspace,
-		store:             deps.store,
-		storeDir:          deps.storeDir,
-		leaseOwnerID:      deps.leaseOwnerID,
-		taskStore:         deps.tasks,
-		controlFeeds:      deps.feeds,
-		approvalRecovery:  deps.approvalRecovery,
-		codexAuth:         deps.codexAuth,
-		grokAuth:          deps.grokAuth,
-		apiKeyCredentials: deps.apiKeyCredentials,
-		providerUsage:     deps.providerUsage,
-		sessionModelPins:  deps.modelPins,
 	}
 	if err := child.buildInitialGatewayRuntime(ctx); err != nil {
 		return nil, fmt.Errorf(

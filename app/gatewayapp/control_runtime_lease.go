@@ -14,7 +14,7 @@ import (
 // AppServer adapters. Presentation surfaces must consume focused clients and
 // never receive this Runtime handle.
 type ControlRuntimeLease struct {
-	runtime *Stack
+	runtime *runtimeComposition
 	session session.Session
 	release func(context.Context) error
 
@@ -50,7 +50,7 @@ func (s *Stack) AcquireControlRuntime(
 		}
 		return nil, errors.New("gatewayapp: Control Runtime snapshot is unavailable")
 	}
-	return &ControlRuntimeLease{runtime: runtime.stack, session: session.CloneSession(active), release: release}, nil
+	return &ControlRuntimeLease{runtime: &runtime.stack.runtimeComposition, session: session.CloneSession(active), release: release}, nil
 }
 
 // ControlRuntimeView returns the focused server-side read projection. It is

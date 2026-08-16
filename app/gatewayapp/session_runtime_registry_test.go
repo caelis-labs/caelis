@@ -663,8 +663,8 @@ func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pinned.runtime != loaded.stack {
-		t.Fatalf("loaded Runtime lease = %p, want %p", pinned.runtime, loaded.stack)
+	if pinned.runtime != &loaded.stack.runtimeComposition {
+		t.Fatalf("loaded Runtime lease = %p, want %p", pinned.runtime, &loaded.stack.runtimeComposition)
 	}
 	if err := pinned.Close(ctx); err != nil {
 		t.Fatal(err)
@@ -2166,10 +2166,10 @@ func activateSessionRuntime(t *testing.T, stack *Stack, sessionID string) *sessi
 	return runtime
 }
 
-func assertSessionRuntimeSharingContract(t *testing.T, host, child *Stack) {
+func assertSessionRuntimeSharingContract(t *testing.T, host *Stack, child *sessionRuntimeInstance) {
 	t.Helper()
-	if child == nil || child == host {
-		t.Fatalf("Session child Stack = %p, host = %p", child, host)
+	if child == nil {
+		t.Fatal("Session Runtime instance is nil")
 	}
 	if child.lookup == host.lookup || child.placementCache == host.placementCache {
 		t.Fatal("Session child shared mutable model or placement configuration")
@@ -2201,15 +2201,6 @@ func assertSessionRuntimeSharingContract(t *testing.T, host, child *Stack) {
 	if child.mcpMgr != nil && child.mcpMgr == host.mcpMgr {
 		t.Fatal("Session child shared its MCP manager")
 	}
-	if child.sessionRuntimes != nil ||
-		child.controlClient != nil ||
-		child.taskStreams != nil ||
-		child.operations != nil ||
-		child.modelRecovery != nil ||
-		child.lifecycleCancel != nil ||
-		child.sandboxLifecycleFactory != nil {
-		t.Fatal("Session child received Host-only ownership state")
-	}
 }
 
 func sameSessionRuntimeReference(left any, right any) bool {
@@ -2231,7 +2222,7 @@ func sameSessionRuntimeReference(left any, right any) bool {
 
 func assertWorkspaceRuntimeComposition(
 	t *testing.T,
-	stack *Stack,
+	stack *sessionRuntimeInstance,
 	wantCWD string,
 	wantInstruction string,
 	forbiddenInstruction string,

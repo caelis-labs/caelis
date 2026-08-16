@@ -40,12 +40,12 @@ func delegationAgentsForBindings(bindings agentbinding.Configuration, includeSel
 	return out
 }
 
-func (s *Stack) delegationSpawnTargets(session controlplacement.SessionContext) (map[string]spawn.Target, error) {
+func (s *runtimeComposition) delegationSpawnTargets(session controlplacement.SessionContext) (map[string]spawn.Target, error) {
 	_, targets, err := s.delegationSpawnConfiguration(session)
 	return targets, err
 }
 
-func (s *Stack) delegationSpawnConfiguration(session controlplacement.SessionContext) ([]sdkdelegation.Agent, map[string]spawn.Target, error) {
+func (s *runtimeComposition) delegationSpawnConfiguration(session controlplacement.SessionContext) ([]sdkdelegation.Agent, map[string]spawn.Target, error) {
 	if s == nil || s.store == nil {
 		return nil, nil, fmt.Errorf("gatewayapp: delegation placement is unavailable")
 	}
@@ -89,7 +89,7 @@ func (s *Stack) delegationSpawnConfiguration(session controlplacement.SessionCon
 	return agents, targets, nil
 }
 
-func (s *Stack) resolveDelegationPlacement(req sdkdelegation.TargetRequest, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
+func (s *runtimeComposition) resolveDelegationPlacement(req sdkdelegation.TargetRequest, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
 	if s == nil || s.store == nil || s.lookup == nil {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: delegation placement is unavailable")
 	}
@@ -134,7 +134,7 @@ func (s *Stack) resolveDelegationPlacement(req sdkdelegation.TargetRequest, runt
 	}
 }
 
-func (s *Stack) materializeDelegatedModel(name, profileID, effort string, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
+func (s *runtimeComposition) materializeDelegatedModel(name, profileID, effort string, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
 	configured, err := s.resolveProviderProfileConfig(profileID, effort)
 	if err != nil {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve delegated profile %q: %w", profileID, err)

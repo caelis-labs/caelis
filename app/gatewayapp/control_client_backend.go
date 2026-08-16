@@ -84,7 +84,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 	}
 
 	sessionID := controlCommandSessionID(request)
-	runtimeStack := s
+	runtimeStack := &s.runtimeComposition
 	var newlyActivatedRuntime *sessionRuntime
 	var releaseRuntimeUse func()
 	var closeControlRuntime func(context.Context) error
@@ -116,14 +116,14 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(errors.New("gatewayapp: Session configuration Runtime is unavailable"))
 		}
 		closeControlRuntime = closeRuntime
-		runtimeStack = runtime.stack
+		runtimeStack = &runtime.stack.runtimeComposition
 	case controlActionActivatesSessionRuntime(action):
 		runtime, _, release, activated, err := s.sessionRuntimes.acquireActivatedControlRuntime(ctx, sessionID)
 		if err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
 		releaseRuntimeUse = func() { _ = release(context.Background()) }
-		runtimeStack = runtime.stack
+		runtimeStack = &runtime.stack.runtimeComposition
 		if activated {
 			newlyActivatedRuntime = runtime
 		}
@@ -141,7 +141,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 				appserver.NewOutcomeError(appserver.OutcomeConflicted, coded)
 		}
 		releaseRuntimeUse = releaseUse
-		runtimeStack = runtime.stack
+		runtimeStack = &runtime.stack.runtimeComposition
 	case action == appserver.ActionSessionClose:
 		runtime, releaseUse, err := s.sessionRuntimes.acquireLoadedRuntime(sessionID)
 		if err != nil {
@@ -149,7 +149,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 		}
 		if runtime != nil {
 			releaseRuntimeUse = releaseUse
-			runtimeStack = runtime.stack
+			runtimeStack = &runtime.stack.runtimeComposition
 		} else if _, err := s.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID}); err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
@@ -224,7 +224,7 @@ func controlCommandProvesNoEffect(err error) bool {
 		outcomeErr.Outcome == appserver.OutcomeConflicted
 }
 
-func (s *Stack) executeControlCommand(ctx context.Context, principal appserver.Principal, action appserver.Action, request any) (result appserver.CommandResult, commandErr error) {
+func (s *runtimeComposition) executeControlCommand(ctx context.Context, principal appserver.Principal, action appserver.Action, request any) (result appserver.CommandResult, commandErr error) {
 	if s == nil {
 		return appserver.CommandResult{}, errors.New("gatewayapp: stack is unavailable")
 	}
@@ -594,7 +594,7 @@ func classifyControlPreDispatchError(err error) error {
 	return appserver.NewOutcomeError(appserver.OutcomeRejected, err)
 }
 
-func (s *Stack) controlRuntimeContext(fallback context.Context, active session.Session) context.Context {
+func (s *runtimeComposition) controlRuntimeContext(fallback context.Context, active session.Session) context.Context {
 	runtimeCtx := fallback
 	if s != nil && s.lifecycleCtx != nil {
 		runtimeCtx = s.lifecycleCtx
@@ -616,7 +616,7 @@ func (s *Stack) controlRuntimeContext(fallback context.Context, active session.S
 	return runtimeCtx
 }
 
-func (s *Stack) resolveControlParticipantPlacement(ctx context.Context, profileID, effort string) (sdkplacement.Placement, error) {
+func (s *runtimeComposition) resolveControlParticipantPlacement(ctx context.Context, profileID, effort string) (sdkplacement.Placement, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -635,7 +635,7 @@ func (s *Stack) resolveControlParticipantPlacement(ctx context.Context, profileI
 	return resolved, nil
 }
 
-func (s *Stack) resolveControlHandlePlacement(ctx context.Context, handle agentbinding.Handle) (sdkplacement.Placement, error) {
+func (s *runtimeComposition) resolveControlHandlePlacement(ctx context.Context, handle agentbinding.Handle) (sdkplacement.Placement, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -665,15 +665,15 @@ func (s *Stack) resolveControlHandlePlacement(ctx context.Context, handle agentb
 	return sdkplacement.Placement{}, appserver.NewOutcomeError(appserver.OutcomeRejected, coded)
 }
 
-func (s *Stack) checkControlCommandCAS(ctx context.Context, base appserver.WriteBase) (session.Session, error) {
+func (s *runtimeComposition) checkControlCommandCAS(ctx context.Context, base appserver.WriteBase) (session.Session, error) {
 	return s.checkControlCommandCASMode(ctx, base, false)
 }
 
-func (s *Stack) checkControlCommandCASAllowClosed(ctx context.Context, base appserver.WriteBase) (session.Session, error) {
+func (s *runtimeComposition) checkControlCommandCASAllowClosed(ctx context.Context, base appserver.WriteBase) (session.Session, error) {
 	return s.checkControlCommandCASMode(ctx, base, true)
 }
 
-func (s *Stack) checkControlCommandCASMode(ctx context.Context, base appserver.WriteBase, allowClosed bool) (session.Session, error) {
+func (s *runtimeComposition) checkControlCommandCASMode(ctx context.Context, base appserver.WriteBase, allowClosed bool) (session.Session, error) {
 	active, err := s.Sessions.Session(ctx, session.SessionRef{SessionID: strings.TrimSpace(base.SessionID)})
 	if err != nil {
 		return session.Session{}, err
@@ -696,7 +696,7 @@ func (s *Stack) checkControlCommandCASMode(ctx context.Context, base appserver.W
 	return active, nil
 }
 
-func (s *Stack) checkControlTurnTarget(ctx context.Context, base appserver.WriteBase, target appserver.TurnTarget) (session.Session, error) {
+func (s *runtimeComposition) checkControlTurnTarget(ctx context.Context, base appserver.WriteBase, target appserver.TurnTarget) (session.Session, error) {
 	active, err := s.checkControlCommandCAS(ctx, base)
 	if err != nil {
 		return active, err
@@ -708,7 +708,7 @@ func (s *Stack) checkControlTurnTarget(ctx context.Context, base appserver.Write
 	return active, nil
 }
 
-func (s *Stack) checkControlApprovalTarget(ctx context.Context, base appserver.WriteBase, target appserver.TurnTarget, requestID string) (session.Session, error) {
+func (s *runtimeComposition) checkControlApprovalTarget(ctx context.Context, base appserver.WriteBase, target appserver.TurnTarget, requestID string) (session.Session, error) {
 	active, err := s.checkControlCommandCAS(ctx, base)
 	if err != nil {
 		return active, err

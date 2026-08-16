@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
-func (s *Stack) attachControlClientHandle(handle kernel.TurnHandle) {
+func (s *runtimeComposition) attachControlClientHandle(handle kernel.TurnHandle) {
 	if handle == nil {
 		return
 	}

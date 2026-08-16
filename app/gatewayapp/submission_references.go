@@ -8,14 +8,14 @@ import (
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func (s *Stack) submissionReferenceProjector() kernelimpl.SubmissionReferenceProjector {
+func (s *runtimeComposition) submissionReferenceProjector() kernelimpl.SubmissionReferenceProjector {
 	if s == nil {
 		return nil
 	}
 	return kernelimpl.SubmissionReferenceProjectorFunc(s.projectSubmissionReferences)
 }
 
-func (s *Stack) projectSubmissionReferences(ctx context.Context, req kernelimpl.SubmissionReferenceProjectionRequest) (kernelimpl.SubmissionReferenceProjection, error) {
+func (s *runtimeComposition) projectSubmissionReferences(ctx context.Context, req kernelimpl.SubmissionReferenceProjectionRequest) (kernelimpl.SubmissionReferenceProjection, error) {
 	text := strings.TrimSpace(req.Input)
 	if text == "" {
 		return kernelimpl.SubmissionReferenceProjection{}, nil

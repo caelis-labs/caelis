@@ -70,14 +70,14 @@ func (s *Stack) setSandboxBackendAtRevision(ctx context.Context, backend string,
 	return securityPosture.applySandboxStatus(status), observed.ConfigurationRevision, errors.Join(persistErr, observedErr)
 }
 
-func (s *Stack) SandboxStatus() SandboxStatus {
+func (s *runtimeComposition) SandboxStatus() SandboxStatus {
 	return s.sandboxStatus(true)
 }
 
 // SandboxStatusForWorkspace projects only Runtime-specific setup data that
 // belongs to the explicitly addressed workspace. A persistent Host must not
 // reuse its startup Runtime's workspace roots for another client directory.
-func (s *Stack) SandboxStatusForWorkspace(workspace session.WorkspaceRef) SandboxStatus {
+func (s *runtimeComposition) SandboxStatusForWorkspace(workspace session.WorkspaceRef) SandboxStatus {
 	if s == nil {
 		return SandboxStatus{}
 	}
@@ -99,12 +99,13 @@ func sameWorkspaceCWD(left, right string) bool {
 	return left == right
 }
 
-func (s *Stack) sandboxStatus(includeRuntime bool) SandboxStatus {
+func (s *runtimeComposition) sandboxStatus(includeRuntime bool) SandboxStatus {
 	if s == nil {
 		return SandboxStatus{}
 	}
 	s.mu.RLock()
 	liveCfg := cloneSandboxConfig(s.sandbox)
+	activationPinned := s.sandboxActivationPinned
 	persistedCfg := cloneSandboxConfig(s.sandboxPersisted)
 	override := cloneSandboxConfig(s.sandboxOverride)
 	exec := s.exec
@@ -112,6 +113,9 @@ func (s *Stack) sandboxStatus(includeRuntime bool) SandboxStatus {
 	s.mu.RUnlock()
 	if !includeRuntime {
 		exec = nil
+	}
+	if activationPinned {
+		return securityPosture.applySandboxStatus(sandboxStatusFromRuntime(liveCfg, exec))
 	}
 	cfg := mergeSandboxConfig(persistedCfg, override)
 	if reflect.DeepEqual(configstore.NormalizeSandboxConfig(liveCfg), configstore.NormalizeSandboxConfig(cfg)) {

@@ -2,6 +2,6 @@ package gatewayapp
 
 const guardianSceneID = "guardian"
 
-func (s *Stack) newGuardianApprover() *guardianApprovalReviewer {
+func (s *runtimeComposition) newGuardianApprover() *guardianApprovalReviewer {
 	return newGuardianApprovalApprover(s.Sessions)
 }

@@ -22,7 +22,7 @@ import (
 type sessionRuntime struct {
 	sessionID string
 	workspace session.WorkspaceRef
-	stack     *Stack
+	stack     *sessionRuntimeInstance
 
 	// Lifecycle fields are guarded by sessionRuntimeRegistry.mu. Once releasing
 	// is set, command routing must not return this Runtime again. inUse covers
@@ -74,7 +74,7 @@ type sessionRuntimeAssembler interface {
 		session.Session,
 		sessionRuntimeActivity,
 		session.Service,
-	) (*Stack, error)
+	) (*sessionRuntimeInstance, error)
 }
 
 type sessionRuntimeRegistryConfig struct {

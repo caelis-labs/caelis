@@ -186,8 +186,8 @@ func TestDisconnectACPCASAllowsOnlyOneConcurrentHostWriter(t *testing.T) {
 		return store
 	}
 	sessions := sessionmemory.NewStore(sessionmemory.Config{})
-	first := &Stack{store: makeStore(), Sessions: sessions}
-	second := &Stack{store: makeStore(), Sessions: sessions}
+	first := &Stack{runtimeComposition: runtimeComposition{store: makeStore(), Sessions: sessions}}
+	second := &Stack{runtimeComposition: runtimeComposition{store: makeStore(), Sessions: sessions}}
 	type outcome struct {
 		result externalAgentMutationResult
 		err    error
