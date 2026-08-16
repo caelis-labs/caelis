@@ -13,15 +13,13 @@ import (
 	"time"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 // Dependencies contains only the Control contracts exposed over HTTP.
 // Product assembly remains outside the listener package.
 type Dependencies struct {
-	Services    appserver.AppServerServices
-	TaskStreams taskstream.Service
-	Lifecycle   interface {
+	Services  appserver.AppServerServices
+	Lifecycle interface {
 		Quiesce(context.Context) error
 	}
 }
@@ -56,14 +54,11 @@ func Handler(deps Dependencies, config Config) (http.Handler, error) {
 	if err := deps.Services.Validate(); err != nil {
 		return nil, fmt.Errorf("controlserver: invalid AppServer services: %w", err)
 	}
-	if deps.TaskStreams == nil {
-		return nil, errors.New("controlserver: Task stream service is required")
-	}
 	if config.Authenticator == nil {
 		return nil, errors.New("controlserver: authenticator is required for an HTTP handler")
 	}
 	server, err := New(HandlerConfig{
-		Services: deps.Services, TaskStreams: deps.TaskStreams, Authenticator: config.Authenticator,
+		Services: deps.Services, Authenticator: config.Authenticator,
 		AllowedHosts: append([]string(nil), config.AllowedHosts...), Heartbeat: config.Heartbeat,
 		ServerInfo: config.ServerInfo, Ready: config.Ready, Shutdown: config.Shutdown,
 	})

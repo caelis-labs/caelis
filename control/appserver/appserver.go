@@ -3,6 +3,8 @@ package appserver
 import (
 	"errors"
 	"fmt"
+
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 // AppServerServices is the complete transport-neutral product capability set
@@ -19,6 +21,7 @@ type AppServerServices struct {
 	Plugins       PluginService
 	Presentation  PresentationService
 	Terminal      TerminalService
+	Tasks         taskstream.Service
 }
 
 // Validate rejects partial AppServer assemblies. A transport adapter may use a
@@ -39,6 +42,7 @@ func (s AppServerServices) Validate() error {
 		{name: "plugin", value: s.Plugins},
 		{name: "presentation", value: s.Presentation},
 		{name: "terminal", value: s.Terminal},
+		{name: "Task observation", value: s.Tasks},
 	}
 	for _, item := range required {
 		if item.value == nil {
@@ -62,6 +66,7 @@ type AppServerClients struct {
 	Plugins       PluginClient
 	Presentation  PresentationClient
 	Terminal      TerminalClient
+	Tasks         taskstream.Client
 }
 
 // BindAppServerClients binds one trusted principal to a complete AppServer.
@@ -109,10 +114,16 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 	if err != nil {
 		return AppServerClients{}, err
 	}
+	tasks, err := taskstream.BindClient(services.Tasks, taskstream.Principal{
+		ID: principal.ID, Roles: append([]string(nil), principal.Roles...),
+	})
+	if err != nil {
+		return AppServerClients{}, err
+	}
 	clients := AppServerClients{
 		Sessions: sessions, Participants: participants, AgentMessages: agentMessages, Status: status,
 		Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
-		Presentation: presentation, Terminal: terminal,
+		Presentation: presentation, Terminal: terminal, Tasks: tasks,
 	}
 	if err := clients.Validate(); err != nil {
 		return AppServerClients{}, err
@@ -123,7 +134,7 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 // Validate rejects a partial presentation client facade.
 func (c AppServerClients) Validate() error {
 	if c.Sessions == nil || c.Participants == nil || c.AgentMessages == nil || c.Status == nil || c.Configuration == nil ||
-		c.Agents == nil || c.Completion == nil || c.Plugins == nil || c.Presentation == nil || c.Terminal == nil {
+		c.Agents == nil || c.Completion == nil || c.Plugins == nil || c.Presentation == nil || c.Terminal == nil || c.Tasks == nil {
 		return errors.New("controlclient: complete AppServer clients are required")
 	}
 	return nil

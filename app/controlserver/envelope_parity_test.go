@@ -49,7 +49,7 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	_ = inProcess.Subscription.Close()
 
 	server, err := New(HandlerConfig{
-		Services: testAppServerServices(parityService{feed: feed}, staticStatusService{}), TaskStreams: &fakeTaskService{},
+		Services: testAppServerServices(parityService{feed: feed}, staticStatusService{}),
 		Authenticator: AuthenticatorFunc(func(*http.Request) (appserver.Principal, error) {
 			return appserver.Principal{ID: "owner"}, nil
 		}),

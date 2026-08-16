@@ -85,7 +85,7 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 		Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},
 	}
 	handler, err := controlserver.Handler(controlserver.Dependencies{
-		Services: appServer.Services, TaskStreams: appServer.TaskStreams, Lifecycle: host,
+		Services: appServer.Services, Lifecycle: host,
 	}, controlserver.Config{
 		Authenticator: authenticator, AllowedHosts: []string{"127.0.0.1"}, ServerInfo: info,
 		Ready: func() bool { return true },
@@ -237,8 +237,8 @@ func TestMissingManagedHostFallsBackToEmbedded(t *testing.T) {
 	if product.Mode != productClientModeEmbedded || !product.ManagedFallback {
 		t.Fatalf("fallback product = mode %d fallback %v", product.Mode, product.ManagedFallback)
 	}
-	if err := product.Clients.Validate(); err != nil || product.Tasks == nil {
-		t.Fatalf("fallback clients = %v, tasks=%T", err, product.Tasks)
+	if err := product.Clients.Validate(); err != nil || product.Clients.Tasks == nil {
+		t.Fatalf("fallback clients = %v, tasks=%T", err, product.Clients.Tasks)
 	}
 }
 

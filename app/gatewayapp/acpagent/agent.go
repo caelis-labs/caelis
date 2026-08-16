@@ -15,7 +15,6 @@ import (
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 	"github.com/caelis-labs/caelis/surfaces/promptview"
 )
 
@@ -23,7 +22,6 @@ import (
 // Surfaces never receive Runtime, Kernel, or Stack handles through this path.
 type ClientsConfig struct {
 	Clients      appserver.AppServerClients
-	Tasks        taskstream.Client
 	AppName      string
 	UserID       string
 	WorkspaceKey string
@@ -43,7 +41,7 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 	if err != nil {
 		return nil, err
 	}
-	clients, taskStreamClient, err := appServer.Bind(appserver.Principal{ID: stack.UserID})
+	clients, err := appServer.Bind(appserver.Principal{ID: stack.UserID})
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +53,6 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 	}
 	return NewFromClients(ClientsConfig{
 		Clients:                   clients,
-		Tasks:                     taskStreamClient,
 		AppName:                   stack.AppName,
 		UserID:                    stack.UserID,
 		WorkspaceKey:              strings.TrimSpace(stack.Workspace.Key),
@@ -85,7 +82,7 @@ func NewFromClients(cfg ClientsConfig) (*runtimeacp.RuntimeAgent, error) {
 		UserID:                    firstNonEmpty(cfg.UserID, "local-user"),
 		WorkspaceKey:              strings.TrimSpace(cfg.WorkspaceKey),
 		WorkspaceCWD:              strings.TrimSpace(cfg.WorkspaceCWD),
-		TaskStreamClient:          cfg.Tasks,
+		TaskStreamClient:          clients.Tasks,
 		SlashResultFormatter:      promptview.FormatSlashResult,
 		PromptRouterFactory: func(ctx context.Context, activeSession session.Session) (controlprompt.Router, error) {
 			turnSessions := clients.Sessions

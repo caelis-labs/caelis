@@ -52,7 +52,7 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler, err := controlserver.Handler(controlserver.Dependencies{
-		Services: appServer.Services, TaskStreams: appServer.TaskStreams,
+		Services: appServer.Services,
 	}, controlserver.Config{
 		Authenticator: authenticator,
 		AllowedHosts:  []string{"127.0.0.1", "localhost"},
@@ -78,15 +78,15 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clientsA, tasksA, err := httpclient.BindAppServer(clientA)
+	clientsA, err := httpclient.AppServerClients(clientA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	clientsB, tasksB, err := httpclient.BindAppServer(clientB)
+	clientsB, err := httpclient.AppServerClients(clientB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tasksA == nil || tasksB == nil {
+	if clientsA.Tasks == nil || clientsB.Tasks == nil {
 		t.Fatal("remote Task clients are required")
 	}
 

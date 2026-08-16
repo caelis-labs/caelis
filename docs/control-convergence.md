@@ -12,8 +12,8 @@ future orchestration.
 `control/appserver` is the aggregate boundary. It exposes the principal-bound
 capability set consumed by presentation surfaces; focused `control/*` domains
 remain the semantic owners composed behind it. Task observation remains a
-separate stream and authority and should join the aggregate client capability
-set without joining the Session feed. `app/*` owns Host composition and
+separate stream and authority inside the aggregate client capability set; it
+does not join the Session feed. `app/*` owns Host composition and
 transport adapters and must not import a concrete Surface.
 
 ```text

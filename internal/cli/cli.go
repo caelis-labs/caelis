@@ -355,7 +355,7 @@ func runWithProductClientOpener(
 	}
 	if acpSubcommand {
 		agent, err := acpagent.NewFromClients(acpagent.ClientsConfig{
-			Clients: product.Clients, Tasks: product.Tasks,
+			Clients: product.Clients,
 			AppName: product.Workspace.AppName, UserID: product.Workspace.UserID,
 			WorkspaceKey: product.Workspace.WorkspaceKey, WorkspaceCWD: product.Workspace.WorkspaceCWD,
 		})
@@ -512,7 +512,7 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 	serverConfig.Authenticator = authenticator
 	serverConfig.TokenFile = tokenFile
 	return runControlServerCommand(ctx, controlserver.Dependencies{
-		Services: appServer.Services, TaskStreams: appServer.TaskStreams, Lifecycle: stack,
+		Services: appServer.Services, Lifecycle: stack,
 	}, serverConfig)
 }
 
@@ -800,7 +800,6 @@ func runInteractive(ctx context.Context, product *productClients, sessionID stri
 	return runTUI(
 		ctx,
 		product.Clients,
-		product.Tasks,
 		strings.TrimSpace(sessionID),
 		product.Workspace.WorkspaceKey,
 		product.Workspace.WorkspaceCWD,

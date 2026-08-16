@@ -43,7 +43,7 @@ func TestModelCatalogMutationsRefreshActiveSessionPickerWithoutReplacingRuntime(
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, _, err := appServer.Bind(appserver.Principal{ID: "local-user"})
+	clients, err := appServer.Bind(appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestAgentMessageExactBindingsAuthorizeEmbeddedAndHTTPClients(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner, _, err := appServer.Bind(appserver.Principal{ID: "owner"})
+	owner, err := appServer.Bind(appserver.Principal{ID: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestAgentMessageExactBindingsAuthorizeEmbeddedAndHTTPClients(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	controllerClients, _, err := appServer.Bind(appserver.Principal{ID: "controller-1"})
+	controllerClients, err := appServer.Bind(appserver.Principal{ID: "controller-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestAgentMessageExactBindingsAuthorizeEmbeddedAndHTTPClients(t *testing.T) 
 	}); err != nil || !result.Accepted {
 		t.Fatalf("embedded controller message = %#v, %v", result, err)
 	}
-	participantClients, _, err := appServer.Bind(appserver.Principal{ID: "participant-1"})
+	participantClients, err := appServer.Bind(appserver.Principal{ID: "participant-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +423,7 @@ func TestAgentMessageExactBindingsAuthorizeEmbeddedAndHTTPClients(t *testing.T) 
 		t.Fatal(err)
 	}
 	handler, err := controlserver.Handler(controlserver.Dependencies{
-		Services: appServer.Services, TaskStreams: appServer.TaskStreams,
+		Services: appServer.Services,
 	}, controlserver.Config{Authenticator: authenticator, AllowedHosts: []string{"127.0.0.1"}})
 	if err != nil {
 		t.Fatal(err)
@@ -967,7 +967,7 @@ func bindAppServerTestClients(t *testing.T, host *gatewayapp.Stack) appserver.Ap
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, _, err := server.Bind(appserver.Principal{ID: "local-user"})
+	clients, err := server.Bind(appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1054,7 +1054,7 @@ func bindAppServerHTTPTestClient(t *testing.T, appServer *AppServer, principalID
 		t.Fatal(err)
 	}
 	handler, err := controlserver.Handler(controlserver.Dependencies{
-		Services: appServer.Services, TaskStreams: appServer.TaskStreams,
+		Services: appServer.Services,
 	}, controlserver.Config{Authenticator: authenticator, AllowedHosts: []string{"127.0.0.1"}})
 	if err != nil {
 		t.Fatal(err)

@@ -188,8 +188,8 @@ func TestEmbeddedProductClientsRemainAvailableWhenLoopbackIsForbidden(t *testing
 	if product.BaseURL != "" || product.embeddedControl != nil {
 		t.Fatalf("restricted embedded child endpoint = %q adapter=%T, want none", product.BaseURL, product.embeddedControl)
 	}
-	if err := product.Clients.Validate(); err != nil || product.Tasks == nil {
-		t.Fatalf("restricted embedded clients = %v, tasks=%T", err, product.Tasks)
+	if err := product.Clients.Validate(); err != nil || product.Clients.Tasks == nil {
+		t.Fatalf("restricted embedded clients = %v, tasks=%T", err, product.Clients.Tasks)
 	}
 }
 

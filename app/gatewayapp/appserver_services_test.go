@@ -1,6 +1,9 @@
 package gatewayapp
 
-import appserver "github.com/caelis-labs/caelis/control/appserver"
+import (
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
+)
 
 type gatewayTestFocusedServices struct {
 	appserver.ParticipantService
@@ -13,11 +16,15 @@ type gatewayTestFocusedServices struct {
 	appserver.TerminalService
 }
 
-func gatewayTestAppServerServices(sessions appserver.Service, status appserver.StatusService) appserver.AppServerServices {
+func gatewayTestAppServerServices(sessions appserver.Service, status appserver.StatusService, tasks ...taskstream.Service) appserver.AppServerServices {
 	focused := &gatewayTestFocusedServices{}
+	taskService := taskstream.Service(controlClientNoopTaskStreams{})
+	if len(tasks) > 0 {
+		taskService = tasks[0]
+	}
 	return appserver.AppServerServices{
 		Sessions: sessions, Participants: focused, AgentMessages: focused, Status: status, Configuration: focused,
 		Agents: focused, Completion: focused, Plugins: focused,
-		Presentation: focused, Terminal: focused,
+		Presentation: focused, Terminal: focused, Tasks: taskService,
 	}
 }

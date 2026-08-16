@@ -676,7 +676,7 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	server, err := controlserver.New(controlserver.HandlerConfig{
-		Services: gatewayTestAppServerServices(service, gatewayTestStatusService{}), TaskStreams: controlClientNoopTaskStreams{}, Authenticator: authenticator,
+		Services: gatewayTestAppServerServices(service, gatewayTestStatusService{}), Authenticator: authenticator,
 		AllowedHosts: []string{"127.0.0.1", "localhost", "::1"},
 	})
 	if err != nil {

@@ -14,6 +14,10 @@ func AppServerClients(client *Client) (appserver.AppServerClients, error) {
 	if client == nil {
 		return appserver.AppServerClients{}, errors.New("control http client: client is required")
 	}
+	tasks, err := NewTaskClient(client)
+	if err != nil {
+		return appserver.AppServerClients{}, err
+	}
 	clients := appserver.AppServerClients{
 		Sessions:      client,
 		Participants:  client,
@@ -25,27 +29,12 @@ func AppServerClients(client *Client) (appserver.AppServerClients, error) {
 		Plugins:       client,
 		Presentation:  client,
 		Terminal:      client,
+		Tasks:         tasks,
 	}
 	if err := clients.Validate(); err != nil {
 		return appserver.AppServerClients{}, err
 	}
 	return clients, nil
-}
-
-// BindAppServer binds one authenticated HTTP Control client into the complete
-// product AppServer capability set plus the independent Task observation side
-// channel. Surfaces consume these clients only; Runtime and Kernel handles stay
-// inside the Host process.
-func BindAppServer(client *Client) (appserver.AppServerClients, taskstream.Client, error) {
-	clients, err := AppServerClients(client)
-	if err != nil {
-		return appserver.AppServerClients{}, nil, err
-	}
-	tasks, err := NewTaskClient(client)
-	if err != nil {
-		return appserver.AppServerClients{}, nil, err
-	}
-	return clients, tasks, nil
 }
 
 var (

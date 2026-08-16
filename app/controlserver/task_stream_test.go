@@ -140,9 +140,10 @@ func TestTaskHTTPSSEMarksCleanAndFailedSubscriptionEnds(t *testing.T) {
 
 func newTaskTestServer(t *testing.T, tasks taskstream.Service) *Server {
 	t.Helper()
+	services := testAppServerServices(&fakeService{}, staticStatusService{})
+	services.Tasks = tasks
 	server, err := New(HandlerConfig{
-		Services:      testAppServerServices(&fakeService{}, staticStatusService{}),
-		TaskStreams:   tasks,
+		Services:      services,
 		Authenticator: testAuthenticator(),
 		AllowedHosts:  []string{"example.test", "127.0.0.1"},
 		Heartbeat:     time.Hour,

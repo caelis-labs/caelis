@@ -133,14 +133,14 @@ func TestHeadlessEmbeddedAppServerCoversCreateResumeAndFormats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, tasks, err := server.Bind(appserver.Principal{ID: host.UserID})
+	clients, err := server.Bind(appserver.Principal{ID: host.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := clients.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if tasks == nil {
+	if clients.Tasks == nil {
 		t.Fatal("embedded AppServer returned no Task client")
 	}
 

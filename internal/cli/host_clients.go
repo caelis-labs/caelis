@@ -18,7 +18,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/internal/servicelifecycle"
 	"github.com/caelis-labs/caelis/internal/version"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 // productClientMode selects how a presentation surface reaches Control.
@@ -65,7 +64,6 @@ type productClientOptions struct {
 
 type productClients struct {
 	Clients                        appserver.AppServerClients
-	Tasks                          taskstream.Client
 	Mode                           productClientMode
 	BaseURL                        string
 	Workspace                      gatewayapp.Config
@@ -159,13 +157,12 @@ func openRemoteProductClients(ctx context.Context, options productClientOptions)
 	if _, err := remote.Initialize(initCtx); err != nil {
 		return nil, fmt.Errorf("cli: attach to Control Host %s failed: %w", baseURL, err)
 	}
-	clients, tasks, err := httpclient.BindAppServer(remote)
+	clients, err := httpclient.AppServerClients(remote)
 	if err != nil {
 		return nil, err
 	}
 	return &productClients{
 		Clients: clients,
-		Tasks:   tasks,
 		Mode:    productClientModeRemote,
 		BaseURL: baseURL,
 		Workspace: gatewayapp.Config{
@@ -263,7 +260,7 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 		_ = ownership.Close()
 		return nil, err
 	}
-	clients, tasks, err := appServer.Bind(appserver.Principal{ID: stack.UserID})
+	clients, err := appServer.Bind(appserver.Principal{ID: stack.UserID})
 	if err != nil {
 		cleanupChildCredentialOnError()
 		closeEndpoint()
@@ -293,7 +290,7 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 		}
 		build := version.BuildInfo()
 		handler, handlerErr := controlserver.Handler(controlserver.Dependencies{
-			Services: appServer.Services, TaskStreams: appServer.TaskStreams,
+			Services: appServer.Services,
 		}, controlserver.Config{
 			Authenticator: authenticator,
 			AllowedHosts:  []string{"127.0.0.1"},
@@ -326,7 +323,6 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 	}
 	return &productClients{
 		Clients:                        clients,
-		Tasks:                          tasks,
 		Mode:                           productClientModeEmbedded,
 		BaseURL:                        baseURL,
 		stack:                          stack,

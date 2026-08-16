@@ -36,11 +36,11 @@ func TestAppServerFacadeResetDoesNotCreateWorkspaceSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, tasks, err := server.Bind(appserver.Principal{ID: "local-user"})
+	clients, err := server.Bind(appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tasks == nil {
+	if clients.Tasks == nil {
 		t.Fatal("AppServer task client is nil")
 	}
 

@@ -35,7 +35,7 @@ func TestRunServeStartsProductControlServer(t *testing.T) {
 	t.Cleanup(func() { runControlServerCommand = previous })
 	var captured controlserver.Config
 	runControlServerCommand = func(_ context.Context, deps controlserver.Dependencies, config controlserver.Config) error {
-		if deps.Services.Validate() != nil || deps.TaskStreams == nil || deps.Lifecycle == nil {
+		if deps.Services.Validate() != nil || deps.Lifecycle == nil {
 			t.Fatal("serve did not assemble the product Control and Task clients")
 		}
 		captured = config
@@ -421,7 +421,7 @@ func TestRunHeadlessRejectsClosedSessionWithoutRecreatingIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, _, err := server.Bind(appserver.Principal{ID: stack.UserID})
+	clients, err := server.Bind(appserver.Principal{ID: stack.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}

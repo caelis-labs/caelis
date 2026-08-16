@@ -71,7 +71,7 @@ func TestListenAndServeQuiescesHostBeforeReturning(t *testing.T) {
 	cancel()
 	listener := testenv.NewMemoryListener("127.0.0.1:1455")
 	err = listenAndServe(ctx, Dependencies{
-		Services: testAppServerServices(&fakeService{}, staticStatusService{}), TaskStreams: &fakeTaskService{}, Lifecycle: lifecycle,
+		Services: testAppServerServices(&fakeService{}, staticStatusService{}), Lifecycle: lifecycle,
 	}, Config{
 		Address: "127.0.0.1:0", Authenticator: authenticator,
 		DrainTimeout: time.Second,
@@ -111,8 +111,8 @@ func TestAuthenticatedHostShutdownQuiescesInMemoryServer(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- listenAndServe(context.Background(), Dependencies{
-			Services:    testAppServerServices(&fakeService{}, staticStatusService{}),
-			TaskStreams: &fakeTaskService{}, Lifecycle: lifecycle,
+			Services:  testAppServerServices(&fakeService{}, staticStatusService{}),
+			Lifecycle: lifecycle,
 		}, Config{
 			Address: "127.0.0.1:0", Authenticator: authenticator, DrainTimeout: time.Second,
 			ServerInfo: appserver.ServerInfo{

@@ -52,7 +52,7 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler, err := controlserver.Handler(controlserver.Dependencies{
-		Services: appServer.Services, TaskStreams: appServer.TaskStreams,
+		Services: appServer.Services,
 	}, controlserver.Config{
 		Authenticator: authenticator,
 		AllowedHosts:  []string{"127.0.0.1", "localhost"},
@@ -69,7 +69,7 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, _, err := httpclient.BindAppServer(client)
+	clients, err := httpclient.AppServerClients(client)
 	if err != nil {
 		t.Fatal(err)
 	}

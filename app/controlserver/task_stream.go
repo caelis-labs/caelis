@@ -18,7 +18,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.config.TaskStreams.List(r.Context(), taskPrincipal(principal), taskstream.ListRequest{
+	result, err := s.config.Services.Tasks.List(r.Context(), taskPrincipal(principal), taskstream.ListRequest{
 		SessionID: r.PathValue("session_id"),
 	})
 	writeJSONResult(w, result, err)
@@ -33,7 +33,7 @@ func (s *Server) taskEvents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.config.TaskStreams.Events(r.Context(), taskPrincipal(principal), taskstream.ReadRequest{
+	result, err := s.config.Services.Tasks.Events(r.Context(), taskPrincipal(principal), taskstream.ReadRequest{
 		SessionID: r.PathValue("session_id"),
 		TaskID:    r.PathValue("task_id"),
 		Cursor:    cursor,
@@ -62,7 +62,7 @@ func (s *Server) subscribeTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.config.TaskStreams.Subscribe(r.Context(), taskPrincipal(principal), taskstream.SubscribeRequest{
+	result, err := s.config.Services.Tasks.Subscribe(r.Context(), taskPrincipal(principal), taskstream.SubscribeRequest{
 		SessionID: r.PathValue("session_id"),
 		TaskID:    r.PathValue("task_id"),
 		Cursor:    cursor,

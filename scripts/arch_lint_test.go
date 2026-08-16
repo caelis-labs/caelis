@@ -126,6 +126,12 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "",
 		},
 		{
+			name:       "AppServer accepts projected Task observation",
+			rel:        "control/appserver/appserver.go",
+			importPath: modulePath + "/protocol/acp/taskstream",
+			want:       "",
+		},
+		{
 			name:       "other control packages reject ACP protocol dependencies",
 			rel:        "control/modelconfig/build.go",
 			importPath: modulePath + "/protocol/acp/schema",

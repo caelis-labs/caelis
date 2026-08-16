@@ -32,7 +32,7 @@ func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 	services.Presentation = presentation
 	services.Terminal = terminals
 	server, err := New(HandlerConfig{
-		Services: services, TaskStreams: &fakeTaskService{}, Authenticator: testAuthenticator(),
+		Services: services, Authenticator: testAuthenticator(),
 		AllowedHosts: []string{"127.0.0.1"},
 	})
 	if err != nil {

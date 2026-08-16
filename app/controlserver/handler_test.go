@@ -29,7 +29,7 @@ func TestHostHealthReadinessAndInitializeExposeOneInstance(t *testing.T) {
 	ready := false
 	instanceID := "11111111-1111-4111-8111-111111111111"
 	server, err := New(HandlerConfig{
-		Services: testAppServerServices(&fakeService{}, staticStatusService{}), TaskStreams: &fakeTaskService{},
+		Services:      testAppServerServices(&fakeService{}, staticStatusService{}),
 		Authenticator: testAuthenticator(), AllowedHosts: []string{"example.test"},
 		ServerInfo: appserver.ServerInfo{
 			ServerID: appserver.ServerIdentity, InstanceID: instanceID,
@@ -147,7 +147,7 @@ func TestHTTPStatusAddressesSessionAndDiagnostics(t *testing.T) {
 		Session:       controlstatus.StatusSession{ID: "session-1", Surface: "pet"},
 	}}
 	server, err := New(HandlerConfig{
-		Services: testAppServerServices(&fakeService{}, statusService), TaskStreams: &fakeTaskService{},
+		Services:      testAppServerServices(&fakeService{}, statusService),
 		Authenticator: testAuthenticator(), AllowedHosts: []string{"example.test"},
 	})
 	if err != nil {
@@ -291,10 +291,10 @@ func TestReconnectRejectsMismatchedResumeInputsAndCredentialQuery(t *testing.T) 
 }
 
 func TestNewRequiresNetworkAuthenticatorAndHostAllowlist(t *testing.T) {
-	if _, err := New(HandlerConfig{Services: testAppServerServices(&fakeService{}, staticStatusService{}), TaskStreams: &fakeTaskService{}, AllowedHosts: []string{"example.test"}}); err == nil {
+	if _, err := New(HandlerConfig{Services: testAppServerServices(&fakeService{}, staticStatusService{}), AllowedHosts: []string{"example.test"}}); err == nil {
 		t.Fatal("New accepted an unauthenticated HTTP handler")
 	}
-	if _, err := New(HandlerConfig{Services: testAppServerServices(&fakeService{}, staticStatusService{}), TaskStreams: &fakeTaskService{}, Authenticator: testAuthenticator()}); err == nil {
+	if _, err := New(HandlerConfig{Services: testAppServerServices(&fakeService{}, staticStatusService{}), Authenticator: testAuthenticator()}); err == nil {
 		t.Fatal("New accepted an empty Host allowlist")
 	}
 }
@@ -556,7 +556,7 @@ func (s *fakeService) Reconnect(_ context.Context, _ appserver.Principal, req ap
 func newTestServer(t *testing.T, service appserver.Service, heartbeat time.Duration) *Server {
 	t.Helper()
 	server, err := New(HandlerConfig{
-		Services: testAppServerServices(service, staticStatusService{}), TaskStreams: &fakeTaskService{}, Authenticator: testAuthenticator(),
+		Services: testAppServerServices(service, staticStatusService{}), Authenticator: testAuthenticator(),
 		AllowedHosts: []string{"example.test", "127.0.0.1"}, Heartbeat: heartbeat,
 	})
 	if err != nil {

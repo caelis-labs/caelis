@@ -216,8 +216,7 @@ func headlessSessionTestClient(
 		t.Fatal(err)
 	}
 	handler, err := controlserver.New(controlserver.HandlerConfig{
-		Services:      gatewayTestAppServerServices(stack.ControlClient(), gatewayTestStatusService{}),
-		TaskStreams:   stack.TaskStreams(),
+		Services:      gatewayTestAppServerServices(stack.ControlClient(), gatewayTestStatusService{}, stack.TaskStreams()),
 		Authenticator: authenticator,
 		AllowedHosts:  []string{"127.0.0.1", "localhost", "::1"},
 	})

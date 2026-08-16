@@ -6,15 +6,13 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 // AppServer is the embedded product AppServer assembly. It owns the complete
-// focused Control service set plus the independent Task output side channel.
-// Surfaces bind clients from this boundary and never receive the Host Stack.
+// surface-facing capability set. Surfaces bind clients from this boundary and
+// never receive the Host Stack.
 type AppServer struct {
-	Services    appserver.AppServerServices
-	TaskStreams taskstream.Service
+	Services appserver.AppServerServices
 }
 
 // NewAppServer assembles one complete embedded AppServer from the product Host.
@@ -66,31 +64,23 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 		Services: appserver.AppServerServices{
 			Sessions: host.ControlClient(), Participants: host.ControlParticipants(), AgentMessages: agentMessages, Status: status,
 			Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
-			Presentation: presentation, Terminal: terminal,
+			Presentation: presentation, Terminal: terminal, Tasks: host.TaskStreams(),
 		},
-		TaskStreams: host.TaskStreams(),
 	}
 	if err := server.Services.Validate(); err != nil {
 		return nil, err
-	}
-	if server.TaskStreams == nil {
-		return nil, errors.New("app/gatewayapp/controladapter/local: Task stream service is required")
 	}
 	return server, nil
 }
 
 // Bind returns the principal-bound AppServer clients used by one surface.
-func (s *AppServer) Bind(principal appserver.Principal) (appserver.AppServerClients, taskstream.Client, error) {
-	if s == nil || s.TaskStreams == nil {
-		return appserver.AppServerClients{}, nil, errors.New("app/gatewayapp/controladapter/local: AppServer is unavailable")
+func (s *AppServer) Bind(principal appserver.Principal) (appserver.AppServerClients, error) {
+	if s == nil {
+		return appserver.AppServerClients{}, errors.New("app/gatewayapp/controladapter/local: AppServer is unavailable")
 	}
 	clients, err := appserver.BindAppServerClients(s.Services, principal)
 	if err != nil {
-		return appserver.AppServerClients{}, nil, err
+		return appserver.AppServerClients{}, err
 	}
-	tasks, err := taskstream.BindClient(s.TaskStreams, taskstream.Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)})
-	if err != nil {
-		return appserver.AppServerClients{}, nil, err
-	}
-	return clients, tasks, nil
+	return clients, nil
 }

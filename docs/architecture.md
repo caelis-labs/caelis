@@ -154,8 +154,9 @@ Document responsibilities are intentionally separate:
   filtering, approval recovery, the aggregate client, the durable idempotency
   operation ledger, and the Session lifecycle write gate. Its feed uses the
   shared ACP projection and `eventstream.Envelope` vocabulary without moving
-  Control authorization, state, or broker ownership into `protocol/acp`. Task
-  observation currently remains an independent typed side channel.
+  Control authorization, state, or broker ownership into `protocol/acp`. Its
+  aggregate includes Task observation as an independently delivered typed
+  capability; Task lifecycle, cursor, and stream ownership remain separate.
 - `internal/controlclient/turningress`: private main-Turn ingress glue between
   `internal/kernel` handles and the Control-owned Session feed. Task output
   never fans into this ingress and cannot delay its terminal.
@@ -170,12 +171,12 @@ Document responsibilities are intentionally separate:
   serializes `control/appserver` domain values directly, it stays with that
   semantic owner instead of pretending to be a product-neutral protocol.
 - `control/appserver/httpclient`: the authenticated HTTP implementation of the
-  complete focused AppServer client set. In-process clients bind the same
+  complete AppServer client set, including Task observation. In-process clients bind the same
   contracts directly; transport selection does not change surface semantics.
 - `app/controlserver`: the Control Host's HTTP handler and production listener,
   including authentication, request policy, TLS, token-file policy, and
-  shutdown drain. It maps the complete focused AppServer protocol and
-  independent Task observation protocol and depends
+  shutdown drain. It maps the complete AppServer capability set while keeping
+  Task observation on its independent protocol and depends
   on explicit Control contracts rather than `gatewayapp.Stack`.
 - `internal/controlprompt`: current Control-owned surface-neutral prompt input
   contract, private prompt facade, command catalog, parsing helpers,

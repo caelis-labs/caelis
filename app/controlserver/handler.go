@@ -14,7 +14,6 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 const apiPrefix = wirev1.APIPrefix
@@ -45,7 +44,6 @@ func (f AuthenticatorFunc) Authenticate(request *http.Request) (appserver.Princi
 // server runner.
 type HandlerConfig struct {
 	Services      appserver.AppServerServices
-	TaskStreams   taskstream.Service
 	Authenticator Authenticator
 	AllowedHosts  []string
 	Heartbeat     time.Duration
@@ -64,9 +62,6 @@ type Server struct {
 func New(config HandlerConfig) (*Server, error) {
 	if err := config.Services.Validate(); err != nil {
 		return nil, fmt.Errorf("controlserver: invalid AppServer services: %w", err)
-	}
-	if config.TaskStreams == nil {
-		return nil, errors.New("controlserver: Task stream service is required")
 	}
 	if config.Authenticator == nil {
 		return nil, errors.New("controlserver: authenticator is required for an HTTP handler")

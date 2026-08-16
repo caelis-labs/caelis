@@ -48,7 +48,7 @@ owns that Host's lifetime:
 | Managed local service | Bare `caelis`, `caelis -p …`, or `caelis acp` performs idempotent service start and attaches | Product Host ownership guard taken at process entry before shared state opens; owns Gateway, feed, approvals, operation ledger, Task streams, and Session Runtimes | Any number of TUI, headless, product ACP, and future GUI clients for that store |
 | Explicit Control Host | `caelis serve` | Same Host authority; publishes discovery only for the protected default credential and a loopback listener | Local managed clients or explicit URL clients |
 | Embedded Host | `caelis --embedded`, or a bare launch after a missing managed Host cannot start | Same Host implementation and ownership guard inside one presentation process | Tests, deliberate single-client launches, and environments that cannot start the loopback service |
-| Explicit presentation client | `caelis --control-url …`, `caelis -p --control-url …`, `caelis acp --control-url …` | None. Focused AppServer/Task clients only | Caller-selected external Host |
+| Explicit presentation client | `caelis --control-url …`, `caelis -p --control-url …`, `caelis acp --control-url …` | None. Complete `AppServerClients` aggregate only | Caller-selected external Host |
 
 Rules:
 
@@ -273,14 +273,14 @@ suggests.
 
 ### G1 — Single live lifecycle authority
 
-**Evidence.** Product clients open focused AppServer/Task clients through
-`internal/cli`. A bare local launch discovers or starts one independent Host and
+**Evidence.** Product clients open one complete `AppServerClients` aggregate
+through `internal/cli`. A bare local launch discovers or starts one independent Host and
 uses HTTP/SSE, falling back to the embedded path only after proving the Host was
 missing and service start failed; an explicit Control URL uses the same
 transport. `caelis serve`, explicit `--embedded`, and the bounded embedded
 fallback take a product Host ownership guard at process entry
 before opening shared Host state (`internal/cli/host_ownership*.go`).
-HTTP clients bind the complete focused set plus Task observation
+HTTP clients include independently delivered Task observation in that aggregate
 (`control/appserver/httpclient`). The feed registry and live approval maps remain
 process-local on that one Host. `NewLocalStack` does not own Host selection.
 
@@ -325,11 +325,12 @@ instance without binding a host loopback port.
 
 ### G3 — AppServer capability parity is complete; product process selection lands
 
-**Evidence.** `control/appserver.AppServerClients` is the complete focused client
+**Evidence.** `control/appserver.AppServerClients` is the complete aggregate client
 set for Session lifecycle and Turns, Agent-message delivery and Turn
 observation, participant Turns, status, configuration, Agent operations,
-completion/skill, plugin operations, ACP presentation, and terminal RPC. Task
-observation remains an independent typed side channel. Both the principal-bound
+completion/skill, plugin operations, ACP presentation, terminal RPC, and Task
+observation. Task delivery remains an independent typed side channel inside
+the aggregate. Both the principal-bound
 embedded implementation and authenticated HTTP implementation cover these
 contracts and share the maintained wire codec and generated protocol checks.
 HTTP Task observation is implemented by `control/appserver/httpclient.TaskClient`.
@@ -661,11 +662,13 @@ The current AppServer slice includes:
 - Headless uses the same typed Session Turn from focused AppServer clients, with
   plain final output plus versioned JSON and JSONL contracts suitable for
   scripts and program integration;
-- the TUI uses focused typed clients for every
-  `internal/controlprompt.Service` capability and a separate Task client; its
+- the TUI uses the aggregate's focused typed clients for every
+  `internal/controlprompt.Service` capability and its independently delivered
+  Task observation capability; its
   production facade owns no Stack, Runtime, or compatibility Adapter;
-- product ACP uses the same typed prompt, presentation, terminal, and Task
-  clients; its product configuration accepts no Runtime, Stack, Session store,
+- product ACP uses the same AppServer aggregate for prompt, presentation,
+  terminal, and Task capabilities; its product configuration accepts no
+  Runtime, Stack, Session store,
   Assembly, or SurfaceBuilder;
 - product clients default to discovery/start/attach of one independent local
   Host and use a caller-selected remote transport only for an explicit Control

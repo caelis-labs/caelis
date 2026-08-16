@@ -61,7 +61,7 @@ func startEvalSession(
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, _, err := server.Bind(appserver.Principal{ID: stack.UserID})
+	clients, err := server.Bind(appserver.Principal{ID: stack.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func evalAppServerClients(
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, _, err := server.Bind(appserver.Principal{ID: principalID})
+	clients, err := server.Bind(appserver.Principal{ID: principalID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func newEvalAppServerAdapter(
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, _, err := server.Bind(appserver.Principal{ID: active.UserID})
+	clients, err := server.Bind(appserver.Principal{ID: active.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func runEvalHeadlessOnce(
 	if err != nil {
 		return headless.Result{}, err
 	}
-	clients, _, err := server.Bind(appserver.Principal{ID: active.UserID})
+	clients, err := server.Bind(appserver.Principal{ID: active.UserID})
 	if err != nil {
 		return headless.Result{}, err
 	}

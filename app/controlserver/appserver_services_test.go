@@ -22,6 +22,6 @@ func testAppServerServices(sessions appserver.Service, status appserver.StatusSe
 	return appserver.AppServerServices{
 		Sessions: sessions, Participants: focused, AgentMessages: focused, Status: status, Configuration: focused,
 		Agents: focused, Completion: focused, Plugins: focused,
-		Presentation: focused, Terminal: focused,
+		Presentation: focused, Terminal: focused, Tasks: &fakeTaskService{},
 	}
 }

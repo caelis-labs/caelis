@@ -14,7 +14,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/updater"
 	"github.com/caelis-labs/caelis/internal/version"
-	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 	tuiapp "github.com/caelis-labs/caelis/surfaces/tui/app"
 )
 
@@ -28,7 +27,6 @@ type tuiOptions struct {
 func runTUI(
 	ctx context.Context,
 	clients appserver.AppServerClients,
-	tasks taskstream.Client,
 	sessionID string,
 	workspaceKey string,
 	workspaceDir string,
@@ -73,7 +71,7 @@ func runTUI(
 		PromptRouterFactory: controlprompt.New,
 		RenderFPS:           envInt("CAELIS_TUI_RENDER_FPS", 0),
 		NoAnimation:         options.NoAnimation,
-		TaskStreams:         tasks,
+		TaskStreams:         clients.Tasks,
 		OnStart: func() {
 			startTUISandboxRefresh(programCtx, typedDriver, sender)
 			startTUIUpdateCheck(programCtx, storeDir, sender)

@@ -74,12 +74,12 @@ func openManagedProductClientsFromDiscovery(ctx context.Context, options product
 	if err != nil {
 		return nil, err
 	}
-	clients, tasks, err := httpclient.BindAppServer(remote)
+	clients, err := httpclient.AppServerClients(remote)
 	if err != nil {
 		return nil, err
 	}
 	return &productClients{
-		Clients: clients, Tasks: tasks, Mode: productClientModeManaged, BaseURL: record.Endpoint,
+		Clients: clients, Mode: productClientModeManaged, BaseURL: record.Endpoint,
 		Workspace: gatewayapp.Config{
 			AppName: record.AppName, UserID: record.PrincipalID, StoreDir: options.StoreDir,
 			WorkspaceKey: options.WorkspaceKey, WorkspaceCWD: options.WorkspaceCWD,
