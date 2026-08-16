@@ -13,11 +13,33 @@ import (
 
 const sessionModelRecoveryMaxAttempts = 3
 
+// sessionModelRecovery owns dormant Session model-reference reconciliation.
+// It depends only on the durable Session/config authorities and model catalog
+// inputs required by the revision-guarded repair; Runtime activation and Host
+// composition remain outside this component.
+type sessionModelRecovery struct {
+	store  *appConfigStore
+	pins   *sessionModelPinRegistry
+	lookup *modelLookup
+}
+
+func newSessionModelRecovery(
+	store *appConfigStore,
+	pins *sessionModelPinRegistry,
+	lookup *modelLookup,
+) *sessionModelRecovery {
+	return &sessionModelRecovery{
+		store:  store,
+		pins:   pins,
+		lookup: lookup,
+	}
+}
+
 // prepareControlClientReconnect reconciles only an explicit reconnect. Plain
 // InspectSession remains read-only, while reconnect returns the repaired
 // revision that the following work-bearing command will use for CAS.
 func (s *Stack) prepareControlClientReconnect(ctx context.Context, ref session.SessionRef) error {
-	if s == nil || s.sessionRuntimes == nil || s.Sessions == nil || s.store == nil {
+	if s == nil || s.sessionRuntimes == nil || s.modelRecovery == nil {
 		return nil
 	}
 	buildCtx, unlock, err := s.sessionRuntimes.lockActivation(ctx)
@@ -28,29 +50,34 @@ func (s *Stack) prepareControlClientReconnect(ctx context.Context, ref session.S
 	if _, loaded := s.sessionRuntimes.loaded(ref.SessionID); loaded || s.sessionRuntimes.isReleasing(ref.SessionID) {
 		return nil
 	}
-	active, err := s.Sessions.Session(buildCtx, ref)
+	sessions := s.Sessions
+	if sessions == nil {
+		return nil
+	}
+	active, err := sessions.Session(buildCtx, ref)
 	if err != nil {
 		return err
 	}
-	closed, err := appserver.IsSessionClosed(buildCtx, s.Sessions, active.SessionRef)
+	closed, err := appserver.IsSessionClosed(buildCtx, sessions, active.SessionRef)
 	if err != nil {
 		return err
 	}
 	if closed {
 		return nil
 	}
-	_, err = s.repairMissingSessionModelSelection(buildCtx, active)
+	_, err = s.modelRecovery.repairMissingSessionModelSelection(buildCtx, sessions, active)
 	return err
 }
 
 // repairMissingSessionModelSelection replaces one stale durable model
 // reference from the current App store. It never scans other Sessions and a
 // revision conflict always yields to the concurrent user mutation.
-func (s *Stack) repairMissingSessionModelSelection(
+func (r *sessionModelRecovery) repairMissingSessionModelSelection(
 	ctx context.Context,
+	sessions session.Service,
 	active session.Session,
 ) (session.Session, error) {
-	if s == nil || s.Sessions == nil || s.store == nil {
+	if r == nil || sessions == nil || r.store == nil {
 		return active, nil
 	}
 	var conflictErr error
@@ -58,7 +85,7 @@ func (s *Stack) repairMissingSessionModelSelection(
 		if active.Controller.Kind == session.ControllerKindACP {
 			return active, nil
 		}
-		state, err := s.Sessions.SnapshotState(ctx, active.SessionRef)
+		state, err := sessions.SnapshotState(ctx, active.SessionRef)
 		if err != nil {
 			return active, err
 		}
@@ -66,19 +93,19 @@ func (s *Stack) repairMissingSessionModelSelection(
 		if currentModel == "" {
 			return active, nil
 		}
-		if pinned, ok := s.sessionModelPins.config(active.SessionID); ok && strings.EqualFold(pinned.ID, currentModel) {
+		if pinned, ok := r.pins.config(active.SessionID); ok && strings.EqualFold(pinned.ID, currentModel) {
 			return active, nil
 		}
 
-		doc, err := s.store.LoadContext(ctx)
+		doc, err := r.store.LoadContext(ctx)
 		if err != nil {
 			return active, err
 		}
 		contextWindow := 0
-		if s.lookup != nil {
-			s.lookup.mu.RLock()
-			contextWindow = s.lookup.contextWindow
-			s.lookup.mu.RUnlock()
+		if r.lookup != nil {
+			r.lookup.mu.RLock()
+			contextWindow = r.lookup.contextWindow
+			r.lookup.mu.RUnlock()
 		}
 		catalog, err := newModelLookupFromDocument(doc, contextWindow)
 		if err != nil {
@@ -97,7 +124,7 @@ func (s *Stack) repairMissingSessionModelSelection(
 		fallback, hasFallback := catalog.Config(fallbackID)
 		currentEffort := modelcatalog.NormalizeReasoningEffort(kernel.CurrentReasoningEffort(state))
 		expectedRevision := active.Revision
-		updated, err := s.Sessions.UpdateState(ctx, session.UpdateStateRequest{
+		updated, err := sessions.UpdateState(ctx, session.UpdateStateRequest{
 			SessionRef:       active.SessionRef,
 			ExpectedRevision: &expectedRevision,
 			MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
@@ -127,7 +154,7 @@ func (s *Stack) repairMissingSessionModelSelection(
 			return active, err
 		}
 		conflictErr = err
-		active, err = s.Sessions.Session(ctx, active.SessionRef)
+		active, err = sessions.Session(ctx, active.SessionRef)
 		if err != nil {
 			return active, err
 		}

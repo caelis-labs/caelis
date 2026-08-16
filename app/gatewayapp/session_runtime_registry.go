@@ -252,11 +252,12 @@ func (r *sessionRuntimeRegistry) activateSessionTracked(
 	if sessionID == "" {
 		return nil, session.Session{}, false, errors.New("gatewayapp: Session ID is required")
 	}
+	sessions := r.owner.Sessions
 	if err := r.waitSessionRelease(ctx, sessionID); err != nil {
 		return nil, session.Session{}, false, err
 	}
 	if loaded, ok := r.loaded(sessionID); ok {
-		active, err := r.owner.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
+		active, err := sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
 		return loaded, active, false, err
 	}
 
@@ -269,21 +270,21 @@ func (r *sessionRuntimeRegistry) activateSessionTracked(
 		return nil, session.Session{}, false, err
 	}
 	if loaded, ok := r.loaded(sessionID); ok {
-		active, err := r.owner.Sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
+		active, err := sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
 		return loaded, active, false, err
 	}
-	active, err := r.owner.Sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
+	active, err := sessions.Session(buildCtx, session.SessionRef{SessionID: sessionID})
 	if err != nil {
 		return nil, session.Session{}, false, err
 	}
-	closed, err := appserver.IsSessionClosed(buildCtx, r.owner.Sessions, active.SessionRef)
+	closed, err := appserver.IsSessionClosed(buildCtx, sessions, active.SessionRef)
 	if err != nil {
 		return nil, active, false, err
 	}
 	if closed {
 		return nil, active, false, appserver.ErrSessionClosed
 	}
-	active, err = r.owner.repairMissingSessionModelSelection(buildCtx, active)
+	active, err = r.owner.modelRecovery.repairMissingSessionModelSelection(buildCtx, sessions, active)
 	if err != nil {
 		return nil, active, false, err
 	}

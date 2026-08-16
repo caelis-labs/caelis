@@ -518,7 +518,7 @@ func TestDormantSessionModelRecoveryReturnsLastRevisionConflict(t *testing.T) {
 	stack.Sessions = conflicting
 	t.Cleanup(func() { stack.Sessions = original })
 
-	_, err = stack.repairMissingSessionModelSelection(ctx, updated)
+	_, err = stack.modelRecovery.repairMissingSessionModelSelection(ctx, stack.Sessions, updated)
 	if !errors.Is(err, session.ErrRevisionConflict) {
 		t.Fatalf("repairMissingSessionModelSelection() error = %v, want revision conflict", err)
 	}

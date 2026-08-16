@@ -178,6 +178,7 @@ type Stack struct {
 	childControlTokenFile     string
 	sessionRuntimes           *sessionRuntimeRegistry
 	sessionModelPins          *sessionModelPinRegistry
+	modelRecovery             *sessionModelRecovery
 	spawnedSessionPinReleases map[string]func()
 	retainRuntimeWork         func(session.SessionRef) func()
 	runtimeTaskChanged        func(session.SessionRef)
@@ -540,6 +541,11 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		sandboxPersisted:      cloneSandboxConfig(doc.Sandbox),
 		sandboxRevision:       doc.ConfigurationRevision,
 	}
+	stack.modelRecovery = newSessionModelRecovery(
+		stack.store,
+		stack.sessionModelPins,
+		stack.lookup,
+	)
 	stack.placementCache = newPlacementSnapshot(doc)
 	configStore.savedHook = stack.invalidatePlacementSnapshot
 	controlState, err := appserver.NewStateService(appserver.StateServiceConfig{
