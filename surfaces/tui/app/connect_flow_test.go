@@ -959,6 +959,40 @@ func TestConnectWizardSkipsAPIKeyForReusableBaseURLAuth(t *testing.T) {
 	}
 }
 
+func TestConnectWizardSkipsAPIKeyForReusableDefaultProviderAuth(t *testing.T) {
+	m := NewModel(Config{
+		Wizards: DefaultWizards(),
+		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "connect":
+				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+			case "connect-provider":
+				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek", Detail: "configured auth", NoAuth: true}}, nil
+			default:
+				state, ok := connectModelCommandState(command)
+				if ok && state.Provider == "deepseek" && state.TokenRef == "" {
+					return []SlashArgCandidate{{
+						Value: "deepseek-v4-pro", Display: "deepseek/deepseek-v4-pro",
+						ModelMetadataComplete: true, ModelImageInputKnown: true,
+					}}, nil
+				}
+				return nil, nil
+			}
+		},
+	})
+
+	openModelConnectWizard(t, m)
+	handled, cmd := m.handleWizardEnter()
+	if !handled {
+		t.Fatal("provider selection was not handled")
+	}
+	runConnectTestCmd(m, cmd)
+	state := requireConnectModelCommandState(t, m.slashArgCommand)
+	if state.Provider != "deepseek" || state.TokenRef != "" {
+		t.Fatalf("connect model state = %#v, want reusable DeepSeek auth without API-key input", state)
+	}
+}
+
 func TestConnectWizardTypedXiaomiAdvancesToEndpointStep(t *testing.T) {
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
@@ -1465,13 +1499,54 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 	if len(m.slashArgCandidates) != 2 {
 		t.Fatalf("model candidates = %#v", m.slashArgCandidates)
 	}
-	runConnectTestCmd(m, m.applySlashArgCompletion())
+	plain := ansi.Strip(m.renderSlashArgList())
+	if !strings.Contains(plain, "[ ] minimax/MiniMax-M2.7") || !strings.Contains(plain, "[ ] minimax/MiniMax-M2.7-highspeed") {
+		t.Fatalf("initial model picker missing unchecked boxes:\n%s", plain)
+	}
+	if handled, cmd := m.handleSlashArgKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace})); !handled {
+		t.Fatal("space did not toggle the first model checkbox")
+	} else {
+		runConnectTestCmd(m, cmd)
+	}
 	if got := m.wizard.state["model"]; got != "MiniMax-M2.7" {
 		t.Fatalf("first selected model = %q", got)
 	}
-	runConnectTestCmd(m, m.applySlashArgCompletion())
+	if len(m.slashArgCandidates) != 2 {
+		t.Fatalf("model candidates after first toggle = %#v, want checked row retained", m.slashArgCandidates)
+	}
+	plain = ansi.Strip(m.renderSlashArgList())
+	if !strings.Contains(plain, "[x] minimax/MiniMax-M2.7") {
+		t.Fatalf("model picker missing checked first model:\n%s", plain)
+	}
+	if handled, cmd := m.handleSlashArgKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace})); !handled {
+		t.Fatal("space did not clear the first model checkbox")
+	} else {
+		runConnectTestCmd(m, cmd)
+	}
+	if got := m.wizard.state["model"]; got != "" {
+		t.Fatalf("selected model after clearing checkbox = %q, want empty", got)
+	}
+	if handled, cmd := m.handleSlashArgKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace})); !handled {
+		t.Fatal("space did not restore the first model checkbox")
+	} else {
+		runConnectTestCmd(m, cmd)
+	}
+	if handled, cmd := m.handleSlashArgKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown})); !handled {
+		t.Fatal("down did not move the model checkbox selection")
+	} else {
+		runConnectTestCmd(m, cmd)
+	}
+	if handled, cmd := m.handleSlashArgKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace})); !handled {
+		t.Fatal("space did not toggle the second model checkbox")
+	} else {
+		runConnectTestCmd(m, cmd)
+	}
 	if got := m.wizard.state["model"]; got != "MiniMax-M2.7,MiniMax-M2.7-highspeed" {
 		t.Fatalf("selected models = %q", got)
+	}
+	plain = ansi.Strip(m.renderSlashArgList())
+	if strings.Count(plain, "[x]") != 2 || !strings.Contains(plain, "click/space/tab toggle") || !strings.Contains(plain, "enter confirm") {
+		t.Fatalf("model picker missing checked models or checkbox guidance:\n%s", plain)
 	}
 	handled, cmd := m.handleWizardEnter()
 	if !handled || cmd == nil {

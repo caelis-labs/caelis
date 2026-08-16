@@ -33,6 +33,14 @@ func (m *Model) renderCompletionOverlayFooter(geometry completionOverlayGeometry
 
 	sep := sepStyle.Render("  ")
 	slash := sepStyle.Render("/")
+	if geometry.kind == completionSlashArg && m.wizard != nil {
+		if step := m.wizard.currentStep(); step != nil && step.MultiSelect {
+			return upStyle.Render("↑") + downStyle.Render("↓") +
+				descStyle.Render("/hover select ") +
+				keyStyle.Render("click") + slash + keyStyle.Render("space") + slash + keyStyle.Render("tab") + descStyle.Render(" toggle") +
+				sep + keyStyle.Render("enter") + descStyle.Render(" confirm")
+		}
+	}
 	return upStyle.Render("↑") + downStyle.Render("↓") +
 		descStyle.Render("/hover select ") +
 		keyStyle.Render("click") + slash + keyStyle.Render("enter") + descStyle.Render(" ") + descStyle.Render("apply") +

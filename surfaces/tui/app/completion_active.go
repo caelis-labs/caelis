@@ -144,6 +144,11 @@ func (m *Model) activateCompletion(kind completionKind) tea.Cmd {
 		_, cmd := m.handleResumeKey(enter)
 		return cmd
 	case completionSlashArg:
+		if candidate, ok := m.currentSlashArgCandidate(); ok {
+			if handled, cmd := m.toggleWizardMultiSelectCandidate(candidate); handled {
+				return cmd
+			}
+		}
 		_, cmd := m.handleSlashArgKey(enter)
 		return cmd
 	case completionSlashCommand:

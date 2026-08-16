@@ -266,7 +266,7 @@ func connectModelWizard() WizardDef {
 				ShouldSkip:        func(state map[string]string) bool { return state["_noauth"] == "true" || state["_reuseauth"] == "true" },
 			},
 			{
-				Key: "model", HintLabel: "/connect model · tab adds · enter confirms", MultiSelect: true,
+				Key: "model", HintLabel: "/connect model", MultiSelect: true,
 				MultiSelectCandidate: func(candidate SlashArgCandidate) bool {
 					return candidate.ModelMetadataComplete && candidate.ModelImageInputKnown
 				},
@@ -348,7 +348,7 @@ func connectACPWizard() WizardDef {
 				},
 			},
 			{
-				Key: "acp_config", HintLabel: "/connect ACP defaults · tab adds · enter confirms",
+				Key: "acp_config", HintLabel: "/connect ACP defaults",
 				FreeformHint:     "/connect ACP defaults: choose reasoning/config defaults or keep the Agent default",
 				RequireCandidate: true, MultiSelect: true,
 				MergeMultiSelect:  mergeACPConfigSelection,

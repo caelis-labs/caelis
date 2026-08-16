@@ -177,7 +177,6 @@ func (m *Model) applySlashArgCandidates(command string, query string, candidates
 		return
 	}
 	filtered := filterSlashArgCandidates(query, candidates)
-	filtered = m.filterWizardMultiSelectCandidates(filtered)
 	if len(filtered) == 0 {
 		m.slashArgCandidates = nil
 		m.slashArgQuery = query
@@ -533,7 +532,7 @@ func (m *Model) applySlashArgCompletion() tea.Cmd {
 		return nil
 	}
 	if m.isWizardActive() {
-		if handled, cmd := m.addWizardMultiSelectCandidate(selected); handled {
+		if handled, cmd := m.toggleWizardMultiSelectCandidate(selected); handled {
 			return cmd
 		}
 		// During a wizard, fill only the step-local query.
@@ -765,6 +764,13 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			m.moveActiveCompletionSelection(1, true)
 		}
 		return true, nil
+	case m.isWizardMultiSelectToggleKey(msg):
+		candidate, ok := m.currentSlashArgCandidate()
+		if !ok {
+			return true, nil
+		}
+		_, cmd := m.toggleWizardMultiSelectCandidate(candidate)
+		return true, cmd
 	case key.Matches(msg, m.keys.Complete):
 		if len(m.slashArgCandidates) == 0 {
 			return true, m.requestCurrentSlashArgCompletion()
@@ -841,12 +847,46 @@ func (m *Model) renderSlashArgList() string {
 func (m *Model) renderSlashArgListGeometry(geometry completionOverlayGeometry, candidates []SlashArgCandidate) string {
 	rows := make([]completionTableRow, 0, geometry.candidateCount)
 	for i := geometry.windowStart; i < geometry.windowEnd; i++ {
+		identity := slashArgCandidateIdentity(candidates[i])
+		if marker, ok := m.wizardMultiSelectMarker(candidates[i]); ok {
+			identity = marker + identity
+		}
 		rows = append(rows, completionTableRow{
-			identity: slashArgCandidateIdentity(candidates[i]),
+			identity: identity,
 			hint:     slashArgPickerHint(m.slashArgCommand, candidates, i),
 		})
 	}
 	return m.renderCompletionOverlay(geometry, m.renderCompletionTableLines(geometry, rows))
+}
+
+func (m *Model) isWizardMultiSelectToggleKey(msg tea.KeyMsg) bool {
+	if m == nil || m.wizard == nil {
+		return false
+	}
+	step := m.wizard.currentStep()
+	if step == nil || !step.MultiSelect || len(m.slashArgCandidates) == 0 {
+		return false
+	}
+	switch msg.String() {
+	case " ", "space":
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Model) wizardMultiSelectMarker(candidate SlashArgCandidate) (string, bool) {
+	if m == nil || m.wizard == nil {
+		return "", false
+	}
+	step := m.wizard.currentStep()
+	if !wizardCandidateSupportsMultiSelect(step, candidate) {
+		return "", false
+	}
+	if wizardMultiSelectContains(wizardMultiSelectValues(m.wizard, step), candidate.Value) {
+		return "[x] ", true
+	}
+	return "[ ] ", true
 }
 
 func (m *Model) currentSlashArgCandidate() (SlashArgCandidate, bool) {

@@ -52,9 +52,10 @@ type WizardStepDef struct {
 	// steps can still allow custom base URLs or model names.
 	RequireCandidate bool
 
-	// MultiSelect lets completion-backed values be accumulated with the complete
-	// key before enter confirms the selection. Enter still keeps
-	// the one-candidate fast path, and free-form input remains a single value.
+	// MultiSelect renders eligible completion candidates as checkboxes. Space,
+	// tab, and mouse clicks toggle the highlighted candidate before enter
+	// confirms the selection. Enter still keeps the one-candidate fast path, and
+	// free-form input remains a single value.
 	MultiSelect bool
 
 	// MultiSelectCandidate optionally decides whether a completion candidate may
@@ -352,6 +353,9 @@ func (m *Model) wizardHintText() string {
 	if label == "" {
 		label = "/" + w.def.Command + " " + step.Key
 	}
+	if step.MultiSelect {
+		return label + "  ↑/↓ select · space toggle · enter confirm"
+	}
 	return m.overlayHintText(label)
 }
 
@@ -444,7 +448,7 @@ func appendUniqueWizardValue(values []string, value string) []string {
 	return append(values, value)
 }
 
-func (m *Model) addWizardMultiSelectCandidate(candidate SlashArgCandidate) (bool, tea.Cmd) {
+func (m *Model) toggleWizardMultiSelectCandidate(candidate SlashArgCandidate) (bool, tea.Cmd) {
 	if m == nil || m.wizard == nil {
 		return false, nil
 	}
@@ -452,12 +456,21 @@ func (m *Model) addWizardMultiSelectCandidate(candidate SlashArgCandidate) (bool
 	if step == nil || !step.MultiSelect || !wizardCandidateSupportsMultiSelect(step, candidate) {
 		return false, nil
 	}
-	values := mergeWizardMultiSelectValue(step, wizardMultiSelectValues(m.wizard, step), candidate.Value)
+	values := wizardMultiSelectValues(m.wizard, step)
+	if wizardMultiSelectContains(values, candidate.Value) {
+		values = removeWizardMultiSelectValue(values, candidate.Value)
+	} else {
+		values = mergeWizardMultiSelectValue(step, values, candidate.Value)
+	}
 	if m.wizard.multiSelections == nil {
 		m.wizard.multiSelections = make(map[string][]string)
 	}
 	m.wizard.multiSelections[step.Key] = append([]string(nil), values...)
-	m.wizard.state[step.Key] = formatWizardMultiSelect(step, values)
+	if len(values) == 0 {
+		delete(m.wizard.state, step.Key)
+	} else {
+		m.wizard.state[step.Key] = formatWizardMultiSelect(step, values)
+	}
 	m.slashArgQuery = ""
 	m.slashArgIndex = 0
 	m.setInputText("")
@@ -468,6 +481,28 @@ func (m *Model) addWizardMultiSelectCandidate(candidate SlashArgCandidate) (bool
 		return true, nil
 	}
 	return true, m.requestCurrentSlashArgCompletion()
+}
+
+func wizardMultiSelectContains(values []string, value string) bool {
+	value = strings.TrimSpace(value)
+	for _, existing := range values {
+		if strings.EqualFold(strings.TrimSpace(existing), value) {
+			return true
+		}
+	}
+	return false
+}
+
+func removeWizardMultiSelectValue(values []string, value string) []string {
+	value = strings.TrimSpace(value)
+	out := make([]string, 0, len(values))
+	for _, existing := range values {
+		if strings.EqualFold(strings.TrimSpace(existing), value) {
+			continue
+		}
+		out = append(out, existing)
+	}
+	return out
 }
 
 func wizardCandidateSupportsMultiSelect(step *WizardStepDef, candidate SlashArgCandidate) bool {
@@ -496,31 +531,6 @@ func formatWizardMultiSelect(step *WizardStepDef, values []string) string {
 		return step.FormatMultiSelect(append([]string(nil), values...))
 	}
 	return strings.Join(values, ",")
-}
-
-func (m *Model) filterWizardMultiSelectCandidates(candidates []SlashArgCandidate) []SlashArgCandidate {
-	if m == nil || m.wizard == nil {
-		return candidates
-	}
-	step := m.wizard.currentStep()
-	selected := wizardMultiSelectValues(m.wizard, step)
-	if len(selected) == 0 {
-		return candidates
-	}
-	out := make([]SlashArgCandidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		found := false
-		for _, value := range selected {
-			if strings.EqualFold(strings.TrimSpace(candidate.Value), value) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			out = append(out, candidate)
-		}
-	}
-	return out
 }
 
 // wizardQueryAtCursor extracts the query text after the wizard command prefix.

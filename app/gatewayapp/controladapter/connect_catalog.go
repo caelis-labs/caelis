@@ -29,7 +29,7 @@ func completeConnectArgs(ctx context.Context, driver *assembler, command string,
 	case command == "connect":
 		return completeConnectSources(ctx, driver, query, limit), nil
 	case command == "connect-provider":
-		return completeConnectProviders(query, limit), nil
+		return completeConnectProviders(ctx, driver, query, limit), nil
 	case command == "connect-disconnect-agent":
 		return completeConnectDisconnectAgents(ctx, driver, query, limit)
 	case strings.HasPrefix(command, "connect-disconnect-confirm:"):
@@ -212,18 +212,27 @@ func connectableACPAgentDetail(agent agentregistry.ConnectableAgent) string {
 	return firstNonEmpty(detail+" · "+source, source)
 }
 
-func completeConnectProviders(query string, limit int) []controlprompt.SlashArgCandidate {
+func completeConnectProviders(ctx context.Context, driver *assembler, query string, limit int) []controlprompt.SlashArgCandidate {
 	templates := modelconfig.ProviderTemplates()
 	out := make([]controlprompt.SlashArgCandidate, 0, len(templates))
 	for _, template := range templates {
 		if query != "" && !strings.Contains(strings.ToLower(template.Label+" "+template.Description), strings.ToLower(strings.TrimSpace(query))) {
 			continue
 		}
+		// Only endpoint-less providers can safely skip authentication here. For
+		// providers with a later endpoint/base-URL step, credential reuse must be
+		// decided after that exact endpoint is selected.
+		reusableAuth := driver != nil && len(template.Endpoints) == 0 && !template.PromptForBaseURL &&
+			driver.hasReusableConnectAuth(ctx, template.Provider, template.DefaultBaseURL)
+		detail := strings.TrimSpace(template.Description)
+		if reusableAuth {
+			detail = strings.Join(compactNonEmpty([]string{detail, "configured auth"}), " · ")
+		}
 		out = append(out, controlprompt.SlashArgCandidate{
 			Value:   template.Label,
 			Display: template.Label,
-			Detail:  strings.TrimSpace(template.Description),
-			NoAuth:  template.NoAuthRequired || template.AuthFlow != "",
+			Detail:  detail,
+			NoAuth:  template.NoAuthRequired || template.AuthFlow != "" || reusableAuth,
 		})
 		if len(out) >= limit {
 			break
