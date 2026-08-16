@@ -101,6 +101,9 @@ func TestSpawnedSubagentSessionCannotReceiveNestedSpawn(t *testing.T) {
 	if strings.Contains(childPrompt, "Delegate only when the subtask has clear independent scope") {
 		t.Fatalf("spawned child prompt retained nested delegation guidance:\n%s", childPrompt)
 	}
+	if !strings.Contains(childPrompt, sharedWorkspaceGuidance) {
+		t.Fatalf("spawned child prompt missing shared workspace guidance:\n%s", childPrompt)
+	}
 }
 
 func TestACPSurfaceAvailableCommandsExposeOnlyBoundProfilesAndHideRosterAgents(t *testing.T) {

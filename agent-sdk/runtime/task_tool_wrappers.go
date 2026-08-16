@@ -359,6 +359,9 @@ func (t runtimeSpawnTool) Definition() tool.Definition {
 	// Runtime serializes only the short participant-binding commit. External
 	// child startup and stream production are independent per Task.
 	def.Capabilities.ParallelSafe = true
+	if t.runtime == nil || t.runtime.controllerContextRouter == nil {
+		hideSpawnIncludeContext(&def)
+	}
 	return def
 }
 
@@ -393,22 +396,67 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	if err != nil {
 		return tool.Result{}, err
 	}
+	var (
+		includeContext     bool
+		contextTransfer    agent.ContextTransfer
+		contextUnsupported bool
+	)
+	if parsed := optionalBoolArg(args, "include_context"); parsed != nil && *parsed {
+		includeContext = true
+		contextTransfer, contextUnsupported = t.resolveDelegatedSpawnContext(ctx)
+	}
 	snapshot, err := t.tasks.StartSubagentTarget(ctx, t.session, t.sessionRef, t.runner, delegation.NormalizeTarget(target), taskapi.SubagentStartRequest{
-		SpawnID:      strings.TrimSpace(call.ID),
-		Prompt:       strings.TrimSpace(prompt),
-		ParentCall:   strings.TrimSpace(call.ID),
-		Role:         session.ParticipantRoleDelegated,
-		Source:       "agent_tool",
-		Mode:         strings.TrimSpace(t.mode),
-		ApprovalMode: strings.TrimSpace(t.approvalMode),
-		Approval:     newSubagentApprovalRequester(t.runtime, t.mode, t.approval, t.session, t.sessionRef),
+		SpawnID:            strings.TrimSpace(call.ID),
+		Prompt:             strings.TrimSpace(prompt),
+		Context:            contextTransfer,
+		IncludeContext:     includeContext,
+		ContextUnsupported: contextUnsupported,
+		ParentCall:         strings.TrimSpace(call.ID),
+		Role:               session.ParticipantRoleDelegated,
+		Source:             "agent_tool",
+		Mode:               strings.TrimSpace(t.mode),
+		ApprovalMode:       strings.TrimSpace(t.approvalMode),
+		Approval:           newSubagentApprovalRequester(t.runtime, t.mode, t.approval, t.session, t.sessionRef),
 	})
 	if err != nil {
 		return tool.Result{}, err
 	}
 	result := taskSnapshotToolResult(call, t.base.Definition(), snapshot)
+	if spawnContextUnsupported(snapshot) {
+		payload := taskToolPayload(snapshot)
+		payload["system_hint"] = spawnContextUnsupportedHint
+		result = taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
+	}
 	t.tasks.markSubagentFinalResponseObserved(snapshot)
 	return result, nil
+}
+
+func (t runtimeSpawnTool) resolveDelegatedSpawnContext(ctx context.Context) (agent.ContextTransfer, bool) {
+	if t.runtime == nil || t.runtime.controllerContextRouter == nil {
+		return agent.ContextTransfer{}, true
+	}
+	transfer, _, err := t.runtime.buildDelegatedSpawnPromptContext(ctx, t.session, t.sessionRef)
+	if err != nil {
+		return agent.ContextTransfer{}, true
+	}
+	return transfer, false
+}
+
+func spawnContextUnsupported(snapshot taskapi.Snapshot) bool {
+	return taskSpecBool(snapshot.Metadata, "context_unsupported")
+}
+
+const spawnContextUnsupportedHint = "Current host does not support parent context transfer; the child received only the spawn prompt."
+
+func hideSpawnIncludeContext(def *tool.Definition) {
+	if def == nil {
+		return
+	}
+	props, ok := def.InputSchema["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+	delete(props, "include_context")
 }
 
 func resolveRuntimeSpawnToolAgent(def tool.Definition, activeSession session.Session, requested string) (string, error) {

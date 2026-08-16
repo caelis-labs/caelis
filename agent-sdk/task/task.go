@@ -105,16 +105,22 @@ type CommandStartRequest struct {
 // participant relationship selected by Control. Source is audit provenance and
 // is never interpreted as authorization or role policy.
 type SubagentStartRequest struct {
-	SpawnID      string                          `json:"spawn_id,omitempty"`
-	Agent        string                          `json:"agent,omitempty"`
-	Prompt       string                          `json:"prompt,omitempty"`
-	Context      agent.ContextTransfer           `json:"context,omitempty"`
-	ParentCall   string                          `json:"parent_call,omitempty"`
-	Role         session.ParticipantRole         `json:"role,omitempty"`
-	Source       string                          `json:"source,omitempty"`
-	Mode         string                          `json:"mode,omitempty"`
-	ApprovalMode string                          `json:"approval_mode,omitempty"`
-	Approval     agent.SubagentApprovalRequester `json:"-"`
+	SpawnID string                `json:"spawn_id,omitempty"`
+	Agent   string                `json:"agent,omitempty"`
+	Prompt  string                `json:"prompt,omitempty"`
+	Context agent.ContextTransfer `json:"context,omitempty"`
+	// IncludeContext is the model-facing request bit. Durable spawn identity
+	// binds this flag, not the resolved ContextTransfer contents.
+	IncludeContext bool `json:"include_context,omitempty"`
+	// ContextUnsupported records that IncludeContext was requested but the
+	// host could not attach a transfer. It is an outcome, not digest input.
+	ContextUnsupported bool                            `json:"context_unsupported,omitempty"`
+	ParentCall         string                          `json:"parent_call,omitempty"`
+	Role               session.ParticipantRole         `json:"role,omitempty"`
+	Source             string                          `json:"source,omitempty"`
+	Mode               string                          `json:"mode,omitempty"`
+	ApprovalMode       string                          `json:"approval_mode,omitempty"`
+	Approval           agent.SubagentApprovalRequester `json:"-"`
 }
 
 // ControlRequest defines one task control request. Principal is the normalized

@@ -41,6 +41,18 @@ func resolveSpawnAgent(session session.Session, requested string) (string, error
 	return requested, nil
 }
 
+func (r *Runtime) buildDelegatedSpawnPromptContext(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+) (agent.ContextTransfer, uint64, error) {
+	return r.buildParticipantPromptContext(ctx, activeSession, ref, session.ParticipantBinding{
+		ID:             "spawn",
+		Label:          "spawn",
+		ContextSyncSeq: 0,
+	})
+}
+
 func (r *Runtime) buildSideSubagentPromptContext(
 	ctx context.Context,
 	activeSession session.Session,
@@ -645,6 +657,12 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	if task.metadata == nil {
 		task.metadata = map[string]any{}
 	}
+	if _, ok := task.metadata["context_unsupported"]; !ok && taskSpecBool(entry.Spec, "context_unsupported") {
+		task.metadata["context_unsupported"] = true
+	}
+	if _, ok := task.metadata["include_context"]; !ok && taskSpecBool(entry.Spec, "include_context") {
+		task.metadata["include_context"] = true
+	}
 	if _, ok := task.metadata["parent_call"]; !ok {
 		task.metadata["parent_call"] = taskSpecString(entry.Spec, "parent_call")
 	}
@@ -888,6 +906,8 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		Spec: map[string]any{
 			"target":               delegation.NormalizeTarget(t.target),
 			"prompt":               t.prompt,
+			"include_context":      taskSpecBool(t.metadata, "include_context"),
+			"context_unsupported":  taskSpecBool(t.metadata, "context_unsupported"),
 			"mode":                 t.mode,
 			"approval_mode":        t.approvalMode,
 			"spawn_identity":       taskStringValue(t.metadata["spawn_identity"]),

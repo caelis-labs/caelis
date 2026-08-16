@@ -417,7 +417,9 @@ func (s *Stack) buildGatewayRuntimeContext(
 			}
 			metadata := map[string]any{}
 			if systemPrompt := stringFromMap(effectiveBaseMetadata, "system_prompt"); systemPrompt != "" {
-				if !spawnedChild {
+				if spawnedChild {
+					systemPrompt = systemPromptWithSharedWorkspaceGuidance(systemPrompt)
+				} else {
 					systemPrompt = systemPromptWithDelegationGuidance(systemPrompt)
 				}
 				metadata["system_prompt"] = systemPrompt

@@ -151,8 +151,8 @@ func validateControllerForwarder(cfg Config) error {
 	if requiresControllerForwarder(cfg) && cfg.ControllerEventForwarder == nil {
 		return errors.New("agent-sdk/runtime: controller event forwarder is required when ACP controllers are configured")
 	}
-	if (cfg.Controllers != nil || cfg.Subagents != nil) && cfg.ControllerContextRouter == nil {
-		return errors.New("agent-sdk/runtime: controller context router is required when controller or subagent endpoints are configured")
+	if cfg.Controllers != nil && cfg.ControllerContextRouter == nil {
+		return errors.New("agent-sdk/runtime: controller context router is required when controller endpoints are configured")
 	}
 	if cfg.Controllers != nil && cfg.ControllerRecovery == nil {
 		return errors.New("agent-sdk/runtime: controller recovery coordinator is required when ACP controllers are configured")

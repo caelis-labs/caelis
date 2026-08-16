@@ -151,7 +151,7 @@ func (tm *taskRuntime) startSubagentTarget(
 	handle := firstNonEmpty(outcome.Entry.Handle, taskSpecString(outcome.Entry.Spec, "handle"))
 	var task *subagentTask
 	if outcome.ShouldSpawn {
-		childPrompt := contextprompt.ComposeTextPrompt(req.Context, strings.TrimSpace(req.Prompt))
+		childPrompt := contextprompt.ComposeTextPrompt(spawnContextFromSpec(outcome.Entry.Spec), strings.TrimSpace(req.Prompt))
 		spawnContext := subagent.SpawnContext{
 			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession), CWD: strings.TrimSpace(activeSession.CWD),
 			TaskID: taskID, Handle: handle, Role: role, ParentCallID: strings.TrimSpace(req.ParentCall), Mode: mode, ApprovalMode: strings.TrimSpace(req.ApprovalMode),
@@ -253,10 +253,13 @@ func (tm *taskRuntime) beginSubagentSpawn(
 		SupportsCancel: true,
 		Spec: map[string]any{
 			"spawn_identity": strings.TrimSpace(spawnID), "spawn_request_digest": strings.TrimSpace(requestDigest),
-			"target":  target,
-			"prompt":  strings.TrimSpace(req.Prompt),
-			"context": agent.CloneContextTransfer(req.Context), "mode": strings.TrimSpace(mode),
-			"approval_mode": strings.TrimSpace(req.ApprovalMode), "parent_call": strings.TrimSpace(req.ParentCall),
+			"target":              target,
+			"prompt":              strings.TrimSpace(req.Prompt),
+			"include_context":     req.IncludeContext,
+			"context_unsupported": req.ContextUnsupported,
+			"context":             agent.CloneContextTransfer(req.Context),
+			"mode":                strings.TrimSpace(mode),
+			"approval_mode":       strings.TrimSpace(req.ApprovalMode), "parent_call": strings.TrimSpace(req.ParentCall),
 			"participant_role": string(role),
 			"handle":           strings.TrimSpace(handle), "terminal_id": subagentTerminalID(taskID), "turn_seq": int64(1),
 			"spawn_phase": string(spawnPhaseIntent),
@@ -264,6 +267,7 @@ func (tm *taskRuntime) beginSubagentSpawn(
 		Metadata: map[string]any{
 			"spawn_status": string(spawnPhaseIntent), "spawn_identity": strings.TrimSpace(spawnID),
 			"spawn_request_digest": strings.TrimSpace(requestDigest),
+			"include_context":      req.IncludeContext, "context_unsupported": req.ContextUnsupported,
 		},
 	}
 	if err := tm.persistSpawnEntry(ctx, entry); err != nil {
@@ -357,19 +361,41 @@ func subagentSpawnRequestDigest(req taskapi.SubagentStartRequest, mode string, r
 
 func subagentSpawnTargetRequestDigest(target delegation.Target, req taskapi.SubagentStartRequest, mode string, role session.ParticipantRole) (string, error) {
 	payload := struct {
-		Target       delegation.Target       `json:"target"`
-		Prompt       string                  `json:"prompt"`
-		Context      agent.ContextTransfer   `json:"context"`
-		Mode         string                  `json:"mode"`
-		ApprovalMode string                  `json:"approval_mode"`
-		ParentCall   string                  `json:"parent_call"`
-		Role         session.ParticipantRole `json:"role"`
+		Target         delegation.Target       `json:"target"`
+		Prompt         string                  `json:"prompt"`
+		IncludeContext bool                    `json:"include_context"`
+		Mode           string                  `json:"mode"`
+		ApprovalMode   string                  `json:"approval_mode"`
+		ParentCall     string                  `json:"parent_call"`
+		Role           session.ParticipantRole `json:"role"`
 	}{
 		Target: delegation.NormalizeTarget(target), Prompt: strings.TrimSpace(req.Prompt),
-		Context: agent.CloneContextTransfer(req.Context), Mode: strings.TrimSpace(mode),
+		IncludeContext: req.IncludeContext, Mode: strings.TrimSpace(mode),
 		ApprovalMode: strings.TrimSpace(req.ApprovalMode), ParentCall: strings.TrimSpace(req.ParentCall), Role: role,
 	}
 	return hashSubagentSpawnPayload(payload)
+}
+
+func spawnContextFromSpec(spec map[string]any) agent.ContextTransfer {
+	if spec == nil {
+		return agent.ContextTransfer{}
+	}
+	switch typed := spec["context"].(type) {
+	case agent.ContextTransfer:
+		return agent.CloneContextTransfer(typed)
+	case map[string]any:
+		raw, err := json.Marshal(typed)
+		if err != nil {
+			return agent.ContextTransfer{}
+		}
+		var transfer agent.ContextTransfer
+		if err := json.Unmarshal(raw, &transfer); err != nil {
+			return agent.ContextTransfer{}
+		}
+		return agent.CloneContextTransfer(transfer)
+	default:
+		return agent.ContextTransfer{}
+	}
 }
 
 func hashSubagentSpawnPayload(payload any) (string, error) {
@@ -411,6 +437,7 @@ func newSubagentTaskFromSpawn(
 			"source": firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"), "participant_role": string(role),
 			"spawn_status": string(phase), "spawn_identity": spawnID, "spawn_request_digest": requestDigest,
 			"parent_call": strings.TrimSpace(req.ParentCall), "parent_tool": spawn.ToolName,
+			"include_context": req.IncludeContext, "context_unsupported": req.ContextUnsupported,
 		},
 	}
 	task.applyResult(result)

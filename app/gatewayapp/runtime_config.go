@@ -46,6 +46,19 @@ func (s *Stack) delegationAgentsForSpawn() []delegation.Agent {
 	return delegationAgentsForBindings(snapshot.placement.Bindings, true)
 }
 
+const sharedWorkspaceGuidance = "You share this workspace and current working directory with the parent agent and any sibling agents. Their edits are immediately visible. Change only files in this task's scope; do not assume you have an isolated copy."
+
+func systemPromptWithSharedWorkspaceGuidance(systemPrompt string) string {
+	systemPrompt = strings.TrimRight(strings.TrimSpace(systemPrompt), "\n")
+	if strings.Contains(systemPrompt, sharedWorkspaceGuidance) {
+		return systemPrompt
+	}
+	if systemPrompt == "" {
+		return sharedWorkspaceGuidance
+	}
+	return systemPrompt + "\n" + sharedWorkspaceGuidance
+}
+
 func systemPromptWithDelegationGuidance(systemPrompt string) string {
 	systemPrompt = strings.TrimRight(strings.TrimSpace(systemPrompt), "\n")
 	guidance := strings.Join([]string{

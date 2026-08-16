@@ -362,6 +362,24 @@ func TestRuntimeRequiresControlContextRouterForExternalEndpoints(t *testing.T) {
 	}
 }
 
+func TestRuntimeAllowsSubagentsWithoutContextRouter(t *testing.T) {
+	t.Parallel()
+
+	sessions, _ := newTestSessionService(t, "subagents-without-router")
+	runtime, err := New(Config{
+		Sessions:     sessions,
+		AgentFactory: chat.Factory{},
+		Subagents:    &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "ok"}},
+		TaskStore:    newFileTaskStoreForTest(t),
+	})
+	if err != nil {
+		t.Fatalf("New(Subagents without ContextRouter) error = %v", err)
+	}
+	if runtime.controllerContextRouter != nil {
+		t.Fatal("controllerContextRouter should stay unset when the host omitted it")
+	}
+}
+
 func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 	t.Parallel()
 

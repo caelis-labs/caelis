@@ -172,6 +172,22 @@ func TestBuildSystemPromptCoreContractIsConciseAndToolAgnostic(t *testing.T) {
 	}
 }
 
+func TestSystemPromptWithSharedWorkspaceGuidanceIsIdempotentAndChildOnly(t *testing.T) {
+	t.Parallel()
+
+	first := systemPromptWithSharedWorkspaceGuidance("base prompt")
+	if !strings.Contains(first, sharedWorkspaceGuidance) {
+		t.Fatalf("shared workspace guidance missing:\n%s", first)
+	}
+	if got := systemPromptWithSharedWorkspaceGuidance(first); got != first {
+		t.Fatalf("shared workspace guidance is not idempotent:\n%s", got)
+	}
+	parent := systemPromptWithDelegationGuidance("base prompt")
+	if strings.Contains(parent, sharedWorkspaceGuidance) {
+		t.Fatalf("parent delegation guidance unexpectedly includes child workspace reminder:\n%s", parent)
+	}
+}
+
 func TestBuildSystemPromptProtectsWorkspaceDeliveryBoundary(t *testing.T) {
 	t.Parallel()
 

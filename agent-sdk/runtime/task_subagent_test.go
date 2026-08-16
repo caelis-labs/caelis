@@ -147,6 +147,229 @@ func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *tes
 	}
 }
 
+func TestDelegatedSpawnIncludeContextAttachesPublicTurns(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	userMessage := model.NewTextMessage(model.RoleUser, "previous request")
+	assistantMessage := model.NewTextMessage(model.RoleAssistant, "previous answer")
+	for _, event := range []*session.Event{{
+		Type: session.EventTypeUser, Visibility: session.VisibilityCanonical,
+		Message: &userMessage, Text: "previous request",
+	}, {
+		Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical,
+		Message: &assistantMessage, Text: "previous answer",
+	}} {
+		if _, err := runtime.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: activeSession.SessionRef, Event: event}); err != nil {
+			t.Fatalf("AppendEvent() error = %v", err)
+		}
+	}
+
+	result := callDelegatedSpawnTool(t, runtime, activeSession, map[string]any{
+		"agent": "helper", "prompt": "review", "include_context": true,
+	})
+	payload := testToolResultPayload(t, result)
+	if _, ok := payload["system_hint"]; ok {
+		t.Fatalf("system_hint = %#v, want omitted when context attached", payload["system_hint"])
+	}
+	prompt := runner.spawnTargetRequest.Prompt
+	if !strings.Contains(prompt, `<caelis_background version="1">`) ||
+		!strings.Contains(prompt, `"user_messages":["previous request"]`) ||
+		!strings.Contains(prompt, `"assistant_summary":"previous answer"`) ||
+		!strings.Contains(prompt, "<caelis_current_request>\nreview") {
+		t.Fatalf("spawn prompt missing public parent context:\n%s", prompt)
+	}
+}
+
+func TestDelegatedSpawnDefaultOmitsParentContext(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	userMessage := model.NewTextMessage(model.RoleUser, "previous request")
+	assistantMessage := model.NewTextMessage(model.RoleAssistant, "previous answer")
+	for _, event := range []*session.Event{{
+		Type: session.EventTypeUser, Visibility: session.VisibilityCanonical,
+		Message: &userMessage, Text: "previous request",
+	}, {
+		Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical,
+		Message: &assistantMessage, Text: "previous answer",
+	}} {
+		if _, err := runtime.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: activeSession.SessionRef, Event: event}); err != nil {
+			t.Fatalf("AppendEvent() error = %v", err)
+		}
+	}
+
+	_ = callDelegatedSpawnTool(t, runtime, activeSession, map[string]any{
+		"agent": "helper", "prompt": "review",
+	})
+	if prompt := runner.spawnTargetRequest.Prompt; prompt != "review" {
+		t.Fatalf("spawn prompt = %q, want only the current request", prompt)
+	}
+}
+
+func TestDelegatedSpawnIncludeContextDegradesWithoutRouter(t *testing.T) {
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
+	}
+	sessions := inmemory.NewStore(inmemory.Config{})
+	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "no-router", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := New(Config{
+		Sessions:     sessions,
+		AgentFactory: chat.Factory{},
+		Subagents:    runner,
+		TaskStore:    newFileTaskStoreForTest(t),
+	})
+	if err != nil {
+		t.Fatalf("New(Subagents without ContextRouter) error = %v", err)
+	}
+
+	result := callDelegatedSpawnTool(t, runtime, activeSession, map[string]any{
+		"agent": "helper", "prompt": "review", "include_context": true,
+	})
+	payload := testToolResultPayload(t, result)
+	if got, _ := payload["system_hint"].(string); got != spawnContextUnsupportedHint {
+		t.Fatalf("system_hint = %q, want unsupported-context hint", got)
+	}
+	if prompt := runner.spawnTargetRequest.Prompt; prompt != "review" {
+		t.Fatalf("degraded spawn prompt = %q, want only the current request", prompt)
+	}
+}
+
+func TestDelegatedSpawnIdentityBindsIncludeContextNotTransferContents(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	first := task.SubagentStartRequest{
+		SpawnID: "include-context-identity", Agent: "helper", Prompt: "review",
+		IncludeContext: true, Role: session.ParticipantRoleDelegated,
+	}
+	if _, err := runtime.tasks.StartSubagentTarget(ctx, activeSession, activeSession.SessionRef, runner, delegation.AgentTarget("helper"), first); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.Context = agent.ContextTransfer{Summary: "later compact"}
+	if _, err := runtime.tasks.StartSubagentTarget(ctx, activeSession, activeSession.SessionRef, runner, delegation.AgentTarget("helper"), second); err != nil {
+		t.Fatalf("changed transfer contents error = %v, want frozen include_context identity to resume", err)
+	}
+	if runner.spawnTargetRequest.Prompt != "review" {
+		t.Fatalf("retry prompt = %q, want frozen first-intent prompt", runner.spawnTargetRequest.Prompt)
+	}
+	third := first
+	third.IncludeContext = false
+	if _, err := runtime.tasks.StartSubagentTarget(ctx, activeSession, activeSession.SessionRef, runner, delegation.AgentTarget("helper"), third); err == nil || !strings.Contains(err.Error(), "conflicts with durable intent") {
+		t.Fatalf("changed include_context error = %v, want durable identity conflict", err)
+	}
+}
+
+func TestDelegatedSpawnRendersFrozenSpecContextOnResume(t *testing.T) {
+	ctx := context.Background()
+	sessions := inmemory.NewStore(inmemory.Config{})
+	activeSession, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "frozen-context", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newFileTaskStoreForTest(t)
+	cas, ok := store.(task.CASStore)
+	if !ok {
+		t.Fatal("test task store does not implement CASStore")
+	}
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
+	}
+	runtime, err := New(testConfigWithACPForwarder(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := task.SubagentStartRequest{
+		SpawnID: "frozen-context", Agent: "helper", Prompt: "review",
+		IncludeContext: true, Context: agent.ContextTransfer{Summary: "should-not-render"},
+		Role: session.ParticipantRoleDelegated,
+	}
+	digest, err := subagentSpawnTargetRequestDigest(delegation.AgentTarget("helper"), req, runtime.defaultPolicyMode, session.ParticipantRoleDelegated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID, err := subagentSpawnTaskID(activeSession.SessionRef, req.SpawnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cas.Put(ctx, task.PutRequest{Entry: &task.Entry{
+		TaskID: taskID, Kind: task.KindSubagent, Session: activeSession.SessionRef, State: task.StatePrepared,
+		Spec: map[string]any{
+			"spawn_identity": req.SpawnID, "spawn_request_digest": digest,
+			"target": delegation.AgentTarget("helper"), "prompt": "review",
+			"include_context": true, "context": agent.ContextTransfer{},
+		},
+		Metadata: map[string]any{"spawn_status": spawnStatusPrepared, "spawn_request_digest": digest},
+	}, ExpectedRevision: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.tasks.StartSubagentTarget(ctx, activeSession, activeSession.SessionRef, runner, delegation.AgentTarget("helper"), req); err != nil {
+		t.Fatal(err)
+	}
+	if prompt := runner.spawnTargetRequest.Prompt; prompt != "review" {
+		t.Fatalf("resumed prompt = %q, want frozen empty transfer", prompt)
+	}
+}
+
+func TestRuntimeSpawnToolHidesIncludeContextWithoutRouter(t *testing.T) {
+	t.Parallel()
+
+	hidden := runtimeSpawnTool{base: spawn.New([]delegation.Agent{{Name: "helper"}})}.Definition()
+	hiddenProps, _ := hidden.InputSchema["properties"].(map[string]any)
+	if _, ok := hiddenProps["include_context"]; ok {
+		t.Fatalf("include_context exposed without ContextRouter: %#v", hiddenProps)
+	}
+
+	exposed := runtimeSpawnTool{
+		runtime: &Runtime{controllerContextRouter: testContextRouter{}},
+		base:    spawn.New([]delegation.Agent{{Name: "helper"}}),
+	}.Definition()
+	exposedProps, _ := exposed.InputSchema["properties"].(map[string]any)
+	if _, ok := exposedProps["include_context"]; !ok {
+		t.Fatal("include_context hidden despite ContextRouter")
+	}
+}
+
+func callDelegatedSpawnTool(t *testing.T, runtime *Runtime, activeSession session.Session, args map[string]any) tool.Result {
+	t.Helper()
+	target := runtimeSpawnTool{
+		runtime:      runtime,
+		base:         spawn.New([]delegation.Agent{{Name: "helper"}}),
+		session:      session.CloneSession(activeSession),
+		sessionRef:   activeSession.SessionRef,
+		tasks:        runtime.tasks,
+		runner:       runtime.subagents,
+		approvalMode: "default",
+	}
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := target.Call(context.Background(), tool.Call{
+		ID: "spawn-call-1", Name: spawn.ToolName, Input: raw,
+	})
+	if err != nil {
+		t.Fatalf("Spawn Call() error = %v", err)
+	}
+	return result
+}
+
 func TestSlashSideSubagentDoesNotPersistPreviewAsFinalDialogue(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{

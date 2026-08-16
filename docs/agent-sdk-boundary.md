@@ -72,6 +72,14 @@ profile. Caelis product assembly adds `SendMessage` explicitly alongside
 `SendMessage` but never receives `Spawn`, so delegation has one level and a
 child cannot create nested children. Runtime augments only a hosted child whose
 parent/sibling message transport is supplied through the execution context.
+Delegated Spawn defaults to the caller prompt only. Optional `include_context`
+asks the host-injected `ContextRouter` for the same recipient-specific public
+`ContextTransfer` used by participant handoff. Durable spawn identity binds that
+request bit, not the resolved transfer contents; the first intent freezes the
+transfer used for child prompt rendering. A missing or failing router is not a
+spawn failure: Subagents may be assembled without a router, the child still
+starts, and the Spawn result may carry a `system_hint` that context transfer is
+unavailable. Runtime hides the argument when no router is assembled.
 
 A Runner exposes one bounded, single-consumer observation stream. Slow
 observers may lose transient output but must not block execution, durable

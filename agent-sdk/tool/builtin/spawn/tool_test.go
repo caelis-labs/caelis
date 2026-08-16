@@ -22,6 +22,14 @@ func TestDefinitionDoesNotExposeYieldTimeMS(t *testing.T) {
 	if _, ok := props["yield_time_ms"]; ok {
 		t.Fatalf("SPAWN properties include yield_time_ms: %#v", props)
 	}
+	includeContext, ok := props["include_context"].(map[string]any)
+	if !ok || includeContext["type"] != "boolean" {
+		t.Fatalf("include_context = %#v, want optional boolean", props["include_context"])
+	}
+	required, _ := def.InputSchema["required"].([]string)
+	if hasString(required, "include_context") {
+		t.Fatalf("required = %#v, want include_context optional", required)
+	}
 	promptProp, _ := props["prompt"].(map[string]any)
 	if got := promptProp["minLength"]; got != 1 {
 		t.Fatalf("prompt minLength = %#v, want 1", got)

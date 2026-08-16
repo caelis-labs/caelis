@@ -19,7 +19,7 @@ const (
 	maxSpawnPromptTokens                 = 1024
 )
 
-var allowedArgs = []string{"agent", "prompt"}
+var allowedArgs = []string{"agent", "prompt", "include_context"}
 
 func ValidateArgs(args map[string]any) error {
 	return tool.RejectUnknownArgs(args, allowedArgs...)
@@ -128,6 +128,10 @@ func spawnDefinition(agents []delegation.Agent) tool.Definition {
 			"type":        "string",
 			"minLength":   1,
 			"description": "Specific self-contained sub-task.",
+		},
+		"include_context": map[string]any{
+			"type":        "boolean",
+			"description": "If true, ask the host to attach earlier public parent context. The host may omit it; the prompt remains the current request.",
 		},
 	}
 	if enum := agentNames(agents); len(enum) > 0 {

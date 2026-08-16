@@ -398,7 +398,11 @@ periods; a terminal Turn outcome never makes that identity unrecoverable.
 SendMessage may reconnect the same child Session and start its next Turn.
 Cancel ends only the current Turn and is reserved for explicit stop or
 prolonged lack of progress. Control tool assembly never gives a Spawn-created
-Session the Spawn tool, so delegation cannot nest.
+Session the Spawn tool, so delegation cannot nest. Spawn-created child prompts
+state that they share the parent workspace and CWD. Optional Spawn
+`include_context` reuses Control's participant `ContextTransfer` (latest compact
+checkpoint plus later user messages and Turn Finals) and never copies tool
+traces or reasoning.
 
 ## Migration Rules
 
