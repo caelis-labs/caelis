@@ -84,7 +84,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 	}
 
 	sessionID := controlCommandSessionID(request)
-	runtimeStack := &s.runtimeComposition
+	composition := &s.runtimeComposition
 	var newlyActivatedRuntime *sessionRuntime
 	var releaseRuntimeUse func()
 	var closeControlRuntime func(context.Context) error
@@ -116,14 +116,14 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(errors.New("gatewayapp: Session configuration Runtime is unavailable"))
 		}
 		closeControlRuntime = closeRuntime
-		runtimeStack = &runtime.stack.runtimeComposition
+		composition = &runtime.instance.runtimeComposition
 	case controlActionActivatesSessionRuntime(action):
 		runtime, _, release, activated, err := s.sessionRuntimes.acquireActivatedControlRuntime(ctx, sessionID)
 		if err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
 		releaseRuntimeUse = func() { _ = release(context.Background()) }
-		runtimeStack = &runtime.stack.runtimeComposition
+		composition = &runtime.instance.runtimeComposition
 		if activated {
 			newlyActivatedRuntime = runtime
 		}
@@ -141,7 +141,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 				appserver.NewOutcomeError(appserver.OutcomeConflicted, coded)
 		}
 		releaseRuntimeUse = releaseUse
-		runtimeStack = &runtime.stack.runtimeComposition
+		composition = &runtime.instance.runtimeComposition
 	case action == appserver.ActionSessionClose:
 		runtime, releaseUse, err := s.sessionRuntimes.acquireLoadedRuntime(sessionID)
 		if err != nil {
@@ -149,12 +149,12 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 		}
 		if runtime != nil {
 			releaseRuntimeUse = releaseUse
-			runtimeStack = &runtime.stack.runtimeComposition
+			composition = &runtime.instance.runtimeComposition
 		} else if _, err := s.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID}); err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
 	}
-	result, commandErr = runtimeStack.executeControlCommand(ctx, principal, action, request)
+	result, commandErr = composition.executeControlCommand(ctx, principal, action, request)
 	if newlyActivatedRuntime != nil && controlCommandProvesNoEffect(commandErr) {
 		if releaseRuntimeUse != nil {
 			releaseRuntimeUse()

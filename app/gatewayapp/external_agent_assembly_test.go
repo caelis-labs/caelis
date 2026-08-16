@@ -150,7 +150,7 @@ func TestProviderProfileBindingMaterializesFixedDirectHandle(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("BindAgentBinding() error = %v", err)
 	}
-	activated := activateFutureAssemblyStack(t, stack, "provider-profile-binding")
+	activated := activateFutureAssemblyRuntime(t, stack, "provider-profile-binding")
 	var materialized assembly.AgentConfig
 	for _, agent := range activated.runtime.Assembly.Agents {
 		if agent.Name == string(agentbinding.HandleBreeze) {
@@ -214,7 +214,7 @@ func TestReviewerACPBindingMaterializesHiddenReviewScene(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("BindAgentBinding(Reviewer ACP) error = %v", err)
 	}
-	activated := activateFutureAssemblyStack(t, stack, "reviewer-acp-binding")
+	activated := activateFutureAssemblyRuntime(t, stack, "reviewer-acp-binding")
 	agents := append([]assembly.AgentConfig(nil), activated.runtime.Assembly.Agents...)
 	for _, agent := range agents {
 		if agent.Name != string(agentbinding.HandleReviewer) {
@@ -253,7 +253,7 @@ func TestSystemAgentBindingsApplySelectedModelAndEffort(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("BindAgentBinding(Guardian) error = %v", err)
 	}
-	activated := activateFutureAssemblyStack(t, stack, "system-agent-bindings")
+	activated := activateFutureAssemblyRuntime(t, stack, "system-agent-bindings")
 	guardian, bound, err := activated.resolveSystemAgentModel(context.Background(), agentbinding.HandleGuardian, 0)
 	if err != nil || !bound || guardian.Model == nil || guardian.ReasoningEffort != "xhigh" {
 		t.Fatalf("resolveSystemAgentModel(Guardian) = (%#v, %v, %v), want xhigh binding", guardian, bound, err)
@@ -284,7 +284,7 @@ func TestSystemAgentBindingsApplySelectedModelAndEffort(t *testing.T) {
 	t.Fatalf("runtime assembly = %#v, want fixed Reviewer", agents)
 }
 
-func activateFutureAssemblyStack(t *testing.T, stack *Stack, sessionID string) *sessionRuntimeInstance {
+func activateFutureAssemblyRuntime(t *testing.T, stack *Stack, sessionID string) *sessionRuntimeInstance {
 	t.Helper()
 	started, err := startGatewayAppTestSession(context.Background(), stack, sessionID)
 	if err != nil {
@@ -294,5 +294,5 @@ func activateFutureAssemblyStack(t *testing.T, stack *Stack, sessionID string) *
 	if err != nil {
 		t.Fatalf("activate future Session: %v", err)
 	}
-	return activated.stack
+	return activated.instance
 }

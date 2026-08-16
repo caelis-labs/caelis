@@ -6,6 +6,9 @@
 // capabilities through control/appserver services; presentation Surfaces must
 // not depend on it.
 //
-// Activated Session Runtime composition still uses Stack as its implementation
-// type, so Host and Runtime are not yet distinct stable package contracts.
+// Stack owns process-lifetime Host services and a process-default Runtime
+// composition. Each activated Session instead uses a private
+// sessionRuntimeInstance with its own pinned composition and disposable
+// resources. These private types are lifecycle boundaries, not stable product
+// contracts or a second capability API.
 package gatewayapp

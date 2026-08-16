@@ -131,11 +131,11 @@ func TestHostedChildSendMessageReachesParentSession(t *testing.T) {
 	}
 	parentRuntime := activateSessionRuntime(t, host, parent.SessionID)
 	childRuntime := activateSessionRuntime(t, host, child.SessionID)
-	if childRuntime.stack.hostedChildMailbox == nil {
+	if childRuntime.instance.hostedChildMailbox == nil {
 		t.Fatal("child Session Runtime did not inherit hosted child mailbox")
 	}
 
-	runtimeCtx := childRuntime.stack.controlRuntimeContext(ctx, child)
+	runtimeCtx := childRuntime.instance.controlRuntimeContext(ctx, child)
 	sender := agentmessage.SenderFromContext(runtimeCtx)
 	if sender == nil {
 		t.Fatal("hosted child turn has no parent/sibling mailbox")
@@ -166,7 +166,7 @@ func TestHostedChildSendMessageReachesParentSession(t *testing.T) {
 	if gotText != "child status" {
 		t.Fatalf("parent message = %#v text %q", message, gotText)
 	}
-	if parentRuntime.stack.engine == nil {
+	if parentRuntime.instance.engine == nil {
 		t.Fatal("parent Session Runtime engine is unavailable")
 	}
 	if err := host.Close(); err != nil {

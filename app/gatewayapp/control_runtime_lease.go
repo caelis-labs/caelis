@@ -44,13 +44,13 @@ func (s *Stack) AcquireControlRuntime(
 	if err != nil {
 		return nil, err
 	}
-	if runtime == nil || runtime.stack == nil {
+	if runtime == nil || runtime.instance == nil {
 		if release != nil {
 			_ = release(context.Background())
 		}
 		return nil, errors.New("gatewayapp: Control Runtime snapshot is unavailable")
 	}
-	return &ControlRuntimeLease{runtime: &runtime.stack.runtimeComposition, session: session.CloneSession(active), release: release}, nil
+	return &ControlRuntimeLease{runtime: &runtime.instance.runtimeComposition, session: session.CloneSession(active), release: release}, nil
 }
 
 // ControlRuntimeView returns the focused server-side read projection. It is

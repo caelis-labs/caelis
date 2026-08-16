@@ -18,19 +18,19 @@ import (
 )
 
 type ModelService struct {
-	stack *runtimeComposition
+	composition *runtimeComposition
 }
 
 type AgentService struct {
-	stack *runtimeComposition
+	composition *runtimeComposition
 }
 
 type SkillService struct {
-	stack *runtimeComposition
+	composition *runtimeComposition
 }
 
 type StatusService struct {
-	stack              *runtimeComposition
+	composition        *runtimeComposition
 	preflightSandboxFn func(context.Context, bool) (SandboxStatus, error)
 }
 
@@ -46,19 +46,19 @@ type ACPPresentationService interface {
 }
 
 func (s *runtimeComposition) Models() ModelService {
-	return ModelService{stack: s}
+	return ModelService{composition: s}
 }
 
 func (s *runtimeComposition) Agents() AgentService {
-	return AgentService{stack: s}
+	return AgentService{composition: s}
 }
 
 func (s *runtimeComposition) Skills() SkillService {
-	return SkillService{stack: s}
+	return SkillService{composition: s}
 }
 
 func (s *runtimeComposition) Status() StatusService {
-	return StatusService{stack: s}
+	return StatusService{composition: s}
 }
 
 // Status adds process-only bootstrap diagnostics when the projection is
@@ -68,7 +68,7 @@ func (s *Stack) Status() StatusService {
 	if s == nil {
 		return StatusService{}
 	}
-	return StatusService{stack: &s.runtimeComposition, preflightSandboxFn: s.PreflightSandbox}
+	return StatusService{composition: &s.runtimeComposition, preflightSandboxFn: s.PreflightSandbox}
 }
 
 func (s *Stack) ACPSurface(modes acp.ModeProvider, useFallbackModes bool, configs acp.ConfigProvider) ACPPresentationService {
@@ -76,41 +76,41 @@ func (s *Stack) ACPSurface(modes acp.ModeProvider, useFallbackModes bool, config
 }
 
 func (s ModelService) ListAliases(ctx context.Context, ref session.SessionRef) ([]string, error) {
-	return s.stack.ListModelAliases(ctx, ref)
+	return s.composition.ListModelAliases(ctx, ref)
 }
 
 func (s ModelService) ListChoices(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
-	return s.stack.ListModelChoices(ctx, ref)
+	return s.composition.ListModelChoices(ctx, ref)
 }
 
 func (s ModelService) HasReusableAuth(ctx context.Context, provider string, baseURL string) bool {
-	return s.stack.HasReusableProviderAuth(ctx, provider, baseURL)
+	return s.composition.HasReusableProviderAuth(ctx, provider, baseURL)
 }
 
 func (s ModelService) DefaultAlias() string {
-	return s.stack.DefaultModelAlias()
+	return s.composition.DefaultModelAlias()
 }
 
 func (s ModelService) DefaultEffort() string {
-	return s.stack.DefaultModelEffort()
+	return s.composition.DefaultModelEffort()
 }
 
 // EffectiveAlias returns the model selected for new work in this Host process.
 // It may differ from the persisted Host default when startup flags provide a
 // process-scoped ModelProfile override.
 func (s ModelService) EffectiveAlias() string {
-	return s.stack.EffectiveModelAlias()
+	return s.composition.EffectiveModelAlias()
 }
 
 // EffectiveEffort returns the reasoning effort selected for new work in this
 // Host process. It follows the same startup-override semantics as
 // EffectiveAlias.
 func (s ModelService) EffectiveEffort() string {
-	return s.stack.EffectiveModelEffort()
+	return s.composition.EffectiveModelEffort()
 }
 
 func (s ModelService) Config(alias string) (ModelConfig, bool) {
-	return s.stack.ModelConfig(alias)
+	return s.composition.ModelConfig(alias)
 }
 
 // authenticateModelProvider runs the Control-owned interactive authentication
@@ -145,7 +145,7 @@ func (s *Stack) authenticateModelProvider(ctx context.Context, req modelconfig.A
 }
 
 func (s ModelService) UsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string) (compact.UsageSnapshot, error) {
-	return s.stack.SessionUsageSnapshot(ctx, ref, modelAlias)
+	return s.composition.SessionUsageSnapshot(ctx, ref, modelAlias)
 }
 
 // ProviderUsage returns the latest cached account-level subscription windows
@@ -154,10 +154,10 @@ func (s ModelService) UsageSnapshot(ctx context.Context, ref session.SessionRef,
 // provider has no usage adapter or the model is not backed by a subscription
 // credential.
 func (s ModelService) ProviderUsage(ctx context.Context, modelAlias string) (providerusage.Snapshot, bool, error) {
-	if s.stack == nil || s.stack.providerUsage == nil {
+	if s.composition == nil || s.composition.providerUsage == nil {
 		return providerusage.Snapshot{}, false, nil
 	}
-	config, ok := s.stack.ModelConfig(modelAlias)
+	config, ok := s.composition.ModelConfig(modelAlias)
 	if !ok {
 		return providerusage.Snapshot{}, false, nil
 	}
@@ -166,19 +166,19 @@ func (s ModelService) ProviderUsage(ctx context.Context, modelAlias string) (pro
 	default:
 		return providerusage.Snapshot{}, false, nil
 	}
-	return s.stack.providerUsage.Query(ctx, config.Provider)
+	return s.composition.providerUsage.Query(ctx, config.Provider)
 }
 
 func (s AgentService) ControllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
-	return s.stack.ACPControllerStatus(ctx, ref)
+	return s.composition.ACPControllerStatus(ctx, ref)
 }
 
 func (s AgentService) DisconnectCandidates(ctx context.Context) ([]controlagents.DisconnectCandidate, error) {
-	return s.stack.DisconnectCandidates(ctx)
+	return s.composition.DisconnectCandidates(ctx)
 }
 
 func (s AgentService) List() []ACPAgentInfo {
-	return s.stack.ListACPAgents()
+	return s.composition.ListACPAgents()
 }
 
 func (s SkillService) Discover(ctx context.Context, workspaceDir string) ([]SkillMeta, error) {
@@ -187,13 +187,13 @@ func (s SkillService) Discover(ctx context.Context, workspaceDir string) ([]Skil
 			return nil, err
 		}
 	}
-	if s.stack == nil {
+	if s.composition == nil {
 		return DiscoverSkillMeta(nil, workspaceDir)
 	}
-	s.stack.mu.RLock()
-	runtimeCfg := s.stack.runtime
-	defaultWorkspace := s.stack.Workspace.CWD
-	s.stack.mu.RUnlock()
+	s.composition.mu.RLock()
+	runtimeCfg := s.composition.runtime
+	defaultWorkspace := s.composition.Workspace.CWD
+	s.composition.mu.RUnlock()
 	if strings.TrimSpace(workspaceDir) == "" {
 		workspaceDir = defaultWorkspace
 	}
@@ -207,10 +207,10 @@ func (s SkillService) Discover(ctx context.Context, workspaceDir string) ([]Skil
 // Snapshot returns the skill catalog captured when the current runtime prompt
 // was assembled. It is stable for the runtime lifetime.
 func (s SkillService) Snapshot() skill.Catalog {
-	if s.stack == nil {
+	if s.composition == nil {
 		return skill.Catalog{}
 	}
-	return s.stack.skillCatalogSnapshot()
+	return s.composition.skillCatalogSnapshot()
 }
 
 func (s *runtimeComposition) skillCatalogSnapshot() skill.Catalog {
@@ -223,11 +223,11 @@ func (s *runtimeComposition) skillCatalogSnapshot() skill.Catalog {
 }
 
 func (s StatusService) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
-	return s.stack.Doctor(ctx, req)
+	return s.composition.Doctor(ctx, req)
 }
 
 func (s StatusService) Sandbox() SandboxStatus {
-	return s.stack.SandboxStatus()
+	return s.composition.SandboxStatus()
 }
 
 // PreflightSandbox is a Host bootstrap diagnostic used before presentation
@@ -241,5 +241,5 @@ func (s StatusService) PreflightSandbox(ctx context.Context, allowNonElevatedRep
 }
 
 func (s StatusService) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
-	return s.stack.SessionRuntimeState(ctx, ref)
+	return s.composition.SessionRuntimeState(ctx, ref)
 }

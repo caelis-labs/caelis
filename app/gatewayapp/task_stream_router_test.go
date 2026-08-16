@@ -21,16 +21,16 @@ func TestHostTaskStreamServiceRoutesByOwningSessionRuntime(t *testing.T) {
 	stack.gateway = rootGateway
 	stack.mu.Unlock()
 
-	rootStack := &sessionRuntimeInstance{runtimeComposition: runtimeComposition{gateway: rootGateway}}
-	childStack := &sessionRuntimeInstance{runtimeComposition: runtimeComposition{gateway: childGateway}}
+	rootInstance := &sessionRuntimeInstance{runtimeComposition: runtimeComposition{gateway: rootGateway}}
+	childInstance := &sessionRuntimeInstance{runtimeComposition: runtimeComposition{gateway: childGateway}}
 	stack.sessionRuntimes.mu.Lock()
 	stack.sessionRuntimes.sessions[active.SessionID] = &sessionRuntime{
 		sessionID: active.SessionID,
-		stack:     rootStack,
+		instance:  rootInstance,
 	}
 	stack.sessionRuntimes.sessions["session-child"] = &sessionRuntime{
 		sessionID: "session-child",
-		stack:     childStack,
+		instance:  childInstance,
 	}
 	stack.sessionRuntimes.mu.Unlock()
 

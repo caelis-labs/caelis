@@ -137,7 +137,7 @@ func TestPluginServiceInstallFromMarketplaceUsesEntryNameWhenSourceDirDiffers(t 
 	if len(doc.Plugins) != 1 || doc.Plugins[0].ID != "drawio" {
 		t.Fatalf("persisted plugins = %#v, want one drawio plugin", doc.Plugins)
 	}
-	activated := activateFutureAssemblyStack(t, stack, "marketplace-plugin-install")
+	activated := activateFutureAssemblyRuntime(t, stack, "marketplace-plugin-install")
 	if len(activated.runtime.PluginSkills) != 1 ||
 		activated.runtime.PluginSkills[0].Plugin != "drawio" ||
 		activated.runtime.PluginSkills[0].Namespace != "drawio" {

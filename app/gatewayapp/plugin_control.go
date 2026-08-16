@@ -18,25 +18,25 @@ type MarketplaceInfo = plugin.MarketplaceInfo
 // host. GatewayApp supplies its product data root, revision-CAS persistence,
 // candidate validation, and live MCP status snapshots.
 func (s *runtimeComposition) Plugins() PluginService {
-	return plugin.NewService(pluginHost{stack: s})
+	return plugin.NewService(pluginHost{composition: s})
 }
 
 type pluginHost struct {
-	stack *runtimeComposition
+	composition *runtimeComposition
 }
 
 func (h pluginHost) StoreDir() string {
-	if h.stack == nil {
+	if h.composition == nil {
 		return ""
 	}
-	return h.stack.storeDir
+	return h.composition.storeDir
 }
 
 func (h pluginHost) LoadPluginState(_ context.Context) (plugin.State, error) {
-	if h.stack == nil || h.stack.store == nil {
+	if h.composition == nil || h.composition.store == nil {
 		return plugin.State{}, fmt.Errorf("plugin service: stack store is unavailable")
 	}
-	doc, err := h.stack.store.Load()
+	doc, err := h.composition.store.Load()
 	if err != nil {
 		return plugin.State{}, err
 	}
@@ -44,14 +44,14 @@ func (h pluginHost) LoadPluginState(_ context.Context) (plugin.State, error) {
 }
 
 func (h pluginHost) UpdatePluginState(ctx context.Context, mutation plugin.Mutation) error {
-	if h.stack == nil || h.stack.store == nil {
+	if h.composition == nil || h.composition.store == nil {
 		return fmt.Errorf("plugin service: stack store is unavailable")
 	}
 	if mutation.Apply == nil {
 		return fmt.Errorf("plugin service: plugin state mutation is required")
 	}
 
-	oldDoc, err := h.stack.store.LoadContext(ctx)
+	oldDoc, err := h.composition.store.LoadContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -73,10 +73,10 @@ func (h pluginHost) UpdatePluginState(ctx context.Context, mutation plugin.Mutat
 	nextDoc := oldDoc
 	nextDoc.Plugins = state.Plugins
 	nextDoc.PluginMarketplaces = state.Marketplaces
-	if err := h.stack.validateAgentAssemblyCandidate(nextDoc); err != nil {
+	if err := h.composition.validateAgentAssemblyCandidate(nextDoc); err != nil {
 		return err
 	}
-	_, persistErr := h.stack.store.CompareAndSave(ctx, expected, nextDoc)
+	_, persistErr := h.composition.store.CompareAndSave(ctx, expected, nextDoc)
 	if persistErr != nil && !configstore.WriteCommitted(persistErr) {
 		return persistErr
 	}
@@ -91,10 +91,10 @@ func (h pluginHost) UpdatePluginState(ctx context.Context, mutation plugin.Mutat
 }
 
 func (h pluginHost) MCPServersStatus(pluginID string) []mcp.MCPServerInfo {
-	if h.stack == nil {
+	if h.composition == nil {
 		return nil
 	}
-	return h.stack.MCPServersStatus(pluginID)
+	return h.composition.MCPServersStatus(pluginID)
 }
 
 func pluginStateFromAppConfig(doc AppConfig) plugin.State {

@@ -91,7 +91,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 		return nil, err
 	}
 
-	child := &sessionRuntimeInstance{
+	instance := &sessionRuntimeInstance{
 		runtimeComposition: runtimeComposition{
 			Sessions:                sessions,
 			AppName:                 deps.appName,
@@ -123,7 +123,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 			hostedChildMailbox:      deps.hostedChildMailbox,
 		},
 	}
-	if err := child.buildInitialGatewayRuntime(ctx); err != nil {
+	if err := instance.buildInitialGatewayRuntime(ctx); err != nil {
 		return nil, fmt.Errorf(
 			"gatewayapp: assemble Session Runtime for workspace %q at %q: %w",
 			workspace.Key,
@@ -131,7 +131,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 			err,
 		)
 	}
-	return child, nil
+	return instance, nil
 }
 
 func cloneSessionRuntimeConfig(config stackRuntimeConfig) stackRuntimeConfig {

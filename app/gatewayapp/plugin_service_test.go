@@ -215,7 +215,7 @@ func TestPluginServiceAddPathAffectsFutureSessionSkillPrompt(t *testing.T) {
 	if _, err := stack.Plugins().AddPath(ctx, pluginDir); err != nil {
 		t.Fatalf("AddPath() error = %v", err)
 	}
-	activated := activateFutureAssemblyStack(t, stack, "plugin-skill-enabled")
+	activated := activateFutureAssemblyRuntime(t, stack, "plugin-skill-enabled")
 	systemPrompt, _ = activated.runtime.BaseMetadata["system_prompt"].(string)
 	if !strings.Contains(systemPrompt, "skillplugin:runtime-skill") {
 		t.Fatalf("runtime-skill missing from future Session activation:\n%s", systemPrompt)
@@ -227,7 +227,7 @@ func TestPluginServiceAddPathAffectsFutureSessionSkillPrompt(t *testing.T) {
 	if current, _ := activated.runtime.BaseMetadata["system_prompt"].(string); !strings.Contains(current, "skillplugin:runtime-skill") {
 		t.Fatalf("active Session lost its fixed plugin skill:\n%s", current)
 	}
-	disabled := activateFutureAssemblyStack(t, stack, "plugin-skill-disabled")
+	disabled := activateFutureAssemblyRuntime(t, stack, "plugin-skill-disabled")
 	systemPrompt, _ = disabled.runtime.BaseMetadata["system_prompt"].(string)
 	if strings.Contains(systemPrompt, "runtime-skill") {
 		t.Fatalf("runtime-skill present in activation after plugin disable:\n%s", systemPrompt)
@@ -743,7 +743,7 @@ func TestPluginServiceMCPServers(t *testing.T) {
 		t.Errorf("expected no current Host tools, got %v", mcpSrv.Tools)
 	}
 
-	activated := activateFutureAssemblyStack(t, stack, "plugin-mcp-enabled")
+	activated := activateFutureAssemblyRuntime(t, stack, "plugin-mcp-enabled")
 	detail, err := activated.Plugins().Inspect(ctx, "myplugin")
 	if err != nil {
 		t.Fatalf("Inspect() failed: %v", err)
@@ -792,7 +792,7 @@ func TestPluginServiceAgentContributions(t *testing.T) {
 		t.Fatalf("AddPath() agents = %#v, want plugin-helper", info.Agents)
 	}
 
-	activated := activateFutureAssemblyStack(t, stack, "plugin-agent-enabled")
+	activated := activateFutureAssemblyRuntime(t, stack, "plugin-agent-enabled")
 	agent, ok := agentConfigByNameForPluginTest(activated.runtime.Assembly.Agents, "plugin-helper")
 	if !ok {
 		t.Fatalf("plugin-helper missing from future Session assembly: %#v", activated.runtime.Assembly.Agents)

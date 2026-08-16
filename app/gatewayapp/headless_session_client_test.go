@@ -68,9 +68,9 @@ func TestHeadlessSessionTurnMatchesInProcessAndHTTPClients(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runtime.stack.mu.Lock()
-			runtime.stack.gateway = gateway
-			runtime.stack.mu.Unlock()
+			runtime.instance.mu.Lock()
+			runtime.instance.gateway = gateway
+			runtime.instance.mu.Unlock()
 
 			turns, err := appserver.NewSessionTurnClient(client)
 			if err != nil {
@@ -170,9 +170,9 @@ func TestSessionTurnReconnectRepairsDeletedDormantModelBeforePromptCAS(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.stack.mu.Lock()
-	runtime.stack.gateway = gateway
-	runtime.stack.mu.Unlock()
+	runtime.instance.mu.Lock()
+	runtime.instance.gateway = gateway
+	runtime.instance.mu.Unlock()
 	result, err := headless.RunSessionOnce(ctx, turns, appserver.SessionTurnStartRequest{
 		SessionID: active.SessionID, Input: "continue after recovery",
 	}, headless.Options{})

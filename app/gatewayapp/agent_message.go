@@ -37,7 +37,7 @@ func (s *Stack) DeliverAgentMessage(ctx context.Context, request DeliverAgentMes
 		return AgentMessageDelivery{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	ref := session.NormalizeSessionRef(request.SessionRef)
-	runtimeStack := &s.runtimeComposition
+	composition := &s.runtimeComposition
 	var release func(context.Context) error
 	var active session.Session
 	if s.sessionRuntimes != nil {
@@ -46,8 +46,8 @@ func (s *Stack) DeliverAgentMessage(ctx context.Context, request DeliverAgentMes
 			return AgentMessageDelivery{}, err
 		}
 		active = loaded
-		if runtime != nil && runtime.stack != nil {
-			runtimeStack = &runtime.stack.runtimeComposition
+		if runtime != nil && runtime.instance != nil {
+			composition = &runtime.instance.runtimeComposition
 		}
 		release = releaseRuntime
 	} else if s.Sessions != nil {
@@ -60,12 +60,12 @@ func (s *Stack) DeliverAgentMessage(ctx context.Context, request DeliverAgentMes
 			_ = release(context.WithoutCancel(ctx))
 		}()
 	}
-	gateway := runtimeStack.currentGateway()
+	gateway := composition.currentGateway()
 	if gateway == nil {
 		return AgentMessageDelivery{}, fmt.Errorf("gatewayapp: Agent message gateway is unavailable")
 	}
 	delivery, err := gateway.DeliverAgentMessage(ctx, kernel.DeliverAgentMessageRequest{
-		SessionRef: ref, RuntimeContext: runtimeStack.controlRuntimeContext(ctx, active), Message: request.Message,
+		SessionRef: ref, RuntimeContext: composition.controlRuntimeContext(ctx, active), Message: request.Message,
 		ExpectedRevision: request.ExpectedRevision,
 		RelatedRevisions: append([]session.SessionRevisionPrecondition(nil), request.RelatedRevisions...),
 	})
@@ -73,7 +73,7 @@ func (s *Stack) DeliverAgentMessage(ctx context.Context, request DeliverAgentMes
 		return AgentMessageDelivery{}, err
 	}
 	if delivery.Turn != nil {
-		runtimeStack.attachControlClientHandle(delivery.Turn)
+		composition.attachControlClientHandle(delivery.Turn)
 	}
 	return AgentMessageDelivery{Accepted: delivery.Accepted, State: delivery.State, Turn: delivery.Turn}, nil
 }

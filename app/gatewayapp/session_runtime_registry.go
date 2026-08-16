@@ -22,7 +22,7 @@ import (
 type sessionRuntime struct {
 	sessionID string
 	workspace session.WorkspaceRef
-	stack     *sessionRuntimeInstance
+	instance  *sessionRuntimeInstance
 
 	// Lifecycle fields are guarded by sessionRuntimeRegistry.mu. Once releasing
 	// is set, command routing must not return this Runtime again. inUse covers
@@ -227,7 +227,7 @@ func (r *sessionRuntimeRegistry) bindActivatedLocked(
 	active session.Session,
 	runtime *sessionRuntime,
 ) error {
-	if runtime == nil || runtime.stack == nil {
+	if runtime == nil || runtime.instance == nil {
 		return errors.New("gatewayapp: activated Session Runtime is unavailable")
 	}
 	if err := validateSessionRuntime(active, runtime); err != nil {
@@ -330,13 +330,13 @@ func (r *sessionRuntimeRegistry) activateSessionTracked(
 			r.scheduleIdleRelease(runtime, ref)
 		},
 	}
-	stack, err := r.assembler.assembleSnapshot(buildCtx, active, activity, sessions)
+	instance, err := r.assembler.assembleSnapshot(buildCtx, active, activity, sessions)
 	if err != nil {
 		return nil, active, false, err
 	}
-	runtime.stack = stack
+	runtime.instance = instance
 	if err := r.bindActivatedLocked(active, runtime); err != nil {
-		_ = stack.closeWorkspaceResources()
+		_ = instance.closeWorkspaceResources()
 		return nil, active, false, err
 	}
 	return runtime, active, true, nil
@@ -498,16 +498,16 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 	if err := r.validateWorkspaceIdentity(workspace); err != nil {
 		return nil, active, nil, err
 	}
-	stack, err := r.assembler.assembleSnapshot(buildCtx, active, sessionRuntimeActivity{}, sessions)
+	instance, err := r.assembler.assembleSnapshot(buildCtx, active, sessionRuntimeActivity{}, sessions)
 	if err != nil {
 		return nil, active, nil, err
 	}
-	runtime := &sessionRuntime{sessionID: sessionID, workspace: workspace, stack: stack}
+	runtime := &sessionRuntime{sessionID: sessionID, workspace: workspace, instance: instance}
 	return runtime, active, func(closeCtx context.Context) error {
 		if closeCtx == nil {
 			closeCtx = context.Background()
 		}
-		return errors.Join(stack.Quiesce(closeCtx), stack.closeWorkspaceResources())
+		return errors.Join(instance.Quiesce(closeCtx), instance.closeWorkspaceResources())
 	}, nil
 }
 
@@ -776,10 +776,10 @@ func (r *sessionRuntimeRegistry) completeRuntimeRelease(
 		releaseErr = r.waitRuntimeUnused(ctx, runtime)
 	}
 	if releaseErr == nil {
-		releaseErr = runtime.stack.Quiesce(ctx)
+		releaseErr = runtime.instance.Quiesce(ctx)
 	}
 	if releaseErr == nil {
-		releaseErr = runtime.stack.closeWorkspaceResources()
+		releaseErr = runtime.instance.closeWorkspaceResources()
 	}
 	r.mu.Lock()
 	runtime.releaseErr = releaseErr
@@ -830,16 +830,16 @@ func (r *sessionRuntimeRegistry) beginQuiesce(ctx context.Context) (*sessionRunt
 		errs = append(errs, fmt.Errorf("drain Session Runtime loads: %w", err))
 	}
 	for _, runtime := range runtimes {
-		if runtime == nil || runtime.stack == nil {
+		if runtime == nil || runtime.instance == nil {
 			continue
 		}
-		if gateway := runtime.stack.currentGateway(); gateway != nil {
+		if gateway := runtime.instance.currentGateway(); gateway != nil {
 			if err := gateway.Quiesce(ctx); err != nil {
 				errs = append(errs, fmt.Errorf("Session %q: %w", runtime.sessionID, err))
 			}
 		}
-		if runtime.stack.acpControlPlane != nil {
-			if err := runtime.stack.acpControlPlane.Quiesce(ctx); err != nil {
+		if runtime.instance.acpControlPlane != nil {
+			if err := runtime.instance.acpControlPlane.Quiesce(ctx); err != nil {
 				errs = append(errs, fmt.Errorf("Session %q child work: %w", runtime.sessionID, err))
 			}
 		}
@@ -870,10 +870,10 @@ func (r *sessionRuntimeRegistry) closeRuntimeResources() error {
 	}
 	var errs []error
 	for _, runtime := range r.snapshot() {
-		if runtime == nil || runtime.stack == nil {
+		if runtime == nil || runtime.instance == nil {
 			continue
 		}
-		if err := runtime.stack.closeWorkspaceResources(); err != nil {
+		if err := runtime.instance.closeWorkspaceResources(); err != nil {
 			errs = append(errs, fmt.Errorf("Session %q: %w", runtime.sessionID, err))
 		}
 	}
@@ -1137,7 +1137,7 @@ func (r *sessionRuntimeRegistry) recordWorkspaceIdentityLocked(workspace session
 }
 
 func validateSessionRuntime(active session.Session, runtime *sessionRuntime) error {
-	if runtime == nil || runtime.stack == nil {
+	if runtime == nil || runtime.instance == nil {
 		return errors.New("gatewayapp: Session Runtime is unavailable")
 	}
 	sessionID := strings.TrimSpace(active.SessionID)

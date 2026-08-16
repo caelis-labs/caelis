@@ -491,7 +491,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 	if err != nil {
 		t.Fatalf("activateSessionTracked() error = %v", err)
 	}
-	loaded.stack.gateway = gw
+	loaded.instance.gateway = gw
 	stack.gateway = gw
 
 	handle, err := stack.currentGateway().BeginTurn(ctx, kernelimpl.BeginTurnRequest{
@@ -660,10 +660,10 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 			}
 		})
 	}
-	if loaded.stack.lookup.HasAlias("ollama/blocked-model") || !loaded.stack.lookup.HasAlias(altAlias) {
-		t.Fatalf("active Session model snapshot changed: blocked=%v alt=%v", loaded.stack.lookup.HasAlias("ollama/blocked-model"), loaded.stack.lookup.HasAlias(altAlias))
+	if loaded.instance.lookup.HasAlias("ollama/blocked-model") || !loaded.instance.lookup.HasAlias(altAlias) {
+		t.Fatalf("active Session model snapshot changed: blocked=%v alt=%v", loaded.instance.lookup.HasAlias("ollama/blocked-model"), loaded.instance.lookup.HasAlias(altAlias))
 	}
-	if got := loaded.stack.sandbox.RequestedType; got != "host" {
+	if got := loaded.instance.sandbox.RequestedType; got != "host" {
 		t.Fatalf("active Session sandbox = %q, want frozen host", got)
 	}
 

@@ -51,10 +51,10 @@ func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
 	runtimeA1 := activateSessionRuntime(t, stack, sessionA1)
 	runtimeA2 := activateSessionRuntime(t, stack, sessionA2)
 	runtimeB := activateSessionRuntime(t, stack, sessionB)
-	if runtimeA1 == runtimeA2 || runtimeA1.stack == runtimeA2.stack {
+	if runtimeA1 == runtimeA2 || runtimeA1.instance == runtimeA2.instance {
 		t.Fatal("two Sessions in one workspace shared a live Runtime")
 	}
-	if runtimeA1.stack.currentGateway() == runtimeA2.stack.currentGateway() {
+	if runtimeA1.instance.currentGateway() == runtimeA2.instance.currentGateway() {
 		t.Fatal("two Sessions in one workspace shared a Gateway")
 	}
 	if runtimeA1.workspace != runtimeA2.workspace {
@@ -65,7 +65,7 @@ func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
 	}
 	assertWorkspaceRuntimeComposition(
 		t,
-		runtimeA1.stack,
+		runtimeA1.instance,
 		workspaceA,
 		"Workspace A rule v1.",
 		"Workspace B rule.",
@@ -74,7 +74,7 @@ func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
 	)
 	assertWorkspaceRuntimeComposition(
 		t,
-		runtimeB.stack,
+		runtimeB.instance,
 		workspaceB,
 		"Workspace B rule.",
 		"Workspace A rule v1.",
@@ -92,7 +92,7 @@ func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
 	}
 	assertWorkspaceRuntimeComposition(
 		t,
-		pinned.stack,
+		pinned.instance,
 		workspaceA,
 		"Workspace A rule v1.",
 		"Workspace A rule v2.",
@@ -104,7 +104,7 @@ func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
 	runtimeA3 := activateSessionRuntime(t, stack, sessionA3)
 	assertWorkspaceRuntimeComposition(
 		t,
-		runtimeA3.stack,
+		runtimeA3.instance,
 		workspaceA,
 		"Workspace A rule v2.",
 		"Workspace A rule v1.",
@@ -113,7 +113,7 @@ func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
 	)
 	assertWorkspaceRuntimeComposition(
 		t,
-		runtimeA2.stack,
+		runtimeA2.instance,
 		workspaceA,
 		"Workspace A rule v1.",
 		"Workspace A rule v2.",
@@ -131,12 +131,12 @@ func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if refreshed == runtimeA1 || refreshed.stack == runtimeA1.stack {
+	if refreshed == runtimeA1 || refreshed.instance == runtimeA1.instance {
 		t.Fatal("reactivated Session reused its released Runtime")
 	}
 	assertWorkspaceRuntimeComposition(
 		t,
-		refreshed.stack,
+		refreshed.instance,
 		workspaceA,
 		"Workspace A rule v2.",
 		"Workspace A rule v1.",
@@ -200,14 +200,14 @@ func TestSessionRuntimeSelectsNewCatalogModelPinsDeletionAndRepairsOnReactivatio
 	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel(new catalog entry) = %#v, %v", selected, err)
 	}
-	if state, err := runtime.stack.SessionRuntimeState(ctx, active.SessionRef); err != nil || state.ModelID != lateID {
+	if state, err := runtime.instance.SessionRuntimeState(ctx, active.SessionRef); err != nil || state.ModelID != lateID {
 		t.Fatalf("active Runtime state after selection = %#v, %v; want %q", state, err, lateID)
 	}
 
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, lateID); err != nil {
 		t.Fatal(err)
 	}
-	if state, err := runtime.stack.SessionRuntimeState(ctx, active.SessionRef); err != nil || state.ModelID != lateID {
+	if state, err := runtime.instance.SessionRuntimeState(ctx, active.SessionRef); err != nil || state.ModelID != lateID {
 		t.Fatalf("active Runtime state after deletion = %#v, %v; want pinned %q", state, err, lateID)
 	}
 	if _, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
@@ -294,7 +294,7 @@ func TestSpawnedSessionUsesParentRuntimeModelSnapshotAfterHostDeletion(t *testin
 		t.Fatalf("Host catalog still contains deleted model %q", modelID)
 	}
 
-	agentConfig, err := parentRuntime.stack.materializeDelegatedModel("", profile.ID, "high", parentRuntime.stack.runtime)
+	agentConfig, err := parentRuntime.instance.materializeDelegatedModel("", profile.ID, "high", parentRuntime.instance.runtime)
 	if err != nil {
 		t.Fatalf("materializeDelegatedModel() from frozen Runtime: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestSpawnedSessionUsesParentRuntimeModelSnapshotAfterHostDeletion(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	remaining, err := parentRuntime.stack.prepareSpawnedACPSession(ctx, tasksubagent.SpawnContext{}, child.SessionID, agentConfig)
+	remaining, err := parentRuntime.instance.prepareSpawnedACPSession(ctx, tasksubagent.SpawnContext{}, child.SessionID, agentConfig)
 	if err != nil {
 		t.Fatalf("prepareSpawnedACPSession() = %v", err)
 	}
@@ -327,7 +327,7 @@ func TestSpawnedSessionUsesParentRuntimeModelSnapshotAfterHostDeletion(t *testin
 	}
 
 	childRuntime := activateSessionRuntime(t, stack, child.SessionID)
-	pinned, err := childRuntime.stack.lookup.ResolveConfig(modelID)
+	pinned, err := childRuntime.instance.lookup.ResolveConfig(modelID)
 	if err != nil {
 		t.Fatalf("child Runtime did not receive process-local model pin: %v", err)
 	}
@@ -342,8 +342,8 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 	t.Cleanup(func() { _ = stack.Close() })
 	principal := appserver.Principal{ID: stack.UserID}
 	runtime := activateSessionRuntime(t, stack, active.SessionID)
-	beforeLookup := runtime.stack.lookup.Snapshot()
-	beforeContextWindow := runtime.stack.lookup.contextWindow
+	beforeLookup := runtime.instance.lookup.Snapshot()
+	beforeContextWindow := runtime.instance.lookup.contextWindow
 
 	profile, err := stack.connectTestModel(ModelConfig{
 		Provider:            "ollama",
@@ -357,11 +357,11 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 	lateID := profile.Backend.Provider.ModelConfigID
 	active = mustCurrentSession(t, stack, active.SessionID)
 	blocked := &blockingUpdateSessionService{
-		Service: runtime.stack.Sessions,
+		Service: runtime.instance.Sessions,
 		entered: make(chan struct{}),
 		proceed: make(chan struct{}),
 	}
-	runtime.stack.Sessions = blocked
+	runtime.instance.Sessions = blocked
 
 	type commandResult struct {
 		result appserver.CommandResult
@@ -384,7 +384,7 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 
 	readDone := make(chan bool, 1)
 	go func() {
-		_, ok := runtime.stack.lookup.Config(lateID)
+		_, ok := runtime.instance.lookup.Config(lateID)
 		readDone <- ok
 	}()
 	select {
@@ -415,11 +415,11 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 	if visible := <-readDone; visible {
 		t.Fatal("conflicted model remained in the Runtime lookup")
 	}
-	if after := runtime.stack.lookup.Snapshot(); !reflect.DeepEqual(after, beforeLookup) {
+	if after := runtime.instance.lookup.Snapshot(); !reflect.DeepEqual(after, beforeLookup) {
 		t.Fatalf("Runtime lookup after conflict = %#v, want %#v", after, beforeLookup)
 	}
-	if runtime.stack.lookup.contextWindow != beforeContextWindow {
-		t.Fatalf("Runtime context window after conflict = %d, want %d", runtime.stack.lookup.contextWindow, beforeContextWindow)
+	if runtime.instance.lookup.contextWindow != beforeContextWindow {
+		t.Fatalf("Runtime context window after conflict = %d, want %d", runtime.instance.lookup.contextWindow, beforeContextWindow)
 	}
 }
 
@@ -663,8 +663,8 @@ func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pinned.runtime != &loaded.stack.runtimeComposition {
-		t.Fatalf("loaded Runtime lease = %p, want %p", pinned.runtime, &loaded.stack.runtimeComposition)
+	if pinned.runtime != &loaded.instance.runtimeComposition {
+		t.Fatalf("loaded Runtime lease = %p, want %p", pinned.runtime, &loaded.instance.runtimeComposition)
 	}
 	if err := pinned.Close(ctx); err != nil {
 		t.Fatal(err)
@@ -720,9 +720,9 @@ func TestSessionRuntimeReleaseWaitsForRoutedControlMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.stack.mu.Lock()
-	runtime.stack.gateway = gateway
-	runtime.stack.mu.Unlock()
+	runtime.instance.mu.Lock()
+	runtime.instance.gateway = gateway
+	runtime.instance.mu.Unlock()
 
 	commandDone := make(chan error, 1)
 	go func() {
@@ -804,12 +804,12 @@ func TestHostCloseRetriesFailedSessionRuntimeResourceRelease(t *testing.T) {
 	closeErr := errors.New("Session Runtime close failed")
 	retryable := newSandboxLifecycleTestRuntime(sandbox.BackendHost, sandbox.BackendHost)
 	retryable.closeErr = closeErr
-	runtime.stack.workspaceCloseMu.Lock()
-	runtime.stack.mu.Lock()
-	original := runtime.stack.exec
-	runtime.stack.exec = retryable
-	runtime.stack.mu.Unlock()
-	runtime.stack.workspaceCloseMu.Unlock()
+	runtime.instance.workspaceCloseMu.Lock()
+	runtime.instance.mu.Lock()
+	original := runtime.instance.exec
+	runtime.instance.exec = retryable
+	runtime.instance.mu.Unlock()
+	runtime.instance.workspaceCloseMu.Unlock()
 	if original != nil {
 		if err := original.Close(); err != nil {
 			t.Fatal(err)
@@ -871,7 +871,7 @@ func TestSessionRuntimeSandboxConfigIsDetachedFromHostMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := activateSessionRuntime(t, stack, firstID)
-	assertSessionRuntimeSharingContract(t, stack, first.stack)
+	assertSessionRuntimeIsolationContract(t, stack, first.instance)
 
 	blockingRuntime := &controlClientLifecycleRuntime{
 		started: make(chan struct{}),
@@ -885,9 +885,9 @@ func TestSessionRuntimeSandboxConfigIsDetachedFromHostMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first.stack.mu.Lock()
-	first.stack.gateway = blockingGateway
-	first.stack.mu.Unlock()
+	first.instance.mu.Lock()
+	first.instance.gateway = blockingGateway
+	first.instance.mu.Unlock()
 	prompt, err := client.Prompt(ctx, appserver.PromptRequest{
 		WriteBase: appserver.WriteBase{OperationID: "prompt-first", SessionID: firstID},
 		Input:     "hold the Session Runtime active",
@@ -915,8 +915,8 @@ func TestSessionRuntimeSandboxConfigIsDetachedFromHostMutation(t *testing.T) {
 	if _, err := stack.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(first.stack.sandbox.WritableRoots, []string{initialWritableRoot}) {
-		t.Fatalf("live Session sandbox writable roots = %#v, want pinned initial snapshot", first.stack.sandbox.WritableRoots)
+	if !slices.Equal(first.instance.sandbox.WritableRoots, []string{initialWritableRoot}) {
+		t.Fatalf("live Session sandbox writable roots = %#v, want pinned initial snapshot", first.instance.sandbox.WritableRoots)
 	}
 	if _, err := client.Cancel(ctx, appserver.CancelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "cancel-first", SessionID: firstID},
@@ -933,15 +933,15 @@ func TestSessionRuntimeSandboxConfigIsDetachedFromHostMutation(t *testing.T) {
 	waitForSessionRuntimeUnloaded(t, stack.sessionRuntimes, firstID)
 	secondID := createWorkspaceRuntimeTestSession(t, client, "create-second", "session-second", "workspace", workspace)
 	second := activateSessionRuntime(t, stack, secondID)
-	if !slices.Equal(second.stack.sandbox.WritableRoots, []string{updatedWritableRoot}) {
-		t.Fatalf("new Session sandbox writable roots = %#v, want current snapshot", second.stack.sandbox.WritableRoots)
+	if !slices.Equal(second.instance.sandbox.WritableRoots, []string{updatedWritableRoot}) {
+		t.Fatalf("new Session sandbox writable roots = %#v, want current snapshot", second.instance.sandbox.WritableRoots)
 	}
 	refreshed, _, err := stack.sessionRuntimes.activateSession(ctx, firstID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(refreshed.stack.sandbox.WritableRoots, []string{updatedWritableRoot}) {
-		t.Fatalf("reactivated Session sandbox writable roots = %#v, want current snapshot", refreshed.stack.sandbox.WritableRoots)
+	if !slices.Equal(refreshed.instance.sandbox.WritableRoots, []string{updatedWritableRoot}) {
+		t.Fatalf("reactivated Session sandbox writable roots = %#v, want current snapshot", refreshed.instance.sandbox.WritableRoots)
 	}
 }
 
@@ -1006,9 +1006,9 @@ func TestSessionRuntimeActivationWaitsForReleaseAndBuildsFreshRuntime(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.stack.mu.Lock()
-	runtime.stack.gateway = blockingGateway
-	runtime.stack.mu.Unlock()
+	runtime.instance.mu.Lock()
+	runtime.instance.gateway = blockingGateway
+	runtime.instance.mu.Unlock()
 	if _, err := client.Prompt(ctx, appserver.PromptRequest{
 		WriteBase: appserver.WriteBase{OperationID: "prompt-release-race", SessionID: sessionID},
 		Input:     "hold release open",
@@ -1053,7 +1053,7 @@ func TestSessionRuntimeActivationWaitsForReleaseAndBuildsFreshRuntime(t *testing
 	if result.err != nil {
 		t.Fatalf("activation after release error = %v", result.err)
 	}
-	if result.runtime == nil || result.runtime == runtime || result.runtime.stack == runtime.stack {
+	if result.runtime == nil || result.runtime == runtime || result.runtime.instance == runtime.instance {
 		t.Fatalf("activation after release reused old Runtime: old=%p new=%p", runtime, result.runtime)
 	}
 	stack.sessionRuntimes.mu.RLock()
@@ -1118,7 +1118,7 @@ func TestSessionRuntimeReassemblesCurrentConfigAfterHostRestart(t *testing.T) {
 	}
 	assertWorkspaceRuntimeComposition(
 		t,
-		runtime.stack,
+		runtime.instance,
 		workspace,
 		"Workspace rule v2.",
 		"Workspace rule v1.",
@@ -1220,11 +1220,11 @@ func TestSessionRuntimeLivesUntilLastObserverDetaches(t *testing.T) {
 
 	writeWorkspaceRuntimeInstruction(t, workspace, "Observer lifetime rule v2.")
 	refreshed := activateSessionRuntime(t, stack, sessionID)
-	if refreshed == runtime || refreshed.stack == runtime.stack {
+	if refreshed == runtime || refreshed.instance == runtime.instance {
 		t.Fatal("reactivation reused the Runtime released by the last observer")
 	}
 	assertWorkspaceRuntimeComposition(
-		t, refreshed.stack, workspace,
+		t, refreshed.instance, workspace,
 		"Observer lifetime rule v2.", "Observer lifetime rule.",
 		"observer-lifetime-skill", "",
 	)
@@ -1316,7 +1316,7 @@ func TestSessionRuntimeDurableRunningTaskSurvivesObserverDetach(t *testing.T) {
 	if err := stack.taskStore.Upsert(ctx, entry); err != nil {
 		t.Fatal(err)
 	}
-	runtime.stack.runtimeTaskChanged(session.SessionRef{SessionID: sessionID})
+	runtime.instance.runtimeTaskChanged(session.SessionRef{SessionID: sessionID})
 	waitForSessionRuntimeUnloaded(t, stack.sessionRuntimes, sessionID)
 }
 
@@ -2166,40 +2166,40 @@ func activateSessionRuntime(t *testing.T, stack *Stack, sessionID string) *sessi
 	return runtime
 }
 
-func assertSessionRuntimeSharingContract(t *testing.T, host *Stack, child *sessionRuntimeInstance) {
+func assertSessionRuntimeIsolationContract(t *testing.T, host *Stack, instance *sessionRuntimeInstance) {
 	t.Helper()
-	if child == nil {
+	if instance == nil {
 		t.Fatal("Session Runtime instance is nil")
 	}
-	if child.lookup == host.lookup || child.placementCache == host.placementCache {
-		t.Fatal("Session child shared mutable model or placement configuration")
+	if instance.lookup == host.lookup || instance.placementCache == host.placementCache {
+		t.Fatal("Session Runtime shared mutable model or placement configuration")
 	}
-	if child.AppName != host.AppName ||
-		child.UserID != host.UserID ||
-		child.storeDir != host.storeDir ||
-		child.leaseOwnerID != host.leaseOwnerID ||
-		child.store != host.store ||
-		!sameSessionRuntimeReference(child.Sessions, host.Sessions) ||
-		!sameSessionRuntimeReference(child.taskStore, host.taskStore) ||
-		!sameSessionRuntimeReference(child.controlFeeds, host.controlFeeds) ||
-		!sameSessionRuntimeReference(child.lifecycleCtx, host.lifecycleCtx) ||
-		child.approvalRecovery != host.approvalRecovery ||
-		child.codexAuth != host.codexAuth ||
-		child.grokAuth != host.grokAuth ||
-		child.apiKeyCredentials != host.apiKeyCredentials ||
-		child.providerUsage != host.providerUsage ||
-		child.modelCatalog != host.lookup ||
-		child.sessionModelPins != host.sessionModelPins ||
-		child.hostedChildMailbox == nil {
-		t.Fatal("Session child did not receive the required Host-shared state")
+	if instance.AppName != host.AppName ||
+		instance.UserID != host.UserID ||
+		instance.storeDir != host.storeDir ||
+		instance.leaseOwnerID != host.leaseOwnerID ||
+		instance.store != host.store ||
+		!sameSessionRuntimeReference(instance.Sessions, host.Sessions) ||
+		!sameSessionRuntimeReference(instance.taskStore, host.taskStore) ||
+		!sameSessionRuntimeReference(instance.controlFeeds, host.controlFeeds) ||
+		!sameSessionRuntimeReference(instance.lifecycleCtx, host.lifecycleCtx) ||
+		instance.approvalRecovery != host.approvalRecovery ||
+		instance.codexAuth != host.codexAuth ||
+		instance.grokAuth != host.grokAuth ||
+		instance.apiKeyCredentials != host.apiKeyCredentials ||
+		instance.providerUsage != host.providerUsage ||
+		instance.modelCatalog != host.lookup ||
+		instance.sessionModelPins != host.sessionModelPins ||
+		instance.hostedChildMailbox == nil {
+		t.Fatal("Session Runtime did not receive the required borrowed Host authorities")
 	}
-	if child.currentGateway() == host.currentGateway() ||
-		child.engine == host.engine ||
-		child.exec == host.exec {
-		t.Fatal("Session child shared execution composition state")
+	if instance.currentGateway() == host.currentGateway() ||
+		instance.engine == host.engine ||
+		instance.exec == host.exec {
+		t.Fatal("Session Runtime shared execution composition state")
 	}
-	if child.mcpMgr != nil && child.mcpMgr == host.mcpMgr {
-		t.Fatal("Session child shared its MCP manager")
+	if instance.mcpMgr != nil && instance.mcpMgr == host.mcpMgr {
+		t.Fatal("Session Runtime shared its MCP manager")
 	}
 }
 
@@ -2222,7 +2222,7 @@ func sameSessionRuntimeReference(left any, right any) bool {
 
 func assertWorkspaceRuntimeComposition(
 	t *testing.T,
-	stack *sessionRuntimeInstance,
+	instance *sessionRuntimeInstance,
 	wantCWD string,
 	wantInstruction string,
 	forbiddenInstruction string,
@@ -2230,17 +2230,17 @@ func assertWorkspaceRuntimeComposition(
 	forbiddenSkill string,
 ) {
 	t.Helper()
-	if stack.Workspace.CWD != wantCWD {
-		t.Fatalf("Session Runtime CWD = %q, want %q", stack.Workspace.CWD, wantCWD)
+	if instance.Workspace.CWD != wantCWD {
+		t.Fatalf("Session Runtime CWD = %q, want %q", instance.Workspace.CWD, wantCWD)
 	}
-	actualCWD, err := stack.exec.FileSystem().Getwd()
+	actualCWD, err := instance.exec.FileSystem().Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if actualCWD != wantCWD {
 		t.Fatalf("Session sandbox CWD = %q, want %q", actualCWD, wantCWD)
 	}
-	prompt := stringFromMap(stack.runtime.BaseMetadata, "system_prompt")
+	prompt := stringFromMap(instance.runtime.BaseMetadata, "system_prompt")
 	if !strings.Contains(prompt, wantInstruction) {
 		t.Fatalf("Session prompt does not contain %q:\n%s", wantInstruction, prompt)
 	}
@@ -2248,7 +2248,7 @@ func assertWorkspaceRuntimeComposition(
 		t.Fatalf("Session prompt contains forbidden instruction %q:\n%s", forbiddenInstruction, prompt)
 	}
 	skills := make(map[string]struct{})
-	for _, meta := range stack.runtime.SkillCatalog.Metas() {
+	for _, meta := range instance.runtime.SkillCatalog.Metas() {
 		skills[meta.Name] = struct{}{}
 	}
 	if _, ok := skills[wantSkill]; !ok {

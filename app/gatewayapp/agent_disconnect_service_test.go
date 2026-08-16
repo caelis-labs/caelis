@@ -284,10 +284,10 @@ func TestDisconnectACPDoesNotRewriteActivatedSessionRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := storedACPAgentInfo(activated.stack.ListACPAgents(), "codex"); !ok {
-		t.Fatalf("activated Session assembly is missing codex: %#v", activated.stack.ListACPAgents())
+	if _, ok := storedACPAgentInfo(activated.instance.ListACPAgents(), "codex"); !ok {
+		t.Fatalf("activated Session assembly is missing codex: %#v", activated.instance.ListACPAgents())
 	}
-	frozen, err := activated.stack.resolveParticipantPlacement(ctx, "acp:codex:default", "none")
+	frozen, err := activated.instance.resolveParticipantPlacement(ctx, "acp:codex:default", "none")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,10 +296,10 @@ func TestDisconnectACPDoesNotRewriteActivatedSessionRuntime(t *testing.T) {
 	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DisconnectACP() receipt/error = %#v/%v", receipt, err)
 	}
-	if _, ok := storedACPAgentInfo(activated.stack.ListACPAgents(), "codex"); !ok {
-		t.Fatalf("disconnect rewrote activated Session assembly: %#v", activated.stack.ListACPAgents())
+	if _, ok := storedACPAgentInfo(activated.instance.ListACPAgents(), "codex"); !ok {
+		t.Fatalf("disconnect rewrote activated Session assembly: %#v", activated.instance.ListACPAgents())
 	}
-	retained, err := activated.stack.resolveParticipantPlacement(ctx, "acp:codex:default", "none")
+	retained, err := activated.instance.resolveParticipantPlacement(ctx, "acp:codex:default", "none")
 	if err != nil {
 		t.Fatalf("activated Session placement changed after disconnect: %v", err)
 	}
@@ -316,10 +316,10 @@ func TestDisconnectACPDoesNotRewriteActivatedSessionRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := storedACPAgentInfo(refreshed.stack.ListACPAgents(), "codex"); ok {
-		t.Fatalf("reactivated Session retained disconnected Agent: %#v", refreshed.stack.ListACPAgents())
+	if _, ok := storedACPAgentInfo(refreshed.instance.ListACPAgents(), "codex"); ok {
+		t.Fatalf("reactivated Session retained disconnected Agent: %#v", refreshed.instance.ListACPAgents())
 	}
-	if _, err := refreshed.stack.resolveParticipantPlacement(ctx, "acp:codex:default", "none"); err == nil {
+	if _, err := refreshed.instance.resolveParticipantPlacement(ctx, "acp:codex:default", "none"); err == nil {
 		t.Fatal("reactivated Session retained disconnected placement")
 	}
 }

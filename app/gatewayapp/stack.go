@@ -243,15 +243,15 @@ func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.Sessi
 	if s == nil {
 		return appserver.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
 	}
-	runtimeStack := &s.runtimeComposition
+	composition := &s.runtimeComposition
 	if s.sessionRuntimes != nil {
 		runtime, ok := s.sessionRuntimes.loaded(ref.SessionID)
 		if !ok {
 			return appserver.RuntimeState{}, nil
 		}
-		runtimeStack = &runtime.stack.runtimeComposition
+		composition = &runtime.instance.runtimeComposition
 	}
-	gateway := runtimeStack.currentGateway()
+	gateway := composition.currentGateway()
 	if gateway == nil {
 		return appserver.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
 	}

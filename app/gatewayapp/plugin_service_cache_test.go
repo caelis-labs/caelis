@@ -38,7 +38,7 @@ func TestPluginServiceRemoveKeepsManagedInstallCacheForActiveRuntimes(t *testing
 	if err := stack.store.Save(doc); err != nil {
 		t.Fatalf("save managed plugin config: %v", err)
 	}
-	activateFutureAssemblyStack(t, stack, "managed-plugin-runtime")
+	activateFutureAssemblyRuntime(t, stack, "managed-plugin-runtime")
 	if err := stack.Plugins().Remove(ctx, "plugin"); err != nil {
 		t.Fatalf("Remove(managed) error = %v", err)
 	}

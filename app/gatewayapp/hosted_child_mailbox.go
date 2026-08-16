@@ -62,10 +62,10 @@ func (r *hostedChildMailboxRouter) deliver(ctx context.Context, parentRef sessio
 			_ = release(context.WithoutCancel(ctx))
 		}()
 	}
-	if runtime == nil || runtime.stack == nil || runtime.stack.engine == nil {
+	if runtime == nil || runtime.instance == nil || runtime.instance.engine == nil {
 		return agentmessage.Response{}, fmt.Errorf("gatewayapp: parent Agent message runtime is unavailable")
 	}
-	return runtime.stack.engine.SendAgentMessage(ctx, parentRef, req)
+	return runtime.instance.engine.SendAgentMessage(ctx, parentRef, req)
 }
 
 type hostedChildMessageSender struct {

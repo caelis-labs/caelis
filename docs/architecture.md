@@ -201,10 +201,14 @@ Document responsibilities are intentionally separate:
   Session ID. The registry is constructed from explicit process authorities and
   a narrow assembler contract; it does not retain the Host `Stack`. It owns the
   activated Runtime set, reference counting, release, and collective shutdown
-  drain. A stateless workspace assembler reads one complete app
-  configuration document plus workspace files on the first execution after a
-  Session has no live activation, then the detached Session Runtime keeps that
-  context-shaping composition fixed until release. Durable Session creation,
+  drain. Registry entries hold private `sessionRuntimeInstance` values rather
+  than child Host `Stack` values. Each instance owns an independent pinned
+  Runtime composition and disposable workspace resources while borrowing only
+  the focused process authorities required for execution. A stateless workspace
+  assembler reads one complete app configuration document plus workspace files
+  on the first execution after a Session has no live activation, then the
+  detached Session Runtime keeps that context-shaping composition fixed until
+  release. Durable Session creation,
   inspect, and reconnect allocate no execution Runtime. An explicit reconnect
   continuation does hold one process-local observation reference: multiple
   clients may observe the same Session, while a selected TUI/GUI Session keeps
@@ -371,12 +375,13 @@ Production `app/*` code must not import `surfaces/*`, and Surfaces must not
 import Host, Kernel, or Runtime implementations. The private
 `internal/controlprompt/appserveradapter` may translate the focused AppServer
 members selected from an already validated aggregate into surface-neutral
-prompt operations, but may not become a second capability boundary. Future
-Host/Session Runtime type extraction has a narrow construction seam: the
-Runtime registry can be constructed and tested without a concrete Host
-`gatewayapp.Stack`. Activated Session Runtime composition still uses `Stack` as
-its implementation type, so that type split is not yet a stable package
-boundary.
+prompt operations, but may not become a second capability boundary. The
+Host/Session Runtime distinction is a private lifecycle boundary, not a package
+extraction commitment: the Runtime registry is constructed without retaining a
+concrete Host `gatewayapp.Stack`, and activated Sessions use private
+`sessionRuntimeInstance` values. `Stack`, `sessionRuntimeInstance`, and their
+shared private `runtimeComposition` implementation remain Host-owned lifecycle
+details rather than stable package contracts.
 
 ## SDK Boundary
 

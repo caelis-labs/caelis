@@ -5,6 +5,15 @@ import (
 	"errors"
 )
 
+// sessionRuntimeInstance is one activated Session execution composition. It
+// borrows the focused process authorities recorded in runtimeComposition but
+// owns only its pinned configuration and disposable execution resources.
+// Host-only clients, registries, operation stores, and lifecycle cancellation
+// never enter this type.
+type sessionRuntimeInstance struct {
+	runtimeComposition
+}
+
 // Quiesce permanently closes this Session Runtime's Turn admission and waits
 // for its Gateway and child controller work. Process-wide Registry draining is
 // owned by Stack and is deliberately absent here.

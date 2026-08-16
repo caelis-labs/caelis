@@ -90,12 +90,3 @@ type runtimeComposition struct {
 	// spawned child Session Runtimes. A composition never owns the Registry.
 	hostedChildMailbox hostedChildMailboxFunc
 }
-
-// sessionRuntimeInstance is one activated Session execution composition. It
-// borrows the focused process authorities recorded in runtimeComposition but
-// owns only its pinned configuration and disposable execution resources.
-// Host-only clients, registries, operation stores, and lifecycle cancellation
-// never enter this type.
-type sessionRuntimeInstance struct {
-	runtimeComposition
-}
