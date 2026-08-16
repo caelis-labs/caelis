@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/discovery"
@@ -25,13 +25,13 @@ type acpPreparationEffectResult struct {
 	Warning       error
 }
 
-func (*Stack) CanRecoverControlCommand(action controlclient.Action) bool {
+func (*Stack) CanRecoverControlCommand(action appserver.Action) bool {
 	return recoverableACPCommandAction(action) || recoverablePluginCommandAction(action)
 }
 
-func recoverableACPCommandAction(action controlclient.Action) bool {
+func recoverableACPCommandAction(action appserver.Action) bool {
 	switch action {
-	case controlclient.ActionACPAgentPrepare, controlclient.ActionACPAgentPrepareAuth:
+	case appserver.ActionACPAgentPrepare, appserver.ActionACPAgentPrepareAuth:
 		return true
 	default:
 		return false
@@ -45,25 +45,25 @@ func recoverableACPCommandAction(action controlclient.Action) bool {
 // exists because their domain state is not operation-attributable.
 func (s *Stack) RecoverControlCommand(
 	ctx context.Context,
-	principal controlclient.Principal,
-	intent controlclient.OperationIntent,
+	principal appserver.Principal,
+	intent appserver.OperationIntent,
 	_ any,
-) (controlclient.CommandResult, bool, error) {
+) (appserver.CommandResult, bool, error) {
 	if recoverablePluginCommandAction(intent.Action) {
 		receipt, found, err := s.loadPluginOperationReceipt(ctx, principal.ID, intent.OperationID, intent.Digest)
 		if err != nil || !found {
-			return controlclient.CommandResult{}, false, err
+			return appserver.CommandResult{}, false, err
 		}
 		if receipt.Action != intent.Action || !receipt.Outcome.Valid() {
-			return controlclient.CommandResult{}, false, nil
+			return appserver.CommandResult{}, false, nil
 		}
 		return pluginCommandResultFromReceipt(receipt), true, nil
 	}
 	if !recoverableACPCommandAction(intent.Action) {
-		return controlclient.CommandResult{}, false, nil
+		return appserver.CommandResult{}, false, nil
 	}
 	if s == nil || s.acpPreparations == nil {
-		return controlclient.CommandResult{}, false, errors.New("gatewayapp: ACP preparation recovery is unavailable")
+		return appserver.CommandResult{}, false, errors.New("gatewayapp: ACP preparation recovery is unavailable")
 	}
 	preparation, found, err := s.acpPreparations.FindByIntent(
 		ctx,
@@ -72,10 +72,10 @@ func (s *Stack) RecoverControlCommand(
 		strings.TrimSpace(intent.Digest),
 	)
 	if err != nil || !found {
-		return controlclient.CommandResult{}, false, err
+		return appserver.CommandResult{}, false, err
 	}
 	if preparation.State != controlagents.PreparationStateNeedsAuth && preparation.State != controlagents.PreparationStateReady {
-		return controlclient.CommandResult{}, false, nil
+		return appserver.CommandResult{}, false, nil
 	}
 	return acpPreparationCommandResult(acpPreparationEffectResult{
 		Revision: preparation.ObservedRevision, Preparation: preparation,
@@ -84,8 +84,8 @@ func (s *Stack) RecoverControlCommand(
 
 func (s *Stack) prepareACPAtRevision(
 	ctx context.Context,
-	principal controlclient.Principal,
-	req controlclient.PrepareACPRequest,
+	principal appserver.Principal,
+	req appserver.PrepareACPRequest,
 ) (acpPreparationEffectResult, error) {
 	result := acpPreparationEffectResult{Revision: expectedConfigurationRevision(req.ExpectedRevision)}
 	if s == nil || s.store == nil || s.acpPreparations == nil {
@@ -95,8 +95,8 @@ func (s *Stack) prepareACPAtRevision(
 	if err := validateACPPrepareLauncher(prepared); err != nil {
 		return result, err
 	}
-	intent, ok := controlclient.OperationIntentFromContext(ctx)
-	if !ok || intent.Action != controlclient.ActionACPAgentPrepare {
+	intent, ok := appserver.OperationIntentFromContext(ctx)
+	if !ok || intent.Action != appserver.ActionACPAgentPrepare {
 		return result, errors.New("gatewayapp: ACP prepare operation intent is unavailable")
 	}
 	if err := s.preflightACPPreparation(ctx, result.Revision); err != nil {
@@ -214,15 +214,15 @@ func (s *Stack) prepareACPAtRevision(
 
 func (s *Stack) prepareACPAuthenticationAtRevision(
 	ctx context.Context,
-	principal controlclient.Principal,
-	req controlclient.PrepareACPAuthenticationRequest,
+	principal appserver.Principal,
+	req appserver.PrepareACPAuthenticationRequest,
 ) (acpPreparationEffectResult, error) {
 	result := acpPreparationEffectResult{Revision: expectedConfigurationRevision(req.ExpectedRevision)}
 	if s == nil || s.acpPreparations == nil {
 		return result, errors.New("gatewayapp: ACP preparation is unavailable")
 	}
-	intent, ok := controlclient.OperationIntentFromContext(ctx)
-	if !ok || intent.Action != controlclient.ActionACPAgentPrepareAuth {
+	intent, ok := appserver.OperationIntentFromContext(ctx)
+	if !ok || intent.Action != appserver.ActionACPAgentPrepareAuth {
 		return result, errors.New("gatewayapp: ACP prepare-auth operation intent is unavailable")
 	}
 	parent, err := s.ownedACPPreparation(ctx, principal.ID, req.PreparationRef, req.PreparationDigest)
@@ -304,8 +304,8 @@ func (s *Stack) prepareACPAuthenticationAtRevision(
 
 func (s *Stack) connectPreparedACPAtRevision(
 	ctx context.Context,
-	principal controlclient.Principal,
-	req controlclient.ConnectACPRequest,
+	principal appserver.Principal,
+	req appserver.ConnectACPRequest,
 ) (externalAgentMutationResult, modelprofile.ModelProfile, error) {
 	mutation := externalAgentMutationResult{Revision: expectedConfigurationRevision(req.ExpectedRevision)}
 	preparation, err := s.ownedACPPreparation(ctx, principal.ID, req.PreparationRef, req.PreparationDigest)
@@ -408,7 +408,7 @@ func (s *Stack) ownedACPPreparation(ctx context.Context, principalID, ref, diges
 		return controlagents.ACPPreparation{}, err
 	}
 	if preparation.PrincipalID != strings.TrimSpace(principalID) {
-		return controlagents.ACPPreparation{}, controlclient.ErrUnauthorized
+		return controlagents.ACPPreparation{}, appserver.ErrUnauthorized
 	}
 	if digest = strings.ToLower(strings.TrimSpace(digest)); digest != "" && preparation.ContentDigest != digest {
 		return controlagents.ACPPreparation{}, errACPPreparationConflict

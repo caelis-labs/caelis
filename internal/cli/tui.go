@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/updater"
 	"github.com/caelis-labs/caelis/internal/version"
@@ -27,7 +27,7 @@ type tuiOptions struct {
 
 func runTUI(
 	ctx context.Context,
-	clients controlclient.AppServerClients,
+	clients appserver.AppServerClients,
 	tasks taskstream.Client,
 	sessionID string,
 	workspaceKey string,

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -48,17 +48,17 @@ type Result struct {
 	Usage          eventstream.UsageSnapshot
 	LifecycleState string
 	StopReason     string
-	Target         controlclient.TurnTarget
+	Target         appserver.TurnTarget
 }
 
 // RunSessionOnce executes one main Turn through the product Session client.
 // Feed bootstrap, target filtering, reconnect recovery, approval routing, and
-// explicit cancellation stay in control/client; this Surface only reduces the
+// explicit cancellation stay in control/appserver; this Surface only reduces the
 // typed Turn stream into non-interactive output.
 func RunSessionOnce(
 	ctx context.Context,
-	starter controlclient.SessionTurnStarter,
-	request controlclient.SessionTurnStartRequest,
+	starter appserver.SessionTurnStarter,
+	request appserver.SessionTurnStartRequest,
 	opts Options,
 ) (Result, error) {
 	return runSessionOnce(
@@ -72,8 +72,8 @@ func RunSessionOnce(
 
 func runSessionOnce(
 	ctx context.Context,
-	starter controlclient.SessionTurnStarter,
-	request controlclient.SessionTurnStartRequest,
+	starter appserver.SessionTurnStarter,
+	request appserver.SessionTurnStartRequest,
 	opts Options,
 	terminalDrainTimeout time.Duration,
 ) (Result, error) {
@@ -284,9 +284,9 @@ func resolveApproval(ctx context.Context, opts Options, req ApprovalRequest) (ap
 func controlClientApprovalResolution(
 	req ApprovalRequest,
 	decision approval.Decision,
-) controlclient.ApprovalResolution {
+) appserver.ApprovalResolution {
 	response := approval.RuntimeResponseFromFinalReview(approval.FinalizeReviewResult(req.Payload, decision))
-	return controlclient.ApprovalResolution{
+	return appserver.ApprovalResolution{
 		RequestID:  req.RequestID,
 		Outcome:    response.Outcome,
 		OptionID:   response.OptionID,

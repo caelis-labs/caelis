@@ -17,7 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 	"github.com/caelis-labs/caelis/internal/testenv"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -133,7 +133,7 @@ func TestHeadlessEmbeddedAppServerCoversCreateResumeAndFormats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, tasks, err := server.Bind(controlclient.Principal{ID: host.UserID})
+	clients, tasks, err := server.Bind(appserver.Principal{ID: host.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}

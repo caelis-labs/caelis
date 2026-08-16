@@ -109,4 +109,4 @@ jobs:
         run: go test -count=1 ./agent-sdk/session/file
 
       - name: Windows control and credential runtime
-        run: go test -count=1 ./control/client ./app/controlserver
+        run: go test -count=1 ./control/appserver ./app/controlserver

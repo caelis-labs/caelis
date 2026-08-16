@@ -12,7 +12,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -81,9 +81,9 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	revision := current.Revision
 	modeResult, err := stack.ConfigurationCommands().ConfigureSessionControllerMode(
 		context.Background(),
-		controlclient.Principal{ID: stack.UserID},
-		controlclient.SessionControllerModeRequest{
-			WriteBase: controlclient.WriteBase{
+		appserver.Principal{ID: stack.UserID},
+		appserver.SessionControllerModeRequest{
+			WriteBase: appserver.WriteBase{
 				OperationID:             "eval-controller-mode-plan",
 				SessionID:               current.SessionID,
 				ExpectedRevision:        &revision,
@@ -92,7 +92,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 			Mode: "plan",
 		},
 	)
-	if err != nil || modeResult.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || modeResult.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionControllerMode(plan) = %#v, %v", modeResult, err)
 	}
 	updatedStatus, found, err := stack.ACPControllerStatus(context.Background(), activeSession.SessionRef)

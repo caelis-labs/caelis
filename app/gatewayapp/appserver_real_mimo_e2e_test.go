@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/app/controlserver"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -81,7 +81,7 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 	const token = "real-mimo-e2e-control-token-0123456789"
 	authenticator, err := controlserver.BearerTokenAuthenticator(
 		token,
-		controlclient.Principal{ID: "local-user"},
+		appserver.Principal{ID: "local-user"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -102,14 +102,14 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 		BearerToken:   token,
 		EventBuffer:   256,
 		HTTPClient:    httpServer.Client(),
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if info, err := remote.Initialize(ctx); err != nil ||
-		info.APIVersion != controlclient.HTTPAPIVersion ||
-		info.EnvelopeVersion != controlclient.EnvelopeVersion {
+		info.APIVersion != appserver.HTTPAPIVersion ||
+		info.EnvelopeVersion != appserver.EnvelopeVersion {
 		t.Fatalf("Initialize() = %#v, %v", info, err)
 	}
 
@@ -121,17 +121,17 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 	}
 	for index := range specs {
 		spec := &specs[index]
-		result, err := remote.CreateSession(ctx, controlclient.CreateSessionRequest{
-			WriteBase:          controlclient.WriteBase{OperationID: "create-" + spec.sessionID},
+		result, err := remote.CreateSession(ctx, appserver.CreateSessionRequest{
+			WriteBase:          appserver.WriteBase{OperationID: "create-" + spec.sessionID},
 			PreferredSessionID: spec.sessionID,
 			WorkspaceKey:       spec.workspaceKey,
 			CWD:                spec.cwd,
 			Title:              spec.sessionID,
 		})
-		if err != nil || result.Outcome != controlclient.OutcomeCommitted {
+		if err != nil || result.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("CreateSession(%q) = %#v, %v", spec.sessionID, result, err)
 		}
-		state, err := remote.InspectSession(ctx, controlclient.StateRequest{SessionID: spec.sessionID})
+		state, err := remote.InspectSession(ctx, appserver.StateRequest{SessionID: spec.sessionID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -139,7 +139,7 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 			t.Fatalf("initial Session state for %q = %#v", spec.sessionID, state)
 		}
 	}
-	listed, err := remote.ListSessions(ctx, controlclient.ListSessionsRequest{Limit: 20})
+	listed, err := remote.ListSessions(ctx, appserver.ListSessionsRequest{Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,11 +151,11 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 		name         string
 		sessionID    string
 		marker       string
-		subscription controlclient.FeedSubscription
+		subscription appserver.FeedSubscription
 	}
 	observers := make([]observer, 0, len(specs)+1)
 	for _, spec := range specs {
-		reconnected, err := remote.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: spec.sessionID})
+		reconnected, err := remote.Reconnect(ctx, appserver.ReconnectRequest{SessionID: spec.sessionID})
 		if err != nil {
 			t.Fatalf("Reconnect(%q): %v", spec.sessionID, err)
 		}
@@ -166,7 +166,7 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 			subscription: reconnected.Subscription,
 		})
 	}
-	secondObserver, err := remote.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: specs[0].sessionID})
+	secondObserver, err := remote.Reconnect(ctx, appserver.ReconnectRequest{SessionID: specs[0].sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,8 +192,8 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 		go func() {
 			defer promptWait.Done()
 			<-start
-			result, promptErr := remote.Prompt(ctx, controlclient.PromptRequest{
-				WriteBase: controlclient.WriteBase{
+			result, promptErr := remote.Prompt(ctx, appserver.PromptRequest{
+				WriteBase: appserver.WriteBase{
 					OperationID: "prompt-" + spec.sessionID,
 					SessionID:   spec.sessionID,
 				},
@@ -208,7 +208,7 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 	close(prompted)
 	for prompt := range prompted {
 		if prompt.err != nil ||
-			prompt.result.Outcome != controlclient.OutcomeCommitted ||
+			prompt.result.Outcome != appserver.OutcomeCommitted ||
 			prompt.result.Target.HandleID == "" ||
 			prompt.result.Target.RunID == "" ||
 			prompt.result.Target.TurnID == "" {
@@ -228,7 +228,7 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 		case <-ticker.C:
 			activeA, activeB := 0, 0
 			for _, spec := range specs {
-				state, inspectErr := remote.InspectSession(ctx, controlclient.StateRequest{SessionID: spec.sessionID})
+				state, inspectErr := remote.InspectSession(ctx, appserver.StateRequest{SessionID: spec.sessionID})
 				if inspectErr != nil {
 					t.Fatalf("InspectSession(%q): %v", spec.sessionID, inspectErr)
 				}
@@ -281,7 +281,7 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 	if primaryCursor == "" {
 		t.Fatal("primary observer did not retain a resume Cursor")
 	}
-	resumed, err := remote.Reconnect(ctx, controlclient.ReconnectRequest{
+	resumed, err := remote.Reconnect(ctx, appserver.ReconnectRequest{
 		SessionID: specs[0].sessionID,
 		Cursor:    primaryCursor,
 	})
@@ -296,7 +296,7 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resumed.State.Run.Active ||
-		resumed.State.ResumeMode != controlclient.ResumeModeExact ||
+		resumed.State.ResumeMode != appserver.ResumeModeExact ||
 		resumedBackfill != 0 {
 		t.Fatalf(
 			"resume from terminal Cursor = active:%t mode:%q backfill:%d",
@@ -307,16 +307,16 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 	}
 
 	for _, spec := range specs {
-		result, err := remote.CloseSession(ctx, controlclient.CloseSessionRequest{
-			WriteBase: controlclient.WriteBase{
+		result, err := remote.CloseSession(ctx, appserver.CloseSessionRequest{
+			WriteBase: appserver.WriteBase{
 				OperationID: "close-" + spec.sessionID,
 				SessionID:   spec.sessionID,
 			},
 		})
-		if err != nil || result.Outcome != controlclient.OutcomeCommitted {
+		if err != nil || result.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("CloseSession(%q) = %#v, %v", spec.sessionID, result, err)
 		}
-		if _, err := remote.InspectSession(ctx, controlclient.StateRequest{SessionID: spec.sessionID}); err != nil {
+		if _, err := remote.InspectSession(ctx, appserver.StateRequest{SessionID: spec.sessionID}); err != nil {
 			t.Fatalf("InspectSession(%q) after close: %v", spec.sessionID, err)
 		}
 	}
@@ -340,7 +340,7 @@ type realMimoSessionSpec struct {
 
 type realMimoPromptResult struct {
 	sessionID string
-	result    controlclient.CommandResult
+	result    appserver.CommandResult
 	err       error
 }
 
@@ -360,7 +360,7 @@ func observeRealMimoTurn(
 	observer string,
 	sessionID string,
 	marker string,
-	subscription controlclient.FeedSubscription,
+	subscription appserver.FeedSubscription,
 ) realMimoObservation {
 	result := realMimoObservation{observer: observer, sessionID: sessionID, marker: marker}
 	defer func() {

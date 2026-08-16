@@ -22,7 +22,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/productpaths"
 	"github.com/caelis-labs/caelis/internal/servicelifecycle"
 	"github.com/caelis-labs/caelis/internal/testenv"
@@ -72,17 +72,17 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	authenticator, err := controlserver.BearerTokenAuthenticator(token, controlclient.Principal{ID: "local-user"})
+	authenticator, err := controlserver.BearerTokenAuthenticator(token, appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	info := controlclient.ServerInfo{
+	info := appserver.ServerInfo{
 		ProtocolVersion:     schema.CurrentProtocolVersion,
-		EnvelopeVersion:     controlclient.EnvelopeVersion,
-		APIVersion:          controlclient.HTTPAPIVersion,
+		EnvelopeVersion:     appserver.EnvelopeVersion,
+		APIVersion:          appserver.HTTPAPIVersion,
 		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
-		ServerID: controlclient.ServerIdentity, InstanceID: instanceID,
-		Capabilities: controlclient.RequiredManagedHostCapabilities(), Transports: []string{"http"},
+		ServerID: appserver.ServerIdentity, InstanceID: instanceID,
+		Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},
 	}
 	handler, err := controlserver.Handler(controlserver.Dependencies{
 		Services: appServer.Services, TaskStreams: appServer.TaskStreams, Lifecycle: host,
@@ -142,11 +142,11 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 		{clientA, "session-a", "workspace-a", workspaceA},
 		{clientB, "session-b", "workspace-b", workspaceB},
 	} {
-		result, err := one.client.Clients.Sessions.CreateSession(ctx, controlclient.CreateSessionRequest{
-			WriteBase:          controlclient.WriteBase{OperationID: "create-" + one.sessionID},
+		result, err := one.client.Clients.Sessions.CreateSession(ctx, appserver.CreateSessionRequest{
+			WriteBase:          appserver.WriteBase{OperationID: "create-" + one.sessionID},
 			PreferredSessionID: one.sessionID, WorkspaceKey: one.workspaceKey, CWD: one.cwd,
 		})
-		if err != nil || result.Outcome != controlclient.OutcomeCommitted {
+		if err != nil || result.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("CreateSession(%s) = %#v, %v", one.sessionID, result, err)
 		}
 	}
@@ -194,14 +194,14 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 		t.Fatalf("workspace B skill candidates = %#v, want workspace-b-only", skillsB)
 	}
 
-	listed, err := clientA.Clients.Sessions.ListSessions(ctx, controlclient.ListSessionsRequest{})
+	listed, err := clientA.Clients.Sessions.ListSessions(ctx, appserver.ListSessionsRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(listed.Sessions) != 2 {
 		t.Fatalf("shared Host Sessions = %#v", listed.Sessions)
 	}
-	stateB, err := clientA.Clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: "session-b"})
+	stateB, err := clientA.Clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: "session-b"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 	if err := clientA.Close(); err != nil {
 		t.Fatal(err)
 	}
-	stateA, err := clientB.Clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: "session-a"})
+	stateA, err := clientB.Clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: "session-a"})
 	if err != nil || stateA.WorkspaceKey != "workspace-a" {
 		t.Fatalf("Session A after first client exit = %#v, %v", stateA, err)
 	}
@@ -289,7 +289,7 @@ func TestAutomaticWorkspaceAddressListsAndResumesPersistedLegacyAliases(t *testi
 	if product.Workspace.WorkspaceKey != canonicalWorkspace || product.Workspace.WorkspaceCWD != canonicalWorkspace {
 		t.Fatalf("automatic workspace = %#v, want canonical address %q", product.Workspace, canonicalWorkspace)
 	}
-	listed, err := product.Clients.Sessions.ListSessions(ctx, controlclient.ListSessionsRequest{
+	listed, err := product.Clients.Sessions.ListSessions(ctx, appserver.ListSessionsRequest{
 		CWD: product.Workspace.WorkspaceCWD,
 	})
 	if err != nil {
@@ -302,8 +302,8 @@ func TestAutomaticWorkspaceAddressListsAndResumesPersistedLegacyAliases(t *testi
 		if want := legacySessions[summary.WorkspaceKey]; want != summary.SessionID {
 			t.Fatalf("legacy workspace Session = %#v, want %q", summary, want)
 		}
-		created, err := product.Clients.Sessions.CreateSession(ctx, controlclient.CreateSessionRequest{
-			WriteBase:          controlclient.WriteBase{OperationID: "resume-" + summary.SessionID},
+		created, err := product.Clients.Sessions.CreateSession(ctx, appserver.CreateSessionRequest{
+			WriteBase:          appserver.WriteBase{OperationID: "resume-" + summary.SessionID},
 			PreferredSessionID: summary.SessionID,
 			WorkspaceKey:       product.Workspace.WorkspaceKey,
 			CWD:                product.Workspace.WorkspaceCWD,
@@ -320,12 +320,12 @@ func TestExplicitRemoteHostRequiresCWDSessionListingCapability(t *testing.T) {
 			http.NotFound(writer, request)
 			return
 		}
-		_ = json.NewEncoder(writer).Encode(controlclient.ServerInfo{
+		_ = json.NewEncoder(writer).Encode(appserver.ServerInfo{
 			ProtocolVersion: schema.CurrentProtocolVersion,
-			EnvelopeVersion: controlclient.EnvelopeVersion,
-			APIVersion:      controlclient.HTTPAPIVersion,
-			ServerID:        controlclient.ServerIdentity,
-			Capabilities:    []string{controlclient.CapabilityMultiWorkspace},
+			EnvelopeVersion: appserver.EnvelopeVersion,
+			APIVersion:      appserver.HTTPAPIVersion,
+			ServerID:        appserver.ServerIdentity,
+			Capabilities:    []string{appserver.CapabilityMultiWorkspace},
 		})
 	}))
 	workspace := t.TempDir()
@@ -335,7 +335,7 @@ func TestExplicitRemoteHostRequiresCWDSessionListingCapability(t *testing.T) {
 		Mode: productClientModeRemote, ControlURL: server.URL, Token: "test-token", HTTPClient: server.Client(),
 		WorkspaceKey: workspace, WorkspaceCWD: workspace,
 	})
-	if err == nil || !strings.Contains(err.Error(), controlclient.CapabilityWorkspaceCWDList) {
+	if err == nil || !strings.Contains(err.Error(), appserver.CapabilityWorkspaceCWDList) {
 		t.Fatalf("remote attach error = %v, want missing CWD-list capability", err)
 	}
 }
@@ -348,10 +348,10 @@ func TestManagedHostOwnershipPreventsEmbeddedFallback(t *testing.T) {
 	build := version.BuildInfo()
 	if err := controlserver.PublishDiscoveryRecord(controlserver.DefaultDiscoveryFile(storeDir), controlserver.DiscoveryRecord{
 		SchemaVersion: controlserver.DiscoverySchemaVersion,
-		ServerID:      controlclient.ServerIdentity, InstanceID: uuid.NewString(),
+		ServerID:      appserver.ServerIdentity, InstanceID: uuid.NewString(),
 		AppName: "caelis", PrincipalID: "local-user", PID: 1, Endpoint: "http://127.0.0.1:7777",
-		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: controlclient.EnvelopeVersion,
-		APIVersion: controlclient.HTTPAPIVersion, Capabilities: controlclient.RequiredManagedHostCapabilities(),
+		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+		APIVersion: appserver.HTTPAPIVersion, Capabilities: appserver.RequiredManagedHostCapabilities(),
 		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
 		Transports: []string{"http"}, StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -384,7 +384,7 @@ func TestManagedHostOwnershipPreventsEmbeddedFallback(t *testing.T) {
 	}
 }
 
-func resumeCandidatesContainSession(candidates []controlclient.ResumeCandidate, sessionID string) bool {
+func resumeCandidatesContainSession(candidates []appserver.ResumeCandidate, sessionID string) bool {
 	for _, candidate := range candidates {
 		if candidate.SessionID == sessionID {
 			return true
@@ -393,7 +393,7 @@ func resumeCandidatesContainSession(candidates []controlclient.ResumeCandidate, 
 	return false
 }
 
-func completionCandidatesContainValue(candidates []controlclient.CompletionCandidate, value string) bool {
+func completionCandidatesContainValue(candidates []appserver.CompletionCandidate, value string) bool {
 	for _, candidate := range candidates {
 		if candidate.Value == value {
 			return true
@@ -447,16 +447,16 @@ func TestManagedLocalHostRecoversStaleDiscoveryAndConvergesConcurrentClients(t *
 	}
 	instanceID := uuid.NewString()
 	build := version.BuildInfo()
-	info := controlclient.ServerInfo{
-		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: controlclient.EnvelopeVersion,
-		APIVersion: controlclient.HTTPAPIVersion, ServerID: controlclient.ServerIdentity,
+	info := appserver.ServerInfo{
+		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+		APIVersion: appserver.HTTPAPIVersion, ServerID: appserver.ServerIdentity,
 		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
-		InstanceID: instanceID, Capabilities: controlclient.RequiredManagedHostCapabilities(), Transports: []string{"http"},
+		InstanceID: instanceID, Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},
 	}
 	server := testenv.NewHTTPServer(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/readyz":
-			_ = json.NewEncoder(writer).Encode(controlclient.HostStatus{
+			_ = json.NewEncoder(writer).Encode(appserver.HostStatus{
 				ServerID: info.ServerID, InstanceID: info.InstanceID, Ready: true,
 			})
 		case "/api/control/v1/initialize":
@@ -471,12 +471,12 @@ func TestManagedLocalHostRecoversStaleDiscoveryAndConvergesConcurrentClients(t *
 	}))
 	if err := controlserver.PublishDiscoveryRecord(controlserver.DefaultDiscoveryFile(storeDir), controlserver.DiscoveryRecord{
 		SchemaVersion: controlserver.DiscoverySchemaVersion,
-		ServerID:      controlclient.ServerIdentity, InstanceID: uuid.NewString(),
+		ServerID:      appserver.ServerIdentity, InstanceID: uuid.NewString(),
 		AppName: "caelis-test", PrincipalID: "local-user", PID: 1,
 		Endpoint: "http://127.0.0.1:65534", ProtocolVersion: schema.CurrentProtocolVersion,
-		EnvelopeVersion: controlclient.EnvelopeVersion, APIVersion: controlclient.HTTPAPIVersion,
+		EnvelopeVersion: appserver.EnvelopeVersion, APIVersion: appserver.HTTPAPIVersion,
 		DistributionVersion: "v1.2.2", BuildID: "stale-build", BuildKind: "release",
-		Capabilities: controlclient.RequiredManagedHostCapabilities(), Transports: []string{"http"}, StartedAt: time.Now().UTC(),
+		Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"}, StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -561,17 +561,17 @@ func TestManagedLocalHostRejectsDiscoveryEndpointInstanceMismatch(t *testing.T) 
 	server := testenv.NewHTTPServer(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/readyz":
-			_, _ = fmt.Fprintf(writer, `{"server_id":%q,"instance_id":%q,"ready":true}`, controlclient.ServerIdentity, serverInstanceID)
+			_, _ = fmt.Fprintf(writer, `{"server_id":%q,"instance_id":%q,"ready":true}`, appserver.ServerIdentity, serverInstanceID)
 		case "/api/control/v1/initialize":
 			if request.Header.Get("Authorization") != "Bearer "+token {
 				http.Error(writer, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			_ = json.NewEncoder(writer).Encode(controlclient.ServerInfo{
-				ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: controlclient.EnvelopeVersion,
-				APIVersion: controlclient.HTTPAPIVersion, ServerID: controlclient.ServerIdentity,
+			_ = json.NewEncoder(writer).Encode(appserver.ServerInfo{
+				ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+				APIVersion: appserver.HTTPAPIVersion, ServerID: appserver.ServerIdentity,
 				DistributionVersion: "v1.2.3", BuildID: "server-build", BuildKind: "release",
-				InstanceID: serverInstanceID, Capabilities: controlclient.RequiredManagedHostCapabilities(), Transports: []string{"http"},
+				InstanceID: serverInstanceID, Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},
 			})
 		default:
 			http.NotFound(writer, request)
@@ -579,10 +579,10 @@ func TestManagedLocalHostRejectsDiscoveryEndpointInstanceMismatch(t *testing.T) 
 	}))
 	if err := controlserver.PublishDiscoveryRecord(controlserver.DefaultDiscoveryFile(storeDir), controlserver.DiscoveryRecord{
 		SchemaVersion: controlserver.DiscoverySchemaVersion,
-		ServerID:      controlclient.ServerIdentity, InstanceID: uuid.NewString(),
+		ServerID:      appserver.ServerIdentity, InstanceID: uuid.NewString(),
 		AppName: "caelis", PrincipalID: "local-user", PID: 1, Endpoint: server.URL,
-		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: controlclient.EnvelopeVersion,
-		APIVersion: controlclient.HTTPAPIVersion, Capabilities: controlclient.RequiredManagedHostCapabilities(),
+		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+		APIVersion: appserver.HTTPAPIVersion, Capabilities: appserver.RequiredManagedHostCapabilities(),
 		DistributionVersion: "v1.2.3", BuildID: "discovery-build", BuildKind: "release",
 		Transports: []string{"http"}, StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -614,16 +614,16 @@ func TestManagedLifecycleProbeIgnoresSurfaceCapabilityCompatibility(t *testing.T
 		t.Fatal(err)
 	}
 	instanceID := uuid.NewString()
-	info := controlclient.ServerInfo{
-		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: controlclient.EnvelopeVersion,
-		APIVersion: controlclient.HTTPAPIVersion, ServerID: controlclient.ServerIdentity,
+	info := appserver.ServerInfo{
+		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+		APIVersion: appserver.HTTPAPIVersion, ServerID: appserver.ServerIdentity,
 		DistributionVersion: "v2.0.0", BuildID: "future-build", BuildKind: version.BuildKindRelease,
 		InstanceID: instanceID, Capabilities: []string{"future-surface-v2"}, Transports: []string{"http"},
 	}
 	server := testenv.NewHTTPServer(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/readyz":
-			_ = json.NewEncoder(writer).Encode(controlclient.HostStatus{
+			_ = json.NewEncoder(writer).Encode(appserver.HostStatus{
 				ServerID: info.ServerID, InstanceID: info.InstanceID, Ready: true,
 			})
 		case "/api/control/v1/initialize":
@@ -637,7 +637,7 @@ func TestManagedLifecycleProbeIgnoresSurfaceCapabilityCompatibility(t *testing.T
 				http.Error(writer, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			_ = json.NewEncoder(writer).Encode(controlclient.HostStatus{
+			_ = json.NewEncoder(writer).Encode(appserver.HostStatus{
 				ServerID: info.ServerID, InstanceID: info.InstanceID, Ready: false,
 			})
 			if err := controlserver.RemoveDiscoveryRecord(controlserver.DefaultDiscoveryFile(storeDir), info.InstanceID); err != nil {
@@ -719,10 +719,10 @@ func TestManagedLocalHostRejectsDifferentAppOrPrincipalForSameStore(t *testing.T
 	}
 	if err := controlserver.PublishDiscoveryRecord(controlserver.DefaultDiscoveryFile(storeDir), controlserver.DiscoveryRecord{
 		SchemaVersion: controlserver.DiscoverySchemaVersion,
-		ServerID:      controlclient.ServerIdentity, InstanceID: uuid.NewString(),
+		ServerID:      appserver.ServerIdentity, InstanceID: uuid.NewString(),
 		AppName: "caelis", PrincipalID: "owner-a", PID: 1, Endpoint: "http://127.0.0.1:65534",
-		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: controlclient.EnvelopeVersion,
-		APIVersion: controlclient.HTTPAPIVersion, Capabilities: controlclient.RequiredManagedHostCapabilities(),
+		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+		APIVersion: appserver.HTTPAPIVersion, Capabilities: appserver.RequiredManagedHostCapabilities(),
 		DistributionVersion: "v1.2.3", BuildID: "test-build", BuildKind: "release",
 		Transports: []string{"http"}, StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -755,17 +755,17 @@ func TestLocalHostStatusAndStopUseDiscoveredInstanceWithoutLoopbackListener(t *t
 		t.Fatal(err)
 	}
 	instanceID := uuid.NewString()
-	info := controlclient.ServerInfo{
-		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: controlclient.EnvelopeVersion,
-		APIVersion: controlclient.HTTPAPIVersion, ServerID: controlclient.ServerIdentity,
+	info := appserver.ServerInfo{
+		ProtocolVersion: schema.CurrentProtocolVersion, EnvelopeVersion: appserver.EnvelopeVersion,
+		APIVersion: appserver.HTTPAPIVersion, ServerID: appserver.ServerIdentity,
 		DistributionVersion: "v1.2.3", BuildID: "test-build", BuildKind: "release",
-		InstanceID: instanceID, Capabilities: controlclient.RequiredManagedHostCapabilities(), Transports: []string{"http"},
+		InstanceID: instanceID, Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},
 	}
 	discoveryPath := controlserver.DefaultDiscoveryFile(storeDir)
 	server := testenv.NewHTTPServer(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/readyz":
-			_ = json.NewEncoder(writer).Encode(controlclient.HostStatus{
+			_ = json.NewEncoder(writer).Encode(appserver.HostStatus{
 				ServerID: info.ServerID, InstanceID: info.InstanceID, Ready: true,
 			})
 		case "/api/control/v1/initialize":
@@ -779,7 +779,7 @@ func TestLocalHostStatusAndStopUseDiscoveredInstanceWithoutLoopbackListener(t *t
 				http.Error(writer, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			_ = json.NewEncoder(writer).Encode(controlclient.HostStatus{
+			_ = json.NewEncoder(writer).Encode(appserver.HostStatus{
 				ServerID: info.ServerID, InstanceID: info.InstanceID, Ready: false,
 			})
 			if err := controlserver.RemoveDiscoveryRecord(discoveryPath, instanceID); err != nil {

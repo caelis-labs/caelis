@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -26,7 +26,7 @@ func NewCompletionService(host *gatewayapp.Stack) (*CompletionService, error) {
 	return &CompletionService{host: host}, nil
 }
 
-func (s *CompletionService) CompleteFile(ctx context.Context, principal controlclient.Principal, req controlclient.CompletionRequest) ([]controlclient.CompletionCandidate, error) {
+func (s *CompletionService) CompleteFile(ctx context.Context, principal appserver.Principal, req appserver.CompletionRequest) ([]appserver.CompletionCandidate, error) {
 	driver, closeDriver, err := s.runtimeAdapter(ctx, principal, req)
 	if err != nil {
 		return nil, err
@@ -35,7 +35,7 @@ func (s *CompletionService) CompleteFile(ctx context.Context, principal controlc
 	return driver.CompleteFile(ctx, req.Query, req.Limit)
 }
 
-func (s *CompletionService) CompleteSkill(ctx context.Context, principal controlclient.Principal, req controlclient.CompletionRequest) ([]controlclient.CompletionCandidate, error) {
+func (s *CompletionService) CompleteSkill(ctx context.Context, principal appserver.Principal, req appserver.CompletionRequest) ([]appserver.CompletionCandidate, error) {
 	driver, closeDriver, err := s.skillRuntimeAdapter(ctx, principal, req)
 	if err != nil {
 		return nil, err
@@ -44,7 +44,7 @@ func (s *CompletionService) CompleteSkill(ctx context.Context, principal control
 	return driver.CompleteSkill(ctx, req.Query, req.Limit)
 }
 
-func (s *CompletionService) CompleteResume(ctx context.Context, principal controlclient.Principal, req controlclient.CompletionRequest) ([]controlclient.ResumeCandidate, error) {
+func (s *CompletionService) CompleteResume(ctx context.Context, principal appserver.Principal, req appserver.CompletionRequest) ([]appserver.ResumeCandidate, error) {
 	driver, closeDriver, err := s.runtimeAdapter(ctx, principal, req)
 	if err != nil {
 		return nil, err
@@ -53,7 +53,7 @@ func (s *CompletionService) CompleteResume(ctx context.Context, principal contro
 	return driver.CompleteResume(ctx, req.Query, req.Limit)
 }
 
-func (s *CompletionService) CompleteSlashArg(ctx context.Context, principal controlclient.Principal, req controlclient.CompletionRequest) ([]controlclient.SlashArgCandidate, error) {
+func (s *CompletionService) CompleteSlashArg(ctx context.Context, principal appserver.Principal, req appserver.CompletionRequest) ([]appserver.SlashArgCandidate, error) {
 	driver, closeDriver, err := s.slashArgAdapter(ctx, principal, req)
 	if err != nil {
 		return nil, err
@@ -68,8 +68,8 @@ func (s *CompletionService) CompleteSlashArg(ctx context.Context, principal cont
 // the App default.
 func (s *CompletionService) slashArgAdapter(
 	ctx context.Context,
-	principal controlclient.Principal,
-	req controlclient.CompletionRequest,
+	principal appserver.Principal,
+	req appserver.CompletionRequest,
 ) (controladapter.CompletionAssembler, func(), error) {
 	if s == nil || s.host == nil {
 		return nil, nil, errors.New("app/gatewayapp/controladapter/local: completion service is unavailable")
@@ -90,10 +90,10 @@ func (s *CompletionService) slashArgAdapter(
 	), func() {}, nil
 }
 
-func (s *CompletionService) ResolveSkill(ctx context.Context, principal controlclient.Principal, req controlclient.CompletionRequest) (controlclient.SkillResolveResult, error) {
+func (s *CompletionService) ResolveSkill(ctx context.Context, principal appserver.Principal, req appserver.CompletionRequest) (appserver.SkillResolveResult, error) {
 	driver, closeDriver, err := s.skillRuntimeAdapter(ctx, principal, req)
 	if err != nil {
-		return controlclient.SkillResolveResult{}, err
+		return appserver.SkillResolveResult{}, err
 	}
 	defer closeDriver()
 	return driver.ResolveSkill(ctx, req.Name)
@@ -105,8 +105,8 @@ func (s *CompletionService) ResolveSkill(ctx context.Context, principal controlc
 // servers or other Session-scoped contributions.
 func (s *CompletionService) skillRuntimeAdapter(
 	ctx context.Context,
-	principal controlclient.Principal,
-	req controlclient.CompletionRequest,
+	principal appserver.Principal,
+	req appserver.CompletionRequest,
 ) (controladapter.CompletionAssembler, func(), error) {
 	if strings.TrimSpace(req.SessionID) != "" {
 		return s.runtimeAdapter(ctx, principal, req)
@@ -136,7 +136,7 @@ func (s *CompletionService) skillRuntimeAdapter(
 	return driver, func() {}, nil
 }
 
-func (s *CompletionService) runtimeAdapter(ctx context.Context, principal controlclient.Principal, req controlclient.CompletionRequest) (controladapter.CompletionAssembler, func(), error) {
+func (s *CompletionService) runtimeAdapter(ctx context.Context, principal appserver.Principal, req appserver.CompletionRequest) (controladapter.CompletionAssembler, func(), error) {
 	if s == nil || s.host == nil {
 		return nil, nil, errors.New("app/gatewayapp/controladapter/local: completion service is unavailable")
 	}
@@ -156,7 +156,7 @@ func (s *CompletionService) runtimeAdapter(ctx context.Context, principal contro
 			"",
 		), func() {}, nil
 	}
-	lease, err := s.host.AcquireControlRuntime(ctx, principal, controlclient.ActionSessionInspect, req.SessionID, false)
+	lease, err := s.host.AcquireControlRuntime(ctx, principal, appserver.ActionSessionInspect, req.SessionID, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -180,18 +180,18 @@ func (s *CompletionService) workspaceAddress(key, cwd string) (session.Workspace
 	})
 }
 
-func (s *CompletionService) runtimeStack(principal controlclient.Principal) *controladapter.RuntimeStack {
+func (s *CompletionService) runtimeStack(principal appserver.Principal) *controladapter.RuntimeStack {
 	stack := runtimeStack(s.host)
 	s.bindPrincipalSessionList(stack, principal)
 	return stack
 }
 
-func (s *CompletionService) bindPrincipalSessionList(stack *controladapter.RuntimeStack, principal controlclient.Principal) {
+func (s *CompletionService) bindPrincipalSessionList(stack *controladapter.RuntimeStack, principal appserver.Principal) {
 	if stack == nil {
 		return
 	}
 	stack.Session.ListSessionsFn = func(ctx context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
-		return s.host.ControlClient().ListSessions(ctx, principal, controlclient.ListSessionsRequest{
+		return s.host.ControlClient().ListSessions(ctx, principal, appserver.ListSessionsRequest{
 			WorkspaceKey: req.WorkspaceKey,
 			CWD:          req.CWD,
 			Cursor:       req.Cursor,
@@ -200,4 +200,4 @@ func (s *CompletionService) bindPrincipalSessionList(stack *controladapter.Runti
 	}
 }
 
-var _ controlclient.CompletionService = (*CompletionService)(nil)
+var _ appserver.CompletionService = (*CompletionService)(nil)

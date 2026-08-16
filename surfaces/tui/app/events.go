@@ -6,7 +6,7 @@ package tuiapp
 import (
 	"time"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
@@ -159,7 +159,7 @@ type ClearHistoryMsg struct{}
 // SessionReconnectMsg atomically replaces transcript/interaction state and
 // installs the Control-owned running snapshot for a resumed Session.
 type SessionReconnectMsg struct {
-	State controlclient.SessionState
+	State appserver.SessionState
 }
 
 type UserMessageMsg struct {

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 // ParticipantHandles projects the directly runnable handles from the fixed
@@ -66,4 +66,4 @@ func (s *Stack) ParticipantHandles(ctx context.Context, sessionID string) ([]str
 	return handles, nil
 }
 
-var _ controlclient.ParticipantHandleReader = (*Stack)(nil)
+var _ appserver.ParticipantHandleReader = (*Stack)(nil)

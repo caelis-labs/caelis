@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/app/controlserver"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/internal/testenv"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/headless"
@@ -97,19 +97,19 @@ func TestHeadlessRealMimoTerminalBenchStyleParallel(t *testing.T) {
 	if _, err := remote.Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
-	turns, err := controlclient.NewSessionTurnClient(remote)
+	turns, err := appserver.NewSessionTurnClient(remote)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, spec := range specs {
-		result, createErr := remote.CreateSession(ctx, controlclient.CreateSessionRequest{
-			WriteBase:          controlclient.WriteBase{OperationID: "create-" + spec.sessionID},
+		result, createErr := remote.CreateSession(ctx, appserver.CreateSessionRequest{
+			WriteBase:          appserver.WriteBase{OperationID: "create-" + spec.sessionID},
 			PreferredSessionID: spec.sessionID,
 			WorkspaceKey:       spec.workspaceKey,
 			CWD:                spec.cwd,
 			Title:              spec.sessionID,
 		})
-		if createErr != nil || result.Outcome != controlclient.OutcomeCommitted {
+		if createErr != nil || result.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("CreateSession(%q) = %#v, %v", spec.sessionID, result, createErr)
 		}
 	}
@@ -126,7 +126,7 @@ func TestHeadlessRealMimoTerminalBenchStyleParallel(t *testing.T) {
 			result, runErr := headless.RunSessionOnce(
 				ctx,
 				turns,
-				controlclient.SessionTurnStartRequest{
+				appserver.SessionTurnStartRequest{
 					SessionID: spec.sessionID,
 					Input:     spec.prompt,
 				},
@@ -213,12 +213,12 @@ type headlessRealMimoResult struct {
 func newHeadlessRealMimoHTTPClient(
 	t *testing.T,
 	stack *Stack,
-) controlclient.SessionClient {
+) appserver.SessionClient {
 	t.Helper()
 	const token = "real-mimo-headless-control-token-0123456789"
 	authenticator, err := controlserver.BearerTokenAuthenticator(
 		token,
-		controlclient.Principal{ID: "local-user"},
+		appserver.Principal{ID: "local-user"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +238,7 @@ func newHeadlessRealMimoHTTPClient(
 		BearerToken:   token,
 		EventBuffer:   256,
 		HTTPClient:    httpServer.Client(),
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)

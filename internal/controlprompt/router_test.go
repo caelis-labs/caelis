@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -236,8 +236,8 @@ func TestRouterResumeReturnsLiveReconnectWithoutSuccessNotice(t *testing.T) {
 func TestRouterResumePropagatesTypedGapWithoutPersistentNotice(t *testing.T) {
 	svc := &fakeService{resumeSnapshot: SessionSnapshot{
 		SessionID: "resumed-session",
-		Reconnect: &routerReconnect{state: controlclient.SessionState{
-			SessionID: "resumed-session", ResumeMode: controlclient.ResumeModeDurableFallback, TransientGap: true,
+		Reconnect: &routerReconnect{state: appserver.SessionState{
+			SessionID: "resumed-session", ResumeMode: appserver.ResumeModeDurableFallback, TransientGap: true,
 		}},
 	}}
 	result, err := New(RouterConfig{Service: svc}).Route(context.Background(), Request{
@@ -724,8 +724,8 @@ func (s *fakeService) ResumeSession(context.Context, string) (SessionSnapshot, e
 	}
 	return SessionSnapshot{
 		SessionID: "resumed-session",
-		Reconnect: &routerReconnect{state: controlclient.SessionState{
-			SessionID: "resumed-session", ResumeMode: controlclient.ResumeModeExact,
+		Reconnect: &routerReconnect{state: appserver.SessionState{
+			SessionID: "resumed-session", ResumeMode: appserver.ResumeModeExact,
 		}},
 	}, nil
 }
@@ -737,12 +737,12 @@ func (s *fakeService) Compact(context.Context) error {
 	return nil
 }
 
-type routerReconnect struct{ state controlclient.SessionState }
+type routerReconnect struct{ state appserver.SessionState }
 
-func (r *routerReconnect) State() controlclient.SessionState { return r.state }
-func (*routerReconnect) HandleID() string                    { return "" }
-func (*routerReconnect) RunID() string                       { return "" }
-func (*routerReconnect) TurnID() string                      { return "" }
+func (r *routerReconnect) State() appserver.SessionState { return r.state }
+func (*routerReconnect) HandleID() string                { return "" }
+func (*routerReconnect) RunID() string                   { return "" }
+func (*routerReconnect) TurnID() string                  { return "" }
 func (*routerReconnect) Backfill() <-chan eventstream.Envelope {
 	closed := make(chan eventstream.Envelope)
 	close(closed)

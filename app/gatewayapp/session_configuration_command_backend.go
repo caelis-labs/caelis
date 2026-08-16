@@ -8,7 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -25,41 +25,41 @@ const (
 
 func (s *Stack) executeSessionConfigurationCommand(
 	ctx context.Context,
-	action controlclient.Action,
+	action appserver.Action,
 	request any,
-) (controlclient.CommandResult, error) {
+) (appserver.CommandResult, error) {
 	switch req := request.(type) {
-	case controlclient.SessionModeRequest:
-		if action != controlclient.ActionSessionApprovalMode {
+	case appserver.SessionModeRequest:
+		if action != appserver.ActionSessionApprovalMode {
 			return sessionCommandResult(session.Session{}), sessionConfigurationRejected("unexpected approval-mode action")
 		}
 		return s.configureSessionApprovalMode(ctx, req)
-	case controlclient.SessionModelRequest:
-		if action != controlclient.ActionSessionModel {
+	case appserver.SessionModelRequest:
+		if action != appserver.ActionSessionModel {
 			return sessionCommandResult(session.Session{}), sessionConfigurationRejected("unexpected model action")
 		}
 		return s.configureSessionModel(ctx, req)
-	case controlclient.SessionControllerModeRequest:
-		if action != controlclient.ActionSessionControllerMode {
+	case appserver.SessionControllerModeRequest:
+		if action != appserver.ActionSessionControllerMode {
 			return sessionCommandResult(session.Session{}), sessionConfigurationRejected("unexpected controller-mode action")
 		}
 		return s.configureSessionControllerMode(ctx, req)
-	case controlclient.SessionPresentationModeRequest:
-		if action != controlclient.ActionSessionPresentationMode {
+	case appserver.SessionPresentationModeRequest:
+		if action != appserver.ActionSessionPresentationMode {
 			return sessionCommandResult(session.Session{}), sessionConfigurationRejected("unexpected presentation-mode action")
 		}
 		return s.configureSessionPresentationMode(ctx, req)
-	case controlclient.SessionPresentationConfigRequest:
-		if action != controlclient.ActionSessionPresentationConfig {
+	case appserver.SessionPresentationConfigRequest:
+		if action != appserver.ActionSessionPresentationConfig {
 			return sessionCommandResult(session.Session{}), sessionConfigurationRejected("unexpected presentation-config action")
 		}
 		return s.configureSessionPresentation(ctx, req)
 	default:
-		return controlclient.CommandResult{}, sessionConfigurationRejected("invalid Session configuration request")
+		return appserver.CommandResult{}, sessionConfigurationRejected("invalid Session configuration request")
 	}
 }
 
-func (s *Stack) configureSessionControllerMode(ctx context.Context, req controlclient.SessionControllerModeRequest) (controlclient.CommandResult, error) {
+func (s *Stack) configureSessionControllerMode(ctx context.Context, req appserver.SessionControllerModeRequest) (appserver.CommandResult, error) {
 	active, err := s.checkSessionConfigurationCAS(ctx, req.WriteBase)
 	if err != nil {
 		return sessionCommandResult(active), classifyControlBackendError(err)
@@ -85,7 +85,7 @@ func (s *Stack) configureSessionControllerMode(ctx context.Context, req controlc
 	})
 	if err != nil {
 		if controller.ConfigurationEffectStarted(err) {
-			return sessionCommandResult(active), controlclient.NewOutcomeError(controlclient.OutcomeUnknown, err)
+			return sessionCommandResult(active), appserver.NewOutcomeError(appserver.OutcomeUnknown, err)
 		}
 		return sessionCommandResult(active), sessionConfigurationRejectedError(err)
 	}
@@ -102,7 +102,7 @@ func (s *Stack) configureSessionControllerMode(ctx context.Context, req controlc
 	return sessionCommandResult(updated), classifyACPSelectionStateError("mode", stateErr)
 }
 
-func (s *Stack) configureSessionApprovalMode(ctx context.Context, req controlclient.SessionModeRequest) (controlclient.CommandResult, error) {
+func (s *Stack) configureSessionApprovalMode(ctx context.Context, req appserver.SessionModeRequest) (appserver.CommandResult, error) {
 	active, err := s.checkSessionConfigurationCAS(ctx, req.WriteBase)
 	if err != nil {
 		return sessionCommandResult(active), classifyControlBackendError(err)
@@ -128,7 +128,7 @@ func (s *Stack) configureSessionApprovalMode(ctx context.Context, req controlcli
 	return sessionCommandResult(updated), classifyControlBackendError(err)
 }
 
-func (s *Stack) configureSessionModel(ctx context.Context, req controlclient.SessionModelRequest) (controlclient.CommandResult, error) {
+func (s *Stack) configureSessionModel(ctx context.Context, req appserver.SessionModelRequest) (appserver.CommandResult, error) {
 	active, err := s.checkSessionConfigurationCAS(ctx, req.WriteBase)
 	if err != nil {
 		return sessionCommandResult(active), classifyControlBackendError(err)
@@ -189,8 +189,8 @@ func (s *Stack) configureSessionModel(ctx context.Context, req controlclient.Ses
 func (s *Stack) configureACPControllerModel(
 	ctx context.Context,
 	active session.Session,
-	req controlclient.SessionModelRequest,
-) (controlclient.CommandResult, error) {
+	req appserver.SessionModelRequest,
+) (appserver.CommandResult, error) {
 	status, found, err := s.ACPControllerStatus(ctx, active.SessionRef)
 	if err != nil {
 		return sessionCommandResult(active), sessionConfigurationRejectedError(err)
@@ -207,7 +207,7 @@ func (s *Stack) configureACPControllerModel(
 	})
 	if err != nil {
 		if controller.ConfigurationEffectStarted(err) {
-			return sessionCommandResult(active), controlclient.NewOutcomeError(controlclient.OutcomeUnknown, err)
+			return sessionCommandResult(active), appserver.NewOutcomeError(appserver.OutcomeUnknown, err)
 		}
 		return sessionCommandResult(active), sessionConfigurationRejectedError(err)
 	}
@@ -233,13 +233,13 @@ func classifyACPSelectionStateError(selection string, err error) error {
 	if err == nil || session.IsCommitted(err) {
 		return nil
 	}
-	return controlclient.NewOutcomeError(
-		controlclient.OutcomeUnknown,
+	return appserver.NewOutcomeError(
+		appserver.OutcomeUnknown,
 		fmt.Errorf("gatewayapp: ACP %s changed but durable Session selection could not be proven: %w", strings.TrimSpace(selection), err),
 	)
 }
 
-func (s *Stack) configureSessionPresentationMode(ctx context.Context, req controlclient.SessionPresentationModeRequest) (controlclient.CommandResult, error) {
+func (s *Stack) configureSessionPresentationMode(ctx context.Context, req appserver.SessionPresentationModeRequest) (appserver.CommandResult, error) {
 	active, err := s.checkSessionConfigurationCAS(ctx, req.WriteBase)
 	if err != nil {
 		return sessionCommandResult(active), classifyControlBackendError(err)
@@ -261,7 +261,7 @@ func (s *Stack) configureSessionPresentationMode(ctx context.Context, req contro
 	return sessionCommandResult(updated), classifyControlBackendError(err)
 }
 
-func (s *Stack) configureSessionPresentation(ctx context.Context, req controlclient.SessionPresentationConfigRequest) (controlclient.CommandResult, error) {
+func (s *Stack) configureSessionPresentation(ctx context.Context, req appserver.SessionPresentationConfigRequest) (appserver.CommandResult, error) {
 	active, err := s.checkSessionConfigurationCAS(ctx, req.WriteBase)
 	if err != nil {
 		return sessionCommandResult(active), classifyControlBackendError(err)
@@ -284,7 +284,7 @@ func (s *Stack) configureSessionPresentation(ctx context.Context, req controlcli
 	return sessionCommandResult(updated), classifyControlBackendError(err)
 }
 
-func (s *Stack) checkSessionConfigurationCAS(ctx context.Context, base controlclient.WriteBase) (session.Session, error) {
+func (s *Stack) checkSessionConfigurationCAS(ctx context.Context, base appserver.WriteBase) (session.Session, error) {
 	active, err := s.checkControlCommandCAS(ctx, base)
 	if err != nil {
 		return active, err
@@ -364,12 +364,12 @@ func sessionConfigurationRejectedError(err error) error {
 	if errorcode.CodeOf(err) == errorcode.Unknown {
 		err = errorcode.Wrap(errorcode.FailedPrecondition, "gatewayapp: Session configuration rejected", err)
 	}
-	return controlclient.NewOutcomeError(controlclient.OutcomeRejected, err)
+	return appserver.NewOutcomeError(appserver.OutcomeRejected, err)
 }
 
 func sessionConfigurationConflict(err error) error {
 	if errorcode.CodeOf(err) == errorcode.Unknown {
 		err = errorcode.Wrap(errorcode.Conflict, "gatewayapp: Session configuration conflict", err)
 	}
-	return controlclient.NewOutcomeError(controlclient.OutcomeConflicted, err)
+	return appserver.NewOutcomeError(appserver.OutcomeConflicted, err)
 }

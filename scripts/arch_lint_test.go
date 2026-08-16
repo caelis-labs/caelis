@@ -21,7 +21,13 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			name:       "retired control client port retains replacement",
 			rel:        "app/controlserver/handler.go",
 			importPath: modulePath + "/ports/controlclient",
-			want:       "production code must not depend on ports/controlclient; use control/client",
+			want:       "production code must not depend on ports/controlclient; use control/appserver",
+		},
+		{
+			name:       "retired control client package retains replacement",
+			rel:        "surfaces/headless/headless.go",
+			importPath: modulePath + "/control/client",
+			want:       "production code must not depend on retired control/client; use control/appserver",
 		},
 		{
 			name:       "deleted gateway port retains replacement",
@@ -108,14 +114,14 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "",
 		},
 		{
-			name:       "control client accepts shared ACP feed vocabulary",
-			rel:        "control/client/feed.go",
+			name:       "AppServer accepts shared ACP feed vocabulary",
+			rel:        "control/appserver/feed.go",
 			importPath: modulePath + "/protocol/acp/eventstream",
 			want:       "",
 		},
 		{
-			name:       "control client accepts shared ACP projector",
-			rel:        "control/client/feed_backfill.go",
+			name:       "AppServer accepts shared ACP projector",
+			rel:        "control/appserver/feed_backfill.go",
 			importPath: modulePath + "/protocol/acp/projector",
 			want:       "",
 		},
@@ -126,8 +132,8 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "control must depend only on Control peers and reusable SDK packages",
 		},
 		{
-			name:       "control client rejects unrelated ACP adapters",
-			rel:        "control/client/client.go",
+			name:       "AppServer rejects unrelated ACP adapters",
+			rel:        "control/appserver/client.go",
 			importPath: modulePath + "/protocol/acp/control",
 			want:       "production code must not depend on retired protocol/acp/control; use internal/controlprompt, control/status, or surfaces/promptview",
 		},
@@ -397,21 +403,27 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 		wantSub string
 	}{
 		{
+			name:    "deleted control client package fails",
+			rel:     "control/client/service.go",
+			want:    "must not recreate control/client; the surface-facing product boundary belongs to control/appserver",
+			wantSub: "control/client",
+		},
+		{
 			name:    "deleted appserver surface fails",
 			rel:     "surfaces/appserver/server.go",
-			want:    "must not recreate surfaces/appserver; the Control Host belongs to app/controlserver and its typed clients and wire codec to control/client",
+			want:    "must not recreate surfaces/appserver; the Control Host belongs to app/controlserver and its typed clients and wire codec to control/appserver",
 			wantSub: "surfaces/appserver",
 		},
 		{
 			name:    "deleted Control protocol package fails",
 			rel:     "protocol/control/v1/wire.go",
-			want:    "must not recreate protocol/control; the domain-bound Control wire codec belongs to control/client/wirev1",
+			want:    "must not recreate protocol/control; the domain-bound Control wire codec belongs to control/appserver/wirev1",
 			wantSub: "protocol/control/v1",
 		},
 		{
 			name:    "deleted product control client port fails",
 			rel:     "ports/controlclient/service.go",
-			want:    "must not recreate ports/controlclient; product client contracts and behavior belong to control/client",
+			want:    "must not recreate ports/controlclient; product client contracts and behavior belong to control/appserver",
 			wantSub: "ports/controlclient",
 		},
 		{

@@ -23,7 +23,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
@@ -114,7 +114,7 @@ type KernelControlPlaneReader interface {
 
 // DefaultControlOperationRetention is the production replay guarantee for
 // proven terminal Control operations.
-const DefaultControlOperationRetention = controlclient.DefaultOperationTerminalRetention
+const DefaultControlOperationRetention = appserver.DefaultOperationTerminalRetention
 
 type Stack struct {
 	Sessions  session.Service
@@ -155,15 +155,15 @@ type Stack struct {
 	placement                 controlplane.PlacementExecutor
 	acpControlPlane           *acpassembly.ControlPlane
 	taskStore                 task.Store
-	controlFeeds              controlclient.FeedRegistry
-	controlClient             controlclient.Service
-	configurationCommands     controlclient.ConfigurationCommandService
-	agentCommands             controlclient.AgentCommandService
-	pluginCommands            controlclient.PluginCommandService
+	controlFeeds              appserver.FeedRegistry
+	controlClient             appserver.Service
+	configurationCommands     appserver.ConfigurationCommandService
+	agentCommands             appserver.AgentCommandService
+	pluginCommands            appserver.PluginCommandService
 	taskStreams               acptaskstream.Service
-	operations                *controlclient.FileOperationStore
+	operations                *appserver.FileOperationStore
 	acpPreparations           *acpPreparationStore
-	approvalRecovery          *controlclient.ApprovalRecoveryGate
+	approvalRecovery          *appserver.ApprovalRecoveryGate
 	lifecycleCtx              context.Context
 	lifecycleCancel           context.CancelFunc
 	closing                   atomic.Bool
@@ -228,7 +228,7 @@ func (s *Stack) KernelStreams() kernelimpl.StreamProvider {
 }
 
 // ControlClient returns the complete transport-neutral client service.
-func (s *Stack) ControlClient() controlclient.Service {
+func (s *Stack) ControlClient() appserver.Service {
 	if s == nil {
 		return nil
 	}
@@ -238,7 +238,7 @@ func (s *Stack) ControlClient() controlclient.Service {
 // ConfigurationCommands returns the focused Host configuration mutation
 // capability backed by the same command executor and durable operation ledger
 // as the Session Control client.
-func (s *Stack) ConfigurationCommands() controlclient.ConfigurationCommandService {
+func (s *Stack) ConfigurationCommands() appserver.ConfigurationCommandService {
 	if s == nil {
 		return nil
 	}
@@ -248,7 +248,7 @@ func (s *Stack) ConfigurationCommands() controlclient.ConfigurationCommandServic
 // AgentCommands returns the focused Host Agent-binding mutation capability
 // backed by the same command executor and durable operation ledger as the
 // Session Control client.
-func (s *Stack) AgentCommands() controlclient.AgentCommandService {
+func (s *Stack) AgentCommands() appserver.AgentCommandService {
 	if s == nil {
 		return nil
 	}
@@ -258,7 +258,7 @@ func (s *Stack) AgentCommands() controlclient.AgentCommandService {
 // PluginCommands returns the focused Host plugin and marketplace mutation
 // capability backed by the same command executor and durable operation ledger
 // as the Session Control client.
-func (s *Stack) PluginCommands() controlclient.PluginCommandService {
+func (s *Stack) PluginCommands() appserver.PluginCommandService {
 	if s == nil {
 		return nil
 	}
@@ -268,11 +268,11 @@ func (s *Stack) PluginCommands() controlclient.PluginCommandService {
 // ControlParticipants returns the focused server-side participant capability
 // assembled into embedded and HTTP AppServer clients. It stays separate from
 // the Session lifecycle and main-Turn Service.
-func (s *Stack) ControlParticipants() controlclient.ParticipantService {
+func (s *Stack) ControlParticipants() appserver.ParticipantService {
 	if s == nil {
 		return nil
 	}
-	participants, _ := s.controlClient.(controlclient.ParticipantService)
+	participants, _ := s.controlClient.(appserver.ParticipantService)
 	return participants
 }
 
@@ -298,18 +298,18 @@ func (s *Stack) ControlTerminalStreams() stream.Controller {
 
 // ControlClientRuntimeState reads live state only from an already activated
 // Session Runtime. Observation must not assemble or retain execution state.
-func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (controlclient.RuntimeState, error) {
+func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (appserver.RuntimeState, error) {
 	runtimeStack := s
 	if s != nil && s.sessionRuntimes != nil {
 		runtime, ok := s.sessionRuntimes.loaded(ref.SessionID)
 		if !ok {
-			return controlclient.RuntimeState{}, nil
+			return appserver.RuntimeState{}, nil
 		}
 		runtimeStack = runtime.stack
 	}
 	gateway := runtimeStack.currentGateway()
 	if gateway == nil {
-		return controlclient.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
+		return appserver.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
 	}
 	return gateway.ControlClientRuntimeState(ctx, ref)
 }
@@ -423,7 +423,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	})
 	sessions := sessionStore
 	taskStore := sessionfile.NewTaskStore(sessionStore)
-	approvalRecovery := controlclient.NewApprovalRecoveryGate(sessions)
+	approvalRecovery := appserver.NewApprovalRecoveryGate(sessions)
 	cursorSecret, err := loadOrCreateControlClientCursorSecret(storeDir)
 	if err != nil {
 		return nil, err
@@ -432,7 +432,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	controlFeeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{
+	controlFeeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{
 		Reader: sessions, CursorCodec: cursorCodec,
 	})
 	if err != nil {
@@ -542,7 +542,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	}
 	stack.placementCache = newPlacementSnapshot(doc)
 	configStore.savedHook = stack.invalidatePlacementSnapshot
-	controlState, err := controlclient.NewStateService(controlclient.StateServiceConfig{
+	controlState, err := appserver.NewStateService(appserver.StateServiceConfig{
 		Sessions: sessions, Runtime: stack, Feeds: controlFeeds,
 		PrepareReconnect:  stack.prepareControlClientReconnect,
 		RetainObservation: stack.retainControlClientObservation,
@@ -550,9 +550,9 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	controlOperations, err := controlclient.NewFileOperationStoreWithConfig(
+	controlOperations, err := appserver.NewFileOperationStoreWithConfig(
 		filepath.Join(storeDir, "control-operations"),
-		controlclient.OperationRetentionConfig{TerminalRetention: cfg.ControlOperationRetention},
+		appserver.OperationRetentionConfig{TerminalRetention: cfg.ControlOperationRetention},
 	)
 	if err != nil {
 		return nil, err
@@ -571,16 +571,16 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	stack.controlOperationRetention = effectiveOperationRetention
 	stack.operations = controlOperations
 	stack.acpPreparations = acpPreparations
-	sessionAuthorizer := controlclient.SessionAuthorizer{Sessions: sessions}
-	controlCommands, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
-		Authorizer: controlclient.ProductCommandAuthorizer{Sessions: sessionAuthorizer},
+	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: sessions}
+	controlCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
+		Authorizer: appserver.ProductCommandAuthorizer{Sessions: sessionAuthorizer},
 		Operations: controlOperations,
 		Backend:    stack,
 	})
 	if err != nil {
 		return nil, err
 	}
-	controlClient, err := controlclient.NewClient(controlclient.ClientConfig{
+	controlClient, err := appserver.NewClient(appserver.ClientConfig{
 		Commands: controlCommands, State: controlState, Feeds: controlFeeds,
 		Authorizer:         sessionAuthorizer,
 		ParticipantHandles: stack,
@@ -598,7 +598,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		Streams:         func() stream.Service { return hostTaskStreamService{host: stack} },
 		Sessions:        sessions,
 		SubagentHistory: stack,
-		Authorizer:      taskStreamAuthorizer{inner: controlclient.SessionAuthorizer{Sessions: sessions}},
+		Authorizer:      taskStreamAuthorizer{inner: appserver.SessionAuthorizer{Sessions: sessions}},
 		Secret:          cursorSecret,
 	})
 	if err != nil {

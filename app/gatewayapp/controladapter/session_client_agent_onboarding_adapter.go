@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 func (a *SessionClientAdapter) DiscoverACPConnection(ctx context.Context, request controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
@@ -42,22 +42,22 @@ func (a *SessionClientAdapter) ConnectACP(ctx context.Context, request controlag
 		return controlagents.ConnectResult{}, fmt.Errorf("app/gatewayapp/controladapter: read Host revision before ACP connect: %w", err)
 	}
 	revision := before.Configuration.Revision
-	receipt, commandErr := a.agentClient.ConnectACP(ctx, controlclient.ConnectACPRequest{
-		WriteBase: controlclient.WriteBase{
+	receipt, commandErr := a.agentClient.ConnectACP(ctx, appserver.ConnectACPRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:      "agent-acp-connect-" + uuid.NewString(),
 			ExpectedRevision: &revision,
 		},
 		PreparationRef: preparation.Ref, PreparationDigest: preparation.ContentDigest,
 		ConfigValues: request.ConfigValues,
 	})
-	if receipt.Outcome != controlclient.OutcomeCommitted {
+	if receipt.Outcome != appserver.OutcomeCommitted {
 		if commandErr == nil {
 			commandErr = fmt.Errorf("ACP connect outcome is %q: %s", receipt.Outcome, strings.TrimSpace(receipt.Detail))
 		}
-		return controlagents.ConnectResult{}, &controlclient.CommandReceiptError{Receipt: receipt, Err: commandErr}
+		return controlagents.ConnectResult{}, &appserver.CommandReceiptError{Receipt: receipt, Err: commandErr}
 	}
-	if receipt.Resource == nil || receipt.Resource.Kind != controlclient.CommandResourceModelProfile || strings.TrimSpace(receipt.Resource.Ref) == "" {
-		return controlagents.ConnectResult{}, &controlclient.CommandReceiptError{
+	if receipt.Resource == nil || receipt.Resource.Kind != appserver.CommandResourceModelProfile || strings.TrimSpace(receipt.Resource.Ref) == "" {
+		return controlagents.ConnectResult{}, &appserver.CommandReceiptError{
 			Receipt: receipt,
 			Err:     errors.New("app/gatewayapp/controladapter: committed ACP connect returned no ModelProfile resource"),
 		}
@@ -78,7 +78,7 @@ func (a *SessionClientAdapter) ConnectACP(ctx context.Context, request controlag
 				receipt.OperationID, detail,
 			))
 		}
-		return connected, &controlclient.CommandReceiptError{Receipt: receipt, Err: warning}
+		return connected, &appserver.CommandReceiptError{Receipt: receipt, Err: warning}
 	}
 	return connected, nil
 }
@@ -114,8 +114,8 @@ func (a *SessionClientAdapter) prepareACPConnectionLocked(ctx context.Context, r
 			return controlagents.ACPPreparation{}, fmt.Errorf("app/gatewayapp/controladapter: read Host revision before ACP prepare: %w", err)
 		}
 		revision := before.Configuration.Revision
-		receipt, commandErr := a.agentClient.PrepareACP(ctx, controlclient.PrepareACPRequest{
-			WriteBase: controlclient.WriteBase{
+		receipt, commandErr := a.agentClient.PrepareACP(ctx, appserver.PrepareACPRequest{
+			WriteBase: appserver.WriteBase{
 				OperationID:      "agent-acp-prepare-" + uuid.NewString(),
 				ExpectedRevision: &revision,
 			},
@@ -144,8 +144,8 @@ func (a *SessionClientAdapter) prepareACPConnectionLocked(ctx context.Context, r
 			return controlagents.ACPPreparation{}, fmt.Errorf("app/gatewayapp/controladapter: read Host revision before ACP authentication: %w", err)
 		}
 		revision := current.Configuration.Revision
-		authReceipt, authErr := a.agentClient.PrepareACPAuthentication(ctx, controlclient.PrepareACPAuthenticationRequest{
-			WriteBase: controlclient.WriteBase{
+		authReceipt, authErr := a.agentClient.PrepareACPAuthentication(ctx, appserver.PrepareACPAuthenticationRequest{
+			WriteBase: appserver.WriteBase{
 				OperationID:      "agent-acp-prepare-auth-" + uuid.NewString(),
 				ExpectedRevision: &revision,
 			},

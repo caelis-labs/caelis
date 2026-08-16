@@ -12,7 +12,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 // sessionRuntime owns one in-memory execution activation. Its assembled
@@ -118,7 +118,7 @@ func (r *sessionRuntimeRegistry) lockActivation(
 // bind one workspace key to conflicting directories.
 func (r *sessionRuntimeRegistry) resolveCreateWorkspaceLocked(
 	ctx context.Context,
-	principal controlclient.Principal,
+	principal appserver.Principal,
 	requested session.WorkspaceRef,
 	preferredSessionID string,
 ) (session.WorkspaceRef, error) {
@@ -136,7 +136,7 @@ func (r *sessionRuntimeRegistry) resolveCreateWorkspaceLocked(
 		case loadErr == nil:
 			if !principal.HasRole("admin") &&
 				strings.TrimSpace(existing.UserID) != strings.TrimSpace(principal.ID) {
-				return session.WorkspaceRef{}, controlclient.ErrUnauthorized
+				return session.WorkspaceRef{}, appserver.ErrUnauthorized
 			}
 			actual, canonicalErr := canonicalSessionWorkspace(existing)
 			if canonicalErr != nil {
@@ -276,12 +276,12 @@ func (r *sessionRuntimeRegistry) activateSessionTracked(
 	if err != nil {
 		return nil, session.Session{}, false, err
 	}
-	closed, err := controlclient.IsSessionClosed(buildCtx, r.owner.Sessions, active.SessionRef)
+	closed, err := appserver.IsSessionClosed(buildCtx, r.owner.Sessions, active.SessionRef)
 	if err != nil {
 		return nil, active, false, err
 	}
 	if closed {
-		return nil, active, false, controlclient.ErrSessionClosed
+		return nil, active, false, appserver.ErrSessionClosed
 	}
 	active, err = r.owner.repairMissingSessionModelSelection(buildCtx, active)
 	if err != nil {
@@ -508,7 +508,7 @@ func (r *sessionRuntimeRegistry) retainRuntimeLocked(runtime *sessionRuntime) fu
 }
 
 // retainControlClientObservation retains an already-live Runtime without
-// creating one. The reference is coupled by control/client to one explicit
+// creating one. The reference is coupled by control/appserver to one explicit
 // reconnect subscription and disappears when that subscription closes.
 func (s *Stack) retainControlClientObservation(ref session.SessionRef) (func(), error) {
 	if s == nil || s.sessionRuntimes == nil {

@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/app/controlserver"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 func newEphemeralChildControlCredential() (string, string, func() error, error) {
@@ -25,7 +25,7 @@ func newEphemeralChildControlCredential() (string, string, func() error, error) 
 }
 
 func anyControlAuthenticator(authenticators ...controlserver.Authenticator) controlserver.Authenticator {
-	return controlserver.AuthenticatorFunc(func(request *http.Request) (controlclient.Principal, error) {
+	return controlserver.AuthenticatorFunc(func(request *http.Request) (appserver.Principal, error) {
 		var authenticationErr error
 		for _, authenticator := range authenticators {
 			if authenticator == nil {
@@ -37,6 +37,6 @@ func anyControlAuthenticator(authenticators ...controlserver.Authenticator) cont
 			}
 			authenticationErr = err
 		}
-		return controlclient.Principal{}, authenticationErr
+		return appserver.Principal{}, authenticationErr
 	})
 }

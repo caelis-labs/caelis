@@ -31,7 +31,7 @@ client binds a trusted principal directly to the same Control service; a
 remote client reaches it through the Host's HTTP/SSE adapter. No presentation
 client owns that adapter's server lifecycle.
 
-The existing `control/client` contract, durable Session store, Envelope cursor,
+The existing `control/appserver` contract, durable Session store, Envelope cursor,
 feed/replay implementation, operation ledger, process-local exact-operation
 gates, durable domain receipts, Session producer leases, and Task stream remain
 the semantic foundation. The design does not replace them with Codex
@@ -235,7 +235,7 @@ contract. Plain text remains the human-friendly default, while:
   `caelis.headless/v1` result or error object, including configuration and Host
   bootstrap failures;
 - `jsonl` emits target-filtered `envelope` objects using the maintained
-  `control/client/wirev1` Envelope codec, then exactly one `result` or `error`;
+  `control/appserver/wirev1` Envelope codec, then exactly one `result` or `error`;
 - each successful result includes durable Session identity, exact Handle/Run/
   Turn identity, terminal lifecycle, last accepted cursor, final assistant
   output, and the available typed usage snapshot;
@@ -255,17 +255,17 @@ suggests.
 
 | Existing capability | Evidence | Keep |
 | --- | --- | --- |
-| Transport-neutral product client | `control/client/service.go`, `client.go` | Yes; all presentation clients should consume it |
-| Atomic reconnect state plus feed splice | `control/client/reconnect_bootstrap.go` | Yes; use for TUI and Bar attachment |
-| Durable cursor, replay, bounded subscriber handling, gap recovery | `control/client/feed.go`, `feed_broker.go` | Yes; this is the authoritative Session stream |
-| Focused typed clients for prompt, lifecycle, Agent-message delivery, status, configuration, Agent, participant, completion/skill, plugin, presentation, and terminal operations | `control/client`, `app/gatewayapp/controladapter/local` | Yes for embedded and HTTP AppServer clients; slash text is parsed by the client and never becomes a generic server command |
-| Durable idempotency operation ledger and CAS/lease checks | `control/client/operation_store.go`, `app/gatewayapp/control_client_backend.go` | Yes; every remote write supplies operation and target identity |
-| Authenticated HTTP/SSE Host adapter with TLS and host policy | `app/controlserver`, `control/client/wirev1` | Yes; it is infrastructure around Control, not a Surface |
+| Transport-neutral product client | `control/appserver/service.go`, `client.go` | Yes; all presentation clients should consume it |
+| Atomic reconnect state plus feed splice | `control/appserver/reconnect_bootstrap.go` | Yes; use for TUI and Bar attachment |
+| Durable cursor, replay, bounded subscriber handling, gap recovery | `control/appserver/feed.go`, `feed_broker.go` | Yes; this is the authoritative Session stream |
+| Focused typed clients for prompt, lifecycle, Agent-message delivery, status, configuration, Agent, participant, completion/skill, plugin, presentation, and terminal operations | `control/appserver`, `app/gatewayapp/controladapter/local` | Yes for embedded and HTTP AppServer clients; slash text is parsed by the client and never becomes a generic server command |
+| Durable idempotency operation ledger and CAS/lease checks | `control/appserver/operation_store.go`, `app/gatewayapp/control_client_backend.go` | Yes; every remote write supplies operation and target identity |
+| Authenticated HTTP/SSE Host adapter with TLS and host policy | `app/controlserver`, `control/appserver/wirev1` | Yes; it is infrastructure around Control, not a Surface |
 | Host-owned accepted main-Turn lifetime | `internal/kernel/gateway_turns.go`, `app/gatewayapp/stack.go` | Yes; HTTP request cancellation must not cancel accepted work |
-| Principal-bound embedded and HTTP AppServer clients | `control/client`, `control/client/httpclient` | Yes; all focused capabilities share one facade |
-| Headless typed Turn and structured output | `control/client/session_turn.go`, `surfaces/headless`, `internal/cli/headless_output.go` | Yes; Headless uses the focused AppServer Session client and exposes text, JSON, and versioned JSONL without a private Gateway ingress |
+| Principal-bound embedded and HTTP AppServer clients | `control/appserver`, `control/appserver/httpclient` | Yes; all focused capabilities share one facade |
+| Headless typed Turn and structured output | `control/appserver/session_turn.go`, `surfaces/headless`, `internal/cli/headless_output.go` | Yes; Headless uses the focused AppServer Session client and exposes text, JSON, and versioned JSONL without a private Gateway ingress |
 | ACP typed lifecycle, replay, main/participant Turns, presentation, terminal RPC, slash capabilities, and Task observation | `app/gatewayapp/acpagent`, `internal/acpagentbridge` | Yes; product assembly receives clients only |
-| Session-fixed participant command discovery | `control/client/participant_client.go`, `app/gatewayapp/control_client_participants.go` | Yes; an active Runtime exposes its frozen bound handles, while an idle Session reads current configuration without activation |
+| Session-fixed participant command discovery | `control/appserver/participant_client.go`, `app/gatewayapp/control_client_participants.go` | Yes; an active Runtime exposes its frozen bound handles, while an idle Session reads current configuration without activation |
 | Session-routed workspace Runtime ownership | `app/gatewayapp/session_runtime_registry.go`, `workspace_config_assembler.go` | Yes for the bounded Session-client slice: workspace composition is loaded on demand, Session ID selects it, and UserID is not a Runtime key |
 | Independent Task observation | `control/taskstream`, `protocol/acp/taskstream`, `app/controlserver/task_stream.go` | Yes; the principal-bound in-process client and authenticated AppServer list/read/subscribe routes address Task output by Session ID without folding it into the Session control stream |
 
@@ -281,7 +281,7 @@ transport. `caelis serve`, explicit `--embedded`, and the bounded embedded
 fallback take a product Host ownership guard at process entry
 before opening shared Host state (`internal/cli/host_ownership*.go`).
 HTTP clients bind the complete focused set plus Task observation
-(`control/client/httpclient`). The feed registry and live approval maps remain
+(`control/appserver/httpclient`). The feed registry and live approval maps remain
 process-local on that one Host. `NewLocalStack` does not own Host selection.
 
 **Failure mode addressed.** Presentation processes no longer construct a silent
@@ -325,14 +325,14 @@ instance without binding a host loopback port.
 
 ### G3 — AppServer capability parity is complete; product process selection lands
 
-**Evidence.** `control/client.AppServerClients` is the complete focused client
+**Evidence.** `control/appserver.AppServerClients` is the complete focused client
 set for Session lifecycle and Turns, Agent-message delivery and Turn
 observation, participant Turns, status, configuration, Agent operations,
 completion/skill, plugin operations, ACP presentation, and terminal RPC. Task
 observation remains an independent typed side channel. Both the principal-bound
 embedded implementation and authenticated HTTP implementation cover these
 contracts and share the maintained wire codec and generated protocol checks.
-HTTP Task observation is implemented by `control/client/httpclient.TaskClient`.
+HTTP Task observation is implemented by `control/appserver/httpclient.TaskClient`.
 
 TUI, Headless, and product ACP bind clients only. Their prompt and slash routers
 contain no `Stack`, Runtime, Session store, local mode/config provider, or
@@ -482,9 +482,9 @@ origin/host confusion.
 ### G6 — Multi-Session activity and unread state are not yet a contract
 
 **Evidence.** Session listing is paginated but snapshot-only
-(`control/client/client.go:29-41`). Live `RunState` exposes active and
+(`control/appserver/client.go:29-41`). Live `RunState` exposes active and
 waiting-approval facts, while there is no typed waiting-on-user-input or
-system-error field (`control/client/state.go:28-62`). The HTTP surface offers
+system-error field (`control/appserver/state.go:28-62`). The HTTP surface offers
 one atomic reconnect stream per Session and no catalog/activity stream
 (`app/controlserver/handler.go`).
 
@@ -531,7 +531,7 @@ flowchart LR
     subgraph Host["One Control Host"]
         API["app/controlserver<br/>auth + HTTP/SSE + drain"]
         CATALOG["Session catalog/activity projection"]
-        CONTROL["control/client<br/>commands + reconnect + feed"]
+        CONTROL["control/appserver<br/>commands + reconnect + feed"]
         TASKS["control/taskstream"]
         ASSEMBLER["Stateless workspace<br/>config assembler"]
         RUNTIME["Session Runtime registry<br/>keyed by Session ID"]
@@ -651,7 +651,7 @@ The current AppServer slice includes:
   terminal, and independent Task operations;
 - reconnect is the sole atomic state/replay/live attachment operation;
 - generated wire clients and conformance tests share
-  `control/client/wirev1`.
+  `control/appserver/wirev1`.
 - the app-scoped Runtime registry permits multiple local workspace
   compositions, but every client mutation and observation is still addressed
   by Session ID; create, inspect, and reconnect allocate no execution Runtime,

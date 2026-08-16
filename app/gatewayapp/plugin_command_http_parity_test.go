@@ -15,8 +15,8 @@ import (
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/internal/testenv"
 )
 
@@ -47,7 +47,7 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	authenticator, err := controlserver.BearerTokenAuthenticator(token, controlclient.Principal{ID: "local-user"})
+	authenticator, err := controlserver.BearerTokenAuthenticator(token, appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 	client, err := httpclient.New(httpclient.Config{
 		BaseURL: httpServer.URL, BearerToken: token,
 		HTTPClient:    httpServer.Client(),
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -88,29 +88,29 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	committed, err := clients.Plugins.AddPluginPath(ctx, controlclient.AddPluginPathRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "http-plugin-add", ExpectedRevision: &revision},
+	committed, err := clients.Plugins.AddPluginPath(ctx, appserver.AddPluginPathRequest{
+		WriteBase: appserver.WriteBase{OperationID: "http-plugin-add", ExpectedRevision: &revision},
 		Path:      pluginDir,
 	})
-	if err != nil || committed.Outcome != controlclient.OutcomeCommitted || committed.Revision <= revision {
+	if err != nil || committed.Outcome != appserver.OutcomeCommitted || committed.Revision <= revision {
 		t.Fatalf("AddPluginPath(committed) = %#v, %v", committed, err)
 	}
-	if committed.Resource == nil || committed.Resource.Kind != controlclient.CommandResourcePlugin {
+	if committed.Resource == nil || committed.Resource.Kind != appserver.CommandResourcePlugin {
 		t.Fatalf("committed Resource = %#v, want plugin kind", committed.Resource)
 	}
 
 	// Stale revision must surface as conflicted with HTTP 409 parity (client
 	// wraps OutcomeError; status is validated inside httpclient.doCommand).
 	stale := revision
-	conflicted, conflictErr := clients.Plugins.EnablePlugin(ctx, controlclient.EnablePluginRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "http-plugin-stale", ExpectedRevision: &stale},
+	conflicted, conflictErr := clients.Plugins.EnablePlugin(ctx, appserver.EnablePluginRequest{
+		WriteBase: appserver.WriteBase{OperationID: "http-plugin-stale", ExpectedRevision: &stale},
 		ID:        "http-demo",
 	})
-	if conflictErr == nil || conflicted.Outcome != controlclient.OutcomeConflicted {
+	if conflictErr == nil || conflicted.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("EnablePlugin(stale) = %#v, %v want conflicted", conflicted, conflictErr)
 	}
-	var outcomeErr *controlclient.OutcomeError
-	if !errors.As(conflictErr, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeConflicted {
+	var outcomeErr *appserver.OutcomeError
+	if !errors.As(conflictErr, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("stale error = %v, want OutcomeError(conflicted)", conflictErr)
 	}
 
@@ -118,14 +118,14 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rejected, rejectErr := clients.Plugins.InstallPlugin(ctx, controlclient.InstallPluginRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "http-plugin-empty", ExpectedRevision: &current},
+	rejected, rejectErr := clients.Plugins.InstallPlugin(ctx, appserver.InstallPluginRequest{
+		WriteBase: appserver.WriteBase{OperationID: "http-plugin-empty", ExpectedRevision: &current},
 		Source:    "",
 	})
-	if rejectErr == nil || rejected.Outcome != controlclient.OutcomeRejected {
+	if rejectErr == nil || rejected.Outcome != appserver.OutcomeRejected {
 		t.Fatalf("InstallPlugin(empty) = %#v, %v want rejected", rejected, rejectErr)
 	}
-	if !errors.As(rejectErr, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeRejected {
+	if !errors.As(rejectErr, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeRejected {
 		t.Fatalf("empty source error = %v, want OutcomeError(rejected)", rejectErr)
 	}
 
@@ -142,12 +142,12 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := controlclient.AddMarketplaceRequest{
-			WriteBase: controlclient.WriteBase{OperationID: "http-market-post-effect-cas", ExpectedRevision: &expected},
+		req := appserver.AddMarketplaceRequest{
+			WriteBase: appserver.WriteBase{OperationID: "http-market-post-effect-cas", ExpectedRevision: &expected},
 			Source:    remoteSource,
 		}
 		type commandCall struct {
-			result controlclient.CommandResult
+			result appserver.CommandResult
 			err    error
 		}
 		callDone := make(chan commandCall, 1)
@@ -164,11 +164,11 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(bumpDir, ".caelis-plugin", "plugin.json"), []byte(`{"name":"revision-bump","version":"1.0.0"}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		bumped, bumpErr := clients.Plugins.AddPluginPath(ctx, controlclient.AddPluginPathRequest{
-			WriteBase: controlclient.WriteBase{OperationID: "http-plugin-race-bump", ExpectedRevision: &expected},
+		bumped, bumpErr := clients.Plugins.AddPluginPath(ctx, appserver.AddPluginPathRequest{
+			WriteBase: appserver.WriteBase{OperationID: "http-plugin-race-bump", ExpectedRevision: &expected},
 			Path:      bumpDir,
 		})
-		if bumpErr != nil || bumped.Outcome != controlclient.OutcomeCommitted {
+		if bumpErr != nil || bumped.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("AddPluginPath(revision bump) = %#v, %v", bumped, bumpErr)
 		}
 		if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
@@ -176,10 +176,10 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 		}
 
 		call := <-callDone
-		if call.err == nil || call.result.Outcome != controlclient.OutcomeUnknown {
+		if call.err == nil || call.result.Outcome != appserver.OutcomeUnknown {
 			t.Fatalf("AddMarketplace(post-effect CAS) = %#v, %v; want unknown", call.result, call.err)
 		}
-		if !errors.As(call.err, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeUnknown {
+		if !errors.As(call.err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeUnknown {
 			t.Fatalf("post-effect error = %v, want OutcomeError(unknown)", call.err)
 		}
 		if got := blockingGitCloneCount(t, count); got != 1 {
@@ -187,7 +187,7 @@ func TestPluginMutationHTTPOutcomeParity(t *testing.T) {
 		}
 
 		replayed, replayErr := clients.Plugins.AddMarketplace(ctx, req)
-		if replayErr == nil || replayed.Outcome != controlclient.OutcomeUnknown {
+		if replayErr == nil || replayed.Outcome != appserver.OutcomeUnknown {
 			t.Fatalf("AddMarketplace(replay) = %#v, %v; want stored unknown", replayed, replayErr)
 		}
 		if got := blockingGitCloneCount(t, count); got != 1 {

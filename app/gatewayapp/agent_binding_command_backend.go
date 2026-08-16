@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 type agentBindingMutationResult struct {
@@ -18,7 +18,7 @@ type agentBindingMutationResult struct {
 	Warning       error
 }
 
-func (s *Stack) executeAgentBindingCommand(ctx context.Context, action controlclient.Action, request any) (controlclient.CommandResult, error) {
+func (s *Stack) executeAgentBindingCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
 	result, err := s.mutateAgentBindingsAtRevision(ctx, action, request)
 	commandResult := configurationCommandResult(result.Revision)
 	if result.Warning != nil {
@@ -27,7 +27,7 @@ func (s *Stack) executeAgentBindingCommand(ctx context.Context, action controlcl
 	return commandResult, classifyAgentBindingMutationError(result, err)
 }
 
-func (s *Stack) mutateAgentBindingsAtRevision(ctx context.Context, action controlclient.Action, request any) (agentBindingMutationResult, error) {
+func (s *Stack) mutateAgentBindingsAtRevision(ctx context.Context, action appserver.Action, request any) (agentBindingMutationResult, error) {
 	result := agentBindingMutationResult{}
 	expected, update, err := agentBindingMutation(action, request)
 	if err != nil {
@@ -78,49 +78,49 @@ func (s *Stack) mutateAgentBindingsAtRevision(ctx context.Context, action contro
 }
 
 func agentBindingMutation(
-	action controlclient.Action,
+	action appserver.Action,
 	request any,
 ) (expected uint64, update func(AppConfig) (agentbinding.Configuration, error), err error) {
 	switch req := request.(type) {
-	case controlclient.BindAgentBindingRequest:
-		if action != controlclient.ActionAgentBindingBind {
+	case appserver.BindAgentBindingRequest:
+		if action != appserver.ActionAgentBindingBind {
 			break
 		}
 		return expectedConfigurationRevision(req.ExpectedRevision), func(doc AppConfig) (agentbinding.Configuration, error) {
 			return agentbinding.Bind(doc.AgentBindings, req.Binding, doc.ModelProfiles)
 		}, nil
-	case controlclient.ResetAgentBindingRequest:
-		if action != controlclient.ActionAgentBindingReset {
+	case appserver.ResetAgentBindingRequest:
+		if action != appserver.ActionAgentBindingReset {
 			break
 		}
 		return expectedConfigurationRevision(req.ExpectedRevision), func(doc AppConfig) (agentbinding.Configuration, error) {
 			return agentbinding.Reset(doc.AgentBindings, req.Handle)
 		}, nil
-	case controlclient.CreateAgentRoleRequest:
-		if action != controlclient.ActionAgentRoleCreate {
+	case appserver.CreateAgentRoleRequest:
+		if action != appserver.ActionAgentRoleCreate {
 			break
 		}
 		return expectedConfigurationRevision(req.ExpectedRevision), func(doc AppConfig) (agentbinding.Configuration, error) {
 			return agentbinding.CreateRole(doc.AgentBindings, req.Role, req.Binding, doc.ModelProfiles)
 		}, nil
-	case controlclient.DeleteAgentRoleRequest:
-		if action != controlclient.ActionAgentRoleDelete {
+	case appserver.DeleteAgentRoleRequest:
+		if action != appserver.ActionAgentRoleDelete {
 			break
 		}
 		return expectedConfigurationRevision(req.ExpectedRevision), func(doc AppConfig) (agentbinding.Configuration, error) {
 			return agentbinding.DeleteRole(doc.AgentBindings, req.Handle)
 		}, nil
-	case controlclient.AgentBindingSetRequest:
+	case appserver.AgentBindingSetRequest:
 		switch action {
-		case controlclient.ActionAgentBindingSetSave:
+		case appserver.ActionAgentBindingSetSave:
 			return expectedConfigurationRevision(req.ExpectedRevision), func(doc AppConfig) (agentbinding.Configuration, error) {
 				return agentbinding.SaveBindingSet(doc.AgentBindings, req.SetName)
 			}, nil
-		case controlclient.ActionAgentBindingSetApply:
+		case appserver.ActionAgentBindingSetApply:
 			return expectedConfigurationRevision(req.ExpectedRevision), func(doc AppConfig) (agentbinding.Configuration, error) {
 				return agentbinding.ApplyBindingSet(doc.AgentBindings, req.SetName, doc.ModelProfiles)
 			}, nil
-		case controlclient.ActionAgentBindingSetDelete:
+		case appserver.ActionAgentBindingSetDelete:
 			return expectedConfigurationRevision(req.ExpectedRevision), func(doc AppConfig) (agentbinding.Configuration, error) {
 				return agentbinding.DeleteBindingSet(doc.AgentBindings, req.SetName)
 			}, nil
@@ -145,13 +145,13 @@ func classifyAgentBindingMutationError(result agentBindingMutationResult, err er
 	}
 	if errors.Is(err, configstore.ErrConfigurationRevisionConflict) {
 		coded := errorcode.Wrap(errorcode.Conflict, "gatewayapp: Agent binding configuration conflict", err)
-		return controlclient.NewOutcomeError(controlclient.OutcomeConflicted, coded)
+		return appserver.NewOutcomeError(appserver.OutcomeConflicted, coded)
 	}
 	if result.EffectStarted {
-		return controlclient.NewOutcomeError(controlclient.OutcomeUnknown, err)
+		return appserver.NewOutcomeError(appserver.OutcomeUnknown, err)
 	}
 	if errorcode.CodeOf(err) == errorcode.Unknown {
 		err = errorcode.Wrap(errorcode.Unavailable, "gatewayapp: mutate Agent binding configuration", err)
 	}
-	return controlclient.NewOutcomeError(controlclient.OutcomeRejected, err)
+	return appserver.NewOutcomeError(appserver.OutcomeRejected, err)
 }

@@ -9,13 +9,13 @@ import (
 
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 func TestAgentBindingCommandsUseHostCASAndSharedLedger(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", Model: "binding-command"})
 	if err != nil {
 		t.Fatal(err)
@@ -29,8 +29,8 @@ func TestAgentBindingCommandsUseHostCASAndSharedLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bindRequest := controlclient.BindAgentBindingRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "agent-binding-bind", ExpectedRevision: &revision},
+	bindRequest := appserver.BindAgentBindingRequest{
+		WriteBase: appserver.WriteBase{OperationID: "agent-binding-bind", ExpectedRevision: &revision},
 		Binding: agentbinding.Binding{
 			Handle: agentbinding.HandleOrbit, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort,
 		},
@@ -44,53 +44,53 @@ func TestAgentBindingCommandsUseHostCASAndSharedLedger(t *testing.T) {
 	changed := bindRequest
 	changed.Binding.ProfileID = "provider:changed"
 	conflicted, err := stack.AgentCommands().BindAgentBinding(ctx, principal, changed)
-	if !errors.Is(err, controlclient.ErrOperationConflict) || conflicted.Outcome != controlclient.OutcomeConflicted {
+	if !errors.Is(err, appserver.ErrOperationConflict) || conflicted.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("BindAgentBinding(changed payload) = %#v, %v", conflicted, err)
 	}
 
 	current := bound.Revision
-	savedSet, err := stack.AgentCommands().SaveAgentBindingSet(ctx, principal, controlclient.AgentBindingSetRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "agent-binding-set-save", ExpectedRevision: &current},
+	savedSet, err := stack.AgentCommands().SaveAgentBindingSet(ctx, principal, appserver.AgentBindingSetRequest{
+		WriteBase: appserver.WriteBase{OperationID: "agent-binding-set-save", ExpectedRevision: &current},
 		SetName:   "baseline",
 	})
 	requireCommittedAgentBindingCommand(t, savedSet, err, current+1)
 	current = savedSet.Revision
-	reset, err := stack.AgentCommands().ResetAgentBinding(ctx, principal, controlclient.ResetAgentBindingRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "agent-binding-reset", ExpectedRevision: &current},
+	reset, err := stack.AgentCommands().ResetAgentBinding(ctx, principal, appserver.ResetAgentBindingRequest{
+		WriteBase: appserver.WriteBase{OperationID: "agent-binding-reset", ExpectedRevision: &current},
 		Handle:    agentbinding.HandleOrbit,
 	})
 	requireCommittedAgentBindingCommand(t, reset, err, current+1)
 	current = reset.Revision
-	applied, err := stack.AgentCommands().ApplyAgentBindingSet(ctx, principal, controlclient.AgentBindingSetRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "agent-binding-set-apply", ExpectedRevision: &current},
+	applied, err := stack.AgentCommands().ApplyAgentBindingSet(ctx, principal, appserver.AgentBindingSetRequest{
+		WriteBase: appserver.WriteBase{OperationID: "agent-binding-set-apply", ExpectedRevision: &current},
 		SetName:   "baseline",
 	})
 	requireCommittedAgentBindingCommand(t, applied, err, current+1)
 	current = applied.Revision
-	created, err := stack.AgentCommands().CreateAgentRole(ctx, principal, controlclient.CreateAgentRoleRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "agent-role-create", ExpectedRevision: &current},
+	created, err := stack.AgentCommands().CreateAgentRole(ctx, principal, appserver.CreateAgentRoleRequest{
+		WriteBase: appserver.WriteBase{OperationID: "agent-role-create", ExpectedRevision: &current},
 		Role:      agentbinding.Role{Handle: "research", Description: "Investigate unfamiliar systems."},
 		Binding:   agentbinding.Binding{ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort},
 	})
 	requireCommittedAgentBindingCommand(t, created, err, current+1)
 	current = created.Revision
-	deletedRole, err := stack.AgentCommands().DeleteAgentRole(ctx, principal, controlclient.DeleteAgentRoleRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "agent-role-delete", ExpectedRevision: &current},
+	deletedRole, err := stack.AgentCommands().DeleteAgentRole(ctx, principal, appserver.DeleteAgentRoleRequest{
+		WriteBase: appserver.WriteBase{OperationID: "agent-role-delete", ExpectedRevision: &current},
 		Handle:    "research",
 	})
 	requireCommittedAgentBindingCommand(t, deletedRole, err, current+1)
 	current = deletedRole.Revision
-	deletedSet, err := stack.AgentCommands().DeleteAgentBindingSet(ctx, principal, controlclient.AgentBindingSetRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "agent-binding-set-delete", ExpectedRevision: &current},
+	deletedSet, err := stack.AgentCommands().DeleteAgentBindingSet(ctx, principal, appserver.AgentBindingSetRequest{
+		WriteBase: appserver.WriteBase{OperationID: "agent-binding-set-delete", ExpectedRevision: &current},
 		SetName:   "baseline",
 	})
 	requireCommittedAgentBindingCommand(t, deletedSet, err, current+1)
 
-	sharedConflict, err := stack.ConfigurationCommands().UseModel(ctx, principal, controlclient.UseModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: bindRequest.OperationID, ExpectedRevision: &deletedSet.Revision},
+	sharedConflict, err := stack.ConfigurationCommands().UseModel(ctx, principal, appserver.UseModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: bindRequest.OperationID, ExpectedRevision: &deletedSet.Revision},
 		Model:     stack.lookup.DefaultID(),
 	})
-	if !errors.Is(err, controlclient.ErrOperationConflict) || sharedConflict.Outcome != controlclient.OutcomeConflicted {
+	if !errors.Is(err, appserver.ErrOperationConflict) || sharedConflict.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("UseModel(shared Agent operation ID) = %#v, %v", sharedConflict, err)
 	}
 	afterSession, err := stack.Sessions.Session(ctx, activeSession.SessionRef)
@@ -139,8 +139,8 @@ func TestAgentBindingCASAllowsOnlyOneConcurrentHostWriter(t *testing.T) {
 	start.Add(2)
 	mutate := func(stack *Stack, setName string) {
 		defer start.Done()
-		result, mutationErr := stack.mutateAgentBindingsAtRevision(ctx, controlclient.ActionAgentBindingSetSave, controlclient.AgentBindingSetRequest{
-			WriteBase: controlclient.WriteBase{ExpectedRevision: &expected},
+		result, mutationErr := stack.mutateAgentBindingsAtRevision(ctx, appserver.ActionAgentBindingSetSave, appserver.AgentBindingSetRequest{
+			WriteBase: appserver.WriteBase{ExpectedRevision: &expected},
 			SetName:   setName,
 		})
 		results <- outcome{result: result, err: mutationErr}
@@ -183,9 +183,9 @@ func TestAgentBindingCASAllowsOnlyOneConcurrentHostWriter(t *testing.T) {
 	}
 }
 
-func requireCommittedAgentBindingCommand(t *testing.T, result controlclient.CommandResult, err error, revision uint64) {
+func requireCommittedAgentBindingCommand(t *testing.T, result appserver.CommandResult, err error, revision uint64) {
 	t.Helper()
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision != revision {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != revision {
 		t.Fatalf("Agent binding command = %#v, %v; want committed revision %d", result, err, revision)
 	}
 }

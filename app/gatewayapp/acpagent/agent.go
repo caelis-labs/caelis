@@ -11,7 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -22,7 +22,7 @@ import (
 // ClientsConfig constructs product ACP from focused AppServer clients only.
 // Surfaces never receive Runtime, Kernel, or Stack handles through this path.
 type ClientsConfig struct {
-	Clients      controlclient.AppServerClients
+	Clients      appserver.AppServerClients
 	Tasks        taskstream.Client
 	AppName      string
 	UserID       string
@@ -32,7 +32,7 @@ type ClientsConfig struct {
 	// after trusted Agent-message delivery. When nil, the principal-bound Session
 	// client is used; Host exact-target Reconnect authorizes owners without
 	// granting RoleSystemSessionRuntime to Surface tokens.
-	AgentMessageSessionClient controlclient.SessionClient
+	AgentMessageSessionClient appserver.SessionClient
 }
 
 func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
@@ -43,12 +43,12 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 	if err != nil {
 		return nil, err
 	}
-	clients, taskStreamClient, err := appServer.Bind(controlclient.Principal{ID: stack.UserID})
+	clients, taskStreamClient, err := appServer.Bind(appserver.Principal{ID: stack.UserID})
 	if err != nil {
 		return nil, err
 	}
-	systemSessionClient, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{
-		ID: stack.UserID, Roles: []string{controlclient.RoleSystemSessionRuntime},
+	systemSessionClient, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{
+		ID: stack.UserID, Roles: []string{appserver.RoleSystemSessionRuntime},
 	})
 	if err != nil {
 		return nil, err

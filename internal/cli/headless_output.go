@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/wirev1"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -19,11 +19,11 @@ const (
 )
 
 type headlessEnvelopeOutput struct {
-	SchemaVersion string                   `json:"schema_version"`
-	Type          string                   `json:"type"`
-	SessionID     string                   `json:"session_id"`
-	Turn          controlclient.TurnTarget `json:"turn"`
-	Envelope      json.RawMessage          `json:"envelope"`
+	SchemaVersion string               `json:"schema_version"`
+	Type          string               `json:"type"`
+	SessionID     string               `json:"session_id"`
+	Turn          appserver.TurnTarget `json:"turn"`
+	Envelope      json.RawMessage      `json:"envelope"`
 }
 
 type headlessErrorOutput struct {
@@ -42,7 +42,7 @@ func writeHeadlessEnvelope(w io.Writer, envelope eventstream.Envelope) error {
 		SchemaVersion: headlessOutputSchemaVersion,
 		Type:          headlessOutputTypeEnvelope,
 		SessionID:     strings.TrimSpace(envelope.SessionID),
-		Turn: controlclient.TurnTarget{
+		Turn: appserver.TurnTarget{
 			HandleID: strings.TrimSpace(envelope.HandleID),
 			RunID:    strings.TrimSpace(envelope.RunID),
 			TurnID:   strings.TrimSpace(envelope.TurnID),

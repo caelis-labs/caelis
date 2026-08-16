@@ -12,7 +12,7 @@ import (
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 
@@ -26,14 +26,14 @@ const controlFeedCatchUpWarning = "session mutation committed; live feed catch-u
 // ExecuteControlCommand is the app assembly adapter for already-authorized
 // transport-neutral commands. The request's operation ID is forwarded in
 // downstream metadata wherever the current gateway contract accepts it.
-func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclient.Principal, action controlclient.Action, request any) (result controlclient.CommandResult, commandErr error) {
+func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.Principal, action appserver.Action, request any) (result appserver.CommandResult, commandErr error) {
 	if s == nil {
-		return controlclient.CommandResult{}, errors.New("gatewayapp: stack is unavailable")
+		return appserver.CommandResult{}, errors.New("gatewayapp: stack is unavailable")
 	}
 	if s.isClosing() {
-		return controlclient.CommandResult{Outcome: controlclient.OutcomeRejected},
-			controlclient.NewOutcomeError(
-				controlclient.OutcomeRejected,
+		return appserver.CommandResult{Outcome: appserver.OutcomeRejected},
+			appserver.NewOutcomeError(
+				appserver.OutcomeRejected,
 				errorcode.New(errorcode.Unavailable, "gatewayapp: host is closing"),
 			)
 	}
@@ -50,10 +50,10 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 		return s.executeControlCommand(ctx, principal, action, request)
 	}
 
-	if create, ok := request.(controlclient.CreateSessionRequest); ok {
+	if create, ok := request.(appserver.CreateSessionRequest); ok {
 		activationCtx, unlock, err := s.sessionRuntimes.lockActivation(ctx)
 		if err != nil {
-			return controlclient.CommandResult{Outcome: controlclient.OutcomeRejected},
+			return appserver.CommandResult{Outcome: appserver.OutcomeRejected},
 				classifyControlPreDispatchError(err)
 		}
 		defer unlock()
@@ -64,21 +64,21 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 			create.PreferredSessionID,
 		)
 		if err != nil {
-			return controlclient.CommandResult{Outcome: controlclient.OutcomeRejected},
+			return appserver.CommandResult{Outcome: appserver.OutcomeRejected},
 				classifyControlPreDispatchError(err)
 		}
 		create.WorkspaceKey = workspace.Key
 		create.CWD = workspace.CWD
 		result, commandErr = s.executeControlCommand(activationCtx, principal, action, create)
-		if commandErr != nil || result.Outcome != controlclient.OutcomeCommitted || strings.TrimSpace(result.SessionID) == "" {
+		if commandErr != nil || result.Outcome != appserver.OutcomeCommitted || strings.TrimSpace(result.SessionID) == "" {
 			return result, commandErr
 		}
 		active, err := s.Sessions.Session(activationCtx, session.SessionRef{SessionID: result.SessionID})
 		if err != nil {
-			return result, controlclient.NewOutcomeError(controlclient.OutcomeUnknown, err)
+			return result, appserver.NewOutcomeError(appserver.OutcomeUnknown, err)
 		}
 		if err := s.sessionRuntimes.bindCreatedWorkspaceLocked(active, workspace); err != nil {
-			return result, controlclient.NewOutcomeError(controlclient.OutcomeUnknown, err)
+			return result, appserver.NewOutcomeError(appserver.OutcomeUnknown, err)
 		}
 		return result, nil
 	}
@@ -99,7 +99,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 			if closeErr == nil {
 				return
 			}
-			if result.Outcome == controlclient.OutcomeCommitted {
+			if result.Outcome == appserver.OutcomeCommitted {
 				result.Detail = firstNonEmpty(result.Detail, "Session configuration committed; disposable Runtime cleanup remains pending")
 				return
 			}
@@ -110,17 +110,17 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 	case controlActionConfiguresSession(action):
 		runtime, _, closeRuntime, err := s.sessionRuntimes.acquireControlRuntime(ctx, sessionID, false)
 		if err != nil {
-			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
+			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
 		if runtime == nil {
-			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(errors.New("gatewayapp: Session configuration Runtime is unavailable"))
+			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(errors.New("gatewayapp: Session configuration Runtime is unavailable"))
 		}
 		closeControlRuntime = closeRuntime
 		runtimeStack = runtime.stack
 	case controlActionActivatesSessionRuntime(action):
 		runtime, _, release, activated, err := s.sessionRuntimes.acquireActivatedControlRuntime(ctx, sessionID)
 		if err != nil {
-			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
+			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
 		releaseRuntimeUse = func() { _ = release(context.Background()) }
 		runtimeStack = runtime.stack
@@ -130,28 +130,28 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 	case controlActionTargetsActiveRuntime(action):
 		runtime, releaseUse, err := s.sessionRuntimes.acquireLoadedRuntime(sessionID)
 		if err != nil {
-			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
+			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
 		if runtime == nil {
 			coded := errorcode.New(
 				errorcode.Conflict,
 				"gatewayapp: active Turn Runtime is unavailable",
 			)
-			return controlclient.CommandResult{SessionID: sessionID},
-				controlclient.NewOutcomeError(controlclient.OutcomeConflicted, coded)
+			return appserver.CommandResult{SessionID: sessionID},
+				appserver.NewOutcomeError(appserver.OutcomeConflicted, coded)
 		}
 		releaseRuntimeUse = releaseUse
 		runtimeStack = runtime.stack
-	case action == controlclient.ActionSessionClose:
+	case action == appserver.ActionSessionClose:
 		runtime, releaseUse, err := s.sessionRuntimes.acquireLoadedRuntime(sessionID)
 		if err != nil {
-			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
+			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
 		if runtime != nil {
 			releaseRuntimeUse = releaseUse
 			runtimeStack = runtime.stack
 		} else if _, err := s.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID}); err != nil {
-			return controlclient.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
+			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
 	}
 	result, commandErr = runtimeStack.executeControlCommand(ctx, principal, action, request)
@@ -170,9 +170,9 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 			)
 		}
 	}
-	if action == controlclient.ActionSessionClose &&
+	if action == appserver.ActionSessionClose &&
 		commandErr == nil &&
-		result.Outcome == controlclient.OutcomeCommitted {
+		result.Outcome == appserver.OutcomeCommitted {
 		if releaseRuntimeUse != nil {
 			releaseRuntimeUse()
 			releaseRuntimeUse = nil
@@ -188,15 +188,15 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlclie
 
 func isHostAgentCommandRequest(request any) bool {
 	switch request.(type) {
-	case controlclient.BindAgentBindingRequest,
-		controlclient.ResetAgentBindingRequest,
-		controlclient.CreateAgentRoleRequest,
-		controlclient.DeleteAgentRoleRequest,
-		controlclient.AgentBindingSetRequest,
-		controlclient.PrepareACPRequest,
-		controlclient.PrepareACPAuthenticationRequest,
-		controlclient.ConnectACPRequest,
-		controlclient.DisconnectACPRequest:
+	case appserver.BindAgentBindingRequest,
+		appserver.ResetAgentBindingRequest,
+		appserver.CreateAgentRoleRequest,
+		appserver.DeleteAgentRoleRequest,
+		appserver.AgentBindingSetRequest,
+		appserver.PrepareACPRequest,
+		appserver.PrepareACPAuthenticationRequest,
+		appserver.ConnectACPRequest,
+		appserver.DisconnectACPRequest:
 		return true
 	default:
 		return false
@@ -205,10 +205,10 @@ func isHostAgentCommandRequest(request any) bool {
 
 func isHostConfigurationCommandRequest(request any) bool {
 	switch request.(type) {
-	case controlclient.ConnectModelRequest,
-		controlclient.UseModelRequest,
-		controlclient.DeleteModelRequest,
-		controlclient.SandboxRequest:
+	case appserver.ConnectModelRequest,
+		appserver.UseModelRequest,
+		appserver.DeleteModelRequest,
+		appserver.SandboxRequest:
 		return true
 	default:
 		return false
@@ -216,28 +216,28 @@ func isHostConfigurationCommandRequest(request any) bool {
 }
 
 func controlCommandProvesNoEffect(err error) bool {
-	var outcomeErr *controlclient.OutcomeError
+	var outcomeErr *appserver.OutcomeError
 	if !errors.As(err, &outcomeErr) {
 		return false
 	}
-	return outcomeErr.Outcome == controlclient.OutcomeRejected ||
-		outcomeErr.Outcome == controlclient.OutcomeConflicted
+	return outcomeErr.Outcome == appserver.OutcomeRejected ||
+		outcomeErr.Outcome == appserver.OutcomeConflicted
 }
 
-func (s *Stack) executeControlCommand(ctx context.Context, principal controlclient.Principal, action controlclient.Action, request any) (result controlclient.CommandResult, commandErr error) {
+func (s *Stack) executeControlCommand(ctx context.Context, principal appserver.Principal, action appserver.Action, request any) (result appserver.CommandResult, commandErr error) {
 	if s == nil {
-		return controlclient.CommandResult{}, errors.New("gatewayapp: stack is unavailable")
+		return appserver.CommandResult{}, errors.New("gatewayapp: stack is unavailable")
 	}
 	if s.isClosing() {
-		return controlclient.CommandResult{Outcome: controlclient.OutcomeRejected},
-			controlclient.NewOutcomeError(
-				controlclient.OutcomeRejected,
+		return appserver.CommandResult{Outcome: appserver.OutcomeRejected},
+			appserver.NewOutcomeError(
+				appserver.OutcomeRejected,
 				errorcode.New(errorcode.Unavailable, "gatewayapp: host is closing"),
 			)
 	}
 	gw := s.currentGateway()
 	if gw == nil {
-		return controlclient.CommandResult{}, errors.New("gatewayapp: gateway is unavailable")
+		return appserver.CommandResult{}, errors.New("gatewayapp: gateway is unavailable")
 	}
 	defer func() {
 		if commandErr != nil || strings.TrimSpace(result.SessionID) == "" {
@@ -259,20 +259,20 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 		}
 	}()
 	switch req := request.(type) {
-	case controlclient.SessionModeRequest,
-		controlclient.SessionModelRequest,
-		controlclient.SessionControllerModeRequest,
-		controlclient.SessionPresentationModeRequest,
-		controlclient.SessionPresentationConfigRequest:
+	case appserver.SessionModeRequest,
+		appserver.SessionModelRequest,
+		appserver.SessionControllerModeRequest,
+		appserver.SessionPresentationModeRequest,
+		appserver.SessionPresentationConfigRequest:
 		return s.executeSessionConfigurationCommand(ctx, action, req)
-	case controlclient.CreateSessionRequest:
+	case appserver.CreateSessionRequest:
 		created, err := s.Sessions.StartSession(ctx, session.StartSessionRequest{
 			AppName: s.AppName, UserID: strings.TrimSpace(principal.ID),
 			Workspace:          session.WorkspaceRef{Key: strings.TrimSpace(req.WorkspaceKey), CWD: strings.TrimSpace(req.CWD)},
 			PreferredSessionID: strings.TrimSpace(req.PreferredSessionID), Title: strings.TrimSpace(req.Title), Metadata: req.Metadata,
 		})
 		return sessionCommandResult(created), classifyControlBackendError(err)
-	case controlclient.CloseSessionRequest:
+	case appserver.CloseSessionRequest:
 		active, err := s.checkControlCommandCASAllowClosed(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -294,12 +294,12 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		updated, err := controlclient.CloseSession(ctx, s.Sessions, active, "closed by control client")
+		updated, err := appserver.CloseSession(ctx, s.Sessions, active, "closed by control client")
 		if err == nil || session.IsCommitted(err) {
 			gw.CloseSessionApprovals(active.SessionRef, "session_closed")
 		}
 		return sessionCommandResult(updated), classifyControlBackendError(err)
-	case controlclient.PromptRequest:
+	case appserver.PromptRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -318,10 +318,10 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 		}
 		out := sessionCommandResult(result.Session)
 		if result.Handle != nil {
-			out.Target = controlclient.TurnTarget{HandleID: result.Handle.HandleID(), RunID: result.Handle.RunID(), TurnID: result.Handle.TurnID()}
+			out.Target = appserver.TurnTarget{HandleID: result.Handle.HandleID(), RunID: result.Handle.RunID(), TurnID: result.Handle.TurnID()}
 		}
 		return out, classifyControlBackendError(err)
-	case controlclient.SteerRequest:
+	case appserver.SteerRequest:
 		active, err := s.checkControlTurnTarget(ctx, req.WriteBase, req.Target)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -332,14 +332,14 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 			Metadata: map[string]any{"operation_id": req.OperationID},
 		})
 		return sessionCommandResult(active), classifyControlBackendError(err)
-	case controlclient.CompactSessionRequest:
+	case appserver.CompactSessionRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
 		err = s.CompactSession(ctx, active.SessionRef)
 		return sessionCommandResult(active), classifyControlBackendError(err)
-	case controlclient.CancelRequest:
+	case appserver.CancelRequest:
 		active, err := s.checkControlTurnTarget(ctx, req.WriteBase, req.Target)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -349,7 +349,7 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 			HandleID: req.Target.HandleID, RunID: req.Target.RunID, TurnID: req.Target.TurnID,
 		})
 		return sessionCommandResult(active), classifyControlBackendError(err)
-	case controlclient.ResolveApprovalRequest:
+	case appserver.ResolveApprovalRequest:
 		active, err := s.checkControlApprovalTarget(ctx, req.WriteBase, req.Target, req.ApprovalRequestID)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -359,7 +359,7 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 			Approved: req.Approved, Reason: req.Reason, ReviewText: req.ReviewText,
 		}})
 		return sessionCommandResult(active), classifyControlBackendError(err)
-	case controlclient.AttachParticipantRequest:
+	case appserver.AttachParticipantRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -376,7 +376,7 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 			Placement:  participantPlacement,
 		})
 		return sessionCommandResult(updated), classifyControlBackendError(err)
-	case controlclient.StartParticipantRequest:
+	case appserver.StartParticipantRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -415,10 +415,10 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 		out := sessionCommandResult(started.Session)
 		out.ParticipantID = controlParticipantID(started.Session.Participants, req.Label, req.Source)
 		if started.Handle != nil {
-			out.Target = controlclient.TurnTarget{HandleID: started.Handle.HandleID(), RunID: started.Handle.RunID(), TurnID: started.Handle.TurnID()}
+			out.Target = appserver.TurnTarget{HandleID: started.Handle.HandleID(), RunID: started.Handle.RunID(), TurnID: started.Handle.TurnID()}
 		}
 		return out, classifyControlBackendError(err)
-	case controlclient.PromptParticipantRequest:
+	case appserver.PromptParticipantRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -440,17 +440,17 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 		out := sessionCommandResult(result.Session)
 		out.ParticipantID = strings.TrimSpace(req.ParticipantID)
 		if result.Handle != nil {
-			out.Target = controlclient.TurnTarget{HandleID: result.Handle.HandleID(), RunID: result.Handle.RunID(), TurnID: result.Handle.TurnID()}
+			out.Target = appserver.TurnTarget{HandleID: result.Handle.HandleID(), RunID: result.Handle.RunID(), TurnID: result.Handle.TurnID()}
 		}
 		return out, classifyControlBackendError(err)
-	case controlclient.CancelParticipantRequest:
+	case appserver.CancelParticipantRequest:
 		active, err := s.checkControlTurnTarget(ctx, req.WriteBase, req.Target)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
 		turn, ok := gw.ActiveTurn(active.SessionID)
 		if !ok || turn.Kind != kernelimpl.ActiveTurnKindParticipant || strings.TrimSpace(turn.ParticipantID) != strings.TrimSpace(req.ParticipantID) {
-			return sessionCommandResult(active), controlclient.NewOutcomeError(controlclient.OutcomeConflicted, errors.New("controlclient: active turn is not the requested participant turn"))
+			return sessionCommandResult(active), appserver.NewOutcomeError(appserver.OutcomeConflicted, errors.New("controlclient: active turn is not the requested participant turn"))
 		}
 		err = gw.Interrupt(ctx, kernelimpl.InterruptRequest{
 			SessionRef: active.SessionRef, Reason: req.Reason,
@@ -458,14 +458,14 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 			Kind: kernelimpl.ActiveTurnKindParticipant, ParticipantID: req.ParticipantID,
 		})
 		return sessionCommandResult(active), classifyControlBackendError(err)
-	case controlclient.DetachParticipantRequest:
+	case appserver.DetachParticipantRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
 		updated, err := gw.DetachParticipant(ctx, kernelimpl.DetachParticipantRequest{SessionRef: active.SessionRef, ParticipantID: req.ParticipantID, Source: req.Source})
 		return sessionCommandResult(updated), classifyControlBackendError(err)
-	case controlclient.HandoffRequest:
+	case appserver.HandoffRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
@@ -481,7 +481,7 @@ func (s *Stack) executeControlCommand(ctx context.Context, principal controlclie
 		})
 		return sessionCommandResult(updated), classifyControlBackendError(err)
 	default:
-		return controlclient.CommandResult{}, fmt.Errorf("gatewayapp: unsupported control command %q (%T)", action, request)
+		return appserver.CommandResult{}, fmt.Errorf("gatewayapp: unsupported control command %q (%T)", action, request)
 	}
 }
 
@@ -505,79 +505,79 @@ func controlParticipantID(participants []session.ParticipantBinding, label, sour
 
 func controlCommandSessionID(request any) string {
 	switch typed := request.(type) {
-	case controlclient.CloseSessionRequest:
+	case appserver.CloseSessionRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.CompactSessionRequest:
+	case appserver.CompactSessionRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.PromptRequest:
+	case appserver.PromptRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.SteerRequest:
+	case appserver.SteerRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.CancelRequest:
+	case appserver.CancelRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.ResolveApprovalRequest:
+	case appserver.ResolveApprovalRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.AttachParticipantRequest:
+	case appserver.AttachParticipantRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.StartParticipantRequest:
+	case appserver.StartParticipantRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.PromptParticipantRequest:
+	case appserver.PromptParticipantRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.CancelParticipantRequest:
+	case appserver.CancelParticipantRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.DetachParticipantRequest:
+	case appserver.DetachParticipantRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.HandoffRequest:
+	case appserver.HandoffRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.SessionModeRequest:
+	case appserver.SessionModeRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.SessionModelRequest:
+	case appserver.SessionModelRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.SessionControllerModeRequest:
+	case appserver.SessionControllerModeRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.SessionPresentationModeRequest:
+	case appserver.SessionPresentationModeRequest:
 		return strings.TrimSpace(typed.SessionID)
-	case controlclient.SessionPresentationConfigRequest:
+	case appserver.SessionPresentationConfigRequest:
 		return strings.TrimSpace(typed.SessionID)
 	default:
 		return ""
 	}
 }
 
-func controlActionConfiguresSession(action controlclient.Action) bool {
+func controlActionConfiguresSession(action appserver.Action) bool {
 	switch action {
-	case controlclient.ActionSessionApprovalMode,
-		controlclient.ActionSessionModel,
-		controlclient.ActionSessionControllerMode,
-		controlclient.ActionSessionPresentationMode,
-		controlclient.ActionSessionPresentationConfig:
+	case appserver.ActionSessionApprovalMode,
+		appserver.ActionSessionModel,
+		appserver.ActionSessionControllerMode,
+		appserver.ActionSessionPresentationMode,
+		appserver.ActionSessionPresentationConfig:
 		return true
 	default:
 		return false
 	}
 }
 
-func controlActionActivatesSessionRuntime(action controlclient.Action) bool {
+func controlActionActivatesSessionRuntime(action appserver.Action) bool {
 	switch action {
-	case controlclient.ActionPrompt,
-		controlclient.ActionSessionCompact,
-		controlclient.ActionParticipantAttach,
-		controlclient.ActionParticipantStart,
-		controlclient.ActionParticipantPrompt,
-		controlclient.ActionParticipantDetach,
-		controlclient.ActionControllerHandoff:
+	case appserver.ActionPrompt,
+		appserver.ActionSessionCompact,
+		appserver.ActionParticipantAttach,
+		appserver.ActionParticipantStart,
+		appserver.ActionParticipantPrompt,
+		appserver.ActionParticipantDetach,
+		appserver.ActionControllerHandoff:
 		return true
 	default:
 		return false
 	}
 }
 
-func controlActionTargetsActiveRuntime(action controlclient.Action) bool {
+func controlActionTargetsActiveRuntime(action appserver.Action) bool {
 	switch action {
-	case controlclient.ActionSteer,
-		controlclient.ActionCancel,
-		controlclient.ActionApprovalResolve,
-		controlclient.ActionParticipantCancel:
+	case appserver.ActionSteer,
+		appserver.ActionCancel,
+		appserver.ActionApprovalResolve,
+		appserver.ActionParticipantCancel:
 		return true
 	default:
 		return false
@@ -591,7 +591,7 @@ func classifyControlPreDispatchError(err error) error {
 	if errorcode.CodeOf(err) == errorcode.Unknown {
 		err = errorcode.Wrap(errorcode.Internal, "gatewayapp: resolve control Runtime", err)
 	}
-	return controlclient.NewOutcomeError(controlclient.OutcomeRejected, err)
+	return appserver.NewOutcomeError(appserver.OutcomeRejected, err)
 }
 
 func (s *Stack) controlRuntimeContext(fallback context.Context, active session.Session) context.Context {
@@ -628,7 +628,7 @@ func (s *Stack) resolveControlParticipantPlacement(ctx context.Context, profileI
 		var selectionErr *controlplacement.ParticipantSelectionError
 		if errors.As(err, &selectionErr) {
 			coded := errorcode.Wrap(errorcode.InvalidArgument, "gatewayapp: invalid participant placement", err)
-			return sdkplacement.Placement{}, controlclient.NewOutcomeError(controlclient.OutcomeRejected, coded)
+			return sdkplacement.Placement{}, appserver.NewOutcomeError(appserver.OutcomeRejected, coded)
 		}
 		return sdkplacement.Placement{}, err
 	}
@@ -662,18 +662,18 @@ func (s *Stack) resolveControlHandlePlacement(ctx context.Context, handle agentb
 		err = resolveErr
 	}
 	coded := errorcode.Wrap(errorcode.FailedPrecondition, "gatewayapp: participant handle is unavailable", err)
-	return sdkplacement.Placement{}, controlclient.NewOutcomeError(controlclient.OutcomeRejected, coded)
+	return sdkplacement.Placement{}, appserver.NewOutcomeError(appserver.OutcomeRejected, coded)
 }
 
-func (s *Stack) checkControlCommandCAS(ctx context.Context, base controlclient.WriteBase) (session.Session, error) {
+func (s *Stack) checkControlCommandCAS(ctx context.Context, base appserver.WriteBase) (session.Session, error) {
 	return s.checkControlCommandCASMode(ctx, base, false)
 }
 
-func (s *Stack) checkControlCommandCASAllowClosed(ctx context.Context, base controlclient.WriteBase) (session.Session, error) {
+func (s *Stack) checkControlCommandCASAllowClosed(ctx context.Context, base appserver.WriteBase) (session.Session, error) {
 	return s.checkControlCommandCASMode(ctx, base, true)
 }
 
-func (s *Stack) checkControlCommandCASMode(ctx context.Context, base controlclient.WriteBase, allowClosed bool) (session.Session, error) {
+func (s *Stack) checkControlCommandCASMode(ctx context.Context, base appserver.WriteBase, allowClosed bool) (session.Session, error) {
 	active, err := s.Sessions.Session(ctx, session.SessionRef{SessionID: strings.TrimSpace(base.SessionID)})
 	if err != nil {
 		return session.Session{}, err
@@ -685,37 +685,37 @@ func (s *Stack) checkControlCommandCASMode(ctx context.Context, base controlclie
 		return active, fmt.Errorf("controlclient: expected controller epoch %q, actual %q: %w", expected, active.Controller.EpochID, session.ErrRevisionConflict)
 	}
 	if !allowClosed {
-		closed, err := controlclient.IsSessionClosed(ctx, s.Sessions, active.SessionRef)
+		closed, err := appserver.IsSessionClosed(ctx, s.Sessions, active.SessionRef)
 		if err != nil {
 			return active, err
 		}
 		if closed {
-			return active, controlclient.ErrSessionClosed
+			return active, appserver.ErrSessionClosed
 		}
 	}
 	return active, nil
 }
 
-func (s *Stack) checkControlTurnTarget(ctx context.Context, base controlclient.WriteBase, target controlclient.TurnTarget) (session.Session, error) {
+func (s *Stack) checkControlTurnTarget(ctx context.Context, base appserver.WriteBase, target appserver.TurnTarget) (session.Session, error) {
 	active, err := s.checkControlCommandCAS(ctx, base)
 	if err != nil {
 		return active, err
 	}
 	turn, ok := s.currentGateway().ActiveTurn(active.SessionID)
 	if !ok || turn.HandleID != strings.TrimSpace(target.HandleID) || turn.RunID != strings.TrimSpace(target.RunID) || turn.TurnID != strings.TrimSpace(target.TurnID) {
-		return active, controlclient.NewOutcomeError(controlclient.OutcomeConflicted, errors.New("controlclient: live turn target changed"))
+		return active, appserver.NewOutcomeError(appserver.OutcomeConflicted, errors.New("controlclient: live turn target changed"))
 	}
 	return active, nil
 }
 
-func (s *Stack) checkControlApprovalTarget(ctx context.Context, base controlclient.WriteBase, target controlclient.TurnTarget, requestID string) (session.Session, error) {
+func (s *Stack) checkControlApprovalTarget(ctx context.Context, base appserver.WriteBase, target appserver.TurnTarget, requestID string) (session.Session, error) {
 	active, err := s.checkControlCommandCAS(ctx, base)
 	if err != nil {
 		return active, err
 	}
 	turn, ok := s.currentGateway().ApprovalTarget(active.SessionID, eventstream.ApprovalRequestID(strings.TrimSpace(requestID)))
 	if !ok || turn.HandleID != strings.TrimSpace(target.HandleID) || turn.RunID != strings.TrimSpace(target.RunID) || turn.TurnID != strings.TrimSpace(target.TurnID) {
-		return active, controlclient.NewOutcomeError(controlclient.OutcomeConflicted, errors.New("controlclient: approval turn target changed"))
+		return active, appserver.NewOutcomeError(appserver.OutcomeConflicted, errors.New("controlclient: approval turn target changed"))
 	}
 	return active, nil
 }
@@ -732,7 +732,7 @@ func waitControlTurnStopped(ctx context.Context, gw *kernelimpl.Gateway, target 
 			return nil
 		}
 		if current.HandleID != target.HandleID || current.RunID != target.RunID || current.TurnID != target.TurnID {
-			return controlclient.NewOutcomeError(controlclient.OutcomeConflicted, errors.New("controlclient: another turn started while closing the session"))
+			return appserver.NewOutcomeError(appserver.OutcomeConflicted, errors.New("controlclient: another turn started while closing the session"))
 		}
 		select {
 		case <-ctx.Done():
@@ -742,15 +742,15 @@ func waitControlTurnStopped(ctx context.Context, gw *kernelimpl.Gateway, target 
 	}
 }
 
-func sessionCommandResult(active session.Session) controlclient.CommandResult {
-	return controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted, SessionID: active.SessionID, Revision: active.Revision}
+func sessionCommandResult(active session.Session) appserver.CommandResult {
+	return appserver.CommandResult{Outcome: appserver.OutcomeCommitted, SessionID: active.SessionID, Revision: active.Revision}
 }
 
 func classifyControlBackendError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var outcomeErr *controlclient.OutcomeError
+	var outcomeErr *appserver.OutcomeError
 	if errors.As(err, &outcomeErr) {
 		return err
 	}
@@ -759,18 +759,18 @@ func classifyControlBackendError(err error) error {
 		switch gatewayErr.Kind {
 		case kernelimpl.KindValidation:
 			coded := errorcode.Wrap(errorcode.InvalidArgument, gatewayErr.Error(), err)
-			return controlclient.NewOutcomeError(controlclient.OutcomeRejected, coded)
+			return appserver.NewOutcomeError(appserver.OutcomeRejected, coded)
 		case kernelimpl.KindConflict, kernelimpl.KindApproval:
 			coded := errorcode.Wrap(errorcode.Conflict, "gatewayapp: command conflict", err)
-			return controlclient.NewOutcomeError(controlclient.OutcomeConflicted, coded)
+			return appserver.NewOutcomeError(appserver.OutcomeConflicted, coded)
 		case kernelimpl.KindUnavailable:
 			coded := errorcode.Wrap(errorcode.Unavailable, gatewayErr.Error(), err)
-			return controlclient.NewOutcomeError(controlclient.OutcomeRejected, coded)
+			return appserver.NewOutcomeError(appserver.OutcomeRejected, coded)
 		}
 	}
 	if errors.Is(err, session.ErrRevisionConflict) || errors.Is(err, session.ErrLeaseConflict) {
 		coded := errorcode.Wrap(errorcode.Conflict, "gatewayapp: session conflict", err)
-		return controlclient.NewOutcomeError(controlclient.OutcomeConflicted, coded)
+		return appserver.NewOutcomeError(appserver.OutcomeConflicted, coded)
 	}
 	if session.IsCommitted(err) {
 		return nil
@@ -778,5 +778,5 @@ func classifyControlBackendError(err error) error {
 	// Only an explicitly typed rejected error proves that no effect committed.
 	// Ordinary backend failures remain unknown so the operation ledger cannot
 	// expire their idempotency guard and replay a possible external effect.
-	return controlclient.NewOutcomeError(controlclient.OutcomeUnknown, err)
+	return appserver.NewOutcomeError(appserver.OutcomeUnknown, err)
 }

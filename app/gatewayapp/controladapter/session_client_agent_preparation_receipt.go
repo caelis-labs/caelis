@@ -8,14 +8,14 @@ import (
 	"time"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 type pendingACPPreparationObservation struct {
 	operation string
 	stage     pendingACPPreparationStage
 	parentRef string
-	receipt   controlclient.CommandResult
+	receipt   appserver.CommandResult
 }
 
 type pendingACPPreparationStage string
@@ -31,7 +31,7 @@ func (a *SessionClientAdapter) observeCommittedACPPreparation(
 	operation string,
 	stage pendingACPPreparationStage,
 	parentRef string,
-	receipt controlclient.CommandResult,
+	receipt appserver.CommandResult,
 	commandErr error,
 ) (controlagents.ACPPreparation, error) {
 	pending, ok := newPendingACPPreparationObservation(operation, stage, parentRef, receipt)
@@ -49,10 +49,10 @@ func newPendingACPPreparationObservation(
 	operation string,
 	stage pendingACPPreparationStage,
 	parentRef string,
-	receipt controlclient.CommandResult,
+	receipt appserver.CommandResult,
 ) (pendingACPPreparationObservation, bool) {
-	if receipt.Outcome != controlclient.OutcomeCommitted || receipt.Resource == nil ||
-		receipt.Resource.Kind != controlclient.CommandResourceACPPreparation ||
+	if receipt.Outcome != appserver.OutcomeCommitted || receipt.Resource == nil ||
+		receipt.Resource.Kind != appserver.CommandResourceACPPreparation ||
 		strings.TrimSpace(receipt.Resource.Ref) == "" || strings.TrimSpace(receipt.Resource.Digest) == "" {
 		return pendingACPPreparationObservation{}, false
 	}
@@ -77,7 +77,7 @@ func (a *SessionClientAdapter) observePendingACPPreparation(
 		return preparation, err
 	}
 	if validationErr := validatePendingACPPreparation(pending, preparation); validationErr != nil {
-		return controlagents.ACPPreparation{}, &controlclient.CommandReceiptError{
+		return controlagents.ACPPreparation{}, &appserver.CommandReceiptError{
 			Receipt: pending.receipt,
 			Err:     errors.Join(err, validationErr),
 		}
@@ -127,23 +127,23 @@ func (a *SessionClientAdapter) cacheACPPreparation(key string, preparation contr
 func (a *SessionClientAdapter) observeACPPreparationReceipt(
 	ctx context.Context,
 	operation string,
-	receipt controlclient.CommandResult,
+	receipt appserver.CommandResult,
 	commandErr error,
 ) (controlagents.ACPPreparation, error) {
-	if receipt.Outcome != controlclient.OutcomeCommitted {
+	if receipt.Outcome != appserver.OutcomeCommitted {
 		if commandErr == nil {
 			commandErr = fmt.Errorf("%s outcome is %q: %s", operation, receipt.Outcome, strings.TrimSpace(receipt.Detail))
 		}
-		return controlagents.ACPPreparation{}, &controlclient.CommandReceiptError{Receipt: receipt, Err: commandErr}
+		return controlagents.ACPPreparation{}, &appserver.CommandReceiptError{Receipt: receipt, Err: commandErr}
 	}
-	if receipt.Resource == nil || receipt.Resource.Kind != controlclient.CommandResourceACPPreparation ||
+	if receipt.Resource == nil || receipt.Resource.Kind != appserver.CommandResourceACPPreparation ||
 		strings.TrimSpace(receipt.Resource.Ref) == "" || strings.TrimSpace(receipt.Resource.Digest) == "" {
-		return controlagents.ACPPreparation{}, &controlclient.CommandReceiptError{
+		return controlagents.ACPPreparation{}, &appserver.CommandReceiptError{
 			Receipt: receipt,
 			Err:     fmt.Errorf("app/gatewayapp/controladapter: committed %s returned no preparation resource", operation),
 		}
 	}
-	preparation, observationErr := a.agentClient.ACPPreparation(ctx, controlclient.ACPPreparationRequest{Ref: receipt.Resource.Ref})
+	preparation, observationErr := a.agentClient.ACPPreparation(ctx, appserver.ACPPreparationRequest{Ref: receipt.Resource.Ref})
 	if observationErr == nil {
 		switch {
 		case preparation.Ref != receipt.Resource.Ref:
@@ -169,7 +169,7 @@ func (a *SessionClientAdapter) observeACPPreparationReceipt(
 		if observationErr != nil {
 			preparation = controlagents.ACPPreparation{}
 		}
-		return preparation, &controlclient.CommandReceiptError{
+		return preparation, &appserver.CommandReceiptError{
 			Receipt: receipt, Err: errors.Join(warning, observationErr),
 		}
 	}

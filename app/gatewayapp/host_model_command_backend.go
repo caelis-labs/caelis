@@ -9,17 +9,17 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 )
 
-func (s *Stack) executeHostModelConfigurationCommand(ctx context.Context, action controlclient.Action, request any) (controlclient.CommandResult, error) {
+func (s *Stack) executeHostModelConfigurationCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
 	var result hostModelMutationResult
 	var err error
 	switch req := request.(type) {
-	case controlclient.ConnectModelRequest:
-		if action != controlclient.ActionModelConnect {
+	case appserver.ConnectModelRequest:
+		if action != appserver.ActionModelConnect {
 			return configurationCommandResult(0), configurationRejectedError(
 				errorcode.New(errorcode.InvalidArgument, "gatewayapp: connect request/action mismatch"),
 			)
@@ -50,15 +50,15 @@ func (s *Stack) executeHostModelConfigurationCommand(ctx context.Context, action
 		if authenticationStarted && err != nil {
 			result.EffectStarted = true
 		}
-	case controlclient.UseModelRequest:
-		if action != controlclient.ActionModelUse {
+	case appserver.UseModelRequest:
+		if action != appserver.ActionModelUse {
 			return configurationCommandResult(0), configurationRejectedError(
 				errorcode.New(errorcode.InvalidArgument, "gatewayapp: use-model request/action mismatch"),
 			)
 		}
 		result, err = s.useHostModelAtRevision(ctx, req.Model, req.ReasoningEffort, req.ExpectedRevision)
-	case controlclient.DeleteModelRequest:
-		if action != controlclient.ActionModelDelete {
+	case appserver.DeleteModelRequest:
+		if action != appserver.ActionModelDelete {
 			return configurationCommandResult(0), configurationRejectedError(
 				errorcode.New(errorcode.InvalidArgument, "gatewayapp: delete-model request/action mismatch"),
 			)
@@ -121,7 +121,7 @@ func (s *Stack) beginHostModelAuthentication(provider string) (func(), error) {
 	}, nil
 }
 
-func (s *Stack) assembleHostModelConnect(ctx context.Context, cfg controlclient.ConnectConfig, candidate *modelLookup) ([]ModelConfig, bool, error) {
+func (s *Stack) assembleHostModelConnect(ctx context.Context, cfg appserver.ConnectConfig, candidate *modelLookup) ([]ModelConfig, bool, error) {
 	_, ok := modelconfig.LookupProvider(cfg.Provider)
 	if !ok {
 		return nil, false, fmt.Errorf("gatewayapp: provider %q is not supported", strings.TrimSpace(cfg.Provider))
@@ -231,7 +231,7 @@ func retainedProviderEndpointID(provider, endpointID, baseURL string) string {
 	return modelconfig.BuildProviderEndpointID(provider, endpointID, baseURL)
 }
 
-func hostConnectModelSelections(cfg controlclient.ConnectConfig) []modelconfig.ModelSelection {
+func hostConnectModelSelections(cfg appserver.ConnectConfig) []modelconfig.ModelSelection {
 	names := strings.Split(cfg.Model, ",")
 	selections := make([]modelconfig.ModelSelection, 0, len(names))
 	seen := make(map[string]struct{}, len(names))
@@ -267,10 +267,10 @@ func classifyHostModelMutationError(result hostModelMutationResult, err error) e
 	}
 	if !result.EffectStarted && errors.Is(err, configstore.ErrConfigurationRevisionConflict) {
 		coded := errorcode.Wrap(errorcode.Conflict, "gatewayapp: configuration conflict", err)
-		return controlclient.NewOutcomeError(controlclient.OutcomeConflicted, coded)
+		return appserver.NewOutcomeError(appserver.OutcomeConflicted, coded)
 	}
 	if !result.EffectStarted && errorcode.CodeOf(err) == errorcode.Conflict {
-		return controlclient.NewOutcomeError(controlclient.OutcomeConflicted, err)
+		return appserver.NewOutcomeError(appserver.OutcomeConflicted, err)
 	}
 	if !result.EffectStarted {
 		if errorcode.CodeOf(err) == errorcode.Unknown {
@@ -278,8 +278,8 @@ func classifyHostModelMutationError(result hostModelMutationResult, err error) e
 		}
 		return configurationRejectedError(err)
 	}
-	return controlclient.NewOutcomeError(
-		controlclient.OutcomeUnknown,
+	return appserver.NewOutcomeError(
+		appserver.OutcomeUnknown,
 		errorcode.Wrap(errorcode.UnknownOutcome, "gatewayapp: Host model effect outcome cannot be proven", err),
 	)
 }

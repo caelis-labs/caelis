@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 func TestDiscoveryRecordRoundTripAndInstanceOwnedRemoval(t *testing.T) {
@@ -102,12 +102,12 @@ func TestPublishDiscoveryRecordRejectsNonLoopbackOrCredentialEndpoint(t *testing
 func testDiscoveryRecord() DiscoveryRecord {
 	return DiscoveryRecord{
 		SchemaVersion: DiscoverySchemaVersion,
-		ServerID:      controlclient.ServerIdentity, InstanceID: uuid.NewString(),
+		ServerID:      appserver.ServerIdentity, InstanceID: uuid.NewString(),
 		AppName: "caelis", PrincipalID: "local-user", PID: os.Getpid(),
 		Endpoint: "http://127.0.0.1:7777", ProtocolVersion: 1,
-		EnvelopeVersion: controlclient.EnvelopeVersion, APIVersion: controlclient.HTTPAPIVersion,
+		EnvelopeVersion: appserver.EnvelopeVersion, APIVersion: appserver.HTTPAPIVersion,
 		DistributionVersion: "v1.2.3", BuildID: "test-build", BuildKind: "release",
-		Capabilities: controlclient.RequiredManagedHostCapabilities(), Transports: []string{"http"},
+		Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},
 		StartedAt: time.Now().UTC(),
 	}
 }

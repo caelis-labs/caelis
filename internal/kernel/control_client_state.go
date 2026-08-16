@@ -7,31 +7,31 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 // ControlClientRuntimeState returns the live handle and approval FIFO state
 // used by reconnect bootstrap. Durable Session state is read separately so the
 // bootstrap service can enforce one revision/boundary transaction.
-func (g *Gateway) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (controlclient.RuntimeState, error) {
+func (g *Gateway) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (appserver.RuntimeState, error) {
 	if g == nil {
-		return controlclient.RuntimeState{}, errors.New("gateway: gateway is unavailable")
+		return appserver.RuntimeState{}, errors.New("gateway: gateway is unavailable")
 	}
 	ref = session.NormalizeSessionRef(ref)
 	if strings.TrimSpace(ref.SessionID) == "" {
-		return controlclient.RuntimeState{}, session.ErrInvalidSession
+		return appserver.RuntimeState{}, session.ErrInvalidSession
 	}
 	runState, err := g.runtime.RunState(ctx, ref)
 	if err != nil && !errors.Is(err, session.ErrSessionNotFound) {
-		return controlclient.RuntimeState{}, err
+		return appserver.RuntimeState{}, err
 	}
 	g.mu.Lock()
 	handle := g.active[ref.SessionID]
 	coordinator := g.approvals[ref.SessionID]
 	g.mu.Unlock()
 	if handle == nil {
-		out := controlclient.RuntimeState{Run: controlclient.RunState{
+		out := appserver.RuntimeState{Run: appserver.RunState{
 			Status: strings.TrimSpace(string(runState.Status)), WaitingApproval: runState.WaitingApproval,
 			RunID: strings.TrimSpace(runState.ActiveRunID),
 		}}
@@ -41,12 +41,12 @@ func (g *Gateway) ControlClientRuntimeState(ctx context.Context, ref session.Ses
 	return handle.controlClientRuntimeState(strings.TrimSpace(string(runState.Status)), runState.WaitingApproval), nil
 }
 
-func (h *turnHandle) controlClientRuntimeState(status string, waitingApproval bool) controlclient.RuntimeState {
+func (h *turnHandle) controlClientRuntimeState(status string, waitingApproval bool) appserver.RuntimeState {
 	if h == nil {
-		return controlclient.RuntimeState{}
+		return appserver.RuntimeState{}
 	}
 	h.mu.Lock()
-	out := controlclient.RuntimeState{Run: controlclient.RunState{
+	out := appserver.RuntimeState{Run: appserver.RunState{
 		Status: status, WaitingApproval: waitingApproval,
 		Active: !h.finished && !h.closed, Kind: string(h.activeKind),
 		HandleID: h.handleID, RunID: h.runID, TurnID: h.turnID, StartedAt: h.createdAt,
@@ -59,7 +59,7 @@ func (h *turnHandle) controlClientRuntimeState(status string, waitingApproval bo
 	return out
 }
 
-func applyControlApprovalState(out *controlclient.RuntimeState, coordinator *approvalCoordinator, ref session.SessionRef, fallbackTurnID string) {
+func applyControlApprovalState(out *appserver.RuntimeState, coordinator *approvalCoordinator, ref session.SessionRef, fallbackTurnID string) {
 	if out == nil {
 		return
 	}
@@ -69,7 +69,7 @@ func applyControlApprovalState(out *controlclient.RuntimeState, coordinator *app
 	if active != nil {
 		payload := approval.PayloadFromRuntimeRequest(*active.request)
 		origin := canonicalOriginFromApproval(active.request, ref, fallbackTurnID)
-		item := &controlclient.ActiveApproval{
+		item := &appserver.ActiveApproval{
 			RequestID: active.id, Scope: eventstream.ScopeMain, ScopeID: ref.SessionID,
 			Permission: approval.ProtocolApprovalFromPayload(payload),
 		}

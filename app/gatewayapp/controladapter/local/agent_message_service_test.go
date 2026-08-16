@@ -7,7 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 )
 
@@ -20,7 +20,7 @@ func TestTrustedAgentMessageSourceUsesExactParticipantBinding(t *testing.T) {
 	}
 	resolved, err := (&AgentMessageService{}).trustedAgentMessageSource(
 		context.Background(),
-		controlclient.Principal{ID: "managed-child-1"},
+		appserver.Principal{ID: "managed-child-1"},
 		session.Session{Participants: []session.ParticipantBinding{binding}},
 	)
 	if err != nil {
@@ -43,7 +43,7 @@ func TestTrustedAgentMessageSourceUsesExactControllerBinding(t *testing.T) {
 	}
 	resolved, err := (&AgentMessageService{}).trustedAgentMessageSource(
 		context.Background(),
-		controlclient.Principal{ID: "controller-1"},
+		appserver.Principal{ID: "controller-1"},
 		session.Session{Controller: binding},
 	)
 	if err != nil {
@@ -58,7 +58,7 @@ func TestTrustedAgentMessageSourceFailsClosedForGenericPrincipal(t *testing.T) {
 	t.Parallel()
 
 	if _, err := (&AgentMessageService{}).trustedAgentMessageSource(
-		context.Background(), controlclient.Principal{ID: "guardian"}, session.Session{},
+		context.Background(), appserver.Principal{ID: "guardian"}, session.Session{},
 	); err == nil {
 		t.Fatal("trustedAgentMessageSource() error = nil, want unbound principal rejection")
 	}
@@ -68,7 +68,7 @@ func TestTrustedAgentMessageSourceFailsClosedWithoutPrincipal(t *testing.T) {
 	t.Parallel()
 
 	if _, err := (&AgentMessageService{}).trustedAgentMessageSource(
-		context.Background(), controlclient.Principal{}, session.Session{},
+		context.Background(), appserver.Principal{}, session.Session{},
 	); err == nil {
 		t.Fatal("trustedAgentMessageSource() error = nil, want missing principal rejection")
 	}
@@ -153,12 +153,12 @@ func testAgentMessageTargetCloseRace(t *testing.T, host *gatewayapp.Stack, servi
 		if err != nil {
 			return gatewayapp.AgentMessageDelivery{}, err
 		}
-		if _, err := controlclient.CloseSession(ctx, host.Sessions, current, "concurrent close"); err != nil {
+		if _, err := appserver.CloseSession(ctx, host.Sessions, current, "concurrent close"); err != nil {
 			return gatewayapp.AgentMessageDelivery{}, err
 		}
 		return host.DeliverAgentMessage(ctx, request)
 	}
-	assertAgentMessageRaceRejected(t, host, service, target, controlclient.Principal{ID: "controller-1"}, "close-race")
+	assertAgentMessageRaceRejected(t, host, service, target, appserver.Principal{ID: "controller-1"}, "close-race")
 }
 
 func testAgentMessageTargetHandoffRace(t *testing.T, host *gatewayapp.Stack, service *AgentMessageService, target session.Session) {
@@ -175,7 +175,7 @@ func testAgentMessageTargetHandoffRace(t *testing.T, host *gatewayapp.Stack, ser
 		}
 		return host.DeliverAgentMessage(ctx, request)
 	}
-	assertAgentMessageRaceRejected(t, host, service, target, controlclient.Principal{ID: "controller-1"}, "handoff-race")
+	assertAgentMessageRaceRejected(t, host, service, target, appserver.Principal{ID: "controller-1"}, "handoff-race")
 }
 
 func testAgentMessageTargetDetachRace(t *testing.T, host *gatewayapp.Stack, service *AgentMessageService, target session.Session) {
@@ -198,7 +198,7 @@ func testAgentMessageTargetDetachRace(t *testing.T, host *gatewayapp.Stack, serv
 		}
 		return host.DeliverAgentMessage(ctx, request)
 	}
-	assertAgentMessageRaceRejected(t, host, service, target, controlclient.Principal{ID: "participant-1"}, "detach-race")
+	assertAgentMessageRaceRejected(t, host, service, target, appserver.Principal{ID: "participant-1"}, "detach-race")
 }
 
 func testAgentMessageManagedParentDetachRace(t *testing.T, host *gatewayapp.Stack, service *AgentMessageService, target session.Session) {
@@ -243,7 +243,7 @@ func testAgentMessageManagedParentDetachRace(t *testing.T, host *gatewayapp.Stac
 		}
 		return host.DeliverAgentMessage(ctx, request)
 	}
-	assertAgentMessageRaceRejected(t, host, service, target, controlclient.Principal{ID: "owner"}, "managed-parent-detach-race")
+	assertAgentMessageRaceRejected(t, host, service, target, appserver.Principal{ID: "owner"}, "managed-parent-detach-race")
 }
 
 func bindAgentMessageRaceController(t *testing.T, host *gatewayapp.Stack, target session.Session, controllerID string) session.Session {
@@ -265,11 +265,11 @@ func assertAgentMessageRaceRejected(
 	host *gatewayapp.Stack,
 	service *AgentMessageService,
 	target session.Session,
-	principal controlclient.Principal,
+	principal appserver.Principal,
 	messageID string,
 ) {
 	t.Helper()
-	_, err := service.DeliverAgentMessage(context.Background(), principal, controlclient.AgentMessageRequest{
+	_, err := service.DeliverAgentMessage(context.Background(), principal, appserver.AgentMessageRequest{
 		SessionID: target.SessionID, MessageID: messageID, Text: "must not append",
 	})
 	if err == nil {

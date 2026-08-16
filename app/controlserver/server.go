@@ -12,14 +12,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 // Dependencies contains only the Control contracts exposed over HTTP.
 // Product assembly remains outside the listener package.
 type Dependencies struct {
-	Services    controlclient.AppServerServices
+	Services    appserver.AppServerServices
 	TaskStreams taskstream.Service
 	Lifecycle   interface {
 		Quiesce(context.Context) error
@@ -30,14 +30,14 @@ type Dependencies struct {
 type Config struct {
 	Address       string
 	Authenticator Authenticator
-	Principal     controlclient.Principal
+	Principal     appserver.Principal
 	TokenFile     string
 	AllowedHosts  []string
 	TLSCertFile   string
 	TLSKeyFile    string
 	Heartbeat     time.Duration
 	DrainTimeout  time.Duration
-	ServerInfo    controlclient.ServerInfo
+	ServerInfo    appserver.ServerInfo
 	OnListening   func(ListenerInfo) error
 	Ready         func() bool
 	Shutdown      func()
@@ -49,7 +49,7 @@ type Config struct {
 type ListenerInfo struct {
 	Endpoint   string
 	Address    string
-	ServerInfo controlclient.ServerInfo
+	ServerInfo appserver.ServerInfo
 }
 
 func Handler(deps Dependencies, config Config) (http.Handler, error) {

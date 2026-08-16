@@ -1,21 +1,21 @@
 package acpagentbridge
 
 import (
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
 type GatewayAgentConfig struct {
-	SessionClient       controlclient.SessionClient
-	ConfigurationClient controlclient.ConfigurationClient
+	SessionClient       appserver.SessionClient
+	ConfigurationClient appserver.ConfigurationClient
 	// AgentMessageSessionClient is the internal Session observer allowed to
 	// follow product-owned child Sessions after trusted Agent-message delivery.
-	AgentMessageSessionClient controlclient.SessionClient
-	AgentMessageClient        controlclient.AgentMessageClient
-	PresentationClient        controlclient.PresentationClient
-	TerminalClient            controlclient.TerminalClient
+	AgentMessageSessionClient appserver.SessionClient
+	AgentMessageClient        appserver.AgentMessageClient
+	PresentationClient        appserver.PresentationClient
+	TerminalClient            appserver.TerminalClient
 	AppName                   string
 	UserID                    string
 	WorkspaceKey              string
@@ -33,7 +33,7 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 	if agentMessageSessions == nil {
 		agentMessageSessions = cfg.SessionClient
 	}
-	agentMessageTurns, err := controlclient.NewAgentMessageTurnClient(agentMessageSessions, cfg.AgentMessageClient)
+	agentMessageTurns, err := appserver.NewAgentMessageTurnClient(agentMessageSessions, cfg.AgentMessageClient)
 	if err != nil {
 		return nil, err
 	}

@@ -1,13 +1,13 @@
 package acpagentbridge
 
 import (
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
-func acpPresentationSnapshot(snapshot controlclient.PresentationSnapshot) (*acp.SessionModeState, []acp.SessionConfigOption, *acp.SessionModelState, []acp.AvailableCommand) {
+func acpPresentationSnapshot(snapshot appserver.PresentationSnapshot) (*acp.SessionModeState, []acp.SessionConfigOption, *acp.SessionModelState, []acp.AvailableCommand) {
 	var modes *acp.SessionModeState
-	if snapshot.Modes != nil && snapshot.Modes.Target != controlclient.PresentationModeTargetApproval {
+	if snapshot.Modes != nil && snapshot.Modes.Target != appserver.PresentationModeTargetApproval {
 		modes = &acp.SessionModeState{CurrentModeID: snapshot.Modes.CurrentModeID}
 		for _, mode := range snapshot.Modes.AvailableModes {
 			modes.AvailableModes = append(modes.AvailableModes, acp.SessionMode{ID: mode.ID, Name: mode.Name, Description: mode.Description})
@@ -32,7 +32,7 @@ func acpPresentationSnapshot(snapshot controlclient.PresentationSnapshot) (*acp.
 	return modes, configs, models, commands
 }
 
-func acpPresentationConfigOptions(options []controlclient.PresentationConfigOption) []acp.SessionConfigOption {
+func acpPresentationConfigOptions(options []appserver.PresentationConfigOption) []acp.SessionConfigOption {
 	result := make([]acp.SessionConfigOption, 0, len(options))
 	for _, option := range options {
 		mapped := acp.SessionConfigOption{

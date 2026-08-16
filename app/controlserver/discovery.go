@@ -16,7 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/productpaths"
 )
 
@@ -178,7 +178,7 @@ func normalizeDiscoveryRecord(record DiscoveryRecord) (DiscoveryRecord, error) {
 	if record.SchemaVersion != DiscoverySchemaVersion {
 		return DiscoveryRecord{}, fmt.Errorf("controlserver: unsupported discovery schema %q", record.SchemaVersion)
 	}
-	if record.ServerID != controlclient.ServerIdentity {
+	if record.ServerID != appserver.ServerIdentity {
 		return DiscoveryRecord{}, fmt.Errorf("controlserver: unsupported discovery server %q", record.ServerID)
 	}
 	if _, err := uuid.Parse(record.InstanceID); err != nil {

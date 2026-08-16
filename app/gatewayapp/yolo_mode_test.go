@@ -7,7 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
@@ -80,25 +80,25 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 	}
 	current := mustCurrentSession(t, stack, active.SessionID)
 	revision := current.Revision
-	base := controlclient.WriteBase{
+	base := appserver.WriteBase{
 		SessionID:               current.SessionID,
 		ExpectedRevision:        &revision,
 		ExpectedControllerEpoch: current.Controller.EpochID,
 	}
-	for name, change := range map[string]func() (controlclient.CommandResult, error){
-		"approval": func() (controlclient.CommandResult, error) {
+	for name, change := range map[string]func() (appserver.CommandResult, error){
+		"approval": func() (appserver.CommandResult, error) {
 			request := base
 			request.OperationID = "yolo-approval-mode"
-			return stack.ConfigurationCommands().ConfigureSessionMode(context.Background(), controlclient.Principal{ID: stack.UserID}, controlclient.SessionModeRequest{WriteBase: request, Mode: "manual"})
+			return stack.ConfigurationCommands().ConfigureSessionMode(context.Background(), appserver.Principal{ID: stack.UserID}, appserver.SessionModeRequest{WriteBase: request, Mode: "manual"})
 		},
-		"presentation": func() (controlclient.CommandResult, error) {
+		"presentation": func() (appserver.CommandResult, error) {
 			request := base
 			request.OperationID = "yolo-presentation-mode"
-			return stack.ConfigurationCommands().ConfigureSessionPresentationMode(context.Background(), controlclient.Principal{ID: stack.UserID}, controlclient.SessionPresentationModeRequest{WriteBase: request, Mode: "manual"})
+			return stack.ConfigurationCommands().ConfigureSessionPresentationMode(context.Background(), appserver.Principal{ID: stack.UserID}, appserver.SessionPresentationModeRequest{WriteBase: request, Mode: "manual"})
 		},
 	} {
 		result, err := change()
-		if err == nil || result.Outcome != controlclient.OutcomeRejected {
+		if err == nil || result.Outcome != appserver.OutcomeRejected {
 			t.Fatalf("%s session mode = %#v, %v; want process posture rejection", name, result, err)
 		}
 	}

@@ -17,8 +17,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
@@ -43,28 +43,28 @@ func TestModelCatalogMutationsRefreshActiveSessionPickerWithoutReplacingRuntime(
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, _, err := appServer.Bind(controlclient.Principal{ID: "local-user"})
+	clients, _, err := appServer.Bind(appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialStatus, err := clients.Status.SessionStatus(ctx, controlclient.StatusRequest{Surface: "test"})
+	initialStatus, err := clients.Status.SessionStatus(ctx, appserver.StatusRequest{Surface: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	initial, err := clients.Configuration.ConnectModel(ctx, controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "connect-initial-model", ExpectedRevision: &initialStatus.Configuration.Revision},
-		Config:    controlclient.ConnectConfig{Provider: "ollama", Model: "initial", BaseURL: "http://127.0.0.1:11434"},
+	initial, err := clients.Configuration.ConnectModel(ctx, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "connect-initial-model", ExpectedRevision: &initialStatus.Configuration.Revision},
+		Config:    appserver.ConnectConfig{Provider: "ollama", Model: "initial", BaseURL: "http://127.0.0.1:11434"},
 	})
-	if err != nil || initial.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || initial.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel(initial) = %#v, %v", initial, err)
 	}
 	sessionID := createAppServerTestSession(t, clients, "create-model-refresh", "model-refresh", workspace)
-	observation, err := clients.Sessions.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: sessionID})
+	observation, err := clients.Sessions.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = observation.Subscription.Close() })
-	lease, err := host.AcquireControlRuntime(ctx, controlclient.Principal{ID: "local-user"}, controlclient.ActionSessionInspect, sessionID, true)
+	lease, err := host.AcquireControlRuntime(ctx, appserver.Principal{ID: "local-user"}, appserver.ActionSessionInspect, sessionID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,13 +72,13 @@ func TestModelCatalogMutationsRefreshActiveSessionPickerWithoutReplacingRuntime(
 		t.Fatal(err)
 	}
 
-	connected, err := clients.Configuration.ConnectModel(ctx, controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "connect-late-model", ExpectedRevision: &initial.Revision},
-		Config: controlclient.ConnectConfig{
+	connected, err := clients.Configuration.ConnectModel(ctx, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "connect-late-model", ExpectedRevision: &initial.Revision},
+		Config: appserver.ConnectConfig{
 			Provider: "ollama", Model: "late", BaseURL: "http://127.0.0.1:11434",
 		},
 	})
-	if err != nil || connected.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
 	}
 	assertSlashArgCandidate(t, clients.Completion, sessionID, "model use", "ollama/late", true)
@@ -86,12 +86,12 @@ func TestModelCatalogMutationsRefreshActiveSessionPickerWithoutReplacingRuntime(
 	remote := bindAppServerHTTPTestClient(t, appServer, "local-user")
 	assertSlashArgCandidate(t, remote, sessionID, "model use", "ollama/late", true)
 
-	active, err := clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
+	active, err := clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected, err := clients.Configuration.UseSessionModel(ctx, controlclient.SessionModelRequest{
-		WriteBase: controlclient.WriteBase{
+	selected, err := clients.Configuration.UseSessionModel(ctx, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "select-late-model",
 			SessionID:               sessionID,
 			ExpectedRevision:        &active.Revision,
@@ -99,21 +99,21 @@ func TestModelCatalogMutationsRefreshActiveSessionPickerWithoutReplacingRuntime(
 		},
 		Model: "ollama/late",
 	})
-	if err != nil || selected.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel() = %#v, %v", selected, err)
 	}
-	deleted, err := clients.Configuration.DeleteModel(ctx, controlclient.DeleteModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "delete-late-model", ExpectedRevision: &connected.Revision},
+	deleted, err := clients.Configuration.DeleteModel(ctx, appserver.DeleteModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "delete-late-model", ExpectedRevision: &connected.Revision},
 		Model:     "ollama/late",
 	})
-	if err != nil || deleted.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || deleted.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DeleteModel() = %#v, %v", deleted, err)
 	}
 	assertSlashArgCandidate(t, clients.Completion, sessionID, "model use", "ollama/late", false)
 	assertSlashArgCandidate(t, clients.Completion, sessionID, "model del", "ollama/late", false)
 	assertSlashArgCandidate(t, remote, sessionID, "model del", "ollama/late", false)
 
-	afterDelete, err := clients.Status.SessionStatus(ctx, controlclient.StatusRequest{SessionID: sessionID, Surface: "test"})
+	afterDelete, err := clients.Status.SessionStatus(ctx, appserver.StatusRequest{SessionID: sessionID, Surface: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,37 +140,37 @@ func TestHostCapabilitiesDoNotCreateSession(t *testing.T) {
 	t.Cleanup(func() { _ = host.Close() })
 	clients := bindAppServerTestClients(t, host)
 
-	if _, err := clients.Status.SessionStatus(ctx, controlclient.StatusRequest{Surface: "test"}); err != nil {
+	if _, err := clients.Status.SessionStatus(ctx, appserver.StatusRequest{Surface: "test"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := clients.Completion.CompleteSkill(ctx, controlclient.CompletionRequest{Surface: "test", Limit: 8}); err != nil {
+	if _, err := clients.Completion.CompleteSkill(ctx, appserver.CompletionRequest{Surface: "test", Limit: 8}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := clients.Agents.ListAgents(ctx, controlclient.AgentRequest{Surface: "test", Limit: 8}); err != nil {
+	if _, err := clients.Agents.ListAgents(ctx, appserver.AgentRequest{Surface: "test", Limit: 8}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := clients.Agents.AgentBindingStatus(ctx, controlclient.AgentRequest{Surface: "test"}); err != nil {
+	if _, err := clients.Agents.AgentBindingStatus(ctx, appserver.AgentRequest{Surface: "test"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := clients.Plugins.ListPlugins(ctx, controlclient.PluginRequest{Surface: "test"}); err != nil {
+	if _, err := clients.Plugins.ListPlugins(ctx, appserver.PluginRequest{Surface: "test"}); err != nil {
 		t.Fatal(err)
 	}
-	status, err := clients.Status.SessionStatus(ctx, controlclient.StatusRequest{Surface: "test", IncludeDiagnostics: true})
+	status, err := clients.Status.SessionStatus(ctx, appserver.StatusRequest{Surface: "test", IncludeDiagnostics: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	revision := status.Configuration.Revision
-	if _, err := clients.Configuration.RefreshSandbox(ctx, controlclient.SandboxRequest{WriteBase: controlclient.WriteBase{
+	if _, err := clients.Configuration.RefreshSandbox(ctx, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "product-contract-refresh", ExpectedRevision: &revision,
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := clients.Configuration.ResetSandbox(ctx, controlclient.SandboxRequest{WriteBase: controlclient.WriteBase{
+	if _, err := clients.Configuration.ResetSandbox(ctx, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "product-contract-reset", ExpectedRevision: &revision,
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	listed, err := clients.Sessions.ListSessions(ctx, controlclient.ListSessionsRequest{WorkspaceKey: "workspace", Limit: 10})
+	listed, err := clients.Sessions.ListSessions(ctx, appserver.ListSessionsRequest{WorkspaceKey: "workspace", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,13 +197,13 @@ func TestAgentHandoffReplaysOnePrincipalBoundCommandReceipt(t *testing.T) {
 	t.Cleanup(func() { _ = host.Close() })
 	clients := bindAppServerTestClients(t, host)
 	sessionID := createAppServerTestSession(t, clients, "create-handoff", "handoff", workspace)
-	state, err := clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
+	state, err := clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	revision := state.Revision
-	request := controlclient.HandoffAgentRequest{
-		WriteBase: controlclient.WriteBase{
+	request := appserver.HandoffAgentRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "principal-handoff-1",
 			SessionID:               sessionID,
 			ExpectedRevision:        &revision,
@@ -212,14 +212,14 @@ func TestAgentHandoffReplaysOnePrincipalBoundCommandReceipt(t *testing.T) {
 		Target: "local",
 	}
 	first, err := clients.Agents.HandoffAgent(ctx, request)
-	if err != nil || first.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || first.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("first HandoffAgent() = %#v, %v", first, err)
 	}
 	second, err := clients.Agents.HandoffAgent(ctx, request)
 	if err != nil || second != first {
 		t.Fatalf("replayed HandoffAgent() = %#v, %v; want %#v", second, err, first)
 	}
-	observed, err := clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
+	observed, err := clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestAgentHandoffReplaysOnePrincipalBoundCommandReceipt(t *testing.T) {
 	stale.OperationID = "principal-handoff-stale"
 	stale.Target = "orbit"
 	conflicted, err := clients.Agents.HandoffAgent(ctx, stale)
-	if conflicted.Outcome != controlclient.OutcomeConflicted || err == nil {
+	if conflicted.Outcome != appserver.OutcomeConflicted || err == nil {
 		t.Fatalf("stale HandoffAgent() = %#v, %v", conflicted, err)
 	}
 	currentRevision := observed.Revision
@@ -240,7 +240,7 @@ func TestAgentHandoffReplaysOnePrincipalBoundCommandReceipt(t *testing.T) {
 	wrongEpoch.ExpectedControllerEpoch = "wrong-epoch"
 	wrongEpoch.Target = "orbit"
 	conflicted, err = clients.Agents.HandoffAgent(ctx, wrongEpoch)
-	if conflicted.Outcome != controlclient.OutcomeConflicted || err == nil {
+	if conflicted.Outcome != appserver.OutcomeConflicted || err == nil {
 		t.Fatalf("epoch-mismatched HandoffAgent() = %#v, %v", conflicted, err)
 	}
 }
@@ -297,7 +297,7 @@ func TestAgentMessageUsesManagedChildParentBindingAndRejectsForgedSource(t *test
 		t.Fatal(err)
 	}
 
-	request := controlclient.AgentMessageRequest{
+	request := appserver.AgentMessageRequest{
 		SessionID: child.SessionID, MessageID: "managed-message-1", Text: "continue", DisplayFrom: "@forged",
 	}
 	first, err := clients.AgentMessages.DeliverAgentMessage(ctx, request)
@@ -337,12 +337,12 @@ func TestAgentMessageUsesManagedChildParentBindingAndRejectsForgedSource(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := clients.AgentMessages.DeliverAgentMessage(ctx, controlclient.AgentMessageRequest{
+	if _, err := clients.AgentMessages.DeliverAgentMessage(ctx, appserver.AgentMessageRequest{
 		SessionID: forgedChild.SessionID, MessageID: "forged-message", Text: "must not append", DisplayFrom: "@main",
 	}); err == nil {
 		t.Fatal("forged managed-child Task relation was accepted")
 	}
-	if _, err := clients.AgentMessages.DeliverAgentMessage(ctx, controlclient.AgentMessageRequest{
+	if _, err := clients.AgentMessages.DeliverAgentMessage(ctx, appserver.AgentMessageRequest{
 		SessionID: parentID, MessageID: "unbound-message", Text: "must not append", DisplayFrom: "@main",
 	}); err == nil {
 		t.Fatal("unbound ordinary Session source was accepted")
@@ -369,7 +369,7 @@ func TestAgentMessageExactBindingsAuthorizeEmbeddedAndHTTPClients(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner, _, err := appServer.Bind(controlclient.Principal{ID: "owner"})
+	owner, _, err := appServer.Bind(appserver.Principal{ID: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,27 +398,27 @@ func TestAgentMessageExactBindingsAuthorizeEmbeddedAndHTTPClients(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	controllerClients, _, err := appServer.Bind(controlclient.Principal{ID: "controller-1"})
+	controllerClients, _, err := appServer.Bind(appserver.Principal{ID: "controller-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result, err := controllerClients.AgentMessages.DeliverAgentMessage(ctx, controlclient.AgentMessageRequest{
+	if result, err := controllerClients.AgentMessages.DeliverAgentMessage(ctx, appserver.AgentMessageRequest{
 		SessionID: sessionID, MessageID: "controller-message", Text: "from controller",
 	}); err != nil || !result.Accepted {
 		t.Fatalf("embedded controller message = %#v, %v", result, err)
 	}
-	participantClients, _, err := appServer.Bind(controlclient.Principal{ID: "participant-1"})
+	participantClients, _, err := appServer.Bind(appserver.Principal{ID: "participant-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result, err := participantClients.AgentMessages.DeliverAgentMessage(ctx, controlclient.AgentMessageRequest{
+	if result, err := participantClients.AgentMessages.DeliverAgentMessage(ctx, appserver.AgentMessageRequest{
 		SessionID: sessionID, MessageID: "participant-message", Text: "from participant",
 	}); err != nil || !result.Accepted {
 		t.Fatalf("embedded participant message = %#v, %v", result, err)
 	}
 
 	const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	authenticator, err := controlserver.BearerTokenAuthenticator(token, controlclient.Principal{ID: "participant-1"})
+	authenticator, err := controlserver.BearerTokenAuthenticator(token, appserver.Principal{ID: "participant-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,12 +431,12 @@ func TestAgentMessageExactBindingsAuthorizeEmbeddedAndHTTPClients(t *testing.T) 
 	remote, err := httpclient.New(httpclient.Config{
 		BaseURL: "http://127.0.0.1", BearerToken: token,
 		HTTPClient:    &http.Client{Transport: appServerHandlerRoundTripper{handler: handler}},
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result, err := remote.DeliverAgentMessage(ctx, controlclient.AgentMessageRequest{
+	if result, err := remote.DeliverAgentMessage(ctx, appserver.AgentMessageRequest{
 		SessionID: sessionID, MessageID: "http-participant-message", Text: "from HTTP participant",
 	}); err != nil || !result.Accepted {
 		t.Fatalf("HTTP participant message = %#v, %v", result, err)
@@ -505,7 +505,7 @@ func TestHostResumeCompletionUsesPrincipalVisibleSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidates, err := clients.Completion.CompleteResume(ctx, controlclient.CompletionRequest{Surface: "test", Limit: 10})
+	candidates, err := clients.Completion.CompleteResume(ctx, appserver.CompletionRequest{Surface: "test", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,12 +532,12 @@ func TestClosedSessionRejectsFocusedMutations(t *testing.T) {
 	t.Cleanup(func() { _ = host.Close() })
 	clients := bindAppServerTestClients(t, host)
 	sessionID := createAppServerTestSession(t, clients, "create-closed-mutations", "closed-mutations", workspace)
-	beforeClose, err := clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
+	beforeClose, err := clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	closed, err := clients.Sessions.CloseSession(ctx, controlclient.CloseSessionRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "close-before-mutations", SessionID: sessionID},
+	closed, err := clients.Sessions.CloseSession(ctx, appserver.CloseSessionRequest{
+		WriteBase: appserver.WriteBase{OperationID: "close-before-mutations", SessionID: sessionID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -551,8 +551,8 @@ func TestClosedSessionRejectsFocusedMutations(t *testing.T) {
 		{
 			name: "configuration",
 			run: func() error {
-				_, err := clients.Configuration.ConfigureSessionMode(ctx, controlclient.SessionModeRequest{
-					WriteBase: controlclient.WriteBase{OperationID: "closed-mode", SessionID: sessionID, ExpectedRevision: &closedRevision, ExpectedControllerEpoch: beforeClose.Controller.EpochID},
+				_, err := clients.Configuration.ConfigureSessionMode(ctx, appserver.SessionModeRequest{
+					WriteBase: appserver.WriteBase{OperationID: "closed-mode", SessionID: sessionID, ExpectedRevision: &closedRevision, ExpectedControllerEpoch: beforeClose.Controller.EpochID},
 					Mode:      "manual",
 				})
 				return err
@@ -561,8 +561,8 @@ func TestClosedSessionRejectsFocusedMutations(t *testing.T) {
 		{
 			name: "presentation",
 			run: func() error {
-				_, err := clients.Configuration.ConfigureSessionPresentationMode(ctx, controlclient.SessionPresentationModeRequest{
-					WriteBase: controlclient.WriteBase{OperationID: "closed-presentation-mode", SessionID: sessionID, ExpectedRevision: &closedRevision},
+				_, err := clients.Configuration.ConfigureSessionPresentationMode(ctx, appserver.SessionPresentationModeRequest{
+					WriteBase: appserver.WriteBase{OperationID: "closed-presentation-mode", SessionID: sessionID, ExpectedRevision: &closedRevision},
 					Mode:      "manual",
 				})
 				return err
@@ -571,7 +571,7 @@ func TestClosedSessionRejectsFocusedMutations(t *testing.T) {
 		{
 			name: "Agent message",
 			run: func() error {
-				_, err := clients.AgentMessages.DeliverAgentMessage(ctx, controlclient.AgentMessageRequest{
+				_, err := clients.AgentMessages.DeliverAgentMessage(ctx, appserver.AgentMessageRequest{
 					SessionID: sessionID, MessageID: "closed-message", Text: "must not append",
 				})
 				return err
@@ -580,12 +580,12 @@ func TestClosedSessionRejectsFocusedMutations(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if err := test.run(); !errors.Is(err, controlclient.ErrSessionClosed) {
+			if err := test.run(); !errors.Is(err, appserver.ErrSessionClosed) {
 				t.Fatalf("closed mutation error = %v, want ErrSessionClosed", err)
 			}
 		})
 	}
-	state, err := clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
+	state, err := clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -626,7 +626,7 @@ func TestBoundAppServerProjectsACPControllerAndFailsClosedWithoutRemoteModes(t *
 		t.Fatal(err)
 	}
 
-	statusBefore, err := clients.Status.SessionStatus(ctx, controlclient.StatusRequest{
+	statusBefore, err := clients.Status.SessionStatus(ctx, appserver.StatusRequest{
 		SessionID: sessionID, Surface: "test", IncludeDiagnostics: true,
 	})
 	if err != nil {
@@ -636,7 +636,7 @@ func TestBoundAppServerProjectsACPControllerAndFailsClosedWithoutRemoteModes(t *
 		statusBefore.ModelStatus.Name != "codex" || statusBefore.ModelStatus.Display != "codex" {
 		t.Fatalf("ACP status model = %#v, want coherent acp/codex identity", statusBefore.ModelStatus)
 	}
-	agentStatus, err := clients.Agents.AgentStatus(ctx, controlclient.AgentRequest{SessionID: sessionID, Surface: "test"})
+	agentStatus, err := clients.Agents.AgentStatus(ctx, appserver.AgentRequest{SessionID: sessionID, Surface: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -644,13 +644,13 @@ func TestBoundAppServerProjectsACPControllerAndFailsClosedWithoutRemoteModes(t *
 		t.Fatalf("Agent status controller = %#v, want durable ACP controller", agentStatus)
 	}
 
-	state, err := clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
+	state, err := clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	revision := state.Revision
-	modeResult, err := clients.Configuration.ConfigureSessionMode(ctx, controlclient.SessionModeRequest{
-		WriteBase: controlclient.WriteBase{
+	modeResult, err := clients.Configuration.ConfigureSessionMode(ctx, appserver.SessionModeRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "set-local-approval-mode",
 			SessionID:               sessionID,
 			ExpectedRevision:        &revision,
@@ -658,10 +658,10 @@ func TestBoundAppServerProjectsACPControllerAndFailsClosedWithoutRemoteModes(t *
 		},
 		Mode: "manual",
 	})
-	if err != nil || modeResult.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || modeResult.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionMode() = %#v, %v", modeResult, err)
 	}
-	statusAfter, err := clients.Status.SessionStatus(ctx, controlclient.StatusRequest{
+	statusAfter, err := clients.Status.SessionStatus(ctx, appserver.StatusRequest{
 		SessionID: sessionID, Surface: "test", IncludeDiagnostics: true,
 	})
 	if err != nil {
@@ -726,7 +726,7 @@ func TestBoundAppServerProjectsSessionUsageAndParticipants(t *testing.T) {
 		}
 	}
 
-	status, err := clients.Status.SessionStatus(ctx, controlclient.StatusRequest{
+	status, err := clients.Status.SessionStatus(ctx, appserver.StatusRequest{
 		SessionID: sessionID, Surface: "test", IncludeDiagnostics: true,
 	})
 	if err != nil {
@@ -744,15 +744,15 @@ func TestBoundAppServerProjectsSessionUsageAndParticipants(t *testing.T) {
 		t.Fatalf("Session usage by model = %#v, want %#v", status.Usage.SessionUsageByModel, wantByModel)
 	}
 
-	agentStatus, err := clients.Agents.AgentStatus(ctx, controlclient.AgentRequest{SessionID: sessionID, Surface: "test"})
+	agentStatus, err := clients.Agents.AgentStatus(ctx, appserver.AgentRequest{SessionID: sessionID, Surface: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantDirect := []controlclient.AgentParticipantSnapshot{{
+	wantDirect := []appserver.AgentParticipantSnapshot{{
 		ID: "side-1", Label: "@side", AgentName: "codex", Kind: string(session.ParticipantKindACP),
 		Role: string(session.ParticipantRoleSidecar), Source: "test", SessionID: "child-side",
 	}}
-	wantDelegated := []controlclient.AgentParticipantSnapshot{{
+	wantDelegated := []appserver.AgentParticipantSnapshot{{
 		ID: "task-1", Label: "@worker", AgentName: "worker", Kind: string(session.ParticipantKindSubagent),
 		Role: string(session.ParticipantRoleDelegated), Source: "test", SessionID: "child-worker",
 	}}
@@ -784,12 +784,12 @@ func TestBoundAppServerKeepsSessionSkillSnapshotUntilLastObserverDetaches(t *tes
 	})
 	clients := bindAppServerTestClients(t, host)
 	sessionID := createAppServerTestSession(t, clients, "create-skill-snapshot", "skill-snapshot", workspace)
-	observation, err := clients.Sessions.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: sessionID})
+	observation, err := clients.Sessions.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer observation.Subscription.Close()
-	lease, err := host.AcquireControlRuntime(ctx, controlclient.Principal{ID: "local-user"}, controlclient.ActionSessionInspect, sessionID, true)
+	lease, err := host.AcquireControlRuntime(ctx, appserver.Principal{ID: "local-user"}, appserver.ActionSessionInspect, sessionID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -797,7 +797,7 @@ func TestBoundAppServerKeepsSessionSkillSnapshotUntilLastObserverDetaches(t *tes
 		t.Fatal(err)
 	}
 
-	initial, err := clients.Completion.CompleteSkill(ctx, controlclient.CompletionRequest{
+	initial, err := clients.Completion.CompleteSkill(ctx, appserver.CompletionRequest{
 		SessionID: sessionID, Surface: "test", Limit: 10,
 	})
 	if err != nil {
@@ -807,14 +807,14 @@ func TestBoundAppServerKeepsSessionSkillSnapshotUntilLastObserverDetaches(t *tes
 		t.Fatalf("initial completions = %#v, want initial skill", initial)
 	}
 	writeAppServerTestSkill(t, skillRoot, "late", "Late skill.")
-	current, err := clients.Completion.CompleteSkill(ctx, controlclient.CompletionRequest{Surface: "test", Limit: 10})
+	current, err := clients.Completion.CompleteSkill(ctx, appserver.CompletionRequest{Surface: "test", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !completionCandidatesContain(current, "initial") || !completionCandidatesContain(current, "late") {
 		t.Fatalf("no-Session current completions = %#v, want initial and late skills", current)
 	}
-	fixed, err := clients.Completion.CompleteSkill(ctx, controlclient.CompletionRequest{
+	fixed, err := clients.Completion.CompleteSkill(ctx, appserver.CompletionRequest{
 		SessionID: sessionID, Surface: "test", Limit: 10,
 	})
 	if err != nil {
@@ -829,8 +829,8 @@ func TestBoundAppServerKeepsSessionSkillSnapshotUntilLastObserverDetaches(t *tes
 	waitForSessionSkill(t, clients.Completion, sessionID, "late")
 	activation, err := host.AcquireControlRuntime(
 		ctx,
-		controlclient.Principal{ID: "local-user"},
-		controlclient.ActionSessionInspect,
+		appserver.Principal{ID: "local-user"},
+		appserver.ActionSessionInspect,
 		sessionID,
 		true,
 	)
@@ -838,7 +838,7 @@ func TestBoundAppServerKeepsSessionSkillSnapshotUntilLastObserverDetaches(t *tes
 		t.Fatal(err)
 	}
 	defer activation.Close(ctx)
-	refreshed, err := clients.Completion.CompleteSkill(ctx, controlclient.CompletionRequest{
+	refreshed, err := clients.Completion.CompleteSkill(ctx, appserver.CompletionRequest{
 		SessionID: sessionID, Surface: "test", Limit: 10,
 	})
 	if err != nil {
@@ -851,14 +851,14 @@ func TestBoundAppServerKeepsSessionSkillSnapshotUntilLastObserverDetaches(t *tes
 
 func waitForSessionSkill(
 	t *testing.T,
-	completion controlclient.CompletionClient,
+	completion appserver.CompletionClient,
 	sessionID string,
 	skillName string,
 ) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		candidates, err := completion.CompleteSkill(context.Background(), controlclient.CompletionRequest{
+		candidates, err := completion.CompleteSkill(context.Background(), appserver.CompletionRequest{
 			SessionID: sessionID,
 			Surface:   "test",
 			Limit:     10,
@@ -915,22 +915,22 @@ func TestNoSessionSkillCompletionDoesNotStartPluginMCP(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(manifestRoot, "plugin.json"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	status, err := clients.Status.SessionStatus(ctx, controlclient.StatusRequest{Surface: "test"})
+	status, err := clients.Status.SessionStatus(ctx, appserver.StatusRequest{Surface: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	added, err := clients.Plugins.AddPluginPath(ctx, controlclient.AddPluginPathRequest{
-		WriteBase: controlclient.WriteBase{
+	added, err := clients.Plugins.AddPluginPath(ctx, appserver.AddPluginPathRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:      "add-completion-side-effect-plugin",
 			ExpectedRevision: &status.Configuration.Revision,
 		},
 		Path: pluginRoot,
 	})
-	if err != nil || added.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || added.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("AddPluginPath() = %#v, %v", added, err)
 	}
 
-	candidates, err := clients.Completion.CompleteSkill(ctx, controlclient.CompletionRequest{
+	candidates, err := clients.Completion.CompleteSkill(ctx, appserver.CompletionRequest{
 		Surface: "test", Query: "completion-side-effect", Limit: 10,
 	})
 	if err != nil {
@@ -939,7 +939,7 @@ func TestNoSessionSkillCompletionDoesNotStartPluginMCP(t *testing.T) {
 	if !completionCandidatesContain(candidates, "completion:completion-side-effect-skill") {
 		t.Fatalf("CompleteSkill() = %#v, want plugin skill", candidates)
 	}
-	resolved, err := clients.Completion.ResolveSkill(ctx, controlclient.CompletionRequest{
+	resolved, err := clients.Completion.ResolveSkill(ctx, appserver.CompletionRequest{
 		Surface: "test", Name: "completion:completion-side-effect-skill",
 	})
 	if err != nil {
@@ -961,13 +961,13 @@ func TestCompletionSkillDiscoveryMCPHelperProcess(t *testing.T) {
 	os.Exit(1)
 }
 
-func bindAppServerTestClients(t *testing.T, host *gatewayapp.Stack) controlclient.AppServerClients {
+func bindAppServerTestClients(t *testing.T, host *gatewayapp.Stack) appserver.AppServerClients {
 	t.Helper()
 	server, err := NewAppServer(host)
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, _, err := server.Bind(controlclient.Principal{ID: "local-user"})
+	clients, _, err := server.Bind(appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -976,14 +976,14 @@ func bindAppServerTestClients(t *testing.T, host *gatewayapp.Stack) controlclien
 
 func createAppServerTestSession(
 	t *testing.T,
-	clients controlclient.AppServerClients,
+	clients appserver.AppServerClients,
 	operationID string,
 	preferredSessionID string,
 	workspace string,
 ) string {
 	t.Helper()
-	created, err := clients.Sessions.CreateSession(context.Background(), controlclient.CreateSessionRequest{
-		WriteBase: controlclient.WriteBase{OperationID: operationID}, PreferredSessionID: preferredSessionID,
+	created, err := clients.Sessions.CreateSession(context.Background(), appserver.CreateSessionRequest{
+		WriteBase: appserver.WriteBase{OperationID: operationID}, PreferredSessionID: preferredSessionID,
 		WorkspaceKey: "workspace", CWD: workspace, Title: preferredSessionID,
 	})
 	if err != nil {
@@ -1007,7 +1007,7 @@ func writeAppServerTestSkill(t *testing.T, root string, name string, description
 	}
 }
 
-func completionCandidatesContain(candidates []controlclient.CompletionCandidate, value string) bool {
+func completionCandidatesContain(candidates []appserver.CompletionCandidate, value string) bool {
 	for _, candidate := range candidates {
 		if strings.TrimSpace(candidate.Value) == value {
 			return true
@@ -1018,14 +1018,14 @@ func completionCandidatesContain(candidates []controlclient.CompletionCandidate,
 
 func assertSlashArgCandidate(
 	t *testing.T,
-	completion controlclient.CompletionClient,
+	completion appserver.CompletionClient,
 	sessionID string,
 	command string,
 	value string,
 	want bool,
 ) {
 	t.Helper()
-	candidates, err := completion.CompleteSlashArg(context.Background(), controlclient.CompletionRequest{
+	candidates, err := completion.CompleteSlashArg(context.Background(), appserver.CompletionRequest{
 		SessionID: sessionID,
 		Surface:   "test",
 		Command:   command,
@@ -1049,7 +1049,7 @@ func assertSlashArgCandidate(
 func bindAppServerHTTPTestClient(t *testing.T, appServer *AppServer, principalID string) *httpclient.Client {
 	t.Helper()
 	const token = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
-	authenticator, err := controlserver.BearerTokenAuthenticator(token, controlclient.Principal{ID: principalID})
+	authenticator, err := controlserver.BearerTokenAuthenticator(token, appserver.Principal{ID: principalID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1062,7 +1062,7 @@ func bindAppServerHTTPTestClient(t *testing.T, appServer *AppServer, principalID
 	client, err := httpclient.New(httpclient.Config{
 		BaseURL: "http://127.0.0.1", BearerToken: token,
 		HTTPClient:    &http.Client{Transport: appServerHandlerRoundTripper{handler: handler}},
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1070,7 +1070,7 @@ func bindAppServerHTTPTestClient(t *testing.T, appServer *AppServer, principalID
 	return client
 }
 
-func resumeCandidatesContain(candidates []controlclient.ResumeCandidate, sessionID string) bool {
+func resumeCandidatesContain(candidates []appserver.ResumeCandidate, sessionID string) bool {
 	for _, candidate := range candidates {
 		if strings.TrimSpace(candidate.SessionID) == strings.TrimSpace(sessionID) {
 			return true

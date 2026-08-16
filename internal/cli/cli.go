@@ -22,7 +22,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/acpagent"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/productpaths"
@@ -50,7 +50,7 @@ type runResult struct {
 	SchemaVersion string                     `json:"schema_version"`
 	Type          string                     `json:"type"`
 	SessionID     string                     `json:"session_id"`
-	Turn          controlclient.TurnTarget   `json:"turn"`
+	Turn          appserver.TurnTarget       `json:"turn"`
 	Status        string                     `json:"status"`
 	StopReason    string                     `json:"stop_reason,omitempty"`
 	Output        string                     `json:"output"`
@@ -284,7 +284,7 @@ func runWithProductClientOpener(
 	}
 	if controlServerSubcommand {
 		return runControlHost(ctx, cfg, controlserver.Config{
-			Address: strings.TrimSpace(*controlListen), Principal: controlclient.Principal{ID: defaultPrincipalID},
+			Address: strings.TrimSpace(*controlListen), Principal: appserver.Principal{ID: defaultPrincipalID},
 			TokenFile: strings.TrimSpace(*controlTokenFile), AllowedHosts: splitCommaSeparated(*controlHosts),
 			TLSCertFile: strings.TrimSpace(*controlTLSCert), TLSKeyFile: strings.TrimSpace(*controlTLSKey),
 		})
@@ -441,10 +441,10 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 	instanceID := uuid.NewString()
 	startedAt := time.Now().UTC()
 	build := version.BuildInfo()
-	serverConfig.ServerInfo = controlclient.ServerInfo{
-		ServerID: controlclient.ServerIdentity, InstanceID: instanceID,
+	serverConfig.ServerInfo = appserver.ServerInfo{
+		ServerID: appserver.ServerIdentity, InstanceID: instanceID,
 		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
-		Capabilities: controlclient.RequiredManagedHostCapabilities(),
+		Capabilities: appserver.RequiredManagedHostCapabilities(),
 	}
 	token := strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN"))
 	tokenFile := strings.TrimSpace(serverConfig.TokenFile)
@@ -566,7 +566,7 @@ func preferredHeadlessSessionID(sessionID string) string {
 
 func runHeadless(
 	ctx context.Context,
-	client controlclient.SessionClient,
+	client appserver.SessionClient,
 	workspace session.WorkspaceRef,
 	sessionID string,
 	input string,
@@ -588,7 +588,7 @@ func runHeadless(
 	if err != nil {
 		return "", err
 	}
-	turns, err := controlclient.NewSessionTurnClient(client)
+	turns, err := appserver.NewSessionTurnClient(client)
 	if err != nil {
 		return activeSessionID, err
 	}
@@ -601,7 +601,7 @@ func runHeadless(
 	result, err := headless.RunSessionOnce(
 		ctx,
 		turns,
-		controlclient.SessionTurnStartRequest{
+		appserver.SessionTurnStartRequest{
 			SessionID: activeSessionID,
 			Input:     input,
 		},
@@ -629,7 +629,7 @@ func runHeadless(
 }
 
 func headlessSessionRunError(sessionID string, err error) error {
-	if !errors.Is(err, controlclient.ErrSessionClosed) {
+	if !errors.Is(err, appserver.ErrSessionClosed) {
 		return err
 	}
 	return fmt.Errorf(
@@ -641,13 +641,13 @@ func headlessSessionRunError(sessionID string, err error) error {
 
 func createOrResumeHeadlessSession(
 	ctx context.Context,
-	client controlclient.SessionClient,
+	client appserver.SessionClient,
 	workspace session.WorkspaceRef,
 	preferredSessionID string,
 ) (string, error) {
 	preferredSessionID = strings.TrimSpace(preferredSessionID)
 	if preferredSessionID != "" {
-		state, err := client.InspectSession(ctx, controlclient.StateRequest{
+		state, err := client.InspectSession(ctx, appserver.StateRequest{
 			SessionID: preferredSessionID,
 		})
 		switch {
@@ -669,8 +669,8 @@ func createOrResumeHeadlessSession(
 			return "", err
 		}
 	}
-	result, err := client.CreateSession(ctx, controlclient.CreateSessionRequest{
-		WriteBase: controlclient.WriteBase{
+	result, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID: "headless-create-" + uuid.NewString(),
 		},
 		PreferredSessionID: preferredSessionID,
@@ -680,8 +680,8 @@ func createOrResumeHeadlessSession(
 	if err != nil {
 		return "", err
 	}
-	if result.Outcome != controlclient.OutcomeCommitted &&
-		result.Outcome != controlclient.OutcomeAccepted {
+	if result.Outcome != appserver.OutcomeCommitted &&
+		result.Outcome != appserver.OutcomeAccepted {
 		return "", fmt.Errorf("cli: create or resume Session outcome is %q", result.Outcome)
 	}
 	if strings.TrimSpace(result.SessionID) == "" {
@@ -690,11 +690,11 @@ func createOrResumeHeadlessSession(
 	return strings.TrimSpace(result.SessionID), nil
 }
 
-func runDoctor(ctx context.Context, statusClient controlclient.StatusClient, sessionID string, format outputFormat, stdout io.Writer) error {
+func runDoctor(ctx context.Context, statusClient appserver.StatusClient, sessionID string, format outputFormat, stdout io.Writer) error {
 	if statusClient == nil {
 		return errors.New("cli: status client is unavailable")
 	}
-	status, err := statusClient.SessionStatus(ctx, controlclient.StatusRequest{
+	status, err := statusClient.SessionStatus(ctx, appserver.StatusRequest{
 		SessionID: strings.TrimSpace(sessionID), Surface: "cli", IncludeDiagnostics: true,
 	})
 	if err != nil {
@@ -704,12 +704,12 @@ func runDoctor(ctx context.Context, statusClient controlclient.StatusClient, ses
 }
 
 func runSandboxSetupFromConfig(ctx context.Context, cfg gatewayapp.Config, options productClientOptions, format outputFormat, stdout io.Writer) error {
-	return withCLIAppServer(ctx, cfg, options, func(clients controlclient.AppServerClients) error {
+	return withCLIAppServer(ctx, cfg, options, func(clients appserver.AppServerClients) error {
 		return runSandboxSetup(ctx, clients.Configuration, clients.Status, format, stdout)
 	})
 }
 
-func runSandboxSetup(ctx context.Context, client controlclient.ConfigurationClient, statusClient controlclient.StatusClient, format outputFormat, stdout io.Writer) error {
+func runSandboxSetup(ctx context.Context, client appserver.ConfigurationClient, statusClient appserver.StatusClient, format outputFormat, stdout io.Writer) error {
 	if client == nil {
 		return errors.New("cli: configuration client is unavailable")
 	}
@@ -717,12 +717,12 @@ func runSandboxSetup(ctx context.Context, client controlclient.ConfigurationClie
 }
 
 func runSandboxFixFromConfig(ctx context.Context, cfg gatewayapp.Config, options productClientOptions, format outputFormat, stdout io.Writer) error {
-	return withCLIAppServer(ctx, cfg, options, func(clients controlclient.AppServerClients) error {
+	return withCLIAppServer(ctx, cfg, options, func(clients appserver.AppServerClients) error {
 		return runSandboxFix(ctx, clients.Configuration, clients.Status, format, stdout)
 	})
 }
 
-func runSandboxFix(ctx context.Context, client controlclient.ConfigurationClient, statusClient controlclient.StatusClient, format outputFormat, stdout io.Writer) error {
+func runSandboxFix(ctx context.Context, client appserver.ConfigurationClient, statusClient appserver.StatusClient, format outputFormat, stdout io.Writer) error {
 	if client == nil {
 		return errors.New("cli: configuration client is unavailable")
 	}
@@ -730,12 +730,12 @@ func runSandboxFix(ctx context.Context, client controlclient.ConfigurationClient
 }
 
 func runSandboxResetFromConfig(ctx context.Context, cfg gatewayapp.Config, options productClientOptions, format outputFormat, stdout io.Writer) error {
-	return withCLIAppServer(ctx, cfg, options, func(clients controlclient.AppServerClients) error {
+	return withCLIAppServer(ctx, cfg, options, func(clients appserver.AppServerClients) error {
 		return runSandboxReset(ctx, clients.Configuration, clients.Status, format, stdout)
 	})
 }
 
-func runSandboxReset(ctx context.Context, client controlclient.ConfigurationClient, statusClient controlclient.StatusClient, format outputFormat, stdout io.Writer) error {
+func runSandboxReset(ctx context.Context, client appserver.ConfigurationClient, statusClient appserver.StatusClient, format outputFormat, stdout io.Writer) error {
 	if client == nil {
 		return errors.New("cli: configuration client is unavailable")
 	}
@@ -744,42 +744,42 @@ func runSandboxReset(ctx context.Context, client controlclient.ConfigurationClie
 
 func runSandboxMutation(
 	ctx context.Context,
-	statusClient controlclient.StatusClient,
-	mutate func(context.Context, controlclient.SandboxRequest) (controlclient.CommandResult, error),
+	statusClient appserver.StatusClient,
+	mutate func(context.Context, appserver.SandboxRequest) (appserver.CommandResult, error),
 	format outputFormat,
 	stdout io.Writer,
 ) error {
 	if statusClient == nil {
 		return errors.New("cli: status client is unavailable")
 	}
-	before, err := statusClient.SessionStatus(ctx, controlclient.StatusRequest{Surface: "cli", IncludeDiagnostics: true})
+	before, err := statusClient.SessionStatus(ctx, appserver.StatusRequest{Surface: "cli", IncludeDiagnostics: true})
 	if err != nil {
 		return fmt.Errorf("cli: read Host configuration revision: %w", err)
 	}
 	expectedRevision := before.Configuration.Revision
-	result, operationErr := mutate(ctx, controlclient.SandboxRequest{WriteBase: controlclient.WriteBase{
+	result, operationErr := mutate(ctx, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID:      "cli-sandbox-" + uuid.NewString(),
 		ExpectedRevision: &expectedRevision,
 	}})
-	if operationErr == nil && result.Outcome != controlclient.OutcomeCommitted {
+	if operationErr == nil && result.Outcome != appserver.OutcomeCommitted {
 		operationErr = fmt.Errorf("cli: sandbox operation outcome is %q: %s", result.Outcome, strings.TrimSpace(result.Detail))
 	}
-	if result.Outcome == controlclient.OutcomeAccepted {
-		return &controlclient.CommandReceiptError{Receipt: result, Err: operationErr}
+	if result.Outcome == appserver.OutcomeAccepted {
+		return &appserver.CommandReceiptError{Receipt: result, Err: operationErr}
 	}
-	status, statusErr := statusClient.SessionStatus(ctx, controlclient.StatusRequest{Surface: "cli", IncludeDiagnostics: true})
+	status, statusErr := statusClient.SessionStatus(ctx, appserver.StatusRequest{Surface: "cli", IncludeDiagnostics: true})
 	if statusErr != nil {
-		return &controlclient.CommandReceiptError{Receipt: result, Err: errors.Join(operationErr, statusErr)}
+		return &appserver.CommandReceiptError{Receipt: result, Err: errors.Join(operationErr, statusErr)}
 	}
 	writeErr := writeSandboxStatusResult(stdout, format, sandboxStatusResultFromStatus(status.SandboxStatus))
 	resultErr := errors.Join(operationErr, writeErr)
 	if resultErr == nil {
 		return nil
 	}
-	return &controlclient.CommandReceiptError{Receipt: result, Err: resultErr}
+	return &appserver.CommandReceiptError{Receipt: result, Err: resultErr}
 }
 
-func withCLIAppServer(ctx context.Context, cfg gatewayapp.Config, options productClientOptions, action func(controlclient.AppServerClients) error) (runErr error) {
+func withCLIAppServer(ctx context.Context, cfg gatewayapp.Config, options productClientOptions, action func(appserver.AppServerClients) error) (runErr error) {
 	product, err := openProductClients(ctx, cfg, options)
 	if err != nil {
 		return err

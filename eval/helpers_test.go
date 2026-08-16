@@ -15,7 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
@@ -61,12 +61,12 @@ func startEvalSession(
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, _, err := server.Bind(controlclient.Principal{ID: stack.UserID})
+	clients, _, err := server.Bind(appserver.Principal{ID: stack.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := clients.Sessions.CreateSession(ctx, controlclient.CreateSessionRequest{
-		WriteBase:          controlclient.WriteBase{OperationID: "eval-session-" + uuid.NewString()},
+	result, err := clients.Sessions.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: "eval-session-" + uuid.NewString()},
 		PreferredSessionID: preferredSessionID,
 		WorkspaceKey:       stack.Workspace.Key,
 		CWD:                stack.Workspace.CWD,
@@ -85,13 +85,13 @@ func evalAppServerClients(
 	t *testing.T,
 	stack *gatewayapp.Stack,
 	principalID string,
-) controlclient.AppServerClients {
+) appserver.AppServerClients {
 	t.Helper()
 	server, err := local.NewAppServer(stack)
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, _, err := server.Bind(controlclient.Principal{ID: principalID})
+	clients, _, err := server.Bind(appserver.Principal{ID: principalID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,10 +103,10 @@ func inspectEvalSession(
 	ctx context.Context,
 	stack *gatewayapp.Stack,
 	active session.Session,
-) controlclient.SessionState {
+) appserver.SessionState {
 	t.Helper()
 	clients := evalAppServerClients(t, stack, active.UserID)
-	state, err := clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: active.SessionID})
+	state, err := clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: active.SessionID})
 	if err != nil {
 		t.Fatalf("InspectSession(%s) error = %v", active.SessionID, err)
 	}
@@ -120,16 +120,16 @@ func handoffEvalController(
 	active session.Session,
 	target string,
 	surface string,
-) controlclient.SessionState {
+) appserver.SessionState {
 	t.Helper()
 	clients := evalAppServerClients(t, stack, active.UserID)
-	state, err := clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: active.SessionID})
+	state, err := clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: active.SessionID})
 	if err != nil {
 		t.Fatalf("InspectSession(%s before handoff) error = %v", active.SessionID, err)
 	}
 	revision := state.Revision
-	if _, err := clients.Agents.HandoffAgent(ctx, controlclient.HandoffAgentRequest{
-		WriteBase: controlclient.WriteBase{
+	if _, err := clients.Agents.HandoffAgent(ctx, appserver.HandoffAgentRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "eval-controller-handoff-" + uuid.NewString(),
 			SessionID:               active.SessionID,
 			ExpectedRevision:        &revision,
@@ -139,7 +139,7 @@ func handoffEvalController(
 	}); err != nil {
 		t.Fatalf("HandoffAgent(%s) error = %v", target, err)
 	}
-	state, err = clients.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: active.SessionID})
+	state, err = clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: active.SessionID})
 	if err != nil {
 		t.Fatalf("InspectSession(%s after handoff) error = %v", active.SessionID, err)
 	}
@@ -152,14 +152,14 @@ func startEvalSessionTurn(
 	stack *gatewayapp.Stack,
 	active session.Session,
 	input string,
-) (controlclient.TargetTurn, error) {
+) (appserver.TargetTurn, error) {
 	t.Helper()
 	clients := evalAppServerClients(t, stack, active.UserID)
-	turns, err := controlclient.NewSessionTurnClient(clients.Sessions)
+	turns, err := appserver.NewSessionTurnClient(clients.Sessions)
 	if err != nil {
 		return nil, err
 	}
-	return turns.Start(ctx, controlclient.SessionTurnStartRequest{
+	return turns.Start(ctx, appserver.SessionTurnStartRequest{
 		SessionID: active.SessionID,
 		Input:     input,
 	})
@@ -176,7 +176,7 @@ func newEvalAppServerAdapter(
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, _, err := server.Bind(controlclient.Principal{ID: active.UserID})
+	clients, _, err := server.Bind(appserver.Principal{ID: active.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,15 +212,15 @@ func runEvalHeadlessOnce(
 	if err != nil {
 		return headless.Result{}, err
 	}
-	clients, _, err := server.Bind(controlclient.Principal{ID: active.UserID})
+	clients, _, err := server.Bind(appserver.Principal{ID: active.UserID})
 	if err != nil {
 		return headless.Result{}, err
 	}
-	turns, err := controlclient.NewSessionTurnClient(clients.Sessions)
+	turns, err := appserver.NewSessionTurnClient(clients.Sessions)
 	if err != nil {
 		return headless.Result{}, err
 	}
-	return headless.RunSessionOnce(ctx, turns, controlclient.SessionTurnStartRequest{
+	return headless.RunSessionOnce(ctx, turns, appserver.SessionTurnStartRequest{
 		SessionID: active.SessionID,
 		Input:     input,
 	}, opts)

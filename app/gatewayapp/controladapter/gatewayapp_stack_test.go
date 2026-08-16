@@ -8,7 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
@@ -37,12 +37,12 @@ func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
 }
 
 func startGatewayAppSessionForTest(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string) (session.Session, error) {
-	client, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: stack.UserID})
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: stack.UserID})
 	if err != nil {
 		return session.Session{}, err
 	}
-	result, err := client.CreateSession(ctx, controlclient.CreateSessionRequest{
-		WriteBase:          controlclient.WriteBase{OperationID: "adapter-test-session-" + uuid.NewString()},
+	result, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: "adapter-test-session-" + uuid.NewString()},
 		PreferredSessionID: preferredSessionID,
 		WorkspaceKey:       stack.Workspace.Key,
 		CWD:                stack.Workspace.CWD,

@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
@@ -69,11 +69,11 @@ func TestAgentBindingServiceRollsForwardAfterCommittedConfigWriteFault(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := stack.AgentCommands().BindAgentBinding(context.Background(), controlclient.Principal{ID: stack.UserID}, controlclient.BindAgentBindingRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "binding-committed-fault", ExpectedRevision: &revision},
+	result, err := stack.AgentCommands().BindAgentBinding(context.Background(), appserver.Principal{ID: stack.UserID}, appserver.BindAgentBindingRequest{
+		WriteBase: appserver.WriteBase{OperationID: "binding-committed-fault", ExpectedRevision: &revision},
 		Binding:   agentbinding.Binding{Handle: agentbinding.HandleOrbit, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort},
 	})
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted || !strings.Contains(result.Detail, fault.Error()) {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || !strings.Contains(result.Detail, fault.Error()) {
 		t.Fatalf("BindAgentBinding() = %#v, %v", result, err)
 	}
 	if writeCount() != 1 {
@@ -136,12 +136,12 @@ func TestAgentBindingCommandCachesUnknownWhenCommittedRevisionCannotBeObserved(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := controlclient.BindAgentBindingRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "binding-committed-readback", ExpectedRevision: &expected},
+	request := appserver.BindAgentBindingRequest{
+		WriteBase: appserver.WriteBase{OperationID: "binding-committed-readback", ExpectedRevision: &expected},
 		Binding:   agentbinding.Binding{Handle: agentbinding.HandleOrbit, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort},
 	}
-	result, err := stack.AgentCommands().BindAgentBinding(context.Background(), controlclient.Principal{ID: stack.UserID}, request)
-	if !errors.Is(err, fault) || result.Outcome != controlclient.OutcomeUnknown || result.Revision != 0 {
+	result, err := stack.AgentCommands().BindAgentBinding(context.Background(), appserver.Principal{ID: stack.UserID}, request)
+	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != 0 {
 		t.Fatalf("BindAgentBinding(committed readback failure) = %#v, %v", result, err)
 	}
 	restore()
@@ -152,7 +152,7 @@ func TestAgentBindingCommandCachesUnknownWhenCommittedRevisionCannotBeObserved(t
 	if binding, ok := agentbinding.Lookup(doc.AgentBindings, agentbinding.HandleOrbit); !ok || binding.ProfileID != profile.ID {
 		t.Fatalf("persisted binding = %#v, %v", binding, ok)
 	}
-	replayed, replayErr := stack.AgentCommands().BindAgentBinding(context.Background(), controlclient.Principal{ID: stack.UserID}, request)
+	replayed, replayErr := stack.AgentCommands().BindAgentBinding(context.Background(), appserver.Principal{ID: stack.UserID}, request)
 	if replayErr != nil || replayed != result || writeCount() != 1 {
 		t.Fatalf("BindAgentBinding(replay) = %#v, %v writes=%d; want %#v and one write", replayed, replayErr, writeCount(), result)
 	}
@@ -168,11 +168,11 @@ func TestAgentBindingCommandCommitsWithoutRuntimeRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := stack.AgentCommands().BindAgentBinding(context.Background(), controlclient.Principal{ID: stack.UserID}, controlclient.BindAgentBindingRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "binding-refresh-failure", ExpectedRevision: &expected},
+	result, err := stack.AgentCommands().BindAgentBinding(context.Background(), appserver.Principal{ID: stack.UserID}, appserver.BindAgentBindingRequest{
+		WriteBase: appserver.WriteBase{OperationID: "binding-refresh-failure", ExpectedRevision: &expected},
 		Binding:   agentbinding.Binding{Handle: agentbinding.HandleOrbit, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort},
 	})
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision != expected+1 {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != expected+1 {
 		t.Fatalf("BindAgentBinding() = %#v, %v", result, err)
 	}
 	doc, err := stack.store.Load()

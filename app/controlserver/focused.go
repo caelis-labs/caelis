@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 // focusedRoutes exposes the same focused capabilities used by the embedded
@@ -95,7 +95,7 @@ func (s *Server) presentationSnapshot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.config.Services.Presentation.PresentationSnapshot(r.Context(), principal, controlclient.PresentationRequest{SessionID: r.PathValue("session_id")})
+	result, err := s.config.Services.Presentation.PresentationSnapshot(r.Context(), principal, appserver.PresentationRequest{SessionID: r.PathValue("session_id")})
 	writeJSONResult(w, result, err)
 }
 
@@ -131,14 +131,14 @@ func (s *Server) releaseTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func terminalRequest(w http.ResponseWriter, r *http.Request, s *Server) (controlclient.Principal, controlclient.TerminalRequest, bool) {
+func terminalRequest(w http.ResponseWriter, r *http.Request, s *Server) (appserver.Principal, appserver.TerminalRequest, bool) {
 	principal, ok := s.requirePrincipal(w, r)
 	if !ok {
-		return controlclient.Principal{}, controlclient.TerminalRequest{}, false
+		return appserver.Principal{}, appserver.TerminalRequest{}, false
 	}
-	var req controlclient.TerminalRequest
+	var req appserver.TerminalRequest
 	if !decodeSessionBody(w, r, r.PathValue("session_id"), &req.SessionID, &req) {
-		return controlclient.Principal{}, controlclient.TerminalRequest{}, false
+		return appserver.Principal{}, appserver.TerminalRequest{}, false
 	}
 	return principal, req, true
 }
@@ -148,7 +148,7 @@ func (s *Server) deliverAgentMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req controlclient.AgentMessageRequest
+	var req appserver.AgentMessageRequest
 	if !decodeSessionBody(w, r, r.PathValue("session_id"), &req.SessionID, &req) {
 		return
 	}
@@ -170,7 +170,7 @@ func (s *Server) startParticipant(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req controlclient.StartParticipantRequest
+	var req appserver.StartParticipantRequest
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
@@ -183,7 +183,7 @@ func (s *Server) promptParticipant(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req controlclient.PromptParticipantRequest
+	var req appserver.PromptParticipantRequest
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
@@ -196,7 +196,7 @@ func (s *Server) cancelParticipant(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req controlclient.CancelParticipantRequest
+	var req appserver.CancelParticipantRequest
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
@@ -213,55 +213,55 @@ func (s *Server) configurationHandler(action string) http.HandlerFunc {
 		sessionID := r.PathValue("session_id")
 		switch action {
 		case "session-mode":
-			var req controlclient.SessionModeRequest
+			var req appserver.SessionModeRequest
 			if decodeBody(w, r, &req) && applyWriteHeaders(w, r, &req.WriteBase, sessionID) {
 				result, err := s.config.Services.Configuration.ConfigureSessionMode(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "session-model":
-			var req controlclient.SessionModelRequest
+			var req appserver.SessionModelRequest
 			if decodeBody(w, r, &req) && applyWriteHeaders(w, r, &req.WriteBase, sessionID) {
 				result, err := s.config.Services.Configuration.UseSessionModel(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "controller-mode":
-			var req controlclient.SessionControllerModeRequest
+			var req appserver.SessionControllerModeRequest
 			if decodeBody(w, r, &req) && applyWriteHeaders(w, r, &req.WriteBase, sessionID) {
 				result, err := s.config.Services.Configuration.ConfigureSessionControllerMode(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "presentation-mode":
-			var req controlclient.SessionPresentationModeRequest
+			var req appserver.SessionPresentationModeRequest
 			if decodeBody(w, r, &req) && applyWriteHeaders(w, r, &req.WriteBase, sessionID) {
 				result, err := s.config.Services.Configuration.ConfigureSessionPresentationMode(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "presentation-config":
-			var req controlclient.SessionPresentationConfigRequest
+			var req appserver.SessionPresentationConfigRequest
 			if decodeBody(w, r, &req) && applyWriteHeaders(w, r, &req.WriteBase, sessionID) {
 				result, err := s.config.Services.Configuration.ConfigureSessionPresentation(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "connect-model":
-			var req controlclient.ConnectModelRequest
+			var req appserver.ConnectModelRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Configuration.ConnectModel(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "use-model":
-			var req controlclient.UseModelRequest
+			var req appserver.UseModelRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Configuration.UseModel(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "delete-model":
-			var req controlclient.DeleteModelRequest
+			var req appserver.DeleteModelRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Configuration.DeleteModel(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		default:
-			var req controlclient.SandboxRequest
+			var req appserver.SandboxRequest
 			if !decodeBody(w, r, &req) || !applyHostWriteHeaders(w, r, &req.WriteBase) {
 				return
 			}
@@ -295,7 +295,7 @@ func (s *Server) agentHandler(action string) http.HandlerFunc {
 		sessionID := r.PathValue("session_id")
 		switch action {
 		case "list", "status", "binding-status":
-			var req controlclient.AgentRequest
+			var req appserver.AgentRequest
 			if !decodeSessionBody(w, r, sessionID, &req.SessionID, &req) {
 				return
 			}
@@ -311,43 +311,43 @@ func (s *Server) agentHandler(action string) http.HandlerFunc {
 				writeJSONResult(w, result, err)
 			}
 		case "handoff":
-			var req controlclient.HandoffAgentRequest
+			var req appserver.HandoffAgentRequest
 			if decodeSessionBody(w, r, sessionID, &req.SessionID, &req) &&
 				applyWriteHeaders(w, r, &req.WriteBase, sessionID) {
 				result, err := s.config.Services.Agents.HandoffAgent(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "prepare-acp":
-			var req controlclient.PrepareACPRequest
+			var req appserver.PrepareACPRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Agents.PrepareACP(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "prepare-acp-auth":
-			var req controlclient.PrepareACPAuthenticationRequest
+			var req appserver.PrepareACPAuthenticationRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Agents.PrepareACPAuthentication(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "connect-acp":
-			var req controlclient.ConnectACPRequest
+			var req appserver.ConnectACPRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Agents.ConnectACP(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "acp-preparation":
-			result, err := s.config.Services.Agents.ACPPreparation(r.Context(), principal, controlclient.ACPPreparationRequest{
+			result, err := s.config.Services.Agents.ACPPreparation(r.Context(), principal, appserver.ACPPreparationRequest{
 				Ref: r.PathValue("preparation_ref"),
 			})
 			writeJSONResult(w, result, err)
 		case "disconnect-candidates":
-			var req controlclient.AgentRequest
+			var req appserver.AgentRequest
 			if decodeBody(w, r, &req) {
 				result, err := s.config.Services.Agents.DisconnectCandidates(r.Context(), principal, req)
 				writeJSONResult(w, result, err)
 			}
 		case "disconnect-acp":
-			var req controlclient.DisconnectACPRequest
+			var req appserver.DisconnectACPRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Agents.DisconnectACP(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
@@ -355,43 +355,43 @@ func (s *Server) agentHandler(action string) http.HandlerFunc {
 		default:
 			switch action {
 			case "bind":
-				var req controlclient.BindAgentBindingRequest
+				var req appserver.BindAgentBindingRequest
 				if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 					result, err := s.config.Services.Agents.BindAgentBinding(r.Context(), principal, req)
 					writeCommandResult(w, result, err)
 				}
 			case "reset-binding":
-				var req controlclient.ResetAgentBindingRequest
+				var req appserver.ResetAgentBindingRequest
 				if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 					result, err := s.config.Services.Agents.ResetAgentBinding(r.Context(), principal, req)
 					writeCommandResult(w, result, err)
 				}
 			case "create-role":
-				var req controlclient.CreateAgentRoleRequest
+				var req appserver.CreateAgentRoleRequest
 				if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 					result, err := s.config.Services.Agents.CreateAgentRole(r.Context(), principal, req)
 					writeCommandResult(w, result, err)
 				}
 			case "delete-role":
-				var req controlclient.DeleteAgentRoleRequest
+				var req appserver.DeleteAgentRoleRequest
 				if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 					result, err := s.config.Services.Agents.DeleteAgentRole(r.Context(), principal, req)
 					writeCommandResult(w, result, err)
 				}
 			case "save-binding-set":
-				var req controlclient.AgentBindingSetRequest
+				var req appserver.AgentBindingSetRequest
 				if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 					result, err := s.config.Services.Agents.SaveAgentBindingSet(r.Context(), principal, req)
 					writeCommandResult(w, result, err)
 				}
 			case "apply-binding-set":
-				var req controlclient.AgentBindingSetRequest
+				var req appserver.AgentBindingSetRequest
 				if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 					result, err := s.config.Services.Agents.ApplyAgentBindingSet(r.Context(), principal, req)
 					writeCommandResult(w, result, err)
 				}
 			case "delete-binding-set":
-				var req controlclient.AgentBindingSetRequest
+				var req appserver.AgentBindingSetRequest
 				if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 					result, err := s.config.Services.Agents.DeleteAgentBindingSet(r.Context(), principal, req)
 					writeCommandResult(w, result, err)
@@ -407,7 +407,7 @@ func (s *Server) completionHandler(action string) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		var req controlclient.CompletionRequest
+		var req appserver.CompletionRequest
 		if !decodeSessionBody(w, r, r.PathValue("session_id"), &req.SessionID, &req) {
 			return
 		}
@@ -439,7 +439,7 @@ func (s *Server) pluginHandler(action string) http.HandlerFunc {
 		}
 		switch action {
 		case "list", "list-marketplaces", "inspect":
-			var req controlclient.PluginRequest
+			var req appserver.PluginRequest
 			if !decodeSessionBody(w, r, r.PathValue("session_id"), &req.SessionID, &req) {
 				return
 			}
@@ -455,49 +455,49 @@ func (s *Server) pluginHandler(action string) http.HandlerFunc {
 				writeJSONResult(w, result, err)
 			}
 		case "add-marketplace":
-			var req controlclient.AddMarketplaceRequest
+			var req appserver.AddMarketplaceRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Plugins.AddMarketplace(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "update-marketplace":
-			var req controlclient.UpdateMarketplaceRequest
+			var req appserver.UpdateMarketplaceRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Plugins.UpdateMarketplace(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "remove-marketplace":
-			var req controlclient.RemoveMarketplaceRequest
+			var req appserver.RemoveMarketplaceRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Plugins.RemoveMarketplace(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "add-path":
-			var req controlclient.AddPluginPathRequest
+			var req appserver.AddPluginPathRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Plugins.AddPluginPath(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "install":
-			var req controlclient.InstallPluginRequest
+			var req appserver.InstallPluginRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Plugins.InstallPlugin(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "enable":
-			var req controlclient.EnablePluginRequest
+			var req appserver.EnablePluginRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Plugins.EnablePlugin(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "disable":
-			var req controlclient.DisablePluginRequest
+			var req appserver.DisablePluginRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Plugins.DisablePlugin(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
 		case "remove":
-			var req controlclient.RemovePluginRequest
+			var req appserver.RemovePluginRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
 				result, err := s.config.Services.Plugins.RemovePlugin(r.Context(), principal, req)
 				writeCommandResult(w, result, err)

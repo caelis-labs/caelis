@@ -18,7 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -40,20 +40,20 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	alias := profile.Backend.Provider.ModelConfigID
 	current := mustCurrentSession(t, stack, activeSession.SessionID)
 	revision := current.Revision
-	modelResult, err := stack.ConfigurationCommands().UseSessionModel(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SessionModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "state-model-alt", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
+	modelResult, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "state-model-alt", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Model:     alias,
 	})
-	if err != nil || modelResult.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || modelResult.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel() = %#v, %v", modelResult, err)
 	}
 	current = mustCurrentSession(t, stack, activeSession.SessionID)
 	revision = current.Revision
-	modeResult, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SessionModeRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "state-mode-manual", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
+	modeResult, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModeRequest{
+		WriteBase: appserver.WriteBase{OperationID: "state-mode-manual", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Mode:      "manual",
 	})
-	if err != nil || modeResult.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || modeResult.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionMode(manual) = %#v, %v", modeResult, err)
 	}
 
@@ -76,11 +76,11 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	}
 	current = mustCurrentSession(t, stack, activeSession.SessionID)
 	revision = current.Revision
-	modeResult, err = stack.ConfigurationCommands().ConfigureSessionMode(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SessionModeRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "state-mode-auto", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
+	modeResult, err = stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModeRequest{
+		WriteBase: appserver.WriteBase{OperationID: "state-mode-auto", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Mode:      "auto-review",
 	})
-	if err != nil || modeResult.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || modeResult.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionMode(auto-review) = %#v, %v", modeResult, err)
 	}
 
@@ -369,8 +369,8 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 	}
 	current := mustCurrentSession(t, first, active.SessionID)
 	revision := current.Revision
-	selected, err := first.ConfigurationCommands().UseSessionModel(ctx, controlclient.Principal{ID: first.UserID}, controlclient.SessionModelRequest{
-		WriteBase: controlclient.WriteBase{
+	selected, err := first.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: first.UserID}, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "persist-grok-session-model",
 			SessionID:               current.SessionID,
 			ExpectedRevision:        &revision,
@@ -378,7 +378,7 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 		},
 		Model: grokID,
 	})
-	if err != nil || selected.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
 		_ = first.Close()
 		t.Fatalf("UseSessionModel(grok) = %#v, %v", selected, err)
 	}
@@ -437,11 +437,11 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 		return http.DefaultClient, nil
 	}
 
-	client, err := controlclient.BindSessionClient(reloaded.ControlClient(), controlclient.Principal{ID: userID})
+	client, err := appserver.BindSessionClient(reloaded.ControlClient(), appserver.Principal{ID: userID})
 	if err != nil {
 		t.Fatalf("BindSessionClient() error = %v", err)
 	}
-	reconnected, err := client.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: active.SessionID})
+	reconnected, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: active.SessionID})
 	if err != nil {
 		t.Fatalf("Reconnect() error = %v", err)
 	}
@@ -500,11 +500,11 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigurationRevision() error = %v", err)
 	}
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), controlclient.Principal{ID: stack.UserID}, controlclient.SandboxRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "sandbox-persist-restart", ExpectedRevision: &expected},
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.UserID}, appserver.SandboxRequest{
+		WriteBase: appserver.WriteBase{OperationID: "sandbox-persist-restart", ExpectedRevision: &expected},
 		Backend:   "host",
 	})
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("SetSandboxBackend() = %#v, %v", result, err)
 	}
 	status := stack.SandboxStatus()
@@ -688,8 +688,8 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	tokenPlanID := tokenPlanProfile.Backend.Provider.ModelConfigID
 	current := mustCurrentSession(t, stack, activeSession.SessionID)
 	revision := current.Revision
-	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SessionModelRequest{
-		WriteBase: controlclient.WriteBase{
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "select-stable-token-plan-profile",
 			SessionID:               current.SessionID,
 			ExpectedRevision:        &revision,
@@ -697,7 +697,7 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 		},
 		Model: tokenPlanID,
 	})
-	if err != nil || selected.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel(token plan) = %#v, %v", selected, err)
 	}
 	activeSession = mustCurrentSession(t, stack, activeSession.SessionID)
@@ -722,8 +722,8 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	}
 	current = mustCurrentSession(t, stack, activeSession.SessionID)
 	revision = current.Revision
-	result, err := stack.ConfigurationCommands().UseSessionModel(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SessionModelRequest{
-		WriteBase: controlclient.WriteBase{
+	result, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "select-stable-api-profile",
 			SessionID:               current.SessionID,
 			ExpectedRevision:        &revision,
@@ -731,7 +731,7 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 		},
 		Model: apiID,
 	})
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel(stable id) = %#v, %v", result, err)
 	}
 	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)

@@ -9,7 +9,7 @@ import (
 	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 )
 
@@ -33,9 +33,9 @@ func NewAgentMessageService(host *gatewayapp.Stack) (*AgentMessageService, error
 // DeliverAgentMessage ignores all wire display identity when assigning the
 // canonical Actor. The source must resolve from an exact participant/controller
 // binding or from the durable parent Task relation of a managed child Session.
-func (s *AgentMessageService) DeliverAgentMessage(ctx context.Context, principal controlclient.Principal, req controlclient.AgentMessageRequest) (controlclient.AgentMessageResult, error) {
+func (s *AgentMessageService) DeliverAgentMessage(ctx context.Context, principal appserver.Principal, req appserver.AgentMessageRequest) (appserver.AgentMessageResult, error) {
 	if s == nil || s.host == nil {
-		return controlclient.AgentMessageResult{}, errors.New("app/gatewayapp/controladapter/local: Agent message service is unavailable")
+		return appserver.AgentMessageResult{}, errors.New("app/gatewayapp/controladapter/local: Agent message service is unavailable")
 	}
 	req.SessionID = strings.TrimSpace(req.SessionID)
 	req.MessageID = strings.TrimSpace(req.MessageID)
@@ -43,7 +43,7 @@ func (s *AgentMessageService) DeliverAgentMessage(ctx context.Context, principal
 	req.Text = strings.TrimSpace(req.Text)
 	req.DisplayFrom = strings.TrimSpace(req.DisplayFrom)
 	if req.SessionID == "" || req.MessageID == "" || req.Text == "" {
-		return controlclient.AgentMessageResult{}, errors.New("app/gatewayapp/controladapter/local: Session ID, message ID, and text are required")
+		return appserver.AgentMessageResult{}, errors.New("app/gatewayapp/controladapter/local: Session ID, message ID, and text are required")
 	}
 	var lastErr error
 	for range maxAgentMessageRevisionAttempts {
@@ -53,7 +53,7 @@ func (s *AgentMessageService) DeliverAgentMessage(ctx context.Context, principal
 		}
 		lastErr = err
 	}
-	return controlclient.AgentMessageResult{}, lastErr
+	return appserver.AgentMessageResult{}, lastErr
 }
 
 // deliverAgentMessageAttempt resolves authority from one durable snapshot and
@@ -62,29 +62,29 @@ func (s *AgentMessageService) DeliverAgentMessage(ctx context.Context, principal
 // append did not commit.
 func (s *AgentMessageService) deliverAgentMessageAttempt(
 	ctx context.Context,
-	principal controlclient.Principal,
-	req controlclient.AgentMessageRequest,
-) (controlclient.AgentMessageResult, error) {
+	principal appserver.Principal,
+	req appserver.AgentMessageRequest,
+) (appserver.AgentMessageResult, error) {
 	active, err := s.host.Sessions.Session(ctx, session.SessionRef{SessionID: req.SessionID})
 	if err != nil {
 		if errors.Is(err, session.ErrSessionNotFound) {
-			return controlclient.AgentMessageResult{}, controlclient.ErrUnauthorized
+			return appserver.AgentMessageResult{}, appserver.ErrUnauthorized
 		}
-		return controlclient.AgentMessageResult{}, err
+		return appserver.AgentMessageResult{}, err
 	}
 	if err := authorizeAgentMessagePrincipal(principal, active); err != nil {
-		return controlclient.AgentMessageResult{}, err
+		return appserver.AgentMessageResult{}, err
 	}
-	closed, err := controlclient.IsSessionClosed(ctx, s.host.Sessions, active.SessionRef)
+	closed, err := appserver.IsSessionClosed(ctx, s.host.Sessions, active.SessionRef)
 	if err != nil {
-		return controlclient.AgentMessageResult{}, err
+		return appserver.AgentMessageResult{}, err
 	}
 	if closed {
-		return controlclient.AgentMessageResult{}, controlclient.ErrSessionClosed
+		return appserver.AgentMessageResult{}, appserver.ErrSessionClosed
 	}
 	source, err := s.trustedAgentMessageSource(ctx, principal, active)
 	if err != nil {
-		return controlclient.AgentMessageResult{}, err
+		return appserver.AgentMessageResult{}, err
 	}
 	expectedRevision := active.Revision
 	deliver := s.deliver
@@ -101,15 +101,15 @@ func (s *AgentMessageService) deliverAgentMessageAttempt(
 		},
 	})
 	if err != nil {
-		return controlclient.AgentMessageResult{}, err
+		return appserver.AgentMessageResult{}, err
 	}
-	result := controlclient.AgentMessageResult{
+	result := appserver.AgentMessageResult{
 		MessageID: req.MessageID,
 		Accepted:  delivery.Accepted,
 		State:     delivery.State,
 	}
 	if delivery.Turn != nil {
-		result.Target = controlclient.TurnTarget{
+		result.Target = appserver.TurnTarget{
 			HandleID: delivery.Turn.HandleID(),
 			RunID:    delivery.Turn.RunID(),
 			TurnID:   delivery.Turn.TurnID(),
@@ -125,10 +125,10 @@ type resolvedAgentMessageSource struct {
 	relatedRevisions []session.SessionRevisionPrecondition
 }
 
-func authorizeAgentMessagePrincipal(principal controlclient.Principal, active session.Session) error {
+func authorizeAgentMessagePrincipal(principal appserver.Principal, active session.Session) error {
 	principalID := strings.TrimSpace(principal.ID)
 	if principalID == "" {
-		return controlclient.ErrUnauthorized
+		return appserver.ErrUnauthorized
 	}
 	if principal.HasRole("admin") || strings.TrimSpace(active.UserID) == principalID {
 		return nil
@@ -141,12 +141,12 @@ func authorizeAgentMessagePrincipal(principal controlclient.Principal, active se
 	if strings.TrimSpace(active.Controller.ControllerID) == principalID {
 		return nil
 	}
-	return controlclient.ErrUnauthorized
+	return appserver.ErrUnauthorized
 }
 
 func (s *AgentMessageService) trustedAgentMessageSource(
 	ctx context.Context,
-	principal controlclient.Principal,
+	principal appserver.Principal,
 	active session.Session,
 ) (resolvedAgentMessageSource, error) {
 	principalID := strings.TrimSpace(principal.ID)
@@ -192,7 +192,7 @@ func participantBindingMatchesPrincipal(binding session.ParticipantBinding, prin
 
 func (s *AgentMessageService) managedChildParentSource(
 	ctx context.Context,
-	principal controlclient.Principal,
+	principal appserver.Principal,
 	child session.Session,
 ) (session.ActorRef, session.EventScope, session.Session, error) {
 	kind := agentMessageMetadataString(child.Metadata, sessionvisibility.MetadataSystemManagedAgent)
@@ -213,7 +213,7 @@ func (s *AgentMessageService) managedChildParentSource(
 		return session.ActorRef{}, session.EventScope{}, session.Session{}, errors.New("managed child parent owner does not match target Session")
 	}
 	if !principal.HasRole("admin") && strings.TrimSpace(parent.UserID) != strings.TrimSpace(principal.ID) {
-		return session.ActorRef{}, session.EventScope{}, session.Session{}, controlclient.ErrUnauthorized
+		return session.ActorRef{}, session.EventScope{}, session.Session{}, appserver.ErrUnauthorized
 	}
 	actor, scope, err := managedChildParentMessageSource(childSessionID, taskID, parent)
 	return actor, scope, parent, err
@@ -263,4 +263,4 @@ func agentMessageMetadataString(metadata map[string]any, key string) string {
 	return strings.TrimSpace(value)
 }
 
-var _ controlclient.AgentMessageService = (*AgentMessageService)(nil)
+var _ appserver.AgentMessageService = (*AgentMessageService)(nil)

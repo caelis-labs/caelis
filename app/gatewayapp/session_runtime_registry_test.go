@@ -21,8 +21,8 @@ import (
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
 )
@@ -144,24 +144,24 @@ func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
 		"workspace-b-skill",
 	)
 
-	if _, err := remote.CloseSession(ctx, controlclient.CloseSessionRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "close-b", SessionID: sessionB},
+	if _, err := remote.CloseSession(ctx, appserver.CloseSessionRequest{
+		WriteBase: appserver.WriteBase{OperationID: "close-b", SessionID: sessionB},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := stack.sessionRuntimes.loaded(sessionB); ok {
 		t.Fatal("closed Session retained a live Runtime")
 	}
-	if state, err := remote.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionB}); err != nil || state.CWD != workspaceB {
+	if state, err := remote.InspectSession(ctx, appserver.StateRequest{SessionID: sessionB}); err != nil || state.CWD != workspaceB {
 		t.Fatalf("inspect closed Session = %#v, %v", state, err)
 	}
-	closedPrompt, err := remote.Prompt(ctx, controlclient.PromptRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "prompt-closed-b", SessionID: sessionB},
+	closedPrompt, err := remote.Prompt(ctx, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{OperationID: "prompt-closed-b", SessionID: sessionB},
 		Input:     "must remain closed",
 	})
-	if !errors.Is(err, controlclient.ErrSessionClosed) ||
+	if !errors.Is(err, appserver.ErrSessionClosed) ||
 		errorcode.CodeOf(err) != errorcode.FailedPrecondition ||
-		closedPrompt.Outcome != controlclient.OutcomeRejected {
+		closedPrompt.Outcome != appserver.OutcomeRejected {
 		t.Fatalf("HTTP Prompt on closed Session = %#v, %v; want typed ErrSessionClosed", closedPrompt, err)
 	}
 	if _, ok := stack.sessionRuntimes.loaded(sessionB); ok {
@@ -173,7 +173,7 @@ func TestSessionRuntimeSelectsNewCatalogModelPinsDeletionAndRepairsOnReactivatio
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	runtime := activateSessionRuntime(t, stack, active.SessionID)
 	initialID := stack.lookup.DefaultID()
 
@@ -188,8 +188,8 @@ func TestSessionRuntimeSelectsNewCatalogModelPinsDeletionAndRepairsOnReactivatio
 	}
 	lateID := profile.Backend.Provider.ModelConfigID
 	active = mustCurrentSession(t, stack, active.SessionID)
-	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, controlclient.SessionModelRequest{
-		WriteBase: controlclient.WriteBase{
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "select-late-runtime-model",
 			SessionID:               active.SessionID,
 			ExpectedRevision:        &active.Revision,
@@ -197,7 +197,7 @@ func TestSessionRuntimeSelectsNewCatalogModelPinsDeletionAndRepairsOnReactivatio
 		},
 		Model: lateID, ReasoningEffort: "high",
 	})
-	if err != nil || selected.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel(new catalog entry) = %#v, %v", selected, err)
 	}
 	if state, err := runtime.stack.SessionRuntimeState(ctx, active.SessionRef); err != nil || state.ModelID != lateID {
@@ -210,8 +210,8 @@ func TestSessionRuntimeSelectsNewCatalogModelPinsDeletionAndRepairsOnReactivatio
 	if state, err := runtime.stack.SessionRuntimeState(ctx, active.SessionRef); err != nil || state.ModelID != lateID {
 		t.Fatalf("active Runtime state after deletion = %#v, %v; want pinned %q", state, err, lateID)
 	}
-	if _, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, controlclient.SessionModelRequest{
-		WriteBase: controlclient.WriteBase{
+	if _, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "reselect-deleted-runtime-model",
 			SessionID:               active.SessionID,
 			ExpectedRevision:        &selected.Revision,
@@ -259,7 +259,7 @@ func TestSpawnedSessionUsesParentRuntimeModelSnapshotAfterHostDeletion(t *testin
 	ctx := context.Background()
 	stack, parent := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 
 	profile, err := stack.connectTestModel(ModelConfig{
 		Provider:            "ollama",
@@ -274,8 +274,8 @@ func TestSpawnedSessionUsesParentRuntimeModelSnapshotAfterHostDeletion(t *testin
 	}
 	modelID := profile.Backend.Provider.ModelConfigID
 	parent = mustCurrentSession(t, stack, parent.SessionID)
-	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, controlclient.SessionModelRequest{
-		WriteBase: controlclient.WriteBase{
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "select-spawn-frozen-model",
 			SessionID:               parent.SessionID,
 			ExpectedRevision:        &parent.Revision,
@@ -283,7 +283,7 @@ func TestSpawnedSessionUsesParentRuntimeModelSnapshotAfterHostDeletion(t *testin
 		},
 		Model: modelID, ReasoningEffort: "high",
 	})
-	if err != nil || selected.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel() = %#v, %v", selected, err)
 	}
 	parentRuntime := activateSessionRuntime(t, stack, parent.SessionID)
@@ -340,7 +340,7 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	runtime := activateSessionRuntime(t, stack, active.SessionID)
 	beforeLookup := runtime.stack.lookup.Snapshot()
 	beforeContextWindow := runtime.stack.lookup.contextWindow
@@ -364,13 +364,13 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 	runtime.stack.Sessions = blocked
 
 	type commandResult struct {
-		result controlclient.CommandResult
+		result appserver.CommandResult
 		err    error
 	}
 	commandDone := make(chan commandResult, 1)
 	go func() {
-		result, commandErr := stack.ConfigurationCommands().UseSessionModel(ctx, principal, controlclient.SessionModelRequest{
-			WriteBase: controlclient.WriteBase{
+		result, commandErr := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+			WriteBase: appserver.WriteBase{
 				OperationID:             "conflicted-runtime-model-pin",
 				SessionID:               active.SessionID,
 				ExpectedRevision:        &active.Revision,
@@ -409,7 +409,7 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 	}
 	close(blocked.proceed)
 	command := <-commandDone
-	if !errors.Is(command.err, session.ErrRevisionConflict) || command.result.Outcome != controlclient.OutcomeConflicted {
+	if !errors.Is(command.err, session.ErrRevisionConflict) || command.result.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("UseSessionModel(conflicted) = %#v, %v", command.result, command.err)
 	}
 	if visible := <-readDone; visible {
@@ -464,7 +464,7 @@ func TestDormantSessionModelRecoveryClearsSelectionWhenCatalogIsEmpty(t *testing
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, modelID); err != nil {
 		t.Fatal(err)
 	}
-	inspected, err := stack.ControlClient().InspectSession(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.StateRequest{SessionID: active.SessionID})
+	inspected, err := stack.ControlClient().InspectSession(ctx, appserver.Principal{ID: stack.UserID}, appserver.StateRequest{SessionID: active.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,16 +557,16 @@ func TestClosedSessionReconnectDoesNotRepairDeletedModelReference(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	closed, err := stack.ControlClient().CloseSession(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.CloseSessionRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "close-before-model-recovery", SessionID: active.SessionID, ExpectedRevision: &updated.Revision},
+	closed, err := stack.ControlClient().CloseSession(ctx, appserver.Principal{ID: stack.UserID}, appserver.CloseSessionRequest{
+		WriteBase: appserver.WriteBase{OperationID: "close-before-model-recovery", SessionID: active.SessionID, ExpectedRevision: &updated.Revision},
 	})
-	if err != nil || closed.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || closed.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("CloseSession() = %#v, %v", closed, err)
 	}
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, modelID); err != nil {
 		t.Fatal(err)
 	}
-	reconnected, err := stack.ControlClient().Reconnect(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.ReconnectRequest{SessionID: active.SessionID})
+	reconnected, err := stack.ControlClient().Reconnect(ctx, appserver.Principal{ID: stack.UserID}, appserver.ReconnectRequest{SessionID: active.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -610,18 +610,18 @@ func TestRejectedFirstCommandDoesNotPinSessionRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	staleRevision := active.Revision + 1
-	result, err := client.Prompt(ctx, controlclient.PromptRequest{
-		WriteBase: controlclient.WriteBase{
+	result, err := client.Prompt(ctx, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:      "reject-first-prompt",
 			SessionID:        sessionID,
 			ExpectedRevision: &staleRevision,
 		},
 		Input: "must not activate",
 	})
-	var outcomeErr *controlclient.OutcomeError
+	var outcomeErr *appserver.OutcomeError
 	if !errors.As(err, &outcomeErr) ||
-		outcomeErr.Outcome != controlclient.OutcomeConflicted ||
-		result.Outcome != controlclient.OutcomeConflicted {
+		outcomeErr.Outcome != appserver.OutcomeConflicted ||
+		result.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("stale first Prompt = %#v, %v; want conflicted", result, err)
 	}
 	if _, loaded := stack.sessionRuntimes.loaded(sessionID); loaded {
@@ -642,9 +642,9 @@ func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *
 	t.Cleanup(func() { _ = stack.Close() })
 	client := newWorkspaceRuntimeHTTPClient(t, stack, "local-user")
 	sessionID := createWorkspaceRuntimeTestSession(t, client, "create-observe", "session-observe", "workspace-observe", workspace)
-	principal := controlclient.Principal{ID: "local-user"}
+	principal := appserver.Principal{ID: "local-user"}
 
-	observed, err := stack.AcquireControlRuntime(ctx, principal, controlclient.ActionSessionInspect, sessionID, false)
+	observed, err := stack.AcquireControlRuntime(ctx, principal, appserver.ActionSessionInspect, sessionID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -659,7 +659,7 @@ func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *
 	}
 
 	loaded := activateSessionRuntime(t, stack, sessionID)
-	pinned, err := stack.AcquireControlRuntime(ctx, principal, controlclient.ActionSessionInspect, sessionID, false)
+	pinned, err := stack.AcquireControlRuntime(ctx, principal, appserver.ActionSessionInspect, sessionID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -686,9 +686,9 @@ func TestSessionRuntimeReleaseWaitsForRoutedControlMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	client, err := controlclient.BindSessionClient(
+	client, err := appserver.BindSessionClient(
 		stack.ControlClient(),
-		controlclient.Principal{ID: "local-user"},
+		appserver.Principal{ID: "local-user"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -728,10 +728,10 @@ func TestSessionRuntimeReleaseWaitsForRoutedControlMutation(t *testing.T) {
 	go func() {
 		_, commandErr := stack.ExecuteControlCommand(
 			ctx,
-			controlclient.Principal{ID: "local-user"},
-			controlclient.ActionControllerHandoff,
-			controlclient.HandoffRequest{
-				WriteBase: controlclient.WriteBase{
+			appserver.Principal{ID: "local-user"},
+			appserver.ActionControllerHandoff,
+			appserver.HandoffRequest{
+				WriteBase: appserver.WriteBase{
 					OperationID: "blocking-handoff",
 					SessionID:   sessionID,
 				},
@@ -784,9 +784,9 @@ func TestHostCloseRetriesFailedSessionRuntimeResourceRelease(t *testing.T) {
 			_ = stack.Close()
 		}
 	})
-	client, err := controlclient.BindSessionClient(
+	client, err := appserver.BindSessionClient(
 		stack.ControlClient(),
-		controlclient.Principal{ID: "local-user"},
+		appserver.Principal{ID: "local-user"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -866,7 +866,7 @@ func TestSessionRuntimeSandboxConfigIsDetachedFromHostMutation(t *testing.T) {
 	t.Cleanup(func() { _ = stack.Close() })
 	client := newWorkspaceRuntimeHTTPClient(t, stack, "local-user")
 	firstID := createWorkspaceRuntimeTestSession(t, client, "create-first", "session-first", "workspace", workspace)
-	observation, err := client.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: firstID})
+	observation, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: firstID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -888,8 +888,8 @@ func TestSessionRuntimeSandboxConfigIsDetachedFromHostMutation(t *testing.T) {
 	first.stack.mu.Lock()
 	first.stack.gateway = blockingGateway
 	first.stack.mu.Unlock()
-	prompt, err := client.Prompt(ctx, controlclient.PromptRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "prompt-first", SessionID: firstID},
+	prompt, err := client.Prompt(ctx, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{OperationID: "prompt-first", SessionID: firstID},
 		Input:     "hold the Session Runtime active",
 	})
 	if err != nil {
@@ -918,8 +918,8 @@ func TestSessionRuntimeSandboxConfigIsDetachedFromHostMutation(t *testing.T) {
 	if !slices.Equal(first.stack.sandbox.WritableRoots, []string{initialWritableRoot}) {
 		t.Fatalf("live Session sandbox writable roots = %#v, want pinned initial snapshot", first.stack.sandbox.WritableRoots)
 	}
-	if _, err := client.Cancel(ctx, controlclient.CancelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "cancel-first", SessionID: firstID},
+	if _, err := client.Cancel(ctx, appserver.CancelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "cancel-first", SessionID: firstID},
 		Target:    prompt.Target,
 		Reason:    "test complete",
 	}); err != nil {
@@ -987,7 +987,7 @@ func TestSessionRuntimeActivationWaitsForReleaseAndBuildsFreshRuntime(t *testing
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	client, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "local-user"})
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1009,8 +1009,8 @@ func TestSessionRuntimeActivationWaitsForReleaseAndBuildsFreshRuntime(t *testing
 	runtime.stack.mu.Lock()
 	runtime.stack.gateway = blockingGateway
 	runtime.stack.mu.Unlock()
-	if _, err := client.Prompt(ctx, controlclient.PromptRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "prompt-release-race", SessionID: sessionID},
+	if _, err := client.Prompt(ctx, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{OperationID: "prompt-release-race", SessionID: sessionID},
 		Input:     "hold release open",
 	}); err != nil {
 		t.Fatal(err)
@@ -1079,7 +1079,7 @@ func TestSessionRuntimeReassemblesCurrentConfigAfterHostRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := controlclient.BindSessionClient(first.ControlClient(), controlclient.Principal{ID: "local-user"})
+	client, err := appserver.BindSessionClient(first.ControlClient(), appserver.Principal{ID: "local-user"})
 	if err != nil {
 		_ = first.Close()
 		t.Fatal(err)
@@ -1095,14 +1095,14 @@ func TestSessionRuntimeReassemblesCurrentConfigAfterHostRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reloaded.Close() })
-	reloadedClient, err := controlclient.BindSessionClient(
+	reloadedClient, err := appserver.BindSessionClient(
 		reloaded.ControlClient(),
-		controlclient.Principal{ID: "local-user"},
+		appserver.Principal{ID: "local-user"},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := reloadedClient.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
+	state, err := reloadedClient.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1141,7 +1141,7 @@ func TestSessionObservationDoesNotActivateRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	client, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "local-user"})
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1150,18 +1150,18 @@ func TestSessionObservationDoesNotActivateRuntime(t *testing.T) {
 		t.Fatal("CreateSession eagerly activated a Runtime")
 	}
 
-	state, err := client.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
+	state, err := client.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if state.Run.Active || state.CWD != workspace {
 		t.Fatalf("observed Session state = %#v", state)
 	}
-	first, err := client.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: sessionID})
+	first, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := client.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: sessionID})
+	second, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
 	if err != nil {
 		_ = first.Subscription.Close()
 		t.Fatal(err)
@@ -1192,11 +1192,11 @@ func TestSessionRuntimeLivesUntilLastObserverDetaches(t *testing.T) {
 	sessionID := createWorkspaceRuntimeTestSession(
 		t, client, "create-observer-lifetime", "observer-lifetime", "observer-lifetime", workspace,
 	)
-	first, err := client.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: sessionID})
+	first, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := client.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: sessionID})
+	second, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
 	if err != nil {
 		_ = first.Subscription.Close()
 		t.Fatal(err)
@@ -1241,14 +1241,14 @@ func TestSessionRuntimeRunningWorkSurvivesObserverDetach(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	client, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "local-user"})
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sessionID := createWorkspaceRuntimeTestSession(
 		t, client, "create-work-lifetime", "work-lifetime", "work-lifetime", workspace,
 	)
-	observed, err := client.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: sessionID})
+	observed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1280,14 +1280,14 @@ func TestSessionRuntimeDurableRunningTaskSurvivesObserverDetach(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	client, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "local-user"})
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sessionID := createWorkspaceRuntimeTestSession(
 		t, client, "create-task-lifetime", "task-lifetime", "task-lifetime", workspace,
 	)
-	observed, err := client.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: sessionID})
+	observed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1331,14 +1331,14 @@ func TestSessionRuntimeIdleReleaseRetriesTransientTaskReadFailure(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	client, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "local-user"})
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sessionID := createWorkspaceRuntimeTestSession(
 		t, client, "create-task-read-retry", "task-read-retry", "task-read-retry", workspace,
 	)
-	observed, err := client.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: sessionID})
+	observed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1400,11 +1400,11 @@ func TestParticipantHandlesUseFixedSessionRuntimeSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sessions, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "local-user"})
+	sessions, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	participants, err := controlclient.BindParticipantClient(stack.ControlParticipants(), controlclient.Principal{ID: "local-user"})
+	participants, err := appserver.BindParticipantClient(stack.ControlParticipants(), appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1444,11 +1444,11 @@ func TestSessionRuntimeIdentityDoesNotPartitionByUser(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stack.Close() })
 
-	first, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "local-user"})
+	first, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "compatibility-principal"})
+	second, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "compatibility-principal"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1492,11 +1492,11 @@ func TestControlClientRejectsForeignPreferredSessionBeforeWorkspaceDisclosure(t 
 	}
 	t.Cleanup(func() { _ = stack.Close() })
 
-	owner, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "owner"})
+	owner, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "other"})
+	other, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "other"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1509,14 +1509,14 @@ func TestControlClientRejectsForeignPreferredSessionBeforeWorkspaceDisclosure(t 
 		workspaceA,
 	)
 
-	result, err := other.CreateSession(ctx, controlclient.CreateSessionRequest{
-		WriteBase:          controlclient.WriteBase{OperationID: "probe-foreign-session"},
+	result, err := other.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: "probe-foreign-session"},
 		PreferredSessionID: sessionID,
 		WorkspaceKey:       "workspace-b",
 		CWD:                workspaceB,
 	})
 	if err == nil ||
-		result.Outcome != controlclient.OutcomeRejected ||
+		result.Outcome != appserver.OutcomeRejected ||
 		errorcode.CodeOf(err) != errorcode.PermissionDenied {
 		t.Fatalf("foreign preferred CreateSession() = %#v, %v; want rejected permission_denied", result, err)
 	}
@@ -1556,7 +1556,7 @@ func TestControlClientRecordsPreDispatchRoutingFailureAsRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	client, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "local-user"})
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1577,8 +1577,8 @@ func TestControlClientRecordsPreDispatchRoutingFailureAsRejected(t *testing.T) {
 		Service: originalSessions,
 		err:     errors.New("synthetic routing read failure"),
 	}
-	request := controlclient.CloseSessionRequest{
-		WriteBase: controlclient.WriteBase{
+	request := appserver.CloseSessionRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID: "close-routing-failure",
 			SessionID:   sessionID,
 		},
@@ -1586,11 +1586,11 @@ func TestControlClientRecordsPreDispatchRoutingFailureAsRejected(t *testing.T) {
 	result, err := client.CloseSession(ctx, request)
 	stack.Sessions = originalSessions
 	if err == nil ||
-		result.Outcome != controlclient.OutcomeRejected ||
+		result.Outcome != appserver.OutcomeRejected ||
 		errorcode.CodeOf(err) != errorcode.Internal {
 		t.Fatalf("pre-dispatch routing failure = %#v, %v; want rejected internal", result, err)
 	}
-	closed, err := controlclient.IsSessionClosed(ctx, originalSessions, session.SessionRef{SessionID: sessionID})
+	closed, err := appserver.IsSessionClosed(ctx, originalSessions, session.SessionRef{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1602,7 +1602,7 @@ func TestControlClientRecordsPreDispatchRoutingFailureAsRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replayed.Outcome != controlclient.OutcomeRejected {
+	if replayed.Outcome != appserver.OutcomeRejected {
 		t.Fatalf("persisted routing failure = %#v, want rejected", replayed)
 	}
 }
@@ -1621,7 +1621,7 @@ func TestSessionRuntimeRegistryCreatesSessionsLazilyConcurrently(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	client, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "local-user"})
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1638,8 +1638,8 @@ func TestSessionRuntimeRegistryCreatesSessionsLazilyConcurrently(t *testing.T) {
 				key, cwd = "workspace-b", workspaceB
 			}
 			sessionID := fmt.Sprintf("concurrent-%02d", index)
-			result, createErr := client.CreateSession(context.Background(), controlclient.CreateSessionRequest{
-				WriteBase:          controlclient.WriteBase{OperationID: "create-" + sessionID},
+			result, createErr := client.CreateSession(context.Background(), appserver.CreateSessionRequest{
+				WriteBase:          appserver.WriteBase{OperationID: "create-" + sessionID},
 				PreferredSessionID: sessionID,
 				WorkspaceKey:       key,
 				CWD:                cwd,
@@ -1648,7 +1648,7 @@ func TestSessionRuntimeRegistryCreatesSessionsLazilyConcurrently(t *testing.T) {
 				errs <- createErr
 				return
 			}
-			if result.Outcome != controlclient.OutcomeCommitted || result.SessionID != sessionID {
+			if result.Outcome != appserver.OutcomeCommitted || result.SessionID != sessionID {
 				errs <- fmt.Errorf("CreateSession(%q) = %#v", sessionID, result)
 			}
 		}()
@@ -1906,13 +1906,13 @@ func TestControlClientRejectsAmbiguousWorkspaceBindingBeforeSessionCreation(t *t
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stack.Close() })
-	client, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: "local-user"})
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := client.CreateSession(ctx, controlclient.CreateSessionRequest{
-		WriteBase:          controlclient.WriteBase{OperationID: "ambiguous-workspace"},
+	result, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: "ambiguous-workspace"},
 		PreferredSessionID: "must-not-exist",
 		WorkspaceKey:       "shared-key",
 		CWD:                workspaceB,
@@ -1920,7 +1920,7 @@ func TestControlClientRejectsAmbiguousWorkspaceBindingBeforeSessionCreation(t *t
 	if err == nil {
 		t.Fatalf("CreateSession() = %#v, nil; want ambiguous workspace rejection", result)
 	}
-	if result.Outcome != controlclient.OutcomeRejected || errorcode.CodeOf(err) != errorcode.InvalidArgument {
+	if result.Outcome != appserver.OutcomeRejected || errorcode.CodeOf(err) != errorcode.InvalidArgument {
 		t.Fatalf("CreateSession() = %#v, %v; want rejected invalid_argument", result, err)
 	}
 	if _, loadErr := stack.Sessions.Session(ctx, session.SessionRef{SessionID: "must-not-exist"}); !errors.Is(loadErr, session.ErrSessionNotFound) {
@@ -1969,12 +1969,12 @@ func newWorkspaceRuntimeHTTPClient(
 	t *testing.T,
 	stack *Stack,
 	principalID string,
-) controlclient.SessionClient {
+) appserver.SessionClient {
 	t.Helper()
 	const token = "0123456789abcdef0123456789abcdef"
 	authenticator, err := controlserver.BearerTokenAuthenticator(
 		token,
-		controlclient.Principal{ID: principalID},
+		appserver.Principal{ID: principalID},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1993,7 +1993,7 @@ func newWorkspaceRuntimeHTTPClient(
 		BaseURL:       server.URL,
 		BearerToken:   token,
 		HTTPClient:    server.Client(),
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2120,15 +2120,15 @@ func waitForSessionRuntimeUnloaded(
 
 func createWorkspaceRuntimeTestSession(
 	t *testing.T,
-	client controlclient.SessionClient,
+	client appserver.SessionClient,
 	operationID string,
 	sessionID string,
 	workspaceKey string,
 	cwd string,
 ) string {
 	t.Helper()
-	result, err := client.CreateSession(context.Background(), controlclient.CreateSessionRequest{
-		WriteBase:          controlclient.WriteBase{OperationID: operationID},
+	result, err := client.CreateSession(context.Background(), appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: operationID},
 		PreferredSessionID: sessionID,
 		WorkspaceKey:       workspaceKey,
 		CWD:                cwd,
@@ -2137,7 +2137,7 @@ func createWorkspaceRuntimeTestSession(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Outcome != controlclient.OutcomeCommitted || result.SessionID != sessionID {
+	if result.Outcome != appserver.OutcomeCommitted || result.SessionID != sessionID {
 		t.Fatalf("CreateSession(%q) = %#v", sessionID, result)
 	}
 	return result.SessionID

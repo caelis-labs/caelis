@@ -8,7 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 func TestAppServerFacadeResetDoesNotCreateWorkspaceSessions(t *testing.T) {
@@ -36,7 +36,7 @@ func TestAppServerFacadeResetDoesNotCreateWorkspaceSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, tasks, err := server.Bind(controlclient.Principal{ID: "local-user"})
+	clients, tasks, err := server.Bind(appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestAppServerFacadeResetDoesNotCreateWorkspaceSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, workspaceKey := range []string{"workspace-a", "workspace-b"} {
-		listed, err := clients.Sessions.ListSessions(ctx, controlclient.ListSessionsRequest{WorkspaceKey: workspaceKey, Limit: 10})
+		listed, err := clients.Sessions.ListSessions(ctx, appserver.ListSessionsRequest{WorkspaceKey: workspaceKey, Limit: 10})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -16,7 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
@@ -51,7 +51,7 @@ func TestDisconnectACPRemovesSiblingProfilesAndRetainsInstallation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Outcome != controlclient.OutcomeCommitted {
+	if result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DisconnectACP() = %#v", result)
 	}
 	doc, err = stack.store.Load()
@@ -73,7 +73,7 @@ func TestDisconnectACPRollsForwardAfterCommittedConfigWriteFault(t *testing.T) {
 	writeCount := installCommittedConfigSaveFault(t, stack, "fsync", fault)
 
 	result, err := disconnectACPCommand(context.Background(), stack, "committed-disconnect")
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted || !strings.Contains(result.Detail, fault.Error()) {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || !strings.Contains(result.Detail, fault.Error()) {
 		t.Fatalf("DisconnectACP() receipt/error = %#v/%v", result, err)
 	}
 	if writeCount() != 1 {
@@ -131,12 +131,12 @@ func TestDisconnectACPCommandCachesUnknownWhenCommittedRevisionCannotBeObserved(
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := controlclient.DisconnectACPRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "agent-disconnect-committed-readback", ExpectedRevision: &expected},
+	request := appserver.DisconnectACPRequest{
+		WriteBase: appserver.WriteBase{OperationID: "agent-disconnect-committed-readback", ExpectedRevision: &expected},
 		AgentID:   "readback-disconnect",
 	}
-	result, err := stack.AgentCommands().DisconnectACP(context.Background(), controlclient.Principal{ID: stack.UserID}, request)
-	if !errors.Is(err, fault) || result.Outcome != controlclient.OutcomeUnknown || result.Revision != 0 {
+	result, err := stack.AgentCommands().DisconnectACP(context.Background(), appserver.Principal{ID: stack.UserID}, request)
+	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != 0 {
 		t.Fatalf("DisconnectACP(committed readback failure) = %#v, %v", result, err)
 	}
 	restore()
@@ -147,7 +147,7 @@ func TestDisconnectACPCommandCachesUnknownWhenCommittedRevisionCannotBeObserved(
 	if _, ok := controlagents.LookupAgent(doc.ExternalAgents, "readback-disconnect"); ok {
 		t.Fatalf("persisted config retained disconnected Agent: %#v", doc.ExternalAgents)
 	}
-	replayed, replayErr := stack.AgentCommands().DisconnectACP(context.Background(), controlclient.Principal{ID: stack.UserID}, request)
+	replayed, replayErr := stack.AgentCommands().DisconnectACP(context.Background(), appserver.Principal{ID: stack.UserID}, request)
 	if replayErr != nil || replayed != result || writeCount() != 1 {
 		t.Fatalf("DisconnectACP(replay) = %#v, %v writes=%d; want %#v and one write", replayed, replayErr, writeCount(), result)
 	}
@@ -254,7 +254,7 @@ func TestDisconnectACPPersistsProfilesAndBindingsWithoutAssemblyRefresh(t *testi
 	}
 
 	receipt, err := disconnectACPCommand(context.Background(), stack, "rollback")
-	if err != nil || receipt.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DisconnectACP() receipt/error = %#v/%v", receipt, err)
 	}
 	doc, err = stack.store.Load()
@@ -293,7 +293,7 @@ func TestDisconnectACPDoesNotRewriteActivatedSessionRuntime(t *testing.T) {
 	}
 
 	receipt, err := disconnectACPCommand(ctx, stack, "codex")
-	if err != nil || receipt.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DisconnectACP() receipt/error = %#v/%v", receipt, err)
 	}
 	if _, ok := storedACPAgentInfo(activated.stack.ListACPAgents(), "codex"); !ok {
@@ -354,7 +354,7 @@ func TestDisconnectACPDoesNotScanDurableSessionBindings(t *testing.T) {
 	}
 
 	receipt, err := disconnectACPCommand(ctx, stack, "codex")
-	if err != nil || receipt.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DisconnectACP() receipt/error = %#v/%v", receipt, err)
 	}
 	doc, err := stack.store.LoadContext(ctx)
@@ -366,14 +366,14 @@ func TestDisconnectACPDoesNotScanDurableSessionBindings(t *testing.T) {
 	}
 }
 
-func disconnectACPCommand(ctx context.Context, stack *Stack, agentID string) (controlclient.CommandResult, error) {
+func disconnectACPCommand(ctx context.Context, stack *Stack, agentID string) (appserver.CommandResult, error) {
 	snapshot, err := stack.DisconnectCandidatesSnapshot(ctx)
 	if err != nil {
-		return controlclient.CommandResult{}, err
+		return appserver.CommandResult{}, err
 	}
 	revision := snapshot.Revision
-	return stack.AgentCommands().DisconnectACP(ctx, controlclient.Principal{ID: "test"}, controlclient.DisconnectACPRequest{
-		WriteBase: controlclient.WriteBase{
+	return stack.AgentCommands().DisconnectACP(ctx, appserver.Principal{ID: "test"}, appserver.DisconnectACPRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:      "test-agent-disconnect-" + uuid.NewString(),
 			ExpectedRevision: &revision,
 		},

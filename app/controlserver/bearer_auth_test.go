@@ -8,12 +8,12 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 func TestBearerTokenAuthenticatorUsesTrustedPrincipal(t *testing.T) {
 	const token = "0123456789abcdef0123456789abcdef0123456789abcdef"
-	authenticator, err := BearerTokenAuthenticator(token, controlclient.Principal{ID: "configured-owner", Roles: []string{"admin"}})
+	authenticator, err := BearerTokenAuthenticator(token, appserver.Principal{ID: "configured-owner", Roles: []string{"admin"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestBearerTokenAuthenticatorUsesTrustedPrincipal(t *testing.T) {
 
 func TestAllowedHostAndProductionBearerReachService(t *testing.T) {
 	const token = "0123456789abcdef0123456789abcdef0123456789abcdef"
-	authenticator, err := BearerTokenAuthenticator(token, controlclient.Principal{ID: "configured-owner"})
+	authenticator, err := BearerTokenAuthenticator(token, appserver.Principal{ID: "configured-owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,12 +53,12 @@ func TestAllowedHostAndProductionBearerReachService(t *testing.T) {
 }
 
 type authBoundaryService struct {
-	controlclient.Service
+	appserver.Service
 	calls     int
-	principal controlclient.Principal
+	principal appserver.Principal
 }
 
-func (s *authBoundaryService) ListSessions(_ context.Context, principal controlclient.Principal, _ controlclient.ListSessionsRequest) (session.SessionList, error) {
+func (s *authBoundaryService) ListSessions(_ context.Context, principal appserver.Principal, _ appserver.ListSessionsRequest) (session.SessionList, error) {
 	s.calls++
 	s.principal = principal
 	return session.SessionList{}, nil

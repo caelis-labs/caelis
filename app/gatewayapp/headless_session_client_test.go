@@ -11,8 +11,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
 	"github.com/caelis-labs/caelis/surfaces/headless"
@@ -37,8 +37,8 @@ func TestHeadlessSessionTurnMatchesInProcessAndHTTPClients(t *testing.T) {
 			t.Cleanup(func() { _ = stack.Close() })
 
 			client := headlessSessionTestClient(t, stack, transport)
-			created, err := client.CreateSession(ctx, controlclient.CreateSessionRequest{
-				WriteBase: controlclient.WriteBase{
+			created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
+				WriteBase: appserver.WriteBase{
 					OperationID: "create-headless-" + transport,
 				},
 				PreferredSessionID: "headless-" + transport,
@@ -72,14 +72,14 @@ func TestHeadlessSessionTurnMatchesInProcessAndHTTPClients(t *testing.T) {
 			runtime.stack.gateway = gateway
 			runtime.stack.mu.Unlock()
 
-			turns, err := controlclient.NewSessionTurnClient(client)
+			turns, err := appserver.NewSessionTurnClient(client)
 			if err != nil {
 				t.Fatal(err)
 			}
 			result, err := headless.RunSessionOnce(
 				ctx,
 				turns,
-				controlclient.SessionTurnStartRequest{
+				appserver.SessionTurnStartRequest{
 					SessionID:    active.SessionID,
 					Input:        "return the fixed test response",
 					ContentParts: contentParts,
@@ -116,7 +116,7 @@ func TestSessionTurnReconnectRepairsDeletedDormantModelBeforePromptCAS(t *testin
 	defer cancel()
 	stack, active := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	initialID := stack.lookup.DefaultID()
 	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: "ollama", Model: "deleted-before-prompt"})
 	if err != nil {
@@ -124,8 +124,8 @@ func TestSessionTurnReconnectRepairsDeletedDormantModelBeforePromptCAS(t *testin
 	}
 	deletedID := profile.Backend.Provider.ModelConfigID
 	active = mustCurrentSession(t, stack, active.SessionID)
-	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, controlclient.SessionModelRequest{
-		WriteBase: controlclient.WriteBase{
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "select-deleted-before-prompt",
 			SessionID:               active.SessionID,
 			ExpectedRevision:        &active.Revision,
@@ -133,7 +133,7 @@ func TestSessionTurnReconnectRepairsDeletedDormantModelBeforePromptCAS(t *testin
 		},
 		Model: deletedID,
 	})
-	if err != nil || selected.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel() = %#v, %v", selected, err)
 	}
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, deletedID); err != nil {
@@ -141,17 +141,17 @@ func TestSessionTurnReconnectRepairsDeletedDormantModelBeforePromptCAS(t *testin
 	}
 
 	requests := make(chan agent.RunRequest, 1)
-	client, err := controlclient.BindSessionClient(stack.ControlClient(), principal)
+	client, err := appserver.BindSessionClient(stack.ControlClient(), principal)
 	if err != nil {
 		t.Fatal(err)
 	}
-	turns, err := controlclient.NewSessionTurnClient(client)
+	turns, err := appserver.NewSessionTurnClient(client)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Replace the newly assembled model-backed Runtime only after reconnect has
 	// repaired state, while retaining the exact product SessionTurn client path.
-	reconnected, err := client.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: active.SessionID})
+	reconnected, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: active.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestSessionTurnReconnectRepairsDeletedDormantModelBeforePromptCAS(t *testin
 	runtime.stack.mu.Lock()
 	runtime.stack.gateway = gateway
 	runtime.stack.mu.Unlock()
-	result, err := headless.RunSessionOnce(ctx, turns, controlclient.SessionTurnStartRequest{
+	result, err := headless.RunSessionOnce(ctx, turns, appserver.SessionTurnStartRequest{
 		SessionID: active.SessionID, Input: "continue after recovery",
 	}, headless.Options{})
 	if err != nil {
@@ -195,12 +195,12 @@ func headlessSessionTestClient(
 	t *testing.T,
 	stack *Stack,
 	transport string,
-) controlclient.SessionClient {
+) appserver.SessionClient {
 	t.Helper()
 	if transport == "in-process" {
-		client, err := controlclient.BindSessionClient(
+		client, err := appserver.BindSessionClient(
 			stack.ControlClient(),
-			controlclient.Principal{ID: "local-user"},
+			appserver.Principal{ID: "local-user"},
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -210,7 +210,7 @@ func headlessSessionTestClient(
 	const token = "0123456789abcdef0123456789abcdef"
 	authenticator, err := controlserver.BearerTokenAuthenticator(
 		token,
-		controlclient.Principal{ID: "local-user"},
+		appserver.Principal{ID: "local-user"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -230,7 +230,7 @@ func headlessSessionTestClient(
 		BearerToken:   token,
 		EventBuffer:   32,
 		HTTPClient:    server.Client(),
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)

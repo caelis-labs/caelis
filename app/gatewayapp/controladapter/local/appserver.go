@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
@@ -13,7 +13,7 @@ import (
 // focused Control service set plus the independent Task output side channel.
 // Surfaces bind clients from this boundary and never receive the Host Stack.
 type AppServer struct {
-	Services    controlclient.AppServerServices
+	Services    appserver.AppServerServices
 	TaskStreams taskstream.Service
 }
 
@@ -63,7 +63,7 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 		return nil, err
 	}
 	server := &AppServer{
-		Services: controlclient.AppServerServices{
+		Services: appserver.AppServerServices{
 			Sessions: host.ControlClient(), Participants: host.ControlParticipants(), AgentMessages: agentMessages, Status: status,
 			Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
 			Presentation: presentation, Terminal: terminal,
@@ -80,17 +80,17 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 }
 
 // Bind returns the principal-bound AppServer clients used by one surface.
-func (s *AppServer) Bind(principal controlclient.Principal) (controlclient.AppServerClients, taskstream.Client, error) {
+func (s *AppServer) Bind(principal appserver.Principal) (appserver.AppServerClients, taskstream.Client, error) {
 	if s == nil || s.TaskStreams == nil {
-		return controlclient.AppServerClients{}, nil, errors.New("app/gatewayapp/controladapter/local: AppServer is unavailable")
+		return appserver.AppServerClients{}, nil, errors.New("app/gatewayapp/controladapter/local: AppServer is unavailable")
 	}
-	clients, err := controlclient.BindAppServerClients(s.Services, principal)
+	clients, err := appserver.BindAppServerClients(s.Services, principal)
 	if err != nil {
-		return controlclient.AppServerClients{}, nil, err
+		return appserver.AppServerClients{}, nil, err
 	}
 	tasks, err := taskstream.BindClient(s.TaskStreams, taskstream.Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)})
 	if err != nil {
-		return controlclient.AppServerClients{}, nil, err
+		return appserver.AppServerClients{}, nil, err
 	}
 	return clients, tasks, nil
 }

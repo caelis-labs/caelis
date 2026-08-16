@@ -18,7 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/plugin"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
@@ -26,17 +26,17 @@ import (
 func TestSandboxConfigurationCommandUsesHostCASAndSharedLedger(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	expected, err := stack.ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := controlclient.SandboxRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "sandbox-host-cas", ExpectedRevision: &expected},
+	request := appserver.SandboxRequest{
+		WriteBase: appserver.WriteBase{OperationID: "sandbox-host-cas", ExpectedRevision: &expected},
 		Backend:   "host",
 	}
 	first, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, principal, request)
-	if err != nil || first.Outcome != controlclient.OutcomeCommitted || first.Revision != expected+1 {
+	if err != nil || first.Outcome != appserver.OutcomeCommitted || first.Revision != expected+1 {
 		t.Fatalf("SetSandboxBackend() = %#v, %v", first, err)
 	}
 	if actual, err := stack.ConfigurationRevision(ctx); err != nil || actual != first.Revision {
@@ -49,35 +49,35 @@ func TestSandboxConfigurationCommandUsesHostCASAndSharedLedger(t *testing.T) {
 	changed := request
 	changed.Backend = "auto"
 	conflicted, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, principal, changed)
-	if !errors.Is(err, controlclient.ErrOperationConflict) || conflicted.Outcome != controlclient.OutcomeConflicted {
+	if !errors.Is(err, appserver.ErrOperationConflict) || conflicted.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("SetSandboxBackend(changed payload) = %#v, %v", conflicted, err)
 	}
-	stale, err := stack.ConfigurationCommands().ResetSandbox(ctx, principal, controlclient.SandboxRequest{WriteBase: controlclient.WriteBase{
+	stale, err := stack.ConfigurationCommands().ResetSandbox(ctx, principal, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "sandbox-stale", ExpectedRevision: &expected,
 	}})
-	if err == nil || stale.Outcome != controlclient.OutcomeConflicted || stale.Revision != first.Revision || errorcode.CodeOf(err) != errorcode.Conflict {
+	if err == nil || stale.Outcome != appserver.OutcomeConflicted || stale.Revision != first.Revision || errorcode.CodeOf(err) != errorcode.Conflict {
 		t.Fatalf("ResetSandbox(stale) = %#v, %v", stale, err)
 	}
 	invalidRevision := first.Revision
-	invalid, err := stack.ConfigurationCommands().ResetSandbox(ctx, principal, controlclient.SandboxRequest{WriteBase: controlclient.WriteBase{
+	invalid, err := stack.ConfigurationCommands().ResetSandbox(ctx, principal, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "sandbox-session-address", SessionID: "session-1", ExpectedRevision: &invalidRevision,
 	}})
-	if errorcode.CodeOf(err) != errorcode.InvalidArgument || invalid.Outcome != controlclient.OutcomeRejected {
+	if errorcode.CodeOf(err) != errorcode.InvalidArgument || invalid.Outcome != appserver.OutcomeRejected {
 		t.Fatalf("ResetSandbox(Session address) = %#v, %v", invalid, err)
 	}
 
 	sharedOperationID := "shared-control-ledger"
-	created, err := stack.ControlClient().CreateSession(ctx, principal, controlclient.CreateSessionRequest{
-		WriteBase: controlclient.WriteBase{OperationID: sharedOperationID}, PreferredSessionID: "shared-ledger-session",
+	created, err := stack.ControlClient().CreateSession(ctx, principal, appserver.CreateSessionRequest{
+		WriteBase: appserver.WriteBase{OperationID: sharedOperationID}, PreferredSessionID: "shared-ledger-session",
 		WorkspaceKey: stack.Workspace.Key, CWD: stack.Workspace.CWD,
 	})
-	if err != nil || created.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("CreateSession() = %#v, %v", created, err)
 	}
-	sharedConflict, err := stack.ConfigurationCommands().ResetSandbox(ctx, principal, controlclient.SandboxRequest{WriteBase: controlclient.WriteBase{
+	sharedConflict, err := stack.ConfigurationCommands().ResetSandbox(ctx, principal, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: sharedOperationID, ExpectedRevision: &invalidRevision,
 	}})
-	if !errors.Is(err, controlclient.ErrOperationConflict) || sharedConflict.Outcome != controlclient.OutcomeConflicted {
+	if !errors.Is(err, appserver.ErrOperationConflict) || sharedConflict.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("ResetSandbox(shared operation ID) = %#v, %v", sharedConflict, err)
 	}
 
@@ -87,11 +87,11 @@ func TestSandboxConfigurationCommandUsesHostCASAndSharedLedger(t *testing.T) {
 	}
 	cancelledCtx, cancel := context.WithCancel(ctx)
 	cancel()
-	cancelled, err := stack.ConfigurationCommands().SetSandboxBackend(cancelledCtx, principal, controlclient.SandboxRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "sandbox-cancelled", ExpectedRevision: &beforeCancelled},
+	cancelled, err := stack.ConfigurationCommands().SetSandboxBackend(cancelledCtx, principal, appserver.SandboxRequest{
+		WriteBase: appserver.WriteBase{OperationID: "sandbox-cancelled", ExpectedRevision: &beforeCancelled},
 		Backend:   "auto",
 	})
-	if err == nil || cancelled.Outcome == controlclient.OutcomeCommitted {
+	if err == nil || cancelled.Outcome == appserver.OutcomeCommitted {
 		t.Fatalf("SetSandboxBackend(cancelled) = %#v, %v", cancelled, err)
 	}
 	if afterCancelled, loadErr := stack.ConfigurationRevision(ctx); loadErr != nil || afterCancelled != beforeCancelled {
@@ -121,11 +121,11 @@ func TestSandboxConfigurationCommandPreservesCanonicalPolicyFields(t *testing.T)
 		t.Fatal(err)
 	}
 	expected := saved.ConfigurationRevision
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SandboxRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "sandbox-preserve-canonical-policy", ExpectedRevision: &expected},
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, appserver.Principal{ID: stack.UserID}, appserver.SandboxRequest{
+		WriteBase: appserver.WriteBase{OperationID: "sandbox-preserve-canonical-policy", ExpectedRevision: &expected},
 		Backend:   "host",
 	})
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision != expected+1 {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != expected+1 {
 		t.Fatalf("SetSandboxBackend() = %#v, %v", result, err)
 	}
 	persisted, err := external.Load()
@@ -160,12 +160,12 @@ func TestSandboxConfigurationCommandRollsForwardAfterCommittedWriteFault(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := controlclient.SandboxRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "sandbox-committed-write", ExpectedRevision: &expected},
+	request := appserver.SandboxRequest{
+		WriteBase: appserver.WriteBase{OperationID: "sandbox-committed-write", ExpectedRevision: &expected},
 		Backend:   "host",
 	}
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, controlclient.Principal{ID: stack.UserID}, request)
-	if !errors.Is(err, fault) || result.Outcome != controlclient.OutcomeUnknown || result.Revision != expected+1 {
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, appserver.Principal{ID: stack.UserID}, request)
+	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != expected+1 {
 		t.Fatalf("SetSandboxBackend(committed fault) = %#v, %v", result, err)
 	}
 	persisted, loadErr := stack.store.Load()
@@ -181,7 +181,7 @@ func TestSandboxConfigurationCommandRollsForwardAfterCommittedWriteFault(t *test
 		live.RequestedType != "host" || !reflect.DeepEqual(livePersisted, persisted.Sandbox) || liveRevision != result.Revision {
 		t.Fatalf("committed fault diverged durable/live: persisted=%#v live=%#v bound=%#v@%d result=%#v", persisted, live, livePersisted, liveRevision, result)
 	}
-	replayed, replayErr := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), controlclient.Principal{ID: stack.UserID}, request)
+	replayed, replayErr := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.UserID}, request)
 	if replayErr != nil || replayed != result || writeCount() != 1 {
 		t.Fatalf("SetSandboxBackend(replay) = %#v, %v writes=%d; want %#v and one write", replayed, replayErr, writeCount(), result)
 	}
@@ -220,11 +220,11 @@ func TestSandboxConfigurationCommandDoesNotGuessRevisionWhenCommittedWriteCannot
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), controlclient.Principal{ID: stack.UserID}, controlclient.SandboxRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "sandbox-committed-write-readback-failed", ExpectedRevision: &expected},
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.UserID}, appserver.SandboxRequest{
+		WriteBase: appserver.WriteBase{OperationID: "sandbox-committed-write-readback-failed", ExpectedRevision: &expected},
 		Backend:   "host",
 	})
-	if !errors.Is(err, fault) || result.Outcome != controlclient.OutcomeUnknown || result.Revision != 0 {
+	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != 0 {
 		t.Fatalf("SetSandboxBackend(committed readback failure) = %#v, %v", result, err)
 	}
 	stack.mu.RLock()
@@ -282,11 +282,11 @@ func TestSandboxConfigurationCommandDoesNotCompensateCommittedWrite(t *testing.T
 		return committedFault(doc)
 	}
 	expected := before.ConfigurationRevision
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), controlclient.Principal{ID: stack.UserID}, controlclient.SandboxRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "sandbox-committed-write-compensated", ExpectedRevision: &expected},
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.UserID}, appserver.SandboxRequest{
+		WriteBase: appserver.WriteBase{OperationID: "sandbox-committed-write-compensated", ExpectedRevision: &expected},
 		Backend:   "host",
 	})
-	if !errors.Is(err, fault) || result.Outcome != controlclient.OutcomeUnknown || result.Revision != expected+1 {
+	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != expected+1 {
 		t.Fatalf("SetSandboxBackend(committed warning) = %#v, %v", result, err)
 	}
 	after, loadErr := stack.store.Load()
@@ -326,13 +326,13 @@ func TestSandboxLifecycleCommandClassifiesPreEffectAndEffectFailures(t *testing.
 		stack.mu.Unlock()
 	})
 
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	expected := saved.ConfigurationRevision
-	preEffectRequest := controlclient.SandboxRequest{WriteBase: controlclient.WriteBase{
+	preEffectRequest := appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "sandbox-lifecycle-pre-effect", ExpectedRevision: &expected,
 	}}
 	rejected, err := stack.ConfigurationCommands().PrepareSandbox(ctx, principal, preEffectRequest)
-	if err == nil || rejected.Outcome != controlclient.OutcomeRejected || rejected.Revision != expected || errorcode.CodeOf(err) != errorcode.Unavailable {
+	if err == nil || rejected.Outcome != appserver.OutcomeRejected || rejected.Revision != expected || errorcode.CodeOf(err) != errorcode.Unavailable {
 		t.Fatalf("PrepareSandbox(pre-effect) = %#v, %v", rejected, err)
 	}
 	replayedRejected, replayErr := stack.ConfigurationCommands().PrepareSandbox(ctx, principal, preEffectRequest)
@@ -348,11 +348,11 @@ func TestSandboxLifecycleCommandClassifiesPreEffectAndEffectFailures(t *testing.
 	stack.mu.Lock()
 	stack.exec = runtime
 	stack.mu.Unlock()
-	effectRequest := controlclient.SandboxRequest{WriteBase: controlclient.WriteBase{
+	effectRequest := appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "sandbox-lifecycle-effect", ExpectedRevision: &expected,
 	}}
 	unknown, err := stack.ConfigurationCommands().PrepareSandbox(ctx, principal, effectRequest)
-	if !errors.Is(err, effectErr) || unknown.Outcome != controlclient.OutcomeUnknown || unknown.Revision != expected || runtime.prepareCalls != 1 {
+	if !errors.Is(err, effectErr) || unknown.Outcome != appserver.OutcomeUnknown || unknown.Revision != expected || runtime.prepareCalls != 1 {
 		t.Fatalf("PrepareSandbox(effect failure) = %#v, %v calls=%d", unknown, err, runtime.prepareCalls)
 	}
 	replayedUnknown, replayErr := stack.ConfigurationCommands().PrepareSandbox(ctx, principal, effectRequest)
@@ -390,10 +390,10 @@ func TestSandboxLifecycleCommandUsesCanonicalExternalPolicy(t *testing.T) {
 		stack.mu.Unlock()
 	}()
 	expected := saved.ConfigurationRevision
-	result, err := stack.ConfigurationCommands().PrepareSandbox(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SandboxRequest{WriteBase: controlclient.WriteBase{
+	result, err := stack.ConfigurationCommands().PrepareSandbox(ctx, appserver.Principal{ID: stack.UserID}, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "sandbox-lifecycle-unreconciled", ExpectedRevision: &expected,
 	}})
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision != expected || runtime.prepareCalls != 1 {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != expected || runtime.prepareCalls != 1 {
 		t.Fatalf("PrepareSandbox(canonical policy) = %#v, %v calls=%d", result, err, runtime.prepareCalls)
 	}
 }
@@ -429,11 +429,11 @@ func TestSandboxLifecycleCommandDoesNotHoldConfigurationWriteBoundary(t *testing
 		stack.mu.Unlock()
 	})
 	expected := saved.ConfigurationRevision
-	principal := controlclient.Principal{ID: stack.UserID}
-	prepareDone := make(chan controlclient.CommandResult, 1)
+	principal := appserver.Principal{ID: stack.UserID}
+	prepareDone := make(chan appserver.CommandResult, 1)
 	prepareErr := make(chan error, 1)
 	go func() {
-		result, commandErr := stack.ConfigurationCommands().PrepareSandbox(ctx, principal, controlclient.SandboxRequest{WriteBase: controlclient.WriteBase{
+		result, commandErr := stack.ConfigurationCommands().PrepareSandbox(ctx, principal, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 			OperationID: "sandbox-lifecycle-serialized", ExpectedRevision: &expected,
 		}})
 		prepareDone <- result
@@ -445,21 +445,21 @@ func TestSandboxLifecycleCommandDoesNotHoldConfigurationWriteBoundary(t *testing
 		t.Fatal("PrepareSandbox() did not start")
 	}
 
-	setDone := make(chan controlclient.CommandResult, 1)
+	setDone := make(chan appserver.CommandResult, 1)
 	setErr := make(chan error, 1)
 	go func() {
-		result, commandErr := stack.ConfigurationCommands().SetSandboxBackend(ctx, principal, controlclient.SandboxRequest{
-			WriteBase: controlclient.WriteBase{OperationID: "sandbox-backend-after-lifecycle", ExpectedRevision: &expected},
+		result, commandErr := stack.ConfigurationCommands().SetSandboxBackend(ctx, principal, appserver.SandboxRequest{
+			WriteBase: appserver.WriteBase{OperationID: "sandbox-backend-after-lifecycle", ExpectedRevision: &expected},
 			Backend:   "host",
 		})
 		setDone <- result
 		setErr <- commandErr
 	}()
-	if result, commandErr := <-setDone, <-setErr; commandErr != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision != expected+1 {
+	if result, commandErr := <-setDone, <-setErr; commandErr != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != expected+1 {
 		t.Fatalf("SetSandboxBackend() = %#v, %v", result, commandErr)
 	}
 	close(runtime.release)
-	if result, commandErr := <-prepareDone, <-prepareErr; commandErr != nil || result.Outcome != controlclient.OutcomeCommitted || runtime.prepareCalls != 1 {
+	if result, commandErr := <-prepareDone, <-prepareErr; commandErr != nil || result.Outcome != appserver.OutcomeCommitted || runtime.prepareCalls != 1 {
 		t.Fatalf("PrepareSandbox() = %#v, %v calls=%d", result, commandErr, runtime.prepareCalls)
 	}
 }
@@ -597,8 +597,8 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 					return loadErr
 				}
 				revision := current.Revision
-				_, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SessionModeRequest{
-					WriteBase: controlclient.WriteBase{OperationID: "active-turn-session-mode", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
+				_, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModeRequest{
+					WriteBase: appserver.WriteBase{OperationID: "active-turn-session-mode", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 					Mode:      "manual",
 				})
 				return err
@@ -634,7 +634,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 				if err != nil {
 					return err
 				}
-				_, err = stack.ConfigurationCommands().ResetSandbox(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SandboxRequest{WriteBase: controlclient.WriteBase{
+				_, err = stack.ConfigurationCommands().ResetSandbox(ctx, appserver.Principal{ID: stack.UserID}, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 					OperationID: "sandbox-lifecycle-active-turn", ExpectedRevision: &expected,
 				}})
 				return err

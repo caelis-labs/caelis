@@ -1,25 +1,25 @@
 package controlserver
 
 import (
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 // testFocusedServices supplies capabilities that a focused HTTP test does not
 // exercise. Tests that cover a capability replace the corresponding service.
 type testFocusedServices struct {
-	controlclient.ParticipantService
-	controlclient.AgentMessageService
-	controlclient.ConfigurationService
-	controlclient.AgentService
-	controlclient.CompletionService
-	controlclient.PluginService
-	controlclient.PresentationService
-	controlclient.TerminalService
+	appserver.ParticipantService
+	appserver.AgentMessageService
+	appserver.ConfigurationService
+	appserver.AgentService
+	appserver.CompletionService
+	appserver.PluginService
+	appserver.PresentationService
+	appserver.TerminalService
 }
 
-func testAppServerServices(sessions controlclient.Service, status controlclient.StatusService) controlclient.AppServerServices {
+func testAppServerServices(sessions appserver.Service, status appserver.StatusService) appserver.AppServerServices {
 	focused := &testFocusedServices{}
-	return controlclient.AppServerServices{
+	return appserver.AppServerServices{
 		Sessions: sessions, Participants: focused, AgentMessages: focused, Status: status, Configuration: focused,
 		Agents: focused, Completion: focused, Plugins: focused,
 		Presentation: focused, Terminal: focused,

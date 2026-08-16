@@ -11,7 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
@@ -159,20 +159,20 @@ func TestDoctorReportFindsAPIKeyThroughCredentialReferenceAfterReload(t *testing
 	}
 	current := mustCurrentSession(t, stack, session.SessionID)
 	revision := current.Revision
-	modelResult, err := stack.ConfigurationCommands().UseSessionModel(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SessionModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "doctor-session-model", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
+	modelResult, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "doctor-session-model", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Model:     profile.Backend.Provider.ModelConfigID,
 	})
-	if err != nil || modelResult.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || modelResult.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel() = %#v, %v", modelResult, err)
 	}
 	current = mustCurrentSession(t, stack, session.SessionID)
 	revision = current.Revision
-	modeResult, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.SessionModeRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "doctor-session-mode", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
+	modeResult, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModeRequest{
+		WriteBase: appserver.WriteBase{OperationID: "doctor-session-mode", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Mode:      "manual",
 	})
-	if err != nil || modeResult.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || modeResult.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionMode() = %#v, %v", modeResult, err)
 	}
 

@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
@@ -30,8 +30,8 @@ func NewStatusService(host *gatewayapp.Stack) (*StatusService, error) {
 
 func (s *StatusService) SessionStatus(
 	ctx context.Context,
-	principal controlclient.Principal,
-	request controlclient.StatusRequest,
+	principal appserver.Principal,
+	request appserver.StatusRequest,
 ) (result controlstatus.StatusSnapshot, returnErr error) {
 	if s == nil || s.host == nil {
 		return controlstatus.StatusSnapshot{}, errors.New("app/gatewayapp/controladapter/local: status service is unavailable")
@@ -58,7 +58,7 @@ func (s *StatusService) SessionStatus(
 		}
 		return driver.LightweightStatus(ctx)
 	}
-	lease, err := s.host.AcquireControlRuntime(ctx, principal, controlclient.ActionSessionInspect, request.SessionID, false)
+	lease, err := s.host.AcquireControlRuntime(ctx, principal, appserver.ActionSessionInspect, request.SessionID, false)
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
 	}
@@ -81,4 +81,4 @@ func (s *StatusService) SessionStatus(
 	return driver.LightweightStatus(ctx)
 }
 
-var _ controlclient.StatusService = (*StatusService)(nil)
+var _ appserver.StatusService = (*StatusService)(nil)

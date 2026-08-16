@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/google/uuid"
 )
@@ -41,7 +41,7 @@ func (a *SessionClientAdapter) addressedStatus(
 	sessionID string,
 	diagnostics bool,
 ) (controlstatus.StatusSnapshot, error) {
-	return a.statusClient.SessionStatus(ctx, controlclient.StatusRequest{
+	return a.statusClient.SessionStatus(ctx, appserver.StatusRequest{
 		SessionID:          strings.TrimSpace(sessionID),
 		WorkspaceKey:       strings.TrimSpace(a.workspaceKey),
 		CWD:                a.WorkspaceDir(),
@@ -82,20 +82,20 @@ func (a *SessionClientAdapter) setClientSession(sessionID, cwd string) {
 	a.sessionMu.Unlock()
 }
 
-func (a *SessionClientAdapter) ensureSessionForMainPrompt(ctx context.Context) (controlclient.SessionState, error) {
+func (a *SessionClientAdapter) ensureSessionForMainPrompt(ctx context.Context) (appserver.SessionState, error) {
 	return a.ensureClientSessionForWork(ctx, "session-main-prompt-")
 }
 
-func (a *SessionClientAdapter) ensureSessionForParticipantStart(ctx context.Context) (controlclient.SessionState, error) {
+func (a *SessionClientAdapter) ensureSessionForParticipantStart(ctx context.Context) (appserver.SessionState, error) {
 	return a.ensureClientSessionForWork(ctx, "session-participant-prompt-")
 }
 
 // ensureClientSessionForWork contains only the mechanical product Session
 // creation transaction. Callers retain ownership of the policy deciding which
 // work-bearing path is allowed to invoke it.
-func (a *SessionClientAdapter) ensureClientSessionForWork(ctx context.Context, operationPrefix string) (controlclient.SessionState, error) {
+func (a *SessionClientAdapter) ensureClientSessionForWork(ctx context.Context, operationPrefix string) (appserver.SessionState, error) {
 	if a == nil || a.sessionClient == nil {
-		return controlclient.SessionState{}, errors.New("app/gatewayapp/controladapter: Session client is unavailable")
+		return appserver.SessionState{}, errors.New("app/gatewayapp/controladapter: Session client is unavailable")
 	}
 	a.sessionChangeMu.Lock()
 	defer a.sessionChangeMu.Unlock()
@@ -106,35 +106,35 @@ func (a *SessionClientAdapter) ensureClientSessionForWork(ctx context.Context, o
 		}
 		return state, err
 	}
-	result, err := a.sessionClient.CreateSession(ctx, controlclient.CreateSessionRequest{
-		WriteBase:          controlclient.WriteBase{OperationID: operationPrefix + uuid.NewString()},
+	result, err := a.sessionClient.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: operationPrefix + uuid.NewString()},
 		PreferredSessionID: strings.TrimSpace(a.preferredID),
 		WorkspaceKey:       strings.TrimSpace(a.workspaceKey),
 		CWD:                strings.TrimSpace(a.workspaceDir),
 		Metadata:           map[string]any{"surface": strings.TrimSpace(a.surface)},
 	})
 	if err != nil {
-		return controlclient.SessionState{}, err
+		return appserver.SessionState{}, err
 	}
 	if strings.TrimSpace(result.SessionID) == "" {
-		return controlclient.SessionState{}, errors.New("app/gatewayapp/controladapter: create Session returned no Session ID")
+		return appserver.SessionState{}, errors.New("app/gatewayapp/controladapter: create Session returned no Session ID")
 	}
-	state, err := a.sessionClient.InspectSession(ctx, controlclient.StateRequest{SessionID: result.SessionID})
+	state, err := a.sessionClient.InspectSession(ctx, appserver.StateRequest{SessionID: result.SessionID})
 	if err != nil {
-		return controlclient.SessionState{}, err
+		return appserver.SessionState{}, err
 	}
 	if err := a.validateTUISessionController(state); err != nil {
-		return controlclient.SessionState{}, err
+		return appserver.SessionState{}, err
 	}
 	a.preferredID = ""
 	a.setClientSession(state.SessionID, state.CWD)
 	if err := a.ensureSessionPresence(state); err != nil {
-		return controlclient.SessionState{}, err
+		return appserver.SessionState{}, err
 	}
 	return state, nil
 }
 
-func (a *SessionClientAdapter) ensureSessionPresence(state controlclient.SessionState) error {
+func (a *SessionClientAdapter) ensureSessionPresence(state appserver.SessionState) error {
 	if !a.tracksSessionPresence() {
 		return nil
 	}
@@ -157,13 +157,13 @@ func (a *SessionClientAdapter) ensureSessionPresence(state controlclient.Session
 	return nil
 }
 
-func (a *SessionClientAdapter) inspectWorkSession(ctx context.Context, sessionID string) (controlclient.SessionState, error) {
-	state, err := a.sessionClient.InspectSession(ctx, controlclient.StateRequest{SessionID: sessionID})
+func (a *SessionClientAdapter) inspectWorkSession(ctx context.Context, sessionID string) (appserver.SessionState, error) {
+	state, err := a.sessionClient.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
 	if err != nil {
-		return controlclient.SessionState{}, err
+		return appserver.SessionState{}, err
 	}
 	if err := a.validateTUISessionController(state); err != nil {
-		return controlclient.SessionState{}, err
+		return appserver.SessionState{}, err
 	}
 	return state, nil
 }

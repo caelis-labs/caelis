@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
@@ -19,8 +19,8 @@ func TestTerminalServiceResolvesDisplayIDThroughTaskDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := controlclient.TerminalRequest{SessionID: "session-1", TerminalID: "tool-call-1"}
-	output, err := service.TerminalOutput(context.Background(), controlclient.Principal{ID: "owner"}, request)
+	request := appserver.TerminalRequest{SessionID: "session-1", TerminalID: "tool-call-1"}
+	output, err := service.TerminalOutput(context.Background(), appserver.Principal{ID: "owner"}, request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,13 +30,13 @@ func TestTerminalServiceResolvesDisplayIDThroughTaskDirectory(t *testing.T) {
 	if streams.ref != (stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "runtime-terminal-1"}) {
 		t.Fatalf("resolved ref = %#v", streams.ref)
 	}
-	if _, err := service.WaitTerminal(context.Background(), controlclient.Principal{ID: "owner"}, request); err != nil {
+	if _, err := service.WaitTerminal(context.Background(), appserver.Principal{ID: "owner"}, request); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.KillTerminal(context.Background(), controlclient.Principal{ID: "owner"}, request); err != nil {
+	if err := service.KillTerminal(context.Background(), appserver.Principal{ID: "owner"}, request); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.ReleaseTerminal(context.Background(), controlclient.Principal{ID: "owner"}, request); err != nil {
+	if err := service.ReleaseTerminal(context.Background(), appserver.Principal{ID: "owner"}, request); err != nil {
 		t.Fatal(err)
 	}
 }

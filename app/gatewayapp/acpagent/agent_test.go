@@ -20,7 +20,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 	"github.com/caelis-labs/caelis/internal/testenv"
@@ -463,12 +463,12 @@ func TestNewFromStackUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 	if _, err := agent.CloseSession(ctx, acp.CloseSessionRequest{SessionID: created.SessionID}); err != nil {
 		t.Fatal(err)
 	}
-	bound, err := controlclient.BindSessionClient(stack.ControlClient(), controlclient.Principal{ID: stack.UserID})
+	bound, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: stack.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = bound.Prompt(ctx, controlclient.PromptRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "prompt-after-acp-close", SessionID: created.SessionID},
+	_, err = bound.Prompt(ctx, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{OperationID: "prompt-after-acp-close", SessionID: created.SessionID},
 		Input:     "must be rejected",
 	})
 	if !errorcode.Is(err, errorcode.FailedPrecondition) {

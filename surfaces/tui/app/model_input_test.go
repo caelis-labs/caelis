@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -1399,7 +1399,7 @@ func TestReconnectStateRestoresActiveTurnSubmissionMode(t *testing.T) {
 	})
 	model.commitLine("old session transcript")
 	model.activePrompt = newPromptState(PromptRequestMsg{Prompt: "old approval", Response: make(chan PromptResponse, 1)})
-	model.applySessionReconnectState(controlclient.SessionState{Run: controlclient.RunState{
+	model.applySessionReconnectState(appserver.SessionState{Run: appserver.RunState{
 		Active: true, HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1", StartedAt: time.Unix(120, 0),
 	}})
 	if !model.turnRunning() || model.activePrompt != nil || len(model.doc.Blocks()) != 0 {
@@ -1417,7 +1417,7 @@ func TestReconnectStateRestoresActiveTurnSubmissionMode(t *testing.T) {
 
 func TestReconnectTransientGapUsesEphemeralHint(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	model.applySessionReconnectState(controlclient.SessionState{TransientGap: true})
+	model.applySessionReconnectState(appserver.SessionState{TransientGap: true})
 	if model.hint != reconnectTransientGapWarning {
 		t.Fatalf("reconnect gap hint = %q, want %q", model.hint, reconnectTransientGapWarning)
 	}

@@ -1,7 +1,7 @@
 package controlprompt
 
 import (
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -42,9 +42,9 @@ type SessionSnapshot struct {
 	Reconnect SessionReconnect
 }
 
-type ResumeCandidate = controlclient.ResumeCandidate
-type CompletionCandidate = controlclient.CompletionCandidate
-type SlashArgCandidate = controlclient.SlashArgCandidate
+type ResumeCandidate = appserver.ResumeCandidate
+type CompletionCandidate = appserver.CompletionCandidate
+type SlashArgCandidate = appserver.SlashArgCandidate
 
 // SlashCommandResultKind identifies the domain payload produced by a slash
 // command. Surfaces decide how to render each payload.
@@ -97,10 +97,10 @@ type CommandHelpItem struct {
 	Known       bool     `json:"known,omitempty"`
 }
 
-type AgentCandidate = controlclient.AgentCandidate
-type AgentParticipantSnapshot = controlclient.AgentParticipantSnapshot
-type AgentStatusSnapshot = controlclient.AgentStatusSnapshot
-type ConnectConfig = controlclient.ConnectConfig
+type AgentCandidate = appserver.AgentCandidate
+type AgentParticipantSnapshot = appserver.AgentParticipantSnapshot
+type AgentStatusSnapshot = appserver.AgentStatusSnapshot
+type ConnectConfig = appserver.ConnectConfig
 
 type ApprovalDecision struct {
 	// RequestID must match the approval_request_id on the permission Envelope
@@ -114,6 +114,6 @@ type ApprovalDecision struct {
 	ReviewText string
 }
 
-type MCPServerSnapshot = controlclient.MCPServerSnapshot
-type PluginSnapshot = controlclient.PluginSnapshot
-type MarketplaceSnapshot = controlclient.MarketplaceSnapshot
+type MCPServerSnapshot = appserver.MCPServerSnapshot
+type PluginSnapshot = appserver.PluginSnapshot
+type MarketplaceSnapshot = appserver.MarketplaceSnapshot

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/wirev1"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
@@ -31,12 +31,12 @@ const (
 type resumeBoundary = wirev1.ResumeBoundary
 
 type Authenticator interface {
-	Authenticate(*http.Request) (controlclient.Principal, error)
+	Authenticate(*http.Request) (appserver.Principal, error)
 }
 
-type AuthenticatorFunc func(*http.Request) (controlclient.Principal, error)
+type AuthenticatorFunc func(*http.Request) (appserver.Principal, error)
 
-func (f AuthenticatorFunc) Authenticate(request *http.Request) (controlclient.Principal, error) {
+func (f AuthenticatorFunc) Authenticate(request *http.Request) (appserver.Principal, error) {
 	return f(request)
 }
 
@@ -44,12 +44,12 @@ func (f AuthenticatorFunc) Authenticate(request *http.Request) (controlclient.Pr
 // an optional listener-lifecycle callback; Host quiesce remains owned by the
 // server runner.
 type HandlerConfig struct {
-	Services      controlclient.AppServerServices
+	Services      appserver.AppServerServices
 	TaskStreams   taskstream.Service
 	Authenticator Authenticator
 	AllowedHosts  []string
 	Heartbeat     time.Duration
-	ServerInfo    controlclient.ServerInfo
+	ServerInfo    appserver.ServerInfo
 	Ready         func() bool
 	Shutdown      func()
 }
@@ -132,14 +132,14 @@ func (s *Server) initialize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, controlclient.HostStatus{
+	writeJSON(w, http.StatusOK, appserver.HostStatus{
 		ServerID: s.config.ServerInfo.ServerID, InstanceID: s.config.ServerInfo.InstanceID,
 		Ready: s.config.Ready(),
 	})
 }
 
 func (s *Server) readiness(w http.ResponseWriter, _ *http.Request) {
-	status := controlclient.HostStatus{
+	status := appserver.HostStatus{
 		ServerID: s.config.ServerInfo.ServerID, InstanceID: s.config.ServerInfo.InstanceID,
 		Ready: s.config.Ready(),
 	}
@@ -158,22 +158,22 @@ func (s *Server) shutdown(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "Host shutdown is unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, controlclient.HostStatus{
+	writeJSON(w, http.StatusOK, appserver.HostStatus{
 		ServerID: s.config.ServerInfo.ServerID, InstanceID: s.config.ServerInfo.InstanceID,
 		Ready: false,
 	})
 	go s.config.Shutdown()
 }
 
-func normalizeServerInfo(info controlclient.ServerInfo) controlclient.ServerInfo {
+func normalizeServerInfo(info appserver.ServerInfo) appserver.ServerInfo {
 	info.ProtocolVersion = schema.CurrentProtocolVersion
-	info.EnvelopeVersion = controlclient.EnvelopeVersion
-	info.APIVersion = controlclient.HTTPAPIVersion
+	info.EnvelopeVersion = appserver.EnvelopeVersion
+	info.APIVersion = appserver.HTTPAPIVersion
 	info.DistributionVersion = strings.TrimSpace(info.DistributionVersion)
 	info.BuildID = strings.TrimSpace(info.BuildID)
 	info.BuildKind = strings.TrimSpace(info.BuildKind)
 	if strings.TrimSpace(info.ServerID) == "" {
-		info.ServerID = controlclient.ServerIdentity
+		info.ServerID = appserver.ServerIdentity
 	}
 	info.ServerID = strings.TrimSpace(info.ServerID)
 	info.InstanceID = strings.TrimSpace(info.InstanceID)
@@ -182,13 +182,13 @@ func normalizeServerInfo(info controlclient.ServerInfo) controlclient.ServerInfo
 	return info
 }
 
-func (s *Server) principal(request *http.Request) (controlclient.Principal, error) {
+func (s *Server) principal(request *http.Request) (appserver.Principal, error) {
 	principal, err := s.config.Authenticator.Authenticate(request)
 	if err != nil {
-		return controlclient.Principal{}, errorcode.Wrap(errorcode.Unauthenticated, "controlserver: authentication failed", err)
+		return appserver.Principal{}, errorcode.Wrap(errorcode.Unauthenticated, "controlserver: authentication failed", err)
 	}
 	if strings.TrimSpace(principal.ID) == "" {
-		return controlclient.Principal{}, errorcode.New(errorcode.Unauthenticated, "controlserver: authentication failed")
+		return appserver.Principal{}, errorcode.New(errorcode.Unauthenticated, "controlserver: authentication failed")
 	}
 	return principal, nil
 }
@@ -207,7 +207,7 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	result, err := s.config.Services.Sessions.ListSessions(r.Context(), principal, controlclient.ListSessionsRequest{
+	result, err := s.config.Services.Sessions.ListSessions(r.Context(), principal, appserver.ListSessionsRequest{
 		WorkspaceKey: r.URL.Query().Get("workspace_key"),
 		CWD:          r.URL.Query().Get("cwd"),
 		Cursor:       r.URL.Query().Get("cursor"),
@@ -221,7 +221,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req controlclient.CreateSessionRequest
+	var req appserver.CreateSessionRequest
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, "") {
 		return
 	}
@@ -234,7 +234,7 @@ func (s *Server) closeSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req controlclient.CloseSessionRequest
+	var req appserver.CloseSessionRequest
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
@@ -247,7 +247,7 @@ func (s *Server) compactSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req controlclient.CompactSessionRequest
+	var req appserver.CompactSessionRequest
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
@@ -260,7 +260,7 @@ func (s *Server) sessionState(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.config.Services.Sessions.InspectSession(r.Context(), principal, controlclient.StateRequest{SessionID: r.PathValue("session_id")})
+	result, err := s.config.Services.Sessions.InspectSession(r.Context(), principal, appserver.StateRequest{SessionID: r.PathValue("session_id")})
 	writeJSONResult(w, result, err)
 }
 
@@ -278,7 +278,7 @@ func (s *Server) sessionStatus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	result, err := s.config.Services.Status.SessionStatus(r.Context(), principal, controlclient.StatusRequest{
+	result, err := s.config.Services.Status.SessionStatus(r.Context(), principal, appserver.StatusRequest{
 		SessionID:          r.PathValue("session_id"),
 		WorkspaceKey:       strings.TrimSpace(r.URL.Query().Get("workspace_key")),
 		CWD:                strings.TrimSpace(r.URL.Query().Get("cwd")),
@@ -297,7 +297,7 @@ func (s *Server) reconnectSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.config.Services.Sessions.Reconnect(r.Context(), principal, controlclient.ReconnectRequest{
+	result, err := s.config.Services.Sessions.Reconnect(r.Context(), principal, appserver.ReconnectRequest{
 		SessionID: r.PathValue("session_id"),
 		Cursor:    cursor,
 	})
@@ -317,8 +317,8 @@ func (s *Server) reconnectSession(w http.ResponseWriter, r *http.Request) {
 func (s *Server) streamControlSubscription(
 	w http.ResponseWriter,
 	r *http.Request,
-	subscription controlclient.FeedSubscription,
-	state controlclient.SessionState,
+	subscription appserver.FeedSubscription,
+	state appserver.SessionState,
 ) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -361,7 +361,7 @@ func (s *Server) streamControlSubscription(
 					events = subscription.Events()
 					continue
 				}
-				var gap *controlclient.FeedGapError
+				var gap *appserver.FeedGapError
 				if errors.As(subscription.Err(), &gap) {
 					retry, marshalErr := json.Marshal(resumeBoundary{
 						ResumeMode: gap.Mode, TransientGap: gap.TransientGap, BoundaryCursor: gap.RetryCursor,
@@ -388,7 +388,7 @@ func (s *Server) prompt(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req controlclient.PromptRequest
+	var req appserver.PromptRequest
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
@@ -400,7 +400,7 @@ func (s *Server) steer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req controlclient.SteerRequest
+	var req appserver.SteerRequest
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
@@ -412,7 +412,7 @@ func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req controlclient.CancelRequest
+	var req appserver.CancelRequest
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
@@ -424,7 +424,7 @@ func (s *Server) resolveApproval(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req controlclient.ResolveApprovalRequest
+	var req appserver.ResolveApprovalRequest
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
@@ -436,11 +436,11 @@ func (s *Server) resolveApproval(w http.ResponseWriter, r *http.Request) {
 	result, err := s.config.Services.Sessions.ResolveApproval(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
-func (s *Server) requirePrincipal(w http.ResponseWriter, r *http.Request) (controlclient.Principal, bool) {
+func (s *Server) requirePrincipal(w http.ResponseWriter, r *http.Request) (appserver.Principal, bool) {
 	principal, err := s.principal(r)
 	if err != nil {
 		writeMappedError(w, err)
-		return controlclient.Principal{}, false
+		return appserver.Principal{}, false
 	}
 	return principal, true
 }
@@ -468,7 +468,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, target any) bool {
 	return true
 }
 
-func applyWriteHeaders(w http.ResponseWriter, r *http.Request, base *controlclient.WriteBase, sessionID string) bool {
+func applyWriteHeaders(w http.ResponseWriter, r *http.Request, base *appserver.WriteBase, sessionID string) bool {
 	operationValues := r.Header.Values("Idempotency-Key")
 	if len(operationValues) != 1 || strings.Contains(operationValues[0], ",") {
 		writeError(w, http.StatusBadRequest, "Idempotency-Key must be provided exactly once")
@@ -523,7 +523,7 @@ func applyWriteHeaders(w http.ResponseWriter, r *http.Request, base *controlclie
 	return true
 }
 
-func applyHostWriteHeaders(w http.ResponseWriter, r *http.Request, base *controlclient.WriteBase) bool {
+func applyHostWriteHeaders(w http.ResponseWriter, r *http.Request, base *appserver.WriteBase) bool {
 	if strings.TrimSpace(base.SessionID) != "" {
 		writeError(w, http.StatusBadRequest, "Host mutation must not address a Session")
 		return false
@@ -570,26 +570,26 @@ func hasCredentialQuery(r *http.Request) bool {
 	return false
 }
 
-func writeCommandResult(w http.ResponseWriter, result controlclient.CommandResult, err error) {
+func writeCommandResult(w http.ResponseWriter, result appserver.CommandResult, err error) {
 	status, knownOutcome := commandOutcomeStatus(result.Outcome)
 	if !knownOutcome {
 		status = http.StatusInternalServerError
 	}
 	switch result.Outcome {
-	case controlclient.OutcomeUnknown:
+	case appserver.OutcomeUnknown:
 		result.Detail = "effect outcome cannot be proven"
-	case controlclient.OutcomeConflicted:
+	case appserver.OutcomeConflicted:
 		result.Detail = "conflict"
 	}
 	if err != nil {
 		if result.ErrorCode == "" {
 			result.ErrorCode = errorcode.CodeOf(err)
-			if result.ErrorCode == errorcode.Unknown && result.Outcome == controlclient.OutcomeUnknown {
+			if result.ErrorCode == errorcode.Unknown && result.Outcome == appserver.OutcomeUnknown {
 				result.ErrorCode = errorcode.UnknownOutcome
 			}
 		}
 		if result.ErrorKind == "" {
-			result.ErrorKind = controlclient.ErrorKindOf(err)
+			result.ErrorKind = appserver.ErrorKindOf(err)
 		}
 		mapped := statusForError(err)
 		switch mapped {
@@ -612,9 +612,9 @@ func writeCommandResult(w http.ResponseWriter, result controlclient.CommandResul
 			// In particular, an uncoded backend error accompanying unknown or
 			// conflicted must not erase the client's 202/409 recovery path.
 			switch result.Outcome {
-			case controlclient.OutcomeUnknown:
+			case appserver.OutcomeUnknown:
 				result.Detail = "effect outcome cannot be proven"
-			case controlclient.OutcomeConflicted:
+			case appserver.OutcomeConflicted:
 				result.Detail = "conflict"
 			default:
 				writeMappedError(w, err)
@@ -625,16 +625,16 @@ func writeCommandResult(w http.ResponseWriter, result controlclient.CommandResul
 	writeJSON(w, status, result)
 }
 
-func commandOutcomeStatus(outcome controlclient.Outcome) (int, bool) {
+func commandOutcomeStatus(outcome appserver.Outcome) (int, bool) {
 	var status int
 	switch outcome {
-	case controlclient.OutcomeCommitted:
+	case appserver.OutcomeCommitted:
 		status = http.StatusOK
-	case controlclient.OutcomeAccepted, controlclient.OutcomeUnknown:
+	case appserver.OutcomeAccepted, appserver.OutcomeUnknown:
 		status = http.StatusAccepted
-	case controlclient.OutcomeConflicted:
+	case appserver.OutcomeConflicted:
 		status = http.StatusConflict
-	case controlclient.OutcomeRejected:
+	case appserver.OutcomeRejected:
 		status = http.StatusBadRequest
 	default:
 		return 0, false
@@ -653,7 +653,7 @@ func writeError(w http.ResponseWriter, status int, detail string) {
 	writeErrorIdentity(w, status, detail, errorCodeForStatus(status), "")
 }
 
-func writeErrorIdentity(w http.ResponseWriter, status int, detail string, code errorcode.Code, kind controlclient.ErrorKind) {
+func writeErrorIdentity(w http.ResponseWriter, status int, detail string, code errorcode.Code, kind appserver.ErrorKind) {
 	response := map[string]any{
 		"error": strings.TrimSpace(detail),
 		"code":  code,

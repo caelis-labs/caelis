@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
@@ -42,7 +42,7 @@ func (a *SessionClientAdapter) StartAgentRun(
 	if strings.TrimSpace(prompt) == "" && len(contentParts) == 0 {
 		return nil, errors.New("app/gatewayapp/controladapter: direct Agent prompt input is required")
 	}
-	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (controlclient.TargetTurn, error) {
+	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (appserver.TargetTurn, error) {
 		state, err := a.ensureSessionForParticipantStart(startCtx)
 		if err != nil {
 			return nil, err
@@ -52,7 +52,7 @@ func (a *SessionClientAdapter) StartAgentRun(
 		if runName := controlagents.FormatRunName(string(handle), label); runName != "" {
 			displayAddress = "/" + runName
 		}
-		return a.participants.Start(startCtx, controlclient.ParticipantTurnStartRequest{
+		return a.participants.Start(startCtx, appserver.ParticipantTurnStartRequest{
 			SessionID:      state.SessionID,
 			Handle:         string(handle),
 			Role:           session.ParticipantRoleSidecar,
@@ -77,7 +77,7 @@ func (a *SessionClientAdapter) ContinueAgentRun(
 	if a == nil || a.participants == nil {
 		return nil, errors.New("app/gatewayapp/controladapter: participant client is unavailable")
 	}
-	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (controlclient.TargetTurn, error) {
+	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (appserver.TargetTurn, error) {
 		state, err := a.currentClientSessionState(startCtx)
 		if err != nil {
 			return nil, err
@@ -97,7 +97,7 @@ func (a *SessionClientAdapter) ContinueAgentRun(
 		if err != nil {
 			return nil, err
 		}
-		return a.participants.Prompt(startCtx, controlclient.ParticipantTurnPromptRequest{
+		return a.participants.Prompt(startCtx, appserver.ParticipantTurnPromptRequest{
 			SessionID:      state.SessionID,
 			ParticipantID:  participantID,
 			Input:          strings.TrimSpace(prompt),
@@ -125,12 +125,12 @@ func (a *SessionClientAdapter) StartReview(
 	if err != nil {
 		return nil, err
 	}
-	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (controlclient.TargetTurn, error) {
+	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (appserver.TargetTurn, error) {
 		state, err := a.ensureSessionForParticipantStart(startCtx)
 		if err != nil {
 			return nil, err
 		}
-		return a.participants.Start(startCtx, controlclient.ParticipantTurnStartRequest{
+		return a.participants.Start(startCtx, appserver.ParticipantTurnStartRequest{
 			SessionID:      state.SessionID,
 			Handle:         string(agentbinding.HandleReviewer),
 			Role:           session.ParticipantRoleSidecar,
@@ -147,13 +147,13 @@ func (a *SessionClientAdapter) StartReview(
 	})
 }
 
-func (a *SessionClientAdapter) currentClientSessionState(ctx context.Context) (controlclient.SessionState, error) {
+func (a *SessionClientAdapter) currentClientSessionState(ctx context.Context) (appserver.SessionState, error) {
 	if a == nil || a.sessionClient == nil {
-		return controlclient.SessionState{}, errors.New("app/gatewayapp/controladapter: Session client is unavailable")
+		return appserver.SessionState{}, errors.New("app/gatewayapp/controladapter: Session client is unavailable")
 	}
 	sessionID := a.clientSessionID()
 	if sessionID == "" {
-		return controlclient.SessionState{}, errors.New("app/gatewayapp/controladapter: no Session is selected")
+		return appserver.SessionState{}, errors.New("app/gatewayapp/controladapter: no Session is selected")
 	}
 	return a.inspectWorkSession(ctx, sessionID)
 }

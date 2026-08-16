@@ -17,8 +17,8 @@ import (
 
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/internal/productpaths"
 	"github.com/caelis-labs/caelis/internal/servicelifecycle"
 	"github.com/caelis-labs/caelis/internal/version"
@@ -91,7 +91,7 @@ type managedHostInspection struct {
 	Probe  servicelifecycle.ProbeResult
 	Client *httpclient.Client
 	Record controlserver.DiscoveryRecord
-	Info   controlclient.ServerInfo
+	Info   appserver.ServerInfo
 	Token  string
 }
 
@@ -113,7 +113,7 @@ func inspectManagedHost(ctx context.Context, options productClientOptions) manag
 	if err != nil {
 		return unreachableManagedHost(record, err)
 	}
-	inspectionPolicy := controlclient.CompatibilityPolicy{
+	inspectionPolicy := appserver.CompatibilityPolicy{
 		ProtocolVersions: []int{record.ProtocolVersion},
 		EnvelopeVersions: []string{record.EnvelopeVersion},
 		APIVersions:      []string{record.APIVersion},
@@ -170,14 +170,14 @@ func attachManagedHostClient(ctx context.Context, options productClientOptions) 
 	case servicelifecycle.ProbeUnreachable:
 		return nil, controlserver.DiscoveryRecord{}, inspection.Probe.Err
 	}
-	for _, capability := range controlclient.RequiredManagedHostCapabilities() {
+	for _, capability := range appserver.RequiredManagedHostCapabilities() {
 		if !slices.Contains(inspection.Record.Capabilities, capability) {
 			return nil, controlserver.DiscoveryRecord{}, &managedCompatibilityError{
 				cause: fmt.Errorf("discovery is missing capability %q", capability),
 			}
 		}
 	}
-	policy := controlclient.CurrentCompatibility(controlclient.RequiredManagedHostCapabilities()...)
+	policy := appserver.CurrentCompatibility(appserver.RequiredManagedHostCapabilities()...)
 	if err := policy.Accept(inspection.Info); err != nil {
 		return nil, controlserver.DiscoveryRecord{}, &managedCompatibilityError{cause: err}
 	}
@@ -201,7 +201,7 @@ func newManagedHTTPClient(
 	record controlserver.DiscoveryRecord,
 	token string,
 	options productClientOptions,
-	policy controlclient.CompatibilityPolicy,
+	policy appserver.CompatibilityPolicy,
 ) (*httpclient.Client, error) {
 	return httpclient.New(httpclient.Config{
 		BaseURL: record.Endpoint, BearerToken: token, HTTPClient: options.HTTPClient, EventBuffer: 256,
@@ -325,8 +325,8 @@ func recordManagedProductDiagnostic(storeDir string, phase string, err error) {
 	_, _ = fmt.Fprintf(file, "%s phase=%s error=%q\n", time.Now().UTC().Format(time.RFC3339Nano), phase, err.Error())
 }
 
-func validateManagedServerInfo(record controlserver.DiscoveryRecord, info controlclient.ServerInfo) error {
-	if info.ServerID != controlclient.ServerIdentity || info.ServerID != record.ServerID || info.InstanceID != record.InstanceID {
+func validateManagedServerInfo(record controlserver.DiscoveryRecord, info appserver.ServerInfo) error {
+	if info.ServerID != appserver.ServerIdentity || info.ServerID != record.ServerID || info.InstanceID != record.InstanceID {
 		return errors.New("cli: local Control Host initialization identity does not match discovery")
 	}
 	if info.ProtocolVersion != record.ProtocolVersion || info.EnvelopeVersion != record.EnvelopeVersion || info.APIVersion != record.APIVersion {

@@ -12,8 +12,8 @@ import (
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/internal/testenv"
 )
 
@@ -47,7 +47,7 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	authenticator, err := controlserver.BearerTokenAuthenticator(token, controlclient.Principal{ID: "local-user"})
+	authenticator, err := controlserver.BearerTokenAuthenticator(token, appserver.Principal{ID: "local-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 	clientA, err := httpclient.New(httpclient.Config{
 		BaseURL: httpServer.URL, BearerToken: token, EventBuffer: 64,
 		HTTPClient:    httpServer.Client(),
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 	clientB, err := httpclient.New(httpclient.Config{
 		BaseURL: httpServer.URL, BearerToken: token, EventBuffer: 64,
 		HTTPClient:    httpServer.Client(),
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -92,33 +92,33 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if info, err := clientsA.Sessions.Initialize(ctx); err != nil || info.APIVersion != controlclient.HTTPAPIVersion {
+	if info, err := clientsA.Sessions.Initialize(ctx); err != nil || info.APIVersion != appserver.HTTPAPIVersion {
 		t.Fatalf("client A Initialize = %#v, %v", info, err)
 	}
-	if info, err := clientsB.Sessions.Initialize(ctx); err != nil || info.APIVersion != controlclient.HTTPAPIVersion {
+	if info, err := clientsB.Sessions.Initialize(ctx); err != nil || info.APIVersion != appserver.HTTPAPIVersion {
 		t.Fatalf("client B Initialize = %#v, %v", info, err)
 	}
 
-	sessionA, err := clientsA.Sessions.CreateSession(ctx, controlclient.CreateSessionRequest{
-		WriteBase:          controlclient.WriteBase{OperationID: "create-session-a"},
+	sessionA, err := clientsA.Sessions.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: "create-session-a"},
 		PreferredSessionID: "session-a", WorkspaceKey: "workspace-a", CWD: workspaceA, Title: "Session A",
 	})
-	if err != nil || sessionA.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || sessionA.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("CreateSession A = %#v, %v", sessionA, err)
 	}
-	sessionB, err := clientsB.Sessions.CreateSession(ctx, controlclient.CreateSessionRequest{
-		WriteBase:          controlclient.WriteBase{OperationID: "create-session-b"},
+	sessionB, err := clientsB.Sessions.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: "create-session-b"},
 		PreferredSessionID: "session-b", WorkspaceKey: "workspace-b", CWD: workspaceB, Title: "Session B",
 	})
-	if err != nil || sessionB.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || sessionB.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("CreateSession B = %#v, %v", sessionB, err)
 	}
 
-	stateAFromB, err := clientsB.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: "session-a"})
+	stateAFromB, err := clientsB.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: "session-a"})
 	if err != nil || stateAFromB.SessionID != "session-a" || stateAFromB.WorkspaceKey != "workspace-a" {
 		t.Fatalf("client B inspect Session A = %#v, %v", stateAFromB, err)
 	}
-	stateBFromA, err := clientsA.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: "session-b"})
+	stateBFromA, err := clientsA.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: "session-b"})
 	if err != nil || stateBFromA.SessionID != "session-b" || stateBFromA.WorkspaceKey != "workspace-b" {
 		t.Fatalf("client A inspect Session B = %#v, %v", stateBFromA, err)
 	}
@@ -128,7 +128,7 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 	wait.Add(2)
 	go func() {
 		defer wait.Done()
-		reconnected, reconnectErr := clientsA.Sessions.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: "session-b"})
+		reconnected, reconnectErr := clientsA.Sessions.Reconnect(ctx, appserver.ReconnectRequest{SessionID: "session-b"})
 		if reconnectErr != nil {
 			errCh <- reconnectErr
 			return
@@ -137,7 +137,7 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 		if reconnected.State.SessionID != "session-b" || reconnected.State.WorkspaceKey != "workspace-b" {
 			errCh <- errors.New("client A reconnect to Session B returned the wrong Session state")
 		}
-		state, inspectErr := clientsA.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: "session-a"})
+		state, inspectErr := clientsA.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: "session-a"})
 		if inspectErr != nil {
 			errCh <- inspectErr
 			return
@@ -148,7 +148,7 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 	}()
 	go func() {
 		defer wait.Done()
-		reconnected, reconnectErr := clientsB.Sessions.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: "session-a"})
+		reconnected, reconnectErr := clientsB.Sessions.Reconnect(ctx, appserver.ReconnectRequest{SessionID: "session-a"})
 		if reconnectErr != nil {
 			errCh <- reconnectErr
 			return
@@ -157,7 +157,7 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 		if reconnected.State.SessionID != "session-a" || reconnected.State.WorkspaceKey != "workspace-a" {
 			errCh <- errors.New("client B reconnect to Session A returned the wrong Session state")
 		}
-		state, inspectErr := clientsB.Sessions.InspectSession(ctx, controlclient.StateRequest{SessionID: "session-b"})
+		state, inspectErr := clientsB.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: "session-b"})
 		if inspectErr != nil {
 			errCh <- inspectErr
 			return
@@ -174,8 +174,8 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 		}
 	}
 
-	if retry, err := clientsB.Sessions.CreateSession(ctx, controlclient.CreateSessionRequest{
-		WriteBase:          controlclient.WriteBase{OperationID: "create-session-a"},
+	if retry, err := clientsB.Sessions.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: "create-session-a"},
 		PreferredSessionID: "session-a", WorkspaceKey: "workspace-a", CWD: workspaceA, Title: "Session A",
 	}); err != nil {
 		t.Fatalf("idempotent CreateSession retry: %v", err)
@@ -183,7 +183,7 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 		t.Fatalf("idempotent CreateSession retry Session = %q", retry.SessionID)
 	}
 
-	listed, err := clientsA.Sessions.ListSessions(ctx, controlclient.ListSessionsRequest{Limit: 10})
+	listed, err := clientsA.Sessions.ListSessions(ctx, appserver.ListSessionsRequest{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,10 +204,10 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 		t.Fatalf("restart Host: %v", err)
 	}
 	defer func() { _ = restarted.Close() }()
-	if _, err := restarted.ControlClient().InspectSession(ctx, controlclient.Principal{ID: "local-user"}, controlclient.StateRequest{SessionID: "session-a"}); err != nil {
+	if _, err := restarted.ControlClient().InspectSession(ctx, appserver.Principal{ID: "local-user"}, appserver.StateRequest{SessionID: "session-a"}); err != nil {
 		t.Fatalf("durable Session A after Host restart: %v", err)
 	}
-	if _, err := restarted.ControlClient().InspectSession(ctx, controlclient.Principal{ID: "local-user"}, controlclient.StateRequest{SessionID: "session-b"}); err != nil {
+	if _, err := restarted.ControlClient().InspectSession(ctx, appserver.Principal{ID: "local-user"}, appserver.StateRequest{SessionID: "session-b"}); err != nil {
 		t.Fatalf("durable Session B after Host restart: %v", err)
 	}
 }

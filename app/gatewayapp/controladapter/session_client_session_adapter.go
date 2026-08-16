@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 // Compact routes manual Session compaction through the same typed Control
@@ -20,8 +20,8 @@ func (a *SessionClientAdapter) Compact(ctx context.Context) error {
 		return err
 	}
 	revision := state.Revision
-	_, err = a.sessionClient.CompactSession(ctx, controlclient.CompactSessionRequest{
-		WriteBase: controlclient.WriteBase{
+	_, err = a.sessionClient.CompactSession(ctx, appserver.CompactSessionRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "compact-" + uuid.NewString(),
 			SessionID:               state.SessionID,
 			ExpectedRevision:        &revision,

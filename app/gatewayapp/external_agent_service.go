@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/discovery"
 	"github.com/caelis-labs/caelis/internal/version"
@@ -26,21 +26,21 @@ func (s *Stack) DisconnectCandidates(ctx context.Context) ([]controlagents.Disco
 
 // DisconnectCandidatesSnapshot returns one canonical Host-revision-bound
 // roster view for presentation clients preparing a disconnect command.
-func (s *Stack) DisconnectCandidatesSnapshot(ctx context.Context) (controlclient.DisconnectCandidatesSnapshot, error) {
+func (s *Stack) DisconnectCandidatesSnapshot(ctx context.Context) (appserver.DisconnectCandidatesSnapshot, error) {
 	if s == nil || s.store == nil {
-		return controlclient.DisconnectCandidatesSnapshot{}, fmt.Errorf("gatewayapp: app config store unavailable")
+		return appserver.DisconnectCandidatesSnapshot{}, fmt.Errorf("gatewayapp: app config store unavailable")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return controlclient.DisconnectCandidatesSnapshot{}, err
+		return appserver.DisconnectCandidatesSnapshot{}, err
 	}
 	doc, err := s.store.LoadContext(ctx)
 	if err != nil {
-		return controlclient.DisconnectCandidatesSnapshot{}, err
+		return appserver.DisconnectCandidatesSnapshot{}, err
 	}
-	return controlclient.DisconnectCandidatesSnapshot{
+	return appserver.DisconnectCandidatesSnapshot{
 		Revision:   doc.ConfigurationRevision,
 		Candidates: controlagents.ListDisconnectCandidates(doc.ExternalAgents),
 	}, nil

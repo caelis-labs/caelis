@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 func TestStackAssemblesConfiguredControlOperationRetention(t *testing.T) {
@@ -28,10 +28,10 @@ func TestStackAssemblesConfiguredControlOperationRetention(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer stack.Close()
-			intent := controlclient.OperationIntent{
+			intent := appserver.OperationIntent{
 				PrincipalID: "owner",
 				OperationID: "assembly-retention",
-				Action:      controlclient.ActionPrompt,
+				Action:      appserver.ActionPrompt,
 				SessionID:   "session-1",
 				Target:      "session-1",
 				Digest:      "digest",
@@ -47,9 +47,9 @@ func TestStackAssemblesConfiguredControlOperationRetention(t *testing.T) {
 func TestStackAdoptsExistingControlOperationRetention(t *testing.T) {
 	storeDir := t.TempDir()
 	operationRoot := filepath.Join(storeDir, "control-operations")
-	seed, err := controlclient.NewFileOperationStoreWithConfig(
+	seed, err := appserver.NewFileOperationStoreWithConfig(
 		operationRoot,
-		controlclient.OperationRetentionConfig{TerminalRetention: 6 * time.Hour},
+		appserver.OperationRetentionConfig{TerminalRetention: 6 * time.Hour},
 	)
 	if err != nil {
 		t.Fatal(err)

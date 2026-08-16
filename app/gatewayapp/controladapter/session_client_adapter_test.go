@@ -16,16 +16,16 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
-	"github.com/caelis-labs/caelis/control/client/wirev1"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 func TestSessionClientAdapterRoutesMainTurnWritesAndObservationThroughTypedClient(t *testing.T) {
-	target := controlclient.TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
+	target := appserver.TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
 	subscription := newSessionClientAdapterTestSubscription()
 	client := &sessionClientAdapterTestClient{
 		target:       target,
@@ -109,7 +109,7 @@ func TestSessionClientAdapterRoutesMainTurnWritesAndObservationThroughTypedClien
 func TestSessionClientAdapterInterruptsBlockedMainTurnAdmission(t *testing.T) {
 	t.Parallel()
 
-	target := controlclient.TurnTarget{HandleID: "handle-pending", RunID: "run-pending", TurnID: "turn-pending"}
+	target := appserver.TurnTarget{HandleID: "handle-pending", RunID: "run-pending", TurnID: "turn-pending"}
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	client := &sessionClientAdapterTestClient{
@@ -149,7 +149,7 @@ func TestSessionClientAdapterInterruptsBlockedMainTurnAdmission(t *testing.T) {
 	client.mu.Lock()
 	cancelled := client.cancel.Target
 	client.mu.Unlock()
-	if cancelled != (controlclient.TurnTarget{}) {
+	if cancelled != (appserver.TurnTarget{}) {
 		t.Fatalf("Cancel() during blocked Start = %#v, want no cancel until admission finishes", cancelled)
 	}
 
@@ -185,10 +185,10 @@ func TestSessionClientAdapterInterruptsBlockedMainTurnAdmission(t *testing.T) {
 func TestSessionClientAdapterInterruptBoundsUncooperativeAdmissionAndCancelsLateTurn(t *testing.T) {
 	t.Parallel()
 
-	target := controlclient.TurnTarget{HandleID: "handle-late", RunID: "run-late", TurnID: "turn-late"}
+	target := appserver.TurnTarget{HandleID: "handle-late", RunID: "run-late", TurnID: "turn-late"}
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
-	cancelled := make(chan controlclient.CancelRequest, 1)
+	cancelled := make(chan appserver.CancelRequest, 1)
 	client := &sessionClientAdapterTestClient{
 		target:       target,
 		subscription: newSessionClientAdapterTestSubscription(),
@@ -246,7 +246,7 @@ func TestSessionClientAdapterInterruptBoundsUncooperativeAdmissionAndCancelsLate
 func TestSessionClientAdapterFailedAdmissionAfterInterruptDoesNotCancelNextTurn(t *testing.T) {
 	t.Parallel()
 
-	target := controlclient.TurnTarget{HandleID: "handle-next", RunID: "run-next", TurnID: "turn-next"}
+	target := appserver.TurnTarget{HandleID: "handle-next", RunID: "run-next", TurnID: "turn-next"}
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	client := &sessionClientAdapterTestClient{
@@ -307,7 +307,7 @@ func TestSessionClientAdapterFailedAdmissionAfterInterruptDoesNotCancelNextTurn(
 	defer turn.Close()
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if client.cancel.Target != (controlclient.TurnTarget{}) {
+	if client.cancel.Target != (appserver.TurnTarget{}) {
 		t.Fatalf("next Turn was cancelled = %#v, want leftover pending interrupt cleared", client.cancel.Target)
 	}
 }
@@ -317,7 +317,7 @@ func TestSessionClientAdapterUnknownAdmissionWithoutTargetDoesNotAcceptInterrupt
 
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
-	unknown := controlclient.NewOutcomeError(controlclient.OutcomeUnknown, errors.New("effect outcome cannot be proven"))
+	unknown := appserver.NewOutcomeError(appserver.OutcomeUnknown, errors.New("effect outcome cannot be proven"))
 	client := &sessionClientAdapterTestClient{
 		subscription: newSessionClientAdapterTestSubscription(),
 		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
@@ -327,7 +327,7 @@ func TestSessionClientAdapterUnknownAdmissionWithoutTargetDoesNotAcceptInterrupt
 		promptStarted:    started,
 		promptRelease:    release,
 		promptErr:        unknown,
-		promptOutcome:    controlclient.OutcomeUnknown,
+		promptOutcome:    appserver.OutcomeUnknown,
 		omitPromptTarget: true,
 	}
 	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
@@ -350,8 +350,8 @@ func TestSessionClientAdapterUnknownAdmissionWithoutTargetDoesNotAcceptInterrupt
 	close(release)
 	select {
 	case err := <-done:
-		var receipt *controlclient.CommandReceiptError
-		if !errors.As(err, &receipt) || receipt.Receipt.Outcome != controlclient.OutcomeUnknown {
+		var receipt *appserver.CommandReceiptError
+		if !errors.As(err, &receipt) || receipt.Receipt.Outcome != appserver.OutcomeUnknown {
 			t.Fatalf("Submit() = %v, want unknown admission receipt", err)
 		}
 	case <-time.After(time.Second):
@@ -359,8 +359,8 @@ func TestSessionClientAdapterUnknownAdmissionWithoutTargetDoesNotAcceptInterrupt
 	}
 	select {
 	case err := <-interruptDone:
-		var receipt *controlclient.CommandReceiptError
-		if !errors.As(err, &receipt) || receipt.Receipt.Outcome != controlclient.OutcomeUnknown {
+		var receipt *appserver.CommandReceiptError
+		if !errors.As(err, &receipt) || receipt.Receipt.Outcome != appserver.OutcomeUnknown {
 			t.Fatalf("Interrupt() = %v, want unknown instead of accepted interrupt", err)
 		}
 	case <-time.After(time.Second):
@@ -368,7 +368,7 @@ func TestSessionClientAdapterUnknownAdmissionWithoutTargetDoesNotAcceptInterrupt
 	}
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if client.cancel.Target != (controlclient.TurnTarget{}) {
+	if client.cancel.Target != (appserver.TurnTarget{}) {
 		t.Fatalf("Cancel() = %#v, want no ambient cancel without a proven target", client.cancel.Target)
 	}
 }
@@ -376,7 +376,7 @@ func TestSessionClientAdapterUnknownAdmissionWithoutTargetDoesNotAcceptInterrupt
 func TestSessionClientAdapterUnknownAdmissionWithTargetKeepsTurnForCancel(t *testing.T) {
 	t.Parallel()
 
-	target := controlclient.TurnTarget{HandleID: "handle-unknown", RunID: "run-unknown", TurnID: "turn-unknown"}
+	target := appserver.TurnTarget{HandleID: "handle-unknown", RunID: "run-unknown", TurnID: "turn-unknown"}
 	client := &sessionClientAdapterTestClient{
 		target:       target,
 		subscription: newSessionClientAdapterTestSubscription(),
@@ -384,8 +384,8 @@ func TestSessionClientAdapterUnknownAdmissionWithTargetKeepsTurnForCancel(t *tes
 			newSessionClientAdapterTestSubscription(),
 			newSessionClientAdapterTestSubscription(),
 		},
-		promptErr:     controlclient.NewOutcomeError(controlclient.OutcomeUnknown, errors.New("effect outcome cannot be proven")),
-		promptOutcome: controlclient.OutcomeUnknown,
+		promptErr:     appserver.NewOutcomeError(appserver.OutcomeUnknown, errors.New("effect outcome cannot be proven")),
+		promptOutcome: appserver.OutcomeUnknown,
 	}
 	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
 	turn, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "hello"})
@@ -406,7 +406,7 @@ func TestSessionClientAdapterUnknownAdmissionWithTargetKeepsTurnForCancel(t *tes
 func TestSessionClientAdapterReportsFailedCancelAfterAdmission(t *testing.T) {
 	t.Parallel()
 
-	target := controlclient.TurnTarget{HandleID: "handle-cancel", RunID: "run-cancel", TurnID: "turn-cancel"}
+	target := appserver.TurnTarget{HandleID: "handle-cancel", RunID: "run-cancel", TurnID: "turn-cancel"}
 	cancelErr := errors.New("cancel rejected")
 	client := &sessionClientAdapterTestClient{
 		target:       target,
@@ -431,7 +431,7 @@ func TestSessionClientAdapterReportsFailedCancelAfterAdmission(t *testing.T) {
 func TestSessionClientAdapterInterruptsBlockedReviewAdmission(t *testing.T) {
 	t.Parallel()
 
-	target := controlclient.TurnTarget{HandleID: "review-handle", RunID: "review-run", TurnID: "review-turn"}
+	target := appserver.TurnTarget{HandleID: "review-handle", RunID: "review-run", TurnID: "review-turn"}
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	client := &sessionClientAdapterTestClient{
@@ -441,7 +441,7 @@ func TestSessionClientAdapterInterruptsBlockedReviewAdmission(t *testing.T) {
 			newSessionClientAdapterTestSubscription(),
 			newSessionClientAdapterTestSubscription(),
 		},
-		state: controlclient.SessionState{
+		state: appserver.SessionState{
 			SessionID: "session-1",
 			Revision:  3,
 			Controller: session.ControllerBinding{
@@ -501,7 +501,7 @@ func TestSessionClientAdapterInterruptsBlockedReviewAdmission(t *testing.T) {
 func TestSessionClientAdapterRetriesCancelAfterTransientFailure(t *testing.T) {
 	t.Parallel()
 
-	target := controlclient.TurnTarget{HandleID: "handle-retry", RunID: "run-retry", TurnID: "turn-retry"}
+	target := appserver.TurnTarget{HandleID: "handle-retry", RunID: "run-retry", TurnID: "turn-retry"}
 	firstErr := context.DeadlineExceeded
 	client := &sessionClientAdapterTestClient{
 		target:       target,
@@ -534,7 +534,7 @@ func TestSessionClientAdapterRetriesCancelAfterTransientFailure(t *testing.T) {
 func TestSessionClientAdapterRetriesRejectedCancelWithFreshOperationID(t *testing.T) {
 	t.Parallel()
 
-	target := controlclient.TurnTarget{HandleID: "handle-rejected", RunID: "run-rejected", TurnID: "turn-rejected"}
+	target := appserver.TurnTarget{HandleID: "handle-rejected", RunID: "run-rejected", TurnID: "turn-rejected"}
 	client := &sessionClientAdapterTestClient{
 		target:       target,
 		subscription: newSessionClientAdapterTestSubscription(),
@@ -542,7 +542,7 @@ func TestSessionClientAdapterRetriesRejectedCancelWithFreshOperationID(t *testin
 			newSessionClientAdapterTestSubscription(),
 			newSessionClientAdapterTestSubscription(),
 		},
-		cancelOutcomes: []controlclient.Outcome{controlclient.OutcomeRejected, controlclient.OutcomeCommitted},
+		cancelOutcomes: []appserver.Outcome{appserver.OutcomeRejected, appserver.OutcomeCommitted},
 	}
 	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-1", "cli-tui")
 	turn, err := adapter.Submit(context.Background(), controlprompt.Submission{Text: "hello"})
@@ -550,8 +550,8 @@ func TestSessionClientAdapterRetriesRejectedCancelWithFreshOperationID(t *testin
 		t.Fatal(err)
 	}
 	defer turn.Close()
-	var receipt *controlclient.CommandReceiptError
-	if err := adapter.Interrupt(context.Background()); !errors.As(err, &receipt) || receipt.Receipt.Outcome != controlclient.OutcomeRejected {
+	var receipt *appserver.CommandReceiptError
+	if err := adapter.Interrupt(context.Background()); !errors.As(err, &receipt) || receipt.Receipt.Outcome != appserver.OutcomeRejected {
 		t.Fatalf("first Interrupt() = %v, want rejected receipt", err)
 	}
 	if err := adapter.Interrupt(context.Background()); err != nil {
@@ -567,7 +567,7 @@ func TestSessionClientAdapterRetriesRejectedCancelWithFreshOperationID(t *testin
 func TestSessionClientAdapterBoundsUncooperativeActiveCancel(t *testing.T) {
 	t.Parallel()
 
-	target := controlclient.TurnTarget{HandleID: "handle-cancel-blocked", RunID: "run-cancel-blocked", TurnID: "turn-cancel-blocked"}
+	target := appserver.TurnTarget{HandleID: "handle-cancel-blocked", RunID: "run-cancel-blocked", TurnID: "turn-cancel-blocked"}
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	client := &sessionClientAdapterTestClient{
@@ -607,12 +607,12 @@ func TestSessionClientAdapterBoundsUncooperativeActiveCancel(t *testing.T) {
 }
 
 func TestSessionClientAdapterCreatesSessionOnlyWhenMainPromptStartsWork(t *testing.T) {
-	target := controlclient.TurnTarget{HandleID: "handle-main", RunID: "run-main", TurnID: "turn-main"}
+	target := appserver.TurnTarget{HandleID: "handle-main", RunID: "run-main", TurnID: "turn-main"}
 	sessions := &sessionClientAdapterTestClient{
 		createSessionID: "session-main",
 		target:          target,
 		subscription:    newSessionClientAdapterTestSubscription(),
-		state: controlclient.SessionState{
+		state: appserver.SessionState{
 			Revision:   1,
 			Controller: session.ControllerBinding{EpochID: "epoch-main"},
 		},
@@ -675,12 +675,12 @@ func TestSessionClientAdapterParticipantPromptOwnsSessionCreation(t *testing.T) 
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			target := controlclient.TurnTarget{HandleID: "handle-participant", RunID: "run-participant", TurnID: "turn-participant"}
+			target := appserver.TurnTarget{HandleID: "handle-participant", RunID: "run-participant", TurnID: "turn-participant"}
 			sessions := &sessionClientAdapterTestClient{
 				createSessionID: "session-participant",
 				target:          target,
 				subscription:    newSessionClientAdapterTestSubscription(),
-				state: controlclient.SessionState{
+				state: appserver.SessionState{
 					Revision:   1,
 					Controller: session.ControllerBinding{EpochID: "epoch-participant"},
 				},
@@ -706,12 +706,12 @@ func TestSessionClientAdapterParticipantPromptOwnsSessionCreation(t *testing.T) 
 }
 
 func TestSessionClientAdapterRoutesReviewThroughTypedParticipantClient(t *testing.T) {
-	target := controlclient.TurnTarget{HandleID: "participant-handle", RunID: "participant-run", TurnID: "participant-turn"}
+	target := appserver.TurnTarget{HandleID: "participant-handle", RunID: "participant-run", TurnID: "participant-turn"}
 	subscription := newSessionClientAdapterTestSubscription()
 	client := &sessionClientAdapterTestClient{
 		target:       target,
 		subscription: subscription,
-		state: controlclient.SessionState{
+		state: appserver.SessionState{
 			SessionID: "session-1",
 			Revision:  7,
 			CWD:       t.TempDir(),
@@ -750,11 +750,11 @@ func TestSessionClientAdapterRoutesReviewThroughTypedParticipantClient(t *testin
 }
 
 func TestSessionClientAdapterRoutesSideAgentStartAndFollowUpThroughTypedClients(t *testing.T) {
-	target := controlclient.TurnTarget{HandleID: "participant-handle", RunID: "participant-run", TurnID: "participant-turn"}
+	target := appserver.TurnTarget{HandleID: "participant-handle", RunID: "participant-run", TurnID: "participant-turn"}
 	sessions := &sessionClientAdapterTestClient{
 		target:       target,
 		subscription: newSessionClientAdapterTestSubscription(),
-		state: controlclient.SessionState{
+		state: appserver.SessionState{
 			SessionID: "session-1", Revision: 7, CWD: t.TempDir(),
 			Controller: session.ControllerBinding{EpochID: "epoch-1"},
 		},
@@ -795,7 +795,7 @@ func TestSessionClientAdapterRoutesSideAgentStartAndFollowUpThroughTypedClients(
 }
 
 func TestSessionClientAdapterRoutesCompactThroughTypedSessionClient(t *testing.T) {
-	client := &sessionClientAdapterTestClient{state: controlclient.SessionState{
+	client := &sessionClientAdapterTestClient{state: appserver.SessionState{
 		SessionID: "session-1",
 		Revision:  7,
 		Controller: session.ControllerBinding{
@@ -817,8 +817,8 @@ func TestSessionClientAdapterRoutesCompactThroughTypedSessionClient(t *testing.T
 
 func newSessionClientAdapterForTest(
 	t *testing.T,
-	sessions controlclient.SessionClient,
-	participants controlclient.ParticipantClient,
+	sessions appserver.SessionClient,
+	participants appserver.ParticipantClient,
 	sessionID string,
 	surface string,
 ) *SessionClientAdapter {
@@ -852,7 +852,7 @@ func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) 
 			replay,
 			presence,
 		},
-		state: controlclient.SessionState{
+		state: appserver.SessionState{
 			Revision: 7,
 			Controller: session.ControllerBinding{
 				EpochID: "epoch-1",
@@ -918,7 +918,7 @@ func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) 
 
 func TestResetSessionDetachesActiveTurnWithoutCancellingHostWork(t *testing.T) {
 	target := &detachOnlyTargetTurn{
-		target: controlclient.TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
+		target: appserver.TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
 		events: make(chan eventstream.Envelope),
 	}
 	adapter := newSessionClientAdapterForTest(
@@ -945,7 +945,7 @@ func TestTUIResumeRejectsRetiredExternalMainControllerSession(t *testing.T) {
 	subscription := newSessionClientAdapterTestSubscription()
 	client := &sessionClientAdapterTestClient{
 		subscription: subscription,
-		state: controlclient.SessionState{
+		state: appserver.SessionState{
 			SessionID: "retired-controller-session",
 			Controller: session.ControllerBinding{
 				Kind: session.ControllerKindACP, ControllerID: "retired-main-controller", EpochID: "retired-epoch",
@@ -983,7 +983,7 @@ func TestTUIWorkRejectsRetiredExternalMainControllerSession(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			client := &sessionClientAdapterTestClient{
 				createSessionID: test.createSessionID,
-				state: controlclient.SessionState{
+				state: appserver.SessionState{
 					SessionID: "retired-controller-session",
 					Controller: session.ControllerBinding{
 						Kind: session.ControllerKindACP, ControllerID: "retired-main-controller", EpochID: "retired-epoch",
@@ -1010,7 +1010,7 @@ func TestTUIWorkRejectsRetiredExternalMainControllerSession(t *testing.T) {
 }
 
 func TestTUISelectedRetiredExternalMainControllerRejectsParticipantContinuationAndMutation(t *testing.T) {
-	client := &sessionClientAdapterTestClient{state: controlclient.SessionState{
+	client := &sessionClientAdapterTestClient{state: appserver.SessionState{
 		SessionID: "retired-controller-session",
 		Controller: session.ControllerBinding{
 			Kind: session.ControllerKindACP, ControllerID: "retired-main-controller", EpochID: "retired-epoch",
@@ -1047,13 +1047,13 @@ func TestTUISelectedRetiredExternalMainControllerRejectsParticipantContinuationA
 }
 
 func TestAppServerAdapterReconnectsActiveTurnForSteerAndClonesState(t *testing.T) {
-	target := controlclient.TurnTarget{HandleID: "handle-resumed", RunID: "run-resumed", TurnID: "turn-resumed"}
+	target := appserver.TurnTarget{HandleID: "handle-resumed", RunID: "run-resumed", TurnID: "turn-resumed"}
 	client := &sessionClientAdapterTestClient{
 		subscription: newSessionClientAdapterTestSubscription(),
-		state: controlclient.SessionState{
+		state: appserver.SessionState{
 			SessionID: "session-resumed", Revision: 7,
 			Controller: session.ControllerBinding{EpochID: "epoch-resumed"},
-			Run: controlclient.RunState{
+			Run: appserver.RunState{
 				Active: true, HandleID: target.HandleID, RunID: target.RunID, TurnID: target.TurnID,
 			},
 			Participants: []session.ParticipantBinding{{
@@ -1114,7 +1114,7 @@ func TestAppServerAdapterReconnectsActiveTurnForSteerAndClonesState(t *testing.T
 func TestAppServerAdapterResumeFailurePreservesCurrentSession(t *testing.T) {
 	client := &sessionClientAdapterTestClient{
 		reconnectErr: errors.New("bootstrap failed"),
-		state:        controlclient.SessionState{SessionID: "session-current"},
+		state:        appserver.SessionState{SessionID: "session-current"},
 	}
 	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "session-current", "cli-tui")
 	if _, err := adapter.ResumeSession(context.Background(), "session-target"); !errors.Is(err, client.reconnectErr) {
@@ -1155,7 +1155,7 @@ func TestAppServerAdapterStatusWithoutSessionDoesNotInspectOrCreate(t *testing.T
 }
 
 func TestAppServerAdapterRoutesSlashDiscoveryAndPluginsThroughTypedClients(t *testing.T) {
-	sessions := &sessionClientAdapterTestClient{state: controlclient.SessionState{
+	sessions := &sessionClientAdapterTestClient{state: appserver.SessionState{
 		SessionID: "session-typed", CWD: t.TempDir(), Revision: 3,
 		Controller: session.ControllerBinding{EpochID: "epoch-1"},
 	}}
@@ -1210,7 +1210,7 @@ func TestAppServerAdapterRoutesSlashDiscoveryAndPluginsThroughTypedClients(t *te
 }
 
 func TestAppServerAdapterFallsBackToHostSkillCatalogWhenSessionSnapshotIsUnavailable(t *testing.T) {
-	sessions := &sessionClientAdapterTestClient{state: controlclient.SessionState{SessionID: "session-gone", CWD: t.TempDir(), Revision: 3}}
+	sessions := &sessionClientAdapterTestClient{state: appserver.SessionState{SessionID: "session-gone", CWD: t.TempDir(), Revision: 3}}
 	completion := &fallbackSkillCompletionClient{}
 	adapter, err := NewAppServerAdapter(AppServerAdapterConfig{
 		SessionID: "session-gone", WorkspaceKey: "workspace", WorkspaceDir: sessions.state.CWD, Surface: "cli-tui",
@@ -1242,7 +1242,7 @@ func TestSessionClientAdapterSandboxMutationUsesHostRevisionAndObservesOnlyCommi
 		{Configuration: controlstatus.StatusConfiguration{Revision: 41}},
 		committedStatus,
 	}}
-	configuration := &sandboxConfigurationClientProbe{result: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted}}
+	configuration := &sandboxConfigurationClientProbe{result: appserver.CommandResult{Outcome: appserver.OutcomeCommitted}}
 	adapter := &SessionClientAdapter{
 		statusClient: statusClient, configClient: configuration, surface: "tui", sessionID: "session-1",
 	}
@@ -1261,7 +1261,7 @@ func TestSessionClientAdapterSandboxMutationUsesHostRevisionAndObservesOnlyCommi
 	unknownErr := errors.New("effect outcome cannot be proven")
 	statusClient = &sandboxStatusClientProbe{statuses: []controlstatus.StatusSnapshot{{Configuration: controlstatus.StatusConfiguration{Revision: 42}}}}
 	configuration = &sandboxConfigurationClientProbe{
-		result: controlclient.CommandResult{Outcome: controlclient.OutcomeUnknown}, err: unknownErr,
+		result: appserver.CommandResult{Outcome: appserver.OutcomeUnknown}, err: unknownErr,
 	}
 	adapter.statusClient, adapter.configClient = statusClient, configuration
 	if _, err := adapter.SetSandboxBackend(context.Background(), "auto"); !errors.Is(err, unknownErr) {
@@ -1270,16 +1270,16 @@ func TestSessionClientAdapterSandboxMutationUsesHostRevisionAndObservesOnlyCommi
 	if len(statusClient.requests) != 1 {
 		t.Fatalf("unknown outcome performed %d status reads, want precondition only", len(statusClient.requests))
 	}
-	var receiptErr *controlclient.CommandReceiptError
-	if _, err := adapter.SetSandboxBackend(context.Background(), "auto"); !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != controlclient.OutcomeUnknown {
+	var receiptErr *appserver.CommandReceiptError
+	if _, err := adapter.SetSandboxBackend(context.Background(), "auto"); !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != appserver.OutcomeUnknown {
 		t.Fatalf("SetSandboxBackend(unknown replay) receipt error = %#v, %v", receiptErr, err)
 	}
 
 	statusClient = &sandboxStatusClientProbe{statuses: []controlstatus.StatusSnapshot{{Configuration: controlstatus.StatusConfiguration{Revision: 42}}}}
-	configuration = &sandboxConfigurationClientProbe{result: controlclient.CommandResult{Outcome: controlclient.OutcomeAccepted}}
+	configuration = &sandboxConfigurationClientProbe{result: appserver.CommandResult{Outcome: appserver.OutcomeAccepted}}
 	adapter.statusClient, adapter.configClient = statusClient, configuration
 	receiptErr = nil
-	if _, err := adapter.SetSandboxBackend(context.Background(), "auto"); !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != controlclient.OutcomeAccepted {
+	if _, err := adapter.SetSandboxBackend(context.Background(), "auto"); !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != appserver.OutcomeAccepted {
 		t.Fatalf("SetSandboxBackend(accepted) receipt error = %#v, %v", receiptErr, err)
 	}
 	if len(statusClient.requests) != 1 {
@@ -1291,10 +1291,10 @@ func TestSessionClientAdapterSandboxMutationUsesHostRevisionAndObservesOnlyCommi
 		statuses: []controlstatus.StatusSnapshot{{Configuration: controlstatus.StatusConfiguration{Revision: 43}}, {}},
 		errors:   []error{nil, observationErr},
 	}
-	configuration = &sandboxConfigurationClientProbe{result: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted}}
+	configuration = &sandboxConfigurationClientProbe{result: appserver.CommandResult{Outcome: appserver.OutcomeCommitted}}
 	adapter.statusClient, adapter.configClient = statusClient, configuration
 	if _, err := adapter.SetSandboxBackend(context.Background(), "host"); !errors.Is(err, observationErr) ||
-		!errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != controlclient.OutcomeCommitted ||
+		!errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != appserver.OutcomeCommitted ||
 		!strings.Contains(err.Error(), "do not retry blindly") {
 		t.Fatalf("SetSandboxBackend(observation failure) error = %v", err)
 	}
@@ -1305,7 +1305,7 @@ func TestSessionClientAdapterAgentBindingMutationUsesHostRevisionAndObservesOnly
 		Configuration: controlstatus.StatusConfiguration{Revision: 51},
 	}}}
 	agents := &agentBindingClientProbe{
-		result: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted},
+		result: appserver.CommandResult{Outcome: appserver.OutcomeCommitted},
 		status: agentbinding.Status{Sets: []agentbinding.BindingSetStatus{{Name: "baseline"}}},
 	}
 	adapter := &SessionClientAdapter{statusClient: statusClient, agentClient: agents, surface: "tui", sessionID: "session-1"}
@@ -1326,13 +1326,13 @@ func TestSessionClientAdapterAgentBindingMutationUsesHostRevisionAndObservesOnly
 		Configuration: controlstatus.StatusConfiguration{Revision: 52},
 	}}}
 	agents = &agentBindingClientProbe{
-		result: controlclient.CommandResult{Outcome: controlclient.OutcomeUnknown},
+		result: appserver.CommandResult{Outcome: appserver.OutcomeUnknown},
 		err:    commandErr,
 	}
 	adapter.statusClient, adapter.agentClient = statusClient, agents
 	_, err = adapter.BindAgentBinding(context.Background(), agentbinding.Binding{Handle: agentbinding.HandleOrbit})
-	var receiptErr *controlclient.CommandReceiptError
-	if !errors.Is(err, commandErr) || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != controlclient.OutcomeUnknown {
+	var receiptErr *appserver.CommandReceiptError
+	if !errors.Is(err, commandErr) || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != appserver.OutcomeUnknown {
 		t.Fatalf("BindAgentBinding(unknown) = %#v, %v", receiptErr, err)
 	}
 	if agents.statusCalls != 0 || len(statusClient.requests) != 1 {
@@ -1344,13 +1344,13 @@ func TestSessionClientAdapterAgentBindingMutationUsesHostRevisionAndObservesOnly
 		Configuration: controlstatus.StatusConfiguration{Revision: 53},
 	}}}
 	agents = &agentBindingClientProbe{
-		result:    controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted},
+		result:    appserver.CommandResult{Outcome: appserver.OutcomeCommitted},
 		statusErr: observationErr,
 	}
 	adapter.statusClient, adapter.agentClient = statusClient, agents
 	_, err = adapter.ResetAgentBinding(context.Background(), agentbinding.HandleOrbit)
 	receiptErr = nil
-	if !errors.Is(err, observationErr) || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != controlclient.OutcomeCommitted ||
+	if !errors.Is(err, observationErr) || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != appserver.OutcomeCommitted ||
 		!strings.Contains(err.Error(), "do not retry blindly") {
 		t.Fatalf("ResetAgentBinding(observation failure) = %#v, %v", receiptErr, err)
 	}
@@ -1358,13 +1358,13 @@ func TestSessionClientAdapterAgentBindingMutationUsesHostRevisionAndObservesOnly
 
 func TestSessionClientAdapterDisconnectUsesRevisionBoundCandidateAndReceipt(t *testing.T) {
 	agents := &disconnectAgentClientProbe{
-		snapshot: controlclient.DisconnectCandidatesSnapshot{
+		snapshot: appserver.DisconnectCandidatesSnapshot{
 			Revision: 61,
 			Candidates: []controlagents.DisconnectCandidate{{
 				AgentID: "codex", Name: "Codex", ConnectionID: "codex-connection", LastOnConnection: true,
 			}},
 		},
-		result: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted, Revision: 62},
+		result: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 62},
 	}
 	adapter := &SessionClientAdapter{agentClient: agents, surface: "tui", sessionID: "session-1"}
 	got, err := adapter.DisconnectACP(context.Background(), "codex")
@@ -1378,22 +1378,22 @@ func TestSessionClientAdapterDisconnectUsesRevisionBoundCandidateAndReceipt(t *t
 	}
 
 	wantErr := errors.New("disconnect outcome unknown")
-	agents.result = controlclient.CommandResult{Outcome: controlclient.OutcomeUnknown, Revision: 0}
+	agents.result = appserver.CommandResult{Outcome: appserver.OutcomeUnknown, Revision: 0}
 	agents.err = wantErr
 	_, err = adapter.DisconnectACP(context.Background(), "codex")
-	var receiptErr *controlclient.CommandReceiptError
-	if !errors.Is(err, wantErr) || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != controlclient.OutcomeUnknown {
+	var receiptErr *appserver.CommandReceiptError
+	if !errors.Is(err, wantErr) || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != appserver.OutcomeUnknown {
 		t.Fatalf("DisconnectACP(unknown) = %#v, %v", receiptErr, err)
 	}
 
-	agents.result = controlclient.CommandResult{
-		OperationID: "agent-acp-disconnect-warning", Outcome: controlclient.OutcomeCommitted, Revision: 62,
+	agents.result = appserver.CommandResult{
+		OperationID: "agent-acp-disconnect-warning", Outcome: appserver.OutcomeCommitted, Revision: 62,
 		Detail: "Agent assembly refresh failed",
 	}
 	agents.err = nil
 	got, err = adapter.DisconnectACP(context.Background(), "codex")
 	receiptErr = nil
-	if got.Agent.ID != "codex" || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != controlclient.OutcomeCommitted ||
+	if got.Agent.ID != "codex" || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != appserver.OutcomeCommitted ||
 		!strings.Contains(err.Error(), "do not retry blindly") || !strings.Contains(err.Error(), "assembly refresh failed") {
 		t.Fatalf("DisconnectACP(committed warning) = %#v, %#v, %v", got, receiptErr, err)
 	}
@@ -1472,9 +1472,9 @@ func TestSessionClientAdapterACPPreparationWarningPreservesReceiptAndCachedEvide
 		CommandLine: "/tmp/custom-acp", ModelID: controlagents.DefaultRemoteModelID, CWD: "/workspace",
 	}
 	discovery, err := adapter.DiscoverACPConnection(context.Background(), request)
-	var receiptErr *controlclient.CommandReceiptError
+	var receiptErr *appserver.CommandReceiptError
 	if discovery.ConnectionID != "custom" || !errors.As(err, &receiptErr) ||
-		receiptErr.Receipt.Outcome != controlclient.OutcomeCommitted ||
+		receiptErr.Receipt.Outcome != appserver.OutcomeCommitted ||
 		!strings.Contains(err.Error(), "do not retry blindly") || !strings.Contains(err.Error(), "directory sync failed") {
 		t.Fatalf("DiscoverACPConnection(warning) = %#v, %#v, %v", discovery, receiptErr, err)
 	}
@@ -1595,10 +1595,10 @@ func TestSessionClientAdapterACPPendingObservationRetriesThroughSameHTTPClient(t
 			})
 		case r.Method == http.MethodPost && r.URL.Path == wirev1.APIPrefix+"/agents/prepare-acp":
 			prepareCalls++
-			writeControlAdapterWireJSON(t, w, http.StatusOK, controlclient.CommandResult{
-				OperationID: r.Header.Get("Idempotency-Key"), Outcome: controlclient.OutcomeCommitted,
-				Resource: &controlclient.CommandResource{
-					Kind: controlclient.CommandResourceACPPreparation, Ref: preparation.Ref, Digest: preparation.ContentDigest,
+			writeControlAdapterWireJSON(t, w, http.StatusOK, appserver.CommandResult{
+				OperationID: r.Header.Get("Idempotency-Key"), Outcome: appserver.OutcomeCommitted,
+				Resource: &appserver.CommandResource{
+					Kind: appserver.CommandResourceACPPreparation, Ref: preparation.Ref, Digest: preparation.ContentDigest,
 				},
 			})
 		case r.Method == http.MethodGet && r.URL.Path == wirev1.APIPrefix+"/agents/acp-preparations/"+preparation.Ref:
@@ -1621,7 +1621,7 @@ func TestSessionClientAdapterACPPendingObservationRetriesThroughSameHTTPClient(t
 		BaseURL:       "https://control.test",
 		BearerToken:   "test-token",
 		HTTPClient:    &http.Client{Transport: transport},
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1733,9 +1733,9 @@ func TestSessionClientAdapterACPAuthenticationWarningCachesReadyEvidence(t *test
 		acpPreparations: map[string]controlagents.ACPPreparation{acpPreparationCacheKey(request): challenge},
 	}
 	discovery, err := adapter.DiscoverACPConnection(context.Background(), request)
-	var receiptErr *controlclient.CommandReceiptError
+	var receiptErr *appserver.CommandReceiptError
 	if discovery.ConnectionID != "custom" || !errors.As(err, &receiptErr) ||
-		receiptErr.Receipt.Outcome != controlclient.OutcomeCommitted || !strings.Contains(err.Error(), "do not retry blindly") {
+		receiptErr.Receipt.Outcome != appserver.OutcomeCommitted || !strings.Contains(err.Error(), "do not retry blindly") {
 		t.Fatalf("DiscoverACPConnection(auth warning) = %#v, %#v, %v", discovery, receiptErr, err)
 	}
 	if agents.prepareCalls != 0 || agents.authCalls != 1 || agents.observeCalls != 1 || agents.connectCalls != 0 {
@@ -1809,10 +1809,10 @@ func TestSessionClientAdapterConnectUsesSeparateHostAndSessionMutations(t *testi
 		{Session: controlstatus.StatusSession{ID: "session-1"}, ModelStatus: controlstatus.StatusModel{Alias: "ollama/first"}},
 	}}
 	configuration := &modelConfigurationClientProbe{
-		connectResult: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted, Revision: 1},
+		connectResult: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 1},
 	}
 	adapter := &SessionClientAdapter{
-		sessionClient: &sessionClientAdapterTestClient{state: controlclient.SessionState{
+		sessionClient: &sessionClientAdapterTestClient{state: appserver.SessionState{
 			SessionID: "session-1", Revision: 7, Controller: session.ControllerBinding{EpochID: "epoch-1"},
 		}},
 		statusClient: statusClient, configClient: configuration, surface: "tui", sessionID: "session-1",
@@ -1839,7 +1839,7 @@ func TestSessionClientAdapterConnectDoesNotReplaceExistingSessionSelection(t *te
 		{Session: controlstatus.StatusSession{ID: "session-1"}, ModelStatus: controlstatus.StatusModel{Alias: "ollama/existing"}},
 	}}
 	configuration := &modelConfigurationClientProbe{
-		connectResult: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted, Revision: 1},
+		connectResult: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 1},
 	}
 	adapter := &SessionClientAdapter{
 		statusClient: statusClient, configClient: configuration, surface: "tui", sessionID: "session-1",
@@ -1860,20 +1860,20 @@ func TestSessionClientAdapterConnectPreservesHostCommitWhenSessionSelectionFails
 	statusClient := &sandboxStatusClientProbe{statuses: []controlstatus.StatusSnapshot{{}, connectedStatus}}
 	selectionErr := errors.New("Session selection conflicted")
 	configuration := &modelConfigurationClientProbe{
-		connectResult: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted, Revision: 1},
-		sessionResult: controlclient.CommandResult{Outcome: controlclient.OutcomeConflicted, Revision: 8},
+		connectResult: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 1},
+		sessionResult: appserver.CommandResult{Outcome: appserver.OutcomeConflicted, Revision: 8},
 		sessionErr:    selectionErr,
 	}
 	adapter := &SessionClientAdapter{
-		sessionClient: &sessionClientAdapterTestClient{state: controlclient.SessionState{
+		sessionClient: &sessionClientAdapterTestClient{state: appserver.SessionState{
 			SessionID: "session-1", Revision: 7, Controller: session.ControllerBinding{EpochID: "epoch-1"},
 		}},
 		statusClient: statusClient, configClient: configuration, surface: "tui", sessionID: "session-1",
 	}
 	status, err := adapter.Connect(context.Background(), controlprompt.ConnectConfig{})
-	var receiptErr *controlclient.CommandReceiptError
+	var receiptErr *appserver.CommandReceiptError
 	if !reflect.DeepEqual(status, connectedStatus) || !errors.Is(err, selectionErr) || !errors.As(err, &receiptErr) ||
-		receiptErr.Receipt.Outcome != controlclient.OutcomeConflicted ||
+		receiptErr.Receipt.Outcome != appserver.OutcomeConflicted ||
 		!strings.Contains(err.Error(), "Host model connection committed") || !strings.Contains(err.Error(), "do not retry the connection blindly") {
 		t.Fatalf("Connect(Session selection failure) = %#v, %#v, %v", status, receiptErr, err)
 	}
@@ -1889,18 +1889,18 @@ func TestSessionClientAdapterConnectDoesNotInferSelectionFromAdvancedHostStatus(
 	}
 	statusClient := &sandboxStatusClientProbe{statuses: []controlstatus.StatusSnapshot{{}, connectedStatus}}
 	configuration := &modelConfigurationClientProbe{
-		connectResult: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted, Revision: 1},
+		connectResult: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 1},
 	}
 	adapter := &SessionClientAdapter{
-		sessionClient: &sessionClientAdapterTestClient{state: controlclient.SessionState{
+		sessionClient: &sessionClientAdapterTestClient{state: appserver.SessionState{
 			SessionID: "session-1", Revision: 7, Controller: session.ControllerBinding{EpochID: "epoch-1"},
 		}},
 		statusClient: statusClient, configClient: configuration, surface: "tui", sessionID: "session-1",
 	}
 	status, err := adapter.Connect(context.Background(), controlprompt.ConnectConfig{Provider: "ollama", Model: "first"})
-	var receiptErr *controlclient.CommandReceiptError
+	var receiptErr *appserver.CommandReceiptError
 	if !reflect.DeepEqual(status, connectedStatus) || !errors.As(err, &receiptErr) ||
-		receiptErr.Receipt.Outcome != controlclient.OutcomeCommitted ||
+		receiptErr.Receipt.Outcome != appserver.OutcomeCommitted ||
 		!strings.Contains(err.Error(), "status advanced") || !strings.Contains(err.Error(), "selection was not attempted") {
 		t.Fatalf("Connect(advanced observation) = %#v, %#v, %v", status, receiptErr, err)
 	}
@@ -1916,13 +1916,13 @@ func TestSessionClientAdapterConnectDoesNotRetargetSelectionAfterSessionChange(t
 	}
 	statusClient := &sandboxStatusClientProbe{statuses: []controlstatus.StatusSnapshot{{}, connectedStatus}}
 	adapter := &SessionClientAdapter{
-		sessionClient: &sessionClientAdapterTestClient{state: controlclient.SessionState{
+		sessionClient: &sessionClientAdapterTestClient{state: appserver.SessionState{
 			SessionID: "session-2", Revision: 11, Controller: session.ControllerBinding{EpochID: "epoch-2"},
 		}},
 		statusClient: statusClient, surface: "tui", sessionID: "session-1",
 	}
 	configuration := &modelConfigurationClientProbe{
-		connectResult: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted, Revision: 1},
+		connectResult: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 1},
 		connectHook: func() {
 			adapter.sessionChangeMu.Lock()
 			adapter.setClientSession("session-2", "")
@@ -1932,9 +1932,9 @@ func TestSessionClientAdapterConnectDoesNotRetargetSelectionAfterSessionChange(t
 	adapter.configClient = configuration
 
 	status, err := adapter.Connect(context.Background(), controlprompt.ConnectConfig{Provider: "ollama", Model: "first"})
-	var receiptErr *controlclient.CommandReceiptError
+	var receiptErr *appserver.CommandReceiptError
 	if !reflect.DeepEqual(status, connectedStatus) || !errors.As(err, &receiptErr) ||
-		receiptErr.Receipt.Outcome != controlclient.OutcomeCommitted ||
+		receiptErr.Receipt.Outcome != appserver.OutcomeCommitted ||
 		!strings.Contains(err.Error(), `selected Session changed from "session-1" to "session-2"`) ||
 		!strings.Contains(err.Error(), "do not retry the connection blindly") {
 		t.Fatalf("Connect(changed Session) = %#v, %#v, %v", status, receiptErr, err)
@@ -1960,7 +1960,7 @@ func TestSessionClientAdapterHostModelReceiptsAndObservation(t *testing.T) {
 			committedStatus,
 		}}
 		configuration := &modelConfigurationClientProbe{
-			hostResult: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted, Revision: 42},
+			hostResult: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 42},
 		}
 		adapter := &SessionClientAdapter{statusClient: statusClient, configClient: configuration, surface: "tui"}
 
@@ -1989,7 +1989,7 @@ func TestSessionClientAdapterHostModelReceiptsAndObservation(t *testing.T) {
 		statusClient := &sandboxStatusClientProbe{statuses: []controlstatus.StatusSnapshot{committedStatus}}
 		configuration := &modelConfigurationClientProbe{}
 		adapter := &SessionClientAdapter{
-			sessionClient: &sessionClientAdapterTestClient{state: controlclient.SessionState{
+			sessionClient: &sessionClientAdapterTestClient{state: appserver.SessionState{
 				SessionID: "session-1", Revision: 7, Controller: session.ControllerBinding{EpochID: "epoch-1"},
 			}},
 			statusClient: statusClient, configClient: configuration, surface: "tui", sessionID: "session-1",
@@ -2021,7 +2021,7 @@ func TestSessionClientAdapterHostModelReceiptsAndObservation(t *testing.T) {
 			committedStatus,
 		}}
 		configuration := &modelConfigurationClientProbe{
-			connectResult: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted, Revision: 32},
+			connectResult: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 32},
 		}
 		adapter := &SessionClientAdapter{statusClient: statusClient, configClient: configuration, surface: "tui"}
 		got, err := adapter.Connect(context.Background(), controlprompt.ConnectConfig{Provider: "ollama", Model: "first"})
@@ -2044,12 +2044,12 @@ func TestSessionClientAdapterHostModelReceiptsAndObservation(t *testing.T) {
 		commandErr := errors.New("connect outcome unknown")
 		statusClient := &sandboxStatusClientProbe{statuses: []controlstatus.StatusSnapshot{{Configuration: controlstatus.StatusConfiguration{Revision: 8}}}}
 		configuration := &modelConfigurationClientProbe{
-			connectResult: controlclient.CommandResult{Outcome: controlclient.OutcomeUnknown}, connectErr: commandErr,
+			connectResult: appserver.CommandResult{Outcome: appserver.OutcomeUnknown}, connectErr: commandErr,
 		}
 		adapter := &SessionClientAdapter{statusClient: statusClient, configClient: configuration, surface: "tui"}
 		_, err := adapter.Connect(context.Background(), controlprompt.ConnectConfig{Provider: "ollama", Model: "first"})
-		var receiptErr *controlclient.CommandReceiptError
-		if !errors.Is(err, commandErr) || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != controlclient.OutcomeUnknown {
+		var receiptErr *appserver.CommandReceiptError
+		if !errors.Is(err, commandErr) || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != appserver.OutcomeUnknown {
 			t.Fatalf("Connect(unknown) error = %#v, %v", receiptErr, err)
 		}
 		if len(statusClient.requests) != 1 {
@@ -2064,12 +2064,12 @@ func TestSessionClientAdapterHostModelReceiptsAndObservation(t *testing.T) {
 			errors:   []error{nil, observationErr},
 		}
 		configuration := &modelConfigurationClientProbe{
-			connectResult: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted, Revision: 9},
+			connectResult: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 9},
 		}
 		adapter := &SessionClientAdapter{statusClient: statusClient, configClient: configuration, surface: "tui"}
 		_, err := adapter.Connect(context.Background(), controlprompt.ConnectConfig{Provider: "ollama", Model: "first"})
-		var receiptErr *controlclient.CommandReceiptError
-		if !errors.Is(err, observationErr) || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != controlclient.OutcomeCommitted ||
+		var receiptErr *appserver.CommandReceiptError
+		if !errors.Is(err, observationErr) || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != appserver.OutcomeCommitted ||
 			!strings.Contains(err.Error(), "do not retry blindly") {
 			t.Fatalf("Connect(observation failure) error = %#v, %v", receiptErr, err)
 		}
@@ -2081,7 +2081,7 @@ func TestSessionClientAdapterHostModelReceiptsAndObservation(t *testing.T) {
 			{Configuration: controlstatus.StatusConfiguration{Revision: 46}},
 		}}
 		configuration := &modelConfigurationClientProbe{
-			deleteResult: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted, Revision: 46},
+			deleteResult: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 46},
 		}
 		adapter := &SessionClientAdapter{statusClient: statusClient, configClient: configuration, surface: "tui", sessionID: "session-1"}
 		if err := adapter.DeleteModel(context.Background(), "ollama/old"); err != nil {
@@ -2107,47 +2107,47 @@ func collectSessionClientAdapterEvents(events <-chan eventstream.Envelope) []eve
 }
 
 type sessionClientAdapterTestClient struct {
-	target                 controlclient.TurnTarget
+	target                 appserver.TurnTarget
 	subscription           *sessionClientAdapterTestSubscription
 	reconnectSubscriptions []*sessionClientAdapterTestSubscription
-	state                  controlclient.SessionState
+	state                  appserver.SessionState
 	list                   session.SessionList
 	createSessionID        string
 	reconnectErr           error
 
 	mu                  sync.Mutex
-	prompt              controlclient.PromptRequest
-	steer               controlclient.SteerRequest
-	approval            controlclient.ResolveApprovalRequest
-	cancel              controlclient.CancelRequest
-	compact             controlclient.CompactSessionRequest
-	create              controlclient.CreateSessionRequest
+	prompt              appserver.PromptRequest
+	steer               appserver.SteerRequest
+	approval            appserver.ResolveApprovalRequest
+	cancel              appserver.CancelRequest
+	compact             appserver.CompactSessionRequest
+	create              appserver.CreateSessionRequest
 	promptStarted       chan struct{}
 	promptRelease       chan struct{}
 	promptIgnoreContext bool
 	promptErr           error
-	promptOutcome       controlclient.Outcome
+	promptOutcome       appserver.Outcome
 	omitPromptTarget    bool
 	cancelErr           error
 	cancelErrs          []error
-	cancelOutcomes      []controlclient.Outcome
+	cancelOutcomes      []appserver.Outcome
 	cancelIDs           []string
-	cancelCalled        chan controlclient.CancelRequest
+	cancelCalled        chan appserver.CancelRequest
 	cancelStarted       chan struct{}
 	cancelRelease       chan struct{}
 }
 
 type detachOnlyTargetTurn struct {
-	target      controlclient.TurnTarget
+	target      appserver.TurnTarget
 	events      chan eventstream.Envelope
 	cancelCalls int
 	closeCalls  int
 }
 
 func (*detachOnlyTargetTurn) SessionID() string                     { return "session-running" }
-func (t *detachOnlyTargetTurn) Target() controlclient.TurnTarget    { return t.target }
+func (t *detachOnlyTargetTurn) Target() appserver.TurnTarget        { return t.target }
 func (t *detachOnlyTargetTurn) Events() <-chan eventstream.Envelope { return t.events }
-func (*detachOnlyTargetTurn) ResolveApproval(context.Context, controlclient.ApprovalResolution) error {
+func (*detachOnlyTargetTurn) ResolveApproval(context.Context, appserver.ApprovalResolution) error {
 	return nil
 }
 func (t *detachOnlyTargetTurn) Cancel(context.Context, string) error {
@@ -2161,39 +2161,39 @@ func (t *detachOnlyTargetTurn) Close() error {
 	return nil
 }
 
-func (*sessionClientAdapterTestClient) Initialize(context.Context) (controlclient.ServerInfo, error) {
-	return controlclient.ServerInfo{}, nil
+func (*sessionClientAdapterTestClient) Initialize(context.Context) (appserver.ServerInfo, error) {
+	return appserver.ServerInfo{}, nil
 }
 
-func (c *sessionClientAdapterTestClient) ListSessions(context.Context, controlclient.ListSessionsRequest) (session.SessionList, error) {
+func (c *sessionClientAdapterTestClient) ListSessions(context.Context, appserver.ListSessionsRequest) (session.SessionList, error) {
 	return c.list, nil
 }
 
-func (c *sessionClientAdapterTestClient) CreateSession(_ context.Context, request controlclient.CreateSessionRequest) (controlclient.CommandResult, error) {
+func (c *sessionClientAdapterTestClient) CreateSession(_ context.Context, request appserver.CreateSessionRequest) (appserver.CommandResult, error) {
 	c.create = request
 	sessionID := strings.TrimSpace(c.createSessionID)
 	if sessionID == "" {
-		return controlclient.CommandResult{}, errors.New("unexpected CreateSession")
+		return appserver.CommandResult{}, errors.New("unexpected CreateSession")
 	}
-	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted, SessionID: sessionID}, nil
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted, SessionID: sessionID}, nil
 }
 
-func (*sessionClientAdapterTestClient) CloseSession(context.Context, controlclient.CloseSessionRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{}, errors.New("unexpected CloseSession")
+func (*sessionClientAdapterTestClient) CloseSession(context.Context, appserver.CloseSessionRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{}, errors.New("unexpected CloseSession")
 }
 
-func (c *sessionClientAdapterTestClient) CompactSession(_ context.Context, request controlclient.CompactSessionRequest) (controlclient.CommandResult, error) {
+func (c *sessionClientAdapterTestClient) CompactSession(_ context.Context, request appserver.CompactSessionRequest) (appserver.CommandResult, error) {
 	c.mu.Lock()
 	c.compact = request
 	c.mu.Unlock()
-	return controlclient.CommandResult{
+	return appserver.CommandResult{
 		OperationID: request.OperationID,
-		Outcome:     controlclient.OutcomeCommitted,
+		Outcome:     appserver.OutcomeCommitted,
 		SessionID:   request.SessionID,
 	}, nil
 }
 
-func (c *sessionClientAdapterTestClient) InspectSession(_ context.Context, request controlclient.StateRequest) (controlclient.SessionState, error) {
+func (c *sessionClientAdapterTestClient) InspectSession(_ context.Context, request appserver.StateRequest) (appserver.SessionState, error) {
 	state := c.state
 	if state.SessionID == "" {
 		state.SessionID = strings.TrimSpace(request.SessionID)
@@ -2205,9 +2205,9 @@ func (c *sessionClientAdapterTestClient) InspectSession(_ context.Context, reque
 	return state, nil
 }
 
-func (c *sessionClientAdapterTestClient) Reconnect(_ context.Context, request controlclient.ReconnectRequest) (controlclient.ReconnectResult, error) {
+func (c *sessionClientAdapterTestClient) Reconnect(_ context.Context, request appserver.ReconnectRequest) (appserver.ReconnectResult, error) {
 	if c.reconnectErr != nil {
-		return controlclient.ReconnectResult{}, c.reconnectErr
+		return appserver.ReconnectResult{}, c.reconnectErr
 	}
 	state := c.state
 	if state.SessionID == "" {
@@ -2226,7 +2226,7 @@ func (c *sessionClientAdapterTestClient) Reconnect(_ context.Context, request co
 		c.reconnectSubscriptions = c.reconnectSubscriptions[1:]
 	}
 	c.mu.Unlock()
-	return controlclient.ReconnectResult{
+	return appserver.ReconnectResult{
 		State:        state,
 		Subscription: subscription,
 	}, nil
@@ -2234,26 +2234,26 @@ func (c *sessionClientAdapterTestClient) Reconnect(_ context.Context, request co
 
 type sessionClientAdapterTestStatusClient struct{}
 
-func (sessionClientAdapterTestStatusClient) SessionStatus(context.Context, controlclient.StatusRequest) (controlstatus.StatusSnapshot, error) {
+func (sessionClientAdapterTestStatusClient) SessionStatus(context.Context, appserver.StatusRequest) (controlstatus.StatusSnapshot, error) {
 	return controlstatus.StatusSnapshot{}, nil
 }
 
 type recordingStatusClient struct {
-	request controlclient.StatusRequest
+	request appserver.StatusRequest
 }
 
-func (c *recordingStatusClient) SessionStatus(_ context.Context, request controlclient.StatusRequest) (controlstatus.StatusSnapshot, error) {
+func (c *recordingStatusClient) SessionStatus(_ context.Context, request appserver.StatusRequest) (controlstatus.StatusSnapshot, error) {
 	c.request = request
 	return controlstatus.StatusSnapshot{}, nil
 }
 
 type sandboxStatusClientProbe struct {
-	requests []controlclient.StatusRequest
+	requests []appserver.StatusRequest
 	statuses []controlstatus.StatusSnapshot
 	errors   []error
 }
 
-func (c *sandboxStatusClientProbe) SessionStatus(_ context.Context, request controlclient.StatusRequest) (controlstatus.StatusSnapshot, error) {
+func (c *sandboxStatusClientProbe) SessionStatus(_ context.Context, request appserver.StatusRequest) (controlstatus.StatusSnapshot, error) {
 	index := len(c.requests)
 	c.requests = append(c.requests, request)
 	var status controlstatus.StatusSnapshot
@@ -2268,18 +2268,18 @@ func (c *sandboxStatusClientProbe) SessionStatus(_ context.Context, request cont
 }
 
 type sandboxConfigurationClientProbe struct {
-	controlclient.ConfigurationClient
-	request controlclient.SandboxRequest
-	result  controlclient.CommandResult
+	appserver.ConfigurationClient
+	request appserver.SandboxRequest
+	result  appserver.CommandResult
 	err     error
 	calls   int
 }
 
 type agentBindingClientProbe struct {
-	controlclient.AgentClient
-	bindRequest  controlclient.BindAgentBindingRequest
-	resetRequest controlclient.ResetAgentBindingRequest
-	result       controlclient.CommandResult
+	appserver.AgentClient
+	bindRequest  appserver.BindAgentBindingRequest
+	resetRequest appserver.ResetAgentBindingRequest
+	result       appserver.CommandResult
 	err          error
 	status       agentbinding.Status
 	statusErr    error
@@ -2287,7 +2287,7 @@ type agentBindingClientProbe struct {
 	statusCalls  int
 }
 
-func (c *agentBindingClientProbe) BindAgentBinding(_ context.Context, request controlclient.BindAgentBindingRequest) (controlclient.CommandResult, error) {
+func (c *agentBindingClientProbe) BindAgentBinding(_ context.Context, request appserver.BindAgentBindingRequest) (appserver.CommandResult, error) {
 	c.bindCalls++
 	c.bindRequest = request
 	result := c.result
@@ -2295,32 +2295,32 @@ func (c *agentBindingClientProbe) BindAgentBinding(_ context.Context, request co
 	return result, c.err
 }
 
-func (c *agentBindingClientProbe) ResetAgentBinding(_ context.Context, request controlclient.ResetAgentBindingRequest) (controlclient.CommandResult, error) {
+func (c *agentBindingClientProbe) ResetAgentBinding(_ context.Context, request appserver.ResetAgentBindingRequest) (appserver.CommandResult, error) {
 	c.resetRequest = request
 	result := c.result
 	result.OperationID = request.OperationID
 	return result, c.err
 }
 
-func (c *agentBindingClientProbe) AgentBindingStatus(_ context.Context, _ controlclient.AgentRequest) (agentbinding.Status, error) {
+func (c *agentBindingClientProbe) AgentBindingStatus(_ context.Context, _ appserver.AgentRequest) (agentbinding.Status, error) {
 	c.statusCalls++
 	return c.status, c.statusErr
 }
 
 type modelConfigurationClientProbe struct {
-	controlclient.ConfigurationClient
-	hostResult     controlclient.CommandResult
+	appserver.ConfigurationClient
+	hostResult     appserver.CommandResult
 	hostErr        error
-	hostRequest    controlclient.UseModelRequest
-	connectResult  controlclient.CommandResult
+	hostRequest    appserver.UseModelRequest
+	connectResult  appserver.CommandResult
 	connectErr     error
-	connectRequest controlclient.ConnectModelRequest
+	connectRequest appserver.ConnectModelRequest
 	connectHook    func()
-	deleteResult   controlclient.CommandResult
+	deleteResult   appserver.CommandResult
 	deleteErr      error
-	deleteRequest  controlclient.DeleteModelRequest
-	sessionRequest controlclient.SessionModelRequest
-	sessionResult  controlclient.CommandResult
+	deleteRequest  appserver.DeleteModelRequest
+	sessionRequest appserver.SessionModelRequest
+	sessionResult  appserver.CommandResult
 	sessionErr     error
 	connectCalls   int
 	hostCalls      int
@@ -2328,7 +2328,7 @@ type modelConfigurationClientProbe struct {
 	sessionCalls   int
 }
 
-func (c *modelConfigurationClientProbe) UseModel(_ context.Context, request controlclient.UseModelRequest) (controlclient.CommandResult, error) {
+func (c *modelConfigurationClientProbe) UseModel(_ context.Context, request appserver.UseModelRequest) (appserver.CommandResult, error) {
 	c.hostCalls++
 	c.hostRequest = request
 	result := c.hostResult
@@ -2336,7 +2336,7 @@ func (c *modelConfigurationClientProbe) UseModel(_ context.Context, request cont
 	return result, c.hostErr
 }
 
-func (c *modelConfigurationClientProbe) ConnectModel(_ context.Context, request controlclient.ConnectModelRequest) (controlclient.CommandResult, error) {
+func (c *modelConfigurationClientProbe) ConnectModel(_ context.Context, request appserver.ConnectModelRequest) (appserver.CommandResult, error) {
 	c.connectCalls++
 	c.connectRequest = request
 	if c.connectHook != nil {
@@ -2347,7 +2347,7 @@ func (c *modelConfigurationClientProbe) ConnectModel(_ context.Context, request 
 	return result, c.connectErr
 }
 
-func (c *modelConfigurationClientProbe) UseSessionModel(_ context.Context, request controlclient.SessionModelRequest) (controlclient.CommandResult, error) {
+func (c *modelConfigurationClientProbe) UseSessionModel(_ context.Context, request appserver.SessionModelRequest) (appserver.CommandResult, error) {
 	c.sessionCalls++
 	c.sessionRequest = request
 	if c.sessionResult.Outcome.Valid() || c.sessionErr != nil {
@@ -2360,12 +2360,12 @@ func (c *modelConfigurationClientProbe) UseSessionModel(_ context.Context, reque
 	if request.ExpectedRevision != nil {
 		revision = *request.ExpectedRevision + 1
 	}
-	return controlclient.CommandResult{
-		OperationID: request.OperationID, SessionID: request.SessionID, Outcome: controlclient.OutcomeCommitted, Revision: revision,
+	return appserver.CommandResult{
+		OperationID: request.OperationID, SessionID: request.SessionID, Outcome: appserver.OutcomeCommitted, Revision: revision,
 	}, nil
 }
 
-func (c *modelConfigurationClientProbe) DeleteModel(_ context.Context, request controlclient.DeleteModelRequest) (controlclient.CommandResult, error) {
+func (c *modelConfigurationClientProbe) DeleteModel(_ context.Context, request appserver.DeleteModelRequest) (appserver.CommandResult, error) {
 	c.deleteCalls++
 	c.deleteRequest = request
 	result := c.deleteResult
@@ -2373,7 +2373,7 @@ func (c *modelConfigurationClientProbe) DeleteModel(_ context.Context, request c
 	return result, c.deleteErr
 }
 
-func (c *sandboxConfigurationClientProbe) SetSandboxBackend(_ context.Context, request controlclient.SandboxRequest) (controlclient.CommandResult, error) {
+func (c *sandboxConfigurationClientProbe) SetSandboxBackend(_ context.Context, request appserver.SandboxRequest) (appserver.CommandResult, error) {
 	c.calls++
 	c.request = request
 	result := c.result
@@ -2383,12 +2383,12 @@ func (c *sandboxConfigurationClientProbe) SetSandboxBackend(_ context.Context, r
 
 type blockingInspectSessionClient struct {
 	*sessionClientAdapterTestClient
-	started chan controlclient.StateRequest
+	started chan appserver.StateRequest
 	release chan struct{}
 	once    sync.Once
 }
 
-func (c *blockingInspectSessionClient) InspectSession(ctx context.Context, request controlclient.StateRequest) (controlclient.SessionState, error) {
+func (c *blockingInspectSessionClient) InspectSession(ctx context.Context, request appserver.StateRequest) (appserver.SessionState, error) {
 	c.once.Do(func() {
 		c.started <- request
 		select {
@@ -2401,53 +2401,53 @@ func (c *blockingInspectSessionClient) InspectSession(ctx context.Context, reque
 
 type sessionClientAdapterTestConfigurationClient struct{}
 
-func (sessionClientAdapterTestConfigurationClient) ConfigureSessionMode(_ context.Context, request controlclient.SessionModeRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: controlclient.OutcomeCommitted}, nil
+func (sessionClientAdapterTestConfigurationClient) ConfigureSessionMode(_ context.Context, request appserver.SessionModeRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: appserver.OutcomeCommitted}, nil
 }
 
-func (sessionClientAdapterTestConfigurationClient) UseSessionModel(_ context.Context, request controlclient.SessionModelRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: controlclient.OutcomeCommitted}, nil
+func (sessionClientAdapterTestConfigurationClient) UseSessionModel(_ context.Context, request appserver.SessionModelRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: appserver.OutcomeCommitted}, nil
 }
 
-func (sessionClientAdapterTestConfigurationClient) ConfigureSessionControllerMode(_ context.Context, request controlclient.SessionControllerModeRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: controlclient.OutcomeCommitted}, nil
+func (sessionClientAdapterTestConfigurationClient) ConfigureSessionControllerMode(_ context.Context, request appserver.SessionControllerModeRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: appserver.OutcomeCommitted}, nil
 }
 
-func (sessionClientAdapterTestConfigurationClient) ConfigureSessionPresentationMode(_ context.Context, request controlclient.SessionPresentationModeRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: controlclient.OutcomeCommitted}, nil
+func (sessionClientAdapterTestConfigurationClient) ConfigureSessionPresentationMode(_ context.Context, request appserver.SessionPresentationModeRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: appserver.OutcomeCommitted}, nil
 }
 
-func (sessionClientAdapterTestConfigurationClient) ConfigureSessionPresentation(_ context.Context, request controlclient.SessionPresentationConfigRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: controlclient.OutcomeCommitted}, nil
+func (sessionClientAdapterTestConfigurationClient) ConfigureSessionPresentation(_ context.Context, request appserver.SessionPresentationConfigRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: appserver.OutcomeCommitted}, nil
 }
 
-func (sessionClientAdapterTestConfigurationClient) RefreshSandbox(_ context.Context, request controlclient.SandboxRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted}, nil
+func (sessionClientAdapterTestConfigurationClient) RefreshSandbox(_ context.Context, request appserver.SandboxRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
 }
 
 type sessionClientAdapterTestAgentClient struct {
-	controlclient.AgentClient
+	appserver.AgentClient
 }
 
 type disconnectAgentClientProbe struct {
-	controlclient.AgentClient
-	snapshot        controlclient.DisconnectCandidatesSnapshot
-	request         controlclient.DisconnectACPRequest
-	result          controlclient.CommandResult
+	appserver.AgentClient
+	snapshot        appserver.DisconnectCandidatesSnapshot
+	request         appserver.DisconnectACPRequest
+	result          appserver.CommandResult
 	err             error
 	candidateCalls  int
 	disconnectCalls int
 }
 
 type acpOnboardingAgentClientProbe struct {
-	controlclient.AgentClient
+	appserver.AgentClient
 	preparation              controlagents.ACPPreparation
 	authenticatedPreparation controlagents.ACPPreparation
 	prepareDetail            string
 	authDetail               string
-	prepareRequest           controlclient.PrepareACPRequest
-	authRequest              controlclient.PrepareACPAuthenticationRequest
-	connectRequest           controlclient.ConnectACPRequest
+	prepareRequest           appserver.PrepareACPRequest
+	authRequest              appserver.PrepareACPAuthenticationRequest
+	connectRequest           appserver.ConnectACPRequest
 	observeErrors            []error
 	prepareCalls             int
 	authCalls                int
@@ -2455,18 +2455,18 @@ type acpOnboardingAgentClientProbe struct {
 	connectCalls             int
 }
 
-func (c *acpOnboardingAgentClientProbe) PrepareACP(_ context.Context, request controlclient.PrepareACPRequest) (controlclient.CommandResult, error) {
+func (c *acpOnboardingAgentClientProbe) PrepareACP(_ context.Context, request appserver.PrepareACPRequest) (appserver.CommandResult, error) {
 	c.prepareCalls++
 	c.prepareRequest = request
-	return controlclient.CommandResult{
-		OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted, Detail: c.prepareDetail,
-		Resource: &controlclient.CommandResource{
-			Kind: controlclient.CommandResourceACPPreparation, Ref: c.preparation.Ref, Digest: c.preparation.ContentDigest,
+	return appserver.CommandResult{
+		OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted, Detail: c.prepareDetail,
+		Resource: &appserver.CommandResource{
+			Kind: appserver.CommandResourceACPPreparation, Ref: c.preparation.Ref, Digest: c.preparation.ContentDigest,
 		},
 	}, nil
 }
 
-func (c *acpOnboardingAgentClientProbe) ACPPreparation(_ context.Context, _ controlclient.ACPPreparationRequest) (controlagents.ACPPreparation, error) {
+func (c *acpOnboardingAgentClientProbe) ACPPreparation(_ context.Context, _ appserver.ACPPreparationRequest) (controlagents.ACPPreparation, error) {
 	c.observeCalls++
 	if len(c.observeErrors) > 0 {
 		err := c.observeErrors[0]
@@ -2478,26 +2478,26 @@ func (c *acpOnboardingAgentClientProbe) ACPPreparation(_ context.Context, _ cont
 	return c.preparation, nil
 }
 
-func (c *acpOnboardingAgentClientProbe) PrepareACPAuthentication(_ context.Context, request controlclient.PrepareACPAuthenticationRequest) (controlclient.CommandResult, error) {
+func (c *acpOnboardingAgentClientProbe) PrepareACPAuthentication(_ context.Context, request appserver.PrepareACPAuthenticationRequest) (appserver.CommandResult, error) {
 	c.authCalls++
 	c.authRequest = request
 	if c.authenticatedPreparation.Ref != "" {
 		c.preparation = c.authenticatedPreparation
 	}
-	return controlclient.CommandResult{
-		OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted, Detail: c.authDetail,
-		Resource: &controlclient.CommandResource{
-			Kind: controlclient.CommandResourceACPPreparation, Ref: c.preparation.Ref, Digest: c.preparation.ContentDigest,
+	return appserver.CommandResult{
+		OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted, Detail: c.authDetail,
+		Resource: &appserver.CommandResource{
+			Kind: appserver.CommandResourceACPPreparation, Ref: c.preparation.Ref, Digest: c.preparation.ContentDigest,
 		},
 	}, nil
 }
 
-func (c *acpOnboardingAgentClientProbe) ConnectACP(_ context.Context, request controlclient.ConnectACPRequest) (controlclient.CommandResult, error) {
+func (c *acpOnboardingAgentClientProbe) ConnectACP(_ context.Context, request appserver.ConnectACPRequest) (appserver.CommandResult, error) {
 	c.connectCalls++
 	c.connectRequest = request
-	return controlclient.CommandResult{
-		OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted, Revision: 72,
-		Resource: &controlclient.CommandResource{Kind: controlclient.CommandResourceModelProfile, Ref: "acp:custom:default", Digest: request.PreparationDigest},
+	return appserver.CommandResult{
+		OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted, Revision: 72,
+		Resource: &appserver.CommandResource{Kind: appserver.CommandResourceModelProfile, Ref: "acp:custom:default", Digest: request.PreparationDigest},
 	}, nil
 }
 
@@ -2520,12 +2520,12 @@ func (f controlAdapterRoundTripFunc) RoundTrip(request *http.Request) (*http.Res
 	return f(request)
 }
 
-func (c *disconnectAgentClientProbe) DisconnectCandidates(_ context.Context, _ controlclient.AgentRequest) (controlclient.DisconnectCandidatesSnapshot, error) {
+func (c *disconnectAgentClientProbe) DisconnectCandidates(_ context.Context, _ appserver.AgentRequest) (appserver.DisconnectCandidatesSnapshot, error) {
 	c.candidateCalls++
 	return c.snapshot, nil
 }
 
-func (c *disconnectAgentClientProbe) DisconnectACP(_ context.Context, request controlclient.DisconnectACPRequest) (controlclient.CommandResult, error) {
+func (c *disconnectAgentClientProbe) DisconnectACP(_ context.Context, request appserver.DisconnectACPRequest) (appserver.CommandResult, error) {
 	c.disconnectCalls++
 	c.request = request
 	result := c.result
@@ -2534,102 +2534,102 @@ func (c *disconnectAgentClientProbe) DisconnectACP(_ context.Context, request co
 }
 
 type sessionClientAdapterTestCompletionClient struct {
-	controlclient.CompletionClient
+	appserver.CompletionClient
 }
 
 type sessionClientAdapterTestPluginClient struct {
-	controlclient.PluginClient
+	appserver.PluginClient
 }
 
 type recordingCompletionClient struct {
-	controlclient.CompletionClient
-	skill   controlclient.CompletionRequest
-	slash   controlclient.CompletionRequest
-	resolve controlclient.CompletionRequest
+	appserver.CompletionClient
+	skill   appserver.CompletionRequest
+	slash   appserver.CompletionRequest
+	resolve appserver.CompletionRequest
 }
 
 type fallbackSkillCompletionClient struct {
-	controlclient.CompletionClient
+	appserver.CompletionClient
 	sessionIDs []string
 }
 
-func (c *fallbackSkillCompletionClient) CompleteSkill(_ context.Context, request controlclient.CompletionRequest) ([]controlclient.CompletionCandidate, error) {
+func (c *fallbackSkillCompletionClient) CompleteSkill(_ context.Context, request appserver.CompletionRequest) ([]appserver.CompletionCandidate, error) {
 	c.sessionIDs = append(c.sessionIDs, request.SessionID)
 	if request.SessionID != "" {
-		return nil, controlclient.ErrSessionClosed
+		return nil, appserver.ErrSessionClosed
 	}
-	return []controlclient.CompletionCandidate{{Value: "review-code"}}, nil
+	return []appserver.CompletionCandidate{{Value: "review-code"}}, nil
 }
 
-func (c *fallbackSkillCompletionClient) ResolveSkill(_ context.Context, request controlclient.CompletionRequest) (controlclient.SkillResolveResult, error) {
+func (c *fallbackSkillCompletionClient) ResolveSkill(_ context.Context, request appserver.CompletionRequest) (appserver.SkillResolveResult, error) {
 	c.sessionIDs = append(c.sessionIDs, request.SessionID)
 	if request.SessionID != "" {
-		return controlclient.SkillResolveResult{}, controlclient.ErrSessionClosed
+		return appserver.SkillResolveResult{}, appserver.ErrSessionClosed
 	}
-	return controlclient.SkillResolveResult{Canonical: request.Name}, nil
+	return appserver.SkillResolveResult{Canonical: request.Name}, nil
 }
 
-func (c *recordingCompletionClient) CompleteSkill(_ context.Context, request controlclient.CompletionRequest) ([]controlclient.CompletionCandidate, error) {
+func (c *recordingCompletionClient) CompleteSkill(_ context.Context, request appserver.CompletionRequest) ([]appserver.CompletionCandidate, error) {
 	c.skill = request
-	return []controlclient.CompletionCandidate{{Value: "review-code"}}, nil
+	return []appserver.CompletionCandidate{{Value: "review-code"}}, nil
 }
 
-func (c *recordingCompletionClient) CompleteSlashArg(_ context.Context, request controlclient.CompletionRequest) ([]controlclient.SlashArgCandidate, error) {
+func (c *recordingCompletionClient) CompleteSlashArg(_ context.Context, request appserver.CompletionRequest) ([]appserver.SlashArgCandidate, error) {
 	c.slash = request
-	return []controlclient.SlashArgCandidate{{Value: "mimo"}}, nil
+	return []appserver.SlashArgCandidate{{Value: "mimo"}}, nil
 }
 
-func (c *recordingCompletionClient) ResolveSkill(_ context.Context, request controlclient.CompletionRequest) (controlclient.SkillResolveResult, error) {
+func (c *recordingCompletionClient) ResolveSkill(_ context.Context, request appserver.CompletionRequest) (appserver.SkillResolveResult, error) {
 	c.resolve = request
-	return controlclient.SkillResolveResult{Canonical: request.Name}, nil
+	return appserver.SkillResolveResult{Canonical: request.Name}, nil
 }
 
 type recordingPluginClient struct {
-	controlclient.PluginClient
-	enable controlclient.EnablePluginRequest
+	appserver.PluginClient
+	enable appserver.EnablePluginRequest
 }
 
-func (c *recordingPluginClient) EnablePlugin(_ context.Context, request controlclient.EnablePluginRequest) (controlclient.CommandResult, error) {
+func (c *recordingPluginClient) EnablePlugin(_ context.Context, request appserver.EnablePluginRequest) (appserver.CommandResult, error) {
 	c.enable = request
 	revision := uint64(0)
 	if request.ExpectedRevision != nil {
 		revision = *request.ExpectedRevision + 1
 	}
-	return controlclient.CommandResult{
+	return appserver.CommandResult{
 		OperationID: request.OperationID,
-		Outcome:     controlclient.OutcomeCommitted,
+		Outcome:     appserver.OutcomeCommitted,
 		Revision:    revision,
-		Resource:    &controlclient.CommandResource{Kind: controlclient.CommandResourcePlugin, Ref: request.ID},
+		Resource:    &appserver.CommandResource{Kind: appserver.CommandResourcePlugin, Ref: request.ID},
 	}, nil
 }
 
-func (c *recordingPluginClient) InspectPlugin(_ context.Context, request controlclient.PluginRequest) (controlclient.PluginSnapshot, error) {
-	return controlclient.PluginSnapshot{ID: request.ID, Enabled: true}, nil
+func (c *recordingPluginClient) InspectPlugin(_ context.Context, request appserver.PluginRequest) (appserver.PluginSnapshot, error) {
+	return appserver.PluginSnapshot{ID: request.ID, Enabled: true}, nil
 }
 
-func (sessionClientAdapterTestConfigurationClient) ConnectModel(_ context.Context, request controlclient.ConnectModelRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted}, nil
+func (sessionClientAdapterTestConfigurationClient) ConnectModel(_ context.Context, request appserver.ConnectModelRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
 }
-func (sessionClientAdapterTestConfigurationClient) UseModel(_ context.Context, request controlclient.UseModelRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted}, nil
+func (sessionClientAdapterTestConfigurationClient) UseModel(_ context.Context, request appserver.UseModelRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
 }
-func (sessionClientAdapterTestConfigurationClient) DeleteModel(_ context.Context, request controlclient.DeleteModelRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted}, nil
+func (sessionClientAdapterTestConfigurationClient) DeleteModel(_ context.Context, request appserver.DeleteModelRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
 }
-func (sessionClientAdapterTestConfigurationClient) SetSandboxBackend(_ context.Context, request controlclient.SandboxRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted}, nil
+func (sessionClientAdapterTestConfigurationClient) SetSandboxBackend(_ context.Context, request appserver.SandboxRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
 }
-func (sessionClientAdapterTestConfigurationClient) PrepareSandbox(_ context.Context, request controlclient.SandboxRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted}, nil
+func (sessionClientAdapterTestConfigurationClient) PrepareSandbox(_ context.Context, request appserver.SandboxRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
 }
-func (sessionClientAdapterTestConfigurationClient) RepairSandbox(_ context.Context, request controlclient.SandboxRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted}, nil
+func (sessionClientAdapterTestConfigurationClient) RepairSandbox(_ context.Context, request appserver.SandboxRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
 }
-func (sessionClientAdapterTestConfigurationClient) ResetSandbox(_ context.Context, request controlclient.SandboxRequest) (controlclient.CommandResult, error) {
-	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted}, nil
+func (sessionClientAdapterTestConfigurationClient) ResetSandbox(_ context.Context, request appserver.SandboxRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
 }
 
-func (c *sessionClientAdapterTestClient) Prompt(ctx context.Context, request controlclient.PromptRequest) (controlclient.CommandResult, error) {
+func (c *sessionClientAdapterTestClient) Prompt(ctx context.Context, request appserver.PromptRequest) (appserver.CommandResult, error) {
 	c.mu.Lock()
 	c.prompt = request
 	started := c.promptStarted
@@ -2649,7 +2649,7 @@ func (c *sessionClientAdapterTestClient) Prompt(ctx context.Context, request con
 			select {
 			case <-release:
 			case <-ctx.Done():
-				return controlclient.CommandResult{}, ctx.Err()
+				return appserver.CommandResult{}, ctx.Err()
 			}
 		}
 	}
@@ -2658,13 +2658,13 @@ func (c *sessionClientAdapterTestClient) Prompt(ctx context.Context, request con
 	outcome := c.promptOutcome
 	target := c.target
 	if c.omitPromptTarget {
-		target = controlclient.TurnTarget{}
+		target = appserver.TurnTarget{}
 	}
 	c.mu.Unlock()
 	if outcome == "" {
-		outcome = controlclient.OutcomeCommitted
+		outcome = appserver.OutcomeCommitted
 	}
-	result := controlclient.CommandResult{
+	result := appserver.CommandResult{
 		OperationID: request.OperationID,
 		Outcome:     outcome,
 		SessionID:   request.SessionID,
@@ -2676,14 +2676,14 @@ func (c *sessionClientAdapterTestClient) Prompt(ctx context.Context, request con
 	return result, nil
 }
 
-func (c *sessionClientAdapterTestClient) Steer(_ context.Context, request controlclient.SteerRequest) (controlclient.CommandResult, error) {
+func (c *sessionClientAdapterTestClient) Steer(_ context.Context, request appserver.SteerRequest) (appserver.CommandResult, error) {
 	c.mu.Lock()
 	c.steer = request
 	c.mu.Unlock()
-	return controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted}, nil
+	return appserver.CommandResult{Outcome: appserver.OutcomeCommitted}, nil
 }
 
-func (c *sessionClientAdapterTestClient) Cancel(_ context.Context, request controlclient.CancelRequest) (controlclient.CommandResult, error) {
+func (c *sessionClientAdapterTestClient) Cancel(_ context.Context, request appserver.CancelRequest) (appserver.CommandResult, error) {
 	c.mu.Lock()
 	c.cancel = request
 	cancelIDs := append(c.cancelIDs, request.OperationID)
@@ -2693,7 +2693,7 @@ func (c *sessionClientAdapterTestClient) Cancel(_ context.Context, request contr
 	cancelCalled := c.cancelCalled
 	cancelStarted := c.cancelStarted
 	cancelRelease := c.cancelRelease
-	var outcome controlclient.Outcome
+	var outcome appserver.Outcome
 	if call < len(c.cancelOutcomes) {
 		outcome = c.cancelOutcomes[call]
 	}
@@ -2717,26 +2717,26 @@ func (c *sessionClientAdapterTestClient) Cancel(_ context.Context, request contr
 		}
 	}
 	if err != nil {
-		return controlclient.CommandResult{OperationID: request.OperationID, Outcome: outcome}, err
+		return appserver.CommandResult{OperationID: request.OperationID, Outcome: outcome}, err
 	}
 	if outcome == "" {
-		outcome = controlclient.OutcomeCommitted
+		outcome = appserver.OutcomeCommitted
 	}
-	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: outcome}, nil
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: outcome}, nil
 }
 
-func (c *sessionClientAdapterTestClient) ResolveApproval(_ context.Context, request controlclient.ResolveApprovalRequest) (controlclient.CommandResult, error) {
+func (c *sessionClientAdapterTestClient) ResolveApproval(_ context.Context, request appserver.ResolveApprovalRequest) (appserver.CommandResult, error) {
 	c.mu.Lock()
 	c.approval = request
 	c.mu.Unlock()
-	return controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted}, nil
+	return appserver.CommandResult{Outcome: appserver.OutcomeCommitted}, nil
 }
 
 type sessionClientAdapterTestParticipantClient struct {
-	target       controlclient.TurnTarget
-	start        controlclient.StartParticipantRequest
-	prompt       controlclient.PromptParticipantRequest
-	cancel       controlclient.CancelParticipantRequest
+	target       appserver.TurnTarget
+	start        appserver.StartParticipantRequest
+	prompt       appserver.PromptParticipantRequest
+	cancel       appserver.CancelParticipantRequest
 	startStarted chan struct{}
 	startRelease chan struct{}
 }
@@ -2745,7 +2745,7 @@ func (*sessionClientAdapterTestParticipantClient) Handles(context.Context, strin
 	return []string{"reviewer"}, nil
 }
 
-func (c *sessionClientAdapterTestParticipantClient) StartParticipant(ctx context.Context, request controlclient.StartParticipantRequest) (controlclient.CommandResult, error) {
+func (c *sessionClientAdapterTestParticipantClient) StartParticipant(ctx context.Context, request appserver.StartParticipantRequest) (appserver.CommandResult, error) {
 	c.start = request
 	if c.startStarted != nil {
 		select {
@@ -2757,31 +2757,31 @@ func (c *sessionClientAdapterTestParticipantClient) StartParticipant(ctx context
 		select {
 		case <-c.startRelease:
 		case <-ctx.Done():
-			return controlclient.CommandResult{}, ctx.Err()
+			return appserver.CommandResult{}, ctx.Err()
 		}
 	}
-	return controlclient.CommandResult{
+	return appserver.CommandResult{
 		OperationID:   request.OperationID,
-		Outcome:       controlclient.OutcomeCommitted,
+		Outcome:       appserver.OutcomeCommitted,
 		SessionID:     request.SessionID,
 		Target:        c.target,
 		ParticipantID: "participant-1",
 	}, nil
 }
 
-func (c *sessionClientAdapterTestParticipantClient) PromptParticipant(_ context.Context, request controlclient.PromptParticipantRequest) (controlclient.CommandResult, error) {
+func (c *sessionClientAdapterTestParticipantClient) PromptParticipant(_ context.Context, request appserver.PromptParticipantRequest) (appserver.CommandResult, error) {
 	c.prompt = request
-	return controlclient.CommandResult{
+	return appserver.CommandResult{
 		OperationID: request.OperationID,
-		Outcome:     controlclient.OutcomeCommitted,
+		Outcome:     appserver.OutcomeCommitted,
 		SessionID:   request.SessionID,
 		Target:      c.target,
 	}, nil
 }
 
-func (c *sessionClientAdapterTestParticipantClient) CancelParticipant(_ context.Context, request controlclient.CancelParticipantRequest) (controlclient.CommandResult, error) {
+func (c *sessionClientAdapterTestParticipantClient) CancelParticipant(_ context.Context, request appserver.CancelParticipantRequest) (appserver.CommandResult, error) {
 	c.cancel = request
-	return controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted}, nil
+	return appserver.CommandResult{Outcome: appserver.OutcomeCommitted}, nil
 }
 
 type sessionClientAdapterTestSubscription struct {
@@ -2823,6 +2823,6 @@ func (s *sessionClientAdapterTestSubscription) Close() error {
 func (*sessionClientAdapterTestSubscription) Err() error         { return nil }
 func (*sessionClientAdapterTestSubscription) LastCursor() string { return "" }
 
-var _ controlclient.SessionClient = (*sessionClientAdapterTestClient)(nil)
-var _ controlclient.ParticipantClient = (*sessionClientAdapterTestParticipantClient)(nil)
-var _ controlclient.FeedSubscription = (*sessionClientAdapterTestSubscription)(nil)
+var _ appserver.SessionClient = (*sessionClientAdapterTestClient)(nil)
+var _ appserver.ParticipantClient = (*sessionClientAdapterTestParticipantClient)(nil)
+var _ appserver.FeedSubscription = (*sessionClientAdapterTestSubscription)(nil)

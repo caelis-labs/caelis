@@ -11,7 +11,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
@@ -47,7 +47,7 @@ func TestSessionReconnectMessageInstallsSessionBeforeSubagentBackfill(t *testing
 		TaskStreams: bindTaskStreamTestClient(t, service),
 	})
 
-	next, _ := model.Update(SessionReconnectMsg{State: controlclient.SessionState{SessionID: "session-old"}})
+	next, _ := model.Update(SessionReconnectMsg{State: appserver.SessionState{SessionID: "session-old"}})
 	model = next.(*Model)
 	if model.currentSessionID != "session-old" {
 		t.Fatalf("reconnect Session = %q, want session-old", model.currentSessionID)
@@ -83,10 +83,10 @@ func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing
 	live <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(20, 0))
 	close(live)
 	reconnect := &tuiReconnect{
-		state: controlclient.SessionState{
-			SessionID: "session-1", ResumeMode: controlclient.ResumeModeExact,
-			Run: controlclient.RunState{Active: true, HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
-			Approval: controlclient.ApprovalState{Active: &controlclient.ActiveApproval{
+		state: appserver.SessionState{
+			SessionID: "session-1", ResumeMode: appserver.ResumeModeExact,
+			Run: appserver.RunState{Active: true, HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
+			Approval: appserver.ApprovalState{Active: &appserver.ActiveApproval{
 				RequestID:  "approval-original",
 				Permission: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call-1", Name: "Bash"}},
 			}},
@@ -150,16 +150,16 @@ func TestForwardSessionReconnectPreservesFeedGapAndDoesNotCompleteTurn(t *testin
 
 	live := make(chan eventstream.Envelope)
 	close(live)
-	gap := &controlclient.FeedGapError{
-		Cause:        controlclient.ErrSlowConsumer,
+	gap := &appserver.FeedGapError{
+		Cause:        appserver.ErrSlowConsumer,
 		RetryCursor:  "retry-cursor",
-		Mode:         controlclient.ResumeModeDurableFallback,
+		Mode:         appserver.ResumeModeDurableFallback,
 		TransientGap: true,
 	}
 	reconnect := &tuiReconnect{
-		state: controlclient.SessionState{
+		state: appserver.SessionState{
 			SessionID: "session-1",
-			Run: controlclient.RunState{
+			Run: appserver.RunState{
 				Active: true, HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1",
 			},
 		},
@@ -177,7 +177,7 @@ func TestForwardSessionReconnectPreservesFeedGapAndDoesNotCompleteTurn(t *testin
 	if !ok || !eventstream.IsTerminalLifecycle(terminal) || terminal.Lifecycle.State != eventstream.LifecycleStateInterrupted {
 		t.Fatalf("terminal = %#v, want interrupted lifecycle", messages[0])
 	}
-	var gotGap *controlclient.FeedGapError
+	var gotGap *appserver.FeedGapError
 	if !errors.As(terminal.Err, &gotGap) || gotGap.RetryCursor != gap.RetryCursor || gotGap.Mode != gap.Mode || !gotGap.TransientGap {
 		t.Fatalf("terminal error = %#v, want typed feed gap with retry cursor", terminal.Err)
 	}
@@ -263,7 +263,7 @@ func TestApplySessionReconnectStateAtomicallyResetsTaskStreamSession(t *testing.
 				Key: "owner-old", CallID: "call-old", Target: runningTargetSubagent,
 			})
 
-			model.applySessionReconnectState(controlclient.SessionState{SessionID: test.reconnectSession})
+			model.applySessionReconnectState(appserver.SessionState{SessionID: test.reconnectSession})
 
 			if model.currentSessionID != test.reconnectSession {
 				t.Fatalf("current Session = %q, want %q", model.currentSessionID, test.reconnectSession)
@@ -329,7 +329,7 @@ func TestApplySessionReconnectStateAtomicallyResetsTaskStreamSession(t *testing.
 
 type tuiReconnect struct {
 	mu        sync.Mutex
-	state     controlclient.SessionState
+	state     appserver.SessionState
 	backfill  <-chan eventstream.Envelope
 	live      <-chan eventstream.Envelope
 	bootstrap []eventstream.Envelope
@@ -337,10 +337,10 @@ type tuiReconnect struct {
 	err       error
 }
 
-func (r *tuiReconnect) State() controlclient.SessionState { return r.state }
-func (r *tuiReconnect) HandleID() string                  { return r.state.Run.HandleID }
-func (r *tuiReconnect) RunID() string                     { return r.state.Run.RunID }
-func (r *tuiReconnect) TurnID() string                    { return r.state.Run.TurnID }
+func (r *tuiReconnect) State() appserver.SessionState { return r.state }
+func (r *tuiReconnect) HandleID() string              { return r.state.Run.HandleID }
+func (r *tuiReconnect) RunID() string                 { return r.state.Run.RunID }
+func (r *tuiReconnect) TurnID() string                { return r.state.Run.TurnID }
 func (r *tuiReconnect) Backfill() <-chan eventstream.Envelope {
 	return r.backfill
 }

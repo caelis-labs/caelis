@@ -9,15 +9,15 @@ import (
 	"testing"
 	"time"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/internal/testenv"
 )
 
 func TestResolveNetworkConfigRequiresTLSOffLoopback(t *testing.T) {
 	authenticator, err := BearerTokenAuthenticator(
 		"0123456789abcdef0123456789abcdef0123456789abcdef",
-		controlclient.Principal{ID: "owner"},
+		appserver.Principal{ID: "owner"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestResolveNetworkConfigRequiresTLSOffLoopback(t *testing.T) {
 func TestListenAndServeQuiescesHostBeforeReturning(t *testing.T) {
 	authenticator, err := BearerTokenAuthenticator(
 		"0123456789abcdef0123456789abcdef0123456789abcdef",
-		controlclient.Principal{ID: "owner"},
+		appserver.Principal{ID: "owner"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -75,9 +75,9 @@ func TestListenAndServeQuiescesHostBeforeReturning(t *testing.T) {
 	}, Config{
 		Address: "127.0.0.1:0", Authenticator: authenticator,
 		DrainTimeout: time.Second,
-		ServerInfo: controlclient.ServerInfo{
-			ServerID: controlclient.ServerIdentity, InstanceID: instanceID,
-			Capabilities: controlclient.RequiredManagedHostCapabilities(),
+		ServerInfo: appserver.ServerInfo{
+			ServerID: appserver.ServerIdentity, InstanceID: instanceID,
+			Capabilities: appserver.RequiredManagedHostCapabilities(),
 		},
 		OnListening: func(info ListenerInfo) error {
 			listening = info
@@ -99,7 +99,7 @@ func TestListenAndServeQuiescesHostBeforeReturning(t *testing.T) {
 
 func TestAuthenticatedHostShutdownQuiescesInMemoryServer(t *testing.T) {
 	const token = "0123456789abcdef0123456789abcdef0123456789abcdef"
-	authenticator, err := BearerTokenAuthenticator(token, controlclient.Principal{ID: "owner"})
+	authenticator, err := BearerTokenAuthenticator(token, appserver.Principal{ID: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,9 +115,9 @@ func TestAuthenticatedHostShutdownQuiescesInMemoryServer(t *testing.T) {
 			TaskStreams: &fakeTaskService{}, Lifecycle: lifecycle,
 		}, Config{
 			Address: "127.0.0.1:0", Authenticator: authenticator, DrainTimeout: time.Second,
-			ServerInfo: controlclient.ServerInfo{
-				ServerID: controlclient.ServerIdentity, InstanceID: instanceID,
-				Capabilities: controlclient.RequiredManagedHostCapabilities(),
+			ServerInfo: appserver.ServerInfo{
+				ServerID: appserver.ServerIdentity, InstanceID: instanceID,
+				Capabilities: appserver.RequiredManagedHostCapabilities(),
 			},
 			OnListening: func(info ListenerInfo) error {
 				listening <- info
@@ -128,7 +128,7 @@ func TestAuthenticatedHostShutdownQuiescesInMemoryServer(t *testing.T) {
 	info := <-listening
 	remote, err := httpclient.New(httpclient.Config{
 		BaseURL: info.Endpoint, BearerToken: token, HTTPClient: client,
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +156,7 @@ func TestAuthenticatedHostShutdownQuiescesInMemoryServer(t *testing.T) {
 func TestResolveNetworkConfigRejectsAmbiguousOrIncompleteTrust(t *testing.T) {
 	authenticator, err := BearerTokenAuthenticator(
 		"0123456789abcdef0123456789abcdef0123456789abcdef",
-		controlclient.Principal{ID: "owner"},
+		appserver.Principal{ID: "owner"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -183,7 +183,7 @@ func TestResolveNetworkConfigRejectsAmbiguousOrIncompleteTrust(t *testing.T) {
 func TestResolveNetworkConfigBuildsLoopbackAuthenticatorFromTokenFile(t *testing.T) {
 	path := DefaultTokenFile(t.TempDir())
 	resolved, useTLS, err := resolveNetworkConfig(Config{
-		Address: "127.0.0.1:7777", TokenFile: path, Principal: controlclient.Principal{ID: "owner"},
+		Address: "127.0.0.1:7777", TokenFile: path, Principal: appserver.Principal{ID: "owner"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -208,7 +208,7 @@ func TestResolveNetworkConfigBuildsLoopbackAuthenticatorFromTokenFile(t *testing
 
 func TestResolvedBearerAuthenticatorRejectsAmbiguousAuthorization(t *testing.T) {
 	const token = "0123456789abcdef0123456789abcdef0123456789abcdef"
-	authenticator, err := BearerTokenAuthenticator(token, controlclient.Principal{ID: "owner"})
+	authenticator, err := BearerTokenAuthenticator(token, appserver.Principal{ID: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}

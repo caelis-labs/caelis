@@ -9,7 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -36,7 +36,7 @@ func TestRunSessionOnceDrainsAssistantOutput(t *testing.T) {
 		turn: handle,
 	}
 
-	result, err := RunSessionOnce(context.Background(), gw, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), gw, appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
@@ -69,7 +69,7 @@ func TestRunSessionOnceAppendsPrefixGrowingACPMessageDeltasExactly(t *testing.T)
 			},
 		},
 	})
-	result, err := RunSessionOnce(context.Background(), fakeStarter{turn: handle}, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), fakeStarter{turn: handle}, appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
@@ -104,7 +104,7 @@ func TestRunSessionOnceReplacesTransientAssistantWithCanonicalFinal(t *testing.T
 			},
 		},
 	})
-	result, err := RunSessionOnce(context.Background(), fakeStarter{turn: handle}, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), fakeStarter{turn: handle}, appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
@@ -134,7 +134,7 @@ func TestRunSessionOncePreservesIdenticalAssistantDeltas(t *testing.T) {
 			},
 		},
 	})
-	result, err := RunSessionOnce(context.Background(), fakeStarter{turn: handle}, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), fakeStarter{turn: handle}, appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
@@ -155,7 +155,7 @@ func TestRunSessionOnceKeepsSDKOnlyAssistantWithoutDurableIdentity(t *testing.T)
 			Content:       schema.TextContent{Type: "text", Text: "sdk-only"},
 		},
 	}})
-	result, err := RunSessionOnce(context.Background(), fakeStarter{turn: handle}, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), fakeStarter{turn: handle}, appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
@@ -204,7 +204,7 @@ func TestRunSessionOnceIgnoresScopedTraceOutput(t *testing.T) {
 		turn: handle,
 	}
 
-	result, err := RunSessionOnce(context.Background(), gw, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), gw, appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
@@ -239,7 +239,7 @@ func TestRunSessionOnceAutoDeniesApprovalByDefault(t *testing.T) {
 		turn: handle,
 	}
 
-	if _, err := RunSessionOnce(context.Background(), gw, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{}); err != nil {
+	if _, err := RunSessionOnce(context.Background(), gw, appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{}); err != nil {
 		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
 	if len(handle.submissions) != 1 {
@@ -284,7 +284,7 @@ func TestRunSessionOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 		turn: handle,
 	}
 	called := false
-	_, err := RunSessionOnce(context.Background(), gw, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{
+	_, err := RunSessionOnce(context.Background(), gw, appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{
 		ResolveApproval: func(_ context.Context, req ApprovalRequest) (approval.Decision, error) {
 			called = true
 			if req.Payload == nil {
@@ -338,7 +338,7 @@ func TestRunSessionOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 		turn: handle,
 	}
 
-	result, err := RunSessionOnce(context.Background(), gw, controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
+	result, err := RunSessionOnce(context.Background(), gw, appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunSessionOnce() error = %v", err)
 	}
@@ -353,7 +353,7 @@ func TestRunSessionOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 func TestRunSessionOnceProjectsTargetedResultAndStructuredObservation(t *testing.T) {
 	t.Parallel()
 
-	target := controlclient.TurnTarget{
+	target := appserver.TurnTarget{
 		HandleID: "handle-1",
 		RunID:    "run-1",
 		TurnID:   "turn-1",
@@ -393,7 +393,7 @@ func TestRunSessionOnceProjectsTargetedResultAndStructuredObservation(t *testing
 	result, err := RunSessionOnce(
 		context.Background(),
 		fakeSessionTurnStarter{turn: turn},
-		controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"},
+		appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"},
 		Options{
 			ObserveEnvelope: func(envelope eventstream.Envelope) error {
 				observed = append(observed, envelope)
@@ -427,7 +427,7 @@ func TestRunSessionOnceProjectsTargetedResultAndStructuredObservation(t *testing
 func TestRunSessionOnceCancelsAndDrainsAfterStructuredOutputFailure(t *testing.T) {
 	t.Parallel()
 
-	target := controlclient.TurnTarget{
+	target := appserver.TurnTarget{
 		HandleID: "handle-1",
 		RunID:    "run-1",
 		TurnID:   "turn-1",
@@ -458,7 +458,7 @@ func TestRunSessionOnceCancelsAndDrainsAfterStructuredOutputFailure(t *testing.T
 	result, err := RunSessionOnce(
 		context.Background(),
 		fakeSessionTurnStarter{turn: turn},
-		controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"},
+		appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"},
 		Options{
 			ObserveEnvelope: func(eventstream.Envelope) error {
 				observations++
@@ -483,7 +483,7 @@ func TestRunSessionOnceCancelsAndDrainsAfterStructuredOutputFailure(t *testing.T
 func TestRunSessionOnceCancellationTimeoutDetachesWithoutTerminal(t *testing.T) {
 	t.Parallel()
 
-	target := controlclient.TurnTarget{
+	target := appserver.TurnTarget{
 		HandleID: "handle-1",
 		RunID:    "run-1",
 		TurnID:   "turn-1",
@@ -501,7 +501,7 @@ func TestRunSessionOnceCancellationTimeoutDetachesWithoutTerminal(t *testing.T) 
 	_, err := runSessionOnce(
 		ctx,
 		fakeSessionTurnStarter{turn: turn},
-		controlclient.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"},
+		appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"},
 		Options{},
 		10*time.Millisecond,
 	)
@@ -519,17 +519,17 @@ func TestRunSessionOnceCancellationTimeoutDetachesWithoutTerminal(t *testing.T) 
 }
 
 type fakeStarter struct {
-	turn controlclient.SessionTurn
+	turn appserver.SessionTurn
 	err  error
 }
 
-func (f fakeStarter) Start(context.Context, controlclient.SessionTurnStartRequest) (controlclient.SessionTurn, error) {
+func (f fakeStarter) Start(context.Context, appserver.SessionTurnStartRequest) (appserver.SessionTurn, error) {
 	return f.turn, f.err
 }
 
 type fakeTurnHandle struct {
 	acpEvents   <-chan eventstream.Envelope
-	submissions []controlclient.ApprovalResolution
+	submissions []appserver.ApprovalResolution
 }
 
 func newFakeACPHandle(events []eventstream.Envelope) *fakeTurnHandle {
@@ -546,11 +546,11 @@ func (h *fakeTurnHandle) RunID() string                          { return "run-1
 func (h *fakeTurnHandle) TurnID() string                         { return "turn-1" }
 func (h *fakeTurnHandle) ACPEvents() <-chan eventstream.Envelope { return h.acpEvents }
 func (*fakeTurnHandle) SessionID() string                        { return "session-1" }
-func (h *fakeTurnHandle) Target() controlclient.TurnTarget {
-	return controlclient.TurnTarget{HandleID: h.HandleID(), RunID: h.RunID(), TurnID: h.TurnID()}
+func (h *fakeTurnHandle) Target() appserver.TurnTarget {
+	return appserver.TurnTarget{HandleID: h.HandleID(), RunID: h.RunID(), TurnID: h.TurnID()}
 }
 func (h *fakeTurnHandle) Events() <-chan eventstream.Envelope { return h.acpEvents }
-func (h *fakeTurnHandle) ResolveApproval(_ context.Context, decision controlclient.ApprovalResolution) error {
+func (h *fakeTurnHandle) ResolveApproval(_ context.Context, decision appserver.ApprovalResolution) error {
 	h.submissions = append(h.submissions, decision)
 	return nil
 }
@@ -561,19 +561,19 @@ func (*fakeTurnHandle) Err() error                                              
 func (*fakeTurnHandle) Close() error                                                     { return nil }
 
 type fakeSessionTurnStarter struct {
-	turn controlclient.SessionTurn
+	turn appserver.SessionTurn
 	err  error
 }
 
 func (f fakeSessionTurnStarter) Start(
 	context.Context,
-	controlclient.SessionTurnStartRequest,
-) (controlclient.SessionTurn, error) {
+	appserver.SessionTurnStartRequest,
+) (appserver.SessionTurn, error) {
 	return f.turn, f.err
 }
 
 type fakeSessionTurn struct {
-	target    controlclient.TurnTarget
+	target    appserver.TurnTarget
 	events    <-chan eventstream.Envelope
 	last      string
 	cancelErr error
@@ -582,7 +582,7 @@ type fakeSessionTurn struct {
 }
 
 func newFakeSessionTurn(
-	target controlclient.TurnTarget,
+	target appserver.TurnTarget,
 	events []eventstream.Envelope,
 ) *fakeSessionTurn {
 	channel := make(chan eventstream.Envelope, len(events))
@@ -598,11 +598,11 @@ func newFakeSessionTurn(
 }
 
 func (*fakeSessionTurn) SessionID() string { return "session-1" }
-func (t *fakeSessionTurn) Target() controlclient.TurnTarget {
+func (t *fakeSessionTurn) Target() appserver.TurnTarget {
 	return t.target
 }
 func (t *fakeSessionTurn) Events() <-chan eventstream.Envelope { return t.events }
-func (*fakeSessionTurn) ResolveApproval(context.Context, controlclient.ApprovalResolution) error {
+func (*fakeSessionTurn) ResolveApproval(context.Context, appserver.ApprovalResolution) error {
 	return nil
 }
 func (*fakeSessionTurn) Steer(context.Context, string, string, []model.ContentPart) error {

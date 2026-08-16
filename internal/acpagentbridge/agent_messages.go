@@ -7,7 +7,7 @@ import (
 
 	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
@@ -61,7 +61,7 @@ func (a *RuntimeAgent) SessionMessage(ctx context.Context, req acp.SessionMessag
 
 	var delivery AgentMessageDelivery
 	if a.agentMessageTurns != nil {
-		observed, deliverErr := a.agentMessageTurns.Deliver(deliveryCtx, controlclient.AgentMessageRequest{
+		observed, deliverErr := a.agentMessageTurns.Deliver(deliveryCtx, appserver.AgentMessageRequest{
 			SessionID:   strings.TrimSpace(req.SessionID),
 			MessageID:   messageID,
 			To:          strings.TrimSpace(req.To),

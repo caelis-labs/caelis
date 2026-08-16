@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
@@ -96,11 +96,11 @@ func (a *SessionClientAdapter) ResolveSkill(ctx context.Context, name string) (c
 	return result, err
 }
 
-func (a *SessionClientAdapter) completionRequest(ctx context.Context, query string, limit int) (controlclient.CompletionRequest, error) {
+func (a *SessionClientAdapter) completionRequest(ctx context.Context, query string, limit int) (appserver.CompletionRequest, error) {
 	if a == nil || a.completionClient == nil {
-		return controlclient.CompletionRequest{}, errors.New("app/gatewayapp/controladapter: completion client is unavailable")
+		return appserver.CompletionRequest{}, errors.New("app/gatewayapp/controladapter: completion client is unavailable")
 	}
-	return controlclient.CompletionRequest{
+	return appserver.CompletionRequest{
 		WorkspaceKey: a.workspaceKey,
 		CWD:          a.WorkspaceDir(),
 		Surface:      a.surface,

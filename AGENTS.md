@@ -14,7 +14,7 @@
 - Put stable product capabilities in coherent `control/*` packages, reusable contracts in `agent-sdk/*`, and concrete composition glue in the Host-owned private implementation tree. Do not recreate the retired `ports/*` tree or turn a private facade or Surface API into a second product API.
 - Treat current package locations as migration evidence, not future precedent. Long-term, `app/*` owns Host composition, private concrete components, and thin transport or in-process adapters; it is not a second product-semantics layer.
 - Keep process-lifetime Host authorities, activated Session Runtime instances, and stateless Runtime assembly factories as distinct concepts. Adapters depend on focused Control contracts rather than a concrete Host, and lower layers never depend outward on composition.
-- `control/client` owns the product client contract, Session feed/replay, approval recovery, and lifecycle write gate. Main-Turn ingress remains private in `internal/controlclient/turningress`; Task output belongs to `control/taskstream`. Surfaces own neither stream discovery nor replay.
+- `control/appserver` owns the product client contract, Session feed/replay, approval recovery, and lifecycle write gate. Main-Turn ingress remains private in `internal/controlclient/turningress`; Task output belongs to `control/taskstream`. Surfaces own neither stream discovery nor replay.
 - Keep one semantic owner, one authoritative data path, and one durable source of truth. Typed Envelope fields own identity, relation, position, approval, and resume semantics; `_meta` is display/debug unless a maintained contract says otherwise.
 - Fence semantic Session writes for the complete producer lifetime. Never retry `ErrLeaseConflict` through an unfenced path; durable State repair requires an explicit revision-checked guarded mutation.
 - Dynamic orchestration belongs to Control. Do not add a deterministic workflow graph/node engine or let an Agent authorize its own handoff.
@@ -31,7 +31,7 @@
 - Run `gofmt` on touched Go files, focused `go test` packages for changed behavior, and `git diff --check`.
 - Before committing, run `make commit-check`; it includes formatting, `golangci-lint`, `arch-lint`, the SDK package-boundary gate, vet, tests, and build.
 - Run `make arch-lint` after import, package ownership, gateway/eventstream, or session protocol changes.
-- Run `make client-protocol-check` after changing OpenAPI, generated clients, Envelope wire shapes, or `control/client` JSON contracts.
+- Run `make client-protocol-check` after changing OpenAPI, generated clients, Envelope wire shapes, or `control/appserver` JSON contracts.
 - Lease, concurrency, persistence, broker, or lifecycle changes require focused `go test -race` coverage in the change that needs it; do not turn that into an unconditional release-time rerun.
 - Persistence or replay changes need round-trip tests comparing rebuilt model context with runtime-produced context.
 - Projection/UI reload tests do not replace model-context round-trip tests.

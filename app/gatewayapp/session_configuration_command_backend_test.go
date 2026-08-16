@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
@@ -14,11 +14,11 @@ import (
 func TestSessionConfigurationCommandUsesObservedRevisionAndSharedLedger(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	active = mustCurrentSession(t, stack, active.SessionID)
 	revision := active.Revision
-	request := controlclient.SessionModeRequest{
-		WriteBase: controlclient.WriteBase{
+	request := appserver.SessionModeRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "session-mode-ledger",
 			SessionID:               active.SessionID,
 			ExpectedRevision:        &revision,
@@ -28,7 +28,7 @@ func TestSessionConfigurationCommandUsesObservedRevisionAndSharedLedger(t *testi
 	}
 
 	first, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, principal, request)
-	if err != nil || first.Outcome != controlclient.OutcomeCommitted || first.Revision != revision+1 {
+	if err != nil || first.Outcome != appserver.OutcomeCommitted || first.Revision != revision+1 {
 		t.Fatalf("ConfigureSessionMode() = %#v, %v", first, err)
 	}
 	replayed, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, principal, request)
@@ -44,7 +44,7 @@ func TestSessionConfigurationCommandUsesObservedRevisionAndSharedLedger(t *testi
 	stale.OperationID = "session-mode-stale"
 	stale.Mode = "auto-review"
 	conflicted, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, principal, stale)
-	if !errors.Is(err, session.ErrRevisionConflict) || conflicted.Outcome != controlclient.OutcomeConflicted || conflicted.Revision != current.Revision {
+	if !errors.Is(err, session.ErrRevisionConflict) || conflicted.Outcome != appserver.OutcomeConflicted || conflicted.Revision != current.Revision {
 		t.Fatalf("ConfigureSessionMode(stale) = %#v, %v", conflicted, err)
 	}
 }
@@ -52,7 +52,7 @@ func TestSessionConfigurationCommandUsesObservedRevisionAndSharedLedger(t *testi
 func TestSessionModelCommandDoesNotChangeHostDefaultOrConfigurationRevision(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	active = mustCurrentSession(t, stack, active.SessionID)
 	hostRevision, err := stack.ConfigurationRevision(ctx)
 	if err != nil {
@@ -61,8 +61,8 @@ func TestSessionModelCommandDoesNotChangeHostDefaultOrConfigurationRevision(t *t
 	hostDefault := stack.lookup.DefaultID()
 	revision := active.Revision
 
-	result, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, controlclient.SessionModelRequest{
-		WriteBase: controlclient.WriteBase{
+	result, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "session-model-only",
 			SessionID:               active.SessionID,
 			ExpectedRevision:        &revision,
@@ -70,7 +70,7 @@ func TestSessionModelCommandDoesNotChangeHostDefaultOrConfigurationRevision(t *t
 		},
 		Model: hostDefault,
 	})
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision != revision+1 {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != revision+1 {
 		t.Fatalf("UseSessionModel() = %#v, %v", result, err)
 	}
 	if got := stack.lookup.DefaultID(); got != hostDefault {
@@ -97,12 +97,12 @@ func TestSessionPresentationAndApprovalCommandsKeepIndependentStateKeys(t *testi
 			Options: []assembly.ConfigSelectOption{{Value: "quiet", Name: "Quiet"}, {Value: "loud", Name: "Loud"}},
 		}},
 	})
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	active = mustCurrentSession(t, stack, active.SessionID)
 
 	revision := active.Revision
-	mode, err := stack.ConfigurationCommands().ConfigureSessionPresentationMode(ctx, principal, controlclient.SessionPresentationModeRequest{
-		WriteBase: controlclient.WriteBase{
+	mode, err := stack.ConfigurationCommands().ConfigureSessionPresentationMode(ctx, principal, appserver.SessionPresentationModeRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "presentation-mode-focus",
 			SessionID:               active.SessionID,
 			ExpectedRevision:        &revision,
@@ -110,14 +110,14 @@ func TestSessionPresentationAndApprovalCommandsKeepIndependentStateKeys(t *testi
 		},
 		Mode: "focus",
 	})
-	if err != nil || mode.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || mode.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionPresentationMode() = %#v, %v", mode, err)
 	}
 
 	active = mustCurrentSession(t, stack, active.SessionID)
 	revision = active.Revision
-	config, err := stack.ConfigurationCommands().ConfigureSessionPresentation(ctx, principal, controlclient.SessionPresentationConfigRequest{
-		WriteBase: controlclient.WriteBase{
+	config, err := stack.ConfigurationCommands().ConfigureSessionPresentation(ctx, principal, appserver.SessionPresentationConfigRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "presentation-config-tone",
 			SessionID:               active.SessionID,
 			ExpectedRevision:        &revision,
@@ -126,14 +126,14 @@ func TestSessionPresentationAndApprovalCommandsKeepIndependentStateKeys(t *testi
 		ConfigID: "tone",
 		Value:    "loud",
 	})
-	if err != nil || config.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || config.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionPresentation() = %#v, %v", config, err)
 	}
 
 	active = mustCurrentSession(t, stack, active.SessionID)
 	revision = active.Revision
-	approval, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, principal, controlclient.SessionModeRequest{
-		WriteBase: controlclient.WriteBase{
+	approval, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, principal, appserver.SessionModeRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "approval-mode-manual",
 			SessionID:               active.SessionID,
 			ExpectedRevision:        &revision,
@@ -141,7 +141,7 @@ func TestSessionPresentationAndApprovalCommandsKeepIndependentStateKeys(t *testi
 		},
 		Mode: "manual",
 	})
-	if err != nil || approval.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || approval.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionMode() = %#v, %v", approval, err)
 	}
 
@@ -168,8 +168,8 @@ func TestACPSelectionStateErrorTreatsPostCommitFailureAsCommitted(t *testing.T) 
 				t.Fatalf("classifyACPSelectionStateError(committed) = %v, want nil", err)
 			}
 			uncommitted := classifyACPSelectionStateError(selection, fault)
-			var outcomeErr *controlclient.OutcomeError
-			if !errors.As(uncommitted, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeUnknown {
+			var outcomeErr *appserver.OutcomeError
+			if !errors.As(uncommitted, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeUnknown {
 				t.Fatalf("classifyACPSelectionStateError(uncommitted) = %v, want unknown outcome", uncommitted)
 			}
 		})

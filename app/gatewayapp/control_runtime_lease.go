@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 // ControlRuntimeLease is private app composition glue exposed to sibling
@@ -27,8 +27,8 @@ type ControlRuntimeLease struct {
 // workspace composition without retaining it.
 func (s *Stack) AcquireControlRuntime(
 	ctx context.Context,
-	principal controlclient.Principal,
-	action controlclient.Action,
+	principal appserver.Principal,
+	action appserver.Action,
 	sessionID string,
 	activate bool,
 ) (*ControlRuntimeLease, error) {
@@ -36,7 +36,7 @@ func (s *Stack) AcquireControlRuntime(
 		return nil, errors.New("gatewayapp: Control Runtime service is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	authorizer := controlclient.SessionAuthorizer{Sessions: s.Sessions}
+	authorizer := appserver.SessionAuthorizer{Sessions: s.Sessions}
 	if err := authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
 		return nil, err
 	}

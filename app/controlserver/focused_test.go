@@ -9,8 +9,8 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 )
 
 func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
@@ -41,13 +41,13 @@ func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 	client, err := httpclient.New(httpclient.Config{
 		BaseURL: "http://127.0.0.1", BearerToken: "test-token",
 		HTTPClient:    &http.Client{Transport: controlHandlerRoundTripper{handler: server}},
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	messageResult, err := client.DeliverAgentMessage(context.Background(), controlclient.AgentMessageRequest{
+	messageResult, err := client.DeliverAgentMessage(context.Background(), appserver.AgentMessageRequest{
 		SessionID: "session-1", MessageID: "message-1", To: "parent", Text: "status", DisplayFrom: "@guardian",
 	})
 	if err != nil || !messageResult.Accepted || messageResult.MessageID != "message-1" {
@@ -58,54 +58,54 @@ func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 		t.Fatalf("Handles() = %#v, %v", handles, err)
 	}
 	expectedSessionRevision := uint64(3)
-	command, err := client.ConfigureSessionMode(context.Background(), controlclient.SessionModeRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "session-mode-1", SessionID: "session-1", ExpectedRevision: &expectedSessionRevision, ExpectedControllerEpoch: "epoch-1"},
+	command, err := client.ConfigureSessionMode(context.Background(), appserver.SessionModeRequest{
+		WriteBase: appserver.WriteBase{OperationID: "session-mode-1", SessionID: "session-1", ExpectedRevision: &expectedSessionRevision, ExpectedControllerEpoch: "epoch-1"},
 		Mode:      "manual",
 	})
-	if err != nil || command.SessionID != "session-1" || command.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || command.SessionID != "session-1" || command.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionMode() = %#v, %v", command, err)
 	}
-	command, err = client.UseSessionModel(context.Background(), controlclient.SessionModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "session-model-1", SessionID: "session-1", ExpectedRevision: &expectedSessionRevision, ExpectedControllerEpoch: "epoch-1"},
+	command, err = client.UseSessionModel(context.Background(), appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "session-model-1", SessionID: "session-1", ExpectedRevision: &expectedSessionRevision, ExpectedControllerEpoch: "epoch-1"},
 		Model:     "mimo", ReasoningEffort: "high",
 	})
-	if err != nil || command.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || command.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel() = %#v, %v", command, err)
 	}
-	command, err = client.ConfigureSessionControllerMode(context.Background(), controlclient.SessionControllerModeRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "controller-mode-1", SessionID: "session-1", ExpectedRevision: &expectedSessionRevision, ExpectedControllerEpoch: "epoch-1"},
+	command, err = client.ConfigureSessionControllerMode(context.Background(), appserver.SessionControllerModeRequest{
+		WriteBase: appserver.WriteBase{OperationID: "controller-mode-1", SessionID: "session-1", ExpectedRevision: &expectedSessionRevision, ExpectedControllerEpoch: "epoch-1"},
 		Mode:      "code",
 	})
-	if err != nil || command.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || command.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionControllerMode() = %#v, %v", command, err)
 	}
-	command, err = client.ConfigureSessionPresentationMode(context.Background(), controlclient.SessionPresentationModeRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "presentation-mode-1", SessionID: "session-1", ExpectedRevision: &expectedSessionRevision, ExpectedControllerEpoch: "epoch-1"},
+	command, err = client.ConfigureSessionPresentationMode(context.Background(), appserver.SessionPresentationModeRequest{
+		WriteBase: appserver.WriteBase{OperationID: "presentation-mode-1", SessionID: "session-1", ExpectedRevision: &expectedSessionRevision, ExpectedControllerEpoch: "epoch-1"},
 		Mode:      "focus",
 	})
-	if err != nil || command.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || command.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionPresentationMode() = %#v, %v", command, err)
 	}
-	command, err = client.ConfigureSessionPresentation(context.Background(), controlclient.SessionPresentationConfigRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "presentation-config-1", SessionID: "session-1", ExpectedRevision: &expectedSessionRevision, ExpectedControllerEpoch: "epoch-1"},
+	command, err = client.ConfigureSessionPresentation(context.Background(), appserver.SessionPresentationConfigRequest{
+		WriteBase: appserver.WriteBase{OperationID: "presentation-config-1", SessionID: "session-1", ExpectedRevision: &expectedSessionRevision, ExpectedControllerEpoch: "epoch-1"},
 		ConfigID:  "tone", Value: "quiet",
 	})
-	if err != nil || command.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || command.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionPresentation() = %#v, %v", command, err)
 	}
 	expectedConfigurationRevision := uint64(7)
-	command, err = client.ResetSandbox(context.Background(), controlclient.SandboxRequest{WriteBase: controlclient.WriteBase{
+	command, err = client.ResetSandbox(context.Background(), appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "sandbox-reset-1", ExpectedRevision: &expectedConfigurationRevision,
 	}})
-	if err != nil || command.Outcome != controlclient.OutcomeCommitted || command.Revision != expectedConfigurationRevision {
+	if err != nil || command.Outcome != appserver.OutcomeCommitted || command.Revision != expectedConfigurationRevision {
 		t.Fatalf("ResetSandbox() = %#v, %v", command, err)
 	}
-	agentStatus, err := client.AgentStatus(context.Background(), controlclient.AgentRequest{SessionID: "session-1", Surface: "bar"})
+	agentStatus, err := client.AgentStatus(context.Background(), appserver.AgentRequest{SessionID: "session-1", Surface: "bar"})
 	if err != nil || agentStatus.ControllerLabel != "main" {
 		t.Fatalf("AgentStatus() = %#v, %v", agentStatus, err)
 	}
-	command, err = client.HandoffAgent(context.Background(), controlclient.HandoffAgentRequest{
-		WriteBase: controlclient.WriteBase{
+	command, err = client.HandoffAgent(context.Background(), appserver.HandoffAgentRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "handoff-1",
 			SessionID:               "session-1",
 			ExpectedRevision:        &expectedSessionRevision,
@@ -113,71 +113,71 @@ func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 		},
 		Target: "orbit",
 	})
-	if err != nil || command.Outcome != controlclient.OutcomeCommitted || agents.handoff.OperationID != "handoff-1" {
+	if err != nil || command.Outcome != appserver.OutcomeCommitted || agents.handoff.OperationID != "handoff-1" {
 		t.Fatalf("HandoffAgent() = %#v, %v; request = %#v", command, err, agents.handoff)
 	}
-	disconnectSnapshot, err := client.DisconnectCandidates(context.Background(), controlclient.AgentRequest{Surface: "host"})
+	disconnectSnapshot, err := client.DisconnectCandidates(context.Background(), appserver.AgentRequest{Surface: "host"})
 	if err != nil || disconnectSnapshot.Revision != expectedConfigurationRevision || len(disconnectSnapshot.Candidates) != 1 {
 		t.Fatalf("DisconnectCandidates() = %#v, %v", disconnectSnapshot, err)
 	}
-	command, err = client.DisconnectACP(context.Background(), controlclient.DisconnectACPRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "agent-disconnect-1", ExpectedRevision: &expectedConfigurationRevision},
+	command, err = client.DisconnectACP(context.Background(), appserver.DisconnectACPRequest{
+		WriteBase: appserver.WriteBase{OperationID: "agent-disconnect-1", ExpectedRevision: &expectedConfigurationRevision},
 		AgentID:   "codex",
 	})
-	if err != nil || command.Outcome != controlclient.OutcomeCommitted || agents.disconnect.OperationID != "agent-disconnect-1" || agents.disconnect.SessionID != "" {
+	if err != nil || command.Outcome != appserver.OutcomeCommitted || agents.disconnect.OperationID != "agent-disconnect-1" || agents.disconnect.SessionID != "" {
 		t.Fatalf("DisconnectACP() = %#v, %v; request = %#v", command, err, agents.disconnect)
 	}
-	command, err = client.PrepareACP(context.Background(), controlclient.PrepareACPRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "agent-prepare-1", ExpectedRevision: &expectedConfigurationRevision},
+	command, err = client.PrepareACP(context.Background(), appserver.PrepareACPRequest{
+		WriteBase: appserver.WriteBase{OperationID: "agent-prepare-1", ExpectedRevision: &expectedConfigurationRevision},
 		Request: controlagents.ACPPrepareRequest{
 			AdapterID: "codex", Launcher: controlagents.LauncherChoiceNPX, ModelID: "mimo", CWD: "/workspace",
 		},
 	})
-	if err != nil || command.Outcome != controlclient.OutcomeCommitted || command.Resource == nil || command.Resource.Kind != controlclient.CommandResourceACPPreparation {
+	if err != nil || command.Outcome != appserver.OutcomeCommitted || command.Resource == nil || command.Resource.Kind != appserver.CommandResourceACPPreparation {
 		t.Fatalf("PrepareACP() = %#v, %v", command, err)
 	}
-	preparation, err := client.ACPPreparation(context.Background(), controlclient.ACPPreparationRequest{Ref: command.Resource.Ref})
+	preparation, err := client.ACPPreparation(context.Background(), appserver.ACPPreparationRequest{Ref: command.Resource.Ref})
 	if err != nil || preparation.Ref != command.Resource.Ref || agents.preparationRef != command.Resource.Ref {
 		t.Fatalf("ACPPreparation() = %#v, %v", preparation, err)
 	}
-	command, err = client.PrepareACPAuthentication(context.Background(), controlclient.PrepareACPAuthenticationRequest{
-		WriteBase:      controlclient.WriteBase{OperationID: "agent-prepare-auth-1", ExpectedRevision: &expectedConfigurationRevision},
+	command, err = client.PrepareACPAuthentication(context.Background(), appserver.PrepareACPAuthenticationRequest{
+		WriteBase:      appserver.WriteBase{OperationID: "agent-prepare-auth-1", ExpectedRevision: &expectedConfigurationRevision},
 		PreparationRef: preparation.Ref, PreparationDigest: preparation.ContentDigest, MethodID: "login",
 	})
-	if err != nil || command.Outcome != controlclient.OutcomeCommitted || agents.prepareAuth.MethodID != "login" {
+	if err != nil || command.Outcome != appserver.OutcomeCommitted || agents.prepareAuth.MethodID != "login" {
 		t.Fatalf("PrepareACPAuthentication() = %#v, %v", command, err)
 	}
-	command, err = client.ConnectACP(context.Background(), controlclient.ConnectACPRequest{
-		WriteBase:      controlclient.WriteBase{OperationID: "agent-connect-1", ExpectedRevision: &expectedConfigurationRevision},
+	command, err = client.ConnectACP(context.Background(), appserver.ConnectACPRequest{
+		WriteBase:      appserver.WriteBase{OperationID: "agent-connect-1", ExpectedRevision: &expectedConfigurationRevision},
 		PreparationRef: preparation.Ref, PreparationDigest: preparation.ContentDigest,
 	})
-	if err != nil || command.Outcome != controlclient.OutcomeCommitted || command.Resource == nil ||
-		command.Resource.Kind != controlclient.CommandResourceModelProfile || agents.connect.OperationID != "agent-connect-1" {
+	if err != nil || command.Outcome != appserver.OutcomeCommitted || command.Resource == nil ||
+		command.Resource.Kind != appserver.CommandResourceModelProfile || agents.connect.OperationID != "agent-connect-1" {
 		t.Fatalf("ConnectACP() = %#v, %v", command, err)
 	}
-	command, err = client.BindAgentBinding(context.Background(), controlclient.BindAgentBindingRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "agent-binding-1", ExpectedRevision: &expectedConfigurationRevision},
+	command, err = client.BindAgentBinding(context.Background(), appserver.BindAgentBindingRequest{
+		WriteBase: appserver.WriteBase{OperationID: "agent-binding-1", ExpectedRevision: &expectedConfigurationRevision},
 		Binding:   agentbinding.Binding{Handle: agentbinding.HandleOrbit, ProfileID: "provider:mimo", Effort: "high"},
 	})
-	if err != nil || command.Outcome != controlclient.OutcomeCommitted || command.Revision != expectedConfigurationRevision+1 ||
+	if err != nil || command.Outcome != appserver.OutcomeCommitted || command.Revision != expectedConfigurationRevision+1 ||
 		agents.binding.OperationID != "agent-binding-1" || agents.binding.SessionID != "" {
 		t.Fatalf("BindAgentBinding() = %#v, %v; request = %#v", command, err, agents.binding)
 	}
-	files, err := client.CompleteFile(context.Background(), controlclient.CompletionRequest{
+	files, err := client.CompleteFile(context.Background(), appserver.CompletionRequest{
 		SessionID: "session-1", WorkspaceKey: "workspace-a", CWD: "/tmp/workspace-a", Query: "REA",
 	})
 	if err != nil || len(files) != 1 || files[0].Value != "README.md" {
 		t.Fatalf("CompleteFile() = %#v, %v", files, err)
 	}
-	plugin, err := client.InspectPlugin(context.Background(), controlclient.PluginRequest{SessionID: "session-1", ID: "demo"})
+	plugin, err := client.InspectPlugin(context.Background(), appserver.PluginRequest{SessionID: "session-1", ID: "demo"})
 	if err != nil || plugin.ID != "demo" {
 		t.Fatalf("InspectPlugin() = %#v, %v", plugin, err)
 	}
-	snapshot, err := client.PresentationSnapshot(context.Background(), controlclient.PresentationRequest{SessionID: "session-1"})
+	snapshot, err := client.PresentationSnapshot(context.Background(), appserver.PresentationRequest{SessionID: "session-1"})
 	if err != nil || snapshot.Modes == nil || snapshot.Modes.CurrentModeID != "manual" {
 		t.Fatalf("PresentationSnapshot() = %#v, %v", snapshot, err)
 	}
-	terminal, err := client.TerminalOutput(context.Background(), controlclient.TerminalRequest{SessionID: "session-1", TerminalID: "call-1"})
+	terminal, err := client.TerminalOutput(context.Background(), appserver.TerminalRequest{SessionID: "session-1", TerminalID: "call-1"})
 	if err != nil || terminal.Output != "done\n" {
 		t.Fatalf("TerminalOutput() = %#v, %v", terminal, err)
 	}
@@ -197,24 +197,24 @@ func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 		t.Fatalf("focused requests were not principal-bound and Session-addressed: %#v %#v %#v %#v %#v", participants, configuration.request, agents.request, completion.request, plugins.request)
 	}
 
-	hostStatus, err := client.SessionStatus(context.Background(), controlclient.StatusRequest{Surface: "host"})
+	hostStatus, err := client.SessionStatus(context.Background(), appserver.StatusRequest{Surface: "host"})
 	if err != nil || hostStatus.Session.ID != "" {
 		t.Fatalf("Host SessionStatus() = %#v, %v", hostStatus, err)
 	}
 	connectRevision := uint64(7)
-	if _, err := client.ConnectModel(context.Background(), controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "model-connect-1", ExpectedRevision: &connectRevision},
-		Config:    controlclient.ConnectConfig{Provider: "openai", Model: "mimo"},
+	if _, err := client.ConnectModel(context.Background(), appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "model-connect-1", ExpectedRevision: &connectRevision},
+		Config:    appserver.ConnectConfig{Provider: "openai", Model: "mimo"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.AgentStatus(context.Background(), controlclient.AgentRequest{Surface: "host"}); err != nil {
+	if _, err := client.AgentStatus(context.Background(), appserver.AgentRequest{Surface: "host"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.CompleteFile(context.Background(), controlclient.CompletionRequest{Surface: "host"}); err != nil {
+	if _, err := client.CompleteFile(context.Background(), appserver.CompletionRequest{Surface: "host"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.InspectPlugin(context.Background(), controlclient.PluginRequest{Surface: "host", ID: "demo"}); err != nil {
+	if _, err := client.InspectPlugin(context.Background(), appserver.PluginRequest{Surface: "host", ID: "demo"}); err != nil {
 		t.Fatal(err)
 	}
 	if agents.request.SessionID != "" || completion.request.SessionID != "" || plugins.request.SessionID != "" {
@@ -341,130 +341,130 @@ func TestFocusedClientsRoundTripThroughHTTPAppServer(t *testing.T) {
 }
 
 type focusedAgentMessageService struct {
-	controlclient.AgentMessageService
-	principal controlclient.Principal
-	request   controlclient.AgentMessageRequest
+	appserver.AgentMessageService
+	principal appserver.Principal
+	request   appserver.AgentMessageRequest
 }
 
-func (s *focusedAgentMessageService) DeliverAgentMessage(_ context.Context, principal controlclient.Principal, request controlclient.AgentMessageRequest) (controlclient.AgentMessageResult, error) {
+func (s *focusedAgentMessageService) DeliverAgentMessage(_ context.Context, principal appserver.Principal, request appserver.AgentMessageRequest) (appserver.AgentMessageResult, error) {
 	s.principal, s.request = principal, request
-	return controlclient.AgentMessageResult{MessageID: request.MessageID, Accepted: true, State: "pending"}, nil
+	return appserver.AgentMessageResult{MessageID: request.MessageID, Accepted: true, State: "pending"}, nil
 }
 
 type focusedParticipantService struct {
-	controlclient.ParticipantService
-	principal controlclient.Principal
+	appserver.ParticipantService
+	principal appserver.Principal
 	sessionID string
 }
 
-func (s *focusedParticipantService) ListParticipantHandles(_ context.Context, principal controlclient.Principal, sessionID string) ([]string, error) {
+func (s *focusedParticipantService) ListParticipantHandles(_ context.Context, principal appserver.Principal, sessionID string) ([]string, error) {
 	s.principal, s.sessionID = principal, sessionID
 	return []string{"review"}, nil
 }
 
 type focusedConfigurationService struct {
-	controlclient.ConfigurationService
-	principal        controlclient.Principal
-	request          controlclient.SessionModeRequest
-	model            controlclient.SessionModelRequest
-	controllerMode   controlclient.SessionControllerModeRequest
-	presentationMode controlclient.SessionPresentationModeRequest
-	presentation     controlclient.SessionPresentationConfigRequest
-	connect          controlclient.ConnectModelRequest
-	reset            controlclient.SandboxRequest
+	appserver.ConfigurationService
+	principal        appserver.Principal
+	request          appserver.SessionModeRequest
+	model            appserver.SessionModelRequest
+	controllerMode   appserver.SessionControllerModeRequest
+	presentationMode appserver.SessionPresentationModeRequest
+	presentation     appserver.SessionPresentationConfigRequest
+	connect          appserver.ConnectModelRequest
+	reset            appserver.SandboxRequest
 	modelCalls       int
 	connectCalls     int
 	resetCalls       int
 }
 
-func (s *focusedConfigurationService) ConnectModel(_ context.Context, _ controlclient.Principal, request controlclient.ConnectModelRequest) (controlclient.CommandResult, error) {
+func (s *focusedConfigurationService) ConnectModel(_ context.Context, _ appserver.Principal, request appserver.ConnectModelRequest) (appserver.CommandResult, error) {
 	s.connectCalls++
 	s.connect = request
-	return controlclient.CommandResult{OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted, Revision: 8}, nil
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted, Revision: 8}, nil
 }
 
-func (s *focusedConfigurationService) ConfigureSessionMode(_ context.Context, _ controlclient.Principal, request controlclient.SessionModeRequest) (controlclient.CommandResult, error) {
+func (s *focusedConfigurationService) ConfigureSessionMode(_ context.Context, _ appserver.Principal, request appserver.SessionModeRequest) (appserver.CommandResult, error) {
 	s.request = request
-	return controlclient.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: controlclient.OutcomeCommitted}, nil
+	return appserver.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: appserver.OutcomeCommitted}, nil
 }
 
-func (s *focusedConfigurationService) UseSessionModel(_ context.Context, _ controlclient.Principal, request controlclient.SessionModelRequest) (controlclient.CommandResult, error) {
+func (s *focusedConfigurationService) UseSessionModel(_ context.Context, _ appserver.Principal, request appserver.SessionModelRequest) (appserver.CommandResult, error) {
 	s.modelCalls++
 	s.model = request
-	return controlclient.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: controlclient.OutcomeCommitted}, nil
+	return appserver.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: appserver.OutcomeCommitted}, nil
 }
 
-func (s *focusedConfigurationService) ConfigureSessionControllerMode(_ context.Context, _ controlclient.Principal, request controlclient.SessionControllerModeRequest) (controlclient.CommandResult, error) {
+func (s *focusedConfigurationService) ConfigureSessionControllerMode(_ context.Context, _ appserver.Principal, request appserver.SessionControllerModeRequest) (appserver.CommandResult, error) {
 	s.controllerMode = request
-	return controlclient.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: controlclient.OutcomeCommitted}, nil
+	return appserver.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: appserver.OutcomeCommitted}, nil
 }
 
-func (s *focusedConfigurationService) ConfigureSessionPresentationMode(_ context.Context, _ controlclient.Principal, request controlclient.SessionPresentationModeRequest) (controlclient.CommandResult, error) {
+func (s *focusedConfigurationService) ConfigureSessionPresentationMode(_ context.Context, _ appserver.Principal, request appserver.SessionPresentationModeRequest) (appserver.CommandResult, error) {
 	s.presentationMode = request
-	return controlclient.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: controlclient.OutcomeCommitted}, nil
+	return appserver.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: appserver.OutcomeCommitted}, nil
 }
 
-func (s *focusedConfigurationService) ConfigureSessionPresentation(_ context.Context, _ controlclient.Principal, request controlclient.SessionPresentationConfigRequest) (controlclient.CommandResult, error) {
+func (s *focusedConfigurationService) ConfigureSessionPresentation(_ context.Context, _ appserver.Principal, request appserver.SessionPresentationConfigRequest) (appserver.CommandResult, error) {
 	s.presentation = request
-	return controlclient.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: controlclient.OutcomeCommitted}, nil
+	return appserver.CommandResult{OperationID: request.OperationID, SessionID: request.SessionID, Outcome: appserver.OutcomeCommitted}, nil
 }
 
-func (s *focusedConfigurationService) ResetSandbox(_ context.Context, principal controlclient.Principal, request controlclient.SandboxRequest) (controlclient.CommandResult, error) {
+func (s *focusedConfigurationService) ResetSandbox(_ context.Context, principal appserver.Principal, request appserver.SandboxRequest) (appserver.CommandResult, error) {
 	s.resetCalls++
 	s.principal, s.reset = principal, request
-	return controlclient.CommandResult{
-		OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted, Revision: *request.ExpectedRevision,
+	return appserver.CommandResult{
+		OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted, Revision: *request.ExpectedRevision,
 	}, nil
 }
 
 type focusedAgentService struct {
-	controlclient.AgentService
-	request         controlclient.AgentRequest
-	candidates      controlclient.AgentRequest
-	handoff         controlclient.HandoffAgentRequest
-	binding         controlclient.BindAgentBindingRequest
-	disconnect      controlclient.DisconnectACPRequest
-	prepare         controlclient.PrepareACPRequest
-	prepareAuth     controlclient.PrepareACPAuthenticationRequest
-	connect         controlclient.ConnectACPRequest
+	appserver.AgentService
+	request         appserver.AgentRequest
+	candidates      appserver.AgentRequest
+	handoff         appserver.HandoffAgentRequest
+	binding         appserver.BindAgentBindingRequest
+	disconnect      appserver.DisconnectACPRequest
+	prepare         appserver.PrepareACPRequest
+	prepareAuth     appserver.PrepareACPAuthenticationRequest
+	connect         appserver.ConnectACPRequest
 	preparationRef  string
 	disconnectCalls int
 	bindingCalls    int
 }
 
-func (s *focusedAgentService) PrepareACP(_ context.Context, _ controlclient.Principal, request controlclient.PrepareACPRequest) (controlclient.CommandResult, error) {
+func (s *focusedAgentService) PrepareACP(_ context.Context, _ appserver.Principal, request appserver.PrepareACPRequest) (appserver.CommandResult, error) {
 	s.prepare = request
 	s.preparationRef = "acpp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	return controlclient.CommandResult{
-		OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted, Revision: *request.ExpectedRevision,
-		Resource: &controlclient.CommandResource{Kind: controlclient.CommandResourceACPPreparation, Ref: s.preparationRef, Digest: strings.Repeat("a", 64)},
+	return appserver.CommandResult{
+		OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted, Revision: *request.ExpectedRevision,
+		Resource: &appserver.CommandResource{Kind: appserver.CommandResourceACPPreparation, Ref: s.preparationRef, Digest: strings.Repeat("a", 64)},
 	}, nil
 }
 
-func (s *focusedAgentService) PrepareACPAuthentication(_ context.Context, _ controlclient.Principal, request controlclient.PrepareACPAuthenticationRequest) (controlclient.CommandResult, error) {
+func (s *focusedAgentService) PrepareACPAuthentication(_ context.Context, _ appserver.Principal, request appserver.PrepareACPAuthenticationRequest) (appserver.CommandResult, error) {
 	s.prepareAuth = request
-	return controlclient.CommandResult{
-		OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted, Revision: *request.ExpectedRevision,
-		Resource: &controlclient.CommandResource{Kind: controlclient.CommandResourceACPPreparation, Ref: request.PreparationRef, Digest: request.PreparationDigest},
+	return appserver.CommandResult{
+		OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted, Revision: *request.ExpectedRevision,
+		Resource: &appserver.CommandResource{Kind: appserver.CommandResourceACPPreparation, Ref: request.PreparationRef, Digest: request.PreparationDigest},
 	}, nil
 }
 
-func (s *focusedAgentService) ACPPreparation(_ context.Context, _ controlclient.Principal, request controlclient.ACPPreparationRequest) (controlagents.ACPPreparation, error) {
+func (s *focusedAgentService) ACPPreparation(_ context.Context, _ appserver.Principal, request appserver.ACPPreparationRequest) (controlagents.ACPPreparation, error) {
 	s.preparationRef = request.Ref
 	return controlagents.ACPPreparation{Ref: request.Ref, State: controlagents.PreparationStateReady, ContentDigest: strings.Repeat("a", 64)}, nil
 }
 
-func (s *focusedAgentService) ConnectACP(_ context.Context, _ controlclient.Principal, request controlclient.ConnectACPRequest) (controlclient.CommandResult, error) {
+func (s *focusedAgentService) ConnectACP(_ context.Context, _ appserver.Principal, request appserver.ConnectACPRequest) (appserver.CommandResult, error) {
 	s.connect = request
-	return controlclient.CommandResult{
-		OperationID: request.OperationID, Outcome: controlclient.OutcomeCommitted, Revision: *request.ExpectedRevision + 1,
-		Resource: &controlclient.CommandResource{Kind: controlclient.CommandResourceModelProfile, Ref: "acp:codex:mimo", Digest: request.PreparationDigest},
+	return appserver.CommandResult{
+		OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted, Revision: *request.ExpectedRevision + 1,
+		Resource: &appserver.CommandResource{Kind: appserver.CommandResourceModelProfile, Ref: "acp:codex:mimo", Digest: request.PreparationDigest},
 	}, nil
 }
 
-func (s *focusedAgentService) DisconnectCandidates(_ context.Context, _ controlclient.Principal, request controlclient.AgentRequest) (controlclient.DisconnectCandidatesSnapshot, error) {
+func (s *focusedAgentService) DisconnectCandidates(_ context.Context, _ appserver.Principal, request appserver.AgentRequest) (appserver.DisconnectCandidatesSnapshot, error) {
 	s.candidates = request
-	return controlclient.DisconnectCandidatesSnapshot{
+	return appserver.DisconnectCandidatesSnapshot{
 		Revision: 7,
 		Candidates: []controlagents.DisconnectCandidate{{
 			AgentID: "codex", ConnectionID: "codex", LastOnConnection: true,
@@ -472,89 +472,89 @@ func (s *focusedAgentService) DisconnectCandidates(_ context.Context, _ controlc
 	}, nil
 }
 
-func (s *focusedAgentService) DisconnectACP(_ context.Context, _ controlclient.Principal, request controlclient.DisconnectACPRequest) (controlclient.CommandResult, error) {
+func (s *focusedAgentService) DisconnectACP(_ context.Context, _ appserver.Principal, request appserver.DisconnectACPRequest) (appserver.CommandResult, error) {
 	s.disconnectCalls++
 	s.disconnect = request
 	revision := uint64(0)
 	if request.ExpectedRevision != nil {
 		revision = *request.ExpectedRevision + 1
 	}
-	return controlclient.CommandResult{
+	return appserver.CommandResult{
 		OperationID: request.OperationID,
-		Outcome:     controlclient.OutcomeCommitted,
+		Outcome:     appserver.OutcomeCommitted,
 		Revision:    revision,
 	}, nil
 }
 
-func (s *focusedAgentService) AgentStatus(_ context.Context, _ controlclient.Principal, request controlclient.AgentRequest) (controlclient.AgentStatusSnapshot, error) {
+func (s *focusedAgentService) AgentStatus(_ context.Context, _ appserver.Principal, request appserver.AgentRequest) (appserver.AgentStatusSnapshot, error) {
 	s.request = request
-	return controlclient.AgentStatusSnapshot{SessionID: request.SessionID, ControllerLabel: "main"}, nil
+	return appserver.AgentStatusSnapshot{SessionID: request.SessionID, ControllerLabel: "main"}, nil
 }
 
-func (s *focusedAgentService) HandoffAgent(_ context.Context, _ controlclient.Principal, request controlclient.HandoffAgentRequest) (controlclient.CommandResult, error) {
+func (s *focusedAgentService) HandoffAgent(_ context.Context, _ appserver.Principal, request appserver.HandoffAgentRequest) (appserver.CommandResult, error) {
 	s.handoff = request
 	revision := uint64(0)
 	if request.ExpectedRevision != nil {
 		revision = *request.ExpectedRevision + 1
 	}
-	return controlclient.CommandResult{
+	return appserver.CommandResult{
 		OperationID: request.OperationID,
 		SessionID:   request.SessionID,
-		Outcome:     controlclient.OutcomeCommitted,
+		Outcome:     appserver.OutcomeCommitted,
 		Revision:    revision,
 	}, nil
 }
 
-func (s *focusedAgentService) BindAgentBinding(_ context.Context, _ controlclient.Principal, request controlclient.BindAgentBindingRequest) (controlclient.CommandResult, error) {
+func (s *focusedAgentService) BindAgentBinding(_ context.Context, _ appserver.Principal, request appserver.BindAgentBindingRequest) (appserver.CommandResult, error) {
 	s.bindingCalls++
 	s.binding = request
 	revision := uint64(0)
 	if request.ExpectedRevision != nil {
 		revision = *request.ExpectedRevision + 1
 	}
-	return controlclient.CommandResult{
+	return appserver.CommandResult{
 		OperationID: request.OperationID,
-		Outcome:     controlclient.OutcomeCommitted,
+		Outcome:     appserver.OutcomeCommitted,
 		Revision:    revision,
 	}, nil
 }
 
 type focusedCompletionService struct {
-	controlclient.CompletionService
-	request controlclient.CompletionRequest
+	appserver.CompletionService
+	request appserver.CompletionRequest
 }
 
-func (s *focusedCompletionService) CompleteFile(_ context.Context, _ controlclient.Principal, request controlclient.CompletionRequest) ([]controlclient.CompletionCandidate, error) {
+func (s *focusedCompletionService) CompleteFile(_ context.Context, _ appserver.Principal, request appserver.CompletionRequest) ([]appserver.CompletionCandidate, error) {
 	s.request = request
-	return []controlclient.CompletionCandidate{{Value: "README.md"}}, nil
+	return []appserver.CompletionCandidate{{Value: "README.md"}}, nil
 }
 
 type focusedPluginService struct {
-	controlclient.PluginService
-	request controlclient.PluginRequest
+	appserver.PluginService
+	request appserver.PluginRequest
 }
 
 type focusedPresentationService struct {
-	controlclient.PresentationService
-	request controlclient.PresentationRequest
+	appserver.PresentationService
+	request appserver.PresentationRequest
 }
 
-func (s *focusedPresentationService) PresentationSnapshot(_ context.Context, _ controlclient.Principal, request controlclient.PresentationRequest) (controlclient.PresentationSnapshot, error) {
+func (s *focusedPresentationService) PresentationSnapshot(_ context.Context, _ appserver.Principal, request appserver.PresentationRequest) (appserver.PresentationSnapshot, error) {
 	s.request = request
-	return controlclient.PresentationSnapshot{Modes: &controlclient.PresentationModeState{CurrentModeID: "manual"}}, nil
+	return appserver.PresentationSnapshot{Modes: &appserver.PresentationModeState{CurrentModeID: "manual"}}, nil
 }
 
 type focusedTerminalService struct {
-	controlclient.TerminalService
-	request controlclient.TerminalRequest
+	appserver.TerminalService
+	request appserver.TerminalRequest
 }
 
-func (s *focusedTerminalService) TerminalOutput(_ context.Context, _ controlclient.Principal, request controlclient.TerminalRequest) (controlclient.TerminalOutput, error) {
+func (s *focusedTerminalService) TerminalOutput(_ context.Context, _ appserver.Principal, request appserver.TerminalRequest) (appserver.TerminalOutput, error) {
 	s.request = request
-	return controlclient.TerminalOutput{Output: "done\n"}, nil
+	return appserver.TerminalOutput{Output: "done\n"}, nil
 }
 
-func (s *focusedPluginService) InspectPlugin(_ context.Context, _ controlclient.Principal, request controlclient.PluginRequest) (controlclient.PluginSnapshot, error) {
+func (s *focusedPluginService) InspectPlugin(_ context.Context, _ appserver.Principal, request appserver.PluginRequest) (appserver.PluginSnapshot, error) {
 	s.request = request
-	return controlclient.PluginSnapshot{ID: request.ID, Name: "Demo", Version: "1", Status: "ready"}, nil
+	return appserver.PluginSnapshot{ID: request.ID, Name: "Demo", Version: "1", Status: "ready"}, nil
 }

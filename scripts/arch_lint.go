@@ -491,7 +491,10 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		return "production code must not depend on ports/controlcommand; use internal/controlprompt"
 	}
 	if target == "ports/controlclient" || strings.HasPrefix(target, "ports/controlclient/") {
-		return "production code must not depend on ports/controlclient; use control/client"
+		return "production code must not depend on ports/controlclient; use control/appserver"
+	}
+	if target == "control/client" || strings.HasPrefix(target, "control/client/") {
+		return "production code must not depend on retired control/client; use control/appserver"
 	}
 	if target == "internal/controlpromptrouter" || strings.HasPrefix(target, "internal/controlpromptrouter/") {
 		return "production code must not depend on internal/controlpromptrouter; use internal/controlprompt"
@@ -523,7 +526,7 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	}
 	switch {
 	case strings.HasPrefix(rel, "control/"):
-		if allowedControlClientProtocolTarget(rel, target) {
+		if allowedAppServerProtocolTarget(rel, target) {
 			return ""
 		}
 		if startsWithAny(target, "app/", "surfaces/", "protocol/", "ports/", "internal/") {
@@ -622,8 +625,8 @@ func isProductionTestSupportPackage(rel string) bool {
 		strings.HasPrefix(rel, "internal/testenv/")
 }
 
-func allowedControlClientProtocolTarget(rel string, target string) bool {
-	return strings.HasPrefix(rel, "control/client/") && pathIn(target,
+func allowedAppServerProtocolTarget(rel string, target string) bool {
+	return strings.HasPrefix(rel, "control/appserver/") && pathIn(target,
 		"protocol/acp/eventstream",
 		"protocol/acp/metautil",
 		"protocol/acp/projector",
@@ -717,12 +720,14 @@ func removedPackageFileRule(rel string) (string, string, int) {
 		return "", "", 0
 	}
 	switch {
+	case pkg == "control/client" || strings.HasPrefix(pkg, "control/client/"):
+		return "must not recreate control/client; the surface-facing product boundary belongs to control/appserver", pkg, 1
 	case pkg == "surfaces/appserver" || strings.HasPrefix(pkg, "surfaces/appserver/"):
-		return "must not recreate surfaces/appserver; the Control Host belongs to app/controlserver and its typed clients and wire codec to control/client", pkg, 1
+		return "must not recreate surfaces/appserver; the Control Host belongs to app/controlserver and its typed clients and wire codec to control/appserver", pkg, 1
 	case pkg == "protocol/control" || strings.HasPrefix(pkg, "protocol/control/"):
-		return "must not recreate protocol/control; the domain-bound Control wire codec belongs to control/client/wirev1", pkg, 1
+		return "must not recreate protocol/control; the domain-bound Control wire codec belongs to control/appserver/wirev1", pkg, 1
 	case pkg == "ports/controlclient" || strings.HasPrefix(pkg, "ports/controlclient/"):
-		return "must not recreate ports/controlclient; product client contracts and behavior belong to control/client", pkg, 1
+		return "must not recreate ports/controlclient; product client contracts and behavior belong to control/appserver", pkg, 1
 	case pkg == "ports/gateway" || strings.HasPrefix(pkg, "ports/gateway/"):
 		return "must not recreate ports/gateway; current Control gateway contracts belong to internal/kernel", pkg, 1
 	case pkg == "ports/controlprompt/connectwizard" || strings.HasPrefix(pkg, "ports/controlprompt/connectwizard/"):

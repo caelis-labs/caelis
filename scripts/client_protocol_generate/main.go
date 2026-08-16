@@ -83,8 +83,8 @@ func main() {
 	goOutput, err := generateGo(spec, operations)
 	must(err)
 	outputs := map[string][]byte{
-		filepath.Join(root, "control/client/wirev1/generated/control_v1.gen.go"): goOutput,
-		filepath.Join(root, "clients/typescript/control-v1.gen.ts"):              generateTypeScript(spec, operations),
+		filepath.Join(root, "control/appserver/wirev1/generated/control_v1.gen.go"): goOutput,
+		filepath.Join(root, "clients/typescript/control-v1.gen.ts"):                 generateTypeScript(spec, operations),
 	}
 	for path, want := range outputs {
 		want = append(bytes.TrimSpace(want), '\n')

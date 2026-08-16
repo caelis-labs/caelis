@@ -17,7 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	acpclient "github.com/caelis-labs/caelis/protocol/acp/client"
@@ -27,11 +27,11 @@ import (
 
 func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	marker := filepath.Join(t.TempDir(), "starts")
 	expected := currentConfigurationRevision(t, stack)
-	request := controlclient.PrepareACPRequest{
-		WriteBase: controlclient.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &expected},
+	request := appserver.PrepareACPRequest{
+		WriteBase: appserver.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &expected},
 		Request: controlagents.ACPPrepareRequest{
 			AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand,
 			CommandLine: gatewayACPOnboardingHelperCommand("ready", marker),
@@ -39,21 +39,21 @@ func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *te
 		},
 	}
 	failing := &completeFailingOperationStore{OperationStore: stack.operations}
-	firstCommands, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
-		Authorizer: controlclient.ProductCommandAuthorizer{}, Operations: failing, Backend: stack,
+	firstCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
+		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: failing, Backend: stack,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	first, firstErr := firstCommands.PrepareACP(context.Background(), principal, request)
-	if firstErr == nil || first.Outcome != controlclient.OutcomeUnknown {
+	if firstErr == nil || first.Outcome != appserver.OutcomeUnknown {
 		t.Fatalf("PrepareACP(first) = %#v, %v; want intent-only unknown after completion fault", first, firstErr)
 	}
 	if starts := onboardingHelperStarts(t, marker); starts != 1 {
 		t.Fatalf("helper starts after first prepare = %d, want 1", starts)
 	}
 
-	restartedOperations := controlclient.NewFileOperationStore(filepath.Join(stack.storeDir, "control-operations"))
+	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.storeDir, "control-operations"))
 	if err := restartedOperations.Initialize(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -62,15 +62,15 @@ func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *te
 		t.Fatal(err)
 	}
 	stack.acpPreparations = restartedPreparations
-	restartedCommands, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
-		Authorizer: controlclient.ProductCommandAuthorizer{}, Operations: restartedOperations, Backend: stack,
+	restartedCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
+		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: restartedOperations, Backend: stack,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	recovered, recoveryErr := restartedCommands.PrepareACP(context.Background(), principal, request)
-	if recoveryErr != nil || recovered.Outcome != controlclient.OutcomeCommitted || recovered.Resource == nil ||
-		recovered.Resource.Kind != controlclient.CommandResourceACPPreparation {
+	if recoveryErr != nil || recovered.Outcome != appserver.OutcomeCommitted || recovered.Resource == nil ||
+		recovered.Resource.Kind != appserver.CommandResourceACPPreparation {
 		t.Fatalf("PrepareACP(recovered) = %#v, %v", recovered, recoveryErr)
 	}
 	if starts := onboardingHelperStarts(t, marker); starts != 1 {
@@ -85,14 +85,14 @@ func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *te
 func TestStackACPCommandRecoveryCapabilityIsExplicit(t *testing.T) {
 	stack := &Stack{}
 	for _, test := range []struct {
-		action controlclient.Action
+		action appserver.Action
 		want   bool
 	}{
-		{action: controlclient.ActionACPAgentPrepare, want: true},
-		{action: controlclient.ActionACPAgentPrepareAuth, want: true},
-		{action: controlclient.ActionACPAgentConnect, want: false},
-		{action: controlclient.ActionPrompt, want: false},
-		{action: controlclient.Action("unknown.action"), want: false},
+		{action: appserver.ActionACPAgentPrepare, want: true},
+		{action: appserver.ActionACPAgentPrepareAuth, want: true},
+		{action: appserver.ActionACPAgentConnect, want: false},
+		{action: appserver.ActionPrompt, want: false},
+		{action: appserver.Action("unknown.action"), want: false},
 	} {
 		if got := stack.CanRecoverControlCommand(test.action); got != test.want {
 			t.Fatalf("CanRecoverControlCommand(%q) = %v, want %v", test.action, got, test.want)
@@ -102,11 +102,11 @@ func TestStackACPCommandRecoveryCapabilityIsExplicit(t *testing.T) {
 
 func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	marker := filepath.Join(t.TempDir(), "starts")
 	expected := currentConfigurationRevision(t, stack)
-	request := controlclient.PrepareACPRequest{
-		WriteBase: controlclient.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &expected},
+	request := appserver.PrepareACPRequest{
+		WriteBase: appserver.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &expected},
 		Request: controlagents.ACPPrepareRequest{
 			AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand,
 			CommandLine: gatewayACPOnboardingHelperCommand("ready", marker),
@@ -119,24 +119,24 @@ func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T
 		started:        make(chan struct{}),
 		release:        make(chan struct{}),
 	}
-	creator, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
-		Authorizer: controlclient.ProductCommandAuthorizer{}, Operations: blockingOperations, Backend: backend,
+	creator, err := appserver.NewCommandService(appserver.CommandServiceConfig{
+		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: blockingOperations, Backend: backend,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	retryOperations := controlclient.NewFileOperationStore(filepath.Join(stack.storeDir, "control-operations"))
+	retryOperations := appserver.NewFileOperationStore(filepath.Join(stack.storeDir, "control-operations"))
 	if err := retryOperations.Initialize(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	retry, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
-		Authorizer: controlclient.ProductCommandAuthorizer{}, Operations: retryOperations, Backend: backend,
+	retry, err := appserver.NewCommandService(appserver.CommandServiceConfig{
+		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: retryOperations, Backend: backend,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	type response struct {
-		result controlclient.CommandResult
+		result appserver.CommandResult
 		err    error
 	}
 	creatorDone := make(chan response, 1)
@@ -173,12 +173,12 @@ func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T
 		t.Fatalf("recovery calls while creator completed = %d, want 0", got)
 	}
 
-	restartedOperations := controlclient.NewFileOperationStore(filepath.Join(stack.storeDir, "control-operations"))
+	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.storeDir, "control-operations"))
 	if err := restartedOperations.Initialize(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
-		Authorizer: controlclient.ProductCommandAuthorizer{}, Operations: restartedOperations, Backend: backend,
+	restarted, err := appserver.NewCommandService(appserver.CommandServiceConfig{
+		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: restartedOperations, Backend: backend,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -194,18 +194,18 @@ func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T
 
 func TestACPPrepareAndAuthenticationCommandsPersistExplicitChallenge(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	marker := filepath.Join(t.TempDir(), "starts")
 	expected := currentConfigurationRevision(t, stack)
-	preparedReceipt, err := stack.AgentCommands().PrepareACP(context.Background(), principal, controlclient.PrepareACPRequest{
-		WriteBase: controlclient.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &expected},
+	preparedReceipt, err := stack.AgentCommands().PrepareACP(context.Background(), principal, appserver.PrepareACPRequest{
+		WriteBase: appserver.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &expected},
 		Request: controlagents.ACPPrepareRequest{
 			AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand,
 			CommandLine: gatewayACPOnboardingHelperCommand("needs-auth", marker),
 			ModelID:     controlagents.DefaultRemoteModelID, CWD: stack.Workspace.CWD,
 		},
 	})
-	if err != nil || preparedReceipt.Outcome != controlclient.OutcomeCommitted || preparedReceipt.Resource == nil {
+	if err != nil || preparedReceipt.Outcome != appserver.OutcomeCommitted || preparedReceipt.Resource == nil {
 		t.Fatalf("PrepareACP() = %#v, %v", preparedReceipt, err)
 	}
 	challenge, err := stack.acpPreparations.Get(context.Background(), preparedReceipt.Resource.Ref)
@@ -214,11 +214,11 @@ func TestACPPrepareAndAuthenticationCommandsPersistExplicitChallenge(t *testing.
 		t.Fatalf("challenge preparation = %#v, %v", challenge, err)
 	}
 	current := currentConfigurationRevision(t, stack)
-	authReceipt, err := stack.AgentCommands().PrepareACPAuthentication(context.Background(), principal, controlclient.PrepareACPAuthenticationRequest{
-		WriteBase:      controlclient.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &current},
+	authReceipt, err := stack.AgentCommands().PrepareACPAuthentication(context.Background(), principal, appserver.PrepareACPAuthenticationRequest{
+		WriteBase:      appserver.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &current},
 		PreparationRef: challenge.Ref, PreparationDigest: challenge.ContentDigest, MethodID: "agent-login",
 	})
-	if err != nil || authReceipt.Outcome != controlclient.OutcomeCommitted || authReceipt.Resource == nil {
+	if err != nil || authReceipt.Outcome != appserver.OutcomeCommitted || authReceipt.Resource == nil {
 		t.Fatalf("PrepareACPAuthentication() = %#v, %v", authReceipt, err)
 	}
 	ready, err := stack.acpPreparations.Get(context.Background(), authReceipt.Resource.Ref)
@@ -233,11 +233,11 @@ func TestACPPrepareAndAuthenticationCommandsPersistExplicitChallenge(t *testing.
 
 func TestACPPrepareCancellationIsUnknownAndNeverRepeatsEffect(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	marker := filepath.Join(t.TempDir(), "starts")
 	expected := currentConfigurationRevision(t, stack)
-	request := controlclient.PrepareACPRequest{
-		WriteBase: controlclient.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &expected},
+	request := appserver.PrepareACPRequest{
+		WriteBase: appserver.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &expected},
 		Request: controlagents.ACPPrepareRequest{
 			AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand,
 			CommandLine: gatewayACPOnboardingHelperCommand("block", marker),
@@ -246,7 +246,7 @@ func TestACPPrepareCancellationIsUnknownAndNeverRepeatsEffect(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	type response struct {
-		result controlclient.CommandResult
+		result appserver.CommandResult
 		err    error
 	}
 	done := make(chan response, 1)
@@ -262,11 +262,11 @@ func TestACPPrepareCancellationIsUnknownAndNeverRepeatsEffect(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("PrepareACP() did not return after cancellation")
 	}
-	if first.err == nil || first.result.Outcome != controlclient.OutcomeUnknown {
+	if first.err == nil || first.result.Outcome != appserver.OutcomeUnknown {
 		t.Fatalf("PrepareACP(canceled) = %#v, %v; want unknown", first.result, first.err)
 	}
 	replayed, replayErr := stack.AgentCommands().PrepareACP(context.Background(), principal, request)
-	if replayErr != nil || replayed.Outcome != controlclient.OutcomeUnknown {
+	if replayErr != nil || replayed.Outcome != appserver.OutcomeUnknown {
 		t.Fatalf("PrepareACP(replay canceled) = %#v, %v", replayed, replayErr)
 	}
 	if starts := onboardingHelperStarts(t, marker); starts != 1 {
@@ -276,11 +276,11 @@ func TestACPPrepareCancellationIsUnknownAndNeverRepeatsEffect(t *testing.T) {
 
 func TestConnectPreparedACPCommitsExactPreparationAndReplaysReceipt(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	prepared := seedReadyACPPreparation(t, stack, principal.ID, "prepare-connect")
 	expected := currentConfigurationRevision(t, stack)
-	request := controlclient.ConnectACPRequest{
-		WriteBase: controlclient.WriteBase{
+	request := appserver.ConnectACPRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:      uuid.NewString(),
 			ExpectedRevision: &expected,
 		},
@@ -289,10 +289,10 @@ func TestConnectPreparedACPCommitsExactPreparationAndReplaysReceipt(t *testing.T
 	}
 
 	receipt, err := stack.AgentCommands().ConnectACP(context.Background(), principal, request)
-	if err != nil || receipt.Outcome != controlclient.OutcomeCommitted || receipt.Revision != expected+1 {
+	if err != nil || receipt.Outcome != appserver.OutcomeCommitted || receipt.Revision != expected+1 {
 		t.Fatalf("ConnectACP() = %#v, %v", receipt, err)
 	}
-	if receipt.Resource == nil || receipt.Resource.Kind != controlclient.CommandResourceModelProfile || receipt.Resource.Ref == "" || receipt.Resource.Digest != prepared.ContentDigest {
+	if receipt.Resource == nil || receipt.Resource.Kind != appserver.CommandResourceModelProfile || receipt.Resource.Ref == "" || receipt.Resource.Digest != prepared.ContentDigest {
 		t.Fatalf("ConnectACP() resource = %#v", receipt.Resource)
 	}
 	doc, err := stack.store.LoadContext(context.Background())
@@ -325,20 +325,20 @@ func TestConnectPreparedACPRejectsForeignOrChangedPreparation(t *testing.T) {
 	expected := currentConfigurationRevision(t, stack)
 	tests := []struct {
 		name      string
-		principal controlclient.Principal
+		principal appserver.Principal
 		digest    string
 	}{
-		{name: "foreign principal", principal: controlclient.Principal{ID: "someone-else"}, digest: prepared.ContentDigest},
-		{name: "changed digest", principal: controlclient.Principal{ID: stack.UserID}, digest: strings.Repeat("f", 64)},
+		{name: "foreign principal", principal: appserver.Principal{ID: "someone-else"}, digest: prepared.ContentDigest},
+		{name: "changed digest", principal: appserver.Principal{ID: stack.UserID}, digest: strings.Repeat("f", 64)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			request := controlclient.ConnectACPRequest{
-				WriteBase:      controlclient.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &expected},
+			request := appserver.ConnectACPRequest{
+				WriteBase:      appserver.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &expected},
 				PreparationRef: prepared.Ref, PreparationDigest: tc.digest,
 			}
 			receipt, err := stack.AgentCommands().ConnectACP(context.Background(), tc.principal, request)
-			if err == nil || receipt.Outcome != controlclient.OutcomeRejected {
+			if err == nil || receipt.Outcome != appserver.OutcomeRejected {
 				t.Fatalf("ConnectACP() = %#v, %v; want rejected", receipt, err)
 			}
 		})
@@ -350,16 +350,16 @@ func TestConnectPreparedACPRejectsForeignOrChangedPreparation(t *testing.T) {
 
 func TestConnectPreparedACPCASCommitsForFutureActivation(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	prepared := seedReadyACPPreparation(t, stack, principal.ID, "prepare-warning")
 	expected := currentConfigurationRevision(t, stack)
 	stale := expected - 1
-	conflictRequest := controlclient.ConnectACPRequest{
-		WriteBase:      controlclient.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &stale},
+	conflictRequest := appserver.ConnectACPRequest{
+		WriteBase:      appserver.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &stale},
 		PreparationRef: prepared.Ref, PreparationDigest: prepared.ContentDigest,
 	}
 	conflicted, err := stack.AgentCommands().ConnectACP(context.Background(), principal, conflictRequest)
-	if err == nil || conflicted.Outcome != controlclient.OutcomeConflicted || conflicted.Revision != expected {
+	if err == nil || conflicted.Outcome != appserver.OutcomeConflicted || conflicted.Revision != expected {
 		t.Fatalf("ConnectACP(stale) = %#v, %v", conflicted, err)
 	}
 
@@ -367,7 +367,7 @@ func TestConnectPreparedACPCASCommitsForFutureActivation(t *testing.T) {
 	request.OperationID = uuid.NewString()
 	request.ExpectedRevision = &expected
 	receipt, err := stack.AgentCommands().ConnectACP(context.Background(), principal, request)
-	if err != nil || receipt.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectACP() = %#v, %v", receipt, err)
 	}
 	doc, loadErr := stack.store.LoadContext(context.Background())
@@ -384,17 +384,17 @@ func TestConnectPreparedACPCASCommitsForFutureActivation(t *testing.T) {
 
 func TestPrepareACPAuthenticationRejectsUnavailableTerminalCapabilityBeforeEffect(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	parent := seedNeedsAuthACPPreparation(t, stack, principal.ID, "prepare-terminal")
 	expected := currentConfigurationRevision(t, stack)
-	receipt, err := stack.AgentCommands().PrepareACPAuthentication(context.Background(), principal, controlclient.PrepareACPAuthenticationRequest{
-		WriteBase: controlclient.WriteBase{
+	receipt, err := stack.AgentCommands().PrepareACPAuthentication(context.Background(), principal, appserver.PrepareACPAuthenticationRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:      uuid.NewString(),
 			ExpectedRevision: &expected,
 		},
 		PreparationRef: parent.Ref, PreparationDigest: parent.ContentDigest, MethodID: "terminal-login",
 	})
-	if err == nil || receipt.Outcome != controlclient.OutcomeRejected || receipt.ErrorCode != "failed_precondition" {
+	if err == nil || receipt.Outcome != appserver.OutcomeRejected || receipt.ErrorCode != "failed_precondition" {
 		t.Fatalf("PrepareACPAuthentication() = %#v, %v; want rejected failed_precondition", receipt, err)
 	}
 	if got := currentConfigurationRevision(t, stack); got != expected {
@@ -474,15 +474,15 @@ func seedReadyACPPreparation(t *testing.T, stack *Stack, principalID, operationI
 }
 
 type completeFailingOperationStore struct {
-	controlclient.OperationStore
+	appserver.OperationStore
 }
 
 func (s *completeFailingOperationStore) Complete(
 	context.Context,
-	controlclient.OperationIntent,
-	controlclient.CommandResult,
-) (controlclient.OperationRecord, error) {
-	return controlclient.OperationRecord{}, errors.New("test operation completion fault")
+	appserver.OperationIntent,
+	appserver.CommandResult,
+) (appserver.OperationRecord, error) {
+	return appserver.OperationRecord{}, errors.New("test operation completion fault")
 }
 
 const warningACPCommandDetail = "ACP preparation committed with a warning: test post-commit durability warning"
@@ -494,12 +494,12 @@ type warningACPCommandBackend struct {
 
 func (b *warningACPCommandBackend) ExecuteControlCommand(
 	ctx context.Context,
-	principal controlclient.Principal,
-	action controlclient.Action,
+	principal appserver.Principal,
+	action appserver.Action,
 	request any,
-) (controlclient.CommandResult, error) {
+) (appserver.CommandResult, error) {
 	result, err := b.Stack.ExecuteControlCommand(ctx, principal, action, request)
-	if err == nil && action == controlclient.ActionACPAgentPrepare && result.Outcome == controlclient.OutcomeCommitted {
+	if err == nil && action == appserver.ActionACPAgentPrepare && result.Outcome == appserver.OutcomeCommitted {
 		result.Detail = warningACPCommandDetail
 	}
 	return result, err
@@ -507,16 +507,16 @@ func (b *warningACPCommandBackend) ExecuteControlCommand(
 
 func (b *warningACPCommandBackend) RecoverControlCommand(
 	ctx context.Context,
-	principal controlclient.Principal,
-	intent controlclient.OperationIntent,
+	principal appserver.Principal,
+	intent appserver.OperationIntent,
 	request any,
-) (controlclient.CommandResult, bool, error) {
+) (appserver.CommandResult, bool, error) {
 	b.recoverCalls.Add(1)
 	return b.Stack.RecoverControlCommand(ctx, principal, intent, request)
 }
 
 type blockingCompleteOperationStore struct {
-	controlclient.OperationStore
+	appserver.OperationStore
 	started chan struct{}
 	release chan struct{}
 	once    sync.Once
@@ -524,9 +524,9 @@ type blockingCompleteOperationStore struct {
 
 func (s *blockingCompleteOperationStore) Complete(
 	ctx context.Context,
-	intent controlclient.OperationIntent,
-	result controlclient.CommandResult,
-) (controlclient.OperationRecord, error) {
+	intent appserver.OperationIntent,
+	result appserver.CommandResult,
+) (appserver.OperationRecord, error) {
 	s.once.Do(func() {
 		close(s.started)
 		<-s.release
@@ -655,7 +655,7 @@ func currentConfigurationRevision(t *testing.T, stack *Stack) uint64 {
 	return revision
 }
 
-func equalCommandResult(left, right controlclient.CommandResult) bool {
+func equalCommandResult(left, right appserver.CommandResult) bool {
 	if left.Resource == nil || right.Resource == nil {
 		return left == right
 	}

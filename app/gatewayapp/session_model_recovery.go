@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
@@ -32,7 +32,7 @@ func (s *Stack) prepareControlClientReconnect(ctx context.Context, ref session.S
 	if err != nil {
 		return err
 	}
-	closed, err := controlclient.IsSessionClosed(buildCtx, s.Sessions, active.SessionRef)
+	closed, err := appserver.IsSessionClosed(buildCtx, s.Sessions, active.SessionRef)
 	if err != nil {
 		return err
 	}

@@ -7,17 +7,17 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
-func (s *Stack) executeConfigurationCommand(ctx context.Context, action controlclient.Action, request any) (controlclient.CommandResult, error) {
+func (s *Stack) executeConfigurationCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
 	switch request.(type) {
-	case controlclient.ConnectModelRequest, controlclient.UseModelRequest, controlclient.DeleteModelRequest:
+	case appserver.ConnectModelRequest, appserver.UseModelRequest, appserver.DeleteModelRequest:
 		return s.executeHostModelConfigurationCommand(ctx, action, request)
 	}
-	req, ok := request.(controlclient.SandboxRequest)
+	req, ok := request.(appserver.SandboxRequest)
 	if !ok {
-		return controlclient.CommandResult{}, configurationRejectedError(
+		return appserver.CommandResult{}, configurationRejectedError(
 			errorcode.New(errorcode.InvalidArgument, "gatewayapp: invalid configuration command request"),
 		)
 	}
@@ -25,21 +25,21 @@ func (s *Stack) executeConfigurationCommand(ctx context.Context, action controlc
 	var effectStarted bool
 	var err error
 	switch action {
-	case controlclient.ActionSandboxBackend:
+	case appserver.ActionSandboxBackend:
 		_, revision, err = s.setSandboxBackendAtRevision(ctx, req.Backend, req.ExpectedRevision)
-	case controlclient.ActionSandboxPrepare:
+	case appserver.ActionSandboxPrepare:
 		_, revision, effectStarted, err = s.runSandboxLifecycleCommand(ctx, sandboxLifecycleCommand{
 			action: prepareSandboxRuntime,
 		}, req.ExpectedRevision)
-	case controlclient.ActionSandboxRepair:
+	case appserver.ActionSandboxRepair:
 		_, revision, effectStarted, err = s.runSandboxLifecycleCommand(ctx, sandboxLifecycleCommand{
 			action: repairSandboxRuntime,
 		}, req.ExpectedRevision)
-	case controlclient.ActionSandboxReset:
+	case appserver.ActionSandboxReset:
 		_, revision, effectStarted, err = s.runSandboxLifecycleCommand(ctx, sandboxLifecycleCommand{
 			action: resetSandboxRuntime,
 		}, req.ExpectedRevision)
-	case controlclient.ActionSandboxRefresh:
+	case appserver.ActionSandboxRefresh:
 		_, revision, effectStarted, err = s.runSandboxLifecycleCommand(ctx, sandboxLifecycleCommand{
 			refresh: true,
 		}, req.ExpectedRevision)
@@ -48,14 +48,14 @@ func (s *Stack) executeConfigurationCommand(ctx context.Context, action controlc
 			errorcode.New(errorcode.InvalidArgument, fmt.Sprintf("gatewayapp: unsupported sandbox command %q", action)),
 		)
 	}
-	if action != controlclient.ActionSandboxBackend && !effectStarted {
+	if action != appserver.ActionSandboxBackend && !effectStarted {
 		return configurationCommandResult(revision), classifyConfigurationPreEffectError(err)
 	}
 	return configurationCommandResult(revision), classifyConfigurationEffectError(err)
 }
 
-func configurationCommandResult(revision uint64) controlclient.CommandResult {
-	return controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted, Revision: revision}
+func configurationCommandResult(revision uint64) appserver.CommandResult {
+	return appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: revision}
 }
 
 func classifyConfigurationPreEffectError(err error) error {
@@ -64,7 +64,7 @@ func classifyConfigurationPreEffectError(err error) error {
 	}
 	if errors.Is(err, configstore.ErrConfigurationRevisionConflict) {
 		coded := errorcode.Wrap(errorcode.Conflict, "gatewayapp: configuration conflict", err)
-		return controlclient.NewOutcomeError(controlclient.OutcomeConflicted, coded)
+		return appserver.NewOutcomeError(appserver.OutcomeConflicted, coded)
 	}
 	if errorcode.CodeOf(err) == errorcode.Unknown {
 		err = errorcode.Wrap(errorcode.Unavailable, "gatewayapp: read configuration revision", err)
@@ -76,13 +76,13 @@ func classifyConfigurationEffectError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var outcomeErr *controlclient.OutcomeError
+	var outcomeErr *appserver.OutcomeError
 	if errors.As(err, &outcomeErr) {
 		return err
 	}
-	return controlclient.NewOutcomeError(controlclient.OutcomeUnknown, err)
+	return appserver.NewOutcomeError(appserver.OutcomeUnknown, err)
 }
 
 func configurationRejectedError(err error) error {
-	return controlclient.NewOutcomeError(controlclient.OutcomeRejected, err)
+	return appserver.NewOutcomeError(appserver.OutcomeRejected, err)
 }

@@ -9,6 +9,13 @@ Every product client should use one transport-neutral Control boundary for
 commands, Session lifecycle, approvals, replay, Task observation, status, and
 future orchestration.
 
+`control/appserver` is the aggregate boundary. It exposes the principal-bound
+capability set consumed by presentation surfaces; focused `control/*` domains
+remain the semantic owners composed behind it. Task observation remains a
+separate stream and authority and should join the aggregate client capability
+set without joining the Session feed. `app/*` owns Host composition and
+transport adapters and must not import a concrete Surface.
+
 ```text
 Surfaces -> Control contracts -> Agent Runtime / SDK
 ```
@@ -40,7 +47,7 @@ Surfaces should own presentation and input only.
 
 ## Client Boundary
 
-The target client contract is:
+The AppServer contract is:
 
 - transport-neutral and authenticated by an injected trusted principal;
 - request-scoped, with explicit Session and target identity;

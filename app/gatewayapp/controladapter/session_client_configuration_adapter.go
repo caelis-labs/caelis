@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
@@ -38,8 +38,8 @@ func (a *SessionClientAdapter) configureSessionMode(ctx context.Context, mode st
 		return controlstatus.StatusSnapshot{}, err
 	}
 	revision := state.Revision
-	result, err := a.configClient.ConfigureSessionMode(ctx, controlclient.SessionModeRequest{
-		WriteBase: controlclient.WriteBase{
+	result, err := a.configClient.ConfigureSessionMode(ctx, appserver.SessionModeRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "session-mode-" + uuid.NewString(),
 			SessionID:               state.SessionID,
 			ExpectedRevision:        &revision,
@@ -62,8 +62,8 @@ func (a *SessionClientAdapter) Connect(ctx context.Context, config controlprompt
 		return controlstatus.StatusSnapshot{}, err
 	}
 	revision := before.Configuration.Revision
-	result, commandErr := a.configClient.ConnectModel(ctx, controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{
+	result, commandErr := a.configClient.ConnectModel(ctx, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:      "model-connect-" + uuid.NewString(),
 			ExpectedRevision: &revision,
 		},
@@ -81,7 +81,7 @@ func (a *SessionClientAdapter) Connect(ctx context.Context, config controlprompt
 				result.Revision,
 				connected.Configuration.Revision,
 			)
-			return connected, &controlclient.CommandReceiptError{Receipt: result, Err: observationErr}
+			return connected, &appserver.CommandReceiptError{Receipt: result, Err: observationErr}
 		}
 		model := strings.TrimSpace(connected.ModelStatus.Alias)
 		if model == "" {
@@ -97,9 +97,9 @@ func (a *SessionClientAdapter) Connect(ctx context.Context, config controlprompt
 					result.OperationID,
 					selectionErr,
 				)
-				var receiptErr *controlclient.CommandReceiptError
+				var receiptErr *appserver.CommandReceiptError
 				if !errors.As(selectionErr, &receiptErr) {
-					selectionErr = &controlclient.CommandReceiptError{Receipt: result, Err: selectionErr}
+					selectionErr = &appserver.CommandReceiptError{Receipt: result, Err: selectionErr}
 				}
 				return connected, selectionErr
 			}
@@ -139,8 +139,8 @@ func (a *SessionClientAdapter) UseModel(ctx context.Context, model string, effor
 			return controlstatus.StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: read Host configuration revision: %w", err)
 		}
 		revision := before.Configuration.Revision
-		result, commandErr := a.configClient.UseModel(ctx, controlclient.UseModelRequest{
-			WriteBase: controlclient.WriteBase{
+		result, commandErr := a.configClient.UseModel(ctx, appserver.UseModelRequest{
+			WriteBase: appserver.WriteBase{
 				OperationID:      "model-use-" + uuid.NewString(),
 				ExpectedRevision: &revision,
 			},
@@ -182,7 +182,7 @@ func (a *SessionClientAdapter) useModelForSelectedSessionLocked(
 	if a.sessionClient == nil {
 		return controlstatus.StatusSnapshot{}, errors.New("app/gatewayapp/controladapter: Session client is unavailable")
 	}
-	state, err := a.sessionClient.InspectSession(ctx, controlclient.StateRequest{SessionID: selectedSessionID})
+	state, err := a.sessionClient.InspectSession(ctx, appserver.StateRequest{SessionID: selectedSessionID})
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
 	}
@@ -197,8 +197,8 @@ func (a *SessionClientAdapter) useModelForSelectedSessionLocked(
 		)
 	}
 	revision := state.Revision
-	result, err := a.configClient.UseSessionModel(ctx, controlclient.SessionModelRequest{
-		WriteBase: controlclient.WriteBase{
+	result, err := a.configClient.UseSessionModel(ctx, appserver.SessionModelRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:             "session-model-" + uuid.NewString(),
 			SessionID:               state.SessionID,
 			ExpectedRevision:        &revision,
@@ -212,10 +212,10 @@ func (a *SessionClientAdapter) useModelForSelectedSessionLocked(
 func (a *SessionClientAdapter) observeCommittedSessionConfiguration(
 	ctx context.Context,
 	label string,
-	result controlclient.CommandResult,
+	result appserver.CommandResult,
 	commandErr error,
 ) (controlstatus.StatusSnapshot, error) {
-	if result.Outcome != controlclient.OutcomeCommitted {
+	if result.Outcome != appserver.OutcomeCommitted {
 		if commandErr == nil {
 			commandErr = fmt.Errorf(
 				"app/gatewayapp/controladapter: %s outcome is %q: %s",
@@ -224,7 +224,7 @@ func (a *SessionClientAdapter) observeCommittedSessionConfiguration(
 				strings.TrimSpace(result.Detail),
 			)
 		}
-		return controlstatus.StatusSnapshot{}, &controlclient.CommandReceiptError{Receipt: result, Err: commandErr}
+		return controlstatus.StatusSnapshot{}, &appserver.CommandReceiptError{Receipt: result, Err: commandErr}
 	}
 	observed, observationErr := a.addressedStatus(ctx, a.clientSessionID(), true)
 	if observationErr != nil {
@@ -237,7 +237,7 @@ func (a *SessionClientAdapter) observeCommittedSessionConfiguration(
 	}
 	resultErr := errors.Join(commandErr, observationErr)
 	if resultErr != nil {
-		resultErr = &controlclient.CommandReceiptError{Receipt: result, Err: resultErr}
+		resultErr = &appserver.CommandReceiptError{Receipt: result, Err: resultErr}
 	}
 	return observed, resultErr
 }
@@ -251,8 +251,8 @@ func (a *SessionClientAdapter) DeleteModel(ctx context.Context, model string) er
 		return fmt.Errorf("app/gatewayapp/controladapter: read Host configuration revision: %w", err)
 	}
 	revision := before.Configuration.Revision
-	result, commandErr := a.configClient.DeleteModel(ctx, controlclient.DeleteModelRequest{
-		WriteBase: controlclient.WriteBase{
+	result, commandErr := a.configClient.DeleteModel(ctx, appserver.DeleteModelRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:      "model-delete-" + uuid.NewString(),
 			ExpectedRevision: &revision,
 		},
@@ -265,10 +265,10 @@ func (a *SessionClientAdapter) DeleteModel(ctx context.Context, model string) er
 func (a *SessionClientAdapter) observeCommittedHostConfiguration(
 	ctx context.Context,
 	label string,
-	result controlclient.CommandResult,
+	result appserver.CommandResult,
 	commandErr error,
 ) (controlstatus.StatusSnapshot, error) {
-	if result.Outcome != controlclient.OutcomeCommitted {
+	if result.Outcome != appserver.OutcomeCommitted {
 		if commandErr == nil {
 			commandErr = fmt.Errorf(
 				"app/gatewayapp/controladapter: %s outcome is %q: %s",
@@ -277,7 +277,7 @@ func (a *SessionClientAdapter) observeCommittedHostConfiguration(
 				strings.TrimSpace(result.Detail),
 			)
 		}
-		return controlstatus.StatusSnapshot{}, &controlclient.CommandReceiptError{Receipt: result, Err: commandErr}
+		return controlstatus.StatusSnapshot{}, &appserver.CommandReceiptError{Receipt: result, Err: commandErr}
 	}
 	observed, observationErr := a.addressedStatus(ctx, "", true)
 	if observationErr != nil {
@@ -290,7 +290,7 @@ func (a *SessionClientAdapter) observeCommittedHostConfiguration(
 	}
 	resultErr := errors.Join(commandErr, observationErr)
 	if resultErr != nil {
-		resultErr = &controlclient.CommandReceiptError{Receipt: result, Err: resultErr}
+		resultErr = &appserver.CommandReceiptError{Receipt: result, Err: resultErr}
 	}
 	return observed, resultErr
 }
@@ -323,14 +323,14 @@ func (a *SessionClientAdapter) configureSandbox(ctx context.Context, action, bac
 		return controlstatus.StatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: read Host configuration revision: %w", err)
 	}
 	expectedRevision := before.Configuration.Revision
-	request := controlclient.SandboxRequest{
-		WriteBase: controlclient.WriteBase{
+	request := appserver.SandboxRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID:      "sandbox-" + action + "-" + uuid.NewString(),
 			ExpectedRevision: &expectedRevision,
 		},
 		Backend: strings.TrimSpace(backend),
 	}
-	var result controlclient.CommandResult
+	var result appserver.CommandResult
 	switch action {
 	case "set":
 		result, err = a.configClient.SetSandboxBackend(ctx, request)
@@ -343,7 +343,7 @@ func (a *SessionClientAdapter) configureSandbox(ctx context.Context, action, bac
 	default:
 		return controlstatus.StatusSnapshot{}, errors.New("app/gatewayapp/controladapter: unknown sandbox action")
 	}
-	if result.Outcome != controlclient.OutcomeCommitted {
+	if result.Outcome != appserver.OutcomeCommitted {
 		if err == nil {
 			err = fmt.Errorf(
 				"app/gatewayapp/controladapter: sandbox %s outcome is %q: %s",
@@ -352,7 +352,7 @@ func (a *SessionClientAdapter) configureSandbox(ctx context.Context, action, bac
 				strings.TrimSpace(result.Detail),
 			)
 		}
-		return controlstatus.StatusSnapshot{}, &controlclient.CommandReceiptError{Receipt: result, Err: err}
+		return controlstatus.StatusSnapshot{}, &appserver.CommandReceiptError{Receipt: result, Err: err}
 	}
 	observed, observationErr := a.addressedStatus(ctx, a.clientSessionID(), true)
 	if observationErr != nil {
@@ -365,7 +365,7 @@ func (a *SessionClientAdapter) configureSandbox(ctx context.Context, action, bac
 	}
 	resultErr := errors.Join(err, observationErr)
 	if resultErr != nil {
-		resultErr = &controlclient.CommandReceiptError{Receipt: result, Err: resultErr}
+		resultErr = &appserver.CommandReceiptError{Receipt: result, Err: resultErr}
 	}
 	return observed, resultErr
 }

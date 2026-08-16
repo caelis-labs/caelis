@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/wirev1"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
@@ -124,7 +124,7 @@ func (s *Server) subscribeTask(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func taskPrincipal(principal controlclient.Principal) taskstream.Principal {
+func taskPrincipal(principal appserver.Principal) taskstream.Principal {
 	return taskstream.Principal{
 		ID:    principal.ID,
 		Roles: append([]string(nil), principal.Roles...),

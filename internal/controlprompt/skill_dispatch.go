@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 // SkillResolver resolves slash-entered skill identities for prompt routing.
@@ -14,7 +14,7 @@ type SkillResolver interface {
 	ResolveSkill(context.Context, string) (SkillResolveResult, error)
 }
 
-type SkillResolveResult = controlclient.SkillResolveResult
+type SkillResolveResult = appserver.SkillResolveResult
 
 func (r router) dispatchDirectSkill(ctx context.Context, command string, args string, argsStart int, submission Submission) (Result, bool, error) {
 	if r.skillResolver == nil {

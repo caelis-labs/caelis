@@ -9,7 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -18,14 +18,14 @@ import (
 // contains no Runtime or Stack handle; every semantic operation is routed
 // through a focused typed client.
 type SessionClientAdapter struct {
-	turns            *controlclient.SessionTurnClient
-	participants     *controlclient.ParticipantTurnClient
-	sessionClient    controlclient.SessionClient
-	statusClient     controlclient.StatusClient
-	configClient     controlclient.ConfigurationClient
-	agentClient      controlclient.AgentClient
-	completionClient controlclient.CompletionClient
-	pluginClient     controlclient.PluginClient
+	turns            *appserver.SessionTurnClient
+	participants     *appserver.ParticipantTurnClient
+	sessionClient    appserver.SessionClient
+	statusClient     appserver.StatusClient
+	configClient     appserver.ConfigurationClient
+	agentClient      appserver.AgentClient
+	completionClient appserver.CompletionClient
+	pluginClient     appserver.PluginClient
 	surface          string
 	workspaceKey     string
 	preferredID      string
@@ -58,23 +58,23 @@ type AppServerAdapterConfig struct {
 	WorkspaceKey       string
 	WorkspaceDir       string
 	Surface            string
-	Sessions           controlclient.SessionClient
-	Participants       controlclient.ParticipantClient
-	Status             controlclient.StatusClient
-	Configuration      controlclient.ConfigurationClient
-	Agents             controlclient.AgentClient
-	Completion         controlclient.CompletionClient
-	Plugins            controlclient.PluginClient
+	Sessions           appserver.SessionClient
+	Participants       appserver.ParticipantClient
+	Status             appserver.StatusClient
+	Configuration      appserver.ConfigurationClient
+	Agents             appserver.AgentClient
+	Completion         appserver.CompletionClient
+	Plugins            appserver.PluginClient
 }
 
 // NewAppServerAdapter composes the complete typed facade used by production
 // presentation surfaces.
 func NewAppServerAdapter(config AppServerAdapterConfig) (*SessionClientAdapter, error) {
-	turns, err := controlclient.NewSessionTurnClient(config.Sessions)
+	turns, err := appserver.NewSessionTurnClient(config.Sessions)
 	if err != nil {
 		return nil, err
 	}
-	participantTurns, err := controlclient.NewParticipantTurnClient(config.Sessions, config.Participants)
+	participantTurns, err := appserver.NewParticipantTurnClient(config.Sessions, config.Participants)
 	if err != nil {
 		return nil, err
 	}
@@ -144,12 +144,12 @@ func (a *SessionClientAdapter) Submit(
 		}
 		return nil, noActiveTurnSubmissionError()
 	}
-	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (controlclient.TargetTurn, error) {
+	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (appserver.TargetTurn, error) {
 		state, err := a.ensureSessionForMainPrompt(startCtx)
 		if err != nil {
 			return nil, err
 		}
-		return a.turns.Start(startCtx, controlclient.SessionTurnStartRequest{
+		return a.turns.Start(startCtx, appserver.SessionTurnStartRequest{
 			SessionID:    state.SessionID,
 			Input:        rawInput,
 			DisplayInput: displayInput,
@@ -250,7 +250,7 @@ func cancelTurnWithTimeout(ctx context.Context, cancel func(context.Context, str
 }
 
 type turnAdmissionResult struct {
-	turn controlclient.TargetTurn
+	turn appserver.TargetTurn
 	err  error
 }
 
@@ -261,7 +261,7 @@ type turnAdmission struct {
 
 func (a *SessionClientAdapter) startAdmittedTurn(
 	ctx context.Context,
-	start func(context.Context) (controlclient.TargetTurn, error),
+	start func(context.Context) (appserver.TargetTurn, error),
 ) (controlprompt.Turn, error) {
 	if start == nil {
 		return nil, errors.New("app/gatewayapp/controladapter: turn admission is unavailable")
@@ -374,7 +374,7 @@ func cleanupLateAdmission(resultCh <-chan turnAdmissionResult) {
 	cleanupAdmittedTurn(result.turn)
 }
 
-func cleanupAdmittedTurn(turn controlclient.TargetTurn) {
+func cleanupAdmittedTurn(turn appserver.TargetTurn) {
 	if turn == nil {
 		return
 	}
@@ -480,7 +480,7 @@ func (a *SessionClientAdapter) clearActiveReconnect(reconnect *clientSessionReco
 }
 
 type sessionClientTurn struct {
-	turn    controlclient.TargetTurn
+	turn    appserver.TargetTurn
 	onClose func()
 
 	cancelMu        sync.Mutex
@@ -496,7 +496,7 @@ func (t *sessionClientTurn) steer(
 	displayInput string,
 	contentParts []model.ContentPart,
 ) error {
-	mainTurn, ok := t.turn.(controlclient.SessionTurn)
+	mainTurn, ok := t.turn.(appserver.SessionTurn)
 	if !ok {
 		return noActiveTurnSubmissionError()
 	}
@@ -538,7 +538,7 @@ func (t *sessionClientTurn) SubmitApproval(
 	if t == nil || t.turn == nil {
 		return errors.New("app/gatewayapp/controladapter: Session Turn is unavailable")
 	}
-	return t.turn.ResolveApproval(ctx, controlclient.ApprovalResolution{
+	return t.turn.ResolveApproval(ctx, appserver.ApprovalResolution{
 		RequestID:  decision.RequestID,
 		Outcome:    strings.TrimSpace(decision.Outcome),
 		OptionID:   strings.TrimSpace(decision.OptionID),

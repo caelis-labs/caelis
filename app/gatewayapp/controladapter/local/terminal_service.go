@@ -7,7 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
 
@@ -25,33 +25,33 @@ func NewTerminalService(tasks taskstream.Service, streams stream.Controller) (*T
 	return &TerminalService{tasks: tasks, streams: streams}, nil
 }
 
-func (s *TerminalService) TerminalOutput(ctx context.Context, principal controlclient.Principal, req controlclient.TerminalRequest) (controlclient.TerminalOutput, error) {
+func (s *TerminalService) TerminalOutput(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) (appserver.TerminalOutput, error) {
 	ref, err := s.resolve(ctx, principal, req)
 	if err != nil {
-		return controlclient.TerminalOutput{}, err
+		return appserver.TerminalOutput{}, err
 	}
 	snapshot, err := s.streams.Read(ctx, stream.ReadRequest{Ref: ref})
 	if err != nil {
-		return controlclient.TerminalOutput{}, err
+		return appserver.TerminalOutput{}, err
 	}
-	result := controlclient.TerminalOutput{Output: terminalSnapshotOutput(snapshot), Truncated: snapshot.TruncatedBefore > 0}
+	result := appserver.TerminalOutput{Output: terminalSnapshotOutput(snapshot), Truncated: snapshot.TruncatedBefore > 0}
 	if snapshot.ExitCode != nil {
 		code := *snapshot.ExitCode
-		result.ExitStatus = &controlclient.TerminalExitStatus{ExitCode: &code}
+		result.ExitStatus = &appserver.TerminalExitStatus{ExitCode: &code}
 	}
 	return result, nil
 }
 
-func (s *TerminalService) WaitTerminal(ctx context.Context, principal controlclient.Principal, req controlclient.TerminalRequest) (controlclient.TerminalExitStatus, error) {
+func (s *TerminalService) WaitTerminal(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) (appserver.TerminalExitStatus, error) {
 	ref, err := s.resolve(ctx, principal, req)
 	if err != nil {
-		return controlclient.TerminalExitStatus{}, err
+		return appserver.TerminalExitStatus{}, err
 	}
 	snapshot, err := s.streams.Wait(ctx, ref)
 	if err != nil {
-		return controlclient.TerminalExitStatus{}, err
+		return appserver.TerminalExitStatus{}, err
 	}
-	result := controlclient.TerminalExitStatus{}
+	result := appserver.TerminalExitStatus{}
 	if snapshot.ExitCode != nil {
 		code := *snapshot.ExitCode
 		result.ExitCode = &code
@@ -59,7 +59,7 @@ func (s *TerminalService) WaitTerminal(ctx context.Context, principal controlcli
 	return result, nil
 }
 
-func (s *TerminalService) KillTerminal(ctx context.Context, principal controlclient.Principal, req controlclient.TerminalRequest) error {
+func (s *TerminalService) KillTerminal(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) error {
 	ref, err := s.resolve(ctx, principal, req)
 	if err != nil {
 		return err
@@ -67,7 +67,7 @@ func (s *TerminalService) KillTerminal(ctx context.Context, principal controlcli
 	return s.streams.Kill(ctx, ref)
 }
 
-func (s *TerminalService) ReleaseTerminal(ctx context.Context, principal controlclient.Principal, req controlclient.TerminalRequest) error {
+func (s *TerminalService) ReleaseTerminal(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) error {
 	ref, err := s.resolve(ctx, principal, req)
 	if err != nil {
 		return err
@@ -75,7 +75,7 @@ func (s *TerminalService) ReleaseTerminal(ctx context.Context, principal control
 	return s.streams.Release(ctx, ref)
 }
 
-func (s *TerminalService) resolve(ctx context.Context, principal controlclient.Principal, req controlclient.TerminalRequest) (stream.Ref, error) {
+func (s *TerminalService) resolve(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) (stream.Ref, error) {
 	sessionID := strings.TrimSpace(req.SessionID)
 	terminalID := strings.TrimSpace(req.TerminalID)
 	if sessionID == "" || terminalID == "" {
@@ -114,4 +114,4 @@ func terminalSnapshotOutput(snapshot stream.Snapshot) string {
 	return snapshot.FinalText
 }
 
-var _ controlclient.TerminalService = (*TerminalService)(nil)
+var _ appserver.TerminalService = (*TerminalService)(nil)

@@ -3,24 +3,24 @@ package acpagentbridge
 import (
 	"testing"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 func TestACPPresentationSnapshotDoesNotExposeApprovalRoutingAsACPMode(t *testing.T) {
-	approval := controlclient.PresentationSnapshot{Modes: &controlclient.PresentationModeState{
-		Target:         controlclient.PresentationModeTargetApproval,
+	approval := appserver.PresentationSnapshot{Modes: &appserver.PresentationModeState{
+		Target:         appserver.PresentationModeTargetApproval,
 		CurrentModeID:  "manual",
-		AvailableModes: []controlclient.PresentationMode{{ID: "manual", Name: "Manual"}},
+		AvailableModes: []appserver.PresentationMode{{ID: "manual", Name: "Manual"}},
 	}}
 	if modes, _, _, _ := acpPresentationSnapshot(approval); modes != nil {
 		t.Fatalf("approval routing projected as ACP mode: %#v", modes)
 	}
 
 	appOwned := approval
-	appOwned.Modes = &controlclient.PresentationModeState{
-		Target:         controlclient.PresentationModeTargetApp,
+	appOwned.Modes = &appserver.PresentationModeState{
+		Target:         appserver.PresentationModeTargetApp,
 		CurrentModeID:  "focus",
-		AvailableModes: []controlclient.PresentationMode{{ID: "focus", Name: "Focus"}},
+		AvailableModes: []appserver.PresentationMode{{ID: "focus", Name: "Focus"}},
 	}
 	modes, _, _, _ := acpPresentationSnapshot(appOwned)
 	if modes == nil || modes.CurrentModeID != "focus" || len(modes.AvailableModes) != 1 {

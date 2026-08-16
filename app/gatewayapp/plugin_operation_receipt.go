@@ -12,23 +12,23 @@ import (
 	"strings"
 	"time"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 // pluginOperationReceipt is an operation-attributable domain receipt for Host
 // plugin mutations that perform external install/update effects. Recovery may
 // prove a terminal result from this record without repeating those effects.
 type pluginOperationReceipt struct {
-	PrincipalID  string                `json:"principal_id"`
-	OperationID  string                `json:"operation_id"`
-	Digest       string                `json:"digest"`
-	Action       controlclient.Action  `json:"action"`
-	Outcome      controlclient.Outcome `json:"outcome"`
-	Revision     uint64                `json:"revision,omitempty"`
-	Detail       string                `json:"detail,omitempty"`
-	ResourceKind string                `json:"resource_kind,omitempty"`
-	Target       string                `json:"target,omitempty"`
-	RecordedAt   time.Time             `json:"recorded_at"`
+	PrincipalID  string            `json:"principal_id"`
+	OperationID  string            `json:"operation_id"`
+	Digest       string            `json:"digest"`
+	Action       appserver.Action  `json:"action"`
+	Outcome      appserver.Outcome `json:"outcome"`
+	Revision     uint64            `json:"revision,omitempty"`
+	Detail       string            `json:"detail,omitempty"`
+	ResourceKind string            `json:"resource_kind,omitempty"`
+	Target       string            `json:"target,omitempty"`
+	RecordedAt   time.Time         `json:"recorded_at"`
 }
 
 func (s *Stack) pluginOperationReceiptDir() string {
@@ -132,8 +132,8 @@ func (s *Stack) loadPluginOperationReceipt(ctx context.Context, principalID, ope
 	return receipt, true, nil
 }
 
-func pluginCommandResultFromReceipt(receipt pluginOperationReceipt) controlclient.CommandResult {
-	result := controlclient.CommandResult{
+func pluginCommandResultFromReceipt(receipt pluginOperationReceipt) appserver.CommandResult {
+	result := appserver.CommandResult{
 		OperationID: receipt.OperationID,
 		Outcome:     receipt.Outcome,
 		Revision:    receipt.Revision,
@@ -144,7 +144,7 @@ func pluginCommandResultFromReceipt(receipt pluginOperationReceipt) controlclien
 		kind = resourceKindForPluginAction(receipt.Action)
 	}
 	if target := strings.TrimSpace(receipt.Target); target != "" || kind != "" {
-		result.Resource = &controlclient.CommandResource{
+		result.Resource = &appserver.CommandResource{
 			Kind: kind,
 			Ref:  target,
 		}

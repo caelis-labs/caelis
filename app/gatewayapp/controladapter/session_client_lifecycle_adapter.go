@@ -12,7 +12,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/semantic"
@@ -48,7 +48,7 @@ func (a *SessionClientAdapter) ResumeSession(ctx context.Context, sessionID stri
 	}
 	a.sessionChangeMu.Lock()
 	defer a.sessionChangeMu.Unlock()
-	result, err := a.sessionClient.Reconnect(ctx, controlclient.ReconnectRequest{SessionID: strings.TrimSpace(sessionID)})
+	result, err := a.sessionClient.Reconnect(ctx, appserver.ReconnectRequest{SessionID: strings.TrimSpace(sessionID)})
 	if err != nil {
 		return controlprompt.SessionSnapshot{}, err
 	}
@@ -113,14 +113,14 @@ func (a *SessionClientAdapter) Close() error {
 }
 
 type sessionPresence struct {
-	subscription controlclient.FeedSubscription
+	subscription appserver.FeedSubscription
 	cancel       context.CancelFunc
 	done         chan struct{}
 	once         sync.Once
 }
 
 func (a *SessionClientAdapter) openSessionPresence(
-	state controlclient.SessionState,
+	state appserver.SessionState,
 ) (*sessionPresence, error) {
 	if a == nil || a.sessionClient == nil {
 		return nil, errors.New("app/gatewayapp/controladapter: Session client is unavailable")
@@ -130,7 +130,7 @@ func (a *SessionClientAdapter) openSessionPresence(
 		return nil, session.ErrInvalidSession
 	}
 	presenceCtx, cancel := context.WithCancel(context.Background())
-	result, err := a.sessionClient.Reconnect(presenceCtx, controlclient.ReconnectRequest{
+	result, err := a.sessionClient.Reconnect(presenceCtx, appserver.ReconnectRequest{
 		SessionID: sessionID,
 		Cursor:    strings.TrimSpace(state.BoundaryCursor),
 	})
@@ -209,7 +209,7 @@ func (a *SessionClientAdapter) tracksSessionPresence() bool {
 	return a != nil && strings.EqualFold(strings.TrimSpace(a.surface), "cli-tui")
 }
 
-func (a *SessionClientAdapter) validateTUISessionController(state controlclient.SessionState) error {
+func (a *SessionClientAdapter) validateTUISessionController(state appserver.SessionState) error {
 	if a != nil && strings.EqualFold(strings.TrimSpace(a.surface), "cli-tui") && state.Controller.Kind == session.ControllerKindACP {
 		return errors.New("this older task uses a connection type that is no longer supported in the TUI; start a new task instead")
 	}
@@ -222,7 +222,7 @@ func (a *SessionClientAdapter) ListSessions(ctx context.Context, limit int) ([]c
 	if a == nil || a.sessionClient == nil {
 		return nil, errors.New("app/gatewayapp/controladapter: Session client is unavailable")
 	}
-	result, err := a.sessionClient.ListSessions(ctx, controlclient.ListSessionsRequest{
+	result, err := a.sessionClient.ListSessions(ctx, appserver.ListSessionsRequest{
 		CWD: strings.TrimSpace(a.WorkspaceDir()), Limit: normalizeCompletionLimit(limit),
 	})
 	if err != nil {
@@ -257,15 +257,15 @@ func (a *SessionClientAdapter) closeActiveTurn() {
 }
 
 type clientSessionReconnect struct {
-	state        controlclient.SessionState
-	subscription controlclient.FeedSubscription
-	client       controlclient.SessionClient
+	state        appserver.SessionState
+	subscription appserver.FeedSubscription
+	client       appserver.SessionClient
 	bootstrap    []eventstream.Envelope
 	onClose      func()
 	closeOnce    sync.Once
 }
 
-func (r *clientSessionReconnect) State() controlclient.SessionState {
+func (r *clientSessionReconnect) State() appserver.SessionState {
 	return cloneReconnectState(r.state)
 }
 func (r *clientSessionReconnect) HandleID() string { return strings.TrimSpace(r.state.Run.HandleID) }
@@ -334,7 +334,7 @@ func (r *clientSessionReconnect) SubmitApproval(ctx context.Context, decision co
 	if err != nil {
 		return err
 	}
-	_, err = r.client.ResolveApproval(ctx, controlclient.ResolveApprovalRequest{
+	_, err = r.client.ResolveApproval(ctx, appserver.ResolveApprovalRequest{
 		WriteBase:         base,
 		Target:            r.target(),
 		ApprovalRequestID: string(decision.RequestID), Outcome: strings.TrimSpace(decision.Outcome),
@@ -356,7 +356,7 @@ func (r *clientSessionReconnect) steer(ctx context.Context, input, displayInput 
 	if err != nil {
 		return err
 	}
-	_, err = r.client.Steer(ctx, controlclient.SteerRequest{
+	_, err = r.client.Steer(ctx, appserver.SteerRequest{
 		WriteBase: base, Target: r.target(), Input: input, DisplayInput: displayInput,
 		ContentParts: append([]model.ContentPart(nil), contentParts...),
 	})
@@ -371,32 +371,32 @@ func (r *clientSessionReconnect) cancel(ctx context.Context, reason string) erro
 	if err != nil {
 		return err
 	}
-	_, err = r.client.Cancel(ctx, controlclient.CancelRequest{
+	_, err = r.client.Cancel(ctx, appserver.CancelRequest{
 		WriteBase: base, Target: r.target(), Reason: strings.TrimSpace(reason),
 	})
 	return err
 }
 
-func (r *clientSessionReconnect) writeBase(ctx context.Context, prefix string) (controlclient.WriteBase, error) {
+func (r *clientSessionReconnect) writeBase(ctx context.Context, prefix string) (appserver.WriteBase, error) {
 	if r == nil || r.client == nil {
-		return controlclient.WriteBase{}, errors.New("app/gatewayapp/controladapter: reconnect client is unavailable")
+		return appserver.WriteBase{}, errors.New("app/gatewayapp/controladapter: reconnect client is unavailable")
 	}
-	state, err := r.client.InspectSession(ctx, controlclient.StateRequest{SessionID: r.state.SessionID})
+	state, err := r.client.InspectSession(ctx, appserver.StateRequest{SessionID: r.state.SessionID})
 	if err != nil {
-		return controlclient.WriteBase{}, err
+		return appserver.WriteBase{}, err
 	}
 	revision := state.Revision
-	return controlclient.WriteBase{
+	return appserver.WriteBase{
 		OperationID: prefix + "-" + uuid.NewString(), SessionID: r.state.SessionID,
 		ExpectedRevision: &revision, ExpectedControllerEpoch: strings.TrimSpace(r.state.Controller.EpochID),
 	}, nil
 }
 
-func (r *clientSessionReconnect) target() controlclient.TurnTarget {
+func (r *clientSessionReconnect) target() appserver.TurnTarget {
 	if r == nil {
-		return controlclient.TurnTarget{}
+		return appserver.TurnTarget{}
 	}
-	return controlclient.TurnTarget{
+	return appserver.TurnTarget{
 		HandleID: strings.TrimSpace(r.state.Run.HandleID),
 		RunID:    strings.TrimSpace(r.state.Run.RunID),
 		TurnID:   strings.TrimSpace(r.state.Run.TurnID),
@@ -415,7 +415,7 @@ func (r *clientSessionReconnect) Close() error {
 	return err
 }
 
-func cloneReconnectState(in controlclient.SessionState) controlclient.SessionState {
+func cloneReconnectState(in appserver.SessionState) appserver.SessionState {
 	out := in
 	out.Metadata = session.CloneState(in.Metadata)
 	out.BoundaryPosition = eventstream.CloneFeedPosition(in.BoundaryPosition)

@@ -10,7 +10,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 func TestPluginCommandsUseSharedLedgerAndHostRevisionCAS(t *testing.T) {
@@ -32,29 +32,29 @@ func TestPluginCommandsUseSharedLedgerAndHostRevisionCAS(t *testing.T) {
 	if !ok {
 		t.Fatal("missing configuration revision")
 	}
-	principal := controlclient.Principal{ID: "owner"}
+	principal := appserver.Principal{ID: "owner"}
 
-	first, err := stack.PluginCommands().AddPluginPath(ctx, principal, controlclient.AddPluginPathRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "plugin-add-path-1", ExpectedRevision: &revision},
+	first, err := stack.PluginCommands().AddPluginPath(ctx, principal, appserver.AddPluginPathRequest{
+		WriteBase: appserver.WriteBase{OperationID: "plugin-add-path-1", ExpectedRevision: &revision},
 		Path:      pluginDir,
 	})
-	if err != nil || first.Outcome != controlclient.OutcomeCommitted || first.Revision <= revision {
+	if err != nil || first.Outcome != appserver.OutcomeCommitted || first.Revision <= revision {
 		t.Fatalf("AddPluginPath() = %#v, %v", first, err)
 	}
 
-	replay, err := stack.PluginCommands().AddPluginPath(ctx, principal, controlclient.AddPluginPathRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "plugin-add-path-1", ExpectedRevision: &revision},
+	replay, err := stack.PluginCommands().AddPluginPath(ctx, principal, appserver.AddPluginPathRequest{
+		WriteBase: appserver.WriteBase{OperationID: "plugin-add-path-1", ExpectedRevision: &revision},
 		Path:      pluginDir,
 	})
-	if err != nil || replay.Outcome != controlclient.OutcomeCommitted || replay.Revision != first.Revision {
+	if err != nil || replay.Outcome != appserver.OutcomeCommitted || replay.Revision != first.Revision {
 		t.Fatalf("replay AddPluginPath() = %#v, %v", replay, err)
 	}
 
-	stale, err := stack.PluginCommands().EnablePlugin(ctx, principal, controlclient.EnablePluginRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "plugin-enable-stale", ExpectedRevision: &revision},
+	stale, err := stack.PluginCommands().EnablePlugin(ctx, principal, appserver.EnablePluginRequest{
+		WriteBase: appserver.WriteBase{OperationID: "plugin-enable-stale", ExpectedRevision: &revision},
 		ID:        "demo",
 	})
-	if err == nil || stale.Outcome != controlclient.OutcomeConflicted {
+	if err == nil || stale.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("EnablePlugin(stale) = %#v, %v", stale, err)
 	}
 }
@@ -62,17 +62,17 @@ func TestPluginCommandsUseSharedLedgerAndHostRevisionCAS(t *testing.T) {
 func TestPluginCommandsRejectSessionAddressAndMissingRevision(t *testing.T) {
 	tmp := t.TempDir()
 	stack := buildPluginStack(t, filepath.Join(tmp, "store"), filepath.Join(tmp, "ws"))
-	principal := controlclient.Principal{ID: "owner"}
+	principal := appserver.Principal{ID: "owner"}
 	revision := uint64(1)
 
-	if _, err := stack.PluginCommands().InstallPlugin(context.Background(), principal, controlclient.InstallPluginRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "session-address", SessionID: "session-1", ExpectedRevision: &revision},
+	if _, err := stack.PluginCommands().InstallPlugin(context.Background(), principal, appserver.InstallPluginRequest{
+		WriteBase: appserver.WriteBase{OperationID: "session-address", SessionID: "session-1", ExpectedRevision: &revision},
 		Source:    "demo@market",
 	}); err == nil || !strings.Contains(err.Error(), "must not address a Session") {
 		t.Fatalf("InstallPlugin(session) error = %v", err)
 	}
-	if _, err := stack.PluginCommands().InstallPlugin(context.Background(), principal, controlclient.InstallPluginRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "missing-revision"},
+	if _, err := stack.PluginCommands().InstallPlugin(context.Background(), principal, appserver.InstallPluginRequest{
+		WriteBase: appserver.WriteBase{OperationID: "missing-revision"},
 		Source:    "demo@market",
 	}); err == nil || !strings.Contains(err.Error(), "expected_revision") {
 		t.Fatalf("InstallPlugin(missing revision) error = %v", err)
@@ -105,9 +105,9 @@ func TestPluginPureConfigMutationLeavesActiveSessionRuntimeUnchanged(t *testing.
 	if !ok {
 		t.Fatal("missing revision")
 	}
-	principal := controlclient.Principal{ID: "owner"}
-	if _, err := stack.PluginCommands().AddPluginPath(ctx, principal, controlclient.AddPluginPathRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "plugin-add-for-activation", ExpectedRevision: &revision},
+	principal := appserver.Principal{ID: "owner"}
+	if _, err := stack.PluginCommands().AddPluginPath(ctx, principal, appserver.AddPluginPathRequest{
+		WriteBase: appserver.WriteBase{OperationID: "plugin-add-for-activation", ExpectedRevision: &revision},
 		Path:      pluginDir,
 	}); err != nil {
 		t.Fatalf("AddPluginPath() error = %v", err)
@@ -123,8 +123,8 @@ func TestPluginPureConfigMutationLeavesActiveSessionRuntimeUnchanged(t *testing.
 	if !ok {
 		t.Fatal("missing revision after add")
 	}
-	if _, err := stack.PluginCommands().DisablePlugin(ctx, principal, controlclient.DisablePluginRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "plugin-disable-active", ExpectedRevision: &revision},
+	if _, err := stack.PluginCommands().DisablePlugin(ctx, principal, appserver.DisablePluginRequest{
+		WriteBase: appserver.WriteBase{OperationID: "plugin-disable-active", ExpectedRevision: &revision},
 		ID:        "skillplugin",
 	}); err != nil {
 		t.Fatalf("DisablePlugin() error = %v", err)
@@ -153,7 +153,7 @@ func TestPluginExternalEffectStaleRevisionDoesNotRunFetch(t *testing.T) {
 	}
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
-	principal := controlclient.Principal{ID: "owner"}
+	principal := appserver.Principal{ID: "owner"}
 	current, ok := stack.currentPluginConfigurationRevision(ctx)
 	if !ok {
 		t.Fatal("missing revision")
@@ -161,8 +161,8 @@ func TestPluginExternalEffectStaleRevisionDoesNotRunFetch(t *testing.T) {
 	// Bump once via pure path so a stale ExpectedRevision cannot fetch.
 	pluginDir := filepath.Join(tmp, "seed")
 	buildMinimalPluginDir(t, pluginDir, `{"name":"seed","version":"1.0.0"}`)
-	if _, err := stack.PluginCommands().AddPluginPath(ctx, principal, controlclient.AddPluginPathRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "seed-path", ExpectedRevision: &current},
+	if _, err := stack.PluginCommands().AddPluginPath(ctx, principal, appserver.AddPluginPathRequest{
+		WriteBase: appserver.WriteBase{OperationID: "seed-path", ExpectedRevision: &current},
 		Path:      pluginDir,
 	}); err != nil {
 		t.Fatalf("seed AddPluginPath: %v", err)
@@ -175,11 +175,11 @@ func TestPluginExternalEffectStaleRevisionDoesNotRunFetch(t *testing.T) {
 	marketplacesRoot := filepath.Join(storeDir, "plugins", "marketplaces")
 	beforeNames := listDirNames(t, marketplacesRoot)
 
-	result, err := stack.PluginCommands().AddMarketplace(ctx, principal, controlclient.AddMarketplaceRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "stale-marketplace", ExpectedRevision: &stale},
+	result, err := stack.PluginCommands().AddMarketplace(ctx, principal, appserver.AddMarketplaceRequest{
+		WriteBase: appserver.WriteBase{OperationID: "stale-marketplace", ExpectedRevision: &stale},
 		Source:    "acme/never-fetched",
 	})
-	if err == nil || result.Outcome != controlclient.OutcomeConflicted {
+	if err == nil || result.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("AddMarketplace(stale) = %#v, %v want conflicted", result, err)
 	}
 	if errorcode.CodeOf(err) == errorcode.UnknownOutcome {
@@ -199,12 +199,12 @@ func TestPluginExternalEffectRejectedWithoutEffectForInvalidSource(t *testing.T)
 	if !ok {
 		t.Fatal("missing revision")
 	}
-	principal := controlclient.Principal{ID: "owner"}
-	result, err := stack.PluginCommands().AddMarketplace(ctx, principal, controlclient.AddMarketplaceRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "invalid-source", ExpectedRevision: &revision},
+	principal := appserver.Principal{ID: "owner"}
+	result, err := stack.PluginCommands().AddMarketplace(ctx, principal, appserver.AddMarketplaceRequest{
+		WriteBase: appserver.WriteBase{OperationID: "invalid-source", ExpectedRevision: &revision},
 		Source:    "",
 	})
-	if err == nil || result.Outcome == controlclient.OutcomeUnknown {
+	if err == nil || result.Outcome == appserver.OutcomeUnknown {
 		t.Fatalf("empty source = %#v, %v want rejected not unknown", result, err)
 	}
 	if errorcode.CodeOf(err) == errorcode.UnknownOutcome {
@@ -220,12 +220,12 @@ func TestPluginMarketplaceNotFoundIsRejectedWithoutUnknown(t *testing.T) {
 	if !ok {
 		t.Fatal("missing revision")
 	}
-	principal := controlclient.Principal{ID: "owner"}
-	result, err := stack.PluginCommands().UpdateMarketplace(ctx, principal, controlclient.UpdateMarketplaceRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "missing-market", ExpectedRevision: &revision},
+	principal := appserver.Principal{ID: "owner"}
+	result, err := stack.PluginCommands().UpdateMarketplace(ctx, principal, appserver.UpdateMarketplaceRequest{
+		WriteBase: appserver.WriteBase{OperationID: "missing-market", ExpectedRevision: &revision},
 		Name:      "does-not-exist",
 	})
-	if err == nil || result.Outcome == controlclient.OutcomeUnknown {
+	if err == nil || result.Outcome == appserver.OutcomeUnknown {
 		t.Fatalf("UpdateMarketplace(missing) = %#v, %v", result, err)
 	}
 	if !strings.Contains(err.Error(), "not found") {
@@ -245,18 +245,18 @@ func TestPluginMarketplaceReceiptRestoresResourceKind(t *testing.T) {
 	if !ok {
 		t.Fatal("missing revision")
 	}
-	principal := controlclient.Principal{ID: "owner"}
+	principal := appserver.Principal{ID: "owner"}
 	marketDir := filepath.Join(tmp, "market")
 	writeLocalMarketplace(t, marketDir, "receipt-market", "demo-plugin")
 
-	result, err := stack.PluginCommands().AddMarketplace(ctx, principal, controlclient.AddMarketplaceRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "market-receipt-1", ExpectedRevision: &revision},
+	result, err := stack.PluginCommands().AddMarketplace(ctx, principal, appserver.AddMarketplaceRequest{
+		WriteBase: appserver.WriteBase{OperationID: "market-receipt-1", ExpectedRevision: &revision},
 		Source:    marketDir,
 	})
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("AddMarketplace() = %#v, %v", result, err)
 	}
-	if result.Resource == nil || result.Resource.Kind != controlclient.CommandResourceMarketplace {
+	if result.Resource == nil || result.Resource.Kind != appserver.CommandResourceMarketplace {
 		t.Fatalf("Resource = %#v, want marketplace kind", result.Resource)
 	}
 
@@ -266,10 +266,10 @@ func TestPluginMarketplaceReceiptRestoresResourceKind(t *testing.T) {
 		PrincipalID:  principal.ID,
 		OperationID:  "market-receipt-recover",
 		Digest:       "digest-market",
-		Action:       controlclient.ActionPluginMarketplaceAdd,
-		Outcome:      controlclient.OutcomeCommitted,
+		Action:       appserver.ActionPluginMarketplaceAdd,
+		Outcome:      appserver.OutcomeCommitted,
 		Revision:     result.Revision,
-		ResourceKind: controlclient.CommandResourceMarketplace,
+		ResourceKind: appserver.CommandResourceMarketplace,
 		Target:       result.Resource.Ref,
 	}); err != nil {
 		t.Fatal(err)
@@ -279,13 +279,13 @@ func TestPluginMarketplaceReceiptRestoresResourceKind(t *testing.T) {
 		t.Fatalf("load receipt: found=%v err=%v", found, err)
 	}
 	command := pluginCommandResultFromReceipt(recovered)
-	if command.Resource == nil || command.Resource.Kind != controlclient.CommandResourceMarketplace || command.Resource.Ref != result.Resource.Ref {
+	if command.Resource == nil || command.Resource.Kind != appserver.CommandResourceMarketplace || command.Resource.Ref != result.Resource.Ref {
 		t.Fatalf("recovered Resource = %#v, want marketplace %q", command.Resource, result.Resource.Ref)
 	}
 	// Action-only derivation must also be deterministic when ResourceKind is absent.
 	recovered.ResourceKind = ""
 	derived := pluginCommandResultFromReceipt(recovered)
-	if derived.Resource == nil || derived.Resource.Kind != controlclient.CommandResourceMarketplace {
+	if derived.Resource == nil || derived.Resource.Kind != appserver.CommandResourceMarketplace {
 		t.Fatalf("derived Resource = %#v, want marketplace kind from action", derived.Resource)
 	}
 }
@@ -299,47 +299,47 @@ func TestPluginMarketplaceIntentOnlyRestartRecoversMarketplaceKind(t *testing.T)
 	if !ok {
 		t.Fatal("missing revision")
 	}
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	marketDir := filepath.Join(tmp, "market")
 	writeLocalMarketplace(t, marketDir, "restart-market", "demo-plugin")
-	request := controlclient.AddMarketplaceRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "market-intent-restart", ExpectedRevision: &revision},
+	request := appserver.AddMarketplaceRequest{
+		WriteBase: appserver.WriteBase{OperationID: "market-intent-restart", ExpectedRevision: &revision},
 		Source:    marketDir,
 	}
 
 	failing := &completeFailingOperationStore{OperationStore: stack.operations}
-	firstCommands, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
-		Authorizer: controlclient.ProductCommandAuthorizer{}, Operations: failing, Backend: stack,
+	firstCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
+		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: failing, Backend: stack,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	first, firstErr := firstCommands.AddMarketplace(ctx, principal, request)
-	if firstErr == nil || first.Outcome != controlclient.OutcomeUnknown {
+	if firstErr == nil || first.Outcome != appserver.OutcomeUnknown {
 		t.Fatalf("AddMarketplace(first) = %#v, %v; want intent-only unknown after completion fault", first, firstErr)
 	}
 
-	restartedOperations := controlclient.NewFileOperationStore(filepath.Join(stack.storeDir, "control-operations"))
+	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.storeDir, "control-operations"))
 	if err := restartedOperations.Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
-	restartedCommands, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
-		Authorizer: controlclient.ProductCommandAuthorizer{}, Operations: restartedOperations, Backend: stack,
+	restartedCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
+		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: restartedOperations, Backend: stack,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	recovered, recoveryErr := restartedCommands.AddMarketplace(ctx, principal, request)
-	if recoveryErr != nil || recovered.Outcome != controlclient.OutcomeCommitted {
+	if recoveryErr != nil || recovered.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("AddMarketplace(recovered) = %#v, %v", recovered, recoveryErr)
 	}
-	if recovered.Resource == nil || recovered.Resource.Kind != controlclient.CommandResourceMarketplace {
+	if recovered.Resource == nil || recovered.Resource.Kind != appserver.CommandResourceMarketplace {
 		t.Fatalf("recovered Resource = %#v, want marketplace kind", recovered.Resource)
 	}
 	if recovered.Resource.Ref != "restart-market" {
 		t.Fatalf("recovered Resource.Ref = %q, want restart-market", recovered.Resource.Ref)
 	}
-	if !stack.CanRecoverControlCommand(controlclient.ActionPluginMarketplaceAdd) {
+	if !stack.CanRecoverControlCommand(appserver.ActionPluginMarketplaceAdd) {
 		t.Fatal("marketplace add must be recoverable")
 	}
 }
@@ -348,8 +348,8 @@ func TestClassifyPluginMutationErrorPostEffectCASIsUnknown(t *testing.T) {
 	err := classifyPluginMutationError(pluginMutationResult{EffectStarted: true}, &configstore.ConfigurationRevisionConflict{
 		Expected: 1, Actual: 2,
 	})
-	var outcomeErr *controlclient.OutcomeError
-	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeUnknown {
+	var outcomeErr *appserver.OutcomeError
+	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeUnknown {
 		t.Fatalf("classify post-effect CAS = %v, want unknown", err)
 	}
 	if errorcode.CodeOf(err) != errorcode.UnknownOutcome {
@@ -376,23 +376,23 @@ func TestPluginExternalEffectReplayDoesNotRepeatInstall(t *testing.T) {
 	if !ok {
 		t.Fatal("missing revision")
 	}
-	principal := controlclient.Principal{ID: "owner"}
-	req := controlclient.InstallPluginRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "plugin-install-once", ExpectedRevision: &revision},
+	principal := appserver.Principal{ID: "owner"}
+	req := appserver.InstallPluginRequest{
+		WriteBase: appserver.WriteBase{OperationID: "plugin-install-once", ExpectedRevision: &revision},
 		Source:    pluginDir,
 	}
 	first, err := stack.PluginCommands().InstallPlugin(ctx, principal, req)
-	if err != nil || first.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || first.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("InstallPlugin() = %#v, %v", first, err)
 	}
 	second, err := stack.PluginCommands().InstallPlugin(ctx, principal, req)
-	if err != nil || second.Outcome != controlclient.OutcomeCommitted || second.Revision != first.Revision {
+	if err != nil || second.Outcome != appserver.OutcomeCommitted || second.Revision != first.Revision {
 		t.Fatalf("InstallPlugin(replay) = %#v, %v", second, err)
 	}
-	if !stack.CanRecoverControlCommand(controlclient.ActionPluginInstall) {
+	if !stack.CanRecoverControlCommand(appserver.ActionPluginInstall) {
 		t.Fatal("install must be recoverable")
 	}
-	if stack.CanRecoverControlCommand(controlclient.ActionPluginEnable) {
+	if stack.CanRecoverControlCommand(appserver.ActionPluginEnable) {
 		t.Fatal("pure config enable must not claim external-effect recovery")
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/caelis-labs/caelis/control/client/wirev1"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 )
 
 type headlessRecord struct {

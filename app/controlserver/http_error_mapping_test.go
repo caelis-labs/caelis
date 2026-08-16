@@ -13,7 +13,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 func TestHTTPStatusMappingUsesTypedErrorsNotMessages(t *testing.T) {
@@ -133,62 +133,62 @@ type errorMappingService struct {
 	err error
 }
 
-func (s *errorMappingService) result() (controlclient.CommandResult, error) {
-	outcome := controlclient.OutcomeRejected
+func (s *errorMappingService) result() (appserver.CommandResult, error) {
+	outcome := appserver.OutcomeRejected
 	if errorcode.CodeOf(s.err) == errorcode.Conflict {
-		outcome = controlclient.OutcomeConflicted
+		outcome = appserver.OutcomeConflicted
 	}
-	return controlclient.CommandResult{OperationID: "operation-1", Outcome: outcome}, s.err
+	return appserver.CommandResult{OperationID: "operation-1", Outcome: outcome}, s.err
 }
 
-func (s *errorMappingService) ListSessions(context.Context, controlclient.Principal, controlclient.ListSessionsRequest) (session.SessionList, error) {
+func (s *errorMappingService) ListSessions(context.Context, appserver.Principal, appserver.ListSessionsRequest) (session.SessionList, error) {
 	return session.SessionList{}, s.err
 }
-func (s *errorMappingService) InspectSession(context.Context, controlclient.Principal, controlclient.StateRequest) (controlclient.SessionState, error) {
-	return controlclient.SessionState{}, s.err
+func (s *errorMappingService) InspectSession(context.Context, appserver.Principal, appserver.StateRequest) (appserver.SessionState, error) {
+	return appserver.SessionState{}, s.err
 }
-func (s *errorMappingService) Reconnect(context.Context, controlclient.Principal, controlclient.ReconnectRequest) (controlclient.ReconnectResult, error) {
-	return controlclient.ReconnectResult{}, s.err
+func (s *errorMappingService) Reconnect(context.Context, appserver.Principal, appserver.ReconnectRequest) (appserver.ReconnectResult, error) {
+	return appserver.ReconnectResult{}, s.err
 }
-func (s *errorMappingService) Events(context.Context, controlclient.Principal, controlclient.SubscribeRequest) (controlclient.EventBatch, error) {
-	return controlclient.EventBatch{}, s.err
+func (s *errorMappingService) Events(context.Context, appserver.Principal, appserver.SubscribeRequest) (appserver.EventBatch, error) {
+	return appserver.EventBatch{}, s.err
 }
-func (s *errorMappingService) Subscribe(context.Context, controlclient.Principal, controlclient.SubscribeRequest) (controlclient.SubscribeResult, error) {
-	return controlclient.SubscribeResult{}, s.err
+func (s *errorMappingService) Subscribe(context.Context, appserver.Principal, appserver.SubscribeRequest) (appserver.SubscribeResult, error) {
+	return appserver.SubscribeResult{}, s.err
 }
-func (s *errorMappingService) CreateSession(context.Context, controlclient.Principal, controlclient.CreateSessionRequest) (controlclient.CommandResult, error) {
+func (s *errorMappingService) CreateSession(context.Context, appserver.Principal, appserver.CreateSessionRequest) (appserver.CommandResult, error) {
 	return s.result()
 }
-func (s *errorMappingService) CloseSession(context.Context, controlclient.Principal, controlclient.CloseSessionRequest) (controlclient.CommandResult, error) {
+func (s *errorMappingService) CloseSession(context.Context, appserver.Principal, appserver.CloseSessionRequest) (appserver.CommandResult, error) {
 	return s.result()
 }
-func (s *errorMappingService) CompactSession(context.Context, controlclient.Principal, controlclient.CompactSessionRequest) (controlclient.CommandResult, error) {
+func (s *errorMappingService) CompactSession(context.Context, appserver.Principal, appserver.CompactSessionRequest) (appserver.CommandResult, error) {
 	return s.result()
 }
-func (s *errorMappingService) Prompt(context.Context, controlclient.Principal, controlclient.PromptRequest) (controlclient.CommandResult, error) {
+func (s *errorMappingService) Prompt(context.Context, appserver.Principal, appserver.PromptRequest) (appserver.CommandResult, error) {
 	return s.result()
 }
-func (s *errorMappingService) Steer(context.Context, controlclient.Principal, controlclient.SteerRequest) (controlclient.CommandResult, error) {
+func (s *errorMappingService) Steer(context.Context, appserver.Principal, appserver.SteerRequest) (appserver.CommandResult, error) {
 	return s.result()
 }
-func (s *errorMappingService) Cancel(context.Context, controlclient.Principal, controlclient.CancelRequest) (controlclient.CommandResult, error) {
+func (s *errorMappingService) Cancel(context.Context, appserver.Principal, appserver.CancelRequest) (appserver.CommandResult, error) {
 	return s.result()
 }
-func (s *errorMappingService) ResolveApproval(context.Context, controlclient.Principal, controlclient.ResolveApprovalRequest) (controlclient.CommandResult, error) {
+func (s *errorMappingService) ResolveApproval(context.Context, appserver.Principal, appserver.ResolveApprovalRequest) (appserver.CommandResult, error) {
 	return s.result()
 }
-func (s *errorMappingService) AttachParticipant(context.Context, controlclient.Principal, controlclient.AttachParticipantRequest) (controlclient.CommandResult, error) {
+func (s *errorMappingService) AttachParticipant(context.Context, appserver.Principal, appserver.AttachParticipantRequest) (appserver.CommandResult, error) {
 	return s.result()
 }
-func (s *errorMappingService) PromptParticipant(context.Context, controlclient.Principal, controlclient.PromptParticipantRequest) (controlclient.CommandResult, error) {
+func (s *errorMappingService) PromptParticipant(context.Context, appserver.Principal, appserver.PromptParticipantRequest) (appserver.CommandResult, error) {
 	return s.result()
 }
-func (s *errorMappingService) CancelParticipant(context.Context, controlclient.Principal, controlclient.CancelParticipantRequest) (controlclient.CommandResult, error) {
+func (s *errorMappingService) CancelParticipant(context.Context, appserver.Principal, appserver.CancelParticipantRequest) (appserver.CommandResult, error) {
 	return s.result()
 }
-func (s *errorMappingService) DetachParticipant(context.Context, controlclient.Principal, controlclient.DetachParticipantRequest) (controlclient.CommandResult, error) {
+func (s *errorMappingService) DetachParticipant(context.Context, appserver.Principal, appserver.DetachParticipantRequest) (appserver.CommandResult, error) {
 	return s.result()
 }
-func (s *errorMappingService) Handoff(context.Context, controlclient.Principal, controlclient.HandoffRequest) (controlclient.CommandResult, error) {
+func (s *errorMappingService) Handoff(context.Context, appserver.Principal, appserver.HandoffRequest) (appserver.CommandResult, error) {
 	return s.result()
 }

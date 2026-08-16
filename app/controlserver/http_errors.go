@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -58,7 +58,7 @@ func writeMappedError(w http.ResponseWriter, err error) {
 	case http.StatusServiceUnavailable:
 		detail = "service unavailable"
 	}
-	writeErrorIdentity(w, status, detail, code, controlclient.ErrorKindOf(err))
+	writeErrorIdentity(w, status, detail, code, appserver.ErrorKindOf(err))
 }
 
 func errorCodeForStatus(status int) errorcode.Code {

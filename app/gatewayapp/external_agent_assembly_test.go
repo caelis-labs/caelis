@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/plugin"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -86,12 +86,12 @@ func TestCustomDirectRoleCollisionFailsClosedAndRollsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := stack.AgentCommands().CreateAgentRole(context.Background(), controlclient.Principal{ID: stack.UserID}, controlclient.CreateAgentRoleRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "colliding-agent-role", ExpectedRevision: &revision},
+	result, err := stack.AgentCommands().CreateAgentRole(context.Background(), appserver.Principal{ID: stack.UserID}, appserver.CreateAgentRoleRequest{
+		WriteBase: appserver.WriteBase{OperationID: "colliding-agent-role", ExpectedRevision: &revision},
 		Role:      agentbinding.Role{Handle: "research", Description: "Investigate unfamiliar systems."},
 		Binding:   agentbinding.Binding{ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort},
 	})
-	if err == nil || result.Outcome != controlclient.OutcomeRejected {
+	if err == nil || result.Outcome != appserver.OutcomeRejected {
 		t.Fatalf("CreateAgentRole() = %#v, %v; want rejected collision", result, err)
 	}
 	doc, loadErr := stack.store.Load()

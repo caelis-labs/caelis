@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 // testAgentBindingService keeps package-level setup concise while exercising
@@ -24,26 +24,26 @@ func (s testAgentBindingService) AgentBindingStatus(ctx context.Context) (agentb
 }
 
 func (s testAgentBindingService) BindAgentBinding(ctx context.Context, binding agentbinding.Binding) (agentbinding.Status, error) {
-	return s.mutate(ctx, "test-agent-binding", func(base controlclient.WriteBase) (controlclient.CommandResult, error) {
-		return s.commands().BindAgentBinding(ctx, s.principal(), controlclient.BindAgentBindingRequest{WriteBase: base, Binding: binding})
+	return s.mutate(ctx, "test-agent-binding", func(base appserver.WriteBase) (appserver.CommandResult, error) {
+		return s.commands().BindAgentBinding(ctx, s.principal(), appserver.BindAgentBindingRequest{WriteBase: base, Binding: binding})
 	})
 }
 
 func (s testAgentBindingService) ResetAgentBinding(ctx context.Context, handle agentbinding.Handle) (agentbinding.Status, error) {
-	return s.mutate(ctx, "test-agent-binding-reset", func(base controlclient.WriteBase) (controlclient.CommandResult, error) {
-		return s.commands().ResetAgentBinding(ctx, s.principal(), controlclient.ResetAgentBindingRequest{WriteBase: base, Handle: handle})
+	return s.mutate(ctx, "test-agent-binding-reset", func(base appserver.WriteBase) (appserver.CommandResult, error) {
+		return s.commands().ResetAgentBinding(ctx, s.principal(), appserver.ResetAgentBindingRequest{WriteBase: base, Handle: handle})
 	})
 }
 
 func (s testAgentBindingService) CreateAgentRole(ctx context.Context, role agentbinding.Role, binding agentbinding.Binding) (agentbinding.Status, error) {
-	return s.mutate(ctx, "test-agent-role-create", func(base controlclient.WriteBase) (controlclient.CommandResult, error) {
-		return s.commands().CreateAgentRole(ctx, s.principal(), controlclient.CreateAgentRoleRequest{WriteBase: base, Role: role, Binding: binding})
+	return s.mutate(ctx, "test-agent-role-create", func(base appserver.WriteBase) (appserver.CommandResult, error) {
+		return s.commands().CreateAgentRole(ctx, s.principal(), appserver.CreateAgentRoleRequest{WriteBase: base, Role: role, Binding: binding})
 	})
 }
 
 func (s testAgentBindingService) DeleteAgentRole(ctx context.Context, handle agentbinding.Handle) (agentbinding.Status, error) {
-	return s.mutate(ctx, "test-agent-role-delete", func(base controlclient.WriteBase) (controlclient.CommandResult, error) {
-		return s.commands().DeleteAgentRole(ctx, s.principal(), controlclient.DeleteAgentRoleRequest{WriteBase: base, Handle: handle})
+	return s.mutate(ctx, "test-agent-role-delete", func(base appserver.WriteBase) (appserver.CommandResult, error) {
+		return s.commands().DeleteAgentRole(ctx, s.principal(), appserver.DeleteAgentRoleRequest{WriteBase: base, Handle: handle})
 	})
 }
 
@@ -63,44 +63,44 @@ func (s testAgentBindingService) bindingSet(
 	ctx context.Context,
 	prefix string,
 	name string,
-	command func(context.Context, controlclient.Principal, controlclient.AgentBindingSetRequest) (controlclient.CommandResult, error),
+	command func(context.Context, appserver.Principal, appserver.AgentBindingSetRequest) (appserver.CommandResult, error),
 ) (agentbinding.Status, error) {
-	return s.mutate(ctx, prefix, func(base controlclient.WriteBase) (controlclient.CommandResult, error) {
-		return command(ctx, s.principal(), controlclient.AgentBindingSetRequest{WriteBase: base, SetName: name})
+	return s.mutate(ctx, prefix, func(base appserver.WriteBase) (appserver.CommandResult, error) {
+		return command(ctx, s.principal(), appserver.AgentBindingSetRequest{WriteBase: base, SetName: name})
 	})
 }
 
 func (s testAgentBindingService) mutate(
 	ctx context.Context,
 	prefix string,
-	command func(controlclient.WriteBase) (controlclient.CommandResult, error),
+	command func(appserver.WriteBase) (appserver.CommandResult, error),
 ) (agentbinding.Status, error) {
 	revision, err := s.stack.ConfigurationRevision(ctx)
 	if err != nil {
 		return agentbinding.Status{}, err
 	}
-	result, commandErr := command(controlclient.WriteBase{
+	result, commandErr := command(appserver.WriteBase{
 		OperationID:      prefix + "-" + uuid.NewString(),
 		ExpectedRevision: &revision,
 	})
-	if result.Outcome != controlclient.OutcomeCommitted {
+	if result.Outcome != appserver.OutcomeCommitted {
 		return agentbinding.Status{}, errors.Join(commandErr, fmt.Errorf("Agent binding test command outcome is %q", result.Outcome))
 	}
 	status, observationErr := s.stack.AgentBindings().AgentBindingStatus(ctx)
 	return status, errors.Join(commandErr, observationErr)
 }
 
-func (s testAgentBindingService) principal() controlclient.Principal {
-	return controlclient.Principal{ID: firstNonEmpty(s.stack.UserID, "gatewayapp-test")}
+func (s testAgentBindingService) principal() appserver.Principal {
+	return appserver.Principal{ID: firstNonEmpty(s.stack.UserID, "gatewayapp-test")}
 }
 
-func (s testAgentBindingService) commands() controlclient.AgentCommandService {
+func (s testAgentBindingService) commands() appserver.AgentCommandService {
 	if commands := s.stack.AgentCommands(); commands != nil {
 		return commands
 	}
-	commands, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
-		Authorizer: controlclient.ProductCommandAuthorizer{},
-		Operations: controlclient.NewMemoryOperationStore(),
+	commands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
+		Authorizer: appserver.ProductCommandAuthorizer{},
+		Operations: appserver.NewMemoryOperationStore(),
 		Backend:    s.stack,
 	})
 	if err != nil {

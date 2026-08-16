@@ -87,8 +87,8 @@ product-acceptance: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./agent-sdk/runtime '$(PRODUCT_RUNTIME_SELECTOR)' product-runtime
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./internal/acpagentbridge/controller '$(PRODUCT_CONTROLLER_SELECTOR)' product-controller
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./internal/acpagentbridge/subagent '$(PRODUCT_SUBAGENT_SELECTOR)' product-subagent
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./control/client '$(PRODUCT_CONTROL_CLIENT_SELECTOR)' product-control-client
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./control/client/wirev1 '$(PRODUCT_WIRE_SELECTOR)' product-wire
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./control/appserver '$(PRODUCT_CONTROL_CLIENT_SELECTOR)' product-control-client
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./control/appserver/wirev1 '$(PRODUCT_WIRE_SELECTOR)' product-wire
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp '$(PRODUCT_DIAGNOSTICS_SELECTOR)' product-diagnostics
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(PRODUCT_TUI_SELECTOR)' product-tui
 
@@ -105,7 +105,7 @@ tui-interaction: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(TUI_INTERACTION_SELECTOR)' tui-interaction
 
 control-feed-regression: cache-dirs
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./control/client '$(CONTROL_TURN_REGRESSION_SELECTOR)' control-turn-regression
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./control/appserver '$(CONTROL_TURN_REGRESSION_SELECTOR)' control-turn-regression
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(SURFACE_CLIENT_REGRESSION_SELECTOR)' surface-client-regression
 
 command-regression: cache-dirs

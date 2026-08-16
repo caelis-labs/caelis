@@ -147,13 +147,15 @@ Document responsibilities are intentionally separate:
   release removes the pin and reference-aware GC reclaims content absent from
   both current configuration and every live Runtime. Committed Plugin changes
   affect later Session activations and never replace an active Runtime.
-- `control/client`: the complete product-facing Control client. It owns trusted
-  principals, transport-neutral commands and outcomes, Session authorization,
+- `control/appserver`: the canonical surface-facing, transport-neutral Control
+  boundary. It owns trusted principals, the aggregate client and service
+  capability sets, commands and outcomes, Session authorization,
   list/bootstrap/reconnect state, feed/replay coordination, legacy-child-mirror
   filtering, approval recovery, the aggregate client, the durable idempotency
   operation ledger, and the Session lifecycle write gate. Its feed uses the
   shared ACP projection and `eventstream.Envelope` vocabulary without moving
-  Control authorization, state, or broker ownership into `protocol/acp`.
+  Control authorization, state, or broker ownership into `protocol/acp`. Task
+  observation currently remains an independent typed side channel.
 - `internal/controlclient/turningress`: private main-Turn ingress glue between
   `internal/kernel` handles and the Control-owned Session feed. Task output
   never fans into this ingress and cannot delay its terminal.
@@ -163,11 +165,11 @@ Document responsibilities are intentionally separate:
   any transitional host fields before constructing this read model. Structured
   `SessionUsageTotal` and `SessionUsageByModel` values are likewise the sole
   cumulative Session-usage sources; the public model carries no flat mirrors.
-- `control/client/wirev1`: the versioned, Control-client-bound HTTP/SSE schema
+- `control/appserver/wirev1`: the versioned, AppServer-bound HTTP/SSE schema
   bindings, generated types, and strict JSON/Envelope codec. Because the codec
-  serializes `control/client` domain values directly, it stays with that
+  serializes `control/appserver` domain values directly, it stays with that
   semantic owner instead of pretending to be a product-neutral protocol.
-- `control/client/httpclient`: the authenticated HTTP implementation of the
+- `control/appserver/httpclient`: the authenticated HTTP implementation of the
   complete focused AppServer client set. In-process clients bind the same
   contracts directly; transport selection does not change surface semantics.
 - `app/controlserver`: the Control Host's HTTP handler and production listener,

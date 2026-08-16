@@ -18,7 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
@@ -73,8 +73,8 @@ func TestRunServeDefaultsToPersistentTokenFile(t *testing.T) {
 		captured = config
 		info := config.ServerInfo
 		info.ProtocolVersion = schema.CurrentProtocolVersion
-		info.EnvelopeVersion = controlclient.EnvelopeVersion
-		info.APIVersion = controlclient.HTTPAPIVersion
+		info.EnvelopeVersion = appserver.EnvelopeVersion
+		info.APIVersion = appserver.HTTPAPIVersion
 		info.Transports = []string{"http"}
 		if err := config.OnListening(controlserver.ListenerInfo{
 			Endpoint: "http://127.0.0.1:7777", Address: "127.0.0.1:7777", ServerInfo: info,
@@ -237,7 +237,7 @@ func TestHeadlessJSONLUsesVersionedEnvelopeAndTerminalResultRecords(t *testing.T
 		SchemaVersion: headlessOutputSchemaVersion,
 		Type:          headlessOutputTypeResult,
 		SessionID:     "session-1",
-		Turn:          controlclient.TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
+		Turn:          appserver.TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
 		Status:        eventstream.LifecycleStateCompleted,
 		Output:        "done",
 		Cursor:        "cursor-2",
@@ -350,7 +350,7 @@ func TestCreateOrResumeHeadlessSessionUsesExistingSessionWithoutCreate(t *testin
 	t.Parallel()
 
 	client := &headlessLifecycleTestClient{
-		state: controlclient.SessionState{
+		state: appserver.SessionState{
 			SessionID:    "session-1",
 			WorkspaceKey: "durable-workspace",
 			CWD:          "/durable/workspace",
@@ -395,8 +395,8 @@ func TestCreateOrResumeHeadlessSessionCreatesMissingPreferredSession(t *testing.
 func TestHeadlessSessionRunErrorExplainsClosedResume(t *testing.T) {
 	t.Parallel()
 
-	err := headlessSessionRunError("session-closed", controlclient.ErrSessionClosed)
-	if !errors.Is(err, controlclient.ErrSessionClosed) ||
+	err := headlessSessionRunError("session-closed", appserver.ErrSessionClosed)
+	if !errors.Is(err, appserver.ErrSessionClosed) ||
 		!strings.Contains(err.Error(), "omit -session to create a new Session") {
 		t.Fatalf("headlessSessionRunError() = %v", err)
 	}
@@ -421,12 +421,12 @@ func TestRunHeadlessRejectsClosedSessionWithoutRecreatingIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, _, err := server.Bind(controlclient.Principal{ID: stack.UserID})
+	clients, _, err := server.Bind(appserver.Principal{ID: stack.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := clients.Sessions.CreateSession(context.Background(), controlclient.CreateSessionRequest{
-		WriteBase:          controlclient.WriteBase{OperationID: "create-closed-headless"},
+	created, err := clients.Sessions.CreateSession(context.Background(), appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: "create-closed-headless"},
 		PreferredSessionID: "closed-headless",
 		WorkspaceKey:       "workspace",
 		CWD:                workspace,
@@ -434,8 +434,8 @@ func TestRunHeadlessRejectsClosedSessionWithoutRecreatingIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = clients.Sessions.CloseSession(context.Background(), controlclient.CloseSessionRequest{
-		WriteBase: controlclient.WriteBase{
+	_, err = clients.Sessions.CloseSession(context.Background(), appserver.CloseSessionRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID: "close-closed-headless",
 			SessionID:   created.SessionID,
 		},
@@ -455,7 +455,7 @@ func TestRunHeadlessRejectsClosedSessionWithoutRecreatingIt(t *testing.T) {
 		&output,
 	)
 	if resumedID != created.SessionID ||
-		!errors.Is(err, controlclient.ErrSessionClosed) ||
+		!errors.Is(err, appserver.ErrSessionClosed) ||
 		!strings.Contains(err.Error(), "omit -session to create a new Session") {
 		t.Fatalf("runHeadless() = Session %q, error %v", resumedID, err)
 	}
@@ -475,28 +475,28 @@ func TestAssemblyFromEnvReturnsParserErrors(t *testing.T) {
 }
 
 type headlessLifecycleTestClient struct {
-	controlclient.SessionClient
-	state       controlclient.SessionState
+	appserver.SessionClient
+	state       appserver.SessionState
 	inspectErr  error
-	created     controlclient.CreateSessionRequest
+	created     appserver.CreateSessionRequest
 	createCalls int
 }
 
 func (client *headlessLifecycleTestClient) InspectSession(
 	context.Context,
-	controlclient.StateRequest,
-) (controlclient.SessionState, error) {
+	appserver.StateRequest,
+) (appserver.SessionState, error) {
 	return client.state, client.inspectErr
 }
 
 func (client *headlessLifecycleTestClient) CreateSession(
 	_ context.Context,
-	request controlclient.CreateSessionRequest,
-) (controlclient.CommandResult, error) {
+	request appserver.CreateSessionRequest,
+) (appserver.CommandResult, error) {
 	client.createCalls++
 	client.created = request
-	return controlclient.CommandResult{
-		Outcome:   controlclient.OutcomeCommitted,
+	return appserver.CommandResult{
+		Outcome:   appserver.OutcomeCommitted,
 		SessionID: request.PreferredSessionID,
 	}, nil
 }
@@ -855,7 +855,7 @@ func useFakeSandboxCommandsForCLITest(t *testing.T) {
 }
 
 type cliStatusClientProbe struct {
-	request  controlclient.StatusRequest
+	request  appserver.StatusRequest
 	status   controlstatus.StatusSnapshot
 	err      error
 	statuses []controlstatus.StatusSnapshot
@@ -863,7 +863,7 @@ type cliStatusClientProbe struct {
 	calls    int
 }
 
-func (c *cliStatusClientProbe) SessionStatus(_ context.Context, request controlclient.StatusRequest) (controlstatus.StatusSnapshot, error) {
+func (c *cliStatusClientProbe) SessionStatus(_ context.Context, request appserver.StatusRequest) (controlstatus.StatusSnapshot, error) {
 	c.request = request
 	index := c.calls
 	c.calls++
@@ -882,24 +882,24 @@ func (c *cliStatusClientProbe) SessionStatus(_ context.Context, request controlc
 }
 
 type cliConfigurationClientProbe struct {
-	controlclient.ConfigurationClient
+	appserver.ConfigurationClient
 	action  string
-	request controlclient.SandboxRequest
-	result  controlclient.CommandResult
+	request appserver.SandboxRequest
+	result  appserver.CommandResult
 	err     error
 }
 
-func (c *cliConfigurationClientProbe) PrepareSandbox(_ context.Context, request controlclient.SandboxRequest) (controlclient.CommandResult, error) {
+func (c *cliConfigurationClientProbe) PrepareSandbox(_ context.Context, request appserver.SandboxRequest) (appserver.CommandResult, error) {
 	c.action, c.request = "prepare", request
 	return c.result, c.err
 }
 
-func (c *cliConfigurationClientProbe) RepairSandbox(_ context.Context, request controlclient.SandboxRequest) (controlclient.CommandResult, error) {
+func (c *cliConfigurationClientProbe) RepairSandbox(_ context.Context, request appserver.SandboxRequest) (appserver.CommandResult, error) {
 	c.action, c.request = "repair", request
 	return c.result, c.err
 }
 
-func (c *cliConfigurationClientProbe) ResetSandbox(_ context.Context, request controlclient.SandboxRequest) (controlclient.CommandResult, error) {
+func (c *cliConfigurationClientProbe) ResetSandbox(_ context.Context, request appserver.SandboxRequest) (appserver.CommandResult, error) {
 	c.action, c.request = "reset", request
 	return c.result, c.err
 }
@@ -1002,7 +1002,7 @@ func TestSandboxCommandsUseConfigurationClient(t *testing.T) {
 	tests := []struct {
 		name   string
 		action string
-		run    func(context.Context, controlclient.ConfigurationClient, controlclient.StatusClient, outputFormat, io.Writer) error
+		run    func(context.Context, appserver.ConfigurationClient, appserver.StatusClient, outputFormat, io.Writer) error
 	}{
 		{name: "setup", action: "prepare", run: runSandboxSetup},
 		{name: "fix", action: "repair", run: runSandboxFix},
@@ -1014,7 +1014,7 @@ func TestSandboxCommandsUseConfigurationClient(t *testing.T) {
 				Configuration: controlstatus.StatusConfiguration{Revision: 17},
 				SandboxStatus: controlstatus.StatusSandbox{RequestedBackend: "host", ResolvedBackend: "host", Route: "host"},
 			}
-			client := &cliConfigurationClientProbe{result: controlclient.CommandResult{Outcome: controlclient.OutcomeCommitted}}
+			client := &cliConfigurationClientProbe{result: appserver.CommandResult{Outcome: appserver.OutcomeCommitted}}
 			statusClient := &cliStatusClientProbe{status: status}
 			var out bytes.Buffer
 			if err := tt.run(context.Background(), client, statusClient, outputText, &out); err != nil {
@@ -1035,15 +1035,15 @@ func TestSandboxCommandsUseConfigurationClient(t *testing.T) {
 }
 
 func TestSandboxCommandDoesNotObserveAcceptedReceiptAsCommitted(t *testing.T) {
-	client := &cliConfigurationClientProbe{result: controlclient.CommandResult{Outcome: controlclient.OutcomeAccepted}}
+	client := &cliConfigurationClientProbe{result: appserver.CommandResult{Outcome: appserver.OutcomeAccepted}}
 	statusClient := &cliStatusClientProbe{status: controlstatus.StatusSnapshot{
 		Configuration: controlstatus.StatusConfiguration{Revision: 18},
 		SandboxStatus: controlstatus.StatusSandbox{ResolvedBackend: "host"},
 	}}
 	var out bytes.Buffer
 	err := runSandboxSetup(context.Background(), client, statusClient, outputText, &out)
-	var receiptErr *controlclient.CommandReceiptError
-	if !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != controlclient.OutcomeAccepted {
+	var receiptErr *appserver.CommandReceiptError
+	if !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != appserver.OutcomeAccepted {
 		t.Fatalf("accepted receipt error = %#v, %v", receiptErr, err)
 	}
 	if statusClient.calls != 1 || out.Len() != 0 {
@@ -1055,7 +1055,7 @@ func TestSandboxCommandReadsCanonicalStatusAfterOperationFailure(t *testing.T) {
 	tests := []struct {
 		name   string
 		action string
-		run    func(context.Context, controlclient.ConfigurationClient, controlclient.StatusClient, outputFormat, io.Writer) error
+		run    func(context.Context, appserver.ConfigurationClient, appserver.StatusClient, outputFormat, io.Writer) error
 	}{
 		{name: "setup", action: "prepare", run: runSandboxSetup},
 		{name: "fix", action: "repair", run: runSandboxFix},
@@ -1065,7 +1065,7 @@ func TestSandboxCommandReadsCanonicalStatusAfterOperationFailure(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			operationErr := errors.New("sandbox operation failed")
 			client := &cliConfigurationClientProbe{
-				result: controlclient.CommandResult{Outcome: controlclient.OutcomeUnknown}, err: operationErr,
+				result: appserver.CommandResult{Outcome: appserver.OutcomeUnknown}, err: operationErr,
 			}
 			statusClient := &cliStatusClientProbe{statuses: []controlstatus.StatusSnapshot{
 				{Configuration: controlstatus.StatusConfiguration{Revision: 19}},
@@ -1075,8 +1075,8 @@ func TestSandboxCommandReadsCanonicalStatusAfterOperationFailure(t *testing.T) {
 			}}
 			var out bytes.Buffer
 			err := tt.run(context.Background(), client, statusClient, outputText, &out)
-			var receiptErr *controlclient.CommandReceiptError
-			if !errors.Is(err, operationErr) || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != controlclient.OutcomeUnknown {
+			var receiptErr *appserver.CommandReceiptError
+			if !errors.Is(err, operationErr) || !errors.As(err, &receiptErr) || receiptErr.Receipt.Outcome != appserver.OutcomeUnknown {
 				t.Fatalf("sandbox %s error = %v, want operation error", tt.name, err)
 			}
 			if client.action != tt.action {
@@ -1095,7 +1095,7 @@ func TestSandboxCommandReadsCanonicalStatusAfterOperationFailure(t *testing.T) {
 func TestSandboxCommandFailurePreservesStatusAndWriteErrors(t *testing.T) {
 	operationErr := errors.New("sandbox setup failed")
 	statusErr := errors.New("status unavailable")
-	client := &cliConfigurationClientProbe{result: controlclient.CommandResult{Outcome: controlclient.OutcomeUnknown}, err: operationErr}
+	client := &cliConfigurationClientProbe{result: appserver.CommandResult{Outcome: appserver.OutcomeUnknown}, err: operationErr}
 	statusClient := &cliStatusClientProbe{
 		statuses: []controlstatus.StatusSnapshot{{Configuration: controlstatus.StatusConfiguration{Revision: 23}}, {}},
 		errors:   []error{nil, statusErr},
@@ -1134,7 +1134,7 @@ func TestWithCLIAppServerClosesHostAfterAction(t *testing.T) {
 	actionErr := errors.New("forced action failure")
 	err := withCLIAppServer(context.Background(), cfg, productClientOptions{
 		Mode: productClientModeEmbedded, EmbeddedControlEndpoint: roundTripEmbeddedControlFactory(t),
-	}, func(clients controlclient.AppServerClients) error {
+	}, func(clients appserver.AppServerClients) error {
 		if err := clients.Validate(); err != nil {
 			t.Fatal(err)
 		}

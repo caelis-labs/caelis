@@ -12,8 +12,8 @@ import (
 
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 )
 
 func TestResolveProductClientModeDefaultsBareLaunchToManagedHost(t *testing.T) {
@@ -88,7 +88,7 @@ func TestEmbeddedProductClientsExposeSameHostToBuiltInACPChild(t *testing.T) {
 	}
 	remote, err := httpclient.New(httpclient.Config{
 		BaseURL: product.BaseURL, BearerToken: token, HTTPClient: product.embeddedControl.HTTPClient(),
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -148,7 +148,7 @@ func TestEmbeddedRawControlTokenUsesSeparateChildCredential(t *testing.T) {
 	for name, token := range map[string]string{"embedding": rawToken, "child": childToken} {
 		remote, clientErr := httpclient.New(httpclient.Config{
 			BaseURL: product.BaseURL, BearerToken: token, HTTPClient: product.embeddedControl.HTTPClient(),
-			Compatibility: controlclient.CurrentCompatibility(),
+			Compatibility: appserver.CurrentCompatibility(),
 		})
 		if clientErr != nil {
 			t.Fatalf("%s client: %v", name, clientErr)

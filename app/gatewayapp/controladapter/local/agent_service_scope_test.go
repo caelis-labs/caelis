@@ -7,12 +7,12 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 func TestAgentBindingStatusRejectsSessionScopeBeforeProjection(t *testing.T) {
 	service := &AgentService{host: &gatewayapp.Stack{}}
-	_, err := service.AgentBindingStatus(context.Background(), controlclient.Principal{ID: "owner"}, controlclient.AgentRequest{
+	_, err := service.AgentBindingStatus(context.Background(), appserver.Principal{ID: "owner"}, appserver.AgentRequest{
 		SessionID: "session-1",
 	})
 	if errorcode.CodeOf(err) != errorcode.InvalidArgument || !strings.Contains(err.Error(), "Host-scoped") {
@@ -22,7 +22,7 @@ func TestAgentBindingStatusRejectsSessionScopeBeforeProjection(t *testing.T) {
 
 func TestDisconnectCandidatesRejectsSessionScopeBeforeProjection(t *testing.T) {
 	service := &AgentService{host: &gatewayapp.Stack{}}
-	_, err := service.DisconnectCandidates(context.Background(), controlclient.Principal{ID: "owner"}, controlclient.AgentRequest{
+	_, err := service.DisconnectCandidates(context.Background(), appserver.Principal{ID: "owner"}, appserver.AgentRequest{
 		SessionID: "session-1",
 	})
 	if errorcode.CodeOf(err) != errorcode.InvalidArgument || !strings.Contains(err.Error(), "Host-scoped") {

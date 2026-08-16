@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -40,7 +40,7 @@ func TestDeliverAgentMessageAttachesIdleTurnAndPreservesRuntimeContext(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{Reader: sessions, CursorCodec: codec})
+	feeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{Reader: sessions, CursorCodec: codec})
 	if err != nil {
 		t.Fatal(err)
 	}

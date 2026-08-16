@@ -3,7 +3,7 @@ package controlprompt
 import (
 	"context"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -27,7 +27,7 @@ type Turn interface {
 // spliced live continuation. Closing it never cancels the Runtime Turn.
 type SessionReconnect interface {
 	Turn
-	State() controlclient.SessionState
+	State() appserver.SessionState
 	Backfill() <-chan eventstream.Envelope
 	BackfillDone() <-chan struct{}
 	BootstrapEvents() []eventstream.Envelope

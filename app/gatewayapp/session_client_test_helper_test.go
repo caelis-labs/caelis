@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 // startGatewayAppTestSession creates test Sessions through the same typed
@@ -17,12 +17,12 @@ func startGatewayAppTestSession(ctx context.Context, s *Stack, preferredSessionI
 	if s == nil {
 		return session.Session{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
-	client, err := controlclient.BindSessionClient(s.ControlClient(), controlclient.Principal{ID: strings.TrimSpace(s.UserID)})
+	client, err := appserver.BindSessionClient(s.ControlClient(), appserver.Principal{ID: strings.TrimSpace(s.UserID)})
 	if err != nil {
 		return session.Session{}, err
 	}
-	result, err := client.CreateSession(ctx, controlclient.CreateSessionRequest{
-		WriteBase:          controlclient.WriteBase{OperationID: "gatewayapp-test-session-" + uuid.NewString()},
+	result, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: "gatewayapp-test-session-" + uuid.NewString()},
 		PreferredSessionID: strings.TrimSpace(preferredSessionID),
 		WorkspaceKey:       strings.TrimSpace(s.Workspace.Key),
 		CWD:                strings.TrimSpace(s.Workspace.CWD),
@@ -30,7 +30,7 @@ func startGatewayAppTestSession(ctx context.Context, s *Stack, preferredSessionI
 	if err != nil {
 		return session.Session{}, err
 	}
-	if result.Outcome != controlclient.OutcomeCommitted || strings.TrimSpace(result.SessionID) == "" {
+	if result.Outcome != appserver.OutcomeCommitted || strings.TrimSpace(result.SessionID) == "" {
 		return session.Session{}, fmt.Errorf("gatewayapp: Session create ended with outcome %q", result.Outcome)
 	}
 	return s.Sessions.Session(ctx, session.SessionRef{SessionID: result.SessionID})

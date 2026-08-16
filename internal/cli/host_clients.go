@@ -14,8 +14,8 @@ import (
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/internal/servicelifecycle"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/protocol/acp/taskstream"
@@ -64,7 +64,7 @@ type productClientOptions struct {
 }
 
 type productClients struct {
-	Clients                        controlclient.AppServerClients
+	Clients                        appserver.AppServerClients
 	Tasks                          taskstream.Client
 	Mode                           productClientMode
 	BaseURL                        string
@@ -149,7 +149,7 @@ func openRemoteProductClients(ctx context.Context, options productClientOptions)
 		BearerToken:   token,
 		HTTPClient:    options.HTTPClient,
 		EventBuffer:   256,
-		Compatibility: controlclient.CurrentCompatibility(controlclient.CapabilityWorkspaceCWDList),
+		Compatibility: appserver.CurrentCompatibility(appserver.CapabilityWorkspaceCWDList),
 	})
 	if err != nil {
 		return nil, err
@@ -263,7 +263,7 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 		_ = ownership.Close()
 		return nil, err
 	}
-	clients, tasks, err := appServer.Bind(controlclient.Principal{ID: stack.UserID})
+	clients, tasks, err := appServer.Bind(appserver.Principal{ID: stack.UserID})
 	if err != nil {
 		cleanupChildCredentialOnError()
 		closeEndpoint()
@@ -272,7 +272,7 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 		return nil, err
 	}
 	if endpoint != nil {
-		authenticator, authErr := controlserver.BearerTokenAuthenticator(token, controlclient.Principal{ID: stack.UserID})
+		authenticator, authErr := controlserver.BearerTokenAuthenticator(token, appserver.Principal{ID: stack.UserID})
 		if authErr != nil {
 			cleanupChildCredentialOnError()
 			closeEndpoint()
@@ -281,7 +281,7 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 			return nil, authErr
 		}
 		if childToken != token {
-			childAuthenticator, childAuthErr := controlserver.BearerTokenAuthenticator(childToken, controlclient.Principal{ID: stack.UserID})
+			childAuthenticator, childAuthErr := controlserver.BearerTokenAuthenticator(childToken, appserver.Principal{ID: stack.UserID})
 			if childAuthErr != nil {
 				cleanupChildCredentialOnError()
 				closeEndpoint()
@@ -297,12 +297,12 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 		}, controlserver.Config{
 			Authenticator: authenticator,
 			AllowedHosts:  []string{"127.0.0.1"},
-			ServerInfo: controlclient.ServerInfo{
-				ServerID:            controlclient.ServerIdentity,
+			ServerInfo: appserver.ServerInfo{
+				ServerID:            appserver.ServerIdentity,
 				DistributionVersion: build.Version,
 				BuildID:             build.BuildID,
 				BuildKind:           build.BuildKind,
-				Capabilities:        controlclient.RequiredManagedHostCapabilities(),
+				Capabilities:        appserver.RequiredManagedHostCapabilities(),
 			},
 		})
 		if handlerErr != nil {

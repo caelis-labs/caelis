@@ -4,26 +4,26 @@ import (
 	"context"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
 func runHeadlessOnceForGatewayAppTest(ctx context.Context, stack *Stack, activeSession session.Session, _ string, input string, opts headless.Options) (headless.Result, error) {
-	client, err := controlclient.BindSessionClient(
+	client, err := appserver.BindSessionClient(
 		stack.ControlClient(),
-		controlclient.Principal{ID: activeSession.UserID},
+		appserver.Principal{ID: activeSession.UserID},
 	)
 	if err != nil {
 		return headless.Result{}, err
 	}
-	turns, err := controlclient.NewSessionTurnClient(client)
+	turns, err := appserver.NewSessionTurnClient(client)
 	if err != nil {
 		return headless.Result{}, err
 	}
 	return headless.RunSessionOnce(
 		ctx,
 		turns,
-		controlclient.SessionTurnStartRequest{SessionID: activeSession.SessionID, Input: input},
+		appserver.SessionTurnStartRequest{SessionID: activeSession.SessionID, Input: input},
 		opts,
 	)
 }

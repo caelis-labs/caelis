@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
@@ -14,7 +14,7 @@ import (
 
 const reconnectTransientGapWarning = "Some transient output may be missing; durable history and the live session feed were restored."
 
-func (m *Model) applySessionReconnectState(state controlclient.SessionState) tea.Cmd {
+func (m *Model) applySessionReconnectState(state appserver.SessionState) tea.Cmd {
 	if m == nil {
 		return nil
 	}

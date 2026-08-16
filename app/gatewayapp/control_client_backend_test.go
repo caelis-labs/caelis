@@ -17,8 +17,8 @@ import (
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/httpclient"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
@@ -31,8 +31,8 @@ import (
 
 func TestClassifyControlBackendErrorTreatsLeaseConflictAsConflict(t *testing.T) {
 	err := classifyControlBackendError(&session.LeaseConflictError{SessionID: "session-1", Detail: "active execution lease"})
-	var outcomeErr *controlclient.OutcomeError
-	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeConflicted {
+	var outcomeErr *appserver.OutcomeError
+	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("classifyControlBackendError() = %v, want conflicted outcome", err)
 	}
 }
@@ -41,7 +41,7 @@ func TestClassifyControlBackendErrorAddsTypedHTTPCategories(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		err     error
-		outcome controlclient.Outcome
+		outcome appserver.Outcome
 		code    errorcode.Code
 	}{
 		{
@@ -49,13 +49,13 @@ func TestClassifyControlBackendErrorAddsTypedHTTPCategories(t *testing.T) {
 			err: &kernelimpl.Error{
 				Kind: kernelimpl.KindValidation, Code: kernelimpl.CodeInvalidRequest, Message: "invalid prompt",
 			},
-			outcome: controlclient.OutcomeRejected,
+			outcome: appserver.OutcomeRejected,
 			code:    errorcode.InvalidArgument,
 		},
 		{
 			name:    "internal",
 			err:     &kernelimpl.Error{Kind: kernelimpl.KindInternal, Code: kernelimpl.CodeInternal, Message: "private failure"},
-			outcome: controlclient.OutcomeUnknown,
+			outcome: appserver.OutcomeUnknown,
 			code:    errorcode.Unknown,
 		},
 		{
@@ -63,13 +63,13 @@ func TestClassifyControlBackendErrorAddsTypedHTTPCategories(t *testing.T) {
 			err: &kernelimpl.Error{
 				Kind: kernelimpl.KindUnavailable, Code: kernelimpl.CodeHostClosing, Message: "gateway: host is closing",
 			},
-			outcome: controlclient.OutcomeRejected,
+			outcome: appserver.OutcomeRejected,
 			code:    errorcode.Unavailable,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := classifyControlBackendError(tt.err)
-			var outcomeErr *controlclient.OutcomeError
+			var outcomeErr *appserver.OutcomeError
 			if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != tt.outcome || errorcode.CodeOf(err) != tt.code {
 				t.Fatalf("classifyControlBackendError() = %v (outcome %#v, code %q)", err, outcomeErr, errorcode.CodeOf(err))
 			}
@@ -79,8 +79,8 @@ func TestClassifyControlBackendErrorAddsTypedHTTPCategories(t *testing.T) {
 
 func TestClassifyControlBackendErrorTreatsUnclassifiedFailureAsUnknown(t *testing.T) {
 	err := classifyControlBackendError(errors.New("effect boundary failed without proof"))
-	var outcomeErr *controlclient.OutcomeError
-	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeUnknown {
+	var outcomeErr *appserver.OutcomeError
+	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeUnknown {
 		t.Fatalf("classifyControlBackendError() = %v, want unknown outcome", err)
 	}
 }
@@ -119,8 +119,8 @@ func TestControlParticipantPlacementRejectsOnlyInvalidSelections(t *testing.T) {
 		{profileID: profile.ID, effort: "low"},
 	} {
 		_, err := stack.resolveControlParticipantPlacement(context.Background(), selection.profileID, selection.effort)
-		var outcomeErr *controlclient.OutcomeError
-		if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeRejected || errorcode.CodeOf(err) != errorcode.InvalidArgument {
+		var outcomeErr *appserver.OutcomeError
+		if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeRejected || errorcode.CodeOf(err) != errorcode.InvalidArgument {
 			t.Fatalf("resolveControlParticipantPlacement(%q, %q) = %v, want rejected invalid_argument", selection.profileID, selection.effort, err)
 		}
 	}
@@ -135,8 +135,8 @@ func TestControlParticipantPlacementStoreFailureRemainsUnknown(t *testing.T) {
 		t.Fatalf("resolveControlParticipantPlacement(store failure) = %v, want internal failure", err)
 	}
 	classified := classifyControlBackendError(err)
-	var outcomeErr *controlclient.OutcomeError
-	if !errors.As(classified, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeUnknown || errorcode.CodeOf(classified) != errorcode.Unknown {
+	var outcomeErr *appserver.OutcomeError
+	if !errors.As(classified, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeUnknown || errorcode.CodeOf(classified) != errorcode.Unknown {
 		t.Fatalf("classifyControlBackendError(store failure) = %v, want unknown outcome", classified)
 	}
 }
@@ -144,9 +144,9 @@ func TestControlParticipantPlacementStoreFailureRemainsUnknown(t *testing.T) {
 func TestControlHandlePlacementRejectsDeterministicSelectionFailure(t *testing.T) {
 	stack := &Stack{store: newAppConfigStore(t.TempDir())}
 	_, err := stack.resolveControlHandlePlacement(context.Background(), agentbinding.Handle("missing"))
-	var outcomeErr *controlclient.OutcomeError
+	var outcomeErr *appserver.OutcomeError
 	if !errors.As(err, &outcomeErr) ||
-		outcomeErr.Outcome != controlclient.OutcomeRejected ||
+		outcomeErr.Outcome != appserver.OutcomeRejected ||
 		errorcode.CodeOf(err) != errorcode.FailedPrecondition {
 		t.Fatalf("resolveControlHandlePlacement(missing) = %v, want rejected failed_precondition", err)
 	}
@@ -161,8 +161,8 @@ func TestControlHandlePlacementStoreFailureRemainsUnknown(t *testing.T) {
 		t.Fatalf("resolveControlHandlePlacement(store failure) = %v, want internal failure", err)
 	}
 	classified := classifyControlBackendError(err)
-	var outcomeErr *controlclient.OutcomeError
-	if !errors.As(classified, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeUnknown {
+	var outcomeErr *appserver.OutcomeError
+	if !errors.As(classified, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeUnknown {
 		t.Fatalf("classifyControlBackendError(store failure) = %v, want unknown outcome", classified)
 	}
 }
@@ -185,7 +185,7 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{
+	feeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{
 		Reader: sessions, CursorCodec: codec,
 	})
 	if err != nil {
@@ -338,21 +338,21 @@ func TestCommittedCommandKeepsOutcomeWhenFeedPrimeFailsAndLedgerReplays(t *testi
 		Sessions: sessions, AppName: "caelis", controlFeeds: controlClientFeedRegistry{feed: feed}, gateway: kernel,
 	}
 	backend := &countingControlClientBackend{backend: stack}
-	commands, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
+	commands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
 		Authorizer: controlClientAllowAuthorizer{},
-		Operations: controlclient.NewMemoryOperationStore(),
+		Operations: appserver.NewMemoryOperationStore(),
 		Backend:    backend,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := controlclient.CreateSessionRequest{
-		WriteBase:          controlclient.WriteBase{OperationID: "operation-prime-failure"},
+	request := appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: "operation-prime-failure"},
 		PreferredSessionID: "session-prime-failure",
 	}
-	principal := controlclient.Principal{ID: "owner"}
+	principal := appserver.Principal{ID: "owner"}
 	first, err := commands.CreateSession(context.Background(), principal, request)
-	if err != nil || first.Outcome != controlclient.OutcomeCommitted || first.Detail != controlFeedCatchUpWarning {
+	if err != nil || first.Outcome != appserver.OutcomeCommitted || first.Detail != controlFeedCatchUpWarning {
 		t.Fatalf("first result = %#v, %v, want committed result with feed warning", first, err)
 	}
 	replayed, err := commands.CreateSession(context.Background(), principal, request)
@@ -391,7 +391,7 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{Reader: sessions, CursorCodec: codec})
+	feeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{Reader: sessions, CursorCodec: codec})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,10 +406,10 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	defer subscription.Close()
 	stack := &Stack{Sessions: sessions, controlFeeds: feeds, gateway: kernel}
 	expected := active.Revision
-	result, err := stack.ExecuteControlCommand(ctx, controlclient.Principal{ID: "owner"}, controlclient.ActionSessionClose, controlclient.CloseSessionRequest{
-		WriteBase: controlclient.WriteBase{SessionID: active.SessionID, ExpectedRevision: &expected},
+	result, err := stack.ExecuteControlCommand(ctx, appserver.Principal{ID: "owner"}, appserver.ActionSessionClose, appserver.CloseSessionRequest{
+		WriteBase: appserver.WriteBase{SessionID: active.SessionID, ExpectedRevision: &expected},
 	})
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision <= active.Revision {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision <= active.Revision {
 		t.Fatalf("CloseSession result = %#v, %v", result, err)
 	}
 	select {
@@ -428,10 +428,10 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err = stack.ExecuteControlCommand(ctx, controlclient.Principal{ID: "owner"}, controlclient.ActionPrompt, controlclient.PromptRequest{
-		WriteBase: controlclient.WriteBase{SessionID: active.SessionID}, Input: "must be rejected",
+	result, err = stack.ExecuteControlCommand(ctx, appserver.Principal{ID: "owner"}, appserver.ActionPrompt, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{SessionID: active.SessionID}, Input: "must be rejected",
 	})
-	if !errors.Is(err, controlclient.ErrSessionClosed) || result.Revision != current.Revision {
+	if !errors.Is(err, appserver.ErrSessionClosed) || result.Revision != current.Revision {
 		t.Fatalf("prompt after close = %#v, %v", result, err)
 	}
 	_ = turn.Handle.Close()
@@ -464,7 +464,7 @@ func TestControlClientPromptUsesHostLifecycleAfterAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{
+	feeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{
 		Reader: sessions, CursorCodec: codec,
 	})
 	if err != nil {
@@ -482,10 +482,10 @@ func TestControlClientPromptUsesHostLifecycleAfterAdmission(t *testing.T) {
 	admissionCtx, cancelAdmission := context.WithCancel(context.Background())
 	result, err := stack.ExecuteControlCommand(
 		admissionCtx,
-		controlclient.Principal{ID: "owner"},
-		controlclient.ActionPrompt,
-		controlclient.PromptRequest{
-			WriteBase: controlclient.WriteBase{
+		appserver.Principal{ID: "owner"},
+		appserver.ActionPrompt,
+		appserver.PromptRequest{
+			WriteBase: appserver.WriteBase{
 				OperationID: "operation-host-lifecycle",
 				SessionID:   active.SessionID,
 			},
@@ -546,7 +546,7 @@ func TestControlClientParticipantPromptUsesHostLifecycleAfterAdmission(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{
+	feeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{
 		Reader: sessions, CursorCodec: codec,
 	})
 	if err != nil {
@@ -564,10 +564,10 @@ func TestControlClientParticipantPromptUsesHostLifecycleAfterAdmission(t *testin
 	admissionCtx, cancelAdmission := context.WithCancel(context.Background())
 	result, err := stack.ExecuteControlCommand(
 		admissionCtx,
-		controlclient.Principal{ID: "owner"},
-		controlclient.ActionParticipantPrompt,
-		controlclient.PromptParticipantRequest{
-			WriteBase: controlclient.WriteBase{
+		appserver.Principal{ID: "owner"},
+		appserver.ActionParticipantPrompt,
+		appserver.PromptParticipantRequest{
+			WriteBase: appserver.WriteBase{
 				OperationID: "operation-participant-host-lifecycle",
 				SessionID:   active.SessionID,
 			},
@@ -628,7 +628,7 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeds, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{
+	feeds, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{
 		Reader: sessions, CursorCodec: codec,
 	})
 	if err != nil {
@@ -642,25 +642,25 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 		lifecycleCtx:    hostCtx,
 		lifecycleCancel: cancelHost,
 	}
-	state, err := controlclient.NewStateService(controlclient.StateServiceConfig{
+	state, err := appserver.NewStateService(appserver.StateServiceConfig{
 		Sessions: sessions, Runtime: stack, Feeds: feeds,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	commands, err := controlclient.NewCommandService(controlclient.CommandServiceConfig{
-		Authorizer: controlclient.SessionAuthorizer{Sessions: sessions},
-		Operations: controlclient.NewMemoryOperationStore(),
+	commands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
+		Authorizer: appserver.SessionAuthorizer{Sessions: sessions},
+		Operations: appserver.NewMemoryOperationStore(),
 		Backend:    stack,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := controlclient.NewClient(controlclient.ClientConfig{
+	service, err := appserver.NewClient(appserver.ClientConfig{
 		Commands: commands,
 		State:    state,
 		Feeds:    feeds,
-		Authorizer: controlclient.SessionAuthorizer{
+		Authorizer: appserver.SessionAuthorizer{
 			Sessions: sessions,
 		},
 		Sessions: sessions,
@@ -670,7 +670,7 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	}
 	authenticator, err := controlserver.BearerTokenAuthenticator(
 		"0123456789abcdef0123456789abcdef",
-		controlclient.Principal{ID: "owner"},
+		appserver.Principal{ID: "owner"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -687,15 +687,15 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	remote, err := httpclient.New(httpclient.Config{
 		BaseURL: httpServer.URL, BearerToken: "0123456789abcdef0123456789abcdef",
 		HTTPClient:    httpServer.Client(),
-		Compatibility: controlclient.CurrentCompatibility(),
+		Compatibility: appserver.CurrentCompatibility(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	admissionCtx, cancelAdmission := context.WithCancel(context.Background())
-	prompt, err := remote.Prompt(admissionCtx, controlclient.PromptRequest{
-		WriteBase: controlclient.WriteBase{
+	prompt, err := remote.Prompt(admissionCtx, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID: "operation-remote-host-prompt",
 			SessionID:   active.SessionID,
 		},
@@ -716,8 +716,8 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	if _, err := remote.Cancel(context.Background(), controlclient.CancelRequest{
-		WriteBase: controlclient.WriteBase{
+	if _, err := remote.Cancel(context.Background(), appserver.CancelRequest{
+		WriteBase: appserver.WriteBase{
 			OperationID: "operation-remote-host-cancel",
 			SessionID:   active.SessionID,
 		},
@@ -738,7 +738,7 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 
 type gatewayTestStatusService struct{}
 
-func (gatewayTestStatusService) SessionStatus(context.Context, controlclient.Principal, controlclient.StatusRequest) (controlstatus.StatusSnapshot, error) {
+func (gatewayTestStatusService) SessionStatus(context.Context, appserver.Principal, appserver.StatusRequest) (controlstatus.StatusSnapshot, error) {
 	return controlstatus.StatusSnapshot{}, nil
 }
 
@@ -784,12 +784,12 @@ func TestControlClientCancelParticipantRejectsMainTurnWithArbitraryParticipantID
 		}
 	}()
 	stack := &Stack{Sessions: sessions, gateway: kernel}
-	result, err := stack.ExecuteControlCommand(ctx, controlclient.Principal{ID: "owner"}, controlclient.ActionParticipantCancel, controlclient.CancelParticipantRequest{
-		WriteBase: controlclient.WriteBase{SessionID: active.SessionID}, ParticipantID: "not-the-main-turn",
-		Target: controlclient.TurnTarget{HandleID: started.Handle.HandleID(), RunID: started.Handle.RunID(), TurnID: started.Handle.TurnID()},
+	result, err := stack.ExecuteControlCommand(ctx, appserver.Principal{ID: "owner"}, appserver.ActionParticipantCancel, appserver.CancelParticipantRequest{
+		WriteBase: appserver.WriteBase{SessionID: active.SessionID}, ParticipantID: "not-the-main-turn",
+		Target: appserver.TurnTarget{HandleID: started.Handle.HandleID(), RunID: started.Handle.RunID(), TurnID: started.Handle.TurnID()},
 	})
-	var outcomeErr *controlclient.OutcomeError
-	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlclient.OutcomeConflicted || result.Outcome != controlclient.OutcomeCommitted {
+	var outcomeErr *appserver.OutcomeError
+	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != appserver.OutcomeConflicted || result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("participant cancel against main = %#v, %v", result, err)
 	}
 	if _, ok := kernel.ActiveTurn(active.SessionID); !ok {
@@ -969,11 +969,11 @@ func (handle *controlClientAttachmentFailureHandle) Cancel() agent.CancelResult 
 func (*controlClientAttachmentFailureHandle) Close() error { return nil }
 
 type controlClientFeedRegistry struct {
-	feed controlclient.SessionFeed
+	feed appserver.SessionFeed
 	err  error
 }
 
-func (registry controlClientFeedRegistry) Session(session.SessionRef) (controlclient.SessionFeed, error) {
+func (registry controlClientFeedRegistry) Session(session.SessionRef) (appserver.SessionFeed, error) {
 	return registry.feed, registry.err
 }
 
@@ -988,10 +988,10 @@ func (feed *controlClientSessionFeed) Prime(context.Context) error {
 	return feed.primeErr
 }
 func (*controlClientSessionFeed) Publish(eventstream.Envelope) error { return nil }
-func (*controlClientSessionFeed) Subscribe(context.Context, controlclient.SubscribeRequest) (controlclient.SubscribeResult, error) {
-	return controlclient.SubscribeResult{}, errors.New("test feed does not support Subscribe")
+func (*controlClientSessionFeed) Subscribe(context.Context, appserver.SubscribeRequest) (appserver.SubscribeResult, error) {
+	return appserver.SubscribeResult{}, errors.New("test feed does not support Subscribe")
 }
-func (*controlClientSessionFeed) SubscribeFromNow(context.Context) (controlclient.FeedSubscription, error) {
+func (*controlClientSessionFeed) SubscribeFromNow(context.Context) (appserver.FeedSubscription, error) {
 	return nil, errors.New("test feed does not support SubscribeFromNow")
 }
 func (feed *controlClientSessionFeed) Attach(events <-chan eventstream.Envelope) <-chan error {
@@ -1006,28 +1006,28 @@ func (feed *controlClientSessionFeed) Attach(events <-chan eventstream.Envelope)
 	}()
 	return result
 }
-func (feed *controlClientSessionFeed) AttachTo(_ controlclient.FeedSubscription, events <-chan eventstream.Envelope) <-chan error {
+func (feed *controlClientSessionFeed) AttachTo(_ appserver.FeedSubscription, events <-chan eventstream.Envelope) <-chan error {
 	return feed.Attach(events)
 }
 func (*controlClientSessionFeed) Boundary() (*eventstream.FeedPosition, string) { return nil, "" }
 
 type controlClientAllowAuthorizer struct{}
 
-func (controlClientAllowAuthorizer) Authorize(context.Context, controlclient.Principal, controlclient.Action, string) error {
+func (controlClientAllowAuthorizer) Authorize(context.Context, appserver.Principal, appserver.Action, string) error {
 	return nil
 }
 
 type countingControlClientBackend struct {
-	backend controlclient.CommandBackend
+	backend appserver.CommandBackend
 	calls   atomic.Int32
 }
 
 func (backend *countingControlClientBackend) ExecuteControlCommand(
 	ctx context.Context,
-	principal controlclient.Principal,
-	action controlclient.Action,
+	principal appserver.Principal,
+	action appserver.Action,
 	request any,
-) (controlclient.CommandResult, error) {
+) (appserver.CommandResult, error) {
 	backend.calls.Add(1)
 	return backend.backend.ExecuteControlCommand(ctx, principal, action, request)
 }

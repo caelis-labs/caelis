@@ -7,7 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 // PluginService implements Host-owned plugin and marketplace configuration
@@ -15,7 +15,7 @@ import (
 // the shared recoverable command path.
 type PluginService struct {
 	host     *gatewayapp.Stack
-	commands controlclient.PluginCommandService
+	commands appserver.PluginCommandService
 }
 
 func NewPluginService(host *gatewayapp.Stack) (*PluginService, error) {
@@ -25,7 +25,7 @@ func NewPluginService(host *gatewayapp.Stack) (*PluginService, error) {
 	return &PluginService{host: host, commands: host.PluginCommands()}, nil
 }
 
-func (s *PluginService) ListPlugins(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) ([]controlclient.PluginSnapshot, error) {
+func (s *PluginService) ListPlugins(ctx context.Context, principal appserver.Principal, req appserver.PluginRequest) ([]appserver.PluginSnapshot, error) {
 	driver, err := s.hostAdapter(principal, req)
 	if err != nil {
 		return nil, err
@@ -33,11 +33,11 @@ func (s *PluginService) ListPlugins(ctx context.Context, principal controlclient
 	return driver.ListPlugins(ctx)
 }
 
-func (s *PluginService) AddMarketplace(ctx context.Context, principal controlclient.Principal, req controlclient.AddMarketplaceRequest) (controlclient.CommandResult, error) {
+func (s *PluginService) AddMarketplace(ctx context.Context, principal appserver.Principal, req appserver.AddMarketplaceRequest) (appserver.CommandResult, error) {
 	return s.commands.AddMarketplace(ctx, principal, req)
 }
 
-func (s *PluginService) ListMarketplaces(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) ([]controlclient.MarketplaceSnapshot, error) {
+func (s *PluginService) ListMarketplaces(ctx context.Context, principal appserver.Principal, req appserver.PluginRequest) ([]appserver.MarketplaceSnapshot, error) {
 	driver, err := s.hostAdapter(principal, req)
 	if err != nil {
 		return nil, err
@@ -45,43 +45,43 @@ func (s *PluginService) ListMarketplaces(ctx context.Context, principal controlc
 	return driver.ListMarketplaces(ctx)
 }
 
-func (s *PluginService) UpdateMarketplace(ctx context.Context, principal controlclient.Principal, req controlclient.UpdateMarketplaceRequest) (controlclient.CommandResult, error) {
+func (s *PluginService) UpdateMarketplace(ctx context.Context, principal appserver.Principal, req appserver.UpdateMarketplaceRequest) (appserver.CommandResult, error) {
 	return s.commands.UpdateMarketplace(ctx, principal, req)
 }
 
-func (s *PluginService) RemoveMarketplace(ctx context.Context, principal controlclient.Principal, req controlclient.RemoveMarketplaceRequest) (controlclient.CommandResult, error) {
+func (s *PluginService) RemoveMarketplace(ctx context.Context, principal appserver.Principal, req appserver.RemoveMarketplaceRequest) (appserver.CommandResult, error) {
 	return s.commands.RemoveMarketplace(ctx, principal, req)
 }
 
-func (s *PluginService) AddPluginPath(ctx context.Context, principal controlclient.Principal, req controlclient.AddPluginPathRequest) (controlclient.CommandResult, error) {
+func (s *PluginService) AddPluginPath(ctx context.Context, principal appserver.Principal, req appserver.AddPluginPathRequest) (appserver.CommandResult, error) {
 	return s.commands.AddPluginPath(ctx, principal, req)
 }
 
-func (s *PluginService) InstallPlugin(ctx context.Context, principal controlclient.Principal, req controlclient.InstallPluginRequest) (controlclient.CommandResult, error) {
+func (s *PluginService) InstallPlugin(ctx context.Context, principal appserver.Principal, req appserver.InstallPluginRequest) (appserver.CommandResult, error) {
 	return s.commands.InstallPlugin(ctx, principal, req)
 }
 
-func (s *PluginService) EnablePlugin(ctx context.Context, principal controlclient.Principal, req controlclient.EnablePluginRequest) (controlclient.CommandResult, error) {
+func (s *PluginService) EnablePlugin(ctx context.Context, principal appserver.Principal, req appserver.EnablePluginRequest) (appserver.CommandResult, error) {
 	return s.commands.EnablePlugin(ctx, principal, req)
 }
 
-func (s *PluginService) DisablePlugin(ctx context.Context, principal controlclient.Principal, req controlclient.DisablePluginRequest) (controlclient.CommandResult, error) {
+func (s *PluginService) DisablePlugin(ctx context.Context, principal appserver.Principal, req appserver.DisablePluginRequest) (appserver.CommandResult, error) {
 	return s.commands.DisablePlugin(ctx, principal, req)
 }
 
-func (s *PluginService) RemovePlugin(ctx context.Context, principal controlclient.Principal, req controlclient.RemovePluginRequest) (controlclient.CommandResult, error) {
+func (s *PluginService) RemovePlugin(ctx context.Context, principal appserver.Principal, req appserver.RemovePluginRequest) (appserver.CommandResult, error) {
 	return s.commands.RemovePlugin(ctx, principal, req)
 }
 
-func (s *PluginService) InspectPlugin(ctx context.Context, principal controlclient.Principal, req controlclient.PluginRequest) (controlclient.PluginSnapshot, error) {
+func (s *PluginService) InspectPlugin(ctx context.Context, principal appserver.Principal, req appserver.PluginRequest) (appserver.PluginSnapshot, error) {
 	driver, err := s.hostAdapter(principal, req)
 	if err != nil {
-		return controlclient.PluginSnapshot{}, err
+		return appserver.PluginSnapshot{}, err
 	}
 	return driver.InspectPlugin(ctx, req.ID)
 }
 
-func (s *PluginService) hostAdapter(principal controlclient.Principal, req controlclient.PluginRequest) (controladapter.PluginAssembler, error) {
+func (s *PluginService) hostAdapter(principal appserver.Principal, req appserver.PluginRequest) (controladapter.PluginAssembler, error) {
 	if s == nil || s.host == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: plugin service is unavailable")
 	}
@@ -91,4 +91,4 @@ func (s *PluginService) hostAdapter(principal controlclient.Principal, req contr
 	return controladapter.NewPluginAssemblerForStack(runtimeStack(s.host), strings.TrimSpace(req.Surface), ""), nil
 }
 
-var _ controlclient.PluginService = (*PluginService)(nil)
+var _ appserver.PluginService = (*PluginService)(nil)

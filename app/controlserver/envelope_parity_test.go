@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -24,7 +24,7 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := controlclient.NewFeedRegistry(controlclient.FeedRegistryConfig{CursorCodec: codec})
+	registry, err := appserver.NewFeedRegistry(appserver.FeedRegistryConfig{CursorCodec: codec})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	inProcess, err := feed.Subscribe(context.Background(), controlclient.SubscribeRequest{SessionID: "session-1"})
+	inProcess, err := feed.Subscribe(context.Background(), appserver.SubscribeRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +50,8 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 
 	server, err := New(HandlerConfig{
 		Services: testAppServerServices(parityService{feed: feed}, staticStatusService{}), TaskStreams: &fakeTaskService{},
-		Authenticator: AuthenticatorFunc(func(*http.Request) (controlclient.Principal, error) {
-			return controlclient.Principal{ID: "owner"}, nil
+		Authenticator: AuthenticatorFunc(func(*http.Request) (appserver.Principal, error) {
+			return appserver.Principal{ID: "owner"}, nil
 		}),
 		AllowedHosts: []string{"127.0.0.1"}, Heartbeat: time.Hour,
 	})
@@ -123,20 +123,20 @@ func decimalizeParityPosition(value any, position *eventstream.FeedPosition) {
 }
 
 type parityService struct {
-	controlclient.Service
-	feed controlclient.SessionFeed
+	appserver.Service
+	feed appserver.SessionFeed
 }
 
-func (s parityService) Reconnect(ctx context.Context, _ controlclient.Principal, req controlclient.ReconnectRequest) (controlclient.ReconnectResult, error) {
-	subscription, err := s.feed.Subscribe(ctx, controlclient.SubscribeRequest(req))
+func (s parityService) Reconnect(ctx context.Context, _ appserver.Principal, req appserver.ReconnectRequest) (appserver.ReconnectResult, error) {
+	subscription, err := s.feed.Subscribe(ctx, appserver.SubscribeRequest(req))
 	if err != nil {
-		return controlclient.ReconnectResult{}, err
+		return appserver.ReconnectResult{}, err
 	}
-	return controlclient.ReconnectResult{
-		State: controlclient.SessionState{
+	return appserver.ReconnectResult{
+		State: appserver.SessionState{
 			ProtocolVersion: schema.CurrentProtocolVersion,
-			EnvelopeVersion: controlclient.EnvelopeVersion,
-			APIVersion:      controlclient.HTTPAPIVersion,
+			EnvelopeVersion: appserver.EnvelopeVersion,
+			APIVersion:      appserver.HTTPAPIVersion,
 			SessionID:       req.SessionID,
 			ResumeMode:      subscription.Mode,
 			TransientGap:    subscription.TransientGap,

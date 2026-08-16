@@ -12,7 +12,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -22,7 +22,7 @@ import (
 func TestHostModelCommandsUseHostCASAndSharedLedger(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	beforeSession, err := stack.Sessions.Session(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatal(err)
@@ -31,14 +31,14 @@ func TestHostModelCommandsUseHostCASAndSharedLedger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	connect := controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "host-model-connect", ExpectedRevision: &expected},
-		Config: controlclient.ConnectConfig{
+	connect := appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-model-connect", ExpectedRevision: &expected},
+		Config: appserver.ConnectConfig{
 			Provider: "ollama", Model: "command-model", BaseURL: "http://127.0.0.1:11434",
 		},
 	}
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, connect)
-	if err != nil || connected.Outcome != controlclient.OutcomeCommitted || connected.Revision != expected+1 {
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted || connected.Revision != expected+1 {
 		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
 	}
 	replayed, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, connect)
@@ -48,30 +48,30 @@ func TestHostModelCommandsUseHostCASAndSharedLedger(t *testing.T) {
 	changed := connect
 	changed.Config.Model = "changed-model"
 	conflicted, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, changed)
-	if !errors.Is(err, controlclient.ErrOperationConflict) || conflicted.Outcome != controlclient.OutcomeConflicted {
+	if !errors.Is(err, appserver.ErrOperationConflict) || conflicted.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("ConnectModel(changed payload) = %#v, %v", conflicted, err)
 	}
-	stale, err := stack.ConfigurationCommands().UseModel(ctx, principal, controlclient.UseModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "host-model-stale", ExpectedRevision: &expected},
+	stale, err := stack.ConfigurationCommands().UseModel(ctx, principal, appserver.UseModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-model-stale", ExpectedRevision: &expected},
 		Model:     "ollama/command-model",
 	})
-	if err == nil || stale.Outcome != controlclient.OutcomeConflicted || stale.Revision != connected.Revision || errorcode.CodeOf(err) != errorcode.Conflict {
+	if err == nil || stale.Outcome != appserver.OutcomeConflicted || stale.Revision != connected.Revision || errorcode.CodeOf(err) != errorcode.Conflict {
 		t.Fatalf("UseModel(stale) = %#v, %v", stale, err)
 	}
 
 	fresh := connected.Revision
-	used, err := stack.ConfigurationCommands().UseModel(ctx, principal, controlclient.UseModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "host-model-use", ExpectedRevision: &fresh},
+	used, err := stack.ConfigurationCommands().UseModel(ctx, principal, appserver.UseModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-model-use", ExpectedRevision: &fresh},
 		Model:     "ollama/command-model",
 	})
-	if err != nil || used.Outcome != controlclient.OutcomeCommitted || used.Revision != fresh+1 {
+	if err != nil || used.Outcome != appserver.OutcomeCommitted || used.Revision != fresh+1 {
 		t.Fatalf("UseModel() = %#v, %v", used, err)
 	}
-	deleted, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, controlclient.DeleteModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "host-model-delete", ExpectedRevision: &used.Revision},
+	deleted, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-model-delete", ExpectedRevision: &used.Revision},
 		Model:     "ollama/command-model",
 	})
-	if err != nil || deleted.Outcome != controlclient.OutcomeCommitted || deleted.Revision != used.Revision+1 {
+	if err != nil || deleted.Outcome != appserver.OutcomeCommitted || deleted.Revision != used.Revision+1 {
 		t.Fatalf("DeleteModel() = %#v, %v", deleted, err)
 	}
 	afterSession, err := stack.Sessions.Session(ctx, activeSession.SessionRef)
@@ -82,20 +82,20 @@ func TestHostModelCommandsUseHostCASAndSharedLedger(t *testing.T) {
 		t.Fatalf("Host model commands changed Session revision: before=%d after=%d", beforeSession.Revision, afterSession.Revision)
 	}
 
-	shared, err := stack.ControlClient().CreateSession(ctx, principal, controlclient.CreateSessionRequest{
-		WriteBase:          controlclient.WriteBase{OperationID: "shared-model-ledger"},
+	shared, err := stack.ControlClient().CreateSession(ctx, principal, appserver.CreateSessionRequest{
+		WriteBase:          appserver.WriteBase{OperationID: "shared-model-ledger"},
 		PreferredSessionID: "shared-model-session",
 		WorkspaceKey:       stack.Workspace.Key,
 		CWD:                stack.Workspace.CWD,
 	})
-	if err != nil || shared.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || shared.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("CreateSession() = %#v, %v", shared, err)
 	}
-	sharedConflict, err := stack.ConfigurationCommands().UseModel(ctx, principal, controlclient.UseModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "shared-model-ledger", ExpectedRevision: &deleted.Revision},
+	sharedConflict, err := stack.ConfigurationCommands().UseModel(ctx, principal, appserver.UseModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "shared-model-ledger", ExpectedRevision: &deleted.Revision},
 		Model:     stack.lookup.DefaultID(),
 	})
-	if !errors.Is(err, controlclient.ErrOperationConflict) || sharedConflict.Outcome != controlclient.OutcomeConflicted {
+	if !errors.Is(err, appserver.ErrOperationConflict) || sharedConflict.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("UseModel(shared operation ID) = %#v, %v", sharedConflict, err)
 	}
 }
@@ -103,7 +103,7 @@ func TestHostModelCommandsUseHostCASAndSharedLedger(t *testing.T) {
 func TestHostModelConnectUsesCanonicalDocumentAndDoesNotPersistSecretInLedger(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	external := newAppConfigStore(filepath.Dir(stack.store.path))
 	doc, err := external.LoadContext(ctx)
 	if err != nil {
@@ -116,14 +116,14 @@ func TestHostModelConnectUsesCanonicalDocumentAndDoesNotPersistSecretInLedger(t 
 		t.Fatal(err)
 	}
 	secret := "host-model-ledger-secret"
-	request := controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "host-model-secret", ExpectedRevision: &saved.ConfigurationRevision},
-		Config: controlclient.ConnectConfig{
+	request := appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-model-secret", ExpectedRevision: &saved.ConfigurationRevision},
+		Config: appserver.ConnectConfig{
 			Provider: "openai", Model: "gpt-command", BaseURL: "https://models.example/v1", APIKey: secret,
 		},
 	}
 	result, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, request)
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision != saved.ConfigurationRevision+1 {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != saved.ConfigurationRevision+1 {
 		t.Fatalf("ConnectModel() = %#v, %v", result, err)
 	}
 	committed, err := external.LoadContext(ctx)
@@ -157,15 +157,15 @@ func TestHostModelCredentialsUseStableEndpointReferenceAcrossPrincipals(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	connect := func(principalID, secret string, expected uint64) controlclient.CommandResult {
+	connect := func(principalID, secret string, expected uint64) appserver.CommandResult {
 		t.Helper()
-		result, connectErr := stack.ConfigurationCommands().ConnectModel(ctx, controlclient.Principal{ID: principalID}, controlclient.ConnectModelRequest{
-			WriteBase: controlclient.WriteBase{OperationID: "shared-operation-id", ExpectedRevision: &expected},
-			Config: controlclient.ConnectConfig{
+		result, connectErr := stack.ConfigurationCommands().ConnectModel(ctx, appserver.Principal{ID: principalID}, appserver.ConnectModelRequest{
+			WriteBase: appserver.WriteBase{OperationID: "shared-operation-id", ExpectedRevision: &expected},
+			Config: appserver.ConnectConfig{
 				Provider: "openai", Model: "shared-model", BaseURL: "https://models.example/v1", APIKey: secret,
 			},
 		})
-		if connectErr != nil || result.Outcome != controlclient.OutcomeCommitted {
+		if connectErr != nil || result.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("ConnectModel(%q) = %#v, %v", principalID, result, connectErr)
 		}
 		return result
@@ -213,18 +213,18 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 	t.Run("canonical endpoint without credential rejects retained stable fallback", func(t *testing.T) {
 		ctx := context.Background()
 		stack, _ := newLocalStateTestStack(t)
-		principal := controlclient.Principal{ID: stack.UserID}
+		principal := appserver.Principal{ID: stack.UserID}
 		revision, err := stack.ConfigurationRevision(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, controlclient.ConnectModelRequest{
-			WriteBase: controlclient.WriteBase{OperationID: "canonical-auth-connect", ExpectedRevision: &revision},
-			Config: controlclient.ConnectConfig{
+		connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+			WriteBase: appserver.WriteBase{OperationID: "canonical-auth-connect", ExpectedRevision: &revision},
+			Config: appserver.ConnectConfig{
 				Provider: "openai", Model: "canonical-auth", BaseURL: "https://models.example/v1", APIKey: "canonical-secret",
 			},
 		})
-		if err != nil || connected.Outcome != controlclient.OutcomeCommitted {
+		if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("ConnectModel(initial) = %#v, %v", connected, err)
 		}
 		external := newAppConfigStore(filepath.Dir(stack.store.path))
@@ -241,13 +241,13 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, controlclient.ConnectModelRequest{
-			WriteBase: controlclient.WriteBase{OperationID: "canonical-auth-reject", ExpectedRevision: &saved.ConfigurationRevision},
-			Config: controlclient.ConnectConfig{
+		result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+			WriteBase: appserver.WriteBase{OperationID: "canonical-auth-reject", ExpectedRevision: &saved.ConfigurationRevision},
+			Config: appserver.ConnectConfig{
 				Provider: "openai", Model: "must-require-key", BaseURL: "https://models.example/v1",
 			},
 		})
-		if commandErr == nil || result.Outcome != controlclient.OutcomeRejected || !strings.Contains(commandErr.Error(), "API key") {
+		if commandErr == nil || result.Outcome != appserver.OutcomeRejected || !strings.Contains(commandErr.Error(), "API key") {
 			t.Fatalf("ConnectModel(stale live auth) = %#v, %v", result, commandErr)
 		}
 		actual, revisionErr := stack.ConfigurationRevision(ctx)
@@ -259,19 +259,19 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 	t.Run("canonical legacy credential reference takes precedence over retained stable reference", func(t *testing.T) {
 		ctx := context.Background()
 		stack, _ := newLocalStateTestStack(t)
-		principal := controlclient.Principal{ID: stack.UserID}
+		principal := appserver.Principal{ID: stack.UserID}
 		revision, err := stack.ConfigurationRevision(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
 		baseURL := "https://legacy-ref.example/v1"
-		connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, controlclient.ConnectModelRequest{
-			WriteBase: controlclient.WriteBase{OperationID: "legacy-ref-seed", ExpectedRevision: &revision},
-			Config: controlclient.ConnectConfig{
+		connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+			WriteBase: appserver.WriteBase{OperationID: "legacy-ref-seed", ExpectedRevision: &revision},
+			Config: appserver.ConnectConfig{
 				Provider: "openai", Model: "legacy-seed", BaseURL: baseURL, APIKey: "stable-secret",
 			},
 		})
-		if err != nil || connected.Outcome != controlclient.OutcomeCommitted {
+		if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("ConnectModel(seed) = %#v, %v", connected, err)
 		}
 		legacyRef := "apikey:test:shared"
@@ -297,13 +297,13 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 		if err := stack.apiKeyCredentials.Delete(ctx, stableRef); err != nil {
 			t.Fatal(err)
 		}
-		result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, controlclient.ConnectModelRequest{
-			WriteBase: controlclient.WriteBase{OperationID: "legacy-ref-reuse", ExpectedRevision: &saved.ConfigurationRevision},
-			Config: controlclient.ConnectConfig{
+		result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+			WriteBase: appserver.WriteBase{OperationID: "legacy-ref-reuse", ExpectedRevision: &saved.ConfigurationRevision},
+			Config: appserver.ConnectConfig{
 				Provider: "openai", Model: "legacy-reused", BaseURL: baseURL,
 			},
 		})
-		if commandErr != nil || result.Outcome != controlclient.OutcomeCommitted {
+		if commandErr != nil || result.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("ConnectModel(reuse legacy ref) = %#v, %v", result, commandErr)
 		}
 		persisted, err := stack.store.LoadContext(ctx)
@@ -324,30 +324,30 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 	t.Run("canonical credential permits stale empty live lookup", func(t *testing.T) {
 		ctx := context.Background()
 		stack, _ := newLocalStateTestStack(t)
-		principal := controlclient.Principal{ID: stack.UserID}
+		principal := appserver.Principal{ID: stack.UserID}
 		before := stack.lookup.Snapshot()
 		contextWindow := stack.lookup.contextWindow
 		revision, err := stack.ConfigurationRevision(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, controlclient.ConnectModelRequest{
-			WriteBase: controlclient.WriteBase{OperationID: "canonical-auth-seed", ExpectedRevision: &revision},
-			Config: controlclient.ConnectConfig{
+		connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+			WriteBase: appserver.WriteBase{OperationID: "canonical-auth-seed", ExpectedRevision: &revision},
+			Config: appserver.ConnectConfig{
 				Provider: "openai", Model: "seed", BaseURL: "https://models.example/v1", APIKey: "canonical-secret",
 			},
 		})
-		if err != nil || connected.Outcome != controlclient.OutcomeCommitted {
+		if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("ConnectModel(seed) = %#v, %v", connected, err)
 		}
 		stack.lookup.Restore(before, contextWindow)
-		result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, controlclient.ConnectModelRequest{
-			WriteBase: controlclient.WriteBase{OperationID: "canonical-auth-reuse", ExpectedRevision: &connected.Revision},
-			Config: controlclient.ConnectConfig{
+		result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+			WriteBase: appserver.WriteBase{OperationID: "canonical-auth-reuse", ExpectedRevision: &connected.Revision},
+			Config: appserver.ConnectConfig{
 				Provider: "openai", Model: "reused", BaseURL: "https://models.example/v1",
 			},
 		})
-		if commandErr != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision != connected.Revision+1 {
+		if commandErr != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != connected.Revision+1 {
 			t.Fatalf("ConnectModel(canonical reusable auth) = %#v, %v", result, commandErr)
 		}
 		persisted, err := stack.store.Load()
@@ -366,21 +366,21 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 func TestHostModelReusableCredentialsAreScopedToExactEndpointIdentity(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	revision, err := stack.ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	baseURL := "https://shared-endpoint.example/v1"
-	connect := func(operationID, endpointID, model, apiKey string, expected uint64) controlclient.CommandResult {
+	connect := func(operationID, endpointID, model, apiKey string, expected uint64) appserver.CommandResult {
 		t.Helper()
-		result, connectErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, controlclient.ConnectModelRequest{
-			WriteBase: controlclient.WriteBase{OperationID: operationID, ExpectedRevision: &expected},
-			Config: controlclient.ConnectConfig{
+		result, connectErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+			WriteBase: appserver.WriteBase{OperationID: operationID, ExpectedRevision: &expected},
+			Config: appserver.ConnectConfig{
 				Provider: "openai", EndpointID: endpointID, Model: model, BaseURL: baseURL, APIKey: apiKey,
 			},
 		})
-		if connectErr != nil || result.Outcome != controlclient.OutcomeCommitted {
+		if connectErr != nil || result.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("ConnectModel(%q) = %#v, %v", endpointID, result, connectErr)
 		}
 		return result
@@ -419,19 +419,19 @@ func TestHostModelReusableCredentialsAreScopedToExactEndpointIdentity(t *testing
 func TestHostModelDeleteRetainsEndpointCredentialForPinnedRuntimeAndReconnect(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	revision, err := stack.ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	baseURL := "https://retained.example/v1"
-	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "retained-auth-connect", ExpectedRevision: &revision},
-		Config: controlclient.ConnectConfig{
+	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "retained-auth-connect", ExpectedRevision: &revision},
+		Config: appserver.ConnectConfig{
 			Provider: "openai", Model: "pinned-model", BaseURL: baseURL, APIKey: "retained-secret",
 		},
 	})
-	if err != nil || connected.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
 	}
 	pinnedDoc, err := stack.store.LoadContext(ctx)
@@ -442,11 +442,11 @@ func TestHostModelDeleteRetainsEndpointCredentialForPinnedRuntimeAndReconnect(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	deleted, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, controlclient.DeleteModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "retained-auth-delete", ExpectedRevision: &connected.Revision},
+	deleted, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "retained-auth-delete", ExpectedRevision: &connected.Revision},
 		Model:     "openai/pinned-model",
 	})
-	if err != nil || deleted.Outcome != controlclient.OutcomeCommitted {
+	if err != nil || deleted.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DeleteModel() = %#v, %v", deleted, err)
 	}
 	doc, err := stack.store.LoadContext(ctx)
@@ -465,13 +465,13 @@ func TestHostModelDeleteRetainsEndpointCredentialForPinnedRuntimeAndReconnect(t 
 	if _, resolveErr := pinned.ResolveModel(ctx, "openai/pinned-model", 0); resolveErr != nil {
 		t.Fatalf("pinned Runtime generation lost retained credential: %v", resolveErr)
 	}
-	reconnected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "retained-auth-reconnect", ExpectedRevision: &deleted.Revision},
-		Config: controlclient.ConnectConfig{
+	reconnected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "retained-auth-reconnect", ExpectedRevision: &deleted.Revision},
+		Config: appserver.ConnectConfig{
 			Provider: "openai", Model: "reconnected-model", BaseURL: baseURL,
 		},
 	})
-	if err != nil || reconnected.Outcome != controlclient.OutcomeCommitted || reconnected.Revision != deleted.Revision+1 {
+	if err != nil || reconnected.Outcome != appserver.OutcomeCommitted || reconnected.Revision != deleted.Revision+1 {
 		t.Fatalf("ConnectModel(reuse retained auth) = %#v, %v", reconnected, err)
 	}
 	reloaded, err := stack.store.LoadContext(ctx)
@@ -495,11 +495,11 @@ func TestHostModelCommandPreCanceledContextHasNoEffect(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	result, err := stack.ConfigurationCommands().ConnectModel(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "host-model-cancelled", ExpectedRevision: &before},
-		Config:    controlclient.ConnectConfig{Provider: "openai", Model: "cancelled", APIKey: "must-not-write"},
+	result, err := stack.ConfigurationCommands().ConnectModel(ctx, appserver.Principal{ID: stack.UserID}, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-model-cancelled", ExpectedRevision: &before},
+		Config:    appserver.ConnectConfig{Provider: "openai", Model: "cancelled", APIKey: "must-not-write"},
 	})
-	if err == nil || result.Outcome == controlclient.OutcomeCommitted {
+	if err == nil || result.Outcome == appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel(cancelled) = %#v, %v", result, err)
 	}
 	after, loadErr := stack.ConfigurationRevision(context.Background())
@@ -538,11 +538,11 @@ func TestHostModelConnectCommitsWhileTurnIsActiveWithoutReplacingRuntime(t *test
 		t.Fatal(err)
 	}
 	beforeGateway := stack.currentGateway()
-	result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "host-model-active-turn", ExpectedRevision: &before},
-		Config:    controlclient.ConnectConfig{Provider: "ollama", Model: "future-model", BaseURL: "http://127.0.0.1:11434"},
+	result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, appserver.Principal{ID: stack.UserID}, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-model-active-turn", ExpectedRevision: &before},
+		Config:    appserver.ConnectConfig{Provider: "ollama", Model: "future-model", BaseURL: "http://127.0.0.1:11434"},
 	})
-	if commandErr != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision != before+1 {
+	if commandErr != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != before+1 {
 		t.Fatalf("ConnectModel(active turn) = %#v, %v", result, commandErr)
 	}
 	after, revisionErr := stack.ConfigurationRevision(ctx)
@@ -568,11 +568,11 @@ func TestHostModelConnectRejectsConcurrentOAuthWithoutSecondEffect(t *testing.T)
 	defer release()
 
 	credentialPath := filepath.Join(stack.storeDir, "providers", "codex", "auth.json")
-	result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, controlclient.Principal{ID: stack.UserID}, controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "host-model-concurrent-oauth", ExpectedRevision: &expected},
-		Config:    controlclient.ConnectConfig{Provider: "codex", Model: "gpt-5.6-sol"},
+	result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, appserver.Principal{ID: stack.UserID}, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-model-concurrent-oauth", ExpectedRevision: &expected},
+		Config:    appserver.ConnectConfig{Provider: "codex", Model: "gpt-5.6-sol"},
 	})
-	if commandErr == nil || result.Outcome != controlclient.OutcomeConflicted || errorcode.CodeOf(commandErr) != errorcode.Conflict {
+	if commandErr == nil || result.Outcome != appserver.OutcomeConflicted || errorcode.CodeOf(commandErr) != errorcode.Conflict {
 		t.Fatalf("ConnectModel(concurrent OAuth) = %#v, %v", result, commandErr)
 	}
 	after, revisionErr := stack.ConfigurationRevision(ctx)
@@ -592,21 +592,21 @@ func TestHostModelCommandRollsForwardAfterCommittedWriteWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "host-model-committed-write", ExpectedRevision: &expected},
-		Config: controlclient.ConnectConfig{
+	request := appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-model-committed-write", ExpectedRevision: &expected},
+		Config: appserver.ConnectConfig{
 			Provider: "ollama", Model: "committed-model", BaseURL: "http://127.0.0.1:11434",
 		},
 	}
-	result, err := stack.ConfigurationCommands().ConnectModel(context.Background(), controlclient.Principal{ID: stack.UserID}, request)
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision != expected+1 ||
+	result, err := stack.ConfigurationCommands().ConnectModel(context.Background(), appserver.Principal{ID: stack.UserID}, request)
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != expected+1 ||
 		!strings.Contains(result.Detail, fault.Error()) {
 		t.Fatalf("ConnectModel(committed warning) = %#v, %v", result, err)
 	}
 	if !stack.lookup.HasAlias("ollama/committed-model") {
 		t.Fatal("committed model was not rolled forward into the live lookup")
 	}
-	replayed, replayErr := stack.ConfigurationCommands().ConnectModel(context.Background(), controlclient.Principal{ID: stack.UserID}, request)
+	replayed, replayErr := stack.ConfigurationCommands().ConnectModel(context.Background(), appserver.Principal{ID: stack.UserID}, request)
 	if replayErr != nil || replayed != result || writeCount() != 1 {
 		t.Fatalf("ConnectModel(replay) = %#v, %v writes=%d; want %#v and one write", replayed, replayErr, writeCount(), result)
 	}
@@ -643,15 +643,15 @@ func TestHostModelCommandPersistsUnknownWhenCredentialRollbackIsIncomplete(t *te
 		permissionsRestored = true
 	}
 	t.Cleanup(restorePermissions)
-	request := controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "host-model-rollback-incomplete", ExpectedRevision: &expected},
-		Config: controlclient.ConnectConfig{
+	request := appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-model-rollback-incomplete", ExpectedRevision: &expected},
+		Config: appserver.ConnectConfig{
 			Provider: "openai", Model: "rollback-incomplete", BaseURL: "https://rollback.example/v1", APIKey: "uncommitted-secret",
 		},
 	}
-	result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, controlclient.Principal{ID: stack.UserID}, request)
+	result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, appserver.Principal{ID: stack.UserID}, request)
 	if !errors.Is(commandErr, wantErr) || !errors.Is(commandErr, credentialstore.ErrRollbackIncomplete) ||
-		result.Outcome != controlclient.OutcomeUnknown || result.ErrorCode != errorcode.UnknownOutcome {
+		result.Outcome != appserver.OutcomeUnknown || result.ErrorCode != errorcode.UnknownOutcome {
 		t.Fatalf("ConnectModel(incomplete rollback) = %#v, %v", result, commandErr)
 	}
 	restorePermissions()
@@ -659,7 +659,7 @@ func TestHostModelCommandPersistsUnknownWhenCredentialRollbackIsIncomplete(t *te
 	if revisionErr != nil || actual != expected {
 		t.Fatalf("configuration revision after incomplete rollback = %d, %v; want %d", actual, revisionErr, expected)
 	}
-	replayed, replayErr := stack.ConfigurationCommands().ConnectModel(ctx, controlclient.Principal{ID: stack.UserID}, request)
+	replayed, replayErr := stack.ConfigurationCommands().ConnectModel(ctx, appserver.Principal{ID: stack.UserID}, request)
 	if replayErr != nil || replayed != result || configWrites != 1 {
 		t.Fatalf("ConnectModel(replay) = %#v, %v writes=%d; want %#v and one write", replayed, replayErr, configWrites, result)
 	}
@@ -705,14 +705,14 @@ func TestHostModelCommandDoesNotGuessRevisionWhenCommittedWriteCannotBeReadBack(
 		t.Fatal(err)
 	}
 	secret := "committed-model-secret"
-	request := controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "host-model-committed-readback", ExpectedRevision: &expected},
-		Config: controlclient.ConnectConfig{
+	request := appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-model-committed-readback", ExpectedRevision: &expected},
+		Config: appserver.ConnectConfig{
 			Provider: "openai", Model: "readback-model", BaseURL: "https://models.example/v1", APIKey: secret,
 		},
 	}
-	result, err := stack.ConfigurationCommands().ConnectModel(context.Background(), controlclient.Principal{ID: stack.UserID}, request)
-	if !errors.Is(err, fault) || result.Outcome != controlclient.OutcomeUnknown || result.Revision != 0 {
+	result, err := stack.ConfigurationCommands().ConnectModel(context.Background(), appserver.Principal{ID: stack.UserID}, request)
+	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != 0 {
 		t.Fatalf("ConnectModel(committed readback failure) = %#v, %v", result, err)
 	}
 	if stack.lookup.HasAlias("openai/readback-model") {
@@ -731,7 +731,7 @@ func TestHostModelCommandDoesNotGuessRevisionWhenCommittedWriteCannotBeReadBack(
 	if credentialErr != nil || source.APIKey != secret {
 		t.Fatalf("committed credential %q = %#v, %v", credentialRef, source, credentialErr)
 	}
-	replayed, replayErr := stack.ConfigurationCommands().ConnectModel(context.Background(), controlclient.Principal{ID: stack.UserID}, request)
+	replayed, replayErr := stack.ConfigurationCommands().ConnectModel(context.Background(), appserver.Principal{ID: stack.UserID}, request)
 	if replayErr != nil || replayed != result || writeCount() != 1 {
 		t.Fatalf("ConnectModel(replay) = %#v, %v writes=%d; want %#v and one write", replayed, replayErr, writeCount(), result)
 	}
@@ -740,20 +740,20 @@ func TestHostModelCommandDoesNotGuessRevisionWhenCommittedWriteCannotBeReadBack(
 func TestHostModelCommandReconcilesNewerCanonicalRevisionBeforeLiveInstall(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	principal := controlclient.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.UserID}
 	revision, err := stack.ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	connect := func(operationID, model string, expected uint64) controlclient.CommandResult {
+	connect := func(operationID, model string, expected uint64) appserver.CommandResult {
 		t.Helper()
-		result, connectErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, controlclient.ConnectModelRequest{
-			WriteBase: controlclient.WriteBase{OperationID: operationID, ExpectedRevision: &expected},
-			Config: controlclient.ConnectConfig{
+		result, connectErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
+			WriteBase: appserver.WriteBase{OperationID: operationID, ExpectedRevision: &expected},
+			Config: appserver.ConnectConfig{
 				Provider: "ollama", Model: model, BaseURL: "http://127.0.0.1:11434",
 			},
 		})
-		if connectErr != nil || result.Outcome != controlclient.OutcomeCommitted {
+		if connectErr != nil || result.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("ConnectModel(%q) = %#v, %v", model, result, connectErr)
 		}
 		return result
@@ -784,11 +784,11 @@ func TestHostModelCommandReconcilesNewerCanonicalRevisionBeforeLiveInstall(t *te
 			t.Errorf("external CompareAndSave: %v", loadErr)
 		}
 	}
-	result, err := stack.ConfigurationCommands().UseModel(ctx, principal, controlclient.UseModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "reconcile-use-first", ExpectedRevision: &second.Revision},
+	result, err := stack.ConfigurationCommands().UseModel(ctx, principal, appserver.UseModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "reconcile-use-first", ExpectedRevision: &second.Revision},
 		Model:     "ollama/reconcile-first",
 	})
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision != second.Revision+1 {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != second.Revision+1 {
 		t.Fatalf("UseModel() = %#v, %v", result, err)
 	}
 	canonical, err := stack.store.LoadContext(ctx)
@@ -809,13 +809,13 @@ func TestHostModelCommandCommitsForFutureActivationWithoutAssemblyRefresh(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := stack.ConfigurationCommands().ConnectModel(context.Background(), controlclient.Principal{ID: stack.UserID}, controlclient.ConnectModelRequest{
-		WriteBase: controlclient.WriteBase{OperationID: "host-model-refresh-warning", ExpectedRevision: &expected},
-		Config: controlclient.ConnectConfig{
+	result, err := stack.ConfigurationCommands().ConnectModel(context.Background(), appserver.Principal{ID: stack.UserID}, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "host-model-refresh-warning", ExpectedRevision: &expected},
+		Config: appserver.ConnectConfig{
 			Provider: "ollama", Model: "refresh-model", BaseURL: "http://127.0.0.1:11434",
 		},
 	})
-	if err != nil || result.Outcome != controlclient.OutcomeCommitted || result.Revision != expected+1 {
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != expected+1 {
 		t.Fatalf("ConnectModel() = %#v, %v", result, err)
 	}
 	persisted, loadErr := stack.store.Load()
@@ -833,7 +833,7 @@ func TestHostModelCommandCommitsForFutureActivationWithoutAssemblyRefresh(t *tes
 
 func TestHostConnectModelSelectionsPreserveImageInput(t *testing.T) {
 	enabled := true
-	selections := hostConnectModelSelections(controlclient.ConnectConfig{
+	selections := hostConnectModelSelections(appserver.ConnectConfig{
 		Model:      "acme-vision",
 		ImageInput: &enabled,
 	})

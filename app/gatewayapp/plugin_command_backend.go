@@ -8,7 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
-	controlclient "github.com/caelis-labs/caelis/control/client"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/plugin"
 )
 
@@ -22,37 +22,37 @@ type pluginMutationResult struct {
 
 func isHostPluginCommandRequest(request any) bool {
 	switch request.(type) {
-	case controlclient.AddMarketplaceRequest,
-		controlclient.UpdateMarketplaceRequest,
-		controlclient.RemoveMarketplaceRequest,
-		controlclient.AddPluginPathRequest,
-		controlclient.InstallPluginRequest,
-		controlclient.EnablePluginRequest,
-		controlclient.DisablePluginRequest,
-		controlclient.RemovePluginRequest:
+	case appserver.AddMarketplaceRequest,
+		appserver.UpdateMarketplaceRequest,
+		appserver.RemoveMarketplaceRequest,
+		appserver.AddPluginPathRequest,
+		appserver.InstallPluginRequest,
+		appserver.EnablePluginRequest,
+		appserver.DisablePluginRequest,
+		appserver.RemovePluginRequest:
 		return true
 	default:
 		return false
 	}
 }
 
-func recoverablePluginCommandAction(action controlclient.Action) bool {
+func recoverablePluginCommandAction(action appserver.Action) bool {
 	switch action {
-	case controlclient.ActionPluginMarketplaceAdd,
-		controlclient.ActionPluginMarketplaceUpdate,
-		controlclient.ActionPluginInstall:
+	case appserver.ActionPluginMarketplaceAdd,
+		appserver.ActionPluginMarketplaceUpdate,
+		appserver.ActionPluginInstall:
 		return true
 	default:
 		return false
 	}
 }
 
-func (s *Stack) executePluginCommand(ctx context.Context, action controlclient.Action, request any) (controlclient.CommandResult, error) {
+func (s *Stack) executePluginCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
 	result, err := s.mutatePluginAtRevision(ctx, action, request)
 	command := configurationCommandResult(result.Revision)
 	if result.ResourceRef != "" {
-		command.Resource = &controlclient.CommandResource{
-			Kind: firstNonEmpty(result.ResourceKind, controlclient.CommandResourcePlugin),
+		command.Resource = &appserver.CommandResource{
+			Kind: firstNonEmpty(result.ResourceKind, appserver.CommandResourcePlugin),
 			Ref:  result.ResourceRef,
 		}
 	}
@@ -61,8 +61,8 @@ func (s *Stack) executePluginCommand(ctx context.Context, action controlclient.A
 	}
 	if err == nil && recoverablePluginCommandAction(action) {
 		if receiptErr := s.persistPluginCommandReceipt(ctx, action, command); receiptErr != nil {
-			return command, controlclient.NewOutcomeError(
-				controlclient.OutcomeUnknown,
+			return command, appserver.NewOutcomeError(
+				appserver.OutcomeUnknown,
 				errorcode.Wrap(errorcode.UnknownOutcome, "gatewayapp: persist plugin operation receipt", receiptErr),
 			)
 		}
@@ -70,7 +70,7 @@ func (s *Stack) executePluginCommand(ctx context.Context, action controlclient.A
 	return command, classifyPluginMutationError(result, err)
 }
 
-func (s *Stack) mutatePluginAtRevision(ctx context.Context, action controlclient.Action, request any) (pluginMutationResult, error) {
+func (s *Stack) mutatePluginAtRevision(ctx context.Context, action appserver.Action, request any) (pluginMutationResult, error) {
 	result := pluginMutationResult{}
 	if s == nil {
 		return result, errors.New("gatewayapp: plugin configuration is unavailable")
@@ -131,7 +131,7 @@ func (s *Stack) preflightPluginConfigurationRevision(ctx context.Context, expect
 }
 
 func pluginMutationInvoker(
-	action controlclient.Action,
+	action appserver.Action,
 	request any,
 ) (
 	expected uint64,
@@ -139,67 +139,67 @@ func pluginMutationInvoker(
 	err error,
 ) {
 	switch req := request.(type) {
-	case controlclient.AddMarketplaceRequest:
-		if action != controlclient.ActionPluginMarketplaceAdd {
+	case appserver.AddMarketplaceRequest:
+		if action != appserver.ActionPluginMarketplaceAdd {
 			break
 		}
 		return expectedConfigurationRevision(req.ExpectedRevision), func(ctx context.Context, service PluginService) (string, string, plugin.EffectReport, error, error) {
 			info, effect, invokeErr := service.AddMarketplace(ctx, req.Source)
-			return controlclient.CommandResourceMarketplace, info.Name, effect, nil, invokeErr
+			return appserver.CommandResourceMarketplace, info.Name, effect, nil, invokeErr
 		}, nil
-	case controlclient.UpdateMarketplaceRequest:
-		if action != controlclient.ActionPluginMarketplaceUpdate {
+	case appserver.UpdateMarketplaceRequest:
+		if action != appserver.ActionPluginMarketplaceUpdate {
 			break
 		}
 		return expectedConfigurationRevision(req.ExpectedRevision), func(ctx context.Context, service PluginService) (string, string, plugin.EffectReport, error, error) {
 			info, effect, invokeErr := service.UpdateMarketplace(ctx, req.Name)
-			return controlclient.CommandResourceMarketplace, info.Name, effect, nil, invokeErr
+			return appserver.CommandResourceMarketplace, info.Name, effect, nil, invokeErr
 		}, nil
-	case controlclient.RemoveMarketplaceRequest:
-		if action != controlclient.ActionPluginMarketplaceRemove {
+	case appserver.RemoveMarketplaceRequest:
+		if action != appserver.ActionPluginMarketplaceRemove {
 			break
 		}
 		return expectedConfigurationRevision(req.ExpectedRevision), func(ctx context.Context, service PluginService) (string, string, plugin.EffectReport, error, error) {
-			return controlclient.CommandResourceMarketplace, strings.TrimSpace(req.Name), plugin.EffectReport{}, nil, service.RemoveMarketplace(ctx, req.Name)
+			return appserver.CommandResourceMarketplace, strings.TrimSpace(req.Name), plugin.EffectReport{}, nil, service.RemoveMarketplace(ctx, req.Name)
 		}, nil
-	case controlclient.AddPluginPathRequest:
-		if action != controlclient.ActionPluginAddPath {
+	case appserver.AddPluginPathRequest:
+		if action != appserver.ActionPluginAddPath {
 			break
 		}
 		return expectedConfigurationRevision(req.ExpectedRevision), func(ctx context.Context, service PluginService) (string, string, plugin.EffectReport, error, error) {
 			info, invokeErr := service.AddPath(ctx, req.Path)
-			return controlclient.CommandResourcePlugin, info.ID, plugin.EffectReport{}, pluginInfoWarning(info), invokeErr
+			return appserver.CommandResourcePlugin, info.ID, plugin.EffectReport{}, pluginInfoWarning(info), invokeErr
 		}, nil
-	case controlclient.InstallPluginRequest:
-		if action != controlclient.ActionPluginInstall {
+	case appserver.InstallPluginRequest:
+		if action != appserver.ActionPluginInstall {
 			break
 		}
 		return expectedConfigurationRevision(req.ExpectedRevision), func(ctx context.Context, service PluginService) (string, string, plugin.EffectReport, error, error) {
 			info, effect, invokeErr := service.Install(ctx, req.Source)
-			return controlclient.CommandResourcePlugin, info.ID, effect, pluginInfoWarning(info), invokeErr
+			return appserver.CommandResourcePlugin, info.ID, effect, pluginInfoWarning(info), invokeErr
 		}, nil
-	case controlclient.EnablePluginRequest:
-		if action != controlclient.ActionPluginEnable {
+	case appserver.EnablePluginRequest:
+		if action != appserver.ActionPluginEnable {
 			break
 		}
 		return expectedConfigurationRevision(req.ExpectedRevision), func(ctx context.Context, service PluginService) (string, string, plugin.EffectReport, error, error) {
 			info, invokeErr := service.Enable(ctx, req.ID)
-			return controlclient.CommandResourcePlugin, info.ID, plugin.EffectReport{}, pluginInfoWarning(info), invokeErr
+			return appserver.CommandResourcePlugin, info.ID, plugin.EffectReport{}, pluginInfoWarning(info), invokeErr
 		}, nil
-	case controlclient.DisablePluginRequest:
-		if action != controlclient.ActionPluginDisable {
+	case appserver.DisablePluginRequest:
+		if action != appserver.ActionPluginDisable {
 			break
 		}
 		return expectedConfigurationRevision(req.ExpectedRevision), func(ctx context.Context, service PluginService) (string, string, plugin.EffectReport, error, error) {
 			info, invokeErr := service.Disable(ctx, req.ID)
-			return controlclient.CommandResourcePlugin, info.ID, plugin.EffectReport{}, pluginInfoWarning(info), invokeErr
+			return appserver.CommandResourcePlugin, info.ID, plugin.EffectReport{}, pluginInfoWarning(info), invokeErr
 		}, nil
-	case controlclient.RemovePluginRequest:
-		if action != controlclient.ActionPluginRemove {
+	case appserver.RemovePluginRequest:
+		if action != appserver.ActionPluginRemove {
 			break
 		}
 		return expectedConfigurationRevision(req.ExpectedRevision), func(ctx context.Context, service PluginService) (string, string, plugin.EffectReport, error, error) {
-			return controlclient.CommandResourcePlugin, strings.TrimSpace(req.ID), plugin.EffectReport{}, nil, service.Remove(ctx, req.ID)
+			return appserver.CommandResourcePlugin, strings.TrimSpace(req.ID), plugin.EffectReport{}, nil, service.Remove(ctx, req.ID)
 		}, nil
 	}
 	return 0, nil, errorcode.New(errorcode.InvalidArgument, fmt.Sprintf("gatewayapp: plugin request/action mismatch for %q", action))
@@ -223,8 +223,8 @@ func (s *Stack) currentPluginConfigurationRevision(ctx context.Context) (uint64,
 	return doc.ConfigurationRevision, true
 }
 
-func (s *Stack) persistPluginCommandReceipt(ctx context.Context, action controlclient.Action, command controlclient.CommandResult) error {
-	intent, ok := controlclient.OperationIntentFromContext(ctx)
+func (s *Stack) persistPluginCommandReceipt(ctx context.Context, action appserver.Action, command appserver.CommandResult) error {
+	intent, ok := appserver.OperationIntentFromContext(ctx)
 	if !ok || !recoverablePluginCommandAction(action) {
 		return nil
 	}
@@ -250,12 +250,12 @@ func (s *Stack) persistPluginCommandReceipt(ctx context.Context, action controlc
 	})
 }
 
-func resourceKindForPluginAction(action controlclient.Action) string {
+func resourceKindForPluginAction(action appserver.Action) string {
 	switch action {
-	case controlclient.ActionPluginMarketplaceAdd, controlclient.ActionPluginMarketplaceUpdate, controlclient.ActionPluginMarketplaceRemove:
-		return controlclient.CommandResourceMarketplace
+	case appserver.ActionPluginMarketplaceAdd, appserver.ActionPluginMarketplaceUpdate, appserver.ActionPluginMarketplaceRemove:
+		return appserver.CommandResourceMarketplace
 	default:
-		return controlclient.CommandResourcePlugin
+		return appserver.CommandResourcePlugin
 	}
 }
 
@@ -266,11 +266,11 @@ func classifyPluginMutationError(result pluginMutationResult, err error) error {
 	// Only pre-effect CAS conflicts are safe "no effect" conflicts.
 	if !result.EffectStarted && errors.Is(err, configstore.ErrConfigurationRevisionConflict) {
 		coded := errorcode.Wrap(errorcode.Conflict, "gatewayapp: plugin configuration conflict", err)
-		return controlclient.NewOutcomeError(controlclient.OutcomeConflicted, coded)
+		return appserver.NewOutcomeError(appserver.OutcomeConflicted, coded)
 	}
 	if result.EffectStarted {
-		return controlclient.NewOutcomeError(
-			controlclient.OutcomeUnknown,
+		return appserver.NewOutcomeError(
+			appserver.OutcomeUnknown,
 			errorcode.Wrap(errorcode.UnknownOutcome, "gatewayapp: plugin mutation outcome cannot be proven", err),
 		)
 	}

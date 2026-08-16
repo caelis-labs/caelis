@@ -16,9 +16,9 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	controlclient "github.com/caelis-labs/caelis/control/client"
-	"github.com/caelis-labs/caelis/control/client/wirev1"
-	"github.com/caelis-labs/caelis/control/client/wirev1/generated"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -31,9 +31,9 @@ func TestHostHealthReadinessAndInitializeExposeOneInstance(t *testing.T) {
 	server, err := New(HandlerConfig{
 		Services: testAppServerServices(&fakeService{}, staticStatusService{}), TaskStreams: &fakeTaskService{},
 		Authenticator: testAuthenticator(), AllowedHosts: []string{"example.test"},
-		ServerInfo: controlclient.ServerInfo{
-			ServerID: controlclient.ServerIdentity, InstanceID: instanceID,
-			Capabilities: controlclient.RequiredManagedHostCapabilities(), Transports: []string{"http"},
+		ServerInfo: appserver.ServerInfo{
+			ServerID: appserver.ServerIdentity, InstanceID: instanceID,
+			Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},
 		},
 		Ready: func() bool { return ready },
 	})
@@ -47,7 +47,7 @@ func TestHostHealthReadinessAndInitializeExposeOneInstance(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("health status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	var health controlclient.HostStatus
+	var health appserver.HostStatus
 	if err := json.Unmarshal(recorder.Body.Bytes(), &health); err != nil {
 		t.Fatal(err)
 	}
@@ -78,13 +78,13 @@ func TestHostHealthReadinessAndInitializeExposeOneInstance(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("initialize status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	var info controlclient.ServerInfo
+	var info appserver.ServerInfo
 	if err := wirev1.Unmarshal(recorder.Body.Bytes(), &info); err != nil {
 		t.Fatal(err)
 	}
-	if info.ServerID != controlclient.ServerIdentity || info.InstanceID != instanceID ||
-		!slices.Contains(info.Capabilities, controlclient.CapabilityMultiWorkspace) ||
-		!slices.Contains(info.Capabilities, controlclient.CapabilityWorkspaceCWDList) {
+	if info.ServerID != appserver.ServerIdentity || info.InstanceID != instanceID ||
+		!slices.Contains(info.Capabilities, appserver.CapabilityMultiWorkspace) ||
+		!slices.Contains(info.Capabilities, appserver.CapabilityWorkspaceCWDList) {
 		t.Fatalf("initialize = %#v", info)
 	}
 }
@@ -200,12 +200,12 @@ func TestReconnectSSEBootstrapsStateBeforeBackfillAndLiveEvents(t *testing.T) {
 	subscription.backfill = envelopeChannel(backfill)
 	service := &fakeService{
 		subscription: subscription,
-		reconnectState: controlclient.SessionState{
+		reconnectState: appserver.SessionState{
 			ProtocolVersion: schema.CurrentProtocolVersion,
-			EnvelopeVersion: controlclient.EnvelopeVersion,
-			APIVersion:      controlclient.HTTPAPIVersion,
+			EnvelopeVersion: appserver.EnvelopeVersion,
+			APIVersion:      appserver.HTTPAPIVersion,
 			SessionID:       "session-1", Revision: math.MaxUint64,
-			ResumeMode: controlclient.ResumeModeExact, BoundaryCursor: "cursor-boundary",
+			ResumeMode: appserver.ResumeModeExact, BoundaryCursor: "cursor-boundary",
 		},
 	}
 	server := newTestServer(t, service, time.Hour)
@@ -239,18 +239,18 @@ func TestReconnectSSEBootstrapsStateBeforeBackfillAndLiveEvents(t *testing.T) {
 
 func TestReconnectReportsTypedGapWithRetryCursor(t *testing.T) {
 	subscription := newTestSubscription()
-	subscription.err = &controlclient.FeedGapError{
+	subscription.err = &appserver.FeedGapError{
 		Cause: errors.New("splice overtaken"), RetryCursor: "retry-cursor",
-		Mode: controlclient.ResumeModeDurableFallback, TransientGap: true,
+		Mode: appserver.ResumeModeDurableFallback, TransientGap: true,
 	}
 	server := newTestServer(t, &fakeService{
 		subscription: subscription,
-		reconnectState: controlclient.SessionState{
+		reconnectState: appserver.SessionState{
 			ProtocolVersion: schema.CurrentProtocolVersion,
-			EnvelopeVersion: controlclient.EnvelopeVersion,
-			APIVersion:      controlclient.HTTPAPIVersion,
+			EnvelopeVersion: appserver.EnvelopeVersion,
+			APIVersion:      appserver.HTTPAPIVersion,
 			SessionID:       "session-1",
-			ResumeMode:      controlclient.ResumeModeExact,
+			ResumeMode:      appserver.ResumeModeExact,
 		},
 	}, time.Hour)
 	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/reconnect", nil)
@@ -490,70 +490,70 @@ func TestOpenAPI31ContainsEveryGeneratedOperation(t *testing.T) {
 }
 
 type fakeService struct {
-	controlclient.Service
-	principal      controlclient.Principal
-	created        controlclient.CreateSessionRequest
-	closed         controlclient.CloseSessionRequest
-	compacted      controlclient.CompactSessionRequest
-	prompted       controlclient.PromptRequest
-	promptResult   *controlclient.CommandResult
+	appserver.Service
+	principal      appserver.Principal
+	created        appserver.CreateSessionRequest
+	closed         appserver.CloseSessionRequest
+	compacted      appserver.CompactSessionRequest
+	prompted       appserver.PromptRequest
+	promptResult   *appserver.CommandResult
 	promptErr      error
-	subscription   controlclient.FeedSubscription
-	reconnectReq   controlclient.ReconnectRequest
-	reconnectState controlclient.SessionState
+	subscription   appserver.FeedSubscription
+	reconnectReq   appserver.ReconnectRequest
+	reconnectState appserver.SessionState
 	listCalls      int
-	listed         controlclient.ListSessionsRequest
+	listed         appserver.ListSessionsRequest
 	inspectErr     error
 }
 
-func (s *fakeService) ListSessions(_ context.Context, _ controlclient.Principal, req controlclient.ListSessionsRequest) (session.SessionList, error) {
+func (s *fakeService) ListSessions(_ context.Context, _ appserver.Principal, req appserver.ListSessionsRequest) (session.SessionList, error) {
 	s.listCalls++
 	s.listed = req
 	return session.SessionList{}, nil
 }
-func (s *fakeService) CreateSession(_ context.Context, principal controlclient.Principal, req controlclient.CreateSessionRequest) (controlclient.CommandResult, error) {
+func (s *fakeService) CreateSession(_ context.Context, principal appserver.Principal, req appserver.CreateSessionRequest) (appserver.CommandResult, error) {
 	s.principal = principal
 	s.created = req
-	return controlclient.CommandResult{OperationID: req.OperationID, Outcome: controlclient.OutcomeCommitted, SessionID: "session-created", Revision: 1}, nil
+	return appserver.CommandResult{OperationID: req.OperationID, Outcome: appserver.OutcomeCommitted, SessionID: "session-created", Revision: 1}, nil
 }
-func (s *fakeService) CloseSession(_ context.Context, principal controlclient.Principal, req controlclient.CloseSessionRequest) (controlclient.CommandResult, error) {
+func (s *fakeService) CloseSession(_ context.Context, principal appserver.Principal, req appserver.CloseSessionRequest) (appserver.CommandResult, error) {
 	s.principal = principal
 	s.closed = req
-	return controlclient.CommandResult{OperationID: req.OperationID, Outcome: controlclient.OutcomeCommitted, SessionID: req.SessionID, Revision: 2}, nil
+	return appserver.CommandResult{OperationID: req.OperationID, Outcome: appserver.OutcomeCommitted, SessionID: req.SessionID, Revision: 2}, nil
 }
-func (s *fakeService) CompactSession(_ context.Context, principal controlclient.Principal, req controlclient.CompactSessionRequest) (controlclient.CommandResult, error) {
+func (s *fakeService) CompactSession(_ context.Context, principal appserver.Principal, req appserver.CompactSessionRequest) (appserver.CommandResult, error) {
 	s.principal = principal
 	s.compacted = req
-	return controlclient.CommandResult{OperationID: req.OperationID, Outcome: controlclient.OutcomeCommitted, SessionID: req.SessionID, Revision: 3}, nil
+	return appserver.CommandResult{OperationID: req.OperationID, Outcome: appserver.OutcomeCommitted, SessionID: req.SessionID, Revision: 3}, nil
 }
-func (s *fakeService) Prompt(_ context.Context, principal controlclient.Principal, req controlclient.PromptRequest) (controlclient.CommandResult, error) {
+func (s *fakeService) Prompt(_ context.Context, principal appserver.Principal, req appserver.PromptRequest) (appserver.CommandResult, error) {
 	s.principal = principal
 	s.prompted = req
 	if s.promptResult != nil {
 		return *s.promptResult, s.promptErr
 	}
-	return controlclient.CommandResult{
+	return appserver.CommandResult{
 		OperationID: req.OperationID,
-		Outcome:     controlclient.OutcomeCommitted,
+		Outcome:     appserver.OutcomeCommitted,
 		SessionID:   req.SessionID,
 		Revision:    math.MaxUint64,
-		Target: controlclient.TurnTarget{
+		Target: appserver.TurnTarget{
 			HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1",
 		},
 	}, nil
 }
-func (s *fakeService) InspectSession(context.Context, controlclient.Principal, controlclient.StateRequest) (controlclient.SessionState, error) {
-	return controlclient.SessionState{}, s.inspectErr
+func (s *fakeService) InspectSession(context.Context, appserver.Principal, appserver.StateRequest) (appserver.SessionState, error) {
+	return appserver.SessionState{}, s.inspectErr
 }
-func (s *fakeService) Subscribe(context.Context, controlclient.Principal, controlclient.SubscribeRequest) (controlclient.SubscribeResult, error) {
-	return controlclient.SubscribeResult{Subscription: s.subscription, Mode: controlclient.ResumeModeExact, BoundaryCursor: "signed-cursor-1"}, nil
+func (s *fakeService) Subscribe(context.Context, appserver.Principal, appserver.SubscribeRequest) (appserver.SubscribeResult, error) {
+	return appserver.SubscribeResult{Subscription: s.subscription, Mode: appserver.ResumeModeExact, BoundaryCursor: "signed-cursor-1"}, nil
 }
-func (s *fakeService) Reconnect(_ context.Context, _ controlclient.Principal, req controlclient.ReconnectRequest) (controlclient.ReconnectResult, error) {
+func (s *fakeService) Reconnect(_ context.Context, _ appserver.Principal, req appserver.ReconnectRequest) (appserver.ReconnectResult, error) {
 	s.reconnectReq = req
-	return controlclient.ReconnectResult{State: s.reconnectState, Subscription: s.subscription}, nil
+	return appserver.ReconnectResult{State: s.reconnectState, Subscription: s.subscription}, nil
 }
 
-func newTestServer(t *testing.T, service controlclient.Service, heartbeat time.Duration) *Server {
+func newTestServer(t *testing.T, service appserver.Service, heartbeat time.Duration) *Server {
 	t.Helper()
 	server, err := New(HandlerConfig{
 		Services: testAppServerServices(service, staticStatusService{}), TaskStreams: &fakeTaskService{}, Authenticator: testAuthenticator(),
@@ -570,17 +570,17 @@ type staticStatusService struct {
 	err    error
 }
 
-func (s staticStatusService) SessionStatus(context.Context, controlclient.Principal, controlclient.StatusRequest) (controlstatus.StatusSnapshot, error) {
+func (s staticStatusService) SessionStatus(context.Context, appserver.Principal, appserver.StatusRequest) (controlstatus.StatusSnapshot, error) {
 	return s.status, s.err
 }
 
 type recordingStatusService struct {
-	principal controlclient.Principal
-	request   controlclient.StatusRequest
+	principal appserver.Principal
+	request   appserver.StatusRequest
 	status    controlstatus.StatusSnapshot
 }
 
-func (s *recordingStatusService) SessionStatus(_ context.Context, principal controlclient.Principal, request controlclient.StatusRequest) (controlstatus.StatusSnapshot, error) {
+func (s *recordingStatusService) SessionStatus(_ context.Context, principal appserver.Principal, request appserver.StatusRequest) (controlstatus.StatusSnapshot, error) {
 	s.principal = principal
 	s.request = request
 	return s.status, nil
@@ -614,11 +614,11 @@ func (s *fakeTaskService) Subscribe(_ context.Context, principal taskstream.Prin
 var _ taskstream.Service = (*fakeTaskService)(nil)
 
 func testAuthenticator() Authenticator {
-	return AuthenticatorFunc(func(request *http.Request) (controlclient.Principal, error) {
+	return AuthenticatorFunc(func(request *http.Request) (appserver.Principal, error) {
 		if request.Header.Get("Authorization") != "Bearer test-token" {
-			return controlclient.Principal{}, errors.New("invalid bearer")
+			return appserver.Principal{}, errors.New("invalid bearer")
 		}
-		return controlclient.Principal{ID: "trusted-owner"}, nil
+		return appserver.Principal{ID: "trusted-owner"}, nil
 	})
 }
 
