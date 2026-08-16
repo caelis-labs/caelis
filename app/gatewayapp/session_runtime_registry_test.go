@@ -1348,27 +1348,42 @@ func TestSessionRuntimeIdleReleaseRetriesTransientTaskReadFailure(t *testing.T) 
 		t.Fatal(err)
 	}
 	releaseUse()
-	stack.taskStore = &transientListTaskStore{Store: stack.taskStore, failingUntil: time.Now().Add(15 * time.Millisecond)}
+	transientTasks := &transientListTaskStore{
+		Store:        stack.taskStore,
+		failingUntil: time.Now().Add(15 * time.Millisecond),
+	}
+	stack.sessionRuntimes.tasks = transientTasks
 	if err := observed.Subscription.Close(); err != nil {
 		t.Fatal(err)
 	}
 	waitForSessionRuntimeUnloaded(t, stack.sessionRuntimes, sessionID)
+	if transientTasks.failureCount() == 0 {
+		t.Fatal("idle release did not exercise the injected transient Task reader")
+	}
 }
 
 type transientListTaskStore struct {
 	taskapi.Store
 	mu           sync.Mutex
 	failingUntil time.Time
+	failures     int
 }
 
 func (s *transientListTaskStore) ListSession(ctx context.Context, ref session.SessionRef) ([]*taskapi.Entry, error) {
 	s.mu.Lock()
 	if time.Now().Before(s.failingUntil) {
+		s.failures++
 		s.mu.Unlock()
 		return nil, errors.New("transient task index read")
 	}
 	s.mu.Unlock()
 	return s.Store.ListSession(ctx, ref)
+}
+
+func (s *transientListTaskStore) failureCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.failures
 }
 
 func TestParticipantHandlesUseFixedSessionRuntimeSnapshot(t *testing.T) {

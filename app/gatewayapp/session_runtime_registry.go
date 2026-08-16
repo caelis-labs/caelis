@@ -12,6 +12,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
@@ -45,8 +46,12 @@ type sessionRuntime struct {
 // activations. Durable Session rows own workspace identity; observation does
 // not create an entry here.
 type sessionRuntimeRegistry struct {
-	owner     *Stack
-	assembler *workspaceConfigAssembler
+	sessionService   session.Service
+	tasks            sessionRuntimeTaskReader
+	lifecycleCtx     context.Context
+	defaultWorkspace session.WorkspaceRef
+	modelRecovery    *sessionModelRecovery
+	assembler        sessionRuntimeAssembler
 
 	mu           sync.RWMutex
 	activationMu sync.Mutex
@@ -59,32 +64,49 @@ type sessionRuntimeRegistry struct {
 	idleReleases sync.WaitGroup
 }
 
-func newSessionRuntimeRegistry(owner *Stack) (*sessionRuntimeRegistry, error) {
-	if owner == nil {
-		return nil, errors.New("gatewayapp: Session Runtime owner is required")
+type sessionRuntimeTaskReader interface {
+	ListSession(context.Context, session.SessionRef) ([]*task.Entry, error)
+}
+
+type sessionRuntimeAssembler interface {
+	assembleSnapshot(
+		context.Context,
+		session.Session,
+		sessionRuntimeActivity,
+		session.Service,
+	) (*Stack, error)
+}
+
+type sessionRuntimeRegistryConfig struct {
+	Sessions         session.Service
+	Tasks            sessionRuntimeTaskReader
+	LifecycleContext context.Context
+	DefaultWorkspace session.WorkspaceRef
+	ModelRecovery    *sessionModelRecovery
+	Assembler        sessionRuntimeAssembler
+}
+
+func newSessionRuntimeRegistry(config sessionRuntimeRegistryConfig) (*sessionRuntimeRegistry, error) {
+	if config.Sessions == nil || config.ModelRecovery == nil || config.Assembler == nil {
+		return nil, errors.New("gatewayapp: Session Runtime registry dependencies are required")
 	}
-	workspace, err := canonicalWorkspaceRef(owner.Workspace, session.WorkspaceRef{})
+	workspace, err := canonicalWorkspaceRef(config.DefaultWorkspace, session.WorkspaceRef{})
 	if err != nil {
 		return nil, err
 	}
-	assemblyDeps, err := newSessionRuntimeAssemblyDeps(owner)
-	if err != nil {
-		return nil, err
-	}
-	assembler, err := newWorkspaceConfigAssembler(assemblyDeps)
-	if err != nil {
-		return nil, err
-	}
-	owner.Workspace = workspace
 	buildsIdle := make(chan struct{})
 	close(buildsIdle)
 	return &sessionRuntimeRegistry{
-		owner:        owner,
-		assembler:    assembler,
-		sessions:     map[string]*sessionRuntime{},
-		observers:    map[string]uint64{},
-		workspaceCWD: map[string]string{workspace.Key: workspace.CWD},
-		buildsIdle:   buildsIdle,
+		sessionService:   config.Sessions,
+		tasks:            config.Tasks,
+		lifecycleCtx:     config.LifecycleContext,
+		defaultWorkspace: workspace,
+		modelRecovery:    config.ModelRecovery,
+		assembler:        config.Assembler,
+		sessions:         map[string]*sessionRuntime{},
+		observers:        map[string]uint64{},
+		workspaceCWD:     map[string]string{workspace.Key: workspace.CWD},
+		buildsIdle:       buildsIdle,
 	}, nil
 }
 
@@ -126,16 +148,16 @@ func (r *sessionRuntimeRegistry) resolveCreateWorkspaceLocked(
 	requested session.WorkspaceRef,
 	preferredSessionID string,
 ) (session.WorkspaceRef, error) {
-	if r == nil || r.owner == nil || r.owner.Sessions == nil {
+	if r == nil || r.sessionService == nil {
 		return session.WorkspaceRef{}, errors.New("gatewayapp: Session Runtime registry is unavailable")
 	}
-	workspace, err := canonicalWorkspaceRef(requested, r.owner.Workspace)
+	workspace, err := canonicalWorkspaceRef(requested, r.defaultWorkspace)
 	if err != nil {
 		return session.WorkspaceRef{}, err
 	}
 	preferredSessionID = strings.TrimSpace(preferredSessionID)
 	if preferredSessionID != "" {
-		existing, loadErr := r.owner.Sessions.Session(ctx, session.SessionRef{SessionID: preferredSessionID})
+		existing, loadErr := r.sessionService.Session(ctx, session.SessionRef{SessionID: preferredSessionID})
 		switch {
 		case loadErr == nil:
 			if !principal.HasRole("admin") &&
@@ -191,7 +213,7 @@ func (r *sessionRuntimeRegistry) bindCreatedWorkspaceLocked(
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed || r.owner == nil || r.owner.isClosing() {
+	if r.hostClosingLocked() {
 		return sessionRuntimeHostClosingError()
 	}
 	if err := r.validateWorkspaceIdentityLocked(workspace); err != nil {
@@ -214,7 +236,7 @@ func (r *sessionRuntimeRegistry) bindActivatedLocked(
 	sessionID := strings.TrimSpace(active.SessionID)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed || r.owner == nil || r.owner.isClosing() {
+	if r.hostClosingLocked() {
 		return sessionRuntimeHostClosingError()
 	}
 	if existing := r.sessions[sessionID]; existing != nil && existing != runtime {
@@ -249,14 +271,14 @@ func (r *sessionRuntimeRegistry) activateSessionTracked(
 	ctx context.Context,
 	sessionID string,
 ) (*sessionRuntime, session.Session, bool, error) {
-	if r == nil || r.owner == nil || r.owner.Sessions == nil {
+	if r == nil || r.sessionService == nil {
 		return nil, session.Session{}, false, errors.New("gatewayapp: Session Runtime registry is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return nil, session.Session{}, false, errors.New("gatewayapp: Session ID is required")
 	}
-	sessions := r.owner.Sessions
+	sessions := r.sessionService
 	if err := r.waitSessionRelease(ctx, sessionID); err != nil {
 		return nil, session.Session{}, false, err
 	}
@@ -288,7 +310,7 @@ func (r *sessionRuntimeRegistry) activateSessionTracked(
 	if closed {
 		return nil, active, false, appserver.ErrSessionClosed
 	}
-	active, err = r.owner.modelRecovery.repairMissingSessionModelSelection(buildCtx, sessions, active)
+	active, err = r.modelRecovery.repairMissingSessionModelSelection(buildCtx, sessions, active)
 	if err != nil {
 		return nil, active, false, err
 	}
@@ -340,7 +362,7 @@ func (r *sessionRuntimeRegistry) acquireRuntimeUse(runtime *sessionRuntime) (fun
 		return nil, errors.New("gatewayapp: Session Runtime is unavailable")
 	}
 	r.mu.Lock()
-	if r.closed || r.owner == nil || r.owner.isClosing() {
+	if r.hostClosingLocked() {
 		r.mu.Unlock()
 		return nil, sessionRuntimeHostClosingError()
 	}
@@ -359,7 +381,7 @@ func (r *sessionRuntimeRegistry) acquireLoadedRuntime(sessionID string) (*sessio
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	r.mu.Lock()
-	if r.closed || r.owner == nil || r.owner.isClosing() {
+	if r.hostClosingLocked() {
 		r.mu.Unlock()
 		return nil, nil, sessionRuntimeHostClosingError()
 	}
@@ -399,7 +421,7 @@ func (r *sessionRuntimeRegistry) acquireActivatedControlRuntime(
 			return nil, session.Session{}, nil, false, err
 		}
 		if loaded != nil {
-			active, loadErr := r.owner.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
+			active, loadErr := r.sessionService.Session(ctx, session.SessionRef{SessionID: sessionID})
 			if loadErr != nil {
 				releaseUse()
 				return nil, session.Session{}, nil, false, loadErr
@@ -432,7 +454,7 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 	sessionID string,
 	activate bool,
 ) (*sessionRuntime, session.Session, func(context.Context) error, error) {
-	if r == nil || r.owner == nil {
+	if r == nil || r.sessionService == nil {
 		return nil, session.Session{}, nil, errors.New("gatewayapp: Session Runtime registry is unavailable")
 	}
 	if ctx == nil {
@@ -442,7 +464,7 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 	if sessionID == "" {
 		return nil, session.Session{}, nil, errors.New("gatewayapp: Session ID is required")
 	}
-	sessions := r.owner.Sessions
+	sessions := r.sessionService
 	if activate {
 		runtime, active, release, _, err := r.acquireActivatedControlRuntime(ctx, sessionID)
 		return runtime, active, release, err
@@ -532,7 +554,7 @@ func (r *sessionRuntimeRegistry) retainObservation(ref session.SessionRef) (func
 		return nil, session.ErrInvalidSession
 	}
 	r.mu.Lock()
-	if r.closed || r.owner == nil || r.owner.isClosing() {
+	if r.hostClosingLocked() {
 		r.mu.Unlock()
 		return nil, sessionRuntimeHostClosingError()
 	}
@@ -677,10 +699,10 @@ func (r *sessionRuntimeRegistry) runtimeMayReleaseLocked(runtime *sessionRuntime
 }
 
 func (r *sessionRuntimeRegistry) hasRunningTasks(ctx context.Context, sessionID string) (bool, error) {
-	if r == nil || r.owner == nil || r.owner.taskStore == nil {
+	if r == nil || r.tasks == nil {
 		return false, nil
 	}
-	entries, err := r.owner.taskStore.ListSession(ctx, session.SessionRef{SessionID: sessionID})
+	entries, err := r.tasks.ListSession(ctx, session.SessionRef{SessionID: sessionID})
 	if err != nil {
 		return false, err
 	}
@@ -935,7 +957,7 @@ func (r *sessionRuntimeRegistry) beginBuild(
 		ctx = context.Background()
 	}
 	r.mu.Lock()
-	if r.closed || r.owner == nil || r.owner.isClosing() {
+	if r.hostClosingLocked() {
 		r.mu.Unlock()
 		return nil, nil, sessionRuntimeHostClosingError()
 	}
@@ -943,7 +965,7 @@ func (r *sessionRuntimeRegistry) beginBuild(
 		r.buildsIdle = make(chan struct{})
 	}
 	r.building++
-	lifecycleCtx := r.owner.lifecycleCtx
+	lifecycleCtx := r.lifecycleCtx
 	r.mu.Unlock()
 
 	buildCtx, cancel := context.WithCancel(ctx)
@@ -970,6 +992,15 @@ func (r *sessionRuntimeRegistry) isClosed() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.closed
+}
+
+// hostClosingLocked reports whether Runtime admission has closed explicitly or
+// the process-scoped Host lifecycle has been canceled. The caller holds r.mu.
+func (r *sessionRuntimeRegistry) hostClosingLocked() bool {
+	if r == nil || r.closed {
+		return true
+	}
+	return r.lifecycleCtx != nil && r.lifecycleCtx.Err() != nil
 }
 
 func (r *sessionRuntimeRegistry) isReleasing(sessionID string) bool {

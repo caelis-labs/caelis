@@ -616,7 +616,24 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		stack.lifecycleCancel()
 		return nil, err
 	}
-	sessionRuntimes, err := newSessionRuntimeRegistry(stack)
+	assemblyDeps, err := newSessionRuntimeAssemblyDeps(stack)
+	if err != nil {
+		_ = stack.Close()
+		return nil, err
+	}
+	runtimeAssembler, err := newWorkspaceConfigAssembler(assemblyDeps)
+	if err != nil {
+		_ = stack.Close()
+		return nil, err
+	}
+	sessionRuntimes, err := newSessionRuntimeRegistry(sessionRuntimeRegistryConfig{
+		Sessions:         stack.Sessions,
+		Tasks:            stack.taskStore,
+		LifecycleContext: stack.lifecycleCtx,
+		DefaultWorkspace: stack.Workspace,
+		ModelRecovery:    stack.modelRecovery,
+		Assembler:        runtimeAssembler,
+	})
 	if err != nil {
 		_ = stack.Close()
 		return nil, err
@@ -735,10 +752,10 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	s.closing.Store(true)
 	if s.lifecycleCancel != nil {
 		s.lifecycleCancel()
 	}
+	s.closing.Store(true)
 	if s.sessionRuntimes != nil {
 		var errs []error
 		runtimes, err := s.sessionRuntimes.closeAdmission(ctx)
