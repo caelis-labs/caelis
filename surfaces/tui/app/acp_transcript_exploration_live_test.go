@@ -113,9 +113,14 @@ func TestTerminalPendingExplorationDoesNotRenderAsActiveContainer(t *testing.T) 
 	block.UpdateToolWithMeta("read-1", "Read", "a.go", "", false, false, ToolUpdateMeta{ToolKind: "read"})
 	block.UpdateToolWithMeta("read-2", "Read", "b.go", "", false, false, ToolUpdateMeta{ToolKind: "read"})
 	block.AppendStreamEvent(SEReasoning, "later terminal narrative", narrativeTestSource())
+	ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(100)
+	running := joinRenderedPlain(block.Render(ctx))
+	if !strings.Contains(running, "• Exploring") {
+		t.Fatalf("test setup did not establish a pending exploration container:\n%s", running)
+	}
 	block.Status = "completed"
 
-	rows := block.Render(NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(100))
+	rows := block.Render(ctx)
 	plain := joinRenderedPlain(rows)
 	if strings.Contains(plain, "• Exploring") || strings.Contains(plain, "• Explored") {
 		t.Fatalf("terminal pending tools rendered as an exploration container:\n%s", plain)
@@ -230,6 +235,98 @@ func TestAttemptResetRetryNoticeDoesNotFlattenSettledExploration(t *testing.T) {
 	}
 	if !strings.Contains(plain, "! Retrying model request (1/5, retry in 1s)") {
 		t.Fatalf("retry notice disappeared after attempt reset:\n%s", plain)
+	}
+}
+
+func TestRetryRequestStartKeepsSettledExplorationCollapsed(t *testing.T) {
+	h := newLiveExplorationHarness(t, 100, 30)
+	h.start("read-1", "Read", "read", "a.go")
+	h.complete("read-1", "Read", "read", "a.go")
+	h.start("search-1", "Grep", "search", "needle")
+	h.complete("search-1", "Grep", "search", "needle")
+	h.reason("reason-before-retry", "inspect the completed exploration")
+
+	beforeRetry := ansi.Strip(h.model.View().Content)
+	if got := countExactTrimmedLine(beforeRetry, "• Explored"); got != 1 {
+		t.Fatalf("settled exploration groups before retry = %d, want one:\n%s", got, beforeRetry)
+	}
+
+	reset := liveExplorationAttemptResetEnvelope(5, 5)
+	h.apply(reset)
+	h.drainNarrative()
+	retrying := ansi.Strip(h.model.View().Content)
+	if got := countExactTrimmedLine(retrying, "• Explored"); got != 1 {
+		t.Fatalf("settled exploration groups during retry = %d, want one:\n%s", got, retrying)
+	}
+	if !strings.Contains(retrying, "Retrying model request (5/5)") {
+		t.Fatalf("retry notice missing before the next request:\n%s", retrying)
+	}
+
+	// The next request's running lifecycle clears the transient retry notice
+	// without appending a later transcript step. The previously settled
+	// container must remain compact until the next model narrative arrives.
+	running := liveExplorationLifecycleEnvelope("running")
+	h.apply(running)
+	h.drainNarrative()
+	waiting := ansi.Strip(h.model.View().Content)
+	if strings.Contains(waiting, "Retrying model request") {
+		t.Fatalf("running lifecycle did not clear the transient retry notice:\n%s", waiting)
+	}
+	if got := countExactTrimmedLine(waiting, "• Explored"); got != 1 {
+		t.Fatalf("settled exploration groups while awaiting retry result = %d, want one:\n%s", got, waiting)
+	}
+	if headers := standaloneExplorationHeaders(waiting); len(headers) != 0 {
+		t.Fatalf("settled exploration expanded while awaiting retry result as %q:\n%s", headers, waiting)
+	}
+	updates := renderFullscreenFramesForTest(t, 100, 30, h.frames...)
+	assertPhysicalFullscreenFrame(t, 100, 30, h.model.View().Content, updates)
+
+	h.reason("reason-after-retry", "continue after the retry")
+	afterResult := ansi.Strip(h.model.View().Content)
+	if got := countExactTrimmedLine(afterResult, "• Explored"); got != 1 {
+		t.Fatalf("settled exploration groups after retry result = %d, want one:\n%s", got, afterResult)
+	}
+}
+
+func TestRetryRequestStartKeepsSettledExplorationCollapsedBeforeFirstRender(t *testing.T) {
+	model := NewModel(Config{
+		NoColor:            true,
+		NoAnimation:        true,
+		StreamTickInterval: time.Millisecond,
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	model = updated.(*Model)
+
+	reset := liveExplorationAttemptResetEnvelope(5, 5)
+	running := liveExplorationLifecycleEnvelope("running")
+
+	envelopes := []eventstream.Envelope{
+		liveExplorationToolStartEnvelope("read-1", "Read", "read", "a.go"),
+		liveExplorationToolCompleteEnvelope("read-1", "Read", "read", "a.go"),
+		liveExplorationToolStartEnvelope("search-1", "Grep", "search", "needle"),
+		liveExplorationToolCompleteEnvelope("search-1", "Grep", "search", "needle"),
+		liveExplorationNarrativeEnvelope("reason-before-retry", "inspect the completed exploration"),
+		reset,
+		running,
+	}
+	var batch []TranscriptEvent
+	for _, envelope := range envelopes {
+		batch = append(batch, ProjectACPEventToTranscriptEvents(envelope)...)
+	}
+	updated, _ = model.Update(TranscriptEventsMsg{Events: batch})
+	model = updated.(*Model)
+	updated, _ = model.Update(frameTickMsg{kind: frameTickViewportSync, at: time.Now()})
+	model = updated.(*Model)
+
+	waiting := ansi.Strip(model.View().Content)
+	if strings.Contains(waiting, "Retrying model request") {
+		t.Fatalf("running lifecycle did not clear the transient retry notice:\n%s", waiting)
+	}
+	if got := countExactTrimmedLine(waiting, "• Explored"); got != 1 {
+		t.Fatalf("settled exploration groups before first render = %d, want one:\n%s", got, waiting)
+	}
+	if headers := standaloneExplorationHeaders(waiting); len(headers) != 0 {
+		t.Fatalf("settled exploration expanded before first render as %q:\n%s", headers, waiting)
 	}
 }
 
@@ -384,6 +481,29 @@ func liveExplorationToolCompleteEnvelope(callID, name, kind, arg string) eventst
 		Status:        &status,
 		RawInput:      liveExplorationToolInput(kind, arg),
 	})
+}
+
+func liveExplorationAttemptResetEnvelope(attempt, maxRetries int) eventstream.Envelope {
+	envelope := liveExplorationLifecycleEnvelope("attempt_reset")
+	envelope.Meta = map[string]any{
+		"caelis": map[string]any{
+			"runtime": map[string]any{
+				"attempt_reset": map[string]any{
+					"attempt":     attempt,
+					"max_retries": maxRetries,
+					"retrying":    true,
+				},
+			},
+		},
+	}
+	return envelope
+}
+
+func liveExplorationLifecycleEnvelope(state string) eventstream.Envelope {
+	envelope := liveExplorationEnvelope(nil)
+	envelope.Kind = eventstream.KindLifecycle
+	envelope.Lifecycle = &eventstream.Lifecycle{State: state}
+	return envelope
 }
 
 func liveExplorationEnvelope(update schema.Update) eventstream.Envelope {

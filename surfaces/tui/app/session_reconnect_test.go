@@ -75,6 +75,74 @@ func TestSessionReconnectMessageInstallsSessionBeforeSubagentBackfill(t *testing
 	}
 }
 
+func TestColdSessionResumeKeepsCompletedExplorationCollapsed(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	next, _ := model.Update(SessionReconnectMsg{State: appserver.SessionState{SessionID: "session-resume"}})
+	model = next.(*Model)
+
+	completed := liveExplorationLifecycleEnvelope(eventstream.LifecycleStateCompleted)
+	envelopes := []eventstream.Envelope{
+		liveExplorationToolStartEnvelope("read-1", "Read", "read", "a.go"),
+		liveExplorationToolCompleteEnvelope("read-1", "Read", "read", "a.go"),
+		liveExplorationToolStartEnvelope("search-1", "Grep", "search", "needle"),
+		liveExplorationToolCompleteEnvelope("search-1", "Grep", "search", "needle"),
+		completed,
+	}
+	var replay []TranscriptEvent
+	for _, envelope := range envelopes {
+		envelope.SessionID = "session-resume"
+		envelope.ScopeID = "session-resume"
+		replay = append(replay, projectResumeReplayEvents([]eventstream.Envelope{envelope})...)
+	}
+	next, _ = model.Update(TranscriptEventsMsg{Events: replay, ReconnectReplay: true})
+	model = next.(*Model)
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	plain := joinRenderedPlain(block.Render(model.blockRenderContext(100)))
+	if got := countExactTrimmedLine(plain, "• Explored"); got != 1 {
+		t.Fatalf("cold resume exploration groups = %d, want one:\n%s", got, plain)
+	}
+	if headers := standaloneExplorationHeaders(plain); len(headers) != 0 {
+		t.Fatalf("cold resume expanded completed exploration as %q:\n%s", headers, plain)
+	}
+}
+
+func TestColdSessionResumeKeepsActiveCompletedExplorationCollapsed(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	next, _ := model.Update(SessionReconnectMsg{State: appserver.SessionState{
+		SessionID: "session-resume",
+		Run:       appserver.RunState{Active: true, TurnID: "turn-live-exploration"},
+	}})
+	model = next.(*Model)
+
+	envelopes := []eventstream.Envelope{
+		liveExplorationToolStartEnvelope("read-1", "Read", "read", "a.go"),
+		liveExplorationToolCompleteEnvelope("read-1", "Read", "read", "a.go"),
+		liveExplorationToolStartEnvelope("search-1", "Grep", "search", "needle"),
+		liveExplorationToolCompleteEnvelope("search-1", "Grep", "search", "needle"),
+	}
+	var replay []TranscriptEvent
+	for _, envelope := range envelopes {
+		envelope.SessionID = "session-resume"
+		envelope.ScopeID = "session-resume"
+		replay = append(replay, projectResumeReplayEvents([]eventstream.Envelope{envelope})...)
+	}
+	next, _ = model.Update(TranscriptEventsMsg{Events: replay, ReconnectReplay: true})
+	model = next.(*Model)
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if block.Status != "running" {
+		t.Fatalf("resumed active block status = %q, want running", block.Status)
+	}
+	plain := joinRenderedPlain(block.Render(model.blockRenderContext(100)))
+	if got := countExactTrimmedLine(plain, "• Explored"); got != 1 {
+		t.Fatalf("active cold resume exploration groups = %d, want one:\n%s", got, plain)
+	}
+	if headers := standaloneExplorationHeaders(plain); len(headers) != 0 {
+		t.Fatalf("active cold resume expanded completed exploration as %q:\n%s", headers, plain)
+	}
+}
+
 func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing.T) {
 	backfill := make(chan eventstream.Envelope, 1)
 	backfill <- eventstream.TurnCompleted("old-handle", "old-run", "old-turn", time.Unix(10, 0))
@@ -222,6 +290,9 @@ func TestStreamReconnectBackfillCarriesNormalizedObservedSpawnResult(t *testing.
 		t.Fatalf("backfill messages = %#v, want one ordered terminal-observation batch", messages)
 	}
 	message := messages[0]
+	if !message.ReconnectReplay {
+		t.Fatal("backfill batch is not marked as reconnect replay")
+	}
 	if len(message.Events) != 2 {
 		t.Fatalf("transcript events = %#v, want Spawn call plus hidden Task observation", message.Events)
 	}

@@ -66,6 +66,10 @@ func (b *MainACPTurnBlock) ClearActiveBuffers() {
 	if b == nil {
 		return
 	}
+	// attempt_reset removes speculative narrative before the next render may run.
+	// Preserve any exploration container that the narrative had already settled
+	// so a batched reset followed by running cannot flatten it on first paint.
+	b.explorationProjection.preserveBeforeEventRemoval(b.Events, b.Status)
 	clearNarrativeStream(&b.Events, &b.narrativeStream)
 }
 

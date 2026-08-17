@@ -58,8 +58,9 @@ func streamReconnectBackfill(
 			return
 		}
 		send(TranscriptEventsMsg{
-			Events:       append([]TranscriptEvent(nil), batch...),
-			OwnerRepairs: ownerRepairs.Clone(),
+			Events:          append([]TranscriptEvent(nil), batch...),
+			OwnerRepairs:    ownerRepairs.Clone(),
+			ReconnectReplay: true,
 		})
 		batch = batch[:0]
 		ownerRepairs = acpprojector.TaskOwnerRepairs{}

@@ -192,6 +192,9 @@ const (
 type TranscriptEventsMsg struct {
 	Events       []TranscriptEvent
 	OwnerRepairs acpprojector.TaskOwnerRepairs
+	// ReconnectReplay marks history delivered by the reconnect backfill path.
+	// It affects only first-paint layout reconstruction, never transcript data.
+	ReconnectReplay bool
 }
 
 type PlanEntry = transcript.PlanEntry

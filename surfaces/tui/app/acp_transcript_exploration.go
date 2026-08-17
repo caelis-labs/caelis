@@ -18,6 +18,51 @@ type explorationContainerState struct {
 	Pending  bool
 }
 
+func (s *explorationProjectionState) preserveBeforeEventRemoval(events []SubagentEvent, status string) {
+	if s == nil {
+		return
+	}
+	s.reconcile(visibleNarrativeEvents(events, status), status)
+}
+
+func (m *Model) seedReconnectReplayExploration() {
+	if m == nil || m.doc == nil {
+		return
+	}
+	for _, docBlock := range m.doc.Blocks() {
+		block, ok := docBlock.(*MainACPTurnBlock)
+		if !ok || block == nil {
+			continue
+		}
+		block.explorationProjection.seedReconnectReplay(block.Events, block.Status)
+	}
+}
+
+func (s *explorationProjectionState) seedReconnectReplay(events []SubagentEvent, status string) {
+	if s == nil {
+		return
+	}
+	visible := visibleNarrativeEvents(events, status)
+	if isTerminalACPTranscriptStatus(status) {
+		s.reconcile(visible, status)
+		return
+	}
+	// Reconnect replay paints an existing timeline for the first time, so the
+	// live anti-jump rule does not need to leave its completed tail expanded.
+	// A synthetic zero-row boundary lets the ordinary collector recover that
+	// settled tail without persisting transient retry UI state.
+	withBoundary := append([]SubagentEvent(nil), visible...)
+	withBoundary = append(withBoundary, SubagentEvent{Kind: SESemanticBoundary})
+	current := collectExplorationContainers(withBoundary, status)
+	completed := current[:0]
+	for _, container := range current {
+		if !container.Pending {
+			completed = append(completed, container)
+		}
+	}
+	s.Containers = reconcileLiveExplorationContainers(visible, s.Containers, completed)
+}
+
 func renderStableExplorationRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
 	if opts.StableExplorationRows == nil {
 		return nil, idx, false
@@ -29,11 +74,134 @@ func (s *explorationProjectionState) reconcile(events []SubagentEvent, status st
 	if s == nil {
 		return
 	}
-	// Rebuild membership from the current tool identities and lifecycle on every
-	// render. Tool updates may reclassify a call after its start; retaining an old
-	// member by CallID would let a stale exploration range consume the ordinary
-	// lifecycle row that now owns that call.
-	s.Containers = collectExplorationContainers(events, status)
+	current := collectExplorationContainers(events, status)
+	if isTerminalACPTranscriptStatus(status) {
+		// A terminal Turn cannot retain a formerly pending container. Only the
+		// explicit terminal tool lifecycles collected from the current events may
+		// render as settled exploration.
+		s.Containers = current
+		return
+	}
+	// Rebuild current membership from tool identity and lifecycle on every
+	// render, then retain an already-present container only while every member
+	// still forms the same valid exploration range. This makes settlement
+	// monotonic across transient boundary removal (for example, a retry notice
+	// cleared by a late in-place tool update) without allowing a reclassified
+	// call to consume the ordinary lifecycle row that now owns it.
+	s.Containers = reconcileLiveExplorationContainers(events, s.Containers, current)
+}
+
+func reconcileLiveExplorationContainers(events []SubagentEvent, previous, current []explorationContainerState) []explorationContainerState {
+	if len(previous) == 0 {
+		return current
+	}
+	claimed := make(map[string]bool)
+	candidates := make(map[string]explorationContainerState, len(current)+len(previous))
+	add := func(container explorationContainerState) {
+		key := strings.TrimSpace(container.StableID)
+		if key == "" || len(container.CallIDs) < 2 {
+			return
+		}
+		candidates[key] = container
+		for _, callID := range container.CallIDs {
+			claimed[strings.TrimSpace(callID)] = true
+		}
+	}
+	for _, container := range current {
+		add(container)
+	}
+	for _, container := range previous {
+		overlapsCurrent := false
+		for _, callID := range container.CallIDs {
+			if claimed[strings.TrimSpace(callID)] {
+				overlapsCurrent = true
+				break
+			}
+		}
+		if overlapsCurrent {
+			continue
+		}
+		retained, ok := retainExplorationContainer(events, container)
+		if ok {
+			add(retained)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	ordered := make([]explorationContainerState, 0, len(candidates))
+	for _, event := range events {
+		if event.Kind != SEToolCall {
+			continue
+		}
+		key := strings.TrimSpace(event.CallID)
+		container, ok := candidates[key]
+		if !ok || strings.TrimSpace(container.StableID) != key {
+			continue
+		}
+		ordered = append(ordered, container)
+		delete(candidates, key)
+	}
+	return ordered
+}
+
+func retainExplorationContainer(events []SubagentEvent, previous explorationContainerState) (explorationContainerState, bool) {
+	if len(previous.CallIDs) < 2 {
+		return explorationContainerState{}, false
+	}
+	wanted := make(map[string]int, len(previous.CallIDs))
+	for index, callID := range previous.CallIDs {
+		callID = strings.TrimSpace(callID)
+		if callID == "" {
+			return explorationContainerState{}, false
+		}
+		wanted[callID] = index
+	}
+	first := -1
+	last := -1
+	pending := false
+	next := 0
+	for index, event := range events {
+		if event.Kind != SEToolCall {
+			continue
+		}
+		callID := strings.TrimSpace(event.CallID)
+		position, ok := wanted[callID]
+		if !ok {
+			continue
+		}
+		if position != next || !isExplorationToolEvent(event) {
+			return explorationContainerState{}, false
+		}
+		if first < 0 {
+			first = index
+		}
+		last = index
+		pending = pending || !event.Done
+		next++
+		if next == len(previous.CallIDs) {
+			break
+		}
+	}
+	if next != len(previous.CallIDs) || first < 0 || last < first {
+		return explorationContainerState{}, false
+	}
+	for _, event := range events[first : last+1] {
+		switch event.Kind {
+		case SEReasoning, SEAssistant:
+			continue
+		case SEToolCall:
+			if _, ok := wanted[strings.TrimSpace(event.CallID)]; ok && isExplorationToolEvent(event) {
+				continue
+			}
+		}
+		return explorationContainerState{}, false
+	}
+	return explorationContainerState{
+		StableID: strings.TrimSpace(previous.CallIDs[0]),
+		CallIDs:  append([]string(nil), previous.CallIDs...),
+		Pending:  pending,
+	}, true
 }
 
 func collectExplorationContainers(events []SubagentEvent, status string) []explorationContainerState {

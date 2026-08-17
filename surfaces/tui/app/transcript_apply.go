@@ -32,6 +32,9 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	if next, ok := model.(*Model); ok {
 		m = next
 	}
+	if msg.ReconnectReplay {
+		m.seedReconnectReplayExploration()
+	}
 	observedSpawnCmd := m.applyObservedSpawnResults(msg.OwnerRepairs.Spawns)
 	m.applyObservedCommandResults(msg.OwnerRepairs.Commands)
 	// Spawn views, including terminal owner repairs projected from Task
