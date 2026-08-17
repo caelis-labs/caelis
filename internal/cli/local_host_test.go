@@ -263,9 +263,9 @@ func TestAutomaticWorkspaceAddressListsAndResumesPersistedLegacyAliases(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := legacy.Sessions.StartSession(ctx, session.StartSessionRequest{
-			AppName: legacy.AppName, UserID: legacy.UserID,
-			Workspace: legacy.Workspace, PreferredSessionID: sessionID,
+		if _, err := legacy.Sessions().StartSession(ctx, session.StartSessionRequest{
+			AppName: legacy.AppName(), UserID: legacy.UserID(),
+			Workspace: legacy.Workspace(), PreferredSessionID: sessionID,
 		}); err != nil {
 			_ = legacy.Close()
 			t.Fatal(err)

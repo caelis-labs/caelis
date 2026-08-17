@@ -10,7 +10,7 @@ import (
 )
 
 func (s *Stack) runSandboxLifecycle(ctx context.Context, action sandboxLifecycleAction) (SandboxStatus, error) {
-	target, err := s.selectSandboxLifecycleTarget(s.sandbox)
+	target, err := s.selectSandboxLifecycleTarget(s.composition.sandbox)
 	if err != nil {
 		return SandboxStatus{}, err
 	}
@@ -49,7 +49,7 @@ func TestSandboxStatusForWorkspaceDoesNotReuseStartupRuntimeSetup(t *testing.T) 
 		Root: "/workspace", Counts: map[string]int{"write_roots": 2},
 	}}}
 	stack := sandboxLifecycleTestStack(runtime, "windows")
-	stack.sandbox = mergeSandboxConfig(stack.sandboxPersisted, stack.sandboxOverride)
+	stack.composition.sandbox = mergeSandboxConfig(stack.composition.sandboxPersisted, stack.composition.sandboxOverride)
 
 	startup := stack.SandboxStatusForWorkspace(session.WorkspaceRef{Key: "startup", CWD: "/workspace"})
 	if startup.WorkspaceSetupRoot != "/workspace" || startup.WorkspaceSetupWriteRoots != 2 {
@@ -100,8 +100,8 @@ func TestSandboxLifecycleUsesTemporaryRuntimeWhenCurrentCannotHandleLifecycle(t 
 		sandboxLifecycleTestRuntime: newSandboxLifecycleTestRuntime(sandbox.BackendWindows, sandbox.BackendWindows),
 	}
 	stack := sandboxLifecycleTestStack(current, "windows")
-	stack.Workspace.CWD = "/workspace"
-	stack.storeDir = "/store"
+	stack.composition.workspace.CWD = "/workspace"
+	stack.composition.storeDir = "/store"
 
 	var factoryCalls int
 	stack.sandboxLifecycleFactory = func(cfg sandbox.Config, current sandbox.Runtime) (sandbox.LifecycleTarget, error) {
@@ -115,7 +115,7 @@ func TestSandboxLifecycleUsesTemporaryRuntimeWhenCurrentCannotHandleLifecycle(t 
 		if cfg.StateDir != "/store" {
 			t.Fatalf("factory cfg.StateDir = %q, want /store", cfg.StateDir)
 		}
-		if current != stack.exec {
+		if current != stack.composition.exec {
 			t.Fatalf("factory current runtime = %#v, want stack runtime", current)
 		}
 		return sandbox.LifecycleTarget{Runtime: temp, Config: cfg}, nil
@@ -248,18 +248,18 @@ func TestCloseWorkspaceResourcesRetainsFailedRuntimeForRetry(t *testing.T) {
 	runtime.closeErr = closeErr
 	stack := sandboxLifecycleTestStack(runtime, "host")
 
-	if err := stack.closeWorkspaceResources(); !errors.Is(err, closeErr) {
+	if err := stack.composition.closeWorkspaceResources(); !errors.Is(err, closeErr) {
 		t.Fatalf("first closeWorkspaceResources() error = %v, want %v", err, closeErr)
 	}
-	if stack.exec != runtime {
+	if stack.composition.exec != runtime {
 		t.Fatal("failed sandbox Runtime close discarded the retryable resource owner")
 	}
 
 	runtime.closeErr = nil
-	if err := stack.closeWorkspaceResources(); err != nil {
+	if err := stack.composition.closeWorkspaceResources(); err != nil {
 		t.Fatalf("retry closeWorkspaceResources() error = %v", err)
 	}
-	if stack.exec != nil {
+	if stack.composition.exec != nil {
 		t.Fatal("successful sandbox Runtime close retained the resource")
 	}
 	if runtime.closeCalls != 2 {
@@ -270,8 +270,8 @@ func TestCloseWorkspaceResourcesRetainsFailedRuntimeForRetry(t *testing.T) {
 func sandboxLifecycleTestStack(runtime sandbox.Runtime, requestedBackend string) *Stack {
 	configured := SandboxConfig{RequestedType: requestedBackend}
 	return &Stack{
-		runtimeComposition: runtimeComposition{
-			Workspace: session.WorkspaceRef{CWD: "/workspace"}, sandbox: configured,
+		composition: runtimeComposition{
+			workspace: session.WorkspaceRef{CWD: "/workspace"}, sandbox: configured,
 			sandboxPersisted: cloneSandboxConfig(configured), exec: runtime, storeDir: "/store",
 		},
 	}

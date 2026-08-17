@@ -50,7 +50,7 @@ func (s *Stack) prepareControlClientReconnect(ctx context.Context, ref session.S
 	if _, loaded := s.sessionRuntimes.loaded(ref.SessionID); loaded || s.sessionRuntimes.isReleasing(ref.SessionID) {
 		return nil
 	}
-	sessions := s.Sessions
+	sessions := s.composition.sessions
 	if sessions == nil {
 		return nil
 	}

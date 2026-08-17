@@ -17,7 +17,7 @@ func TestHostedChildMailboxRoutesParentAndSiblingThroughParentSession(t *testing
 	var got agentmessage.Request
 	var gotParent session.SessionRef
 	stack := &Stack{
-		runtimeComposition: runtimeComposition{
+		composition: runtimeComposition{
 			hostedChildMailbox: func(_ context.Context, parentRef session.SessionRef, req agentmessage.Request) (agentmessage.Response, error) {
 				gotParent = parentRef
 				got = req
@@ -47,7 +47,7 @@ func TestHostedChildMailboxRoutesParentAndSiblingThroughParentSession(t *testing
 		},
 	}
 	sender := hostedChildMessageSender{
-		deliver: stack.hostedChildMailbox,
+		deliver: stack.composition.hostedChildMailbox,
 		parent:  parent,
 		child:   child,
 	}
@@ -99,7 +99,7 @@ func TestHostedChildSendMessageReachesParentSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent, err = host.Sessions.BindController(ctx, session.BindControllerRequest{
+	parent, err = host.composition.sessions.BindController(ctx, session.BindControllerRequest{
 		SessionRef: parent.SessionRef,
 		Binding: session.ControllerBinding{
 			Kind: session.ControllerKindKernel, ControllerID: "parent-controller", AgentName: "main", EpochID: "epoch-1",
@@ -108,9 +108,9 @@ func TestHostedChildSendMessageReachesParentSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := host.Sessions.StartSession(ctx, session.StartSessionRequest{
-		AppName: host.AppName, UserID: host.UserID,
-		Workspace: session.WorkspaceRef{Key: host.Workspace.Key, CWD: host.Workspace.CWD},
+	child, err := host.composition.sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: host.composition.appName, UserID: host.composition.userID,
+		Workspace: session.WorkspaceRef{Key: host.composition.workspace.Key, CWD: host.composition.workspace.CWD},
 		Metadata: map[string]any{
 			sessionvisibility.MetadataSystemManagedAgent:  sessionvisibility.SystemManagedAgentSubagent,
 			sessionvisibility.MetadataSystemManagedParent: parent.SessionID,
@@ -120,7 +120,7 @@ func TestHostedChildSendMessageReachesParentSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = host.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
+	if _, err = host.composition.sessions.PutParticipant(ctx, session.PutParticipantRequest{
 		SessionRef: parent.SessionRef,
 		Binding: session.ParticipantBinding{
 			ID: "child-agent", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated,
@@ -146,7 +146,7 @@ func TestHostedChildSendMessageReachesParentSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := host.Sessions.Events(ctx, session.EventsRequest{SessionRef: parent.SessionRef})
+	events, err := host.composition.sessions.Events(ctx, session.EventsRequest{SessionRef: parent.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}

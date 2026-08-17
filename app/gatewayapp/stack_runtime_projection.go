@@ -17,14 +17,14 @@ import (
 )
 
 // runtimeProjection returns the process root's Runtime composition without
-// exposing it outside gatewayapp. Keeping explicit Stack forwarding methods
-// preserves the public Host API, including its historical nil-receiver
-// behavior, while detached Session Runtimes use runtimeComposition directly.
+// exposing it outside gatewayapp. Stack keeps the composition as a named field
+// so only deliberate Host methods cross the boundary; detached Session
+// Runtimes use runtimeComposition directly.
 func (s *Stack) runtimeProjection() *runtimeComposition {
 	if s == nil {
 		return nil
 	}
-	return &s.runtimeComposition
+	return &s.composition
 }
 
 func (s *Stack) KernelTurnState() KernelTurnReader {

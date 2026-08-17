@@ -70,7 +70,7 @@ func TestGuardianRealMimoReviewWithoutOutputBudget(t *testing.T) {
 		}
 	})
 
-	resolved, handled, err := stack.resolveSystemAgentModel(ctx, agentbinding.HandleGuardian, 0)
+	resolved, handled, err := stack.composition.resolveSystemAgentModel(ctx, agentbinding.HandleGuardian, 0)
 	if err != nil {
 		t.Fatalf("resolve Guardian model: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestGuardianRealMimoReviewWithoutOutputBudget(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			appendGuardianRealMimoTranscript(t, ctx, stack.Sessions, activeSession)
+			appendGuardianRealMimoTranscript(t, ctx, stack.composition.sessions, activeSession)
 
 			diagnostic := &guardianDiagnosticModel{}
 			var guardianModel model.LLM
@@ -102,7 +102,7 @@ func TestGuardianRealMimoReviewWithoutOutputBudget(t *testing.T) {
 				diagnostic.inner = productionModel
 				guardianModel = diagnostic
 			}
-			reviewer, ok := newGuardianApprovalReviewer(stack.Sessions).(*guardianApprovalReviewer)
+			reviewer, ok := newGuardianApprovalReviewer(stack.composition.sessions).(*guardianApprovalReviewer)
 			if !ok {
 				t.Fatal("Guardian reviewer has unexpected implementation")
 			}

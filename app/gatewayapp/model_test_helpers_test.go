@@ -27,16 +27,16 @@ func (s *Stack) connectTestModel(cfg ModelConfig) (modelprofile.ModelProfile, er
 func (s *Stack) connectTestModels(configs []ModelConfig) ([]modelprofile.ModelProfile, error) {
 	result, err := s.connectModelsAtRevision(context.Background(), configs, nil)
 	resultErr := errors.Join(err, result.Warning)
-	doc, loadErr := s.store.Load()
+	doc, loadErr := s.composition.store.Load()
 	if loadErr != nil {
 		return nil, errors.Join(resultErr, loadErr)
 	}
 	profiles := make([]modelprofile.ModelProfile, 0, len(configs))
 	for _, raw := range configs {
 		configured := normalizeModelConfig(raw)
-		current, ok := s.lookup.Config(configured.ID)
+		current, ok := s.composition.lookup.Config(configured.ID)
 		if !ok {
-			current, ok = s.lookup.Config(configured.Alias)
+			current, ok = s.composition.lookup.Config(configured.Alias)
 		}
 		if !ok {
 			continue

@@ -149,7 +149,7 @@ func connectClaudeAgentForE2E(
 	if strings.TrimSpace(os.Getenv("CAELIS_CLAUDE_ACP_E2E_INSTALL")) == "1" {
 		launcher = controlagents.LauncherChoiceManaged
 	}
-	req := controlagents.ConnectRequest{AdapterID: "claude", Launcher: launcher, CWD: stack.Workspace.CWD}
+	req := controlagents.ConnectRequest{AdapterID: "claude", Launcher: launcher, CWD: stack.Workspace().CWD}
 	discovered, err := driver.DiscoverACPConnection(ctx, req)
 	if err != nil {
 		t.Fatalf("DiscoverACPConnection(claude, %s) error = %v", launcher, err)

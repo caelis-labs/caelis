@@ -91,7 +91,7 @@ func (s testAgentBindingService) mutate(
 }
 
 func (s testAgentBindingService) principal() appserver.Principal {
-	return appserver.Principal{ID: firstNonEmpty(s.stack.UserID, "gatewayapp-test")}
+	return appserver.Principal{ID: firstNonEmpty(s.stack.composition.userID, "gatewayapp-test")}
 }
 
 func (s testAgentBindingService) commands() appserver.AgentCommandService {

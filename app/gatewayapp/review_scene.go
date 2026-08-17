@@ -26,8 +26,8 @@ func (s *runtimeComposition) materializeReviewerAgent(
 		}
 		return configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 			StoreDir:     s.storeDir,
-			WorkspaceKey: s.Workspace.Key,
-			WorkspaceCWD: s.Workspace.CWD,
+			WorkspaceKey: s.workspace.Key,
+			WorkspaceCWD: s.workspace.CWD,
 			SessionOptions: caelisModelSessionOptions(
 				configured,
 				placement.ReasoningEffort,

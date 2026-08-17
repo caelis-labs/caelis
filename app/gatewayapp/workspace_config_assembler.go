@@ -93,10 +93,10 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 
 	instance := &sessionRuntimeInstance{
 		runtimeComposition: runtimeComposition{
-			Sessions:                sessions,
-			AppName:                 deps.appName,
-			UserID:                  deps.userID,
-			Workspace:               workspace,
+			sessions:                sessions,
+			appName:                 deps.appName,
+			userID:                  deps.userID,
+			workspace:               workspace,
 			store:                   deps.store,
 			storeDir:                deps.storeDir,
 			leaseOwnerID:            deps.leaseOwnerID,

@@ -120,13 +120,13 @@ func defaultCompactionConfig(contextWindow int) sdkruntime.CompactionConfig {
 }
 
 func (s *runtimeComposition) SessionUsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string) (compact.UsageSnapshot, error) {
-	if s == nil || s.Sessions == nil {
+	if s == nil || s.sessions == nil {
 		return compact.UsageSnapshot{}, fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return compact.UsageSnapshot{}, nil
 	}
-	events, err := s.Sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
+	events, err := s.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
 	if err != nil {
 		return compact.UsageSnapshot{}, err
 	}

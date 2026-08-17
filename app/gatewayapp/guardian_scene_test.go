@@ -8,9 +8,9 @@ import (
 
 func TestStackNewGuardianApproverUsesStackSessions(t *testing.T) {
 	sessions := inmemory.NewStore(inmemory.Config{})
-	stack := &Stack{runtimeComposition: runtimeComposition{Sessions: sessions}}
+	stack := &Stack{composition: runtimeComposition{sessions: sessions}}
 
-	approver := stack.newGuardianApprover()
+	approver := stack.composition.newGuardianApprover()
 	if approver == nil {
 		t.Fatal("newGuardianApprover() = nil")
 	}

@@ -133,7 +133,7 @@ func TestHeadlessEmbeddedAppServerCoversCreateResumeAndFormats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, err := server.Bind(appserver.Principal{ID: host.UserID})
+	clients, err := server.Bind(appserver.Principal{ID: host.UserID()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestHeadlessEmbeddedAppServerCoversCreateResumeAndFormats(t *testing.T) {
 	createdSessionID, err := runHeadless(
 		ctx,
 		clients.Sessions,
-		host.Workspace,
+		host.Workspace(),
 		"",
 		"first prompt",
 		outputText,
@@ -165,7 +165,7 @@ func TestHeadlessEmbeddedAppServerCoversCreateResumeAndFormats(t *testing.T) {
 	resumedSessionID, err := runHeadless(
 		ctx,
 		clients.Sessions,
-		host.Workspace,
+		host.Workspace(),
 		createdSessionID,
 		"resume prompt",
 		outputJSON,
@@ -187,7 +187,7 @@ func TestHeadlessEmbeddedAppServerCoversCreateResumeAndFormats(t *testing.T) {
 	jsonlSessionID, err := runHeadless(
 		ctx,
 		clients.Sessions,
-		host.Workspace,
+		host.Workspace(),
 		"",
 		"stream prompt",
 		outputJSONL,

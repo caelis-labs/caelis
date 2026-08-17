@@ -61,20 +61,20 @@ func startEvalSession(
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, err := server.Bind(appserver.Principal{ID: stack.UserID})
+	clients, err := server.Bind(appserver.Principal{ID: stack.UserID()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := clients.Sessions.CreateSession(ctx, appserver.CreateSessionRequest{
 		WriteBase:          appserver.WriteBase{OperationID: "eval-session-" + uuid.NewString()},
 		PreferredSessionID: preferredSessionID,
-		WorkspaceKey:       stack.Workspace.Key,
-		CWD:                stack.Workspace.CWD,
+		WorkspaceKey:       stack.Workspace().Key,
+		CWD:                stack.Workspace().CWD,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	active, err := stack.Sessions.Session(ctx, session.SessionRef{SessionID: result.SessionID})
+	active, err := stack.Sessions().Session(ctx, session.SessionRef{SessionID: result.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}

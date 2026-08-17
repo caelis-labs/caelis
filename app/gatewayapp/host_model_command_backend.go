@@ -144,7 +144,7 @@ func (s *Stack) assembleHostModelConnect(ctx context.Context, cfg appserver.Conn
 	}, modelconfig.ConnectOptions{
 		HasReusableAuth: func(ctx context.Context, provider, baseURL string) bool {
 			var reusable bool
-			reusableCredentialRef, reusable = s.reusableProviderCredentialRef(ctx, candidate, provider, cfg.EndpointID, baseURL)
+			reusableCredentialRef, reusable = s.composition.reusableProviderCredentialRef(ctx, candidate, provider, cfg.EndpointID, baseURL)
 			return reusable
 		},
 		Authenticate: authenticate,
@@ -190,7 +190,7 @@ func (s *runtimeComposition) reusableProviderCredentialRef(ctx context.Context, 
 }
 
 func (s *Stack) bindReusableAPIKeyCredential(ctx context.Context, configs []ModelConfig, reusableRef string) ([]ModelConfig, error) {
-	if s == nil || s.apiKeyCredentials == nil {
+	if s == nil || s.composition.apiKeyCredentials == nil {
 		return configs, nil
 	}
 	bound := append([]ModelConfig(nil), configs...)
@@ -207,7 +207,7 @@ func (s *Stack) bindReusableAPIKeyCredential(ctx context.Context, configs []Mode
 		if ref == "" {
 			continue
 		}
-		source, err := s.apiKeyCredentials.LookupSource(ctx, ref)
+		source, err := s.composition.apiKeyCredentials.LookupSource(ctx, ref)
 		if err != nil {
 			return nil, fmt.Errorf("gatewayapp: retained provider credential %q is unavailable: %w", ref, err)
 		}

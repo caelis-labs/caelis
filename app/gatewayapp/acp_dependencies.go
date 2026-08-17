@@ -23,13 +23,13 @@ func (s *Stack) PresentationDependencies() (AppServerPresentationDependencies, e
 	if s == nil {
 		return AppServerPresentationDependencies{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
-	s.mu.RLock()
+	s.composition.mu.RLock()
 	deps := AppServerPresentationDependencies{
-		Sessions: s.Sessions,
-		Assembly: assembly.CloneResolvedAssembly(s.runtime.Assembly),
-		AppName:  s.AppName,
-		UserID:   s.UserID,
+		Sessions: s.composition.sessions,
+		Assembly: assembly.CloneResolvedAssembly(s.composition.runtime.Assembly),
+		AppName:  s.composition.appName,
+		UserID:   s.composition.userID,
 	}
-	s.mu.RUnlock()
+	s.composition.mu.RUnlock()
 	return deps, nil
 }

@@ -35,6 +35,32 @@ func TestSessionRuntimeLifecycleTypesDoNotRetainHostStack(t *testing.T) {
 	}
 }
 
+func TestStackOwnsRuntimeCompositionAsNamedPrivateState(t *testing.T) {
+	t.Parallel()
+
+	stackType := reflect.TypeFor[Stack]()
+	field, ok := stackType.FieldByName("composition")
+	if !ok {
+		t.Fatal("Stack has no named runtime composition field")
+	}
+	if field.Anonymous {
+		t.Fatal("Stack anonymously embeds runtimeComposition")
+	}
+	if field.IsExported() {
+		t.Fatal("Stack runtime composition field is exported")
+	}
+	if field.Type != reflect.TypeFor[runtimeComposition]() {
+		t.Fatalf("Stack composition type = %v, want %v", field.Type, reflect.TypeFor[runtimeComposition]())
+	}
+
+	compositionType := reflect.TypeFor[runtimeComposition]()
+	for i := range compositionType.NumField() {
+		if compositionField := compositionType.Field(i); compositionField.IsExported() {
+			t.Errorf("runtimeComposition field %s is exported", compositionField.Name)
+		}
+	}
+}
+
 func retainedConcreteStack(typ reflect.Type, stackType reflect.Type, seen map[reflect.Type]bool) (string, bool) {
 	for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Array || typ.Kind() == reflect.Slice || typ.Kind() == reflect.Chan {
 		typ = typ.Elem()
@@ -155,7 +181,7 @@ func (a *recordingSessionRuntimeAssembler) assembleSnapshot(
 	defer a.mu.Unlock()
 	a.calls++
 	a.sessions = sessions
-	return &sessionRuntimeInstance{runtimeComposition: runtimeComposition{Sessions: sessions}}, nil
+	return &sessionRuntimeInstance{runtimeComposition: runtimeComposition{sessions: sessions}}, nil
 }
 
 func (a *recordingSessionRuntimeAssembler) snapshot() (int, session.Service) {

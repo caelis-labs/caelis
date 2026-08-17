@@ -91,7 +91,7 @@ func (s *runtimeComposition) Doctor(ctx context.Context, req DoctorRequest) (Doc
 	if s == nil {
 		return DoctorReport{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
-	return s.doctorForWorkspace(ctx, s.Workspace, req)
+	return s.doctorForWorkspace(ctx, s.workspace, req)
 }
 
 // DoctorForWorkspace returns Host diagnostics without substituting the
@@ -236,10 +236,10 @@ func (s *runtimeComposition) doctorForWorkspace(ctx context.Context, workspace s
 }
 
 func (s *runtimeComposition) sessionMigrationWarnings() []string {
-	if s == nil || s.Sessions == nil {
+	if s == nil || s.sessions == nil {
 		return nil
 	}
-	reporter, ok := s.Sessions.(interface {
+	reporter, ok := s.sessions.(interface {
 		MigrationReport() sessionfile.MigrationReport
 	})
 	if !ok {
@@ -432,10 +432,10 @@ func (s *runtimeComposition) resolveDoctorSessionRef(ctx context.Context, req Do
 	}
 	if strings.TrimSpace(req.SessionID) != "" {
 		return session.SessionRef{
-			AppName:      s.AppName,
-			UserID:       s.UserID,
+			AppName:      s.appName,
+			UserID:       s.userID,
 			SessionID:    strings.TrimSpace(req.SessionID),
-			WorkspaceKey: s.Workspace.Key,
+			WorkspaceKey: s.workspace.Key,
 		}
 	}
 	if strings.TrimSpace(req.BindingKey) != "" {

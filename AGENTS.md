@@ -19,6 +19,7 @@
 - The external-ACP `ControlPlane` owns its shared Agent registry and replacement operation. Do not expose the registry or a mutable updater through `internal/controlassembly` or another cross-package dependency bag.
 - `internal/kernel` owns product Session/Turn coordination, not reusable SDK or ACP helper facades. Consume `agent-sdk` approval/usage semantics and `protocol/acp/metautil` directly instead of mirroring them.
 - Session Runtime registries, instances, assemblers, and assembly dependency snapshots must not retain a concrete Host `*gatewayapp.Stack`. Capture explicit process authorities and focused immutable snapshots instead.
+- `gatewayapp.Stack` must own Runtime composition through a named private field. Do not anonymously embed `runtimeComposition` into `Stack` or export the composition's fields; cross the Host boundary only through deliberate focused methods and immutable views.
 - Keep one semantic owner, one authoritative data path, and one durable source of truth. Typed Envelope fields own identity, relation, position, approval, and resume semantics; `_meta` is display/debug unless a maintained contract says otherwise.
 - Fence semantic Session writes for the complete producer lifetime. Never retry `ErrLeaseConflict` through an unfenced path; durable State repair requires an explicit revision-checked guarded mutation.
 - Dynamic orchestration belongs to Control. Do not add a deterministic workflow graph/node engine or let an Agent authorize its own handoff.

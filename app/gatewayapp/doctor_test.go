@@ -34,8 +34,8 @@ func TestDoctorReportsObservedLegacySessionParticipantDrop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	stack.Sessions = doctorSessionMigrationReporter{
-		Service: stack.Sessions,
+	stack.composition.sessions = doctorSessionMigrationReporter{
+		Service: stack.composition.sessions,
 		report: sessionfile.MigrationReport{
 			FromVersion: 1,
 			Dropped: []sessionfile.MigrationDrop{{
@@ -159,7 +159,7 @@ func TestDoctorReportFindsAPIKeyThroughCredentialReferenceAfterReload(t *testing
 	}
 	current := mustCurrentSession(t, stack, session.SessionID)
 	revision := current.Revision
-	modelResult, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModelRequest{
+	modelResult, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "doctor-session-model", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Model:     profile.Backend.Provider.ModelConfigID,
 	})
@@ -168,7 +168,7 @@ func TestDoctorReportFindsAPIKeyThroughCredentialReferenceAfterReload(t *testing
 	}
 	current = mustCurrentSession(t, stack, session.SessionID)
 	revision = current.Revision
-	modeResult, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModeRequest{
+	modeResult, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModeRequest{
 		WriteBase: appserver.WriteBase{OperationID: "doctor-session-mode", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Mode:      "manual",
 	})

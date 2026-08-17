@@ -37,7 +37,7 @@ func (s *Stack) DeliverAgentMessage(ctx context.Context, request DeliverAgentMes
 		return AgentMessageDelivery{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	ref := session.NormalizeSessionRef(request.SessionRef)
-	composition := &s.runtimeComposition
+	composition := &s.composition
 	var release func(context.Context) error
 	var active session.Session
 	if s.sessionRuntimes != nil {
@@ -50,8 +50,8 @@ func (s *Stack) DeliverAgentMessage(ctx context.Context, request DeliverAgentMes
 			composition = &runtime.instance.runtimeComposition
 		}
 		release = releaseRuntime
-	} else if s.Sessions != nil {
-		if loaded, err := s.Sessions.Session(ctx, ref); err == nil {
+	} else if s.composition.sessions != nil {
+		if loaded, err := s.composition.sessions.Session(ctx, ref); err == nil {
 			active = loaded
 		}
 	}

@@ -50,27 +50,27 @@ func newSessionRuntimeAssemblyDeps(host *Stack) (sessionRuntimeAssemblyDeps, err
 	if host == nil {
 		return sessionRuntimeAssemblyDeps{}, errors.New("gatewayapp: Session Runtime assembly Host is required")
 	}
-	mailbox := host.hostedChildMailbox
+	runtimeRoot := &host.composition
+	mailbox := runtimeRoot.hostedChildMailbox
 	if mailbox == nil {
 		return sessionRuntimeAssemblyDeps{}, errors.New("gatewayapp: hosted child mailbox is required")
 	}
-	runtimeRoot := &host.runtimeComposition
 	return sessionRuntimeAssemblyDeps{
-		appName:             host.AppName,
-		userID:              host.UserID,
-		store:               host.store,
-		storeDir:            host.storeDir,
-		leaseOwnerID:        host.leaseOwnerID,
-		tasks:               host.taskStore,
-		feeds:               host.controlFeeds,
-		approvalRecovery:    host.approvalRecovery,
-		lifecycleCtx:        host.lifecycleCtx,
-		codexAuth:           host.codexAuth,
-		grokAuth:            host.grokAuth,
-		apiKeyCredentials:   host.apiKeyCredentials,
-		providerUsage:       host.providerUsage,
-		modelCatalog:        host.lookup,
-		modelPins:           host.sessionModelPins,
+		appName:             runtimeRoot.appName,
+		userID:              runtimeRoot.userID,
+		store:               runtimeRoot.store,
+		storeDir:            runtimeRoot.storeDir,
+		leaseOwnerID:        runtimeRoot.leaseOwnerID,
+		tasks:               runtimeRoot.taskStore,
+		feeds:               runtimeRoot.controlFeeds,
+		approvalRecovery:    runtimeRoot.approvalRecovery,
+		lifecycleCtx:        runtimeRoot.lifecycleCtx,
+		codexAuth:           runtimeRoot.codexAuth,
+		grokAuth:            runtimeRoot.grokAuth,
+		apiKeyCredentials:   runtimeRoot.apiKeyCredentials,
+		providerUsage:       runtimeRoot.providerUsage,
+		modelCatalog:        runtimeRoot.lookup,
+		modelPins:           runtimeRoot.sessionModelPins,
 		hostedChildMailbox:  mailbox,
 		loadProcessSnapshot: runtimeRoot.loadSessionRuntimeProcessSnapshot,
 	}, nil

@@ -26,7 +26,7 @@ import (
 func TestSandboxConfigurationCommandUsesHostCASAndSharedLedger(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	expected, err := stack.ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestSandboxConfigurationCommandUsesHostCASAndSharedLedger(t *testing.T) {
 	sharedOperationID := "shared-control-ledger"
 	created, err := stack.ControlClient().CreateSession(ctx, principal, appserver.CreateSessionRequest{
 		WriteBase: appserver.WriteBase{OperationID: sharedOperationID}, PreferredSessionID: "shared-ledger-session",
-		WorkspaceKey: stack.Workspace.Key, CWD: stack.Workspace.CWD,
+		WorkspaceKey: stack.composition.workspace.Key, CWD: stack.composition.workspace.CWD,
 	})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("CreateSession() = %#v, %v", created, err)
@@ -102,7 +102,7 @@ func TestSandboxConfigurationCommandUsesHostCASAndSharedLedger(t *testing.T) {
 func TestSandboxConfigurationCommandPreservesCanonicalPolicyFields(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	external := newAppConfigStore(filepath.Dir(stack.store.path))
+	external := newAppConfigStore(filepath.Dir(stack.composition.store.path))
 	doc, err := external.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func TestSandboxConfigurationCommandPreservesCanonicalPolicyFields(t *testing.T)
 		t.Fatal(err)
 	}
 	expected := saved.ConfigurationRevision
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, appserver.Principal{ID: stack.UserID}, appserver.SandboxRequest{
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SandboxRequest{
 		WriteBase: appserver.WriteBase{OperationID: "sandbox-preserve-canonical-policy", ExpectedRevision: &expected},
 		Backend:   "host",
 	})
@@ -137,10 +137,10 @@ func TestSandboxConfigurationCommandPreservesCanonicalPolicyFields(t *testing.T)
 	if !reflect.DeepEqual(persisted.Sandbox, wantSandbox) || persisted.Runtime.ApprovalMode != "manual" {
 		t.Fatalf("persisted canonical document = %#v / %#v, want sandbox %#v and manual Runtime", persisted.Sandbox, persisted.Runtime, wantSandbox)
 	}
-	stack.mu.RLock()
-	livePersisted := cloneSandboxConfig(stack.sandboxPersisted)
-	liveRevision := stack.sandboxRevision
-	stack.mu.RUnlock()
+	stack.composition.mu.RLock()
+	livePersisted := cloneSandboxConfig(stack.composition.sandboxPersisted)
+	liveRevision := stack.composition.sandboxRevision
+	stack.composition.mu.RUnlock()
 	if !reflect.DeepEqual(livePersisted, wantSandbox) || liveRevision != result.Revision {
 		t.Fatalf("live binding = %#v @ %d, want %#v @ %d", livePersisted, liveRevision, wantSandbox, result.Revision)
 	}
@@ -151,8 +151,8 @@ func TestSandboxConfigurationCommandRollsForwardAfterCommittedWriteFault(t *test
 	ctx, cancel := context.WithCancel(context.Background())
 	fault := errors.New("directory fsync after sandbox CAS failed")
 	writeCount := installCommittedConfigSaveFault(t, stack, "fsync", fault)
-	committedFault := stack.store.saveHook
-	stack.store.saveHook = func(doc AppConfig) error {
+	committedFault := stack.composition.store.saveHook
+	stack.composition.store.saveHook = func(doc AppConfig) error {
 		cancel()
 		return committedFault(doc)
 	}
@@ -164,24 +164,24 @@ func TestSandboxConfigurationCommandRollsForwardAfterCommittedWriteFault(t *test
 		WriteBase: appserver.WriteBase{OperationID: "sandbox-committed-write", ExpectedRevision: &expected},
 		Backend:   "host",
 	}
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, appserver.Principal{ID: stack.UserID}, request)
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, appserver.Principal{ID: stack.composition.userID}, request)
 	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != expected+1 {
 		t.Fatalf("SetSandboxBackend(committed fault) = %#v, %v", result, err)
 	}
-	persisted, loadErr := stack.store.Load()
+	persisted, loadErr := stack.composition.store.Load()
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	stack.mu.RLock()
-	live := cloneSandboxConfig(stack.sandbox)
-	livePersisted := cloneSandboxConfig(stack.sandboxPersisted)
-	liveRevision := stack.sandboxRevision
-	stack.mu.RUnlock()
+	stack.composition.mu.RLock()
+	live := cloneSandboxConfig(stack.composition.sandbox)
+	livePersisted := cloneSandboxConfig(stack.composition.sandboxPersisted)
+	liveRevision := stack.composition.sandboxRevision
+	stack.composition.mu.RUnlock()
 	if persisted.ConfigurationRevision != result.Revision || persisted.Sandbox.RequestedType != "host" ||
 		live.RequestedType != "host" || !reflect.DeepEqual(livePersisted, persisted.Sandbox) || liveRevision != result.Revision {
 		t.Fatalf("committed fault diverged durable/live: persisted=%#v live=%#v bound=%#v@%d result=%#v", persisted, live, livePersisted, liveRevision, result)
 	}
-	replayed, replayErr := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.UserID}, request)
+	replayed, replayErr := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.composition.userID}, request)
 	if replayErr != nil || replayed != result || writeCount() != 1 {
 		t.Fatalf("SetSandboxBackend(replay) = %#v, %v writes=%d; want %#v and one write", replayed, replayErr, writeCount(), result)
 	}
@@ -191,26 +191,26 @@ func TestSandboxConfigurationCommandDoesNotGuessRevisionWhenCommittedWriteCannot
 	stack, _ := newLocalStateTestStack(t)
 	fault := errors.New("directory fsync after sandbox CAS failed")
 	installCommittedConfigSaveFault(t, stack, "fsync", fault)
-	committedFault := stack.store.saveHook
-	committedPath := stack.store.path + ".committed"
+	committedFault := stack.composition.store.saveHook
+	committedPath := stack.composition.store.path + ".committed"
 	pathBlocked := false
 	t.Cleanup(func() {
 		if !pathBlocked {
 			return
 		}
-		_ = os.Remove(stack.store.path)
-		_ = os.Rename(committedPath, stack.store.path)
+		_ = os.Remove(stack.composition.store.path)
+		_ = os.Rename(committedPath, stack.composition.store.path)
 	})
-	stack.store.saveHook = func(doc AppConfig) error {
+	stack.composition.store.saveHook = func(doc AppConfig) error {
 		committedErr := committedFault(doc)
 		if !configstore.WriteCommitted(committedErr) {
 			return committedErr
 		}
-		if err := os.Rename(stack.store.path, committedPath); err != nil {
+		if err := os.Rename(stack.composition.store.path, committedPath); err != nil {
 			return errors.Join(committedErr, err)
 		}
-		if err := os.Mkdir(stack.store.path, 0o700); err != nil {
-			_ = os.Rename(committedPath, stack.store.path)
+		if err := os.Mkdir(stack.composition.store.path, 0o700); err != nil {
+			_ = os.Rename(committedPath, stack.composition.store.path)
 			return errors.Join(committedErr, err)
 		}
 		pathBlocked = true
@@ -220,29 +220,29 @@ func TestSandboxConfigurationCommandDoesNotGuessRevisionWhenCommittedWriteCannot
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.UserID}, appserver.SandboxRequest{
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.composition.userID}, appserver.SandboxRequest{
 		WriteBase: appserver.WriteBase{OperationID: "sandbox-committed-write-readback-failed", ExpectedRevision: &expected},
 		Backend:   "host",
 	})
 	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != 0 {
 		t.Fatalf("SetSandboxBackend(committed readback failure) = %#v, %v", result, err)
 	}
-	stack.mu.RLock()
-	live := cloneSandboxConfig(stack.sandbox)
-	livePersisted := cloneSandboxConfig(stack.sandboxPersisted)
-	liveRevision := stack.sandboxRevision
-	stack.mu.RUnlock()
+	stack.composition.mu.RLock()
+	live := cloneSandboxConfig(stack.composition.sandbox)
+	livePersisted := cloneSandboxConfig(stack.composition.sandboxPersisted)
+	liveRevision := stack.composition.sandboxRevision
+	stack.composition.mu.RUnlock()
 	if liveRevision != 0 {
 		t.Fatalf("live binding = %#v / %#v @ %d, want unknown revision", live, livePersisted, liveRevision)
 	}
-	if err := os.Remove(stack.store.path); err != nil {
+	if err := os.Remove(stack.composition.store.path); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Rename(committedPath, stack.store.path); err != nil {
+	if err := os.Rename(committedPath, stack.composition.store.path); err != nil {
 		t.Fatal(err)
 	}
 	pathBlocked = false
-	persisted, err := stack.store.Load()
+	persisted, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestSandboxConfigurationCommandDoesNotGuessRevisionWhenCommittedWriteCannot
 
 func TestSandboxConfigurationCommandDoesNotCompensateCommittedWrite(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,30 +266,30 @@ func TestSandboxConfigurationCommandDoesNotCompensateCommittedWrite(t *testing.T
 		t.Fatal(err)
 	}
 	doc.Plugins = []PluginConfig{{ID: "malformed-plugin", Root: pluginRoot, Enabled: true}}
-	if err := stack.store.Save(doc); err != nil {
+	if err := stack.composition.store.Save(doc); err != nil {
 		t.Fatal(err)
 	}
-	before, err := stack.store.Load()
+	before, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	fault := errors.New("directory fsync after sandbox CAS failed")
 	writeCount := installCommittedConfigSaveFault(t, stack, "fsync", fault)
-	committedFault := stack.store.saveHook
+	committedFault := stack.composition.store.saveHook
 	attempts := 0
-	stack.store.saveHook = func(doc AppConfig) error {
+	stack.composition.store.saveHook = func(doc AppConfig) error {
 		attempts++
 		return committedFault(doc)
 	}
 	expected := before.ConfigurationRevision
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.UserID}, appserver.SandboxRequest{
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.composition.userID}, appserver.SandboxRequest{
 		WriteBase: appserver.WriteBase{OperationID: "sandbox-committed-write-compensated", ExpectedRevision: &expected},
 		Backend:   "host",
 	})
 	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != expected+1 {
 		t.Fatalf("SetSandboxBackend(committed warning) = %#v, %v", result, err)
 	}
-	after, loadErr := stack.store.Load()
+	after, loadErr := stack.composition.store.Load()
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
@@ -301,32 +301,32 @@ func TestSandboxConfigurationCommandDoesNotCompensateCommittedWrite(t *testing.T
 func TestSandboxLifecycleCommandClassifiesPreEffectAndEffectFailures(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc.Sandbox.RequestedType = "windows"
-	saved, err := stack.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
+	saved, err := stack.composition.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stack.mu.Lock()
-	previousExec := stack.exec
-	previousOverride := stack.sandboxOverride
-	stack.sandbox = configstore.DefaultSandboxConfig(saved.Sandbox)
-	stack.sandboxPersisted = cloneSandboxConfig(saved.Sandbox)
-	stack.sandboxRevision = saved.ConfigurationRevision
-	stack.sandboxOverride = SandboxConfig{}
-	stack.exec = nil
-	stack.mu.Unlock()
+	stack.composition.mu.Lock()
+	previousExec := stack.composition.exec
+	previousOverride := stack.composition.sandboxOverride
+	stack.composition.sandbox = configstore.DefaultSandboxConfig(saved.Sandbox)
+	stack.composition.sandboxPersisted = cloneSandboxConfig(saved.Sandbox)
+	stack.composition.sandboxRevision = saved.ConfigurationRevision
+	stack.composition.sandboxOverride = SandboxConfig{}
+	stack.composition.exec = nil
+	stack.composition.mu.Unlock()
 	t.Cleanup(func() {
-		stack.mu.Lock()
-		stack.exec = previousExec
-		stack.sandboxOverride = previousOverride
-		stack.mu.Unlock()
+		stack.composition.mu.Lock()
+		stack.composition.exec = previousExec
+		stack.composition.sandboxOverride = previousOverride
+		stack.composition.mu.Unlock()
 	})
 
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	expected := saved.ConfigurationRevision
 	preEffectRequest := appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "sandbox-lifecycle-pre-effect", ExpectedRevision: &expected,
@@ -345,9 +345,9 @@ func TestSandboxLifecycleCommandClassifiesPreEffectAndEffectFailures(t *testing.
 		sandboxLifecycleTestRuntime: newSandboxLifecycleTestRuntime(sandbox.BackendWindows, sandbox.BackendWindows),
 		prepareErr:                  effectErr,
 	}
-	stack.mu.Lock()
-	stack.exec = runtime
-	stack.mu.Unlock()
+	stack.composition.mu.Lock()
+	stack.composition.exec = runtime
+	stack.composition.mu.Unlock()
 	effectRequest := appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "sandbox-lifecycle-effect", ExpectedRevision: &expected,
 	}}
@@ -364,33 +364,33 @@ func TestSandboxLifecycleCommandClassifiesPreEffectAndEffectFailures(t *testing.
 func TestSandboxLifecycleCommandUsesCanonicalExternalPolicy(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc.Sandbox.RequestedType = "windows"
 	doc.Sandbox.WritableRoots = []string{"/external/policy"}
-	saved, err := stack.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
+	saved, err := stack.composition.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
 	if err != nil {
 		t.Fatal(err)
 	}
 	runtime := &sandboxLifecyclePrepareRuntime{
 		sandboxLifecycleTestRuntime: newSandboxLifecycleTestRuntime(sandbox.BackendWindows, sandbox.BackendWindows),
 	}
-	stack.mu.Lock()
-	previousExec := stack.exec
-	previousOverride := stack.sandboxOverride
-	stack.sandboxOverride = SandboxConfig{}
-	stack.exec = runtime
-	stack.mu.Unlock()
+	stack.composition.mu.Lock()
+	previousExec := stack.composition.exec
+	previousOverride := stack.composition.sandboxOverride
+	stack.composition.sandboxOverride = SandboxConfig{}
+	stack.composition.exec = runtime
+	stack.composition.mu.Unlock()
 	defer func() {
-		stack.mu.Lock()
-		stack.exec = previousExec
-		stack.sandboxOverride = previousOverride
-		stack.mu.Unlock()
+		stack.composition.mu.Lock()
+		stack.composition.exec = previousExec
+		stack.composition.sandboxOverride = previousOverride
+		stack.composition.mu.Unlock()
 	}()
 	expected := saved.ConfigurationRevision
-	result, err := stack.ConfigurationCommands().PrepareSandbox(ctx, appserver.Principal{ID: stack.UserID}, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
+	result, err := stack.ConfigurationCommands().PrepareSandbox(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "sandbox-lifecycle-unreconciled", ExpectedRevision: &expected,
 	}})
 	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != expected || runtime.prepareCalls != 1 {
@@ -401,12 +401,12 @@ func TestSandboxLifecycleCommandUsesCanonicalExternalPolicy(t *testing.T) {
 func TestSandboxLifecycleCommandDoesNotHoldConfigurationWriteBoundary(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc.Sandbox.RequestedType = "windows"
-	saved, err := stack.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
+	saved, err := stack.composition.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,21 +415,21 @@ func TestSandboxLifecycleCommandDoesNotHoldConfigurationWriteBoundary(t *testing
 		started:                     make(chan struct{}),
 		release:                     make(chan struct{}),
 	}
-	stack.mu.Lock()
-	previousOverride := stack.sandboxOverride
-	stack.sandbox = configstore.DefaultSandboxConfig(saved.Sandbox)
-	stack.sandboxPersisted = cloneSandboxConfig(saved.Sandbox)
-	stack.sandboxRevision = saved.ConfigurationRevision
-	stack.sandboxOverride = SandboxConfig{}
-	stack.exec = runtime
-	stack.mu.Unlock()
+	stack.composition.mu.Lock()
+	previousOverride := stack.composition.sandboxOverride
+	stack.composition.sandbox = configstore.DefaultSandboxConfig(saved.Sandbox)
+	stack.composition.sandboxPersisted = cloneSandboxConfig(saved.Sandbox)
+	stack.composition.sandboxRevision = saved.ConfigurationRevision
+	stack.composition.sandboxOverride = SandboxConfig{}
+	stack.composition.exec = runtime
+	stack.composition.mu.Unlock()
 	t.Cleanup(func() {
-		stack.mu.Lock()
-		stack.sandboxOverride = previousOverride
-		stack.mu.Unlock()
+		stack.composition.mu.Lock()
+		stack.composition.sandboxOverride = previousOverride
+		stack.composition.mu.Unlock()
 	})
 	expected := saved.ConfigurationRevision
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	prepareDone := make(chan appserver.CommandResult, 1)
 	prepareErr := make(chan error, 1)
 	go func() {
@@ -480,7 +480,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 
 	blocking := &blockingRuntime{session: session, release: make(chan struct{})}
 	gw, err := kernelimpl.New(kernelimpl.Config{
-		Sessions: stack.Sessions,
+		Sessions: stack.composition.sessions,
 		Runtime:  blocking,
 		Resolver: blockingResolver{},
 	})
@@ -492,9 +492,9 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 		t.Fatalf("activateSessionTracked() error = %v", err)
 	}
 	loaded.instance.gateway = gw
-	stack.gateway = gw
+	stack.composition.gateway = gw
 
-	handle, err := stack.currentGateway().BeginTurn(ctx, kernelimpl.BeginTurnRequest{
+	handle, err := stack.composition.currentGateway().BeginTurn(ctx, kernelimpl.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      "hold active",
 	})
@@ -502,13 +502,13 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
 	defer handle.Handle.Close()
-	if got := len(stack.currentGateway().ActiveTurns()); got != 1 {
+	if got := len(stack.composition.currentGateway().ActiveTurns()); got != 1 {
 		t.Fatalf("ActiveTurns() len = %d, want 1", got)
 	}
 	disconnectConnection := controlagents.Connection{
 		ID: "disconnect-acp", Launcher: controlagents.Launcher{Command: writeExternalAgentExecutable(t, t.TempDir(), "disconnect-acp")},
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -517,7 +517,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 		Agents:      []controlagents.Agent{{ID: "disconnect-agent", ConnectionID: disconnectConnection.ID}},
 		Discoveries: []controlagents.DiscoverySnapshot{{ConnectionID: disconnectConnection.ID, SelectedModelID: "opus"}},
 	}
-	if err := stack.store.Save(doc); err != nil {
+	if err := stack.composition.store.Save(doc); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
@@ -539,7 +539,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 			},
 			want: func(t *testing.T) {
 				t.Helper()
-				if !stack.lookup.HasAlias("ollama/blocked-model") {
+				if !stack.composition.lookup.HasAlias("ollama/blocked-model") {
 					t.Fatal("Connect() did not update the future activation catalog")
 				}
 			},
@@ -552,7 +552,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 			},
 			want: func(t *testing.T) {
 				t.Helper()
-				doc, err := stack.store.Load()
+				doc, err := stack.composition.store.Load()
 				if err != nil {
 					t.Fatalf("Load() error = %v", err)
 				}
@@ -571,7 +571,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 			},
 			want: func(t *testing.T) {
 				t.Helper()
-				if got := stack.lookup.DefaultID(); got != altAlias {
+				if got := stack.composition.lookup.DefaultID(); got != altAlias {
 					t.Fatalf("Host default = %q, want future activation default %q", got, altAlias)
 				}
 			},
@@ -583,7 +583,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 			},
 			want: func(t *testing.T) {
 				t.Helper()
-				if stack.lookup.HasAlias(altAlias) {
+				if stack.composition.lookup.HasAlias(altAlias) {
 					t.Fatalf("DeleteModel() retained future activation model %q", altAlias)
 				}
 			},
@@ -592,12 +592,12 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 			name:      "set session mode",
 			wantError: true,
 			run: func() error {
-				current, loadErr := stack.Sessions.Session(ctx, session.SessionRef)
+				current, loadErr := stack.composition.sessions.Session(ctx, session.SessionRef)
 				if loadErr != nil {
 					return loadErr
 				}
 				revision := current.Revision
-				_, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModeRequest{
+				_, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModeRequest{
 					WriteBase: appserver.WriteBase{OperationID: "active-turn-session-mode", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 					Mode:      "manual",
 				})
@@ -634,7 +634,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 				if err != nil {
 					return err
 				}
-				_, err = stack.ConfigurationCommands().ResetSandbox(ctx, appserver.Principal{ID: stack.UserID}, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
+				_, err = stack.ConfigurationCommands().ResetSandbox(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 					OperationID: "sandbox-lifecycle-active-turn", ExpectedRevision: &expected,
 				}})
 				return err
@@ -655,7 +655,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 				t.Fatalf("%s error = %v, want Host configuration commit", tt.name, err)
 			}
 			tt.want(t)
-			if stack.currentGateway() != gw {
+			if stack.composition.currentGateway() != gw {
 				t.Fatalf("%s replaced the active Host Runtime", tt.name)
 			}
 		})
@@ -683,7 +683,7 @@ func TestBuildInitialGatewayRuntimeRejectsInitializedRuntimeBeforePlanLoad(t *te
 	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), []byte("invalid-json{"), 0o600); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
 	}
-	if err := stack.store.Save(AppConfig{
+	if err := stack.composition.store.Save(AppConfig{
 		Plugins: []PluginConfig{{ID: "malformed-plugin", Root: pluginRoot, Enabled: true}},
 	}); err != nil {
 		t.Fatalf("store.Save() error = %v", err)
@@ -691,16 +691,16 @@ func TestBuildInitialGatewayRuntimeRejectsInitializedRuntimeBeforePlanLoad(t *te
 
 	blocking := &blockingRuntime{session: activeSession, release: make(chan struct{})}
 	gw, err := kernelimpl.New(kernelimpl.Config{
-		Sessions: stack.Sessions,
+		Sessions: stack.composition.sessions,
 		Runtime:  blocking,
 		Resolver: blockingResolver{},
 	})
 	if err != nil {
 		t.Fatalf("kernel.New() error = %v", err)
 	}
-	stack.gateway = gw
+	stack.composition.gateway = gw
 
-	handle, err := stack.currentGateway().BeginTurn(ctx, kernelimpl.BeginTurnRequest{
+	handle, err := stack.composition.currentGateway().BeginTurn(ctx, kernelimpl.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "hold active",
 	})
@@ -714,7 +714,7 @@ func TestBuildInitialGatewayRuntimeRejectsInitializedRuntimeBeforePlanLoad(t *te
 		}
 	}()
 
-	err = stack.buildInitialGatewayRuntime(ctx)
+	err = stack.composition.buildInitialGatewayRuntime(ctx)
 	if err == nil {
 		t.Fatal("buildInitialGatewayRuntime() error = nil, want initialized Runtime rejection")
 	}
@@ -728,11 +728,11 @@ func TestBuildInitialGatewayRuntimeRejectsInitializedRuntimeBeforePlanLoad(t *te
 
 func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
-	beforeGateway := stack.gateway
-	beforeExec := stack.exec
-	beforeMCP := stack.mcpMgr
-	beforePlugins := clonePluginConfigs(stack.runtime.Plugins)
-	beforeBaseMetadata := cloneMap(stack.runtime.BaseMetadata)
+	beforeGateway := stack.composition.gateway
+	beforeExec := stack.composition.exec
+	beforeMCP := stack.composition.mcpMgr
+	beforePlugins := clonePluginConfigs(stack.composition.runtime.Plugins)
+	beforeBaseMetadata := cloneMap(stack.composition.runtime.BaseMetadata)
 
 	pluginRoot := filepath.Join(t.TempDir(), "malformed-plugin")
 	manifestDir := filepath.Join(pluginRoot, ".caelis-plugin")
@@ -742,43 +742,43 @@ func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), []byte("invalid-json{"), 0o600); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
 	}
-	if err := stack.store.Save(AppConfig{
+	if err := stack.composition.store.Save(AppConfig{
 		Plugins: []PluginConfig{{ID: "malformed-plugin", Root: pluginRoot, Enabled: true}},
 	}); err != nil {
 		t.Fatalf("store.Save() error = %v", err)
 	}
 
-	sandboxCfg := stack.sandbox
-	_, err := stack.loadGatewayBuildPlan(sandboxCfg, stack.runtime)
+	sandboxCfg := stack.composition.sandbox
+	_, err := stack.composition.loadGatewayBuildPlan(sandboxCfg, stack.composition.runtime)
 	if err == nil {
 		t.Fatal("loadGatewayBuildPlan() error = nil, want plugin parse failure")
 	}
 	if !strings.Contains(err.Error(), "parse enabled plugin") {
 		t.Fatalf("loadGatewayBuildPlan() error = %v, want plugin parse failure", err)
 	}
-	if stack.gateway != beforeGateway {
-		t.Fatalf("gateway changed on plan failure: before=%p after=%p", beforeGateway, stack.gateway)
+	if stack.composition.gateway != beforeGateway {
+		t.Fatalf("gateway changed on plan failure: before=%p after=%p", beforeGateway, stack.composition.gateway)
 	}
-	if stack.exec != beforeExec {
-		t.Fatalf("exec changed on plan failure: before=%p after=%p", beforeExec, stack.exec)
+	if stack.composition.exec != beforeExec {
+		t.Fatalf("exec changed on plan failure: before=%p after=%p", beforeExec, stack.composition.exec)
 	}
-	if stack.mcpMgr != beforeMCP {
-		t.Fatalf("mcp manager changed on plan failure: before=%p after=%p", beforeMCP, stack.mcpMgr)
+	if stack.composition.mcpMgr != beforeMCP {
+		t.Fatalf("mcp manager changed on plan failure: before=%p after=%p", beforeMCP, stack.composition.mcpMgr)
 	}
-	if !reflect.DeepEqual(stack.runtime.Plugins, beforePlugins) {
-		t.Fatalf("runtime plugins = %+v, want unchanged %+v", stack.runtime.Plugins, beforePlugins)
+	if !reflect.DeepEqual(stack.composition.runtime.Plugins, beforePlugins) {
+		t.Fatalf("runtime plugins = %+v, want unchanged %+v", stack.composition.runtime.Plugins, beforePlugins)
 	}
-	if !reflect.DeepEqual(stack.runtime.BaseMetadata, beforeBaseMetadata) {
-		t.Fatalf("runtime base metadata = %+v, want unchanged %+v", stack.runtime.BaseMetadata, beforeBaseMetadata)
+	if !reflect.DeepEqual(stack.composition.runtime.BaseMetadata, beforeBaseMetadata) {
+		t.Fatalf("runtime base metadata = %+v, want unchanged %+v", stack.composition.runtime.BaseMetadata, beforeBaseMetadata)
 	}
 }
 
 func TestBuildGatewayRuntimeMCPFailureDoesNotSwapStack(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
-	beforeGateway := stack.gateway
-	beforeExec := stack.exec
-	beforeMCP := stack.mcpMgr
-	plan, err := stack.loadGatewayBuildPlan(stack.sandbox, stack.runtime)
+	beforeGateway := stack.composition.gateway
+	beforeExec := stack.composition.exec
+	beforeMCP := stack.composition.mcpMgr
+	plan, err := stack.composition.loadGatewayBuildPlan(stack.composition.sandbox, stack.composition.runtime)
 	if err != nil {
 		t.Fatalf("loadGatewayBuildPlan() error = %v", err)
 	}
@@ -788,7 +788,7 @@ func TestBuildGatewayRuntimeMCPFailureDoesNotSwapStack(t *testing.T) {
 		Transport: plugin.MCPTransportStdio,
 	}}
 
-	bundle, err := stack.buildGatewayRuntime(plan)
+	bundle, err := stack.composition.buildGatewayRuntime(plan)
 	if err == nil {
 		t.Fatal("buildGatewayRuntime() error = nil, want MCP init failure")
 	}
@@ -798,35 +798,35 @@ func TestBuildGatewayRuntimeMCPFailureDoesNotSwapStack(t *testing.T) {
 	if !strings.Contains(err.Error(), "failed to initialize MCP servers") {
 		t.Fatalf("buildGatewayRuntime() error = %v, want MCP init failure", err)
 	}
-	if stack.gateway != beforeGateway {
-		t.Fatalf("gateway changed on build failure: before=%p after=%p", beforeGateway, stack.gateway)
+	if stack.composition.gateway != beforeGateway {
+		t.Fatalf("gateway changed on build failure: before=%p after=%p", beforeGateway, stack.composition.gateway)
 	}
-	if stack.exec != beforeExec {
-		t.Fatalf("exec changed on build failure: before=%p after=%p", beforeExec, stack.exec)
+	if stack.composition.exec != beforeExec {
+		t.Fatalf("exec changed on build failure: before=%p after=%p", beforeExec, stack.composition.exec)
 	}
-	if stack.mcpMgr != beforeMCP {
-		t.Fatalf("mcp manager changed on build failure: before=%p after=%p", beforeMCP, stack.mcpMgr)
+	if stack.composition.mcpMgr != beforeMCP {
+		t.Fatalf("mcp manager changed on build failure: before=%p after=%p", beforeMCP, stack.composition.mcpMgr)
 	}
 }
 
 func TestInstallGatewayRuntimeBundleRejectsRuntimeReplacementAndClosesBundle(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
-	beforeExec := stack.exec
-	beforeMCP := stack.mcpMgr
+	beforeExec := stack.composition.exec
+	beforeMCP := stack.composition.mcpMgr
 
 	blocking := &blockingRuntime{session: activeSession, release: make(chan struct{})}
 	oldGateway, err := kernelimpl.New(kernelimpl.Config{
-		Sessions: stack.Sessions,
+		Sessions: stack.composition.sessions,
 		Runtime:  blocking,
 		Resolver: blockingResolver{},
 	})
 	if err != nil {
 		t.Fatalf("kernel.New() error = %v", err)
 	}
-	stack.gateway = oldGateway
+	stack.composition.gateway = oldGateway
 
-	handle, err := stack.currentGateway().BeginTurn(ctx, kernelimpl.BeginTurnRequest{
+	handle, err := stack.composition.currentGateway().BeginTurn(ctx, kernelimpl.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "hold active",
 	})
@@ -840,11 +840,11 @@ func TestInstallGatewayRuntimeBundleRejectsRuntimeReplacementAndClosesBundle(t *
 		}
 	}()
 
-	plan, err := stack.loadGatewayBuildPlan(stack.sandbox, stack.runtime)
+	plan, err := stack.composition.loadGatewayBuildPlan(stack.composition.sandbox, stack.composition.runtime)
 	if err != nil {
 		t.Fatalf("loadGatewayBuildPlan() error = %v", err)
 	}
-	bundle, err := stack.buildGatewayRuntime(plan)
+	bundle, err := stack.composition.buildGatewayRuntime(plan)
 	if err != nil {
 		t.Fatalf("buildGatewayRuntime() error = %v", err)
 	}
@@ -852,21 +852,21 @@ func TestInstallGatewayRuntimeBundleRejectsRuntimeReplacementAndClosesBundle(t *
 		t.Fatalf("buildGatewayRuntime() incomplete bundle: %+v", bundle)
 	}
 
-	err = stack.installGatewayRuntimeBundle(oldGateway, bundle)
+	err = stack.composition.installGatewayRuntimeBundle(oldGateway, bundle)
 	if err == nil {
 		t.Fatal("installGatewayRuntimeBundle() error = nil, want Runtime replacement rejection")
 	}
 	if !strings.Contains(err.Error(), "refusing to replace") {
 		t.Fatalf("installGatewayRuntimeBundle() error = %v, want Runtime replacement rejection", err)
 	}
-	if stack.gateway != oldGateway {
-		t.Fatalf("gateway swapped despite active turn: before=%p after=%p", oldGateway, stack.gateway)
+	if stack.composition.gateway != oldGateway {
+		t.Fatalf("gateway swapped despite active turn: before=%p after=%p", oldGateway, stack.composition.gateway)
 	}
-	if stack.exec != beforeExec {
-		t.Fatalf("exec swapped despite active turn: before=%p after=%p", beforeExec, stack.exec)
+	if stack.composition.exec != beforeExec {
+		t.Fatalf("exec swapped despite active turn: before=%p after=%p", beforeExec, stack.composition.exec)
 	}
-	if stack.mcpMgr != beforeMCP {
-		t.Fatalf("mcp manager swapped despite active turn: before=%p after=%p", beforeMCP, stack.mcpMgr)
+	if stack.composition.mcpMgr != beforeMCP {
+		t.Fatalf("mcp manager swapped despite active turn: before=%p after=%p", beforeMCP, stack.composition.mcpMgr)
 	}
 	if bundle.Gateway != nil || bundle.Engine != nil || bundle.Exec != nil || bundle.MCP != nil {
 		t.Fatalf("installGatewayRuntimeBundle() left bundle resources open: %+v", bundle)
@@ -875,10 +875,10 @@ func TestInstallGatewayRuntimeBundleRejectsRuntimeReplacementAndClosesBundle(t *
 
 func TestStackConnectRollsBackOnConfigSaveFailure(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
-	beforeDefault := stack.lookup.DefaultID()
-	stack.mu.RLock()
-	beforeRuntime := stack.runtime
-	stack.mu.RUnlock()
+	beforeDefault := stack.composition.lookup.DefaultID()
+	stack.composition.mu.RLock()
+	beforeRuntime := stack.composition.runtime
+	stack.composition.mu.RUnlock()
 	poisonConfigStorePath(t, stack)
 
 	_, err := stack.connectTestModel(ModelConfig{
@@ -889,15 +889,15 @@ func TestStackConnectRollsBackOnConfigSaveFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("Connect() error = nil, want config save failure")
 	}
-	if stack.lookup.HasAlias("ollama/save-failed-model") {
+	if stack.composition.lookup.HasAlias("ollama/save-failed-model") {
 		t.Fatal("Connect() left failed model in lookup")
 	}
-	if got := stack.lookup.DefaultID(); got != beforeDefault {
+	if got := stack.composition.lookup.DefaultID(); got != beforeDefault {
 		t.Fatalf("DefaultModelID() = %q, want %q", got, beforeDefault)
 	}
-	stack.mu.RLock()
-	afterRuntime := stack.runtime
-	stack.mu.RUnlock()
+	stack.composition.mu.RLock()
+	afterRuntime := stack.composition.runtime
+	stack.composition.mu.RUnlock()
 	if afterRuntime.Model.ID != beforeRuntime.Model.ID {
 		t.Fatalf("runtime model = %q, want %q", afterRuntime.Model.ID, beforeRuntime.Model.ID)
 	}
@@ -907,7 +907,7 @@ func TestStackSetSandboxBackendRollsBackOnConfigSaveFailure(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
 	before := stack.SandboxStatus()
-	beforeGateway := stack.currentGateway()
+	beforeGateway := stack.composition.currentGateway()
 	poisonConfigStorePath(t, stack)
 
 	_, _, err := stack.setSandboxBackendAtRevision(ctx, "auto", nil)
@@ -918,7 +918,7 @@ func TestStackSetSandboxBackendRollsBackOnConfigSaveFailure(t *testing.T) {
 	if after.RequestedBackend != before.RequestedBackend || after.ResolvedBackend != before.ResolvedBackend {
 		t.Fatalf("SandboxStatus() = %+v, want rollback to %+v", after, before)
 	}
-	if afterGateway := stack.currentGateway(); afterGateway != beforeGateway {
+	if afterGateway := stack.composition.currentGateway(); afterGateway != beforeGateway {
 		t.Fatalf("currentGateway() changed on save failure: before=%p after=%p", beforeGateway, afterGateway)
 	}
 }
@@ -933,19 +933,19 @@ func TestStackSetSandboxBackendObservesNewerConcurrentSandboxWriter(t *testing.T
 	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), []byte("invalid-json{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc.Plugins = []PluginConfig{{ID: "malformed-plugin", Root: pluginRoot, Enabled: true}}
-	if err := stack.store.Save(doc); err != nil {
+	if err := stack.composition.store.Save(doc); err != nil {
 		t.Fatal(err)
 	}
 
-	external := newAppConfigStore(filepath.Dir(stack.store.path))
-	previousSavedHook := stack.store.savedHook
+	external := newAppConfigStore(filepath.Dir(stack.composition.store.path))
+	previousSavedHook := stack.composition.store.savedHook
 	injected := false
-	stack.store.savedHook = func() {
+	stack.composition.store.savedHook = func() {
 		if previousSavedHook != nil {
 			previousSavedHook()
 		}
@@ -983,9 +983,9 @@ func TestStackSetSandboxBackendObservesNewerConcurrentSandboxWriter(t *testing.T
 	if observed := stack.SandboxStatus(); observed.RequestedBackend != "host" || observed.Route != "host" {
 		t.Fatalf("SandboxStatus() after command = %#v, want fixed process override", observed)
 	}
-	stack.mu.RLock()
-	observedPolicy := cloneSandboxConfig(stack.sandboxPersisted)
-	stack.mu.RUnlock()
+	stack.composition.mu.RLock()
+	observedPolicy := cloneSandboxConfig(stack.composition.sandboxPersisted)
+	stack.composition.mu.RUnlock()
 	if observedPolicy.RequestedType != "windows" {
 		t.Fatalf("observed canonical sandbox = %#v, want concurrent writer policy", observedPolicy)
 	}
@@ -997,7 +997,7 @@ func poisonConfigStorePath(t *testing.T, stack *Stack) {
 	if err := os.WriteFile(blocker, []byte("block"), 0o600); err != nil {
 		t.Fatalf("WriteFile(blocker) error = %v", err)
 	}
-	stack.store.path = filepath.Join(blocker, "config.json")
+	stack.composition.store.path = filepath.Join(blocker, "config.json")
 }
 
 type blockingResolver struct{}

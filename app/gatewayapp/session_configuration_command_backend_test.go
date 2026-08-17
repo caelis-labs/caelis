@@ -14,7 +14,7 @@ import (
 func TestSessionConfigurationCommandUsesObservedRevisionAndSharedLedger(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	active = mustCurrentSession(t, stack, active.SessionID)
 	revision := active.Revision
 	request := appserver.SessionModeRequest{
@@ -52,13 +52,13 @@ func TestSessionConfigurationCommandUsesObservedRevisionAndSharedLedger(t *testi
 func TestSessionModelCommandDoesNotChangeHostDefaultOrConfigurationRevision(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	active = mustCurrentSession(t, stack, active.SessionID)
 	hostRevision, err := stack.ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	hostDefault := stack.lookup.DefaultID()
+	hostDefault := stack.composition.lookup.DefaultID()
 	revision := active.Revision
 
 	result, err := stack.ConfigurationCommands().UseSessionModel(ctx, principal, appserver.SessionModelRequest{
@@ -73,13 +73,13 @@ func TestSessionModelCommandDoesNotChangeHostDefaultOrConfigurationRevision(t *t
 	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != revision+1 {
 		t.Fatalf("UseSessionModel() = %#v, %v", result, err)
 	}
-	if got := stack.lookup.DefaultID(); got != hostDefault {
+	if got := stack.composition.lookup.DefaultID(); got != hostDefault {
 		t.Fatalf("Host default = %q, want unchanged %q", got, hostDefault)
 	}
 	if got, err := stack.ConfigurationRevision(ctx); err != nil || got != hostRevision {
 		t.Fatalf("Host configuration revision = %d, %v; want %d", got, err, hostRevision)
 	}
-	state, err := stack.Sessions.SnapshotState(ctx, active.SessionRef)
+	state, err := stack.composition.sessions.SnapshotState(ctx, active.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestSessionPresentationAndApprovalCommandsKeepIndependentStateKeys(t *testi
 			Options: []assembly.ConfigSelectOption{{Value: "quiet", Name: "Quiet"}, {Value: "loud", Name: "Loud"}},
 		}},
 	})
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	active = mustCurrentSession(t, stack, active.SessionID)
 
 	revision := active.Revision
@@ -145,7 +145,7 @@ func TestSessionPresentationAndApprovalCommandsKeepIndependentStateKeys(t *testi
 		t.Fatalf("ConfigureSessionMode() = %#v, %v", approval, err)
 	}
 
-	state, err := stack.Sessions.SnapshotState(ctx, active.SessionRef)
+	state, err := stack.composition.sessions.SnapshotState(ctx, active.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestACPSelectionStateErrorTreatsPostCommitFailureAsCommitted(t *testing.T) 
 
 func mustCurrentSession(t *testing.T, stack *Stack, sessionID string) session.Session {
 	t.Helper()
-	active, err := stack.Sessions.Session(context.Background(), session.SessionRef{SessionID: sessionID})
+	active, err := stack.composition.sessions.Session(context.Background(), session.SessionRef{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}

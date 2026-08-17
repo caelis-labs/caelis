@@ -21,17 +21,17 @@ import (
 )
 
 // runtimeComposition groups the mutable execution snapshot and the resources
-// built from it. Stack embeds one for the process root, while each detached
-// Session Runtime instance receives a distinct value. Keeping the composition
-// private prevents it from becoming a second product API.
+// built from it. Stack owns one as a named field for the process root, while
+// each detached Session Runtime instance receives a distinct value. Keeping
+// the composition private prevents it from becoming a second product API.
 type runtimeComposition struct {
 	// These references are borrowed from the Host. The composition uses them to
 	// execute one fixed Runtime snapshot but does not own their process
 	// lifecycle or construct replacement authorities.
-	Sessions                  session.Service
-	AppName                   string
-	UserID                    string
-	Workspace                 session.WorkspaceRef
+	sessions                  session.Service
+	appName                   string
+	userID                    string
+	workspace                 session.WorkspaceRef
 	store                     *appConfigStore
 	storeDir                  string
 	leaseOwnerID              string

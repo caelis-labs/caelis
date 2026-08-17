@@ -141,8 +141,8 @@ func (s *runtimeComposition) materializeDelegatedModel(name, profileID, effort s
 	}
 	materialized, err := configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		StoreDir:     s.storeDir,
-		WorkspaceKey: s.Workspace.Key,
-		WorkspaceCWD: s.Workspace.CWD,
+		WorkspaceKey: s.workspace.Key,
+		WorkspaceCWD: s.workspace.CWD,
 		SessionOptions: caelisModelSessionOptions(
 			configured,
 			effort,

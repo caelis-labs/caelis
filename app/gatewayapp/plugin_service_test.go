@@ -93,7 +93,7 @@ func TestPluginServiceAddPathHappyPath(t *testing.T) {
 	if plugins[0].ID != "myplugin" {
 		t.Errorf("List()[0].ID = %q, want %q", plugins[0].ID, "myplugin")
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatalf("Load config after AddPath: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestPluginServiceAddPathAffectsFutureSessionSkillPrompt(t *testing.T) {
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
 
-	systemPrompt, _ := stack.runtime.BaseMetadata["system_prompt"].(string)
+	systemPrompt, _ := stack.composition.runtime.BaseMetadata["system_prompt"].(string)
 	if strings.Contains(systemPrompt, "runtime-skill") {
 		t.Fatalf("runtime-skill unexpectedly present before plugin add:\n%s", systemPrompt)
 	}
@@ -574,16 +574,16 @@ func TestPluginServiceCommitsWhileTurnIsActiveWithoutReplacingRuntime(t *testing
 
 	blocking := &blockingRuntime{session: activeSession, release: make(chan struct{})}
 	gw, err := kernelimpl.New(kernelimpl.Config{
-		Sessions: stack.Sessions,
+		Sessions: stack.composition.sessions,
 		Runtime:  blocking,
 		Resolver: blockingResolver{},
 	})
 	if err != nil {
 		t.Fatalf("kernel.New() error = %v", err)
 	}
-	stack.gateway = gw
+	stack.composition.gateway = gw
 
-	handle, err := stack.currentGateway().BeginTurn(ctx, kernelimpl.BeginTurnRequest{
+	handle, err := stack.composition.currentGateway().BeginTurn(ctx, kernelimpl.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "hold active",
 	})
@@ -597,10 +597,10 @@ func TestPluginServiceCommitsWhileTurnIsActiveWithoutReplacingRuntime(t *testing
 		}
 	}()
 
-	if got := len(stack.currentGateway().ActiveTurns()); got != 1 {
+	if got := len(stack.composition.currentGateway().ActiveTurns()); got != 1 {
 		t.Fatalf("ActiveTurns() len = %d, want 1", got)
 	}
-	activeGateway := stack.currentGateway()
+	activeGateway := stack.composition.currentGateway()
 
 	existingDir := filepath.Join(t.TempDir(), "some-plugin")
 	buildMinimalPluginDir(t, existingDir, `{"name":"existing","version":"1.0.0"}`)
@@ -623,7 +623,7 @@ func TestPluginServiceCommitsWhileTurnIsActiveWithoutReplacingRuntime(t *testing
 	if err != nil {
 		t.Errorf("Remove() error = %v", err)
 	}
-	if stack.currentGateway() != activeGateway {
+	if stack.composition.currentGateway() != activeGateway {
 		t.Fatal("Plugin configuration replaced the active Runtime")
 	}
 }
@@ -660,7 +660,7 @@ func TestPluginServiceValidationFailureDoesNotEnterConfigWriter(t *testing.T) {
 	}
 
 	var saveCount int
-	stack.store.saveHook = func(doc AppConfig) error {
+	stack.composition.store.saveHook = func(doc AppConfig) error {
 		saveCount++
 		return nil
 	}
@@ -818,8 +818,8 @@ func TestPluginServiceAgentContributions(t *testing.T) {
 	if _, err := stack.Plugins().Disable(ctx, "agentplugin"); err != nil {
 		t.Fatalf("Disable() failed: %v", err)
 	}
-	if _, ok := agentConfigByNameForPluginTest(stack.runtime.Assembly.Agents, "plugin-helper"); ok {
-		t.Fatalf("plugin-helper still present after disable: %#v", stack.runtime.Assembly.Agents)
+	if _, ok := agentConfigByNameForPluginTest(stack.composition.runtime.Assembly.Agents, "plugin-helper"); ok {
+		t.Fatalf("plugin-helper still present after disable: %#v", stack.composition.runtime.Assembly.Agents)
 	}
 }
 
@@ -856,7 +856,7 @@ func TestPluginServiceRejectsAgentCollisionBeforeCAS(t *testing.T) {
 	if _, err := stack.Plugins().AddPath(context.Background(), pluginDir); err == nil || !strings.Contains(err.Error(), "conflicts with an existing Agent") {
 		t.Fatalf("AddPath(colliding Agent) error = %v, want pre-CAS collision rejection", err)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}

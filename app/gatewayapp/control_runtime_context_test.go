@@ -22,9 +22,9 @@ func TestControlRuntimeContextPreservesOnlyAgentMessageTransport(t *testing.T) {
 	sender := controlRuntimeContextMessageSender{}
 	fallback := context.WithValue(context.Background(), requestValueKey{}, "request-only")
 	fallback = agentmessage.WithSender(fallback, sender)
-	stack := &Stack{runtimeComposition: runtimeComposition{lifecycleCtx: context.Background()}}
+	stack := &Stack{composition: runtimeComposition{lifecycleCtx: context.Background()}}
 
-	runtimeCtx := stack.controlRuntimeContext(fallback, session.Session{})
+	runtimeCtx := stack.composition.controlRuntimeContext(fallback, session.Session{})
 	if agentmessage.SenderFromContext(runtimeCtx) == nil {
 		t.Fatal("Control runtime context dropped negotiated Agent message transport")
 	}
@@ -37,7 +37,7 @@ func TestControlRuntimeContextBindsMailboxForSpawnedChild(t *testing.T) {
 	t.Parallel()
 
 	stack := &Stack{
-		runtimeComposition: runtimeComposition{
+		composition: runtimeComposition{
 			lifecycleCtx: context.Background(),
 			hostedChildMailbox: func(context.Context, session.SessionRef, agentmessage.Request) (agentmessage.Response, error) {
 				return agentmessage.Response{Accepted: true}, nil
@@ -53,12 +53,12 @@ func TestControlRuntimeContextBindsMailboxForSpawnedChild(t *testing.T) {
 		},
 	}
 
-	runtimeCtx := stack.controlRuntimeContext(context.Background(), child)
+	runtimeCtx := stack.composition.controlRuntimeContext(context.Background(), child)
 	if agentmessage.SenderFromContext(runtimeCtx) == nil {
 		t.Fatal("spawned child runtime context has no parent/sibling mailbox")
 	}
 
-	mainCtx := stack.controlRuntimeContext(context.Background(), session.Session{
+	mainCtx := stack.composition.controlRuntimeContext(context.Background(), session.Session{
 		SessionRef: session.SessionRef{SessionID: "main-1"},
 	})
 	if agentmessage.SenderFromContext(mainCtx) != nil {

@@ -260,7 +260,7 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 		_ = ownership.Close()
 		return nil, err
 	}
-	clients, err := appServer.Bind(appserver.Principal{ID: stack.UserID})
+	clients, err := appServer.Bind(appserver.Principal{ID: stack.UserID()})
 	if err != nil {
 		cleanupChildCredentialOnError()
 		closeEndpoint()
@@ -269,7 +269,7 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 		return nil, err
 	}
 	if endpoint != nil {
-		authenticator, authErr := controlserver.BearerTokenAuthenticator(token, appserver.Principal{ID: stack.UserID})
+		authenticator, authErr := controlserver.BearerTokenAuthenticator(token, appserver.Principal{ID: stack.UserID()})
 		if authErr != nil {
 			cleanupChildCredentialOnError()
 			closeEndpoint()
@@ -278,7 +278,7 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 			return nil, authErr
 		}
 		if childToken != token {
-			childAuthenticator, childAuthErr := controlserver.BearerTokenAuthenticator(childToken, appserver.Principal{ID: stack.UserID})
+			childAuthenticator, childAuthErr := controlserver.BearerTokenAuthenticator(childToken, appserver.Principal{ID: stack.UserID()})
 			if childAuthErr != nil {
 				cleanupChildCredentialOnError()
 				closeEndpoint()
@@ -331,8 +331,8 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 		childCredentialCleanup:         childCredentialCleanup,
 		EmbeddedChildBridgeUnavailable: childBridgeUnavailable,
 		Workspace: gatewayapp.Config{
-			AppName: stack.AppName, UserID: stack.UserID, StoreDir: cfg.StoreDir,
-			WorkspaceKey: stack.Workspace.Key, WorkspaceCWD: stack.Workspace.CWD,
+			AppName: stack.AppName(), UserID: stack.UserID(), StoreDir: cfg.StoreDir,
+			WorkspaceKey: stack.Workspace().Key, WorkspaceCWD: stack.Workspace().CWD,
 		},
 	}, nil
 }

@@ -32,10 +32,10 @@ type pluginOperationReceipt struct {
 }
 
 func (s *Stack) pluginOperationReceiptDir() string {
-	if s == nil || strings.TrimSpace(s.storeDir) == "" {
+	if s == nil || strings.TrimSpace(s.composition.storeDir) == "" {
 		return ""
 	}
-	return filepath.Join(s.storeDir, "plugins", "operation-receipts")
+	return filepath.Join(s.composition.storeDir, "plugins", "operation-receipts")
 }
 
 func pluginOperationReceiptPath(dir, principalID, operationID string) (string, error) {

@@ -412,7 +412,7 @@ func TestNewLocalStackLoadsPluginSkills(t *testing.T) {
 	}
 	defer stack.Close()
 
-	systemPrompt, _ := stack.runtime.BaseMetadata["system_prompt"].(string)
+	systemPrompt, _ := stack.composition.runtime.BaseMetadata["system_prompt"].(string)
 	if !strings.Contains(systemPrompt, "my-plugin:plugin-skill") {
 		t.Fatalf("expected system prompt to contain plugin skill, but it didn't.\nPrompt:\n%s", systemPrompt)
 	}
@@ -563,7 +563,7 @@ func TestNewLocalStackRunsSessionStartHook(t *testing.T) {
 
 	// Create a session in the stack's session service
 	ctx := context.Background()
-	sess, err := stack.Sessions.StartSession(ctx, session.StartSessionRequest{
+	sess, err := stack.composition.sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: "CAELIS",
 		UserID:  "local-user",
 		Workspace: session.WorkspaceRef{
@@ -576,7 +576,7 @@ func TestNewLocalStackRunsSessionStartHook(t *testing.T) {
 	}
 
 	// Get the gateway and run a turn
-	gw := stack.currentGateway()
+	gw := stack.composition.currentGateway()
 	if gw == nil {
 		t.Fatal("expected non-nil gateway from stack")
 	}
@@ -592,7 +592,7 @@ func TestNewLocalStackRunsSessionStartHook(t *testing.T) {
 	}
 
 	// Verify that the hook ran and appended plugin context as a user-role model message.
-	events, err := stack.Sessions.Events(ctx, session.EventsRequest{SessionRef: sess.SessionRef})
+	events, err := stack.composition.sessions.Events(ctx, session.EventsRequest{SessionRef: sess.SessionRef})
 	if err != nil {
 		t.Fatalf("failed to list session events: %v", err)
 	}

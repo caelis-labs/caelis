@@ -39,7 +39,7 @@ func BindAgentBinding(ctx context.Context, stack *gatewayapp.Stack, binding agen
 	if err != nil {
 		return agentbinding.Status{}, err
 	}
-	result, err := stack.AgentCommands().BindAgentBinding(ctx, appserver.Principal{ID: stack.UserID}, appserver.BindAgentBindingRequest{
+	result, err := stack.AgentCommands().BindAgentBinding(ctx, appserver.Principal{ID: stack.UserID()}, appserver.BindAgentBindingRequest{
 		WriteBase: appserver.WriteBase{
 			OperationID:      "gatewayapptest-agent-binding-" + uuid.NewString(),
 			ExpectedRevision: &revision,
@@ -70,7 +70,7 @@ func CreateAgentRole(
 	if err != nil {
 		return agentbinding.Status{}, err
 	}
-	result, err := stack.AgentCommands().CreateAgentRole(ctx, appserver.Principal{ID: stack.UserID}, appserver.CreateAgentRoleRequest{
+	result, err := stack.AgentCommands().CreateAgentRole(ctx, appserver.Principal{ID: stack.UserID()}, appserver.CreateAgentRoleRequest{
 		WriteBase: appserver.WriteBase{
 			OperationID:      "gatewayapptest-agent-role-create-" + uuid.NewString(),
 			ExpectedRevision: &revision,
@@ -96,7 +96,7 @@ func ConnectModel(ctx context.Context, stack *gatewayapp.Stack, cfg gatewayapp.M
 	if err != nil {
 		return "", err
 	}
-	result, err := stack.ConfigurationCommands().ConnectModel(ctx, appserver.Principal{ID: stack.UserID}, appserver.ConnectModelRequest{
+	result, err := stack.ConfigurationCommands().ConnectModel(ctx, appserver.Principal{ID: stack.UserID()}, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{
 			OperationID:      "gatewayapptest-model-connect-" + uuid.NewString(),
 			ExpectedRevision: &revision,
@@ -123,7 +123,7 @@ func UseHostModel(ctx context.Context, stack *gatewayapp.Stack, alias string) er
 	if err != nil {
 		return err
 	}
-	result, err := stack.ConfigurationCommands().UseModel(ctx, appserver.Principal{ID: stack.UserID}, appserver.UseModelRequest{
+	result, err := stack.ConfigurationCommands().UseModel(ctx, appserver.Principal{ID: stack.UserID()}, appserver.UseModelRequest{
 		WriteBase: appserver.WriteBase{
 			OperationID:      "gatewayapptest-model-use-" + uuid.NewString(),
 			ExpectedRevision: &revision,

@@ -116,8 +116,8 @@ func (s *runtimeComposition) configuredAssembly(base assembly.ResolvedAssembly, 
 func (s *runtimeComposition) configuredAssemblyWithPluginAgents(base assembly.ResolvedAssembly, pluginAgents []pluginapi.AgentRegistration, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	self, err := defaultSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		StoreDir:     s.storeDir,
-		WorkspaceKey: s.Workspace.Key,
-		WorkspaceCWD: s.Workspace.CWD,
+		WorkspaceKey: s.workspace.Key,
+		WorkspaceCWD: s.workspace.CWD,
 		SessionOptions: caelisModelSessionOptions(
 			runtimeCfg.Model,
 			runtimeCfg.ModelProfileEffort,

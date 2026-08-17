@@ -65,7 +65,7 @@ func (s *AgentMessageService) deliverAgentMessageAttempt(
 	principal appserver.Principal,
 	req appserver.AgentMessageRequest,
 ) (appserver.AgentMessageResult, error) {
-	active, err := s.host.Sessions.Session(ctx, session.SessionRef{SessionID: req.SessionID})
+	active, err := s.host.Sessions().Session(ctx, session.SessionRef{SessionID: req.SessionID})
 	if err != nil {
 		if errors.Is(err, session.ErrSessionNotFound) {
 			return appserver.AgentMessageResult{}, appserver.ErrUnauthorized
@@ -75,7 +75,7 @@ func (s *AgentMessageService) deliverAgentMessageAttempt(
 	if err := authorizeAgentMessagePrincipal(principal, active); err != nil {
 		return appserver.AgentMessageResult{}, err
 	}
-	closed, err := appserver.IsSessionClosed(ctx, s.host.Sessions, active.SessionRef)
+	closed, err := appserver.IsSessionClosed(ctx, s.host.Sessions(), active.SessionRef)
 	if err != nil {
 		return appserver.AgentMessageResult{}, err
 	}
@@ -205,7 +205,7 @@ func (s *AgentMessageService) managedChildParentSource(
 	if parentSessionID == "" || taskID == "" || childSessionID == "" {
 		return session.ActorRef{}, session.EventScope{}, session.Session{}, errors.New("managed child Session relation is incomplete")
 	}
-	parent, err := s.host.Sessions.Session(ctx, session.SessionRef{SessionID: parentSessionID})
+	parent, err := s.host.Sessions().Session(ctx, session.SessionRef{SessionID: parentSessionID})
 	if err != nil {
 		return session.ActorRef{}, session.EventScope{}, session.Session{}, fmt.Errorf("inspect managed child parent: %w", err)
 	}

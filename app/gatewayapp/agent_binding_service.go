@@ -23,7 +23,7 @@ func (s *Stack) AgentBindings() AgentBindingService {
 // AgentBindingStatus returns every fixed and custom handle, standard
 // ModelProfile, and binding-set status.
 func (s AgentBindingService) AgentBindingStatus(ctx context.Context) (agentbinding.Status, error) {
-	if s.stack == nil || s.stack.store == nil {
+	if s.stack == nil || s.stack.composition.store == nil {
 		return agentbinding.Status{}, fmt.Errorf("gatewayapp: Agent binding configuration is unavailable")
 	}
 	if ctx != nil {
@@ -31,7 +31,7 @@ func (s AgentBindingService) AgentBindingStatus(ctx context.Context) (agentbindi
 			return agentbinding.Status{}, err
 		}
 	}
-	doc, err := s.stack.store.LoadContext(contextOrBackground(ctx))
+	doc, err := s.stack.composition.store.LoadContext(contextOrBackground(ctx))
 	if err != nil {
 		return agentbinding.Status{}, err
 	}

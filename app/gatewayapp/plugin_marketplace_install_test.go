@@ -130,7 +130,7 @@ func TestPluginServiceInstallFromMarketplaceUsesEntryNameWhenSourceDirDiffers(t 
 		t.Fatalf("Install() skills = %#v, want drawio namespace", info.Skills)
 	}
 
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -184,7 +184,7 @@ func TestPluginServiceMarketplaceInstallRenamesExistingSameRoot(t *testing.T) {
 	if info.ID != "drawio" {
 		t.Fatalf("Install() ID = %q, want drawio", info.ID)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -236,7 +236,7 @@ func TestPluginServiceMarketplaceInstallUpdatesSameIDAtNewRoot(t *testing.T) {
 	if info.ID != "drawio" || info.Root != pluginDir {
 		t.Fatalf("Install() = %#v, want same ID updated to root %q", info, pluginDir)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -280,7 +280,7 @@ func TestPluginServiceMarketplaceInstallRejectsIDCollisionOnRootRename(t *testin
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("Install() error = %v, want ID collision", err)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}

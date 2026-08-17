@@ -18,10 +18,10 @@ func (s *runtimeComposition) updateSessionStateAtRevision(
 	expectedRevision uint64,
 	update func(map[string]any) (map[string]any, error),
 ) (session.Session, error) {
-	if s == nil || s.Sessions == nil {
+	if s == nil || s.sessions == nil {
 		return session.Session{}, fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
-	return s.Sessions.UpdateState(ctx, session.UpdateStateRequest{
+	return s.sessions.UpdateState(ctx, session.UpdateStateRequest{
 		SessionRef:       ref,
 		ExpectedRevision: &expectedRevision,
 		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
@@ -32,10 +32,10 @@ func (s *runtimeComposition) updateSessionStateAtRevision(
 // SessionRuntimeState returns the current per-session runtime overrides backed
 // by session state.
 func (s *runtimeComposition) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
-	if s == nil || s.Sessions == nil {
+	if s == nil || s.sessions == nil {
 		return SessionRuntimeState{}, fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
-	state, err := s.Sessions.SnapshotState(ctx, ref)
+	state, err := s.sessions.SnapshotState(ctx, ref)
 	if err != nil {
 		return SessionRuntimeState{}, err
 	}

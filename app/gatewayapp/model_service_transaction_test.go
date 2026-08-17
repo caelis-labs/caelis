@@ -32,7 +32,7 @@ func TestConnectStoresProviderAPIKeyBehindOpaqueReference(t *testing.T) {
 		t.Fatal(err)
 	}
 	modelID := profile.Backend.Provider.ModelConfigID
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,22 +53,22 @@ func TestConnectStoresProviderAPIKeyBehindOpaqueReference(t *testing.T) {
 	if endpointProfile.CredentialRef == "" || !strings.HasPrefix(endpointProfile.CredentialRef, "apikey:") || endpointProfile.Token != "" || endpointProfile.PersistToken {
 		t.Fatalf("persisted provider credential = %#v", endpointProfile)
 	}
-	raw, err := os.ReadFile(stack.store.path)
+	raw, err := os.ReadFile(stack.composition.store.path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(raw), secret) {
 		t.Fatalf("config contains plaintext key: %s", raw)
 	}
-	got, err := stack.apiKeyCredentials.Get(context.Background(), endpointProfile.CredentialRef)
+	got, err := stack.composition.apiKeyCredentials.Get(context.Background(), endpointProfile.CredentialRef)
 	if err != nil || got != secret {
 		t.Fatalf("credential Get() = %q, %v", got, err)
 	}
-	hydrated, err := stack.lookup.ResolveConfig(modelID)
+	hydrated, err := stack.composition.lookup.ResolveConfig(modelID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stack.lookup.ResolveModelConfig(context.Background(), hydrated, 0); err != nil {
+	if _, err := stack.composition.lookup.ResolveModelConfig(context.Background(), hydrated, 0); err != nil {
 		t.Fatalf("ResolveModelConfig() error = %v", err)
 	}
 }
@@ -82,7 +82,7 @@ func TestConnectReplacesLegacyEnvironmentCredential(t *testing.T) {
 		Token:    "replacement-secret",
 	})
 	ref := credentialstore.BuildReference(configured.Provider, configured.ProviderEndpointID)
-	writeLegacyEnvironmentCredentialForTest(t, stack.storeDir, ref, "DEEPSEEK_API_KEY")
+	writeLegacyEnvironmentCredentialForTest(t, stack.composition.storeDir, ref, "DEEPSEEK_API_KEY")
 
 	profile, err := stack.connectTestModel(configured)
 	if err != nil {
@@ -91,7 +91,7 @@ func TestConnectReplacesLegacyEnvironmentCredential(t *testing.T) {
 	if strings.TrimSpace(profile.ID) == "" {
 		t.Fatal("Connect() returned an empty ModelProfile")
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestConnectReplacesLegacyEnvironmentCredential(t *testing.T) {
 	if !foundEndpoint {
 		t.Fatalf("DeepSeek endpoint does not reference replacement credential %q: %#v", ref, doc.Models.ProviderEndpoints)
 	}
-	if got, err := stack.apiKeyCredentials.Get(context.Background(), ref); err != nil || got != "replacement-secret" {
+	if got, err := stack.composition.apiKeyCredentials.Get(context.Background(), ref); err != nil || got != "replacement-secret" {
 		t.Fatalf("replacement credential = %q, %v", got, err)
 	}
 }
@@ -116,21 +116,21 @@ func TestConnectLegacyEnvironmentCredentialRollbackAllowsRetry(t *testing.T) {
 		Token:    "replacement-secret",
 	})
 	ref := credentialstore.BuildReference(configured.Provider, configured.ProviderEndpointID)
-	writeLegacyEnvironmentCredentialForTest(t, stack.storeDir, ref, "DEEPSEEK_API_KEY")
-	stack.store.saveHook = func(AppConfig) error { return errors.New("save failed") }
+	writeLegacyEnvironmentCredentialForTest(t, stack.composition.storeDir, ref, "DEEPSEEK_API_KEY")
+	stack.composition.store.saveHook = func(AppConfig) error { return errors.New("save failed") }
 
 	if _, err := stack.connectTestModel(configured); err == nil || !strings.Contains(err.Error(), "save failed") {
 		t.Fatalf("Connect() error = %v, want save failure", err)
 	}
-	if _, err := stack.apiKeyCredentials.Get(context.Background(), ref); !errors.Is(err, os.ErrNotExist) {
+	if _, err := stack.composition.apiKeyCredentials.Get(context.Background(), ref); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("credential after rollback error = %v, want removed replacement", err)
 	}
 
-	stack.store.saveHook = nil
+	stack.composition.store.saveHook = nil
 	if _, err := stack.connectTestModel(configured); err != nil {
 		t.Fatalf("Connect() retry error = %v", err)
 	}
-	if got, err := stack.apiKeyCredentials.Get(context.Background(), ref); err != nil || got != "replacement-secret" {
+	if got, err := stack.composition.apiKeyCredentials.Get(context.Background(), ref); err != nil || got != "replacement-secret" {
 		t.Fatalf("credential after retry = %q, %v", got, err)
 	}
 }
@@ -144,9 +144,9 @@ func TestResolveModelConfigHidesLegacyCredentialStorageDetails(t *testing.T) {
 	})
 	ref := credentialstore.BuildReference(configured.Provider, configured.ProviderEndpointID)
 	configured.CredentialRef = ref
-	writeLegacyEnvironmentCredentialForTest(t, stack.storeDir, ref, "DEEPSEEK_API_KEY")
+	writeLegacyEnvironmentCredentialForTest(t, stack.composition.storeDir, ref, "DEEPSEEK_API_KEY")
 
-	_, err := stack.lookup.ResolveModelConfig(context.Background(), configured, 0)
+	_, err := stack.composition.lookup.ResolveModelConfig(context.Background(), configured, 0)
 	if err == nil || err.Error() != "model credential is invalid; reconnect with /connect" {
 		t.Fatalf("ResolveModelConfig() error = %v, want concise reconnect guidance", err)
 	}
@@ -175,7 +175,7 @@ func TestHasReusableProviderAuthRejectsLegacyCredential(t *testing.T) {
 		t.Fatal("HasReusableProviderAuth() = false for valid stored credential")
 	}
 
-	writeLegacyEnvironmentCredentialForTest(t, stack.storeDir, ref, "DEEPSEEK_API_KEY")
+	writeLegacyEnvironmentCredentialForTest(t, stack.composition.storeDir, ref, "DEEPSEEK_API_KEY")
 	if stack.HasReusableProviderAuth(context.Background(), "deepseek", baseURL) {
 		t.Fatal("HasReusableProviderAuth() = true for invalid legacy credential")
 	}
@@ -187,11 +187,11 @@ func TestConnectRollsBackNewProviderCredentialWhenConfigSaveFails(t *testing.T) 
 		Provider: "openai", API: providers.APIOpenAI, Model: "gpt-rollback", BaseURL: "https://rollback.example/v1", Token: "secret",
 	})
 	ref := credentialstore.BuildReference(configured.Provider, configured.ProviderEndpointID)
-	stack.store.saveHook = func(AppConfig) error { return errors.New("save failed") }
+	stack.composition.store.saveHook = func(AppConfig) error { return errors.New("save failed") }
 	if _, err := stack.connectTestModel(configured); err == nil || !strings.Contains(err.Error(), "save failed") {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	if _, err := stack.apiKeyCredentials.Get(context.Background(), ref); !errors.Is(err, os.ErrNotExist) {
+	if _, err := stack.composition.apiKeyCredentials.Get(context.Background(), ref); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("rolled-back credential Get() error = %v", err)
 	}
 }
@@ -199,7 +199,7 @@ func TestConnectRollsBackNewProviderCredentialWhenConfigSaveFails(t *testing.T) 
 func TestProviderCredentialCASLoserRestoresCommittedWinner(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	stale, err := stack.store.LoadContext(ctx)
+	stale, err := stack.composition.store.LoadContext(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestProviderCredentialCASLoserRestoresCommittedWinner(t *testing.T) {
 		t.Fatalf("Connect(winner) error = %v", err)
 	}
 	ref := credentialstore.BuildReference(winner.Provider, winner.ProviderEndpointID)
-	if got, err := stack.apiKeyCredentials.Get(ctx, ref); err != nil || got != "winner-secret" {
+	if got, err := stack.composition.apiKeyCredentials.Get(ctx, ref); err != nil || got != "winner-secret" {
 		t.Fatalf("winner credential = %q, %v", got, err)
 	}
 
@@ -221,7 +221,7 @@ func TestProviderCredentialCASLoserRestoresCommittedWinner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stack.store.CompareAndSave(ctx, stale.ConfigurationRevision, stale); err == nil {
+	if _, err := stack.composition.store.CompareAndSave(ctx, stale.ConfigurationRevision, stale); err == nil {
 		t.Fatal("stale AppConfig CAS unexpectedly committed")
 	} else {
 		var conflict *configstore.ConfigurationRevisionConflict
@@ -232,7 +232,7 @@ func TestProviderCredentialCASLoserRestoresCommittedWinner(t *testing.T) {
 	if err := credentialTxn.rollback(); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := stack.apiKeyCredentials.Get(ctx, ref); err != nil || got != "winner-secret" {
+	if got, err := stack.composition.apiKeyCredentials.Get(ctx, ref); err != nil || got != "winner-secret" {
 		t.Fatalf("credential after CAS loser rollback = %q, %v; want winner", got, err)
 	}
 }
@@ -266,8 +266,8 @@ func TestConnectRollsForwardCredentialAfterCommittedConfigWriteFault(t *testing.
 	ref := credentialstore.BuildReference(configured.Provider, configured.ProviderEndpointID)
 	fault := errors.New("directory fsync failed")
 	invalidations := 0
-	stack.store.savedHook = func() { invalidations++ }
-	stack.store.saveHook = func(doc AppConfig) error {
+	stack.composition.store.savedHook = func() { invalidations++ }
+	stack.composition.store.saveHook = func(doc AppConfig) error {
 		doc = configstore.Normalize(doc)
 		if err := configstore.Validate(doc); err != nil {
 			return err
@@ -276,7 +276,7 @@ func TestConnectRollsForwardCredentialAfterCommittedConfigWriteFault(t *testing.
 		if err != nil {
 			return err
 		}
-		return atomicWriteFile(stack.store.path, data, 0o600, atomicWriteOps{
+		return atomicWriteFile(stack.composition.store.path, data, 0o600, atomicWriteOps{
 			fsyncDir: func(string) error { return fault },
 		})
 	}
@@ -288,10 +288,10 @@ func TestConnectRollsForwardCredentialAfterCommittedConfigWriteFault(t *testing.
 	if len(profiles) != 1 || invalidations != 1 {
 		t.Fatalf("ConnectModels() profiles/invalidations = %d/%d, want 1/1", len(profiles), invalidations)
 	}
-	if got, err := stack.apiKeyCredentials.Get(context.Background(), ref); err != nil || got != "committed-secret" {
+	if got, err := stack.composition.apiKeyCredentials.Get(context.Background(), ref); err != nil || got != "committed-secret" {
 		t.Fatalf("credential after committed config write = %q, %v", got, err)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestConnectRollsForwardCredentialAfterCommittedConfigWriteFault(t *testing.
 	if !found {
 		t.Fatalf("committed config does not reference credential %q: %#v", ref, doc.Models.ProviderEndpoints)
 	}
-	if !stack.lookup.HasAlias(profiles[0].Backend.Provider.ModelConfigID) {
+	if !stack.composition.lookup.HasAlias(profiles[0].Backend.Provider.ModelConfigID) {
 		t.Fatalf("committed model %q missing from live lookup", profiles[0].Backend.Provider.ModelConfigID)
 	}
 }
@@ -321,7 +321,7 @@ func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	modelID := profile.Backend.Provider.ModelConfigID
-	originalDoc, err := stack.store.Load()
+	originalDoc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 	if writeCount() != 1 {
 		t.Fatalf("config writes = %d, want one committed default-selection write", writeCount())
 	}
-	doc, loadErr := stack.store.Load()
+	doc, loadErr := stack.composition.store.Load()
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
@@ -341,19 +341,19 @@ func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 		doc.Models.DefaultAlias != "" ||
 		doc.ModelProfiles.DefaultProfileID != profile.ID ||
 		doc.ModelProfiles.DefaultEffort != "high" ||
-		stack.lookup.DefaultID() != modelID ||
-		stack.lookup.DefaultEffort() != "high" ||
-		stack.runtime.Model.ID != modelID ||
-		stack.runtime.ModelProfileEffort != "high" {
+		stack.composition.lookup.DefaultID() != modelID ||
+		stack.composition.lookup.DefaultEffort() != "high" ||
+		stack.composition.runtime.Model.ID != modelID ||
+		stack.composition.runtime.ModelProfileEffort != "high" {
 		t.Fatalf(
 			"global defaults diverged: legacy=%q profile=%q effort=%q lookup=%q/%q runtime=%q/%q",
 			doc.Models.DefaultID,
 			doc.ModelProfiles.DefaultProfileID,
 			doc.ModelProfiles.DefaultEffort,
-			stack.lookup.DefaultID(),
-			stack.lookup.DefaultEffort(),
-			stack.runtime.Model.ID,
-			stack.runtime.ModelProfileEffort,
+			stack.composition.lookup.DefaultID(),
+			stack.composition.lookup.DefaultEffort(),
+			stack.composition.runtime.Model.ID,
+			stack.composition.runtime.ModelProfileEffort,
 		)
 	}
 	if !reflect.DeepEqual(doc.Models.Configs, originalDoc.Models.Configs) ||
@@ -361,7 +361,7 @@ func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 		!reflect.DeepEqual(doc.ModelProfiles.Profiles, originalDoc.ModelProfiles.Profiles) {
 		t.Fatalf("UseModel overwrote model/profile definitions:\nbefore: %#v\nafter:  %#v", originalDoc, doc)
 	}
-	rawConfig, readErr := os.ReadFile(stack.store.path)
+	rawConfig, readErr := os.ReadFile(stack.composition.store.path)
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
@@ -371,16 +371,16 @@ func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 	if !strings.Contains(string(rawConfig), `"default_effort": "high"`) {
 		t.Fatalf("config did not persist global default effort:\n%s", rawConfig)
 	}
-	state, stateErr := stack.Sessions.SnapshotState(ctx, activeSession.SessionRef)
+	state, stateErr := stack.composition.sessions.SnapshotState(ctx, activeSession.SessionRef)
 	if stateErr != nil {
 		t.Fatal(stateErr)
 	}
 	if got := kernel.CurrentModelAlias(state); got != "" {
 		t.Fatalf("Host UseModel mutated Session model alias = %q", got)
 	}
-	storeDir := stack.storeDir
-	workspaceKey := stack.Workspace.Key
-	workspaceCWD := stack.Workspace.CWD
+	storeDir := stack.composition.storeDir
+	workspaceKey := stack.composition.workspace.Key
+	workspaceCWD := stack.composition.workspace.CWD
 	if closeErr := stack.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -394,12 +394,12 @@ func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 		t.Fatal(reloadErr)
 	}
 	defer reloaded.Close()
-	if reloaded.runtime.ModelProfileID != profile.ID || reloaded.runtime.ModelProfileEffort != "high" {
-		t.Fatalf("reloaded global default = %q/%q, want %q/high", reloaded.runtime.ModelProfileID, reloaded.runtime.ModelProfileEffort, profile.ID)
+	if reloaded.composition.runtime.ModelProfileID != profile.ID || reloaded.composition.runtime.ModelProfileEffort != "high" {
+		t.Fatalf("reloaded global default = %q/%q, want %q/high", reloaded.composition.runtime.ModelProfileID, reloaded.composition.runtime.ModelProfileEffort, profile.ID)
 	}
-	self, ok := agentConfigForToolTest(reloaded.runtime.Assembly.Agents, "self")
+	self, ok := agentConfigForToolTest(reloaded.composition.runtime.Assembly.Agents, "self")
 	if !ok {
-		t.Fatalf("runtime-derived self missing from assembly: %#v", reloaded.runtime.Assembly.Agents)
+		t.Fatalf("runtime-derived self missing from assembly: %#v", reloaded.composition.runtime.Assembly.Agents)
 	}
 	if got := self.SessionOptions.ModelID; got != profile.Backend.Provider.ModelConfigID {
 		t.Fatalf("runtime-derived self model session option = %q, want %q", got, profile.Backend.Provider.ModelConfigID)
@@ -429,7 +429,7 @@ func TestHostModelSelectionDoesNotRequireOrMutateSession(t *testing.T) {
 	if err := stack.useTestHostModel(ctx, session.SessionRef{}, modelID, "high"); err != nil {
 		t.Fatalf("Host UseModel() error = %v", err)
 	}
-	state, err := stack.Sessions.SnapshotState(ctx, activeSession.SessionRef)
+	state, err := stack.composition.sessions.SnapshotState(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,16 +440,16 @@ func TestHostModelSelectionDoesNotRequireOrMutateSession(t *testing.T) {
 
 func TestConnectPersistsCanonicalProfileForFutureActivation(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
-	originalID := stack.lookup.DefaultID()
-	originalRuntimeModel := stack.runtime.Model.ID
+	originalID := stack.composition.lookup.DefaultID()
+	originalRuntimeModel := stack.composition.runtime.Model.ID
 	_, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "new-model"})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	if stack.lookup.DefaultID() != originalID || stack.runtime.Model.ID != originalRuntimeModel {
-		t.Fatalf("existing default changed after committed connect: %q/%q", stack.lookup.DefaultID(), stack.runtime.Model.ID)
+	if stack.composition.lookup.DefaultID() != originalID || stack.composition.runtime.Model.ID != originalRuntimeModel {
+		t.Fatalf("existing default changed after committed connect: %q/%q", stack.composition.lookup.DefaultID(), stack.composition.runtime.Model.ID)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,14 +463,14 @@ func TestConnectPersistsCanonicalProfileForFutureActivation(t *testing.T) {
 			}
 		}
 	}
-	if !found || modelID == "" || !stack.lookup.HasAlias(modelID) {
+	if !found || modelID == "" || !stack.composition.lookup.HasAlias(modelID) {
 		t.Fatalf("committed profile did not roll forward to durable/live state: %#v", doc.ModelProfiles)
 	}
 }
 
 func TestConnectModelsPersistsStandardProfilesAtomicallyAndKeepsExistingDefault(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
-	originalDefaultID := stack.lookup.DefaultID()
+	originalDefaultID := stack.composition.lookup.DefaultID()
 	profiles, err := stack.connectTestModels([]ModelConfig{
 		{Provider: "ollama", API: providers.APIOllama, Model: "batch-first"},
 		{Provider: "ollama", API: providers.APIOllama, Model: "batch-second"},
@@ -478,10 +478,10 @@ func TestConnectModelsPersistsStandardProfilesAtomicallyAndKeepsExistingDefault(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(profiles) != 2 || stack.lookup.DefaultID() != originalDefaultID || stack.runtime.Model.ID != originalDefaultID {
-		t.Fatalf("batch profiles/default/runtime = %#v/%q/%q", profiles, stack.lookup.DefaultID(), stack.runtime.Model.ID)
+	if len(profiles) != 2 || stack.composition.lookup.DefaultID() != originalDefaultID || stack.composition.runtime.Model.ID != originalDefaultID {
+		t.Fatalf("batch profiles/default/runtime = %#v/%q/%q", profiles, stack.composition.lookup.DefaultID(), stack.composition.runtime.Model.ID)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +494,7 @@ func TestConnectModelsPersistsStandardProfilesAtomicallyAndKeepsExistingDefault(
 		t.Fatalf("provider connect created synthetic Agents: %#v", doc.ExternalAgents.Agents)
 	}
 
-	before := stack.lookup.Snapshot()
+	before := stack.composition.lookup.Snapshot()
 	_, err = stack.connectTestModels([]ModelConfig{
 		{Provider: "ollama", API: providers.APIOllama, Model: "should-rollback"},
 		{Model: "invalid-without-provider"},
@@ -502,8 +502,8 @@ func TestConnectModelsPersistsStandardProfilesAtomicallyAndKeepsExistingDefault(
 	if err == nil {
 		t.Fatal("ConnectModels(invalid batch) error = nil")
 	}
-	after := stack.lookup.Snapshot()
-	if !reflect.DeepEqual(after, before) || stack.lookup.HasAlias("ollama/should-rollback") {
+	after := stack.composition.lookup.Snapshot()
+	if !reflect.DeepEqual(after, before) || stack.composition.lookup.HasAlias("ollama/should-rollback") {
 		t.Fatalf("invalid batch leaked into lookup: before=%#v after=%#v", before, after)
 	}
 }
@@ -522,8 +522,8 @@ func TestConnectModelsSelectsFirstProfileWhenNoModelExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	firstModelID := profiles[0].Backend.Provider.ModelConfigID
-	if len(profiles) != 2 || stack.lookup.DefaultID() != firstModelID || stack.runtime.Model.ID != firstModelID {
-		t.Fatalf("profiles/default/runtime = %#v/%q/%q", profiles, stack.lookup.DefaultID(), stack.runtime.Model.ID)
+	if len(profiles) != 2 || stack.composition.lookup.DefaultID() != firstModelID || stack.composition.runtime.Model.ID != firstModelID {
+		t.Fatalf("profiles/default/runtime = %#v/%q/%q", profiles, stack.composition.lookup.DefaultID(), stack.composition.runtime.Model.ID)
 	}
 }
 
@@ -545,7 +545,7 @@ func TestDeleteModelRemovesProviderProfileAndOrdinaryBindings(t *testing.T) {
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, profile.Backend.Provider.ModelConfigID); err != nil {
 		t.Fatal(err)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -584,22 +584,22 @@ func TestDeleteNonDefaultModelPreservesGlobalEffort(t *testing.T) {
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, unrelated.Backend.Provider.ModelConfigID); err != nil {
 		t.Fatal(err)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if doc.ModelProfiles.DefaultProfileID != selected.ID ||
 		doc.ModelProfiles.DefaultEffort != "high" ||
-		stack.lookup.DefaultID() != selected.Backend.Provider.ModelConfigID ||
-		stack.lookup.DefaultEffort() != "high" ||
-		stack.runtime.ModelProfileEffort != "high" {
+		stack.composition.lookup.DefaultID() != selected.Backend.Provider.ModelConfigID ||
+		stack.composition.lookup.DefaultEffort() != "high" ||
+		stack.composition.runtime.ModelProfileEffort != "high" {
 		t.Fatalf(
 			"default changed after deleting unrelated model: profile=%q effort=%q lookup=%q/%q runtime=%q",
 			doc.ModelProfiles.DefaultProfileID,
 			doc.ModelProfiles.DefaultEffort,
-			stack.lookup.DefaultID(),
-			stack.lookup.DefaultEffort(),
-			stack.runtime.ModelProfileEffort,
+			stack.composition.lookup.DefaultID(),
+			stack.composition.lookup.DefaultEffort(),
+			stack.composition.runtime.ModelProfileEffort,
 		)
 	}
 }
@@ -633,7 +633,7 @@ func TestDeleteModelRollsForwardAfterCommittedConfigWriteFault(t *testing.T) {
 				t.Fatalf("config writes = %d, want one committed roll-forward write", got)
 			}
 
-			doc, loadErr := stack.store.Load()
+			doc, loadErr := stack.composition.store.Load()
 			if loadErr != nil {
 				t.Fatal(loadErr)
 			}
@@ -643,10 +643,10 @@ func TestDeleteModelRollsForwardAfterCommittedConfigWriteFault(t *testing.T) {
 			if _, ok := agentbinding.Lookup(doc.AgentBindings, agentbinding.HandleZenith); ok {
 				t.Fatalf("committed deletion retained binding %q", agentbinding.HandleZenith)
 			}
-			if stack.lookup.HasAlias(modelID) || stack.runtime.Model.ID != stack.lookup.DefaultID() {
-				t.Fatalf("lookup/runtime diverged after committed deletion: has=%v runtime=%q default=%q", stack.lookup.HasAlias(modelID), stack.runtime.Model.ID, stack.lookup.DefaultID())
+			if stack.composition.lookup.HasAlias(modelID) || stack.composition.runtime.Model.ID != stack.composition.lookup.DefaultID() {
+				t.Fatalf("lookup/runtime diverged after committed deletion: has=%v runtime=%q default=%q", stack.composition.lookup.HasAlias(modelID), stack.composition.runtime.Model.ID, stack.composition.lookup.DefaultID())
 			}
-			state, stateErr := stack.Sessions.SnapshotState(ctx, activeSession.SessionRef)
+			state, stateErr := stack.composition.sessions.SnapshotState(ctx, activeSession.SessionRef)
 			if stateErr != nil {
 				t.Fatal(stateErr)
 			}
@@ -665,20 +665,20 @@ func TestDeleteModelRollsBackAfterPreCommitConfigWriteFault(t *testing.T) {
 		t.Fatal(err)
 	}
 	modelID := profile.Backend.Provider.ModelConfigID
-	previousRuntimeID := stack.runtime.Model.ID
+	previousRuntimeID := stack.composition.runtime.Model.ID
 	fault := errors.New("rename failed")
-	stack.store.saveHook = func(AppConfig) error { return fault }
+	stack.composition.store.saveHook = func(AppConfig) error { return fault }
 
 	err = stack.deleteTestHostModel(ctx, session.SessionRef{}, modelID)
 	if !errors.Is(err, fault) || configstore.WriteCommitted(err) {
 		t.Fatalf("DeleteModel() error = %v, want uncommitted %v", err, fault)
 	}
-	doc, loadErr := stack.store.Load()
+	doc, loadErr := stack.composition.store.Load()
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	if _, ok := modelprofile.Lookup(doc.ModelProfiles, profile.ID); !ok || !stack.lookup.HasAlias(modelID) || stack.runtime.Model.ID != previousRuntimeID {
-		t.Fatalf("pre-commit rollback diverged: profile=%v lookup=%v runtime=%q want=%q", ok, stack.lookup.HasAlias(modelID), stack.runtime.Model.ID, previousRuntimeID)
+	if _, ok := modelprofile.Lookup(doc.ModelProfiles, profile.ID); !ok || !stack.composition.lookup.HasAlias(modelID) || stack.composition.runtime.Model.ID != previousRuntimeID {
+		t.Fatalf("pre-commit rollback diverged: profile=%v lookup=%v runtime=%q want=%q", ok, stack.composition.lookup.HasAlias(modelID), stack.composition.runtime.Model.ID, previousRuntimeID)
 	}
 }
 
@@ -701,7 +701,7 @@ func TestDeleteModelRejectsSystemBoundProfile(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "rebind or reset") {
 		t.Fatalf("DeleteModel(system-bound) error = %v", err)
 	}
-	if !stack.lookup.HasAlias(profile.Backend.Provider.ModelConfigID) {
+	if !stack.composition.lookup.HasAlias(profile.Backend.Provider.ModelConfigID) {
 		t.Fatal("DeleteModel removed a system-bound model")
 	}
 }
@@ -721,7 +721,7 @@ func TestDeleteModelPersistsCanonicalDeletionForFutureActivation(t *testing.T) {
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, profile.Backend.Provider.ModelConfigID); err != nil {
 		t.Fatalf("DeleteModel() error = %v", err)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -731,7 +731,7 @@ func TestDeleteModelPersistsCanonicalDeletionForFutureActivation(t *testing.T) {
 	if binding, ok := agentbinding.Lookup(doc.AgentBindings, agentbinding.HandleZenith); ok {
 		t.Fatalf("committed deletion restored binding: %#v", binding)
 	}
-	if stack.lookup.HasAlias(profile.Backend.Provider.ModelConfigID) {
+	if stack.composition.lookup.HasAlias(profile.Backend.Provider.ModelConfigID) {
 		t.Fatal("committed deletion did not roll forward to live lookup")
 	}
 }
@@ -739,7 +739,7 @@ func TestDeleteModelPersistsCanonicalDeletionForFutureActivation(t *testing.T) {
 func installCommittedConfigSaveFault(t *testing.T, stack *Stack, stage string, fault error) func() int {
 	t.Helper()
 	writes := 0
-	stack.store.saveHook = func(doc AppConfig) error {
+	stack.composition.store.saveHook = func(doc AppConfig) error {
 		writes++
 		doc = configstore.Normalize(doc)
 		doc.ConfigurationRevision++
@@ -754,7 +754,7 @@ func installCommittedConfigSaveFault(t *testing.T, stack *Stack, stage string, f
 		switch stage {
 		case "chmod":
 			ops.chmod = func(path string, mode os.FileMode) error {
-				if path == stack.store.path {
+				if path == stack.composition.store.path {
 					return fault
 				}
 				return os.Chmod(path, mode)
@@ -764,7 +764,7 @@ func installCommittedConfigSaveFault(t *testing.T, stack *Stack, stage string, f
 		default:
 			t.Fatalf("unknown committed fault stage %q", stage)
 		}
-		return atomicWriteFile(stack.store.path, data, 0o600, ops)
+		return atomicWriteFile(stack.composition.store.path, data, 0o600, ops)
 	}
 	return func() int { return writes }
 }

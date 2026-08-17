@@ -41,7 +41,7 @@ func TestAuthenticateModelProviderRoutesGrokOAuthWithoutCatalogRead(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	stack := &Stack{runtimeComposition: runtimeComposition{grokAuth: manager}}
+	stack := &Stack{composition: runtimeComposition{grokAuth: manager}}
 	err = stack.authenticateModelProvider(context.Background(), modelconfig.AuthenticateRequest{
 		Provider: "grok", HTTPClient: client,
 	})

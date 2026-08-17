@@ -46,7 +46,7 @@ func (s *Stack) invalidatePlacementSnapshot() {
 	}
 	// Session Runtime placement snapshots are immutable for one activation and
 	// must not observe later app configuration writes.
-	s.invalidateOwnPlacementSnapshot()
+	s.composition.invalidateOwnPlacementSnapshot()
 }
 
 func (s *runtimeComposition) invalidateOwnPlacementSnapshot() {

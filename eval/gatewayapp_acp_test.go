@@ -74,14 +74,14 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	if got := len(controllerStatus.ModeOptions); got != 2 {
 		t.Fatalf("len(ACPControllerStatus().ModeOptions) = %d, want 2", got)
 	}
-	current, err := stack.Sessions.Session(context.Background(), activeSession.SessionRef)
+	current, err := stack.Sessions().Session(context.Background(), activeSession.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
 	revision := current.Revision
 	modeResult, err := stack.ConfigurationCommands().ConfigureSessionControllerMode(
 		context.Background(),
-		appserver.Principal{ID: stack.UserID},
+		appserver.Principal{ID: stack.UserID()},
 		appserver.SessionControllerModeRequest{
 			WriteBase: appserver.WriteBase{
 				OperationID:             "eval-controller-mode-plan",
@@ -114,7 +114,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 		t.Fatalf("RunSessionOnce() output = %q, want %q", got, "gateway acp main ok")
 	}
 
-	loaded, err := stack.Sessions.LoadSession(ctx, session.LoadSessionRequest{
+	loaded, err := stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{
 		SessionRef: activeSession.SessionRef,
 	})
 	if err != nil {

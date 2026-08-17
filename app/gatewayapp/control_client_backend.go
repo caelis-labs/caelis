@@ -30,7 +30,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 	if s == nil {
 		return appserver.CommandResult{}, errors.New("gatewayapp: stack is unavailable")
 	}
-	if s.isClosing() {
+	if s.composition.isClosing() {
 		return appserver.CommandResult{Outcome: appserver.OutcomeRejected},
 			appserver.NewOutcomeError(
 				appserver.OutcomeRejected,
@@ -47,7 +47,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 		return s.executePluginCommand(ctx, action, request)
 	}
 	if s.sessionRuntimes == nil {
-		return s.executeControlCommand(ctx, principal, action, request)
+		return s.composition.executeControlCommand(ctx, principal, action, request)
 	}
 
 	if create, ok := request.(appserver.CreateSessionRequest); ok {
@@ -69,11 +69,11 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 		}
 		create.WorkspaceKey = workspace.Key
 		create.CWD = workspace.CWD
-		result, commandErr = s.executeControlCommand(activationCtx, principal, action, create)
+		result, commandErr = s.composition.executeControlCommand(activationCtx, principal, action, create)
 		if commandErr != nil || result.Outcome != appserver.OutcomeCommitted || strings.TrimSpace(result.SessionID) == "" {
 			return result, commandErr
 		}
-		active, err := s.Sessions.Session(activationCtx, session.SessionRef{SessionID: result.SessionID})
+		active, err := s.composition.sessions.Session(activationCtx, session.SessionRef{SessionID: result.SessionID})
 		if err != nil {
 			return result, appserver.NewOutcomeError(appserver.OutcomeUnknown, err)
 		}
@@ -84,7 +84,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 	}
 
 	sessionID := controlCommandSessionID(request)
-	composition := &s.runtimeComposition
+	composition := &s.composition
 	var newlyActivatedRuntime *sessionRuntime
 	var releaseRuntimeUse func()
 	var closeControlRuntime func(context.Context) error
@@ -150,7 +150,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 		if runtime != nil {
 			releaseRuntimeUse = releaseUse
 			composition = &runtime.instance.runtimeComposition
-		} else if _, err := s.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID}); err != nil {
+		} else if _, err := s.composition.sessions.Session(ctx, session.SessionRef{SessionID: sessionID}); err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
 	}
@@ -266,8 +266,8 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		appserver.SessionPresentationConfigRequest:
 		return s.executeSessionConfigurationCommand(ctx, action, req)
 	case appserver.CreateSessionRequest:
-		created, err := s.Sessions.StartSession(ctx, session.StartSessionRequest{
-			AppName: s.AppName, UserID: strings.TrimSpace(principal.ID),
+		created, err := s.sessions.StartSession(ctx, session.StartSessionRequest{
+			AppName: s.appName, UserID: strings.TrimSpace(principal.ID),
 			Workspace:          session.WorkspaceRef{Key: strings.TrimSpace(req.WorkspaceKey), CWD: strings.TrimSpace(req.CWD)},
 			PreferredSessionID: strings.TrimSpace(req.PreferredSessionID), Title: strings.TrimSpace(req.Title), Metadata: req.Metadata,
 		})
@@ -290,11 +290,11 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 				return sessionCommandResult(active), classifyControlBackendError(err)
 			}
 		}
-		active, err = s.Sessions.Session(ctx, active.SessionRef)
+		active, err = s.sessions.Session(ctx, active.SessionRef)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		updated, err := appserver.CloseSession(ctx, s.Sessions, active, "closed by control client")
+		updated, err := appserver.CloseSession(ctx, s.sessions, active, "closed by control client")
 		if err == nil || session.IsCommitted(err) {
 			gw.CloseSessionApprovals(active.SessionRef, "session_closed")
 		}
@@ -674,7 +674,7 @@ func (s *runtimeComposition) checkControlCommandCASAllowClosed(ctx context.Conte
 }
 
 func (s *runtimeComposition) checkControlCommandCASMode(ctx context.Context, base appserver.WriteBase, allowClosed bool) (session.Session, error) {
-	active, err := s.Sessions.Session(ctx, session.SessionRef{SessionID: strings.TrimSpace(base.SessionID)})
+	active, err := s.sessions.Session(ctx, session.SessionRef{SessionID: strings.TrimSpace(base.SessionID)})
 	if err != nil {
 		return session.Session{}, err
 	}
@@ -685,7 +685,7 @@ func (s *runtimeComposition) checkControlCommandCASMode(ctx context.Context, bas
 		return active, fmt.Errorf("controlclient: expected controller epoch %q, actual %q: %w", expected, active.Controller.EpochID, session.ErrRevisionConflict)
 	}
 	if !allowClosed {
-		closed, err := appserver.IsSessionClosed(ctx, s.Sessions, active.SessionRef)
+		closed, err := appserver.IsSessionClosed(ctx, s.sessions, active.SessionRef)
 		if err != nil {
 			return active, err
 		}

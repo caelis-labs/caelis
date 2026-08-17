@@ -15,22 +15,22 @@ func newTestAgentFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, e
 	if err != nil {
 		return nil, err
 	}
-	clients, err := appServer.Bind(appserver.Principal{ID: stack.UserID})
+	clients, err := appServer.Bind(appserver.Principal{ID: stack.UserID()})
 	if err != nil {
 		return nil, err
 	}
 	systemSessionClient, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{
-		ID: stack.UserID, Roles: []string{appserver.RoleSystemSessionRuntime},
+		ID: stack.UserID(), Roles: []string{appserver.RoleSystemSessionRuntime},
 	})
 	if err != nil {
 		return nil, err
 	}
 	return surfaceacp.NewFromClients(surfaceacp.ClientsConfig{
 		Clients:                   clients,
-		AppName:                   stack.AppName,
-		UserID:                    stack.UserID,
-		WorkspaceKey:              strings.TrimSpace(stack.Workspace.Key),
-		WorkspaceCWD:              strings.TrimSpace(stack.Workspace.CWD),
+		AppName:                   stack.AppName(),
+		UserID:                    stack.UserID(),
+		WorkspaceKey:              strings.TrimSpace(stack.Workspace().Key),
+		WorkspaceCWD:              strings.TrimSpace(stack.Workspace().CWD),
 		AgentMessageSessionClient: systemSessionClient,
 	})
 }

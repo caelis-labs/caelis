@@ -61,7 +61,7 @@ func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,15 +96,15 @@ func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testi
 		t.Fatal(err)
 	}
 	defer child.Close()
-	if child.runtime.ModelProfileID != profile.ID ||
-		child.runtime.ModelProfileEffort != "high" ||
-		child.runtime.Model.ID != profile.Backend.Provider.ModelConfigID ||
-		child.runtime.Model.CredentialRef != credentialRef {
-		t.Fatalf("child runtime profile/model = %q / %#v, want %q", child.runtime.ModelProfileID, child.runtime.Model, profile.ID)
+	if child.composition.runtime.ModelProfileID != profile.ID ||
+		child.composition.runtime.ModelProfileEffort != "high" ||
+		child.composition.runtime.Model.ID != profile.Backend.Provider.ModelConfigID ||
+		child.composition.runtime.Model.CredentialRef != credentialRef {
+		t.Fatalf("child runtime profile/model = %q / %#v, want %q", child.composition.runtime.ModelProfileID, child.composition.runtime.Model, profile.ID)
 	}
-	self, ok := agentConfigForToolTest(child.runtime.Assembly.Agents, "self")
+	self, ok := agentConfigForToolTest(child.composition.runtime.Assembly.Agents, "self")
 	if !ok {
-		t.Fatalf("child self agent missing from assembly: %#v", child.runtime.Assembly.Agents)
+		t.Fatalf("child self agent missing from assembly: %#v", child.composition.runtime.Assembly.Agents)
 	}
 	if got := self.SessionOptions.ModelID; got != profile.Backend.Provider.ModelConfigID {
 		t.Fatalf("child self model session option = %q, want %q", got, profile.Backend.Provider.ModelConfigID)
@@ -115,14 +115,14 @@ func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testi
 	if got := self.SessionOptions.ConfigValues[acpConfigModeID]; got != "manual" {
 		t.Fatalf("child self mode session option = %q, want manual", got)
 	}
-	if child.lookup.DefaultID() == child.runtime.Model.ID {
-		t.Fatalf("test setup did not preserve a distinct global default: lookup=%q selected=%q", child.lookup.DefaultID(), child.runtime.Model.ID)
+	if child.composition.lookup.DefaultID() == child.composition.runtime.Model.ID {
+		t.Fatalf("test setup did not preserve a distinct global default: lookup=%q selected=%q", child.composition.lookup.DefaultID(), child.composition.runtime.Model.ID)
 	}
-	if got := runtimeDefaultModelAlias(child.runtime, child.lookup); got != profile.Backend.Provider.ModelConfigID {
+	if got := runtimeDefaultModelAlias(child.composition.runtime, child.composition.lookup); got != profile.Backend.Provider.ModelConfigID {
 		t.Fatalf("runtimeDefaultModelAlias() = %q, want selected profile model %q", got, profile.Backend.Provider.ModelConfigID)
 	}
-	if got := child.Models().EffectiveAlias(); got != child.runtime.Model.Alias {
-		t.Fatalf("EffectiveAlias() = %q, want startup-selected alias %q", got, child.runtime.Model.Alias)
+	if got := child.Models().EffectiveAlias(); got != child.composition.runtime.Model.Alias {
+		t.Fatalf("EffectiveAlias() = %q, want startup-selected alias %q", got, child.composition.runtime.Model.Alias)
 	}
 	if got := child.Models().EffectiveEffort(); got != "high" {
 		t.Fatalf("EffectiveEffort() = %q, want high", got)
@@ -131,17 +131,17 @@ func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.ActiveModelAlias != child.runtime.Model.Alias || report.ActiveModel != child.runtime.Model.Model {
-		t.Fatalf("Doctor active model = %#v, want startup-selected %#v", report, child.runtime.Model)
+	if report.ActiveModelAlias != child.composition.runtime.Model.Alias || report.ActiveModel != child.composition.runtime.Model.Model {
+		t.Fatalf("Doctor active model = %#v, want startup-selected %#v", report, child.composition.runtime.Model)
 	}
-	noneConfig, err := resolveRuntimeProviderProfile(doc.ModelProfiles, child.lookup, profile.ID, "none")
+	noneConfig, err := resolveRuntimeProviderProfile(doc.ModelProfiles, child.composition.lookup, profile.ID, "none")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if noneConfig.ReasoningEffort != "none" {
 		t.Fatalf("explicit none profile effort resolved to %q", noneConfig.ReasoningEffort)
 	}
-	noneResolution, err := child.lookup.ResolveModelConfig(context.Background(), noneConfig, 0)
+	noneResolution, err := child.composition.lookup.ResolveModelConfig(context.Background(), noneConfig, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

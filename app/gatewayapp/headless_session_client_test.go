@@ -58,7 +58,7 @@ func TestHeadlessSessionTurnMatchesInProcessAndHTTPClients(t *testing.T) {
 				t.Fatal(err)
 			}
 			gateway, err := kernelimpl.New(kernelimpl.Config{
-				Sessions: stack.Sessions,
+				Sessions: stack.composition.sessions,
 				Runtime: headlessSessionTestRuntime{
 					response: "headless " + transport + " ok",
 					requests: requests,
@@ -116,8 +116,8 @@ func TestSessionTurnReconnectRepairsDeletedDormantModelBeforePromptCAS(t *testin
 	defer cancel()
 	stack, active := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
-	principal := appserver.Principal{ID: stack.UserID}
-	initialID := stack.lookup.DefaultID()
+	principal := appserver.Principal{ID: stack.composition.userID}
+	initialID := stack.composition.lookup.DefaultID()
 	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: "ollama", Model: "deleted-before-prompt"})
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +163,7 @@ func TestSessionTurnReconnectRepairsDeletedDormantModelBeforePromptCAS(t *testin
 	}
 	runtime := activateSessionRuntime(t, stack, active.SessionID)
 	gateway, err := kernelimpl.New(kernelimpl.Config{
-		Sessions: stack.Sessions,
+		Sessions: stack.composition.sessions,
 		Runtime:  headlessSessionTestRuntime{response: "recovered prompt ok", requests: requests},
 		Resolver: headlessSessionTestResolver{},
 	})
@@ -182,7 +182,7 @@ func TestSessionTurnReconnectRepairsDeletedDormantModelBeforePromptCAS(t *testin
 	if result.Output != "recovered prompt ok" {
 		t.Fatalf("SessionTurn output = %q", result.Output)
 	}
-	state, err := stack.Sessions.SnapshotState(ctx, active.SessionRef)
+	state, err := stack.composition.sessions.SnapshotState(ctx, active.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}

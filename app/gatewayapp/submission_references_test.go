@@ -17,12 +17,12 @@ func TestProjectSubmissionReferencesDoesNotBlockOnSkillDiscoveryError(t *testing
 
 	workspace := t.TempDir()
 	stack := &Stack{
-		runtimeComposition: runtimeComposition{
-			Workspace: session.WorkspaceRef{CWD: workspace}, runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
+		composition: runtimeComposition{
+			workspace: session.WorkspaceRef{CWD: workspace}, runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
 		},
 	}
 
-	projected, err := stack.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
+	projected, err := stack.composition.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
 		Session: session.Session{CWD: workspace},
 		Input:   "$cmpctl inspect",
 	})
@@ -39,12 +39,12 @@ func TestProjectSubmissionReferencesKeepsShellVariableWhenSkillDiscoveryFails(t 
 
 	workspace := t.TempDir()
 	stack := &Stack{
-		runtimeComposition: runtimeComposition{
-			Workspace: session.WorkspaceRef{CWD: workspace}, runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
+		composition: runtimeComposition{
+			workspace: session.WorkspaceRef{CWD: workspace}, runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
 		},
 	}
 
-	projected, err := stack.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
+	projected, err := stack.composition.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
 		Session: session.Session{CWD: workspace},
 		Input:   "echo $HOME",
 	})
@@ -64,12 +64,12 @@ func TestProjectSubmissionReferencesProjectsFilesWhenSkillDiscoveryFails(t *test
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	stack := &Stack{
-		runtimeComposition: runtimeComposition{
-			Workspace: session.WorkspaceRef{CWD: workspace}, runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
+		composition: runtimeComposition{
+			workspace: session.WorkspaceRef{CWD: workspace}, runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
 		},
 	}
 
-	projected, err := stack.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
+	projected, err := stack.composition.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
 		Session: session.Session{CWD: workspace},
 		Input:   "$cmpctl inspect @dict.go",
 	})
@@ -92,12 +92,12 @@ func TestProjectSubmissionReferencesDoesNotDiscoverSkillsForFileOnlyReferences(t
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	stack := &Stack{
-		runtimeComposition: runtimeComposition{
-			Workspace: session.WorkspaceRef{CWD: workspace}, runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
+		composition: runtimeComposition{
+			workspace: session.WorkspaceRef{CWD: workspace}, runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
 		},
 	}
 
-	projected, err := stack.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
+	projected, err := stack.composition.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
 		Session: session.Session{CWD: workspace},
 		Input:   "read @dict.go",
 	})
@@ -120,8 +120,8 @@ func TestProjectSubmissionReferencesUsesRuntimeSkillSnapshot(t *testing.T) {
 		t.Fatalf("WriteFile(late SKILL.md) error = %v", err)
 	}
 	stack := &Stack{
-		runtimeComposition: runtimeComposition{
-			Workspace: session.WorkspaceRef{CWD: workspace},
+		composition: runtimeComposition{
+			workspace: session.WorkspaceRef{CWD: workspace},
 			runtime: stackRuntimeConfig{
 				SkillCatalog: skill.NewCatalog([]skill.Meta{{
 					Name:      "known",
@@ -132,7 +132,7 @@ func TestProjectSubmissionReferencesUsesRuntimeSkillSnapshot(t *testing.T) {
 		},
 	}
 
-	projected, err := stack.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
+	projected, err := stack.composition.projectSubmissionReferences(context.Background(), kernelimpl.SubmissionReferenceProjectionRequest{
 		Session: session.Session{CWD: workspace},
 		Input:   "$known and $late",
 	})

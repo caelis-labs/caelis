@@ -86,14 +86,14 @@ func (s *PresentationService) PresentationCapabilities(ctx context.Context, prin
 }
 
 func (s *PresentationService) authorizedSession(ctx context.Context, principal appserver.Principal, action appserver.Action, sessionID string) (session.Session, error) {
-	if s == nil || s.host == nil || s.host.Sessions == nil || s.surface == nil {
+	if s == nil || s.host == nil || s.host.Sessions() == nil || s.surface == nil {
 		return session.Session{}, errors.New("app/gatewayapp/controladapter/local: presentation service is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	if err := (appserver.SessionAuthorizer{Sessions: s.host.Sessions}).Authorize(ctx, principal, action, sessionID); err != nil {
+	if err := (appserver.SessionAuthorizer{Sessions: s.host.Sessions()}).Authorize(ctx, principal, action, sessionID); err != nil {
 		return session.Session{}, err
 	}
-	return s.host.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
+	return s.host.Sessions().Session(ctx, session.SessionRef{SessionID: sessionID})
 }
 
 func presentationSnapshot(

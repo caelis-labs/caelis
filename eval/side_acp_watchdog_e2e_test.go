@@ -184,7 +184,7 @@ func TestSideACPDistinctXSearchBypassesOrchestrationWatchdogE2E(t *testing.T) {
 		t.Fatalf("ReadFile(interruption probe) error = %v", err)
 	}
 
-	loaded, err := stack.Sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+	loaded, err := stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}

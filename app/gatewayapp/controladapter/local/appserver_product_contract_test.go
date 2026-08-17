@@ -268,18 +268,18 @@ func TestAgentMessageUsesManagedChildParentBindingAndRejectsForgedSource(t *test
 	t.Cleanup(func() { _ = host.Close() })
 	clients := bindAppServerTestClients(t, host)
 	parentID := createAppServerTestSession(t, clients, "create-message-parent", "message-parent", workspace)
-	parent, err := host.Sessions.Session(ctx, session.SessionRef{SessionID: parentID})
+	parent, err := host.Sessions().Session(ctx, session.SessionRef{SessionID: parentID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	controller := session.ControllerBinding{
 		Kind: session.ControllerKindKernel, ControllerID: "parent-controller", AgentName: "main", EpochID: "parent-epoch",
 	}
-	parent, err = host.Sessions.BindController(ctx, session.BindControllerRequest{SessionRef: parent.SessionRef, Binding: controller})
+	parent, err = host.Sessions().BindController(ctx, session.BindControllerRequest{SessionRef: parent.SessionRef, Binding: controller})
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := host.Sessions.StartSession(ctx, session.StartSessionRequest{
+	child, err := host.Sessions().StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis-test", UserID: "local-user", PreferredSessionID: "message-child",
 		Workspace: session.WorkspaceRef{Key: "workspace", CWD: workspace},
 		Metadata: map[string]any{
@@ -291,7 +291,7 @@ func TestAgentMessageUsesManagedChildParentBindingAndRejectsForgedSource(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent, err = host.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
+	parent, err = host.Sessions().PutParticipant(ctx, session.PutParticipantRequest{
 		SessionRef: parent.SessionRef,
 		Binding: session.ParticipantBinding{
 			ID: "child-agent", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated,
@@ -313,7 +313,7 @@ func TestAgentMessageUsesManagedChildParentBindingAndRejectsForgedSource(t *test
 	if err != nil || !second.Accepted {
 		t.Fatalf("duplicate DeliverAgentMessage() = %#v, %v", second, err)
 	}
-	loaded, err := host.Sessions.Events(ctx, session.EventsRequest{SessionRef: child.SessionRef, Limit: 100})
+	loaded, err := host.Sessions().Events(ctx, session.EventsRequest{SessionRef: child.SessionRef, Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +330,7 @@ func TestAgentMessageUsesManagedChildParentBindingAndRejectsForgedSource(t *test
 		t.Fatalf("durable Agent message = actor %#v meta %#v, want parent controller and display-only wire source", messages[0].Actor, messages[0].Meta)
 	}
 
-	forgedChild, err := host.Sessions.StartSession(ctx, session.StartSessionRequest{
+	forgedChild, err := host.Sessions().StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis-test", UserID: "local-user", PreferredSessionID: "forged-message-child",
 		Workspace: session.WorkspaceRef{Key: "workspace", CWD: workspace},
 		Metadata: map[string]any{
@@ -379,11 +379,11 @@ func TestAgentMessageExactBindingsAuthorizeEmbeddedAndHTTPClients(t *testing.T) 
 		t.Fatal(err)
 	}
 	sessionID := createAppServerTestSession(t, owner, "create-exact-binding", "exact-binding", workspace)
-	active, err := host.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
+	active, err := host.Sessions().Session(ctx, session.SessionRef{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	active, err = host.Sessions.BindController(ctx, session.BindControllerRequest{
+	active, err = host.Sessions().BindController(ctx, session.BindControllerRequest{
 		SessionRef: active.SessionRef,
 		Binding: session.ControllerBinding{
 			Kind: session.ControllerKindACP, ControllerID: "controller-1", AgentName: "main", EpochID: "epoch-1",
@@ -392,7 +392,7 @@ func TestAgentMessageExactBindingsAuthorizeEmbeddedAndHTTPClients(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	active, err = host.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
+	active, err = host.Sessions().PutParticipant(ctx, session.PutParticipantRequest{
 		SessionRef: active.SessionRef,
 		Binding: session.ParticipantBinding{
 			ID: "participant-1", Kind: session.ParticipantKindACP,
@@ -447,7 +447,7 @@ func TestAgentMessageExactBindingsAuthorizeEmbeddedAndHTTPClients(t *testing.T) 
 		t.Fatalf("HTTP participant message = %#v, %v", result, err)
 	}
 
-	events, err := host.Sessions.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef})
+	events, err := host.Sessions().Events(ctx, session.EventsRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,7 +502,7 @@ func TestHostResumeCompletionUsesPrincipalVisibleSessions(t *testing.T) {
 	t.Cleanup(func() { _ = host.Close() })
 	clients := bindAppServerTestClients(t, host)
 	visibleID := createAppServerTestSession(t, clients, "create-visible-resume", "visible-resume", workspace)
-	foreign, err := host.Sessions.StartSession(ctx, session.StartSessionRequest{
+	foreign, err := host.Sessions().StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis-test", UserID: "different-owner",
 		Workspace:          session.WorkspaceRef{Key: "workspace", CWD: workspace},
 		PreferredSessionID: "foreign-resume", Title: "foreign resume",
@@ -617,11 +617,11 @@ func TestBoundAppServerProjectsACPControllerAndFailsClosedWithoutRemoteModes(t *
 	t.Cleanup(func() { _ = host.Close() })
 	clients := bindAppServerTestClients(t, host)
 	sessionID := createAppServerTestSession(t, clients, "create-acp-projection", "acp-projection", workspace)
-	active, err := host.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
+	active, err := host.Sessions().Session(ctx, session.SessionRef{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := host.Sessions.BindController(ctx, session.BindControllerRequest{
+	if _, err := host.Sessions().BindController(ctx, session.BindControllerRequest{
 		SessionRef: active.SessionRef,
 		Binding: session.ControllerBinding{
 			Kind: session.ControllerKindACP, ControllerID: "codex-controller", AgentName: "codex",
@@ -695,12 +695,12 @@ func TestBoundAppServerProjectsSessionUsageAndParticipants(t *testing.T) {
 	t.Cleanup(func() { _ = host.Close() })
 	clients := bindAppServerTestClients(t, host)
 	sessionID := createAppServerTestSession(t, clients, "create-projection", "projection", workspace)
-	active, err := host.Sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
+	active, err := host.Sessions().Session(ctx, session.SessionRef{SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assistant := model.NewTextMessage(model.RoleAssistant, "answer")
-	if _, err := host.Sessions.AppendEvent(ctx, session.AppendEventRequest{
+	if _, err := host.Sessions().AppendEvent(ctx, session.AppendEventRequest{
 		SessionRef: active.SessionRef,
 		Event: &session.Event{
 			Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Message: &assistant,
@@ -724,7 +724,7 @@ func TestBoundAppServerProjectsSessionUsageAndParticipants(t *testing.T) {
 			AgentName: "worker", Label: "@worker", SessionID: "child-worker", Source: "test", DelegationID: "task-1",
 		},
 	} {
-		if _, err := host.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
+		if _, err := host.Sessions().PutParticipant(ctx, session.PutParticipantRequest{
 			SessionRef: active.SessionRef, Binding: binding,
 		}); err != nil {
 			t.Fatal(err)

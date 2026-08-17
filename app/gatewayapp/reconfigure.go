@@ -35,23 +35,23 @@ import (
 )
 
 func (s *Stack) loadSandboxConfigDocument(ctx context.Context, expected *uint64) (AppConfig, error) {
-	if s == nil || s.store == nil {
+	if s == nil || s.composition.store == nil {
 		if s == nil {
 			return AppConfig{}, fmt.Errorf("gatewayapp: stack is unavailable")
 		}
-		s.mu.RLock()
+		s.composition.mu.RLock()
 		doc := AppConfig{
 			SchemaVersion:         configstore.SchemaVersionV2,
-			ConfigurationRevision: s.sandboxRevision,
-			Sandbox:               cloneSandboxConfig(s.sandboxPersisted),
+			ConfigurationRevision: s.composition.sandboxRevision,
+			Sandbox:               cloneSandboxConfig(s.composition.sandboxPersisted),
 		}
-		s.mu.RUnlock()
+		s.composition.mu.RUnlock()
 		if expected != nil && doc.ConfigurationRevision != *expected {
 			return doc, &configstore.ConfigurationRevisionConflict{Expected: *expected, Actual: doc.ConfigurationRevision}
 		}
 		return doc, nil
 	}
-	doc, err := s.store.LoadContext(ctx)
+	doc, err := s.composition.store.LoadContext(ctx)
 	if err != nil {
 		return AppConfig{}, err
 	}
@@ -65,10 +65,10 @@ func (s *Stack) loadSandboxConfigDocument(ctx context.Context, expected *uint64)
 }
 
 func (s *Stack) persistSandboxConfigDocument(ctx context.Context, doc AppConfig) (AppConfig, error) {
-	if s == nil || s.store == nil {
+	if s == nil || s.composition.store == nil {
 		return doc, nil
 	}
-	return s.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
+	return s.composition.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
 }
 
 // buildInitialGatewayRuntime constructs the root or detached Session Runtime
@@ -177,7 +177,7 @@ func (s *runtimeComposition) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runt
 			_ = releasePluginCache()
 		}
 	}()
-	skillDirs := stackSkillDiscoveryDirs(s.Workspace.CWD, runtimeCfg.SkillDirs)
+	skillDirs := stackSkillDiscoveryDirs(s.workspace.CWD, runtimeCfg.SkillDirs)
 	contribs, err := resolveGatewayPluginContributions(doc.Plugins)
 	if err != nil {
 		return gatewayBuildPlan{}, err
@@ -189,7 +189,7 @@ func (s *runtimeComposition) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runt
 	runtimeCfg.Assembly = configuredAssembly
 	runtimeCfg.Plugins = clonePluginConfigs(doc.Plugins)
 	runtimeCfg.PluginSkills = skill.ClonePluginBundles(contribs.SkillBundles)
-	baseMetadata, err := buildStackBaseMetadata(s.AppName, s.Workspace.CWD, runtimeCfg.SystemPrompt, runtimeCfg.Model, sandboxCfg, skillDirs, runtimeCfg.PluginSkills)
+	baseMetadata, err := buildStackBaseMetadata(s.appName, s.workspace.CWD, runtimeCfg.SystemPrompt, runtimeCfg.Model, sandboxCfg, skillDirs, runtimeCfg.PluginSkills)
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
@@ -246,7 +246,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	sandboxRuntime, err := sandbox.New(sandbox.Config{
-		CWD:                 s.Workspace.CWD,
+		CWD:                 s.workspace.CWD,
 		RequestedBackend:    route.Backend,
 		BackendCandidates:   route.BackendCandidates,
 		FallbackInstallHint: route.InstallHint,
@@ -317,20 +317,20 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	estimatedPrefixTokens := estimateModelPromptPrefixTokens(effectiveBaseMetadata, tools)
 	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)
 	compactionCfg.EstimatedPromptPrefixTokens = estimatedPrefixTokens
-	contextRouter, err := controlplane.NewContextRouter(s.Sessions)
+	contextRouter, err := controlplane.NewContextRouter(s.sessions)
 	if err != nil {
 		bundle.Close()
 		return nil, err
 	}
 	localCfg := runtime.Config{
-		Sessions:                 s.Sessions,
+		Sessions:                 s.sessions,
 		AgentFactory:             chat.Factory{},
 		DefaultPolicyMode:        effectivePolicyProfile,
 		PolicyRegistry:           policyRegistry,
 		DefaultApprovalMode:      string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
 		Compaction:               compactionCfg,
 		ControllerContextRouter:  contextRouter,
-		ControllerEventForwarder: acpbridge.NewControllerForwarder(s.Sessions),
+		ControllerEventForwarder: acpbridge.NewControllerForwarder(s.sessions),
 		TaskStore:                s.taskStore,
 		TaskActivityChanged:      s.runtimeTaskChanged,
 	}
@@ -346,7 +346,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	controlCoordinator, err := controlplane.NewCoordinator(controlplane.CoordinatorConfig{
-		Sessions:    s.Sessions,
+		Sessions:    s.sessions,
 		Controllers: localCfg.Controllers,
 		Context:     contextRouter,
 	})
@@ -362,7 +362,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	}
 	bundle.Engine = rt
 	bindSubagentMessageRouter(acpControlPlane, rt)
-	leaseService, ok := s.Sessions.(session.SessionLeaseService)
+	leaseService, ok := s.sessions.(session.SessionLeaseService)
 	if !ok {
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: production session service does not support execution leases")
@@ -387,7 +387,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	resolver, err := kernelimpl.NewAssemblyResolver(kernelimpl.AssemblyResolverConfig{
-		Sessions:          s.Sessions,
+		Sessions:          s.sessions,
 		Assembly:          runtimeCfg.Assembly,
 		DefaultModelAlias: runtimeDefaultModelAlias(runtimeCfg, s.lookup),
 		ContextWindow:     runtimeCfg.ContextWindow,
@@ -402,7 +402,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 			return withSystemAgentReasoningEffort(resolved), bound, nil
 		},
 		ToolAugmenter: func(ctx context.Context, req kernelimpl.ToolAugmentContext) (kernelimpl.ToolAugmentation, error) {
-			activeSession, err := s.Sessions.Session(ctx, req.SessionRef)
+			activeSession, err := s.sessions.Session(ctx, req.SessionRef)
 			if err != nil {
 				return kernelimpl.ToolAugmentation{}, err
 			}
@@ -436,7 +436,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	}
 	guardianApprover := s.newGuardianApprover()
 	gw, err := kernelimpl.New(kernelimpl.Config{
-		Sessions:             s.Sessions,
+		Sessions:             s.sessions,
 		Runtime:              leasedRuntime,
 		TurnStartGate:        s.approvalRecovery,
 		Control:              sessionControl,

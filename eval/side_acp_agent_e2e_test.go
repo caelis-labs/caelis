@@ -186,7 +186,7 @@ func TestSideACPAgentDirectRunEnvelopeE2E(t *testing.T) {
 		t.Fatalf("rendered assistant answer count = %d, want one\n%s", got, frame)
 	}
 
-	loaded, err := stack.Sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+	loaded, err := stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}

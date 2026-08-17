@@ -131,7 +131,7 @@ func newAgentMessageRaceFixture(t *testing.T) (*gatewayapp.Stack, *AgentMessageS
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = host.Close() })
-	target, err := host.Sessions.StartSession(context.Background(), session.StartSessionRequest{
+	target, err := host.Sessions().StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis-test", UserID: "owner",
 		Workspace: session.WorkspaceRef{Key: "workspace", CWD: root},
 	})
@@ -149,11 +149,11 @@ func testAgentMessageTargetCloseRace(t *testing.T, host *gatewayapp.Stack, servi
 	t.Helper()
 	target = bindAgentMessageRaceController(t, host, target, "controller-1")
 	service.deliver = func(ctx context.Context, request gatewayapp.DeliverAgentMessageRequest) (gatewayapp.AgentMessageDelivery, error) {
-		current, err := host.Sessions.Session(ctx, target.SessionRef)
+		current, err := host.Sessions().Session(ctx, target.SessionRef)
 		if err != nil {
 			return gatewayapp.AgentMessageDelivery{}, err
 		}
-		if _, err := appserver.CloseSession(ctx, host.Sessions, current, "concurrent close"); err != nil {
+		if _, err := appserver.CloseSession(ctx, host.Sessions(), current, "concurrent close"); err != nil {
 			return gatewayapp.AgentMessageDelivery{}, err
 		}
 		return host.DeliverAgentMessage(ctx, request)
@@ -165,7 +165,7 @@ func testAgentMessageTargetHandoffRace(t *testing.T, host *gatewayapp.Stack, ser
 	t.Helper()
 	target = bindAgentMessageRaceController(t, host, target, "controller-1")
 	service.deliver = func(ctx context.Context, request gatewayapp.DeliverAgentMessageRequest) (gatewayapp.AgentMessageDelivery, error) {
-		if _, err := host.Sessions.BindController(ctx, session.BindControllerRequest{
+		if _, err := host.Sessions().BindController(ctx, session.BindControllerRequest{
 			SessionRef: target.SessionRef,
 			Binding: session.ControllerBinding{
 				Kind: session.ControllerKindACP, ControllerID: "controller-2", EpochID: "epoch-2",
@@ -181,7 +181,7 @@ func testAgentMessageTargetHandoffRace(t *testing.T, host *gatewayapp.Stack, ser
 func testAgentMessageTargetDetachRace(t *testing.T, host *gatewayapp.Stack, service *AgentMessageService, target session.Session) {
 	t.Helper()
 	var err error
-	target, err = host.Sessions.PutParticipant(context.Background(), session.PutParticipantRequest{
+	target, err = host.Sessions().PutParticipant(context.Background(), session.PutParticipantRequest{
 		SessionRef: target.SessionRef,
 		Binding: session.ParticipantBinding{
 			ID: "participant-1", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar,
@@ -191,7 +191,7 @@ func testAgentMessageTargetDetachRace(t *testing.T, host *gatewayapp.Stack, serv
 		t.Fatal(err)
 	}
 	service.deliver = func(ctx context.Context, request gatewayapp.DeliverAgentMessageRequest) (gatewayapp.AgentMessageDelivery, error) {
-		if _, err := host.Sessions.RemoveParticipant(ctx, session.RemoveParticipantRequest{
+		if _, err := host.Sessions().RemoveParticipant(ctx, session.RemoveParticipantRequest{
 			SessionRef: target.SessionRef, ParticipantID: "participant-1",
 		}); err != nil {
 			return gatewayapp.AgentMessageDelivery{}, err
@@ -205,7 +205,7 @@ func testAgentMessageManagedParentDetachRace(t *testing.T, host *gatewayapp.Stac
 	t.Helper()
 	ctx := context.Background()
 	workspace := session.WorkspaceRef{Key: target.WorkspaceKey, CWD: target.CWD}
-	parent, err := host.Sessions.StartSession(ctx, session.StartSessionRequest{
+	parent, err := host.Sessions().StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis-test", UserID: "owner", Workspace: workspace,
 	})
 	if err != nil {
@@ -214,7 +214,7 @@ func testAgentMessageManagedParentDetachRace(t *testing.T, host *gatewayapp.Stac
 	parent = bindAgentMessageRaceController(t, host, parent, "parent-controller")
 	// System-managed identity is immutable Session metadata, so seed it on a
 	// replacement child created specifically for this cross-Session race.
-	target, err = host.Sessions.StartSession(ctx, session.StartSessionRequest{
+	target, err = host.Sessions().StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis-test", UserID: "owner", Workspace: workspace,
 		Metadata: map[string]any{
 			sessionvisibility.MetadataSystemManagedAgent:  sessionvisibility.SystemManagedAgentSubagent,
@@ -225,7 +225,7 @@ func testAgentMessageManagedParentDetachRace(t *testing.T, host *gatewayapp.Stac
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent, err = host.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
+	parent, err = host.Sessions().PutParticipant(ctx, session.PutParticipantRequest{
 		SessionRef: parent.SessionRef,
 		Binding: session.ParticipantBinding{
 			ID: "child-agent-2", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated,
@@ -236,7 +236,7 @@ func testAgentMessageManagedParentDetachRace(t *testing.T, host *gatewayapp.Stac
 		t.Fatal(err)
 	}
 	service.deliver = func(ctx context.Context, request gatewayapp.DeliverAgentMessageRequest) (gatewayapp.AgentMessageDelivery, error) {
-		if _, err := host.Sessions.RemoveParticipant(ctx, session.RemoveParticipantRequest{
+		if _, err := host.Sessions().RemoveParticipant(ctx, session.RemoveParticipantRequest{
 			SessionRef: parent.SessionRef, ParticipantID: "child-agent-2",
 		}); err != nil {
 			return gatewayapp.AgentMessageDelivery{}, err
@@ -248,7 +248,7 @@ func testAgentMessageManagedParentDetachRace(t *testing.T, host *gatewayapp.Stac
 
 func bindAgentMessageRaceController(t *testing.T, host *gatewayapp.Stack, target session.Session, controllerID string) session.Session {
 	t.Helper()
-	updated, err := host.Sessions.BindController(context.Background(), session.BindControllerRequest{
+	updated, err := host.Sessions().BindController(context.Background(), session.BindControllerRequest{
 		SessionRef: target.SessionRef,
 		Binding: session.ControllerBinding{
 			Kind: session.ControllerKindACP, ControllerID: controllerID, EpochID: controllerID + "-epoch",
@@ -275,7 +275,7 @@ func assertAgentMessageRaceRejected(
 	if err == nil {
 		t.Fatal("concurrent lifecycle or binding mutation was accepted")
 	}
-	events, readErr := host.Sessions.Events(context.Background(), session.EventsRequest{SessionRef: target.SessionRef})
+	events, readErr := host.Sessions().Events(context.Background(), session.EventsRequest{SessionRef: target.SessionRef})
 	if readErr != nil {
 		t.Fatal(readErr)
 	}

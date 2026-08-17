@@ -30,7 +30,7 @@ func TestLocalStackInjectsOnlySelfUntilProfileIsBound(t *testing.T) {
 			Args: []string{"run", "./internal/acpe2eagent"}, WorkDir: repoRootForGatewayAppTest(t),
 		}},
 	})
-	resolved, err := stack.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: activeSession.SessionRef})
+	resolved, err := stack.composition.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: activeSession.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn() error = %v", err)
 	}
@@ -52,7 +52,7 @@ func TestLocalStackInjectsOnlySelfUntilProfileIsBound(t *testing.T) {
 	}
 
 	bindProfileToModelForToolTest(t, stack, agentbinding.HandleOrbit)
-	resolved, err = stack.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: activeSession.SessionRef})
+	resolved, err = stack.composition.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: activeSession.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(bound Orbit) error = %v", err)
 	}
@@ -71,12 +71,12 @@ func TestSpawnedSubagentSessionCannotReceiveNestedSpawn(t *testing.T) {
 
 	ctx := context.Background()
 	stack := newStackForToolTest(t, assembly.ResolvedAssembly{})
-	child, err := stack.Sessions.StartSession(ctx, session.StartSessionRequest{
-		AppName: stack.AppName,
-		UserID:  stack.UserID,
+	child, err := stack.composition.sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: stack.composition.appName,
+		UserID:  stack.composition.userID,
 		Workspace: session.WorkspaceRef{
-			Key: stack.Workspace.Key,
-			CWD: stack.Workspace.CWD,
+			Key: stack.composition.workspace.Key,
+			CWD: stack.composition.workspace.CWD,
 		},
 		Metadata: map[string]any{
 			sessionvisibility.MetadataSystemManagedAgent:  sessionvisibility.SystemManagedAgentSubagent,
@@ -87,7 +87,7 @@ func TestSpawnedSubagentSessionCannotReceiveNestedSpawn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := stack.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: child.SessionRef})
+	resolved, err := stack.composition.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: child.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}

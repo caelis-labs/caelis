@@ -17,9 +17,9 @@ func TestHostTaskStreamServiceRoutesByOwningSessionRuntime(t *testing.T) {
 
 	rootGateway := newTaskStreamRouterTestGateway(t, stack, "root")
 	childGateway := newTaskStreamRouterTestGateway(t, stack, "child")
-	stack.mu.Lock()
-	stack.gateway = rootGateway
-	stack.mu.Unlock()
+	stack.composition.mu.Lock()
+	stack.composition.gateway = rootGateway
+	stack.composition.mu.Unlock()
 
 	rootInstance := &sessionRuntimeInstance{runtimeComposition: runtimeComposition{gateway: rootGateway}}
 	childInstance := &sessionRuntimeInstance{runtimeComposition: runtimeComposition{gateway: childGateway}}
@@ -73,7 +73,7 @@ func TestHostTaskStreamServiceRoutesByOwningSessionRuntime(t *testing.T) {
 func newTaskStreamRouterTestGateway(t *testing.T, stack *Stack, marker string) *kernelimpl.Gateway {
 	t.Helper()
 	gateway, err := kernelimpl.New(kernelimpl.Config{
-		Sessions: stack.Sessions,
+		Sessions: stack.composition.sessions,
 		Runtime: taskStreamRouterTestRuntime{
 			streams: taskStreamRouterTestStreams{marker: marker},
 		},

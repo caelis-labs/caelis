@@ -90,7 +90,7 @@ func (s *runtimeComposition) hostedChildMessageSender(active session.Session) ag
 	}
 	return hostedChildMessageSender{
 		deliver:  deliver,
-		sessions: s.Sessions,
+		sessions: s.sessions,
 		child:    session.CloneSession(active),
 	}
 }

@@ -40,7 +40,7 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	alias := profile.Backend.Provider.ModelConfigID
 	current := mustCurrentSession(t, stack, activeSession.SessionID)
 	revision := current.Revision
-	modelResult, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModelRequest{
+	modelResult, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "state-model-alt", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Model:     alias,
 	})
@@ -49,7 +49,7 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	}
 	current = mustCurrentSession(t, stack, activeSession.SessionID)
 	revision = current.Revision
-	modeResult, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModeRequest{
+	modeResult, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModeRequest{
 		WriteBase: appserver.WriteBase{OperationID: "state-mode-manual", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Mode:      "manual",
 	})
@@ -76,7 +76,7 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	}
 	current = mustCurrentSession(t, stack, activeSession.SessionID)
 	revision = current.Revision
-	modeResult, err = stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModeRequest{
+	modeResult, err = stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModeRequest{
 		WriteBase: appserver.WriteBase{OperationID: "state-mode-auto", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Mode:      "auto-review",
 	})
@@ -99,7 +99,7 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 func TestStackSessionRuntimeStateRejectsLegacySessionState(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
-	if _, err := stack.Sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
+	if _, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
@@ -164,11 +164,11 @@ func TestNewLocalStackUsesRuntimeConfigApprovalAndPolicyProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	if stack.runtime.ApprovalMode != "manual" {
-		t.Fatalf("runtime ApprovalMode = %q, want manual", stack.runtime.ApprovalMode)
+	if stack.composition.runtime.ApprovalMode != "manual" {
+		t.Fatalf("runtime ApprovalMode = %q, want manual", stack.composition.runtime.ApprovalMode)
 	}
-	if stack.runtime.PolicyProfile != "workspace-write" {
-		t.Fatalf("runtime PolicyProfile = %q, want workspace-write", stack.runtime.PolicyProfile)
+	if stack.composition.runtime.PolicyProfile != "workspace-write" {
+		t.Fatalf("runtime PolicyProfile = %q, want workspace-write", stack.composition.runtime.PolicyProfile)
 	}
 	session, err := startGatewayAppTestSession(context.Background(), stack, "runtime config session")
 	if err != nil {
@@ -201,7 +201,7 @@ func TestNewLocalStackPersistsTasksInSessionSQLiteIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	if err := stack.taskStore.Upsert(context.Background(), &taskapi.Entry{
+	if err := stack.composition.taskStore.Upsert(context.Background(), &taskapi.Entry{
 		TaskID:  "task-stack",
 		Kind:    taskapi.KindCommand,
 		Session: activeSession.SessionRef,
@@ -215,7 +215,7 @@ func TestNewLocalStackPersistsTasksInSessionSQLiteIndex(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("taskStore.Upsert() error = %v", err)
 	}
-	got, err := stack.taskStore.Get(context.Background(), "task-stack")
+	got, err := stack.composition.taskStore.Get(context.Background(), "task-stack")
 	if err != nil {
 		t.Fatalf("taskStore.Get() error = %v", err)
 	}
@@ -357,7 +357,7 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack(first) error = %v", err)
 	}
-	grokID := first.lookup.DefaultID()
+	grokID := first.composition.lookup.DefaultID()
 	active, err := startGatewayAppTestSession(ctx, first, "grok context resume")
 	if err != nil {
 		_ = first.Close()
@@ -369,7 +369,7 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 	}
 	current := mustCurrentSession(t, first, active.SessionID)
 	revision := current.Revision
-	selected, err := first.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: first.UserID}, appserver.SessionModelRequest{
+	selected, err := first.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: first.UserID()}, appserver.SessionModelRequest{
 		WriteBase: appserver.WriteBase{
 			OperationID:             "persist-grok-session-model",
 			SessionID:               current.SessionID,
@@ -433,7 +433,7 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
 	}
 	defer reloaded.Close()
-	reloaded.lookup.resolveHTTPClient = func(context.Context, ModelConfig) (*http.Client, error) {
+	reloaded.composition.lookup.resolveHTTPClient = func(context.Context, ModelConfig) (*http.Client, error) {
 		return http.DefaultClient, nil
 	}
 
@@ -465,7 +465,7 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 		t.Fatalf("resumed usage context window = %d, want 500000", usage.ContextWindowTokens)
 	}
 
-	resolved, err := reloaded.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{
+	resolved, err := reloaded.composition.currentGateway().Resolver().ResolveTurn(ctx, kernel.TurnIntent{
 		SessionRef: resumedRef,
 	})
 	if err != nil {
@@ -500,7 +500,7 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigurationRevision() error = %v", err)
 	}
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.UserID}, appserver.SandboxRequest{
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.composition.userID}, appserver.SandboxRequest{
 		WriteBase: appserver.WriteBase{OperationID: "sandbox-persist-restart", ExpectedRevision: &expected},
 		Backend:   "host",
 	})
@@ -654,7 +654,7 @@ func TestStackUseModelReportsAmbiguousVisibleAlias(t *testing.T) {
 			t.Fatalf("Connect(%s) error = %v", cfg.BaseURL, err)
 		}
 	}
-	if !stack.lookup.HasAlias("xiaomi/mimo-v2.5-pro") {
+	if !stack.composition.lookup.HasAlias("xiaomi/mimo-v2.5-pro") {
 		t.Fatal("HasAlias(duplicate visible alias) = false, want true")
 	}
 	err := stack.useTestHostModel(ctx, session.SessionRef{}, "xiaomi/mimo-v2.5-pro")
@@ -688,7 +688,7 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	tokenPlanID := tokenPlanProfile.Backend.Provider.ModelConfigID
 	current := mustCurrentSession(t, stack, activeSession.SessionID)
 	revision := current.Revision
-	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModelRequest{
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModelRequest{
 		WriteBase: appserver.WriteBase{
 			OperationID:             "select-stable-token-plan-profile",
 			SessionID:               current.SessionID,
@@ -722,7 +722,7 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	}
 	current = mustCurrentSession(t, stack, activeSession.SessionID)
 	revision = current.Revision
-	result, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.UserID}, appserver.SessionModelRequest{
+	result, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModelRequest{
 		WriteBase: appserver.WriteBase{
 			OperationID:             "select-stable-api-profile",
 			SessionID:               current.SessionID,
@@ -800,7 +800,7 @@ func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
 func TestSessionRuntimeStateIgnoresStaleModelAliasOutsideConfig(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
-	if _, err := stack.Sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
+	if _, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
@@ -1004,8 +1004,8 @@ func assertSandboxNetworkEnabledDefault(t *testing.T, stack *Stack) {
 	if stack == nil {
 		t.Fatal("stack is nil")
 	}
-	if stack.sandbox.NetworkEnabled == nil || !*stack.sandbox.NetworkEnabled {
-		t.Fatalf("stack sandbox NetworkEnabled = %#v, want runtime true default", stack.sandbox.NetworkEnabled)
+	if stack.composition.sandbox.NetworkEnabled == nil || !*stack.composition.sandbox.NetworkEnabled {
+		t.Fatalf("stack sandbox NetworkEnabled = %#v, want runtime true default", stack.composition.sandbox.NetworkEnabled)
 	}
 }
 
@@ -1071,7 +1071,7 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 	if got := server.compactionCalls.Load(); got == 0 {
 		t.Fatal("expected app default runtime to invoke compaction")
 	}
-	loaded, err := stack.Sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	loaded, err := stack.composition.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
@@ -1166,7 +1166,7 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	if got := server.compactionCalls.Load(); got != 1 {
 		t.Fatalf("compactionCalls = %d, want 1", got)
 	}
-	loaded, err := stack.Sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	loaded, err := stack.composition.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
@@ -1420,7 +1420,7 @@ func gatewayAppOllamaMessages(messages []struct {
 
 func appendGatewayAppEvent(t *testing.T, stack *Stack, ref session.SessionRef, event *session.Event) {
 	t.Helper()
-	if _, err := stack.Sessions.AppendEvent(context.Background(), session.AppendEventRequest{
+	if _, err := stack.composition.sessions.AppendEvent(context.Background(), session.AppendEventRequest{
 		SessionRef: ref,
 		Event:      event,
 	}); err != nil {

@@ -83,10 +83,10 @@ func (s *Stack) SetBuiltInChildControl(controlURL string, tokenFile string) {
 	if s == nil {
 		return
 	}
-	s.mu.Lock()
-	s.childControlURL = strings.TrimSpace(controlURL)
-	s.childControlTokenFile = strings.TrimSpace(tokenFile)
-	s.mu.Unlock()
+	s.composition.mu.Lock()
+	s.composition.childControlURL = strings.TrimSpace(controlURL)
+	s.composition.childControlTokenFile = strings.TrimSpace(tokenFile)
+	s.composition.mu.Unlock()
 }
 
 // KernelTurnReader is the read-only live Turn projection required by
@@ -106,7 +106,7 @@ type KernelControlPlaneReader interface {
 const DefaultControlOperationRetention = appserver.DefaultOperationTerminalRetention
 
 type Stack struct {
-	runtimeComposition
+	composition               runtimeComposition
 	controlOperationRetention time.Duration
 	hostAuthenticationMu      sync.Mutex
 	hostAuthentications       map[string]struct{}
@@ -123,6 +123,38 @@ type Stack struct {
 
 	// Optional test seam; nil uses the platform lifecycle runtime factory.
 	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
+}
+
+// Sessions returns the Host's process-level Session authority.
+func (s *Stack) Sessions() session.Service {
+	if runtime := s.runtimeProjection(); runtime != nil {
+		return runtime.sessions
+	}
+	return nil
+}
+
+// AppName returns the durable application identity used for new Sessions.
+func (s *Stack) AppName() string {
+	if runtime := s.runtimeProjection(); runtime != nil {
+		return runtime.appName
+	}
+	return ""
+}
+
+// UserID returns the compatibility Session owner identity bound to this Host.
+func (s *Stack) UserID() string {
+	if runtime := s.runtimeProjection(); runtime != nil {
+		return runtime.userID
+	}
+	return ""
+}
+
+// Workspace returns the Host's default workspace address.
+func (s *Stack) Workspace() session.WorkspaceRef {
+	if runtime := s.runtimeProjection(); runtime != nil {
+		return runtime.workspace
+	}
+	return session.WorkspaceRef{}
 }
 
 // KernelTurnState returns the current read-only live Turn projection. Turn
@@ -228,7 +260,7 @@ func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.Sessi
 	if s == nil {
 		return appserver.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
 	}
-	composition := &s.runtimeComposition
+	composition := &s.composition
 	if s.sessionRuntimes != nil {
 		runtime, ok := s.sessionRuntimes.loaded(ref.SessionID)
 		if !ok {
@@ -445,11 +477,11 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	stack := &Stack{
-		runtimeComposition: runtimeComposition{
-			Sessions:              sessions,
-			AppName:               appName,
-			UserID:                userID,
-			Workspace:             workspace,
+		composition: runtimeComposition{
+			sessions:              sessions,
+			appName:               appName,
+			userID:                userID,
+			workspace:             workspace,
 			store:                 configStore,
 			storeDir:              storeDir,
 			leaseOwnerID:          leaseOwnerID,
@@ -472,11 +504,11 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		},
 	}
 	stack.modelRecovery = newSessionModelRecovery(
-		stack.store,
-		stack.sessionModelPins,
-		stack.lookup,
+		stack.composition.store,
+		stack.composition.sessionModelPins,
+		stack.composition.lookup,
 	)
-	stack.placementCache = newPlacementSnapshot(doc)
+	stack.composition.placementCache = newPlacementSnapshot(doc)
 	configStore.savedHook = stack.invalidatePlacementSnapshot
 	controlState, err := appserver.NewStateService(appserver.StateServiceConfig{
 		Sessions: sessions, Runtime: stack, Feeds: controlFeeds,
@@ -541,13 +573,13 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	stack.taskStreams = acptaskstream.New(controlTaskStreams)
-	stack.lifecycleCtx, stack.lifecycleCancel = context.WithCancel(context.Background())
-	if err := stack.buildInitialGatewayRuntime(context.Background()); err != nil {
+	stack.composition.lifecycleCtx, stack.lifecycleCancel = context.WithCancel(context.Background())
+	if err := stack.composition.buildInitialGatewayRuntime(context.Background()); err != nil {
 		stack.lifecycleCancel()
 		return nil, err
 	}
 	mailboxRouter := &hostedChildMailboxRouter{}
-	stack.hostedChildMailbox = mailboxRouter.deliver
+	stack.composition.hostedChildMailbox = mailboxRouter.deliver
 	assemblyDeps, err := newSessionRuntimeAssemblyDeps(stack)
 	if err != nil {
 		_ = stack.Close()
@@ -559,10 +591,10 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	sessionRuntimes, err := newSessionRuntimeRegistry(sessionRuntimeRegistryConfig{
-		Sessions:         stack.Sessions,
-		Tasks:            stack.taskStore,
-		LifecycleContext: stack.lifecycleCtx,
-		DefaultWorkspace: stack.Workspace,
+		Sessions:         stack.composition.sessions,
+		Tasks:            stack.composition.taskStore,
+		LifecycleContext: stack.composition.lifecycleCtx,
+		DefaultWorkspace: stack.composition.workspace,
 		ModelRecovery:    stack.modelRecovery,
 		Assembler:        runtimeAssembler,
 	})
@@ -606,19 +638,19 @@ func modelConfigSupplied(cfg ModelConfig) bool {
 // StartApprovalRecovery begins the Control-owned abandoned-approval sweep.
 // Turn entry remains gated until the sweep completes.
 func (s *Stack) StartApprovalRecovery(ctx context.Context) {
-	if s == nil || s.approvalRecovery == nil {
+	if s == nil || s.composition.approvalRecovery == nil {
 		return
 	}
-	s.approvalRecovery.Start(ctx)
+	s.composition.approvalRecovery.Start(ctx)
 }
 
 // WaitApprovalRecovery blocks Host readiness until abandoned durable approval
 // mirrors have been settled.
 func (s *Stack) WaitApprovalRecovery(ctx context.Context) error {
-	if s == nil || s.approvalRecovery == nil {
+	if s == nil || s.composition.approvalRecovery == nil {
 		return nil
 	}
-	return s.approvalRecovery.Wait(ctx)
+	return s.composition.approvalRecovery.Wait(ctx)
 }
 
 func newStackLeaseOwnerID() (string, error) {
@@ -691,20 +723,20 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 	if s.lifecycleCancel != nil {
 		s.lifecycleCancel()
 	}
-	s.closing.Store(true)
+	s.composition.closing.Store(true)
 	if s.sessionRuntimes != nil {
 		var errs []error
 		drain, err := s.sessionRuntimes.beginQuiesce(ctx)
 		if err != nil {
 			errs = append(errs, err)
 		}
-		if gateway := s.currentGateway(); gateway != nil {
+		if gateway := s.composition.currentGateway(); gateway != nil {
 			if err := gateway.Quiesce(ctx); err != nil {
 				errs = append(errs, fmt.Errorf("default Runtime: %w", err))
 			}
 		}
-		if s.acpControlPlane != nil {
-			if err := s.acpControlPlane.Quiesce(ctx); err != nil {
+		if s.composition.acpControlPlane != nil {
+			if err := s.composition.acpControlPlane.Quiesce(ctx); err != nil {
 				errs = append(errs, fmt.Errorf("default Runtime child work: %w", err))
 			}
 		}
@@ -715,11 +747,11 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 		}
 		return errors.Join(errs...)
 	}
-	if gateway := s.currentGateway(); gateway != nil {
+	if gateway := s.composition.currentGateway(); gateway != nil {
 		gatewayErr := gateway.Quiesce(ctx)
 		var childErr error
-		if s.acpControlPlane != nil {
-			childErr = s.acpControlPlane.Quiesce(ctx)
+		if s.composition.acpControlPlane != nil {
+			childErr = s.composition.acpControlPlane.Quiesce(ctx)
 		}
 		return errors.Join(gatewayErr, childErr)
 	}
@@ -737,11 +769,11 @@ func (s *Stack) Close() error {
 	if s.sessionRuntimes != nil {
 		sessionCloseErr = s.sessionRuntimes.closeRuntimeResources()
 	}
-	workspaceResourceErr := s.closeWorkspaceResources()
-	s.mu.Lock()
+	workspaceResourceErr := s.composition.closeWorkspaceResources()
+	s.composition.mu.Lock()
 	controlOperations := s.operations
 	s.operations = nil
-	s.mu.Unlock()
+	s.composition.mu.Unlock()
 
 	var errs []error
 	if quiesceErr != nil {

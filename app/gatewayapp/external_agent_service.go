@@ -57,7 +57,7 @@ type externalAgentMutationResult struct {
 // installation is outside the configuration document and remains retained.
 func (s *Stack) disconnectACPAtRevision(ctx context.Context, agentID string, expected uint64) (externalAgentMutationResult, controlagents.DisconnectResult, error) {
 	mutation := externalAgentMutationResult{}
-	if s == nil || s.store == nil {
+	if s == nil || s.composition.store == nil {
 		return mutation, controlagents.DisconnectResult{}, fmt.Errorf("gatewayapp: app config store unavailable")
 	}
 	if ctx == nil {
@@ -67,7 +67,7 @@ func (s *Stack) disconnectACPAtRevision(ctx context.Context, agentID string, exp
 		return mutation, controlagents.DisconnectResult{}, err
 	}
 
-	doc, err := s.store.LoadContext(ctx)
+	doc, err := s.composition.store.LoadContext(ctx)
 	if err != nil {
 		return mutation, controlagents.DisconnectResult{}, err
 	}
@@ -93,7 +93,7 @@ func (s *Stack) disconnectACPAtRevision(ctx context.Context, agentID string, exp
 		doc.ModelProfiles = modelprofile.Remove(doc.ModelProfiles, profile.ID)
 	}
 	doc.ExternalAgents = next
-	saved, persistErr := s.store.CompareAndSave(ctx, expected, doc)
+	saved, persistErr := s.composition.store.CompareAndSave(ctx, expected, doc)
 	if persistErr != nil && !configstore.WriteCommitted(persistErr) {
 		mutation.Revision = configurationErrorRevision(persistErr, saved.ConfigurationRevision)
 		return mutation, controlagents.DisconnectResult{}, persistErr
@@ -113,18 +113,18 @@ func (s *Stack) disconnectACPAtRevision(ctx context.Context, agentID string, exp
 }
 
 func (s *Stack) reconcileCommittedExternalAgents(ctx context.Context) error {
-	if s == nil || s.store == nil {
+	if s == nil || s.composition.store == nil {
 		return errors.New("gatewayapp: external Agent configuration is unavailable")
 	}
 	reconcileCtx, cancel := context.WithTimeout(context.WithoutCancel(contextOrBackground(ctx)), 5*time.Second)
 	defer cancel()
-	_, err := s.store.LoadContext(reconcileCtx)
+	_, err := s.composition.store.LoadContext(reconcileCtx)
 	return err
 }
 
 func (s *Stack) acpDiscoveryService() discovery.Service {
 	return discovery.Service{ClientInfo: &client.Implementation{
-		Name:    firstNonEmpty(s.AppName, "caelis"),
+		Name:    firstNonEmpty(s.composition.appName, "caelis"),
 		Version: version.String(),
 	}}
 }

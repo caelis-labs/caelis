@@ -32,11 +32,11 @@ func (s *Stack) AcquireControlRuntime(
 	sessionID string,
 	activate bool,
 ) (*ControlRuntimeLease, error) {
-	if s == nil || s.sessionRuntimes == nil || s.Sessions == nil {
+	if s == nil || s.sessionRuntimes == nil || s.composition.sessions == nil {
 		return nil, errors.New("gatewayapp: Control Runtime service is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	authorizer := appserver.SessionAuthorizer{Sessions: s.Sessions}
+	authorizer := appserver.SessionAuthorizer{Sessions: s.composition.sessions}
 	if err := authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
 		return nil, err
 	}

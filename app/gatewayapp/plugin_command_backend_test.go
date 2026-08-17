@@ -299,7 +299,7 @@ func TestPluginMarketplaceIntentOnlyRestartRecoversMarketplaceKind(t *testing.T)
 	if !ok {
 		t.Fatal("missing revision")
 	}
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	marketDir := filepath.Join(tmp, "market")
 	writeLocalMarketplace(t, marketDir, "restart-market", "demo-plugin")
 	request := appserver.AddMarketplaceRequest{
@@ -319,7 +319,7 @@ func TestPluginMarketplaceIntentOnlyRestartRecoversMarketplaceKind(t *testing.T)
 		t.Fatalf("AddMarketplace(first) = %#v, %v; want intent-only unknown after completion fault", first, firstErr)
 	}
 
-	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.storeDir, "control-operations"))
+	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.composition.storeDir, "control-operations"))
 	if err := restartedOperations.Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}

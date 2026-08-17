@@ -310,16 +310,16 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	childSession, err := stack.Sessions.Session(ctx, session.SessionRef{SessionID: child.SessionID})
+	childSession, err := stack.Sessions().Session(ctx, session.SessionRef{SessionID: child.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if childSession.Metadata["system_managed_agent"] != "subagent" {
 		t.Fatalf("child Session metadata = %#v, want managed subagent marker", childSession.Metadata)
 	}
-	foreign, err := stack.Sessions.StartSession(ctx, session.StartSessionRequest{
-		AppName: stack.AppName,
-		UserID:  stack.UserID,
+	foreign, err := stack.Sessions().StartSession(ctx, session.StartSessionRequest{
+		AppName: stack.AppName(),
+		UserID:  stack.UserID(),
 		Workspace: session.WorkspaceRef{
 			Key: workspace,
 			CWD: workspace,
@@ -349,7 +349,7 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 	if _, err := agent.CloseSession(ctx, acp.CloseSessionRequest{SessionID: foreign.SessionID}); !errors.Is(err, session.ErrSessionNotFound) {
 		t.Fatalf("CloseSession(foreign system-managed child) error = %v, want session not found", err)
 	}
-	foreignAfter, err := stack.Sessions.Session(ctx, foreign.SessionRef)
+	foreignAfter, err := stack.Sessions().Session(ctx, foreign.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +433,7 @@ func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 	if len(listed.Sessions) != 1 || listed.Sessions[0].SessionID != created.SessionID {
 		t.Fatalf("ListSessions() = %#v, want created Session", listed)
 	}
-	active, err := stack.Sessions.Session(ctx, session.SessionRef{SessionID: created.SessionID})
+	active, err := stack.Sessions().Session(ctx, session.SessionRef{SessionID: created.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +461,7 @@ func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 	if _, err := agent.CloseSession(ctx, acp.CloseSessionRequest{SessionID: created.SessionID}); err != nil {
 		t.Fatal(err)
 	}
-	bound, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: stack.UserID})
+	bound, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: stack.UserID()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,8 +543,8 @@ func TestNewFromClientsSetConfigOptionUsesNewSessionCWDWorkspace(t *testing.T) {
 		t.Fatalf("SetSessionConfigOption(tone) error = %v", err)
 	}
 	state, err := stack.SessionRuntimeState(ctx, session.SessionRef{
-		AppName:      stack.AppName,
-		UserID:       stack.UserID,
+		AppName:      stack.AppName(),
+		UserID:       stack.UserID(),
 		SessionID:    sessionResp.SessionID,
 		WorkspaceKey: clientWorkspace,
 	})
@@ -554,7 +554,7 @@ func TestNewFromClientsSetConfigOptionUsesNewSessionCWDWorkspace(t *testing.T) {
 	if state.SessionMode != "auto-review" {
 		t.Fatalf("client workspace approval mode = %q, want unchanged auto-review", state.SessionMode)
 	}
-	stored, err := stack.Sessions.SnapshotState(ctx, session.SessionRef{SessionID: sessionResp.SessionID})
+	stored, err := stack.Sessions().SnapshotState(ctx, session.SessionRef{SessionID: sessionResp.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -617,7 +617,7 @@ func TestNewFromClientsSetConfigOptionRoutesAdvertisedApprovalMode(t *testing.T)
 		t.Fatalf("ResumeSession() mode = %q, want manual", got)
 	}
 	state, err := stack.SessionRuntimeState(ctx, session.SessionRef{
-		AppName: stack.AppName, UserID: stack.UserID, SessionID: created.SessionID, WorkspaceKey: workspace,
+		AppName: stack.AppName(), UserID: stack.UserID(), SessionID: created.SessionID, WorkspaceKey: workspace,
 	})
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
@@ -625,7 +625,7 @@ func TestNewFromClientsSetConfigOptionRoutesAdvertisedApprovalMode(t *testing.T)
 	if state.SessionMode != "manual" {
 		t.Fatalf("approval mode = %q, want manual", state.SessionMode)
 	}
-	stored, err := stack.Sessions.SnapshotState(ctx, session.SessionRef{SessionID: created.SessionID})
+	stored, err := stack.Sessions().SnapshotState(ctx, session.SessionRef{SessionID: created.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}

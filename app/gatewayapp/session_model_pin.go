@@ -159,18 +159,18 @@ func (s *runtimeComposition) releaseSpawnedSessionModelPin(sessionID string) {
 }
 
 func (s *runtimeComposition) selectPinnedSpawnedSessionModel(ctx context.Context, sessionID string, pinned ModelConfig) error {
-	if s == nil || s.Sessions == nil {
+	if s == nil || s.sessions == nil {
 		return errors.New("gatewayapp: Sessions service is unavailable")
 	}
 	ref := session.SessionRef{SessionID: strings.TrimSpace(sessionID)}
 	effort := strings.TrimSpace(pinned.ReasoningEffort)
 	var conflictErr error
 	for attempt := 0; attempt < sessionModelRecoveryMaxAttempts; attempt++ {
-		active, err := s.Sessions.Session(ctx, ref)
+		active, err := s.sessions.Session(ctx, ref)
 		if err != nil {
 			return err
 		}
-		state, err := s.Sessions.SnapshotState(ctx, active.SessionRef)
+		state, err := s.sessions.SnapshotState(ctx, active.SessionRef)
 		if err != nil {
 			return err
 		}
@@ -179,7 +179,7 @@ func (s *runtimeComposition) selectPinnedSpawnedSessionModel(ctx context.Context
 			return nil
 		}
 		expectedRevision := active.Revision
-		_, err = s.Sessions.UpdateState(ctx, session.UpdateStateRequest{
+		_, err = s.sessions.UpdateState(ctx, session.UpdateStateRequest{
 			SessionRef:       active.SessionRef,
 			ExpectedRevision: &expectedRevision,
 			MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),

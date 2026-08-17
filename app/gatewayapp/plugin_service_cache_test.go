@@ -23,7 +23,7 @@ func TestPluginServiceRemoveKeepsManagedInstallCacheForActiveRuntimes(t *testing
 	cacheRoot := filepath.Join(storeDir, "plugins", "installed", "cached-plugin")
 	managedPlugin := filepath.Join(cacheRoot, "plugin")
 	buildMinimalPluginDir(t, managedPlugin, `{"name":"managed","version":"1.0.0"}`)
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatalf("load plugin config: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestPluginServiceRemoveKeepsManagedInstallCacheForActiveRuntimes(t *testing
 		Managed:   true,
 		CacheRoot: cacheRoot,
 	}}
-	if err := stack.store.Save(doc); err != nil {
+	if err := stack.composition.store.Save(doc); err != nil {
 		t.Fatalf("save managed plugin config: %v", err)
 	}
 	activateFutureAssemblyRuntime(t, stack, "managed-plugin-runtime")

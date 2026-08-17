@@ -393,9 +393,12 @@ extraction commitment: the Runtime registry is constructed without retaining a
 concrete Host `gatewayapp.Stack`, and activated Sessions use private
 `sessionRuntimeInstance` values. `Stack`, `sessionRuntimeInstance`, and their
 shared private `runtimeComposition` implementation remain Host-owned lifecycle
-details rather than stable package contracts. Architecture gates enforce the
-private adapter consumer boundary and prevent Registry, Runtime instance, and
-assembly types from retaining a concrete Host `Stack`.
+details rather than stable package contracts. `Stack` owns its composition as a
+named private field; `runtimeComposition` exports no state, so only deliberate
+Host methods and immutable views cross the package boundary. Architecture and
+structural gates enforce the private adapter consumer boundary, reject anonymous
+Host composition, and prevent Registry, Runtime instance, and assembly types
+from retaining a concrete Host `Stack`.
 
 ## SDK Boundary
 

@@ -10,7 +10,7 @@ func (s *Stack) ResolveWorkspaceAddress(requested session.WorkspaceRef) (session
 	if s == nil || s.sessionRuntimes == nil {
 		return session.WorkspaceRef{}, sessionRuntimeHostClosingError()
 	}
-	workspace, err := canonicalWorkspaceRef(requested, s.Workspace)
+	workspace, err := canonicalWorkspaceRef(requested, s.composition.workspace)
 	if err != nil {
 		return session.WorkspaceRef{}, err
 	}

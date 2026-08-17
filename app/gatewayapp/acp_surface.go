@@ -38,7 +38,7 @@ func newGatewayACPSurface(stack *Stack, fallbackModes acp.ModeProvider, useFallb
 }
 
 func (p gatewayACPSurface) SessionModes(ctx context.Context, session session.Session) (*acp.SessionModeState, error) {
-	if p.stack != nil && p.stack.processSecurityPosture().FullAccessMode {
+	if p.stack != nil && p.stack.composition.processSecurityPosture().FullAccessMode {
 		return &acp.SessionModeState{CurrentModeID: dangerouslySkipPermissionsModeLabel}, nil
 	}
 	if p.useFallbackModes {
@@ -79,7 +79,7 @@ func (p gatewayACPSurface) SessionConfigOptions(ctx context.Context, session ses
 		if err != nil {
 			return nil, err
 		}
-		if p.stack != nil && p.stack.processSecurityPosture().FullAccessMode {
+		if p.stack != nil && p.stack.composition.processSecurityPosture().FullAccessMode {
 			fallback = slices.DeleteFunc(fallback, func(option acp.SessionConfigOption) bool {
 				return strings.EqualFold(strings.TrimSpace(option.ID), acpConfigModeID) ||
 					strings.EqualFold(strings.TrimSpace(option.Category), acpConfigModeID)
@@ -337,7 +337,7 @@ func (p gatewayACPSurface) currentReasoningEffort(ctx context.Context, session s
 }
 
 func (p gatewayACPSurface) session(ctx context.Context, sessionID string) (session.Session, error) {
-	if p.stack == nil || p.stack.Sessions == nil {
+	if p.stack == nil || p.stack.composition.sessions == nil {
 		return session.Session{}, fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
@@ -345,15 +345,15 @@ func (p gatewayACPSurface) session(ctx context.Context, sessionID string) (sessi
 		return session.Session{}, fmt.Errorf("gatewayapp: session id is required")
 	}
 	ref := p.sessionRef(sessionID)
-	return p.stack.Sessions.Session(ctx, ref)
+	return p.stack.composition.sessions.Session(ctx, ref)
 }
 
 func (p gatewayACPSurface) sessionRef(sessionID string) session.SessionRef {
 	appName := "caelis"
 	userID := "acp"
 	if p.stack != nil {
-		appName = firstNonEmpty(strings.TrimSpace(p.stack.AppName), appName)
-		userID = firstNonEmpty(strings.TrimSpace(p.stack.UserID), userID)
+		appName = firstNonEmpty(strings.TrimSpace(p.stack.composition.appName), appName)
+		userID = firstNonEmpty(strings.TrimSpace(p.stack.composition.userID), userID)
 	}
 	return session.SessionRef{
 		AppName:   appName,
@@ -363,10 +363,10 @@ func (p gatewayACPSurface) sessionRef(sessionID string) session.SessionRef {
 }
 
 func (p gatewayACPSurface) modelSnapshot() persistedModelConfig {
-	if p.stack == nil || p.stack.lookup == nil {
+	if p.stack == nil || p.stack.composition.lookup == nil {
 		return persistedModelConfig{}
 	}
-	return p.stack.lookup.Snapshot()
+	return p.stack.composition.lookup.Snapshot()
 }
 
 func modeSelectOptions(modes []acp.SessionMode) []acp.SessionConfigSelectOption {

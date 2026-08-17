@@ -217,22 +217,22 @@ func (s *Stack) deleteHostModelAtRevision(ctx context.Context, alias string, exp
 }
 
 func (s *Stack) loadModelConfigurationCandidate(ctx context.Context, expected *uint64) (AppConfig, *modelLookup, error) {
-	if s == nil || s.store == nil {
+	if s == nil || s.composition.store == nil {
 		return AppConfig{}, nil, fmt.Errorf("gatewayapp: app config store unavailable")
 	}
-	if s.lookup == nil {
+	if s.composition.lookup == nil {
 		return AppConfig{}, nil, fmt.Errorf("gatewayapp: model lookup unavailable")
 	}
-	doc, err := s.store.LoadContext(contextOrBackground(ctx))
+	doc, err := s.composition.store.LoadContext(contextOrBackground(ctx))
 	if err != nil {
 		return AppConfig{}, nil, err
 	}
 	if expected != nil && doc.ConfigurationRevision != *expected {
 		return doc, nil, &configstore.ConfigurationRevisionConflict{Expected: *expected, Actual: doc.ConfigurationRevision}
 	}
-	s.lookup.mu.RLock()
-	contextWindow := s.lookup.contextWindow
-	s.lookup.mu.RUnlock()
+	s.composition.lookup.mu.RLock()
+	contextWindow := s.composition.lookup.contextWindow
+	s.composition.lookup.mu.RUnlock()
 	candidate, err := newModelLookupFromDocument(doc, contextWindow)
 	if err != nil {
 		return doc, nil, err
@@ -241,7 +241,7 @@ func (s *Stack) loadModelConfigurationCandidate(ctx context.Context, expected *u
 }
 
 func (s *Stack) persistModelConfiguration(ctx context.Context, doc AppConfig) (AppConfig, error, error) {
-	saved, err := s.store.CompareAndSave(contextOrBackground(ctx), doc.ConfigurationRevision, doc)
+	saved, err := s.composition.store.CompareAndSave(contextOrBackground(ctx), doc.ConfigurationRevision, doc)
 	if err != nil && !configstore.WriteCommitted(err) {
 		return saved, nil, err
 	}
@@ -255,12 +255,12 @@ func (s *Stack) persistModelConfiguration(ctx context.Context, doc AppConfig) (A
 // a CAS commit. It never rebuilds a Runtime; activated Sessions keep their
 // detached model and Agent assembly until release.
 func (s *Stack) observeCommittedModelConfiguration(ctx context.Context, committed AppConfig) error {
-	if s == nil || s.lookup == nil || s.store == nil {
+	if s == nil || s.composition.lookup == nil || s.composition.store == nil {
 		return errors.New("gatewayapp: model lookup unavailable after configuration commit")
 	}
 	reconcileCtx, cancel := context.WithTimeout(context.WithoutCancel(contextOrBackground(ctx)), 5*time.Second)
 	defer cancel()
-	doc, err := s.store.LoadContext(reconcileCtx)
+	doc, err := s.composition.store.LoadContext(reconcileCtx)
 	if err != nil {
 		return fmt.Errorf("gatewayapp: observe canonical model configuration after commit: %w", err)
 	}
@@ -271,17 +271,17 @@ func (s *Stack) observeCommittedModelConfiguration(ctx context.Context, committe
 			committed.ConfigurationRevision,
 		)
 	}
-	s.lookup.mu.RLock()
-	contextWindow := s.lookup.contextWindow
-	s.lookup.mu.RUnlock()
+	s.composition.lookup.mu.RLock()
+	contextWindow := s.composition.lookup.contextWindow
+	s.composition.lookup.mu.RUnlock()
 	candidate, err := newModelLookupFromDocument(doc, contextWindow)
 	if err != nil {
 		return fmt.Errorf("gatewayapp: rebuild committed model lookup: %w", err)
 	}
-	s.lookup.Restore(candidate.Snapshot(), candidate.contextWindow)
-	s.setRuntimeDefaultModelFromLookup()
-	if gw := s.currentGateway(); gw != nil && gw.Resolver() != nil {
-		gw.Resolver().SetModelLookup(s.lookup, s.lookup.DefaultID())
+	s.composition.lookup.Restore(candidate.Snapshot(), candidate.contextWindow)
+	s.composition.setRuntimeDefaultModelFromLookup()
+	if gw := s.composition.currentGateway(); gw != nil && gw.Resolver() != nil {
+		gw.Resolver().SetModelLookup(s.composition.lookup, s.composition.lookup.DefaultID())
 	}
 	return nil
 }

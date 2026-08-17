@@ -122,12 +122,12 @@ func TestInstallFromRegisteredMarketplaceRefetchesMissingRoot(t *testing.T) {
 	if _, _, err := stack.Plugins().AddMarketplace(ctx, marketplaceDir); err != nil {
 		t.Fatalf("AddMarketplace() error = %v", err)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 	doc.PluginMarketplaces[0].Root = filepath.Join(tmp, "missing-cache-root")
-	if err := stack.store.Save(doc); err != nil {
+	if err := stack.composition.store.Save(doc); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 

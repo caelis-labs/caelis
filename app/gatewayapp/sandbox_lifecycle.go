@@ -83,9 +83,9 @@ func (s *Stack) selectSandboxLifecycleTarget(config SandboxConfig) (sandbox.Life
 	if err != nil {
 		return sandbox.LifecycleTarget{}, err
 	}
-	s.mu.RLock()
-	override := cloneSandboxConfig(s.sandboxOverride)
-	s.mu.RUnlock()
+	s.composition.mu.RLock()
+	override := cloneSandboxConfig(s.composition.sandboxOverride)
+	s.composition.mu.RUnlock()
 	config = mergeSandboxConfig(config, override)
 	if isHostSandboxBackend(config.RequestedType) {
 		cfg := sandboxConfigToPort(config, snapshot.workspaceCWD, snapshot.storeDir)
@@ -108,15 +108,15 @@ func (s *Stack) sandboxLifecycleSnapshot() (sandboxLifecycleSnapshot, error) {
 	if s == nil {
 		return sandboxLifecycleSnapshot{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.exec == nil {
+	s.composition.mu.RLock()
+	defer s.composition.mu.RUnlock()
+	if s.composition.exec == nil {
 		return sandboxLifecycleSnapshot{}, fmt.Errorf("gatewayapp: sandbox runtime is unavailable")
 	}
 	return sandboxLifecycleSnapshot{
-		exec:         s.exec,
-		workspaceCWD: s.Workspace.CWD,
-		storeDir:     s.storeDir,
+		exec:         s.composition.exec,
+		workspaceCWD: s.composition.workspace.CWD,
+		storeDir:     s.composition.storeDir,
 	}, nil
 }
 

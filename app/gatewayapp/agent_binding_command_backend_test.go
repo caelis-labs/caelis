@@ -15,12 +15,12 @@ import (
 func TestAgentBindingCommandsUseHostCASAndSharedLedger(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", Model: "binding-command"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	beforeSession, err := stack.Sessions.Session(ctx, activeSession.SessionRef)
+	beforeSession, err := stack.composition.sessions.Session(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,12 +88,12 @@ func TestAgentBindingCommandsUseHostCASAndSharedLedger(t *testing.T) {
 
 	sharedConflict, err := stack.ConfigurationCommands().UseModel(ctx, principal, appserver.UseModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: bindRequest.OperationID, ExpectedRevision: &deletedSet.Revision},
-		Model:     stack.lookup.DefaultID(),
+		Model:     stack.composition.lookup.DefaultID(),
 	})
 	if !errors.Is(err, appserver.ErrOperationConflict) || sharedConflict.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("UseModel(shared Agent operation ID) = %#v, %v", sharedConflict, err)
 	}
-	afterSession, err := stack.Sessions.Session(ctx, activeSession.SessionRef)
+	afterSession, err := stack.composition.sessions.Session(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,8 +128,8 @@ func TestAgentBindingCASAllowsOnlyOneConcurrentHostWriter(t *testing.T) {
 		}
 		return store
 	}
-	first := &Stack{runtimeComposition: runtimeComposition{store: makeStore()}}
-	second := &Stack{runtimeComposition: runtimeComposition{store: makeStore()}}
+	first := &Stack{composition: runtimeComposition{store: makeStore()}}
+	second := &Stack{composition: runtimeComposition{store: makeStore()}}
 	type outcome struct {
 		result agentBindingMutationResult
 		err    error

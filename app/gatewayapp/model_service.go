@@ -59,7 +59,7 @@ func (s *runtimeComposition) ListModelAliases(ctx context.Context, ref session.S
 }
 
 func (s *runtimeComposition) ListModelChoices(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
-	if s == nil || s.Sessions == nil {
+	if s == nil || s.sessions == nil {
 		return nil, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	if s.lookup == nil {
@@ -67,7 +67,7 @@ func (s *runtimeComposition) ListModelChoices(ctx context.Context, ref session.S
 	}
 	choices := make([]ModelChoice, 0, len(s.lookup.ListModelChoices())+1)
 	if strings.TrimSpace(ref.SessionID) != "" {
-		state, err := s.Sessions.SnapshotState(ctx, ref)
+		state, err := s.sessions.SnapshotState(ctx, ref)
 		if err != nil {
 			return nil, err
 		}

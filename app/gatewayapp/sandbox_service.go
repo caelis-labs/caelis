@@ -34,10 +34,10 @@ func (s *Stack) setSandboxBackendAtRevision(ctx context.Context, backend string,
 	if err != nil {
 		return SandboxStatus{}, currentRevision, configurationRejectedError(errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err))
 	}
-	s.mu.RLock()
-	securityPosture := resolveProcessSecurityPosture(s.runtime)
-	runtimeOverride := cloneSandboxConfig(s.sandboxOverride)
-	s.mu.RUnlock()
+	s.composition.mu.RLock()
+	securityPosture := resolveProcessSecurityPosture(s.composition.runtime)
+	runtimeOverride := cloneSandboxConfig(s.composition.sandboxOverride)
+	s.composition.mu.RUnlock()
 	if err := securityPosture.validateSandboxBackend(sandbox.Backend(normalized)); err != nil {
 		return SandboxStatus{}, currentRevision, configurationRejectedError(errorcode.Wrap(errorcode.FailedPrecondition, err.Error(), err))
 	}
@@ -61,10 +61,10 @@ func (s *Stack) setSandboxBackendAtRevision(ctx context.Context, backend string,
 	} else if current.ConfigurationRevision >= saved.ConfigurationRevision {
 		observed = current
 	}
-	s.mu.Lock()
-	s.sandboxPersisted = cloneSandboxConfig(observed.Sandbox)
-	s.sandboxRevision = observed.ConfigurationRevision
-	s.mu.Unlock()
+	s.composition.mu.Lock()
+	s.composition.sandboxPersisted = cloneSandboxConfig(observed.Sandbox)
+	s.composition.sandboxRevision = observed.ConfigurationRevision
+	s.composition.mu.Unlock()
 	nextLive := mergeSandboxConfig(observed.Sandbox, runtimeOverride)
 	status := sandboxStatusFromRuntime(nextLive, nil)
 	return securityPosture.applySandboxStatus(status), observed.ConfigurationRevision, errors.Join(persistErr, observedErr)
@@ -81,7 +81,7 @@ func (s *runtimeComposition) SandboxStatusForWorkspace(workspace session.Workspa
 	if s == nil {
 		return SandboxStatus{}
 	}
-	includeRuntime := sameWorkspaceCWD(workspace.CWD, s.Workspace.CWD)
+	includeRuntime := sameWorkspaceCWD(workspace.CWD, s.workspace.CWD)
 	return s.sandboxStatus(includeRuntime)
 }
 

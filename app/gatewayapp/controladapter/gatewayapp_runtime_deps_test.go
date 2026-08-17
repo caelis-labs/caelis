@@ -38,7 +38,7 @@ func gatewayAppControlRuntimeDepsForTest(stack *gatewayapp.Stack) *ControlRuntim
 			UserID:    view.UserID,
 			Workspace: view.Workspace,
 			ListSessionsFn: func(ctx context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
-				return stack.ControlClient().ListSessions(ctx, appserver.Principal{ID: stack.UserID}, appserver.ListSessionsRequest{
+				return stack.ControlClient().ListSessions(ctx, appserver.Principal{ID: stack.UserID()}, appserver.ListSessionsRequest{
 					WorkspaceKey: req.WorkspaceKey,
 					CWD:          req.CWD,
 					Cursor:       req.Cursor,
@@ -96,20 +96,20 @@ func gatewayAppControlRuntimeDepsForTest(stack *gatewayapp.Stack) *ControlRuntim
 }
 
 func startGatewayAppSessionForTest(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string) (session.Session, error) {
-	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: stack.UserID})
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: stack.UserID()})
 	if err != nil {
 		return session.Session{}, err
 	}
 	result, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
 		WriteBase:          appserver.WriteBase{OperationID: "adapter-test-session-" + uuid.NewString()},
 		PreferredSessionID: preferredSessionID,
-		WorkspaceKey:       stack.Workspace.Key,
-		CWD:                stack.Workspace.CWD,
+		WorkspaceKey:       stack.Workspace().Key,
+		CWD:                stack.Workspace().CWD,
 	})
 	if err != nil {
 		return session.Session{}, err
 	}
-	return stack.Sessions.Session(ctx, session.SessionRef{SessionID: result.SessionID})
+	return stack.Sessions().Session(ctx, session.SessionRef{SessionID: result.SessionID})
 }
 
 func TestGatewayAppControlRuntimeDepsWiresFocusedServices(t *testing.T) {

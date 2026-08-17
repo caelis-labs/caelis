@@ -470,7 +470,7 @@ func pluginSystemE2EPluginActive(list []PluginInfo) bool {
 
 func pluginSystemE2EEventSummary(t *testing.T, stack *Stack, ref session.SessionRef) string {
 	t.Helper()
-	events, err := stack.Sessions.Events(context.Background(), session.EventsRequest{
+	events, err := stack.composition.sessions.Events(context.Background(), session.EventsRequest{
 		SessionRef:       ref,
 		IncludeTransient: true,
 	})

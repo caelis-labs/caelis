@@ -68,7 +68,7 @@ func (s *Stack) Status() StatusService {
 	if s == nil {
 		return StatusService{}
 	}
-	return StatusService{composition: &s.runtimeComposition, preflightSandboxFn: s.PreflightSandbox}
+	return StatusService{composition: &s.composition, preflightSandboxFn: s.PreflightSandbox}
 }
 
 func (s *Stack) ACPSurface(modes acp.ModeProvider, useFallbackModes bool, configs acp.ConfigProvider) ACPPresentationService {
@@ -122,20 +122,20 @@ func (s *Stack) authenticateModelProvider(ctx context.Context, req modelconfig.A
 	}
 	template, ok := modelconfig.LookupProvider(req.Provider)
 	if ok && template.AuthFlow == modelconfig.AuthFlowCodexOAuth {
-		if s.codexAuth == nil {
+		if s.composition.codexAuth == nil {
 			return fmt.Errorf("gatewayapp: codex authentication is unavailable")
 		}
-		return s.codexAuth.EnsureAuthenticated(ctx, codexauth.LoginOptions{
+		return s.composition.codexAuth.EnsureAuthenticated(ctx, codexauth.LoginOptions{
 			HTTPClient:      req.HTTPClient,
 			OpenBrowser:     req.OpenBrowser,
 			CallbackTimeout: req.CallbackTimeout,
 		})
 	}
 	if ok && template.AuthFlow == modelconfig.AuthFlowGrokOAuth {
-		if s.grokAuth == nil {
+		if s.composition.grokAuth == nil {
 			return fmt.Errorf("gatewayapp: grok authentication is unavailable")
 		}
-		return s.grokAuth.EnsureAuthenticated(ctx, grokauth.LoginOptions{
+		return s.composition.grokAuth.EnsureAuthenticated(ctx, grokauth.LoginOptions{
 			HTTPClient:      req.HTTPClient,
 			OpenBrowser:     req.OpenBrowser,
 			CallbackTimeout: req.CallbackTimeout,
@@ -192,7 +192,7 @@ func (s SkillService) Discover(ctx context.Context, workspaceDir string) ([]Skil
 	}
 	s.composition.mu.RLock()
 	runtimeCfg := s.composition.runtime
-	defaultWorkspace := s.composition.Workspace.CWD
+	defaultWorkspace := s.composition.workspace.CWD
 	s.composition.mu.RUnlock()
 	if strings.TrimSpace(workspaceDir) == "" {
 		workspaceDir = defaultWorkspace

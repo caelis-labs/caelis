@@ -27,7 +27,7 @@ import (
 
 func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	marker := filepath.Join(t.TempDir(), "starts")
 	expected := currentConfigurationRevision(t, stack)
 	request := appserver.PrepareACPRequest{
@@ -35,7 +35,7 @@ func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *te
 		Request: controlagents.ACPPrepareRequest{
 			AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand,
 			CommandLine: gatewayACPOnboardingHelperCommand("ready", marker),
-			ModelID:     controlagents.DefaultRemoteModelID, CWD: stack.Workspace.CWD,
+			ModelID:     controlagents.DefaultRemoteModelID, CWD: stack.composition.workspace.CWD,
 		},
 	}
 	failing := &completeFailingOperationStore{OperationStore: stack.operations}
@@ -53,11 +53,11 @@ func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *te
 		t.Fatalf("helper starts after first prepare = %d, want 1", starts)
 	}
 
-	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.storeDir, "control-operations"))
+	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.composition.storeDir, "control-operations"))
 	if err := restartedOperations.Initialize(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	restartedPreparations, err := newACPPreparationStore(stack.storeDir)
+	restartedPreparations, err := newACPPreparationStore(stack.composition.storeDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestStackACPCommandRecoveryCapabilityIsExplicit(t *testing.T) {
 
 func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	marker := filepath.Join(t.TempDir(), "starts")
 	expected := currentConfigurationRevision(t, stack)
 	request := appserver.PrepareACPRequest{
@@ -110,7 +110,7 @@ func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T
 		Request: controlagents.ACPPrepareRequest{
 			AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand,
 			CommandLine: gatewayACPOnboardingHelperCommand("ready", marker),
-			ModelID:     controlagents.DefaultRemoteModelID, CWD: stack.Workspace.CWD,
+			ModelID:     controlagents.DefaultRemoteModelID, CWD: stack.composition.workspace.CWD,
 		},
 	}
 	backend := &warningACPCommandBackend{Stack: stack}
@@ -125,7 +125,7 @@ func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	retryOperations := appserver.NewFileOperationStore(filepath.Join(stack.storeDir, "control-operations"))
+	retryOperations := appserver.NewFileOperationStore(filepath.Join(stack.composition.storeDir, "control-operations"))
 	if err := retryOperations.Initialize(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T
 		t.Fatalf("recovery calls while creator completed = %d, want 0", got)
 	}
 
-	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.storeDir, "control-operations"))
+	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.composition.storeDir, "control-operations"))
 	if err := restartedOperations.Initialize(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T
 
 func TestACPPrepareAndAuthenticationCommandsPersistExplicitChallenge(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	marker := filepath.Join(t.TempDir(), "starts")
 	expected := currentConfigurationRevision(t, stack)
 	preparedReceipt, err := stack.AgentCommands().PrepareACP(context.Background(), principal, appserver.PrepareACPRequest{
@@ -202,7 +202,7 @@ func TestACPPrepareAndAuthenticationCommandsPersistExplicitChallenge(t *testing.
 		Request: controlagents.ACPPrepareRequest{
 			AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand,
 			CommandLine: gatewayACPOnboardingHelperCommand("needs-auth", marker),
-			ModelID:     controlagents.DefaultRemoteModelID, CWD: stack.Workspace.CWD,
+			ModelID:     controlagents.DefaultRemoteModelID, CWD: stack.composition.workspace.CWD,
 		},
 	})
 	if err != nil || preparedReceipt.Outcome != appserver.OutcomeCommitted || preparedReceipt.Resource == nil {
@@ -233,7 +233,7 @@ func TestACPPrepareAndAuthenticationCommandsPersistExplicitChallenge(t *testing.
 
 func TestACPPrepareCancellationIsUnknownAndNeverRepeatsEffect(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	marker := filepath.Join(t.TempDir(), "starts")
 	expected := currentConfigurationRevision(t, stack)
 	request := appserver.PrepareACPRequest{
@@ -241,7 +241,7 @@ func TestACPPrepareCancellationIsUnknownAndNeverRepeatsEffect(t *testing.T) {
 		Request: controlagents.ACPPrepareRequest{
 			AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand,
 			CommandLine: gatewayACPOnboardingHelperCommand("block", marker),
-			ModelID:     controlagents.DefaultRemoteModelID, CWD: stack.Workspace.CWD,
+			ModelID:     controlagents.DefaultRemoteModelID, CWD: stack.composition.workspace.CWD,
 		},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -276,7 +276,7 @@ func TestACPPrepareCancellationIsUnknownAndNeverRepeatsEffect(t *testing.T) {
 
 func TestConnectPreparedACPCommitsExactPreparationAndReplaysReceipt(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	prepared := seedReadyACPPreparation(t, stack, principal.ID, "prepare-connect")
 	expected := currentConfigurationRevision(t, stack)
 	request := appserver.ConnectACPRequest{
@@ -295,7 +295,7 @@ func TestConnectPreparedACPCommitsExactPreparationAndReplaysReceipt(t *testing.T
 	if receipt.Resource == nil || receipt.Resource.Kind != appserver.CommandResourceModelProfile || receipt.Resource.Ref == "" || receipt.Resource.Digest != prepared.ContentDigest {
 		t.Fatalf("ConnectACP() resource = %#v", receipt.Resource)
 	}
-	doc, err := stack.store.LoadContext(context.Background())
+	doc, err := stack.composition.store.LoadContext(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestConnectPreparedACPCommitsExactPreparationAndReplaysReceipt(t *testing.T
 
 func TestConnectPreparedACPRejectsForeignOrChangedPreparation(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	prepared := seedReadyACPPreparation(t, stack, stack.UserID, "prepare-owned")
+	prepared := seedReadyACPPreparation(t, stack, stack.composition.userID, "prepare-owned")
 	expected := currentConfigurationRevision(t, stack)
 	tests := []struct {
 		name      string
@@ -329,7 +329,7 @@ func TestConnectPreparedACPRejectsForeignOrChangedPreparation(t *testing.T) {
 		digest    string
 	}{
 		{name: "foreign principal", principal: appserver.Principal{ID: "someone-else"}, digest: prepared.ContentDigest},
-		{name: "changed digest", principal: appserver.Principal{ID: stack.UserID}, digest: strings.Repeat("f", 64)},
+		{name: "changed digest", principal: appserver.Principal{ID: stack.composition.userID}, digest: strings.Repeat("f", 64)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -350,7 +350,7 @@ func TestConnectPreparedACPRejectsForeignOrChangedPreparation(t *testing.T) {
 
 func TestConnectPreparedACPCASCommitsForFutureActivation(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	prepared := seedReadyACPPreparation(t, stack, principal.ID, "prepare-warning")
 	expected := currentConfigurationRevision(t, stack)
 	stale := expected - 1
@@ -370,7 +370,7 @@ func TestConnectPreparedACPCASCommitsForFutureActivation(t *testing.T) {
 	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectACP() = %#v, %v", receipt, err)
 	}
-	doc, loadErr := stack.store.LoadContext(context.Background())
+	doc, loadErr := stack.composition.store.LoadContext(context.Background())
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
@@ -384,7 +384,7 @@ func TestConnectPreparedACPCASCommitsForFutureActivation(t *testing.T) {
 
 func TestPrepareACPAuthenticationRejectsUnavailableTerminalCapabilityBeforeEffect(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.UserID}
+	principal := appserver.Principal{ID: stack.composition.userID}
 	parent := seedNeedsAuthACPPreparation(t, stack, principal.ID, "prepare-terminal")
 	expected := currentConfigurationRevision(t, stack)
 	receipt, err := stack.AgentCommands().PrepareACPAuthentication(context.Background(), principal, appserver.PrepareACPAuthenticationRequest{
@@ -416,7 +416,7 @@ func seedNeedsAuthACPPreparation(t *testing.T, stack *Stack, principalID, operat
 		IntentDigest: strings.Repeat("b", 64),
 		Request: controlagents.ACPPrepareRequest{
 			AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand,
-			CommandLine: command, ModelID: controlagents.DefaultRemoteModelID, CWD: stack.Workspace.CWD,
+			CommandLine: command, ModelID: controlagents.DefaultRemoteModelID, CWD: stack.composition.workspace.CWD,
 		},
 		ObservedRevision: currentConfigurationRevision(t, stack),
 	})
@@ -427,7 +427,7 @@ func seedNeedsAuthACPPreparation(t *testing.T, stack *Stack, principalID, operat
 	needsAuth.State = controlagents.PreparationStateNeedsAuth
 	needsAuth.Connection = controlagents.Connection{
 		ID: "terminal-auth-acp", Name: "Terminal Auth ACP",
-		Launcher: controlagents.Launcher{Kind: controlagents.LaunchKindExecutable, Command: command, WorkDir: stack.Workspace.CWD},
+		Launcher: controlagents.Launcher{Kind: controlagents.LaunchKindExecutable, Command: command, WorkDir: stack.composition.workspace.CWD},
 	}
 	needsAuth.AuthenticationMethods = []controlagents.AuthenticationChallengeMethod{{
 		ID: "terminal-login", Name: "Terminal login", Type: controlagents.AuthenticationTerminal,
@@ -449,7 +449,7 @@ func seedReadyACPPreparation(t *testing.T, stack *Stack, principalID, operationI
 		IntentDigest: strings.Repeat("a", 64),
 		Request: controlagents.ACPPrepareRequest{
 			AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand,
-			CommandLine: command, ModelID: controlagents.DefaultRemoteModelID, CWD: stack.Workspace.CWD,
+			CommandLine: command, ModelID: controlagents.DefaultRemoteModelID, CWD: stack.composition.workspace.CWD,
 		},
 		ObservedRevision: currentConfigurationRevision(t, stack),
 	})
@@ -460,11 +460,11 @@ func seedReadyACPPreparation(t *testing.T, stack *Stack, principalID, operationI
 	ready.State = controlagents.PreparationStateReady
 	ready.Connection = controlagents.Connection{
 		ID: "prepared-acp", Name: "Prepared ACP",
-		Launcher: controlagents.Launcher{Kind: controlagents.LaunchKindExecutable, Command: command, WorkDir: stack.Workspace.CWD},
+		Launcher: controlagents.Launcher{Kind: controlagents.LaunchKindExecutable, Command: command, WorkDir: stack.composition.workspace.CWD},
 	}
 	ready.Discovery = controlagents.DiscoverySnapshot{
 		ConnectionID: ready.Connection.ID, LaunchFingerprint: controlagents.LaunchFingerprint(ready.Connection.Launcher),
-		CWD: stack.Workspace.CWD, SelectedModelID: controlagents.DefaultRemoteModelID, DiscoveredAt: time.Now().UTC(),
+		CWD: stack.composition.workspace.CWD, SelectedModelID: controlagents.DefaultRemoteModelID, DiscoveredAt: time.Now().UTC(),
 	}
 	ready, err = stack.acpPreparations.Save(context.Background(), planned.ContentDigest, ready)
 	if err != nil {

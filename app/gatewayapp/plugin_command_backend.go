@@ -114,10 +114,10 @@ func (s *Stack) mutatePluginAtRevision(ctx context.Context, action appserver.Act
 }
 
 func (s *Stack) preflightPluginConfigurationRevision(ctx context.Context, expected uint64) error {
-	if s == nil || s.store == nil {
+	if s == nil || s.composition.store == nil {
 		return errors.New("gatewayapp: plugin configuration is unavailable")
 	}
-	doc, err := s.store.LoadContext(contextOrBackground(ctx))
+	doc, err := s.composition.store.LoadContext(contextOrBackground(ctx))
 	if err != nil {
 		return err
 	}
@@ -213,10 +213,10 @@ func pluginInfoWarning(info PluginInfo) error {
 }
 
 func (s *Stack) currentPluginConfigurationRevision(ctx context.Context) (uint64, bool) {
-	if s == nil || s.store == nil {
+	if s == nil || s.composition.store == nil {
 		return 0, false
 	}
-	doc, err := s.store.LoadContext(contextOrBackground(ctx))
+	doc, err := s.composition.store.LoadContext(contextOrBackground(ctx))
 	if err != nil {
 		return 0, false
 	}

@@ -421,7 +421,7 @@ func TestRunHeadlessRejectsClosedSessionWithoutRecreatingIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients, err := server.Bind(appserver.Principal{ID: stack.UserID})
+	clients, err := server.Bind(appserver.Principal{ID: stack.UserID()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +448,7 @@ func TestRunHeadlessRejectsClosedSessionWithoutRecreatingIt(t *testing.T) {
 	resumedID, err := runHeadless(
 		context.Background(),
 		clients.Sessions,
-		stack.Workspace,
+		stack.Workspace(),
 		created.SessionID,
 		"hello",
 		outputJSON,

@@ -23,7 +23,7 @@ func TestDelegationAgentHandleKeepsACPPlacementIdentity(t *testing.T) {
 			Choices:       []modelprofile.EffortChoice{{Canonical: "none"}},
 		},
 	}
-	if err := stack.store.Save(AppConfig{
+	if err := stack.composition.store.Save(AppConfig{
 		ExternalAgents: controlagents.Configuration{
 			Connections: []controlagents.Connection{{
 				ID: "grok", Name: "Grok", Launcher: controlagents.Launcher{Kind: controlagents.LaunchKindExecutable, Command: "grok-acp"},
@@ -38,7 +38,7 @@ func TestDelegationAgentHandleKeepsACPPlacementIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	targets, err := stack.delegationSpawnTargets(controlplacement.SessionContext{})
+	targets, err := stack.composition.delegationSpawnTargets(controlplacement.SessionContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestDelegationAgentHandleKeepsACPPlacementIdentity(t *testing.T) {
 	if target.Selector != "zenith" || target.Placement.Agent != "grok" {
 		t.Fatalf("resolved target = %#v, want AgentHandle zenith backed by ACP Agent grok", target)
 	}
-	materialized, err := stack.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: target}, stack.runtime)
+	materialized, err := stack.composition.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: target}, stack.composition.runtime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,11 +76,11 @@ func TestSelfDelegationPlacementTracksEffectiveSessionModelAndEffort(t *testing.
 
 	firstID := firstProfile.Backend.Provider.ModelConfigID
 	secondID := secondProfile.Backend.Provider.ModelConfigID
-	first, err := stack.delegationSpawnTargets(controlplacement.SessionContext{ProfileID: firstProfile.ID, Effort: "high"})
+	first, err := stack.composition.delegationSpawnTargets(controlplacement.SessionContext{ProfileID: firstProfile.ID, Effort: "high"})
 	if err != nil {
 		t.Fatalf("delegationSpawnTargets(first) error = %v", err)
 	}
-	second, err := stack.delegationSpawnTargets(controlplacement.SessionContext{ProfileID: secondProfile.ID, Effort: "low"})
+	second, err := stack.composition.delegationSpawnTargets(controlplacement.SessionContext{ProfileID: secondProfile.ID, Effort: "low"})
 	if err != nil {
 		t.Fatalf("delegationSpawnTargets(second) error = %v", err)
 	}
@@ -103,7 +103,7 @@ func TestSelfDelegationPlacementTracksEffectiveSessionModelAndEffort(t *testing.
 
 func TestDelegationSpawnConfigurationOmitsSelfWithoutLocalSessionSelection(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	agents, targets, err := stack.delegationSpawnConfiguration(controlplacement.SessionContext{})
+	agents, targets, err := stack.composition.delegationSpawnConfiguration(controlplacement.SessionContext{})
 	if err != nil {
 		t.Fatalf("delegationSpawnConfiguration() error = %v", err)
 	}
@@ -151,11 +151,11 @@ func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 		t.Fatalf("Connect() error = %v", err)
 	}
 	modelID := profile.Backend.Provider.ModelConfigID
-	targets, err := stack.delegationSpawnTargets(controlplacement.SessionContext{ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort})
+	targets, err := stack.composition.delegationSpawnTargets(controlplacement.SessionContext{ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort})
 	if err != nil {
 		t.Fatalf("delegationSpawnTargets() error = %v", err)
 	}
-	doc, err := stack.store.Load()
+	doc, err := stack.composition.store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -164,10 +164,10 @@ func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 			doc.Models.Configs[index].ContextWindowTokens++
 		}
 	}
-	if err := stack.store.Save(doc); err != nil {
+	if err := stack.composition.store.Save(doc); err != nil {
 		t.Fatalf("Save(changed) error = %v", err)
 	}
-	_, err = stack.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: targets["self"]}, stack.runtime)
+	_, err = stack.composition.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: targets["self"]}, stack.composition.runtime)
 	if err == nil || !strings.Contains(err.Error(), "changed after placement was frozen") {
 		t.Fatalf("resolveDelegationPlacement() error = %v, want configuration drift rejection", err)
 	}
@@ -175,7 +175,7 @@ func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 
 func assertDelegationPlacementSessionOptions(t *testing.T, stack *Stack, target sdkdelegation.Target, modelID string, effort string) {
 	t.Helper()
-	agent, err := stack.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: target}, stack.runtime)
+	agent, err := stack.composition.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: target}, stack.composition.runtime)
 	if err != nil {
 		t.Fatalf("resolveDelegationPlacement() error = %v", err)
 	}
