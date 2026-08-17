@@ -10,7 +10,17 @@ import (
 func TestAppServerLeafServicesDoNotRetainConcreteHost(t *testing.T) {
 	t.Parallel()
 
-	stackType := reflect.TypeFor[gatewayapp.Stack]()
+	assertAppServerLeafServicesDoNotRetain(t, "gatewayapp.Stack", reflect.TypeFor[gatewayapp.Stack]())
+}
+
+func TestAppServerLeafServicesDoNotRetainRuntimeLease(t *testing.T) {
+	t.Parallel()
+
+	assertAppServerLeafServicesDoNotRetain(t, "gatewayapp.ControlRuntimeLease", reflect.TypeFor[gatewayapp.ControlRuntimeLease]())
+}
+
+func assertAppServerLeafServicesDoNotRetain(t *testing.T, targetName string, targetType reflect.Type) {
+	t.Helper()
 	for _, test := range []struct {
 		name string
 		typ  reflect.Type
@@ -25,8 +35,8 @@ func TestAppServerLeafServicesDoNotRetainConcreteHost(t *testing.T) {
 		{name: "Terminal", typ: reflect.TypeFor[TerminalService]()},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if path, ok := retainedConcreteType(test.typ, stackType, nil); ok {
-				t.Fatalf("%s service retains gatewayapp.Stack through %s", test.name, path)
+			if path, ok := retainedConcreteType(test.typ, targetType, nil); ok {
+				t.Fatalf("%s service retains %s through %s", test.name, targetName, path)
 			}
 		})
 	}

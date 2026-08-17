@@ -337,14 +337,15 @@ func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
+	processRuntime := stack.composition.runtimeProcessSnapshot().runtime
 	if doc.Models.DefaultID != "" ||
 		doc.Models.DefaultAlias != "" ||
 		doc.ModelProfiles.DefaultProfileID != profile.ID ||
 		doc.ModelProfiles.DefaultEffort != "high" ||
 		stack.composition.lookup.DefaultID() != modelID ||
 		stack.composition.lookup.DefaultEffort() != "high" ||
-		stack.composition.runtime.Model.ID != modelID ||
-		stack.composition.runtime.ModelProfileEffort != "high" {
+		processRuntime.Model.ID != modelID ||
+		processRuntime.ModelProfileEffort != "high" {
 		t.Fatalf(
 			"global defaults diverged: legacy=%q profile=%q effort=%q lookup=%q/%q runtime=%q/%q",
 			doc.Models.DefaultID,
@@ -352,8 +353,8 @@ func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 			doc.ModelProfiles.DefaultEffort,
 			stack.composition.lookup.DefaultID(),
 			stack.composition.lookup.DefaultEffort(),
-			stack.composition.runtime.Model.ID,
-			stack.composition.runtime.ModelProfileEffort,
+			processRuntime.Model.ID,
+			processRuntime.ModelProfileEffort,
 		)
 	}
 	if !reflect.DeepEqual(doc.Models.Configs, originalDoc.Models.Configs) ||
@@ -394,12 +395,12 @@ func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 		t.Fatal(reloadErr)
 	}
 	defer reloaded.Close()
-	if reloaded.composition.runtime.ModelProfileID != profile.ID || reloaded.composition.runtime.ModelProfileEffort != "high" {
-		t.Fatalf("reloaded global default = %q/%q, want %q/high", reloaded.composition.runtime.ModelProfileID, reloaded.composition.runtime.ModelProfileEffort, profile.ID)
+	if reloaded.composition.activeRuntime.ModelProfileID != profile.ID || reloaded.composition.activeRuntime.ModelProfileEffort != "high" {
+		t.Fatalf("reloaded global default = %q/%q, want %q/high", reloaded.composition.activeRuntime.ModelProfileID, reloaded.composition.activeRuntime.ModelProfileEffort, profile.ID)
 	}
-	self, ok := agentConfigForToolTest(reloaded.composition.runtime.Assembly.Agents, "self")
+	self, ok := agentConfigForToolTest(reloaded.composition.activeRuntime.Assembly.Agents, "self")
 	if !ok {
-		t.Fatalf("runtime-derived self missing from assembly: %#v", reloaded.composition.runtime.Assembly.Agents)
+		t.Fatalf("runtime-derived self missing from assembly: %#v", reloaded.composition.activeRuntime.Assembly.Agents)
 	}
 	if got := self.SessionOptions.ModelID; got != profile.Backend.Provider.ModelConfigID {
 		t.Fatalf("runtime-derived self model session option = %q, want %q", got, profile.Backend.Provider.ModelConfigID)
@@ -441,13 +442,13 @@ func TestHostModelSelectionDoesNotRequireOrMutateSession(t *testing.T) {
 func TestConnectPersistsCanonicalProfileForFutureActivation(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
 	originalID := stack.composition.lookup.DefaultID()
-	originalRuntimeModel := stack.composition.runtime.Model.ID
+	originalRuntimeModel := stack.composition.runtimeProcessSnapshot().runtime.Model.ID
 	_, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "new-model"})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	if stack.composition.lookup.DefaultID() != originalID || stack.composition.runtime.Model.ID != originalRuntimeModel {
-		t.Fatalf("existing default changed after committed connect: %q/%q", stack.composition.lookup.DefaultID(), stack.composition.runtime.Model.ID)
+	if stack.composition.lookup.DefaultID() != originalID || stack.composition.runtimeProcessSnapshot().runtime.Model.ID != originalRuntimeModel {
+		t.Fatalf("existing default changed after committed connect: %q/%q", stack.composition.lookup.DefaultID(), stack.composition.runtimeProcessSnapshot().runtime.Model.ID)
 	}
 	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
@@ -478,8 +479,8 @@ func TestConnectModelsPersistsStandardProfilesAtomicallyAndKeepsExistingDefault(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(profiles) != 2 || stack.composition.lookup.DefaultID() != originalDefaultID || stack.composition.runtime.Model.ID != originalDefaultID {
-		t.Fatalf("batch profiles/default/runtime = %#v/%q/%q", profiles, stack.composition.lookup.DefaultID(), stack.composition.runtime.Model.ID)
+	if len(profiles) != 2 || stack.composition.lookup.DefaultID() != originalDefaultID || stack.composition.runtimeProcessSnapshot().runtime.Model.ID != originalDefaultID {
+		t.Fatalf("batch profiles/default/runtime = %#v/%q/%q", profiles, stack.composition.lookup.DefaultID(), stack.composition.runtimeProcessSnapshot().runtime.Model.ID)
 	}
 	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
@@ -522,8 +523,8 @@ func TestConnectModelsSelectsFirstProfileWhenNoModelExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	firstModelID := profiles[0].Backend.Provider.ModelConfigID
-	if len(profiles) != 2 || stack.composition.lookup.DefaultID() != firstModelID || stack.composition.runtime.Model.ID != firstModelID {
-		t.Fatalf("profiles/default/runtime = %#v/%q/%q", profiles, stack.composition.lookup.DefaultID(), stack.composition.runtime.Model.ID)
+	if len(profiles) != 2 || stack.composition.lookup.DefaultID() != firstModelID || stack.composition.runtimeProcessSnapshot().runtime.Model.ID != firstModelID {
+		t.Fatalf("profiles/default/runtime = %#v/%q/%q", profiles, stack.composition.lookup.DefaultID(), stack.composition.runtimeProcessSnapshot().runtime.Model.ID)
 	}
 }
 
@@ -592,14 +593,14 @@ func TestDeleteNonDefaultModelPreservesGlobalEffort(t *testing.T) {
 		doc.ModelProfiles.DefaultEffort != "high" ||
 		stack.composition.lookup.DefaultID() != selected.Backend.Provider.ModelConfigID ||
 		stack.composition.lookup.DefaultEffort() != "high" ||
-		stack.composition.runtime.ModelProfileEffort != "high" {
+		stack.composition.runtimeProcessSnapshot().runtime.ModelProfileEffort != "high" {
 		t.Fatalf(
 			"default changed after deleting unrelated model: profile=%q effort=%q lookup=%q/%q runtime=%q",
 			doc.ModelProfiles.DefaultProfileID,
 			doc.ModelProfiles.DefaultEffort,
 			stack.composition.lookup.DefaultID(),
 			stack.composition.lookup.DefaultEffort(),
-			stack.composition.runtime.ModelProfileEffort,
+			stack.composition.runtimeProcessSnapshot().runtime.ModelProfileEffort,
 		)
 	}
 }
@@ -643,8 +644,8 @@ func TestDeleteModelRollsForwardAfterCommittedConfigWriteFault(t *testing.T) {
 			if _, ok := agentbinding.Lookup(doc.AgentBindings, agentbinding.HandleZenith); ok {
 				t.Fatalf("committed deletion retained binding %q", agentbinding.HandleZenith)
 			}
-			if stack.composition.lookup.HasAlias(modelID) || stack.composition.runtime.Model.ID != stack.composition.lookup.DefaultID() {
-				t.Fatalf("lookup/runtime diverged after committed deletion: has=%v runtime=%q default=%q", stack.composition.lookup.HasAlias(modelID), stack.composition.runtime.Model.ID, stack.composition.lookup.DefaultID())
+			if stack.composition.lookup.HasAlias(modelID) || stack.composition.runtimeProcessSnapshot().runtime.Model.ID != stack.composition.lookup.DefaultID() {
+				t.Fatalf("lookup/runtime diverged after committed deletion: has=%v runtime=%q default=%q", stack.composition.lookup.HasAlias(modelID), stack.composition.runtimeProcessSnapshot().runtime.Model.ID, stack.composition.lookup.DefaultID())
 			}
 			state, stateErr := stack.composition.sessions.SnapshotState(ctx, activeSession.SessionRef)
 			if stateErr != nil {
@@ -665,7 +666,7 @@ func TestDeleteModelRollsBackAfterPreCommitConfigWriteFault(t *testing.T) {
 		t.Fatal(err)
 	}
 	modelID := profile.Backend.Provider.ModelConfigID
-	previousRuntimeID := stack.composition.runtime.Model.ID
+	previousRuntimeID := stack.composition.runtimeProcessSnapshot().runtime.Model.ID
 	fault := errors.New("rename failed")
 	stack.composition.authorities.store.saveHook = func(AppConfig) error { return fault }
 
@@ -677,8 +678,8 @@ func TestDeleteModelRollsBackAfterPreCommitConfigWriteFault(t *testing.T) {
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	if _, ok := modelprofile.Lookup(doc.ModelProfiles, profile.ID); !ok || !stack.composition.lookup.HasAlias(modelID) || stack.composition.runtime.Model.ID != previousRuntimeID {
-		t.Fatalf("pre-commit rollback diverged: profile=%v lookup=%v runtime=%q want=%q", ok, stack.composition.lookup.HasAlias(modelID), stack.composition.runtime.Model.ID, previousRuntimeID)
+	if _, ok := modelprofile.Lookup(doc.ModelProfiles, profile.ID); !ok || !stack.composition.lookup.HasAlias(modelID) || stack.composition.runtimeProcessSnapshot().runtime.Model.ID != previousRuntimeID {
+		t.Fatalf("pre-commit rollback diverged: profile=%v lookup=%v runtime=%q want=%q", ok, stack.composition.lookup.HasAlias(modelID), stack.composition.runtimeProcessSnapshot().runtime.Model.ID, previousRuntimeID)
 	}
 }
 

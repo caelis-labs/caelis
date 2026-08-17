@@ -24,6 +24,7 @@ func (s *runtimeComposition) materializeReviewerAgent(
 		if err != nil {
 			return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve Reviewer model profile %q: %w", placement.ProfileID, err)
 		}
+		process := s.runtimeProcessSnapshot()
 		return configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 			StoreDir:     s.authorities.storeDir,
 			WorkspaceKey: s.workspace.Key,
@@ -34,7 +35,7 @@ func (s *runtimeComposition) materializeReviewerAgent(
 			),
 			PinnedModel:    ptrToModelConfig(configured),
 			BridgeApproval: !runtimeCfg.DangerouslySkipPermissions,
-			ControlURL:     s.childControlURL, ControlTokenFile: s.childControlTokenFile,
+			ControlURL:     process.childControlURL, ControlTokenFile: process.childControlTokenFile,
 		})
 	case sdkplacement.KindAgent:
 		snapshot, err := s.placementSnapshot(ctx)

@@ -87,13 +87,13 @@ func (s *StatusService) SessionStatus(
 	defer func() {
 		returnErr = errors.Join(returnErr, lease.Close(context.Background()))
 	}()
-	deps := controlAssemblyDepsFromView(lease.ControlRuntimeView())
+	deps := statusAssemblyDepsFromLease(lease)
 	if deps == nil {
 		return controlstatus.StatusSnapshot{}, errors.New("app/gatewayapp/controladapter/local: status Runtime projection is unavailable")
 	}
 	driver, err := controladapter.NewStatusAssemblerForSession(
 		ctx,
-		deps.Status,
+		*deps,
 		lease.Session(),
 		strings.TrimSpace(request.Surface),
 		"",

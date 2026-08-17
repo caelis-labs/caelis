@@ -38,9 +38,7 @@ func (s *runtimeComposition) processSecurityPosture() processSecurityPosture {
 	if s == nil {
 		return resolveProcessSecurityPosture(stackRuntimeConfig{})
 	}
-	s.mu.RLock()
-	config := s.runtime
-	s.mu.RUnlock()
+	config := s.runtimeProcessSnapshot().runtime
 	return resolveProcessSecurityPosture(config)
 }
 

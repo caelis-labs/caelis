@@ -46,7 +46,7 @@ func TestDelegationAgentHandleKeepsACPPlacementIdentity(t *testing.T) {
 	if target.Selector != "zenith" || target.Placement.Agent != "grok" {
 		t.Fatalf("resolved target = %#v, want AgentHandle zenith backed by ACP Agent grok", target)
 	}
-	materialized, err := stack.composition.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: target}, stack.composition.runtime)
+	materialized, err := stack.composition.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: target}, stack.composition.activeRuntime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatalf("Save(changed) error = %v", err)
 	}
-	_, err = stack.composition.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: targets["self"]}, stack.composition.runtime)
+	_, err = stack.composition.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: targets["self"]}, stack.composition.activeRuntime)
 	if err == nil || !strings.Contains(err.Error(), "changed after placement was frozen") {
 		t.Fatalf("resolveDelegationPlacement() error = %v, want configuration drift rejection", err)
 	}
@@ -175,7 +175,7 @@ func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 
 func assertDelegationPlacementSessionOptions(t *testing.T, stack *Stack, target sdkdelegation.Target, modelID string, effort string) {
 	t.Helper()
-	agent, err := stack.composition.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: target}, stack.composition.runtime)
+	agent, err := stack.composition.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: target}, stack.composition.activeRuntime)
 	if err != nil {
 		t.Fatalf("resolveDelegationPlacement() error = %v", err)
 	}

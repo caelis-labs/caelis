@@ -22,13 +22,15 @@ func TestRuntimeProcessConfigSourceSnapshotsAndClonesMutableState(t *testing.T) 
 
 	first := source.snapshot()
 	first.runtime.SkillDirs[0] = "mutated"
-	first.runtime.Plugins[0].ID = "mutated"
 	first.sandboxOverride.WritableRoots[0] = "mutated"
 	*first.sandboxOverride.NetworkEnabled = false
 
 	second := source.snapshot()
-	if second.runtime.SkillDirs[0] != "skills-a" || second.runtime.Plugins[0].ID != "plugin-a" {
+	if second.runtime.SkillDirs[0] != "skills-a" {
 		t.Fatalf("Runtime snapshot aliases caller mutation: %#v", second.runtime)
+	}
+	if len(second.runtime.Plugins) != 0 {
+		t.Fatalf("Runtime snapshot duplicated AppConfig-owned Plugins: %#v", second.runtime.Plugins)
 	}
 	if second.sandboxOverride.WritableRoots[0] != "workspace-a" || !*second.sandboxOverride.NetworkEnabled {
 		t.Fatalf("sandbox snapshot aliases caller mutation: %#v", second.sandboxOverride)

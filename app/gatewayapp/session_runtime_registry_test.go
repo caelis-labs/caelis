@@ -255,6 +255,45 @@ func TestSessionRuntimeSelectsNewCatalogModelPinsDeletionAndRepairsOnReactivatio
 	}
 }
 
+func TestFutureSessionActivationUsesLatestHostProcessConfig(t *testing.T) {
+	ctx := context.Background()
+	stack, _ := newLocalStateTestStack(t)
+	t.Cleanup(func() { _ = stack.Close() })
+
+	profile, err := stack.connectTestModel(ModelConfig{
+		Provider:        "ollama",
+		API:             "ollama",
+		Model:           "future-process-model",
+		ReasoningLevels: []string{"high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelID := profile.Backend.Provider.ModelConfigID
+	if err := stack.useTestHostModel(ctx, session.SessionRef{}, modelID, "high"); err != nil {
+		t.Fatal(err)
+	}
+	const controlURL = "http://127.0.0.1:4321"
+	const tokenFile = "/run/caelis/future-child-token"
+	stack.SetBuiltInChildControl(controlURL, tokenFile)
+
+	activated := activateFutureAssemblyRuntime(t, stack, "future-process-config")
+	if activated.activeRuntime.Model.ID != modelID || activated.activeRuntime.ModelProfileEffort != "high" {
+		t.Fatalf("activated model = %q/%q, want %q/high", activated.activeRuntime.Model.ID, activated.activeRuntime.ModelProfileEffort, modelID)
+	}
+	if activated.pinnedChildControlURL != controlURL || activated.pinnedChildControlTokenFile != tokenFile {
+		t.Fatalf("activated child control = %q/%q, want %q/%q", activated.pinnedChildControlURL, activated.pinnedChildControlTokenFile, controlURL, tokenFile)
+	}
+	self, ok := agentConfigForToolTest(activated.activeRuntime.Assembly.Agents, "self")
+	if !ok {
+		t.Fatalf("activated self Agent missing from assembly: %#v", activated.activeRuntime.Assembly.Agents)
+	}
+	args := strings.Join(self.Args, "\x00")
+	if !strings.Contains(args, "-control-url\x00"+controlURL) || !strings.Contains(args, "-control-token-file\x00"+tokenFile) {
+		t.Fatalf("activated self Agent args = %#v, want latest child-control endpoint", self.Args)
+	}
+}
+
 func TestSpawnedSessionUsesParentRuntimeModelSnapshotAfterHostDeletion(t *testing.T) {
 	ctx := context.Background()
 	stack, parent := newLocalStateTestStack(t)
@@ -294,7 +333,7 @@ func TestSpawnedSessionUsesParentRuntimeModelSnapshotAfterHostDeletion(t *testin
 		t.Fatalf("Host catalog still contains deleted model %q", modelID)
 	}
 
-	agentConfig, err := parentRuntime.instance.materializeDelegatedModel("", profile.ID, "high", parentRuntime.instance.runtime)
+	agentConfig, err := parentRuntime.instance.materializeDelegatedModel("", profile.ID, "high", parentRuntime.instance.activeRuntime)
 	if err != nil {
 		t.Fatalf("materializeDelegatedModel() from frozen Runtime: %v", err)
 	}
@@ -648,8 +687,8 @@ func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observed.ControlRuntimeView() == nil || observed.Session().SessionID != sessionID || observed.Session().CWD != workspace {
-		t.Fatalf("observed lease = view:%t session=%#v", observed.ControlRuntimeView() != nil, observed.Session())
+	if observed.SessionReads() == nil || observed.Session().SessionID != sessionID || observed.Session().CWD != workspace {
+		t.Fatalf("observed lease = session-reads:%t session=%#v", observed.SessionReads() != nil, observed.Session())
 	}
 	if _, ok := stack.sessionRuntimes.loaded(sessionID); ok {
 		t.Fatal("read-only Control observation retained an idle Session Runtime")
@@ -2247,7 +2286,7 @@ func assertWorkspaceRuntimeComposition(
 	if actualCWD != wantCWD {
 		t.Fatalf("Session sandbox CWD = %q, want %q", actualCWD, wantCWD)
 	}
-	prompt := stringFromMap(instance.runtime.BaseMetadata, "system_prompt")
+	prompt := stringFromMap(instance.activeRuntime.BaseMetadata, "system_prompt")
 	if !strings.Contains(prompt, wantInstruction) {
 		t.Fatalf("Session prompt does not contain %q:\n%s", wantInstruction, prompt)
 	}
@@ -2255,7 +2294,7 @@ func assertWorkspaceRuntimeComposition(
 		t.Fatalf("Session prompt contains forbidden instruction %q:\n%s", forbiddenInstruction, prompt)
 	}
 	skills := make(map[string]struct{})
-	for _, meta := range instance.runtime.SkillCatalog.Metas() {
+	for _, meta := range instance.activeRuntime.SkillCatalog.Metas() {
 		skills[meta.Name] = struct{}{}
 	}
 	if _, ok := skills[wantSkill]; !ok {

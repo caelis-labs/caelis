@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 )
@@ -20,13 +21,16 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	if host == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: host Stack is required")
 	}
-	view := host.ControlRuntimeView()
-	hostDeps := controlAssemblyDepsFromView(view)
+	sessions := host.Sessions()
+	kernelReads := host.ControlKernelReads()
 	runtimes := host.ControlRuntimes()
 	agentMessageDelivery := host.AgentMessageDelivery()
 	workspaceReads := host.WorkspaceReads()
 	statusReads := host.ControlStatus()
 	agentReads := host.Agents()
+	modelReads := host.Models()
+	skillReads := host.Skills()
+	pluginReads := host.ControlPluginReads()
 	preparationReads := host.ACPPreparationReads()
 	control := host.ControlClient()
 	configurationCommands := host.ConfigurationCommands()
@@ -35,17 +39,31 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	participants := host.ControlParticipants()
 	tasks := host.TaskStreams()
 	terminalStreams := host.ControlTerminalStreams()
-	if view == nil || hostDeps == nil || control == nil || configurationCommands == nil || agentCommands == nil ||
+	if sessions == nil || control == nil || configurationCommands == nil || agentCommands == nil ||
 		pluginCommands == nil || participants == nil || tasks == nil || terminalStreams == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: Host AppServer dependencies are unavailable")
 	}
+	sessionDeps := sessionRuntimeDeps(sessions, host.AppName(), host.UserID(), host.Workspace())
+	gatewayDeps := gatewayRuntimeDeps(kernelReads)
+	statusDeps := controladapter.StatusAssemblyDeps{
+		Gateway: gatewayDeps, Session: sessionDeps, Status: statusRuntimeDeps(statusReads),
+		Agent: agentRuntimeDeps(agentReads), Model: modelRuntimeDeps(modelReads), Sandbox: sandboxRuntimeDeps(statusReads),
+	}
+	agentDeps := controladapter.AgentAssemblyDeps{
+		Gateway: gatewayDeps, Session: sessionDeps, Agent: agentRuntimeDeps(agentReads),
+	}
+	completionDeps := controladapter.CompletionAssemblyDeps{
+		Session: sessionDeps, Status: statusRuntimeDeps(statusReads), Agent: agentRuntimeDeps(agentReads),
+		Model: modelRuntimeDeps(modelReads), Skill: skillRuntimeDeps(skillReads), Plugin: pluginRuntimeDeps(pluginReads),
+	}
+	pluginDeps := controladapter.PluginAssemblyDeps{Plugin: pluginRuntimeDeps(pluginReads)}
 
-	agentMessages, err := newAgentMessageService(view.Sessions, agentMessageDelivery.Deliver)
+	agentMessages, err := newAgentMessageService(sessions, agentMessageDelivery.Deliver)
 	if err != nil {
 		return nil, err
 	}
 	status, err := newStatusService(statusServiceDeps{
-		hostDeps: &hostDeps.Status, acquireRuntime: runtimes.Acquire, resolveWorkspace: workspaceReads.Resolve,
+		hostDeps: &statusDeps, acquireRuntime: runtimes.Acquire, resolveWorkspace: workspaceReads.Resolve,
 		sandboxStatusForWorkspace: statusReads.SandboxForWorkspace, doctorForWorkspace: statusReads.DoctorForWorkspace,
 	})
 	if err != nil {
@@ -57,7 +75,7 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	}
 	bindingStatus := host.AgentBindings()
 	agents, err := newAgentService(agentServiceDeps{
-		hostDeps: &hostDeps.Agent, acquireRuntime: runtimes.Acquire, handoff: control.Handoff,
+		hostDeps: &agentDeps, acquireRuntime: runtimes.Acquire, handoff: control.Handoff,
 		preparation: preparationReads.Preparation, disconnectCandidates: agentReads.DisconnectCandidatesSnapshot,
 		bindingStatus: bindingStatus.AgentBindingStatus, commands: agentCommands,
 	})
@@ -65,13 +83,13 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 		return nil, err
 	}
 	completion, err := newCompletionService(completionServiceDeps{
-		hostDeps: &hostDeps.Completion, acquireRuntime: runtimes.Acquire, resolveWorkspace: workspaceReads.Resolve,
+		hostDeps: &completionDeps, acquireRuntime: runtimes.Acquire, resolveWorkspace: workspaceReads.Resolve,
 		currentSkillCatalog: workspaceReads.CurrentSkillCatalog, listSessions: control.ListSessions,
 	})
 	if err != nil {
 		return nil, err
 	}
-	plugins, err := newPluginService(&hostDeps.Plugin, pluginCommands)
+	plugins, err := newPluginService(&pluginDeps, pluginCommands)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +104,7 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	presentation, err := newPresentationService(
 		dependencies.Sessions,
 		host.ACPSurface(modes, len(dependencies.Assembly.Modes) > 0, configs),
-		view.ControllerStatusFn,
+		agentReads.ControllerStatus,
 		len(dependencies.Assembly.Modes) > 0 && modes != nil,
 	)
 	if err != nil {

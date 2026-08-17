@@ -162,6 +162,29 @@ func localAdapterConcreteHostRule(rel string, file *ast.File, fset *token.FileSe
 	if len(gatewayNames) == 0 {
 		return "", "", 0
 	}
+	var aggregateSubject string
+	var aggregateLine int
+	ast.Inspect(file, func(node ast.Node) bool {
+		if aggregateSubject != "" {
+			return false
+		}
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok || selector.Sel.Name != "ControlRuntimeView" {
+			return true
+		}
+		ident, ok := selector.X.(*ast.Ident)
+		if !ok || !gatewayNames[ident.Name] {
+			return true
+		}
+		aggregateSubject = ident.Name + ".ControlRuntimeView"
+		aggregateLine = fset.Position(selector.Pos()).Line
+		return false
+	})
+	if aggregateSubject != "" {
+		// This is a historical name-specific regression guard. Generic retention
+		// of wide Runtime aggregates is frozen by gatewayapp structural contracts.
+		return "controladapter/local must compose focused gatewayapp services, not a wide ControlRuntimeView", aggregateSubject, aggregateLine
+	}
 	allowedStackPositions := map[token.Pos]bool{}
 	if rel == "app/gatewayapp/controladapter/local/appserver.go" {
 		for _, decl := range file.Decls {

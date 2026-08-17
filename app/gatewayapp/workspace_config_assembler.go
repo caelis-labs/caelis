@@ -94,20 +94,20 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 
 	instance := &sessionRuntimeInstance{
 		runtimeComposition: runtimeComposition{
-			authorities:             authorities,
-			sessions:                sessions,
-			workspace:               workspace,
-			lookup:                  lookup,
-			modelCatalog:            deps.modelCatalog,
-			placementCache:          placement,
-			appConfigSnapshot:       ptrToConfigSnapshot(doc),
-			runtime:                 runtimeConfig,
-			sandbox:                 sandboxConfig,
-			sandboxActivationPinned: true,
-			childControlURL:         process.childControlURL,
-			childControlTokenFile:   process.childControlTokenFile,
-			retainRuntimeWork:       activity.retainWork,
-			runtimeTaskChanged:      activity.taskChanged,
+			authorities:                 authorities,
+			sessions:                    sessions,
+			workspace:                   workspace,
+			lookup:                      lookup,
+			modelCatalog:                deps.modelCatalog,
+			placementCache:              placement,
+			appConfigSnapshot:           ptrToConfigSnapshot(doc),
+			activeRuntime:               runtimeConfig,
+			sandbox:                     sandboxConfig,
+			sandboxActivationPinned:     true,
+			pinnedChildControlURL:       process.childControlURL,
+			pinnedChildControlTokenFile: process.childControlTokenFile,
+			retainRuntimeWork:           activity.retainWork,
+			runtimeTaskChanged:          activity.taskChanged,
 		},
 	}
 	if err := instance.buildInitialGatewayRuntime(ctx); err != nil {
@@ -124,7 +124,9 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 func cloneSessionRuntimeConfig(config stackRuntimeConfig) stackRuntimeConfig {
 	config.Model = cloneSessionModelConfig(config.Model)
 	config.SkillDirs = cloneStringSlicePreserveNil(config.SkillDirs)
-	config.Plugins = clonePluginConfigs(config.Plugins)
+	// Plugin configuration is owned by canonical AppConfig and is read in the
+	// same activation transaction. It is not duplicated in process state.
+	config.Plugins = nil
 	config.BaseAssembly = assembly.CloneResolvedAssembly(config.BaseAssembly)
 	config.Assembly = assembly.CloneResolvedAssembly(config.BaseAssembly)
 	config.PluginSkills = nil

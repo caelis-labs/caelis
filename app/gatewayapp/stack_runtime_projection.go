@@ -4,11 +4,8 @@ import (
 	"context"
 	"time"
 
-	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	sdksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
-	"github.com/caelis-labs/caelis/control/agentbinding"
 )
 
 // runtimeProjection returns the process root's Runtime composition without
@@ -20,10 +17,6 @@ func (s *Stack) runtimeProjection() *runtimeComposition {
 		return nil
 	}
 	return &s.composition
-}
-
-func (s *Stack) ControlRuntimeView() *ControlRuntimeView {
-	return s.runtimeProjection().ControlRuntimeView()
 }
 
 func (s *Stack) Models() ModelService {
@@ -46,14 +39,6 @@ func (s *Stack) Plugins() PluginService {
 // to fence Control mutations.
 func (s *Stack) ConfigurationRevision(ctx context.Context) (uint64, error) {
 	return s.runtimeProjection().ConfigurationRevision(ctx)
-}
-
-func (s *Stack) ResolveHandlePlacement(ctx context.Context, handle agentbinding.Handle) (sdkplacement.Placement, error) {
-	return s.runtimeProjection().ResolveHandlePlacement(ctx, handle)
-}
-
-func (s *Stack) LoadHistory(ctx context.Context, req sdksubagent.HistoryRequest) (session.LoadedSession, error) {
-	return s.runtimeProjection().LoadHistory(ctx, req)
 }
 
 func (s *Stack) StartSubagent(

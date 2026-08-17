@@ -55,7 +55,7 @@ func TestPluginServiceSkillsFollowEnabledStateAndSuppressLegacyCopies(t *testing
 		t.Fatalf("AddPath() error = %v", err)
 	}
 	enabled := activateFutureAssemblyRuntime(t, stack, "plugin-skill-enabled-with-legacy")
-	systemPrompt, _ := enabled.runtime.BaseMetadata["system_prompt"].(string)
+	systemPrompt, _ := enabled.activeRuntime.BaseMetadata["system_prompt"].(string)
 	if !strings.Contains(systemPrompt, "skillplugin:runtime-skill") {
 		t.Fatalf("namespaced plugin skill missing after add:\n%s", systemPrompt)
 	}
@@ -84,11 +84,11 @@ func TestPluginServiceSkillsFollowEnabledStateAndSuppressLegacyCopies(t *testing
 	if _, err := stack.Plugins().Disable(ctx, "skillplugin"); err != nil {
 		t.Fatalf("Disable() error = %v", err)
 	}
-	if current, _ := enabled.runtime.BaseMetadata["system_prompt"].(string); !strings.Contains(current, "skillplugin:runtime-skill") {
+	if current, _ := enabled.activeRuntime.BaseMetadata["system_prompt"].(string); !strings.Contains(current, "skillplugin:runtime-skill") {
 		t.Fatalf("active Session lost its fixed plugin skill:\n%s", current)
 	}
 	disabled := activateFutureAssemblyRuntime(t, stack, "plugin-skill-disabled-with-legacy")
-	systemPrompt, _ = disabled.runtime.BaseMetadata["system_prompt"].(string)
+	systemPrompt, _ = disabled.activeRuntime.BaseMetadata["system_prompt"].(string)
 	if strings.Contains(systemPrompt, "runtime-skill") {
 		t.Fatalf("plugin skill or legacy copy still present after disable:\n%s", systemPrompt)
 	}

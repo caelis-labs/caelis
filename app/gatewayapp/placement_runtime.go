@@ -40,15 +40,6 @@ func newPlacementSnapshot(doc AppConfig) *placementSnapshot {
 	}}
 }
 
-func (s *Stack) invalidatePlacementSnapshot() {
-	if s == nil {
-		return
-	}
-	// Session Runtime placement snapshots are immutable for one activation and
-	// must not observe later app configuration writes.
-	s.composition.invalidateOwnPlacementSnapshot()
-}
-
 func (s *runtimeComposition) invalidateOwnPlacementSnapshot() {
 	if s == nil {
 		return
@@ -111,24 +102,6 @@ func (s *runtimeComposition) resolveParticipantPlacement(ctx context.Context, pr
 		return sdkplacement.Placement{}, err
 	}
 	return controlplacement.ResolveParticipant(snapshot.placement, profileID, effort)
-}
-
-// ResolveHandlePlacement is the narrow adapter facet used by the transitional
-// in-process control adapter.
-func (s *runtimeComposition) ResolveHandlePlacement(ctx context.Context, handle agentbinding.Handle) (sdkplacement.Placement, error) {
-	handle = agentbinding.NormalizeHandle(handle)
-	snapshot, err := s.placementSnapshot(ctx)
-	if err != nil {
-		return sdkplacement.Placement{}, err
-	}
-	purpose, err := controlplacement.PurposeForHandle(
-		agentbinding.CatalogFor(snapshot.placement.Bindings),
-		handle,
-	)
-	if err != nil {
-		return sdkplacement.Placement{}, err
-	}
-	return controlplacement.ResolveHandle(snapshot.placement, controlplacement.HandleRequest{Handle: handle, Purpose: purpose})
 }
 
 func (s *runtimeComposition) resolveSystemAgentModel(

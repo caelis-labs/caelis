@@ -10,6 +10,13 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
+// ControlSessionReader is the read-only durable Session capability available
+// to Host-private AppServer assemblers.
+type ControlSessionReader interface {
+	session.Reader
+	session.StateReader
+}
+
 // ControlRuntimeLease is private app composition glue exposed to sibling
 // AppServer adapters. Presentation surfaces must consume focused clients and
 // never receive this Runtime handle.
@@ -68,13 +75,85 @@ func (s ControlRuntimeService) Acquire(
 	return &ControlRuntimeLease{runtime: &runtime.instance.runtimeComposition, session: session.CloneSession(active), release: release}, nil
 }
 
-// ControlRuntimeView returns the focused server-side read projection. It is
-// intentionally scoped to AppServer adapter packages and is not a product API.
-func (l *ControlRuntimeLease) ControlRuntimeView() *ControlRuntimeView {
-	if l == nil {
+// SessionReads returns the durable Session reads for this authorized Runtime.
+func (l *ControlRuntimeLease) SessionReads() ControlSessionReader {
+	if l == nil || l.runtime == nil {
 		return nil
 	}
-	return l.runtime.ControlRuntimeView()
+	return l.runtime.sessions
+}
+
+// AppName returns the application identity pinned to this Runtime.
+func (l *ControlRuntimeLease) AppName() string {
+	if l == nil || l.runtime == nil {
+		return ""
+	}
+	return l.runtime.authorities.appName
+}
+
+// UserID returns the Session owner identity pinned to this Runtime.
+func (l *ControlRuntimeLease) UserID() string {
+	if l == nil || l.runtime == nil {
+		return ""
+	}
+	return l.runtime.authorities.userID
+}
+
+// Workspace returns the immutable workspace address pinned to this Runtime.
+func (l *ControlRuntimeLease) Workspace() session.WorkspaceRef {
+	if l == nil || l.runtime == nil {
+		return session.WorkspaceRef{}
+	}
+	return l.runtime.workspace
+}
+
+// KernelReads returns the focused live execution projection.
+func (l *ControlRuntimeLease) KernelReads() KernelReadService {
+	if l == nil {
+		return KernelReadService{}
+	}
+	return KernelReadService{composition: l.runtime}
+}
+
+// Status returns the focused Runtime status service.
+func (l *ControlRuntimeLease) Status() StatusService {
+	if l == nil || l.runtime == nil {
+		return StatusService{}
+	}
+	return l.runtime.Status()
+}
+
+// Agents returns the focused Runtime Agent read service.
+func (l *ControlRuntimeLease) Agents() AgentService {
+	if l == nil || l.runtime == nil {
+		return AgentService{}
+	}
+	return l.runtime.Agents()
+}
+
+// Models returns the focused Runtime model read service.
+func (l *ControlRuntimeLease) Models() ModelService {
+	if l == nil || l.runtime == nil {
+		return ModelService{}
+	}
+	return l.runtime.Models()
+}
+
+// Skills returns the focused Runtime skill read service.
+func (l *ControlRuntimeLease) Skills() SkillService {
+	if l == nil || l.runtime == nil {
+		return SkillService{}
+	}
+	return l.runtime.Skills()
+}
+
+// PluginReads returns the focused read-only Runtime Plugin service. Mutations
+// remain on principal-bound AppServer commands.
+func (l *ControlRuntimeLease) PluginReads() PluginReadService {
+	if l == nil || l.runtime == nil {
+		return PluginReadService{}
+	}
+	return l.runtime.pluginReads()
 }
 
 // Session returns the authorized durable Session snapshot.

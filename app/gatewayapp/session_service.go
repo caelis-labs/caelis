@@ -153,7 +153,7 @@ func (s *runtimeComposition) estimatedPromptPrefixTokens(ctx context.Context, re
 		return 0
 	}
 	s.mu.RLock()
-	runtimeCfg := s.runtime
+	runtimeCfg := s.activeRuntime
 	runtimeCfg.Assembly = assembly.CloneResolvedAssembly(runtimeCfg.Assembly)
 	runtimeCfg.BaseMetadata = cloneMap(runtimeCfg.BaseMetadata)
 	// This is an initial/static status estimate only. The Runtime model gate and
@@ -201,8 +201,10 @@ func (s *runtimeComposition) currentContextWindowTokensForAlias(alias string) in
 			return s.lookup.contextWindow
 		}
 	}
-	if s != nil && s.runtime.ContextWindow > 0 {
-		return s.runtime.ContextWindow
+	if s != nil {
+		if contextWindow := s.runtimeProcessSnapshot().runtime.ContextWindow; contextWindow > 0 {
+			return contextWindow
+		}
 	}
 	return 0
 }

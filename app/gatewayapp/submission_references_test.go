@@ -18,7 +18,7 @@ func TestProjectSubmissionReferencesDoesNotBlockOnSkillDiscoveryError(t *testing
 	workspace := t.TempDir()
 	stack := &Stack{
 		composition: runtimeComposition{
-			workspace: session.WorkspaceRef{CWD: workspace}, runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
+			workspace: session.WorkspaceRef{CWD: workspace}, activeRuntime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
 		},
 	}
 
@@ -40,7 +40,7 @@ func TestProjectSubmissionReferencesKeepsShellVariableWhenSkillDiscoveryFails(t 
 	workspace := t.TempDir()
 	stack := &Stack{
 		composition: runtimeComposition{
-			workspace: session.WorkspaceRef{CWD: workspace}, runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
+			workspace: session.WorkspaceRef{CWD: workspace}, activeRuntime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
 		},
 	}
 
@@ -65,7 +65,7 @@ func TestProjectSubmissionReferencesProjectsFilesWhenSkillDiscoveryFails(t *test
 	}
 	stack := &Stack{
 		composition: runtimeComposition{
-			workspace: session.WorkspaceRef{CWD: workspace}, runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
+			workspace: session.WorkspaceRef{CWD: workspace}, activeRuntime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
 		},
 	}
 
@@ -93,7 +93,7 @@ func TestProjectSubmissionReferencesDoesNotDiscoverSkillsForFileOnlyReferences(t
 	}
 	stack := &Stack{
 		composition: runtimeComposition{
-			workspace: session.WorkspaceRef{CWD: workspace}, runtime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
+			workspace: session.WorkspaceRef{CWD: workspace}, activeRuntime: stackRuntimeConfig{SkillDirs: []string{"\x00"}},
 		},
 	}
 
@@ -122,7 +122,7 @@ func TestProjectSubmissionReferencesUsesRuntimeSkillSnapshot(t *testing.T) {
 	stack := &Stack{
 		composition: runtimeComposition{
 			workspace: session.WorkspaceRef{CWD: workspace},
-			runtime: stackRuntimeConfig{
+			activeRuntime: stackRuntimeConfig{
 				SkillCatalog: skill.NewCatalog([]skill.Meta{{
 					Name:      "known",
 					LocalName: "known",

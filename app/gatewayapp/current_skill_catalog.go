@@ -33,9 +33,7 @@ func (s WorkspaceReadService) CurrentSkillCatalog(ctx context.Context, workspace
 		return skill.Catalog{}, err
 	}
 	workspaceDir := strings.TrimSpace(resolved.CWD)
-	s.composition.mu.RLock()
-	skillDirs := stackSkillDiscoveryDirs(workspaceDir, s.composition.runtime.SkillDirs)
-	s.composition.mu.RUnlock()
+	skillDirs := stackSkillDiscoveryDirs(workspaceDir, s.composition.runtimeProcessSnapshot().runtime.SkillDirs)
 	contributions, err := resolveGatewayPluginContributions(doc.Plugins)
 	if err != nil {
 		return skill.Catalog{}, err

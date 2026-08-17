@@ -28,8 +28,8 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stack.Close() })
 
-	if !stack.composition.runtime.DangerouslySkipPermissions || stack.composition.runtime.PolicyProfile != presets.ModeWorkspaceWrite {
-		t.Fatalf("runtime config = %#v, want user policy preserved beside process YOLO flag", stack.composition.runtime)
+	if !stack.composition.activeRuntime.DangerouslySkipPermissions || stack.composition.activeRuntime.PolicyProfile != presets.ModeWorkspaceWrite {
+		t.Fatalf("runtime config = %#v, want user policy preserved beside process YOLO flag", stack.composition.activeRuntime)
 	}
 	if stack.composition.sandbox.RequestedType != "host" {
 		t.Fatalf("sandbox requested type = %q, want host", stack.composition.sandbox.RequestedType)
@@ -122,9 +122,9 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 	if fallbackModes.setCalls != 0 {
 		t.Fatalf("fallback SetSessionMode calls = %d, want read-only projection", fallbackModes.setCalls)
 	}
-	self, ok := agentConfigForToolTest(stack.composition.runtime.Assembly.Agents, "self")
+	self, ok := agentConfigForToolTest(stack.composition.activeRuntime.Assembly.Agents, "self")
 	if !ok {
-		t.Fatalf("YOLO runtime self agent missing from assembly: %#v", stack.composition.runtime.Assembly.Agents)
+		t.Fatalf("YOLO runtime self agent missing from assembly: %#v", stack.composition.activeRuntime.Assembly.Agents)
 	}
 	if _, ok := self.SessionOptions.ConfigValues[acpConfigModeID]; ok {
 		t.Fatalf("YOLO child session options = %#v, must not request unavailable manual mode", self.SessionOptions)
@@ -181,7 +181,7 @@ func TestDangerouslySkipPermissionsIsNotPersisted(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reloaded.Close() })
-	if reloaded.composition.runtime.DangerouslySkipPermissions || reloaded.composition.runtime.PolicyProfile != presets.ModeWorkspaceWrite || reloaded.ControlStatus().Sandbox().FullAccessMode {
-		t.Fatalf("reloaded runtime retained process-only YOLO mode: runtime=%#v status=%#v", reloaded.composition.runtime, reloaded.ControlStatus().Sandbox())
+	if reloaded.composition.activeRuntime.DangerouslySkipPermissions || reloaded.composition.activeRuntime.PolicyProfile != presets.ModeWorkspaceWrite || reloaded.ControlStatus().Sandbox().FullAccessMode {
+		t.Fatalf("reloaded runtime retained process-only YOLO mode: runtime=%#v status=%#v", reloaded.composition.activeRuntime, reloaded.ControlStatus().Sandbox())
 	}
 }

@@ -139,6 +139,7 @@ func (s *runtimeComposition) materializeDelegatedModel(name, profileID, effort s
 	if err != nil {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve delegated profile %q: %w", profileID, err)
 	}
+	process := s.runtimeProcessSnapshot()
 	materialized, err := configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		StoreDir:     s.authorities.storeDir,
 		WorkspaceKey: s.workspace.Key,
@@ -149,7 +150,7 @@ func (s *runtimeComposition) materializeDelegatedModel(name, profileID, effort s
 		),
 		PinnedModel:    ptrToModelConfig(configured),
 		BridgeApproval: !runtimeCfg.DangerouslySkipPermissions,
-		ControlURL:     s.childControlURL, ControlTokenFile: s.childControlTokenFile,
+		ControlURL:     process.childControlURL, ControlTokenFile: process.childControlTokenFile,
 	})
 	if err != nil {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: materialize delegated model %q: %w", name, err)

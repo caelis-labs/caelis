@@ -34,10 +34,9 @@ func (s *Stack) setSandboxBackendAtRevision(ctx context.Context, backend string,
 	if err != nil {
 		return SandboxStatus{}, currentRevision, configurationRejectedError(errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err))
 	}
-	s.composition.mu.RLock()
-	securityPosture := resolveProcessSecurityPosture(s.composition.runtime)
-	runtimeOverride := cloneSandboxConfig(s.composition.sandboxOverride)
-	s.composition.mu.RUnlock()
+	process := s.composition.runtimeProcessSnapshot()
+	securityPosture := resolveProcessSecurityPosture(process.runtime)
+	runtimeOverride := process.sandboxOverride
 	if err := securityPosture.validateSandboxBackend(sandbox.Backend(normalized)); err != nil {
 		return SandboxStatus{}, currentRevision, configurationRejectedError(errorcode.Wrap(errorcode.FailedPrecondition, err.Error(), err))
 	}
@@ -107,10 +106,11 @@ func (s *runtimeComposition) sandboxStatus(includeRuntime bool) SandboxStatus {
 	liveCfg := cloneSandboxConfig(s.sandbox)
 	activationPinned := s.sandboxActivationPinned
 	persistedCfg := cloneSandboxConfig(s.sandboxPersisted)
-	override := cloneSandboxConfig(s.sandboxOverride)
 	exec := s.exec
-	securityPosture := resolveProcessSecurityPosture(s.runtime)
 	s.mu.RUnlock()
+	process := s.runtimeProcessSnapshot()
+	override := process.sandboxOverride
+	securityPosture := resolveProcessSecurityPosture(process.runtime)
 	if !includeRuntime {
 		exec = nil
 	}

@@ -316,7 +316,7 @@ func (s *runtimeComposition) resolvedSessionAssembly() assembly.ResolvedAssembly
 		return assembly.ResolvedAssembly{}
 	}
 	s.mu.RLock()
-	resolved := assembly.CloneResolvedAssembly(s.runtime.Assembly)
+	resolved := assembly.CloneResolvedAssembly(s.activeRuntime.Assembly)
 	s.mu.RUnlock()
 	return resolved
 }

@@ -83,9 +83,7 @@ func (s *Stack) selectSandboxLifecycleTarget(config SandboxConfig) (sandbox.Life
 	if err != nil {
 		return sandbox.LifecycleTarget{}, err
 	}
-	s.composition.mu.RLock()
-	override := cloneSandboxConfig(s.composition.sandboxOverride)
-	s.composition.mu.RUnlock()
+	override := s.composition.runtimeProcessSnapshot().sandboxOverride
 	config = mergeSandboxConfig(config, override)
 	if isHostSandboxBackend(config.RequestedType) {
 		cfg := sandboxConfigToPort(config, snapshot.workspaceCWD, snapshot.storeDir)

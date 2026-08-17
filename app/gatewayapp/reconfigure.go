@@ -28,7 +28,6 @@ import (
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
-	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/sandboxrouter"
@@ -87,8 +86,8 @@ func (s *runtimeComposition) buildInitialGatewayRuntime(ctx context.Context) err
 	s.mu.RLock()
 	oldGateway := s.gateway
 	sandboxCfg := s.sandbox
-	runtimeCfg := s.runtime
 	s.mu.RUnlock()
+	runtimeCfg := s.runtimeProcessSnapshot().runtime
 
 	if oldGateway != nil {
 		return errors.New("gatewayapp: Runtime is already initialized")
@@ -209,7 +208,7 @@ func (s *runtimeComposition) retainManagedPluginCaches(configs []PluginConfig) f
 	var releaseOnce sync.Once
 	return func() error {
 		releaseOnce.Do(release)
-		return s.Plugins().ReclaimManagedCaches(context.Background())
+		return s.pluginCacheLifecycleBackend().ReclaimManagedCaches(context.Background())
 	}
 }
 
@@ -495,16 +494,9 @@ func (s *runtimeComposition) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	oldExec := s.exec
 	oldMcpMgr := s.mcpMgr
 	oldPluginCacheRelease := s.pluginCacheRelease
-	currentRuntime := s.runtime
-	currentRuntime.Assembly = assembly.CloneResolvedAssembly(bundle.RuntimeConfig.Assembly)
-	currentRuntime.SkillDirs = cloneStringSlicePreserveNil(bundle.RuntimeConfig.SkillDirs)
-	currentRuntime.PluginSkills = skill.ClonePluginBundles(bundle.RuntimeConfig.PluginSkills)
-	currentRuntime.SkillCatalog = bundle.RuntimeConfig.SkillCatalog
-	currentRuntime.Plugins = clonePluginConfigs(bundle.RuntimeConfig.Plugins)
-	currentRuntime.BaseMetadata = cloneMap(bundle.RuntimeConfig.BaseMetadata)
+	currentRuntime := cloneActiveRuntimeConfig(bundle.RuntimeConfig)
 	currentRuntime.EstimatedPromptPrefixTokens = bundle.EstimatedPromptPrefixTokens
-	s.runtime = currentRuntime
-	s.processConfig.setRuntime(currentRuntime)
+	s.activeRuntime = currentRuntime
 	s.gateway = bundle.Gateway
 	s.exec = bundle.Exec
 	s.engine = bundle.Engine

@@ -48,9 +48,12 @@ func TestHostPrivateProjectionTypesDoNotRetainHostStack(t *testing.T) {
 		{name: "ACP surface", typ: reflect.TypeFor[gatewayACPSurface]()},
 		{name: "Agent binding service", typ: reflect.TypeFor[AgentBindingService]()},
 		{name: "Control Runtime service", typ: reflect.TypeFor[ControlRuntimeService]()},
+		{name: "Control Runtime lease", typ: reflect.TypeFor[ControlRuntimeLease]()},
 		{name: "Agent message delivery", typ: reflect.TypeFor[AgentMessageDeliveryService]()},
 		{name: "Workspace reads", typ: reflect.TypeFor[WorkspaceReadService]()},
 		{name: "Task stream router", typ: reflect.TypeFor[hostTaskStreamService]()},
+		{name: "Runtime state reader", typ: reflect.TypeFor[controlRuntimeStateReader]()},
+		{name: "Subagent history", typ: reflect.TypeFor[subagentHistoryService]()},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -84,6 +87,25 @@ func TestStackOwnsRuntimeCompositionAsNamedPrivateState(t *testing.T) {
 		if compositionField := compositionType.Field(i); compositionField.IsExported() {
 			t.Errorf("runtimeComposition field %s is exported", compositionField.Name)
 		}
+	}
+}
+
+func TestRuntimeCompositionHasNoParallelProcessConfigFields(t *testing.T) {
+	t.Parallel()
+
+	compositionType := reflect.TypeFor[runtimeComposition]()
+	processField, ok := compositionType.FieldByName("processConfig")
+	if !ok || processField.Type != reflect.TypeFor[*runtimeProcessConfigSource]() {
+		t.Fatalf("process configuration source = %v, present:%v", processField.Type, ok)
+	}
+	for _, retired := range []string{"runtime", "sandboxOverride", "childControlURL", "childControlTokenFile"} {
+		if _, ok := compositionType.FieldByName(retired); ok {
+			t.Errorf("runtimeComposition retains parallel mutable process field %q", retired)
+		}
+	}
+	activeField, ok := compositionType.FieldByName("activeRuntime")
+	if !ok || activeField.Type != reflect.TypeFor[stackRuntimeConfig]() {
+		t.Fatalf("installed Runtime artifact = %v, present:%v", activeField.Type, ok)
 	}
 }
 

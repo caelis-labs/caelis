@@ -4,81 +4,130 @@ import (
 	"context"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-type ModelConfig = controladapter.ModelConfig
 type SandboxStatusProjection = controladapter.SandboxStatusProjection
 type DoctorRequest = controladapter.DoctorRequest
 type DoctorStatusProjection = controladapter.DoctorStatusProjection
 
-type controlAssemblyDeps struct {
-	Status     controladapter.StatusAssemblyDeps
-	Agent      controladapter.AgentAssemblyDeps
-	Completion controladapter.CompletionAssemblyDeps
-	Plugin     controladapter.PluginAssemblyDeps
-}
-
-func controlAssemblyDepsFromView(view *gatewayapp.ControlRuntimeView) *controlAssemblyDeps {
-	if view == nil {
-		return nil
-	}
-	gateway := controladapter.GatewayRuntimeDeps{
+func gatewayRuntimeDeps(reads gatewayapp.KernelReadService) controladapter.GatewayRuntimeDeps {
+	return controladapter.GatewayRuntimeDeps{
 		TurnServiceFn: func() controladapter.GatewayTurnService {
-			return view.TurnStateFn()
+			return reads.TurnState()
 		},
 		ControlPlaneServiceFn: func() controladapter.GatewayControlPlaneService {
-			return view.ControlPlaneStateFn()
+			return reads.ControlPlaneState()
 		},
 	}
-	sessionDeps := controladapter.SessionRuntimeDeps{
-		Store: view.Sessions, AppName: view.AppName, UserID: view.UserID, Workspace: view.Workspace,
+}
+
+func sessionRuntimeDeps(
+	store gatewayapp.ControlSessionReader,
+	appName string,
+	userID string,
+	workspace session.WorkspaceRef,
+) controladapter.SessionRuntimeDeps {
+	return controladapter.SessionRuntimeDeps{
+		Store: store, AppName: appName, UserID: userID, Workspace: workspace,
 	}
-	status := controladapter.StatusRuntimeDeps{
-		RuntimeStateFn:          view.RuntimeStateFn,
-		ConfigurationRevisionFn: view.ConfigurationRevisionFn,
+}
+
+func statusRuntimeDeps(status gatewayapp.StatusService) controladapter.StatusRuntimeDeps {
+	return controladapter.StatusRuntimeDeps{
+		RuntimeStateFn:          status.SessionRuntimeState,
+		ConfigurationRevisionFn: status.ConfigurationRevision,
 		DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorStatusProjection, error) {
-			return toDoctorStatusProjection(view.DoctorFn(ctx, req))
+			return toDoctorStatusProjection(status.Doctor(ctx, req))
 		},
 	}
-	agent := controladapter.AgentRuntimeDeps{
-		ControllerStatusFn: view.ControllerStatusFn, DisconnectCandidatesFn: view.DisconnectCandidatesFn,
-		ListFn: view.ListAgentsFn,
+}
+
+func agentRuntimeDeps(agents gatewayapp.AgentService) controladapter.AgentRuntimeDeps {
+	return controladapter.AgentRuntimeDeps{
+		ControllerStatusFn:     agents.ControllerStatus,
+		DisconnectCandidatesFn: agents.DisconnectCandidates,
+		ListFn:                 agents.List,
 	}
-	model := controladapter.ModelRuntimeDeps{
-		EffectiveAliasFn: view.EffectiveModelAliasFn, EffectiveEffortFn: view.EffectiveModelEffortFn,
-		ConfigFn:               func(alias string) (ModelConfig, bool) { return view.ModelConfigFn(alias) },
-		SessionUsageSnapshotFn: view.SessionUsageSnapshotFn, ProviderUsageFn: view.ProviderUsageFn,
-		ListAliasesFn:     view.ListModelAliasesFn,
-		ListChoicesFn:     view.ListModelChoicesFn,
-		HasReusableAuthFn: view.HasReusableAuthFn,
+}
+
+func modelRuntimeDeps(models gatewayapp.ModelService) controladapter.ModelRuntimeDeps {
+	return controladapter.ModelRuntimeDeps{
+		EffectiveAliasFn:       models.EffectiveAlias,
+		EffectiveEffortFn:      models.EffectiveEffort,
+		ConfigFn:               models.Config,
+		SessionUsageSnapshotFn: models.UsageSnapshot,
+		ProviderUsageFn:        models.ProviderUsage,
+		ListAliasesFn:          models.ListAliases,
+		ListChoicesFn:          models.ListChoices,
+		HasReusableAuthFn:      models.HasReusableAuth,
 	}
-	skill := controladapter.SkillRuntimeDeps{SnapshotFn: view.SkillCatalogFn}
-	sandboxDeps := controladapter.SandboxRuntimeDeps{
-		StatusFn: func() SandboxStatusProjection { return toSandboxStatusProjection(view.SandboxFn()) },
+}
+
+func skillRuntimeDeps(skills gatewayapp.SkillService) controladapter.SkillRuntimeDeps {
+	return controladapter.SkillRuntimeDeps{SnapshotFn: skills.Snapshot}
+}
+
+func sandboxRuntimeDeps(status gatewayapp.StatusService) controladapter.SandboxRuntimeDeps {
+	return controladapter.SandboxRuntimeDeps{
+		StatusFn: func() SandboxStatusProjection { return toSandboxStatusProjection(status.Sandbox()) },
 	}
-	plugin := controladapter.PluginRuntimeDeps{
+}
+
+func pluginRuntimeDeps(plugins gatewayapp.PluginReadService) controladapter.PluginRuntimeDeps {
+	return controladapter.PluginRuntimeDeps{
 		ListPluginsFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
-			return toRuntimePluginSnapshots(view.ListPluginsFn(ctx))
+			return toRuntimePluginSnapshots(plugins.List(ctx))
 		},
 		ListMarketplacesFn: func(ctx context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
-			return toRuntimeMarketplaceSnapshots(view.ListMarketplacesFn(ctx))
+			return toRuntimeMarketplaceSnapshots(plugins.ListMarketplaces(ctx))
 		},
 		InspectPluginFn: func(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
-			return toRuntimePluginSnapshotWithError(view.InspectPluginFn(ctx, id))
+			return toRuntimePluginSnapshotWithError(plugins.Inspect(ctx, id))
 		},
 	}
-	return &controlAssemblyDeps{
-		Status: controladapter.StatusAssemblyDeps{
-			Gateway: gateway, Session: sessionDeps, Status: status, Agent: agent, Model: model, Sandbox: sandboxDeps,
-		},
-		Agent: controladapter.AgentAssemblyDeps{Gateway: gateway, Session: sessionDeps, Agent: agent},
-		Completion: controladapter.CompletionAssemblyDeps{
-			Session: sessionDeps, Status: status, Agent: agent, Model: model, Skill: skill, Plugin: plugin,
-		},
-		Plugin: controladapter.PluginAssemblyDeps{Plugin: plugin},
+}
+
+func statusAssemblyDepsFromLease(lease *gatewayapp.ControlRuntimeLease) *controladapter.StatusAssemblyDeps {
+	if lease == nil || lease.SessionReads() == nil {
+		return nil
+	}
+	status := lease.Status()
+	return &controladapter.StatusAssemblyDeps{
+		Gateway: gatewayRuntimeDeps(lease.KernelReads()),
+		Session: sessionRuntimeDeps(lease.SessionReads(), lease.AppName(), lease.UserID(), lease.Workspace()),
+		Status:  statusRuntimeDeps(status),
+		Agent:   agentRuntimeDeps(lease.Agents()),
+		Model:   modelRuntimeDeps(lease.Models()),
+		Sandbox: sandboxRuntimeDeps(status),
+	}
+}
+
+func agentAssemblyDepsFromLease(lease *gatewayapp.ControlRuntimeLease) *controladapter.AgentAssemblyDeps {
+	if lease == nil || lease.SessionReads() == nil {
+		return nil
+	}
+	return &controladapter.AgentAssemblyDeps{
+		Gateway: gatewayRuntimeDeps(lease.KernelReads()),
+		Session: sessionRuntimeDeps(lease.SessionReads(), lease.AppName(), lease.UserID(), lease.Workspace()),
+		Agent:   agentRuntimeDeps(lease.Agents()),
+	}
+}
+
+func completionAssemblyDepsFromLease(lease *gatewayapp.ControlRuntimeLease) *controladapter.CompletionAssemblyDeps {
+	if lease == nil || lease.SessionReads() == nil {
+		return nil
+	}
+	return &controladapter.CompletionAssemblyDeps{
+		Session: sessionRuntimeDeps(lease.SessionReads(), lease.AppName(), lease.UserID(), lease.Workspace()),
+		Status:  statusRuntimeDeps(lease.Status()),
+		Agent:   agentRuntimeDeps(lease.Agents()),
+		Model:   modelRuntimeDeps(lease.Models()),
+		Skill:   skillRuntimeDeps(lease.Skills()),
+		Plugin:  pluginRuntimeDeps(lease.PluginReads()),
 	}
 }
 

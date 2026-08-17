@@ -114,7 +114,7 @@ func TestPluginPureConfigMutationLeavesActiveSessionRuntimeUnchanged(t *testing.
 	}
 
 	activated := activateFutureAssemblyRuntime(t, stack, "plugin-active")
-	before, _ := activated.runtime.BaseMetadata["system_prompt"].(string)
+	before, _ := activated.activeRuntime.BaseMetadata["system_prompt"].(string)
 	if !strings.Contains(before, "skillplugin:runtime-skill") {
 		t.Fatalf("active assembly missing plugin skill:\n%s", before)
 	}
@@ -129,13 +129,13 @@ func TestPluginPureConfigMutationLeavesActiveSessionRuntimeUnchanged(t *testing.
 	}); err != nil {
 		t.Fatalf("DisablePlugin() error = %v", err)
 	}
-	after, _ := activated.runtime.BaseMetadata["system_prompt"].(string)
+	after, _ := activated.activeRuntime.BaseMetadata["system_prompt"].(string)
 	if after != before {
 		t.Fatalf("active Session Runtime changed after pure config mutation")
 	}
 
 	reactivated := activateFutureAssemblyRuntime(t, stack, "plugin-reactivated")
-	prompt, _ := reactivated.runtime.BaseMetadata["system_prompt"].(string)
+	prompt, _ := reactivated.activeRuntime.BaseMetadata["system_prompt"].(string)
 	if strings.Contains(prompt, "runtime-skill") {
 		t.Fatalf("future activation still has disabled plugin skill:\n%s", prompt)
 	}

@@ -2,12 +2,14 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	pluginapi "github.com/caelis-labs/caelis/control/plugin"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -114,6 +116,30 @@ func TestPluginServiceAddPathHappyPath(t *testing.T) {
 	}
 }
 
+func TestDetachedRuntimePluginsRejectMutations(t *testing.T) {
+	stack := buildPluginStack(t, t.TempDir(), t.TempDir())
+	ctx := context.Background()
+	before, err := stack.composition.authorities.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	activated := activateFutureAssemblyRuntime(t, stack, "detached-plugin-write")
+	if _, err := activated.Plugins().Enable(ctx, "missing"); !errors.Is(err, pluginapi.ErrHostUnavailable) {
+		t.Fatalf("detached Plugins().Enable() error = %v, want ErrHostUnavailable", err)
+	}
+	if _, err := activated.pluginReads().List(ctx); err != nil {
+		t.Fatalf("detached pluginReads().List() error = %v", err)
+	}
+	after, err := stack.composition.authorities.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.ConfigurationRevision != before.ConfigurationRevision {
+		t.Fatalf("Host configuration revision = %d, want unchanged %d", after.ConfigurationRevision, before.ConfigurationRevision)
+	}
+}
+
 // TestPluginServiceEnableDisableHappyPath exercises Enable→Disable lifecycle.
 func TestPluginServiceEnableDisableHappyPath(t *testing.T) {
 	tmp := t.TempDir()
@@ -207,7 +233,7 @@ func TestPluginServiceAddPathAffectsFutureSessionSkillPrompt(t *testing.T) {
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
 
-	systemPrompt, _ := stack.composition.runtime.BaseMetadata["system_prompt"].(string)
+	systemPrompt, _ := stack.composition.activeRuntime.BaseMetadata["system_prompt"].(string)
 	if strings.Contains(systemPrompt, "runtime-skill") {
 		t.Fatalf("runtime-skill unexpectedly present before plugin add:\n%s", systemPrompt)
 	}
@@ -216,7 +242,7 @@ func TestPluginServiceAddPathAffectsFutureSessionSkillPrompt(t *testing.T) {
 		t.Fatalf("AddPath() error = %v", err)
 	}
 	activated := activateFutureAssemblyRuntime(t, stack, "plugin-skill-enabled")
-	systemPrompt, _ = activated.runtime.BaseMetadata["system_prompt"].(string)
+	systemPrompt, _ = activated.activeRuntime.BaseMetadata["system_prompt"].(string)
 	if !strings.Contains(systemPrompt, "skillplugin:runtime-skill") {
 		t.Fatalf("runtime-skill missing from future Session activation:\n%s", systemPrompt)
 	}
@@ -224,11 +250,11 @@ func TestPluginServiceAddPathAffectsFutureSessionSkillPrompt(t *testing.T) {
 	if _, err := stack.Plugins().Disable(ctx, "skillplugin"); err != nil {
 		t.Fatalf("Disable() error = %v", err)
 	}
-	if current, _ := activated.runtime.BaseMetadata["system_prompt"].(string); !strings.Contains(current, "skillplugin:runtime-skill") {
+	if current, _ := activated.activeRuntime.BaseMetadata["system_prompt"].(string); !strings.Contains(current, "skillplugin:runtime-skill") {
 		t.Fatalf("active Session lost its fixed plugin skill:\n%s", current)
 	}
 	disabled := activateFutureAssemblyRuntime(t, stack, "plugin-skill-disabled")
-	systemPrompt, _ = disabled.runtime.BaseMetadata["system_prompt"].(string)
+	systemPrompt, _ = disabled.activeRuntime.BaseMetadata["system_prompt"].(string)
 	if strings.Contains(systemPrompt, "runtime-skill") {
 		t.Fatalf("runtime-skill present in activation after plugin disable:\n%s", systemPrompt)
 	}
@@ -744,12 +770,26 @@ func TestPluginServiceMCPServers(t *testing.T) {
 	}
 
 	activated := activateFutureAssemblyRuntime(t, stack, "plugin-mcp-enabled")
-	detail, err := activated.Plugins().Inspect(ctx, "myplugin")
+	detail, err := activated.pluginReads().Inspect(ctx, "myplugin")
 	if err != nil {
 		t.Fatalf("Inspect() failed: %v", err)
 	}
 	if len(detail.MCPServers) != 1 || detail.MCPServers[0].Status != "running" {
 		t.Errorf("expected running MCP server in inspect, got: %+v", detail.MCPServers)
+	}
+	if err := stack.Plugins().Remove(ctx, "myplugin"); err != nil {
+		t.Fatalf("Remove() failed: %v", err)
+	}
+	pinned, err := activated.pluginReads().Inspect(ctx, "myplugin")
+	if err != nil {
+		t.Fatalf("active Runtime pinned Inspect() failed: %v", err)
+	}
+	if !pinned.Enabled || len(pinned.MCPServers) != 1 || pinned.MCPServers[0].Status != "running" {
+		t.Fatalf("active Runtime Plugin view = %#v, want enabled pinned MCP", pinned)
+	}
+	future := activateFutureAssemblyRuntime(t, stack, "plugin-mcp-removed")
+	if _, err := future.pluginReads().Inspect(ctx, "myplugin"); err == nil {
+		t.Fatal("future Runtime Inspect() error = nil after Host removal")
 	}
 }
 
@@ -793,9 +833,9 @@ func TestPluginServiceAgentContributions(t *testing.T) {
 	}
 
 	activated := activateFutureAssemblyRuntime(t, stack, "plugin-agent-enabled")
-	agent, ok := agentConfigByNameForPluginTest(activated.runtime.Assembly.Agents, "plugin-helper")
+	agent, ok := agentConfigByNameForPluginTest(activated.activeRuntime.Assembly.Agents, "plugin-helper")
 	if !ok {
-		t.Fatalf("plugin-helper missing from future Session assembly: %#v", activated.runtime.Assembly.Agents)
+		t.Fatalf("plugin-helper missing from future Session assembly: %#v", activated.activeRuntime.Assembly.Agents)
 	}
 	if agent.Command != os.Args[0] {
 		t.Fatalf("plugin-helper command = %q, want %q", agent.Command, os.Args[0])
@@ -818,8 +858,8 @@ func TestPluginServiceAgentContributions(t *testing.T) {
 	if _, err := stack.Plugins().Disable(ctx, "agentplugin"); err != nil {
 		t.Fatalf("Disable() failed: %v", err)
 	}
-	if _, ok := agentConfigByNameForPluginTest(stack.composition.runtime.Assembly.Agents, "plugin-helper"); ok {
-		t.Fatalf("plugin-helper still present after disable: %#v", stack.composition.runtime.Assembly.Agents)
+	if _, ok := agentConfigByNameForPluginTest(stack.composition.activeRuntime.Assembly.Agents, "plugin-helper"); ok {
+		t.Fatalf("plugin-helper still present after disable: %#v", stack.composition.activeRuntime.Assembly.Agents)
 	}
 }
 

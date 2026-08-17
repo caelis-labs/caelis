@@ -312,18 +312,18 @@ func TestSandboxLifecycleCommandClassifiesPreEffectAndEffectFailures(t *testing.
 	}
 	stack.composition.mu.Lock()
 	previousExec := stack.composition.exec
-	previousOverride := stack.composition.sandboxOverride
 	stack.composition.sandbox = configstore.DefaultSandboxConfig(saved.Sandbox)
 	stack.composition.sandboxPersisted = cloneSandboxConfig(saved.Sandbox)
 	stack.composition.sandboxRevision = saved.ConfigurationRevision
-	stack.composition.sandboxOverride = SandboxConfig{}
 	stack.composition.exec = nil
 	stack.composition.mu.Unlock()
+	previousOverride := stack.composition.runtimeProcessSnapshot().sandboxOverride
+	stack.composition.processConfig.setSandboxOverride(SandboxConfig{})
 	t.Cleanup(func() {
 		stack.composition.mu.Lock()
 		stack.composition.exec = previousExec
-		stack.composition.sandboxOverride = previousOverride
 		stack.composition.mu.Unlock()
+		stack.composition.processConfig.setSandboxOverride(previousOverride)
 	})
 
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
@@ -379,15 +379,15 @@ func TestSandboxLifecycleCommandUsesCanonicalExternalPolicy(t *testing.T) {
 	}
 	stack.composition.mu.Lock()
 	previousExec := stack.composition.exec
-	previousOverride := stack.composition.sandboxOverride
-	stack.composition.sandboxOverride = SandboxConfig{}
 	stack.composition.exec = runtime
 	stack.composition.mu.Unlock()
+	previousOverride := stack.composition.runtimeProcessSnapshot().sandboxOverride
+	stack.composition.processConfig.setSandboxOverride(SandboxConfig{})
 	defer func() {
 		stack.composition.mu.Lock()
 		stack.composition.exec = previousExec
-		stack.composition.sandboxOverride = previousOverride
 		stack.composition.mu.Unlock()
+		stack.composition.processConfig.setSandboxOverride(previousOverride)
 	}()
 	expected := saved.ConfigurationRevision
 	result, err := stack.ConfigurationCommands().PrepareSandbox(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
@@ -415,18 +415,16 @@ func TestSandboxLifecycleCommandDoesNotHoldConfigurationWriteBoundary(t *testing
 		started:                     make(chan struct{}),
 		release:                     make(chan struct{}),
 	}
+	previousOverride := stack.composition.runtimeProcessSnapshot().sandboxOverride
+	stack.composition.processConfig.setSandboxOverride(SandboxConfig{})
 	stack.composition.mu.Lock()
-	previousOverride := stack.composition.sandboxOverride
 	stack.composition.sandbox = configstore.DefaultSandboxConfig(saved.Sandbox)
 	stack.composition.sandboxPersisted = cloneSandboxConfig(saved.Sandbox)
 	stack.composition.sandboxRevision = saved.ConfigurationRevision
-	stack.composition.sandboxOverride = SandboxConfig{}
 	stack.composition.exec = runtime
 	stack.composition.mu.Unlock()
 	t.Cleanup(func() {
-		stack.composition.mu.Lock()
-		stack.composition.sandboxOverride = previousOverride
-		stack.composition.mu.Unlock()
+		stack.composition.processConfig.setSandboxOverride(previousOverride)
 	})
 	expected := saved.ConfigurationRevision
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
@@ -731,8 +729,8 @@ func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
 	beforeGateway := stack.composition.gateway
 	beforeExec := stack.composition.exec
 	beforeMCP := stack.composition.mcpMgr
-	beforePlugins := clonePluginConfigs(stack.composition.runtime.Plugins)
-	beforeBaseMetadata := cloneMap(stack.composition.runtime.BaseMetadata)
+	beforePlugins := clonePluginConfigs(stack.composition.activeRuntime.Plugins)
+	beforeBaseMetadata := cloneMap(stack.composition.activeRuntime.BaseMetadata)
 
 	pluginRoot := filepath.Join(t.TempDir(), "malformed-plugin")
 	manifestDir := filepath.Join(pluginRoot, ".caelis-plugin")
@@ -749,7 +747,7 @@ func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
 	}
 
 	sandboxCfg := stack.composition.sandbox
-	_, err := stack.composition.loadGatewayBuildPlan(sandboxCfg, stack.composition.runtime)
+	_, err := stack.composition.loadGatewayBuildPlan(sandboxCfg, stack.composition.activeRuntime)
 	if err == nil {
 		t.Fatal("loadGatewayBuildPlan() error = nil, want plugin parse failure")
 	}
@@ -765,11 +763,11 @@ func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
 	if stack.composition.mcpMgr != beforeMCP {
 		t.Fatalf("mcp manager changed on plan failure: before=%p after=%p", beforeMCP, stack.composition.mcpMgr)
 	}
-	if !reflect.DeepEqual(stack.composition.runtime.Plugins, beforePlugins) {
-		t.Fatalf("runtime plugins = %+v, want unchanged %+v", stack.composition.runtime.Plugins, beforePlugins)
+	if !reflect.DeepEqual(stack.composition.activeRuntime.Plugins, beforePlugins) {
+		t.Fatalf("runtime plugins = %+v, want unchanged %+v", stack.composition.activeRuntime.Plugins, beforePlugins)
 	}
-	if !reflect.DeepEqual(stack.composition.runtime.BaseMetadata, beforeBaseMetadata) {
-		t.Fatalf("runtime base metadata = %+v, want unchanged %+v", stack.composition.runtime.BaseMetadata, beforeBaseMetadata)
+	if !reflect.DeepEqual(stack.composition.activeRuntime.BaseMetadata, beforeBaseMetadata) {
+		t.Fatalf("runtime base metadata = %+v, want unchanged %+v", stack.composition.activeRuntime.BaseMetadata, beforeBaseMetadata)
 	}
 }
 
@@ -778,7 +776,7 @@ func TestBuildGatewayRuntimeMCPFailureDoesNotSwapStack(t *testing.T) {
 	beforeGateway := stack.composition.gateway
 	beforeExec := stack.composition.exec
 	beforeMCP := stack.composition.mcpMgr
-	plan, err := stack.composition.loadGatewayBuildPlan(stack.composition.sandbox, stack.composition.runtime)
+	plan, err := stack.composition.loadGatewayBuildPlan(stack.composition.sandbox, stack.composition.activeRuntime)
 	if err != nil {
 		t.Fatalf("loadGatewayBuildPlan() error = %v", err)
 	}
@@ -840,7 +838,7 @@ func TestInstallGatewayRuntimeBundleRejectsRuntimeReplacementAndClosesBundle(t *
 		}
 	}()
 
-	plan, err := stack.composition.loadGatewayBuildPlan(stack.composition.sandbox, stack.composition.runtime)
+	plan, err := stack.composition.loadGatewayBuildPlan(stack.composition.sandbox, stack.composition.activeRuntime)
 	if err != nil {
 		t.Fatalf("loadGatewayBuildPlan() error = %v", err)
 	}
@@ -877,7 +875,7 @@ func TestStackConnectRollsBackOnConfigSaveFailure(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
 	beforeDefault := stack.composition.lookup.DefaultID()
 	stack.composition.mu.RLock()
-	beforeRuntime := stack.composition.runtime
+	beforeRuntime := stack.composition.activeRuntime
 	stack.composition.mu.RUnlock()
 	poisonConfigStorePath(t, stack)
 
@@ -896,7 +894,7 @@ func TestStackConnectRollsBackOnConfigSaveFailure(t *testing.T) {
 		t.Fatalf("DefaultModelID() = %q, want %q", got, beforeDefault)
 	}
 	stack.composition.mu.RLock()
-	afterRuntime := stack.composition.runtime
+	afterRuntime := stack.composition.activeRuntime
 	stack.composition.mu.RUnlock()
 	if afterRuntime.Model.ID != beforeRuntime.Model.ID {
 		t.Fatalf("runtime model = %q, want %q", afterRuntime.Model.ID, beforeRuntime.Model.ID)

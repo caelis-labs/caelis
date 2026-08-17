@@ -3,6 +3,9 @@ package gatewayapp
 import (
 	"strings"
 	"sync"
+
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
 // runtimeProcessConfigSource owns mutable process configuration sampled once
@@ -49,6 +52,15 @@ func (s *runtimeProcessConfigSource) setRuntime(runtime stackRuntimeConfig) {
 	s.mu.Unlock()
 }
 
+func (s *runtimeProcessConfigSource) setSandboxOverride(config SandboxConfig) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.sandboxOverride = cloneSandboxConfig(config)
+	s.mu.Unlock()
+}
+
 func (s *runtimeProcessConfigSource) setChildControl(controlURL string, tokenFile string) {
 	if s == nil {
 		return
@@ -57,4 +69,35 @@ func (s *runtimeProcessConfigSource) setChildControl(controlURL string, tokenFil
 	s.childControlURL = strings.TrimSpace(controlURL)
 	s.childControlTokenFile = strings.TrimSpace(tokenFile)
 	s.mu.Unlock()
+}
+
+// runtimeProcessSnapshot returns the one mutable Host process configuration,
+// or the immutable activation snapshot for a detached Session Runtime. It
+// never holds composition and process-source locks at the same time.
+func (s *runtimeComposition) runtimeProcessSnapshot() sessionRuntimeProcessSnapshot {
+	if s == nil {
+		return sessionRuntimeProcessSnapshot{}
+	}
+	if s.processConfig != nil {
+		return s.processConfig.snapshot()
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return sessionRuntimeProcessSnapshot{
+		runtime:               cloneActiveRuntimeConfig(s.activeRuntime),
+		childControlURL:       s.pinnedChildControlURL,
+		childControlTokenFile: s.pinnedChildControlTokenFile,
+	}
+}
+
+func cloneActiveRuntimeConfig(config stackRuntimeConfig) stackRuntimeConfig {
+	config.Model = cloneSessionModelConfig(config.Model)
+	config.SkillDirs = cloneStringSlicePreserveNil(config.SkillDirs)
+	config.PluginSkills = skill.ClonePluginBundles(config.PluginSkills)
+	config.SkillCatalog = skill.NewCatalog(config.SkillCatalog.Metas())
+	config.Plugins = clonePluginConfigs(config.Plugins)
+	config.BaseAssembly = assembly.CloneResolvedAssembly(config.BaseAssembly)
+	config.Assembly = assembly.CloneResolvedAssembly(config.Assembly)
+	config.BaseMetadata = cloneMap(config.BaseMetadata)
+	return config
 }

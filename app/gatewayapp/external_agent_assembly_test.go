@@ -125,11 +125,9 @@ func TestExternalAgentAssemblyRejectsProductAndSystemNames(t *testing.T) {
 
 func TestProviderProfileBindingMaterializesFixedDirectHandle(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	stack.composition.mu.Lock()
-	runtimeCfg := stack.composition.runtime
+	runtimeCfg := stack.composition.runtimeProcessSnapshot().runtime
 	runtimeCfg.SystemPrompt = "shared base prompt"
-	stack.composition.runtime = runtimeCfg
-	stack.composition.mu.Unlock()
+	stack.composition.processConfig.setRuntime(runtimeCfg)
 
 	profile, err := stack.connectTestModel(ModelConfig{
 		Provider: "ollama", API: providers.APIOllama, Model: "deepseek-v4-pro",
@@ -152,14 +150,14 @@ func TestProviderProfileBindingMaterializesFixedDirectHandle(t *testing.T) {
 	}
 	activated := activateFutureAssemblyRuntime(t, stack, "provider-profile-binding")
 	var materialized assembly.AgentConfig
-	for _, agent := range activated.runtime.Assembly.Agents {
+	for _, agent := range activated.activeRuntime.Assembly.Agents {
 		if agent.Name == string(agentbinding.HandleBreeze) {
 			materialized = agent
 			break
 		}
 	}
 	if materialized.Command == "" {
-		t.Fatalf("future Session assembly does not contain Breeze profile Agent: %#v", activated.runtime.Assembly.Agents)
+		t.Fatalf("future Session assembly does not contain Breeze profile Agent: %#v", activated.activeRuntime.Assembly.Agents)
 	}
 	if got := materialized.SessionOptions.ModelID; got != profile.Backend.Provider.ModelConfigID {
 		t.Fatalf("materialized model session option = %q, want %q", got, profile.Backend.Provider.ModelConfigID)
@@ -208,14 +206,14 @@ func TestReviewerACPBindingMaterializesHiddenReviewScene(t *testing.T) {
 	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	stack.invalidatePlacementSnapshot()
+	stack.composition.invalidateOwnPlacementSnapshot()
 	if _, err := stack.testAgentBindings().BindAgentBinding(context.Background(), agentbinding.Binding{
 		Handle: agentbinding.HandleReviewer, ProfileID: "acp:claude:opus", Effort: "xhigh",
 	}); err != nil {
 		t.Fatalf("BindAgentBinding(Reviewer ACP) error = %v", err)
 	}
 	activated := activateFutureAssemblyRuntime(t, stack, "reviewer-acp-binding")
-	agents := append([]assembly.AgentConfig(nil), activated.runtime.Assembly.Agents...)
+	agents := append([]assembly.AgentConfig(nil), activated.activeRuntime.Assembly.Agents...)
 	for _, agent := range agents {
 		if agent.Name != string(agentbinding.HandleReviewer) {
 			continue
@@ -259,7 +257,7 @@ func TestSystemAgentBindingsApplySelectedModelAndEffort(t *testing.T) {
 		t.Fatalf("resolveSystemAgentModel(Guardian) = (%#v, %v, %v), want xhigh binding", guardian, bound, err)
 	}
 
-	agents := append([]assembly.AgentConfig(nil), activated.runtime.Assembly.Agents...)
+	agents := append([]assembly.AgentConfig(nil), activated.activeRuntime.Assembly.Agents...)
 	for _, agent := range agents {
 		if agent.Name != string(agentbinding.HandleReviewer) {
 			continue

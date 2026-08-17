@@ -111,6 +111,7 @@ func (s *runtimeComposition) configuredAssembly(base assembly.ResolvedAssembly, 
 }
 
 func (s *runtimeComposition) configuredAssemblyWithPluginAgents(base assembly.ResolvedAssembly, pluginAgents []pluginapi.AgentRegistration, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
+	process := s.runtimeProcessSnapshot()
 	self, err := defaultSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		StoreDir:     s.authorities.storeDir,
 		WorkspaceKey: s.workspace.Key,
@@ -121,7 +122,7 @@ func (s *runtimeComposition) configuredAssemblyWithPluginAgents(base assembly.Re
 		),
 		PinnedModel:    ptrToModelConfig(runtimeCfg.Model),
 		BridgeApproval: !runtimeCfg.DangerouslySkipPermissions,
-		ControlURL:     s.childControlURL, ControlTokenFile: s.childControlTokenFile,
+		ControlURL:     process.childControlURL, ControlTokenFile: process.childControlTokenFile,
 	})
 	if err != nil {
 		return assembly.ResolvedAssembly{}, err
@@ -382,7 +383,7 @@ func (s *runtimeComposition) ListACPAgents() []ACPAgentInfo {
 		return nil
 	}
 	s.mu.RLock()
-	agents := append([]assembly.AgentConfig(nil), s.runtime.Assembly.Agents...)
+	agents := append([]assembly.AgentConfig(nil), s.activeRuntime.Assembly.Agents...)
 	s.mu.RUnlock()
 	if len(agents) == 0 {
 		return nil

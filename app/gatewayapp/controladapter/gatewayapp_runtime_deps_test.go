@@ -22,21 +22,26 @@ func newAssemblerFromGatewayAppSession(ctx context.Context, stack *gatewayapp.St
 }
 
 func gatewayAppRuntimeDepsForTest(stack *gatewayapp.Stack) *runtimeDeps {
-	view := stack.ControlRuntimeView()
+	kernelReads := stack.ControlKernelReads()
+	status := stack.ControlStatus()
+	agents := stack.Agents()
+	models := stack.Models()
+	skills := stack.Skills()
+	plugins := stack.ControlPluginReads()
 	deps := &runtimeDeps{
 		Gateway: GatewayRuntimeDeps{
 			TurnServiceFn: func() GatewayTurnService {
-				return view.TurnStateFn()
+				return kernelReads.TurnState()
 			},
 			ControlPlaneServiceFn: func() GatewayControlPlaneService {
-				return view.ControlPlaneStateFn()
+				return kernelReads.ControlPlaneState()
 			},
 		},
 		Session: SessionRuntimeDeps{
-			Store:     view.Sessions,
-			AppName:   view.AppName,
-			UserID:    view.UserID,
-			Workspace: view.Workspace,
+			Store:     stack.Sessions(),
+			AppName:   stack.AppName(),
+			UserID:    stack.UserID(),
+			Workspace: stack.Workspace(),
 			ListSessionsFn: func(ctx context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
 				return stack.ControlClient().ListSessions(ctx, appserver.Principal{ID: stack.UserID()}, appserver.ListSessionsRequest{
 					WorkspaceKey: req.WorkspaceKey,
@@ -47,44 +52,44 @@ func gatewayAppRuntimeDepsForTest(stack *gatewayapp.Stack) *runtimeDeps {
 			},
 		},
 		Status: StatusRuntimeDeps{
-			RuntimeStateFn:          view.RuntimeStateFn,
-			ConfigurationRevisionFn: view.ConfigurationRevisionFn,
+			RuntimeStateFn:          status.SessionRuntimeState,
+			ConfigurationRevisionFn: status.ConfigurationRevision,
 			DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorStatusProjection, error) {
-				return testDoctorStatusProjection(view.DoctorFn(ctx, req))
+				return testDoctorStatusProjection(status.Doctor(ctx, req))
 			},
 		},
 		Agent: AgentRuntimeDeps{
-			ControllerStatusFn:     view.ControllerStatusFn,
-			DisconnectCandidatesFn: view.DisconnectCandidatesFn,
-			ListFn:                 view.ListAgentsFn,
+			ControllerStatusFn:     agents.ControllerStatus,
+			DisconnectCandidatesFn: agents.DisconnectCandidates,
+			ListFn:                 agents.List,
 		},
 		Model: ModelRuntimeDeps{
-			EffectiveAliasFn:  view.EffectiveModelAliasFn,
-			EffectiveEffortFn: view.EffectiveModelEffortFn,
+			EffectiveAliasFn:  models.EffectiveAlias,
+			EffectiveEffortFn: models.EffectiveEffort,
 			ConfigFn: func(alias string) (ModelConfig, bool) {
-				return view.ModelConfigFn(alias)
+				return models.Config(alias)
 			},
-			SessionUsageSnapshotFn: view.SessionUsageSnapshotFn,
-			ProviderUsageFn:        view.ProviderUsageFn,
-			ListAliasesFn:          view.ListModelAliasesFn,
-			ListChoicesFn:          view.ListModelChoicesFn,
-			HasReusableAuthFn:      view.HasReusableAuthFn,
+			SessionUsageSnapshotFn: models.UsageSnapshot,
+			ProviderUsageFn:        models.ProviderUsage,
+			ListAliasesFn:          models.ListAliases,
+			ListChoicesFn:          models.ListChoices,
+			HasReusableAuthFn:      models.HasReusableAuth,
 		},
 		Skill: SkillRuntimeDeps{
-			SnapshotFn: view.SkillCatalogFn,
+			SnapshotFn: skills.Snapshot,
 		},
 		Sandbox: SandboxRuntimeDeps{
-			StatusFn: func() SandboxStatusProjection { return testSandboxStatusProjection(view.SandboxFn()) },
+			StatusFn: func() SandboxStatusProjection { return testSandboxStatusProjection(status.Sandbox()) },
 		},
 		Plugin: PluginRuntimeDeps{
 			ListPluginsFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
-				return testRuntimePluginSnapshots(view.ListPluginsFn(ctx))
+				return testRuntimePluginSnapshots(plugins.List(ctx))
 			},
 			ListMarketplacesFn: func(ctx context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
-				return testRuntimeMarketplaceSnapshots(view.ListMarketplacesFn(ctx))
+				return testRuntimeMarketplaceSnapshots(plugins.ListMarketplaces(ctx))
 			},
 			InspectPluginFn: func(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
-				return testRuntimePluginSnapshotWithError(view.InspectPluginFn(ctx, id))
+				return testRuntimePluginSnapshotWithError(plugins.Inspect(ctx, id))
 			},
 		},
 	}

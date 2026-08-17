@@ -24,13 +24,11 @@ func (s *runtimeComposition) validateAgentAssemblyCandidate(doc AppConfig) error
 	}
 
 	seen := make(map[string]struct{})
-	s.mu.RLock()
-	for _, configured := range s.runtime.BaseAssembly.Agents {
+	for _, configured := range s.runtimeProcessSnapshot().runtime.BaseAssembly.Agents {
 		if name := agentAssemblyNameKey(configured.Name); name != "" {
 			seen[name] = struct{}{}
 		}
 	}
-	s.mu.RUnlock()
 
 	contributions, err := resolveGatewayPluginContributions(doc.Plugins)
 	if err != nil {

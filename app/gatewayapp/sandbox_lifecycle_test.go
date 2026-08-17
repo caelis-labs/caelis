@@ -49,7 +49,7 @@ func TestSandboxStatusForWorkspaceDoesNotReuseStartupRuntimeSetup(t *testing.T) 
 		Root: "/workspace", Counts: map[string]int{"write_roots": 2},
 	}}}
 	stack := sandboxLifecycleTestStack(runtime, "windows")
-	stack.composition.sandbox = mergeSandboxConfig(stack.composition.sandboxPersisted, stack.composition.sandboxOverride)
+	stack.composition.sandbox = mergeSandboxConfig(stack.composition.sandboxPersisted, stack.composition.runtimeProcessSnapshot().sandboxOverride)
 
 	startup := stack.ControlStatus().SandboxForWorkspace(session.WorkspaceRef{Key: "startup", CWD: "/workspace"})
 	if startup.WorkspaceSetupRoot != "/workspace" || startup.WorkspaceSetupWriteRoots != 2 {

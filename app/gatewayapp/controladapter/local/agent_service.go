@@ -174,12 +174,12 @@ func (s *AgentService) runtimeAdapter(ctx context.Context, principal appserver.P
 	if err != nil {
 		return nil, nil, err
 	}
-	deps := controlAssemblyDepsFromView(lease.ControlRuntimeView())
+	deps := agentAssemblyDepsFromLease(lease)
 	if deps == nil {
 		_ = lease.Close(ctx)
 		return nil, nil, errors.New("app/gatewayapp/controladapter/local: Agent Runtime projection is unavailable")
 	}
-	driver, err := controladapter.NewAgentAssemblerForSession(ctx, deps.Agent, lease.Session(), strings.TrimSpace(surface), "")
+	driver, err := controladapter.NewAgentAssemblerForSession(ctx, *deps, lease.Session(), strings.TrimSpace(surface), "")
 	if err != nil {
 		_ = lease.Close(ctx)
 		return nil, nil, err

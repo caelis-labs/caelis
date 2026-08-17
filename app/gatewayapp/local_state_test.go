@@ -164,11 +164,11 @@ func TestNewLocalStackUsesRuntimeConfigApprovalAndPolicyProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	if stack.composition.runtime.ApprovalMode != "manual" {
-		t.Fatalf("runtime ApprovalMode = %q, want manual", stack.composition.runtime.ApprovalMode)
+	if stack.composition.activeRuntime.ApprovalMode != "manual" {
+		t.Fatalf("runtime ApprovalMode = %q, want manual", stack.composition.activeRuntime.ApprovalMode)
 	}
-	if stack.composition.runtime.PolicyProfile != "workspace-write" {
-		t.Fatalf("runtime PolicyProfile = %q, want workspace-write", stack.composition.runtime.PolicyProfile)
+	if stack.composition.activeRuntime.PolicyProfile != "workspace-write" {
+		t.Fatalf("runtime PolicyProfile = %q, want workspace-write", stack.composition.activeRuntime.PolicyProfile)
 	}
 	session, err := startGatewayAppTestSession(context.Background(), stack, "runtime config session")
 	if err != nil {

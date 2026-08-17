@@ -38,7 +38,7 @@ func TestPluginServiceRemoveKeepsManagedInstallCacheForActiveRuntimes(t *testing
 	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatalf("save managed plugin config: %v", err)
 	}
-	activateFutureAssemblyRuntime(t, stack, "managed-plugin-runtime")
+	activated := activateFutureAssemblyRuntime(t, stack, "managed-plugin-runtime")
 	if err := stack.Plugins().Remove(ctx, "plugin"); err != nil {
 		t.Fatalf("Remove(managed) error = %v", err)
 	}
@@ -46,6 +46,10 @@ func TestPluginServiceRemoveKeepsManagedInstallCacheForActiveRuntimes(t *testing
 	// already-activated Session Runtime can keep reading them until release.
 	if _, err := os.Stat(cacheRoot); err != nil {
 		t.Fatalf("managed cache was reclaimed during pure config Remove: %v", err)
+	}
+	pinned, err := activated.pluginReads().Inspect(ctx, "plugin")
+	if err != nil || !pinned.Enabled || pinned.Root != managedPlugin {
+		t.Fatalf("active Runtime pinned Plugin = %#v, %v", pinned, err)
 	}
 	if err := stack.sessionRuntimes.release(ctx, "managed-plugin-runtime"); err != nil {
 		t.Fatalf("release managed Plugin Runtime: %v", err)

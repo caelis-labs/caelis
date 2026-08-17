@@ -51,9 +51,7 @@ func (s *runtimeComposition) SessionRuntimeState(ctx context.Context, ref sessio
 			modelAlias = cfg.Alias
 		}
 	}
-	s.mu.RLock()
-	runtimeConfig := s.runtime
-	s.mu.RUnlock()
+	runtimeConfig := s.runtimeProcessSnapshot().runtime
 	securityPosture := resolveProcessSecurityPosture(runtimeConfig)
 	sessionMode := kernel.CurrentSessionModeOrDefault(state, runtimeConfig.ApprovalMode)
 	effectivePolicyProfile := firstNonEmpty(kernel.CurrentPolicyProfile(state), policyProfile(runtimeConfig.PolicyProfile))

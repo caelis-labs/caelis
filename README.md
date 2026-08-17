@@ -171,7 +171,10 @@ in-process and HTTP clients. `app/*` owns the private Control Host composition,
 transport adapters, and concrete components; presentation code never depends
 on that Host implementation. The in-process adapter receives the concrete Host
 only at its composition root and injects focused services into leaf
-capabilities. `agent-sdk/*` remains reusable below the product Control layer.
+capabilities. Session-bound adapter paths select only the focused services
+needed from an authorized Runtime lease; neither the Host nor a Runtime
+aggregate reaches leaf services. `agent-sdk/*` remains reusable below the
+product Control layer.
 
 See [docs/architecture.md](docs/architecture.md) for the repository map,
 [docs/agent-sdk-boundary.md](docs/agent-sdk-boundary.md) for the reusable Agent

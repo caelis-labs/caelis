@@ -15,15 +15,16 @@ func TestStackPublicMethodsStayAtDeclaredHostBoundary(t *testing.T) {
 		"AppName": true, "CanRecoverControlCommand": true, "Close": true,
 		"CompactSession":        true,
 		"ConfigurationCommands": true, "ConfigurationRevision": true,
-		"ControlClient": true, "ControlClientRuntimeState": true,
-		"ControlParticipants": true, "ControlRuntimeView": true,
+		"ControlClient":      true,
+		"ControlKernelReads": true,
+		"ControlPluginReads": true, "ControlParticipants": true,
 		"ControlRuntimes": true, "ControlStatus": true,
 		"ControlTerminalStreams": true, "ExecuteControlCommand": true,
-		"LoadHistory": true, "Models": true,
+		"Models":             true,
 		"ParticipantHandles": true, "PluginCommands": true, "Plugins": true,
 		"PreflightSandbox": true, "PresentationDependencies": true,
 		"Quiesce": true, "RecoverControlCommand": true,
-		"ResolveHandlePlacement": true, "Sessions": true,
+		"Sessions":               true,
 		"SetBuiltInChildControl": true, "Skills": true,
 		"StartApprovalRecovery": true, "StartSubagent": true,
 		"StartSubagentWithOptions": true, "Status": true, "TaskStreams": true,
@@ -49,6 +50,21 @@ func TestStackPublicMethodsStayAtDeclaredHostBoundary(t *testing.T) {
 	slices.Sort(missing)
 	if len(unexpected) > 0 || len(missing) > 0 {
 		t.Fatalf("Stack public methods changed: unexpected=%v missing=%v; expose focused services or update this boundary deliberately", unexpected, missing)
+	}
+}
+
+func TestPluginReadServiceExposesOnlyReadMethods(t *testing.T) {
+	t.Parallel()
+
+	want := []string{"Inspect", "List", "ListMarketplaces"}
+	typ := reflect.TypeFor[PluginReadService]()
+	got := make([]string, 0, typ.NumMethod())
+	for index := range typ.NumMethod() {
+		got = append(got, typ.Method(index).Name)
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("PluginReadService methods = %v, want read-only %v", got, want)
 	}
 }
 

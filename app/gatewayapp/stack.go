@@ -85,10 +85,6 @@ func (s *Stack) SetBuiltInChildControl(controlURL string, tokenFile string) {
 		return
 	}
 	s.composition.processConfig.setChildControl(controlURL, tokenFile)
-	s.composition.mu.Lock()
-	s.composition.childControlURL = strings.TrimSpace(controlURL)
-	s.composition.childControlTokenFile = strings.TrimSpace(tokenFile)
-	s.composition.mu.Unlock()
 }
 
 // KernelTurnReader is the read-only live Turn projection required by
@@ -254,27 +250,6 @@ func (s *Stack) ControlTerminalStreams() stream.Controller {
 		return nil
 	}
 	return hostTaskStreamService{host: &s.composition, registry: s.sessionRuntimes}
-}
-
-// ControlClientRuntimeState reads live state only from an already activated
-// Session Runtime. Observation must not assemble or retain execution state.
-func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (appserver.RuntimeState, error) {
-	if s == nil {
-		return appserver.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
-	}
-	composition := &s.composition
-	if s.sessionRuntimes != nil {
-		runtime, ok := s.sessionRuntimes.loaded(ref.SessionID)
-		if !ok {
-			return appserver.RuntimeState{}, nil
-		}
-		composition = &runtime.instance.runtimeComposition
-	}
-	gateway := composition.currentGateway()
-	if gateway == nil {
-		return appserver.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
-	}
-	return gateway.ControlClientRuntimeState(ctx, ref)
 }
 
 func (s *runtimeComposition) currentGateway() *kernelimpl.Gateway {
@@ -471,6 +446,12 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
+	processConfig := newRuntimeProcessConfigSource(sessionRuntimeProcessSnapshot{
+		runtime:               runtimeCfg,
+		sandboxOverride:       cfg.Sandbox,
+		childControlURL:       cfg.ChildControlURL,
+		childControlTokenFile: cfg.ChildControlTokenFile,
+	})
 	stack := &Stack{
 		composition: runtimeComposition{
 			authorities: runtimeHostAuthorities{
@@ -489,33 +470,28 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 				providerUsage:     providerUsage,
 				sessionModelPins:  newSessionModelPinRegistry(),
 			},
-			sessions:              sessions,
-			workspace:             workspace,
-			lookup:                lookup,
-			childControlURL:       strings.TrimSpace(cfg.ChildControlURL),
-			childControlTokenFile: strings.TrimSpace(cfg.ChildControlTokenFile),
-			runtime:               runtimeCfg,
-			sandbox:               sandboxCfg,
-			sandboxOverride:       cloneSandboxConfig(cfg.Sandbox),
-			sandboxPersisted:      cloneSandboxConfig(doc.Sandbox),
-			sandboxRevision:       doc.ConfigurationRevision,
+			sessions:         sessions,
+			workspace:        workspace,
+			lookup:           lookup,
+			processConfig:    processConfig,
+			sandbox:          sandboxCfg,
+			sandboxPersisted: cloneSandboxConfig(doc.Sandbox),
+			sandboxRevision:  doc.ConfigurationRevision,
 		},
 	}
-	stack.composition.processConfig = newRuntimeProcessConfigSource(sessionRuntimeProcessSnapshot{
-		runtime:               runtimeCfg,
-		sandboxOverride:       cfg.Sandbox,
-		childControlURL:       cfg.ChildControlURL,
-		childControlTokenFile: cfg.ChildControlTokenFile,
-	})
 	stack.modelRecovery = newSessionModelRecovery(
 		stack.composition.authorities.store,
 		stack.composition.authorities.sessionModelPins,
 		stack.composition.lookup,
 	)
 	stack.composition.placementCache = newPlacementSnapshot(doc)
-	configStore.savedHook = stack.invalidatePlacementSnapshot
+	configStore.savedHook = stack.composition.invalidateOwnPlacementSnapshot
+	runtimeStateReader, err := newControlRuntimeStateReader(&stack.composition)
+	if err != nil {
+		return nil, err
+	}
 	controlState, err := appserver.NewStateService(appserver.StateServiceConfig{
-		Sessions: sessions, Runtime: stack, Feeds: controlFeeds,
+		Sessions: sessions, Runtime: runtimeStateReader, Feeds: controlFeeds,
 		PrepareReconnect:  stack.prepareControlClientReconnect,
 		RetainObservation: stack.retainControlClientObservation,
 	})
@@ -570,7 +546,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		Tasks:           taskStore,
 		Streams:         func() stream.Service { return taskStreamRouter },
 		Sessions:        sessions,
-		SubagentHistory: stack,
+		SubagentHistory: subagentHistoryService{composition: &stack.composition},
 		Authorizer:      taskStreamAuthorizer{inner: appserver.SessionAuthorizer{Sessions: sessions}},
 		Secret:          cursorSecret,
 	})
@@ -608,6 +584,10 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	stack.sessionRuntimes = sessionRuntimes
+	if err := runtimeStateReader.bindRegistry(sessionRuntimes); err != nil {
+		_ = stack.Close()
+		return nil, err
+	}
 	taskStreamRouter.registry = sessionRuntimes
 	if err := mailboxRouter.bind(sessionRuntimes); err != nil {
 		_ = stack.Close()

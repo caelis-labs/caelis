@@ -155,7 +155,10 @@ Document responsibilities are intentionally separate:
   bounded. Assembled Runtimes pin the exact managed content they use; lifecycle
   release removes the pin and reference-aware GC reclaims content absent from
   both current configuration and every live Runtime. Committed Plugin changes
-  affect later Session activations and never replace an active Runtime.
+  affect later Session activations and never replace an active Runtime. A
+  detached Runtime may read its pinned Plugin view but cannot obtain a mutable
+  Plugin host over its hook-free configuration reader; writes remain on the
+  principal-bound Host command path.
 - `control/appserver`: the canonical surface-facing, transport-neutral Control
   boundary. It owns trusted principals, the aggregate client and service
   capability sets, commands and outcomes, Session authorization,
@@ -215,11 +218,16 @@ Document responsibilities are intentionally separate:
   workspace resources while borrowing only the focused process authorities
   required for execution. The stateless workspace assembler retains an explicit
   value of those authorities, a dedicated configuration store instance without
-  Host write hooks, the immutable startup migration report, and an independent
-  process-configuration source. On the first execution after a Session has no live activation, it
-  samples that source once and reads one complete app configuration document
-  plus workspace files. The detached Session Runtime keeps the resulting
-  context-shaping composition fixed until release. Durable Session creation,
+  Host write hooks, the immutable startup migration report, and the Host's sole
+  mutable process-configuration source. The root Runtime's `activeRuntime` is
+  an installed execution artifact rather than a second publication target; a
+  process model, sandbox override, skill-root, or child-control change is
+  published once to the process source. On the first execution after a Session
+  has no live activation, the assembler samples that source once and reads one
+  complete app configuration document plus workspace files. Plugin
+  configuration comes only from that canonical document. The detached Session
+  Runtime keeps the resulting context-shaping composition fixed until release.
+  Durable Session creation,
   inspect, and reconnect allocate no execution Runtime. An explicit reconnect
   continuation does hold one process-local observation reference: multiple
   clients may observe the same Session, while a selected TUI/GUI Session keeps
@@ -315,9 +323,10 @@ Document responsibilities are intentionally separate:
   package that consumes the root adapter package directly and assembles the
   complete in-process AppServer service set. `local.NewAppServer` is the sole
   production composition root that receives a concrete `gatewayapp.Stack`. It
-  translates Host views into focused, principal-sensitive service dependencies;
-  leaf services retain neither the Stack nor the assembler's private union of
-  focused dependencies. Exact model, Agent catalog, Session Runtime, and
+  selects focused Host services and, for Session-bound requests, focused
+  services from an authorized Runtime lease. Leaf services retain neither the
+  Stack, the lease, nor a wide union of Runtime capabilities. Exact model,
+  Agent catalog, Session Runtime, and
   diagnostics-selection reads use their canonical `control/*` owners, while
   deliberate Sandbox and Doctor subsets remain named Host-to-Control
   projections. The root package does not import the concrete Host. Every other
@@ -407,14 +416,17 @@ concrete Host `gatewayapp.Stack`, and activated Sessions use private
 shared private `runtimeComposition` implementation remain Host-owned lifecycle
 details rather than stable package contracts. `Stack` owns its composition as a
 named private field; `runtimeComposition` exports no state, so only deliberate
-focused service getters and immutable views cross the package boundary. Direct
-Stack mirrors of Model, Agent, Status, Runtime acquisition, workspace,
-preparation, and Agent-message service methods are not parallel entry points.
-Architecture and structural gates enforce the private adapter consumer
-boundary, reject concrete Stack use in local leaf adapters and anonymous Host
-composition, freeze deliberate public Stack methods, and prevent Registry,
-Runtime instance, and assembly types from retaining a concrete Host `Stack` or
-the Host root `runtimeComposition`.
+focused service getters cross the package boundary. Authorized Runtime leases
+remain request-scoped and expose focused service selections rather than a wide
+function bag. Reconnect live-state observation and Task child-history fallback
+use dedicated private readers instead of Stack pass-throughs. Direct Stack
+mirrors of Model, Agent, Status, Runtime acquisition, workspace, preparation,
+and Agent-message service methods are not parallel entry points. Architecture
+and structural gates enforce the private adapter consumer boundary, reject
+concrete Stack use and the retired wide Runtime view in local leaf adapters,
+reject anonymous Host composition, freeze deliberate public Stack methods, and
+prevent Registry, Runtime instance, and assembly types from retaining a
+concrete Host `Stack` or the Host root `runtimeComposition`.
 
 ## SDK Boundary
 

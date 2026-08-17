@@ -175,12 +175,12 @@ func (s *CompletionService) runtimeAdapter(ctx context.Context, principal appser
 	if err != nil {
 		return nil, nil, err
 	}
-	assemblyDeps := controlAssemblyDepsFromView(lease.ControlRuntimeView())
+	assemblyDeps := completionAssemblyDepsFromLease(lease)
 	if assemblyDeps == nil {
 		_ = lease.Close(ctx)
 		return nil, nil, errors.New("app/gatewayapp/controladapter/local: completion Runtime projection is unavailable")
 	}
-	deps = &assemblyDeps.Completion
+	deps = assemblyDeps
 	s.bindPrincipalSessionList(deps, principal)
 	driver, err := controladapter.NewCompletionAssemblerForSession(ctx, *deps, lease.Session(), strings.TrimSpace(req.Surface), "")
 	if err != nil {

@@ -434,7 +434,23 @@ func retain(host *Stack) {}
 	}
 }
 
-func TestSemanticBoundaryRuleAllowsFocusedGatewayProjectionInLocalAdapter(t *testing.T) {
+func TestSemanticBoundaryRuleAllowsFocusedGatewayServiceInLocalAdapter(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/caelis-labs/caelis"
+	source := `package local
+
+import "github.com/caelis-labs/caelis/app/gatewayapp"
+
+func project(reads gatewayapp.KernelReadService) {}
+`
+	rule, subject, _ := semanticRuleForSource(t, "app/gatewayapp/controladapter/local/local_stack.go", source, modulePath)
+	if rule != "" || subject != "" {
+		t.Fatalf("semantic rule = (%q, %q), want focused gateway service allowed", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleRejectsWideGatewayRuntimeViewInLocalAdapter(t *testing.T) {
 	t.Parallel()
 
 	const modulePath = "github.com/caelis-labs/caelis"
@@ -445,8 +461,8 @@ import "github.com/caelis-labs/caelis/app/gatewayapp"
 func project(view *gatewayapp.ControlRuntimeView) {}
 `
 	rule, subject, _ := semanticRuleForSource(t, "app/gatewayapp/controladapter/local/local_stack.go", source, modulePath)
-	if rule != "" || subject != "" {
-		t.Fatalf("semantic rule = (%q, %q), want focused gateway projection allowed", rule, subject)
+	if !strings.Contains(rule, "focused gatewayapp services") || subject != "gatewayapp.ControlRuntimeView" {
+		t.Fatalf("semantic rule = (%q, %q), want wide Runtime view rejection", rule, subject)
 	}
 }
 

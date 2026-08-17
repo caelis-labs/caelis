@@ -32,17 +32,14 @@ func (s *runtimeComposition) setRuntimeDefaultModelFromLookup() {
 }
 
 func (s *runtimeComposition) setRuntimeModel(profileID string, cfg ModelConfig) {
-	if s == nil {
+	if s == nil || s.processConfig == nil {
 		return
 	}
-	s.mu.Lock()
-	runtimeCfg := s.runtime
+	runtimeCfg := s.runtimeProcessSnapshot().runtime
 	runtimeCfg.ModelProfileID = modelprofile.NormalizeID(profileID)
 	runtimeCfg.ModelProfileEffort = strings.ToLower(strings.TrimSpace(cfg.ReasoningEffort))
 	runtimeCfg.Model = cfg
-	s.runtime = runtimeCfg
 	s.processConfig.setRuntime(runtimeCfg)
-	s.mu.Unlock()
 }
 
 // ListModelAliases returns the current session override plus resolver-known
@@ -116,9 +113,7 @@ func (s *runtimeComposition) EffectiveModelAlias() string {
 	if s == nil {
 		return ""
 	}
-	s.mu.RLock()
-	runtimeModel := s.runtime.Model
-	s.mu.RUnlock()
+	runtimeModel := s.runtimeProcessSnapshot().runtime.Model
 	if alias := strings.TrimSpace(runtimeModel.Alias); alias != "" {
 		return alias
 	}
@@ -136,9 +131,7 @@ func (s *runtimeComposition) EffectiveModelEffort() string {
 	if s == nil {
 		return ""
 	}
-	s.mu.RLock()
-	runtimeCfg := s.runtime
-	s.mu.RUnlock()
+	runtimeCfg := s.runtimeProcessSnapshot().runtime
 	if effort := strings.TrimSpace(runtimeCfg.ModelProfileEffort); effort != "" {
 		return effort
 	}

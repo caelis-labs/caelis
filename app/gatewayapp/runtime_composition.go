@@ -45,8 +45,11 @@ type runtimeComposition struct {
 	// plugin and Agent assembly on the same immutable AppConfig document used to
 	// resolve that activation's placement snapshot.
 	appConfigSnapshot *AppConfig
-	runtime           stackRuntimeConfig
-	sandbox           SandboxConfig
+	// activeRuntime is the execution artifact installed with gateway/engine.
+	// Host process mutations publish only to processConfig; detached values keep
+	// this activation-pinned snapshot for their complete lifetime.
+	activeRuntime stackRuntimeConfig
+	sandbox       SandboxConfig
 	// sandboxActivationPinned marks a detached Session Runtime whose sandbox
 	// field is already the authoritative configuration for this activation.
 	// Host roots instead compare their startup Runtime with the latest canonical
@@ -55,19 +58,20 @@ type runtimeComposition struct {
 	// sandboxPersisted and sandboxRevision are populated only for the Host root
 	// so status can report the canonical policy. Detached Runtime compositions
 	// remain bound to their fixed sandbox snapshot in sandbox.
-	sandboxOverride       SandboxConfig
-	sandboxPersisted      SandboxConfig
-	sandboxRevision       uint64
-	exec                  sandbox.Runtime
-	engine                *runtime.Runtime
-	placement             controlplane.PlacementExecutor
-	acpControlPlane       *acpassembly.ControlPlane
-	closing               atomic.Bool
-	gateway               *kernelimpl.Gateway
-	mcpMgr                *mcp.Manager
-	pluginCacheRelease    func() error
-	childControlURL       string
-	childControlTokenFile string
-	retainRuntimeWork     func(session.SessionRef) func()
-	runtimeTaskChanged    func(session.SessionRef)
+	sandboxPersisted   SandboxConfig
+	sandboxRevision    uint64
+	exec               sandbox.Runtime
+	engine             *runtime.Runtime
+	placement          controlplane.PlacementExecutor
+	acpControlPlane    *acpassembly.ControlPlane
+	closing            atomic.Bool
+	gateway            *kernelimpl.Gateway
+	mcpMgr             *mcp.Manager
+	pluginCacheRelease func() error
+	// Pinned child-control values are populated only on detached Runtimes. The
+	// Host root reads the current endpoint from processConfig.
+	pinnedChildControlURL       string
+	pinnedChildControlTokenFile string
+	retainRuntimeWork           func(session.SessionRef) func()
+	runtimeTaskChanged          func(session.SessionRef)
 }

@@ -119,9 +119,7 @@ func (s *runtimeComposition) doctorForWorkspace(ctx context.Context, workspace s
 
 	ref := s.resolveDoctorSessionRef(ctx, req)
 	report.SessionID = strings.TrimSpace(ref.SessionID)
-	s.mu.RLock()
-	securityPosture := resolveProcessSecurityPosture(s.runtime)
-	s.mu.RUnlock()
+	securityPosture := s.processSecurityPosture()
 	report.SessionMode = securityPosture.DisplayMode
 	report.PolicyProfile = securityPosture.PolicyMode
 	alias := ""
@@ -326,7 +324,7 @@ func (s *runtimeComposition) legacyPluginSkillCopyWarnings(workspace string) []s
 		return nil
 	}
 	s.mu.RLock()
-	runtimeCfg := s.runtime
+	runtimeCfg := s.activeRuntime
 	s.mu.RUnlock()
 	if len(runtimeCfg.PluginSkills) == 0 {
 		return nil

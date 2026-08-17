@@ -229,17 +229,18 @@ func (s SkillService) Discover(ctx context.Context, workspaceDir string) ([]Skil
 	if s.composition == nil {
 		return DiscoverSkillMeta(nil, workspaceDir)
 	}
+	processRuntime := s.composition.runtimeProcessSnapshot().runtime
 	s.composition.mu.RLock()
-	runtimeCfg := s.composition.runtime
+	pluginSkills := skill.ClonePluginBundles(s.composition.activeRuntime.PluginSkills)
 	defaultWorkspace := s.composition.workspace.CWD
 	s.composition.mu.RUnlock()
 	if strings.TrimSpace(workspaceDir) == "" {
 		workspaceDir = defaultWorkspace
 	}
 	return DiscoverSkillMetaRequest(skill.DiscoverRequest{
-		Dirs:          stackSkillDiscoveryDirs(workspaceDir, runtimeCfg.SkillDirs),
+		Dirs:          stackSkillDiscoveryDirs(workspaceDir, processRuntime.SkillDirs),
 		WorkspaceDir:  workspaceDir,
-		PluginBundles: skill.ClonePluginBundles(runtimeCfg.PluginSkills),
+		PluginBundles: pluginSkills,
 	})
 }
 
@@ -258,11 +259,17 @@ func (s *runtimeComposition) skillCatalogSnapshot() skill.Catalog {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.runtime.SkillCatalog
+	return s.activeRuntime.SkillCatalog
 }
 
 func (s StatusService) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
 	return s.composition.Doctor(ctx, req)
+}
+
+// ConfigurationRevision returns the canonical Host configuration revision
+// observed by this Runtime's focused status projection.
+func (s StatusService) ConfigurationRevision(ctx context.Context) (uint64, error) {
+	return s.composition.ConfigurationRevision(ctx)
 }
 
 func (s StatusService) Sandbox() SandboxStatus {

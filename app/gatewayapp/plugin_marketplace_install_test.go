@@ -138,10 +138,10 @@ func TestPluginServiceInstallFromMarketplaceUsesEntryNameWhenSourceDirDiffers(t 
 		t.Fatalf("persisted plugins = %#v, want one drawio plugin", doc.Plugins)
 	}
 	activated := activateFutureAssemblyRuntime(t, stack, "marketplace-plugin-install")
-	if len(activated.runtime.PluginSkills) != 1 ||
-		activated.runtime.PluginSkills[0].Plugin != "drawio" ||
-		activated.runtime.PluginSkills[0].Namespace != "drawio" {
-		t.Fatalf("future Session plugin skills = %#v, want drawio identity", activated.runtime.PluginSkills)
+	if len(activated.activeRuntime.PluginSkills) != 1 ||
+		activated.activeRuntime.PluginSkills[0].Plugin != "drawio" ||
+		activated.activeRuntime.PluginSkills[0].Namespace != "drawio" {
+		t.Fatalf("future Session plugin skills = %#v, want drawio identity", activated.activeRuntime.PluginSkills)
 	}
 }
 

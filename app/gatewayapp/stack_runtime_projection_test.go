@@ -21,7 +21,7 @@ func TestNilStackRuntimeProjectionPreservesUnavailableResults(t *testing.T) {
 	if _, err := stack.Models().ListChoices(context.Background(), session.SessionRef{}); err == nil || !strings.Contains(err.Error(), "stack is unavailable") {
 		t.Fatalf("ListModelChoices() error = %v, want unavailable Stack", err)
 	}
-	if view := stack.ControlRuntimeView(); view != nil {
-		t.Fatalf("ControlRuntimeView() = %#v, want nil", view)
+	if turns := stack.ControlKernelReads().TurnState(); turns != nil {
+		t.Fatalf("ControlKernelReads().TurnState() = %#v, want nil", turns)
 	}
 }

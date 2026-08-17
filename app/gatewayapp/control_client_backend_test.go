@@ -660,8 +660,12 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 		},
 		lifecycleCancel: cancelHost,
 	}
+	runtimeStateReader, err := newControlRuntimeStateReader(&stack.composition)
+	if err != nil {
+		t.Fatal(err)
+	}
 	state, err := appserver.NewStateService(appserver.StateServiceConfig{
-		Sessions: sessions, Runtime: stack, Feeds: feeds,
+		Sessions: sessions, Runtime: runtimeStateReader, Feeds: feeds,
 	})
 	if err != nil {
 		t.Fatal(err)
