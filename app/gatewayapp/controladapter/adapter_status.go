@@ -179,7 +179,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		}
 		if includeDiagnostics && ok {
 			if usage, err := d.sessionTokenUsageBreakdown(ctx, activeSession.SessionRef); err == nil {
-				status.Usage.SessionUsageTotal = usageSnapshotFromKernel(usage.Total)
+				status.Usage.SessionUsageTotal = usageSnapshotFromSession(usage.Total)
 				status.Usage.SessionUsageByModel = modelUsageSnapshotsFromBreakdown(usage)
 			} else if ctx.Err() != nil {
 				return controlstatus.StatusSnapshot{}, ctx.Err()

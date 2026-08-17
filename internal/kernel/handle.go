@@ -433,10 +433,10 @@ func canonicalApprovalEventMeta(req *agent.ApprovalRequest) map[string]any {
 	if parentCallID == "" && parentTool == "" && parentTaskID == "" {
 		return nil
 	}
-	return withCaelisRuntimeSection(nil, EventMetaRuntimeStream, map[string]any{
-		EventMetaRuntimeStreamParentCallID: parentCallID,
-		EventMetaRuntimeStreamParentTool:   parentTool,
-		EventMetaRuntimeStreamParentTaskID: parentTaskID,
+	return metautil.WithCompactRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
+		metautil.RuntimeStreamParentCallID: parentCallID,
+		metautil.RuntimeStreamParentTool:   parentTool,
+		metautil.RuntimeStreamParentTaskID: parentTaskID,
 	})
 }
 

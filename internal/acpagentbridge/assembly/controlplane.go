@@ -18,7 +18,7 @@ import (
 type ControlPlane struct {
 	Controllers controller.Backend
 	Subagents   subagent.Runner
-	Updater     assembly.AgentConfigUpdater
+	registry    *acpsubagent.Registry
 	manager     *acpcontroller.Manager
 	runner      *acpsubagent.Runner
 }
@@ -30,8 +30,8 @@ type ControlPlaneConfig struct {
 	SessionPreparer   acpsubagent.SessionPreparer
 }
 
-// NewControlPlane constructs controller, subagent runner, and updater instances
-// backed by the same registry.
+// NewControlPlane constructs controller and subagent runner instances backed
+// by the same registry.
 func NewControlPlane(cfg ControlPlaneConfig) (*ControlPlane, error) {
 	registry, err := acpsubagent.NewRegistry(cfg.Agents)
 	if err != nil {
@@ -52,7 +52,7 @@ func NewControlPlane(cfg ControlPlaneConfig) (*ControlPlane, error) {
 	return &ControlPlane{
 		Controllers: manager,
 		Subagents:   runner,
-		Updater:     &registryUpdater{registry: registry},
+		registry:    registry,
 		manager:     manager,
 		runner:      runner,
 	}, nil
@@ -105,13 +105,11 @@ func (c *ControlPlane) SetControllerMode(ctx context.Context, req acpcontroller.
 	return c.manager.SetControllerMode(ctx, req)
 }
 
-type registryUpdater struct {
-	registry *acpsubagent.Registry
-}
-
-func (u *registryUpdater) UpdateAgents(agents []assembly.AgentConfig) error {
-	if u == nil || u.registry == nil {
-		return fmt.Errorf("internal/acpagentbridge/assembly: agent config updater is unavailable")
+// UpdateAgents replaces the registry snapshot shared by controller and
+// subagent backends without exposing the mutable registry authority.
+func (c *ControlPlane) UpdateAgents(agents []assembly.AgentConfig) error {
+	if c == nil || c.registry == nil {
+		return fmt.Errorf("internal/acpagentbridge/assembly: agent registry is unavailable")
 	}
-	return u.registry.Replace(agents)
+	return c.registry.Replace(agents)
 }

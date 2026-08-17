@@ -11,8 +11,9 @@ import (
 type ApprovalMode = approval.Mode
 
 const (
-	ApprovalModeAutoReview = approval.ModeAutoReview
-	ApprovalModeManual     = approval.ModeManual
+	StateCurrentApprovalMode = approval.StateCurrentApprovalMode
+	ApprovalModeAutoReview   = approval.ModeAutoReview
+	ApprovalModeManual       = approval.ModeManual
 )
 
 func NormalizeApprovalMode(mode string) ApprovalMode {
@@ -20,14 +21,11 @@ func NormalizeApprovalMode(mode string) ApprovalMode {
 }
 
 func CurrentApprovalMode(state map[string]any) ApprovalMode {
-	return CurrentApprovalModeOrDefault(state, ApprovalModeAutoReview)
+	return approval.CurrentMode(state)
 }
 
 func CurrentApprovalModeOrDefault(state map[string]any, fallback ApprovalMode) ApprovalMode {
-	if mode, ok := currentApprovalModeOverride(state); ok {
-		return mode
-	}
-	return NormalizeApprovalMode(string(fallback))
+	return approval.CurrentModeOrDefault(state, fallback)
 }
 
 type ApprovalOption = approval.Option

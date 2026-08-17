@@ -131,7 +131,7 @@ func (r *guardianApprovalReviewer) ReleaseApprovalContext(ref session.SessionRef
 
 func approvalReviewAccountingFromEvent(event *session.Event) approvalReviewAccounting {
 	return approvalReviewAccounting{
-		usage:      kernel.UsageSnapshotFromSessionEvent(event),
+		usage:      session.UsageSnapshotFromSessionEvent(event),
 		invocation: approvalInvocationFromEvent(event),
 	}
 }

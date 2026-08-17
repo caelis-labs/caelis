@@ -25,6 +25,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/testenv"
 
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	acptaskstream "github.com/caelis-labs/caelis/protocol/acp/taskstream"
 )
@@ -237,14 +238,14 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 			Status:        &status,
 		},
 		Meta: map[string]any{
-			kernelimpl.EventMetaRoot: map[string]any{
-				kernelimpl.EventMetaRuntime: map[string]any{
-					kernelimpl.EventMetaRuntimeTool: map[string]any{
-						kernelimpl.EventMetaRuntimeToolName: "RUN_COMMAND",
+			metautil.Root: map[string]any{
+				metautil.Runtime: map[string]any{
+					metautil.RuntimeTool: map[string]any{
+						metautil.RuntimeToolName: "RUN_COMMAND",
 					},
-					kernelimpl.EventMetaRuntimeTask: map[string]any{
-						kernelimpl.EventMetaRuntimeTaskID:         "task-1",
-						kernelimpl.EventMetaRuntimeTaskTerminalID: "terminal-1",
+					metautil.RuntimeTask: map[string]any{
+						metautil.RuntimeTaskID:         "task-1",
+						metautil.RuntimeTaskTerminalID: "terminal-1",
 					},
 				},
 			},

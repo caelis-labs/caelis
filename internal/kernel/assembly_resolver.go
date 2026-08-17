@@ -20,9 +20,6 @@ const (
 	// model reference selected by the TUI. Newer clients store stable model IDs
 	// here; older session state may still contain visible model aliases.
 	StateCurrentModelAlias = "gateway.current_model_alias"
-	// StateCurrentApprovalMode is the durable session-state key for a
-	// per-session approval routing override selected by the TUI.
-	StateCurrentApprovalMode = "gateway.current_approval_mode"
 	// StateCurrentPolicyProfile is the durable session-state key for a
 	// per-session policy profile override.
 	StateCurrentPolicyProfile = "gateway.current_policy_profile"
@@ -446,16 +443,6 @@ func CurrentPolicyProfile(state map[string]any) string {
 	}
 	value, _ := state[StateCurrentPolicyProfile].(string)
 	return policyapi.NormalizeProfileName(value)
-}
-
-func currentApprovalModeOverride(state map[string]any) (ApprovalMode, bool) {
-	if state == nil {
-		return ApprovalModeAutoReview, false
-	}
-	if value, _ := state[StateCurrentApprovalMode].(string); strings.TrimSpace(value) != "" {
-		return NormalizeApprovalMode(value), true
-	}
-	return ApprovalModeAutoReview, false
 }
 
 // UnsupportedLegacyStateKey returns the first old session-state key that should

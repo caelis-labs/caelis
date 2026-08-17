@@ -12,29 +12,29 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func (d *assembler) sessionTokenUsage(ctx context.Context, ref session.SessionRef) (kernel.UsageSnapshot, error) {
+func (d *assembler) sessionTokenUsage(ctx context.Context, ref session.SessionRef) (session.UsageSnapshot, error) {
 	breakdown, err := d.sessionTokenUsageBreakdown(ctx, ref)
 	if err != nil {
-		return kernel.UsageSnapshot{}, err
+		return session.UsageSnapshot{}, err
 	}
 	return breakdown.Total, nil
 }
 
 type sessionTokenUsageBreakdown struct {
-	Total      kernel.UsageSnapshot
-	Main       kernel.UsageSnapshot
-	Subagents  kernel.UsageSnapshot
-	AutoReview kernel.UsageSnapshot
+	Total      session.UsageSnapshot
+	Main       session.UsageSnapshot
+	Subagents  session.UsageSnapshot
+	AutoReview session.UsageSnapshot
 	ByModel    map[string]modelUsageSnapshot
 }
 
 type modelUsageSnapshot struct {
 	Provider string
 	Model    string
-	Usage    kernel.UsageSnapshot
+	Usage    session.UsageSnapshot
 }
 
-func usageSnapshotFromKernel(usage kernel.UsageSnapshot) controlstatus.UsageSnapshot {
+func usageSnapshotFromSession(usage session.UsageSnapshot) controlstatus.UsageSnapshot {
 	return controlstatus.UsageSnapshot{
 		PromptTokens:      usage.PromptTokens,
 		CachedInputTokens: usage.CachedInputTokens,
@@ -84,7 +84,7 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 	lastToolCallUsageKey := ""
 	lastUsageWasToolCall := false
 	for _, event := range events {
-		one := kernel.UsageSnapshotFromSessionEvent(event)
+		one := session.UsageSnapshotFromSessionEvent(event)
 		if one == nil {
 			if session.EventTypeOf(event) != session.EventTypeToolCall {
 				lastToolCallUsageKey = ""
@@ -98,11 +98,11 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 			continue
 		}
 		invocation, hasInvocation := invocationFromSessionEvent(event)
-		provider := kernel.UsageProviderFromSessionEvent(event)
+		provider := session.UsageProviderFromSessionEvent(event)
 		if provider == "" && hasInvocation {
 			provider = invocation.Provider
 		}
-		usage := kernel.NormalizeUsageForDisplay(*one, provider)
+		usage := session.NormalizeUsageForDisplay(*one, provider)
 		breakdown.add(usageCategoryFromSessionEvent(event, fallbackCategory), usage)
 		if hasInvocation {
 			breakdown.addModel(invocation.Provider, invocation.Model, usage)
@@ -123,8 +123,8 @@ func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsage
 	accounting := mapAnyValue(state[kernel.StateUsageAccounting])
 	autoReviewProvider := anyString(accounting["auto_review_provider"])
 	autoReviewModel := anyString(accounting["auto_review_model"])
-	autoReviewUsage := kernel.UsageSnapshotFromMapForProvider(mapAnyValue(accounting[tokenUsageCategoryAutoReview]), autoReviewProvider)
-	var autoReviewByModel kernel.UsageSnapshot
+	autoReviewUsage := session.UsageSnapshotFromMapForProvider(mapAnyValue(accounting[tokenUsageCategoryAutoReview]), autoReviewProvider)
+	var autoReviewByModel session.UsageSnapshot
 	hasAutoReviewByModel := false
 	for _, item := range anySliceValue(accounting["by_model"]) {
 		row := mapAnyValue(item)
@@ -135,17 +135,17 @@ func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsage
 			continue
 		}
 		invocation := session.EventInvocation{Provider: anyString(row["provider"]), Model: anyString(row["model"])}
-		usage := kernel.UsageSnapshotFromMapForProvider(mapAnyValue(row["usage"]), invocation.Provider)
+		usage := session.UsageSnapshotFromMapForProvider(mapAnyValue(row["usage"]), invocation.Provider)
 		if usage == nil {
 			continue
 		}
-		normalized := kernel.NormalizeUsageForDisplay(*usage, invocation.Provider)
+		normalized := session.NormalizeUsageForDisplay(*usage, invocation.Provider)
 		addUsageSnapshot(&autoReviewByModel, normalized)
 		hasAutoReviewByModel = true
 		breakdown.addModel(invocation.Provider, invocation.Model, normalized)
 	}
 	if autoReviewUsage != nil {
-		usage := kernel.NormalizeUsageForDisplay(*autoReviewUsage, autoReviewProvider)
+		usage := session.NormalizeUsageForDisplay(*autoReviewUsage, autoReviewProvider)
 		if hasAutoReviewByModel {
 			// by_model rows are the authoritative auto-review attribution when
 			// present; the aggregate is retained only for older snapshots.
@@ -158,7 +158,7 @@ func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsage
 	return breakdown
 }
 
-func (u *sessionTokenUsageBreakdown) add(category string, usage kernel.UsageSnapshot) {
+func (u *sessionTokenUsageBreakdown) add(category string, usage session.UsageSnapshot) {
 	if u == nil {
 		return
 	}
@@ -173,7 +173,7 @@ func (u *sessionTokenUsageBreakdown) add(category string, usage kernel.UsageSnap
 	}
 }
 
-func (u *sessionTokenUsageBreakdown) addModel(provider string, modelName string, usage kernel.UsageSnapshot) {
+func (u *sessionTokenUsageBreakdown) addModel(provider string, modelName string, usage session.UsageSnapshot) {
 	if u == nil {
 		return
 	}
@@ -205,7 +205,7 @@ func (u *sessionTokenUsageBreakdown) addBreakdown(other sessionTokenUsageBreakdo
 	}
 }
 
-func addUsageSnapshot(total *kernel.UsageSnapshot, usage kernel.UsageSnapshot) {
+func addUsageSnapshot(total *session.UsageSnapshot, usage session.UsageSnapshot) {
 	if total == nil {
 		return
 	}
@@ -378,7 +378,7 @@ func (d *assembler) subagentSessionRefs(ctx context.Context, ref session.Session
 	return out
 }
 
-func usageSnapshotDedupeKey(usage kernel.UsageSnapshot) string {
+func usageSnapshotDedupeKey(usage session.UsageSnapshot) string {
 	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 && usage.TotalTokens == 0 {
 		return ""
 	}
@@ -394,7 +394,7 @@ func modelUsageSnapshotsFromBreakdown(breakdown sessionTokenUsageBreakdown) []co
 		out = append(out, controlstatus.ModelUsageSnapshot{
 			Provider: item.Provider,
 			Model:    item.Model,
-			Usage:    usageSnapshotFromKernel(item.Usage),
+			Usage:    usageSnapshotFromSession(item.Usage),
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {

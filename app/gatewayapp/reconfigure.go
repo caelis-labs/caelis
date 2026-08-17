@@ -478,7 +478,7 @@ func (s *runtimeComposition) installGatewayRuntimeBundle(oldGateway *kernelimpl.
 	oldControlPlane := s.acpControlPlane
 	s.mu.RUnlock()
 	if oldControlPlane != nil {
-		if err := oldControlPlane.Updater.UpdateAgents(bundle.RuntimeConfig.Assembly.Agents); err != nil {
+		if err := oldControlPlane.UpdateAgents(bundle.RuntimeConfig.Assembly.Agents); err != nil {
 			bundle.Close()
 			return err
 		}

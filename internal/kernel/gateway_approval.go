@@ -253,7 +253,7 @@ func (g *Gateway) persistApprovalReviewSessionAccounting(ctx context.Context, re
 		if invocation != nil && strings.TrimSpace(invocation.Provider) != "" {
 			existingProvider = strings.TrimSpace(invocation.Provider)
 		}
-		if existing := UsageSnapshotFromMapForProvider(anyMapValue(accounting["auto_review"]), existingProvider); existing != nil {
+		if existing := session.UsageSnapshotFromMapForProvider(anyMapValue(accounting["auto_review"]), existingProvider); existing != nil {
 			total = *existing
 		}
 		addUsageSnapshot(&total, usageCopy)
@@ -303,7 +303,7 @@ func addUsageByModelState(existing any, invocation session.EventInvocation, usag
 			continue
 		}
 		total := UsageSnapshot{}
-		if existingUsage := UsageSnapshotFromMapForProvider(anyMapValue(item["usage"]), invocation.Provider); existingUsage != nil {
+		if existingUsage := session.UsageSnapshotFromMapForProvider(anyMapValue(item["usage"]), invocation.Provider); existingUsage != nil {
 			total = *existingUsage
 		}
 		addUsageSnapshot(&total, usage)

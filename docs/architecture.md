@@ -194,6 +194,10 @@ Document responsibilities are intentionally separate:
   prompt facade consumed by concrete Surfaces. It contains no Host, Runtime,
   Kernel, persistence, or transport authority and is not a second product API.
 - `internal/controlassembly`: product Agent assembly resolution.
+- `internal/acpagentbridge/assembly`: private external-ACP ControlPlane
+  composition. One shared registry backs controller and subagent execution;
+  registry replacement remains a `ControlPlane` operation rather than a
+  mutable cross-package updater authority.
 - `internal/controlplane`: shared-ledger routing, endpoint lifecycle/recovery,
   and handoff coordination.
 - `app/gatewayapp`: the current product Control host and composition entry. Its
@@ -292,6 +296,10 @@ Document responsibilities are intentionally separate:
 - `internal/kernel`: Control-owned Session/Turn coordination, gateway
   contracts, and their current implementation. The contracts formerly exposed
   by `ports/gateway` now have one authority here rather than a forwarding port.
+  Reusable approval-state and Session-usage semantics remain owned by
+  `agent-sdk/*`, while ACP metadata shape remains owned by
+  `protocol/acp/metautil`; Kernel consumes those owners directly instead of
+  mirroring their helpers.
 - other `internal/control*` packages: current Control integration
   implementations that may converge with adjacent `app/*` and `control/*`
   ownership before any later package split.
