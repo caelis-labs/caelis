@@ -1536,10 +1536,16 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 	} else {
 		runConnectTestCmd(m, cmd)
 	}
+	if got := m.slashArgIndex; got != 1 {
+		t.Fatalf("model checkbox selection after down = %d, want second row", got)
+	}
 	if handled, cmd := m.handleSlashArgKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace})); !handled {
 		t.Fatal("space did not toggle the second model checkbox")
 	} else {
 		runConnectTestCmd(m, cmd)
+	}
+	if got := m.slashArgIndex; got != 1 {
+		t.Fatalf("model checkbox selection after toggle = %d, want second row preserved", got)
 	}
 	if got := m.wizard.state["model"]; got != "MiniMax-M2.7,MiniMax-M2.7-highspeed" {
 		t.Fatalf("selected models = %q", got)

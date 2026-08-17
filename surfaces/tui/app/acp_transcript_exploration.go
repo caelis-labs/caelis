@@ -864,7 +864,7 @@ func isASCIIAlphaNum(ch byte) bool {
 
 func isExplorationSummaryVerb(verb string) bool {
 	switch strings.ToLower(strings.TrimSpace(verb)) {
-	case "read", "list", "glob", "search", "fetch", "skill":
+	case "read", "view", "list", "glob", "search", "fetch", "skill":
 		return true
 	default:
 		return false

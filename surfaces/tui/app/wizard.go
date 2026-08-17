@@ -456,6 +456,7 @@ func (m *Model) toggleWizardMultiSelectCandidate(candidate SlashArgCandidate) (b
 	if step == nil || !step.MultiSelect || !wizardCandidateSupportsMultiSelect(step, candidate) {
 		return false, nil
 	}
+	selectedIndex := m.slashArgIndex
 	values := wizardMultiSelectValues(m.wizard, step)
 	if wizardMultiSelectContains(values, candidate.Value) {
 		values = removeWizardMultiSelectValue(values, candidate.Value)
@@ -472,15 +473,21 @@ func (m *Model) toggleWizardMultiSelectCandidate(candidate SlashArgCandidate) (b
 		m.wizard.state[step.Key] = formatWizardMultiSelect(step, values)
 	}
 	m.slashArgQuery = ""
-	m.slashArgIndex = 0
 	m.setInputText("")
 	m.syncTextareaFromInput()
 	command := m.wizard.completionCommand()
 	if isAsyncSlashArgCommand(command) && m.slashArgLoaded && sameAsyncSlashArgCatalog(m.slashArgLoadedCommand, command) {
 		m.applySlashArgCandidates(command, "", m.slashArgLoadedCandidates, nil)
+		m.slashArgIndex = normalizeFilteredSelection(selectedIndex, "", "", len(m.slashArgCandidates))
 		return true, nil
 	}
-	return true, m.requestCurrentSlashArgCompletion()
+	cmd := m.requestCurrentSlashArgCompletion()
+	// The selected values are part of the wizard command payload, so refreshing
+	// an otherwise unchanged catalog may reset the ordinary completion target.
+	// Keep the user's row while that refresh is pending; the result application
+	// will clamp it if the catalog became shorter.
+	m.slashArgIndex = selectedIndex
+	return true, cmd
 }
 
 func wizardMultiSelectContains(values []string, value string) bool {

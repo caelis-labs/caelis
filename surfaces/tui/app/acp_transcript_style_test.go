@@ -114,6 +114,33 @@ func TestExplorationSummaryWrappedDetailStylesContinuationNumbers(t *testing.T) 
 	}
 }
 
+func TestExplorationSummaryStylesViewAsToolAction(t *testing.T) {
+	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	ctx := BlockRenderContext{Width: 80, TermWidth: 80, Theme: model.theme}
+	block := NewMainACPTurnBlock("turn-view")
+	block.UpdateToolWithMeta("view-1", "ViewImage", "page-4.png", "", true, false, ToolUpdateMeta{ToolKind: "read"})
+	block.UpdateToolWithMeta("read-1", "Read", "notes.txt", "", true, false, ToolUpdateMeta{ToolKind: "read"})
+	block.Status = "completed"
+
+	var viewRow RenderedRow
+	for _, row := range block.Render(ctx) {
+		if strings.Contains(row.Plain, "View page-4.png") {
+			viewRow = row
+			break
+		}
+	}
+	if viewRow.Plain == "" {
+		t.Fatal("Explored summary omitted ViewImage row")
+	}
+	if got := strings.TrimRight(ansi.Strip(viewRow.Styled), " "); got != viewRow.Plain {
+		t.Fatalf("styled strips to %q, want %q", got, viewRow.Plain)
+	}
+	actionText := ansiTextForForeground(t, viewRow.Styled, model.theme.ToolActionStyle(tuikit.ToolActionNeutral).GetForeground())
+	if actionText != "View" {
+		t.Fatalf("tool action foreground covers %q, want View only\nstyled=%q", actionText, viewRow.Styled)
+	}
+}
+
 func TestACPModelRetryNoticeStylesTextAndNumbersSeparately(t *testing.T) {
 	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
 	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme}
