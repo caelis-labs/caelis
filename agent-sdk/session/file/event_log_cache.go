@@ -262,10 +262,11 @@ func (s *Store) storeEventLogCache(path string, cache *eventLogCache) {
 		s.eventLogCaches = map[string]*eventLogCache{}
 	}
 	s.removeEventLogCache(path)
-	if cache == nil || cache.size < 0 || cache.size > maxEventLogCacheBytes {
+	limit := s.eventLogCacheLimitBytes()
+	if cache == nil || cache.size < 0 || cache.size > limit {
 		return
 	}
-	for len(s.eventLogCaches) >= maxEventLogCaches || s.eventLogCacheBytes+cache.size > maxEventLogCacheBytes {
+	for len(s.eventLogCaches) >= maxEventLogCaches || s.eventLogCacheBytes+cache.size > limit {
 		if !s.evictOldestEventLogCache() {
 			return
 		}
@@ -274,6 +275,13 @@ func (s *Store) storeEventLogCache(path string, cache *eventLogCache) {
 	cache.lastUsed = s.eventLogCacheClock
 	s.eventLogCaches[path] = cache
 	s.eventLogCacheBytes += cache.size
+}
+
+func (s *Store) eventLogCacheLimitBytes() int64 {
+	if s != nil && s.eventLogCacheMaxBytes > 0 {
+		return s.eventLogCacheMaxBytes
+	}
+	return maxEventLogCacheBytes
 }
 
 func (s *Store) touchEventLogCache(cache *eventLogCache) {

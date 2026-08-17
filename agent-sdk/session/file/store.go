@@ -23,6 +23,7 @@ func NewStore(cfg Config) *Store {
 		pathCache:          map[string]string{},
 		eventPageIndexes:   map[string]*eventPageIndex{},
 		eventLogCaches:     map[string]*eventLogCache{},
+		eventAppendIndexes: map[string]*eventAppendIndex{},
 	}
 	if store.rootDir == "" {
 		store.rootDir = filepath.Join(os.TempDir(), "caelis-sdk-sessions")
@@ -203,7 +204,7 @@ func (s *Store) StartSession(
 		// document/index recovery boundary as a compound mutation. Otherwise a
 		// crash after the document rename can leave a valid Session permanently
 		// absent from the only lookup/listing index.
-		if err := s.writeRecoverableDocumentTransaction(ctx, doc, nil); err != nil {
+		if err := s.writeRecoverableDocumentTransaction(ctx, doc, nil, nil); err != nil {
 			return err
 		}
 		return nil
@@ -278,6 +279,11 @@ func (s *Store) AppendEventWithOutcome(
 	if event == nil {
 		return session.AppendEventResult{}, session.ErrInvalidEvent
 	}
+	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
+	if err != nil {
+		return session.AppendEventResult{}, err
+	}
+	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.AppendEventResult{}, err
@@ -295,11 +301,7 @@ func (s *Store) AppendEventWithOutcome(
 			return err
 		}
 
-		existingEvents, err := s.eventsForDocumentContext(ctx, doc)
-		if err != nil {
-			return err
-		}
-		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, []*session.Event{event}, existingEvents, nil, nil, req.ExpectedRevision, "", "")
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(ctx, doc, []*session.Event{event}, nil, nil, nil, req.ExpectedRevision, "", "", prewarm)
 		if err != nil {
 			return err
 		}
@@ -308,7 +310,7 @@ func (s *Store) AppendEventWithOutcome(
 			out = session.CloneEvent(normalized)
 			return nil
 		}
-		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted); err != nil {
+		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
 			return err
 		}
 		out = session.CloneEvent(normalized)
@@ -330,6 +332,11 @@ func (s *Store) AppendEventWithOutcomeConditional(
 	if event == nil {
 		return session.AppendEventResult{}, session.ErrInvalidEvent
 	}
+	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
+	if err != nil {
+		return session.AppendEventResult{}, err
+	}
+	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.AppendEventResult{}, err
@@ -357,11 +364,7 @@ func (s *Store) AppendEventWithOutcomeConditional(
 			}
 		}
 
-		existingEvents, err := s.eventsForDocumentContext(ctx, doc)
-		if err != nil {
-			return err
-		}
-		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, []*session.Event{event}, existingEvents, nil, nil, req.ExpectedRevision, "", "")
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(ctx, doc, []*session.Event{event}, nil, nil, nil, req.ExpectedRevision, "", "", prewarm)
 		if err != nil {
 			return err
 		}
@@ -370,7 +373,7 @@ func (s *Store) AppendEventWithOutcomeConditional(
 			out = session.CloneEvent(normalized)
 			return nil
 		}
-		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted); err != nil {
+		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
 			return err
 		}
 		out = session.CloneEvent(normalized)
@@ -383,38 +386,43 @@ func (s *Store) AppendEventWithOutcomeConditional(
 }
 
 func (s *Store) prepareAppendTransactionForDocument(
+	ctx context.Context,
 	doc persistedDocument,
 	events []*session.Event,
-	existingEvents []*session.Event,
+	knownExistingEvents []*session.Event,
 	mutate session.AppendSessionMutation,
 	updateState session.AppendStateUpdate,
 	expectedRevision *uint64,
 	transactionID string,
 	mutationDigest string,
+	prewarm *eventAppendPrewarm,
 ) (persistedDocument, session.PreparedAppendTransaction, error) {
-	existingForPrepare := existingEvents
-	var existingIDs map[string]struct{}
-	var lastSeq uint64
-	if relevant, cachedIDs, cachedLastSeq, ok := s.cachedAppendPreparationInputs(doc, existingEvents, events); ok {
-		existingForPrepare = relevant
-		existingIDs = cachedIDs
-		lastSeq = cachedLastSeq
+	var preparation eventAppendPreparation
+	var err error
+	if knownExistingEvents != nil {
+		preparation = eventAppendPreparation{
+			existingEvents: knownExistingEvents,
+			existingIDs:    existingEventIDSet(knownExistingEvents),
+			lastSeq:        session.LastEventSeq(knownExistingEvents),
+		}
 	} else {
-		existingIDs = existingEventIDSet(existingEvents)
-		lastSeq = session.LastEventSeq(existingEvents)
+		preparation, err = s.eventAppendPreparationContext(ctx, doc, events, prewarm)
+		if err != nil {
+			return persistedDocument{}, session.PreparedAppendTransaction{}, err
+		}
 	}
 	tx, err := session.PrepareAppendTransaction(session.PrepareAppendTransactionRequest{
 		Session:                  doc.Session,
 		State:                    doc.State,
 		Events:                   events,
-		ExistingEvents:           existingForPrepare,
-		ExistingIDs:              existingIDs,
+		ExistingEvents:           preparation.existingEvents,
+		ExistingIDs:              preparation.existingIDs,
 		ExpectedRevision:         expectedRevision,
 		TransactionID:            transactionID,
 		MutationDigest:           mutationDigest,
 		TransactionApplied:       doc.AppliedTransactions[strings.TrimSpace(transactionID)],
 		AppliedTransactionDigest: doc.AppliedTransactionDigests[strings.TrimSpace(transactionID)],
-		LastSeq:                  lastSeq,
+		LastSeq:                  preparation.lastSeq,
 		Now:                      s.now(),
 		AllocateEventID:          s.ensureUniqueEventID,
 		MutateSession:            mutate,
@@ -426,6 +434,13 @@ func (s *Store) prepareAppendTransactionForDocument(
 	doc.Session = tx.Session
 	doc.State = cloneState(tx.State)
 	if doc.PendingApprovals == nil {
+		existingEvents := knownExistingEvents
+		if existingEvents == nil {
+			existingEvents, err = s.eventsForDocumentContext(ctx, doc)
+			if err != nil {
+				return persistedDocument{}, session.PreparedAppendTransaction{}, err
+			}
+		}
 		doc.PendingApprovals = pendingApprovalsFromEvents(existingEvents)
 	}
 	applyPendingApprovalEvents(doc.PendingApprovals, tx.Prepared.Persisted)
@@ -442,12 +457,17 @@ func (s *Store) prepareAppendTransactionForDocument(
 	return doc, tx, nil
 }
 
-func (s *Store) writeDocumentWithEvents(ctx context.Context, doc persistedDocument, events []*session.Event) error {
+func (s *Store) writeDocumentWithEvents(
+	ctx context.Context,
+	doc persistedDocument,
+	events []*session.Event,
+	prewarm *eventAppendPrewarm,
+) error {
 	events = persistedEvents(events)
 	if len(events) == 0 {
 		return s.writeDocument(ctx, doc)
 	}
-	if err := s.writeRecoverableDocumentTransaction(ctx, doc, events); err != nil {
+	if err := s.writeRecoverableDocumentTransaction(ctx, doc, events, prewarm); err != nil {
 		if documentWriteCommitted(err) {
 			return &session.CommittedError{Err: err}
 		}
@@ -463,6 +483,11 @@ func (s *Store) AppendEvents(
 	if len(req.Events) == 0 {
 		return nil, nil
 	}
+	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
+	if err != nil {
+		return nil, err
+	}
+	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 
 	if err := s.mu.LockContext(ctx); err != nil {
 		return nil, err
@@ -478,16 +503,12 @@ func (s *Store) AppendEvents(
 		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
 			return err
 		}
-		existingEvents, err := s.eventsForDocumentContext(ctx, doc)
-		if err != nil {
-			return err
-		}
-		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, req.Events, existingEvents, nil, nil, req.ExpectedRevision, "", "")
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(ctx, doc, req.Events, nil, nil, nil, req.ExpectedRevision, "", "", prewarm)
 		if err != nil {
 			return err
 		}
 		if tx.Changed {
-			if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted); err != nil {
+			if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
 				return err
 			}
 		}
@@ -506,6 +527,11 @@ func (s *Store) AppendEventsAndUpdateState(
 	if len(req.Events) == 0 && req.UpdateState == nil {
 		return nil, nil
 	}
+	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
+	if err != nil {
+		return nil, err
+	}
+	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 
 	if err := s.mu.LockContext(ctx); err != nil {
 		return nil, err
@@ -521,16 +547,12 @@ func (s *Store) AppendEventsAndUpdateState(
 		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
 			return err
 		}
-		existingEvents, err := s.eventsForDocumentContext(ctx, doc)
-		if err != nil {
-			return err
-		}
-		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, req.Events, existingEvents, nil, req.UpdateState, req.ExpectedRevision, req.TransactionID, req.MutationDigest)
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(ctx, doc, req.Events, nil, nil, req.UpdateState, req.ExpectedRevision, req.TransactionID, req.MutationDigest, prewarm)
 		if err != nil {
 			return err
 		}
 		if tx.Changed {
-			if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted); err != nil {
+			if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
 				return err
 			}
 		}
@@ -674,6 +696,11 @@ func (s *Store) BindControllerWithEvent(
 	ctx context.Context,
 	req session.BindControllerWithEventRequest,
 ) (session.Session, *session.Event, error) {
+	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
+	if err != nil {
+		return session.Session{}, nil, err
+	}
+	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, nil, err
 	}
@@ -688,14 +715,11 @@ func (s *Store) BindControllerWithEvent(
 		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
 			return err
 		}
-		existing, err := s.eventsForDocumentContext(ctx, doc)
-		if err != nil {
-			return err
-		}
 		nextDoc, tx, err := s.prepareAppendTransactionForDocument(
+			ctx,
 			doc,
 			[]*session.Event{req.Event},
-			existing,
+			nil,
 			func(active *session.Session, _ session.PreparedAppendEvents) (bool, error) {
 				active.Controller = session.CloneControllerBinding(req.Binding)
 				return true, nil
@@ -704,12 +728,13 @@ func (s *Store) BindControllerWithEvent(
 			req.ExpectedRevision,
 			"",
 			"",
+			prewarm,
 		)
 		if err != nil {
 			return err
 		}
 		normalized := tx.Prepared.Events[0]
-		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted); err != nil {
+		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
 			return err
 		}
 		out = session.CloneSession(nextDoc.Session)
@@ -781,6 +806,11 @@ func (s *Store) PutParticipantWithEvent(
 	ctx context.Context,
 	req session.PutParticipantWithEventRequest,
 ) (session.Session, *session.Event, error) {
+	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
+	if err != nil {
+		return session.Session{}, nil, err
+	}
+	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, nil, err
 	}
@@ -796,14 +826,11 @@ func (s *Store) PutParticipantWithEvent(
 		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
 			return err
 		}
-		existingEvents, err := s.eventsForDocumentContext(ctx, doc)
-		if err != nil {
-			return err
-		}
 		nextDoc, tx, err := s.prepareAppendTransactionForDocument(
+			ctx,
 			doc,
 			[]*session.Event{req.Event},
-			existingEvents,
+			nil,
 			func(activeSession *session.Session, _ session.PreparedAppendEvents) (bool, error) {
 				if strings.TrimSpace(req.Binding.ID) != "" {
 					expected := strings.TrimSpace(req.Binding.DelegationID)
@@ -820,6 +847,7 @@ func (s *Store) PutParticipantWithEvent(
 			req.ExpectedRevision,
 			"",
 			"",
+			prewarm,
 		)
 		if err != nil {
 			return err
@@ -827,7 +855,7 @@ func (s *Store) PutParticipantWithEvent(
 		normalizedEvent := tx.Prepared.Events[0]
 		out = session.CloneSession(nextDoc.Session)
 		outEvent = session.CloneEvent(normalizedEvent)
-		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted); err != nil {
+		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
 			return err
 		}
 		return nil
@@ -896,6 +924,11 @@ func (s *Store) RemoveParticipantWithEvent(
 	ctx context.Context,
 	req session.RemoveParticipantWithEventRequest,
 ) (session.Session, *session.Event, error) {
+	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
+	if err != nil {
+		return session.Session{}, nil, err
+	}
+	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, nil, err
 	}
@@ -911,14 +944,11 @@ func (s *Store) RemoveParticipantWithEvent(
 		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
 			return err
 		}
-		existingEvents, err := s.eventsForDocumentContext(ctx, doc)
-		if err != nil {
-			return err
-		}
 		nextDoc, tx, err := s.prepareAppendTransactionForDocument(
+			ctx,
 			doc,
 			[]*session.Event{req.Event},
-			existingEvents,
+			nil,
 			func(activeSession *session.Session, _ session.PreparedAppendEvents) (bool, error) {
 				if req.ExpectedDelegationID != nil {
 					if err := session.CheckParticipantDelegation(activeSession, req.ParticipantID, *req.ExpectedDelegationID); err != nil {
@@ -931,6 +961,7 @@ func (s *Store) RemoveParticipantWithEvent(
 			req.ExpectedRevision,
 			"",
 			"",
+			prewarm,
 		)
 		if err != nil {
 			return err
@@ -938,7 +969,7 @@ func (s *Store) RemoveParticipantWithEvent(
 		normalizedEvent := tx.Prepared.Events[0]
 		out = session.CloneSession(nextDoc.Session)
 		outEvent = session.CloneEvent(normalizedEvent)
-		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted); err != nil {
+		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
 			return err
 		}
 		return nil

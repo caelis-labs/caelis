@@ -120,13 +120,18 @@ func (s *Store) SettlePendingApproval(
 	if err := session.ValidateSettlePendingApprovalRequest(req); err != nil {
 		return session.SettlePendingApprovalResult{}, err
 	}
+	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
+	if err != nil {
+		return session.SettlePendingApprovalResult{}, err
+	}
+	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.SettlePendingApprovalResult{}, err
 	}
 	defer s.mu.Unlock()
 
 	var out session.SettlePendingApprovalResult
-	err := s.withRootWriteLockContext(ctx, func() error {
+	err = s.withRootWriteLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -149,13 +154,8 @@ func (s *Store) SettlePendingApproval(
 		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {
 			return err
 		}
-		if existingEvents == nil {
-			existingEvents, err = s.eventsForDocumentContext(ctx, doc)
-			if err != nil {
-				return err
-			}
-		}
 		nextDoc, tx, err := s.prepareAppendTransactionForDocument(
+			ctx,
 			doc,
 			[]*session.Event{req.Settlement},
 			existingEvents,
@@ -164,6 +164,7 @@ func (s *Store) SettlePendingApproval(
 			req.ExpectedRevision,
 			"",
 			"",
+			prewarm,
 		)
 		if err != nil {
 			return err
@@ -175,7 +176,7 @@ func (s *Store) SettlePendingApproval(
 		if !tx.Changed {
 			return nil
 		}
-		return s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted)
+		return s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm)
 	})
 	return out, err
 }

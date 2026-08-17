@@ -77,6 +77,48 @@ func TestPendingApprovalsSettlementRemovesPersistedIndexEntry(t *testing.T) {
 	}
 }
 
+func TestSettlePendingApprovalBuildsLargeLogIndexOnlyOnce(t *testing.T) {
+	store, active := newEventPageIndexFixture(t, 8)
+	request := pendingApprovalTestEvent("approval-large-log")
+	if _, err := store.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: active.SessionRef, Event: request,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened := NewStore(Config{RootDir: store.rootDir})
+	reopened.eventLogCacheMaxBytes = 512
+	pending, err := reopened.PendingApprovals(context.Background())
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("PendingApprovals() = %#v, %v, want one candidate", pending, err)
+	}
+	reads := 0
+	reopened.eventLogLineRead = func(_ string, _ int, _ int64) { reads++ }
+	candidate := pending[0]
+	expectedRevision := candidate.Revision
+	result, err := reopened.SettlePendingApproval(context.Background(), session.SettlePendingApprovalRequest{
+		SessionRef: active.SessionRef, ExpectedRevision: &expectedRevision,
+		MutationGuard:          session.ControlMutationGuard(session.ControlMutationPurposeApproval),
+		ApprovalRequestID:      candidate.Request.ApprovalRequestID,
+		ExpectedRequestEventID: candidate.Request.ID,
+		ExpectedRequestSeq:     candidate.Request.Seq,
+		Settlement: &session.Event{
+			Type: session.EventTypeLifecycle, Visibility: session.VisibilityMirror,
+			ApprovalRequestID: candidate.Request.ApprovalRequestID,
+			Lifecycle:         &session.EventLifecycle{Status: "interrupted", Reason: "startup_recovery"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Settled || result.Event == nil {
+		t.Fatalf("SettlePendingApproval() = %#v, want one settlement", result)
+	}
+	if reads != 9 {
+		t.Fatalf("large-log settlement decoded %d lines, want one lock-free index build over 9 lines", reads)
+	}
+}
+
 func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndLeaseRelease(t *testing.T) {
 	root := t.TempDir()
 	service := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-settlement-cas" }})
