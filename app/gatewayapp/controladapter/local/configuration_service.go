@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/caelis-labs/caelis/app/gatewayapp"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
@@ -14,11 +13,11 @@ type ConfigurationService struct {
 	commands appserver.ConfigurationCommandService
 }
 
-func NewConfigurationService(host *gatewayapp.Stack) (*ConfigurationService, error) {
-	if host == nil || host.ConfigurationCommands() == nil {
-		return nil, errors.New("app/gatewayapp/controladapter/local: host and configuration command services are required")
+func newConfigurationService(commands appserver.ConfigurationCommandService) (*ConfigurationService, error) {
+	if commands == nil {
+		return nil, errors.New("app/gatewayapp/controladapter/local: configuration command service is required")
 	}
-	return &ConfigurationService{commands: host.ConfigurationCommands()}, nil
+	return &ConfigurationService{commands: commands}, nil
 }
 
 func (s *ConfigurationService) ConfigureSessionMode(ctx context.Context, principal appserver.Principal, req appserver.SessionModeRequest) (appserver.CommandResult, error) {

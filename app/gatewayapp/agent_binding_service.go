@@ -12,18 +12,21 @@ import (
 // effort binding, custom delegation role, and named binding snapshot. Writes
 // are owned by the shared recoverable Agent command capability.
 type AgentBindingService struct {
-	stack *Stack
+	store *appConfigStore
 }
 
 // AgentBindings returns the read-only Control-owned Agent binding projection.
 func (s *Stack) AgentBindings() AgentBindingService {
-	return AgentBindingService{stack: s}
+	if s == nil {
+		return AgentBindingService{}
+	}
+	return AgentBindingService{store: s.composition.store}
 }
 
 // AgentBindingStatus returns every fixed and custom handle, standard
 // ModelProfile, and binding-set status.
 func (s AgentBindingService) AgentBindingStatus(ctx context.Context) (agentbinding.Status, error) {
-	if s.stack == nil || s.stack.composition.store == nil {
+	if s.store == nil {
 		return agentbinding.Status{}, fmt.Errorf("gatewayapp: Agent binding configuration is unavailable")
 	}
 	if ctx != nil {
@@ -31,7 +34,7 @@ func (s AgentBindingService) AgentBindingStatus(ctx context.Context) (agentbindi
 			return agentbinding.Status{}, err
 		}
 	}
-	doc, err := s.stack.composition.store.LoadContext(contextOrBackground(ctx))
+	doc, err := s.store.LoadContext(contextOrBackground(ctx))
 	if err != nil {
 		return agentbinding.Status{}, err
 	}

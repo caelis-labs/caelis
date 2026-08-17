@@ -11,6 +11,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
@@ -22,32 +23,60 @@ const (
 )
 
 type gatewayACPSurface struct {
-	stack            *Stack
-	fallbackModes    acp.ModeProvider
-	useFallbackModes bool
-	fallbackConfig   acp.ConfigProvider
+	sessions           session.Reader
+	appName            string
+	userID             string
+	fullAccessModeFn   func() bool
+	runtimeStateFn     func(context.Context, session.SessionRef) (SessionRuntimeState, error)
+	modelSnapshotFn    func() persistedModelConfig
+	bindingStatusFn    func(context.Context) (agentbinding.Status, error)
+	controllerStatusFn func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
+	listAgentsFn       func() []ACPAgentInfo
+	fallbackModes      acp.ModeProvider
+	useFallbackModes   bool
+	fallbackConfig     acp.ConfigProvider
 }
 
-func newGatewayACPSurface(stack *Stack, fallbackModes acp.ModeProvider, useFallbackModes bool, fallbackConfig acp.ConfigProvider) gatewayACPSurface {
+type gatewayACPSurfaceDeps struct {
+	sessions           session.Reader
+	appName            string
+	userID             string
+	fullAccessModeFn   func() bool
+	runtimeStateFn     func(context.Context, session.SessionRef) (SessionRuntimeState, error)
+	modelSnapshotFn    func() persistedModelConfig
+	bindingStatusFn    func(context.Context) (agentbinding.Status, error)
+	controllerStatusFn func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
+	listAgentsFn       func() []ACPAgentInfo
+}
+
+func newGatewayACPSurface(deps gatewayACPSurfaceDeps, fallbackModes acp.ModeProvider, useFallbackModes bool, fallbackConfig acp.ConfigProvider) gatewayACPSurface {
 	return gatewayACPSurface{
-		stack:            stack,
-		fallbackModes:    fallbackModes,
-		useFallbackModes: useFallbackModes && fallbackModes != nil,
-		fallbackConfig:   fallbackConfig,
+		sessions:           deps.sessions,
+		appName:            deps.appName,
+		userID:             deps.userID,
+		fullAccessModeFn:   deps.fullAccessModeFn,
+		runtimeStateFn:     deps.runtimeStateFn,
+		modelSnapshotFn:    deps.modelSnapshotFn,
+		bindingStatusFn:    deps.bindingStatusFn,
+		controllerStatusFn: deps.controllerStatusFn,
+		listAgentsFn:       deps.listAgentsFn,
+		fallbackModes:      fallbackModes,
+		useFallbackModes:   useFallbackModes && fallbackModes != nil,
+		fallbackConfig:     fallbackConfig,
 	}
 }
 
 func (p gatewayACPSurface) SessionModes(ctx context.Context, session session.Session) (*acp.SessionModeState, error) {
-	if p.stack != nil && p.stack.composition.processSecurityPosture().FullAccessMode {
+	if p.fullAccessMode() {
 		return &acp.SessionModeState{CurrentModeID: dangerouslySkipPermissionsModeLabel}, nil
 	}
 	if p.useFallbackModes {
 		return p.fallbackModes.SessionModes(ctx, session)
 	}
-	if p.stack == nil {
-		return nil, fmt.Errorf("gatewayapp: stack is unavailable")
+	if p.runtimeStateFn == nil {
+		return nil, fmt.Errorf("gatewayapp: Session Runtime state is unavailable")
 	}
-	state, err := p.stack.SessionRuntimeState(ctx, session.SessionRef)
+	state, err := p.runtimeStateFn(ctx, session.SessionRef)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +108,7 @@ func (p gatewayACPSurface) SessionConfigOptions(ctx context.Context, session ses
 		if err != nil {
 			return nil, err
 		}
-		if p.stack != nil && p.stack.composition.processSecurityPosture().FullAccessMode {
+		if p.fullAccessMode() {
 			fallback = slices.DeleteFunc(fallback, func(option acp.SessionConfigOption) bool {
 				return strings.EqualFold(strings.TrimSpace(option.ID), acpConfigModeID) ||
 					strings.EqualFold(strings.TrimSpace(option.Category), acpConfigModeID)
@@ -134,8 +163,8 @@ func (p gatewayACPSurface) PromptCapabilities(context.Context) (acp.PromptCapabi
 func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID string) ([]acp.AvailableCommand, error) {
 	var bindingStatus agentbinding.Status
 	boundProfiles := map[string]agentbinding.HandleStatus{}
-	if p.stack != nil {
-		if status, err := p.stack.AgentBindings().AgentBindingStatus(ctx); err == nil {
+	if p.bindingStatusFn != nil {
+		if status, err := p.bindingStatusFn(ctx); err == nil {
 			bindingStatus = status
 			for _, handle := range agentbinding.BoundDirectHandles(status) {
 				boundProfiles[string(handle.Definition.Handle)] = handle
@@ -164,7 +193,7 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 		commands = append(commands, cmd)
 		seen[name] = struct{}{}
 	}
-	if p.stack != nil {
+	if p.sessions != nil {
 		if strings.TrimSpace(sessionID) != "" {
 			activeSession, err := p.session(ctx, sessionID)
 			if err != nil {
@@ -191,11 +220,11 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 				})
 				seen[name] = struct{}{}
 			}
-			if remote, active, err := p.stack.ACPControllerStatus(ctx, activeSession.SessionRef); err != nil {
+			if remote, active, err := p.controllerStatus(ctx, activeSession.SessionRef); err != nil {
 				return nil, err
 			} else if active {
 				hiddenRosterNames := make(map[string]struct{})
-				for _, agent := range p.stack.ListACPAgents() {
+				for _, agent := range p.listAgents() {
 					if name := controlagents.NormalizeName(agent.Name); name != "" {
 						hiddenRosterNames[name] = struct{}{}
 					}
@@ -302,7 +331,10 @@ func (p gatewayACPSurface) currentModelConfig(ctx context.Context, session sessi
 	if len(snapshot.Configs) == 0 {
 		return "", ModelConfig{}, false, nil
 	}
-	state, err := p.stack.SessionRuntimeState(ctx, session.SessionRef)
+	if p.runtimeStateFn == nil {
+		return "", ModelConfig{}, false, fmt.Errorf("gatewayapp: Session Runtime state is unavailable")
+	}
+	state, err := p.runtimeStateFn(ctx, session.SessionRef)
 	if err != nil {
 		return "", ModelConfig{}, false, err
 	}
@@ -315,10 +347,12 @@ func (p gatewayACPSurface) currentModelConfig(ctx context.Context, session sessi
 }
 
 func (p gatewayACPSurface) currentReasoningEffort(ctx context.Context, session session.Session, cfg ModelConfig, levels []string) string {
-	state, err := p.stack.SessionRuntimeState(ctx, session.SessionRef)
-	if err == nil {
-		if value := modelcatalog.NormalizeReasoningEffort(state.ReasoningEffort); value != "" {
-			return value
+	if p.runtimeStateFn != nil {
+		state, err := p.runtimeStateFn(ctx, session.SessionRef)
+		if err == nil {
+			if value := modelcatalog.NormalizeReasoningEffort(state.ReasoningEffort); value != "" {
+				return value
+			}
 		}
 	}
 	for _, value := range []string{
@@ -337,7 +371,7 @@ func (p gatewayACPSurface) currentReasoningEffort(ctx context.Context, session s
 }
 
 func (p gatewayACPSurface) session(ctx context.Context, sessionID string) (session.Session, error) {
-	if p.stack == nil || p.stack.composition.sessions == nil {
+	if p.sessions == nil {
 		return session.Session{}, fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
@@ -345,16 +379,14 @@ func (p gatewayACPSurface) session(ctx context.Context, sessionID string) (sessi
 		return session.Session{}, fmt.Errorf("gatewayapp: session id is required")
 	}
 	ref := p.sessionRef(sessionID)
-	return p.stack.composition.sessions.Session(ctx, ref)
+	return p.sessions.Session(ctx, ref)
 }
 
 func (p gatewayACPSurface) sessionRef(sessionID string) session.SessionRef {
 	appName := "caelis"
 	userID := "acp"
-	if p.stack != nil {
-		appName = firstNonEmpty(strings.TrimSpace(p.stack.composition.appName), appName)
-		userID = firstNonEmpty(strings.TrimSpace(p.stack.composition.userID), userID)
-	}
+	appName = firstNonEmpty(strings.TrimSpace(p.appName), appName)
+	userID = firstNonEmpty(strings.TrimSpace(p.userID), userID)
 	return session.SessionRef{
 		AppName:   appName,
 		UserID:    userID,
@@ -363,10 +395,28 @@ func (p gatewayACPSurface) sessionRef(sessionID string) session.SessionRef {
 }
 
 func (p gatewayACPSurface) modelSnapshot() persistedModelConfig {
-	if p.stack == nil || p.stack.composition.lookup == nil {
+	if p.modelSnapshotFn == nil {
 		return persistedModelConfig{}
 	}
-	return p.stack.composition.lookup.Snapshot()
+	return p.modelSnapshotFn()
+}
+
+func (p gatewayACPSurface) fullAccessMode() bool {
+	return p.fullAccessModeFn != nil && p.fullAccessModeFn()
+}
+
+func (p gatewayACPSurface) controllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
+	if p.controllerStatusFn == nil {
+		return controller.ControllerStatus{}, false, nil
+	}
+	return p.controllerStatusFn(ctx, ref)
+}
+
+func (p gatewayACPSurface) listAgents() []ACPAgentInfo {
+	if p.listAgentsFn == nil {
+		return nil
+	}
+	return p.listAgentsFn()
 }
 
 func modeSelectOptions(modes []acp.SessionMode) []acp.SessionConfigSelectOption {

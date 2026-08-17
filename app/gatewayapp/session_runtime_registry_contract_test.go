@@ -35,6 +35,30 @@ func TestSessionRuntimeLifecycleTypesDoNotRetainHostStack(t *testing.T) {
 	}
 }
 
+func TestHostPrivateProjectionTypesDoNotRetainHostStack(t *testing.T) {
+	t.Parallel()
+
+	stackType := reflect.TypeFor[Stack]()
+	for _, test := range []struct {
+		name string
+		typ  reflect.Type
+	}{
+		{name: "ACP surface", typ: reflect.TypeFor[gatewayACPSurface]()},
+		{name: "Agent binding service", typ: reflect.TypeFor[AgentBindingService]()},
+		{name: "Control Runtime service", typ: reflect.TypeFor[ControlRuntimeService]()},
+		{name: "Agent message delivery", typ: reflect.TypeFor[AgentMessageDeliveryService]()},
+		{name: "Workspace reads", typ: reflect.TypeFor[WorkspaceReadService]()},
+		{name: "Task stream router", typ: reflect.TypeFor[hostTaskStreamService]()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if fieldPath, ok := retainedConcreteStack(test.typ, stackType, nil); ok {
+				t.Fatalf("%s retains gatewayapp.Stack through %s", test.name, fieldPath)
+			}
+		})
+	}
+}
+
 func TestStackOwnsRuntimeCompositionAsNamedPrivateState(t *testing.T) {
 	t.Parallel()
 

@@ -13,7 +13,8 @@ import (
 // its Session. Task output remains an independent side stream; this router
 // does not copy it into the Control Session feed.
 type hostTaskStreamService struct {
-	host *Stack
+	host     *runtimeComposition
+	registry *sessionRuntimeRegistry
 }
 
 func (s hostTaskStreamService) Read(
@@ -82,14 +83,13 @@ func (s hostTaskStreamService) Release(ctx context.Context, ref stream.Ref) erro
 }
 
 func (s hostTaskStreamService) service(sessionID string) (stream.Service, error) {
-	host := s.host
-	if host == nil {
+	composition := s.host
+	if composition == nil {
 		return nil, taskStreamRuntimeUnavailable()
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	composition := &host.composition
-	if registry := host.sessionRuntimes; registry != nil {
-		runtime, ok := registry.loaded(sessionID)
+	if s.registry != nil {
+		runtime, ok := s.registry.loaded(sessionID)
 		if !ok || runtime == nil || runtime.instance == nil {
 			return nil, taskStreamRuntimeUnavailable()
 		}

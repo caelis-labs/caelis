@@ -8,27 +8,34 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
 // PresentationService projects ACP-compatible mode, config, model, and command
 // state while all writes remain owned by focused Configuration commands.
 type PresentationService struct {
-	host            *gatewayapp.Stack
-	surface         gatewayapp.ACPPresentationService
-	modeWriteTarget string
+	sessions         session.Reader
+	surface          gatewayapp.ACPPresentationService
+	controllerStatus func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
+	modeWriteTarget  string
 }
 
-func NewPresentationService(host *gatewayapp.Stack, modes acp.ModeProvider, useModes bool, configs acp.ConfigProvider) (*PresentationService, error) {
-	if host == nil {
-		return nil, errors.New("app/gatewayapp/controladapter/local: host Stack is required")
+func newPresentationService(
+	sessions session.Reader,
+	surface gatewayapp.ACPPresentationService,
+	controllerStatus func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error),
+	useModes bool,
+) (*PresentationService, error) {
+	if sessions == nil || surface == nil || controllerStatus == nil {
+		return nil, errors.New("app/gatewayapp/controladapter/local: presentation service dependencies are required")
 	}
 	modeWriteTarget := appserver.PresentationModeTargetApproval
-	if useModes && modes != nil {
+	if useModes {
 		modeWriteTarget = appserver.PresentationModeTargetApp
 	}
 	return &PresentationService{
-		host: host, surface: host.ACPSurface(modes, useModes, configs), modeWriteTarget: modeWriteTarget,
+		sessions: sessions, surface: surface, controllerStatus: controllerStatus, modeWriteTarget: modeWriteTarget,
 	}, nil
 }
 
@@ -43,7 +50,7 @@ func (s *PresentationService) PresentationSnapshot(ctx context.Context, principa
 	}
 	modeWriteTarget := s.modeWriteTarget
 	if active.Controller.Kind == session.ControllerKindACP {
-		remote, found, statusErr := s.host.ACPControllerStatus(ctx, active.SessionRef)
+		remote, found, statusErr := s.controllerStatus(ctx, active.SessionRef)
 		if statusErr != nil {
 			return appserver.PresentationSnapshot{}, statusErr
 		}
@@ -86,14 +93,14 @@ func (s *PresentationService) PresentationCapabilities(ctx context.Context, prin
 }
 
 func (s *PresentationService) authorizedSession(ctx context.Context, principal appserver.Principal, action appserver.Action, sessionID string) (session.Session, error) {
-	if s == nil || s.host == nil || s.host.Sessions() == nil || s.surface == nil {
+	if s == nil || s.sessions == nil || s.surface == nil || s.controllerStatus == nil {
 		return session.Session{}, errors.New("app/gatewayapp/controladapter/local: presentation service is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	if err := (appserver.SessionAuthorizer{Sessions: s.host.Sessions()}).Authorize(ctx, principal, action, sessionID); err != nil {
+	if err := (appserver.SessionAuthorizer{Sessions: s.sessions}).Authorize(ctx, principal, action, sessionID); err != nil {
 		return session.Session{}, err
 	}
-	return s.host.Sessions().Session(ctx, session.SessionRef{SessionID: sessionID})
+	return s.sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
 }
 
 func presentationSnapshot(

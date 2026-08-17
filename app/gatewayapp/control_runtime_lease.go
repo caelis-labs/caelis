@@ -22,6 +22,23 @@ type ControlRuntimeLease struct {
 	closeErr  error
 }
 
+// ControlRuntimeService is the focused Host-private lifecycle authority used
+// by AppServer adapters to acquire an authorized Session Runtime snapshot. It
+// retains the registry and Session authority, never the concrete Host Stack.
+type ControlRuntimeService struct {
+	registry *sessionRuntimeRegistry
+	sessions session.Service
+}
+
+// ControlRuntimes returns the focused Runtime lease authority for AppServer
+// composition.
+func (s *Stack) ControlRuntimes() ControlRuntimeService {
+	if s == nil {
+		return ControlRuntimeService{}
+	}
+	return ControlRuntimeService{registry: s.sessionRuntimes, sessions: s.composition.sessions}
+}
+
 // AcquireControlRuntime authorizes and resolves one Session Runtime snapshot.
 // activate=false observes a loaded fixed Runtime or builds a disposable current
 // workspace composition without retaining it.
@@ -32,15 +49,26 @@ func (s *Stack) AcquireControlRuntime(
 	sessionID string,
 	activate bool,
 ) (*ControlRuntimeLease, error) {
-	if s == nil || s.sessionRuntimes == nil || s.composition.sessions == nil {
+	return s.ControlRuntimes().Acquire(ctx, principal, action, sessionID, activate)
+}
+
+// Acquire authorizes and resolves one Session Runtime snapshot.
+func (s ControlRuntimeService) Acquire(
+	ctx context.Context,
+	principal appserver.Principal,
+	action appserver.Action,
+	sessionID string,
+	activate bool,
+) (*ControlRuntimeLease, error) {
+	if s.registry == nil || s.sessions == nil {
 		return nil, errors.New("gatewayapp: Control Runtime service is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	authorizer := appserver.SessionAuthorizer{Sessions: s.composition.sessions}
+	authorizer := appserver.SessionAuthorizer{Sessions: s.sessions}
 	if err := authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
 		return nil, err
 	}
-	runtime, active, release, err := s.sessionRuntimes.acquireControlRuntime(ctx, sessionID, activate)
+	runtime, active, release, err := s.registry.acquireControlRuntime(ctx, sessionID, activate)
 	if err != nil {
 		return nil, err
 	}

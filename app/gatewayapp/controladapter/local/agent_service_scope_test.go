@@ -6,12 +6,11 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/app/gatewayapp"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
 func TestAgentBindingStatusRejectsSessionScopeBeforeProjection(t *testing.T) {
-	service := &AgentService{host: &gatewayapp.Stack{}}
+	service := &AgentService{}
 	_, err := service.AgentBindingStatus(context.Background(), appserver.Principal{ID: "owner"}, appserver.AgentRequest{
 		SessionID: "session-1",
 	})
@@ -21,7 +20,7 @@ func TestAgentBindingStatusRejectsSessionScopeBeforeProjection(t *testing.T) {
 }
 
 func TestDisconnectCandidatesRejectsSessionScopeBeforeProjection(t *testing.T) {
-	service := &AgentService{host: &gatewayapp.Stack{}}
+	service := &AgentService{}
 	_, err := service.DisconnectCandidates(context.Background(), appserver.Principal{ID: "owner"}, appserver.AgentRequest{
 		SessionID: "session-1",
 	})

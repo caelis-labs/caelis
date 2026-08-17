@@ -15,7 +15,13 @@ import (
 // particular, completion must not start plugin MCP servers, hooks, sandboxes,
 // or controllers merely to read Skill metadata.
 func (s *Stack) CurrentSkillCatalog(ctx context.Context, workspace session.WorkspaceRef) (skill.Catalog, error) {
-	if s == nil || s.composition.store == nil {
+	return s.WorkspaceReads().CurrentSkillCatalog(ctx, workspace)
+}
+
+// CurrentSkillCatalog discovers the configured skills for a future Session
+// without assembling an execution Runtime.
+func (s WorkspaceReadService) CurrentSkillCatalog(ctx context.Context, workspace session.WorkspaceRef) (skill.Catalog, error) {
+	if s.composition == nil || s.composition.store == nil {
 		return skill.Catalog{}, errors.New("gatewayapp: App configuration store is unavailable")
 	}
 	if ctx == nil {
@@ -28,12 +34,12 @@ func (s *Stack) CurrentSkillCatalog(ctx context.Context, workspace session.Works
 	if err != nil {
 		return skill.Catalog{}, err
 	}
-	resolved, err := s.ResolveWorkspaceAddress(workspace)
+	resolved, err := s.Resolve(workspace)
 	if err != nil {
 		return skill.Catalog{}, err
 	}
-	s.composition.mu.RLock()
 	workspaceDir := strings.TrimSpace(resolved.CWD)
+	s.composition.mu.RLock()
 	skillDirs := stackSkillDiscoveryDirs(workspaceDir, s.composition.runtime.SkillDirs)
 	s.composition.mu.RUnlock()
 	contributions, err := resolveGatewayPluginContributions(doc.Plugins)

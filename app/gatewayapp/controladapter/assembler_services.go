@@ -43,46 +43,103 @@ type PluginAssembler interface {
 	InspectPlugin(context.Context, string) (controlprompt.PluginSnapshot, error)
 }
 
+// StatusAssemblyDeps contains only the read authorities used by status
+// projection. It cannot assemble Agent, completion, or plugin capabilities.
+type StatusAssemblyDeps struct {
+	Gateway GatewayRuntimeDeps
+	Session SessionRuntimeDeps
+	Status  StatusRuntimeDeps
+	Agent   AgentRuntimeDeps
+	Model   ModelRuntimeDeps
+	Sandbox SandboxRuntimeDeps
+}
+
+func (d StatusAssemblyDeps) runtimeDeps() *ControlRuntimeDeps {
+	return &ControlRuntimeDeps{
+		Gateway: d.Gateway, Session: d.Session, Status: d.Status,
+		Agent: d.Agent, Model: d.Model, Sandbox: d.Sandbox,
+	}
+}
+
+// AgentAssemblyDeps contains only Agent catalog and live Session projection
+// authorities.
+type AgentAssemblyDeps struct {
+	Gateway GatewayRuntimeDeps
+	Session SessionRuntimeDeps
+	Agent   AgentRuntimeDeps
+}
+
+func (d AgentAssemblyDeps) runtimeDeps() *ControlRuntimeDeps {
+	return &ControlRuntimeDeps{Gateway: d.Gateway, Session: d.Session, Agent: d.Agent}
+}
+
+// CompletionAssemblyDeps contains the catalog and principal-bound Session
+// reads needed to complete AppServer input without mutation authority.
+type CompletionAssemblyDeps struct {
+	Session SessionRuntimeDeps
+	Status  StatusRuntimeDeps
+	Agent   AgentRuntimeDeps
+	Model   ModelRuntimeDeps
+	Skill   SkillRuntimeDeps
+	Plugin  PluginRuntimeDeps
+}
+
+func (d CompletionAssemblyDeps) runtimeDeps() *ControlRuntimeDeps {
+	return &ControlRuntimeDeps{
+		Session: d.Session, Status: d.Status, Agent: d.Agent,
+		Model: d.Model, Skill: d.Skill, Plugin: d.Plugin,
+	}
+}
+
+// PluginAssemblyDeps contains only pure plugin and marketplace reads.
+type PluginAssemblyDeps struct {
+	Plugin PluginRuntimeDeps
+}
+
+func (d PluginAssemblyDeps) runtimeDeps() *ControlRuntimeDeps {
+	return &ControlRuntimeDeps{Plugin: d.Plugin}
+}
+
 // NewStatusAssemblerForSession binds the status assembler to an already
 // authorized Session. It is server composition, not a presentation client.
-func NewStatusAssemblerForSession(ctx context.Context, deps *ControlRuntimeDeps, active session.Session, bindingKey, modelText string) (StatusAssembler, error) {
-	return newAssemblerForSession(ctx, deps, active, bindingKey, modelText)
+func NewStatusAssemblerForSession(ctx context.Context, deps StatusAssemblyDeps, active session.Session, bindingKey, modelText string) (StatusAssembler, error) {
+	return newAssemblerForSession(ctx, deps.runtimeDeps(), active, bindingKey, modelText)
 }
 
 // NewStatusAssemblerForHost constructs the Host-scoped status projection.
 // Session-specific fields remain empty until the caller explicitly selects a
 // Session and uses NewStatusAssemblerForSession.
-func NewStatusAssemblerForHost(deps *ControlRuntimeDeps, bindingKey, modelText string) StatusAssembler {
-	return newHostAssembler(deps, bindingKey, modelText)
+func NewStatusAssemblerForHost(deps StatusAssemblyDeps, bindingKey, modelText string) StatusAssembler {
+	return newHostAssembler(deps.runtimeDeps(), bindingKey, modelText)
 }
 
 // NewAgentAssemblerForSession binds the Agent assembler to an already
 // authorized Session.
-func NewAgentAssemblerForSession(ctx context.Context, deps *ControlRuntimeDeps, active session.Session, bindingKey, modelText string) (AgentAssembler, error) {
-	return newAssemblerForSession(ctx, deps, active, bindingKey, modelText)
+func NewAgentAssemblerForSession(ctx context.Context, deps AgentAssemblyDeps, active session.Session, bindingKey, modelText string) (AgentAssembler, error) {
+	return newAssemblerForSession(ctx, deps.runtimeDeps(), active, bindingKey, modelText)
 }
 
 // NewAgentAssemblerForHost constructs the Host Agent catalog and disconnect
 // projection. Product onboarding mutations use the focused Agent command
 // client. Controller and participant state require the Session variant.
-func NewAgentAssemblerForHost(deps *ControlRuntimeDeps, bindingKey, modelText string) AgentAssembler {
-	return newHostAssembler(deps, bindingKey, modelText)
+func NewAgentAssemblerForHost(deps AgentAssemblyDeps, bindingKey, modelText string) AgentAssembler {
+	return newHostAssembler(deps.runtimeDeps(), bindingKey, modelText)
 }
 
 // NewCompletionAssemblerForSession binds the completion assembler to an
 // already authorized Session.
-func NewCompletionAssemblerForSession(ctx context.Context, deps *ControlRuntimeDeps, active session.Session, bindingKey, modelText string) (CompletionAssembler, error) {
-	return newAssemblerForSession(ctx, deps, active, bindingKey, modelText)
+func NewCompletionAssemblerForSession(ctx context.Context, deps CompletionAssemblyDeps, active session.Session, bindingKey, modelText string) (CompletionAssembler, error) {
+	return newAssemblerForSession(ctx, deps.runtimeDeps(), active, bindingKey, modelText)
 }
 
 // NewCompletionAssemblerForHost constructs workspace/catalog completion
 // without creating or activating a Session.
-func NewCompletionAssemblerForHost(deps *ControlRuntimeDeps, bindingKey, modelText string) CompletionAssembler {
-	return newHostAssembler(deps, bindingKey, modelText)
+func NewCompletionAssemblerForHost(deps CompletionAssemblyDeps, bindingKey, modelText string) CompletionAssembler {
+	return newHostAssembler(deps.runtimeDeps(), bindingKey, modelText)
 }
 
 // NewPluginAssemblerForHost constructs Host-owned plugin and marketplace
 // configuration without a Session address.
-func NewPluginAssemblerForHost(deps *ControlRuntimeDeps, bindingKey, modelText string) PluginAssembler {
-	return newHostAssembler(deps, bindingKey, modelText)
+func NewPluginAssemblerForHost(deps PluginAssemblyDeps, bindingKey, modelText string) PluginAssembler {
+	return newHostAssembler(deps.runtimeDeps(), bindingKey, modelText)
 }

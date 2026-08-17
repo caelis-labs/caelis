@@ -18,23 +18,31 @@ const maxAgentMessageRevisionAttempts = 8
 // AgentMessageService is the embedded AppServer owner of trusted source
 // resolution and target Runtime activation for product ACP Agent messages.
 type AgentMessageService struct {
-	host    *gatewayapp.Stack
+	sessions interface {
+		session.Reader
+		session.StateReader
+	}
 	deliver func(context.Context, gatewayapp.DeliverAgentMessageRequest) (gatewayapp.AgentMessageDelivery, error)
 }
 
-// NewAgentMessageService constructs the focused Agent-message capability.
-func NewAgentMessageService(host *gatewayapp.Stack) (*AgentMessageService, error) {
-	if host == nil || host.ControlClient() == nil {
-		return nil, errors.New("app/gatewayapp/controladapter/local: Agent message host is required")
+func newAgentMessageService(
+	sessions interface {
+		session.Reader
+		session.StateReader
+	},
+	deliver func(context.Context, gatewayapp.DeliverAgentMessageRequest) (gatewayapp.AgentMessageDelivery, error),
+) (*AgentMessageService, error) {
+	if sessions == nil || deliver == nil {
+		return nil, errors.New("app/gatewayapp/controladapter/local: Agent message dependencies are required")
 	}
-	return &AgentMessageService{host: host, deliver: host.DeliverAgentMessage}, nil
+	return &AgentMessageService{sessions: sessions, deliver: deliver}, nil
 }
 
 // DeliverAgentMessage ignores all wire display identity when assigning the
 // canonical Actor. The source must resolve from an exact participant/controller
 // binding or from the durable parent Task relation of a managed child Session.
 func (s *AgentMessageService) DeliverAgentMessage(ctx context.Context, principal appserver.Principal, req appserver.AgentMessageRequest) (appserver.AgentMessageResult, error) {
-	if s == nil || s.host == nil {
+	if s == nil || s.sessions == nil || s.deliver == nil {
 		return appserver.AgentMessageResult{}, errors.New("app/gatewayapp/controladapter/local: Agent message service is unavailable")
 	}
 	req.SessionID = strings.TrimSpace(req.SessionID)
@@ -65,7 +73,7 @@ func (s *AgentMessageService) deliverAgentMessageAttempt(
 	principal appserver.Principal,
 	req appserver.AgentMessageRequest,
 ) (appserver.AgentMessageResult, error) {
-	active, err := s.host.Sessions().Session(ctx, session.SessionRef{SessionID: req.SessionID})
+	active, err := s.sessions.Session(ctx, session.SessionRef{SessionID: req.SessionID})
 	if err != nil {
 		if errors.Is(err, session.ErrSessionNotFound) {
 			return appserver.AgentMessageResult{}, appserver.ErrUnauthorized
@@ -75,7 +83,7 @@ func (s *AgentMessageService) deliverAgentMessageAttempt(
 	if err := authorizeAgentMessagePrincipal(principal, active); err != nil {
 		return appserver.AgentMessageResult{}, err
 	}
-	closed, err := appserver.IsSessionClosed(ctx, s.host.Sessions(), active.SessionRef)
+	closed, err := appserver.IsSessionClosed(ctx, s.sessions, active.SessionRef)
 	if err != nil {
 		return appserver.AgentMessageResult{}, err
 	}
@@ -87,11 +95,7 @@ func (s *AgentMessageService) deliverAgentMessageAttempt(
 		return appserver.AgentMessageResult{}, err
 	}
 	expectedRevision := active.Revision
-	deliver := s.deliver
-	if deliver == nil {
-		deliver = s.host.DeliverAgentMessage
-	}
-	delivery, err := deliver(ctx, gatewayapp.DeliverAgentMessageRequest{
+	delivery, err := s.deliver(ctx, gatewayapp.DeliverAgentMessageRequest{
 		SessionRef:       active.SessionRef,
 		ExpectedRevision: &expectedRevision,
 		RelatedRevisions: source.relatedRevisions,
@@ -205,7 +209,7 @@ func (s *AgentMessageService) managedChildParentSource(
 	if parentSessionID == "" || taskID == "" || childSessionID == "" {
 		return session.ActorRef{}, session.EventScope{}, session.Session{}, errors.New("managed child Session relation is incomplete")
 	}
-	parent, err := s.host.Sessions().Session(ctx, session.SessionRef{SessionID: parentSessionID})
+	parent, err := s.sessions.Session(ctx, session.SessionRef{SessionID: parentSessionID})
 	if err != nil {
 		return session.ActorRef{}, session.EventScope{}, session.Session{}, fmt.Errorf("inspect managed child parent: %w", err)
 	}

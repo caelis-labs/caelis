@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
@@ -71,8 +72,40 @@ func (s *Stack) Status() StatusService {
 	return StatusService{composition: &s.composition, preflightSandboxFn: s.PreflightSandbox}
 }
 
+// ControlStatus returns the focused read-only status projection used by
+// AppServer composition. Host bootstrap preflight remains on Status().
+func (s *Stack) ControlStatus() StatusService {
+	if s == nil {
+		return StatusService{}
+	}
+	return s.composition.Status()
+}
+
 func (s *Stack) ACPSurface(modes acp.ModeProvider, useFallbackModes bool, configs acp.ConfigProvider) ACPPresentationService {
-	return newGatewayACPSurface(s, modes, useFallbackModes, configs)
+	if s == nil {
+		return newGatewayACPSurface(gatewayACPSurfaceDeps{}, modes, useFallbackModes, configs)
+	}
+	composition := &s.composition
+	status := composition.Status()
+	agents := composition.Agents()
+	bindingStatus := s.AgentBindings()
+	lookup := composition.lookup
+	return newGatewayACPSurface(gatewayACPSurfaceDeps{
+		sessions:         composition.sessions,
+		appName:          composition.appName,
+		userID:           composition.userID,
+		fullAccessModeFn: func() bool { return composition.processSecurityPosture().FullAccessMode },
+		runtimeStateFn:   status.SessionRuntimeState,
+		modelSnapshotFn: func() persistedModelConfig {
+			if lookup == nil {
+				return persistedModelConfig{}
+			}
+			return lookup.Snapshot()
+		},
+		bindingStatusFn:    bindingStatus.AgentBindingStatus,
+		controllerStatusFn: agents.ControllerStatus,
+		listAgentsFn:       agents.List,
+	}, modes, useFallbackModes, configs)
 }
 
 func (s ModelService) ListAliases(ctx context.Context, ref session.SessionRef) ([]string, error) {
@@ -177,6 +210,12 @@ func (s AgentService) DisconnectCandidates(ctx context.Context) ([]controlagents
 	return s.composition.DisconnectCandidates(ctx)
 }
 
+// DisconnectCandidatesSnapshot returns the revision-bound external Agent
+// roster used by Host-scoped AppServer reads.
+func (s AgentService) DisconnectCandidatesSnapshot(ctx context.Context) (appserver.DisconnectCandidatesSnapshot, error) {
+	return s.composition.DisconnectCandidatesSnapshot(ctx)
+}
+
 func (s AgentService) List() []ACPAgentInfo {
 	return s.composition.ListACPAgents()
 }
@@ -228,6 +267,18 @@ func (s StatusService) Doctor(ctx context.Context, req DoctorRequest) (DoctorRep
 
 func (s StatusService) Sandbox() SandboxStatus {
 	return s.composition.SandboxStatus()
+}
+
+// SandboxForWorkspace projects sandbox state for one explicitly addressed
+// workspace without substituting the Host startup workspace.
+func (s StatusService) SandboxForWorkspace(workspace session.WorkspaceRef) SandboxStatus {
+	return s.composition.SandboxStatusForWorkspace(workspace)
+}
+
+// DoctorForWorkspace returns diagnostics for one explicitly addressed
+// workspace without retaining the concrete Host Stack.
+func (s StatusService) DoctorForWorkspace(ctx context.Context, workspace session.WorkspaceRef, req DoctorRequest) (DoctorReport, error) {
+	return s.composition.DoctorForWorkspace(ctx, workspace, req)
 }
 
 // PreflightSandbox is a Host bootstrap diagnostic used before presentation

@@ -138,7 +138,8 @@ func newAgentMessageRaceFixture(t *testing.T) (*gatewayapp.Stack, *AgentMessageS
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewAgentMessageService(host)
+	delivery := host.AgentMessageDelivery()
+	service, err := newAgentMessageService(host.Sessions(), delivery.Deliver)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
-	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -16,14 +15,30 @@ import (
 // CompletionService implements Host completion with optional Session-bound
 // runtime projections inside the AppServer boundary.
 type CompletionService struct {
-	host *gatewayapp.Stack
+	hostDeps            *controladapter.CompletionAssemblyDeps
+	acquireRuntime      acquireControlRuntimeFunc
+	resolveWorkspace    resolveWorkspaceAddressFunc
+	currentSkillCatalog func(context.Context, session.WorkspaceRef) (skill.Catalog, error)
+	listSessions        func(context.Context, appserver.Principal, appserver.ListSessionsRequest) (session.SessionList, error)
 }
 
-func NewCompletionService(host *gatewayapp.Stack) (*CompletionService, error) {
-	if host == nil {
-		return nil, errors.New("app/gatewayapp/controladapter/local: host Stack is required")
+type completionServiceDeps struct {
+	hostDeps            *controladapter.CompletionAssemblyDeps
+	acquireRuntime      acquireControlRuntimeFunc
+	resolveWorkspace    resolveWorkspaceAddressFunc
+	currentSkillCatalog func(context.Context, session.WorkspaceRef) (skill.Catalog, error)
+	listSessions        func(context.Context, appserver.Principal, appserver.ListSessionsRequest) (session.SessionList, error)
+}
+
+func newCompletionService(deps completionServiceDeps) (*CompletionService, error) {
+	if deps.hostDeps == nil || deps.acquireRuntime == nil || deps.resolveWorkspace == nil ||
+		deps.currentSkillCatalog == nil || deps.listSessions == nil {
+		return nil, errors.New("app/gatewayapp/controladapter/local: completion service dependencies are required")
 	}
-	return &CompletionService{host: host}, nil
+	return &CompletionService{
+		hostDeps: deps.hostDeps, acquireRuntime: deps.acquireRuntime, resolveWorkspace: deps.resolveWorkspace,
+		currentSkillCatalog: deps.currentSkillCatalog, listSessions: deps.listSessions,
+	}, nil
 }
 
 func (s *CompletionService) CompleteFile(ctx context.Context, principal appserver.Principal, req appserver.CompletionRequest) ([]appserver.CompletionCandidate, error) {
@@ -71,7 +86,7 @@ func (s *CompletionService) slashArgAdapter(
 	principal appserver.Principal,
 	req appserver.CompletionRequest,
 ) (controladapter.CompletionAssembler, func(), error) {
-	if s == nil || s.host == nil {
+	if s == nil || s.hostDeps == nil {
 		return nil, nil, errors.New("app/gatewayapp/controladapter/local: completion service is unavailable")
 	}
 	if err := authorizeHostCapability(principal); err != nil {
@@ -84,7 +99,7 @@ func (s *CompletionService) slashArgAdapter(
 	}
 	deps.Session.Workspace = workspace
 	return controladapter.NewCompletionAssemblerForHost(
-		deps,
+		*deps,
 		strings.TrimSpace(req.Surface),
 		"",
 	), func() {}, nil
@@ -111,7 +126,7 @@ func (s *CompletionService) skillRuntimeAdapter(
 	if strings.TrimSpace(req.SessionID) != "" {
 		return s.runtimeAdapter(ctx, principal, req)
 	}
-	if s == nil || s.host == nil {
+	if s == nil || s.hostDeps == nil {
 		return nil, nil, errors.New("app/gatewayapp/controladapter/local: completion service is unavailable")
 	}
 	if err := authorizeHostCapability(principal); err != nil {
@@ -121,7 +136,7 @@ func (s *CompletionService) skillRuntimeAdapter(
 	if err != nil {
 		return nil, nil, err
 	}
-	catalog, err := s.host.CurrentSkillCatalog(ctx, workspace)
+	catalog, err := s.currentSkillCatalog(ctx, workspace)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -129,7 +144,7 @@ func (s *CompletionService) skillRuntimeAdapter(
 	deps.Session.Workspace = workspace
 	deps.Skill.SnapshotFn = func() skill.Catalog { return catalog }
 	driver := controladapter.NewCompletionAssemblerForHost(
-		deps,
+		*deps,
 		strings.TrimSpace(req.Surface),
 		"",
 	)
@@ -137,7 +152,7 @@ func (s *CompletionService) skillRuntimeAdapter(
 }
 
 func (s *CompletionService) runtimeAdapter(ctx context.Context, principal appserver.Principal, req appserver.CompletionRequest) (controladapter.CompletionAssembler, func(), error) {
-	if s == nil || s.host == nil {
+	if s == nil || s.hostDeps == nil {
 		return nil, nil, errors.New("app/gatewayapp/controladapter/local: completion service is unavailable")
 	}
 	if err := authorizeHostCapability(principal); err != nil {
@@ -151,18 +166,23 @@ func (s *CompletionService) runtimeAdapter(ctx context.Context, principal appser
 		}
 		deps.Session.Workspace = workspace
 		return controladapter.NewCompletionAssemblerForHost(
-			deps,
+			*deps,
 			strings.TrimSpace(req.Surface),
 			"",
 		), func() {}, nil
 	}
-	lease, err := s.host.AcquireControlRuntime(ctx, principal, appserver.ActionSessionInspect, req.SessionID, false)
+	lease, err := s.acquireRuntime(ctx, principal, appserver.ActionSessionInspect, req.SessionID, false)
 	if err != nil {
 		return nil, nil, err
 	}
-	deps = controlRuntimeDepsFromView(lease.ControlRuntimeView())
+	assemblyDeps := controlAssemblyDepsFromView(lease.ControlRuntimeView())
+	if assemblyDeps == nil {
+		_ = lease.Close(ctx)
+		return nil, nil, errors.New("app/gatewayapp/controladapter/local: completion Runtime projection is unavailable")
+	}
+	deps = &assemblyDeps.Completion
 	s.bindPrincipalSessionList(deps, principal)
-	driver, err := controladapter.NewCompletionAssemblerForSession(ctx, deps, lease.Session(), strings.TrimSpace(req.Surface), "")
+	driver, err := controladapter.NewCompletionAssemblerForSession(ctx, *deps, lease.Session(), strings.TrimSpace(req.Surface), "")
 	if err != nil {
 		_ = lease.Close(ctx)
 		return nil, nil, err
@@ -171,27 +191,30 @@ func (s *CompletionService) runtimeAdapter(ctx context.Context, principal appser
 }
 
 func (s *CompletionService) workspaceAddress(key, cwd string) (session.WorkspaceRef, error) {
-	if s == nil || s.host == nil {
+	if s == nil || s.resolveWorkspace == nil {
 		return session.WorkspaceRef{}, errors.New("app/gatewayapp/controladapter/local: completion service is unavailable")
 	}
-	return s.host.ResolveWorkspaceAddress(session.WorkspaceRef{
+	return s.resolveWorkspace(session.WorkspaceRef{
 		Key: strings.TrimSpace(key),
 		CWD: strings.TrimSpace(cwd),
 	})
 }
 
-func (s *CompletionService) controlRuntimeDeps(principal appserver.Principal) *controladapter.ControlRuntimeDeps {
-	deps := controlRuntimeDeps(s.host)
-	s.bindPrincipalSessionList(deps, principal)
-	return deps
+func (s *CompletionService) controlRuntimeDeps(principal appserver.Principal) *controladapter.CompletionAssemblyDeps {
+	if s == nil || s.hostDeps == nil {
+		return nil
+	}
+	deps := *s.hostDeps
+	s.bindPrincipalSessionList(&deps, principal)
+	return &deps
 }
 
-func (s *CompletionService) bindPrincipalSessionList(deps *controladapter.ControlRuntimeDeps, principal appserver.Principal) {
+func (s *CompletionService) bindPrincipalSessionList(deps *controladapter.CompletionAssemblyDeps, principal appserver.Principal) {
 	if deps == nil {
 		return
 	}
 	deps.Session.ListSessionsFn = func(ctx context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
-		return s.host.ControlClient().ListSessions(ctx, principal, appserver.ListSessionsRequest{
+		return s.listSessions(ctx, principal, appserver.ListSessionsRequest{
 			WorkspaceKey: req.WorkspaceKey,
 			CWD:          req.CWD,
 			Cursor:       req.Cursor,

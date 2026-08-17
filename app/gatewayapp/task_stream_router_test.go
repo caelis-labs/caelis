@@ -34,7 +34,7 @@ func TestHostTaskStreamServiceRoutesByOwningSessionRuntime(t *testing.T) {
 	}
 	stack.sessionRuntimes.mu.Unlock()
 
-	router := hostTaskStreamService{host: stack}
+	router := hostTaskStreamService{host: &stack.composition, registry: stack.sessionRuntimes}
 	root, err := router.Read(context.Background(), stream.ReadRequest{
 		Ref: stream.Ref{SessionID: active.SessionID, TaskID: "task-root"},
 	})

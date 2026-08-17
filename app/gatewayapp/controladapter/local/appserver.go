@@ -20,27 +20,58 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	if host == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: host Stack is required")
 	}
-	agentMessages, err := NewAgentMessageService(host)
+	view := host.ControlRuntimeView()
+	hostDeps := controlAssemblyDepsFromView(view)
+	runtimes := host.ControlRuntimes()
+	agentMessageDelivery := host.AgentMessageDelivery()
+	workspaceReads := host.WorkspaceReads()
+	statusReads := host.ControlStatus()
+	agentReads := host.Agents()
+	preparationReads := host.ACPPreparationReads()
+	control := host.ControlClient()
+	configurationCommands := host.ConfigurationCommands()
+	agentCommands := host.AgentCommands()
+	pluginCommands := host.PluginCommands()
+	participants := host.ControlParticipants()
+	tasks := host.TaskStreams()
+	terminalStreams := host.ControlTerminalStreams()
+	if view == nil || hostDeps == nil || control == nil || configurationCommands == nil || agentCommands == nil ||
+		pluginCommands == nil || participants == nil || tasks == nil || terminalStreams == nil {
+		return nil, errors.New("app/gatewayapp/controladapter/local: Host AppServer dependencies are unavailable")
+	}
+
+	agentMessages, err := newAgentMessageService(view.Sessions, agentMessageDelivery.Deliver)
 	if err != nil {
 		return nil, err
 	}
-	status, err := NewStatusService(host)
+	status, err := newStatusService(statusServiceDeps{
+		hostDeps: &hostDeps.Status, acquireRuntime: runtimes.Acquire, resolveWorkspace: workspaceReads.Resolve,
+		sandboxStatusForWorkspace: statusReads.SandboxForWorkspace, doctorForWorkspace: statusReads.DoctorForWorkspace,
+	})
 	if err != nil {
 		return nil, err
 	}
-	configuration, err := NewConfigurationService(host)
+	configuration, err := newConfigurationService(configurationCommands)
 	if err != nil {
 		return nil, err
 	}
-	agents, err := NewAgentService(host)
+	bindingStatus := host.AgentBindings()
+	agents, err := newAgentService(agentServiceDeps{
+		hostDeps: &hostDeps.Agent, acquireRuntime: runtimes.Acquire, handoff: control.Handoff,
+		preparation: preparationReads.Preparation, disconnectCandidates: agentReads.DisconnectCandidatesSnapshot,
+		bindingStatus: bindingStatus.AgentBindingStatus, commands: agentCommands,
+	})
 	if err != nil {
 		return nil, err
 	}
-	completion, err := NewCompletionService(host)
+	completion, err := newCompletionService(completionServiceDeps{
+		hostDeps: &hostDeps.Completion, acquireRuntime: runtimes.Acquire, resolveWorkspace: workspaceReads.Resolve,
+		currentSkillCatalog: workspaceReads.CurrentSkillCatalog, listSessions: control.ListSessions,
+	})
 	if err != nil {
 		return nil, err
 	}
-	plugins, err := NewPluginService(host)
+	plugins, err := newPluginService(&hostDeps.Plugin, pluginCommands)
 	if err != nil {
 		return nil, err
 	}
@@ -52,19 +83,24 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 		AppName: dependencies.AppName, UserID: dependencies.UserID,
 		Assembly: dependencies.Assembly, Sessions: dependencies.Sessions,
 	})
-	presentation, err := NewPresentationService(host, modes, len(dependencies.Assembly.Modes) > 0, configs)
+	presentation, err := newPresentationService(
+		dependencies.Sessions,
+		host.ACPSurface(modes, len(dependencies.Assembly.Modes) > 0, configs),
+		view.ControllerStatusFn,
+		len(dependencies.Assembly.Modes) > 0 && modes != nil,
+	)
 	if err != nil {
 		return nil, err
 	}
-	terminal, err := NewTerminalService(host.TaskStreams(), host.ControlTerminalStreams())
+	terminal, err := NewTerminalService(tasks, terminalStreams)
 	if err != nil {
 		return nil, err
 	}
 	server := &AppServer{
 		Services: appserver.AppServerServices{
-			Sessions: host.ControlClient(), Participants: host.ControlParticipants(), AgentMessages: agentMessages, Status: status,
+			Sessions: control, Participants: participants, AgentMessages: agentMessages, Status: status,
 			Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
-			Presentation: presentation, Terminal: terminal, Tasks: host.TaskStreams(),
+			Presentation: presentation, Terminal: terminal, Tasks: tasks,
 		},
 	}
 	if err := server.Services.Validate(); err != nil {

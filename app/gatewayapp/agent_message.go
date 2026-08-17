@@ -30,18 +30,40 @@ type DeliverAgentMessageRequest struct {
 	RelatedRevisions []session.SessionRevisionPrecondition
 }
 
+// AgentMessageDeliveryService is the focused Host-private write authority used
+// by AppServer Agent-message ingress. It retains only Runtime delivery
+// authorities and never the concrete Host Stack.
+type AgentMessageDeliveryService struct {
+	composition *runtimeComposition
+	registry    *sessionRuntimeRegistry
+}
+
+// AgentMessageDelivery returns the focused Agent-message delivery authority.
+func (s *Stack) AgentMessageDelivery() AgentMessageDeliveryService {
+	if s == nil {
+		return AgentMessageDeliveryService{}
+	}
+	return AgentMessageDeliveryService{composition: &s.composition, registry: s.sessionRuntimes}
+}
+
 // DeliverAgentMessage activates the target Session Runtime when necessary and
 // delegates message ownership to its Control Gateway.
 func (s *Stack) DeliverAgentMessage(ctx context.Context, request DeliverAgentMessageRequest) (AgentMessageDelivery, error) {
-	if s == nil {
+	return s.AgentMessageDelivery().Deliver(ctx, request)
+}
+
+// Deliver activates the target Session Runtime when necessary and delegates
+// message ownership to its Control Gateway.
+func (s AgentMessageDeliveryService) Deliver(ctx context.Context, request DeliverAgentMessageRequest) (AgentMessageDelivery, error) {
+	if s.composition == nil {
 		return AgentMessageDelivery{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	ref := session.NormalizeSessionRef(request.SessionRef)
-	composition := &s.composition
+	composition := s.composition
 	var release func(context.Context) error
 	var active session.Session
-	if s.sessionRuntimes != nil {
-		runtime, loaded, releaseRuntime, err := s.sessionRuntimes.acquireControlRuntime(ctx, ref.SessionID, true)
+	if s.registry != nil {
+		runtime, loaded, releaseRuntime, err := s.registry.acquireControlRuntime(ctx, ref.SessionID, true)
 		if err != nil {
 			return AgentMessageDelivery{}, err
 		}

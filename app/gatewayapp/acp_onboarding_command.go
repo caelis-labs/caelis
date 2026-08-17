@@ -385,8 +385,27 @@ func (s *Stack) preflightACPPreparation(ctx context.Context, expected uint64) er
 	return nil
 }
 
+// ACPPreparationReadService is the focused Host-private preparation read
+// authority used by the AppServer Agent capability.
+type ACPPreparationReadService struct {
+	store *acpPreparationStore
+}
+
+// ACPPreparationReads returns the focused preparation read authority.
+func (s *Stack) ACPPreparationReads() ACPPreparationReadService {
+	if s == nil {
+		return ACPPreparationReadService{}
+	}
+	return ACPPreparationReadService{store: s.acpPreparations}
+}
+
 func (s *Stack) ACPPreparation(ctx context.Context, principalID string, ref string) (controlagents.ACPPreparation, error) {
-	preparation, err := s.ownedACPPreparation(ctx, principalID, ref, "")
+	return s.ACPPreparationReads().Preparation(ctx, principalID, ref)
+}
+
+// Preparation loads one preparation owned by the bound principal.
+func (s ACPPreparationReadService) Preparation(ctx context.Context, principalID string, ref string) (controlagents.ACPPreparation, error) {
+	preparation, err := ownedACPPreparation(s.store, ctx, principalID, ref, "")
 	switch {
 	case err == nil:
 		return preparation, nil
@@ -400,10 +419,17 @@ func (s *Stack) ACPPreparation(ctx context.Context, principalID string, ref stri
 }
 
 func (s *Stack) ownedACPPreparation(ctx context.Context, principalID, ref, digest string) (controlagents.ACPPreparation, error) {
-	if s == nil || s.acpPreparations == nil {
+	if s == nil {
 		return controlagents.ACPPreparation{}, errors.New("gatewayapp: ACP preparation is unavailable")
 	}
-	preparation, err := s.acpPreparations.Get(ctx, ref)
+	return ownedACPPreparation(s.acpPreparations, ctx, principalID, ref, digest)
+}
+
+func ownedACPPreparation(store *acpPreparationStore, ctx context.Context, principalID, ref, digest string) (controlagents.ACPPreparation, error) {
+	if store == nil {
+		return controlagents.ACPPreparation{}, errors.New("gatewayapp: ACP preparation is unavailable")
+	}
+	preparation, err := store.Get(ctx, ref)
 	if err != nil {
 		return controlagents.ACPPreparation{}, err
 	}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
@@ -14,15 +13,15 @@ import (
 // inside the AppServer boundary. Reads stay pure observations; mutations use
 // the shared recoverable command path.
 type PluginService struct {
-	host     *gatewayapp.Stack
+	hostDeps *controladapter.PluginAssemblyDeps
 	commands appserver.PluginCommandService
 }
 
-func NewPluginService(host *gatewayapp.Stack) (*PluginService, error) {
-	if host == nil || host.PluginCommands() == nil {
-		return nil, errors.New("app/gatewayapp/controladapter/local: host Stack is required")
+func newPluginService(hostDeps *controladapter.PluginAssemblyDeps, commands appserver.PluginCommandService) (*PluginService, error) {
+	if hostDeps == nil || commands == nil {
+		return nil, errors.New("app/gatewayapp/controladapter/local: plugin service dependencies are required")
 	}
-	return &PluginService{host: host, commands: host.PluginCommands()}, nil
+	return &PluginService{hostDeps: hostDeps, commands: commands}, nil
 }
 
 func (s *PluginService) ListPlugins(ctx context.Context, principal appserver.Principal, req appserver.PluginRequest) ([]appserver.PluginSnapshot, error) {
@@ -82,13 +81,13 @@ func (s *PluginService) InspectPlugin(ctx context.Context, principal appserver.P
 }
 
 func (s *PluginService) hostAdapter(principal appserver.Principal, req appserver.PluginRequest) (controladapter.PluginAssembler, error) {
-	if s == nil || s.host == nil {
+	if s == nil || s.hostDeps == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: plugin service is unavailable")
 	}
 	if err := authorizeHostCapability(principal); err != nil {
 		return nil, err
 	}
-	return controladapter.NewPluginAssemblerForHost(controlRuntimeDeps(s.host), strings.TrimSpace(req.Surface), ""), nil
+	return controladapter.NewPluginAssemblerForHost(*s.hostDeps, strings.TrimSpace(req.Surface), ""), nil
 }
 
 var _ appserver.PluginService = (*PluginService)(nil)

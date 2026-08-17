@@ -7,7 +7,7 @@ import (
 )
 
 func TestStatusProjectsCanonicalConfigurationRevision(t *testing.T) {
-	driver := NewStatusAssemblerForHost(&ControlRuntimeDeps{Status: StatusRuntimeDeps{
+	driver := NewStatusAssemblerForHost(StatusAssemblyDeps{Status: StatusRuntimeDeps{
 		ConfigurationRevisionFn: func(context.Context) (uint64, error) { return 42, nil },
 	}}, "test", "")
 	status, err := driver.LightweightStatus(context.Background())
@@ -21,7 +21,7 @@ func TestStatusProjectsCanonicalConfigurationRevision(t *testing.T) {
 
 func TestStatusPropagatesConfigurationRevisionReadFailure(t *testing.T) {
 	fault := errors.New("config read failed")
-	driver := NewStatusAssemblerForHost(&ControlRuntimeDeps{Status: StatusRuntimeDeps{
+	driver := NewStatusAssemblerForHost(StatusAssemblyDeps{Status: StatusRuntimeDeps{
 		ConfigurationRevisionFn: func(context.Context) (uint64, error) { return 0, fault },
 	}}, "test", "")
 	if _, err := driver.LightweightStatus(context.Background()); !errors.Is(err, fault) {
@@ -30,7 +30,7 @@ func TestStatusPropagatesConfigurationRevisionReadFailure(t *testing.T) {
 }
 
 func TestStatusProjectsEffectiveProcessModelWithoutSession(t *testing.T) {
-	driver := NewStatusAssemblerForHost(&ControlRuntimeDeps{Model: ModelRuntimeDeps{
+	driver := NewStatusAssemblerForHost(StatusAssemblyDeps{Model: ModelRuntimeDeps{
 		EffectiveAliasFn:  func() string { return "xiaomi/mimo-v2.5-pro" },
 		EffectiveEffortFn: func() string { return "high" },
 	}}, "test", "")

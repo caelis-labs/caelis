@@ -251,7 +251,7 @@ func (s *Stack) ControlTerminalStreams() stream.Controller {
 	if s == nil {
 		return nil
 	}
-	return hostTaskStreamService{host: s}
+	return hostTaskStreamService{host: &s.composition, registry: s.sessionRuntimes}
 }
 
 // ControlClientRuntimeState reads live state only from an already activated
@@ -561,9 +561,10 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	stack.configurationCommands = controlCommands
 	stack.agentCommands = controlCommands
 	stack.pluginCommands = controlCommands
+	taskStreamRouter := &hostTaskStreamService{host: &stack.composition}
 	controlTaskStreams, err := controltaskstream.New(controltaskstream.Config{
 		Tasks:           taskStore,
-		Streams:         func() stream.Service { return hostTaskStreamService{host: stack} },
+		Streams:         func() stream.Service { return taskStreamRouter },
 		Sessions:        sessions,
 		SubagentHistory: stack,
 		Authorizer:      taskStreamAuthorizer{inner: appserver.SessionAuthorizer{Sessions: sessions}},
@@ -603,6 +604,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	stack.sessionRuntimes = sessionRuntimes
+	taskStreamRouter.registry = sessionRuntimes
 	if err := mailboxRouter.bind(sessionRuntimes); err != nil {
 		_ = stack.Close()
 		return nil, err

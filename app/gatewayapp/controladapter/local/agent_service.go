@@ -7,7 +7,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/app/gatewayapp"
 	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -17,15 +16,35 @@ import (
 // AgentService is the local implementation of the focused AppServer Agent
 // capability.
 type AgentService struct {
-	host     *gatewayapp.Stack
-	commands appserver.AgentCommandService
+	hostDeps             *controladapter.AgentAssemblyDeps
+	acquireRuntime       acquireControlRuntimeFunc
+	handoff              func(context.Context, appserver.Principal, appserver.HandoffRequest) (appserver.CommandResult, error)
+	preparation          func(context.Context, string, string) (controlagents.ACPPreparation, error)
+	disconnectCandidates func(context.Context) (appserver.DisconnectCandidatesSnapshot, error)
+	bindingStatus        func(context.Context) (agentbinding.Status, error)
+	commands             appserver.AgentCommandService
 }
 
-func NewAgentService(host *gatewayapp.Stack) (*AgentService, error) {
-	if host == nil || host.AgentCommands() == nil {
-		return nil, errors.New("app/gatewayapp/controladapter/local: host Stack is required")
+type agentServiceDeps struct {
+	hostDeps             *controladapter.AgentAssemblyDeps
+	acquireRuntime       acquireControlRuntimeFunc
+	handoff              func(context.Context, appserver.Principal, appserver.HandoffRequest) (appserver.CommandResult, error)
+	preparation          func(context.Context, string, string) (controlagents.ACPPreparation, error)
+	disconnectCandidates func(context.Context) (appserver.DisconnectCandidatesSnapshot, error)
+	bindingStatus        func(context.Context) (agentbinding.Status, error)
+	commands             appserver.AgentCommandService
+}
+
+func newAgentService(deps agentServiceDeps) (*AgentService, error) {
+	if deps.hostDeps == nil || deps.acquireRuntime == nil || deps.handoff == nil ||
+		deps.preparation == nil || deps.disconnectCandidates == nil || deps.bindingStatus == nil || deps.commands == nil {
+		return nil, errors.New("app/gatewayapp/controladapter/local: Agent service dependencies are required")
 	}
-	return &AgentService{host: host, commands: host.AgentCommands()}, nil
+	return &AgentService{
+		hostDeps: deps.hostDeps, acquireRuntime: deps.acquireRuntime, handoff: deps.handoff,
+		preparation: deps.preparation, disconnectCandidates: deps.disconnectCandidates,
+		bindingStatus: deps.bindingStatus, commands: deps.commands,
+	}, nil
 }
 
 func (s *AgentService) ListAgents(ctx context.Context, principal appserver.Principal, req appserver.AgentRequest) ([]appserver.AgentCandidate, error) {
@@ -59,7 +78,7 @@ func (s *AgentService) HandoffAgent(ctx context.Context, principal appserver.Pri
 		kind = session.ControllerKindKernel
 		target = ""
 	}
-	return s.host.ControlClient().Handoff(ctx, principal, appserver.HandoffRequest{
+	return s.handoff(ctx, principal, appserver.HandoffRequest{
 		WriteBase: req.WriteBase,
 		Kind:      kind, Agent: target, Source: "user_agent_handoff",
 		Reason: "user selected controller",
@@ -78,7 +97,7 @@ func (s *AgentService) ACPPreparation(ctx context.Context, principal appserver.P
 	if err := authorizeHostCapability(principal); err != nil {
 		return controlagents.ACPPreparation{}, err
 	}
-	return s.host.ACPPreparation(ctx, principal.ID, req.Ref)
+	return s.preparation(ctx, principal.ID, req.Ref)
 }
 
 func (s *AgentService) ConnectACP(ctx context.Context, principal appserver.Principal, req appserver.ConnectACPRequest) (appserver.CommandResult, error) {
@@ -92,7 +111,7 @@ func (s *AgentService) DisconnectCandidates(ctx context.Context, principal appse
 	if strings.TrimSpace(req.SessionID) != "" {
 		return appserver.DisconnectCandidatesSnapshot{}, errorcode.New(errorcode.InvalidArgument, "app/gatewayapp/controladapter/local: ACP disconnect candidates are Host-scoped")
 	}
-	return s.host.DisconnectCandidatesSnapshot(ctx)
+	return s.disconnectCandidates(ctx)
 }
 
 func (s *AgentService) DisconnectACP(ctx context.Context, principal appserver.Principal, req appserver.DisconnectACPRequest) (appserver.CommandResult, error) {
@@ -106,7 +125,7 @@ func (s *AgentService) AgentBindingStatus(ctx context.Context, principal appserv
 	if strings.TrimSpace(req.SessionID) != "" {
 		return agentbinding.Status{}, errorcode.New(errorcode.InvalidArgument, "app/gatewayapp/controladapter/local: Agent binding status is Host-scoped")
 	}
-	return s.host.AgentBindings().AgentBindingStatus(ctx)
+	return s.bindingStatus(ctx)
 }
 
 func (s *AgentService) BindAgentBinding(ctx context.Context, principal appserver.Principal, req appserver.BindAgentBindingRequest) (appserver.CommandResult, error) {
@@ -138,21 +157,29 @@ func (s *AgentService) DeleteAgentBindingSet(ctx context.Context, principal apps
 }
 
 func (s *AgentService) hostAdapter(principal appserver.Principal, surface string) (controladapter.AgentAssembler, error) {
-	if s == nil || s.host == nil {
+	if s == nil || s.hostDeps == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: Agent service is unavailable")
 	}
 	if err := authorizeHostCapability(principal); err != nil {
 		return nil, err
 	}
-	return controladapter.NewAgentAssemblerForHost(controlRuntimeDeps(s.host), strings.TrimSpace(surface), ""), nil
+	return controladapter.NewAgentAssemblerForHost(*s.hostDeps, strings.TrimSpace(surface), ""), nil
 }
 
 func (s *AgentService) runtimeAdapter(ctx context.Context, principal appserver.Principal, sessionID, surface string, activate bool) (controladapter.AgentAssembler, func(), error) {
-	lease, err := s.host.AcquireControlRuntime(ctx, principal, appserver.ActionSessionInspect, sessionID, activate)
+	if s == nil || s.acquireRuntime == nil {
+		return nil, nil, errors.New("app/gatewayapp/controladapter/local: Agent Runtime access is unavailable")
+	}
+	lease, err := s.acquireRuntime(ctx, principal, appserver.ActionSessionInspect, sessionID, activate)
 	if err != nil {
 		return nil, nil, err
 	}
-	driver, err := controladapter.NewAgentAssemblerForSession(ctx, controlRuntimeDepsFromView(lease.ControlRuntimeView()), lease.Session(), strings.TrimSpace(surface), "")
+	deps := controlAssemblyDepsFromView(lease.ControlRuntimeView())
+	if deps == nil {
+		_ = lease.Close(ctx)
+		return nil, nil, errors.New("app/gatewayapp/controladapter/local: Agent Runtime projection is unavailable")
+	}
+	driver, err := controladapter.NewAgentAssemblerForSession(ctx, deps.Agent, lease.Session(), strings.TrimSpace(surface), "")
 	if err != nil {
 		_ = lease.Close(ctx)
 		return nil, nil, err

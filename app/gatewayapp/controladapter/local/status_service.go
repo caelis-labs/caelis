@@ -17,15 +17,30 @@ import (
 // It reuses the maintained status assembler while keeping Runtime handles out
 // of presentation surfaces.
 type StatusService struct {
-	host *gatewayapp.Stack
+	hostDeps                  *controladapter.StatusAssemblyDeps
+	acquireRuntime            acquireControlRuntimeFunc
+	resolveWorkspace          resolveWorkspaceAddressFunc
+	sandboxStatusForWorkspace func(session.WorkspaceRef) gatewayapp.SandboxStatus
+	doctorForWorkspace        func(context.Context, session.WorkspaceRef, gatewayapp.DoctorRequest) (gatewayapp.DoctorReport, error)
 }
 
-// NewStatusService constructs the focused AppServer status capability.
-func NewStatusService(host *gatewayapp.Stack) (*StatusService, error) {
-	if host == nil {
-		return nil, errors.New("app/gatewayapp/controladapter/local: host Stack is required")
+type statusServiceDeps struct {
+	hostDeps                  *controladapter.StatusAssemblyDeps
+	acquireRuntime            acquireControlRuntimeFunc
+	resolveWorkspace          resolveWorkspaceAddressFunc
+	sandboxStatusForWorkspace func(session.WorkspaceRef) gatewayapp.SandboxStatus
+	doctorForWorkspace        func(context.Context, session.WorkspaceRef, gatewayapp.DoctorRequest) (gatewayapp.DoctorReport, error)
+}
+
+func newStatusService(deps statusServiceDeps) (*StatusService, error) {
+	if deps.hostDeps == nil || deps.acquireRuntime == nil || deps.resolveWorkspace == nil ||
+		deps.sandboxStatusForWorkspace == nil || deps.doctorForWorkspace == nil {
+		return nil, errors.New("app/gatewayapp/controladapter/local: status service dependencies are required")
 	}
-	return &StatusService{host: host}, nil
+	return &StatusService{
+		hostDeps: deps.hostDeps, acquireRuntime: deps.acquireRuntime, resolveWorkspace: deps.resolveWorkspace,
+		sandboxStatusForWorkspace: deps.sandboxStatusForWorkspace, doctorForWorkspace: deps.doctorForWorkspace,
+	}, nil
 }
 
 func (s *StatusService) SessionStatus(
@@ -33,21 +48,28 @@ func (s *StatusService) SessionStatus(
 	principal appserver.Principal,
 	request appserver.StatusRequest,
 ) (result controlstatus.StatusSnapshot, returnErr error) {
-	if s == nil || s.host == nil {
+	if s == nil || s.hostDeps == nil {
 		return controlstatus.StatusSnapshot{}, errors.New("app/gatewayapp/controladapter/local: status service is unavailable")
 	}
 	if err := authorizeHostCapability(principal); err != nil {
 		return controlstatus.StatusSnapshot{}, err
 	}
 	if strings.TrimSpace(request.SessionID) == "" {
-		workspace, err := s.host.ResolveWorkspaceAddress(session.WorkspaceRef{
+		workspace, err := s.resolveWorkspace(session.WorkspaceRef{
 			Key: strings.TrimSpace(request.WorkspaceKey),
 			CWD: strings.TrimSpace(request.CWD),
 		})
 		if err != nil {
 			return controlstatus.StatusSnapshot{}, err
 		}
-		deps := controlRuntimeDepsForWorkspace(s.host, workspace)
+		deps := *s.hostDeps
+		deps.Session.Workspace = workspace
+		deps.Sandbox.StatusFn = func() SandboxStatus {
+			return toRuntimeSandboxStatus(s.sandboxStatusForWorkspace(workspace))
+		}
+		deps.Status.DoctorFn = func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
+			return toRuntimeDoctorReport(s.doctorForWorkspace(ctx, workspace, toGatewayDoctorRequest(req)))
+		}
 		driver := controladapter.NewStatusAssemblerForHost(
 			deps,
 			strings.TrimSpace(request.Surface),
@@ -58,16 +80,20 @@ func (s *StatusService) SessionStatus(
 		}
 		return driver.LightweightStatus(ctx)
 	}
-	lease, err := s.host.AcquireControlRuntime(ctx, principal, appserver.ActionSessionInspect, request.SessionID, false)
+	lease, err := s.acquireRuntime(ctx, principal, appserver.ActionSessionInspect, request.SessionID, false)
 	if err != nil {
 		return controlstatus.StatusSnapshot{}, err
 	}
 	defer func() {
 		returnErr = errors.Join(returnErr, lease.Close(context.Background()))
 	}()
+	deps := controlAssemblyDepsFromView(lease.ControlRuntimeView())
+	if deps == nil {
+		return controlstatus.StatusSnapshot{}, errors.New("app/gatewayapp/controladapter/local: status Runtime projection is unavailable")
+	}
 	driver, err := controladapter.NewStatusAssemblerForSession(
 		ctx,
-		controlRuntimeDepsFromView(lease.ControlRuntimeView()),
+		deps.Status,
 		lease.Session(),
 		strings.TrimSpace(request.Surface),
 		"",

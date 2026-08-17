@@ -18,93 +18,76 @@ type DoctorRequest = controladapter.DoctorRequest
 type DoctorReport = controladapter.DoctorReport
 type ACPAgentInfo = controladapter.ACPAgentInfo
 
-func controlRuntimeDeps(stack *gatewayapp.Stack) *controladapter.ControlRuntimeDeps {
-	if stack == nil {
-		return nil
-	}
-	return controlRuntimeDepsFromView(stack.ControlRuntimeView())
+type controlAssemblyDeps struct {
+	Status     controladapter.StatusAssemblyDeps
+	Agent      controladapter.AgentAssemblyDeps
+	Completion controladapter.CompletionAssemblyDeps
+	Plugin     controladapter.PluginAssemblyDeps
 }
 
-func controlRuntimeDepsFromView(view *gatewayapp.ControlRuntimeView) *controladapter.ControlRuntimeDeps {
+func controlAssemblyDepsFromView(view *gatewayapp.ControlRuntimeView) *controlAssemblyDeps {
 	if view == nil {
 		return nil
 	}
-	return &controladapter.ControlRuntimeDeps{
-		Gateway: controladapter.GatewayRuntimeDeps{
-			TurnServiceFn: func() controladapter.GatewayTurnService {
-				return view.TurnStateFn()
-			},
-			ControlPlaneServiceFn: func() controladapter.GatewayControlPlaneService {
-				return view.ControlPlaneStateFn()
-			},
+	gateway := controladapter.GatewayRuntimeDeps{
+		TurnServiceFn: func() controladapter.GatewayTurnService {
+			return view.TurnStateFn()
 		},
-		Session: controladapter.SessionRuntimeDeps{
-			Store:     view.Sessions,
-			AppName:   view.AppName,
-			UserID:    view.UserID,
-			Workspace: view.Workspace,
-		},
-		Status: controladapter.StatusRuntimeDeps{
-			RuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
-				return toRuntimeSessionRuntimeState(view.RuntimeStateFn(ctx, ref))
-			},
-			ConfigurationRevisionFn: view.ConfigurationRevisionFn,
-			DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
-				return toRuntimeDoctorReport(view.DoctorFn(ctx, toGatewayDoctorRequest(req)))
-			},
-		},
-		Agent: controladapter.AgentRuntimeDeps{
-			ControllerStatusFn:     view.ControllerStatusFn,
-			DisconnectCandidatesFn: view.DisconnectCandidatesFn,
-			ListFn:                 func() []ACPAgentInfo { return toRuntimeACPAgents(view.ListAgentsFn()) },
-		},
-		Model: controladapter.ModelRuntimeDeps{
-			EffectiveAliasFn:  view.EffectiveModelAliasFn,
-			EffectiveEffortFn: view.EffectiveModelEffortFn,
-			ConfigFn: func(alias string) (ModelConfig, bool) {
-				return view.ModelConfigFn(alias)
-			},
-			SessionUsageSnapshotFn: view.SessionUsageSnapshotFn,
-			ProviderUsageFn:        view.ProviderUsageFn,
-			ListAliasesFn:          view.ListModelAliasesFn,
-			ListChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
-				return toRuntimeModelChoices(view.ListModelChoicesFn(ctx, ref))
-			},
-			HasReusableAuthFn: view.HasReusableAuthFn,
-		},
-		Skill: controladapter.SkillRuntimeDeps{
-			SnapshotFn: view.SkillCatalogFn,
-		},
-		Sandbox: controladapter.SandboxRuntimeDeps{
-			StatusFn: func() SandboxStatus { return toRuntimeSandboxStatus(view.SandboxFn()) },
-		},
-		Plugin: controladapter.PluginRuntimeDeps{
-			ListPluginsFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
-				return toRuntimePluginSnapshots(view.ListPluginsFn(ctx))
-			},
-			ListMarketplacesFn: func(ctx context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
-				return toRuntimeMarketplaceSnapshots(view.ListMarketplacesFn(ctx))
-			},
-			InspectPluginFn: func(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
-				return toRuntimePluginSnapshotWithError(view.InspectPluginFn(ctx, id))
-			},
+		ControlPlaneServiceFn: func() controladapter.GatewayControlPlaneService {
+			return view.ControlPlaneStateFn()
 		},
 	}
-}
-
-func controlRuntimeDepsForWorkspace(stack *gatewayapp.Stack, workspace session.WorkspaceRef) *controladapter.ControlRuntimeDeps {
-	deps := controlRuntimeDeps(stack)
-	if deps == nil || stack == nil {
-		return deps
+	sessionDeps := controladapter.SessionRuntimeDeps{
+		Store: view.Sessions, AppName: view.AppName, UserID: view.UserID, Workspace: view.Workspace,
 	}
-	deps.Session.Workspace = workspace
-	deps.Sandbox.StatusFn = func() SandboxStatus {
-		return toRuntimeSandboxStatus(stack.SandboxStatusForWorkspace(workspace))
+	status := controladapter.StatusRuntimeDeps{
+		RuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
+			return toRuntimeSessionRuntimeState(view.RuntimeStateFn(ctx, ref))
+		},
+		ConfigurationRevisionFn: view.ConfigurationRevisionFn,
+		DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
+			return toRuntimeDoctorReport(view.DoctorFn(ctx, toGatewayDoctorRequest(req)))
+		},
 	}
-	deps.Status.DoctorFn = func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
-		return toRuntimeDoctorReport(stack.DoctorForWorkspace(ctx, workspace, toGatewayDoctorRequest(req)))
+	agent := controladapter.AgentRuntimeDeps{
+		ControllerStatusFn: view.ControllerStatusFn, DisconnectCandidatesFn: view.DisconnectCandidatesFn,
+		ListFn: func() []ACPAgentInfo { return toRuntimeACPAgents(view.ListAgentsFn()) },
 	}
-	return deps
+	model := controladapter.ModelRuntimeDeps{
+		EffectiveAliasFn: view.EffectiveModelAliasFn, EffectiveEffortFn: view.EffectiveModelEffortFn,
+		ConfigFn:               func(alias string) (ModelConfig, bool) { return view.ModelConfigFn(alias) },
+		SessionUsageSnapshotFn: view.SessionUsageSnapshotFn, ProviderUsageFn: view.ProviderUsageFn,
+		ListAliasesFn: view.ListModelAliasesFn,
+		ListChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
+			return toRuntimeModelChoices(view.ListModelChoicesFn(ctx, ref))
+		},
+		HasReusableAuthFn: view.HasReusableAuthFn,
+	}
+	skill := controladapter.SkillRuntimeDeps{SnapshotFn: view.SkillCatalogFn}
+	sandboxDeps := controladapter.SandboxRuntimeDeps{
+		StatusFn: func() SandboxStatus { return toRuntimeSandboxStatus(view.SandboxFn()) },
+	}
+	plugin := controladapter.PluginRuntimeDeps{
+		ListPluginsFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
+			return toRuntimePluginSnapshots(view.ListPluginsFn(ctx))
+		},
+		ListMarketplacesFn: func(ctx context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
+			return toRuntimeMarketplaceSnapshots(view.ListMarketplacesFn(ctx))
+		},
+		InspectPluginFn: func(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
+			return toRuntimePluginSnapshotWithError(view.InspectPluginFn(ctx, id))
+		},
+	}
+	return &controlAssemblyDeps{
+		Status: controladapter.StatusAssemblyDeps{
+			Gateway: gateway, Session: sessionDeps, Status: status, Agent: agent, Model: model, Sandbox: sandboxDeps,
+		},
+		Agent: controladapter.AgentAssemblyDeps{Gateway: gateway, Session: sessionDeps, Agent: agent},
+		Completion: controladapter.CompletionAssemblyDeps{
+			Session: sessionDeps, Status: status, Agent: agent, Model: model, Skill: skill, Plugin: plugin,
+		},
+		Plugin: controladapter.PluginAssemblyDeps{Plugin: plugin},
+	}
 }
 
 func toRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
