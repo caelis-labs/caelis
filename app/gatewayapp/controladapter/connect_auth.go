@@ -9,11 +9,11 @@ import (
 )
 
 func (d *assembler) hasReusableConnectAuth(ctx context.Context, provider string, baseURL string) bool {
-	if d == nil || d.stack == nil {
+	if d == nil || d.deps == nil {
 		return false
 	}
-	if d.stack.Model.HasReusableAuthFn != nil {
-		return d.stack.Model.HasReusableAuthFn(ctx, provider, baseURL)
+	if d.deps.Model.HasReusableAuthFn != nil {
+		return d.deps.Model.HasReusableAuthFn(ctx, provider, baseURL)
 	}
 	normalizedBaseURL := modelconfig.NormalizeBaseURL(baseURL)
 	if normalizedBaseURL == "" {
@@ -23,7 +23,7 @@ func (d *assembler) hasReusableConnectAuth(ctx context.Context, provider string,
 	if activeSession, ok := d.currentSession(); ok {
 		ref = activeSession.SessionRef
 	}
-	choices, err := listModelChoices(ctx, d.stack.Model, ref)
+	choices, err := listModelChoices(ctx, d.deps.Model, ref)
 	if err != nil {
 		return false
 	}

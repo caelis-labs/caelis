@@ -3,6 +3,8 @@
 // capabilities belong to control/appserver and focused control packages.
 //
 // The local subpackage is the only production package that consumes these
-// views directly. Other packages compose through its AppServer services or
-// depend on focused Control contracts.
+// views directly. It owns translation from gatewayapp Host state and binds
+// principal-sensitive capabilities before assembly; the root package does not
+// depend on the concrete Host. Other packages compose through local AppServer
+// services or depend on focused Control contracts.
 package controladapter

@@ -51,27 +51,27 @@ const (
 )
 
 func (d *assembler) sessionTokenUsageBreakdown(ctx context.Context, ref session.SessionRef) (sessionTokenUsageBreakdown, error) {
-	if d == nil || d.stack == nil || d.stack.Session.Store == nil {
+	if d == nil || d.deps == nil || d.deps.Session.Store == nil {
 		return sessionTokenUsageBreakdown{}, nil
 	}
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return sessionTokenUsageBreakdown{}, nil
 	}
-	events, err := d.stack.Session.Store.Events(ctx, session.EventsRequest{SessionRef: ref})
+	events, err := d.deps.Session.Store.Events(ctx, session.EventsRequest{SessionRef: ref})
 	if err != nil {
 		return sessionTokenUsageBreakdown{}, err
 	}
 	breakdown := sessionTokenUsageBreakdownFromEvents(events, tokenUsageCategoryMain)
-	if state, err := d.stack.Session.Store.SnapshotState(ctx, ref); err == nil {
+	if state, err := d.deps.Session.Store.SnapshotState(ctx, ref); err == nil {
 		breakdown.addBreakdown(sessionTokenUsageBreakdownFromState(state))
 	}
 	for _, childRef := range d.subagentSessionRefs(ctx, ref) {
-		childEvents, err := d.stack.Session.Store.Events(ctx, session.EventsRequest{SessionRef: childRef})
+		childEvents, err := d.deps.Session.Store.Events(ctx, session.EventsRequest{SessionRef: childRef})
 		if err != nil {
 			continue
 		}
 		childBreakdown := sessionTokenUsageBreakdownFromEvents(childEvents, tokenUsageCategorySubagent)
-		if state, err := d.stack.Session.Store.SnapshotState(ctx, childRef); err == nil {
+		if state, err := d.deps.Session.Store.SnapshotState(ctx, childRef); err == nil {
 			childBreakdown.addBreakdown(sessionTokenUsageBreakdownFromState(state))
 		}
 		breakdown.addBreakdown(childBreakdown)
@@ -347,10 +347,10 @@ func normalizeUsageCategory(category string) string {
 }
 
 func (d *assembler) subagentSessionRefs(ctx context.Context, ref session.SessionRef) []session.SessionRef {
-	if d == nil || d.stack == nil || d.stack.Session.Store == nil {
+	if d == nil || d.deps == nil || d.deps.Session.Store == nil {
 		return nil
 	}
-	activeSession, err := d.stack.Session.Store.Session(ctx, ref)
+	activeSession, err := d.deps.Session.Store.Session(ctx, ref)
 	if err != nil {
 		return nil
 	}

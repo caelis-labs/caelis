@@ -52,7 +52,7 @@ func (d *assembler) ResolveSkill(ctx context.Context, name string) (controlpromp
 }
 
 func (d *assembler) skillCompletionCatalog(ctx context.Context) (skill.Catalog, error) {
-	if d == nil || d.stack == nil {
+	if d == nil || d.deps == nil {
 		return skill.Catalog{}, missingRuntimeDependency("skill discovery")
 	}
 	if ctx != nil {
@@ -60,7 +60,7 @@ func (d *assembler) skillCompletionCatalog(ctx context.Context) (skill.Catalog, 
 			return skill.Catalog{}, err
 		}
 	}
-	return d.stack.Skill.Snapshot(), nil
+	return d.deps.Skill.Snapshot(), nil
 }
 
 func (d *assembler) skillCompletionMetas(ctx context.Context) ([]skill.Meta, error) {
@@ -106,8 +106,8 @@ func (d *assembler) CompleteResume(ctx context.Context, query string, limit int)
 	cursor := ""
 	for {
 		result, err := d.listSessions(ctx, kernel.ListSessionsRequest{
-			AppName: d.stack.Session.AppName, UserID: d.stack.Session.UserID,
-			CWD:    d.stack.Session.Workspace.CWD,
+			AppName: d.deps.Session.AppName, UserID: d.deps.Session.UserID,
+			CWD:    d.deps.Session.Workspace.CWD,
 			Cursor: cursor, Limit: resumeCompletionPageLimit,
 		})
 		if err != nil {
@@ -194,10 +194,10 @@ func (d *assembler) completeModelReasoningLevels(ctx context.Context, aliasQuery
 		//nolint:nilerr // Completion is best-effort; an unresolved alias yields no candidates.
 		return nil, nil
 	}
-	if d.stack.Model.ConfigFn == nil {
+	if d.deps.Model.ConfigFn == nil {
 		return nil, nil
 	}
-	cfg, ok := d.stack.Model.ConfigFn(alias)
+	cfg, ok := d.deps.Model.ConfigFn(alias)
 	if !ok {
 		return nil, nil
 	}
@@ -220,10 +220,10 @@ func (d *assembler) completeModelReasoningLevels(ctx context.Context, aliasQuery
 }
 
 func (d *assembler) modelAliasSupportsReasoningLevel(alias string, level string) bool {
-	if d.stack.Model.ConfigFn == nil {
+	if d.deps.Model.ConfigFn == nil {
 		return false
 	}
-	cfg, ok := d.stack.Model.ConfigFn(alias)
+	cfg, ok := d.deps.Model.ConfigFn(alias)
 	if !ok {
 		return false
 	}
@@ -363,7 +363,7 @@ func (d *assembler) completeModelAliases(ctx context.Context, query string, limi
 	if activeSession, ok := d.currentSession(); ok {
 		ref = activeSession.SessionRef
 	}
-	choices, err := listModelChoices(ctx, d.stack.Model, ref)
+	choices, err := listModelChoices(ctx, d.deps.Model, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -390,10 +390,10 @@ func (d *assembler) completeModelAliases(ctx context.Context, query string, limi
 }
 
 func (d *assembler) agentCatalog(limit int) []controlprompt.AgentCandidate {
-	if d.stack.Agent.ListFn == nil {
+	if d.deps.Agent.ListFn == nil {
 		return nil
 	}
-	available := d.stack.Agent.ListFn()
+	available := d.deps.Agent.ListFn()
 	if len(available) == 0 {
 		return nil
 	}
@@ -422,7 +422,7 @@ func (d *assembler) resolveStoredModelAlias(ctx context.Context, input string) (
 	if activeSession, ok := d.currentSession(); ok {
 		ref = activeSession.SessionRef
 	}
-	choices, err := listModelChoices(ctx, d.stack.Model, ref)
+	choices, err := listModelChoices(ctx, d.deps.Model, ref)
 	if err != nil {
 		return "", err
 	}
@@ -487,10 +487,10 @@ func hasSlashArgPrefix(query string, values ...string) bool {
 }
 
 func (d *assembler) completePluginIDs(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
-	if d.stack.Plugin.ListPluginsFn == nil {
+	if d.deps.Plugin.ListPluginsFn == nil {
 		return nil, missingRuntimeDependency("list plugins")
 	}
-	plugins, err := d.stack.Plugin.ListPluginsFn(ctx)
+	plugins, err := d.deps.Plugin.ListPluginsFn(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -521,10 +521,10 @@ func pluginMarketplaceActionCandidates() []controlprompt.SlashArgCandidate {
 }
 
 func (d *assembler) completeMarketplaceNames(ctx context.Context, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
-	if d.stack.Plugin.ListMarketplacesFn == nil {
+	if d.deps.Plugin.ListMarketplacesFn == nil {
 		return nil, missingRuntimeDependency("list marketplaces")
 	}
-	marketplaces, err := d.stack.Plugin.ListMarketplacesFn(ctx)
+	marketplaces, err := d.deps.Plugin.ListMarketplacesFn(ctx)
 	if err != nil {
 		return nil, err
 	}

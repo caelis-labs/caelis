@@ -24,7 +24,6 @@ type ControlRuntimeView struct {
 	Workspace session.WorkspaceRef
 
 	TurnStateFn         func() KernelTurnReader
-	SessionStateFn      func() KernelSessionReader
 	ControlPlaneStateFn func() KernelControlPlaneReader
 
 	RuntimeStateFn          func(context.Context, session.SessionRef) (SessionRuntimeState, error)
@@ -70,7 +69,6 @@ func (s *runtimeComposition) ControlRuntimeView() *ControlRuntimeView {
 		Workspace: s.Workspace,
 
 		TurnStateFn:         s.KernelTurnState,
-		SessionStateFn:      s.KernelSessionState,
 		ControlPlaneStateFn: s.KernelControlPlaneState,
 
 		RuntimeStateFn:          status.SessionRuntimeState,

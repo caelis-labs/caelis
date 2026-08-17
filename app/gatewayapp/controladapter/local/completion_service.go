@@ -77,14 +77,14 @@ func (s *CompletionService) slashArgAdapter(
 	if err := authorizeHostCapability(principal); err != nil {
 		return nil, nil, err
 	}
-	stack := s.runtimeStack(principal)
+	deps := s.controlRuntimeDeps(principal)
 	workspace, err := s.workspaceAddress(req.WorkspaceKey, req.CWD)
 	if err != nil {
 		return nil, nil, err
 	}
-	stack.Session.Workspace = workspace
-	return controladapter.NewCompletionAssemblerForStack(
-		stack,
+	deps.Session.Workspace = workspace
+	return controladapter.NewCompletionAssemblerForHost(
+		deps,
 		strings.TrimSpace(req.Surface),
 		"",
 	), func() {}, nil
@@ -125,11 +125,11 @@ func (s *CompletionService) skillRuntimeAdapter(
 	if err != nil {
 		return nil, nil, err
 	}
-	stack := s.runtimeStack(principal)
-	stack.Session.Workspace = workspace
-	stack.Skill.SnapshotFn = func() skill.Catalog { return catalog }
-	driver := controladapter.NewCompletionAssemblerForStack(
-		stack,
+	deps := s.controlRuntimeDeps(principal)
+	deps.Session.Workspace = workspace
+	deps.Skill.SnapshotFn = func() skill.Catalog { return catalog }
+	driver := controladapter.NewCompletionAssemblerForHost(
+		deps,
 		strings.TrimSpace(req.Surface),
 		"",
 	)
@@ -143,15 +143,15 @@ func (s *CompletionService) runtimeAdapter(ctx context.Context, principal appser
 	if err := authorizeHostCapability(principal); err != nil {
 		return nil, nil, err
 	}
-	stack := s.runtimeStack(principal)
+	deps := s.controlRuntimeDeps(principal)
 	if strings.TrimSpace(req.SessionID) == "" {
 		workspace, err := s.workspaceAddress(req.WorkspaceKey, req.CWD)
 		if err != nil {
 			return nil, nil, err
 		}
-		stack.Session.Workspace = workspace
-		return controladapter.NewCompletionAssemblerForStack(
-			stack,
+		deps.Session.Workspace = workspace
+		return controladapter.NewCompletionAssemblerForHost(
+			deps,
 			strings.TrimSpace(req.Surface),
 			"",
 		), func() {}, nil
@@ -160,9 +160,9 @@ func (s *CompletionService) runtimeAdapter(ctx context.Context, principal appser
 	if err != nil {
 		return nil, nil, err
 	}
-	stack = runtimeStackFromView(lease.ControlRuntimeView())
-	s.bindPrincipalSessionList(stack, principal)
-	driver, err := controladapter.NewCompletionAssemblerForSession(ctx, stack, lease.Session(), strings.TrimSpace(req.Surface), "")
+	deps = controlRuntimeDepsFromView(lease.ControlRuntimeView())
+	s.bindPrincipalSessionList(deps, principal)
+	driver, err := controladapter.NewCompletionAssemblerForSession(ctx, deps, lease.Session(), strings.TrimSpace(req.Surface), "")
 	if err != nil {
 		_ = lease.Close(ctx)
 		return nil, nil, err
@@ -180,17 +180,17 @@ func (s *CompletionService) workspaceAddress(key, cwd string) (session.Workspace
 	})
 }
 
-func (s *CompletionService) runtimeStack(principal appserver.Principal) *controladapter.RuntimeStack {
-	stack := runtimeStack(s.host)
-	s.bindPrincipalSessionList(stack, principal)
-	return stack
+func (s *CompletionService) controlRuntimeDeps(principal appserver.Principal) *controladapter.ControlRuntimeDeps {
+	deps := controlRuntimeDeps(s.host)
+	s.bindPrincipalSessionList(deps, principal)
+	return deps
 }
 
-func (s *CompletionService) bindPrincipalSessionList(stack *controladapter.RuntimeStack, principal appserver.Principal) {
-	if stack == nil {
+func (s *CompletionService) bindPrincipalSessionList(deps *controladapter.ControlRuntimeDeps, principal appserver.Principal) {
+	if deps == nil {
 		return
 	}
-	stack.Session.ListSessionsFn = func(ctx context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
+	deps.Session.ListSessionsFn = func(ctx context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
 		return s.host.ControlClient().ListSessions(ctx, principal, appserver.ListSessionsRequest{
 			WorkspaceKey: req.WorkspaceKey,
 			CWD:          req.CWD,

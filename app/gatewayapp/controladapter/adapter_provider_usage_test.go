@@ -18,7 +18,7 @@ func TestAdapterFullStatusQueriesProviderUsageAndFailsSoft(t *testing.T) {
 	providerCalls := 0
 	doctorCalls := 0
 	usageCalls := 0
-	stack := &RuntimeStack{
+	deps := &ControlRuntimeDeps{
 		Session: SessionRuntimeDeps{Store: inmemory.NewStore(inmemory.Config{})},
 		Status: StatusRuntimeDeps{DoctorFn: func(context.Context, DoctorRequest) (DoctorReport, error) {
 			doctorCalls++
@@ -49,7 +49,7 @@ func TestAdapterFullStatusQueriesProviderUsageAndFailsSoft(t *testing.T) {
 			},
 		},
 	}
-	driver := newAssemblerForStack(stack, "surface", "")
+	driver := newHostAssembler(deps, "surface", "")
 	driver.session = session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}}
 	driver.hasSession = true
 

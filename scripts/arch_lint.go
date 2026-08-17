@@ -521,6 +521,12 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		(target == "app/gatewayapp" || strings.HasPrefix(target, "app/gatewayapp/")) {
 		return "app/controlserver must depend on explicit Control contracts, not gatewayapp assembly"
 	}
+	if strings.HasPrefix(rel, "app/gatewayapp/controladapter/") &&
+		!strings.HasPrefix(rel, "app/gatewayapp/controladapter/local/") &&
+		!strings.HasSuffix(rel, "_test.go") &&
+		target == "app/gatewayapp" {
+		return "root controladapter must not depend on the concrete gatewayapp Host; translation belongs to controladapter/local"
+	}
 	if target == "app/gatewayapp/controladapter" {
 		sourcePackage := filepath.ToSlash(filepath.Dir(rel))
 		if sourcePackage != "app/gatewayapp/controladapter" &&

@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 func newAssemblerFromGatewayAppSession(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*assembler, error) {
@@ -17,22 +18,81 @@ func newAssemblerFromGatewayAppSession(ctx context.Context, stack *gatewayapp.St
 	if err != nil {
 		return nil, err
 	}
-	return newAssemblerForSession(ctx, gatewayAppStackForRuntimeTest(stack), active, bindingKey, modelText)
+	return newAssemblerForSession(ctx, gatewayAppControlRuntimeDepsForTest(stack), active, bindingKey, modelText)
 }
 
-func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
-	runtimeStack := NewRuntimeStackFromGatewayApp(stack.ControlRuntimeView(), RuntimeStackGatewayAppAdapters{
-		SandboxStatus:        testRuntimeSandboxStatus,
-		SessionRuntimeState:  testRuntimeSessionRuntimeState,
-		ModelChoices:         testRuntimeModelChoices,
-		DoctorRequest:        testGatewayDoctorRequest,
-		DoctorReport:         testRuntimeDoctorReport,
-		ACPAgents:            testRuntimeACPAgents,
-		PluginSnapshots:      testRuntimePluginSnapshots,
-		PluginSnapshot:       testRuntimePluginSnapshotWithError,
-		MarketplaceSnapshots: testRuntimeMarketplaceSnapshots,
-	})
-	return runtimeStack
+func gatewayAppControlRuntimeDepsForTest(stack *gatewayapp.Stack) *ControlRuntimeDeps {
+	view := stack.ControlRuntimeView()
+	deps := &ControlRuntimeDeps{
+		Gateway: GatewayRuntimeDeps{
+			TurnServiceFn: func() GatewayTurnService {
+				return view.TurnStateFn()
+			},
+			ControlPlaneServiceFn: func() GatewayControlPlaneService {
+				return view.ControlPlaneStateFn()
+			},
+		},
+		Session: SessionRuntimeDeps{
+			Store:     view.Sessions,
+			AppName:   view.AppName,
+			UserID:    view.UserID,
+			Workspace: view.Workspace,
+			ListSessionsFn: func(ctx context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
+				return stack.ControlClient().ListSessions(ctx, appserver.Principal{ID: stack.UserID}, appserver.ListSessionsRequest{
+					WorkspaceKey: req.WorkspaceKey,
+					CWD:          req.CWD,
+					Cursor:       req.Cursor,
+					Limit:        req.Limit,
+				})
+			},
+		},
+		Status: StatusRuntimeDeps{
+			RuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
+				return testRuntimeSessionRuntimeState(view.RuntimeStateFn(ctx, ref))
+			},
+			ConfigurationRevisionFn: view.ConfigurationRevisionFn,
+			DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
+				return testRuntimeDoctorReport(view.DoctorFn(ctx, testGatewayDoctorRequest(req)))
+			},
+		},
+		Agent: AgentRuntimeDeps{
+			ControllerStatusFn:     view.ControllerStatusFn,
+			DisconnectCandidatesFn: view.DisconnectCandidatesFn,
+			ListFn:                 func() []ACPAgentInfo { return testRuntimeACPAgents(view.ListAgentsFn()) },
+		},
+		Model: ModelRuntimeDeps{
+			EffectiveAliasFn:  view.EffectiveModelAliasFn,
+			EffectiveEffortFn: view.EffectiveModelEffortFn,
+			ConfigFn: func(alias string) (ModelConfig, bool) {
+				return view.ModelConfigFn(alias)
+			},
+			SessionUsageSnapshotFn: view.SessionUsageSnapshotFn,
+			ProviderUsageFn:        view.ProviderUsageFn,
+			ListAliasesFn:          view.ListModelAliasesFn,
+			ListChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
+				return testRuntimeModelChoices(view.ListModelChoicesFn(ctx, ref))
+			},
+			HasReusableAuthFn: view.HasReusableAuthFn,
+		},
+		Skill: SkillRuntimeDeps{
+			SnapshotFn: view.SkillCatalogFn,
+		},
+		Sandbox: SandboxRuntimeDeps{
+			StatusFn: func() SandboxStatus { return testRuntimeSandboxStatus(view.SandboxFn()) },
+		},
+		Plugin: PluginRuntimeDeps{
+			ListPluginsFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
+				return testRuntimePluginSnapshots(view.ListPluginsFn(ctx))
+			},
+			ListMarketplacesFn: func(ctx context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
+				return testRuntimeMarketplaceSnapshots(view.ListMarketplacesFn(ctx))
+			},
+			InspectPluginFn: func(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
+				return testRuntimePluginSnapshotWithError(view.InspectPluginFn(ctx, id))
+			},
+		},
+	}
+	return deps
 }
 
 func startGatewayAppSessionForTest(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string) (session.Session, error) {
@@ -52,17 +112,16 @@ func startGatewayAppSessionForTest(ctx context.Context, stack *gatewayapp.Stack,
 	return stack.Sessions.Session(ctx, session.SessionRef{SessionID: result.SessionID})
 }
 
-func TestGatewayAppStackForRuntimeTestWiresFullRuntimeSurface(t *testing.T) {
+func TestGatewayAppControlRuntimeDepsWiresFocusedServices(t *testing.T) {
 	t.Parallel()
 
-	stack := gatewayAppStackForRuntimeTest(&gatewayapp.Stack{})
+	stack := gatewayAppControlRuntimeDepsForTest(&gatewayapp.Stack{})
 	if stack == nil {
-		t.Fatal("gatewayAppStackForRuntimeTest() returned nil")
+		t.Fatal("gatewayAppControlRuntimeDepsForTest() returned nil")
 	}
 
 	gatewayHooks := map[string]bool{
 		"turn":          stack.Gateway.TurnServiceFn != nil,
-		"session":       stack.Gateway.SessionServiceFn != nil,
 		"control-plane": stack.Gateway.ControlPlaneServiceFn != nil,
 	}
 	for name, ok := range gatewayHooks {

@@ -60,10 +60,9 @@ func TestCompleteResumeSearchesBeyondFirstTwoHundredSessions(t *testing.T) {
 			Title:      "needle target", UpdatedAt: time.Unix(1, 0),
 		}}},
 	}}
-	driver := &assembler{stack: &RuntimeStack{
-		Gateway: GatewayRuntimeDeps{SessionServiceFn: func() GatewaySessionService { return gw }},
+	driver := &assembler{deps: &ControlRuntimeDeps{
 		Session: SessionRuntimeDeps{
-			AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws"},
+			AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws"}, ListSessionsFn: gw.ListSessions,
 		},
 	}}
 	candidates, err := driver.CompleteResume(context.Background(), "needle", 8)
@@ -76,6 +75,22 @@ func TestCompleteResumeSearchesBeyondFirstTwoHundredSessions(t *testing.T) {
 	if len(gw.requests) != 2 || gw.requests[1].Cursor != "page-2" {
 		t.Fatalf("ListSessions() requests = %#v, want exhaustive pagination", gw.requests)
 	}
+	if gw.requests[0].UserID != "" || gw.requests[1].UserID != "" {
+		t.Fatalf("ListSessions() requests = %#v, want principal-bound calls without Runtime user partition", gw.requests)
+	}
+}
+
+func TestCompleteResumeRequiresPrincipalBoundSessionList(t *testing.T) {
+	t.Parallel()
+
+	driver := &assembler{deps: &ControlRuntimeDeps{
+		Session: SessionRuntimeDeps{
+			AppName: "caelis", UserID: "legacy-user", Workspace: session.WorkspaceRef{Key: "ws"},
+		},
+	}}
+	if _, err := driver.CompleteResume(context.Background(), "", 8); err == nil {
+		t.Fatal("CompleteResume() error = nil, want missing principal-bound Session list capability")
+	}
 }
 
 func TestCompleteResumeKeepsOrdinarySessionWithoutTitle(t *testing.T) {
@@ -87,10 +102,9 @@ func TestCompleteResumeKeepsOrdinarySessionWithoutTitle(t *testing.T) {
 			UpdatedAt:  time.Unix(1000, 0),
 		}}},
 	}}
-	driver := &assembler{stack: &RuntimeStack{
-		Gateway: GatewayRuntimeDeps{SessionServiceFn: func() GatewaySessionService { return gw }},
+	driver := &assembler{deps: &ControlRuntimeDeps{
 		Session: SessionRuntimeDeps{
-			AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws"},
+			AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws"}, ListSessionsFn: gw.ListSessions,
 		},
 	}}
 
@@ -122,10 +136,9 @@ func TestCompleteResumeStopsWhenFirstPageSatisfiesLimit(t *testing.T) {
 		},
 		errors: map[string]error{"page-2": errors.New("later page unavailable")},
 	}
-	driver := &assembler{stack: &RuntimeStack{
-		Gateway: GatewayRuntimeDeps{SessionServiceFn: func() GatewaySessionService { return gw }},
+	driver := &assembler{deps: &ControlRuntimeDeps{
 		Session: SessionRuntimeDeps{
-			AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws"},
+			AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws"}, ListSessionsFn: gw.ListSessions,
 		},
 	}}
 

@@ -8,8 +8,8 @@ import (
 
 // DisconnectCandidates lists only user-configured external ACP Agents.
 func (d *assembler) DisconnectCandidates(ctx context.Context) ([]controlagents.DisconnectCandidate, error) {
-	if d == nil || d.stack == nil || d.stack.Agent.DisconnectCandidatesFn == nil {
+	if d == nil || d.deps == nil || d.deps.Agent.DisconnectCandidatesFn == nil {
 		return nil, missingRuntimeDependency("ACP Agent disconnect candidates")
 	}
-	return d.stack.Agent.DisconnectCandidatesFn(ctx)
+	return d.deps.Agent.DisconnectCandidatesFn(ctx)
 }

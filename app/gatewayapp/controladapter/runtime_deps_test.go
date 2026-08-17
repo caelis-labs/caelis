@@ -8,10 +8,10 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-func TestRuntimeStackPluginDepsUseGroupedField(t *testing.T) {
+func TestControlRuntimeDepsPluginDepsUseGroupedField(t *testing.T) {
 	t.Parallel()
 
-	stack := &RuntimeStack{
+	deps := &ControlRuntimeDeps{
 		Plugin: PluginRuntimeDeps{
 			ListPluginsFn: func(context.Context) ([]controlprompt.PluginSnapshot, error) {
 				return []controlprompt.PluginSnapshot{{ID: "grouped"}}, nil
@@ -19,7 +19,7 @@ func TestRuntimeStackPluginDepsUseGroupedField(t *testing.T) {
 		},
 	}
 
-	plugins, err := stack.Plugin.ListPluginsFn(context.Background())
+	plugins, err := deps.Plugin.ListPluginsFn(context.Background())
 	if err != nil {
 		t.Fatalf("ListPlugins() error = %v", err)
 	}
@@ -28,7 +28,7 @@ func TestRuntimeStackPluginDepsUseGroupedField(t *testing.T) {
 	}
 }
 
-func TestRuntimeStackPluginDepsMissingFieldErrors(t *testing.T) {
+func TestControlRuntimeDepsPluginDepsMissingFieldErrors(t *testing.T) {
 	t.Parallel()
 
 	if err := missingRuntimeDependency("list plugins"); err == nil {
@@ -36,10 +36,10 @@ func TestRuntimeStackPluginDepsMissingFieldErrors(t *testing.T) {
 	}
 }
 
-func TestRuntimeStackModelDepsUseGroupedField(t *testing.T) {
+func TestControlRuntimeDepsModelDepsUseGroupedField(t *testing.T) {
 	t.Parallel()
 
-	stack := &RuntimeStack{
+	deps := &ControlRuntimeDeps{
 		Model: ModelRuntimeDeps{
 			EffectiveAliasFn: func() string {
 				return "grouped"
@@ -47,7 +47,7 @@ func TestRuntimeStackModelDepsUseGroupedField(t *testing.T) {
 		},
 	}
 
-	if got := stack.Model.EffectiveAliasFn(); got != "grouped" {
+	if got := deps.Model.EffectiveAliasFn(); got != "grouped" {
 		t.Fatalf("Model.EffectiveAliasFn() = %q, want grouped", got)
 	}
 }
@@ -56,7 +56,7 @@ func TestHasReusableConnectAuthUsesCredentialValidationHook(t *testing.T) {
 	t.Parallel()
 
 	called := false
-	driver := &assembler{stack: &RuntimeStack{
+	driver := &assembler{deps: &ControlRuntimeDeps{
 		Model: ModelRuntimeDeps{
 			HasReusableAuthFn: func(_ context.Context, provider string, baseURL string) bool {
 				called = true
@@ -82,23 +82,23 @@ func TestHasReusableConnectAuthUsesCredentialValidationHook(t *testing.T) {
 	}
 }
 
-func TestRuntimeStackModelDepsMissingFieldUsesEmptyDefault(t *testing.T) {
+func TestControlRuntimeDepsModelDepsMissingFieldUsesEmptyDefault(t *testing.T) {
 	t.Parallel()
 
-	stack := &RuntimeStack{}
+	deps := &ControlRuntimeDeps{}
 	got := ""
-	if stack.Model.EffectiveAliasFn != nil {
-		got = stack.Model.EffectiveAliasFn()
+	if deps.Model.EffectiveAliasFn != nil {
+		got = deps.Model.EffectiveAliasFn()
 	}
 	if got != "" {
 		t.Fatalf("Model.EffectiveAliasFn() = %q, want empty effective selection", got)
 	}
 }
 
-func TestRuntimeStackModelChoicesFallbackUsesGroupedAliases(t *testing.T) {
+func TestControlRuntimeDepsModelChoicesFallbackUsesGroupedAliases(t *testing.T) {
 	t.Parallel()
 
-	stack := &RuntimeStack{
+	deps := &ControlRuntimeDeps{
 		Model: ModelRuntimeDeps{
 			ListAliasesFn: func(context.Context, session.SessionRef) ([]string, error) {
 				return []string{"alpha", "beta"}, nil
@@ -106,7 +106,7 @@ func TestRuntimeStackModelChoicesFallbackUsesGroupedAliases(t *testing.T) {
 		},
 	}
 
-	choices, err := listModelChoices(context.Background(), stack.Model, session.SessionRef{})
+	choices, err := listModelChoices(context.Background(), deps.Model, session.SessionRef{})
 	if err != nil {
 		t.Fatalf("listModelChoices() error = %v", err)
 	}
@@ -115,15 +115,15 @@ func TestRuntimeStackModelChoicesFallbackUsesGroupedAliases(t *testing.T) {
 	}
 }
 
-func TestRuntimeStackSandboxDepsUseGroupedFields(t *testing.T) {
+func TestControlRuntimeDepsSandboxDepsUseGroupedFields(t *testing.T) {
 	t.Parallel()
 
 	called := 0
-	stack := &RuntimeStack{Sandbox: SandboxRuntimeDeps{StatusFn: func() SandboxStatus {
+	deps := &ControlRuntimeDeps{Sandbox: SandboxRuntimeDeps{StatusFn: func() SandboxStatus {
 		called++
 		return SandboxStatus{ResolvedBackend: "status"}
 	}}}
-	status := stack.Sandbox.StatusFn()
+	status := deps.Sandbox.StatusFn()
 	if status.ResolvedBackend != "status" || called != 1 {
 		t.Fatalf("sandbox status = %#v, calls=%d", status, called)
 	}

@@ -23,11 +23,6 @@ type GatewayTurnService interface {
 	ActiveTurns() []kernel.ActiveTurnState
 }
 
-// GatewaySessionService exposes the Session list read used by completion.
-type GatewaySessionService interface {
-	ListSessions(context.Context, kernel.ListSessionsRequest) (session.SessionList, error)
-}
-
 // GatewayControlPlaneService exposes the controller and participant state read
 // used by status and completion.
 type GatewayControlPlaneService interface {
@@ -150,7 +145,6 @@ type PluginRuntimeDeps struct {
 // assembling focused AppServer services.
 type GatewayRuntimeDeps struct {
 	TurnServiceFn         func() GatewayTurnService
-	SessionServiceFn      func() GatewaySessionService
 	ControlPlaneServiceFn func() GatewayControlPlaneService
 }
 
@@ -162,8 +156,9 @@ type SessionRuntimeDeps struct {
 		session.StateReader
 	}
 	AppName string
-	// UserID is compatibility input for legacy Gateway session listings. New
-	// AppServer paths should supply ListSessionsFn with principal-bound Control.
+	// UserID supplies the durable Session identity used by bound assemblers.
+	// Visibility-sensitive Session listing must use the principal-bound
+	// ListSessionsFn.
 	UserID         string
 	Workspace      session.WorkspaceRef
 	ListSessionsFn func(context.Context, kernel.ListSessionsRequest) (session.SessionList, error)
@@ -218,7 +213,10 @@ type SandboxRuntimeDeps struct {
 	StatusFn func() SandboxStatus
 }
 
-type RuntimeStack struct {
+// ControlRuntimeDeps is the focused, Host-neutral dependency set used to
+// assemble private AppServer services. The local adapter owns translation from
+// gatewayapp and must bind principal-sensitive capabilities before use.
+type ControlRuntimeDeps struct {
 	Gateway GatewayRuntimeDeps
 	Session SessionRuntimeDeps
 	Status  StatusRuntimeDeps

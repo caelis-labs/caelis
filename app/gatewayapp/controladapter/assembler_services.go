@@ -45,44 +45,44 @@ type PluginAssembler interface {
 
 // NewStatusAssemblerForSession binds the status assembler to an already
 // authorized Session. It is server composition, not a presentation client.
-func NewStatusAssemblerForSession(ctx context.Context, stack *RuntimeStack, active session.Session, bindingKey, modelText string) (StatusAssembler, error) {
-	return newAssemblerForSession(ctx, stack, active, bindingKey, modelText)
+func NewStatusAssemblerForSession(ctx context.Context, deps *ControlRuntimeDeps, active session.Session, bindingKey, modelText string) (StatusAssembler, error) {
+	return newAssemblerForSession(ctx, deps, active, bindingKey, modelText)
 }
 
-// NewStatusAssemblerForStack constructs the Host-scoped status projection.
+// NewStatusAssemblerForHost constructs the Host-scoped status projection.
 // Session-specific fields remain empty until the caller explicitly selects a
 // Session and uses NewStatusAssemblerForSession.
-func NewStatusAssemblerForStack(stack *RuntimeStack, bindingKey, modelText string) StatusAssembler {
-	return newAssemblerForStack(stack, bindingKey, modelText)
+func NewStatusAssemblerForHost(deps *ControlRuntimeDeps, bindingKey, modelText string) StatusAssembler {
+	return newHostAssembler(deps, bindingKey, modelText)
 }
 
 // NewAgentAssemblerForSession binds the Agent assembler to an already
 // authorized Session.
-func NewAgentAssemblerForSession(ctx context.Context, stack *RuntimeStack, active session.Session, bindingKey, modelText string) (AgentAssembler, error) {
-	return newAssemblerForSession(ctx, stack, active, bindingKey, modelText)
+func NewAgentAssemblerForSession(ctx context.Context, deps *ControlRuntimeDeps, active session.Session, bindingKey, modelText string) (AgentAssembler, error) {
+	return newAssemblerForSession(ctx, deps, active, bindingKey, modelText)
 }
 
-// NewAgentAssemblerForStack constructs the Host Agent catalog and disconnect
+// NewAgentAssemblerForHost constructs the Host Agent catalog and disconnect
 // projection. Product onboarding mutations use the focused Agent command
 // client. Controller and participant state require the Session variant.
-func NewAgentAssemblerForStack(stack *RuntimeStack, bindingKey, modelText string) AgentAssembler {
-	return newAssemblerForStack(stack, bindingKey, modelText)
+func NewAgentAssemblerForHost(deps *ControlRuntimeDeps, bindingKey, modelText string) AgentAssembler {
+	return newHostAssembler(deps, bindingKey, modelText)
 }
 
 // NewCompletionAssemblerForSession binds the completion assembler to an
 // already authorized Session.
-func NewCompletionAssemblerForSession(ctx context.Context, stack *RuntimeStack, active session.Session, bindingKey, modelText string) (CompletionAssembler, error) {
-	return newAssemblerForSession(ctx, stack, active, bindingKey, modelText)
+func NewCompletionAssemblerForSession(ctx context.Context, deps *ControlRuntimeDeps, active session.Session, bindingKey, modelText string) (CompletionAssembler, error) {
+	return newAssemblerForSession(ctx, deps, active, bindingKey, modelText)
 }
 
-// NewCompletionAssemblerForStack constructs workspace/catalog completion
+// NewCompletionAssemblerForHost constructs workspace/catalog completion
 // without creating or activating a Session.
-func NewCompletionAssemblerForStack(stack *RuntimeStack, bindingKey, modelText string) CompletionAssembler {
-	return newAssemblerForStack(stack, bindingKey, modelText)
+func NewCompletionAssemblerForHost(deps *ControlRuntimeDeps, bindingKey, modelText string) CompletionAssembler {
+	return newHostAssembler(deps, bindingKey, modelText)
 }
 
-// NewPluginAssemblerForStack constructs Host-owned plugin and marketplace
+// NewPluginAssemblerForHost constructs Host-owned plugin and marketplace
 // configuration without a Session address.
-func NewPluginAssemblerForStack(stack *RuntimeStack, bindingKey, modelText string) PluginAssembler {
-	return newAssemblerForStack(stack, bindingKey, modelText)
+func NewPluginAssemblerForHost(deps *ControlRuntimeDeps, bindingKey, modelText string) PluginAssembler {
+	return newHostAssembler(deps, bindingKey, modelText)
 }

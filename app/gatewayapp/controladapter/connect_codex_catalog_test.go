@@ -14,7 +14,7 @@ func TestCodexConnectCompletionUsesMaintainedCatalogWithoutAuthentication(t *tes
 	t.Parallel()
 
 	ctx := context.Background()
-	driver := newAssemblerForStack(&RuntimeStack{}, "", "")
+	driver := newHostAssembler(&ControlRuntimeDeps{}, "", "")
 	state := connectwizard.ConnectWizardState{
 		Provider:       "codex",
 		BaseURL:        modelconfig.CodexOAuthBaseURL,
@@ -58,7 +58,7 @@ func slashCandidateValues(candidates []controlprompt.SlashArgCandidate) []string
 func TestCodexConnectCompletionFallbackOmitsDeprecated52(t *testing.T) {
 	t.Parallel()
 
-	driver := newAssemblerForStack(&RuntimeStack{}, "", "")
+	driver := newHostAssembler(&ControlRuntimeDeps{}, "", "")
 	state := connectwizard.ConnectWizardState{Provider: "codex", BaseURL: modelconfig.CodexOAuthBaseURL}
 	models, err := driver.CompleteSlashArg(context.Background(), "connect-model:"+state.EncodeCompletionState(), "", 20)
 	if err != nil {

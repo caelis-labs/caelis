@@ -7,22 +7,22 @@ import (
 )
 
 func (d *assembler) ListPlugins(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
-	if d.stack.Plugin.ListPluginsFn == nil {
+	if d.deps.Plugin.ListPluginsFn == nil {
 		return nil, missingRuntimeDependency("list plugins")
 	}
-	return d.stack.Plugin.ListPluginsFn(ctx)
+	return d.deps.Plugin.ListPluginsFn(ctx)
 }
 
 func (d *assembler) ListMarketplaces(ctx context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
-	if d.stack.Plugin.ListMarketplacesFn == nil {
+	if d.deps.Plugin.ListMarketplacesFn == nil {
 		return nil, missingRuntimeDependency("list marketplaces")
 	}
-	return d.stack.Plugin.ListMarketplacesFn(ctx)
+	return d.deps.Plugin.ListMarketplacesFn(ctx)
 }
 
 func (d *assembler) InspectPlugin(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
-	if d.stack.Plugin.InspectPluginFn == nil {
+	if d.deps.Plugin.InspectPluginFn == nil {
 		return controlprompt.PluginSnapshot{}, missingRuntimeDependency("inspect plugin")
 	}
-	return d.stack.Plugin.InspectPluginFn(ctx, id)
+	return d.deps.Plugin.InspectPluginFn(ctx, id)
 }

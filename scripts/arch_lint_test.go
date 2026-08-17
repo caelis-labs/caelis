@@ -174,6 +174,24 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "",
 		},
 		{
+			name:       "root control adapter rejects gateway Host assembly",
+			rel:        "app/gatewayapp/controladapter/runtime_deps.go",
+			importPath: modulePath + "/app/gatewayapp",
+			want:       "root controladapter must not depend on the concrete gatewayapp Host; translation belongs to controladapter/local",
+		},
+		{
+			name:       "root control adapter test may use gateway Host fixtures",
+			rel:        "app/gatewayapp/controladapter/runtime_deps_test.go",
+			importPath: modulePath + "/app/gatewayapp",
+			want:       "",
+		},
+		{
+			name:       "local adapter owns gateway Host translation",
+			rel:        "app/gatewayapp/controladapter/local/runtime_deps.go",
+			importPath: modulePath + "/app/gatewayapp",
+			want:       "",
+		},
+		{
 			name:       "CLI accepts composed local adapter",
 			rel:        "internal/cli/host_clients.go",
 			importPath: modulePath + "/app/gatewayapp/controladapter/local",

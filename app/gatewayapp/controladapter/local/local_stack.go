@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-type RuntimeStack = controladapter.RuntimeStack
 type ModelConfig = controladapter.ModelConfig
 type ModelChoice = controladapter.ModelChoice
 type SessionRuntimeState = controladapter.SessionRuntimeState
@@ -19,40 +18,93 @@ type DoctorRequest = controladapter.DoctorRequest
 type DoctorReport = controladapter.DoctorReport
 type ACPAgentInfo = controladapter.ACPAgentInfo
 
-func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
+func controlRuntimeDeps(stack *gatewayapp.Stack) *controladapter.ControlRuntimeDeps {
 	if stack == nil {
 		return nil
 	}
-	return runtimeStackFromView(stack.ControlRuntimeView())
+	return controlRuntimeDepsFromView(stack.ControlRuntimeView())
 }
 
-func runtimeStackFromView(view *gatewayapp.ControlRuntimeView) *RuntimeStack {
-	return controladapter.NewRuntimeStackFromGatewayApp(view, controladapter.RuntimeStackGatewayAppAdapters{
-		SandboxStatus:        toRuntimeSandboxStatus,
-		SessionRuntimeState:  toRuntimeSessionRuntimeState,
-		ModelChoices:         toRuntimeModelChoices,
-		DoctorRequest:        toGatewayDoctorRequest,
-		DoctorReport:         toRuntimeDoctorReport,
-		ACPAgents:            toRuntimeACPAgents,
-		PluginSnapshots:      toRuntimePluginSnapshots,
-		PluginSnapshot:       toRuntimePluginSnapshotWithError,
-		MarketplaceSnapshots: toRuntimeMarketplaceSnapshots,
-	})
-}
-
-func runtimeStackForWorkspace(stack *gatewayapp.Stack, workspace session.WorkspaceRef) *RuntimeStack {
-	runtime := runtimeStack(stack)
-	if runtime == nil || stack == nil {
-		return runtime
+func controlRuntimeDepsFromView(view *gatewayapp.ControlRuntimeView) *controladapter.ControlRuntimeDeps {
+	if view == nil {
+		return nil
 	}
-	runtime.Session.Workspace = workspace
-	runtime.Sandbox.StatusFn = func() SandboxStatus {
+	return &controladapter.ControlRuntimeDeps{
+		Gateway: controladapter.GatewayRuntimeDeps{
+			TurnServiceFn: func() controladapter.GatewayTurnService {
+				return view.TurnStateFn()
+			},
+			ControlPlaneServiceFn: func() controladapter.GatewayControlPlaneService {
+				return view.ControlPlaneStateFn()
+			},
+		},
+		Session: controladapter.SessionRuntimeDeps{
+			Store:     view.Sessions,
+			AppName:   view.AppName,
+			UserID:    view.UserID,
+			Workspace: view.Workspace,
+		},
+		Status: controladapter.StatusRuntimeDeps{
+			RuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
+				return toRuntimeSessionRuntimeState(view.RuntimeStateFn(ctx, ref))
+			},
+			ConfigurationRevisionFn: view.ConfigurationRevisionFn,
+			DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
+				return toRuntimeDoctorReport(view.DoctorFn(ctx, toGatewayDoctorRequest(req)))
+			},
+		},
+		Agent: controladapter.AgentRuntimeDeps{
+			ControllerStatusFn:     view.ControllerStatusFn,
+			DisconnectCandidatesFn: view.DisconnectCandidatesFn,
+			ListFn:                 func() []ACPAgentInfo { return toRuntimeACPAgents(view.ListAgentsFn()) },
+		},
+		Model: controladapter.ModelRuntimeDeps{
+			EffectiveAliasFn:  view.EffectiveModelAliasFn,
+			EffectiveEffortFn: view.EffectiveModelEffortFn,
+			ConfigFn: func(alias string) (ModelConfig, bool) {
+				return view.ModelConfigFn(alias)
+			},
+			SessionUsageSnapshotFn: view.SessionUsageSnapshotFn,
+			ProviderUsageFn:        view.ProviderUsageFn,
+			ListAliasesFn:          view.ListModelAliasesFn,
+			ListChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
+				return toRuntimeModelChoices(view.ListModelChoicesFn(ctx, ref))
+			},
+			HasReusableAuthFn: view.HasReusableAuthFn,
+		},
+		Skill: controladapter.SkillRuntimeDeps{
+			SnapshotFn: view.SkillCatalogFn,
+		},
+		Sandbox: controladapter.SandboxRuntimeDeps{
+			StatusFn: func() SandboxStatus { return toRuntimeSandboxStatus(view.SandboxFn()) },
+		},
+		Plugin: controladapter.PluginRuntimeDeps{
+			ListPluginsFn: func(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
+				return toRuntimePluginSnapshots(view.ListPluginsFn(ctx))
+			},
+			ListMarketplacesFn: func(ctx context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
+				return toRuntimeMarketplaceSnapshots(view.ListMarketplacesFn(ctx))
+			},
+			InspectPluginFn: func(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
+				return toRuntimePluginSnapshotWithError(view.InspectPluginFn(ctx, id))
+			},
+		},
+	}
+}
+
+func controlRuntimeDepsForWorkspace(stack *gatewayapp.Stack, workspace session.WorkspaceRef) *controladapter.ControlRuntimeDeps {
+	deps := controlRuntimeDeps(stack)
+	if deps == nil || stack == nil {
+		return deps
+	}
+	deps.Session.Workspace = workspace
+	deps.Sandbox.StatusFn = func() SandboxStatus {
 		return toRuntimeSandboxStatus(stack.SandboxStatusForWorkspace(workspace))
 	}
-	runtime.Status.DoctorFn = func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
+	deps.Status.DoctorFn = func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
 		return toRuntimeDoctorReport(stack.DoctorForWorkspace(ctx, workspace, toGatewayDoctorRequest(req)))
 	}
-	return runtime
+	return deps
 }
 
 func toRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {

@@ -298,7 +298,10 @@ Document responsibilities are intentionally separate:
 - `app/gatewayapp/controladapter`: narrow Host-private, server-side assemblers
   for existing Control semantics. Its `local` subpackage is the only production
   package that consumes the root adapter package directly and assembles the
-  complete in-process AppServer service set. Every other production package
+  complete in-process AppServer service set. `local` also owns the translation
+  from `gatewayapp` Host views into the root package's focused,
+  principal-sensitive dependency set; the root package does not import the
+  concrete Host. Every other production package
   depends on `control/appserver`, a focused Control contract, or the composed
   `local` adapter; the root adapter package is not a product-client API.
   Production `app/*` code does not import `surfaces/*`. Do not add

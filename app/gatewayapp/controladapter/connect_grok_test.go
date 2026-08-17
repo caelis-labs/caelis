@@ -21,7 +21,7 @@ func TestConnectCatalogMarksDefaultProviderCredentialReusable(t *testing.T) {
 	t.Parallel()
 
 	called := false
-	driver := &assembler{stack: &RuntimeStack{Model: ModelRuntimeDeps{
+	driver := &assembler{deps: &ControlRuntimeDeps{Model: ModelRuntimeDeps{
 		HasReusableAuthFn: func(_ context.Context, provider string, baseURL string) bool {
 			called = true
 			if provider != "deepseek" || baseURL != "https://api.deepseek.com/anthropic" {

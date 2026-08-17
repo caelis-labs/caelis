@@ -47,9 +47,9 @@ func (s *StatusService) SessionStatus(
 		if err != nil {
 			return controlstatus.StatusSnapshot{}, err
 		}
-		stack := runtimeStackForWorkspace(s.host, workspace)
-		driver := controladapter.NewStatusAssemblerForStack(
-			stack,
+		deps := controlRuntimeDepsForWorkspace(s.host, workspace)
+		driver := controladapter.NewStatusAssemblerForHost(
+			deps,
 			strings.TrimSpace(request.Surface),
 			"",
 		)
@@ -67,7 +67,7 @@ func (s *StatusService) SessionStatus(
 	}()
 	driver, err := controladapter.NewStatusAssemblerForSession(
 		ctx,
-		runtimeStackFromView(lease.ControlRuntimeView()),
+		controlRuntimeDepsFromView(lease.ControlRuntimeView()),
 		lease.Session(),
 		strings.TrimSpace(request.Surface),
 		"",

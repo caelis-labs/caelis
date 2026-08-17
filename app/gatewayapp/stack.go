@@ -95,12 +95,6 @@ type KernelTurnReader interface {
 	ActiveTurns() []kernelimpl.ActiveTurnState
 }
 
-// KernelSessionReader is the read-only Session projection required by
-// server-side completion assembly.
-type KernelSessionReader interface {
-	ListSessions(context.Context, kernelimpl.ListSessionsRequest) (session.SessionList, error)
-}
-
 // KernelControlPlaneReader is the read-only controller and participant
 // projection required by server-side status assembly.
 type KernelControlPlaneReader interface {
@@ -134,15 +128,6 @@ type Stack struct {
 // KernelTurnState returns the current read-only live Turn projection. Turn
 // writes remain behind typed AppServer clients.
 func (s *runtimeComposition) KernelTurnState() KernelTurnReader {
-	if gw := s.currentGateway(); gw != nil {
-		return gw
-	}
-	return nil
-}
-
-// KernelSessionState returns the current read-only Session projection. Session
-// writes remain behind typed AppServer clients.
-func (s *runtimeComposition) KernelSessionState() KernelSessionReader {
 	if gw := s.currentGateway(); gw != nil {
 		return gw
 	}

@@ -23,9 +23,9 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		return controlstatus.StatusSnapshot{}, err
 	}
 	configurationRevision := uint64(0)
-	if d.stack != nil && d.stack.Status.ConfigurationRevisionFn != nil {
+	if d.deps != nil && d.deps.Status.ConfigurationRevisionFn != nil {
 		var err error
-		configurationRevision, err = d.stack.Status.ConfigurationRevisionFn(ctx)
+		configurationRevision, err = d.deps.Status.ConfigurationRevisionFn(ctx)
 		if err != nil {
 			return controlstatus.StatusSnapshot{}, err
 		}
@@ -33,22 +33,22 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 	modelText, sessionMode, sandboxType := d.defaultDisplays()
 	reasoningEffort := ""
 	effectiveModelText := ""
-	if d.stack != nil && d.stack.Model.EffectiveAliasFn != nil {
-		if alias := strings.TrimSpace(d.stack.Model.EffectiveAliasFn()); alias != "" {
+	if d.deps != nil && d.deps.Model.EffectiveAliasFn != nil {
+		if alias := strings.TrimSpace(d.deps.Model.EffectiveAliasFn()); alias != "" {
 			modelText = alias
 			effectiveModelText = alias
 		}
 	}
-	if d.stack != nil && d.stack.Model.EffectiveEffortFn != nil {
-		reasoningEffort = strings.TrimSpace(d.stack.Model.EffectiveEffortFn())
+	if d.deps != nil && d.deps.Model.EffectiveEffortFn != nil {
+		reasoningEffort = strings.TrimSpace(d.deps.Model.EffectiveEffortFn())
 	}
 	sandboxStatus := SandboxStatus{}
-	if d.stack != nil && d.stack.Sandbox.StatusFn != nil {
-		sandboxStatus = d.stack.Sandbox.StatusFn()
+	if d.deps != nil && d.deps.Sandbox.StatusFn != nil {
+		sandboxStatus = d.deps.Sandbox.StatusFn()
 	}
 	activeSession, ok := d.currentSession()
-	if ok && d.stack != nil && d.stack.Status.RuntimeStateFn != nil {
-		if state, err := d.stack.Status.RuntimeStateFn(ctx, activeSession.SessionRef); err == nil {
+	if ok && d.deps != nil && d.deps.Status.RuntimeStateFn != nil {
+		if state, err := d.deps.Status.RuntimeStateFn(ctx, activeSession.SessionRef); err == nil {
 			if strings.TrimSpace(state.ModelAlias) != "" {
 				modelText = strings.TrimSpace(state.ModelAlias)
 				if effectiveModelText != "" && !strings.EqualFold(modelText, effectiveModelText) {
@@ -101,8 +101,8 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 	if ok {
 		workspaceCWD = strings.TrimSpace(activeSession.CWD)
 	}
-	if workspaceCWD == "" && d.stack != nil {
-		workspaceCWD = strings.TrimSpace(d.stack.Session.Workspace.CWD)
+	if workspaceCWD == "" && d.deps != nil {
+		workspaceCWD = strings.TrimSpace(d.deps.Session.Workspace.CWD)
 	}
 
 	status := controlstatus.StatusSnapshot{
@@ -131,13 +131,13 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 			FullAccessMode:   sandboxStatus.FullAccessMode,
 		},
 	}
-	if d.stack != nil {
+	if d.deps != nil {
 		// The configured context window is static model metadata, not a usage
 		// diagnostic. Keep it available to lightweight status consumers so a
 		// later total-only provider usage event can still render the ratio.
 		// Surfaces hide the compact label until observed token usage arrives.
-		if !activeACP && d.stack.Model.ConfigFn != nil {
-			if cfg, found := d.stack.Model.ConfigFn(rawModelText); found && cfg.ContextWindowTokens > 0 {
+		if !activeACP && d.deps.Model.ConfigFn != nil {
+			if cfg, found := d.deps.Model.ConfigFn(rawModelText); found && cfg.ContextWindowTokens > 0 {
 				status.Usage.ContextWindowTokens = cfg.ContextWindowTokens
 			}
 		}
@@ -145,8 +145,8 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		if ok {
 			req.SessionRef = activeSession.SessionRef
 		}
-		if includeDiagnostics && d.stack.Status.DoctorFn != nil {
-			if report, err := d.stack.Status.DoctorFn(ctx, req); err == nil {
+		if includeDiagnostics && d.deps.Status.DoctorFn != nil {
+			if report, err := d.deps.Status.DoctorFn(ctx, req); err == nil {
 				applyDoctorStatus(&status, report)
 				if alias := strings.TrimSpace(report.ActiveModelAlias); alias != "" {
 					rawModelText = alias
@@ -160,15 +160,15 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 			if activeACP {
 				status.ModelStatus.ReasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
 				status.ModelStatus.Display = formatReasoningModelDisplay(firstNonEmpty(strings.TrimSpace(acpStatus.Model), rawModelText), status.ModelStatus.ReasoningEffort)
-			} else if d.stack.Model.ConfigFn != nil {
-				if cfg, ok := d.stack.Model.ConfigFn(rawModelText); ok {
+			} else if d.deps.Model.ConfigFn != nil {
+				if cfg, ok := d.deps.Model.ConfigFn(rawModelText); ok {
 					status.ModelStatus.ReasoningEffort = firstNonEmpty(cfg.ReasoningEffort, cfg.DefaultReasoningEffort)
 					status.ModelStatus.Display = formatReasoningModelDisplay(rawModelText, status.ModelStatus.ReasoningEffort)
 				}
 			}
 		}
-		if includeDiagnostics && ok && !activeACP && d.stack.Model.SessionUsageSnapshotFn != nil {
-			if usage, err := d.stack.Model.SessionUsageSnapshotFn(ctx, activeSession.SessionRef, rawModelText); err == nil {
+		if includeDiagnostics && ok && !activeACP && d.deps.Model.SessionUsageSnapshotFn != nil {
+			if usage, err := d.deps.Model.SessionUsageSnapshotFn(ctx, activeSession.SessionRef, rawModelText); err == nil {
 				status.Usage.TotalTokens = usage.TotalTokens
 				if usage.ContextWindowTokens > 0 {
 					status.Usage.ContextWindowTokens = usage.ContextWindowTokens
@@ -185,8 +185,8 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 				return controlstatus.StatusSnapshot{}, ctx.Err()
 			}
 		}
-		if includeDiagnostics && !activeACP && d.stack.Model.ProviderUsageFn != nil {
-			if usage, found, err := d.stack.Model.ProviderUsageFn(ctx, rawModelText); err == nil && found {
+		if includeDiagnostics && !activeACP && d.deps.Model.ProviderUsageFn != nil {
+			if usage, found, err := d.deps.Model.ProviderUsageFn(ctx, rawModelText); err == nil && found {
 				status.RateLimits = statusRateLimitsFromProviderUsage(usage)
 			} else if ctx.Err() != nil {
 				return controlstatus.StatusSnapshot{}, ctx.Err()

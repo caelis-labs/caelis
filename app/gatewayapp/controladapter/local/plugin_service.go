@@ -88,7 +88,7 @@ func (s *PluginService) hostAdapter(principal appserver.Principal, req appserver
 	if err := authorizeHostCapability(principal); err != nil {
 		return nil, err
 	}
-	return controladapter.NewPluginAssemblerForStack(runtimeStack(s.host), strings.TrimSpace(req.Surface), ""), nil
+	return controladapter.NewPluginAssemblerForHost(controlRuntimeDeps(s.host), strings.TrimSpace(req.Surface), ""), nil
 }
 
 var _ appserver.PluginService = (*PluginService)(nil)

@@ -31,10 +31,6 @@ func (s *Stack) KernelTurnState() KernelTurnReader {
 	return s.runtimeProjection().KernelTurnState()
 }
 
-func (s *Stack) KernelSessionState() KernelSessionReader {
-	return s.runtimeProjection().KernelSessionState()
-}
-
 func (s *Stack) KernelControlPlaneState() KernelControlPlaneReader {
 	return s.runtimeProjection().KernelControlPlaneState()
 }

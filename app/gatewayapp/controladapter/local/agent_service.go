@@ -144,7 +144,7 @@ func (s *AgentService) hostAdapter(principal appserver.Principal, surface string
 	if err := authorizeHostCapability(principal); err != nil {
 		return nil, err
 	}
-	return controladapter.NewAgentAssemblerForStack(runtimeStack(s.host), strings.TrimSpace(surface), ""), nil
+	return controladapter.NewAgentAssemblerForHost(controlRuntimeDeps(s.host), strings.TrimSpace(surface), ""), nil
 }
 
 func (s *AgentService) runtimeAdapter(ctx context.Context, principal appserver.Principal, sessionID, surface string, activate bool) (controladapter.AgentAssembler, func(), error) {
@@ -152,7 +152,7 @@ func (s *AgentService) runtimeAdapter(ctx context.Context, principal appserver.P
 	if err != nil {
 		return nil, nil, err
 	}
-	driver, err := controladapter.NewAgentAssemblerForSession(ctx, runtimeStackFromView(lease.ControlRuntimeView()), lease.Session(), strings.TrimSpace(surface), "")
+	driver, err := controladapter.NewAgentAssemblerForSession(ctx, controlRuntimeDepsFromView(lease.ControlRuntimeView()), lease.Session(), strings.TrimSpace(surface), "")
 	if err != nil {
 		_ = lease.Close(ctx)
 		return nil, nil, err

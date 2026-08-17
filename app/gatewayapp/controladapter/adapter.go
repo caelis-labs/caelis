@@ -17,7 +17,7 @@ const processOwnedFullAccessSessionMode = "yolo"
 
 type assembler struct {
 	mu                 sync.Mutex
-	stack              *RuntimeStack
+	deps               *ControlRuntimeDeps
 	session            session.Session
 	hasSession         bool
 	bindingKey         string
@@ -34,9 +34,9 @@ type assembler struct {
 // clients; these private assemblers expose only the server-side projections
 // needed by focused status, configuration, Agent, completion, and plugin
 // services.
-func newAssemblerForSession(ctx context.Context, stack *RuntimeStack, activeSession session.Session, bindingKey string, modelText string) (*assembler, error) {
-	if stack == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
+func newAssemblerForSession(ctx context.Context, deps *ControlRuntimeDeps, activeSession session.Session, bindingKey string, modelText string) (*assembler, error) {
+	if deps == nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: dependencies are required")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -46,20 +46,20 @@ func newAssemblerForSession(ctx context.Context, stack *RuntimeStack, activeSess
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: session id is required")
 	}
 	if activeSession.AppName == "" {
-		activeSession.AppName = strings.TrimSpace(stack.Session.AppName)
+		activeSession.AppName = strings.TrimSpace(deps.Session.AppName)
 	}
 	if activeSession.UserID == "" {
-		activeSession.UserID = strings.TrimSpace(stack.Session.UserID)
+		activeSession.UserID = strings.TrimSpace(deps.Session.UserID)
 	}
-	driver := newAssemblerForStack(stack, bindingKey, modelText)
+	driver := newHostAssembler(deps, bindingKey, modelText)
 	driver.bindSession(ctx, activeSession)
 	return driver, nil
 }
 
-func newAssemblerForStack(stack *RuntimeStack, bindingKey string, modelText string) *assembler {
+func newHostAssembler(deps *ControlRuntimeDeps, bindingKey string, modelText string) *assembler {
 	key := firstNonEmpty(strings.TrimSpace(bindingKey), "cli-tui")
 	return &assembler{
-		stack:              stack,
+		deps:               deps,
 		bindingKey:         key,
 		defaultModelText:   strings.TrimSpace(modelText),
 		modelText:          strings.TrimSpace(modelText),
@@ -81,20 +81,16 @@ func (d *assembler) gatewayTurns() (GatewayTurnService, error) {
 	return resolveGatewayDep(d, gatewayTurnServiceFn, "gateway turn service", "gateway turn service is unavailable")
 }
 
-func (d *assembler) gatewaySessions() (GatewaySessionService, error) {
-	return resolveGatewayDep(d, gatewaySessionServiceFn, "gateway session service", "gateway session service is unavailable")
-}
-
 func (d *assembler) gatewayControlPlane() (GatewayControlPlaneService, error) {
 	return resolveGatewayDep(d, gatewayControlPlaneServiceFn, "gateway control-plane service", "gateway control-plane service is unavailable")
 }
 
 func resolveGatewayDep[T any](driver *assembler, provider func(GatewayRuntimeDeps) func() T, depName, unavailable string) (T, error) {
 	var zero T
-	if driver == nil || driver.stack == nil {
-		return zero, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
+	if driver == nil || driver.deps == nil {
+		return zero, fmt.Errorf("app/gatewayapp/controladapter: dependencies are required")
 	}
-	fn := provider(driver.stack.Gateway)
+	fn := provider(driver.deps.Gateway)
 	if fn == nil {
 		return zero, missingRuntimeDependency(depName)
 	}
@@ -106,10 +102,6 @@ func resolveGatewayDep[T any](driver *assembler, provider func(GatewayRuntimeDep
 
 func gatewayTurnServiceFn(deps GatewayRuntimeDeps) func() GatewayTurnService {
 	return deps.TurnServiceFn
-}
-
-func gatewaySessionServiceFn(deps GatewayRuntimeDeps) func() GatewaySessionService {
-	return deps.SessionServiceFn
 }
 
 func gatewayControlPlaneServiceFn(deps GatewayRuntimeDeps) func() GatewayControlPlaneService {
@@ -128,7 +120,7 @@ func anyString(value any) string {
 }
 
 func (d *assembler) WorkspaceDir() string {
-	if d == nil || d.stack == nil {
+	if d == nil || d.deps == nil {
 		return ""
 	}
 	if activeSession, ok := d.currentSession(); ok {
@@ -136,7 +128,7 @@ func (d *assembler) WorkspaceDir() string {
 			return cwd
 		}
 	}
-	return strings.TrimSpace(d.stack.Session.Workspace.CWD)
+	return strings.TrimSpace(d.deps.Session.Workspace.CWD)
 }
 
 func (d *assembler) requireSession() (session.Session, error) {
@@ -163,7 +155,7 @@ func (d *assembler) activeACPControllerStatus(ctx context.Context) (controller.C
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if d == nil || d.stack == nil {
+	if d == nil || d.deps == nil {
 		return controller.ControllerStatus{}, false, nil
 	}
 	activeSession, ok := d.currentSession()
@@ -172,9 +164,9 @@ func (d *assembler) activeACPControllerStatus(ctx context.Context) (controller.C
 	}
 	status := controller.ControllerStatus{}
 	found := false
-	if d.stack.Agent.ControllerStatusFn != nil {
+	if d.deps.Agent.ControllerStatusFn != nil {
 		var err error
-		status, found, err = d.stack.Agent.ControllerStatusFn(ctx, activeSession.SessionRef)
+		status, found, err = d.deps.Agent.ControllerStatusFn(ctx, activeSession.SessionRef)
 		if err != nil {
 			return controller.ControllerStatus{}, false, err
 		}
@@ -215,9 +207,9 @@ func (d *assembler) listResumeCandidates(ctx context.Context, limit int) ([]cont
 	ctx, cancel := completionContext(ctx, resumeCompletionTimeout)
 	defer cancel()
 	result, err := d.listSessions(ctx, kernel.ListSessionsRequest{
-		AppName: d.stack.Session.AppName,
-		UserID:  d.stack.Session.UserID,
-		CWD:     d.stack.Session.Workspace.CWD,
+		AppName: d.deps.Session.AppName,
+		UserID:  d.deps.Session.UserID,
+		CWD:     d.deps.Session.Workspace.CWD,
 		Limit:   limit,
 	})
 	if err != nil {
@@ -231,20 +223,13 @@ func (d *assembler) listResumeCandidates(ctx context.Context, limit int) ([]cont
 }
 
 func (d *assembler) listSessions(ctx context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
-	if d == nil || d.stack == nil {
+	if d == nil || d.deps == nil || d.deps.Session.ListSessionsFn == nil {
 		return session.SessionList{}, missingRuntimeDependency("session list")
 	}
-	if d.stack.Session.ListSessionsFn != nil {
-		// Principal-bound Control owns visibility on the maintained AppServer
-		// path; do not carry the legacy Runtime user partition into it.
-		req.UserID = ""
-		return d.stack.Session.ListSessionsFn(ctx, req)
-	}
-	gw, err := d.gatewaySessions()
-	if err != nil {
-		return session.SessionList{}, err
-	}
-	return gw.ListSessions(ctx, req)
+	// Principal-bound Control owns visibility; the durable Runtime user
+	// partition is never forwarded as an authorization substitute.
+	req.UserID = ""
+	return d.deps.Session.ListSessionsFn(ctx, req)
 }
 
 func (d *assembler) ListAgents(ctx context.Context, limit int) ([]controlprompt.AgentCandidate, error) {
@@ -384,17 +369,17 @@ func (d *assembler) defaultDisplays() (string, string, string) {
 }
 
 func (d *assembler) refreshSessionDisplay(ctx context.Context, activeSession session.Session) {
-	if d == nil || d.stack == nil {
+	if d == nil || d.deps == nil {
 		return
 	}
 	modelText, sessionMode, sandboxType := d.defaultDisplays()
-	if d.stack.Model.EffectiveAliasFn != nil {
-		if alias := strings.TrimSpace(d.stack.Model.EffectiveAliasFn()); alias != "" {
+	if d.deps.Model.EffectiveAliasFn != nil {
+		if alias := strings.TrimSpace(d.deps.Model.EffectiveAliasFn()); alias != "" {
 			modelText = alias
 		}
 	}
-	if d.stack.Status.RuntimeStateFn != nil {
-		if state, err := d.stack.Status.RuntimeStateFn(ctx, activeSession.SessionRef); err == nil {
+	if d.deps.Status.RuntimeStateFn != nil {
+		if state, err := d.deps.Status.RuntimeStateFn(ctx, activeSession.SessionRef); err == nil {
 			if strings.TrimSpace(state.ModelAlias) != "" {
 				modelText = strings.TrimSpace(state.ModelAlias)
 			}
