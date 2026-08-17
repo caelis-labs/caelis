@@ -46,7 +46,7 @@ func (s *runtimeComposition) delegationSpawnTargets(session controlplacement.Ses
 }
 
 func (s *runtimeComposition) delegationSpawnConfiguration(session controlplacement.SessionContext) ([]sdkdelegation.Agent, map[string]spawn.Target, error) {
-	if s == nil || s.store == nil {
+	if s == nil || s.authorities.store == nil {
 		return nil, nil, fmt.Errorf("gatewayapp: delegation placement is unavailable")
 	}
 	snapshot, err := s.placementSnapshot(context.Background())
@@ -90,7 +90,7 @@ func (s *runtimeComposition) delegationSpawnConfiguration(session controlplaceme
 }
 
 func (s *runtimeComposition) resolveDelegationPlacement(req sdkdelegation.TargetRequest, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
-	if s == nil || s.store == nil || s.lookup == nil {
+	if s == nil || s.authorities.store == nil || s.lookup == nil {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: delegation placement is unavailable")
 	}
 	target := sdkdelegation.NormalizeTarget(req.Target)
@@ -140,7 +140,7 @@ func (s *runtimeComposition) materializeDelegatedModel(name, profileID, effort s
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve delegated profile %q: %w", profileID, err)
 	}
 	materialized, err := configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
-		StoreDir:     s.storeDir,
+		StoreDir:     s.authorities.storeDir,
 		WorkspaceKey: s.workspace.Key,
 		WorkspaceCWD: s.workspace.CWD,
 		SessionOptions: caelisModelSessionOptions(

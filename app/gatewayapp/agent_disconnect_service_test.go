@@ -27,7 +27,7 @@ func TestDisconnectACPRemovesSiblingProfilesAndRetainsInstallation(t *testing.T)
 	connection := controlagents.Connection{
 		ID: "shared", Name: "Shared", Launcher: controlagents.Launcher{Kind: controlagents.LaunchKindManaged, Command: installed},
 	}
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestDisconnectACPRemovesSiblingProfilesAndRetainsInstallation(t *testing.T)
 		{Handle: agentbinding.HandleBreeze, ProfileID: "acp:shared:opus", Effort: "none"},
 		{Handle: agentbinding.HandleOrbit, ProfileID: "acp:shared:sonnet", Effort: "none"},
 	}}
-	if err := stack.composition.store.Save(doc); err != nil {
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatal(err)
 	}
 
@@ -54,7 +54,7 @@ func TestDisconnectACPRemovesSiblingProfilesAndRetainsInstallation(t *testing.T)
 	if result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DisconnectACP() = %#v", result)
 	}
-	doc, err = stack.composition.store.Load()
+	doc, err = stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestDisconnectACPRollsForwardAfterCommittedConfigWriteFault(t *testing.T) {
 	if writeCount() != 1 {
 		t.Fatalf("DisconnectACP() result/writes = %#v/%d", result, writeCount())
 	}
-	doc, loadErr := stack.composition.store.Load()
+	doc, loadErr := stack.composition.authorities.store.Load()
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
@@ -96,32 +96,32 @@ func TestDisconnectACPCommandCachesUnknownWhenCommittedRevisionCannotBeObserved(
 	persistDisconnectTestAgent(t, stack, "readback-disconnect")
 	fault := errors.New("directory fsync after disconnect CAS failed")
 	writeCount := installCommittedConfigSaveFault(t, stack, "fsync", fault)
-	committedFault := stack.composition.store.saveHook
-	committedPath := stack.composition.store.path + ".committed-disconnect"
+	committedFault := stack.composition.authorities.store.saveHook
+	committedPath := stack.composition.authorities.store.path + ".committed-disconnect"
 	pathBlocked := false
 	restore := func() {
 		if !pathBlocked {
 			return
 		}
-		if err := os.Remove(stack.composition.store.path); err != nil {
+		if err := os.Remove(stack.composition.authorities.store.path); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Rename(committedPath, stack.composition.store.path); err != nil {
+		if err := os.Rename(committedPath, stack.composition.authorities.store.path); err != nil {
 			t.Fatal(err)
 		}
 		pathBlocked = false
 	}
 	t.Cleanup(restore)
-	stack.composition.store.saveHook = func(doc AppConfig) error {
+	stack.composition.authorities.store.saveHook = func(doc AppConfig) error {
 		committedErr := committedFault(doc)
 		if !configstore.WriteCommitted(committedErr) {
 			return committedErr
 		}
-		if err := os.Rename(stack.composition.store.path, committedPath); err != nil {
+		if err := os.Rename(stack.composition.authorities.store.path, committedPath); err != nil {
 			return errors.Join(committedErr, err)
 		}
-		if err := os.Mkdir(stack.composition.store.path, 0o700); err != nil {
-			_ = os.Rename(committedPath, stack.composition.store.path)
+		if err := os.Mkdir(stack.composition.authorities.store.path, 0o700); err != nil {
+			_ = os.Rename(committedPath, stack.composition.authorities.store.path)
 			return errors.Join(committedErr, err)
 		}
 		pathBlocked = true
@@ -135,19 +135,19 @@ func TestDisconnectACPCommandCachesUnknownWhenCommittedRevisionCannotBeObserved(
 		WriteBase: appserver.WriteBase{OperationID: "agent-disconnect-committed-readback", ExpectedRevision: &expected},
 		AgentID:   "readback-disconnect",
 	}
-	result, err := stack.AgentCommands().DisconnectACP(context.Background(), appserver.Principal{ID: stack.composition.userID}, request)
+	result, err := stack.AgentCommands().DisconnectACP(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, request)
 	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != 0 {
 		t.Fatalf("DisconnectACP(committed readback failure) = %#v, %v", result, err)
 	}
 	restore()
-	doc, err := stack.composition.store.LoadContext(context.Background())
+	doc, err := stack.composition.authorities.store.LoadContext(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := controlagents.LookupAgent(doc.ExternalAgents, "readback-disconnect"); ok {
 		t.Fatalf("persisted config retained disconnected Agent: %#v", doc.ExternalAgents)
 	}
-	replayed, replayErr := stack.AgentCommands().DisconnectACP(context.Background(), appserver.Principal{ID: stack.composition.userID}, request)
+	replayed, replayErr := stack.AgentCommands().DisconnectACP(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, request)
 	if replayErr != nil || replayed != result || writeCount() != 1 {
 		t.Fatalf("DisconnectACP(replay) = %#v, %v writes=%d; want %#v and one write", replayed, replayErr, writeCount(), result)
 	}
@@ -186,8 +186,8 @@ func TestDisconnectACPCASAllowsOnlyOneConcurrentHostWriter(t *testing.T) {
 		return store
 	}
 	sessions := sessionmemory.NewStore(sessionmemory.Config{})
-	first := &Stack{composition: runtimeComposition{store: makeStore(), sessions: sessions}}
-	second := &Stack{composition: runtimeComposition{store: makeStore(), sessions: sessions}}
+	first := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: makeStore()}, sessions: sessions}}
+	second := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: makeStore()}, sessions: sessions}}
 	type outcome struct {
 		result externalAgentMutationResult
 		err    error
@@ -241,7 +241,7 @@ func TestDisconnectACPCASAllowsOnlyOneConcurrentHostWriter(t *testing.T) {
 func TestDisconnectACPPersistsProfilesAndBindingsWithoutAssemblyRefresh(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	connection := controlagents.Connection{ID: "rollback", Launcher: controlagents.Launcher{Command: writeExternalAgentExecutable(t, t.TempDir(), "rollback-acp")}}
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestDisconnectACPPersistsProfilesAndBindingsWithoutAssemblyRefresh(t *testi
 	doc.AgentBindings = agentbinding.Configuration{Bindings: []agentbinding.Binding{{
 		Handle: agentbinding.HandleZenith, ProfileID: "acp:rollback:opus", Effort: "none",
 	}}}
-	if err := stack.composition.store.Save(doc); err != nil {
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatal(err)
 	}
 
@@ -257,7 +257,7 @@ func TestDisconnectACPPersistsProfilesAndBindingsWithoutAssemblyRefresh(t *testi
 	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DisconnectACP() receipt/error = %#v/%v", receipt, err)
 	}
-	doc, err = stack.composition.store.Load()
+	doc, err = stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestDisconnectACPDoesNotScanDurableSessionBindings(t *testing.T) {
 	persistDisconnectTestAgent(t, stack, "codex")
 	ctx := context.Background()
 	active, err := stack.composition.sessions.StartSession(ctx, session.StartSessionRequest{
-		AppName: stack.composition.appName, UserID: stack.composition.userID, Workspace: stack.composition.workspace,
+		AppName: stack.composition.authorities.appName, UserID: stack.composition.authorities.userID, Workspace: stack.composition.workspace,
 		PreferredSessionID: "activated-session",
 	})
 	if err != nil {
@@ -357,7 +357,7 @@ func TestDisconnectACPDoesNotScanDurableSessionBindings(t *testing.T) {
 	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DisconnectACP() receipt/error = %#v/%v", receipt, err)
 	}
-	doc, err := stack.composition.store.LoadContext(ctx)
+	doc, err := stack.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +387,7 @@ func persistDisconnectTestAgent(t *testing.T, stack *Stack, agentID string) {
 		ID:       agentID,
 		Launcher: controlagents.Launcher{Command: writeExternalAgentExecutable(t, t.TempDir(), agentID+"-acp")},
 	}
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +397,7 @@ func persistDisconnectTestAgent(t *testing.T, stack *Stack, agentID string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := stack.composition.store.Save(doc); err != nil {
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatal(err)
 	}
 }

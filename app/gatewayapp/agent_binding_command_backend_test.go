@@ -15,7 +15,7 @@ import (
 func TestAgentBindingCommandsUseHostCASAndSharedLedger(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", Model: "binding-command"})
 	if err != nil {
 		t.Fatal(err)
@@ -128,8 +128,8 @@ func TestAgentBindingCASAllowsOnlyOneConcurrentHostWriter(t *testing.T) {
 		}
 		return store
 	}
-	first := &Stack{composition: runtimeComposition{store: makeStore()}}
-	second := &Stack{composition: runtimeComposition{store: makeStore()}}
+	first := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: makeStore()}}}
+	second := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: makeStore()}}}
 	type outcome struct {
 		result agentBindingMutationResult
 		err    error

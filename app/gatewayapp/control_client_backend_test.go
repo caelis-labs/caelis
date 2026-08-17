@@ -111,7 +111,7 @@ func TestControlParticipantPlacementRejectsOnlyInvalidSelections(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	stack := &Stack{composition: runtimeComposition{store: store}}
+	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: store}}}
 	for _, selection := range []struct {
 		profileID string
 		effort    string
@@ -130,7 +130,7 @@ func TestControlParticipantPlacementRejectsOnlyInvalidSelections(t *testing.T) {
 func TestControlParticipantPlacementStoreFailureRemainsUnknown(t *testing.T) {
 	store := newAppConfigStore(t.TempDir())
 	store.path = t.TempDir()
-	stack := &Stack{composition: runtimeComposition{store: store}}
+	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: store}}}
 	_, err := stack.composition.resolveControlParticipantPlacement(context.Background(), "acp:claude:opus", "xhigh")
 	if err == nil || errorcode.CodeOf(err) == errorcode.InvalidArgument {
 		t.Fatalf("resolveControlParticipantPlacement(store failure) = %v, want internal failure", err)
@@ -143,7 +143,7 @@ func TestControlParticipantPlacementStoreFailureRemainsUnknown(t *testing.T) {
 }
 
 func TestControlHandlePlacementRejectsDeterministicSelectionFailure(t *testing.T) {
-	stack := &Stack{composition: runtimeComposition{store: newAppConfigStore(t.TempDir())}}
+	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: newAppConfigStore(t.TempDir())}}}
 	_, err := stack.composition.resolveControlHandlePlacement(context.Background(), agentbinding.Handle("missing"))
 	var outcomeErr *appserver.OutcomeError
 	if !errors.As(err, &outcomeErr) ||
@@ -156,7 +156,7 @@ func TestControlHandlePlacementRejectsDeterministicSelectionFailure(t *testing.T
 func TestControlHandlePlacementStoreFailureRemainsUnknown(t *testing.T) {
 	store := newAppConfigStore(t.TempDir())
 	store.path = t.TempDir()
-	stack := &Stack{composition: runtimeComposition{store: store}}
+	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: store}}}
 	_, err := stack.composition.resolveControlHandlePlacement(context.Background(), agentbinding.HandleReviewer)
 	if err == nil || errorcode.CodeOf(err) == errorcode.FailedPrecondition {
 		t.Fatalf("resolveControlHandlePlacement(store failure) = %v, want internal failure", err)
@@ -206,7 +206,9 @@ func TestAttachControlClientHandleDoesNotReadTaskStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	stack := &Stack{
-		composition: runtimeComposition{sessions: sessions, controlFeeds: feeds, gateway: kernel},
+		composition: runtimeComposition{
+			authorities: runtimeHostAuthorities{controlFeeds: feeds}, sessions: sessions, gateway: kernel,
+		},
 	}
 	feed, err := feeds.Session(active.SessionRef)
 	if err != nil {
@@ -289,7 +291,9 @@ func TestAttachControlClientHandleFailureCancelsAndPublishesAfterProducerBarrier
 		}()
 		return result
 	}}
-	stack := &Stack{composition: runtimeComposition{controlFeeds: controlClientFeedRegistry{feed: feed}}}
+	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{
+		controlFeeds: controlClientFeedRegistry{feed: feed},
+	}}}
 	stack.composition.attachControlClientHandle(handle)
 
 	select {
@@ -339,7 +343,9 @@ func TestCommittedCommandKeepsOutcomeWhenFeedPrimeFailsAndLedgerReplays(t *testi
 	feed := &controlClientSessionFeed{primeErr: errors.New("injected prime failure")}
 	stack := &Stack{
 		composition: runtimeComposition{
-			sessions: sessions, appName: "caelis", controlFeeds: controlClientFeedRegistry{feed: feed}, gateway: kernel,
+			authorities: runtimeHostAuthorities{appName: "caelis", controlFeeds: controlClientFeedRegistry{feed: feed}},
+			sessions:    sessions,
+			gateway:     kernel,
 		},
 	}
 	backend := &countingControlClientBackend{backend: stack}
@@ -410,7 +416,9 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	}
 	defer subscription.Close()
 	stack := &Stack{
-		composition: runtimeComposition{sessions: sessions, controlFeeds: feeds, gateway: kernel},
+		composition: runtimeComposition{
+			authorities: runtimeHostAuthorities{controlFeeds: feeds}, sessions: sessions, gateway: kernel,
+		},
 	}
 	expected := active.Revision
 	result, err := stack.ExecuteControlCommand(ctx, appserver.Principal{ID: "owner"}, appserver.ActionSessionClose, appserver.CloseSessionRequest{
@@ -480,7 +488,9 @@ func TestControlClientPromptUsesHostLifecycleAfterAdmission(t *testing.T) {
 	hostCtx, cancelHost := context.WithCancel(context.Background())
 	stack := &Stack{
 		composition: runtimeComposition{
-			sessions: sessions, controlFeeds: feeds, gateway: kernel, lifecycleCtx: hostCtx,
+			authorities: runtimeHostAuthorities{controlFeeds: feeds, lifecycleCtx: hostCtx},
+			sessions:    sessions,
+			gateway:     kernel,
 		},
 		lifecycleCancel: cancelHost,
 	}
@@ -561,7 +571,9 @@ func TestControlClientParticipantPromptUsesHostLifecycleAfterAdmission(t *testin
 	hostCtx, cancelHost := context.WithCancel(context.Background())
 	stack := &Stack{
 		composition: runtimeComposition{
-			sessions: sessions, controlFeeds: feeds, gateway: kernel, lifecycleCtx: hostCtx,
+			authorities: runtimeHostAuthorities{controlFeeds: feeds, lifecycleCtx: hostCtx},
+			sessions:    sessions,
+			gateway:     kernel,
 		},
 		lifecycleCancel: cancelHost,
 	}
@@ -642,7 +654,9 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	hostCtx, cancelHost := context.WithCancel(context.Background())
 	stack := &Stack{
 		composition: runtimeComposition{
-			sessions: sessions, controlFeeds: feeds, gateway: kernel, lifecycleCtx: hostCtx,
+			authorities: runtimeHostAuthorities{controlFeeds: feeds, lifecycleCtx: hostCtx},
+			sessions:    sessions,
+			gateway:     kernel,
 		},
 		lifecycleCancel: cancelHost,
 	}

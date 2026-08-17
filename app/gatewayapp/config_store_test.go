@@ -61,7 +61,7 @@ func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}

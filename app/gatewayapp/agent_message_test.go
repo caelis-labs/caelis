@@ -58,7 +58,9 @@ func TestDeliverAgentMessageAttachesIdleTurnAndPreservesRuntimeContext(t *testin
 	defer stopLifecycle()
 	stack := &Stack{
 		composition: runtimeComposition{
-			sessions: sessions, controlFeeds: feeds, gateway: gateway, lifecycleCtx: lifecycleCtx,
+			authorities: runtimeHostAuthorities{controlFeeds: feeds, lifecycleCtx: lifecycleCtx},
+			sessions:    sessions,
+			gateway:     gateway,
 		},
 	}
 	feed, err := feeds.Session(active.SessionRef)

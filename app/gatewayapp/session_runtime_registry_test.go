@@ -173,7 +173,7 @@ func TestSessionRuntimeSelectsNewCatalogModelPinsDeletionAndRepairsOnReactivatio
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	runtime := activateSessionRuntime(t, stack, active.SessionID)
 	initialID := stack.composition.lookup.DefaultID()
 
@@ -259,7 +259,7 @@ func TestSpawnedSessionUsesParentRuntimeModelSnapshotAfterHostDeletion(t *testin
 	ctx := context.Background()
 	stack, parent := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 
 	profile, err := stack.connectTestModel(ModelConfig{
 		Provider:            "ollama",
@@ -340,7 +340,7 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	runtime := activateSessionRuntime(t, stack, active.SessionID)
 	beforeLookup := runtime.instance.lookup.Snapshot()
 	beforeContextWindow := runtime.instance.lookup.contextWindow
@@ -464,7 +464,7 @@ func TestDormantSessionModelRecoveryClearsSelectionWhenCatalogIsEmpty(t *testing
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, modelID); err != nil {
 		t.Fatal(err)
 	}
-	inspected, err := stack.ControlClient().InspectSession(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.StateRequest{SessionID: active.SessionID})
+	inspected, err := stack.ControlClient().InspectSession(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.StateRequest{SessionID: active.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,7 +557,7 @@ func TestClosedSessionReconnectDoesNotRepairDeletedModelReference(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	closed, err := stack.ControlClient().CloseSession(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.CloseSessionRequest{
+	closed, err := stack.ControlClient().CloseSession(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.CloseSessionRequest{
 		WriteBase: appserver.WriteBase{OperationID: "close-before-model-recovery", SessionID: active.SessionID, ExpectedRevision: &updated.Revision},
 	})
 	if err != nil || closed.Outcome != appserver.OutcomeCommitted {
@@ -566,7 +566,7 @@ func TestClosedSessionReconnectDoesNotRepairDeletedModelReference(t *testing.T) 
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, modelID); err != nil {
 		t.Fatal(err)
 	}
-	reconnected, err := stack.ControlClient().Reconnect(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.ReconnectRequest{SessionID: active.SessionID})
+	reconnected, err := stack.ControlClient().Reconnect(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.ReconnectRequest{SessionID: active.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -907,12 +907,12 @@ func TestSessionRuntimeSandboxConfigIsDetachedFromHostMutation(t *testing.T) {
 		t.Fatal("detaching the last observer released a running Session Runtime")
 	}
 
-	doc, err = stack.composition.store.LoadContext(ctx)
+	doc, err = stack.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc.Sandbox.WritableRoots = []string{updatedWritableRoot}
-	if _, err := stack.composition.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
+	if _, err := stack.composition.authorities.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(first.instance.sandbox.WritableRoots, []string{initialWritableRoot}) {
@@ -1301,7 +1301,7 @@ func TestSessionRuntimeDurableRunningTaskSurvivesObserverDetach(t *testing.T) {
 		TaskID: "task-running-after-detach", Kind: taskapi.KindSubagent,
 		Session: session.SessionRef{SessionID: sessionID}, State: taskapi.StateRunning, Running: true,
 	}
-	if err := stack.composition.taskStore.Upsert(ctx, entry); err != nil {
+	if err := stack.composition.authorities.taskStore.Upsert(ctx, entry); err != nil {
 		t.Fatal(err)
 	}
 	if err := observed.Subscription.Close(); err != nil {
@@ -1313,7 +1313,7 @@ func TestSessionRuntimeDurableRunningTaskSurvivesObserverDetach(t *testing.T) {
 	}
 	entry.State = taskapi.StateCompleted
 	entry.Running = false
-	if err := stack.composition.taskStore.Upsert(ctx, entry); err != nil {
+	if err := stack.composition.authorities.taskStore.Upsert(ctx, entry); err != nil {
 		t.Fatal(err)
 	}
 	runtime.instance.runtimeTaskChanged(session.SessionRef{SessionID: sessionID})
@@ -1349,7 +1349,7 @@ func TestSessionRuntimeIdleReleaseRetriesTransientTaskReadFailure(t *testing.T) 
 	}
 	releaseUse()
 	transientTasks := &transientListTaskStore{
-		Store:        stack.composition.taskStore,
+		Store:        stack.composition.authorities.taskStore,
 		failingUntil: time.Now().Add(15 * time.Millisecond),
 	}
 	stack.sessionRuntimes.tasks = transientTasks
@@ -1701,7 +1701,7 @@ func TestSessionRuntimeRegistryQuiesceWaitsForInFlightActivation(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stack.Close() })
 	active, err := stack.composition.sessions.StartSession(context.Background(), session.StartSessionRequest{
-		AppName:            stack.composition.appName,
+		AppName:            stack.composition.authorities.appName,
 		UserID:             "local-user",
 		Workspace:          session.WorkspaceRef{Key: "workspace-b", CWD: workspaceB},
 		PreferredSessionID: "activation-during-close",
@@ -1763,7 +1763,7 @@ func TestAcquireControlRuntimeRetriesAcrossIdleRelease(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stack.Close() })
 	active, err := stack.composition.sessions.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: stack.composition.appName, UserID: stack.composition.userID,
+		AppName: stack.composition.authorities.appName, UserID: stack.composition.authorities.userID,
 		Workspace:          session.WorkspaceRef{Key: "acquire-retry", CWD: workspace},
 		PreferredSessionID: "acquire-retry-session",
 	})
@@ -1802,7 +1802,7 @@ func TestCloseWaitsForScheduledIdleReleaseBeforeStoreCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	active, err := stack.composition.sessions.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: stack.composition.appName, UserID: stack.composition.userID,
+		AppName: stack.composition.authorities.appName, UserID: stack.composition.authorities.userID,
 		Workspace:          session.WorkspaceRef{Key: "close-idle-release", CWD: workspace},
 		PreferredSessionID: "close-idle-release-session",
 	})
@@ -1835,7 +1835,7 @@ func TestSessionRuntimeRegistryQuiesceWaitsForRuntimeWorkAfterGatewayDrain(t *te
 	}
 	t.Cleanup(func() { _ = stack.Close() })
 	active, err := stack.composition.sessions.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: stack.composition.appName, UserID: stack.composition.userID,
+		AppName: stack.composition.authorities.appName, UserID: stack.composition.authorities.userID,
 		Workspace:          session.WorkspaceRef{Key: "quiesce-work", CWD: workspace},
 		PreferredSessionID: "quiesce-work-session",
 	})
@@ -1882,8 +1882,8 @@ func TestSessionRuntimeActivationHasNoHostConfigurationMutationLock(t *testing.T
 	}
 	t.Cleanup(func() { _ = stack.Close() })
 	active, err := stack.composition.sessions.StartSession(context.Background(), session.StartSessionRequest{
-		AppName:            stack.composition.appName,
-		UserID:             stack.composition.userID,
+		AppName:            stack.composition.authorities.appName,
+		UserID:             stack.composition.authorities.userID,
 		Workspace:          stack.composition.workspace,
 		PreferredSessionID: "activation-with-host-mutation",
 	})
@@ -2174,24 +2174,31 @@ func assertSessionRuntimeIsolationContract(t *testing.T, host *Stack, instance *
 	if instance.lookup == host.composition.lookup || instance.placementCache == host.composition.placementCache {
 		t.Fatal("Session Runtime shared mutable model or placement configuration")
 	}
-	if instance.appName != host.composition.appName ||
-		instance.userID != host.composition.userID ||
-		instance.storeDir != host.composition.storeDir ||
-		instance.leaseOwnerID != host.composition.leaseOwnerID ||
-		instance.store != host.composition.store ||
+	if instance.processConfig != nil {
+		t.Fatal("Session Runtime retained the mutable process configuration source")
+	}
+	if instance.authorities.appName != host.composition.authorities.appName ||
+		instance.authorities.userID != host.composition.authorities.userID ||
+		instance.authorities.storeDir != host.composition.authorities.storeDir ||
+		instance.authorities.leaseOwnerID != host.composition.authorities.leaseOwnerID ||
 		!sameSessionRuntimeReference(instance.sessions, host.composition.sessions) ||
-		!sameSessionRuntimeReference(instance.taskStore, host.composition.taskStore) ||
-		!sameSessionRuntimeReference(instance.controlFeeds, host.composition.controlFeeds) ||
-		!sameSessionRuntimeReference(instance.lifecycleCtx, host.composition.lifecycleCtx) ||
-		instance.approvalRecovery != host.composition.approvalRecovery ||
-		instance.codexAuth != host.composition.codexAuth ||
-		instance.grokAuth != host.composition.grokAuth ||
-		instance.apiKeyCredentials != host.composition.apiKeyCredentials ||
-		instance.providerUsage != host.composition.providerUsage ||
+		!sameSessionRuntimeReference(instance.authorities.taskStore, host.composition.authorities.taskStore) ||
+		!sameSessionRuntimeReference(instance.authorities.controlFeeds, host.composition.authorities.controlFeeds) ||
+		!sameSessionRuntimeReference(instance.authorities.lifecycleCtx, host.composition.authorities.lifecycleCtx) ||
+		instance.authorities.approvalRecovery != host.composition.authorities.approvalRecovery ||
+		instance.authorities.codexAuth != host.composition.authorities.codexAuth ||
+		instance.authorities.grokAuth != host.composition.authorities.grokAuth ||
+		instance.authorities.apiKeyCredentials != host.composition.authorities.apiKeyCredentials ||
+		instance.authorities.providerUsage != host.composition.authorities.providerUsage ||
 		instance.modelCatalog != host.composition.lookup ||
-		instance.sessionModelPins != host.composition.sessionModelPins ||
-		instance.hostedChildMailbox == nil {
+		instance.authorities.sessionModelPins != host.composition.authorities.sessionModelPins ||
+		instance.authorities.hostedChildMailbox == nil {
 		t.Fatal("Session Runtime did not receive the required borrowed Host authorities")
+	}
+	if instance.authorities.store == nil || instance.authorities.store == host.composition.authorities.store ||
+		instance.authorities.store.path != host.composition.authorities.store.path ||
+		instance.authorities.store.saveHook != nil || instance.authorities.store.savedHook != nil {
+		t.Fatal("Session Runtime did not receive an independent configuration source")
 	}
 	if instance.currentGateway() == host.composition.currentGateway() ||
 		instance.engine == host.composition.engine ||

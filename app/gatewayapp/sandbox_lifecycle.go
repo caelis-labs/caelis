@@ -116,7 +116,7 @@ func (s *Stack) sandboxLifecycleSnapshot() (sandboxLifecycleSnapshot, error) {
 	return sandboxLifecycleSnapshot{
 		exec:         s.composition.exec,
 		workspaceCWD: s.composition.workspace.CWD,
-		storeDir:     s.composition.storeDir,
+		storeDir:     s.composition.authorities.storeDir,
 	}, nil
 }
 

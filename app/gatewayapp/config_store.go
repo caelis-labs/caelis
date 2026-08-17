@@ -143,7 +143,7 @@ func (s *appConfigStore) CompareAndSave(ctx context.Context, expected uint64, do
 // revision. It reads the shared document instead of a process-local cache so
 // status and later compare-and-save operations observe external writers.
 func (s *runtimeComposition) ConfigurationRevision(ctx context.Context) (uint64, error) {
-	if s == nil || s.store == nil {
+	if s == nil || s.authorities.store == nil {
 		return 0, fmt.Errorf("gatewayapp: app config store unavailable")
 	}
 	if ctx == nil {
@@ -152,7 +152,7 @@ func (s *runtimeComposition) ConfigurationRevision(ctx context.Context) (uint64,
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	doc, err := s.store.LoadContext(ctx)
+	doc, err := s.authorities.store.LoadContext(ctx)
 	if err != nil {
 		return 0, err
 	}

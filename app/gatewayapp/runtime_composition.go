@@ -1,20 +1,13 @@
 package gatewayapp
 
 import (
-	"context"
 	"sync"
 	"sync/atomic"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	appserver "github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
-	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
-	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
-	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
@@ -25,24 +18,16 @@ import (
 // each detached Session Runtime instance receives a distinct value. Keeping
 // the composition private prevents it from becoming a second product API.
 type runtimeComposition struct {
-	// These references are borrowed from the Host. The composition uses them to
-	// execute one fixed Runtime snapshot but does not own their process
-	// lifecycle or construct replacement authorities.
-	sessions                  session.Service
-	appName                   string
-	userID                    string
-	workspace                 session.WorkspaceRef
-	store                     *appConfigStore
-	storeDir                  string
-	leaseOwnerID              string
-	taskStore                 task.Store
-	controlFeeds              appserver.FeedRegistry
-	approvalRecovery          *appserver.ApprovalRecoveryGate
-	codexAuth                 *codexauth.Manager
-	grokAuth                  *grokauth.Manager
-	apiKeyCredentials         *credentialstore.Store
-	providerUsage             *providerusage.Registry
-	sessionModelPins          *sessionModelPinRegistry
+	// authorities are borrowed process services. The value contains references
+	// only; one Runtime composition never owns or replaces their lifecycle.
+	authorities runtimeHostAuthorities
+	sessions    session.Service
+	workspace   session.WorkspaceRef
+
+	// processConfig is present only on the Host root. Detached Session Runtime
+	// instances receive a pinned snapshot and never retain this mutable source.
+	processConfig *runtimeProcessConfigSource
+
 	spawnedSessionPinsMu      sync.Mutex
 	spawnedSessionPinReleases map[string]func()
 
@@ -77,7 +62,6 @@ type runtimeComposition struct {
 	engine                *runtime.Runtime
 	placement             controlplane.PlacementExecutor
 	acpControlPlane       *acpassembly.ControlPlane
-	lifecycleCtx          context.Context
 	closing               atomic.Bool
 	gateway               *kernelimpl.Gateway
 	mcpMgr                *mcp.Manager
@@ -86,7 +70,4 @@ type runtimeComposition struct {
 	childControlTokenFile string
 	retainRuntimeWork     func(session.SessionRef) func()
 	runtimeTaskChanged    func(session.SessionRef)
-	// hostedChildMailbox is the Host-owned parent/sibling route borrowed by
-	// spawned child Session Runtimes. A composition never owns the Registry.
-	hostedChildMailbox hostedChildMailboxFunc
 }

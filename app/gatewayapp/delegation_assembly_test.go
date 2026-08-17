@@ -23,7 +23,7 @@ func TestDelegationAgentHandleKeepsACPPlacementIdentity(t *testing.T) {
 			Choices:       []modelprofile.EffortChoice{{Canonical: "none"}},
 		},
 	}
-	if err := stack.composition.store.Save(AppConfig{
+	if err := stack.composition.authorities.store.Save(AppConfig{
 		ExternalAgents: controlagents.Configuration{
 			Connections: []controlagents.Connection{{
 				ID: "grok", Name: "Grok", Launcher: controlagents.Launcher{Kind: controlagents.LaunchKindExecutable, Command: "grok-acp"},
@@ -155,7 +155,7 @@ func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delegationSpawnTargets() error = %v", err)
 	}
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -164,7 +164,7 @@ func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 			doc.Models.Configs[index].ContextWindowTokens++
 		}
 	}
-	if err := stack.composition.store.Save(doc); err != nil {
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatalf("Save(changed) error = %v", err)
 	}
 	_, err = stack.composition.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: targets["self"]}, stack.composition.runtime)

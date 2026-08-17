@@ -243,11 +243,11 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if commandErr != nil || strings.TrimSpace(result.SessionID) == "" {
 			return
 		}
-		if s.controlFeeds == nil {
+		if s.authorities.controlFeeds == nil {
 			result.Detail = controlFeedCatchUpWarning
 			return
 		}
-		feed, err := s.controlFeeds.Session(session.SessionRef{SessionID: result.SessionID})
+		feed, err := s.authorities.controlFeeds.Session(session.SessionRef{SessionID: result.SessionID})
 		if err != nil {
 			result.Detail = controlFeedCatchUpWarning
 			return
@@ -267,7 +267,7 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		return s.executeSessionConfigurationCommand(ctx, action, req)
 	case appserver.CreateSessionRequest:
 		created, err := s.sessions.StartSession(ctx, session.StartSessionRequest{
-			AppName: s.appName, UserID: strings.TrimSpace(principal.ID),
+			AppName: s.authorities.appName, UserID: strings.TrimSpace(principal.ID),
 			Workspace:          session.WorkspaceRef{Key: strings.TrimSpace(req.WorkspaceKey), CWD: strings.TrimSpace(req.CWD)},
 			PreferredSessionID: strings.TrimSpace(req.PreferredSessionID), Title: strings.TrimSpace(req.Title), Metadata: req.Metadata,
 		})
@@ -596,8 +596,8 @@ func classifyControlPreDispatchError(err error) error {
 
 func (s *runtimeComposition) controlRuntimeContext(fallback context.Context, active session.Session) context.Context {
 	runtimeCtx := fallback
-	if s != nil && s.lifecycleCtx != nil {
-		runtimeCtx = s.lifecycleCtx
+	if s != nil && s.authorities.lifecycleCtx != nil {
+		runtimeCtx = s.authorities.lifecycleCtx
 	}
 	// Accepted Control turns outlive their admission request, so their
 	// cancellation parent is the Stack lifecycle. Preserve only the negotiated

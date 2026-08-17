@@ -120,20 +120,20 @@ func (s *runtimeComposition) prepareSpawnedACPSession(
 }
 
 func (s *runtimeComposition) retainSpawnedSessionModelPin(sessionID string, config ModelConfig) error {
-	if s == nil || s.sessionModelPins == nil {
+	if s == nil || s.authorities.sessionModelPins == nil {
 		return errors.New("gatewayapp: Session model pin registry is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	s.spawnedSessionPinsMu.Lock()
 	defer s.spawnedSessionPinsMu.Unlock()
 	if _, exists := s.spawnedSessionPinReleases[sessionID]; exists {
-		pinned, ok := s.sessionModelPins.config(sessionID)
+		pinned, ok := s.authorities.sessionModelPins.config(sessionID)
 		if !ok || !samePinnedSessionModel(pinned, config) {
 			return fmt.Errorf("gatewayapp: child Session %q pinned model changed", sessionID)
 		}
 		return nil
 	}
-	release, err := s.sessionModelPins.retain(sessionID, config)
+	release, err := s.authorities.sessionModelPins.retain(sessionID, config)
 	if err != nil {
 		return err
 	}

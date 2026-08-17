@@ -14,7 +14,7 @@ import (
 func TestSessionConfigurationCommandUsesObservedRevisionAndSharedLedger(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	active = mustCurrentSession(t, stack, active.SessionID)
 	revision := active.Revision
 	request := appserver.SessionModeRequest{
@@ -52,7 +52,7 @@ func TestSessionConfigurationCommandUsesObservedRevisionAndSharedLedger(t *testi
 func TestSessionModelCommandDoesNotChangeHostDefaultOrConfigurationRevision(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	active = mustCurrentSession(t, stack, active.SessionID)
 	hostRevision, err := stack.ConfigurationRevision(ctx)
 	if err != nil {
@@ -97,7 +97,7 @@ func TestSessionPresentationAndApprovalCommandsKeepIndependentStateKeys(t *testi
 			Options: []assembly.ConfigSelectOption{{Value: "quiet", Name: "Quiet"}, {Value: "loud", Name: "Loud"}},
 		}},
 	})
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	active = mustCurrentSession(t, stack, active.SessionID)
 
 	revision := active.Revision

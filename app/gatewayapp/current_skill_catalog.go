@@ -15,7 +15,7 @@ import (
 // start plugin MCP servers, hooks, sandboxes, or controllers merely to read
 // Skill metadata.
 func (s WorkspaceReadService) CurrentSkillCatalog(ctx context.Context, workspace session.WorkspaceRef) (skill.Catalog, error) {
-	if s.composition == nil || s.composition.store == nil {
+	if s.composition == nil || s.composition.authorities.store == nil {
 		return skill.Catalog{}, errors.New("gatewayapp: App configuration store is unavailable")
 	}
 	if ctx == nil {
@@ -24,7 +24,7 @@ func (s WorkspaceReadService) CurrentSkillCatalog(ctx context.Context, workspace
 	if err := ctx.Err(); err != nil {
 		return skill.Catalog{}, err
 	}
-	doc, err := s.composition.store.LoadContext(ctx)
+	doc, err := s.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
 		return skill.Catalog{}, err
 	}

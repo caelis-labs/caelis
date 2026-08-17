@@ -343,7 +343,7 @@ func (s *Stack) managedACPAgentRoot() string {
 	if s == nil {
 		return ""
 	}
-	return filepath.Join(s.composition.storeDir, "acp-agents", "npm")
+	return filepath.Join(s.composition.authorities.storeDir, "acp-agents", "npm")
 }
 
 func managedACPAdapterRoot(baseRoot string, pkg builtinACPAdapterPackage) string {
@@ -528,10 +528,10 @@ func managedACPInstallTreeSize(root string) int64 {
 // installations, caches, and staging directories live beside these legacy
 // entries and are not touched.
 func (s *Stack) cleanupLegacyManagedACPInstallIfUnused() {
-	if s == nil || s.composition.store == nil {
+	if s == nil || s.composition.authorities.store == nil {
 		return
 	}
-	doc, err := s.composition.store.Load()
+	doc, err := s.composition.authorities.store.Load()
 	if err != nil {
 		return
 	}

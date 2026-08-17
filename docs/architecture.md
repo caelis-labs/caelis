@@ -207,16 +207,19 @@ Document responsibilities are intentionally separate:
 - `app/gatewayapp`: the current product Control host and composition entry. Its
   app-scoped Session Runtime registry routes public Control execution by durable
   Session ID. The registry is constructed from explicit process authorities and
-  a narrow assembler contract; it does not retain the Host `Stack`. It owns the
-  activated Runtime set, reference counting, release, and collective shutdown
-  drain. Registry entries hold private `sessionRuntimeInstance` values rather
-  than child Host `Stack` values. Each instance owns an independent pinned
-  Runtime composition and disposable workspace resources while borrowing only
-  the focused process authorities required for execution. A stateless workspace
-  assembler reads one complete app configuration document plus workspace files
-  on the first execution after a Session has no live activation, then the
-  detached Session Runtime keeps that context-shaping composition fixed until
-  release. Durable Session creation,
+  a narrow assembler contract; it does not retain the Host `Stack` or root
+  Runtime composition. It owns the activated Runtime set, reference counting,
+  release, and collective shutdown drain. Registry entries hold private
+  `sessionRuntimeInstance` values rather than child Host `Stack` values. Each
+  instance owns an independent pinned Runtime composition and disposable
+  workspace resources while borrowing only the focused process authorities
+  required for execution. The stateless workspace assembler retains an explicit
+  value of those authorities, a dedicated configuration store instance without
+  Host write hooks, the immutable startup migration report, and an independent
+  process-configuration source. On the first execution after a Session has no live activation, it
+  samples that source once and reads one complete app configuration document
+  plus workspace files. The detached Session Runtime keeps the resulting
+  context-shaping composition fixed until release. Durable Session creation,
   inspect, and reconnect allocate no execution Runtime. An explicit reconnect
   continuation does hold one process-local observation reference: multiple
   clients may observe the same Session, while a selected TUI/GUI Session keeps
@@ -410,7 +413,8 @@ preparation, and Agent-message service methods are not parallel entry points.
 Architecture and structural gates enforce the private adapter consumer
 boundary, reject concrete Stack use in local leaf adapters and anonymous Host
 composition, freeze deliberate public Stack methods, and prevent Registry,
-Runtime instance, and assembly types from retaining a concrete Host `Stack`.
+Runtime instance, and assembly types from retaining a concrete Host `Stack` or
+the Host root `runtimeComposition`.
 
 ## SDK Boundary
 

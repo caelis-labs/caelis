@@ -26,7 +26,7 @@ type sessionRuntimeActivity struct {
 }
 
 func newWorkspaceConfigAssembler(deps sessionRuntimeAssemblyDeps) (*workspaceConfigAssembler, error) {
-	if deps.store == nil || deps.modelCatalog == nil || deps.loadProcessSnapshot == nil {
+	if deps.authorities.store == nil || deps.modelCatalog == nil || deps.processConfig == nil {
 		return nil, errors.New("gatewayapp: workspace config assembler dependencies are required")
 	}
 	return &workspaceConfigAssembler{deps: deps}, nil
@@ -52,15 +52,16 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	}
 
 	deps := a.deps
+	authorities := deps.authorities
 	workspace, err := canonicalSessionWorkspace(active)
 	if err != nil {
 		return nil, err
 	}
-	doc, err := deps.store.LoadContext(ctx)
+	doc, err := authorities.store.LoadContext(ctx)
 	if err != nil {
 		return nil, err
 	}
-	process := deps.loadProcessSnapshot()
+	process := deps.processConfig.snapshot()
 	runtimeConfig := process.runtime
 	sandboxConfig := mergeSandboxConfig(doc.Sandbox, process.sandboxOverride)
 	securityPosture := resolveProcessSecurityPosture(runtimeConfig)
@@ -71,7 +72,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	if err != nil {
 		return nil, err
 	}
-	if pinned, ok := deps.modelPins.config(active.SessionID); ok {
+	if pinned, ok := authorities.sessionModelPins.config(active.SessionID); ok {
 		if _, err := lookup.upsert(pinned, false); err != nil {
 			return nil, fmt.Errorf("gatewayapp: inject pinned model for Session %q: %w", active.SessionID, err)
 		}
@@ -93,21 +94,9 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 
 	instance := &sessionRuntimeInstance{
 		runtimeComposition: runtimeComposition{
+			authorities:             authorities,
 			sessions:                sessions,
-			appName:                 deps.appName,
-			userID:                  deps.userID,
 			workspace:               workspace,
-			store:                   deps.store,
-			storeDir:                deps.storeDir,
-			leaseOwnerID:            deps.leaseOwnerID,
-			taskStore:               deps.tasks,
-			controlFeeds:            deps.feeds,
-			approvalRecovery:        deps.approvalRecovery,
-			codexAuth:               deps.codexAuth,
-			grokAuth:                deps.grokAuth,
-			apiKeyCredentials:       deps.apiKeyCredentials,
-			providerUsage:           deps.providerUsage,
-			sessionModelPins:        deps.modelPins,
 			lookup:                  lookup,
 			modelCatalog:            deps.modelCatalog,
 			placementCache:          placement,
@@ -115,12 +104,10 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 			runtime:                 runtimeConfig,
 			sandbox:                 sandboxConfig,
 			sandboxActivationPinned: true,
-			lifecycleCtx:            deps.lifecycleCtx,
 			childControlURL:         process.childControlURL,
 			childControlTokenFile:   process.childControlTokenFile,
 			retainRuntimeWork:       activity.retainWork,
 			runtimeTaskChanged:      activity.taskChanged,
-			hostedChildMailbox:      deps.hostedChildMailbox,
 		},
 	}
 	if err := instance.buildInitialGatewayRuntime(ctx); err != nil {

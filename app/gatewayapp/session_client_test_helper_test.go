@@ -17,7 +17,7 @@ func startGatewayAppTestSession(ctx context.Context, s *Stack, preferredSessionI
 	if s == nil {
 		return session.Session{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
-	client, err := appserver.BindSessionClient(s.ControlClient(), appserver.Principal{ID: strings.TrimSpace(s.composition.userID)})
+	client, err := appserver.BindSessionClient(s.ControlClient(), appserver.Principal{ID: strings.TrimSpace(s.composition.authorities.userID)})
 	if err != nil {
 		return session.Session{}, err
 	}

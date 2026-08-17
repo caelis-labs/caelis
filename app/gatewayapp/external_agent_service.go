@@ -27,7 +27,7 @@ func (s *runtimeComposition) DisconnectCandidates(ctx context.Context) ([]contro
 // DisconnectCandidatesSnapshot returns one canonical Host-revision-bound
 // roster view for presentation clients preparing a disconnect command.
 func (s *runtimeComposition) DisconnectCandidatesSnapshot(ctx context.Context) (appserver.DisconnectCandidatesSnapshot, error) {
-	if s == nil || s.store == nil {
+	if s == nil || s.authorities.store == nil {
 		return appserver.DisconnectCandidatesSnapshot{}, fmt.Errorf("gatewayapp: app config store unavailable")
 	}
 	if ctx == nil {
@@ -36,7 +36,7 @@ func (s *runtimeComposition) DisconnectCandidatesSnapshot(ctx context.Context) (
 	if err := ctx.Err(); err != nil {
 		return appserver.DisconnectCandidatesSnapshot{}, err
 	}
-	doc, err := s.store.LoadContext(ctx)
+	doc, err := s.authorities.store.LoadContext(ctx)
 	if err != nil {
 		return appserver.DisconnectCandidatesSnapshot{}, err
 	}
@@ -57,7 +57,7 @@ type externalAgentMutationResult struct {
 // installation is outside the configuration document and remains retained.
 func (s *Stack) disconnectACPAtRevision(ctx context.Context, agentID string, expected uint64) (externalAgentMutationResult, controlagents.DisconnectResult, error) {
 	mutation := externalAgentMutationResult{}
-	if s == nil || s.composition.store == nil {
+	if s == nil || s.composition.authorities.store == nil {
 		return mutation, controlagents.DisconnectResult{}, fmt.Errorf("gatewayapp: app config store unavailable")
 	}
 	if ctx == nil {
@@ -67,7 +67,7 @@ func (s *Stack) disconnectACPAtRevision(ctx context.Context, agentID string, exp
 		return mutation, controlagents.DisconnectResult{}, err
 	}
 
-	doc, err := s.composition.store.LoadContext(ctx)
+	doc, err := s.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
 		return mutation, controlagents.DisconnectResult{}, err
 	}
@@ -93,7 +93,7 @@ func (s *Stack) disconnectACPAtRevision(ctx context.Context, agentID string, exp
 		doc.ModelProfiles = modelprofile.Remove(doc.ModelProfiles, profile.ID)
 	}
 	doc.ExternalAgents = next
-	saved, persistErr := s.composition.store.CompareAndSave(ctx, expected, doc)
+	saved, persistErr := s.composition.authorities.store.CompareAndSave(ctx, expected, doc)
 	if persistErr != nil && !configstore.WriteCommitted(persistErr) {
 		mutation.Revision = configurationErrorRevision(persistErr, saved.ConfigurationRevision)
 		return mutation, controlagents.DisconnectResult{}, persistErr
@@ -113,18 +113,18 @@ func (s *Stack) disconnectACPAtRevision(ctx context.Context, agentID string, exp
 }
 
 func (s *Stack) reconcileCommittedExternalAgents(ctx context.Context) error {
-	if s == nil || s.composition.store == nil {
+	if s == nil || s.composition.authorities.store == nil {
 		return errors.New("gatewayapp: external Agent configuration is unavailable")
 	}
 	reconcileCtx, cancel := context.WithTimeout(context.WithoutCancel(contextOrBackground(ctx)), 5*time.Second)
 	defer cancel()
-	_, err := s.composition.store.LoadContext(reconcileCtx)
+	_, err := s.composition.authorities.store.LoadContext(reconcileCtx)
 	return err
 }
 
 func (s *Stack) acpDiscoveryService() discovery.Service {
 	return discovery.Service{ClientInfo: &client.Implementation{
-		Name:    firstNonEmpty(s.composition.appName, "caelis"),
+		Name:    firstNonEmpty(s.composition.authorities.appName, "caelis"),
 		Version: version.String(),
 	}}
 }

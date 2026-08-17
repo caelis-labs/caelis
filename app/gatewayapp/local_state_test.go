@@ -40,7 +40,7 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	alias := profile.Backend.Provider.ModelConfigID
 	current := mustCurrentSession(t, stack, activeSession.SessionID)
 	revision := current.Revision
-	modelResult, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModelRequest{
+	modelResult, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SessionModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "state-model-alt", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Model:     alias,
 	})
@@ -49,7 +49,7 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	}
 	current = mustCurrentSession(t, stack, activeSession.SessionID)
 	revision = current.Revision
-	modeResult, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModeRequest{
+	modeResult, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SessionModeRequest{
 		WriteBase: appserver.WriteBase{OperationID: "state-mode-manual", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Mode:      "manual",
 	})
@@ -76,7 +76,7 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	}
 	current = mustCurrentSession(t, stack, activeSession.SessionID)
 	revision = current.Revision
-	modeResult, err = stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModeRequest{
+	modeResult, err = stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SessionModeRequest{
 		WriteBase: appserver.WriteBase{OperationID: "state-mode-auto", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Mode:      "auto-review",
 	})
@@ -201,7 +201,7 @@ func TestNewLocalStackPersistsTasksInSessionSQLiteIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	if err := stack.composition.taskStore.Upsert(context.Background(), &taskapi.Entry{
+	if err := stack.composition.authorities.taskStore.Upsert(context.Background(), &taskapi.Entry{
 		TaskID:  "task-stack",
 		Kind:    taskapi.KindCommand,
 		Session: activeSession.SessionRef,
@@ -215,7 +215,7 @@ func TestNewLocalStackPersistsTasksInSessionSQLiteIndex(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("taskStore.Upsert() error = %v", err)
 	}
-	got, err := stack.composition.taskStore.Get(context.Background(), "task-stack")
+	got, err := stack.composition.authorities.taskStore.Get(context.Background(), "task-stack")
 	if err != nil {
 		t.Fatalf("taskStore.Get() error = %v", err)
 	}
@@ -500,7 +500,7 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigurationRevision() error = %v", err)
 	}
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.composition.userID}, appserver.SandboxRequest{
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SandboxRequest{
 		WriteBase: appserver.WriteBase{OperationID: "sandbox-persist-restart", ExpectedRevision: &expected},
 		Backend:   "host",
 	})
@@ -688,7 +688,7 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	tokenPlanID := tokenPlanProfile.Backend.Provider.ModelConfigID
 	current := mustCurrentSession(t, stack, activeSession.SessionID)
 	revision := current.Revision
-	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModelRequest{
+	selected, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SessionModelRequest{
 		WriteBase: appserver.WriteBase{
 			OperationID:             "select-stable-token-plan-profile",
 			SessionID:               current.SessionID,
@@ -722,7 +722,7 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	}
 	current = mustCurrentSession(t, stack, activeSession.SessionID)
 	revision = current.Revision
-	result, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModelRequest{
+	result, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SessionModelRequest{
 		WriteBase: appserver.WriteBase{
 			OperationID:             "select-stable-api-profile",
 			SessionID:               current.SessionID,

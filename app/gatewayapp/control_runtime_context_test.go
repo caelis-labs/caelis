@@ -22,7 +22,7 @@ func TestControlRuntimeContextPreservesOnlyAgentMessageTransport(t *testing.T) {
 	sender := controlRuntimeContextMessageSender{}
 	fallback := context.WithValue(context.Background(), requestValueKey{}, "request-only")
 	fallback = agentmessage.WithSender(fallback, sender)
-	stack := &Stack{composition: runtimeComposition{lifecycleCtx: context.Background()}}
+	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{lifecycleCtx: context.Background()}}}
 
 	runtimeCtx := stack.composition.controlRuntimeContext(fallback, session.Session{})
 	if agentmessage.SenderFromContext(runtimeCtx) == nil {
@@ -38,9 +38,11 @@ func TestControlRuntimeContextBindsMailboxForSpawnedChild(t *testing.T) {
 
 	stack := &Stack{
 		composition: runtimeComposition{
-			lifecycleCtx: context.Background(),
-			hostedChildMailbox: func(context.Context, session.SessionRef, agentmessage.Request) (agentmessage.Response, error) {
-				return agentmessage.Response{Accepted: true}, nil
+			authorities: runtimeHostAuthorities{
+				lifecycleCtx: context.Background(),
+				hostedChildMailbox: func(context.Context, session.SessionRef, agentmessage.Request) (agentmessage.Response, error) {
+					return agentmessage.Response{Accepted: true}, nil
+				},
 			},
 		},
 	}

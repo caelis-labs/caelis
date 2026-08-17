@@ -92,8 +92,8 @@ func (s *Stack) ACPSurface(modes acp.ModeProvider, useFallbackModes bool, config
 	lookup := composition.lookup
 	return newGatewayACPSurface(gatewayACPSurfaceDeps{
 		sessions:         composition.sessions,
-		appName:          composition.appName,
-		userID:           composition.userID,
+		appName:          composition.authorities.appName,
+		userID:           composition.authorities.userID,
 		fullAccessModeFn: func() bool { return composition.processSecurityPosture().FullAccessMode },
 		runtimeStateFn:   status.SessionRuntimeState,
 		modelSnapshotFn: func() persistedModelConfig {
@@ -155,20 +155,20 @@ func (s *Stack) authenticateModelProvider(ctx context.Context, req modelconfig.A
 	}
 	template, ok := modelconfig.LookupProvider(req.Provider)
 	if ok && template.AuthFlow == modelconfig.AuthFlowCodexOAuth {
-		if s.composition.codexAuth == nil {
+		if s.composition.authorities.codexAuth == nil {
 			return fmt.Errorf("gatewayapp: codex authentication is unavailable")
 		}
-		return s.composition.codexAuth.EnsureAuthenticated(ctx, codexauth.LoginOptions{
+		return s.composition.authorities.codexAuth.EnsureAuthenticated(ctx, codexauth.LoginOptions{
 			HTTPClient:      req.HTTPClient,
 			OpenBrowser:     req.OpenBrowser,
 			CallbackTimeout: req.CallbackTimeout,
 		})
 	}
 	if ok && template.AuthFlow == modelconfig.AuthFlowGrokOAuth {
-		if s.composition.grokAuth == nil {
+		if s.composition.authorities.grokAuth == nil {
 			return fmt.Errorf("gatewayapp: grok authentication is unavailable")
 		}
-		return s.composition.grokAuth.EnsureAuthenticated(ctx, grokauth.LoginOptions{
+		return s.composition.authorities.grokAuth.EnsureAuthenticated(ctx, grokauth.LoginOptions{
 			HTTPClient:      req.HTTPClient,
 			OpenBrowser:     req.OpenBrowser,
 			CallbackTimeout: req.CallbackTimeout,
@@ -187,7 +187,7 @@ func (s ModelService) UsageSnapshot(ctx context.Context, ref session.SessionRef,
 // provider has no usage adapter or the model is not backed by a subscription
 // credential.
 func (s ModelService) ProviderUsage(ctx context.Context, modelAlias string) (providerusage.Snapshot, bool, error) {
-	if s.composition == nil || s.composition.providerUsage == nil {
+	if s.composition == nil || s.composition.authorities.providerUsage == nil {
 		return providerusage.Snapshot{}, false, nil
 	}
 	config, ok := s.composition.ModelConfig(modelAlias)
@@ -199,7 +199,7 @@ func (s ModelService) ProviderUsage(ctx context.Context, modelAlias string) (pro
 	default:
 		return providerusage.Snapshot{}, false, nil
 	}
-	return s.composition.providerUsage.Query(ctx, config.Provider)
+	return s.composition.authorities.providerUsage.Query(ctx, config.Provider)
 }
 
 func (s AgentService) ControllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {

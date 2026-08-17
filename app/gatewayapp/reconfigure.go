@@ -35,7 +35,7 @@ import (
 )
 
 func (s *Stack) loadSandboxConfigDocument(ctx context.Context, expected *uint64) (AppConfig, error) {
-	if s == nil || s.composition.store == nil {
+	if s == nil || s.composition.authorities.store == nil {
 		if s == nil {
 			return AppConfig{}, fmt.Errorf("gatewayapp: stack is unavailable")
 		}
@@ -51,7 +51,7 @@ func (s *Stack) loadSandboxConfigDocument(ctx context.Context, expected *uint64)
 		}
 		return doc, nil
 	}
-	doc, err := s.composition.store.LoadContext(ctx)
+	doc, err := s.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
 		return AppConfig{}, err
 	}
@@ -65,10 +65,10 @@ func (s *Stack) loadSandboxConfigDocument(ctx context.Context, expected *uint64)
 }
 
 func (s *Stack) persistSandboxConfigDocument(ctx context.Context, doc AppConfig) (AppConfig, error) {
-	if s == nil || s.composition.store == nil {
+	if s == nil || s.composition.authorities.store == nil {
 		return doc, nil
 	}
-	return s.composition.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
+	return s.composition.authorities.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
 }
 
 // buildInitialGatewayRuntime constructs the root or detached Session Runtime
@@ -189,7 +189,7 @@ func (s *runtimeComposition) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runt
 	runtimeCfg.Assembly = configuredAssembly
 	runtimeCfg.Plugins = clonePluginConfigs(doc.Plugins)
 	runtimeCfg.PluginSkills = skill.ClonePluginBundles(contribs.SkillBundles)
-	baseMetadata, err := buildStackBaseMetadata(s.appName, s.workspace.CWD, runtimeCfg.SystemPrompt, runtimeCfg.Model, sandboxCfg, skillDirs, runtimeCfg.PluginSkills)
+	baseMetadata, err := buildStackBaseMetadata(s.authorities.appName, s.workspace.CWD, runtimeCfg.SystemPrompt, runtimeCfg.Model, sandboxCfg, skillDirs, runtimeCfg.PluginSkills)
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
@@ -205,7 +205,7 @@ func (s *runtimeComposition) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runt
 }
 
 func (s *runtimeComposition) retainManagedPluginCaches(configs []PluginConfig) func() error {
-	release := plugin.RetainManagedPluginCaches(s.storeDir, configs)
+	release := plugin.RetainManagedPluginCaches(s.authorities.storeDir, configs)
 	var releaseOnce sync.Once
 	return func() error {
 		releaseOnce.Do(release)
@@ -217,10 +217,10 @@ func (s *runtimeComposition) loadGatewayAppConfig() (AppConfig, error) {
 	if s != nil && s.appConfigSnapshot != nil {
 		return configstore.Normalize(*s.appConfigSnapshot), nil
 	}
-	if s == nil || s.store == nil {
+	if s == nil || s.authorities.store == nil {
 		return AppConfig{}, fmt.Errorf("gatewayapp: app config store unavailable")
 	}
-	return s.store.Load()
+	return s.authorities.store.Load()
 }
 
 func (s *runtimeComposition) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundle, error) {
@@ -251,7 +251,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		BackendCandidates:   route.BackendCandidates,
 		FallbackInstallHint: route.InstallHint,
 		HelperPath:          sandboxCfg.HelperPath,
-		StateDir:            s.storeDir,
+		StateDir:            s.authorities.storeDir,
 		WritableRoots:       append([]string(nil), sandboxCfg.WritableRoots...),
 		ReadOnlySubpaths:    append([]string(nil), sandboxCfg.ReadOnlySubpaths...),
 	})
@@ -331,7 +331,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		Compaction:               compactionCfg,
 		ControllerContextRouter:  contextRouter,
 		ControllerEventForwarder: acpbridge.NewControllerForwarder(s.sessions),
-		TaskStore:                s.taskStore,
+		TaskStore:                s.authorities.taskStore,
 		TaskActivityChanged:      s.runtimeTaskChanged,
 	}
 	var acpControlPlane *acpassembly.ControlPlane
@@ -370,7 +370,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	leasedRuntime, err := controlplane.NewLeasedRuntime(controlplane.LeasedRuntimeConfig{
 		Runtime: rt,
 		Leases:  leaseService,
-		OwnerID: strings.TrimSpace(s.leaseOwnerID),
+		OwnerID: strings.TrimSpace(s.authorities.leaseOwnerID),
 	})
 	if err != nil {
 		bundle.Close()
@@ -438,7 +438,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions:             s.sessions,
 		Runtime:              leasedRuntime,
-		TurnStartGate:        s.approvalRecovery,
+		TurnStartGate:        s.authorities.approvalRecovery,
 		Control:              sessionControl,
 		Resolver:             resolver,
 		ExecutionValidator:   executionValidator,
@@ -504,6 +504,7 @@ func (s *runtimeComposition) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	currentRuntime.BaseMetadata = cloneMap(bundle.RuntimeConfig.BaseMetadata)
 	currentRuntime.EstimatedPromptPrefixTokens = bundle.EstimatedPromptPrefixTokens
 	s.runtime = currentRuntime
+	s.processConfig.setRuntime(currentRuntime)
 	s.gateway = bundle.Gateway
 	s.exec = bundle.Exec
 	s.engine = bundle.Engine

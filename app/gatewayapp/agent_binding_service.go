@@ -20,7 +20,7 @@ func (s *Stack) AgentBindings() AgentBindingService {
 	if s == nil {
 		return AgentBindingService{}
 	}
-	return AgentBindingService{store: s.composition.store}
+	return AgentBindingService{store: s.composition.authorities.store}
 }
 
 // AgentBindingStatus returns every fixed and custom handle, standard

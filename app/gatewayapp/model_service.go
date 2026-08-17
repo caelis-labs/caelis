@@ -41,6 +41,7 @@ func (s *runtimeComposition) setRuntimeModel(profileID string, cfg ModelConfig) 
 	runtimeCfg.ModelProfileEffort = strings.ToLower(strings.TrimSpace(cfg.ReasoningEffort))
 	runtimeCfg.Model = cfg
 	s.runtime = runtimeCfg
+	s.processConfig.setRuntime(runtimeCfg)
 	s.mu.Unlock()
 }
 

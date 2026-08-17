@@ -93,7 +93,7 @@ func TestPluginServiceAddPathHappyPath(t *testing.T) {
 	if plugins[0].ID != "myplugin" {
 		t.Errorf("List()[0].ID = %q, want %q", plugins[0].ID, "myplugin")
 	}
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatalf("Load config after AddPath: %v", err)
 	}
@@ -660,7 +660,7 @@ func TestPluginServiceValidationFailureDoesNotEnterConfigWriter(t *testing.T) {
 	}
 
 	var saveCount int
-	stack.composition.store.saveHook = func(doc AppConfig) error {
+	stack.composition.authorities.store.saveHook = func(doc AppConfig) error {
 		saveCount++
 		return nil
 	}
@@ -856,7 +856,7 @@ func TestPluginServiceRejectsAgentCollisionBeforeCAS(t *testing.T) {
 	if _, err := stack.Plugins().AddPath(context.Background(), pluginDir); err == nil || !strings.Contains(err.Error(), "conflicts with an existing Agent") {
 		t.Fatalf("AddPath(colliding Agent) error = %v, want pre-CAS collision rejection", err)
 	}
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}

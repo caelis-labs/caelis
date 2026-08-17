@@ -72,8 +72,8 @@ func TestSpawnedSubagentSessionCannotReceiveNestedSpawn(t *testing.T) {
 	ctx := context.Background()
 	stack := newStackForToolTest(t, assembly.ResolvedAssembly{})
 	child, err := stack.composition.sessions.StartSession(ctx, session.StartSessionRequest{
-		AppName: stack.composition.appName,
-		UserID:  stack.composition.userID,
+		AppName: stack.composition.authorities.appName,
+		UserID:  stack.composition.authorities.userID,
 		Workspace: session.WorkspaceRef{
 			Key: stack.composition.workspace.Key,
 			CWD: stack.composition.workspace.CWD,

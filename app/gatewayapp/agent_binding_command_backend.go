@@ -33,14 +33,14 @@ func (s *Stack) mutateAgentBindingsAtRevision(ctx context.Context, action appser
 	if err != nil {
 		return result, err
 	}
-	if s == nil || s.composition.store == nil {
+	if s == nil || s.composition.authorities.store == nil {
 		return result, errors.New("gatewayapp: Agent binding configuration is unavailable")
 	}
 	ctx = contextOrBackground(ctx)
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	doc, err := s.composition.store.LoadContext(ctx)
+	doc, err := s.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
 		return result, err
 	}
@@ -58,7 +58,7 @@ func (s *Stack) mutateAgentBindingsAtRevision(ctx context.Context, action appser
 	}
 	doc.AgentBindings = agentbinding.NormalizeConfiguration(next)
 
-	saved, persistErr := s.composition.store.CompareAndSave(ctx, expected, doc)
+	saved, persistErr := s.composition.authorities.store.CompareAndSave(ctx, expected, doc)
 	if persistErr != nil && !configstore.WriteCommitted(persistErr) {
 		result.Revision = configurationErrorRevision(persistErr, saved.ConfigurationRevision)
 		return result, persistErr
@@ -130,12 +130,12 @@ func agentBindingMutation(
 }
 
 func (s *Stack) reconcileCommittedAgentBindings(ctx context.Context) error {
-	if s == nil || s.composition.store == nil {
+	if s == nil || s.composition.authorities.store == nil {
 		return errors.New("gatewayapp: Agent binding configuration is unavailable")
 	}
 	reconcileCtx, cancel := context.WithTimeout(context.WithoutCancel(contextOrBackground(ctx)), 5*time.Second)
 	defer cancel()
-	_, err := s.composition.store.LoadContext(reconcileCtx)
+	_, err := s.composition.authorities.store.LoadContext(reconcileCtx)
 	return err
 }
 

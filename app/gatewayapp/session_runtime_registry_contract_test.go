@@ -7,8 +7,10 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	agentmessage "github.com/caelis-labs/caelis/agent-sdk/message"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 )
 
 func TestSessionRuntimeLifecycleTypesDoNotRetainHostStack(t *testing.T) {
@@ -82,6 +84,68 @@ func TestStackOwnsRuntimeCompositionAsNamedPrivateState(t *testing.T) {
 		if compositionField := compositionType.Field(i); compositionField.IsExported() {
 			t.Errorf("runtimeComposition field %s is exported", compositionField.Name)
 		}
+	}
+}
+
+func TestSessionRuntimeAssemblyDoesNotRetainRootComposition(t *testing.T) {
+	t.Parallel()
+
+	compositionType := reflect.TypeFor[runtimeComposition]()
+	for _, test := range []struct {
+		name string
+		typ  reflect.Type
+	}{
+		{name: "Workspace assembler", typ: reflect.TypeFor[workspaceConfigAssembler]()},
+		{name: "Assembly dependencies", typ: reflect.TypeFor[sessionRuntimeAssemblyDeps]()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if fieldPath, ok := retainedConcreteStack(test.typ, compositionType, nil); ok {
+				t.Fatalf("%s retains the Host root runtimeComposition through %s", test.name, fieldPath)
+			}
+		})
+	}
+
+	depsType := reflect.TypeFor[sessionRuntimeAssemblyDeps]()
+	if _, ok := depsType.FieldByName("loadProcessSnapshot"); ok {
+		t.Fatal("Session Runtime assembly dependencies retain a bound process snapshot loader")
+	}
+	field, ok := depsType.FieldByName("processConfig")
+	if !ok || field.Type != reflect.TypeFor[*runtimeProcessConfigSource]() {
+		t.Fatalf("process configuration source = %v, present:%v", field.Type, ok)
+	}
+}
+
+func TestSessionRuntimeAssemblyUsesIndependentConfigurationSource(t *testing.T) {
+	t.Parallel()
+
+	storeDir := t.TempDir()
+	rootStore := newAppConfigStore(storeDir)
+	rootStore.savedHook = func() {}
+	host := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{
+		store:           rootStore,
+		storeDir:        storeDir,
+		configMigration: configstore.MigrationReport{FromSchema: 1, Migrated: true},
+		hostedChildMailbox: func(context.Context, session.SessionRef, agentmessage.Request) (agentmessage.Response, error) {
+			return agentmessage.Response{}, nil
+		},
+	}}}
+
+	deps, err := newSessionRuntimeAssemblyDeps(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deps.authorities.store == nil || deps.authorities.store == rootStore {
+		t.Fatal("Session Runtime assembly retained the Host configuration store")
+	}
+	if deps.authorities.store.path != rootStore.path {
+		t.Fatalf("Session Runtime configuration path = %q, want %q", deps.authorities.store.path, rootStore.path)
+	}
+	if deps.authorities.store.saveHook != nil || deps.authorities.store.savedHook != nil {
+		t.Fatal("Session Runtime configuration source retained Host write hooks")
+	}
+	if deps.authorities.configMigration.FromSchema != 1 || !deps.authorities.configMigration.Migrated {
+		t.Fatalf("Session Runtime migration snapshot = %#v", deps.authorities.configMigration)
 	}
 }
 

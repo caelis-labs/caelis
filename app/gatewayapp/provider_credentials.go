@@ -60,10 +60,10 @@ func (s *Stack) prepareProviderCredentials(ctx context.Context, configs []ModelC
 	if len(replacements) == 0 {
 		return prepared, &providerCredentialTransaction{}, nil
 	}
-	if s.composition.apiKeyCredentials == nil {
+	if s.composition.authorities.apiKeyCredentials == nil {
 		return nil, nil, fmt.Errorf("gatewayapp: provider credential store is unavailable")
 	}
-	replacement, err := s.composition.apiKeyCredentials.BeginReplacement(ctx, replacements)
+	replacement, err := s.composition.authorities.apiKeyCredentials.BeginReplacement(ctx, replacements)
 	if err != nil {
 		return nil, nil, fmt.Errorf("gatewayapp: replace provider credentials: %w", err)
 	}

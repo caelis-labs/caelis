@@ -18,10 +18,12 @@ func TestHostedChildMailboxRoutesParentAndSiblingThroughParentSession(t *testing
 	var gotParent session.SessionRef
 	stack := &Stack{
 		composition: runtimeComposition{
-			hostedChildMailbox: func(_ context.Context, parentRef session.SessionRef, req agentmessage.Request) (agentmessage.Response, error) {
-				gotParent = parentRef
-				got = req
-				return agentmessage.Response{Accepted: true, State: agentmessage.StatePending}, nil
+			authorities: runtimeHostAuthorities{
+				hostedChildMailbox: func(_ context.Context, parentRef session.SessionRef, req agentmessage.Request) (agentmessage.Response, error) {
+					gotParent = parentRef
+					got = req
+					return agentmessage.Response{Accepted: true, State: agentmessage.StatePending}, nil
+				},
 			},
 		},
 	}
@@ -47,7 +49,7 @@ func TestHostedChildMailboxRoutesParentAndSiblingThroughParentSession(t *testing
 		},
 	}
 	sender := hostedChildMessageSender{
-		deliver: stack.composition.hostedChildMailbox,
+		deliver: stack.composition.authorities.hostedChildMailbox,
 		parent:  parent,
 		child:   child,
 	}
@@ -109,7 +111,7 @@ func TestHostedChildSendMessageReachesParentSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	child, err := host.composition.sessions.StartSession(ctx, session.StartSessionRequest{
-		AppName: host.composition.appName, UserID: host.composition.userID,
+		AppName: host.composition.authorities.appName, UserID: host.composition.authorities.userID,
 		Workspace: session.WorkspaceRef{Key: host.composition.workspace.Key, CWD: host.composition.workspace.CWD},
 		Metadata: map[string]any{
 			sessionvisibility.MetadataSystemManagedAgent:  sessionvisibility.SystemManagedAgentSubagent,
@@ -131,7 +133,7 @@ func TestHostedChildSendMessageReachesParentSession(t *testing.T) {
 	}
 	parentRuntime := activateSessionRuntime(t, host, parent.SessionID)
 	childRuntime := activateSessionRuntime(t, host, child.SessionID)
-	if childRuntime.instance.hostedChildMailbox == nil {
+	if childRuntime.instance.authorities.hostedChildMailbox == nil {
 		t.Fatal("child Session Runtime did not inherit hosted child mailbox")
 	}
 

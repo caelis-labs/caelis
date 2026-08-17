@@ -20,14 +20,14 @@ func (s *runtimeComposition) attachControlClientHandle(handle kernel.TurnHandle)
 	}
 	ingress := turningress.New(handle)
 	events := ingress.Events()
-	if s.controlFeeds == nil {
+	if s.authorities.controlFeeds == nil {
 		go func() {
 			defer releaseWork()
 			finishFailedControlClientAttachment(ingress, nil, events, errors.New("gatewayapp: control session feed is unavailable"))
 		}()
 		return
 	}
-	feed, err := s.controlFeeds.Session(handle.SessionRef())
+	feed, err := s.authorities.controlFeeds.Session(handle.SessionRef())
 	if err != nil {
 		go func() {
 			defer releaseWork()

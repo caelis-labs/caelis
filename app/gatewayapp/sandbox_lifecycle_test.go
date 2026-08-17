@@ -101,7 +101,7 @@ func TestSandboxLifecycleUsesTemporaryRuntimeWhenCurrentCannotHandleLifecycle(t 
 	}
 	stack := sandboxLifecycleTestStack(current, "windows")
 	stack.composition.workspace.CWD = "/workspace"
-	stack.composition.storeDir = "/store"
+	stack.composition.authorities.storeDir = "/store"
 
 	var factoryCalls int
 	stack.sandboxLifecycleFactory = func(cfg sandbox.Config, current sandbox.Runtime) (sandbox.LifecycleTarget, error) {
@@ -271,8 +271,9 @@ func sandboxLifecycleTestStack(runtime sandbox.Runtime, requestedBackend string)
 	configured := SandboxConfig{RequestedType: requestedBackend}
 	return &Stack{
 		composition: runtimeComposition{
-			workspace: session.WorkspaceRef{CWD: "/workspace"}, sandbox: configured,
-			sandboxPersisted: cloneSandboxConfig(configured), exec: runtime, storeDir: "/store",
+			authorities: runtimeHostAuthorities{storeDir: "/store"},
+			workspace:   session.WorkspaceRef{CWD: "/workspace"}, sandbox: configured,
+			sandboxPersisted: cloneSandboxConfig(configured), exec: runtime,
 		},
 	}
 }

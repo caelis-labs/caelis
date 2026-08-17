@@ -116,7 +116,7 @@ func TestSessionTurnReconnectRepairsDeletedDormantModelBeforePromptCAS(t *testin
 	defer cancel()
 	stack, active := newLocalStateTestStack(t)
 	t.Cleanup(func() { _ = stack.Close() })
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	initialID := stack.composition.lookup.DefaultID()
 	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: "ollama", Model: "deleted-before-prompt"})
 	if err != nil {

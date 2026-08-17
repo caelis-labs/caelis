@@ -99,7 +99,7 @@ func (s *runtimeComposition) childMailbox() hostedChildMailboxFunc {
 	if s == nil {
 		return nil
 	}
-	return s.hostedChildMailbox
+	return s.authorities.hostedChildMailbox
 }
 
 func (s hostedChildMessageSender) SendMessage(ctx context.Context, raw agentmessage.Request) (agentmessage.Response, error) {

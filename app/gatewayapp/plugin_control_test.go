@@ -13,7 +13,7 @@ import (
 
 func TestPluginHostReleasesConfigurationCASBeforeAfterCommit(t *testing.T) {
 	storeDir := t.TempDir()
-	stack := &Stack{composition: runtimeComposition{store: newAppConfigStore(storeDir), storeDir: storeDir}}
+	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: newAppConfigStore(storeDir), storeDir: storeDir}}}
 	host := pluginHost{composition: &stack.composition}
 
 	afterCommitEntered := make(chan struct{})
@@ -67,7 +67,7 @@ func TestPluginHostReleasesConfigurationCASBeforeAfterCommit(t *testing.T) {
 
 func TestPluginHostAfterCommitErrorDoesNotRollbackCommittedState(t *testing.T) {
 	storeDir := t.TempDir()
-	stack := &Stack{composition: runtimeComposition{store: newAppConfigStore(storeDir), storeDir: storeDir}}
+	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: newAppConfigStore(storeDir), storeDir: storeDir}}}
 	host := pluginHost{composition: &stack.composition}
 	sentinel := errors.New("cleanup failed")
 

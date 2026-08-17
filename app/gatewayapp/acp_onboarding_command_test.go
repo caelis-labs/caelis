@@ -27,7 +27,7 @@ import (
 
 func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	marker := filepath.Join(t.TempDir(), "starts")
 	expected := currentConfigurationRevision(t, stack)
 	request := appserver.PrepareACPRequest{
@@ -53,11 +53,11 @@ func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *te
 		t.Fatalf("helper starts after first prepare = %d, want 1", starts)
 	}
 
-	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.composition.storeDir, "control-operations"))
+	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.composition.authorities.storeDir, "control-operations"))
 	if err := restartedOperations.Initialize(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	restartedPreparations, err := newACPPreparationStore(stack.composition.storeDir)
+	restartedPreparations, err := newACPPreparationStore(stack.composition.authorities.storeDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestStackACPCommandRecoveryCapabilityIsExplicit(t *testing.T) {
 
 func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	marker := filepath.Join(t.TempDir(), "starts")
 	expected := currentConfigurationRevision(t, stack)
 	request := appserver.PrepareACPRequest{
@@ -125,7 +125,7 @@ func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	retryOperations := appserver.NewFileOperationStore(filepath.Join(stack.composition.storeDir, "control-operations"))
+	retryOperations := appserver.NewFileOperationStore(filepath.Join(stack.composition.authorities.storeDir, "control-operations"))
 	if err := retryOperations.Initialize(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T
 		t.Fatalf("recovery calls while creator completed = %d, want 0", got)
 	}
 
-	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.composition.storeDir, "control-operations"))
+	restartedOperations := appserver.NewFileOperationStore(filepath.Join(stack.composition.authorities.storeDir, "control-operations"))
 	if err := restartedOperations.Initialize(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestACPPrepareConcurrentRetryPreservesPostCommitWarningReceipt(t *testing.T
 
 func TestACPPrepareAndAuthenticationCommandsPersistExplicitChallenge(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	marker := filepath.Join(t.TempDir(), "starts")
 	expected := currentConfigurationRevision(t, stack)
 	preparedReceipt, err := stack.AgentCommands().PrepareACP(context.Background(), principal, appserver.PrepareACPRequest{
@@ -233,7 +233,7 @@ func TestACPPrepareAndAuthenticationCommandsPersistExplicitChallenge(t *testing.
 
 func TestACPPrepareCancellationIsUnknownAndNeverRepeatsEffect(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	marker := filepath.Join(t.TempDir(), "starts")
 	expected := currentConfigurationRevision(t, stack)
 	request := appserver.PrepareACPRequest{
@@ -276,7 +276,7 @@ func TestACPPrepareCancellationIsUnknownAndNeverRepeatsEffect(t *testing.T) {
 
 func TestConnectPreparedACPCommitsExactPreparationAndReplaysReceipt(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	prepared := seedReadyACPPreparation(t, stack, principal.ID, "prepare-connect")
 	expected := currentConfigurationRevision(t, stack)
 	request := appserver.ConnectACPRequest{
@@ -295,7 +295,7 @@ func TestConnectPreparedACPCommitsExactPreparationAndReplaysReceipt(t *testing.T
 	if receipt.Resource == nil || receipt.Resource.Kind != appserver.CommandResourceModelProfile || receipt.Resource.Ref == "" || receipt.Resource.Digest != prepared.ContentDigest {
 		t.Fatalf("ConnectACP() resource = %#v", receipt.Resource)
 	}
-	doc, err := stack.composition.store.LoadContext(context.Background())
+	doc, err := stack.composition.authorities.store.LoadContext(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestConnectPreparedACPCommitsExactPreparationAndReplaysReceipt(t *testing.T
 
 func TestConnectPreparedACPRejectsForeignOrChangedPreparation(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	prepared := seedReadyACPPreparation(t, stack, stack.composition.userID, "prepare-owned")
+	prepared := seedReadyACPPreparation(t, stack, stack.composition.authorities.userID, "prepare-owned")
 	expected := currentConfigurationRevision(t, stack)
 	tests := []struct {
 		name      string
@@ -329,7 +329,7 @@ func TestConnectPreparedACPRejectsForeignOrChangedPreparation(t *testing.T) {
 		digest    string
 	}{
 		{name: "foreign principal", principal: appserver.Principal{ID: "someone-else"}, digest: prepared.ContentDigest},
-		{name: "changed digest", principal: appserver.Principal{ID: stack.composition.userID}, digest: strings.Repeat("f", 64)},
+		{name: "changed digest", principal: appserver.Principal{ID: stack.composition.authorities.userID}, digest: strings.Repeat("f", 64)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -350,7 +350,7 @@ func TestConnectPreparedACPRejectsForeignOrChangedPreparation(t *testing.T) {
 
 func TestConnectPreparedACPCASCommitsForFutureActivation(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	prepared := seedReadyACPPreparation(t, stack, principal.ID, "prepare-warning")
 	expected := currentConfigurationRevision(t, stack)
 	stale := expected - 1
@@ -370,7 +370,7 @@ func TestConnectPreparedACPCASCommitsForFutureActivation(t *testing.T) {
 	if err != nil || receipt.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectACP() = %#v, %v", receipt, err)
 	}
-	doc, loadErr := stack.composition.store.LoadContext(context.Background())
+	doc, loadErr := stack.composition.authorities.store.LoadContext(context.Background())
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
@@ -384,7 +384,7 @@ func TestConnectPreparedACPCASCommitsForFutureActivation(t *testing.T) {
 
 func TestPrepareACPAuthenticationRejectsUnavailableTerminalCapabilityBeforeEffect(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	parent := seedNeedsAuthACPPreparation(t, stack, principal.ID, "prepare-terminal")
 	expected := currentConfigurationRevision(t, stack)
 	receipt, err := stack.AgentCommands().PrepareACPAuthentication(context.Background(), principal, appserver.PrepareACPAuthenticationRequest{

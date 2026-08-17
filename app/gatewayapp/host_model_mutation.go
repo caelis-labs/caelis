@@ -217,13 +217,13 @@ func (s *Stack) deleteHostModelAtRevision(ctx context.Context, alias string, exp
 }
 
 func (s *Stack) loadModelConfigurationCandidate(ctx context.Context, expected *uint64) (AppConfig, *modelLookup, error) {
-	if s == nil || s.composition.store == nil {
+	if s == nil || s.composition.authorities.store == nil {
 		return AppConfig{}, nil, fmt.Errorf("gatewayapp: app config store unavailable")
 	}
 	if s.composition.lookup == nil {
 		return AppConfig{}, nil, fmt.Errorf("gatewayapp: model lookup unavailable")
 	}
-	doc, err := s.composition.store.LoadContext(contextOrBackground(ctx))
+	doc, err := s.composition.authorities.store.LoadContext(contextOrBackground(ctx))
 	if err != nil {
 		return AppConfig{}, nil, err
 	}
@@ -241,7 +241,7 @@ func (s *Stack) loadModelConfigurationCandidate(ctx context.Context, expected *u
 }
 
 func (s *Stack) persistModelConfiguration(ctx context.Context, doc AppConfig) (AppConfig, error, error) {
-	saved, err := s.composition.store.CompareAndSave(contextOrBackground(ctx), doc.ConfigurationRevision, doc)
+	saved, err := s.composition.authorities.store.CompareAndSave(contextOrBackground(ctx), doc.ConfigurationRevision, doc)
 	if err != nil && !configstore.WriteCommitted(err) {
 		return saved, nil, err
 	}
@@ -255,12 +255,12 @@ func (s *Stack) persistModelConfiguration(ctx context.Context, doc AppConfig) (A
 // a CAS commit. It never rebuilds a Runtime; activated Sessions keep their
 // detached model and Agent assembly until release.
 func (s *Stack) observeCommittedModelConfiguration(ctx context.Context, committed AppConfig) error {
-	if s == nil || s.composition.lookup == nil || s.composition.store == nil {
+	if s == nil || s.composition.lookup == nil || s.composition.authorities.store == nil {
 		return errors.New("gatewayapp: model lookup unavailable after configuration commit")
 	}
 	reconcileCtx, cancel := context.WithTimeout(context.WithoutCancel(contextOrBackground(ctx)), 5*time.Second)
 	defer cancel()
-	doc, err := s.composition.store.LoadContext(reconcileCtx)
+	doc, err := s.composition.authorities.store.LoadContext(reconcileCtx)
 	if err != nil {
 		return fmt.Errorf("gatewayapp: observe canonical model configuration after commit: %w", err)
 	}

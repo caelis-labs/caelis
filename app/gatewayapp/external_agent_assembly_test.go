@@ -27,7 +27,7 @@ func TestExternalAgentAssemblyDoesNotOwnModelDefaults(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	stack := &Stack{composition: runtimeComposition{store: store}}
+	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: store}}}
 	resolved, err := stack.composition.withExternalACPAgents(assembly.ResolvedAssembly{}, stackRuntimeConfig{})
 	if err != nil {
 		t.Fatalf("withExternalACPAgents() error = %v", err)
@@ -51,7 +51,7 @@ func TestExternalAgentAssemblyRejectsParallelLegacyTargetName(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	stack := &Stack{composition: runtimeComposition{store: store}}
+	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: store}}}
 	_, err := stack.composition.withExternalACPAgents(assembly.ResolvedAssembly{Agents: []assembly.AgentConfig{{Name: "claude", Command: "legacy-claude"}}}, stackRuntimeConfig{})
 	if err == nil {
 		t.Fatal("withExternalACPAgents() error = nil, want duplicate truth rejection")
@@ -86,7 +86,7 @@ func TestCustomDirectRoleCollisionFailsClosedAndRollsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := stack.AgentCommands().CreateAgentRole(context.Background(), appserver.Principal{ID: stack.composition.userID}, appserver.CreateAgentRoleRequest{
+	result, err := stack.AgentCommands().CreateAgentRole(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, appserver.CreateAgentRoleRequest{
 		WriteBase: appserver.WriteBase{OperationID: "colliding-agent-role", ExpectedRevision: &revision},
 		Role:      agentbinding.Role{Handle: "research", Description: "Investigate unfamiliar systems."},
 		Binding:   agentbinding.Binding{ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort},
@@ -94,7 +94,7 @@ func TestCustomDirectRoleCollisionFailsClosedAndRollsBack(t *testing.T) {
 	if err == nil || result.Outcome != appserver.OutcomeRejected {
 		t.Fatalf("CreateAgentRole() = %#v, %v; want rejected collision", result, err)
 	}
-	doc, loadErr := stack.composition.store.Load()
+	doc, loadErr := stack.composition.authorities.store.Load()
 	if loadErr != nil {
 		t.Fatalf("Load() error = %v", loadErr)
 	}
@@ -138,7 +138,7 @@ func TestProviderProfileBindingMaterializesFixedDirectHandle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -183,7 +183,7 @@ func TestProviderProfileBindingMaterializesFixedDirectHandle(t *testing.T) {
 
 func TestReviewerACPBindingMaterializesHiddenReviewScene(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -205,7 +205,7 @@ func TestReviewerACPBindingMaterializesHiddenReviewScene(t *testing.T) {
 			Choices: []modelprofile.EffortChoice{{Canonical: "high", WireValue: "high"}, {Canonical: "xhigh", WireValue: "very-high"}},
 		},
 	})
-	if err := stack.composition.store.Save(doc); err != nil {
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	stack.invalidatePlacementSnapshot()

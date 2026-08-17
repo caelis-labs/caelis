@@ -60,7 +60,7 @@ func (s *runtimeComposition) invalidateOwnPlacementSnapshot() {
 }
 
 func (s *runtimeComposition) placementSnapshot(ctx context.Context) (*placementSnapshot, error) {
-	if s == nil || s.store == nil {
+	if s == nil || s.authorities.store == nil {
 		return nil, fmt.Errorf("gatewayapp: placement is unavailable")
 	}
 	ctx = contextOrBackground(ctx)
@@ -75,7 +75,7 @@ func (s *runtimeComposition) placementSnapshot(ctx context.Context) (*placementS
 		if cached != nil {
 			return cached, nil
 		}
-		doc, err := s.store.Load()
+		doc, err := s.authorities.store.Load()
 		if err != nil {
 			return nil, err
 		}
@@ -136,7 +136,7 @@ func (s *runtimeComposition) resolveSystemAgentModel(
 	handle agentbinding.Handle,
 	contextWindow int,
 ) (kernelimpl.ModelResolution, bool, error) {
-	if s == nil || s.store == nil {
+	if s == nil || s.authorities.store == nil {
 		return kernelimpl.ModelResolution{}, false, nil
 	}
 	if s.lookup == nil {

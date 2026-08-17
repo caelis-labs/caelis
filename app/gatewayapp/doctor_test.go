@@ -11,9 +11,31 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
+
+func TestConfigMigrationWarningsUseProcessSnapshot(t *testing.T) {
+	t.Parallel()
+
+	composition := &runtimeComposition{authorities: runtimeHostAuthorities{
+		store: newAppConfigStore(t.TempDir()),
+		configMigration: configstore.MigrationReport{
+			FromSchema: 1,
+			Migrated:   true,
+			BackupPath: "/tmp/config.v1.backup",
+			Dropped: []configstore.MigrationDrop{{
+				Category: "model", Identity: "legacy", Reason: "unsafe credential",
+			}},
+		},
+	}}
+
+	warnings := composition.configMigrationWarnings()
+	if len(warnings) != 3 {
+		t.Fatalf("migration warnings = %#v, want summary, dropped count, and dropped record", warnings)
+	}
+}
 
 type doctorSessionMigrationReporter struct {
 	session.Service
@@ -159,7 +181,7 @@ func TestDoctorReportFindsAPIKeyThroughCredentialReferenceAfterReload(t *testing
 	}
 	current := mustCurrentSession(t, stack, session.SessionID)
 	revision := current.Revision
-	modelResult, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModelRequest{
+	modelResult, err := stack.ConfigurationCommands().UseSessionModel(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SessionModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "doctor-session-model", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Model:     profile.Backend.Provider.ModelConfigID,
 	})
@@ -168,7 +190,7 @@ func TestDoctorReportFindsAPIKeyThroughCredentialReferenceAfterReload(t *testing
 	}
 	current = mustCurrentSession(t, stack, session.SessionID)
 	revision = current.Revision
-	modeResult, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModeRequest{
+	modeResult, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SessionModeRequest{
 		WriteBase: appserver.WriteBase{OperationID: "doctor-session-mode", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 		Mode:      "manual",
 	})

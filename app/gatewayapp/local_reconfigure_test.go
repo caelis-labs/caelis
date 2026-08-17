@@ -26,7 +26,7 @@ import (
 func TestSandboxConfigurationCommandUsesHostCASAndSharedLedger(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	expected, err := stack.ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestSandboxConfigurationCommandUsesHostCASAndSharedLedger(t *testing.T) {
 func TestSandboxConfigurationCommandPreservesCanonicalPolicyFields(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	external := newAppConfigStore(filepath.Dir(stack.composition.store.path))
+	external := newAppConfigStore(filepath.Dir(stack.composition.authorities.store.path))
 	doc, err := external.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func TestSandboxConfigurationCommandPreservesCanonicalPolicyFields(t *testing.T)
 		t.Fatal(err)
 	}
 	expected := saved.ConfigurationRevision
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SandboxRequest{
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SandboxRequest{
 		WriteBase: appserver.WriteBase{OperationID: "sandbox-preserve-canonical-policy", ExpectedRevision: &expected},
 		Backend:   "host",
 	})
@@ -151,8 +151,8 @@ func TestSandboxConfigurationCommandRollsForwardAfterCommittedWriteFault(t *test
 	ctx, cancel := context.WithCancel(context.Background())
 	fault := errors.New("directory fsync after sandbox CAS failed")
 	writeCount := installCommittedConfigSaveFault(t, stack, "fsync", fault)
-	committedFault := stack.composition.store.saveHook
-	stack.composition.store.saveHook = func(doc AppConfig) error {
+	committedFault := stack.composition.authorities.store.saveHook
+	stack.composition.authorities.store.saveHook = func(doc AppConfig) error {
 		cancel()
 		return committedFault(doc)
 	}
@@ -164,11 +164,11 @@ func TestSandboxConfigurationCommandRollsForwardAfterCommittedWriteFault(t *test
 		WriteBase: appserver.WriteBase{OperationID: "sandbox-committed-write", ExpectedRevision: &expected},
 		Backend:   "host",
 	}
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, appserver.Principal{ID: stack.composition.userID}, request)
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, request)
 	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != expected+1 {
 		t.Fatalf("SetSandboxBackend(committed fault) = %#v, %v", result, err)
 	}
-	persisted, loadErr := stack.composition.store.Load()
+	persisted, loadErr := stack.composition.authorities.store.Load()
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
@@ -181,7 +181,7 @@ func TestSandboxConfigurationCommandRollsForwardAfterCommittedWriteFault(t *test
 		live.RequestedType != "host" || !reflect.DeepEqual(livePersisted, persisted.Sandbox) || liveRevision != result.Revision {
 		t.Fatalf("committed fault diverged durable/live: persisted=%#v live=%#v bound=%#v@%d result=%#v", persisted, live, livePersisted, liveRevision, result)
 	}
-	replayed, replayErr := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.composition.userID}, request)
+	replayed, replayErr := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, request)
 	if replayErr != nil || replayed != result || writeCount() != 1 {
 		t.Fatalf("SetSandboxBackend(replay) = %#v, %v writes=%d; want %#v and one write", replayed, replayErr, writeCount(), result)
 	}
@@ -191,26 +191,26 @@ func TestSandboxConfigurationCommandDoesNotGuessRevisionWhenCommittedWriteCannot
 	stack, _ := newLocalStateTestStack(t)
 	fault := errors.New("directory fsync after sandbox CAS failed")
 	installCommittedConfigSaveFault(t, stack, "fsync", fault)
-	committedFault := stack.composition.store.saveHook
-	committedPath := stack.composition.store.path + ".committed"
+	committedFault := stack.composition.authorities.store.saveHook
+	committedPath := stack.composition.authorities.store.path + ".committed"
 	pathBlocked := false
 	t.Cleanup(func() {
 		if !pathBlocked {
 			return
 		}
-		_ = os.Remove(stack.composition.store.path)
-		_ = os.Rename(committedPath, stack.composition.store.path)
+		_ = os.Remove(stack.composition.authorities.store.path)
+		_ = os.Rename(committedPath, stack.composition.authorities.store.path)
 	})
-	stack.composition.store.saveHook = func(doc AppConfig) error {
+	stack.composition.authorities.store.saveHook = func(doc AppConfig) error {
 		committedErr := committedFault(doc)
 		if !configstore.WriteCommitted(committedErr) {
 			return committedErr
 		}
-		if err := os.Rename(stack.composition.store.path, committedPath); err != nil {
+		if err := os.Rename(stack.composition.authorities.store.path, committedPath); err != nil {
 			return errors.Join(committedErr, err)
 		}
-		if err := os.Mkdir(stack.composition.store.path, 0o700); err != nil {
-			_ = os.Rename(committedPath, stack.composition.store.path)
+		if err := os.Mkdir(stack.composition.authorities.store.path, 0o700); err != nil {
+			_ = os.Rename(committedPath, stack.composition.authorities.store.path)
 			return errors.Join(committedErr, err)
 		}
 		pathBlocked = true
@@ -220,7 +220,7 @@ func TestSandboxConfigurationCommandDoesNotGuessRevisionWhenCommittedWriteCannot
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.composition.userID}, appserver.SandboxRequest{
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SandboxRequest{
 		WriteBase: appserver.WriteBase{OperationID: "sandbox-committed-write-readback-failed", ExpectedRevision: &expected},
 		Backend:   "host",
 	})
@@ -235,14 +235,14 @@ func TestSandboxConfigurationCommandDoesNotGuessRevisionWhenCommittedWriteCannot
 	if liveRevision != 0 {
 		t.Fatalf("live binding = %#v / %#v @ %d, want unknown revision", live, livePersisted, liveRevision)
 	}
-	if err := os.Remove(stack.composition.store.path); err != nil {
+	if err := os.Remove(stack.composition.authorities.store.path); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Rename(committedPath, stack.composition.store.path); err != nil {
+	if err := os.Rename(committedPath, stack.composition.authorities.store.path); err != nil {
 		t.Fatal(err)
 	}
 	pathBlocked = false
-	persisted, err := stack.composition.store.Load()
+	persisted, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestSandboxConfigurationCommandDoesNotGuessRevisionWhenCommittedWriteCannot
 
 func TestSandboxConfigurationCommandDoesNotCompensateCommittedWrite(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,30 +266,30 @@ func TestSandboxConfigurationCommandDoesNotCompensateCommittedWrite(t *testing.T
 		t.Fatal(err)
 	}
 	doc.Plugins = []PluginConfig{{ID: "malformed-plugin", Root: pluginRoot, Enabled: true}}
-	if err := stack.composition.store.Save(doc); err != nil {
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatal(err)
 	}
-	before, err := stack.composition.store.Load()
+	before, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	fault := errors.New("directory fsync after sandbox CAS failed")
 	writeCount := installCommittedConfigSaveFault(t, stack, "fsync", fault)
-	committedFault := stack.composition.store.saveHook
+	committedFault := stack.composition.authorities.store.saveHook
 	attempts := 0
-	stack.composition.store.saveHook = func(doc AppConfig) error {
+	stack.composition.authorities.store.saveHook = func(doc AppConfig) error {
 		attempts++
 		return committedFault(doc)
 	}
 	expected := before.ConfigurationRevision
-	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.composition.userID}, appserver.SandboxRequest{
+	result, err := stack.ConfigurationCommands().SetSandboxBackend(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SandboxRequest{
 		WriteBase: appserver.WriteBase{OperationID: "sandbox-committed-write-compensated", ExpectedRevision: &expected},
 		Backend:   "host",
 	})
 	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != expected+1 {
 		t.Fatalf("SetSandboxBackend(committed warning) = %#v, %v", result, err)
 	}
-	after, loadErr := stack.composition.store.Load()
+	after, loadErr := stack.composition.authorities.store.Load()
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
@@ -301,12 +301,12 @@ func TestSandboxConfigurationCommandDoesNotCompensateCommittedWrite(t *testing.T
 func TestSandboxLifecycleCommandClassifiesPreEffectAndEffectFailures(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc.Sandbox.RequestedType = "windows"
-	saved, err := stack.composition.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
+	saved, err := stack.composition.authorities.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestSandboxLifecycleCommandClassifiesPreEffectAndEffectFailures(t *testing.
 		stack.composition.mu.Unlock()
 	})
 
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	expected := saved.ConfigurationRevision
 	preEffectRequest := appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "sandbox-lifecycle-pre-effect", ExpectedRevision: &expected,
@@ -364,13 +364,13 @@ func TestSandboxLifecycleCommandClassifiesPreEffectAndEffectFailures(t *testing.
 func TestSandboxLifecycleCommandUsesCanonicalExternalPolicy(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc.Sandbox.RequestedType = "windows"
 	doc.Sandbox.WritableRoots = []string{"/external/policy"}
-	saved, err := stack.composition.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
+	saved, err := stack.composition.authorities.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestSandboxLifecycleCommandUsesCanonicalExternalPolicy(t *testing.T) {
 		stack.composition.mu.Unlock()
 	}()
 	expected := saved.ConfigurationRevision
-	result, err := stack.ConfigurationCommands().PrepareSandbox(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
+	result, err := stack.ConfigurationCommands().PrepareSandbox(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 		OperationID: "sandbox-lifecycle-unreconciled", ExpectedRevision: &expected,
 	}})
 	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != expected || runtime.prepareCalls != 1 {
@@ -401,12 +401,12 @@ func TestSandboxLifecycleCommandUsesCanonicalExternalPolicy(t *testing.T) {
 func TestSandboxLifecycleCommandDoesNotHoldConfigurationWriteBoundary(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc.Sandbox.RequestedType = "windows"
-	saved, err := stack.composition.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
+	saved, err := stack.composition.authorities.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func TestSandboxLifecycleCommandDoesNotHoldConfigurationWriteBoundary(t *testing
 		stack.composition.mu.Unlock()
 	})
 	expected := saved.ConfigurationRevision
-	principal := appserver.Principal{ID: stack.composition.userID}
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	prepareDone := make(chan appserver.CommandResult, 1)
 	prepareErr := make(chan error, 1)
 	go func() {
@@ -508,7 +508,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 	disconnectConnection := controlagents.Connection{
 		ID: "disconnect-acp", Launcher: controlagents.Launcher{Command: writeExternalAgentExecutable(t, t.TempDir(), "disconnect-acp")},
 	}
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -517,7 +517,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 		Agents:      []controlagents.Agent{{ID: "disconnect-agent", ConnectionID: disconnectConnection.ID}},
 		Discoveries: []controlagents.DiscoverySnapshot{{ConnectionID: disconnectConnection.ID, SelectedModelID: "opus"}},
 	}
-	if err := stack.composition.store.Save(doc); err != nil {
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
@@ -552,7 +552,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 			},
 			want: func(t *testing.T) {
 				t.Helper()
-				doc, err := stack.composition.store.Load()
+				doc, err := stack.composition.authorities.store.Load()
 				if err != nil {
 					t.Fatalf("Load() error = %v", err)
 				}
@@ -597,7 +597,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 					return loadErr
 				}
 				revision := current.Revision
-				_, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SessionModeRequest{
+				_, err := stack.ConfigurationCommands().ConfigureSessionMode(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SessionModeRequest{
 					WriteBase: appserver.WriteBase{OperationID: "active-turn-session-mode", SessionID: current.SessionID, ExpectedRevision: &revision, ExpectedControllerEpoch: current.Controller.EpochID},
 					Mode:      "manual",
 				})
@@ -634,7 +634,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 				if err != nil {
 					return err
 				}
-				_, err = stack.ConfigurationCommands().ResetSandbox(ctx, appserver.Principal{ID: stack.composition.userID}, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
+				_, err = stack.ConfigurationCommands().ResetSandbox(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
 					OperationID: "sandbox-lifecycle-active-turn", ExpectedRevision: &expected,
 				}})
 				return err
@@ -683,7 +683,7 @@ func TestBuildInitialGatewayRuntimeRejectsInitializedRuntimeBeforePlanLoad(t *te
 	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), []byte("invalid-json{"), 0o600); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
 	}
-	if err := stack.composition.store.Save(AppConfig{
+	if err := stack.composition.authorities.store.Save(AppConfig{
 		Plugins: []PluginConfig{{ID: "malformed-plugin", Root: pluginRoot, Enabled: true}},
 	}); err != nil {
 		t.Fatalf("store.Save() error = %v", err)
@@ -742,7 +742,7 @@ func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), []byte("invalid-json{"), 0o600); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
 	}
-	if err := stack.composition.store.Save(AppConfig{
+	if err := stack.composition.authorities.store.Save(AppConfig{
 		Plugins: []PluginConfig{{ID: "malformed-plugin", Root: pluginRoot, Enabled: true}},
 	}); err != nil {
 		t.Fatalf("store.Save() error = %v", err)
@@ -933,19 +933,19 @@ func TestStackSetSandboxBackendObservesNewerConcurrentSandboxWriter(t *testing.T
 	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), []byte("invalid-json{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc.Plugins = []PluginConfig{{ID: "malformed-plugin", Root: pluginRoot, Enabled: true}}
-	if err := stack.composition.store.Save(doc); err != nil {
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatal(err)
 	}
 
-	external := newAppConfigStore(filepath.Dir(stack.composition.store.path))
-	previousSavedHook := stack.composition.store.savedHook
+	external := newAppConfigStore(filepath.Dir(stack.composition.authorities.store.path))
+	previousSavedHook := stack.composition.authorities.store.savedHook
 	injected := false
-	stack.composition.store.savedHook = func() {
+	stack.composition.authorities.store.savedHook = func() {
 		if previousSavedHook != nil {
 			previousSavedHook()
 		}
@@ -997,7 +997,7 @@ func poisonConfigStorePath(t *testing.T, stack *Stack) {
 	if err := os.WriteFile(blocker, []byte("block"), 0o600); err != nil {
 		t.Fatalf("WriteFile(blocker) error = %v", err)
 	}
-	stack.composition.store.path = filepath.Join(blocker, "config.json")
+	stack.composition.authorities.store.path = filepath.Join(blocker, "config.json")
 }
 
 type blockingResolver struct{}

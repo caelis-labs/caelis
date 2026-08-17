@@ -25,7 +25,7 @@ func (s *runtimeComposition) materializeReviewerAgent(
 			return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve Reviewer model profile %q: %w", placement.ProfileID, err)
 		}
 		return configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
-			StoreDir:     s.storeDir,
+			StoreDir:     s.authorities.storeDir,
 			WorkspaceKey: s.workspace.Key,
 			WorkspaceCWD: s.workspace.CWD,
 			SessionOptions: caelisModelSessionOptions(

@@ -84,6 +84,7 @@ func (s *Stack) SetBuiltInChildControl(controlURL string, tokenFile string) {
 	if s == nil {
 		return
 	}
+	s.composition.processConfig.setChildControl(controlURL, tokenFile)
 	s.composition.mu.Lock()
 	s.composition.childControlURL = strings.TrimSpace(controlURL)
 	s.composition.childControlTokenFile = strings.TrimSpace(tokenFile)
@@ -137,7 +138,7 @@ func (s *Stack) Sessions() session.Service {
 // AppName returns the durable application identity used for new Sessions.
 func (s *Stack) AppName() string {
 	if runtime := s.runtimeProjection(); runtime != nil {
-		return runtime.appName
+		return runtime.authorities.appName
 	}
 	return ""
 }
@@ -145,7 +146,7 @@ func (s *Stack) AppName() string {
 // UserID returns the compatibility Session owner identity bound to this Host.
 func (s *Stack) UserID() string {
 	if runtime := s.runtimeProjection(); runtime != nil {
-		return runtime.userID
+		return runtime.authorities.userID
 	}
 	return ""
 }
@@ -289,9 +290,9 @@ func (s *runtimeComposition) isClosing() bool {
 	if s == nil {
 		return true
 	}
-	if s.lifecycleCtx != nil {
+	if s.authorities.lifecycleCtx != nil {
 		select {
-		case <-s.lifecycleCtx.Done():
+		case <-s.authorities.lifecycleCtx.Done():
 			return true
 		default:
 		}
@@ -472,21 +473,24 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	}
 	stack := &Stack{
 		composition: runtimeComposition{
+			authorities: runtimeHostAuthorities{
+				appName:           appName,
+				userID:            userID,
+				store:             configStore,
+				storeDir:          storeDir,
+				configMigration:   configStore.MigrationReport(),
+				leaseOwnerID:      leaseOwnerID,
+				taskStore:         taskStore,
+				controlFeeds:      controlFeeds,
+				approvalRecovery:  approvalRecovery,
+				codexAuth:         codexAuth,
+				grokAuth:          grokAuth,
+				apiKeyCredentials: apiKeyCredentials,
+				providerUsage:     providerUsage,
+				sessionModelPins:  newSessionModelPinRegistry(),
+			},
 			sessions:              sessions,
-			appName:               appName,
-			userID:                userID,
 			workspace:             workspace,
-			store:                 configStore,
-			storeDir:              storeDir,
-			leaseOwnerID:          leaseOwnerID,
-			taskStore:             taskStore,
-			controlFeeds:          controlFeeds,
-			approvalRecovery:      approvalRecovery,
-			codexAuth:             codexAuth,
-			grokAuth:              grokAuth,
-			apiKeyCredentials:     apiKeyCredentials,
-			providerUsage:         providerUsage,
-			sessionModelPins:      newSessionModelPinRegistry(),
 			lookup:                lookup,
 			childControlURL:       strings.TrimSpace(cfg.ChildControlURL),
 			childControlTokenFile: strings.TrimSpace(cfg.ChildControlTokenFile),
@@ -497,9 +501,15 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			sandboxRevision:       doc.ConfigurationRevision,
 		},
 	}
+	stack.composition.processConfig = newRuntimeProcessConfigSource(sessionRuntimeProcessSnapshot{
+		runtime:               runtimeCfg,
+		sandboxOverride:       cfg.Sandbox,
+		childControlURL:       cfg.ChildControlURL,
+		childControlTokenFile: cfg.ChildControlTokenFile,
+	})
 	stack.modelRecovery = newSessionModelRecovery(
-		stack.composition.store,
-		stack.composition.sessionModelPins,
+		stack.composition.authorities.store,
+		stack.composition.authorities.sessionModelPins,
 		stack.composition.lookup,
 	)
 	stack.composition.placementCache = newPlacementSnapshot(doc)
@@ -568,13 +578,13 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	stack.taskStreams = acptaskstream.New(controlTaskStreams)
-	stack.composition.lifecycleCtx, stack.lifecycleCancel = context.WithCancel(context.Background())
+	stack.composition.authorities.lifecycleCtx, stack.lifecycleCancel = context.WithCancel(context.Background())
 	if err := stack.composition.buildInitialGatewayRuntime(context.Background()); err != nil {
 		stack.lifecycleCancel()
 		return nil, err
 	}
 	mailboxRouter := &hostedChildMailboxRouter{}
-	stack.composition.hostedChildMailbox = mailboxRouter.deliver
+	stack.composition.authorities.hostedChildMailbox = mailboxRouter.deliver
 	assemblyDeps, err := newSessionRuntimeAssemblyDeps(stack)
 	if err != nil {
 		_ = stack.Close()
@@ -587,8 +597,8 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	}
 	sessionRuntimes, err := newSessionRuntimeRegistry(sessionRuntimeRegistryConfig{
 		Sessions:         stack.composition.sessions,
-		Tasks:            stack.composition.taskStore,
-		LifecycleContext: stack.composition.lifecycleCtx,
+		Tasks:            stack.composition.authorities.taskStore,
+		LifecycleContext: stack.composition.authorities.lifecycleCtx,
 		DefaultWorkspace: stack.composition.workspace,
 		ModelRecovery:    stack.modelRecovery,
 		Assembler:        runtimeAssembler,
@@ -634,19 +644,19 @@ func modelConfigSupplied(cfg ModelConfig) bool {
 // StartApprovalRecovery begins the Control-owned abandoned-approval sweep.
 // Turn entry remains gated until the sweep completes.
 func (s *Stack) StartApprovalRecovery(ctx context.Context) {
-	if s == nil || s.composition.approvalRecovery == nil {
+	if s == nil || s.composition.authorities.approvalRecovery == nil {
 		return
 	}
-	s.composition.approvalRecovery.Start(ctx)
+	s.composition.authorities.approvalRecovery.Start(ctx)
 }
 
 // WaitApprovalRecovery blocks Host readiness until abandoned durable approval
 // mirrors have been settled.
 func (s *Stack) WaitApprovalRecovery(ctx context.Context) error {
-	if s == nil || s.composition.approvalRecovery == nil {
+	if s == nil || s.composition.authorities.approvalRecovery == nil {
 		return nil
 	}
-	return s.composition.approvalRecovery.Wait(ctx)
+	return s.composition.authorities.approvalRecovery.Wait(ctx)
 }
 
 func newStackLeaseOwnerID() (string, error) {

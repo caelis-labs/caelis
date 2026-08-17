@@ -89,12 +89,12 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 		"approval": func() (appserver.CommandResult, error) {
 			request := base
 			request.OperationID = "yolo-approval-mode"
-			return stack.ConfigurationCommands().ConfigureSessionMode(context.Background(), appserver.Principal{ID: stack.composition.userID}, appserver.SessionModeRequest{WriteBase: request, Mode: "manual"})
+			return stack.ConfigurationCommands().ConfigureSessionMode(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SessionModeRequest{WriteBase: request, Mode: "manual"})
 		},
 		"presentation": func() (appserver.CommandResult, error) {
 			request := base
 			request.OperationID = "yolo-presentation-mode"
-			return stack.ConfigurationCommands().ConfigureSessionPresentationMode(context.Background(), appserver.Principal{ID: stack.composition.userID}, appserver.SessionPresentationModeRequest{WriteBase: request, Mode: "manual"})
+			return stack.ConfigurationCommands().ConfigureSessionPresentationMode(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SessionPresentationModeRequest{WriteBase: request, Mode: "manual"})
 		},
 	} {
 		result, err := change()

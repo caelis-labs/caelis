@@ -55,9 +55,9 @@ func TestModelServiceProviderUsageSupportsGrokOAuthCredential(t *testing.T) {
 	stack := &Stack{
 		composition: runtimeComposition{
 			lookup: lookup,
-			providerUsage: providerusage.NewRegistry(map[string]providerusage.Reader{
-				"xai": reader,
-			}),
+			authorities: runtimeHostAuthorities{providerUsage: providerusage.NewRegistry(
+				map[string]providerusage.Reader{"xai": reader},
+			)},
 		},
 	}
 	service := stack.Models()
@@ -113,9 +113,9 @@ func TestModelServiceProviderUsageDoesNotWaitForProvider(t *testing.T) {
 	stack := &Stack{
 		composition: runtimeComposition{
 			lookup: lookup,
-			providerUsage: providerusage.NewRegistry(map[string]providerusage.Reader{
-				"xai": reader,
-			}),
+			authorities: runtimeHostAuthorities{providerUsage: providerusage.NewRegistry(
+				map[string]providerusage.Reader{"xai": reader},
+			)},
 		},
 	}
 	service := stack.Models()

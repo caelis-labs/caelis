@@ -88,7 +88,7 @@ func (s *Stack) prepareACPAtRevision(
 	req appserver.PrepareACPRequest,
 ) (acpPreparationEffectResult, error) {
 	result := acpPreparationEffectResult{Revision: expectedConfigurationRevision(req.ExpectedRevision)}
-	if s == nil || s.composition.store == nil || s.acpPreparations == nil {
+	if s == nil || s.composition.authorities.store == nil || s.acpPreparations == nil {
 		return result, errors.New("gatewayapp: ACP preparation is unavailable")
 	}
 	prepared := controlagents.NormalizeACPPrepareRequest(req.Request)
@@ -324,7 +324,7 @@ func (s *Stack) connectPreparedACPAtRevision(
 		return mutation, modelprofile.ModelProfile{}, fmt.Errorf("gatewayapp: %w", err)
 	}
 
-	doc, err := s.composition.store.LoadContext(ctx)
+	doc, err := s.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
 		return mutation, modelprofile.ModelProfile{}, err
 	}
@@ -351,7 +351,7 @@ func (s *Stack) connectPreparedACPAtRevision(
 	if err != nil {
 		return mutation, modelprofile.ModelProfile{}, fmt.Errorf("gatewayapp: update model profile catalog: %w", err)
 	}
-	saved, persistErr := s.composition.store.CompareAndSave(ctx, expected, doc)
+	saved, persistErr := s.composition.authorities.store.CompareAndSave(ctx, expected, doc)
 	if persistErr != nil && !configstore.WriteCommitted(persistErr) {
 		mutation.Revision = configurationErrorRevision(persistErr, saved.ConfigurationRevision)
 		return mutation, modelprofile.ModelProfile{}, persistErr
@@ -375,7 +375,7 @@ func (s *Stack) connectPreparedACPAtRevision(
 }
 
 func (s *Stack) preflightACPPreparation(ctx context.Context, expected uint64) error {
-	doc, err := s.composition.store.LoadContext(ctx)
+	doc, err := s.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
 		return err
 	}

@@ -64,8 +64,8 @@ func (s *runtimeComposition) ControlRuntimeView() *ControlRuntimeView {
 	plugins := s.Plugins()
 	return &ControlRuntimeView{
 		Sessions:  s.sessions,
-		AppName:   s.appName,
-		UserID:    s.userID,
+		AppName:   s.authorities.appName,
+		UserID:    s.authorities.userID,
 		Workspace: s.workspace,
 
 		TurnStateFn:         s.KernelTurnState,

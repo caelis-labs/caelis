@@ -27,8 +27,8 @@ func (s *Stack) PresentationDependencies() (AppServerPresentationDependencies, e
 	deps := AppServerPresentationDependencies{
 		Sessions: s.composition.sessions,
 		Assembly: assembly.CloneResolvedAssembly(s.composition.runtime.Assembly),
-		AppName:  s.composition.appName,
-		UserID:   s.composition.userID,
+		AppName:  s.composition.authorities.appName,
+		UserID:   s.composition.authorities.userID,
 	}
 	s.composition.mu.RUnlock()
 	return deps, nil

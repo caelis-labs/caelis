@@ -29,14 +29,14 @@ func (h pluginHost) StoreDir() string {
 	if h.composition == nil {
 		return ""
 	}
-	return h.composition.storeDir
+	return h.composition.authorities.storeDir
 }
 
 func (h pluginHost) LoadPluginState(_ context.Context) (plugin.State, error) {
-	if h.composition == nil || h.composition.store == nil {
+	if h.composition == nil || h.composition.authorities.store == nil {
 		return plugin.State{}, fmt.Errorf("plugin service: stack store is unavailable")
 	}
-	doc, err := h.composition.store.Load()
+	doc, err := h.composition.authorities.store.Load()
 	if err != nil {
 		return plugin.State{}, err
 	}
@@ -44,14 +44,14 @@ func (h pluginHost) LoadPluginState(_ context.Context) (plugin.State, error) {
 }
 
 func (h pluginHost) UpdatePluginState(ctx context.Context, mutation plugin.Mutation) error {
-	if h.composition == nil || h.composition.store == nil {
+	if h.composition == nil || h.composition.authorities.store == nil {
 		return fmt.Errorf("plugin service: stack store is unavailable")
 	}
 	if mutation.Apply == nil {
 		return fmt.Errorf("plugin service: plugin state mutation is required")
 	}
 
-	oldDoc, err := h.composition.store.LoadContext(ctx)
+	oldDoc, err := h.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func (h pluginHost) UpdatePluginState(ctx context.Context, mutation plugin.Mutat
 	if err := h.composition.validateAgentAssemblyCandidate(nextDoc); err != nil {
 		return err
 	}
-	_, persistErr := h.composition.store.CompareAndSave(ctx, expected, nextDoc)
+	_, persistErr := h.composition.authorities.store.CompareAndSave(ctx, expected, nextDoc)
 	if persistErr != nil && !configstore.WriteCommitted(persistErr) {
 		return persistErr
 	}

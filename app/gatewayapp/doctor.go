@@ -105,10 +105,10 @@ func (s *runtimeComposition) doctorForWorkspace(ctx context.Context, workspace s
 		GoVersion: runtime.Version(),
 		GOOS:      runtime.GOOS,
 		GOARCH:    runtime.GOARCH,
-		StoreDir:  strings.TrimSpace(s.storeDir),
+		StoreDir:  strings.TrimSpace(s.authorities.storeDir),
 	}
-	if s.store != nil {
-		report.ConfigPath = strings.TrimSpace(s.store.path)
+	if s.authorities.store != nil {
+		report.ConfigPath = strings.TrimSpace(s.authorities.store.path)
 	}
 	dirMode, dirSecure, fileMode, fileSecure := checkConfigPermissions(report.ConfigPath)
 	report.ConfigDirMode = dirMode
@@ -264,10 +264,10 @@ func (s *runtimeComposition) sessionMigrationWarnings() []string {
 }
 
 func (s *runtimeComposition) configMigrationWarnings() []string {
-	if s == nil || s.store == nil {
+	if s == nil {
 		return nil
 	}
-	report := s.store.MigrationReport()
+	report := s.authorities.configMigration
 	if report.FromSchema == 0 && !report.Migrated && !report.SourcePreserved && !report.ExplicitReplacement &&
 		strings.TrimSpace(report.BackupPath) == "" && len(report.Dropped) == 0 {
 		return nil
@@ -311,10 +311,10 @@ func (s *runtimeComposition) modelCredentialStatus(cfg ModelConfig) (bool, strin
 	if ref == "" || !strings.HasPrefix(strings.ToLower(ref), "apikey:") {
 		return modelConfigMissingAPIKey(cfg), modelConfigTokenSource(cfg)
 	}
-	if s == nil || s.apiKeyCredentials == nil {
+	if s == nil || s.authorities.apiKeyCredentials == nil {
 		return true, "credential:" + ref
 	}
-	source, err := s.apiKeyCredentials.LookupSource(context.Background(), ref)
+	source, err := s.authorities.apiKeyCredentials.LookupSource(context.Background(), ref)
 	if err != nil {
 		return true, "credential:" + ref
 	}
@@ -429,8 +429,8 @@ func (s *runtimeComposition) resolveDoctorSessionRef(ctx context.Context, req Do
 	}
 	if strings.TrimSpace(req.SessionID) != "" {
 		return session.SessionRef{
-			AppName:      s.appName,
-			UserID:       s.userID,
+			AppName:      s.authorities.appName,
+			UserID:       s.authorities.userID,
 			SessionID:    strings.TrimSpace(req.SessionID),
 			WorkspaceKey: s.workspace.Key,
 		}

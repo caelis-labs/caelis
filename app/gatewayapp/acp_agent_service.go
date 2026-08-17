@@ -112,7 +112,7 @@ func (s *runtimeComposition) configuredAssembly(base assembly.ResolvedAssembly, 
 
 func (s *runtimeComposition) configuredAssemblyWithPluginAgents(base assembly.ResolvedAssembly, pluginAgents []pluginapi.AgentRegistration, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	self, err := defaultSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
-		StoreDir:     s.storeDir,
+		StoreDir:     s.authorities.storeDir,
 		WorkspaceKey: s.workspace.Key,
 		WorkspaceCWD: s.workspace.CWD,
 		SessionOptions: caelisModelSessionOptions(
@@ -152,7 +152,7 @@ func ptrToModelConfig(model ModelConfig) *ModelConfig {
 
 func (s *runtimeComposition) withDirectProfileAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	out := assembly.CloneResolvedAssembly(resolved)
-	if s == nil || s.store == nil || s.lookup == nil {
+	if s == nil || s.authorities.store == nil || s.lookup == nil {
 		return out, nil
 	}
 	seen := make(map[string]struct{}, len(out.Agents))
@@ -200,7 +200,7 @@ func (s *runtimeComposition) withReviewerAgent(resolved assembly.ResolvedAssembl
 			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: host agent %q conflicts with the fixed Reviewer scene", reviewerAgentID)
 		}
 	}
-	if s.store == nil {
+	if s.authorities.store == nil {
 		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer placement: app config store unavailable")
 	}
 	placement, resolveErr := s.resolveHandlePlacement(context.Background(), controlplacement.HandleRequest{
@@ -226,7 +226,7 @@ func (s *runtimeComposition) withReviewerAgent(resolved assembly.ResolvedAssembl
 
 func (s *runtimeComposition) withExternalACPAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	out := assembly.CloneResolvedAssembly(resolved)
-	if s == nil || s.store == nil {
+	if s == nil || s.authorities.store == nil {
 		return out, nil
 	}
 	doc, err := s.loadGatewayAppConfig()

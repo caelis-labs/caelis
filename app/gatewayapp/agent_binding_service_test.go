@@ -30,7 +30,7 @@ func TestAgentBindingServicePersistsUnifiedProfileBindingForFutureActivation(t *
 	}); err != nil {
 		t.Fatal(err)
 	}
-	stack := &Stack{composition: runtimeComposition{store: store}}
+	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: store}}}
 	service := stack.testAgentBindings()
 	status, err := service.BindAgentBinding(context.Background(), agentbinding.Binding{
 		Handle: agentbinding.HandleOrbit, ProfileID: profile.ID, Effort: "none",
@@ -69,7 +69,7 @@ func TestAgentBindingServiceRollsForwardAfterCommittedConfigWriteFault(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := stack.AgentCommands().BindAgentBinding(context.Background(), appserver.Principal{ID: stack.composition.userID}, appserver.BindAgentBindingRequest{
+	result, err := stack.AgentCommands().BindAgentBinding(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, appserver.BindAgentBindingRequest{
 		WriteBase: appserver.WriteBase{OperationID: "binding-committed-fault", ExpectedRevision: &revision},
 		Binding:   agentbinding.Binding{Handle: agentbinding.HandleOrbit, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort},
 	})
@@ -84,7 +84,7 @@ func TestAgentBindingServiceRollsForwardAfterCommittedConfigWriteFault(t *testin
 		t.Fatal(err)
 	}
 	assertAgentBindingTarget(t, status, agentbinding.HandleOrbit, profile.ID)
-	loaded, loadErr := stack.composition.store.Load()
+	loaded, loadErr := stack.composition.authorities.store.Load()
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
@@ -101,32 +101,32 @@ func TestAgentBindingCommandCachesUnknownWhenCommittedRevisionCannotBeObserved(t
 	}
 	fault := errors.New("directory fsync after rename failed")
 	writeCount := installCommittedConfigSaveFault(t, stack, "fsync", fault)
-	committedFault := stack.composition.store.saveHook
-	committedPath := stack.composition.store.path + ".committed"
+	committedFault := stack.composition.authorities.store.saveHook
+	committedPath := stack.composition.authorities.store.path + ".committed"
 	pathBlocked := false
 	restore := func() {
 		if !pathBlocked {
 			return
 		}
-		if err := os.Remove(stack.composition.store.path); err != nil {
+		if err := os.Remove(stack.composition.authorities.store.path); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Rename(committedPath, stack.composition.store.path); err != nil {
+		if err := os.Rename(committedPath, stack.composition.authorities.store.path); err != nil {
 			t.Fatal(err)
 		}
 		pathBlocked = false
 	}
 	t.Cleanup(restore)
-	stack.composition.store.saveHook = func(doc AppConfig) error {
+	stack.composition.authorities.store.saveHook = func(doc AppConfig) error {
 		committedErr := committedFault(doc)
 		if !configstore.WriteCommitted(committedErr) {
 			return committedErr
 		}
-		if err := os.Rename(stack.composition.store.path, committedPath); err != nil {
+		if err := os.Rename(stack.composition.authorities.store.path, committedPath); err != nil {
 			return errors.Join(committedErr, err)
 		}
-		if err := os.Mkdir(stack.composition.store.path, 0o700); err != nil {
-			_ = os.Rename(committedPath, stack.composition.store.path)
+		if err := os.Mkdir(stack.composition.authorities.store.path, 0o700); err != nil {
+			_ = os.Rename(committedPath, stack.composition.authorities.store.path)
 			return errors.Join(committedErr, err)
 		}
 		pathBlocked = true
@@ -140,19 +140,19 @@ func TestAgentBindingCommandCachesUnknownWhenCommittedRevisionCannotBeObserved(t
 		WriteBase: appserver.WriteBase{OperationID: "binding-committed-readback", ExpectedRevision: &expected},
 		Binding:   agentbinding.Binding{Handle: agentbinding.HandleOrbit, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort},
 	}
-	result, err := stack.AgentCommands().BindAgentBinding(context.Background(), appserver.Principal{ID: stack.composition.userID}, request)
+	result, err := stack.AgentCommands().BindAgentBinding(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, request)
 	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != 0 {
 		t.Fatalf("BindAgentBinding(committed readback failure) = %#v, %v", result, err)
 	}
 	restore()
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if binding, ok := agentbinding.Lookup(doc.AgentBindings, agentbinding.HandleOrbit); !ok || binding.ProfileID != profile.ID {
 		t.Fatalf("persisted binding = %#v, %v", binding, ok)
 	}
-	replayed, replayErr := stack.AgentCommands().BindAgentBinding(context.Background(), appserver.Principal{ID: stack.composition.userID}, request)
+	replayed, replayErr := stack.AgentCommands().BindAgentBinding(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, request)
 	if replayErr != nil || replayed != result || writeCount() != 1 {
 		t.Fatalf("BindAgentBinding(replay) = %#v, %v writes=%d; want %#v and one write", replayed, replayErr, writeCount(), result)
 	}
@@ -168,14 +168,14 @@ func TestAgentBindingCommandCommitsWithoutRuntimeRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := stack.AgentCommands().BindAgentBinding(context.Background(), appserver.Principal{ID: stack.composition.userID}, appserver.BindAgentBindingRequest{
+	result, err := stack.AgentCommands().BindAgentBinding(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, appserver.BindAgentBindingRequest{
 		WriteBase: appserver.WriteBase{OperationID: "binding-refresh-failure", ExpectedRevision: &expected},
 		Binding:   agentbinding.Binding{Handle: agentbinding.HandleOrbit, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort},
 	})
 	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != expected+1 {
 		t.Fatalf("BindAgentBinding() = %#v, %v", result, err)
 	}
-	doc, err := stack.composition.store.Load()
+	doc, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestAgentBindingServicePersistsCustomRoleAndSwitchesNamedSnapshot(t *testin
 	assertAgentBindingTarget(t, status, agentbinding.HandleOrbit, "")
 	assertAgentBindingTarget(t, status, "research", profile.ID)
 
-	loaded, err := stack.composition.store.Load()
+	loaded, err := stack.composition.authorities.store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}

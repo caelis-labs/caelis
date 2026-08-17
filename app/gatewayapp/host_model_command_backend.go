@@ -157,7 +157,7 @@ func (s *Stack) assembleHostModelConnect(ctx context.Context, cfg appserver.Conn
 }
 
 func (s *runtimeComposition) reusableProviderCredentialRef(ctx context.Context, lookup *modelLookup, provider, endpointID, baseURL string) (string, bool) {
-	if s == nil || s.apiKeyCredentials == nil {
+	if s == nil || s.authorities.apiKeyCredentials == nil {
 		return "", false
 	}
 	if ctx == nil {
@@ -178,19 +178,19 @@ func (s *runtimeComposition) reusableProviderCredentialRef(ctx context.Context, 
 			if !strings.HasPrefix(ref, "apikey:") {
 				return "", false
 			}
-			source, err := s.apiKeyCredentials.LookupSource(ctx, ref)
+			source, err := s.authorities.apiKeyCredentials.LookupSource(ctx, ref)
 			return ref, err == nil && strings.TrimSpace(source.APIKey) != ""
 		}
 	}
 	ref := credentialstore.BuildReference(provider, providerEndpointID)
-	if source, err := s.apiKeyCredentials.LookupSource(ctx, ref); err == nil && strings.TrimSpace(source.APIKey) != "" {
+	if source, err := s.authorities.apiKeyCredentials.LookupSource(ctx, ref); err == nil && strings.TrimSpace(source.APIKey) != "" {
 		return ref, true
 	}
 	return "", false
 }
 
 func (s *Stack) bindReusableAPIKeyCredential(ctx context.Context, configs []ModelConfig, reusableRef string) ([]ModelConfig, error) {
-	if s == nil || s.composition.apiKeyCredentials == nil {
+	if s == nil || s.composition.authorities.apiKeyCredentials == nil {
 		return configs, nil
 	}
 	bound := append([]ModelConfig(nil), configs...)
@@ -207,7 +207,7 @@ func (s *Stack) bindReusableAPIKeyCredential(ctx context.Context, configs []Mode
 		if ref == "" {
 			continue
 		}
-		source, err := s.composition.apiKeyCredentials.LookupSource(ctx, ref)
+		source, err := s.composition.authorities.apiKeyCredentials.LookupSource(ctx, ref)
 		if err != nil {
 			return nil, fmt.Errorf("gatewayapp: retained provider credential %q is unavailable: %w", ref, err)
 		}
