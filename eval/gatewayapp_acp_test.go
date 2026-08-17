@@ -61,7 +61,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	if state.Controller.Kind != session.ControllerKindACP || strings.TrimSpace(state.Controller.EpochID) == "" {
 		t.Fatalf("control state = %+v", state)
 	}
-	controllerStatus, found, err := stack.ACPControllerStatus(context.Background(), activeSession.SessionRef)
+	controllerStatus, found, err := stack.Agents().ControllerStatus(context.Background(), activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("ACPControllerStatus() error = %v", err)
 	}
@@ -95,7 +95,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	if err != nil || modeResult.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConfigureSessionControllerMode(plan) = %#v, %v", modeResult, err)
 	}
-	updatedStatus, found, err := stack.ACPControllerStatus(context.Background(), activeSession.SessionRef)
+	updatedStatus, found, err := stack.Agents().ControllerStatus(context.Background(), activeSession.SessionRef)
 	if err != nil || !found {
 		t.Fatalf("ACPControllerStatus(after mode) = %#v, %v, found=%v", updatedStatus, err, found)
 	}

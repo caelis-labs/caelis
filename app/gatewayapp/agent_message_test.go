@@ -74,7 +74,7 @@ func TestDeliverAgentMessageAttachesIdleTurnAndPreservesRuntimeContext(t *testin
 	admissionCtx, cancelAdmission := context.WithCancel(context.Background())
 	admissionCtx = agentmessage.WithSender(admissionCtx, controlRuntimeContextMessageSender{})
 	expectedRevision := active.Revision
-	delivery, err := stack.DeliverAgentMessage(admissionCtx, DeliverAgentMessageRequest{
+	delivery, err := stack.AgentMessageDelivery().Deliver(admissionCtx, DeliverAgentMessageRequest{
 		SessionRef: active.SessionRef, ExpectedRevision: &expectedRevision,
 		Message: agentmessage.Request{
 			MessageID: "message-1", Text: "continue",

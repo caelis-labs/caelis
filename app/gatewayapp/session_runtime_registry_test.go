@@ -644,7 +644,7 @@ func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *
 	sessionID := createWorkspaceRuntimeTestSession(t, client, "create-observe", "session-observe", "workspace-observe", workspace)
 	principal := appserver.Principal{ID: "local-user"}
 
-	observed, err := stack.AcquireControlRuntime(ctx, principal, appserver.ActionSessionInspect, sessionID, false)
+	observed, err := stack.ControlRuntimes().Acquire(ctx, principal, appserver.ActionSessionInspect, sessionID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -659,7 +659,7 @@ func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *
 	}
 
 	loaded := activateSessionRuntime(t, stack, sessionID)
-	pinned, err := stack.AcquireControlRuntime(ctx, principal, appserver.ActionSessionInspect, sessionID, false)
+	pinned, err := stack.ControlRuntimes().Acquire(ctx, principal, appserver.ActionSessionInspect, sessionID, false)
 	if err != nil {
 		t.Fatal(err)
 	}

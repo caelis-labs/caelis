@@ -15,7 +15,7 @@ func (s *Stack) runSandboxLifecycle(ctx context.Context, action sandboxLifecycle
 		return SandboxStatus{}, err
 	}
 	if target.NoOp {
-		return s.SandboxStatus(), nil
+		return s.runtimeProjection().SandboxStatus(), nil
 	}
 	defer func() { _ = target.Close() }()
 	return s.sandboxLifecycleStatus(target), action(ctx, target.Runtime)
@@ -51,11 +51,11 @@ func TestSandboxStatusForWorkspaceDoesNotReuseStartupRuntimeSetup(t *testing.T) 
 	stack := sandboxLifecycleTestStack(runtime, "windows")
 	stack.composition.sandbox = mergeSandboxConfig(stack.composition.sandboxPersisted, stack.composition.sandboxOverride)
 
-	startup := stack.SandboxStatusForWorkspace(session.WorkspaceRef{Key: "startup", CWD: "/workspace"})
+	startup := stack.ControlStatus().SandboxForWorkspace(session.WorkspaceRef{Key: "startup", CWD: "/workspace"})
 	if startup.WorkspaceSetupRoot != "/workspace" || startup.WorkspaceSetupWriteRoots != 2 {
 		t.Fatalf("startup workspace status = %#v, want Runtime setup projection", startup)
 	}
-	other := stack.SandboxStatusForWorkspace(session.WorkspaceRef{Key: "other", CWD: "/other-workspace"})
+	other := stack.ControlStatus().SandboxForWorkspace(session.WorkspaceRef{Key: "other", CWD: "/other-workspace"})
 	if other.WorkspaceSetupRoot != "" || other.WorkspaceSetupWriteRoots != 0 || len(other.Setup.Checks) != 0 {
 		t.Fatalf("other workspace status = %#v, leaked startup Runtime setup", other)
 	}

@@ -64,7 +64,7 @@ func TestModelCatalogMutationsRefreshActiveSessionPickerWithoutReplacingRuntime(
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = observation.Subscription.Close() })
-	lease, err := host.AcquireControlRuntime(ctx, appserver.Principal{ID: "local-user"}, appserver.ActionSessionInspect, sessionID, true)
+	lease, err := host.ControlRuntimes().Acquire(ctx, appserver.Principal{ID: "local-user"}, appserver.ActionSessionInspect, sessionID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -794,7 +794,7 @@ func TestBoundAppServerKeepsSessionSkillSnapshotUntilLastObserverDetaches(t *tes
 		t.Fatal(err)
 	}
 	defer observation.Subscription.Close()
-	lease, err := host.AcquireControlRuntime(ctx, appserver.Principal{ID: "local-user"}, appserver.ActionSessionInspect, sessionID, true)
+	lease, err := host.ControlRuntimes().Acquire(ctx, appserver.Principal{ID: "local-user"}, appserver.ActionSessionInspect, sessionID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -832,7 +832,7 @@ func TestBoundAppServerKeepsSessionSkillSnapshotUntilLastObserverDetaches(t *tes
 		t.Fatal(err)
 	}
 	waitForSessionSkill(t, clients.Completion, sessionID, "late")
-	activation, err := host.AcquireControlRuntime(
+	activation, err := host.ControlRuntimes().Acquire(
 		ctx,
 		appserver.Principal{ID: "local-user"},
 		appserver.ActionSessionInspect,

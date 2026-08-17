@@ -10,16 +10,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 )
 
-// CurrentSkillCatalog discovers the skills configured for a future Session in
-// the addressed workspace without assembling an execution Runtime. In
-// particular, completion must not start plugin MCP servers, hooks, sandboxes,
-// or controllers merely to read Skill metadata.
-func (s *Stack) CurrentSkillCatalog(ctx context.Context, workspace session.WorkspaceRef) (skill.Catalog, error) {
-	return s.WorkspaceReads().CurrentSkillCatalog(ctx, workspace)
-}
-
 // CurrentSkillCatalog discovers the configured skills for a future Session
-// without assembling an execution Runtime.
+// without assembling an execution Runtime. In particular, completion must not
+// start plugin MCP servers, hooks, sandboxes, or controllers merely to read
+// Skill metadata.
 func (s WorkspaceReadService) CurrentSkillCatalog(ctx context.Context, workspace session.WorkspaceRef) (skill.Catalog, error) {
 	if s.composition == nil || s.composition.store == nil {
 		return skill.Catalog{}, errors.New("gatewayapp: App configuration store is unavailable")

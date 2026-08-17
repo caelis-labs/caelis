@@ -12,13 +12,13 @@ func TestNilStackRuntimeProjectionPreservesUnavailableResults(t *testing.T) {
 	t.Parallel()
 
 	var stack *Stack
-	if _, err := stack.Doctor(context.Background(), DoctorRequest{}); err == nil || !strings.Contains(err.Error(), "stack is unavailable") {
+	if _, err := stack.Status().Doctor(context.Background(), DoctorRequest{}); err == nil || !strings.Contains(err.Error(), "stack is unavailable") {
 		t.Fatalf("Doctor() error = %v, want unavailable Stack", err)
 	}
-	if status, found, err := stack.ACPControllerStatus(context.Background(), session.SessionRef{}); err != nil || found {
+	if status, found, err := stack.Agents().ControllerStatus(context.Background(), session.SessionRef{}); err != nil || found {
 		t.Fatalf("ACPControllerStatus() = %#v, %v, %v, want zero, false, nil", status, found, err)
 	}
-	if _, err := stack.ListModelChoices(context.Background(), session.SessionRef{}); err == nil || !strings.Contains(err.Error(), "stack is unavailable") {
+	if _, err := stack.Models().ListChoices(context.Background(), session.SessionRef{}); err == nil || !strings.Contains(err.Error(), "stack is unavailable") {
 		t.Fatalf("ListModelChoices() error = %v, want unavailable Stack", err)
 	}
 	if view := stack.ControlRuntimeView(); view != nil {

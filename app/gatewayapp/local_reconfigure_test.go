@@ -605,7 +605,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 			},
 			want: func(t *testing.T) {
 				t.Helper()
-				state, err := stack.SessionRuntimeState(ctx, session.SessionRef)
+				state, err := stack.ControlStatus().SessionRuntimeState(ctx, session.SessionRef)
 				if err != nil {
 					t.Fatalf("SessionRuntimeState() error = %v", err)
 				}
@@ -622,7 +622,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 			},
 			want: func(t *testing.T) {
 				t.Helper()
-				if got := stack.SandboxStatus().RequestedBackend; got != "host" {
+				if got := stack.ControlStatus().Sandbox().RequestedBackend; got != "host" {
 					t.Fatalf("SandboxStatus().RequestedBackend = %q, want effective future activation host override", got)
 				}
 			},
@@ -906,7 +906,7 @@ func TestStackConnectRollsBackOnConfigSaveFailure(t *testing.T) {
 func TestStackSetSandboxBackendRollsBackOnConfigSaveFailure(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
-	before := stack.SandboxStatus()
+	before := stack.ControlStatus().Sandbox()
 	beforeGateway := stack.composition.currentGateway()
 	poisonConfigStorePath(t, stack)
 
@@ -914,7 +914,7 @@ func TestStackSetSandboxBackendRollsBackOnConfigSaveFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("SetSandboxBackend() error = nil, want config save failure")
 	}
-	after := stack.SandboxStatus()
+	after := stack.ControlStatus().Sandbox()
 	if after.RequestedBackend != before.RequestedBackend || after.ResolvedBackend != before.ResolvedBackend {
 		t.Fatalf("SandboxStatus() = %+v, want rollback to %+v", after, before)
 	}
@@ -980,7 +980,7 @@ func TestStackSetSandboxBackendObservesNewerConcurrentSandboxWriter(t *testing.T
 	if status.RequestedBackend != "host" {
 		t.Fatalf("SetSandboxBackend() effective status = %#v, want fixed process override", status)
 	}
-	if observed := stack.SandboxStatus(); observed.RequestedBackend != "host" || observed.Route != "host" {
+	if observed := stack.ControlStatus().Sandbox(); observed.RequestedBackend != "host" || observed.Route != "host" {
 		t.Fatalf("SandboxStatus() after command = %#v, want fixed process override", observed)
 	}
 	stack.composition.mu.RLock()

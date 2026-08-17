@@ -132,6 +132,9 @@ func readModulePath(path string) (string, error) {
 }
 
 func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
+	if rule, subject, line := localAdapterConcreteHostRule(rel, file, fset, modulePath); rule != "" {
+		return rule, subject, line
+	}
 	if rule, subject, line := surfaceGatewayConsumptionRule(rel, file, fset, modulePath); rule != "" {
 		return rule, subject, line
 	}
@@ -142,6 +145,68 @@ func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modul
 		return rule, subject, line
 	}
 	return "", "", 0
+}
+
+func localAdapterConcreteHostRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
+	if !strings.HasPrefix(rel, "app/gatewayapp/controladapter/local/") ||
+		strings.HasSuffix(rel, "_test.go") || file == nil {
+		return "", "", 0
+	}
+	for _, spec := range file.Imports {
+		path, err := strconv.Unquote(spec.Path.Value)
+		if err == nil && path == modulePath+"/app/gatewayapp" && spec.Name != nil && spec.Name.Name == "." {
+			return "controladapter/local must name gatewayapp imports so concrete Stack use remains enforceable", ". import " + path, fset.Position(spec.Pos()).Line
+		}
+	}
+	gatewayNames := importNames(file, modulePath+"/app/gatewayapp")
+	if len(gatewayNames) == 0 {
+		return "", "", 0
+	}
+	allowedStackPositions := map[token.Pos]bool{}
+	if rel == "app/gatewayapp/controladapter/local/appserver.go" {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name.Name != "NewAppServer" || fn.Type.Params == nil {
+				continue
+			}
+			ast.Inspect(fn.Type.Params, func(node ast.Node) bool {
+				selector, ok := node.(*ast.SelectorExpr)
+				if !ok || selector.Sel.Name != "Stack" {
+					return true
+				}
+				ident, ok := selector.X.(*ast.Ident)
+				if ok && gatewayNames[ident.Name] {
+					allowedStackPositions[selector.Pos()] = true
+				}
+				return true
+			})
+		}
+	}
+	var subject string
+	var line int
+	ast.Inspect(file, func(node ast.Node) bool {
+		if subject != "" {
+			return false
+		}
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok || selector.Sel.Name != "Stack" {
+			return true
+		}
+		if allowedStackPositions[selector.Pos()] {
+			return true
+		}
+		ident, ok := selector.X.(*ast.Ident)
+		if !ok || !gatewayNames[ident.Name] {
+			return true
+		}
+		subject = ident.Name + ".Stack"
+		line = fset.Position(selector.Pos()).Line
+		return false
+	})
+	if subject == "" {
+		return "", "", 0
+	}
+	return "only controladapter/local NewAppServer may receive the concrete gatewayapp Stack; leaf composition uses focused services", subject, line
 }
 
 func surfaceGatewayConsumptionRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {

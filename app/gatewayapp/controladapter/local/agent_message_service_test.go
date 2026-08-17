@@ -157,7 +157,7 @@ func testAgentMessageTargetCloseRace(t *testing.T, host *gatewayapp.Stack, servi
 		if _, err := appserver.CloseSession(ctx, host.Sessions(), current, "concurrent close"); err != nil {
 			return gatewayapp.AgentMessageDelivery{}, err
 		}
-		return host.DeliverAgentMessage(ctx, request)
+		return host.AgentMessageDelivery().Deliver(ctx, request)
 	}
 	assertAgentMessageRaceRejected(t, host, service, target, appserver.Principal{ID: "controller-1"}, "close-race")
 }
@@ -174,7 +174,7 @@ func testAgentMessageTargetHandoffRace(t *testing.T, host *gatewayapp.Stack, ser
 		}); err != nil {
 			return gatewayapp.AgentMessageDelivery{}, err
 		}
-		return host.DeliverAgentMessage(ctx, request)
+		return host.AgentMessageDelivery().Deliver(ctx, request)
 	}
 	assertAgentMessageRaceRejected(t, host, service, target, appserver.Principal{ID: "controller-1"}, "handoff-race")
 }
@@ -197,7 +197,7 @@ func testAgentMessageTargetDetachRace(t *testing.T, host *gatewayapp.Stack, serv
 		}); err != nil {
 			return gatewayapp.AgentMessageDelivery{}, err
 		}
-		return host.DeliverAgentMessage(ctx, request)
+		return host.AgentMessageDelivery().Deliver(ctx, request)
 	}
 	assertAgentMessageRaceRejected(t, host, service, target, appserver.Principal{ID: "participant-1"}, "detach-race")
 }
@@ -242,7 +242,7 @@ func testAgentMessageManagedParentDetachRace(t *testing.T, host *gatewayapp.Stac
 		}); err != nil {
 			return gatewayapp.AgentMessageDelivery{}, err
 		}
-		return host.DeliverAgentMessage(ctx, request)
+		return host.AgentMessageDelivery().Deliver(ctx, request)
 	}
 	assertAgentMessageRaceRejected(t, host, service, target, appserver.Principal{ID: "owner"}, "managed-parent-detach-race")
 }

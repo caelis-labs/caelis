@@ -169,8 +169,9 @@ TUI / Headless / ACP
 `control/appserver` is the transport-neutral product entry point shared by
 in-process and HTTP clients. `app/*` owns the private Control Host composition,
 transport adapters, and concrete components; presentation code never depends
-on that Host implementation. `agent-sdk/*` remains reusable below the product
-Control layer.
+on that Host implementation. The in-process adapter receives the concrete Host
+only at its composition root and injects focused services into leaf
+capabilities. `agent-sdk/*` remains reusable below the product Control layer.
 
 See [docs/architecture.md](docs/architecture.md) for the repository map,
 [docs/agent-sdk-boundary.md](docs/agent-sdk-boundary.md) for the reusable Agent

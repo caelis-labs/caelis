@@ -136,6 +136,8 @@ Document responsibilities are intentionally separate:
   as discovery configuration. Authentication recovery, Agent-default behavior,
   and Registry snapshot maintenance are defined in
   [External ACP Agents](external-acp-agents.md).
+  The configured Agent catalog entry is the canonical read projection consumed
+  by Host adapters; adapters do not mirror its name and description fields.
 - `control/plugin`: Control-owned plugin configuration, manifest discovery,
   identity, marketplace/install resolution, lifecycle mutation, and normalized
   hook, skill, MCP server, and external Agent contributions. Its `Info` view is
@@ -173,6 +175,8 @@ Document responsibilities are intentionally separate:
   any transitional host fields before constructing this read model. Structured
   `SessionUsageTotal` and `SessionUsageByModel` values are likewise the sole
   cumulative Session-usage sources; the public model carries no flat mirrors.
+  Effective per-Session Runtime state and diagnostics selection are canonical
+  Control read inputs here rather than duplicated Host-adapter structs.
 - `control/appserver/wirev1`: the versioned, AppServer-bound HTTP/SSE schema
   bindings, generated types, and strict JSON/Envelope codec. Because the codec
   serializes `control/appserver` domain values directly, it stays with that
@@ -306,10 +310,15 @@ Document responsibilities are intentionally separate:
 - `app/gatewayapp/controladapter`: narrow Host-private, server-side assemblers
   for existing Control semantics. Its `local` subpackage is the only production
   package that consumes the root adapter package directly and assembles the
-  complete in-process AppServer service set. `local` also owns the translation
-  from `gatewayapp` Host views into the root package's focused,
-  principal-sensitive dependency set; the root package does not import the
-  concrete Host. Every other production package
+  complete in-process AppServer service set. `local.NewAppServer` is the sole
+  production composition root that receives a concrete `gatewayapp.Stack`. It
+  translates Host views into focused, principal-sensitive service dependencies;
+  leaf services retain neither the Stack nor the assembler's private union of
+  focused dependencies. Exact model, Agent catalog, Session Runtime, and
+  diagnostics-selection reads use their canonical `control/*` owners, while
+  deliberate Sandbox and Doctor subsets remain named Host-to-Control
+  projections. The root package does not import the concrete Host. Every other
+  production package
   depends on `control/appserver`, a focused Control contract, or the composed
   `local` adapter; the root adapter package is not a product-client API.
   Production `app/*` code does not import `surfaces/*`. Do not add
@@ -395,10 +404,13 @@ concrete Host `gatewayapp.Stack`, and activated Sessions use private
 shared private `runtimeComposition` implementation remain Host-owned lifecycle
 details rather than stable package contracts. `Stack` owns its composition as a
 named private field; `runtimeComposition` exports no state, so only deliberate
-Host methods and immutable views cross the package boundary. Architecture and
-structural gates enforce the private adapter consumer boundary, reject anonymous
-Host composition, and prevent Registry, Runtime instance, and assembly types
-from retaining a concrete Host `Stack`.
+focused service getters and immutable views cross the package boundary. Direct
+Stack mirrors of Model, Agent, Status, Runtime acquisition, workspace,
+preparation, and Agent-message service methods are not parallel entry points.
+Architecture and structural gates enforce the private adapter consumer
+boundary, reject concrete Stack use in local leaf adapters and anonymous Host
+composition, freeze deliberate public Stack methods, and prevent Registry,
+Runtime instance, and assembly types from retaining a concrete Host `Stack`.
 
 ## SDK Boundary
 

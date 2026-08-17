@@ -42,7 +42,7 @@ func (s *Stack) setSandboxBackendAtRevision(ctx context.Context, backend string,
 		return SandboxStatus{}, currentRevision, configurationRejectedError(errorcode.Wrap(errorcode.FailedPrecondition, err.Error(), err))
 	}
 	if securityPosture.RequiredSandboxBackend != "" {
-		return s.SandboxStatus(), currentRevision, nil
+		return s.runtimeProjection().SandboxStatus(), currentRevision, nil
 	}
 	nextCanonical := cloneSandboxConfig(doc.Sandbox)
 	nextCanonical.RequestedType = normalized
@@ -230,10 +230,10 @@ func (s *Stack) PreflightSandbox(ctx context.Context, allowNonElevatedRepair boo
 	}
 	preflight, ok := snapshot.exec.(sandbox.PreflightRuntime)
 	if !ok {
-		return s.SandboxStatus(), nil
+		return s.runtimeProjection().SandboxStatus(), nil
 	}
 	err = preflight.Preflight(ctx, sandbox.PreflightOptions{AllowNonElevatedRepair: allowNonElevatedRepair})
-	return s.SandboxStatus(), err
+	return s.runtimeProjection().SandboxStatus(), err
 }
 
 func normalizeSandboxBackend(backend string) (string, error) {

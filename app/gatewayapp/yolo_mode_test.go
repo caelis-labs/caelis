@@ -34,12 +34,12 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 	if stack.composition.sandbox.RequestedType != "host" {
 		t.Fatalf("sandbox requested type = %q, want host", stack.composition.sandbox.RequestedType)
 	}
-	status := stack.SandboxStatus()
+	status := stack.ControlStatus().Sandbox()
 	if !status.FullAccessMode || status.Route != "host" || status.ResolvedBackend != "host" || !strings.Contains(status.SecuritySummary, "YOLO") {
 		t.Fatalf("SandboxStatus() = %#v, want visible YOLO Host status", status)
 	}
 
-	report, err := stack.Doctor(context.Background(), DoctorRequest{})
+	report, err := stack.Status().Doctor(context.Background(), DoctorRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,14 +64,14 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	runtimeState, err := stack.SessionRuntimeState(context.Background(), active.SessionRef)
+	runtimeState, err := stack.ControlStatus().SessionRuntimeState(context.Background(), active.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if runtimeState.SessionMode != dangerouslySkipPermissionsModeLabel || runtimeState.PolicyProfile != presets.ModeDangerFullAccess {
 		t.Fatalf("SessionRuntimeState() = %#v, want process-owned YOLO display", runtimeState)
 	}
-	report, err = stack.Doctor(context.Background(), DoctorRequest{SessionRef: active.SessionRef})
+	report, err = stack.Status().Doctor(context.Background(), DoctorRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 			t.Fatalf("%s session mode = %#v, %v; want process posture rejection", name, result, err)
 		}
 	}
-	runtimeState, err = stack.SessionRuntimeState(context.Background(), active.SessionRef)
+	runtimeState, err = stack.ControlStatus().SessionRuntimeState(context.Background(), active.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestDangerouslySkipPermissionsIsNotPersisted(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reloaded.Close() })
-	if reloaded.composition.runtime.DangerouslySkipPermissions || reloaded.composition.runtime.PolicyProfile != presets.ModeWorkspaceWrite || reloaded.SandboxStatus().FullAccessMode {
-		t.Fatalf("reloaded runtime retained process-only YOLO mode: runtime=%#v status=%#v", reloaded.composition.runtime, reloaded.SandboxStatus())
+	if reloaded.composition.runtime.DangerouslySkipPermissions || reloaded.composition.runtime.PolicyProfile != presets.ModeWorkspaceWrite || reloaded.ControlStatus().Sandbox().FullAccessMode {
+		t.Fatalf("reloaded runtime retained process-only YOLO mode: runtime=%#v status=%#v", reloaded.composition.runtime, reloaded.ControlStatus().Sandbox())
 	}
 }

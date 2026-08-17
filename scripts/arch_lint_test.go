@@ -369,6 +369,87 @@ func consume(event kernel.Event) string {
 	}
 }
 
+func TestSemanticBoundaryRuleRejectsConcreteHostInLocalLeaf(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/caelis-labs/caelis"
+	source := `package local
+
+import "github.com/caelis-labs/caelis/app/gatewayapp"
+
+type StatusService struct { host *gatewayapp.Stack }
+`
+	rule, subject, _ := semanticRuleForSource(t, "app/gatewayapp/controladapter/local/status_service.go", source, modulePath)
+	if !strings.Contains(rule, "only controladapter/local NewAppServer") || subject != "gatewayapp.Stack" {
+		t.Fatalf("semantic rule = (%q, %q), want concrete Host leaf rejection", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleAllowsConcreteHostAtLocalCompositionRoot(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/caelis-labs/caelis"
+	source := `package local
+
+import "github.com/caelis-labs/caelis/app/gatewayapp"
+
+func NewAppServer(host *gatewayapp.Stack) {}
+`
+	rule, subject, _ := semanticRuleForSource(t, "app/gatewayapp/controladapter/local/appserver.go", source, modulePath)
+	if rule != "" || subject != "" {
+		t.Fatalf("semantic rule = (%q, %q), want local composition root allowed", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleRejectsOtherConcreteHostUseInLocalCompositionFile(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/caelis-labs/caelis"
+	source := `package local
+
+import "github.com/caelis-labs/caelis/app/gatewayapp"
+
+func NewAppServer(host *gatewayapp.Stack) {}
+func retain(host *gatewayapp.Stack) {}
+`
+	rule, subject, _ := semanticRuleForSource(t, "app/gatewayapp/controladapter/local/appserver.go", source, modulePath)
+	if !strings.Contains(rule, "only controladapter/local NewAppServer") || subject != "gatewayapp.Stack" {
+		t.Fatalf("semantic rule = (%q, %q), want secondary concrete Host use rejected", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleRejectsLocalGatewayDotImport(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/caelis-labs/caelis"
+	source := `package local
+
+import . "github.com/caelis-labs/caelis/app/gatewayapp"
+
+func retain(host *Stack) {}
+`
+	rule, subject, _ := semanticRuleForSource(t, "app/gatewayapp/controladapter/local/status_service.go", source, modulePath)
+	if !strings.Contains(rule, "must name gatewayapp imports") || !strings.HasPrefix(subject, ". import") {
+		t.Fatalf("semantic rule = (%q, %q), want gatewayapp dot import rejection", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleAllowsFocusedGatewayProjectionInLocalAdapter(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/caelis-labs/caelis"
+	source := `package local
+
+import "github.com/caelis-labs/caelis/app/gatewayapp"
+
+func project(view *gatewayapp.ControlRuntimeView) {}
+`
+	rule, subject, _ := semanticRuleForSource(t, "app/gatewayapp/controladapter/local/local_stack.go", source, modulePath)
+	if rule != "" || subject != "" {
+		t.Fatalf("semantic rule = (%q, %q), want focused gateway projection allowed", rule, subject)
+	}
+}
+
 func TestSemanticBoundaryRuleRejectsDirectEventProtocolAliasReads(t *testing.T) {
 	t.Parallel()
 

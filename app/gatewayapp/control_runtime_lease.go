@@ -39,19 +39,6 @@ func (s *Stack) ControlRuntimes() ControlRuntimeService {
 	return ControlRuntimeService{registry: s.sessionRuntimes, sessions: s.composition.sessions}
 }
 
-// AcquireControlRuntime authorizes and resolves one Session Runtime snapshot.
-// activate=false observes a loaded fixed Runtime or builds a disposable current
-// workspace composition without retaining it.
-func (s *Stack) AcquireControlRuntime(
-	ctx context.Context,
-	principal appserver.Principal,
-	action appserver.Action,
-	sessionID string,
-	activate bool,
-) (*ControlRuntimeLease, error) {
-	return s.ControlRuntimes().Acquire(ctx, principal, action, sessionID, activate)
-}
-
 // Acquire authorizes and resolves one Session Runtime snapshot.
 func (s ControlRuntimeService) Acquire(
 	ctx context.Context,

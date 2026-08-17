@@ -47,7 +47,7 @@ func TestDoctorReportsObservedLegacySessionParticipantDrop(t *testing.T) {
 		},
 	}
 
-	report, err := stack.Doctor(context.Background(), DoctorRequest{})
+	report, err := stack.Status().Doctor(context.Background(), DoctorRequest{})
 	if err != nil {
 		t.Fatalf("Doctor() error = %v", err)
 	}
@@ -104,7 +104,7 @@ func TestDoctorReportsLossyLegacyMigrationWithoutLeakingRawConfig(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	report, err := stack.Doctor(ctx, DoctorRequest{})
+	report, err := stack.Status().Doctor(ctx, DoctorRequest{})
 	if err != nil {
 		t.Fatalf("Doctor() error = %v", err)
 	}
@@ -189,7 +189,7 @@ func TestDoctorReportFindsAPIKeyThroughCredentialReferenceAfterReload(t *testing
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
 	}
 
-	report, err := reloaded.Doctor(ctx, DoctorRequest{
+	report, err := reloaded.Status().Doctor(ctx, DoctorRequest{
 		SessionID: session.SessionID,
 	})
 	if err != nil {
@@ -239,7 +239,7 @@ func TestDoctorReportUsesConfiguredModeWithoutSession(t *testing.T) {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 
-	report, err := stack.Doctor(ctx, DoctorRequest{})
+	report, err := stack.Status().Doctor(ctx, DoctorRequest{})
 	if err != nil {
 		t.Fatalf("Doctor() error = %v", err)
 	}

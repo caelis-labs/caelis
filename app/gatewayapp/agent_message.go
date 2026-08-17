@@ -46,12 +46,6 @@ func (s *Stack) AgentMessageDelivery() AgentMessageDeliveryService {
 	return AgentMessageDeliveryService{composition: &s.composition, registry: s.sessionRuntimes}
 }
 
-// DeliverAgentMessage activates the target Session Runtime when necessary and
-// delegates message ownership to its Control Gateway.
-func (s *Stack) DeliverAgentMessage(ctx context.Context, request DeliverAgentMessageRequest) (AgentMessageDelivery, error) {
-	return s.AgentMessageDelivery().Deliver(ctx, request)
-}
-
 // Deliver activates the target Session Runtime when necessary and delegates
 // message ownership to its Control Gateway.
 func (s AgentMessageDeliveryService) Deliver(ctx context.Context, request DeliverAgentMessageRequest) (AgentMessageDelivery, error) {

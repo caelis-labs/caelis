@@ -40,7 +40,7 @@ func TestDisconnectACPRemovesSiblingProfilesAndRetainsInstallation(t *testing.T)
 		t.Fatal(err)
 	}
 
-	candidates, err := stack.DisconnectCandidates(context.Background())
+	candidates, err := stack.Agents().DisconnectCandidates(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestDisconnectACPDoesNotScanDurableSessionBindings(t *testing.T) {
 }
 
 func disconnectACPCommand(ctx context.Context, stack *Stack, agentID string) (appserver.CommandResult, error) {
-	snapshot, err := stack.DisconnectCandidatesSnapshot(ctx)
+	snapshot, err := stack.Agents().DisconnectCandidatesSnapshot(ctx)
 	if err != nil {
 		return appserver.CommandResult{}, err
 	}

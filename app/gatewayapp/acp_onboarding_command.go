@@ -399,10 +399,6 @@ func (s *Stack) ACPPreparationReads() ACPPreparationReadService {
 	return ACPPreparationReadService{store: s.acpPreparations}
 }
 
-func (s *Stack) ACPPreparation(ctx context.Context, principalID string, ref string) (controlagents.ACPPreparation, error) {
-	return s.ACPPreparationReads().Preparation(ctx, principalID, ref)
-}
-
 // Preparation loads one preparation owned by the bound principal.
 func (s ACPPreparationReadService) Preparation(ctx context.Context, principalID string, ref string) (controlagents.ACPPreparation, error) {
 	preparation, err := ownedACPPreparation(s.store, ctx, principalID, ref, "")

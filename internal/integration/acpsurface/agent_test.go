@@ -542,7 +542,7 @@ func TestNewFromClientsSetConfigOptionUsesNewSessionCWDWorkspace(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetSessionConfigOption(tone) error = %v", err)
 	}
-	state, err := stack.SessionRuntimeState(ctx, session.SessionRef{
+	state, err := stack.ControlStatus().SessionRuntimeState(ctx, session.SessionRef{
 		AppName:      stack.AppName(),
 		UserID:       stack.UserID(),
 		SessionID:    sessionResp.SessionID,
@@ -616,7 +616,7 @@ func TestNewFromClientsSetConfigOptionRoutesAdvertisedApprovalMode(t *testing.T)
 	if got := requiredConfigOptionString(t, resumed.ConfigOptions, "mode"); got != "manual" {
 		t.Fatalf("ResumeSession() mode = %q, want manual", got)
 	}
-	state, err := stack.SessionRuntimeState(ctx, session.SessionRef{
+	state, err := stack.ControlStatus().SessionRuntimeState(ctx, session.SessionRef{
 		AppName: stack.AppName(), UserID: stack.UserID(), SessionID: created.SessionID, WorkspaceKey: workspace,
 	})
 	if err != nil {

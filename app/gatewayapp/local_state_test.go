@@ -57,7 +57,7 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 		t.Fatalf("ConfigureSessionMode(manual) = %#v, %v", modeResult, err)
 	}
 
-	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
+	state, err := stack.ControlStatus().SessionRuntimeState(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
 	}
@@ -84,7 +84,7 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 		t.Fatalf("ConfigureSessionMode(auto-review) = %#v, %v", modeResult, err)
 	}
 
-	state, err = stack.SessionRuntimeState(ctx, activeSession.SessionRef)
+	state, err = stack.ControlStatus().SessionRuntimeState(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() after reset error = %v", err)
 	}
@@ -110,7 +110,7 @@ func TestStackSessionRuntimeStateRejectsLegacySessionState(t *testing.T) {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
 
-	_, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
+	_, err := stack.ControlStatus().SessionRuntimeState(ctx, activeSession.SessionRef)
 	if !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
 		t.Fatalf("SessionRuntimeState() error = %v, want ErrUnsupportedLegacyFormat", err)
 	}
@@ -174,7 +174,7 @@ func TestNewLocalStackUsesRuntimeConfigApprovalAndPolicyProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	state, err := stack.SessionRuntimeState(context.Background(), session.SessionRef)
+	state, err := stack.ControlStatus().SessionRuntimeState(context.Background(), session.SessionRef)
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
 	}
@@ -450,14 +450,14 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 	}
 	resumed := reconnected.State
 	resumedRef := session.SessionRef{SessionID: resumed.SessionID}
-	state, err := reloaded.SessionRuntimeState(ctx, resumedRef)
+	state, err := reloaded.ControlStatus().SessionRuntimeState(ctx, resumedRef)
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
 	}
 	if state.ModelAlias != "xai/grok-4.5" {
 		t.Fatalf("resumed ModelAlias = %q, want xai/grok-4.5", state.ModelAlias)
 	}
-	usage, err := reloaded.SessionUsageSnapshot(ctx, resumedRef, state.ModelAlias)
+	usage, err := reloaded.Models().UsageSnapshot(ctx, resumedRef, state.ModelAlias)
 	if err != nil {
 		t.Fatalf("SessionUsageSnapshot() error = %v", err)
 	}
@@ -507,7 +507,7 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	if err != nil || result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("SetSandboxBackend() = %#v, %v", result, err)
 	}
-	status := stack.SandboxStatus()
+	status := stack.ControlStatus().Sandbox()
 	if status.RequestedBackend != "host" {
 		t.Fatalf("requested backend = %q, want host", status.RequestedBackend)
 	}
@@ -527,7 +527,7 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
 	}
-	reloadedStatus := reloaded.SandboxStatus()
+	reloadedStatus := reloaded.ControlStatus().Sandbox()
 	if got := reloadedStatus.RequestedBackend; got != "host" {
 		t.Fatalf("SandboxStatus().RequestedBackend = %q, want host", got)
 	}
@@ -563,7 +563,7 @@ func TestStackDeleteModelRemovesConfiguredAlias(t *testing.T) {
 		t.Fatalf("DeleteModel() error = %v", err)
 	}
 
-	aliases, err := stack.ListModelAliases(ctx, activeSession.SessionRef)
+	aliases, err := stack.Models().ListAliases(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("ListModelAliases() error = %v", err)
 	}
@@ -572,7 +572,7 @@ func TestStackDeleteModelRemovesConfiguredAlias(t *testing.T) {
 			t.Fatalf("deleted alias %q still present in %#v", alias, aliases)
 		}
 	}
-	if got := stack.DefaultModelAlias(); got == alias {
+	if got := stack.Models().DefaultAlias(); got == alias {
 		t.Fatalf("default alias = %q, want deleted alias removed", got)
 	}
 }
@@ -734,7 +734,7 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	if err != nil || result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel(stable id) = %#v, %v", result, err)
 	}
-	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
+	state, err := stack.ControlStatus().SessionRuntimeState(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
 	}
@@ -778,17 +778,17 @@ func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
 	if err := stack.deleteTestHostModel(ctx, session.SessionRef{}, alias); err != nil {
 		t.Fatalf("DeleteModel() error = %v", err)
 	}
-	if got := stack.DefaultModelAlias(); got != "" {
+	if got := stack.Models().DefaultAlias(); got != "" {
 		t.Fatalf("DefaultModelAlias() = %q, want empty", got)
 	}
-	aliases, err := stack.ListModelAliases(ctx, activeSession.SessionRef)
+	aliases, err := stack.Models().ListAliases(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("ListModelAliases() error = %v", err)
 	}
 	if len(aliases) != 0 {
 		t.Fatalf("ListModelAliases() = %#v, want empty", aliases)
 	}
-	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
+	state, err := stack.ControlStatus().SessionRuntimeState(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
 	}
@@ -810,7 +810,7 @@ func TestSessionRuntimeStateIgnoresStaleModelAliasOutsideConfig(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
-	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
+	state, err := stack.ControlStatus().SessionRuntimeState(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
 	}
@@ -878,7 +878,7 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession(reloaded) error = %v", err)
 	}
-	aliases, err := reloaded.ListModelAliases(ctx, reloadedSession.SessionRef)
+	aliases, err := reloaded.Models().ListAliases(ctx, reloadedSession.SessionRef)
 	if err != nil {
 		t.Fatalf("ListModelAliases(reloaded) error = %v", err)
 	}
@@ -891,7 +891,7 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	if !containsStringFold(aliases, "deepseek/deepseek-v4-pro") {
 		t.Fatalf("reloaded aliases = %#v, missing deepseek/deepseek-v4-pro", aliases)
 	}
-	if got := reloaded.DefaultModelAlias(); got != "minimax/minimax-m2.7-highspeed" {
+	if got := reloaded.Models().DefaultAlias(); got != "minimax/minimax-m2.7-highspeed" {
 		t.Fatalf("DefaultModelAlias(reloaded) = %q, want minimax/minimax-m2.7-highspeed", got)
 	}
 	doc, err := LoadAppConfig(root)
@@ -935,7 +935,7 @@ func TestNewLocalStackAllowsEmptyInitialModelConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	if got := stack.DefaultModelAlias(); got != "" {
+	if got := stack.Models().DefaultAlias(); got != "" {
 		t.Fatalf("DefaultModelAlias() = %q, want empty", got)
 	}
 	assertSandboxNetworkEnabledDefault(t, stack)
@@ -1234,7 +1234,7 @@ func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) 
 		},
 	})
 
-	usage, err := stack.SessionUsageSnapshot(ctx, activeSession.SessionRef, "ollama/llama3")
+	usage, err := stack.Models().UsageSnapshot(ctx, activeSession.SessionRef, "ollama/llama3")
 	if err != nil {
 		t.Fatalf("SessionUsageSnapshot() error = %v", err)
 	}
@@ -1293,7 +1293,7 @@ func TestSessionUsageSnapshotUsesActiveMainModelBaseline(t *testing.T) {
 	appendUsage("main-usage", "openai-codex", "gpt-main", 80_000)
 	appendUsage("guardian-usage", "deepseek", "guardian", 25_941)
 
-	usage, err := stack.SessionUsageSnapshot(ctx, activeSession.SessionRef, "openai-codex/gpt-main")
+	usage, err := stack.Models().UsageSnapshot(ctx, activeSession.SessionRef, "openai-codex/gpt-main")
 	if err != nil {
 		t.Fatalf("SessionUsageSnapshot() error = %v", err)
 	}

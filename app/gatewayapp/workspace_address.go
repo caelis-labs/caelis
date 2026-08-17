@@ -20,14 +20,6 @@ func (s *Stack) WorkspaceReads() WorkspaceReadService {
 	return WorkspaceReadService{composition: &s.composition, registry: s.sessionRuntimes}
 }
 
-// ResolveWorkspaceAddress canonicalizes a client workspace address and
-// rejects aliases that conflict with workspaces already known by this Host.
-// Read-only projections use this without retaining a Session Runtime or
-// registering another lifecycle authority.
-func (s *Stack) ResolveWorkspaceAddress(requested session.WorkspaceRef) (session.WorkspaceRef, error) {
-	return s.WorkspaceReads().Resolve(requested)
-}
-
 // Resolve canonicalizes one client workspace address and validates that it
 // does not conflict with the Host registry's durable identity map.
 func (s WorkspaceReadService) Resolve(requested session.WorkspaceRef) (session.WorkspaceRef, error) {

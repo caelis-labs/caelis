@@ -66,7 +66,7 @@ func (s *Stack) runSandboxLifecycleCommand(
 		return status, doc.ConfigurationRevision, true, errors.Join(effectErr, target.Close())
 	}
 	if target.NoOp {
-		return s.SandboxStatus(), doc.ConfigurationRevision, false, nil
+		return s.runtimeProjection().SandboxStatus(), doc.ConfigurationRevision, false, nil
 	}
 	if err := ctx.Err(); err != nil {
 		closeErr := target.Close()
@@ -122,7 +122,7 @@ func (s *Stack) sandboxLifecycleSnapshot() (sandboxLifecycleSnapshot, error) {
 
 func (s *Stack) sandboxLifecycleStatus(target sandbox.LifecycleTarget) SandboxStatus {
 	if target.Current {
-		return s.SandboxStatus()
+		return s.runtimeProjection().SandboxStatus()
 	}
 	return sandboxStatusFromRuntime(sandboxConfigFromPort(target.Config), target.Runtime)
 }

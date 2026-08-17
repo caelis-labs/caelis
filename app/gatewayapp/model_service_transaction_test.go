@@ -171,12 +171,12 @@ func TestHasReusableProviderAuthRejectsLegacyCredential(t *testing.T) {
 	if _, err := stack.connectTestModel(configured); err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	if !stack.HasReusableProviderAuth(context.Background(), "deepseek", baseURL) {
+	if !stack.Models().HasReusableAuth(context.Background(), "deepseek", baseURL) {
 		t.Fatal("HasReusableProviderAuth() = false for valid stored credential")
 	}
 
 	writeLegacyEnvironmentCredentialForTest(t, stack.composition.storeDir, ref, "DEEPSEEK_API_KEY")
-	if stack.HasReusableProviderAuth(context.Background(), "deepseek", baseURL) {
+	if stack.Models().HasReusableAuth(context.Background(), "deepseek", baseURL) {
 		t.Fatal("HasReusableProviderAuth() = true for invalid legacy credential")
 	}
 }
