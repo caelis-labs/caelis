@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
@@ -22,7 +23,7 @@ const (
 	acpConfigReasoningID = "reasoning_effort"
 )
 
-type gatewayACPSurface struct {
+type gatewayPresentationSource struct {
 	sessions           session.Reader
 	appName            string
 	userID             string
@@ -37,7 +38,7 @@ type gatewayACPSurface struct {
 	fallbackConfig     acp.ConfigProvider
 }
 
-type gatewayACPSurfaceDeps struct {
+type gatewayPresentationSourceDeps struct {
 	sessions           session.Reader
 	appName            string
 	userID             string
@@ -49,8 +50,8 @@ type gatewayACPSurfaceDeps struct {
 	listAgentsFn       func() []ACPAgentInfo
 }
 
-func newGatewayACPSurface(deps gatewayACPSurfaceDeps, fallbackModes acp.ModeProvider, useFallbackModes bool, fallbackConfig acp.ConfigProvider) gatewayACPSurface {
-	return gatewayACPSurface{
+func newGatewayPresentationSource(deps gatewayPresentationSourceDeps, fallbackModes acp.ModeProvider, useFallbackModes bool, fallbackConfig acp.ConfigProvider) gatewayPresentationSource {
+	return gatewayPresentationSource{
 		sessions:           deps.sessions,
 		appName:            deps.appName,
 		userID:             deps.userID,
@@ -66,12 +67,13 @@ func newGatewayACPSurface(deps gatewayACPSurfaceDeps, fallbackModes acp.ModeProv
 	}
 }
 
-func (p gatewayACPSurface) SessionModes(ctx context.Context, session session.Session) (*acp.SessionModeState, error) {
+func (p gatewayPresentationSource) SessionModes(ctx context.Context, session session.Session) (*appserver.PresentationModeState, error) {
 	if p.fullAccessMode() {
-		return &acp.SessionModeState{CurrentModeID: dangerouslySkipPermissionsModeLabel}, nil
+		return &appserver.PresentationModeState{CurrentModeID: dangerouslySkipPermissionsModeLabel}, nil
 	}
 	if p.useFallbackModes {
-		return p.fallbackModes.SessionModes(ctx, session)
+		modes, err := p.fallbackModes.SessionModes(ctx, session)
+		return presentationModesFromACP(modes), err
 	}
 	if p.runtimeStateFn == nil {
 		return nil, fmt.Errorf("gatewayapp: Session Runtime state is unavailable")
@@ -80,17 +82,17 @@ func (p gatewayACPSurface) SessionModes(ctx context.Context, session session.Ses
 	if err != nil {
 		return nil, err
 	}
-	return &acp.SessionModeState{
+	return &appserver.PresentationModeState{
 		CurrentModeID: normalizeSessionModeOrDefault(state.SessionMode),
-		AvailableModes: []acp.SessionMode{
+		AvailableModes: []appserver.PresentationMode{
 			{ID: "auto-review", Name: "Auto Review", Description: "Use automatic AI approval review for sensitive requests."},
 			{ID: "manual", Name: "Manual", Description: "Prompt the client for sensitive approval requests."},
 		},
 	}, nil
 }
 
-func (p gatewayACPSurface) SessionConfigOptions(ctx context.Context, session session.Session) ([]acp.SessionConfigOption, error) {
-	options := []acp.SessionConfigOption{}
+func (p gatewayPresentationSource) SessionConfigOptions(ctx context.Context, session session.Session) ([]appserver.PresentationConfigOption, error) {
+	options := []appserver.PresentationConfigOption{}
 	modeOption, err := p.modeConfigOption(ctx, session)
 	if err != nil {
 		return nil, err
@@ -114,12 +116,12 @@ func (p gatewayACPSurface) SessionConfigOptions(ctx context.Context, session ses
 					strings.EqualFold(strings.TrimSpace(option.Category), acpConfigModeID)
 			})
 		}
-		options = append(options, fallback...)
+		options = append(options, presentationConfigOptionsFromACP(fallback)...)
 	}
 	return options, nil
 }
 
-func (p gatewayACPSurface) SessionModels(ctx context.Context, session session.Session) (*acp.SessionModelState, error) {
+func (p gatewayPresentationSource) SessionModels(ctx context.Context, session session.Session) (*appserver.PresentationModelState, error) {
 	snapshot := p.modelSnapshot()
 	if len(snapshot.Configs) == 0 {
 		return nil, nil
@@ -131,21 +133,21 @@ func (p gatewayACPSurface) SessionModels(ctx context.Context, session session.Se
 	if !ok {
 		return nil, nil
 	}
-	models := make([]acp.ModelInfo, 0, len(snapshot.Configs))
+	models := make([]appserver.PresentationModel, 0, len(snapshot.Configs))
 	for _, cfg := range snapshot.Configs {
-		models = append(models, acp.ModelInfo{
-			ModelID:     cfg.ID,
+		models = append(models, appserver.PresentationModel{
+			ID:          cfg.ID,
 			Name:        cfg.Alias,
 			Description: modelDescription(cfg),
 		})
 	}
-	return &acp.SessionModelState{
+	return &appserver.PresentationModelState{
 		CurrentModelID:  current,
 		AvailableModels: models,
 	}, nil
 }
 
-func (p gatewayACPSurface) PromptCapabilities(context.Context) (acp.PromptCapabilities, error) {
+func (p gatewayPresentationSource) PromptCapabilities(context.Context) (appserver.PresentationCapabilities, error) {
 	image := false
 	for _, cfg := range p.modelSnapshot().Configs {
 		if modelConfigSupportsImages(cfg) {
@@ -153,14 +155,14 @@ func (p gatewayACPSurface) PromptCapabilities(context.Context) (acp.PromptCapabi
 			break
 		}
 	}
-	return acp.PromptCapabilities{
+	return appserver.PresentationCapabilities{
 		Audio:           false,
 		EmbeddedContext: false,
 		Image:           image,
 	}, nil
 }
 
-func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID string) ([]acp.AvailableCommand, error) {
+func (p gatewayPresentationSource) AvailableCommands(ctx context.Context, sessionID string) ([]appserver.PresentationCommand, error) {
 	var bindingStatus agentbinding.Status
 	boundProfiles := map[string]agentbinding.HandleStatus{}
 	if p.bindingStatusFn != nil {
@@ -171,11 +173,11 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 			}
 		}
 	}
-	commands := make([]acp.AvailableCommand, 0, len(controlprompt.DefaultACPSpecs()))
+	commands := make([]appserver.PresentationCommand, 0, len(controlprompt.DefaultACPSpecs()))
 	seen := map[string]struct{}{}
 	for _, name := range agentbinding.ProjectBoundDirectNames(controlprompt.DefaultACPNames(), bindingStatus) {
 		spec, known := controlprompt.LookupACP(name)
-		cmd := acp.AvailableCommand{
+		cmd := appserver.PresentationCommand{
 			Name: name,
 		}
 		if known {
@@ -213,7 +215,7 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 					continue
 				}
 				agent, _, _ := controlagents.ParseRunName(name)
-				commands = append(commands, acp.AvailableCommand{
+				commands = append(commands, appserver.PresentationCommand{
 					Name:        name,
 					Description: "Continue the " + agent + " Agent run",
 					Input:       commandInput("prompt"),
@@ -247,7 +249,7 @@ func (p gatewayACPSurface) AvailableCommands(ctx context.Context, sessionID stri
 					if _, exists := seen[name]; exists {
 						continue
 					}
-					commands = append(commands, acp.AvailableCommand{Name: name, Description: strings.TrimSpace(command.Description), Input: commandInput("prompt")})
+					commands = append(commands, appserver.PresentationCommand{Name: name, Description: strings.TrimSpace(command.Description), Input: commandInput("prompt")})
 					seen[name] = struct{}{}
 				}
 			}
@@ -271,15 +273,15 @@ func availableProfileDescription(profile agentbinding.HandleStatus) string {
 	return description + " · " + target
 }
 
-func (p gatewayACPSurface) modeConfigOption(ctx context.Context, session session.Session) (acp.SessionConfigOption, error) {
+func (p gatewayPresentationSource) modeConfigOption(ctx context.Context, session session.Session) (appserver.PresentationConfigOption, error) {
 	modes, err := p.SessionModes(ctx, session)
 	if err != nil {
-		return acp.SessionConfigOption{}, err
+		return appserver.PresentationConfigOption{}, err
 	}
 	if modes == nil || len(modes.AvailableModes) == 0 {
-		return acp.SessionConfigOption{}, nil
+		return appserver.PresentationConfigOption{}, nil
 	}
-	return acp.SessionConfigOption{
+	return appserver.PresentationConfigOption{
 		Type:         "select",
 		ID:           acpConfigModeID,
 		Name:         "Approval Mode",
@@ -290,7 +292,7 @@ func (p gatewayACPSurface) modeConfigOption(ctx context.Context, session session
 	}, nil
 }
 
-func (p gatewayACPSurface) modelConfigOptions(ctx context.Context, session session.Session) ([]acp.SessionConfigOption, error) {
+func (p gatewayPresentationSource) modelConfigOptions(ctx context.Context, session session.Session) ([]appserver.PresentationConfigOption, error) {
 	snapshot := p.modelSnapshot()
 	if len(snapshot.Configs) == 0 {
 		return nil, nil
@@ -302,7 +304,7 @@ func (p gatewayACPSurface) modelConfigOptions(ctx context.Context, session sessi
 	if !ok {
 		return nil, nil
 	}
-	options := []acp.SessionConfigOption{{
+	options := []appserver.PresentationConfigOption{{
 		Type:         "select",
 		ID:           acpConfigModelID,
 		Name:         "Model",
@@ -313,7 +315,7 @@ func (p gatewayACPSurface) modelConfigOptions(ctx context.Context, session sessi
 	}}
 	reasoningLevels := reasoningLevelsForACPModel(cfg)
 	if len(reasoningLevels) > 0 {
-		options = append(options, acp.SessionConfigOption{
+		options = append(options, appserver.PresentationConfigOption{
 			Type:         "select",
 			ID:           acpConfigReasoningID,
 			Name:         "Reasoning Effort",
@@ -326,7 +328,7 @@ func (p gatewayACPSurface) modelConfigOptions(ctx context.Context, session sessi
 	return options, nil
 }
 
-func (p gatewayACPSurface) currentModelConfig(ctx context.Context, session session.Session) (string, ModelConfig, bool, error) {
+func (p gatewayPresentationSource) currentModelConfig(ctx context.Context, session session.Session) (string, ModelConfig, bool, error) {
 	snapshot := p.modelSnapshot()
 	if len(snapshot.Configs) == 0 {
 		return "", ModelConfig{}, false, nil
@@ -346,7 +348,7 @@ func (p gatewayACPSurface) currentModelConfig(ctx context.Context, session sessi
 	return cfg.ID, cfg, true, nil
 }
 
-func (p gatewayACPSurface) currentReasoningEffort(ctx context.Context, session session.Session, cfg ModelConfig, levels []string) string {
+func (p gatewayPresentationSource) currentReasoningEffort(ctx context.Context, session session.Session, cfg ModelConfig, levels []string) string {
 	if p.runtimeStateFn != nil {
 		state, err := p.runtimeStateFn(ctx, session.SessionRef)
 		if err == nil {
@@ -370,7 +372,7 @@ func (p gatewayACPSurface) currentReasoningEffort(ctx context.Context, session s
 	return ""
 }
 
-func (p gatewayACPSurface) session(ctx context.Context, sessionID string) (session.Session, error) {
+func (p gatewayPresentationSource) session(ctx context.Context, sessionID string) (session.Session, error) {
 	if p.sessions == nil {
 		return session.Session{}, fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
@@ -382,7 +384,7 @@ func (p gatewayACPSurface) session(ctx context.Context, sessionID string) (sessi
 	return p.sessions.Session(ctx, ref)
 }
 
-func (p gatewayACPSurface) sessionRef(sessionID string) session.SessionRef {
+func (p gatewayPresentationSource) sessionRef(sessionID string) session.SessionRef {
 	appName := "caelis"
 	userID := "acp"
 	appName = firstNonEmpty(strings.TrimSpace(p.appName), appName)
@@ -394,35 +396,35 @@ func (p gatewayACPSurface) sessionRef(sessionID string) session.SessionRef {
 	}
 }
 
-func (p gatewayACPSurface) modelSnapshot() persistedModelConfig {
+func (p gatewayPresentationSource) modelSnapshot() persistedModelConfig {
 	if p.modelSnapshotFn == nil {
 		return persistedModelConfig{}
 	}
 	return p.modelSnapshotFn()
 }
 
-func (p gatewayACPSurface) fullAccessMode() bool {
+func (p gatewayPresentationSource) fullAccessMode() bool {
 	return p.fullAccessModeFn != nil && p.fullAccessModeFn()
 }
 
-func (p gatewayACPSurface) controllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
+func (p gatewayPresentationSource) controllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
 	if p.controllerStatusFn == nil {
 		return controller.ControllerStatus{}, false, nil
 	}
 	return p.controllerStatusFn(ctx, ref)
 }
 
-func (p gatewayACPSurface) listAgents() []ACPAgentInfo {
+func (p gatewayPresentationSource) listAgents() []ACPAgentInfo {
 	if p.listAgentsFn == nil {
 		return nil
 	}
 	return p.listAgentsFn()
 }
 
-func modeSelectOptions(modes []acp.SessionMode) []acp.SessionConfigSelectOption {
-	options := make([]acp.SessionConfigSelectOption, 0, len(modes))
+func modeSelectOptions(modes []appserver.PresentationMode) []appserver.PresentationSelectOption {
+	options := make([]appserver.PresentationSelectOption, 0, len(modes))
 	for _, mode := range modes {
-		options = append(options, acp.SessionConfigSelectOption{
+		options = append(options, appserver.PresentationSelectOption{
 			Value:       mode.ID,
 			Name:        mode.Name,
 			Description: mode.Description,
@@ -431,10 +433,10 @@ func modeSelectOptions(modes []acp.SessionMode) []acp.SessionConfigSelectOption 
 	return options
 }
 
-func modelSelectOptions(configs []ModelConfig) []acp.SessionConfigSelectOption {
-	options := make([]acp.SessionConfigSelectOption, 0, len(configs))
+func modelSelectOptions(configs []ModelConfig) []appserver.PresentationSelectOption {
+	options := make([]appserver.PresentationSelectOption, 0, len(configs))
 	for _, cfg := range configs {
-		options = append(options, acp.SessionConfigSelectOption{
+		options = append(options, appserver.PresentationSelectOption{
 			Value:       cfg.ID,
 			Name:        cfg.Alias,
 			Description: modelDescription(cfg),
@@ -443,10 +445,10 @@ func modelSelectOptions(configs []ModelConfig) []acp.SessionConfigSelectOption {
 	return options
 }
 
-func reasoningSelectOptions(levels []string) []acp.SessionConfigSelectOption {
-	options := make([]acp.SessionConfigSelectOption, 0, len(levels))
+func reasoningSelectOptions(levels []string) []appserver.PresentationSelectOption {
+	options := make([]appserver.PresentationSelectOption, 0, len(levels))
 	for _, level := range levels {
-		options = append(options, acp.SessionConfigSelectOption{
+		options = append(options, appserver.PresentationSelectOption{
 			Value: level,
 			Name:  reasoningDisplayName(level),
 		})
@@ -505,8 +507,8 @@ func reasoningDisplayName(level string) string {
 	return strings.ToUpper(level[:1]) + level[1:]
 }
 
-func commandInput(hint string) *acp.AvailableCommandInput {
-	return &acp.AvailableCommandInput{Hint: hint}
+func commandInput(hint string) *appserver.PresentationCommandInput {
+	return &appserver.PresentationCommandInput{Hint: hint}
 }
 
 func availableCommandHint(usage string) string {
@@ -521,6 +523,34 @@ func availableCommandHint(usage string) string {
 	return strings.Join(fields[1:], " ")
 }
 
-var _ ACPPresentationService = gatewayACPSurface{}
-var _ acp.PromptCapabilitiesProvider = gatewayACPSurface{}
-var _ acp.CommandProvider = gatewayACPSurface{}
+func presentationModesFromACP(modes *acp.SessionModeState) *appserver.PresentationModeState {
+	if modes == nil {
+		return nil
+	}
+	result := &appserver.PresentationModeState{CurrentModeID: modes.CurrentModeID}
+	for _, mode := range modes.AvailableModes {
+		result.AvailableModes = append(result.AvailableModes, appserver.PresentationMode{
+			ID: mode.ID, Name: mode.Name, Description: mode.Description,
+		})
+	}
+	return result
+}
+
+func presentationConfigOptionsFromACP(configs []acp.SessionConfigOption) []appserver.PresentationConfigOption {
+	result := make([]appserver.PresentationConfigOption, 0, len(configs))
+	for _, config := range configs {
+		mapped := appserver.PresentationConfigOption{
+			Type: config.Type, ID: config.ID, Name: config.Name, Description: config.Description,
+			Category: config.Category, CurrentValue: config.CurrentValue,
+		}
+		for _, option := range config.Options {
+			mapped.Options = append(mapped.Options, appserver.PresentationSelectOption{
+				Value: option.Value, Name: option.Name, Description: option.Description,
+			})
+		}
+		result = append(result, mapped)
+	}
+	return result
+}
+
+var _ PresentationSource = gatewayPresentationSource{}

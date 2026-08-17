@@ -16,7 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 )
 
-func (s *Stack) setSandboxBackendAtRevision(ctx context.Context, backend string, expected *uint64) (SandboxStatus, uint64, error) {
+func (s *controlCommandBackend) setSandboxBackendAtRevision(ctx context.Context, backend string, expected *uint64) (SandboxStatus, uint64, error) {
 	if s == nil {
 		return SandboxStatus{}, 0, configurationRejectedError(errorcode.New(errorcode.Unavailable, "gatewayapp: stack is unavailable"))
 	}
@@ -40,7 +40,7 @@ func (s *Stack) setSandboxBackendAtRevision(ctx context.Context, backend string,
 		return SandboxStatus{}, currentRevision, configurationRejectedError(errorcode.Wrap(errorcode.FailedPrecondition, err.Error(), err))
 	}
 	if securityPosture.RequiredSandboxBackend != "" {
-		return s.runtimeProjection().SandboxStatus(), currentRevision, nil
+		return s.composition.SandboxStatus(), currentRevision, nil
 	}
 	nextCanonical := cloneSandboxConfig(doc.Sandbox)
 	nextCanonical.RequestedType = normalized
@@ -60,8 +60,10 @@ func (s *Stack) setSandboxBackendAtRevision(ctx context.Context, backend string,
 		observed = current
 	}
 	s.composition.mu.Lock()
-	s.composition.sandboxPersisted = cloneSandboxConfig(observed.Sandbox)
-	s.composition.sandboxRevision = observed.ConfigurationRevision
+	if s.composition.process != nil {
+		s.composition.process.sandboxPersisted = cloneSandboxConfig(observed.Sandbox)
+		s.composition.process.sandboxRevision = observed.ConfigurationRevision
+	}
 	s.composition.mu.Unlock()
 	nextLive := mergeSandboxConfig(observed.Sandbox, runtimeOverride)
 	status := sandboxStatusFromRuntime(nextLive, nil)
@@ -103,8 +105,11 @@ func (s *runtimeComposition) sandboxStatus(includeRuntime bool) SandboxStatus {
 	}
 	s.mu.RLock()
 	liveCfg := cloneSandboxConfig(s.sandbox)
-	activationPinned := s.sandboxActivationPinned
-	persistedCfg := cloneSandboxConfig(s.sandboxPersisted)
+	activationPinned := s.activation != nil
+	persistedCfg := SandboxConfig{}
+	if s.process != nil {
+		persistedCfg = cloneSandboxConfig(s.process.sandboxPersisted)
+	}
 	exec := s.exec
 	s.mu.RUnlock()
 	process := s.runtimeProcessSnapshot()

@@ -111,8 +111,8 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 	}
 
 	fallbackModes := &recordingModeProvider{}
-	surface := stack.ACPSurface(fallbackModes, true, nil)
-	modes, err := surface.SessionModes(context.Background(), active)
+	source := stack.PresentationSource(fallbackModes, true, nil)
+	modes, err := source.SessionModes(context.Background(), active)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,10 +130,10 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 		t.Fatalf("YOLO child session options = %#v, must not request unavailable manual mode", self.SessionOptions)
 	}
 
-	if _, _, err := stack.setSandboxBackendAtRevision(context.Background(), "auto", nil); err == nil || !strings.Contains(err.Error(), "fixes the sandbox backend to Host") {
+	if _, _, err := stack.commandBackend.setSandboxBackendAtRevision(context.Background(), "auto", nil); err == nil || !strings.Contains(err.Error(), "fixes the sandbox backend to Host") {
 		t.Fatalf("SetSandboxBackend(auto) error = %v, want process Host lock", err)
 	}
-	if status, _, err := stack.setSandboxBackendAtRevision(context.Background(), "host", nil); err != nil || !status.FullAccessMode {
+	if status, _, err := stack.commandBackend.setSandboxBackendAtRevision(context.Background(), "host", nil); err != nil || !status.FullAccessMode {
 		t.Fatalf("SetSandboxBackend(host) = %#v, %v; want safe no-op", status, err)
 	}
 }

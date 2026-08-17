@@ -45,13 +45,14 @@ func TestHostPrivateProjectionTypesDoNotRetainHostStack(t *testing.T) {
 		name string
 		typ  reflect.Type
 	}{
-		{name: "ACP surface", typ: reflect.TypeFor[gatewayACPSurface]()},
+		{name: "Presentation source", typ: reflect.TypeFor[gatewayPresentationSource]()},
 		{name: "Agent binding service", typ: reflect.TypeFor[AgentBindingService]()},
 		{name: "Control Runtime service", typ: reflect.TypeFor[ControlRuntimeService]()},
 		{name: "Control Runtime lease", typ: reflect.TypeFor[ControlRuntimeLease]()},
 		{name: "Agent message delivery", typ: reflect.TypeFor[AgentMessageDeliveryService]()},
 		{name: "Workspace reads", typ: reflect.TypeFor[WorkspaceReadService]()},
 		{name: "Task stream router", typ: reflect.TypeFor[hostTaskStreamService]()},
+		{name: "Control command backend", typ: reflect.TypeFor[controlCommandBackend]()},
 		{name: "Runtime state reader", typ: reflect.TypeFor[controlRuntimeStateReader]()},
 		{name: "Participant handle reader", typ: reflect.TypeFor[participantHandleReader]()},
 		{name: "Subagent history", typ: reflect.TypeFor[subagentHistoryService]()},
@@ -95,11 +96,16 @@ func TestRuntimeCompositionHasNoParallelProcessConfigFields(t *testing.T) {
 	t.Parallel()
 
 	compositionType := reflect.TypeFor[runtimeComposition]()
-	processField, ok := compositionType.FieldByName("processConfig")
-	if !ok || processField.Type != reflect.TypeFor[*runtimeProcessConfigSource]() {
-		t.Fatalf("process configuration source = %v, present:%v", processField.Type, ok)
+	processField, ok := compositionType.FieldByName("process")
+	if !ok || processField.Type != reflect.TypeFor[*runtimeProcessState]() {
+		t.Fatalf("process state = %v, present:%v", processField.Type, ok)
 	}
-	for _, retired := range []string{"runtime", "sandboxOverride", "childControlURL", "childControlTokenFile"} {
+	processStateType := reflect.TypeFor[runtimeProcessState]()
+	configField, ok := processStateType.FieldByName("config")
+	if !ok || configField.Type != reflect.TypeFor[*runtimeProcessConfigSource]() {
+		t.Fatalf("process configuration source = %v, present:%v", configField.Type, ok)
+	}
+	for _, retired := range []string{"processConfig", "runtime", "sandboxOverride", "sandboxPersisted", "sandboxRevision", "childControlURL", "childControlTokenFile"} {
 		if _, ok := compositionType.FieldByName(retired); ok {
 			t.Errorf("runtimeComposition retains parallel mutable process field %q", retired)
 		}
@@ -152,7 +158,7 @@ func TestSessionRuntimeAssemblyUsesIndependentConfigurationSource(t *testing.T) 
 		hostedChildMailbox: func(context.Context, session.SessionRef, agentmessage.Request) (agentmessage.Response, error) {
 			return agentmessage.Response{}, nil
 		},
-	}}}
+	}, process: &runtimeProcessState{config: newRuntimeProcessConfigSource(sessionRuntimeProcessSnapshot{})}}}
 
 	deps, err := newSessionRuntimeAssemblyDeps(host)
 	if err != nil {

@@ -103,7 +103,7 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	})
 	presentation, err := newPresentationService(
 		dependencies.Sessions,
-		host.ACPSurface(modes, len(dependencies.Assembly.Modes) > 0, configs),
+		host.PresentationSource(modes, len(dependencies.Assembly.Modes) > 0, configs),
 		agentReads.ControllerStatus,
 		len(dependencies.Assembly.Modes) > 0 && modes != nil,
 	)

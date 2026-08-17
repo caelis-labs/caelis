@@ -55,7 +55,7 @@ type externalAgentMutationResult struct {
 // disconnectACPAtRevision removes one connection-scoped external ACP Agent
 // and all dependent product configuration through one Host CAS. Adapter
 // installation is outside the configuration document and remains retained.
-func (s *Stack) disconnectACPAtRevision(ctx context.Context, agentID string, expected uint64) (externalAgentMutationResult, controlagents.DisconnectResult, error) {
+func (s *controlCommandBackend) disconnectACPAtRevision(ctx context.Context, agentID string, expected uint64) (externalAgentMutationResult, controlagents.DisconnectResult, error) {
 	mutation := externalAgentMutationResult{}
 	if s == nil || s.composition.authorities.store == nil {
 		return mutation, controlagents.DisconnectResult{}, fmt.Errorf("gatewayapp: app config store unavailable")
@@ -112,7 +112,7 @@ func (s *Stack) disconnectACPAtRevision(ctx context.Context, agentID string, exp
 	return mutation, result, nil
 }
 
-func (s *Stack) reconcileCommittedExternalAgents(ctx context.Context) error {
+func (s *controlCommandBackend) reconcileCommittedExternalAgents(ctx context.Context) error {
 	if s == nil || s.composition.authorities.store == nil {
 		return errors.New("gatewayapp: external Agent configuration is unavailable")
 	}
@@ -122,7 +122,7 @@ func (s *Stack) reconcileCommittedExternalAgents(ctx context.Context) error {
 	return err
 }
 
-func (s *Stack) acpDiscoveryService() discovery.Service {
+func (s *controlCommandBackend) acpDiscoveryService() discovery.Service {
 	return discovery.Service{ClientInfo: &client.Implementation{
 		Name:    firstNonEmpty(s.composition.authorities.appName, "caelis"),
 		Version: version.String(),

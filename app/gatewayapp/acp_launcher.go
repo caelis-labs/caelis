@@ -25,7 +25,7 @@ var installedACPAdapterPackageMatches = defaultInstalledACPAdapterPackageMatches
 
 var acpAgentInstallMu sync.Mutex
 
-func (s *Stack) resolveACPConnectionLauncher(ctx context.Context, req controlagents.ConnectRequest) (controlagents.Connection, error) {
+func (s *controlCommandBackend) resolveACPConnectionLauncher(ctx context.Context, req controlagents.ConnectRequest) (controlagents.Connection, error) {
 	req = controlagents.NormalizeConnectRequest(req)
 	if req.AdapterID == "" {
 		return controlagents.Connection{}, fmt.Errorf("gatewayapp: ACP adapter is required")

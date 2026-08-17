@@ -33,16 +33,19 @@ import (
 	"github.com/caelis-labs/caelis/internal/sandboxrouter"
 )
 
-func (s *Stack) loadSandboxConfigDocument(ctx context.Context, expected *uint64) (AppConfig, error) {
-	if s == nil || s.composition.authorities.store == nil {
-		if s == nil {
-			return AppConfig{}, fmt.Errorf("gatewayapp: stack is unavailable")
+func (s *controlCommandBackend) loadSandboxConfigDocument(ctx context.Context, expected *uint64) (AppConfig, error) {
+	if s == nil || s.composition == nil {
+		return AppConfig{}, fmt.Errorf("gatewayapp: control command backend is unavailable")
+	}
+	if s.composition.authorities.store == nil {
+		if s.composition.process == nil {
+			return AppConfig{}, fmt.Errorf("gatewayapp: Host process state is unavailable")
 		}
 		s.composition.mu.RLock()
 		doc := AppConfig{
 			SchemaVersion:         configstore.SchemaVersionV2,
-			ConfigurationRevision: s.composition.sandboxRevision,
-			Sandbox:               cloneSandboxConfig(s.composition.sandboxPersisted),
+			ConfigurationRevision: s.composition.process.sandboxRevision,
+			Sandbox:               cloneSandboxConfig(s.composition.process.sandboxPersisted),
 		}
 		s.composition.mu.RUnlock()
 		if expected != nil && doc.ConfigurationRevision != *expected {
@@ -63,8 +66,8 @@ func (s *Stack) loadSandboxConfigDocument(ctx context.Context, expected *uint64)
 	return doc, nil
 }
 
-func (s *Stack) persistSandboxConfigDocument(ctx context.Context, doc AppConfig) (AppConfig, error) {
-	if s == nil || s.composition.authorities.store == nil {
+func (s *controlCommandBackend) persistSandboxConfigDocument(ctx context.Context, doc AppConfig) (AppConfig, error) {
+	if s == nil || s.composition == nil || s.composition.authorities.store == nil {
 		return doc, nil
 	}
 	return s.composition.authorities.store.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
@@ -213,8 +216,8 @@ func (s *runtimeComposition) retainManagedPluginCaches(configs []PluginConfig) f
 }
 
 func (s *runtimeComposition) loadGatewayAppConfig() (AppConfig, error) {
-	if s != nil && s.appConfigSnapshot != nil {
-		return configstore.Normalize(*s.appConfigSnapshot), nil
+	if s != nil && s.activation != nil && s.activation.appConfig != nil {
+		return configstore.Normalize(*s.activation.appConfig), nil
 	}
 	if s == nil || s.authorities.store == nil {
 		return AppConfig{}, fmt.Errorf("gatewayapp: app config store unavailable")

@@ -663,7 +663,7 @@ func TestStackUseModelReportsAmbiguousVisibleAlias(t *testing.T) {
 	}
 }
 
-func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
+func TestPresentationSourceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
 	apiProfile, err := stack.connectTestModel(ModelConfig{
@@ -701,8 +701,8 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 		t.Fatalf("UseSessionModel(token plan) = %#v, %v", selected, err)
 	}
 	activeSession = mustCurrentSession(t, stack, activeSession.SessionID)
-	surface := stack.ACPSurface(nil, false, nil)
-	models, err := surface.SessionModels(ctx, activeSession)
+	source := stack.PresentationSource(nil, false, nil)
+	models, err := source.SessionModels(ctx, activeSession)
 	if err != nil {
 		t.Fatalf("SessionModels() error = %v", err)
 	}
@@ -715,7 +715,7 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	}
 	seen := map[string]string{}
 	for _, model := range models.AvailableModels {
-		seen[model.ModelID] = model.Name
+		seen[model.ID] = model.Name
 	}
 	if seen[apiID] != "xiaomi/mimo-v2.5-pro" || seen[tokenPlanID] != "xiaomi/mimo-v2.5-pro" {
 		t.Fatalf("available models = %#v, want stable ids with visible alias names", models.AvailableModels)

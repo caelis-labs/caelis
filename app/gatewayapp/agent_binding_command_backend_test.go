@@ -130,6 +130,8 @@ func TestAgentBindingCASAllowsOnlyOneConcurrentHostWriter(t *testing.T) {
 	}
 	first := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: makeStore()}}}
 	second := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: makeStore()}}}
+	testControlCommandBackend(first)
+	testControlCommandBackend(second)
 	type outcome struct {
 		result agentBindingMutationResult
 		err    error
@@ -139,7 +141,7 @@ func TestAgentBindingCASAllowsOnlyOneConcurrentHostWriter(t *testing.T) {
 	start.Add(2)
 	mutate := func(stack *Stack, setName string) {
 		defer start.Done()
-		result, mutationErr := stack.mutateAgentBindingsAtRevision(ctx, appserver.ActionAgentBindingSetSave, appserver.AgentBindingSetRequest{
+		result, mutationErr := stack.commandBackend.mutateAgentBindingsAtRevision(ctx, appserver.ActionAgentBindingSetSave, appserver.AgentBindingSetRequest{
 			WriteBase: appserver.WriteBase{ExpectedRevision: &expected},
 			SetName:   setName,
 		})

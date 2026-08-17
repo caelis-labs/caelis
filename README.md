@@ -173,8 +173,10 @@ on that Host implementation. The in-process adapter receives the concrete Host
 only at its composition root and injects focused services into leaf
 capabilities. Session-bound adapter paths select only the focused services
 needed from an authorized Runtime lease; neither the Host nor a Runtime
-aggregate reaches leaf services. `agent-sdk/*` remains reusable below the
-product Control layer.
+aggregate reaches leaf services. Host presentation reads are normalized to
+`control/appserver` types before the local adapter; ACP wire projection remains
+outside Host composition. `agent-sdk/*` remains reusable below the product
+Control layer.
 
 See [docs/architecture.md](docs/architecture.md) for the repository map,
 [docs/agent-sdk-boundary.md](docs/agent-sdk-boundary.md) for the reusable Agent

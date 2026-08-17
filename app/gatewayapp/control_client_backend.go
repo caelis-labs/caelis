@@ -26,11 +26,11 @@ const controlFeedCatchUpWarning = "session mutation committed; live feed catch-u
 // ExecuteControlCommand is the app assembly adapter for already-authorized
 // transport-neutral commands. The request's operation ID is forwarded in
 // downstream metadata wherever the current gateway contract accepts it.
-func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.Principal, action appserver.Action, request any) (result appserver.CommandResult, commandErr error) {
+func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, principal appserver.Principal, action appserver.Action, request any) (result appserver.CommandResult, commandErr error) {
 	if s == nil {
-		return appserver.CommandResult{}, errors.New("gatewayapp: stack is unavailable")
+		return appserver.CommandResult{}, errors.New("gatewayapp: control command backend is unavailable")
 	}
-	if s.composition.isClosing() {
+	if s.composition == nil || s.composition.isClosing() {
 		return appserver.CommandResult{Outcome: appserver.OutcomeRejected},
 			appserver.NewOutcomeError(
 				appserver.OutcomeRejected,
@@ -46,18 +46,19 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 	if isHostPluginCommandRequest(request) {
 		return s.executePluginCommand(ctx, action, request)
 	}
-	if s.sessionRuntimes == nil {
+	runtimes := s.runtimeRegistry()
+	if runtimes == nil {
 		return s.composition.executeControlCommand(ctx, principal, action, request)
 	}
 
 	if create, ok := request.(appserver.CreateSessionRequest); ok {
-		activationCtx, unlock, err := s.sessionRuntimes.lockActivation(ctx)
+		activationCtx, unlock, err := runtimes.lockActivation(ctx)
 		if err != nil {
 			return appserver.CommandResult{Outcome: appserver.OutcomeRejected},
 				classifyControlPreDispatchError(err)
 		}
 		defer unlock()
-		workspace, err := s.sessionRuntimes.resolveCreateWorkspaceLocked(
+		workspace, err := runtimes.resolveCreateWorkspaceLocked(
 			activationCtx,
 			principal,
 			session.WorkspaceRef{Key: create.WorkspaceKey, CWD: create.CWD},
@@ -77,14 +78,14 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 		if err != nil {
 			return result, appserver.NewOutcomeError(appserver.OutcomeUnknown, err)
 		}
-		if err := s.sessionRuntimes.bindCreatedWorkspaceLocked(active, workspace); err != nil {
+		if err := runtimes.bindCreatedWorkspaceLocked(active, workspace); err != nil {
 			return result, appserver.NewOutcomeError(appserver.OutcomeUnknown, err)
 		}
 		return result, nil
 	}
 
 	sessionID := controlCommandSessionID(request)
-	composition := &s.composition
+	composition := s.composition
 	var newlyActivatedRuntime *sessionRuntime
 	var releaseRuntimeUse func()
 	var closeControlRuntime func(context.Context) error
@@ -108,7 +109,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 	}()
 	switch {
 	case controlActionConfiguresSession(action):
-		runtime, _, closeRuntime, err := s.sessionRuntimes.acquireControlRuntime(ctx, sessionID, false)
+		runtime, _, closeRuntime, err := runtimes.acquireControlRuntime(ctx, sessionID, false)
 		if err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
@@ -118,7 +119,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 		closeControlRuntime = closeRuntime
 		composition = &runtime.instance.runtimeComposition
 	case controlActionActivatesSessionRuntime(action):
-		runtime, _, release, activated, err := s.sessionRuntimes.acquireActivatedControlRuntime(ctx, sessionID)
+		runtime, _, release, activated, err := runtimes.acquireActivatedControlRuntime(ctx, sessionID)
 		if err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
@@ -128,7 +129,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 			newlyActivatedRuntime = runtime
 		}
 	case controlActionTargetsActiveRuntime(action):
-		runtime, releaseUse, err := s.sessionRuntimes.acquireLoadedRuntime(sessionID)
+		runtime, releaseUse, err := runtimes.acquireLoadedRuntime(sessionID)
 		if err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
@@ -143,7 +144,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 		releaseRuntimeUse = releaseUse
 		composition = &runtime.instance.runtimeComposition
 	case action == appserver.ActionSessionClose:
-		runtime, releaseUse, err := s.sessionRuntimes.acquireLoadedRuntime(sessionID)
+		runtime, releaseUse, err := runtimes.acquireLoadedRuntime(sessionID)
 		if err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
@@ -161,7 +162,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 			releaseRuntimeUse = nil
 		}
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
-		cleanupErr := s.sessionRuntimes.releaseRejectedActivation(releaseCtx, newlyActivatedRuntime)
+		cleanupErr := runtimes.releaseRejectedActivation(releaseCtx, newlyActivatedRuntime)
 		cancel()
 		if cleanupErr != nil {
 			commandErr = errors.Join(
@@ -179,7 +180,7 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal appserver.P
 		}
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
 		defer cancel()
-		if err := s.sessionRuntimes.releaseSession(releaseCtx, sessionID); err != nil {
+		if err := runtimes.releaseSession(releaseCtx, sessionID); err != nil {
 			result.Detail = "session closed; execution Runtime cleanup remains pending"
 		}
 	}

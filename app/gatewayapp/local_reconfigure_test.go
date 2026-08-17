@@ -138,8 +138,8 @@ func TestSandboxConfigurationCommandPreservesCanonicalPolicyFields(t *testing.T)
 		t.Fatalf("persisted canonical document = %#v / %#v, want sandbox %#v and manual Runtime", persisted.Sandbox, persisted.Runtime, wantSandbox)
 	}
 	stack.composition.mu.RLock()
-	livePersisted := cloneSandboxConfig(stack.composition.sandboxPersisted)
-	liveRevision := stack.composition.sandboxRevision
+	livePersisted := cloneSandboxConfig(stack.composition.process.sandboxPersisted)
+	liveRevision := stack.composition.process.sandboxRevision
 	stack.composition.mu.RUnlock()
 	if !reflect.DeepEqual(livePersisted, wantSandbox) || liveRevision != result.Revision {
 		t.Fatalf("live binding = %#v @ %d, want %#v @ %d", livePersisted, liveRevision, wantSandbox, result.Revision)
@@ -174,8 +174,8 @@ func TestSandboxConfigurationCommandRollsForwardAfterCommittedWriteFault(t *test
 	}
 	stack.composition.mu.RLock()
 	live := cloneSandboxConfig(stack.composition.sandbox)
-	livePersisted := cloneSandboxConfig(stack.composition.sandboxPersisted)
-	liveRevision := stack.composition.sandboxRevision
+	livePersisted := cloneSandboxConfig(stack.composition.process.sandboxPersisted)
+	liveRevision := stack.composition.process.sandboxRevision
 	stack.composition.mu.RUnlock()
 	if persisted.ConfigurationRevision != result.Revision || persisted.Sandbox.RequestedType != "host" ||
 		live.RequestedType != "host" || !reflect.DeepEqual(livePersisted, persisted.Sandbox) || liveRevision != result.Revision {
@@ -229,8 +229,8 @@ func TestSandboxConfigurationCommandDoesNotGuessRevisionWhenCommittedWriteCannot
 	}
 	stack.composition.mu.RLock()
 	live := cloneSandboxConfig(stack.composition.sandbox)
-	livePersisted := cloneSandboxConfig(stack.composition.sandboxPersisted)
-	liveRevision := stack.composition.sandboxRevision
+	livePersisted := cloneSandboxConfig(stack.composition.process.sandboxPersisted)
+	liveRevision := stack.composition.process.sandboxRevision
 	stack.composition.mu.RUnlock()
 	if liveRevision != 0 {
 		t.Fatalf("live binding = %#v / %#v @ %d, want unknown revision", live, livePersisted, liveRevision)
@@ -313,17 +313,17 @@ func TestSandboxLifecycleCommandClassifiesPreEffectAndEffectFailures(t *testing.
 	stack.composition.mu.Lock()
 	previousExec := stack.composition.exec
 	stack.composition.sandbox = configstore.DefaultSandboxConfig(saved.Sandbox)
-	stack.composition.sandboxPersisted = cloneSandboxConfig(saved.Sandbox)
-	stack.composition.sandboxRevision = saved.ConfigurationRevision
+	stack.composition.process.sandboxPersisted = cloneSandboxConfig(saved.Sandbox)
+	stack.composition.process.sandboxRevision = saved.ConfigurationRevision
 	stack.composition.exec = nil
 	stack.composition.mu.Unlock()
 	previousOverride := stack.composition.runtimeProcessSnapshot().sandboxOverride
-	stack.composition.processConfig.setSandboxOverride(SandboxConfig{})
+	stack.composition.process.config.setSandboxOverride(SandboxConfig{})
 	t.Cleanup(func() {
 		stack.composition.mu.Lock()
 		stack.composition.exec = previousExec
 		stack.composition.mu.Unlock()
-		stack.composition.processConfig.setSandboxOverride(previousOverride)
+		stack.composition.process.config.setSandboxOverride(previousOverride)
 	})
 
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
@@ -382,12 +382,12 @@ func TestSandboxLifecycleCommandUsesCanonicalExternalPolicy(t *testing.T) {
 	stack.composition.exec = runtime
 	stack.composition.mu.Unlock()
 	previousOverride := stack.composition.runtimeProcessSnapshot().sandboxOverride
-	stack.composition.processConfig.setSandboxOverride(SandboxConfig{})
+	stack.composition.process.config.setSandboxOverride(SandboxConfig{})
 	defer func() {
 		stack.composition.mu.Lock()
 		stack.composition.exec = previousExec
 		stack.composition.mu.Unlock()
-		stack.composition.processConfig.setSandboxOverride(previousOverride)
+		stack.composition.process.config.setSandboxOverride(previousOverride)
 	}()
 	expected := saved.ConfigurationRevision
 	result, err := stack.ConfigurationCommands().PrepareSandbox(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.SandboxRequest{WriteBase: appserver.WriteBase{
@@ -416,15 +416,15 @@ func TestSandboxLifecycleCommandDoesNotHoldConfigurationWriteBoundary(t *testing
 		release:                     make(chan struct{}),
 	}
 	previousOverride := stack.composition.runtimeProcessSnapshot().sandboxOverride
-	stack.composition.processConfig.setSandboxOverride(SandboxConfig{})
+	stack.composition.process.config.setSandboxOverride(SandboxConfig{})
 	stack.composition.mu.Lock()
 	stack.composition.sandbox = configstore.DefaultSandboxConfig(saved.Sandbox)
-	stack.composition.sandboxPersisted = cloneSandboxConfig(saved.Sandbox)
-	stack.composition.sandboxRevision = saved.ConfigurationRevision
+	stack.composition.process.sandboxPersisted = cloneSandboxConfig(saved.Sandbox)
+	stack.composition.process.sandboxRevision = saved.ConfigurationRevision
 	stack.composition.exec = runtime
 	stack.composition.mu.Unlock()
 	t.Cleanup(func() {
-		stack.composition.processConfig.setSandboxOverride(previousOverride)
+		stack.composition.process.config.setSandboxOverride(previousOverride)
 	})
 	expected := saved.ConfigurationRevision
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
@@ -615,7 +615,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 		{
 			name: "set sandbox backend",
 			run: func() error {
-				_, _, err := stack.setSandboxBackendAtRevision(ctx, "auto", nil)
+				_, _, err := stack.commandBackend.setSandboxBackendAtRevision(ctx, "auto", nil)
 				return err
 			},
 			want: func(t *testing.T) {
@@ -908,7 +908,7 @@ func TestStackSetSandboxBackendRollsBackOnConfigSaveFailure(t *testing.T) {
 	beforeGateway := stack.composition.currentGateway()
 	poisonConfigStorePath(t, stack)
 
-	_, _, err := stack.setSandboxBackendAtRevision(ctx, "auto", nil)
+	_, _, err := stack.commandBackend.setSandboxBackendAtRevision(ctx, "auto", nil)
 	if err == nil {
 		t.Fatal("SetSandboxBackend() error = nil, want config save failure")
 	}
@@ -961,7 +961,7 @@ func TestStackSetSandboxBackendObservesNewerConcurrentSandboxWriter(t *testing.T
 		}
 	}
 
-	status, actualRevision, err := stack.setSandboxBackendAtRevision(context.Background(), "host", nil)
+	status, actualRevision, err := stack.commandBackend.setSandboxBackendAtRevision(context.Background(), "host", nil)
 	if err != nil {
 		t.Fatalf("SetSandboxBackend() error = %v", err)
 	}
@@ -982,7 +982,7 @@ func TestStackSetSandboxBackendObservesNewerConcurrentSandboxWriter(t *testing.T
 		t.Fatalf("SandboxStatus() after command = %#v, want fixed process override", observed)
 	}
 	stack.composition.mu.RLock()
-	observedPolicy := cloneSandboxConfig(stack.composition.sandboxPersisted)
+	observedPolicy := cloneSandboxConfig(stack.composition.process.sandboxPersisted)
 	stack.composition.mu.RUnlock()
 	if observedPolicy.RequestedType != "windows" {
 		t.Fatalf("observed canonical sandbox = %#v, want concurrent writer policy", observedPolicy)

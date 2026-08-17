@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -27,7 +26,6 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
-	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 
@@ -83,7 +81,9 @@ func (s *Stack) SetBuiltInChildControl(controlURL string, tokenFile string) {
 	if s == nil {
 		return
 	}
-	s.composition.processConfig.setChildControl(controlURL, tokenFile)
+	if s.composition.process != nil && s.composition.process.config != nil {
+		s.composition.process.config.setChildControl(controlURL, tokenFile)
+	}
 }
 
 // KernelTurnReader is the read-only live Turn projection required by
@@ -105,21 +105,16 @@ const DefaultControlOperationRetention = appserver.DefaultOperationTerminalReten
 type Stack struct {
 	composition               runtimeComposition
 	controlOperationRetention time.Duration
-	hostAuthenticationMu      sync.Mutex
-	hostAuthentications       map[string]struct{}
+	commandBackend            *controlCommandBackend
 	controlClient             appserver.Service
 	configurationCommands     appserver.ConfigurationCommandService
 	agentCommands             appserver.AgentCommandService
 	pluginCommands            appserver.PluginCommandService
 	taskStreams               acptaskstream.Service
 	operations                *appserver.FileOperationStore
-	acpPreparations           *acpPreparationStore
 	lifecycleCancel           context.CancelFunc
 	sessionRuntimes           *sessionRuntimeRegistry
 	modelRecovery             *sessionModelRecovery
-
-	// Optional test seam; nil uses the platform lifecycle runtime factory.
-	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
 }
 
 // Sessions returns the Host's process-level Session authority.
@@ -464,13 +459,15 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 				providerUsage:     providerUsage,
 				sessionModelPins:  newSessionModelPinRegistry(),
 			},
-			sessions:         sessions,
-			workspace:        workspace,
-			lookup:           lookup,
-			processConfig:    processConfig,
-			sandbox:          sandboxCfg,
-			sandboxPersisted: cloneSandboxConfig(doc.Sandbox),
-			sandboxRevision:  doc.ConfigurationRevision,
+			sessions:  sessions,
+			workspace: workspace,
+			lookup:    lookup,
+			process: &runtimeProcessState{
+				config:           processConfig,
+				sandboxPersisted: cloneSandboxConfig(doc.Sandbox),
+				sandboxRevision:  doc.ConfigurationRevision,
+			},
+			sandbox: sandboxCfg,
 		},
 	}
 	stack.modelRecovery = newSessionModelRecovery(
@@ -478,121 +475,17 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		stack.composition.authorities.sessionModelPins,
 		stack.composition.lookup,
 	)
+	stack.commandBackend, err = newControlCommandBackend(&stack.composition, stack.modelRecovery)
+	if err != nil {
+		return nil, err
+	}
 	stack.composition.placementCache = newPlacementSnapshot(doc)
 	configStore.savedHook = stack.composition.invalidateOwnPlacementSnapshot
-	runtimeStateReader, err := newControlRuntimeStateReader(&stack.composition)
+	controlAssembly, err := assembleHostControlServices(stack, cfg, storeDir, cursorSecret)
 	if err != nil {
 		return nil, err
 	}
-	participantHandles, err := newParticipantHandleReader(&stack.composition)
-	if err != nil {
-		return nil, err
-	}
-	controlState, err := appserver.NewStateService(appserver.StateServiceConfig{
-		Sessions: sessions, Runtime: runtimeStateReader, Feeds: controlFeeds,
-		PrepareReconnect:  stack.prepareControlClientReconnect,
-		RetainObservation: stack.retainControlClientObservation,
-	})
-	if err != nil {
-		return nil, err
-	}
-	controlOperations, err := appserver.NewFileOperationStoreWithConfig(
-		filepath.Join(storeDir, "control-operations"),
-		appserver.OperationRetentionConfig{TerminalRetention: cfg.ControlOperationRetention},
-	)
-	if err != nil {
-		return nil, err
-	}
-	acpPreparations, err := newACPPreparationStore(storeDir)
-	if err != nil {
-		return nil, err
-	}
-	if err := controlOperations.Initialize(context.Background()); err != nil {
-		return nil, err
-	}
-	effectiveOperationRetention, err := controlOperations.EffectiveTerminalRetention(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	stack.controlOperationRetention = effectiveOperationRetention
-	stack.operations = controlOperations
-	stack.acpPreparations = acpPreparations
-	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: sessions}
-	controlCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
-		Authorizer: appserver.ProductCommandAuthorizer{Sessions: sessionAuthorizer},
-		Operations: controlOperations,
-		Backend:    stack,
-	})
-	if err != nil {
-		return nil, err
-	}
-	controlClient, err := appserver.NewClient(appserver.ClientConfig{
-		Commands: controlCommands, State: controlState, Feeds: controlFeeds,
-		Authorizer:         sessionAuthorizer,
-		ParticipantHandles: participantHandles,
-		Sessions:           sessions,
-	})
-	if err != nil {
-		return nil, err
-	}
-	stack.controlClient = controlClient
-	stack.configurationCommands = controlCommands
-	stack.agentCommands = controlCommands
-	stack.pluginCommands = controlCommands
-	taskStreamRouter := &hostTaskStreamService{host: &stack.composition}
-	controlTaskStreams, err := controltaskstream.New(controltaskstream.Config{
-		Tasks:           taskStore,
-		Streams:         func() stream.Service { return taskStreamRouter },
-		Sessions:        sessions,
-		SubagentHistory: subagentHistoryService{composition: &stack.composition},
-		Authorizer:      taskStreamAuthorizer{inner: appserver.SessionAuthorizer{Sessions: sessions}},
-		Secret:          cursorSecret,
-	})
-	if err != nil {
-		return nil, err
-	}
-	stack.taskStreams = acptaskstream.New(controlTaskStreams)
-	stack.composition.authorities.lifecycleCtx, stack.lifecycleCancel = context.WithCancel(context.Background())
-	if err := stack.composition.buildInitialGatewayRuntime(context.Background()); err != nil {
-		stack.lifecycleCancel()
-		return nil, err
-	}
-	mailboxRouter := &hostedChildMailboxRouter{}
-	stack.composition.authorities.hostedChildMailbox = mailboxRouter.deliver
-	assemblyDeps, err := newSessionRuntimeAssemblyDeps(stack)
-	if err != nil {
-		_ = stack.Close()
-		return nil, err
-	}
-	runtimeAssembler, err := newWorkspaceConfigAssembler(assemblyDeps)
-	if err != nil {
-		_ = stack.Close()
-		return nil, err
-	}
-	sessionRuntimes, err := newSessionRuntimeRegistry(sessionRuntimeRegistryConfig{
-		Sessions:         stack.composition.sessions,
-		Tasks:            stack.composition.authorities.taskStore,
-		LifecycleContext: stack.composition.authorities.lifecycleCtx,
-		DefaultWorkspace: stack.composition.workspace,
-		ModelRecovery:    stack.modelRecovery,
-		Assembler:        runtimeAssembler,
-	})
-	if err != nil {
-		_ = stack.Close()
-		return nil, err
-	}
-	stack.sessionRuntimes = sessionRuntimes
-	if err := runtimeStateReader.bindRegistry(sessionRuntimes); err != nil {
-		_ = stack.Close()
-		return nil, err
-	}
-	if err := participantHandles.bindRegistry(sessionRuntimes); err != nil {
-		_ = stack.Close()
-		return nil, err
-	}
-	taskStreamRouter.registry = sessionRuntimes
-	if err := mailboxRouter.bind(sessionRuntimes); err != nil {
-		_ = stack.Close()
+	if err := activateHostRuntime(stack, controlAssembly); err != nil {
 		return nil, err
 	}
 	return stack, nil

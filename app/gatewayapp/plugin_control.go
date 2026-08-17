@@ -25,7 +25,7 @@ type PluginReadService struct {
 // process Host. Detached Runtime compositions return a zero service so their
 // hook-free configuration readers cannot become write authorities.
 func (s *runtimeComposition) Plugins() PluginService {
-	if s == nil || s.processConfig == nil {
+	if s == nil || s.process == nil || s.process.config == nil {
 		return PluginService{}
 	}
 	return plugin.NewService(pluginHost{composition: s})
@@ -98,8 +98,8 @@ func (h pluginReadHost) StoreDir() string {
 }
 
 func (h pluginReadHost) LoadPluginState(ctx context.Context) (plugin.State, error) {
-	if h.composition != nil && h.composition.appConfigSnapshot != nil {
-		return pluginStateFromAppConfig(*h.composition.appConfigSnapshot), nil
+	if h.composition != nil && h.composition.activation != nil && h.composition.activation.appConfig != nil {
+		return pluginStateFromAppConfig(*h.composition.activation.appConfig), nil
 	}
 	return pluginHost(h).LoadPluginState(ctx)
 }

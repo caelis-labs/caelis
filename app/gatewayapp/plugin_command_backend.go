@@ -47,7 +47,7 @@ func recoverablePluginCommandAction(action appserver.Action) bool {
 	}
 }
 
-func (s *Stack) executePluginCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
+func (s *controlCommandBackend) executePluginCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
 	result, err := s.mutatePluginAtRevision(ctx, action, request)
 	command := configurationCommandResult(result.Revision)
 	if result.ResourceRef != "" {
@@ -70,7 +70,7 @@ func (s *Stack) executePluginCommand(ctx context.Context, action appserver.Actio
 	return command, classifyPluginMutationError(result, err)
 }
 
-func (s *Stack) mutatePluginAtRevision(ctx context.Context, action appserver.Action, request any) (pluginMutationResult, error) {
+func (s *controlCommandBackend) mutatePluginAtRevision(ctx context.Context, action appserver.Action, request any) (pluginMutationResult, error) {
 	result := pluginMutationResult{}
 	if s == nil {
 		return result, errors.New("gatewayapp: plugin configuration is unavailable")
@@ -113,7 +113,7 @@ func (s *Stack) mutatePluginAtRevision(ctx context.Context, action appserver.Act
 	return result, nil
 }
 
-func (s *Stack) preflightPluginConfigurationRevision(ctx context.Context, expected uint64) error {
+func (s *controlCommandBackend) preflightPluginConfigurationRevision(ctx context.Context, expected uint64) error {
 	if s == nil || s.composition.authorities.store == nil {
 		return errors.New("gatewayapp: plugin configuration is unavailable")
 	}
@@ -212,7 +212,7 @@ func pluginInfoWarning(info PluginInfo) error {
 	return errors.New(strings.TrimSpace(info.Warning))
 }
 
-func (s *Stack) currentPluginConfigurationRevision(ctx context.Context) (uint64, bool) {
+func (s *controlCommandBackend) currentPluginConfigurationRevision(ctx context.Context) (uint64, bool) {
 	if s == nil || s.composition.authorities.store == nil {
 		return 0, false
 	}
@@ -223,7 +223,7 @@ func (s *Stack) currentPluginConfigurationRevision(ctx context.Context) (uint64,
 	return doc.ConfigurationRevision, true
 }
 
-func (s *Stack) persistPluginCommandReceipt(ctx context.Context, action appserver.Action, command appserver.CommandResult) error {
+func (s *controlCommandBackend) persistPluginCommandReceipt(ctx context.Context, action appserver.Action, command appserver.CommandResult) error {
 	intent, ok := appserver.OperationIntentFromContext(ctx)
 	if !ok || !recoverablePluginCommandAction(action) {
 		return nil

@@ -19,10 +19,10 @@ type RouterFactory func(RouterConfig) Router
 
 // RouterConfig configures a prompt router implementation.
 type RouterConfig struct {
-	Service Service
+	Service RouterService
 	// CommandNames controls /help rendering. When nil, shared command names and
 	// registered ACP agent commands are used.
-	CommandNames func(context.Context, Service) []string
+	CommandNames func(context.Context, RouterService) []string
 	// CoreCommandAllowed optionally narrows which shared core slash commands this
 	// router may execute. Dynamic ACP agent slashes are checked separately.
 	CoreCommandAllowed func(context.Context, string) bool

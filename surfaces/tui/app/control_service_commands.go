@@ -69,7 +69,11 @@ func executeTUIPrivateSlashCommandWithContext(ctx context.Context, service Contr
 	return dispatchTUIPrivateSlashCommandWithContext(ctx, service, sender, cmd, args), true
 }
 
-func controlServiceCanSubmitRunningPrompt(ctx context.Context, service controlprompt.Service) bool {
+type activeTurnStatusService interface {
+	AgentStatus(context.Context) (controlprompt.AgentStatusSnapshot, error)
+}
+
+func controlServiceCanSubmitRunningPrompt(ctx context.Context, service activeTurnStatusService) bool {
 	if service == nil {
 		return true
 	}
@@ -100,11 +104,11 @@ func projectResumeReplayEvents(events []eventstream.Envelope) []TranscriptEvent 
 	return transcript.ProjectReplayEvents(events, tuiTranscriptProjector{})
 }
 
-func slashConnect(service controlprompt.Service, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {
+func slashConnect(service ControlServices, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {
 	return slashConnectWithContext(context.Background(), service, agents, send, args)
 }
 
-func slashConnectWithContext(ctx context.Context, service controlprompt.Service, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {
+func slashConnectWithContext(ctx context.Context, service ControlServices, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	kind, payloadText, _ := controlprompt.ParseFirst(strings.TrimSpace(args))
 	if strings.EqualFold(strings.TrimSpace(kind), "disconnect") {

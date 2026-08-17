@@ -10,10 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-type SandboxStatusProjection = controladapter.SandboxStatusProjection
-type DoctorRequest = controladapter.DoctorRequest
-type DoctorStatusProjection = controladapter.DoctorStatusProjection
-
 func gatewayRuntimeDeps(reads gatewayapp.KernelReadService) controladapter.GatewayRuntimeDeps {
 	return controladapter.GatewayRuntimeDeps{
 		TurnServiceFn: func() controladapter.GatewayTurnService {
@@ -40,7 +36,7 @@ func statusRuntimeDeps(status gatewayapp.StatusService) controladapter.StatusRun
 	return controladapter.StatusRuntimeDeps{
 		RuntimeStateFn:          status.SessionRuntimeState,
 		ConfigurationRevisionFn: status.ConfigurationRevision,
-		DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorStatusProjection, error) {
+		DoctorFn: func(ctx context.Context, req controladapter.DoctorRequest) (controladapter.DoctorStatusProjection, error) {
 			return toDoctorStatusProjection(status.Doctor(ctx, req))
 		},
 	}
@@ -73,7 +69,7 @@ func skillRuntimeDeps(skills gatewayapp.SkillService) controladapter.SkillRuntim
 
 func sandboxRuntimeDeps(status gatewayapp.StatusService) controladapter.SandboxRuntimeDeps {
 	return controladapter.SandboxRuntimeDeps{
-		StatusFn: func() SandboxStatusProjection { return toSandboxStatusProjection(status.Sandbox()) },
+		StatusFn: func() controladapter.SandboxStatusProjection { return toSandboxStatusProjection(status.Sandbox()) },
 	}
 }
 
@@ -131,8 +127,8 @@ func completionAssemblyDepsFromLease(lease *gatewayapp.ControlRuntimeLease) *con
 	}
 }
 
-func toSandboxStatusProjection(status gatewayapp.SandboxStatus) SandboxStatusProjection {
-	return SandboxStatusProjection{
+func toSandboxStatusProjection(status gatewayapp.SandboxStatus) controladapter.SandboxStatusProjection {
+	return controladapter.SandboxStatusProjection{
 		RequestedBackend:         status.RequestedBackend,
 		ResolvedBackend:          status.ResolvedBackend,
 		Route:                    status.Route,
@@ -158,8 +154,8 @@ func toSandboxStatusProjection(status gatewayapp.SandboxStatus) SandboxStatusPro
 	}
 }
 
-func toDoctorStatusProjection(report gatewayapp.DoctorReport, err error) (DoctorStatusProjection, error) {
-	return DoctorStatusProjection{
+func toDoctorStatusProjection(report gatewayapp.DoctorReport, err error) (controladapter.DoctorStatusProjection, error) {
+	return controladapter.DoctorStatusProjection{
 		GoVersion:                       report.GoVersion,
 		GOOS:                            report.GOOS,
 		GOARCH:                          report.GOARCH,

@@ -34,15 +34,16 @@ type StatusService struct {
 	composition *runtimeComposition
 }
 
-// ACPPresentationService is the read-only ACP-shaped projection used behind
-// the AppServer Presentation capability. Product writes belong to the focused
-// Configuration command service.
-type ACPPresentationService interface {
-	SessionModes(context.Context, session.Session) (*acp.SessionModeState, error)
-	SessionConfigOptions(context.Context, session.Session) ([]acp.SessionConfigOption, error)
-	SessionModels(context.Context, session.Session) (*acp.SessionModelState, error)
-	AvailableCommands(context.Context, string) ([]acp.AvailableCommand, error)
-	PromptCapabilities(context.Context) (acp.PromptCapabilities, error)
+// PresentationSource is the protocol-neutral read model used behind the
+// AppServer Presentation capability. Product writes belong to the focused
+// Configuration command service; ACP fallback providers are normalized at
+// this Host-private boundary and never flow into the local adapter.
+type PresentationSource interface {
+	SessionModes(context.Context, session.Session) (*appserver.PresentationModeState, error)
+	SessionConfigOptions(context.Context, session.Session) ([]appserver.PresentationConfigOption, error)
+	SessionModels(context.Context, session.Session) (*appserver.PresentationModelState, error)
+	AvailableCommands(context.Context, string) ([]appserver.PresentationCommand, error)
+	PromptCapabilities(context.Context) (appserver.PresentationCapabilities, error)
 }
 
 func (s *runtimeComposition) Models() ModelService {
@@ -70,16 +71,16 @@ func (s *Stack) ControlStatus() StatusService {
 	return s.composition.Status()
 }
 
-func (s *Stack) ACPSurface(modes acp.ModeProvider, useFallbackModes bool, configs acp.ConfigProvider) ACPPresentationService {
+func (s *Stack) PresentationSource(modes acp.ModeProvider, useFallbackModes bool, configs acp.ConfigProvider) PresentationSource {
 	if s == nil {
-		return newGatewayACPSurface(gatewayACPSurfaceDeps{}, modes, useFallbackModes, configs)
+		return newGatewayPresentationSource(gatewayPresentationSourceDeps{}, modes, useFallbackModes, configs)
 	}
 	composition := &s.composition
 	status := composition.Status()
 	agents := composition.Agents()
 	bindingStatus := s.AgentBindings()
 	lookup := composition.lookup
-	return newGatewayACPSurface(gatewayACPSurfaceDeps{
+	return newGatewayPresentationSource(gatewayPresentationSourceDeps{
 		sessions:         composition.sessions,
 		appName:          composition.authorities.appName,
 		userID:           composition.authorities.userID,
@@ -138,13 +139,13 @@ func (s ModelService) Config(alias string) (ModelConfig, bool) {
 // authenticateModelProvider runs the Control-owned interactive authentication
 // effect behind the recoverable Host configuration command. It is deliberately
 // not exposed through ModelService: discovery and completion are read-only.
-func (s *Stack) authenticateModelProvider(ctx context.Context, req modelconfig.AuthenticateRequest) error {
+func (s *controlCommandBackend) authenticateModelProvider(ctx context.Context, req modelconfig.AuthenticateRequest) error {
 	if s == nil {
-		return fmt.Errorf("gatewayapp: stack is unavailable")
+		return fmt.Errorf("gatewayapp: control command backend is unavailable")
 	}
 	template, ok := modelconfig.LookupProvider(req.Provider)
 	if ok && template.AuthFlow == modelconfig.AuthFlowCodexOAuth {
-		if s.composition.authorities.codexAuth == nil {
+		if s.composition == nil || s.composition.authorities.codexAuth == nil {
 			return fmt.Errorf("gatewayapp: codex authentication is unavailable")
 		}
 		return s.composition.authorities.codexAuth.EnsureAuthenticated(ctx, codexauth.LoginOptions{
@@ -154,7 +155,7 @@ func (s *Stack) authenticateModelProvider(ctx context.Context, req modelconfig.A
 		})
 	}
 	if ok && template.AuthFlow == modelconfig.AuthFlowGrokOAuth {
-		if s.composition.authorities.grokAuth == nil {
+		if s.composition == nil || s.composition.authorities.grokAuth == nil {
 			return fmt.Errorf("gatewayapp: grok authentication is unavailable")
 		}
 		return s.composition.authorities.grokAuth.EnsureAuthenticated(ctx, grokauth.LoginOptions{

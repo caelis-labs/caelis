@@ -31,7 +31,7 @@ type pluginOperationReceipt struct {
 	RecordedAt   time.Time         `json:"recorded_at"`
 }
 
-func (s *Stack) pluginOperationReceiptDir() string {
+func (s *controlCommandBackend) pluginOperationReceiptDir() string {
 	if s == nil || strings.TrimSpace(s.composition.authorities.storeDir) == "" {
 		return ""
 	}
@@ -57,7 +57,7 @@ func pluginOperationReceiptPath(dir, principalID, operationID string) (string, e
 	return path, nil
 }
 
-func (s *Stack) writePluginOperationReceipt(ctx context.Context, receipt pluginOperationReceipt) error {
+func (s *controlCommandBackend) writePluginOperationReceipt(ctx context.Context, receipt pluginOperationReceipt) error {
 	if s == nil {
 		return errors.New("gatewayapp: plugin operation receipt store is unavailable")
 	}
@@ -96,7 +96,7 @@ func (s *Stack) writePluginOperationReceipt(ctx context.Context, receipt pluginO
 	return nil
 }
 
-func (s *Stack) loadPluginOperationReceipt(ctx context.Context, principalID, operationID, digest string) (pluginOperationReceipt, bool, error) {
+func (s *controlCommandBackend) loadPluginOperationReceipt(ctx context.Context, principalID, operationID, digest string) (pluginOperationReceipt, bool, error) {
 	if s == nil {
 		return pluginOperationReceipt{}, false, errors.New("gatewayapp: plugin operation receipt store is unavailable")
 	}

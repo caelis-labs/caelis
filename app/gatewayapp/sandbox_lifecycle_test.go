@@ -10,7 +10,7 @@ import (
 )
 
 func (s *Stack) runSandboxLifecycle(ctx context.Context, action sandboxLifecycleAction) (SandboxStatus, error) {
-	target, err := s.selectSandboxLifecycleTarget(s.composition.sandbox)
+	target, err := s.commandBackend.selectSandboxLifecycleTarget(s.composition.sandbox)
 	if err != nil {
 		return SandboxStatus{}, err
 	}
@@ -18,7 +18,7 @@ func (s *Stack) runSandboxLifecycle(ctx context.Context, action sandboxLifecycle
 		return s.runtimeProjection().SandboxStatus(), nil
 	}
 	defer func() { _ = target.Close() }()
-	return s.sandboxLifecycleStatus(target), action(ctx, target.Runtime)
+	return s.commandBackend.sandboxLifecycleStatus(target), action(ctx, target.Runtime)
 }
 
 func TestPrepareSandboxUsesCurrentLifecycleRuntime(t *testing.T) {
@@ -49,7 +49,7 @@ func TestSandboxStatusForWorkspaceDoesNotReuseStartupRuntimeSetup(t *testing.T) 
 		Root: "/workspace", Counts: map[string]int{"write_roots": 2},
 	}}}
 	stack := sandboxLifecycleTestStack(runtime, "windows")
-	stack.composition.sandbox = mergeSandboxConfig(stack.composition.sandboxPersisted, stack.composition.runtimeProcessSnapshot().sandboxOverride)
+	stack.composition.sandbox = mergeSandboxConfig(stack.composition.process.sandboxPersisted, stack.composition.runtimeProcessSnapshot().sandboxOverride)
 
 	startup := stack.ControlStatus().SandboxForWorkspace(session.WorkspaceRef{Key: "startup", CWD: "/workspace"})
 	if startup.WorkspaceSetupRoot != "/workspace" || startup.WorkspaceSetupWriteRoots != 2 {
@@ -104,7 +104,7 @@ func TestSandboxLifecycleUsesTemporaryRuntimeWhenCurrentCannotHandleLifecycle(t 
 	stack.composition.authorities.storeDir = "/store"
 
 	var factoryCalls int
-	stack.sandboxLifecycleFactory = func(cfg sandbox.Config, current sandbox.Runtime) (sandbox.LifecycleTarget, error) {
+	stack.commandBackend.sandboxLifecycleFactory = func(cfg sandbox.Config, current sandbox.Runtime) (sandbox.LifecycleTarget, error) {
 		factoryCalls++
 		if cfg.RequestedBackend != sandbox.BackendWindows {
 			t.Fatalf("factory cfg.RequestedBackend = %q, want windows", cfg.RequestedBackend)
@@ -146,7 +146,7 @@ func TestSandboxLifecycleSkipsHostBackend(t *testing.T) {
 	stack := sandboxLifecycleTestStack(runtime, "host")
 
 	var factoryCalls int
-	stack.sandboxLifecycleFactory = func(sandbox.Config, sandbox.Runtime) (sandbox.LifecycleTarget, error) {
+	stack.commandBackend.sandboxLifecycleFactory = func(sandbox.Config, sandbox.Runtime) (sandbox.LifecycleTarget, error) {
 		factoryCalls++
 		return sandbox.LifecycleTarget{NoOp: true}, nil
 	}
@@ -170,7 +170,7 @@ func TestSandboxLifecycleFactoryError(t *testing.T) {
 	current := newSandboxLifecycleTestRuntime("", sandbox.BackendHost)
 	stack := sandboxLifecycleTestStack(current, "windows")
 	wantErr := errors.New("factory failed")
-	stack.sandboxLifecycleFactory = func(sandbox.Config, sandbox.Runtime) (sandbox.LifecycleTarget, error) {
+	stack.commandBackend.sandboxLifecycleFactory = func(sandbox.Config, sandbox.Runtime) (sandbox.LifecycleTarget, error) {
 		return sandbox.LifecycleTarget{}, wantErr
 	}
 
@@ -208,7 +208,7 @@ func TestSandboxLifecycleTemporaryRuntimeWithoutCapabilityReturnsTemporaryStatus
 	current := newSandboxLifecycleTestRuntime("", sandbox.BackendHost)
 	temp := newSandboxLifecycleTestRuntime(sandbox.BackendWindows, sandbox.BackendCustom)
 	stack := sandboxLifecycleTestStack(current, "windows")
-	stack.sandboxLifecycleFactory = func(cfg sandbox.Config, _ sandbox.Runtime) (sandbox.LifecycleTarget, error) {
+	stack.commandBackend.sandboxLifecycleFactory = func(cfg sandbox.Config, _ sandbox.Runtime) (sandbox.LifecycleTarget, error) {
 		cfg.RequestedBackend = sandbox.BackendWindows
 		return sandbox.LifecycleTarget{Runtime: temp, Config: cfg}, nil
 	}
@@ -269,13 +269,15 @@ func TestCloseWorkspaceResourcesRetainsFailedRuntimeForRetry(t *testing.T) {
 
 func sandboxLifecycleTestStack(runtime sandbox.Runtime, requestedBackend string) *Stack {
 	configured := SandboxConfig{RequestedType: requestedBackend}
-	return &Stack{
+	stack := &Stack{
 		composition: runtimeComposition{
 			authorities: runtimeHostAuthorities{storeDir: "/store"},
 			workspace:   session.WorkspaceRef{CWD: "/workspace"}, sandbox: configured,
-			sandboxPersisted: cloneSandboxConfig(configured), exec: runtime,
+			process: &runtimeProcessState{sandboxPersisted: cloneSandboxConfig(configured)}, exec: runtime,
 		},
 	}
+	stack.commandBackend = &controlCommandBackend{composition: &stack.composition}
+	return stack
 }
 
 type sandboxLifecycleTestRuntime struct {

@@ -40,7 +40,7 @@ func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *te
 	}
 	failing := &completeFailingOperationStore{OperationStore: stack.operations}
 	firstCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
-		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: failing, Backend: stack,
+		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: failing, Backend: stack.commandBackend,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -61,9 +61,9 @@ func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	stack.acpPreparations = restartedPreparations
+	stack.commandBackend.acpPreparations = restartedPreparations
 	restartedCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
-		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: restartedOperations, Backend: stack,
+		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: restartedOperations, Backend: stack.commandBackend,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -76,14 +76,14 @@ func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *te
 	if starts := onboardingHelperStarts(t, marker); starts != 1 {
 		t.Fatalf("helper starts after observational recovery = %d, want 1", starts)
 	}
-	prepared, getErr := stack.acpPreparations.Get(context.Background(), recovered.Resource.Ref)
+	prepared, getErr := stack.commandBackend.acpPreparations.Get(context.Background(), recovered.Resource.Ref)
 	if getErr != nil || prepared.State != controlagents.PreparationStateReady || prepared.ContentDigest != recovered.Resource.Digest {
 		t.Fatalf("recovered preparation = %#v, %v", prepared, getErr)
 	}
 }
 
-func TestStackACPCommandRecoveryCapabilityIsExplicit(t *testing.T) {
-	stack := &Stack{}
+func TestControlCommandBackendRecoveryCapabilityIsExplicit(t *testing.T) {
+	backend := &controlCommandBackend{}
 	for _, test := range []struct {
 		action appserver.Action
 		want   bool
@@ -94,7 +94,7 @@ func TestStackACPCommandRecoveryCapabilityIsExplicit(t *testing.T) {
 		{action: appserver.ActionPrompt, want: false},
 		{action: appserver.Action("unknown.action"), want: false},
 	} {
-		if got := stack.CanRecoverControlCommand(test.action); got != test.want {
+		if got := backend.CanRecoverControlCommand(test.action); got != test.want {
 			t.Fatalf("CanRecoverControlCommand(%q) = %v, want %v", test.action, got, test.want)
 		}
 	}
@@ -208,7 +208,7 @@ func TestACPPrepareAndAuthenticationCommandsPersistExplicitChallenge(t *testing.
 	if err != nil || preparedReceipt.Outcome != appserver.OutcomeCommitted || preparedReceipt.Resource == nil {
 		t.Fatalf("PrepareACP() = %#v, %v", preparedReceipt, err)
 	}
-	challenge, err := stack.acpPreparations.Get(context.Background(), preparedReceipt.Resource.Ref)
+	challenge, err := stack.commandBackend.acpPreparations.Get(context.Background(), preparedReceipt.Resource.Ref)
 	if err != nil || challenge.State != controlagents.PreparationStateNeedsAuth || len(challenge.AuthenticationMethods) != 1 ||
 		challenge.AuthenticationMethods[0].ID != "agent-login" {
 		t.Fatalf("challenge preparation = %#v, %v", challenge, err)
@@ -221,7 +221,7 @@ func TestACPPrepareAndAuthenticationCommandsPersistExplicitChallenge(t *testing.
 	if err != nil || authReceipt.Outcome != appserver.OutcomeCommitted || authReceipt.Resource == nil {
 		t.Fatalf("PrepareACPAuthentication() = %#v, %v", authReceipt, err)
 	}
-	ready, err := stack.acpPreparations.Get(context.Background(), authReceipt.Resource.Ref)
+	ready, err := stack.commandBackend.acpPreparations.Get(context.Background(), authReceipt.Resource.Ref)
 	if err != nil || ready.State != controlagents.PreparationStateReady || ready.ParentRef != challenge.Ref ||
 		ready.SelectedAuthentication.MethodID != "agent-login" {
 		t.Fatalf("authenticated preparation = %#v, %v", ready, err)
@@ -400,7 +400,7 @@ func TestPrepareACPAuthenticationRejectsUnavailableTerminalCapabilityBeforeEffec
 	if got := currentConfigurationRevision(t, stack); got != expected {
 		t.Fatalf("rejected terminal auth changed revision to %d, want %d", got, expected)
 	}
-	observed, getErr := stack.acpPreparations.Get(context.Background(), parent.Ref)
+	observed, getErr := stack.commandBackend.acpPreparations.Get(context.Background(), parent.Ref)
 	if getErr != nil || observed.State != controlagents.PreparationStateNeedsAuth || observed.ContentDigest != parent.ContentDigest {
 		t.Fatalf("parent preparation after rejection = %#v, %v", observed, getErr)
 	}
@@ -409,7 +409,7 @@ func TestPrepareACPAuthenticationRejectsUnavailableTerminalCapabilityBeforeEffec
 func seedNeedsAuthACPPreparation(t *testing.T, stack *Stack, principalID, operationID string) controlagents.ACPPreparation {
 	t.Helper()
 	command := writeExternalAgentExecutable(t, t.TempDir(), "terminal-auth-acp")
-	planned, err := stack.acpPreparations.CreatePlanned(context.Background(), controlagents.ACPPreparation{
+	planned, err := stack.commandBackend.acpPreparations.CreatePlanned(context.Background(), controlagents.ACPPreparation{
 		State:        controlagents.PreparationStatePlanned,
 		PrincipalID:  principalID,
 		OperationID:  operationID,
@@ -432,7 +432,7 @@ func seedNeedsAuthACPPreparation(t *testing.T, stack *Stack, principalID, operat
 	needsAuth.AuthenticationMethods = []controlagents.AuthenticationChallengeMethod{{
 		ID: "terminal-login", Name: "Terminal login", Type: controlagents.AuthenticationTerminal,
 	}}
-	needsAuth, err = stack.acpPreparations.Save(context.Background(), planned.ContentDigest, needsAuth)
+	needsAuth, err = stack.commandBackend.acpPreparations.Save(context.Background(), planned.ContentDigest, needsAuth)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +442,7 @@ func seedNeedsAuthACPPreparation(t *testing.T, stack *Stack, principalID, operat
 func seedReadyACPPreparation(t *testing.T, stack *Stack, principalID, operationID string) controlagents.ACPPreparation {
 	t.Helper()
 	command := writeExternalAgentExecutable(t, t.TempDir(), "prepared-acp")
-	planned, err := stack.acpPreparations.CreatePlanned(context.Background(), controlagents.ACPPreparation{
+	planned, err := stack.commandBackend.acpPreparations.CreatePlanned(context.Background(), controlagents.ACPPreparation{
 		State:        controlagents.PreparationStatePlanned,
 		PrincipalID:  principalID,
 		OperationID:  operationID,
@@ -466,7 +466,7 @@ func seedReadyACPPreparation(t *testing.T, stack *Stack, principalID, operationI
 		ConnectionID: ready.Connection.ID, LaunchFingerprint: controlagents.LaunchFingerprint(ready.Connection.Launcher),
 		CWD: stack.composition.workspace.CWD, SelectedModelID: controlagents.DefaultRemoteModelID, DiscoveredAt: time.Now().UTC(),
 	}
-	ready, err = stack.acpPreparations.Save(context.Background(), planned.ContentDigest, ready)
+	ready, err = stack.commandBackend.acpPreparations.Save(context.Background(), planned.ContentDigest, ready)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,13 +492,17 @@ type warningACPCommandBackend struct {
 	recoverCalls atomic.Int32
 }
 
+func (b *warningACPCommandBackend) CanRecoverControlCommand(action appserver.Action) bool {
+	return b.commandBackend.CanRecoverControlCommand(action)
+}
+
 func (b *warningACPCommandBackend) ExecuteControlCommand(
 	ctx context.Context,
 	principal appserver.Principal,
 	action appserver.Action,
 	request any,
 ) (appserver.CommandResult, error) {
-	result, err := b.Stack.ExecuteControlCommand(ctx, principal, action, request)
+	result, err := b.commandBackend.ExecuteControlCommand(ctx, principal, action, request)
 	if err == nil && action == appserver.ActionACPAgentPrepare && result.Outcome == appserver.OutcomeCommitted {
 		result.Detail = warningACPCommandDetail
 	}
@@ -512,7 +516,7 @@ func (b *warningACPCommandBackend) RecoverControlCommand(
 	request any,
 ) (appserver.CommandResult, bool, error) {
 	b.recoverCalls.Add(1)
-	return b.Stack.RecoverControlCommand(ctx, principal, intent, request)
+	return b.commandBackend.RecoverControlCommand(ctx, principal, intent, request)
 }
 
 type blockingCompleteOperationStore struct {

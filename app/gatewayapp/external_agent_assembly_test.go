@@ -127,7 +127,7 @@ func TestProviderProfileBindingMaterializesFixedDirectHandle(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	runtimeCfg := stack.composition.runtimeProcessSnapshot().runtime
 	runtimeCfg.SystemPrompt = "shared base prompt"
-	stack.composition.processConfig.setRuntime(runtimeCfg)
+	stack.composition.process.config.setRuntime(runtimeCfg)
 
 	profile, err := stack.connectTestModel(ModelConfig{
 		Provider: "ollama", API: providers.APIOllama, Model: "deepseek-v4-pro",

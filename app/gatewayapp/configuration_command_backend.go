@@ -10,7 +10,7 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
-func (s *Stack) executeConfigurationCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
+func (s *controlCommandBackend) executeConfigurationCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
 	switch request.(type) {
 	case appserver.ConnectModelRequest, appserver.UseModelRequest, appserver.DeleteModelRequest:
 		return s.executeHostModelConfigurationCommand(ctx, action, request)

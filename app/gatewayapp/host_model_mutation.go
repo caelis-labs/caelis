@@ -23,7 +23,7 @@ type hostModelMutationResult struct {
 	Warning       error
 }
 
-func (s *Stack) connectModelsAtRevision(ctx context.Context, configs []ModelConfig, expected *uint64) (result hostModelMutationResult, returnErr error) {
+func (s *controlCommandBackend) connectModelsAtRevision(ctx context.Context, configs []ModelConfig, expected *uint64) (result hostModelMutationResult, returnErr error) {
 	if s == nil {
 		return result, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -113,7 +113,7 @@ func (s *Stack) connectModelsAtRevision(ctx context.Context, configs []ModelConf
 	return result, nil
 }
 
-func (s *Stack) useHostModelAtRevision(ctx context.Context, alias string, reasoningEffort string, expected *uint64) (result hostModelMutationResult, returnErr error) {
+func (s *controlCommandBackend) useHostModelAtRevision(ctx context.Context, alias string, reasoningEffort string, expected *uint64) (result hostModelMutationResult, returnErr error) {
 	if s == nil {
 		return result, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -158,7 +158,7 @@ func (s *Stack) useHostModelAtRevision(ctx context.Context, alias string, reason
 	return result, nil
 }
 
-func (s *Stack) deleteHostModelAtRevision(ctx context.Context, alias string, expected *uint64) (result hostModelMutationResult, returnErr error) {
+func (s *controlCommandBackend) deleteHostModelAtRevision(ctx context.Context, alias string, expected *uint64) (result hostModelMutationResult, returnErr error) {
 	if s == nil {
 		return result, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -216,7 +216,7 @@ func (s *Stack) deleteHostModelAtRevision(ctx context.Context, alias string, exp
 	return result, nil
 }
 
-func (s *Stack) loadModelConfigurationCandidate(ctx context.Context, expected *uint64) (AppConfig, *modelLookup, error) {
+func (s *controlCommandBackend) loadModelConfigurationCandidate(ctx context.Context, expected *uint64) (AppConfig, *modelLookup, error) {
 	if s == nil || s.composition.authorities.store == nil {
 		return AppConfig{}, nil, fmt.Errorf("gatewayapp: app config store unavailable")
 	}
@@ -240,7 +240,7 @@ func (s *Stack) loadModelConfigurationCandidate(ctx context.Context, expected *u
 	return doc, candidate, nil
 }
 
-func (s *Stack) persistModelConfiguration(ctx context.Context, doc AppConfig) (AppConfig, error, error) {
+func (s *controlCommandBackend) persistModelConfiguration(ctx context.Context, doc AppConfig) (AppConfig, error, error) {
 	saved, err := s.composition.authorities.store.CompareAndSave(contextOrBackground(ctx), doc.ConfigurationRevision, doc)
 	if err != nil && !configstore.WriteCommitted(err) {
 		return saved, nil, err
@@ -254,7 +254,7 @@ func (s *Stack) persistModelConfiguration(ctx context.Context, doc AppConfig) (A
 // observeCommittedModelConfiguration refreshes Host catalog/status state after
 // a CAS commit. It never rebuilds a Runtime; activated Sessions keep their
 // detached model and Agent assembly until release.
-func (s *Stack) observeCommittedModelConfiguration(ctx context.Context, committed AppConfig) error {
+func (s *controlCommandBackend) observeCommittedModelConfiguration(ctx context.Context, committed AppConfig) error {
 	if s == nil || s.composition.lookup == nil || s.composition.authorities.store == nil {
 		return errors.New("gatewayapp: model lookup unavailable after configuration commit")
 	}

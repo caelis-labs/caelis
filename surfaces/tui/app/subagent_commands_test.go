@@ -14,7 +14,7 @@ import (
 )
 
 type subagentDelegationStub struct {
-	controlprompt.Service
+	ControlServices
 	status      agentbinding.Status
 	bindRequest agentbinding.Binding
 	reset       agentbinding.Handle

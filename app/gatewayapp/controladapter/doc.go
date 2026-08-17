@@ -1,6 +1,8 @@
 // Package controladapter owns the Host-private, server-side dependency sets
-// used to assemble Control services. It is not a product client API: stable
-// capabilities belong to control/appserver and focused control packages.
+// used to assemble Control services. Its exported constructors and projection
+// types exist for repository-internal assembly and are not a downstream
+// compatibility API: stable capabilities belong to control/appserver and
+// focused control packages.
 //
 // The local subpackage is the only production package that consumes these
 // sets directly. Its NewAppServer function is the sole concrete Stack

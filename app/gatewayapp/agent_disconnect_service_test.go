@@ -188,6 +188,8 @@ func TestDisconnectACPCASAllowsOnlyOneConcurrentHostWriter(t *testing.T) {
 	sessions := sessionmemory.NewStore(sessionmemory.Config{})
 	first := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: makeStore()}, sessions: sessions}}
 	second := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: makeStore()}, sessions: sessions}}
+	testControlCommandBackend(first)
+	testControlCommandBackend(second)
 	type outcome struct {
 		result externalAgentMutationResult
 		err    error
@@ -197,7 +199,7 @@ func TestDisconnectACPCASAllowsOnlyOneConcurrentHostWriter(t *testing.T) {
 	wait.Add(2)
 	mutate := func(stack *Stack) {
 		defer wait.Done()
-		result, _, mutationErr := stack.disconnectACPAtRevision(ctx, "shared", expected)
+		result, _, mutationErr := stack.commandBackend.disconnectACPAtRevision(ctx, "shared", expected)
 		results <- outcome{result: result, err: mutationErr}
 	}
 	go mutate(first)

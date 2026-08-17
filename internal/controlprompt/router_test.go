@@ -295,7 +295,7 @@ func TestRouterHelpReturnsStructuredPayload(t *testing.T) {
 	svc := &fakeService{}
 	router := New(RouterConfig{
 		Service: svc,
-		CommandNames: func(context.Context, Service) []string {
+		CommandNames: func(context.Context, RouterService) []string {
 			return []string{"help", "status", "breeze"}
 		},
 	})
@@ -883,5 +883,5 @@ func (t *fakeTurn) SubmitApproval(context.Context, ApprovalDecision) error { ret
 func (t *fakeTurn) Cancel()                                                {}
 func (t *fakeTurn) Close() error                                           { return nil }
 
-var _ Service = (*fakeService)(nil)
+var _ RouterService = (*fakeService)(nil)
 var _ Turn = (*fakeTurn)(nil)

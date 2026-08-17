@@ -85,7 +85,7 @@ func (e *ACPAgentInstallError) CommandString() string {
 	return strings.Join(e.Command, " ")
 }
 
-func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base assembly.AgentConfig) (assembly.AgentConfig, error) {
+func (s *controlCommandBackend) installBuiltinACPAgent(ctx context.Context, name string, base assembly.AgentConfig) (assembly.AgentConfig, error) {
 	pkg, ok := builtinACPAdapterPackageFor(name)
 	if !ok {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: ACP agent %q does not support local npm install", strings.TrimSpace(name))
@@ -339,7 +339,7 @@ func defaultRunBuiltinACPAgentNPMInstall(ctx context.Context, req builtinACPAgen
 	return result, nil
 }
 
-func (s *Stack) managedACPAgentRoot() string {
+func (s *controlCommandBackend) managedACPAgentRoot() string {
 	if s == nil {
 		return ""
 	}
@@ -527,7 +527,7 @@ func managedACPInstallTreeSize(root string) int64 {
 // tree only after no persisted Connection can launch from it. New immutable
 // installations, caches, and staging directories live beside these legacy
 // entries and are not touched.
-func (s *Stack) cleanupLegacyManagedACPInstallIfUnused() {
+func (s *controlCommandBackend) cleanupLegacyManagedACPInstallIfUnused() {
 	if s == nil || s.composition.authorities.store == nil {
 		return
 	}

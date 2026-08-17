@@ -23,6 +23,9 @@ func (s *Stack) Skills() SkillService {
 	return s.runtimeProjection().Skills()
 }
 
-func (s *Stack) plugins() PluginService {
-	return s.runtimeProjection().Plugins()
+func (s *controlCommandBackend) plugins() PluginService {
+	if s == nil || s.composition == nil {
+		return PluginService{}
+	}
+	return s.composition.Plugins()
 }

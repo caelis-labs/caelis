@@ -29,6 +29,9 @@ func newSessionRuntimeAssemblyDeps(host *Stack) (sessionRuntimeAssemblyDeps, err
 		return sessionRuntimeAssemblyDeps{}, errors.New("gatewayapp: Session Runtime assembly Host is required")
 	}
 	runtimeRoot := &host.composition
+	if runtimeRoot.process == nil || runtimeRoot.process.config == nil {
+		return sessionRuntimeAssemblyDeps{}, errors.New("gatewayapp: Session Runtime process configuration source is required")
+	}
 	mailbox := runtimeRoot.authorities.hostedChildMailbox
 	if mailbox == nil {
 		return sessionRuntimeAssemblyDeps{}, errors.New("gatewayapp: hosted child mailbox is required")
@@ -45,6 +48,6 @@ func newSessionRuntimeAssemblyDeps(host *Stack) (sessionRuntimeAssemblyDeps, err
 	return sessionRuntimeAssemblyDeps{
 		authorities:   authorities,
 		modelCatalog:  runtimeRoot.lookup,
-		processConfig: runtimeRoot.processConfig,
+		processConfig: runtimeRoot.process.config,
 	}, nil
 }

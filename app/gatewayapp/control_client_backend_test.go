@@ -348,7 +348,7 @@ func TestCommittedCommandKeepsOutcomeWhenFeedPrimeFailsAndLedgerReplays(t *testi
 			gateway:     kernel,
 		},
 	}
-	backend := &countingControlClientBackend{backend: stack}
+	backend := &countingControlClientBackend{backend: &controlCommandBackend{composition: &stack.composition}}
 	commands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
 		Authorizer: controlClientAllowAuthorizer{},
 		Operations: appserver.NewMemoryOperationStore(),
@@ -421,7 +421,7 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 		},
 	}
 	expected := active.Revision
-	result, err := stack.ExecuteControlCommand(ctx, appserver.Principal{ID: "owner"}, appserver.ActionSessionClose, appserver.CloseSessionRequest{
+	result, err := testControlCommandBackend(stack).ExecuteControlCommand(ctx, appserver.Principal{ID: "owner"}, appserver.ActionSessionClose, appserver.CloseSessionRequest{
 		WriteBase: appserver.WriteBase{SessionID: active.SessionID, ExpectedRevision: &expected},
 	})
 	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision <= active.Revision {
@@ -443,7 +443,7 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err = stack.ExecuteControlCommand(ctx, appserver.Principal{ID: "owner"}, appserver.ActionPrompt, appserver.PromptRequest{
+	result, err = stack.commandBackend.ExecuteControlCommand(ctx, appserver.Principal{ID: "owner"}, appserver.ActionPrompt, appserver.PromptRequest{
 		WriteBase: appserver.WriteBase{SessionID: active.SessionID}, Input: "must be rejected",
 	})
 	if !errors.Is(err, appserver.ErrSessionClosed) || result.Revision != current.Revision {
@@ -496,7 +496,7 @@ func TestControlClientPromptUsesHostLifecycleAfterAdmission(t *testing.T) {
 	}
 
 	admissionCtx, cancelAdmission := context.WithCancel(context.Background())
-	result, err := stack.ExecuteControlCommand(
+	result, err := testControlCommandBackend(stack).ExecuteControlCommand(
 		admissionCtx,
 		appserver.Principal{ID: "owner"},
 		appserver.ActionPrompt,
@@ -579,7 +579,7 @@ func TestControlClientParticipantPromptUsesHostLifecycleAfterAdmission(t *testin
 	}
 
 	admissionCtx, cancelAdmission := context.WithCancel(context.Background())
-	result, err := stack.ExecuteControlCommand(
+	result, err := testControlCommandBackend(stack).ExecuteControlCommand(
 		admissionCtx,
 		appserver.Principal{ID: "owner"},
 		appserver.ActionParticipantPrompt,
@@ -673,7 +673,7 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	commands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
 		Authorizer: appserver.SessionAuthorizer{Sessions: sessions},
 		Operations: appserver.NewMemoryOperationStore(),
-		Backend:    stack,
+		Backend:    testControlCommandBackend(stack),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -808,7 +808,7 @@ func TestControlClientCancelParticipantRejectsMainTurnWithArbitraryParticipantID
 	stack := &Stack{
 		composition: runtimeComposition{sessions: sessions, gateway: kernel},
 	}
-	result, err := stack.ExecuteControlCommand(ctx, appserver.Principal{ID: "owner"}, appserver.ActionParticipantCancel, appserver.CancelParticipantRequest{
+	result, err := testControlCommandBackend(stack).ExecuteControlCommand(ctx, appserver.Principal{ID: "owner"}, appserver.ActionParticipantCancel, appserver.CancelParticipantRequest{
 		WriteBase: appserver.WriteBase{SessionID: active.SessionID}, ParticipantID: "not-the-main-turn",
 		Target: appserver.TurnTarget{HandleID: started.Handle.HandleID(), RunID: started.Handle.RunID(), TurnID: started.Handle.TurnID()},
 	})

@@ -25,7 +25,7 @@ func (s *Stack) connectTestModel(cfg ModelConfig) (modelprofile.ModelProfile, er
 }
 
 func (s *Stack) connectTestModels(configs []ModelConfig) ([]modelprofile.ModelProfile, error) {
-	result, err := s.connectModelsAtRevision(context.Background(), configs, nil)
+	result, err := s.commandBackend.connectModelsAtRevision(context.Background(), configs, nil)
 	resultErr := errors.Join(err, result.Warning)
 	doc, loadErr := s.composition.authorities.store.Load()
 	if loadErr != nil {
@@ -60,7 +60,7 @@ func (s *Stack) useTestHostModel(ctx context.Context, ref session.SessionRef, al
 	if len(reasoningEffort) > 0 {
 		reasoning = strings.TrimSpace(reasoningEffort[0])
 	}
-	result, err := s.useHostModelAtRevision(ctx, alias, reasoning, nil)
+	result, err := s.commandBackend.useHostModelAtRevision(ctx, alias, reasoning, nil)
 	return errors.Join(err, result.Warning)
 }
 
@@ -68,6 +68,6 @@ func (s *Stack) deleteTestHostModel(ctx context.Context, ref session.SessionRef,
 	if strings.TrimSpace(ref.SessionID) != "" {
 		return errors.New("gatewayapp: Host model deletion must not address a Session")
 	}
-	result, err := s.deleteHostModelAtRevision(ctx, alias, nil)
+	result, err := s.commandBackend.deleteHostModelAtRevision(ctx, alias, nil)
 	return errors.Join(err, result.Warning)
 }

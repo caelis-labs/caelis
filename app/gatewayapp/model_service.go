@@ -32,14 +32,14 @@ func (s *runtimeComposition) setRuntimeDefaultModelFromLookup() {
 }
 
 func (s *runtimeComposition) setRuntimeModel(profileID string, cfg ModelConfig) {
-	if s == nil || s.processConfig == nil {
+	if s == nil || s.process == nil || s.process.config == nil {
 		return
 	}
 	runtimeCfg := s.runtimeProcessSnapshot().runtime
 	runtimeCfg.ModelProfileID = modelprofile.NormalizeID(profileID)
 	runtimeCfg.ModelProfileEffort = strings.ToLower(strings.TrimSpace(cfg.ReasoningEffort))
 	runtimeCfg.Model = cfg
-	s.processConfig.setRuntime(runtimeCfg)
+	s.process.config.setRuntime(runtimeCfg)
 }
 
 // ListModelAliases returns the current session override plus resolver-known

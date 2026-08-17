@@ -10,7 +10,7 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
-func (s *Stack) executeAgentCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
+func (s *controlCommandBackend) executeAgentCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
 	switch typed := request.(type) {
 	case appserver.PrepareACPRequest:
 		if action != appserver.ActionACPAgentPrepare {

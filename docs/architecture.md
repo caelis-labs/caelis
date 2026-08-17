@@ -332,11 +332,17 @@ Document responsibilities are intentionally separate:
   projections. The root package does not import the concrete Host. Every other
   production package
   depends on `control/appserver`, a focused Control contract, or the composed
-  `local` adapter; the root adapter package is not a product-client API.
+  `local` adapter; the root adapter package is not a product-client API. The
+  exported constructors and projection types under `app/gatewayapp` and its
+  adapter packages exist for repository-internal assembly, not downstream Go
+  source compatibility. `control/appserver` and focused `control/*` contracts
+  are the supported product boundaries.
   Production `app/*` code does not import `surfaces/*`. Do not add
-  product-client operations to the private `internal/controlprompt.Service`
-  aggregate or recreate `ports/*`; stable capabilities belong in coherent
-  `control/*` packages. The TUI uses external
+  product-client operations to the private `internal/controlprompt.RouterService`
+  or recreate `ports/*`; stable capabilities belong in coherent `control/*`
+  packages. The shared router consumes only prompt-routing facets; the TUI owns
+  its additional mode, completion, plugin, connector, and binding aggregate.
+  The TUI uses external
   ACP connections only as Side ACP participants; it does not bind an external
   ACP endpoint as the Session's main controller or project that endpoint's
   slash/model catalog. A legacy ACP-controller Session cannot be resumed or
@@ -415,21 +421,30 @@ concrete Host `gatewayapp.Stack`, and activated Sessions use private
 `sessionRuntimeInstance` values. `Stack`, `sessionRuntimeInstance`, and their
 shared private `runtimeComposition` implementation remain Host-owned lifecycle
 details rather than stable package contracts. `Stack` owns its composition as a
-named private field; `runtimeComposition` exports no state, so only deliberate
+named private field; `runtimeComposition` exports no state. Its Host-only
+`runtimeProcessState` and detached `sessionRuntimeActivation` make mutable
+process publication and immutable activation selection distinct. Host startup
+also names Control-service assembly and Runtime activation as separate private
+phases without exposing either as a reusable product API. Only deliberate
 focused service getters cross the package boundary. Authorized Runtime leases
 remain request-scoped and expose focused service selections rather than a wide
 function bag. Reconnect live-state observation, Participant handle projection,
 and Task child-history fallback use dedicated private readers instead of Stack
 pass-throughs. Full Plugin mutation remains behind the principal-bound AppServer
-command service rather than a public Stack getter. Direct Stack mirrors of
-execution, configuration revision, Model, Agent, Status, Runtime acquisition,
+command service rather than a public Stack getter. The command service delegates
+to a private command backend that owns command-scoped state and a once-bound
+Runtime registry, not to `Stack` or bound Stack methods. Presentation reads are
+normalized by the Host-private `PresentationSource` into `control/appserver`
+types before they reach `controladapter/local`; ACP fallback providers are
+accepted only as inputs to that normalization boundary. Direct Stack mirrors
+of execution, configuration revision, Model, Agent, Status, Runtime acquisition,
 workspace, preparation, and Agent-message service methods are not parallel
-entry points. Architecture
-and structural gates enforce the private adapter consumer boundary, reject
-concrete Stack use and the retired wide Runtime view in local leaf adapters,
-reject anonymous Host composition, freeze deliberate public Stack methods, and
-prevent Registry, Runtime instance, and assembly types from retaining a
-concrete Host `Stack` or the Host root `runtimeComposition`.
+entry points. Architecture and structural gates enforce the private adapter
+consumer boundary, reject concrete Stack use in local leaf adapters, reject ACP
+wire types in local presentation assembly, reject anonymous Host composition,
+freeze deliberate public Stack methods, and prevent Registry, Runtime instance,
+assembly, command backend, and focused projection types from retaining a
+concrete Host `Stack` or the Host root `runtimeComposition` where prohibited.
 
 ## SDK Boundary
 

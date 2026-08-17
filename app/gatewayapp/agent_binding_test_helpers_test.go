@@ -101,7 +101,7 @@ func (s testAgentBindingService) commands() appserver.AgentCommandService {
 	commands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
 		Authorizer: appserver.ProductCommandAuthorizer{},
 		Operations: appserver.NewMemoryOperationStore(),
-		Backend:    s.stack,
+		Backend:    testControlCommandBackend(s.stack),
 	})
 	if err != nil {
 		panic(err)

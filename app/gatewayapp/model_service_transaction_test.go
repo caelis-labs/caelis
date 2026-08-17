@@ -217,7 +217,7 @@ func TestProviderCredentialCASLoserRestoresCommittedWinner(t *testing.T) {
 	loser := winner
 	loser.Model = "gpt-loser"
 	loser.Token = "loser-secret"
-	_, credentialTxn, err := stack.prepareProviderCredentials(ctx, []ModelConfig{loser})
+	_, credentialTxn, err := stack.commandBackend.prepareProviderCredentials(ctx, []ModelConfig{loser})
 	if err != nil {
 		t.Fatal(err)
 	}

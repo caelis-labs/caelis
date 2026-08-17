@@ -281,8 +281,8 @@ func TestFutureSessionActivationUsesLatestHostProcessConfig(t *testing.T) {
 	if activated.activeRuntime.Model.ID != modelID || activated.activeRuntime.ModelProfileEffort != "high" {
 		t.Fatalf("activated model = %q/%q, want %q/high", activated.activeRuntime.Model.ID, activated.activeRuntime.ModelProfileEffort, modelID)
 	}
-	if activated.pinnedChildControlURL != controlURL || activated.pinnedChildControlTokenFile != tokenFile {
-		t.Fatalf("activated child control = %q/%q, want %q/%q", activated.pinnedChildControlURL, activated.pinnedChildControlTokenFile, controlURL, tokenFile)
+	if activated.activation == nil || activated.activation.childControlURL != controlURL || activated.activation.childControlTokenFile != tokenFile {
+		t.Fatalf("activated child control = %#v, want %q/%q", activated.activation, controlURL, tokenFile)
 	}
 	self, ok := agentConfigForToolTest(activated.activeRuntime.Assembly.Agents, "self")
 	if !ok {
@@ -765,7 +765,7 @@ func TestSessionRuntimeReleaseWaitsForRoutedControlMutation(t *testing.T) {
 
 	commandDone := make(chan error, 1)
 	go func() {
-		_, commandErr := stack.ExecuteControlCommand(
+		_, commandErr := stack.commandBackend.ExecuteControlCommand(
 			ctx,
 			appserver.Principal{ID: "local-user"},
 			appserver.ActionControllerHandoff,
@@ -999,7 +999,7 @@ func TestSetSandboxBackendRollsBackWhenRequiredBackendIsUnavailable(t *testing.T
 	t.Cleanup(func() { _ = stack.Close() })
 	before := cloneSandboxConfig(stack.composition.sandbox)
 
-	_, _, err = stack.setSandboxBackendAtRevision(ctx, "auto", nil)
+	_, _, err = stack.commandBackend.setSandboxBackendAtRevision(ctx, "auto", nil)
 	if err == nil {
 		t.Skip("platform-required sandbox backend is available; unavailable rollback path is not applicable")
 	}
@@ -2213,7 +2213,7 @@ func assertSessionRuntimeIsolationContract(t *testing.T, host *Stack, instance *
 	if instance.lookup == host.composition.lookup || instance.placementCache == host.composition.placementCache {
 		t.Fatal("Session Runtime shared mutable model or placement configuration")
 	}
-	if instance.processConfig != nil {
+	if instance.process != nil {
 		t.Fatal("Session Runtime retained the mutable process configuration source")
 	}
 	if instance.authorities.appName != host.composition.authorities.appName ||
@@ -2229,7 +2229,7 @@ func assertSessionRuntimeIsolationContract(t *testing.T, host *Stack, instance *
 		instance.authorities.grokAuth != host.composition.authorities.grokAuth ||
 		instance.authorities.apiKeyCredentials != host.composition.authorities.apiKeyCredentials ||
 		instance.authorities.providerUsage != host.composition.authorities.providerUsage ||
-		instance.modelCatalog != host.composition.lookup ||
+		instance.activation == nil || instance.activation.modelCatalog != host.composition.lookup ||
 		instance.authorities.sessionModelPins != host.composition.authorities.sessionModelPins ||
 		instance.authorities.hostedChildMailbox == nil {
 		t.Fatal("Session Runtime did not receive the required borrowed Host authorities")

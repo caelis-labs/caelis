@@ -96,10 +96,6 @@ type PluginAssemblyDeps struct {
 	Plugin PluginRuntimeDeps
 }
 
-func (d PluginAssemblyDeps) runtimeDeps() *runtimeDeps {
-	return &runtimeDeps{Plugin: d.Plugin}
-}
-
 // NewStatusAssemblerForSession binds the status assembler to an already
 // authorized Session. It is server composition, not a presentation client.
 func NewStatusAssemblerForSession(ctx context.Context, deps StatusAssemblyDeps, active session.Session, bindingKey, modelText string) (StatusAssembler, error) {
@@ -140,6 +136,6 @@ func NewCompletionAssemblerForHost(deps CompletionAssemblyDeps, bindingKey, mode
 
 // NewPluginAssemblerForHost constructs Host-owned plugin and marketplace
 // configuration without a Session address.
-func NewPluginAssemblerForHost(deps PluginAssemblyDeps, bindingKey, modelText string) PluginAssembler {
-	return newHostAssembler(deps.runtimeDeps(), bindingKey, modelText)
+func NewPluginAssemblerForHost(deps PluginAssemblyDeps) PluginAssembler {
+	return &pluginAssembler{deps: deps.Plugin}
 }

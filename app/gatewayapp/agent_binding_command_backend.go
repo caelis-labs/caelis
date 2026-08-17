@@ -18,7 +18,7 @@ type agentBindingMutationResult struct {
 	Warning       error
 }
 
-func (s *Stack) executeAgentBindingCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
+func (s *controlCommandBackend) executeAgentBindingCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
 	result, err := s.mutateAgentBindingsAtRevision(ctx, action, request)
 	commandResult := configurationCommandResult(result.Revision)
 	if result.Warning != nil {
@@ -27,7 +27,7 @@ func (s *Stack) executeAgentBindingCommand(ctx context.Context, action appserver
 	return commandResult, classifyAgentBindingMutationError(result, err)
 }
 
-func (s *Stack) mutateAgentBindingsAtRevision(ctx context.Context, action appserver.Action, request any) (agentBindingMutationResult, error) {
+func (s *controlCommandBackend) mutateAgentBindingsAtRevision(ctx context.Context, action appserver.Action, request any) (agentBindingMutationResult, error) {
 	result := agentBindingMutationResult{}
 	expected, update, err := agentBindingMutation(action, request)
 	if err != nil {
@@ -129,7 +129,7 @@ func agentBindingMutation(
 	return 0, nil, errorcode.New(errorcode.InvalidArgument, fmt.Sprintf("gatewayapp: Agent binding request/action mismatch for %q", action))
 }
 
-func (s *Stack) reconcileCommittedAgentBindings(ctx context.Context) error {
+func (s *controlCommandBackend) reconcileCommittedAgentBindings(ctx context.Context) error {
 	if s == nil || s.composition.authorities.store == nil {
 		return errors.New("gatewayapp: Agent binding configuration is unavailable")
 	}

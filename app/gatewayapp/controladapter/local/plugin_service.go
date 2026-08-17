@@ -3,7 +3,6 @@ package local
 import (
 	"context"
 	"errors"
-	"strings"
 
 	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -87,7 +86,7 @@ func (s *PluginService) hostAdapter(principal appserver.Principal, req appserver
 	if err := authorizeHostCapability(principal); err != nil {
 		return nil, err
 	}
-	return controladapter.NewPluginAssemblerForHost(*s.hostDeps, strings.TrimSpace(req.Surface), ""), nil
+	return controladapter.NewPluginAssemblerForHost(*s.hostDeps), nil
 }
 
 var _ appserver.PluginService = (*PluginService)(nil)

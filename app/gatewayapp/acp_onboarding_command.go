@@ -25,7 +25,7 @@ type acpPreparationEffectResult struct {
 	Warning       error
 }
 
-func (*Stack) CanRecoverControlCommand(action appserver.Action) bool {
+func (*controlCommandBackend) CanRecoverControlCommand(action appserver.Action) bool {
 	return recoverableACPCommandAction(action) || recoverablePluginCommandAction(action)
 }
 
@@ -43,7 +43,7 @@ func recoverableACPCommandAction(action appserver.Action) bool {
 // process, auth, install, marketplace fetch, Session, or configuration effects.
 // Pure AppConfig mutations remain conservatively unknown when only an intent
 // exists because their domain state is not operation-attributable.
-func (s *Stack) RecoverControlCommand(
+func (s *controlCommandBackend) RecoverControlCommand(
 	ctx context.Context,
 	principal appserver.Principal,
 	intent appserver.OperationIntent,
@@ -82,7 +82,7 @@ func (s *Stack) RecoverControlCommand(
 	}), true, nil
 }
 
-func (s *Stack) prepareACPAtRevision(
+func (s *controlCommandBackend) prepareACPAtRevision(
 	ctx context.Context,
 	principal appserver.Principal,
 	req appserver.PrepareACPRequest,
@@ -212,7 +212,7 @@ func (s *Stack) prepareACPAtRevision(
 	return result, nil
 }
 
-func (s *Stack) prepareACPAuthenticationAtRevision(
+func (s *controlCommandBackend) prepareACPAuthenticationAtRevision(
 	ctx context.Context,
 	principal appserver.Principal,
 	req appserver.PrepareACPAuthenticationRequest,
@@ -302,7 +302,7 @@ func (s *Stack) prepareACPAuthenticationAtRevision(
 	return result, nil
 }
 
-func (s *Stack) connectPreparedACPAtRevision(
+func (s *controlCommandBackend) connectPreparedACPAtRevision(
 	ctx context.Context,
 	principal appserver.Principal,
 	req appserver.ConnectACPRequest,
@@ -374,7 +374,7 @@ func (s *Stack) connectPreparedACPAtRevision(
 	return mutation, profile, nil
 }
 
-func (s *Stack) preflightACPPreparation(ctx context.Context, expected uint64) error {
+func (s *controlCommandBackend) preflightACPPreparation(ctx context.Context, expected uint64) error {
 	doc, err := s.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
 		return err
@@ -393,10 +393,10 @@ type ACPPreparationReadService struct {
 
 // ACPPreparationReads returns the focused preparation read authority.
 func (s *Stack) ACPPreparationReads() ACPPreparationReadService {
-	if s == nil {
+	if s == nil || s.commandBackend == nil {
 		return ACPPreparationReadService{}
 	}
-	return ACPPreparationReadService{store: s.acpPreparations}
+	return ACPPreparationReadService{store: s.commandBackend.acpPreparations}
 }
 
 // Preparation loads one preparation owned by the bound principal.
@@ -414,7 +414,7 @@ func (s ACPPreparationReadService) Preparation(ctx context.Context, principalID 
 	}
 }
 
-func (s *Stack) ownedACPPreparation(ctx context.Context, principalID, ref, digest string) (controlagents.ACPPreparation, error) {
+func (s *controlCommandBackend) ownedACPPreparation(ctx context.Context, principalID, ref, digest string) (controlagents.ACPPreparation, error) {
 	if s == nil {
 		return controlagents.ACPPreparation{}, errors.New("gatewayapp: ACP preparation is unavailable")
 	}
@@ -485,7 +485,7 @@ func preparationChallengeMethod(methods []controlagents.AuthenticationChallengeM
 	return controlagents.AuthenticationChallengeMethod{}, false
 }
 
-func (s *Stack) saveACPPreparationWarning(ctx context.Context, preparation controlagents.ACPPreparation) (controlagents.ACPPreparation, error) {
+func (s *controlCommandBackend) saveACPPreparationWarning(ctx context.Context, preparation controlagents.ACPPreparation) (controlagents.ACPPreparation, error) {
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(contextOrBackground(ctx)), 5*time.Second)
 	defer cancel()
 	return s.acpPreparations.Save(saveCtx, preparation.ContentDigest, preparation)

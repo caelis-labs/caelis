@@ -192,6 +192,18 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "",
 		},
 		{
+			name:       "local presentation adapter rejects ACP wire types",
+			rel:        "app/gatewayapp/controladapter/local/presentation_service.go",
+			importPath: modulePath + "/protocol/acp/schema",
+			want:       "controladapter/local presentation must consume protocol-neutral control/appserver types, not ACP wire types",
+		},
+		{
+			name:       "local terminal adapter accepts independent Task projection",
+			rel:        "app/gatewayapp/controladapter/local/terminal_service.go",
+			importPath: modulePath + "/protocol/acp/taskstream",
+			want:       "",
+		},
+		{
 			name:       "CLI accepts composed local adapter",
 			rel:        "internal/cli/host_clients.go",
 			importPath: modulePath + "/app/gatewayapp/controladapter/local",
@@ -447,22 +459,6 @@ func project(reads gatewayapp.KernelReadService) {}
 	rule, subject, _ := semanticRuleForSource(t, "app/gatewayapp/controladapter/local/local_stack.go", source, modulePath)
 	if rule != "" || subject != "" {
 		t.Fatalf("semantic rule = (%q, %q), want focused gateway service allowed", rule, subject)
-	}
-}
-
-func TestSemanticBoundaryRuleRejectsWideGatewayRuntimeViewInLocalAdapter(t *testing.T) {
-	t.Parallel()
-
-	const modulePath = "github.com/caelis-labs/caelis"
-	source := `package local
-
-import "github.com/caelis-labs/caelis/app/gatewayapp"
-
-func project(view *gatewayapp.ControlRuntimeView) {}
-`
-	rule, subject, _ := semanticRuleForSource(t, "app/gatewayapp/controladapter/local/local_stack.go", source, modulePath)
-	if !strings.Contains(rule, "focused gatewayapp services") || subject != "gatewayapp.ControlRuntimeView" {
-		t.Fatalf("semantic rule = (%q, %q), want wide Runtime view rejection", rule, subject)
 	}
 }
 

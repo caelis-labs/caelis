@@ -619,5 +619,5 @@ func closedEnvelopeChannel() <-chan eventstream.Envelope {
 	return closed
 }
 
-var _ controlprompt.Service = (*SessionClientAdapter)(nil)
+var _ controlprompt.RouterService = (*SessionClientAdapter)(nil)
 var _ controlprompt.Turn = (*sessionClientTurn)(nil)

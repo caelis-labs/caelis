@@ -30,7 +30,7 @@ func TestResolveACPConnectionLauncherUsesExistingGlobalAdapter(t *testing.T) {
 		return nil
 	}
 
-	connection, err := (&Stack{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
+	connection, err := (&controlCommandBackend{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
 		AdapterID: "claude", Launcher: controlagents.LauncherChoiceGlobal,
 	})
 	if err != nil {
@@ -64,7 +64,7 @@ func TestResolveACPConnectionLauncherInstallsMissingGlobalAdapter(t *testing.T) 
 		return nil
 	}
 
-	connection, err := (&Stack{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
+	connection, err := (&controlCommandBackend{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
 		AdapterID: "codex", Launcher: controlagents.LauncherChoiceGlobal,
 	})
 	if err != nil {
@@ -80,7 +80,7 @@ func TestResolveACPConnectionLauncherUsesRegistryNPXMetadata(t *testing.T) {
 	npx := writeExternalAgentExecutable(t, binDir, "npx")
 	t.Setenv("PATH", binDir)
 
-	connection, err := (&Stack{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
+	connection, err := (&controlCommandBackend{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
 		AdapterID: "factory-droid", Launcher: controlagents.LauncherChoiceNPX,
 	})
 	if err != nil {
@@ -110,7 +110,7 @@ func TestResolveACPConnectionLauncherGlobalInstallFailureDoesNotFallbackToNPX(t 
 		return errors.New("permission denied")
 	}
 
-	connection, err := (&Stack{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
+	connection, err := (&controlCommandBackend{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
 		AdapterID: "claude", Launcher: controlagents.LauncherChoiceGlobal,
 	})
 	if err == nil || !strings.Contains(err.Error(), "permission denied") || connection.Launcher.Command != "" {

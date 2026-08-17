@@ -15,13 +15,13 @@ import (
 )
 
 type acpConnectControlStub struct {
-	controlprompt.Service
+	ControlServices
 	req          controlagents.ConnectRequest
 	disconnected string
 }
 
 type modelConnectControlStub struct {
-	controlprompt.Service
+	ControlServices
 	agents        []controlprompt.AgentCandidate
 	status        controlprompt.AgentStatusSnapshot
 	bindingStatus agentbinding.Status

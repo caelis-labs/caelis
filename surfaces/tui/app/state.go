@@ -126,7 +126,7 @@ type Config struct {
 	Commands               []string
 	CommandDetails         map[string]string
 	Wizards                []WizardDef
-	ControlService         controlprompt.Service
+	ControlService         ControlServices
 	TaskStreams            taskstream.Client
 	ProgramSender          *ProgramSender
 	PromptRouterFactory    controlprompt.RouterFactory

@@ -42,7 +42,7 @@ func TestAuthenticateModelProviderRoutesGrokOAuthWithoutCatalogRead(t *testing.T
 		t.Fatal(err)
 	}
 	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{grokAuth: manager}}}
-	err = stack.authenticateModelProvider(context.Background(), modelconfig.AuthenticateRequest{
+	err = testControlCommandBackend(stack).authenticateModelProvider(context.Background(), modelconfig.AuthenticateRequest{
 		Provider: "grok", HTTPClient: client,
 	})
 	if err != nil {
@@ -52,7 +52,7 @@ func TestAuthenticateModelProviderRoutesGrokOAuthWithoutCatalogRead(t *testing.T
 
 func TestPrepareProviderCredentialsRejectsGrokOAuthAPIKey(t *testing.T) {
 	stack := &Stack{}
-	_, _, err := stack.prepareProviderCredentials(context.Background(), []ModelConfig{{
+	_, _, err := testControlCommandBackend(stack).prepareProviderCredentials(context.Background(), []ModelConfig{{
 		Provider: "xai", API: model.APIXAIResponses, Model: "grok-4.5",
 		BaseURL: modelconfig.GrokOAuthBaseURL, AuthType: model.AuthOAuthToken,
 		CredentialRef: modelconfig.GrokOAuthCredentialRef, Token: "must-not-persist",

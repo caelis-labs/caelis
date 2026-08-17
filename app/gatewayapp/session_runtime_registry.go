@@ -538,11 +538,12 @@ func (r *sessionRuntimeRegistry) retainRuntimeLocked(runtime *sessionRuntime) fu
 // retainControlClientObservation retains an already-live Runtime without
 // creating one. The reference is coupled by control/appserver to one explicit
 // reconnect subscription and disappears when that subscription closes.
-func (s *Stack) retainControlClientObservation(ref session.SessionRef) (func(), error) {
-	if s == nil || s.sessionRuntimes == nil {
+func (s *controlCommandBackend) retainControlClientObservation(ref session.SessionRef) (func(), error) {
+	runtimes := s.runtimeRegistry()
+	if runtimes == nil {
 		return nil, errors.New("gatewayapp: Session Runtime registry is unavailable")
 	}
-	return s.sessionRuntimes.retainObservation(ref)
+	return runtimes.retainObservation(ref)
 }
 
 func (r *sessionRuntimeRegistry) retainObservation(ref session.SessionRef) (func(), error) {

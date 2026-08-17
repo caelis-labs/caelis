@@ -38,16 +38,17 @@ func newSessionModelRecovery(
 // prepareControlClientReconnect reconciles only an explicit reconnect. Plain
 // InspectSession remains read-only, while reconnect returns the repaired
 // revision that the following work-bearing command will use for CAS.
-func (s *Stack) prepareControlClientReconnect(ctx context.Context, ref session.SessionRef) error {
-	if s == nil || s.sessionRuntimes == nil || s.modelRecovery == nil {
+func (s *controlCommandBackend) prepareControlClientReconnect(ctx context.Context, ref session.SessionRef) error {
+	runtimes := s.runtimeRegistry()
+	if s == nil || runtimes == nil || s.modelRecovery == nil || s.composition == nil {
 		return nil
 	}
-	buildCtx, unlock, err := s.sessionRuntimes.lockActivation(ctx)
+	buildCtx, unlock, err := runtimes.lockActivation(ctx)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	if _, loaded := s.sessionRuntimes.loaded(ref.SessionID); loaded || s.sessionRuntimes.isReleasing(ref.SessionID) {
+	if _, loaded := runtimes.loaded(ref.SessionID); loaded || runtimes.isReleasing(ref.SessionID) {
 		return nil
 	}
 	sessions := s.composition.sessions

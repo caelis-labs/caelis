@@ -7,7 +7,10 @@ import (
 )
 
 var (
-	_ controlprompt.Service                   = (*SessionClientAdapter)(nil)
+	_ controlprompt.RouterService             = (*SessionClientAdapter)(nil)
+	_ controlprompt.SessionModeService        = (*SessionClientAdapter)(nil)
+	_ controlprompt.CompletionService         = (*SessionClientAdapter)(nil)
+	_ controlprompt.PluginService             = (*SessionClientAdapter)(nil)
 	_ controlprompt.SkillResolver             = (*SessionClientAdapter)(nil)
 	_ controlprompt.LightweightStatusProvider = (*SessionClientAdapter)(nil)
 	_ controlagents.Connector                 = (*SessionClientAdapter)(nil)

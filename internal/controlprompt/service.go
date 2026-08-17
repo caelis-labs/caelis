@@ -100,17 +100,23 @@ type PluginService interface {
 	InspectPlugin(context.Context, string) (PluginSnapshot, error)
 }
 
-type Service interface {
-	StatusService
-	TurnService
-	SessionService
-	SessionModeService
-	ModelService
-	SandboxService
-	AgentService
-	ReviewService
-	CompletionService
-	PluginService
+// RouterService is the exact capability set consumed by the shared prompt
+// router. Surface-only controls and sibling methods from broader Control
+// facets stay on consumer-owned aggregates instead of widening this facade.
+type RouterService interface {
+	Status(context.Context) (controlstatus.StatusSnapshot, error)
+	Submit(context.Context, Submission) (Turn, error)
+	ResetSession(context.Context) error
+	ResumeSession(context.Context, string) (SessionSnapshot, error)
+	ListSessions(context.Context, int) ([]ResumeCandidate, error)
+	Compact(context.Context) error
+	UseModel(context.Context, string, ...string) (controlstatus.StatusSnapshot, error)
+	DeleteModel(context.Context, string) error
+	RepairSandbox(context.Context) (controlstatus.StatusSnapshot, error)
+	AgentStatus(context.Context) (AgentStatusSnapshot, error)
+	StartAgentRun(context.Context, string, string, []Attachment) (Turn, error)
+	ContinueAgentRun(context.Context, string, string, []Attachment) (Turn, error)
+	StartReview(context.Context, string, []Attachment) (Turn, error)
 }
 
 type LightweightStatusProvider interface {

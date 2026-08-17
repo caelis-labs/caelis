@@ -662,9 +662,10 @@ The current AppServer slice includes:
 - Headless uses the same typed Session Turn from focused AppServer clients, with
   plain final output plus versioned JSON and JSONL contracts suitable for
   scripts and program integration;
-- the TUI uses the aggregate's focused typed clients for every
-  `internal/controlprompt.Service` capability and its independently delivered
-  Task observation capability; its
+- the TUI uses the aggregate's focused typed clients for the shared
+  `internal/controlprompt.RouterService`, adds only its consumer-owned mode,
+  completion, plugin, connector, and binding facets, and receives Task
+  observation independently; its
   production facade owns no Stack, Runtime, or compatibility Adapter;
 - product ACP uses the same AppServer aggregate for prompt, presentation,
   terminal, and Task capabilities; its product configuration accepts no

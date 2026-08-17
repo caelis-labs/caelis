@@ -76,7 +76,7 @@ func NewFromClients(cfg ClientsConfig) (*runtimeacp.RuntimeAgent, error) {
 			}
 			router := controlprompt.New(controlprompt.RouterConfig{
 				Service: driverWithTypedTurns,
-				CommandNames: func(ctx context.Context, service controlprompt.Service) []string {
+				CommandNames: func(ctx context.Context, service controlprompt.RouterService) []string {
 					handles, _ := clients.Participants.Handles(ctx, activeSession.SessionID)
 					out := acpPromptCommandNamesFromHandles(handles)
 					status, err := service.AgentStatus(ctx)

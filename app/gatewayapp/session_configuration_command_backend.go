@@ -140,8 +140,8 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 		return s.configureACPControllerModel(ctx, active, req)
 	}
 	catalog := s.lookup
-	if s.modelCatalog != nil {
-		catalog = s.modelCatalog
+	if s.activation != nil && s.activation.modelCatalog != nil {
+		catalog = s.activation.modelCatalog
 	}
 	if catalog == nil || s.lookup == nil {
 		return sessionCommandResult(active), sessionConfigurationRejected("model catalog is unavailable")
@@ -161,7 +161,7 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 	// pin its hydrated configuration into this Runtime so a later App deletion
 	// cannot interrupt the active Session.
 	var finishPin func(bool)
-	if s.modelCatalog != nil {
+	if s.activation != nil && s.activation.modelCatalog != nil {
 		finishPin, err = s.lookup.beginPinnedUpsert(configured)
 		if err != nil {
 			return sessionCommandResult(active), sessionConfigurationRejectedError(err)

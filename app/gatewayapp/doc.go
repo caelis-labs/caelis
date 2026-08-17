@@ -6,6 +6,10 @@
 // independent source at activation. The root active Runtime is an installed
 // execution artifact rather than a parallel publication target. The Registry
 // owns Session Runtime activation, release, and collective shutdown.
+// Exported composition helpers in this package exist for repository-internal
+// assembly and are not a downstream compatibility surface. Stable product
+// clients depend on control/appserver or focused control packages.
+//
 // The package exposes focused Host services to its private AppServer
 // composition and product capabilities through control/appserver. Authorized
 // Session Runtime leases expose only focused inputs selected by that private

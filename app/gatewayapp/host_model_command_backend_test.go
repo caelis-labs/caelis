@@ -561,7 +561,7 @@ func TestHostModelConnectRejectsConcurrentOAuthWithoutSecondEffect(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	release, err := stack.beginHostModelAuthentication("codex")
+	release, err := stack.commandBackend.beginHostModelAuthentication("codex")
 	if err != nil {
 		t.Fatal(err)
 	}

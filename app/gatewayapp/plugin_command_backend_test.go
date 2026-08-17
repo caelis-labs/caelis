@@ -28,7 +28,7 @@ func TestPluginCommandsUseSharedLedgerAndHostRevisionCAS(t *testing.T) {
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
-	revision, ok := stack.currentPluginConfigurationRevision(ctx)
+	revision, ok := stack.commandBackend.currentPluginConfigurationRevision(ctx)
 	if !ok {
 		t.Fatal("missing configuration revision")
 	}
@@ -101,7 +101,7 @@ func TestPluginPureConfigMutationLeavesActiveSessionRuntimeUnchanged(t *testing.
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
-	revision, ok := stack.currentPluginConfigurationRevision(ctx)
+	revision, ok := stack.commandBackend.currentPluginConfigurationRevision(ctx)
 	if !ok {
 		t.Fatal("missing revision")
 	}
@@ -119,7 +119,7 @@ func TestPluginPureConfigMutationLeavesActiveSessionRuntimeUnchanged(t *testing.
 		t.Fatalf("active assembly missing plugin skill:\n%s", before)
 	}
 
-	revision, ok = stack.currentPluginConfigurationRevision(ctx)
+	revision, ok = stack.commandBackend.currentPluginConfigurationRevision(ctx)
 	if !ok {
 		t.Fatal("missing revision after add")
 	}
@@ -154,7 +154,7 @@ func TestPluginExternalEffectStaleRevisionDoesNotRunFetch(t *testing.T) {
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
 	principal := appserver.Principal{ID: "owner"}
-	current, ok := stack.currentPluginConfigurationRevision(ctx)
+	current, ok := stack.commandBackend.currentPluginConfigurationRevision(ctx)
 	if !ok {
 		t.Fatal("missing revision")
 	}
@@ -167,7 +167,7 @@ func TestPluginExternalEffectStaleRevisionDoesNotRunFetch(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed AddPluginPath: %v", err)
 	}
-	current, ok = stack.currentPluginConfigurationRevision(ctx)
+	current, ok = stack.commandBackend.currentPluginConfigurationRevision(ctx)
 	if !ok || current == 0 {
 		t.Fatalf("revision after seed = %d, ok=%v", current, ok)
 	}
@@ -195,7 +195,7 @@ func TestPluginExternalEffectRejectedWithoutEffectForInvalidSource(t *testing.T)
 	tmp := t.TempDir()
 	stack := buildPluginStack(t, filepath.Join(tmp, "store"), filepath.Join(tmp, "ws"))
 	ctx := context.Background()
-	revision, ok := stack.currentPluginConfigurationRevision(ctx)
+	revision, ok := stack.commandBackend.currentPluginConfigurationRevision(ctx)
 	if !ok {
 		t.Fatal("missing revision")
 	}
@@ -216,7 +216,7 @@ func TestPluginMarketplaceNotFoundIsRejectedWithoutUnknown(t *testing.T) {
 	tmp := t.TempDir()
 	stack := buildPluginStack(t, filepath.Join(tmp, "store"), filepath.Join(tmp, "ws"))
 	ctx := context.Background()
-	revision, ok := stack.currentPluginConfigurationRevision(ctx)
+	revision, ok := stack.commandBackend.currentPluginConfigurationRevision(ctx)
 	if !ok {
 		t.Fatal("missing revision")
 	}
@@ -241,7 +241,7 @@ func TestPluginMarketplaceReceiptRestoresResourceKind(t *testing.T) {
 	storeDir := filepath.Join(tmp, "store")
 	stack := buildPluginStack(t, storeDir, filepath.Join(tmp, "ws"))
 	ctx := context.Background()
-	revision, ok := stack.currentPluginConfigurationRevision(ctx)
+	revision, ok := stack.commandBackend.currentPluginConfigurationRevision(ctx)
 	if !ok {
 		t.Fatal("missing revision")
 	}
@@ -262,7 +262,7 @@ func TestPluginMarketplaceReceiptRestoresResourceKind(t *testing.T) {
 
 	// Intent-only restart recovery must restore the marketplace resource kind,
 	// not default to plugin.
-	if err := stack.writePluginOperationReceipt(ctx, pluginOperationReceipt{
+	if err := stack.commandBackend.writePluginOperationReceipt(ctx, pluginOperationReceipt{
 		PrincipalID:  principal.ID,
 		OperationID:  "market-receipt-recover",
 		Digest:       "digest-market",
@@ -274,7 +274,7 @@ func TestPluginMarketplaceReceiptRestoresResourceKind(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	recovered, found, err := stack.loadPluginOperationReceipt(ctx, principal.ID, "market-receipt-recover", "digest-market")
+	recovered, found, err := stack.commandBackend.loadPluginOperationReceipt(ctx, principal.ID, "market-receipt-recover", "digest-market")
 	if err != nil || !found {
 		t.Fatalf("load receipt: found=%v err=%v", found, err)
 	}
@@ -295,7 +295,7 @@ func TestPluginMarketplaceIntentOnlyRestartRecoversMarketplaceKind(t *testing.T)
 	storeDir := filepath.Join(tmp, "store")
 	stack := buildPluginStack(t, storeDir, filepath.Join(tmp, "ws"))
 	ctx := context.Background()
-	revision, ok := stack.currentPluginConfigurationRevision(ctx)
+	revision, ok := stack.commandBackend.currentPluginConfigurationRevision(ctx)
 	if !ok {
 		t.Fatal("missing revision")
 	}
@@ -309,7 +309,7 @@ func TestPluginMarketplaceIntentOnlyRestartRecoversMarketplaceKind(t *testing.T)
 
 	failing := &completeFailingOperationStore{OperationStore: stack.operations}
 	firstCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
-		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: failing, Backend: stack,
+		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: failing, Backend: stack.commandBackend,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -324,7 +324,7 @@ func TestPluginMarketplaceIntentOnlyRestartRecoversMarketplaceKind(t *testing.T)
 		t.Fatal(err)
 	}
 	restartedCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
-		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: restartedOperations, Backend: stack,
+		Authorizer: appserver.ProductCommandAuthorizer{}, Operations: restartedOperations, Backend: stack.commandBackend,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -339,7 +339,7 @@ func TestPluginMarketplaceIntentOnlyRestartRecoversMarketplaceKind(t *testing.T)
 	if recovered.Resource.Ref != "restart-market" {
 		t.Fatalf("recovered Resource.Ref = %q, want restart-market", recovered.Resource.Ref)
 	}
-	if !stack.CanRecoverControlCommand(appserver.ActionPluginMarketplaceAdd) {
+	if !stack.commandBackend.CanRecoverControlCommand(appserver.ActionPluginMarketplaceAdd) {
 		t.Fatal("marketplace add must be recoverable")
 	}
 }
@@ -372,7 +372,7 @@ func TestPluginExternalEffectReplayDoesNotRepeatInstall(t *testing.T) {
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
 	ctx := context.Background()
-	revision, ok := stack.currentPluginConfigurationRevision(ctx)
+	revision, ok := stack.commandBackend.currentPluginConfigurationRevision(ctx)
 	if !ok {
 		t.Fatal("missing revision")
 	}
@@ -389,10 +389,10 @@ func TestPluginExternalEffectReplayDoesNotRepeatInstall(t *testing.T) {
 	if err != nil || second.Outcome != appserver.OutcomeCommitted || second.Revision != first.Revision {
 		t.Fatalf("InstallPlugin(replay) = %#v, %v", second, err)
 	}
-	if !stack.CanRecoverControlCommand(appserver.ActionPluginInstall) {
+	if !stack.commandBackend.CanRecoverControlCommand(appserver.ActionPluginInstall) {
 		t.Fatal("install must be recoverable")
 	}
-	if stack.CanRecoverControlCommand(appserver.ActionPluginEnable) {
+	if stack.commandBackend.CanRecoverControlCommand(appserver.ActionPluginEnable) {
 		t.Fatal("pure config enable must not claim external-effect recovery")
 	}
 }

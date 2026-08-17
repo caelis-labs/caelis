@@ -9,25 +9,25 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
-	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
-// PresentationService projects ACP-compatible mode, config, model, and command
-// state while all writes remain owned by focused Configuration commands.
+// PresentationService projects protocol-neutral mode, config, model, and
+// command state while all writes remain owned by focused Configuration
+// commands. ACP wire mapping belongs outside this local Host adapter.
 type PresentationService struct {
 	sessions         session.Reader
-	surface          gatewayapp.ACPPresentationService
+	source           gatewayapp.PresentationSource
 	controllerStatus func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
 	modeWriteTarget  string
 }
 
 func newPresentationService(
 	sessions session.Reader,
-	surface gatewayapp.ACPPresentationService,
+	source gatewayapp.PresentationSource,
 	controllerStatus func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error),
 	useModes bool,
 ) (*PresentationService, error) {
-	if sessions == nil || surface == nil || controllerStatus == nil {
+	if sessions == nil || source == nil || controllerStatus == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: presentation service dependencies are required")
 	}
 	modeWriteTarget := appserver.PresentationModeTargetApproval
@@ -35,7 +35,7 @@ func newPresentationService(
 		modeWriteTarget = appserver.PresentationModeTargetApp
 	}
 	return &PresentationService{
-		sessions: sessions, surface: surface, controllerStatus: controllerStatus, modeWriteTarget: modeWriteTarget,
+		sessions: sessions, source: source, controllerStatus: controllerStatus, modeWriteTarget: modeWriteTarget,
 	}, nil
 }
 
@@ -44,7 +44,7 @@ func (s *PresentationService) PresentationSnapshot(ctx context.Context, principa
 	if err != nil {
 		return appserver.PresentationSnapshot{}, err
 	}
-	modes, err := s.surface.SessionModes(ctx, active)
+	modes, err := s.source.SessionModes(ctx, active)
 	if err != nil {
 		return appserver.PresentationSnapshot{}, err
 	}
@@ -55,10 +55,10 @@ func (s *PresentationService) PresentationSnapshot(ctx context.Context, principa
 			return appserver.PresentationSnapshot{}, statusErr
 		}
 		if found && len(remote.ModeOptions) > 0 {
-			modes = &acp.SessionModeState{CurrentModeID: strings.TrimSpace(remote.Mode)}
+			modes = &appserver.PresentationModeState{CurrentModeID: strings.TrimSpace(remote.Mode)}
 			for _, mode := range remote.ModeOptions {
 				if id := strings.TrimSpace(mode.ID); id != "" {
-					modes.AvailableModes = append(modes.AvailableModes, acp.SessionMode{
+					modes.AvailableModes = append(modes.AvailableModes, appserver.PresentationMode{
 						ID: id, Name: strings.TrimSpace(mode.Name), Description: strings.TrimSpace(mode.Description),
 					})
 				}
@@ -66,34 +66,40 @@ func (s *PresentationService) PresentationSnapshot(ctx context.Context, principa
 			modeWriteTarget = appserver.PresentationModeTargetController
 		}
 	}
-	configs, err := s.surface.SessionConfigOptions(ctx, active)
+	configs, err := s.source.SessionConfigOptions(ctx, active)
 	if err != nil {
 		return appserver.PresentationSnapshot{}, err
 	}
-	models, err := s.surface.SessionModels(ctx, active)
+	models, err := s.source.SessionModels(ctx, active)
 	if err != nil {
 		return appserver.PresentationSnapshot{}, err
 	}
-	commands, err := s.surface.AvailableCommands(ctx, active.SessionID)
+	commands, err := s.source.AvailableCommands(ctx, active.SessionID)
 	if err != nil {
 		return appserver.PresentationSnapshot{}, err
 	}
-	return presentationSnapshot(modes, configs, models, commands, modeWriteTarget), nil
+	if modes != nil {
+		cloned := *modes
+		cloned.AvailableModes = append([]appserver.PresentationMode(nil), modes.AvailableModes...)
+		cloned.Target = strings.TrimSpace(modeWriteTarget)
+		modes = &cloned
+	}
+	return appserver.PresentationSnapshot{Modes: modes, ConfigOptions: configs, Models: models, Commands: commands}, nil
 }
 
 func (s *PresentationService) PresentationCapabilities(ctx context.Context, principal appserver.Principal) (appserver.PresentationCapabilities, error) {
 	if strings.TrimSpace(principal.ID) == "" {
 		return appserver.PresentationCapabilities{}, errors.New("app/gatewayapp/controladapter/local: principal ID is required")
 	}
-	caps, err := s.surface.PromptCapabilities(ctx)
+	caps, err := s.source.PromptCapabilities(ctx)
 	if err != nil {
 		return appserver.PresentationCapabilities{}, err
 	}
-	return appserver.PresentationCapabilities{Audio: caps.Audio, EmbeddedContext: caps.EmbeddedContext, Image: caps.Image}, nil
+	return caps, nil
 }
 
 func (s *PresentationService) authorizedSession(ctx context.Context, principal appserver.Principal, action appserver.Action, sessionID string) (session.Session, error) {
-	if s == nil || s.sessions == nil || s.surface == nil || s.controllerStatus == nil {
+	if s == nil || s.sessions == nil || s.source == nil || s.controllerStatus == nil {
 		return session.Session{}, errors.New("app/gatewayapp/controladapter/local: presentation service is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
@@ -101,51 +107,6 @@ func (s *PresentationService) authorizedSession(ctx context.Context, principal a
 		return session.Session{}, err
 	}
 	return s.sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
-}
-
-func presentationSnapshot(
-	modes *acp.SessionModeState,
-	configs []acp.SessionConfigOption,
-	models *acp.SessionModelState,
-	commands []acp.AvailableCommand,
-	modeWriteTarget string,
-) appserver.PresentationSnapshot {
-	result := appserver.PresentationSnapshot{ConfigOptions: presentationConfigOptions(configs)}
-	if modes != nil {
-		result.Modes = &appserver.PresentationModeState{Target: strings.TrimSpace(modeWriteTarget), CurrentModeID: modes.CurrentModeID}
-		for _, mode := range modes.AvailableModes {
-			result.Modes.AvailableModes = append(result.Modes.AvailableModes, appserver.PresentationMode{ID: mode.ID, Name: mode.Name, Description: mode.Description})
-		}
-	}
-	if models != nil {
-		result.Models = &appserver.PresentationModelState{CurrentModelID: models.CurrentModelID}
-		for _, model := range models.AvailableModels {
-			result.Models.AvailableModels = append(result.Models.AvailableModels, appserver.PresentationModel{ID: model.ModelID, Name: model.Name, Description: model.Description})
-		}
-	}
-	for _, command := range commands {
-		mapped := appserver.PresentationCommand{Name: command.Name, Description: command.Description}
-		if command.Input != nil {
-			mapped.Input = &appserver.PresentationCommandInput{Hint: command.Input.Hint}
-		}
-		result.Commands = append(result.Commands, mapped)
-	}
-	return result
-}
-
-func presentationConfigOptions(configs []acp.SessionConfigOption) []appserver.PresentationConfigOption {
-	result := make([]appserver.PresentationConfigOption, 0, len(configs))
-	for _, config := range configs {
-		mapped := appserver.PresentationConfigOption{
-			Type: config.Type, ID: config.ID, Name: config.Name, Description: config.Description,
-			Category: config.Category, CurrentValue: config.CurrentValue,
-		}
-		for _, option := range config.Options {
-			mapped.Options = append(mapped.Options, appserver.PresentationSelectOption{Value: option.Value, Name: option.Name, Description: option.Description})
-		}
-		result = append(result, mapped)
-	}
-	return result
 }
 
 var _ appserver.PresentationService = (*PresentationService)(nil)

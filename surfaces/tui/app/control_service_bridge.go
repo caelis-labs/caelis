@@ -1,7 +1,7 @@
 package tuiapp
 
-// control_service_bridge.go bridges the standard controlprompt.Service contract into
-// Config callback fields. This is the key migration adapter.
+// control_service_bridge.go bridges focused controlprompt contracts into TUI
+// Config callback fields.
 
 import (
 	"context"
@@ -249,10 +249,16 @@ func (s *ProgramSender) waitForwarders(timeout time.Duration) bool {
 	}
 }
 
-// ControlServices is the explicit set of Control facets required by the TUI.
-// ACP onboarding remains separate from the transitional aggregate service.
+// ControlServices is the consumer-owned set of Control facets required by the
+// TUI. ACP onboarding remains separate from this presentation-only aggregate.
 type ControlServices interface {
-	controlprompt.Service
+	controlprompt.RouterService
+	WorkspaceDir() string
+	Interrupt(context.Context) error
+	Connect(context.Context, controlprompt.ConnectConfig) (controlstatus.StatusSnapshot, error)
+	controlprompt.SessionModeService
+	controlprompt.CompletionService
+	controlprompt.PluginService
 	controlagents.Connector
 	controlagents.Disconnector
 	agentbinding.Service
@@ -474,7 +480,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 	return base
 }
 
-func refreshStatusSnapshot(ctx context.Context, service controlprompt.Service) (controlstatus.StatusSnapshot, error) {
+func refreshStatusSnapshot(ctx context.Context, service controlprompt.StatusService) (controlstatus.StatusSnapshot, error) {
 	if lightweight, ok := service.(controlprompt.LightweightStatusProvider); ok {
 		return lightweight.LightweightStatus(ctx)
 	}
@@ -507,7 +513,7 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 
 	router := routerFactory(controlprompt.RouterConfig{
 		Service: service,
-		CommandNames: func(ctx context.Context, service controlprompt.Service) []string {
+		CommandNames: func(ctx context.Context, service controlprompt.RouterService) []string {
 			return appendAgentSlashCommandsWithContext(ctx, service, DefaultCommands())
 		},
 		PrivateSlashHandler: func(ctx context.Context, req controlprompt.PrivateSlashRequest) (controlprompt.Result, bool, error) {
@@ -587,7 +593,7 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 	return executeLineResult{completion: TaskResultMsg{}}
 }
 
-func executeControlPromptResult(ctx context.Context, service controlprompt.Service, sender *ProgramSender, result controlprompt.Result) executeLineResult {
+func executeControlPromptResult(ctx context.Context, service ControlServices, sender *ProgramSender, result controlprompt.Result) executeLineResult {
 	send := sender.sendFunc()
 	if result.Reconnect != nil {
 		defer result.Reconnect.Close()
@@ -651,11 +657,11 @@ func executeControlPromptResult(ctx context.Context, service controlprompt.Servi
 // Helpers
 // ---------------------------------------------------------------------------
 
-func appendAgentSlashCommands(service controlprompt.Service, commands []string) []string {
+func appendAgentSlashCommands(service ControlServices, commands []string) []string {
 	return appendAgentSlashCommandsWithContext(context.Background(), service, commands)
 }
 
-func appendAgentSlashCommandsWithContext(ctx context.Context, service controlprompt.Service, commands []string) []string {
+func appendAgentSlashCommandsWithContext(ctx context.Context, service controlprompt.RouterService, commands []string) []string {
 	ctx = contextOrBackground(ctx)
 	if len(commands) == 0 {
 		commands = DefaultCommands()
@@ -680,11 +686,11 @@ func tuiDirectAgentRuns(status controlprompt.AgentStatusSnapshot) []controlagent
 	return runs
 }
 
-func refreshAgentSlashCommandsViaSend(service controlprompt.Service, send func(tea.Msg)) {
+func refreshAgentSlashCommandsViaSend(service ControlServices, send func(tea.Msg)) {
 	refreshAgentSlashCommandsViaSendWithContext(context.Background(), service, send)
 }
 
-func refreshAgentSlashCommandsViaSendWithContext(ctx context.Context, service controlprompt.Service, send func(tea.Msg)) {
+func refreshAgentSlashCommandsViaSendWithContext(ctx context.Context, service controlprompt.RouterService, send func(tea.Msg)) {
 	if send == nil {
 		return
 	}
@@ -694,7 +700,7 @@ func refreshAgentSlashCommandsViaSendWithContext(ctx context.Context, service co
 	})
 }
 
-func profileCommandDetailsWithContext(ctx context.Context, service controlprompt.Service) map[string]string {
+func profileCommandDetailsWithContext(ctx context.Context, service controlprompt.RouterService) map[string]string {
 	if service == nil {
 		return nil
 	}
@@ -746,11 +752,11 @@ func statusModelDisplay(model string) string {
 	return normalizeStatusModel(model)
 }
 
-func refreshStatusViaSend(service controlprompt.Service, send func(tea.Msg)) {
+func refreshStatusViaSend(service controlprompt.StatusService, send func(tea.Msg)) {
 	refreshStatusViaSendWithContext(context.Background(), service, send)
 }
 
-func refreshStatusViaSendWithContext(ctx context.Context, service controlprompt.Service, send func(tea.Msg)) {
+func refreshStatusViaSendWithContext(ctx context.Context, service controlprompt.StatusService, send func(tea.Msg)) {
 	ctx = contextOrBackground(ctx)
 	status, err := service.Status(ctx)
 	if err != nil {

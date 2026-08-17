@@ -29,7 +29,7 @@ type sandboxLifecycleCommand struct {
 // disposable lifecycle target. It never holds the configuration write boundary
 // or mutates an activated Session Runtime across the external setup effect.
 // The bool reports whether an effect was invoked (or cleanup became uncertain).
-func (s *Stack) runSandboxLifecycleCommand(
+func (s *controlCommandBackend) runSandboxLifecycleCommand(
 	ctx context.Context,
 	command sandboxLifecycleCommand,
 	expected *uint64,
@@ -66,7 +66,7 @@ func (s *Stack) runSandboxLifecycleCommand(
 		return status, doc.ConfigurationRevision, true, errors.Join(effectErr, target.Close())
 	}
 	if target.NoOp {
-		return s.runtimeProjection().SandboxStatus(), doc.ConfigurationRevision, false, nil
+		return s.composition.SandboxStatus(), doc.ConfigurationRevision, false, nil
 	}
 	if err := ctx.Err(); err != nil {
 		closeErr := target.Close()
@@ -78,7 +78,7 @@ func (s *Stack) runSandboxLifecycleCommand(
 	return status, doc.ConfigurationRevision, true, errors.Join(effectErr, closeErr)
 }
 
-func (s *Stack) selectSandboxLifecycleTarget(config SandboxConfig) (sandbox.LifecycleTarget, error) {
+func (s *controlCommandBackend) selectSandboxLifecycleTarget(config SandboxConfig) (sandbox.LifecycleTarget, error) {
 	snapshot, err := s.sandboxLifecycleSnapshot()
 	if err != nil {
 		return sandbox.LifecycleTarget{}, err
@@ -102,7 +102,7 @@ func (s *Stack) selectSandboxLifecycleTarget(config SandboxConfig) (sandbox.Life
 	return target, nil
 }
 
-func (s *Stack) sandboxLifecycleSnapshot() (sandboxLifecycleSnapshot, error) {
+func (s *controlCommandBackend) sandboxLifecycleSnapshot() (sandboxLifecycleSnapshot, error) {
 	if s == nil {
 		return sandboxLifecycleSnapshot{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -118,9 +118,9 @@ func (s *Stack) sandboxLifecycleSnapshot() (sandboxLifecycleSnapshot, error) {
 	}, nil
 }
 
-func (s *Stack) sandboxLifecycleStatus(target sandbox.LifecycleTarget) SandboxStatus {
+func (s *controlCommandBackend) sandboxLifecycleStatus(target sandbox.LifecycleTarget) SandboxStatus {
 	if target.Current {
-		return s.runtimeProjection().SandboxStatus()
+		return s.composition.SandboxStatus()
 	}
 	return sandboxStatusFromRuntime(sandboxConfigFromPort(target.Config), target.Runtime)
 }
@@ -141,7 +141,7 @@ func isHostSandboxBackend(backend string) bool {
 	return sandbox.CanonicalBackend(sandbox.Backend(backend)) == sandbox.BackendHost
 }
 
-func (s *Stack) sandboxLifecycleRuntime(cfg SandboxConfig, current sandbox.Runtime, workspaceCWD string, storeDir string) (sandbox.LifecycleTarget, error) {
+func (s *controlCommandBackend) sandboxLifecycleRuntime(cfg SandboxConfig, current sandbox.Runtime, workspaceCWD string, storeDir string) (sandbox.LifecycleTarget, error) {
 	portCfg := sandboxConfigToPort(cfg, workspaceCWD, storeDir)
 	if s != nil && s.sandboxLifecycleFactory != nil {
 		return s.sandboxLifecycleFactory(portCfg, current)

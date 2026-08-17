@@ -14,12 +14,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
 func TestLocalStackInjectsOnlySelfUntilProfileIsBound(t *testing.T) {
@@ -106,14 +106,14 @@ func TestSpawnedSubagentSessionCannotReceiveNestedSpawn(t *testing.T) {
 	}
 }
 
-func TestACPSurfaceAvailableCommandsExposeOnlyBoundProfilesAndHideRosterAgents(t *testing.T) {
+func TestPresentationSourceAvailableCommandsExposeOnlyBoundProfilesAndHideRosterAgents(t *testing.T) {
 	stack, activeSession := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{
 		Agents: []assembly.AgentConfig{{
 			Name: "helper", Description: "bounded ACP helper", Command: "go",
 			Args: []string{"run", "./internal/acpe2eagent"}, WorkDir: repoRootForGatewayAppTest(t),
 		}},
 	})
-	commands, err := stack.ACPSurface(nil, false, nil).AvailableCommands(context.Background(), activeSession.SessionID)
+	commands, err := stack.PresentationSource(nil, false, nil).AvailableCommands(context.Background(), activeSession.SessionID)
 	if err != nil {
 		t.Fatalf("AvailableCommands() error = %v", err)
 	}
@@ -123,7 +123,7 @@ func TestACPSurfaceAvailableCommandsExposeOnlyBoundProfilesAndHideRosterAgents(t
 		}
 	}
 	bindProfileToModelForToolTest(t, stack, agentbinding.HandleOrbit)
-	commands, err = stack.ACPSurface(nil, false, nil).AvailableCommands(context.Background(), activeSession.SessionID)
+	commands, err = stack.PresentationSource(nil, false, nil).AvailableCommands(context.Background(), activeSession.SessionID)
 	if err != nil {
 		t.Fatalf("AvailableCommands(bound Orbit) error = %v", err)
 	}
@@ -191,7 +191,7 @@ func TestLocalStackFailsOnInvalidSelfAgentEnv(t *testing.T) {
 	}
 }
 
-func acpCommandForToolTest(commands []acp.AvailableCommand, name string) *acp.AvailableCommand {
+func acpCommandForToolTest(commands []appserver.PresentationCommand, name string) *appserver.PresentationCommand {
 	for i := range commands {
 		if strings.EqualFold(strings.TrimSpace(commands[i].Name), strings.TrimSpace(name)) {
 			return &commands[i]

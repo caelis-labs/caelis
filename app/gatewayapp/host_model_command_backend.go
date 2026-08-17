@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 )
 
-func (s *Stack) executeHostModelConfigurationCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
+func (s *controlCommandBackend) executeHostModelConfigurationCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
 	var result hostModelMutationResult
 	var err error
 	switch req := request.(type) {
@@ -83,7 +83,7 @@ func expectedConfigurationRevision(expected *uint64) uint64 {
 	return *expected
 }
 
-func (s *Stack) preflightHostModelConnect(ctx context.Context, expected *uint64) (*modelLookup, error) {
+func (s *controlCommandBackend) preflightHostModelConnect(ctx context.Context, expected *uint64) (*modelLookup, error) {
 	_, candidate, err := s.loadModelConfigurationCandidate(ctx, expected)
 	return candidate, err
 }
@@ -91,7 +91,7 @@ func (s *Stack) preflightHostModelConnect(ctx context.Context, expected *uint64)
 // beginHostModelAuthentication rejects overlapping interactive authentication
 // in this Control Host. It deliberately does not create a cross-process lock or
 // wait behind another user interaction.
-func (s *Stack) beginHostModelAuthentication(provider string) (func(), error) {
+func (s *controlCommandBackend) beginHostModelAuthentication(provider string) (func(), error) {
 	template, ok := modelconfig.LookupProvider(provider)
 	if !ok {
 		return nil, nil
@@ -121,7 +121,7 @@ func (s *Stack) beginHostModelAuthentication(provider string) (func(), error) {
 	}, nil
 }
 
-func (s *Stack) assembleHostModelConnect(ctx context.Context, cfg appserver.ConnectConfig, candidate *modelLookup) ([]ModelConfig, bool, error) {
+func (s *controlCommandBackend) assembleHostModelConnect(ctx context.Context, cfg appserver.ConnectConfig, candidate *modelLookup) ([]ModelConfig, bool, error) {
 	_, ok := modelconfig.LookupProvider(cfg.Provider)
 	if !ok {
 		return nil, false, fmt.Errorf("gatewayapp: provider %q is not supported", strings.TrimSpace(cfg.Provider))
@@ -189,7 +189,7 @@ func (s *runtimeComposition) reusableProviderCredentialRef(ctx context.Context, 
 	return "", false
 }
 
-func (s *Stack) bindReusableAPIKeyCredential(ctx context.Context, configs []ModelConfig, reusableRef string) ([]ModelConfig, error) {
+func (s *controlCommandBackend) bindReusableAPIKeyCredential(ctx context.Context, configs []ModelConfig, reusableRef string) ([]ModelConfig, error) {
 	if s == nil || s.composition.authorities.apiKeyCredentials == nil {
 		return configs, nil
 	}

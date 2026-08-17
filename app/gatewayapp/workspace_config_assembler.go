@@ -94,20 +94,21 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 
 	instance := &sessionRuntimeInstance{
 		runtimeComposition: runtimeComposition{
-			authorities:                 authorities,
-			sessions:                    sessions,
-			workspace:                   workspace,
-			lookup:                      lookup,
-			modelCatalog:                deps.modelCatalog,
-			placementCache:              placement,
-			appConfigSnapshot:           ptrToConfigSnapshot(doc),
-			activeRuntime:               runtimeConfig,
-			sandbox:                     sandboxConfig,
-			sandboxActivationPinned:     true,
-			pinnedChildControlURL:       process.childControlURL,
-			pinnedChildControlTokenFile: process.childControlTokenFile,
-			retainRuntimeWork:           activity.retainWork,
-			runtimeTaskChanged:          activity.taskChanged,
+			authorities: authorities,
+			sessions:    sessions,
+			workspace:   workspace,
+			lookup:      lookup,
+			activation: &sessionRuntimeActivation{
+				modelCatalog:          deps.modelCatalog,
+				appConfig:             ptrToConfigSnapshot(doc),
+				childControlURL:       process.childControlURL,
+				childControlTokenFile: process.childControlTokenFile,
+			},
+			placementCache:     placement,
+			activeRuntime:      runtimeConfig,
+			sandbox:            sandboxConfig,
+			retainRuntimeWork:  activity.retainWork,
+			runtimeTaskChanged: activity.taskChanged,
 		},
 	}
 	if err := instance.buildInitialGatewayRuntime(ctx); err != nil {

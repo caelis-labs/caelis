@@ -78,15 +78,19 @@ func (s *runtimeComposition) runtimeProcessSnapshot() sessionRuntimeProcessSnaps
 	if s == nil {
 		return sessionRuntimeProcessSnapshot{}
 	}
-	if s.processConfig != nil {
-		return s.processConfig.snapshot()
+	if s.process != nil && s.process.config != nil {
+		return s.process.config.snapshot()
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	activation := s.activation
+	if activation == nil {
+		activation = &sessionRuntimeActivation{}
+	}
 	return sessionRuntimeProcessSnapshot{
 		runtime:               cloneActiveRuntimeConfig(s.activeRuntime),
-		childControlURL:       s.pinnedChildControlURL,
-		childControlTokenFile: s.pinnedChildControlTokenFile,
+		childControlURL:       activation.childControlURL,
+		childControlTokenFile: activation.childControlTokenFile,
 	}
 }
 

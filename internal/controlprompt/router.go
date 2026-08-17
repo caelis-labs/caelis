@@ -10,11 +10,11 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
-// router dispatches surface-neutral prompt input through Service.
+// router dispatches surface-neutral prompt input through RouterService.
 type router struct {
-	service               Service
+	service               RouterService
 	skillResolver         SkillResolver
-	commandNames          func(context.Context, Service) []string
+	commandNames          func(context.Context, RouterService) []string
 	coreCommandAllowed    func(context.Context, string) bool
 	dynamicCommandAllowed func(context.Context, string) bool
 	privateSlashHandler   PrivateSlashHandler

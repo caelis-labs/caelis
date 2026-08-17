@@ -63,7 +63,7 @@ func slashSubagentWithContext(ctx context.Context, service subagentConfiguration
 			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("update subagent binding", err)}
 		}
 		sendNotice(send, formatAgentBindingNotice(status, handle), SlashNoticeFeedback)
-		if controlService, ok := any(service).(controlprompt.Service); ok && !system {
+		if controlService, ok := any(service).(ControlServices); ok && !system {
 			refreshAgentSlashCommandsViaSendWithContext(ctx, controlService, send)
 		}
 		return TaskResultMsg{SuppressTurnDivider: true}

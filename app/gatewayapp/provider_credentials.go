@@ -14,7 +14,7 @@ type providerCredentialTransaction struct {
 	replacement *credentialstore.ReplacementTransaction
 }
 
-func (s *Stack) prepareProviderCredentials(ctx context.Context, configs []ModelConfig) ([]ModelConfig, *providerCredentialTransaction, error) {
+func (s *controlCommandBackend) prepareProviderCredentials(ctx context.Context, configs []ModelConfig) ([]ModelConfig, *providerCredentialTransaction, error) {
 	prepared := make([]ModelConfig, 0, len(configs))
 	seenSources := map[string]credentialstore.Source{}
 	for _, raw := range configs {

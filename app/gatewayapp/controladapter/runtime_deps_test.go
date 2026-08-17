@@ -2,24 +2,38 @@ package controladapter
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-func TestRuntimeDepsPluginDepsUseGroupedField(t *testing.T) {
+func TestPluginAssemblerDoesNotRetainRuntimeDeps(t *testing.T) {
 	t.Parallel()
 
-	deps := &runtimeDeps{
+	typ := reflect.TypeFor[pluginAssembler]()
+	if typ.NumField() != 1 {
+		t.Fatalf("pluginAssembler fields = %d, want one focused dependency", typ.NumField())
+	}
+	field := typ.Field(0)
+	if field.Name != "deps" || field.Type != reflect.TypeFor[PluginRuntimeDeps]() {
+		t.Fatalf("pluginAssembler dependency = %s %v, want deps PluginRuntimeDeps", field.Name, field.Type)
+	}
+}
+
+func TestPluginAssemblerUsesOnlyFocusedDependencies(t *testing.T) {
+	t.Parallel()
+
+	driver := NewPluginAssemblerForHost(PluginAssemblyDeps{
 		Plugin: PluginRuntimeDeps{
 			ListPluginsFn: func(context.Context) ([]controlprompt.PluginSnapshot, error) {
 				return []controlprompt.PluginSnapshot{{ID: "grouped"}}, nil
 			},
 		},
-	}
+	})
 
-	plugins, err := deps.Plugin.ListPluginsFn(context.Background())
+	plugins, err := driver.ListPlugins(context.Background())
 	if err != nil {
 		t.Fatalf("ListPlugins() error = %v", err)
 	}

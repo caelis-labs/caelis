@@ -6,23 +6,31 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-func (d *assembler) ListPlugins(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
-	if d.deps.Plugin.ListPluginsFn == nil {
+// pluginAssembler retains only pure plugin read capabilities. It cannot
+// accidentally grow access to Session, model, status, or gateway authorities.
+type pluginAssembler struct {
+	deps PluginRuntimeDeps
+}
+
+func (d *pluginAssembler) ListPlugins(ctx context.Context) ([]controlprompt.PluginSnapshot, error) {
+	if d == nil || d.deps.ListPluginsFn == nil {
 		return nil, missingRuntimeDependency("list plugins")
 	}
-	return d.deps.Plugin.ListPluginsFn(ctx)
+	return d.deps.ListPluginsFn(ctx)
 }
 
-func (d *assembler) ListMarketplaces(ctx context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
-	if d.deps.Plugin.ListMarketplacesFn == nil {
+func (d *pluginAssembler) ListMarketplaces(ctx context.Context) ([]controlprompt.MarketplaceSnapshot, error) {
+	if d == nil || d.deps.ListMarketplacesFn == nil {
 		return nil, missingRuntimeDependency("list marketplaces")
 	}
-	return d.deps.Plugin.ListMarketplacesFn(ctx)
+	return d.deps.ListMarketplacesFn(ctx)
 }
 
-func (d *assembler) InspectPlugin(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
-	if d.deps.Plugin.InspectPluginFn == nil {
+func (d *pluginAssembler) InspectPlugin(ctx context.Context, id string) (controlprompt.PluginSnapshot, error) {
+	if d == nil || d.deps.InspectPluginFn == nil {
 		return controlprompt.PluginSnapshot{}, missingRuntimeDependency("inspect plugin")
 	}
-	return d.deps.Plugin.InspectPluginFn(ctx, id)
+	return d.deps.InspectPluginFn(ctx, id)
 }
+
+var _ PluginAssembler = (*pluginAssembler)(nil)
